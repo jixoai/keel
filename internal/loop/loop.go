@@ -1,0 +1,456 @@
+// Copied from github.com/smallnest/pigo@891d1f37 (MIT License).
+// Upstream: internal/runtime/loop.go
+// Modified for fde2e-agent-runtime: package renamed to loop; reminder injection and
+// file-based checkpoint writing removed (checkpoints are persisted by the host through a callback).
+
+// This file implements pi's two-layer agent loop (US-006, FR-1). It strings
+// together streaming assistant responses, batch tool execution, and the loop's
+// six hooks with control flow kept faithful to pi's runLoop:
+//
+//   - Inner loop: one turn = stream an assistant response → execute its tool
+//     calls → feed the results back, repeating until an assistant message has no
+//     tool calls (a natural turn end).
+//   - Outer loop: after the inner loop settles, pull getFollowUpMessages; if any
+//     are returned they become the next pending input and the inner loop runs
+//     again, otherwise the run ends.
+//
+// Per-turn hooks after each turn_end: getSteeringMessages (pulled after tool
+// execution and injected before the next turn), prepareNextTurn (may swap
+// context / model / thinkingLevel), shouldStopAfterTurn (true ⇒ agent_end +
+// exit). Two stop reasons are handled specially: length (the response was
+// truncated by the token cap) fails every tool call so the model resends
+// (failToolCallsFromTruncatedMessage); error / aborted end the run immediately.
+//
+// agentLoop starts a fresh run from a prompt already appended to the context.
+package loop
+
+import (
+	"context"
+	"time"
+
+	"github.com/jixoai/fde2e-agent-runtime/internal/agentcore"
+	"github.com/jixoai/fde2e-agent-runtime/internal/agenttool"
+	"github.com/jixoai/fde2e-agent-runtime/internal/compaction"
+	"github.com/jixoai/fde2e-agent-runtime/internal/provider"
+)
+
+// nowMillis returns the current Unix time in milliseconds, the timestamp unit
+// used for CompactionMessage checkpoints.
+func nowMillis() int64 { return time.Now().UnixMilli() }
+
+// TurnUpdate is the optional result of PrepareNextTurn: any non-nil field
+// replaces the corresponding piece of loop state before the next turn. It lets
+// a caller swap the trimmed context, system prompt, tool set, model, or
+// thinking level between turns (FR-6).
+type TurnUpdate struct {
+	Messages      *agentcore.MessageList
+	SystemPrompt  *string
+	Tools         *[]agentcore.AgentTool
+	Model         *string
+	ThinkingLevel *agentcore.ThinkingLevel
+}
+
+// StopDecision is the result of the OnStop seam. Block=true prevents the run
+// from ending; Guidance, when non-empty, is appended as a user-role message to
+// steer the forced continuation (the Stop / SubagentStop hook's reason). The
+// zero value (Block=false) lets the run end.
+type StopDecision struct {
+	Block    bool
+	Guidance string
+}
+
+// RunConfig is the full configuration for a loop run: the per-turn streaming
+// config (embedded LoopConfig), the batch tool-execution config, and the four
+// loop-level hooks. Every hook is optional (nil = default behavior).
+type RunConfig struct {
+	LoopConfig
+	// Batch holds the tool registry and the prepare/before/after hooks used to
+	// execute each assistant message's tool calls.
+	Batch agenttool.BatchConfig
+
+	// GetFollowUpMessages is consulted after the inner loop settles (an assistant
+	// message with no tool calls). Returning messages continues the outer loop
+	// with them as the next input; returning none ends the run (FR-9).
+	GetFollowUpMessages func(ctx context.Context, agentCtx *agentcore.AgentContext) []agentcore.AgentMessage
+	// GetSteeringMessages is pulled after each turn's tool execution and injected
+	// before the next turn (pi per-turn semantics, FR-8).
+	GetSteeringMessages func(ctx context.Context) []agentcore.AgentMessage
+	// PrepareNextTurn runs after each turn_end and may swap context / model /
+	// thinkingLevel for the next turn (FR-6).
+	PrepareNextTurn func(ctx context.Context, agentCtx *agentcore.AgentContext) *TurnUpdate
+	// ShouldStopAfterTurn runs after each turn_end; true ends the run with an
+	// agent_end event (FR-7).
+	ShouldStopAfterTurn func(ctx context.Context, agentCtx *agentcore.AgentContext) bool
+
+	// OnStop, when set, is consulted right before the run would end naturally (no
+	// tool calls and no follow-up messages). Returning a decision with Block=true
+	// keeps the loop running: any Guidance is appended as a user-role message to
+	// steer the continued run (Stop / SubagentStop hooks, US-008/009, FR-10). The
+	// seam carries no loop-protection itself — the caller's decorator owns the
+	// consecutive-block counter and the FR-12 force-stop limit, so an ill-behaved
+	// hook cannot loop forever. nil or a non-blocking decision lets the run end.
+	OnStop func(ctx context.Context, agentCtx *agentcore.AgentContext) *StopDecision
+
+	// EventBuffer is the buffer size of the emitted EventStream. 0 gives fully
+	// synchronous back-pressure (matching pi's awaited emit).
+	EventBuffer int
+
+	// SessionID, when set, is carried in the run's agent_start event so a
+	// stream-json consumer sees the backing session id in the first event and can
+	// resume the run later (mirrors pi/Claude Code).
+	SessionID string
+
+	// OnCompaction, when set, is called after a successful auto-compaction with
+	// the summary that replaced the collapsed prefix. The host persists it as a
+	// checkpoint (PG, not a file) so a later run can reload the summary instead
+	// of replaying the whole transcript. A persistence failure is the host's to
+	// log; the loop continues on the compacted context either way.
+	OnCompaction func(ctx context.Context, summary string, firstKeptIndex, summarizedCount int)
+}
+
+// LoopEventStream is the stream returned by the loop entry points: it carries
+// AgentEvents and yields the messages newly produced during the run.
+type LoopEventStream = agentcore.EventStream[agentcore.AgentEvent, []agentcore.AgentMessage]
+
+// agentLoop starts a fresh run. The caller has already appended the initiating
+// user message(s) to agentCtx.Messages. It returns immediately with an
+// EventStream; a producer goroutine drives the loop and closes the stream when
+// the run ends.
+func agentLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfig) *LoopEventStream {
+	stream := agentcore.NewEventStream[agentcore.AgentEvent, []agentcore.AgentMessage](cfg.EventBuffer)
+	go runLoop(ctx, agentCtx, cfg, stream)
+	return stream
+}
+
+// StartRun is the exported entry point for a fresh run, used by out-of-package
+// drivers (the interactive REPL, US-022). It is a thin wrapper over agentLoop so
+// the loop internals stay unexported while callers outside the package can
+// still launch a run and consume its event stream.
+func StartRun(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfig) *LoopEventStream {
+	return agentLoop(ctx, agentCtx, cfg)
+}
+
+// runLoop is the producer: it drives the two-layer loop, emitting events onto
+// stream and setting the stream result to the messages produced during the run.
+func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfig, stream *LoopEventStream) {
+	startIdx := len(agentCtx.Messages)
+	// tel accumulates structured telemetry (turn count, per-tool durations,
+	// truncation count, compaction count, latest context-utilization ratio) from
+	// the events emitted below, surfaced as a TelemetryEvent at run end.
+	tel := newTelemetry()
+	// newMessages returns the messages appended since the run began.
+	newMessages := func() []agentcore.AgentMessage {
+		if len(agentCtx.Messages) <= startIdx {
+			return nil
+		}
+		out := make([]agentcore.AgentMessage, len(agentCtx.Messages)-startIdx)
+		copy(out, agentCtx.Messages[startIdx:])
+		return out
+	}
+	emit := func(ev agentcore.AgentEvent) error {
+		tel.observe(ev)
+		return stream.Emit(ctx, ev)
+	}
+	// emitFrom wraps the raw stream.Emit callback handed to streamAssistantResponse
+	// and ExecuteToolCalls so telemetry observes those events (message_* and
+	// tool_execution_*) too, without changing their signatures.
+	emitFrom := func(c context.Context, ev agentcore.AgentEvent) error {
+		tel.observe(ev)
+		return stream.Emit(c, ev)
+	}
+
+	// finish emits the telemetry summary then agent_end (unless suppressed by a
+	// prior emit error), records the run result, and closes the stream exactly
+	// once. Telemetry is emitted first so a consumer sees the run's structured
+	// metrics immediately before the terminal event.
+	finish := func() {
+		_ = emit(tel.summary())
+		msgs := newMessages()
+		_ = emit(agentcore.AgentEndEvent{Messages: msgs})
+		stream.SetResult(msgs)
+		stream.Close()
+	}
+
+	if err := emit(agentcore.AgentStartEvent{SessionID: cfg.SessionID}); err != nil {
+		finish()
+		return
+	}
+
+	for { // outer loop: pending / follow-up messages
+		for { // inner loop: turns until no tool calls
+			if err := emit(agentcore.TurnStartEvent{}); err != nil {
+				finish()
+				return
+			}
+
+			assistant, err := streamAssistantResponse(ctx, agentCtx, cfg.LoopConfig, emitFrom)
+			if err != nil {
+				// emit was cancelled mid-stream; end the run.
+				finish()
+				return
+			}
+
+			switch assistant.StopReason {
+			case agentcore.StopReasonLength:
+				// Truncated by the token cap: fail every tool call so the model
+				// resends, then continue feeding back.
+				toolResults := failToolCallsFromTruncatedMessage(agentCtx, assistant)
+				if err := emit(agentcore.TurnEndEvent{Message: assistant, ToolResults: toolResults}); err != nil {
+					finish()
+					return
+				}
+				if afterTurn(ctx, agentCtx, &cfg, true, emit, tel) {
+					finish()
+					return
+				}
+				continue
+			case agentcore.StopReasonError, agentcore.StopReasonAborted:
+				// Terminal failure: emit the turn end and stop.
+				_ = emit(agentcore.TurnEndEvent{Message: assistant})
+				finish()
+				return
+			}
+
+			calls := toAgentToolCalls(assistant.ToolCalls())
+			if len(calls) == 0 {
+				// Natural turn end: no tools to run.
+				if err := emit(agentcore.TurnEndEvent{Message: assistant}); err != nil {
+					finish()
+					return
+				}
+				if afterTurn(ctx, agentCtx, &cfg, false, emit, tel) {
+					finish()
+					return
+				}
+				break // exit inner loop → consult follow-up messages
+			}
+
+			// Inject the run-level emitter into the context so tools (notably the
+			// generic task tool) can retrieve it via ProgressEmitterFromContext and
+			// surface a dispatched sub-agent's progress up this parent event stream.
+			// emitFrom feeds the parent stream and is run-scoped, so a child's
+			// SubAgentProgressEvent lands on the right run's stream.
+			toolCtx := agentcore.WithProgressEmitter(ctx, emitFrom)
+			toolResults, allTerminate := agenttool.ExecuteToolCalls(toolCtx, cfg.Batch, calls, emitFrom)
+			for _, tr := range toolResults {
+				agentCtx.Messages = append(agentCtx.Messages, tr)
+			}
+			if err := emit(agentcore.TurnEndEvent{Message: assistant, ToolResults: toolResults}); err != nil {
+				finish()
+				return
+			}
+			if allTerminate {
+				// Every tool asked to terminate the run.
+				finish()
+				return
+			}
+			if afterTurn(ctx, agentCtx, &cfg, true, emit, tel) {
+				finish()
+				return
+			}
+			// Feed the tool results back into the next turn.
+		}
+
+		// Inner loop settled: consult follow-up messages.
+		if cfg.GetFollowUpMessages != nil {
+			if follow := cfg.GetFollowUpMessages(ctx, agentCtx); len(follow) > 0 {
+				agentCtx.Messages = append(agentCtx.Messages, follow...)
+				continue // outer loop with the follow-ups as new input
+			}
+		}
+		// Stop hook: the run is about to end naturally. A hook may block the end
+		// and force a continuation, feeding its guidance back as the next input
+		// (US-008/009, FR-10). The consecutive-block counter and force-stop limit
+		// (FR-12) live in the decorator behind OnStop, so this seam stays simple.
+		if cfg.OnStop != nil {
+			if dec := cfg.OnStop(ctx, agentCtx); dec != nil && dec.Block {
+				if dec.Guidance != "" {
+					agentCtx.Messages = append(agentCtx.Messages, agentcore.UserMessage{
+						RoleField: agentcore.RoleUser,
+						Content:   agentcore.ContentList{agentcore.NewTextContent(dec.Guidance)},
+					})
+				}
+				continue // outer loop: keep the run alive
+			}
+		}
+		break
+	}
+
+	finish()
+}
+
+// afterTurn runs the per-turn hooks after a turn_end. When hadToolExecution is
+// true it first pulls getSteeringMessages and injects them before the next turn
+// (pi per-turn semantics). It then applies prepareNextTurn, runs auto-compaction
+// when the context has outgrown its window, and finally consults
+// shouldStopAfterTurn, returning true when the run should end.
+func afterTurn(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, hadToolExecution bool, emit func(agentcore.AgentEvent) error, tel *telemetry) (stop bool) {
+	if hadToolExecution && cfg.GetSteeringMessages != nil {
+		if steer := cfg.GetSteeringMessages(ctx); len(steer) > 0 {
+			agentCtx.Messages = append(agentCtx.Messages, steer...)
+		}
+	}
+	if cfg.PrepareNextTurn != nil {
+		if upd := cfg.PrepareNextTurn(ctx, agentCtx); upd != nil {
+			applyTurnUpdate(agentCtx, cfg, upd)
+		}
+	}
+	maybeAutoCompact(ctx, agentCtx, cfg, emit, tel)
+	// Record the latest context-utilization ratio once the turn has settled (after
+	// any compaction), so the telemetry summary reports the current used/window
+	// figure. This runs even when auto-compaction is disabled so utilization is
+	// still observable whenever the context window is known.
+	if tel != nil && cfg.ContextWindow > 0 {
+		tokens := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
+		tel.recordContext(tokens, cfg.ContextWindow)
+	}
+	if cfg.ShouldStopAfterTurn != nil {
+		return cfg.ShouldStopAfterTurn(ctx, agentCtx)
+	}
+	return false
+}
+
+// maybeAutoCompact checks whether the context has outgrown its usable window and,
+// if so, compacts it in place and emits a CompactionEvent. Compaction is a no-op
+// when disabled, when the context window is unknown (<= 0), or when usage is
+// under threshold. A compaction failure is non-fatal: the original context is
+// preserved and a CompactionEvent carrying ErrorMessage is emitted so the failure
+// is observable without aborting the run (US-004).
+func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, emit func(agentcore.AgentEvent) error, tel *telemetry) {
+	if !cfg.Compaction.Enabled || cfg.ContextWindow <= 0 {
+		return
+	}
+	before := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
+	// Record pre-compaction utilization so the ratio reflects the peak that
+	// triggered (or nearly triggered) compaction even when the summary is read
+	// mid-run. afterTurn overwrites it with the post-settle figure.
+	if tel != nil {
+		tel.recordContext(before, cfg.ContextWindow)
+	}
+	if !compaction.ShouldCompact(before, cfg.ContextWindow, cfg.Compaction) {
+		return
+	}
+	// Signal the start so a front-end can show an in-progress indicator while the
+	// summarization request (an LLM call that blocks the loop) is in flight.
+	_ = emit(agentcore.CompactionStartEvent{Reason: "threshold", TokensBefore: before})
+	res, err := runCompaction(ctx, agentCtx.Messages, cfg)
+	kept := len(agentCtx.Messages)
+	if err != nil {
+		_ = emit(agentcore.CompactionEvent{
+			Reason:       "threshold",
+			TokensBefore: before,
+			TokensAfter:  before,
+			KeptCount:    kept,
+			ErrorMessage: err.Error(),
+		})
+		return
+	}
+	if res == nil {
+		// Nothing to summarize (cut point left no prefix); leave context as-is.
+		return
+	}
+	now := nowMillis()
+	rebuilt := res.RebuildContext(agentCtx.Messages, now)
+	summarized := len(agentCtx.Messages) - (len(rebuilt) - 1)
+	// Hand the summary to the host so it can persist a checkpoint (PG row, not a
+	// file). It reuses the summary compaction just produced — no extra LLM call —
+	// and is best-effort: a persistence failure is the host's to log and the run
+	// continues on the compacted context.
+	if cfg.OnCompaction != nil {
+		cfg.OnCompaction(ctx, res.Summary, res.FirstKeptIndex, summarized)
+	}
+	agentCtx.Messages = rebuilt
+	after := compaction.EstimateContextTokens(rebuilt).Tokens
+	_ = emit(agentcore.CompactionEvent{
+		Reason:          "threshold",
+		TokensBefore:    before,
+		TokensAfter:     after,
+		SummarizedCount: summarized,
+		KeptCount:       len(rebuilt) - 1,
+	})
+}
+
+// runCompaction invokes compaction.Compact with the loop's summarization config,
+// falling back to the primary Stream/Model when the summary-specific fields are
+// unset. Compact derives the cut point from settings.KeepRecentTokens.
+func runCompaction(ctx context.Context, msgs agentcore.MessageList, cfg *RunConfig) (*compaction.CompactionResult, error) {
+	stream := cfg.SummaryStream
+	if stream == nil {
+		stream = cfg.Stream
+	}
+	model := cfg.SummaryModel
+	if model.ID == "" {
+		model = provider.Model{Provider: cfg.Provider, ID: cfg.Model, ContextWindow: cfg.ContextWindow}
+	}
+	// Resolve the API key the same way the primary turn does (dynamic key wins,
+	// static APIKey is the fallback) so the summarization stream authenticates
+	// against auth-requiring providers instead of failing with "missing API key".
+	key := cfg.APIKey
+	if cfg.GetAPIKey != nil {
+		if dyn := cfg.GetAPIKey(ctx, cfg.Provider); dyn != "" {
+			key = dyn
+		}
+	}
+	scfg := provider.StreamConfig{APIKey: key, ThinkingLevel: cfg.ThinkingLevel}
+	return compaction.Compact(ctx, stream, model, msgs, cfg.Compaction, -1, nil, "", scfg)
+}
+
+// applyTurnUpdate applies a non-nil TurnUpdate to the mutable loop state: any
+// set field replaces the current context / config value for the next turn.
+func applyTurnUpdate(agentCtx *agentcore.AgentContext, cfg *RunConfig, upd *TurnUpdate) {
+	if upd.Messages != nil {
+		agentCtx.Messages = *upd.Messages
+	}
+	if upd.SystemPrompt != nil {
+		agentCtx.SystemPrompt = *upd.SystemPrompt
+	}
+	if upd.Tools != nil {
+		agentCtx.Tools = *upd.Tools
+	}
+	if upd.Model != nil {
+		cfg.Model = *upd.Model
+	}
+	if upd.ThinkingLevel != nil {
+		cfg.ThinkingLevel = *upd.ThinkingLevel
+	}
+}
+
+// failToolCallsFromTruncatedMessage produces an error tool-result message for
+// every tool call in a truncated (stopReason=length) assistant message, telling
+// the model the response was cut off and to resend. The results are appended to
+// the context and returned. Mirrors pi's failToolCallsFromTruncatedMessage.
+func failToolCallsFromTruncatedMessage(agentCtx *agentcore.AgentContext, assistant agentcore.AssistantMessage) []agentcore.ToolResultMessage {
+	calls := assistant.ToolCalls()
+	if len(calls) == 0 {
+		return nil
+	}
+	results := make([]agentcore.ToolResultMessage, 0, len(calls))
+	for _, c := range calls {
+		results = append(results, agentcore.ToolResultMessage{
+			RoleField:  agentcore.RoleToolResult,
+			ToolCallID: c.ID,
+			ToolName:   c.Name,
+			Content: agentcore.ContentList{agentcore.NewTextContent(
+				"The previous response was truncated because it hit the output token limit, " +
+					"so this tool call was not executed. Please send a shorter response and retry.")},
+			IsError: true,
+		})
+	}
+	for _, r := range results {
+		agentCtx.Messages = append(agentCtx.Messages, r)
+	}
+	return results
+}
+
+// toAgentToolCalls converts the assistant message's ToolCallContent blocks into
+// the loop-level AgentToolCall view executeToolCalls consumes.
+func toAgentToolCalls(blocks []agentcore.ToolCallContent) []agentcore.AgentToolCall {
+	if len(blocks) == 0 {
+		return nil
+	}
+	calls := make([]agentcore.AgentToolCall, len(blocks))
+	for i, b := range blocks {
+		calls[i] = agentcore.AgentToolCall{ID: b.ID, Name: b.Name, Arguments: b.Arguments}
+	}
+	return calls
+}

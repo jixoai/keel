@@ -1,0 +1,268 @@
+// Package store is the PostgreSQL persistence layer. It is deliberately thin:
+// every query carries tenant_id, and the only long-lived object is a pgxpool.
+//
+// The runtime process holds no conversation state. Events are the sole truth;
+// checkpoints are projections; blobs are stored as 64KiB chunk rows so a read
+// never materialises a whole image.
+package store
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+//go:embed schema.sql
+var schemaFS embed.FS
+
+// Config tunes the pool for a 2GB host. The defaults follow docs/BACKPRESSURE.md
+// §5: enough connections to keep 1000 image streams fed in 2-chunk batches,
+// few enough that PG's per-backend memory stays bounded.
+type Config struct {
+	DSN            string
+	MaxConns       int32         // default 24
+	MinConns       int32         // default 8
+	AcquireTimeout time.Duration // default 300ms
+	// StatementTimeout is applied to every connection. A statement that exceeds
+	// it is cancelled server-side instead of pinning a backend.
+	StatementTimeout time.Duration // default 5s
+}
+
+func (c *Config) applyDefaults() {
+	if c.MaxConns == 0 {
+		c.MaxConns = 24
+	}
+	if c.MinConns == 0 {
+		c.MinConns = 8
+	}
+	if c.AcquireTimeout == 0 {
+		c.AcquireTimeout = 300 * time.Millisecond
+	}
+	if c.StatementTimeout == 0 {
+		c.StatementTimeout = 5 * time.Second
+	}
+}
+
+// Store wraps a pgx pool.
+type Store struct {
+	pool           *pgxpool.Pool
+	acquireTimeout time.Duration
+}
+
+// Open connects, tunes the session, and applies the schema (idempotent).
+func Open(ctx context.Context, cfg Config) (*Store, error) {
+	cfg.applyDefaults()
+	pc, err := pgxpool.ParseConfig(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("store: parse dsn: %w", err)
+	}
+	pc.MaxConns = cfg.MaxConns
+	pc.MinConns = cfg.MinConns
+	pc.MaxConnLifetime = 30 * time.Minute
+	pc.MaxConnIdleTime = 5 * time.Minute
+	pc.HealthCheckPeriod = 30 * time.Second
+	pc.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		// SET does not accept bind parameters; the value is an int64 we control.
+		_, err := conn.Exec(ctx, fmt.Sprintf(
+			"SET statement_timeout = %d; SET idle_in_transaction_session_timeout = '3s'",
+			cfg.StatementTimeout.Milliseconds()))
+		return err
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, pc)
+	if err != nil {
+		return nil, fmt.Errorf("store: pool: %w", err)
+	}
+	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout}
+	if err := s.Migrate(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// Close releases the pool.
+func (s *Store) Close() { s.pool.Close() }
+
+// Pool exposes the underlying pool for the blob reader (which needs its own
+// keyset queries) without making every query public.
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
+// Migrate applies schema.sql. It is safe to run on every start.
+func (s *Store) Migrate(ctx context.Context) error {
+	sql, err := schemaFS.ReadFile("schema.sql")
+	if err != nil {
+		return fmt.Errorf("store: read schema: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, string(sql)); err != nil {
+		return fmt.Errorf("store: migrate: %w", err)
+	}
+	return nil
+}
+
+// Acquire returns a connection with a short timeout: when the pool is saturated
+// the caller gets a fast failure it can turn into 503 + Retry-After instead of
+// letting the queue grow.
+func (s *Store) Acquire(ctx context.Context) (*pgxpool.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.acquireTimeout)
+	defer cancel()
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: acquire: %w", err)
+	}
+	return conn, nil
+}
+
+// CreateTenant inserts a tenant (idempotent by id).
+func (s *Store) CreateTenant(ctx context.Context, tenantID uuid.UUID, name string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO tenants (tenant_id, name) VALUES ($1, $2)
+		 ON CONFLICT (tenant_id) DO NOTHING`, tenantID, name)
+	if err != nil {
+		return fmt.Errorf("store: create tenant: %w", err)
+	}
+	return nil
+}
+
+// CreateSession inserts a session (idempotent).
+func (s *Store) CreateSession(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO sessions (tenant_id, session_id) VALUES ($1, $2)
+		 ON CONFLICT (tenant_id, session_id) DO NOTHING`, tenantID, sessionID)
+	if err != nil {
+		return fmt.Errorf("store: create session: %w", err)
+	}
+	return nil
+}
+
+// Event is one committed fact.
+type Event struct {
+	Seq     int64           `json:"seq"`
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// AppendEvent commits one event and returns its per-session sequence. The
+// sequence is allocated by the session row lock, so two writers on the same
+// session cannot interleave but different sessions never contend.
+func (s *Store) AppendEvent(ctx context.Context, tenantID, sessionID uuid.UUID, kind string, payload any) (int64, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("store: marshal event: %w", err)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var seq int64
+	err = tx.QueryRow(ctx,
+		`UPDATE sessions SET next_seq = next_seq + 1, updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2
+		 RETURNING next_seq - 1`, tenantID, sessionID).Scan(&seq)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNoSession
+	}
+	if err != nil {
+		return 0, fmt.Errorf("store: allocate seq: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO events (tenant_id, session_id, seq, kind, payload)
+		 VALUES ($1, $2, $3, $4, $5)`, tenantID, sessionID, seq, kind, raw); err != nil {
+		return 0, fmt.Errorf("store: insert event: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("store: commit event: %w", err)
+	}
+	return seq, nil
+}
+
+// ErrNoSession is returned when the session does not exist for the tenant.
+var ErrNoSession = errors.New("store: session not found")
+
+// LoadEvents returns up to limit events with seq > afterSeq, in order.
+func (s *Store) LoadEvents(ctx context.Context, tenantID, sessionID uuid.UUID, afterSeq int64, limit int) ([]Event, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT seq, kind, payload FROM events
+		 WHERE tenant_id = $1 AND session_id = $2 AND seq > $3
+		 ORDER BY seq LIMIT $4`, tenantID, sessionID, afterSeq, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: load events: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Event, 0, limit)
+	for rows.Next() {
+		var ev Event
+		if err := rows.Scan(&ev.Seq, &ev.Kind, &ev.Payload); err != nil {
+			return nil, fmt.Errorf("store: scan event: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+// SaveCheckpoint stores a compaction projection. Events are never deleted.
+func (s *Store) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq int64, summary string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, summary)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (tenant_id, session_id, upto_seq) DO UPDATE SET summary = EXCLUDED.summary`,
+		tenantID, sessionID, uptoSeq, summary)
+	if err != nil {
+		return fmt.Errorf("store: save checkpoint: %w", err)
+	}
+	return nil
+}
+
+// Submission is the idempotent result of a client request.
+type Submission struct {
+	ID     uuid.UUID
+	Seq    *int64
+	Status string
+}
+
+// Submit records a request idempotently. A replay with the same requestId returns
+// the existing row (and never creates a second user message).
+func (s *Store) Submit(ctx context.Context, tenantID uuid.UUID, requestID string, sessionID uuid.UUID, submissionID uuid.UUID) (Submission, bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO submissions (tenant_id, request_id, session_id, submission_id, status)
+		 VALUES ($1, $2, $3, $4, 'pending')
+		 ON CONFLICT (tenant_id, request_id) DO NOTHING`,
+		tenantID, requestID, sessionID, submissionID)
+	if err != nil {
+		return Submission{}, false, fmt.Errorf("store: submit: %w", err)
+	}
+	created := tag.RowsAffected() == 1
+	var out Submission
+	var seq *int64
+	err = s.pool.QueryRow(ctx,
+		`SELECT submission_id, seq, status FROM submissions
+		 WHERE tenant_id = $1 AND request_id = $2`, tenantID, requestID).Scan(&out.ID, &seq, &out.Status)
+	if err != nil {
+		return Submission{}, created, fmt.Errorf("store: read submission: %w", err)
+	}
+	out.Seq = seq
+	return out, created, nil
+}
+
+// SetSubmissionStatus updates the submission state and the sequence at which it
+// became visible.
+func (s *Store) SetSubmissionStatus(ctx context.Context, tenantID uuid.UUID, requestID, status string, seq int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE submissions SET status = $3, seq = $4
+		 WHERE tenant_id = $1 AND request_id = $2`, tenantID, requestID, status, seq)
+	if err != nil {
+		return fmt.Errorf("store: set submission status: %w", err)
+	}
+	return nil
+}
