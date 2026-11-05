@@ -205,7 +205,12 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 				}
 				continue
 			case agentcore.StopReasonError, agentcore.StopReasonAborted:
-				// Terminal failure: emit the turn end and stop.
+				// Terminal failure: emit the turn end and stop. A failure before
+				// the stream existed never back-filled the context, so record
+				// the terminal message before finishing.
+				if len(agentCtx.Messages) == 0 || agentCtx.Messages[len(agentCtx.Messages)-1].Role() != agentcore.RoleAssistant {
+					agentCtx.Messages = append(agentCtx.Messages, assistant)
+				}
 				_ = emit(agentcore.TurnEndEvent{Message: assistant})
 				finish()
 				return
