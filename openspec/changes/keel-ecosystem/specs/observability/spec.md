@@ -2,7 +2,17 @@
 
 ## ADDED Requirements
 
-### Requirement: 每次 run 一条终态遥测
+### Requirement: PI telemetry 契约
+
+系统 SHALL 实现 PI `packages/telemetry` 的 `TelemetryContext` / `TelemetrySpan` /
+`TelemetryMetrics` / `TelemetryStore` 形状，并提供 noop 与 memory adapter；
+run/turn/tool/compaction 的 span 层级 MUST 与 PI 一致。
+
+#### Scenario: span 树
+- **WHEN** 一次 run 调用两个工具
+- **THEN** 得到一个 run span，两个 turn span（如适用），两个 tool span，父子关系正确
+
+### Requirement: 每次 run 一条业务汇总
 
 Runner SHALL 在 run 结束时追加 `run.finished` 事件，包含：`turns`、`tokensIn`、
 `tokensOut`、`toolTimings`（按工具名聚合）、`contextTokens`、`model`、`provider`、

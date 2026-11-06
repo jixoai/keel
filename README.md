@@ -2,6 +2,10 @@
 
 > **Keel（龙骨）**——船体最承重的结构。Keel 是智能体集群的龙骨：
 > 一个**通用、无状态、多租户**的 Agent 运行时底座。
+>
+> **Keel 是 [PI](https://github.com/earendil-works/pi) 的 Go 重构**：接口、事件语义与
+> 生态产物（SKILL.md / MCP / 压缩 / 遥测）以 PI 为唯一参照；只替换运行时
+> （PostgreSQL / SSE / 多租户 / 2GB）。见 [docs/PI-PARITY.md](docs/PI-PARITY.md)。
 
 Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都可能带图片、工具调用、长上下文），
 又不想让进程内存随会话数增长，也不想在重启时丢会话，底层的执行、存储、流式与反压应该长什么样。
@@ -51,7 +55,7 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
   所以任意 wire offset 都能无损续传；
 - **反压三层**：阻塞 `Write` 提供天然背压，全局 token bucket 塑形总带宽，per-write deadline 杀慢客户端。
 
-详细设计：[架构与决策](docs/ARCHITECTURE.md) · [反压设计](docs/BACKPRESSURE.md) ·
+详细设计：[PI 对齐基线](docs/PI-PARITY.md) · [架构与决策](docs/ARCHITECTURE.md) · [反压设计](docs/BACKPRESSURE.md) ·
 [存储调研](docs/BLOB-STORAGE-RESEARCH.md) · [文件协议](docs/FILE-PROTOCOL.md) · [运行手册](docs/RUNBOOK.md)
 
 ## 技术栈

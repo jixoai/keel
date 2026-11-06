@@ -2,18 +2,21 @@
 
 ## ADDED Requirements
 
-### Requirement: SKILL.md 格式
+### Requirement: Agent Skills 规范
 
-系统 SHALL 加载 pi 格式 `SKILL.md`：YAML frontmatter（name、description、
-allowed-tools、version、license）与 Markdown 正文（可含脚本/资源）。
+系统 SHALL 加载 Agent Skills 规范的 `SKILL.md`：frontmatter `name` / `description` /
+`license` / `compatibility` / `metadata` / `allowed-tools` / `disable-model-invocation`，
+加 Markdown 正文（可含 scripts/references/assets）。目录发现与 PI 一致：
+`~/.agents/skills/`、`.agents/skills/`、项目/用户 skills 目录，递归查找 `SKILL.md`。
 
 #### Scenario: 上游 skill 原样加载
-- **WHEN** 放入一个未修改的 pi 格式 skill 目录
+- **WHEN** 放入一个未修改的上游 Agent Skills 目录
 - **THEN** 被扫描、校验并出现在 skill 列表中
 
-### Requirement: 渐进披露
+### Requirement: 渐进披露与 /skill:name
 
-系统提示 MUST 只包含 skill 的 name 与 description；正文 MUST 在 `skill` 工具被调用时加载。
+系统提示 MUST 只包含 skill 的 name、description 与 path；正文 MUST 在 `skill` 工具被调用时加载；
+`/skill:name` MUST 强制加载（PI 语义）。
 
 #### Scenario: 未调用不占上下文
 - **WHEN** 会话未使用某个 skill

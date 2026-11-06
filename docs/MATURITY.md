@@ -11,7 +11,7 @@
 | **G1** | 单机功能 | fake provider 下端到端可用；单测 + 集成测试；错误路径有明确返回 |
 | **G2** | 崩溃一致 | 每个 await 点 `kill -9` 注入；不丢事件、不重复可见消息；at-least-once 语义写入文档；恢复测试进 CI |
 | **G3** | 可观测 | 每次 run 一条 `run.finished`；Prometheus 指标固定基数；结构化日志含 request/tenant/session/run id；无敏感内容 |
-| **G4** | 生态兼容 | pi 格式的 skill / hook 配置 / MCP server **不改代码**可加载；一致性测试套件通过 |
+| **G4** | PI 对齐 | PI 录制的事件流回放一致；`AgentTool` 形状一致；真实 SKILL.md / MCP server / hook 配置**零代码改动**可用；`docs/PI-PARITY.md` 的 conformance suite 全绿 |
 | **G5** | 规模与运维 | 2GB / 1000 会话 / 64 并发 run；10 分钟随机 kill 混沌；排水/就绪；文档 + 示例 + 安全评审 |
 
 **Beta = G0–G3；Alpha = G0–G1。** 任何能力不得跳级声明；G2 未过不算「可恢复」，G3 未过不算「可运维」。
@@ -23,7 +23,7 @@
 1. **规模**：2GB cgroup 内 1000 条 SSE + 64 并发 run + 周期 1MiB 图片，RSS 峰值 < 1.8GB，0 OOM。
 2. **混沌**：10 分钟随机 SIGKILL（平均 30s 一次），0 丢失事件、0 重复最终回复、run 状态最终收敛。
 3. **可观测**：任一 run 可在日志/指标中还原「模型→工具→压缩→结束」全链路；指标 series 数不随会话数增长。
-4. **兼容**：一个真实 pi 格式 skill、一个真实 MCP server、一份 hook 配置，无需改 Keel 代码即可工作。
+4. **PI 对齐**：事件名/顺序、工具接口、SKILL.md、MCP 配置/命名/传输、压缩与遥测语义与 PI 一致；用真实上游产物验证。
 5. **安全**：日志无密钥/消息正文；MCP 凭据脱敏；skill 不能未经许可执行任意代码；tool 拒绝钩子真实生效。
 6. **文档**：每个能力有 spec + 示例 + runbook；公开 API 标记 v1 并承诺兼容策略。
 

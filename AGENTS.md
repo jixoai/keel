@@ -3,6 +3,14 @@
 > 本文件是项目级指令，补充（不覆盖）`~/.agents/AGENTS.md` 与 `~/.zcode/AGENTS.md` 的全局规则。
 > 本仓＝**Keel（龙骨）· 通用 Agent 无状态运行时底座**，不绑定任何具体产品。
 
+## 原则：PI 是接口与生态的唯一参照（项目裁决 2026-11-06）
+
+Keel 是 **PI 的 Go 重构**，不是另起一套标准。事件名与顺序、`AgentTool` 形状、SKILL.md
+（Agent Skills 规范）、MCP 配置/命名/传输、压缩 entry/checkpoint、telemetry span/metric
+必须与 PI 对齐；只允许替换运行时（PostgreSQL / SSE / 多租户 / 2GB）。新增能力先判断
+能否用 PI 的扩展点（配置 → 扩展 → 工具 → hook → 宿主）表达。基线 pin 与矩阵见
+`docs/PI-PARITY.md`。
+
 ## 原则：一切任务用 OpenSpec 履行
 
 任何任务/需求，都必须以 openspec change 履行：先建 change（proposal + tasks +

@@ -2,18 +2,20 @@
 
 ## ADDED Requirements
 
-### Requirement: 两种传输
+### Requirement: 传输与 PI 一致
 
-MCP 客户端 SHALL 支持 stdio（本地进程）与 streamable HTTP/SSE（远程）。
-连接 MUST 有超时、健康检查与重连退避。
+MCP 客户端 SHALL 支持 stdio 与 Streamable HTTP；MUST 拒绝 legacy SSE（与 PI 一致）；
+SHALL 提供 PipeTransport 与内存测试传输。连接 MUST 有超时、健康检查与重连退避。
 
 #### Scenario: server 崩溃
 - **WHEN** MCP server 进程退出
 - **THEN** 当前调用返回错误，客户端按退避重连，run 不被拖死
 
-### Requirement: 工具命名空间
+### Requirement: 工具命名与内容适配
 
-MCP 工具 SHALL 以 `mcp__<server>__<tool>` 暴露；重名 MUST 在加载时被拒绝并报告。
+MCP 工具 SHALL 以 `mcp__<server>__<tool>` 暴露：非法字符替换、冲突加 hash 后缀、
+64 字符上限（对齐 `createMcpToolName`）。输入 schema MUST 规范化为 object +
+properties；输出 MUST 经 `toLlmContent` 转换并裁剪到 20KB（`limitMcpContent`）。
 
 #### Scenario: 两个 server 同名工具
 - **WHEN** 两个 server 都提供 `read`

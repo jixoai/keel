@@ -2,14 +2,17 @@
 
 ## ADDED Requirements
 
-### Requirement: 事件模型
+### Requirement: 事件模型（PI 命名）
 
-系统 SHALL 在 `turn.start`、`turn.end`、`tool.before`、`tool.after`、`run.stop`、
-`compaction.before`、`compaction.after` 暴露 hook 点。
+系统 SHALL 使用 PI 扩展模型的事件名，不自造新名字：
+`before_agent_start`、`agent_start` / `agent_end` / `agent_before_settle` / `agent_settled`、
+`turn_start` / `turn_end`、`message_start` / `message_update` / `message_end`、
+`tool_execution_start` / `tool_execution_update` / `tool_execution_end`、
+`context`、`session_before_compact` / `session_compact` / `session_compact_failed`。
 
 #### Scenario: 工具前
 - **WHEN** 模型请求调用工具
-- **THEN** `tool.before` 在该工具执行前被调用
+- **THEN** `tool_execution_start` 在该工具执行前被调用
 
 ### Requirement: 两种实现
 
@@ -26,7 +29,7 @@ hook 返回 `allow | deny | modify`；`deny` MUST 阻止工具执行并产生审
 `modify` MUST 只影响本次调用的参数。
 
 #### Scenario: 拒绝危险命令
-- **WHEN** `tool.before` 对 bash 工具返回 deny
+- **WHEN** `tool_execution_start` 的 hook 对 bash 工具返回 deny
 - **THEN** 工具不执行，模型收到拒绝结果
 
 ### Requirement: 审计

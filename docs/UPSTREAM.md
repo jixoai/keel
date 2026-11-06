@@ -1,9 +1,23 @@
-# 上游代码来源
+# 上游来源与对齐基线
 
-本仓**不是 pigo 的 fork**（Owner 2026-11-05 裁决）。我们只搬运必要的代码到自己的仓库，
-按本仓架构改造，不跟随上游演进。
+本仓**不是任何上游的 fork**。Keel 是 **PI 的 Go 重构**：接口、事件语义与生态产物以 PI 为
+唯一参照；代码按 Keel 的运行时（PostgreSQL / SSE / 多租户 / 2GB）重写。
 
-## pigo
+## PI（接口与生态基线）
+
+- 仓库：https://github.com/earendil-works/pi
+- 许可：MIT
+- Pin commit：`55a5c6914570e2ae31ca36297654483bbbf46883`（2026-11-05）
+- 参照：`packages/agent`（loop/tool/event）、`packages/durable`（task/compaction/extension）、
+  `packages/mcp`（MCP 客户端）、`packages/telemetry`（span/metric）、
+  `packages/coding-agent`（skills/extensions/compaction 宿主）
+- 对齐矩阵与 conformance 计划：`docs/PI-PARITY.md`
+- 原则：契约必须一致；实现可以不同；不复制代码，不跟随上游自动合并。
+
+## pigo（Go 实现参考）
+
+> pigo 是 PI 的 Go 移植，作为 `provider` / loop / `agenttool` / `compaction` 的**实现参考**
+> 被搬运并改造；它不是接口标准的来源——标准以 PI 为准。
 
 - 仓库：https://github.com/smallnest/pigo
 - 许可：MIT
@@ -20,6 +34,6 @@
 
 ## 其它参考（未搬运）
 
-- pi（TypeScript）：无状态执行语义的实证来源，见 `docs/ARCHITECTURE.md` §3。
+- pi（https://github.com/earendil-works/pi）：契约与生态基线，见 `docs/PI-PARITY.md`。
 - pgrundev/pgx：PG 极致调参思路（AGPL，未使用其代码）。
 - Deno celld / Cloudflare Durable Objects：设计参考，未使用。
