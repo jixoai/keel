@@ -82,7 +82,14 @@ go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 **可运行底座 + 实测通过**（2026-11-05）。已实现：PG schema、64KiB 分块 blob、流式 base64、
 SSE 续传、三类分池与全局带宽，以及 **Agent 执行**——事件溯源上下文、持久 run（租约 +
 `FOR UPDATE SKIP LOCKED`）、工具执行、崩溃恢复（模型调用中 / 工具执行中 kill 均可续跑）。
-正在补：每租户配额/RLS、provider 文件协议 adapter、缩略图与 TTL 回收、CI/部署。
+正在补：可观测、可恢复性收口、上下文压缩、Skills、MCP、Hooks，以及租户配额/RLS、
+provider 文件协议 adapter、缩略图与 TTL 回收、CI/部署。
+
+路线与「做到什么程度算好」以 **[docs/MATURITY.md](docs/MATURITY.md)** 为准：
+每个能力按 G0（规格）→ G1（单机）→ G2（崩溃一致）→ G3（可观测）→ G4（生态兼容）→
+G5（规模与运维）六级验收，**GA = 六项能力全部 G5**。规划见
+[openspec/changes/keel-ecosystem](openspec/changes/keel-ecosystem/proposal.md) 与
+[openspec/changes/keel-ga](openspec/changes/keel-ga/proposal.md)。
 
 ## 与 pigo 的关系
 

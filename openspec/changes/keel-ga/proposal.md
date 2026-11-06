@@ -1,7 +1,10 @@
 # Proposal: keel-ga
 
 > 立项：Keel 首版实测通过后（2026-11-05），把「能跑的底座」推进到「能承载真实 Agent 的 GA 底座」。
-> 本 change 覆盖首版 `runtime-foundation` 未完成的全部能力；完成即归档。
+> 本 change 覆盖首版 `runtime-foundation` 未完成的运行时核心能力（Agent 执行、租户、provider 文件、
+> 运维、blob 生命周期）；完成即归档。
+> 生态层（可观测/可恢复/压缩/Skills/MCP/Hooks）见 `keel-ecosystem`；两者按 `docs/MATURITY.md`
+> 的 G0–G5 闸门验收。Agent 执行部分已于 2026-11-06 完成。
 
 ## Why
 
