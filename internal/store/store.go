@@ -107,7 +107,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	for attempt := 0; attempt < 6; attempt++ {
 		if err := s.migrateOnce(ctx, string(sql)); err != nil {
 			lastErr = err
-			if !isRetryableMigration(err) {
+			if !isRetryableTx(err) {
 				return err
 			}
 			time.Sleep(time.Duration(50+attempt*75) * time.Millisecond)
@@ -118,7 +118,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return lastErr
 }
 
-func isRetryableMigration(err error) bool {
+func isRetryableTx(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
@@ -208,6 +208,29 @@ func (s *Store) AppendEventDedup(ctx context.Context, tenantID, sessionID uuid.U
 	if err != nil {
 		return 0, false, fmt.Errorf("store: marshal event: %w", err)
 	}
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		seq, inserted, err := s.appendEventDedupOnce(ctx, tenantID, sessionID, kind, raw, dedupeKey)
+		if err == nil {
+			return seq, inserted, nil
+		}
+		lastErr = err
+		if !isRetryableTx(err) {
+			return 0, false, err
+		}
+		select {
+		case <-ctx.Done():
+			return 0, false, ctx.Err()
+		case <-time.After(time.Duration(10+attempt*20) * time.Millisecond):
+		}
+	}
+	return 0, false, lastErr
+}
+
+// appendEventDedupOnce is one transaction of AppendEventDedup. Concurrent
+// session locks and the events insert can deadlock under parallel appends;
+// the caller retries that class of failure.
+func (s *Store) appendEventDedupOnce(ctx context.Context, tenantID, sessionID uuid.UUID, kind string, raw []byte, dedupeKey string) (int64, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, fmt.Errorf("store: begin: %w", err)
