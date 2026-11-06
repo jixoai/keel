@@ -1,11 +1,11 @@
-# FDE2E Keel（fde2e-keel）项目指令
+# Keel（keel）项目指令
 
 > 本文件是项目级指令，补充（不覆盖）`~/.agents/AGENTS.md` 与 `~/.zcode/AGENTS.md` 的全局规则。
-> 本仓＝**FDE2E Keel（龙骨）· 通用 Agent 无状态运行时底座**，与 Hive、任何具体产品无关。
+> 本仓＝**Keel（龙骨）· 通用 Agent 无状态运行时底座**，不绑定任何具体产品。
 
 ## 原则：一切任务用 OpenSpec 履行
 
-Owner 发的任何任务/需求，都必须以 openspec change 履行：先建 change（proposal + tasks +
+任何任务/需求，都必须以 openspec change 履行：先建 change（proposal + tasks +
 specs 增量），再实现，再按 change 验收。change 全部任务完成且验证通过后立即归档。
 
 ## 原则：无状态是宪法（Owner 2026-11-05）

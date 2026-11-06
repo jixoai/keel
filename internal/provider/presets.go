@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/presets.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file defines the built-in preset catalog: a curated set of ready-to-use
 // (provider, model) pairs a user can pick from without knowing each gateway's

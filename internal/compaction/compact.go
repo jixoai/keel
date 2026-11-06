@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/compaction/compact.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file (US-003) ties the compaction pieces together: given a message list
 // and settings, it finds the cut point, extracts file operations from the
@@ -13,8 +13,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
-	"github.com/jixoai/fde2e-keel/internal/provider"
+	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/provider"
 )
 
 // CompactionDetails records the files touched in the compacted history, stored

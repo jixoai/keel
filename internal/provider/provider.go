@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/provider.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file defines the provider streaming abstraction (US-003/US-007 base):
 // the StreamFn contract, the per-delta AssistantMessageEvent set, and the
@@ -16,7 +16,7 @@ package provider
 import (
 	"context"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 // AssistantMessageEvent is the sealed interface for provider stream deltas. The

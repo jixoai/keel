@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
-	"github.com/jixoai/fde2e-keel/internal/agenttool"
-	"github.com/jixoai/fde2e-keel/internal/provider"
+	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agenttool"
+	"github.com/jixoai/keel/internal/provider"
 )
 
 // fakeStream returns a StreamFn that hands out the pre-programmed responses in

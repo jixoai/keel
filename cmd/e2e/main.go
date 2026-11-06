@@ -36,13 +36,13 @@ type env struct {
 
 func main() {
 	var (
-		bin  = flag.String("bin", "/tmp/fde2e-runtime", "runtime binary")
-		dsn  = flag.String("dsn", os.Getenv("FDE2E_DSN"), "PostgreSQL DSN")
+		bin  = flag.String("bin", "/tmp/keel-runtime", "runtime binary")
+		dsn  = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
 		port = flag.Int("port", 13745, "listen port")
 	)
 	flag.Parse()
 	if *dsn == "" {
-		log.Fatal("FDE2E_DSN is required")
+		log.Fatal("KEEL_DSN is required")
 	}
 	e := &env{bin: *bin, dsn: *dsn, base: fmt.Sprintf("http://127.0.0.1:%d", *port)}
 
@@ -73,12 +73,12 @@ func (e *env) start() error {
 	if e.cmd != nil {
 		return nil
 	}
-	f, err := os.OpenFile("/tmp/fde2e-e2e-server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile("/tmp/keel-e2e-server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(e.bin, "-addr", "127.0.0.1:"+portOf(e.base), "-cas", "/tmp/fde2e-e2e-cas", "-streams", "600", "-admit-rate", "2000")
-	cmd.Env = append(os.Environ(), "FDE2E_DSN="+e.dsn, "GOMEMLIMIT=805306368")
+	cmd := exec.Command(e.bin, "-addr", "127.0.0.1:"+portOf(e.base), "-cas", "/tmp/keel-e2e-cas", "-streams", "600", "-admit-rate", "2000")
+	cmd.Env = append(os.Environ(), "KEEL_DSN="+e.dsn, "GOMEMLIMIT=805306368")
 	cmd.Stdout = f
 	cmd.Stderr = f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

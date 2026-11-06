@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/infer.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements model-name → provider inference (US: auto-infer provider
 // from --model alone). When a user supplies only --model, with no --provider,

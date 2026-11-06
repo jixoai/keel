@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/agenttool/tool_executor.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements the three-phase tool execution (US-004): prepare →
 // execute → finalize, with the beforeToolCall / afterToolCall hooks. It mirrors
@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 // toolResultMaxBytes is the executor-layer budget for a single tool result's

@@ -14,7 +14,7 @@
 ### 搬运纪律
 
 1. 每个被搬运的文件保留原始 MIT 版权头，并在文件头加一行：
-   `// Copied from pigo <commit>/<path> (MIT). Modified for fde2e-keel: <一句话>。`
+   `// Copied from pigo <commit>/<path> (MIT). Modified for keel: <一句话>。`
 2. 搬运即改造：去掉全局单例、环境变量直读、`os.Exit`、TUI 依赖。
 3. 改造后的文件归本仓所有；上游更新不自动合并，只作参考。
 

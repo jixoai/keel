@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f37 (MIT License).
 // Upstream: internal/agenttool/bash_tool.go
-// Modified for fde2e-keel: extracted the two rune-boundary helpers
+// Modified for keel: extracted the two rune-boundary helpers
 // without pulling the bash tool into the foundation.
 
 package agenttool

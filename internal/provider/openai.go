@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/openai.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements the OpenAI-compatible streaming decoder (US-009): a
 // stateful Decoder (see transport.go) for the OpenAI Chat Completions SSE
@@ -30,7 +30,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 // openaiToolCall accumulates one streamed tool call, keyed by its delta index.

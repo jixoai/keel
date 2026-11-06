@@ -2,7 +2,7 @@
 
 ## 0. 仓与规格
 
-- [x] 建仓 `jixoai/fde2e-keel`（私有）＋ README/AGENTS/docs
+- [x] 建仓 `jixoai/keel`（私有）＋ README/AGENTS/docs
 - [x] `go.mod` 固定 Go **1.27.3**
 - [x] OpenSpec 规格落地（runtime-core / stream / blob / backpressure / tenant / provider）
 - [ ] 主仓挂 submodule ＋ PROJECT-MAP 登记

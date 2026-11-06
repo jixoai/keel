@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/fde2e-keel/internal/store"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // Errors returned by the uploader.

@@ -17,16 +17,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/fde2e-keel/internal/blob"
-	"github.com/jixoai/fde2e-keel/internal/store"
-	"github.com/jixoai/fde2e-keel/internal/stream"
+	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/stream"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	t.Helper()
-	dsn := os.Getenv("FDE2E_TEST_DSN")
+	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
-		t.Skip("FDE2E_TEST_DSN not set")
+		t.Skip("KEEL_TEST_DSN not set")
 	}
 	ctx := context.Background()
 	st, err := store.Open(ctx, store.Config{DSN: dsn})

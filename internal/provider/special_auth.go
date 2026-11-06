@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/special_auth.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements parameter validation and endpoint construction for the
 // "special auth" providers (US-007 / FR-12): Azure OpenAI, Amazon Bedrock,

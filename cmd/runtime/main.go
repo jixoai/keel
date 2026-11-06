@@ -1,4 +1,4 @@
-// Command runtime is the fde2e agent runtime server: a stateless HTTP/SSE shell
+// Command runtime is the Keel agent runtime server: a stateless HTTP/SSE shell
 // over PostgreSQL.
 package main
 
@@ -16,26 +16,26 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jixoai/fde2e-keel/internal/blob"
-	"github.com/jixoai/fde2e-keel/internal/httpapi"
-	"github.com/jixoai/fde2e-keel/internal/store"
-	"github.com/jixoai/fde2e-keel/internal/stream"
+	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/httpapi"
+	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/stream"
 )
 
 func main() {
 	var (
 		addr      = flag.String("addr", ":13740", "listen address")
-		dsn       = flag.String("dsn", os.Getenv("FDE2E_DSN"), "PostgreSQL DSN")
-		casDir    = flag.String("cas", os.Getenv("FDE2E_CAS_DIR"), "content-addressed store directory (large originals)")
-		budget    = flag.Int64("bandwidth", envInt64("FDE2E_BANDWIDTH", 0), "outbound bytes/sec budget (0 = unlimited)")
-		streamCap = flag.Int("streams", envInt("FDE2E_STREAMS", 1000), "max concurrent streams")
-		batch     = flag.Int("chunk-batch", envInt("FDE2E_CHUNK_BATCH", 1), "chunks per PG query (2 = 1Gbps mode)")
-		admitRate = flag.Int("admit-rate", envInt("FDE2E_ADMIT_RATE", 200), "new streams per second")
+		dsn       = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
+		casDir    = flag.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
+		budget    = flag.Int64("bandwidth", envInt64("KEEL_BANDWIDTH", 0), "outbound bytes/sec budget (0 = unlimited)")
+		streamCap = flag.Int("streams", envInt("KEEL_STREAMS", 1000), "max concurrent streams")
+		batch     = flag.Int("chunk-batch", envInt("KEEL_CHUNK_BATCH", 1), "chunks per PG query (2 = 1Gbps mode)")
+		admitRate = flag.Int("admit-rate", envInt("KEEL_ADMIT_RATE", 200), "new streams per second")
 		memLimit  = flag.Int64("memlimit", envInt64("GOMEMLIMIT", 0), "soft memory limit in bytes (0 = Go default)")
 	)
 	flag.Parse()
 	if *dsn == "" {
-		slog.Error("FDE2E_DSN (or -dsn) is required")
+		slog.Error("KEEL_DSN (or -dsn) is required")
 		os.Exit(2)
 	}
 	if *memLimit > 0 {

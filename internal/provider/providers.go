@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/providers.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements the first concrete Providers (US-013): Bedrock,
 // OpenRouter, and Ollama. Each satisfies the Provider interface by building an
@@ -34,7 +34,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 // providerBaseURLs holds the default endpoint per built-in provider. A base URL

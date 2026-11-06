@@ -47,7 +47,7 @@ Owner 给出硬指标：**2GB 内存、100–200 逻辑隔离租户、每租户 
 
 ## Impact
 
-- **新仓** `jixoai/fde2e-keel`（私有；后续按 Owner 决定是否开源）。
+- **新仓** `jixoai/keel`（私有；后续按 Owner 决定是否开源）。
 - **主仓**：作为 submodule 引入，`PROJECT-MAP.md` 登记。
 - **下游**：所有 Agent 产品（omni/echo/lens/meta/void/moon/browser）未来可接入；
   本 change 不修改任何现有产品。

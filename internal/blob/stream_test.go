@@ -9,16 +9,16 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/fde2e-keel/internal/store"
+	"github.com/jixoai/keel/internal/store"
 )
 
-// testStore opens the store named by FDE2E_TEST_DSN, skipping when unset so a
+// testStore opens the store named by KEEL_TEST_DSN, skipping when unset so a
 // plain `go test ./...` works without a database.
 func testStore(t *testing.T) *store.Store {
 	t.Helper()
-	dsn := os.Getenv("FDE2E_TEST_DSN")
+	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
-		t.Skip("FDE2E_TEST_DSN not set")
+		t.Skip("KEEL_TEST_DSN not set")
 	}
 	s, err := store.Open(context.Background(), store.Config{DSN: dsn})
 	if err != nil {

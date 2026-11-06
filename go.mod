@@ -1,4 +1,4 @@
-module github.com/jixoai/fde2e-keel
+module github.com/jixoai/keel
 
 go 1.27.3
 

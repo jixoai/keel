@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/agenttool/registry.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements the tool registry (US-014): tools are registered by
 // name, and their arguments are validated against a per-tool JSON Schema
@@ -18,7 +18,7 @@ import (
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )

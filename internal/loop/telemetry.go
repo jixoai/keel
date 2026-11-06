@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f37 (MIT License).
 // Upstream: internal/runtime/telemetry.go
-// Modified for fde2e-keel: package renamed to loop; reminder injection and
+// Modified for keel: package renamed to loop; reminder injection and
 // file-based checkpoint writing removed (checkpoints are persisted by the host through a callback).
 
 // This file implements structured telemetry collection for a loop run
@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 // telemetry is the per-run accumulator. Most fields are folded from events on

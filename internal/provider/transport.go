@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/transport.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements the shared transport driver (US-007 support): a
 // provider-agnostic layer that turns an HTTP request into a stream of
@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 // StreamEvent is the transport-level alias for AssistantMessageEvent. Decoders

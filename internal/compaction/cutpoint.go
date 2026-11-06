@@ -1,10 +1,10 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/compaction/cutpoint.go
-// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 package compaction
 
-import "github.com/jixoai/fde2e-keel/internal/agentcore"
+import "github.com/jixoai/keel/internal/agentcore"
 
 // CutPointResult describes the cut selected for compaction, mirroring pi's
 // CutPointResult (adapted to pigo's flat message list).

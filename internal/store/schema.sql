@@ -1,4 +1,4 @@
--- FDE2E agent runtime schema (PostgreSQL 18).
+-- Keel agent runtime schema (PostgreSQL 18).
 -- One database, tenant_id on every row, composite indexes. No schema-per-tenant.
 -- See openspec/changes/runtime-foundation/specs/tenant-isolation/spec.md.
 
@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS blobs_by_expiry ON blobs (expires_at) WHERE ref_count
 -- notification costs one heartbeat interval, never data.
 CREATE OR REPLACE FUNCTION notify_event() RETURNS trigger AS $$
 BEGIN
-    PERFORM pg_notify('fde2e_events',
+    PERFORM pg_notify('keel_events',
         NEW.tenant_id::text || ':' || NEW.session_id::text || ':' || NEW.seq::text);
     RETURN NEW;
 END;
