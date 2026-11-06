@@ -79,9 +79,10 @@ go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 
 ## 状态与路线
 
-**可运行骨架 + 实测通过**（2026-11-05）。已实现：PG schema、64KiB 分块 blob、流式 base64、
-SSE 续传、三类分池与全局带宽、无状态 E2E。正在补：Agent loop 与事件日志的持久任务接线、
-每租户配额/RLS、provider 文件协议 adapter、缩略图与 TTL 回收、CI/部署。
+**可运行底座 + 实测通过**（2026-11-05）。已实现：PG schema、64KiB 分块 blob、流式 base64、
+SSE 续传、三类分池与全局带宽，以及 **Agent 执行**——事件溯源上下文、持久 run（租约 +
+`FOR UPDATE SKIP LOCKED`）、工具执行、崩溃恢复（模型调用中 / 工具执行中 kill 均可续跑）。
+正在补：每租户配额/RLS、provider 文件协议 adapter、缩略图与 TTL 回收、CI/部署。
 
 ## 与 pigo 的关系
 

@@ -160,23 +160,23 @@ func main() {
 		return true
 	})
 	res := map[string]any{
-		"statusCounts": statusCounts,
-		"errorCounts":  errCounts,
-		"tenant":        tenant,
-		"sessions":      len(sessions),
-		"durationSec":   duration.Seconds(),
-		"texts":         texts.Load(),
-		"imagesOK":      imageOK.Load(),
-		"imagesErr":     imageErr.Load(),
-		"sseErrors":     sseErr.Load(),
-		"bytesIn":       bytesIn.Load(),
-		"throughputMBs": float64(bytesIn.Load()) / duration.Seconds() / 1e6,
+		"statusCounts":      statusCounts,
+		"errorCounts":       errCounts,
+		"tenant":            tenant,
+		"sessions":          len(sessions),
+		"durationSec":       duration.Seconds(),
+		"texts":             texts.Load(),
+		"imagesOK":          imageOK.Load(),
+		"imagesErr":         imageErr.Load(),
+		"sseErrors":         sseErr.Load(),
+		"bytesIn":           bytesIn.Load(),
+		"throughputMBs":     float64(bytesIn.Load()) / duration.Seconds() / 1e6,
 		"imageLatencyP50MS": p50.Seconds() * 1000,
 		"imageLatencyP95MS": p95.Seconds() * 1000,
 		"imageLatencyP99MS": p99.Seconds() * 1000,
-		"rssMinMB":      mb(rssMin(rss)),
-		"rssP50MB":      mb(rssPercentile(rss, 0.50)),
-		"rssMaxMB":      mb(rssMax(rss)),
+		"rssMinMB":          mb(rssMin(rss)),
+		"rssP50MB":          mb(rssPercentile(rss, 0.50)),
+		"rssMaxMB":          mb(rssMax(rss)),
 	}
 	raw, _ := json.MarshalIndent(res, "", "  ")
 	fmt.Println(string(raw))
@@ -548,4 +548,3 @@ func rssPercentile(v []int64, p float64) int64 {
 }
 
 func mb(v int64) float64 { return float64(v) / 1e6 }
-

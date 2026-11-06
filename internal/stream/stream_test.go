@@ -92,8 +92,8 @@ func TestGuardKillsSlowClient(t *testing.T) {
 func TestGuardKeepsFastClient(t *testing.T) {
 	w := writerFunc(func(p []byte) (int, error) { return len(p), nil })
 	g := NewGuardWriter(w, func(time.Time) error { return nil }, GuardConfig{
-		Window:       10 * time.Millisecond,
-		MinRate:      1 << 20,
+		Window:  10 * time.Millisecond,
+		MinRate: 1 << 20,
 		// A generous stall count keeps this test about "fast writes are not
 		// killed", not about scheduler pauses on a shared CI box.
 		StallWindows: 1000,

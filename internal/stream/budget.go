@@ -116,9 +116,9 @@ func (p *BufferPool) InUse() int { return len(p.ch) }
 type Class uint8
 
 const (
-	Small Class = iota // <256KiB
-	Medium             // <2MiB
-	Large              // >=2MiB
+	Small  Class = iota // <256KiB
+	Medium              // <2MiB
+	Large               // >=2MiB
 )
 
 func (c Class) String() string {

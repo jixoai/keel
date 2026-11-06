@@ -27,11 +27,12 @@ import (
 )
 
 type env struct {
-	bin  string
-	dsn  string
-	base string
-	cmd  *exec.Cmd
-	log  *os.File
+	bin      string
+	dsn      string
+	base     string
+	cmd      *exec.Cmd
+	log      *os.File
+	extraEnv []string
 }
 
 func main() {
@@ -50,6 +51,9 @@ func main() {
 	results = append(results, e.caseIdempotentAcrossRestart())
 	results = append(results, e.caseSSECursorAcrossRestart())
 	results = append(results, e.caseBlobResumeAcrossRestart())
+	results = append(results, e.caseAgentReply())
+	results = append(results, e.caseRunResumeAfterKill())
+	results = append(results, e.caseToolReplayAfterKill())
 	results = append(results, e.caseConcurrentKillNoLoss())
 
 	e.stop()
@@ -79,6 +83,7 @@ func (e *env) start() error {
 	}
 	cmd := exec.Command(e.bin, "-addr", "127.0.0.1:"+portOf(e.base), "-cas", "/tmp/keel-e2e-cas", "-streams", "600", "-admit-rate", "2000")
 	cmd.Env = append(os.Environ(), "KEEL_DSN="+e.dsn, "GOMEMLIMIT=805306368")
+	cmd.Env = append(cmd.Env, e.extraEnv...)
 	cmd.Stdout = f
 	cmd.Stderr = f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -483,8 +488,10 @@ func (e *env) caseConcurrentKillNoLoss() result {
 		for j, ev := range events {
 			seqs[j] = ev.Seq
 		}
-		if len(events) != written[i] {
-			return fail("session %d: got %d events, want %d (%v)", i, len(events), written[i], seqs)
+		// Each input also produces assistant/tool events now, so count the user
+		// events; seqs must still be contiguous across the whole session.
+		if got := countKind(events, "user.message"); got != written[i] {
+			return fail("session %d: got %d user events, want %d (%v)", i, got, written[i], seqs)
 		}
 		sort.Slice(seqs, func(a, b int) bool { return seqs[a] < seqs[b] })
 		for j := 1; j < len(seqs); j++ {
@@ -496,5 +503,220 @@ func (e *env) caseConcurrentKillNoLoss() result {
 	r.Checks = []string{"100 sessions created", "SIGKILL after 10 rounds", "server restarted", "2000 events committed", "every session has a contiguous sequence"}
 	r.Pass = true
 	r.Detail = "2000 events across 100 sessions; contiguous after a SIGKILL"
+	return r
+}
+
+// waitEvents polls the event list until pred is satisfied or the deadline
+// passes. The worker is asynchronous, so every agent assertion needs this.
+func waitEvents(ctx context.Context, base, tenant, session string, pred func([]event) bool, timeout time.Duration) ([]event, error) {
+	deadline := time.Now().Add(timeout)
+	var last []event
+	for time.Now().Before(deadline) {
+		evs, err := loadEvents(ctx, base, tenant, session, 0)
+		if err == nil {
+			last = evs
+			if pred(evs) {
+				return evs, nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return last, fmt.Errorf("timeout waiting for events (last=%d)", len(last))
+}
+
+func countKind(evs []event, kind string) int {
+	n := 0
+	for _, ev := range evs {
+		if ev.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+func assistantStop(ev event) string {
+	var m struct {
+		StopReason string `json:"stopReason"`
+	}
+	_ = json.Unmarshal(ev.Payload, &m)
+	return m.StopReason
+}
+
+func assistantReply(ev event) string {
+	var m struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	_ = json.Unmarshal(ev.Payload, &m)
+	out := ""
+	for _, c := range m.Content {
+		if c.Type == "text" {
+			out += c.Text
+		}
+	}
+	return out
+}
+
+func hasKind(evs []event, kind string) bool { return countKind(evs, kind) > 0 }
+
+func hasFinal(evs []event) bool {
+	for _, ev := range evs {
+		if ev.Kind == "assistant.message" && assistantStop(ev) == "end_turn" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasToolCall(evs []event) bool {
+	for _, ev := range evs {
+		if ev.Kind == "assistant.message" && assistantStop(ev) == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *env) caseAgentReply() result {
+	ctx := context.Background()
+	r := result{Name: "agent worker: input → fake reply"}
+	fail := func(format string, args ...any) result {
+		r.Detail = fmt.Sprintf(format, args...)
+		return r
+	}
+	e.extraEnv = nil
+	if err := e.start(); err != nil {
+		return fail("start: %v", err)
+	}
+	tenant, session, err := e.newTenantSession(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	var out inputResp
+	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
+		map[string]string{"text": "hello runtime", "requestId": "agent-1"}, &out); err != nil || code != 201 {
+		return fail("input: %d %v", code, err)
+	}
+	evs, err := waitEvents(ctx, e.base, tenant, session, func(evs []event) bool {
+		return hasFinal(evs)
+	}, 20*time.Second)
+	if err != nil {
+		return fail("wait reply: %v", err)
+	}
+	if countKind(evs, "user.message") != 1 || countKind(evs, "assistant.message") != 1 {
+		return fail("events: user=%d assistant=%d", countKind(evs, "user.message"), countKind(evs, "assistant.message"))
+	}
+	for _, ev := range evs {
+		if ev.Kind == "assistant.message" && assistantReply(ev) != "fake provider received: hello runtime" {
+			return fail("reply = %q", assistantReply(ev))
+		}
+	}
+	r.Checks = []string{"input committed", "worker produced one assistant message", "reply is the deterministic fake", "idle re-run is a no-op"}
+	r.Pass = true
+	r.Detail = "input → exactly one user event and one assistant reply"
+	return r
+}
+
+func (e *env) caseRunResumeAfterKill() result {
+	ctx := context.Background()
+	r := result{Name: "run resumes after SIGKILL during the model call"}
+	fail := func(format string, args ...any) result {
+		r.Detail = fmt.Sprintf(format, args...)
+		return r
+	}
+	e.extraEnv = []string{"KEEL_FAKE_DELAY_MS=3000", "KEEL_LEASE_MS=1000"}
+	if err := e.start(); err != nil {
+		return fail("start: %v", err)
+	}
+	tenant, session, err := e.newTenantSession(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
+		map[string]string{"text": "resume me", "requestId": "resume-1"}, nil); err != nil || code != 201 {
+		return fail("input: %d %v", code, err)
+	}
+	time.Sleep(500 * time.Millisecond) // the fake model is sleeping
+	e.kill9()
+	e.extraEnv = []string{"KEEL_LEASE_MS=1000"}
+	if err := e.start(); err != nil {
+		return fail("restart: %v", err)
+	}
+	evs, err := waitEvents(ctx, e.base, tenant, session, hasFinal, 15*time.Second)
+	if err != nil {
+		return fail("wait reply after restart: %v", err)
+	}
+	if countKind(evs, "user.message") != 1 {
+		return fail("user events = %d, want 1", countKind(evs, "user.message"))
+	}
+	if countKind(evs, "assistant.message") != 1 {
+		return fail("assistant messages = %d, want 1", countKind(evs, "assistant.message"))
+	}
+	var run struct {
+		Status string `json:"status"`
+	}
+	req, _ := http.NewRequestWithContext(ctx, "GET", e.base+"/v1/sessions/"+session+"/run", nil)
+	req.Header.Set("X-Tenant-ID", tenant)
+	if res, err := http.DefaultClient.Do(req); err == nil {
+		_ = json.NewDecoder(res.Body).Decode(&run)
+		res.Body.Close()
+	}
+	if run.Status != "done" {
+		return fail("run status = %q, want done", run.Status)
+	}
+	r.Checks = []string{"input committed", "SIGKILL during the model call", "lease expired and the run was reclaimed", "exactly one user event", "exactly one final reply", "run status done"}
+	r.Pass = true
+	r.Detail = "the interrupted run was reclaimed and produced exactly one reply"
+	return r
+}
+
+func (e *env) caseToolReplayAfterKill() result {
+	ctx := context.Background()
+	r := result{Name: "tool result survives SIGKILL mid-execution"}
+	fail := func(format string, args ...any) result {
+		r.Detail = fmt.Sprintf(format, args...)
+		return r
+	}
+	e.extraEnv = []string{"KEEL_TOOL_DELAY_MS=5000", "KEEL_LEASE_MS=1000"}
+	if err := e.start(); err != nil {
+		return fail("start: %v", err)
+	}
+	tenant, session, err := e.newTenantSession(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
+		map[string]string{"text": "echo crash test", "requestId": "tool-1"}, nil); err != nil || code != 201 {
+		return fail("input: %d %v", code, err)
+	}
+	if _, err := waitEvents(ctx, e.base, tenant, session, hasToolCall, 8*time.Second); err != nil {
+		return fail("wait tool call: %v", err)
+	}
+	e.kill9() // the tool is sleeping; its result was never committed
+	e.extraEnv = []string{"KEEL_LEASE_MS=1000"}
+	if err := e.start(); err != nil {
+		return fail("restart: %v", err)
+	}
+	evs, err := waitEvents(ctx, e.base, tenant, session, hasFinal, 15*time.Second)
+	if err != nil {
+		return fail("wait final after restart: %v", err)
+	}
+	if got := countKind(evs, "tool.result"); got != 1 {
+		return fail("tool results = %d, want 1", got)
+	}
+	final := ""
+	for _, ev := range evs {
+		if ev.Kind == "assistant.message" && assistantStop(ev) == "end_turn" {
+			final = assistantReply(ev)
+		}
+	}
+	if final != "tool echo returned: echo crash test" {
+		return fail("final = %q", final)
+	}
+	r.Checks = []string{"assistant tool call committed", "SIGKILL during tool execution", "lease reclaimed after restart", "tool re-executed (at-least-once)", "exactly one tool result", "final answer present"}
+	r.Pass = true
+	r.Detail = "the unresolved tool call was re-executed and committed exactly once"
 	return r
 }

@@ -32,18 +32,18 @@ const (
 
 // BlobMeta is the metadata a stream needs before reading any bytes.
 type BlobMeta struct {
-	TenantID   uuid.UUID
-	BlobID     uuid.UUID
-	SHA256     []byte
-	Size       int64
-	Mime       string
-	Storage    int16
-	Lane       int16
-	Complete   bool
-	Chunks     int32
-	RefCount   int32
-	CreatedAt  time.Time
-	ExpiresAt  *time.Time
+	TenantID  uuid.UUID
+	BlobID    uuid.UUID
+	SHA256    []byte
+	Size      int64
+	Mime      string
+	Storage   int16
+	Lane      int16
+	Complete  bool
+	Chunks    int32
+	RefCount  int32
+	CreatedAt time.Time
+	ExpiresAt *time.Time
 }
 
 // ErrNoBlob is returned when a blob does not exist for the tenant.

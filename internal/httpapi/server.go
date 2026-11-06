@@ -25,10 +25,10 @@ import (
 
 // Config wires the server's dependencies.
 type Config struct {
-	Store    *store.Store
-	Hub      *Hub
-	Blobs    *blob.Reader
-	Uploader *blob.Uploader
+	Store     *store.Store
+	Hub       *Hub
+	Blobs     *blob.Reader
+	Uploader  *blob.Uploader
 	Scheduler *stream.Scheduler
 	Admitter  *stream.Admitter
 	Limiter   *stream.Limiter
@@ -79,6 +79,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/tenants", s.createTenant)
 	s.mux.HandleFunc("POST /v1/sessions", s.createSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/input", s.input)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/run", s.triggerRun)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/run", s.runStatus)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/events", s.appendEvent)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.listEvents)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events/stream", s.streamEvents)
@@ -91,12 +93,12 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	writeJSON(w, 200, map[string]any{
-		"ok":      true,
-		"pid":     pid,
-		"bootId":  bootID,
+		"ok":        true,
+		"pid":       pid,
+		"bootId":    bootID,
 		"goroutine": runtime.NumGoroutine(),
-		"heapMB":  float64(m.HeapAlloc) / 1e6,
-		"rssMB":   float64(m.Sys) / 1e6,
+		"heapMB":    float64(m.HeapAlloc) / 1e6,
+		"rssMB":     float64(m.Sys) / 1e6,
 	})
 }
 
@@ -105,14 +107,14 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	writeJSON(w, 200, map[string]any{
-		"stream":   s.cfg.Metrics.Snapshot(),
-		"inflight": inflight,
-		"control":  control,
-		"classes": map[string]int{"small": classes[0], "medium": classes[1], "large": classes[2]},
-		"rejected": rejected,
+		"stream":    s.cfg.Metrics.Snapshot(),
+		"inflight":  inflight,
+		"control":   control,
+		"classes":   map[string]int{"small": classes[0], "medium": classes[1], "large": classes[2]},
+		"rejected":  rejected,
 		"goroutine": runtime.NumGoroutine(),
-		"heapMB":   float64(m.HeapAlloc) / 1e6,
-		"sysMB":    float64(m.Sys) / 1e6,
+		"heapMB":    float64(m.HeapAlloc) / 1e6,
+		"sysMB":     float64(m.Sys) / 1e6,
 	})
 }
 
@@ -220,6 +222,12 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		}
 		sub.Seq = &seq
 	}
+	// Enqueue on replays too: if the first enqueue failed after the event was
+	// committed, the client's retry repairs it without creating a second event.
+	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
 	status := 200
 	if created {
 		status = 201
@@ -230,6 +238,56 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		"status":       sub.Status,
 		"seq":          sub.Seq,
 		"created":      created,
+	})
+}
+
+// triggerRun enqueues a run without appending a user event. It is useful for
+// retrying a failed run after the operator fixed the provider configuration.
+func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFrom(r)
+	if !ok {
+		writeErr(w, 401, errors.New("X-Tenant-ID is required"))
+		return
+	}
+	sessionID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
+		return
+	}
+	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 202, map[string]any{"enqueued": true})
+}
+
+// runStatus reports the session's durable run state.
+func (s *Server) runStatus(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFrom(r)
+	if !ok {
+		writeErr(w, 401, errors.New("X-Tenant-ID is required"))
+		return
+	}
+	sessionID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
+		return
+	}
+	run, err := s.cfg.Store.GetRun(r.Context(), tenantID, sessionID)
+	if err != nil {
+		status := 500
+		if errors.Is(err, store.ErrNoRun) {
+			status = 404
+		}
+		writeErr(w, status, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"status":     run.Status,
+		"attempts":   run.Attempts,
+		"cursorSeq":  run.CursorSeq,
+		"leaseUntil": run.LeaseUntil,
+		"lastError":  run.LastError,
 	})
 }
 
@@ -693,4 +751,3 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 func writeErr(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]any{"error": err.Error()})
 }
-

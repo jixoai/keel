@@ -119,3 +119,20 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS events_notify ON events;
 CREATE TRIGGER events_notify AFTER INSERT ON events
 FOR EACH ROW EXECUTE FUNCTION notify_event();
+
+-- One run row per session. Workers claim it with FOR UPDATE SKIP LOCKED; a
+-- crashed process leaves the lease behind and any worker may reclaim it.
+CREATE TABLE IF NOT EXISTS runs (
+    tenant_id   uuid NOT NULL,
+    session_id  uuid NOT NULL,
+    status      text NOT NULL DEFAULT 'pending', -- pending|running|done|failed
+    lease_until timestamptz,
+    attempts    int NOT NULL DEFAULT 0,
+    cursor_seq  bigint NOT NULL DEFAULT 0,
+    last_error  text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS runs_claim ON runs (status, updated_at);

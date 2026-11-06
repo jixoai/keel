@@ -16,8 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/httpapi"
+	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 )
@@ -32,6 +34,8 @@ func main() {
 		batch     = flag.Int("chunk-batch", envInt("KEEL_CHUNK_BATCH", 1), "chunks per PG query (2 = 1Gbps mode)")
 		admitRate = flag.Int("admit-rate", envInt("KEEL_ADMIT_RATE", 200), "new streams per second")
 		memLimit  = flag.Int64("memlimit", envInt64("GOMEMLIMIT", 0), "soft memory limit in bytes (0 = Go default)")
+		runs      = flag.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
+		noWorker  = flag.Bool("no-worker", false, "do not start the agent worker")
 	)
 	flag.Parse()
 	if *dsn == "" {
@@ -55,6 +59,23 @@ func main() {
 
 	hub := httpapi.NewHub(st, log)
 	go hub.Run(ctx)
+
+	streamFn, providerName, model := agent.FakeStream(), "fake", "fake"
+	if m := os.Getenv("KEEL_MODEL"); m != "" {
+		p, modelID, err := provider.ResolveProvider(m, os.Getenv("KEEL_BASE_URL"),
+			os.Getenv("KEEL_PROTOCOL"), os.Getenv("KEEL_PROVIDER"), os.Getenv)
+		if err != nil {
+			log.Error("resolve provider", "err", err)
+			os.Exit(2)
+		}
+		streamFn, providerName, model = provider.StreamFnFromProvider(p), p.Name(), modelID
+	}
+	runner := agent.NewRunner(st, streamFn, providerName, model, os.Getenv("KEEL_API_KEY"), log)
+	if !*noWorker {
+		worker := agent.NewWorker(st, runner, *runs, log)
+		go worker.Run(ctx)
+		log.Info("agent worker started", "provider", providerName, "model", model, "concurrency", *runs)
+	}
 
 	metrics := &stream.Metrics{}
 	srv := httpapi.New(httpapi.Config{
