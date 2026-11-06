@@ -18,9 +18,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/fde2e-agent-runtime/internal/blob"
-	"github.com/jixoai/fde2e-agent-runtime/internal/store"
-	"github.com/jixoai/fde2e-agent-runtime/internal/stream"
+	"github.com/jixoai/fde2e-keel/internal/blob"
+	"github.com/jixoai/fde2e-keel/internal/store"
+	"github.com/jixoai/fde2e-keel/internal/stream"
 )
 
 // Config wires the server's dependencies.

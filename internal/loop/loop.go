@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f37 (MIT License).
 // Upstream: internal/runtime/loop.go
-// Modified for fde2e-agent-runtime: package renamed to loop; reminder injection and
+// Modified for fde2e-keel: package renamed to loop; reminder injection and
 // file-based checkpoint writing removed (checkpoints are persisted by the host through a callback).
 
 // This file implements pi's two-layer agent loop (US-006, FR-1). It strings
@@ -28,10 +28,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/jixoai/fde2e-agent-runtime/internal/agentcore"
-	"github.com/jixoai/fde2e-agent-runtime/internal/agenttool"
-	"github.com/jixoai/fde2e-agent-runtime/internal/compaction"
-	"github.com/jixoai/fde2e-agent-runtime/internal/provider"
+	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/fde2e-keel/internal/agenttool"
+	"github.com/jixoai/fde2e-keel/internal/compaction"
+	"github.com/jixoai/fde2e-keel/internal/provider"
 )
 
 // nowMillis returns the current Unix time in milliseconds, the timestamp unit

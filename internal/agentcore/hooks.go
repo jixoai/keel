@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/agentcore/hooks.go
-// Modified for fde2e-agent-runtime: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 package agentcore
 

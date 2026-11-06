@@ -1,4 +1,4 @@
-# 架构与决策
+# FDE2E Keel · 架构与决策
 
 > 本文件记录底座的技术判断与**已验证的量化依据**。数字来自 2026-11-05 的实测
 > （见 `docs/benchmarks/`，原始报告在 `.agents/reports/`）；未验证的推断都标「待验证」。
@@ -18,7 +18,7 @@
 
 ```
                     ┌──────────────────────────────────────┐
-   HTTP/SSE  ──────▶│  fde2e-agent-runtime (Go, 1 process)  │
+   HTTP/SSE  ──────▶│  fde2e-keel (Go, 1 process)  │
    (1000 conn)      │  ┌─────────┐ ┌─────────┐ ┌────────┐  │
                     │  │ API/SSE │ │ Agent   │ │ Blob   │  │
                     │  │  lane   │ │ loop    │ │ stream │  │

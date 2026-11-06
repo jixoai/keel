@@ -100,8 +100,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("store: read schema: %w", err)
 	}
-	if _, err := s.pool.Exec(ctx, string(sql)); err != nil {
+	// Serialize concurrent migrations (test packages and replicas start at the
+	// same time); the lock is released automatically at commit.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: migrate begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(714322)"); err != nil {
+		return fmt.Errorf("store: migrate lock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("store: migrate commit: %w", err)
 	}
 	return nil
 }

@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/compaction/tokens.go
-// Modified for fde2e-agent-runtime: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // Package compaction implements context-window token accounting and the
 // decision of when a long session must be compacted, mirroring pi's
@@ -16,7 +16,7 @@ package compaction
 import (
 	"encoding/json"
 
-	"github.com/jixoai/fde2e-agent-runtime/internal/agentcore"
+	"github.com/jixoai/fde2e-keel/internal/agentcore"
 )
 
 // CompactionSettings holds the thresholds and retention knobs for compaction,

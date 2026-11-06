@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/provider_interface.go
-// Modified for fde2e-agent-runtime: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file defines the unified Provider interface and its dual failure model
 // (US-007). A Provider turns a CompletionRequest into a stream of
@@ -18,7 +18,7 @@ package provider
 import (
 	"context"
 
-	"github.com/jixoai/fde2e-agent-runtime/internal/agentcore"
+	"github.com/jixoai/fde2e-keel/internal/agentcore"
 )
 
 // Model is provider-agnostic metadata describing a single model's identity and

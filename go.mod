@@ -1,4 +1,4 @@
-module github.com/jixoai/fde2e-agent-runtime
+module github.com/jixoai/fde2e-keel
 
 go 1.27.3
 

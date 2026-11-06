@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/provider/anthropic.go
-// Modified for fde2e-agent-runtime: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file implements the Anthropic Messages API streaming decoder (US-008).
 // It is a stateful Decoder (see transport.go) that translates Anthropic SSE
@@ -29,7 +29,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jixoai/fde2e-agent-runtime/internal/agentcore"
+	"github.com/jixoai/fde2e-keel/internal/agentcore"
 )
 
 // anthropicBlock accumulates one content block's streaming state, keyed by its

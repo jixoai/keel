@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/fde2e-agent-runtime/internal/store"
+	"github.com/jixoai/fde2e-keel/internal/store"
 )
 
 // testStore opens the store named by FDE2E_TEST_DSN, skipping when unset so a

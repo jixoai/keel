@@ -15,8 +15,8 @@ import (
 	"os"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/fde2e-agent-runtime/internal/store"
-	"github.com/jixoai/fde2e-agent-runtime/internal/stream"
+	"github.com/jixoai/fde2e-keel/internal/store"
+	"github.com/jixoai/fde2e-keel/internal/stream"
 )
 
 // Reader streams blobs out of the store.

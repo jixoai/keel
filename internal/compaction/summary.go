@@ -1,6 +1,6 @@
 // Copied from github.com/smallnest/pigo@891d1f3 (MIT License).
 // Upstream: internal/compaction/summary.go
-// Modified for fde2e-agent-runtime: module import paths rewritten; see docs/UPSTREAM.md.
+// Modified for fde2e-keel: module import paths rewritten; see docs/UPSTREAM.md.
 
 // This file (US-003) covers summarization: the structured prompts, the
 // conversation serializer, file-operation extraction, and GenerateSummary,
@@ -16,8 +16,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jixoai/fde2e-agent-runtime/internal/agentcore"
-	"github.com/jixoai/fde2e-agent-runtime/internal/provider"
+	"github.com/jixoai/fde2e-keel/internal/agentcore"
+	"github.com/jixoai/fde2e-keel/internal/provider"
 )
 
 // SUMMARIZATION_SYSTEM_PROMPT instructs the model to only emit the structured

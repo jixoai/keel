@@ -1,7 +1,7 @@
-# fde2e-agent-runtime 项目指令
+# FDE2E Keel（fde2e-keel）项目指令
 
 > 本文件是项目级指令，补充（不覆盖）`~/.agents/AGENTS.md` 与 `~/.zcode/AGENTS.md` 的全局规则。
-> 本仓＝**通用 Agent 无状态运行时底座**，与 Hive、任何具体产品无关。
+> 本仓＝**FDE2E Keel（龙骨）· 通用 Agent 无状态运行时底座**，与 Hive、任何具体产品无关。
 
 ## 原则：一切任务用 OpenSpec 履行
 

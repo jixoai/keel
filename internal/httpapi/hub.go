@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jixoai/fde2e-agent-runtime/internal/store"
+	"github.com/jixoai/fde2e-keel/internal/store"
 )
 
 // Hub fans out "this session has new events" wakeups to SSE subscribers. It is
