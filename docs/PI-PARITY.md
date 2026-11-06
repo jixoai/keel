@@ -81,7 +81,7 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 ## 4.1 官方测试对齐状态
 
 逐文件对照、已移植测试与未覆盖项见 [PI-CONFORMANCE.md](PI-CONFORMANCE.md)。
-当前：199 个测试（含子测试）通过，0 失败；覆盖 loop / compaction / MCP / skills / telemetry。
+当前：205 个测试（含子测试）通过，0 失败；覆盖 loop / compaction / MCP / skills / telemetry。
 
 ## 5. 版本与升级
 
