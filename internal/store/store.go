@@ -162,39 +162,73 @@ type Event struct {
 }
 
 // AppendEvent commits one event and returns its per-session sequence. The
-// sequence is allocated by the session row lock, so two writers on the same
+// sequence is allocated under the session row lock, so two writers on the same
 // session cannot interleave but different sessions never contend.
 func (s *Store) AppendEvent(ctx context.Context, tenantID, sessionID uuid.UUID, kind string, payload any) (int64, error) {
+	seq, _, err := s.AppendEventDedup(ctx, tenantID, sessionID, kind, payload, "")
+	return seq, err
+}
+
+// AppendEventDedup is AppendEvent with an optional idempotency key. A non-empty
+// key that already exists returns the existing sequence with inserted=false and
+// writes nothing. The check and the allocation happen under the same session
+// row lock, so concurrent retries cannot create a gap or a duplicate.
+func (s *Store) AppendEventDedup(ctx context.Context, tenantID, sessionID uuid.UUID, kind string, payload any, dedupeKey string) (int64, bool, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return 0, fmt.Errorf("store: marshal event: %w", err)
+		return 0, false, fmt.Errorf("store: marshal event: %w", err)
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("store: begin: %w", err)
+		return 0, false, fmt.Errorf("store: begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	var seq int64
+	// Lock the session first: it serializes both dedupe checks and sequence
+	// allocation for this session.
+	var next int64
 	err = tx.QueryRow(ctx,
-		`UPDATE sessions SET next_seq = next_seq + 1, updated_at = now()
-		 WHERE tenant_id = $1 AND session_id = $2
-		 RETURNING next_seq - 1`, tenantID, sessionID).Scan(&seq)
+		`SELECT next_seq FROM sessions
+		 WHERE tenant_id = $1 AND session_id = $2 FOR UPDATE`,
+		tenantID, sessionID).Scan(&next)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNoSession
+		return 0, false, ErrNoSession
 	}
 	if err != nil {
-		return 0, fmt.Errorf("store: allocate seq: %w", err)
+		return 0, false, fmt.Errorf("store: lock session: %w", err)
+	}
+	if dedupeKey != "" {
+		var existing int64
+		err := tx.QueryRow(ctx,
+			`SELECT seq FROM events
+			 WHERE tenant_id = $1 AND session_id = $2 AND dedupe_key = $3`,
+			tenantID, sessionID, dedupeKey).Scan(&existing)
+		if err == nil {
+			if err := tx.Commit(ctx); err != nil {
+				return 0, false, fmt.Errorf("store: commit dedupe hit: %w", err)
+			}
+			return existing, false, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, false, fmt.Errorf("store: dedupe lookup: %w", err)
+		}
+	}
+	seq := next
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions SET next_seq = next_seq + 1, updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2`, tenantID, sessionID); err != nil {
+		return 0, false, fmt.Errorf("store: allocate seq: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO events (tenant_id, session_id, seq, kind, payload)
-		 VALUES ($1, $2, $3, $4, $5)`, tenantID, sessionID, seq, kind, raw); err != nil {
-		return 0, fmt.Errorf("store: insert event: %w", err)
+		`INSERT INTO events (tenant_id, session_id, seq, kind, payload, dedupe_key)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))`,
+		tenantID, sessionID, seq, kind, raw, dedupeKey); err != nil {
+		return 0, false, fmt.Errorf("store: insert event: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("store: commit event: %w", err)
+		return 0, false, fmt.Errorf("store: commit event: %w", err)
 	}
-	return seq, nil
+	return seq, true, nil
 }
 
 // ErrNoSession is returned when the session does not exist for the tenant.

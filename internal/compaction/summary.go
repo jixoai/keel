@@ -12,6 +12,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,8 +27,11 @@ const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. 
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`
 
-// summarizationPrompt is the first-time summary template (pi's SUMMARIZATION_PROMPT).
-const summarizationPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+// summarizationPrompt is the summary template, verbatim from pi's
+// SUMMARIZATION_PROMPT (harness/compaction.ts:77-108). pi has no separate
+// update template: a previous summary rides in the serialized conversation as a
+// wrapped user message, and this prompt tells the model to fold it in.
+const summarizationPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work. If the conversation starts with an earlier summary, preserve its information and fold the newer messages into it.
 
 Use this EXACT format:
 
@@ -60,8 +64,11 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`
 
-// updateSummarizationPrompt incorporates new messages into an existing summary
-// (pi's UPDATE_SUMMARIZATION_PROMPT).
+// updateSummarizationPrompt incorporates new messages into an existing summary.
+// It is a keel/pigo extension with no counterpart in pi's compaction contract:
+// pi always uses summarizationPrompt and folds the prior summary through the
+// conversation transcript. It is reached only when a caller passes a non-empty
+// previousSummary to Compact (keel's loop does not).
 const updateSummarizationPrompt = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
 Update the existing structured summary with new information. RULES:
@@ -211,20 +218,28 @@ func truncateForSummary(text string, maxChars int) string {
 	return fmt.Sprintf("%s\n\n[... %d more characters truncated]", text[:maxChars], len(text)-maxChars)
 }
 
-// textOf concatenates the text blocks of a content list.
+// textOf joins the text blocks of a content list with "\n", matching pi's
+// contentText (harness/compaction.ts:413-418) and its summaryText join
+// (harness/compaction.ts:355-363).
 func textOf(content agentcore.ContentList) string {
-	var b strings.Builder
+	var parts []string
 	for _, c := range content {
 		if t, ok := c.(agentcore.TextContent); ok {
-			b.WriteString(t.Text)
+			parts = append(parts, t.Text)
 		}
 	}
-	return b.String()
+	return strings.Join(parts, "\n")
 }
 
 // serializeConversation renders messages as a plain-text transcript for the
-// summarization prompt, mirroring pi's serializeConversation: user text,
-// assistant thinking/text/tool-call lines, and truncated tool results.
+// summarization prompt, mirroring pi's serializeConversation
+// (harness/compaction.ts:386-411): user text, assistant text and tool-call
+// lines, and truncated tool results. Thinking is omitted, as pi does
+// (harness/compaction.ts:381-385): providers return summaries of the real
+// reasoning and replayed thinking is often not part of the live context, so
+// including it can make the request larger than the context it summarizes.
+// System prompts are out of band in keel (the loop carries them separately),
+// so — like pi's system-message omission — they never appear here.
 func serializeConversation(msgs []agentcore.Message) string {
 	var parts []string
 	for _, msg := range msgs {
@@ -233,20 +248,22 @@ func serializeConversation(msgs []agentcore.Message) string {
 			if s := textOf(m.Content); s != "" {
 				parts = append(parts, "[User]: "+s)
 			}
+		case agentcore.CompactionMessage:
+			// pi's checkpoint is a user message carrying the wrapped summary
+			// (harness/compaction.ts:450-455), so a second compaction sees it as
+			// an earlier summary to fold in (harness/compaction.ts:337-344).
+			if s := textOf(m.AsUserMessage().Content); s != "" {
+				parts = append(parts, "[User]: "+s)
+			}
 		case agentcore.AssistantMessage:
-			var textParts, thinkingParts, toolCalls []string
+			var textParts, toolCalls []string
 			for _, block := range m.Content {
 				switch c := block.(type) {
 				case agentcore.TextContent:
 					textParts = append(textParts, c.Text)
-				case agentcore.ThinkingContent:
-					thinkingParts = append(thinkingParts, c.Thinking)
 				case agentcore.ToolCallContent:
 					toolCalls = append(toolCalls, formatToolCall(c))
 				}
-			}
-			if len(thinkingParts) > 0 {
-				parts = append(parts, "[Assistant thinking]: "+strings.Join(thinkingParts, "\n"))
 			}
 			if len(textParts) > 0 {
 				parts = append(parts, "[Assistant]: "+strings.Join(textParts, "\n"))
@@ -287,12 +304,20 @@ func formatToolCall(c agentcore.ToolCallContent) string {
 }
 
 // GenerateSummary drives a provider stream to summarize msgs into a structured
-// checkpoint. When previousSummary is non-empty it uses the update template and
-// embeds the prior summary in <previous-summary> tags; otherwise it uses the
-// first-time template. maxTokens is bounded to min(0.8*reserveTokens,
-// model.MaxOutputTokens) as in pi. The returned text is the concatenation of
-// the assistant response's text blocks. A terminal error/aborted response is
-// surfaced as an error.
+// checkpoint, mirroring pi's summarize phase (harness/compaction.ts:161-223).
+// The request is the summarization system prompt plus one user message holding
+// the serialized conversation and the prompt; no tools are offered. maxTokens
+// is bounded to min(0.8*reserveTokens, model.MaxOutputTokens) exactly as pi
+// computes it (harness/compaction.ts:152-155).
+//
+// The response must be a clean, tool-free assistant answer; anything else
+// (error, abort, length stop, tool call, empty text) is a summarization failure
+// whose message matches pi's summaryFailure (harness/compaction.ts:355-372), and
+// no summary is produced — the caller keeps the original context.
+//
+// previousSummary is a keel/pigo extension: pi has no separate update channel
+// (the earlier summary is part of msgs as a compaction checkpoint), so callers
+// that pass "" get pi's exact prompt.
 func GenerateSummary(
 	ctx context.Context,
 	stream provider.StreamFn,
@@ -349,23 +374,52 @@ func GenerateSummary(
 
 	// Drain events so the stream's result is populated, then read the final
 	// message. Failures ride the stream as a terminal message per the provider
-	// contract, so inspect StopReason rather than only the returned error.
+	// contract, so classify the final message rather than only the returned
+	// error.
 	for range s.Events() {
 	}
 	final, resErr := s.Result(ctx)
 	if resErr != nil {
 		return "", fmt.Errorf("compaction: summary stream: %w", resErr)
 	}
-	switch final.StopReason {
-	case agentcore.StopReasonAborted:
-		return "", fmt.Errorf("compaction: summarization aborted: %s", final.ErrorMessage)
-	case agentcore.StopReasonError:
-		return "", fmt.Errorf("compaction: summarization failed: %s", final.ErrorMessage)
+	return summaryText(final)
+}
+
+// hasToolCall reports whether an assistant answer contains a tool call.
+func hasToolCall(content agentcore.ContentList) bool {
+	for _, block := range content {
+		if _, ok := block.(agentcore.ToolCallContent); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// summaryText extracts a summary from a clean assistant answer and classifies
+// every other outcome with pi's summaryText + summaryFailure contract
+// (harness/compaction.ts:355-372): only a tool-free stop with non-empty text is
+// a summary. The error texts below are pi's verbatim messages, because the
+// harness surfaces them to the user and its tests assert them.
+func summaryText(final agentcore.AssistantMessage) (string, error) {
+	switch {
+	case final.StopReason == agentcore.StopReasonError || final.StopReason == agentcore.StopReasonAborted:
+		message := final.ErrorMessage
+		if message == "" {
+			message = final.StopReason
+		}
+		return "", fmt.Errorf("Summarization failed: %s", message)
+	case final.StopReason == agentcore.StopReasonLength:
+		return "", errors.New("Summarization hit the token limit; the summary is incomplete")
+	case hasToolCall(final.Content):
+		return "", errors.New("Summarization attempted to call a tool")
+	case final.StopReason != agentcore.StopReasonEndTurn:
+		// pi requires a clean "stop"; any other stop reason is not a summary.
+		return "", errors.New("Summarization produced no text")
 	}
 
-	summary := textOf(final.Content)
-	if strings.TrimSpace(summary) == "" {
-		return "", fmt.Errorf("compaction: summarization produced empty output")
+	summary := strings.TrimSpace(textOf(final.Content))
+	if summary == "" {
+		return "", errors.New("Summarization produced no text")
 	}
 	return summary, nil
 }

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jixoai/keel/internal/agentcore"
 )
@@ -60,8 +61,9 @@ func executeToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcore
 	tool, args, prep, isError := prepareToolCall(ctx, cfg, call)
 	if prep != nil {
 		// Prepare short-circuited (unknown tool / prepare error / validation /
-		// block / abort): finalize the error result without executing.
-		return finalizeToolCall(ctx, cfg, call, *prep, isError, emit)
+		// block / abort): finalize the error result without executing. No duration
+		// is recorded because execute() never ran.
+		return finalizeToolCall(ctx, cfg, call, *prep, isError, nil, emit)
 	}
 
 	// 2. execute.
@@ -70,10 +72,10 @@ func executeToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcore
 			return errorToolResult(call, "aborted before execution: "+err.Error()), false
 		}
 	}
-	result, isError := runToolWithRetry(ctx, cfg, tool, call, args, emit)
+	result, isError, durationMs := runToolWithRetry(ctx, cfg, tool, call, args, emit)
 
 	// 3. finalize: afterToolCall overrides.
-	return finalizeToolCall(ctx, cfg, call, result, isError, emit)
+	return finalizeToolCall(ctx, cfg, call, result, isError, durationMs, emit)
 }
 
 // prepareToolCall performs the prepare phase. On success it returns the tool and
@@ -122,16 +124,20 @@ func prepareToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcore
 				if dec.Details != nil {
 					r.Details = *dec.Details
 				}
+				// A blocked result may participate in the batch early-termination
+				// rule (pi: BeforeToolCallResult.terminate).
+				if dec.Terminate {
+					terminate := true
+					r.Terminate = &terminate
+				}
 				return nil, nil, &r, true
 			}
-			// Argument rewrite (PreToolUse updatedInput): replace and re-validate
-			// so a hook cannot smuggle schema-invalid args past the tool.
+			// Argument rewrite (PreToolUse updatedInput): the hook runs after
+			// schema validation, so the rewritten input is used as-is and NOT
+			// re-validated, matching pi's beforeToolCall contract. The hook is the
+			// trust boundary; a host that wants validation enforces it in the hook.
 			if len(dec.UpdatedInput) > 0 {
 				args = dec.UpdatedInput
-				if errs := cfg.Registry.Validate(call.Name, args); len(errs) > 0 {
-					r := ValidationErrorResult(call.Name, errs)
-					return nil, nil, &r, true
-				}
 			}
 		}
 	}
@@ -147,20 +153,20 @@ func prepareToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcore
 // never retried). Retries are capped by toolRetryCap and separated by a small
 // backoff. Context cancellation short-circuits immediately: a cancelled/expired
 // outer ctx is never retried.
-func runToolWithRetry(ctx context.Context, cfg ToolExecutorConfig, tool agentcore.AgentTool, call agentcore.AgentToolCall, args json.RawMessage, emit agentcore.EmitFunc) (agentcore.AgentToolResult, bool) {
+func runToolWithRetry(ctx context.Context, cfg ToolExecutorConfig, tool agentcore.AgentTool, call agentcore.AgentToolCall, args json.RawMessage, emit agentcore.EmitFunc) (agentcore.AgentToolResult, bool, *int64) {
 	retryCap := toolRetryCap(cfg.MaxToolRetries)
 
 	var lastResult agentcore.AgentToolResult
 	var lastIsError bool
+	var lastDurationMs *int64
 	for attempt := 0; attempt <= retryCap; attempt++ {
-		result, err, isError := runTool(ctx, tool, call, args, emit)
+		result, err, isError, durationMs := runTool(ctx, tool, call, args, emit)
+		lastResult, lastIsError, lastDurationMs = result, isError, durationMs
 		if err == nil {
 			// Execute returned (result, nil): terminal success regardless of
 			// the result's own IsError flag. Done, no retry.
-			return result, isError
+			return result, isError, durationMs
 		}
-
-		lastResult, lastIsError = result, isError
 
 		// Do not retry if the outer context is done (Canceled or its deadline
 		// has passed) — a dead context means stop.
@@ -176,14 +182,16 @@ func runToolWithRetry(ctx context.Context, cfg ToolExecutorConfig, tool agentcor
 			break
 		}
 	}
-	return lastResult, lastIsError
+	return lastResult, lastIsError, lastDurationMs
 }
 
 // runTool executes the tool, recovering a panic into an error. It returns the
-// shaped error result, the raw error (nil on success), and the isError flag.
-// The raw error is surfaced so the caller can classify it for retry; on success
-// err is nil even if the result itself carries IsError semantics.
-func runTool(ctx context.Context, tool agentcore.AgentTool, call agentcore.AgentToolCall, args json.RawMessage, emit agentcore.EmitFunc) (result agentcore.AgentToolResult, rawErr error, isError bool) {
+// shaped error result, the raw error (nil on success), the isError flag, and how
+// long execute() itself took (monotonic clock, excluding retry backoff and the
+// before/after hooks). The raw error is surfaced so the caller can classify it
+// for retry; on success err is nil even if the result itself carries IsError
+// semantics. durationMs is always non-nil: execute() was called.
+func runTool(ctx context.Context, tool agentcore.AgentTool, call agentcore.AgentToolCall, args json.RawMessage, emit agentcore.EmitFunc) (result agentcore.AgentToolResult, rawErr error, isError bool, durationMs *int64) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = errorResult(fmt.Sprintf("tool %q panicked: %v", call.Name, r))
@@ -199,17 +207,21 @@ func runTool(ctx context.Context, tool agentcore.AgentTool, call agentcore.Agent
 		_ = emit(ctx, agentcore.ToolExecutionUpdateEvent{ToolCallID: call.ID, ToolName: call.Name, PartialResult: partial})
 	}
 
+	startedAt := time.Now()
 	res, err := tool.Execute(ctx, call.ID, args, onUpdate)
+	elapsed := time.Since(startedAt).Milliseconds()
+	durationMs = &elapsed
 	if err != nil {
-		return errorResult(fmt.Sprintf("tool %q failed: %v", call.Name, err)), err, true
+		return errorResult(fmt.Sprintf("tool %q failed: %v", call.Name, err)), err, true, durationMs
 	}
-	return res, nil, false
+	return res, nil, false, durationMs
 }
 
 // finalizeToolCall applies the afterToolCall hook (field-level override, no deep
 // merge), emits the tool_execution_end event, and builds the ToolResultMessage.
-// It returns the message and whether this result requests termination.
-func finalizeToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcore.AgentToolCall, result agentcore.AgentToolResult, isError bool, emit agentcore.EmitFunc) (agentcore.ToolResultMessage, bool) {
+// durationMs is nil when execute() never ran. It returns the message and whether
+// this result requests termination.
+func finalizeToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcore.AgentToolCall, result agentcore.AgentToolResult, isError bool, durationMs *int64, emit agentcore.EmitFunc) (agentcore.ToolResultMessage, bool) {
 	if cfg.AfterToolCall != nil {
 		if ov := cfg.AfterToolCall(ctx, call, result, isError); ov != nil {
 			if ov.Content != nil {
@@ -233,7 +245,7 @@ func finalizeToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcor
 	result.Content = clipToolResultContent(result.Content, cfg.MaxResultBytes)
 
 	if emit != nil {
-		_ = emit(ctx, agentcore.ToolExecutionEndEvent{ToolCallID: call.ID, ToolName: call.Name, Result: result, IsError: isError})
+		_ = emit(ctx, agentcore.ToolExecutionEndEvent{ToolCallID: call.ID, ToolName: call.Name, Result: result, IsError: isError, DurationMs: durationMs})
 	}
 
 	terminate := result.Terminate != nil && *result.Terminate
@@ -244,6 +256,7 @@ func finalizeToolCall(ctx context.Context, cfg ToolExecutorConfig, call agentcor
 		Content:    result.Content,
 		Details:    result.Details,
 		IsError:    isError,
+		DurationMs: durationMs,
 	}, terminate
 }
 

@@ -7,10 +7,14 @@ package compaction
 import "github.com/jixoai/keel/internal/agentcore"
 
 // CutPointResult describes the cut selected for compaction, mirroring pi's
-// CutPointResult (adapted to pigo's flat message list).
+// CutPointResult (adapted to keel's flat message list).
 type CutPointResult struct {
 	// FirstKeptIndex is the index of the first message retained after
-	// compaction; everything before it is summarized.
+	// compaction; everything before it is summarized. Zero means there is no
+	// cut: pi's selectCut returns undefined when the retained budget never fills
+	// or when only a previous summary marker would be summarized
+	// (harness/compaction.ts:285-303), and a cut at index zero has nothing to
+	// summarize either.
 	FirstKeptIndex int
 	// TurnStartIndex is the index of the user message that starts the turn the
 	// cut falls inside, or -1 when the cut lands on a clean turn boundary.
@@ -19,28 +23,60 @@ type CutPointResult struct {
 	IsSplitTurn bool
 }
 
-// isValidCutPoint reports whether a message may serve as a cut point. A cut may
-// land on a user or assistant message but never on a toolResult, because a
-// toolResult must stay attached to the toolCall that produced it (pi semantics).
-func isValidCutPoint(msg agentcore.Message) bool {
-	switch msg.Role() {
-	case agentcore.RoleUser, agentcore.RoleAssistant:
-		return true
-	default: // toolResult and any custom kinds are not cuttable.
+// isValidCutPoint reports whether the message at idx may head the kept range,
+// mirroring pi's isCandidate (harness/compaction.ts:305-325). A cut may land on
+// a user or assistant message but never on a toolResult (it must stay attached
+// to the toolCall that produced it); nor on an error/aborted assistant answer,
+// which pi drops from the context view before selecting a cut.
+func isValidCutPoint(msgs []agentcore.Message, idx int) bool {
+	switch msgs[idx].Role() {
+	case agentcore.RoleUser:
+		// pi refuses a user entry that a result of the preceding assistant's
+		// calls still follows (harness/compaction.ts:309-316, 317-324).
+		return !hasDanglingToolResult(msgs, idx)
+	case agentcore.RoleAssistant:
+		return !excludedFromContext(msgs[idx])
+	default: // toolResult, compaction checkpoints, and custom kinds are not cuttable.
 		return false
 	}
 }
 
-// findValidCutPoints returns the indices of all messages that may serve as cut
-// points, in ascending order.
-func findValidCutPoints(msgs []agentcore.Message) []int {
-	var pts []int
-	for i, m := range msgs {
-		if isValidCutPoint(m) {
-			pts = append(pts, i)
+// hasDanglingToolResult reports whether a toolResult answering the closest
+// preceding assistant's calls still follows idx before the next assistant
+// message. Cutting there would strand the result away from its call, so pi
+// moves the cut to the next assistant (harness/compaction.ts:317-324).
+func hasDanglingToolResult(msgs []agentcore.Message, idx int) bool {
+	calls := map[string]struct{}{}
+	for before := idx - 1; before >= 0; before-- {
+		a, ok := msgs[before].(agentcore.AssistantMessage)
+		// pi's contributions drop error/aborted answers, so the nearest visible
+		// assistant is what its backward scan finds.
+		if !ok || excludedFromContext(a) {
+			continue
+		}
+		for _, call := range a.ToolCalls() {
+			calls[call.ID] = struct{}{}
+		}
+		break
+	}
+	if len(calls) == 0 {
+		return false
+	}
+	for after := idx; after < len(msgs); after++ {
+		switch m := msgs[after].(type) {
+		case agentcore.AssistantMessage:
+			// A later visible assistant ends the turn this user entry steered:
+			// the result cannot belong to the preceding call any more.
+			if after > idx && !excludedFromContext(m) {
+				return false
+			}
+		case agentcore.ToolResultMessage:
+			if _, ok := calls[m.ToolCallID]; ok {
+				return true
+			}
 		}
 	}
-	return pts
+	return false
 }
 
 // findTurnStartIndex scans backwards from idx to find the user message that
@@ -55,46 +91,92 @@ func findTurnStartIndex(msgs []agentcore.Message, idx int) int {
 }
 
 // FindCutPoint finds the compaction cut that keeps approximately
-// keepRecentTokens worth of the most recent messages. It accumulates token
-// estimates from the newest message backwards; once the retained budget is
-// reached it snaps to the nearest valid cut point at or after that message,
-// never splitting a toolCall from its toolResult. This mirrors pi's findCutPoint.
+// keepRecentTokens worth of the most recent messages. It is the flat-list form
+// of pi's selectCut (harness/compaction.ts:285-303): it accumulates token
+// estimates from the newest message backwards, and once the retained budget is
+// reached snaps to the first valid cut point at or after that message (or the
+// last valid cut point when the budget is reached inside the final tool
+// result), never splitting a toolCall from its toolResult.
 //
-// When no valid cut point exists, it keeps everything (FirstKeptIndex 0).
+// It returns a zero FirstKeptIndex when no cut exists: the budget is never
+// reached (nothing is old enough to compact) or the only messages before the
+// cut would be empty/excluded ones.
 func FindCutPoint(msgs []agentcore.Message, keepRecentTokens int) CutPointResult {
-	cutPoints := findValidCutPoints(msgs)
-	if len(cutPoints) == 0 {
-		return CutPointResult{FirstKeptIndex: 0, TurnStartIndex: -1, IsSplitTurn: false}
+	return findCutPoint(msgs, keepRecentTokens, 0)
+}
+
+// findCutPoint is FindCutPoint with a lower bound: only messages at or after
+// from may be candidates or count toward the retained budget. Compact passes
+// the index just past the previous checkpoint, because pi's view starts at its
+// head marker (harness/compaction.ts:287).
+func findCutPoint(msgs []agentcore.Message, keepRecentTokens, from int) CutPointResult {
+	noCut := CutPointResult{FirstKeptIndex: 0, TurnStartIndex: -1, IsSplitTurn: false}
+	if from < 0 {
+		from = 0
 	}
 
-	// Default to the earliest valid cut point (keep as much as possible) when
-	// the retained budget is never reached.
-	cutIndex := cutPoints[0]
+	var candidates []int
+	for i := from; i < len(msgs); i++ {
+		if isValidCutPoint(msgs, i) {
+			candidates = append(candidates, i)
+		}
+	}
+	if len(candidates) == 0 {
+		return noCut
+	}
 
-	accumulated := 0
-	for i := len(msgs) - 1; i >= 0; i-- {
-		accumulated += EstimateTokens(msgs[i])
-		if accumulated >= keepRecentTokens {
-			// Snap to the nearest valid cut point at or after i, so the kept
-			// window starts on a cuttable boundary.
-			for _, c := range cutPoints {
-				if c >= i {
-					cutIndex = c
-					break
-				}
+	cut := -1
+	kept := 0
+	for i := len(msgs) - 1; i >= from; i-- {
+		// pi's view drops error/aborted answers before summing contributions
+		// (harness/compaction.ts:305), so they add no tokens.
+		if !excludedFromContext(msgs[i]) {
+			kept += EstimateTokens(msgs[i])
+		}
+		if kept < keepRecentTokens {
+			continue
+		}
+		// Snap to the first candidate at or after this message; when the budget
+		// is reached inside trailing tool results, keep them with their call by
+		// cutting at the last candidate (pi: candidates.at(-1)).
+		for _, c := range candidates {
+			if c >= i {
+				cut = c
+				break
 			}
+		}
+		if cut < 0 {
+			cut = candidates[len(candidates)-1]
+		}
+		break
+	}
+	if cut < 0 {
+		// The budget never filled: everything is recent enough to keep.
+		return noCut
+	}
+
+	// pi requires a real message before the cut; a range holding only an
+	// earlier summary marker (or nothing) is not worth compacting
+	// (harness/compaction.ts:301-302).
+	hasContent := false
+	for i := from; i < cut; i++ {
+		if !excludedFromContext(msgs[i]) {
+			hasContent = true
 			break
 		}
 	}
+	if !hasContent {
+		return noCut
+	}
 
-	cutOnUser := msgs[cutIndex].Role() == agentcore.RoleUser
+	cutOnUser := msgs[cut].Role() == agentcore.RoleUser
 	turnStart := -1
 	if !cutOnUser {
-		turnStart = findTurnStartIndex(msgs, cutIndex)
+		turnStart = findTurnStartIndex(msgs, cut)
 	}
 
 	return CutPointResult{
-		FirstKeptIndex: cutIndex,
+		FirstKeptIndex: cut,
 		TurnStartIndex: turnStart,
 		IsSplitTurn:    !cutOnUser && turnStart != -1,
 	}

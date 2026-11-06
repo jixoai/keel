@@ -5,27 +5,51 @@
 
 // This file implements pi's two-layer agent loop (US-006, FR-1). It strings
 // together streaming assistant responses, batch tool execution, and the loop's
-// six hooks with control flow kept faithful to pi's runLoop:
+// hooks with control flow kept faithful to pi's runLoop
+// (packages/agent/src/agent-loop.ts, pin 55a5c69):
 //
 //   - Inner loop: one turn = stream an assistant response → execute its tool
 //     calls → feed the results back, repeating until an assistant message has no
-//     tool calls (a natural turn end).
+//     tool calls (a natural turn end) or every tool result asks to terminate.
 //   - Outer loop: after the inner loop settles, pull getFollowUpMessages; if any
 //     are returned they become the next pending input and the inner loop runs
-//     again, otherwise the run ends.
+//     again, otherwise the run settles.
 //
-// Per-turn hooks after each turn_end: getSteeringMessages (pulled after tool
-// execution and injected before the next turn), prepareNextTurn (may swap
-// context / model / thinkingLevel), shouldStopAfterTurn (true ⇒ agent_end +
-// exit). Two stop reasons are handled specially: length (the response was
-// truncated by the token cap) fails every tool call so the model resends
-// (failToolCallsFromTruncatedMessage); error / aborted end the run immediately.
+// Queue draining (pi's three drain points): getSteeringMessages is polled once
+// before the first request, after every completed turn, and again after
+// PrepareNextTurn when nothing was pending. Queued messages are appended right
+// before the next provider request. prepareNextTurn runs after turn_end when the
+// loop will continue and may swap context / model / thinkingLevel;
+// prepareRequest runs immediately before every request (including the first)
+// and may replace the request state, but never polls queues itself.
+// shouldStopAfterTurn (Keel's finishTurn-action-end equivalent) is consulted
+// after turn_end and before the post-turn steering poll.
 //
-// agentLoop starts a fresh run from a prompt already appended to the context.
+// Two stop reasons are handled specially: length (the response was truncated by
+// the token cap) fails every tool call with an error result and emits the tool
+// execution events so the model resends (failToolCallsFromTruncatedMessage);
+// error / aborted end the run immediately.
+//
+// Lifecycle: agent_start … agent_end exactly as pi's core AgentEvent
+// (packages/agent/src/types.ts). The settle lifecycle (agent_before_settle /
+// agent_settled) belongs to pi's coding-agent session/extension layer, not the
+// kernel, so it is opt-in via RunConfig.EmitSettleEvents (default off).
+//
+// Deliberate divergence from pi's core loop: Keel does not emit message_start /
+// message_end lifecycle events for prompt, steering/follow-up, or tool-result
+// messages (only assistant stream messages get message_* events). The transcript
+// and turn_end.ToolResults carry those messages instead. Hosts that persist on
+// message_end (internal/agent) depend on this contract, and pi parity for the
+// event *names and order* of the agent/turn/tool lifecycle is unaffected.
+//
+// agentLoop starts a fresh run from a prompt already appended to the context;
+// StartContinue resumes from an existing context without a new prompt.
 package loop
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jixoai/keel/internal/agentcore"
@@ -48,6 +72,11 @@ type TurnUpdate struct {
 	Tools         *[]agentcore.AgentTool
 	Model         *string
 	ThinkingLevel *agentcore.ThinkingLevel
+	// AppendMessages are appended to the context right before the next provider
+	// request (after the update is applied, alongside any queued steering
+	// messages). Mirrors pi's AgentLoopTurnUpdate.messages: "messages to append
+	// before the next provider request".
+	AppendMessages []agentcore.AgentMessage
 }
 
 // StopDecision is the result of the OnStop seam. Block=true prevents the run
@@ -57,6 +86,32 @@ type TurnUpdate struct {
 type StopDecision struct {
 	Block    bool
 	Guidance string
+}
+
+// PrepareRequestContext is the runtime state handed to PrepareRequest
+// immediately before a conversational provider request: the context the request
+// will be built from (pending messages already appended), the model id, and the
+// thinking level. Mirrors pi's PrepareRequestContext.
+type PrepareRequestContext struct {
+	Context       *agentcore.AgentContext
+	Model         string
+	ThinkingLevel agentcore.ThinkingLevel
+}
+
+// RequestUpdate is the optional replacement request state returned by
+// PrepareRequest. Any non-nil field replaces the runtime value for this and
+// later requests (pi's AgentRequestUpdate). Message lists are not replaceable
+// here — use Context for a full replacement (pi's prepareRequest returns a
+// context, not messages).
+type RequestUpdate struct {
+	// Context, when non-nil, replaces the system prompt, messages, and tools the
+	// next request is built from.
+	Context *agentcore.AgentContext
+	// Model, when non-nil, replaces the model id for this and later requests.
+	Model *string
+	// ThinkingLevel, when non-nil, replaces the reasoning effort for this and
+	// later requests.
+	ThinkingLevel *agentcore.ThinkingLevel
 }
 
 // RunConfig is the full configuration for a loop run: the per-turn streaming
@@ -72,15 +127,49 @@ type RunConfig struct {
 	// message with no tool calls). Returning messages continues the outer loop
 	// with them as the next input; returning none ends the run (FR-9).
 	GetFollowUpMessages func(ctx context.Context, agentCtx *agentcore.AgentContext) []agentcore.AgentMessage
-	// GetSteeringMessages is pulled after each turn's tool execution and injected
-	// before the next turn (pi per-turn semantics, FR-8).
+	// GetSteeringMessages is polled by the loop at pi's three drain points: once
+	// before the first request, after every completed turn, and again after
+	// PrepareNextTurn when nothing was pending. Returned messages are appended to
+	// the context right before the next provider request (pi per-turn semantics,
+	// FR-8).
 	GetSteeringMessages func(ctx context.Context) []agentcore.AgentMessage
-	// PrepareNextTurn runs after each turn_end and may swap context / model /
-	// thinkingLevel for the next turn (FR-6).
+	// PrepareNextTurn runs after a completed turn when the loop is about to start
+	// another one (after turn_end, before steering is polled and before the next
+	// turn_start) and may swap context / model / thinkingLevel for the next turn
+	// (FR-6).
 	PrepareNextTurn func(ctx context.Context, agentCtx *agentcore.AgentContext) *TurnUpdate
+	// PrepareRequest runs immediately before every conversational provider
+	// request, including the first. Pending (steering/follow-up) messages have
+	// already been appended to the context when it runs. The returned update
+	// replaces the context/model/thinkingLevel for this and later requests. It
+	// must not poll the steering queue — the loop owns queue draining (pi's
+	// PrepareRequest contract).
+	PrepareRequest func(ctx context.Context, req PrepareRequestContext) *RequestUpdate
 	// ShouldStopAfterTurn runs after each turn_end; true ends the run with an
-	// agent_end event (FR-7).
+	// agent_end event (FR-7). It is consulted before the post-turn steering poll,
+	// so a stop skips queue draining (pi's finishTurn action "end").
 	ShouldStopAfterTurn func(ctx context.Context, agentCtx *agentcore.AgentContext) bool
+
+	// OnBeforeSettle, when set, is consulted at the settle boundary right after
+	// agent_before_settle is emitted and before agent_settled. Returning true
+	// requests exactly one more turn over the current context (the boundary may
+	// have appended messages/entries); the loop then starts a fresh low-level run
+	// (agent_start) instead of settling. Mirrors pi's actionable
+	// agent_before_settle boundary.
+	//
+	// This hook only runs when EmitSettleEvents is true. It is a host-level
+	// extension: pi's core AgentEvent has no settle events (they live in
+	// packages/coding-agent's session/extension layer).
+	OnBeforeSettle func(ctx context.Context, agentCtx *agentcore.AgentContext) bool
+
+	// EmitSettleEvents enables the host-level settle lifecycle pair
+	// (agent_before_settle then agent_settled) after agent_end. It defaults to
+	// false because pi's core AgentEvent (packages/agent/src/types.ts) ends at
+	// agent_end; the settle events belong to pi's coding-agent session/extension
+	// layer (extensions.md "agent_start / agent_end / agent_before_settle /
+	// agent_settled"). A host that mirrors that layer opts in here. An aborted
+	// run skips agent_before_settle and goes straight to agent_settled.
+	EmitSettleEvents bool
 
 	// OnStop, when set, is consulted right before the run would end naturally (no
 	// tool calls and no follow-up messages). Returning a decision with Block=true
@@ -130,23 +219,52 @@ func StartRun(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConf
 	return agentLoop(ctx, agentCtx, cfg)
 }
 
+// Continuation guards, worded exactly like pi's agentLoopContinue so a caller
+// (or an operator reading a log) sees the same contract.
+var (
+	// ErrNoMessagesToContinue is returned by StartContinue for an empty context.
+	ErrNoMessagesToContinue = errors.New("Cannot continue: no messages in context")
+	// ErrContinueFromAssistant is returned by StartContinue when the last context
+	// message is an assistant message — the model would have nothing to answer.
+	ErrContinueFromAssistant = errors.New("Cannot continue from message role: assistant")
+)
+
+// StartContinue is the continuation entry point (pi's agentLoopContinue): it
+// resumes from the existing context without a new prompt, so no prompt/user
+// message events are emitted and the run result carries only the messages
+// produced by this run. The caller is responsible for the context's last message
+// converting to a user or toolResult message through ConvertToLlm; the role
+// guard below is the same one pi applies.
+func StartContinue(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfig) (*LoopEventStream, error) {
+	if agentCtx == nil || len(agentCtx.Messages) == 0 {
+		return nil, ErrNoMessagesToContinue
+	}
+	if agentCtx.Messages[len(agentCtx.Messages)-1].Role() == agentcore.RoleAssistant {
+		return nil, ErrContinueFromAssistant
+	}
+	return agentLoop(ctx, agentCtx, cfg), nil
+}
+
 // runLoop is the producer: it drives the two-layer loop, emitting events onto
 // stream and setting the stream result to the messages produced during the run.
 func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfig, stream *LoopEventStream) {
-	startIdx := len(agentCtx.Messages)
+	// produced is this invocation's newMessages (pi's newMessages): the messages
+	// the loop appended to the transcript. It is tracked explicitly rather than
+	// sliced off the context so a hook that replaces the context wholesale
+	// (prepareRequest / prepareNextTurn pruning) cannot corrupt the run result.
+	var produced []agentcore.AgentMessage
+	snapshot := func() []agentcore.AgentMessage {
+		if len(produced) == 0 {
+			return nil
+		}
+		out := make([]agentcore.AgentMessage, len(produced))
+		copy(out, produced)
+		return out
+	}
 	// tel accumulates structured telemetry (turn count, per-tool durations,
 	// truncation count, compaction count, latest context-utilization ratio) from
 	// the events emitted below, surfaced as a TelemetryEvent at run end.
 	tel := newTelemetry()
-	// newMessages returns the messages appended since the run began.
-	newMessages := func() []agentcore.AgentMessage {
-		if len(agentCtx.Messages) <= startIdx {
-			return nil
-		}
-		out := make([]agentcore.AgentMessage, len(agentCtx.Messages)-startIdx)
-		copy(out, agentCtx.Messages[startIdx:])
-		return out
-	}
 	emit := func(ev agentcore.AgentEvent) error {
 		tel.observe(ev)
 		return stream.Emit(ctx, ev)
@@ -159,16 +277,35 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 		return stream.Emit(c, ev)
 	}
 
-	// finish emits the telemetry summary then agent_end (unless suppressed by a
-	// prior emit error), records the run result, and closes the stream exactly
-	// once. Telemetry is emitted first so a consumer sees the run's structured
-	// metrics immediately before the terminal event.
-	finish := func() {
+	// outcome records how the low-level run ended; it rides agent_before_settle
+	// and decides whether that boundary is emitted at all (an aborted run skips
+	// it, going straight from agent_end to agent_settled — pi's rule).
+	outcome := agentcore.SettleOutcomeCompleted
+
+	// finalizeRun ends the current low-level run: the telemetry summary first (so
+	// a consumer sees the run's metrics immediately before the terminal event),
+	// then agent_end carrying everything produced so far.
+	finalizeRun := func() {
 		_ = emit(tel.summary())
-		msgs := newMessages()
-		_ = emit(agentcore.AgentEndEvent{Messages: msgs})
+		_ = emit(agentcore.AgentEndEvent{Messages: snapshot()})
+	}
+	// settle records the result and closes the stream exactly once, emitting the
+	// host-level settle lifecycle pair first when enabled (not part of pi's core
+	// AgentEvent).
+	settle := func() {
+		if cfg.EmitSettleEvents {
+			if outcome != agentcore.SettleOutcomeAborted {
+				_ = emit(agentcore.AgentBeforeSettleEvent{Outcome: outcome})
+			}
+			_ = emit(agentcore.AgentSettledEvent{Aborted: outcome == agentcore.SettleOutcomeAborted})
+		}
+		msgs := snapshot()
 		stream.SetResult(msgs)
 		stream.Close()
+	}
+	finish := func() {
+		finalizeRun()
+		settle()
 	}
 
 	if err := emit(agentcore.AgentStartEvent{SessionID: cfg.SessionID}); err != nil {
@@ -176,90 +313,191 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 		return
 	}
 
-	for { // outer loop: pending / follow-up messages
-		for { // inner loop: turns until no tool calls
+	// pi polls the steering queue once before the first request: the user may
+	// have typed while the run was being prepared.
+	pending := pollSteering(ctx, &cfg)
+	// prepared holds messages a PrepareNextTurn update asked to append; they are
+	// injected right before the next request, ahead of queued steering messages
+	// (pi's [...preparedMessages, ...pendingMessages]).
+	var prepared []agentcore.AgentMessage
+	// lastTurnDone mirrors pi's lastCompletedTurn: prepareNextTurn and the extra
+	// steering poll only run once a turn has completed. It is reset when a settle
+	// continuation starts a fresh low-level run.
+	lastTurnDone := false
+
+	// settleOrContinue emits agent_end and, when EmitSettleEvents is enabled, the
+	// host-level settle boundary. An aborted run skips agent_before_settle and
+	// goes straight to agent_settled. A boundary hook may request exactly one more
+	// turn, in which case a fresh low-level run is started (agent_start again,
+	// like pi's host re-invoking runAgentLoop) and done is false.
+	settleOrContinue := func() (done bool) {
+		finalizeRun()
+		if cfg.EmitSettleEvents {
+			if outcome == agentcore.SettleOutcomeAborted {
+				_ = emit(agentcore.AgentSettledEvent{Aborted: true})
+				msgs := snapshot()
+				stream.SetResult(msgs)
+				stream.Close()
+				return true
+			}
+			_ = emit(agentcore.AgentBeforeSettleEvent{Outcome: outcome})
+			if cfg.OnBeforeSettle != nil {
+				before := len(agentCtx.Messages)
+				if cfg.OnBeforeSettle(ctx, agentCtx) {
+					// Anything the boundary appended is part of this run's result.
+					if before < len(agentCtx.Messages) {
+						produced = append(produced, agentCtx.Messages[before:]...)
+					}
+					if err := emit(agentcore.AgentStartEvent{SessionID: cfg.SessionID}); err != nil {
+						_ = emit(agentcore.AgentSettledEvent{Aborted: false})
+						msgs := snapshot()
+						stream.SetResult(msgs)
+						stream.Close()
+						return true
+					}
+					outcome = agentcore.SettleOutcomeCompleted
+					lastTurnDone = false
+					pending = pollSteering(ctx, &cfg)
+					return false
+				}
+			}
+			_ = emit(agentcore.AgentSettledEvent{Aborted: false})
+		}
+		msgs := snapshot()
+		stream.SetResult(msgs)
+		stream.Close()
+		return true
+	}
+
+	for { // outer loop: pending / follow-up messages and settle continuations
+		hasMoreToolCalls := true
+		for hasMoreToolCalls || len(pending) > 0 { // inner loop: turns until no tool calls
+			if lastTurnDone {
+				// pi applies prepareNextTurn first (it can be long-running, e.g.
+				// compaction) and then picks up steering queued while it ran. Only
+				// poll when nothing was already pending: otherwise "one-at-a-time"
+				// mode would deliver two messages in the same turn.
+				if cfg.PrepareNextTurn != nil {
+					if upd := cfg.PrepareNextTurn(ctx, agentCtx); upd != nil {
+						applyTurnUpdate(agentCtx, &cfg, upd)
+						prepared = upd.AppendMessages
+					}
+				}
+				if len(pending) == 0 {
+					pending = pollSteering(ctx, &cfg)
+				}
+			}
 			if err := emit(agentcore.TurnStartEvent{}); err != nil {
 				finish()
 				return
 			}
+			// Inject messages the previous turn's update asked to append, then the
+			// queued steering messages, before the next provider request.
+			for _, m := range prepared {
+				agentCtx.Messages = append(agentCtx.Messages, m)
+				produced = append(produced, m)
+			}
+			prepared = nil
+			for _, m := range pending {
+				agentCtx.Messages = append(agentCtx.Messages, m)
+				produced = append(produced, m)
+			}
+			pending = nil
+
+			// pi's prepareRequest: every conversational request, including the
+			// first, after pending messages were appended. It may replace the
+			// context/model/thinkingLevel and must not poll queues.
+			applyPrepareRequest(ctx, agentCtx, &cfg)
 
 			assistant, err := streamAssistantResponse(ctx, agentCtx, cfg.LoopConfig, emitFrom)
 			if err != nil {
 				// emit was cancelled mid-stream; end the run.
+				if ctx.Err() != nil {
+					outcome = agentcore.SettleOutcomeAborted
+				}
 				finish()
 				return
 			}
+			produced = append(produced, assistant)
 
+			var toolResults []agentcore.ToolResultMessage
 			switch assistant.StopReason {
 			case agentcore.StopReasonLength:
 				// Truncated by the token cap: fail every tool call so the model
-				// resends, then continue feeding back.
-				toolResults := failToolCallsFromTruncatedMessage(agentCtx, assistant)
-				if err := emit(agentcore.TurnEndEvent{Message: assistant, ToolResults: toolResults}); err != nil {
-					finish()
-					return
-				}
-				if afterTurn(ctx, agentCtx, &cfg, true, emit, tel) {
-					finish()
-					return
-				}
-				continue
+				// resends, then keep looping (pi sets hasMoreToolCalls = true for a
+				// non-terminating batch).
+				toolResults = failToolCallsFromTruncatedMessage(ctx, agentCtx, assistant, emitFrom)
+				hasMoreToolCalls = len(toolResults) > 0
+				produced = appendToolResults(produced, toolResults)
 			case agentcore.StopReasonError, agentcore.StopReasonAborted:
 				// Terminal failure: emit the turn end and stop. A failure before
 				// the stream existed never back-filled the context, so record
 				// the terminal message before finishing.
+				if assistant.StopReason == agentcore.StopReasonAborted || ctx.Err() != nil {
+					outcome = agentcore.SettleOutcomeAborted
+				} else {
+					outcome = agentcore.SettleOutcomeError
+				}
 				if len(agentCtx.Messages) == 0 || agentCtx.Messages[len(agentCtx.Messages)-1].Role() != agentcore.RoleAssistant {
 					agentCtx.Messages = append(agentCtx.Messages, assistant)
 				}
 				_ = emit(agentcore.TurnEndEvent{Message: assistant})
 				finish()
 				return
+			default:
+				calls := toAgentToolCalls(assistant.ToolCalls())
+				hasMoreToolCalls = false
+				if len(calls) > 0 {
+					// Inject the run-level emitter into the context so tools
+					// (notably the generic task tool) can retrieve it via
+					// ProgressEmitterFromContext and surface a dispatched
+					// sub-agent's progress up this parent event stream. emitFrom
+					// feeds the parent stream and is run-scoped, so a child's
+					// SubAgentProgressEvent lands on the right run's stream.
+					toolCtx := agentcore.WithProgressEmitter(ctx, emitFrom)
+					var allTerminate bool
+					toolResults, allTerminate = agenttool.ExecuteToolCalls(toolCtx, cfg.Batch, calls, emitFrom)
+					// The batch stops the loop only when every finalized result
+					// asks to terminate (pi's shouldTerminateToolBatch).
+					hasMoreToolCalls = !allTerminate
+					for _, tr := range toolResults {
+						agentCtx.Messages = append(agentCtx.Messages, tr)
+					}
+					produced = appendToolResults(produced, toolResults)
+				}
 			}
 
-			calls := toAgentToolCalls(assistant.ToolCalls())
-			if len(calls) == 0 {
-				// Natural turn end: no tools to run.
-				if err := emit(agentcore.TurnEndEvent{Message: assistant}); err != nil {
-					finish()
-					return
-				}
-				if afterTurn(ctx, agentCtx, &cfg, false, emit, tel) {
-					finish()
-					return
-				}
-				break // exit inner loop → consult follow-up messages
-			}
-
-			// Inject the run-level emitter into the context so tools (notably the
-			// generic task tool) can retrieve it via ProgressEmitterFromContext and
-			// surface a dispatched sub-agent's progress up this parent event stream.
-			// emitFrom feeds the parent stream and is run-scoped, so a child's
-			// SubAgentProgressEvent lands on the right run's stream.
-			toolCtx := agentcore.WithProgressEmitter(ctx, emitFrom)
-			toolResults, allTerminate := agenttool.ExecuteToolCalls(toolCtx, cfg.Batch, calls, emitFrom)
-			for _, tr := range toolResults {
-				agentCtx.Messages = append(agentCtx.Messages, tr)
-			}
 			if err := emit(agentcore.TurnEndEvent{Message: assistant, ToolResults: toolResults}); err != nil {
 				finish()
 				return
 			}
-			if allTerminate {
-				// Every tool asked to terminate the run.
+			lastTurnDone = true
+
+			// Keel extension: auto-compaction at the turn boundary (pi's host does
+			// it between runs). Record utilization after any compaction so the
+			// telemetry summary reports the current used/window figure.
+			maybeAutoCompact(ctx, agentCtx, &cfg, emit, tel)
+			if tel != nil && cfg.ContextWindow > 0 {
+				tokens := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
+				tel.recordContext(tokens, cfg.ContextWindow)
+			}
+			// Stop hook, consulted before queue draining: a stop skips the post-turn
+			// steering poll (pi's finishTurn action "end").
+			if cfg.ShouldStopAfterTurn != nil && cfg.ShouldStopAfterTurn(ctx, agentCtx) {
 				finish()
 				return
 			}
-			if afterTurn(ctx, agentCtx, &cfg, true, emit, tel) {
-				finish()
-				return
-			}
-			// Feed the tool results back into the next turn.
+			// Queue the next input: steering delivered after the turn, then the
+			// inner loop continues when tools still need a follow-up request.
+			pending = pollSteering(ctx, &cfg)
 		}
 
-		// Inner loop settled: consult follow-up messages.
+		// Inner loop settled: consult follow-up messages. They become the next
+		// pending input (not appended directly) so prepareNextTurn sees the same
+		// context pi would show it.
 		if cfg.GetFollowUpMessages != nil {
 			if follow := cfg.GetFollowUpMessages(ctx, agentCtx); len(follow) > 0 {
-				agentCtx.Messages = append(agentCtx.Messages, follow...)
+				pending = follow
 				continue // outer loop with the follow-ups as new input
 			}
 		}
@@ -270,49 +508,60 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 		if cfg.OnStop != nil {
 			if dec := cfg.OnStop(ctx, agentCtx); dec != nil && dec.Block {
 				if dec.Guidance != "" {
-					agentCtx.Messages = append(agentCtx.Messages, agentcore.UserMessage{
+					guidance := agentcore.UserMessage{
 						RoleField: agentcore.RoleUser,
 						Content:   agentcore.ContentList{agentcore.NewTextContent(dec.Guidance)},
-					})
+					}
+					agentCtx.Messages = append(agentCtx.Messages, guidance)
+					produced = append(produced, guidance)
 				}
 				continue // outer loop: keep the run alive
 			}
 		}
-		break
+		// Settle: agent_end, then agent_before_settle / agent_settled. The boundary
+		// may request one more turn over the (possibly extended) context.
+		if settleOrContinue() {
+			return
+		}
 	}
-
-	finish()
 }
 
-// afterTurn runs the per-turn hooks after a turn_end. When hadToolExecution is
-// true it first pulls getSteeringMessages and injects them before the next turn
-// (pi per-turn semantics). It then applies prepareNextTurn, runs auto-compaction
-// when the context has outgrown its window, and finally consults
-// shouldStopAfterTurn, returning true when the run should end.
-func afterTurn(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, hadToolExecution bool, emit func(agentcore.AgentEvent) error, tel *telemetry) (stop bool) {
-	if hadToolExecution && cfg.GetSteeringMessages != nil {
-		if steer := cfg.GetSteeringMessages(ctx); len(steer) > 0 {
-			agentCtx.Messages = append(agentCtx.Messages, steer...)
-		}
+// pollSteering drains the steering queue once; nil when the hook is unset
+// (pi's `config.getSteeringMessages?.() || []`).
+func pollSteering(ctx context.Context, cfg *RunConfig) []agentcore.AgentMessage {
+	if cfg.GetSteeringMessages == nil {
+		return nil
 	}
-	if cfg.PrepareNextTurn != nil {
-		if upd := cfg.PrepareNextTurn(ctx, agentCtx); upd != nil {
-			applyTurnUpdate(agentCtx, cfg, upd)
-		}
+	return cfg.GetSteeringMessages(ctx)
+}
+
+// applyPrepareRequest runs the prepareRequest hook and applies its replacement
+// state. A non-nil Context replaces the system prompt, messages, and tools the
+// request is built from; Model / ThinkingLevel replace the runtime values for
+// this and later requests. The hook never polls queues.
+func applyPrepareRequest(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig) {
+	if cfg.PrepareRequest == nil {
+		return
 	}
-	maybeAutoCompact(ctx, agentCtx, cfg, emit, tel)
-	// Record the latest context-utilization ratio once the turn has settled (after
-	// any compaction), so the telemetry summary reports the current used/window
-	// figure. This runs even when auto-compaction is disabled so utilization is
-	// still observable whenever the context window is known.
-	if tel != nil && cfg.ContextWindow > 0 {
-		tokens := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
-		tel.recordContext(tokens, cfg.ContextWindow)
+	upd := cfg.PrepareRequest(ctx, PrepareRequestContext{
+		Context:       agentCtx,
+		Model:         cfg.Model,
+		ThinkingLevel: cfg.ThinkingLevel,
+	})
+	if upd == nil {
+		return
 	}
-	if cfg.ShouldStopAfterTurn != nil {
-		return cfg.ShouldStopAfterTurn(ctx, agentCtx)
+	if upd.Context != nil {
+		agentCtx.SystemPrompt = upd.Context.SystemPrompt
+		agentCtx.Messages = upd.Context.Messages
+		agentCtx.Tools = upd.Context.Tools
 	}
-	return false
+	if upd.Model != nil {
+		cfg.Model = *upd.Model
+	}
+	if upd.ThinkingLevel != nil {
+		cfg.ThinkingLevel = *upd.ThinkingLevel
+	}
 }
 
 // maybeAutoCompact checks whether the context has outgrown its usable window and,
@@ -328,7 +577,7 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 	before := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
 	// Record pre-compaction utilization so the ratio reflects the peak that
 	// triggered (or nearly triggered) compaction even when the summary is read
-	// mid-run. afterTurn overwrites it with the post-settle figure.
+	// mid-run. The turn boundary overwrites it with the post-settle figure.
 	if tel != nil {
 		tel.recordContext(before, cfg.ContextWindow)
 	}
@@ -402,6 +651,8 @@ func runCompaction(ctx context.Context, msgs agentcore.MessageList, cfg *RunConf
 
 // applyTurnUpdate applies a non-nil TurnUpdate to the mutable loop state: any
 // set field replaces the current context / config value for the next turn.
+// AppendMessages is not applied here — the caller injects it right before the
+// next provider request so it lands in the transcript at pi's injection point.
 func applyTurnUpdate(agentCtx *agentcore.AgentContext, cfg *RunConfig, upd *TurnUpdate) {
 	if upd.Messages != nil {
 		agentCtx.Messages = *upd.Messages
@@ -422,29 +673,55 @@ func applyTurnUpdate(agentCtx *agentcore.AgentContext, cfg *RunConfig, upd *Turn
 
 // failToolCallsFromTruncatedMessage produces an error tool-result message for
 // every tool call in a truncated (stopReason=length) assistant message, telling
-// the model the response was cut off and to resend. The results are appended to
-// the context and returned. Mirrors pi's failToolCallsFromTruncatedMessage.
-func failToolCallsFromTruncatedMessage(agentCtx *agentcore.AgentContext, assistant agentcore.AssistantMessage) []agentcore.ToolResultMessage {
+// the model the response was cut off and to resend. Streamed tool-call arguments
+// are completed by a best-effort JSON salvage parser, so a truncated message can
+// yield calls whose arguments parse and validate but are silently incomplete;
+// none of them is safe to execute. Each call still gets the normal observable
+// lifecycle — tool_execution_start then an error tool_execution_end — so a
+// consumer sees every finalized call. The results are appended to the context
+// and returned. Mirrors pi's failToolCallsFromTruncatedMessage.
+func failToolCallsFromTruncatedMessage(ctx context.Context, agentCtx *agentcore.AgentContext, assistant agentcore.AssistantMessage, emit agentcore.EmitFunc) []agentcore.ToolResultMessage {
 	calls := assistant.ToolCalls()
 	if len(calls) == 0 {
 		return nil
 	}
 	results := make([]agentcore.ToolResultMessage, 0, len(calls))
 	for _, c := range calls {
+		if emit != nil {
+			_ = emit(ctx, agentcore.ToolExecutionStartEvent{ToolCallID: c.ID, ToolName: c.Name, Args: c.Arguments})
+		}
+		content := agentcore.ContentList{agentcore.NewTextContent(fmt.Sprintf(
+			"Tool call %q was not executed: the response hit the output token limit, "+
+				"so its arguments may be truncated. Re-issue the tool call with complete arguments.", c.Name))}
+		if emit != nil {
+			_ = emit(ctx, agentcore.ToolExecutionEndEvent{
+				ToolCallID: c.ID,
+				ToolName:   c.Name,
+				Result:     agentcore.AgentToolResult{Content: content},
+				IsError:    true,
+			})
+		}
 		results = append(results, agentcore.ToolResultMessage{
 			RoleField:  agentcore.RoleToolResult,
 			ToolCallID: c.ID,
 			ToolName:   c.Name,
-			Content: agentcore.ContentList{agentcore.NewTextContent(
-				"The previous response was truncated because it hit the output token limit, " +
-					"so this tool call was not executed. Please send a shorter response and retry.")},
-			IsError: true,
+			Content:    content,
+			IsError:    true,
 		})
 	}
 	for _, r := range results {
 		agentCtx.Messages = append(agentCtx.Messages, r)
 	}
 	return results
+}
+
+// appendToolResults appends tool-result messages to the run's produced-message
+// list as AgentMessages.
+func appendToolResults(dst []agentcore.AgentMessage, results []agentcore.ToolResultMessage) []agentcore.AgentMessage {
+	for _, tr := range results {
+		dst = append(dst, tr)
+	}
+	return dst
 }
 
 // toAgentToolCalls converts the assistant message's ToolCallContent blocks into

@@ -55,7 +55,7 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
   所以任意 wire offset 都能无损续传；
 - **反压三层**：阻塞 `Write` 提供天然背压，全局 token bucket 塑形总带宽，per-write deadline 杀慢客户端。
 
-详细设计：[PI 对齐基线](docs/PI-PARITY.md) · [架构与决策](docs/ARCHITECTURE.md) · [反压设计](docs/BACKPRESSURE.md) ·
+详细设计：[PI 对齐基线](docs/PI-PARITY.md) · [官方测试对齐矩阵](docs/PI-CONFORMANCE.md) · [架构与决策](docs/ARCHITECTURE.md) · [反压设计](docs/BACKPRESSURE.md) ·
 [存储调研](docs/BLOB-STORAGE-RESEARCH.md) · [文件协议](docs/FILE-PROTOCOL.md) · [运行手册](docs/RUNBOOK.md)
 
 ## 技术栈

@@ -50,6 +50,16 @@ func eventsOf(t *testing.T, st *store.Store, tenant, session uuid.UUID) []store.
 	return events
 }
 
+func countKind(evs []store.Event, kind string) int {
+	n := 0
+	for _, ev := range evs {
+		if ev.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
 func newTestRunner(st *store.Store) *Runner {
 	return NewRunner(st, FakeStream(), "fake", "fake", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
@@ -174,6 +184,48 @@ func TestRunnerResumesUnresolvedToolCall(t *testing.T) {
 	}
 	if final != "tool echo returned: echo after crash" {
 		t.Fatalf("final = %q", final)
+	}
+
+	// A second execution (lease expiry / duplicate enqueue) must not add a
+	// second tool result or a second final answer.
+	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+		t.Fatal(err)
+	}
+	again := eventsOf(t, st, tenant, session)
+	if got := countKind(again, store.EventToolResult); got != 1 {
+		t.Fatalf("tool results after re-run = %d, want 1", got)
+	}
+	if got := countKind(again, store.EventAssistantMessage); got != 2 {
+		t.Fatalf("assistant messages after re-run = %d, want 2 (tool call + final)", got)
+	}
+}
+
+func TestToolResultDedupeKey(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	ctx := context.Background()
+	msg := agentcore.ToolResultMessage{
+		RoleField:  agentcore.RoleToolResult,
+		ToolCallID: "call-1",
+		ToolName:   "echo",
+		Content:    agentcore.ContentList{agentcore.NewTextContent("x")},
+	}
+	seq1, inserted1, err := st.AppendEventDedup(ctx, tenant, session, store.EventToolResult, msg, "tool:call-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq2, inserted2, err := st.AppendEventDedup(ctx, tenant, session, store.EventToolResult, msg, "tool:call-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted1 || inserted2 {
+		t.Fatalf("inserted flags = %v/%v", inserted1, inserted2)
+	}
+	if seq1 != seq2 {
+		t.Fatalf("seq = %d/%d, want the same", seq1, seq2)
+	}
+	if events := eventsOf(t, st, tenant, session); len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
 	}
 }
 

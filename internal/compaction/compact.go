@@ -28,14 +28,21 @@ type CompactionDetails struct {
 }
 
 // CompactionResult is the outcome of a compaction: the summary text (with file
-// metadata appended), the index where retained history begins, the estimated
-// tokens before compaction, and the extracted file details. Mirrors pi's
-// CompactionResult, adapted to pigo's flat message list (index vs entry id).
+// metadata appended), the watermark where retained history begins, how many
+// messages the summary covers, the estimated tokens before compaction, and the
+// extracted file details. Mirrors pi's CompactionResult, adapted to keel's flat
+// message list (index vs entry id).
 type CompactionResult struct {
 	// Summary is the structured summary that replaces the compacted history.
 	Summary string
-	// FirstKeptIndex is the index of the first retained message.
+	// FirstKeptIndex is the watermark: the index of the first retained message,
+	// keel's equivalent of pi's CompactionEntry.head (the first kept entry id).
 	FirstKeptIndex int
+	// CoveredMessages is the number of messages the summary stands in for: the
+	// range [previous checkpoint or 0, FirstKeptIndex). Like pi's
+	// `entries: view.entries.slice(0, cut)` (harness/compaction.ts:132-140), it
+	// includes an earlier summary marker when one is being folded in.
+	CoveredMessages int
 	// TokensBefore is the estimated context tokens before compaction.
 	TokensBefore int
 	// Details holds the file operations extracted from the compacted range.
@@ -43,19 +50,27 @@ type CompactionResult struct {
 }
 
 // Compact prepares and generates a compaction over msgs. It cuts at
-// FindCutPoint(msgs, settings.KeepRecentTokens), summarizes messages in
-// [prevCompactionIndex+1, firstKeptIndex) (seeding file ops from a prior
-// compaction's details when provided), and appends <read-files>/<modified-files>
-// metadata to the summary. previousSummary, when non-empty, switches to the
-// iterative update template.
+// findCutPoint(msgs, settings.KeepRecentTokens) and summarizes the messages
+// before the cut, seeding file ops from a prior compaction's details when
+// provided, and appends <read-files>/<modified-files> metadata to the summary
+// (the metadata blocks are a keel/pigo extension: pi's CompactionEntry stores
+// the bare summary).
 //
-// prevCompactionIndex is the index of the last already-applied compaction point
-// (-1 when none); summarization starts just after it so each compaction only
-// covers the newly accumulated history. prevDetails carries that compaction's
-// file lists so long-lived reads/edits survive across successive compactions.
+// prevCompactionIndex is the index of the last already-applied compaction
+// checkpoint (-1 when none). Like pi, whose context view starts at its head
+// marker (harness/compaction.ts:287), the messages after that checkpoint are
+// the only candidates for the new cut, but the checkpoint itself is still part
+// of the summarized range so the newer summary folds the older one in
+// (harness/compaction.ts:132-140). prevDetails carries that compaction's file
+// lists so long-lived reads/edits survive across successive compactions.
 //
-// It returns (nil, nil) when there is nothing to compact (no valid cut point or
-// an empty summarization range).
+// previousSummary, when non-empty, additionally embeds that text in
+// <previous-summary> tags and switches to keel's update template; pi has no such
+// channel and callers that pass "" get pi's exact summarization request.
+//
+// It returns (nil, nil) when there is nothing to compact (no valid cut point, or
+// nothing but the previous checkpoint would be summarized), matching pi's
+// "completes without a summary when there is nothing to compact".
 func Compact(
 	ctx context.Context,
 	stream provider.StreamFn,
@@ -67,17 +82,30 @@ func Compact(
 	previousSummary string,
 	cfg provider.StreamConfig,
 ) (*CompactionResult, error) {
-	cut := FindCutPoint(msgs, settings.KeepRecentTokens)
-
-	start := prevCompactionIndex + 1
-	if start < 0 {
-		start = 0
+	first := prevCompactionIndex + 1
+	if first < 0 {
+		first = 0
 	}
-	if start >= cut.FirstKeptIndex {
-		// Nothing new to summarize.
+	cut := findCutPoint(msgs, settings.KeepRecentTokens, first)
+	if cut.FirstKeptIndex <= first {
+		// No cut, or the cut would cover only the previous checkpoint.
 		return nil, nil
 	}
-	toSummarize := msgs[start:cut.FirstKeptIndex]
+
+	start := first
+	if prevCompactionIndex >= 0 {
+		start = prevCompactionIndex
+	}
+	// pi's summary source is built from the context view's contributions, which
+	// drop error/aborted assistant answers before anything is serialized
+	// (harness/context.ts:283-289, harness/compaction.ts:328-330).
+	toSummarize := make([]agentcore.Message, 0, cut.FirstKeptIndex-start)
+	for _, m := range msgs[start:cut.FirstKeptIndex] {
+		if excludedFromContext(m) {
+			continue
+		}
+		toSummarize = append(toSummarize, m)
+	}
 
 	// Seed file ops from the previous compaction, then fold in this range.
 	ops := NewFileOps()
@@ -101,10 +129,11 @@ func Compact(
 	summary += formatFileOperations(readFiles, modifiedFiles)
 
 	return &CompactionResult{
-		Summary:        summary,
-		FirstKeptIndex: cut.FirstKeptIndex,
-		TokensBefore:   EstimateContextTokens(msgs).Tokens,
-		Details:        CompactionDetails{ReadFiles: readFiles, ModifiedFiles: modifiedFiles},
+		Summary:         summary,
+		FirstKeptIndex:  cut.FirstKeptIndex,
+		CoveredMessages: cut.FirstKeptIndex - start,
+		TokensBefore:    EstimateContextTokens(msgs).Tokens,
+		Details:         CompactionDetails{ReadFiles: readFiles, ModifiedFiles: modifiedFiles},
 	}, nil
 }
 

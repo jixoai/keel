@@ -85,10 +85,10 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 	turns := 0
 	cfg := loop.RunConfig{
 		LoopConfig: loop.LoopConfig{
-			Model:        r.Model,
-			Provider:     r.ProviderName,
-			APIKey:       r.APIKey,
-			Stream:       r.Stream,
+			Model:         r.Model,
+			Provider:      r.ProviderName,
+			APIKey:        r.APIKey,
+			Stream:        r.Stream,
 			ThinkingLevel: agentcore.ThinkingLow,
 			// Compaction stays off until the checkpoint projection is wired to
 			// the event log; the loop supports it via OnCompaction.
@@ -104,10 +104,10 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 		},
 		OnCompaction: func(ctx context.Context, summary string, firstKeptIndex, summarizedCount int) {
 			seq, err := r.appendEvent(ctx, run.TenantID, run.SessionID, store.EventCompaction, map[string]any{
-				"summary":      summary,
-				"firstKept":    firstKeptIndex,
-				"summarized":   summarizedCount,
-				"timestamp":    time.Now().UnixMilli(),
+				"summary":    summary,
+				"firstKept":  firstKeptIndex,
+				"summarized": summarizedCount,
+				"timestamp":  time.Now().UnixMilli(),
 			})
 			if err != nil {
 				r.Logger.Warn("persist compaction", "err", err)
@@ -141,7 +141,7 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 				Details:    e.Result.Details,
 				IsError:    e.IsError,
 			}
-			seq, err := r.appendEvent(ctx, run.TenantID, run.SessionID, store.EventToolResult, msg)
+			seq, err := r.appendToolResult(ctx, run, msg)
 			if err != nil {
 				return cursor, err
 			}
@@ -194,7 +194,7 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, run store.Run, msgs
 	}, missing, nil)
 	for _, tr := range results {
 		msgs = append(msgs, tr)
-		seq, err := r.appendEvent(ctx, run.TenantID, run.SessionID, store.EventToolResult, tr)
+		seq, err := r.appendToolResult(ctx, run, tr)
 		if err != nil {
 			return msgs, cursor, err
 		}
@@ -221,6 +221,17 @@ func (r *Runner) loadEvents(ctx context.Context, tenantID, sessionID uuid.UUID) 
 		}
 	}
 	return all, after, nil
+}
+
+// appendToolResult writes a tool result with a per-call idempotency key. The
+// execution layer is at-least-once; the log holds exactly one result per call.
+func (r *Runner) appendToolResult(ctx context.Context, run store.Run, msg agentcore.ToolResultMessage) (int64, error) {
+	seq, _, err := r.Store.AppendEventDedup(ctx, run.TenantID, run.SessionID, store.EventToolResult, msg, "tool:"+msg.ToolCallID)
+	if err != nil {
+		r.Logger.Error("append tool result", "err", err)
+		return 0, err
+	}
+	return seq, nil
 }
 
 func (r *Runner) appendEvent(ctx context.Context, tenantID, sessionID uuid.UUID, kind string, payload any) (int64, error) {

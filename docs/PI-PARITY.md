@@ -78,6 +78,11 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 **不允许的差异**：事件名与顺序、工具接口形状、SKILL.md 格式、MCP 配置/命名/传输语义、
 压缩 entry/checkpoint 语义、telemetry span/metric 形状。
 
+## 4.1 官方测试对齐状态
+
+逐文件对照、已移植测试与未覆盖项见 [PI-CONFORMANCE.md](PI-CONFORMANCE.md)。
+当前：199 个测试（含子测试）通过，0 失败；覆盖 loop / compaction / MCP / skills / telemetry。
+
 ## 5. 版本与升级
 
 - `PI_PIN` 写入本文件与 `docs/UPSTREAM.md`；升级前先跑 conformance suite。

@@ -95,7 +95,13 @@ type ToolResultMessage struct {
 	Content    ContentList `json:"content"`
 	Details    any         `json:"details,omitempty"`
 	IsError    bool        `json:"isError"`
-	Timestamp  int64       `json:"timestamp"`
+	// DurationMs is how long execute() took, measured with a monotonic clock.
+	// nil when the tool did not run (unknown tool, invalid arguments, a blocked
+	// or aborted call). Hook time is excluded, matching pi's
+	// AgentToolCallOutcome.durationMs. A pointer keeps "never ran" distinct from
+	// a legitimate 0 ms execution.
+	DurationMs *int64 `json:"durationMs,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 func (ToolResultMessage) isMessage()     {}

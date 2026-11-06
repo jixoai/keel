@@ -26,9 +26,18 @@ CREATE TABLE IF NOT EXISTS events (
     seq         bigint NOT NULL,
     kind        text NOT NULL,
     payload     jsonb NOT NULL,
+    dedupe_key  text,
     created_at  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, session_id, seq)
 );
+
+-- Tool results (and other replayable effects) are at-least-once at the execution
+-- layer but exactly-once in the log: the same dedupe key can only be inserted
+-- once per session.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS dedupe_key text;
+CREATE UNIQUE INDEX IF NOT EXISTS events_dedupe
+    ON events (tenant_id, session_id, dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS checkpoints (
     tenant_id   uuid NOT NULL,

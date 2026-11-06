@@ -18,6 +18,8 @@ type AgentEvent interface {
 const (
 	EventAgentStart          = "agent_start"
 	EventAgentEnd            = "agent_end"
+	EventAgentBeforeSettle   = "agent_before_settle"
+	EventAgentSettled        = "agent_settled"
 	EventTurnStart           = "turn_start"
 	EventTurnEnd             = "turn_end"
 	EventMessageStart        = "message_start"
@@ -42,8 +44,42 @@ type AgentStartEvent struct {
 
 // AgentEndEvent is emitted once when a loop run ends, carrying the messages
 // newly produced during this run (the EventStream result).
+//
+// agent_end is the terminal event of pi's core AgentEvent
+// (packages/agent/src/types.ts). The host layer that mirrors pi's coding-agent
+// session (docs/extensions.md, "agent_start / agent_end / agent_before_settle /
+// agent_settled") may additionally emit agent_before_settle / agent_settled
+// after it; those two are host-level extensions, not kernel events, and are
+// opt-in in the loop (RunConfig.EmitSettleEvents).
 type AgentEndEvent struct {
 	Messages []AgentMessage
+}
+
+// Outcomes carried by AgentBeforeSettleEvent.Outcome.
+const (
+	SettleOutcomeCompleted = "completed"
+	SettleOutcomeError     = "error"
+	SettleOutcomeAborted   = "aborted"
+)
+
+// AgentBeforeSettleEvent is the final actionable settle boundary of the host
+// layer (pi's coding-agent session/extension event, not part of the core
+// AgentEvent set): it is emitted after agent_end when the run is about to settle
+// and the host opted in. A boundary handler may still request one more turn
+// (for example retry recovery or queued work), which starts another low-level
+// run. An aborted run skips this event, going straight from agent_end to
+// agent_settled.
+type AgentBeforeSettleEvent struct {
+	// Outcome reports how the low-level run ended: "completed", "error", or
+	// "aborted".
+	Outcome string
+}
+
+// AgentSettledEvent is the final, notification-only event of a run: the agent is
+// idle and will not continue on its own. Aborted distinguishes a cancelled run
+// from a finished one.
+type AgentSettledEvent struct {
+	Aborted bool
 }
 
 // TurnStartEvent marks the start of a turn (a single assistant response cycle).
@@ -93,6 +129,11 @@ type ToolExecutionEndEvent struct {
 	ToolName   string
 	Result     AgentToolResult
 	IsError    bool
+	// DurationMs is how long execute() took, measured with a monotonic clock.
+	// nil when the tool did not run (unknown tool, invalid arguments, a blocked
+	// or aborted call); hook time (beforeToolCall / afterToolCall) is excluded,
+	// matching pi's AgentToolCallOutcome.durationMs.
+	DurationMs *int64
 }
 
 // CompactionEvent is emitted when the loop compacts the context window, either
@@ -192,6 +233,8 @@ type TelemetryEvent struct {
 
 func (AgentStartEvent) isAgentEvent()          {}
 func (AgentEndEvent) isAgentEvent()            {}
+func (AgentBeforeSettleEvent) isAgentEvent()   {}
+func (AgentSettledEvent) isAgentEvent()        {}
 func (TurnStartEvent) isAgentEvent()           {}
 func (TurnEndEvent) isAgentEvent()             {}
 func (MessageStartEvent) isAgentEvent()        {}
@@ -207,6 +250,8 @@ func (SubAgentProgressEvent) isAgentEvent()    {}
 
 func (AgentStartEvent) EventType() string          { return EventAgentStart }
 func (AgentEndEvent) EventType() string            { return EventAgentEnd }
+func (AgentBeforeSettleEvent) EventType() string   { return EventAgentBeforeSettle }
+func (AgentSettledEvent) EventType() string        { return EventAgentSettled }
 func (TurnStartEvent) EventType() string           { return EventTurnStart }
 func (TurnEndEvent) EventType() string             { return EventTurnEnd }
 func (MessageStartEvent) EventType() string        { return EventMessageStart }
