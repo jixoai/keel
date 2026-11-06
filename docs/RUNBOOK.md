@@ -39,36 +39,42 @@ go build -o /tmp/keel-e2e ./cmd/e2e
 KEEL_DSN="$KEEL_TEST_DSN" /tmp/keel-e2e -bin /tmp/keel-runtime -port 13745
 ```
 
-四个场景：requestId 幂等、SSE 游标、blob wire-offset 续传、100 会话 2000 事件无缺口。
+七个场景：requestId 幂等、SSE 游标、blob wire-offset 续传、agent 回复、模型调用中
+SIGKILL、工具执行中 SIGKILL、100 会话 2000 事件无缺口。E2E 默认先 `TRUNCATE` 运行时表
+（`-reset=false` 关闭），所以只能指向专用测试库。
 
 ## 压测
 
 ```bash
 go build -o /tmp/keel-loadtest ./cmd/loadtest
 /tmp/keel-loadtest -base http://127.0.0.1:13740 \
-  -sessions 1000 -duration 120s \
-  -text-every 10s -image-every 30s -image-size 1048576 -images 20 \
-  -client-rate 102400 -out /tmp/bench.json
+  -sessions 1000 -duration 60s \
+  -text-every 10s -image-every 60s -image-size 1048576 -images 20 \
+  -client-rate 51200 -out /tmp/bench.json
 ```
 
-- `-client-rate` 是每流客户端读取上限；它决定延迟下界（1.4MB ÷ 100KB/s ≈ 14.3s）。
-- 429 是预期反压：loadtest 会按 Retry-After 重试。
+- `-client-rate` 是每流客户端读取上限；它决定延迟下界（1.4MB ÷ 50KB/s ≈ 27.3s）。
+- 服务端必须用 `-streams 2000` 才能同时容纳 1000 条 SSE 与 800 条 Medium 图片流。
+- 429 是预期反压：loadtest 会按 Retry-After 重试；60000ms 单轮只有 800 条 Medium
+  容量，剩余 200 条会在 6 次退避后记为失败（这是容量上限，不是流错误）。
+- 2026-11-06 基线：800/1000 图片完成、0 SSE 错误、18.6MB/s、2GB cgroup 峰值 544MB。
 - 结果 JSON 含 p50/p95/p99、吞吐、429 计数、RSS 采样。
 
 ## 2GB 硬限复跑
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/runtime-linux ./cmd/runtime
-docker run -d --name runtime-2g --memory=2g --cpus=2 -p 13748:13740 \
+docker run -d --name runtime-2g --memory=2g --memory-swap=2g --cpus=4 \
   -v /tmp/runtime-linux:/runtime:ro -v /tmp/cas:/cas \
   -e KEEL_DSN='postgres://postgres:runtime@host.docker.internal:13741/runtime?sslmode=disable' \
   -e GOMEMLIMIT=1610612736 \
-  alpine:3.20 /runtime -addr :13740 -cas /cas -streams 2200
+  alpine:3.20 /runtime -addr 127.0.0.1:13750 -cas /cas -streams 2000
 
 # 同 netns 的旁车跑压测，避开 Docker Desktop 端口转发的千连接限制
 docker run --rm --network container:runtime-2g \
   -v /tmp/loadtest-linux:/loadtest:ro -v /tmp/out:/out alpine:3.20 \
-  /loadtest -base http://127.0.0.1:13740 -sessions 1000 -duration 60s ...
+  /loadtest -base http://127.0.0.1:13750 -sessions 1000 -duration 60s \
+  -client-rate 51200 -image-size 1048576
 ```
 
 `docker exec runtime-2g cat /sys/fs/cgroup/memory.current` 采样 cgroup 内存。

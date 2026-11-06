@@ -65,7 +65,7 @@ func TestLimitContent(t *testing.T) {
 		}
 		full := builder.String()
 		var saved []string
-	var savedExt []string
+		var savedExt []string
 		split := strings.Index(full[100:], "\n") + 100
 		image := testImage()
 		limited := LimitContent(

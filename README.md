@@ -20,19 +20,20 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
 
 ## 已实测
 
-1000 个带图片的持续会话，每 30s 拉一张 1MiB 图，客户端每流限速 100KB/s：
+1000 个持续会话：每会话一条 SSE + 周期文本，单轮 1MiB 图片下载，客户端每流限速 50KB/s，
+进程限制在 2GB cgroup（Linux/arm64）：
 
 | 指标 | 结果 |
 |---|---|
-| 并发会话 | **1000**（每会话一条 SSE + 周期图片） |
-| 图片 | 120s 内 **2867 张**完成（约 4.0GB base64 出站） |
-| SSE 稳定性 | **0 次异常断开**（120s） |
-| 吞吐 | 33.4 MB/s 平均（客户端限速主导，非服务端上限） |
-| 延迟 | p50 14.1s / p95 16.0s / p99 22.6s（= 1.4MB ÷ 100KB/s，服务端附加≈0） |
-| 进程 RSS | p50 **300MB**，p95 431MB，**max 437MB**（`GOMEMLIMIT=1.6GiB`） |
-| 2GB cgroup | Linux/arm64 `--memory=2g` 复跑：峰值 **503MB（24.6%）**，未 OOM |
-| 反压 | 588 次 429（容量满时快速拒绝，客户端按 `Retry-After` 重试） |
-| 无状态 E2E | **4/4**：请求幂等、SSE 游标、blob 续传、100 会话 2000 事件，全部跨 `SIGKILL` |
+| 并发会话 | **1000**（1000 条 SSE 同时在线） |
+| 图片 | 一轮内 **800 张 1MiB 图完成**（1.12GB base64 出站；另 200 张按尺寸分池返回 429，客户端重试） |
+| SSE 稳定性 | **0 次异常断开** |
+| 吞吐 | 18.6 MB/s（客户端限速主导，非服务端上限） |
+| 延迟 | p50 28.0s / p95 28.5s（= 1.4MB ÷ 50KB/s，服务端附加≈0） |
+| 进程 RSS | max **427MB**（`GOMEMLIMIT=1.6GiB`） |
+| 2GB cgroup | 峰值 **544MB（26.8%）**，未 OOM、未触发内存回收抖动 |
+| 反压 | 1200 次 429（Medium 档 40% 容量上限；快速拒绝并按 `Retry-After` 重试） |
+| 无状态 E2E | **7/7**：requestId 幂等、SSE 游标、blob 续传、agent 回复、模型/工具执行中 `SIGKILL` 恢复、100 会话 2000 事件序列连续 |
 
 ## 架构
 
@@ -83,11 +84,15 @@ go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 
 ## 状态与路线
 
-**可运行底座 + 实测通过**（2026-11-05）。已实现：PG schema、64KiB 分块 blob、流式 base64、
-SSE 续传、三类分池与全局带宽，以及 **Agent 执行**——事件溯源上下文、持久 run（租约 +
-`FOR UPDATE SKIP LOCKED`）、工具执行、崩溃恢复（模型调用中 / 工具执行中 kill 均可续跑）。
-正在补：可观测、可恢复性收口、上下文压缩、Skills、MCP、Hooks，以及租户配额/RLS、
-provider 文件协议 adapter、缩略图与 TTL 回收、CI/部署。
+**可运行底座 + PI 对齐**（2026-11-06）。已实现：PG schema、64KiB 分块 blob、流式 base64、
+SSE 续传、三类分池与全局带宽；**Agent 执行**——事件溯源上下文、持久 run（租约 +
+`FOR UPDATE SKIP LOCKED`）、工具执行、崩溃恢复（模型调用中 / 工具执行中 kill 均可续跑）；
+以及 **PI 能力的宿主装配**——system prompt sections、Skills（`SKILL.md` + 按需加载）、
+Hooks（扩展事件 + 命令钩子）、Compaction（PI policy + checkpoint 事件）、MCP（stdio /
+Streamable HTTP / `mcp.json` / OAuth provider 接口）、Durable tasks（提交/生成/嵌套工具/
+结构化输出）、Telemetry（span/metric/store）。
+正在补：MCP 交互式 OAuth 登录（discovery/loopback/PKCE）、durable 存储投影（PG 只落
+tasks/submissions，inbox/live/nested docs 仍由宿主存储承担）、租户配额/RLS、缩略图与 TTL 回收、CI/部署。
 
 路线与「做到什么程度算好」以 **[docs/MATURITY.md](docs/MATURITY.md)** 为准：
 每个能力按 G0（规格）→ G1（单机）→ G2（崩溃一致）→ G3（可观测）→ G4（生态兼容）→

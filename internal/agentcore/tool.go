@@ -59,7 +59,27 @@ type AgentToolCall struct {
 // *bool so "not set" is distinguishable from an explicit false — the loop only
 // signals early termination when every result in a batch has Terminate=true.
 type AgentToolResult struct {
-	Content   ContentList `json:"content"`
-	Details   any         `json:"details,omitempty"`
-	Terminate *bool       `json:"terminate,omitempty"`
+	Content ContentList `json:"content"`
+	Details any         `json:"details,omitempty"`
+	// StructuredContent is the machine-readable result matching a tool's output
+	// schema. It is not sent to the model; Content remains the model-facing
+	// result (pi's AgentToolResult.structuredContent).
+	StructuredContent any `json:"structuredContent,omitempty"`
+	// IsError reports a failure without throwing: the model sees Content as an
+	// error result, but Details/StructuredContent are kept for the UI and
+	// programmatic callers (pi's AgentToolResult.isError).
+	IsError   *bool `json:"isError,omitempty"`
+	Terminate *bool `json:"terminate,omitempty"`
+}
+
+// AgentToolCallOutcome is the final outcome of one tool call after the
+// prepare/execute/finalize phases and hooks ran (pi's AgentToolCallOutcome).
+type AgentToolCallOutcome struct {
+	ToolCall AgentToolCall
+	Result   AgentToolResult
+	IsError  bool
+	// DurationMs is how long execute() took, measured with a monotonic clock.
+	// nil when the tool did not run (unknown tool, invalid arguments, blocked or
+	// aborted call); hook time is excluded.
+	DurationMs *int64
 }

@@ -15,6 +15,13 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
+// Assembly is the host seam: the system prompt and tool registry for a run.
+// host.Host implements it; tests can supply a static assembly.
+type Assembly interface {
+	SystemPrompt() string
+	Tools() *agenttool.ToolRegistry
+}
+
 // Runner executes one claimed run: rebuild → (fill missing tool results) →
 // loop → append events.
 type Runner struct {
@@ -24,8 +31,32 @@ type Runner struct {
 	Model        string
 	APIKey       string
 	Tools        *agenttool.ToolRegistry
-	MaxTurns     int
-	Logger       *slog.Logger
+	// Assembly, when set, overrides Tools and supplies the system prompt. It is
+	// the host layer (skills, MCP tools, tenant instructions) plugged into the
+	// runtime; the kernel loop never knows about it.
+	Assembly Assembly
+	// Telemetry, when set, records one span and two metrics per run.
+	Telemetry *RunTelemetry
+	MaxTurns  int
+	Logger    *slog.Logger
+}
+
+// registry returns the tool registry for this run, preferring the host.
+func (r *Runner) registry() *agenttool.ToolRegistry {
+	if r.Assembly != nil {
+		if reg := r.Assembly.Tools(); reg != nil {
+			return reg
+		}
+	}
+	return r.Tools
+}
+
+// systemPrompt returns the host-assembled prompt ("" when no host is wired).
+func (r *Runner) systemPrompt() string {
+	if r.Assembly != nil {
+		return r.Assembly.SystemPrompt()
+	}
+	return ""
 }
 
 // NewRunner wires the production defaults: clock + echo tools and a turn cap.
@@ -56,6 +87,12 @@ func NewRunner(st *store.Store, stream provider.StreamFn, providerName, model, a
 // the run consumed or produced; the caller uses it to decide whether more input
 // arrived while the run was executing.
 func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
+	return r.observeRun(run, func() (int64, error) {
+		return r.run(ctx, run)
+	})
+}
+
+func (r *Runner) run(ctx context.Context, run store.Run) (int64, error) {
 	events, cursor, err := r.loadEvents(ctx, run.TenantID, run.SessionID)
 	if err != nil {
 		return cursor, err
@@ -83,6 +120,16 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 	}
 
 	turns := 0
+	tools := r.registry()
+	// Only a trailing user input is this run's prompt; a run that continues from
+	// committed tool results must not replay prompt lifecycle events for them.
+	promptCount := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role() != agentcore.RoleUser {
+			break
+		}
+		promptCount++
+	}
 	cfg := loop.RunConfig{
 		LoopConfig: loop.LoopConfig{
 			Model:         r.Model,
@@ -90,14 +137,31 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 			APIKey:        r.APIKey,
 			Stream:        r.Stream,
 			ThinkingLevel: agentcore.ThinkingLow,
+			// Transcript tool-loadout declarations (system messages) are not part
+			// of the provider wire in Keel: tools travel in LlmContext.Tools, and
+			// the OpenAI/Anthropic encoders would drop the system entries anyway.
+			// Filter them here so the provider sees the conversational transcript
+			// (pi's collapseSystemMessages at the provider boundary).
+			ConvertToLlm: func(msgs agentcore.MessageList) agentcore.MessageList {
+				out := make(agentcore.MessageList, 0, len(msgs))
+				for _, m := range msgs {
+					if m.Role() != agentcore.RoleSystem {
+						out = append(out, m)
+					}
+				}
+				return out
+			},
 			// Compaction stays off until the checkpoint projection is wired to
 			// the event log; the loop supports it via OnCompaction.
 		},
 		Batch: agenttool.BatchConfig{
-			ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: r.Tools},
+			ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: tools},
 		},
 		EventBuffer: 32,
 		SessionID:   run.SessionID.String(),
+		// The run is triggered by its trailing user message(s); they are the
+		// prompt whose message lifecycle pi emits.
+		PromptCount: promptCount,
 		ShouldStopAfterTurn: func(ctx context.Context, agentCtx *agentcore.AgentContext) bool {
 			turns++
 			return r.MaxTurns > 0 && turns >= r.MaxTurns
@@ -117,8 +181,9 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 		},
 	}
 	agentCtx := &agentcore.AgentContext{
-		Messages: msgs,
-		Tools:    r.Tools.List(),
+		SystemPrompt: r.systemPrompt(),
+		Messages:     msgs,
+		Tools:        tools.List(),
 	}
 	stream := loop.StartRun(ctx, agentCtx, cfg)
 	for ev := range stream.Events() {
@@ -127,6 +192,12 @@ func (r *Runner) Run(ctx context.Context, run store.Run) (int64, error) {
 		}
 		switch e := ev.(type) {
 		case agentcore.MessageEndEvent:
+			// User prompts and tool results are persisted by their own paths
+			// (input submission / tool_execution_end); only assistant answers
+			// belong to assistant.message.
+			if e.Message.Role() != agentcore.RoleAssistant {
+				continue
+			}
 			seq, err := r.appendEvent(ctx, run.TenantID, run.SessionID, store.EventAssistantMessage, e.Message)
 			if err != nil {
 				return cursor, err
@@ -190,7 +261,7 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, run store.Run, msgs
 	}
 	r.Logger.Warn("resuming unresolved tool calls", "session", run.SessionID, "count", len(missing))
 	results, _ := agenttool.ExecuteToolCalls(ctx, agenttool.BatchConfig{
-		ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: r.Tools},
+		ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: r.registry()},
 	}, missing, nil)
 	for _, tr := range results {
 		msgs = append(msgs, tr)

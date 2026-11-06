@@ -16,7 +16,7 @@ PI 的分层是这次重构最重要的约束：
 | 层 | 职责 | PI 位置 | Keel 对应 |
 |---|---|---|---|
 | **内核** | 循环、事件流、工具契约、生成/压缩任务 | `packages/agent`、`packages/durable` | `internal/loop`、`internal/agentcore`、`internal/agenttool` |
-| **宿主** | 提示词装配、skills、扩展事件、命令、UI | `packages/coding-agent` | `internal/httpapi` + 未来的 `internal/host` |
+| **宿主** | 提示词装配、skills、扩展事件、命令、UI | `packages/coding-agent` | `internal/host` + `internal/httpapi` |
 | **协议** | MCP、遥测、provider 文件 | `packages/mcp`、`packages/telemetry`、`packages/ai` | `internal/mcp`、`internal/telemetry`、`internal/provider` |
 
 **判定规则**：一个能力如果需要新的**执行原语/协议/传输**，进内核或独立协议包；
@@ -81,7 +81,7 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 ## 4.1 官方测试对齐状态
 
 逐文件对照、已移植测试与未覆盖项见 [PI-CONFORMANCE.md](PI-CONFORMANCE.md)。
-当前：205 个测试（含子测试）通过，0 失败；覆盖 loop / compaction / MCP / skills / telemetry。
+当前：495 个测试（含子测试）通过、0 失败、1 跳过；覆盖 loop / compaction / MCP（含 stdio、Streamable HTTP、配置）/ skills / telemetry / hooks / durable / host / runner。
 
 ## 5. 版本与升级
 
@@ -92,7 +92,7 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 ## 6. 对当前计划的修正
 
 1. **Skills 不进内核**：`internal/agent` 不感知 skill；由宿主层装配系统提示 + `skill` 工具。
-2. **MCP 独立包**：`internal/mcp` 镜像 `pi-mcp` 的传输/命名/裁剪/OAuth 语义，再适配 `AgentTool`。
+2. **MCP 独立包**：`internal/mcp` 镜像 `pi-mcp` 的传输（stdio / Streamable HTTP）/命名/裁剪/`mcp.json`/AuthProvider 语义，再适配 `AgentTool`。
 3. **Hooks 用 PI 事件名**：`before_agent_start`、`turn_start/end`、`tool_execution_*`、`context`、
    `session_before_compact` 等，不自造 `tool.before` 这类新名字。
 4. **遥测用 PI 的 span/metric 契约**：先做 `TelemetryContext`/`Span`/`Metrics` 接口与

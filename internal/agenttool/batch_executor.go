@@ -19,6 +19,7 @@ package agenttool
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 
 	"github.com/jixoai/keel/internal/agentcore"
@@ -56,13 +57,50 @@ func ExecuteToolCalls(ctx context.Context, cfg BatchConfig, calls []agentcore.Ag
 			results[i], terminates[i] = executeToolCall(ctx, cfg.ToolExecutorConfig, call, emit)
 		}
 	} else {
-		var wg sync.WaitGroup
+		// Parallel: preflight every call sequentially in source order (emitting
+		// tool_execution_start in that order), then execute the allowed calls
+		// concurrently. tool_execution_end is emitted per call in completion
+		// order by the executing goroutine (pi's executeToolCallsParallel).
+		type preparedExecution struct {
+			index int
+			call  agentcore.AgentToolCall
+			tool  agentcore.AgentTool
+			args  json.RawMessage
+		}
+		executions := make([]preparedExecution, 0, len(calls))
 		for i, call := range calls {
+			if ctx.Err() != nil {
+				for j := i; j < len(calls); j++ {
+					results[j] = errorToolResult(calls[j], "tool call aborted")
+					terminates[j] = false
+				}
+				break
+			}
+			if emit != nil {
+				if err := emit(ctx, agentcore.ToolExecutionStartEvent{
+					ToolCallID: call.ID, ToolName: call.Name, Args: call.Arguments,
+				}); err != nil {
+					results[i] = errorToolResult(call, "aborted before execution: "+err.Error())
+					continue
+				}
+			}
+			tool, args, prep, isError := prepareToolCall(ctx, cfg.ToolExecutorConfig, call)
+			if prep != nil {
+				results[i], terminates[i] = finalizeToolCall(
+					ctx, cfg.ToolExecutorConfig, call, *prep, isError, nil, emit, false)
+				continue
+			}
+			executions = append(executions, preparedExecution{index: i, call: call, tool: tool, args: args})
+		}
+
+		var wg sync.WaitGroup
+		for _, ex := range executions {
 			wg.Add(1)
-			go func(i int, call agentcore.AgentToolCall) {
+			go func(ex preparedExecution) {
 				defer wg.Done()
-				results[i], terminates[i] = executeToolCall(ctx, cfg.ToolExecutorConfig, call, emit)
-			}(i, call)
+				results[ex.index], terminates[ex.index] = executePreparedToolCall(
+					ctx, cfg.ToolExecutorConfig, ex.call, ex.tool, ex.args, emit)
+			}(ex)
 		}
 		wg.Wait()
 	}

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
@@ -11,31 +12,38 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/jixoai/keel/internal/agent"
+	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/httpapi"
+	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 func main() {
 	var (
-		addr      = flag.String("addr", ":13740", "listen address")
-		dsn       = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
-		casDir    = flag.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
-		budget    = flag.Int64("bandwidth", envInt64("KEEL_BANDWIDTH", 0), "outbound bytes/sec budget (0 = unlimited)")
-		streamCap = flag.Int("streams", envInt("KEEL_STREAMS", 1000), "max concurrent streams")
-		batch     = flag.Int("chunk-batch", envInt("KEEL_CHUNK_BATCH", 1), "chunks per PG query (2 = 1Gbps mode)")
-		admitRate = flag.Int("admit-rate", envInt("KEEL_ADMIT_RATE", 200), "new streams per second")
-		memLimit  = flag.Int64("memlimit", envInt64("GOMEMLIMIT", 0), "soft memory limit in bytes (0 = Go default)")
-		runs      = flag.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
-		noWorker  = flag.Bool("no-worker", false, "do not start the agent worker")
+		addr       = flag.String("addr", ":13740", "listen address")
+		dsn        = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
+		casDir     = flag.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
+		budget     = flag.Int64("bandwidth", envInt64("KEEL_BANDWIDTH", 0), "outbound bytes/sec budget (0 = unlimited)")
+		streamCap  = flag.Int("streams", envInt("KEEL_STREAMS", 1000), "max concurrent streams")
+		batch      = flag.Int("chunk-batch", envInt("KEEL_CHUNK_BATCH", 1), "chunks per PG query (2 = 1Gbps mode)")
+		admitRate  = flag.Int("admit-rate", envInt("KEEL_ADMIT_RATE", 200), "new streams per second")
+		memLimit   = flag.Int64("memlimit", envInt64("GOMEMLIMIT", 0), "soft memory limit in bytes (0 = Go default)")
+		runs       = flag.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
+		noWorker   = flag.Bool("no-worker", false, "do not start the agent worker")
+		mcpConfig  = flag.String("mcp", os.Getenv("KEEL_MCP_CONFIG"), "global mcp.json path (empty disables MCP)")
+		mcpProject = flag.String("mcp-project", os.Getenv("KEEL_MCP_PROJECT"), "project mcp.json path (trusted projects only)")
 	)
 	flag.Parse()
 	if *dsn == "" {
@@ -71,6 +79,60 @@ func main() {
 		streamFn, providerName, model = provider.StreamFnFromProvider(p), p.Name(), modelID
 	}
 	runner := agent.NewRunner(st, streamFn, providerName, model, os.Getenv("KEEL_API_KEY"), log)
+
+	// Host layer: tenant prompt, skills (progressive disclosure), and tools. The
+	// runtime stays stateless: the host is assembled at boot from configuration
+	// paths, exactly as pi's coding-agent assembles its prompt and tool loadout.
+	sections, err := hostSections()
+	if err != nil {
+		log.Error("parse KEEL_SYSTEM_SECTIONS", "err", err)
+		os.Exit(2)
+	}
+	// MCP servers: configuration is the shared mcpServers shape; connections and
+	// tool adaptation happen once at boot, exactly as pi's host connects them.
+	var mcpManager *mcp.Manager
+	var mcpTools []agentcore.AgentTool
+	if *mcpConfig != "" {
+		loaded := mcp.LoadConfigFiles(*mcpConfig, *mcpProject)
+		for _, message := range loaded.Errors {
+			log.Warn("mcp config", "err", message)
+		}
+		mcpManager = mcp.Connect(ctx, loaded.Servers, mcp.ConnectOptions{
+			ClientName:    "keel",
+			ClientVersion: "1.0.0",
+			Logger:        log,
+		})
+		defer mcpManager.Close()
+		mcpTools = mcpManager.Tools()
+		if section := mcpManager.PromptSection(); section != "" {
+			sections = append(sections, host.Section{Name: "mcp_servers", Content: section})
+		}
+		for _, message := range mcpManager.Errors() {
+			log.Error("mcp server", "err", message)
+		}
+	}
+	asm, warnings, err := host.New(host.Config{
+		Preamble:        envOr("KEEL_SYSTEM_PROMPT", defaultSystemPrompt),
+		Sections:        sections,
+		SkillRoots:      skillRoots(),
+		FileReadTool:    os.Getenv("KEEL_FILE_READ_TOOL"),
+		ExtraTools:      mcpTools,
+		IncludeBuiltins: true,
+	})
+	if err != nil {
+		log.Error("assemble host", "err", err)
+		os.Exit(1)
+	}
+	for _, w := range warnings {
+		log.Warn("skill discovery", "warning", w.String())
+	}
+	runner.Assembly = asm
+	if os.Getenv("KEEL_TELEMETRY") == "memory" {
+		memory := telemetry.NewMemory()
+		runner.Telemetry = &agent.RunTelemetry{Context: memory, Metrics: memory}
+	}
+	log.Info("host assembled", "skills", len(asm.Skills()), "visible", len(asm.VisibleSkills()), "tools", len(asm.Tools().List()))
+
 	if !*noWorker {
 		worker := agent.NewWorker(st, runner, *runs, log)
 		go worker.Run(ctx)
@@ -159,4 +221,36 @@ func envInt64(name string, def int64) int64 {
 		}
 	}
 	return def
+}
+
+const defaultSystemPrompt = "You are an AI agent running on the Keel runtime. Use the available tools when they help."
+
+func envOr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
+// skillRoots reads the PI-style skill search path (OS path list).
+func skillRoots() []string {
+	raw := os.Getenv("KEEL_SKILLS_ROOTS")
+	if raw == "" {
+		return nil
+	}
+	return filepath.SplitList(raw)
+}
+
+// hostSections parses additional prompt sections as a JSON array of
+// {"name": "...", "content": "..."} objects.
+func hostSections() ([]host.Section, error) {
+	raw := os.Getenv("KEEL_SYSTEM_SECTIONS")
+	if raw == "" {
+		return nil, nil
+	}
+	var sections []host.Section
+	if err := json.Unmarshal([]byte(raw), &sections); err != nil {
+		return nil, err
+	}
+	return sections, nil
 }

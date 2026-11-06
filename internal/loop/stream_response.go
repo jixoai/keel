@@ -100,8 +100,13 @@ func streamAssistantResponse(ctx context.Context, agentCtx *agentcore.AgentConte
 	})
 	if err != nil {
 		// Early "cannot build stream" failure: synthesize a terminal message so
-		// the loop has a uniform assistant message to record.
-		return newErrorAssistantMessage(cfg, err), nil
+		// the loop has a uniform assistant message to record. pi emits the full
+		// message lifecycle for it even when no stream existed.
+		msg := newErrorAssistantMessage(cfg, err)
+		if emitErr := emitFinalMessage(ctx, emit, msg); emitErr != nil {
+			return agentcore.AssistantMessage{}, emitErr
+		}
+		return msg, nil
 	}
 
 	// 6. drain the stream, back-filling the partial into the context.
@@ -138,12 +143,22 @@ func streamAssistantResponse(ctx context.Context, agentCtx *agentcore.AgentConte
 				return agentcore.AssistantMessage{}, err
 			}
 		case provider.StreamDoneEvent:
+			if !addedPartial {
+				if err := emit(ctx, agentcore.MessageStartEvent{Message: e.Message}); err != nil {
+					return agentcore.AssistantMessage{}, err
+				}
+			}
 			finalizeMessage(agentCtx, e.Message, &addedPartial)
 			if err := emit(ctx, agentcore.MessageEndEvent{Message: e.Message}); err != nil {
 				return agentcore.AssistantMessage{}, err
 			}
 			return e.Message, nil
 		case provider.StreamErrorEvent:
+			if !addedPartial {
+				if err := emit(ctx, agentcore.MessageStartEvent{Message: e.Message}); err != nil {
+					return agentcore.AssistantMessage{}, err
+				}
+			}
 			finalizeMessage(agentCtx, e.Message, &addedPartial)
 			if err := emit(ctx, agentcore.MessageEndEvent{Message: e.Message}); err != nil {
 				return agentcore.AssistantMessage{}, err
@@ -155,13 +170,29 @@ func streamAssistantResponse(ctx context.Context, agentCtx *agentcore.AgentConte
 	// 7. stream ended without done/error: fall back to the stream result.
 	final, resErr := stream.Result(ctx)
 	if resErr != nil {
-		return newErrorAssistantMessage(cfg, resErr), nil
+		msg := newErrorAssistantMessage(cfg, resErr)
+		if ctx.Err() != nil {
+			msg.StopReason = agentcore.StopReasonAborted
+		}
+		if emitErr := emitFinalMessage(ctx, emit, msg); emitErr != nil {
+			return agentcore.AssistantMessage{}, emitErr
+		}
+		return msg, nil
 	}
 	finalizeMessage(agentCtx, final, &addedPartial)
 	if err := emit(ctx, agentcore.MessageEndEvent{Message: final}); err != nil {
 		return agentcore.AssistantMessage{}, err
 	}
 	return final, nil
+}
+
+// emitFinalMessage emits message_start/message_end for a terminal message that
+// never streamed (a provider build failure or a stream that ended abnormally).
+func emitFinalMessage(ctx context.Context, emit agentcore.EmitFunc, msg agentcore.AssistantMessage) error {
+	if err := emit(ctx, agentcore.MessageStartEvent{Message: msg}); err != nil {
+		return err
+	}
+	return emit(ctx, agentcore.MessageEndEvent{Message: msg})
 }
 
 // finalizeMessage replaces the placeholder partial with the final message, or

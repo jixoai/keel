@@ -35,12 +35,11 @@
 // agent_settled) belongs to pi's coding-agent session/extension layer, not the
 // kernel, so it is opt-in via RunConfig.EmitSettleEvents (default off).
 //
-// Deliberate divergence from pi's core loop: Keel does not emit message_start /
-// message_end lifecycle events for prompt, steering/follow-up, or tool-result
-// messages (only assistant stream messages get message_* events). The transcript
-// and turn_end.ToolResults carry those messages instead. Hosts that persist on
-// message_end (internal/agent) depend on this contract, and pi parity for the
-// event *names and order* of the agent/turn/tool lifecycle is unaffected.
+// Message lifecycle matches pi's core: message_start/message_end are emitted for
+// the prompt (RunConfig.PromptCount), injected steering/follow-up messages,
+// assistant stream messages, and every tool result. Hosts that persist on
+// message_end must filter by role (internal/agent persists only assistant
+// messages; tool results are persisted from tool_execution_end).
 //
 // agentLoop starts a fresh run from a prompt already appended to the context;
 // StartContinue resumes from an existing context without a new prompt.
@@ -86,6 +85,36 @@ type TurnUpdate struct {
 type StopDecision struct {
 	Block    bool
 	Guidance string
+}
+
+// TurnAction is the decision a FinishTurn hook returns.
+type TurnAction string
+
+const (
+	// TurnActionContinue ensures one next provider request. A tool-result,
+	// steering, or follow-up request that is already scheduled satisfies it and
+	// adds no extra request; otherwise the loop runs exactly one context-only
+	// turn (pi's finishTurn {action:"continue"}).
+	TurnActionContinue TurnAction = "continue"
+	// TurnActionEnd ends the run without polling queues or preparing another
+	// request (pi's finishTurn {action:"end"}).
+	TurnActionEnd TurnAction = "end"
+)
+
+// AgentTurnDecision is the optional result of FinishTurn.
+type AgentTurnDecision struct {
+	Action TurnAction
+}
+
+// AgentTurnContext is the completed-turn snapshot handed to FinishTurn. It
+// mirrors pi's AgentTurnContext: the assistant message that completed the turn,
+// its tool results, the context after both were appended, and the messages this
+// run will return if it ends here.
+type AgentTurnContext struct {
+	Message     agentcore.AssistantMessage
+	ToolResults []agentcore.ToolResultMessage
+	Context     *agentcore.AgentContext
+	NewMessages []agentcore.AgentMessage
 }
 
 // PrepareRequestContext is the runtime state handed to PrepareRequest
@@ -150,6 +179,16 @@ type RunConfig struct {
 	// so a stop skips queue draining (pi's finishTurn action "end").
 	ShouldStopAfterTurn func(ctx context.Context, agentCtx *agentcore.AgentContext) bool
 
+	// FinishTurn runs after the turn's assistant message and tool-result
+	// messages were appended and before turn_end (pi's finishTurn). Returning
+	// TurnActionEnd ends the run without polling queues or preparing another
+	// request. Returning TurnActionContinue guarantees one next provider
+	// request: an already-scheduled tool-result, steering, or follow-up request
+	// satisfies it; otherwise the loop runs exactly one context-only request
+	// over the current context. Error and aborted responses remain hard exits
+	// (the decision is ignored). nil preserves normal scheduling.
+	FinishTurn func(ctx context.Context, turn AgentTurnContext) *AgentTurnDecision
+
 	// OnBeforeSettle, when set, is consulted at the settle boundary right after
 	// agent_before_settle is emitted and before agent_settled. Returning true
 	// requests exactly one more turn over the current context (the boundary may
@@ -179,6 +218,17 @@ type RunConfig struct {
 	// consecutive-block counter and the FR-12 force-stop limit, so an ill-behaved
 	// hook cannot loop forever. nil or a non-blocking decision lets the run end.
 	OnStop func(ctx context.Context, agentCtx *agentcore.AgentContext) *StopDecision
+
+	// PromptCount is the number of trailing context messages that are this run's
+	// new prompt. They receive message_start/message_end events like pi's
+	// agentLoop prompt; StartContinue leaves it 0.
+	PromptCount int
+
+	// SkipInitialSteeringPoll suppresses the pre-first-request steering poll for
+	// this run. A host that already drained a steering message into the prompt
+	// (pi's Agent.continue assistant-tail fallback) uses it so a one-at-a-time
+	// queue does not deliver two messages in the same turn.
+	SkipInitialSteeringPoll bool
 
 	// EventBuffer is the buffer size of the emitted EventStream. 0 gives fully
 	// synchronous back-pressure (matching pi's awaited emit).
@@ -313,9 +363,40 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 		return
 	}
 
+	// pi emits the message lifecycle for the prompt before the first turn.
+	emitMessage := func(m agentcore.AgentMessage) error {
+		if err := emit(agentcore.MessageStartEvent{Message: m}); err != nil {
+			return err
+		}
+		return emit(agentcore.MessageEndEvent{Message: m})
+	}
+	if cfg.PromptCount > 0 {
+		start := len(agentCtx.Messages) - cfg.PromptCount
+		if start < 0 {
+			start = 0
+		}
+		// The prompt tail is also where a tool-loadout declaration belongs: it
+		// must precede the first prompt message (pi's initialMessages).
+		tail := append([]agentcore.AgentMessage{}, agentCtx.Messages[start:]...)
+		declared, _ := declareToolChanges(agentCtx, tail)
+		agentCtx.Messages = append(agentCtx.Messages[:start], declared...)
+		for _, m := range declared {
+			if err := emitMessage(m); err != nil {
+				finish()
+				return
+			}
+		}
+		// pi's runAgentLoop returns its initial messages (declaration + prompt) in
+		// newMessages; a prompt run therefore includes the prompt in its result.
+		produced = append(produced, declared...)
+	}
+
 	// pi polls the steering queue once before the first request: the user may
 	// have typed while the run was being prepared.
-	pending := pollSteering(ctx, &cfg)
+	var pending []agentcore.AgentMessage
+	if !cfg.SkipInitialSteeringPoll {
+		pending = pollSteering(ctx, &cfg)
+	}
 	// prepared holds messages a PrepareNextTurn update asked to append; they are
 	// injected right before the next request, ahead of queued steering messages
 	// (pi's [...preparedMessages, ...pendingMessages]).
@@ -324,6 +405,10 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 	// steering poll only run once a turn has completed. It is reset when a settle
 	// continuation starts a fresh low-level run.
 	lastTurnDone := false
+	// explicitContinuation records a FinishTurn {action:"continue"} decision that
+	// no natural (tool-result, steering, follow-up) request satisfied yet; the
+	// outer loop then runs exactly one context-only turn (pi's explicitContinuation).
+	explicitContinuation := false
 
 	// settleOrContinue emits agent_end and, when EmitSettleEvents is enabled, the
 	// host-level settle boundary. An aborted run skips agent_before_settle and
@@ -392,16 +477,21 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 				return
 			}
 			// Inject messages the previous turn's update asked to append, then the
-			// queued steering messages, before the next provider request.
-			for _, m := range prepared {
+			// queued steering messages, before the next provider request. A tool
+			// loadout change is declared ahead of them (pi's declareToolChanges).
+			injected := make([]agentcore.AgentMessage, 0, len(prepared)+len(pending))
+			injected = append(injected, prepared...)
+			injected = append(injected, pending...)
+			injected, _ = declareToolChanges(agentCtx, injected)
+			for _, m := range injected {
+				if err := emitMessage(m); err != nil {
+					finish()
+					return
+				}
 				agentCtx.Messages = append(agentCtx.Messages, m)
 				produced = append(produced, m)
 			}
 			prepared = nil
-			for _, m := range pending {
-				agentCtx.Messages = append(agentCtx.Messages, m)
-				produced = append(produced, m)
-			}
 			pending = nil
 
 			// pi's prepareRequest: every conversational request, including the
@@ -428,6 +518,12 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 				// non-terminating batch).
 				toolResults = failToolCallsFromTruncatedMessage(ctx, agentCtx, assistant, emitFrom)
 				hasMoreToolCalls = len(toolResults) > 0
+				for _, tr := range toolResults {
+					if err := emitMessage(tr); err != nil {
+						finish()
+						return
+					}
+				}
 				produced = appendToolResults(produced, toolResults)
 			case agentcore.StopReasonError, agentcore.StopReasonAborted:
 				// Terminal failure: emit the turn end and stop. A failure before
@@ -440,6 +536,16 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 				}
 				if len(agentCtx.Messages) == 0 || agentCtx.Messages[len(agentCtx.Messages)-1].Role() != agentcore.RoleAssistant {
 					agentCtx.Messages = append(agentCtx.Messages, assistant)
+				}
+				// pi still calls finishTurn for a terminal assistant message, but the
+				// decision cannot change the hard exit.
+				if cfg.FinishTurn != nil {
+					cfg.FinishTurn(ctx, AgentTurnContext{
+						Message:     assistant,
+						ToolResults: nil,
+						Context:     agentCtx,
+						NewMessages: snapshot(),
+					})
 				}
 				_ = emit(agentcore.TurnEndEvent{Message: assistant})
 				finish()
@@ -461,17 +567,39 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 					// asks to terminate (pi's shouldTerminateToolBatch).
 					hasMoreToolCalls = !allTerminate
 					for _, tr := range toolResults {
+						if err := emitMessage(tr); err != nil {
+							finish()
+							return
+						}
 						agentCtx.Messages = append(agentCtx.Messages, tr)
 					}
 					produced = appendToolResults(produced, toolResults)
 				}
 			}
 
+			// pi's finishTurn: after every message of the turn (assistant + tool
+			// results) was appended and before turn_end.
+			var decision *AgentTurnDecision
+			if cfg.FinishTurn != nil {
+				decision = cfg.FinishTurn(ctx, AgentTurnContext{
+					Message:     assistant,
+					ToolResults: toolResults,
+					Context:     agentCtx,
+					NewMessages: snapshot(),
+				})
+			}
 			if err := emit(agentcore.TurnEndEvent{Message: assistant, ToolResults: toolResults}); err != nil {
 				finish()
 				return
 			}
 			lastTurnDone = true
+			// {action:"end"} ends the run without polling queues or preparing the
+			// next turn.
+			if decision != nil && decision.Action == TurnActionEnd {
+				finish()
+				return
+			}
+			explicitContinuation = decision != nil && decision.Action == TurnActionContinue
 
 			// Keel extension: auto-compaction at the turn boundary (pi's host does
 			// it between runs). Record utilization after any compaction so the
@@ -488,8 +616,13 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 				return
 			}
 			// Queue the next input: steering delivered after the turn, then the
-			// inner loop continues when tools still need a follow-up request.
+			// inner loop continues when tools still need a follow-up request. A
+			// natural request satisfies an explicit continuation; otherwise it is
+			// fulfilled once by the outer loop.
 			pending = pollSteering(ctx, &cfg)
+			if hasMoreToolCalls || len(pending) > 0 {
+				explicitContinuation = false
+			}
 		}
 
 		// Inner loop settled: consult follow-up messages. They become the next
@@ -497,9 +630,16 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 		// context pi would show it.
 		if cfg.GetFollowUpMessages != nil {
 			if follow := cfg.GetFollowUpMessages(ctx, agentCtx); len(follow) > 0 {
+				explicitContinuation = false
 				pending = follow
 				continue // outer loop with the follow-ups as new input
 			}
+		}
+		// No natural request was selected, so fulfill the continuation decision
+		// with exactly one context-only turn.
+		if explicitContinuation {
+			explicitContinuation = false
+			continue
 		}
 		// Stop hook: the run is about to end naturally. A hook may block the end
 		// and force a continuation, feeding its guidance back as the next input

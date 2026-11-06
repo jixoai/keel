@@ -10,8 +10,8 @@
 // Every test keeps PI's it(...) title (prefixed with TestConformance) so the two
 // suites can be diffed line by line. Where Go cannot express PI's shape the
 // adaptation is stated on the test:
-//   - prompts are pre-appended to the context by the caller (Keel's loop does not
-//     emit prompt message events, see the package docs);
+//   - prompts are pre-appended to the context by the caller and announced via
+//     RunConfig.PromptCount so the loop emits their message lifecycle;
 //   - custom message kinds implement agentcore.Message instead of TypeScript
 //     declaration merging, so the custom-kind case uses the non-LLM
 //     CompactionMessage role;

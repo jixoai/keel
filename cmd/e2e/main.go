@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type env struct {
@@ -37,15 +38,21 @@ type env struct {
 
 func main() {
 	var (
-		bin  = flag.String("bin", "/tmp/keel-runtime", "runtime binary")
-		dsn  = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
-		port = flag.Int("port", 13745, "listen port")
+		bin   = flag.String("bin", "/tmp/keel-runtime", "runtime binary")
+		dsn   = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
+		port  = flag.Int("port", 13745, "listen port")
+		reset = flag.Bool("reset", true, "truncate the runtime tables before the run (dedicated test DSN required)")
 	)
 	flag.Parse()
 	if *dsn == "" {
 		log.Fatal("KEEL_DSN is required")
 	}
 	e := &env{bin: *bin, dsn: *dsn, base: fmt.Sprintf("http://127.0.0.1:%d", *port)}
+	if *reset {
+		if err := resetRuntimeTables(context.Background(), *dsn); err != nil {
+			log.Fatalf("reset runtime tables: %v", err)
+		}
+	}
 
 	results := []result{}
 	results = append(results, e.caseIdempotentAcrossRestart())
@@ -64,6 +71,20 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// resetRuntimeTables starts every run from an empty log. Without it, leftovers
+// from an earlier run (for example a 100-session bulk tenant) are claimed first
+// and can starve a new session past the case timeout.
+func resetRuntimeTables(ctx context.Context, dsn string) error {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	_, err = pool.Exec(ctx, `TRUNCATE tenants, sessions, events, checkpoints, submissions,
+		tasks, blobs, blob_chunks, blob_refs, runs`)
+	return err
 }
 
 type result struct {
@@ -242,8 +263,10 @@ func (e *env) caseIdempotentAcrossRestart() result {
 	if err != nil {
 		return fail("load events: %v", err)
 	}
-	if len(events) != 1 {
-		return fail("want 1 event after three submits, got %d", len(events))
+	// The worker may already have answered; idempotency is about the single
+	// user event, not about suppressing the assistant turn.
+	if users := countKind(events, "user.message"); users != 1 {
+		return fail("want 1 user event after three submits, got %d (events: %d)", users, len(events))
 	}
 	r.Checks = []string{"first submit created", "replay before kill reused submission", "SIGKILL", "replay after kill reused submission", "exactly one user event"}
 	r.Pass = true

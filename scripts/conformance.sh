@@ -9,6 +9,7 @@ export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.3}"
 out="${1:-/tmp/keel-conformance.json}"
 go test -json -count=1 \
   ./internal/loop ./internal/compaction ./internal/mcp ./internal/skills \
-  ./internal/telemetry ./internal/agent ./internal/httpapi ./internal/blob ./internal/stream \
+  ./internal/telemetry ./internal/hooks ./internal/host ./internal/durable \
+  ./internal/agenttool ./internal/agent ./internal/httpapi ./internal/blob ./internal/stream \
   > "$out"
 exec python3 "$(dirname "$0")/summarize-conformance.py" "$out"

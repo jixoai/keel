@@ -89,9 +89,24 @@ per-model overrides、background 实际触发（loop 仍只做 blocking）。
 | input-schema: object + properties / keep keywords | `TestNormalizeInputSchema/*`（+ 非法 JSON 加固） | ✅ PASS |
 | content: text/image/audio/link/resource/structured | `TestToLLMContent/*` | ✅ PASS |
 | output-limit: 20KB middle cut / save / unicode | `TestLimitContent/*`（+ `.txt` extension + FullOutputPath） | ✅ PASS |
+| client: initialize / tools list + pagination / call / timeout / server requests | `TestClient*` | ✅ PASS |
+| stdio transport: framing / stderr / child exit / close / stubborn child | `TestStdio*` | ✅ PASS（1 例按平台跳过） |
+| Streamable HTTP: JSON + SSE / session + protocol headers / GET stream | `TestStreamableHTTPTransport/*` | ✅ PASS |
+| Streamable HTTP: Last-Event-ID resume / broken response stream / reconnect | 同上 | ✅ PASS |
+| Streamable HTTP: 202-without-response / JSON size limit / BOM + UTF-8 | 同上 | ✅ PASS |
+| Streamable HTTP: error excerpt / body in message / 401 + insufficient_scope / close DELETE / expired session | 同上 | ✅ PASS |
+| SSE parser: CR/LF/CRLF / chunk splits / comments / multiline / size limit | `TestConsumeSSEStream/*` | ✅ PASS |
+| config: stdio + HTTP entries / transport picking / field errors / oauth | `TestValidateMcpServerConfig/*` | ✅ PASS |
+| config: CIMD callback / unknown fields / override predicate | 同上 | ✅ PASS |
+| mcp.json: global + project merge / override keys / namespace clash | `TestLoadConfigFiles/*` | ✅ PASS |
+| manager: connect / tool adapters / partial failure / prompt section / close | `TestManagerConnect` | ✅ PASS |
 
 实现备注：`CreateToolName` 的 hash 覆盖**未清洗**的 `server\0tool`（与 PI 字节一致）；
 `LimitContent` 返回 `{Content, FullOutputPath}`，`saveOutput(data, extension)` 与 PI 同形。
+Streamable HTTP 保留 PI 的请求分类（JSON/SSE/202）、SSE 断点续传、GET 流重连与退避、
+AuthProvider 的一次 401/403 步进重试、`Mcp-Session-Id` / `MCP-Protocol-Version` 头，
+以及 close 时用最后一个 token 发 DELETE（不重新取 token）。**未移植**：交互式 OAuth
+（discovery / DCR / CIMD / loopback / PKCE 登录流程）；AuthProvider 接口与 oauth 配置校验已就位。
 
 ### 2.4 Skills（`internal/skills/*_test.go`）
 
@@ -126,7 +141,8 @@ per-model overrides、background 实际触发（loop 仍只做 blocking）。
 | metrics ordered/exemplars/aggregate/detached/noop | `TestMetrics*`、`TestNoopMetricsShareInstruments` | ✅ PASS |
 | store settled/detached / filters / cursor / remote trace | `TestStore*` | ✅ PASS |
 
-合计 34 个测试，全部 PASS，coverage 80.6%，`-race` 通过。
+合计 38 个测试，全部 PASS，coverage 80.6%，`-race` 通过。`render.go` 增加 span/trace/metric
+的稳定文本渲染（排序属性）用于报告与调试；聚合器差异见下。
 
 已知差异（诚实登记）：
 - `FindMetrics` 按 `(interval,name,kind,unit,attrs)` 聚合 count/sum/min/max；PI memory adapter 返回 count-one 原始行
@@ -134,18 +150,58 @@ per-model overrides、background 实际触发（loop 仍只做 blocking）。
 - PI `telemetryNow()` 的 10ms 重锚时钟未移植；Go 用 `time.Now()` + 可注入 clock，µs 分辨率与顺序测试通过。
 - TS 编译期 schema 推导、render、OTLP/Prometheus adapter 未在本次范围。
 
-## 2.6 汇总（2026-11-06）
+### 2.6 Extensions / Hooks（`internal/hooks/*_test.go`）
 
-`scripts/conformance.sh` 的 `go test -json` 统计：**205 个测试（含子测试）PASS / 0 FAIL**。
+| PI 事件 | Go 测试 | 状态 |
+|---|---|---|
+| beforeToolCall allow/deny/modify + revalidation | `TestBeforeToolCall*` | ✅ PASS |
+| afterToolCall replace / structured content / error results | `TestAfterToolCall*` | ✅ PASS |
+| command hooks: JSON stdin/stdout / 5s timeout / failure policy / audit | `TestCommandHook*`、`TestAudit*` | ✅ PASS |
+| registry ordering / snapshots / wrap tool | `TestRegistry*`、`TestWrapTool*` | ✅ PASS |
+
+合计 81 个测试，全部 PASS，coverage 79.9%。
+
+### 2.7 Durable（`internal/durable/*_test.go`）
+
+| PI durable 语义 | Go 测试 | 状态 |
+|---|---|---|
+| task state machine: pending/running/waiting/sleeping/completing/terminal | `TestTasks*` | ✅ PASS |
+| submissions: input/write/continue, queued/placed/done/unanswered, requestId dedupe | `TestSubmissions_*` | ✅ PASS |
+| run failure / failed-run inbox / continue after failure | `TestRunFailure_*`、`TestInputsQueued*`、`TestContinue*` | ✅ PASS |
+| generation idempotency / retry policy / restart limit | `TestGeneration*`、`TestTasks_Retry*` | ✅ PASS |
+| tool tasks: call→execute, replay safe/unsafe, restart/abandoned slots | `TestToolHooks*`、`TestNestedTools*` | ✅ PASS |
+| nested tools: per-call task, keys, abort/reuse, parent result | `TestNestedTools*` | ✅ PASS |
+| structured output: schema validation / diagnostics / afterTool revalidation | `TestStructuredOutput*` | ✅ PASS |
+
+合计 100 个测试，全部 PASS。PG 侧 `internal/store/tasks.go` 持久化 tasks/submissions；
+entries/inbox/live/nested documents 仍由内存 harness 承担（见 §4）。
+
+### 2.8 Host / Runner 装配（`internal/host`、`internal/agent`）
+
+| PI 宿主能力 | Go 测试 | 状态 |
+|---|---|---|
+| system prompt sections + skills XML + file-read wording | `TestBuildSystemPrompt*`、`TestHost*` | ✅ PASS |
+| skill discovery + skill tool (progressive disclosure) | `TestHost*` | ✅ PASS |
+| runner uses host prompt and tool registry | `TestRunnerUsesHostAssembly` | ✅ PASS |
+| runner run span + run counter/duration metric | `TestRunnerRecordsTelemetry` | ✅ PASS |
+| provider stream proxy events / toolcall deltas / unterminated terminal | `TestProxy*` | ✅ PASS |
+
+## 2.9 汇总（2026-11-06）
+
+`scripts/conformance.sh` 的 `go test -json` 统计：**495 个测试（含子测试）PASS / 0 FAIL / 1 SKIP**。
 
 | 套件 | PASS |
 |---|---|
-| loop | 30 |
+| loop | 70 |
 | compaction | 42 |
-| mcp | 31 |
+| mcp | 83（1 skip） |
 | skills | 49 |
-| telemetry | 34 |
-| 运行时（agent/httpapi/blob/stream） | 19 |
+| telemetry | 38 |
+| hooks | 81 |
+| durable | 100 |
+| host | 4 |
+| agenttool | 2 |
+| 运行时（agent/httpapi/blob/stream） | 26 |
 
 ## 3. 运行
 
@@ -156,8 +212,15 @@ GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=go1.27.3 go test ./internal/loop .
 
 ## 4. 未覆盖与后续
 
-- `packages/durable/test` 其余 ~100 个文件：session/storage/JSONL/提交语义，按 `keel-ecosystem` 的
-  recoverability 工作流逐批移植。
-- `packages/coding-agent/test` 的 extensions/compaction 宿主用例：等宿主层扩展模型落地后移植。
-- MCP 网络传输（stdio/streamable HTTP/OAuth）：本轮先做纯函数；网络层在 `keel-ecosystem` P3 移植。
+- **MCP 交互式 OAuth**：`oauth/` 的 discovery、DCR、CIMD、loopback 回调、PKCE 登录与 token 刷新
+  未移植；AuthProvider 接口、oauth 配置校验和 401/403 步进重试已就位。
+- **durable 存储层**：PI 的 SQLite/JSONL、commit publication/observer、watch/ops、document
+  family 生命周期、`persistWithinMs` 延迟提交与 slot 快照未复刻；Keel 用事件日志 + PG 投影替代。
+  PG 目前只落 tasks/submissions，entries/inbox/live/nested docs 仍在进程内 harness。
+- **durable 任务版本迁移**（v1→v2→v3）、orphaned/blocked/background task、read-only harness、
+  wake/sleeping timer、compaction 任务、provider deferred response/poll、usage ledger 未移植。
+- **coding-agent 宿主**：extensions loader 的完整注册/信任模型、project-trust UI、交互式 `/mcp`
+  菜单、TUI/CLI 不复刻（明确非目标）。
+- **telemetry**：OTLP / Prometheus adapter 未实现；`pi.ai.request` 请求级 span/token/cost 指标
+  尚未接入 provider（当前是 run 级 span + run counter/duration）。
 - 所有未覆盖项必须在报告里显式登记，不得用「已对齐」一笔带过。

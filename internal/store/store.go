@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -94,12 +95,41 @@ func (s *Store) Close() { s.pool.Close() }
 // keyset queries) without making every query public.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Migrate applies schema.sql. It is safe to run on every start.
+// Migrate applies schema.sql. It is safe to run on every start. Concurrent
+// migrators (tests, replicas) can deadlock on DDL locks even with the advisory
+// lock, so transient deadlock/serialization failures are retried.
 func (s *Store) Migrate(ctx context.Context) error {
 	sql, err := schemaFS.ReadFile("schema.sql")
 	if err != nil {
 		return fmt.Errorf("store: read schema: %w", err)
 	}
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		if err := s.migrateOnce(ctx, string(sql)); err != nil {
+			lastErr = err
+			if !isRetryableMigration(err) {
+				return err
+			}
+			time.Sleep(time.Duration(50+attempt*75) * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func isRetryableMigration(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "40P01", "40001", "55P03":
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) migrateOnce(ctx context.Context, sql string) error {
 	// Serialize concurrent migrations (test packages and replicas start at the
 	// same time); the lock is released automatically at commit.
 	tx, err := s.pool.Begin(ctx)
@@ -110,7 +140,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(714322)"); err != nil {
 		return fmt.Errorf("store: migrate lock: %w", err)
 	}
-	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+	if _, err := tx.Exec(ctx, sql); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

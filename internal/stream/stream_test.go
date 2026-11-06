@@ -134,3 +134,27 @@ func TestBufferPoolBounded(t *testing.T) {
 type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// TestGuardDeadlineScalesWithWriteSize pins the slow-client floor: one 87KB
+// chunk must be allowed the time it needs at MinRate, not the flat 4s that
+// killed a 50KB/s client draining the chunk through a small socket buffer.
+func TestGuardDeadlineScalesWithWriteSize(t *testing.T) {
+	var deadlines []time.Duration
+	w := writerFunc(func(p []byte) (int, error) { return len(p), nil })
+	g := NewGuardWriter(w, func(at time.Time) error {
+		deadlines = append(deadlines, time.Until(at))
+		return nil
+	}, GuardConfig{MinRate: 12 << 10})
+	if _, err := g.Write(make([]byte, MaxChunkWire)); err != nil {
+		t.Fatal(err)
+	}
+	if len(deadlines) != 1 || deadlines[0] < 7*time.Second {
+		t.Fatalf("chunk deadline = %v, want at least 7s at 12KB/s", deadlines)
+	}
+	if _, err := g.Write(make([]byte, 64)); err != nil {
+		t.Fatal(err)
+	}
+	if len(deadlines) != 2 || deadlines[1] < 3*time.Second || deadlines[1] > 5*time.Second {
+		t.Fatalf("small write deadline = %v, want the flat 4s", deadlines)
+	}
+}

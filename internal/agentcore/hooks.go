@@ -35,6 +35,10 @@ type AfterToolCallResult struct {
 	Details   *any
 	Terminate *bool
 	IsError   *bool
+	// StructuredContent replaces the machine-readable result. When Content is
+	// replaced without StructuredContent, the structured content is dropped
+	// because it may no longer match (pi's AfterToolCallResult contract).
+	StructuredContent *any
 }
 
 // AgentLoopTurnUpdate is the optional result of the prepareNextTurn hook: it can

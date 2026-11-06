@@ -15,8 +15,9 @@ import (
 var ErrSlowClient = errors.New("stream: slow client")
 
 // GuardConfig tunes slow-client detection. The defaults encode the design in
-// docs/BACKPRESSURE.md §3: a single write may block 4s (≈22KB/s implied floor)
-// and two consecutive 15s windows below MinRate condemn the stream.
+// docs/BACKPRESSURE.md §3: a single write may block 4s, or longer when the write
+// itself is larger than MinRate × 4s (so one 87KB chunk gets ~7s at the 12KB/s
+// floor), and two consecutive 15s windows below MinRate condemn the stream.
 type GuardConfig struct {
 	Limiter      *Limiter      // nil = unlimited (SSE text must stay unlimited)
 	MaxBlock     time.Duration // default 4s
@@ -86,7 +87,14 @@ func (g *Guard) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	if g.deadline != nil {
-		if err := g.deadline(time.Now().Add(g.cfg.MaxBlock)); err != nil {
+		block := g.cfg.MaxBlock
+		// A write may carry a whole chunk: allow it the time that chunk needs at
+		// the minimum rate, or a 50KB/s client would be killed for the kernel
+		// draining one 87KB chunk slower than 4s.
+		if bySize := time.Duration(int64(len(p)) * int64(time.Second) / g.cfg.MinRate); bySize > block {
+			block = bySize
+		}
+		if err := g.deadline(time.Now().Add(block)); err != nil {
 			// A ResponseWriter that cannot set a deadline is a programming error
 			// in the middleware chain (a wrapper without Unwrap); fail loudly.
 			if errors.Is(err, http.ErrNotSupported) {

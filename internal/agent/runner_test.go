@@ -10,7 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/agenttool"
+	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 func testStore(t *testing.T) *store.Store {
@@ -254,5 +257,98 @@ func TestRunnerSkipsDuplicateFinal(t *testing.T) {
 	}
 	if assistants != 1 {
 		t.Fatalf("assistant messages = %d, want 1", assistants)
+	}
+}
+
+type staticAssembly struct {
+	prompt string
+	tools  *agenttool.ToolRegistry
+}
+
+func (s staticAssembly) SystemPrompt() string           { return s.prompt }
+func (s staticAssembly) Tools() *agenttool.ToolRegistry { return s.tools }
+
+// TestRunnerUsesHostAssembly proves the host seam reaches the kernel: the system
+// prompt is the host-assembled string and the tools executed are the host
+// registry's, not the runner defaults.
+func TestRunnerUsesHostAssembly(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	ctx := context.Background()
+	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "echo hello"}); err != nil {
+		t.Fatal(err)
+	}
+	const prompt = "<tenant>\nYou are a test tenant.\n</tenant>"
+	var gotSystem string
+	base := FakeStream()
+	stream := func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		gotSystem = llm.SystemPrompt
+		return base(ctx, model, llm, cfg)
+	}
+	reg := agenttool.NewToolRegistry()
+	if err := reg.Register(EchoTool{}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(st, stream, "fake", "fake", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.Tools = nil // only the host registry may execute tools
+	r.Assembly = staticAssembly{prompt: prompt, tools: reg}
+	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+		t.Fatal(err)
+	}
+	if gotSystem != prompt {
+		t.Fatalf("provider system prompt = %q, want %q", gotSystem, prompt)
+	}
+	events := eventsOf(t, st, tenant, session)
+	if len(events) < 3 {
+		t.Fatalf("want user + assistant tool call + tool result + assistant, got %d events", len(events))
+	}
+	var last agentcore.AssistantMessage
+	if err := json.Unmarshal(events[len(events)-1].Payload, &last); err != nil {
+		t.Fatal(err)
+	}
+	if got := ContentText(last.Content); got != "tool echo returned: echo hello" {
+		t.Fatalf("final reply = %q", got)
+	}
+}
+
+// TestRunnerRecordsTelemetry checks the observability seam: one span per run
+// with tenant/session attributes, and the run counter/histogram.
+func TestRunnerRecordsTelemetry(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	ctx := context.Background()
+	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	memory := telemetry.NewMemory()
+	r := newTestRunner(st)
+	r.Telemetry = &RunTelemetry{Context: memory, Metrics: memory}
+	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+		t.Fatal(err)
+	}
+	spans := memory.Spans()
+	if len(spans) != 1 || spans[0].Name != "keel.agent.run" {
+		t.Fatalf("spans = %#v, want one keel.agent.run", spans)
+	}
+	if got := spans[0].Attributes["tenant"]; got != tenant.String() {
+		t.Errorf("span tenant = %v", got)
+	}
+	if got := spans[0].Attributes["session"]; got != session.String() {
+		t.Errorf("span session = %v", got)
+	}
+	foundRunCounter, foundDuration := false, false
+	for _, measurement := range memory.Measurements() {
+		switch measurement.Name {
+		case "keel.agent.runs":
+			foundRunCounter = true
+			if measurement.Value != 1 {
+				t.Errorf("run counter value = %v", measurement.Value)
+			}
+		case "keel.agent.run.duration":
+			foundDuration = true
+		}
+	}
+	if !foundRunCounter || !foundDuration {
+		t.Errorf("measurements = %#v, want the run counter and duration", memory.Measurements())
 	}
 }

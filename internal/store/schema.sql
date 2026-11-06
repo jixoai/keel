@@ -71,6 +71,33 @@ CREATE TABLE IF NOT EXISTS tasks (
     PRIMARY KEY (tenant_id, session_id, task_id)
 );
 
+-- Durable task state machine (internal/durable). `state` stays the live
+-- checkpoint envelope; these columns carry the identity and lifecycle fields
+-- the scheduler needs without rewriting the whole JSON document.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS version  int NOT NULL DEFAULT 1;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS input    jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS checkpoint jsonb;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS outcome  jsonb;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS status   text NOT NULL DEFAULT 'pending';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner    uuid;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS started_at timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS ended_at   timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS abort_requested    boolean NOT NULL DEFAULT false;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS background        boolean NOT NULL DEFAULT false;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS abandon_on_restart boolean NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS tasks_live ON tasks (tenant_id, session_id, status)
+    WHERE status IN ('pending', 'running', 'waiting', 'sleeping', 'completing');
+
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS type      text;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS entry_id  bigint;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS answer_id bigint;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reason    text;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS detail    jsonb;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS submissions_by_session ON submissions (tenant_id, session_id, created_at);
+
 CREATE TABLE IF NOT EXISTS blobs (
     tenant_id     uuid NOT NULL,
     blob_id       uuid NOT NULL,

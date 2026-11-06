@@ -11,6 +11,7 @@ import (
 
 // Message roles, matching pi's wire format.
 const (
+	RoleSystem     = "system"
 	RoleUser       = "user"
 	RoleAssistant  = "assistant"
 	RoleToolResult = "toolResult"
@@ -53,6 +54,35 @@ type UserMessage struct {
 
 func (UserMessage) isMessage()     {}
 func (m UserMessage) Role() string { return RoleUser }
+
+// ToolDeclaration is the model-facing declaration of a tool, stripped of its
+// executable payload (mirrors pi's toToolDeclaration). Parameters is the raw
+// JSON Schema.
+type ToolDeclaration struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ToolReference names a previously declared tool, used by toolsRemoved.
+type ToolReference struct {
+	Name string `json:"name"`
+}
+
+// SystemMessage is a transcript system message. Its Content is prompt text;
+// ToolsAdded / ToolsRemoved declare a tool-loadout delta. A message with no
+// content and no tool delta is a pure declaration (pi's pending system
+// message). Mirrors pi's SystemMessage minus the app-specific "sections".
+type SystemMessage struct {
+	RoleField    string            `json:"role"`
+	Content      string            `json:"content,omitempty"`
+	ToolsAdded   []ToolDeclaration `json:"toolsAdded,omitempty"`
+	ToolsRemoved []ToolReference   `json:"toolsRemoved,omitempty"`
+	Timestamp    int64             `json:"timestamp"`
+}
+
+func (SystemMessage) isMessage()     {}
+func (m SystemMessage) Role() string { return RoleSystem }
 
 // AssistantMessage is a model response. Content may hold text/thinking/toolCall
 // blocks. StopReason follows pi's set (end_turn/tool_use/length/error/aborted).
@@ -188,6 +218,12 @@ func decodeMessage(raw json.RawMessage) (Message, error) {
 		return nil, fmt.Errorf("peek role: %w", err)
 	}
 	switch probe.Role {
+	case RoleSystem:
+		var m SystemMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return m, nil
 	case RoleUser:
 		var m UserMessage
 		if err := json.Unmarshal(raw, &m); err != nil {

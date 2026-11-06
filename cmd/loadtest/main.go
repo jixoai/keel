@@ -131,11 +131,13 @@ func main() {
 	// available via the metrics endpoint's pid field.
 	rssSamples := make(chan int64, 256)
 	sampleStop := make(chan struct{})
-	go sampleRSS(sampleStop, rssSamples, c.base)
+	samplerDone := make(chan struct{})
+	go sampleRSS(sampleStop, rssSamples, samplerDone, c.base)
 
 	wg.Wait()
 	duration := time.Since(start)
 	close(sampleStop)
+	<-samplerDone
 	close(rssSamples)
 
 	var rss []int64
@@ -447,7 +449,8 @@ func seedImages(ctx context.Context, client *http.Client, base, tenant string, n
 	return ids, nil
 }
 
-func sampleRSS(stop <-chan struct{}, out chan<- int64, base string) {
+func sampleRSS(stop <-chan struct{}, out chan<- int64, done chan<- struct{}, base string) {
+	defer close(done)
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
