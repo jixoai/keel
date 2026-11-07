@@ -303,7 +303,12 @@ func usageOf(usage *proxyUsage) *agentcore.Usage {
 	if usage == nil {
 		return nil
 	}
-	return &agentcore.Usage{InputTokens: usage.Input, OutputTokens: usage.Output}
+	return &agentcore.Usage{
+		InputTokens:      usage.Input,
+		OutputTokens:     usage.Output,
+		CacheReadTokens:  usage.CacheRead,
+		CacheWriteTokens: usage.CacheWrite,
+	}
 }
 
 func failProxy(ctx context.Context, partial *agentcore.AssistantMessage, stream *provider.AssistantMessageEventStream, reason, message string) {

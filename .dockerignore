@@ -1,0 +1,13 @@
+.git
+.env*
+.env.*
+.gitignore
+.github
+.worktrees
+**/.DS_Store
+*.log
+tmp/
+docs/
+openspec/
+scripts/
+third_party/

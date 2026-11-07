@@ -105,8 +105,25 @@ per-model overrides、background 实际触发（loop 仍只做 blocking）。
 `LimitContent` 返回 `{Content, FullOutputPath}`，`saveOutput(data, extension)` 与 PI 同形。
 Streamable HTTP 保留 PI 的请求分类（JSON/SSE/202）、SSE 断点续传、GET 流重连与退避、
 AuthProvider 的一次 401/403 步进重试、`Mcp-Session-Id` / `MCP-Protocol-Version` 头，
-以及 close 时用最后一个 token 发 DELETE（不重新取 token）。**未移植**：交互式 OAuth
-（discovery / DCR / CIMD / loopback / PKCE 登录流程）；AuthProvider 接口与 oauth 配置校验已就位。
+以及 close 时用最后一个 token 发 DELETE（不重新取 token）。
+
+### 2.3.1 MCP OAuth（`internal/mcp/oauth/*_test.go`）
+
+| PI 测试（`packages/mcp/test`） | Go 测试 | 状态 |
+|---|---|---|
+| oauth: discovery + DCR + PKCE + 401 refresh 全链路 | `TestOAuthDiscoversRegistersAuthorizesAndRefreshesOn401` | ✅ PASS |
+| oauth: 并发 401 共享一次 refresh（rotation） | `TestOAuthSharesOneRefreshBetweenConcurrent401s` | ✅ PASS |
+| oauth: insufficient_scope 不 refresh，保留旧 grant | `TestOAuthAsksForAuthorizationOnInsufficientScope` | ✅ PASS |
+| oauth: 凭据绑定精确 server URL / application_type / issuer / 非 HTTP endpoint | `TestOAuthBindsCredentialsToExactServerURL`、`TestOAuthRegistrationApplicationType`、`TestOAuthRejectsIssuerMismatch`、`TestOAuthRejectsNonHTTPAuthorizationEndpoints` | ✅ PASS |
+| oauth: 配置 metadata 文档 / iss 参数矩阵 / ctx 取消 / callback 页面 | `TestOAuthUsesConfiguredAuthorizationServerMetadataDocument`、`TestOAuthExchangesCodeOnlyWhenIssParameterMatches`、`TestOAuthStopsWhenContextIsCancelled`、`TestOAuthCallbackServerPages/*` | ✅ PASS |
+| sign-in: 二次调用完成 / refresh / 锁 / stored client / CIMD / 取消 | `TestSignIn*`（含 5 个 stored-client、10 个 CIMD、4 个取消子例） | ✅ PASS |
+| auth-provider: refresh / pending 保留 / 文档刷新 / invalid_client / server/network error | `TestStoredAuthProvider*` | ✅ PASS |
+| loopback: 回调完成 / 错路径 / 粘贴 URL / 取消 | `TestLoopbackSignIn*`、`TestPastedRedirectURLs` | ✅ PASS |
+
+运行时替换（PI 无对应）：独立锁池 advisory lock（MaxConns=2 并发回归）、pending 原子
+消费、AES-GCM AAD/key id、SSRF 私网拒绝、token 错误脱敏、HTTP sign-in/callback 与
+同进程重连 E2E。**未覆盖**：CIMD 公共文档的静态托管（部署项）、宿主 per-tenant
+manager 缓存（Runner/host 范围）、过期 pending 的后台清理。
 
 ### 2.4 Skills（`internal/skills/*_test.go`）
 
@@ -188,7 +205,7 @@ entries/inbox/live/nested documents 仍由内存 harness 承担（见 §4）。
 
 ## 2.9 汇总（2026-11-06）
 
-`scripts/conformance.sh` 的 `go test -json` 统计：**495 个测试（含子测试）PASS / 0 FAIL / 1 SKIP**。
+`scripts/conformance.sh` 的 `go test -json` 统计：**634 个测试（含子测试）PASS / 0 FAIL / 1 SKIP**（本文件其余「495」为 PI 搬运期历史口径；冻结基线为 593，当前含本 change 新增测试 634）。
 
 | 套件 | PASS |
 |---|---|
@@ -212,15 +229,19 @@ GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=go1.27.3 go test ./internal/loop .
 
 ## 4. 未覆盖与后续
 
-- **MCP 交互式 OAuth**：`oauth/` 的 discovery、DCR、CIMD、loopback 回调、PKCE 登录与 token 刷新
-  未移植；AuthProvider 接口、oauth 配置校验和 401/403 步进重试已就位。
+- **MCP OAuth 宿主侧**：协议与存储已全量移植；CIMD 公共文档静态托管、per-tenant
+  manager 缓存（多租户同时在线）与过期 pending 后台清理仍未实现。
 - **durable 存储层**：PI 的 SQLite/JSONL、commit publication/observer、watch/ops、document
   family 生命周期、`persistWithinMs` 延迟提交与 slot 快照未复刻；Keel 用事件日志 + PG 投影替代。
   PG 目前只落 tasks/submissions，entries/inbox/live/nested docs 仍在进程内 harness。
 - **durable 任务版本迁移**（v1→v2→v3）、orphaned/blocked/background task、read-only harness、
-  wake/sleeping timer、compaction 任务、provider deferred response/poll、usage ledger 未移植。
+  wake/sleeping timer、compaction 任务、provider deferred response/poll 未移植。
+- **usage ledger**：schema/store 契约已交付（`usage_ledger` 以 request_id 幂等，
+  `settled`/`unaccounted` 状态与聚合查询）；request_id 生成、请求元数据事件、崩溃补偿
+  扫描与 `AppendUsage` 调用属于 composition root，待 Runner 升级 change 接线。
 - **coding-agent 宿主**：extensions loader 的完整注册/信任模型、project-trust UI、交互式 `/mcp`
   菜单、TUI/CLI 不复刻（明确非目标）。
-- **telemetry**：OTLP / Prometheus adapter 未实现；`pi.ai.request` 请求级 span/token/cost 指标
-  尚未接入 provider（当前是 run 级 span + run counter/duration）。
+- **telemetry**：OTLP / Prometheus adapter 未实现；`pi.ai.request` 请求级 span/token 指标
+  模块已交付（`internal/agent.NewObservedStream` + memory adapter 测试），composition root
+  待 Runner 接线；当前 run 级 span + run counter/duration 已在线。
 - 所有未覆盖项必须在报告里显式登记，不得用「已对齐」一笔带过。

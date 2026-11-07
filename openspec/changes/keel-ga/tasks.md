@@ -1,3 +1,9 @@
+> **状态（2026-11-08 对账）**：本 change 是历史任务板，**已冻结**。剩余未完成项不再单独推进，
+> 已并入 `keel-service-graph`（其 `tasks.md` 是当前唯一在推进的板：W0 基线/R1 差分、
+> W1 契约内核、W2 服务图与 loadout、W3 PI loop 与 conformance 门、W4 handoff、
+> W5 外部网关、W6 集成与验收）。本板保留原文，仅作历史对照；后续以
+> `keel-service-graph` 为准，勿在此勾选。
+
 # Tasks: keel-ga
 
 ## 1. agent-execution（核心，先做）
@@ -38,12 +44,12 @@
 
 ## 4. ops-runtime
 
-- [ ] CI：build/vet/test -race/容器构建（Go 1.27.3，PG service）
-- [ ] Dockerfile（distroless）+ docker-compose（PG + Keel）
-- [ ] `/v1/ready`（PG + 迁移）；`/metrics`（Prometheus 文本，固定基数）
-- [ ] 结构化日志 + request id
-- [ ] SIGTERM 排水：`event: drain` + 速率关闭
-- [ ] 部署文档（单机 2GB 推荐参数）
+- [x] CI：build/vet/test -race/容器构建（Go 1.27.3，PG service）
+- [x] Dockerfile（distroless）+ docker-compose（PG + Keel）
+- [x] `/v1/ready`（PG + 迁移）；`/metrics`（Prometheus 文本，固定基数）
+- [x] 结构化日志 + request id
+- [x] SIGTERM 排水：`event: drain` + 速率关闭
+- [x] 部署文档（单机 2GB 推荐参数）
 
 ## 5. blob-lifecycle
 

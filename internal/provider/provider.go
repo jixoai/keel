@@ -17,6 +17,7 @@ import (
 	"context"
 
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 // AssistantMessageEvent is the sealed interface for provider stream deltas. The
@@ -114,6 +115,11 @@ type StreamConfig struct {
 	ThinkingLevel agentcore.ThinkingLevel
 	// Extra holds provider-specific options; opaque to the loop.
 	Extra map[string]any
+	// Telemetry is the optional request-scoped telemetry context. It is a
+	// contract seam only: providers may ignore it, and the runtime's
+	// request-level span is installed by wrapping the StreamFn
+	// (internal/agent.NewObservedStream), not by every provider.
+	Telemetry telemetry.Context
 }
 
 // StreamFn produces a provider stream for a model + shaped context. Per the

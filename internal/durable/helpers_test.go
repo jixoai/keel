@@ -164,8 +164,12 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatalf("condition not met within 5s")
 }
 
+// ctxT bounds a test with a context deadline so a stuck recovery path fails
+// instead of hanging. The bound must survive a full `go test -race ./...` run,
+// where this package competes with two dozen others: 10s produced load-induced
+// timeouts of the recovery waits, so it is 30s here.
 func ctxT(t *testing.T) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	return ctx
 }

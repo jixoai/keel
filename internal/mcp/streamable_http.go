@@ -57,6 +57,9 @@ type UnauthorizedEvent struct {
 	ServerURL       string
 	// Token is the access token the rejected request carried, if any.
 	Token string
+	// Client is the HTTP client of the rejected request, so OAuth discovery and
+	// token requests share its transport.
+	Client *http.Client
 }
 
 // HTTPError is a non-2xx response from an MCP server.
@@ -554,6 +557,7 @@ func (t *HTTPTransport) authorizedFetch(baseCtx, requestCtx context.Context, met
 			Body:            string(excerpt),
 			ServerURL:       t.url,
 			Token:           token,
+			Client:          t.client,
 		}
 		if err := provider.OnUnauthorized(requestCtx, event); err != nil {
 			return nil, err

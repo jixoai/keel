@@ -1,0 +1,49 @@
+# Keel + PostgreSQL 18. Host ports follow the project's 137xx allocation:
+# 13740 = Keel HTTP/SSE, 13741 = PostgreSQL.
+name: keel
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: runtime
+      POSTGRES_DB: runtime
+    ports:
+      - "127.0.0.1:13741:5432"
+    volumes:
+      # PostgreSQL 18 images declare /var/lib/postgresql (not .../data) as the
+      # data volume; PGDATA lives in a major-version subdirectory.
+      - keel-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d runtime"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  keel:
+    build: .
+    # Default provider is the deterministic fake (KEEL_MODEL unset). Set
+    # KEEL_MODEL/KEEL_BASE_URL/KEEL_API_KEY for a real model.
+    ports:
+      - "127.0.0.1:13740:13740"
+    environment:
+      KEEL_DSN: postgres://postgres:runtime@postgres:5432/runtime?sslmode=disable
+      KEEL_CAS_DIR: /data/cas
+      GOMEMLIMIT: "1610612736"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - keel-cas:/data/cas
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+    restart: unless-stopped
+
+volumes:
+  keel-pg:
+  keel-cas:

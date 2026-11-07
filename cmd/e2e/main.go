@@ -34,22 +34,30 @@ type env struct {
 	cmd      *exec.Cmd
 	log      *os.File
 	extraEnv []string
+	adminKey string
 }
 
 func main() {
 	var (
-		bin   = flag.String("bin", "/tmp/keel-runtime", "runtime binary")
-		dsn   = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
-		port  = flag.Int("port", 13745, "listen port")
-		reset = flag.Bool("reset", true, "truncate the runtime tables before the run (dedicated test DSN required)")
+		bin          = flag.String("bin", "/tmp/keel-runtime", "runtime binary")
+		dsn          = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
+		port         = flag.Int("port", 13745, "listen port")
+		reset        = flag.Bool("reset", true, "truncate the runtime tables before the run (dedicated test DSN required)")
+		resetConfirm = flag.String("reset-confirm", "", "the database name the -reset truncate is allowed to wipe")
 	)
 	flag.Parse()
 	if *dsn == "" {
 		log.Fatal("KEEL_DSN is required")
 	}
 	e := &env{bin: *bin, dsn: *dsn, base: fmt.Sprintf("http://127.0.0.1:%d", *port)}
+	// Tenant provisioning is admin-guarded. The e2e harness starts the runtime
+	// itself, so it generates (or reuses) the key and passes it to both sides.
+	e.adminKey = os.Getenv("KEEL_ADMIN_KEY")
+	if e.adminKey == "" {
+		e.adminKey = "e2e-admin-key"
+	}
 	if *reset {
-		if err := resetRuntimeTables(context.Background(), *dsn); err != nil {
+		if err := resetRuntimeTables(context.Background(), *dsn, *resetConfirm); err != nil {
 			log.Fatalf("reset runtime tables: %v", err)
 		}
 	}
@@ -76,14 +84,40 @@ func main() {
 // resetRuntimeTables starts every run from an empty log. Without it, leftovers
 // from an earlier run (for example a 100-session bulk tenant) are claimed first
 // and can starve a new session past the case timeout.
-func resetRuntimeTables(ctx context.Context, dsn string) error {
+//
+// Truncating is destructive to every other user of that database. Test suites
+// run in parallel against one server, so pointing this at the shared dev
+// database mid-suite wipes rows under other packages' feet (observed: a store
+// test's submission vanished). The wipe therefore needs a database that is
+// clearly dedicated — its name carries "e2e"/"test" — or an explicit
+// -reset-confirm <dbname> that matches exactly.
+func resetRuntimeTables(ctx context.Context, dsn, confirm string) error {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return fmt.Errorf("parse dsn: %w", err)
+	}
+	name := cfg.ConnConfig.Database
+	lower := strings.ToLower(name)
+	dedicated := strings.Contains(lower, "e2e") || strings.Contains(lower, "test") || (confirm != "" && confirm == name)
+	if !dedicated {
+		return fmt.Errorf("refusing to truncate database %q: it does not look dedicated (pass -reset-confirm %s if this is really a throwaway database)", name, name)
+	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	log.Printf("resetting runtime tables in database %s", name)
 	_, err = pool.Exec(ctx, `TRUNCATE tenants, sessions, events, checkpoints, submissions,
-		tasks, blobs, blob_chunks, blob_refs, runs`)
+		tasks, blobs, blob_chunks, blob_refs, runs, usage_ledger,
+		mcp_oauth_pending, mcp_oauth_credentials`)
+	if err != nil && strings.Contains(err.Error(), "42P01") {
+		// A brand-new database has no tables yet; the runtime migrates on boot,
+		// so there is nothing to truncate. This keeps `-reset` (the default)
+		// working on an empty database instead of failing before the first start.
+		log.Printf("database %s is empty (42P01): the runtime will migrate on boot", name)
+		return nil
+	}
 	return err
 }
 
@@ -103,7 +137,7 @@ func (e *env) start() error {
 		return err
 	}
 	cmd := exec.Command(e.bin, "-addr", "127.0.0.1:"+portOf(e.base), "-cas", "/tmp/keel-e2e-cas", "-streams", "600", "-admit-rate", "2000")
-	cmd.Env = append(os.Environ(), "KEEL_DSN="+e.dsn, "GOMEMLIMIT=805306368")
+	cmd.Env = append(os.Environ(), "KEEL_DSN="+e.dsn, "GOMEMLIMIT=805306368", "KEEL_ADMIN_KEY="+e.adminKey)
 	cmd.Env = append(cmd.Env, e.extraEnv...)
 	cmd.Stdout = f
 	cmd.Stderr = f
@@ -168,7 +202,7 @@ func (e *env) newTenantSession(ctx context.Context) (string, string, error) {
 		TenantID  string `json:"tenantId"`
 		SessionID string `json:"sessionId"`
 	}
-	if code, err := postJSON(ctx, e.base+"/v1/tenants", tenant, map[string]string{"name": "e2e"}, &out); err != nil || code != 201 {
+	if code, err := e.createTenant(ctx, tenant, "e2e"); err != nil || code != 201 {
 		return "", "", fmt.Errorf("create tenant: %d %v", code, err)
 	}
 	if code, err := postJSON(ctx, e.base+"/v1/sessions", tenant, map[string]string{}, &out); err != nil || code != 201 {
@@ -190,6 +224,23 @@ func postJSON(ctx context.Context, url, tenant string, body any, out any) (int, 
 	if out != nil {
 		_ = json.NewDecoder(res.Body).Decode(out)
 	}
+	return res.StatusCode, nil
+}
+
+// createTenant provisions a tenant with the operator key the runtime was
+// started with: POST /v1/tenants is admin-guarded (401 without it).
+func (e *env) createTenant(ctx context.Context, tenant, name string) (int, error) {
+	raw, _ := json.Marshal(map[string]string{"name": name})
+	req, _ := http.NewRequestWithContext(ctx, "POST", e.base+"/v1/tenants", bytes.NewReader(raw))
+	req.Header.Set("X-Tenant-ID", tenant)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+e.adminKey)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, res.Body)
 	return res.StatusCode, nil
 }
 
@@ -243,11 +294,21 @@ func (e *env) caseIdempotentAcrossRestart() result {
 	if err != nil || code != 201 || !first.Created {
 		return fail("first input: code=%d err=%v created=%v", code, err, first.Created)
 	}
+	// A retry carries the SAME content: same key + same payload is a replay and
+	// reuses the committed receipt.
 	var replay inputResp
 	code, err = postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
-		map[string]string{"text": "hello (replayed)", "requestId": "r1"}, &replay)
+		map[string]string{"text": "hello", "requestId": "r1"}, &replay)
 	if err != nil || code != 200 || replay.Created || replay.SubmissionID != first.SubmissionID {
 		return fail("replay before kill: code=%d created=%v ids=%s/%s", code, replay.Created, first.SubmissionID, replay.SubmissionID)
+	}
+	// Same key + different content is a client bug: the kernel answers 409 and
+	// appends nothing (a silent 200 would drop the new text).
+	var conflict inputResp
+	code, err = postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
+		map[string]string{"text": "hello (different)", "requestId": "r1"}, &conflict)
+	if err != nil || code != 409 {
+		return fail("conflicting replay before kill: code=%d err=%v, want 409", code, err)
 	}
 	e.kill9()
 	if err := e.start(); err != nil {
@@ -255,7 +316,7 @@ func (e *env) caseIdempotentAcrossRestart() result {
 	}
 	var after inputResp
 	code, err = postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
-		map[string]string{"text": "hello (after kill)", "requestId": "r1"}, &after)
+		map[string]string{"text": "hello", "requestId": "r1"}, &after)
 	if err != nil || code != 200 || after.Created || after.SubmissionID != first.SubmissionID {
 		return fail("replay after kill: code=%d created=%v ids=%s/%s", code, after.Created, first.SubmissionID, after.SubmissionID)
 	}
@@ -266,11 +327,11 @@ func (e *env) caseIdempotentAcrossRestart() result {
 	// The worker may already have answered; idempotency is about the single
 	// user event, not about suppressing the assistant turn.
 	if users := countKind(events, "user.message"); users != 1 {
-		return fail("want 1 user event after three submits, got %d (events: %d)", users, len(events))
+		return fail("want 1 user event after the submits, got %d (events: %d)", users, len(events))
 	}
-	r.Checks = []string{"first submit created", "replay before kill reused submission", "SIGKILL", "replay after kill reused submission", "exactly one user event"}
+	r.Checks = []string{"first submit created", "replay before kill reused submission", "conflicting replay refused with 409", "SIGKILL", "replay after kill reused submission", "exactly one user event"}
 	r.Pass = true
-	r.Detail = "one requestId → one submission → one event, across a SIGKILL"
+	r.Detail = "one requestId → one submission → one event across a SIGKILL; different content is refused"
 	return r
 }
 
@@ -449,7 +510,7 @@ func (e *env) caseConcurrentKillNoLoss() result {
 		return fail("start: %v", err)
 	}
 	tenant := uuid.NewString()
-	if code, err := postJSON(ctx, e.base+"/v1/tenants", tenant, map[string]string{"name": "bulk"}, nil); err != nil || code != 201 {
+	if code, err := e.createTenant(ctx, tenant, "bulk"); err != nil || code != 201 {
 		return fail("tenant: %d %v", code, err)
 	}
 	sessions := make([]string, 100)

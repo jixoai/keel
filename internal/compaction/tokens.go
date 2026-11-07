@@ -163,11 +163,13 @@ func messageTimestamp(msg agentcore.Message) int64 {
 }
 
 // calculateContextTokens derives total context tokens from a provider usage
-// block, matching pi's calculateContextTokens (ai/src/utils/estimate.ts:18-20).
-// pi sums input + output + cacheRead + cacheWrite unless the provider reports a
-// total; keel's Usage carries only input and output, so the two are equal.
+// block, matching pi's calculateContextTokens (ai/src/utils/estimate.ts:18-20):
+// input + output + cacheRead + cacheWrite. The four input-side counters are
+// mutually exclusive: provider decoders subtract cache subsets from raw
+// prompt/input totals (OpenAI), while Anthropic reports them separately.
+// Reasoning tokens are not added because providers report them inside output.
 func calculateContextTokens(u agentcore.Usage) int {
-	return u.InputTokens + u.OutputTokens
+	return u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
 }
 
 // usageApplies reports whether an assistant message's usage may describe the

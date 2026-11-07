@@ -45,3 +45,25 @@ env 中的密钥 MUST 加密存储且日志脱敏。
 #### Scenario: 标准 server
 - **WHEN** 按 MCP 规范启动 filesystem server
 - **THEN** `tools/list` 的结果出现在 Keel 工具注册表中
+
+### Requirement: OAuth 授权（PI 对齐）
+
+MCP 客户端 SHALL 完整实现 PI `pi-mcp/oauth` 的 OAuth 能力：RFC 9728 protected
+resource metadata、RFC 8414/OIDC AS metadata（issuer 严格校验）、WWW-Authenticate
+解析、DCR、CIMD、PKCE S256、授权码交换、refresh rotation、step-up scope、
+AuthProvider 与 sign-in start/complete。运行时替换仅限存储、加密与锁：凭据 MUST
+AES-256-GCM 加密（AAD 绑定 tenant/server，带 key id/版本），pending 授权 MUST
+原子一次性消费，跨进程刷新 MUST 只允许一次（独立锁池 advisory lock）。日志与错误
+MUST NOT 包含 token/verifier/client_secret。
+
+#### Scenario: 并发 401
+- **WHEN** 同一 server 的多个请求同时收到 401
+- **THEN** 只发生一次 refresh，其余请求使用新 token 重试，旧 refresh token 不被二次使用
+
+#### Scenario: 重复授权回调
+- **WHEN** 浏览器回调或宿主完成请求被重复投递
+- **THEN** 只有一次授权码交换；已有 token 时重复回调返回幂等成功，绝不因输家失败清空 token
+
+#### Scenario: 登录后同进程可用
+- **WHEN** sign-in 完成并写入凭据
+- **THEN** 宿主重连目标 server，MCP 工具无需重启进程即可调用

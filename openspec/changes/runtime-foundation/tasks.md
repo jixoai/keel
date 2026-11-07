@@ -1,3 +1,9 @@
+> **状态（2026-11-08 对账）**：本 change 是历史任务板，**已冻结**。剩余未完成项不再单独推进，
+> 已并入 `keel-service-graph`（其 `tasks.md` 是当前唯一在推进的板：W0 基线/R1 差分、
+> W1 契约内核、W2 服务图与 loadout、W3 PI loop 与 conformance 门、W4 handoff、
+> W5 外部网关、W6 集成与验收）。本板保留原文，仅作历史对照；后续以
+> `keel-service-graph` 为准，勿在此勾选。
+
 # Tasks: runtime-foundation
 
 ## 0. 仓与规格

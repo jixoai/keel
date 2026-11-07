@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 )
@@ -35,9 +37,56 @@ type Config struct {
 	Metrics   *stream.Metrics
 	Logger    *slog.Logger
 	CASDir    string
+	// Edge is the contract kernel's commit seam for client input (edge-scoped,
+	// idempotent). It is satisfied by *kernel.Kernel; the server never holds a
+	// raw event-table write handle. POST /v1/sessions/{id}/events and
+	// /v1/sessions/{id}/input answer 503 when it is not wired.
+	Edge kernel.Committer
+	// Events is the contract kernel's read seam. It carries the tenant
+	// boundary, so GET /v1/sessions/{id}/events answers 404 for a foreign or
+	// missing session instead of 200 + an empty list.
+	Events kernel.Reader
+	// Loadouts is the read-only run-loadout query (the loadout revision and
+	// fencing epoch a run finished under). It is a separate endpoint on
+	// purpose: adding fields to the run-status body would change an existing
+	// response shape. Nil answers 503.
+	Loadouts LoadoutReader
+	// AdminKey authenticates the tenant admin API. Empty falls back to
+	// KEEL_ADMIN_KEY at request time; when neither is set the admin API is
+	// disabled (503) rather than open.
+	AdminKey string
+	// MetricsExporter backs GET /metrics (Prometheus text). Nil returns 503.
+	MetricsExporter MetricsExporter
+	// Ready backs GET /v1/ready. Nil means the process is ready as soon as it
+	// is listening.
+	Ready ReadyChecker
+	// Drain coordinates SIGTERM drainage. Nil disables drain behavior. A
+	// *ModeDrainer additionally distinguishes shutdown from handoff drains
+	// (see runtime.go).
+	Drain Drainer
+	// Control backs the runtime admin routes (GET /v1/runtime/status,
+	// POST /v1/runtime/drain). Nil answers 503 on those routes.
+	Control RuntimeControl
+	// MCPOAuth enables the MCP sign-in endpoints; nil answers 503.
+	MCPOAuth *MCPOAuth
+	// External is the external-gateway surface (AgentBackend sessions). Nil
+	// answers 503 on every /v1/external route; a tenant document that declares
+	// no external backend also leaves it nil.
+	External ExternalSessions
 	// MaxBody caps JSON request bodies (uploads use MaxUpload).
 	MaxBody   int64
 	MaxUpload int64
+}
+
+// errKernelUnwired is the explicit failure of an edge write endpoint when the
+// contract kernel was not injected. The legacy store write path is not a
+// fallback: events must be committed through the kernel (contract-kernel).
+var errKernelUnwired = errors.New("contract kernel is not wired for the edge endpoints")
+
+// LoadoutReader answers which service loadout a run pinned. It is the kernel's
+// read-only run-pin query (satisfied by *kernel.Kernel).
+type LoadoutReader interface {
+	RunPin(ctx context.Context, scope kernel.Scope) (kernel.RunPin, error)
 }
 
 // Server is the HTTP handler.
@@ -60,6 +109,10 @@ func New(cfg Config) *Server {
 	if cfg.MaxUpload == 0 {
 		cfg.MaxUpload = 64 << 20
 	}
+	if cfg.Edge == nil || cfg.Events == nil {
+		cfg.Logger.Warn("httpapi: contract kernel is not wired",
+			"detail", "POST /v1/sessions/{id}/events and /input answer 503; GET /v1/sessions/{id}/events answers 503")
+	}
 	if cfg.CASDir != "" && cfg.Blobs != nil {
 		cfg.Blobs.CASDir = cfg.CASDir
 	}
@@ -68,25 +121,35 @@ func New(cfg Config) *Server {
 	return s
 }
 
-// ServeHTTP implements http.Handler.
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// ServeHTTP implements http.Handler. While draining, new API requests receive
+// 503 + Retry-After; probes and /metrics stay reachable so the orchestrator can
+// observe the drain.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.serveLogged(w, r) }
 
 var sseExitLogs int64
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/health", s.health)
+	s.mux.HandleFunc("GET /v1/ready", s.ready)
 	s.mux.HandleFunc("GET /v1/metrics", s.metrics)
+	s.mux.HandleFunc("GET /metrics", s.prometheusMetrics)
 	s.mux.HandleFunc("POST /v1/tenants", s.createTenant)
+	s.registerAdminRoutes()
+	s.registerRuntimeRoutes()
+	s.registerExternalRoutes()
 	s.mux.HandleFunc("POST /v1/sessions", s.createSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/input", s.input)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/run", s.triggerRun)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/run", s.runStatus)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/run/loadout", s.runLoadout)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/events", s.appendEvent)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.listEvents)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events/stream", s.streamEvents)
 	s.mux.HandleFunc("POST /v1/files", s.upload)
 	s.mux.HandleFunc("GET /v1/files/{id}/meta", s.fileMeta)
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
+	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
+	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +187,14 @@ func tenantFrom(r *http.Request) (uuid.UUID, bool) {
 	return id, err == nil
 }
 
+// createTenant provisions a tenant. It is an operator action, not a tenant
+// self-service endpoint: an unauthenticated caller must not be able to mint a
+// tenant id that later owns credentials and events. Authentication reuses the
+// admin API semantics (503 when KEEL_ADMIN_KEY is unset, 401 otherwise).
 func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -204,28 +274,73 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
+	scope := kernel.Scope{TenantID: tenantID, SessionID: sessionID}
+	payload, err := json.Marshal(map[string]any{"text": body.Text, "requestId": requestID})
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	if s.cfg.Edge == nil {
+		writeErr(w, http.StatusServiceUnavailable, errKernelUnwired)
+		return
+	}
+	// Class pre-check before the commit: an external session has no native
+	// run/lease flow, so /input answers 409 instead of appending a message and
+	// then failing to queue a run (M4's "commit then 500"). The kernel's edge
+	// seam still records messages for external sessions (the external gateway's
+	// SSE replay depends on that contract), so the refusal belongs to the
+	// native client API, before anything is written.
+	owner, exists, err := s.cfg.Store.SessionOwner(r.Context(), tenantID, sessionID)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	if !exists {
+		writeErr(w, http.StatusNotFound, errors.New("session not found"))
+		return
+	}
+	if owner == store.StateOwnerExternal {
+		writeErr(w, http.StatusConflict, errors.New("session is owned by an external backend; native input is not supported"))
+		return
+	}
+	// Edge-scoped commit: user.message carries the requestId as its idempotency
+	// key and never a fencing token (client input keeps landing during a drain;
+	// the next runtime picks it up).
+	receipt, err := s.cfg.Edge.Commit(r.Context(), kernel.CommitRequest{
+		Scope:      scope,
+		Kind:       kernel.KindUserMessage,
+		RequestID:  requestID,
+		Payload:    payload,
+		NativeEdge: true,
+	})
+	if err != nil {
+		writeEdgeError(w, err)
+		return
+	}
+	// The committed event is the truth; the submissions row is client-facing
+	// bookkeeping kept for the response contract. A row that predates a crash
+	// between commit and bookkeeping is repaired here. The commit itself already
+	// queued the run in its own transaction (kernel edge commit), so a failure
+	// in this bookkeeping can no longer strand the input.
 	sub, created, err := s.cfg.Store.Submit(r.Context(), tenantID, requestID, sessionID, uuid.New())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	if created {
-		seq, err := s.cfg.Store.AppendEvent(r.Context(), tenantID, sessionID, "user.message",
-			map[string]any{"text": body.Text, "requestId": requestID})
-		if err != nil {
+	if sub.Seq == nil {
+		if err := s.cfg.Store.SetSubmissionStatus(r.Context(), tenantID, sessionID, requestID, "committed", receipt.Seq); err != nil {
 			writeErr(w, 500, err)
 			return
 		}
-		if err := s.cfg.Store.SetSubmissionStatus(r.Context(), tenantID, requestID, "committed", seq); err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-		sub.Seq = &seq
+		sub.Seq = &receipt.Seq
+		// The response reports the state the bookkeeping now holds, not the
+		// transient "pending" the row was inserted with.
+		sub.Status = "committed"
 	}
 	// Enqueue on replays too: if the first enqueue failed after the event was
 	// committed, the client's retry repairs it without creating a second event.
 	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
-		writeErr(w, 500, err)
+		writeEnqueueError(w, err)
 		return
 	}
 	status := 200
@@ -243,6 +358,9 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 
 // triggerRun enqueues a run without appending a user event. It is useful for
 // retrying a failed run after the operator fixed the provider configuration.
+// A missing (or foreign) session is a 404 and never creates a run row: an
+// orphan runs row can never be claimed and would inflate the queue depth
+// forever.
 func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFrom(r)
 	if !ok {
@@ -255,7 +373,7 @@ func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
-		writeErr(w, 500, err)
+		writeEnqueueError(w, err)
 		return
 	}
 	writeJSON(w, 202, map[string]any{"enqueued": true})
@@ -291,6 +409,49 @@ func (s *Server) runStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// runLoadout answers the service loadout a run pinned: the immutable snapshot
+// id/revision and the graph generation that served it, plus the fencing epoch
+// the run finished under. It is a read-only debug/audit endpoint; the
+// run-status response keeps its existing shape. A run that settled before the
+// runtime adopted loadout metadata answers zeros (it did not record a pin).
+func (s *Server) runLoadout(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFrom(r)
+	if !ok {
+		writeErr(w, 401, errors.New("X-Tenant-ID is required"))
+		return
+	}
+	sessionID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
+		return
+	}
+	if s.cfg.Loadouts == nil {
+		writeErr(w, http.StatusServiceUnavailable, errKernelUnwired)
+		return
+	}
+	pin, err := s.cfg.Loadouts.RunPin(r.Context(), kernel.Scope{TenantID: tenantID, SessionID: sessionID})
+	if err != nil {
+		status := 500
+		if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, kernel.ErrNoRunnable) {
+			status = 404
+		}
+		writeErr(w, status, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"loadoutId":  pin.LoadoutID,
+		"revision":   pin.LoadoutRevision,
+		"generation": pin.LoadoutGeneration,
+		"ownerEpoch": pin.LoadoutOwnerEpoch,
+	})
+}
+
+// appendEvent accepts one client event. The edge whitelist is exactly the
+// kernel's edge-scoped kinds (user.message): any other kind is a 400, and a
+// foreign or missing session is a 404 that does not leak existence. The
+// requestId is the idempotency key: it is taken from the payload, then the
+// X-Request-ID header, and generated when neither is present (a generated key
+// cannot deduplicate a retry, so clients that retry must send one).
 func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFrom(r)
 	if !ok {
@@ -314,17 +475,46 @@ func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("kind is required"))
 		return
 	}
+	if class, known := kernel.KindClass(kernel.EventKind(body.Kind)); !known || class != kernel.ClassEdge {
+		writeErr(w, 400, fmt.Errorf("kind %q is not accepted from clients; the edge whitelist is %s",
+			body.Kind, edgeKindList()))
+		return
+	}
 	if len(body.Payload) == 0 {
 		body.Payload = json.RawMessage(`{}`)
 	}
-	seq, err := s.cfg.Store.AppendEvent(r.Context(), tenantID, sessionID, body.Kind, body.Payload)
-	if err != nil {
-		writeErr(w, 500, err)
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		var meta struct {
+			RequestID string `json:"requestId"`
+		}
+		if err := json.Unmarshal(body.Payload, &meta); err == nil {
+			requestID = meta.RequestID
+		}
+	}
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	if s.cfg.Edge == nil {
+		writeErr(w, http.StatusServiceUnavailable, errKernelUnwired)
 		return
 	}
-	writeJSON(w, 201, map[string]any{"seq": seq})
+	receipt, err := s.cfg.Edge.Commit(r.Context(), kernel.CommitRequest{
+		Scope:      kernel.Scope{TenantID: tenantID, SessionID: sessionID},
+		Kind:       kernel.EventKind(body.Kind),
+		RequestID:  requestID,
+		Payload:    body.Payload,
+		NativeEdge: true,
+	})
+	if err != nil {
+		writeEdgeError(w, err)
+		return
+	}
+	writeJSON(w, 201, map[string]any{"seq": receipt.Seq, "deduped": receipt.Deduped})
 }
 
+// listEvents reads committed events through the kernel's read seam: a foreign
+// or missing session is a 404 instead of a 200 with an empty list.
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFrom(r)
 	if !ok {
@@ -338,12 +528,78 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	after := parseAfter("", r.URL.Query().Get("after"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	events, err := s.cfg.Store.LoadEvents(r.Context(), tenantID, sessionID, after, limit)
-	if err != nil {
-		writeErr(w, 500, err)
+	if s.cfg.Events == nil {
+		writeErr(w, 503, errKernelUnwired)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"events": events})
+	events, err := s.cfg.Events.LoadEvents(r.Context(),
+		kernel.Scope{TenantID: tenantID, SessionID: sessionID}, after, limit)
+	if err != nil {
+		writeEdgeError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"events": storeEvents(events)})
+}
+
+// writeEdgeError maps a kernel rejection onto the edge status. NotFound is the
+// 404 that does not leak existence; a rejected request shape is the client's
+// 400; a native edge write to an external session is 409; quota is 429;
+// everything else is a 500.
+func writeEdgeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errKernelUnwired):
+		writeErr(w, http.StatusServiceUnavailable, err)
+	case errors.Is(err, kernel.ErrNotFound):
+		writeErr(w, http.StatusNotFound, errors.New("session not found"))
+	case errors.Is(err, kernel.ErrExternalSession):
+		writeErr(w, http.StatusConflict, errors.New("session is owned by an external backend; native input is not supported"))
+	case errors.Is(err, kernel.ErrUnknownKind),
+		errors.Is(err, kernel.ErrKeyKindMismatch),
+		errors.Is(err, kernel.ErrInvalidRequest),
+		errors.Is(err, kernel.ErrMissingToken):
+		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, kernel.ErrQuota):
+		writeErr(w, http.StatusTooManyRequests, err)
+	case errors.Is(err, kernel.ErrKeyConflict),
+		errors.Is(err, kernel.ErrExternalSession):
+		writeErr(w, http.StatusConflict, err)
+	default:
+		writeErr(w, http.StatusInternalServerError, err)
+	}
+}
+
+// writeEnqueueError maps the native queue seam's refusals: a missing (or
+// foreign) session is 404; an external session is 409 because the session
+// exists but must never enter the native run/lease flow.
+func writeEnqueueError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrNoSession):
+		writeErr(w, http.StatusNotFound, errors.New("session not found"))
+	case errors.Is(err, store.ErrExternalSession):
+		writeErr(w, http.StatusConflict, errors.New("session is owned by an external backend; native runs are not supported"))
+	default:
+		writeErr(w, http.StatusInternalServerError, err)
+	}
+}
+
+// edgeKindList renders the client-writable whitelist for a 400 message.
+func edgeKindList() string {
+	kinds := kernel.EdgeKinds()
+	out := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		out = append(out, string(kind))
+	}
+	return strings.Join(out, ", ")
+}
+
+// storeEvents maps kernel events onto the wire shape (the JSON keys the
+// event-list endpoint has always used).
+func storeEvents(events []kernel.Event) []store.Event {
+	out := make([]store.Event, 0, len(events))
+	for _, ev := range events {
+		out = append(out, store.Event{Seq: ev.Seq, Kind: string(ev.Kind), Payload: ev.Payload})
+	}
+	return out
 }
 
 // streamEvents is the SSE endpoint. It subscribes to the hub for wakeups and
@@ -358,6 +614,20 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
+		return
+	}
+	after := parseAfter(r.Header.Get("Last-Event-ID"), r.URL.Query().Get("after"))
+	// The stream carries the same tenant boundary as GET /events: a foreign or
+	// missing session is a 404 before any SSE headers are written. Otherwise the
+	// stream would answer 200 with an empty body and never end, which both
+	// leaks the difference and holds a stream slot forever.
+	if s.cfg.Events == nil {
+		writeErr(w, http.StatusServiceUnavailable, errKernelUnwired)
+		return
+	}
+	if _, err := s.cfg.Events.LoadEvents(r.Context(),
+		kernel.Scope{TenantID: tenantID, SessionID: sessionID}, 0, 1); err != nil {
+		writeEdgeError(w, err)
 		return
 	}
 	if !s.cfg.Admitter.Allow() {
@@ -395,9 +665,12 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	rc := http.NewResponseController(w)
-	after := parseAfter(r.Header.Get("Last-Event-ID"), r.URL.Query().Get("after"))
 	wake, cancel := s.cfg.Hub.Subscribe(tenantID, sessionID)
 	defer cancel()
+	var drainDone <-chan struct{}
+	if s.cfg.Drain != nil {
+		drainDone = s.cfg.Drain.Done()
+	}
 
 	exit := func(reason string, err error) {
 		ctxErr := ""
@@ -405,7 +678,9 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			ctxErr = r.Context().Err().Error()
 		}
 		if atomic.AddInt64(&sseExitLogs, 1) <= 50 {
-			s.cfg.Logger.Warn("sse exit", "reason", reason, "err", err, "ctx", ctxErr, "after", after)
+			s.cfg.Logger.Warn("sse exit", "reason", reason, "err", err, "ctx", ctxErr, "after", after,
+				"request_id", RequestIDFrom(r.Context()),
+				"tenant_id", tenantID, "session_id", sessionID)
 		}
 	}
 	heartbeat := time.NewTicker(15 * time.Second)
@@ -457,6 +732,13 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			exit("done", r.Context().Err())
+			return
+		case <-drainDone:
+			// The durable log is the truth: flush what the client has not seen,
+			// then tell it to reconnect elsewhere and close at drain rate.
+			if err := s.drainStream(r.Context(), w, flusher, rc, tenantID, sessionID, &after); err != nil {
+				exit("drain", err)
+			}
 			return
 		case <-wake:
 		case <-heartbeat.C:

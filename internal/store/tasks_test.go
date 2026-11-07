@@ -137,13 +137,33 @@ func TestSubmissionsDeduplicateByRequestAndPersistSettlement(t *testing.T) {
 	if dupNew || dup.SubmissionID != subID {
 		t.Fatalf("duplicate = %+v new=%v", dup, dupNew)
 	}
+	// The same requestId in another session is an independent submission: the
+	// key is per session, exactly like the event log's dedupe scope (M3).
+	otherSession := uuid.New()
+	if err := st.CreateSession(ctx, tenant, otherSession); err != nil {
+		t.Fatal(err)
+	}
+	otherID := uuid.New()
+	other, otherNew, err := st.CreateSubmission(ctx, SubmissionRow{
+		TenantID: tenant, SessionID: otherSession, SubmissionID: otherID,
+		RequestID: "r1", Type: "input", Status: "queued",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !otherNew || other.SubmissionID != otherID {
+		t.Fatalf("cross-session submission = %+v new=%v, want a new row", other, otherNew)
+	}
+	if stored, err := st.GetSubmissionByRequest(ctx, tenant, otherSession, "r1"); err != nil || stored.SubmissionID != otherID {
+		t.Fatalf("other session lookup = %+v, %v", stored, err)
+	}
 	answer := int64(9)
 	dup.Status = "done"
 	dup.AnswerID = &answer
 	if err := st.SaveSubmission(ctx, dup); err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.GetSubmissionByRequest(ctx, tenant, "r1")
+	got, err := st.GetSubmissionByRequest(ctx, tenant, session, "r1")
 	if err != nil {
 		t.Fatal(err)
 	}

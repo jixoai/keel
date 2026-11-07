@@ -1,3 +1,9 @@
+> **状态（2026-11-08 对账）**：本 change 是历史任务板，**已冻结**。剩余未完成项不再单独推进，
+> 已并入 `keel-service-graph`（其 `tasks.md` 是当前唯一在推进的板：W0 基线/R1 差分、
+> W1 契约内核、W2 服务图与 loadout、W3 PI loop 与 conformance 门、W4 handoff、
+> W5 外部网关、W6 集成与验收）。本板保留原文，仅作历史对照；后续以
+> `keel-service-graph` 为准，勿在此勾选。
+
 # Tasks: keel-ecosystem
 
 > 闸门见 `docs/MATURITY.md`；PI 对齐基线见 `docs/PI-PARITY.md`（pin `55a5c69`）。
@@ -21,8 +27,9 @@
 - [ ] 业务汇总事件 `run.finished`（turns/tokens/toolTimings/context/model/duration/stopReason）
 - [ ] provider usage 归一（OpenAI/Anthropic/Responses）
 - [ ] Prometheus adapter：runs/turns/tool/context/queue/lease/stream/pgxpool/go
-- [ ] 指标基数审查：禁止 session/run id 标签；测试证明 series 不随会话数增长
-- [ ] 结构化日志字段 + 消息正文/密钥脱敏测试
+  （已交付 runs/queue/lease/stream/pgxpool/go；turns/tool/context 待 loop/host 接线）
+- [x] 指标基数审查：禁止 session/run id 标签；测试证明 series 不随会话数增长
+- [x] 结构化日志字段 + 消息正文/密钥脱敏测试
 - [ ] OTLP adapter（默认关）
 
 ## 2. recoverability（P1，与 1 并行）
@@ -64,7 +71,13 @@
 
 - [ ] `McpClient`：JSON-RPC 关联、初始化/能力协商、超时、取消、server 请求
 - [ ] 传输：stdio、Streamable HTTP、PipeTransport、内存测试传输；**拒绝 legacy SSE**
-- [ ] OAuth 子集（对齐 `pi-mcp/oauth`）
+- [x] OAuth 全量（对齐 `pi-mcp/oauth`）：RFC 9728/8414 discovery、WWW-Authenticate、
+  DCR、CIMD、PKCE S256、code exchange、refresh rotation、step-up、AuthProvider、
+  sign-in start/complete、loopback 回调、粘贴 redirect（`internal/mcp/oauth`）
+- [x] OAuth 运行时替换：AES-256-GCM（AAD=tenant+server、key id/版本）凭据存储、
+  pending 一次性消费、PostgreSQL 独立锁池刷新锁、HTTP sign-in/callback、同进程重连
+- [ ] 宿主 per-tenant MCP manager 缓存（Runner/host 范围；当前 Manager 单租户 +
+  `Reconnect` + HTTP callback 重连 hook，多租户需宿主按 tenant 构造 manager）
 - [ ] 命名：`mcp__<server>__<tool>`，非法字符替换、冲突 hash、64 字符上限
 - [ ] `normalizeMcpInputSchema`、`toLlmContent`、20KB 输出裁剪、progress 透传
 - [ ] 租户 `mcp_servers`：`mcp.json` 兼容格式、env/headers 加密、日志脱敏

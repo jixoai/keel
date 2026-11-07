@@ -8,7 +8,7 @@ package agent
 import (
 	"time"
 
-	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/telemetry"
 )
 
@@ -19,13 +19,13 @@ type RunTelemetry struct {
 }
 
 // observeRun wraps one run in a span and records its duration and outcome.
-func (r *Runner) observeRun(run store.Run, execute func() (int64, error)) (int64, error) {
+func (r *Runner) observeRun(lease kernel.Lease, execute func() (int64, error)) (int64, error) {
 	if r.Telemetry == nil || r.Telemetry.Context == nil {
 		return execute()
 	}
 	attributes := telemetry.SpanAttributes{
-		"tenant":   run.TenantID.String(),
-		"session":  run.SessionID.String(),
+		"tenant":   lease.Scope.TenantID.String(),
+		"session":  lease.Scope.SessionID.String(),
 		"model":    r.Model,
 		"provider": r.ProviderName,
 	}

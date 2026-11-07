@@ -50,12 +50,15 @@ type OpenAIDecoder struct {
 	toolCalls map[int]*openaiToolCall
 	toolOrder []int // tool-call indices in first-seen order
 
-	responseID    string
-	responseModel string
-	inputTokens   int
-	outputTokens  int
-	stopReason    string // mapped pigo stop reason (empty until finish_reason)
-	done          bool
+	responseID       string
+	responseModel    string
+	inputTokens      int
+	outputTokens     int
+	cacheReadTokens  int
+	cacheWriteTokens int
+	reasoningTokens  int
+	stopReason       string // mapped pigo stop reason (empty until finish_reason)
+	done             bool
 }
 
 // NewOpenAIDecoder builds a fresh decoder for one streamed response.
@@ -84,6 +87,18 @@ type openaiChunk struct {
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
+		// PromptTokensDetails holds the cache breakdown. cached_tokens and
+		// cache_write_tokens are subsets of prompt_tokens (some gateways report
+		// the latter); Usage.input is normalized to exclude them.
+		PromptTokensDetails *struct {
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
+		} `json:"prompt_tokens_details"`
+		// CompletionTokensDetails.ReasoningTokens is the reasoning subset of the
+		// completion tokens (already included in CompletionTokens).
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 	// Some gateways surface an error object inline on the stream.
 	Error *struct {
@@ -126,8 +141,27 @@ func (d *OpenAIDecoder) Decode(payload []byte) ([]StreamEvent, error) {
 		d.responseModel = chunk.Model
 	}
 	if chunk.Usage != nil {
-		d.inputTokens = chunk.Usage.PromptTokens
+		cacheRead := 0
+		cacheWrite := 0
+		if details := chunk.Usage.PromptTokensDetails; details != nil {
+			cacheRead = details.CachedTokens
+			cacheWrite = details.CacheWriteTokens
+		}
+		d.cacheReadTokens = cacheRead
+		d.cacheWriteTokens = cacheWrite
+		// OpenAI's prompt_tokens includes cached tokens; PI's Usage.input is the
+		// mutually exclusive remainder so input+cacheRead+cacheWrite reconstructs
+		// the raw total without double counting in context estimation.
+		d.inputTokens = chunk.Usage.PromptTokens - cacheRead - cacheWrite
+		if d.inputTokens < 0 {
+			d.inputTokens = 0
+		}
 		d.outputTokens = chunk.Usage.CompletionTokens
+		if details := chunk.Usage.CompletionTokensDetails; details != nil {
+			d.reasoningTokens = details.ReasoningTokens
+		} else {
+			d.reasoningTokens = 0
+		}
 	}
 
 	var events []StreamEvent
@@ -206,8 +240,15 @@ func (d *OpenAIDecoder) partial() agentcore.AssistantMessage {
 		ResponseID:    d.responseID,
 		ResponseModel: d.responseModel,
 	}
-	if d.inputTokens != 0 || d.outputTokens != 0 {
-		msg.Usage = &agentcore.Usage{InputTokens: d.inputTokens, OutputTokens: d.outputTokens}
+	if d.inputTokens != 0 || d.outputTokens != 0 || d.cacheReadTokens != 0 ||
+		d.cacheWriteTokens != 0 || d.reasoningTokens != 0 {
+		msg.Usage = &agentcore.Usage{
+			InputTokens:      d.inputTokens,
+			OutputTokens:     d.outputTokens,
+			CacheReadTokens:  d.cacheReadTokens,
+			CacheWriteTokens: d.cacheWriteTokens,
+			ReasoningTokens:  d.reasoningTokens,
+		}
 	}
 	if d.thinking.Len() > 0 {
 		msg.Content = append(msg.Content, agentcore.NewThinkingContent(d.thinking.String()))

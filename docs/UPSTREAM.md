@@ -9,8 +9,10 @@
 - 许可：MIT
 - Pin commit：`55a5c6914570e2ae31ca36297654483bbbf46883`（2026-11-05）
 - 参照：`packages/agent`（loop/tool/event）、`packages/durable`（task/compaction/extension）、
-  `packages/mcp`（MCP 客户端）、`packages/telemetry`（span/metric）、
+  `packages/mcp`（MCP 客户端，含 `src/oauth` 全量 OAuth）、`packages/telemetry`（span/metric）、
   `packages/coding-agent`（skills/extensions/compaction 宿主）
+- OAuth 运行时替换：PI 的 JSON 状态文件 / proper-lockfile → PostgreSQL 加密行 +
+  独立锁池 advisory lock；接口与事件语义不变（见 `internal/mcp/oauth`）
 - 对齐矩阵与 conformance 计划：`docs/PI-PARITY.md`
 - 原则：契约必须一致；实现可以不同；不复制代码，不跟随上游自动合并。
 

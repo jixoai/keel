@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/openai/openai-go"
@@ -248,13 +249,40 @@ func (d *responsesDriver) mapResponse(resp *responses.Response) agentcore.Assist
 	if sawToolCall {
 		msg.StopReason = agentcore.StopReasonToolUse
 	}
-	if resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 {
+	cacheRead := int(resp.Usage.InputTokensDetails.CachedTokens)
+	cacheWrite := responsesCacheWriteTokens(resp.Usage)
+	// input_tokens includes the cached subsets; Usage.input is normalized to the
+	// mutually exclusive remainder, matching PI's Responses mapping.
+	inputTokens := int(resp.Usage.InputTokens) - cacheRead - cacheWrite
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
+	reasoning := int(resp.Usage.OutputTokensDetails.ReasoningTokens)
+	if resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 || cacheRead != 0 || cacheWrite != 0 || reasoning != 0 {
 		msg.Usage = &agentcore.Usage{
-			InputTokens:  int(resp.Usage.InputTokens),
-			OutputTokens: int(resp.Usage.OutputTokens),
+			InputTokens:      inputTokens,
+			OutputTokens:     int(resp.Usage.OutputTokens),
+			CacheReadTokens:  cacheRead,
+			CacheWriteTokens: cacheWrite,
+			ReasoningTokens:  reasoning,
 		}
 	}
 	return msg
+}
+
+// responsesCacheWriteTokens reads cache_write_tokens from the SDK's extra-field
+// bag. The pinned SDK exposes cached_tokens on the typed struct but not the
+// cache-write counter some gateways return alongside it.
+func responsesCacheWriteTokens(usage responses.ResponseUsage) int {
+	field, ok := usage.InputTokensDetails.JSON.ExtraFields["cache_write_tokens"]
+	if !ok {
+		return 0
+	}
+	value, err := strconv.Atoi(field.Raw())
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }
 
 // toolCallContent maps a Responses function_call item into a pigo

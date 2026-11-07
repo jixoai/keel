@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agenttool"
@@ -23,8 +24,11 @@ type Config struct {
 	IncludeBuiltins bool
 }
 
-// Host composes the system prompt, skills, and tools for a run.
+// Host composes the system prompt, skills, and tools for a run. The tool
+// registry and MCP prompt section can be refreshed after an MCP sign-in; an
+// in-flight run keeps using the registry it already resolved.
 type Host struct {
+	mu       sync.RWMutex
 	cfg      Config
 	skills   []skills.Skill
 	warnings []skills.Warning
@@ -35,27 +39,68 @@ type Host struct {
 // are returned as warnings, not errors: a broken skill must not stop the host.
 func New(cfg Config) (*Host, []skills.Warning, error) {
 	discovered, warnings := skills.Discover(cfg.SkillRoots)
-	h := &Host{cfg: cfg, skills: discovered, warnings: warnings, tools: agenttool.NewToolRegistry()}
+	reg, err := buildRegistry(cfg, discovered)
+	if err != nil {
+		return nil, warnings, err
+	}
+	return &Host{cfg: cfg, skills: discovered, warnings: warnings, tools: reg}, warnings, nil
+}
+
+// buildRegistry compiles the builtin, host-provided, and skill tools. It is
+// shared by boot and RefreshMCP so a refresh has exactly the same validation.
+func buildRegistry(cfg Config, discovered []skills.Skill) (*agenttool.ToolRegistry, error) {
+	reg := agenttool.NewToolRegistry()
 	if cfg.IncludeBuiltins {
 		for _, tool := range []agentcore.AgentTool{ClockTool{}, EchoTool{}} {
-			if err := h.tools.Register(tool); err != nil {
-				return nil, warnings, fmt.Errorf("host: register %s: %w", tool.Name(), err)
+			if err := reg.Register(tool); err != nil {
+				return nil, fmt.Errorf("host: register %s: %w", tool.Name(), err)
 			}
 		}
 	}
 	for _, tool := range cfg.ExtraTools {
-		if err := h.tools.Register(tool); err != nil {
-			return nil, warnings, fmt.Errorf("host: register %s: %w", tool.Name(), err)
+		if err := reg.Register(tool); err != nil {
+			return nil, fmt.Errorf("host: register %s: %w", tool.Name(), err)
 		}
 	}
-	// The skill loader is only useful when at least one skill is visible.
-	visible := h.VisibleSkills()
+	visible := visibleSkills(discovered)
 	if len(visible) > 0 {
-		if err := h.tools.Register(SkillTool{skills: visible}); err != nil {
-			return nil, warnings, fmt.Errorf("host: register skill tool: %w", err)
+		if err := reg.Register(SkillTool{skills: visible}); err != nil {
+			return nil, fmt.Errorf("host: register skill tool: %w", err)
 		}
 	}
-	return h, warnings, nil
+	return reg, nil
+}
+
+// RefreshMCP replaces the MCP-provided tools and prompt section. The new
+// registry is built and validated before it is published; callers already
+// holding the old registry (an in-flight run) continue safely.
+func (h *Host) RefreshMCP(extra []agentcore.AgentTool, section string) error {
+	h.mu.RLock()
+	cfg := h.cfg
+	discovered := h.skills
+	h.mu.RUnlock()
+
+	cfg.ExtraTools = append([]agentcore.AgentTool(nil), extra...)
+	sections := make([]Section, 0, len(cfg.Sections)+1)
+	for _, s := range cfg.Sections {
+		if s.Name != "mcp_servers" {
+			sections = append(sections, s)
+		}
+	}
+	if section != "" {
+		sections = append(sections, Section{Name: "mcp_servers", Content: section})
+	}
+	cfg.Sections = sections
+
+	reg, err := buildRegistry(cfg, discovered)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	h.cfg = cfg
+	h.tools = reg
+	h.mu.Unlock()
+	return nil
 }
 
 // Skills returns the discovered skills.
@@ -63,8 +108,12 @@ func (h *Host) Skills() []skills.Skill { return h.skills }
 
 // VisibleSkills returns the skills advertised to the model.
 func (h *Host) VisibleSkills() []skills.Skill {
-	out := make([]skills.Skill, 0, len(h.skills))
-	for _, skill := range h.skills {
+	return visibleSkills(h.skills)
+}
+
+func visibleSkills(discovered []skills.Skill) []skills.Skill {
+	out := make([]skills.Skill, 0, len(discovered))
+	for _, skill := range discovered {
 		if !skill.DisableModelInvocation {
 			out = append(out, skill)
 		}
@@ -74,16 +123,24 @@ func (h *Host) VisibleSkills() []skills.Skill {
 
 // SystemPrompt renders the PI-shaped sections including the skills index.
 func (h *Host) SystemPrompt() string {
+	h.mu.RLock()
+	cfg := h.cfg
+	discovered := h.skills
+	h.mu.RUnlock()
 	return BuildSystemPrompt(PromptConfig{
-		Preamble:     h.cfg.Preamble,
-		Sections:     h.cfg.Sections,
-		Skills:       h.skills,
-		FileReadTool: h.cfg.FileReadTool,
+		Preamble:     cfg.Preamble,
+		Sections:     cfg.Sections,
+		Skills:       discovered,
+		FileReadTool: cfg.FileReadTool,
 	})
 }
 
 // Tools returns the registry the loop executes.
-func (h *Host) Tools() *agenttool.ToolRegistry { return h.tools }
+func (h *Host) Tools() *agenttool.ToolRegistry {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.tools
+}
 
 // SkillTool loads a skill's full instructions on demand (progressive
 // disclosure). It is registered only when a visible skill exists.

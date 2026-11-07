@@ -63,7 +63,7 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 | 压缩 | `CompactionEntry`、`CompactionCheckpoint`、`DEFAULT_COMPACTION_POLICY` | `compaction` 事件 + checkpoint | 摘要/保留段/token 账一致 |
 | 扩展 | `defineExtension`、`hook`、`section`、`wrapTool` | Go 接口 + 事件名对齐 | 同一 hook 语义 |
 | Skills | Agent Skills 规范 + `skills.ts` | 宿主层 loader | 真实 SKILL.md 零改动 |
-| MCP | `McpClient` + 两种传输 + 命名/裁剪 | `internal/mcp` | 真实 MCP server 零改动 |
+| MCP | `McpClient` + 两种传输 + 命名/裁剪 + OAuth（discovery/DCR/CIMD/PKCE/sign-in） | `internal/mcp`、`internal/mcp/oauth` | 真实 MCP server 零改动 |
 | 遥测 | `TelemetryContext`/`TelemetrySpan`/`TelemetryStore` + adapters | 同形接口 + Prometheus/OTLP adapter | 同一 span 树 |
 | Provider | `StreamFn`、`AssistantMessageEvent`、`ImageContent` | 已搬运 | 协议驱动器回放 |
 
@@ -81,7 +81,10 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 ## 4.1 官方测试对齐状态
 
 逐文件对照、已移植测试与未覆盖项见 [PI-CONFORMANCE.md](PI-CONFORMANCE.md)。
-当前：495 个测试（含子测试）通过、0 失败、1 跳过；覆盖 loop / compaction / MCP（含 stdio、Streamable HTTP、配置）/ skills / telemetry / hooks / durable / host / runner。
+当前：全仓 `go test ./...` 通过；覆盖 loop / compaction / MCP（含 stdio、Streamable HTTP、
+配置、OAuth 授权与 sign-in）/ skills / telemetry / hooks / durable / host / runner。
+MCP OAuth 的运行时代理层（PostgreSQL 加密存储 / 独立锁池刷新锁 / HTTP sign-in /
+同进程重连）见 `internal/mcp/oauth` 与 `internal/store/mcp_oauth.go`。
 
 ## 5. 版本与升级
 

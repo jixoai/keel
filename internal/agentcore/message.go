@@ -38,10 +38,19 @@ type Message interface {
 // LLM messages.
 type AgentMessage = Message
 
-// Usage reports token accounting for an assistant response.
+// Usage reports token accounting for an assistant response. It carries only
+// objective counts; prices are a contract concern and never appear here.
 type Usage struct {
 	InputTokens  int `json:"inputTokens"`
 	OutputTokens int `json:"outputTokens"`
+	// CacheReadTokens counts input tokens served from the provider's prompt
+	// cache. Providers that do not report caching leave it zero.
+	CacheReadTokens int `json:"cacheReadTokens,omitempty"`
+	// CacheWriteTokens counts tokens written into the provider's cache.
+	CacheWriteTokens int `json:"cacheWriteTokens,omitempty"`
+	// ReasoningTokens counts reasoning/thinking tokens when the provider reports
+	// them separately. They are usually already included in OutputTokens.
+	ReasoningTokens int `json:"reasoningTokens,omitempty"`
 }
 
 // UserMessage is input from the user. Content is restricted at construction to

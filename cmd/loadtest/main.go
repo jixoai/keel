@@ -27,6 +27,7 @@ import (
 type config struct {
 	base       string
 	tenant     string
+	adminKey   string
 	sessions   int
 	duration   time.Duration
 	textEvery  time.Duration
@@ -41,6 +42,7 @@ func main() {
 	var c config
 	flag.StringVar(&c.base, "base", "http://127.0.0.1:13740", "runtime base URL")
 	flag.StringVar(&c.tenant, "tenant", "", "tenant UUID (created when empty)")
+	flag.StringVar(&c.adminKey, "admin-key", os.Getenv("KEEL_ADMIN_KEY"), "operator key for tenant provisioning (env KEEL_ADMIN_KEY)")
 	flag.IntVar(&c.sessions, "sessions", 1000, "concurrent sessions")
 	flag.DurationVar(&c.duration, "duration", 60*time.Second, "test duration")
 	flag.DurationVar(&c.textEvery, "text-every", 10*time.Second, "text event period per session")
@@ -67,7 +69,7 @@ func main() {
 	tenant := c.tenant
 	if tenant == "" {
 		var err error
-		tenant, err = createTenant(ctx, client, c.base)
+		tenant, err = createTenant(ctx, client, c.base, c.adminKey)
 		if err != nil {
 			log.Fatalf("create tenant: %v", err)
 		}
@@ -359,14 +361,21 @@ func copyThrottled(dst io.Writer, src io.Reader, rate int) (int64, error) {
 	}
 }
 
-func createTenant(ctx context.Context, client *http.Client, base string) (string, error) {
+func createTenant(ctx context.Context, client *http.Client, base, adminKey string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/tenants", bytes.NewReader([]byte(`{"name":"loadtest"}`)))
 	req.Header.Set("Content-Type", "application/json")
+	if adminKey != "" {
+		req.Header.Set("Authorization", "Bearer "+adminKey)
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(res.Body)
+		return "", fmt.Errorf("status %d: %s (is -admin-key/KEEL_ADMIN_KEY set?)", res.StatusCode, body)
+	}
 	var out struct {
 		TenantID string `json:"tenantId"`
 	}

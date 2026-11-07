@@ -190,14 +190,14 @@ func (s *Store) CreateSubmission(ctx context.Context, row SubmissionRow) (Submis
 		`INSERT INTO submissions (tenant_id, request_id, session_id, submission_id, status,
 		                          type, entry_id, answer_id, reason, detail, seq)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11)
-		 ON CONFLICT (tenant_id, request_id) DO NOTHING`,
+		 ON CONFLICT (tenant_id, session_id, request_id) DO NOTHING`,
 		row.TenantID, requestID, row.SessionID, row.SubmissionID, row.Status, row.Type,
 		row.EntryID, row.AnswerID, row.Reason, jsonOrNil(row.Detail), row.Seq)
 	if err != nil {
 		return SubmissionRow{}, false, fmt.Errorf("store: create submission: %w", err)
 	}
 	created := tag.RowsAffected() == 1
-	stored, err := s.GetSubmissionByRequest(ctx, row.TenantID, requestID)
+	stored, err := s.GetSubmissionByRequest(ctx, row.TenantID, row.SessionID, requestID)
 	if err != nil {
 		return SubmissionRow{}, created, err
 	}
@@ -234,11 +234,11 @@ func (s *Store) GetSubmission(ctx context.Context, tenantID, submissionID uuid.U
 	return row, nil
 }
 
-// GetSubmissionByRequest reads a submission by its per-tenant request key.
-func (s *Store) GetSubmissionByRequest(ctx context.Context, tenantID uuid.UUID, requestID string) (SubmissionRow, error) {
+// GetSubmissionByRequest reads a submission by its per-session request key.
+func (s *Store) GetSubmissionByRequest(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (SubmissionRow, error) {
 	row, err := scanSubmission(s.pool.QueryRow(ctx,
 		`SELECT `+submissionColumns+` FROM submissions
-		 WHERE tenant_id=$1 AND request_id=$2`, tenantID, requestID))
+		 WHERE tenant_id=$1 AND session_id=$2 AND request_id=$3`, tenantID, sessionID, requestID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SubmissionRow{}, ErrSubmissionNotFound
 	}

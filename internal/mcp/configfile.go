@@ -42,10 +42,17 @@ var overrideKeys = map[string]bool{"enabled": true, "exposure": true, "toolExpos
 // empty, the project file. Missing files are not errors; invalid entries are
 // collected in Errors and skipped.
 func LoadConfigFiles(globalPath, projectPath string) LoadedConfig {
+	return LoadConfigFilesWithOptions(globalPath, projectPath, McpServerConfigOptions{})
+}
+
+// LoadConfigFilesWithOptions is LoadConfigFiles with application validation,
+// such as the Client ID Metadata Document callback that makes
+// oauth.clientRegistration "cimd" loadable.
+func LoadConfigFilesWithOptions(globalPath, projectPath string, options McpServerConfigOptions) LoadedConfig {
 	state := configState{servers: map[string]*ServerEntry{}}
-	readConfigFile(globalPath, "global", &state)
+	readConfigFile(globalPath, "global", &state, options)
 	if projectPath != "" {
-		readConfigFile(projectPath, "project", &state)
+		readConfigFile(projectPath, "project", &state, options)
 	}
 	loaded := LoadedConfig{Errors: state.errors}
 	for _, entry := range state.servers {
@@ -69,7 +76,7 @@ type configState struct {
 	errors  []string
 }
 
-func readConfigFile(path, scope string, state *configState) {
+func readConfigFile(path, scope string, state *configState, options McpServerConfigOptions) {
 	if path == "" {
 		return
 	}
@@ -122,7 +129,7 @@ func readConfigFile(path, scope string, state *configState) {
 					merged[key] = entry
 				}
 				encoded, _ := json.Marshal(merged)
-				validated := ValidateMcpServerConfig(name, encoded, McpServerConfigOptions{})
+				validated := ValidateMcpServerConfig(name, encoded, options)
 				if validated.Kind == "invalid" {
 					state.errors = append(state.errors, fmt.Sprintf("%s: %s", path, validated.Error))
 					continue
@@ -139,7 +146,7 @@ func readConfigFile(path, scope string, state *configState) {
 			state.errors = append(state.errors, fmt.Sprintf("%s: server %q: %v", path, name, err))
 			continue
 		}
-		validated := ValidateMcpServerConfig(name, encoded, McpServerConfigOptions{})
+		validated := ValidateMcpServerConfig(name, encoded, options)
 		if validated.Kind == "invalid" {
 			state.errors = append(state.errors, fmt.Sprintf("%s: %s", path, validated.Error))
 			continue

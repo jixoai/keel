@@ -3,14 +3,17 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agenttool"
+	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/telemetry"
@@ -30,6 +33,33 @@ func testStore(t *testing.T) *store.Store {
 	return st
 }
 
+// testKernel builds the contract kernel over the test store: the runner's
+// production write and read seam.
+func testKernel(t *testing.T, st *store.Store) *kernel.Kernel {
+	t.Helper()
+	pg, err := kernel.NewPG(context.Background(), st.Pool())
+	if err != nil {
+		t.Fatalf("open kernel pg store: %v", err)
+	}
+	return kernel.New(pg, kernel.Options{})
+}
+
+// brokenKernel is a kernel whose pool is closed: every read and write fails
+// with a store error (the deterministic stand-in for a transient outage).
+func brokenKernel(t *testing.T) *kernel.Kernel {
+	t.Helper()
+	st, err := store.Open(context.Background(), store.Config{DSN: os.Getenv("KEEL_TEST_DSN")})
+	if err != nil {
+		t.Fatalf("open broken store: %v", err)
+	}
+	pg, err := kernel.NewPG(context.Background(), st.Pool())
+	if err != nil {
+		t.Fatalf("open broken kernel: %v", err)
+	}
+	st.Close()
+	return kernel.New(pg, kernel.Options{})
+}
+
 func newSession(t *testing.T, st *store.Store) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 	tenant := uuid.New()
@@ -39,6 +69,11 @@ func newSession(t *testing.T, st *store.Store) (uuid.UUID, uuid.UUID) {
 		t.Fatal(err)
 	}
 	if err := st.CreateSession(ctx, tenant, session); err != nil {
+		t.Fatal(err)
+	}
+	// The kernel claims runs, not bare sessions: a run row is queued the way
+	// the edge queues it on input.
+	if err := st.EnqueueRun(ctx, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	return tenant, session
@@ -63,19 +98,57 @@ func countKind(evs []store.Event, kind string) int {
 	return n
 }
 
-func newTestRunner(st *store.Store) *Runner {
-	return NewRunner(st, FakeStream(), "fake", "fake", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+func discardLog() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func newTestRunner(t *testing.T, st *store.Store) (*Runner, *kernel.Kernel) {
+	t.Helper()
+	k := testKernel(t, st)
+	return NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog()), k
+}
+
+// claimScope claims the session's run for the test runner.
+func claimScope(t *testing.T, k *kernel.Kernel, tenant, session uuid.UUID) kernel.Lease {
+	t.Helper()
+	lease, err := k.ClaimScope(context.Background(),
+		kernel.Scope{TenantID: tenant, SessionID: session}, "runner-test", time.Minute)
+	if err != nil {
+		t.Fatalf("claim scope: %v", err)
+	}
+	return lease
+}
+
+// execRun claims, executes and settles the session's run the way the worker
+// does, and returns the runner's cursor and error.
+func execRun(t *testing.T, k *kernel.Kernel, r *Runner, tenant, session uuid.UUID) (int64, error) {
+	t.Helper()
+	ctx := context.Background()
+	lease := claimScope(t, k, tenant, session)
+	cursor, runErr := r.Run(ctx, lease)
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease, Cursor: cursor, Err: runErr, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	return cursor, runErr
+}
+
+// requeue models new work arriving after a settled run (POST /run semantics).
+func requeue(t *testing.T, st *store.Store, tenant, session uuid.UUID) {
+	t.Helper()
+	if err := st.EnqueueRun(context.Background(), tenant, session); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRunnerTextReply(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	ctx := context.Background()
+	r, k := newTestRunner(t, st)
 	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "hello"}); err != nil {
 		t.Fatal(err)
 	}
-	r := newTestRunner(st)
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	events := eventsOf(t, st, tenant, session)
@@ -95,7 +168,8 @@ func TestRunnerTextReply(t *testing.T) {
 
 	// A second run with no new input must be a no-op.
 	before := len(events)
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	requeue(t, st, tenant, session)
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	if after := len(eventsOf(t, st, tenant, session)); after != before {
@@ -107,11 +181,11 @@ func TestRunnerToolRoundTrip(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	ctx := context.Background()
+	r, k := newTestRunner(t, st)
 	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "please echo this"}); err != nil {
 		t.Fatal(err)
 	}
-	r := newTestRunner(st)
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	events := eventsOf(t, st, tenant, session)
@@ -144,10 +218,121 @@ func TestRunnerToolRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRunnerCommitsThroughKernel proves the write path is the contract kernel:
+// the assistant message is deduplicated by its derived generationId, the tool
+// result by its toolCallId, and the kernel's pairing projection is empty once
+// the turn is complete.
+func TestRunnerCommitsThroughKernel(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	ctx := context.Background()
+	r, k := newTestRunner(t, st)
+	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "echo this"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
+		t.Fatal(err)
+	}
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	// The assistant generations carry the derived ids (u<userSeq>-a<ordinal>).
+	first, found, err := k.Lookup(ctx, scope, kernel.KeyRef{Kind: kernel.KeyGeneration, Value: "u1-a0"})
+	if err != nil || !found {
+		t.Fatalf("generation lookup u1-a0 = %+v found=%v err=%v", first, found, err)
+	}
+	second, found, err := k.Lookup(ctx, scope, kernel.KeyRef{Kind: kernel.KeyGeneration, Value: "u1-a1"})
+	if err != nil || !found {
+		t.Fatalf("generation lookup u1-a1 = %+v found=%v err=%v", second, found, err)
+	}
+	if second.Seq <= first.Seq {
+		t.Fatalf("generation seqs = %d/%d, want the final answer after the tool call", first.Seq, second.Seq)
+	}
+
+	// The tool result is committed under its toolCallId.
+	var callID string
+	for _, ev := range eventsOf(t, st, tenant, session) {
+		if ev.Kind != store.EventAssistantMessage {
+			continue
+		}
+		var m agentcore.AssistantMessage
+		if err := json.Unmarshal(ev.Payload, &m); err != nil {
+			t.Fatal(err)
+		}
+		if calls := m.ToolCalls(); len(calls) > 0 {
+			callID = calls[0].ID
+		}
+	}
+	if callID == "" {
+		t.Fatal("no tool call committed")
+	}
+	if _, found, err := k.Lookup(ctx, scope, kernel.KeyRef{Kind: kernel.KeyToolCall, Value: callID}); err != nil || !found {
+		t.Fatalf("tool result lookup %q found=%v err=%v", callID, found, err)
+	}
+	unresolved, err := k.UnresolvedToolCalls(ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unresolved) != 0 {
+		t.Fatalf("unresolved tool calls = %+v, want none", unresolved)
+	}
+}
+
+// TestRunnerRejectsStaleClaim replays the handoff rejection at the service
+// level: after another owner claimed the session, the drained runner's commits
+// are refused and the ledger keeps the new owner's truth only.
+func TestRunnerRejectsStaleClaim(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	ctx := context.Background()
+	r, k := newTestRunner(t, st)
+	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	stale := claimScope(t, k, tenant, session)
+	// The session is handed over: release, then the new runtime claims it and
+	// bumps the epoch.
+	if err := k.Release(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := k.ClaimScope(ctx, scope, "runtime-b", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Token.Epoch != stale.Token.Epoch+1 {
+		t.Fatalf("handoff epoch = %d, want %d", fresh.Token.Epoch, stale.Token.Epoch+1)
+	}
+
+	before := len(eventsOf(t, st, tenant, session))
+	if _, err := r.Run(ctx, stale); !errors.Is(err, kernel.ErrStaleEpoch) {
+		t.Fatalf("stale run error = %v, want stale-epoch", err)
+	}
+	if after := len(eventsOf(t, st, tenant, session)); after != before {
+		t.Fatalf("stale writer appended events: %d -> %d", before, after)
+	}
+	// The old owner cannot settle the run either.
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: stale}); !errors.Is(err, kernel.ErrStaleEpoch) {
+		t.Fatalf("stale finish error = %v, want stale-epoch", err)
+	}
+	// The new owner proceeds normally.
+	newRunner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	if _, err := newRunner.Run(ctx, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countKind(eventsOf(t, st, tenant, session), store.EventAssistantMessage); got != 1 {
+		t.Fatalf("assistant messages = %d, want exactly the new owner's one", got)
+	}
+}
+
 func TestRunnerResumesUnresolvedToolCall(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	ctx := context.Background()
+	r, k := newTestRunner(t, st)
 	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "echo after crash"}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,8 +348,7 @@ func TestRunnerResumesUnresolvedToolCall(t *testing.T) {
 	if _, err := st.AppendEvent(ctx, tenant, session, store.EventAssistantMessage, call); err != nil {
 		t.Fatal(err)
 	}
-	r := newTestRunner(st)
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	events := eventsOf(t, st, tenant, session)
@@ -191,7 +375,8 @@ func TestRunnerResumesUnresolvedToolCall(t *testing.T) {
 
 	// A second execution (lease expiry / duplicate enqueue) must not add a
 	// second tool result or a second final answer.
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	requeue(t, st, tenant, session)
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	again := eventsOf(t, st, tenant, session)
@@ -213,6 +398,8 @@ func TestToolResultDedupeKey(t *testing.T) {
 		ToolName:   "echo",
 		Content:    agentcore.ContentList{agentcore.NewTextContent("x")},
 	}
+	// The legacy store writer shares the "tool:" namespace the kernel uses, so
+	// pre-existing logs keep deduplicating unchanged.
 	seq1, inserted1, err := st.AppendEventDedup(ctx, tenant, session, store.EventToolResult, msg, "tool:call-1")
 	if err != nil {
 		t.Fatal(err)
@@ -236,17 +423,17 @@ func TestRunnerSkipsDuplicateFinal(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	ctx := context.Background()
+	r, k := newTestRunner(t, st)
 	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "one"}); err != nil {
 		t.Fatal(err)
 	}
-	r := newTestRunner(st)
-	run := store.Run{TenantID: tenant, SessionID: session}
-	if _, err := r.Run(ctx, run); err != nil {
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	// Concurrent workers can claim the same session after a lease expiry; a
 	// second execution must not answer twice.
-	if _, err := r.Run(ctx, run); err != nil {
+	requeue(t, st, tenant, session)
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	var assistants int
@@ -289,10 +476,11 @@ func TestRunnerUsesHostAssembly(t *testing.T) {
 	if err := reg.Register(EchoTool{}); err != nil {
 		t.Fatal(err)
 	}
-	r := NewRunner(st, stream, "fake", "fake", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	k := testKernel(t, st)
+	r := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
 	r.Tools = nil // only the host registry may execute tools
 	r.Assembly = staticAssembly{prompt: prompt, tools: reg}
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	if gotSystem != prompt {
@@ -321,9 +509,9 @@ func TestRunnerRecordsTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	memory := telemetry.NewMemory()
-	r := newTestRunner(st)
+	r, k := newTestRunner(t, st)
 	r.Telemetry = &RunTelemetry{Context: memory, Metrics: memory}
-	if _, err := r.Run(ctx, store.Run{TenantID: tenant, SessionID: session}); err != nil {
+	if _, err := execRun(t, k, r, tenant, session); err != nil {
 		t.Fatal(err)
 	}
 	spans := memory.Spans()

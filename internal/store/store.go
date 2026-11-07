@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,10 @@ type Config struct {
 	// StatementTimeout is applied to every connection. A statement that exceeds
 	// it is cancelled server-side instead of pinning a backend.
 	StatementTimeout time.Duration // default 5s
+	// MCPOAuthLockConns bounds the separate pool that holds session advisory
+	// locks for MCP OAuth refreshes. It must stay small: a lock holder runs its
+	// callback on the main pool, so the two pools must never be the same.
+	MCPOAuthLockConns int32 // default 4
 }
 
 func (c *Config) applyDefaults() {
@@ -49,12 +54,22 @@ func (c *Config) applyDefaults() {
 	if c.StatementTimeout == 0 {
 		c.StatementTimeout = 5 * time.Second
 	}
+	if c.MCPOAuthLockConns == 0 {
+		c.MCPOAuthLockConns = 4
+	}
 }
 
 // Store wraps a pgx pool.
 type Store struct {
 	pool           *pgxpool.Pool
 	acquireTimeout time.Duration
+	// observer, when set, receives the kind of every committed event. It is an
+	// observability seam (metrics), not durable state; nil disables it.
+	observer atomic.Pointer[EventObserver]
+	// lockPool is a tiny separate pool for MCP OAuth session advisory locks.
+	// Lock holders run their callback on the main pool; sharing one pool would
+	// let MaxConns lock holders deadlock every other query.
+	lockPool *pgxpool.Pool
 }
 
 // Open connects, tunes the session, and applies the schema (idempotent).
@@ -80,16 +95,45 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: pool: %w", err)
 	}
-	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout}
+	// The lock pool must never share connections with the main pool: a holder
+	// runs Load/Save on the main pool while keeping its lock connection.
+	lockConfig, err := pgxpool.ParseConfig(cfg.DSN)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("store: parse lock dsn: %w", err)
+	}
+	lockConfig.MaxConns = cfg.MCPOAuthLockConns
+	lockConfig.MinConns = 0
+	lockConfig.MaxConnLifetime = 30 * time.Minute
+	lockConfig.MaxConnIdleTime = time.Minute
+	lockConfig.HealthCheckPeriod = 30 * time.Second
+	lockConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		// A lock wait must be bounded by lock_timeout, not canceled early by the
+		// pool-wide statement timeout.
+		_, err := conn.Exec(ctx, "SET statement_timeout = 0; SET idle_in_transaction_session_timeout = '3s'")
+		return err
+	}
+	lockPool, err := pgxpool.NewWithConfig(ctx, lockConfig)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("store: lock pool: %w", err)
+	}
+	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout, lockPool: lockPool}
 	if err := s.Migrate(ctx); err != nil {
+		lockPool.Close()
 		pool.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
-// Close releases the pool.
-func (s *Store) Close() { s.pool.Close() }
+// Close releases both pools.
+func (s *Store) Close() {
+	if s.lockPool != nil {
+		s.lockPool.Close()
+	}
+	s.pool.Close()
+}
 
 // Pool exposes the underlying pool for the blob reader (which needs its own
 // keyset queries) without making every query public.
@@ -129,6 +173,30 @@ func isRetryableTx(err error) bool {
 	return false
 }
 
+// execRetry executes one idempotent statement, retrying the transient
+// transaction failures that a concurrent migration (the boot-time DDL every
+// replica applies) or another writer can produce. Only statements that are
+// safe to re-run may use it: the inserts here are upserts or conflict-deduped.
+func (s *Store) execRetry(ctx context.Context, statement string, args ...any) (pgconn.CommandTag, error) {
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		tag, err := s.pool.Exec(ctx, statement, args...)
+		if err == nil {
+			return tag, nil
+		}
+		lastErr = err
+		if !isRetryableTx(err) {
+			return pgconn.CommandTag{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return pgconn.CommandTag{}, ctx.Err()
+		case <-time.After(time.Duration(10+attempt*20) * time.Millisecond):
+		}
+	}
+	return pgconn.CommandTag{}, lastErr
+}
+
 func (s *Store) migrateOnce(ctx context.Context, sql string) error {
 	// Serialize concurrent migrations (test packages and replicas start at the
 	// same time); the lock is released automatically at commit.
@@ -137,6 +205,9 @@ func (s *Store) migrateOnce(ctx context.Context, sql string) error {
 		return fmt.Errorf("store: migrate begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, migrateSessionSettings); err != nil {
+		return fmt.Errorf("store: migrate settings: %w", err)
+	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(714322)"); err != nil {
 		return fmt.Errorf("store: migrate lock: %w", err)
 	}
@@ -148,6 +219,17 @@ func (s *Store) migrateOnce(ctx context.Context, sql string) error {
 	}
 	return nil
 }
+
+// migrateSessionSettings lifts the pool-wide statement timeout for the schema
+// transaction. DDL cost is bounded by the data, not by a request budget: the
+// kernel's tool-call index on a large events table (measured ~0.95 s at 200k
+// rows, linear after that) would otherwise be canceled at the pool's 5 s
+// statement timeout, failing the migration and taking every replica down with
+// it. Both settings are SET LOCAL, so they revert when the transaction ends and
+// never leak into pooled connections the request path uses; a lock wait is
+// still bounded by lock_timeout, and 55P03 is in the retry loop's retryable
+// set, so a busy database backs off instead of hanging.
+const migrateSessionSettings = "SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = '30s'"
 
 // Acquire returns a connection with a short timeout: when the pool is saturated
 // the caller gets a fast failure it can turn into 503 + Retry-After instead of
@@ -281,6 +363,7 @@ func (s *Store) appendEventDedupOnce(ctx context.Context, tenantID, sessionID uu
 	if err := tx.Commit(ctx); err != nil {
 		return 0, false, fmt.Errorf("store: commit event: %w", err)
 	}
+	s.notifyEvent(kind)
 	return seq, true, nil
 }
 
@@ -331,13 +414,17 @@ type Submission struct {
 	Status string
 }
 
-// Submit records a request idempotently. A replay with the same requestId returns
-// the existing row (and never creates a second user message).
+// Submit records a request idempotently. The key is (tenant, session,
+// requestId), mirroring the event log's dedupe scope: a replay in the same
+// session returns the existing row (and never creates a second user message),
+// while the same requestId in another session is an independent submission. A
+// tenant-wide key would leak the first session's submission/seq to the second
+// (M3).
 func (s *Store) Submit(ctx context.Context, tenantID uuid.UUID, requestID string, sessionID uuid.UUID, submissionID uuid.UUID) (Submission, bool, error) {
-	tag, err := s.pool.Exec(ctx,
+	tag, err := s.execRetry(ctx,
 		`INSERT INTO submissions (tenant_id, request_id, session_id, submission_id, status)
 		 VALUES ($1, $2, $3, $4, 'pending')
-		 ON CONFLICT (tenant_id, request_id) DO NOTHING`,
+		 ON CONFLICT (tenant_id, session_id, request_id) DO NOTHING`,
 		tenantID, requestID, sessionID, submissionID)
 	if err != nil {
 		return Submission{}, false, fmt.Errorf("store: submit: %w", err)
@@ -347,7 +434,8 @@ func (s *Store) Submit(ctx context.Context, tenantID uuid.UUID, requestID string
 	var seq *int64
 	err = s.pool.QueryRow(ctx,
 		`SELECT submission_id, seq, status FROM submissions
-		 WHERE tenant_id = $1 AND request_id = $2`, tenantID, requestID).Scan(&out.ID, &seq, &out.Status)
+		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
+		tenantID, sessionID, requestID).Scan(&out.ID, &seq, &out.Status)
 	if err != nil {
 		return Submission{}, created, fmt.Errorf("store: read submission: %w", err)
 	}
@@ -356,11 +444,13 @@ func (s *Store) Submit(ctx context.Context, tenantID uuid.UUID, requestID string
 }
 
 // SetSubmissionStatus updates the submission state and the sequence at which it
-// became visible.
-func (s *Store) SetSubmissionStatus(ctx context.Context, tenantID uuid.UUID, requestID, status string, seq int64) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE submissions SET status = $3, seq = $4
-		 WHERE tenant_id = $1 AND request_id = $2`, tenantID, requestID, status, seq)
+// became visible. The session is part of the key: a requestId reused by another
+// session has its own row.
+func (s *Store) SetSubmissionStatus(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, status string, seq int64) error {
+	_, err := s.execRetry(ctx,
+		`UPDATE submissions SET status = $4, seq = $5
+		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
+		tenantID, sessionID, requestID, status, seq)
 	if err != nil {
 		return fmt.Errorf("store: set submission status: %w", err)
 	}

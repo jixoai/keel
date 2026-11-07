@@ -1,0 +1,68 @@
+[
+  {
+    "path": "/http/events.owner_scoped/status",
+    "old": "201",
+    "new": "400",
+    "reason": "MODIFIED API (contract-kernel): the edge accepts only user.message; an owner-scoped kind now answers 400 instead of 201"
+  },
+  {
+    "path": "/http/events.owner_scoped/body/error",
+    "reason": "Same delta: the 400 body carries the whitelist message instead of a committed seq. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.owner_scoped/body/seq",
+    "old": "1",
+    "new": "$absent",
+    "reason": "Same delta: the baseline answered with the seq it stored; the tightened edge has no seq to report"
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events",
+    "old": "$absent",
+    "new": "[]",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/seq",
+    "old": "1",
+    "new": "$absent",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/kind",
+    "old": "\"assistant.message\"",
+    "new": "$absent",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/payload/text",
+    "reason": "The stored text of the baseline's refused write; content, not a contract."
+  },
+  {
+    "path": "/http/events.foreign_tenant/status",
+    "old": "200",
+    "new": "404",
+    "reason": "MODIFIED API (contract-kernel): a cross-tenant or missing session answers 404 instead of an empty page"
+  },
+  {
+    "path": "/http/events.foreign_tenant/body/error",
+    "reason": "Same delta: 404 error body instead of an empty events array. Message wording is not pinned."
+  },
+  {
+    "path": "/http/events.foreign_tenant/body/events",
+    "old": "[]",
+    "new": "$absent",
+    "reason": "Same delta: the baseline answered an empty array; the tightened edge answers an error body instead"
+  },
+  {
+    "path": "/http/input.user1/body/status",
+    "old": "\"pending\"",
+    "new": "\"committed\"",
+    "reason": "MODIFIED API: the /input response reports the authoritative submission status (the commit already happened, so \"pending\" was a lie). Pinned per step because the fix applies to every first submit."
+  },
+  {
+    "path": "/http/input.user2/body/status",
+    "old": "\"pending\"",
+    "new": "\"committed\"",
+    "reason": "MODIFIED API: the /input response reports the authoritative submission status (the commit already happened, so \"pending\" was a lie). Pinned per step because the fix applies to every first submit."
+  }
+]

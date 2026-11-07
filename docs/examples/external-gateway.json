@@ -1,0 +1,32 @@
+{
+  "external": {
+    "backends": {
+      "dsh": {
+        "transport": "stdio",
+        "command": "node",
+        "args": ["/opt/keel/dsh-keel-sidecar.mjs"],
+        "env": {
+          "DSH_PROVIDER": "env:DSH_PROVIDER",
+          "DSH_MODEL": "env:DSH_MODEL",
+          "DSH_API_KEY": "secret:DSH_API_KEY"
+        },
+        "timeoutMs": 60000,
+        "maxSessions": 16
+      }
+    },
+    "tools": {
+      "docs": {
+        "transport": "http",
+        "url": "https://tools.example.com/mcp",
+        "headers": {
+          "Authorization": "secret:DOCS_TOKEN"
+        },
+        "timeoutMs": 30000
+      }
+    },
+    "quota": {
+      "unmetered": "deny",
+      "maxSessionsPerBackend": 32
+    }
+  }
+}

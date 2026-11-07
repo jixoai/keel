@@ -82,3 +82,65 @@ func TestHostHidesDisabledSkillFromPrompt(t *testing.T) {
 		t.Fatal("skill tool should not exist without visible skills")
 	}
 }
+
+type namedTestTool struct{ name string }
+
+func (n namedTestTool) Name() string          { return n.name }
+func (namedTestTool) Description() string     { return "test tool" }
+func (namedTestTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (namedTestTool) ExecutionMode() agentcore.ToolExecutionMode {
+	return agentcore.ToolExecutionParallel
+}
+func (namedTestTool) Execute(context.Context, string, json.RawMessage, agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	return agentcore.AgentToolResult{}, nil
+}
+
+func TestRefreshMCPReplacesToolsAndPromptSection(t *testing.T) {
+	h, _, err := New(Config{
+		Preamble:   "base",
+		Sections:   []Section{{Name: "base", Content: "BASE"}},
+		ExtraTools: []agentcore.AgentTool{namedTestTool{name: "old_mcp"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.Tools().Get("old_mcp"); !ok {
+		t.Fatal("old tool missing before refresh")
+	}
+	if err := h.RefreshMCP([]agentcore.AgentTool{namedTestTool{name: "new_mcp"}}, "MCP SERVERS"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.Tools().Get("old_mcp"); ok {
+		t.Fatal("old tool survived refresh")
+	}
+	if _, ok := h.Tools().Get("new_mcp"); !ok {
+		t.Fatal("new tool missing after refresh")
+	}
+	prompt := h.SystemPrompt()
+	if !strings.Contains(prompt, "MCP SERVERS") || !strings.Contains(prompt, "BASE") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestRefreshMCPConcurrentReads(t *testing.T) {
+	h, _, err := New(Config{Preamble: "base", IncludeBuiltins: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func(i int) {
+			defer func() { done <- struct{}{} }()
+			_ = h.Tools().List()
+			_ = h.SystemPrompt()
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		if err := h.RefreshMCP([]agentcore.AgentTool{namedTestTool{name: "mcp_" + string(rune('a'+i))}}, "section"); err != nil {
+			t.Error(err)
+		}
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
+}

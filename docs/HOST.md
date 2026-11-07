@@ -51,10 +51,16 @@ telemetry:
   adapter: "memory"         # memory | prometheus | otlp（后两者后续）
 tools:
   allow: ["clock", "echo", "skill", "mcp__*"]
+quota:
+  runConcurrency: 8       # per-tenant concurrent runs in this runtime (0 = unlimited)
+  eventsPerMinute: 600    # per-tenant admitted-event rate (0 = unlimited)
 ```
 
-配置来源：**当前实现**从环境变量读取（见 §4）；`tenants.config jsonb` 是下一阶段的多租户配置面。
-密钥只从 env/secret store 读，不落 schema。
+配置来源：运行时可继续从环境变量读取（见 §4）；租户配置文档持久化在
+`tenants.config jsonb`，由管理员 API（见 §4.2）写入，下一轮 run 生效。
+密钥只存引用：`agent.apiKeyRef` 与 MCP server 的 `env` / `headers` 值只接受
+`${NAME}` / `env:NAME` / `secret:NAME` 三种形态；明文（包括 `Bearer <token>`）一律拒绝，
+不落 schema。
 
 ## 3. 装配顺序（与 PI 对齐）
 
@@ -92,7 +98,29 @@ tools:
 | `KEEL_MCP_CONFIG` | 全局 `mcp.json` 路径（空 = 不启用 MCP） |
 | `KEEL_MCP_PROJECT` | 项目 `mcp.json` 路径（仅可信项目） |
 | `KEEL_TELEMETRY` | `memory` 时启用内存 telemetry recorder |
+| `KEEL_ADMIN_KEY` | 管理员 Bearer key（租户 provisioning、租户配置/用量 API、MCP OAuth sign-in）；空 = 管理员 API 关闭（503） |
 | `KEEL_MODEL` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_PROVIDER` / `KEEL_API_KEY` | provider 选择（空 = fake provider） |
+| `KEEL_LOADOUT_ID` / `KEEL_LOADOUT_REVISION` | 默认 loadout 快照 id 与 revision（handoff identity 与 run 元数据共用；默认 `default` / 1） |
+| `KEEL_QUOTA_RUNS` / `KEEL_QUOTA_EVENTS_PER_MINUTE` | 默认租户文档的 per-tenant 配额（并发 run / 每分钟事件）；0 = 不限，租户存储文档可覆盖 |
+
+### 管理员 API（租户 provisioning / 配置 / 用量）
+
+管理员接口要求 `Authorization: Bearer <KEEL_ADMIN_KEY>`（scheme 大小写不敏感，密钥比较
+常量时间）；未配置 `KEEL_ADMIN_KEY` 时返回 503，不存在匿名或半开放路径。
+
+| 方法/路径 | 作用 |
+|---|---|
+| `POST /v1/tenants` | 创建租户（`X-Tenant-ID` 指定 id，body `{"name":"..."}`）；未鉴权 401，未配置 key 503 |
+| `PUT /v1/tenants/{id}/config` | 替换租户配置。body 即 §2 的 JSON 文档（非信封）；未知字段/非法值 400，body 超限 413，租户不存在 404 |
+| `GET /v1/tenants/{id}/config` | 返回 `{tenantId, revision, config}` |
+| `GET /v1/tenants/{id}/usage` | 返回按 session/provider/model 分组的 token 计数与总计（含 `unaccountedEntries`）；只有计数，无金额 |
+
+租户 provisioning 也是管理员操作：`X-Tenant-ID` 只是写入的行 id，不是身份凭证。
+
+`config_revision` 每次写入原子 +1，是变更标识。`usage_ledger` 以 Runner 在发请求前生成的
+`request_id` 为幂等键：同一 request_id 重放只记一次，一个事件 seq 派生多个请求（如
+compaction summary）也不会丢账；provider 已计费但进程崩溃导致 usage 丢失的请求以
+`unaccounted` 行保留，恢复后在同一行升级为 `settled`。
 
 ## 5. 验收
 

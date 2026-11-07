@@ -1,0 +1,19 @@
+{
+  "external": {
+    "backends": {
+      "dsh-ref": {
+        "command": "/tmp/keel-gw-smoke/bin/keel-dsh-ref",
+        "args": ["-usage", "-prompt=smoke:"],
+        "timeoutMs": 5000,
+        "maxSessions": 4
+      }
+    },
+    "tools": {
+      "dsh-tools": {
+        "command": "/tmp/keel-gw-smoke/bin/keel-dsh-ref",
+        "args": ["-kind=tool"]
+      }
+    },
+    "quota": {"unmetered": "allow", "maxSessionsPerBackend": 8}
+  }
+}

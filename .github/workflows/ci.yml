@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Nightly chaos placeholder: the job structure is wired, the scenario is
+    # still a TODO (see the chaos-nightly job).
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: runtime
+          POSTGRES_DB: runtime
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d runtime"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt required for:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        env:
+          KEEL_TEST_DSN: postgres://postgres:runtime@127.0.0.1:5432/runtime?sslmode=disable
+        run: go test -race ./...
+      - name: go build
+        run: go build ./...
+
+  image:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: docker build
+        run: docker build -t keel:ci .
+
+  chaos-nightly:
+    # Placeholder only: scheduled runs execute a no-op until the random-kill
+    # matrix (cmd/e2e, 10 minutes, kill -9 every 30s) is wired.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: nightly chaos (TODO)
+        run: |
+          echo "TODO: run cmd/e2e random-kill matrix for 10 minutes"
+          go build ./...
