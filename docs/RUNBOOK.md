@@ -134,13 +134,27 @@ go build -o /tmp/keel-loadtest ./cmd/loadtest
 - 服务端必须用 `-streams 2000` 才能同时容纳 1000 条 SSE 与 800 条 Medium 图片流。
 - 429 是预期反压：loadtest 会按 Retry-After 重试；60000ms 单轮只有 800 条 Medium
   容量，剩余 200 条会在 6 次退避后记为失败（这是容量上限，不是流错误）。
-- 2026-11-06 基线：800/1000 图片完成、0 SSE 错误、18.6MB/s、2GB cgroup 峰值 544MB。
+- 2026-11-06 历史基线：800/1000 图片完成、0 SSE 错误、18.6MB/s、2GB cgroup 峰值 544MB。
+- 2026-11-08 终轮（`scripts/acceptance-perf.sh`，fail-closed 口径）：998/1000 图片完成
+  （另 214 张按尺寸分池 429 后退避重试）、0 硬错误、23.2MB/s、2GB cgroup 峰值 **590MB
+  （27.5%）**；双进程 handoff（`scripts/acceptance-handoff-rss.sh`）峰值 584MB（27.2%）。
+  单进程峰值各轮 485–590MB（随负载完成度浮动，均 ≤2GiB 的 29%），上限门 1.5GB。
 - 结果 JSON 含 p50/p95/p99、吞吐、429 计数、RSS 采样。
 
 ## 验收脚本（一条命令复跑）
 
-改内核/装配/handoff 之后，按下面顺序复跑；这些脚本都自己建/删**隔离库**（库名必须含
-e2e/test/smoke/perf/accept，含防呆），跑完不留进程：
+**推荐入口**：`scripts/acceptance-all.sh` —— 串行跑完全部验收门（build/vet、全仓
+`-race`、conformance、R1（含同 dump 负控）、空库 E2E、排水、in-flight、网关冒烟、
+chaos kill/handoff、2GB/1000 与双进程内存门），每个门的工件先截断再写、失败即停，
+全部证据落在 `$KEEL_EVIDENCE_DIR`：
+
+```bash
+KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence \
+  scripts/acceptance-all.sh
+```
+
+改内核/装配/handoff 之后，也可以按下面顺序手工复跑；这些脚本都自己建/删**隔离库**
+（库名必须含 e2e/test/smoke/perf/accept，含防呆），跑完不留进程：
 
 ```bash
 # 1) 重构平价：基线二进制 vs 候选二进制，同剧本规范化逐字比对
