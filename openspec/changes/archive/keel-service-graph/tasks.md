@@ -145,9 +145,14 @@
       双租户同名工具与 provider 图片内容未覆盖，登记为后续加固）
 - [x] handoff 补充：新 runtime 刚 claim 就崩（epoch 连跳：`cmd/chaos -mode handoff` 6 轮实跑）；交接恰逢压缩——压缩未服务化，登记为差距
 - [x] 文档：loadout 示例（`docs/LOADOUT.md`）、handoff runbook 与回滚手册（`docs/HANDOFF.md`）、DSH 兼容矩阵（`docs/DSH-REFERENCE.md`）
-- [ ] 子代理交叉复核（reviewer/vision，不使用 Codex）
-- [ ] HTML 报告：过程截图 + 大白话解说；fde2e 公网链接
-- [ ] 归档本 change；更新主仓 submodule 指针与项目索引
+- [x] 子代理交叉复核（reviewer/vision，不使用 Codex）——四轮对抗审查驱动的 N1–N12 全修；
+      终轮「合流增量 + 证据链 + 验收工具红队」复核 7/10 判 1 阻塞（外部会话 Open 非原子：
+      并发可改写 marks / closed 可复活 / 两条 backend 对话混入同一日志）→ 修复后复审 9/10
+      判 B1 闭合、无新阻塞；报告页另有 vision 走查，P1 逐项整改
+- [x] HTML 报告：过程截图 + 大白话解说；公网链接 `https://alpha-keel-service-graph.fde2e.com/report.html`
+      （同一内容另有本机隧道 `https://local-gaubee-keel-service-graph.fde2e.com/report.html`）
+- [x] 归档本 change；更新主仓 submodule 指针与项目索引（keel main 已推送：服务图终版 squash +
+      复核修复批次；主仓指针 + E2E 索引行 commit `50050c85`）
 
 ## 完成定义（Definition of Done）
 
