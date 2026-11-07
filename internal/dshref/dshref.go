@@ -85,6 +85,10 @@ type Config struct {
 	HandshakeDelay time.Duration
 	// OpenDelay delays the session.open answer (a stuck-provider test).
 	OpenDelay time.Duration
+	// OpenLog appends one line per created session to this file (append mode).
+	// It is the observable the single-flight test counts: a concurrent Open of
+	// one Keel scope must hand the backend exactly one session.
+	OpenLog string
 	// IgnoreCancel makes the cancel method a no-op (a stuck-backend test).
 	IgnoreCancel bool
 	// CrashOnSend terminates the sidecar instead of answering message.send.
@@ -488,6 +492,12 @@ func (s *Server) openSession(params json.RawMessage) (any, *rpcError) {
 	id := fmt.Sprintf("%s-session-%d", s.cfg.name(), s.nextSession)
 	session := &sessionState{id: id, reference: request.Reference}
 	s.sessions[id] = session
+	if s.cfg.OpenLog != "" {
+		if file, err := os.OpenFile(s.cfg.OpenLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			_, _ = fmt.Fprintln(file, id)
+			_ = file.Close()
+		}
+	}
 	s.mu.Unlock()
 	return map[string]any{
 		"sessionId":  id,

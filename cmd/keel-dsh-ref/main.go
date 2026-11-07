@@ -37,6 +37,7 @@ func main() {
 		requireEnv      = flag.String("require-env", "", "comma-separated environment variables that must be present")
 		handshakeDelay  = flag.Duration("handshake-delay", 0, "delay the initialize answer (stuck-provider tests)")
 		openDelay       = flag.Duration("open-delay", 0, "delay the session.open answer (stuck-provider tests)")
+		openLog         = flag.String("open-log", "", "append one line per created session to this file (test support)")
 		spawnChild      = flag.Bool("spawn-child", false, "spawn a long-lived grandchild (process-group reaping test)")
 	)
 	flag.Parse()
@@ -56,6 +57,7 @@ func main() {
 		RequiredEnv:      splitList(*requireEnv),
 		HandshakeDelay:   *handshakeDelay,
 		OpenDelay:        *openDelay,
+		OpenLog:          *openLog,
 		SpawnChild:       *spawnChild,
 	}
 	if cfg.Slow < 0 {

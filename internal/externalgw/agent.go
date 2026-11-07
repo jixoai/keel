@@ -42,11 +42,56 @@ type AgentService struct {
 	log      *slog.Logger
 	backends map[string]*backendRuntime
 
+	// openLocks serializes Open per session scope inside this process (see the
+	// openLocks type); the kernel's conditional upsert is the cross-process
+	// guard.
+	openLocks openLocks
+
 	mu     sync.Mutex
 	ctx    context.Context
 	cancel context.CancelFunc
 	closed bool
 	wg     sync.WaitGroup
+}
+
+// openLocks is a keyed mutex set for the open path. Without it two concurrent
+// Opens of one scope would both create a backend session before either marked
+// the row, leaving an orphan backend session behind (the loser's handle is
+// never recorded, so nothing would ever close it).
+type openLocks struct {
+	mu      sync.Mutex
+	entries map[kernel.Scope]*openLockEntry
+}
+
+type openLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lock acquires the scope's mutex and returns the release function.
+func (l *openLocks) lock(scope kernel.Scope) func() {
+	l.mu.Lock()
+	if l.entries == nil {
+		l.entries = make(map[kernel.Scope]*openLockEntry)
+	}
+	entry := l.entries[scope]
+	if entry == nil {
+		entry = &openLockEntry{}
+		l.entries[scope] = entry
+	}
+	entry.refs++
+	l.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		l.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(l.entries, scope)
+		}
+		l.mu.Unlock()
+	}
 }
 
 var _ servicegraph.Instance = (*AgentService)(nil)
@@ -235,6 +280,14 @@ func (s *AgentService) Open(ctx context.Context, scope kernel.Scope, backend str
 	if !ok {
 		return SessionView{}, fmt.Errorf("%w: %s", ErrBackendUnknown, backend)
 	}
+	// The critical section covers "check the marks → open on the backend → mark
+	// the row", so a retry or a double-click cannot leave a second, unrecorded
+	// backend session behind. The kernel upsert is the cross-process guard
+	// (a different ref or backend is refused), this lock keeps the fast path
+	// from ever creating the orphan.
+	release := s.openLocks.lock(scope)
+	defer release()
+
 	// A session may only be promoted while it is pristine; a session that is
 	// already external belongs to a backend session and is not reopened under a
 	// second backend handle.

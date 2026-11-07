@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -210,6 +211,55 @@ func TestExternalSendCancelCloseAndBackends(t *testing.T) {
 	}
 	if code := doJSON(t, hs.Client(), "GET", hs.URL+"/v1/external/backends", tenant, nil, &backends); code != http.StatusOK || len(backends.Backends) != 1 {
 		t.Fatalf("backends = %d %+v", code, backends)
+	}
+}
+
+// TestExternalControlBodyIsValidated pins the control-plane body rules: an
+// empty body means "use the defaults", but a malformed or oversized one is
+// refused before the action runs — a truncated reason must not silently close
+// the session with an empty one.
+func TestExternalControlBodyIsValidated(t *testing.T) {
+	fake := &fakeExternal{}
+	hs := externalTestServer(t, fake)
+	tenant := uuid.NewString()
+	base := hs.URL + "/v1/external/sessions/" + uuid.NewString()
+
+	post := func(path, body string) int {
+		t.Helper()
+		req, err := http.NewRequest("POST", base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Tenant-ID", tenant)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := hs.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		_, _ = io.Copy(io.Discard, res.Body)
+		return res.StatusCode
+	}
+
+	if code := post("/cancel", `{"turnId":`); code != http.StatusBadRequest {
+		t.Fatalf("malformed cancel body = %d, want 400", code)
+	}
+	oversized := `{"reason":"` + strings.Repeat("x", 1<<21) + `"}`
+	if code := post("/close", oversized); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized close body = %d, want 413", code)
+	}
+	fake.mu.Lock()
+	calls := append([]string(nil), fake.calls...)
+	fake.mu.Unlock()
+	if len(calls) != 0 {
+		t.Fatalf("refused bodies still reached the service: %v", calls)
+	}
+	// An empty body keeps the defaults and runs.
+	if code := post("/cancel", ""); code != http.StatusOK {
+		t.Fatalf("empty cancel body = %d, want 200", code)
+	}
+	if fake.cancel.TurnID != "" || fake.cancel.Reason != "" {
+		t.Fatalf("empty body reached the service with %+v", fake.cancel)
 	}
 }
 

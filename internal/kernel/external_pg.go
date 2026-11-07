@@ -60,11 +60,14 @@ func (s *PGStore) upsertExternalSession(ctx context.Context, scope Scope, marks 
 	var (
 		stateOwner string
 		nextSeq    int64
+		curBackend *string
+		curRef     *string
+		curStatus  *string
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT state_owner, next_seq FROM sessions
+		`SELECT state_owner, next_seq, external_backend, external_ref, external_status FROM sessions
 		 WHERE tenant_id = $1 AND session_id = $2 FOR UPDATE`,
-		scope.TenantID, scope.SessionID).Scan(&stateOwner, &nextSeq)
+		scope.TenantID, scope.SessionID).Scan(&stateOwner, &nextSeq, &curBackend, &curRef, &curStatus)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if _, err := tx.Exec(ctx,
@@ -78,7 +81,49 @@ func (s *PGStore) upsertExternalSession(ctx context.Context, scope Scope, marks 
 		}
 	case err != nil:
 		return ExternalSession{}, fmt.Errorf("kernel: external lock session: %w", pgFail(err))
-	case stateOwner != StateOwnerExternal:
+	case stateOwner == StateOwnerExternal:
+		// An existing external session may only be refreshed idempotently by
+		// its own handle. The marks are the single fact of "who owns this
+		// session": overwriting them would strand the previous backend session
+		// (never closed, still projecting into this log under its old ref) and
+		// silently answer every later query with the wrong owner. A different
+		// backend or reference is therefore a conflict, and closed is terminal
+		// (the same rule SetExternalStatus enforces).
+		var curBackendV, curRefV, curStatusV string
+		if curBackend != nil {
+			curBackendV = *curBackend
+		}
+		if curRef != nil {
+			curRefV = *curRef
+		}
+		if curStatus != nil {
+			curStatusV = *curStatus
+		}
+		if curStatusV == ExternalStatusClosed {
+			return ExternalSession{}, fmt.Errorf("kernel: external session %s is closed: %w", scope, ErrExternalConflict)
+		}
+		if marks.Backend != curBackendV {
+			return ExternalSession{}, fmt.Errorf("kernel: external session %s belongs to backend %q, not %q: %w",
+				scope, curBackendV, marks.Backend, ErrExternalConflict)
+		}
+		ref := marks.Ref
+		if ref == "" {
+			ref = curRefV // an unspecified ref never erases a known one
+		}
+		if curRefV != "" && ref != curRefV {
+			return ExternalSession{}, fmt.Errorf("kernel: external session %s is bound to ref %q, not %q: %w",
+				scope, curRefV, ref, ErrExternalConflict)
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE sessions SET external_ref = NULLIF($3, ''), external_status = $4,
+			                     metering = $5, external_recovery = NULLIF($6, ''),
+			                     external_updated_at = now(), updated_at = now()
+			 WHERE tenant_id = $1 AND session_id = $2 AND state_owner = 'external'`,
+			scope.TenantID, scope.SessionID, ref,
+			marks.Status, marks.Metering, marks.Recovery); err != nil {
+			return ExternalSession{}, fmt.Errorf("kernel: external update: %w", pgFail(err))
+		}
+	default:
 		// A native session may only be promoted while it is pristine: nothing
 		// in the log, no run row, no submission. Anything else is already owned
 		// by the native flow and must not be dressed up as external.
@@ -94,8 +139,6 @@ func (s *PGStore) upsertExternalSession(ctx context.Context, scope Scope, marks 
 		if history {
 			return ExternalSession{}, fmt.Errorf("kernel: session %s is a native session with history: %w", scope, ErrExternalConflict)
 		}
-		fallthrough
-	default:
 		if _, err := tx.Exec(ctx,
 			`UPDATE sessions SET state_owner = 'external', external_backend = $3,
 			                     external_ref = NULLIF($4, ''), external_status = $5,

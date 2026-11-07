@@ -686,22 +686,9 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 	// The session class is read inside the session transaction, under the row
 	// lock BeginSession took. The two lanes are mirror images of each other:
 	//   - a native edge commit (NativeEdge) may not append to an external
-	//     session: a promotion that commits before this read is visible, and one
-	//     that commits after blocks on the same row, so neither ordering can
-	//     land a native user.message on a session that is becoming external;
+	//     session (see the ClassEdge branch below);
 	//   - an external-scoped commit may only extend a session the backend owns
 	//     (see the ClassExternal branch below).
-	if spec.class == ClassEdge && req.NativeEdge {
-		state, err := txn.ExternalState(ctx)
-		if err != nil {
-			return Receipt{}, k.classifyStoreError(OpCommit, req, err)
-		}
-		if state.StateOwner == StateOwnerExternal {
-			return Receipt{}, k.reject(ReasonExternalSession, OpCommit, req.Scope, req.Kind, req.Token,
-				"native input cannot be appended to an external session", ErrExternalSession)
-		}
-	}
-
 	if spec.class == ClassOwner {
 		state, err := txn.Lease(ctx)
 		if err != nil {
@@ -731,10 +718,12 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 		}
 	}
 	if spec.class == ClassEdge && req.NativeEdge {
-		// The native client API's side of the same decision: a message for an
-		// external session would be committed and then never picked up by a
-		// native run. The check is inside the locked transaction (not only in
-		// the HTTP pre-check), so a concurrent promotion cannot race it.
+		// A native message for an external session would be committed and then
+		// never picked up by a native run. The check is inside the locked
+		// transaction (not only in the HTTP pre-check), so a promotion that
+		// committed before this read is visible, and one that commits after
+		// blocks on the same row: neither ordering can land a native
+		// user.message on a session that is becoming external.
 		state, err := txn.ExternalState(ctx)
 		if err != nil {
 			return Receipt{}, k.classifyStoreError(OpCommit, req, err)

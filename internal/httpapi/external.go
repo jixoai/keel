@@ -23,6 +23,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -229,6 +231,24 @@ func (s *Server) externalSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
+// decodeOptionalBody decodes a control-plane body (cancel/close): an empty body
+// means "use the defaults", but a malformed or oversized one is answered
+// immediately instead of running the action with silently dropped fields (a
+// truncated reason, or a timeout that quietly fell back to the default).
+func decodeOptionalBody(w http.ResponseWriter, r *http.Request, limit int64, dst any) bool {
+	err := decodeBody(w, r, limit, dst)
+	if err == nil || errors.Is(err, io.EOF) {
+		return true
+	}
+	status := http.StatusBadRequest
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	writeErr(w, status, fmt.Errorf("invalid request body: %w", err))
+	return false
+}
+
 func (s *Server) externalCancel(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.externalService(w)
 	if !ok {
@@ -243,7 +263,9 @@ func (s *Server) externalCancel(w http.ResponseWriter, r *http.Request) {
 		Reason    string `json:"reason"`
 		TimeoutMS int64  `json:"timeoutMs"`
 	}
-	_ = decodeBody(w, r, s.cfg.MaxBody, &body)
+	if !decodeOptionalBody(w, r, s.cfg.MaxBody, &body) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), externalTimeout(body.TimeoutMS, defaultExternalControlTimeout, maxExternalControlTimeout))
 	defer cancel()
 	if err := svc.Cancel(ctx, scope, externalgw.CancelRequest{TurnID: body.TurnID, Reason: body.Reason}); err != nil {
@@ -266,7 +288,9 @@ func (s *Server) externalClose(w http.ResponseWriter, r *http.Request) {
 		Reason    string `json:"reason"`
 		TimeoutMS int64  `json:"timeoutMs"`
 	}
-	_ = decodeBody(w, r, s.cfg.MaxBody, &body)
+	if !decodeOptionalBody(w, r, s.cfg.MaxBody, &body) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), externalTimeout(body.TimeoutMS, defaultExternalControlTimeout, maxExternalControlTimeout))
 	defer cancel()
 	if err := svc.Close(ctx, scope, body.Reason); err != nil {

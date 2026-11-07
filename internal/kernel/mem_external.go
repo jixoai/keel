@@ -50,6 +50,26 @@ func (m *MemStore) UpsertExternalSession(ctx context.Context, scope Scope, marks
 		if len(s.events) > 0 || s.run != nil {
 			return ExternalSession{}, fmt.Errorf("memstore: session %s has native history: %w", scope, ErrExternalConflict)
 		}
+	} else {
+		// An existing external session may only be refreshed idempotently by
+		// its own handle: a different backend or reference is a conflict (the
+		// marks are the single fact of "who owns this session"), and closed is
+		// terminal. Mirrors the PostgreSQL rules.
+		cur := s.external.marks
+		if cur.Status == ExternalStatusClosed {
+			return ExternalSession{}, fmt.Errorf("memstore: external session %s is closed: %w", scope, ErrExternalConflict)
+		}
+		if marks.Backend != cur.Backend {
+			return ExternalSession{}, fmt.Errorf("memstore: external session %s belongs to backend %q, not %q: %w",
+				scope, cur.Backend, marks.Backend, ErrExternalConflict)
+		}
+		if marks.Ref == "" {
+			marks.Ref = cur.Ref // an unspecified ref never erases a known one
+		}
+		if cur.Ref != "" && marks.Ref != cur.Ref {
+			return ExternalSession{}, fmt.Errorf("memstore: external session %s is bound to ref %q, not %q: %w",
+				scope, cur.Ref, marks.Ref, ErrExternalConflict)
+		}
 	}
 	if s.external == nil {
 		s.external = &memExternal{createdAt: now}

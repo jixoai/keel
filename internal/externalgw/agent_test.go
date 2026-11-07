@@ -289,6 +289,75 @@ func TestOpenSendProjectQueryClose(t *testing.T) {
 	}
 }
 
+// TestConcurrentOpenIsSingleFlight pins the open critical section: concurrent
+// Opens of one scope must hand the backend exactly one session. Without the
+// local lock the losers would each create a second backend session that no mark
+// ever records, so nothing would ever close it (and the kernel upsert would
+// refuse the marks only after the orphan already exists). The sidecar's
+// -open-log counts what the backend actually saw.
+func TestConcurrentOpenIsSingleFlight(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "opens.log")
+	h := newHarness(t, harnessOptions{backendArgs: []string{"-usage", "-open-log", logPath}})
+	h.waitReady()
+	ctx := context.Background()
+
+	const attempts = 4
+	var (
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		wins   int
+		losers []error
+	)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := h.svc.Open(ctx, h.scope, "dsh", gateway.SessionOpenRequest{Reference: "single-flight"})
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				wins++
+				return
+			}
+			losers = append(losers, err)
+		}()
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("wins = %d, want exactly 1 (losers: %v)", wins, losers)
+	}
+	for _, err := range losers {
+		if !errors.Is(err, ErrAlreadyExternal) {
+			t.Fatalf("loser error = %v, want ErrAlreadyExternal", err)
+		}
+	}
+	// The backend saw exactly one session.open.
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read open log: %v", err)
+	}
+	lines := 0
+	if trimmed := strings.TrimSpace(string(raw)); trimmed != "" {
+		lines = strings.Count(trimmed, "\n") + 1
+	}
+	if lines != 1 {
+		t.Fatalf("backend session.open calls = %d, want 1 (log: %q)", lines, raw)
+	}
+	// Exactly one live link, and the marks point at the backend session it
+	// wraps (a stranded second link would be the corruption this guards).
+	links := h.svc.backends["dsh"].links()
+	if len(links) != 1 {
+		t.Fatalf("links = %d, want 1", len(links))
+	}
+	marks, err := h.k.ExternalSession(ctx, h.scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marks.Ref != links[0].ref || marks.Status != kernel.ExternalStatusActive {
+		t.Fatalf("marks ref %q vs link ref %q (status %s)", marks.Ref, links[0].ref, marks.Status)
+	}
+}
+
 func TestUnmeteredDenyPolicy(t *testing.T) {
 	h := newHarness(t, harnessOptions{quota: host.ExternalUnmeteredDeny})
 	h.waitReady()

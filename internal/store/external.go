@@ -146,11 +146,14 @@ func (s *Store) createExternalSessionOnce(ctx context.Context, tenantID, session
 	var (
 		stateOwner string
 		nextSeq    int64
+		curBackend *string
+		curRef     *string
+		curStatus  *string
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT state_owner, next_seq FROM sessions
+		`SELECT state_owner, next_seq, external_backend, external_ref, external_status FROM sessions
 		 WHERE tenant_id = $1 AND session_id = $2 FOR UPDATE`,
-		tenantID, sessionID).Scan(&stateOwner, &nextSeq)
+		tenantID, sessionID).Scan(&stateOwner, &nextSeq, &curBackend, &curRef, &curStatus)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if _, err := tx.Exec(ctx,
@@ -163,7 +166,45 @@ func (s *Store) createExternalSessionOnce(ctx context.Context, tenantID, session
 		}
 	case err != nil:
 		return ExternalSession{}, fmt.Errorf("store: external lock session: %w", err)
-	case stateOwner != StateOwnerExternal:
+	case stateOwner == StateOwnerExternal:
+		// Idempotent refresh only, pinned to the kernel's rules (the parity
+		// test runs both layers against the same database): a different
+		// backend or reference would strand the previous backend session and
+		// silently rewrite who owns the log; closed is terminal.
+		var curBackendV, curRefV, curStatusV string
+		if curBackend != nil {
+			curBackendV = *curBackend
+		}
+		if curRef != nil {
+			curRefV = *curRef
+		}
+		if curStatus != nil {
+			curStatusV = *curStatus
+		}
+		if curStatusV == ExternalStatusClosed {
+			return ExternalSession{}, fmt.Errorf("store: external session %s/%s is closed: %w", tenantID, sessionID, ErrExternalConflict)
+		}
+		if marks.Backend != curBackendV {
+			return ExternalSession{}, fmt.Errorf("store: external session %s/%s belongs to backend %q, not %q: %w",
+				tenantID, sessionID, curBackendV, marks.Backend, ErrExternalConflict)
+		}
+		ref := marks.Ref
+		if ref == "" {
+			ref = curRefV // an unspecified ref never erases a known one
+		}
+		if curRefV != "" && ref != curRefV {
+			return ExternalSession{}, fmt.Errorf("store: external session %s/%s is bound to ref %q, not %q: %w",
+				tenantID, sessionID, curRefV, ref, ErrExternalConflict)
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE sessions SET external_ref = NULLIF($3, ''), external_status = $4,
+			                     metering = $5, external_recovery = NULLIF($6, ''),
+			                     external_updated_at = now(), updated_at = now()
+			 WHERE tenant_id = $1 AND session_id = $2 AND state_owner = 'external'`,
+			tenantID, sessionID, ref, marks.Status, marks.Metering, marks.Recovery); err != nil {
+			return ExternalSession{}, fmt.Errorf("store: external update: %w", err)
+		}
+	default:
 		var history bool
 		if err := tx.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM sessions
@@ -176,8 +217,6 @@ func (s *Store) createExternalSessionOnce(ctx context.Context, tenantID, session
 		if history {
 			return ExternalSession{}, fmt.Errorf("store: session %s/%s has native history: %w", tenantID, sessionID, ErrExternalConflict)
 		}
-		fallthrough
-	default:
 		if _, err := tx.Exec(ctx,
 			`UPDATE sessions SET state_owner = 'external', external_backend = $3,
 			                     external_ref = NULLIF($4, ''), external_status = $5,

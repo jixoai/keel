@@ -226,6 +226,76 @@ func TestExternalSessionRefusesNativeHijack(t *testing.T) {
 	}
 }
 
+// TestExternalUpsertRefreshesInPlaceOrConflicts pins the refresh rules of an
+// existing external session: the marks may only be refreshed idempotently by
+// the same backend handle. A different backend or reference is a conflict — the
+// previous backend session would otherwise be stranded (never closed, still
+// projecting into this log under its old ref) while every later query answers
+// with the wrong owner — and closed is terminal, the same rule
+// SetExternalStatus enforces.
+func TestExternalUpsertRefreshesInPlaceOrConflicts(t *testing.T) {
+	for _, im := range implementations(t) {
+		im := im
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+			ctx := context.Background()
+			scope := h.bareSession()
+
+			if _, err := h.k.OpenExternalSession(ctx, scope, externalMarks("dsh", "ref-a")); err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			// Same backend + same ref: an idempotent refresh (the status moves on).
+			refreshed, err := h.k.OpenExternalSession(ctx, scope, ExternalMarks{
+				Backend: "dsh", Ref: "ref-a", Status: ExternalStatusOpening, Metering: MeteringExternal})
+			if err != nil {
+				t.Fatalf("refresh with the same ref: %v", err)
+			}
+			if refreshed.Ref != "ref-a" || refreshed.Status != ExternalStatusOpening || refreshed.Metering != MeteringExternal {
+				t.Fatalf("refresh = %+v", refreshed.ExternalMarks)
+			}
+			// An unspecified ref never erases the known one.
+			kept, err := h.k.OpenExternalSession(ctx, scope, ExternalMarks{
+				Backend: "dsh", Status: ExternalStatusActive, Metering: MeteringNone})
+			if err != nil {
+				t.Fatalf("refresh with an unspecified ref: %v", err)
+			}
+			if kept.Ref != "ref-a" || kept.Status != ExternalStatusActive {
+				t.Fatalf("refresh kept = %+v", kept.ExternalMarks)
+			}
+			// A different ref is a second backend handle: refused.
+			if _, err := h.k.OpenExternalSession(ctx, scope, externalMarks("dsh", "ref-b")); !iso(err, ErrExternalConflict) {
+				t.Fatalf("second ref = %v, want external-conflict", err)
+			}
+			// A different backend must not hijack the marks either.
+			if _, err := h.k.OpenExternalSession(ctx, scope, externalMarks("other", "ref-a")); !iso(err, ErrExternalConflict) {
+				t.Fatalf("second backend = %v, want external-conflict", err)
+			}
+			// Neither refusal may have touched the marks.
+			read, err := h.k.ExternalSession(ctx, scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if read.Backend != "dsh" || read.Ref != "ref-a" || read.Status != ExternalStatusActive {
+				t.Fatalf("marks after refusals = %+v", read.ExternalMarks)
+			}
+			// Closed is terminal: nothing reopens it.
+			if err := h.k.SetExternalStatus(ctx, scope, ExternalStatusClosed); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+			if _, err := h.k.OpenExternalSession(ctx, scope, externalMarks("dsh", "ref-a")); !iso(err, ErrExternalConflict) {
+				t.Fatalf("reopen closed = %v, want external-conflict", err)
+			}
+			final, err := h.k.ExternalSession(ctx, scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if final.Status != ExternalStatusClosed {
+				t.Fatalf("closed session status = %s, want closed", final.Status)
+			}
+		})
+	}
+}
+
 // TestExternalBackendUnavailable covers the crash scenario: the backend's open
 // sessions become a queryable terminal state, closed ones stay closed, other
 // backends are untouched, and nothing is fabricated (no event, no run, no
@@ -491,11 +561,16 @@ func TestStoreAndKernelExternalAgree(t *testing.T) {
 		map[string]any{"text": "external session note"}, ""); err != nil {
 		t.Fatal(err)
 	}
-	// (Re-opening an existing external session stays allowed: it only refreshes
-	// the marks, the history belongs to the backend.)
+	// Refreshing the same handle stays allowed (it only refreshes the marks,
+	// the history belongs to the backend); a second ref is refused — the marks
+	// are the single fact of who owns the session.
 	if _, err := st.CreateExternalSession(ctx, tenant, session, store.ExternalMarks{
-		Backend: "dsh", Ref: "ref-2", Status: store.ExternalStatusActive}); err != nil {
+		Backend: "dsh", Ref: "ref-1", Status: store.ExternalStatusActive}); err != nil {
 		t.Fatalf("refresh external session: %v", err)
+	}
+	if _, err := st.CreateExternalSession(ctx, tenant, session, store.ExternalMarks{
+		Backend: "dsh", Ref: "ref-2", Status: store.ExternalStatusActive}); !errors.Is(err, store.ErrExternalConflict) {
+		t.Fatalf("refresh with a second ref = %v, want external-conflict", err)
 	}
 }
 
