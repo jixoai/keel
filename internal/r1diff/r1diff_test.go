@@ -113,9 +113,12 @@ func TestFilterUsesPathPrefixesAndNeedsReasons(t *testing.T) {
 		{Path: "/events/3/payload/text", Old: "\"hi\"", New: "\"hey\""},
 	}
 	rules := []AllowRule{{Path: "/http/4", Reason: "MODIFIED API: edge tightening"}}
-	allowed, unexpected := Filter(diffs, rules)
+	allowed, unexpected, stale := Filter(diffs, rules)
 	if len(allowed) != 2 || len(unexpected) != 1 {
 		t.Fatalf("allowed=%+v unexpected=%+v", allowed, unexpected)
+	}
+	if len(stale) != 0 {
+		t.Fatalf("fired rule reported stale: %+v", stale)
 	}
 	if allowed[0].Reason == "" {
 		t.Fatal("allowed entries must carry the rule reason")
@@ -136,7 +139,7 @@ func TestFilterUsesPathPrefixesAndNeedsReasons(t *testing.T) {
 
 func TestBuildReportVerdict(t *testing.T) {
 	pass := BuildReport(10, nil, nil)
-	if !pass.Equal || !strings.Contains(pass.Summary(), "PASS") {
+	if !pass.Equal || !pass.RulesComplete || !strings.Contains(pass.Summary(), "PASS") {
 		t.Fatalf("pass report: %+v", pass)
 	}
 	fail := BuildReport(10, []Diff{{Path: "/a", Old: "1", New: "2"}}, nil)
@@ -146,23 +149,137 @@ func TestBuildReportVerdict(t *testing.T) {
 	if !strings.Contains(fail.Summary(), "/a") {
 		t.Fatal("summary must name the unexpected path")
 	}
+	// No unexpected difference means the allowlist (empty here) is complete.
+	if !fail.RulesComplete {
+		t.Fatalf("rule completeness must ignore unexpected diffs: %+v", fail)
+	}
+}
+
+func TestBuildReportFailsStaleRulesOnIdenticalDumps(t *testing.T) {
+	// The one-sided gate this test pins down: identical dumps have zero diffs,
+	// so every allow rule is stale and the run must fail even though nothing is
+	// "unexpected". This is the wrong-baseline / same-binary / wrong-ref case.
+	rules := []AllowRule{
+		{Path: "/http/events.owner_scoped/status", Old: "201", New: "400", Reason: "registered tightening"},
+		{Path: "/http/input.user1/body/status", Old: "\"pending\"", New: "\"committed\"", Reason: "registered status fix"},
+	}
+	report := BuildReport(102, nil, rules)
+	if report.Equal {
+		t.Fatalf("identical dumps with an allowlist must not be equal: %+v", report)
+	}
+	if report.RulesComplete {
+		t.Fatalf("rule completeness must be false: %+v", report)
+	}
+	if len(report.StaleRules) != len(rules) {
+		t.Fatalf("stale rules = %d, want %d: %+v", len(report.StaleRules), len(rules), report.StaleRules)
+	}
+	summary := report.Summary()
+	if !strings.Contains(summary, "FAIL") || !strings.Contains(summary, "STALE RULE") {
+		t.Fatalf("summary must fail and name stale rules:\n%s", summary)
+	}
+	if !strings.Contains(summary, "0/2 matched") {
+		t.Fatalf("summary must count matched rules:\n%s", summary)
+	}
+	// Both fields are part of the machine-readable contract: a consumer reading
+	// only "equal" or only "rulesComplete" must see the failure.
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"rulesComplete":false`, `"equal":false`, `"staleRules":[`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("report JSON missing %s:\n%s", want, raw)
+		}
+	}
+}
+
+func TestBuildReportPassesWhenEveryRuleFires(t *testing.T) {
+	diffs := []Diff{
+		{Path: "/http/events.owner_scoped/status", Old: "201", New: "400"},
+		{Path: "/http/input.user1/body/status", Old: "\"pending\"", New: "\"committed\""},
+	}
+	rules := []AllowRule{
+		{Path: "/http/events.owner_scoped/status", Old: "201", New: "400", Reason: "registered tightening"},
+		{Path: "/http/input.user1/body/status", Old: "\"pending\"", New: "\"committed\"", Reason: "registered status fix"},
+	}
+	report := BuildReport(102, diffs, rules)
+	if !report.Equal || !report.RulesComplete {
+		t.Fatalf("every rule fired, want PASS: %+v", report)
+	}
+	if len(report.StaleRules) != 0 {
+		t.Fatalf("stale rules: %+v", report.StaleRules)
+	}
+	if !strings.Contains(report.Summary(), "2/2 matched") || !strings.Contains(report.Summary(), "PASS") {
+		t.Fatalf("summary:\n%s", report.Summary())
+	}
+}
+
+func TestFilterMarksUnfiredAndDriftedRulesStale(t *testing.T) {
+	diffs := []Diff{
+		// This rule's path matches but its pinned new value drifted (400 -> 500):
+		// the diff is unexpected AND the rule did not fire.
+		{Path: "/http/edge/status", Old: "201", New: "500"},
+	}
+	rules := []AllowRule{
+		{Path: "/http/edge/status", Old: "201", New: "400", Reason: "registered tightening"},
+		{Path: "/http/never/seen", Reason: "declared but absent"},
+	}
+	allowed, unexpected, stale := Filter(diffs, rules)
+	if len(allowed) != 0 || len(unexpected) != 1 {
+		t.Fatalf("allowed=%+v unexpected=%+v", allowed, unexpected)
+	}
+	if len(stale) != 2 {
+		t.Fatalf("drifted and unfired rules must both be stale, got %+v", stale)
+	}
+	if stale[0].Path != "/http/edge/status" || stale[1].Path != "/http/never/seen" {
+		t.Fatalf("stale order must follow the allowlist: %+v", stale)
+	}
+}
+
+func TestVerifyHealthOwner(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		pid     int
+		wantErr string // empty means success
+	}{
+		{name: "matching pid", body: `{"ok":true,"pid":4242}`, pid: 4242},
+		{name: "mismatched pid", body: `{"ok":true,"pid":4242}`, pid: 4343, wantErr: "pid 4242, not 4343"},
+		{name: "missing pid", body: `{"ok":true}`, pid: 4242, wantErr: "no pid"},
+		{name: "zero pid", body: `{"pid":0}`, pid: 4242, wantErr: "no pid"},
+		{name: "not json", body: `not json`, pid: 4242, wantErr: "not JSON"},
+		{name: "pid as string", body: `{"pid":"4242"}`, pid: 4242, wantErr: "not JSON"},
+	}
+	for _, c := range cases {
+		err := VerifyHealthOwner([]byte(c.body), c.pid)
+		if c.wantErr == "" {
+			if err != nil {
+				t.Errorf("%s: unexpected error: %v", c.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Errorf("%s: err = %v, want it to contain %q", c.name, err, c.wantErr)
+		}
+	}
 }
 
 func TestFilterPinnedValuesRejectDrift(t *testing.T) {
 	rules := []AllowRule{{Path: "/http/edge/status", Old: "201", New: "400", Reason: "registered tightening"}}
-	// The registered delta matches: allowed.
-	allowed, unexpected := Filter([]Diff{{Path: "/http/edge/status", Old: "201", New: "400"}}, rules)
-	if len(allowed) != 1 || len(unexpected) != 0 {
-		t.Fatalf("registered delta: allowed=%v unexpected=%v", allowed, unexpected)
+	// The registered delta matches: allowed, rule fired.
+	allowed, unexpected, stale := Filter([]Diff{{Path: "/http/edge/status", Old: "201", New: "400"}}, rules)
+	if len(allowed) != 1 || len(unexpected) != 0 || len(stale) != 0 {
+		t.Fatalf("registered delta: allowed=%v unexpected=%v stale=%v", allowed, unexpected, stale)
 	}
 	// The same path drifting to a different value must NOT be allowed: a 500 is
-	// a regression, not the registered 400.
-	allowed, unexpected = Filter([]Diff{{Path: "/http/edge/status", Old: "201", New: "500"}}, rules)
-	if len(allowed) != 0 || len(unexpected) != 1 {
-		t.Fatalf("drifted delta must be unexpected: allowed=%v unexpected=%v", allowed, unexpected)
+	// a regression, not the registered 400. The rule therefore matched nothing.
+	allowed, unexpected, stale = Filter([]Diff{{Path: "/http/edge/status", Old: "201", New: "500"}}, rules)
+	if len(allowed) != 0 || len(unexpected) != 1 || len(stale) != 1 {
+		t.Fatalf("drifted delta must be unexpected and leave the rule stale: allowed=%v unexpected=%v stale=%v",
+			allowed, unexpected, stale)
 	}
 	// Child paths inherit the prefix but still honour the pins.
-	_, unexpected = Filter([]Diff{{Path: "/http/edge/status/extra", Old: "201", New: "500"}}, rules)
+	_, unexpected, _ = Filter([]Diff{{Path: "/http/edge/status/extra", Old: "201", New: "500"}}, rules)
 	if len(unexpected) != 1 {
 		t.Fatalf("child path with drifted value must be unexpected: %v", unexpected)
 	}

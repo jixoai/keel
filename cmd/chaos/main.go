@@ -3,10 +3,19 @@
 // session off, then asserts the ledger invariants that must survive any of it.
 //
 //	mode=kill    : random SIGKILL of the runtime, restarted by the harness,
-//	               for the whole duration.
+//	               for the whole duration. Every relaunch is counted in
+//	               restarts (the process-restart count); faults stays the
+//	               SIGKILL count so existing readers keep their meaning.
 //	mode=handoff : a second runtime takes over the first (handoff drain), the
 //	               successor is SIGKILLed right after it starts claiming (epoch
-//	               jumps), and a third runtime finishes the job.
+//	               jumps), and a third runtime finishes the job. A cycle only
+//	               counts as a succession when the durable audit proves it: the
+//	               predecessor's handoff drain reached a terminal status and its
+//	               runtime row is stopped, the successor process became ready
+//	               after that drain began, and every session was re-claimed by
+//	               the new runtime at a strictly higher sessions.owner_epoch.
+//	               A 200/409 drain answer alone proves nothing and is never
+//	               counted.
 //
 // Invariants checked on every touched session at the end:
 //   - the committed seq is contiguous from 1 (no lost or duplicated event);
@@ -19,6 +28,10 @@
 //
 //	chaos -bin /tmp/keel-runtime -dsn 'postgres://…/keel_chaos_e2e?sslmode=disable' \
 //	      -port 13795 -sessions 8 -duration 60s -kill-every 5s -mode kill
+//
+// -faults bounds the number of injected faults (0 = run for the whole
+// -duration); a bounded run is how a single kill or handoff cycle is exercised
+// without the full soak.
 package main
 
 import (
@@ -51,6 +64,7 @@ type config struct {
 	sessions  int
 	duration  time.Duration
 	killEvery time.Duration
+	faults    int // max injected faults (0 = unlimited)
 	mode      string
 	settleFor time.Duration
 	jsonOut   string
@@ -61,16 +75,37 @@ type runtimeProc struct {
 	id  string
 }
 
+// harness owns the fault loop and everything the client goroutines share.
+//
+// Locking: mu guards procs, the live endpoint (baseURL/curPort) and nothing
+// else. The endpoint is rewritten by start() from the fault loop while the
+// writer goroutines post through it on every request, so both the write and
+// the read happen under mu (reach them through base()/port()/setEndpoint()).
+// procs is the process audit trail; sigkillNewest/current/pruneDead/stopAll
+// take the same lock.
 type harness struct {
-	cfg      config
-	base     string
-	curPort  int
-	mu       sync.Mutex
-	procs    []*runtimeProc
-	logFile  *os.File
+	cfg config
+	mu  sync.Mutex
+	// baseURL/curPort name the runtime the harness currently talks to. They
+	// are only changed after a process answered healthy, so a client never
+	// posts at a half-started server.
+	baseURL string
+	curPort int
+	procs   []*runtimeProc
+	logFile *os.File
+	// spawned numbers the processes this harness started (including the
+	// initial one) and is the source of unique runtime ids: audit tables
+	// (runtime_instances, handoffs) are keyed by that id, so two processes
+	// must never share one — kill mode used to restart "runtime-2" forever.
+	spawned  atomic.Int64
 	killed   atomic.Int64
 	restarts atomic.Int64
-	pool     *pgxpool.Pool
+	// handoff cycle state; written by the fault loop (the main goroutine) and
+	// read by verify after the writers have joined.
+	handoffCycles int
+	successions   int
+	successionLog []successionEvidence
+	pool          *pgxpool.Pool
 }
 
 type sessionState struct {
@@ -108,6 +143,7 @@ func main() {
 	flag.IntVar(&c.sessions, "sessions", 8, "concurrent sessions")
 	flag.DurationVar(&c.duration, "duration", 60*time.Second, "fault-injection duration")
 	flag.DurationVar(&c.killEvery, "kill-every", 5*time.Second, "interval between faults")
+	flag.IntVar(&c.faults, "faults", 0, "max injected faults (0 = run for the whole duration)")
 	flag.StringVar(&c.mode, "mode", "kill", "kill | handoff")
 	flag.DurationVar(&c.settleFor, "settle", 20*time.Second, "quiet period after the last fault (must exceed the lease TTL)")
 	flag.StringVar(&c.jsonOut, "out", "", "write the result JSON here")
@@ -131,7 +167,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open dsn: %v", err)
 	}
-	h := &harness{cfg: c, base: fmt.Sprintf("http://127.0.0.1:%d", c.port), pool: pool}
+	h := &harness{cfg: c, pool: pool}
 	defer pool.Close()
 	f, err := os.OpenFile("/tmp/keel-chaos-runtime.log", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -169,8 +205,9 @@ func main() {
 	}
 
 	// Fault injection.
-	faults := time.NewTicker(c.killEvery)
+	faultTick := time.NewTicker(c.killEvery)
 	deadline := time.Now().Add(c.duration)
+	injected := 0
 loop:
 	for {
 		select {
@@ -178,18 +215,26 @@ loop:
 			break loop
 		case <-time.After(time.Until(deadline)):
 			break loop
-		case <-faults.C:
+		case <-faultTick.C:
 			if c.mode == "kill" {
 				h.sigkillNewest()
-				if err := h.start(ctx, h.nextRuntimeID(), h.curPort); err != nil {
+				if err := h.start(ctx, h.nextRuntimeID(), h.port()); err != nil {
 					h.fatalf("restart: %v", err)
 				}
+				// The relaunch is the restart this fault paid for: count it so
+				// restarts answers "how often did the process come back" and is
+				// not a permanent 0 in kill mode.
+				h.restarts.Add(1)
 			} else {
-				h.handoffAndKillSuccessor(ctx)
+				h.handoffAndKillSuccessor(ctx, sessions)
+			}
+			injected++
+			if c.faults > 0 && injected >= c.faults {
+				break loop
 			}
 		}
 	}
-	faults.Stop()
+	faultTick.Stop()
 	stopWriters()
 	wg.Wait()
 
@@ -219,12 +264,47 @@ type result struct {
 	Failures   []string `json:"failures"`
 	Pass       bool     `json:"pass"`
 	LastErrors []string `json:"lastErrors,omitempty"`
+	// Handoff-only fields: how many handoff cycles ran, how many proved a real
+	// shift change, and the per-cycle evidence (epochs, runtime rows, drain
+	// audit). A drain that answers 200/409 but changes nothing leaves
+	// successions below handoffCycles and fails the run.
+	Successions        int                  `json:"successions"`
+	HandoffCycles      int                  `json:"handoffCycles,omitempty"`
+	SuccessionEvidence []successionEvidence `json:"successionEvidence,omitempty"`
 }
 
 // --- process control ------------------------------------------------------
 
+// nextRuntimeID names the next process. Every start consumes an id even when
+// the process fails to become healthy, so a failed start can never leave an
+// audit row that a later runtime silently overwrites.
 func (h *harness) nextRuntimeID() string {
-	return fmt.Sprintf("runtime-%d", h.restarts.Load()+2)
+	return fmt.Sprintf("runtime-%d", h.spawned.Load()+1)
+}
+
+// base reports the endpoint of the live runtime. Writers call this on every
+// request while the fault loop switches endpoints, so the read is locked.
+func (h *harness) base() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.baseURL
+}
+
+// port reports the port of the live runtime (the handoff cycle alternates
+// between the base port and its neighbour).
+func (h *harness) port() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.curPort
+}
+
+// setEndpoint records the runtime the harness talks to next. It is called only
+// after the process answered healthy on that port.
+func (h *harness) setEndpoint(port int) {
+	h.mu.Lock()
+	h.curPort = port
+	h.baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+	h.mu.Unlock()
 }
 
 func (h *harness) start(ctx context.Context, id string, port int) error {
@@ -248,6 +328,7 @@ func (h *harness) start(ctx context.Context, id string, port int) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	h.spawned.Add(1)
 	proc := &runtimeProc{cmd: cmd, id: id}
 	h.mu.Lock()
 	h.procs = append(h.procs, proc)
@@ -255,8 +336,7 @@ func (h *harness) start(ctx context.Context, id string, port int) error {
 	if err := h.waitHealthy(ctx, fmt.Sprintf("http://127.0.0.1:%d", port), cmd.Process.Pid); err != nil {
 		return err
 	}
-	h.curPort = port
-	h.base = fmt.Sprintf("http://127.0.0.1:%d", port)
+	h.setEndpoint(port)
 	return nil
 }
 
@@ -300,23 +380,51 @@ func (h *harness) sigkillNewest() {
 // handoffAndKillSuccessor runs the split-brain scenario, one cycle:
 //
 //	old (port P, live) -> successor (port P+1, starts and claims)
-//	-> old drained (handoff) and exits -> successor SIGKILLed right after it
-//	started working -> a fresh runtime on P adopts the session (epoch jumps).
+//	-> old drained (handoff) and stops claiming -> successor SIGKILLed right
+//	after it started working -> a fresh runtime on P takes over the sessions.
 //
 // Every cycle therefore ends with exactly one live, non-draining runtime on
-// h.curPort, which is where the harness posts its input.
-func (h *harness) handoffAndKillSuccessor(ctx context.Context) {
+// h.port(), which is where the harness posts its input.
+//
+// The cycle is only a *succession* when the durable audit says so
+// (successionEvidence): a drain answered 200/409 is merely an accepted
+// request. The evidence is collected after the fresh runtime is healthy and
+// polled until it is complete or the bounded wait expires; a cycle without it
+// fails the run instead of silently counting a restart.
+func (h *harness) handoffAndKillSuccessor(ctx context.Context, sessions []*sessionState) {
+	h.handoffCycles++
+	ev := &successionEvidence{Cycle: h.handoffCycles}
+	started := time.Now()
+	record := func() {
+		h.successionLog = append(h.successionLog, *ev)
+		if ev.Proven {
+			h.successions++
+		}
+	}
 	old := h.current()
 	if old == nil {
+		ev.Problems = append(ev.Problems, "no live predecessor to hand off from")
+		record()
 		return
 	}
-	oldBase := h.base
+	ev.OldRuntime = old.id
+	oldBase := h.base()
+	// Snapshot the epoch every session is at before the successor exists: the
+	// "after" value must be strictly higher, otherwise no new runtime claimed.
+	if epochs, _, err := h.sessionLeases(ctx, sessions); err != nil {
+		ev.Problems = append(ev.Problems, fmt.Sprintf("snapshot session epochs: %v", err))
+	} else {
+		ev.EpochBefore = epochs
+	}
 	nextPort := h.otherPort()
 	successorID := h.nextRuntimeID()
 	if err := h.start(ctx, successorID, nextPort); err != nil {
 		log.Printf("handoff successor start: %v", err)
+		ev.Problems = append(ev.Problems, fmt.Sprintf("successor start: %v", err))
+		record()
 		return
 	}
+	ev.SuccessorRuntime = successorID
 	h.restarts.Add(1)
 	// Drain the predecessor through its own base.
 	body, _ := json.Marshal(map[string]any{"mode": "handoff", "deadlineMs": 5000})
@@ -342,16 +450,18 @@ func (h *harness) handoffAndKillSuccessor(ctx context.Context) {
 	}
 	if !drained {
 		log.Printf("handoff cycle skipped: the predecessor never accepted the drain")
+		ev.Problems = append(ev.Problems, "the predecessor never accepted the drain")
+		record()
 		return
 	}
 	// Let the successor claim, then kill it hard: the next runtime must adopt
 	// from a higher epoch without duplicating an answer.
 	time.Sleep(1500 * time.Millisecond)
 	h.sigkillNewest()
-	// The predecessor exits once its drain completes; if it is still holding
-	// its port after the drain window, kill it (a stuck old process must not
-	// block the upgrade either). Only then is its port free for the fresh
-	// successor.
+	// The predecessor stops claiming when its drain begins and closes its audit
+	// row when the drain finishes (or hits the deadline); a handoff drain does
+	// not exit the process. Give it its drain window, then free the port if it
+	// is still there (a stuck old process must not block the upgrade either).
 	for i := 0; i < 80; i++ {
 		if !processAlive(old.cmd.Process.Pid) {
 			break
@@ -362,13 +472,19 @@ func (h *harness) handoffAndKillSuccessor(ctx context.Context) {
 		_ = syscall.Kill(-old.cmd.Process.Pid, syscall.SIGKILL)
 		_ = old.cmd.Wait()
 	}
-	finalPort := h.curPort
+	finalPort := h.port()
 	finalID := h.nextRuntimeID()
 	if err := h.start(ctx, finalID, finalPort); err != nil {
 		log.Printf("fresh successor start: %v", err)
+		ev.Problems = append(ev.Problems, fmt.Sprintf("fresh successor start: %v", err))
+		record()
 		return
 	}
+	ev.FinalRuntime = finalID
+	h.restarts.Add(1)
 	h.pruneDead()
+	h.awaitSuccession(ctx, ev, sessions, started)
+	record()
 }
 
 // processAlive reports whether the pid still exists (signal 0 probe).
@@ -420,13 +536,13 @@ func (h *harness) stopAll() {
 }
 
 // otherPort is the second listen port: the handoff cycle alternates between
-// curPort and its neighbour so a successor never has to wait for the old
-// process to release its socket.
+// the current port and its neighbour so a successor never has to wait for the
+// old process to release its socket.
 func (h *harness) otherPort() int {
-	if h.curPort == h.cfg.port {
-		return h.cfg.port + 1
+	if port := h.port(); port != h.cfg.port {
+		return h.cfg.port
 	}
-	return h.cfg.port
+	return h.cfg.port + 1
 }
 
 // runReadState reads the durable read facts the kernel keeps on the run row:
@@ -490,7 +606,7 @@ func (h *harness) writeLoop(ctx context.Context, s *sessionState) {
 // admin surface, the session and input endpoints are tenant-scoped.
 func (h *harness) postAdmin(ctx context.Context, path, tenant string, body any, out any) (int, error) {
 	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, "POST", h.base+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, "POST", h.base()+path, bytes.NewReader(raw))
 	if err != nil {
 		return 0, err
 	}
@@ -512,7 +628,7 @@ func (h *harness) postAdmin(ctx context.Context, path, tenant string, body any, 
 
 func (h *harness) post(ctx context.Context, path, tenant string, body any, out any) (int, error) {
 	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, "POST", h.base+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, "POST", h.base()+path, bytes.NewReader(raw))
 	if err != nil {
 		return 0, err
 	}
@@ -541,6 +657,11 @@ type event struct {
 
 func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 	res := result{Mode: h.cfg.mode, Faults: h.killed.Load(), Restarts: h.restarts.Load(), Sessions: len(sessions)}
+	if h.cfg.mode == "handoff" {
+		res.HandoffCycles = h.handoffCycles
+		res.Successions = h.successions
+		res.SuccessionEvidence = h.successionLog
+	}
 	fail := func(format string, args ...any) {
 		res.Failures = append(res.Failures, fmt.Sprintf(format, args...))
 	}
@@ -722,6 +843,25 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 			fail("session %s: run stuck in status %q after the quiet period", s.session, run.Status)
 		}
 	}
+	// The fault the mode claims to inject must actually have been injected and
+	// accounted for. Kill mode: every SIGKILL bought exactly one relaunch (a
+	// restarts that never moved was the bug this check pins down). Handoff
+	// mode: every cycle must carry durable proof that the shifts changed —
+	// a drain answered 200/409 with nothing actually taken over is a failed
+	// handoff, not a pass.
+	switch h.cfg.mode {
+	case "handoff":
+		switch {
+		case h.handoffCycles == 0:
+			fail("handoff: no handoff cycle ran, so no succession was proven")
+		case h.successions != h.handoffCycles:
+			fail("handoff: %d of %d cycles proved succession (want every cycle)", h.successions, h.handoffCycles)
+		}
+	default:
+		if faults := h.killed.Load(); faults != h.restarts.Load() {
+			fail("kill: %d SIGKILLs but %d counted runtime relaunches (want one per fault)", faults, h.restarts.Load())
+		}
+	}
 	if len(res.Failures) == 0 {
 		res.Pass = true
 		res.Checks = []string{
@@ -731,12 +871,19 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 			"no orphan tool results",
 			"every run converged (done/pending/failed)",
 		}
+		if h.cfg.mode == "handoff" {
+			res.Checks = append(res.Checks,
+				"every handoff cycle proved succession: predecessor stopped after a terminal handoff drain, successor ready afterwards, every session re-claimed by the new runtime id at a strictly higher epoch")
+		} else {
+			res.Checks = append(res.Checks,
+				"every SIGKILL was followed by a counted runtime relaunch (restarts == faults)")
+		}
 	}
 	return res
 }
 
 func (h *harness) get(ctx context.Context, path, tenant string, out any) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", h.base+path, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", h.base()+path, nil)
 	if err != nil {
 		return 0, err
 	}

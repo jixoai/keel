@@ -9,11 +9,13 @@
 #
 # Environment:
 #   KEEL_DSN          optional; default creates/uses the local docker PostgreSQL
-#                     (container fde2e-keel-pg, port 13741) and the dedicated
-#                     database keel_gw_smoke. A custom DSN is only accepted when
-#                     its database name contains "smoke" (the script truncates
-#                     and drops it).
+#                     (dockerized Postgres named $KEEL_PG_CTR, port 13741) and the
+#                     dedicated database keel_gw_smoke. A custom DSN is only
+#                     accepted when its database name contains "smoke" (the
+#                     script truncates and drops it).
 #   KEEL_SMOKE_PORT   optional; default 13796.
+#   KEEL_PG_CTR       optional; name of the dockerized Postgres container
+#                     (default keel-pg).
 #
 # The script fails on the first mismatch and always cleans up (runtime process,
 # sidecar/process group, database, temp dir). Every step prints one PASS line
@@ -24,6 +26,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d /tmp/keel-gw-smoke.XXXXXX)"
 PORT="${KEEL_SMOKE_PORT:-13796}"
 DB="keel_gw_smoke"
+PG_CTR="${KEEL_PG_CTR:-keel-pg}"
 TENANT="11111111-1111-4111-8111-111111111111"
 ADMIN_KEY="smoke-admin-$(date +%s)-$$"
 RUNTIME_PID=""
@@ -70,7 +73,7 @@ cleanup() {
     kill -KILL "${RUNTIME_PID}" 2>/dev/null || true
   fi
   if [[ "${USING_DOCKER}" == "1" ]]; then
-    docker exec fde2e-keel-pg psql -U postgres -d postgres -c \
+    docker exec "${PG_CTR}" psql -U postgres -d postgres -c \
       "DROP DATABASE IF EXISTS ${DB} WITH (FORCE)" >/dev/null 2>&1 || true
   fi
   rm -rf "${TMP}"
@@ -96,13 +99,13 @@ if [[ -n "${KEEL_DSN:-}" ]]; then
   esac
   DSN="${KEEL_DSN}"
 else
-  if ! docker ps --format '{{.Names}}' | grep -qx 'fde2e-keel-pg'; then
-    fail "docker container fde2e-keel-pg is not running (start it or set KEEL_DSN)"
+  if ! docker ps --format '{{.Names}}' | grep -qx "${PG_CTR}"; then
+    fail "docker container ${PG_CTR} is not running (start it, set KEEL_PG_CTR, or set KEEL_DSN)"
   fi
   USING_DOCKER=1
-  docker exec fde2e-keel-pg psql -U postgres -d postgres -c \
+  docker exec "${PG_CTR}" psql -U postgres -d postgres -c \
     "DROP DATABASE IF EXISTS ${DB} WITH (FORCE)" >/dev/null
-  docker exec fde2e-keel-pg psql -U postgres -d postgres -c \
+  docker exec "${PG_CTR}" psql -U postgres -d postgres -c \
     "CREATE DATABASE ${DB}" >/dev/null
   DSN="postgres://postgres:runtime@127.0.0.1:13741/${DB}?sslmode=disable"
 fi

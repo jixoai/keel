@@ -167,6 +167,12 @@ func capture(name, bin, dsn string, port int, outPath string) error {
 	if _, err := os.Stat(bin); err != nil {
 		return fmt.Errorf("binary %s: %w", bin, err)
 	}
+	// Interlock before touching the database: a stale runtime on the port would
+	// answer this capture's requests, so refuse rather than silently compare
+	// against a foreign process.
+	if err := checkPortFree(port); err != nil {
+		return err
+	}
 	if err := resetDatabase(dsn); err != nil {
 		return err
 	}
@@ -251,21 +257,60 @@ func startRuntime(bin, dsn, base, casDir string) (*runtimeProc, error) {
 		f.Close()
 		return nil, err
 	}
+	if err := waitHealthy(base, cmd.Process.Pid); err != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		f.Close()
+		return nil, fmt.Errorf("%w (see %s)", err, logPath)
+	}
+	return &runtimeProc{cmd: cmd, log: f}, nil
+}
+
+// checkPortFree refuses to run against a foreign process: a stale runtime on
+// the port would answer the scenario's requests while the newly started child
+// either fails to bind or binds and never serves. Same interlock as cmd/chaos.
+func checkPortFree(port int) error {
+	out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN").Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		holder := ""
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) > 1 {
+			fields := strings.Fields(lines[1])
+			if len(fields) > 1 {
+				holder = fields[1]
+			}
+		}
+		return fmt.Errorf("port %d is already in use (holder pid %s): refusing to capture against a foreign process", port, holder)
+	}
+	return nil
+}
+
+// waitHealthy waits until the runtime answers, and fails fast when the
+// answering process is not the one just started (a stale runtime on the same
+// port would make every later assertion meaningless). Same rule as
+// cmd/chaos.waitHealthy and scripts/acceptance-drain.sh: the health pid must be
+// the child's pid.
+func waitHealthy(base string, pid int) error {
 	deadline := time.Now().Add(20 * time.Second)
+	last := "no response"
 	for time.Now().Before(deadline) {
 		res, err := http.Get(base + "/v1/health")
 		if err == nil {
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 64<<10))
 			res.Body.Close()
-			if res.StatusCode == 200 {
-				return &runtimeProc{cmd: cmd, log: f}, nil
+			if readErr != nil {
+				last = readErr.Error()
+			} else if res.StatusCode == 200 {
+				return r1diff.VerifyHealthOwner(raw, pid)
+			} else {
+				last = fmt.Sprintf("health status %d", res.StatusCode)
 			}
+		} else {
+			last = err.Error()
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	_ = cmd.Wait()
-	f.Close()
-	return nil, errors.New("runtime did not become healthy (see " + logPath + ")")
+	return fmt.Errorf("runtime did not become healthy: %s", last)
 }
 
 func (p *runtimeProc) stop() {

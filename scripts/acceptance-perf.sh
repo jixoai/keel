@@ -8,7 +8,13 @@
 #   - SSE streams do not drop (0 errors) and the 429 backpressure behaves
 #
 # Usage: scripts/acceptance-perf.sh [sessions] [duration]
-# Requires: docker (Docker Desktop), the fde2e-keel-pg container for the DSN.
+# Requires: docker (Docker Desktop) and a dockerized Postgres named
+# $KEEL_PG_CTR (override with KEEL_PG_CTR; default keel-pg).
+#
+# Fail-closed by design: unreadable cgroup memory.peak, a peak above the
+# ceiling, sessions != 1000, no text load, or any non-429 SSE error makes the
+# script exit non-zero. The merged result (loadtest fields + acceptance fields)
+# is written to $KEEL_PERF_OUT (default /tmp/keel-perf/acceptance.json).
 set -euo pipefail
 
 SESSIONS="${1:-1000}"
@@ -17,16 +23,29 @@ DSN_BASE="${KEEL_PERF_DSN_BASE:-postgres://postgres:runtime@host.docker.internal
 DB="${KEEL_PERF_DB:-keel_perf}"
 ADMIN_KEY="${KEEL_ADMIN_KEY:-local-perf-admin-key}"
 PORT=13750
-OUT_DIR="${KEEL_PERF_OUT:-/tmp/keel-perf}"
+OUT_DIR="${KEEL_PERF_DIR:-/tmp/keel-perf}"
+JSON_OUT="${KEEL_PERF_OUT:-$OUT_DIR/acceptance.json}"
+CEILING_MB="${KEEL_PERF_CEILING_MB:-1536}"
+EXPECTED_SESSIONS="${KEEL_PERF_EXPECTED_SESSIONS:-1000}"
 CTR=keel-perf-2g
-PG_CTR=fde2e-keel-pg
+PG_CTR="${KEEL_PG_CTR:-keel-pg}"
 
 say() { printf '%s\n' "$*"; }
-mkdir -p "$OUT_DIR" /tmp/keel-perf-cas
+
+case "$CEILING_MB" in
+  ''|*[!0-9]*) echo "FATAL: KEEL_PERF_CEILING_MB must be a positive integer (got \"$CEILING_MB\")"; exit 1 ;;
+esac
+case "$EXPECTED_SESSIONS" in
+  ''|*[!0-9]*) echo "FATAL: KEEL_PERF_EXPECTED_SESSIONS must be a positive integer (got \"$EXPECTED_SESSIONS\")"; exit 1 ;;
+esac
+[ "$CEILING_MB" -gt 0 ] || { echo "FATAL: KEEL_PERF_CEILING_MB must be > 0"; exit 1; }
+[ "$EXPECTED_SESSIONS" -gt 0 ] || { echo "FATAL: KEEL_PERF_EXPECTED_SESSIONS must be > 0"; exit 1; }
+
+mkdir -p "$OUT_DIR" /tmp/keel-perf-cas "$(dirname "$JSON_OUT")"
 
 cleanup() {
   docker rm -f "$CTR" >/dev/null 2>&1 || true
-  docker exec "$PG_CTR" psql -U postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null 2>&1 || true
+  docker exec "$PG_CTR" psql -U postgres -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -43,9 +62,13 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/keel-perf-runtime ./cmd/r
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/keel-perf-loadtest ./cmd/loadtest
 
 say "== fresh database $DB =="
-cleanup_db() { docker exec "$PG_CTR" psql -U postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null 2>&1 || true; }
+cleanup_db() {
+  docker exec "$PG_CTR" psql -U postgres -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null \
+    || { say "FATAL: could not drop database $DB (is the $PG_CTR container running?)"; exit 1; }
+}
 cleanup_db
-docker exec "$PG_CTR" psql -U postgres -c "CREATE DATABASE $DB" >/dev/null
+docker exec "$PG_CTR" psql -U postgres -c "CREATE DATABASE $DB" >/dev/null \
+  || { say "FATAL: could not create database $DB"; exit 1; }
 
 say "== start runtime under --memory=2g =="
 docker run -d --name "$CTR" --memory=2g --memory-swap=2g --cpus=4 \
@@ -72,44 +95,100 @@ docker run --rm --network "container:$CTR" \
   -client-rate 51200 > "$OUT_DIR/bench.json" 2> "$OUT_DIR/loadtest.log" || true
 
 # memory.peak is the cgroup's own high-water mark; memory.current sampled after
-# the run is just the last reading and would understate the peak.
-PEAK=$(docker exec "$CTR" cat /sys/fs/cgroup/memory.peak 2>/dev/null | tr -d '\r')
-if [ -z "$PEAK" ]; then PEAK=$(docker exec "$CTR" cat /sys/fs/cgroup/memory.current | tr -d '\r'); fi
+# the run is just the last reading and would understate the peak. There is no
+# fallback: an unreadable peak is an uncertifiable run (fail closed).
+PEAK=$(docker exec "$CTR" cat /sys/fs/cgroup/memory.peak 2>/dev/null | tr -d '\r' || true)
 if [ ! -s "$OUT_DIR/bench.json" ]; then
   say "ACCEPTANCE FAIL: the loadtest produced no result (see $OUT_DIR/loadtest.log)"
+  docker logs "$CTR" 2>&1 | tail -20 || true
+  printf '{\n  "mode": "perf",\n  "verdict": "FAIL",\n  "failures": ["loadtest produced no result"]\n}\n' > "$JSON_OUT"
+  say "result JSON: $JSON_OUT"
   exit 1
 fi
-if [ -s "$OUT_DIR/bench.json" ]; then
-  python3 - "$OUT_DIR/bench.json" "$PEAK" <<'PY'
-import json, sys
-bench = json.load(open(sys.argv[1]))
-peak = int(sys.argv[2]) if sys.argv[2].isdigit() else 0
+
+python3 - "$OUT_DIR/bench.json" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" <<'PY'
+import json, os, sys
+
+bench_path, peak_raw, out_path, ceiling_mb, expected_sessions = sys.argv[1:6]
+ceiling_mb = float(ceiling_mb)
+expected_sessions = int(expected_sessions)
+failures = []
+
+try:
+    with open(bench_path) as fh:
+        bench = json.load(fh)
+    if not isinstance(bench, dict):
+        raise ValueError(f"expected a JSON object, got {type(bench).__name__}")
+except Exception as exc:  # unreadable result is a failure, not an empty pass
+    bench = {}
+    failures.append(f"loadtest JSON unreadable ({bench_path}): {exc}")
+
+if peak_raw.isdigit():
+    peak = int(peak_raw)
+else:
+    peak = None
+    failures.append(
+        f"cgroup memory.peak unreadable (got {peak_raw!r}); refusing to certify an unknown peak"
+    )
+
 status = bench.get("statusCounts") or {}
 throttled = int(status.get("429", 0))
+sse_errors = int(bench.get("sseErrors", 0))
 # sseErrors counts every non-200 the stream loop saw, 429 included. Admission
 # backpressure (429 + Retry-After) is documented and retried by the client;
 # what must be zero is a stream that failed for any other reason.
-hard = int(bench.get("sseErrors", 0)) - throttled
-summary = {
-    "sessions": bench.get("sessions"),
-    "durationSec": round(bench.get("durationSec", 0)),
-    "texts": bench.get("texts"),
-    "imagesOK": bench.get("imagesOK"),
-    "imagesErr": bench.get("imagesErr"),
-    "sseErrorsRaw": bench.get("sseErrors"),
-    "sseThrottled429": throttled,
-    "sseHardErrors": hard,
-    "throughputMBs": round(bench.get("throughputMBs", 0), 1),
-    "imageLatencyP95MS": round(bench.get("imageLatencyP95MS", 0), 1),
-    "rssMaxMB": bench.get("rssMaxMB"),
-}
-print(json.dumps(summary, ensure_ascii=False, indent=2))
-print(f"cgroup peak after run: {peak/1e6:.0f} MB / 2048 MB ({(peak/2**31*100):.1f}% of the hard limit)")
-if hard > 0:
-    print("ACCEPTANCE FAIL: SSE streams failed for reasons other than admission backpressure")
+hard = sse_errors - throttled
+
+sessions = bench.get("sessions")
+texts = bench.get("texts")
+duration = bench.get("durationSec", 0)
+
+if sessions != expected_sessions:
+    failures.append(f"sessions = {sessions}, want exactly {expected_sessions} (empty-run guard)")
+if not isinstance(texts, int) or texts <= 0:
+    failures.append(f"texts = {texts}, want > 0 (no text load means the run was idle)")
+if hard != 0:
+    failures.append(f"hard SSE errors = {hard} (sseErrors {sse_errors} - 429 {throttled}), want 0")
+if peak is not None and peak / 1e6 > ceiling_mb:
+    failures.append(f"cgroup peak {peak / 1e6:.0f} MB exceeds the {ceiling_mb:.0f} MB ceiling")
+
+summary = dict(bench)  # keep every loadtest field
+summary.update({
+    "mode": "perf",
+    "peakMB": round(peak / 1e6, 1) if peak is not None else None,
+    "peakBytes": peak,
+    "hardErrors": hard,
+    "sseErrors": sse_errors,
+    "statusCounts429": throttled,
+    "sessions": sessions,
+    "texts": texts,
+    "durationSec": round(duration, 3) if isinstance(duration, (int, float)) else duration,
+    "ceilingMB": ceiling_mb,
+    "expectedSessions": expected_sessions,
+    "verdict": "FAIL" if failures else "PASS",
+    "failures": failures,
+})
+
+os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+with open(out_path, "w") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=2)
+    fh.write("\n")
+
+print(json.dumps({k: summary.get(k) for k in (
+    "mode", "sessions", "texts", "durationSec", "sseErrors", "statusCounts429",
+    "hardErrors", "imagesOK", "imagesErr", "throughputMBs", "peakMB", "peakBytes",
+    "ceilingMB", "verdict",
+)}, ensure_ascii=False, indent=2))
+if peak is None:
+    print("cgroup peak after run: UNREADABLE (failing closed)")
+else:
+    print(f"cgroup peak after run: {peak/1e6:.0f} MB / 2048 MB ({(peak/2**31*100):.1f}% of the hard limit)")
+for failure in failures:
+    print(f"ACCEPTANCE FAIL: {failure}")
+print(f"result JSON: {out_path}")
+if failures:
     sys.exit(1)
 print(f"verdict: PASS ({throttled} admission 429s retried by the client, 0 hard stream errors)")
 PY
-fi
 say "raw: $OUT_DIR/bench.json $OUT_DIR/loadtest.log"
 say "== done (container and database removed) =="
