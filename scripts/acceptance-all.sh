@@ -43,15 +43,37 @@ mkdir -p "$EVID/perf"
 say() { printf '%s\n' "$*" | tee -a "$LOG"; }
 fail() { say "FAIL: $*"; exit 1; }
 
-# run <label> <logfile> <cmd...> — a gate passes only on exit 0.
+# run <label> <logfile> <cmd...> — a gate passes only on exit 0. The artifact
+# is truncated first: re-running the battery in the same directory must never
+# leave two runs' output concatenated (a stale artifact is a lying artifact).
 run() {
   local label="$1" out="$2"; shift 2
   say "-- $label"
+  : >"$out"
   if "$@" >>"$out" 2>&1; then
     say "PASS: $label ($out)"
   else
     say "FAIL: $label (exit $?) — tail of $out:"
     tail -25 "$out" | sed 's/^/    /' | tee -a "$LOG"
+    exit 1
+  fi
+}
+
+# run_split <label> <out> <errlog> <cmd...> — like run, but stdout and stderr
+# land in separate files: a JSON artifact must stay a single parseable document
+# even when the tool logs progress to stderr.
+run_split() {
+  local label="$1" out="$2" errlog="$3"; shift 3
+  say "-- $label"
+  : >"$out"
+  : >"$errlog"
+  if "$@" >>"$out" 2>>"$errlog"; then
+    say "PASS: $label ($out)"
+  else
+    say "FAIL: $label (exit $?) — tail of $out:"
+    tail -25 "$out" | sed 's/^/    /' | tee -a "$LOG"
+    say "    (stderr: $errlog)"
+    tail -10 "$errlog" | sed 's/^/    /' | tee -a "$LOG"
     exit 1
   fi
 }
@@ -77,9 +99,9 @@ say "keel acceptance battery — $(date)"
 say "evidence: $EVID"
 
 # --- 0. the tree itself -----------------------------------------------------
-run "go build ./..." "$EVID/build-vet.log" go build ./...
-run "go vet ./..." "$EVID/build-vet.log" go vet ./...
-run "build candidate runtime" "$EVID/build-vet.log" go build -o "$BIN" ./cmd/runtime
+run "go build ./..." "$EVID/build.log" go build ./...
+run "go vet ./..." "$EVID/vet.log" go vet ./...
+run "build candidate runtime" "$EVID/runtime-build.log" go build -o "$BIN" ./cmd/runtime
 
 # --- 1. the full race suite -------------------------------------------------
 {
@@ -100,6 +122,7 @@ run "conformance" "$EVID/conformance-summary.txt" \
 # --- 3. R1 differential against the frozen baseline -------------------------
 run "build R1 baseline (e7361f8)" "$EVID/r1-build.txt" \
   scripts/build-r1-baseline.sh e7361f8 "$BASE"
+db_reset keel_r1diff
 port_free 13778
 port_free 13779
 run "R1 live capture" "$EVID/r1-live.txt" \
@@ -120,7 +143,7 @@ say "PASS: R1 negative control refused (see $EVID/r1-negative.txt)"
 # --- 4. E2E on a fresh database --------------------------------------------
 db_reset keel_e2e_final
 port_free 13745
-run "E2E (fresh database)" "$EVID/e2e-7of7.json" \
+run_split "E2E (fresh database)" "$EVID/e2e-7of7.json" "$EVID/e2e-run.log" \
   go run ./cmd/e2e -bin "$BIN" -dsn "$(dsn keel_e2e_final)" -port 13745 \
   -reset -reset-confirm keel_e2e_final
 

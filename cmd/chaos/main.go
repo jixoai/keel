@@ -354,7 +354,13 @@ func (h *harness) waitHealthy(ctx context.Context, base string, pid int) error {
 			_ = json.NewDecoder(res.Body).Decode(&body)
 			res.Body.Close()
 			if res.StatusCode == 200 {
-				if body.PID != 0 && body.PID != pid {
+				// Fail closed: a health answer without a pid cannot be matched
+				// to the process this harness started, and matching it by port
+				// alone is exactly how a stale runtime gets mistaken for ours.
+				if body.PID == 0 {
+					return fmt.Errorf("port %s answers without a pid; cannot prove it is the runtime we started", base)
+				}
+				if body.PID != pid {
 					return fmt.Errorf("port %s answers with pid %d, not %d (stale runtime?)", base, body.PID, pid)
 				}
 				return nil

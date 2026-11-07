@@ -54,44 +54,58 @@ type AgentService struct {
 	wg     sync.WaitGroup
 }
 
-// openLocks is a keyed mutex set for the open path. Without it two concurrent
-// Opens of one scope would both create a backend session before either marked
-// the row, leaving an orphan backend session behind (the loser's handle is
-// never recorded, so nothing would ever close it).
+// openLocks is a keyed semaphore set for the open path. Without it two
+// concurrent Opens of one scope would both create a backend session before
+// either marked the row, leaving an orphan backend session behind (the loser's
+// handle is never recorded, so nothing would ever close it).
 type openLocks struct {
 	mu      sync.Mutex
 	entries map[kernel.Scope]*openLockEntry
 }
 
+// openLockEntry is one scope's slot. It is a channel, not a mutex, so a queued
+// request can give up when its own context expires instead of waiting behind a
+// stuck backend handshake for the whole RPC timeout.
 type openLockEntry struct {
-	mu   sync.Mutex
+	sem  chan struct{}
 	refs int
 }
 
-// lock acquires the scope's mutex and returns the release function.
-func (l *openLocks) lock(scope kernel.Scope) func() {
+// lock acquires the scope's slot, waiting no longer than ctx allows. The
+// returned release function must be called exactly once on success.
+func (l *openLocks) lock(ctx context.Context, scope kernel.Scope) (func(), error) {
 	l.mu.Lock()
 	if l.entries == nil {
 		l.entries = make(map[kernel.Scope]*openLockEntry)
 	}
 	entry := l.entries[scope]
 	if entry == nil {
-		entry = &openLockEntry{}
+		entry = &openLockEntry{sem: make(chan struct{}, 1)}
 		l.entries[scope] = entry
 	}
 	entry.refs++
 	l.mu.Unlock()
 
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
-		l.mu.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(l.entries, scope)
-		}
-		l.mu.Unlock()
+	select {
+	case entry.sem <- struct{}{}:
+	case <-ctx.Done():
+		l.release(scope, entry)
+		return nil, ctx.Err()
 	}
+	return func() {
+		<-entry.sem
+		l.release(scope, entry)
+	}, nil
+}
+
+// release drops one reference and forgets the slot once it is idle.
+func (l *openLocks) release(scope kernel.Scope, entry *openLockEntry) {
+	l.mu.Lock()
+	entry.refs--
+	if entry.refs == 0 {
+		delete(l.entries, scope)
+	}
+	l.mu.Unlock()
 }
 
 var _ servicegraph.Instance = (*AgentService)(nil)
@@ -283,9 +297,13 @@ func (s *AgentService) Open(ctx context.Context, scope kernel.Scope, backend str
 	// The critical section covers "check the marks → open on the backend → mark
 	// the row", so a retry or a double-click cannot leave a second, unrecorded
 	// backend session behind. The kernel upsert is the cross-process guard
-	// (a different ref or backend is refused), this lock keeps the fast path
-	// from ever creating the orphan.
-	release := s.openLocks.lock(scope)
+	// (a different ref or backend is refused), this slot keeps the fast path
+	// from ever creating the orphan. Waiting honours ctx: a queued request
+	// gives up when its own deadline expires.
+	release, err := s.openLocks.lock(ctx, scope)
+	if err != nil {
+		return SessionView{}, err
+	}
 	defer release()
 
 	// A session may only be promoted while it is pristine; a session that is

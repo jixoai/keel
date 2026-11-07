@@ -19,6 +19,7 @@ set -euo pipefail
 
 SESSIONS="${1:-1000}"
 DURATION="${2:-60s}"
+REQ_DURATION_SEC="${DURATION%s}"
 DSN_BASE="${KEEL_PERF_DSN_BASE:-postgres://postgres:runtime@host.docker.internal:13741}"
 DB="${KEEL_PERF_DB:-keel_perf}"
 ADMIN_KEY="${KEEL_ADMIN_KEY:-local-perf-admin-key}"
@@ -106,12 +107,13 @@ if [ ! -s "$OUT_DIR/bench.json" ]; then
   exit 1
 fi
 
-python3 - "$OUT_DIR/bench.json" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" <<'PY'
+python3 - "$OUT_DIR/bench.json" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" "$REQ_DURATION_SEC" <<'PY'
 import json, os, sys
 
-bench_path, peak_raw, out_path, ceiling_mb, expected_sessions = sys.argv[1:6]
+bench_path, peak_raw, out_path, ceiling_mb, expected_sessions, req_duration = sys.argv[1:7]
 ceiling_mb = float(ceiling_mb)
 expected_sessions = int(expected_sessions)
+expected_duration = float(req_duration)
 failures = []
 
 try:
@@ -142,11 +144,18 @@ hard = sse_errors - throttled
 sessions = bench.get("sessions")
 texts = bench.get("texts")
 duration = bench.get("durationSec", 0)
+images_ok = bench.get("imagesOK")
 
 if sessions != expected_sessions:
     failures.append(f"sessions = {sessions}, want exactly {expected_sessions} (empty-run guard)")
 if not isinstance(texts, int) or texts <= 0:
     failures.append(f"texts = {texts}, want > 0 (no text load means the run was idle)")
+# A short run would pass every count above and still show a low peak: the
+# duration and image channel must prove the budget was actually exercised.
+if not isinstance(duration, (int, float)) or duration < 0.9 * expected_duration:
+    failures.append(f"durationSec = {duration}, want >= {0.9 * expected_duration:.1f} of {expected_duration:.0f}s (short run)")
+if not isinstance(images_ok, int) or images_ok <= 0:
+    failures.append(f"imagesOK = {images_ok}, want > 0 (the image channel was never exercised)")
 if hard != 0:
     failures.append(f"hard SSE errors = {hard} (sseErrors {sse_errors} - 429 {throttled}), want 0")
 if peak is not None and peak / 1e6 > ceiling_mb:

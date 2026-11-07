@@ -358,6 +358,39 @@ func TestConcurrentOpenIsSingleFlight(t *testing.T) {
 	}
 }
 
+// TestOpenQueueHonoursContext pins the slot's cancellation behaviour: while one
+// Open is stuck on the backend handshake, a queued Open of the same scope must
+// give up when its own deadline expires instead of waiting out the whole RPC
+// timeout. (The kernel upsert would refuse the loser anyway; the point is not
+// to hold a request for 60s to learn that.)
+func TestOpenQueueHonoursContext(t *testing.T) {
+	h := newHarness(t, harnessOptions{backendArgs: []string{"-open-delay", "2s"}})
+	h.waitReady()
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := h.svc.Open(context.Background(), h.scope, "dsh", gateway.SessionOpenRequest{})
+		first <- err
+	}()
+	// Let the first Open take the slot and block on the delayed handshake.
+	time.Sleep(150 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := h.svc.Open(ctx, h.scope, "dsh", gateway.SessionOpenRequest{})
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued Open = %v, want deadline-exceeded", err)
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Fatalf("queued Open waited %s past its own deadline", elapsed)
+	}
+	if err := <-first; err != nil {
+		t.Fatalf("the first Open must still succeed: %v", err)
+	}
+}
+
 func TestUnmeteredDenyPolicy(t *testing.T) {
 	h := newHarness(t, harnessOptions{quota: host.ExternalUnmeteredDeny})
 	h.waitReady()

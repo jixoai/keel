@@ -24,6 +24,7 @@ LOADLOG=/tmp/perf-handoff-loadtest.log
 JSON_OUT="${KEEL_HANDOFF_OUT:-/tmp/perf-handoff-acceptance.json}"
 CEILING_MB="${KEEL_HANDOFF_CEILING_MB:-1500}"
 EXPECTED_SESSIONS="${KEEL_HANDOFF_EXPECTED_SESSIONS:-1000}"
+EXPECTED_DURATION_SEC="${KEEL_HANDOFF_EXPECTED_DURATION_SEC:-60}"
 D1="$DSN_BASE/$DB?sslmode=disable"
 
 say() { printf '%s\n' "$*"; }
@@ -118,12 +119,13 @@ PEAK=$(docker exec "$CTR" cat /sys/fs/cgroup/memory.peak 2>/dev/null | tr -d '\r
 say "cgroup peak (both runtimes): ${PEAK:-UNREADABLE} bytes"
 docker exec "$CTR" sh -c 'pgrep -f /runtime | wc -l; tail -3 /tmp/a.log; tail -3 /tmp/b.log' 2>/dev/null || true
 
-python3 - "$BENCH" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" <<'PY'
+python3 - "$BENCH" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" "$EXPECTED_DURATION_SEC" <<'PY'
 import json, os, sys
 
-bench_path, peak_raw, out_path, ceiling_mb, expected_sessions = sys.argv[1:6]
+bench_path, peak_raw, out_path, ceiling_mb, expected_sessions, req_duration = sys.argv[1:7]
 ceiling_mb = float(ceiling_mb)
 expected_sessions = int(expected_sessions)
+expected_duration = float(req_duration)
 failures = []
 
 try:
@@ -158,6 +160,10 @@ if sessions != expected_sessions:
     failures.append(f"sessions = {sessions}, want exactly {expected_sessions} (empty-run guard)")
 if not isinstance(texts, int) or texts <= 0:
     failures.append(f"texts = {texts}, want > 0 (no text load means the run was idle)")
+# A short run would pass every count above and still show a low peak: the
+# duration must prove the budget was actually exercised.
+if not isinstance(duration, (int, float)) or duration < 0.9 * expected_duration:
+    failures.append(f"durationSec = {duration}, want >= {0.9 * expected_duration:.1f} of {expected_duration:.0f}s (short run)")
 if hard != 0:
     failures.append(f"hard SSE errors = {hard} (sseErrors {sse_errors} - 429 {throttled}), want 0")
 if peak is not None and peak / 1e6 > ceiling_mb:

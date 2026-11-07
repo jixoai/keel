@@ -27,13 +27,13 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
 |---|---|
 | 并发会话 | **1000**（1000 条 SSE 同时在线） |
 | 图片 | 一轮内 **800 张 1MiB 图完成**（1.12GB base64 出站；另 200 张按尺寸分池返回 429，客户端重试） |
-| SSE 稳定性 | **0 次异常断开** |
+| SSE 稳定性 | **0 次硬错误**（429 准入反压由客户端按 `Retry-After` 重试，不计硬错误） |
 | 吞吐 | 18.6 MB/s（客户端限速主导，非服务端上限） |
-| 延迟 | p50 28.0s / p95 28.5s（= 1.4MB ÷ 50KB/s，服务端附加≈0） |
-| 进程 RSS | max **427MB**（`GOMEMLIMIT=1.6GiB`） |
-| 2GB cgroup | 峰值 **544MB（26.8%）**，未 OOM、未触发内存回收抖动 |
-| 反压 | 1200 次 429（Medium 档 40% 容量上限；快速拒绝并按 `Retry-After` 重试） |
+| 延迟 | p50 28.9s / p95 31.4s（= 1.4MB ÷ 50KB/s，服务端附加≈0） |
+| 2GB cgroup 峰值 | **580MB（28%）**，未 OOM（`memory.peak` 口径，`GOMEMLIMIT=1.5GiB`；双进程 handoff 峰值 547MB/26%） |
+| 反压 | 1761 次 429（Medium 档 40% 容量上限；快速拒绝并按 `Retry-After` 重试） |
 | 无状态 E2E | **7/7**：requestId 幂等、SSE 游标、blob 续传、agent 回复、模型/工具执行中 `SIGKILL` 恢复、100 会话 2000 事件序列连续 |
+| 服务图验收 | 全仓 `-race` 31 包 0 失败 · PI conformance **674**（0 失败/1 跳过）· R1 差分 102 路径/12 条规则全部命中 · SIGTERM 排水 8/8 与 in-flight 探针 4/4 · chaos：kill 10 次故障 + handoff 6 轮换代（接班由 `runtime_instances`/`handoffs`/`owner_epoch` 证明）——见 [docs/SERVICE-GRAPH.md](docs/SERVICE-GRAPH.md) |
 
 ## 架构
 
