@@ -161,9 +161,12 @@ if sessions != expected_sessions:
 if not isinstance(texts, int) or texts <= 0:
     failures.append(f"texts = {texts}, want > 0 (no text load means the run was idle)")
 # A short run would pass every count above and still show a low peak: the
-# duration must prove the budget was actually exercised.
+# duration and the image channel must prove the budget was actually exercised.
 if not isinstance(duration, (int, float)) or duration < 0.9 * expected_duration:
     failures.append(f"durationSec = {duration}, want >= {0.9 * expected_duration:.1f} of {expected_duration:.0f}s (short run)")
+images_ok = bench.get("imagesOK")
+if not isinstance(images_ok, int) or images_ok <= 0:
+    failures.append(f"imagesOK = {images_ok}, want > 0 (the image channel was never exercised)")
 if hard != 0:
     failures.append(f"hard SSE errors = {hard} (sseErrors {sse_errors} - 429 {throttled}), want 0")
 if peak is not None and peak / 1e6 > ceiling_mb:

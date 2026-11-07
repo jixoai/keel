@@ -269,13 +269,19 @@ func imageLoop(ctx context.Context, client *http.Client, c config, tenant, sid s
 				if ctx.Err() == nil {
 					fail.Add(1)
 				}
-			} else {
-				ok.Add(1)
-				bytesIn.Add(n)
-				latMu.Lock()
-				*latencies = append(*latencies, time.Since(start))
-				latMu.Unlock()
+				// A failed fetch (a 429/503 the attempt budget could not
+				// outlast, or a stream cut by a runtime restart) is retried
+				// soon rather than after the whole image period: the load is
+				// meant to exercise the runtime's resume path across a handoff,
+				// not to sleep out the round.
+				t.Reset(jitter(min(c.imageEvery, 8*time.Second), rng))
+				continue
 			}
+			ok.Add(1)
+			bytesIn.Add(n)
+			latMu.Lock()
+			*latencies = append(*latencies, time.Since(start))
+			latMu.Unlock()
 			t.Reset(jitter(c.imageEvery, rng))
 		}
 	}
