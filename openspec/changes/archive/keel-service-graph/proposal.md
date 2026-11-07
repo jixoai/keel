@@ -8,7 +8,7 @@
 ## Why
 
 Keel 当前已经证明了几件最难的事：事件日志是唯一真值、SIGKILL 后可恢复、
-1000 个带图片的 SSE 会话在 2GB 内、PI 行为契约全量 conformance 全绿（冻结基线 593 项；收口时实测 634 PASS / 0 FAIL / 1 SKIP）。
+1000 个带图片的 SSE 会话在 2GB 内、PI 行为契约全量 conformance 全绿（冻结基线 495 PASS / 0 FAIL / 1 SKIP，`e7361f8` 带 DSN；无 DSN 对照 481/0/15；收口实测 674 PASS / 0 FAIL / 1 SKIP（复核修复后重跑），证据 `conformance.json`）。
 但这些能力仍然焊在 `cmd/runtime`、`agent.Runner`、`host.New` 的构造函数里：
 
 - 换一个 agent loop、prompt 组装、tool 执行器或 LLM adapter，要改启动代码；
@@ -189,7 +189,7 @@ W0 合并后冻结基线 R1；验收器对同输入比较规范化 HTTP 状态/�
 - 旧装配保留 feature flag，直到 P 工作流全部通过；
 - 新表/列只做增量：loadout revision、owner epoch、handoff 审计；
   不修改已有事件 payload；
-- PI conformance 593（冻结基线）不退化（收口实测 634 PASS / 0 FAIL / 1 SKIP）；E2E 7/7、2GB/1000 基线是回归门；
+- PI conformance 495（冻结基线 `e7361f8`，带 DSN；无 DSN 对照 481）不退化（收口实测 674 PASS / 0 FAIL / 1 SKIP）；E2E 7/7、2GB/1000 基线是回归门；
 - DSH 兼容模式 opt-in per tenant；审计日志记录 backend、版本、状态所有权。
 
 ## Risks
@@ -203,7 +203,7 @@ W0 合并后冻结基线 R1；验收器对同输入比较规范化 HTTP 状态/�
 ## Acceptance（唯一完成态）
 
 - 五个 spec 的全部 Scenario 有自动化测试；
-- PI conformance 不退化（冻结 593 → 收口 634）；E2E 7/7；2GB/1000 基线不退化；
+- PI conformance 不退化（冻结 495 → 收口 674，带 DSN；无 DSN 口径 481 → 584）；E2E 7/7；2GB/1000 基线不退化；
 - 原生 handoff 五类安全点：0 丢事件、0 重复最终回复、SSE 游标连续；
 - 外部 gateway：慢消费者/大帧/坏帧/崩溃不拖垮 run；
 - DSH sidecar 与 DSH tool provider 的参考适配器有真实测试；

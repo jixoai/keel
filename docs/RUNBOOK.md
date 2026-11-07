@@ -38,6 +38,26 @@ curl -sf -X POST http://127.0.0.1:13740/v1/tenants \
   -d '{"name":"tenant-a"}'
 ```
 
+## 准入额度归还的已知取舍（陈旧释放可能瞬时超额）
+
+`internal/kernel/lease.go` 的 `Finish` 与 `Release` 都用 `defer k.releaseAdmission(...)`
+**无条件**归还租户 run 并发槽位（`internal/quota/limits.go` 的 `ReleaseRun`，计数钳在 0）。
+这是「宁可瞬时超额，不永久饿死」的既定取舍，不是 bug：
+
+- **现象**：旧 owner 的租约已被接管（过期/换班），新 owner 已持租并占用槽位；旧 owner
+  此时才 Finish/Release，会给同一租户的 `active` 再减一。若紧接着有新 claim，`active`
+  会低于真实在跑 run 数，`runConcurrency` 可被瞬时突破——上限＝在途陈旧 attempt 数
+  （每个 attempt 只归还一次，`ReleaseRun` 在 0 处钳住，不会负溢出）。
+- **取舍理由**：归还不能依赖 store 结果。陈旧、被 fencing 拒绝、store 报错的结算也必须
+  释放本进程占用的槽位；否则崩溃重试/接管/放弃路径会把租户额度永久占死，后续 run 饿死
+  （`internal/agent/worker.go` 的 abandon 路径也依赖这一点）。
+- **影响面**：配额是**进程内**计数（重启归零），只影响本 runtime 的准入瞬时值；不影响
+  租约/fencing/事件账本的持久正确性。要严格不超额得把租约计数放到数据库侧（跨进程
+  权威），属后续加固，不在当前实现内。
+
+运维口径：同租户短时在跑 run 数高于 `runConcurrency` 属预期窗口；真正的泄漏特征是
+`active` 长期不回落且没有对应的在跑 run。
+
 ## MCP OAuth
 
 MCP `oauth` 配置项的交互式授权、刷新与凭据存储。**fail-closed**：缺少必需配置时

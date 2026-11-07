@@ -133,7 +133,7 @@
 
 ## W6. 集成、验收与交付
 
-- [x] 默认 loadout 全量回归：PI conformance 634-0-1、E2E 7/7、2GB/1000/64（A/B 对照无退化；`scripts/acceptance-perf.sh`）
+- [x] 默认 loadout 全量回归：PI conformance 674-0-1（复核修复后重跑；证据 `conformance.json`，带 DSN；无 DSN 584-0-79）、E2E 7/7、2GB/1000/64（A/B 对照无退化；`scripts/acceptance-perf.sh`）
 - [x] R1 差分验收：白名单外 0 差异（`cmd/r1diff`，12 条规则＝9 条值钉死＋3 条文案豁免；负控实验证明门不空转）；API 收紧用例（400/404）
 - [x] 混沌：10 分钟随机 SIGKILL + handoff 故障注入；0 丢事件/0 重复最终回复（`cmd/chaos`：kill 模式 10 分钟 30 次故障、handoff 模式 5 轮接班即崩，seq 连续/requestId 唯一/终答不重复/无孤儿结果/run 收敛全绿）
 - [x] 插件故障注入：启动失败、运行中崩溃、缺失依赖、回滚、卸载顺序（`internal/servicegraph` 引擎测试 + `servicehost` 生命周期测试）

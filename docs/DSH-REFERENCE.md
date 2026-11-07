@@ -212,7 +212,7 @@ curl -s localhost:13740/v1/sessions/<sessionId>/events -H "X-Tenant-ID: $TENANT"
 | `external call ... status=timeout` | 模型首包慢于 `timeoutMs` | 调大 backend `timeoutMs`（上限由 HTTP 端点再兜底） |
 | 收到 `-32003`/`cancel` 报错 | DSH SDK 协议无 cancel | 这是官方限制；关闭会话/进程放弃 turn，文档已登记 |
 | 会话 `backend-unavailable` 且不恢复 | DSH 进程崩溃/退出，或 `session/resume` 返回失败 | 查 sidecar stderr；Keel 不伪造恢复，需重新打开会话 |
-| 关 runtime 后仍有 `node`/`dsh` 进程 | 桥没在 stdin EOF 时退出，或自行 setsid 脱离进程组 | 桥必须继承进程组并在 stdin EOF/`shutdown` 后退出；必要时用 pidfile + `gateway.KillTree` |
+| 关 runtime 后仍有 `node`/`dsh` 进程 | 桥没在 stdin EOF 时退出，或自行 setsid 脱离进程组 | 桥必须继承进程组并在 stdin EOF/`shutdown` 后退出；必要时用 pidfile + `gateway.KillTree`；runtime 被 SIGKILL 时没有自动 sweep，见 §4 第 2 条 |
 | stdout 出现非 JSON 行（握手解析失败） | 桥把日志写到了 stdout | stdout 只放协议帧，日志一律 stderr |
 
 ### 3.5 本轮实测结论（2026-11-06）
@@ -224,3 +224,15 @@ curl -s localhost:13740/v1/sessions/<sessionId>/events -H "X-Tenant-ID: $TENANT"
 - 未完成：真实模型 turn（需要 DSH provider/model 凭据 + §3.3 的桥）。桥是 DSH 侧
   非零代码，未纳入本仓 CI；参考 sidecar 的自动化测试覆盖了 Keel 侧全部语义
   （`go test -race ./internal/externalgw ./internal/dshref` + 冒烟 15 步）。
+
+## 4. 差距与已知限制（诚实登记）
+
+| # | 差距 | 当前状态/依赖 | 补强方向 |
+|---|---|---|---|
+| 1 | sidecar 资源预算未在 Go 侧实施 | `maxSessions` 只限会话数；CPU/内存/文件描述符/子进程数由部署侧（容器 cgroup、ulimit、节点隔离）承担，Keel 不做运行时配额 | 在 gateway 的 spawn/transport 层接入 per-backend 预算（cgroup v2 或 rlimit），超限拒绝激活并进审计 |
+| 2 | **runtime 被 SIGKILL 后，遗留 sidecar 没有任何 sweep** | 正常回收只走 `StdioTransport.Close`：关 stdin → grace → 进程组 SIGTERM → SIGKILL（`internal/gateway/stdio.go`）。进程被 SIGKILL 时这条路径不执行；`gateway.KillTree`（进程组 reaper）与 `RedactEnv` 目前只有测试调用，没有生产调用点。唯一防线是**协议约定**：父进程死亡 → stdin EOF，sidecar 必须自行退出（真实 DSH `--profile sdk-minimal` 实测 EOF → exit 0，见 §3.2；DSH 桥义务见 §3.3 第 3 条） | pidfile（记录 sidecar pid/进程组）+ 下次 runtime 启动时 sweep，用 `gateway.KillTree` 回收（需校验 pid 复用）；或交给外部 supervisor（systemd `KillMode=control-group`、容器 PID namespace + tini、k8s pod 级回收）保证父死子亡 |
+
+风险：sidecar 若忽略 stdin EOF、自行 `setsid` 或让孙进程脱离进程组，会继续持有模型
+凭据/网络连接；新 runtime 的 `maxSessions` 记账从零开始，遗留会话不计入，可能重复
+计量或突破单 backend 并发上限。SIGKILL 是混沌/运维的既定输入（`cmd/chaos`），不是
+理论场景。

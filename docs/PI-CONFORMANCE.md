@@ -203,28 +203,51 @@ entries/inbox/live/nested documents 仍由内存 harness 承担（见 §4）。
 | runner run span + run counter/duration metric | `TestRunnerRecordsTelemetry` | ✅ PASS |
 | provider stream proxy events / toolcall deltas / unterminated terminal | `TestProxy*` | ✅ PASS |
 
-## 2.9 汇总（2026-11-06）
+## 2.9 汇总（2026-11-08）
 
-`scripts/conformance.sh` 的 `go test -json` 统计：**634 个测试（含子测试）PASS / 0 FAIL / 1 SKIP**（本文件其余「495」为 PI 搬运期历史口径；冻结基线为 593，当前含本 change 新增测试 634）。
+**终轮实测（复核修复后重跑，证据 `conformance.json`）：674 PASS / 0 FAIL / 1 SKIP**（13 个包；`scripts/conformance.sh` + `KEEL_TEST_DSN` 口径）。修复前的终轮（`6875d89`）为 673/0/1（`conformance-current-dsn-673/`）——差的 1 项＝复核修复新增的 `TestExternalControlBodyIsValidated`（cancel/close 请求体校验）。
 
-| 套件 | PASS |
+同一套包在**无 DSN**（PG 集成用例按设计 skip）口径下的对照值：
+
+| 口径 | 基线 `e7361f8`（service-graph 之前） | 当前（含本 change + 复核修复） |
+|---|---|---|
+| 带 DSN | 495 PASS / 0 FAIL / 1 SKIP（`conformance-baseline-dsn-495/`） | **674 PASS / 0 FAIL / 1 SKIP**（本轮 `conformance.json`；修复前 673 见 `conformance-current-dsn-673/`） |
+| 无 DSN | 481 PASS / 0 FAIL / 15 SKIP（496 项；`conformance-baseline-593/`） | 584 PASS / 0 FAIL / 79 SKIP（663 项；`conformance-current-no-dsn/`） |
+
+口径差来源：无 DSN 时 PG 集成用例在包内 `t.Skip`（基线 14 个：agent 7、httpapi 3、blob 4；当前 78 个：agent 22、httpapi 52、blob 4），另 1 个 skip 恒为 MCP `TestHelperProcess`（辅助子进程入口，设计行为）。当前带 DSN 的 674 = 无 DSN 的 584 + 78 个由 SKIP 转 PASS 的集成用例 + `TestAdminConfigRejectsInvalidDocuments` 的 11 个子测试（父用例在无 DSN 时整体 skip，子测试不入账）+ 1 个复核修复新增的体校验测试。
+
+**历史「593」口径的更正**：`e7361f8` + `scripts/conformance.sh` 无法复现 593——同口径实测为 495（带 DSN）/481（无 DSN），其中 495 与本文件历史记载一致；仓库内也没有 593 的机器工件可追溯。按可复现证据，冻结 main 的基线记为 **495（带 DSN）/481（无 DSN）**；593 不再作为回归门数字引用。
+
+证据落位：`.agents/reports/keel/2026-11-07-service-graph/` 下 `conformance.json`（终轮）、`conformance-current-dsn-673/`、`conformance-current-no-dsn/`、`conformance-baseline-dsn-495/`、`conformance-baseline-593/`（目录名为任务约定保留，内容为 `e7361f8` 无 DSN 实测 481）。
+
+| 套件 | PASS（带 DSN，终轮） |
 |---|---|
 | loop | 70 |
-| compaction | 42 |
-| mcp | 83（1 skip） |
+| compaction | 44 |
+| mcp | 90（1 skip） |
 | skills | 49 |
 | telemetry | 38 |
 | hooks | 81 |
 | durable | 100 |
-| host | 4 |
+| host | 53 |
 | agenttool | 2 |
-| 运行时（agent/httpapi/blob/stream） | 26 |
+| 运行时（agent/httpapi/blob/stream） | 147 |
+| **合计** | **674** |
 
 ## 3. 运行
 
 ```bash
 cd keel
-GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=go1.27.3 go test ./internal/loop ./internal/compaction ./internal/mcp ./internal/skills ./internal/telemetry
+# 带 DSN（与终轮 674 同口径）
+KEEL_TEST_DSN='postgres://…' scripts/conformance.sh /tmp/keel-conformance.json
+
+# 无 DSN 对照（PG 集成用例 skip；481/584 口径）
+GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=go1.27.3 go test -json -count=1 \
+  ./internal/loop ./internal/compaction ./internal/mcp ./internal/skills \
+  ./internal/telemetry ./internal/hooks ./internal/host ./internal/durable \
+  ./internal/agenttool ./internal/agent ./internal/httpapi ./internal/blob ./internal/stream \
+  > /tmp/keel-conformance-no-dsn.json
+python3 scripts/summarize-conformance.py /tmp/keel-conformance-no-dsn.json
 ```
 
 ## 4. 未覆盖与后续
