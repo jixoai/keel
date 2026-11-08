@@ -1,0 +1,182 @@
+[
+  {
+    "path": "/http/events.owner_scoped/status",
+    "old": "201",
+    "new": "400",
+    "reason": "MODIFIED API (contract-kernel): the edge accepts only user.message; an owner-scoped kind now answers 400 instead of 201"
+  },
+  {
+    "path": "/http/events.owner_scoped/body/error",
+    "reason": "Same delta: the 400 body carries the whitelist message instead of a committed seq. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.owner_scoped/body/seq",
+    "old": "1",
+    "new": "$absent",
+    "reason": "Same delta: the baseline answered with the seq it stored; the tightened edge has no seq to report"
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events",
+    "old": "$absent",
+    "new": "[]",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/seq",
+    "old": "1",
+    "new": "$absent",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/kind",
+    "old": "\"assistant.message\"",
+    "new": "$absent",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/payload/text",
+    "reason": "The stored text of the baseline's refused write; content, not a contract."
+  },
+  {
+    "path": "/http/events.foreign_tenant/status",
+    "old": "200",
+    "new": "404",
+    "reason": "MODIFIED API (contract-kernel): a cross-tenant or missing session answers 404 instead of an empty page"
+  },
+  {
+    "path": "/http/events.foreign_tenant/body/error",
+    "reason": "Same delta: 404 error body instead of an empty events array. Message wording is not pinned."
+  },
+  {
+    "path": "/http/events.foreign_tenant/body/events",
+    "old": "[]",
+    "new": "$absent",
+    "reason": "Same delta: the baseline answered an empty array; the tightened edge answers an error body instead"
+  },
+  {
+    "path": "/http/input.user1/body/status",
+    "old": "\"pending\"",
+    "new": "\"committed\"",
+    "reason": "MODIFIED API: the /input response reports the authoritative submission status (the commit already happened, so \"pending\" was a lie). Pinned per step because the fix applies to every first submit."
+  },
+  {
+    "path": "/http/input.user2/body/status",
+    "old": "\"pending\"",
+    "new": "\"committed\"",
+    "reason": "MODIFIED API: the /input response reports the authoritative submission status (the commit already happened, so \"pending\" was a lie). Pinned per step because the fix applies to every first submit."
+  },
+  {
+    "path": "/bookkeeping/0/kind",
+    "old": "$absent",
+    "new": "\"run.finished\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/0/status",
+    "old": "$absent",
+    "new": "\"done\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/0/stopReason",
+    "old": "$absent",
+    "new": "\"end_turn\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/0/turns",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/kind",
+    "old": "$absent",
+    "new": "\"run.finished\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/status",
+    "old": "$absent",
+    "new": "\"done\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/stopReason",
+    "old": "$absent",
+    "new": "\"end_turn\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/turns",
+    "old": "$absent",
+    "new": "2",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/events/1/payload/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/3/payload/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/3/payload/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/5/payload/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/5/payload/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/0/data/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/0/data/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/2/data/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/2/data/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/http/input.user2/body/seq",
+    "old": "3",
+    "new": "4",
+    "reason": "Same delta, observed on the HTTP surface: each settled attempt adds one run.finished event, so the second input and the final cursor sit two events later than in the frozen baseline. Pinned to the exact values."
+  },
+  {
+    "path": "/runStatus/body/cursorSeq",
+    "old": "6",
+    "new": "8",
+    "reason": "Same delta, observed on the HTTP surface: each settled attempt adds one run.finished event, so the second input and the final cursor sit two events later than in the frozen baseline. Pinned to the exact values."
+  }
+]

@@ -127,13 +127,81 @@ func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider
 	return runner
 }
 
+// RunSummary is the attempt's own account of what it did. The worker commits it
+// as run.finished right before the attempt settles, so a client can report
+// turns/tokens/stop reason without replaying the log. It is bookkeeping and
+// never enters the model context.
+type RunSummary struct {
+	// Status is the attempt outcome: done, failed or cancelled.
+	Status string `json:"status"`
+	// Turns is how many assistant turns the loop completed.
+	Turns int `json:"turns"`
+	// Tokens are the provider's reported token counts for the attempt.
+	Tokens TokenTotals `json:"tokens"`
+	// ToolTimings records every tool execution of the attempt.
+	ToolTimings []ToolTiming `json:"toolTimings,omitempty"`
+	// Context describes the transcript the attempt ended with.
+	Context ContextStats `json:"context"`
+	// StopReason is why the attempt ended: a pi stop reason (end_turn,
+	// tool_use, length), max_turns for a turn cap, error or aborted.
+	StopReason string `json:"stopReason,omitempty"`
+	// ErrorMessage is the terminal model/provider failure, when the attempt
+	// ended in one. The worker records it as the run's last error.
+	ErrorMessage string `json:"error,omitempty"`
+	// DurationMs is the attempt's wall clock, load to settle.
+	DurationMs int64 `json:"durationMs"`
+}
+
+// TokenTotals is the objective token accounting of an attempt (no prices: the
+// contract layer owns money).
+type TokenTotals struct {
+	Input  int `json:"input"`
+	Output int `json:"output"`
+	Total  int `json:"total"`
+}
+
+// ToolTiming is one tool execution: the loop's own measurement (hooks
+// excluded), matching pi's AgentToolCallOutcome.durationMs.
+type ToolTiming struct {
+	Tool       string `json:"tool,omitempty"`
+	DurationMs int64  `json:"durationMs"`
+	IsError    bool   `json:"isError,omitempty"`
+}
+
+// ContextStats describes the transcript an attempt ended with.
+type ContextStats struct {
+	// Messages is the number of messages in the final model context.
+	Messages int `json:"messages"`
+	// Tokens is the last provider request's input size (the closest objective
+	// proxy for context size; zero when the provider reported no usage).
+	Tokens int `json:"tokens"`
+}
+
+// Stop reason values the runner can produce beyond pi's set.
+const (
+	// StopReasonMaxTurns marks a run that ended because it hit the turn cap.
+	StopReasonMaxTurns = "max_turns"
+)
+
+// RunResult is what one attempt produced: where it read up to, and how it went.
+type RunResult struct {
+	// Cursor is the last event sequence the attempt consumed or produced.
+	Cursor int64
+	// ReadThrough is the load watermark: the highest committed sequence the
+	// transcript was built from. Input above it was never part of this attempt
+	// (the worker passes it to Finish so the session re-queues).
+	ReadThrough int64
+	// Summary is the attempt-level account committed as run.finished.
+	Summary RunSummary
+}
+
 // Run executes the session once under the claim (scope + fencing token). The
 // returned cursor is the last event sequence the run consumed or produced; the
 // caller uses it to decide whether more input arrived while the run was
 // executing.
 func (r *Runner) Run(ctx context.Context, lease kernel.Lease) (int64, error) {
-	cursor, _, err := r.RunWithWatermark(ctx, lease)
-	return cursor, err
+	res, err := r.RunAttempt(ctx, lease)
+	return res.Cursor, err
 }
 
 // RunWithWatermark executes the run once and additionally reports the load
@@ -145,25 +213,56 @@ func (r *Runner) Run(ctx context.Context, lease kernel.Lease) (int64, error) {
 // the truthful boundary: a user.message with a higher sequence must force a
 // re-queue, which the worker does by passing it to FinishRequest.ReadThrough.
 func (r *Runner) RunWithWatermark(ctx context.Context, lease kernel.Lease) (int64, int64, error) {
-	if r.Committer == nil || r.Events == nil || r.Reads == nil {
-		return 0, 0, errors.New("agent: runner needs the contract kernel seams (Committer, Reader and ReadMarker)")
-	}
-	var watermark int64
-	cursor, err := r.observeRun(lease, func() (int64, error) {
-		return r.run(ctx, lease, &watermark)
-	})
-	return cursor, watermark, err
+	res, err := r.RunAttempt(ctx, lease)
+	return res.Cursor, res.ReadThrough, err
 }
 
-func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) (int64, error) {
-	events, cursor, err := r.loadEvents(ctx, lease.Scope)
-	if err == nil && watermark != nil {
-		// The load high-water mark: everything the transcript was built from.
-		// Input committed after it was not seen and must re-queue the run.
-		*watermark = cursor
+// RunAttempt executes the run once and returns the full result: cursor, read
+// watermark and the attempt summary. The worker uses it so the settle carries
+// the summary it commits as run.finished.
+func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult, error) {
+	if r.Committer == nil || r.Events == nil || r.Reads == nil {
+		return RunResult{}, errors.New("agent: runner needs the contract kernel seams (Committer, Reader and ReadMarker)")
 	}
+	started := time.Now()
+	var res RunResult
+	cursor, err := r.observeRun(lease, func() (int64, error) {
+		out, runErr := r.run(ctx, lease)
+		res = out
+		return out.Cursor, runErr
+	})
+	res.Cursor = cursor
+	res.Summary.DurationMs = time.Since(started).Milliseconds()
+	switch {
+	case err != nil:
+		res.Summary.Status = kernel.RunSummaryFailed
+		if res.Summary.StopReason == "" {
+			res.Summary.StopReason = agentcore.StopReasonError
+		}
+	case res.Summary.StopReason == agentcore.StopReasonError:
+		// pi reports a provider failure as a terminal assistant message
+		// (stopReason=error), not as a Go error. The attempt failed all the same;
+		// the worker turns this into the settle's error so the run is retried and
+		// the row records why.
+		res.Summary.Status = kernel.RunSummaryFailed
+	case res.Summary.Status == "":
+		res.Summary.Status = kernel.RunSummaryDone
+	}
+	if res.Summary.StopReason == "" {
+		res.Summary.StopReason = agentcore.StopReasonEndTurn
+	}
+	return res, err
+}
+
+func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error) {
+	var res RunResult
+	events, cursor, err := r.loadEvents(ctx, lease.Scope)
+	// The load high-water mark: everything the transcript was built from.
+	// Input committed after it was not seen and must re-queue the run.
+	res.ReadThrough = cursor
+	res.Cursor = cursor
 	if err != nil {
-		return cursor, err
+		return res, err
 	}
 	// Persist the load point BEFORE anything else (in particular before
 	// fillMissingToolResults can commit): whatever happens next — a model
@@ -171,7 +270,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 	// attempt did not read. A failure here aborts the attempt while nothing has
 	// been committed yet, so the retry is clean.
 	if err := r.Reads.RecordRead(ctx, lease, cursor); err != nil {
-		return cursor, fmt.Errorf("agent: record read point: %w", err)
+		return res, fmt.Errorf("agent: record read point: %w", err)
 	}
 	// A payload the kernel would not accept today (legacy or foreign data) is
 	// skipped with a diagnostic instead of failing the run: the session must
@@ -181,7 +280,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 			"seq", seq, "kind", kind, "err", err)
 	})
 	if len(msgs) == 0 {
-		return cursor, nil
+		return res, nil
 	}
 	// Nothing is owed to the model when every committed input is covered. The
 	// decision is durable, not a transcript-tail guess: the claim delivers the
@@ -189,27 +288,59 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 	// to be unread even though an answer the previous attempt produced sits
 	// after that input in the log.
 	if !owedTurn(events, lease.ReadWatermark) {
-		return cursor, nil
+		return res, nil
 	}
 
 	// A previous process may have died after committing an assistant tool call
 	// but before committing its results. Execute the missing calls now (at least
 	// once) so the model sees a complete turn.
 	msgs, seqs, cursor, err = r.fillMissingToolResults(ctx, lease, msgs, seqs, cursor)
+	res.Cursor = cursor
 	if err != nil {
-		return cursor, err
+		return res, err
 	}
 	// The model must see the input this transcript owes an answer to LAST:
 	// input that arrived while the previous attempt was running sits before
 	// that attempt's answer in the log, so leaving the log order intact makes
 	// the model treat the input as already answered (no reply, no tool call —
-	// adversarial review B5).
-	msgs = presentUnreadInputLast(msgs, seqs, lease.ReadWatermark)
+	// adversarial review B5). "Unread" is the consumption fact when the log
+	// carries it: a guide input answered in an earlier attempt must NOT be
+	// presented as a new prompt (that would answer it twice).
+	answered, consumptionKnown := answeredInputs(events)
+	msgs = presentUnreadInputLast(msgs, seqs, func(seq int64) bool {
+		if consumptionKnown {
+			return !answered[seq]
+		}
+		// A read watermark of zero means no attempt has ever proven a read
+		// point: the log order is the only information available and is left
+		// alone.
+		return lease.ReadWatermark > 0 && seq > lease.ReadWatermark
+	})
+
+	// The inputs this attempt actually presents to the model. The assistant
+	// message records them (payload.inputSeqs) so "unanswered input" is a fact
+	// in the log rather than a watermark heuristic: a successor can tell a
+	// queue input from a guide input, and a crash between the assistant commit
+	// and Finish cannot duplicate an answer. The two slices move in lockstep
+	// (presentUnreadInputLast returns them unchanged on a length mismatch).
+	inputSeqs := make([]int64, 0, len(msgs))
+	if len(seqs) == len(msgs) {
+		for i, m := range msgs {
+			if m.Role() == agentcore.RoleUser {
+				inputSeqs = append(inputSeqs, seqs[i])
+			}
+		}
+	}
 
 	// Generation identity: the kernel dedupes assistant messages by
 	// generationId, and the id must be the same for a retried attempt, so it is
 	// derived from the committed log (see generationBase).
 	generation := generationBase(events)
+	// The steering feed is the loop's GetSteeringMessages source: guide inputs
+	// committed after this attempt loaded its transcript, handed out one at a
+	// time at PI's drain points (see guideFeed).
+	feed := newGuideFeed(r, lease, res.ReadThrough)
+	summary := &res.Summary
 	turns := 0
 	tools := r.registry()
 	// Only a trailing user input is this run's prompt; a run that continues from
@@ -253,9 +384,17 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 		// The run is triggered by its trailing user message(s); they are the
 		// prompt whose message lifecycle pi emits.
 		PromptCount: promptCount,
+		// Guide input is injected inside the running turn: the loop polls this
+		// before the first request, after every completed turn (all sibling tool
+		// results committed) and again after PrepareNextTurn.
+		GetSteeringMessages: feed.poll,
 		ShouldStopAfterTurn: func(ctx context.Context, agentCtx *agentcore.AgentContext) bool {
 			turns++
-			return r.MaxTurns > 0 && turns >= r.MaxTurns
+			if r.MaxTurns > 0 && turns >= r.MaxTurns {
+				summary.StopReason = StopReasonMaxTurns
+				return true
+			}
+			return false
 		},
 		OnCompaction: func(ctx context.Context, summary string, firstKeptIndex, summarizedCount int) {
 			raw, err := marshalPayload(map[string]any{
@@ -291,9 +430,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 	stream := loop.StartRun(ctx, agentCtx, cfg)
 	for ev := range stream.Events() {
 		if ctx.Err() != nil {
-			return cursor, ctx.Err()
+			res.Cursor = cursor
+			summary.StopReason = agentcore.StopReasonAborted
+			return res, ctx.Err()
 		}
 		switch e := ev.(type) {
+		case agentcore.TurnEndEvent:
+			summary.Turns++
 		case agentcore.MessageEndEvent:
 			// User prompts and tool results are persisted by their own paths
 			// (input submission / tool_execution_end); only assistant answers
@@ -301,9 +444,33 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 			if e.Message.Role() != agentcore.RoleAssistant {
 				continue
 			}
+			if assistant, ok := e.Message.(agentcore.AssistantMessage); ok {
+				if assistant.Usage != nil {
+					summary.Tokens.Input += assistant.Usage.InputTokens
+					summary.Tokens.Output += assistant.Usage.OutputTokens
+					summary.Context.Tokens = assistant.Usage.InputTokens
+				}
+				if assistant.StopReason != "" {
+					summary.StopReason = assistant.StopReason
+				}
+				if assistant.StopReason == agentcore.StopReasonError {
+					summary.ErrorMessage = assistant.ErrorMessage
+				}
+			}
 			raw, err := marshalPayload(e.Message)
 			if err != nil {
-				return cursor, err
+				res.Cursor = cursor
+				return res, err
+			}
+			// Record what this answer consumed: the committed user inputs this
+			// request presented to the model (the transcript it was built from
+			// plus every guide input the loop has injected since). owedTurn uses
+			// the union of these sets (not a watermark) to decide what is still
+			// owed.
+			raw, err = attachInputSeqs(raw, mergeInputSeqs(inputSeqs, feed.consumed()))
+			if err != nil {
+				res.Cursor = cursor
+				return res, err
 			}
 			seq, err := r.commitEvent(ctx, lease, kernel.CommitRequest{
 				Kind:         kernel.KindAssistantMessage,
@@ -311,10 +478,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 				Payload:      raw,
 			})
 			if err != nil {
-				return cursor, err
+				res.Cursor = cursor
+				return res, err
 			}
 			cursor = seq
 		case agentcore.ToolExecutionEndEvent:
+			timing := ToolTiming{Tool: e.ToolName, IsError: e.IsError}
+			if e.DurationMs != nil {
+				timing.DurationMs = *e.DurationMs
+			}
+			summary.ToolTimings = append(summary.ToolTimings, timing)
 			msg := agentcore.ToolResultMessage{
 				RoleField:  agentcore.RoleToolResult,
 				ToolCallID: e.ToolCallID,
@@ -325,15 +498,22 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, watermark *int64) 
 			}
 			seq, err := r.appendToolResult(ctx, lease, msg)
 			if err != nil {
-				return cursor, err
+				res.Cursor = cursor
+				return res, err
 			}
 			cursor = seq
 		}
 	}
 	if _, err := stream.Result(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		return cursor, err
+		res.Cursor = cursor
+		return res, err
 	}
-	return cursor, nil
+	// The final context size is the transcript the loop ended with; steering may
+	// have extended it beyond the messages this attempt loaded.
+	summary.Context.Messages = len(agentCtx.Messages)
+	summary.Tokens.Total = summary.Tokens.Input + summary.Tokens.Output
+	res.Cursor = cursor
+	return res, nil
 }
 
 // generation names one model generation: the seq of the newest committed user
@@ -373,30 +553,80 @@ func (g *generation) next() string {
 
 // owedTurn reports whether the run must produce a model turn.
 //
-//   - readWatermark is the previous attempt's proven load point: any user
-//     message above it was never part of that attempt, so it is unanswered by
-//     definition. This is the authoritative test — it also survives a previous
-//     attempt that FAILED after committing an answer, and one that was killed
-//     before Finish (the runner records its read point before the first model
-//     call).
-//   - The tail being a user message is the crash-before-the-read-point
-//     fallback: an attempt that died between the claim and its load left no
-//     watermark, but the input it was claimed for is still the tail.
-//   - The newest assistant message carrying tool calls means the loop must fill
-//     their results and continue.
+// The authoritative rule is the consumption fact recorded in the log: every
+// assistant message carries payload.inputSeqs — the committed user inputs that
+// request presented to the model. A user message no assistant references is
+// unanswered, whatever the watermark says. This is what makes queue and guide
+// inputs exact across crashes and interleavings:
 //
-// Bookkeeping events (run.started, run.failed, compaction) never answer input.
+//   - an answer committed before a crash has already consumed its inputs, so a
+//     successor does not answer them twice;
+//   - an attempt killed before committing its answer consumed nothing, so its
+//     inputs stay owed;
+//   - a guide input consumed in a turn and a queue input left for the next turn
+//     are distinguished by their seqs, not by their position relative to a
+//     watermark.
+//
+// Legacy logs (no assistant message carries inputSeqs) fall back to the old
+// watermark + tail heuristic, so historical sessions keep working.
+//
+// Independently of input consumption, the newest assistant message carrying
+// tool calls means the loop must fill their results and continue.
+//
+// Bookkeeping events (run.started, run.failed, run.finished, compaction) never
+// answer input.
 func owedTurn(events []store.Event, readWatermark int64) bool {
-	if readWatermark > 0 {
+	if answered, known := answeredInputs(events); known {
 		for _, ev := range events {
-			if ev.Kind == store.EventUserMessage && ev.Seq > readWatermark {
+			if ev.Kind == store.EventUserMessage && !answered[ev.Seq] {
 				return true
 			}
 		}
+		return newestAssistantHasToolCalls(events)
 	}
-	if len(events) > 0 && events[len(events)-1].Kind == store.EventUserMessage {
-		return true
+	return legacyOwedTurn(events, readWatermark)
+}
+
+// answeredInputs unions every assistant message's inputSeqs. known is false
+// when no message carries the field (a log written before the consumption fact
+// existed), which selects the legacy heuristic.
+//
+// A terminal failure (stopReason error/aborted) does NOT consume its input: the
+// model saw it but produced no answer, so the input stays owed and a retry
+// re-asks. Only a completed turn (end_turn/tool_use/…) is an answer.
+func answeredInputs(events []store.Event) (map[int64]bool, bool) {
+	answered := make(map[int64]bool)
+	known := false
+	for _, ev := range events {
+		if ev.Kind != store.EventAssistantMessage {
+			continue
+		}
+		var payload struct {
+			InputSeqs  []int64 `json:"inputSeqs"`
+			StopReason string  `json:"stopReason"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if len(payload.InputSeqs) == 0 {
+			continue
+		}
+		// The message records what it was shown, so the log DOES carry the
+		// consumption fact — but a terminal failure answered nothing.
+		known = true
+		if payload.StopReason == agentcore.StopReasonError || payload.StopReason == agentcore.StopReasonAborted {
+			continue
+		}
+		for _, seq := range payload.InputSeqs {
+			answered[seq] = true
+		}
 	}
+	return answered, known
+}
+
+// newestAssistantHasToolCalls reports whether the newest assistant message
+// declares tool calls (their results may still be missing after a crash).
+func newestAssistantHasToolCalls(events []store.Event) bool {
 	for i := len(events) - 1; i >= 0; i-- {
 		if events[i].Kind != store.EventAssistantMessage {
 			continue
@@ -410,6 +640,23 @@ func owedTurn(events []store.Event, readWatermark int64) bool {
 		return len(m.ToolCalls()) > 0
 	}
 	return false
+}
+
+// legacyOwedTurn is the pre-inputSeqs heuristic, kept for logs that predate the
+// consumption fact (and for messages persisted by helpers that do not record
+// it). New logs never take this path.
+func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
+	if readWatermark > 0 {
+		for _, ev := range events {
+			if ev.Kind == store.EventUserMessage && ev.Seq > readWatermark {
+				return true
+			}
+		}
+	}
+	if len(events) > 0 && events[len(events)-1].Kind == store.EventUserMessage {
+		return true
+	}
+	return newestAssistantHasToolCalls(events)
 }
 
 // fillMissingToolResults executes tool calls that a crashed process left
@@ -464,24 +711,26 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease,
 	return msgs, seqs, cursor, nil
 }
 
-// presentUnreadInputLast moves the user messages the previous attempt never
-// read (their seq is above its read watermark) to the end of the transcript,
-// keeping their relative order. The rest of the transcript — including the
-// previous attempt's answer, which sits AFTER that input in the log — stays in
-// front. A model then sees the input it owes an answer to as its prompt, so the
-// input is actually answered (and any tool call it triggers executes) instead
-// of being swallowed by an answer to older input.
+// presentUnreadInputLast moves the user messages no committed answer consumed
+// (unread(seq)) to the end of the transcript, keeping their relative order. The
+// rest of the transcript — including the previous attempt's answer, which sits
+// AFTER that input in the log — stays in front. A model then sees the input it
+// owes an answer to as its prompt, so the input is actually answered (and any
+// tool call it triggers executes) instead of being swallowed by an answer to
+// older input.
 //
-// A read watermark of zero means no attempt has ever proven a read point: the
-// log order is the only information available and is left alone.
-func presentUnreadInputLast(msgs agentcore.MessageList, seqs []int64, readWatermark int64) agentcore.MessageList {
-	if readWatermark <= 0 || len(msgs) == 0 || len(seqs) != len(msgs) {
+// unread is the caller's rule: the inputSeqs consumption fact for new logs, the
+// read watermark for legacy ones.
+func presentUnreadInputLast(msgs agentcore.MessageList, seqs []int64, unread func(seq int64) bool) agentcore.MessageList {
+	if len(msgs) == 0 || len(seqs) != len(msgs) {
 		return msgs
 	}
 	kept := make(agentcore.MessageList, 0, len(msgs))
 	moved := make(agentcore.MessageList, 0, len(msgs))
 	for i, m := range msgs {
-		if m.Role() == agentcore.RoleUser && seqs[i] > readWatermark {
+		// seq 0 marks a message rebuilt in-process (a re-executed tool result),
+		// never a committed user input.
+		if m.Role() == agentcore.RoleUser && seqs[i] > 0 && unread(seqs[i]) {
 			moved = append(moved, m)
 			continue
 		}
@@ -560,6 +809,30 @@ func marshalPayload(v any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("agent: marshal event payload: %w", err)
 	}
 	return raw, nil
+}
+
+// attachInputSeqs adds the consumed-input fact (payload.inputSeqs) to an
+// assistant message payload. Values are kept as raw JSON so the message's own
+// encoding is untouched; only the added key changes. An empty set is omitted:
+// there is nothing to consume.
+func attachInputSeqs(raw json.RawMessage, seqs []int64) (json.RawMessage, error) {
+	if len(seqs) == 0 {
+		return raw, nil
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("agent: assistant payload is not an object: %w", err)
+	}
+	encoded, err := json.Marshal(seqs)
+	if err != nil {
+		return nil, fmt.Errorf("agent: encode inputSeqs: %w", err)
+	}
+	payload["inputSeqs"] = encoded
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("agent: marshal assistant payload: %w", err)
+	}
+	return out, nil
 }
 
 // MarshalAssistant is a small helper for callers that persist a message outside

@@ -515,18 +515,26 @@ func TestRuntimeHandoffProcess(t *testing.T) {
 		t.Fatalf("A never answered the first message\n--- runtime-a log ---\n%s\n--- runtime-b log ---\n%s",
 			a.logs(), b.logs())
 	}
-	cursor := firstReply
+	// The attempt records its own summary (run.finished) right before the settle,
+	// so the log cursor a client resumes from is that frame, not the reply.
+	cursor, ok := waitForFinished(t, a.base, headers, eventsPath, 1, 30*time.Second)
+	if !ok {
+		t.Fatalf("A never recorded the first run summary\n--- runtime-a log ---\n%s", a.logs())
+	}
+	if cursor <= firstReply {
+		t.Fatalf("run.finished seq = %d, want after the reply at %d", cursor, firstReply)
+	}
 
-	// 2. A client opens the stream on A and reads up to the reply.
+	// 2. A client opens the stream on A and reads up to the settled run.
 	streamA := openStream(t, a.base, tenant.String(), session.String(), "")
 	var lastID string
 	for {
-		frame := streamA.next(15*time.Second, "the first reply frame")
+		frame := streamA.next(15*time.Second, "the first run's frames")
 		if frame.id == "" {
 			continue
 		}
 		lastID = frame.id
-		if frame.event == "assistant.message" {
+		if frame.event == "run.finished" {
 			break
 		}
 	}
@@ -612,15 +620,35 @@ func TestRuntimeHandoffProcess(t *testing.T) {
 			t.Fatalf("resume frame %d, want %d (cursor+1, no repeat, no gap)", id, want)
 		}
 		seen = append(seen, frame)
-		if frame.event == "assistant.message" && id == cursor+2 {
+		// The successor answers the drained input and records the attempt
+		// summary; both arrive on the resumed stream.
+		if frame.event == "run.finished" && len(seen) > 1 {
 			break
 		}
 	}
-	if seen[0].event != "user.message" && len(seen) == 1 {
-		t.Fatalf("the drained input never reached the successor's stream: %+v", seen)
+	var userFrames, assistantFrames int
+	for _, frame := range seen {
+		switch frame.event {
+		case "user.message":
+			userFrames++
+		case "assistant.message":
+			assistantFrames++
+		}
 	}
-	if seen[len(seen)-1].event != "assistant.message" {
-		t.Fatalf("last resumed frame = %+v, want the reply to the drained input", seen[len(seen)-1])
+	// The drained input is only on B's stream when A's drain flush stopped before
+	// it; either way the successor's reply is exactly one assistant message.
+	wantUserFrames := 0
+	if lastA == cursor {
+		wantUserFrames = 1
+	}
+	if userFrames != wantUserFrames {
+		t.Fatalf("resumed stream carried %d user frames, want %d: %+v", userFrames, wantUserFrames, seen)
+	}
+	if assistantFrames != 1 {
+		t.Fatalf("resumed stream carried %d assistant frames, want 1: %+v", assistantFrames, seen)
+	}
+	if seen[len(seen)-1].event != "run.finished" {
+		t.Fatalf("last resumed frame = %+v, want the settled attempt summary", seen[len(seen)-1])
 	}
 
 	// 7. The final log is exactly what the two messages imply: no lost events,
@@ -631,11 +659,12 @@ func TestRuntimeHandoffProcess(t *testing.T) {
 		t.Fatalf("read log = %d", code)
 	}
 	log := parseEvents(t, body)
-	if len(log.user) != 2 || len(log.assistant) != 2 {
-		t.Fatalf("log = %d user / %d assistant events, want 2/2", len(log.user), len(log.assistant))
+	if len(log.user) != 2 || len(log.assistant) != 2 || len(log.finished) != 2 {
+		t.Fatalf("log = %d user / %d assistant / %d finished events, want 2/2/2",
+			len(log.user), len(log.assistant), len(log.finished))
 	}
-	if log.seqs[len(log.seqs)-1] != 4 {
-		t.Fatalf("log seqs = %v, want 1..4", log.seqs)
+	if log.seqs[len(log.seqs)-1] != 6 {
+		t.Fatalf("log seqs = %v, want 1..6", log.seqs)
 	}
 	for i, seq := range log.seqs {
 		if seq != int64(i+1) {
@@ -782,6 +811,7 @@ type logDump struct {
 	seqs      []int64
 	user      []int64
 	assistant []int64
+	finished  []int64
 }
 
 func parseEvents(t *testing.T, body map[string]any) logDump {
@@ -804,9 +834,29 @@ func parseEvents(t *testing.T, body map[string]any) logDump {
 			dump.user = append(dump.user, seq)
 		case "assistant.message":
 			dump.assistant = append(dump.assistant, seq)
+		case "run.finished":
+			dump.finished = append(dump.finished, seq)
 		}
 	}
 	return dump
+}
+
+// waitForFinished polls the log until it holds n attempt summaries and returns
+// the seq of the last one. ok=false means the timeout passed.
+func waitForFinished(t *testing.T, base string, headers map[string]string, eventsPath string, n int, timeout time.Duration) (int64, bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		code, body := httpJSON(t, "GET", base+eventsPath+"?limit=100", headers, "")
+		if code == 200 {
+			dump := parseEvents(t, body)
+			if len(dump.finished) >= n {
+				return dump.finished[len(dump.finished)-1], true
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return 0, false
 }
 
 // waitForAssistant polls the log until it holds n assistant messages and

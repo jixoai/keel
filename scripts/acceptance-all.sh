@@ -128,13 +128,13 @@ port_free 13779
 run "R1 live capture" "$EVID/r1-live.txt" \
   go run ./cmd/r1diff -old-bin "$BASE" -new-bin "$BIN" \
   -dsn "$(dsn keel_r1diff)" -out "$EVID/r1" \
-  -allow openspec/changes/archive/keel-service-graph/r1-allow.json \
+  -allow openspec/changes/keel-kernel-loop/r1-allow.json \
   -port-old 13778 -port-new 13779
 # Negative control: the same dump on both sides means every rule went stale —
 # the gate must refuse to pass (it is not allowed to pass vacuously).
 say "-- R1 negative control (identical dumps must FAIL)"
 if go run ./cmd/r1diff -old-dump "$EVID/r1/new.json" -new-dump "$EVID/r1/new.json" \
-  -allow openspec/changes/archive/keel-service-graph/r1-allow.json \
+  -allow openspec/changes/keel-kernel-loop/r1-allow.json \
   -out "$EVID/r1-negative-control" >"$EVID/r1-negative.txt" 2>&1; then
   fail "R1 negative control passed: the gate can be satisfied without its differences"
 fi

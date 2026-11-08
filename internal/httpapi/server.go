@@ -73,6 +73,13 @@ type Config struct {
 	// answers 503 on every /v1/external route; a tenant document that declares
 	// no external backend also leaves it nil.
 	External ExternalSessions
+	// Product is the product-layer AgentAPI (keel-agent, internal/agentapi)
+	// mounted under /v1/. Specific routes registered here keep precedence; the
+	// subtree handler only sees paths this server does not own. Nil disables it.
+	Product http.Handler
+	// Partials is the token-level bypass seam for the SSE handler. Nil keeps
+	// ?partials=1 a no-op.
+	Partials PartialSource
 	// MaxBody caps JSON request bodies (uploads use MaxUpload).
 	MaxBody   int64
 	MaxUpload int64
@@ -150,6 +157,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
 	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
+	// Product-layer AgentAPI (keel-agent): its own mux owns the remaining /v1
+	// patterns. The more specific patterns above win, so the existing edge
+	// contract is unchanged.
+	if s.cfg.Product != nil {
+		s.mux.Handle("/v1/", s.cfg.Product)
+	}
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -258,6 +271,10 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Text      string `json:"text"`
 		RequestID string `json:"requestId"`
+		// Delivery selects how the loop consumes this input: "queue" (default)
+		// waits for the next run, "guide" is injected into the running turn at a
+		// tool boundary.
+		Delivery string `json:"delivery"`
 	}
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, 400, err)
@@ -265,6 +282,26 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Text) == "" {
 		writeErr(w, 400, errors.New("text is required"))
+		return
+	}
+	delivery := body.Delivery
+	switch delivery {
+	case "":
+		// Absent means queue (the pre-delivery contract). The field is not
+		// injected: a client that never sends delivery must keep a byte-identical
+		// payload, or its idempotent retry after a crash becomes a key conflict.
+	case kernel.DeliveryQueue:
+	case kernel.DeliveryGuide:
+		// The downgrade rule: a guide input steers the turn that is running, so
+		// it only stays a guide while an attempt is actually executing. Without
+		// a live attempt there is nothing to steer and it is committed as queue
+		// input — visible in the event, never silent.
+		run, err := s.cfg.Store.GetRun(r.Context(), tenantID, sessionID)
+		if err != nil || run.Status != kernel.RunStatusRunning {
+			delivery = kernel.DeliveryQueue
+		}
+	default:
+		writeErr(w, 400, fmt.Errorf("delivery must be %q or %q", kernel.DeliveryQueue, kernel.DeliveryGuide))
 		return
 	}
 	requestID := body.RequestID
@@ -275,7 +312,11 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		requestID = uuid.NewString()
 	}
 	scope := kernel.Scope{TenantID: tenantID, SessionID: sessionID}
-	payload, err := json.Marshal(map[string]any{"text": body.Text, "requestId": requestID})
+	fields := map[string]any{"text": body.Text, "requestId": requestID}
+	if delivery != "" {
+		fields["delivery"] = delivery
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -667,6 +708,15 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	wake, cancel := s.cfg.Hub.Subscribe(tenantID, sessionID)
 	defer cancel()
+	// Token-level partials are an opt-in bypass: no id line, no persistence, no
+	// effect on Last-Event-ID. A nil source (or no ?partials=1) keeps the
+	// historical behavior byte for byte.
+	var partialCh <-chan PartialFrame
+	if r.URL.Query().Get("partials") == "1" && s.cfg.Partials != nil {
+		ch, cancelPartials := s.cfg.Partials.SubscribePartials(tenantID, sessionID)
+		defer cancelPartials()
+		partialCh = ch
+	}
 	var drainDone <-chan struct{}
 	if s.cfg.Drain != nil {
 		drainDone = s.cfg.Drain.Done()
@@ -741,6 +791,23 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		case <-wake:
+		case partial, ok := <-partialCh:
+			if !ok {
+				partialCh = nil
+				continue
+			}
+			if err := setWriteDeadline(rc, 10*time.Second); err != nil {
+				exit("partial-deadline", err)
+				return
+			}
+			// No `id:` line: a partial must never move the client's resume
+			// cursor. A reconnect replays only committed events.
+			frame := "event: " + partial.Event + "\ndata: " + string(partial.Data) + "\n\n"
+			if _, err := w.Write([]byte(frame)); err != nil {
+				exit("partial-write", err)
+				return
+			}
+			flusher.Flush()
 		case <-heartbeat.C:
 			if err := setWriteDeadline(rc, 10*time.Second); err != nil {
 				exit("heartbeat-deadline", err)

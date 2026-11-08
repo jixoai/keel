@@ -1,0 +1,606 @@
+package agentext
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jixoai/keel/internal/agentcore"
+)
+
+// Agent plugin contract. A plugin is declarative: it declares what it provides,
+// what it requires, the tools it adds to the model, the hooks it subscribes to,
+// the triggers it owns and the effects it must clean up. Assembly is ordered and
+// unload is the exact mirror image (reverse), so an assembly cycle can never
+// leave a listener, a timer or a tool behind.
+type PluginState string
+
+const (
+	PluginActive  PluginState = "active"
+	PluginPending PluginState = "pending"
+	PluginFailed  PluginState = "failed"
+	PluginStopped PluginState = "stopped"
+)
+
+// ToolSpec is one model-facing tool a plugin contributes.
+type ToolSpec struct {
+	Name        string
+	Description string
+	Schema      json.RawMessage
+	// Sequential forces the whole tool batch to run serially (tools with side
+	// effects on shared state).
+	Sequential bool
+	Execute    func(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error)
+}
+
+// HookSpec is one hook subscription a plugin declares.
+type HookSpec struct {
+	Event   HookEvent
+	Handler HookHandler
+	Timeout time.Duration
+}
+
+// Effect is a named cleanup a plugin must run on unload, in reverse declaration
+// order.
+type Effect struct {
+	Name string
+	Stop func(ctx context.Context) error
+}
+
+// PluginEnv is what Start receives: the live product services, never the kernel.
+type PluginEnv struct {
+	Hooks     *HookBus
+	Decisions *DecisionBroker
+	Triggers  *TriggerEngine
+	Subagents *SubagentRunner
+	Partials  *PartialHub
+	Logger    *slog.Logger
+}
+
+// Plugin is one agent extension.
+type Plugin struct {
+	ID       string
+	Version  string
+	Provides []string
+	Requires []string
+	Tools    []ToolSpec
+	Hooks    []HookSpec
+	Triggers []TriggerSpec
+	Effects  []Effect
+	// Start runs before the plugin's tools/hooks/triggers are applied; an error
+	// marks the plugin FAILED (its dependents stay PENDING).
+	Start func(ctx context.Context, env *PluginEnv) error
+	// Stop runs after hooks/triggers/effects are removed.
+	Stop func(ctx context.Context) error
+}
+
+// ToolSink receives the active tool set after every assembly. The hosting
+// process publishes it to the model registry (servicehost's product assembly
+// point); the runtime never reaches into the host directly.
+type ToolSink func(tools []agentcore.AgentTool) error
+
+// RuntimeOptions configures the plugin runtime.
+type RuntimeOptions struct {
+	Plugins   []*Plugin
+	Hooks     *HookBus
+	Triggers  *TriggerEngine
+	Decisions *DecisionBroker
+	Subagents *SubagentRunner
+	Partials  *PartialHub
+	Tools     ToolSink
+	Logger    *slog.Logger
+	Now       func() time.Time
+}
+
+// PluginStatus is the observable plugin state (GET /v1/plugins).
+type PluginStatus struct {
+	ID          string        `json:"id"`
+	Version     string        `json:"version,omitempty"`
+	State       PluginState   `json:"state"`
+	Provides    []string      `json:"provides,omitempty"`
+	Requires    []string      `json:"requires,omitempty"`
+	Tools       []string      `json:"tools,omitempty"`
+	Hooks       []HookEvent   `json:"hooks,omitempty"`
+	Triggers    []TriggerSpec `json:"triggers,omitempty"`
+	Effects     []string      `json:"effects,omitempty"`
+	Diagnostics []string      `json:"diagnostics,omitempty"`
+	StartedAt   *time.Time    `json:"startedAt,omitempty"`
+	StoppedAt   *time.Time    `json:"stoppedAt,omitempty"`
+}
+
+// Snapshot is the assembled extension surface.
+type Snapshot struct {
+	Generation int64          `json:"generation"`
+	Plugins    []PluginStatus `json:"plugins"`
+	Hooks      StatsSummary   `json:"hooks"`
+	Tools      []string       `json:"tools"`
+}
+
+// Runtime assembles plugins in dependency order and unloads them in reverse.
+type Runtime struct {
+	hooks     *HookBus
+	triggers  *TriggerEngine
+	decisions *DecisionBroker
+	subagents *SubagentRunner
+	partials  *PartialHub
+	sink      ToolSink
+	log       *slog.Logger
+	now       func() time.Time
+
+	mu         sync.Mutex
+	plugins    []*Plugin
+	generation int64
+	active     []*activatedPlugin
+	statuses   map[string]PluginStatus
+	closed     bool
+}
+
+type activatedPlugin struct {
+	plugin       *Plugin
+	unsubs       []func()
+	triggerStops []func()
+	effectsRun   []bool
+	tools        []agentcore.AgentTool
+	startedAt    time.Time
+}
+
+// NewRuntime builds a plugin runtime. Every service is optional; a plugin that
+// needs a missing service fails with a readable diagnostic.
+func NewRuntime(opts RuntimeOptions) *Runtime {
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	if opts.Now == nil {
+		opts.Now = func() time.Time { return time.Now().UTC() }
+	}
+	return &Runtime{
+		hooks:     opts.Hooks,
+		triggers:  opts.Triggers,
+		decisions: opts.Decisions,
+		subagents: opts.Subagents,
+		partials:  opts.Partials,
+		sink:      opts.Tools,
+		log:       opts.Logger,
+		now:       opts.Now,
+		plugins:   append([]*Plugin(nil), opts.Plugins...),
+		statuses:  make(map[string]PluginStatus),
+	}
+}
+
+// Apply (re)assembles the configured plugins. A previous assembly is unloaded
+// in reverse order first; the generation increments exactly once per apply.
+func (r *Runtime) Apply(ctx context.Context) error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return errors.New("agentext: plugin runtime is closed")
+	}
+	plugins := append([]*Plugin(nil), r.plugins...)
+	r.mu.Unlock()
+	return r.assemble(ctx, plugins)
+}
+
+// ApplyPlugins replaces the plugin set and reassembles.
+func (r *Runtime) ApplyPlugins(ctx context.Context, plugins []*Plugin) error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return errors.New("agentext: plugin runtime is closed")
+	}
+	r.plugins = append([]*Plugin(nil), plugins...)
+	r.mu.Unlock()
+	return r.assemble(ctx, plugins)
+}
+
+func (r *Runtime) assemble(ctx context.Context, plugins []*Plugin) error {
+	r.unload(ctx)
+
+	r.mu.Lock()
+	r.generation++
+	generation := r.generation
+	r.statuses = make(map[string]PluginStatus, len(plugins))
+	for _, plugin := range plugins {
+		if plugin == nil || plugin.ID == "" {
+			continue
+		}
+		r.statuses[plugin.ID] = PluginStatus{
+			ID:       plugin.ID,
+			Version:  plugin.Version,
+			State:    PluginPending,
+			Provides: append([]string(nil), plugin.Provides...),
+			Requires: append([]string(nil), plugin.Requires...),
+			Hooks:    hookNames(plugin.Hooks),
+			Tools:    toolNames(plugin.Tools),
+			Effects:  effectNames(plugin.Effects),
+			Triggers: append([]TriggerSpec(nil), plugin.Triggers...),
+		}
+	}
+	r.mu.Unlock()
+
+	// Duplicate tool names are a fail-closed condition: the model faces one
+	// namespace, so two plugins cannot own the same name.
+	toolOwners := make(map[string]string)
+	for _, plugin := range plugins {
+		if plugin == nil {
+			continue
+		}
+		for _, tool := range plugin.Tools {
+			if owner, exists := toolOwners[tool.Name]; exists && owner != plugin.ID {
+				r.diagnose(plugin.ID, fmt.Sprintf("tool %q is also declared by plugin %q", tool.Name, owner))
+			}
+			toolOwners[tool.Name] = plugin.ID
+		}
+	}
+
+	provided := make(map[string]struct{})
+	remaining := make([]*Plugin, 0, len(plugins))
+	for _, plugin := range plugins {
+		if plugin != nil && plugin.ID != "" {
+			remaining = append(remaining, plugin)
+		}
+	}
+	activated := make([]*activatedPlugin, 0, len(remaining))
+	for {
+		progress := false
+		next := remaining[:0]
+		for _, plugin := range remaining {
+			if !requiresSatisfied(plugin.Requires, provided) {
+				next = append(next, plugin)
+				continue
+			}
+			// A duplicate tool declaration makes the plugin fail; the check is
+			// repeated here so dependency order does not hide it.
+			if conflict := r.toolConflict(plugin, activated); conflict != "" {
+				r.fail(plugin.ID, conflict)
+				progress = true
+				continue
+			}
+			entry, err := r.activate(ctx, plugin)
+			if err != nil {
+				r.fail(plugin.ID, err.Error())
+				r.log.Warn("plugin activation failed", "plugin", plugin.ID, "generation", generation, "err", err)
+				progress = true
+				continue
+			}
+			activated = append(activated, entry)
+			for _, capability := range plugin.Provides {
+				provided[capability] = struct{}{}
+			}
+			r.markActive(plugin.ID, entry.startedAt)
+			progress = true
+		}
+		remaining = next
+		if !progress || len(remaining) == 0 {
+			break
+		}
+	}
+	for _, plugin := range remaining {
+		var missing []string
+		for _, requirement := range plugin.Requires {
+			if _, ok := provided[requirement]; !ok {
+				missing = append(missing, requirement)
+			}
+		}
+		if len(missing) == 0 {
+			missing = []string{"dependency activation did not complete"}
+		}
+		r.setDiagnostics(plugin.ID, PluginPending, fmt.Sprintf("waiting for: %s", strings.Join(missing, ", ")))
+		r.log.Info("plugin pending", "plugin", plugin.ID, "missing", strings.Join(missing, ", "))
+	}
+
+	r.mu.Lock()
+	r.active = activated
+	r.mu.Unlock()
+
+	if err := r.publishTools(); err != nil {
+		return err
+	}
+	r.log.Info("plugin assembly", "generation", generation, "plugins", len(plugins), "active", len(activated),
+		"pending", len(remaining))
+	return nil
+}
+
+func (r *Runtime) activate(ctx context.Context, plugin *Plugin) (*activatedPlugin, error) {
+	env := &PluginEnv{
+		Hooks:     r.hooks,
+		Decisions: r.decisions,
+		Triggers:  r.triggers,
+		Subagents: r.subagents,
+		Partials:  r.partials,
+		Logger:    r.log,
+	}
+	if plugin.Start != nil {
+		if err := plugin.Start(ctx, env); err != nil {
+			return nil, fmt.Errorf("start: %w", err)
+		}
+	}
+	entry := &activatedPlugin{plugin: plugin, startedAt: r.now()}
+	// Effects are cleaned in reverse; effectsRun tracks which ones were already
+	// executed so a partial unload never double-runs one.
+	entry.effectsRun = make([]bool, len(plugin.Effects))
+
+	if r.hooks != nil {
+		for _, spec := range plugin.Hooks {
+			unsub, err := r.hooks.Subscribe(plugin.ID, HookOptions{
+				Event:   spec.Event,
+				Handler: spec.Handler,
+				Timeout: spec.Timeout,
+			})
+			if err != nil {
+				entry.cleanup(ctx, r.log)
+				return nil, fmt.Errorf("subscribe %s: %w", spec.Event, err)
+			}
+			entry.unsubs = append(entry.unsubs, unsub)
+		}
+	} else if len(plugin.Hooks) > 0 {
+		entry.cleanup(ctx, r.log)
+		return nil, errors.New("hook bus is not wired")
+	}
+
+	if r.triggers != nil {
+		for _, spec := range plugin.Triggers {
+			if spec.ID == "" {
+				spec.ID = plugin.ID + "." + strings.ToLower(string(spec.Kind)) + "." + fmt.Sprintf("%d", len(entry.triggerStops))
+			}
+			if spec.Owner == "" {
+				spec.Owner = plugin.ID
+			}
+			if spec.Enabled && (spec.Kind == TriggerInterval || spec.Kind == TriggerCron) && spec.TenantID == "" {
+				entry.cleanup(ctx, r.log)
+				return nil, fmt.Errorf("trigger %s needs a tenantId", spec.ID)
+			}
+			stop, err := r.triggers.Register(spec)
+			if err != nil {
+				entry.cleanup(ctx, r.log)
+				return nil, fmt.Errorf("trigger %s: %w", spec.ID, err)
+			}
+			entry.triggerStops = append(entry.triggerStops, stop)
+		}
+	} else if len(plugin.Triggers) > 0 {
+		entry.cleanup(ctx, r.log)
+		return nil, errors.New("trigger engine is not wired")
+	}
+
+	for _, tool := range plugin.Tools {
+		entry.tools = append(entry.tools, &pluginTool{owner: plugin.ID, spec: tool})
+	}
+	return entry, nil
+}
+
+func (entry *activatedPlugin) cleanup(ctx context.Context, log *slog.Logger) {
+	for i := len(entry.triggerStops) - 1; i >= 0; i-- {
+		entry.triggerStops[i]()
+	}
+	entry.triggerStops = nil
+	for i := len(entry.unsubs) - 1; i >= 0; i-- {
+		entry.unsubs[i]()
+	}
+	entry.unsubs = nil
+	for i := len(entry.plugin.Effects) - 1; i >= 0; i-- {
+		if entry.effectsRun[i] {
+			continue
+		}
+		entry.effectsRun[i] = true
+		effect := entry.plugin.Effects[i]
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		err := effect.Stop(stopCtx)
+		cancel()
+		if err != nil {
+			log.Warn("plugin effect cleanup failed", "plugin", entry.plugin.ID, "effect", effect.Name, "err", err)
+		}
+	}
+	if entry.plugin.Stop != nil {
+		if err := entry.plugin.Stop(context.WithoutCancel(ctx)); err != nil {
+			log.Warn("plugin stop failed", "plugin", entry.plugin.ID, "err", err)
+		}
+	}
+}
+
+// unload tears the current assembly down in reverse activation order.
+func (r *Runtime) unload(ctx context.Context) {
+	r.mu.Lock()
+	active := r.active
+	r.active = nil
+	r.mu.Unlock()
+	for i := len(active) - 1; i >= 0; i-- {
+		entry := active[i]
+		entry.cleanup(ctx, r.log)
+		r.mu.Lock()
+		status := r.statuses[entry.plugin.ID]
+		status.State = PluginStopped
+		stopped := r.now()
+		status.StoppedAt = &stopped
+		if status.StartedAt != nil {
+			status.Diagnostics = append(status.Diagnostics, fmt.Sprintf("ran for %s", stopped.Sub(*status.StartedAt).Round(time.Millisecond)))
+		}
+		r.statuses[entry.plugin.ID] = status
+		r.mu.Unlock()
+	}
+}
+
+func (r *Runtime) publishTools() error {
+	if r.sink == nil {
+		return nil
+	}
+	r.mu.Lock()
+	tools := make([]agentcore.AgentTool, 0)
+	for _, entry := range r.active {
+		tools = append(tools, entry.tools...)
+	}
+	r.mu.Unlock()
+	if err := r.sink(tools); err != nil {
+		return fmt.Errorf("agentext: publish plugin tools: %w", err)
+	}
+	return nil
+}
+
+func (r *Runtime) toolConflict(plugin *Plugin, activated []*activatedPlugin) string {
+	owned := make(map[string]string)
+	for _, entry := range activated {
+		for _, tool := range entry.plugin.Tools {
+			owned[tool.Name] = entry.plugin.ID
+		}
+	}
+	for _, tool := range plugin.Tools {
+		if owner, exists := owned[tool.Name]; exists {
+			return fmt.Sprintf("tool %q is already owned by plugin %q", tool.Name, owner)
+		}
+	}
+	return ""
+}
+
+func (r *Runtime) markActive(id string, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.statuses[id]
+	status.State = PluginActive
+	status.StartedAt = &at
+	r.statuses[id] = status
+}
+
+func (r *Runtime) fail(id, diagnostic string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.statuses[id]
+	status.State = PluginFailed
+	status.Diagnostics = append(status.Diagnostics, diagnostic)
+	r.statuses[id] = status
+}
+
+func (r *Runtime) diagnose(id, diagnostic string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.statuses[id]
+	status.Diagnostics = append(status.Diagnostics, diagnostic)
+	r.statuses[id] = status
+}
+
+func (r *Runtime) setDiagnostics(id string, state PluginState, diagnostic string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.statuses[id]
+	status.State = state
+	status.Diagnostics = append(status.Diagnostics, diagnostic)
+	r.statuses[id] = status
+}
+
+// Snapshot returns the assembled extension surface.
+func (r *Runtime) Snapshot() Snapshot {
+	r.mu.Lock()
+	statuses := make([]PluginStatus, 0, len(r.statuses))
+	for _, status := range r.statuses {
+		copied := status
+		copied.Diagnostics = append([]string(nil), status.Diagnostics...)
+		copied.Tools = append([]string(nil), status.Tools...)
+		copied.Hooks = append([]HookEvent(nil), status.Hooks...)
+		copied.Triggers = append([]TriggerSpec(nil), status.Triggers...)
+		copied.Effects = append([]string(nil), status.Effects...)
+		statuses = append(statuses, copied)
+	}
+	generation := r.generation
+	tools := make([]string, 0)
+	for _, entry := range r.active {
+		for _, tool := range entry.tools {
+			tools = append(tools, tool.Name())
+		}
+	}
+	r.mu.Unlock()
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	sort.Strings(tools)
+	snapshot := Snapshot{Generation: generation, Plugins: statuses, Tools: tools}
+	if r.hooks != nil {
+		snapshot.Hooks = r.hooks.Summary()
+	}
+	return snapshot
+}
+
+// Generation reports the current assembly generation.
+func (r *Runtime) Generation() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.generation
+}
+
+// Close unloads everything and forbids further assembly.
+func (r *Runtime) Close(ctx context.Context) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	r.closed = true
+	r.mu.Unlock()
+	r.unload(ctx)
+	if r.sink != nil {
+		_ = r.sink(nil)
+	}
+}
+
+func requiresSatisfied(requires []string, provided map[string]struct{}) bool {
+	for _, requirement := range requires {
+		if _, ok := provided[requirement]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hookNames(specs []HookSpec) []HookEvent {
+	out := make([]HookEvent, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, spec.Event)
+	}
+	return out
+}
+
+func toolNames(specs []ToolSpec) []string {
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, spec.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func effectNames(effects []Effect) []string {
+	out := make([]string, 0, len(effects))
+	for _, effect := range effects {
+		out = append(out, effect.Name)
+	}
+	return out
+}
+
+// pluginTool adapts a ToolSpec to agentcore.AgentTool.
+type pluginTool struct {
+	owner string
+	spec  ToolSpec
+}
+
+func (t *pluginTool) Name() string        { return t.spec.Name }
+func (t *pluginTool) Description() string { return t.spec.Description }
+func (t *pluginTool) Schema() json.RawMessage {
+	if len(t.spec.Schema) == 0 {
+		return json.RawMessage(`{"type":"object","additionalProperties":true}`)
+	}
+	return t.spec.Schema
+}
+
+func (t *pluginTool) ExecutionMode() agentcore.ToolExecutionMode {
+	if t.spec.Sequential {
+		return agentcore.ToolExecutionSequential
+	}
+	return agentcore.ToolExecutionParallel
+}
+
+func (t *pluginTool) Execute(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	if t.spec.Execute == nil {
+		return errorToolResult(fmt.Sprintf("tool %s is declared by plugin %s but has no executor", t.spec.Name, t.owner)), nil
+	}
+	return t.spec.Execute(ctx, id, args, onUpdate)
+}

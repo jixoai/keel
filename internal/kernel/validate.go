@@ -28,6 +28,11 @@ type kindSpec struct {
 // start/attempts/outcome, and emitting them would change the client-visible
 // event stream, which the R1 parity gate pins). Do not treat their presence
 // here as "the loop emits lifecycle events".
+//
+// run.finished is different: the worker DOES emit it once per settled attempt
+// (the attempt-level summary), because a client needs turns/tokens/stop reason
+// without reconstructing them from the transcript. It is bookkeeping, not a
+// message: the transcript decoder skips it.
 var kindRegistry = map[EventKind]kindSpec{
 	KindUserMessage:      {class: ClassEdge, key: KeyRequest},
 	KindAssistantMessage: {class: ClassOwner, key: KeyGeneration},
@@ -35,6 +40,7 @@ var kindRegistry = map[EventKind]kindSpec{
 	KindCompaction:       {class: ClassOwner},
 	KindRunStarted:       {class: ClassOwner},
 	KindRunFailed:        {class: ClassOwner},
+	KindRunFinished:      {class: ClassOwner},
 	KindExternalEvent:    {class: ClassExternal, key: KeyRequest},
 }
 
@@ -75,6 +81,7 @@ func Kinds() []EventKind {
 		KindCompaction,
 		KindRunStarted,
 		KindRunFailed,
+		KindRunFinished,
 		KindExternalEvent,
 	}
 }
@@ -212,8 +219,14 @@ func findToolCall(ctx context.Context, txn SessionTxn, callID string) (ToolCallR
 // finishStatus mirrors store.FinishRun's outcome policy: a failed run goes back
 // to pending unless the attempt budget is spent; a successful run goes back to
 // pending when newer input arrived while it ran, otherwise it is done.
-func finishStatus(runErr error, attempts, maxAttempts int, moreInput bool) string {
+func finishStatus(runErr error, attempts, maxAttempts int, moreInput, cancelled bool) string {
 	switch {
+	case cancelled:
+		// A cancelled attempt is terminal: the operator asked for it to stop, so
+		// re-queueing the same input would make the cancel a no-op. The input
+		// remains unanswered in the log and the next run (started by later
+		// input) answers it.
+		return RunStatusFailed
 	case runErr != nil:
 		if maxAttempts > 0 && attempts >= maxAttempts {
 			return RunStatusFailed
@@ -225,6 +238,24 @@ func finishStatus(runErr error, attempts, maxAttempts int, moreInput bool) strin
 		return RunStatusDone
 	}
 }
+
+// Delivery values of user.message.payload.delivery. They are the durable
+// contract between the edge (which writes the intent) and the loop (which
+// consumes it): queue input waits for the next run, guide input is injected
+// into the running turn at a tool boundary. The names follow PI's
+// followUp/steer and zcode's queue/guide wording.
+const (
+	DeliveryQueue = "queue"
+	DeliveryGuide = "guide"
+)
+
+// Summary status values of a run.finished payload: the attempt-level outcome.
+// "cancelled" is a deliberate stop, distinct from a failure.
+const (
+	RunSummaryDone      = "done"
+	RunSummaryFailed    = "failed"
+	RunSummaryCancelled = "cancelled"
+)
 
 // validateUserMessagePayload pins the shape the transcript rebuild depends on.
 // user.message is the only kind a client can write; a payload the runner cannot
@@ -247,7 +278,111 @@ func validateUserMessagePayload(raw json.RawMessage) error {
 	if v, ok := payload["requestId"]; ok && !isJSONString(v) {
 		return errors.New(`user.message payload "requestId" must be a string`)
 	}
+	// delivery selects how the loop consumes this input (PI steer/followUp,
+	// zcode guide/queue). It is persisted in the payload because a successor
+	// process must see the intent from the log alone. An absent field means
+	// "queue" (the pre-existing behaviour), so old clients and old dumps keep
+	// working.
+	if v, ok := payload["delivery"]; ok {
+		var delivery string
+		if !isJSONString(v) || json.Unmarshal(v, &delivery) != nil {
+			return errors.New(`user.message payload "delivery" must be a string`)
+		}
+		if delivery != DeliveryQueue && delivery != DeliveryGuide {
+			return fmt.Errorf(`user.message payload "delivery" must be "queue" or "guide", got %q`, delivery)
+		}
+	}
 	return nil
+}
+
+// validateRunFinishedPayload pins the shape of the attempt summary. The event is
+// the durable answer to "what did this attempt do?" — the run row only carries
+// the session-level status — so the status must be one of the three terminal
+// attempt outcomes and the counters must be numbers when present. Unknown
+// fields stay allowed: a newer worker may add a metric without a kernel change.
+func validateRunFinishedPayload(raw json.RawMessage) error {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
+		return errors.New("run.finished payload must be a JSON object")
+	}
+	status, ok := payload["status"]
+	if !ok {
+		return errors.New(`run.finished payload requires a "status"`)
+	}
+	if !isJSONString(status) {
+		return errors.New(`run.finished payload "status" must be a string`)
+	}
+	var s string
+	_ = json.Unmarshal(status, &s)
+	switch s {
+	case RunSummaryDone, RunSummaryFailed, RunSummaryCancelled:
+	default:
+		return fmt.Errorf(`run.finished payload "status" must be %q, %q or %q, got %q`,
+			RunSummaryDone, RunSummaryFailed, RunSummaryCancelled, s)
+	}
+	for _, field := range []string{"turns", "durationMs"} {
+		if v, ok := payload[field]; ok && !isJSONCount(v) {
+			return fmt.Errorf(`run.finished payload %q must be a non-negative integer`, field)
+		}
+	}
+	if v, ok := payload["stopReason"]; ok && !isJSONString(v) {
+		return errors.New(`run.finished payload "stopReason" must be a string`)
+	}
+	if v, ok := payload["error"]; ok && !isJSONString(v) {
+		return errors.New(`run.finished payload "error" must be a string`)
+	}
+	for _, field := range []string{"tokens", "context"} {
+		v, ok := payload[field]
+		if !ok {
+			continue
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(v, &obj); err != nil || obj == nil {
+			return fmt.Errorf(`run.finished payload %q must be a JSON object`, field)
+		}
+		for name, value := range obj {
+			if !isJSONCount(value) {
+				return fmt.Errorf(`run.finished payload %q field %q must be a non-negative integer`, field, name)
+			}
+		}
+	}
+	if v, ok := payload["toolTimings"]; ok {
+		var entries []map[string]json.RawMessage
+		if err := json.Unmarshal(v, &entries); err != nil {
+			return errors.New(`run.finished payload "toolTimings" must be an array of objects`)
+		}
+		for _, entry := range entries {
+			if entry == nil {
+				return errors.New(`run.finished payload "toolTimings" entries must be objects`)
+			}
+			if name, ok := entry["tool"]; ok && !isJSONString(name) {
+				return errors.New(`run.finished payload toolTimings "tool" must be a string`)
+			}
+			if d, ok := entry["durationMs"]; ok && !isJSONCount(d) {
+				return errors.New(`run.finished payload toolTimings "durationMs" must be a non-negative integer`)
+			}
+			if e, ok := entry["isError"]; ok && !isJSONBool(e) {
+				return errors.New(`run.finished payload toolTimings "isError" must be a boolean`)
+			}
+		}
+	}
+	return nil
+}
+
+// isJSONCount reports whether raw is a non-negative JSON integer (null and
+// floats are not counters).
+func isJSONCount(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return false
+	}
+	var n int64
+	return json.Unmarshal(trimmed, &n) == nil && n >= 0
+}
+
+func isJSONBool(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return bytes.Equal(trimmed, []byte("true")) || bytes.Equal(trimmed, []byte("false"))
 }
 
 func isJSONString(raw json.RawMessage) bool {

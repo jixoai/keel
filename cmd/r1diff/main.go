@@ -58,11 +58,16 @@ type dump struct {
 	Scenario string `json:"scenario"`
 	// HTTP is keyed by step name (not an array) so allowlist paths stay stable
 	// when the scenario gains a step; the step order lives in this file.
-	HTTP      map[string]httpStep `json:"http"`
-	Events    []map[string]any    `json:"events"`
-	Tools     []string            `json:"tools"`
-	SSE       []sseFrame          `json:"sse"`
-	RunStatus map[string]any      `json:"runStatus"`
+	HTTP map[string]httpStep `json:"http"`
+	// Events is the conversation log: bookkeeping kinds removed, seq renumbered
+	// to the array position (see splitBookkeeping).
+	Events []map[string]any `json:"events"`
+	// Bookkeeping records the attempt-level facts (run.finished today) as
+	// normalized facts. They are additive runtime facts, not conversation.
+	Bookkeeping []map[string]any `json:"bookkeeping,omitempty"`
+	Tools       []string         `json:"tools"`
+	SSE         []sseFrame       `json:"sse"`
+	RunStatus   map[string]any   `json:"runStatus"`
 }
 
 type httpStep struct {
@@ -403,8 +408,8 @@ func runScenario(base string) (*dump, error) {
 	if err != nil {
 		return nil, err
 	}
-	d.Events = events
-	for _, ev := range events {
+	d.Events, d.Bookkeeping = splitBookkeeping(events)
+	for _, ev := range d.Events {
 		kind, _ := ev["kind"].(string)
 		switch kind {
 		case "assistant.message":
@@ -465,7 +470,7 @@ func runScenario(base string) (*dump, error) {
 	if err != nil {
 		return nil, err
 	}
-	d.SSE = frames
+	d.SSE = normalizeFrames(frames)
 	return d, nil
 }
 

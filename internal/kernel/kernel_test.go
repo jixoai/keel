@@ -1486,6 +1486,7 @@ func TestEventKindsMatchStore(t *testing.T) {
 		KindCompaction:       store.EventCompaction,
 		KindRunStarted:       store.EventRunStarted,
 		KindRunFailed:        store.EventRunFailed,
+		KindRunFinished:      store.EventRunFinished,
 		KindExternalEvent:    store.EventExternalEvent,
 	}
 	for kind, want := range pairs {
@@ -1555,16 +1556,20 @@ func TestFinishStatusPolicy(t *testing.T) {
 		attempts    int
 		maxAttempts int
 		moreInput   bool
+		cancelled   bool
 		want        string
 	}{
-		{"clean", nil, 1, 3, false, RunStatusDone},
-		{"newer input", nil, 1, 3, true, RunStatusPending},
-		{"failure retryable", errors.New("x"), 1, 3, false, RunStatusPending},
-		{"failure over budget", errors.New("x"), 3, 3, false, RunStatusFailed},
-		{"failure without budget", errors.New("x"), 9, 0, false, RunStatusPending},
+		{"clean", nil, 1, 3, false, false, RunStatusDone},
+		{"newer input", nil, 1, 3, true, false, RunStatusPending},
+		{"failure retryable", errors.New("x"), 1, 3, false, false, RunStatusPending},
+		{"failure over budget", errors.New("x"), 3, 3, false, false, RunStatusFailed},
+		{"failure without budget", errors.New("x"), 9, 0, false, false, RunStatusPending},
+		// A cancel is terminal even with an attempt budget left and unread input:
+		// re-queueing would make the cancel a no-op.
+		{"cancelled", context.Canceled, 1, 3, true, true, RunStatusFailed},
 	}
 	for _, c := range cases {
-		if got := finishStatus(c.err, c.attempts, c.maxAttempts, c.moreInput); got != c.want {
+		if got := finishStatus(c.err, c.attempts, c.maxAttempts, c.moreInput, c.cancelled); got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
 		}
 	}

@@ -112,13 +112,26 @@ func newLLMFactory(cfg Config) servicegraph.Factory {
 		svc := &llmService{stream: agent.FakeStream(), providerName: "fake", model: "fake", apiKey: cfg.LLM.APIKey}
 		agentCfg := cfg.Tenant.Agent
 		if strings.TrimSpace(agentCfg.Model) != "" {
-			resolved, modelID, err := provider.ResolveProvider(agentCfg.Model, agentCfg.BaseURL, agentCfg.Protocol, agentCfg.Provider, lookup)
+			resolved, _, err := provider.ResolveProvider(agentCfg.Model, agentCfg.BaseURL, agentCfg.Protocol, agentCfg.Provider, lookup)
 			if err != nil {
 				return nil, fmt.Errorf("resolve provider %q: %w", agentCfg.Model, err)
 			}
 			svc.stream = provider.StreamFnFromProvider(resolved)
 			svc.providerName = resolved.Name()
-			svc.model = modelID
+			// ResolveProvider's second return is the provider name, not the wire
+			// model id; the runner sends Model() to the provider, so it must be
+			// the model id the provider actually serves (a provider name here is
+			// rejected by every gateway with model_not_found).
+			if models := resolved.Models(); len(models) > 0 && strings.TrimSpace(models[0].ID) != "" {
+				svc.model = models[0].ID
+			} else {
+				svc.model = agentCfg.Model
+			}
+		}
+		// Product-layer observation (token partials): the decorator runs on the
+		// hot path for every model request, so it must stay allocation-light.
+		if cfg.Product.WrapStream != nil && svc.stream != nil {
+			svc.stream = cfg.Product.WrapStream(svc.stream)
 		}
 		return svc, nil
 	}
@@ -168,6 +181,9 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			}
 			extra = append(extra, toolsService.Tools()...)
 		}
+		// Static product tools (keel-agent): plugin tools are added later through
+		// Runtime.RefreshProductTools.
+		extra = append(extra, cfg.Product.ExtraTools...)
 		preamble := cfg.Tenant.Agent.SystemPrompt
 		if preamble == "" {
 			preamble = cfg.Prompt.Preamble
@@ -338,7 +354,11 @@ func (t *telemetryService) Stop(context.Context) error                          
 func newTelemetryFactory(cfg Config) servicegraph.Factory {
 	return func(context.Context, servicegraph.Resolved) (servicegraph.Instance, error) {
 		memory := telemetry.NewMemory()
-		return &telemetryService{run: &agent.RunTelemetry{Context: memory, Metrics: memory}}, nil
+		runContext := telemetry.Context(memory)
+		if cfg.Product.WrapTelemetry != nil {
+			runContext = cfg.Product.WrapTelemetry(runContext)
+		}
+		return &telemetryService{run: &agent.RunTelemetry{Context: runContext, Metrics: memory}}, nil
 	}
 }
 
@@ -483,6 +503,10 @@ func newWorkerFactory(cfg Config, engine *servicegraph.Engine) servicegraph.Fact
 		worker := agent.NewWorker(cfg.Seams.Leases, mirror, runner, cfg.RuntimeID, cfg.Concurrency, cfg.Seams.Logger)
 		worker.Metrics = cfg.Metrics
 		worker.DrainGate = cfg.DrainGate
+		worker.Control = cfg.Product.RunControl
+		// The attempt summary is a durable fact (run.finished) written under the
+		// run's lease; without the commit seam the worker settles without it.
+		worker.Committer = cfg.Seams.Committer
 		worker.Binding = &graphBinding{engine: engine}
 		return &workerService{worker: worker, log: cfg.Seams.Logger}, nil
 	}

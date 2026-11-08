@@ -1,0 +1,26 @@
+{
+  "name": "Keel",
+  "id": "com.fde2e.keel",
+  "version": "0.1.0",
+  "build": 1,
+  "appearance": "system",
+  "theme": "theme.json",
+  "capabilities": {
+    "network": {
+      "hosts": [
+        "*"
+      ]
+    },
+    "host": [
+      "keel.*"
+    ],
+    "clipboard": true,
+    "picker": true,
+    "speech": false,
+    "notifications": true
+  },
+  "web": {
+    "host": "./host.js"
+  },
+  "icon": "icon.png"
+}

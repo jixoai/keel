@@ -796,8 +796,13 @@ func (s *PGStore) finish(ctx context.Context, req FinishRequest) error {
 	if err != nil {
 		return fmt.Errorf("kernel: finish run read: %w", pgFail(err))
 	}
-	moreInput := unreadInput(ctx, tx, req, flagNow)
-	status := finishStatus(req.Err, attempts, req.MaxAttempts, moreInput)
+	moreInput := false
+	if !req.Cancelled {
+		// A cancelled attempt is terminal: the input it did not answer is not a
+		// re-queue trigger (see FinishRequest.Cancelled).
+		moreInput = unreadInput(ctx, tx, req, flagNow)
+	}
+	status := finishStatus(req.Err, attempts, req.MaxAttempts, moreInput, req.Cancelled)
 	lastError := ""
 	if req.Err != nil {
 		lastError = req.Err.Error()
@@ -864,13 +869,28 @@ func unreadInput(ctx context.Context, q queryer, req FinishRequest, flagNow bool
 	if req.Err != nil {
 		return true
 	}
+	// The consumption fact is authoritative when the log carries it: a guide
+	// input consumed inside the run sits above the read watermark but IS
+	// answered (an assistant message lists it in inputSeqs), so a watermark-only
+	// probe would re-queue a session that owes nothing. A user message no later
+	// assistant references is unread — that is exactly the runner's owedTurn
+	// rule, evaluated against the committed log. Legacy logs (no inputSeqs
+	// anywhere) fall back to the watermark probe by construction: no later
+	// assistant references anything, so every input above the watermark counts.
 	var more bool
 	if err := q.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM events
-		                WHERE tenant_id = $1 AND session_id = $2
-		                  AND seq > $3 AND kind = $4)`,
+		`SELECT EXISTS (
+		    SELECT 1 FROM events u
+		    WHERE u.tenant_id = $1 AND u.session_id = $2
+		      AND u.seq > $3 AND u.kind = $4
+		      AND NOT EXISTS (
+		          SELECT 1 FROM events a
+		          WHERE a.tenant_id = u.tenant_id AND a.session_id = u.session_id
+		            AND a.kind = $5 AND a.seq > u.seq
+		            AND a.payload->'inputSeqs' @> to_jsonb(u.seq)
+		      ))`,
 		req.Lease.Scope.TenantID, req.Lease.Scope.SessionID,
-		req.probeAfter(), string(KindUserMessage)).Scan(&more); err != nil {
+		req.probeAfter(), string(KindUserMessage), string(KindAssistantMessage)).Scan(&more); err != nil {
 		// The probe failed: keep the flag rather than clear it — an unread
 		// input is stranded forever, a redundant turn is not.
 		return flagNow

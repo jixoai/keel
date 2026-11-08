@@ -354,19 +354,41 @@ func (m *MemStore) FinishLease(ctx context.Context, req FinishRequest) error {
 		return fmt.Errorf("memstore: finish: %w", ErrNotFound)
 	}
 	moreInput := false
-	if req.Err != nil {
+	if req.Cancelled {
+		// A cancelled attempt is terminal: its unread input is not a re-queue
+		// trigger (PG parity).
+		moreInput = false
+	} else if req.Err != nil {
 		// A failed attempt leaves unread input pending (PG parity).
 		moreInput = true
 	} else {
+		// PG parity: an input above the read watermark is unread unless a later
+		// assistant message consumed it (payload.inputSeqs). A guide input
+		// injected and answered inside the run must not re-queue the session.
 		probeAfter := req.probeAfter()
+		answered := make(map[int64]bool)
 		for _, ev := range s.events {
-			if ev.Seq > probeAfter && ev.Kind == KindUserMessage {
+			if ev.Kind != KindAssistantMessage || ev.Seq <= probeAfter {
+				continue
+			}
+			var payload struct {
+				InputSeqs []int64 `json:"inputSeqs"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				continue
+			}
+			for _, seq := range payload.InputSeqs {
+				answered[seq] = true
+			}
+		}
+		for _, ev := range s.events {
+			if ev.Seq > probeAfter && ev.Kind == KindUserMessage && !answered[ev.Seq] {
 				moreInput = true
 				break
 			}
 		}
 	}
-	s.run.status = finishStatus(req.Err, s.run.attempts, req.MaxAttempts, moreInput)
+	s.run.status = finishStatus(req.Err, s.run.attempts, req.MaxAttempts, moreInput, req.Cancelled)
 	s.run.pendingInput = moreInput
 	// The read point is a fact about what the attempt loaded: write it whether
 	// or not the attempt succeeded (PG parity).

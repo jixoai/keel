@@ -81,6 +81,10 @@ const (
 	KindCompaction       EventKind = "compaction"
 	KindRunStarted       EventKind = "run.started"
 	KindRunFailed        EventKind = "run.failed"
+	// KindRunFinished is the attempt-level run summary (status, turns, tokens,
+	// tool timings, stop reason). The worker writes it under the run's lease
+	// just before the settle; it is bookkeeping and never enters the transcript.
+	KindRunFinished EventKind = "run.finished"
 	// KindExternalEvent is Keel's own record of one external-backend fact: a
 	// message the gateway handed to an AgentBackend, or an event the backend
 	// pushed back. It is the compatibility log of an external session and it
@@ -306,6 +310,12 @@ type FinishRequest struct {
 	ReadThrough int64
 	Err         error
 	MaxAttempts int
+	// Cancelled marks an attempt a caller stopped on purpose. It is a terminal
+	// outcome: the run does not re-queue (a cancel that immediately re-runs the
+	// same input is a no-op in disguise), while the unanswered input stays in
+	// the log and is answered by the next run a later input starts. Err is
+	// still set (context.Canceled) so logs and metrics see the aborted attempt.
+	Cancelled bool
 	// Loadout, when set, records the service loadout the run pinned. It is
 	// written to the run row in the same transaction that settles the run, so
 	// an audit can answer "which revision/generation did this run finish
@@ -670,6 +680,10 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 				reason, sentinel = ReasonDuplicateToolCall, ErrDuplicateToolCall
 			}
 			return Receipt{}, k.reject(reason, OpCommit, req.Scope, req.Kind, req.Token, err.Error(), sentinel)
+		}
+	case KindRunFinished:
+		if err := validateRunFinishedPayload(req.Payload); err != nil {
+			return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, err.Error(), ErrInvalidRequest)
 		}
 	case KindExternalEvent:
 		if err := validateExternalEventPayload(req.Payload); err != nil {

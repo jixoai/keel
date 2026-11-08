@@ -44,8 +44,10 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicegraph"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 // Default collector timing. The retire timeout bounds how long an old
@@ -126,6 +128,26 @@ type ExternalOptions struct {
 	Stderr io.Writer
 }
 
+// ProductOptions is the product layer's (keel-agent) assembly hook. It is the
+// only place the extension surface touches the run path, and every field is
+// optional: a kernel-only deployment passes none of them.
+type ProductOptions struct {
+	// ExtraTools are static product tools appended to the host registry (plugin
+	// tools added later go through Runtime.RefreshProductTools).
+	ExtraTools []agentcore.AgentTool
+	// WrapTelemetry decorates the run telemetry context. The runner opens one
+	// keel.agent.run span per attempt; the product layer turns that span into
+	// the turn.started/turn.finished hooks without a worker change.
+	WrapTelemetry func(base telemetry.Context) telemetry.Context
+	// WrapStream decorates every provider stream (the run's model calls). It is
+	// the product layer's observation point for token-level partials.
+	WrapStream func(base provider.StreamFn) provider.StreamFn
+	// RunControl registers each executing attempt so the product layer can stop
+	// it (POST /v1/sessions/{id}/cancel). The worker consults it per claim; nil
+	// keeps cancellation outside the process (the endpoint answers 501).
+	RunControl agent.RunController
+}
+
 // Config is the hosting-process input for Boot.
 type Config struct {
 	Seams  Seams
@@ -150,6 +172,9 @@ type Config struct {
 	// tenant document (Tenant.External) declares the providers; this is only
 	// how the process resolves their secrets and supervises them.
 	External ExternalOptions
+	// Product is the keel-agent assembly hook (extra tools, telemetry and
+	// provider-stream decorators). All fields are optional.
+	Product ProductOptions
 
 	RetireTimeout   time.Duration
 	CollectInterval time.Duration
@@ -391,6 +416,38 @@ func (r *Runtime) ReconnectMCP(ctx context.Context, name string) error {
 		return fmt.Errorf("refresh host after MCP reconnect: %w", err)
 	}
 	return nil
+}
+
+// RefreshProductTools republishes the host tool registry with the product
+// layer's dynamic tool set (plugin tools). It preserves the MCP and external
+// tool providers, which share the one registry, so a refresh never silently
+// drops a capability. The registry swap is live: an already running attempt
+// resolves tools per model call, so a newly assembled plugin is visible without
+// a restart (and an unloaded one disappears).
+func (r *Runtime) RefreshProductTools(dynamic []agentcore.AgentTool) error {
+	if r == nil {
+		return fmt.Errorf("servicehost: runtime closed")
+	}
+	assembly := r.Assembly()
+	if assembly == nil {
+		return fmt.Errorf("servicehost: host assembly is not available")
+	}
+	var extra []agentcore.AgentTool
+	section := ""
+	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
+		if mcpService, ok := svc.(*mcpService); ok {
+			extra = append(extra, mcpService.Tools()...)
+			section = mcpService.PromptSection()
+		}
+	}
+	if svc, ok := r.engine.Lookup(loadout.ServiceExternalTools); ok {
+		if toolsService, ok := svc.(*externalgw.ToolService); ok {
+			extra = append(extra, toolsService.Tools()...)
+		}
+	}
+	extra = append(extra, r.cfg.Product.ExtraTools...)
+	extra = append(extra, dynamic...)
+	return assembly.RefreshMCP(extra, section)
 }
 
 // StopWorker stops claiming new runs (SIGTERM drain) without unloading the
