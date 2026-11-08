@@ -7,7 +7,7 @@ import type { ConversationView, Delivery } from "../data/contract";
 import type { PendingAttachment } from "../data/store";
 import { store } from "../data/store";
 import { Icon } from "../ui/icons";
-import { IconButton, PillButton, Press, Segmented, Spinner } from "../ui/primitives";
+import { IconButton, Press, Segmented, Spinner } from "../ui/primitives";
 import { alpha, colors, glass, radius, space } from "../ui/theme";
 import { QueuePanel, GuideWaitingBanner } from "./messages";
 
@@ -22,6 +22,9 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
   const view = () => props.view;
   const busy = () => !!view()?.busy;
   const stopping = () => !!view()?.stopping;
+  // An idle session has no run to steer: queue is the effective mode by
+  // definition, so the segmented control shows 队列 and 引导 is disabled.
+  const effectiveMode = (): Delivery => (busy() ? mode() : "queue");
   // Guides waiting for a boundary: still queued (the server has not injected
   // them yet) plus injected-but-unconsumed ones of the running turn. A guide
   // that was downgraded to queue carries delivery=queue, so it is not counted.
@@ -81,7 +84,7 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
     draft.set("");
     attachments.set([]);
     inputHeight.set(20);
-    await store.send(text, mode(), pending);
+    await store.send(text, effectiveMode(), pending);
   };
 
   const stop = () => {
@@ -91,16 +94,35 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
 
   const submitOnEnter = platform.idiom !== "phone";
   const placeholder = () =>
-    busy()
-      ? mode() === "guide"
-        ? "输入引导，注入当前任务…"
-        : "输入消息，排队等待当前任务结束…"
-      : "给 Keel 发消息…";
+    stopping()
+      ? "停止中，等待任务结束…"
+      : busy()
+        ? mode() === "guide"
+          ? "输入引导，注入当前任务…"
+          : "输入消息，当前任务后发送…"
+        : "给 Keel 发消息，空闲时直接开始…";
+  const hint = () =>
+    stopping()
+      ? "停止中，引导将转为队列"
+      : busy()
+        ? mode() === "guide"
+          ? "引导在工具轮边界注入，无法注入时转队列"
+          : "当前任务结束后按顺序发送"
+        : "空闲发送直接开始 · Enter 发送 · Shift+Enter 换行";
+  const compact = !!props.compact;
 
   return (
-    <View style={{ width: "100%", maxWidth: 880, alignSelf: "center", gap: space.sm, paddingHorizontal: props.compact ? 10 : 16 }}>
+    <View
+      style={{
+        width: "100%",
+        maxWidth: 880,
+        alignSelf: "center",
+        gap: space.sm,
+        paddingHorizontal: compact ? 10 : 16,
+      }}
+    >
       <QueuePanel queue={view()?.queue ?? []} />
-      <GuideWaitingBanner visible={guideCount() > 0} count={guideCount()} />
+      <GuideWaitingBanner visible={guideCount() > 0} count={guideCount()} stopping={stopping()} />
       {attachments().length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
           {attachments().map((item, index) => (
@@ -120,14 +142,21 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
               <Text style={{ numberOfLines: 1, maxWidth: 180, fontSize: 11.5, color: colors.foreground }}>
                 {item.name}
               </Text>
-              <IconButton icon="x" label="移除附件" size={22} iconSize={11} onPress={() => removeAttachment(index)} />
+              <IconButton
+                icon="x"
+                label="移除附件"
+                size={22}
+                iconSize={11}
+                hitSlop={11}
+                onPress={() => removeAttachment(index)}
+              />
             </View>
           ))}
         </View>
       ) : null}
       <View
         style={{
-          borderRadius: radius.pill,
+          borderRadius: radius.card,
           ...glass.card,
           padding: 6,
           gap: 4,
@@ -162,28 +191,21 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
             label="添加附件"
             size={30}
             iconSize={15}
+            hitSlop={compact ? 8 : undefined}
             onPress={() => void addPicked()}
           />
           <Segmented
             compact
             options={[
               { value: "queue", label: "队列", icon: "clock" },
-              { value: "guide", label: "引导", icon: "external" },
+              { value: "guide", label: "引导", icon: "external", disabled: !busy() },
             ]}
-            value={mode()}
+            value={effectiveMode()}
             onChange={(value) => mode.set(value)}
           />
           <View style={{ flex: 1 }} />
           <If when={windowSize().width >= 560}>
-            <Text style={{ numberOfLines: 1, fontSize: 10.5, color: colors.mutedForeground }}>
-              {busy()
-                ? mode() === "guide"
-                  ? "引导会在工具轮边界注入；无法注入时回到队列"
-                  : "当前任务结束后按顺序发送"
-                : platform.idiom === "phone"
-                  ? "Return 换行"
-                  : "Enter 发送 · Shift+Enter 换行"}
-            </Text>
+            <Text style={{ numberOfLines: 1, fontSize: 10.5, color: colors.mutedForeground }}>{hint()}</Text>
             <View style={{ flex: 1 }} />
           </If>
           <If when={busy()}>
@@ -192,24 +214,35 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
               onPress={stopping() ? undefined : stop}
               disabled={stopping()}
               accessibilityLabel={stopping() ? "正在停止" : "停止当前任务"}
+              hitSlop={4}
               hoverStyle={{ opacity: 0.9 }}
               activeStyle={{ opacity: 0.7 }}
               style={{
-                width: 34,
-                height: 34,
-                borderRadius: 17,
+                flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: colors.dangerTint,
+                gap: 6,
+                height: 36,
+                paddingHorizontal: 12,
+                borderRadius: 18,
+                backgroundColor: stopping() ? colors.muted : colors.dangerTint,
                 borderWidth: 1,
-                borderColor: alpha(colors.danger, 0.34),
+                borderColor: stopping() ? colors.border : alpha(colors.danger, 0.4),
               }}
             >
               {stopping() ? (
-                <Spinner size={14} tint={colors.danger} />
+                <Spinner size={12} tint={colors.mutedForeground} />
               ) : (
-                <Icon name="stop" size={14} tint={colors.danger} />
+                <Icon name="stop" size={12} tint={colors.danger} />
               )}
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "600",
+                  color: stopping() ? colors.mutedForeground : colors.danger,
+                }}
+              >
+                {stopping() ? "停止中" : "停止"}
+              </Text>
             </Press>
           </If>
           <Press
@@ -217,6 +250,7 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
             onPress={canSend() && !stopping() ? () => void send() : undefined}
             disabled={!canSend() || stopping()}
             accessibilityLabel="发送"
+            hitSlop={compact ? 4 : undefined}
             hoverStyle={{ opacity: 0.92 }}
             activeStyle={{ opacity: 0.7 }}
             style={{
@@ -238,25 +272,17 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
             />
           </Press>
         </View>
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingBottom: 2 }}>
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-          {store.mode() === "fixture" ? "演示数据 · 本地 fixture" : "实时服务 · keel serve"}
-        </Text>
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>·</Text>
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-          {stopping() ? "停止屏障已触发，等待权威确认" : busy() ? "运行中" : "就绪"}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingBottom: 2 }}>
+          <Icon
+            name={store.mode() === "fixture" ? "spark" : "wifi"}
+            size={9}
+            tint={colors.mutedForeground}
+          />
+          <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+            {store.mode() === "fixture" ? "演示数据 · 本地 fixture" : "实时服务 · keel serve"}
+          </Text>
+        </View>
       </View>
     </View>
   );
 }
-
-/** Send a suggestion from the empty state through the same composer path. */
-export function sendSuggestion(text: string) {
-  draft.set(text);
-  void store.send(text, busyMode(), []);
-  draft.set("");
-}
-
-const busyMode = (): Delivery => (store.busy() ? "queue" : "queue");

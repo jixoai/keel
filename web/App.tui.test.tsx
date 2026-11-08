@@ -33,7 +33,7 @@ test("TUI: 审批卡一键作答", async () => {
   await app.waitFor("text:需要你的确认");
   expect(app.texts()).toContain("推荐");
   await app.press("text:批准发布");
-  await app.waitFor("text:/已作答/");
+  await app.waitFor("text:/已确认/");
   await app.waitFor("text:/已记录你的选择/");
 });
 

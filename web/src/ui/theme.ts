@@ -50,6 +50,18 @@ export const colors = {
   get destructive() {
     return token("destructive");
   },
+  get destructiveForeground() {
+    return token("destructive-foreground");
+  },
+  get headerBorder() {
+    return token("header-border");
+  },
+  get mark() {
+    return token("mark");
+  },
+  get markForeground() {
+    return token("mark-foreground");
+  },
   get border() {
     return token("border");
   },

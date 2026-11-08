@@ -302,6 +302,7 @@ export class FixtureClient {
         kind: "compaction",
         payload: {
           summary: "此前 42 条消息已压缩：重构方案确定采用无状态投影；迁移分两步；主要风险是事件序号乱序与断线缺口。",
+          manual: true,
           tokensBefore: 48000,
           timestamp: base - 2_000_000,
         },

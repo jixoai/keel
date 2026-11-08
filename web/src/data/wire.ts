@@ -218,6 +218,8 @@ export function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+/** One stamp format per recency: "刚刚 / N 分钟前" for the last hour, an
+ * absolute date-time for anything older. Never a bare clock time. */
 export function formatTime(value: string | number | undefined, now = Date.now()): string {
   if (value === undefined || value === "") return "";
   const ms = typeof value === "number" ? value : Date.parse(value);
@@ -226,9 +228,10 @@ export function formatTime(value: string | number | undefined, now = Date.now())
   if (diff >= 0 && diff < 60_000) return "刚刚";
   if (diff >= 0 && diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
   const date = new Date(ms);
-  const sameDay = new Date(now).toDateString() === date.toDateString();
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
-  if (sameDay) return `${hh}:${mm}`;
-  return `${date.getMonth() + 1}/${date.getDate()} ${hh}:${mm}`;
+  const stamp = `${date.getMonth() + 1}月${date.getDate()}日 ${hh}:${mm}`;
+  return date.getFullYear() === new Date(now).getFullYear()
+    ? stamp
+    : `${date.getFullYear()}年${stamp}`;
 }

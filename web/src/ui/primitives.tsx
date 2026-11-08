@@ -3,6 +3,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Icon, type IconName } from "./icons";
+import { runStateLabel, runStateTone, type RunState } from "./run-state";
 import { alpha, colors, glass, motion, radius, space } from "./theme";
 
 export function Press(props: {
@@ -15,6 +16,12 @@ export function Press(props: {
   activeStyle?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; checked?: boolean; disabled?: boolean };
+  /** A touch target that stays visually small but is easier to hit. */
+  hitSlop?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
   children: JSX.Element;
 }) {
   return (
@@ -25,6 +32,11 @@ export function Press(props: {
       disabled={props.disabled}
       accessibilityLabel={props.accessibilityLabel}
       accessibilityState={props.accessibilityState}
+      hitSlop={props.hitSlop}
+      onMouseEnter={props.onMouseEnter}
+      onMouseLeave={props.onMouseLeave}
+      onFocus={props.onFocus}
+      onBlur={props.onBlur}
       hoverStyle={props.disabled ? undefined : (props.hoverStyle ?? { opacity: 0.9 })}
       activeStyle={props.disabled ? undefined : (props.activeStyle ?? { opacity: 0.7 })}
       style={[props.style ?? null, props.disabled ? { opacity: 0.38 } : null]}
@@ -54,17 +66,24 @@ export function Spinner(props: { size?: number; tint?: string }) {
   );
 }
 
-export function StatusDot(props: { tone?: "running" | "done" | "failed" | "idle"; size?: number }) {
+export function StatusDot(props: {
+  tone?: "running" | "done" | "failed" | "idle" | "brand" | "warning";
+  size?: number;
+}) {
   const size = props.size ?? 7;
   const tone = props.tone ?? "idle";
   const color =
     tone === "running"
       ? colors.statusRunning
-      : tone === "done"
-        ? colors.statusDone
-        : tone === "failed"
-          ? colors.danger
-          : colors.mutedForeground;
+      : tone === "brand"
+        ? colors.brand
+        : tone === "warning"
+          ? colors.warning
+          : tone === "done"
+            ? colors.statusDone
+            : tone === "failed"
+              ? colors.danger
+              : colors.mutedForeground;
   return (
     <View
       style={{
@@ -73,11 +92,52 @@ export function StatusDot(props: { tone?: "running" | "done" | "failed" | "idle"
         borderRadius: size / 2,
         backgroundColor: color,
         opacity: tone === "idle" ? 0.5 : 1,
-        animationName: tone === "running" ? "pulse" : undefined,
+        animationName: tone === "running" || tone === "brand" || tone === "warning" ? "pulse" : undefined,
         animationDuration: 1200,
         animationIterationCount: "infinite",
       }}
     />
+  );
+}
+
+/** The one authoritative run-state display. The header shows this pill; every
+ * other surface is a quieter projection of the same vocabulary. */
+export function StatusPill(props: { state: RunState }) {
+  const tone = () => runStateTone[props.state];
+  const fill = () =>
+    tone() === "brand"
+      ? colors.brandTint
+      : tone() === "warning"
+        ? colors.warningTint
+        : tone() === "danger"
+          ? colors.dangerTint
+          : colors.muted;
+  const ink = () =>
+    tone() === "brand"
+      ? colors.brand
+      : tone() === "warning"
+        ? colors.warning
+        : tone() === "danger"
+          ? colors.danger
+          : colors.mutedForeground;
+  const dot = (): "brand" | "warning" | "failed" | "done" | "idle" =>
+    tone() === "brand" ? "brand" : tone() === "warning" ? "warning" : tone() === "danger" ? "failed" : "done";
+  return (
+    <View
+      accessibilityLabel={`任务状态：${runStateLabel[props.state]}`}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: 8,
+        height: 24,
+        borderRadius: radius.pill,
+        backgroundColor: fill(),
+      }}
+    >
+      <StatusDot tone={dot()} size={6} />
+      <Text style={{ fontSize: 10.5, fontWeight: "600", color: ink() }}>{runStateLabel[props.state]}</Text>
+    </View>
   );
 }
 
@@ -138,6 +198,9 @@ export function IconButton(props: {
   tint?: string;
   disabled?: boolean;
   selected?: boolean;
+  hitSlop?: number;
+  onFocus?: () => void;
+  onBlur?: () => void;
   style?: ViewStyle;
 }) {
   const size = props.size ?? 32;
@@ -147,6 +210,9 @@ export function IconButton(props: {
       disabled={props.disabled}
       accessibilityLabel={props.label}
       accessibilityState={{ disabled: props.disabled, selected: props.selected }}
+      hitSlop={props.hitSlop}
+      onFocus={props.onFocus}
+      onBlur={props.onBlur}
       hoverStyle={{ backgroundColor: colors.hover }}
       activeStyle={{ backgroundColor: colors.glassStateArmed }}
       style={[
@@ -169,7 +235,7 @@ export function IconButton(props: {
 }
 
 export function Segmented<T extends string>(props: {
-  options: ReadonlyArray<{ value: T; label: string; icon?: IconName }>;
+  options: ReadonlyArray<{ value: T; label: string; icon?: IconName; disabled?: boolean }>;
   value: T;
   onChange: (value: T) => void;
   compact?: boolean;
@@ -188,11 +254,14 @@ export function Segmented<T extends string>(props: {
     >
       {props.options.map((option) => {
         const selected = () => props.value === option.value;
+        const disabled = () => !!option.disabled;
         return (
           <Press
-            onPress={() => props.onChange(option.value)}
+            onPress={() => (disabled() ? undefined : props.onChange(option.value))}
+            disabled={disabled()}
             accessibilityLabel={option.label}
-            accessibilityState={{ selected: selected() }}
+            accessibilityState={{ selected: selected(), disabled: disabled() }}
+            hitSlop={props.compact ? { top: 11, bottom: 11, left: 3, right: 3 } : undefined}
             hoverStyle={{ backgroundColor: colors.hover }}
             style={{
               flexDirection: "row",
@@ -202,22 +271,22 @@ export function Segmented<T extends string>(props: {
               height: props.compact ? 22 : 26,
               paddingHorizontal: props.compact ? 8 : 10,
               borderRadius: radius.control - 3,
-              backgroundColor: selected() ? colors.glassControl : undefined,
-              boxShadow: selected() ? `inset 0 1px 0 ${colors.glassControlRim}` : undefined,
+              backgroundColor: selected() && !disabled() ? colors.glassControl : undefined,
+              boxShadow: selected() && !disabled() ? `inset 0 1px 0 ${colors.glassControlRim}` : undefined,
             }}
           >
             {option.icon ? (
               <Icon
                 name={option.icon}
                 size={12}
-                tint={selected() ? colors.foreground : colors.mutedForeground}
+                tint={disabled() ? colors.mutedForeground : selected() ? colors.foreground : colors.mutedForeground}
               />
             ) : null}
             <Text
               style={{
                 fontSize: props.compact ? 11 : 12,
                 fontWeight: "600",
-                color: selected() ? colors.foreground : colors.mutedForeground,
+                color: disabled() ? colors.mutedForeground : selected() ? colors.foreground : colors.mutedForeground,
               }}
             >
               {option.label}
@@ -229,7 +298,17 @@ export function Segmented<T extends string>(props: {
   );
 }
 
-export function Divider(props: { label?: string; style?: StyleProp<ViewStyle> }) {
+/** A line · label · line rule. Every in-conversation divider (compaction,
+ * a new work segment) uses this one language. */
+export function Divider(props: {
+  label?: string;
+  icon?: IconName;
+  tone?: "muted" | "brand" | "warning";
+  style?: StyleProp<ViewStyle>;
+}) {
+  const tone = props.tone ?? "muted";
+  const ink =
+    tone === "brand" ? colors.brand : tone === "warning" ? colors.warning : colors.mutedForeground;
   return (
     <View
       style={[
@@ -239,9 +318,10 @@ export function Divider(props: { label?: string; style?: StyleProp<ViewStyle> })
     >
       <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
       {props.label ? (
-        <Text style={{ fontSize: 11, fontWeight: "600", color: colors.mutedForeground }}>
-          {props.label}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          {props.icon ? <Icon name={props.icon} size={11} tint={ink} /> : null}
+          <Text style={{ fontSize: 11, fontWeight: "600", color: ink }}>{props.label}</Text>
+        </View>
       ) : null}
       <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
     </View>
@@ -264,7 +344,7 @@ export function PillButton(props: {
   label: string;
   icon?: IconName;
   onPress?: () => void;
-  tone?: "primary" | "secondary" | "danger" | "ghost";
+  tone?: "primary" | "secondary" | "danger" | "destructive" | "ghost";
   disabled?: boolean;
   compact?: boolean;
   width?: ViewStyle["width"];
@@ -273,17 +353,21 @@ export function PillButton(props: {
   const bg =
     tone === "primary"
       ? colors.primary
-      : tone === "danger"
-        ? colors.dangerTint
-        : tone === "ghost"
-          ? undefined
-          : colors.glassControl;
+      : tone === "destructive"
+        ? colors.destructive
+        : tone === "danger"
+          ? colors.dangerTint
+          : tone === "ghost"
+            ? undefined
+            : colors.glassControl;
   const fg =
     tone === "primary"
       ? colors.primaryForeground
-      : tone === "danger"
-        ? colors.danger
-        : colors.foreground;
+      : tone === "destructive"
+        ? colors.destructiveForeground
+        : tone === "danger"
+          ? colors.danger
+          : colors.foreground;
   return (
     <Press
       onPress={props.onPress}
@@ -301,9 +385,14 @@ export function PillButton(props: {
         width: props.width,
         borderRadius: radius.control,
         backgroundColor: bg,
-        borderWidth: tone === "primary" ? 0 : 1,
+        borderWidth: tone === "primary" || tone === "destructive" ? 0 : 1,
         borderColor: tone === "ghost" ? "transparent" : colors.glassControlRim,
-        boxShadow: tone === "primary" ? `inset 0 1px 0 ${alpha(colors.primaryForeground, 0.25)}` : undefined,
+        boxShadow:
+          tone === "primary"
+            ? `inset 0 1px 0 ${alpha(colors.primaryForeground, 0.25)}`
+            : tone === "destructive"
+              ? `inset 0 1px 0 ${alpha(colors.destructiveForeground, 0.25)}`
+              : undefined,
       }}
     >
       {props.icon ? <Icon name={props.icon} size={14} tint={fg} /> : null}

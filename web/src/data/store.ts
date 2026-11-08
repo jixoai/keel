@@ -414,6 +414,16 @@ class KeelStore {
 
   async createSession(): Promise<string | null> {
     try {
+      // One empty "new session" is enough: creating again while an untouched
+      // one exists reopens it instead of appending a twin row.
+      const empty = this.sessions().find(
+        (row) => !row.lastMessage && (row.title ?? "").trim() === "新会话",
+      );
+      if (empty) {
+        await this.refreshSessions();
+        if (this.activeId() !== empty.sessionId) await this.openSession(empty.sessionId);
+        return empty.sessionId;
+      }
       const id = await this.client.createSession();
       await this.refreshSessions();
       await this.openSession(id);

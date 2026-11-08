@@ -1,121 +1,203 @@
-// The session list: create, delete (two-step), search, empty/loading/error
-// states, last-message summary and run status. On a wide screen it is the
-// sidebar; on a narrow one (and in the TUI's narrow grid) it is the first
-// screen, with the conversation a second one.
-import { signal, Text, View } from "nsh";
+// The session list: create, delete (a centered confirmation, never an inline
+// row push), search, empty/loading/error states, last-message summary and a
+// quiet projection of the run state. On a wide screen it is the sidebar; on a
+// narrow one (and in the TUI's narrow grid) it is the first screen, with the
+// conversation a second one.
+import { platform, signal, Text, type TextStyle, View, windowSize } from "nsh";
 import { Input } from "nsh/base";
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
 import { formatTime } from "../data/wire";
 import { Icon } from "../ui/icons";
-import { Badge, IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
+import { IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
+import { conversationState, runStateLabel, sessionState } from "../ui/run-state";
+import { cellWidth, fitCells } from "../ui/text";
 import { alpha, colors, glass, radius, space } from "../ui/theme";
+import { requestDelete } from "./delete-dialog";
 
 const query = signal("");
-const deleting = signal<string | null>(null);
 const refreshing = signal(false);
 
-const runTone = (status: string | undefined): "running" | "done" | "failed" | "idle" =>
-  status === "running" ? "running" : status === "failed" || status === "error" ? "failed" : status === "cancelled" ? "idle" : "done";
+const isTerminal = () => platform.idiom === "terminal";
+const isPhone = () => !isTerminal() && windowSize().width < 900;
 
-const runLabel = (status: string | undefined): string | null => {
-  if (status === "running") return "运行中";
-  if (status === "failed" || status === "error") return "失败";
-  if (status === "cancelled") return "已取消";
-  return null;
+/** The one-word state of a row: the active row projects the open conversation
+ * (which knows about stopping), every other row projects runStatus. */
+const rowStateOf = (row: SessionSummary, active: boolean) => {
+  if (active && store.conversation()) return conversationState(store.conversation());
+  return sessionState(row.runStatus);
 };
 
-function SessionRow(props: { row: SessionSummary; active: boolean; onSelect: () => void }) {
+const rowDotTone = (state: ReturnType<typeof rowStateOf>) =>
+  state === "running"
+    ? "running"
+    : state === "failed"
+      ? "failed"
+      : state === "stopping" || state === "reconnecting"
+        ? "warning"
+        : state === "stopped"
+          ? "idle"
+          : "done";
+
+function Highlighted(props: { text: string; style: TextStyle }) {
+  const parts = () => {
+    const needle = query().trim().toLowerCase();
+    if (!needle) return [{ text: props.text, match: false }];
+    const haystack = props.text.toLowerCase();
+    const out: Array<{ text: string; match: boolean }> = [];
+    let index = 0;
+    while (index < props.text.length) {
+      const at = haystack.indexOf(needle, index);
+      if (at < 0) {
+        out.push({ text: props.text.slice(index), match: false });
+        break;
+      }
+      if (at > index) out.push({ text: props.text.slice(index, at), match: false });
+      out.push({ text: props.text.slice(at, at + needle.length), match: true });
+      index = at + needle.length;
+    }
+    return out;
+  };
+  return (
+    <Text style={props.style}>
+      {parts().map((part) =>
+        part.match ? (
+          <Text style={{ backgroundColor: colors.mark, color: colors.markForeground }}>{part.text}</Text>
+        ) : (
+          part.text
+        ),
+      )}
+    </Text>
+  );
+}
+
+function SessionRow(props: { row: SessionSummary; active: boolean; onSelect: () => void; wide: boolean }) {
+  const hovered = signal(false);
+  const focused = signal(false);
   const row = () => props.row;
   const title = () => row().title || row().sessionId.slice(0, 10);
   const summary = () => row().lastMessage || "（空会话）";
-  const confirming = () => deleting() === row().sessionId;
+  const searching = () => query().trim().length > 0;
+  // Mobile reveals delete with a long press; desktop with the row's overflow
+  // button (hover or keyboard focus). Neither is a persistent trash icon.
+  const canLongPress = () => isPhone() && !searching();
+  const showMenu = () => props.wide && !isTerminal() && !searching();
+  const state = () => rowStateOf(row(), props.active);
+  // The active row's state is the header pill's job; rows only surface a
+  // failure, so no run word is repeated down the sidebar.
+  const stateLabel = () => (!props.active && state() === "failed" ? runStateLabel.failed : null);
+  const time = () => formatTime(row().lastMessageAt);
+  const cells = () =>
+    isTerminal() ? Math.max(24, Math.floor(windowSize().width / 8)) : Math.max(24, Math.floor(windowSize().width));
+  const titleBudget = () => Math.max(6, cells() - 12 - cellWidth(time()));
+  const previewBudget = () =>
+    Math.max(6, cells() - 8 - (stateLabel() ? cellWidth(stateLabel()!) + 1 : 0));
+  const titleText = () => (isTerminal() ? fitCells(title(), titleBudget()) : title());
+  const summaryText = () => (isTerminal() ? fitCells(summary(), previewBudget()) : summary());
+  const openDelete = () => requestDelete(row().sessionId, title());
+
   return (
     <View
+      onMouseEnter={() => hovered.set(true)}
+      onMouseLeave={() => hovered.set(false)}
       style={{
+        flexDirection: "row",
+        alignItems: "center",
         borderRadius: radius.control,
-        backgroundColor: props.active ? colors.glassState : alpha(colors.foreground, 0),
-        borderWidth: props.active ? 1 : 0,
-        borderColor: colors.glassStateRim,
+        backgroundColor: props.active ? colors.brandTint : alpha(colors.foreground, 0),
+        borderLeftWidth: props.active ? 2 : 0,
+        borderLeftColor: colors.brand,
+        transitionProperty: "background-color",
+        transitionDuration: 160,
       }}
     >
-      <If
-        when={confirming()}
-        else={
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingRight: 4 }}>
-            <Press
-              onPress={props.onSelect}
-              accessibilityLabel={`打开会话 ${title()}`}
-              accessibilityState={{ selected: props.active }}
-              hoverStyle={{ backgroundColor: colors.hover }}
-              style={{ flex: 1, paddingLeft: 10, paddingVertical: 9, gap: 3, borderRadius: radius.control }}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <StatusDot tone={runTone(row().runStatus)} />
-                <Text
-                  style={{
-                    flex: 1,
-                    numberOfLines: 1,
-                    fontSize: 13,
-                    fontWeight: props.active ? "700" : "600",
-                    color: colors.foreground,
-                  }}
-                >
-                  {title()}
-                </Text>
-                <Text style={{ fontSize: 10, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
-                  {formatTime(row().lastMessageAt)}
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 13 }}>
-                <Text style={{ flex: 1, numberOfLines: 1, fontSize: 11.5, color: colors.mutedForeground }}>
-                  {summary()}
-                </Text>
-                <If when={!!runLabel(row().runStatus)}>
-                  <Text
-                    style={{
-                      fontSize: 9.5,
-                      fontWeight: "600",
-                      color:
-                        runTone(row().runStatus) === "running"
-                          ? colors.brand
-                          : runTone(row().runStatus) === "failed"
-                            ? colors.danger
-                            : colors.mutedForeground,
-                    }}
-                  >
-                    {runLabel(row().runStatus)}
-                  </Text>
-                </If>
-              </View>
-            </Press>
-            <IconButton
-              icon="trash"
-              label="删除会话"
-              size={28}
-              iconSize={14}
-              onPress={() => deleting.set(row().sessionId)}
-            />
-          </View>
-        }
+      <Press
+        onPress={props.onSelect}
+        onLongPress={canLongPress() ? openDelete : undefined}
+        onFocus={() => focused.set(true)}
+        onBlur={() => focused.set(false)}
+        accessibilityLabel={`打开会话 ${title()}`}
+        accessibilityState={{ selected: props.active }}
+        hoverStyle={{ backgroundColor: props.active ? undefined : colors.hover }}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          paddingLeft: props.active ? 8 : 10,
+          paddingRight: 6,
+          paddingVertical: 8,
+          gap: 3,
+          borderRadius: radius.control,
+        }}
       >
-        <View style={{ padding: 10, gap: space.sm }}>
-          <Text style={{ fontSize: 12, color: colors.foreground }}>
-            删除「{title()}」？此操作不可撤销。
-          </Text>
-          <View style={{ flexDirection: "row", gap: space.sm }}>
-            <PillButton
-              label="删除"
-              tone="danger"
-              compact
-              onPress={() => {
-                const id = row().sessionId;
-                deleting.set(null);
-                void store.deleteSession(id);
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <StatusDot tone={rowDotTone(state())} />
+          <Highlighted
+            text={titleText()}
+            style={{
+              flex: 1,
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
+              fontSize: 13,
+              fontWeight: props.active ? "700" : "600",
+              color: colors.foreground,
+            }}
+          />
+          <If when={!!stateLabel()}>
+            <Text
+              style={{
+                fontSize: 9.5,
+                fontWeight: "600",
+                color: state() === "failed" ? colors.danger : colors.mutedForeground,
               }}
-            />
-            <PillButton label="取消" tone="ghost" compact onPress={() => deleting.set(null)} />
-          </View>
+            >
+              {stateLabel() ?? ""}
+            </Text>
+          </If>
+          <Text
+            style={{
+              fontSize: 10,
+              color: colors.mutedForeground,
+              fontVariant: ["tabular-nums"],
+              numberOfLines: 1,
+            }}
+          >
+            {time()}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: isTerminal() ? 0 : 13 }}>
+          <Highlighted
+            text={summaryText()}
+            style={{
+              flex: 1,
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
+              fontSize: 11.5,
+              color: colors.mutedForeground,
+            }}
+          />
+        </View>
+      </Press>
+      <If when={showMenu()}>
+        <View
+          style={{
+            width: 28,
+            marginRight: 3,
+            opacity: hovered() || focused() ? 1 : 0,
+            transitionProperty: "opacity",
+            transitionDuration: 160,
+            pointerEvents: hovered() || focused() ? "auto" : "none",
+          }}
+        >
+          <IconButton
+            icon="dots"
+            label="删除会话"
+            size={26}
+            iconSize={14}
+            hitSlop={6}
+            onPress={openDelete}
+            onFocus={() => focused.set(true)}
+            onBlur={() => focused.set(false)}
+          />
         </View>
       </If>
     </View>
@@ -149,6 +231,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
     await store.refreshSessions();
     refreshing.set(false);
   };
+  const chipSlop = () => (isPhone() ? 11 : undefined);
   return (
     <View
       style={{
@@ -161,29 +244,32 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
     >
       <View style={{ padding: space.md, gap: space.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: 36 }}>
-          <View
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 9,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: colors.brandMuted,
-              borderWidth: 1,
-              borderColor: alpha(colors.brand, 0.3),
-            }}
-          >
-            <Icon name="spark" size={15} tint={colors.brand} />
-          </View>
+          <If when={!isTerminal()}>
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 9,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: colors.muted,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}
+            >
+              <Icon name="spark" size={15} tint={colors.brand} />
+            </View>
+          </If>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>Keel</Text>
             <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>AI 员工会话</Text>
           </View>
           <IconButton
-            icon={refreshing() ? "refresh" : "refresh"}
+            icon="refresh"
             label="刷新会话"
             size={30}
             iconSize={15}
+            hitSlop={isPhone() ? 7 : undefined}
             onPress={() => void refresh()}
           />
           <IconButton
@@ -192,6 +278,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             size={30}
             iconSize={16}
             tint={colors.brand}
+            hitSlop={isPhone() ? 7 : undefined}
             onPress={() => void store.createSession()}
           />
         </View>
@@ -220,8 +307,22 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
               caretColor: colors.brand,
             }}
           />
-          {query() ? <IconButton icon="x" label="清除搜索" size={22} iconSize={11} onPress={() => query.set("")} /> : null}
+          {query() ? (
+            <IconButton
+              icon="x"
+              label="清除搜索"
+              size={22}
+              iconSize={11}
+              hitSlop={11}
+              onPress={() => query.set("")}
+            />
+          ) : null}
         </View>
+        <If when={query().trim().length > 0}>
+          <Text style={{ paddingLeft: 2, fontSize: 10.5, color: colors.mutedForeground }}>
+            {filtered().length > 0 ? `${filtered().length} 个结果` : "没有结果"}
+          </Text>
+        </If>
       </View>
 
       <View style={{ flex: 1, minHeight: 0 }}>
@@ -244,7 +345,11 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>
               {query() ? "没有匹配的会话" : "还没有会话"}
             </Text>
-            {!query() ? <PillButton label="新建会话" tone="primary" compact onPress={() => void store.createSession()} /> : null}
+            {query() ? (
+              <PillButton label="清除搜索" compact onPress={() => query.set("")} />
+            ) : (
+              <PillButton label="新建会话" tone="primary" compact onPress={() => void store.createSession()} />
+            )}
           </View>
         ) : (
           <View style={{ gap: 2, paddingHorizontal: 6, paddingBottom: 8 }}>
@@ -252,6 +357,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
               <SessionRow
                 row={row}
                 active={props.activeId === row.sessionId}
+                wide={props.wide}
                 onSelect={() => props.onSelect(row.sessionId)}
               />
             ))}
@@ -294,6 +400,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             <Press
               onPress={() => void store.switchMode(store.mode() === "fixture" ? "http" : "fixture")}
               accessibilityLabel="切换数据源"
+              hitSlop={chipSlop()}
               hoverStyle={{ opacity: 0.88 }}
               style={{
                 paddingHorizontal: 8,
@@ -321,6 +428,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             onPress={() => void store.setPartials(!store.showPartials())}
             accessibilityLabel="切换 token 级 partial"
             accessibilityState={{ selected: store.showPartials() }}
+            hitSlop={chipSlop()}
             hoverStyle={{ opacity: 0.88 }}
             style={{
               flexDirection: "row",
@@ -347,6 +455,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             <Press
               onPress={() => store.simulateDrop()}
               accessibilityLabel="模拟断线重连"
+              hitSlop={chipSlop()}
               hoverStyle={{ opacity: 0.88 }}
               style={{
                 flexDirection: "row",
@@ -363,7 +472,9 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             </Press>
           ) : null}
           <View style={{ flex: 1 }} />
-          <Text style={{ fontSize: 9.5, color: colors.mutedForeground }}>NSH nightly</Text>
+          <If when={!isTerminal()}>
+            <Text style={{ fontSize: 9.5, color: colors.mutedForeground }}>NSH nightly</Text>
+          </If>
         </View>
       </View>
     </View>
@@ -393,7 +504,7 @@ export function ConnectionBadge() {
       {state().status === "reconnecting" || state().status === "connecting" ? (
         <Spinner size={10} tint={tone() === "warning" ? colors.warning : colors.mutedForeground} />
       ) : (
-        <StatusDot tone={tone() === "success" ? "done" : tone() === "warning" ? "running" : "idle"} size={6} />
+        <StatusDot tone={tone() === "success" ? "done" : tone() === "warning" ? "warning" : "idle"} size={6} />
       )}
       <Text
         style={{

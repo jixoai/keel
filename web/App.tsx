@@ -8,6 +8,7 @@ import { Press, Spinner } from "./src/ui/primitives";
 import { alpha, colors, glass, radius, space } from "./src/ui/theme";
 import { SessionList } from "./src/screens/session-list";
 import { Conversation } from "./src/screens/conversation";
+import { DeleteDialog } from "./src/screens/delete-dialog";
 import { LoginScreen } from "./src/screens/login";
 
 const isWide = () => windowSize().width >= 900;
@@ -107,10 +108,9 @@ function Shell() {
     void store.openSession(id);
     if (!isWide()) screen.set("chat");
   };
-  const back = () => {
-    store.closeSession();
-    screen.set("list");
-  };
+  // Going back keeps the conversation open: the list still highlights the
+  // session the user was just reading.
+  const back = () => screen.set("list");
 
   return (
     <View
@@ -138,6 +138,7 @@ function Shell() {
       </If>
       <NoticeToast />
       <ProbeBadge />
+      <DeleteDialog />
     </View>
   );
 }

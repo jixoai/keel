@@ -6,15 +6,17 @@
 // NSH components run once and update through fine-grained bindings: every
 // signal/prop is read inside JSX or an `<If>`, never copied into a local at
 // the top of a component (that would freeze the value).
-import { cleanup, List, type ListRef, signal, Text, View } from "nsh";
+import { cleanup, List, type ListRef, platform, signal, Text, View } from "nsh";
 import type { ConversationView, DecisionView, TurnView } from "../data/contract";
 import { store } from "../data/store";
 import { Icon } from "../ui/icons";
-import { IconButton, PillButton, Spinner, StatusDot } from "../ui/primitives";
-import { alpha, colors, radius, space } from "../ui/theme";
+import { IconButton, PillButton, Spinner, StatusPill } from "../ui/primitives";
+import { conversationState } from "../ui/run-state";
+import { alpha, colors, space } from "../ui/theme";
 import { ApprovalCard, EmptyConversation, TurnRow } from "./messages";
 import { Composer } from "./composer";
 import { ConnectionBadge } from "./session-list";
+import { pendingDeleteId } from "./delete-dialog";
 
 interface Row {
   kind: "turn" | "decision";
@@ -35,23 +37,6 @@ const rowsOf = (view: ConversationView | null): Row[] => {
   ];
 };
 
-const runLabel = (view: ConversationView | null): string => {
-  if (!view) return "未连接";
-  if (view.stopping) return "停止中";
-  if (view.busy) return "运行中";
-  const last = view.turns[view.turns.length - 1];
-  if (last?.status === "failed") return "上次失败";
-  if (last?.status === "interrupted") return "已停止";
-  return "就绪";
-};
-
-const runTone = (view: ConversationView | null): "running" | "done" | "failed" | "idle" => {
-  if (!view) return "idle";
-  if (view.busy || view.stopping) return "running";
-  const last = view.turns[view.turns.length - 1];
-  return last?.status === "failed" ? "failed" : last?.status === "interrupted" ? "idle" : "done";
-};
-
 function ConversationHeader(props: {
   title: string;
   wide: boolean;
@@ -67,48 +52,29 @@ function ConversationHeader(props: {
         height: 48,
         paddingHorizontal: space.md,
         borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-        backgroundColor: alpha(colors.background, 0.86),
+        borderBottomColor: colors.headerBorder,
+        backgroundColor: colors.background,
+        zIndex: 4,
       }}
     >
       <If when={!props.wide}>
-        <IconButton icon="chevron-left" label="返回会话列表" size={30} onPress={props.onBack} />
+        <IconButton
+          icon="chevron-left"
+          label="返回会话列表"
+          size={platform.idiom === "terminal" ? 30 : 44}
+          iconSize={20}
+          onPress={props.onBack}
+        />
       </If>
-      <View style={{ flex: 1, gap: 1 }}>
-        <Text style={{ numberOfLines: 1, fontSize: 14, fontWeight: "700", color: colors.foreground }}>
+      <View style={{ flex: 1, gap: 1, alignItems: "flex-start" }}>
+        <Text style={{ numberOfLines: 1, textOverflow: "ellipsis", fontSize: 14, fontWeight: "700", color: colors.foreground }}>
           {props.title}
         </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <StatusDot tone={runTone(props.view)} size={6} />
-          <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>{runLabel(props.view)}</Text>
-          <Text style={{ fontSize: 10, color: colors.mutedForeground }}>·</Text>
+        <If when={platform.idiom !== "terminal" && props.view?.connection.status !== "reconnecting"}>
           <ConnectionBadge />
-        </View>
+        </If>
       </View>
-      <If when={!!props.view?.busy}>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 5,
-            paddingHorizontal: 8,
-            height: 24,
-            borderRadius: radius.pill,
-            backgroundColor: props.view?.stopping ? colors.dangerTint : colors.brandTint,
-          }}
-        >
-          <Spinner size={10} tint={props.view?.stopping ? colors.danger : colors.brand} />
-          <Text
-            style={{
-              fontSize: 10.5,
-              fontWeight: "600",
-              color: props.view?.stopping ? colors.danger : colors.brand,
-            }}
-          >
-            {props.view?.stopping ? "停止中" : "运行中"}
-          </Text>
-        </View>
-      </If>
+      <StatusPill state={conversationState(props.view)} />
     </View>
   );
 }
@@ -119,6 +85,13 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
     const last = turns[turns.length - 1];
     const turn = props.row().turn;
     return !!turn && !!last && turn.turnId === last.turnId && last.status === "running";
+  };
+  const isActiveDecision = (decisionId: string) => {
+    const decisions = store.conversation()?.decisions ?? [];
+    for (let index = decisions.length - 1; index >= 0; index -= 1) {
+      if (decisions[index].status === "open") return decisions[index].decisionId === decisionId;
+    }
+    return false;
   };
   return (
     <View
@@ -135,6 +108,7 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
           <View style={{ paddingVertical: space.md }}>
             <ApprovalCard
               decision={() => props.row().decision!}
+              active={() => isActiveDecision(props.row().decision!.decisionId)}
               timeoutAt={() => store.decisionTimeout(props.row().decision!.decisionId)}
               submitting={() => !!submitting()[props.row().decision!.decisionId]}
               now={() => now()}
@@ -174,16 +148,19 @@ function NoSession(props: { wide: boolean; onOpenList?: () => void }) {
           borderRadius: 20,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: colors.brandMuted,
+          backgroundColor: colors.muted,
           borderWidth: 1,
-          borderColor: alpha(colors.brand, 0.28),
+          borderColor: colors.border,
         }}
       >
         <Icon name="message" size={28} tint={colors.brand} />
       </View>
       <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground }}>选择一个会话</Text>
       <Text style={{ maxWidth: 420, textAlign: "center", fontSize: 12.5, lineHeight: 19, color: colors.mutedForeground }}>
-        从左侧选择会话，或新建一个。演示数据里包含工具卡、引导等待、审批、停止与压缩等状态。
+        从左侧选择一个会话，或新建一个开始。
+      </Text>
+      <Text style={{ maxWidth: 420, textAlign: "center", fontSize: 12.5, lineHeight: 19, color: colors.mutedForeground }}>
+        审批、工具和流式回复会实时出现在这里。
       </Text>
       <If
         when={!props.wide}
@@ -237,7 +214,7 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
             >
               <Spinner size={11} tint={colors.warning} />
               <Text style={{ fontSize: 11, color: colors.warning }}>
-                连接中断，正在用 after={store.connection().lastSeq} 续传；缺口会补发且不重复。
+                连接中断，正在续接缺失的事件；缺口会补发且不重复。
               </Text>
             </View>
           </If>
@@ -261,8 +238,9 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
                   keyExtractor={(row) => row.id}
                   estimatedItemSize={160}
                   alignment="bottom"
+                  scrollbar={platform.idiom === "terminal" ? false : undefined}
                   style={{ flex: 1 }}
-                  contentStyle={{ paddingTop: 10, paddingBottom: 12 }}
+                  contentStyle={{ paddingTop: 16, paddingBottom: 12 }}
                   onScroll={(event) => {
                     following.set(event.offset.y + event.size.height >= event.contentSize.height - 56);
                   }}
@@ -271,15 +249,53 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
                 </List>
               </If>
             </If>
+            {/* Content scrolling under the header softens instead of hard-cutting. */}
+            <View
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 22,
+                backgroundImage: `linear-gradient(to bottom, ${colors.background}, ${alpha(colors.background, 0)})`,
+                pointerEvents: "none",
+                zIndex: 3,
+              }}
+            />
             <If when={!following()}>
               <View style={{ position: "absolute", right: 18, bottom: 12 }}>
                 <PillButton label="回到底部" icon="arrow-down" compact onPress={jumpToEnd} />
               </View>
             </If>
           </View>
-          <View style={{ paddingTop: 8, paddingBottom: 10 }}>
+          <View style={{ paddingTop: 12, paddingBottom: 10 }}>
             <Composer view={store.conversation()} compact={!props.wide} />
           </View>
+          {/* The right pane never keeps showing a session that is about to be
+              deleted: the confirmation covers it with a neutral placeholder. */}
+          <If when={pendingDeleteId() === store.activeId()}>
+            <View
+              style={{
+                position: "absolute",
+                top: 48,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 3,
+                backgroundColor: colors.background,
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: 24,
+              }}
+            >
+              <Icon name="trash" size={22} tint={colors.mutedForeground} />
+              <Text style={{ fontSize: 13, fontWeight: "600", color: colors.mutedForeground }}>
+                此会话等待删除确认
+              </Text>
+              <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>取消后可以继续查看。</Text>
+            </View>
+          </If>
         </View>
       </If>
     </View>
