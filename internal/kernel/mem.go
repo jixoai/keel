@@ -372,9 +372,15 @@ func (m *MemStore) FinishLease(ctx context.Context, req FinishRequest) error {
 				continue
 			}
 			var payload struct {
-				InputSeqs []int64 `json:"inputSeqs"`
+				InputSeqs  []int64 `json:"inputSeqs"`
+				StopReason string  `json:"stopReason"`
 			}
 			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				continue
+			}
+			// A terminal failure presented the input but consumed nothing; it must
+			// not clear pending_input (runner parity: unreadInputs).
+			if payload.StopReason == "error" || payload.StopReason == "aborted" {
 				continue
 			}
 			for _, seq := range payload.InputSeqs {

@@ -347,6 +347,9 @@ func validateRunFinishedPayload(raw json.RawMessage) error {
 		}
 	}
 	if v, ok := payload["toolTimings"]; ok {
+		if isJSONNull(v) {
+			return errors.New(`run.finished payload "toolTimings" must be an array of objects, not null`)
+		}
 		var entries []map[string]json.RawMessage
 		if err := json.Unmarshal(v, &entries); err != nil {
 			return errors.New(`run.finished payload "toolTimings" must be an array of objects`)

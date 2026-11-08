@@ -888,6 +888,7 @@ func unreadInput(ctx context.Context, q queryer, req FinishRequest, flagNow bool
 		          WHERE a.tenant_id = u.tenant_id AND a.session_id = u.session_id
 		            AND a.kind = $5 AND a.seq > u.seq
 		            AND a.payload->'inputSeqs' @> to_jsonb(u.seq)
+		            AND COALESCE(a.payload->>'stopReason', '') NOT IN ('error', 'aborted')
 		      ))`,
 		req.Lease.Scope.TenantID, req.Lease.Scope.SessionID,
 		req.probeAfter(), string(KindUserMessage), string(KindAssistantMessage)).Scan(&more); err != nil {

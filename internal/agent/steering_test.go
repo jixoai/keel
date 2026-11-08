@@ -453,3 +453,50 @@ func TestRunFinishedIsBookkeepingForTheTranscript(t *testing.T) {
 		}
 	}
 }
+
+// TestFeedSnapshotsAlignWithRequests pins the fix for the guide consumption
+// race: the inputSeqs of an assistant come from the snapshot taken at ITS
+// request boundary, not from the feed's live state at commit time (the loop can
+// run ahead through the event buffer, and a hand-out after the request must not
+// be attributed to the answer that request produced).
+func TestFeedSnapshotsAlignWithRequests(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session := newSession(t, st)
+	k := testKernel(t, st)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	first := commitInput(t, k, scope, "g1", "guide one", kernel.DeliveryGuide, nil)
+	second := commitInput(t, k, scope, "g2", "guide two", kernel.DeliveryGuide, nil)
+	lease := claimScope(t, k, tenant, session)
+	runner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	feed := newGuideFeed(runner, lease, 0)
+
+	// Request 1: the loop polls once, then the request boundary is taken.
+	if got := feed.poll(ctx); len(got) != 1 {
+		t.Fatalf("first poll = %d messages, want 1", len(got))
+	}
+	feed.beginRequest()
+	// Request 2: the loop polls again (one at a time) and prepares.
+	if got := feed.poll(ctx); len(got) != 1 {
+		t.Fatalf("second poll = %d messages, want 1", len(got))
+	}
+	feed.beginRequest()
+
+	// The assistant of request 1 must record only what request 1 presented.
+	firstSnapshot := feed.takeRequestSeqs()
+	if len(firstSnapshot) != 1 || firstSnapshot[0] != first {
+		t.Fatalf("request 1 snapshot = %v, want [%d]", firstSnapshot, first)
+	}
+	secondSnapshot := feed.takeRequestSeqs()
+	if len(secondSnapshot) != 2 || secondSnapshot[0] != first || secondSnapshot[1] != second {
+		t.Fatalf("request 2 snapshot = %v, want [%d %d]", secondSnapshot, first, second)
+	}
+	// A late hand-out is never attributed backwards.
+	if got := feed.poll(ctx); len(got) != 0 {
+		t.Fatalf("third poll = %d messages, want 0 (both handed out)", len(got))
+	}
+	if got := feed.takeRequestSeqs(); len(got) != 0 {
+		t.Fatalf("snapshot after the two requests = %v, want none", got)
+	}
+}

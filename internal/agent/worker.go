@@ -353,15 +353,11 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 	// (the parent ctx is untouched). It is a deliberate stop, not a failure: the
 	// attempt settles through the same policy (unread input re-queues) and the
 	// summary says so.
-	cancelled := false
-	if ctx.Err() == nil && runCtx.Err() != nil {
-		cancelled = true
-		if runErr == nil {
-			// The loop may end cleanly when the stream is cut short; the attempt
-			// still did not finish its work, so the settle must not read "done".
-			runErr = context.Canceled
-		}
-	}
+	// A cancel only matters if it actually cut the attempt short: a cancel that
+	// lands after the last answer was committed must not rewrite a completed run
+	// as cancelled (the runner returned no error, so the work is done and the
+	// cancel seam will report the settlement as such).
+	cancelled := ctx.Err() == nil && runCtx.Err() != nil && runErr != nil
 	if !cancelled && runErr == nil && result.Summary.Status == kernel.RunSummaryFailed {
 		// The loop reports a provider failure as a terminal assistant message
 		// (stopReason=error), not as a Go error. The attempt failed all the same:

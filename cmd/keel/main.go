@@ -61,7 +61,7 @@ Usage:
 
 Environment (serve):
   KEEL_DSN                 PostgreSQL DSN (required)
-  KEEL_SERVE_ADDR          listen address (default 127.0.0.1:13741)
+  KEEL_SERVE_ADDR          listen address (default 127.0.0.1:13750)
   KEEL_SERVE_TENANT        tenant UUID the server acts as (required with auth)
   KEEL_SERVE_PASSWORD      local passphrase; unset disables auth (loopback only)
   KEEL_SERVE_WEB_DIR       static build directory (default web/dist)
@@ -71,7 +71,7 @@ Environment (serve):
 
 Environment (tui):
   KEEL_TUI_BIN             path to the NSH TUI binary
-  KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13741)
+  KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13750)
   KEEL_AGENT_TOKEN         bearer token (the serve passphrase)
 `)
 }

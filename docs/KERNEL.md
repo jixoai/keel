@@ -51,7 +51,9 @@ keel 的内核只有一个职责：**把一个会话的一次运行（run）跑�
 - `guide`：当前 turn 内注入，**在所有 sibling tool results 提交之后**，一次一条，不打断模型流。
   没有活跃 attempt 时由 HTTP 边界降级为 `queue`（事件里可见）。
 - 实现：`internal/agent/steering.go`（从账本读未消费的 guide，作为 loop 的
-  `GetSteeringMessages`）。注入的 seq 并入随后 assistant 的 `inputSeqs`。
+  `GetSteeringMessages`）。注入的 seq 并入随后 assistant 的 `inputSeqs`——按**请求边界快照**
+  （loop 的 `PrepareRequest`）归属，而不是提交时读实时状态：loop 会通过事件缓冲跑到
+  runner 前面，读取实时状态会把「下一次请求才注入的 guide」记到上一次回答上。
 
 ### 输入消费事实（inputSeqs）
 
@@ -59,10 +61,14 @@ keel 的内核只有一个职责：**把一个会话的一次运行（run）跑�
 
 - 「未答输入」＝没有被任何**完成态** assistant（`end_turn`/`tool_use`/…）的 `inputSeqs`
   引用的输入；`stopReason: error|aborted` 的终止消息不算回答（失败会重试，取消不重跑）。
-- `read_watermark` 只保留为诊断/兼容；新日志以 `inputSeqs` 为准（`owedTurn`），
-  老日志自动回退水位启发式。**跨升级的日志**：第一条带 `inputSeqs` 的 assistant 之前的输入
-  仍按水位决定（不再重答）；从它开始的输入由 `inputSeqs` 判定。终止失败（error/aborted）
-  呈现过但没消费，仍算未答。
+  终止消息也**不进模型上下文**（它是失败尝试的记录，重放空/错误 assistant 会污染下一次请求）；
+  最新 assistant 是终止失败时，`owedTurn` 为真——否则「工具轮完成 + 下一轮 provider 失败」
+  重试时会以为无事可做，把 run 落成 done。
+- `read_watermark` 保留为诊断/兼容与**老日志/升级前缀**的判定：新日志以 `inputSeqs` 为准
+  （`owedTurn`）；第一条带 `inputSeqs` 的 assistant 之前的输入仍按水位决定（不再重答，
+  即使那条边界消息是终止失败），从它开始的输入由 `inputSeqs` 判定，仍是「呈现过但没消费」。
+- kernel 的 settle 也用它判定是否 re-queue（PG: `payload->'inputSeqs' @> seq`，且排除
+  `stopReason in (error, aborted)` 的终止消息；MemStore 逐条等价）。
 - kernel 的 settle 也用它判定是否 re-queue（PG: `payload->'inputSeqs' @> seq`）。
 
 ### 运行摘要

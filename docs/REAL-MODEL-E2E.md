@@ -92,8 +92,9 @@ export KEEL_API_KEY=...
 2026-11-06 实测本机到 A6API 的 TLS 握手被重置（§6），可用
 `KEEL_E2E_GATEWAY=s2api` 跑同一个 `deepseek-v4.1-flash`。
 
-> 注意：当前分支有一处装配缺陷会让配置的模型名到不了线路（§5）。直连真实网关
-> 前先确认该缺陷已修复；未修复时用 `KEEL_E2E_MODEL_REWRITE=1` 打开 harness 绕行。
+> 2026-11-09：§5 的装配缺陷已修复（`servicehost` 改用 `resolved.Models()[0].ID`），
+> 回归测试 `internal/servicehost/llm_model_test.go`；直连真实网关的回合已通过，
+> 无需 `KEEL_E2E_MODEL_REWRITE`。
 
 ## 3. 脚本用法
 
@@ -182,7 +183,7 @@ scripts/real-model-e2e.sh --with-failure
   `stopReason=error` + `errorMessage`；`run.failed/run.finished` 的收口是
   `keel-kernel-loop` K3 的待办，不在本脚本的修改范围。
 
-## 5. 阻断项：配置的 model id 没有到达线路（2026-11-06 实测）
+## 5. 已修复：配置的 model id 没有到达线路（2026-11-06 实测，2026-11-09 修复）
 
 **现象**：`KEEL_MODEL=deepseek-v4.1-flash` 时，runtime 启动日志是
 `agent worker started provider=openai model=openai`，出站请求体是
@@ -204,11 +205,10 @@ scripts/real-model-e2e.sh --with-failure
   都是 **provider 名**（`internal/provider/resolve.go:70,78,80,99-109,116,121,132,142`；
   `ResolveNamedProvider` 返回 `spec.Name`）。
 
-**最小修复（装配层一行，不在本任务的改动范围）**：
+**修复（已落地）**：`svc.model = resolved.Models()[0].ID`（空时回退 `agentCfg.Model`），
+另加 `internal/servicehost/llm_model_test.go` 钉住「发出去的是模型 id，不是 provider 名」。
 
-    svc.model = agentCfg.Model   // 或 resolved.Models()[0].ID
-
-**临时绕行**：`KEEL_E2E_MODEL_REWRITE=1` 时，脚本在 runtime 与真实网关之间起一个
+**绕行（保留作回归工具，日常不需要）**：`KEEL_E2E_MODEL_REWRITE=1` 时，脚本在 runtime 与真实网关之间起一个
 本地模型名重写代理（只改 `model` 字段，转发真实 `Authorization` 与流式响应），
 证据里保留 `model 'openai' -> '<配置模型>'` 与 `workaround` 字段。绕行只影响
 harness，不掩盖缺陷：不打开它时，真实回合在修复前必然失败。

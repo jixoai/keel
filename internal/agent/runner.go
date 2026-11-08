@@ -388,6 +388,15 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error)
 		// before the first request, after every completed turn (all sibling tool
 		// results committed) and again after PrepareNextTurn.
 		GetSteeringMessages: feed.poll,
+		// The request boundary is where the consumption fact is pinned: the loop
+		// has appended the pending steering messages and is about to call the
+		// provider, so the snapshot is exactly what this request presents. The
+		// runner reads it by request order (structural alignment), never by
+		// "current feed state" — the loop may run ahead through the event buffer.
+		PrepareRequest: func(ctx context.Context, req loop.PrepareRequestContext) *loop.RequestUpdate {
+			feed.beginRequest()
+			return nil
+		},
 		ShouldStopAfterTurn: func(ctx context.Context, agentCtx *agentcore.AgentContext) bool {
 			turns++
 			if r.MaxTurns > 0 && turns >= r.MaxTurns {
@@ -467,7 +476,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error)
 			// plus every guide input the loop has injected since). owedTurn uses
 			// the union of these sets (not a watermark) to decide what is still
 			// owed.
-			raw, err = attachInputSeqs(raw, mergeInputSeqs(inputSeqs, feed.consumed()))
+			raw, err = attachInputSeqs(raw, mergeInputSeqs(inputSeqs, feed.takeRequestSeqs()))
 			if err != nil {
 				res.Cursor = cursor
 				return res, err
@@ -580,7 +589,12 @@ func (g *generation) next() string {
 // answer input.
 func owedTurn(events []store.Event, readWatermark int64) bool {
 	if unread, known := unreadInputs(events, readWatermark); known {
-		return len(unread) > 0 || newestAssistantHasToolCalls(events)
+		// A terminal failure (stopReason error/aborted) is not an answer: the
+		// turn it was producing was never completed, so the loop must run it
+		// again. Without this a failed second turn after a completed tool turn
+		// would leave nothing owed and the retry would settle the run "done"
+		// without ever calling the model.
+		return len(unread) > 0 || newestAssistantHasToolCalls(events) || newestAssistantTerminallyFailed(events)
 	}
 	return legacyOwedTurn(events, readWatermark)
 }
@@ -599,10 +613,6 @@ func owedTurn(events []store.Event, readWatermark int64) bool {
 // must never cause).
 func unreadInputs(events []store.Event, readWatermark int64) (map[int64]bool, bool) {
 	answered := make(map[int64]bool)
-	// presented marks every input some attempt showed the model, even an attempt
-	// that then failed: such an input is post-upgrade and stays owed until a
-	// completed turn consumes it.
-	presented := make(map[int64]bool)
 	var boundary int64
 	known := false
 	for _, ev := range events {
@@ -623,12 +633,10 @@ func unreadInputs(events []store.Event, readWatermark int64) (map[int64]bool, bo
 			boundary = ev.Seq
 			known = true
 		}
-		terminal := payload.StopReason == agentcore.StopReasonError || payload.StopReason == agentcore.StopReasonAborted
+		if payload.StopReason == agentcore.StopReasonError || payload.StopReason == agentcore.StopReasonAborted {
+			continue
+		}
 		for _, seq := range payload.InputSeqs {
-			presented[seq] = true
-			if terminal {
-				continue
-			}
 			answered[seq] = true
 		}
 	}
@@ -640,14 +648,35 @@ func unreadInputs(events []store.Event, readWatermark int64) (map[int64]bool, bo
 		if ev.Kind != store.EventUserMessage || answered[ev.Seq] {
 			continue
 		}
-		// A pre-upgrade input (never presented by a message carrying inputSeqs)
-		// that the watermark already covered keeps the old decision.
-		if !presented[ev.Seq] && ev.Seq < boundary && readWatermark > 0 && ev.Seq <= readWatermark {
+		// A pre-upgrade input that the watermark already covered keeps the old
+		// decision. This holds even when a boundary message *presented* it: the
+		// boundary message may itself be a terminal failure (the first
+		// post-upgrade attempt failed), and its presentation consumed nothing.
+		if ev.Seq < boundary && readWatermark > 0 && ev.Seq <= readWatermark {
 			continue
 		}
 		unread[ev.Seq] = true
 	}
 	return unread, true
+}
+
+// newestAssistantTerminallyFailed reports whether the newest assistant message
+// is a terminal failure (the provider errored or the turn was aborted). Such a
+// message is a record of an attempt, not an answer: the turn still owes work.
+func newestAssistantTerminallyFailed(events []store.Event) bool {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != store.EventAssistantMessage {
+			continue
+		}
+		var payload struct {
+			StopReason string `json:"stopReason"`
+		}
+		if err := json.Unmarshal(events[i].Payload, &payload); err != nil {
+			return false
+		}
+		return payload.StopReason == agentcore.StopReasonError || payload.StopReason == agentcore.StopReasonAborted
+	}
+	return false
 }
 
 // newestAssistantHasToolCalls reports whether the newest assistant message

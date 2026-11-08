@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -97,6 +98,35 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 			if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: stale,
 				Payload: json.RawMessage(`{"status":"done"}`)}); !iso(err, ErrStaleEpoch) {
 				t.Fatalf("stale run.finished = %v", err)
+			}
+		})
+	}
+}
+
+// TestFinishProbeIgnoresTerminalFailures pins the parity between the kernel's
+// re-queue probe and the runner's owedTurn rule: a terminal failure presented
+// the input but consumed nothing, so pending_input must stay set. Without the
+// exclusion the probe would settle the session "done" with the input unanswered.
+func TestFinishProbeIgnoresTerminalFailures(t *testing.T) {
+	for _, im := range implementations(t) {
+		im := im
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+			ctx := context.Background()
+			h.mustCommit(CommitRequest{Kind: KindUserMessage, RequestID: "r1", Payload: userPayload("one")})
+			h.mustCommit(CommitRequest{Kind: KindUserMessage, RequestID: "r2", Payload: userPayload("two")})
+			lease := h.claimScope(h.scope, "runtime-a")
+			h.mustCommit(CommitRequest{Kind: KindAssistantMessage, Token: lease.Token, GenerationID: "u2-a0",
+				Payload: json.RawMessage(`{"role":"assistant","content":[],"stopReason":"error","inputSeqs":[1,2]}`)})
+			if err := h.k.Finish(ctx, FinishRequest{Lease: lease, Cursor: 3, ReadThrough: 1, MaxAttempts: 3}); err != nil {
+				t.Fatalf("finish: %v", err)
+			}
+			pin, err := h.k.RunPin(ctx, h.scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pin.Status != RunStatusPending {
+				t.Fatalf("run status = %s, want pending (seq 2 was presented by a terminal failure only)", pin.Status)
 			}
 		})
 	}

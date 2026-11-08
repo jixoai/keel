@@ -62,6 +62,14 @@ func DecodeMessages(events []store.Event, diagnose func(seq int64, kind string, 
 			if m.RoleField == "" {
 				m.RoleField = agentcore.RoleAssistant
 			}
+			// A terminal failure is a record of a failed attempt, not a turn the
+			// model produced: it must not be replayed into the next request (an
+			// empty/error assistant message would confuse the wire and hide the
+			// prompt the retry is supposed to answer). Its event stays in the log
+			// for the UI and the audit.
+			if m.StopReason == agentcore.StopReasonError || m.StopReason == agentcore.StopReasonAborted {
+				continue
+			}
 			appendMsg(ev.Seq, m)
 		case store.EventToolResult:
 			var m agentcore.ToolResultMessage
