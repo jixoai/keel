@@ -116,6 +116,79 @@ func TestCrashAfterAssistantCommitDoesNotReanswer(t *testing.T) {
 	}
 }
 
+// TestLegacyPrefixIsNotReansweredAfterUpgrade pins the migration rule: a log
+// that straddles the inputSeqs upgrade (an older answer without the fact, newer
+// answers with it) must not re-answer the pre-upgrade input. The watermark
+// decided it once; inputSeqs only governs inputs from the upgrade boundary on.
+func TestLegacyPrefixIsNotReansweredAfterUpgrade(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session := newSession(t, st)
+	k := testKernel(t, st)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	commitInput(t, k, scope, "r1", "one", "", nil)
+	// The pre-upgrade answer: no inputSeqs (written by the old runtime).
+	lease := claimScope(t, k, tenant, session)
+	legacy := mustJSON(map[string]any{
+		"role":       "assistant",
+		"content":    []map[string]any{{"type": "text", "text": "legacy answer one"}},
+		"stopReason": "end_turn",
+	})
+	if _, err := k.Commit(ctx, kernel.CommitRequest{Scope: scope, Kind: kernel.KindAssistantMessage,
+		Token: lease.Token, GenerationID: "u1-a0", Payload: legacy}); err != nil {
+		t.Fatalf("commit legacy answer: %v", err)
+	}
+	if err := k.Release(ctx, lease); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	// Post-upgrade input: the answer carries the consumption fact.
+	commitInput(t, k, scope, "r2", "two", "", nil)
+	lease2 := claimScope(t, k, tenant, session)
+	runner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	res, err := runner.RunAttempt(ctx, lease2)
+	if err != nil {
+		t.Fatalf("post-upgrade run: %v", err)
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease2, Cursor: res.Cursor,
+		ReadThrough: res.ReadThrough, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	// A later run must not re-answer "one": its pre-upgrade answer stands.
+	commitInput(t, k, scope, "r3", "three", "", nil)
+	lease3 := claimScope(t, k, tenant, session)
+	runner2 := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	res3, err := runner2.RunAttempt(ctx, lease3)
+	if err != nil {
+		t.Fatalf("third run: %v", err)
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease3, Cursor: res3.Cursor,
+		ReadThrough: res3.ReadThrough, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish third run: %v", err)
+	}
+	texts := assistantTexts(t, eventsOf(t, st, tenant, session))
+	var ones, twos, threes int
+	for _, text := range texts {
+		if strings.Contains(text, "one") {
+			ones++
+		}
+		if strings.Contains(text, "two") {
+			twos++
+		}
+		if strings.Contains(text, "three") {
+			threes++
+		}
+	}
+	if ones != 1 {
+		t.Fatalf("answers to the pre-upgrade input = %d, want exactly the legacy one: %q", ones, texts)
+	}
+	if twos != 1 || threes != 1 {
+		t.Fatalf("answers two=%d three=%d, want one each: %q", twos, threes, texts)
+	}
+}
+
 // TestCrashDuringToolTurnFillsResults pins the tool-turn half: the assistant
 // tool call is committed, the result is not, and the successor fills exactly
 // one result before continuing. A guide input that arrived in the crashed

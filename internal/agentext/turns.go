@@ -128,18 +128,11 @@ func (s *TurnStarter) StartTurn(ctx context.Context, req StartTurnRequest) (Star
 	if err != nil {
 		return StartTurnResult{}, err
 	}
-	if s.Hooks != nil {
-		payload := HookPayload{
-			Event:     HookTurnStarted,
-			TenantID:  req.TenantID.String(),
-			SessionID: sessionID.String(),
-			RequestID: requestID,
-			Status:    "started",
-			At:        s.Now(),
-		}
-		payload.SetData("seq", fmt.Sprintf("%d", receipt.Seq))
-		s.Hooks.Emit(payload)
-	}
+	// No turn.started here: committing the input is a *submission*, not a start.
+	// The attempt-level emitter (TurnTelemetry, wrapping the runner's span) is the
+	// single source of the turn lifecycle, and it is the only one that can carry
+	// the run identity the hook contract requires. Emitting here too would fire
+	// turn.started twice per turn (and with an empty RunID).
 	return StartTurnResult{
 		TenantID:  req.TenantID,
 		SessionID: sessionID,

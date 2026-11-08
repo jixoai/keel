@@ -306,10 +306,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error)
 	// adversarial review B5). "Unread" is the consumption fact when the log
 	// carries it: a guide input answered in an earlier attempt must NOT be
 	// presented as a new prompt (that would answer it twice).
-	answered, consumptionKnown := answeredInputs(events)
+	unread, consumptionKnown := unreadInputs(events, lease.ReadWatermark)
 	msgs = presentUnreadInputLast(msgs, seqs, func(seq int64) bool {
 		if consumptionKnown {
-			return !answered[seq]
+			return unread[seq]
 		}
 		// A read watermark of zero means no attempt has ever proven a read
 		// point: the log order is the only information available and is left
@@ -568,7 +568,10 @@ func (g *generation) next() string {
 //     watermark.
 //
 // Legacy logs (no assistant message carries inputSeqs) fall back to the old
-// watermark + tail heuristic, so historical sessions keep working.
+// watermark + tail heuristic, so historical sessions keep working. A log that
+// straddles the upgrade (some answers carry the fact, older ones do not) keeps
+// the legacy decision for the pre-upgrade prefix: re-deciding those inputs from
+// inputSeqs alone would answer them a second time.
 //
 // Independently of input consumption, the newest assistant message carrying
 // tool calls means the loop must fill their results and continue.
@@ -576,26 +579,31 @@ func (g *generation) next() string {
 // Bookkeeping events (run.started, run.failed, run.finished, compaction) never
 // answer input.
 func owedTurn(events []store.Event, readWatermark int64) bool {
-	if answered, known := answeredInputs(events); known {
-		for _, ev := range events {
-			if ev.Kind == store.EventUserMessage && !answered[ev.Seq] {
-				return true
-			}
-		}
-		return newestAssistantHasToolCalls(events)
+	if unread, known := unreadInputs(events, readWatermark); known {
+		return len(unread) > 0 || newestAssistantHasToolCalls(events)
 	}
 	return legacyOwedTurn(events, readWatermark)
 }
 
-// answeredInputs unions every assistant message's inputSeqs. known is false
-// when no message carries the field (a log written before the consumption fact
-// existed), which selects the legacy heuristic.
+// unreadInputs returns the committed user inputs that still owe an answer, plus
+// whether the log carries any consumption fact at all.
 //
 // A terminal failure (stopReason error/aborted) does NOT consume its input: the
 // model saw it but produced no answer, so the input stays owed and a retry
 // re-asks. Only a completed turn (end_turn/tool_use/…) is an answer.
-func answeredInputs(events []store.Event) (map[int64]bool, bool) {
+//
+// The upgrade boundary is the seq of the first assistant message carrying
+// inputSeqs: everything committed before it was decided by the old watermark
+// heuristic, and an input below it that the watermark already covered is
+// treated as answered (re-answering old input is the one outcome this fact
+// must never cause).
+func unreadInputs(events []store.Event, readWatermark int64) (map[int64]bool, bool) {
 	answered := make(map[int64]bool)
+	// presented marks every input some attempt showed the model, even an attempt
+	// that then failed: such an input is post-upgrade and stays owed until a
+	// completed turn consumes it.
+	presented := make(map[int64]bool)
+	var boundary int64
 	known := false
 	for _, ev := range events {
 		if ev.Kind != store.EventAssistantMessage {
@@ -611,17 +619,35 @@ func answeredInputs(events []store.Event) (map[int64]bool, bool) {
 		if len(payload.InputSeqs) == 0 {
 			continue
 		}
-		// The message records what it was shown, so the log DOES carry the
-		// consumption fact — but a terminal failure answered nothing.
-		known = true
-		if payload.StopReason == agentcore.StopReasonError || payload.StopReason == agentcore.StopReasonAborted {
-			continue
+		if !known {
+			boundary = ev.Seq
+			known = true
 		}
+		terminal := payload.StopReason == agentcore.StopReasonError || payload.StopReason == agentcore.StopReasonAborted
 		for _, seq := range payload.InputSeqs {
+			presented[seq] = true
+			if terminal {
+				continue
+			}
 			answered[seq] = true
 		}
 	}
-	return answered, known
+	if !known {
+		return nil, false
+	}
+	unread := make(map[int64]bool)
+	for _, ev := range events {
+		if ev.Kind != store.EventUserMessage || answered[ev.Seq] {
+			continue
+		}
+		// A pre-upgrade input (never presented by a message carrying inputSeqs)
+		// that the watermark already covered keeps the old decision.
+		if !presented[ev.Seq] && ev.Seq < boundary && readWatermark > 0 && ev.Seq <= readWatermark {
+			continue
+		}
+		unread[ev.Seq] = true
+	}
+	return unread, true
 }
 
 // newestAssistantHasToolCalls reports whether the newest assistant message

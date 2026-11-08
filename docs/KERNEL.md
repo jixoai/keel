@@ -60,7 +60,9 @@ keel 的内核只有一个职责：**把一个会话的一次运行（run）跑�
 - 「未答输入」＝没有被任何**完成态** assistant（`end_turn`/`tool_use`/…）的 `inputSeqs`
   引用的输入；`stopReason: error|aborted` 的终止消息不算回答（失败会重试，取消不重跑）。
 - `read_watermark` 只保留为诊断/兼容；新日志以 `inputSeqs` 为准（`owedTurn`），
-  老日志自动回退水位启发式。
+  老日志自动回退水位启发式。**跨升级的日志**：第一条带 `inputSeqs` 的 assistant 之前的输入
+  仍按水位决定（不再重答）；从它开始的输入由 `inputSeqs` 判定。终止失败（error/aborted）
+  呈现过但没消费，仍算未答。
 - kernel 的 settle 也用它判定是否 re-queue（PG: `payload->'inputSeqs' @> seq`）。
 
 ### 运行摘要

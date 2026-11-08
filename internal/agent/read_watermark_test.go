@@ -205,7 +205,10 @@ func TestCrashBeforeFinishDoesNotDuplicateTheFinalAnswer(t *testing.T) {
 		RequestID: "r1", Payload: mustJSON(map[string]any{"text": "hello", "requestId": "r1"})}); err != nil {
 		t.Fatal(err)
 	}
-	lease1, err := k.ClaimScope(ctx, scope, "runtime-killed", 1500*time.Millisecond)
+	// The attempt must finish before the lease lapses (the test forces the lapse
+	// afterwards to simulate the kill); under -race the run needs headroom, and
+	// the steering feed adds log reads at the loop's drain points.
+	lease1, err := k.ClaimScope(ctx, scope, "runtime-killed", 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +275,10 @@ func TestKillBetweenLoadAndFinishNeitherDuplicatesNorMisses(t *testing.T) {
 		RequestID: "r1", Payload: mustJSON(map[string]any{"text": "hello", "requestId": "r1"})}); err != nil {
 		t.Fatal(err)
 	}
-	lease1, err := k.ClaimScope(ctx, scope, "runtime-killed", 1500*time.Millisecond)
+	// The attempt must finish before the lease lapses (the test forces the lapse
+	// afterwards to simulate the kill); under -race the run needs headroom, and
+	// the steering feed adds log reads at the loop's drain points.
+	lease1, err := k.ClaimScope(ctx, scope, "runtime-killed", 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
