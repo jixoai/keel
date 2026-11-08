@@ -160,6 +160,9 @@ type localRun struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	once   sync.Once
+	// outcome is the final outcome the worker reported; written before done is
+	// closed, read only after <-done (the close is the happens-before edge).
+	outcome string
 }
 
 type overlayEntry struct {
@@ -236,11 +239,16 @@ func (c *RunControl) BeginRun(parent context.Context, scope kernel.Scope, runID 
 
 	finish := func(outcome string) {
 		entry.once.Do(func() {
+			entry.outcome = outcome
 			c.mu.Lock()
 			if c.local[scope] == entry {
 				delete(c.local, scope)
 			}
-			c.setOverlayLocked(scope, outcome)
+			// Only the product-specific state is overlaid: a durable done/failed
+			// must not be masked by a stale overlay while the run is re-queued.
+			if outcome == "cancelled" {
+				c.setOverlayLocked(scope, outcome)
+			}
 			c.mu.Unlock()
 			close(entry.done)
 		})
@@ -260,6 +268,12 @@ func (c *RunControl) Cancel(ctx context.Context, scope kernel.Scope) (CancelResu
 		defer timer.Stop()
 		select {
 		case <-entry.done:
+			// The attempt settled. Report what actually happened: a cancel that
+			// raced a clean finish must not claim it stopped the run.
+			if outcome := entry.outcome; outcome == "done" || outcome == "failed" {
+				return CancelResult{Status: "settled", RunStatus: outcome, Cancelled: false,
+					Detail: "the attempt settled before the cancel landed"}, nil
+			}
 			c.mu.Lock()
 			c.setOverlayLocked(scope, "cancelled")
 			c.mu.Unlock()
@@ -295,7 +309,7 @@ func (c *RunControl) Cancel(ctx context.Context, scope kernel.Scope) (CancelResu
 			Detail: "the run already reached a terminal state"}, nil
 	case "pending":
 		return CancelResult{Status: "idle", RunStatus: "pending",
-			Detail: "the run is queued but has no active attempt; the input stays unanswered until a cancel seam is wired"}, nil
+			Detail: "the run is queued but has no active attempt to stop; the queued input will run when a worker claims it"}, nil
 	case "running":
 		return CancelResult{Status: "not_wired", RunStatus: "running"}, ErrCancelUnavailable
 	default:

@@ -85,6 +85,10 @@ type Config struct {
 	Hooks *agentext.HookBus
 	// Parents optionally resolves sub-agent parent links; defaults to Subagents.
 	Parents ParentResolver
+	// SessionExists validates that a session belongs to the tenant before a
+	// product endpoint writes to it (a decision opened on a missing session
+	// would be an orphan row). Nil skips the check (tests without a store).
+	SessionExists func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error)
 	// RunStatus optionally overrides the durable run status (a cancelled run
 	// settles as failed in the kernel policy table; the product snapshot
 	// remembers the cancellation).

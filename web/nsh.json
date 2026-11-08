@@ -20,6 +20,7 @@
     "notifications": true
   },
   "web": {
+    "base": "/",
     "host": "./host.js"
   },
   "icon": "icon.png"

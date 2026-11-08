@@ -57,6 +57,17 @@ func (s *Server) openDecision(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errors.New("decisions are not wired"))
 		return
 	}
+	if s.cfg.SessionExists != nil {
+		exists, err := s.cfg.SessionExists(r.Context(), tenantID, sessionID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !exists {
+			writeErr(w, http.StatusNotFound, ErrSessionNotFound)
+			return
+		}
+	}
 	var body openDecisionRequest
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)

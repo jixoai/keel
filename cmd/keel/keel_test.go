@@ -169,11 +169,36 @@ func TestAuthCookieExpiryAndDisabledMode(t *testing.T) {
 		w.WriteHeader(200)
 	}), noopLog{})
 	req = httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
+	req.Host = "127.0.0.1:13750"
 	req.Header.Set("X-Tenant-ID", tenantID.String())
 	rec = httptest.NewRecorder()
 	disabled.ServeHTTP(rec, req)
 	if rec.Code != 200 || seen != tenantID.String() {
 		t.Fatalf("disabled mode: %d tenant=%q", rec.Code, seen)
+	}
+
+	// Disabled mode with a configured tenant still injects it (the bundled web
+	// UI never sends X-Tenant-ID), and a foreign Host is refused so a rebinding
+	// page cannot reach the API.
+	seen = ""
+	disabledTenant := newAuthHandler(authConfig{TenantID: tenantID}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("X-Tenant-ID")
+		w.WriteHeader(200)
+	}), noopLog{})
+	req = httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
+	req.Host = "127.0.0.1:13750"
+	req.Header.Set("X-Tenant-ID", uuid.NewString())
+	rec = httptest.NewRecorder()
+	disabledTenant.ServeHTTP(rec, req)
+	if rec.Code != 200 || seen != tenantID.String() {
+		t.Fatalf("disabled mode with tenant: %d tenant=%q", rec.Code, seen)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
+	req.Host = "evil.test"
+	rec = httptest.NewRecorder()
+	disabledTenant.ServeHTTP(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("disabled mode foreign host: %d, want 403", rec.Code)
 	}
 }
 

@@ -8,6 +8,7 @@ import { Press, Spinner } from "./src/ui/primitives";
 import { alpha, colors, glass, radius, space } from "./src/ui/theme";
 import { SessionList } from "./src/screens/session-list";
 import { Conversation } from "./src/screens/conversation";
+import { LoginScreen } from "./src/screens/login";
 
 const isWide = () => windowSize().width >= 900;
 
@@ -90,7 +91,7 @@ function ProbeBadge() {
   );
 }
 
-function App() {
+function Shell() {
   const screen = signal<"list" | "chat">("list");
   const autoOpened = signal(false);
 
@@ -138,6 +139,17 @@ function App() {
       <NoticeToast />
       <ProbeBadge />
     </View>
+  );
+}
+
+// The auth gate is an If, not an early return: a component body in NSH runs once
+// and its reactive reads live in the vnode getters, so a body-level `if` would
+// freeze the decision made before the async probe finished.
+function App() {
+  return (
+    <If when={store.auth() === "required"} else={<Shell />}>
+      <LoginScreen />
+    </If>
   );
 }
 

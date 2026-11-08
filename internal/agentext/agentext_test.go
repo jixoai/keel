@@ -517,7 +517,7 @@ func TestRunControlCancelSeam(t *testing.T) {
 		t.Fatal("cancel did not cancel the run context")
 	}
 	time.Sleep(20 * time.Millisecond)
-	finish("failed")
+	finish("cancelled")
 	select {
 	case result := <-cancelled:
 		if result.Status != "cancelled" || !result.Cancelled {
@@ -533,6 +533,24 @@ func TestRunControlCancelSeam(t *testing.T) {
 	if status, ok := control.Status(scope); !ok || status != "cancelled" {
 		t.Fatalf("overlay = %q ok=%v", status, ok)
 	}
+	// A cancel that races a clean finish reports what actually happened.
+	raceCtx, raceFinish := control.BeginRun(context.Background(), scope, "run-2")
+	raceDone := make(chan CancelResult, 1)
+	go func() {
+		result, _ := control.Cancel(context.Background(), scope)
+		raceDone <- result
+	}()
+	select {
+	case <-raceCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("cancel did not cancel the race context")
+	}
+	time.Sleep(20 * time.Millisecond)
+	raceFinish("failed")
+	if result := <-raceDone; result.Status != "settled" || result.RunStatus != "failed" || result.Cancelled {
+		t.Fatalf("raced cancel result: %+v", result)
+	}
+
 	// No seam at all: the endpoint must say so instead of faking success.
 	if _, err := control.Cancel(context.Background(), kernel.Scope{TenantID: uuid.New(), SessionID: uuid.New()}); !errors.Is(err, ErrCancelUnavailable) {
 		t.Fatalf("unwired cancel: %v", err)

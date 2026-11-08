@@ -412,8 +412,14 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 
 	api := agentapi.New(agentapi.Config{
-		Sessions:  agentapi.NewPGSessionLister(st),
-		Cancel:    cancelFn,
+		Sessions: agentapi.NewPGSessionLister(st),
+		Cancel:   cancelFn,
+		// A product write must land on a session this tenant owns: a decision
+		// opened on a missing session would be an orphan row.
+		SessionExists: func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
+			_, exists, err := st.SessionOwner(ctx, tenantID, sessionID)
+			return exists, err
+		},
 		Decisions: decisions,
 		Partials:  partials,
 		Plugins:   plugins,

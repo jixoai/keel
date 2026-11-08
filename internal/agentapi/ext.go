@@ -1,8 +1,10 @@
 package agentapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentext"
@@ -83,6 +85,18 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 		} else {
 			reason = "manual"
 		}
+	}
+	// The reason is provenance written into the turn payload: a closed set, so a
+	// caller cannot dress a manual fire up as a schedule, and bounded.
+	switch reason {
+	case "manual", "schedule", "webhook":
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New(`reason must be "manual", "schedule" or "webhook"`))
+		return
+	}
+	if len(reason) > 32 {
+		writeErr(w, http.StatusBadRequest, errors.New("reason is too long"))
+		return
 	}
 	result, err := s.cfg.Triggers.Fire(r.Context(), triggerID, tenantID, agentext.FireRequest{
 		IdempotencyKey: key,
@@ -225,7 +239,12 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	result, err := s.cfg.Subagents.Wait(r.Context(), tenantID, sessionID, budget, body.Agent)
+	// The wait is bounded by its own budget, not by the HTTP request: a client
+	// that disconnects must not cancel the sub-agent it started.
+	waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(r.Context()),
+		time.Duration(budget.TimeoutMs)*time.Millisecond)
+	defer cancelWait()
+	result, err := s.cfg.Subagents.Wait(waitCtx, tenantID, sessionID, budget, body.Agent)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return

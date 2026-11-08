@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -92,7 +93,31 @@ func newAuthHandler(cfg authConfig, next http.Handler, logger interface {
 }
 
 func (h *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.cfg.Password == "" || authExempt(r.URL.Path) {
+	if h.cfg.Password == "" {
+		// No passphrase: the port is a development surface, so it must not be
+		// reachable from another origin. The Host check blocks DNS rebinding (a
+		// page on evil.test resolving to 127.0.0.1 still sends its own Host).
+		if !loopbackHost(r.Host) {
+			writeAuthJSON(w, http.StatusForbidden, map[string]any{
+				"error": "authentication is disabled: keel serve only answers loopback hosts",
+			})
+			return
+		}
+		if authExempt(r.URL.Path) {
+			h.next.ServeHTTP(w, r)
+			return
+		}
+		// The bundled web UI never sends X-Tenant-ID, so a configured tenant is
+		// injected here too — otherwise the UI is unusable with auth disabled.
+		// Without a configured tenant the header-driven development mode stays.
+		if h.cfg.TenantID != uuid.Nil {
+			r.Header.Del("X-Tenant-ID")
+			r.Header.Set("X-Tenant-ID", h.cfg.TenantID.String())
+		}
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	if authExempt(r.URL.Path) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
@@ -202,7 +227,7 @@ func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(body.Password)), []byte(h.cfg.Password)) != 1 {
+	if !passwordEqual(strings.TrimSpace(body.Password), h.cfg.Password) {
 		// A tiny delay makes an offline guess loop expensive without adding a
 		// stateful throttle to the local server.
 		time.Sleep(150 * time.Millisecond)
@@ -299,4 +324,31 @@ func envBool(name string) bool {
 		return true
 	}
 	return false
+}
+
+// passwordEqual compares two passphrases in constant time regardless of their
+// lengths (a plain ConstantTimeCompare leaks the expected length through its
+// early return).
+func passwordEqual(got, want string) bool {
+	gotSum := sha256.Sum256([]byte(got))
+	wantSum := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotSum[:], wantSum[:]) == 1
+}
+
+// loopbackHost reports whether the request Host names the local machine. Used
+// only when authentication is disabled.
+func loopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

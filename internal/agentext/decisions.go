@@ -345,7 +345,7 @@ func (b *DecisionBroker) Answer(ctx context.Context, req AnswerDecisionRequest) 
 			return rowToDecision(row), false, fmt.Errorf("%w: unknown optionId %q", ErrInvalidDecision, answer.OptionID)
 		}
 	}
-	if answer.Text != "" && !row.AllowFreeText && answer.OptionID == "" {
+	if answer.Text != "" && !row.AllowFreeText {
 		return rowToDecision(row), false, fmt.Errorf("%w: free text is not allowed for this decision", ErrInvalidDecision)
 	}
 

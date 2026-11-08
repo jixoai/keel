@@ -139,6 +139,11 @@ type Runtime struct {
 	active     []*activatedPlugin
 	statuses   map[string]PluginStatus
 	closed     bool
+	// lifeCtx is the plugin lifetime: cancelled by Close, so a Start that spawned
+	// background work (a ticker, a subscription) stops with the runtime instead of
+	// with the activation call.
+	lifeCtx    context.Context
+	lifeCancel context.CancelFunc
 }
 
 type activatedPlugin struct {
@@ -159,17 +164,20 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
+	lifeCtx, lifeCancel := context.WithCancel(context.Background())
 	return &Runtime{
-		hooks:     opts.Hooks,
-		triggers:  opts.Triggers,
-		decisions: opts.Decisions,
-		subagents: opts.Subagents,
-		partials:  opts.Partials,
-		sink:      opts.Tools,
-		log:       opts.Logger,
-		now:       opts.Now,
-		plugins:   append([]*Plugin(nil), opts.Plugins...),
-		statuses:  make(map[string]PluginStatus),
+		hooks:      opts.Hooks,
+		triggers:   opts.Triggers,
+		decisions:  opts.Decisions,
+		subagents:  opts.Subagents,
+		partials:   opts.Partials,
+		sink:       opts.Tools,
+		log:        opts.Logger,
+		now:        opts.Now,
+		plugins:    append([]*Plugin(nil), opts.Plugins...),
+		statuses:   make(map[string]PluginStatus),
+		lifeCtx:    lifeCtx,
+		lifeCancel: lifeCancel,
 	}
 }
 
@@ -316,7 +324,10 @@ func (r *Runtime) activate(ctx context.Context, plugin *Plugin) (*activatedPlugi
 		Logger:    r.log,
 	}
 	if plugin.Start != nil {
-		if err := plugin.Start(ctx, env); err != nil {
+		// The lifecycle context, not the activation context: activation returns
+		// right after Apply and a Start that owns background work must keep
+		// running until the runtime closes.
+		if err := plugin.Start(r.lifeCtx, env); err != nil {
 			return nil, fmt.Errorf("start: %w", err)
 		}
 	}
@@ -536,6 +547,7 @@ func (r *Runtime) Close(ctx context.Context) {
 	}
 	r.closed = true
 	r.mu.Unlock()
+	r.lifeCancel()
 	r.unload(ctx)
 	if r.sink != nil {
 		_ = r.sink(nil)
