@@ -31,5 +31,5 @@
 
 ## K4. 回归
 
-- [ ] K4.1 既有 11 门全量重跑（race/conformance/R1/E2E/drain/inflight/smoke/chaos/perf×2）
+- [x] K4.1 既有 11 门全量重跑（race/conformance/R1/E2E/drain/inflight/smoke/chaos×2/perf×2）——16 门全绿（2026-11-09）
 - [x] K4.2 内核纯度/边界/性能无退化；文档（KERNEL/CHAT-SURFACE 的 loop 部分）更新
