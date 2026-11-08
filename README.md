@@ -30,7 +30,7 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
 | SSE 稳定性 | **0 次硬错误**（429 准入反压由客户端按 `Retry-After` 重试，不计硬错误） |
 | 吞吐 | 18.6 MB/s（客户端限速主导，非服务端上限） |
 | 延迟 | p50 28.9s / p95 31.4s（= 1.4MB ÷ 50KB/s，服务端附加≈0） |
-| 2GB cgroup 峰值 | **590MB（27.5%）**，未 OOM（`memory.peak` 口径，`GOMEMLIMIT=1.5GiB`；双进程 handoff 峰值 584MB/27.2%） |
+| 2GB cgroup 峰值 | **640MB（29.8%）**，未 OOM（`memory.peak` 口径，`GOMEMLIMIT=1.5GiB`；双进程 handoff 峰值 656MB/32.0%） |
 | 反压 | 1761 次 429（Medium 档 40% 容量上限；快速拒绝并按 `Retry-After` 重试） |
 | 无状态 E2E | **7/7**：requestId 幂等、SSE 游标、blob 续传、agent 回复、模型/工具执行中 `SIGKILL` 恢复、100 会话 2000 事件序列连续 |
 | 服务图验收 | 全仓 `-race` 31 包 0 失败 · PI conformance **674**（0 失败/1 跳过）· R1 差分 102 路径/12 条规则全部命中 · SIGTERM 排水 8/8 与 in-flight 探针 4/4 · chaos：kill 10 次故障 + handoff 6 轮换代（接班由 `runtime_instances`/`handoffs`/`owner_epoch` 证明）——见 [docs/SERVICE-GRAPH.md](docs/SERVICE-GRAPH.md) |

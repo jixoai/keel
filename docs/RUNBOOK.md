@@ -136,9 +136,9 @@ go build -o /tmp/keel-loadtest ./cmd/loadtest
   容量，剩余 200 条会在 6 次退避后记为失败（这是容量上限，不是流错误）。
 - 2026-11-06 历史基线：800/1000 图片完成、0 SSE 错误、18.6MB/s、2GB cgroup 峰值 544MB。
 - 2026-11-08 终轮（`scripts/acceptance-perf.sh`，fail-closed 口径）：998/1000 图片完成
-  （另 214 张按尺寸分池 429 后退避重试）、0 硬错误、23.2MB/s、2GB cgroup 峰值 **590MB
-  （27.5%）**；双进程 handoff（`scripts/acceptance-handoff-rss.sh`）峰值 584MB（27.2%）。
-  单进程峰值各轮 485–590MB（随负载完成度浮动，均 ≤2GiB 的 29%），上限门 1.5GB。
+  （该轮 1853 张按尺寸分池 429 后退避重试）、0 硬错误、23.2MB/s、2GB cgroup 峰值 **640MB
+  （29.8%）**；双进程 handoff（`scripts/acceptance-handoff-rss.sh`）峰值 656MB（32.0%）。
+  单进程峰值各轮 485–640MB（随负载完成度浮动，均 ≤2GiB 的 32%），上限门 1.5GB。
 - 结果 JSON 含 p50/p95/p99、吞吐、429 计数、RSS 采样。
 
 ## 验收脚本（一条命令复跑）
