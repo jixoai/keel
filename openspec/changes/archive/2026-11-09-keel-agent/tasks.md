@@ -48,10 +48,10 @@
 - [x] Q1 AgentAPI E2E（列表/取消/审批/partials；取消与完成竞争）
 - [x] Q2 扩展面 E2E（插件/subagent/trigger/hook）
 - [x] Q3 既有 11 门回归 + 内核纯度测试（16 门全绿，2026-11-09）
-- [ ] Q4 web/TUI 视觉走查（vision 已走查一轮并整改，报告待出）+ HTML 图文报告（公网链接）
+- [x] Q4 web/TUI 视觉走查（vision 复审 5/10 → 26 项整改+重拍）+ HTML 图文报告：https://alpha-keel-kernel-loop.fde2e.com/report.html
 - [x] Q5 文档：`docs/AGENT.md`（AgentAPI/扩展面/部署）、`docs/CHAT-SURFACE.md`、`docs/WEBUI.md`、`docs/KERNEL.md`
 
 ## R. 复核
 
 - [x] R1 子代理对抗复核（产品层 7/10、内核 6/10、视觉 5/10 → 阻塞项全部修复并回归）
-- [ ] R2 全量验收、报告归档、change archive
+- [x] R2 全量验收（16 门全绿）、报告归档（alpha 上线）、change archive
