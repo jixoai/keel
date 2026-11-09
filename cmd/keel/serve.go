@@ -121,8 +121,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Audit:  servicehost.NewAuditSink(log, servicehost.AuditOptions{}),
 	})
 
+	// The SSE hub is started once the runtime is up (below): on a boot failure
+	// it would hold a pool connection and park store.Close, turning a reported
+	// error into a silent hang.
 	hub := httpapi.NewHub(st, log)
-	go hub.Run(ctx)
 
 	// Static product tools are empty at boot: plugin tools are published after
 	// the plugin runtime assembles, through Runtime.RefreshProductTools.
@@ -191,7 +193,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	// Boot precedence: a stored override (the settings write path's row) wins
 	// over KEEL_MODELS_CONFIG; the deployment document stays the fallback a
-	// reset returns to.
+	// reset returns to — and the fallback boot takes when the override cannot
+	// be served at all (deleted secret, unset environment variable): a settings
+	// row must not be able to brick the next boot.
+	var overrideRevision int64
 	if opts.TenantID != uuid.Nil {
 		document, revision, _, found, err := st.GetModelSettings(ctx, opts.TenantID)
 		if err != nil {
@@ -200,6 +205,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		if found {
 			log.Info("stored model settings override in effect", "revision", revision, "bytes", len(document))
 			tenantCfg.Models = document
+			overrideRevision = revision
 		}
 	}
 	limits.Update(tenantCfg.Quota)
@@ -215,6 +221,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 			Logger:    log,
 		},
 		Tenant: tenantCfg,
+		// The deployment document stays the boot fallback: a stored override
+		// whose credentials no longer resolve falls back to it instead of
+		// failing the deployment (the rejection is surfaced on the settings
+		// read).
+		DeploymentModels: modelsDoc,
+		OverrideRevision: overrideRevision,
 		Options: loadout.Options{
 			ID:             opts.LoadoutID,
 			Revision:       opts.LoadoutRevision,
@@ -259,6 +271,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 			log.Warn("close service loadout", "err", err)
 		}
 	}()
+	// The runtime is up: the SSE hub may hold its pool connection now.
+	go hub.Run(ctx)
+	if rejected, ok := rt.RejectedModelsOverride(); ok {
+		log.Warn("the stored model settings override was rejected at boot; serving the deployment document",
+			"revision", rejected.Revision, "reason", rejected.Reason)
+	}
 
 	// --- product layer (keel-agent) ---
 	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, secretBox, secretReason, log)
@@ -584,6 +602,15 @@ func (m modelRuntimeSeam) DefaultSelection() modelcfg.Selection {
 
 // DeploymentModels implements agentapi.ModelSettingsRuntime.
 func (m modelRuntimeSeam) DeploymentModels() json.RawMessage { return m.rt.DeploymentModels() }
+
+// RejectedModelsOverride implements agentapi.ModelSettingsRuntime.
+func (m modelRuntimeSeam) RejectedModelsOverride() (int64, string, bool) {
+	rejected, ok := m.rt.RejectedModelsOverride()
+	if !ok {
+		return 0, "", false
+	}
+	return rejected.Revision, rejected.Reason, true
+}
 
 // ValidateModelsDocument implements agentapi.ModelSettingsRuntime.
 func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (agentapi.ModelCandidate, []modelcfg.Issue, error) {

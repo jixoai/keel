@@ -28,6 +28,7 @@
 package servicehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -165,6 +166,14 @@ type Config struct {
 	Options loadout.Options
 	// RuntimeID is the worker owner identity written into every claim.
 	RuntimeID string
+	// DeploymentModels is the deployment document the process booted with. It
+	// is the fallback a stored override that cannot be served at boot falls
+	// back to (Tenant.Models is the override then; the two are equal when no
+	// override is in effect).
+	DeploymentModels json.RawMessage
+	// OverrideRevision is the stored override's revision, named when the
+	// override is rejected at boot so the settings read can point at it.
+	OverrideRevision int64
 	// Concurrency caps the process-wide worker (0 = agent default).
 	Concurrency int
 	// Metrics observes worker runs (optional).
@@ -200,8 +209,30 @@ type Runtime struct {
 	snapshot *servicegraph.Snapshot
 	closed   bool
 
+	// rejectedOverride is the stored model settings override this boot refused
+	// to serve (its credentials no longer resolve). Nil when what is stored is
+	// what is running.
+	rejectedOverride *RejectedOverride
+
 	collectCancel context.CancelFunc
 	collectDone   chan struct{}
+}
+
+// RejectedOverride is a stored models override that could not be served at
+// boot: the deployment fell back to its own document, and the settings read
+// points the operator at this row so it can be fixed or deleted.
+type RejectedOverride struct {
+	Revision int64
+	Reason   string
+}
+
+// RejectedModelsOverride reports the stored override this process refused at
+// boot, if any. Zero values when what is stored is what is running.
+func (r *Runtime) RejectedModelsOverride() (RejectedOverride, bool) {
+	if r == nil || r.rejectedOverride == nil {
+		return RejectedOverride{}, false
+	}
+	return *r.rejectedOverride, true
 }
 
 // Boot resolves the tenant document into the default loadout, applies it, and
@@ -226,33 +257,66 @@ func Boot(ctx context.Context, cfg Config) (*Runtime, error) {
 		servicegraph.WithLogger(cfg.Seams.Logger),
 		servicegraph.WithRetireTimeout(cfg.RetireTimeout),
 	)
-	provide := newProvider(cfg.Tenant, cfg, engine)
-	lo, err := loadout.FromTenantConfig(cfg.Tenant, cfg.Options, provide)
-	if err != nil {
-		return nil, fmt.Errorf("servicehost: resolve loadout: %w", err)
-	}
-	snap, err := engine.Apply(ctx, lo)
-	if err != nil {
-		if activation, ok := err.(*servicegraph.ActivationError); ok {
-			// Keep the activation error visible, but only fail boot when a
-			// service the run path depends on did not activate.
-			cfg.Seams.Logger.Error("loadout activation incomplete", "generation", activation.Generation, "err", err)
-		} else {
-			engine.Close(context.WithoutCancel(ctx))
-			return nil, fmt.Errorf("servicehost: apply loadout: %w", err)
+	// tryBoot assembles and applies one tenant document, reporting the
+	// activation error when a run-path service did not come up. The provider
+	// closure is created per attempt: it is what turns a tenant document into
+	// the model service, so a fallback needs its own.
+	tryBoot := func(tenant host.TenantConfig) (*servicegraph.Snapshot, func(string) servicegraph.Factory, error) {
+		provide := newProvider(tenant, cfg, engine)
+		lo, err := loadout.FromTenantConfig(tenant, cfg.Options, provide)
+		if err != nil {
+			return nil, nil, fmt.Errorf("servicehost: resolve loadout: %w", err)
 		}
+		snap, err := engine.Apply(ctx, lo)
+		if err != nil {
+			if activation, ok := err.(*servicegraph.ActivationError); ok {
+				// Keep the activation error visible, but only fail boot when a
+				// service the run path depends on did not activate.
+				cfg.Seams.Logger.Error("loadout activation incomplete", "generation", activation.Generation, "err", err)
+			} else {
+				return nil, nil, fmt.Errorf("servicehost: apply loadout: %w", err)
+			}
+		}
+		if err := requireActive(snap, cfg.Options.Worker); err != nil {
+			return snap, provide, err
+		}
+		return snap, provide, nil
 	}
-	if err := requireActive(snap, cfg.Options.Worker); err != nil {
-		engine.Close(context.WithoutCancel(ctx))
-		return nil, err
+	snap, provide, err := tryBoot(cfg.Tenant)
+	var rejected *RejectedOverride
+	if err != nil {
+		// A stored override whose credentials vanished (a deleted secret, an
+		// unset environment variable) must not take the deployment down on the
+		// next boot: fall back to the deployment document, say so loudly, and
+		// keep the rejection on the runtime so the settings read points the
+		// operator at the row they need to fix or delete. A deployment document
+		// that cannot be served is still fatal — that is the deployment's own
+		// file.
+		if len(cfg.DeploymentModels) == 0 || bytes.Equal(cfg.DeploymentModels, cfg.Tenant.Models) {
+			engine.Close(context.WithoutCancel(ctx))
+			return nil, err
+		}
+		cfg.Seams.Logger.Error("stored model settings override is not servable; serving the deployment document",
+			"revision", cfg.OverrideRevision, "err", err)
+		fallback := cfg.Tenant
+		fallback.Models = cfg.DeploymentModels
+		fallbackSnap, fallbackProvide, fallbackErr := tryBoot(fallback)
+		if fallbackErr != nil {
+			engine.Close(context.WithoutCancel(ctx))
+			return nil, err
+		}
+		snap, provide = fallbackSnap, fallbackProvide
+		cfg.Tenant = fallback
+		rejected = &RejectedOverride{Revision: cfg.OverrideRevision, Reason: err.Error()}
 	}
 	rt := &Runtime{
-		engine:   engine,
-		cfg:      cfg,
-		tenant:   cfg.Tenant,
-		opts:     cfg.Options,
-		provider: provide,
-		snapshot: snap,
+		engine:           engine,
+		cfg:              cfg,
+		tenant:           cfg.Tenant,
+		opts:             cfg.Options,
+		provider:         provide,
+		snapshot:         snap,
+		rejectedOverride: rejected,
 	}
 	rt.startCollector(ctx)
 	cfg.Seams.Logger.Info("service loadout active",

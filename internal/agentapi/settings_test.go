@@ -87,11 +87,20 @@ type fakeSettingsRuntime struct {
 	validateErr error
 	applyErr    error
 
+	// rejected is the stored override this process refused at boot, if any.
+	rejectedRevision int64
+	rejectedReason   string
+	rejected         bool
+
 	mu      sync.Mutex
 	applied []json.RawMessage
 }
 
 func (f *fakeSettingsRuntime) DeploymentModels() json.RawMessage { return f.deployment }
+
+func (f *fakeSettingsRuntime) RejectedModelsOverride() (int64, string, bool) {
+	return f.rejectedRevision, f.rejectedReason, f.rejected
+}
 
 func (f *fakeSettingsRuntime) ValidateModelsDocument(document json.RawMessage) (ModelCandidate, []modelcfg.Issue, error) {
 	if f.validateErr != nil {
@@ -776,5 +785,105 @@ func TestSecretNameGrammarMatchesReferences(t *testing.T) {
 		if secretNamePattern.MatchString(name) {
 			t.Fatalf("%q must be refused (no models document could reference it)", name)
 		}
+	}
+}
+
+// TestModelSettingsReadNamesARejectedOverride pins the boot fallback's read
+// side: when the process refused a stored override at boot, the read reports
+// what is really serving (the deployment document) and names the override it
+// refused, so the settings page can point the operator at the row to fix or
+// delete instead of showing a document that is not in effect.
+func TestModelSettingsReadNamesARejectedOverride(t *testing.T) {
+	settings := newFakeModelSettingsStore()
+	runtime := &fakeSettingsRuntime{
+		deployment:       json.RawMessage(`{"selection":{"providerId":"s2api","modelId":"deepseek-v4.1-flash"}}`),
+		rejected:         true,
+		rejectedRevision: 1,
+		rejectedReason:   `providers[0].access.ref: secret "gone" is not stored for this tenant`,
+	}
+	server := settingsServer(t, func(cfg *Config) {
+		cfg.ModelSettingsStore = settings
+		cfg.ModelSettingsRuntime = runtime
+		cfg.Models = stubCatalog{defaultSelection: modelcfg.Selection{ProviderID: "s2api", ModelID: "deepseek-v4.1-flash"}}
+	})
+	client := server.Client()
+	tenant := uuid.New()
+	if _, err := settings.SetModelSettings(context.Background(), tenant, 0,
+		json.RawMessage(`{"selection":{"providerId":"gone-gw","modelId":"x"}}`)); err != nil {
+		t.Fatalf("plant override: %v", err)
+	}
+
+	var view struct {
+		Source   string           `json:"source"`
+		Revision int64            `json:"revision"`
+		Issues   []map[string]any `json:"issues"`
+	}
+	if code := doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/models", tenant, nil, &view); code != 200 {
+		t.Fatalf("GET: %d", code)
+	}
+	if view.Source != "deployment" {
+		t.Fatalf("source = %q, want deployment (the override is not in effect)", view.Source)
+	}
+	if view.Revision != 1 {
+		t.Fatalf("revision = %d, want the stored row's revision 1", view.Revision)
+	}
+	named := false
+	for _, issue := range view.Issues {
+		if issue["field"] == "storedOverride" {
+			named = true
+			if reason, _ := issue["message"].(string); !strings.Contains(reason, "revision 1") {
+				t.Fatalf("issue message does not name the revision: %q", reason)
+			}
+		}
+	}
+	if !named {
+		t.Fatalf("issues do not name the rejected override: %+v", view.Issues)
+	}
+}
+
+// TestSecretDeleteRefusesWhileReferenced pins the guard that keeps a delete
+// from creating the boot problem in the first place: a secret a stored models
+// document references is not deletable until that document stops referencing it.
+func TestSecretDeleteRefusesWhileReferenced(t *testing.T) {
+	settings := newFakeModelSettingsStore()
+	secrets := newFakeSecretStore()
+	server := settingsServer(t, func(cfg *Config) {
+		cfg.ModelSettingsStore = settings
+		cfg.ModelSettingsRuntime = &fakeSettingsRuntime{deployment: json.RawMessage(`{}`)}
+		cfg.SecretStore = secrets
+	})
+	client := server.Client()
+	tenant := uuid.New()
+	if _, err := secrets.Put(context.Background(), tenant, "gw_key", []byte("sk-value")); err != nil {
+		t.Fatalf("plant secret: %v", err)
+	}
+	if _, err := settings.SetModelSettings(context.Background(), tenant, 0, json.RawMessage(
+		`{"providers":[{"id":"gw","access":{"type":"api-key","ref":"secret:gw_key"}}],"selection":{"providerId":"gw","modelId":"m"}}`)); err != nil {
+		t.Fatalf("plant override: %v", err)
+	}
+
+	var out map[string]any
+	if code := doSettingsJSON(t, client, http.MethodDelete, server.URL+"/v1/settings/secrets/gw_key", tenant, nil, &out); code != http.StatusConflict {
+		t.Fatalf("DELETE referenced secret: %d (%+v), want 409", code, out)
+	}
+	holds := false
+	if list, err := secrets.List(context.Background(), tenant); err == nil {
+		for _, meta := range list {
+			if meta.Name == "gw_key" {
+				holds = true
+			}
+		}
+	}
+	if !holds {
+		t.Fatal("the referenced secret was deleted anyway")
+	}
+
+	// Once the stored document stops referencing it, the delete goes through.
+	if _, err := settings.SetModelSettings(context.Background(), tenant, 0, json.RawMessage(
+		`{"providers":[{"id":"gw","access":{"type":"api-key","env":"S2API_KEY"}}],"selection":{"providerId":"gw","modelId":"m"}}`)); err != nil {
+		t.Fatalf("rewrite override: %v", err)
+	}
+	if code := doSettingsJSON(t, client, http.MethodDelete, server.URL+"/v1/settings/secrets/gw_key", tenant, nil, &out); code != 200 {
+		t.Fatalf("DELETE unreferenced secret: %d (%+v), want 200", code, out)
 	}
 }

@@ -99,6 +99,16 @@ func (s *Server) retryTurn(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, fmt.Errorf("retry: the committed input payload is not readable: %w", err))
 		return
 	}
+	// The re-ask carries the stored selection verbatim, so it must clear the
+	// same gate a fresh input does: a selection the current configuration can
+	// no longer resolve is refused here (400 with the reason) instead of being
+	// committed and failing asynchronously as a run.
+	if len(source.Selection) > 0 {
+		if err := s.vetSelection(source.Selection); err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("the stored selection can no longer be resolved: %w", err))
+			return
+		}
+	}
 	requestID := "retry:" + uuid.NewString()
 	retryOf := inputSeq
 	commit, err := s.commitUserInput(r.Context(), userInput{

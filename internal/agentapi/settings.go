@@ -72,6 +72,11 @@ type ModelSettingsRuntime interface {
 	// restores the deployment document. The previous generation keeps serving
 	// when the candidate cannot be assembled.
 	ApplyModels(ctx context.Context, document json.RawMessage) error
+	// RejectedModelsOverride reports a stored override this process refused at
+	// boot because its credentials no longer resolve: the deployment document
+	// is what is serving, and the read points the operator at the row to fix or
+	// delete. ok=false when what is stored is what is running.
+	RejectedModelsOverride() (revision int64, reason string, ok bool)
 }
 
 // ModelCandidate is the validated summary the PUT response publishes: the
@@ -165,11 +170,13 @@ func (s *Server) getModelSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	source := modelSettingsSourceDeployment
-	if found {
+	rejectedRevision, rejectedReason, rejected := s.cfg.ModelSettingsRuntime.RejectedModelsOverride()
+	if found && !rejected {
 		source = modelSettingsSourceStored
 	} else {
-		// The deployment document is the runtime's boot document, not a re-read
-		// of the file: the runtime is the authority on what it is serving.
+		// What is serving is the runtime's boot document, not a re-read of the
+		// file: the runtime is the authority. A stored override this process
+		// refused at boot is not serving; the read says so below.
 		document = s.cfg.ModelSettingsRuntime.DeploymentModels()
 	}
 	if len(document) == 0 {
@@ -179,12 +186,21 @@ func (s *Server) getModelSettings(w http.ResponseWriter, r *http.Request) {
 	if catalog := s.catalog(); catalog != nil {
 		selection = catalog.DefaultSelection()
 	}
+	issues := s.modelResolutionIssues()
+	if rejected {
+		issues = append(issues, modelcfg.Issue{
+			Field: "storedOverride",
+			Message: fmt.Sprintf(
+				"the saved override at revision %d cannot be served and is not in effect: %s. The deployment document is serving; save a working document or reset to the deployment default.",
+				rejectedRevision, rejectedReason),
+		})
+	}
 	writeJSON(w, http.StatusOK, modelSettingsResponse{
 		Revision:  revision,
 		Source:    source,
 		Document:  document,
 		Selection: selection,
-		Issues:    s.modelResolutionIssues(),
+		Issues:    issues,
 	})
 }
 
@@ -331,8 +347,10 @@ func (s *Server) deleteModelSettings(w http.ResponseWriter, r *http.Request) {
 		// The reset could not be applied: put the override back, guarded by the
 		// revision the delete produced.
 		if restored, restoreErr := s.cfg.ModelSettingsStore.SetModelSettings(r.Context(), tenantID, newRevision, document); restoreErr != nil {
+			// restored is 0 on error; name the revision the rollback tried to
+			// write instead of reporting a number that never existed.
 			s.cfg.Logger.Error("model settings reset rollback failed",
-				"tenant_id", tenantID, "revision", restored, "error", restoreErr)
+				"tenant_id", tenantID, "expected_revision", newRevision, "written_revision", restored, "error", restoreErr)
 		}
 		s.writeSettingsError(w, &settingsReloadError{err: err})
 		return
@@ -569,12 +587,62 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errors.New(s.secretsUnavailableReason()))
 		return
 	}
+	// A stored models document may reference this secret. Deleting it would
+	// leave the next boot with an override that cannot resolve its credential
+	// (the boot falls back to the deployment document and says so, but the
+	// honest move is to refuse the delete while the reference exists).
+	if s.cfg.ModelSettingsStore != nil {
+		if document, revision, _, found, err := s.cfg.ModelSettingsStore.GetModelSettings(r.Context(), tenantID); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		} else if found && documentReferencesSecret(document, name) {
+			writeErr(w, http.StatusConflict, fmt.Errorf(
+				"secret %q is referenced by the stored models document at revision %d; save a document that does not reference it (or reset to the deployment default) before deleting it",
+				name, revision))
+			return
+		}
+	}
 	deleted, err := s.cfg.SecretStore.Delete(r.Context(), tenantID, name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, secretDeleteResponse{Name: name, Deleted: deleted})
+}
+
+// documentReferencesSecret reports whether a models document names the tenant
+// secret anywhere. Documents are data: every string shaped like a reference is
+// one the resolver may try, so the walk is over the whole document rather than
+// a list of known fields.
+func documentReferencesSecret(document json.RawMessage, name string) bool {
+	ref := "secret:" + name
+	var walk func(value any) bool
+	walk = func(value any) bool {
+		switch typed := value.(type) {
+		case string:
+			return typed == ref
+		case []any:
+			for _, item := range typed {
+				if walk(item) {
+					return true
+				}
+			}
+		case map[string]any:
+			for _, item := range typed {
+				if walk(item) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	var parsed any
+	if err := json.Unmarshal(document, &parsed); err != nil {
+		// An unreadable document cannot be shown to reference anything; the
+		// boot path rejects it on its own terms.
+		return false
+	}
+	return walk(parsed)
 }
 
 // --- plugins -------------------------------------------------------------

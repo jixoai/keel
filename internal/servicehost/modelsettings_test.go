@@ -401,3 +401,80 @@ func TestStoredSecretResolvesAnAttempt(t *testing.T) {
 		t.Fatalf("the refusal leaked a credential: %s", rendered)
 	}
 }
+
+// TestBootFallsBackToTheDeploymentDocumentWhenTheOverrideCannotBeServed pins
+// the anti-brick rule: a stored override whose credentials no longer resolve
+// (a deleted secret, an unset environment variable) must not take the
+// deployment down on the next boot. The deployment document serves, the boot
+// says exactly which override it refused, and the settings read can name it so
+// the operator fixes or deletes the row.
+func TestBootFallsBackToTheDeploymentDocumentWhenTheOverrideCannotBeServed(t *testing.T) {
+	deployment := json.RawMessage(`{
+		"providers":[{"id":"dep-gw","api":{"type":"openai-chat-completions","baseUrl":"https://dep.example.invalid/v1"},
+			"access":{"type":"api-key","env":"DEP_KEY"},"modelIds":["deepseek-v4.1-flash"]}],
+		"selection":{"providerId":"dep-gw","modelId":"deepseek-v4.1-flash"}}`)
+	// The stored override references a tenant secret this process cannot
+	// resolve: LookupSecret is nil, which is exactly the "no secret store /
+	// nothing stored" state that used to fail boot.
+	override := json.RawMessage(`{
+		"providers":[{"id":"stored-gw","api":{"type":"openai-chat-completions","baseUrl":"https://stored.example.invalid/v1"},
+			"access":{"type":"api-key","ref":"secret:GONE_KEY"},"modelIds":["deepseek-v4.1-flash"]}],
+		"selection":{"providerId":"stored-gw","modelId":"deepseek-v4.1-flash"}}`)
+
+	st := kernel.NewMemStore()
+	k := kernel.New(st, kernel.Options{})
+	rt, err := Boot(context.Background(), Config{
+		Seams:            Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
+		Tenant:           host.TenantConfig{Models: override},
+		LLM:              testLLM(map[string]string{"DEP_KEY": "env-value"}, ""),
+		DeploymentModels: deployment,
+		OverrideRevision: 9,
+		RuntimeID:        "test-runtime",
+	})
+	if err != nil {
+		t.Fatalf("a stored override that cannot be served must fall back, not fail boot: %v", err)
+	}
+	t.Cleanup(func() { rt.Close(context.Background()) })
+
+	rejected, ok := rt.RejectedModelsOverride()
+	if !ok {
+		t.Fatal("the fallback must be reported")
+	}
+	if rejected.Revision != 9 {
+		t.Fatalf("rejected revision = %d, want 9", rejected.Revision)
+	}
+	if !strings.Contains(rejected.Reason, "GONE_KEY") {
+		t.Fatalf("the reason must name the credential that vanished: %q", rejected.Reason)
+	}
+	// What is serving is the deployment document, not the refused override.
+	service := rt.Models()
+	if service == nil {
+		t.Fatal("the deployment document must serve after the fallback")
+	}
+	if got := service.DefaultSelection(); got.ProviderID != "dep-gw" {
+		t.Fatalf("serving provider = %q, want the deployment one (dep-gw)", got.ProviderID)
+	}
+}
+
+// TestBootKeepsFailingWhenTheDeploymentDocumentItselfIsBroken pins the other
+// half: the fallback is only for the stored override — a deployment document
+// this process cannot serve is still fatal, because it is the deployment's own
+// file.
+func TestBootKeepsFailingWhenTheDeploymentDocumentItselfIsBroken(t *testing.T) {
+	broken := json.RawMessage(`{"providers":[{"id":"x","api":{"type":"carrier-pigeon"}}]}`)
+	st := kernel.NewMemStore()
+	k := kernel.New(st, kernel.Options{})
+	rt, err := Boot(context.Background(), Config{
+		Seams:            Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
+		Tenant:           host.TenantConfig{Models: broken},
+		DeploymentModels: broken,
+		RuntimeID:        "test-runtime",
+	})
+	if err == nil {
+		rt.Close(context.Background())
+		t.Fatal("a broken deployment document must still fail boot")
+	}
+	if !strings.Contains(err.Error(), "api.type") {
+		t.Fatalf("boot error must carry the resolver's diagnostic: %v", err)
+	}
+}

@@ -58,6 +58,17 @@ func validateTenantDocument(doc map[string]any) error {
 		if _, err := decodeSelection(raw); err != nil {
 			return err
 		}
+		// The document's selection speaks the same vocabulary as an input's
+		// selection fact: a key the resolver never reads (a stored baseUrl, say)
+		// must not be storable — it would look like it applied while nothing
+		// reads it.
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("selection: %w", err)
+		}
+		if err := checkSelectionKeys(encoded, selectionKeys); err != nil {
+			return fmt.Errorf("selection: %w", err)
+		}
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -381,5 +382,57 @@ func TestRetryTurnRefusals(t *testing.T) {
 	after := loadSessionEvents(t, st, tenantID, session)
 	if len(after) != len(before) {
 		t.Fatalf("log grew from %d to %d events across refusals", len(before), len(after))
+	}
+}
+
+// TestRetryRefusesAnUnresolvableStoredSelection pins the gate the re-ask shares
+// with a fresh input: the retry copies the stored selection verbatim, so a
+// selection the current configuration can no longer resolve is refused before
+// anything is written, instead of being committed and failing asynchronously as
+// a run.
+func TestRetryRefusesAnUnresolvableStoredSelection(t *testing.T) {
+	hs, st := newTestServer(t, func(c *Config) {
+		c.ValidateSelection = func(raw json.RawMessage) error {
+			var sel struct {
+				ProviderID string `json:"providerId"`
+				ModelID    string `json:"modelId"`
+			}
+			if err := json.Unmarshal(raw, &sel); err != nil {
+				return err
+			}
+			if sel.ProviderID != "s2api" {
+				return fmt.Errorf("unknown provider %q", sel.ProviderID)
+			}
+			return nil
+		}
+	})
+	hc := hs.Client()
+	tenant := uuid.NewString()
+	session := inputSetup(t, hs, tenant)
+	tenantID := uuid.MustParse(tenant)
+
+	var appended struct {
+		Seq int64 `json:"seq"`
+	}
+	if code := doJSON(t, hc, http.MethodPost, hs.URL+"/v1/sessions/"+session.String()+"/events", tenant,
+		map[string]any{
+			"kind": "user.message",
+			"payload": map[string]any{
+				"text":      "ask the old gateway",
+				"requestId": "orig-gone",
+				"selection": map[string]any{"providerId": "gone-gw", "modelId": "deepseek-v4.1-flash"},
+			},
+		}, &appended); code != 201 {
+		t.Fatalf("append original input: %d", code)
+	}
+	before := loadSessionEvents(t, st, tenantID, session)
+
+	var retry retryBody
+	code := postRetry(t, hc, hs, tenant, session, "t_"+strconv.FormatInt(appended.Seq, 10), "", &retry)
+	if code != http.StatusBadRequest {
+		t.Fatalf("retry with an unresolvable selection: %d (%+v), want 400", code, retry)
+	}
+	if after := loadSessionEvents(t, st, tenantID, session); len(after) != len(before) {
+		t.Fatalf("refused retry wrote %d events (before %d)", len(after), len(before))
 	}
 }
