@@ -219,6 +219,12 @@ func (s *Server) modelResolutionIssues() []modelcfg.Issue {
 // with the runtime's own construction, persist, apply) lives in
 // applyModelSettings; this handler only shapes the wire.
 func (s *Server) putModelSettings(w http.ResponseWriter, r *http.Request) {
+	// One settings write at a time: a write is a read-modify-apply sequence and
+	// two of them interleaving can leave the stored revision and the serving
+	// generation disagreeing.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
 	tenantID, ok := tenantFrom(w, r)
 	if !ok {
 		return
@@ -305,6 +311,9 @@ func (s *Server) rollbackModelSettings(ctx context.Context, tenantID uuid.UUID, 
 // in the requested state, so the reset is idempotent: it answers 200 with the
 // current revision and source=deployment instead of failing a repeated click.
 func (s *Server) deleteModelSettings(w http.ResponseWriter, r *http.Request) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
 	tenantID, ok := tenantFrom(w, r)
 	if !ok {
 		return

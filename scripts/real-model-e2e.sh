@@ -1591,6 +1591,7 @@ print(seqs[-1] if seqs else "")')"
   RESET_EVENTS="$prefix-run-reset-events.json" \
   SUMMARY_OUT="$EVIDENCE_DIR/settings-summary.json" \
   python3 - <<'PY' || die "model-settings assertions failed; see $EVIDENCE_DIR/settings-summary.json"
+import hashlib
 import json, os
 
 first, second = os.environ["SETTINGS_MODEL"], os.environ["SECOND_MODEL"]
@@ -1663,25 +1664,40 @@ def payload_of(event):
 
 
 # Retry: the ledger grew, the original turns were not rewritten.
+#
+# A retry is deliberately not idempotent, and the harness above answers provider
+# weather with another intentional attempt: the assertion is therefore "at least
+# one re-ask carrying retryOf, the newest of them settled", never "exactly one"
+# (that would fail on a healthy retry the gateway hiccupped on).
 retry_events = load(os.environ["RETRY_EVENTS"]).get("events") or []
 reset_events = load(os.environ["RESET_EVENTS"]).get("events") or []
 retry_seq = int(os.environ["RETRY_SEQ"])
 reasks = [e for e in retry_events if e.get("kind") == "user.message" and payload_of(e).get("retryOf") == retry_seq]
-check("the retry appended one re-ask carrying retryOf", len(reasks) == 1,
+check("the retry appended a re-ask carrying retryOf", len(reasks) >= 1,
       "retryOf=%s matches=%d" % (retry_seq, len(reasks)))
 if reasks:
-    new_seq = reasks[0]["seq"]
+    new_seq = reasks[-1]["seq"]
     later = [e for e in retry_events if e["seq"] > new_seq]
-    check("the re-ask ran to a fresh terminal run",
+    check("the newest re-ask ran to a fresh terminal run",
           any(e.get("kind") == "run.finished" for e in later) and
           any(e.get("kind") == "assistant.message" for e in later),
           "seqs after %s: %s" % (new_seq, [e.get("kind") for e in later]))
-    untouched = all(
-        any(o["seq"] == e["seq"] and o.get("kind") == e.get("kind") for o in retry_events)
-        for e in reset_events
-    )
-    check("the original turns are still present at their own seqs", untouched,
-          "%d original events" % len(reset_events))
+
+
+    def digest(event):
+        payload = payload_of(event)
+        raw = payload if isinstance(payload, str) else json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+    by_seq = {e["seq"]: e for e in retry_events}
+    rewritten = [
+        e["seq"] for e in reset_events
+        if by_seq.get(e["seq"], {}).get("kind") != e.get("kind")
+        or digest(by_seq.get(e["seq"], {})) != digest(e)
+    ]
+    check("every original event is byte-identical at its own seq (kind + payload)", not rewritten,
+          "changed seqs: %s over %d original events" % (rewritten, len(reset_events)))
 
 summary = {"ok": all(c["ok"] for c in checks), "checks": checks}
 with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:

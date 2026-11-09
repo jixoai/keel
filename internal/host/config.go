@@ -27,7 +27,7 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // secretRefPattern accepts only indirections, never literal credentials:
 // ${NAME}, env:NAME, or secret:NAME.
-var secretRefPattern = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|(?:env|secret):[A-Za-z_][A-Za-z0-9_]*)$`)
+var secretRefPattern = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]{0,63}\}|(?:env|secret):[A-Za-z_][A-Za-z0-9_]{0,63})$`)
 
 // toolPattern accepts registry names and trailing-* wildcards (mcp__*).
 var toolPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+\*?$`)

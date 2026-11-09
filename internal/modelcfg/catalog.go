@@ -541,7 +541,7 @@ var (
 	// host's exact language: a credential is always an indirection — ${NAME},
 	// env:NAME or secret:NAME — and never a literal value. The two acceptances
 	// are pinned together by TestSecretRefVocabularyMatchesHost.
-	secretRefPattern = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|(?:env|secret):[A-Za-z_][A-Za-z0-9_]*)$`)
+	secretRefPattern = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]{0,63}\}|(?:env|secret):[A-Za-z_][A-Za-z0-9_]{0,63})$`)
 )
 
 func validateIdentifier(value, field string) error {

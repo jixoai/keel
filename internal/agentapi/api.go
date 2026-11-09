@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -132,6 +133,12 @@ type Config struct {
 type Server struct {
 	cfg Config
 	mux *http.ServeMux
+	// settingsMu serializes the model-settings write path (read current →
+	// validate → store → apply). Without it two concurrent writes can interleave
+	// as store(B), apply(A): the row says B while the generation serves A. The
+	// window is small (the store write and the apply are back to back) but the
+	// inconsistency is real, and one lock is cheaper than explaining it.
+	settingsMu sync.Mutex
 }
 
 // New builds the API and its routes.

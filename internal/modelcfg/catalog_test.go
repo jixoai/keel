@@ -407,6 +407,11 @@ func TestSecretRefVocabularyMatchesHost(t *testing.T) {
 		"hunter2", "sk-1234", "pk-live", "Bearer abc", "basic xyz",
 		"env:", "secret:", "${}", "${NAME", "NAME}", "env:1BAD", "env:BAD-NAME",
 		"ENV:NAME", " name", "name ", "   ", "a/b",
+		// The store's secret names are capped at 64 characters; the reference
+		// vocabulary carries the same bound, so a name that cannot be stored
+		// cannot be referenced either (the two vocabularies are one).
+		"env:" + strings.Repeat("A", 64), "env:" + strings.Repeat("A", 65),
+		"secret:" + strings.Repeat("A", 65), "${" + strings.Repeat("A", 65) + "}",
 	}
 	for _, sample := range samples {
 		hostErr := host.TenantConfig{Agent: host.AgentConfig{APIKeyRef: sample}}.Validate()
