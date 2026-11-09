@@ -3,7 +3,7 @@
 // attachments and the approval card. Every row is a pure function of a
 // `TurnView` / `DecisionView`; state that survives cell recycling lives in
 // module signals keyed by turn/segment id.
-import { Image, keymap, platform, signal, Text, View, windowSize } from "nsh";
+import { Clipboard, Image, keymap, platform, signal, Text, View, windowSize } from "nsh";
 import { TextView } from "nsh/base";
 import type {
   AttachmentRef,
@@ -16,18 +16,23 @@ import type {
   TurnView,
   WorkSegment,
 } from "../data/contract";
-import { formatDuration, formatTokens, preview } from "../data/wire";
+import { formatDuration, formatTime, formatTokens, preview } from "../data/wire";
 import { store } from "../data/store";
 import { Caret, Divider, IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
-import { CONTINUATION, fitCells, wrapCells } from "../ui/text";
-import { Icon } from "../ui/icons";
-import { alpha, colors, glass, radius, space } from "../ui/theme";
+import { fitCells, wrapCells } from "../ui/text";
+import { Icon, type IconName } from "../ui/icons";
+import { alpha, colors, glass, mono, radius, space } from "../ui/theme";
 
 const expandedTools = signal<Record<string, boolean>>({});
 const expandedThinking = signal<Record<string, boolean>>({});
 const expandedToolsDetails = signal<Record<string, boolean>>({});
+const expandedFamilies = signal<Record<string, boolean>>({});
+const expandedSegments = signal<Record<string, boolean>>({});
 /** The terminal approval cursor, keyed by decision id. */
 const approvalCursor = signal<Record<string, number>>({});
+/** Which copy control just copied (its short "已复制" confirmation). */
+const copiedKey = signal<string | null>(null);
+let copiedTimer: number | undefined;
 
 const toggle = (mapSignal: typeof expandedTools, key: string, fallback = false) => {
   const map = mapSignal();
@@ -167,13 +172,34 @@ function UserInputRow(props: { input: InputView; attachments?: AttachmentRef[]; 
   );
 }
 
-function ThinkingBlock(props: { turnId: string; text: string; running: boolean }) {
+/** The last non-empty line of a thinking text — the one-line summary the
+ * collapsed block shows while the model is still working (C11). */
+function lastLineOf(text: string, max = 48): string {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const line = lines[lines.length - 1] ?? "";
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** Thinking is folded by default — streaming shows one live summary line,
+ * once settled the fold is titled with how long it took (C11). */
+function ThinkingBlock(props: { turnId: string; text: string; running: boolean; durationMs?: number }) {
   const key = `${props.turnId}-thinking`;
-  const open = () => isOpen(expandedThinking(), key, props.running);
+  const open = () => isOpen(expandedThinking(), key, false);
+  const label = () => {
+    if (props.running) {
+      const line = lastLineOf(props.text);
+      return line ? `Thinking · ${line}` : "Thinking";
+    }
+    const duration = formatDuration(props.durationMs);
+    return duration ? `Thought · ${duration}` : "Thought";
+  };
   return (
     <View style={{ gap: space.xs }}>
       <Press
-        onPress={() => toggle(expandedThinking, key, props.running)}
+        onPress={() => toggle(expandedThinking, key, false)}
         accessibilityLabel="思考过程"
         style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", height: 28 }}
       >
@@ -182,8 +208,16 @@ function ThinkingBlock(props: { turnId: string; text: string; running: boolean }
         ) : (
           <Icon name="brain" size={13} tint={colors.mutedForeground} />
         )}
-        <Text style={{ fontSize: 12, fontWeight: "500", color: colors.mutedForeground }}>
-          {props.running ? "思考中…" : "思考过程"}
+        <Text
+          style={{
+            numberOfLines: 1,
+            maxWidth: 480,
+            fontSize: 12,
+            fontWeight: "500",
+            color: colors.mutedForeground,
+          }}
+        >
+          {label()}
         </Text>
         <View
           style={{
@@ -215,9 +249,121 @@ function ThinkingBlock(props: { turnId: string; text: string; running: boolean }
   );
 }
 
+/** The one assistant-text renderer: a committed segment's text and the live
+ * streaming preview are the same component on the same path, so the moment the
+ * preview is committed nothing re-flows, re-wraps or re-styles (C7). The only
+ * difference is the streaming caret. */
+function AssistantText(props: { text: string; streaming: boolean }) {
+  const termWidth = Math.max(20, Math.floor(windowSize().width / 8) - 6);
+  return (
+    <If
+      when={platform.idiom === "terminal"}
+      else={
+        <TextView
+          markdown={props.text}
+          selectable
+          options={{ streaming: props.streaming }}
+          streamingCaret={props.streaming ? <Caret /> : undefined}
+        />
+      }
+    >
+      <Text
+        style={{
+          userSelect: "text",
+          fontSize: 13.5,
+          lineHeight: 20,
+          numberOfLines: props.streaming ? 3 : undefined,
+          color: colors.foreground,
+        }}
+      >
+        {props.streaming
+          ? fitCells(props.text, termWidth * 2)
+          : wrapCells(props.text, termWidth)}
+      </Text>
+    </If>
+  );
+}
+
 function toolTone(call: ToolCallView): "running" | "done" | "failed" {
   if (call.error) return "failed";
   return call.result !== undefined ? "done" : "running";
+}
+
+// ---- tool families (C9) ---------------------------------------------------
+
+type ToolFamily = "explore" | "terminal" | "changes" | "other";
+
+/** The words a tool name carries its family in (matched on `a.b_c-d` tokens). */
+const FAMILY_WORDS: Record<Exclude<ToolFamily, "other">, string[]> = {
+  terminal: ["shell", "bash", "sh", "zsh", "exec", "run", "terminal", "command", "cmd", "process", "spawn"],
+  changes: [
+    "edit", "write", "patch", "apply", "replace", "create", "delete", "remove", "mkdir",
+    "move", "rename", "git", "commit", "diff", "build", "test", "install", "deploy", "publish",
+  ],
+  explore: [
+    "read", "list", "search", "grep", "glob", "find", "open", "load", "fetch", "view", "show",
+    "cat", "ls", "tree", "stat", "head", "tail", "inspect", "check", "health", "status",
+    "context", "workspace", "calendar", "transcript", "web", "http",
+  ],
+};
+
+function familyOf(name: string): ToolFamily {
+  const tokens = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const has = (words: string[]) => tokens.some((token) => words.includes(token));
+  if (has(FAMILY_WORDS.terminal)) return "terminal";
+  if (has(FAMILY_WORDS.changes)) return "changes";
+  if (has(FAMILY_WORDS.explore)) return "explore";
+  return "other";
+}
+
+const FAMILY_LABEL: Record<ToolFamily, string> = {
+  explore: "探索",
+  terminal: "终端",
+  changes: "变更",
+  other: "工具",
+};
+
+const FAMILY_ICON: Record<ToolFamily, IconName> = {
+  explore: "search",
+  terminal: "terminal",
+  changes: "file",
+  other: "tool",
+};
+
+/** `service=api · timeoutMs=2000` — a call's arguments as one readable line,
+ * never raw JSON as the main view (C9). */
+function formatArgs(value: unknown, max = 96): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return preview(value, max);
+  if (typeof value !== "object") return String(value);
+  if (Array.isArray(value)) return preview(value, max);
+  const parts: string[] = [];
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const text =
+      item === null || item === undefined ? "—" : typeof item === "object" ? preview(item, 40) : String(item);
+    parts.push(`${key}=${text}`);
+  }
+  const joined = parts.join(" · ");
+  return joined.length > max ? `${joined.slice(0, max - 1)}…` : joined;
+}
+
+/** The full arguments for the expanded detail (a string keeps its lines). */
+function argumentBody(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return String(value);
+  if (Array.isArray(value)) return preview(value, 600);
+  const parts: string[] = [];
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const text =
+      item === null || item === undefined
+        ? "—"
+        : typeof item === "object"
+          ? preview(item, 400)
+          : String(item);
+    parts.push(`${key}=${text}`);
+  }
+  return parts.join("\n");
 }
 
 function ToolRow(props: { call: ToolCallView }) {
@@ -227,6 +373,9 @@ function ToolRow(props: { call: ToolCallView }) {
   const duration = props.call.finishedAt && props.call.startedAt
     ? formatDuration(props.call.finishedAt - props.call.startedAt)
     : "";
+  const argsLine = formatArgs(props.call.args, 72);
+  const resultText = () =>
+    props.call.error ?? (props.call.result === undefined ? "" : preview(props.call.result, 1400));
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
       <Press
@@ -258,7 +407,7 @@ function ToolRow(props: { call: ToolCallView }) {
         </View>
         <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{props.call.name}</Text>
         <Text style={{ flex: 1, numberOfLines: 1, fontSize: 11.5, color: colors.mutedForeground }}>
-          {preview(props.call.args, 72)}
+          {argsLine}
         </Text>
         {duration ? (
           <Text style={{ fontSize: 11, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
@@ -279,15 +428,10 @@ function ToolRow(props: { call: ToolCallView }) {
             borderColor: colors.glassEdge,
           }}
         >
-          <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.mutedForeground }}>参数</Text>
-          <Text style={{ userSelect: "text", fontSize: 11.5, lineHeight: 17, color: colors.foreground }}>
-            {preview(props.call.args, 1000) || "（无）"}
-          </Text>
+          {/* Result first: what a call did matters more than what it was asked. */}
           {props.call.result !== undefined || props.call.error ? (
             <>
-              <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.mutedForeground, marginTop: 4 }}>
-                结果
-              </Text>
+              <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.mutedForeground }}>结果</Text>
               <Text
                 style={{
                   userSelect: "text",
@@ -296,12 +440,73 @@ function ToolRow(props: { call: ToolCallView }) {
                   color: props.call.error ? colors.danger : colors.foreground,
                 }}
               >
-                {props.call.error ?? preview(props.call.result, 1400)}
+                {resultText()}
               </Text>
             </>
           ) : (
             <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>等待结果…</Text>
           )}
+          <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.mutedForeground, marginTop: 4 }}>
+            参数
+          </Text>
+          <Text
+            style={{
+              userSelect: "text",
+              fontSize: 11,
+              lineHeight: 16,
+              color: colors.mutedForeground,
+              fontFamily: mono(),
+            }}
+          >
+            {argumentBody(props.call.args) || "（无）"}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** One family of a segment's calls, collapsed by default: the segment's own
+ * summary line already says how many and how many failed (C9). */
+function ToolFamilyGroup(props: { groupId: string; family: ToolFamily; calls: ToolCallView[] }) {
+  const key = `${props.groupId}-${props.family}`;
+  const open = () => isOpen(expandedFamilies(), key, false);
+  const failed = () => props.calls.filter((call) => toolTone(call) === "failed").length;
+  const done = () => props.calls.filter((call) => toolTone(call) === "done").length;
+  const pending = () => props.calls.length - failed() - done();
+  const detail = () =>
+    failed() > 0 ? `${failed()} 个失败` : pending() > 0 ? `${pending()} 个进行中` : "全部完成";
+  return (
+    <View style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
+      <Press
+        onPress={() => toggle(expandedFamilies, key, false)}
+        accessibilityLabel={`工具家族 ${FAMILY_LABEL[props.family]}`}
+        style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: 34 }}
+        hoverStyle={{ backgroundColor: colors.hover }}
+      >
+        <Icon name={FAMILY_ICON[props.family]} size={12} tint={colors.mutedForeground} />
+        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>
+          {FAMILY_LABEL[props.family]}
+        </Text>
+        <Text style={{ fontSize: 11, color: failed() > 0 ? colors.danger : colors.mutedForeground }}>
+          {props.calls.length} 个 · {detail()}
+        </Text>
+        <View style={{ flex: 1 }} />
+        <View
+          style={{
+            transform: open() ? "rotate(0deg)" : "rotate(-90deg)",
+            transitionProperty: "transform",
+            transitionDuration: 180,
+          }}
+        >
+          <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
+        </View>
+      </Press>
+      {open() ? (
+        <View style={{ paddingLeft: 2, paddingBottom: 2 }}>
+          {props.calls.map((call) => (
+            <ToolRow call={call} />
+          ))}
         </View>
       ) : null}
     </View>
@@ -314,12 +519,43 @@ function ToolGroup(props: { segment: WorkSegment; running: boolean }) {
   const open = () => isOpen(expandedTools(), key, true);
   const failed = () => calls().filter((call) => toolTone(call) === "failed").length;
   const done = () => calls().filter((call) => toolTone(call) === "done").length;
-  const detail = () =>
-    failed() > 0
-      ? `${failed()} 个失败`
-      : calls().length > 0 && done() === calls().length
-        ? "全部完成"
-        : "";
+  const unfinished = () => calls().length - failed() - done();
+  /** The line every tool block is read by: how many, how many failed. */
+  const summary = () => {
+    const total = calls().length;
+    const families = new Set(calls().map((call) => familyOf(call.name)));
+    const noun = families.size === 1 && families.has("terminal") ? "命令" : "工具";
+    const failures = failed();
+    if (failures > 0) return `${total} 个${noun}，${failures} 个失败`;
+    if (!props.running && unfinished() > 0) return `${total} 个${noun}，${unfinished()} 个未完成`;
+    if (total > 0 && done() === total) return `${total} 个${noun}，全部完成`;
+    return `${total} 个${noun}`;
+  };
+  /** Families in first-appearance order, only those with two or more members;
+   * everything else stays a standalone row (C9). */
+  const items = () => {
+    const groups = new Map<ToolFamily, ToolCallView[]>();
+    for (const call of calls()) {
+      const family = familyOf(call.name);
+      const bucket = groups.get(family);
+      if (bucket) bucket.push(call);
+      else groups.set(family, [call]);
+    }
+    const emitted = new Set<ToolFamily>();
+    const list: Array<{ kind: "family"; family: ToolFamily; calls: ToolCallView[] } | { kind: "call"; call: ToolCallView }> = [];
+    for (const call of calls()) {
+      const family = familyOf(call.name);
+      const bucket = groups.get(family) ?? [];
+      if (bucket.length < 2) {
+        list.push({ kind: "call", call });
+        continue;
+      }
+      if (emitted.has(family)) continue;
+      emitted.add(family);
+      list.push({ kind: "family", family, calls: bucket });
+    }
+    return list;
+  };
   return (
     <View
       style={{
@@ -348,15 +584,11 @@ function ToolGroup(props: { segment: WorkSegment; running: boolean }) {
         >
           <Icon name="tool" size={13} tint={colors.mutedForeground} />
         </View>
-        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>
-          {calls().length} 个工具
-        </Text>
+        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>{summary()}</Text>
         {props.running ? (
           <Spinner size={11} tint={colors.mutedForeground} />
-        ) : detail() ? (
-          <Text style={{ fontSize: 11, color: failed() > 0 ? colors.danger : colors.mutedForeground }}>
-            · {detail()}
-          </Text>
+        ) : failed() > 0 ? (
+          <Text style={{ fontSize: 11, color: colors.danger }}>· 需要留意</Text>
         ) : null}
         <View style={{ flex: 1 }} />
         <View style={{ transform: open() ? "rotate(0deg)" : "rotate(-90deg)", transitionProperty: "transform", transitionDuration: 180 }}>
@@ -365,9 +597,13 @@ function ToolGroup(props: { segment: WorkSegment; running: boolean }) {
       </Press>
       {open() ? (
         <View style={{ paddingBottom: 4 }}>
-          {calls().map((call) => (
-            <ToolRow call={call} />
-          ))}
+          {items().map((item) =>
+            item.kind === "family" ? (
+              <ToolFamilyGroup groupId={key} family={item.family} calls={item.calls} />
+            ) : (
+              <ToolRow call={item.call} />
+            ),
+          )}
           {calls().length === 0 ? (
             <Text style={{ fontSize: 12, color: colors.mutedForeground, paddingVertical: 10 }}>
               正在准备工具…
@@ -556,6 +792,112 @@ function AssistantHeader(props: { ordinal: number }) {
   );
 }
 
+/** The ledger's own thinking window for a segment: from the segment's first
+ * event to the first tool it triggered; a segment that never called a tool
+ * falls back to its own span, then to the run's duration (C11). */
+function thinkingDurationMs(turn: TurnView, segment: WorkSegment): number | undefined {
+  const start = segment.startedAt;
+  if (start !== undefined) {
+    const toolStarts = segment.toolCalls
+      .map((call) => call.startedAt)
+      .filter((value): value is number => value !== undefined);
+    if (toolStarts.length) {
+      const first = Math.min(...toolStarts);
+      return first > start ? first - start : undefined;
+    }
+    if (segment.endedAt !== undefined && segment.endedAt > start) return segment.endedAt - start;
+  }
+  if (!segment.toolCalls.length && (turn.runSummary?.durationMs ?? 0) > 0) {
+    return turn.runSummary?.durationMs;
+  }
+  return undefined;
+}
+
+/** `12 秒` / `1 分 20 秒` — a work segment's own words (C10). */
+function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes} 分 ${rest} 秒` : `${minutes} 分`;
+}
+
+/** A segment's settled span from the ledger, with the run's duration as the
+ * fallback for the single-run turn (the segment was the run). */
+function segmentDurationMs(turn: TurnView, segment: WorkSegment, isLast: boolean): number | undefined {
+  if (segment.startedAt !== undefined && segment.endedAt !== undefined && segment.endedAt > segment.startedAt) {
+    return segment.endedAt - segment.startedAt;
+  }
+  if (isLast && (turn.runSummary?.durationMs ?? 0) > 0) return turn.runSummary?.durationMs;
+  return undefined;
+}
+
+/** The first non-empty line of a segment — the preview a folded segment keeps. */
+function firstLineOf(text: string | undefined, max = 64): string {
+  const line = (text ?? "")
+    .split("\n")
+    .map((item) => item.trim())
+    .find(Boolean) ?? "";
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** The one work-segment header: 工作中 N 秒 / 已工作 N 秒 / 已停止 (C10). It is
+ * the fold's handle; the latest answer always renders outside the fold. */
+function SegmentHeader(props: {
+  label: () => string;
+  preview: () => string;
+  running: () => boolean;
+  foldable: () => boolean;
+  open: () => boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Press
+      onPress={props.foldable() ? props.onToggle : undefined}
+      accessibilityLabel={props.label()}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        height: 30,
+        paddingHorizontal: 6,
+        borderRadius: radius.control,
+      }}
+      hoverStyle={props.foldable() ? { backgroundColor: colors.hover } : undefined}
+    >
+      {props.running() ? (
+        <Spinner size={11} tint={colors.mutedForeground} />
+      ) : (
+        <Icon name="clock" size={12} tint={colors.mutedForeground} />
+      )}
+      <Text
+        style={{
+          fontSize: 11.5,
+          fontWeight: "600",
+          color: colors.mutedForeground,
+          fontVariant: ["tabular-nums"],
+        }}
+      >
+        {props.label()}
+      </Text>
+      <Text style={{ flex: 1, numberOfLines: 1, fontSize: 11, color: colors.mutedForeground }}>
+        {props.preview()}
+      </Text>
+      <If when={props.foldable()}>
+        <View
+          style={{
+            transform: props.open() ? "rotate(0deg)" : "rotate(-90deg)",
+            transitionProperty: "transform",
+            transitionDuration: 180,
+          }}
+        >
+          <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
+        </View>
+      </If>
+    </Press>
+  );
+}
+
 export function TurnRow(props: {
   turn: () => TurnView;
   attachmentsFor: (requestId: string) => AttachmentRef[] | undefined;
@@ -564,6 +906,8 @@ export function TurnRow(props: {
   /** The conversation is parked on an open question (C2): the approval card
    * is the current activity, so the turn shows no loading motion. */
   waiting: () => boolean;
+  /** The conversation panel's clock, read only while something is running. */
+  now: () => number;
 }) {
   const synthetic = () => {
     const turn = props.turn();
@@ -573,6 +917,10 @@ export function TurnRow(props: {
     const turn = props.turn();
     return props.isLastRunning() && turn.status === "running" && !!props.partialText();
   };
+  /** The streaming preview lands inside the last segment — the place the
+   * committed text will occupy — and only floats free before any segment
+   * exists (C7). */
+  const streamInSegment = () => streaming() && props.turn().workSegments.length > 0;
   const waitingForWords = () => {
     const turn = props.turn();
     return (
@@ -581,11 +929,6 @@ export function TurnRow(props: {
       !turn.workSegments.some((segment) => segment.assistantText || segment.toolCalls.length || segment.assistantThinking) &&
       !streaming()
     );
-  };
-  const terminalPartial = () => {
-    const text = props.partialText() ?? "";
-    const budget = Math.max(40, Math.floor(windowSize().width / 8) - 8) * 2;
-    return fitCells(text, budget);
   };
   return (
     <View style={{ paddingVertical: space.sm }}>
@@ -607,89 +950,92 @@ export function TurnRow(props: {
           ))}
           <AssistantHeader ordinal={props.turn().ordinal} />
           <View style={{ gap: space.md, paddingLeft: 2 }}>
-            {props.turn().workSegments.map((segment, index) => (
-              <View style={{ gap: 10 }}>
-                <If when={index > 0 && !!segment.triggerInput}>
-                  <Divider label="引导生效 · 新工作段" tone="brand" />
-                </If>
-                <If when={!!segment.assistantThinking}>
-                  <ThinkingBlock
-                    turnId={props.turn().turnId}
-                    text={segment.assistantThinking ?? ""}
-                    running={
-                      props.turn().status === "running" &&
-                      !props.waiting() &&
-                      index === props.turn().workSegments.length - 1 &&
-                      !segment.assistantText &&
-                      segment.toolCalls.length === 0
-                    }
-                  />
-                </If>
-                <If when={segment.toolCalls.length > 0}>
-                  <ToolGroup
-                    segment={segment}
-                    running={
-                      props.turn().status === "running" &&
-                      segment.toolCalls.some((call) => call.result === undefined && !call.error)
-                    }
-                  />
-                </If>
-                <If when={!!segment.assistantText}>
-                  <If
-                    when={platform.idiom === "terminal"}
-                    else={<TextView markdown={segment.assistantText ?? ""} selectable options={{ streaming: false }} />}
-                  >
-                    <Text
-                      style={{
-                        userSelect: "text",
-                        fontSize: 13.5,
-                        lineHeight: 20,
-                        color: colors.foreground,
-                      }}
-                    >
-                      {wrapCells(segment.assistantText ?? "", Math.max(20, Math.floor(windowSize().width / 8) - 6))}
-                    </Text>
-                  </If>
-                </If>
-              </View>
-            ))}
-            <If when={streaming()}>
-              <If
-                when={platform.idiom === "terminal"}
-                else={
-                  <View style={{ gap: 6 }}>
-                    <TextView
-                      markdown={props.partialText() ?? ""}
-                      selectable
-                      options={{ streaming: true }}
-                      streamingCaret={<Caret />}
-                    />
-                    <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>partial · 尚未提交</Text>
-                  </View>
+            {props.turn().workSegments.map((segment, index) => {
+              const isLast = () => index === props.turn().workSegments.length - 1;
+              const segmentKey = `${props.turn().turnId}:seg:${segment.segmentId}`;
+              // Earlier segments fold once the turn moved past them; the last
+              // one stays open, and its answer renders outside the fold anyway.
+              const foldOpen = () => isOpen(expandedSegments(), segmentKey, isLast());
+              const foldable = () => !!segment.assistantThinking || segment.toolCalls.length > 0;
+              const segmentLabel = () => {
+                const turn = props.turn();
+                if (isLast() && turn.status === "running") {
+                  const elapsed = segment.startedAt !== undefined ? formatElapsed(props.now() - segment.startedAt) : "";
+                  return elapsed ? `工作中 ${elapsed}` : "工作中";
                 }
-              >
-                <View style={{ gap: 4 }}>
-                  <Text
-                    style={{
-                      userSelect: "text",
-                      fontSize: 13,
-                      lineHeight: 19,
-                      numberOfLines: 3,
-                      color: colors.mutedForeground,
-                    }}
-                  >
-                    {terminalPartial()}
-                  </Text>
-                  <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
-                    partial · 尚未提交 · {CONTINUATION}
-                  </Text>
+                if (isLast() && turn.status === "interrupted") return "已停止";
+                const duration = segmentDurationMs(turn, segment, isLast());
+                return duration !== undefined ? `已工作 ${formatElapsed(duration)}` : "已工作";
+              };
+              const segmentPreview = () =>
+                foldOpen()
+                  ? ""
+                  : firstLineOf(segment.assistantText) ||
+                    firstLineOf(segment.assistantThinking) ||
+                    (segment.toolCalls.length ? `${segment.toolCalls.length} 个工具` : "");
+              const headerVisible = () => props.turn().workSegments.length > 1 || (isLast() && props.turn().status === "running");
+              return (
+                <View style={{ gap: 10 }}>
+                  <If when={index > 0 && !!segment.triggerInput}>
+                    <Divider label="引导生效 · 新工作段" tone="brand" />
+                  </If>
+                  <If when={headerVisible()}>
+                    <SegmentHeader
+                      label={segmentLabel}
+                      preview={segmentPreview}
+                      running={() => isLast() && props.turn().status === "running"}
+                      foldable={foldable}
+                      open={foldOpen}
+                      onToggle={() => toggle(expandedSegments, segmentKey, isLast())}
+                    />
+                  </If>
+                  <If when={foldOpen()}>
+                    <View style={{ gap: 10 }}>
+                      <If when={!!segment.assistantThinking}>
+                        <ThinkingBlock
+                          turnId={props.turn().turnId}
+                          text={segment.assistantThinking ?? ""}
+                          durationMs={thinkingDurationMs(props.turn(), segment)}
+                          running={
+                            props.turn().status === "running" &&
+                            !props.waiting() &&
+                            isLast() &&
+                            !segment.assistantText &&
+                            segment.toolCalls.length === 0
+                          }
+                        />
+                      </If>
+                      <If when={segment.toolCalls.length > 0}>
+                        <ToolGroup
+                          segment={segment}
+                          running={
+                            props.turn().status === "running" &&
+                            segment.toolCalls.some((call) => call.result === undefined && !call.error)
+                          }
+                        />
+                      </If>
+                      <If when={!!segment.assistantText && !isLast()}>
+                        <AssistantText text={segment.assistantText ?? ""} streaming={false} />
+                      </If>
+                    </View>
+                  </If>
+                  {/* The latest answer is never inside the fold. */}
+                  <If when={!!segment.assistantText && isLast()}>
+                    <AssistantText text={segment.assistantText ?? ""} streaming={false} />
+                  </If>
+                  <If when={streamInSegment() && isLast()}>
+                    <AssistantText text={props.partialText() ?? ""} streaming />
+                  </If>
                 </View>
-              </If>
+              );
+            })}
+            <If when={streaming() && props.turn().workSegments.length === 0}>
+              <AssistantText text={props.partialText() ?? ""} streaming />
             </If>
             <If when={waitingForWords()}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 24 }}>
+              {/* Loading is motion only (C7): no "thinking…" words. */}
+              <View style={{ flexDirection: "row", alignItems: "center", height: 24 }}>
                 <Spinner size={12} tint={colors.brand} />
-                <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>正在思考…</Text>
               </View>
             </If>
             {props.turn().postTurnEvents.map((event) => {
@@ -992,9 +1338,59 @@ export function ApprovalCard(props: {
   );
 }
 
-export function QueuePanel(props: { queue: QueueItemView[]; onRemove?: (requestId: string) => void }) {
+/** A guide that has not landed yet (C12). It is shown at the tail of the
+ * stream — the place it will be injected — instead of a banner above the
+ * composer, so a reader sees where the guidance is going to arrive. */
+export function GuideWaitingRow(props: { item: QueueItemView; stopping: boolean }) {
+  const ink = () => (props.stopping ? colors.warning : colors.brand);
   return (
-    <If when={props.queue.length > 0}>
+    <View
+      accessibilityLabel="等待引导当前任务"
+      style={{
+        alignSelf: "flex-start",
+        maxWidth: "86%",
+        gap: 5,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: radius.card,
+        backgroundColor: props.stopping ? colors.warningTint : colors.brandMuted,
+        borderWidth: 1,
+        borderColor: alpha(ink(), 0.3),
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {props.stopping ? (
+          <Icon name="clock" size={12} tint={ink()} />
+        ) : (
+          <Spinner size={12} tint={ink()} />
+        )}
+        <Text style={{ fontSize: 12, fontWeight: "600", color: ink() }}>
+          {props.stopping ? "停止中 · 引导将转为队列" : "等待引导当前任务…"}
+        </Text>
+      </View>
+      <Text
+        style={{
+          userSelect: "text",
+          fontSize: 13,
+          lineHeight: 19,
+          numberOfLines: 3,
+          color: colors.foreground,
+        }}
+      >
+        {props.item.text}
+      </Text>
+      <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
+        {props.stopping ? "任务结束后按顺序入队" : "将在工具轮边界注入当前任务"}
+      </Text>
+    </View>
+  );
+}
+
+export function QueuePanel(props: { queue: QueueItemView[]; onRemove?: (requestId: string) => void }) {
+  // Guides render at the stream's tail (C12); the panel keeps the queue.
+  const items = () => props.queue.filter((item) => item.delivery !== "guide");
+  return (
+    <If when={items().length > 0}>
       <View
         style={{
           borderRadius: radius.card,
@@ -1007,21 +1403,15 @@ export function QueuePanel(props: { queue: QueueItemView[]; onRemove?: (requestI
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="clock" size={12} tint={colors.mutedForeground} />
           <Text style={{ fontSize: 11, fontWeight: "700", color: colors.mutedForeground }}>
-            队列 · {props.queue.length}
+            队列 · {items().length}
           </Text>
           <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>当前任务结束后按顺序发送</Text>
         </View>
-        {props.queue.map((item, index) => (
+        {items().map((item, index) => (
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minHeight: 26 }}>
             <Text style={{ width: 16, fontSize: 10.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
               {index + 1}
             </Text>
-            <If when={item.delivery === "guide"}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                <Icon name="external" size={10} tint={colors.warning} />
-                <Text style={{ fontSize: 10, fontWeight: "600", color: colors.warning }}>引导</Text>
-              </View>
-            </If>
             <Text style={{ flex: 1, numberOfLines: 1, fontSize: 12, color: colors.foreground }}>
               {item.text}
             </Text>
@@ -1036,44 +1426,6 @@ export function QueuePanel(props: { queue: QueueItemView[]; onRemove?: (requestI
             </If>
           </View>
         ))}
-      </View>
-    </If>
-  );
-}
-
-export function GuideWaitingBanner(props: { visible: boolean; count: number; stopping?: boolean }) {
-  const ink = () => (props.stopping ? colors.warning : colors.brand);
-  return (
-    <If when={props.visible}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.sm,
-          paddingHorizontal: 12,
-          height: 34,
-          marginBottom: 6,
-          borderRadius: radius.control,
-          backgroundColor: props.stopping ? colors.warningTint : colors.brandMuted,
-          borderWidth: 1,
-          borderColor: alpha(ink(), 0.3),
-        }}
-      >
-        {props.stopping ? (
-          <Icon name="clock" size={12} tint={ink()} />
-        ) : (
-          <Spinner size={12} tint={ink()} />
-        )}
-        <Text style={{ fontSize: 12, fontWeight: "600", color: ink() }}>
-          {props.stopping ? "停止中 · 引导转为队列" : "等待引导当前任务…"}
-        </Text>
-        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>
-          {props.stopping
-            ? `${props.count} 条引导将在任务结束后入队`
-            : props.count > 1
-              ? `${props.count} 条引导将在工具轮边界注入`
-              : "将在工具轮边界注入当前任务"}
-        </Text>
       </View>
     </If>
   );

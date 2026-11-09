@@ -9,7 +9,7 @@ import { store } from "../data/store";
 import { Icon } from "../ui/icons";
 import { IconButton, Press, Segmented, Spinner } from "../ui/primitives";
 import { alpha, colors, glass, radius, space } from "../ui/theme";
-import { QueuePanel, GuideWaitingBanner } from "./messages";
+import { QueuePanel } from "./messages";
 
 const draft = signal("");
 const mode = signal<Delivery>("queue");
@@ -39,19 +39,6 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
   // An idle session has no run to steer: queue is the effective mode by
   // definition, so the segmented control shows 队列 and 引导 is disabled.
   const effectiveMode = (): Delivery => (busy() ? mode() : "queue");
-  // Guides waiting for a boundary: still queued (the server has not injected
-  // them yet) plus injected-but-unconsumed ones of the running turn. A guide
-  // that was downgraded to queue carries delivery=queue, so it is not counted.
-  const guideCount = () => {
-    const queued = (view()?.queue ?? []).filter((item) => item.delivery === "guide").length;
-    const turns = view()?.turns ?? [];
-    const turn = turns[turns.length - 1];
-    const injected =
-      turn && turn.status === "running"
-        ? turn.visibleInputs.filter((input) => input.delivery === "guide" && !input.consumed).length
-        : 0;
-    return queued + injected;
-  };
   const canSend = () => !!draft().trim() || attachments().length > 0;
 
   const addPicked = async () => {
@@ -136,7 +123,6 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
       }}
     >
       <QueuePanel queue={view()?.queue ?? []} />
-      <GuideWaitingBanner visible={guideCount() > 0} count={guideCount()} stopping={stopping()} />
       {attachments().length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
           {attachments().map((item, index) => (

@@ -7,23 +7,24 @@
 // signal/prop is read inside JSX or an `<If>`, never copied into a local at
 // the top of a component (that would freeze the value).
 import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View } from "nsh";
-import type { ConversationView, DecisionView, ScrollState, TurnView } from "../data/contract";
+import type { ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
 import { Icon } from "../ui/icons";
 import { IconButton, PillButton, Spinner, StatusPill } from "../ui/primitives";
 import { conversationState } from "../ui/run-state";
 import { alpha, colors, space } from "../ui/theme";
-import { ApprovalCard, EmptyConversation, TurnErrorBanner, TurnRow } from "./messages";
+import { ApprovalCard, EmptyConversation, GuideWaitingRow, TurnErrorBanner, TurnRow } from "./messages";
 import { Composer, prefillComposer } from "./composer";
 import { ConnectionBadge } from "./session-list";
 import { pendingDeleteId } from "./delete-dialog";
 import { SessionModelChip } from "./model-picker";
 
 interface Row {
-  kind: "turn" | "decision";
+  kind: "turn" | "decision" | "guide";
   id: string;
   turn?: TurnView;
   decision?: DecisionView;
+  guide?: QueueItemView;
 }
 
 const submitting = signal<Record<string, boolean>>({});
@@ -44,6 +45,11 @@ const rowsOf = (view: ConversationView | null): Row[] => {
   return [
     ...view.turns.map((turn): Row => ({ kind: "turn", id: turn.turnId, turn })),
     ...view.decisions.map((decision): Row => ({ kind: "decision", id: `decision-${decision.decisionId}`, decision })),
+    // Guides still waiting for a boundary show at the stream's tail (C12):
+    // the place they will be injected.
+    ...view.queue
+      .filter((item) => item.delivery === "guide")
+      .map((item): Row => ({ kind: "guide", id: `guide-${item.requestId}`, guide: item })),
   ];
 };
 
@@ -113,38 +119,42 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
         paddingHorizontal: props.wide ? 24 : 12,
       }}
     >
-      <If
-        when={props.row().kind === "turn"}
-        else={
-          <View style={{ paddingVertical: space.md }}>
-            <ApprovalCard
-              decision={() => props.row().decision!}
-              active={() => isActiveDecision(props.row().decision!.decisionId)}
-              timeoutAt={() => store.decisionTimeout(props.row().decision!.decisionId)}
-              submitting={() => !!submitting()[props.row().decision!.decisionId]}
-              now={() => now()}
-              onAnswer={(decisionId, optionId) => {
-                if (submitting()[decisionId]) return;
-                submitting.update((map) => ({ ...map, [decisionId]: true }));
-                void store.answerDecision(decisionId, optionId).finally(() => {
-                  submitting.update((map) => {
-                    const next = { ...map };
-                    delete next[decisionId];
-                    return next;
-                  });
-                });
-              }}
-            />
-          </View>
-        }
-      >
+      <If when={props.row().kind === "turn"}>
         <TurnRow
           turn={() => props.row().turn!}
           attachmentsFor={(requestId) => store.attachmentsFor(requestId)}
           partialText={() => store.partial()}
           isLastRunning={isLastRunning}
           waiting={() => store.waiting()}
+          now={() => now()}
         />
+      </If>
+      <If when={props.row().kind === "decision"}>
+        <View style={{ paddingVertical: space.md }}>
+          <ApprovalCard
+            decision={() => props.row().decision!}
+            active={() => isActiveDecision(props.row().decision!.decisionId)}
+            timeoutAt={() => store.decisionTimeout(props.row().decision!.decisionId)}
+            submitting={() => !!submitting()[props.row().decision!.decisionId]}
+            now={() => now()}
+            onAnswer={(decisionId, optionId) => {
+              if (submitting()[decisionId]) return;
+              submitting.update((map) => ({ ...map, [decisionId]: true }));
+              void store.answerDecision(decisionId, optionId).finally(() => {
+                submitting.update((map) => {
+                  const next = { ...map };
+                  delete next[decisionId];
+                  return next;
+                });
+              });
+            }}
+          />
+        </View>
+      </If>
+      <If when={props.row().kind === "guide"}>
+        <View style={{ paddingVertical: space.sm }}>
+          <GuideWaitingRow item={props.row().guide!} stopping={!!store.conversation()?.stopping} />
+        </View>
       </If>
     </View>
   );
@@ -227,8 +237,9 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
     };
   });
   const timer = setInterval(() => {
-    const decisions = store.conversation()?.decisions ?? [];
-    if (decisions.some((decision) => decision.status === "open")) now.set(Date.now());
+    // The panel's clock only ticks while something on screen is moving: a run
+    // (work-segment timers) or an open question (the answer countdown).
+    if (store.busy() || store.waiting()) now.set(Date.now());
   }, 1000);
   cleanup(() => clearInterval(timer));
 
