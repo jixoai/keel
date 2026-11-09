@@ -453,7 +453,13 @@ func (r *Runtime) ApplyModels(ctx context.Context, document json.RawMessage) (*s
 	}
 	r.mu.Unlock()
 	opts.Revision++
-	return r.Reload(ctx, tenant, opts)
+	// The activation context must outlive the call: services register
+	// shutdown watchdogs on it (the worker stops claiming when it ends), and a
+	// settings write arrives on an HTTP request whose context ends as soon as
+	// the response is written. Tying the new generation to that context parked
+	// the worker until the next restart — the write looked successful and no
+	// run was ever claimed again.
+	return r.Reload(context.WithoutCancel(ctx), tenant, opts)
 }
 
 // tenantConfig snapshots the tenant document the runtime currently serves.
