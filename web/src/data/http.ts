@@ -7,37 +7,88 @@ import type {
   ConnectionState,
   Delivery,
   EventSource,
+  FireResultView,
+  ModelsResponse,
+  ModelsSettingsReset,
+  ModelsSettingsSaved,
+  ModelsSettingsView,
+  PluginsView,
+  ProvidersResponse,
+  SecretSaved,
+  SecretsView,
+  SendOptions,
   SessionSummary,
+  SettingsApi,
+  SettingsIssue,
+  TriggersView,
   UiCommands,
   WireEvent,
 } from "./contract";
 
 export class KeelApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** The server's field-level diagnostics (settings 400), verbatim. */
+  readonly issues: SettingsIssue[];
+  /** The current revision of a 409 conflict, when the server named one. */
+  readonly revision: number | undefined;
+  constructor(status: number, message: string, issues: SettingsIssue[] = [], revision?: number) {
     super(message);
     this.status = status;
+    this.issues = issues;
+    this.revision = revision;
   }
 }
 
 const retryable = (status: number) => status === 408 || status === 429 || status >= 500;
 
-async function readError(response: Response): Promise<string> {
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const issueList = (value: unknown): SettingsIssue[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): SettingsIssue => {
+      if (typeof item === "string") return { field: "", message: item };
+      const row = asRecord(item);
+      return { field: String(row.field ?? ""), message: String(row.message ?? "") };
+    })
+    .filter((issue) => issue.field || issue.message);
+};
+
+const numberOr = (value: unknown, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+/** The error body's message, field issues and conflict revision. */
+async function readErrorBody(
+  response: Response,
+): Promise<{ message: string; issues: SettingsIssue[]; revision: number | undefined }> {
+  const issues: SettingsIssue[] = [];
+  let revision: number | undefined;
+  let message = "";
   try {
     const text = await response.text();
     try {
-      const body = JSON.parse(text) as { error?: string };
-      if (body.error) return body.error;
+      const body = asRecord(JSON.parse(text));
+      if (typeof body.error === "string" && body.error) message = body.error;
+      else if (typeof body.message === "string" && body.message) message = body.message;
+      issues.push(...issueList(body.issues));
+      if (typeof body.revision === "number" && Number.isFinite(body.revision)) revision = body.revision;
+      if (!message && issues.length) message = issues[0]?.message ?? "";
     } catch {
-      /* not JSON */
+      message = text;
     }
-    return text || `HTTP ${response.status}`;
+    if (!message) message = `HTTP ${response.status}`;
   } catch {
-    return `HTTP ${response.status}`;
+    message = `HTTP ${response.status}`;
   }
+  return { message, issues, revision };
 }
 
-export class KeelHttp {
+async function readError(response: Response): Promise<string> {
+  return (await readErrorBody(response)).message;
+}
+
+export class KeelHttp implements SettingsApi {
   readonly base: string;
 
   constructor(base = "") {
@@ -54,7 +105,8 @@ export class KeelHttp {
       ...init,
     });
     if (!response.ok) {
-      throw new KeelApiError(response.status, await readError(response));
+      const { message, issues, revision } = await readErrorBody(response);
+      throw new KeelApiError(response.status, message, issues, revision);
     }
     return response;
   }
@@ -169,6 +221,149 @@ export class KeelHttp {
 
   commands(sessionId: string): HttpCommands {
     return new HttpCommands(this, sessionId);
+  }
+
+  // ---- settings (change keel-model-settings) ----------------------------
+
+  /** `GET /v1/settings/models` — the effective models document. */
+  async modelsSettings(): Promise<ModelsSettingsView> {
+    const response = await this.request("/v1/settings/models");
+    const body = asRecord(await response.json());
+    return {
+      revision: numberOr(body.revision, 0),
+      source: body.source === "stored" ? "stored" : "deployment",
+      document: asRecord(body.document),
+      issues: issueList(body.issues),
+    };
+  }
+
+  /** `PUT /v1/settings/models` — validate + store + hot-reload in one write.
+   * 400 carries field issues, 409 the revision that won. */
+  async saveModelsSettings(
+    document: Record<string, unknown>,
+    expectedRevision?: number,
+  ): Promise<ModelsSettingsSaved> {
+    const payload: Record<string, unknown> = { ...document };
+    if (expectedRevision !== undefined) payload.expectedRevision = expectedRevision;
+    const response = await this.request("/v1/settings/models", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = asRecord(await response.json());
+    const selectionRow = asRecord(body.selection);
+    return {
+      revision: numberOr(body.revision, expectedRevision ?? 0),
+      source: typeof body.source === "string" ? body.source : "stored",
+      selection:
+        typeof selectionRow.modelId === "string" && selectionRow.modelId
+          ? {
+              providerId: typeof selectionRow.providerId === "string" ? selectionRow.providerId : undefined,
+              modelId: selectionRow.modelId,
+              reasoningLevel:
+                typeof selectionRow.reasoningLevel === "string" ? selectionRow.reasoningLevel : undefined,
+            }
+          : undefined,
+      providersExecutable:
+        typeof body.providersExecutable === "number" ? body.providersExecutable : undefined,
+      modelsSelectable: typeof body.modelsSelectable === "number" ? body.modelsSelectable : undefined,
+    };
+  }
+
+  /** `DELETE /v1/settings/models` — clear the override, back to the
+   * deployment document. */
+  async resetModelsSettings(expectedRevision?: number): Promise<ModelsSettingsReset> {
+    const query =
+      expectedRevision !== undefined ? `?expectedRevision=${encodeURIComponent(String(expectedRevision))}` : "";
+    const response = await this.request(`/v1/settings/models${query}`, { method: "DELETE" });
+    const body = asRecord(await response.json());
+    return { revision: numberOr(body.revision, 0), source: "deployment" };
+  }
+
+  /** `GET /v1/providers` — the resolved settings view (visible providers). */
+  async providers(): Promise<ProvidersResponse> {
+    const response = await this.request("/v1/providers");
+    const body = asRecord(await response.json());
+    return {
+      providers: Array.isArray(body.providers) ? (body.providers as ProvidersResponse["providers"]) : [],
+      issues: issueList(body.issues),
+    };
+  }
+
+  /** `GET /v1/models` — the flat selectable list a picker consumes. */
+  async models(): Promise<ModelsResponse> {
+    const response = await this.request("/v1/models");
+    const body = asRecord(await response.json());
+    const enforcement = asRecord(body.enforcement);
+    return {
+      models: Array.isArray(body.models) ? (body.models as ModelsResponse["models"]) : [],
+      issues: issueList(body.issues),
+      enforcement: {
+        toolCall: enforcement.toolCall === true,
+        media: enforcement.media === true,
+      },
+    };
+  }
+
+  /** `GET /v1/settings/secrets` — names and times only, never values. */
+  async secrets(): Promise<SecretsView> {
+    const response = await this.request("/v1/settings/secrets");
+    const body = asRecord(await response.json());
+    const rows = Array.isArray(body.secrets) ? body.secrets : [];
+    return {
+      secrets: rows.map((row) => {
+        const item = asRecord(row);
+        return {
+          name: String(item.name ?? ""),
+          createdAt: item.createdAt ? String(item.createdAt) : undefined,
+          updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
+        };
+      }),
+      available: body.available !== false,
+      reason: typeof body.reason === "string" && body.reason ? body.reason : undefined,
+    };
+  }
+
+  /** `PUT /v1/settings/secrets/{name}` — write or overwrite a secret. The
+   * value is sent once and never read back. */
+  async putSecret(name: string, value: string): Promise<SecretSaved> {
+    const response = await this.request(`/v1/settings/secrets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+    const body = asRecord(await response.json());
+    return { name: String(body.name ?? name), updatedAt: body.updatedAt ? String(body.updatedAt) : undefined };
+  }
+
+  /** `DELETE /v1/settings/secrets/{name}`. */
+  async deleteSecret(name: string): Promise<void> {
+    await this.request(`/v1/settings/secrets/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  /** `GET /v1/plugins` — the assembled extension surface. */
+  async plugins(): Promise<PluginsView> {
+    const response = await this.request("/v1/plugins");
+    return (await response.json()) as PluginsView;
+  }
+
+  /** `GET /v1/triggers` — the trigger engine's registry state. */
+  async triggers(): Promise<TriggersView> {
+    const response = await this.request("/v1/triggers");
+    const body = asRecord(await response.json());
+    return { triggers: Array.isArray(body.triggers) ? (body.triggers as TriggersView["triggers"]) : [] };
+  }
+
+  /** `POST /v1/triggers/{id}/fire` — a manual fire; the audit result or the
+   * server's refusal comes back verbatim. */
+  async fireTrigger(id: string, reason = "manual"): Promise<FireResultView> {
+    const response = await this.request(`/v1/triggers/${encodeURIComponent(id)}/fire`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    const body = asRecord(await response.json());
+    return asRecord(body.result).triggerId ? (asRecord(body.result) as FireResultView) : (body as FireResultView);
   }
 }
 
@@ -378,14 +573,11 @@ export class HttpCommands implements UiCommands {
     this.sessionId = sessionId;
   }
 
-  async send(text: string, opts: { requestId: string; delivery: Delivery }): Promise<void> {
+  async send(text: string, opts: SendOptions): Promise<void> {
     await this.sendWithAttachments(text, opts);
   }
 
-  async sendWithAttachments(
-    text: string,
-    opts: { requestId: string; delivery: Delivery; attachments?: AttachmentRef[] },
-  ): Promise<void> {
+  async sendWithAttachments(text: string, opts: SendOptions): Promise<void> {
     await this.http.request(`/v1/sessions/${encodeURIComponent(this.sessionId)}/input`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -394,6 +586,9 @@ export class HttpCommands implements UiCommands {
         requestId: opts.requestId,
         delivery: opts.delivery,
         ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+        // The session's model selection travels as the input's own fact; an
+        // absent selection means "the tenant default" (the server decides).
+        ...(opts.selection ? { selection: opts.selection } : {}),
       }),
     });
   }

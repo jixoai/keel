@@ -34,7 +34,10 @@ export type IconName =
   | "spark"
   | "terminal"
   | "external"
-  | "layers";
+  | "layers"
+  | "settings"
+  | "key"
+  | "play";
 
 const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   plus: ["M5 12h14", "M12 5v14"],
@@ -70,6 +73,13 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   terminal: ["M4 5h16v14H4V5z", "M8 9l3 3-3 3", "M13 15h4"],
   external: ["M14 3h7v7", "M21 3l-9 9", "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"],
   layers: ["M12 3l9 5-9 5-9-5 9-5z", "M3 13l9 5 9-5", "M3 18l9 5 9-5"],
+  // lucide's `settings`, `key` and `play`.
+  settings: [
+    "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+    "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  ],
+  key: ["M21 2l-9.6 9.6", "M15.5 7.5l3 3L22 7l-3-3", "M7.5 21a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11z"],
+  play: ["M6 3l14 9-14 9V3z"],
 };
 
 export function Icon(props: { name: IconName; size?: number; tint: string }) {

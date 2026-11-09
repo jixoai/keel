@@ -265,6 +265,14 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>AI 员工会话</Text>
           </View>
           <IconButton
+            icon="settings"
+            label="设置"
+            size={30}
+            iconSize={15}
+            hitSlop={isPhone() ? 7 : undefined}
+            onPress={() => store.openSettings()}
+          />
+          <IconButton
             icon="refresh"
             label="刷新会话"
             size={30}
@@ -424,6 +432,24 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           ) : null}
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Press
+            onPress={() => store.openSettings()}
+            accessibilityLabel="打开设置"
+            hitSlop={chipSlop()}
+            hoverStyle={{ opacity: 0.88 }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 5,
+              paddingHorizontal: 8,
+              height: 22,
+              borderRadius: radius.pill,
+              backgroundColor: colors.muted,
+            }}
+          >
+            <Icon name="settings" size={10} tint={colors.mutedForeground} />
+            <Text style={{ fontSize: 10, fontWeight: "600", color: colors.mutedForeground }}>设置</Text>
+          </Press>
           <Press
             onPress={() => void store.setPartials(!store.showPartials())}
             accessibilityLabel="切换 token 级 partial"

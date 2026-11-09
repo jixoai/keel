@@ -13,10 +13,29 @@ import type {
   ConnectionState,
   Delivery,
   EventSource,
+  FireResultView,
+  ModelOptionSpecsView,
+  ModelsResponse,
+  ModelsSettingsReset,
+  ModelsSettingsSaved,
+  ModelsSettingsView,
+  ModelSelection,
+  ModelView,
+  PluginsView,
+  ProviderView,
+  ProvidersResponse,
+  SecretMeta,
+  SecretSaved,
+  SecretsView,
+  SendOptions,
   SessionSummary,
+  SettingsApi,
+  SettingsIssue,
+  TriggersView,
   UiCommands,
   WireEvent,
 } from "./contract";
+import { KeelApiError } from "./http";
 import demoShot from "../../assets/demo-shot.png";
 
 type Subscriber = {
@@ -42,6 +61,90 @@ type Peer = {
   drainPaused: boolean;
 };
 
+// ---- settings demo state --------------------------------------------------
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+/** The reasoning vocabulary (modelcfg's ascending set). */
+const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Credentials this demo process can resolve (the analogue of env vars). */
+const DEMO_CREDENTIALS = ["S2API_KEY", "A6API_KEY"];
+
+const DEMO_PROTOCOLS = ["openai-chat-completions", "openai-responses", "anthropic-messages"];
+
+/** The deployment-default models document (what a startup file would hold). */
+const demoDeploymentDocument = (): Record<string, unknown> => ({
+  schemaVersion: 1,
+  providers: [
+    {
+      id: "s2api",
+      name: "S2API",
+      api: { type: "openai-chat-completions", baseUrl: "https://s2api.top/v1" },
+      access: { type: "api-key", env: "S2API_KEY" },
+      modelIds: ["deepseek-v4.1-flash"],
+      visibility: "visible",
+    },
+    {
+      id: "a6api",
+      name: "A6API",
+      api: { type: "openai-chat-completions", baseUrl: "https://api.a6api.com/v1" },
+      access: { type: "api-key", env: "A6API_KEY" },
+      modelIds: ["deepseek-v4.1-flash"],
+      visibility: "visible",
+    },
+    {
+      id: "anthropic",
+      name: "Anthropic",
+      api: { type: "anthropic-messages", baseUrl: "https://api.anthropic.com" },
+      access: { type: "api-key", env: "ANTHROPIC_API_KEY" },
+      modelIds: ["claude-sonnet-5"],
+      visibility: "visible",
+    },
+  ],
+  modelRules: [
+    {
+      match: "*",
+      config: {
+        enabled: true,
+        properties: {
+          contextWindow: 128000,
+          inputFormat: { text: true, image: false, video: false, audio: false, pdf: false },
+          outputFormat: { text: true },
+          supportsToolCall: true,
+          supportsJsonSchemaOutput: true,
+          supportsNativeWebSearch: false,
+        },
+      },
+    },
+  ],
+  selection: { providerId: "s2api", modelId: "deepseek-v4.1-flash", reasoningLevel: "high" },
+});
+
+/** The demo capability facts of one model identity. */
+const demoModelCapabilities = (modelId: string): { contextWindow: number; image: boolean; levels: string[] } =>
+  modelId === "claude-sonnet-5"
+    ? { contextWindow: 200000, image: true, levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] }
+    : { contextWindow: 128000, image: false, levels: ["off", "low", "medium", "high"] };
+
+const demoOptions = (modelId: string): ModelOptionSpecsView => ({
+  reasoningLevel: {
+    values: demoModelCapabilities(modelId).levels,
+    map: Object.fromEntries(demoModelCapabilities(modelId).levels.map((level) => [level, {}])),
+  },
+  maxOutputTokens: { max: 8192, map: {} },
+});
+
+interface DemoModelResolution {
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  credential: string;
+  credentialKind: "env" | "ref";
+  executable: boolean;
+}
+
 const nowISO = () => new Date().toISOString();
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -52,9 +155,22 @@ function textPreview(payload: unknown): string {
   return text.replace(/\s+/g, " ").slice(0, 90);
 }
 
-export class FixtureClient {
+export class FixtureClient implements SettingsApi {
   private sessions = new Map<string, Peer>();
   private sequence = 0;
+  /** The tenant's effective models document (demo: the deployment default
+   * until a save, a saved override after one). */
+  private settingsState: {
+    revision: number;
+    source: "stored" | "deployment";
+    document: Record<string, unknown>;
+  } = { revision: 3, source: "deployment", document: demoDeploymentDocument() };
+  /** Secret names and times only — the demo never keeps a value either. */
+  private secretState: SecretMeta[] = [
+    { name: "s2api", createdAt: new Date(Date.now() - 86_400_000).toISOString(), updatedAt: new Date(Date.now() - 3_600_000).toISOString() },
+    { name: "webhook-token", createdAt: new Date(Date.now() - 172_800_000).toISOString(), updatedAt: new Date(Date.now() - 172_800_000).toISOString() },
+  ];
+  private triggerFires = 12;
 
   constructor(private readonly imageURL: string = demoShot.url) {
     this.seed();
@@ -102,13 +218,355 @@ export class FixtureClient {
   commands(sessionId: string): UiCommands {
     const peer = this.need(sessionId);
     return {
-      send: (text, opts) => this.send(peer, text, opts.delivery, opts.requestId),
-      sendWithAttachments: (text, opts) =>
-        this.send(peer, text, opts.delivery, opts.requestId, opts.attachments),
+      send: (text, opts: SendOptions) =>
+        this.send(peer, text, opts.delivery, opts.requestId, opts.attachments, opts.selection),
+      sendWithAttachments: (text, opts: SendOptions) =>
+        this.send(peer, text, opts.delivery, opts.requestId, opts.attachments, opts.selection),
       stop: async () => this.stop(peer),
       answerDecision: async (decisionId, answer) => this.answer(peer, decisionId, answer),
       upload: async () => ({ fileId: `fixture-file-${++this.sequence}` }),
     };
+  }
+
+  // ---- settings demo -----------------------------------------------------
+
+  async modelsSettings(): Promise<ModelsSettingsView> {
+    return {
+      revision: this.settingsState.revision,
+      source: this.settingsState.source,
+      document: JSON.parse(JSON.stringify(this.settingsState.document)) as Record<string, unknown>,
+      issues: [],
+    };
+  }
+
+  async saveModelsSettings(
+    document: Record<string, unknown>,
+    expectedRevision?: number,
+  ): Promise<ModelsSettingsSaved> {
+    this.guardRevision(expectedRevision);
+    const issues = this.validateDocument(document);
+    if (issues.length) {
+      throw new KeelApiError(400, `invalid models document: ${issues[0]?.message ?? ""}`, issues);
+    }
+    const stored: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(document)) {
+      if (key !== "expectedRevision") stored[key] = value;
+    }
+    this.settingsState = {
+      revision: this.settingsState.revision + 1,
+      source: "stored",
+      document: stored,
+    };
+    const selection = asRecord(stored.selection);
+    const resolution = this.resolveSelection(stored);
+    return {
+      revision: this.settingsState.revision,
+      source: "stored",
+      selection: {
+        providerId: typeof selection.providerId === "string" ? selection.providerId : undefined,
+        modelId: String(selection.modelId ?? ""),
+        reasoningLevel: typeof selection.reasoningLevel === "string" ? selection.reasoningLevel : undefined,
+      },
+      providersExecutable: (resolution.providers ?? []).filter((row) => row.executable).length,
+      modelsSelectable: resolution.models.filter((row) => row.selectable).length,
+    };
+  }
+
+  async resetModelsSettings(expectedRevision?: number): Promise<ModelsSettingsReset> {
+    this.guardRevision(expectedRevision);
+    this.settingsState = {
+      revision: this.settingsState.revision + 1,
+      source: "deployment",
+      document: demoDeploymentDocument(),
+    };
+    return { revision: this.settingsState.revision, source: "deployment" };
+  }
+
+  async providers(): Promise<ProvidersResponse> {
+    const resolution = this.resolveSelection(this.settingsState.document);
+    return { providers: resolution.providers, issues: resolution.issues };
+  }
+
+  async models(): Promise<ModelsResponse> {
+    const resolution = this.resolveSelection(this.settingsState.document);
+    return {
+      models: resolution.models,
+      issues: [],
+      enforcement: { toolCall: true, media: false },
+    };
+  }
+
+  async secrets(): Promise<SecretsView> {
+    return { secrets: this.secretState.map((item) => ({ ...item })), available: true };
+  }
+
+  async putSecret(name: string, value: string): Promise<SecretSaved> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new KeelApiError(400, "secret name is required");
+    if (!value) throw new KeelApiError(400, "secret value is required");
+    const at = nowISO();
+    const existing = this.secretState.find((item) => item.name === trimmed);
+    if (existing) existing.updatedAt = at;
+    else this.secretState.push({ name: trimmed, createdAt: at, updatedAt: at });
+    this.secretState.sort((a, b) => a.name.localeCompare(b.name));
+    return { name: trimmed, updatedAt: at };
+  }
+
+  async deleteSecret(name: string): Promise<void> {
+    if (!this.secretState.some((item) => item.name === name)) {
+      throw new KeelApiError(404, `secret ${name} was not found`);
+    }
+    this.secretState = this.secretState.filter((item) => item.name !== name);
+  }
+
+  async plugins(): Promise<PluginsView> {
+    const started = new Date(Date.now() - 3_600_000).toISOString();
+    return {
+      generation: 3,
+      plugins: [
+        {
+          id: "demo.workflow",
+          version: "0.4.1",
+          state: "ready",
+          provides: ["tools", "triggers"],
+          requires: [],
+          tools: ["workflow.plan", "workflow.status"],
+          hooks: ["turn.start", "turn.end"],
+          triggers: [
+            {
+              id: "demo.workflow.daily",
+              kind: "interval",
+              schedule: "24h",
+              prompt: "生成每日工作摘要并发到工作区。",
+              enabled: true,
+              owner: "demo.workflow",
+            },
+          ],
+          diagnostics: [],
+          startedAt: started,
+        },
+        {
+          id: "demo.webhook",
+          version: "0.2.0",
+          state: "failed",
+          provides: ["triggers"],
+          requires: ["demo.workflow"],
+          tools: [],
+          hooks: ["turn.end"],
+          triggers: [
+            {
+              id: "demo.webhook.oncall",
+              kind: "webhook",
+              prompt: "处理一条值班 webhook：{{payload}}",
+              enabled: false,
+              owner: "demo.webhook",
+            },
+          ],
+          diagnostics: ["start failed: listen tcp 127.0.0.1:0: permission denied"],
+          stoppedAt: new Date(Date.now() - 3_590_000).toISOString(),
+        },
+      ],
+      hooks: { subscriptions: 6, emitted: 42, delivered: 42, dropped: 0, failed: 1, queued: 0, capacity: 256 },
+      tools: ["workflow.plan", "workflow.status", "clock.now"],
+      hookStats: { subscriptions: 6, emitted: 42, delivered: 42, dropped: 0, failed: 1, queued: 0, capacity: 256 },
+    };
+  }
+
+  async triggers(): Promise<TriggersView> {
+    return {
+      triggers: [
+        {
+          id: "demo.workflow.daily",
+          kind: "interval",
+          schedule: "24h",
+          prompt: "生成每日工作摘要并发到工作区。",
+          enabled: true,
+          owner: "demo.workflow",
+          nextFireAt: new Date(Date.now() + 6 * 3_600_000).toISOString(),
+          lastFireAt: new Date(Date.now() - 18 * 3_600_000).toISOString(),
+          lastStatus: "started",
+          fires: this.triggerFires,
+          failures: 1,
+        },
+        {
+          id: "demo.webhook.oncall",
+          kind: "webhook",
+          prompt: "处理一条值班 webhook：{{payload}}",
+          enabled: false,
+          owner: "demo.webhook",
+          fires: 3,
+          failures: 3,
+          lastStatus: "disabled",
+        },
+      ],
+    };
+  }
+
+  async fireTrigger(id: string, reason = "manual"): Promise<FireResultView> {
+    const registry = await this.triggers();
+    const trigger = (registry.triggers ?? []).find((item) => item.id === id);
+    if (!trigger) throw new KeelApiError(404, `trigger ${id} was not found`);
+    if (trigger.enabled === false) throw new KeelApiError(409, `trigger ${id} is disabled`);
+    this.triggerFires += 1;
+    this.sequence += 1;
+    void reason;
+    return {
+      triggerId: id,
+      status: "started",
+      idempotencyKey: `demo-fire-${this.sequence}`,
+      sessionId: `demo-trigger-${this.sequence}`,
+      seq: 1,
+      deduped: false,
+      attempts: 1,
+    };
+  }
+
+  private guardRevision(expectedRevision: number | undefined) {
+    if (expectedRevision === undefined) return;
+    if (expectedRevision !== this.settingsState.revision) {
+      throw new KeelApiError(
+        409,
+        `model settings revision conflict: expected revision ${expectedRevision} does not match the current revision`,
+        [],
+        this.settingsState.revision,
+      );
+    }
+  }
+
+  /** The demo body of the resolver: provider/model views and the default
+   * selection's executability share one derivation, like the server's. */
+  private resolveSelection(document: Record<string, unknown>): {
+    providers: ProviderView[];
+    models: ModelView[];
+    issues: SettingsIssue[];
+  } {
+    const rows = Array.isArray(document.providers) ? document.providers : [];
+    const models: ModelView[] = [];
+    const providers: ProviderView[] = [];
+    for (const raw of rows) {
+      const provider = asRecord(raw);
+      const providerId = String(provider.id ?? "");
+      if (!providerId) continue;
+      const access = asRecord(provider.access);
+      const env = typeof access.env === "string" ? access.env : "";
+      const ref = typeof access.ref === "string" ? access.ref : "";
+      const refName = ref.startsWith("secret:") ? ref.slice("secret:".length) : "";
+      const credential = env || ref;
+      const resolvable = env
+        ? DEMO_CREDENTIALS.includes(env)
+        : refName
+          ? this.secretState.some((item) => item.name === refName)
+          : false;
+      const modelIds = Array.isArray(provider.modelIds) ? provider.modelIds.map(String) : [];
+      const providerIssues: SettingsIssue[] = [];
+      if (!resolvable) {
+        providerIssues.push({
+          field: `providers.${providerId}.access`,
+          message: `credential ${credential || "(missing)"} is not set in this process`,
+        });
+      }
+      const providerModels: ModelView[] = modelIds.map((modelId) => {
+        const caps = demoModelCapabilities(modelId);
+        const model: ModelView = {
+          providerId,
+          modelId,
+          api: asRecord(provider.api) as ModelView["api"],
+          properties: {
+            contextWindow: caps.contextWindow,
+            inputFormat: { text: true, image: caps.image, video: false, audio: false, pdf: false },
+            outputFormat: { text: true },
+            supportsToolCall: true,
+            supportsJsonSchemaOutput: true,
+            supportsNativeWebSearch: false,
+          },
+          options: demoOptions(modelId),
+          enabled: true,
+          executable: resolvable,
+          selectable: resolvable,
+        };
+        models.push(model);
+        return model;
+      });
+      const providerView: ProviderView = {
+        providerId,
+        name: typeof provider.name === "string" ? provider.name : undefined,
+        visibility: "visible",
+        api: asRecord(provider.api) as ProviderView["api"],
+        access: { type: "api-key", env: env || undefined, ref: ref || undefined },
+        models: providerModels,
+        issues: providerIssues.length ? providerIssues : undefined,
+        executable: resolvable,
+        selectable: resolvable && providerModels.length > 0,
+      };
+      providers.push(providerView);
+    }
+    return { providers, models, issues: [] };
+  }
+
+  /** The demo validator: the same shape checks the server's modelcfg makes,
+   * with field paths. */
+  private validateDocument(document: Record<string, unknown>): SettingsIssue[] {
+    const issues: SettingsIssue[] = [];
+    if (document.schemaVersion !== 1) {
+      issues.push({ field: "schemaVersion", message: "schemaVersion must be 1" });
+    }
+    const rows = document.providers;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      issues.push({ field: "providers", message: "providers must be a non-empty array" });
+    } else {
+      rows.forEach((raw, index) => {
+        const provider = asRecord(raw);
+        if (typeof provider.id !== "string" || !provider.id) {
+          issues.push({ field: `providers[${index}].id`, message: "provider id is required" });
+        }
+        const api = asRecord(provider.api);
+        if (!DEMO_PROTOCOLS.includes(String(api.type ?? ""))) {
+          issues.push({
+            field: `providers[${index}].api.type`,
+            message: `unknown api type ${String(api.type ?? "(missing)")}`,
+          });
+        }
+        const access = asRecord(provider.access);
+        if (!access.env && !access.ref) {
+          issues.push({ field: `providers[${index}].access`, message: "access needs env or ref" });
+        }
+      });
+    }
+    const selection = asRecord(document.selection);
+    const modelId = typeof selection.modelId === "string" ? selection.modelId : "";
+    if (!modelId) {
+      issues.push({ field: "selection.modelId", message: "a default selection is required" });
+    } else {
+      const resolution = this.resolveSelection(document);
+      const providerId = typeof selection.providerId === "string" ? selection.providerId : "";
+      const target = resolution.models.find(
+        (model) => model.modelId === modelId && (!providerId || model.providerId === providerId),
+      );
+      if (!target) {
+        issues.push({
+          field: "selection.modelId",
+          message: `selection ${providerId ? `${providerId}/` : ""}${modelId} does not match any declared model`,
+        });
+      } else if (!target.executable) {
+        const provider = resolution.providers.find((item) => item.providerId === target.providerId);
+        issues.push({
+          field: `providers.${target.providerId}.access`,
+          message: provider?.issues?.[0]?.message ?? `credential for ${target.providerId} is not resolvable`,
+        });
+      } else {
+        const level = typeof selection.reasoningLevel === "string" ? selection.reasoningLevel : "";
+        const levels = target.options?.reasoningLevel?.values ?? [];
+        if (level && !levels.includes(level)) {
+          issues.push({
+            field: "selection.reasoningLevel",
+            message: REASONING_LEVELS.includes(level)
+              ? `reasoning level ${level} is not declared by ${target.providerId}/${target.modelId}`
+              : `unknown reasoning level ${level}`,
+          });
+        }
+      }
+    }
+    return issues;
   }
 
   /** The QA hook behind the sidebar's connection demo: events keep arriving
@@ -455,7 +913,14 @@ export class FixtureClient {
     delivery: Delivery,
     requestId: string,
     attachments?: AttachmentRef[],
+    selection?: ModelSelection,
   ) {
+    const extras = {
+      ...(attachments?.length ? { attachments } : {}),
+      // The selection is the input's own fact (never written to the tenant
+      // document), exactly as the server persists it.
+      ...(selection ? { selection } : {}),
+    };
     if (peer.running) {
       const seq = peer.nextSeq;
       const accepted: Delivery = delivery === "guide" ? "guide" : "queue";
@@ -464,7 +929,7 @@ export class FixtureClient {
         requestId,
         delivery: accepted,
         timestamp: Date.now(),
-        ...(attachments?.length ? { attachments } : {}),
+        ...extras,
       });
       peer.meta.runStatus = "running";
       if (accepted === "queue") {
@@ -493,7 +958,7 @@ export class FixtureClient {
       requestId,
       delivery: "queue",
       timestamp: Date.now(),
-      ...(attachments?.length ? { attachments } : {}),
+      ...extras,
     });
     peer.meta.runStatus = "running";
     this.reply(peer, event.seq, text);

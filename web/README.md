@@ -39,22 +39,21 @@ nsh run --target tui                        # 真实终端开发宿主
 
 ```
 web/
-├── App.tsx                    入口：宽屏侧栏+主区 / 窄屏两屏；自动打开最近会话
-├── App.tui.test.tsx           TUI 行为测试（会话/审批/引导/停止/partial）
+├── App.tsx                    入口：路由决定 shell（工作区 / 设置页）；工作区宽屏侧栏+主区 / 窄屏两屏；自动打开最近会话
+├── App.tui.test.tsx           TUI 行为测试（会话/审批/引导/停止/partial + 设置页 + 会话模型选择器）
 ├── nsh.json                   app 元数据、外观、theme、capabilities、web.host
 ├── theme.json                 solid-glass 设计令牌（light/dark）
-├── host.js                    web host：keel.notify / keel.info / keel.network
+├── host.js                    web host：keel.notify / keel.info / keel.route / keel.navigate
 ├── src/
 │   ├── data/
-│   │   ├── contract.ts        冻结契约的 type re-export + UI 侧扩展类型
-│   │   ├── wire.ts            事件 payload 解析/格式化
+│   │   ├── contract.ts        冻结契约的 type re-export + UI 侧扩展类型（含 settings/secrets/plugins/selection）
+│   │   ├── wire.ts            事件 payload 解析/格式化 + selection/模型能力格式化
 │   │   ├── core.ts            @keel/chat-surface 核心的宿主适配层（附件索引/partial 访问）
-│   │   ├── http.ts            fetch + SSE EventSource、SurfaceCommands、会话 API
-│   │   ├── fixture.ts         本地 scripted keel 服务（演示/QA）
-│   │   └── store.ts           会话列表、打开/发送/停止/审批、模式切换、重连
-│   ├── screens/               session-list / conversation / messages / composer
+│   │   ├── http.ts            fetch + SSE EventSource、SurfaceCommands、设置/密钥/插件 API
+│   │   ├── fixture.ts         本地 scripted keel 服务（演示/QA，含设置面演示数据）
+│   │   └── store.ts           会话列表、打开/发送/停止/审批、模式切换、重连、路由、设置/密钥/插件状态
+│   ├── screens/               session-list / conversation / messages / composer / settings / model-picker
 │   └── ui/                    theme tokens、lucide 风格单色 Canvas 图标、primitives
-└── qa/                        web 截图、TUI cell dump/渲染与运行日志
 ```
 
 ## 与 headless 核心的接法
@@ -108,6 +107,38 @@ web/
   验证缺口补发与去重。
 - **通知**：web 构建通过 `host.js` 的 `keel.notify` 在审批到达时发系统通知（需权限）；
   非 web 宿主自动 no-op。
+
+## 设置页与会话模型选择（change keel-model-settings）
+
+**设置是独立的面**：路由 `/settings`（深链直达，`keel serve` 的 SPA 回退把页面交给客户端，
+客户端 boot 时经 `host.js` 的 `keel.route` 读 `location.pathname` 决定 shell；`keel.navigate`
+把应用内路由写回地址栏，浏览器前进/后退经 `popstate` → `keel.route` 事件跟随）。
+非 web 宿主（TUI/桌面/测试）没有 URL，路由留在应用内。入口：会话列表 header 的齿轮与
+底部「设置」入口；返回「工作区」按钮回到工作区，**原会话保持打开**（store 跨 shell 切换持有
+`activeId`/engine，narrow 布局的屏幕位也保留）。
+
+设置页三个分区（同一套 primitives/theme，不引入第二套组件体系）：
+
+- **模型**：当前生效（`source` 部署默认/已保存覆盖 + `revision` + 默认 selection + 解析诊断）、
+  `编辑`（默认模型、思考档 chips 来自该模型 `options.reasoningLevel.values`、原始文档 textarea、
+  保存并生效 / 两步重置）、模型列表（`/v1/models`：能力事实、基线推断、issues、点选设为默认）、
+  Provider 列表（`/v1/providers`：可执行/可选状态、`access.env`/`access.ref`、逐条 issues）。
+  保存 PUT 整份文档（带 `expectedRevision`）：400 的 `issues` 按字段路径原样列出，409 给出
+  「文档已被其它写入更新 + 当前 revision」并给刷新入口；成功后显示新 revision 并刷新
+  `/v1/providers` + `/v1/models`。
+- **密钥**：`GET /v1/settings/secrets` 只返回名字与创建/更新时间；写入/覆盖（值输入框 masked，
+  保存后清空，值永不回显、不进列表）；两步删除确认；`available:false` 时显示服务端 `reason`
+  禁用表单（永不回退明文）。
+- **插件**：`GET /v1/plugins`（generation、插件状态/版本/provides/requires/tools/hooks/triggers/
+  diagnostics/启停时间、hook 统计、工具清单）与 `GET /v1/triggers`（计划、启停、次数、上次结果）；
+  每个触发器有「触发」按钮（`POST /v1/triggers/{id}/fire`，manual 来源），结果显示/错误原样呈现；
+  明示「插件在启动时装载，这里看状态与控制触发，不做代码级配置」。
+
+**会话内模型选择器**：会话 header 的 chip 显示本会话的模型（与租户默认分开显示；未选择时显示
+租户默认）；弹层列出 `/v1/models` 中 `selectable` 的模型（按 provider 分组）与思考档，可一键
+「恢复默认」。选择是**输入事实**：之后每条 `POST /v1/sessions/{id}/input` 带
+`selection:{providerId,modelId,reasoningLevel?}`（`HttpCommands.send/sendWithAttachments` 的
+`SendOptions`），不写租户文档；清除选择后输入不再带该字段（服务端回租户默认）。
 
 ## QA 产物
 

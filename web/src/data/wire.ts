@@ -2,7 +2,7 @@
 // (`GET /v1/sessions/{id}/events`) or JSON strings (SSE `data:` lines).
 // These helpers read the shapes `internal/agentcore` writes without trusting
 // optional fields, so a partial/older payload never breaks projection.
-import type { AttachmentRef, Delivery, RunSummary, ToolCallView, WireEvent } from "./contract";
+import type { AttachmentRef, Delivery, ModelSelection, RunSummary, ToolCallView, WireEvent } from "./contract";
 
 export interface ContentBlock {
   type?: string;
@@ -51,6 +51,10 @@ export interface RunFinishedPayload {
   stopReason?: string;
   durationMs?: number;
   toolTimings?: unknown;
+  /** The resolved execution identity of the attempt (the server records
+   * `providerId` + `modelId` since the provider-config change). */
+  provider?: string;
+  model?: string;
 }
 
 export interface DecisionPayload {
@@ -234,4 +238,62 @@ export function formatTime(value: string | number | undefined, now = Date.now())
   return date.getFullYear() === new Date(now).getFullYear()
     ? stamp
     : `${date.getFullYear()}年${stamp}`;
+}
+
+/** The unified reasoning vocabulary (modelcfg's ascending set), in the words
+ * the pickers show. An unknown level is shown as it came. */
+export const reasoningLevelLabels: Record<string, string> = {
+  off: "关",
+  minimal: "极简",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最大",
+};
+
+export function reasoningLabel(level: string | undefined): string {
+  if (!level) return "";
+  return reasoningLevelLabels[level] ?? level;
+}
+
+/** `s2api/deepseek-v4.1-flash · 高` — the one way a selection is written. */
+export function selectionLabel(selection: ModelSelection | null | undefined): string {
+  if (!selection) return "";
+  const id = `${selection.providerId ? `${selection.providerId}/` : ""}${selection.modelId}`;
+  return selection.reasoningLevel ? `${id} · ${reasoningLabel(selection.reasoningLevel)}` : id;
+}
+
+/** The first model identity of a `/v1/models` row. */
+export const modelKey = (model: { providerId?: string; modelId?: string }): string =>
+  `${model.providerId ?? ""}/${model.modelId ?? ""}`;
+
+/** A human capability line: context window, image input, tool calling. */
+export function modelFacts(model: {
+  properties?: {
+    contextWindow?: number;
+    inputFormat?: { image?: boolean; video?: boolean; audio?: boolean; pdf?: boolean };
+    supportsToolCall?: boolean;
+  };
+  options?: { reasoningLevel?: { values?: string[] } };
+  baseline?: boolean;
+}): string {
+  const facts: string[] = [];
+  const window = model.properties?.contextWindow;
+  if (typeof window === "number" && window > 0) {
+    facts.push(window >= 1000 ? `${Math.round(window / 1000)}K 上下文` : `${window} 上下文`);
+  }
+  const input = model.properties?.inputFormat;
+  const media = [
+    input?.image ? "图片" : "",
+    input?.video ? "视频" : "",
+    input?.audio ? "音频" : "",
+    input?.pdf ? "PDF" : "",
+  ].filter(Boolean);
+  facts.push(media.length ? `输入 ${media.join("/")}` : "仅文本输入");
+  if (model.properties?.supportsToolCall) facts.push("工具调用");
+  const levels = model.options?.reasoningLevel?.values ?? [];
+  if (levels.length) facts.push(`思考档 ${levels.map((value) => reasoningLevelLabels[value] ?? value).join("/")}`);
+  if (model.baseline) facts.push("基线推断");
+  return facts.join(" · ");
 }

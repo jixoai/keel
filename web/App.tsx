@@ -1,6 +1,10 @@
 // The app root: a sidebar + conversation on wide screens, two screens on
 // narrow ones (and in the TUI's narrow grid). One code path for web and the
 // TUI target; the only platform check is the window width.
+//
+// The route decides the shell: `settings` renders the standalone settings page
+// (`/settings` deep-links straight into it, and the workspace state — the open
+// session included — waits untouched underneath), anything else the workspace.
 import { effect, mount, signal, Text, View, windowSize } from "nsh";
 import { store } from "./src/data/store";
 import { Icon } from "./src/ui/icons";
@@ -10,8 +14,15 @@ import { SessionList } from "./src/screens/session-list";
 import { Conversation } from "./src/screens/conversation";
 import { DeleteDialog } from "./src/screens/delete-dialog";
 import { LoginScreen } from "./src/screens/login";
+import { SettingsScreen } from "./src/screens/settings";
+import { SessionModelPicker } from "./src/screens/model-picker";
 
 const isWide = () => windowSize().width >= 900;
+
+// Held at module level so leaving the settings page and coming back lands on
+// the screen (and session) the user was reading.
+const screen = signal<"list" | "chat">("list");
+const autoOpened = signal(false);
 
 function NoticeToast() {
   return (
@@ -93,9 +104,6 @@ function ProbeBadge() {
 }
 
 function Shell() {
-  const screen = signal<"list" | "chat">("list");
-  const autoOpened = signal(false);
-
   effect(() => {
     if (!isWide() || store.mode() === "checking" || autoOpened() || store.activeId()) return;
     const rows = store.sessions();
@@ -136,21 +144,32 @@ function Shell() {
           <Conversation wide />
         </View>
       </If>
-      <NoticeToast />
-      <ProbeBadge />
-      <DeleteDialog />
     </View>
   );
 }
 
 // The auth gate is an If, not an early return: a component body in NSH runs once
 // and its reactive reads live in the vnode getters, so a body-level `if` would
-// freeze the decision made before the async probe finished.
+// freeze the decision made before the async probe finished. The same shape
+// decides the shell from the route (a `/settings` deep link included).
 function App() {
   return (
-    <If when={store.auth() === "required"} else={<Shell />}>
-      <LoginScreen />
-    </If>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <If
+        when={store.auth() === "required"}
+        else={
+          <If when={store.route() === "settings"} else={<Shell />}>
+            <SettingsScreen />
+          </If>
+        }
+      >
+        <LoginScreen />
+      </If>
+      <NoticeToast />
+      <ProbeBadge />
+      <DeleteDialog />
+      <SessionModelPicker />
+    </View>
   );
 }
 

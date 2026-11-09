@@ -11,13 +11,28 @@ import type {
   ConversationView,
   Delivery,
   EventSource,
+  FireResultView,
+  ModelsSettingsView,
+  ModelSelection,
+  ModelView,
+  PluginsView,
+  ProviderView,
+  SecretMeta,
+  SendOptions,
   SessionSummary,
+  SettingsApi,
+  SettingsIssue,
+  TriggerStatusView,
   UiCommands,
   WireEvent,
 } from "./contract";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
 
 export type Mode = "checking" | "fixture" | "http";
+
+/** The top-level route. The app shell renders the workspace (session list +
+ * conversation) or the standalone settings page (change keel-model-settings). */
+export type Route = "workspace" | "settings";
 
 export interface Notice {
   tone: "info" | "warn" | "danger" | "success";
@@ -33,7 +48,7 @@ export interface PendingAttachment {
   file?: Blob;
 }
 
-interface Client {
+interface Client extends SettingsApi {
   probe(): Promise<"ok" | "auth" | "down">;
   capabilities(): Promise<Record<string, unknown>>;
   listSessions(limit?: number): Promise<SessionSummary[]>;
@@ -85,6 +100,54 @@ class KeelStore {
   readonly connection = signal<ConnectionState>({ status: "closed", lastSeq: 0 });
   readonly decisionDeadlines = signal<Record<string, number>>({});
 
+  /** The top-level route: `/settings` deep-links straight into the settings
+   * page; the workspace stays otherwise untouched. */
+  readonly route = signal<Route>("workspace");
+
+  // ---- settings face (change keel-model-settings) ------------------------
+
+  /** The effective models document (`GET /v1/settings/models`). */
+  readonly settings = signal<ModelsSettingsView | null>(null);
+  readonly settingsLoading = signal(false);
+  readonly settingsError = signal<string | null>(null);
+  readonly settingsSaving = signal(false);
+  /** The server's 400 field issues, verbatim. */
+  readonly settingsIssues = signal<SettingsIssue[]>([]);
+  /** The revision a 409 conflict reported (the one that won). */
+  readonly settingsConflict = signal<number | null>(null);
+  /** How many selectable models the last save reported. */
+  readonly settingsSavedSummary = signal<string | null>(null);
+
+  readonly providers = signal<ProviderView[]>([]);
+  readonly providersIssues = signal<SettingsIssue[]>([]);
+  readonly providersError = signal<string | null>(null);
+  readonly models = signal<ModelView[]>([]);
+  readonly modelIssues = signal<SettingsIssue[]>([]);
+  readonly modelsError = signal<string | null>(null);
+  readonly enforcement = signal<{ toolCall: boolean; media: boolean } | null>(null);
+  readonly registryLoaded = signal(false);
+
+  readonly secrets = signal<SecretMeta[]>([]);
+  readonly secretsAvailable = signal(true);
+  readonly secretsReason = signal<string | null>(null);
+  readonly secretsLoading = signal(false);
+  readonly secretsError = signal<string | null>(null);
+  readonly secretsBusy = signal(false);
+  /** A write/delete failure, shown next to the form (never swallowed). */
+  readonly secretsActionError = signal<string | null>(null);
+
+  readonly plugins = signal<PluginsView | null>(null);
+  readonly pluginsLoading = signal(false);
+  readonly pluginsError = signal<string | null>(null);
+  readonly triggers = signal<TriggerStatusView[]>([]);
+  readonly firingTrigger = signal<string | null>(null);
+  /** The last manual fire's outcome, per trigger id. */
+  readonly fireOutcome = signal<{ triggerId: string; ok: boolean; text: string } | null>(null);
+
+  /** The open session's model selection (an input fact, separate from the
+   * tenant default in the settings document). */
+  readonly sessionSelection = signal<ModelSelection | null>(null);
+
   private readonly fixture = new FixtureClient();
   private http: KeelHttp | null = null;
   private client: Client = this.fixture;
@@ -95,9 +158,17 @@ class KeelStore {
   private noticeTimer: number | undefined;
   private refreshTimer: number | undefined;
   private answered = new Set<string>();
+  /** Per-session selections, kept while the session list lives in memory. */
+  private sessionSelections = new Map<string, ModelSelection>();
+  /** Set as soon as the user navigates by hand, so the boot route read never
+   * overrides an explicit move. */
+  private routeTouched = false;
+  /** True once the host answered as the web page host (route plumbing on). */
+  private routePlumbed = false;
 
   constructor() {
     void this.detect();
+    void this.initRoute();
   }
 
   private async detect() {
@@ -168,7 +239,314 @@ class KeelStore {
       this.client = this.fixture;
     }
     this.mode.set(mode);
+    this.resetSettingsState();
     await this.refreshSessions();
+  }
+
+  // ---- route --------------------------------------------------------------
+
+  /**
+   * Read the route once at boot: a web page served at `/settings` (the SPA
+   * fallback) starts on the settings page; every other host starts on the
+   * workspace. The read is the host's (`keel.route` in host.js), because the
+   * app's JS sandbox has no `location` of its own — and it is gated on
+   * `keel.info` so only the real web host (which answers both) takes part:
+   * native hosts and test hosts keep their routes fully in-app.
+   */
+  private async initRoute() {
+    if (!host.available()) return;
+    try {
+      const info = await host.call<{ origin?: string }>("keel.info", {}, { timeout: 1200 });
+      if (typeof info?.origin !== "string" || !info.origin) return;
+    } catch {
+      return;
+    }
+    this.routePlumbed = true;
+    try {
+      const info = await host.call<{ path?: string }>("keel.route", {}, { timeout: 1200 });
+      const path = typeof info?.path === "string" ? info.path : "/";
+      if (!this.routeTouched) this.route.set(path.startsWith("/settings") ? "settings" : "workspace");
+    } catch {
+      /* keep the in-app route */
+    }
+    try {
+      // Browser back/forward: the URL is authoritative again.
+      host.on<{ path?: string }>("keel.route", (payload) => {
+        const next = typeof payload?.path === "string" ? payload.path : "";
+        this.route.set(next.startsWith("/settings") ? "settings" : "workspace");
+      });
+    } catch {
+      /* a host without events is fine: routes stay in-app */
+    }
+  }
+
+  /** Keep the page URL in step with the shell (`/settings` is a real route;
+   * a host without a URL — TUI, desktop, tests — just ignores it). */
+  private navigate(path: string) {
+    if (!this.routePlumbed) return;
+    // The call goes through the same channel as the route read: the web host
+    // module answers `keel.navigate` with a pushState (a `host.post` would be
+    // dropped — the host module's returned object only wires `call`).
+    void host.call("keel.navigate", { path }, { timeout: 1200 }).catch(() => {
+      /* the route is still correct in-app */
+    });
+  }
+
+  openSettings() {
+    this.routeTouched = true;
+    if (this.route() === "settings") return;
+    this.route.set("settings");
+    this.navigate("/settings");
+  }
+
+  /** Back to the workspace; the open session is preserved (the store keeps it
+   * across the shell swap). */
+  closeSettings() {
+    this.routeTouched = true;
+    if (this.route() === "workspace") return;
+    this.route.set("workspace");
+    this.navigate("/");
+  }
+
+  // ---- model settings -----------------------------------------------------
+
+  /** `GET /v1/settings/models` alone (the effective document + its issues). */
+  async loadModelsSettings() {
+    if (this.settingsLoading()) return;
+    this.settingsLoading.set(true);
+    this.settingsError.set(null);
+    try {
+      this.settings.set(await this.client.modelsSettings());
+    } catch (error) {
+      this.settingsError.set(messageOf(error));
+    } finally {
+      this.settingsLoading.set(false);
+    }
+  }
+
+  /** `GET /v1/providers` + `GET /v1/models` — the resolved registry views. */
+  async loadRegistry() {
+    try {
+      const [providers, models] = await Promise.all([this.client.providers(), this.client.models()]);
+      this.providers.set(providers.providers ?? []);
+      this.providersIssues.set(providers.issues ?? []);
+      this.providersError.set(null);
+      this.models.set(models.models ?? []);
+      this.modelIssues.set(models.issues ?? []);
+      this.enforcement.set(
+        models.enforcement
+          ? { toolCall: models.enforcement.toolCall === true, media: models.enforcement.media === true }
+          : null,
+      );
+      this.modelsError.set(null);
+      this.registryLoaded.set(true);
+    } catch (error) {
+      this.providersError.set(messageOf(error));
+      this.modelsError.set(messageOf(error));
+    }
+  }
+
+  /** The settings page's 模型 section: one refresh of all three resources. */
+  async loadModelsPanel() {
+    await Promise.all([this.loadModelsSettings(), this.loadRegistry()]);
+  }
+
+  /** `PUT /v1/settings/models` — the server validates, stores and reloads.
+   * 400 issues land in `settingsIssues` per field; a 409 lands in
+   * `settingsConflict` with the revision that won. */
+  async saveModelsSettings(document: Record<string, unknown>) {
+    if (this.settingsSaving()) return;
+    this.settingsSaving.set(true);
+    this.settingsIssues.set([]);
+    this.settingsConflict.set(null);
+    this.settingsSavedSummary.set(null);
+    try {
+      const saved = await this.client.saveModelsSettings(document, this.settings()?.revision);
+      this.settingsSavedSummary.set(
+        `revision ${saved.revision} · 可执行 provider ${saved.providersExecutable ?? "-"} · 可选模型 ${
+          saved.modelsSelectable ?? "-"
+        }`,
+      );
+      this.flash({ tone: "success", text: `模型配置已保存并生效（revision ${saved.revision}）` });
+      await this.loadModelsPanel();
+    } catch (error) {
+      if (error instanceof KeelApiError) {
+        if (error.status === 400) this.settingsIssues.set(error.issues);
+        if (error.status === 409) this.settingsConflict.set(error.revision ?? null);
+        this.flash({ tone: error.status === 409 ? "warn" : "danger", text: `保存失败：${error.message}` });
+      } else {
+        this.flash({ tone: "danger", text: `保存失败：${messageOf(error)}` });
+      }
+    } finally {
+      this.settingsSaving.set(false);
+    }
+  }
+
+  /** `DELETE /v1/settings/models` — back to the deployment document. */
+  async resetModelsSettings() {
+    if (this.settingsSaving()) return;
+    this.settingsSaving.set(true);
+    this.settingsIssues.set([]);
+    this.settingsConflict.set(null);
+    try {
+      const reset = await this.client.resetModelsSettings(this.settings()?.revision);
+      this.settingsSavedSummary.set(`revision ${reset.revision} · 部署默认`);
+      this.flash({ tone: "success", text: `已重置为部署默认（revision ${reset.revision}）` });
+      await this.loadModelsPanel();
+    } catch (error) {
+      if (error instanceof KeelApiError) {
+        if (error.status === 409) this.settingsConflict.set(error.revision ?? null);
+        this.flash({ tone: error.status === 409 ? "warn" : "danger", text: `重置失败：${error.message}` });
+      } else {
+        this.flash({ tone: "danger", text: `重置失败：${messageOf(error)}` });
+      }
+    } finally {
+      this.settingsSaving.set(false);
+    }
+  }
+
+  /** The tenant default selection (the effective document's `selection`),
+   * shown next to the session's own selection. */
+  tenantSelection(): ModelSelection | null {
+    const document = this.settings()?.document;
+    const row = document && typeof document === "object" ? (document as Record<string, unknown>).selection : undefined;
+    if (!row || typeof row !== "object") return null;
+    const selection = row as Record<string, unknown>;
+    if (typeof selection.modelId !== "string" || !selection.modelId) return null;
+    return {
+      providerId: typeof selection.providerId === "string" ? selection.providerId : undefined,
+      modelId: selection.modelId,
+      reasoningLevel: typeof selection.reasoningLevel === "string" ? selection.reasoningLevel : undefined,
+    };
+  }
+
+  // ---- session model selection -------------------------------------------
+
+  /** Set (or clear) the open session's model selection. It is an input fact:
+   * nothing here writes the tenant document. */
+  setSessionSelection(selection: ModelSelection | null) {
+    const sessionId = this.activeId();
+    if (!sessionId) return;
+    if (selection) this.sessionSelections.set(sessionId, selection);
+    else this.sessionSelections.delete(sessionId);
+    this.sessionSelection.set(selection);
+  }
+
+  // ---- secrets ------------------------------------------------------------
+
+  async loadSecrets() {
+    if (this.secretsLoading()) return;
+    this.secretsLoading.set(true);
+    this.secretsError.set(null);
+    try {
+      const view = await this.client.secrets();
+      this.secrets.set(view.secrets ?? []);
+      this.secretsAvailable.set(view.available !== false);
+      this.secretsReason.set(view.reason ?? null);
+    } catch (error) {
+      this.secretsError.set(messageOf(error));
+    } finally {
+      this.secretsLoading.set(false);
+    }
+  }
+
+  /** Write or overwrite a secret. The value goes one way only: it is never
+   * kept, echoed or rendered again. */
+  async saveSecret(name: string, value: string): Promise<boolean> {
+    if (this.secretsBusy()) return false;
+    this.secretsBusy.set(true);
+    this.secretsActionError.set(null);
+    try {
+      const saved = await this.client.putSecret(name.trim(), value);
+      await this.loadSecrets();
+      this.flash({ tone: "success", text: `密钥已保存：${saved.name}（值不回显）` });
+      return true;
+    } catch (error) {
+      this.secretsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.secretsBusy.set(false);
+    }
+  }
+
+  async deleteSecret(name: string) {
+    if (this.secretsBusy()) return;
+    this.secretsBusy.set(true);
+    this.secretsActionError.set(null);
+    try {
+      await this.client.deleteSecret(name);
+      await this.loadSecrets();
+      this.flash({ tone: "success", text: `密钥已删除：${name}` });
+    } catch (error) {
+      this.secretsActionError.set(messageOf(error));
+    } finally {
+      this.secretsBusy.set(false);
+    }
+  }
+
+  // ---- plugins & triggers -------------------------------------------------
+
+  async loadPlugins() {
+    if (this.pluginsLoading()) return;
+    this.pluginsLoading.set(true);
+    this.pluginsError.set(null);
+    try {
+      const [plugins, triggers] = await Promise.all([this.client.plugins(), this.client.triggers()]);
+      this.plugins.set(plugins);
+      this.triggers.set(triggers.triggers ?? []);
+    } catch (error) {
+      this.pluginsError.set(messageOf(error));
+    } finally {
+      this.pluginsLoading.set(false);
+    }
+  }
+
+  /** `POST /v1/triggers/{id}/fire` — a manual fire; the audit result (or the
+   * server's refusal) is shown in the trigger's row. */
+  async fireTrigger(id: string) {
+    if (this.firingTrigger()) return;
+    this.firingTrigger.set(id);
+    this.fireOutcome.set(null);
+    try {
+      const result: FireResultView = await this.client.fireTrigger(id, "manual");
+      const parts = [
+        result.status ? `状态 ${result.status}` : "",
+        result.sessionId ? `会话 ${result.sessionId}` : "",
+        result.seq ? `seq ${result.seq}` : "",
+        result.deduped ? "已去重" : "",
+        result.error ? `错误 ${result.error}` : "",
+      ].filter(Boolean);
+      this.fireOutcome.set({ triggerId: id, ok: true, text: parts.join(" · ") || "已触发" });
+      const refreshed = await this.client.triggers();
+      this.triggers.set(refreshed.triggers ?? []);
+    } catch (error) {
+      this.fireOutcome.set({ triggerId: id, ok: false, text: messageOf(error) });
+    } finally {
+      this.firingTrigger.set(null);
+    }
+  }
+
+  private resetSettingsState() {
+    this.settings.set(null);
+    this.settingsError.set(null);
+    this.settingsIssues.set([]);
+    this.settingsConflict.set(null);
+    this.settingsSavedSummary.set(null);
+    this.providers.set([]);
+    this.providersIssues.set([]);
+    this.providersError.set(null);
+    this.models.set([]);
+    this.modelIssues.set([]);
+    this.modelsError.set(null);
+    this.enforcement.set(null);
+    this.registryLoaded.set(false);
+    this.secrets.set([]);
+    this.secretsError.set(null);
+    this.secretsActionError.set(null);
+    this.plugins.set(null);
+    this.pluginsError.set(null);
+    this.triggers.set([]);
+    this.fireOutcome.set(null);
   }
 
   async refreshSessions() {
@@ -234,6 +612,11 @@ class KeelStore {
     const token = ++this.openToken;
     this.closeStream();
     this.activeId.set(sessionId);
+    // The session's own model selection (kept in memory while the app runs).
+    this.sessionSelection.set(this.sessionSelections.get(sessionId) ?? null);
+    // The header's model chip shows the session's choice against the tenant
+    // default: read the effective document once.
+    if (!this.settings()) void this.loadModelsSettings();
     this.connection.set({ status: "connecting", lastSeq: 0 });
     this.partial.set(undefined);
     this.decisionDeadlines.set({});
@@ -326,6 +709,7 @@ class KeelStore {
     this.partial.set(undefined);
     this.busy.set(false);
     this.stopping.set(false);
+    this.sessionSelection.set(null);
     this.connection.set({ status: "closed", lastSeq: 0 });
     this.decisionDeadlines.set({});
   }
@@ -347,6 +731,9 @@ class KeelStore {
     const delivery: Delivery = this.busy() ? mode : "queue";
     const requestId = newRequestId();
     const commands = this.client.commands(sessionId);
+    // The session's model selection rides every input; without one the server
+    // resolves the tenant default (the field is then absent on the wire).
+    const selection = this.sessionSelection() ?? undefined;
     const optimistic: AttachmentRef[] = pending.map((item) => ({
       name: item.name,
       mime: item.mime,
@@ -371,10 +758,12 @@ class KeelStore {
         }
       }
       const body = trimmed || (attachments.length ? "（附件）" : "");
+      const sendOpts: SendOptions = { requestId, delivery, attachments };
+      if (selection) sendOpts.selection = selection;
       if (commands.sendWithAttachments) {
-        await commands.sendWithAttachments(body, { requestId, delivery, attachments });
+        await commands.sendWithAttachments(body, sendOpts);
       } else {
-        await commands.send(body, { requestId, delivery });
+        await commands.send(body, sendOpts);
       }
     } catch (error) {
       engine.removeOptimistic(requestId);

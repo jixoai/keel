@@ -17,6 +17,7 @@ import { ApprovalCard, EmptyConversation, TurnRow } from "./messages";
 import { Composer } from "./composer";
 import { ConnectionBadge } from "./session-list";
 import { pendingDeleteId } from "./delete-dialog";
+import { SessionModelChip } from "./model-picker";
 
 interface Row {
   kind: "turn" | "decision";
@@ -74,6 +75,7 @@ function ConversationHeader(props: {
           <ConnectionBadge />
         </If>
       </View>
+      <SessionModelChip />
       <StatusPill state={conversationState(props.view)} />
     </View>
   );
