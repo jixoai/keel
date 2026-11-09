@@ -207,6 +207,90 @@ func TestGuideInputWithAttachmentsWaitsForTheNextRun(t *testing.T) {
 	}
 }
 
+// TestSelectionGuideInputWaitsForTheNextRun pins the second downgrade: an
+// attempt's execution identity is fixed at load, so a guide input that names a
+// model of its own must not be injected into the running turn (it would be
+// answered by the running model while the log says it asked for another one).
+// It waits for the next attempt, which resolves the selection it carries.
+func TestSelectionGuideInputWaitsForTheNextRun(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session := newSession(t, st)
+	k := testKernel(t, st)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	commitInput(t, k, scope, "r1", "echo one", "", nil)
+	lease := claimScope(t, k, tenant, session)
+
+	fake := FakeStream()
+	var (
+		once     sync.Once
+		guideErr error
+	)
+	stream := func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		once.Do(func() {
+			_, guideErr = k.Commit(ctx, kernel.CommitRequest{
+				Scope: scope, Kind: kernel.KindUserMessage, RequestID: "r2",
+				Payload: mustJSON(map[string]any{
+					"text": "two", "requestId": "r2", "delivery": kernel.DeliveryGuide,
+					"selection": map[string]any{"providerId": "s2api", "modelId": "other-model"},
+				}),
+			})
+		})
+		return fake(ctx, model, llm, cfg)
+	}
+	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	res, err := runner.RunAttempt(ctx, lease)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if guideErr != nil {
+		t.Fatalf("guide input: %v", guideErr)
+	}
+	for _, assistant := range assistantEvents(eventsOf(t, st, tenant, session)) {
+		for _, seq := range inputSeqsOf(t, assistant) {
+			if seq == 2 {
+				t.Fatalf("assistant inputSeqs consumed the selection guide (seq 2): %+v", assistant)
+			}
+		}
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease, Cursor: res.Cursor,
+		ReadThrough: res.ReadThrough, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	pin, err := k.RunPin(ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin.Status != kernel.RunStatusPending {
+		t.Fatalf("run status = %s, want pending (the selection guide was not consumed)", pin.Status)
+	}
+
+	// The successor presents it and resolves the model the input asked for.
+	lease2 := claimScope(t, k, tenant, session)
+	resolver := &stubResolver{resolved: ActiveModel{
+		ProviderID: "s2api", Model: "other-model", APIKey: "k",
+		Stream: FakeStream(), ThinkingLevel: agentcore.ThinkingLow,
+	}}
+	runner2 := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	runner2.Models = resolver
+	res2, err := runner2.RunAttempt(ctx, lease2)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if selections := resolver.selections(); len(selections) != 1 || !strings.Contains(selections[0], "other-model") {
+		t.Fatalf("the successor resolved %v, want the queued selection", selections)
+	}
+	texts := assistantTexts(t, eventsOf(t, st, tenant, session))
+	if last := texts[len(texts)-1]; !strings.Contains(last, "two") {
+		t.Fatalf("successor answer = %q, want the queued guide input answered", last)
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease2, Cursor: res2.Cursor,
+		ReadThrough: res2.ReadThrough, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish second run: %v", err)
+	}
+}
+
 // TestQueueAndGuideMixAreEachAnsweredOnce is the interleaving case: a queue
 // input and a guide input committed in the same window. The guide is consumed
 // inside the running turn, the queue input waits for the next run, and neither

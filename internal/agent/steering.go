@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -81,6 +82,7 @@ func (f *guideFeed) poll(ctx context.Context) []agentcore.AgentMessage {
 			Text        string            `json:"text"`
 			Delivery    string            `json:"delivery"`
 			Attachments []json.RawMessage `json:"attachments"`
+			Selection   json.RawMessage   `json:"selection"`
 		}
 		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
 			continue
@@ -92,6 +94,14 @@ func (f *guideFeed) poll(ctx context.Context) []agentcore.AgentMessage {
 			// Downgrade: an input with attachments belongs to the queue path
 			// (the attachment pipeline runs at a run boundary, not mid-turn).
 			// Leaving it untouched means the next attempt presents it.
+			continue
+		}
+		if len(bytes.TrimSpace(payload.Selection)) > 0 && !bytes.Equal(bytes.TrimSpace(payload.Selection), []byte("null")) {
+			// Downgrade: a selection names the model its answer must come from,
+			// and the attempt's execution identity is fixed at load. Injecting it
+			// mid-turn would answer it with the running model while the log says
+			// the input asked for another one. It waits for the next attempt,
+			// which resolves the selection it carries.
 			continue
 		}
 		f.mu.Lock()
