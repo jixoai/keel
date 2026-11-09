@@ -17,7 +17,8 @@ import type {
   WorkSegment,
 } from "../data/contract";
 import { formatDuration, formatTokens, preview } from "../data/wire";
-import { Caret, Divider, IconButton, Press, Spinner, StatusDot } from "../ui/primitives";
+import { store } from "../data/store";
+import { Caret, Divider, IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
 import { CONTINUATION, fitCells, wrapCells } from "../ui/text";
 import { Icon } from "../ui/icons";
 import { alpha, colors, glass, radius, space } from "../ui/theme";
@@ -406,6 +407,106 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
       ) : null}
 
     </View>
+  );
+}
+
+/** The one retry control: re-asks the turn's own input as a new commit
+ * (`POST /v1/sessions/{id}/retry`), spinning while the server is working. */
+function RetryPress(props: { turnId: string; compact?: boolean }) {
+  const pending = () => store.retryingTurn() === props.turnId;
+  return (
+    <Press
+      onPress={pending() ? undefined : () => void store.retryTurn(props.turnId)}
+      disabled={pending()}
+      accessibilityLabel="重试本回合"
+      hitSlop={props.compact ? 4 : undefined}
+      hoverStyle={{ backgroundColor: colors.hover }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        height: 26,
+        paddingHorizontal: 8,
+        borderRadius: radius.control,
+      }}
+    >
+      {pending() ? (
+        <Spinner size={11} tint={colors.mutedForeground} />
+      ) : (
+        <Icon name="refresh" size={12} tint={colors.mutedForeground} />
+      )}
+      <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.mutedForeground }}>
+        {pending() ? "重试中" : "重试"}
+      </Text>
+    </Press>
+  );
+}
+
+/** The turn-level failure banner (C6). It sits above the composer, carries the
+ * authority's reason, can be closed, and can be retried when the turn has a
+ * committed input to re-ask. The store keys dismissals by turn, so closing it
+ * only silences this failure — reopening the session shows it again. */
+export function TurnErrorBanner(props: { compact?: boolean }) {
+  const error = () => {
+    const row = store.turnError();
+    return row && row.sessionId === store.activeId() ? row : null;
+  };
+  return (
+    <If when={!!error()}>
+      <View
+        style={{
+          width: "100%",
+          maxWidth: 880,
+          alignSelf: "center",
+          paddingHorizontal: props.compact ? 10 : 16,
+          marginBottom: space.sm,
+        }}
+      >
+        <View
+          accessibilityLabel="回合失败"
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.sm,
+            paddingLeft: 12,
+            paddingRight: 4,
+            paddingVertical: 8,
+            borderRadius: radius.card,
+            backgroundColor: colors.dangerTint,
+            borderWidth: 1,
+            borderColor: alpha(colors.danger, 0.32),
+          }}
+        >
+          <Icon name="alert" size={14} tint={colors.danger} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ fontSize: 11, fontWeight: "700", color: colors.danger }}>
+              这次运行失败了
+            </Text>
+            <Text
+              style={{
+                fontSize: 11.5,
+                lineHeight: 17,
+                color: colors.foreground,
+                userSelect: "text",
+                numberOfLines: 3,
+              }}
+            >
+              {error()?.text ?? ""}
+            </Text>
+          </View>
+          <If when={!!error()?.turnId && !!error()?.retryable}>
+            <RetryPress turnId={error()?.turnId ?? ""} compact={props.compact} />
+          </If>
+          <IconButton
+            icon="x"
+            label="关闭错误提示"
+            size={28}
+            iconSize={13}
+            onPress={() => store.dismissTurnError()}
+          />
+        </View>
+      </View>
+    </If>
   );
 }
 
@@ -978,6 +1079,16 @@ export function GuideWaitingBanner(props: { visible: boolean; count: number; sto
   );
 }
 
+/** A greeting for the hour the panel was opened on (C14). */
+function greetingFor(date: Date): string {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 11) return "早上好";
+  if (hour >= 11 && hour < 13) return "中午好";
+  if (hour >= 13 && hour < 18) return "下午好";
+  if (hour >= 18 && hour < 23) return "晚上好";
+  return "夜深了";
+}
+
 export function EmptyConversation(props: { onSuggestion: (text: string) => void }) {
   const suggestions = [
     "帮我总结一下这周的发布准备情况",
@@ -1001,7 +1112,9 @@ export function EmptyConversation(props: { onSuggestion: (text: string) => void 
         <Icon name="spark" size={26} tint={colors.brand} />
       </View>
       <View style={{ alignItems: "center", gap: 6 }}>
-        <Text style={{ fontSize: 20, fontWeight: "700", color: colors.foreground }}>开始一段对话</Text>
+        <Text style={{ fontSize: 20, fontWeight: "700", color: colors.foreground }}>
+          {greetingFor(new Date())}，我是 Keel
+        </Text>
         <Text style={{ maxWidth: 420, fontSize: 13, lineHeight: 19, color: colors.mutedForeground, textAlign: "center" }}>
           发送一条消息，Keel 会在这里开始工作。
         </Text>
@@ -1013,7 +1126,7 @@ export function EmptyConversation(props: { onSuggestion: (text: string) => void 
         {suggestions.map((text) => (
           <Press
             onPress={() => props.onSuggestion(text)}
-            accessibilityLabel={text}
+            accessibilityLabel={`使用建议 ${text}`}
             hitSlop={6}
             hoverStyle={{ backgroundColor: colors.hover }}
             style={{

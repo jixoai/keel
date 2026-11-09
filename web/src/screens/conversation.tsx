@@ -6,15 +6,15 @@
 // NSH components run once and update through fine-grained bindings: every
 // signal/prop is read inside JSX or an `<If>`, never copied into a local at
 // the top of a component (that would freeze the value).
-import { cleanup, List, type ListRef, platform, signal, Text, View } from "nsh";
-import type { ConversationView, DecisionView, TurnView } from "../data/contract";
+import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View } from "nsh";
+import type { ConversationView, DecisionView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
 import { Icon } from "../ui/icons";
 import { IconButton, PillButton, Spinner, StatusPill } from "../ui/primitives";
 import { conversationState } from "../ui/run-state";
 import { alpha, colors, space } from "../ui/theme";
-import { ApprovalCard, EmptyConversation, TurnRow } from "./messages";
-import { Composer } from "./composer";
+import { ApprovalCard, EmptyConversation, TurnErrorBanner, TurnRow } from "./messages";
+import { Composer, prefillComposer } from "./composer";
 import { ConnectionBadge } from "./session-list";
 import { pendingDeleteId } from "./delete-dialog";
 import { SessionModelChip } from "./model-picker";
@@ -26,9 +26,18 @@ interface Row {
   decision?: DecisionView;
 }
 
-const following = signal(true);
 const submitting = signal<Record<string, boolean>>({});
 const now = signal(Date.now());
+
+// The reader's scroll intent for the OPEN session (C4). The value is replaced
+// from the store's per-session memory whenever a session opens, and every
+// scroll writes it back — so the intent and the reading position can never
+// leak across sessions.
+const scroll = signal<ScrollState>({ intent: "following", offset: 0 });
+/** Whether the content is taller than the viewport: the "回到底部" gate. */
+const overflowing = signal(false);
+/** The session whose saved position has already been handed to the list. */
+const scrollRestored = signal<string | null>(null);
 
 const rowsOf = (view: ConversationView | null): Row[] => {
   if (!view) return [];
@@ -183,9 +192,40 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
     return row?.title || (id ? id.slice(0, 12) : "会话");
   };
   const jumpToEnd = () => {
-    following.set(true);
+    const id = store.activeId();
+    scroll.set({ intent: "following", offset: 0 });
+    if (id) store.saveScrollState(id, { intent: "following", offset: 0 });
     list?.scrollToEnd({ animated: true });
   };
+  // Take the session's remembered scroll intent as soon as its snapshot is on
+  // screen; a detached reader keeps their offset, and the list holds it while
+  // content grows (maintainVisibleContentPosition). Nothing here is written
+  // back to the ledger — this is the reader's place in the panel, not a fact.
+  effect(() => {
+    const id = store.activeId();
+    if (!id || !store.conversation()) {
+      if (!id && scrollRestored() !== null) {
+        scrollRestored.set(null);
+        scroll.set({ intent: "following", offset: 0 });
+        overflowing.set(false);
+      }
+      return;
+    }
+    if (untracked(scrollRestored) === id) return;
+    scrollRestored.set(id);
+    const saved = store.scrollState(id) ?? { intent: "following" as const, offset: 0 };
+    scroll.set(saved);
+    overflowing.set(false);
+    if (saved.intent !== "detached" || saved.offset <= 0) return;
+    // The list measures its rows natively; hand it the offset once it can take
+    // the command, and once more while the rows above settle.
+    const first = setTimeout(() => list?.scrollToOffset({ offset: saved.offset, animated: false }), 32);
+    const second = setTimeout(() => list?.scrollToOffset({ offset: saved.offset, animated: false }), 240);
+    return () => {
+      clearTimeout(first);
+      clearTimeout(second);
+    };
+  });
   const timer = setInterval(() => {
     const decisions = store.conversation()?.decisions ?? [];
     if (decisions.some((decision) => decision.status === "open")) now.set(Date.now());
@@ -233,7 +273,7 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
             >
               <If
                 when={rowsOf(store.conversation()).length > 0}
-                else={<EmptyConversation onSuggestion={(text) => void store.send(text, "queue", [])} />}
+                else={<EmptyConversation onSuggestion={(text) => prefillComposer(text)} />}
               >
                 <List
                   ref={list}
@@ -241,11 +281,17 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
                   keyExtractor={(row) => row.id}
                   estimatedItemSize={160}
                   alignment="bottom"
+                  maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 48 }}
                   scrollbar={platform.idiom === "terminal" ? false : undefined}
                   style={{ flex: 1 }}
                   contentStyle={{ paddingTop: 16, paddingBottom: 12 }}
                   onScroll={(event) => {
-                    following.set(event.offset.y + event.size.height >= event.contentSize.height - 56);
+                    const atEnd = event.offset.y + event.size.height >= event.contentSize.height - 48;
+                    const next: ScrollState = { intent: atEnd ? "following" : "detached", offset: event.offset.y };
+                    scroll.set(next);
+                    overflowing.set(event.contentSize.height > event.size.height + 8);
+                    const id = store.activeId();
+                    if (id) store.saveScrollState(id, next);
                   }}
                 >
                   {(row) => <RowCell row={row} wide={props.wide} />}
@@ -265,13 +311,14 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
                 zIndex: 3,
               }}
             />
-            <If when={!following()}>
+            <If when={scroll().intent === "detached" && overflowing()}>
               <View style={{ position: "absolute", right: 18, bottom: 12 }}>
                 <PillButton label="回到底部" icon="arrow-down" compact onPress={jumpToEnd} />
               </View>
             </If>
           </View>
           <View style={{ paddingTop: 12, paddingBottom: 10 }}>
+            <TurnErrorBanner compact={!props.wide} />
             <Composer view={store.conversation()} compact={!props.wide} />
           </View>
           {/* The right pane never keeps showing a session that is about to be

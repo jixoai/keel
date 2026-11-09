@@ -1,7 +1,7 @@
 // The composer: queue/guide mode, attachments, send/stop. It only calls the
 // store; the delivery decision (a mode applies while a run is active, an idle
 // session always sends queue) is made in one place.
-import { Picker, platform, signal, Text, View, windowSize } from "nsh";
+import { effect, Picker, platform, signal, Text, type InputRef, untracked, View, windowSize } from "nsh";
 import { Input } from "nsh/base";
 import type { ConversationView, Delivery } from "../data/contract";
 import type { PendingAttachment } from "../data/store";
@@ -15,10 +15,24 @@ const draft = signal("");
 const mode = signal<Delivery>("queue");
 const attachments = signal<PendingAttachment[]>([]);
 const inputHeight = signal(20);
+/** Bumped when text is placed into the draft from outside (the empty-state
+ * suggestion chips): the input takes the caret, nothing is sent (C8). */
+const prefillTick = signal(0);
 
 export const composerDraft = draft;
 
+/** Fill the composer with text — never send it. */
+export function prefillComposer(text: string) {
+  draft.set(text);
+  prefillTick.update((value) => value + 1);
+}
+
 export function Composer(props: { view: ConversationView | null; compact?: boolean }) {
+  let input: InputRef | undefined;
+  effect(() => {
+    if (prefillTick() === 0) return;
+    untracked(() => input?.focus());
+  });
   const view = () => props.view;
   const busy = () => !!view()?.busy;
   const stopping = () => !!view()?.stopping;
@@ -163,6 +177,9 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
         }}
       >
         <Input
+          ref={(node) => {
+            input = node;
+          }}
           testID="composer-input"
           value={draft()}
           onChange={({ value }) => draft.set(value)}
