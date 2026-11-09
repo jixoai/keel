@@ -9,6 +9,7 @@
 import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View } from "nsh";
 import type { ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
+import { formatTime } from "../data/wire";
 import { Icon } from "../ui/icons";
 import { IconButton, PillButton, Spinner, StatusPill } from "../ui/primitives";
 import { conversationState } from "../ui/run-state";
@@ -103,6 +104,12 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
     const turn = props.row().turn;
     return !!turn && !!last && turn.turnId === last.turnId && last.status === "running";
   };
+  const isLastTurn = () => {
+    const turns = store.conversation()?.turns ?? [];
+    const last = turns[turns.length - 1];
+    const turn = props.row().turn;
+    return !!turn && !!last && turn.turnId === last.turnId;
+  };
   const isActiveDecision = (decisionId: string) => {
     const decisions = store.conversation()?.decisions ?? [];
     for (let index = decisions.length - 1; index >= 0; index -= 1) {
@@ -125,6 +132,7 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
           attachmentsFor={(requestId) => store.attachmentsFor(requestId)}
           partialText={() => store.partial()}
           isLastRunning={isLastRunning}
+          isLast={isLastTurn}
           waiting={() => store.waiting()}
           now={() => now()}
         />
@@ -199,7 +207,12 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
   const title = () => {
     const id = store.activeId();
     const row = store.sessions().find((item) => item.sessionId === id);
-    return row?.title || (id ? id.slice(0, 12) : "会话");
+    const named = (row?.title ?? "").trim();
+    if (named) return named;
+    // Never a raw id as a title (C1): an unnamed session reads as "新会话"
+    // plus how long ago it was created (no createdAt: just the name).
+    const created = formatTime(row?.createdAt);
+    return created ? `新会话 · ${created}` : "新会话";
   };
   const jumpToEnd = () => {
     const id = store.activeId();

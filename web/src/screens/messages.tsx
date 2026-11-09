@@ -3,7 +3,7 @@
 // attachments and the approval card. Every row is a pure function of a
 // `TurnView` / `DecisionView`; state that survives cell recycling lives in
 // module signals keyed by turn/segment id.
-import { Clipboard, Image, keymap, platform, signal, Text, View, windowSize } from "nsh";
+import { Clipboard, Image, type JSX, keymap, platform, signal, Text, View, windowSize } from "nsh";
 import { TextView } from "nsh/base";
 import type {
   AttachmentRef,
@@ -32,6 +32,8 @@ const expandedSegments = signal<Record<string, boolean>>({});
 const approvalCursor = signal<Record<string, number>>({});
 /** Which copy control just copied (its short "已复制" confirmation). */
 const copiedKey = signal<string | null>(null);
+/** The turn the pointer is over: its action line becomes fully visible (C3). */
+const hoveredTurn = signal<string | null>(null);
 let copiedTimer: number | undefined;
 
 const toggle = (mapSignal: typeof expandedTools, key: string, fallback = false) => {
@@ -101,7 +103,7 @@ function AttachmentChip(props: { item: AttachmentRef }) {
   );
 }
 
-function UserInputRow(props: { input: InputView; attachments?: AttachmentRef[]; running?: boolean }) {
+function UserInputRow(props: { turnId: string; input: InputView; attachments?: AttachmentRef[]; running?: boolean }) {
   const guideState = (): "consumed" | "pending" | "inert" =>
     props.input.consumed ? "consumed" : props.running ? "pending" : "inert";
   const guideLabel = () =>
@@ -168,6 +170,10 @@ function UserInputRow(props: { input: InputView; attachments?: AttachmentRef[]; 
           </View>
         ) : null}
       </View>
+      {/* A user's own message is copyable text too (C3). */}
+      <ActionLine turnId={props.turnId} time={props.input.createdAt}>
+        <CopyPress id={`input-${props.input.requestId}`} text={props.input.text} />
+      </ActionLine>
     </View>
   );
 }
@@ -627,6 +633,12 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
         : "";
     return `${statusLabel(props.status)}${duration}${tokens}`;
   };
+  /** Who answered this run — the ledger's own identity fact, shown beside the
+   * cost so it lines up with the model configured in settings. */
+  const identity = () => {
+    if (!summary || (!summary.provider && !summary.model)) return "";
+    return `${summary.provider ? `${summary.provider}/` : ""}${summary.model ?? ""}`;
+  };
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 }}>
       <StatusDot tone={tone} size={6} />
@@ -641,15 +653,16 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
       summary.stopReason !== "canceled" ? (
         <Text style={{ fontSize: 10.5, color: colors.warning }}>{summary.stopReason}</Text>
       ) : null}
-
+      {identity() ? (
+        <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: mono() }}>{identity()}</Text>
+      ) : null}
     </View>
   );
 }
 
 /** The one retry control: re-asks the turn's own input as a new commit
  * (`POST /v1/sessions/{id}/retry`), spinning while the server is working. */
-function RetryPress(props: { turnId: string; compact?: boolean }) {
-  const pending = () => store.retryingTurn() === props.turnId;
+function RetryPress(props: { turnId: string; compact?: boolean }) {  const pending = () => store.retryingTurn() === props.turnId;
   return (
     <Press
       onPress={pending() ? undefined : () => void store.retryTurn(props.turnId)}
@@ -898,6 +911,88 @@ function SegmentHeader(props: {
   );
 }
 
+/** Copy with a short in-place confirmation; a failure is never swallowed. */
+function CopyPress(props: { id: string; text: string; label?: string }) {
+  const copied = () => copiedKey() === props.id;
+  const copy = () => {
+    void Clipboard.writeText(props.text).then(
+      () => {
+        copiedKey.set(props.id);
+        if (copiedTimer !== undefined) clearTimeout(copiedTimer);
+        copiedTimer = setTimeout(() => {
+          copiedKey.set(null);
+          copiedTimer = undefined;
+        }, 1600) as unknown as number;
+      },
+      (error: unknown) => {
+        store.flash({
+          tone: "danger",
+          text: `复制失败：${error instanceof Error ? error.message : String(error)}`,
+        });
+      },
+    );
+  };
+  return (
+    <Press
+      onPress={copy}
+      accessibilityLabel={props.label ?? "复制"}
+      hoverStyle={{ backgroundColor: colors.hover }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        height: 26,
+        paddingHorizontal: 8,
+        borderRadius: radius.control,
+      }}
+    >
+      <Icon name={copied() ? "check" : "file"} size={12} tint={copied() ? colors.success : colors.mutedForeground} />
+      <Text
+        style={{
+          fontSize: 11.5,
+          fontWeight: "600",
+          color: copied() ? colors.success : colors.mutedForeground,
+        }}
+      >
+        {copied() ? "已复制" : props.label ?? "复制"}
+      </Text>
+    </Press>
+  );
+}
+
+/** Touch screens and terminals have no hover: the action line just shows. */
+const actionsAlwaysVisible = () =>
+  platform.idiom === "terminal" || platform.idiom === "phone" || platform.idiom === "tv";
+
+/** The quiet action line under a message: only a pointer over the turn (or a
+ * platform without hover) reveals it — it reserves its place either way, so
+ * nothing on screen jumps when it appears (C3). */
+function ActionLine(props: { turnId: string; time?: number; children: JSX.Element | JSX.Element[] }) {
+  const revealed = () => actionsAlwaysVisible() || hoveredTurn() === props.turnId;
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 2,
+        height: 26,
+        opacity: revealed() ? 1 : 0,
+        pointerEvents: revealed() ? "auto" : "none",
+        transitionProperty: "opacity",
+        transitionDuration: 180,
+      }}
+    >
+      {props.children}
+      <View style={{ flex: 1 }} />
+      {props.time ? (
+        <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
+          {formatTime(props.time)}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function TurnRow(props: {
   turn: () => TurnView;
   attachmentsFor: (requestId: string) => AttachmentRef[] | undefined;
@@ -906,6 +1001,8 @@ export function TurnRow(props: {
   /** The conversation is parked on an open question (C2): the approval card
    * is the current activity, so the turn shows no loading motion. */
   waiting: () => boolean;
+  /** The newest turn: its answer is the one a reader may want again (C3). */
+  isLast: () => boolean;
   /** The conversation panel's clock, read only while something is running. */
   now: () => number;
 }) {
@@ -930,8 +1027,35 @@ export function TurnRow(props: {
       !streaming()
     );
   };
+  /** The turn's merged assistant text: what 复制 puts on the clipboard, tool
+   * JSON excluded (C3). */
+  const copyText = () => props.turn().assistantOutput ?? "";
+  const settledTime = () => {
+    const turn = props.turn();
+    if (turn.status === "running" || turn.status === "settling") return undefined;
+    const segments = turn.workSegments;
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      const segment = segments[index]!;
+      if (segment.endedAt !== undefined) return segment.endedAt;
+      if (segment.startedAt !== undefined) return segment.startedAt;
+    }
+    const inputs = turn.visibleInputs;
+    return inputs.length ? inputs[inputs.length - 1]!.createdAt : undefined;
+  };
+  /** A settled turn may be asked again: the newest one (the reader is not
+   * happy with the answer) or a failed one (C3). */
+  const retryable = () =>
+    props.turn().status !== "running" &&
+    props.turn().status !== "settling" &&
+    (props.isLast() || props.turn().status === "failed");
   return (
-    <View style={{ paddingVertical: space.sm }}>
+    <View
+      onMouseEnter={() => hoveredTurn.set(props.turn().turnId)}
+      onMouseLeave={() => {
+        if (hoveredTurn() === props.turn().turnId) hoveredTurn.set(null);
+      }}
+      style={{ paddingVertical: space.sm }}
+    >
       <If when={synthetic()}>
         <View style={{ paddingVertical: space.xs }}>
           {props.turn().postTurnEvents.map((event) =>
@@ -943,6 +1067,7 @@ export function TurnRow(props: {
         <View style={{ gap: space.sm }}>
           {props.turn().visibleInputs.map((input) => (
             <UserInputRow
+              turnId={props.turn().turnId}
               input={input}
               attachments={props.attachmentsFor(input.requestId)}
               running={props.turn().status === "running"}
@@ -1070,6 +1195,17 @@ export function TurnRow(props: {
               }
               return null;
             })}
+            <If when={!!copyText() || retryable()}>
+              {/* 复制/重试/时间 for the turn's answer (C3). */}
+              <ActionLine turnId={props.turn().turnId} time={settledTime()}>
+                <If when={!!copyText()}>
+                  <CopyPress id={`turn-${props.turn().turnId}`} text={copyText()} label="复制回答" />
+                </If>
+                <If when={retryable()}>
+                  <RetryPress turnId={props.turn().turnId} />
+                </If>
+              </ActionLine>
+            </If>
             <If
               when={
                 props.turn().status === "completed" ||

@@ -85,7 +85,13 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
     draft.set("");
     attachments.set([]);
     inputHeight.set(20);
-    await store.send(text, effectiveMode(), pending);
+    const ok = await store.send(text, effectiveMode(), pending);
+    if (!ok) {
+      // Nothing was committed: give the writer their words back (attachment
+      // previews included). The reason is in the turn-error banner.
+      draft.set(text);
+      attachments.set(pending);
+    }
   };
 
   const stop = () => {
