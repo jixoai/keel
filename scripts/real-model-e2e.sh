@@ -52,6 +52,7 @@
 #   scripts/real-model-e2e.sh --models        # provider-configuration phase (after)
 #   scripts/real-model-e2e.sh --models-baseline  # the pre-change binary (before)
 #   scripts/real-model-e2e.sh --models-legacy    # this binary on the flat flags (compat)
+#   scripts/real-model-e2e.sh --settings         # settings write -> hot reload -> reset
 #   scripts/real-model-e2e.sh --models-all    # all three phases in one evidence directory
 #   scripts/real-model-e2e.sh --check         # resolve config only, no network
 #
@@ -82,6 +83,7 @@ for arg in "$@"; do
     --models-baseline) MODE=models-baseline ;;
     --models-legacy) MODE=models-legacy ;;
     --models-all) MODE=models-all ;;
+    --settings) MODE=settings ;;
     -h|--help)
       sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
@@ -1492,6 +1494,198 @@ print(sum(1 for e in ev if e.get("kind") in ("assistant.message", "run.finished"
   return 1
 }
 
+# --- model settings phase (write -> hot reload -> reset) -------------------
+#
+# The acceptance gate for keel-model-settings: a settings write must change what
+# the NEXT run uses, without a restart, and a bad document must be refused
+# without disturbing the configuration that is serving.
+run_model_settings() {
+  info "phase: model settings (write -> hot reload -> reset)"
+  local rec_port serve_port tenant password models bodies prefix
+  rec_port="$(pick_port)"
+  serve_port="$(pick_port)"
+  prefix="$EVIDENCE_DIR/settings"
+  bodies="$EVIDENCE_DIR/settings-wire.jsonl"
+  models="$EVIDENCE_DIR/settings-boot-models.json"
+  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
+  JAR="$EVIDENCE_DIR/settings-cookies.txt"
+  : > "$JAR"
+
+  SERVE_BIN="$(ensure_serve_binary)"
+  export KEEL_E2E_MODEL_KEY="$API_KEY"
+  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/settings-recording-proxy.log" "$bodies" "$BASE_URL"
+  # The BOOT document selects the first model; the settings write moves the
+  # default to the second one, which is the observable difference.
+  write_settings_boot_document "$models" "http://127.0.0.1:$rec_port/v1"
+  start_serve "$serve_port" "$EVIDENCE_DIR/settings-serve.log" "$models" "$password" "$tenant"
+
+  local base="http://127.0.0.1:$serve_port" code
+  serve_login "$serve_port" "$JAR" "$password"
+
+  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$prefix-session.json" '{}')"
+  [ "$code" = "201" ] || die "create session returned HTTP $code: $(cat "$prefix-session.json" 2>/dev/null)"
+  SESSION="$(SESSION_FILE="$prefix-session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
+  [ -n "$SESSION" ] || die "session response carries no id"
+
+  code="$(serve_json GET "$JAR" "$base/v1/settings/models" "$prefix-get-before.json")"
+  [ "$code" = "200" ] || die "GET /v1/settings/models returned HTTP $code: $(cat "$prefix-get-before.json" 2>/dev/null)"
+  SETTINGS_REV_BEFORE="$(FILE="$prefix-get-before.json" python3 -c 'import json,os; print(json.load(open(os.environ["FILE"])).get("revision"))')"
+  submit_settings_turn "$base" "$JAR" "before" "$prefix-run-before" "设置前的一条输入"
+  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-before.json" "$prefix-status-before.json" \
+    || die "the before-settings attempt did not settle; see $EVIDENCE_DIR/settings-serve.log"
+
+  code="$(serve_json PUT "$JAR" "$base/v1/settings/models" "$prefix-put.json" \
+    "$(SETTINGS_MODEL="$MODEL" SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" EXPECTED="$SETTINGS_REV_BEFORE" python3 -c '
+import json, os
+doc = {
+  "schemaVersion": 1,
+  "providers": [{"id": "s2api-e2e", "modelIds": [os.environ["SECOND_MODEL"]]}],
+  "selection": {"providerId": "s2api-e2e", "modelId": os.environ["SECOND_MODEL"], "reasoningLevel": "low"},
+  "expectedRevision": int(os.environ["EXPECTED"]),
+}
+print(json.dumps(doc))')")"
+  SETTINGS_PUT_CODE="$code"
+  info "PUT /v1/settings/models -> HTTP $code"
+  [ "$code" = "200" ] || die "settings write returned HTTP $code: $(cat "$prefix-put.json" 2>/dev/null)"
+
+  code="$(serve_json GET "$JAR" "$base/v1/settings/models" "$prefix-get-after.json")"
+  SETTINGS_GET_CODE="$code"
+
+  submit_settings_turn "$base" "$JAR" "after" "$prefix-run-after" "设置后的一条输入"
+  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-after.json" "$prefix-status-after.json" \
+    || die "the after-settings attempt did not settle"
+
+  code="$(serve_json PUT "$JAR" "$base/v1/settings/models" "$prefix-put-bad.json" \
+    '{"schemaVersion":1,"selection":{"providerId":"s2api-e2e","modelId":"does-not-exist"}}')"
+  SETTINGS_BAD_CODE="$code"
+  info "PUT with an unknown model -> HTTP $code (expected 400)"
+
+  code="$(serve_json DELETE "$JAR" "$base/v1/settings/models?expectedRevision=$(FILE="$prefix-get-after.json" python3 -c 'import json,os; print(json.load(open(os.environ["FILE"])).get("revision"))')" "$prefix-delete.json")"
+  SETTINGS_DELETE_CODE="$code"
+  code="$(serve_json GET "$JAR" "$base/v1/settings/models" "$prefix-get-reset.json")"
+  submit_settings_turn "$base" "$JAR" "reset" "$prefix-run-reset" "重置后的一条输入"
+  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-reset.json" "$prefix-status-reset.json" \
+    || die "the reset attempt did not settle"
+
+  SETTINGS_MODEL="$MODEL" SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" \
+  BEFORE="$prefix-get-before.json" AFTER="$prefix-get-after.json" RESET="$prefix-get-reset.json" \
+  PUT_CODE="$SETTINGS_PUT_CODE" GET_CODE="$SETTINGS_GET_CODE" BAD_CODE="$SETTINGS_BAD_CODE" \
+  PUT_BAD="$prefix-put-bad.json" \
+  DELETE_CODE="$SETTINGS_DELETE_CODE" REV_BEFORE="$SETTINGS_REV_BEFORE" \
+  EVENTS_BEFORE="$prefix-events-before.json" EVENTS_AFTER="$prefix-events-after.json" \
+  EVENTS_RESET="$prefix-events-reset.json" BODIES="$bodies" \
+  SUMMARY_OUT="$EVIDENCE_DIR/settings-summary.json" \
+  python3 - <<'PY' || die "model-settings assertions failed; see $EVIDENCE_DIR/settings-summary.json"
+import json, os
+
+first, second = os.environ["SETTINGS_MODEL"], os.environ["SECOND_MODEL"]
+checks = []
+
+
+def check(name, ok, detail=""):
+    checks.append({"check": name, "ok": bool(ok), "detail": detail})
+    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
+
+
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def finished_model(path):
+    events = load(path).get("events") or []
+    out = []
+    for ev in events:
+        if ev.get("kind") != "run.finished":
+            continue
+        p = ev.get("payload")
+        if isinstance(p, str):
+            p = json.loads(p)
+        out.append(p.get("model"))
+    return out
+
+
+before, after, reset = load(os.environ["BEFORE"]), load(os.environ["AFTER"]), load(os.environ["RESET"])
+check("GET before the write reports the deployment document", before.get("source") == "deployment",
+      "source=%r" % before.get("source"))
+check("the before run used the deployment model", finished_model(os.environ["EVENTS_BEFORE"]) == [first],
+      finished_model(os.environ["EVENTS_BEFORE"]))
+check("the write was accepted", os.environ["PUT_CODE"] == "200", "HTTP %s" % os.environ["PUT_CODE"])
+check("the read-back reflects the stored document",
+      os.environ["GET_CODE"] == "200" and after.get("source") == "stored", "source=%r" % after.get("source"))
+check("the revision moved", int(after.get("revision") or 0) == int(os.environ["REV_BEFORE"]) + 1,
+      "before=%s after=%s" % (os.environ["REV_BEFORE"], after.get("revision")))
+check("the stored document is the one that was written",
+      ((after.get("document") or {}).get("selection") or {}).get("modelId") == second,
+      (after.get("document") or {}).get("selection"))
+check("the next run used the new model without a restart", finished_model(os.environ["EVENTS_AFTER"]) == [second],
+      finished_model(os.environ["EVENTS_AFTER"]))
+check("a document whose selection cannot run is refused", os.environ["BAD_CODE"] == "400",
+      "HTTP %s" % os.environ["BAD_CODE"])
+bad = load(os.environ["PUT_BAD"])
+check("the refusal names the field", bool(bad.get("issues")), bad.get("error"))
+check("the reset was accepted", os.environ["DELETE_CODE"] == "200", "HTTP %s" % os.environ["DELETE_CODE"])
+check("the reset restores the deployment source", reset.get("source") == "deployment",
+      "source=%r" % reset.get("source"))
+check("the run after the reset uses the deployment model", finished_model(os.environ["EVENTS_RESET"]) == [first],
+      finished_model(os.environ["EVENTS_RESET"]))
+
+rows = [json.loads(line) for line in open(os.environ["BODIES"], encoding="utf-8") if line.strip()]
+used = {r.get("model") for r in rows}
+check("the gateway received both models", {first, second} <= used, "wire models=%s" % sorted(used))
+
+summary = {"ok": all(c["ok"] for c in checks), "checks": checks}
+with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=2)
+print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
+raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
+PY
+
+  stop_serve
+  stop_record_proxy
+  say ""
+  say "PASS: model settings wrote, applied without a restart, and reset"
+  say "  evidence   = $EVIDENCE_DIR/settings-{get-before,put,get-after,delete,get-reset}.json, settings-wire.jsonl"
+}
+
+# write_settings_boot_document FILE PROXY_BASE — the deployment document used by
+# the settings phase: one provider with two models, defaulting to the first.
+write_settings_boot_document() {
+  local file="$1" base="$2"
+  MODELS_FILE="$file" PROXY_BASE="$base" MODEL_ID="$MODEL" SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" python3 - <<'PY'
+import json, os
+
+doc = {
+    "schemaVersion": 1,
+    "providers": [{
+        "id": "s2api-e2e",
+        "name": "S2API (recording proxy)",
+        "api": {"type": "openai-chat-completions", "baseUrl": os.environ["PROXY_BASE"]},
+        "access": {"type": "api-key", "env": "KEEL_E2E_MODEL_KEY"},
+        "modelIds": [os.environ["MODEL_ID"], os.environ["SECOND_MODEL"]],
+        "visibility": "visible",
+    }],
+    "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": "low"},
+}
+with open(os.environ["MODELS_FILE"], "w", encoding="utf-8") as fh:
+    json.dump(doc, fh, ensure_ascii=False, indent=2)
+PY
+  info "settings boot document written: $file (default $MODEL, second ${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5})"
+}
+
+# submit_settings_turn BASE JAR LABEL PREFIX TEXT — one plain input (no
+# selection: the tenant default must supply the identity).
+submit_settings_turn() {
+  local base="$1" jar="$2" label="$3" prefix="$4" text="$5" code
+  code="$(serve_json POST "$jar" "$base/v1/sessions/$SESSION/input" "$prefix-input.json" \
+    "$(REQUEST_ID="settings-$label-$(date +%s)-$$" TEXT="$text" python3 -c '
+import json, os
+print(json.dumps({"text": os.environ["TEXT"], "requestId": os.environ["REQUEST_ID"]}))')")"
+  [ "$code" = "201" ] || die "input ($label) returned HTTP $code: $(cat "$prefix-input.json" 2>/dev/null)"
+  info "input committed ($label)"
+}
+
 # --- phases ----------------------------------------------------------------
 
 run_success() {
@@ -1877,6 +2071,7 @@ case "$MODE" in
   models-baseline) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}" ;;
   models-legacy) run_current_legacy ;;
   models-all) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}"; run_current_legacy; run_provider_config ;;
+  settings) run_model_settings ;;
   *) die "internal: unknown mode $MODE" ;;
 esac
 
