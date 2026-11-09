@@ -85,6 +85,11 @@ type Config struct {
 	Hooks *agentext.HookBus
 	// Parents optionally resolves sub-agent parent links; defaults to Subagents.
 	Parents ParentResolver
+	// Models, when set, exposes the resolved provider configuration as the
+	// settings/registry projection (GET /v1/providers, GET /v1/models). The
+	// implementation lives in the hosting process, so this package never
+	// depends on the service assembly. Nil answers 501 on both endpoints.
+	Models ModelCatalog
 	// SessionExists validates that a session belongs to the tenant before a
 	// product endpoint writes to it (a decision opened on a missing session
 	// would be an orphan row). Nil skips the check (tests without a store).
@@ -131,6 +136,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/capabilities", s.capabilities)
+	s.mux.HandleFunc("GET /v1/providers", s.listProviders)
+	s.mux.HandleFunc("GET /v1/models", s.listModels)
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)

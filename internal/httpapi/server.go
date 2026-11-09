@@ -46,6 +46,11 @@ type Config struct {
 	// boundary, so GET /v1/sessions/{id}/events answers 404 for a foreign or
 	// missing session instead of 200 + an empty list.
 	Events kernel.Reader
+	// ValidateSelection, when set, validates a selection object before it is
+	// persisted with the input. The core shell stores the fact; the product layer
+	// owns the vocabulary, so an unwired validator accepts nothing but absent
+	// fields.
+	ValidateSelection func(json.RawMessage) error
 	// Loadouts is the read-only run-loadout query (the loadout revision and
 	// fencing epoch a run finished under). It is a separate endpoint on
 	// purpose: adding fields to the run-status body would change an existing
@@ -275,6 +280,10 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		// waits for the next run, "guide" is injected into the running turn at a
 		// tool boundary.
 		Delivery string `json:"delivery"`
+		// Selection names the provider/model this input asks its answer from. The
+		// shell only stores the fact (verbatim); the product vocabulary is
+		// validated through Config.ValidateSelection before the commit.
+		Selection json.RawMessage `json:"selection"`
 	}
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, 400, err)
@@ -283,6 +292,15 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(body.Text) == "" {
 		writeErr(w, 400, errors.New("text is required"))
 		return
+	}
+	// A selection the server cannot vet is refused before any store IO or
+	// commit: the kernel would also reject a non-object, but only after the
+	// request entered the commit path.
+	if len(body.Selection) > 0 {
+		if err := s.vetSelection(body.Selection); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
 	}
 	delivery := body.Delivery
 	switch delivery {
@@ -315,6 +333,12 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]any{"text": body.Text, "requestId": requestID}
 	if delivery != "" {
 		fields["delivery"] = delivery
+	}
+	if len(body.Selection) > 0 {
+		// Verbatim: a RawMessage passes the object through the payload marshal
+		// without re-encoding its fields, so the value the client sent is the
+		// value in the log.
+		fields["selection"] = json.RawMessage(body.Selection)
 	}
 	payload, err := json.Marshal(fields)
 	if err != nil {
@@ -395,6 +419,22 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		"seq":          sub.Seq,
 		"created":      created,
 	})
+}
+
+// vetSelection checks a client-supplied selection before the input is
+// committed. Object shape is the shell's own contract (the kernel persists the
+// fact without interpreting it); the provider/model vocabulary belongs to the
+// product layer, so a deployment without a wired validator refuses every
+// selection rather than storing one it cannot honour.
+func (s *Server) vetSelection(selection json.RawMessage) error {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(selection, &obj); err != nil || obj == nil {
+		return errors.New("selection must be a JSON object")
+	}
+	if s.cfg.ValidateSelection == nil {
+		return errors.New("selection is not supported by this server")
+	}
+	return s.cfg.ValidateSelection(selection)
 }
 
 // triggerRun enqueues a run without appending a user event. It is useful for

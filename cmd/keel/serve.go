@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
@@ -53,6 +55,9 @@ type serveOptions struct {
 	LoadoutRevision int64
 	MCPConfig       string
 	MCPProject      string
+	// ModelsConfig is the path of the tenant models document
+	// (providers/rules/selection); empty leaves provider configuration off.
+	ModelsConfig    string
 	ExampleInterval time.Duration
 	Log             *slog.Logger
 }
@@ -143,6 +148,13 @@ func runServe(parent context.Context, opts serveOptions) error {
 			log.Warn("mcp config", "err", message)
 		}
 	}
+	// The tenant models document is the provider configuration source; an empty
+	// path leaves provider configuration off (the legacy flat agent config
+	// still normalizes to one provider + selection).
+	modelsDoc, err := host.LoadModelsDocument(opts.ModelsConfig)
+	if err != nil {
+		return fmt.Errorf("load models config: %w", err)
+	}
 	tenantCfg := host.TenantConfig{
 		Agent: host.AgentConfig{
 			Provider:     opts.Provider,
@@ -151,6 +163,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 			Protocol:     opts.Protocol,
 			SystemPrompt: opts.SystemPrompt,
 		},
+		Models: modelsDoc,
 		Skills: host.SkillsConfig{Roots: opts.SkillsRoots},
 		MCP:    host.MCPConfig{Servers: mcpServerEntries(mcpEntries)},
 		Quota:  host.QuotaConfig{RunConcurrency: envInt("KEEL_QUOTA_RUNS", 0), EventsPerMinute: envInt("KEEL_QUOTA_EVENTS_PER_MINUTE", 0)},
@@ -216,6 +229,14 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	defer product.close()
 
+	// The resolved provider configuration is product configuration: a
+	// deployment whose service assembly carries none must refuse selections at
+	// the input edge instead of storing a fact it cannot honour.
+	var validateSelection func(json.RawMessage) error
+	if svc := rt.Models(); svc != nil {
+		validateSelection = svc.ValidateSelection
+	}
+
 	// Drain is the same edge contract the runtime uses: new requests get 503 +
 	// Retry-After, every open SSE stream receives the drain frame and closes at
 	// the configured rate. keel serve owns the worker, so draining also stops
@@ -239,6 +260,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 		CASDir:    opts.CASDir,
 		Product:   product.api,
 		Partials:  agentapi.PartialSource(product.partials),
+		// The selection vocabulary is injected here; a nil seam (no provider
+		// configuration) makes the input edge refuse every selection.
+		ValidateSelection: validateSelection,
 	})
 
 	// Auth routes live next to the API (same origin). The middleware wraps the
@@ -411,6 +435,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		return runControl.Cancel(cancelCtx, kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 	}
 
+	// The settings/registry projection (GET /v1/providers, GET /v1/models) comes
+	// from the same assembly as the selection vocabulary; a nil catalog keeps
+	// both endpoints at 501.
+	var modelCatalog agentapi.ModelCatalog
+	if svc := rt.Models(); svc != nil {
+		modelCatalog = modelSeam{svc: svc}
+	}
 	api := agentapi.New(agentapi.Config{
 		Sessions: agentapi.NewPGSessionLister(st),
 		Cancel:   cancelFn,
@@ -426,6 +457,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Triggers:  triggers,
 		Subagents: subagents,
 		Hooks:     hooks,
+		Models:    modelCatalog,
 		RunStatus: func(tenantID, sessionID uuid.UUID) (string, bool) {
 			return runControl.Status(kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 		},
@@ -463,6 +495,22 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 type storeSessions struct {
 	*store.Store
 }
+
+// modelSeam adapts the service assembly's resolved provider configuration to
+// the agentapi.ModelCatalog seam. It lives in cmd/keel because that is the only
+// package that knows both sides: agentapi must not depend on servicehost.
+type modelSeam struct {
+	svc interface {
+		ProviderViews() []modelcfg.ProviderView
+		ModelViews() []modelcfg.ModelView
+	}
+}
+
+// ProviderViews implements agentapi.ModelCatalog.
+func (m modelSeam) ProviderViews() []modelcfg.ProviderView { return m.svc.ProviderViews() }
+
+// ModelViews implements agentapi.ModelCatalog.
+func (m modelSeam) ModelViews() []modelcfg.ModelView { return m.svc.ModelViews() }
 
 // RunState implements agentext.RunStatusReader.
 func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RunState, error) {

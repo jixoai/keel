@@ -33,7 +33,15 @@
 
 - [ ] S1 `Resolution` 同时产出 settings（Effective + issues + executable/selectable）与 registry
 - [ ] S2 `GET /v1/providers`（设置视图）、`GET /v1/models`（可选择的扁平列表，含能力摘要）
+      → 端点已实现（agentapi/models.go：`Config.Models`／`ModelCatalog` 缝；隐藏 provider 剔除、
+      空解析带 `no provider configuration is loaded`、未接线 501；models_test.go）；serve.go 已装配
+      `rt.Models()`（modelSeam 适配器）＋`--models-config`／`KEEL_MODELS_CONFIG`（`host.LoadModelsDocument`
+      → `tenantCfg.Models`）；真机冒烟通过（8 provider／10 模型、hidden 不泄、未接线 501）
 - [ ] S3 selection 作为 user.message 的账本事实：校验 + 写入 payload；运行取最新已提交 selection
+      → 边缘侧完成（httpapi：`Config.ValidateSelection` 缝；present 且未接线/校验失败/非对象一律 400，
+      对象逐字进 payload；selection_test.go 覆盖五类）；运行侧已由 b8c4a2b 落地；serve.go 已接
+      `rt.Models().ValidateSelection`（真机冒烟：未知模型/未知 provider/非对象 = 400 且零写入）；
+      残留：`/v1/sessions/{id}/events` 裸边不校验词汇（同 delivery 现状）
 - [ ] S4 租户 flat agent.model/baseURL/protocol/provider 归一为匿名 provider + selection（兼容）
 
 ## W. 接线
@@ -44,6 +52,8 @@
       contextWindow（租户值仅作覆盖）
 - [ ] W3 agentapi/客户端契约：selection 形状进入 `GET /v1/models` 响应与 input 请求体；
       wire 类型零改动（chat-surface 不感知）
+      → 服务端侧完成：`/v1/models` 以 ModelView（properties/options/issues）出模型形状；input 接收
+      可选 `selection` 对象（缺省字节不变、逐字入 payload）；客户端零改动（增量可选字段）
 - [ ] W4 内核纯度：`go list -deps` 断言 kernel/loop/agent 不 import modelcfg
 
 ## Q. 验收

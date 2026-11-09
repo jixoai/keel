@@ -67,6 +67,7 @@ Environment (serve):
   KEEL_SERVE_WEB_DIR       static build directory (default web/dist)
   KEEL_MODEL / KEEL_PROVIDER / KEEL_BASE_URL / KEEL_PROTOCOL / KEEL_API_KEY
                            model selection (fake provider when unset)
+  KEEL_MODELS_CONFIG       tenant models document (providers/rules/selection)
   KEEL_SKILLS_ROOTS        OS path list of skill roots (PI-compatible)
 
 Environment (tui):
@@ -119,7 +120,9 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		loadoutRev = fs.Int64("loadout-revision", envInt64("KEEL_LOADOUT_REVISION", 1), "loadout revision")
 		mcpConfig  = fs.String("mcp", os.Getenv("KEEL_MCP_CONFIG"), "global mcp.json path (empty disables MCP)")
 		mcpProject = fs.String("mcp-project", os.Getenv("KEEL_MCP_PROJECT"), "project mcp.json path")
-		exampleInt = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
+		// modelsConfig carries the tenant models document (providers/rules/selection).
+		modelsConfig = fs.String("models-config", os.Getenv("KEEL_MODELS_CONFIG"), "tenant models document (providers/rules/selection; empty disables provider configuration)")
+		exampleInt   = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -151,6 +154,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		LoadoutRevision: *loadoutRev,
 		MCPConfig:       *mcpConfig,
 		MCPProject:      *mcpProject,
+		ModelsConfig:    *modelsConfig,
 		ExampleInterval: *exampleInt,
 		Log:             log,
 	}
