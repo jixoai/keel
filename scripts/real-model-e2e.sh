@@ -537,7 +537,7 @@ doc = {
             "id": "s2api-e2e",
             "name": "S2API (recording proxy)",
             "api": {"type": "openai-chat-completions", "baseUrl": os.environ["PROXY_BASE"]},
-            "access": {"type": "api-key", "env": "KEEL_API_KEY"},
+            "access": {"type": "api-key", "env": "KEEL_E2E_MODEL_KEY"},
             "modelIds": [os.environ["MODEL_ID"]],
             "visibility": "visible",
         },
@@ -545,7 +545,7 @@ doc = {
             "id": "hidden-e2e",
             "name": "Hidden provider (must not be listed)",
             "api": {"type": "openai-chat-completions", "baseUrl": os.environ["PROXY_BASE"]},
-            "access": {"type": "api-key", "env": "KEEL_API_KEY"},
+            "access": {"type": "api-key", "env": "KEEL_E2E_MODEL_KEY"},
             "modelIds": [os.environ["MODEL_ID"] + "-hidden"],
             "visibility": "hidden",
         },
@@ -607,12 +607,13 @@ start_serve() { # PORT LOG MODELS_FILE PASSWORD TENANT
   SERVE_LOG="$log"
   : > "$log"
   info "starting keel serve on 127.0.0.1:$port (log: $log)"
-  # KEEL_API_KEY is the variable the models document's access.env names: the
-  # credential reaches the process through the environment, never through the
-  # document.
+  # KEEL_E2E_MODEL_KEY is the variable the models document's access.env names:
+  # the credential reaches the process through the environment, never through
+  # the document. It is deliberately NOT the flat KEEL_API_KEY, so the picker's
+  # credential-aware registry stays observable (the keyless builtin providers
+  # must not be offered).
   env \
     KEEL_DSN="$DSN" \
-    KEEL_API_KEY="$API_KEY" \
     KEEL_MODELS_CONFIG="$models" \
     KEEL_SYSTEM_PROMPT="${KEEL_SYSTEM_PROMPT:-You are a deterministic integration-test agent. When the user asks you to call the echo tool, call it exactly once and then answer with the tool result.}" \
     "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/serve-cas" -password "$password" -tenant "$tenant" \
@@ -1237,6 +1238,10 @@ run_provider_config() {
   : > "$JAR"
 
   SERVE_BIN="$(ensure_serve_binary)"
+  # The credential variable the models document names is exported here, so the
+  # harness and the server agree on which providers this process can resolve —
+  # which is what the picker assertion below checks.
+  export KEEL_E2E_MODEL_KEY="$API_KEY"
   PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/recording-proxy.log" "$bodies" "$BASE_URL"
   write_models_config "$models" "http://127.0.0.1:$rec_port/v1" "$MODEL"
   start_serve "$serve_port" "$EVIDENCE_DIR/serve.log" "$models" "$password" "$tenant"
@@ -1257,12 +1262,30 @@ run_provider_config() {
   [ -n "$SESSION" ] || die "session response carries no id: $(cat "$EVIDENCE_DIR/session.json")"
   info "serve session created: $SESSION"
 
-  local level request_id prompt
+  # Refusals, on a real session: the hidden provider's model, and a selection
+  # carrying a key the vocabulary does not define. Both must be 400 AND the body
+  # must name the refusal (a session-gate "session not found" would be a pass for
+  # the wrong reason).
+  local before_events
+  before_events="$(serve_json GET "$JAR" "$base/v1/sessions/$SESSION/events?limit=500" "$EVIDENCE_DIR/refused-before.json" >/dev/null; EVENTS_FILE="$EVIDENCE_DIR/refused-before.json" python3 -c 'import json,os; print(len((json.load(open(os.environ["EVENTS_FILE"])).get("events") or [])))')"
+  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/refused-hidden.json" \
+    "$(MODEL_ID="$MODEL" python3 -c 'import json,os; print(json.dumps({"text":"x","requestId":"hidden-probe","selection":{"providerId":"hidden-e2e","modelId":os.environ["MODEL_ID"]+"-hidden"}}))')")"
+  HIDDEN_REFUSED_CODE="$code"
+  info "selecting a hidden provider's model -> HTTP $code (expected 400)"
+  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/refused-unknown-key.json" \
+    "$(MODEL_ID="$MODEL" python3 -c 'import json,os; print(json.dumps({"text":"x","requestId":"unknown-key-probe","selection":{"providerId":"s2api-e2e","modelId":os.environ["MODEL_ID"],"apiKey":"sk-probe-not-a-credential"}}))')")"
+  UNKNOWN_KEY_REFUSED_CODE="$code"
+  info "a selection carrying an unknown key -> HTTP $code (expected 400)"
+  serve_json GET "$JAR" "$base/v1/sessions/$SESSION/events?limit=500" "$EVIDENCE_DIR/refused-after.json" >/dev/null
+  REFUSED_EVENTS_BEFORE="$before_events"
+
+  local level attempt request_id prompt
   for level in low high; do
-    request_id="models-$level-$(date +%s)-$$"
     prompt="Call the echo tool exactly once with the argument x set to \"$level-marker\". Then reply with one short sentence that contains the exact text the tool returned."
-    code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$prefix-input-$level.json" \
-      "$(LEVEL="$level" REQUEST_ID="$request_id" PROMPT="$prompt" MODEL_ID="$MODEL" python3 -c '
+    for attempt in 1 2 3; do
+      request_id="models-$level-$attempt-$(date +%s)-$$"
+      code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$prefix-input-$level.json" \
+        "$(LEVEL="$level" REQUEST_ID="$request_id" PROMPT="$prompt" MODEL_ID="$MODEL" python3 -c '
 import json, os
 print(json.dumps({
     "text": os.environ["PROMPT"],
@@ -1270,14 +1293,28 @@ print(json.dumps({
     "delivery": "queue",
     "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": os.environ["LEVEL"]},
 }))'  )")"
-    [ "$code" = "201" ] || die "input ($level) returned HTTP $code: $(cat "$prefix-input-$level.json" 2>/dev/null)"
-    info "input committed with reasoningLevel=$level"
-    wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/events-$level.json" "$EVIDENCE_DIR/run-$level.json" \
-      || die "the $level attempt did not settle done; see $EVIDENCE_DIR/serve.log"
+      [ "$code" = "201" ] || die "input ($level, attempt $attempt) returned HTTP $code: $(cat "$prefix-input-$level.json" 2>/dev/null)"
+      info "input committed with reasoningLevel=$level (attempt $attempt)"
+      wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/events-$level.json" "$EVIDENCE_DIR/run-$level.json" \
+        || die "the $level attempt did not settle; see $EVIDENCE_DIR/serve.log"
+      if RUN_FILE="$EVIDENCE_DIR/run-$level.json" python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUN_FILE"])).get("status") == "done" else 1)'; then
+        break
+      fi
+      # A real gateway can answer 5xx transiently; the retry is the deployment's
+      # own behaviour (the kernel re-queues a failed run), so the harness submits
+      # a fresh input instead of failing the gate on provider weather.
+      info "attempt $attempt for $level settled $(RUN_FILE="$EVIDENCE_DIR/run-$level.json" python3 -c 'import json,os; print(json.load(open(os.environ["RUN_FILE"])).get("status"))'); resubmitting"
+      [ "$attempt" != "3" ] || die "the $level attempt kept failing upstream; see $EVIDENCE_DIR/run-$level.json"
+    done
   done
 
   MODEL_ID="$MODEL" BODIES="$bodies" PROVIDERS="$EVIDENCE_DIR/providers.json" \
   MODELS="$EVIDENCE_DIR/models.json" EVENTS_LOW="$EVIDENCE_DIR/events-low.json" \
+  HIDDEN_REFUSED_CODE="$HIDDEN_REFUSED_CODE" UNKNOWN_KEY_REFUSED_CODE="$UNKNOWN_KEY_REFUSED_CODE" \
+  HIDDEN_REFUSED_BODY="$(cat "$EVIDENCE_DIR/refused-hidden.json" 2>/dev/null)" \
+  UNKNOWN_KEY_REFUSED_BODY="$(cat "$EVIDENCE_DIR/refused-unknown-key.json" 2>/dev/null)" \
+  REFUSED_EVENTS_BEFORE="$REFUSED_EVENTS_BEFORE" \
+  REFUSED_EVENTS_AFTER="$(EVENTS_FILE="$EVIDENCE_DIR/refused-after.json" python3 -c 'import json,os; print(len((json.load(open(os.environ["EVENTS_FILE"])).get("events") or [])))' 2>/dev/null || echo "")" \
   EVENTS_HIGH="$EVIDENCE_DIR/events-high.json" INPUT_LOW="$prefix-input-low.json" \
   INPUT_HIGH="$prefix-input-high.json" SECRET_TO_SCAN="$API_KEY" SESSION="$SESSION" \
   SERVE_LOG="$EVIDENCE_DIR/serve.log" RECORD_LOG="$EVIDENCE_DIR/recording-proxy.log" \
@@ -1351,10 +1388,39 @@ check("requests are streaming and carry the tool definitions",
 provider_ids = [p.get("providerId") for p in providers.get("providers") or []]
 check("GET /v1/providers lists the tenant provider", "s2api-e2e" in provider_ids, "providers=%s" % provider_ids)
 check("GET /v1/providers hides the hidden provider", "hidden-e2e" not in provider_ids, "providers=%s" % provider_ids)
+check("the settings view still publishes the keyless builtin providers (issues, not silence)",
+      len(provider_ids) > 1, "providers=%d" % len(provider_ids))
 visible_models = [m.get("modelId") for m in models.get("models") or []]
 check("GET /v1/models lists the selected model", model in visible_models, "models=%s" % visible_models)
 check("GET /v1/models does not leak the hidden model",
       not any("hidden" in (m or "") for m in visible_models), "models=%s" % visible_models)
+# The picker list is the credential-aware registry: this process holds only the
+# tenant's key, so the keyless builtin providers must not be offered.
+# The picker list is the credential-aware registry: only models whose provider
+# credential this process can actually resolve are offered. The settings view
+# above keeps everything visible with issues.
+resolvable = {p.get("providerId") for p in providers.get("providers") or []
+              if (p.get("access") or {}).get("env") and os.environ.get((p.get("access") or {})["env"])}
+rows = [(m.get("providerId"), m.get("modelId")) for m in models.get("models") or []]
+check("GET /v1/models offers only models of credential-resolvable providers",
+      bool(rows) and all(pid in resolvable for pid, _ in rows),
+      "rows=%s resolvable=%s" % (rows, sorted(resolvable)))
+check("keyless providers are absent from the picker",
+      not any(pid in {"openai", "ollama", "anthropic", "openrouter", "deepseek"} for pid, _ in rows),
+      "rows=%s" % rows)
+check("the refusal probes did not write anything to the log",
+      os.environ["REFUSED_EVENTS_BEFORE"] == os.environ["REFUSED_EVENTS_AFTER"],
+      "before=%s after=%s" % (os.environ["REFUSED_EVENTS_BEFORE"], os.environ["REFUSED_EVENTS_AFTER"]))
+check("the hidden-provider refusal names the refusal (not the session gate)",
+      "not found" not in os.environ["HIDDEN_REFUSED_BODY"].lower(),
+      os.environ["HIDDEN_REFUSED_BODY"][:160])
+check("the unknown-key refusal names the refusal (not the session gate)",
+      "not found" not in os.environ["UNKNOWN_KEY_REFUSED_BODY"].lower(),
+      os.environ["UNKNOWN_KEY_REFUSED_BODY"][:160])
+check("selecting a hidden provider's model is refused", os.environ["HIDDEN_REFUSED_CODE"] == "400",
+      "HTTP %s" % os.environ["HIDDEN_REFUSED_CODE"])
+check("a selection carrying an unknown key is refused", os.environ["UNKNOWN_KEY_REFUSED_CODE"] == "400",
+      "HTTP %s" % os.environ["UNKNOWN_KEY_REFUSED_CODE"])
 surface = json.dumps({"providers": providers, "models": models})
 check("capability surface carries no credential-shaped value", not re.search(r"sk-[A-Za-z0-9]", surface))
 
