@@ -101,14 +101,18 @@ executable/selectable；Registry MUST 只含完整可执行项。`GET /v1/provid
 
 ### Requirement: 兼容与门禁
 
-租户文档既有的 `agent.model/baseURL/protocol/provider` MUST 被归一为一条 selection 参与解析
-（旧部署零改动）。内核包 MUST NOT import `internal/modelcfg`；既有 16 门验收与 R1 MUST 不退化；
+既有扁平 `agent.model/baseURL/protocol/provider` MUST 零改动可用，且**线路行为与升级前逐字段一致**：
+只有租户模型文档（`models` 段）才启用解析器路径——把扁平配置也送去解析，会把思考档从历史默认
+`low` 变成文档默认并有引入请求 overlay 的风险，那等于「升级即改线路」。租户文档存在但未声明
+provider 时，扁平字段仍作为默认 selection 参与解析（增量采纳路径）。
+内核包 MUST NOT import `internal/modelcfg`；既有 16 门验收与 R1 MUST 不退化；
 真实模型 E2E MUST 用 selection 跑通（providerId+modelId 到达线路，不出现 provider 名冒充 model id）。
 
-#### Scenario: 旧配置照常工作
-- **GIVEN** 只配置了 `agent.model=deepseek-v4.1-flash, baseURL=…, protocol=openai`
-- **WHEN** 启动
-- **THEN** 解析为一条匿名 provider + 该模型，行为与升级前一致
+#### Scenario: 旧配置照常工作（零线路变化）
+- **GIVEN** 只配置了 `agent.model=deepseek-v4.1-flash, baseURL=…, protocol=openai`（无 models 段）
+- **WHEN** 启动并发起一次真实回合
+- **THEN** 线路请求体与升级前逐字段相等（同一 model id、同一思考档、无 overlay），
+  且 `GET /v1/providers` 答 501、带 `selection` 的输入答 400（无文档即无词汇可校验）
 
 #### Scenario: 线路上的身份
 - **WHEN** 真实模型回合发出请求
