@@ -98,6 +98,21 @@ const sortNewestFirst = (rows: SessionSummary[]): SessionSummary[] => {
     .map((item) => item.row);
 };
 
+/** A run status that may still be waiting on an answer: only those rows are
+ * re-read for the pending-decision badge. */
+const runningLike = (runStatus: string | undefined): boolean => {
+  switch ((runStatus ?? "").toLowerCase()) {
+    case "running":
+    case "busy":
+    case "stopping":
+    case "cancelling":
+    case "canceling":
+      return true;
+    default:
+      return false;
+  }
+};
+
 /** The tail's newest decision, read for the list badge (C2): an open decision
  * parks the session on an answer; a settled one, or a tail that ends without
  * any decision, is not waiting. `undefined` = the tail says nothing either
@@ -577,7 +592,7 @@ class KeelStore {
       const result: FireResultView = await this.client.fireTrigger(id, "manual");
       const parts = [
         result.status ? `状态 ${result.status}` : "",
-        result.sessionId ? `会话 ${result.sessionId}` : "",
+        result.sessionId ? `会话 …${result.sessionId.slice(-8)}` : "",
         result.seq ? `seq ${result.seq}` : "",
         result.deduped ? "已去重" : "",
         result.error ? `错误 ${result.error}` : "",
@@ -662,7 +677,11 @@ class KeelStore {
     const tail = this.client.tail?.bind(this.client);
     if (!tail) return;
     for (const row of rows.slice(0, 12)) {
-      if (row.title && row.lastMessage && row.pendingDecision !== undefined) continue;
+      // The tail read fills what the listing lacks and keeps the badge honest.
+      // A row that is not running-like and already carries its title, preview
+      // and badge answer is complete: reading its tail again would be a
+      // request per refresh for nothing.
+      if (row.title && row.lastMessage && row.pendingDecision !== undefined && !runningLike(row.runStatus)) continue;
       try {
         const events = await tail(row.sessionId, row.lastSeq ?? 0, 8);
         if (!events.length) continue;

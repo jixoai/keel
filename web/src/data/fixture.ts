@@ -845,6 +845,52 @@ export class FixtureClient implements SettingsApi {
       },
     ], "failed");
 
+    // Two state samples the review asked for: a question that arrives while a
+    // tool call is still unfinished (the tool row must not spin while the
+    // conversation is parked on the answer), and a session whose newest turn is
+    // a maintenance compaction with no input to re-ask (no retry button, no
+    // empty assistant shell).
+    this.add("demo-parked", "部署卡在确认", [
+      { kind: "user.message", payload: { text: "把发布包推到预发环境，然后等我确认。", requestId: "seed-parked-1", delivery: "queue", timestamp: base - 620_000 } },
+      {
+        kind: "assistant.message",
+        payload: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-parked", name: "deploy.prepare", arguments: { channel: "staging" } }],
+          inputSeqs: [1],
+          stopReason: "tool_use",
+          timestamp: base - 614_000,
+        },
+      },
+      {
+        kind: "decision",
+        payload: {
+          decisionId: "dec-parked",
+          question: "预发包已就绪：继续推生产，还是先回滚？",
+          options: [
+            { optionId: "continue", label: "继续推生产", description: "进入生产窗口并跑冒烟" },
+            { optionId: "rollback", label: "先回滚", description: "撤掉预发包，明天再评估" },
+          ],
+          recommendation: "continue",
+          status: "open",
+          timeoutAt: base + 180_000,
+          timestamp: base - 600_000,
+        },
+      },
+    ], "running");
+
+    this.add("demo-compact-only", "仅压缩记录", [
+      {
+        kind: "compaction",
+        payload: {
+          summary: "上一轮 68 条消息已压缩：只剩摘要，没有可重问的输入。",
+          manual: true,
+          tokensBefore: 61000,
+          timestamp: base - 1_200_000,
+        },
+      },
+    ]);
+
     this.add("demo-empty", "新会话", []);
   }
 

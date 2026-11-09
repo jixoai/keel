@@ -181,8 +181,12 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; onSelec
               (the row never gets the running pulse), and the badge carries
               the words. The clock is the state's own tone (warning); the
               terminal's grid cannot draw the icon, so it keeps the dot. */}
-          {waiting() && !isTerminal() ? (
-            <Icon name="clock" size={11} tint={colors.warning} />
+          {waiting() ? (
+            isTerminal() ? (
+              <StatusDot tone="warning" animated={false} />
+            ) : (
+              <Icon name="clock" size={11} tint={colors.warning} />
+            )
           ) : (
             <StatusDot tone={rowDotTone(state())} />
           )}

@@ -69,6 +69,9 @@ export function Spinner(props: { size?: number; tint?: string }) {
 export function StatusDot(props: {
   tone?: "running" | "done" | "failed" | "idle" | "brand" | "warning";
   size?: number;
+  /** A parked state (waiting on a human) keeps its color but not the motion:
+   * waiting is not activity. Defaults to the tone's own rule. */
+  animated?: boolean;
 }) {
   const size = props.size ?? 7;
   const tone = props.tone ?? "idle";
@@ -92,7 +95,12 @@ export function StatusDot(props: {
         borderRadius: size / 2,
         backgroundColor: color,
         opacity: tone === "idle" ? 0.5 : 1,
-        animationName: tone === "running" || tone === "brand" || tone === "warning" ? "pulse" : undefined,
+        animationName:
+          props.animated === false
+            ? undefined
+            : tone === "running" || tone === "brand" || tone === "warning"
+              ? "pulse"
+              : undefined,
         animationDuration: 1200,
         animationIterationCount: "infinite",
       }}

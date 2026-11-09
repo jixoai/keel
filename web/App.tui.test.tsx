@@ -186,12 +186,30 @@ test("TUI: 打磨——不落裸 id/等待确认不是思考/错误横幅与重�
   // C2（列表侧）：停在未决问句上的会话带「等待确认」。
   expect(app.texts()).toContain("等待确认");
 
-  // C2（对话侧）：等待 ≠ 思考——问句在场时不出加载/思考字样。
+  // C2（对话侧）：等待 ≠ 思考——问句在场时对话自己说的是「等待确认」，
+  // 段头不再自称「工作中」（等待态的工具行也不转圈：同一道 waiting 门）。
   await app.press(TITLE("发布审批"));
   await app.waitFor("text:需要你的确认");
-  expect(app.texts()).not.toContain("正在思考");
+  expect(app.texts()).toContain("等待确认");
+  expect(app.texts()).not.toContain("工作中");
   await app.press("text:批准发布");
   await app.waitFor("text:/已确认/");
+
+  // C2 的最难一条：问句先到、工具结果还没回——工具行存在、仍在等待，且不被说成工作。
+  await app.press("label:返回会话列表");
+  await app.press(TITLE("部署卡在确认"));
+  await app.waitFor("text:/预发包已就绪/");
+  expect(app.texts()).toContain("等待确认");
+  expect(app.texts()).not.toContain("工作中");
+  expect(screen()).toContain("1 个工具");
+
+  // C3 的诚实性：没有已提交输入的回合（只剩压缩摘要）不给「重试」，
+  // 也不渲染成助手空壳（只有压缩分隔条，没有 Keel 头）。
+  await app.press("label:返回会话列表");
+  await app.press(TITLE("仅压缩记录"));
+  await app.waitFor("text:/消息已压缩/");
+  expect(app.shows("label:重试本回合")).toBe(false);
+  expect(app.count("text:Keel")).toBe(0);
 
   // C6/C3：失败回合的错误横幅（原因逐字来自账本）＋重试把同一输入再次提交。
   await app.press("label:返回会话列表");

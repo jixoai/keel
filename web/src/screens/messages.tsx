@@ -372,10 +372,13 @@ function argumentBody(value: unknown): string {
   return parts.join("\n");
 }
 
-function ToolRow(props: { call: ToolCallView }) {
+function ToolRow(props: { call: ToolCallView; waiting?: boolean }) {
   const key = `tool-${props.call.toolCallId}`;
   const open = () => isOpen(expandedToolsDetails(), key, false);
   const tone = toolTone(props.call);
+  /** A call with no result while the conversation is parked on an open
+   * question: the question is the activity, so no motion (C2). */
+  const parked = () => tone === "running" && props.waiting === true;
   const duration = props.call.finishedAt && props.call.startedAt
     ? formatDuration(props.call.finishedAt - props.call.startedAt)
     : "";
@@ -402,7 +405,11 @@ function ToolRow(props: { call: ToolCallView }) {
           }}
         >
           {tone === "running" ? (
-            <Spinner size={11} tint={colors.brand} />
+            parked() ? (
+              <Icon name="clock" size={12} tint={colors.warning} />
+            ) : (
+              <Spinner size={11} tint={colors.brand} />
+            )
           ) : (
             <Icon
               name={tone === "failed" ? "alert" : "check"}
@@ -474,7 +481,12 @@ function ToolRow(props: { call: ToolCallView }) {
 
 /** One family of a segment's calls, collapsed by default: the segment's own
  * summary line already says how many and how many failed (C9). */
-function ToolFamilyGroup(props: { groupId: string; family: ToolFamily; calls: ToolCallView[] }) {
+function ToolFamilyGroup(props: {
+  groupId: string;
+  family: ToolFamily;
+  calls: ToolCallView[];
+  waiting?: boolean;
+}) {
   const key = `${props.groupId}-${props.family}`;
   const open = () => isOpen(expandedFamilies(), key, false);
   const failed = () => props.calls.filter((call) => toolTone(call) === "failed").length;
@@ -511,7 +523,7 @@ function ToolFamilyGroup(props: { groupId: string; family: ToolFamily; calls: To
       {open() ? (
         <View style={{ paddingLeft: 2, paddingBottom: 2 }}>
           {props.calls.map((call) => (
-            <ToolRow call={call} />
+            <ToolRow call={call} waiting={props.waiting} />
           ))}
         </View>
       ) : null}
@@ -519,7 +531,7 @@ function ToolFamilyGroup(props: { groupId: string; family: ToolFamily; calls: To
   );
 }
 
-function ToolGroup(props: { segment: WorkSegment; running: boolean }) {
+function ToolGroup(props: { segment: WorkSegment; running: boolean; waiting?: boolean }) {
   const key = props.segment.segmentId;
   const calls = () => props.segment.toolCalls;
   const open = () => isOpen(expandedTools(), key, true);
@@ -605,9 +617,9 @@ function ToolGroup(props: { segment: WorkSegment; running: boolean }) {
         <View style={{ paddingBottom: 4 }}>
           {items().map((item) =>
             item.kind === "family" ? (
-              <ToolFamilyGroup groupId={key} family={item.family} calls={item.calls} />
+              <ToolFamilyGroup groupId={key} family={item.family} calls={item.calls} waiting={props.waiting} />
             ) : (
-              <ToolRow call={item.call} />
+              <ToolRow call={item.call} waiting={props.waiting} />
             ),
           )}
           {calls().length === 0 ? (
@@ -1011,7 +1023,12 @@ export function TurnRow(props: {
 }) {
   const synthetic = () => {
     const turn = props.turn();
-    return turn.origin === "manual_compact" && turn.visibleInputs.length === 0 && turn.workSegments.length === 0;
+    if (turn.visibleInputs.length > 0) return false;
+    // The projection always opens one segment; a maintenance turn is the one
+    // whose segment holds no answer and no tool work.
+    return turn.workSegments.every(
+      (segment) => !segment.assistantText && !segment.assistantThinking && segment.toolCalls.length === 0,
+    );
   };
   const streaming = () => {
     const turn = props.turn();
@@ -1046,10 +1063,14 @@ export function TurnRow(props: {
     return inputs.length ? inputs[inputs.length - 1]!.createdAt : undefined;
   };
   /** A settled turn may be asked again: the newest one (the reader is not
-   * happy with the answer) or a failed one (C3). */
+   * happy with the answer) or a failed one (C3) — and only when it has a
+   * committed input to re-ask. A maintenance turn (compaction) has none: the
+   * server would refuse the retry, so the button must not be offered. */
+  const hasCommittedInput = () => props.turn().visibleInputs.some((input) => input.seq !== undefined);
   const retryable = () =>
     props.turn().status !== "running" &&
     props.turn().status !== "settling" &&
+    hasCommittedInput() &&
     (props.isLast() || props.turn().status === "failed");
   return (
     <View
@@ -1139,8 +1160,10 @@ export function TurnRow(props: {
                       <If when={segment.toolCalls.length > 0}>
                         <ToolGroup
                           segment={segment}
+                          waiting={props.waiting()}
                           running={
                             props.turn().status === "running" &&
+                            !props.waiting() &&
                             segment.toolCalls.some((call) => call.result === undefined && !call.error)
                           }
                         />
