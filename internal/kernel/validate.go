@@ -292,6 +292,16 @@ func validateUserMessagePayload(raw json.RawMessage) error {
 			return fmt.Errorf(`user.message payload "delivery" must be "queue" or "guide", got %q`, delivery)
 		}
 	}
+	// selection names the provider/model this input asks its answer from. The
+	// kernel persists the fact without interpreting it (the product layer owns
+	// the vocabulary), but it must be an object: a half-typed value would be
+	// replayed to every successor exactly as it was written.
+	if v, ok := payload["selection"]; ok {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(v, &obj); err != nil || obj == nil {
+			return errors.New(`user.message payload "selection" must be a JSON object`)
+		}
+	}
 	return nil
 }
 
@@ -330,6 +340,14 @@ func validateRunFinishedPayload(raw json.RawMessage) error {
 	}
 	if v, ok := payload["error"]; ok && !isJSONString(v) {
 		return errors.New(`run.finished payload "error" must be a string`)
+	}
+	// provider and model are the execution identity the attempt resolved to.
+	// The kernel checks their shape only: which providers exist is product
+	// configuration, not kernel vocabulary.
+	for _, field := range []string{"provider", "model"} {
+		if v, ok := payload[field]; ok && !isJSONString(v) {
+			return fmt.Errorf(`run.finished payload %q must be a string`, field)
+		}
 	}
 	for _, field := range []string{"tokens", "context"} {
 		v, ok := payload[field]

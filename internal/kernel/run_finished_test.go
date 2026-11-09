@@ -35,6 +35,33 @@ func TestUserMessageDeliveryIsValidated(t *testing.T) {
 	}
 }
 
+// TestUserMessageSelectionIsValidated pins the shape of the selection fact: the
+// kernel persists the object without interpreting it (the product layer owns
+// the vocabulary), but a non-object would be replayed to every successor
+// exactly as written.
+func TestUserMessageSelectionIsValidated(t *testing.T) {
+	for _, im := range implementations(t) {
+		im := im
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+			h.mustCommit(CommitRequest{Kind: KindUserMessage, RequestID: "r-sel",
+				Payload: json.RawMessage(`{"text":"hi","selection":{"providerId":"s2api","modelId":"m","reasoningLevel":"high"}}`)})
+			for _, bad := range []json.RawMessage{
+				json.RawMessage(`{"text":"hi","selection":"s2api/m"}`),
+				json.RawMessage(`{"text":"hi","selection":null}`),
+				json.RawMessage(`{"text":"hi","selection":["m"]}`),
+			} {
+				if err := h.commitErr(CommitRequest{Kind: KindUserMessage, RequestID: "r-sel-bad", Payload: bad}); !iso(err, ErrInvalidRequest) {
+					t.Fatalf("selection payload %s = %v, want invalid-request", bad, err)
+				}
+			}
+			if n := h.eventCount(h.scope); n != 1 {
+				t.Fatalf("event count = %d, want 1 (rejected selections must not land)", n)
+			}
+		})
+	}
+}
+
 // TestRunFinishedPayloadIsValidated pins the attempt summary contract: the
 // status is the attempt outcome, the counters are non-negative integers, and a
 // malformed summary is refused before it reaches the log (a client would
@@ -79,6 +106,8 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				json.RawMessage(`{"status":"done","tokens":{"input":"many"}}`),
 				json.RawMessage(`{"status":"done","toolTimings":{}}`),
 				json.RawMessage(`{"status":"done","toolTimings":[{"isError":"yes"}]}`),
+				json.RawMessage(`{"status":"done","provider":7}`),
+				json.RawMessage(`{"status":"done","model":["gpt"]}`),
 				json.RawMessage(`[]`),
 			} {
 				if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: lease.Token, Payload: bad}); !iso(err, ErrInvalidRequest) {

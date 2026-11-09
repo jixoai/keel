@@ -18,10 +18,13 @@ type RunTelemetry struct {
 	Metrics telemetry.Metrics
 }
 
-// observeRun wraps one run in a span and records its duration and outcome.
-func (r *Runner) observeRun(lease kernel.Lease, execute func() (int64, error)) (int64, error) {
+// observeRun wraps one run in a span and records its duration and outcome. The
+// callback receives the span so the attempt can publish the identity it
+// actually ran with (a multi-model tenant resolves per attempt, so the boot
+// identity is not the run's identity).
+func (r *Runner) observeRun(lease kernel.Lease, execute func(telemetry.Span) (int64, error)) (int64, error) {
 	if r.Telemetry == nil || r.Telemetry.Context == nil {
-		return execute()
+		return execute(nil)
 	}
 	attributes := telemetry.SpanAttributes{
 		"tenant":   lease.Scope.TenantID.String(),
@@ -29,26 +32,36 @@ func (r *Runner) observeRun(lease kernel.Lease, execute func() (int64, error)) (
 		"model":    r.Model,
 		"provider": r.ProviderName,
 	}
-	started := time.Now()
 	cursor, err := telemetry.StartSpan(r.Telemetry.Context, telemetry.SpanOptions{
 		Name:       "keel.agent.run",
 		Attributes: attributes,
 	}, func(span telemetry.Span) (int64, error) {
-		return execute()
+		return execute(span)
 	})
-	if r.Telemetry.Metrics != nil {
-		outcome := "ok"
-		if err != nil {
-			outcome = "error"
-		}
-		metricAttributes := telemetry.SpanAttributes{
-			"model":   r.Model,
-			"outcome": outcome,
-		}
-		r.Telemetry.Metrics.Counter("keel.agent.runs", nil).Add(1, metricAttributes)
-		r.Telemetry.Metrics.Histogram("keel.agent.run.duration", &telemetry.HistogramOptions{
-			Unit: "ms",
-		}).Record(float64(time.Since(started).Milliseconds()), metricAttributes, nil)
-	}
 	return cursor, err
+}
+
+// recordRunMetrics records the run counter and duration histogram with the
+// identity the attempt actually resolved to (the boot defaults are only the
+// label of a runtime that never got as far as resolving one).
+func (r *Runner) recordRunMetrics(res RunResult, started time.Time, err error) {
+	if r.Telemetry == nil || r.Telemetry.Metrics == nil {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	model := res.Summary.Model
+	if model == "" {
+		model = r.Model
+	}
+	metricAttributes := telemetry.SpanAttributes{
+		"model":   model,
+		"outcome": outcome,
+	}
+	r.Telemetry.Metrics.Counter("keel.agent.runs", nil).Add(1, metricAttributes)
+	r.Telemetry.Metrics.Histogram("keel.agent.run.duration", &telemetry.HistogramOptions{
+		Unit: "ms",
+	}).Record(float64(time.Since(started).Milliseconds()), metricAttributes, nil)
 }

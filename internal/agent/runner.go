@@ -15,6 +15,7 @@ import (
 	"github.com/jixoai/keel/internal/loop"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 // CompactionOptions enables automatic context compaction for a runner. It is
@@ -57,12 +58,22 @@ type Runner struct {
 	// that value is the kernel; a test double sets it explicitly.
 	Reads  kernel.ReadMarker
 	Stream provider.StreamFn
-	// ProviderName and Model describe the model the runner calls; they are
-	// captured into telemetry and logs.
+	// ProviderName and Model describe the static model the runner calls; they
+	// are captured into telemetry and logs and stay the identity of a runner
+	// without a Models resolver (the fakestream path and the legacy flat
+	// configuration).
 	ProviderName string
 	Model        string
 	APIKey       string
-	Tools        *agenttool.ToolRegistry
+	// ThinkingLevel is the static reasoning level of a runner without a
+	// resolver; empty means ThinkingLow (the historical default).
+	ThinkingLevel agentcore.ThinkingLevel
+	// Models, when set, resolves the execution identity per attempt from the
+	// run's selection fact (the product-layer provider configuration). It is
+	// consulted per attempt, so a configuration change applies to runs that
+	// start after it without disturbing the ones already in flight.
+	Models ModelResolver
+	Tools  *agenttool.ToolRegistry
 	// Assembly, when set, overrides Tools and supplies the system prompt. It is
 	// the host layer (skills, MCP tools, tenant instructions) plugged into the
 	// runtime; the kernel loop never knows about it.
@@ -150,6 +161,13 @@ type RunSummary struct {
 	ErrorMessage string `json:"error,omitempty"`
 	// DurationMs is the attempt's wall clock, load to settle.
 	DurationMs int64 `json:"durationMs"`
+	// Provider and Model record the resolved execution identity of the attempt
+	// (providerId + modelId). They are in the ledger because "which model
+	// answered this turn" is an audit fact, and because a retry after a
+	// configuration change must be distinguishable from the attempt it
+	// replaces.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // TokenTotals is the objective token accounting of an attempt (no prices: the
@@ -226,13 +244,14 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 	}
 	started := time.Now()
 	var res RunResult
-	cursor, err := r.observeRun(lease, func() (int64, error) {
-		out, runErr := r.run(ctx, lease)
+	cursor, err := r.observeRun(lease, func(span telemetry.Span) (int64, error) {
+		out, runErr := r.run(ctx, lease, span)
 		res = out
 		return out.Cursor, runErr
 	})
 	res.Cursor = cursor
 	res.Summary.DurationMs = time.Since(started).Milliseconds()
+	r.recordRunMetrics(res, started, err)
 	switch {
 	case err != nil:
 		res.Summary.Status = kernel.RunSummaryFailed
@@ -254,7 +273,7 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 	return res, err
 }
 
-func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error) {
+func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Span) (RunResult, error) {
 	var res RunResult
 	events, cursor, err := r.loadEvents(ctx, lease.Scope)
 	// The load high-water mark: everything the transcript was built from.
@@ -290,6 +309,23 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error)
 	if !owedTurn(events, lease.ReadWatermark) {
 		return res, nil
 	}
+
+	// The execution identity of this attempt is resolved from the run's
+	// selection fact before anything is committed: a selection that cannot be
+	// executed fails the attempt here, where no tool call has been dispatched
+	// and no event written, so the retry (or the operator's fix) starts clean.
+	model, err := r.activeModel(ctx, lease, events)
+	if err != nil {
+		return res, fmt.Errorf("agent: resolve model: %w", err)
+	}
+	// The attempt's real identity, wherever it is observed: the span replaces
+	// the boot defaults the mixer opened it with, and the summary carries it
+	// into the run.finished event.
+	if span != nil {
+		span.SetAttributes(telemetry.SpanAttributes{"provider": model.ProviderID, "model": model.Model})
+	}
+	res.Summary.Provider = model.ProviderID
+	res.Summary.Model = model.Model
 
 	// A previous process may have died after committing an assistant tool call
 	// but before committing its results. Execute the missing calls now (at least
@@ -354,11 +390,11 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error)
 	}
 	cfg := loop.RunConfig{
 		LoopConfig: loop.LoopConfig{
-			Model:         r.Model,
-			Provider:      r.ProviderName,
-			APIKey:        r.APIKey,
-			Stream:        r.Stream,
-			ThinkingLevel: agentcore.ThinkingLow,
+			Model:         model.Model,
+			Provider:      model.ProviderID,
+			APIKey:        model.APIKey,
+			Stream:        model.Stream,
+			ThinkingLevel: model.ThinkingLevel,
 			// Transcript tool-loadout declarations (system messages) are not part
 			// of the provider wire in Keel: tools travel in LlmContext.Tools, and
 			// the OpenAI/Anthropic encoders would drop the system entries anyway.
@@ -427,9 +463,23 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease) (RunResult, error)
 			cursor = seq
 		},
 	}
-	if r.Compaction != nil && r.Compaction.Settings.Enabled && r.Compaction.ContextWindow > 0 {
-		cfg.ContextWindow = r.Compaction.ContextWindow
-		cfg.Compaction = r.Compaction.Settings
+	if r.Compaction != nil && r.Compaction.Settings.Enabled {
+		// The model's own budget is the primary source (a 1M-context model must
+		// not be compacted at the tenant's conservative default); the tenant
+		// setting remains the fallback for models that declare nothing.
+		window := model.ContextWindow
+		if window <= 0 {
+			window = r.Compaction.ContextWindow
+		}
+		if window > 0 {
+			cfg.ContextWindow = window
+			cfg.Compaction = r.Compaction.Settings
+		}
+	}
+	// The request overlay of the resolved model travels to the provider as
+	// opaque options; nothing in the kernel interprets it.
+	if len(model.RequestPatch) > 0 {
+		cfg.Extra = model.RequestPatch
 	}
 	agentCtx := &agentcore.AgentContext{
 		SystemPrompt: r.systemPrompt(),
