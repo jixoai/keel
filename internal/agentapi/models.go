@@ -40,6 +40,20 @@ type providersResponse struct {
 type modelsResponse struct {
 	Models []modelcfg.ModelView `json:"models"`
 	Issues []modelcfg.Issue     `json:"issues"`
+	// Enforcement says which published capability facts the server actually
+	// enforces. A client MUST NOT promise behaviour from a declared fact alone:
+	// v1 enforces the tool gate (a model declaring supportsToolCall=false never
+	// receives tools) while the media gate is a recorded deferral, so an
+	// attachment policy may not be derived from properties.inputFormat yet.
+	// Keeping the answer in the response means a client reads it instead of
+	// assuming it.
+	Enforcement capabilityEnforcement `json:"enforcement"`
+}
+
+// capabilityEnforcement is the enforcement ledger of the published capabilities.
+type capabilityEnforcement struct {
+	ToolCall bool `json:"toolCall"`
+	Media    bool `json:"media"`
 }
 
 // noProvidersIssue is the resolution-level diagnostic of a deployment with no
@@ -139,5 +153,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, modelsResponse{
 		Models: models,
 		Issues: resolutionIssues(s.cfg.Models, providers),
+		// v1: the tool gate is enforced in the runtime, the media gate is not
+		// (see the spec's capability scenario and the change's deferred list).
+		Enforcement: capabilityEnforcement{ToolCall: true, Media: false},
 	})
 }

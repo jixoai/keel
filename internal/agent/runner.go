@@ -252,7 +252,6 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 	})
 	res.Cursor = cursor
 	res.Summary.DurationMs = time.Since(started).Milliseconds()
-	r.recordRunMetrics(res, started, err)
 	switch {
 	case err != nil:
 		res.Summary.Status = kernel.RunSummaryFailed
@@ -271,6 +270,10 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 	if res.Summary.StopReason == "" {
 		res.Summary.StopReason = agentcore.StopReasonEndTurn
 	}
+	// The metric records the attempt's settled outcome, so it is recorded after
+	// the status is derived: a provider-turn failure rides the loop as a terminal
+	// message and would otherwise be posted as a success.
+	r.recordRunMetrics(res, started, err)
 	return res, err
 }
 
@@ -327,6 +330,17 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	}
 	res.Summary.Provider = model.ProviderID
 	res.Summary.Model = model.Model
+	tools := r.registry()
+	// A model that cannot run the request must be refused before anything is
+	// committed (the same rule the identity resolution follows): the tool list is
+	// part of the request, so a model whose configuration denies tool calls may not
+	// be handed any.
+	if props := model.Properties; props != nil && !props.SupportsToolCall {
+		if listed := tools.List(); len(listed) > 0 {
+			return res, fmt.Errorf("agent: model %s/%s declares no tool-call support but %d tools are available",
+				model.ProviderID, model.Model, len(listed))
+		}
+	}
 
 	// A previous process may have died after committing an assistant tool call
 	// but before committing its results. Execute the missing calls now (at least
@@ -388,17 +402,6 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// the cancellation guard reads to tell "the caller stopped an attempt that had
 	// already answered" from "the attempt produced nothing".
 	answerCommitted := false
-	tools := r.registry()
-	// A model whose configuration denies tool calls must not be handed any: the
-	// provider would reject the request (or silently ignore the tools) and the run
-	// would fail somewhere far from the cause. Refusing here keeps the fact and the
-	// consequence in one place.
-	if props := model.Properties; props != nil && !props.SupportsToolCall {
-		if listed := tools.List(); len(listed) > 0 {
-			return res, fmt.Errorf("agent: model %s/%s declares no tool-call support but %d tools are available",
-				model.ProviderID, model.Model, len(listed))
-		}
-	}
 	// Only a trailing user input is this run's prompt; a run that continues from
 	// committed tool results must not replay prompt lifecycle events for them.
 	promptCount := 0

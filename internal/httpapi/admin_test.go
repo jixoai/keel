@@ -183,6 +183,10 @@ func TestAdminConfigRejectsInvalidDocuments(t *testing.T) {
 			"Server": map[string]any{"command": "cmd"},
 		}}}},
 		{"bad tool allow", map[string]any{"tools": map[string]any{"allow": []string{"bad name"}}}},
+		// The provider configuration is boot-time only until a reload path
+		// exists; accepting it here would store a promise nothing reads, and a
+		// literal secret would ride along unvalidated.
+		{"models section", map[string]any{"models": map[string]any{"providers": []any{}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

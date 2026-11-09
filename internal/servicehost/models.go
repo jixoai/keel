@@ -186,6 +186,13 @@ func (m *modelsService) ProviderViews() []modelcfg.ProviderView {
 		if view.Executable {
 			if issue, missing := m.credentialIssue(view.Access); missing {
 				view.Issues = append(view.Issues, issue)
+				// The picker refuses what an attempt would fail on, so the settings
+				// flags must say the same thing: a provider this process cannot
+				// authenticate is not selectable here, however complete its config is.
+				view.Selectable = false
+				for i := range view.Models {
+					view.Models[i].Selectable = false
+				}
 			}
 		}
 		out = append(out, view)
@@ -285,6 +292,15 @@ func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveM
 		ThinkingLevel: level,
 		ContextWindow: m.contextWindow(active),
 		RequestPatch:  active.RequestPatch,
+		// The capability facts travel with the identity: the runtime enforces what
+		// the configuration declares (the tool gate today; the media gate is a
+		// recorded deferral), and it must not have to re-derive them.
+		Properties: &agent.ModelProperties{
+			SupportsToolCall:         active.Properties.SupportsToolCall,
+			SupportsJSONSchemaOutput: active.Properties.SupportsJSONSchemaOutput,
+			SupportsNativeWebSearch:  active.Properties.SupportsNativeWebSearch,
+			ImageInput:               active.Properties.InputFormat.Image,
+		},
 	}, nil
 }
 

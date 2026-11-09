@@ -15,7 +15,33 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/telemetry"
 )
+
+// TestOwedTurnIgnoresBookkeepingTails pins the rule behind the retry fix: the
+// legacy "is anything owed?" heuristic must read the last *conversational*
+// event. A run.finished tail is one attempt's summary, not an answer, and
+// treating it as one strands the input forever. (The worker-level test below
+// covers the same rule end to end; this one fails the moment the skip list
+// loses a bookkeeping kind.)
+func TestOwedTurnIgnoresBookkeepingTails(t *testing.T) {
+	user := store.Event{Seq: 1, Kind: store.EventUserMessage, Payload: json.RawMessage(`{"text":"hi"}`)}
+	for _, kind := range []string{
+		store.EventRunStarted, store.EventRunFailed, store.EventRunFinished,
+		store.EventCompaction, store.EventExternalEvent,
+	} {
+		tail := store.Event{Seq: 2, Kind: kind, Payload: json.RawMessage(`{"status":"failed"}`)}
+		if !legacyOwedTurn([]store.Event{user, tail}, 1) {
+			t.Fatalf("a %s tail must not hide the unanswered input", kind)
+		}
+	}
+	// An answer still closes the turn.
+	answer := store.Event{Seq: 2, Kind: store.EventAssistantMessage,
+		Payload: json.RawMessage(`{"role":"assistant","stopReason":"end_turn","content":[{"type":"text","text":"ok"}]}`)}
+	if legacyOwedTurn([]store.Event{user, answer}, 1) {
+		t.Fatal("a committed answer must settle the input")
+	}
+}
 
 // TestResolveFailureOnFirstInputIsRetriedNotStranded is the regression test for
 // a silent-loss bug an adversarial review proved: the attempt that fails before
@@ -23,6 +49,10 @@ import (
 // with a run.finished event, and the successor's legacy "is anything owed?"
 // heuristic read that summary as the log tail and concluded the input had been
 // answered. The input stayed unanswered while the run said done.
+//
+// It drives the worker, not the runner: the run.finished tail that triggered the
+// bug is committed by the worker, so a runner-only test cannot reproduce it
+// (proven by reverting the fix and watching a runner-only version stay green).
 func TestResolveFailureOnFirstInputIsRetriedNotStranded(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()
@@ -36,41 +66,44 @@ func TestResolveFailureOnFirstInputIsRetriedNotStranded(t *testing.T) {
 	resolver := &stubResolver{err: errors.New(`modelcfg: unknown model "gone"`)}
 	runner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
 	runner.Models = resolver
+	worker := &Worker{
+		Leases: k, Runs: st, Runner: runner, Owner: "retry-test",
+		Lease: time.Minute, MaxAttempts: 3, Logger: discardLog(), Committer: k,
+	}
+	sem := make(chan struct{}, 1)
 
-	lease := claimScope(t, k, tenant, session)
-	first, err := runner.RunAttempt(ctx, lease)
-	if err == nil {
-		t.Fatal("the first attempt must fail at resolution")
-	}
-	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease, Cursor: first.Cursor,
-		ReadThrough: first.ReadThrough, Err: err, MaxAttempts: 3}); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-	if pin, err := k.RunPin(ctx, scope); err != nil || pin.Status != kernel.RunStatusPending {
-		t.Fatalf("run status after the failed attempt = %v (%v), want pending", pin.Status, err)
-	}
-
-	// The successor must reach the resolver again instead of settling done on a
-	// log whose tail is another attempt's summary.
-	lease2 := claimScope(t, k, tenant, session)
-	second, err2 := runner.RunAttempt(ctx, lease2)
-	if err2 == nil {
-		t.Fatalf("the retry settled without resolving (status %q): the input would be stranded", second.Summary.Status)
+	// Two worker cycles: each one commits its own run.finished summary, which is
+	// exactly the tail the old heuristic misread as "the input was answered".
+	for attempt := 1; attempt <= 2; attempt++ {
+		lease, err := k.ClaimScope(ctx, scope, "retry-test", time.Minute)
+		if err != nil {
+			t.Fatalf("claim attempt %d: %v", attempt, err)
+		}
+		sem <- struct{}{}
+		worker.execute(ctx, sem, lease)
+		pin, err := k.RunPin(ctx, scope)
+		if err != nil {
+			t.Fatalf("pin attempt %d: %v", attempt, err)
+		}
+		if attempt == 1 && pin.Status != kernel.RunStatusPending {
+			t.Fatalf("run status after the failed attempt = %s, want pending", pin.Status)
+		}
+		if attempt == 2 {
+			// The second attempt must have reached the resolver again. Settling
+			// "done" here is the bug: the input would be stranded with no answer.
+			if pin.Status == kernel.RunStatusDone {
+				t.Fatal("the retry settled done without resolving: the input is stranded")
+			}
+		}
 	}
 	if got := len(resolver.selections()); got != 2 {
 		t.Fatalf("resolver calls = %d, want 2 (the input must be retried)", got)
 	}
-	k.Finish(context.Background(), kernel.FinishRequest{Lease: lease2, Cursor: second.Cursor,
-		ReadThrough: second.ReadThrough, Err: err2, MaxAttempts: 3}) //nolint:errcheck // test cleanup
-
-	// No answer was invented anywhere along the way.
-	for _, assistant := range assistantEvents(eventsOf(t, st, tenant, session)) {
-		t.Fatalf("a failed resolution must not produce an answer: %+v", assistant)
+	if assistants := assistantEvents(eventsOf(t, st, tenant, session)); len(assistants) != 0 {
+		t.Fatalf("a failed resolution must not produce an answer: %+v", assistants)
 	}
-	// The caller-side Finish (not the worker) committed nothing: the log holds the
-	// unanswered input and no invented answer.
-	if n := len(eventsOf(t, st, tenant, session)); n != 1 {
-		t.Fatalf("events = %d, want only the unanswered input", n)
+	if n := len(eventsOf(t, st, tenant, session)); n != 1+2 {
+		t.Fatalf("events = %d, want the input plus two attempt summaries", n)
 	}
 }
 
@@ -285,4 +318,55 @@ func lastRunFinished(t *testing.T, st *store.Store, tenant, session uuid.UUID) m
 		t.Fatal("no run.finished event")
 	}
 	return summary
+}
+
+// TestProviderFailureIsPostedAsAnErrorMetric pins the observability half of the
+// round-2 review: a provider turn failure rides the loop as a terminal assistant
+// message, so the runtime returns no Go error — the metric must still report the
+// attempt as an error instead of posting a failed run as "ok".
+func TestProviderFailureIsPostedAsAnErrorMetric(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	ctx := context.Background()
+	if _, err := st.AppendEvent(ctx, tenant, session, store.EventUserMessage, map[string]string{"text": "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	k := testKernel(t, st)
+	failing := func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		msg := agentcore.AssistantMessage{
+			RoleField:    agentcore.RoleAssistant,
+			StopReason:   agentcore.StopReasonError,
+			ErrorMessage: "transport: upstream 500",
+		}
+		s := provider.NewAssistantMessageEventStream(4)
+		go func() {
+			defer s.Close()
+			_ = s.Emit(ctx, provider.StreamStartEvent{Partial: msg})
+			_ = s.Emit(ctx, provider.StreamDoneEvent{Message: msg})
+		}()
+		return s, nil
+	}
+	memory := telemetry.NewMemory()
+	runner := NewRunner(k, k, failing, "openai", "gpt-test", "key", discardLog())
+	runner.Telemetry = &RunTelemetry{Context: memory, Metrics: memory}
+	lease := claimScope(t, k, tenant, session)
+	res, err := runner.RunAttempt(ctx, lease)
+	if err != nil {
+		t.Fatalf("a provider failure is a terminal message, not a Go error: %v", err)
+	}
+	if res.Summary.Status != kernel.RunSummaryFailed {
+		t.Fatalf("status = %q, want failed", res.Summary.Status)
+	}
+	k.Finish(context.Background(), kernel.FinishRequest{Lease: lease, Cursor: res.Cursor,
+		ReadThrough: res.ReadThrough, MaxAttempts: 3}) //nolint:errcheck // test cleanup
+
+	outcome := ""
+	for _, m := range memory.Measurements() {
+		if m.Name == "keel.agent.runs" {
+			outcome, _ = m.Attributes["outcome"].(string)
+		}
+	}
+	if outcome != "error" {
+		t.Fatalf("metric outcome = %q, want error (a failed attempt must not be posted as ok)", outcome)
+	}
 }

@@ -51,12 +51,11 @@ func (r *Runner) recordRunMetrics(res RunResult, started time.Time, err error) {
 	// The outcome follows the attempt's terminal status, not just the returned
 	// error: a provider turn failure rides the loop as a terminal assistant
 	// message and settles the run failed without a Go error.
+	// The status is the settled attempt outcome (a cancellation is stamped by the
+	// worker, which owns the terminal state, so it is not visible here).
 	outcome := "ok"
-	switch {
-	case err != nil || res.Summary.Status == kernel.RunSummaryFailed:
+	if err != nil || res.Summary.Status == kernel.RunSummaryFailed {
 		outcome = "error"
-	case res.Summary.Status == kernel.RunSummaryCancelled:
-		outcome = "cancelled"
 	}
 	model := res.Summary.Model
 	if model == "" {

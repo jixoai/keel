@@ -61,10 +61,18 @@ MUST NOT 按模型名硬编码思考档位或能力。v1 的补丁模板是闭�
 - **THEN** 请求体得到 `reasoning_effort=high`；Anthropic 协议映射为 thinking budget，
   且不超过该模型 maxOutputTokens
 
-#### Scenario: 能力门
-- **GIVEN** 模型 `inputFormat.supportsImage=false`
+#### Scenario: 工具能力门（v1 已实现）
+- **GIVEN** 模型 `supportsToolCall=false`
+- **WHEN** 该模型的 run 持有任何工具
+- **THEN** 运行时在请求前拒绝（fail-closed），MUST NOT 把工具塞进请求
+
+#### Scenario: 媒体能力门（v1 显式推迟，实现前 MUST NOT 宣称已具备）
+- **GIVEN** 模型 `inputFormat.image=false`
 - **WHEN** 提交带图片附件的输入
-- **THEN** 产品层拒绝或降级（按附件策略），MUST NOT 把图片塞进请求
+- **THEN** v1 **尚未**实现该门（附件策略仍在产品层，见 tasks.md 的推迟清单）；
+  实现时 MUST 在请求前拒绝或按策略降级，MUST NOT 把图片塞进请求。
+  在实现前，`/v1/models` 发布的 `inputFormat` 只是事实声明，不是执行保证——这一点
+  必须对使用方可见（客户端选择器不得据此承诺能力）。
 
 ### Requirement: 不可变 ActiveModel
 
@@ -83,10 +91,14 @@ Selection MUST 只保存 `{providerId, modelId, options.reasoningLevel?}`，MUST
 选择 MUST 在提交时对配置校验。草稿、提交、会话当前、Active 四层 MUST 分开；v1 以「租户默认
 selection + 每条 user.message 携带的 selection」表达，运行取最新已提交 selection。
 
-#### Scenario: 队列中改模型
-- **GIVEN** 一条输入带着旧 selection 在队列里
-- **WHEN** 用户改选并提交新输入
-- **THEN** 旧输入按提交时的选择执行，不回填；新 run 用新选择
+#### Scenario: 队列中改模型（v1 语义：一次尝试一个身份）
+- **GIVEN** 两条输入在队列里（seq1 带 selection=A，seq2 带 selection=B），尚无终答
+- **WHEN** 一次尝试（一个 run）把两条输入一起呈现给模型
+- **THEN** 该尝试用**最新**已提交 selection（B）解析身份，两条输入都由 B 回答；
+  账本同时记录 seq1 的 selection=A、seq2 的 selection=B 与该尝试的身份
+  （`run.finished.provider/model`），因此「谁答了什么」可审计而无歧义。
+  v1 **不**在 selection 变化处切开尝试（那需要新的「推迟输入」重排事实）；
+  「按提交时的选择执行」的严格语义是 tasks.md 的推迟项。
 
 ### Requirement: 设置视图与 Registry 同源
 

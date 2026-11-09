@@ -860,3 +860,31 @@ func TestModelServiceUsesOnlyTheInjectedLookup(t *testing.T) {
 		t.Fatalf("APIKey = %q, want the injected flat key", active.APIKey)
 	}
 }
+
+// TestModelServiceToolGateReachesTheRuntime pins the round-2 blocker: the
+// resolved capability facts must travel with the identity, or the runtime's tool
+// gate is dead code. The check happens through the real service (not a stub
+// resolver) and before any provider call.
+func TestModelServiceToolGateReachesTheRuntime(t *testing.T) {
+	doc := json.RawMessage(`{
+	  "providers": [{"id": "notools", "api": {"type": "openai-chat-completions", "baseUrl": "https://example.test/v1"},
+	                 "access": {"type": "api-key", "env": "KEEL_TEST_NOTOOLS_KEY"},
+	                 "modelIds": ["m1"], "visibility": "visible"}],
+	  "modelRules": [{"match": "m1", "config": {"properties": {"supportsToolCall": false}}}],
+	  "selection": {"providerId": "notools", "modelId": "m1"}
+	}`)
+	service := newTestModels(t, host.TenantConfig{Models: doc}, testLLM(map[string]string{
+		"KEEL_TEST_NOTOOLS_KEY": "test-key",
+	}, ""))
+
+	active, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if active.Properties == nil {
+		t.Fatal("the resolved identity must carry the capability facts")
+	}
+	if active.Properties.SupportsToolCall {
+		t.Fatal("the document declares supportsToolCall=false; the facts must say so")
+	}
+}

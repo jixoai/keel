@@ -287,3 +287,25 @@ func TestModelCatalogAllHiddenDiagnostic(t *testing.T) {
 		t.Fatalf("model-list issues = %+v, want the hidden diagnostic", list.Issues)
 	}
 }
+
+// TestModelsResponsePublishesTheEnforcementLedger pins the round-2 blocker: a
+// declared capability the server does not enforce must not read like a promise,
+// so the response carries the enforcement answer explicitly.
+func TestModelsResponsePublishesTheEnforcementLedger(t *testing.T) {
+	server := httptest.NewServer(New(Config{Models: stubCatalog{}, Logger: testLogger()}))
+	defer server.Close()
+	var raw json.RawMessage
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/models", uuid.New(), nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/models = %d %s", code, raw)
+	}
+	var body modelsResponse
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Enforcement.ToolCall {
+		t.Fatal("the tool gate is enforced and the ledger must say so")
+	}
+	if body.Enforcement.Media {
+		t.Fatal("the media gate is a recorded deferral; claiming enforcement would be a lie")
+	}
+}

@@ -104,6 +104,16 @@ func (s *Server) putTenantConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	// The provider configuration is not part of the admin document yet: nothing
+	// reads a stored models section into the running loadout, so accepting it
+	// would store a promise the runtime never keeps (and a literal secret would
+	// ride along unvalidated). It is configured at boot until a reload path
+	// exists.
+	if len(config.Models) > 0 {
+		writeErr(w, http.StatusBadRequest, errors.New(
+			"tenant config: models is configured at boot (KEEL_MODELS_CONFIG); the admin document does not accept it yet"))
+		return
+	}
 	canonical, err := json.Marshal(config)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)

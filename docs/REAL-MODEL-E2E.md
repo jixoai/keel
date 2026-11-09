@@ -306,8 +306,26 @@ harness，不掩盖缺陷：不打开它时，真实回合在修复前必然失�
   逐字落进 `user.message` payload；每次尝试取「最新一条带 selection 的输入」解析
   执行身份，解析失败在任何提交之前失败（不半执行工具、不写事件）。
 - **配置投影**：`GET /v1/providers`（可见 provider 的设置视图，含 issues 与
-  executable/selectable）与 `GET /v1/models`（可选模型扁平列表）；隐藏 provider
-  与其模型不出现在任一响应里。
+  executable/selectable）与 `GET /v1/models`（可选模型扁平列表）。两条纪律：
+  ① 隐藏 provider 从解析结果里**直接剔除**（设置视图、注册表、`Find`、工厂的歧义
+  匹配都看不到它，选中它得到 fail-closed 的 `unknown provider`）；② picker 只列
+  **本进程能解析凭据**的 provider 的模型（配置完整但取不到 key 的 provider 仍在设置
+  视图里，带 issue，且 `selectable=false`），`GET /v1/models` 的 `enforcement` 字段
+  声明哪些能力事实被服务端真正执行（v1：`toolCall=true`、`media=false`）。
+- **selection 的词表**：只接受 `{providerId, modelId, reasoningLevel}`（以及文档里
+  的 `options.reasoningLevel` 别名）；未知键在输入边即 400（`/events` 裸边是运维通道，
+  只做形状校验，见 tasks 推迟清单）。只给 `providerId`、不给 `modelId` 是拒绝而不是
+  猜；只给 `reasoningLevel` 会取租户默认模型并套上该档位。
+- **空文档的边界**：「有词汇键且非 null」才算声明了 provider 配置——`{}`、`{ }`、
+  `{\n}`、`{"schemaVersion":1}`、`{"selection":null}` 都走兼容静态路径；`{"providers":[]}`
+  或任何规则数组则启用解析器（此时扁平字段仍是默认 selection 的增量采纳）。
+- **启动门**：文档驱动部署的**默认 selection** 在装配期就校验（模型/档位/驱动/凭据），
+  不合格即启动（或 reload）失败并点名变量/字段；因此「secret 变量为空」是启动失败而不是
+  运行期失败。
+- **媒体附件的 v1 边界（诚实声明）**：媒体能力门未实装——图片等附件既不会进请求，也不会
+  报错（解码层只带文本），模型声明 `inputFormat.image=false` 同样如此。使用方**不得**据
+  `inputFormat` 假定附件被消费；`enforcement.media=false` 就是这句话的机器可读形式。
+  工具门已实装（声明 `supportsToolCall=false` 的模型拿不到工具，请求前 fail-closed）。
 - **run.finished 记录身份**：摘要里带 `provider`/`model`，审计可回答「这一轮是谁答的」。
 
 **边界与恢复（selection 是账本事实的代价）**：尝试取「最新一条带 selection 的输入」，
