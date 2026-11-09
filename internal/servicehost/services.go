@@ -150,6 +150,17 @@ func newLLMFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory {
 				return nil, fmt.Errorf("resolve model configuration: %w", err)
 			}
 			svc.models = models
+			// The advertised identity follows the document's default selection:
+			// a document-driven deployment must not report itself as the fake
+			// provider in boot logs, telemetry and the loadout summary. The
+			// construction above already proved the default resolves, so this
+			// is the identity every bare run of this generation uses.
+			if models.DefaultSelection().ModelID != "" {
+				if active, err := models.resolveActive(nil); err == nil {
+					svc.providerName = active.ProviderID
+					svc.model = active.ModelID
+				}
+			}
 		}
 		// Product-layer observation (token partials): the decorator runs on the
 		// hot path for every model request, so it must stay allocation-light.

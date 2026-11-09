@@ -2,8 +2,12 @@ package modelcfg
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/host"
 )
 
 func TestEmbeddedCatalogResolves(t *testing.T) {
@@ -371,5 +375,136 @@ func TestCatalogValidationAcceptsCompleteBaseline(t *testing.T) {
 	raw := marshalJSON(t, validCatalogDocument())
 	if _, err := LoadCatalog(raw); err != nil {
 		t.Fatalf("valid catalog rejected: %v", err)
+	}
+}
+
+// TestReasoningLevelsMatchAgentcore pins the unified vocabulary against the
+// runtime's level constants in both directions, so the model layer and the
+// execution layer can never drift apart.
+func TestReasoningLevelsMatchAgentcore(t *testing.T) {
+	want := []string{
+		string(agentcore.ThinkingOff),
+		string(agentcore.ThinkingMinimal),
+		string(agentcore.ThinkingLow),
+		string(agentcore.ThinkingMedium),
+		string(agentcore.ThinkingHigh),
+		string(agentcore.ThinkingXHigh),
+		string(agentcore.ThinkingMax),
+	}
+	if !reflect.DeepEqual(reasoningLevels, want) {
+		t.Fatalf("reasoningLevels = %v, want the agentcore levels %v", reasoningLevels, want)
+	}
+}
+
+// TestSecretRefVocabularyMatchesHost pins provider access.ref to the host's
+// tenant-document vocabulary: a value the host accepts for agent.apiKeyRef must
+// be legal here, and a value it refuses must be refused here too. The empty
+// string is the "no reference declared" case and is compared only for
+// completeness.
+func TestSecretRefVocabularyMatchesHost(t *testing.T) {
+	samples := []string{
+		"env:NAME", "env:_under", "secret:NAME", "${NAME}", "${A1_B}",
+		"hunter2", "sk-1234", "pk-live", "Bearer abc", "basic xyz",
+		"env:", "secret:", "${}", "${NAME", "NAME}", "env:1BAD", "env:BAD-NAME",
+		"ENV:NAME", " name", "name ", "   ", "a/b",
+	}
+	for _, sample := range samples {
+		hostErr := host.TenantConfig{Agent: host.AgentConfig{APIKeyRef: sample}}.Validate()
+		refErr := validateSecretRef(sample)
+		if (hostErr == nil) != (refErr == nil) {
+			t.Errorf("vocabulary drift for %q: host err=%v, modelcfg err=%v", sample, hostErr, refErr)
+		}
+	}
+	if err := validateSecretRef(""); err != nil {
+		t.Fatalf("the empty ref is 'no reference declared': %v", err)
+	}
+}
+
+// TestParseSecretRef pins the three accepted shapes and the names they yield.
+func TestParseSecretRef(t *testing.T) {
+	valid := map[string]string{
+		"env:NAME":    "NAME",
+		"secret:NAME": "NAME",
+		"${NAME}":     "NAME",
+		" env:NAME ":  "NAME",
+		"${A1_B}":     "A1_B",
+	}
+	for ref, want := range valid {
+		name, ok := ParseSecretRef(ref)
+		if !ok || name != want {
+			t.Errorf("ParseSecretRef(%q) = %q, %v; want %q, true", ref, name, ok, want)
+		}
+	}
+	for _, ref := range []string{"", "hunter2", "sk-1234", "env:", "env:BAD-NAME", "${NAME", "NAME}", "NAME"} {
+		if name, ok := ParseSecretRef(ref); ok {
+			t.Errorf("ParseSecretRef(%q) accepted as %q; literal values must not parse", ref, name)
+		}
+	}
+}
+
+// TestProviderRefMustBeAReference: a literal credential in access.ref is
+// refused at validation (naming the field), whatever shape it has.
+func TestProviderRefMustBeAReference(t *testing.T) {
+	provider := testProvider("gw", APITypeOpenAIChatCompletions, "https://gw.example/v1", "", "model")
+	provider["access"] = map[string]any{"type": "api-key", "ref": "hunter2-literal-secret"}
+	doc := testCatalogDoc([]any{provider})
+	_, err := LoadCatalog(marshalJSON(t, doc))
+	if err == nil {
+		t.Fatal("a literal credential in access.ref must be refused")
+	}
+	if !strings.Contains(err.Error(), "access.ref") || !strings.Contains(err.Error(), "secret reference") {
+		t.Fatalf("ref refusal must name the field and the vocabulary: %v", err)
+	}
+
+	// The same check runs for a tenant patch after the overlay is merged.
+	overlay := mustOverlay(t, map[string]any{
+		"providers": []any{map[string]any{
+			"id":     "chat",
+			"access": map[string]any{"type": "api-key", "ref": "hunter2-literal-secret"},
+		}},
+	}, LegacyAgent{})
+	if _, err := NewResolver(loadTestCatalog(t, testCatalogDoc(baseProviders())), overlay); err == nil {
+		t.Fatal("a tenant patch with a literal ref must be refused")
+	}
+}
+
+// TestValidateSelectionFact covers the strict gate: exactly the documented
+// vocabulary, both spellings of the reasoning level, and no duplicates.
+func TestValidateSelectionFact(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr string
+	}{
+		{name: "empty", raw: ""},
+		{name: "null", raw: "null"},
+		{name: "full selection", raw: `{"providerId":"a","modelId":"m","reasoningLevel":"high"}`},
+		{name: "documented alias", raw: `{"modelId":"m","options":{"reasoningLevel":"low"}}`},
+		{name: "level only", raw: `{"reasoningLevel":"low"}`},
+		{name: "options null", raw: `{"modelId":"m","options":null}`},
+		{name: "unknown key", raw: `{"modelId":"m","baseUrl":"https://evil.example"}`, wantErr: `unknown key "baseUrl"`},
+		{name: "unknown nested key", raw: `{"modelId":"m","options":{"temperature":1}}`, wantErr: `options: unknown key "temperature"`},
+		{name: "duplicate key", raw: `{"modelId":"m","modelId":"n"}`, wantErr: `duplicate key "modelId"`},
+		{name: "duplicate nested key", raw: `{"modelId":"m","options":{"reasoningLevel":"a","reasoningLevel":"b"}}`, wantErr: `options: duplicate key "reasoningLevel"`},
+		{name: "wrong value type", raw: `{"modelId":7}`, wantErr: "selection:"},
+		{name: "not an object", raw: `["modelId"]`, wantErr: "must be a JSON object"},
+		{name: "trailing content", raw: `{"modelId":"m"} {}`, wantErr: "selection:"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateSelectionFact([]byte(test.raw))
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateSelectionFact(%q) = %v", test.raw, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateSelectionFact(%q) = nil, want %q", test.raw, test.wantErr)
+			}
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %q, want it to contain %q", err, test.wantErr)
+			}
+		})
 	}
 }

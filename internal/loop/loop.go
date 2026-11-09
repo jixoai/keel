@@ -785,7 +785,11 @@ func runCompaction(ctx context.Context, msgs agentcore.MessageList, cfg *RunConf
 			key = dyn
 		}
 	}
-	scfg := provider.StreamConfig{APIKey: key, ThinkingLevel: cfg.ThinkingLevel}
+	// The compaction request carries the same provider-specific overlay as the
+	// primary turn: the resolved model's options (reasoning level patch, vendor
+	// keys) belong to the model, not to the caller. The compaction policy still
+	// overrides max_tokens with its own bound.
+	scfg := provider.StreamConfig{APIKey: key, ThinkingLevel: cfg.ThinkingLevel, Extra: cfg.Extra}
 	return compaction.Compact(ctx, stream, model, msgs, cfg.Compaction, -1, nil, "", scfg)
 }
 

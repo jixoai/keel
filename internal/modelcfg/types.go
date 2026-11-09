@@ -21,11 +21,32 @@ const (
 	AccessTypeAPIKey = "api-key"
 )
 
-// Visibility values. An empty visibility defaults to visible.
+// Visibility values. An empty visibility defaults to visible. A hidden
+// provider is not part of the resolved configuration at all: it is not
+// executable, not selectable, and its identity never appears in a diagnostic
+// (see buildResolution).
 const (
 	VisibilityVisible = "visible"
 	VisibilityHidden  = "hidden"
 )
+
+// reasoningLevels is the runtime's unified thinking-level vocabulary, in
+// ascending order. It is the single set a model's reasoningLevel.values may
+// draw from: the execution layer maps these strings onto driver dialects, so a
+// value outside the set cannot be interpreted and the model is not executable.
+// TestReasoningLevelsMatchAgentcore pins the set against agentcore's level
+// constants, so the two can never drift apart.
+var reasoningLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// validReasoningLevel reports whether value is in the unified vocabulary.
+func validReasoningLevel(value string) bool {
+	for _, level := range reasoningLevels {
+		if value == level {
+			return true
+		}
+	}
+	return false
+}
 
 // API describes the wire protocol, endpoint and static headers of a provider.
 // Headers are static, non-secret values (for example an API-version header);
@@ -132,7 +153,11 @@ type Issue struct {
 // ModelView is the resolved view of one model. It is present in Settings even
 // when incomplete or disabled; Enabled reports the configured enabled flag
 // (default true), Executable reports completeness, and Selectable reports
-// completeness + enabled + a usable provider.
+// completeness + enabled + a usable provider. Baseline reports that no rule
+// named this model: its facts were patched in by wildcard/baseline rules, so
+// they are a heuristic about the model rather than a declaration about it
+// (servicehost therefore does not hand a baseline-derived context window to the
+// compaction path).
 type ModelView struct {
 	ProviderID string      `json:"providerId"`
 	ModelID    string      `json:"modelId"`
@@ -142,13 +167,15 @@ type ModelView struct {
 	Enabled    bool        `json:"enabled"`
 	Executable bool        `json:"executable"`
 	Selectable bool        `json:"selectable"`
+	Baseline   bool        `json:"baseline"`
 	Issues     []Issue     `json:"issues,omitempty"`
 }
 
 // ProviderView is the resolved view of one provider. Models contains every
 // resolved member model (including incomplete/disabled ones). Executable
 // reports that the provider itself is complete enough to be used; Selectable
-// reports that it is visible and has at least one selectable model.
+// reports that it is visible and has at least one selectable model. Hidden
+// providers are not resolved at all, so they appear in no view.
 type ProviderView struct {
 	ProviderID string      `json:"providerId"`
 	Name       string      `json:"name,omitempty"`
@@ -163,7 +190,8 @@ type ProviderView struct {
 
 // Resolution is one complete parse of catalog + tenant overlay. Settings and
 // the executable registry are projections of the same value, so they cannot
-// drift apart.
+// drift apart. Hidden providers are dropped while the resolution is built, so
+// neither projection (nor a Factory built from the resolution) can reach them.
 type Resolution struct {
 	Providers []ProviderView `json:"providers"`
 }

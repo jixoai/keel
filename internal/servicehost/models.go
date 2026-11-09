@@ -12,11 +12,9 @@ package servicehost
 // configuration it started under.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/jixoai/keel/internal/agent"
@@ -35,6 +33,13 @@ type ModelService interface {
 	ValidateSelection(raw json.RawMessage) error
 	ProviderViews() []modelcfg.ProviderView
 	ModelViews() []modelcfg.ModelView
+	// ResolutionIssues reports resolution-level diagnostics (an empty
+	// resolution, every provider hidden) that no single view can carry.
+	ResolutionIssues() []modelcfg.Issue
+	// DefaultSelection is the tenant document's default selection (the zero
+	// value when the document names none). The llm service advertises this
+	// identity in its logs and loadout summary.
+	DefaultSelection() modelcfg.Selection
 }
 
 // modelsService implements ModelService over one immutable resolution.
@@ -45,7 +50,9 @@ type modelsService struct {
 	// names no model inherits it.
 	selection modelcfg.Selection
 	// legacyKey is the hosting process's flat key (--api-key / KEEL_API_KEY),
-	// the fallback for a provider whose access.env is unset or empty.
+	// the fallback for a provider whose access.env is not set in this process.
+	// It is never a fallback for a credential the provider declares explicitly
+	// (an access.env that is set but empty, or an access.ref).
 	legacyKey  string
 	lookup     func(string) (string, bool)
 	wrapStream func(provider.StreamFn) provider.StreamFn
@@ -82,14 +89,18 @@ func newModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provid
 	if err != nil {
 		return nil, fmt.Errorf("model configuration: %w", err)
 	}
-	return &modelsService{
+	service := &modelsService{
 		factory:    factory,
 		resolution: resolution,
 		selection:  overlay.Selection(),
 		legacyKey:  llm.APIKey,
 		lookup:     llm.LookupEnv,
 		wrapStream: wrap,
-	}, nil
+	}
+	if err := service.validateDefaultSelection(); err != nil {
+		return nil, fmt.Errorf("model configuration: default selection: %w", err)
+	}
+	return service, nil
 }
 
 // modelsConfigured reports whether the tenant carries a provider
@@ -101,52 +112,67 @@ func newModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provid
 // a provider-less configuration (for example only a selection) still goes
 // through the resolver, where the flat fields are the documented incremental
 // adoption path.
+//
+// Emptiness is decided semantically by modelcfg, not by the bytes: `{}`, `{ }`
+// and `{"schemaVersion":1}` declare nothing and leave the deployment on the
+// static path.
 func modelsConfigured(tenant host.TenantConfig) bool {
-	trimmed := bytes.TrimSpace(tenant.Models)
-	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("{}"))
+	return modelcfg.ModelsDocumentConfigured(tenant.Models)
+}
+
+// DefaultSelection returns the tenant document's default selection.
+func (m *modelsService) DefaultSelection() modelcfg.Selection { return m.selection }
+
+// validateDefaultSelection is the boot/reassembly gate of the tenant's default
+// selection: a default that names a model this generation cannot execute
+// (unknown, disabled, ambiguous, a driver the runtime does not have, a
+// credential this process cannot resolve) fails construction, so a deployment
+// never boots with a configuration nobody can honour. A document that names no
+// default is legal — runs then need a selection fact of their own.
+func (m *modelsService) validateDefaultSelection() error {
+	if m.selection.ModelID == "" && m.selection.ProviderID == "" {
+		return nil
+	}
+	active, err := m.resolveActive(nil)
+	if err != nil {
+		return err
+	}
+	_, err = m.attemptModel(active)
+	return err
 }
 
 // Resolve turns the run's selection fact into the execution identity of one
-// attempt. The fact is parsed, the tenant default applies when it names no
-// model, and the factory fails closed on anything it cannot execute: sending
+// attempt. The fact is parsed, the tenant default applies where the fact is
+// silent, and the factory fails closed on anything it cannot execute: sending
 // the wrong model is worse than failing the attempt.
 func (m *modelsService) Resolve(_ context.Context, _ kernel.Scope, raw json.RawMessage) (agent.ActiveModel, error) {
 	active, err := m.resolveActive(raw)
 	if err != nil {
 		return agent.ActiveModel{}, err
 	}
-	key, err := m.credential(active)
-	if err != nil {
-		return agent.ActiveModel{}, err
-	}
-	stream, err := m.stream(active)
-	if err != nil {
-		return agent.ActiveModel{}, err
-	}
-	level, err := thinkingLevel(active)
-	if err != nil {
-		return agent.ActiveModel{}, err
-	}
-	return agent.ActiveModel{
-		ProviderID:    active.ProviderID,
-		Model:         active.ModelID,
-		APIKey:        key,
-		Stream:        stream,
-		ThinkingLevel: level,
-		ContextWindow: active.Properties.ContextWindow,
-		RequestPatch:  active.RequestPatch,
-	}, nil
+	return m.attemptModel(active)
 }
 
-// ValidateSelection is the submit-time check: the same fail-closed resolution
-// as an attempt, without touching a provider or a credential.
+// ValidateSelection is the submit-time check. It runs the exact composition an
+// attempt runs — resolution, credential, wire driver, runtime thinking level —
+// so the input edge can never accept a selection the next attempt would deny.
 func (m *modelsService) ValidateSelection(raw json.RawMessage) error {
-	_, err := m.resolveActive(raw)
+	if err := modelcfg.ValidateSelectionFact(raw); err != nil {
+		return err
+	}
+	active, err := m.resolveActive(raw)
+	if err != nil {
+		return err
+	}
+	_, err = m.attemptModel(active)
 	return err
 }
 
-// ProviderViews returns the resolved settings for visible providers only: a
-// hidden provider is not part of the API surface.
+// ProviderViews returns the resolved settings for every visible provider: a
+// hidden provider is not part of the API surface (the resolution does not
+// contain it at all). A provider whose credential this process cannot resolve
+// stays visible with a diagnostic issue; that is where an operator reads why it
+// is missing from the picker list.
 func (m *modelsService) ProviderViews() []modelcfg.ProviderView {
 	all := m.resolution.Settings()
 	out := make([]modelcfg.ProviderView, 0, len(all))
@@ -154,20 +180,33 @@ func (m *modelsService) ProviderViews() []modelcfg.ProviderView {
 		if view.Visibility == modelcfg.VisibilityHidden {
 			continue
 		}
+		// An incomplete provider already carries the configuration issue that
+		// explains it; the credential diagnostic is for a provider that is
+		// complete on paper but cannot authenticate in this process.
+		if view.Executable {
+			if issue, missing := m.credentialIssue(view.Access); missing {
+				view.Issues = append(view.Issues, issue)
+			}
+		}
 		out = append(out, view)
 	}
 	return out
 }
 
-// ModelViews returns the flat, selectable model list of the visible providers.
-// The visibility filter is repeated here (the resolution already refuses to
-// select models of a hidden provider) so a hidden provider can never leak into
-// a picker projection.
+// ModelViews returns the flat, selectable model list of the visible providers
+// whose credential this process can actually resolve. A model that is
+// selectable on paper but cannot authenticate here is not a choice: the picker
+// must not offer what an attempt would fail on. The visibility filter is
+// repeated here (the resolution already refuses to resolve hidden providers) so
+// a hidden provider can never leak into a picker projection.
 func (m *modelsService) ModelViews() []modelcfg.ModelView {
-	visible := make(map[string]struct{}, len(m.resolution.Providers))
+	visible := make(map[string]modelcfg.ProviderView, len(m.resolution.Providers))
 	for _, view := range m.resolution.Providers {
-		if view.Visibility != modelcfg.VisibilityHidden {
-			visible[view.ProviderID] = struct{}{}
+		if view.Visibility == modelcfg.VisibilityHidden {
+			continue
+		}
+		if m.credentialAvailable(view.Access) {
+			visible[view.ProviderID] = view
 		}
 	}
 	all := m.resolution.Models()
@@ -181,46 +220,198 @@ func (m *modelsService) ModelViews() []modelcfg.ModelView {
 	return out
 }
 
-// resolveActive is the shared fail-closed core of Resolve and
-// ValidateSelection. It performs no IO.
-func (m *modelsService) resolveActive(raw json.RawMessage) (modelcfg.ActiveModel, error) {
-	selection, err := modelcfg.ParseSelection(raw)
-	if err != nil {
-		return modelcfg.ActiveModel{}, err
+// ResolutionIssues reports resolution-level diagnostics: with everything
+// hidden there is no provider to select, which is a different fact from "no
+// provider configuration was loaded" and must read differently.
+func (m *modelsService) ResolutionIssues() []modelcfg.Issue {
+	if len(m.resolution.Providers) > 0 {
+		return nil
 	}
-	if selection.ModelID == "" {
-		selection = m.selection
-	}
-	active, err := m.factory.Resolve(selection)
-	if err != nil {
-		return modelcfg.ActiveModel{}, err
-	}
-	return active, nil
+	return []modelcfg.Issue{{
+		Field:   "providers",
+		Message: "every configured provider is hidden; no model can be selected",
+	}}
 }
 
-// credential resolves the provider's api-key: the access environment variable
-// first, then the hosting process's flat key. A provider without any key is an
-// error, never a request — a paid endpoint must not be called with an empty
-// credential. Neither the key nor the environment value is ever logged.
+// resolveActive is the shared fail-closed core of Resolve and
+// ValidateSelection. It performs no IO.
+//
+// The fact overlays the tenant default field by field: a fact that names a
+// model executes that identity; a fact that only narrows the reasoning level
+// keeps the default model and takes the level. A fact that names a provider
+// without a model is refused rather than resolved to "that provider's default
+// model" — picking a model here would be a guess, and a wrong model on the wire
+// is worse than a rejected input.
+func (m *modelsService) resolveActive(raw json.RawMessage) (modelcfg.ActiveModel, error) {
+	fact, err := modelcfg.ParseSelection(raw)
+	if err != nil {
+		return modelcfg.ActiveModel{}, err
+	}
+	selection := m.selection
+	switch {
+	case fact.ModelID != "":
+		selection = fact
+	case fact.ProviderID != "":
+		return modelcfg.ActiveModel{}, fmt.Errorf(
+			"selection: providerId %q is not enough to choose a model: modelId is required", fact.ProviderID)
+	case fact.ReasoningLevel != "":
+		selection.ReasoningLevel = fact.ReasoningLevel
+	}
+	return m.factory.Resolve(selection)
+}
+
+// attemptModel composes the attempt's execution identity from a resolved
+// ActiveModel: the credential, the runtime thinking level and the wire driver
+// must all exist and agree with the resolved protocol. It is the one
+// composition ValidateSelection and Resolve share.
+func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveModel, error) {
+	key, err := m.credential(active)
+	if err != nil {
+		return agent.ActiveModel{}, err
+	}
+	level, err := thinkingLevel(active)
+	if err != nil {
+		return agent.ActiveModel{}, err
+	}
+	stream, err := m.stream(active)
+	if err != nil {
+		return agent.ActiveModel{}, err
+	}
+	return agent.ActiveModel{
+		ProviderID:    active.ProviderID,
+		Model:         active.ModelID,
+		APIKey:        key,
+		Stream:        stream,
+		ThinkingLevel: level,
+		ContextWindow: m.contextWindow(active),
+		RequestPatch:  active.RequestPatch,
+	}, nil
+}
+
+// contextWindow returns the window the attempt may compact against. A window
+// that only wildcard/baseline rules contributed is not a declaration about this
+// model — nobody described it — so it is withheld: the runner then keeps the
+// tenant's compaction window authoritative instead of compacting at an invented
+// number.
+func (m *modelsService) contextWindow(active modelcfg.ActiveModel) int {
+	if view, ok := m.resolution.Find(active.ProviderID, active.ModelID); ok && view.Baseline {
+		return 0
+	}
+	return active.Properties.ContextWindow
+}
+
+// credential resolves the provider's api-key. The declared access shape decides
+// the source: an explicit secret reference, otherwise the declared environment
+// variable, otherwise the hosting process's flat key. A declared source that
+// cannot produce a value fails closed — falling back to another credential
+// would silently send the wrong provider's key — and neither the key nor the
+// environment value is ever logged.
 func (m *modelsService) credential(active modelcfg.ActiveModel) (string, error) {
-	env := strings.TrimSpace(active.Access.Env)
-	if env != "" {
-		lookup := m.lookup
-		if lookup == nil {
-			lookup = os.LookupEnv
-		}
-		if value, ok := lookup(env); ok && value != "" {
+	access := active.Access
+	if ref := strings.TrimSpace(access.Ref); ref != "" {
+		if value, ok := m.resolveRef(ref); ok {
 			return value, nil
+		}
+		return "", fmt.Errorf("model %s: no credential: access.ref (%s) cannot be resolved in this process",
+			modelIdentity(active), ref)
+	}
+	if env := strings.TrimSpace(access.Env); env != "" {
+		value, found := m.lookupEnv(env)
+		switch {
+		case found && value != "":
+			return value, nil
+		case !found && m.legacyKey != "":
+			// The variable is not set at all: the process-wide key is the
+			// documented fallback. A variable that is set but empty never falls
+			// back — that is a deliberate empty value, not a missing one.
+			return m.legacyKey, nil
+		case found:
+			return "", fmt.Errorf("model %s: no credential: access.env (%s) is set but empty", modelIdentity(active), env)
+		default:
+			return "", fmt.Errorf("model %s: no credential: access.env (%s) is not set in this process and no API key is configured",
+				modelIdentity(active), env)
 		}
 	}
 	if m.legacyKey != "" {
 		return m.legacyKey, nil
 	}
-	detail := "access.env is unset"
-	if env != "" {
-		detail = fmt.Sprintf("access.env (%s) is unset or empty", env)
+	return "", fmt.Errorf("model %s: no credential: the provider declares no access reference and no API key is configured",
+		modelIdentity(active))
+}
+
+// credentialAvailable reports whether this process can produce a credential
+// for the provider, applying exactly the rules credential() applies. It is the
+// picker's gate: a model whose provider cannot authenticate here is not a
+// choice. The value itself is never returned or logged.
+func (m *modelsService) credentialAvailable(access modelcfg.Access) bool {
+	_, missing := m.credentialIssue(access)
+	return !missing
+}
+
+// credentialIssue reports why a provider's credential cannot be resolved here,
+// as an operator-readable issue for the settings view. Availability and the
+// diagnostic come from one function, so the picker and the settings view can
+// never disagree about whether a provider can authenticate.
+func (m *modelsService) credentialIssue(access modelcfg.Access) (modelcfg.Issue, bool) {
+	if ref := strings.TrimSpace(access.Ref); ref != "" {
+		if _, ok := m.resolveRef(ref); ok {
+			return modelcfg.Issue{}, false
+		}
+		return modelcfg.Issue{
+			Field:   "access.ref",
+			Message: fmt.Sprintf("secret reference %q cannot be resolved in this process", ref),
+		}, true
 	}
-	return "", fmt.Errorf("model %s: no credential: %s and no API key is configured", modelIdentity(active), detail)
+	if env := strings.TrimSpace(access.Env); env != "" {
+		value, found := m.lookupEnv(env)
+		switch {
+		case found && value != "":
+			return modelcfg.Issue{}, false
+		case found:
+			return modelcfg.Issue{
+				Field:   "access.env",
+				Message: fmt.Sprintf("environment variable %q is set but empty", env),
+			}, true
+		case m.legacyKey != "":
+			return modelcfg.Issue{}, false
+		default:
+			return modelcfg.Issue{
+				Field:   "access.env",
+				Message: fmt.Sprintf("environment variable %q is not set and no process API key is configured", env),
+			}, true
+		}
+	}
+	if m.legacyKey != "" {
+		return modelcfg.Issue{}, false
+	}
+	return modelcfg.Issue{
+		Field:   "access",
+		Message: "no access reference is declared and no process API key is configured",
+	}, true
+}
+
+// resolveRef resolves a declared secret reference through the same lookup the
+// environment path uses: ${NAME}, env:NAME and secret:NAME all name one entry
+// of the injected lookup. An unresolvable reference is a failed credential, not
+// an invitation to try something else.
+func (m *modelsService) resolveRef(ref string) (string, bool) {
+	name, ok := modelcfg.ParseSecretRef(ref)
+	if !ok {
+		return "", false
+	}
+	value, found := m.lookupEnv(name)
+	return value, found && value != ""
+}
+
+// lookupEnv consults only the injected lookup. A nil lookup resolves nothing:
+// the service must never reach into the process environment behind the host's
+// back (a test or an embedded host would otherwise read the developer's real
+// environment).
+func (m *modelsService) lookupEnv(name string) (string, bool) {
+	if m.lookup == nil {
+		return "", false
+	}
+	return m.lookup(name)
 }
 
 // stream builds the wire driver for the resolved protocol. The mapping is

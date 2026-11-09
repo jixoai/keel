@@ -167,8 +167,11 @@ func TestFactoryClampsAnthropicThinkingBudget(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	thinking := patchObject(t, active.RequestPatch, "thinking")
-	if got := patchInt(t, thinking, "budget_tokens"); got != 2048 {
-		t.Fatalf("thinking budget must be clamped to maxOutputTokens, got %d", got)
+	// Anthropic requires budget_tokens strictly below max_tokens, so the patch
+	// clamps under the cap (2048-1); the provider driver additionally reserves
+	// reply headroom under the cap and drops the block when nothing fits.
+	if got := patchInt(t, thinking, "budget_tokens"); got != 2047 {
+		t.Fatalf("thinking budget must be clamped below maxOutputTokens, got %d", got)
 	}
 	if got := patchInt(t, active.RequestPatch, "max_tokens"); got != 2048 {
 		t.Fatalf("max_tokens = %d", got)

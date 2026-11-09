@@ -503,6 +503,7 @@ type modelSeam struct {
 	svc interface {
 		ProviderViews() []modelcfg.ProviderView
 		ModelViews() []modelcfg.ModelView
+		ResolutionIssues() []modelcfg.Issue
 	}
 }
 
@@ -511,6 +512,9 @@ func (m modelSeam) ProviderViews() []modelcfg.ProviderView { return m.svc.Provid
 
 // ModelViews implements agentapi.ModelCatalog.
 func (m modelSeam) ModelViews() []modelcfg.ModelView { return m.svc.ModelViews() }
+
+// ResolutionIssues implements agentapi.ModelCatalog.
+func (m modelSeam) ResolutionIssues() []modelcfg.Issue { return m.svc.ResolutionIssues() }
 
 // RunState implements agentext.RunStatusReader.
 func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RunState, error) {

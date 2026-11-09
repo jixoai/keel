@@ -16,12 +16,14 @@ import (
 // resolved views, and deliberately includes a hidden provider (and a model of
 // that provider) so the handler's own visibility boundary is exercised too.
 type stubCatalog struct {
-	providers []modelcfg.ProviderView
-	models    []modelcfg.ModelView
+	providers        []modelcfg.ProviderView
+	models           []modelcfg.ModelView
+	resolutionIssues []modelcfg.Issue
 }
 
 func (s stubCatalog) ProviderViews() []modelcfg.ProviderView { return s.providers }
 func (s stubCatalog) ModelViews() []modelcfg.ModelView       { return s.models }
+func (s stubCatalog) ResolutionIssues() []modelcfg.Issue     { return s.resolutionIssues }
 
 // testViews builds one visible provider (a complete model plus an incomplete
 // one that must stay in the settings view) and one hidden provider.
@@ -243,5 +245,45 @@ func TestProviderRoutesRequireTenantHeader(t *testing.T) {
 		if code != http.StatusUnauthorized {
 			t.Fatalf("GET %s without X-Tenant-ID = %d %v, want 401", path, code, body)
 		}
+	}
+}
+
+// TestModelCatalogAllHiddenDiagnostic: a resolution whose providers are all
+// hidden explains itself differently from a deployment with no provider
+// configuration at all.
+func TestModelCatalogAllHiddenDiagnostic(t *testing.T) {
+	hidden := modelcfg.Issue{Field: "providers", Message: "every configured provider is hidden; no model can be selected"}
+	server := httptest.NewServer(New(Config{
+		Models: stubCatalog{resolutionIssues: []modelcfg.Issue{hidden}},
+		Logger: testLogger(),
+	}))
+	defer server.Close()
+	tenant := uuid.New()
+
+	var raw json.RawMessage
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/providers", tenant, nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/providers = %d %s", code, raw)
+	}
+	if strings.Contains(string(raw), "no provider configuration is loaded") {
+		t.Fatalf("an all-hidden configuration must not read as an unloaded one: %s", raw)
+	}
+	var settings providersResponse
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Issues) != 1 || settings.Issues[0] != hidden {
+		t.Fatalf("providers issues = %+v, want the hidden diagnostic", settings.Issues)
+	}
+
+	raw = nil
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/models", tenant, nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/models = %d %s", code, raw)
+	}
+	var list modelsResponse
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Issues) != 1 || list.Issues[0] != hidden {
+		t.Fatalf("model-list issues = %+v, want the hidden diagnostic", list.Issues)
 	}
 }

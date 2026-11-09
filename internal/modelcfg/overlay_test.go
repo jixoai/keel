@@ -220,7 +220,11 @@ func TestDocumentProvidersSuppressLegacyNormalization(t *testing.T) {
 	}
 }
 
-func TestDocumentRulesSuppressLegacyNormalization(t *testing.T) {
+// TestDocumentRulesKeepLegacyNormalization: rule sets alone do not suppress the
+// legacy path. A rules-only document (no providers) still normalizes the flat
+// agent fields into one provider and the default selection — the documented
+// incremental-adoption path — and the tenant rule applies on top.
+func TestDocumentRulesKeepLegacyNormalization(t *testing.T) {
 	cat := EmbeddedBuiltin()
 	overlay := mustOverlay(t, map[string]any{
 		"providerModelRules": []any{
@@ -232,12 +236,36 @@ func TestDocumentRulesSuppressLegacyNormalization(t *testing.T) {
 		},
 	}, LegacyAgent{Model: "deepseek-v4.1-flash"})
 	resolution := resolveFrom(t, cat, overlay)
-	if len(resolution.Providers) != 7 {
-		t.Fatalf("providers = %d, want the catalog providers", len(resolution.Providers))
+	if len(resolution.Providers) != 8 {
+		t.Fatalf("providers = %d, want the catalog providers plus the legacy provider", len(resolution.Providers))
+	}
+	legacy := mustFindProvider(t, resolution, "legacy")
+	if legacy.API.BaseURL == "" || legacy.Access.Env == "" {
+		t.Fatalf("legacy provider = %#v, want the flat fields normalized in", legacy)
+	}
+	if overlay.Selection().ModelID != "deepseek-v4.1-flash" {
+		t.Fatalf("selection = %#v, want the flat model as the default selection", overlay.Selection())
 	}
 	model := mustFindModel(t, resolution, "s2api", "deepseek-v4.1-flash")
 	if model.Enabled {
-		t.Fatalf("overlay rule must apply instead of legacy normalization")
+		t.Fatalf("overlay rule must apply")
+	}
+}
+
+// TestDocumentProvidersSuppressLegacyNormalizationOnly pins the complementary
+// half: a document that declares providers keeps the flat fields out, and a
+// rules-only document keeps them in.
+func TestDocumentProvidersSuppressLegacyNormalizationOnly(t *testing.T) {
+	doc := map[string]any{
+		"providers": []any{
+			testProvider("custom", APITypeOpenAIChatCompletions, "https://custom.example/v1", "CUSTOM_KEY", "custom-model"),
+		},
+	}
+	if !documentDeclaresProviders(doc) {
+		t.Fatal("a document with providers must suppress the legacy normalization")
+	}
+	if documentDeclaresProviders(map[string]any{"modelRules": []any{map[string]any{"match": "*", "config": map[string]any{}}}}) {
+		t.Fatal("rule sets alone must not suppress the legacy normalization")
 	}
 }
 
@@ -286,5 +314,78 @@ func TestOverlayFromLegacyConvenience(t *testing.T) {
 	}
 	if overlay.Selection().ModelID != "deepseek-v4.1-flash" {
 		t.Fatalf("selection = %#v", overlay.Selection())
+	}
+}
+
+// TestModelsDocumentConfiguredIsSemantic pins the boundary of the static
+// compatibility path: only a document that declares something activates the
+// resolver. Bytes like `{ }` or a schema-version-only body declare nothing.
+func TestModelsDocumentConfiguredIsSemantic(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty bytes", raw: "", want: false},
+		{name: "empty object", raw: `{}`, want: false},
+		{name: "spaced object", raw: `{ }`, want: false},
+		{name: "newline object", raw: "{\n}", want: false},
+		{name: "null", raw: `null`, want: false},
+		{name: "schema version only", raw: `{"schemaVersion":1}`, want: false},
+		{name: "null selection", raw: `{"selection":null}`, want: false},
+		{name: "null providers", raw: `{"providers":null}`, want: false},
+		{name: "empty providers", raw: `{"providers":[]}`, want: true},
+		{name: "selection", raw: `{"selection":{"modelId":"m"}}`, want: true},
+		{name: "rules only", raw: `{"modelRules":[{"match":"*","config":{}}]}`, want: true},
+		{name: "providers", raw: `{"providers":[{"id":"x"}]}`, want: true},
+		{name: "not an object", raw: `[1]`, want: true},
+		{name: "malformed", raw: `{"providers":`, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ModelsDocumentConfigured([]byte(test.raw)); got != test.want {
+				t.Fatalf("ModelsDocumentConfigured(%q) = %v, want %v", test.raw, got, test.want)
+			}
+		})
+	}
+}
+
+// TestSpacedEmptyDocumentKeepsTheFlatSelection: a `{ }` document is the same
+// deployment as no document at all — flat fields normalize into the default
+// selection exactly as they do on the static path.
+func TestSpacedEmptyDocumentKeepsTheFlatSelection(t *testing.T) {
+	legacy := LegacyAgent{Provider: "a6api", Model: "deepseek-v4.1-flash", BaseURL: "https://api.a6api.com/v1"}
+	for _, raw := range []string{"", `{}`, "{ }", "{\n}"} {
+		overlay, err := OverlayFromDocument([]byte(raw), legacy)
+		if err != nil {
+			t.Fatalf("OverlayFromDocument(%q): %v", raw, err)
+		}
+		selection := overlay.Selection()
+		if selection.ProviderID != "a6api" || selection.ModelID != "deepseek-v4.1-flash" {
+			t.Fatalf("OverlayFromDocument(%q) selection = %#v, want the flat default", raw, selection)
+		}
+	}
+}
+
+// TestRuleOnlyDocumentKeepsItsSelection: a document with rules and a selection
+// but no providers and no flat fields resolves through the catalog exactly as
+// declared — the rules customize the catalog entry the selection names.
+func TestRuleOnlyDocumentKeepsItsSelection(t *testing.T) {
+	overlay := mustOverlay(t, map[string]any{
+		"modelRules": []any{modelRuleForWindow("deepseek-v4.1-flash", 65536)},
+		"selection":  map[string]any{"providerId": "deepseek", "modelId": "deepseek-v4.1-flash"},
+	}, LegacyAgent{})
+	resolution := resolveFrom(t, EmbeddedBuiltin(), overlay)
+	factory := mustFactory(t, resolution)
+
+	active, err := factory.Resolve(overlay.Selection())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if active.ProviderID != "deepseek" || active.ModelID != "deepseek-v4.1-flash" {
+		t.Fatalf("identity = %s/%s", active.ProviderID, active.ModelID)
+	}
+	if active.Properties.ContextWindow != 65536 {
+		t.Fatalf("contextWindow = %d, want the tenant rule's window", active.Properties.ContextWindow)
 	}
 }

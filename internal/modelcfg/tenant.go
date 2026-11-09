@@ -11,6 +11,12 @@ import (
 // tenantRuleKeys are the ordered rule sets a tenant overlay may extend.
 var tenantRuleKeys = []string{"modelRules", "modelApiRules", "siteRules", "providerModelRules"}
 
+// documentModelKeys is the full vocabulary of the provider-configuration slice
+// of a tenant document: the rule sets, the providers, and the default
+// selection. schemaVersion is deliberately not part of it — declaring a schema
+// version configures nothing.
+var documentModelKeys = append([]string{"providers"}, append(tenantRuleKeys, "selection")...)
+
 // validateTenantDocument checks the shape of a sparse tenant overlay. Unlike
 // the catalog document it must NOT require completeness: a tenant entry is a
 // patch, and completeness is only required after the overlay is applied.

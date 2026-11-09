@@ -15,11 +15,17 @@ type ModelCatalog interface {
 	// ProviderViews returns the resolved provider settings for visible
 	// providers only (a hidden provider is not part of the API surface). Every
 	// visible provider keeps all of its member models, including incomplete or
-	// disabled ones — the settings view is where their issues are read.
+	// disabled ones — the settings view is where their issues are read. A
+	// provider whose credential this process cannot resolve stays visible with
+	// an issue; only the picker list drops it.
 	ProviderViews() []modelcfg.ProviderView
 	// ModelViews returns the flat, selectable model list in stable order
-	// (models of visible providers only; the executable registry projection).
+	// (models of visible providers whose credential this process can resolve;
+	// the executable registry projection).
 	ModelViews() []modelcfg.ModelView
+	// ResolutionIssues reports resolution-level diagnostics that no single
+	// provider view can carry (an empty resolution, every provider hidden).
+	ResolutionIssues() []modelcfg.Issue
 }
 
 // providersResponse is the GET /v1/providers body. Top-level issues report
@@ -38,9 +44,25 @@ type modelsResponse struct {
 
 // noProvidersIssue is the resolution-level diagnostic of a deployment with no
 // provider configuration at all (an empty or builtin-less resolution): an
-// empty list without a reason would look like a client bug.
+// empty list without a reason would look like a client bug. A resolution whose
+// diagnostics the catalog supplied (for example every provider hidden) uses
+// those instead, so the two cases never read alike.
 func noProvidersIssue() modelcfg.Issue {
 	return modelcfg.Issue{Field: "providers", Message: "no provider configuration is loaded"}
+}
+
+// resolutionIssues is the settings/list diagnostic set: the catalog's own
+// resolution-level issues, with the generic "nothing loaded" message only when
+// it explains an empty provider list.
+func resolutionIssues(catalog ModelCatalog, providers []modelcfg.ProviderView) []modelcfg.Issue {
+	issues := append([]modelcfg.Issue{}, catalog.ResolutionIssues()...)
+	if len(providers) == 0 && len(issues) == 0 {
+		issues = append(issues, noProvidersIssue())
+	}
+	if issues == nil {
+		issues = []modelcfg.Issue{}
+	}
+	return issues
 }
 
 // notWired answers 501 in the shape the cancel seam established: the endpoint
@@ -82,11 +104,10 @@ func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	providers := visibleProviderViews(s.cfg.Models.ProviderViews())
-	issues := make([]modelcfg.Issue, 0, 1)
-	if len(providers) == 0 {
-		issues = append(issues, noProvidersIssue())
-	}
-	writeJSON(w, http.StatusOK, providersResponse{Providers: providers, Issues: issues})
+	writeJSON(w, http.StatusOK, providersResponse{
+		Providers: providers,
+		Issues:    resolutionIssues(s.cfg.Models, providers),
+	})
 }
 
 // listModels implements GET /v1/models: the flat selectable list a picker
@@ -115,9 +136,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 		}
 		models = append(models, model)
 	}
-	issues := make([]modelcfg.Issue, 0, 1)
-	if len(providers) == 0 {
-		issues = append(issues, noProvidersIssue())
-	}
-	writeJSON(w, http.StatusOK, modelsResponse{Models: models, Issues: issues})
+	writeJSON(w, http.StatusOK, modelsResponse{
+		Models: models,
+		Issues: resolutionIssues(s.cfg.Models, providers),
+	})
 }

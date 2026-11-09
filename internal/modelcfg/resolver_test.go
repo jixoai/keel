@@ -1,6 +1,7 @@
 package modelcfg
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -475,4 +476,146 @@ func TestCaseInsensitiveUnambiguousProviderFallback(t *testing.T) {
 	if active.ProviderID != "solo" || active.ModelID != "only-model" {
 		t.Fatalf("active model = %#v", active)
 	}
+}
+
+// hiddenProviderCatalog is a catalog with one visible and one hidden provider
+// that share a model id, so both the identity path and the ambiguity path can
+// be exercised against the visibility boundary.
+func hiddenProviderCatalog(t *testing.T) *Catalog {
+	t.Helper()
+	hidden := testProvider("hidden-gw", APITypeOpenAIChatCompletions, "https://hidden.example/v1", "HIDDEN_KEY", "secret-model", "shared-model")
+	hidden["visibility"] = VisibilityHidden
+	return loadTestCatalog(t, testCatalogDoc([]any{
+		testProvider("visible-gw", APITypeOpenAIChatCompletions, "https://visible.example/v1", "VISIBLE_KEY", "shared-model"),
+		hidden,
+	}))
+}
+
+// TestHiddenProviderIsNotResolvedButIsRefused: a hidden provider is not part of
+// the resolution at all, so it cannot execute and its identity cannot leak.
+// Both entry paths fail closed.
+func TestHiddenProviderIsNotResolvedButIsRefused(t *testing.T) {
+	resolution := resolveFrom(t, hiddenProviderCatalog(t), Overlay{})
+	for _, provider := range resolution.Providers {
+		if provider.ProviderID == "hidden-gw" {
+			t.Fatalf("hidden provider leaked into the resolution: %#v", provider)
+		}
+	}
+	factory := mustFactory(t, resolution)
+
+	if _, err := factory.Resolve(Selection{ProviderID: "hidden-gw", ModelID: "secret-model"}); err == nil {
+		t.Fatal("a hidden provider must not resolve")
+	} else if !strings.Contains(err.Error(), "hidden-gw") || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("hidden refusal must name the unknown provider: %v", err)
+	}
+	if _, err := factory.Resolve(Selection{ProviderID: "hidden-gw"}); err == nil {
+		t.Fatal("a hidden provider id alone must not resolve")
+	}
+	if _, ok := resolution.Find("hidden-gw", "secret-model"); ok {
+		t.Fatal("Find must not see a hidden provider")
+	}
+	if _, err := factory.Resolve(Selection{ModelID: "secret-model"}); err == nil {
+		t.Fatal("a model that only a hidden provider declares must be unknown")
+	}
+}
+
+// TestAmbiguityDoesNotEnumerateHiddenProviders: the ambiguity diagnostic lists
+// what a caller may choose. A hidden provider is not a choice, so a model id
+// that is visible in one provider and hidden in another resolves to the visible
+// one; a hidden-only id is simply unknown.
+func TestAmbiguityDoesNotEnumerateHiddenProviders(t *testing.T) {
+	resolution := resolveFrom(t, hiddenProviderCatalog(t), Overlay{})
+	factory := mustFactory(t, resolution)
+
+	active, err := factory.Resolve(Selection{ModelID: "shared-model"})
+	if err != nil {
+		t.Fatalf("hidden duplicates must not create an ambiguity: %v", err)
+	}
+	if active.ProviderID != "visible-gw" {
+		t.Fatalf("resolved provider = %q, want the visible one", active.ProviderID)
+	}
+
+	_, err = factory.Resolve(Selection{ModelID: "secret-model"})
+	if err == nil {
+		t.Fatal("a hidden-only model id must not resolve")
+	}
+	if strings.Contains(err.Error(), "hidden-gw") {
+		t.Fatalf("a diagnostic must never name a hidden provider: %v", err)
+	}
+}
+
+// TestBaselineFlagMarksUndescribedModels: Baseline reports that no rule named
+// the model, which is what servicehost uses to keep an invented window out of
+// the compaction path.
+func TestBaselineFlagMarksUndescribedModels(t *testing.T) {
+	doc := testCatalogDoc([]any{
+		testProvider("gw", APITypeOpenAIChatCompletions, "https://gw.example/v1", "GW_KEY", "described", "undescribed"),
+	})
+	doc["providerModelRules"] = []any{providerModelRuleForWindow("gw", "described", 65536)}
+	cat := loadTestCatalog(t, doc)
+	resolution := resolveFrom(t, cat, Overlay{})
+
+	if described := mustFindModel(t, resolution, "gw", "described"); described.Baseline {
+		t.Fatalf("a model named by a rule is not baseline-derived: %#v", described)
+	}
+	if undescribed := mustFindModel(t, resolution, "gw", "undescribed"); !undescribed.Baseline {
+		t.Fatalf("a model nobody named must be baseline-derived: %#v", undescribed)
+	}
+}
+
+// TestStaticHeadersMakeAProviderUnexecutable: no runtime driver can carry
+// api.headers today, so a provider that declares them must not present itself
+// as executable (the settings view shows the issue instead).
+func TestStaticHeadersMakeAProviderUnexecutable(t *testing.T) {
+	provider := testProvider("gw", APITypeOpenAIChatCompletions, "https://gw.example/v1", "GW_KEY", "model")
+	provider["api"] = map[string]any{
+		"type":    APITypeOpenAIChatCompletions,
+		"baseUrl": "https://gw.example/v1",
+		"headers": map[string]any{"x-api-version": "2024-10-01"},
+	}
+	cat := loadTestCatalog(t, testCatalogDoc([]any{provider}))
+	resolution := resolveFrom(t, cat, Overlay{})
+
+	view := mustFindProvider(t, resolution, "gw")
+	if view.Executable {
+		t.Fatalf("a header-carrying provider must not be executable: %#v", view)
+	}
+	requireIssue(t, view.Issues, "api.headers", "")
+	if model := mustFindModel(t, resolution, "gw", "model"); model.Selectable {
+		t.Fatalf("no model of an unexecutable provider may be selectable: %#v", model)
+	}
+}
+
+// TestReasoningValuesOutsideTheRuntimeVocabulary: a model whose reasoning
+// vocabulary the runtime cannot interpret is not executable, and the issue
+// names the offender.
+func TestReasoningValuesOutsideTheRuntimeVocabulary(t *testing.T) {
+	doc := testCatalogDoc([]any{
+		testProvider("gw", APITypeOpenAIChatCompletions, "https://gw.example/v1", "GW_KEY", "model"),
+	})
+	doc["providerModelRules"] = []any{
+		map[string]any{
+			"providerId": "gw",
+			"modelId":    "model",
+			"config": map[string]any{
+				"options": map[string]any{
+					"reasoningLevel": map[string]any{
+						"values": anyStrings("off", "turbo"),
+						"map": map[string]any{
+							"off":   map[string]any{},
+							"turbo": map[string]any{"reasoning_effort": "turbo"},
+						},
+					},
+				},
+			},
+		},
+	}
+	cat := loadTestCatalog(t, doc)
+	resolution := resolveFrom(t, cat, Overlay{})
+
+	model := mustFindModel(t, resolution, "gw", "model")
+	if model.Executable || model.Selectable {
+		t.Fatalf("a model with a non-runtime reasoning level must not execute: %#v", model)
+	}
+	requireIssue(t, model.Issues, "options.reasoningLevel.values", `reasoning level "turbo" is not a runtime level (want off|minimal|low|medium|high|xhigh|max)`)
 }

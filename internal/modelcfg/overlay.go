@@ -66,7 +66,7 @@ func OverlayFromDocument(raw []byte, legacy LegacyAgent) (Overlay, error) {
 	}
 
 	overlay := Overlay{patch: cloneJSONMap(doc), selection: selection}
-	if documentHasModelConfiguration(doc) {
+	if documentDeclaresProviders(doc) {
 		return overlay, nil
 	}
 
@@ -103,17 +103,46 @@ func OverlayFromLegacy(legacy LegacyAgent) (Overlay, error) {
 	return OverlayFromDocument(nil, legacy)
 }
 
-func documentHasModelConfiguration(doc map[string]any) bool {
+// documentDeclaresProviders reports whether a tenant document declares its own
+// provider list. Only that suppresses the legacy normalization: when the
+// document does not, the flat agent fields are normalized into one provider and
+// a default selection (the documented incremental-adoption path), including for
+// a rules-only document whose rules then customize the result. Rule sets alone
+// never suppress the flat default selection.
+func documentDeclaresProviders(doc map[string]any) bool {
 	if doc == nil {
 		return false
 	}
-	if list, ok := doc["providers"].([]any); ok && len(list) > 0 {
+	list, ok := doc["providers"].([]any)
+	return ok && len(list) > 0
+}
+
+// ModelsDocumentConfigured reports whether a tenant's "models" section
+// declares provider configuration. The decision is semantic, never byte-based:
+// a document that carries none of the vocabulary keys (or only explicit nulls)
+// declares nothing, whatever its bytes look like — `{}`, `{ }`, a
+// newline-only body and `{"schemaVersion":1}` all leave a flat deployment on
+// its static path.
+// A document that is not a JSON object at all counts as configured, so the
+// resolver reports it instead of it being silently ignored.
+func ModelsDocumentConfigured(raw []byte) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return false
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &doc); err != nil {
 		return true
 	}
-	for _, key := range tenantRuleKeys {
-		if list, ok := doc[key].([]any); ok && len(list) > 0 {
-			return true
+	for _, key := range documentModelKeys {
+		value, ok := doc[key]
+		if !ok {
+			continue
 		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			continue
+		}
+		return true
 	}
 	return false
 }

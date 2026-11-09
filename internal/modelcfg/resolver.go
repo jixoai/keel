@@ -75,7 +75,8 @@ func (r *Resolution) Find(providerID, modelID string) (ModelView, bool) {
 	return ModelView{}, false
 }
 
-// Settings returns every provider, including incomplete and disabled entries.
+// Settings returns every resolved provider, including incomplete and disabled
+// entries. Hidden providers are not resolved at all, so they are never here.
 func (r *Resolution) Settings() []ProviderView {
 	if r == nil {
 		return []ProviderView{}
@@ -83,10 +84,23 @@ func (r *Resolution) Settings() []ProviderView {
 	return cloneProviderViews(r.Providers)
 }
 
+// buildResolution resolves every declared provider except the hidden ones.
+//
+// A hidden provider is not part of the resolved configuration: it is not
+// executable, not selectable and not routable, and its identity never appears
+// in a diagnostic. Dropping it here — rather than flagging it in a later
+// projection — is the only place that can keep every consumer honest at once:
+// the settings view, the executable registry and the ModelFactory (whose
+// ambiguity scan walks the resolved providers) never see the hidden entry, so a
+// hidden id can neither execute nor leak through an ambiguity list.
 func buildResolution(doc document) Resolution {
 	resolution := Resolution{Providers: make([]ProviderView, 0, len(doc.providers))}
 	for _, provider := range doc.providers {
-		resolution.Providers = append(resolution.Providers, resolveProvider(provider, doc))
+		view := resolveProvider(provider, doc)
+		if view.Visibility == VisibilityHidden {
+			continue
+		}
+		resolution.Providers = append(resolution.Providers, view)
 	}
 	return resolution
 }
@@ -109,17 +123,16 @@ func resolveProvider(provider ProviderConfig, doc document) ProviderView {
 	view.Issues = issues
 	view.Executable = complete
 
-	providerUsable := complete && visibility != VisibilityHidden
 	anySelectable := false
 	for _, modelID := range modelIDs {
 		model := resolveModel(provider, modelID, doc)
-		model.Selectable = model.Executable && model.Enabled && providerUsable
+		model.Selectable = model.Executable && model.Enabled && complete && visibility != VisibilityHidden
 		if model.Selectable {
 			anySelectable = true
 		}
 		view.Models = append(view.Models, model)
 	}
-	view.Selectable = providerUsable && anySelectable
+	view.Selectable = complete && visibility != VisibilityHidden && anySelectable
 	return view
 }
 
@@ -189,6 +202,7 @@ func resolveModel(provider ProviderConfig, modelID string, doc document) ModelVi
 		Options:    cloneOptions(options),
 		Enabled:    enabled,
 		Executable: complete,
+		Baseline:   !exact,
 		Issues:     issues,
 	}
 }
@@ -313,6 +327,14 @@ func modelIssues(config ModelConfig, enabled, exact bool) ([]Issue, bool) {
 			complete = false
 		} else {
 			for _, value := range options.ReasoningLevel.Values {
+				if !validReasoningLevel(value) {
+					issues = append(issues, Issue{
+						Field: "options.reasoningLevel.values",
+						Message: fmt.Sprintf("reasoning level %q is not a runtime level (want %s)",
+							value, strings.Join(reasoningLevels, "|")),
+					})
+					complete = false
+				}
 				patch, ok := options.ReasoningLevel.Map[value]
 				if !ok || patch == nil {
 					issues = append(issues, Issue{
@@ -384,7 +406,14 @@ func providerIssues(provider ProviderConfig, modelCount int) ([]Issue, bool) {
 		})
 		complete = false
 	}
-	if provider.Access.Env == "" && provider.Access.Ref == "" {
+	if len(provider.API.Headers) > 0 {
+		issues = append(issues, Issue{
+			Field:   "api.headers",
+			Message: "static headers are not carried by any runtime driver yet; a provider with headers cannot execute",
+		})
+		complete = false
+	}
+	if strings.TrimSpace(provider.Access.Env) == "" && strings.TrimSpace(provider.Access.Ref) == "" {
 		issues = append(issues, Issue{
 			Field:   "access",
 			Message: "access environment variable name or secret reference is required",

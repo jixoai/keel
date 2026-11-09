@@ -77,6 +77,55 @@ func TestApplyRequestExtraIsSparseAndProtectsManagedKeys(t *testing.T) {
 	}
 }
 
+// TestApplyRequestExtraOnJSONDecodedOverlay covers the shapes an overlay
+// actually arrives in: a tenant document is decoded JSON (map[string]any,
+// []any, float64 numbers), not a hand-built Go map. A non-map value must
+// replace wholesale, and a nested patch over a body key whose existing value is
+// not an object must replace it rather than crash.
+func TestApplyRequestExtraOnJSONDecodedOverlay(t *testing.T) {
+	var overlay map[string]any
+	raw := []byte(`{
+		"max_tokens": 1024,
+		"stop": ["a", "b"],
+		"thinking": {"budget_tokens": 1536},
+		"metadata": {"trace": {"nested": true}}
+	}`)
+	if err := json.Unmarshal(raw, &overlay); err != nil {
+		t.Fatalf("unmarshal overlay: %v", err)
+	}
+	body := map[string]any{
+		"model":    "m",
+		"thinking": "literal",
+		"stop":     "not-a-list",
+	}
+	applyRequestExtra(body, overlay, "model")
+
+	if body["model"] != "m" {
+		t.Fatalf("managed key rewritten: %v", body)
+	}
+	if body["max_tokens"] != float64(1024) {
+		t.Fatalf("a JSON-decoded number must land as its decoded shape: %#v", body["max_tokens"])
+	}
+	if stop, ok := body["stop"].([]any); !ok || len(stop) != 2 {
+		t.Fatalf("a []any value must replace wholesale: %#v", body["stop"])
+	}
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("a nested patch over a non-map body value must replace it with the object: %#v", body["thinking"])
+	}
+	if thinking["budget_tokens"] != float64(1536) {
+		t.Fatalf("the nested patch did not land: %#v", thinking)
+	}
+	metadata, ok := body["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("a new nested object must be set wholesale: %#v", body["metadata"])
+	}
+	trace, ok := metadata["trace"].(map[string]any)
+	if !ok || trace["nested"] != true {
+		t.Fatalf("nested decoded objects must survive the merge: %#v", metadata)
+	}
+}
+
 // TestChatBodyCarriesRequestExtra pins the Chat Completions overlay: the
 // resolved model's request patch lands in the body, and its envelope keys are
 // untouchable.

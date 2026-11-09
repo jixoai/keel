@@ -31,6 +31,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 
@@ -332,9 +333,25 @@ func (d *anthropicCompatDriver) StreamCompletion(ctx context.Context, req Comple
 	return StreamRequest(ctx, TransportConfig{NewRequest: newReq, Decoder: NewAnthropicDecoder()})
 }
 
+// anthropicManagedKeys are the body keys the Anthropic Messages driver owns:
+// model identity, the transcript, the system prompt, the streaming contract and
+// the encoded tool list. A caller overlay — a resolved model's request patch —
+// may set anything else (max_tokens, thinking, vendor extensions) but cannot
+// rewrite these.
+var anthropicManagedKeys = []string{"model", "messages", "system", "stream", "tools"}
+
 // encodeAnthropicRequest serializes a CompletionRequest into an Anthropic
 // Messages JSON body with streaming enabled. The system prompt is a top-level
 // field; tool results and tool calls follow the Messages content-block shape.
+//
+// max_tokens and thinking come from the resolved request overlay (a model's
+// resolved request patch), which is the single fact source for a configured
+// model; the level table below is only a fallback for a request that carries no
+// resolved options (the flat configuration path). Whatever the source, the
+// driver enforces Anthropic's constraint on the way out: budget_tokens must sit
+// below max_tokens with room for the visible answer, so the budget is shrunk
+// under the resolved cap — never the other way around — and dropped entirely
+// when nothing fits.
 func encodeAnthropicRequest(req CompletionRequest, models []Model) ([]byte, error) {
 	msgs := make([]map[string]any, 0, len(req.Context.Messages))
 	for _, m := range req.Context.Messages {
@@ -350,37 +367,87 @@ func encodeAnthropicRequest(req CompletionRequest, models []Model) ([]byte, erro
 	if sp := req.Context.SystemPrompt; sp != "" {
 		body["system"] = sp
 	}
-	maxTok := maxOutputTokensFor(req)
-	if maxTok <= 0 {
-		// Anthropic requires max_tokens. Prefer the model's declared cap; fall
-		// back to a coding-friendly default (4096 was too low and caused
-		// truncation/retry loops on longer edits).
-		maxTok = anthropicDefaultMaxTokens(req.Model, models)
-	}
-	// Extended thinking: when a thinking level is requested, enable the Anthropic
-	// thinking block with a budget derived from the level. Omitted for off/unset
-	// so non-thinking requests keep their prior shape.
-	if budget := anthropicThinkingBudget(req.Config.ThinkingLevel); budget > 0 {
-		// Anthropic counts thinking tokens toward max_tokens and requires
-		// budget_tokens < max_tokens (else a 400). Guarantee headroom for the
-		// visible reply by lifting max_tokens above the budget when the caller's
-		// cap is too low to fit both the reasoning and a real answer.
-		if minTok := budget + anthropicResponseHeadroom; maxTok < minTok {
-			maxTok = minTok
-		}
-		body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
-	}
-	body["max_tokens"] = maxTok
 	if tools := encodeAnthropicTools(req.Context.Tools); len(tools) > 0 {
 		body["tools"] = tools
 	}
+	// The caller's overlay joins the finished envelope: the resolved model's
+	// request patch owns max_tokens and thinking, the driver owns the envelope.
+	applyRequestExtra(body, req.Config.Extra, anthropicManagedKeys...)
+
+	// max_tokens: the resolved value is the cap. Anthropic requires the field,
+	// so a request without a usable one falls back to the model catalog's
+	// declared cap, then to a coding-friendly default (4096 was too low and
+	// caused truncation/retry loops on longer edits).
+	maxTok, declared := jsonInt(body["max_tokens"])
+	if !declared || maxTok <= 0 {
+		maxTok = anthropicDefaultMaxTokens(req.Model, models)
+		declared = false
+	}
+	body["max_tokens"] = maxTok
+
+	// thinking: the resolved overlay when it carries the key (even when it asks
+	// for {"type":"disabled"}), else the level table. A shape the driver cannot
+	// interpret is never forwarded — an invalid block would fail the whole
+	// request — and, being an explicit declaration, it does not fall back to the
+	// level table either.
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		if _, carried := body["thinking"]; carried {
+			delete(body, "thinking")
+		} else if budget := anthropicThinkingBudget(req.Config.ThinkingLevel); budget > 0 {
+			thinking = map[string]any{"type": "enabled", "budget_tokens": budget}
+		}
+	}
+	applyAnthropicThinkingFit(body, thinking, maxTok, declared)
 	return json.Marshal(body)
+}
+
+// applyAnthropicThinkingFit writes the thinking block after fitting its budget
+// under Anthropic's constraint: anthropicMinThinkingBudget <= budget_tokens and
+// budget_tokens + anthropicResponseHeadroom <= max_tokens. When the request
+// declared a cap (declared == true), the cap is fixed and the budget yields: it
+// is shrunk to the largest value that fits, and the block is omitted when none
+// does. When no cap was declared, the driver's own fallback default yields
+// instead — the historical behavior, so a flat deployment's wire body (which
+// declares nothing) does not change.
+func applyAnthropicThinkingFit(body map[string]any, thinking map[string]any, maxTok int, declared bool) {
+	if thinking == nil {
+		return
+	}
+	budget, readable := jsonInt(thinking["budget_tokens"])
+	if !readable {
+		// Nothing to fit (for example an explicit {"type":"disabled"}): the
+		// declaration travels as-is.
+		body["thinking"] = thinking
+		return
+	}
+	limit := maxTok - anthropicResponseHeadroom
+	switch {
+	case budget <= limit:
+		body["thinking"] = thinking
+	case !declared:
+		body["max_tokens"] = budget + anthropicResponseHeadroom
+		body["thinking"] = thinking
+	case limit >= anthropicMinThinkingBudget:
+		thinking["budget_tokens"] = limit
+		body["thinking"] = thinking
+	default:
+		// Nothing fits under the declared cap: asking for no thinking beats
+		// asking for an impossible budget, or silently exceeding the cap.
+		delete(body, "thinking")
+	}
 }
 
 // anthropicResponseHeadroom is the token margin reserved for the visible reply
 // on top of the thinking budget, so max_tokens always exceeds budget_tokens (an
 // Anthropic hard requirement) with room left for a real answer.
 const anthropicResponseHeadroom = 4096
+
+// anthropicMinThinkingBudget is the smallest thinking budget_tokens the
+// Anthropic Messages API accepts. A budget below it is not a valid request, so
+// a budget cannot be shrunk past it: when the fit limit falls below it there is
+// no thinking to send at all.
+const anthropicMinThinkingBudget = 1024
 
 // anthropicDefaultMaxTokens picks the max_tokens fallback when no explicit hint
 // is given: the model's declared MaxOutputTokens if present in the driver's
@@ -396,7 +463,9 @@ func anthropicDefaultMaxTokens(model string, models []Model) int {
 }
 
 // anthropicThinkingBudget maps a unified ThinkingLevel onto an Anthropic
-// thinking budget_tokens value. off/"" yields 0 (thinking block omitted).
+// thinking budget_tokens value. off/"" yields 0 (thinking block omitted). It is
+// the fallback for a request whose resolved options carry no thinking block; a
+// configured model's own reasoningLevel patch is the primary source.
 func anthropicThinkingBudget(level agentcore.ThinkingLevel) int {
 	switch level {
 	case agentcore.ThinkingMinimal:
@@ -582,19 +651,44 @@ func encodeAnthropicTools(tools []agentcore.AgentTool) []map[string]any {
 	return out
 }
 
-// maxOutputTokensFor pulls a max-output hint from the request Extra map, if any,
-// so callers can bound Anthropic responses without a registry lookup here.
-func maxOutputTokensFor(req CompletionRequest) int {
-	if req.Config.Extra == nil {
-		return 0
-	}
-	switch v := req.Config.Extra["max_tokens"].(type) {
+// jsonInt reads an integral number out of a decoded JSON value. A driver that
+// enforces a value it read from a caller overlay (a cap, a thinking budget)
+// must accept every shape JSON decoding produces — the factory's own ints, plus
+// float64 from json.Unmarshal and json.Number from a UseNumber decoder — because
+// a missed type assertion silently drops the constraint the value carried.
+// Fractional, non-finite and out-of-range numbers are not integers: ok=false.
+func jsonInt(value any) (int, bool) {
+	switch v := value.(type) {
 	case int:
-		return v
+		return v, true
+	case int64:
+		return int(v), true
 	case float64:
-		return int(v)
+		return floatToInt(v)
+	case float32:
+		return floatToInt(float64(v))
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i), true
+		}
+		if f, err := v.Float64(); err == nil {
+			return floatToInt(f)
+		}
+		return 0, false
+	default:
+		return 0, false
 	}
-	return 0
+}
+
+// floatToInt reports whether value is an exact integer representable as int.
+func floatToInt(value float64) (int, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value {
+		return 0, false
+	}
+	if value > float64(math.MaxInt) || value < float64(math.MinInt) {
+		return 0, false
+	}
+	return int(value), true
 }
 
 // ---------------------------------------------------------------------------

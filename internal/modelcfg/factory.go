@@ -229,17 +229,41 @@ func (f *Factory) matches(predicate func(ModelView) bool) []providerModelMatch {
 	return out
 }
 
+// anthropicMinThinkingBudget is the smallest thinking budget the Anthropic
+// Messages API accepts, so it is also the smallest budget a resolved patch may
+// carry.
+const anthropicMinThinkingBudget = 1024
+
+// clampThinkingBudget keeps an anthropic thinking patch consistent with the
+// model's resolved max output tokens. Anthropic requires
+// anthropicMinThinkingBudget <= budget_tokens < max_tokens, and the driver
+// never lifts the declared cap (it shrinks the budget instead), so the patch
+// must not ask for a budget at or above the cap. A budget that cannot fit is
+// removed from the patch entirely: asking for no thinking beats asking for an
+// impossible one. The driver still has the last word — it additionally reserves
+// reply headroom under the cap — but it never has to correct an excess here.
 func clampThinkingBudget(patch map[string]any, maxOutputTokens int) {
 	thinking, ok := patch["thinking"].(map[string]any)
 	if !ok {
 		return
 	}
-	budget, ok := intValue(thinking["budget_tokens"])
-	if !ok {
+	if _, ok := thinking["budget_tokens"]; !ok {
+		// {"type":"disabled"} and friends carry no budget to fit.
 		return
 	}
-	if budget > maxOutputTokens {
-		thinking["budget_tokens"] = maxOutputTokens
+	budget, ok := intValue(thinking["budget_tokens"])
+	if !ok {
+		// An unreadable budget is the driver's to reject or drop; the factory
+		// does not guess at it.
+		return
+	}
+	limit := maxOutputTokens - 1
+	if limit < anthropicMinThinkingBudget {
+		delete(patch, "thinking")
+		return
+	}
+	if budget > limit {
+		thinking["budget_tokens"] = limit
 	}
 }
 

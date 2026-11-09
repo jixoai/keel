@@ -275,6 +275,81 @@ func ParseSelection(raw []byte) (Selection, error) {
 	return decodeSelection(value)
 }
 
+// selectionKeys is the exact key vocabulary of a selection fact (and of a
+// tenant document's selection). The fact is persisted verbatim by the kernel,
+// so this vocabulary is the whole contract.
+var selectionKeys = []string{"providerId", "modelId", "reasoningLevel", "options"}
+
+var selectionOptionKeys = []string{"reasoningLevel"}
+
+// ValidateSelectionFact is the strict gate for a client-supplied selection
+// fact. Unlike ParseSelection it refuses unknown and duplicate keys, so a
+// stored fact can never smuggle a field the resolver does not read (for
+// example a baseUrl) into a session's history. The documented
+// options.reasoningLevel alias is accepted alongside the flattened spelling.
+// The empty and null payloads are the "no choice made" fact.
+func ValidateSelectionFact(raw []byte) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if err := checkSelectionKeys(trimmed, selectionKeys); err != nil {
+		return fmt.Errorf("selection: %w", err)
+	}
+	_, err := ParseSelection(trimmed)
+	return err
+}
+
+// checkSelectionKeys walks one JSON object level and refuses keys outside
+// allowed, duplicate keys, and (for the nested "options" object, which is the
+// only nested object in the vocabulary) anything outside its own vocabulary.
+// Value types are left to ParseSelection.
+func checkSelectionKeys(raw []byte, allowed []string) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return errors.New("must be a JSON object")
+	}
+	known := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		known[key] = struct{}{}
+	}
+	seen := make(map[string]struct{})
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return errors.New("object keys must be strings")
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("duplicate key %q", key)
+		}
+		seen[key] = struct{}{}
+		if _, ok := known[key]; !ok {
+			return fmt.Errorf("unknown key %q", key)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return err
+		}
+		if key != "options" || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			continue
+		}
+		if err := checkSelectionKeys(value, selectionOptionKeys); err != nil {
+			return fmt.Errorf("options: %w", err)
+		}
+	}
+	_, err = dec.Token()
+	return err
+}
+
 func decodeSelection(raw any) (Selection, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
@@ -461,7 +536,12 @@ func validAPIType(apiType string) bool {
 
 var (
 	envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	secretPrefixes = []string{"sk-", "pk-", "bearer ", "basic "}
+	// secretRefPattern is the tenant-document secret reference vocabulary of
+	// internal/host/config.go, mirrored here so provider access.ref speaks the
+	// host's exact language: a credential is always an indirection — ${NAME},
+	// env:NAME or secret:NAME — and never a literal value. The two acceptances
+	// are pinned together by TestSecretRefVocabularyMatchesHost.
+	secretRefPattern = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|(?:env|secret):[A-Za-z_][A-Za-z0-9_]*)$`)
 )
 
 func validateIdentifier(value, field string) error {
@@ -502,23 +582,45 @@ func validateBaseURL(raw string) error {
 	return nil
 }
 
+// validateSecretRef accepts only the host's reference shapes. A literal
+// credential — including an "sk-"-style token, a bare word, or a "Bearer …"
+// header value — is rejected, so no credential can be persisted in a provider
+// document. The empty string is "no reference declared" and is left to the
+// caller's completeness check; a blank-but-present value is an error exactly as
+// it is in the host.
 func validateSecretRef(ref string) error {
-	if ref == "" {
-		return nil
-	}
-	if strings.TrimSpace(ref) != ref || strings.ContainsAny(ref, " \t\r\n") {
-		return errors.New("must not contain whitespace")
-	}
-	lower := strings.ToLower(ref)
-	for _, prefix := range secretPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			return errors.New("must be a reference, never a credential value")
+	value := strings.TrimSpace(ref)
+	if value == "" {
+		if ref == "" {
+			return nil
 		}
+		return errors.New("secret reference is required")
 	}
-	if len(ref) > 512 {
-		return errors.New("is too long")
+	if !secretRefPattern.MatchString(value) {
+		return errors.New("must be a secret reference (${NAME}, env:NAME, or secret:NAME); literal secrets are not allowed")
 	}
 	return nil
+}
+
+// ParseSecretRef splits a secret reference into the variable name it names. ok
+// is false for anything that is not a reference shape (including the empty
+// string); callers must fail closed on !ok. ${NAME}, env:NAME and secret:NAME
+// all name one lookup entry — resolution goes through the caller's lookup
+// function, exactly like access.env, so the two cannot drift into different
+// credential sources.
+func ParseSecretRef(ref string) (string, bool) {
+	value := strings.TrimSpace(ref)
+	if !secretRefPattern.MatchString(value) {
+		return "", false
+	}
+	switch {
+	case strings.HasPrefix(value, "${"):
+		return value[2 : len(value)-1], true
+	case strings.HasPrefix(value, "env:"):
+		return strings.TrimPrefix(value, "env:"), true
+	default:
+		return strings.TrimPrefix(value, "secret:"), true
+	}
 }
 
 func validateHeaders(headers map[string]string) error {
