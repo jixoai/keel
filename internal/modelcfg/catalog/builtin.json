@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "id": "s2api",
+      "name": "S2API",
+      "api": {
+        "type": "openai-chat-completions",
+        "baseUrl": "https://s2api.top/v1"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "S2API_KEY"
+      },
+      "modelIds": [
+        "deepseek-v4.1-flash"
+      ],
+      "visibility": "visible"
+    },
+    {
+      "id": "a6api",
+      "name": "A6API",
+      "api": {
+        "type": "openai-chat-completions",
+        "baseUrl": "https://api.a6api.com/v1"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "A6API_KEY"
+      },
+      "modelIds": [
+        "deepseek-v4.1-flash"
+      ],
+      "visibility": "visible"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "api": {
+        "type": "openai-chat-completions",
+        "baseUrl": "https://api.deepseek.com/v1"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "DEEPSEEK_API_KEY"
+      },
+      "modelIds": [
+        "deepseek-v4.1-flash",
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ],
+      "visibility": "visible"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "api": {
+        "type": "anthropic-messages",
+        "baseUrl": "https://api.anthropic.com"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "ANTHROPIC_API_KEY"
+      },
+      "modelIds": [
+        "claude-sonnet-4-5"
+      ],
+      "visibility": "visible"
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "api": {
+        "type": "openai-responses",
+        "baseUrl": "https://api.openai.com/v1"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "OPENAI_API_KEY"
+      },
+      "modelIds": [
+        "gpt-5"
+      ],
+      "visibility": "visible"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "api": {
+        "type": "openai-chat-completions",
+        "baseUrl": "https://openrouter.ai/api/v1"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "OPENROUTER_API_KEY"
+      },
+      "modelIds": [
+        "openai/gpt-5"
+      ],
+      "visibility": "visible"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "api": {
+        "type": "openai-chat-completions",
+        "baseUrl": "http://127.0.0.1:11434/v1"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "OLLAMA_API_KEY"
+      },
+      "modelIds": [
+        "llama3.2"
+      ],
+      "visibility": "visible"
+    }
+  ],
+  "modelRules": [
+    {
+      "match": "*",
+      "config": {
+        "enabled": true,
+        "properties": {
+          "contextWindow": 128000,
+          "inputFormat": {
+            "text": true,
+            "image": false,
+            "video": false,
+            "audio": false,
+            "pdf": false
+          },
+          "outputFormat": {
+            "text": true
+          },
+          "supportsToolCall": true,
+          "supportsJsonSchemaOutput": true,
+          "supportsNativeWebSearch": false
+        },
+        "options": {
+          "reasoningLevel": {
+            "values": [
+              "off",
+              "low",
+              "medium",
+              "high"
+            ],
+            "map": {
+              "off": {},
+              "low": {},
+              "medium": {},
+              "high": {}
+            }
+          },
+          "maxOutputTokens": {
+            "max": 8192,
+            "map": {
+              "": {},
+              "*": {}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "modelApiRules": [
+    {
+      "match": "*",
+      "apiType": "openai-chat-completions",
+      "config": {
+        "options": {
+          "reasoningLevel": {
+            "map": {
+              "off": {},
+              "low": {
+                "reasoning_effort": "low"
+              },
+              "medium": {
+                "reasoning_effort": "medium"
+              },
+              "high": {
+                "reasoning_effort": "high"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "match": "*",
+      "apiType": "openai-responses",
+      "config": {
+        "options": {
+          "reasoningLevel": {
+            "map": {
+              "off": {},
+              "low": {
+                "reasoning": {
+                  "effort": "low"
+                }
+              },
+              "medium": {
+                "reasoning": {
+                  "effort": "medium"
+                }
+              },
+              "high": {
+                "reasoning": {
+                  "effort": "high"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "match": "*",
+      "apiType": "anthropic-messages",
+      "config": {
+        "options": {
+          "reasoningLevel": {
+            "map": {
+              "off": {
+                "thinking": {
+                  "type": "disabled"
+                }
+              },
+              "low": {
+                "thinking": {
+                  "type": "enabled",
+                  "budget_tokens": 1024
+                }
+              },
+              "medium": {
+                "thinking": {
+                  "type": "enabled",
+                  "budget_tokens": 4096
+                }
+              },
+              "high": {
+                "thinking": {
+                  "type": "enabled",
+                  "budget_tokens": 6144
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "siteRules": [],
+  "providerModelRules": []
+}
