@@ -134,6 +134,7 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
           attachmentsFor={(requestId) => store.attachmentsFor(requestId)}
           partialText={() => store.partial()}
           isLastRunning={isLastRunning}
+          waiting={() => store.waiting()}
         />
       </If>
     </View>

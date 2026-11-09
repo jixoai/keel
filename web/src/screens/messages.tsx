@@ -460,6 +460,9 @@ export function TurnRow(props: {
   attachmentsFor: (requestId: string) => AttachmentRef[] | undefined;
   partialText: () => string | undefined;
   isLastRunning: () => boolean;
+  /** The conversation is parked on an open question (C2): the approval card
+   * is the current activity, so the turn shows no loading motion. */
+  waiting: () => boolean;
 }) {
   const synthetic = () => {
     const turn = props.turn();
@@ -473,6 +476,7 @@ export function TurnRow(props: {
     const turn = props.turn();
     return (
       turn.status === "running" &&
+      !props.waiting() &&
       !turn.workSegments.some((segment) => segment.assistantText || segment.toolCalls.length || segment.assistantThinking) &&
       !streaming()
     );
@@ -513,6 +517,7 @@ export function TurnRow(props: {
                     text={segment.assistantThinking ?? ""}
                     running={
                       props.turn().status === "running" &&
+                      !props.waiting() &&
                       index === props.turn().workSegments.length - 1 &&
                       !segment.assistantText &&
                       segment.toolCalls.length === 0
