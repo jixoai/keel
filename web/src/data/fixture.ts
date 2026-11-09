@@ -216,6 +216,17 @@ export class FixtureClient implements SettingsApi {
     };
   }
 
+  /** The last `count` events at or before `lastSeq`, the same window the HTTP
+   * transport reads: the store's list enrichment (titles, previews, the
+   * pending-decision badge) must work in the demo too, not only live. */
+  async tail(sessionId: string, lastSeq: number, count = 6): Promise<WireEvent[]> {
+    const peer = this.need(sessionId);
+    const upto = lastSeq > 0 ? lastSeq : peer.nextSeq - 1;
+    return peer.events
+      .filter((event) => event.seq <= upto)
+      .slice(-count);
+  }
+
   commands(sessionId: string): UiCommands {
     const peer = this.need(sessionId);
     return {
