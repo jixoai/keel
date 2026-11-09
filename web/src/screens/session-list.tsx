@@ -35,6 +35,11 @@ const isPhone = () => !isTerminal() && windowSize().width < 900;
  * the row around. */
 const oneLine = (text: string | undefined): string => (text ?? "").replace(/\s+/g, " ").trim();
 
+/** The title's floor in the terminal's narrow grid: the cells a common
+ * four-character title needs. Badges and the time give way to it, never the
+ * other way around. */
+const MIN_TITLE_CELLS = 8;
+
 /** The row's title (C1). Never a raw session id: a session without a derived
  * title — the server leaves it empty, and "新会话" is also what the store's
  * "one untouched session" rule reads as untouched — shows "新会话" plus when
@@ -123,11 +128,15 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; onSelec
   const time = () => formatTime(row().lastMessageAt);
   const cells = () =>
     isTerminal() ? Math.max(24, Math.floor(windowSize().width / 8)) : Math.max(24, Math.floor(windowSize().width));
-  // The terminal grid truncates by hand, so the badge and the failure word
-  // both eat into the title's cells (the badge's pill adds its own padding).
+  // The terminal grid truncates by hand, so the waiting badge and the failure
+  // word both eat into the title's cells. The badge's footprint is its label
+  // plus one cell of pill padding either side (measured in the grid) — never
+  // the pixel padding the badge draws with on the web.
   const trailingCells = () =>
-    (waiting() ? cellWidth(runStateLabel.waiting) + 20 : 0) + (stateLabel() ? cellWidth(stateLabel()!) + 6 : 0);
-  const titleBudget = () => Math.max(6, cells() - 12 - cellWidth(time()) - trailingCells());
+    (waiting() ? cellWidth(runStateLabel.waiting) + 2 : 0) + (stateLabel() ? cellWidth(stateLabel()!) + 6 : 0);
+  // A row title always keeps room for a common four-character title (8 cells):
+  // the badge must never starve it into an ellipsis.
+  const titleBudget = () => Math.max(MIN_TITLE_CELLS, cells() - 12 - cellWidth(time()) - trailingCells());
   const previewBudget = () =>
     Math.max(6, cells() - 8 - (stateLabel() ? cellWidth(stateLabel()!) + 1 : 0));
   const titleText = () => (isTerminal() ? fitCells(title(), titleBudget()) : title());
@@ -170,8 +179,9 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; onSelec
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {/* Waiting is a parked state, not activity: a still clock marks it
               (the row never gets the running pulse), and the badge carries
-              the words. The clock is the state's own tone (warning). */}
-          {waiting() ? (
+              the words. The clock is the state's own tone (warning); the
+              terminal's grid cannot draw the icon, so it keeps the dot. */}
+          {waiting() && !isTerminal() ? (
             <Icon name="clock" size={11} tint={colors.warning} />
           ) : (
             <StatusDot tone={rowDotTone(state())} />
