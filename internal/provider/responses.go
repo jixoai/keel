@@ -34,6 +34,7 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/responses"
 	"github.com/openai/openai-go/shared"
 
@@ -89,7 +90,10 @@ func (d *responsesDriver) StreamCompletion(ctx context.Context, req CompletionRe
 	opts = append(opts, d.clientOpts...)
 	client := openai.NewClient(opts...)
 
-	params := buildResponsesParams(req)
+	params, err := buildResponsesParams(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", d.name, err)
+	}
 
 	stream := NewAssistantMessageEventStream(0)
 	go d.pump(ctx, stream, &client, params)
@@ -319,14 +323,42 @@ func appendToolCalls(content agentcore.ContentList, calls []agentcore.ToolCallCo
 	return content
 }
 
-// buildResponsesParams maps a CompletionRequest onto Responses API params. The
+// responsesManagedKeys are the body keys the Responses driver owns: model
+// identity, instructions (system prompt), input items, the streaming contract
+// and the encoded tool list. A caller overlay may add or extend anything else
+// (max_output_tokens, reasoning, vendor extensions) but cannot rewrite these.
+var responsesManagedKeys = []string{"model", "instructions", "input", "stream", "tools"}
+
+// buildResponsesParams maps a CompletionRequest onto Responses API params and
+// applies the caller's request overlay (a resolved model's request patch).
+// The SDK params type cannot carry arbitrary keys, so when an overlay is
+// present the body travels as raw JSON through param.Override; the managed
+// envelope keys are still the driver's (see responsesManagedKeys).
+func buildResponsesParams(req CompletionRequest) (responses.ResponseNewParams, error) {
+	params := responsesParams(req)
+	if len(req.Config.Extra) == 0 {
+		return params, nil
+	}
+	raw, err := params.MarshalJSON()
+	if err != nil {
+		return responses.ResponseNewParams{}, fmt.Errorf("encode responses body: %w", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return responses.ResponseNewParams{}, fmt.Errorf("encode responses body: %w", err)
+	}
+	applyRequestExtra(body, req.Config.Extra, responsesManagedKeys...)
+	return param.Override[responses.ResponseNewParams](body), nil
+}
+
+// responsesParams maps a CompletionRequest onto Responses API params. The
 // system prompt becomes Instructions; the thinking level becomes a reasoning
 // effort (with an auto summary so reasoning is returned); pigo tools become
 // Responses function tools; and each message is replayed as the matching input
 // item(s): assistant tool calls as function_call items, tool results as
 // function_call_output items, and text (plus any images) as a role-tagged
 // message.
-func buildResponsesParams(req CompletionRequest) responses.ResponseNewParams {
+func responsesParams(req CompletionRequest) responses.ResponseNewParams {
 	params := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(req.Model),
 	}

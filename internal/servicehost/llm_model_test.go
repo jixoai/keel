@@ -24,7 +24,7 @@ func TestLLMServiceSendsTheModelIDNotTheProviderName(t *testing.T) {
 		}},
 		LLM: LLMOptions{APIKey: "test-key", LookupEnv: func(string) (string, bool) { return "", false }},
 	}
-	instance, err := newLLMFactory(cfg)(context.Background(), servicegraph.Resolved{})
+	instance, err := newLLMFactory(cfg.Tenant, cfg)(context.Background(), servicegraph.Resolved{})
 	if err != nil {
 		t.Fatalf("newLLMFactory: %v", err)
 	}

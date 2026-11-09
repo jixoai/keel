@@ -258,6 +258,23 @@ func decodeRule(obj map[string]any) (ruleDoc, error) {
 	return decoded, nil
 }
 
+// ParseSelection decodes a selection fact: the "selection" field of a
+// user.message payload, or a tenant document's selection. An empty or null
+// payload yields the zero selection, which callers read as "no choice made".
+// The fact and the document share one vocabulary, so the two cannot drift
+// apart.
+func ParseSelection(raw []byte) (Selection, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return Selection{}, nil
+	}
+	var value any
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return Selection{}, fmt.Errorf("selection: %w", err)
+	}
+	return decodeSelection(value)
+}
+
 func decodeSelection(raw any) (Selection, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {

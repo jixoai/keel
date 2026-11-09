@@ -208,6 +208,12 @@ type Config struct {
 	// LoopPins overrides the pinned PI conformance manifest hash per loop
 	// service. The blueprint pins pi-loop to PinnedPiLoopManifestHash.
 	LoopPins map[string]string
+	// ServiceVersions overrides the implementation version of individual
+	// services. The tenant-document adapter derives them for services whose
+	// behavior is a function of the document (the llm service resolves the
+	// run's provider configuration), so a reassembly rebuilds those instead of
+	// sharing the stale instance.
+	ServiceVersions map[string]string
 }
 
 // Default builds the default loadout, attaching the factories supplied by the
@@ -229,6 +235,9 @@ func Default(cfg Config) (*servicegraph.Loadout, error) {
 	}
 	services := make([]servicegraph.ServiceDescriptor, 0, len(defaultServices))
 	for _, d := range defaultServices {
+		if version := cfg.ServiceVersions[d.Name]; version != "" {
+			d.Version = version
+		}
 		var factory servicegraph.Factory
 		if cfg.Provide != nil {
 			factory = cfg.Provide(d.Name)

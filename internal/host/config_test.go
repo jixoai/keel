@@ -2,6 +2,8 @@ package host
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -550,5 +552,68 @@ func TestExternalConfigMerge(t *testing.T) {
 	provider.Command = "mutated-again"
 	if defaults.External.Backends["dsh"].Command != "/bin/dsh" {
 		t.Fatal("defaults were mutated through a copied provider")
+	}
+}
+
+// TestModelsDocumentMerge pins the pass-through contract of the provider
+// configuration slice: it merges like the other sections (nil inherits, an
+// explicit value replaces) and the merged document owns its bytes.
+func TestModelsDocumentMerge(t *testing.T) {
+	defaults := TenantConfig{Models: json.RawMessage(`{"selection":{"modelId":"a"}}`)}
+	if got := string(Merge(defaults, TenantConfig{}).Models); got != `{"selection":{"modelId":"a"}}` {
+		t.Fatalf("a nil models section must inherit the defaults: %s", got)
+	}
+	tenant := json.RawMessage(`{"selection":{"modelId":"b"}}`)
+	merged := Merge(defaults, TenantConfig{Models: tenant})
+	if string(merged.Models) != `{"selection":{"modelId":"b"}}` {
+		t.Fatalf("an explicit models section must replace the defaults: %s", merged.Models)
+	}
+	merged.Models[0] = '['
+	if tenant[0] != '{' || defaults.Models[0] != '{' {
+		t.Fatal("merge did not copy the models bytes")
+	}
+}
+
+// TestLoadModelsDocument pins the file contract: the file IS the models
+// section, an empty path or file means "no models document", and a malformed
+// one names the file so boot fails readably.
+func TestLoadModelsDocument(t *testing.T) {
+	if raw, err := LoadModelsDocument(""); raw != nil || err != nil {
+		t.Fatalf("empty path = %s, %v; want no document", raw, err)
+	}
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	path := write("models.json", `{"providers":[],"selection":{"modelId":"m"}}`)
+	raw, err := LoadModelsDocument(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// The loaded bytes are exactly what a tenant document carries, so the file,
+	// the admin API and both commands speak one shape.
+	doc, err := ParseTenantConfig([]byte(`{"models":` + string(raw) + `}`))
+	if err != nil {
+		t.Fatalf("the fragment must parse as the document's models section: %v", err)
+	}
+	if string(doc.Models) != string(raw) {
+		t.Fatalf("models round trip = %s", doc.Models)
+	}
+	if raw, err := LoadModelsDocument(write("empty.json", " \n")); raw != nil || err != nil {
+		t.Fatalf("an empty file = %s, %v; want no document", raw, err)
+	}
+	if _, err := LoadModelsDocument(write("array.json", `[1,2]`)); err == nil || !strings.Contains(err.Error(), "array.json") {
+		t.Fatalf("a non-object must be an error naming the file, got %v", err)
+	}
+	if _, err := LoadModelsDocument(write("broken.json", `{`)); err == nil {
+		t.Fatal("a malformed file must be an error")
+	}
+	if _, err := LoadModelsDocument(filepath.Join(dir, "missing.json")); err == nil {
+		t.Fatal("an unreadable file must be an error")
 	}
 }

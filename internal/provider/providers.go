@@ -111,6 +111,12 @@ func (d *openAICompatDriver) StreamCompletion(ctx context.Context, req Completio
 	return StreamRequest(ctx, TransportConfig{NewRequest: newReq, Decoder: NewOpenAIDecoder()})
 }
 
+// openAIChatManagedKeys are the body keys the Chat Completions driver owns:
+// model identity, transcript, streaming contract and the encoded tool list. A
+// caller overlay may add or extend anything else (max_tokens, reasoning_effort,
+// vendor extensions) but cannot rewrite these.
+var openAIChatManagedKeys = []string{"model", "messages", "stream", "stream_options", "tools"}
+
 // encodeOpenAIRequest serializes a CompletionRequest into an OpenAI Chat
 // Completions JSON body with streaming enabled and usage requested.
 func encodeOpenAIRequest(req CompletionRequest) ([]byte, error) {
@@ -137,6 +143,9 @@ func encodeOpenAIRequest(req CompletionRequest) ([]byte, error) {
 	if tools := encodeOpenAITools(req.Context.Tools); len(tools) > 0 {
 		body["tools"] = tools
 	}
+	// The caller's overlay (a resolved model's request patch) joins the same
+	// body after the envelope is complete.
+	applyRequestExtra(body, req.Config.Extra, openAIChatManagedKeys...)
 	return json.Marshal(body)
 }
 

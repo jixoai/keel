@@ -218,7 +218,7 @@ func Boot(ctx context.Context, cfg Config) (*Runtime, error) {
 		servicegraph.WithLogger(cfg.Seams.Logger),
 		servicegraph.WithRetireTimeout(cfg.RetireTimeout),
 	)
-	provide := newProvider(cfg, engine)
+	provide := newProvider(cfg.Tenant, cfg, engine)
 	lo, err := loadout.FromTenantConfig(cfg.Tenant, cfg.Options, provide)
 	if err != nil {
 		return nil, fmt.Errorf("servicehost: resolve loadout: %w", err)
@@ -335,6 +335,21 @@ func (r *Runtime) Projection() kernel.Reader {
 // ProviderName and Model describe the llm service in use.
 func (r *Runtime) ProviderName() string { return r.llm().ProviderName() }
 func (r *Runtime) Model() string        { return r.llm().Model() }
+
+// Models returns the provider configuration of the current generation, or nil
+// when the tenant declares none (no models document and no legacy model): the
+// hosting process then exposes no selection vocabulary at all.
+func (r *Runtime) Models() ModelService {
+	if r == nil {
+		return nil
+	}
+	if svc, ok := r.engine.Lookup(loadout.ServiceLLM); ok {
+		if llm, ok := svc.(*llmService); ok {
+			return llm.models
+		}
+	}
+	return nil
+}
 
 // ExternalAgents returns the AgentBackend service of the current generation
 // (nil when the tenant document declares no agent backend). The HTTP edge uses
@@ -467,11 +482,17 @@ func (r *Runtime) StopWorker() {
 // new snapshot revision/generation becomes current, while runs already pinned
 // to the previous generation keep their instances. On a rejected loadout the
 // current generation stays untouched.
+//
+// The factories are rebuilt from the incoming document, so a document-derived
+// service (the model configuration) is assembled from the configuration being
+// applied. A document that leaves a required run-path service failed is
+// reported as a reload error instead of being adopted silently.
 func (r *Runtime) Reload(ctx context.Context, tenant host.TenantConfig, opts loadout.Options) (*servicegraph.Snapshot, error) {
 	if r == nil {
 		return nil, fmt.Errorf("servicehost: runtime closed")
 	}
-	lo, err := loadout.FromTenantConfig(tenant, opts, r.provider)
+	provide := newProvider(tenant, r.cfg, r.engine)
+	lo, err := loadout.FromTenantConfig(tenant, opts, provide)
 	if err != nil {
 		return nil, fmt.Errorf("servicehost: reload resolve: %w", err)
 	}
@@ -482,8 +503,11 @@ func (r *Runtime) Reload(ctx context.Context, tenant host.TenantConfig, opts loa
 		}
 		r.cfg.Seams.Logger.Error("reload activation incomplete", "err", err)
 	}
+	if err := requireActive(snap, opts.Worker); err != nil {
+		return nil, fmt.Errorf("servicehost: reload rejected: %w", err)
+	}
 	r.mu.Lock()
-	r.tenant, r.opts, r.snapshot = tenant, opts, snap
+	r.tenant, r.opts, r.snapshot, r.provider = tenant, opts, snap, provide
 	r.mu.Unlock()
 	if r.cfg.Seams.Limits != nil {
 		r.cfg.Seams.Limits.Update(tenant.Quota)

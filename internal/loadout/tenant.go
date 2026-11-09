@@ -1,6 +1,9 @@
 package loadout
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -149,12 +152,49 @@ func FromTenantConfig(cfg host.TenantConfig, opts Options, provide func(service 
 		return provide(name)
 	}
 	return Default(Config{
-		ID:       opts.ID,
-		Revision: opts.Revision,
-		Version:  opts.Version,
-		Summary:  Summary(cfg, opts),
-		Provide:  filtered,
+		ID:              opts.ID,
+		Revision:        opts.Revision,
+		Version:         opts.Version,
+		Summary:         Summary(cfg, opts),
+		Provide:         filtered,
+		ServiceVersions: serviceVersions(cfg),
 	})
+}
+
+// serviceVersions derives per-service implementation versions from the tenant
+// document. A service whose instance behavior is a function of the document
+// must change its version with that content: reassembly compares
+// (name, version, provides, requires, optional, role) and never the factory, so
+// an unchanged version would keep sharing the old instance — and its frozen
+// configuration — with the new generation.
+func serviceVersions(cfg host.TenantConfig) map[string]string {
+	digest := modelConfigDigest(cfg)
+	if digest == "" {
+		return nil
+	}
+	return map[string]string{ServiceLLM: Version + "+models:" + digest}
+}
+
+// modelConfigDigest digests the model-configuration slice of the document: the
+// models section plus the legacy flat agent fields the same resolver reads. It
+// is empty when the document carries neither, so a deployment without provider
+// configuration keeps the blueprint version (and reload sharing) unchanged.
+//
+// The digest never contains the values themselves, only a one-way hash of them.
+func modelConfigDigest(cfg host.TenantConfig) string {
+	models := bytes.TrimSpace(cfg.Models)
+	legacy := strings.Join([]string{
+		cfg.Agent.Provider, cfg.Agent.Model, cfg.Agent.BaseURL,
+		cfg.Agent.Protocol, cfg.Agent.APIKeyRef,
+	}, "\x00")
+	if len(models) == 0 && strings.Trim(legacy, "\x00") == "" {
+		return ""
+	}
+	hash := sha256.New()
+	hash.Write(models)
+	hash.Write([]byte{0})
+	hash.Write([]byte(legacy))
+	return hex.EncodeToString(hash.Sum(nil)[:6])
 }
 
 func compactionEnabled(cfg host.CompactionConfig) bool {

@@ -28,10 +28,15 @@ import (
 // factories of this hosting process. A name with no factory is omitted from
 // the loadout (sandbox has no implementation; MCP is omitted when nothing is
 // configured), which is exactly the "no fake factory" rule.
-func newProvider(cfg Config, engine *servicegraph.Engine) func(string) servicegraph.Factory {
+//
+// tenant is the document the loadout is being resolved from, passed explicitly
+// rather than read off cfg: a reassembly (Reload) must build its
+// document-derived services from the document being applied, not from the
+// document this process booted with.
+func newProvider(tenant host.TenantConfig, cfg Config, engine *servicegraph.Engine) func(string) servicegraph.Factory {
 	factories := map[string]servicegraph.Factory{
 		loadout.ServiceStore:             newStoreFactory(cfg),
-		loadout.ServiceLLM:               newLLMFactory(cfg),
+		loadout.ServiceLLM:               newLLMFactory(tenant, cfg),
 		loadout.ServicePrompt:            newPromptFactory(cfg),
 		loadout.ServiceTools:             newToolsFactory(cfg),
 		loadout.ServicePiLoop:            newPiLoopFactory(cfg),
@@ -83,6 +88,11 @@ type LLMService interface {
 	ProviderName() string
 	Model() string
 	APIKey() string
+	// Models is the provider configuration of this generation (nil when the
+	// tenant declares none): the per-attempt resolver and the views the API
+	// surface serves. The loop wires it into the runner so an attempt's
+	// execution identity comes from the run's selection fact.
+	Models() ModelService
 }
 
 type llmService struct {
@@ -90,17 +100,19 @@ type llmService struct {
 	providerName string
 	model        string
 	apiKey       string
+	models       ModelService
 }
 
 func (l *llmService) StreamFn() provider.StreamFn { return l.stream }
 func (l *llmService) ProviderName() string        { return l.providerName }
 func (l *llmService) Model() string               { return l.model }
 func (l *llmService) APIKey() string              { return l.apiKey }
+func (l *llmService) Models() ModelService        { return l.models }
 
 func (l *llmService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (l *llmService) Stop(context.Context) error                             { return nil }
 
-func newLLMFactory(cfg Config) servicegraph.Factory {
+func newLLMFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory {
 	return func(context.Context, servicegraph.Resolved) (servicegraph.Instance, error) {
 		lookup := func(string) string { return "" }
 		if cfg.LLM.LookupEnv != nil {
@@ -110,7 +122,7 @@ func newLLMFactory(cfg Config) servicegraph.Factory {
 			}
 		}
 		svc := &llmService{stream: agent.FakeStream(), providerName: "fake", model: "fake", apiKey: cfg.LLM.APIKey}
-		agentCfg := cfg.Tenant.Agent
+		agentCfg := tenant.Agent
 		if strings.TrimSpace(agentCfg.Model) != "" {
 			resolved, _, err := provider.ResolveProvider(agentCfg.Model, agentCfg.BaseURL, agentCfg.Protocol, agentCfg.Provider, lookup)
 			if err != nil {
@@ -127,6 +139,17 @@ func newLLMFactory(cfg Config) servicegraph.Factory {
 			} else {
 				svc.model = agentCfg.Model
 			}
+		}
+		// The provider configuration (the tenant document's models slice)
+		// resolves the execution identity per attempt; its absence leaves the
+		// static path above authoritative. A document the resolver cannot use
+		// fails this factory, which fails boot/reassembly.
+		if modelsConfigured(tenant) {
+			models, err := newModelsService(tenant, cfg.LLM, cfg.Product.WrapStream)
+			if err != nil {
+				return nil, fmt.Errorf("resolve model configuration: %w", err)
+			}
+			svc.models = models
 		}
 		// Product-layer observation (token partials): the decorator runs on the
 		// hot path for every model request, so it must stay allocation-light.
@@ -388,6 +411,12 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		}
 		runner := agent.NewRunner(cfg.Seams.Committer, cfg.Seams.Reader,
 			llm.StreamFn(), llm.ProviderName(), llm.Model(), llm.APIKey(), cfg.Seams.Logger)
+		// The attempt's execution identity comes from the provider configuration
+		// when the tenant declares one; without it the runner's static fields
+		// (the fake/legacy path) stay authoritative.
+		if models := llm.Models(); models != nil {
+			runner.Models = models
+		}
 		runner.Assembly = assembly
 		if cfg.Tenant.Agent.MaxTurns > 0 {
 			runner.MaxTurns = cfg.Tenant.Agent.MaxTurns

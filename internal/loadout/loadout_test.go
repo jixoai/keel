@@ -2,6 +2,7 @@ package loadout
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -369,6 +370,51 @@ func TestFromTenantConfigRejectsInvalidDocument(t *testing.T) {
 	if _, err := FromTenantConfig(bad, Options{}, provideAll(allServiceNames()...)); err == nil ||
 		!strings.Contains(err.Error(), "quota.runConcurrency") {
 		t.Fatalf("invalid tenant document must be rejected with the field path, got %v", err)
+	}
+}
+
+// TestModelConfigurationVersionsTheLLMService pins the reassembly identity of
+// the llm service: a document that carries provider configuration must produce
+// a distinguishable version (so a Reload rebuilds the resolver instead of
+// sharing the stale instance), the same document must stay stable, and a
+// document without provider configuration must keep the blueprint version.
+func TestModelConfigurationVersionsTheLLMService(t *testing.T) {
+	llmVersion := func(t *testing.T, cfg host.TenantConfig) string {
+		t.Helper()
+		lo, err := FromTenantConfig(cfg, Options{}, provideAll(allServiceNames()...))
+		if err != nil {
+			t.Fatalf("FromTenantConfig: %v", err)
+		}
+		desc, ok := lo.Service(ServiceLLM)
+		if !ok {
+			t.Fatal("llm service missing from the loadout")
+		}
+		return desc.Version
+	}
+
+	baseline := llmVersion(t, host.TenantConfig{})
+	modelsA := llmVersion(t, host.TenantConfig{
+		Models: json.RawMessage(`{"selection":{"providerId":"a6api","modelId":"deepseek-v4.1-flash"}}`),
+	})
+	if modelsA == baseline {
+		t.Fatal("a models document must change the llm service version")
+	}
+	modelsB := llmVersion(t, host.TenantConfig{
+		Models: json.RawMessage(`{"selection":{"providerId":"deepseek","modelId":"deepseek-v4.1-flash"}}`),
+	})
+	if modelsB == modelsA {
+		t.Fatal("two different models documents must produce different llm versions")
+	}
+	if again := llmVersion(t, host.TenantConfig{
+		Models: json.RawMessage(`{"selection":{"providerId":"a6api","modelId":"deepseek-v4.1-flash"}}`),
+	}); again != modelsA {
+		t.Fatalf("the version must be deterministic: %q != %q", again, modelsA)
+	}
+	// The legacy flat agent fields are part of the same slice: the resolver
+	// reads them, so a change must be visible to reassembly too.
+	legacy := llmVersion(t, host.TenantConfig{Agent: host.AgentConfig{Model: "deepseek-v4.1-flash", Protocol: "openai"}})
+	if legacy == baseline {
+		t.Fatal("a legacy agent model must change the llm service version")
 	}
 }
 

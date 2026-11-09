@@ -331,6 +331,15 @@ func main() {
 		log.Error("load KEEL_EXTERNAL_CONFIG", "err", err)
 		os.Exit(2)
 	}
+	// The provider configuration is the same tenant document's models slice, so
+	// its boot default comes from KEEL_MODELS_CONFIG (the file IS the models
+	// section: providers / rules / selection). The bytes travel verbatim; the
+	// resolver owns the vocabulary and fails boot on a document it cannot use.
+	modelsDoc, err := host.LoadModelsDocument(os.Getenv("KEEL_MODELS_CONFIG"))
+	if err != nil {
+		log.Error("load KEEL_MODELS_CONFIG", "err", err)
+		os.Exit(2)
+	}
 	// The runtime's default tenant document. Everything a loadout needs comes
 	// from this one struct (host.TenantConfig): model selection, prompt, skills,
 	// MCP servers, telemetry, quota and external providers. There is no second
@@ -344,6 +353,7 @@ func main() {
 			SystemPrompt: envOr("KEEL_SYSTEM_PROMPT", defaultSystemPrompt),
 			Sections:     promptSections(sections),
 		},
+		Models: modelsDoc,
 		Skills: host.SkillsConfig{
 			Roots:        skillRoots(),
 			FileReadTool: os.Getenv("KEEL_FILE_READ_TOOL"),
@@ -473,26 +483,34 @@ func main() {
 			log.Info("external agent backend", "name", backend.Name, "state", backend.State, "health", backend.Health)
 		}
 	}
+	// A nil validator must stay a nil interface: the edge accepts a selection
+	// exactly when the tenant declares a provider configuration, and an unwired
+	// validator refuses every selection instead of storing one nothing honours.
+	var validateSelection func(json.RawMessage) error
+	if models := rt.Models(); models != nil {
+		validateSelection = models.ValidateSelection
+	}
 	srv := httpapi.New(httpapi.Config{
-		Store:           st,
-		Hub:             hub,
-		Edge:            kern,
-		Events:          rt.Projection(),
-		Loadouts:        kern,
-		Blobs:           blob.NewReader(st, *streamCap, *batch),
-		Uploader:        &blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()},
-		Scheduler:       stream.NewScheduler(*streamCap),
-		Admitter:        stream.NewAdmitter(*admitRate, *admitRate*2),
-		Limiter:         stream.NewLimiter(*budget),
-		Metrics:         streamMetrics,
-		MetricsExporter: reg,
-		Ready:           st,
-		Drain:           runtimeDrain,
-		Control:         runtimeControl{Coordinator: coord, window: *handoffWindow},
-		External:        externalSessions,
-		Logger:          log,
-		CASDir:          *casDir,
-		MCPOAuth:        mcpOAuthConfig,
+		Store:             st,
+		Hub:               hub,
+		Edge:              kern,
+		Events:            rt.Projection(),
+		Loadouts:          kern,
+		ValidateSelection: validateSelection,
+		Blobs:             blob.NewReader(st, *streamCap, *batch),
+		Uploader:          &blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()},
+		Scheduler:         stream.NewScheduler(*streamCap),
+		Admitter:          stream.NewAdmitter(*admitRate, *admitRate*2),
+		Limiter:           stream.NewLimiter(*budget),
+		Metrics:           streamMetrics,
+		MetricsExporter:   reg,
+		Ready:             st,
+		Drain:             runtimeDrain,
+		Control:           runtimeControl{Coordinator: coord, window: *handoffWindow},
+		External:          externalSessions,
+		Logger:            log,
+		CASDir:            *casDir,
+		MCPOAuth:          mcpOAuthConfig,
 	})
 
 	hs := &http.Server{

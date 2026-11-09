@@ -67,7 +67,7 @@ func TestProductStreamWrapInstalled(t *testing.T) {
 		}
 		return inner
 	}})
-	instance, err := newLLMFactory(cfg)(context.Background(), servicegraph.Resolved{})
+	instance, err := newLLMFactory(cfg.Tenant, cfg)(context.Background(), servicegraph.Resolved{})
 	if err != nil {
 		t.Fatal(err)
 	}

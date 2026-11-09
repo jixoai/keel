@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -34,7 +35,12 @@ var toolPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+\*?$`)
 // TenantConfig is one tenant's agent configuration. Every field is optional:
 // a zero value inherits from the defaults passed to Merge.
 type TenantConfig struct {
-	Agent      AgentConfig      `json:"agent"`
+	Agent AgentConfig `json:"agent"`
+	// Models carries the provider-configuration slice of the tenant document
+	// (providers / modelRules / modelApiRules / siteRules / providerModelRules /
+	// selection). It is passed verbatim to the model configuration resolver, so
+	// the host vocabulary stays one document.
+	Models     json.RawMessage  `json:"models,omitempty"`
 	Skills     SkillsConfig     `json:"skills"`
 	MCP        MCPConfig        `json:"mcp"`
 	Hooks      HooksConfig      `json:"hooks"`
@@ -382,6 +388,32 @@ func ParseTenantConfig(raw []byte) (TenantConfig, error) {
 	return cfg, nil
 }
 
+// LoadModelsDocument reads the provider-configuration fragment named by a
+// tenant-document path: the file IS the models section (providers / rules /
+// selection), not an envelope. An empty path means "no models document"
+// (nil, nil); an unreadable or malformed file is an error the caller turns
+// into a boot failure.
+//
+// The bytes travel verbatim (the resolver owns the vocabulary); only the
+// JSON-object shape is checked here so a boot failure names the file.
+func LoadModelsDocument(path string) (json.RawMessage, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
+		return nil, fmt.Errorf("%s: models document must be a JSON object", path)
+	}
+	return json.RawMessage(trimmed), nil
+}
+
 // Merge overlays a tenant document on defaults. Scalars and the compaction
 // Enabled flag take the tenant value when explicitly set (non-zero / non-nil);
 // Sections, skill Roots, hook Commands, and the tools Allow-list replace the
@@ -404,6 +436,7 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 			MaxTurns:      pickInt(defaults.Agent.MaxTurns, tenant.Agent.MaxTurns),
 			ContextWindow: pickInt(defaults.Agent.ContextWindow, tenant.Agent.ContextWindow),
 		},
+		Models: cloneRawMessage(defaults.Models),
 		Skills: SkillsConfig{
 			Enabled:      cloneBool(defaults.Skills.Enabled),
 			Roots:        cloneStrings(defaults.Skills.Roots),
@@ -439,6 +472,11 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 	}
 	if tenant.Agent.Sections != nil {
 		out.Agent.Sections = cloneSections(tenant.Agent.Sections)
+	}
+	// A nil models section inherits the defaults; a non-nil one (including an
+	// explicitly empty object) replaces them, exactly like Sections.
+	if tenant.Models != nil {
+		out.Models = cloneRawMessage(tenant.Models)
 	}
 	if tenant.Skills.Roots != nil {
 		out.Skills.Roots = cloneStrings(tenant.Skills.Roots)
@@ -709,6 +747,18 @@ func cloneStrings(values []string) []string {
 
 func cloneSections(sections []PromptSection) []PromptSection {
 	return slices.Clone(sections)
+}
+
+// cloneRawMessage copies raw JSON so the merged document owns its bytes. A
+// non-nil empty document stays non-nil: "explicitly cleared" must survive the
+// merge, otherwise the next merge would treat it as "inherit defaults".
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	out := make(json.RawMessage, len(raw))
+	copy(out, raw)
+	return out
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
