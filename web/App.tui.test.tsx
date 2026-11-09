@@ -139,8 +139,7 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   await app.waitFor("text:/本周发布准备已基本就绪/");
 });
 
-test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分开", async () => {
-  const app = await open("./App.tsx");
+test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分开", async () => {  const app = await open("./App.tsx");
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("text:/本周发布准备已基本就绪/");
 
@@ -170,4 +169,45 @@ test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分�
   await app.press("label:恢复默认");
   await app.press("label:关闭");
   expect(app.texts()).toContain("默认 s2api/deepseek-v4.1-flash · 高");
+});
+
+// The workspace-polish change (keel-workspace-polish) on the same fixture:
+// titles never leak ids, a parked question is not "thinking", a failed turn
+// carries its reason in a banner that can retry, and a suggestion only
+// prefills the composer (never sends).
+test("TUI: 打磨——不落裸 id/等待确认不是思考/错误横幅与重试/空态只预填", async () => {
+  const app = await open("./App.tsx");
+  const screen = () => app.texts().join("\n");
+
+  // C1：行上是标题（未命名会话是「新会话 · 时间」）；屏幕上没有任何裸 session id。
+  await app.waitFor("text:/新会话 · /");
+  expect(screen()).not.toContain("demo-");
+  expect(app.texts()).toContain("发布准备周报");
+  // C2（列表侧）：停在未决问句上的会话带「等待确认」。
+  expect(app.texts()).toContain("等待确认");
+
+  // C2（对话侧）：等待 ≠ 思考——问句在场时不出加载/思考字样。
+  await app.press(TITLE("发布审批"));
+  await app.waitFor("text:需要你的确认");
+  expect(app.texts()).not.toContain("正在思考");
+  await app.press("text:批准发布");
+  await app.waitFor("text:/已确认/");
+
+  // C6/C3：失败回合的错误横幅（原因逐字来自账本）＋重试把同一输入再次提交。
+  await app.press("label:返回会话列表");
+  await app.press(TITLE("生成发布说明"));
+  await app.waitFor("text:这次运行失败了");
+  expect(app.texts()).toContain("upstream 429: rate limit exceeded (retry-after 30s)");
+  await app.press("label:回合失败 >> label:重试本回合");
+  await app.waitFor("text:/已检查当前工作区/", { timeout: 15_000 });
+  expect(app.texts()).not.toContain("这次运行失败了");
+
+  // C8：空态建议只预填——草稿就是建议原文，且空态仍在（没有自动发送）。
+  await app.press("label:返回会话列表");
+  await app.press("text:还没有消息");
+  await app.waitFor("text:/我是 Keel/");
+  await app.press("label:使用建议 把行动项按负责人分组");
+  await app.waitFor("text:/把行动项按负责人分组/");
+  expect(app.value("id:composer-input")).toBe("把行动项按负责人分组");
+  expect(app.texts()).toContain("发送一条消息，Keel 会在这里开始工作。");
 });
