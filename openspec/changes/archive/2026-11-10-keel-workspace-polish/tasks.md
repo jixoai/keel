@@ -42,5 +42,8 @@
 
 ## V. 复审与交付
 
-- [ ] V1 子代理对抗复核（体验口径/账本语义不被渲染器污染/无回归）
-- [ ] V2 报告（before/after 截图）＋ 公网链接 ＋ archive
+- [x] V1 子代理对抗复核（体验口径/账本语义不被渲染器污染/无回归）：客户端/真值面 8/10；
+      阻塞项「C2 在工具面的加载动效未闭合」已修（waiting 门全链 + 两条状态样本 + TUI 断言），
+      非阻塞项（无输入回合不给重试、压缩空壳、TUI 等待标记静止、enrich 空跑、裸 id 审计）全部落地
+- [x] V2 报告（before/after 截图）＋ 公网链接 ＋ archive
+      （https://local-gaubee-keel-polish.fde2e.com/report.html · 2026-11-10 归档）

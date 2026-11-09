@@ -1,19 +1,14 @@
 # Model Settings（模型配置的产品面）
 
-## Requirement: 模型配置可读可写
+## ADDED Requirements
 
-租户级模型配置 MUST 可读、可写、可重置，且写入前 MUST 用与运行期同一套解析器校验。
+### Requirement: 模型配置可读可写
 
-- **GET `/v1/settings/models`** MUST 返回 `{revision, source, document, issues}`：
-  `source` ∈ {`stored`, `deployment`}（有覆盖=stored，否则=启动文档）；`document` 是**当前生效**的模型文档
-  （覆盖或部署默认）；`issues` 是解析级诊断（无则空数组）。
-- **PUT `/v1/settings/models`** MUST 接受一份完整模型文档（`schemaVersion` / `providers` / 规则数组 /
-  `selection`），返回 `{revision, source:"stored", selection, providersExecutable, modelsSelectable}` 摘要。
-  - 校验 MUST 覆盖：文档形状、规则引用、默认 selection 可执行（含凭据可解析、驱动可构造、思考档在词汇表内）。
-  - 校验失败 MUST 400，body 带字段路径（`{"error":"...","issues":[{"field":"selection.modelId","message":"..."}]}`）。
-  - 并发写 MUST 用 `expectedRevision`（可选）守卫：不匹配 409，并返回当前 revision。
-- **DELETE `/v1/settings/models`** MUST 清除覆盖并回到部署默认，返回 `{revision, source:"deployment"}`。
-- 写入 MUST 落审计：revision 单调递增、`updated_at`、来源与操作者（会话/租户）。
+租户级模型配置 MUST 可读、可写、可重置；写入 MUST 用与运行期同一套解析器校验后才落盘。
+
+- GET MUST 返回 `{revision, source, document, issues}`（`document` 是当前生效的一份）。
+- PUT MUST 接受完整文档并返回生效摘要；校验失败 400 带字段路径；`expectedRevision` 不匹配 409。
+- DELETE MUST 清除覆盖并回到部署默认；revision 单调递增且留审计。
 
 #### Scenario: 保存即生效
 - **GIVEN** 服务以部署默认（deepseek）运行
@@ -34,7 +29,7 @@
 - **WHEN** DELETE `/v1/settings/models`
 - **THEN** 200 且 source=deployment；后续 run 回到启动文件配置
 
-## Requirement: 热更按代数生效，边缘缝按请求读取
+### Requirement: 热更按代数生效，边缘缝按请求读取
 
 配置变更 MUST 通过装配新服务代数生效，MUST NOT 要求重启；HTTP 边缘的两处读取
 （selection 校验、设置/注册表投影）MUST 按请求解析到当前代数，MUST NOT 在 boot 时捕获后不再更新。
@@ -46,7 +41,7 @@
 - **WHEN** PUT 成功
 - **THEN** 紧随其后的 GET 返回同一 revision 与新文档（无缓存窗口）
 
-## Requirement: 设置是独立的面
+### Requirement: 设置是独立的面
 
 设置 MUST 是独立于工作区的页面/路由（`/settings`），MUST NOT 以面板形式塞进会话界面。
 
@@ -58,7 +53,7 @@
 - **WHEN** 已登录用户打开 `/settings`
 - **THEN** 直接进入设置页（不是重定向到工作区），返回后仍在原会话
 
-## Requirement: 客户端设置页——模型
+### Requirement: 客户端设置页——模型
 
 设置页的模型分区 MUST 覆盖：当前生效（来源/revision/默认 selection）、provider 列表与不可执行原因、
 模型列表与能力事实/issues、默认模型与思考档编辑、原始文档编辑、保存/重置、字段级错误呈现。
@@ -67,7 +62,16 @@
 - 保存失败 MUST 原样呈现服务端 issues（字段路径 + 消息），MUST NOT 用“保存失败”吞掉原因。
 - 保存成功 MUST 显示新 revision 与生效状态（source）。
 
-## Requirement: 密钥管理
+#### Scenario: 字段级错误
+- **GIVEN** 原始文档里写了一个未声明的模型
+- **WHEN** 点保存
+- **THEN** 页面按字段路径列出服务端原因，revision 不变
+
+#### Scenario: 保存生效
+- **WHEN** 保存一份合法文档
+- **THEN** 来源变为「已保存覆盖」，revision +1，默认模型与思考档立即按新文档显示
+
+### Requirement: 密钥管理
 
 设置页的密钥分区 MUST 支持按名字写入、覆盖、删除，供模型配置以 `secret:NAME` 引用。
 
@@ -87,7 +91,7 @@
 - **WHEN** 打开密钥分区或尝试写入
 - **THEN** 界面明确说明「密钥存储未启用」并给原因；写入被拒；不回退明文
 
-## Requirement: 插件清单与触发
+### Requirement: 插件清单与触发
 
 设置页的插件分区 MUST 呈现装载清单与状态，并允许手动触发已注册的触发器。
 
@@ -99,7 +103,7 @@
 - **WHEN** 打开插件分区
 - **THEN** 看到插件 generation、状态、其工具/hook/触发器与诊断；能触发一个触发器并看到结果
 
-## Requirement: 会话内模型选择
+### Requirement: 会话内模型选择
 
 聊天界面 MUST 提供「本会话模型」选择器（provider/model/reasoning），选中后该会话后续每条输入
 MUST 携带该 selection；会话选择 MUST 与租户默认选择分开呈现（会话当前 vs 默认）。
@@ -118,8 +122,19 @@ MUST 携带该 selection；会话选择 MUST 与租户默认选择分开呈现�
 - **WHEN** 打开选择器
 - **THEN** 只出现 s2api 的可执行模型（无凭据的 provider 不出现在选择器里）
 
-## Requirement: 一致性与门禁
+### Requirement: 一致性与门禁
 
 - 内核包 MUST NOT import `internal/modelcfg`（已有边界测试保持）。
 - 既有 18 门验收与 R1 MUST 不退化；真实模型 E2E MUST 覆盖：写入→热更→新 run 用新模型→DELETE 回默认。
 - 设置写入 MUST 只接受租户自身作用域（cookie 会话注入的租户；不得跨租户写入）。
+- 被存储的覆盖在启动时 MUST NOT 因凭据消失而使部署不可服务：回退部署文档并让设置读点名被拒的覆盖。
+- 被存储的模型文档引用中的密钥 MUST NOT 可被直接删除（409），除非文档先停止引用。
+
+#### Scenario: 覆盖的凭据消失
+- **GIVEN** 一份引用了已删除密钥的已保存覆盖
+- **WHEN** 进程重启
+- **THEN** 服务起得来并服务部署文档；设置读报 `source=deployment` 且 issues 点名该覆盖与原因，可保存或重置自愈
+
+#### Scenario: 删除被引用的密钥
+- **WHEN** 删除一个被已保存文档引用的密钥
+- **THEN** 服务返回 409 并说明文档仍引用它（先改文档或重置）

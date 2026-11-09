@@ -68,9 +68,12 @@
 - [x] Q3 在飞 run 不受影响（进程内 + 说明；`applymodels_worker_test.go` 的激活上下文用例）
 - [x] Q4 浏览器 E2E：设置页读/写/重置（截图），会话选择器切换模型并生效
       （三区走查 + UI 写入密钥 + 选择器 chip；截图见 2026-11-09-provider-config 报告与打磨报告）
-- [ ] Q5 既有 18 门 + R1 不退化（打磨合并后统一复跑）
+- [x] Q5 既有 18 门 + R1 不退化（复审后统一复跑：16/16 ALL GATES PASS，perf 523.8MB / 双进程 522.7MB）
 
 ## V. 复审与交付
 
-- [ ] V1 子代理对抗复核（凭据/跨租户/热更一致性/UI 可用性），阻塞修完再复审
-- [ ] V2 报告（HTML 图文）＋ 公网链接 ＋ archive
+- [x] V1 子代理对抗复核（凭据/跨租户/热更一致性/UI 可用性）：运行时/设置面 7/10、客户端/真值面 8/10；
+      阻塞项「启动回退防砖化」已修并 scratch 真机复验（health 200 + issues[storedOverride] + 日志两条），
+      非阻塞项（retry 复验 selection、引用文法限长、设置写串行化、文档 selection 词表、回滚日志）全部落地
+- [x] V2 报告（HTML 图文）＋ 公网链接 ＋ archive
+      （https://local-gaubee-keel-polish.fde2e.com/report.html · 2026-11-10 归档）
