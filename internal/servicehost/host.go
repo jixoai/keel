@@ -268,16 +268,24 @@ func Boot(ctx context.Context, cfg Config) (*Runtime, error) {
 			return nil, nil, fmt.Errorf("servicehost: resolve loadout: %w", err)
 		}
 		snap, err := engine.Apply(ctx, lo)
+		activationReason := ""
 		if err != nil {
 			if activation, ok := err.(*servicegraph.ActivationError); ok {
 				// Keep the activation error visible, but only fail boot when a
 				// service the run path depends on did not activate.
 				cfg.Seams.Logger.Error("loadout activation incomplete", "generation", activation.Generation, "err", err)
+				activationReason = err.Error()
 			} else {
 				return nil, nil, fmt.Errorf("servicehost: apply loadout: %w", err)
 			}
 		}
 		if err := requireActive(snap, cfg.Options.Worker); err != nil {
+			// The activation error carries the reason the factory refused (a
+			// credential that no longer resolves); requireActive only names the
+			// state. The operator-facing message keeps both.
+			if activationReason != "" {
+				return snap, provide, fmt.Errorf("%w: %s", err, activationReason)
+			}
 			return snap, provide, err
 		}
 		return snap, provide, nil

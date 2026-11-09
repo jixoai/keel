@@ -116,8 +116,25 @@ type retryBody struct {
 // user.message repeats the original input's text/attachments/selection with a
 // fresh retry:<uuid> requestId, delivery queue, and retryOf naming the original
 // input seq — and the run is enqueued for it.
+// productServer is the retry tests' server with the seam a deployment wires:
+// the product layer validates selections, and a retry carries the stored one
+// verbatim, so the tests use the permissive stand-in (a validator that accepts
+// any object) unless they are testing the refusal itself.
+func productServer(t *testing.T) (*httptest.Server, *store.Store) {
+	t.Helper()
+	return newTestServer(t, func(c *Config) {
+		c.ValidateSelection = func(raw json.RawMessage) error {
+			var obj map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+				return fmt.Errorf("selection must be a JSON object")
+			}
+			return nil
+		}
+	})
+}
+
 func TestRetryTurnAppendsANewInputAndQueuesTheRun(t *testing.T) {
-	hs, st := newTestServer(t)
+	hs, st := productServer(t)
 	hc := hs.Client()
 	tenant := uuid.NewString()
 	session := inputSetup(t, hs, tenant)
@@ -235,7 +252,7 @@ func TestRetryTurnAppendsANewInputAndQueuesTheRun(t *testing.T) {
 // seq>) resolves to the newest user input that assistant's inputSeqs records,
 // and a turn on a non-conversation event is refused with 400.
 func TestRetryTurnResolvesThroughAssistantInputSeqs(t *testing.T) {
-	hs, st := newTestServer(t)
+	hs, st := productServer(t)
 	hc := hs.Client()
 	tenant := uuid.NewString()
 	session := inputSetup(t, hs, tenant)
@@ -320,7 +337,7 @@ func TestRetryTurnResolvesThroughAssistantInputSeqs(t *testing.T) {
 // 404 without leaking existence; a malformed turnId is 400; nothing is written
 // on any refusal.
 func TestRetryTurnRefusals(t *testing.T) {
-	hs, st := newTestServer(t)
+	hs, st := productServer(t)
 	hc := hs.Client()
 	tenant := uuid.NewString()
 	session := inputSetup(t, hs, tenant)
