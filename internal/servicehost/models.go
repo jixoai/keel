@@ -92,17 +92,18 @@ func newModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provid
 	}, nil
 }
 
-// modelsConfigured reports whether the tenant declares a provider
-// configuration: an explicit models section (an empty object carries none), or
-// the legacy flat agent model the normalization turns into one anonymous
-// provider. Without either there is nothing to resolve and the runner keeps
-// its static stream identity (the fake/legacy path stays untouched).
+// modelsConfigured reports whether the tenant carries a provider
+// configuration document (the "models" slice). The flat agent.* fields are the
+// pre-document compatibility path, deliberately NOT a provider configuration
+// here: a deployment that has never seen a models document keeps the static llm
+// identity, and therefore its historical thinking level and request shape —
+// upgrading must not change what such a deployment sends. A document that names
+// a provider-less configuration (for example only a selection) still goes
+// through the resolver, where the flat fields are the documented incremental
+// adoption path.
 func modelsConfigured(tenant host.TenantConfig) bool {
 	trimmed := bytes.TrimSpace(tenant.Models)
-	if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("{}")) {
-		return true
-	}
-	return strings.TrimSpace(tenant.Agent.Model) != ""
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("{}"))
 }
 
 // Resolve turns the run's selection fact into the execution identity of one

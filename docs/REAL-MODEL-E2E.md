@@ -3,8 +3,13 @@
 > 目的：证明 keel 的 loop 能用**真实模型**跑完一次完整回合——
 > `input → 模型 → 工具往返（echo）→ 终答`——并给出可复跑脚本、事件级断言与失败路径证据。
 >
-> 本文只描述既有装配（`cmd/runtime` → `servicehost` → `provider`），不引入第二套配置词汇。
-> 所有结论以代码为准，引用处标注 `path:line`。
+> 本文只描述既有装配（`cmd/runtime`、`cmd/keel serve` → `servicehost` → `provider`），
+> 不引入第二套配置词汇。所有结论以代码为准，引用处标注 `path:line`。
+>
+> **两条配置路径并存**：扁平变量（`KEEL_MODEL` 等，§1–§2，兼容旧部署）与
+> **租户模型文档**（`KEEL_MODELS_CONFIG` / `--models-config`，§8）——后者是
+> provider/model 配置的正式形态：一次解析出身份、能力与请求选项，`selection`
+> 随每条输入作为账本事实落盘，由该次尝试解析后使用。
 
 ## 1. 配置路径（代码为准）
 
@@ -254,3 +259,90 @@ harness，不掩盖缺陷：不打开它时，真实回合在修复前必然失�
 - 模型是否调用工具由模型决定；脚本用确定性的提示词 + 唯一标记串提高命中率，
   并把“标记串是否原样回显”作为摘要字段（`markerEchoed`），默认不作硬门。
 - 证据里的消息正文只留在 `/tmp`（不入库、不贴报告）；报告只写长度/seq/耗时。
+
+## 8. 租户模型文档路径（`--models` / `--models-baseline`）
+
+`keel serve` 与 `cmd/runtime` 都能从**一份租户模型文档**装配 provider/model：
+`--models-config <file>`（serve）或 `KEEL_MODELS_CONFIG=<file>`（两者）。文件内容
+就是文档里的 `models` 段（`providers` / `modelRules` / `modelApiRules` /
+`siteRules` / `providerModelRules` / `selection`），不是信封：
+
+```json
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "id": "s2api-e2e",
+      "name": "S2API",
+      "api": {"type": "openai-chat-completions", "baseUrl": "https://s2api.top/v1"},
+      "access": {"type": "api-key", "env": "S2API_KEY"},
+      "modelIds": ["deepseek-v4.1-flash"],
+      "visibility": "visible"
+    }
+  ],
+  "modelRules": [
+    {"match": "deepseek-v4.1-flash",
+     "config": {"properties": {"contextWindow": 64000},
+                "options": {"reasoningLevel": {"values": ["off", "low", "high"],
+                                               "map": {"low": {"reasoning_effort": "low"},
+                                                       "high": {"reasoning_effort": "high"}}},
+                            "maxOutputTokens": {"max": 1024, "map": {}}}}}
+  ],
+  "selection": {"providerId": "s2api-e2e", "modelId": "deepseek-v4.1-flash", "reasoningLevel": "low"}
+}
+```
+
+要点（都以代码为准）：
+
+- **身份只有一对**：`providerId` + `modelId`。驱动按 `api.type` 直接构造
+  （`openai-chat-completions` / `openai-responses` / `anthropic-messages`），
+  不再走「模型名推断 provider」的启发式；`providerId` 只作为身份与遥测标签。
+- **凭据是引用**：`access.env` 是环境变量**名**（也可以是租户密钥引用），值从
+  环境注入；查不到即失败，绝不用空 key 打真实网关。
+- **能力与请求选项同源**：`properties.contextWindow` 供压缩使用，
+  `options.reasoningLevel.map` / `options.maxOutputTokens` 经 ModelFactory 合成
+  **请求体 overlay**，由 runtime 作为 `StreamConfig.Extra` 交给驱动。
+- **selection 是输入事实**：`POST /v1/sessions/{id}/input` 接受 `selection` 对象，
+  逐字落进 `user.message` payload；每次尝试取「最新一条带 selection 的输入」解析
+  执行身份，解析失败在任何提交之前失败（不半执行工具、不写事件）。
+- **配置投影**：`GET /v1/providers`（可见 provider 的设置视图，含 issues 与
+  executable/selectable）与 `GET /v1/models`（可选模型扁平列表）；隐藏 provider
+  与其模型不出现在任一响应里。
+- **run.finished 记录身份**：摘要里带 `provider`/`model`，审计可回答「这一轮是谁答的」。
+
+**边界与恢复（selection 是账本事实的代价）**：尝试取「最新一条带 selection 的输入」，
+所以一条**无法执行**的 selection（模型被下线、id 写错、文档改了）会让**之后每一条没有
+自带 selection 的输入**都在解析处失败——run 结 `failed`、输入不被回答、`lastError` 明说
+哪个身份不可执行。恢复路径有二：① 客户端把「会话当前选择」随每条输入一起发（这正是
+selection 被设计成输入事实的原因：持有当前选择的是客户端）；② 运维用
+`/v1/sessions/{id}/events` 裸边补一条带合法 selection 的输入，或把文档改回去。解析失败是
+**fail-closed**（宁可失败也不用别的模型作答）：错模型的答案比没有答案更危险。
+
+脚本阶段：
+
+```bash
+scripts/real-model-e2e.sh --models           # after：keel serve + 文档 + 录制代理
+scripts/real-model-e2e.sh --models-baseline  # before：改前二进制 + 扁平配置
+scripts/real-model-e2e.sh --models-all       # 两半一起跑，证据可逐字段对照
+```
+
+两半都把 provider 的 base URL 指向**录制代理**（只转发、不改造；流式原样回传），
+代理把每次请求的 `model`、`reasoning_effort`、`max_tokens`、是否带凭据（只记布尔，
+不记值）写进 `wire-requests.jsonl`。因此断言的是**线路事实**，而不是配置解析结果：
+
+| 断言 | before（`--models-baseline`，参考 `ed3f733`） | after（`--models`） |
+|---|---|---|
+| `GET /v1/providers` | 无此路由（404） | 200，可见 provider 列出、隐藏 provider 不出现 |
+| 线路 `model` | 扁平配置的模型 id | 文档里 `modelIds` 的模型 id |
+| 线路 `reasoning_effort` | 恒为 `low`（硬编码默认，selection 被忽略） | 随每条输入的 `selection.reasoningLevel` 变化 |
+| 线路 `max_tokens` | 无（无 overlay） | 文档 `options.maxOutputTokens.max` |
+| `user.message.selection` | 不存在（字段不存在，值被边界丢弃） | 逐字等于客户端提交的对象 |
+| `run.finished` 身份 | 无 `provider`/`model` | `provider`/`model` 等于解析出的身份 |
+
+`KEEL_ACCEPTANCE_REAL_MODEL=1` 时，`scripts/acceptance-all.sh` 会把这两半接进全量
+验收（默认不跑：这一步需要真实凭据与网络，不能是密封门）。
+
+## 9. 实测结果（provider 配置，2026-11-06）
+
+见 `.agents/reports/keel/<本次报告目录>/`（原始证据在脚本打印的
+`KEEL_E2E_EVIDENCE_DIR`，不入库）。

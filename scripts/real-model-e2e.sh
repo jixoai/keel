@@ -36,10 +36,23 @@
 # configured id and logs the rewrite; the loop itself still talks to the real
 # gateway. Drop the flag once the wiring is fixed.
 #
+# --models is the provider-configuration phase: it boots `keel serve` with a
+# tenant models document (KEEL_MODELS_CONFIG / --models-config) whose provider
+# points at a RECORDING proxy in front of the real gateway, then drives two
+# inputs through the product API with different per-input selections and
+# asserts the wire request itself: model id, reasoning_effort, max_tokens,
+# credential presence, plus GET /v1/providers and GET /v1/models, the persisted
+# selection fact and the run.finished identity. This is the gate for "the
+# configuration reached the wire", not just "a run finished".
+#
 # Usage:
 #   scripts/real-model-e2e.sh                 # success round trip
 #   scripts/real-model-e2e.sh --with-failure  # success + 401 failure path
 #   scripts/real-model-e2e.sh --failure-auth  # 401 failure path only
+#   scripts/real-model-e2e.sh --models        # provider-configuration phase (after)
+#   scripts/real-model-e2e.sh --models-baseline  # the pre-change binary (before)
+#   scripts/real-model-e2e.sh --models-legacy    # this binary on the flat flags (compat)
+#   scripts/real-model-e2e.sh --models-all    # all three phases in one evidence directory
 #   scripts/real-model-e2e.sh --check         # resolve config only, no network
 #
 # Exit codes: 0 pass; 1 assertion/runtime failure; 2 blocked (credentials or
@@ -65,8 +78,12 @@ for arg in "$@"; do
     --check) MODE=check ;;
     --failure-auth) MODE=failure ;;
     --with-failure) MODE=both ;;
+    --models) MODE=models ;;
+    --models-baseline) MODE=models-baseline ;;
+    --models-legacy) MODE=models-legacy ;;
+    --models-all) MODE=models-all ;;
     -h|--help)
-      sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
@@ -369,8 +386,276 @@ stop_proxy() {
   PROXY_PID=""
 }
 
-start_rewrite_proxy() { # PORT LOG UPSTREAM TARGET_MODEL
-  PROXY_PORT="$1"
+# --- recording proxy (provider-config phase) -------------------------------
+#
+# The provider-config phase configures the tenant's provider base URL to point
+# here, so the ONLY way the loop can reach the model is through this proxy. It
+# forwards to the real gateway (streaming SSE back untouched) and records what
+# the wire actually carried: the request body plus whether a credential was
+# present and matched. The credential VALUE is never written: only the boolean
+# verdict, computed inside the proxy.
+REC_PID=""
+REC_PORT=""
+REC_BODIES=""
+
+stop_record_proxy() {
+  if [ -z "$REC_PID" ]; then return 0; fi
+  kill -TERM "$REC_PID" 2>/dev/null || true
+  wait "$REC_PID" 2>/dev/null || true
+  REC_PID=""
+}
+
+start_recording_proxy() { # PORT LOG BODIES_JSONL UPSTREAM
+  REC_PORT="$1"
+  REC_BODIES="$3"
+  : > "$2"
+  : > "$3"
+  python3 - "$1" "$2" "$3" "$4" <<'PY' &
+import http.server, json, os, sys, urllib.error, urllib.request
+
+port = int(sys.argv[1])
+logpath = sys.argv[2]
+bodies = sys.argv[3]
+upstream = sys.argv[4].rstrip("/")
+expect_key = os.environ.get("PROXY_EXPECT_KEY", "")
+
+
+def log(line):
+    with open(logpath, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+
+def record(doc):
+    with open(bodies, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc, ensure_ascii=False) + "\n")
+
+
+def upstream_url(path):
+    if upstream.endswith("/v1") and path.startswith("/v1/"):
+        return upstream + path[len("/v1"):]
+    return upstream + path
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length)
+        try:
+            doc = json.loads(raw)
+        except Exception as exc:  # noqa: BLE001 - a non-JSON body is a fact too
+            doc = {}
+            log("POST %s unparseable body: %s" % (self.path, exc))
+        auth = self.headers.get("Authorization") or ""
+        scheme = auth.split(" ", 1)[0] if auth else ""
+        token = auth.split(" ", 1)[1] if " " in auth else ""
+        record({
+            "path": self.path,
+            "model": doc.get("model"),
+            "reasoningEffort": doc.get("reasoning_effort"),
+            "maxTokens": doc.get("max_tokens"),
+            "maxOutputTokens": doc.get("max_output_tokens"),
+            "stream": doc.get("stream"),
+            "hasTools": bool(doc.get("tools")),
+            "topLevelKeys": sorted(doc.keys()),
+            "authScheme": scheme,
+            "authPresent": bool(auth),
+            "authMatchesExpected": bool(expect_key) and token == expect_key,
+        })
+
+        req = urllib.request.Request(upstream_url(self.path), data=raw, method="POST")
+        for key, value in self.headers.items():
+            if key.lower() in ("content-length", "host", "connection", "accept-encoding", "transfer-encoding"):
+                continue
+            req.add_header(key, value)
+        status = 0
+        try:
+            try:
+                resp = urllib.request.urlopen(req, timeout=300)
+                status = resp.status
+            except urllib.error.HTTPError as exc:
+                resp = exc
+                status = exc.code
+            self.send_response(status)
+            ctype = resp.headers.get("Content-Type")
+            if ctype:
+                self.send_header("Content-Type", ctype)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            while True:
+                chunk = resp.read(4096)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+            resp.close()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:  # noqa: BLE001 - upstream failure is data
+            log("POST %s upstream error: %s: %s" % (self.path, type(exc).__name__, exc))
+            try:
+                self.send_error(502, "recorder: upstream failure")
+            except Exception:
+                pass
+        finally:
+            log("POST %s model=%r status=%s" % (self.path, doc.get("model"), status))
+
+    def log_message(self, *args):
+        pass
+
+
+http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+PY
+  REC_PID=$!
+  local i
+  for i in $(seq 1 60); do
+    if [ "$(port_free "$REC_PORT")" = "used" ]; then
+      info "recording proxy on 127.0.0.1:$REC_PORT -> $4 (bodies: $3)"
+      return 0
+    fi
+    kill -0 "$REC_PID" 2>/dev/null || die "recording proxy exited during startup"
+    sleep 0.1
+  done
+  die "recording proxy did not start on port $REC_PORT"
+}
+
+# write_models_config FILE PROXY_BASE MODEL — the tenant's models document. It
+# configures exactly what the phase asserts: one visible provider pointing at
+# the recording proxy, one hidden provider that must never be listed, a model
+# rule pinning maxOutputTokens (so the value on the wire is provably the
+# configured one, not a default) and the reasoning-level wire mapping.
+write_models_config() {
+  local file="$1" base="$2" model="$3"
+  MODELS_FILE="$file" PROXY_BASE="$base" MODEL_ID="$model" python3 - <<'PY'
+import json, os
+
+doc = {
+    "schemaVersion": 1,
+    "providers": [
+        {
+            "id": "s2api-e2e",
+            "name": "S2API (recording proxy)",
+            "api": {"type": "openai-chat-completions", "baseUrl": os.environ["PROXY_BASE"]},
+            "access": {"type": "api-key", "env": "KEEL_API_KEY"},
+            "modelIds": [os.environ["MODEL_ID"]],
+            "visibility": "visible",
+        },
+        {
+            "id": "hidden-e2e",
+            "name": "Hidden provider (must not be listed)",
+            "api": {"type": "openai-chat-completions", "baseUrl": os.environ["PROXY_BASE"]},
+            "access": {"type": "api-key", "env": "KEEL_API_KEY"},
+            "modelIds": [os.environ["MODEL_ID"] + "-hidden"],
+            "visibility": "hidden",
+        },
+    ],
+    "modelRules": [
+        {
+            "match": os.environ["MODEL_ID"],
+            "config": {
+                "properties": {"contextWindow": 64000},
+                "options": {
+                    "reasoningLevel": {
+                        "values": ["off", "low", "high"],
+                        "map": {
+                            "off": {},
+                            "low": {"reasoning_effort": "low"},
+                            "high": {"reasoning_effort": "high"},
+                        },
+                    },
+                    "maxOutputTokens": {"max": 1024, "map": {"": {}}},
+                },
+            },
+        }
+    ],
+    "selection": {
+        "providerId": "s2api-e2e",
+        "modelId": os.environ["MODEL_ID"],
+        "reasoningLevel": "low",
+    },
+}
+with open(os.environ["MODELS_FILE"], "w", encoding="utf-8") as fh:
+    json.dump(doc, fh, ensure_ascii=False, indent=2)
+PY
+  info "models document written: $file (model $model via the recording proxy)"
+}
+
+# --- keel serve lifecycle (provider-config phase) --------------------------
+
+SERVE_PID=""
+SERVE_LOG=""
+JAR=""
+
+stop_serve() {
+  if [ -z "$SERVE_PID" ]; then return 0; fi
+  if kill -0 "$SERVE_PID" 2>/dev/null; then
+    kill -TERM "$SERVE_PID" 2>/dev/null || true
+    local i
+    for i in $(seq 1 120); do
+      kill -0 "$SERVE_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL "$SERVE_PID" 2>/dev/null || true
+  fi
+  wait "$SERVE_PID" 2>/dev/null || true
+  SERVE_PID=""
+}
+
+start_serve() { # PORT LOG MODELS_FILE PASSWORD TENANT
+  local port="$1" log="$2" models="$3" password="$4" tenant="$5"
+  SERVE_LOG="$log"
+  : > "$log"
+  info "starting keel serve on 127.0.0.1:$port (log: $log)"
+  # KEEL_API_KEY is the variable the models document's access.env names: the
+  # credential reaches the process through the environment, never through the
+  # document.
+  env \
+    KEEL_DSN="$DSN" \
+    KEEL_API_KEY="$API_KEY" \
+    KEEL_MODELS_CONFIG="$models" \
+    KEEL_SYSTEM_PROMPT="${KEEL_SYSTEM_PROMPT:-You are a deterministic integration-test agent. When the user asks you to call the echo tool, call it exactly once and then answer with the tool result.}" \
+    "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/serve-cas" -password "$password" -tenant "$tenant" \
+    >>"$log" 2>&1 &
+  SERVE_PID=$!
+
+  local body pid i
+  for i in $(seq 1 150); do
+    body="$(curl -fsS -m 2 "http://127.0.0.1:$port/v1/health" 2>/dev/null || true)"
+    if [ -n "$body" ]; then
+      pid="$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid"))' 2>/dev/null || true)"
+      [ "$pid" = "$SERVE_PID" ] || die "port $port answers with pid $pid, not $SERVE_PID (foreign process)"
+      info "keel serve healthy (pid $SERVE_PID)"
+      return 0
+    fi
+    kill -0 "$SERVE_PID" 2>/dev/null || die "keel serve exited during startup; see $log"
+    sleep 0.2
+  done
+  die "keel serve did not become healthy within 30s; see $log"
+}
+
+serve_login() { # PORT JAR PASSWORD
+  local code
+  code="$(curl -sS -m 10 -o "$EVIDENCE_DIR/serve-login.json" -w '%{http_code}' \
+    -c "$2" -X POST "http://127.0.0.1:$1/v1/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "$(PASSWORD_ENV="$3" python3 -c 'import json,os; print(json.dumps({"password": os.environ["PASSWORD_ENV"]}))')")"
+  [ "$code" = "200" ] || die "login returned HTTP $code: $(cat "$EVIDENCE_DIR/serve-login.json" 2>/dev/null)"
+  info "logged in (cookie jar: $2)"
+}
+
+# serve_json METHOD JAR URL OUT [DATA] -> prints the HTTP status
+serve_json() {
+  local method="$1" jar="$2" url="$3" out="$4" data="${5:-}"
+  if [ -n "$data" ]; then
+    curl -sS -m 30 -o "$out" -w '%{http_code}' -b "$jar" -c "$jar" -X "$method" "$url" \
+      -H 'Content-Type: application/json' -d "$data"
+  else
+    curl -sS -m 30 -o "$out" -w '%{http_code}' -b "$jar" -c "$jar" -X "$method" "$url"
+  fi
+}
+
+start_rewrite_proxy() { # PORT LOG UPSTREAM TARGET_MODEL  PROXY_PORT="$1"
   PROXY_LOG="$2"
   : > "$PROXY_LOG"
   python3 - "$PROXY_PORT" "$PROXY_LOG" "$3" "$4" <<'PY' &
@@ -472,6 +757,8 @@ cleanup() {
   set +e
   stop_runtime
   stop_proxy
+  stop_record_proxy
+  stop_serve
   if [ "$DB_CREATED" = "1" ] && [ "${KEEL_E2E_KEEP_DB:-0}" != "1" ]; then
     docker exec "$PG_CTR" psql -U postgres -c "DROP DATABASE IF EXISTS \"$DB\" WITH (FORCE)" >/dev/null 2>&1
     [ "${KEEL_E2E_KEEP_DB:-0}" = "1" ] || true
@@ -527,6 +814,17 @@ ensure_binary() {
   else
     info "building runtime -> $bin"
     go build -o "$bin" ./cmd/runtime || die "go build ./cmd/runtime failed"
+  fi
+  printf '%s\n' "$bin"
+}
+
+ensure_serve_binary() {
+  local bin="${KEEL_E2E_SERVE_BIN:-/tmp/keel-real-model-serve}"
+  if [ "${KEEL_E2E_SKIP_BUILD:-0}" = "1" ]; then
+    [ -x "$bin" ] || blocked "KEEL_E2E_SKIP_BUILD=1 but $bin is not executable"
+  else
+    info "building keel serve -> $bin"
+    go build -o "$bin" ./cmd/keel || die "go build ./cmd/keel failed"
   fi
   printf '%s\n' "$bin"
 }
@@ -917,6 +1215,217 @@ if doc.get("lastError"):
 PY
 }
 
+# --- provider-config phase -------------------------------------------------
+#
+# The gate for "the tenant's provider configuration reaches the wire". The
+# provider's base URL points at the recording proxy, so a request that did not
+# carry the configured model/protocol/options is a visible failure rather than
+# a silent one. Two inputs with different per-input selections prove the
+# selection fact travels from the client through the log to the attempt.
+run_provider_config() {
+  info "phase: provider configuration (keel serve + models document + recording proxy)"
+  local port rec_port serve_port tenant password models bodies prefix
+  port="$(pick_port)"
+  rec_port="$(pick_port)"
+  serve_port="$(pick_port)"
+  prefix="$EVIDENCE_DIR/models"
+  bodies="$EVIDENCE_DIR/wire-requests.jsonl"
+  models="$EVIDENCE_DIR/models-config.json"
+  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
+  JAR="$EVIDENCE_DIR/cookies.txt"
+  : > "$JAR"
+
+  SERVE_BIN="$(ensure_serve_binary)"
+  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/recording-proxy.log" "$bodies" "$BASE_URL"
+  write_models_config "$models" "http://127.0.0.1:$rec_port/v1" "$MODEL"
+  start_serve "$serve_port" "$EVIDENCE_DIR/serve.log" "$models" "$password" "$tenant"
+
+  local base="http://127.0.0.1:$serve_port" code
+  serve_login "$serve_port" "$JAR" "$password"
+
+  # The capability surface: an authenticated client must see the tenant's
+  # visible provider and never the hidden one.
+  code="$(serve_json GET "$JAR" "$base/v1/providers" "$EVIDENCE_DIR/providers.json")"
+  [ "$code" = "200" ] || die "GET /v1/providers returned HTTP $code: $(cat "$EVIDENCE_DIR/providers.json" 2>/dev/null)"
+  code="$(serve_json GET "$JAR" "$base/v1/models" "$EVIDENCE_DIR/models.json")"
+  [ "$code" = "200" ] || die "GET /v1/models returned HTTP $code: $(cat "$EVIDENCE_DIR/models.json" 2>/dev/null)"
+
+  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$EVIDENCE_DIR/session.json" '{}')"
+  [ "$code" = "201" ] || die "create session returned HTTP $code: $(cat "$EVIDENCE_DIR/session.json" 2>/dev/null)"
+  SESSION="$(SESSION_FILE="$EVIDENCE_DIR/session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
+  [ -n "$SESSION" ] || die "session response carries no id: $(cat "$EVIDENCE_DIR/session.json")"
+  info "serve session created: $SESSION"
+
+  local level request_id prompt
+  for level in low high; do
+    request_id="models-$level-$(date +%s)-$$"
+    prompt="Call the echo tool exactly once with the argument x set to \"$level-marker\". Then reply with one short sentence that contains the exact text the tool returned."
+    code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$prefix-input-$level.json" \
+      "$(LEVEL="$level" REQUEST_ID="$request_id" PROMPT="$prompt" MODEL_ID="$MODEL" python3 -c '
+import json, os
+print(json.dumps({
+    "text": os.environ["PROMPT"],
+    "requestId": os.environ["REQUEST_ID"],
+    "delivery": "queue",
+    "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": os.environ["LEVEL"]},
+}))'  )")"
+    [ "$code" = "201" ] || die "input ($level) returned HTTP $code: $(cat "$prefix-input-$level.json" 2>/dev/null)"
+    info "input committed with reasoningLevel=$level"
+    wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/events-$level.json" "$EVIDENCE_DIR/run-$level.json" \
+      || die "the $level attempt did not settle done; see $EVIDENCE_DIR/serve.log"
+  done
+
+  MODEL_ID="$MODEL" BODIES="$bodies" PROVIDERS="$EVIDENCE_DIR/providers.json" \
+  MODELS="$EVIDENCE_DIR/models.json" EVENTS_LOW="$EVIDENCE_DIR/events-low.json" \
+  EVENTS_HIGH="$EVIDENCE_DIR/events-high.json" INPUT_LOW="$prefix-input-low.json" \
+  INPUT_HIGH="$prefix-input-high.json" SECRET_TO_SCAN="$API_KEY" SESSION="$SESSION" \
+  SERVE_LOG="$EVIDENCE_DIR/serve.log" RECORD_LOG="$EVIDENCE_DIR/recording-proxy.log" \
+  SUMMARY_OUT="$EVIDENCE_DIR/provider-config-summary.json" \
+  python3 - <<'PY' || die "provider-config assertions failed; see $EVIDENCE_DIR/provider-config-summary.json"
+import json, os, re
+
+model = os.environ["MODEL_ID"]
+secret = os.environ["SECRET_TO_SCAN"]
+
+
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+bodies = [json.loads(line) for line in open(os.environ["BODIES"], encoding="utf-8") if line.strip()]
+providers = load(os.environ["PROVIDERS"])
+models = load(os.environ["MODELS"])
+checks = []
+
+
+def check(name, ok, detail=""):
+    checks.append({"check": name, "ok": bool(ok), "detail": detail})
+    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
+
+
+def payload(ev):
+    raw = ev.get("payload")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def text_of(p):
+    return "".join(b.get("text") or "" for b in (p.get("content") or [])
+                   if isinstance(b, dict) and b.get("type") == "text")
+
+
+check("the model was actually called through the configured provider (>=2 requests)",
+      len(bodies) >= 2, "%d requests" % len(bodies))
+chat = [b for b in bodies if b.get("path", "").endswith("/chat/completions")]
+check("every request used the configured wire protocol (chat completions)",
+      bool(chat) and len(chat) == len(bodies), "paths=%s" % [b.get("path") for b in bodies])
+
+# Select by reasoning effort: a retried attempt must not be mistaken for the
+# other level.
+low = next((b for b in chat if b.get("reasoningEffort") == "low"), {})
+high = next((b for b in chat if b.get("reasoningEffort") == "high"), {})
+
+check("wire model id is the configured modelId",
+      bool(chat) and all(b.get("model") == model for b in chat),
+      "models=%s" % sorted({b.get("model") for b in chat}))
+check("selection low reached the wire", low.get("reasoningEffort") == "low",
+      "reasoningEffort=%r" % low.get("reasoningEffort"))
+check("selection high reached the wire", high.get("reasoningEffort") == "high",
+      "reasoningEffort=%r" % high.get("reasoningEffort"))
+check("configured maxOutputTokens reached the wire",
+      bool(chat) and all(b.get("maxTokens") == 1024 for b in chat),
+      "maxTokens=%s" % [b.get("maxTokens") for b in chat])
+check("credential was present and matched the configured value on every request",
+      bool(chat) and all(b.get("authPresent") and b.get("authMatchesExpected") for b in chat),
+      "auth=%s" % [(b.get("authScheme"), b.get("authMatchesExpected")) for b in chat])
+check("requests are streaming and carry the tool definitions",
+      bool(chat) and all(b.get("stream") and b.get("hasTools") for b in chat),
+      "stream=%s tools=%s" % ([b.get("stream") for b in chat], [b.get("hasTools") for b in chat]))
+
+provider_ids = [p.get("providerId") for p in providers.get("providers") or []]
+check("GET /v1/providers lists the tenant provider", "s2api-e2e" in provider_ids, "providers=%s" % provider_ids)
+check("GET /v1/providers hides the hidden provider", "hidden-e2e" not in provider_ids, "providers=%s" % provider_ids)
+visible_models = [m.get("modelId") for m in models.get("models") or []]
+check("GET /v1/models lists the selected model", model in visible_models, "models=%s" % visible_models)
+check("GET /v1/models does not leak the hidden model",
+      not any("hidden" in (m or "") for m in visible_models), "models=%s" % visible_models)
+surface = json.dumps({"providers": providers, "models": models})
+check("capability surface carries no credential-shaped value", not re.search(r"sk-[A-Za-z0-9]", surface))
+
+for label, level in (("low", "low"), ("high", "high")):
+    events = load(os.environ["EVENTS_%s" % label.upper()]).get("events") or []
+    users = [payload(ev) for ev in events if ev.get("kind") == "user.message"]
+    assistants = [payload(ev) for ev in events if ev.get("kind") == "assistant.message"]
+    finished = [payload(ev) for ev in events if ev.get("kind") == "run.finished"]
+    expected = {"providerId": "s2api-e2e", "modelId": model, "reasoningLevel": level}
+    check("%s: the input carries the selection fact verbatim" % label,
+          any((u.get("selection") or {}) == expected for u in users),
+          "selections=%s" % [u.get("selection") for u in users])
+    check("%s: an assistant answered" % label, any(text_of(a) for a in assistants))
+    check("%s: run.finished records the execution identity" % label,
+          any(f.get("model") == model and f.get("provider") == "s2api-e2e" for f in finished),
+          "identities=%s" % [(f.get("provider"), f.get("model")) for f in finished])
+    check("%s: no terminal model error" % label,
+          not any(a.get("stopReason") == "error" for a in assistants))
+
+for label, path in (("events low", os.environ["EVENTS_LOW"]), ("events high", os.environ["EVENTS_HIGH"]),
+                    ("serve log", os.environ["SERVE_LOG"]), ("recording proxy log", os.environ["RECORD_LOG"]),
+                    ("input low", os.environ["INPUT_LOW"]), ("input high", os.environ["INPUT_HIGH"]),
+                    ("wire requests", os.environ["BODIES"])):
+    data = open(path, encoding="utf-8").read()
+    check("%s: no API-key literal" % label, not (secret and secret in data))
+
+summary = {"ok": all(c["ok"] for c in checks), "model": model,
+           "session": os.environ.get("SESSION", ""), "requests": bodies, "checks": checks}
+with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=2)
+print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
+raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
+PY
+
+  stop_serve
+  stop_record_proxy
+  say ""
+  say "PASS: provider configuration reached the wire"
+  say "  evidence   = $EVIDENCE_DIR/wire-requests.jsonl, providers.json, models.json, events-{low,high}.json"
+}
+
+# wait_serve_run BASE JAR SESSION EVENTS_OUT RUN_OUT — poll until the session's
+# run settles done, then fetch the events.
+wait_serve_run() {
+  local base="$1" jar="$2" session="$3" events_out="$4" run_out="$5" i status assist
+  for i in $(seq 1 $(( ${KEEL_E2E_TIMEOUT_SEC:-180} * 2 ))); do
+    serve_json GET "$jar" "$base/v1/sessions/$session/run" "$run_out" >/dev/null 2>&1 || true
+    status="$(RUN_FILE="$run_out" python3 -c 'import json,os
+try:
+    print(json.load(open(os.environ["RUN_FILE"])).get("status") or "")
+except Exception:
+    print("")' 2>/dev/null || true)"
+    case "$status" in
+      done|failed|cancelled)
+        serve_json GET "$jar" "$base/v1/sessions/$session/events?limit=500" "$events_out" >/dev/null 2>&1 || true
+        assist="$(EVENTS_FILE="$events_out" python3 -c 'import json,os
+try:
+    ev = (json.load(open(os.environ["EVENTS_FILE"])).get("events") or [])
+except Exception:
+    print(0); raise SystemExit
+print(sum(1 for e in ev if e.get("kind") in ("assistant.message", "run.finished")))' 2>/dev/null || true)"
+        if [ "$status" = "done" ] && [ "${assist:-0}" -ge 1 ]; then
+          return 0
+        fi
+        ;;
+    esac
+    sleep 0.5
+  done
+  return 1
+}
+
 # --- phases ----------------------------------------------------------------
 
 run_success() {
@@ -999,6 +1508,282 @@ run_failure() {
   stop_proxy
 }
 
+# --- current binary on the flat configuration (compatibility gate) ---------
+#
+# The other half of the compatibility promise: this branch's binary, started
+# with ONLY the flat flags, must send exactly what the baseline sent (same wire
+# model, same thinking level, no request overlay) AND must refuse a selection
+# instead of silently ignoring one — a deployment with no provider document has
+# no vocabulary to vet it, so storing it would be a promise nobody keeps.
+run_current_legacy() {
+  info "phase: current binary on the flat configuration (compatibility)"
+  local rec_port serve_port tenant password bodies code
+  rec_port="$(pick_port)"
+  serve_port="$(pick_port)"
+  bodies="$EVIDENCE_DIR/legacy-wire-requests.jsonl"
+  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
+  JAR="$EVIDENCE_DIR/legacy-cookies.txt"
+  : > "$JAR"
+
+  SERVE_BIN="$(ensure_serve_binary)"
+  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/legacy-recording-proxy.log" "$bodies" "$BASE_URL"
+  KEEL_MODELS_CONFIG="" \
+  SERVE_BASE_URL="http://127.0.0.1:$rec_port/v1" \
+  SERVE_MODEL="$MODEL" SERVE_PROTOCOL=openai SERVE_KEY="$API_KEY" SERVE_TENANT="$tenant" \
+  start_serve_legacy "$serve_port" "$EVIDENCE_DIR/legacy-serve.log" "$password"
+
+  local base="http://127.0.0.1:$serve_port"
+  serve_login "$serve_port" "$JAR" "$password"
+
+  code="$(serve_json GET "$JAR" "$base/v1/providers" "$EVIDENCE_DIR/legacy-providers.json")"
+  LEGACY_PROVIDERS_CODE="$code"
+  info "current binary, no models document: GET /v1/providers -> HTTP $code (expected 501)"
+
+  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$EVIDENCE_DIR/legacy-session.json" '{}')"
+  [ "$code" = "201" ] || die "create session returned HTTP $code: $(cat "$EVIDENCE_DIR/legacy-session.json" 2>/dev/null)"
+  SESSION="$(SESSION_FILE="$EVIDENCE_DIR/legacy-session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
+
+  # 1. A selection is refused: 400, nothing committed.
+  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/legacy-refused.json" \
+    "$(REQUEST_ID="legacy-refused-$(date +%s)-$$" MODEL_ID="$MODEL" python3 -c '
+import json, os
+print(json.dumps({"text": "this must not be stored",
+                  "requestId": os.environ["REQUEST_ID"],
+                  "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": "high"}}))'  )")"
+  LEGACY_REFUSED_CODE="$code"
+
+  # 2. A plain input runs exactly like the baseline did.
+  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/legacy-input.json" \
+    "$(REQUEST_ID="legacy-$(date +%s)-$$" python3 -c '
+import json, os
+print(json.dumps({"text": "Call the echo tool exactly once with the argument x set to \"legacy-marker\". Then reply with one short sentence that contains the exact text the tool returned.",
+                  "requestId": os.environ["REQUEST_ID"]}))'  )")"
+  [ "$code" = "201" ] || die "input returned HTTP $code: $(cat "$EVIDENCE_DIR/legacy-input.json" 2>/dev/null)"
+  wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/legacy-events.json" "$EVIDENCE_DIR/legacy-run.json" \
+    || die "the flat-configuration attempt did not settle done; see $EVIDENCE_DIR/legacy-serve.log"
+
+  MODEL_ID="$MODEL" BODIES="$bodies" REFUSED_CODE="$LEGACY_REFUSED_CODE" \
+  PROVIDERS_CODE="$LEGACY_PROVIDERS_CODE" EVENTS="$EVIDENCE_DIR/legacy-events.json" \
+  BASELINE_BODIES="$EVIDENCE_DIR/baseline-wire-requests.jsonl" \
+  SUMMARY_OUT="$EVIDENCE_DIR/legacy-summary.json" \
+  python3 - <<'PY' || die "compatibility assertions failed; see $EVIDENCE_DIR/legacy-summary.json"
+import json, os
+
+model = os.environ["MODEL_ID"]
+checks = []
+
+
+def check(name, ok, detail=""):
+    checks.append({"check": name, "ok": bool(ok), "detail": detail})
+    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
+
+
+def rows(path):
+    if not os.path.exists(path):
+        return []
+    out = []
+    for line in open(path, encoding="utf-8"):
+        if line.strip():
+            row = json.loads(line)
+            if row.get("path", "").endswith("/chat/completions"):
+                out.append(row)
+    return out
+
+
+current = rows(os.environ["BODIES"])
+baseline = rows(os.environ["BASELINE_BODIES"])
+check("the selection was refused before anything was committed",
+      os.environ["REFUSED_CODE"] == "400", "HTTP %s" % os.environ["REFUSED_CODE"])
+check("no provider document means no settings surface",
+      os.environ["PROVIDERS_CODE"] == "501", "HTTP %s" % os.environ["PROVIDERS_CODE"])
+check("the flat configuration still reaches the gateway", bool(current), "%d requests" % len(current))
+shape = lambda rows_: sorted({(r.get("model"), r.get("reasoningEffort"), r.get("maxTokens")) for r in rows_})
+check("current wire shape equals the baseline wire shape", bool(current) and shape(current) == shape(baseline),
+      "current=%s baseline=%s" % (shape(current), shape(baseline)))
+events = json.load(open(os.environ["EVENTS"], encoding="utf-8")).get("events") or []
+refused = [ev for ev in events if ev.get("kind") == "user.message"
+           and "must not be stored" in json.dumps(ev.get("payload"))]
+check("the refused input is not in the log", not refused, "%d matching events" % len(refused))
+
+summary = {"ok": all(c["ok"] for c in checks), "model": model, "requests": current, "checks": checks}
+with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=2)
+print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
+raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
+PY
+
+  stop_serve
+  stop_record_proxy
+  say ""
+  say "PASS: the flat configuration is unchanged and a selection is refused without a document"
+  say "  evidence   = $EVIDENCE_DIR/legacy-wire-requests.jsonl, legacy-summary.json"
+}
+
+# --- baseline (before) phase -----------------------------------------------
+#
+# The "before" half of the provider-configuration comparison, and the
+# legacy-configuration compatibility gate: the pre-change binary, configured
+# with the flat flags, must ignore a selection (it has no provider document),
+# which is exactly what the after phase proves it now honours. Both halves write
+# the same evidence shape, so a report can diff them field by field.
+ensure_baseline_binary() {
+  local ref="${KEEL_E2E_BASELINE_REF:-ed3f733}"
+  local bin="${KEEL_E2E_BASELINE_BIN:-/tmp/keel-real-model-baseline-$ref}"
+  if [ -x "$bin" ]; then
+    printf '%s\n' "$bin"
+    return 0
+  fi
+  local src="/tmp/keel-baseline-src-$ref"
+  rm -rf "$src"
+  mkdir -p "$src"
+  info "extracting baseline $ref -> $src"
+  git archive "$ref" | tar -x -C "$src" || die "git archive $ref failed (is the ref present?)"
+  ( cd "$src" && go build -o "$bin" ./cmd/keel ) || die "go build baseline ./cmd/keel failed"
+  printf '%s\n' "$bin"
+}
+
+run_baseline() { # REF
+  local ref="$1"
+  info "phase: baseline $ref (flat configuration, selection must be ignored)"
+  local rec_port serve_port tenant password bodies models
+  rec_port="$(pick_port)"
+  serve_port="$(pick_port)"
+  bodies="$EVIDENCE_DIR/baseline-wire-requests.jsonl"
+  models="$EVIDENCE_DIR/baseline-models-config.json"
+  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
+  JAR="$EVIDENCE_DIR/baseline-cookies.txt"
+  : > "$JAR"
+
+  SERVE_BIN="$(ensure_baseline_binary)"
+  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/baseline-recording-proxy.log" "$bodies" "$BASE_URL"
+  # A models document IS written and exported, so the run proves the baseline
+  # ignores it (the feature did not exist) rather than proving the flag is
+  # unset.
+  write_models_config "$models" "http://127.0.0.1:$rec_port/v1" "$MODEL"
+
+  local base="http://127.0.0.1:$serve_port" code
+  # Flat flags only: the baseline binary has no --models-config at all.
+  KEEL_MODELS_CONFIG="$models" \
+  SERVE_BASE_URL="http://127.0.0.1:$rec_port/v1" \
+  SERVE_MODEL="$MODEL" SERVE_PROTOCOL=openai SERVE_KEY="$API_KEY" SERVE_TENANT="$tenant" \
+  start_serve_legacy "$serve_port" "$EVIDENCE_DIR/baseline-serve.log" "$password"
+  base="http://127.0.0.1:$serve_port"
+  serve_login "$serve_port" "$JAR" "$password"
+
+  code="$(serve_json GET "$JAR" "$base/v1/providers" "$EVIDENCE_DIR/baseline-providers.json")"
+  BASELINE_PROVIDERS_CODE="$code"
+  info "baseline GET /v1/providers -> HTTP $code (expected: absent route)"
+
+  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$EVIDENCE_DIR/baseline-session.json" '{}')"
+  [ "$code" = "201" ] || die "baseline create session returned HTTP $code: $(cat "$EVIDENCE_DIR/baseline-session.json" 2>/dev/null)"
+  SESSION="$(SESSION_FILE="$EVIDENCE_DIR/baseline-session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
+
+  local prompt
+  prompt="Call the echo tool exactly once with the argument x set to \"baseline-marker\". Then reply with one short sentence that contains the exact text the tool returned."
+  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/baseline-input.json" \
+    "$(REQUEST_ID="baseline-$(date +%s)-$$" PROMPT="$prompt" MODEL_ID="$MODEL" python3 -c '
+import json, os
+print(json.dumps({
+    "text": os.environ["PROMPT"],
+    "requestId": os.environ["REQUEST_ID"],
+    "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": "high"},
+}))'  )")"
+  [ "$code" = "201" ] || die "baseline input returned HTTP $code: $(cat "$EVIDENCE_DIR/baseline-input.json" 2>/dev/null)"
+  wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/baseline-events.json" "$EVIDENCE_DIR/baseline-run.json" \
+    || die "baseline attempt did not settle done; see $EVIDENCE_DIR/baseline-serve.log"
+
+  MODEL_ID="$MODEL" BODIES="$bodies" PROVIDERS_CODE="$BASELINE_PROVIDERS_CODE" \
+  EVENTS="$EVIDENCE_DIR/baseline-events.json" REF="$ref" \
+  SUMMARY_OUT="$EVIDENCE_DIR/baseline-summary.json" \
+  python3 - <<'PY' || die "baseline assertions failed; see $EVIDENCE_DIR/baseline-summary.json"
+import json, os
+
+model = os.environ["MODEL_ID"]
+bodies = [json.loads(line) for line in open(os.environ["BODIES"], encoding="utf-8") if line.strip()]
+events = json.load(open(os.environ["EVENTS"], encoding="utf-8")).get("events") or []
+checks = []
+
+
+def check(name, ok, detail=""):
+    checks.append({"check": name, "ok": bool(ok), "detail": detail})
+    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
+
+
+def payload(ev):
+    raw = ev.get("payload")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = {}
+    return raw if isinstance(raw, dict) else {}
+
+
+chat = [b for b in bodies if b.get("path", "").endswith("/chat/completions")]
+check("baseline called the gateway through the flat configuration", bool(chat), "requests=%d" % len(chat))
+check("baseline had no provider-settings route", os.environ["PROVIDERS_CODE"] in ("404", "501", "405"),
+      "HTTP %s" % os.environ["PROVIDERS_CODE"])
+check("baseline used the legacy wire model", bool(chat) and all(b.get("model") == model for b in chat),
+      "models=%s" % sorted({b.get("model") for b in chat}))
+check("baseline ignored the selection's reasoning level (flat default low)",
+      bool(chat) and all(b.get("reasoningEffort") == "low" for b in chat),
+      "efforts=%s" % sorted({b.get("reasoningEffort") for b in chat}))
+check("baseline applied no request overlay (no configured max tokens)",
+      bool(chat) and all(b.get("maxTokens") is None for b in chat),
+      "maxTokens=%s" % [b.get("maxTokens") for b in chat])
+users = [payload(ev) for ev in events if ev.get("kind") == "user.message"]
+check("baseline stored no selection fact (the field did not exist, so the value was dropped at the edge)",
+      bool(users) and all(u.get("selection") is None for u in users),
+      "selections=%s" % [u.get("selection") for u in users])
+finished = [payload(ev) for ev in events if ev.get("kind") == "run.finished"]
+check("baseline run summary carries no execution identity",
+      not any(f.get("model") or f.get("provider") for f in finished),
+      "identities=%s" % [(f.get("provider"), f.get("model")) for f in finished])
+
+summary = {"ok": all(c["ok"] for c in checks), "ref": os.environ["REF"], "requests": bodies, "checks": checks}
+with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=2)
+print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
+raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
+PY
+
+  stop_serve
+  stop_record_proxy
+  say ""
+  say "PASS: baseline $ref (flat configuration, selection ignored)"
+  say "  evidence   = $EVIDENCE_DIR/baseline-wire-requests.jsonl, baseline-summary.json"
+}
+
+# start_serve_legacy PORT LOG PASSWORD — the flat-configuration boot, used by
+# the baseline phase (a pre-provider binary has no models document flag).
+start_serve_legacy() {
+  local port="$1" log="$2" password="$3"
+  SERVE_LOG="$log"
+  : > "$log"
+  info "starting baseline keel serve on 127.0.0.1:$port (log: $log)"
+  env KEEL_DSN="$DSN" "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/baseline-cas" \
+    -password "$password" -tenant "${SERVE_TENANT:?}" \
+    -model "${SERVE_MODEL:?}" -base-url "${SERVE_BASE_URL:?}" -protocol "${SERVE_PROTOCOL:?}" -api-key "${SERVE_KEY:?}" \
+    >>"$log" 2>&1 &
+  SERVE_PID=$!
+
+  local body pid i
+  for i in $(seq 1 150); do
+    body="$(curl -fsS -m 2 "http://127.0.0.1:$port/v1/health" 2>/dev/null || true)"
+    if [ -n "$body" ]; then
+      pid="$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid"))' 2>/dev/null || true)"
+      [ "$pid" = "$SERVE_PID" ] || die "port $port answers with pid $pid, not $SERVE_PID (foreign process)"
+      info "baseline keel serve healthy (pid $SERVE_PID)"
+      return 0
+    fi
+    kill -0 "$SERVE_PID" 2>/dev/null || die "baseline keel serve exited during startup; see $log"
+    sleep 0.2
+  done
+  die "baseline keel serve did not become healthy within 30s; see $log"
+}
+
 # --- main ------------------------------------------------------------------
 
 resolve_credentials
@@ -1022,6 +1807,10 @@ case "$MODE" in
   success) run_success ;;
   failure) run_failure ;;
   both)    run_success; run_failure ;;
+  models)  run_provider_config ;;
+  models-baseline) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}" ;;
+  models-legacy) run_current_legacy ;;
+  models-all) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}"; run_current_legacy; run_provider_config ;;
   *) die "internal: unknown mode $MODE" ;;
 esac
 

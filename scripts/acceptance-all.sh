@@ -177,4 +177,18 @@ run "handoff dual-process RSS" "$EVID/perf/handoff-dual.log" \
   env KEEL_HANDOFF_RSS_DB=keel_perf_handoff_final KEEL_HANDOFF_OUT="$EVID/perf/handoff-dual.json" \
   scripts/acceptance-handoff-rss.sh
 
+# --- 9. real model E2E (needs credentials + network; opt-in) ----------------
+# The provider-configuration phase is the only gate that proves the tenant's
+# provider document reached the wire (model id, reasoning level, max tokens,
+# credential). It cannot be hermetic: it talks to a real gateway through a
+# recording proxy. Off by default; on with KEEL_ACCEPTANCE_REAL_MODEL=1 when
+# credentials are configured (scripts/real-model-e2e.sh --check reports them).
+if [ "${KEEL_ACCEPTANCE_REAL_MODEL:-0}" = "1" ]; then
+  run "real model E2E (round trip)" "$EVID/real-model.txt" scripts/real-model-e2e.sh
+  run "real model E2E (provider configuration)" "$EVID/real-model-models.txt" \
+    scripts/real-model-e2e.sh --models
+else
+  say "SKIP: real model E2E (set KEEL_ACCEPTANCE_REAL_MODEL=1 with credentials to include it)"
+fi
+
 say "ALL GATES PASS — $(date)"
