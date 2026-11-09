@@ -121,7 +121,10 @@ type openaiToolDelta struct {
 func (d *OpenAIDecoder) Decode(payload []byte) ([]StreamEvent, error) {
 	var chunk openaiChunk
 	if err := json.Unmarshal(payload, &chunk); err != nil {
-		return nil, fmt.Errorf("openai: parse chunk: %w", err)
+		// A gateway that answers with an HTML error page (some report 200 and a
+		// body) reaches this decoder as a non-JSON payload. A bare JSON syntax
+		// error tells the operator nothing; a bounded, escaped snippet does.
+		return nil, fmt.Errorf("openai: parse chunk: %w (upstream payload: %q)", err, snippet(payload, 120))
 	}
 	if chunk.Error != nil {
 		msg := "openai stream error"
@@ -287,4 +290,14 @@ func mapOpenAIFinishReason(reason string) string {
 	default:
 		return agentcore.StopReasonEndTurn
 	}
+}
+
+// snippet returns at most n bytes of a payload as a printable, single-line
+// string so an error can quote what the upstream actually sent.
+func snippet(payload []byte, n int) string {
+	if len(payload) > n {
+		payload = payload[:n]
+	}
+	text := strings.Join(strings.Fields(string(payload)), " ")
+	return text
 }

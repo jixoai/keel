@@ -616,6 +616,7 @@ start_serve() { # PORT LOG MODELS_FILE PASSWORD TENANT
   # must not be offered).
   env \
     KEEL_DSN="$DSN" \
+    KEEL_SECRET_KEY="${KEEL_E2E_SECRET_KEY:-$(openssl rand -hex 32)}" \
     KEEL_MODELS_CONFIG="$models" \
     KEEL_SYSTEM_PROMPT="${KEEL_SYSTEM_PROMPT:-You are a deterministic integration-test agent. When the user asks you to call the echo tool, call it exactly once and then answer with the tool result.}" \
     "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/serve-cas" -password "$password" -tenant "$tenant" \
@@ -1466,8 +1467,8 @@ PY
 
 # wait_serve_run BASE JAR SESSION EVENTS_OUT RUN_OUT — poll until the session's
 # run settles done, then fetch the events.
-wait_serve_run() {
-  local base="$1" jar="$2" session="$3" events_out="$4" run_out="$5" i status assist
+wait_serve_run() { # BASE JAR SESSION EVENTS_OUT RUN_OUT [EXPECTED_STATUS]
+  local base="$1" jar="$2" session="$3" events_out="$4" run_out="$5" expected="${6:-done}" i status assist
   for i in $(seq 1 $(( ${KEEL_E2E_TIMEOUT_SEC:-180} * 2 ))); do
     serve_json GET "$jar" "$base/v1/sessions/$session/run" "$run_out" >/dev/null 2>&1 || true
     status="$(RUN_FILE="$run_out" python3 -c 'import json,os
@@ -1484,7 +1485,7 @@ try:
 except Exception:
     print(0); raise SystemExit
 print(sum(1 for e in ev if e.get("kind") in ("assistant.message", "run.finished")))' 2>/dev/null || true)"
-        if [ "$status" = "done" ] && [ "${assist:-0}" -ge 1 ]; then
+        if [ "$status" = "$expected" ] && [ "${assist:-0}" -ge 1 ]; then
           return 0
         fi
         ;;
@@ -1531,19 +1532,19 @@ run_model_settings() {
   code="$(serve_json GET "$JAR" "$base/v1/settings/models" "$prefix-get-before.json")"
   [ "$code" = "200" ] || die "GET /v1/settings/models returned HTTP $code: $(cat "$prefix-get-before.json" 2>/dev/null)"
   SETTINGS_REV_BEFORE="$(FILE="$prefix-get-before.json" python3 -c 'import json,os; print(json.load(open(os.environ["FILE"])).get("revision"))')"
-  submit_settings_turn "$base" "$JAR" "before" "$prefix-run-before" "设置前的一条输入"
-  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-before.json" "$prefix-status-before.json" \
-    || die "the before-settings attempt did not settle; see $EVIDENCE_DIR/settings-serve.log"
+  settings_turn_until "$base" "$JAR" "before" "$prefix-run-before" "设置前的一条输入" done \
+    || die "the before-settings attempt never settled done; see $EVIDENCE_DIR/settings-serve.log"
 
+  # The settings write is a whole-document replacement (not a patch over the
+  # deployment document), so the body is the boot document with a new default
+  # selection: a provider declared here must carry its own api/access.
   code="$(serve_json PUT "$JAR" "$base/v1/settings/models" "$prefix-put.json" \
-    "$(SETTINGS_MODEL="$MODEL" SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" EXPECTED="$SETTINGS_REV_BEFORE" python3 -c '
+    "$(SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" EXPECTED="$SETTINGS_REV_BEFORE" BOOT="$models" \
+       python3 -c '
 import json, os
-doc = {
-  "schemaVersion": 1,
-  "providers": [{"id": "s2api-e2e", "modelIds": [os.environ["SECOND_MODEL"]]}],
-  "selection": {"providerId": "s2api-e2e", "modelId": os.environ["SECOND_MODEL"], "reasoningLevel": "low"},
-  "expectedRevision": int(os.environ["EXPECTED"]),
-}
+doc = json.load(open(os.environ["BOOT"], encoding="utf-8"))
+doc["selection"] = {"providerId": "s2api-e2e", "modelId": os.environ["SECOND_MODEL"], "reasoningLevel": "low"}
+doc["expectedRevision"] = int(os.environ["EXPECTED"])
 print(json.dumps(doc))')")"
   SETTINGS_PUT_CODE="$code"
   info "PUT /v1/settings/models -> HTTP $code"
@@ -1552,9 +1553,8 @@ print(json.dumps(doc))')")"
   code="$(serve_json GET "$JAR" "$base/v1/settings/models" "$prefix-get-after.json")"
   SETTINGS_GET_CODE="$code"
 
-  submit_settings_turn "$base" "$JAR" "after" "$prefix-run-after" "设置后的一条输入"
-  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-after.json" "$prefix-status-after.json" \
-    || die "the after-settings attempt did not settle"
+  settings_turn_until "$base" "$JAR" "after" "$prefix-run-after" "设置后的一条输入" done \
+    || die "the after-settings attempt never settled done"
 
   code="$(serve_json PUT "$JAR" "$base/v1/settings/models" "$prefix-put-bad.json" \
     '{"schemaVersion":1,"selection":{"providerId":"s2api-e2e","modelId":"does-not-exist"}}')"
@@ -1564,17 +1564,16 @@ print(json.dumps(doc))')")"
   code="$(serve_json DELETE "$JAR" "$base/v1/settings/models?expectedRevision=$(FILE="$prefix-get-after.json" python3 -c 'import json,os; print(json.load(open(os.environ["FILE"])).get("revision"))')" "$prefix-delete.json")"
   SETTINGS_DELETE_CODE="$code"
   code="$(serve_json GET "$JAR" "$base/v1/settings/models" "$prefix-get-reset.json")"
-  submit_settings_turn "$base" "$JAR" "reset" "$prefix-run-reset" "重置后的一条输入"
-  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-reset.json" "$prefix-status-reset.json" \
-    || die "the reset attempt did not settle"
+  settings_turn_until "$base" "$JAR" "reset" "$prefix-run-reset" "重置后的一条输入" done \
+    || die "the reset attempt never settled done; see $prefix-status.json"
 
   SETTINGS_MODEL="$MODEL" SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" \
   BEFORE="$prefix-get-before.json" AFTER="$prefix-get-after.json" RESET="$prefix-get-reset.json" \
   PUT_CODE="$SETTINGS_PUT_CODE" GET_CODE="$SETTINGS_GET_CODE" BAD_CODE="$SETTINGS_BAD_CODE" \
   PUT_BAD="$prefix-put-bad.json" \
   DELETE_CODE="$SETTINGS_DELETE_CODE" REV_BEFORE="$SETTINGS_REV_BEFORE" \
-  EVENTS_BEFORE="$prefix-events-before.json" EVENTS_AFTER="$prefix-events-after.json" \
-  EVENTS_RESET="$prefix-events-reset.json" BODIES="$bodies" \
+  EVENTS_BEFORE="$prefix-run-before-events.json" EVENTS_AFTER="$prefix-run-after-events.json" \
+  EVENTS_RESET="$prefix-run-reset-events.json" BODIES="$bodies" \
   SUMMARY_OUT="$EVIDENCE_DIR/settings-summary.json" \
   python3 - <<'PY' || die "model-settings assertions failed; see $EVIDENCE_DIR/settings-summary.json"
 import json, os
@@ -1593,7 +1592,7 @@ def load(path):
         return json.load(fh)
 
 
-def finished_model(path):
+def finished_models(path):
     events = load(path).get("events") or []
     out = []
     for ev in events:
@@ -1606,11 +1605,16 @@ def finished_model(path):
     return out
 
 
+def last_finished_model(path):
+    models = finished_models(path)
+    return models[-1] if models else None
+
+
 before, after, reset = load(os.environ["BEFORE"]), load(os.environ["AFTER"]), load(os.environ["RESET"])
 check("GET before the write reports the deployment document", before.get("source") == "deployment",
       "source=%r" % before.get("source"))
-check("the before run used the deployment model", finished_model(os.environ["EVENTS_BEFORE"]) == [first],
-      finished_model(os.environ["EVENTS_BEFORE"]))
+check("the before run used the deployment model", last_finished_model(os.environ["EVENTS_BEFORE"]) == first,
+      finished_models(os.environ["EVENTS_BEFORE"]))
 check("the write was accepted", os.environ["PUT_CODE"] == "200", "HTTP %s" % os.environ["PUT_CODE"])
 check("the read-back reflects the stored document",
       os.environ["GET_CODE"] == "200" and after.get("source") == "stored", "source=%r" % after.get("source"))
@@ -1619,8 +1623,8 @@ check("the revision moved", int(after.get("revision") or 0) == int(os.environ["R
 check("the stored document is the one that was written",
       ((after.get("document") or {}).get("selection") or {}).get("modelId") == second,
       (after.get("document") or {}).get("selection"))
-check("the next run used the new model without a restart", finished_model(os.environ["EVENTS_AFTER"]) == [second],
-      finished_model(os.environ["EVENTS_AFTER"]))
+check("the next run used the new model without a restart", last_finished_model(os.environ["EVENTS_AFTER"]) == second,
+      finished_models(os.environ["EVENTS_AFTER"]))
 check("a document whose selection cannot run is refused", os.environ["BAD_CODE"] == "400",
       "HTTP %s" % os.environ["BAD_CODE"])
 bad = load(os.environ["PUT_BAD"])
@@ -1628,8 +1632,8 @@ check("the refusal names the field", bool(bad.get("issues")), bad.get("error"))
 check("the reset was accepted", os.environ["DELETE_CODE"] == "200", "HTTP %s" % os.environ["DELETE_CODE"])
 check("the reset restores the deployment source", reset.get("source") == "deployment",
       "source=%r" % reset.get("source"))
-check("the run after the reset uses the deployment model", finished_model(os.environ["EVENTS_RESET"]) == [first],
-      finished_model(os.environ["EVENTS_RESET"]))
+check("the run after the reset uses the deployment model", last_finished_model(os.environ["EVENTS_RESET"]) == first,
+      finished_models(os.environ["EVENTS_RESET"]))
 
 rows = [json.loads(line) for line in open(os.environ["BODIES"], encoding="utf-8") if line.strip()]
 used = {r.get("model") for r in rows}
@@ -1647,6 +1651,147 @@ PY
   say ""
   say "PASS: model settings wrote, applied without a restart, and reset"
   say "  evidence   = $EVIDENCE_DIR/settings-{get-before,put,get-after,delete,get-reset}.json, settings-wire.jsonl"
+}
+
+# --- secrets phase (the credential really comes from the secret store) -----
+#
+# A secret-store write must be the credential the model call uses — not an env
+# variable that happens to hold the same key. The proof is behavioural: writing
+# a WRONG value through the API and selecting a provider that references it must
+# fail authentication, and writing the right value must succeed with the same
+# document. No amount of "the value is stored" assertion proves that.
+run_settings_secrets() {
+  info "phase: secrets (wrong value fails, right value works, value never readable)"
+  local rec_port serve_port tenant password models bodies prefix
+  rec_port="$(pick_port)"
+  serve_port="$(pick_port)"
+  prefix="$EVIDENCE_DIR/secrets"
+  bodies="$EVIDENCE_DIR/secrets-wire.jsonl"
+  models="$EVIDENCE_DIR/secrets-boot-models.json"
+  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
+  JAR="$EVIDENCE_DIR/secrets-cookies.txt"
+  : > "$JAR"
+
+  SERVE_BIN="$(ensure_serve_binary)"
+  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/secrets-recording-proxy.log" "$bodies" "$BASE_URL"
+  write_settings_boot_document "$models" "http://127.0.0.1:$rec_port/v1"
+  # The boot document uses the env credential; the secrets phase moves the
+  # tenant to a provider that references the secret store instead.
+  start_serve "$serve_port" "$EVIDENCE_DIR/secrets-serve.log" "$models" "$password" "$tenant"
+
+  local base="http://127.0.0.1:$serve_port" code wrong
+  serve_login "$serve_port" "$JAR" "$password"
+  wrong="wrong-$(date +%s)-$$"
+
+  code="$(serve_json PUT "$JAR" "$base/v1/settings/secrets/e2e_key" "$prefix-put-wrong.json" \
+    "$(VALUE="$wrong" python3 -c 'import json,os; print(json.dumps({"value": os.environ["VALUE"]}))')")"
+  SECRETS_PUT_CODE="$code"
+  info "PUT /v1/settings/secrets/e2e_key (wrong value) -> HTTP $code"
+
+  code="$(serve_json GET "$JAR" "$base/v1/settings/secrets" "$prefix-list.json")"
+  SECRETS_LIST_CODE="$code"
+
+  # A document that reaches the gateway through the secret reference.
+  code="$(serve_json PUT "$JAR" "$base/v1/settings/models" "$prefix-put-doc.json" \
+    "$(MODEL_ID="$MODEL" PROXY="http://127.0.0.1:$rec_port/v1" python3 -c '
+import json, os
+doc = {
+  "schemaVersion": 1,
+  "providers": [{
+    "id": "s2api-secret", "name": "S2API (secret ref)",
+    "api": {"type": "openai-chat-completions", "baseUrl": os.environ["PROXY"]},
+    "access": {"type": "api-key", "ref": "secret:e2e_key"},
+    "modelIds": [os.environ["MODEL_ID"]], "visibility": "visible",
+  }],
+  "selection": {"providerId": "s2api-secret", "modelId": os.environ["MODEL_ID"], "reasoningLevel": "low"},
+}
+print(json.dumps(doc))')")"
+  SECRETS_DOC_CODE="$code"
+
+  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$prefix-session.json" '{}')"
+  [ "$code" = "201" ] || die "create session returned HTTP $code"
+  SESSION="$(SESSION_FILE="$prefix-session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
+
+  submit_settings_turn "$base" "$JAR" "wrong-secret" "$prefix-run-wrong" "用一句话回答：ok"
+  # A wrong stored credential is expected to FAIL: the gate is that the attempt
+  # ran at all and reached the gateway (401), not that it answered.
+  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-wrong.json" "$prefix-status-wrong.json" failed \
+    || die "the wrong-secret attempt did not settle failed"
+
+  # Now the right value; the same document must start working.
+  code="$(serve_json PUT "$JAR" "$base/v1/settings/secrets/e2e_key" "$prefix-put-right.json" \
+    "$(VALUE="$API_KEY" python3 -c 'import json,os; print(json.dumps({"value": os.environ["VALUE"]}))')")"
+  SECRETS_RIGHT_CODE="$code"
+  submit_settings_turn "$base" "$JAR" "right-secret" "$prefix-run-right" "用一句话回答：ok"
+  wait_serve_run "$base" "$JAR" "$SESSION" "$prefix-events-right.json" "$prefix-status-right.json" \
+    || die "the right-secret attempt did not settle"
+
+  SECRETS_PUT_CODE="$SECRETS_PUT_CODE" SECRETS_LIST_CODE="$SECRETS_LIST_CODE" \
+  SECRETS_DOC_CODE="$SECRETS_DOC_CODE" SECRETS_RIGHT_CODE="$SECRETS_RIGHT_CODE" \
+  LIST="$prefix-list.json" EVENTS_WRONG="$prefix-events-wrong.json" EVENTS_RIGHT="$prefix-events-right.json" \
+  SECRET_NAME="e2e_key" SECRET_VALUE="$API_KEY" WRONG="$wrong" \
+  SUMMARY_OUT="$EVIDENCE_DIR/secrets-summary.json" \
+  python3 - <<'PY' || die "secret assertions failed; see $EVIDENCE_DIR/secrets-summary.json"
+import json, os
+
+checks = []
+
+
+def check(name, ok, detail=""):
+    checks.append({"check": name, "ok": bool(ok), "detail": detail})
+    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
+
+
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def payloads(path, kind):
+    out = []
+    for ev in load(path).get("events") or []:
+        if ev.get("kind") != kind:
+            continue
+        p = ev.get("payload")
+        if isinstance(p, str):
+            p = json.loads(p)
+        out.append(p)
+    return out
+
+
+listing = load(os.environ["LIST"])
+names = [s.get("name") for s in listing.get("secrets") or []]
+check("the key store is available", listing.get("available") is True, "unavailable: %s" % listing.get("reason"))
+check("the write was accepted", os.environ["SECRETS_PUT_CODE"] == "200", "HTTP %s" % os.environ["SECRETS_PUT_CODE"])
+check("the list shows the name", os.environ["SECRET_NAME"] in names, names)
+raw = open(os.environ["LIST"], encoding="utf-8").read()
+check("the list never carries the value", os.environ["SECRET_VALUE"] not in raw and os.environ["WRONG"] not in raw)
+check("a document may reference the secret", os.environ["SECRETS_DOC_CODE"] == "200",
+      "HTTP %s" % os.environ["SECRETS_DOC_CODE"])
+
+wrong_assistants = payloads(os.environ["EVENTS_WRONG"], "assistant.message")
+wrong_errors = [(p.get("errorMessage") or "") for p in wrong_assistants if p.get("stopReason") == "error"]
+check("a wrong secret value cannot authenticate", bool(wrong_errors),
+      wrong_errors[0][:120] if wrong_errors else "the attempt answered with a wrong credential")
+
+right_assistants = payloads(os.environ["EVENTS_RIGHT"], "assistant.message")
+right_ok = [p for p in right_assistants if p.get("stopReason") == "end_turn"]
+check("the right secret value makes the same document work", bool(right_ok),
+      [(p.get("stopReason"), (p.get("errorMessage") or "")[:80]) for p in right_assistants])
+
+summary = {"ok": all(c["ok"] for c in checks), "checks": checks}
+with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, ensure_ascii=False, indent=2)
+print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
+raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
+PY
+
+  stop_serve
+  stop_record_proxy
+  say ""
+  say "PASS: the secret store supplies the credential (wrong rejected, right accepted, value unreadable)"
+  say "  evidence   = $EVIDENCE_DIR/secrets-{put-wrong,list,put-doc,run-wrong,put-right,run-right}.json"
 }
 
 # write_settings_boot_document FILE PROXY_BASE — the deployment document used by
@@ -1672,6 +1817,28 @@ with open(os.environ["MODELS_FILE"], "w", encoding="utf-8") as fh:
     json.dump(doc, fh, ensure_ascii=False, indent=2)
 PY
   info "settings boot document written: $file (default $MODEL, second ${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5})"
+}
+
+# settings_turn_until BASE JAR LABEL PREFIX TEXT EXPECTED [ATTEMPTS] — submit
+# one input and wait for the expected terminal status. The gateway has stalled
+# or answered HTML for minutes at a time during this work; the deployment's own
+# recovery is a fresh submit, so the harness does the same instead of failing the
+# gate on provider weather. A run that never settles is NOT retried into
+# obscurity: the attempts are bounded and the last status is reported.
+settings_turn_until() {
+  local base="$1" jar="$2" label="$3" prefix="$4" text="$5" expected="$6" attempts="${7:-3}"
+  local i status
+  for i in $(seq 1 "$attempts"); do
+    submit_settings_turn "$base" "$jar" "$label-$i" "$prefix" "$text"
+    if wait_serve_run "$base" "$jar" "$SESSION" "$prefix-events.json" "$prefix-status.json" "$expected"; then
+      return 0
+    fi
+    status="$(RUN_FILE="$prefix-status.json" python3 -c 'import json,os
+try: print(json.load(open(os.environ["RUN_FILE"])).get("status") or "none")
+except Exception: print("none")')"
+    info "$label attempt $i did not settle $expected (status=$status); resubmitting"
+  done
+  return 1
 }
 
 # submit_settings_turn BASE JAR LABEL PREFIX TEXT — one plain input (no
@@ -2071,7 +2238,7 @@ case "$MODE" in
   models-baseline) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}" ;;
   models-legacy) run_current_legacy ;;
   models-all) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}"; run_current_legacy; run_provider_config ;;
-  settings) run_model_settings ;;
+  settings) run_model_settings; run_settings_secrets ;;
   *) die "internal: unknown mode $MODE" ;;
 esac
 

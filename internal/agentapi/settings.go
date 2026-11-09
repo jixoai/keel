@@ -39,11 +39,11 @@ const (
 	modelSettingsSourceDeployment = "deployment"
 )
 
-// secretNamePattern is the secret name grammar: URL-safe, no path separators,
-// bounded. Note that a modelcfg reference (`secret:NAME`) only accepts
-// [A-Za-z_][A-Za-z0-9_]* today, so a name outside that subset can be stored but
-// not referenced from a models document.
-var secretNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+// secretNamePattern is the secret name grammar, kept identical to the one a
+// models document can reference (`secret:NAME` in modelcfg). A wider grammar
+// would let the settings surface store a secret that no provider can ever
+// reference — a footgun the API refuses instead of documenting.
+var secretNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 
 // ModelSettingsStore is the persistence seam of the tenant models override. It
 // is the store package's model-settings API verbatim, so *store.Store satisfies
@@ -526,7 +526,7 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !secretNamePattern.MatchString(name) {
 		writeErr(w, http.StatusBadRequest,
-			errors.New("secret name must match [A-Za-z0-9_.-]{1,64}"))
+			errors.New("secret name must match [A-Za-z_][A-Za-z0-9_]{0,63} (the grammar a models document can reference)"))
 		return
 	}
 	if s.cfg.SecretStore == nil {
@@ -562,7 +562,7 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !secretNamePattern.MatchString(name) {
 		writeErr(w, http.StatusBadRequest,
-			errors.New("secret name must match [A-Za-z0-9_.-]{1,64}"))
+			errors.New("secret name must match [A-Za-z_][A-Za-z0-9_]{0,63} (the grammar a models document can reference)"))
 		return
 	}
 	if s.cfg.SecretStore == nil {

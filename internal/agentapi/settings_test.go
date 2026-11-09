@@ -762,3 +762,19 @@ func TestSettingsCapabilitiesDiscoverable(t *testing.T) {
 		t.Fatalf("a deployment without the seams must not advertise them: %v", caps.Features)
 	}
 }
+
+// TestSecretNameGrammarMatchesReferences pins the grammar to the one a models
+// document can reference: a stored secret nobody can reference is a footgun,
+// so the write edge refuses it (e.g. a hyphenated name).
+func TestSecretNameGrammarMatchesReferences(t *testing.T) {
+	for _, name := range []string{"s2api", "_k", "A1_b2"} {
+		if !secretNamePattern.MatchString(name) {
+			t.Fatalf("%q must be accepted (a models document can reference it)", name)
+		}
+	}
+	for _, name := range []string{"e2e-key", "a.b", "9lead", "", "a b", "a/b"} {
+		if secretNamePattern.MatchString(name) {
+			t.Fatalf("%q must be refused (no models document could reference it)", name)
+		}
+	}
+}
