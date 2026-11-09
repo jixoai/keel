@@ -563,6 +563,18 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			cursor = seq
 		}
 	}
+	// A cancel that lands while the loop is settling is invisible to the per-event
+	// check above: Emit honours the context, so the loop's remaining events are
+	// dropped and this consumer sees a plain channel close. The attempt must not
+	// settle as a clean finish in that case — the worker's terminal-outcome rule
+	// reads the returned error, and "done" would claim an answer nobody produced.
+	// The one honest exception is an attempt whose final answer is already
+	// committed: that work is done, and reporting it cancelled would hide it.
+	if ctxErr := ctx.Err(); ctxErr != nil && summary.StopReason != agentcore.StopReasonEndTurn {
+		res.Cursor = cursor
+		summary.StopReason = agentcore.StopReasonAborted
+		return res, ctxErr
+	}
 	if _, err := stream.Result(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		res.Cursor = cursor
 		return res, err
