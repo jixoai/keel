@@ -155,6 +155,27 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if err != nil {
 		return fmt.Errorf("load models config: %w", err)
 	}
+	// Tenant secret storage (settings > 密钥) is AES-256-GCM through the same
+	// SecretBox the MCP OAuth path uses. Without KEEL_SECRET_KEY the feature is
+	// disabled explicitly: the settings page reports it, writes are refused, and
+	// a `secret:` model reference fails closed — nothing is ever stored in
+	// plaintext.
+	var secretBox *store.SecretBox
+	secretReason := ""
+	if key, err := store.SecretKeyFromEnv(os.Getenv); err != nil {
+		if errors.Is(err, store.ErrSecretKeyMissing) {
+			secretReason = "tenant secret storage is not enabled: KEEL_SECRET_KEY is not configured"
+			log.Info("tenant secret storage disabled", "reason", "KEEL_SECRET_KEY is not set")
+		} else {
+			secretReason = "tenant secret storage is not enabled: " + err.Error()
+			log.Error("tenant secret storage disabled", "err", err)
+		}
+	} else if box, err := store.NewSecretBox(key); err != nil {
+		secretReason = "tenant secret storage is not enabled: " + err.Error()
+		log.Error("tenant secret storage disabled", "err", err)
+	} else {
+		secretBox = box
+	}
 	tenantCfg := host.TenantConfig{
 		Agent: host.AgentConfig{
 			Provider:     opts.Provider,
@@ -167,6 +188,19 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Skills: host.SkillsConfig{Roots: opts.SkillsRoots},
 		MCP:    host.MCPConfig{Servers: mcpServerEntries(mcpEntries)},
 		Quota:  host.QuotaConfig{RunConcurrency: envInt("KEEL_QUOTA_RUNS", 0), EventsPerMinute: envInt("KEEL_QUOTA_EVENTS_PER_MINUTE", 0)},
+	}
+	// Boot precedence: a stored override (the settings write path's row) wins
+	// over KEEL_MODELS_CONFIG; the deployment document stays the fallback a
+	// reset returns to.
+	if opts.TenantID != uuid.Nil {
+		document, revision, _, found, err := st.GetModelSettings(ctx, opts.TenantID)
+		if err != nil {
+			return fmt.Errorf("load stored model settings: %w", err)
+		}
+		if found {
+			log.Info("stored model settings override in effect", "revision", revision, "bytes", len(document))
+			tenantCfg.Models = document
+		}
 	}
 	limits.Update(tenantCfg.Quota)
 
@@ -194,7 +228,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 			Entries:        mcpEntries,
 			ConnectOptions: mcp.ConnectOptions{ClientName: "keel", ClientVersion: version, Logger: log},
 		},
-		LLM: servicehost.LLMOptions{APIKey: opts.APIKey, LookupEnv: os.LookupEnv},
+		LLM: servicehost.LLMOptions{
+			APIKey:       opts.APIKey,
+			LookupEnv:    os.LookupEnv,
+			LookupSecret: tenantSecretLookup(st, secretBox, opts.TenantID, log),
+		},
 		External: servicehost.ExternalOptions{
 			LookupEnv: os.LookupEnv,
 			Environ:   os.Environ(),
@@ -223,19 +261,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}()
 
 	// --- product layer (keel-agent) ---
-	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, log)
+	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, secretBox, secretReason, log)
 	if err != nil {
 		return err
 	}
 	defer product.close()
-
-	// The resolved provider configuration is product configuration: a
-	// deployment whose service assembly carries none must refuse selections at
-	// the input edge instead of storing a fact it cannot honour.
-	var validateSelection func(json.RawMessage) error
-	if svc := rt.Models(); svc != nil {
-		validateSelection = svc.ValidateSelection
-	}
 
 	// Drain is the same edge contract the runtime uses: new requests get 503 +
 	// Retry-After, every open SSE stream receives the drain frame and closes at
@@ -260,9 +290,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 		CASDir:    opts.CASDir,
 		Product:   product.api,
 		Partials:  agentapi.PartialSource(product.partials),
-		// The selection vocabulary is injected here; a nil seam (no provider
-		// configuration) makes the input edge refuse every selection.
-		ValidateSelection: validateSelection,
+		// The selection vocabulary is read from the CURRENT generation at call
+		// time: a settings write installs a new model service, and the input edge
+		// must accept exactly what that generation can run. A runtime without
+		// provider configuration still refuses every selection.
+		ValidateSelection: selectFromCurrentGeneration(rt),
 	})
 
 	// Auth routes live next to the API (same origin). The middleware wraps the
@@ -375,8 +407,9 @@ func (p *productLayer) pluginSnapshot() agentext.Snapshot {
 }
 
 // newProductLayer assembles the extension surface over an already-booted
-// service runtime.
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, log *slog.Logger) (*productLayer, error) {
+// service runtime. secretBox (nil when KEEL_SECRET_KEY is unset) enables the
+// settings secret store; secretReason explains its absence to an operator.
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, secretBox *store.SecretBox, secretReason string, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -436,11 +469,14 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 
 	// The settings/registry projection (GET /v1/providers, GET /v1/models) comes
-	// from the same assembly as the selection vocabulary; a nil catalog keeps
-	// both endpoints at 501.
-	var modelCatalog agentapi.ModelCatalog
-	if svc := rt.Models(); svc != nil {
-		modelCatalog = modelSeam{svc: svc}
+	// from the same assembly as the selection vocabulary. It is read per request
+	// off the live runtime (ModelsLive): a settings write installs a new model
+	// service without a restart, and a generation without provider
+	// configuration answers 501 exactly like a boot without a models document.
+	modelSeam := modelRuntimeSeam{rt: rt}
+	var secretStore agentapi.SecretStore
+	if secretBox != nil {
+		secretStore = tenantSecretSeam{store: st, box: secretBox}
 	}
 	api := agentapi.New(agentapi.Config{
 		Sessions: agentapi.NewPGSessionLister(st),
@@ -457,7 +493,16 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Triggers:  triggers,
 		Subagents: subagents,
 		Hooks:     hooks,
-		Models:    modelCatalog,
+		ModelsLive: func() agentapi.ModelCatalog {
+			if rt.Models() == nil {
+				return nil
+			}
+			return modelSeam
+		},
+		ModelSettingsStore:   st,
+		ModelSettingsRuntime: modelSeam,
+		SecretStore:          secretStore,
+		SecretStoreReason:    secretReason,
 		RunStatus: func(tenantID, sessionID uuid.UUID) (string, bool) {
 			return runControl.Status(kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 		},
@@ -496,25 +541,137 @@ type storeSessions struct {
 	*store.Store
 }
 
-// modelSeam adapts the service assembly's resolved provider configuration to
-// the agentapi.ModelCatalog seam. It lives in cmd/keel because that is the only
-// package that knows both sides: agentapi must not depend on servicehost.
-type modelSeam struct {
-	svc interface {
-		ProviderViews() []modelcfg.ProviderView
-		ModelViews() []modelcfg.ModelView
-		ResolutionIssues() []modelcfg.Issue
-	}
+// modelRuntimeSeam adapts the live service runtime to the product API's model
+// seams. Both sides read the CURRENT generation per call (never a boot capture):
+// the registry projections the picker consumes, and the settings write path's
+// validate/apply pair. It lives in cmd/keel because that is the only package
+// that knows both sides: agentapi must not depend on servicehost.
+type modelRuntimeSeam struct {
+	rt *servicehost.Runtime
 }
 
 // ProviderViews implements agentapi.ModelCatalog.
-func (m modelSeam) ProviderViews() []modelcfg.ProviderView { return m.svc.ProviderViews() }
+func (m modelRuntimeSeam) ProviderViews() []modelcfg.ProviderView {
+	if service := m.rt.Models(); service != nil {
+		return service.ProviderViews()
+	}
+	return nil
+}
 
 // ModelViews implements agentapi.ModelCatalog.
-func (m modelSeam) ModelViews() []modelcfg.ModelView { return m.svc.ModelViews() }
+func (m modelRuntimeSeam) ModelViews() []modelcfg.ModelView {
+	if service := m.rt.Models(); service != nil {
+		return service.ModelViews()
+	}
+	return nil
+}
 
 // ResolutionIssues implements agentapi.ModelCatalog.
-func (m modelSeam) ResolutionIssues() []modelcfg.Issue { return m.svc.ResolutionIssues() }
+func (m modelRuntimeSeam) ResolutionIssues() []modelcfg.Issue {
+	if service := m.rt.Models(); service != nil {
+		return service.ResolutionIssues()
+	}
+	return nil
+}
+
+// DefaultSelection implements agentapi.ModelCatalog.
+func (m modelRuntimeSeam) DefaultSelection() modelcfg.Selection {
+	if service := m.rt.Models(); service != nil {
+		return service.DefaultSelection()
+	}
+	return modelcfg.Selection{}
+}
+
+// DeploymentModels implements agentapi.ModelSettingsRuntime.
+func (m modelRuntimeSeam) DeploymentModels() json.RawMessage { return m.rt.DeploymentModels() }
+
+// ValidateModelsDocument implements agentapi.ModelSettingsRuntime.
+func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (agentapi.ModelCandidate, []modelcfg.Issue, error) {
+	candidate, issues, err := m.rt.ValidateModelsDocument(document)
+	if err != nil || len(issues) > 0 {
+		return agentapi.ModelCandidate{}, issues, err
+	}
+	return agentapi.ModelCandidate{
+		Selection:           candidate.Selection,
+		ProvidersExecutable: candidate.ProvidersExecutable,
+		ModelsSelectable:    candidate.ModelsSelectable,
+	}, nil, nil
+}
+
+// ApplyModels implements agentapi.ModelSettingsRuntime.
+func (m modelRuntimeSeam) ApplyModels(ctx context.Context, document json.RawMessage) error {
+	_, err := m.rt.ApplyModels(ctx, document)
+	return err
+}
+
+// selectFromCurrentGeneration is the input edge's selection validator: it
+// validates against the model service the runtime is serving right now, so a
+// settings write changes what the next input may ask for without a restart. A
+// runtime without provider configuration refuses every selection, exactly like
+// a boot without a models document always did.
+func selectFromCurrentGeneration(rt *servicehost.Runtime) func(json.RawMessage) error {
+	return func(selection json.RawMessage) error {
+		service := rt.Models()
+		if service == nil {
+			return errors.New("selection is not supported by this server")
+		}
+		return service.ValidateSelection(selection)
+	}
+}
+
+// tenantSecretSeam adapts the store's encrypted tenant secrets to
+// agentapi.SecretStore. The value crosses this boundary exactly once, on the
+// way in; no method here returns one to a caller.
+type tenantSecretSeam struct {
+	store *store.Store
+	box   *store.SecretBox
+}
+
+func (s tenantSecretSeam) List(ctx context.Context, tenantID uuid.UUID) ([]agentapi.SecretMeta, error) {
+	metas, err := s.store.ListTenantSecrets(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentapi.SecretMeta, 0, len(metas))
+	for _, meta := range metas {
+		out = append(out, agentapi.SecretMeta{Name: meta.Name, CreatedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt})
+	}
+	return out, nil
+}
+
+func (s tenantSecretSeam) Put(ctx context.Context, tenantID uuid.UUID, name string, value []byte) (time.Time, error) {
+	return s.store.PutTenantSecret(ctx, tenantID, name, value, s.box)
+}
+
+func (s tenantSecretSeam) Delete(ctx context.Context, tenantID uuid.UUID, name string) (bool, error) {
+	return s.store.DeleteTenantSecret(ctx, tenantID, name)
+}
+
+// tenantSecretLookup resolves `secret:NAME` model credentials from the boot
+// tenant's secret store. It is nil when this deployment has no secret storage
+// (or no configured tenant): a secret: reference then fails closed in the
+// resolver, naming the secret. The read gets its own bounded context because
+// the resolution pipeline is also called from ctx-free projections (the
+// settings views) — it must never hand an unbounded store query to them. Only
+// the name and the failure are ever logged.
+func tenantSecretLookup(st *store.Store, box *store.SecretBox, tenantID uuid.UUID, log *slog.Logger) func(string) (string, bool) {
+	if st == nil || box == nil || tenantID == uuid.Nil {
+		return nil
+	}
+	return func(name string) (string, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		value, found, err := st.GetTenantSecret(ctx, tenantID, name, box)
+		if err != nil {
+			log.Warn("model settings: read tenant secret failed", "secret", name, "err", err)
+			return "", false
+		}
+		if !found || len(value) == 0 {
+			return "", false
+		}
+		return string(value), true
+	}
+}
 
 // RunState implements agentext.RunStatusReader.
 func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RunState, error) {

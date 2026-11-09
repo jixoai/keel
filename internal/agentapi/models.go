@@ -26,6 +26,12 @@ type ModelCatalog interface {
 	// ResolutionIssues reports resolution-level diagnostics that no single
 	// provider view can carry (an empty resolution, every provider hidden).
 	ResolutionIssues() []modelcfg.Issue
+	// DefaultSelection is the current generation's default selection — the
+	// model a run that carries no selection of its own resolves. It is the
+	// document's declared default (zero when it names none), reported by the
+	// settings read view so a client can show the effective default even when
+	// the deployment document itself is empty.
+	DefaultSelection() modelcfg.Selection
 }
 
 // providersResponse is the GET /v1/providers body. Top-level issues report
@@ -105,6 +111,19 @@ func visibleProviderViews(views []modelcfg.ProviderView) []modelcfg.ProviderView
 	return out
 }
 
+// catalog resolves the model catalog the registry endpoints read: ModelsLive
+// wins when set — it re-reads the runtime's current generation on every call,
+// so a settings write is visible without a restart — and Models is the static
+// seam used by tests and embedded hosts. A nil result means this deployment has
+// no provider configuration capability to report, which the endpoints answer
+// with 501 rather than an empty list.
+func (s *Server) catalog() ModelCatalog {
+	if s.cfg.ModelsLive != nil {
+		return s.cfg.ModelsLive()
+	}
+	return s.cfg.Models
+}
+
 // listProviders implements GET /v1/providers: the resolved settings view
 // (Effective configurations, issues, executable/selectable flags). It is not a
 // picker projection — incomplete and disabled entries stay visible with their
@@ -113,14 +132,15 @@ func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantFrom(w, r); !ok {
 		return
 	}
-	if s.cfg.Models == nil {
+	catalog := s.catalog()
+	if catalog == nil {
 		notWired(w, "provider settings are not wired")
 		return
 	}
-	providers := visibleProviderViews(s.cfg.Models.ProviderViews())
+	providers := visibleProviderViews(catalog.ProviderViews())
 	writeJSON(w, http.StatusOK, providersResponse{
 		Providers: providers,
-		Issues:    resolutionIssues(s.cfg.Models, providers),
+		Issues:    resolutionIssues(catalog, providers),
 	})
 }
 
@@ -133,16 +153,17 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantFrom(w, r); !ok {
 		return
 	}
-	if s.cfg.Models == nil {
+	catalog := s.catalog()
+	if catalog == nil {
 		notWired(w, "model listing is not wired")
 		return
 	}
-	providers := visibleProviderViews(s.cfg.Models.ProviderViews())
+	providers := visibleProviderViews(catalog.ProviderViews())
 	visible := make(map[string]struct{}, len(providers))
 	for _, view := range providers {
 		visible[view.ProviderID] = struct{}{}
 	}
-	all := s.cfg.Models.ModelViews()
+	all := catalog.ModelViews()
 	models := make([]modelcfg.ModelView, 0, len(all))
 	for _, model := range all {
 		if _, ok := visible[model.ProviderID]; !ok {
@@ -152,7 +173,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, modelsResponse{
 		Models: models,
-		Issues: resolutionIssues(s.cfg.Models, providers),
+		Issues: resolutionIssues(catalog, providers),
 		// v1: the tool gate is enforced in the runtime, the media gate is not
 		// (see the spec's capability scenario and the change's deferred list).
 		Enforcement: capabilityEnforcement{ToolCall: true, Media: false},

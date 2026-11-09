@@ -518,16 +518,18 @@ func TestModelServiceHiddenProviderIsRefused(t *testing.T) {
 	}
 }
 
-// TestModelServiceRefCredentials: access.ref is resolved through the injected
-// lookup with the host's vocabulary, and an explicit ref never falls back to
-// another credential.
+// TestModelServiceRefCredentials: access.ref is resolved through the lookup its
+// kind names — env:NAME/${NAME} through the injected environment lookup,
+// secret:NAME through the tenant secret store — and an explicit ref never falls
+// back to another source (an env-shaped name that is also stored as a secret
+// does not resolve, and vice versa).
 func TestModelServiceRefCredentials(t *testing.T) {
 	docFor := func(ref string) string {
 		return `{"providers":[{"id":"ref-gw","api":{"type":"openai-chat-completions","baseUrl":"https://ref.example/v1"},
 		"access":{"type":"api-key","ref":"` + ref + `"},"modelIds":["m1"]}]}`
 	}
 	selection := json.RawMessage(`{"providerId":"ref-gw","modelId":"m1"}`)
-	for _, ref := range []string{"env:REF_KEY", "${REF_KEY}", "secret:REF_KEY"} {
+	for _, ref := range []string{"env:REF_KEY", "${REF_KEY}"} {
 		t.Run(ref, func(t *testing.T) {
 			service := newTestModels(t, host.TenantConfig{Models: json.RawMessage(docFor(ref))},
 				testLLM(map[string]string{"REF_KEY": "ref-value"}, "flat-key"))
@@ -540,6 +542,54 @@ func TestModelServiceRefCredentials(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("secret ref reads the tenant secret store", func(t *testing.T) {
+		llm := testLLM(map[string]string{"REF_KEY": "env-value"}, "flat-key")
+		llm.LookupSecret = func(name string) (string, bool) {
+			if name != "REF_KEY" {
+				return "", false
+			}
+			return "secret-value", true
+		}
+		service := newTestModels(t, host.TenantConfig{Models: json.RawMessage(docFor("secret:REF_KEY"))}, llm)
+		active, err := service.Resolve(context.Background(), kernel.Scope{}, selection)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if active.APIKey != "secret-value" {
+			t.Fatalf("APIKey = %q, want the tenant secret store's value", active.APIKey)
+		}
+		if err := service.ValidateSelection(selection); err != nil {
+			t.Fatalf("ValidateSelection: %v", err)
+		}
+	})
+
+	t.Run("secret ref without a secret store fails closed naming the secret", func(t *testing.T) {
+		// The environment happens to hold the same name: it must not be used.
+		service := newTestModels(t, host.TenantConfig{Models: json.RawMessage(docFor("secret:REF_KEY"))},
+			testLLM(map[string]string{"REF_KEY": "env-value"}, "flat-key"))
+		_, err := service.Resolve(context.Background(), kernel.Scope{}, selection)
+		if err == nil {
+			t.Fatal("a secret: ref must not fall back to the environment")
+		}
+		if !strings.Contains(err.Error(), "access.ref") || !strings.Contains(err.Error(), "secret:REF_KEY") ||
+			!strings.Contains(err.Error(), "KEEL_SECRET_KEY") {
+			t.Fatalf("error must name the reference and the missing secret store: %v", err)
+		}
+		if err := service.ValidateSelection(selection); err == nil {
+			t.Fatal("ValidateSelection must refuse it too")
+		}
+	})
+
+	t.Run("unstored secret ref names the secret", func(t *testing.T) {
+		llm := testLLM(map[string]string{"REF_KEY": "env-value"}, "flat-key")
+		llm.LookupSecret = func(string) (string, bool) { return "", false }
+		service := newTestModels(t, host.TenantConfig{Models: json.RawMessage(docFor("secret:REF_KEY"))}, llm)
+		_, err := service.Resolve(context.Background(), kernel.Scope{}, selection)
+		if err == nil || !strings.Contains(err.Error(), "not stored") {
+			t.Fatalf("an unstored secret must fail naming the secret: %v", err)
+		}
+	})
 
 	t.Run("unresolvable ref never falls back", func(t *testing.T) {
 		service := newTestModels(t, host.TenantConfig{Models: json.RawMessage(docFor("env:MISSING_REF"))},

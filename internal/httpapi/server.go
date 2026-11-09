@@ -49,7 +49,9 @@ type Config struct {
 	// ValidateSelection, when set, validates a selection object before it is
 	// persisted with the input. The core shell stores the fact; the product layer
 	// owns the vocabulary, so an unwired validator accepts nothing but absent
-	// fields.
+	// fields. `keel serve` binds the seam to the model service of the CURRENT
+	// generation (resolved per call, never captured at boot), so a settings write
+	// changes what the edge accepts without a restart.
 	ValidateSelection func(json.RawMessage) error
 	// Loadouts is the read-only run-loadout query (the loadout revision and
 	// fencing epoch a run finished under). It is a separate endpoint on

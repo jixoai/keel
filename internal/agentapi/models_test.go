@@ -19,11 +19,13 @@ type stubCatalog struct {
 	providers        []modelcfg.ProviderView
 	models           []modelcfg.ModelView
 	resolutionIssues []modelcfg.Issue
+	defaultSelection modelcfg.Selection
 }
 
 func (s stubCatalog) ProviderViews() []modelcfg.ProviderView { return s.providers }
 func (s stubCatalog) ModelViews() []modelcfg.ModelView       { return s.models }
 func (s stubCatalog) ResolutionIssues() []modelcfg.Issue     { return s.resolutionIssues }
+func (s stubCatalog) DefaultSelection() modelcfg.Selection   { return s.defaultSelection }
 
 // testViews builds one visible provider (a complete model plus an incomplete
 // one that must stay in the settings view) and one hidden provider.

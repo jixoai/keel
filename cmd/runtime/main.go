@@ -340,6 +340,28 @@ func main() {
 		log.Error("load KEEL_MODELS_CONFIG", "err", err)
 		os.Exit(2)
 	}
+	// Boot precedence, matching `keel serve`: a stored override wins over the
+	// deployment document, which stays the fallback. This process is
+	// multi-tenant and has no settings API (that surface is `keel serve`'s), so
+	// the override is read once at boot for the tenant named explicitly by
+	// KEEL_MODELS_TENANT; without that variable the deployment document is the
+	// only source, exactly as before.
+	if raw := strings.TrimSpace(os.Getenv("KEEL_MODELS_TENANT")); raw != "" {
+		settingsTenant, err := uuid.Parse(raw)
+		if err != nil {
+			log.Error("KEEL_MODELS_TENANT is not a UUID", "err", err)
+			os.Exit(2)
+		}
+		document, revision, _, found, err := st.GetModelSettings(ctx, settingsTenant)
+		if err != nil {
+			log.Error("load stored model settings", "err", err)
+			os.Exit(1)
+		}
+		if found {
+			log.Info("stored model settings override in effect", "tenant", settingsTenant.String(), "revision", revision)
+			modelsDoc = document
+		}
+	}
 	// The runtime's default tenant document. Everything a loadout needs comes
 	// from this one struct (host.TenantConfig): model selection, prompt, skills,
 	// MCP servers, telemetry, quota and external providers. There is no second

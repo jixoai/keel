@@ -14,6 +14,7 @@ package servicehost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -53,9 +54,15 @@ type modelsService struct {
 	// the fallback for a provider whose access.env is not set in this process.
 	// It is never a fallback for a credential the provider declares explicitly
 	// (an access.env that is set but empty, or an access.ref).
-	legacyKey  string
-	lookup     func(string) (string, bool)
-	wrapStream func(provider.StreamFn) provider.StreamFn
+	legacyKey string
+	lookup    func(string) (string, bool)
+	// lookupSecret resolves `secret:NAME` references from the tenant secret
+	// store (the hosting process wires it to the store + SecretBox pair). Nil
+	// means this deployment has no secret storage: a secret: reference then
+	// fails closed naming the secret, and it is never re-read from the
+	// environment instead.
+	lookupSecret func(string) (string, bool)
+	wrapStream   func(provider.StreamFn) provider.StreamFn
 }
 
 var _ agent.ModelResolver = (*modelsService)(nil)
@@ -63,12 +70,35 @@ var _ agent.ModelResolver = (*modelsService)(nil)
 func (m *modelsService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (m *modelsService) Stop(context.Context) error                             { return nil }
 
-// newModelsService resolves one tenant document (plus the hosting process's
-// credential inputs) into the model service of a generation. A document the
-// resolver cannot use is a construction error: the llm service then fails to
-// activate and boot/reassembly reports it instead of running with a
-// configuration nobody can honour.
-func newModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provider.StreamFn) provider.StreamFn) (*modelsService, error) {
+// ModelDocumentError is a models document this runtime would refuse, reported
+// as the field-path issues the settings view renders. Boot/reassembly logs its
+// Error() text; the settings write path turns it into the 400 body's issues, so
+// both surfaces explain a rejection with the same vocabulary.
+type ModelDocumentError struct {
+	Issues []modelcfg.Issue
+}
+
+func (e *ModelDocumentError) Error() string {
+	if len(e.Issues) == 0 {
+		return "model configuration: the models document cannot be executed"
+	}
+	parts := make([]string, 0, len(e.Issues))
+	for _, issue := range e.Issues {
+		if issue.Field == "" {
+			parts = append(parts, issue.Message)
+			continue
+		}
+		parts = append(parts, issue.Field+": "+issue.Message)
+	}
+	return "model configuration: " + strings.Join(parts, "; ")
+}
+
+// buildModelsService resolves one tenant document (plus the hosting process's
+// credential inputs) into the model service of a generation, without applying
+// the default-selection gate. Callers decide how a default that cannot execute
+// is reported: newModelsService fails construction with the issues, the
+// settings write path renders the same issues as a 400 body.
+func buildModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provider.StreamFn) provider.StreamFn) (*modelsService, error) {
 	agentCfg := tenant.Agent
 	overlay, err := modelcfg.OverlayFromDocument(tenant.Models, modelcfg.LegacyAgent{
 		Provider:  agentCfg.Provider,
@@ -89,16 +119,30 @@ func newModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provid
 	if err != nil {
 		return nil, fmt.Errorf("model configuration: %w", err)
 	}
-	service := &modelsService{
-		factory:    factory,
-		resolution: resolution,
-		selection:  overlay.Selection(),
-		legacyKey:  llm.APIKey,
-		lookup:     llm.LookupEnv,
-		wrapStream: wrap,
+	return &modelsService{
+		factory:      factory,
+		resolution:   resolution,
+		selection:    overlay.Selection(),
+		legacyKey:    llm.APIKey,
+		lookup:       llm.LookupEnv,
+		lookupSecret: llm.LookupSecret,
+		wrapStream:   wrap,
+	}, nil
+}
+
+// newModelsService builds the generation's model service and applies the
+// boot/reassembly gate: the document's default selection must resolve end to
+// end (credential, wire driver, runtime thinking level). A document the
+// resolver cannot use is a construction error: the llm service then fails to
+// activate and boot/reassembly reports it instead of running with a
+// configuration nobody can honour.
+func newModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(provider.StreamFn) provider.StreamFn) (*modelsService, error) {
+	service, err := buildModelsService(tenant, llm, wrap)
+	if err != nil {
+		return nil, err
 	}
-	if err := service.validateDefaultSelection(); err != nil {
-		return nil, fmt.Errorf("model configuration: default selection: %w", err)
+	if issues := service.defaultSelectionIssues(); len(issues) > 0 {
+		return nil, fmt.Errorf("model configuration: default selection: %w", &ModelDocumentError{Issues: issues})
 	}
 	return service, nil
 }
@@ -123,22 +167,73 @@ func modelsConfigured(tenant host.TenantConfig) bool {
 // DefaultSelection returns the tenant document's default selection.
 func (m *modelsService) DefaultSelection() modelcfg.Selection { return m.selection }
 
-// validateDefaultSelection is the boot/reassembly gate of the tenant's default
-// selection: a default that names a model this generation cannot execute
-// (unknown, disabled, ambiguous, a driver the runtime does not have, a
-// credential this process cannot resolve) fails construction, so a deployment
-// never boots with a configuration nobody can honour. A document that names no
-// default is legal — runs then need a selection fact of their own.
-func (m *modelsService) validateDefaultSelection() error {
-	if m.selection.ModelID == "" && m.selection.ProviderID == "" {
+// defaultSelectionIssues explains why the tenant's default selection cannot be
+// executed today, as the field-path issues the settings view renders. An empty
+// result means it is executable, or that the document names no default at all
+// (legal for the runtime — runs then need a selection fact of their own; the
+// settings write path additionally requires one).
+//
+// The verdict comes from the same calls an attempt makes (resolveActive,
+// attemptModel); this function only renders their failure.
+func (m *modelsService) defaultSelectionIssues() []modelcfg.Issue {
+	selection := m.selection
+	if strings.TrimSpace(selection.ModelID) == "" && strings.TrimSpace(selection.ProviderID) == "" {
 		return nil
 	}
 	active, err := m.resolveActive(nil)
 	if err != nil {
-		return err
+		return selectionIssues(err)
 	}
-	_, err = m.attemptModel(active)
-	return err
+	_, issues, err := m.attemptModel(active)
+	if err != nil {
+		return issues
+	}
+	return nil
+}
+
+// selectionIssues renders a resolution failure as field-path issues. The
+// resolver's own issues already carry model-relative paths (modelId,
+// providerId, api.type, ...); they are prefixed with the scope the settings
+// document edited.
+func selectionIssues(err error) []modelcfg.Issue {
+	var notExecutable *modelcfg.NotExecutableError
+	if errors.As(err, &notExecutable) {
+		out := make([]modelcfg.Issue, 0, len(notExecutable.Issues))
+		for _, issue := range notExecutable.Issues {
+			out = append(out, modelcfg.Issue{
+				Field:   fieldPath("selection", issue.Field),
+				Message: issue.Message,
+			})
+		}
+		if len(out) == 0 {
+			out = append(out, modelcfg.Issue{Field: "selection", Message: err.Error()})
+		}
+		return out
+	}
+	return []modelcfg.Issue{{Field: "selection", Message: err.Error()}}
+}
+
+// providerField names a provider-scoped field path (providers[s2api].access.env)
+// so a rejection points at the entry the operator edited.
+func providerField(providerID, field string) string {
+	if strings.TrimSpace(providerID) == "" {
+		if strings.TrimSpace(field) == "" {
+			return "providers"
+		}
+		return "providers[]." + field
+	}
+	if strings.TrimSpace(field) == "" {
+		return "providers[" + providerID + "]"
+	}
+	return "providers[" + providerID + "]." + field
+}
+
+func fieldPath(prefix, field string) string {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return prefix
+	}
+	return prefix + "." + field
 }
 
 // Resolve turns the run's selection fact into the execution identity of one
@@ -150,7 +245,8 @@ func (m *modelsService) Resolve(_ context.Context, _ kernel.Scope, raw json.RawM
 	if err != nil {
 		return agent.ActiveModel{}, err
 	}
-	return m.attemptModel(active)
+	resolved, _, err := m.attemptModel(active)
+	return resolved, err
 }
 
 // ValidateSelection is the submit-time check. It runs the exact composition an
@@ -164,7 +260,7 @@ func (m *modelsService) ValidateSelection(raw json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.attemptModel(active)
+	_, _, err = m.attemptModel(active)
 	return err
 }
 
@@ -240,6 +336,25 @@ func (m *modelsService) ResolutionIssues() []modelcfg.Issue {
 	}}
 }
 
+// ProvidersExecutable counts the visible providers this process can actually
+// serve: complete on paper AND holding a credential it can resolve here. It is
+// the count the write summary publishes, and it is derived from the same
+// ProviderViews the settings/registry endpoints serve, so the number and the
+// list can never disagree.
+func (m *modelsService) ProvidersExecutable() int {
+	count := 0
+	for _, view := range m.ProviderViews() {
+		if view.Executable && m.credentialAvailable(view.Access) {
+			count++
+		}
+	}
+	return count
+}
+
+// ModelsSelectable counts the models a picker may offer: the flat selectable
+// list of the visible, credential-resolvable providers.
+func (m *modelsService) ModelsSelectable() int { return len(m.ModelViews()) }
+
 // resolveActive is the shared fail-closed core of Resolve and
 // ValidateSelection. It performs no IO.
 //
@@ -271,18 +386,36 @@ func (m *modelsService) resolveActive(raw json.RawMessage) (modelcfg.ActiveModel
 // ActiveModel: the credential, the runtime thinking level and the wire driver
 // must all exist and agree with the resolved protocol. It is the one
 // composition ValidateSelection and Resolve share.
-func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveModel, error) {
+//
+// A failure is reported twice over: as the error the attempt path returns, and
+// as the field-path issue the settings view renders (the decider is the failing
+// check itself — there is no second validation pass that could disagree).
+func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveModel, []modelcfg.Issue, error) {
 	key, err := m.credential(active)
 	if err != nil {
-		return agent.ActiveModel{}, err
+		issue, _ := m.credentialIssue(active.Access)
+		message := strings.TrimSpace(issue.Message)
+		if message == "" {
+			message = err.Error()
+		}
+		return agent.ActiveModel{}, []modelcfg.Issue{{
+			Field:   providerField(active.ProviderID, issue.Field),
+			Message: message,
+		}}, err
 	}
 	level, err := thinkingLevel(active)
 	if err != nil {
-		return agent.ActiveModel{}, err
+		return agent.ActiveModel{}, []modelcfg.Issue{{
+			Field:   "selection.reasoningLevel",
+			Message: fmt.Sprintf("reasoning level %q is not a runtime thinking level", active.ReasoningLevel),
+		}}, err
 	}
 	stream, err := m.stream(active)
 	if err != nil {
-		return agent.ActiveModel{}, err
+		return agent.ActiveModel{}, []modelcfg.Issue{{
+			Field:   providerField(active.ProviderID, "api"),
+			Message: err.Error(),
+		}}, err
 	}
 	return agent.ActiveModel{
 		ProviderID:    active.ProviderID,
@@ -301,7 +434,7 @@ func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveM
 			SupportsNativeWebSearch:  active.Properties.SupportsNativeWebSearch,
 			ImageInput:               active.Properties.InputFormat.Image,
 		},
-	}, nil
+	}, nil, nil
 }
 
 // contextWindow returns the window the attempt may compact against. A window
@@ -325,11 +458,11 @@ func (m *modelsService) contextWindow(active modelcfg.ActiveModel) int {
 func (m *modelsService) credential(active modelcfg.ActiveModel) (string, error) {
 	access := active.Access
 	if ref := strings.TrimSpace(access.Ref); ref != "" {
-		if value, ok := m.resolveRef(ref); ok {
+		value, reason := m.resolveRef(ref)
+		if reason == "" {
 			return value, nil
 		}
-		return "", fmt.Errorf("model %s: no credential: access.ref (%s) cannot be resolved in this process",
-			modelIdentity(active), ref)
+		return "", fmt.Errorf("model %s: no credential: access.ref (%s) %s", modelIdentity(active), ref, reason)
 	}
 	if env := strings.TrimSpace(access.Env); env != "" {
 		value, found := m.lookupEnv(env)
@@ -370,13 +503,14 @@ func (m *modelsService) credentialAvailable(access modelcfg.Access) bool {
 // never disagree about whether a provider can authenticate.
 func (m *modelsService) credentialIssue(access modelcfg.Access) (modelcfg.Issue, bool) {
 	if ref := strings.TrimSpace(access.Ref); ref != "" {
-		if _, ok := m.resolveRef(ref); ok {
+		if _, reason := m.resolveRef(ref); reason == "" {
 			return modelcfg.Issue{}, false
+		} else {
+			return modelcfg.Issue{
+				Field:   "access.ref",
+				Message: fmt.Sprintf("secret reference %q %s", ref, reason),
+			}, true
 		}
-		return modelcfg.Issue{
-			Field:   "access.ref",
-			Message: fmt.Sprintf("secret reference %q cannot be resolved in this process", ref),
-		}, true
 	}
 	if env := strings.TrimSpace(access.Env); env != "" {
 		value, found := m.lookupEnv(env)
@@ -406,17 +540,50 @@ func (m *modelsService) credentialIssue(access modelcfg.Access) (modelcfg.Issue,
 	}, true
 }
 
-// resolveRef resolves a declared secret reference through the same lookup the
-// environment path uses: ${NAME}, env:NAME and secret:NAME all name one entry
-// of the injected lookup. An unresolvable reference is a failed credential, not
-// an invitation to try something else.
-func (m *modelsService) resolveRef(ref string) (string, bool) {
-	name, ok := modelcfg.ParseSecretRef(ref)
+// resolveRef resolves a declared secret reference. The reference kind decides
+// the source and the kinds never cross over: `secret:NAME` resolves from the
+// tenant secret store only (a deployment without one fails closed naming the
+// secret), while `${NAME}` and `env:NAME` resolve from the injected environment
+// lookup. An unresolvable reference is a failed credential, not an invitation
+// to try another source — the second return is the reason it could not resolve
+// (empty on success), always naming the reference and never a value.
+func (m *modelsService) resolveRef(ref string) (string, string) {
+	kind, name, ok := secretRefParts(ref)
 	if !ok {
-		return "", false
+		return "", `is not a secret reference (want ${NAME}, env:NAME or secret:NAME)`
+	}
+	if kind == "secret" {
+		if m.lookupSecret == nil {
+			return "", fmt.Sprintf("names the tenant secret %q, but this deployment has no tenant secret storage (KEEL_SECRET_KEY is not configured)", name)
+		}
+		value, found := m.lookupSecret(name)
+		if !found || value == "" {
+			return "", fmt.Sprintf("names the tenant secret %q, which is not stored for this tenant", name)
+		}
+		return value, ""
 	}
 	value, found := m.lookupEnv(name)
-	return value, found && value != ""
+	if !found || value == "" {
+		return "", fmt.Sprintf("names the environment variable %q, which is not set in this process", name)
+	}
+	return value, ""
+}
+
+// secretRefParts splits one declared reference into its kind and its name,
+// using the modelcfg vocabulary: ${NAME}, env:NAME, secret:NAME. The grammar is
+// deliberately identical to modelcfg's own (a reference the resolver accepted
+// must not be re-read differently here), and an unknown shape is refused.
+func secretRefParts(ref string) (kind, name string, ok bool) {
+	value := strings.TrimSpace(ref)
+	switch {
+	case strings.HasPrefix(value, "${") && strings.HasSuffix(value, "}"):
+		return "env", value[2 : len(value)-1], true
+	case strings.HasPrefix(value, "env:"):
+		return "env", strings.TrimPrefix(value, "env:"), true
+	case strings.HasPrefix(value, "secret:"):
+		return "secret", strings.TrimPrefix(value, "secret:"), true
+	}
+	return "", "", false
 }
 
 // lookupEnv consults only the injected lookup. A nil lookup resolves nothing:

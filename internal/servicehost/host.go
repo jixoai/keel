@@ -29,10 +29,12 @@ package servicehost
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +46,7 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicegraph"
@@ -107,6 +110,11 @@ type LLMOptions struct {
 	// LookupEnv resolves provider credentials referenced by apiKeyRef or by the
 	// provider's own env conventions. Defaults to a lookup that finds nothing.
 	LookupEnv func(string) (string, bool)
+	// LookupSecret resolves `secret:NAME` references from the tenant secret
+	// store (cmd/keel wires it to store.Store + store.SecretBox). Nil means this
+	// deployment has no secret storage: a secret: reference fails closed naming
+	// the secret instead of falling back to the environment.
+	LookupSecret func(name string) (string, bool)
 }
 
 // ExternalOptions carries the hosting-process inputs the external gateway
@@ -351,6 +359,121 @@ func (r *Runtime) Models() ModelService {
 	return nil
 }
 
+// DeploymentModels returns the models document the process booted with. It is
+// never replaced by a reload: it is the fallback a cleared override returns to,
+// and the source the settings read view reports as `deployment`.
+func (r *Runtime) DeploymentModels() json.RawMessage {
+	if r == nil {
+		return nil
+	}
+	return cloneModelDocument(r.cfg.Tenant.Models)
+}
+
+// ModelsCandidate is a validated candidate models document: the default
+// selection the next generation would execute, and how many providers/models
+// this process could actually serve under it. It is the write path's summary —
+// derived from the same resolution the generation would run, never from a
+// second parse.
+type ModelsCandidate struct {
+	Selection           modelcfg.Selection
+	ProvidersExecutable int
+	ModelsSelectable    int
+}
+
+// ValidateModelsDocument resolves a candidate models document exactly as the
+// next generation would: the same construction the llm service runs (overlay,
+// resolver, factory) and the same attempt composition a run runs, including
+// credential, wire driver and thinking level. Nothing is applied and nothing is
+// stored.
+//
+// A document this process would refuse comes back as field-path issues (the
+// settings view's vocabulary, empty when the document is acceptable). error is
+// reserved for a runtime that cannot answer at all.
+func (r *Runtime) ValidateModelsDocument(document json.RawMessage) (ModelsCandidate, []modelcfg.Issue, error) {
+	if r == nil {
+		return ModelsCandidate{}, nil, fmt.Errorf("servicehost: runtime closed")
+	}
+	tenant := r.tenantConfig()
+	tenant.Models = cloneModelDocument(document)
+	service, err := buildModelsService(tenant, r.cfg.LLM, r.cfg.Product.WrapStream)
+	if err != nil {
+		return ModelsCandidate{}, []modelcfg.Issue{{Field: "document", Message: err.Error()}}, nil
+	}
+	if issues := service.defaultSelectionIssues(); len(issues) > 0 {
+		return ModelsCandidate{}, issues, nil
+	}
+	// A document that stores no default selection is legal for a generation but
+	// not for the write path: this surface exists to set the default runs
+	// resolve, so a client must not silently clear it.
+	if strings.TrimSpace(service.DefaultSelection().ModelID) == "" {
+		return ModelsCandidate{}, []modelcfg.Issue{{
+			Field:   "selection.modelId",
+			Message: "a default selection is required: every run that carries no selection of its own resolves it",
+		}}, nil
+	}
+	active, err := service.resolveActive(nil)
+	if err != nil {
+		return ModelsCandidate{}, selectionIssues(err), nil
+	}
+	return ModelsCandidate{
+		Selection: modelcfg.Selection{
+			ProviderID:     active.ProviderID,
+			ModelID:        active.ModelID,
+			ReasoningLevel: active.ReasoningLevel,
+		},
+		ProvidersExecutable: service.ProvidersExecutable(),
+		ModelsSelectable:    service.ModelsSelectable(),
+	}, nil, nil
+}
+
+// ApplyModels reassembles the runtime with the tenant's models section replaced
+// by document. A nil document restores the deployment document (the state a
+// cleared override returns to). The loadout revision advances, so a run
+// finished afterwards records which configuration served it.
+//
+// Runs already in flight keep the generation they were pinned to; a document
+// that cannot be assembled is rejected with the previous generation still
+// serving.
+func (r *Runtime) ApplyModels(ctx context.Context, document json.RawMessage) (*servicegraph.Snapshot, error) {
+	if r == nil {
+		return nil, fmt.Errorf("servicehost: runtime closed")
+	}
+	tenant := r.tenantConfig()
+	if document == nil {
+		document = cloneModelDocument(r.cfg.Tenant.Models)
+	}
+	tenant.Models = cloneModelDocument(document)
+	r.mu.Lock()
+	opts := r.opts
+	// Advance past the revision that is serving, not merely past the boot
+	// options: the loadout may default an unset revision (0 -> 1), and a run
+	// finished afterwards must still record a distinct configuration.
+	if r.snapshot != nil && r.snapshot.Revision >= opts.Revision {
+		opts.Revision = r.snapshot.Revision
+	}
+	r.mu.Unlock()
+	opts.Revision++
+	return r.Reload(ctx, tenant, opts)
+}
+
+// tenantConfig snapshots the tenant document the runtime currently serves.
+func (r *Runtime) tenantConfig() host.TenantConfig {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.tenant
+}
+
+// cloneModelDocument copies raw JSON so a caller can never mutate the runtime's
+// document (or have its own mutated) through the returned slice.
+func cloneModelDocument(document json.RawMessage) json.RawMessage {
+	if document == nil {
+		return nil
+	}
+	out := make(json.RawMessage, len(document))
+	copy(out, document)
+	return out
+}
+
 // ExternalAgents returns the AgentBackend service of the current generation
 // (nil when the tenant document declares no agent backend). The HTTP edge uses
 // it for the external-session endpoints.
@@ -504,6 +627,11 @@ func (r *Runtime) Reload(ctx context.Context, tenant host.TenantConfig, opts loa
 		r.cfg.Seams.Logger.Error("reload activation incomplete", "err", err)
 	}
 	if err := requireActive(snap, opts.Worker); err != nil {
+		// The engine already adopted the new graph (its instances are live but
+		// failed to activate), and the services it replaced are gone: restore the
+		// document that was serving before the rejection is reported, so a
+		// rejected reload never takes the run path down with it.
+		r.restore(ctx)
 		return nil, fmt.Errorf("servicehost: reload rejected: %w", err)
 	}
 	r.mu.Lock()
@@ -516,6 +644,35 @@ func (r *Runtime) Reload(ctx context.Context, tenant host.TenantConfig, opts loa
 		"loadout", snap.LoadoutID, "revision", snap.Revision, "generation", snap.Generation,
 		"summary", snap.Summary, "retiring", len(snap.Retiring))
 	return snap, nil
+}
+
+// restore re-applies the document the runtime was serving (the last accepted
+// tenant document) after a rejected reload the engine had already adopted. It
+// re-derives fresh instances from the accepted document — the replaced ones
+// were unloaded by the failed apply — so the run path keeps serving. An error
+// here is logged, not returned: the caller is already reporting the rejection.
+func (r *Runtime) restore(ctx context.Context) {
+	tenant := r.tenantConfig()
+	r.mu.Lock()
+	opts := r.opts
+	r.mu.Unlock()
+	provide := newProvider(tenant, r.cfg, r.engine)
+	lo, err := loadout.FromTenantConfig(tenant, opts, provide)
+	if err != nil {
+		r.cfg.Seams.Logger.Error("reload rollback could not resolve the previous loadout", "err", err)
+		return
+	}
+	snap, err := r.engine.Apply(ctx, lo)
+	if err != nil {
+		r.cfg.Seams.Logger.Error("reload rollback incomplete", "err", err)
+	}
+	if snap != nil {
+		r.mu.Lock()
+		r.snapshot = snap
+		r.mu.Unlock()
+	}
+	r.cfg.Seams.Logger.Warn("rejected reload rolled back to the serving configuration",
+		"loadout", lo.ID, "revision", lo.Revision)
 }
 
 // Binding returns the per-run service pin installed on the worker (also

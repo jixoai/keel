@@ -358,6 +358,49 @@ CREATE INDEX IF NOT EXISTS mcp_oauth_pending_active
     ON mcp_oauth_pending (tenant_id, server, expires_at DESC)
     WHERE consumed_at IS NULL;
 
+-- Tenant model settings (change keel-model-settings): one row per tenant holds
+-- the accepted models-document override; the history table is the append-only
+-- audit of every accepted transition (source 'stored' for a write,
+-- 'deployment' for the reset that cleared the override). The revision is the
+-- change identity clients compare and it never decreases: it is derived over
+-- both tables, so a cleared override still advances it. No foreign key ties the
+-- rows to `tenants`: the settings belong to the tenant the session names, and a
+-- deployment that never created a tenants row still has settings.
+CREATE TABLE IF NOT EXISTS model_settings (
+    tenant_id  uuid PRIMARY KEY,
+    revision   bigint NOT NULL,
+    document   jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- document is NULL for a reset row: at that revision the override was cleared
+-- and the deployment document applies again. The removed override stays
+-- readable in the previous history row, so the chain reconstructs every state.
+CREATE TABLE IF NOT EXISTS model_settings_history (
+    tenant_id  uuid NOT NULL,
+    revision   bigint NOT NULL,
+    document   jsonb,
+    source     text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, revision)
+);
+
+-- Tenant secrets (change keel-model-settings, 密钥管理): named credentials a
+-- tenant's model configuration references with `secret:NAME`. ciphertext is
+-- AES-256-GCM (the same store.SecretBox envelope as MCP OAuth, keyed by
+-- KEEL_SECRET_KEY and bound to (tenant, name) as additional authenticated
+-- data); the plaintext never appears in a column, a response, a log or an
+-- error. A deployment without KEEL_SECRET_KEY has no secret storage at all:
+-- nothing is ever written in plaintext as a fallback.
+CREATE TABLE IF NOT EXISTS tenant_secrets (
+    tenant_id  uuid NOT NULL,
+    name       text NOT NULL,
+    ciphertext bytea NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, name)
+);
+
 -- Encrypted OAuth state: client registration, tokens, PKCE verifier, discovery.
 -- payload is AES-256-GCM ciphertext (nonce prepended); the key comes from
 -- KEEL_SECRET_KEY and is never stored next to the row. scopes and expires_at

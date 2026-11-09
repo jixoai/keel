@@ -10,7 +10,10 @@
 //   - the token-level partial transport (?partials=1), wired into the runtime's
 //     SSE handler through a narrow seam;
 //   - capability discovery and the extension query/control plane
-//     (plugins/triggers/sub-agents).
+//     (plugins/triggers/sub-agents);
+//   - the settings surface (internal/agentapi/settings.go): the tenant model
+//     configuration write path, secret storage and the plugin inventory —
+//     separate from the workspace, mounted under /v1/settings/.
 //
 // Authentication is NOT implemented here: it is a service-layer concern
 // (cmd/keel's cookie/passphrase middleware). This package reads the
@@ -90,6 +93,25 @@ type Config struct {
 	// implementation lives in the hosting process, so this package never
 	// depends on the service assembly. Nil answers 501 on both endpoints.
 	Models ModelCatalog
+	// ModelsLive, when set, resolves the model catalog of the current runtime
+	// generation per request instead of once at boot, so a settings write is
+	// visible to the next /v1/providers and /v1/models call without a restart. A
+	// nil result (the current generation carries no provider configuration at
+	// all) keeps the 501 answer Models: nil gives.
+	ModelsLive func() ModelCatalog
+	// ModelSettingsStore and ModelSettingsRuntime are the model settings write
+	// path (GET/PUT/DELETE /v1/settings/models): the override store and the live
+	// runtime that validates and applies it. Both must be set for the routes to
+	// be live; either nil answers 501.
+	ModelSettingsStore   ModelSettingsStore
+	ModelSettingsRuntime ModelSettingsRuntime
+	// SecretStore is the tenant secret storage (GET/PUT/DELETE
+	// /v1/settings/secrets). Nil means this deployment has no secret storage:
+	// the list reports unavailable with SecretStoreReason and writes answer 503.
+	SecretStore SecretStore
+	// SecretStoreReason explains a missing secret store to an operator. It is
+	// rendered verbatim and must never contain a value.
+	SecretStoreReason string
 	// SessionExists validates that a session belongs to the tenant before a
 	// product endpoint writes to it (a decision opened on a missing session
 	// would be an orphan row). Nil skips the check (tests without a store).
@@ -138,6 +160,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/capabilities", s.capabilities)
 	s.mux.HandleFunc("GET /v1/providers", s.listProviders)
 	s.mux.HandleFunc("GET /v1/models", s.listModels)
+	s.settingsRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)
@@ -234,6 +257,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		"triggers":        s.cfg.Triggers != nil,
 		"subagents":       s.cfg.Subagents != nil,
 		"hooks":           s.cfg.Plugins != nil,
+		// Settings is its own surface: the model write path and secret storage
+		// are separately discoverable, so a client can hide a section this
+		// deployment does not serve.
+		"settings.models":  s.modelSettingsWired(),
+		"settings.secrets": s.cfg.SecretStore != nil,
 	}
 	hooks := make([]string, 0, len(agentext.HookEvents()))
 	for _, event := range agentext.HookEvents() {
