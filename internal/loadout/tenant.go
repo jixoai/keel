@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -97,11 +98,38 @@ func EnabledServices(cfg host.TenantConfig, opts Options) []string {
 	return out
 }
 
+// modelsDocumentAgent names the provider/model a models document selects by
+// default, in the same "provider/model" shape the flat fields use. It reads the
+// document without interpreting it (an unreadable document is the resolver's
+// error to report, not this digest's), and answers "" when nothing is selected.
+func modelsDocumentAgent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var doc struct {
+		Selection *struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"selection"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Selection == nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(doc.Selection.ProviderID)+"/"+strings.TrimSpace(doc.Selection.ModelID), "/")
+}
+
 // Summary is the deterministic configuration digest recorded with the loadout
 // revision. It is human-readable on purpose: handoff audits compare it, and it
 // names only counts/flags — never a secret value or a secret reference.
 func Summary(cfg host.TenantConfig, opts Options) string {
 	agent := strings.TrimPrefix(strings.TrimSpace(cfg.Agent.Provider)+"/"+strings.TrimSpace(cfg.Agent.Model), "/")
+	if agent == "" {
+		// A deployment configured through a models document has no flat agent
+		// fields; its identity comes from the document's default selection, and
+		// the digest must not call that "fake" (it would describe a real model
+		// run as a stub one).
+		agent = modelsDocumentAgent(cfg.Models)
+	}
 	if agent == "" {
 		agent = "fake"
 	}

@@ -469,3 +469,20 @@ func TestExternalServicesSelectedByDocument(t *testing.T) {
 		}
 	}
 }
+
+// TestSummaryNamesTheModelsDocumentIdentity pins the digest's honesty for a
+// document-driven deployment: a tenant configured through a models document has
+// no flat agent fields, and describing a real model run as "agent=fake" would
+// misreport it.
+func TestSummaryNamesTheModelsDocumentIdentity(t *testing.T) {
+	cfg := host.TenantConfig{Models: json.RawMessage(`{
+	  "selection": {"providerId": "s2api", "modelId": "deepseek-v4.1-flash"}
+	}`)}
+	summary := Summary(cfg, Options{})
+	if !strings.Contains(summary, "agent=s2api/deepseek-v4.1-flash") {
+		t.Fatalf("summary = %q, want the document's default selection", summary)
+	}
+	if empty := Summary(host.TenantConfig{}, Options{}); !strings.Contains(empty, "agent=fake") {
+		t.Fatalf("an unconfigured deployment is the fake path: %q", empty)
+	}
+}
