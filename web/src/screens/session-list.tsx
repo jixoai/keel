@@ -3,13 +3,23 @@
 // quiet projection of the run state. On a wide screen it is the sidebar; on a
 // narrow one (and in the TUI's narrow grid) it is the first screen, with the
 // conversation a second one.
+//
+// Change keel-workspace-polish (C1/C2/C5):
+//   - a row never renders a raw session id: an untitled session reads
+//     "新会话 · <相对时间>" (the store keeps the title empty rather than
+//     faking one from the id);
+//   - a session parked on an open decision carries the "等待确认" badge and a
+//     still amber clock instead of a pulsing dot: waiting for a human is not
+//     activity, so it lights no running pulse and no unread-style emphasis;
+//   - the rows are the store's own order (`Each` by session id), so a refresh
+//     that only changes state updates rows in place instead of re-shuffling.
 import { platform, signal, Text, type TextStyle, View, windowSize } from "nsh";
 import { Input } from "nsh/base";
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
 import { formatTime } from "../data/wire";
 import { Icon } from "../ui/icons";
-import { IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
+import { Badge, IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
 import { conversationState, runStateLabel, sessionState } from "../ui/run-state";
 import { cellWidth, fitCells } from "../ui/text";
 import { alpha, colors, glass, radius, space } from "../ui/theme";
@@ -21,6 +31,24 @@ const refreshing = signal(false);
 const isTerminal = () => platform.idiom === "terminal";
 const isPhone = () => !isTerminal() && windowSize().width < 900;
 
+/** One line, trimmed: a derived title/preview is user text and must not push
+ * the row around. */
+const oneLine = (text: string | undefined): string => (text ?? "").replace(/\s+/g, " ").trim();
+
+/** The row's title (C1). Never a raw session id: a session without a derived
+ * title — the server leaves it empty, and "新会话" is also what the store's
+ * "one untouched session" rule reads as untouched — shows "新会话" plus when
+ * it was created, so two fresh sessions never look alike. */
+const titleOf = (row: SessionSummary): string => {
+  const title = oneLine(row.title);
+  if (title && title !== "新会话") return title;
+  const time = formatTime(row.createdAt ?? row.lastMessageAt);
+  return time ? `新会话 · ${time}` : "新会话";
+};
+
+/** The row's preview line: the last message, or the fact that there is none. */
+const summaryOf = (row: SessionSummary): string => oneLine(row.lastMessage) || "还没有消息";
+
 /** The one-word state of a row: the active row projects the open conversation
  * (which knows about stopping), every other row projects runStatus. */
 const rowStateOf = (row: SessionSummary, active: boolean) => {
@@ -28,12 +56,14 @@ const rowStateOf = (row: SessionSummary, active: boolean) => {
   return sessionState(row.runStatus);
 };
 
+/** The dot of a row that is not parked on a question (`waiting` has its own
+ * marker: an open decision is not activity). */
 const rowDotTone = (state: ReturnType<typeof rowStateOf>) =>
   state === "running"
     ? "running"
     : state === "failed"
       ? "failed"
-      : state === "stopping" || state === "reconnecting"
+      : state === "waiting" || state === "stopping" || state === "reconnecting"
         ? "warning"
         : state === "stopped"
           ? "idle"
@@ -71,25 +101,33 @@ function Highlighted(props: { text: string; style: TextStyle }) {
   );
 }
 
-function SessionRow(props: { row: SessionSummary; active: boolean; onSelect: () => void; wide: boolean }) {
+function SessionRow(props: { row: () => SessionSummary; active: boolean; onSelect: () => void; wide: boolean }) {
   const hovered = signal(false);
   const focused = signal(false);
-  const row = () => props.row;
-  const title = () => row().title || row().sessionId.slice(0, 10);
-  const summary = () => row().lastMessage || "（空会话）";
+  const row = () => props.row();
+  const title = () => titleOf(row());
+  const summary = () => summaryOf(row());
   const searching = () => query().trim().length > 0;
   // Mobile reveals delete with a long press; desktop with the row's overflow
   // button (hover or keyboard focus). Neither is a persistent trash icon.
   const canLongPress = () => isPhone() && !searching();
   const showMenu = () => props.wide && !isTerminal() && !searching();
+  // C2: a parked question is not a run. The row shows the badge and a still
+  // marker, and no state word may claim the session is running (or, further
+  // down, that a failure is the headline when the wait blocks it).
+  const waiting = () => store.waiting(row().sessionId);
   const state = () => rowStateOf(row(), props.active);
   // The active row's state is the header pill's job; rows only surface a
   // failure, so no run word is repeated down the sidebar.
-  const stateLabel = () => (!props.active && state() === "failed" ? runStateLabel.failed : null);
+  const stateLabel = () => (!props.active && !waiting() && state() === "failed" ? runStateLabel.failed : null);
   const time = () => formatTime(row().lastMessageAt);
   const cells = () =>
     isTerminal() ? Math.max(24, Math.floor(windowSize().width / 8)) : Math.max(24, Math.floor(windowSize().width));
-  const titleBudget = () => Math.max(6, cells() - 12 - cellWidth(time()));
+  // The terminal grid truncates by hand, so the badge and the failure word
+  // both eat into the title's cells (the badge's pill adds its own padding).
+  const trailingCells = () =>
+    (waiting() ? cellWidth(runStateLabel.waiting) + 20 : 0) + (stateLabel() ? cellWidth(stateLabel()!) + 6 : 0);
+  const titleBudget = () => Math.max(6, cells() - 12 - cellWidth(time()) - trailingCells());
   const previewBudget = () =>
     Math.max(6, cells() - 8 - (stateLabel() ? cellWidth(stateLabel()!) + 1 : 0));
   const titleText = () => (isTerminal() ? fitCells(title(), titleBudget()) : title());
@@ -130,7 +168,14 @@ function SessionRow(props: { row: SessionSummary; active: boolean; onSelect: () 
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <StatusDot tone={rowDotTone(state())} />
+          {/* Waiting is a parked state, not activity: a still clock marks it
+              (the row never gets the running pulse), and the badge carries
+              the words. The clock is the state's own tone (warning). */}
+          {waiting() ? (
+            <Icon name="clock" size={11} tint={colors.warning} />
+          ) : (
+            <StatusDot tone={rowDotTone(state())} />
+          )}
           <Highlighted
             text={titleText()}
             style={{
@@ -142,6 +187,9 @@ function SessionRow(props: { row: SessionSummary; active: boolean; onSelect: () 
               color: colors.foreground,
             }}
           />
+          <If when={waiting()}>
+            <Badge label={runStateLabel.waiting} tone="warning" />
+          </If>
           <If when={!!stateLabel()}>
             <Text
               style={{
@@ -218,13 +266,15 @@ function Skeleton() {
 }
 
 export function SessionList(props: { onSelect: (id: string) => void; activeId: string | null; wide: boolean }) {
-  const filtered = () => {
-    const q = query().trim().toLowerCase();
-    const rows = store.sessions();
-    if (!q) return rows;
-    return rows.filter((row) =>
-      `${row.title ?? ""} ${row.lastMessage ?? ""} ${row.sessionId}`.toLowerCase().includes(q),
-    );
+  // The store's order, filtered only by the search box (never re-sorted, never
+  // re-created): a refresh that changes state must not move a row (C5). The
+  // search reads what the rows show — title and preview, never the id — so a
+  // match is always visible in the row it keeps.
+  const rows = () => {
+    const needle = query().trim().toLowerCase();
+    const all = store.sessions();
+    if (!needle) return all;
+    return all.filter((row) => `${titleOf(row)} ${summaryOf(row)}`.toLowerCase().includes(needle));
   };
   const refresh = async () => {
     refreshing.set(true);
@@ -277,6 +327,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             label="刷新会话"
             size={30}
             iconSize={15}
+            disabled={refreshing()}
             hitSlop={isPhone() ? 7 : undefined}
             onPress={() => void refresh()}
           />
@@ -328,7 +379,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
         </View>
         <If when={query().trim().length > 0}>
           <Text style={{ paddingLeft: 2, fontSize: 10.5, color: colors.mutedForeground }}>
-            {filtered().length > 0 ? `${filtered().length} 个结果` : "没有结果"}
+            {rows().length > 0 ? `${rows().length} 个结果` : "没有结果"}
           </Text>
         </If>
       </View>
@@ -345,9 +396,14 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             <Text style={{ fontSize: 11.5, lineHeight: 17, color: colors.mutedForeground }}>
               {store.sessionsError()}
             </Text>
-            <PillButton label="重试" compact onPress={() => void refresh()} />
+            <PillButton
+              label={refreshing() ? "重试中…" : "重试"}
+              compact
+              disabled={refreshing()}
+              onPress={() => void refresh()}
+            />
           </View>
-        ) : filtered().length === 0 ? (
+        ) : rows().length === 0 ? (
           <View style={{ padding: space.xl, alignItems: "center", gap: space.sm }}>
             <Icon name="message" size={22} tint={colors.mutedForeground} />
             <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>
@@ -361,14 +417,16 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           </View>
         ) : (
           <View style={{ gap: 2, paddingHorizontal: 6, paddingBottom: 8 }}>
-            {filtered().map((row) => (
-              <SessionRow
-                row={row}
-                active={props.activeId === row.sessionId}
-                wide={props.wide}
-                onSelect={() => props.onSelect(row.sessionId)}
-              />
-            ))}
+            <Each of={rows()} key={(row) => row.sessionId}>
+              {(row) => (
+                <SessionRow
+                  row={row}
+                  active={props.activeId === row().sessionId}
+                  wide={props.wide}
+                  onSelect={() => props.onSelect(row().sessionId)}
+                />
+              )}
+            </Each>
           </View>
         )}
       </View>
