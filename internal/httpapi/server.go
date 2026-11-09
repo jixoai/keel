@@ -153,6 +153,7 @@ func (s *Server) routes() {
 	s.registerExternalRoutes()
 	s.mux.HandleFunc("POST /v1/sessions", s.createSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/input", s.input)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/retry", s.retryTurn)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/run", s.triggerRun)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/run", s.runStatus)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/run/loadout", s.runLoadout)
@@ -331,95 +332,31 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
-	scope := kernel.Scope{TenantID: tenantID, SessionID: sessionID}
-	fields := map[string]any{"text": body.Text, "requestId": requestID}
-	if delivery != "" {
-		fields["delivery"] = delivery
-	}
-	if len(body.Selection) > 0 {
-		// Verbatim: a RawMessage passes the object through the payload marshal
-		// without re-encoding its fields, so the value the client sent is the
-		// value in the log.
-		fields["selection"] = json.RawMessage(body.Selection)
-	}
-	payload, err := json.Marshal(fields)
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	if s.cfg.Edge == nil {
-		writeErr(w, http.StatusServiceUnavailable, errKernelUnwired)
-		return
-	}
-	// Class pre-check before the commit: an external session has no native
-	// run/lease flow, so /input answers 409 instead of appending a message and
-	// then failing to queue a run (M4's "commit then 500"). The kernel's edge
-	// seam still records messages for external sessions (the external gateway's
-	// SSE replay depends on that contract), so the refusal belongs to the
-	// native client API, before anything is written.
-	owner, exists, err := s.cfg.Store.SessionOwner(r.Context(), tenantID, sessionID)
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	if !exists {
-		writeErr(w, http.StatusNotFound, errors.New("session not found"))
-		return
-	}
-	if owner == store.StateOwnerExternal {
-		writeErr(w, http.StatusConflict, errors.New("session is owned by an external backend; native input is not supported"))
-		return
-	}
-	// Edge-scoped commit: user.message carries the requestId as its idempotency
-	// key and never a fencing token (client input keeps landing during a drain;
-	// the next runtime picks it up).
-	receipt, err := s.cfg.Edge.Commit(r.Context(), kernel.CommitRequest{
-		Scope:      scope,
-		Kind:       kernel.KindUserMessage,
-		RequestID:  requestID,
-		Payload:    payload,
-		NativeEdge: true,
+	// The commit itself is the shared path with POST /retry: payload shape,
+	// external-session refusal, kernel commit and submissions bookkeeping all
+	// live in commitUserInput.
+	commit, err := s.commitUserInput(r.Context(), userInput{
+		TenantID:  tenantID,
+		SessionID: sessionID,
+		RequestID: requestID,
+		Text:      body.Text,
+		Delivery:  delivery,
+		Selection: body.Selection,
 	})
 	if err != nil {
-		writeEdgeError(w, err)
-		return
-	}
-	// The committed event is the truth; the submissions row is client-facing
-	// bookkeeping kept for the response contract. A row that predates a crash
-	// between commit and bookkeeping is repaired here. The commit itself already
-	// queued the run in its own transaction (kernel edge commit), so a failure
-	// in this bookkeeping can no longer strand the input.
-	sub, created, err := s.cfg.Store.Submit(r.Context(), tenantID, requestID, sessionID, uuid.New())
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	if sub.Seq == nil {
-		if err := s.cfg.Store.SetSubmissionStatus(r.Context(), tenantID, sessionID, requestID, "committed", receipt.Seq); err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-		sub.Seq = &receipt.Seq
-		// The response reports the state the bookkeeping now holds, not the
-		// transient "pending" the row was inserted with.
-		sub.Status = "committed"
-	}
-	// Enqueue on replays too: if the first enqueue failed after the event was
-	// committed, the client's retry repairs it without creating a second event.
-	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
-		writeEnqueueError(w, err)
+		writeInputError(w, err)
 		return
 	}
 	status := 200
-	if created {
+	if commit.Created {
 		status = 201
 	}
 	writeJSON(w, status, map[string]any{
-		"submissionId": sub.ID,
+		"submissionId": commit.Submission.ID,
 		"requestId":    requestID,
-		"status":       sub.Status,
-		"seq":          sub.Seq,
-		"created":      created,
+		"status":       commit.Submission.Status,
+		"seq":          commit.Submission.Seq,
+		"created":      commit.Created,
 	})
 }
 

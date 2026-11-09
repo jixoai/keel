@@ -35,13 +35,27 @@ func NewPGSessionLister(st *store.Store) *PGSessionLister {
 	return &PGSessionLister{db: st.Pool()}
 }
 
+// sessionSelect is the whole list projection in one round trip: the session
+// row, its run status, the last event time, and the title source — the text of
+// the session's first user.message, read with a lateral so the page never
+// degrades into a per-row query. Only the payload's "text" field is read: the
+// title must never pick up selection/attachments JSON.
 const sessionSelect = `SELECT s.session_id, s.created_at, s.updated_at,
        GREATEST(s.next_seq - 1, 0) AS last_seq,
        COALESCE(r.status, '') AS run_status,
        (SELECT max(e.created_at) FROM events e
-         WHERE e.tenant_id = s.tenant_id AND e.session_id = s.session_id) AS last_message_at
+         WHERE e.tenant_id = s.tenant_id AND e.session_id = s.session_id) AS last_message_at,
+       COALESCE(first_input.text, '') AS first_input_text
   FROM sessions s
   LEFT JOIN runs r ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
+  LEFT JOIN LATERAL (
+       SELECT e.payload ->> 'text' AS text
+         FROM events e
+        WHERE e.tenant_id = s.tenant_id AND e.session_id = s.session_id
+          AND e.kind = 'user.message'
+        ORDER BY e.seq
+        LIMIT 1
+  ) first_input ON true
  WHERE s.tenant_id = $1`
 
 // ListSessionSummaries reads one page, newest activity first.
@@ -86,8 +100,9 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
 			lastSeq       int64
 			runStatus     string
 			lastMessageAt sql.NullTime
+			firstInput    sql.NullString
 		)
-		if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt); err != nil {
+		if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt, &firstInput); err != nil {
 			return SessionPage{}, fmt.Errorf("agentapi: scan session: %w", err)
 		}
 		summary := SessionSummary{
@@ -96,6 +111,7 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
 			UpdatedAt: updatedAt.UTC(),
 			LastSeq:   lastSeq,
 			RunStatus: runStatus,
+			Title:     deriveSessionTitle(firstInput.String),
 		}
 		if lastMessageAt.Valid {
 			at := lastMessageAt.Time.UTC()

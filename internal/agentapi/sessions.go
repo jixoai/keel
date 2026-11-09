@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,9 @@ import (
 const (
 	defaultSessionsLimit = 50
 	maxSessionsLimit     = 200
+	// sessionTitleLimit bounds the derived list title, in runes, including the
+	// trailing ellipsis of a cut title.
+	sessionTitleLimit = 60
 )
 
 // ErrBadCursor is a malformed pagination cursor (400).
@@ -32,6 +36,26 @@ type SessionSummary struct {
 	// the spec makes it part of every item, not an omission.
 	LastMessageAt   *time.Time `json:"lastMessageAt"`
 	ParentSessionID string     `json:"parentSessionId,omitempty"`
+	// Title is the display name the list renders: derived from the session's
+	// FIRST user message by deriveSessionTitle, empty when the session has no
+	// user message. Always present, so the client never has to fall back to
+	// rendering the session id.
+	Title string `json:"title"`
+}
+
+// deriveSessionTitle renders a session's list title from the text of its first
+// user.message. It is a display projection of user text only (never of the
+// selection/attachments facts): whitespace runs collapse to single spaces, so
+// a multi-line prompt stays one line, and a text longer than sessionTitleLimit
+// runes is cut to that many runes with a trailing ellipsis. An empty or
+// whitespace-only text has no title.
+func deriveSessionTitle(text string) string {
+	flat := strings.Join(strings.Fields(text), " ")
+	runes := []rune(flat)
+	if len(runes) <= sessionTitleLimit {
+		return flat
+	}
+	return string(runes[:sessionTitleLimit-1]) + "…"
 }
 
 // SessionPage is one keyset page. NextCursor is empty on the last page.

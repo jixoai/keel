@@ -302,6 +302,13 @@ func validateUserMessagePayload(raw json.RawMessage) error {
 			return errors.New(`user.message payload "selection" must be a JSON object`)
 		}
 	}
+	// retryOf names the earlier user input this input re-asks (the retry
+	// endpoint's ledger mark). It is shape-checked only, like selection: the
+	// kernel stores the fact, and a successor reads "this asks again what seq N
+	// asked" from the log alone.
+	if v, ok := payload["retryOf"]; ok && !isJSONCount(v) {
+		return errors.New(`user.message payload "retryOf" must be a non-negative integer`)
+	}
 	return nil
 }
 

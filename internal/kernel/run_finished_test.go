@@ -62,6 +62,40 @@ func TestUserMessageSelectionIsValidated(t *testing.T) {
 	}
 }
 
+// TestUserMessageRetryOfIsValidated pins the shape of the retry mark: retryOf
+// names the earlier user input this input re-asks, so it must be a non-negative
+// integer (a string or a float would be replayed to every successor exactly as
+// written). It is shape-only, like selection: the kernel stores the fact.
+func TestUserMessageRetryOfIsValidated(t *testing.T) {
+	for _, im := range implementations(t) {
+		im := im
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+			h.mustCommit(CommitRequest{Kind: KindUserMessage, RequestID: "r-retry",
+				Payload: json.RawMessage(`{"text":"hi","requestId":"r-retry","retryOf":3,"delivery":"queue"}`)})
+			// Zero is a legal counter value for the shape check (no input is
+			// committed at seq 0; the resolution layer owns the semantics).
+			h.mustCommit(CommitRequest{Kind: KindUserMessage, RequestID: "r-retry-zero",
+				Payload: json.RawMessage(`{"text":"hi","retryOf":0}`)})
+			for _, bad := range []json.RawMessage{
+				json.RawMessage(`{"text":"hi","retryOf":"3"}`),
+				json.RawMessage(`{"text":"hi","retryOf":-1}`),
+				json.RawMessage(`{"text":"hi","retryOf":1.5}`),
+				json.RawMessage(`{"text":"hi","retryOf":null}`),
+				json.RawMessage(`{"text":"hi","retryOf":true}`),
+				json.RawMessage(`{"text":"hi","retryOf":[1]}`),
+			} {
+				if err := h.commitErr(CommitRequest{Kind: KindUserMessage, RequestID: "r-retry-bad", Payload: bad}); !iso(err, ErrInvalidRequest) {
+					t.Fatalf("retryOf payload %s = %v, want invalid-request", bad, err)
+				}
+			}
+			if n := h.eventCount(h.scope); n != 2 {
+				t.Fatalf("event count = %d, want 2 (rejected retryOf marks must not land)", n)
+			}
+		})
+	}
+}
+
 // TestRunFinishedPayloadIsValidated pins the attempt summary contract: the
 // status is the attempt outcome, the counters are non-negative integers, and a
 // malformed summary is refused before it reaches the log (a client would
