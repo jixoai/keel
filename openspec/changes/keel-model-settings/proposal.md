@@ -1,4 +1,4 @@
-# Proposal: keel-model-settings（模型配置的产品面）
+# Proposal: keel-model-settings（设置面：模型 / 密钥 / 插件）
 
 ## Why
 
@@ -9,7 +9,10 @@
 
 ## What Changes
 
-**一句话：把模型配置变成产品里可读、可写、可即时生效、可审计的一等能力，并把选择接进会话 UI。**
+**一句话：做一个独立的「设置」面（与工作区分开），把模型配置、密钥、插件三件事做成可读、可写、可即时生效、可审计的产品能力。**
+
+Owner 2026-11-09 裁决：设置不塞进工作区——现在这个界面是「工作区」，设置单独成页；
+设置页里配置模型、管理密钥、查看插件。
 
 1. **写入路径**：新增租户级模型配置存储（`model_settings` + 历史表，revision 单调递增）。
    `GET/PUT/DELETE /v1/settings/models` 读写当前生效的模型文档；写入前用同一套 `modelcfg`
@@ -19,27 +22,35 @@
    为此把 HTTP 边缘的两处 boot 捕获缝（`ValidateSelection`、`ModelCatalog`）改为**按请求读取当前代数**。
 3. **来源与优先级**：`GET` 返回 `source`（`stored` 覆盖 / `deployment` 部署默认＝启动文件）与 `revision`；
    `DELETE` 清除覆盖回到部署默认。启动时：有覆盖用覆盖，否则用启动文档。
-4. **客户端设置页**：NSH 客户端新增设置页——当前生效状态（来源/revision/默认 selection）、
-   provider 列表（可见/不可执行原因/凭据状态）、模型列表（能力事实 + issues + 可选性）、
-   默认模型与思考档编辑、保存/重置、字段级错误呈现。
+4. **独立的设置面（客户端）**：设置是**自己的页面/路由**（`/settings`），从工作区的入口进入、
+   可返回；工作区（会话列表＋对话）保持原样，不在里面塞管理面板。设置页有分区导航：
+   **模型 / 密钥 / 插件**。
+   - 模型：当前生效（source/revision/默认 selection）、provider 列表（不可执行原因/凭据状态）、
+     模型列表（能力事实 + issues + 可选性）、默认模型与思考档编辑、原始文档编辑、保存/重置、字段级错误。
+   - 密钥：按名字写入/删除、列表只显示名字与时间（**值永不回读**）、不可用时明确说明原因。
+     模型配置的 `access.ref` 可写 `secret:NAME` 直接引用这里存的密钥。
+   - 插件：装载清单与状态（状态/版本/tools/hooks/triggers/diagnostics）+ 触发器手动触发；
+     明确说明「插件在启动时装载，这里看状态与控制触发，不做代码级配置」。
 5. **会话内模型选择**：聊天头部新增「本会话模型」选择器（provider/model/reasoning），
    之后每条输入携带该 selection；与设置页的「租户默认」明确区分。选中项从 `/v1/models` 取，
    不复制端点/凭据。
-6. **审计与可观测**：每次写入记录 revision/时间/来源与操作者会话；boot 日志与 loadout 摘要反映
-   实际身份（已具备），生产日志不再出现 `agent=fake`。
+6. **审计与可观测**：模型配置每次写入记录 revision/时间/来源与操作者会话；密钥写入只记名字/时间
+   （值不落任何日志/响应）；boot 日志与 loadout 摘要反映实际身份，生产日志不再出现 `agent=fake`。
 
 ## Impact
 
 - 受影响规格：`model-settings`（新）、`provider-config`（写入/热更/边缘缝按代读取的约束）、
   `agentapi`（设置端点）。
-- 受影响代码：`internal/store`（新表与方法）、`internal/httpapi`（设置路由、按请求读取的校验缝）、
-  `internal/servicehost`（Reload 调用面、当前代读取）、`cmd/keel`（装配）、`web/`（设置页与会话选择器）。
+- 受影响代码：`internal/store`（模型配置与密钥两张表/方法）、`internal/httpapi`（设置路由、
+  按请求读取的校验缝）、`internal/servicehost`（Reload 调用面、当前代读取、`secret:` 解析）、
+  `cmd/keel`（装配、密钥盒）、`web/`（独立设置页＋会话内选择器）。
 - 不受影响：内核事件契约（不新增事件类型）；selection 作为输入事实的语义；扁平配置兼容路径。
 
 ## Non-Goals
 
 - 不做多租户控制面（`keel serve` 仍是单租户本地面；写入按注入租户落库）。
-- 不做 provider 密钥的新存储（`access.env`/`access.ref` 语义不变，凭据仍来自环境或外部密钥引用）。
+- 不做插件代码级配置/启停编排（插件在启动时装载；设置页只呈现状态与触发）。
+- 不做密钥轮换/版本管理（v1 只有按名字写入/覆盖/删除；值永不回读）。
 - 不做隐藏 provider 的治理面（hidden 仍不从解析结果出现；设置页只管理可见项并说明）。
 
 ## Why now

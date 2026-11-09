@@ -46,14 +46,58 @@
 - **WHEN** PUT 成功
 - **THEN** 紧随其后的 GET 返回同一 revision 与新文档（无缓存窗口）
 
-## Requirement: 客户端设置页
+## Requirement: 设置是独立的面
 
-客户端 MUST 提供设置页，覆盖：当前生效（来源/revision/默认 selection）、provider 列表与不可执行原因、
-模型列表与能力事实/issues、默认模型与思考档编辑、保存/重置、字段级错误呈现。
+设置 MUST 是独立于工作区的页面/路由（`/settings`），MUST NOT 以面板形式塞进会话界面。
+
+- 工作区（会话列表＋对话）MUST 保持原样；设置从工作区入口进入、可返回，并保留当前会话。
+- 设置页 MUST 有分区导航：模型 / 密钥 / 插件；深链 `/settings` MUST 可直接打开。
+- 设置页与工作区共享同一套视觉语汇（NSH 客户端既有 primitives/theme），MUST NOT 引入第二套组件体系。
+
+#### Scenario: 深链直达设置
+- **WHEN** 已登录用户打开 `/settings`
+- **THEN** 直接进入设置页（不是重定向到工作区），返回后仍在原会话
+
+## Requirement: 客户端设置页——模型
+
+设置页的模型分区 MUST 覆盖：当前生效（来源/revision/默认 selection）、provider 列表与不可执行原因、
+模型列表与能力事实/issues、默认模型与思考档编辑、原始文档编辑、保存/重置、字段级错误呈现。
 
 - 设置页 MUST 只管理解析结果中的**可见** provider；隐藏 provider 不出现在设置页（服务端已剔除）。
 - 保存失败 MUST 原样呈现服务端 issues（字段路径 + 消息），MUST NOT 用“保存失败”吞掉原因。
 - 保存成功 MUST 显示新 revision 与生效状态（source）。
+
+## Requirement: 密钥管理
+
+设置页的密钥分区 MUST 支持按名字写入、覆盖、删除，供模型配置以 `secret:NAME` 引用。
+
+- 列表 MUST 只返回名字与时间（创建/更新时间），MUST NOT 返回值、长度或任何可用于猜测值的信息。
+- 写入 MUST 走加密落盘（复用既有 `store.SecretBox`，密钥来自 `KEEL_SECRET_KEY`）；
+  未配置密钥时 MUST 明确不可用（503/禁用态 + 原因），MUST NOT 降级为明文存储。
+- 值 MUST NOT 出现在日志、事件、错误消息或任何 GET 响应中；写入审计只记名字/时间/操作者。
+- 模型配置的 `access.ref` MUST 能把 `secret:NAME` 解析到该存储（`env:NAME`/`${NAME}` 仍查环境）。
+
+#### Scenario: 写入后模型可用它
+- **GIVEN** 未设置任何环境变量凭据
+- **WHEN** 在设置页写入 `secret:s2api`，并把模型配置的 `access.ref` 设为 `secret:s2api` 保存
+- **THEN** 保存成功；下一条输入的 run 正常调用网关；`GET /v1/settings/secrets` 只显示名字与时间
+
+#### Scenario: 未配置密钥盒
+- **GIVEN** 进程没有 `KEEL_SECRET_KEY`
+- **WHEN** 打开密钥分区或尝试写入
+- **THEN** 界面明确说明「密钥存储未启用」并给原因；写入被拒；不回退明文
+
+## Requirement: 插件清单与触发
+
+设置页的插件分区 MUST 呈现装载清单与状态，并允许手动触发已注册的触发器。
+
+- 清单 MUST 含：generation、每个插件的 id/版本/状态/provides/requires/tools/hooks/triggers/diagnostics。
+- 触发器 MUST 可列出并手动触发（既有 `POST /v1/triggers/{id}/fire`），触发结果 MUST 可见。
+- 界面 MUST 明确说明「插件在启动时装载；这里看状态、控制触发，不做代码级配置」。
+
+#### Scenario: 插件状态可见
+- **WHEN** 打开插件分区
+- **THEN** 看到插件 generation、状态、其工具/hook/触发器与诊断；能触发一个触发器并看到结果
 
 ## Requirement: 会话内模型选择
 

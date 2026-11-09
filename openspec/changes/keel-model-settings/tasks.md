@@ -23,14 +23,33 @@
 - [ ] R2 HTTP 边缘缝按请求读取当前代数（`ValidateSelection`、`ModelCatalog`），移除 boot 捕获
 - [ ] R3 进程内测试：写入→新 run 用新身份、在飞 run 用旧代数、DELETE 回默认
 
+## K. 密钥存储（internal/store + internal/servicehost + cmd/keel）
+
+- [ ] K1 `tenant_secrets(tenant_id, name, ciphertext bytea, created_at, updated_at)`（幂等 DDL）＋
+      方法 Get/List/Put/Delete（值用既有 `store.SecretBox` 加密；列表不带与值有关的任何信息）
+- [ ] K2 `GET/PUT/DELETE /v1/settings/secrets[/{name}]`：值永不回读；未配置 `KEEL_SECRET_KEY` 时 503 + 原因
+- [ ] K3 modelcfg 解析：`secret:NAME` → 密钥存储（`env:NAME`/`${NAME}` 仍查环境）；
+      校验期也要能判定 ref 可解析（保存配置时不误报）
+- [ ] K4 单测：加密落盘/不回读/跨租户隔离/未配置密钥盒 fail-closed/secret 引用可解析
+
+## P. 插件清单（internal/agentapi）
+
+- [ ] P1 `GET /v1/settings/plugins`（或复用 `/v1/plugins` 并补 triggers/fire）：generation/状态/tools/hooks/
+      triggers/diagnostics；`POST /v1/triggers/{id}/fire` 已有，补齐返回体
+- [ ] P2 单测：未接线 501、快照直出、触发结果
+
 ## U. 客户端（web/，NSH）
 
-- [ ] U1 设置页：当前生效（source/revision/默认 selection）＋ provider 列表（不可执行原因）＋
-      模型列表（能力/selectable/issues）＋默认模型与思考档编辑＋保存/重置＋字段级错误
-- [ ] U2 会话内模型选择器（provider/model/reasoning）→ 之后每条输入带 selection；
+- [ ] U1 **独立设置页**：`/settings` 路由（深链直达），从工作区入口进入/返回；分区导航 模型/密钥/插件；
+      工作区不动
+- [ ] U2 模型分区：当前生效（source/revision/默认 selection）＋ provider 列表（不可执行原因）＋
+      模型列表（能力/selectable/issues）＋默认模型与思考档编辑＋原始文档编辑＋保存/重置＋字段级错误
+- [ ] U3 密钥分区：写入/覆盖/删除（值只输入不回显）、列表只有名字与时间、未启用时说明原因
+- [ ] U4 插件分区：清单/状态/工具/hook/触发器/诊断 + 手动触发并显示结果 + 装载语义说明
+- [ ] U5 会话内模型选择器（provider/model/reasoning）→ 之后每条输入带 selection；
       与租户默认分开显示；没有选择时不带字段
-- [ ] U3 客户端类型/契约最小增量（wire.ts：settings 形状、selection 已在 input）
-- [ ] U4 TUI 目标下同一份代码可编译（不要求完整交互，但不得破坏）
+- [ ] U6 客户端类型/契约增量（wire.ts/contract.ts：settings 形状、secrets、plugins、selection）
+- [ ] U7 TUI 目标下同一份代码可编译（不要求完整交互，但不得破坏）
 
 ## Q. 验收
 
