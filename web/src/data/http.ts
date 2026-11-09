@@ -14,6 +14,7 @@ import type {
   ModelsSettingsView,
   PluginsView,
   ProvidersResponse,
+  RetryResult,
   SecretSaved,
   SecretsView,
   SendOptions,
@@ -278,6 +279,23 @@ export class KeelHttp implements SettingsApi {
     const response = await this.request(`/v1/settings/models${query}`, { method: "DELETE" });
     const body = asRecord(await response.json());
     return { revision: numberOr(body.revision, 0), source: "deployment" };
+  }
+
+  /** `POST /v1/sessions/{id}/retry {turnId}` — the server re-asks the input the
+   * turn answered; the ledger only grows. Deliberately not idempotent: the
+   * same turn retried twice is two intentional attempts. */
+  async retryTurn(sessionId: string, turnId: string): Promise<RetryResult> {
+    const response = await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/retry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turnId }),
+    });
+    const body = asRecord(await response.json());
+    return {
+      created: body.created === true,
+      seq: numberOr(body.seq, 0),
+      requestId: typeof body.requestId === "string" ? body.requestId : "",
+    };
   }
 
   /** `GET /v1/providers` — the resolved settings view (visible providers). */

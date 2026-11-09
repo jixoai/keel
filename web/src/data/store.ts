@@ -18,11 +18,13 @@ import type {
   PluginsView,
   ProviderView,
   SecretMeta,
+  ScrollState,
   SendOptions,
   SessionSummary,
   SettingsApi,
   SettingsIssue,
   TriggerStatusView,
+  TurnErrorState,
   UiCommands,
   WireEvent,
 } from "./contract";
@@ -82,6 +84,42 @@ const messageOf = (error: unknown): string => {
   return String(error);
 };
 
+/** Newest first by createdAt (the API's own clock), stable for rows without
+ * one — a listing order, never a re-sort of what is already on screen. */
+const sortNewestFirst = (rows: SessionSummary[]): SessionSummary[] => {
+  const stamp = (row: SessionSummary) => {
+    const raw = row.createdAt ?? row.lastMessageAt ?? "";
+    const at = Date.parse(raw);
+    return Number.isFinite(at) ? at : 0;
+  };
+  return [...rows]
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => stamp(b.row) - stamp(a.row) || a.index - b.index)
+    .map((item) => item.row);
+};
+
+/** The tail's newest decision, read for the list badge (C2): an open decision
+ * parks the session on an answer; a settled one, or a tail that ends without
+ * any decision, is not waiting. `undefined` = the tail says nothing either
+ * way (keep what we had). */
+const pendingDecisionIn = (events: WireEvent[]): boolean | undefined => {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== "decision") continue;
+    const status = asString(payloadOf(event).status);
+    if (status === undefined || status === "open") return true;
+    return false;
+  }
+  const last = events[events.length - 1];
+  if (last && (last.kind === "run.finished" || last.kind === "assistant.message")) return false;
+  return undefined;
+};
+
+/** Does the open conversation wait on a human answer (C2)? A parked question is
+ * not thinking, and it is not a reason for a spinner. */
+const waitingIn = (view: ConversationView | null): boolean =>
+  (view?.decisions ?? []).some((decision) => decision.status === "open");
+
 class KeelStore {
   readonly mode = signal<Mode>("checking");
   /** Live API auth gate: the server wants a session (login) before /v1 works. */
@@ -99,6 +137,11 @@ class KeelStore {
   readonly stopping = signal(false);
   readonly connection = signal<ConnectionState>({ status: "closed", lastSeq: 0 });
   readonly decisionDeadlines = signal<Record<string, number>>({});
+  /** The composer's turn-level error banner (C6): the newest failure of the
+   * open session, dismissible per turn, cleared by a retry. */
+  readonly turnError = signal<TurnErrorState | null>(null);
+  /** The turn whose retry is in flight (the retry button's pending state). */
+  readonly retryingTurn = signal<string | null>(null);
 
   /** The top-level route: `/settings` deep-links straight into the settings
    * page; the workspace stays otherwise untouched. */
@@ -160,6 +203,12 @@ class KeelStore {
   private answered = new Set<string>();
   /** Per-session selections, kept while the session list lives in memory. */
   private sessionSelections = new Map<string, ModelSelection>();
+  /** Per-session scroll memory (C4): intent plus the offset it was seen at. */
+  private scrollStates = new Map<string, ScrollState>();
+  /** Turn failures the reader closed (C6): a dismissed banner stays dismissed. */
+  private dismissedTurnErrors = new Set<string>();
+  /** Decisions already announced (C13): a reconnect replay must not re-notify. */
+  private notifiedDecisions = new Set<string>();
   /** Set as soon as the user navigates by hand, so the boot route read never
    * overrides an explicit move. */
   private routeTouched = false;
@@ -568,7 +617,7 @@ class KeelStore {
     if (this.mode() === "checking") return;
     try {
       const rows = await this.client.listSessions(60);
-      this.sessions.set(rows);
+      this.mergeSessions(rows);
       this.sessionsError.set(null);
       void this.enrich(rows);
     } catch (error) {
@@ -584,13 +633,34 @@ class KeelStore {
     }
   }
 
+  /** Fold a server listing into the visible order without reshuffling it: a
+   * refresh carries state changes, not a new sort. Rows already on screen keep
+   * their place (updated in place); only rows never seen before are inserted,
+   * at the top, newest first (C5). */
+  private mergeSessions(incoming: SessionSummary[]) {
+    const current = this.sessions();
+    if (current.length === 0) {
+      this.sessions.set(sortNewestFirst(incoming));
+      return;
+    }
+    const fresh = new Map(incoming.map((row) => [row.sessionId, row]));
+    const next: SessionSummary[] = [];
+    for (const row of current) {
+      const update = fresh.get(row.sessionId);
+      if (update) next.push({ ...row, ...update });
+    }
+    const known = new Set(current.map((row) => row.sessionId));
+    const added = sortNewestFirst(incoming.filter((row) => !known.has(row.sessionId)));
+    this.sessions.set([...added, ...next]);
+  }
+
   /** Fill title/summary from the tail of the log when the list endpoint does
    * not carry them (the API spec only requires ids and timestamps). */
   private async enrich(rows: SessionSummary[]) {
     const tail = this.client.tail?.bind(this.client);
     if (!tail) return;
     for (const row of rows.slice(0, 12)) {
-      if (row.title && row.lastMessage) continue;
+      if (row.title && row.lastMessage && row.pendingDecision !== undefined) continue;
       try {
         const events = await tail(row.sessionId, row.lastSeq ?? 0, 8);
         if (!events.length) continue;
@@ -603,12 +673,15 @@ class KeelStore {
           asString(payload.question) ??
           asString(payload.toolName) ??
           "";
+        // Never a raw id as a title (C1): an unnamed session stays unnamed and
+        // the list renders "新会话 + 时间" instead.
         const title = firstUser ? textOf(contentOf(payloadOf(firstUser))).slice(0, 32) : undefined;
+        const pending = pendingDecisionIn(events);
         this.patchSession(row.sessionId, {
-          title: row.title ?? (title || row.sessionId.slice(0, 8)),
-          lastMessage: row.lastMessage ?? summary.slice(0, 90),
-          lastSeq: last.seq,
-          runStatus: last.kind === "run.finished" ? "done" : row.runStatus,
+          ...(row.title ?? title ? { title: row.title ?? title } : {}),
+          ...(row.lastMessage ?? summary ? { lastMessage: row.lastMessage ?? summary.slice(0, 90) } : {}),
+          lastSeq: Math.max(row.lastSeq ?? 0, last.seq),
+          ...(pending !== undefined ? { pendingDecision: pending } : {}),
         });
       } catch {
         /* enrichment is best-effort */
@@ -635,6 +708,8 @@ class KeelStore {
     this.connection.set({ status: "connecting", lastSeq: 0 });
     this.partial.set(undefined);
     this.decisionDeadlines.set({});
+    // The banner belongs to the session that produced it (C6).
+    if (this.turnError()?.sessionId !== sessionId) this.turnError.set(null);
     this.answered = new Set();
     const engine = createCoreEngine(sessionId);
     this.engine = engine;
@@ -645,6 +720,8 @@ class KeelStore {
       this.stopping.set(view.stopping);
       this.connection.set(view.connection);
       this.partial.set(engine.partialText());
+      this.syncTurnError(sessionId, view);
+      this.patchSession(sessionId, { pendingDecision: waitingIn(view) });
     });
     try {
       const detach = await engine.attach(
@@ -687,7 +764,16 @@ class KeelStore {
         this.decisionDeadlines.update((map) => ({ ...map, [decisionId]: deadline! }));
       }
       if (status === "open" || status === undefined) {
-        void notify("Keel · 需要你的审批", question);
+        this.patchSession(sessionId, { pendingDecision: true });
+        // One notification per decision (C13): a reconnect replay of the same
+        // question must not pop it again.
+        const key = `${sessionId}:${decisionId ?? question}`;
+        if (!this.notifiedDecisions.has(key)) {
+          this.notifiedDecisions.add(key);
+          void notify("Keel · 需要你的审批", question);
+        }
+      } else {
+        this.patchSession(sessionId, { pendingDecision: false });
       }
     }
     if (event.kind === "run.finished") {
@@ -695,6 +781,7 @@ class KeelStore {
         runStatus: String(payloadOf(event).stopReason ?? "done"),
         lastSeq: event.seq,
         lastMessageAt: new Date().toISOString(),
+        pendingDecision: false,
       });
     } else if (event.kind === "user.message" || event.kind === "assistant.message") {
       this.patchSession(sessionId, { runStatus: "running", lastSeq: event.seq });
@@ -737,12 +824,14 @@ class KeelStore {
     return this.decisionDeadlines()[decisionId];
   }
 
-  async send(text: string, mode: Delivery, pending: PendingAttachment[] = []) {
+  /** Commit one input. Returns false when nothing was committed (no session,
+   * empty input, or a refused write) — the composer restores its draft then. */
+  async send(text: string, mode: Delivery, pending: PendingAttachment[] = []): Promise<boolean> {
     const sessionId = this.activeId();
     const engine = this.engine;
-    if (!sessionId || !engine) return;
+    if (!sessionId || !engine) return false;
     const trimmed = text.trim();
-    if (!trimmed && pending.length === 0) return;
+    if (!trimmed && pending.length === 0) return false;
     const delivery: Delivery = this.busy() ? mode : "queue";
     const requestId = newRequestId();
     const commands = this.client.commands(sessionId);
@@ -780,9 +869,16 @@ class KeelStore {
       } else {
         await commands.send(body, sendOpts);
       }
+      this.turnError.set(null);
+      return true;
     } catch (error) {
       engine.removeOptimistic(requestId);
-      this.notice.set({ tone: "danger", text: `发送失败：${messageOf(error)}` });
+      this.turnError.set({
+        sessionId,
+        text: `发送失败：${messageOf(error)}`,
+        retryable: false,
+      });
+      return false;
     }
   }
 
@@ -814,6 +910,76 @@ class KeelStore {
 
   isAnswering(decisionId: string): boolean {
     return this.answered.has(decisionId);
+  }
+
+  // ---- turn failures, retry, waiting, scroll memory (C2/C4/C6/C3) ---------
+
+  /** Does the session wait on a human answer? The open session reads its own
+   * projection; any other row reads the ledger-derived list badge. A parked
+   * question is not a running task: no spinner belongs on it. */
+  waiting(sessionId?: string): boolean {
+    const id = sessionId ?? this.activeId();
+    if (!id) return false;
+    if (this.activeId() === id) return waitingIn(this.conversation());
+    return this.sessions().find((row) => row.sessionId === id)?.pendingDecision === true;
+  }
+
+  /** The banner follows the open session's newest failed turn. A dismissed turn
+   * stays dismissed until a newer failure or an explicit retry. */
+  private syncTurnError(sessionId: string, view: ConversationView) {
+    const failed = [...view.turns].reverse().find((turn) => turn.status === "failed" && !!turn.error);
+    if (!failed || !failed.error) {
+      if (this.turnError()?.sessionId === sessionId && this.turnError()?.turnId === undefined) {
+        this.turnError.set(null);
+      }
+      return;
+    }
+    if (this.dismissedTurnErrors.has(failed.turnId) || this.turnError()?.turnId === failed.turnId) return;
+    this.turnError.set({
+      sessionId,
+      turnId: failed.turnId,
+      text: failed.error,
+      retryable: failed.visibleInputs.some((input) => input.seq !== undefined),
+    });
+  }
+
+  /** The banner's close button: a dismissal is per turn — the same failure must
+   * not pop back on the next refresh. */
+  dismissTurnError() {
+    const current = this.turnError();
+    if (current?.turnId) this.dismissedTurnErrors.add(current.turnId);
+    this.turnError.set(null);
+  }
+
+  /** `POST /v1/sessions/{id}/retry {turnId}` — re-ask the input the turn
+   * answered, as a new commit. The ledger only grows; history is untouched. */
+  async retryTurn(turnId: string): Promise<boolean> {
+    const sessionId = this.activeId();
+    if (!sessionId || this.retryingTurn()) return false;
+    this.retryingTurn.set(turnId);
+    try {
+      await this.client.retryTurn(sessionId, turnId);
+      this.dismissedTurnErrors.delete(turnId);
+      if (this.turnError()?.turnId === turnId) this.turnError.set(null);
+      this.patchSession(sessionId, { runStatus: "running", pendingDecision: false });
+      this.scheduleRefresh();
+      return true;
+    } catch (error) {
+      this.turnError.set({ sessionId, turnId, text: `重试失败：${messageOf(error)}`, retryable: true });
+      return false;
+    } finally {
+      this.retryingTurn.set(null);
+    }
+  }
+
+  /** Per-session scroll memory (C4): where the reader was and whether they were
+   * following the tail. In-memory only, like the rest of the view state. */
+  scrollState(sessionId: string): ScrollState | undefined {
+    return this.scrollStates.get(sessionId);
+  }
+
+  saveScrollState(sessionId: string, state: ScrollState) {
+    this.scrollStates.set(sessionId, state);
   }
 
   async createSession(): Promise<string | null> {

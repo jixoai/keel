@@ -38,6 +38,34 @@ export interface SessionSummary {
    * loading the last events of a session). */
   title?: string;
   lastMessage?: string;
+  /** The session's newest turn is parked on an open decision. Derived from the
+   * ledger (the tail's last decision event), so the list badge and the
+   * conversation agree on one fact. */
+  pendingDecision?: boolean;
+}
+
+/** A failed turn the composer's error banner is showing (change
+ * keel-workspace-polish C6). `retryable` is false when there is no committed
+ * input to re-ask (a send that never reached the ledger). */
+export interface TurnErrorState {
+  sessionId: string;
+  turnId?: string;
+  text: string;
+  retryable: boolean;
+}
+
+/** A conversation's scroll memory: the reader's intent (following the tail or
+ * reading somewhere above) plus the offset the intent was last seen at. */
+export interface ScrollState {
+  intent: "following" | "detached";
+  offset: number;
+}
+
+/** The answer to `POST /v1/sessions/{id}/retry`. */
+export interface RetryResult {
+  created: boolean;
+  seq: number;
+  requestId: string;
 }
 
 /** An attachment shown in the conversation (uploaded by the composer). */
@@ -301,6 +329,9 @@ export interface SettingsApi {
   plugins(): Promise<PluginsView>;
   triggers(): Promise<TriggersView>;
   fireTrigger(id: string, reason?: string): Promise<FireResultView>;
+  /** Re-ask the input an earlier turn answered: a new user.message carrying
+   * retryOf, plus a run. The ledger only grows. */
+  retryTurn(sessionId: string, turnId: string): Promise<RetryResult>;
 }
 
 /** The engine the UI runs against. `setConnection` is a client-side seam: the

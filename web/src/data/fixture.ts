@@ -24,6 +24,7 @@ import type {
   PluginsView,
   ProviderView,
   ProvidersResponse,
+  RetryResult,
   SecretMeta,
   SecretSaved,
   SecretsView,
@@ -419,6 +420,35 @@ export class FixtureClient implements SettingsApi {
       deduped: false,
       attempts: 1,
     };
+  }
+
+  /** The retry seam, same contract as the server: resolve the turn's own input
+   * from the log and re-ask it as a NEW queued message (never a rewrite). */
+  async retryTurn(sessionId: string, turnId: string): Promise<RetryResult> {
+    const peer = this.need(sessionId);
+    const raw = turnId.startsWith("t_") ? turnId.slice(2) : "";
+    const seq = Number.parseInt(raw, 10);
+    if (!raw || !Number.isFinite(seq) || seq <= 0) {
+      throw new KeelApiError(400, 'turnId must be the client turn id, "t_<seq>"');
+    }
+    const event = peer.events.find((item) => item.seq === seq);
+    if (!event) throw new KeelApiError(404, "turn not found");
+    let source: { text?: string; selection?: ModelSelection } | undefined;
+    if (event.kind === "user.message") {
+      source = event.payload as { text?: string; selection?: ModelSelection };
+    } else if (event.kind === "assistant.message") {
+      const inputSeqs = (event.payload as { inputSeqs?: number[] }).inputSeqs ?? [];
+      const input = peer.events.find((item) => item.seq === inputSeqs[inputSeqs.length - 1]);
+      if (!input || input.kind !== "user.message") {
+        throw new KeelApiError(400, "turn is not a user turn");
+      }
+      source = input.payload as { text?: string; selection?: ModelSelection };
+    } else {
+      throw new KeelApiError(400, "turn is not a user turn");
+    }
+    const requestId = `retry:${this.sequence++}-${Math.random().toString(36).slice(2, 8)}`;
+    await this.send(peer, source.text ?? "", "queue", requestId, undefined, source.selection);
+    return { created: true, seq: peer.nextSeq - 1, requestId };
   }
 
   private guardRevision(expectedRevision: number | undefined) {

@@ -560,6 +560,8 @@ export class ConversationProjection {
         ? `${segment.assistantThinking}\n\n${parsed.thinking}`
         : parsed.thinking;
     }
+    this.touchSegment(segment, parsed.timestamp);
+    if (parsed.errorMessage !== undefined) turn.error = parsed.errorMessage;
     turn.assistantOutput = recomputeAssistantOutput(turn);
 
     for (const call of parsed.toolCalls) {
@@ -657,6 +659,7 @@ export class ConversationProjection {
           entry.call.startedAt = timestamp - parsed.durationMs;
         }
       }
+      this.touchSegment(entry.segment, timestamp);
       return;
     }
     // Missing call (truncated window / foreign log): keep the result visible.
@@ -674,6 +677,7 @@ export class ConversationProjection {
     if (parsed.result !== undefined) view.result = parsed.result;
     if (parsed.error !== undefined) view.error = parsed.error;
     segment.toolCalls.push(view);
+    this.touchSegment(segment, timestamp);
     this.toolCallIndex.set(parsed.toolCallId, { turn, segment, call: view });
   }
 
@@ -778,6 +782,13 @@ export class ConversationProjection {
         stopReason: parsed.stopReason,
         durationMs: parsed.durationMs,
       };
+      // A run-level failure carries its reason here when no assistant message
+      // did (the last segment ends with the run itself).
+      if (parsed.errorMessage !== undefined) {
+        target.error = parsed.errorMessage;
+        const last = target.workSegments[target.workSegments.length - 1];
+        if (last) this.touchSegment(last, parsed.timestamp);
+      }
     }
 
     const hadImmediateReservation = this.pendingOrder.some((requestId) => this.pending.get(requestId)?.immediate === true);
@@ -905,6 +916,15 @@ export class ConversationProjection {
     if (trigger) segment.triggerInput = trigger;
     turn.workSegments.push(segment);
     return segment;
+  }
+
+  /** Widen a segment's ledger-derived time window: the earliest and the latest
+   * event timestamp seen in it. No timestamp, no claim — the renderer uses a
+   * local clock for what the ledger has not dated yet. */
+  private touchSegment(segment: WorkSegment, timestamp: number | undefined): void {
+    if (timestamp === undefined) return;
+    if (segment.startedAt === undefined || timestamp < segment.startedAt) segment.startedAt = timestamp;
+    if (segment.endedAt === undefined || timestamp > segment.endedAt) segment.endedAt = timestamp;
   }
 
   private pushPostTurn(turn: TurnView, kind: string, seq: number, note?: string): void {

@@ -33,6 +33,10 @@ export interface InputView {
 export interface WorkSegment {
   segmentId: string;
   triggerInput?: InputView;
+  /** 该段首/末事件自带的时间戳（epoch ms）。没有事件时间戳的段为空——
+   * 渲染器的计时只能来自账本事实或本地时钟，绝不写回。 */
+  startedAt?: number;
+  endedAt?: number;
   /** 该段内的工具调用与结果（按事件顺序）。 */
   toolCalls: ToolCallView[];
   /** 该段的 assistant 文本（可能为空：纯工具段）。 */
@@ -76,6 +80,9 @@ export interface TurnView {
   visibleInputs: InputView[];
   workSegments: WorkSegment[];
   assistantOutput?: string;
+  /** 该回合失败时的原因（账本里 assistant.message / run.finished 的
+   * errorMessage）。渲染器据此出错误横幅；重试是对同一输入的再次提交。 */
+  error?: string;
   postTurnEvents: Array<{ kind: string; seq: number; note?: string }>;
   runSummary?: RunSummary;
 }
