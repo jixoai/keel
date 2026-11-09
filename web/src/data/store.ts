@@ -205,8 +205,10 @@ class KeelStore {
   private sessionSelections = new Map<string, ModelSelection>();
   /** Per-session scroll memory (C4): intent plus the offset it was seen at. */
   private scrollStates = new Map<string, ScrollState>();
-  /** Turn failures the reader closed (C6): a dismissed banner stays dismissed. */
-  private dismissedTurnErrors = new Set<string>();
+  /** The turn whose failure the reader closed (C6): dismissal hides the banner
+   * for the open session view; re-opening the session shows the failure again,
+   * because the turn is still the session's newest state. */
+  private dismissedTurnError: string | null = null;
   /** Decisions already announced (C13): a reconnect replay must not re-notify. */
   private notifiedDecisions = new Set<string>();
   /** Set as soon as the user navigates by hand, so the boot route read never
@@ -708,8 +710,10 @@ class KeelStore {
     this.connection.set({ status: "connecting", lastSeq: 0 });
     this.partial.set(undefined);
     this.decisionDeadlines.set({});
-    // The banner belongs to the session that produced it (C6).
+    // The banner belongs to the session that produced it (C6); a dismissal is
+    // per opening — coming back shows the session's newest state again.
     if (this.turnError()?.sessionId !== sessionId) this.turnError.set(null);
+    this.dismissedTurnError = null;
     this.answered = new Set();
     const engine = createCoreEngine(sessionId);
     this.engine = engine;
@@ -924,30 +928,32 @@ class KeelStore {
     return this.sessions().find((row) => row.sessionId === id)?.pendingDecision === true;
   }
 
-  /** The banner follows the open session's newest failed turn. A dismissed turn
-   * stays dismissed until a newer failure or an explicit retry. */
+  /** The banner follows the open session's **newest** turn: an older failure
+   * that a later turn moved past is history, not a live problem. A dismissed
+   * turn stays dismissed until it fails again or is explicitly retried. */
   private syncTurnError(sessionId: string, view: ConversationView) {
-    const failed = [...view.turns].reverse().find((turn) => turn.status === "failed" && !!turn.error);
-    if (!failed || !failed.error) {
+    const last = view.turns[view.turns.length - 1];
+    if (!last || last.status !== "failed" || !last.error) {
       if (this.turnError()?.sessionId === sessionId && this.turnError()?.turnId === undefined) {
         this.turnError.set(null);
       }
       return;
     }
-    if (this.dismissedTurnErrors.has(failed.turnId) || this.turnError()?.turnId === failed.turnId) return;
+    if (this.dismissedTurnError === last.turnId || this.turnError()?.turnId === last.turnId) return;
     this.turnError.set({
       sessionId,
-      turnId: failed.turnId,
-      text: failed.error,
-      retryable: failed.visibleInputs.some((input) => input.seq !== undefined),
+      turnId: last.turnId,
+      text: last.error,
+      retryable: last.visibleInputs.some((input) => input.seq !== undefined),
     });
   }
 
   /** The banner's close button: a dismissal is per turn — the same failure must
-   * not pop back on the next refresh. */
+   * not pop back on the next refresh of this view. Re-opening the session shows
+   * it again (the turn is still the newest state). */
   dismissTurnError() {
     const current = this.turnError();
-    if (current?.turnId) this.dismissedTurnErrors.add(current.turnId);
+    if (current?.turnId) this.dismissedTurnError = current.turnId;
     this.turnError.set(null);
   }
 
@@ -959,7 +965,7 @@ class KeelStore {
     this.retryingTurn.set(turnId);
     try {
       await this.client.retryTurn(sessionId, turnId);
-      this.dismissedTurnErrors.delete(turnId);
+      if (this.dismissedTurnError === turnId) this.dismissedTurnError = null;
       if (this.turnError()?.turnId === turnId) this.turnError.set(null);
       this.patchSession(sessionId, { runStatus: "running", pendingDecision: false });
       this.scheduleRefresh();
