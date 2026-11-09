@@ -364,3 +364,16 @@ scripts/real-model-e2e.sh --models-all       # 两半一起跑，证据可逐字
 
 见 `.agents/reports/keel/<本次报告目录>/`（原始证据在脚本打印的
 `KEEL_E2E_EVIDENCE_DIR`，不入库）。
+
+## 10. 重试相（`--settings` 内，2026-11-06 增）
+
+`--settings` 相在「重置后的一条输入」之后追加一步**重试**：脚本从本会话已提交的事件里取出
+最后一个 `user.message` 的 seq，用投影派生的回合标识 `t_<seq>` 调
+`POST /v1/sessions/{id}/retry`，等待新 run 终态，然后断言三件事：
+
+1. **账本只增长**：事件流里出现且只出现一条新的 `user.message`，其 `retryOf` 等于原输入 seq；
+2. **重试真的跑了**：这条新输入之后有 `assistant.message` 与 `run.finished`；
+3. **历史未被改写**：重试前的事件在重试后**仍在各自的 seq 上**（逐条 kind 对照）。
+
+重试**故意不幂等**（同一 turnId 重发即第二次有意尝试），所以上游天气坏时脚本按同样语义
+再发一次（有界 3 次），不做 requestId 去重——这正是产品语义本身。
