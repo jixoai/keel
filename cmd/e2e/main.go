@@ -67,6 +67,7 @@ func main() {
 	results = append(results, e.caseSSECursorAcrossRestart())
 	results = append(results, e.caseBlobResumeAcrossRestart())
 	results = append(results, e.caseAgentReply())
+	results = append(results, e.caseRetryAppends())
 	results = append(results, e.caseRunResumeAfterKill())
 	results = append(results, e.caseToolReplayAfterKill())
 	results = append(results, e.caseConcurrentKillNoLoss())
@@ -700,6 +701,110 @@ func (e *env) caseAgentReply() result {
 	r.Checks = []string{"input committed", "worker produced one assistant message", "reply is the deterministic fake", "idle re-run is a no-op"}
 	r.Pass = true
 	r.Detail = "input → exactly one user event and one assistant reply"
+	return r
+}
+
+// caseRetryAppends: POST /v1/sessions/{id}/retry re-asks an earlier turn's own
+// input as a NEW commit. The ledger only grows — a fresh user.message carrying
+// retryOf, its own run — and every original event stays at its own seq.
+func (e *env) caseRetryAppends() result {
+	ctx := context.Background()
+	r := result{Name: "retry: re-ask appends a new input, history is not rewritten"}
+	fail := func(format string, args ...any) result {
+		r.Detail = fmt.Sprintf(format, args...)
+		return r
+	}
+	e.extraEnv = nil
+	if err := e.start(); err != nil {
+		return fail("start: %v", err)
+	}
+	tenant, session, err := e.newTenantSession(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	var out inputResp
+	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
+		map[string]string{"text": "hello retry", "requestId": "retry-1"}, &out); err != nil || code != 201 {
+		return fail("input: %d %v", code, err)
+	}
+	before, err := waitEvents(ctx, e.base, tenant, session, hasFinal, 20*time.Second)
+	if err != nil {
+		return fail("first run: %v", err)
+	}
+	// The projection derives a turn id as "t_<the turn's first input seq>".
+	var turnSeq int64
+	for _, ev := range before {
+		if ev.Kind == "user.message" {
+			turnSeq = ev.Seq
+			break
+		}
+	}
+	if turnSeq == 0 {
+		return fail("no committed user.message to retry")
+	}
+	// A malformed id is refused before anything is written.
+	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/retry", tenant,
+		map[string]string{"turnId": "nope"}, nil); err != nil || code != 400 {
+		return fail("malformed turnId: code=%d err=%v (want 400)", code, err)
+	}
+	var retryResp struct {
+		Created   bool   `json:"created"`
+		Seq       int64  `json:"seq"`
+		RequestID string `json:"requestId"`
+	}
+	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/retry", tenant,
+		map[string]string{"turnId": fmt.Sprintf("t_%d", turnSeq)}, &retryResp); err != nil || code != 201 {
+		return fail("retry: %d %v", code, err)
+	}
+	after, err := waitEvents(ctx, e.base, tenant, session, func(evs []event) bool {
+		return countKind(evs, "user.message") == 2 && countKind(evs, "run.finished") >= 2
+	}, 20*time.Second)
+	if err != nil {
+		return fail("second run: %v", err)
+	}
+	// The re-ask names what it re-asks, and the fake answered it again.
+	var reask *event
+	for i := range after {
+		if after[i].Kind != "user.message" || after[i].Seq == turnSeq {
+			continue
+		}
+		reask = &after[i]
+	}
+	if reask == nil {
+		return fail("the retry appended no user.message")
+	}
+	var payload struct {
+		RetryOf *int64 `json:"retryOf"`
+		Text    string `json:"text"`
+	}
+	_ = json.Unmarshal(reask.Payload, &payload)
+	if payload.RetryOf == nil || *payload.RetryOf != turnSeq {
+		return fail("the re-ask carries retryOf=%v (want %d)", payload.RetryOf, turnSeq)
+	}
+	for _, ev := range before {
+		for _, cur := range after {
+			if cur.Seq == ev.Seq && cur.Kind != ev.Kind {
+				return fail("original seq %d changed kind %s → %s", ev.Seq, ev.Kind, cur.Kind)
+			}
+		}
+	}
+	repliedAgain := false
+	for _, ev := range after {
+		if ev.Seq > reask.Seq && ev.Kind == "assistant.message" && assistantStop(ev) == "end_turn" {
+			repliedAgain = true
+		}
+	}
+	if !repliedAgain {
+		return fail("the re-ask never produced its own answer")
+	}
+	r.Checks = []string{
+		"a malformed turn id is refused with 400 (nothing written)",
+		"retry appends one new user.message carrying retryOf",
+		"the re-ask runs to its own terminal answer",
+		"every original event is still at its own seq",
+	}
+	r.Pass = true
+	r.Detail = fmt.Sprintf("turn t_%d re-asked at seq %d; %d original events untouched", turnSeq, reask.Seq, len(before))
 	return r
 }
 

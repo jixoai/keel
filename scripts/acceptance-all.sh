@@ -8,7 +8,7 @@
 #   conformance-summary.txt  its human summary
 #   r1-live.txt, r1/         the R1 capture (baseline e7361f8 vs candidate)
 #   r1-negative.txt          stale-rule negative control (must FAIL)
-#   e2e-7of7.json            cmd/e2e on a freshly created database
+#   e2e-8of8.json            cmd/e2e on a freshly created database
 #   drain-smoke.txt          SIGTERM drain (health during drain, 503, SSE frame)
 #   inflight.txt             input-during-run probe
 #   external-smoke.log       external gateway end to end (DSH reference sidecar)
@@ -143,7 +143,7 @@ say "PASS: R1 negative control refused (see $EVID/r1-negative.txt)"
 # --- 4. E2E on a fresh database --------------------------------------------
 db_reset keel_e2e_final
 port_free 13745
-run_split "E2E (fresh database)" "$EVID/e2e-7of7.json" "$EVID/e2e-run.log" \
+run_split "E2E (fresh database)" "$EVID/e2e-8of8.json" "$EVID/e2e-run.log" \
   go run ./cmd/e2e -bin "$BIN" -dsn "$(dsn keel_e2e_final)" -port 13745 \
   -reset -reset-confirm keel_e2e_final
 
