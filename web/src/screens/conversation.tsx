@@ -212,10 +212,12 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
     const id = store.activeId();
     const row = store.sessions().find((item) => item.sessionId === id);
     const named = (row?.title ?? "").trim();
-    if (named) return named;
     // Never a raw id as a title (C1): an unnamed session reads as "新会话"
-    // plus how long ago it was created (no createdAt: just the name).
+    // plus how long ago it was created (no createdAt: just the name). The
+    // store's placeholder name counts as unnamed, so the header and the list
+    // row say the same thing.
     const created = formatTime(row?.createdAt);
+    if (named && named !== "新会话") return named;
     return created ? `新会话 · ${created}` : "新会话";
   };
   const jumpToEnd = () => {
