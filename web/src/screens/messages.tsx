@@ -18,7 +18,7 @@ import type {
 } from "../data/contract";
 import { formatDuration, formatTime, formatTokens, preview } from "../data/wire";
 import { store } from "../data/store";
-import { Caret, Divider, IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
+import { Caret, Divider, IconButton, Press, Spinner, StatusDot } from "../ui/primitives";
 import { fitCells, wrapCells } from "../ui/text";
 import { Icon, type IconName } from "../ui/icons";
 import { alpha, colors, glass, mono, radius, space } from "../ui/theme";
