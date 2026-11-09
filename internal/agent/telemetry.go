@@ -48,17 +48,28 @@ func (r *Runner) recordRunMetrics(res RunResult, started time.Time, err error) {
 	if r.Telemetry == nil || r.Telemetry.Metrics == nil {
 		return
 	}
+	// The outcome follows the attempt's terminal status, not just the returned
+	// error: a provider turn failure rides the loop as a terminal assistant
+	// message and settles the run failed without a Go error.
 	outcome := "ok"
-	if err != nil {
+	switch {
+	case err != nil || res.Summary.Status == kernel.RunSummaryFailed:
 		outcome = "error"
+	case res.Summary.Status == kernel.RunSummaryCancelled:
+		outcome = "cancelled"
 	}
 	model := res.Summary.Model
 	if model == "" {
 		model = r.Model
 	}
+	provider := res.Summary.Provider
+	if provider == "" {
+		provider = r.ProviderName
+	}
 	metricAttributes := telemetry.SpanAttributes{
-		"model":   model,
-		"outcome": outcome,
+		"model":    model,
+		"provider": provider,
+		"outcome":  outcome,
 	}
 	r.Telemetry.Metrics.Counter("keel.agent.runs", nil).Add(1, metricAttributes)
 	r.Telemetry.Metrics.Histogram("keel.agent.run.duration", &telemetry.HistogramOptions{

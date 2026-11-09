@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/kernel"
@@ -28,6 +29,22 @@ type ActiveModel struct {
 	// model carries (max output tokens, reasoning effort, ...). The runtime
 	// forwards it as StreamConfig.Extra without interpreting it.
 	RequestPatch map[string]any
+	// Properties is the resolved capability fact sheet. Nil means "unknown"
+	// (the static/fake path), which is deliberately different from "declares no
+	// capability": the runtime only refuses what the configuration explicitly
+	// denies.
+	Properties *ModelProperties
+}
+
+// ModelProperties is the capability fact sheet of an attempt's model, as plain
+// data: the runtime must not depend on configuration types, and the caller (the
+// product layer) owns what the fields mean. The attachment/media gate is not
+// wired to this yet (see the change's tasks); the tool gate is.
+type ModelProperties struct {
+	SupportsToolCall         bool
+	SupportsJSONSchemaOutput bool
+	SupportsNativeWebSearch  bool
+	ImageInput               bool
 }
 
 // ModelResolver is the product seam between a run and its execution identity.
@@ -88,11 +105,16 @@ func (r *Runner) activeModel(ctx context.Context, lease kernel.Lease, events []s
 	if resolved.ThinkingLevel == "" {
 		resolved.ThinkingLevel = am.ThinkingLevel
 	}
-	// A resolver that leaves the transport unset would produce a nil stream in
-	// the loop (a panic at the first request); the static one is the honest
-	// fallback only when the resolver answered without a transport at all.
+	// A resolver that answers without a transport would make the loop call the
+	// boot/fake stream while the ledger records the resolved identity — exactly
+	// the "the record says model X, the wire was something else" failure this
+	// seam exists to prevent. It is refused, not papered over.
 	if resolved.Stream == nil {
-		resolved.Stream = am.Stream
+		return ActiveModel{}, fmt.Errorf("agent: model resolver returned no transport for %s/%s",
+			resolved.ProviderID, resolved.Model)
+	}
+	if resolved.Model == "" {
+		return ActiveModel{}, fmt.Errorf("agent: model resolver returned no model id (provider %q)", resolved.ProviderID)
 	}
 	return resolved, nil
 }

@@ -97,12 +97,13 @@ func (f *guideFeed) poll(ctx context.Context) []agentcore.AgentMessage {
 			continue
 		}
 		if len(bytes.TrimSpace(payload.Selection)) > 0 && !bytes.Equal(bytes.TrimSpace(payload.Selection), []byte("null")) {
-			// Downgrade: a selection names the model its answer must come from,
-			// and the attempt's execution identity is fixed at load. Injecting it
-			// mid-turn would answer it with the running model while the log says
-			// the input asked for another one. It waits for the next attempt,
-			// which resolves the selection it carries.
-			continue
+			// Downgrade: a selection names the model its answer must come from, and
+			// the attempt's execution identity is fixed at load. Injecting it mid-turn
+			// would answer it with the running model while the log says it asked for
+			// another one. It waits for the next attempt, which resolves what it
+			// carries — and the scan stops here so a later plain guide cannot jump
+			// ahead of it (the answer order follows the submission order).
+			return nil
 		}
 		f.mu.Lock()
 		f.handed[ev.Seq] = true

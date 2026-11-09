@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/jixoai/keel/internal/agentcore"
@@ -378,7 +379,26 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	feed := newGuideFeed(r, lease, res.ReadThrough)
 	summary := &res.Summary
 	turns := 0
+	// maxTurnsHit is written by the loop goroutine (ShouldStopAfterTurn) and read
+	// here after the stream closed: an atomic is the cheapest correct handoff, and
+	// the run-level stop reason is labelled on this side so the two goroutines
+	// never share a plain field.
+	var maxTurnsHit atomic.Bool
+	// answerCommitted records that this attempt committed a terminal answer, which
+	// the cancellation guard reads to tell "the caller stopped an attempt that had
+	// already answered" from "the attempt produced nothing".
+	answerCommitted := false
 	tools := r.registry()
+	// A model whose configuration denies tool calls must not be handed any: the
+	// provider would reject the request (or silently ignore the tools) and the run
+	// would fail somewhere far from the cause. Refusing here keeps the fact and the
+	// consequence in one place.
+	if props := model.Properties; props != nil && !props.SupportsToolCall {
+		if listed := tools.List(); len(listed) > 0 {
+			return res, fmt.Errorf("agent: model %s/%s declares no tool-call support but %d tools are available",
+				model.ProviderID, model.Model, len(listed))
+		}
+	}
 	// Only a trailing user input is this run's prompt; a run that continues from
 	// committed tool results must not replay prompt lifecycle events for them.
 	promptCount := 0
@@ -436,7 +456,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		ShouldStopAfterTurn: func(ctx context.Context, agentCtx *agentcore.AgentContext) bool {
 			turns++
 			if r.MaxTurns > 0 && turns >= r.MaxTurns {
-				summary.StopReason = StopReasonMaxTurns
+				maxTurnsHit.Store(true)
 				return true
 			}
 			return false
@@ -512,6 +532,11 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				if assistant.StopReason != "" {
 					summary.StopReason = assistant.StopReason
 				}
+				if assistant.StopReason == agentcore.StopReasonEndTurn {
+					// A terminal answer is in the log: the attempt's work is done,
+					// whatever the caller decides afterwards.
+					answerCommitted = true
+				}
 				if assistant.StopReason == agentcore.StopReasonError {
 					summary.ErrorMessage = assistant.ErrorMessage
 				}
@@ -570,10 +595,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// reads the returned error, and "done" would claim an answer nobody produced.
 	// The one honest exception is an attempt whose final answer is already
 	// committed: that work is done, and reporting it cancelled would hide it.
-	if ctxErr := ctx.Err(); ctxErr != nil && summary.StopReason != agentcore.StopReasonEndTurn {
+	if ctxErr := ctx.Err(); ctxErr != nil && !answerCommitted {
 		res.Cursor = cursor
 		summary.StopReason = agentcore.StopReasonAborted
 		return res, ctxErr
+	}
+	if maxTurnsHit.Load() {
+		summary.StopReason = StopReasonMaxTurns
 	}
 	if _, err := stream.Result(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		res.Cursor = cursor
@@ -762,6 +790,15 @@ func newestAssistantHasToolCalls(events []store.Event) bool {
 // legacyOwedTurn is the pre-inputSeqs heuristic, kept for logs that predate the
 // consumption fact (and for messages persisted by helpers that do not record
 // it). New logs never take this path.
+//
+// Bookkeeping kinds are skipped when reading the log tail: a failed attempt
+// commits its summary and settles without ever producing an answer, so
+// "run.finished is the newest event" says nothing about whether the input was
+// answered. Reading the tail literally would strand the input of every
+// deployment whose very first attempt fails before committing anything (an
+// unrunnable selection, a missing credential): the watermark that attempt
+// recorded covers the input, so the retry would settle done with no answer at
+// all.
 func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
 	if readWatermark > 0 {
 		for _, ev := range events {
@@ -770,8 +807,15 @@ func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
 			}
 		}
 	}
-	if len(events) > 0 && events[len(events)-1].Kind == store.EventUserMessage {
-		return true
+	for i := len(events) - 1; i >= 0; i-- {
+		switch events[i].Kind {
+		case store.EventRunStarted, store.EventRunFailed, store.EventRunFinished,
+			store.EventCompaction, store.EventExternalEvent:
+			continue
+		case store.EventUserMessage:
+			return true
+		}
+		break
 	}
 	return newestAssistantHasToolCalls(events)
 }
