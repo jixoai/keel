@@ -1270,6 +1270,62 @@ function SectionTabs() {
 
 /** The standalone settings page. Rendered by the app shell when the route is
  * `settings`; the workspace (and its open session) waits underneath. */
+/**
+ * The settings page edits server state, so it must say when there is no server
+ * behind it: fixture mode is a demo, never the product's answer. The strip sits
+ * above every section and offers the honest way back — probe again.
+ */
+function DataSourceStrip() {
+  return (
+    <If when={store.mode() !== "http"}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.sm,
+          paddingHorizontal: space.md,
+          paddingVertical: 7,
+          backgroundColor: store.mode() === "checking" ? colors.infoTint : colors.warningTint,
+          borderBottomWidth: 1,
+          borderBottomColor:
+            store.mode() === "checking" ? alpha(colors.info, 0.32) : alpha(colors.warning, 0.32),
+        }}
+      >
+        <If
+          when={store.mode() === "checking"}
+          else={<Icon name="alert" size={13} tint={colors.warning} />}
+        >
+          <Spinner size={12} tint={colors.info} />
+        </If>
+        <Text style={{ flex: 1, fontSize: 11.5, color: colors.foreground }}>
+          {store.mode() === "checking"
+            ? "正在探测 keel serve…连接后本页显示服务端的真实配置。"
+            : "演示数据 · 未连接服务：以下内容来自本地 fixture，不是服务端的真实状态。"}
+        </Text>
+        <If when={store.mode() === "fixture"}>
+          <Press
+            onPress={() => void store.reconnect()}
+            accessibilityLabel="重试连接服务"
+            hoverStyle={{ opacity: 0.88 }}
+            style={{
+              paddingHorizontal: 10,
+              height: 22,
+              borderRadius: radius.pill,
+              backgroundColor: colors.warning,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ fontSize: 10, fontWeight: "600", color: colors.primaryForeground }}>
+              重试连接
+            </Text>
+          </Press>
+        </If>
+      </View>
+    </If>
+  );
+}
+
 export function SettingsScreen() {
   const load = () => {
     const section = settingsSection();
@@ -1278,11 +1334,15 @@ export function SettingsScreen() {
     else void store.loadPlugins();
   };
   // Each section loads what it shows; switching sections (or re-entering the
-  // page) refreshes that section. The load goes out of the effect's own turn:
-  // a mount-time load sets its loading signals synchronously, and writing them
-  // while the tree is still mounting must not happen inside the effect.
+  // page) refreshes that section. A booting probe is waited for, not raced:
+  // the effect re-runs when `mode` settles, which is when the transport the
+  // load should use actually exists. The load goes out of the effect's own
+  // turn: a mount-time load sets its loading signals synchronously, and
+  // writing them while the tree is still mounting must not happen inside the
+  // effect.
   effect(() => {
     if (store.route() !== "settings") return;
+    if (store.mode() === "checking") return;
     settingsSection();
     const timer = setTimeout(load, 0);
     cleanup(() => clearTimeout(timer));
@@ -1343,6 +1403,7 @@ export function SettingsScreen() {
           <Icon name="refresh" size={15} tint={colors.mutedForeground} />
         </Press>
       </View>
+      <DataSourceStrip />
       <Scroll style={{ flex: 1 }} contentStyle={{ alignItems: "center" }}>
         <View
           style={{

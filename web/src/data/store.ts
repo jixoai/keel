@@ -226,6 +226,21 @@ class KeelStore {
     return true;
   }
 
+  /**
+   * Probe the server again from a fixture view (the settings page's "重试连接").
+   * The answer decides where we land: a live server, the login gate, or back
+   * to the demo fixture — never a silently fabricated one.
+   */
+  async reconnect() {
+    if (this.mode() === "checking") return;
+    this.closeStream();
+    this.activeId.set(null);
+    this.conversation.set(null);
+    this.mode.set("checking");
+    this.resetSettingsState();
+    await this.detect();
+  }
+
   /** Switch transports by hand (the sidebar footer's badge). */
   async switchMode(mode: Mode) {
     if (mode === this.mode() || mode === "checking") return;
