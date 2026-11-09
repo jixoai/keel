@@ -781,6 +781,8 @@ export class ConversationProjection {
         tokensOut: parsed.tokensOut,
         stopReason: parsed.stopReason,
         durationMs: parsed.durationMs,
+        ...(parsed.provider ? { provider: parsed.provider } : {}),
+        ...(parsed.model ? { model: parsed.model } : {}),
       };
       // A run-level failure carries its reason here when no assistant message
       // did (the last segment ends with the run itself).

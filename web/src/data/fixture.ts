@@ -675,7 +675,7 @@ export class FixtureClient implements SettingsApi {
       },
       {
         kind: "run.finished",
-        payload: { turns: 1, tokensIn: 1820, tokensOut: 364, stopReason: "done", durationMs: 6400, timestamp: base - 531_000 },
+        payload: { turns: 1, tokensIn: 1820, tokensOut: 364, stopReason: "done", durationMs: 6400, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: base - 531_000 },
       },
     ]);
 
@@ -711,7 +711,7 @@ export class FixtureClient implements SettingsApi {
       },
       {
         kind: "run.finished",
-        payload: { turns: 1, tokensIn: 2210, tokensOut: 268, stopReason: "done", durationMs: 5100, timestamp: base - 1_488_000 },
+        payload: { turns: 1, tokensIn: 2210, tokensOut: 268, stopReason: "done", durationMs: 5100, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: base - 1_488_000 },
       },
     ]);
 
@@ -811,7 +811,7 @@ export class FixtureClient implements SettingsApi {
       },
       {
         kind: "run.finished",
-        payload: { turns: 1, tokensIn: 980, tokensOut: 210, stopReason: "done", durationMs: 3200, timestamp: base - 1_983_000 },
+        payload: { turns: 1, tokensIn: 980, tokensOut: 210, stopReason: "done", durationMs: 3200, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: base - 1_983_000 },
       },
     ]);
 
@@ -830,7 +830,7 @@ export class FixtureClient implements SettingsApi {
       },
       {
         kind: "run.finished",
-        payload: { turns: 1, tokensIn: 0, tokensOut: 0, stopReason: "failed", durationMs: 1200, timestamp: base - 3_593_000 },
+        payload: { turns: 1, tokensIn: 0, tokensOut: 0, stopReason: "failed", durationMs: 1200, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: base - 3_593_000 },
       },
     ], "failed");
 
@@ -1113,6 +1113,8 @@ export class FixtureClient implements SettingsApi {
       tokensOut: 180,
       stopReason,
       durationMs: 2400,
+      provider: "s2api",
+      model: "deepseek-v4.1-flash",
       timestamp: Date.now(),
     });
     if (peer.queue.length > 0 && !peer.drainPaused) {

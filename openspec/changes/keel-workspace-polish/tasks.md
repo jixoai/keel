@@ -4,9 +4,13 @@
 
 ## S. 服务端支撑
 
-- [ ] S1 `GET /v1/sessions` 行带 `title`（首条用户消息派生）与 `createdAt`；无消息为空标题
-- [ ] S2 `POST /v1/sessions/{id}/retry {turnId}`：追加新 run（不改写历史；幂等键沿用 requestId 语义）
-- [ ] S3 回合视图/事件带分段起止时间（`startedAt/endedAt/activeMs`），或给出可用的替代投影
+- [x] S1 `GET /v1/sessions` 行带 `title`（首条用户消息派生，60 字符内）与 `createdAt`；无消息为空标题
+      （internal/agentapi/sessions.go；客户端 enrich 也改为「不拿裸 id 当标题」）
+- [x] S2 `POST /v1/sessions/{id}/retry {turnId}`：追加新 run（不改写历史；新 user.message 带
+      `retryOf: <原输入 seq>` 作为账本事实；故意不幂等；400/404 语义见 internal/httpapi/retry.go）
+- [x] S3 回合视图/事件带分段起止时间：投影 `WorkSegment.startedAt/endedAt` 由事件自带 timestamp 派生
+      （`touchSegment`），`TurnView.error` 由 assistant.message/run.finished 的 errorMessage 派生；
+      进行中的段允许渲染器用本地时钟，不写回
 
 ## C. 客户端（P0）
 
@@ -25,7 +29,8 @@
 - [ ] C10 分段折叠与计时（工作中/已工作/已停止），最新答案在折叠之外
 - [ ] C11 思考流式中折叠＋一行摘要＋完成耗时
 - [ ] C12 待发送引导显示在流末尾并标注「等待引导当前任务…」
-- [ ] C13 通知按 decisionId 去重，重连回放不重复弹
+- [ ] C13 通知按 decisionId 去重，重连回放不重复弹（store 侧已落地：`notifiedDecisions`；
+      屏幕侧由 C 项一并验证）
 - [ ] C14 空态时间问候
 
 ## Q. 验收
@@ -34,8 +39,10 @@
 - [ ] Q2 真实模型 E2E：重试端点跑通（新 run、旧回合保留）
 - [ ] Q3 既有 18 门 + settings change 的 E2E 不退化
 - [ ] Q4 TUI 目标可编译、`nsh test --target tui` 绿
+- [ ] Q5 改动文件前后截图审计（Owner 2026-11-04 规则）：每个改动文件在覆盖表里有页面/状态归属，
+      视觉面产出 before/after 成对截图，UNCOVERED = 0（落 .agents/reports/keel/2026-11-09-workspace-polish/）
 
 ## V. 复审与交付
 
 - [ ] V1 子代理对抗复核（体验口径/账本语义不被渲染器污染/无回归）
-- [ ] V2 报告（before/after 截图）＋ archive
+- [ ] V2 报告（before/after 截图）＋ 公网链接 ＋ archive

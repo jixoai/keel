@@ -1567,6 +1567,19 @@ print(json.dumps(doc))')")"
   settings_turn_until "$base" "$JAR" "reset" "$prefix-run-reset" "重置后的一条输入" done \
     || die "the reset attempt never settled done; see $prefix-status.json"
 
+  # Retry (change keel-workspace-polish S2): re-ask the last turn's own input.
+  # The projection's derived turn id is "t_<the turn's first input seq>"; the
+  # ledger grows — a NEW user.message carrying retryOf — and nothing is
+  # rewritten.
+  RETRY_TURN_SEQ="$(EVENTS_FILE="$prefix-run-reset-events.json" python3 -c '
+import json, os
+events = json.load(open(os.environ["EVENTS_FILE"])).get("events") or []
+seqs = [e["seq"] for e in events if e.get("kind") == "user.message"]
+print(seqs[-1] if seqs else "")')"
+  [ -n "$RETRY_TURN_SEQ" ] || die "no committed user.message to retry"
+  retry_until "$base" "$JAR" "$RETRY_TURN_SEQ" "$prefix-retry" 3 \
+    || die "the retry never settled done; see $prefix-retry-status.json"
+
   SETTINGS_MODEL="$MODEL" SECOND_MODEL="${KEEL_E2E_SECOND_MODEL:-claude-sonnet-5}" \
   BEFORE="$prefix-get-before.json" AFTER="$prefix-get-after.json" RESET="$prefix-get-reset.json" \
   PUT_CODE="$SETTINGS_PUT_CODE" GET_CODE="$SETTINGS_GET_CODE" BAD_CODE="$SETTINGS_BAD_CODE" \
@@ -1574,6 +1587,8 @@ print(json.dumps(doc))')")"
   DELETE_CODE="$SETTINGS_DELETE_CODE" REV_BEFORE="$SETTINGS_REV_BEFORE" \
   EVENTS_BEFORE="$prefix-run-before-events.json" EVENTS_AFTER="$prefix-run-after-events.json" \
   EVENTS_RESET="$prefix-run-reset-events.json" BODIES="$bodies" \
+  RETRY_SEQ="$RETRY_TURN_SEQ" RETRY_EVENTS="$prefix-retry-events.json" \
+  RESET_EVENTS="$prefix-run-reset-events.json" \
   SUMMARY_OUT="$EVIDENCE_DIR/settings-summary.json" \
   python3 - <<'PY' || die "model-settings assertions failed; see $EVIDENCE_DIR/settings-summary.json"
 import json, os
@@ -1638,6 +1653,35 @@ check("the run after the reset uses the deployment model", last_finished_model(o
 rows = [json.loads(line) for line in open(os.environ["BODIES"], encoding="utf-8") if line.strip()]
 used = {r.get("model") for r in rows}
 check("the gateway received both models", {first, second} <= used, "wire models=%s" % sorted(used))
+
+
+def payload_of(event):
+    p = event.get("payload")
+    if isinstance(p, str):
+        return json.loads(p)
+    return p or {}
+
+
+# Retry: the ledger grew, the original turns were not rewritten.
+retry_events = load(os.environ["RETRY_EVENTS"]).get("events") or []
+reset_events = load(os.environ["RESET_EVENTS"]).get("events") or []
+retry_seq = int(os.environ["RETRY_SEQ"])
+reasks = [e for e in retry_events if e.get("kind") == "user.message" and payload_of(e).get("retryOf") == retry_seq]
+check("the retry appended one re-ask carrying retryOf", len(reasks) == 1,
+      "retryOf=%s matches=%d" % (retry_seq, len(reasks)))
+if reasks:
+    new_seq = reasks[0]["seq"]
+    later = [e for e in retry_events if e["seq"] > new_seq]
+    check("the re-ask ran to a fresh terminal run",
+          any(e.get("kind") == "run.finished" for e in later) and
+          any(e.get("kind") == "assistant.message" for e in later),
+          "seqs after %s: %s" % (new_seq, [e.get("kind") for e in later]))
+    untouched = all(
+        any(o["seq"] == e["seq"] and o.get("kind") == e.get("kind") for o in retry_events)
+        for e in reset_events
+    )
+    check("the original turns are still present at their own seqs", untouched,
+          "%d original events" % len(reset_events))
 
 summary = {"ok": all(c["ok"] for c in checks), "checks": checks}
 with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
@@ -1851,6 +1895,33 @@ import json, os
 print(json.dumps({"text": os.environ["TEXT"], "requestId": os.environ["REQUEST_ID"]}))')")"
   [ "$code" = "201" ] || die "input ($label) returned HTTP $code: $(cat "$prefix-input.json" 2>/dev/null)"
   info "input committed ($label)"
+}
+
+# retry_until BASE JAR TURN_SEQ PREFIX [ATTEMPTS] — POST /v1/sessions/{id}/retry
+# until the re-asked turn settles. A retry is intentionally not idempotent (a
+# retry that deduplicated against the original would be a no-op), so provider
+# weather is answered with another intentional attempt, bounded like the
+# settings turns.
+retry_until() {
+  local base="$1" jar="$2" seq="$3" prefix="$4" attempts="${5:-3}" i code status
+  for i in $(seq 1 "$attempts"); do
+    code="$(serve_json POST "$jar" "$base/v1/sessions/$SESSION/retry" "$prefix-attempt-$i.json" \
+      "{\"turnId\":\"t_$seq\"}")"
+    if [ "$code" != "201" ]; then
+      info "retry attempt $i returned HTTP $code: $(cat "$prefix-attempt-$i.json" 2>/dev/null)"
+      sleep 2
+      continue
+    fi
+    if wait_serve_run "$base" "$jar" "$SESSION" "$prefix-events.json" "$prefix-status.json" done; then
+      return 0
+    fi
+    status="$(RUN_FILE="$prefix-status.json" python3 -c 'import json,os
+try: print(json.load(open(os.environ["RUN_FILE"])).get("status") or "none")
+except Exception: print("none")')"
+    info "retry attempt $i did not settle done (status=$status); retrying"
+    sleep 2
+  done
+  return 1
 }
 
 # --- phases ----------------------------------------------------------------

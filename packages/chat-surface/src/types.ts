@@ -69,6 +69,10 @@ export interface RunSummary {
   tokensOut: number;
   stopReason: string;
   durationMs: number;
+  /** The execution identity this run resolved to (provider + model id), when
+   * the run committed one. */
+  provider?: string;
+  model?: string;
 }
 
 export interface TurnView {

@@ -307,6 +307,9 @@ export interface ParsedRunFinished {
   tokensOut: number;
   durationMs: number;
   errorMessage?: string;
+  /** The execution identity the attempt resolved to (kernel-checked shape). */
+  provider?: string;
+  model?: string;
   timestamp?: number;
 }
 
@@ -334,6 +337,8 @@ export function parseRunFinished(payload: unknown): ParsedRunFinished {
     tokensOut: num(p.tokensOut) ?? num(tokens.output) ?? num(tokens.out) ?? num(usage.outputTokens) ?? 0,
     durationMs: num(p.durationMs) ?? num(p.duration) ?? 0,
     errorMessage: str(p.errorMessage) ?? str(p.error),
+    provider: str(p.provider),
+    model: str(p.model),
     timestamp: num(p.timestamp),
   };
 }
