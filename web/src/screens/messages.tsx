@@ -639,20 +639,23 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
     if (!summary || (!summary.provider && !summary.model)) return "";
     return `${summary.provider ? `${summary.provider}/` : ""}${summary.model ?? ""}`;
   };
+  /** An unusual end to a run that nevertheless completed (a truncated answer,
+   * a tool round). A failure or a stop already says so in the status word. */
+  const noteReason = () => {
+    if (!summary || props.status !== "completed") return "";
+    const reason = summary.stopReason;
+    if (!reason || reason === "done" || reason === "end_turn" || reason === "cancelled" || reason === "canceled") return "";
+    if (reason === "length" || reason === "max_tokens") return "达到输出上限";
+    if (reason === "tool_use") return "工具轮继续";
+    return reason;
+  };
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 }}>
       <StatusDot tone={tone} size={6} />
       <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
         {text()}
       </Text>
-      {summary &&
-      summary.stopReason &&
-      summary.stopReason !== "done" &&
-      summary.stopReason !== "end_turn" &&
-      summary.stopReason !== "cancelled" &&
-      summary.stopReason !== "canceled" ? (
-        <Text style={{ fontSize: 10.5, color: colors.warning }}>{summary.stopReason}</Text>
-      ) : null}
+      {noteReason() ? <Text style={{ fontSize: 10.5, color: colors.warning }}>{noteReason()}</Text> : null}
       {identity() ? (
         <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: mono() }}>{identity()}</Text>
       ) : null}
@@ -1085,6 +1088,9 @@ export function TurnRow(props: {
               const segmentLabel = () => {
                 const turn = props.turn();
                 if (isLast() && turn.status === "running") {
+                  // A parked question is not work in progress (C2): the clock
+                  // is not running while the run waits on the human.
+                  if (props.waiting()) return "等待确认";
                   const elapsed = segment.startedAt !== undefined ? formatElapsed(props.now() - segment.startedAt) : "";
                   return elapsed ? `工作中 ${elapsed}` : "工作中";
                 }
@@ -1108,7 +1114,7 @@ export function TurnRow(props: {
                     <SegmentHeader
                       label={segmentLabel}
                       preview={segmentPreview}
-                      running={() => isLast() && props.turn().status === "running"}
+                      running={() => isLast() && props.turn().status === "running" && !props.waiting()}
                       foldable={foldable}
                       open={foldOpen}
                       onToggle={() => toggle(expandedSegments, segmentKey, isLast())}
@@ -1156,6 +1162,27 @@ export function TurnRow(props: {
             })}
             <If when={streaming() && props.turn().workSegments.length === 0}>
               <AssistantText text={props.partialText() ?? ""} streaming />
+            </If>
+            {/* A failed turn keeps its reason in history: the banner above the
+                composer is the actionable one, this is the ledger's own. */}
+            <If when={props.turn().status === "failed" && !!props.turn().error}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  gap: space.sm,
+                  padding: 10,
+                  borderRadius: radius.control,
+                  backgroundColor: colors.dangerTint,
+                  borderWidth: 1,
+                  borderColor: alpha(colors.danger, 0.3),
+                }}
+              >
+                <Icon name="alert" size={14} tint={colors.danger} />
+                <Text style={{ flex: 1, userSelect: "text", fontSize: 12, lineHeight: 18, color: colors.danger }}>
+                  {props.turn().error ?? ""}
+                </Text>
+              </View>
             </If>
             <If when={waitingForWords()}>
               {/* Loading is motion only (C7): no "thinking…" words. */}

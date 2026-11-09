@@ -40,6 +40,10 @@ const scroll = signal<ScrollState>({ intent: "following", offset: 0 });
 const overflowing = signal(false);
 /** The session whose saved position has already been handed to the list. */
 const scrollRestored = signal<string | null>(null);
+/** A detached session's restore in flight: while the list lays its rows out it
+ * may report offsets of its own; they are not the reader's intent, and the
+ * saved offset is applied again until it sticks. */
+let pendingRestore: { sessionId: string; offset: number; tries: number } | null = null;
 
 const rowsOf = (view: ConversationView | null): Row[] => {
   if (!view) return [];
@@ -226,27 +230,36 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
   // back to the ledger — this is the reader's place in the panel, not a fact.
   effect(() => {
     const id = store.activeId();
-    if (!id || !store.conversation()) {
-      if (!id && scrollRestored() !== null) {
+    const view = store.conversation();
+    if (!id) {
+      if (scrollRestored() !== null) {
         scrollRestored.set(null);
+        pendingRestore = null;
         scroll.set({ intent: "following", offset: 0 });
         overflowing.set(false);
       }
       return;
     }
+    // Wait for the snapshot to belong to this session: restoring into the
+    // previous session's rows would land on the wrong content.
+    if (!view || view.sessionId !== id) return;
     if (untracked(scrollRestored) === id) return;
     scrollRestored.set(id);
     const saved = store.scrollState(id) ?? { intent: "following" as const, offset: 0 };
     scroll.set(saved);
     overflowing.set(false);
-    if (saved.intent !== "detached" || saved.offset <= 0) return;
-    // The list measures its rows natively; hand it the offset once it can take
-    // the command, and once more while the rows above settle.
-    const first = setTimeout(() => list?.scrollToOffset({ offset: saved.offset, animated: false }), 32);
-    const second = setTimeout(() => list?.scrollToOffset({ offset: saved.offset, animated: false }), 240);
+    pendingRestore = null;
+    // Put a detached reader back exactly where they were (offset 0 included).
+    // The offset is applied here and again by every scroll report until it
+    // sticks — a list still measuring its new rows must not be mistaken for a
+    // reader who scrolled, nor may it drag them back to the bottom.
+    if (saved.intent !== "detached") return;
+    pendingRestore = { sessionId: id, offset: saved.offset, tries: 0 };
+    const timers = [32, 240].map((delay) =>
+      setTimeout(() => list?.scrollToOffset({ offset: saved.offset, animated: false }), delay),
+    );
     return () => {
-      clearTimeout(first);
-      clearTimeout(second);
+      for (const timer of timers) clearTimeout(timer);
     };
   });
   const timer = setInterval(() => {
@@ -310,11 +323,21 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
                   style={{ flex: 1 }}
                   contentStyle={{ paddingTop: 16, paddingBottom: 12 }}
                   onScroll={(event) => {
+                    const id = store.activeId();
+                    // A restore in flight is not a reader's intent: re-apply the
+                    // remembered offset (bounded) instead of recording.
+                    if (id && pendingRestore && pendingRestore.sessionId === id) {
+                      if (Math.abs(event.offset.y - pendingRestore.offset) > 4 && pendingRestore.tries < 6) {
+                        pendingRestore.tries += 1;
+                        list?.scrollToOffset({ offset: pendingRestore.offset, animated: false });
+                        return;
+                      }
+                      pendingRestore = null;
+                    }
                     const atEnd = event.offset.y + event.size.height >= event.contentSize.height - 48;
                     const next: ScrollState = { intent: atEnd ? "following" : "detached", offset: event.offset.y };
                     scroll.set(next);
                     overflowing.set(event.contentSize.height > event.size.height + 8);
-                    const id = store.activeId();
                     if (id) store.saveScrollState(id, next);
                   }}
                 >
