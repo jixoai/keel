@@ -31,9 +31,9 @@
 // so the app cannot bind Escape over it, and the dialog layer hears nothing
 // to close on. A one-press close needs the native command to give Escape up
 // (a prop or an nsh change), which this screen cannot do.
-import { keymap, platform, signal, Text } from "nsh";
+import { keymap, platform, signal, View, windowSize } from "nsh";
 import type { CommandItem } from "../ui/kit";
-import { Command, Dialog, Empty, EmptyDescription, EmptyTitle } from "../ui/kit";
+import { Command, Dialog, Empty, EmptyDescription, EmptyTitle, space } from "../ui/kit";
 import { store } from "../data/store";
 import { sessionTitle } from "../ui/session-title";
 import { openModelPicker } from "./model-picker";
@@ -55,9 +55,6 @@ export const openPalette = () => {
 };
 
 export const closePalette = () => paletteOpen.set(false);
-
-/** TEMPORARY probe. */
-export const hlDebug = signal("none");
 
 /** How long a chosen action waits after the palette closes before it runs, on
  * platforms whose modal owns a browser history entry: the runtime's modal exit
@@ -172,6 +169,12 @@ export function CommandPalette(props: {
 } = {}) {
   const openSession = props.onOpenSession ?? defaultOpenSession;
 
+  /** The list's height cap: the palette grows until every row shows and only
+   * then scrolls. A fixed 320px cap cut the last row against the card's rounded
+   * bottom edge; the window's own height is the honest ceiling here (the card
+   * is centred with `margin: auto`). */
+  const listCap = () => Math.max(240, Math.min(560, windowSize().height - 200));
+
   // The app's shortcut. Bound while this component renders (nsh removes a
   // binding with the component that made it); `mod` is Command on Apple
   // platforms and Control elsewhere.
@@ -197,8 +200,6 @@ export function CommandPalette(props: {
   };
 
   return (
-    <>
-    <Text testID="hl-debug">{`hl ${hlDebug()}`}</Text>
     <Dialog
       open={paletteOpen()}
       onOpenChange={(event) => {
@@ -213,6 +214,7 @@ export function CommandPalette(props: {
       accessibilityLabel="命令面板"
       testID="command-palette"
     >
+      <View style={{ flexDirection: "column" }}>
       <Command
         // `id:` also finds the search field for `type` in tests.
         testID="command-palette"
@@ -222,7 +224,6 @@ export function CommandPalette(props: {
         query={paletteQuery()}
         onQueryChange={(query) => paletteQuery.set(query)}
         onSelect={select}
-        onHighlightChange={(id) => hlDebug.set(id ?? "null")}
         // Escape with an empty query: the platform's close path and the
         // command's own cancel both end at the same flag. With a query the
         // native command clears it first (the header note).
@@ -230,6 +231,7 @@ export function CommandPalette(props: {
         placeholder="搜索会话、模型、设置或插件…"
         accessibilityLabel="命令面板"
         searchAccessibilityLabel="搜索命令"
+        maxHeight={listCap()}
         // The kit's own empty slot, in the kit's empty-state vocabulary: an
         // empty query lists everything, so this is only a query that matches
         // nothing.
@@ -243,7 +245,10 @@ export function CommandPalette(props: {
         // Clearing it here keeps the border and the shadow to one layer.
         style={{ backgroundColor: "transparent", borderWidth: 0, boxShadow: "none" }}
       />
+      {/* The card's own bottom inset: the list stops above the rounded corner,
+          so the last row — and its highlight — never touches the edge. */}
+      <View style={{ height: space.md }} />
+      </View>
     </Dialog>
-    </>
   );
 }

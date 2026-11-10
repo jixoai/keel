@@ -19,7 +19,7 @@
 import type { StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Radio, RadioGroup as NativeRadioGroup } from "nsh/base";
-import { color, radius, space, typeScale } from "../tokens";
+import { alpha, color, radius, space, typeScale } from "../tokens";
 
 export function RadioGroup(props: {
   value?: string;
@@ -64,7 +64,12 @@ export function RadioGroup(props: {
                   height: 16,
                   borderRadius: radius.pill,
                   borderWidth: 1,
-                  borderColor: checked() ? color.primary : color.input,
+                  // The unchecked ring is a visible affordance on any card:
+                  // `color.input` is the card's own face in the dark
+                  // appearance, which made the ring disappear. A muted
+                  // foreground at half strength reads on card, panel and
+                  // popover alike.
+                  borderColor: checked() ? color.primary : alpha(color.mutedForeground, 0.55),
                   alignItems: "center",
                   justifyContent: "center",
                 }}

@@ -331,7 +331,7 @@ class KeelStore {
     }
     const http = new KeelHttp("");
     let status: "ok" | "auth" | "down" = "down";
-    let reason = "/v1/capabilities 没有有效响应";
+    let reason = "服务没有返回有效响应";
     try {
       status = await http.probe();
       if (status === "ok") {
@@ -340,7 +340,7 @@ class KeelStore {
         const capabilities = await http.capabilities().catch(() => null);
         if (!capabilities) {
           status = "down";
-          reason = "服务在线，但 /v1/capabilities 返回的不是 Keel API 的 JSON";
+          reason = "服务在线，但返回的不是 Keel 服务的响应";
         }
       }
     } catch (error) {
@@ -528,11 +528,11 @@ class KeelStore {
     try {
       const saved = await this.client.saveModelsSettings(document, this.settings()?.revision);
       this.settingsSavedSummary.set(
-        `revision ${saved.revision} · 可执行 provider ${saved.providersExecutable ?? "-"} · 可选模型 ${
+        `配置版本 ${saved.revision} · 可执行 Provider ${saved.providersExecutable ?? "-"} · 可选模型 ${
           saved.modelsSelectable ?? "-"
         }`,
       );
-      this.flash({ tone: "success", text: `模型配置已保存并生效（revision ${saved.revision}）` });
+      this.flash({ tone: "success", text: `模型配置已保存并生效（配置版本 ${saved.revision}）` });
       await this.loadModelsPanel();
     } catch (error) {
       if (error instanceof KeelApiError) {
@@ -555,8 +555,8 @@ class KeelStore {
     this.settingsConflict.set(null);
     try {
       const reset = await this.client.resetModelsSettings(this.settings()?.revision);
-      this.settingsSavedSummary.set(`revision ${reset.revision} · 部署默认`);
-      this.flash({ tone: "success", text: `已重置为部署默认（revision ${reset.revision}）` });
+      this.settingsSavedSummary.set(`配置版本 ${reset.revision} · 部署默认`);
+      this.flash({ tone: "success", text: `已重置为部署默认（配置版本 ${reset.revision}）` });
       await this.loadModelsPanel();
     } catch (error) {
       if (error instanceof KeelApiError) {

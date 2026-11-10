@@ -12,16 +12,25 @@
 import { signal, Text, View } from "nsh";
 import type { ModelSelection, ModelView } from "../data/contract";
 import { store } from "../data/store";
-import { modelFacts, reasoningLabel, selectionLabel } from "../data/wire";
+import {
+  displayNameOf,
+  modelFacts,
+  providerDisplayName,
+  reasoningLabel,
+  selectionDisplay,
+  selectionLabel,
+} from "../data/wire";
 import { Icon } from "../ui/icons";
 import {
   Badge,
   Button,
   Dialog,
+  IconButton,
   RadioGroup,
   ScrollArea,
   Separator,
   Spinner,
+  Tooltip,
   alpha,
   color,
   controlIconSize,
@@ -73,28 +82,44 @@ const selectModel = (model: ModelView, reasoningLevel?: string) => {
 /** One model's declared levels as radio options (低 / 高 …). */
 const levelOptions = (levels: string[]) => levels.map((level) => ({ value: level, label: reasoningLabel(level) }));
 
-/** The header chip: the session's current model, or 默认. A kit Button — one
- * press opens the picker Dialog directly. */
-export function SessionModelChip() {
+/** The header chip: the model this session's next input runs on — the
+ * session's own choice, else the tenant default. The visible label is the
+ * model's readable name (`selectionDisplay`); the wire identity
+ * (`selectionLabel`) lives in the tooltip. A kit Button — one press opens the
+ * picker Dialog directly; `iconOnly` is the narrow column's form (the header
+ * pays title room with it, and the accessibility label carries the name). */
+export function SessionModelChip(props: { iconOnly?: boolean } = {}) {
   const session = () => store.sessionSelection();
   const tenant = () => store.tenantSelection();
-  const label = () => {
-    const current = session();
-    if (current) return selectionLabel(current);
-    const fallback = tenant();
-    return fallback ? `默认 ${selectionLabel(fallback)}` : "默认";
-  };
+  const effective = () => session() ?? tenant();
+  const label = () => selectionDisplay(effective()) || "选择模型";
+  const detail = () => selectionLabel(effective());
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      icon="brain"
-      iconTrailing="chevron-down"
-      label={label()}
-      selected={!!session()}
-      accessibilityLabel="本会话模型"
-      onPress={() => openModelPicker()}
-    />
+    <If
+      when={!props.iconOnly}
+      else={
+        <IconButton
+          testID="session-model-chip"
+          variant="outline"
+          icon="brain"
+          label={`本会话模型：${label()}`}
+          onPress={() => openModelPicker()}
+        />
+      }
+    >
+      <Button
+        testID="session-model-chip"
+        variant="outline"
+        size="sm"
+        icon="brain"
+        iconTrailing="chevron-down"
+        label={label()}
+        selected={!!session()}
+        accessibilityLabel={`本会话模型：${label()}`}
+        tooltip={detail() ? <Tooltip label={detail()} /> : undefined}
+        onPress={() => openModelPicker()}
+      />
+    </If>
   );
 }
 
@@ -120,8 +145,9 @@ function PickerModelRow(props: { model: () => ModelView }) {
         <Button
           variant="ghost"
           size="sm"
-          label={`${props.model().providerId}/${props.model().modelId}`}
-          accessibilityLabel={`选择模型 ${props.model().providerId}/${props.model().modelId}`}
+          label={displayNameOf(props.model().modelId)}
+          accessibilityLabel={`选择模型 ${displayNameOf(props.model().modelId)}`}
+          tooltip={<Tooltip label={`${props.model().providerId}/${props.model().modelId}`} />}
           selected={isCurrent()}
           onPress={() => selectModel(props.model())}
         />
@@ -142,7 +168,7 @@ function PickerModelRow(props: { model: () => ModelView }) {
             options={levelOptions(levels())}
             value={level()}
             onChange={(value) => selectModel(props.model(), value)}
-            accessibilityLabel={`思考档 ${props.model().providerId}/${props.model().modelId}`}
+            accessibilityLabel={`思考档 ${displayNameOf(props.model().modelId)}`}
           />
         </View>
       </If>
@@ -161,7 +187,9 @@ function PickerGroups() {
     }
     return [...map.entries()].map(([providerId, models]) => ({
       providerId,
-      name: store.providers().find((provider) => provider.providerId === providerId)?.name ?? providerId,
+      name: providerDisplayName(
+        store.providers().find((provider) => provider.providerId === providerId) ?? { providerId },
+      ),
       models,
     }));
   };
@@ -209,6 +237,7 @@ function PickerGroups() {
  * then the selectable models with their reasoning levels. */
 export function SessionModelPicker() {
   const session = () => store.sessionSelection();
+  const tenant = () => store.tenantSelection();
   return (
     <Dialog
       open={pickerOpen() && store.route() === "workspace" && !!store.activeId()}
@@ -258,7 +287,7 @@ export function SessionModelPicker() {
               else={<Text style={{ fontSize: typeScale.sm, color: color.foreground }}>未选择 · 使用租户默认</Text>}
             >
               <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
-                {selectionLabel(session())}
+                {selectionDisplay(session())}
               </Text>
             </If>
           </View>
@@ -276,7 +305,7 @@ export function SessionModelPicker() {
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
                   <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
-                    {selectionLabel(store.tenantSelection())}
+                    {selectionDisplay(store.tenantSelection())}
                   </Text>
                   <Badge variant="outline" label="只读" />
                 </View>
@@ -286,6 +315,20 @@ export function SessionModelPicker() {
           <Text style={{ fontSize: typeScale.xs, lineHeight: lineHeight.normal, color: color.mutedForeground }}>
             租户默认只在设置页的「模型」分区修改；这里显示它，不在这里写它。
           </Text>
+          {/* The wire identity, as the detail line: the readable name above is
+              what the reader picks by, the id is what the server stores. */}
+          <If when={!!(session() ?? tenant())}>
+            <Text
+              style={{
+                fontFamily: font.mono,
+                fontSize: typeScale["2xs"],
+                color: color.mutedForeground,
+                userSelect: "text",
+              }}
+            >
+              {selectionLabel(session() ?? tenant())}
+            </Text>
+          </If>
         </View>
         <Separator />
         <ScrollArea maxHeight={380} fade accessibilityLabel="可选模型">

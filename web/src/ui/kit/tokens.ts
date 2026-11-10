@@ -196,6 +196,11 @@ export const color = {
   get secondaryForeground() {
     return token("secondary-foreground");
   },
+  /** The selected-surface wash (a keyboard cursor, a chosen row): the
+   * reference's `bg-menu-hover`, one step above `hover` so it stays legible. */
+  get selected() {
+    return token("selected");
+  },
   get sidebar() {
     return token("sidebar");
   },

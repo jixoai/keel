@@ -135,8 +135,9 @@ function codeOnly(line) {
   return out;
 }
 
-/** The violations of one source file. `path` is what the caller prints. */
-function scanFile(file, display, options) {
+/** The violations of one source file. `path` is what the caller prints.
+ * `only` limits the run to a set of rule ids (the kit's own scan). */
+function scanFile(file, display, options, only) {
   const violations = [];
   const lines = fs.readFileSync(file, "utf8").split("\n");
   for (let index = 0; index < lines.length; index++) {
@@ -144,6 +145,7 @@ function scanFile(file, display, options) {
     const code = codeOnly(raw);
     const text = stripComment(raw);
     for (const rule of RULES) {
+      if (only && !only.has(rule.id)) continue;
       if (rule.needed && !rule.needed(options)) continue;
       if (rule.excuse && rule.excuse.test(raw)) continue;
       if (!rule.match(code, text)) continue;
@@ -175,9 +177,31 @@ function scanAppEntry(webDir, options) {
   return scanFile(file, path.join(path.basename(webDir), "App.tsx"), options);
 }
 
-/** Every consumer surface this gate owns: the screens and the app root. */
+/** <web>/src/ui/kit/** — the kit's own sources. Only the raw-colour rule
+ * applies inside the kit: its layout blocks are exactly where the shell's
+ * numbers (264/320/480/360) belong, while a hard-coded colour bypasses
+ * web/theme.json there just as it would in a screen — the kit is where the
+ * tokens are read, so it must not carry ink of its own. */
+function scanKit(webDir, options) {
+  const root = path.join(webDir, "src", "ui", "kit");
+  if (!fs.existsSync(root)) return [];
+  const displayRoot = path.join(path.basename(webDir), "src", "ui", "kit");
+  const violations = [];
+  for (const file of walk(root)) {
+    const display = path.join(displayRoot, path.relative(root, file));
+    violations.push(...scanFile(file, display, options, new Set(["raw-color"])));
+  }
+  return violations;
+}
+
+/** Every consumer surface this gate owns: the screens, the app root and the
+ * kit's own sources. */
 function scanConsumer(webDir, options) {
-  return [...scanScreens(webDir, options), ...scanAppEntry(webDir, options)];
+  return [
+    ...scanScreens(webDir, options),
+    ...scanAppEntry(webDir, options),
+    ...scanKit(webDir, options),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +263,32 @@ function runSelfTest() {
   fs.rmSync(appEntry);
   const appClean = scanAppEntry(path.join(dir, "web"), options);
   if (appClean.length > 0) problems.push(`a clean web/App.tsx still reports ${appClean.length} violation(s)`);
+
+  // The kit's own sources are scanned for raw colours (the shell's numbers are
+  // the kit's to own, so the width rule stays off there): one hard-coded
+  // colour is caught, a token colour and a shell width pass, and removing the
+  // colour scans clean (the third negative control).
+  const kitDir = path.join(dir, "web", "src", "ui", "kit", "components");
+  fs.mkdirSync(kitDir, { recursive: true });
+  const kitFile = path.join(kitDir, "bad-color.tsx");
+  fs.writeFileSync(
+    kitFile,
+    `import { color } from "../tokens";\nexport function Bad() {\n  return <View style={{ width: 264, backgroundColor: color.hover, borderColor: "#123456" }} />;\n}\n`,
+  );
+  const kitBad = scanKit(path.join(dir, "web"), options);
+  const kitColor = kitBad.filter((violation) => violation.rule === "raw-color");
+  if (kitColor.length !== 1) {
+    problems.push(`a raw colour in the kit produced ${kitColor.length} raw-color violation(s), want 1`);
+  }
+  if (!kitColor.every((violation) => violation.file.includes("src/ui/kit/"))) {
+    problems.push("the kit control reports the wrong file");
+  }
+  if (kitBad.some((violation) => violation.rule === "shell-magic-width")) {
+    problems.push("the kit scan applied the shell-width rule (the kit owns those numbers)");
+  }
+  fs.rmSync(kitFile);
+  const kitClean = scanKit(path.join(dir, "web"), options);
+  if (kitClean.length > 0) problems.push(`a clean kit still reports ${kitClean.length} violation(s)`);
 
   // Remove the violations: the same fixture must now scan clean.
   fs.rmSync(path.join(screens, "bad-legacy.tsx"));
@@ -312,12 +362,13 @@ function main() {
   const webRoot = path.basename(args.web);
   const screens = path.join(webRoot, "src", "screens");
   const appEntry = path.join(webRoot, "App.tsx");
+  const kit = path.join(webRoot, "src", "ui", "kit");
   if (violations.length > 0) {
-    console.log(`kit-imports: ${violations.length} violation(s) in ${screens} and ${appEntry}`);
+    console.log(`kit-imports: ${violations.length} violation(s) in ${screens}, ${appEntry} and ${kit}`);
     return 1;
   }
   console.log(
-    `kit-imports: clean — ${screens} and ${appEntry} import only the kit, write no shell widths and no raw colours`,
+    `kit-imports: clean — ${screens} and ${appEntry} import only the kit, write no shell widths and no raw colours; the kit itself writes no raw colour either`,
   );
   return failed;
 }

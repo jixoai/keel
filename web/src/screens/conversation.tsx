@@ -33,7 +33,7 @@ import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked,
 import type { ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
 import { Badge, color, ComposerDock, ConversationColumn, row, Skeleton, space, typeScale } from "../ui/kit";
-import { ApprovalCard, EmptyConversation, GuideWaitingRow, TurnErrorBanner, TurnRow } from "./messages";
+import { ApprovalCard, EmptyConversation, GuideWaitingRow, OfflineBanner, TurnErrorBanner, TurnRow } from "./messages";
 import { Composer, prefillComposer } from "./composer";
 
 interface Row {
@@ -320,7 +320,10 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
         testID="composer-dock"
       >
         {/* The failure's reason sits directly above the input it belongs to
-            (C5): same column, same layer, closable and retryable. */}
+            (C5): same column, same layer, closable and retryable. The offline
+            face rides the same slot — the reader learns the service is gone
+            here, before a send can vanish. */}
+        <OfflineBanner />
         <TurnErrorBanner compact={!props.wide} />
         <Composer view={store.conversation()} compact={!props.wide} />
       </ComposerDock>

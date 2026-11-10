@@ -16,9 +16,11 @@
 // confirmation, the session model picker's own `Dialog`, and the global
 // command palette (`CommandPalette`: Mod+K over every route).
 //
-// Two seams wait on parallel entries, each marked `SEAM` where it sits: the
-// plugin page (`src/screens/plugins.tsx`) and the right pane's facts
-// (`src/screens/session-status-pane.tsx`).
+// The workspace's right pane is its own screen
+// (`src/screens/session-status-pane.tsx`) — the open session's running facts.
+// The settings page's 外观 section can still switch the scheme at runtime; the
+// launch appearance is locked to dark (`nsh.json`) because the light palette
+// has not been through acceptance.
 //
 // NSH components run once: every reactive read lives in the vnode getters (JSX
 // or an `<If>`), never in a body-level `if` or a local.
@@ -34,6 +36,7 @@ import { LoginScreen } from "./src/screens/login";
 import { SessionModelChip, SessionModelPicker } from "./src/screens/model-picker";
 import { PluginsScreen } from "./src/screens/plugins";
 import { SessionList } from "./src/screens/session-list";
+import { SessionStatusPane } from "./src/screens/session-status-pane";
 import { SettingsScreen } from "./src/screens/settings";
 import { restoreAppearance } from "./src/ui/appearance";
 import { type IconName } from "./src/ui/icons";
@@ -42,7 +45,6 @@ import {
   Badge,
   Button,
   color,
-  ConversationStatusRail,
   IconButton,
   space,
   ToastViewport,
@@ -51,7 +53,11 @@ import {
   type ToastTone,
   typeScale,
   weight,
+  WORKSPACE_SHELL_MAIN_MIN_WIDTH_PX,
   WORKSPACE_SHELL_SINGLE_COLUMN_MAX_PX,
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH_PX,
+  SIDE_PANE_EXPANDED_RATIO,
+  SIDE_PANE_MIN_WIDTH_PX,
   WorkspaceShell,
 } from "./src/ui/kit";
 import { conversationState, runStateLabel, runStateTone, type RunTone } from "./src/ui/run-state";
@@ -123,6 +129,22 @@ const SIDE_PANE_STORAGE_KEY = "keel:workspace-shell:side-pane-open";
  * opens it. So a 1280 window gives the conversation the whole pane width the
  * kit's column geometry is keyed on (1280 − 264 = 1016 → the 896/48 band). */
 const sidePaneOpen = signal(false);
+
+/** Can the shell hold three columns? The header's toggle appears only when the
+ * sidebar, a conversation at the kit's own floor and the 45% pane fit at
+ * once — below that the pane would squeeze the conversation past its minimum
+ * and the header's own controls would clip (768px with the pane open is the
+ * case that showed it). The shell's resize policy closes the pane on the way
+ * down; this gates the way in. */
+const sidePaneFits = () => {
+  if (singleColumn()) return false;
+  const width = windowSize().width;
+  const pane = Math.max(SIDE_PANE_MIN_WIDTH_PX, Math.round(width * SIDE_PANE_EXPANDED_RATIO));
+  return width - WORKSPACE_SIDEBAR_DEFAULT_WIDTH_PX - pane >= WORKSPACE_SHELL_MAIN_MIN_WIDTH_PX;
+};
+
+/** The pane's effective state: the reader's choice, only while it fits. */
+const paneOpen = () => sidePaneOpen() && sidePaneFits();
 /** The stored choice, once the host answered (`undefined` while it reads). */
 let storedSidePane: string | null | undefined = undefined;
 /** Someone decided: the user's toggle, or the shell's auto-collapse policy. */
@@ -212,8 +234,12 @@ function WorkspaceHeader() {
         />
       </If>
       {/* The title's own column: a terminal lays a flexible text out at no
-          width at all, so the flex belongs to this box, never to the Text. */}
-      <View style={{ flex: 1, minWidth: 0 }}>
+          width at all, so the flex belongs to this box, never to the Text.
+          `minWidth` is the identity's floor: the title is the screen's name,
+          so it keeps at least this much and the row's other occupants give way
+          (the state word drops at the single column, the model chip becomes an
+          icon there) instead of the title collapsing into "…". */}
+      <View style={{ flex: 1, minWidth: 120 }}>
         <Text
           testID="workspace-header-title"
           style={{
@@ -227,34 +253,37 @@ function WorkspaceHeader() {
           {headerTitle()}
         </Text>
       </View>
-      {/* The state word rides both headers. The model chip is the same control
-          at both widths, label and all: its label is what the session's own
-          selection reads as (「默认 provider/model · 档」), and the existing TUI
-          acceptance asserts exactly that text where the terminal runs — at the
-          single column's width (`keel-harness-shell` spec: the 7 TUI tests MUST
-          stay green). Its full label is 283px at a 390 viewport, so on that
-          column the row pays with the title's ellipsis; title room comes back
-          from the row's other occupants (the state word, the back entry), not
-          from hiding the chip. Same accessibility label (`label:本会话模型`)
-          and the same picker Dialog either way. */}
-      <If when={!!store.activeId()}>
+      {/* The state word is the row's first concession: at the single column it
+          goes (the run state still rides the pane and each row), so the title
+          and the model control keep their room. */}
+      <If when={!!store.activeId() && !singleColumn()}>
         <Badge
           testID="workspace-header-state"
           variant={stateBadge[runStateTone[conversationState(store.conversation())]]}
           label={runStateLabel[conversationState(store.conversation())]}
         />
       </If>
+      {/* The model chip: its full label at the wide column; an icon-only button
+          at the single column (the zcode mobile form), with the model's name in
+          its accessibility label. A terminal keeps the text form — an icon-only
+          view has no characters there — and the TUI acceptance reads the same
+          label it always did. */}
       <If when={!!store.activeId()}>
-        <SessionModelChip />
+        <If
+          when={singleColumn() && platform.idiom !== "terminal"}
+          else={<SessionModelChip />}
+        >
+          <SessionModelChip iconOnly />
+        </If>
       </If>
-      <If when={!singleColumn()}>
+      <If when={sidePaneFits()}>
         <HeaderAction
           testID="workspace-header-side-pane"
           icon="panel"
-          text={sidePaneOpen() ? "收起右栏" : "展开右栏"}
-          label={sidePaneOpen() ? "收起右侧状态栏" : "展开右侧状态栏"}
-          selected={sidePaneOpen()}
-          onPress={() => chooseSidePane(!sidePaneOpen())}
+          text={paneOpen() ? "收起右栏" : "展开右栏"}
+          label={paneOpen() ? "收起右侧状态栏" : "展开右侧状态栏"}
+          selected={paneOpen()}
+          onPress={() => chooseSidePane(!paneOpen())}
         />
       </If>
     </View>
@@ -285,23 +314,14 @@ function Workspace() {
         )
       }
       sidePane={
-        <View style={{ flex: 1, padding: space.xl }}>
-          {/* SEAM: the pane's facts (模型/思考档/用量/工具/插件) come from the
-              parallel entry `src/screens/session-status-pane.tsx`; when it lands
-              this becomes `sidePane={<SessionStatusPane />}`. Until then the
-              kit's own status surface stands in — its compact form, because the
-              `inline` form is the 320px floating rail this shell replaced. */}
-          <ConversationStatusRail variant="mini" label="会话状态">
-            <If when={!!store.activeId()}>
-              <Badge
-                variant={stateBadge[runStateTone[conversationState(store.conversation())]]}
-                label={runStateLabel[conversationState(store.conversation())]}
-              />
-            </If>
-          </ConversationStatusRail>
-        </View>
+        // The pane's own screen (`src/screens/session-status-pane.tsx`): the
+        // open session's model, usage, tool calls and plugins. Mounted only
+        // while open, so its plugin read is not a boot-time request.
+        <If when={paneOpen()}>
+          <SessionStatusPane />
+        </If>
       }
-      sidePaneOpen={sidePaneOpen()}
+      sidePaneOpen={paneOpen()}
       onSidePaneOpenChange={(open) => {
         // The shell reports its own moves too (the auto-collapse after a
         // resize): the flag follows them, the stored choice does not.

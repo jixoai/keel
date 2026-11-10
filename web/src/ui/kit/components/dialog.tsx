@@ -56,7 +56,10 @@ export function Dialog(props: {
       closeOnBackdropPress={props.closeOnBackdropPress ?? true}
       onOpenChange={(event) => props.onOpenChange?.(event)}
       onClose={props.onClose}
-      backdropStyle={{ backgroundColor: alpha(color.glassShade, 0.55) }}
+      // The scrim: the theme's own shade at full strength (60% black in the
+      // dark appearance), plus the reference's `backdrop-blur-xs` so what is
+      // behind the modal visibly recedes instead of merely dimming.
+      backdropStyle={{ backgroundColor: color.glassShade, backdropFilter: "blur(4px)" }}
       backdropTestID={props.testID !== undefined ? `${props.testID}-backdrop` : undefined}
       style={[
         {

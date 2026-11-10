@@ -54,10 +54,13 @@ function CommandRow(props: { entry: CommandEntry; highlighted: boolean }) {
         flexDirection: "row",
         alignItems: "center",
         gap: space.md,
-        flex: 1,
-        alignSelf: "stretch",
+        width: "100%",
+        height: 28,
         borderRadius: radius.sm,
-        backgroundColor: props.highlighted ? "#ff0000" : undefined,
+        // The reference's `data-selected:bg-menu-hover`: the kit's selected
+        // surface token (a step above `hover`, so the keyboard cursor reads at
+        // a glance), never a colour of its own.
+        backgroundColor: props.highlighted ? color.selected : undefined,
       }}
     >
       <Text

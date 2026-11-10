@@ -772,6 +772,57 @@ export function TurnErrorBanner(props: { compact?: boolean }) {
   );
 }
 
+/** The conversation's offline face (M7): the transport is down, so the input
+ * below it cannot reach the service. The same banner shape as the failed-turn
+ * card, one tone calmer — the reader needs to know before typing, not after a
+ * send disappears. */
+export function OfflineBanner() {
+  return (
+    <If when={store.mode() === "offline"}>
+      <View
+        style={{
+          width: "100%",
+          maxWidth: 880,
+          alignSelf: "center",
+          marginBottom: space.sm,
+        }}
+      >
+        <Card
+          testID="conversation-offline"
+          accessibilityLabel="当前未连接"
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.md,
+            paddingVertical: space.sm,
+            paddingLeft: space.lg,
+            paddingRight: space.lg,
+            backgroundColor: color.warningTint,
+            borderColor: alpha(color.warning, 0.32),
+          }}
+        >
+          <Icon name="alert" size={iconSize.sm} tint={color.warning} />
+          <View style={{ flex: 1, gap: space.xxs }}>
+            <Text style={{ fontSize: typeScale.xs, fontWeight: weight.bold, color: color.warning }}>
+              当前未连接
+            </Text>
+            <Text
+              style={{
+                fontSize: typeScale.sm,
+                lineHeight: Math.round(typeScale.sm * lineHeight.snug),
+                color: color.foreground,
+                numberOfLines: 2,
+              }}
+            >
+              服务暂时不可达，现在发送会失败；连接恢复后再试一次。
+            </Text>
+          </View>
+        </Card>
+      </View>
+    </If>
+  );
+}
+
 /** A compaction, as the stream's one rule (the kit's Separator). */
 function CompactionRow(props: { note?: string }) {
   return (

@@ -37,7 +37,7 @@
 import { cleanup, effect, host, openUrl, platform, signal, Text, View, WebView } from "nsh";
 import type { PluginStatusView, TriggerSpecView, TriggerStatusView } from "../data/contract";
 import { store } from "../data/store";
-import { formatTime } from "../data/wire";
+import { formatTime, pluginStateLabel } from "../data/wire";
 import { Icon } from "../ui/icons";
 import {
   Badge,
@@ -191,6 +191,7 @@ const navigate = (path: string) => {
 const pluginStateVariant = (state: string): BadgeVariant => {
   switch (state) {
     case "active":
+    case "ready":
       return "success";
     case "pending":
       return "warning";
@@ -437,7 +438,7 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
         description={subtitle()}
         action={
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
-            <Badge variant={pluginStateVariant(state())} label={state()} />
+            <Badge variant={pluginStateVariant(state())} label={pluginStateLabel(state())} />
             <Button
               testID={`plugin-open-${props.plugin().id}`}
               variant="outline"
@@ -459,19 +460,9 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
-          <Badge variant="secondary" label={`${tools().length} 工具`} />
-          <Badge variant="secondary" label={`${hooks().length} hooks`} />
-          <Badge variant="secondary" label={`${triggers().length} 触发器`} />
-          <Text
-            style={{
-              fontFamily: font.mono,
-              fontSize: typeScale["2xs"],
-              color: color.mutedForeground,
-              userSelect: "text",
-            }}
-          >
-            {pluginPath(props.plugin().id)}
-          </Text>
+          <Badge variant="secondary" label={`${tools().length} 个工具`} />
+          <Badge variant="secondary" label={`${hooks().length} 个钩子`} />
+          <Badge variant="secondary" label={`${triggers().length} 个触发器`} />
         </View>
 
         <If when={tools().length > 0}>
@@ -497,7 +488,7 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
               userSelect: "text",
             }}
           >
-            {`Hooks：${hooks().join(" · ")}`}
+            {`钩子：${hooks().join(" · ")}`}
           </Text>
         </If>
 
@@ -581,7 +572,7 @@ function Inventory() {
         <Card testID="plugins-inventory">
           <CardHeader
             title="已装插件"
-            description="插件在进程启动时装配；状态、来源与触发声明来自 GET /v1/plugins，触发次数来自 GET /v1/triggers。"
+            description="插件在进程启动时装配；状态、能力与触发声明来自服务端清单。"
             action={
               <Button
                 variant="ghost"
@@ -606,7 +597,6 @@ function Inventory() {
             </If>
             <If when={!!store.plugins()}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-                <Badge variant="info" label={`generation ${store.plugins()?.generation ?? "-"}`} />
                 <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
                   {`${plugins().length} 个插件 · ${tools().length} 个工具`}
                 </Text>
@@ -623,9 +613,6 @@ function Inventory() {
                   {(plugin) => <PluginCard plugin={plugin} />}
                 </Each>
               </View>
-              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-                状态：active（已装配）· pending（等待依赖）· failed（装配失败）· stopped（已停止）。
-              </Text>
             </If>
           </CardContent>
         </Card>
@@ -633,13 +620,13 @@ function Inventory() {
         <Card testID="plugins-available">
           <CardHeader
             title="可装与更新"
-            description="GET /v1/plugins 只报告已装配插件的状态；契约里没有可装清单，也没有版本对比字段。"
+            description="这里列出可以安装或更新的插件。"
           />
           <CardContent>
             <Empty accessibilityLabel="可装与更新">
               <EmptyMedia icon="layers" />
-              <EmptyTitle label="没有可装或可更新的条目可以显示" />
-              <EmptyDescription label="可装清单、版本检查与安装动作都依赖 keel-plugin-core（插件 UI 路由与安装 API）。它落地之前，这里保持空态，不编造条目。" />
+              <EmptyTitle label="暂时没有可安装或可更新的插件" />
+              <EmptyDescription label="安装与更新能力接入后，这里会列出可用的插件条目。" />
             </Empty>
           </CardContent>
         </Card>
@@ -657,7 +644,7 @@ function Inventory() {
                 color: color.mutedForeground,
               }}
             >
-              安装动作依赖 keel-plugin-core 的安装 API；本版只提供入口与状态说明，不执行安装。
+              安装能力尚未接入；这里只帮你把需求整理成对话，不执行安装。
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
               <Button
@@ -749,7 +736,7 @@ function PluginPage(props: { id: string }) {
                 userSelect: "text",
               }}
             >
-              {`插件页面尚未提供（${detail()}）。插件 UI 路由由 keel-plugin-core 提供，尚未落地。`}
+              {`插件页面暂时不可用（${detail()}）。页面由插件自身提供，尚未接入。`}
             </Text>
           </View>
           <Text
@@ -830,7 +817,7 @@ function PluginPage(props: { id: string }) {
                 onPress={() => void probePluginPage(props.id)}
               />
               <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-                页面来源与安装动作由 keel-plugin-core 提供。
+                页面由插件自身提供。
               </Text>
             </View>
           </Card>

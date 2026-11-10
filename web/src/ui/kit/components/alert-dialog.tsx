@@ -62,7 +62,9 @@ export function AlertDialog(props: {
       closeOnEscape={props.closeOnEscape ?? true}
       closeOnBackdropPress={props.closeOnBackdropPress ?? true}
       onOpenChange={() => props.onCancel?.()}
-      backdropStyle={{ backgroundColor: alpha(color.glassShade, 0.55) }}
+      // One scrim for every modal: the theme's shade at full strength (60%
+      // black in the dark appearance) and the reference's `backdrop-blur-xs`.
+      backdropStyle={{ backgroundColor: color.glassShade, backdropFilter: "blur(4px)" }}
       style={[
         {
           width: 400,

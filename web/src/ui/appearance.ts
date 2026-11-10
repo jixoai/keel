@@ -12,7 +12,12 @@ export type Appearance = "light" | "dark" | "system";
 /** The key the choice is kept under. */
 export const APPEARANCE_STORAGE_KEY = "keel:appearance";
 
-const appearance = signal<Appearance>("system");
+/** The launch appearance: `nsh.json`'s `appearance` is locked to dark (the
+ * light palette has not been through acceptance), so boot must land there too
+ * — a stored choice, when there is one, still wins. */
+const LAUNCH_APPEARANCE: Appearance = "dark";
+
+const appearance = signal<Appearance>(LAUNCH_APPEARANCE);
 
 /** The appearance in force (reactive). */
 export const appearancePreference = () => appearance();
@@ -26,15 +31,17 @@ export function applyAppearance(scheme: Appearance) {
   });
 }
 
-/** Boot: apply what the last session chose (`system` when nothing is stored). */
+/** Boot: apply what the last session chose (`dark` — the locked launch
+ * appearance — when nothing is stored). */
 export async function restoreAppearance() {
   let stored: string | null = null;
   try {
     stored = await Storage.getItem(APPEARANCE_STORAGE_KEY);
   } catch {
-    /* a host without storage: the system appearance stands */
+    /* a host without storage: the launch appearance stands */
   }
-  const scheme: Appearance = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+  const scheme: Appearance =
+    stored === "light" || stored === "dark" || stored === "system" ? stored : LAUNCH_APPEARANCE;
   appearance.set(scheme);
   setColorScheme(scheme);
 }

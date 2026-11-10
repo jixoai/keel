@@ -257,11 +257,76 @@ export function reasoningLabel(level: string | undefined): string {
   return reasoningLevelLabels[level] ?? level;
 }
 
-/** `s2api/deepseek-v4.1-flash · 高` — the one way a selection is written. */
+/** `s2api/deepseek-v4.1-flash · 高` — the wire identity. Screens show it as a
+ * detail (a tooltip, a dialog's mono line), never as the primary label: that
+ * is `selectionDisplay`. */
 export function selectionLabel(selection: ModelSelection | null | undefined): string {
   if (!selection) return "";
   const id = `${selection.providerId ? `${selection.providerId}/` : ""}${selection.modelId}`;
   return selection.reasoningLevel ? `${id} · ${reasoningLabel(selection.reasoningLevel)}` : id;
+}
+
+/** Brand spellings a plain capitalisation would miss. A model id is a slug;
+ * these are the words inside it that are not written like a word. */
+const NAME_WORDS: Record<string, string> = {
+  ai: "AI",
+  api: "API",
+  deepseek: "DeepSeek",
+  glm: "GLM",
+  gpt: "GPT",
+  llm: "LLM",
+  ocr: "OCR",
+  qwen: "Qwen",
+  stt: "STT",
+  tts: "TTS",
+  vl: "VL",
+  vlm: "VLM",
+};
+
+/** A human short name derived from an id — `deepseek-v4.1-flash` reads as
+ * "DeepSeek V4.1 Flash", `claude-sonnet-5` as "Claude Sonnet 5". The id stays
+ * the identity; this is only what the reader sees. */
+export function displayNameOf(id: string | undefined): string {
+  if (!id) return "";
+  return id
+    .split(/[-_/\s]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => {
+      const known = NAME_WORDS[part.toLowerCase()];
+      if (known) return known;
+      if (/^\d/.test(part)) return part;
+      if (/^v\d/i.test(part)) return `V${part.slice(1)}`;
+      if (part.length <= 3 && part === part.toUpperCase()) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}
+
+/** A provider's readable name: the declared `name` wins, else the id derived. */
+export function providerDisplayName(provider: { providerId?: string; name?: string }): string {
+  const name = provider.name?.trim();
+  return name && name.length > 0 ? name : displayNameOf(provider.providerId);
+}
+
+/** `DeepSeek V4.1 Flash · 高` — what a selection reads as on screen. */
+export function selectionDisplay(selection: ModelSelection | null | undefined): string {
+  if (!selection) return "";
+  const name = displayNameOf(selection.modelId);
+  return selection.reasoningLevel ? `${name} · ${reasoningLabel(selection.reasoningLevel)}` : name;
+}
+
+/** A plugin's lifecycle in the reader's words. A token this build does not
+ * know is never mapped onto a made-up state: it reads as 未知状态. */
+export const pluginStateLabels: Record<string, string> = {
+  active: "已启用",
+  ready: "已就绪",
+  pending: "等待依赖",
+  failed: "失败",
+  stopped: "已停止",
+};
+
+export function pluginStateLabel(state: string | undefined): string {
+  return (state ? pluginStateLabels[state] : undefined) ?? "未知状态";
 }
 
 /** The first model identity of a `/v1/models` row. */

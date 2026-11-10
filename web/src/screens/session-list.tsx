@@ -19,11 +19,15 @@
 //     changes state updates rows in place (the polish change's C5). A row is a
 //     clickable composition in the kit's vocabulary: a `View` that takes the
 //     press (`role="button"`, one `accessibilityLabel`,
-//     `accessibilityState.selected`), the Card's geometry (radius + hairline)
-//     with the theme's washes for the pointer and for the selection, the title /
+//     `accessibilityState.selected`), flat like the reference's
+//     (`TaskListItem.tsx:570-577`: no fill, no outline, `radius.md`) with the
+//     theme's washes for the pointer and for the selection, and the title /
 //     preview / relative time and the one run-state Badge. Its actions are a
-//     `DropdownMenu` (no opacity-faded button any more), and the secondary click
-//     — or a held finger — is the kit's `ContextMenu`. An untitled session
+//     `DropdownMenu` that shows while the pointer is on the row (or the row is
+//     the open one — a terminal has no hover), and the right click — or a
+//     held finger — is the kit's `ContextMenu`; the row is that menu's
+//     *content*, never its anchored element, so its own name stays its own.
+//     An untitled session
 //     reads「新会话 · <相对时间>」(`src/ui/session-title.ts` is the title's single
 //     source — the rows, the workspace header and the conversation read one
 //     name), and a raw session id is never rendered.
@@ -37,10 +41,12 @@
 //     `bg-selected` (`styles.css:698`), which has no Keel token;
 //     `sidebar-accent` is the theme's own wash over the sidebar and is the only
 //     selection face this file draws.
-//   · the rows are flat like the reference's (`TaskListItem.tsx:570-578`): the
-//     Card's contribution is its geometry (radius + hairline), never a fill. A
+//   · the rows are flat like the reference's (`TaskListItem.tsx:570-577`): no
+//     fill, no outline, `radius.md`, and their actions appear on the pointer
+//     (or on the open row in a terminal). The washes are the only faces: a
 //     card face made the selected row the darkest one on the column (round-2
-//     review), so the washes are the only faces.
+//     review), and an outline around every row turned the column into eleven
+//     competing cards that starved the titles.
 //   · the header's logo is a token tile with `radius.lg` (12px) — the shape the
 //     reference's titlebar logo has (`DesktopTopOverlay.tsx:144`,
 //     `rounded-lg`). The kit `Avatar`'s pill is outside the 6/12/16 ladder.
@@ -153,8 +159,7 @@ function Highlighted(props: { text: string; style: TextStyle }) {
 
 /** One row of the list: pressable, selectable, and the subject of two menus —
  * the trailing `DropdownMenu` (a pointer, the wide layout) and the
- * `ContextMenu` the row itself is the trigger of (the secondary click on a
- * desktop, a held finger on a touch screen). */
+ * `ContextMenu` a right click (or a held finger) opens over it. */
 function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: boolean; onSelect: () => void }) {
   const row = () => props.row();
   const title = () => sessionTitle(row());
@@ -163,82 +168,104 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
   const waiting = () => store.waiting(row().sessionId);
   const badge = () => rowBadgeOf(rowStateOf(row(), props.active), waiting(), props.active);
   const openDelete = () => requestDelete(row().sessionId, title());
+  /** The pointer is on the row: the wide layout's overflow action only shows
+   * then (or while the row is the open one — a terminal has no hover). */
+  const hovered = signal(false);
 
   const trigger = (
-    <View
-      testID={`session-row-${row().sessionId}`}
-      role="button"
-      focusable
-      onPress={props.onSelect}
-      accessibilityLabel={`打开会话 ${title()}`}
-      accessibilityState={{ selected: props.active }}
-      // The selection is the accessibility state itself (`selectedStyle`), so
-      // the face and `accessibilityState.selected` can never drift apart. The
-      // row is flat like the reference's (`TaskListItem.tsx:570`, no fill): the
-      // washes are the only faces, so a selected row is a highlight over the
-      // sidebar — never a darker card than its neighbours.
-      selectedStyle={{ backgroundColor: color.sidebarAccent }}
-      hoverStyle={props.active ? undefined : { backgroundColor: color.hover }}
-      focusStyle={focusRing()}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.sm,
-        paddingHorizontal: space.md,
-        paddingVertical: space.sm,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: color.border,
-      }}
-    >
-      <View style={{ flexDirection: "column", flex: 1, minWidth: 0, gap: space.xxs }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
-          <Highlighted
-            text={title()}
-            style={{
-              flex: 1,
-              numberOfLines: 1,
-              textOverflow: "ellipsis",
-              fontSize: typeScale.base,
-              fontWeight: props.active ? weight.semibold : weight.medium,
-              color: color.sidebarForeground,
-            }}
-          />
-          <If when={badge()}>
-            {(current) => <Badge variant={current().variant} label={current().label} icon={current().icon} />}
-          </If>
-          <If when={time() !== ""}>
-            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}>
-              {time()}
-            </Text>
-          </If>
-        </View>
-        <Highlighted
-          text={preview()}
-          style={{
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
-            fontSize: typeScale.sm,
-            color: color.mutedForeground,
-          }}
-        />
-      </View>
-      <If when={props.wide}>
-        <DropdownMenu
-          accessibilityLabel={`会话操作 ${title()}`}
-          trigger={
-            <Button
-              icon="dots"
-              size="icon"
-              variant="ghost"
-              accessibilityLabel="会话操作"
-              tooltip={<Tooltip label="会话操作" />}
+    // The row is the trigger's *content*, never the trigger's element: the
+    // `ContextMenu` gives its slot's accessibility, focus and press props to
+    // the one element it is anchored to (and takes them back as the slot
+    // reconciles), so the row keeps its own name (`打开会话 <标题>`), role and
+    // press handler on a node of its own.
+    <View style={{ flexDirection: "column" }}>
+      <View
+        testID={`session-row-${row().sessionId}`}
+        role="button"
+        focusable
+        onPress={props.onSelect}
+        accessibilityLabel={`打开会话 ${title()}`}
+        accessibilityState={{ selected: props.active }}
+        onMouseEnter={() => hovered.set(true)}
+        onMouseLeave={() => hovered.set(false)}
+        // The selection is the accessibility state itself (`selectedStyle`), so
+        // the face and `accessibilityState.selected` can never drift apart. The
+        // row is flat like the reference's (`TaskListItem.tsx:570-577`, no
+        // fill, no outline): the washes are the only faces, so a selected row
+        // is a highlight over the sidebar — never a darker card than its
+        // neighbours, and never a bordered one (that card look is what made
+        // eleven outlined tiles fight over the column's width).
+        selectedStyle={{ backgroundColor: color.sidebarAccent }}
+        hoverStyle={props.active ? undefined : { backgroundColor: color.hover }}
+        focusStyle={focusRing()}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.sm,
+          paddingHorizontal: space.md,
+          paddingVertical: space.sm,
+          borderRadius: radius.md,
+        }}
+      >
+        <View style={{ flexDirection: "column", flex: 1, minWidth: 0, gap: space.xxs }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <Highlighted
+              text={title()}
+              style={{
+                flex: 1,
+                numberOfLines: 1,
+                textOverflow: "ellipsis",
+                fontSize: typeScale.base,
+                fontWeight: props.active ? weight.semibold : weight.medium,
+                color: color.sidebarForeground,
+              }}
             />
-          }
-        >
-          <DropdownMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />
-        </DropdownMenu>
-      </If>
+            <If when={badge()}>
+              {(current) => <Badge variant={current().variant} label={current().label} icon={current().icon} />}
+            </If>
+          </View>
+          {/* The second line is the row's metadata line: the last message, and
+              when it was — the title's line keeps the room the timestamp would
+              take (a 264px column: a CJK title needs two cells a character, and
+              the status word alone eats ten). */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <Highlighted
+              text={preview()}
+              style={{
+                flex: 1,
+                numberOfLines: 1,
+                textOverflow: "ellipsis",
+                fontSize: typeScale.sm,
+                color: color.mutedForeground,
+              }}
+            />
+            <If when={time() !== ""}>
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}>
+                {time()}
+              </Text>
+            </If>
+          </View>
+        </View>
+        {/* The row's actions are a pointer's, never a permanent column of
+            glyphs: they show while the pointer is on the row or the row is the
+            open one, and the title keeps the room they would take. */}
+        <If when={props.wide && (hovered() || props.active)}>
+          <DropdownMenu
+            accessibilityLabel={`会话操作 ${title()}`}
+            trigger={
+              <Button
+                icon="dots"
+                size="icon"
+                variant="ghost"
+                accessibilityLabel="会话操作"
+                tooltip={<Tooltip label="会话操作" />}
+              />
+            }
+          >
+            <DropdownMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />
+          </DropdownMenu>
+        </If>
+      </View>
     </View>
   );
 
@@ -390,17 +417,27 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
         accessibilityLabel="会话列表"
         style={{ flex: 1, minHeight: 0 }}
       >
-        {store.sessionsLoading() ? (
+        {/* The branches are separate `If`s, never one ternary over `rows()`:
+            a ternary whose condition reads `rows().length` is one computation,
+            so every refresh — a new array of the same sessions — re-ran it and
+            replaced the rows (a new element each run), deleting and re-creating
+            every row's native view. A press that landed in that window found a
+            row's label with no native view. Each `If` mounts once for its
+            boolean, and the rows below it stay the same nodes. */}
+        <If when={store.sessionsLoading()}>
           <SessionListSkeleton />
-        ) : store.sessionsError() !== null ? (
+        </If>
+        <If when={!store.sessionsLoading() && store.sessionsError() !== null}>
           <SessionListError
             message={store.sessionsError() ?? ""}
             retrying={refreshing()}
             onRetry={() => void refresh()}
           />
-        ) : rows().length === 0 ? (
+        </If>
+        <If when={!store.sessionsLoading() && store.sessionsError() === null && rows().length === 0}>
           <SessionListEmpty searching={query().trim().length > 0} />
-        ) : (
+        </If>
+        <If when={!store.sessionsLoading() && store.sessionsError() === null && rows().length > 0}>
           <View style={{ flexDirection: "column", gap: space.sm, padding: space.md }}>
             <Each of={rows()} key={(row) => row.sessionId}>
               {(row) => (
@@ -413,7 +450,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
               )}
             </Each>
           </View>
-        )}
+        </If>
       </ScrollArea>
       {/* L1 · the footer: the connection status Badge, and nothing else. */}
       <Separator />

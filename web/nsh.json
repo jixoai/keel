@@ -3,7 +3,7 @@
   "id": "com.fde2e.keel",
   "version": "0.1.0",
   "build": 1,
-  "appearance": "system",
+  "appearance": "dark",
   "theme": "theme.json",
   "capabilities": {
     "network": {

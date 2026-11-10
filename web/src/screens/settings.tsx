@@ -49,7 +49,16 @@ import type {
   TriggerStatusView,
 } from "../data/contract";
 import { store } from "../data/store";
-import { formatTime, modelFacts, reasoningLabel, selectionLabel } from "../data/wire";
+import {
+  displayNameOf,
+  formatTime,
+  modelFacts,
+  pluginStateLabel,
+  providerDisplayName,
+  reasoningLabel,
+  selectionDisplay,
+  selectionLabel,
+} from "../data/wire";
 import { applyAppearance, appearancePreference, type Appearance } from "../ui/appearance";
 import { Icon } from "../ui/icons";
 import {
@@ -169,7 +178,7 @@ const parseDocument = (text: string): { document?: Record<string, unknown>; erro
   try {
     const value: unknown = JSON.parse(text);
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return { error: "文档必须是一个 JSON 对象" };
+      return { error: "配置必须是一个 JSON 对象" };
     }
     return { document: value as Record<string, unknown> };
   } catch (error) {
@@ -196,7 +205,7 @@ const updateDraft = (mutate: (document: Record<string, unknown>) => void) => {
   const text = rawDocument();
   const parsed = text.trim() === "" ? { document: store.settings()?.document } : parseDocument(text);
   if (!parsed.document) {
-    rawParseError.set(parsed.error ?? "文档不是合法的 JSON");
+    rawParseError.set(parsed.error ?? "配置不是合法的 JSON");
     rawOpen.set(true);
     return;
   }
@@ -440,17 +449,17 @@ function AboutRow(props: { name: string; value?: string; children?: JSX.Element 
 function GeneralSection() {
   return (
     <Card testID="settings-general">
-      <CardHeader title="通用" description="会话的阅读偏好；只影响这台设备的界面，不进模型文档。" />
+      <CardHeader title="通用" description="会话的阅读偏好；只影响这台设备的界面，不进模型配置。" />
       <CardContent>
         <Field
           orientation="horizontal"
-          hint="流式回答按 token 增量刷新；关闭后整段回复到达才显示。运行中的任务不受影响，下一次订阅按新设置进行。"
+          hint="回答生成时逐字显示；关闭后整段回复完成才出现。运行中的任务不受影响，下一次生成按新设置进行。"
         >
           <Switch
             checked={store.showPartials()}
             onChange={(checked) => void store.setPartials(checked)}
-            label={`partial ${store.showPartials() ? "开" : "关"}`}
-            accessibilityLabel="切换 token 级 partial"
+            label={`逐字预览 ${store.showPartials() ? "开" : "关"}`}
+            accessibilityLabel="切换逐字预览"
             testID="settings-partials"
           />
         </Field>
@@ -539,7 +548,7 @@ function CurrentCard() {
                   fontVariant: ["tabular-nums"],
                 }}
               >
-                revision {store.settings()?.revision ?? 0}
+                配置版本 {store.settings()?.revision ?? 0}
               </Text>
             </View>
             <Field label="默认模型">
@@ -547,13 +556,26 @@ function CurrentCard() {
                 when={!!store.tenantSelection()}
                 else={
                   <Text style={{ fontSize: typeScale.sm, color: color.warning }}>
-                    未设置（文档里没有 selection）
+                    未设置（还没有默认选择）
                   </Text>
                 }
               >
-                <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-                  {selectionLabel(store.tenantSelection())}
-                </Text>
+                <View style={{ gap: space.xxs }}>
+                  <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+                    {selectionDisplay(store.tenantSelection())}
+                  </Text>
+                  {/* The wire identity as the detail line. */}
+                  <Text
+                    style={{
+                      fontFamily: font.mono,
+                      fontSize: typeScale["2xs"],
+                      color: color.mutedForeground,
+                      userSelect: "text",
+                    }}
+                  >
+                    {selectionLabel(store.tenantSelection())}
+                  </Text>
+                </View>
               </If>
             </Field>
             <If when={!!store.settingsSavedSummary()}>
@@ -572,14 +594,16 @@ function CurrentCard() {
   );
 }
 
-/** The provider choices of the structured form: the draft's declared ids. */
+/** The provider choices of the structured form: readable names, the id as the
+ * value (what the document stores). */
 const providerItems = (): SelectItem[] =>
   draftProviders().map((provider) => ({
     value: provider.id,
-    title: provider.name ? `${provider.name} · ${provider.id}` : provider.id,
+    title: provider.name.trim().length > 0 ? provider.name : displayNameOf(provider.id),
   }));
 
-/** The model choices for the selected provider (or all declared models). */
+/** The model choices for the selected provider (or all declared models):
+ * readable names, the wire identity as the value. */
 const modelItems = (selection: ModelSelection | null): SelectItem[] => {
   const providers = draftProviders();
   const chosen = providers.find((provider) => provider.id === selection?.providerId);
@@ -589,9 +613,16 @@ const modelItems = (selection: ModelSelection | null): SelectItem[] => {
         .models()
         .find((model) => model.providerId === provider.id && model.modelId === modelId);
       const unavailable = resolved?.selectable === false;
+      const name = displayNameOf(modelId);
+      const title =
+        chosen || providers.length === 1
+          ? `${name}${unavailable ? "（不可执行）" : ""}`
+          : `${name} · ${provider.name.trim().length > 0 ? provider.name : displayNameOf(provider.id)}${
+              unavailable ? "（不可执行）" : ""
+            }`;
       return {
         value: chosen ? modelId : `${provider.id}/${modelId}`,
-        title: `${chosen ? modelId : `${provider.id}/${modelId}`}${unavailable ? "（不可执行）" : ""}`,
+        title,
         disabled: unavailable,
       };
     }),
@@ -647,7 +678,7 @@ function SelectionCard() {
   const save = () => {
     const parsed = parseDocument(rawDocument());
     if (!parsed.document) {
-      rawParseError.set(parsed.error ?? "文档不是合法的 JSON");
+      rawParseError.set(parsed.error ?? "配置不是合法的 JSON");
       rawOpen.set(true);
       return;
     }
@@ -663,7 +694,7 @@ function SelectionCard() {
     <Card testID="settings-selection">
       <CardHeader
         title="部署默认"
-        description="结构化编辑模型文档的默认选择；保存时整份文档提交（带 expectedRevision），服务端逐字段校验。"
+        description="结构化编辑默认选择；保存时整份配置一起提交，并核对打开时的配置版本，服务端逐字段校验。"
       />
       <CardContent>
         <If when={store.settingsIssues().length > 0}>
@@ -677,7 +708,7 @@ function SelectionCard() {
         <If when={store.settingsConflict() !== null}>
           <Notice tone="warning" accessibilityLabel="文档冲突">
             <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.warning }}>
-              文档已被其它写入更新（当前 revision {store.settingsConflict() ?? "?"}）
+              配置已被其它写入更新（当前版本 {store.settingsConflict() ?? "?"}）
             </Text>
             <Text
               style={{
@@ -702,13 +733,13 @@ function SelectionCard() {
           </Notice>
         </If>
         <FieldGroup>
-          <Field label="Provider" hint="来自当前文档的 providers；保存后服务端按凭据解析可执行性。">
+          <Field label="Provider" hint="来自当前配置的 Provider；保存后服务端按凭据解析可执行性。">
             <Select
               testID="settings-selection-provider"
               accessibilityLabel="默认 Provider"
               items={providerItems()}
               value={selection()?.providerId ?? null}
-              placeholder="选择 provider"
+              placeholder="选择 Provider"
               onChange={(value) => {
                 if (value) chooseProvider(value);
               }}
@@ -718,7 +749,7 @@ function SelectionCard() {
             label="模型"
             hint={
               modelItems(selection()).length === 0
-                ? "该 provider 在文档里没有声明模型。"
+                ? "该 Provider 还没有声明模型。"
                 : "可选的模型才能保存为默认；不可执行的会标明原因。"
             }
           >
@@ -795,6 +826,7 @@ function SelectionCard() {
 
 /** One provider's structured row: template, endpoint, credential reference. */
 function ProviderEditorRow(props: { provider: () => DraftProvider }) {
+  const name = () => props.provider().name.trim() || displayNameOf(props.provider().id);
   return (
     <View
       style={{
@@ -807,29 +839,32 @@ function ProviderEditorRow(props: { provider: () => DraftProvider }) {
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
         <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-          {props.provider().name
-            ? `${props.provider().name} · ${props.provider().id}`
-            : props.provider().id}
+          {name()}
+        </Text>
+        {/* The document's own key, as a detail: the name above is what the
+            reader edits by. */}
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground }}>
+          {props.provider().id}
         </Text>
         <Badge variant="secondary" label={`${props.provider().modelIds.length} 个模型`} />
       </View>
       <FieldGroup>
-        <Field label="模板" hint="文档里的 api.type；其它取值走「高级」的原始文档。">
+        <Field label="接口协议" hint="只列常用协议；其它取值可在「高级」的原始配置里改。">
           <Select
             testID={`settings-provider-template-${props.provider().id}`}
-            accessibilityLabel={`${props.provider().id} 模板`}
+            accessibilityLabel={`${name()} 接口协议`}
             items={API_PROTOCOLS}
             value={props.provider().apiType}
-            placeholder="选择模板"
+            placeholder="选择协议"
             onChange={(value) => {
               if (value) setProviderApiType(props.provider().id, value);
             }}
           />
         </Field>
-        <Field label="endpoint" hint="api.baseUrl，例如 https://api.example.com/v1。">
+        <Field label="服务地址" hint="Provider 的接口根地址，例如 https://api.example.com/v1。">
           <Input
             testID={`settings-provider-endpoint-${props.provider().id}`}
-            accessibilityLabel={`${props.provider().id} endpoint`}
+            accessibilityLabel={`${name()} 服务地址`}
             value={props.provider().baseUrl}
             placeholder="https://…"
             onChange={(value) => setProviderBaseUrl(props.provider().id, value)}
@@ -837,11 +872,11 @@ function ProviderEditorRow(props: { provider: () => DraftProvider }) {
         </Field>
         <Field
           label="凭据引用"
-          hint="env 变量名，或 secret:名字（写到「密钥」分区）；这里永远不存凭据的值。"
+          hint="环境变量的名字，或「密钥」分区里保存的名字；这里永远不存凭据的值。"
         >
           <Input
             testID={`settings-provider-credential-${props.provider().id}`}
-            accessibilityLabel={`${props.provider().id} 凭据引用`}
+            accessibilityLabel={`${name()} 凭据引用`}
             value={props.provider().credential}
             placeholder="S2API_KEY 或 secret:name"
             onChange={(value) => setProviderCredential(props.provider().id, value)}
@@ -858,7 +893,7 @@ function ProviderEditorCard() {
     <Card testID="settings-provider-editor">
       <CardHeader
         title="Provider 接入"
-        description="按 provider 编辑模板、endpoint 与凭据引用；改的是待保存的文档，按上方「保存模型配置」生效。"
+        description="按 Provider 编辑接口协议、服务地址与凭据引用；改的是待保存的配置，按上方「保存模型配置」生效。"
       />
       <CardContent>
         <If when={providers().length === 0}>
@@ -891,8 +926,8 @@ function AdvancedCard() {
                 color: color.mutedForeground,
               }}
             >
-              完整的 models 文档（schemaVersion / providers / 规则数组 / selection）。保存时整份文档提交；
-              服务端校验失败会按字段路径列出原因。
+              完整的模型配置：版本号、Provider 列表、模型规则与默认选择。保存时整份提交；
+              服务端校验失败会按字段列出原因。
             </Text>
             <Textarea
               testID="settings-raw-document"
@@ -964,6 +999,9 @@ function ModelRow(props: { model: () => ModelView }) {
       <View style={{ flex: 1, minWidth: 0, gap: space.xxs }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
           <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+            {displayNameOf(props.model().modelId)}
+          </Text>
+          <Text style={{ fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground }}>
             {props.model().providerId}/{props.model().modelId}
           </Text>
           <If when={isDefault()}>
@@ -986,7 +1024,7 @@ function ModelRow(props: { model: () => ModelView }) {
           variant="outline"
           size="sm"
           label="设为默认"
-          accessibilityLabel={`设为默认 ${props.model().providerId}/${props.model().modelId}`}
+          accessibilityLabel={`设为默认 ${displayNameOf(props.model().modelId)}`}
           disabled={props.model().selectable === false}
           onPress={choose}
         />
@@ -1062,7 +1100,7 @@ function ModelsListCard() {
     <Card testID="settings-models">
       <CardHeader
         title="模型列表"
-        description="来自 /v1/models：只含凭据可解析的可见 provider；可选的模型可以点选为默认。"
+        description="来自服务端清单：只含凭据可解析的可见 Provider；可选的模型可以点选为默认。"
       />
       <CardContent>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
@@ -1132,9 +1170,10 @@ function ProviderRow(props: { provider: () => ProviderView }) {
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
         <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-          {props.provider().name
-            ? `${props.provider().name} · ${props.provider().providerId}`
-            : props.provider().providerId}
+          {providerDisplayName(props.provider())}
+        </Text>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground }}>
+          {props.provider().providerId}
         </Text>
         <Badge
           variant={props.provider().executable ? "success" : "destructive"}
@@ -1168,7 +1207,7 @@ function ProvidersListCard() {
     <Card testID="settings-providers">
       <CardHeader
         title="Provider 列表"
-        description="来自 /v1/providers（只含可见 provider）：凭据状态、可执行性与逐条诊断。"
+        description="来自服务端清单（只含可见 Provider）：凭据状态、可执行性与逐条诊断。"
       />
       <CardContent>
         <If when={!!store.providersError()}>
@@ -1260,6 +1299,13 @@ function SecretRow(props: { secret: () => SecretMeta }) {
 
 function SecretsSection() {
   const available = () => store.secretsAvailable();
+  /** Why the box is off, in the reader's words: the server names its own
+   * configuration key, and that name is not the reader's business. */
+  const reasonText = () => {
+    const raw = store.secretsReason();
+    if (!raw || /KEEL_SECRET_KEY/.test(raw)) return "服务端尚未启用密钥存储。";
+    return raw;
+  };
   const isOverwrite = () =>
     store.secrets().some((item) => item.name === secretName().trim() && !!secretName().trim());
   const submit = () => {
@@ -1281,7 +1327,7 @@ function SecretsSection() {
       <Card testID="settings-secrets">
         <CardHeader
           title="密钥"
-          description={'按名字写入/覆盖/删除；值只写不回读（响应、日志、列表都不含它）。模型配置用 access.ref = "secret:NAME" 引用。'}
+          description="按名字写入/覆盖/删除；值只写不回读（响应、日志、列表都不含它）。模型配置里按名字引用这里保存的密钥。"
         />
         <CardContent>
           <If when={!available()}>
@@ -1296,7 +1342,7 @@ function SecretsSection() {
                   color: color.foreground,
                 }}
               >
-                {store.secretsReason() || "服务端没有配置 KEEL_SECRET_KEY（密钥盒）。"}
+                {reasonText()}
               </Text>
               <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
                 不会回退为明文存储；配置密钥盒后这里即可写入。
@@ -1322,7 +1368,7 @@ function SecretsSection() {
           <View style={{ gap: space.md }}>
             <Label label={available() ? "写入 / 覆盖" : "写入（不可用）"} />
             <FieldGroup>
-              <Field label="名字" hint="写入同名名字即覆盖；模型文档用 secret:名字 引用它。">
+              <Field label="名字" hint="写入同名名字即覆盖；模型配置里用 secret:名字 引用它。">
                 <Input
                   testID="secret-name"
                   accessibilityLabel="密钥名字"
@@ -1426,7 +1472,7 @@ function PluginRow(props: { plugin: () => PluginStatusView }) {
         </If>
         <Badge
           variant={pluginStateVariant(props.plugin().state)}
-          label={props.plugin().state ?? "unknown"}
+          label={pluginStateLabel(props.plugin().state)}
         />
         <View style={{ flex: 1 }} />
         <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
@@ -1701,7 +1747,6 @@ function PluginsSection() {
           </If>
           <If when={!store.pluginsError() && !store.pluginsLoading()}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-              <Badge variant="info" label={`generation ${store.plugins()?.generation ?? "-"}`} />
               <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
                 {(store.plugins()?.tools ?? []).length} 个工具 · {plugins().length} 个插件
               </Text>
@@ -1735,7 +1780,7 @@ function PluginsSection() {
       <Card testID="settings-triggers">
         <CardHeader
           title="触发器"
-          description="来自 /v1/triggers：手动触发以 manual 来源记录审计；被禁用的触发器无法触发。"
+          description="来自服务端清单：手动触发会记入审计；被停用的触发器无法触发。"
         />
         <CardContent>
           <If
