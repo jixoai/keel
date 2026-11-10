@@ -16,7 +16,7 @@ kind: in-process|sidecar|webview
 description: 一句话
 engines: { keel: ">=0.2.0 <0.3.0" }
 provides:
-  tools: [name, ...]           # 工具名（全局唯一，冲突 fail-closed）
+  tools: [name, ...]           # 工具名（声明用 `<plugin>.<tool>` 或裸名；发布名见「工具发布名 wire 安全」）
   hooks: [event, ...]          # 闭集事件
   triggers: [id, ...]
   ui: { entry: ui/index.html, title: "..." }   # webview 必填
@@ -43,6 +43,26 @@ MUST 支持从 `plugins-root` 发现插件；MUST 提供安装（本地目录/gi
 #### Scenario: 安装即出现
 - **WHEN** 安装一个合法插件包
 - **THEN** `GET /v1/plugins` 立即列出它（状态 installed/enabled），UI 清单同步刷新
+
+### Requirement: 工具发布名 wire 安全
+
+`provides.tools` MUST 接受两种声明写法：裸本地名（`greet`）或已限定名（`<plugin>.greet`）。
+宿主发布的模型可见工具名 MUST 匹配 `^[A-Za-z0-9_-]{1,64}$`（OpenAI 兼容端点的 function name 文法）。
+发布 MUST 先把 `<plugin>` 与本地名以 `.` 连接、再把所有 `[^A-Za-z0-9_-]` 字符归一为 `_`
+（`demo.sidecar` 的 `greet` 发布为 `demo_sidecar_greet`）；**已经合规的名字 MUST 逐字不变**
+（`example_status`、`spawn_subagent` 是既有调用方兼容红线）。`kind: in-process` 的
+`provides.tools` 条目即发布名（同一归一规则）；`kind: sidecar|webview` 的条目是本地名或
+已限定名，发布时加上宿主命名空间。归一后的发布名 MUST 在安装时校验：不满足文法（含超长）
+或两个声明归一后同名 MUST 以字段级错误拒绝（fail-closed），不允许等到调用期才失败。
+
+#### Scenario: 归一后一次调用闭环
+- **GIVEN** 一个 sidecar 插件 `demo.sidecar` 在清单与 `tools/list` 中都提供本地工具 `greet`
+- **WHEN** 它被启用后模型面上出现工具
+- **THEN** 可见名是 `demo_sidecar_greet`；以该名调用解析回本地工具 `greet`、在 sidecar 上真的执行、结果原样返回
+
+#### Scenario: 不合规即安装拒绝
+- **WHEN** 声明的工具归一后不匹配 `^[A-Za-z0-9_-]{1,64}$`（例如超长），或两个声明归一后同名
+- **THEN** 安装返回 `provides.tools[i]` 字段级错误并且包不被采用（清单不落库、包不入受管目录）
 
 ### Requirement: 生命周期
 

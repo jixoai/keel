@@ -330,10 +330,7 @@ func (m *Manager) loaderFor(entry *managerEntry) PluginLoader {
 	if entry.loader != nil {
 		return entry.loader
 	}
-	if entry.manifest == nil {
-		return nil
-	}
-	return m.loaders[entry.manifest.Kind]
+	return m.loaderForKind(entry.manifest)
 }
 
 // runtimeFailure asks the entry's loader whether the runtime it supervises has

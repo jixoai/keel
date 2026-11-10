@@ -1,0 +1,30 @@
+id: keel.web-search
+version: 1.0.0
+kind: sidecar
+description: "Official web-search plugin: one tool that searches the live web through a fallback chain of five upstreams and reports upstream failures verbatim."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - search
+permissions:
+  # The sidecar makes its own outbound HTTPS requests (the runtime does not
+  # proxy them); these are the hosts the default provider chain can reach.
+  net:
+    - www.bing.com
+    - cn.bing.com
+    - html.duckduckgo.com
+    - hn.algolia.com
+    - api.github.com
+    - registry.npmjs.org
+entry:
+  # Node >= 20 must be on PATH (the sidecar loader passes the host's PATH
+  # through). The script is plain ESM with no dependencies.
+  command:
+    - node
+    - sidecar.mjs
+  env:
+    - KEEL_WEB_SEARCH_PROVIDERS
+    - KEEL_WEB_SEARCH_TIMEOUT_MS
+    - KEEL_WEB_SEARCH_BUDGET_MS
+    - KEEL_WEB_SEARCH_LIMIT

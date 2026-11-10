@@ -1,0 +1,23 @@
+id: keel.context-memory
+version: 1.0.0
+kind: sidecar
+description: "Official context-memory plugin: durable local memory with tag/keyword/time recall, stored in the plugin's own journal and never in host secrets."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - remember
+    - recall
+permissions:
+  # The sidecar writes its own append-only journal under <plugins root>/.data/
+  # (or $KEEL_CONTEXT_MEMORY_DIR). The runtime does not mediate sidecar file
+  # access yet; the declaration states the intent (spec: 诚实边界).
+  fs:
+    - plugin-data
+entry:
+  # Node >= 20 must be on PATH; the script is plain ESM with no dependencies.
+  command:
+    - node
+    - sidecar.mjs
+  env:
+    - KEEL_CONTEXT_MEMORY_DIR

@@ -1,0 +1,22 @@
+id: keel.creation
+version: 1.0.0
+kind: in-process
+description: "Creation mode: the agent scaffolds, validates, installs and removes real plugin packages, with the plugin standard contributed to the session."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - creation_scaffold
+    - creation_validate
+    - creation_install
+    - creation_list
+    - creation_remove
+permissions:
+  tools:
+    - creation_scaffold
+    - creation_validate
+    - creation_install
+    - creation_list
+    - creation_remove
+source:
+  type: builtin

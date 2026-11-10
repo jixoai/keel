@@ -1,0 +1,2523 @@
+{
+  "schema": "keel.plugin-market.catalog/1",
+  "generatedAt": "2026-11-06",
+  "sources": [
+    {
+      "kind": "dsh-official",
+      "repo": "deepseek-ai/deepseek-harness",
+      "ref": "fcc0ad462172",
+      "refDate": "2026-11-04T08:40:00Z",
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "observed": {
+        "groups": 53,
+        "workspacePackages": 370,
+        "packageJsonUnderPackages": 379,
+        "bundles": 15,
+        "webProfile": {
+          "baseRows": 99,
+          "webAppRows": 121,
+          "uniqueRows": 196,
+          "enabledRows": 171
+        }
+      },
+      "method": "GitHub tree API: packages/**/package.json; group = packages/<group>/<pkg>; workspacePackages counts packages/<group>/<pkg>, packageJsonUnderPackages also counts nested fixtures/templates"
+    },
+    {
+      "kind": "dsh-community",
+      "url": "https://github.com/topics/dsh-plugin",
+      "also": "https://github.com/search?q=dsh-plugin+in%3Aname&type=repositories",
+      "method": "GitHub search API sorted by stars, top 30 of each, 2026-11-06; star counts recorded as observed"
+    },
+    {
+      "kind": "keel-coverage",
+      "url": "plugins/COVERAGE.md"
+    }
+  ],
+  "entries": [
+    {
+      "id": "community.EverMind-AI.EverOS",
+      "name": "EverMind-AI/EverOS",
+      "summary": "可移植记忆层：local-first、Markdown 原生、用户自有",
+      "capabilities": [
+        "memory",
+        "local-first",
+        "markdown"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "EverMind-AI/EverOS",
+        "url": "https://github.com/EverMind-AI/EverOS",
+        "stars": 13865,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "delivered",
+        "keelPluginId": "keel.context-memory",
+        "tools": [
+          "keel_context-memory_remember",
+          "keel_context-memory_recall"
+        ],
+        "note": "记忆能力面由本轮 keel.context-memory 覆盖（本地日志，非 Markdown）"
+      }
+    },
+    {
+      "id": "keel.context-memory",
+      "name": "上下文记忆（keel.context-memory）",
+      "summary": "官方上下文记忆插件（sidecar）：本地 NDJSON 日志，标签/关键词/时间检索，并发安全。",
+      "capabilities": [
+        "memory",
+        "local-storage",
+        "retrieval"
+      ],
+      "source": {
+        "kind": "keel-official",
+        "url": "https://github.com/jixoai/keel/tree/main/plugins/keel.context-memory",
+        "path": "plugins/keel.context-memory"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "delivered",
+        "keelPluginId": "keel.context-memory",
+        "tools": [
+          "keel_context-memory_remember",
+          "keel_context-memory_recall"
+        ]
+      }
+    },
+    {
+      "id": "keel.plugin-market",
+      "name": "官方插件市场索引（keel.plugin-market）",
+      "summary": "官方插件市场索引客户端（sidecar）：随包静态索引，查询 DSH 官方/社区能力面与 keel 覆盖状态。",
+      "capabilities": [
+        "plugin-index",
+        "market",
+        "coverage"
+      ],
+      "source": {
+        "kind": "keel-official",
+        "url": "https://github.com/jixoai/keel/tree/main/plugins/keel.plugin-market",
+        "path": "plugins/keel.plugin-market"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "delivered",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "keel.web-search",
+      "name": "联网搜索（keel.web-search）",
+      "summary": "官方联网搜索插件（sidecar）：五个上游回退链，结构化结果 + 如实错误。",
+      "capabilities": [
+        "web-search",
+        "http",
+        "fallback"
+      ],
+      "source": {
+        "kind": "keel-official",
+        "url": "https://github.com/jixoai/keel/tree/main/plugins/keel.web-search",
+        "path": "plugins/keel.web-search"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "delivered",
+        "keelPluginId": "keel.web-search",
+        "tools": [
+          "keel_web-search_search"
+        ]
+      }
+    },
+    {
+      "id": "community.AdamPlatin123.dsh-plugin-radar",
+      "name": "AdamPlatin123/dsh-plugin-radar",
+      "summary": "DSH 插件生态雷达：持续发现/分类社区插件",
+      "capabilities": [
+        "plugin-index",
+        "ecosystem-radar"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "AdamPlatin123/dsh-plugin-radar",
+        "url": "https://github.com/AdamPlatin123/dsh-plugin-radar",
+        "stars": 1498,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "community.LivXue.dsh-plugin-shop",
+      "name": "LivXue/dsh-plugin-shop",
+      "summary": "每日刷新的 DSH 插件市场（浏览/搜索/安装）",
+      "capabilities": [
+        "plugin-market",
+        "installer"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "LivXue/dsh-plugin-shop",
+        "url": "https://github.com/LivXue/dsh-plugin-shop",
+        "stars": 663,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ],
+        "note": "托管/一键装属于 W3"
+      }
+    },
+    {
+      "id": "community.MemTensor.MemOS",
+      "name": "MemTensor/MemOS",
+      "summary": "自进化记忆 OS：超持久、混合检索、跨任务",
+      "capabilities": [
+        "memory",
+        "hybrid-retrieval"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "MemTensor/MemOS",
+        "url": "https://github.com/MemTensor/MemOS",
+        "stars": 12342,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.context-memory",
+        "tools": [
+          "keel_context-memory_remember",
+          "keel_context-memory_recall"
+        ],
+        "note": "基础读写/检索已交付；向量/混合检索未覆盖"
+      }
+    },
+    {
+      "id": "community.Nagi-ovo.dsh-find-plugins",
+      "name": "Nagi-ovo/dsh-find-plugins",
+      "summary": "搜索、安装并验证 GitHub 插件的 DSH skill",
+      "capabilities": [
+        "plugin-index",
+        "installer",
+        "verification"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Nagi-ovo/dsh-find-plugins",
+        "url": "https://github.com/Nagi-ovo/dsh-find-plugins",
+        "stars": 184,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "community.awesome-dsh-plugin.awesome-dsh-plugin",
+      "name": "awesome-dsh-plugin/awesome-dsh-plugin",
+      "summary": "DeepSeek Harness 插件精选列表（社区索引）",
+      "capabilities": [
+        "plugin-index",
+        "curation"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "awesome-dsh-plugin/awesome-dsh-plugin",
+        "url": "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin",
+        "stars": 24105,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ],
+        "note": "作为 keel.plugin-market 的索引来源之一；市场托管仍 W3"
+      }
+    },
+    {
+      "id": "community.awesome-dsh-plugin.dsh-find-plugin",
+      "name": "awesome-dsh-plugin/dsh-find-plugin",
+      "summary": "在 agent 内实时搜索 GitHub dsh-plugin topic 并按 star 排序",
+      "capabilities": [
+        "plugin-index",
+        "search"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "awesome-dsh-plugin/dsh-find-plugin",
+        "url": "https://github.com/awesome-dsh-plugin/dsh-find-plugin",
+        "stars": 230,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "community.bradeGithub.DSH-Plugins-Marketplace",
+      "name": "bradeGithub/DSH-Plugins-Marketplace",
+      "summary": "在 DSH Web GUI 内一键浏览/安装/更新 GitHub 插件",
+      "capabilities": [
+        "plugin-market",
+        "installer"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "bradeGithub/DSH-Plugins-Marketplace",
+        "url": "https://github.com/bradeGithub/DSH-Plugins-Marketplace",
+        "stars": 203,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "community.bruc3van.awesome-dsh-plugin",
+      "name": "bruc3van/awesome-dsh-plugin",
+      "summary": "每日抓取并人工复核的 DSH 插件索引",
+      "capabilities": [
+        "plugin-index",
+        "curation"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "bruc3van/awesome-dsh-plugin",
+        "url": "https://github.com/bruc3van/awesome-dsh-plugin",
+        "stars": 508,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "community.dshplugin.dsh-plugin-hub",
+      "name": "dshplugin/dsh-plugin-hub",
+      "summary": "DSH 插件市场/插件大全（下载与安装）",
+      "capabilities": [
+        "plugin-market",
+        "installer"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "dshplugin/dsh-plugin-hub",
+        "url": "https://github.com/dshplugin/dsh-plugin-hub",
+        "stars": 503,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "community.polang233.dsh-plugin-index",
+      "name": "polang233/dsh-plugin-index",
+      "summary": "面向小开发者的开放插件市场索引",
+      "capabilities": [
+        "plugin-index",
+        "market"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "polang233/dsh-plugin-index",
+        "url": "https://github.com/polang233/dsh-plugin-index",
+        "stars": 212,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ]
+      }
+    },
+    {
+      "id": "dsh.boot",
+      "name": "boot：启动 / profile / 热重载 / 插件管理 / 市场",
+      "summary": "应用启动、命令行、配置编辑、HMR、插件管理器与插件市场。",
+      "capabilities": [
+        "boot",
+        "profile-patch",
+        "hmr",
+        "plugin-manager",
+        "plugin-market"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/boot",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/boot"
+      },
+      "dshPackages": [
+        "app-boot",
+        "cmdline",
+        "config-editor",
+        "hmr",
+        "plugin-manager",
+        "plugin-market"
+      ],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.plugin-market",
+        "tools": [
+          "keel_plugin-market_search",
+          "keel_plugin-market_info"
+        ],
+        "note": "索引客户端本轮交付；插件管理器/启动层仍 planned"
+      }
+    },
+    {
+      "id": "dsh.context",
+      "name": "context：指令 / 时间 / 文件引用 / harness 上下文",
+      "summary": "Agent 指令、文件引用、会话引用、时间上下文与 tmux 上下文。",
+      "capabilities": [
+        "context-injection",
+        "file-reference",
+        "time-context"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/context",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/context"
+      },
+      "dshPackages": [
+        "agent-instructions",
+        "file-reference",
+        "file-reference-local",
+        "harness-dev-context",
+        "session-reference",
+        "time-context",
+        "tmux-context"
+      ],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.context-memory",
+        "tools": [
+          "keel_context-memory_remember",
+          "keel_context-memory_recall"
+        ],
+        "note": "上下文记忆本轮交付；上下文注入层仍 planned"
+      }
+    },
+    {
+      "id": "dsh.web",
+      "name": "web：搜索 / 抓取 / provider",
+      "summary": "web 服务、DeepSeek 搜索 provider、HTTP 抓取与 web 工具。",
+      "capabilities": [
+        "web-search",
+        "web-fetch",
+        "web-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/web",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/web"
+      },
+      "dshPackages": [
+        "tool-web",
+        "web",
+        "web-deepseek-api",
+        "web-fetch-http",
+        "web-search-deepseek"
+      ],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.web-search",
+        "tools": [
+          "keel_web-search_search"
+        ],
+        "note": "联网搜索本轮交付；web 服务与抓取仍 planned"
+      }
+    },
+    {
+      "id": "community.Tencent.BrowserSkill",
+      "name": "Tencent/BrowserSkill",
+      "summary": "让 AI 使用你已登录的真实浏览器（CLI + 扩展）",
+      "capabilities": [
+        "browser",
+        "real-profile",
+        "automation"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Tencent/BrowserSkill",
+        "url": "https://github.com/Tencent/BrowserSkill",
+        "stars": 10261,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.browser-use",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.WYH66666666.DSH-Transparent-UI-Plugin",
+      "name": "WYH66666666/DSH-Transparent-UI-Plugin",
+      "summary": "玻璃质感主题：顶栏/侧栏/输入框/轨迹全部磨砂玻璃",
+      "capabilities": [
+        "theme",
+        "glassmorphism",
+        "web-ui"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "WYH66666666/DSH-Transparent-UI-Plugin",
+        "url": "https://github.com/WYH66666666/DSH-Transparent-UI-Plugin",
+        "stars": 435,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.theme.glass",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.cpj-dev.dsh-plugin-cc",
+      "name": "cpj-dev/dsh-plugin-cc",
+      "summary": "把 DSH 接入 Claude Code 做评审/批判/委派",
+      "capabilities": [
+        "subagent",
+        "claude-code",
+        "review"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "cpj-dev/dsh-plugin-cc",
+        "url": "https://github.com/cpj-dev/dsh-plugin-cc",
+        "stars": 104,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.subagent-adapter",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.lili-luo.dsh-plugin-bundle",
+      "name": "lili-luo/dsh-plugin-bundle",
+      "summary": "插件组合包（每个插件独立子目录，可 path: 单独安装）",
+      "capabilities": [
+        "bundle",
+        "distribution"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "lili-luo/dsh-plugin-bundle",
+        "url": "https://github.com/lili-luo/dsh-plugin-bundle",
+        "stars": 256,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.bundles",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.luobosibing2.dsh-jev-plugin",
+      "name": "luobosibing2/dsh-jev-plugin",
+      "summary": "TypeSafe Jev / Decision API 原生 DSH 插件",
+      "capabilities": [
+        "api-integration",
+        "decisions"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "luobosibing2/dsh-jev-plugin",
+        "url": "https://github.com/luobosibing2/dsh-jev-plugin",
+        "stars": 207,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.interaction",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.xuanyuanzhifeng.dsh-plugin-agent-workflow",
+      "name": "xuanyuanzhifeng/dsh-plugin-agent-workflow",
+      "summary": "DSH Agent 工作流插件",
+      "capabilities": [
+        "workflow",
+        "orchestration"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "xuanyuanzhifeng/dsh-plugin-agent-workflow",
+        "url": "https://github.com/xuanyuanzhifeng/dsh-plugin-agent-workflow",
+        "stars": 326,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.workflow",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.api",
+      "name": "api：Remote 层（Host↔Client）",
+      "summary": "类型化远程调用、Gateway、账户/会话/任务/工作区控制器与访问控制。",
+      "capabilities": [
+        "remote-gateway",
+        "typed-api",
+        "controllers",
+        "access-control"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/api",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/api"
+      },
+      "dshPackages": [
+        "account-controller",
+        "gateway",
+        "job-controller",
+        "remote-access",
+        "remotes",
+        "session-controller",
+        "settings-controller",
+        "terminal-controller",
+        "workspace-controller",
+        "workspace-files"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.api",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.attachment",
+      "name": "attachment：图片附件能力",
+      "summary": "附件服务与本地附件后端。",
+      "capabilities": [
+        "attachment",
+        "attachment-local"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/attachment",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/attachment"
+      },
+      "dshPackages": [
+        "attachment",
+        "attachment-local"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.attachment",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.browser-use",
+      "name": "browser-use：浏览器操作能力缝",
+      "summary": "浏览器使用能力缝（可接 Chrome DevTools/Playwright/Stagehand）。",
+      "capabilities": [
+        "browser-use"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/browser-use",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/browser-use"
+      },
+      "dshPackages": [
+        "browser-use"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.browser-use",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.bundle",
+      "name": "bundle：6 个装配 bundle",
+      "summary": "base / web-app / headless / sdk-app / sdk-minimal / acp-app 六个 profile bundle。",
+      "capabilities": [
+        "bundle-base",
+        "bundle-web",
+        "bundle-headless",
+        "bundle-sdk",
+        "bundle-acp"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/bundle",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/bundle"
+      },
+      "dshPackages": [
+        "acp-app",
+        "base",
+        "headless",
+        "sdk-app",
+        "sdk-minimal",
+        "web-app"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.bundles",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.client",
+      "name": "client：Web GUI（70 个 UI 包）",
+      "summary": "聊天、设置、插件市场、审批、文件、终端、主题等 70 个 Web 客户端包。",
+      "capabilities": [
+        "web-ui",
+        "chat-ui",
+        "settings-ui",
+        "plugin-market-ui",
+        "approval-ui"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/client",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/client"
+      },
+      "dshPackages": [
+        "connection",
+        "file-upload",
+        "hmr",
+        "locale",
+        "modules",
+        "product-analytics",
+        "resources",
+        "shortcuts",
+        "store",
+        "ui-agent-preset",
+        "ui-agent-team",
+        "ui-approval",
+        "ui-attachment",
+        "ui-brand-official",
+        "ui-chat",
+        "ui-commands",
+        "ui-context-menu",
+        "ui-conversation",
+        "ui-deliverables",
+        "ui-directory-picker-browse",
+        "ui-directory-picker-native",
+        "ui-dockkit",
+        "ui-entry-customization",
+        "ui-file-actions",
+        "ui-file-drag",
+        "ui-goal",
+        "ui-input-trigger",
+        "ui-jobs",
+        "ui-layout",
+        "ui-message-feedback",
+        "ui-model-selection",
+        "ui-open-in-app",
+        "ui-permission-presets",
+        "ui-plan",
+        "ui-plugin-manager",
+        "ui-plugin-market",
+        "ui-primitives",
+        "ui-reference",
+        "ui-renderer",
+        "ui-schedule",
+        "ui-secret-mask",
+        "ui-session",
+        "ui-settings",
+        "ui-settings-account",
+        "ui-settings-agent-loop",
+        "ui-settings-general",
+        "ui-settings-models",
+        "ui-settings-plugin-inventory",
+        "ui-settings-plugins",
+        "ui-settings-session-log",
+        "ui-settings-shell",
+        "ui-settings-subagent",
+        "ui-settings-web-search",
+        "ui-shortcuts",
+        "ui-sidebar",
+        "ui-sidebar-browser",
+        "ui-sidebar-documentpreview",
+        "ui-sidebar-files",
+        "ui-sidebar-right",
+        "ui-sidebar-terminal",
+        "ui-skill",
+        "ui-slots",
+        "ui-subagent",
+        "ui-theme",
+        "ui-tool",
+        "ui-trajectory",
+        "ui-user-questions",
+        "ui-workflow-run",
+        "ui-workspace",
+        "web"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.client-ui",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.compaction",
+      "name": "compaction：自动压缩 / /compact",
+      "summary": "压缩策略、基础压缩、图片卸载与工具结果修剪。",
+      "capabilities": [
+        "compaction",
+        "auto-compact",
+        "tool-result-pruner"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/compaction",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/compaction"
+      },
+      "dshPackages": [
+        "command-compact",
+        "compaction",
+        "compaction-basic",
+        "compaction-image-offload",
+        "compaction-tool-result-pruner"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.compaction",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.computer-use",
+      "name": "computer-use：桌面操作能力缝",
+      "summary": "计算机使用（CUA）能力缝。",
+      "capabilities": [
+        "computer-use"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/computer-use",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/computer-use"
+      },
+      "dshPackages": [
+        "computer-use"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.computer-use",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.core",
+      "name": "core：agent loop / session / 系统提示 / 工具注册表",
+      "summary": "六边形内核：模型循环、会话、系统提示与工具执行器（native / ptc 两态）。",
+      "capabilities": [
+        "agent-loop",
+        "session-log",
+        "system-prompt",
+        "tool-registry",
+        "tool-executor"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/core",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/core"
+      },
+      "dshPackages": [
+        "agent",
+        "agent-default-model",
+        "agent-loop",
+        "agent-tool-presentation",
+        "scope",
+        "session",
+        "system-prompt",
+        "tool-executor-native",
+        "tool-executor-ptc",
+        "tools"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.core",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.credentials",
+      "name": "credentials：凭据引用缝与授权流",
+      "summary": "凭据引用、本地 provider、OAuth 授权流与 DeepSeek 账号。",
+      "capabilities": [
+        "credentials",
+        "authorization",
+        "oauth"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/credentials",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials"
+      },
+      "dshPackages": [
+        "authorization",
+        "credentials",
+        "credentials-local",
+        "deepseek-account",
+        "deepseek-account-platform"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.credentials",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.deliverables",
+      "name": "deliverables：交付物登记",
+      "summary": "文件交付引用、present 工具与工作区变更。",
+      "capabilities": [
+        "deliverables",
+        "workspace-changes",
+        "present-tool"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/deliverables",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/deliverables"
+      },
+      "dshPackages": [
+        "deliverable-file-references",
+        "tool-present",
+        "workspace-changes"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.deliverables",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.document",
+      "name": "document：Office→PDF",
+      "summary": "office-to-pdf 转换。",
+      "capabilities": [
+        "office-to-pdf"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/document",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/document"
+      },
+      "dshPackages": [
+        "office-to-pdf"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.document",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.extensions",
+      "name": "extensions：运行时自省 + 动态插件卡",
+      "summary": "Cordis 运行器（host/client）与 cordis 工具/UI。",
+      "capabilities": [
+        "cordis-runner",
+        "cordis-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/extensions",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/extensions"
+      },
+      "dshPackages": [
+        "cordis-client-runner",
+        "cordis-host-runner",
+        "tool-cordis",
+        "ui-cordis"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.creation",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.feedback",
+      "name": "feedback：会话/消息反馈采集",
+      "summary": "反馈命令与消息反馈。",
+      "capabilities": [
+        "feedback",
+        "message-feedback"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/feedback",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/feedback"
+      },
+      "dshPackages": [
+        "command-feedback",
+        "message-feedback"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.feedback",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.fs",
+      "name": "fs：文件契约与沙箱后端",
+      "summary": "文件系统抽象 + 本地/沙箱后端、补丁、观察策略与文件检索工具。",
+      "capabilities": [
+        "filesystem",
+        "sandbox-backend",
+        "file-tools",
+        "search"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/fs",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/fs"
+      },
+      "dshPackages": [
+        "fs",
+        "fs-local",
+        "fs-observation-policy",
+        "fs-patch",
+        "fs-sandbox",
+        "tool-fs",
+        "tool-fs-search",
+        "tool-str-replace-editor"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.fs",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.goal",
+      "name": "goal：每会话持久目标 + 自动续跑",
+      "summary": "目标、轮次驱动与目标工具。",
+      "capabilities": [
+        "goal",
+        "goal-round-driver",
+        "goal-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/goal",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/goal"
+      },
+      "dshPackages": [
+        "command-goal",
+        "goal",
+        "goal-round-driver",
+        "tool-goal"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.goal",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.guard",
+      "name": "guard：重复工具提醒 / 超时策略",
+      "summary": "重复工具调用提醒与单次超时策略。",
+      "capabilities": [
+        "repeat-reminder",
+        "timeout-policy"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/guard",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/guard"
+      },
+      "dshPackages": [
+        "repeat-tool-reminder",
+        "timeout-policy"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.guard",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.host",
+      "name": "host：HTTP/SPA 宿主与目录选择",
+      "summary": "Webserver、静态前端、目录选择（浏览/原生/自动）、open-in-app、OTel。",
+      "capabilities": [
+        "webserver",
+        "static-hosting",
+        "directory-picker",
+        "open-in-app"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/host",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/host"
+      },
+      "dshPackages": [
+        "directory-picker",
+        "directory-picker-auto",
+        "directory-picker-browse",
+        "directory-picker-native",
+        "frontend-static",
+        "open-in-app",
+        "plugin-inventory",
+        "product-telemetry-otel",
+        "webserver"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.host",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.identity",
+      "name": "identity：匿名 id / OTel",
+      "summary": "匿名用户 id 与产品遥测。",
+      "capabilities": [
+        "anonymous-id",
+        "otel"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/identity",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/identity"
+      },
+      "dshPackages": [
+        "anonymous-user-id"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.telemetry",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.interaction",
+      "name": "interaction：命令 / 审批 / 问句 / 权限预设",
+      "summary": "斜杠命令、审批、用户问句与权限预设。",
+      "capabilities": [
+        "commands",
+        "approval",
+        "user-questions",
+        "permission-presets"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/interaction",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/interaction"
+      },
+      "dshPackages": [
+        "commands",
+        "permission-presets",
+        "tool-ask-user",
+        "user-approval",
+        "user-questions"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.interaction",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.jobs",
+      "name": "jobs：后台作业控制",
+      "summary": "作业服务、本地后端与作业工具。",
+      "capabilities": [
+        "jobs",
+        "jobs-local",
+        "job-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/jobs",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/jobs"
+      },
+      "dshPackages": [
+        "jobs",
+        "jobs-local",
+        "tool-jobs"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.jobs",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.llm",
+      "name": "llm：提供商中立的模型调用",
+      "summary": "模型适配层：DeepSeek 官方 API、API key/账号两种凭据、重试与 token 计量。",
+      "capabilities": [
+        "llm",
+        "provider-adapter",
+        "retry",
+        "token-metering"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/llm",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/llm"
+      },
+      "dshPackages": [
+        "deepseek-llm-api-extensions",
+        "llm",
+        "llm-deepseek",
+        "llm-deepseek-account",
+        "llm-deepseek-api-key",
+        "llm-pi-ai",
+        "llm-retry",
+        "plugin-package-inventory-deepseek",
+        "token-meter"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.llm",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.lsp",
+      "name": "lsp：代码导航",
+      "summary": "LSP 客户端、stdio provider 与 lsp 工具。",
+      "capabilities": [
+        "lsp",
+        "lsp-stdio",
+        "lsp-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/lsp",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/lsp"
+      },
+      "dshPackages": [
+        "lsp",
+        "lsp-stdio",
+        "tool-lsp"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.lsp",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.mcp",
+      "name": "mcp：MCP server 连接",
+      "summary": "MCP 客户端、管理器与资源面。",
+      "capabilities": [
+        "mcp-client",
+        "mcp-manager",
+        "mcp-resources"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/mcp",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/mcp"
+      },
+      "dshPackages": [
+        "mcp-client",
+        "mcp-manager",
+        "mcp-resources"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.mcp",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.plan",
+      "name": "plan：计划模式",
+      "summary": "计划模式插件。",
+      "capabilities": [
+        "plan-mode"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/plan",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/plan"
+      },
+      "dshPackages": [
+        "plan-mode"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.plan",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.preset",
+      "name": "preset：按 revision 换工具/提示词/技能",
+      "summary": "Agent 预设、预设注册表与 persona。",
+      "capabilities": [
+        "agent-preset",
+        "persona",
+        "preset-registry"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/preset",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/preset"
+      },
+      "dshPackages": [
+        "agent-preset",
+        "agent-preset-registry",
+        "persona"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.preset",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.ptc-runtime",
+      "name": "ptc-runtime：程序化工具调用运行时",
+      "summary": "PTC 运行时与 Node 后端。",
+      "capabilities": [
+        "ptc-runtime",
+        "ptc-runtime-node"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/ptc-runtime",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/ptc-runtime"
+      },
+      "dshPackages": [
+        "ptc-runtime",
+        "ptc-runtime-node"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.ptc",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.sandbox",
+      "name": "sandbox：三档文件效应与平台后端",
+      "summary": "沙箱策略、本地后端与 Windows ACL 后端。",
+      "capabilities": [
+        "sandbox-policy",
+        "sandbox-local",
+        "windows-acl"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/sandbox",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/sandbox"
+      },
+      "dshPackages": [
+        "sandbox",
+        "sandbox-local",
+        "sandbox-policy",
+        "sandbox-windows-acl"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.sandbox",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.schedule",
+      "name": "schedule：定时任务 / 提醒",
+      "summary": "调度服务与 schedule 工具。",
+      "capabilities": [
+        "schedule",
+        "schedule-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/schedule",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/schedule"
+      },
+      "dshPackages": [
+        "schedule",
+        "tool-schedule"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.schedule",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.sdk",
+      "name": "sdk：进程外 SDK（JSON-RPC）",
+      "summary": "SDK 协议、服务端与客户端。",
+      "capabilities": [
+        "sdk-protocol",
+        "sdk-server",
+        "sdk-client"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/sdk",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/sdk"
+      },
+      "dshPackages": [
+        "client",
+        "protocol",
+        "server"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.sdk",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.session",
+      "name": "session：持久化 / 投影 / 标题 / 遥测",
+      "summary": "会话日志与格式版本（v0→v4 迁移）、投影缓存、标题生成、统计与遥测。",
+      "capabilities": [
+        "session-log",
+        "projection",
+        "session-format",
+        "session-title",
+        "telemetry"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/session",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/session"
+      },
+      "dshPackages": [
+        "message-quotes",
+        "session-checkpoint-policy",
+        "session-format",
+        "session-format-catalog",
+        "session-format-v0-to-v1",
+        "session-format-v1-to-v2",
+        "session-format-v2-to-v3",
+        "session-format-v3-to-v4",
+        "session-log-deepseek",
+        "session-persistence",
+        "session-persistence-jsonl",
+        "session-projection",
+        "session-projection-cache",
+        "session-stats",
+        "session-telemetry",
+        "session-telemetry-otel",
+        "session-title",
+        "session-title-first-prompt-llm",
+        "session-title-llm",
+        "session-turn-outline",
+        "tool-working-directory",
+        "working-directory"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.session",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.session-query",
+      "name": "session-query：历史会话检索 / 导出",
+      "summary": "会话检索（SQLite）与日志导出。",
+      "capabilities": [
+        "session-query",
+        "session-export",
+        "session-search"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/session-query",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/session-query"
+      },
+      "dshPackages": [
+        "session-log-export",
+        "session-query",
+        "session-query-sqlite"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.session-query",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.settings",
+      "name": "settings：schema 派生配置表单",
+      "summary": "设置服务（schema 派生）。",
+      "capabilities": [
+        "settings"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/settings",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/settings"
+      },
+      "dshPackages": [
+        "settings"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.settings",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.shell",
+      "name": "shell：bash / pwsh 执行",
+      "summary": "bash 与 PowerShell 的本地/沙箱执行，含持久终端工具。",
+      "capabilities": [
+        "bash",
+        "pwsh",
+        "shell-tools",
+        "persistent-terminal"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/shell",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/shell"
+      },
+      "dshPackages": [
+        "bash-local",
+        "bash-sandbox",
+        "pwsh-local",
+        "pwsh-sandbox",
+        "shell",
+        "shell-env",
+        "tool-bash",
+        "tool-bash-persistent",
+        "tool-pwsh",
+        "tool-pwsh-persistent"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.shell",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.skill",
+      "name": "skill：技能发现 / 装载 / 工具",
+      "summary": "技能发现、文件系统/Office 技能、技能工具与工作区依赖。",
+      "capabilities": [
+        "skills",
+        "skill-tools",
+        "office-skills"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/skill",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/skill"
+      },
+      "dshPackages": [
+        "skill",
+        "skill-filesystem",
+        "skill-office",
+        "tool-skill",
+        "tool-workspace-dependencies"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.skill",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.spill",
+      "name": "spill：长文本溢出到存储",
+      "summary": "溢出策略与本地溢出。",
+      "capabilities": [
+        "spill",
+        "spill-local",
+        "spill-policy"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/spill",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/spill"
+      },
+      "dshPackages": [
+        "spill",
+        "spill-local",
+        "spill-policy"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.spill",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.ssh",
+      "name": "ssh：远端 fs/subprocess/sandbox",
+      "summary": "SSH 连接、远端文件/沙箱/子进程与 helper runtime。",
+      "capabilities": [
+        "ssh",
+        "fs-ssh",
+        "sandbox-ssh",
+        "subprocess-ssh"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/ssh",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/ssh"
+      },
+      "dshPackages": [
+        "fs-ssh",
+        "sandbox-ssh",
+        "ssh",
+        "ssh-helper-runtime",
+        "subprocess-ssh"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.ssh",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.storage",
+      "name": "storage：非会话持久存储",
+      "summary": "域存储、JSON/SQLite 后端。",
+      "capabilities": [
+        "storage",
+        "storage-json",
+        "storage-sqlite"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/storage",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/storage"
+      },
+      "dshPackages": [
+        "storage",
+        "storage-domain",
+        "storage-json",
+        "storage-sqlite"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.storage",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.subagent",
+      "name": "subagent：委派与外部后端",
+      "summary": "子代理工具、进程内 fork/spawn、Claude Code / Codex / ACP / DSH-SDK 适配器。",
+      "capabilities": [
+        "subagent",
+        "claude-code-adapter",
+        "codex-adapter",
+        "acp-adapter"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/subagent",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/subagent"
+      },
+      "dshPackages": [
+        "subagent",
+        "subagent-acp",
+        "subagent-claude-code",
+        "subagent-codex",
+        "subagent-dsh-sdk",
+        "subagent-fork-in-process",
+        "subagent-spawn-in-process",
+        "tool-subagent",
+        "tool-subagent-control"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.subagent",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.subprocess",
+      "name": "subprocess：共享子进程服务",
+      "summary": "子进程服务与本地 provider。",
+      "capabilities": [
+        "subprocess",
+        "subprocess-local",
+        "win32-process"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/subprocess",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/subprocess"
+      },
+      "dshPackages": [
+        "subprocess",
+        "subprocess-local",
+        "win32-process"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.subprocess",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.team",
+      "name": "team：子代理树任务协调",
+      "summary": "Agent team 与协作工具。",
+      "capabilities": [
+        "agent-team",
+        "team-tools"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/team",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/team"
+      },
+      "dshPackages": [
+        "agent-team",
+        "tool-agent-team"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.team",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.telemetry",
+      "name": "telemetry：OTel 导出",
+      "summary": "OTel 遥测导出。",
+      "capabilities": [
+        "otel-export"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/telemetry",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/telemetry"
+      },
+      "dshPackages": [
+        "otel"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.telemetry",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.terminal",
+      "name": "terminal：持久终端服务",
+      "summary": "终端服务与 bash 终端。",
+      "capabilities": [
+        "terminal",
+        "terminal-bash"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/terminal",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/terminal"
+      },
+      "dshPackages": [
+        "terminal",
+        "terminal-bash"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.terminal",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.test-support",
+      "name": "test-support：无密钥测试台 / LLM mock-replay",
+      "summary": "agent-loop testkit、LLM mock/replay、会话快照与远端 mock。",
+      "capabilities": [
+        "testkit",
+        "llm-mock",
+        "llm-replay"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/test-support",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/test-support"
+      },
+      "dshPackages": [
+        "agent-loop-testkit",
+        "client-runtime",
+        "llm-mock-server",
+        "llm-replay",
+        "loader-smoke",
+        "remote-mock",
+        "session-snapshot",
+        "tool-testkit"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.testkit",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.todo",
+      "name": "todo：todo_write 工具",
+      "summary": "待办工具。",
+      "capabilities": [
+        "todo-write"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/todo",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/todo"
+      },
+      "dshPackages": [
+        "tool-todo"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.todo",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.util",
+      "name": "util：共享工具库",
+      "summary": "原子写、加密、HTTP 代理、插件市场索引、路径等 21 个共享库。",
+      "capabilities": [
+        "shared-utils",
+        "plugin-market-index"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/util",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/util"
+      },
+      "dshPackages": [
+        "atomic-write",
+        "brand",
+        "chunked-list",
+        "code-language",
+        "crypto",
+        "deque",
+        "file-drag",
+        "home-paths",
+        "http-proxy",
+        "launch-environment",
+        "lazy-require",
+        "native-command",
+        "official-bundles",
+        "output-retention",
+        "package-manifest",
+        "plugin-detail",
+        "plugin-market-index",
+        "time",
+        "timeout",
+        "values",
+        "workspace-path"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.util",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.workflow",
+      "name": "workflow：模型自写编排脚本扇出",
+      "summary": "workflow 与 PTC 工作流工具。",
+      "capabilities": [
+        "workflow",
+        "workflow-ptc"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/workflow",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/workflow"
+      },
+      "dshPackages": [
+        "tool-workflow",
+        "workflow",
+        "workflow-ptc"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.workflow",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.workspace",
+      "name": "workspace：workspace 实体与会话成员关系",
+      "summary": "工作区实体与会话成员关系。",
+      "capabilities": [
+        "workspace"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/workspace",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/workspace"
+      },
+      "dshPackages": [
+        "workspace"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "planned",
+        "keelPluginId": "keel.workspace",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.Clarklevis1995.dsh-plugin-mobile-gateway",
+      "name": "Clarklevis1995/dsh-plugin-mobile-gateway",
+      "summary": "WebSocket 网关：同网域移动端接入 DSH",
+      "capabilities": [
+        "mobile",
+        "gateway",
+        "websocket"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Clarklevis1995/dsh-plugin-mobile-gateway",
+        "url": "https://github.com/Clarklevis1995/dsh-plugin-mobile-gateway",
+        "stars": 157,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.mobile-gateway",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.Ebony-Vinyl.dsh-our-free-model",
+      "name": "Ebony-Vinyl/dsh-our-free-model",
+      "summary": "装上即免登录免 Key 使用前沿模型（DeepSeek/Kimi 等）",
+      "capabilities": [
+        "llm",
+        "free-tier"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Ebony-Vinyl/dsh-our-free-model",
+        "url": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
+        "stars": 67796,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.llm.subscription",
+        "tools": [],
+        "note": "第三方免费额度，不属于官方插件承诺范围"
+      }
+    },
+    {
+      "id": "community.Noob-stupid.dsh-plugin-gating-hub",
+      "name": "Noob-stupid/dsh-plugin-gating-hub",
+      "summary": "框架升级安全 + 插件门禁：契约预检、回滚、证据账本",
+      "capabilities": [
+        "plugin-gating",
+        "rollback",
+        "audit"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Noob-stupid/dsh-plugin-gating-hub",
+        "url": "https://github.com/Noob-stupid/dsh-plugin-gating-hub",
+        "stars": 125,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.plugin-gate",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.Tencent.WeKnora",
+      "name": "Tencent/WeKnora",
+      "summary": "把原始文档变成可查询 RAG 的开源 LLM 知识平台",
+      "capabilities": [
+        "rag",
+        "knowledge-base",
+        "documents"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Tencent/WeKnora",
+        "url": "https://github.com/Tencent/WeKnora",
+        "stars": 37053,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.knowledge",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.Totoro-qaq.dsh-plugin-bridge",
+      "name": "Totoro-qaq/dsh-plugin-bridge",
+      "summary": "跨 preset 的可预览会话迁移",
+      "capabilities": [
+        "session-migration",
+        "preset"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "Totoro-qaq/dsh-plugin-bridge",
+        "url": "https://github.com/Totoro-qaq/dsh-plugin-bridge",
+        "stars": 166,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.session-migrate",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.V1ki.dsh-plugin-subscriptions",
+      "name": "V1ki/dsh-plugin-subscriptions",
+      "summary": "把 ChatGPT/Claude/Grok 订阅账号变成 DSH 的 LLM provider",
+      "capabilities": [
+        "llm",
+        "oauth",
+        "subscription"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "V1ki/dsh-plugin-subscriptions",
+        "url": "https://github.com/V1ki/dsh-plugin-subscriptions",
+        "stars": 580,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.llm.subscription",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.anywhere-labs.dsh-desktop",
+      "name": "anywhere-labs/dsh-desktop",
+      "summary": "DSH 插件生态的桌面端（桌面本身也是插件）",
+      "capabilities": [
+        "desktop",
+        "electron"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "anywhere-labs/dsh-desktop",
+        "url": "https://github.com/anywhere-labs/dsh-desktop",
+        "stars": 35563,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.desktop",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.ccch1mneyyy.dsh-Go",
+      "name": "ccch1mneyyy/dsh-Go",
+      "summary": "把 DSH 装进口袋：手机本机运行 + 遥控电脑",
+      "capabilities": [
+        "mobile",
+        "remote-control"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "ccch1mneyyy/dsh-Go",
+        "url": "https://github.com/ccch1mneyyy/dsh-Go",
+        "stars": 17966,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.mobile-gateway",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.dataelement.dsh-desktop",
+      "name": "dataelement/dsh-desktop",
+      "summary": "DSHDesktop：DeepSeek Harness 桌面版",
+      "capabilities": [
+        "desktop",
+        "electron"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "dataelement/dsh-desktop",
+        "url": "https://github.com/dataelement/dsh-desktop",
+        "stars": 17789,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.desktop",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.oh-my-dsh.dsh-plugin-upgrade-skill",
+      "name": "oh-my-dsh/dsh-plugin-upgrade-skill",
+      "summary": "让插件随 dsh 版本升级的 skill",
+      "capabilities": [
+        "skill",
+        "upgrade",
+        "compatibility"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "oh-my-dsh/dsh-plugin-upgrade-skill",
+        "url": "https://github.com/oh-my-dsh/dsh-plugin-upgrade-skill",
+        "stars": 318,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.plugin-gate",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.poco-ai.agentero-dsh-plugin",
+      "name": "poco-ai/agentero-dsh-plugin",
+      "summary": "科研文献库：搜论文、带出处、审批入库",
+      "capabilities": [
+        "research",
+        "literature",
+        "rag"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "poco-ai/agentero-dsh-plugin",
+        "url": "https://github.com/poco-ai/agentero-dsh-plugin",
+        "stars": 169,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.research.literature",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.sixtysevenlf.dsh-blender-plugin",
+      "name": "sixtysevenlf/dsh-blender-plugin",
+      "summary": "DSH × Blender 直连：15 个工具驱动 GUI Blender",
+      "capabilities": [
+        "blender",
+        "gui-automation"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "sixtysevenlf/dsh-blender-plugin",
+        "url": "https://github.com/sixtysevenlf/dsh-blender-plugin",
+        "stars": 1941,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.blender",
+        "tools": []
+      }
+    },
+    {
+      "id": "community.volcengine.OpenViking",
+      "name": "volcengine/OpenViking",
+      "summary": "自进化上下文数据库：统一 Agent 记忆、知识 RAG 与技能",
+      "capabilities": [
+        "memory",
+        "rag",
+        "context-db"
+      ],
+      "source": {
+        "kind": "dsh-community",
+        "repo": "volcengine/OpenViking",
+        "url": "https://github.com/volcengine/OpenViking",
+        "stars": 41897,
+        "starsObservedAt": "2026-11-06",
+        "discovery": "GitHub topic:dsh-plugin and dsh-plugin in:name, sorted by stars"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.knowledge",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.acp",
+      "name": "acp：Agent Client Protocol",
+      "summary": "自动化 ACP 服务。",
+      "capabilities": [
+        "acp"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/acp",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/acp"
+      },
+      "dshPackages": [
+        "acp"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": "keel.acp",
+        "tools": []
+      }
+    },
+    {
+      "id": "dsh.experimental",
+      "name": "experimental：61 个实验原型",
+      "summary": "auto-review、cua、forge、liveshare、voice、STT、翻译、hook 协议、会话搜索、市场、inspector 等。",
+      "capabilities": [
+        "experiments",
+        "prototypes"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/experimental",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/experimental"
+      },
+      "dshPackages": [
+        "action-cards",
+        "api-speech-to-text",
+        "auto-review",
+        "badge-skill-bundle",
+        "browser-use-chrome-devtools-mcp",
+        "browser-use-playwright-mcp",
+        "browser-use-runtime",
+        "browser-use-stagehand-native",
+        "claude-code-mods",
+        "client-ui-action-cards",
+        "client-ui-claude-code-mods",
+        "client-ui-cot-translation",
+        "client-ui-creation-recommendations",
+        "client-ui-forge",
+        "client-ui-plugin-recommendations",
+        "client-ui-stats",
+        "client-ui-voice-input",
+        "computer-use-cua-driver-mcp",
+        "computer-use-cua-driver-native",
+        "cot-translation-bundle",
+        "creation-recommendations",
+        "cua",
+        "cua-bundle",
+        "cua-macos",
+        "forge",
+        "forge-bundle",
+        "forge-github",
+        "forge-session",
+        "hook-protocol",
+        "hooks-claude-code",
+        "hooks-codex",
+        "inspector",
+        "inspector-profile",
+        "liveshare",
+        "liveshare-protocol",
+        "personalized-recommendations",
+        "plugin-market-bundle",
+        "plugin-recommendations",
+        "ptc-runtime-python",
+        "ralph-bundle",
+        "session-inspector",
+        "session-search",
+        "session-title-all-prompts-llm",
+        "session-titles-bundle",
+        "skill-badge",
+        "speech-to-text",
+        "speech-to-text-sensevoice",
+        "subagent-oar",
+        "terminal-bundle",
+        "tool-ralph",
+        "tool-session-query",
+        "tool-subagent-oar",
+        "tool-terminal",
+        "tool-worktree",
+        "translator",
+        "voice-input-bundle",
+        "webhook",
+        "webhook-github",
+        "webworker-packer",
+        "webworker-runtime",
+        "worktree"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "registered",
+        "keelPluginId": null,
+        "tools": [],
+        "note": "按能力面拆到 W3，不在 W1 承诺"
+      }
+    },
+    {
+      "id": "dsh.typert",
+      "name": "typert：TS 构建期类型图",
+      "summary": "TS 构建期类型图与 Host→Client 类型化调用。",
+      "capabilities": [
+        "typert"
+      ],
+      "source": {
+        "kind": "dsh-official",
+        "repo": "deepseek-ai/deepseek-harness",
+        "path": "packages/typert",
+        "url": "https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/typert"
+      },
+      "dshPackages": [
+        "generator",
+        "loader",
+        "protocol",
+        "registry"
+      ],
+      "coverage": {
+        "covered": false,
+        "status": "absent",
+        "keelPluginId": null,
+        "tools": [],
+        "note": "keel 全 Go + 静态客户端，无此构建层；等价能力由 keel.api 承担"
+      }
+    }
+  ]
+}

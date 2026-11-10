@@ -53,6 +53,10 @@ type PluginView struct {
 	Hooks    []HookEvent `json:"hooks,omitempty"`
 	Triggers []string    `json:"triggers,omitempty"`
 	Effects  []string    `json:"effects,omitempty"`
+	// Prompt is the system-prompt contribution the plugin makes while it is
+	// loaded (the sections a host appends to its prompt). It is empty for a
+	// plugin that contributes none, and for one that is not loaded.
+	Prompt []PromptSection `json:"prompt,omitempty"`
 	// StartedAt and StoppedAt stamp the last activation cycle (top-level mirror
 	// of the same runtime fields).
 	StartedAt *time.Time `json:"startedAt,omitempty"`
@@ -109,6 +113,9 @@ type PluginInventory struct {
 	Plugins []PluginView `json:"plugins"`
 	// Tools is the effective model-facing tool surface.
 	Tools []string `json:"tools"`
+	// Prompt is the effective prompt contribution of the enabled plugins (the
+	// sections a host appends to its system prompt while they are loaded).
+	Prompt []PromptSection `json:"prompt,omitempty"`
 	// Enabled lists the enabled plugin ids.
 	Enabled []string `json:"enabled"`
 	// Hooks is the hook-bus summary.
@@ -142,6 +149,7 @@ func (m *Manager) Snapshot() PluginInventory {
 		Generation: runtimeSnapshot.Generation,
 		Plugins:    views,
 		Tools:      runtimeSnapshot.Tools,
+		Prompt:     runtimeSnapshot.Prompt,
 		Enabled:    enabled,
 		Hooks:      runtimeSnapshot.Hooks,
 	}
@@ -193,6 +201,12 @@ func (m *Manager) viewWithStatus(entry *managerEntry, status PluginStatus) Plugi
 		view.Tools = append([]string(nil), status.Tools...)
 		view.Hooks = append([]HookEvent(nil), status.Hooks...)
 		view.Effects = append([]string(nil), status.Effects...)
+		// The prompt contribution is a fact of the LOADED plugin: a status record
+		// exists for a plugin that failed to activate too, and reporting its
+		// sections then would claim a contribution nothing publishes.
+		if status.State == PluginActive {
+			view.Prompt = append([]PromptSection(nil), status.Prompt...)
+		}
 		for _, trigger := range status.Triggers {
 			view.Triggers = append(view.Triggers, trigger.ID)
 		}
@@ -212,10 +226,11 @@ func (m *Manager) viewWithStatus(entry *managerEntry, status PluginStatus) Plugi
 		}
 		view.Runtime = runtime
 		// A sidecar (or a webview backend) speaks its own local tool names; the
-		// host publishes them as <plugin>.<tool>. `provides` is the manifest's
-		// declaration, so the host-qualified names the assembly actually
-		// publishes are added: that is the name the model calls and the plugin
-		// bridge dispatches, and a client that only reads `provides` must see it.
+		// host publishes them as `<plugin>.<tool>`, normalized to the wire grammar
+		// (`demo_sidecar_greet`). `provides` is the manifest's declaration, so the
+		// host-qualified names the assembly actually publishes are added: that is
+		// the name the model calls and the plugin bridge dispatches, and a client
+		// that only reads `provides` must see it.
 		if len(view.Provides.Tools) > 0 {
 			merged := append([]string(nil), view.Provides.Tools...)
 			for _, tool := range status.Tools {

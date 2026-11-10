@@ -1,0 +1,21 @@
+id: keel.plugin-market
+version: 1.0.0
+kind: sidecar
+description: "Official plugin-market index client: answers DSH official/community capability questions from a static catalog shipped with the package, including which keel plugin covers each capability."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - search
+    - info
+permissions:
+  # The sidecar reads catalog.json from its own package directory and nothing
+  # else. The runtime does not mediate sidecar file access yet; the declaration
+  # states the intent (spec: 诚实边界).
+  fs:
+    - read:plugin-package
+entry:
+  # Node >= 20 must be on PATH; the script is plain ESM with no dependencies.
+  command:
+    - node
+    - sidecar.mjs

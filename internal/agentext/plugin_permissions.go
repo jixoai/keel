@@ -138,13 +138,23 @@ func NewPermissionPolicy(manifest *pluginpkg.Manifest) *PermissionPolicy {
 	policy.version = manifest.Version
 	for _, name := range manifest.Permissions.Tools {
 		policy.tools[name] = true
+		// The dispatch point checks the PUBLISHED name of the resolved tool, so a
+		// permission declared in the manifest's spelling (`keel.other.other_tool`)
+		// must also match its wire form (`keel_other_other_tool`). Both name the
+		// same declared tool.
+		policy.tools[pluginpkg.NormalizePublishedToolName(name)] = true
 	}
-	for _, name := range manifest.Provides.Tools {
-		policy.own[name] = true
-		// A sidecar's local tool is published as <plugin>.<tool>; a manifest may
-		// declare either form, so both count as the plugin's own surface.
-		if !strings.HasPrefix(name, manifest.ID+".") {
-			policy.own[manifest.ID+"."+name] = true
+	for _, tool := range manifest.PublishedTools() {
+		// A plugin's own surface is every spelling of its tools that can arrive
+		// at a dispatch point: the declared name, the local name a sidecar speaks,
+		// the host-qualified `<id>.<local>`, and the normalized wire name the model
+		// and the bridge actually call (`demo_sidecar_greet`). Without the last one
+		// a plugin could not call its own tool by its published name.
+		policy.own[tool.Declared] = true
+		policy.own[tool.Published] = true
+		if manifest.NamespacesTools() {
+			policy.own[manifest.ID+"."+tool.Local] = true
+			policy.own[manifest.ID+"."+tool.Declared] = true
 		}
 	}
 	policy.net = append([]string(nil), manifest.Permissions.Net...)
@@ -686,10 +696,24 @@ func (r *Runtime) activeTools() []activeTool {
 var errToolNotActive = errors.New("the tool is not part of the current assembly")
 
 // resolveActiveTool finds a tool in the runtime's current assembly: the exact
-// published name, or the plugin-qualified form of a bare request.
+// published name, the plugin-qualified form of a bare request, or the normalized
+// wire form the model and the bridge call (`demo_sidecar_greet` for a sidecar
+// tool `greet` of plugin `demo.sidecar`).
 func (m *Manager) resolveActiveTool(pluginID, tool string) (activeTool, error) {
+	// The request may name the tool in any spelling that can reach a caller: the
+	// published wire name, the declared `<id>.<local>` form of this plugin or of
+	// ANOTHER plugin (`permissions.tools` lets a plugin call a declared foreign
+	// tool by its declaration), the bare local name, or an already-normalized
+	// form of any of them. Trimming the plugin prefix first keeps a local name
+	// from being qualified twice.
+	local := strings.TrimPrefix(tool, pluginID+".")
+	normalizedLocal := pluginpkg.NamespacedPublishedToolName(pluginID, local)
+	normalizedDeclared := pluginpkg.NormalizePublishedToolName(tool)
 	for _, candidate := range m.runtime.activeTools() {
-		if candidate.name == tool || candidate.name == pluginID+"."+tool {
+		if candidate.name == tool ||
+			candidate.name == pluginID+"."+tool ||
+			candidate.name == normalizedLocal ||
+			candidate.name == normalizedDeclared {
 			return candidate, nil
 		}
 	}

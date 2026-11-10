@@ -1,0 +1,192 @@
+/*
+ * Plugin panel styles. Every colour, radius and font comes from the host theme
+ * token document (bridge/state → theme.cssVars), applied as CSS variables by
+ * app.jsx; the fallbacks below only keep the page readable before the first
+ * byte of the bridge answer arrives. Nothing here is a local design system:
+ * the plugin inherits the host's look, including light and dark.
+ */
+:root {
+  --background: #ececf1;
+  --foreground: #1a1a1a;
+  --card: rgba(255, 255, 255, 0.6);
+  --border: rgba(20, 20, 30, 0.13);
+  --muted-foreground: #6b6b6b;
+  --primary: #1f1f1f;
+  --primary-foreground: #fbfbfb;
+  --brand: #4fbf8f;
+  --radius: 14px;
+  --radius-card: 16px;
+  --radius-control: 11px;
+  --font-sans: system-ui, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 22px 20px 32px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.label {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.value {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  word-break: break-all;
+  text-align: right;
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 3px 9px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.button {
+  appearance: none;
+  padding: 7px 14px;
+  min-height: 34px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.state {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.state-enabled,
+.state-active {
+  color: var(--brand);
+  border-color: var(--brand);
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+}
+
+.result {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  max-height: 320px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

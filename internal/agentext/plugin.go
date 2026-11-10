@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/pluginpkg"
 )
 
 // Agent plugin contract. A plugin is declarative: it declares what it provides,
@@ -46,6 +47,22 @@ type HookSpec struct {
 	Timeout time.Duration
 }
 
+// PromptSection is one named block of text a plugin contributes to the session's
+// system prompt while the plugin is loaded, in the same shape the host assembles
+// its own sections (a preamble plus named sections). It is how a plugin teaches
+// the model a vocabulary — `keel.creation` contributes the plugin standard — and
+// it is declarative on purpose: the hook bus is a fire-and-forget observation
+// stream (bounded payloads, handlers that cannot return text), so a prompt
+// contribution is part of the plugin contract, published through the same sink
+// pattern as tools, not smuggled through an event.
+type PromptSection struct {
+	// Name is the section name (the host renders <name>...</name>).
+	Name string `json:"name"`
+	// Content is the text. It must not carry a credential; a plugin's prompt is
+	// shown to the model.
+	Content string `json:"content"`
+}
+
 // Effect is a named cleanup a plugin must run on unload, in reverse declaration
 // order.
 type Effect struct {
@@ -73,6 +90,11 @@ type Plugin struct {
 	Hooks    []HookSpec
 	Triggers []TriggerSpec
 	Effects  []Effect
+	// PromptSections are the system-prompt blocks this plugin contributes while
+	// it is active. They are published through RuntimeOptions.PromptSink and
+	// appear in the runtime snapshot, so a host can rebuild its prompt on every
+	// assembly exactly as it rebuilds its tool registry.
+	PromptSections []PromptSection
 	// Start runs before the plugin's tools/hooks/triggers are applied; an error
 	// marks the plugin FAILED (its dependents stay PENDING).
 	Start func(ctx context.Context, env *PluginEnv) error
@@ -85,6 +107,13 @@ type Plugin struct {
 // point); the runtime never reaches into the host directly.
 type ToolSink func(tools []agentcore.AgentTool) error
 
+// PromptSink receives the active prompt sections after every assembly, in
+// activation order. It mirrors ToolSink: the host decides how a section reaches
+// its system prompt (servicehost rebuilds the host assembly), and the runtime
+// stays free of prompt concerns. A nil sink still exposes the sections through
+// Snapshot().Prompt.
+type PromptSink func(sections []PromptSection) error
+
 // RuntimeOptions configures the plugin runtime.
 type RuntimeOptions struct {
 	Plugins   []*Plugin
@@ -94,24 +123,29 @@ type RuntimeOptions struct {
 	Subagents *SubagentRunner
 	Partials  *PartialHub
 	Tools     ToolSink
-	Logger    *slog.Logger
-	Now       func() time.Time
+	// Prompt publishes the active prompt sections (nil keeps them snapshot-only).
+	Prompt func(sections []PromptSection) error
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // PluginStatus is the observable plugin state (GET /v1/plugins).
 type PluginStatus struct {
-	ID          string        `json:"id"`
-	Version     string        `json:"version,omitempty"`
-	State       PluginState   `json:"state"`
-	Provides    []string      `json:"provides,omitempty"`
-	Requires    []string      `json:"requires,omitempty"`
-	Tools       []string      `json:"tools,omitempty"`
-	Hooks       []HookEvent   `json:"hooks,omitempty"`
-	Triggers    []TriggerSpec `json:"triggers,omitempty"`
-	Effects     []string      `json:"effects,omitempty"`
-	Diagnostics []string      `json:"diagnostics,omitempty"`
-	StartedAt   *time.Time    `json:"startedAt,omitempty"`
-	StoppedAt   *time.Time    `json:"stoppedAt,omitempty"`
+	ID       string        `json:"id"`
+	Version  string        `json:"version,omitempty"`
+	State    PluginState   `json:"state"`
+	Provides []string      `json:"provides,omitempty"`
+	Requires []string      `json:"requires,omitempty"`
+	Tools    []string      `json:"tools,omitempty"`
+	Hooks    []HookEvent   `json:"hooks,omitempty"`
+	Triggers []TriggerSpec `json:"triggers,omitempty"`
+	Effects  []string      `json:"effects,omitempty"`
+	// Prompt is the system-prompt contribution this plugin makes while it is
+	// active (empty for a plugin that contributes none, or is not loaded).
+	Prompt      []PromptSection `json:"prompt,omitempty"`
+	Diagnostics []string        `json:"diagnostics,omitempty"`
+	StartedAt   *time.Time      `json:"startedAt,omitempty"`
+	StoppedAt   *time.Time      `json:"stoppedAt,omitempty"`
 }
 
 // Snapshot is the assembled extension surface.
@@ -120,18 +154,22 @@ type Snapshot struct {
 	Plugins    []PluginStatus `json:"plugins"`
 	Hooks      StatsSummary   `json:"hooks"`
 	Tools      []string       `json:"tools"`
+	// Prompt is the effective prompt contribution of the active plugins, in
+	// activation order.
+	Prompt []PromptSection `json:"prompt,omitempty"`
 }
 
 // Runtime assembles plugins in dependency order and unloads them in reverse.
 type Runtime struct {
-	hooks     *HookBus
-	triggers  *TriggerEngine
-	decisions *DecisionBroker
-	subagents *SubagentRunner
-	partials  *PartialHub
-	sink      ToolSink
-	log       *slog.Logger
-	now       func() time.Time
+	hooks      *HookBus
+	triggers   *TriggerEngine
+	decisions  *DecisionBroker
+	subagents  *SubagentRunner
+	partials   *PartialHub
+	sink       ToolSink
+	promptSink func(sections []PromptSection) error
+	log        *slog.Logger
+	now        func() time.Time
 
 	mu         sync.Mutex
 	plugins    []*Plugin
@@ -172,6 +210,7 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 		subagents:  opts.Subagents,
 		partials:   opts.Partials,
 		sink:       opts.Tools,
+		promptSink: opts.Prompt,
 		log:        opts.Logger,
 		now:        opts.Now,
 		plugins:    append([]*Plugin(nil), opts.Plugins...),
@@ -207,6 +246,15 @@ func (r *Runtime) ApplyPlugins(ctx context.Context, plugins []*Plugin) error {
 }
 
 func (r *Runtime) assemble(ctx context.Context, plugins []*Plugin) error {
+	// Publication normalization happens here, once, for every loader: the model
+	// faces one wire grammar, so a tool name carrying '.' or ':' is published
+	// with '_' instead. A manifest that would publish an uncallable name is
+	// already refused at install (pluginpkg validation); this is the assembly's
+	// own guarantee, so a plugin registered from Go cannot bypass it either. An
+	// already compliant name is returned verbatim — `example_status` and
+	// `spawn_subagent` must never change.
+	plugins = publishToolNames(plugins)
+
 	r.unload(ctx)
 
 	r.mu.Lock()
@@ -227,6 +275,7 @@ func (r *Runtime) assemble(ctx context.Context, plugins []*Plugin) error {
 			Tools:    toolNames(plugin.Tools),
 			Effects:  effectNames(plugin.Effects),
 			Triggers: append([]TriggerSpec(nil), plugin.Triggers...),
+			Prompt:   append([]PromptSection(nil), plugin.PromptSections...),
 		}
 	}
 	r.mu.Unlock()
@@ -306,7 +355,7 @@ func (r *Runtime) assemble(ctx context.Context, plugins []*Plugin) error {
 	r.active = activated
 	r.mu.Unlock()
 
-	if err := r.publishTools(); err != nil {
+	if err := r.publish(); err != nil {
 		return err
 	}
 	r.log.Info("plugin assembly", "generation", generation, "plugins", len(plugins), "active", len(activated),
@@ -435,20 +484,44 @@ func (r *Runtime) unload(ctx context.Context) {
 	}
 }
 
-func (r *Runtime) publishTools() error {
-	if r.sink == nil {
-		return nil
-	}
+// publish publishes the assembled surface: the tool registry and the prompt
+// sections, through their own sinks. Both are published on every assembly, so a
+// freshly enabled plugin is visible (and a disabled one disappears) without a
+// restart — the same rule the tool registry already follows.
+func (r *Runtime) publish() error {
 	r.mu.Lock()
 	tools := make([]agentcore.AgentTool, 0)
 	for _, entry := range r.active {
 		tools = append(tools, entry.tools...)
 	}
+	sections := r.activePromptSectionsLocked()
 	r.mu.Unlock()
-	if err := r.sink(tools); err != nil {
-		return fmt.Errorf("agentext: publish plugin tools: %w", err)
+	if r.sink != nil {
+		if err := r.sink(tools); err != nil {
+			return fmt.Errorf("agentext: publish plugin tools: %w", err)
+		}
+	}
+	if r.promptSink != nil {
+		if err := r.promptSink(sections); err != nil {
+			return fmt.Errorf("agentext: publish plugin prompt sections: %w", err)
+		}
 	}
 	return nil
+}
+
+// activePromptSectionsLocked collects the prompt sections of the active plugins,
+// in activation order. The caller holds r.mu.
+func (r *Runtime) activePromptSectionsLocked() []PromptSection {
+	sections := make([]PromptSection, 0)
+	for _, entry := range r.active {
+		for _, section := range entry.plugin.PromptSections {
+			if strings.TrimSpace(section.Content) == "" {
+				continue
+			}
+			sections = append(sections, section)
+		}
+	}
+	return sections
 }
 
 func (r *Runtime) toolConflict(plugin *Plugin, activated []*activatedPlugin) string {
@@ -512,6 +585,7 @@ func (r *Runtime) Snapshot() Snapshot {
 		copied.Hooks = append([]HookEvent(nil), status.Hooks...)
 		copied.Triggers = append([]TriggerSpec(nil), status.Triggers...)
 		copied.Effects = append([]string(nil), status.Effects...)
+		copied.Prompt = append([]PromptSection(nil), status.Prompt...)
 		statuses = append(statuses, copied)
 	}
 	generation := r.generation
@@ -521,10 +595,11 @@ func (r *Runtime) Snapshot() Snapshot {
 			tools = append(tools, tool.Name())
 		}
 	}
+	prompt := r.activePromptSectionsLocked()
 	r.mu.Unlock()
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
 	sort.Strings(tools)
-	snapshot := Snapshot{Generation: generation, Plugins: statuses, Tools: tools}
+	snapshot := Snapshot{Generation: generation, Plugins: statuses, Tools: tools, Prompt: prompt}
 	if r.hooks != nil {
 		snapshot.Hooks = r.hooks.Summary()
 	}
@@ -552,6 +627,9 @@ func (r *Runtime) Close(ctx context.Context) {
 	if r.sink != nil {
 		_ = r.sink(nil)
 	}
+	if r.promptSink != nil {
+		_ = r.promptSink(nil)
+	}
 }
 
 func requiresSatisfied(requires []string, provided map[string]struct{}) bool {
@@ -561,6 +639,29 @@ func requiresSatisfied(requires []string, provided map[string]struct{}) bool {
 		}
 	}
 	return true
+}
+
+// publishToolNames copies the plugin set with every tool name normalized to the
+// model-facing wire grammar (pluginpkg.NormalizePublishedToolName). The plugin
+// values are copied rather than mutated: the caller's set stays the declarative
+// surface, and the assembly owns what it publishes. Compliance is idempotent, so
+// applying this twice (Apply → ApplyPlugins) changes nothing.
+func publishToolNames(plugins []*Plugin) []*Plugin {
+	out := make([]*Plugin, 0, len(plugins))
+	for _, plugin := range plugins {
+		if plugin == nil || len(plugin.Tools) == 0 {
+			out = append(out, plugin)
+			continue
+		}
+		copied := *plugin
+		copied.Tools = make([]ToolSpec, len(plugin.Tools))
+		for i, tool := range plugin.Tools {
+			tool.Name = pluginpkg.NormalizePublishedToolName(tool.Name)
+			copied.Tools[i] = tool
+		}
+		out = append(out, &copied)
+	}
+	return out
 }
 
 func hookNames(specs []HookSpec) []HookEvent {

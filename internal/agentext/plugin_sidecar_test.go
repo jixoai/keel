@@ -376,13 +376,13 @@ func TestSidecarLoaderLoadsToolsAndCalls(t *testing.T) {
 	if plugin.ID != "demo.sidecar" || plugin.Version != "1.2.3" {
 		t.Fatalf("plugin identity = %s@%s", plugin.ID, plugin.Version)
 	}
-	if got := pluginToolNames(plugin); len(got) != 1 || got[0] != "demo.sidecar.greet" {
-		t.Fatalf("tools = %v, want [demo.sidecar.greet]", got)
+	if got := pluginToolNames(plugin); len(got) != 1 || got[0] != "demo_sidecar_greet" {
+		t.Fatalf("tools = %v, want [demo_sidecar_greet]", got)
 	}
 	if !contains(plugin.Provides, "cap:plugin.sidecar") {
 		t.Fatalf("provides = %v, want the sidecar capability", plugin.Provides)
 	}
-	text, err := callTool(t, plugin, "demo.sidecar.greet", `{"who":"world"}`)
+	text, err := callTool(t, plugin, "demo_sidecar_greet", `{"who":"world"}`)
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestSidecarLoaderRefusesUndeclaredTools(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	defer stopPlugin(t, plugin)
-	if got := pluginToolNames(plugin); len(got) != 1 || got[0] != "demo.sidecar.greet" {
+	if got := pluginToolNames(plugin); len(got) != 1 || got[0] != "demo_sidecar_greet" {
 		t.Fatalf("tools = %v, want only the declared tool", got)
 	}
 	mu.Lock()
@@ -504,7 +504,7 @@ func TestSidecarLoaderEnvWhitelistKeepsHostSecretsOut(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	defer stopPlugin(t, plugin)
-	text, err := callTool(t, plugin, "demo.sidecar.env", `{}`)
+	text, err := callTool(t, plugin, "demo_sidecar_env", `{}`)
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -549,10 +549,10 @@ func TestSidecarCrashIsolatesAndReconnects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if _, err := callTool(t, plugin, "demo.sidecar.greet", `{}`); err != nil {
+	if _, err := callTool(t, plugin, "demo_sidecar_greet", `{}`); err != nil {
 		t.Fatalf("greet before the crash: %v", err)
 	}
-	if _, err := callTool(t, plugin, "demo.sidecar.crashme", `{}`); err == nil {
+	if _, err := callTool(t, plugin, "demo_sidecar_crashme", `{}`); err == nil {
 		t.Fatal("a tool whose sidecar process dies answered without an error")
 	}
 	// The supervision record reports the death, and the crash is audited once.
@@ -583,7 +583,7 @@ func TestSidecarCrashIsolatesAndReconnects(t *testing.T) {
 		t.Fatalf("reconnect: %v", err)
 	}
 	defer stopPlugin(t, reconnected)
-	if _, err := callTool(t, reconnected, "demo.sidecar.greet", `{}`); err != nil {
+	if _, err := callTool(t, reconnected, "demo_sidecar_greet", `{}`); err != nil {
 		t.Fatalf("greet after reconnect: %v", err)
 	}
 	if _, failed := loader.RuntimeFailure("demo.sidecar"); failed {
@@ -603,7 +603,7 @@ func TestSidecarLoaderStopReapsTheProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	text, err := callTool(t, plugin, "demo.sidecar.spawn", `{}`)
+	text, err := callTool(t, plugin, "demo_sidecar_spawn", `{}`)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -647,7 +647,7 @@ func TestSidecarLoaderTimeoutAndCancellation(t *testing.T) {
 
 	// A sidecar that never answers is ended by the request budget.
 	started := time.Now()
-	spec := toolSpecNamed(t, plugin, "demo.sidecar.slowme")
+	spec := toolSpecNamed(t, plugin, "demo_sidecar_slowme")
 	_, err = spec.Execute(ctx, "call-1", json.RawMessage(`{}`), nil)
 	if err == nil {
 		t.Fatal("a request that never answers succeeded")
@@ -782,7 +782,7 @@ func TestSidecarToolResultsMapOntoTheRuntime(t *testing.T) {
 	}
 	defer stopPlugin(t, plugin)
 
-	fail := toolSpecNamed(t, plugin, "demo.sidecar.fail")
+	fail := toolSpecNamed(t, plugin, "demo_sidecar_fail")
 	result, err := fail.Execute(ctx, "call-1", json.RawMessage(`{}`), nil)
 	if err != nil {
 		t.Fatalf("fail tool: %v", err)
@@ -790,7 +790,7 @@ func TestSidecarToolResultsMapOntoTheRuntime(t *testing.T) {
 	if result.IsError == nil || !*result.IsError {
 		t.Fatalf("a sidecar isError result did not become a tool error: %+v", result)
 	}
-	image := toolSpecNamed(t, plugin, "demo.sidecar.image")
+	image := toolSpecNamed(t, plugin, "demo_sidecar_image")
 	result, err = image.Execute(ctx, "call-2", json.RawMessage(`{}`), nil)
 	if err != nil {
 		t.Fatalf("image tool: %v", err)
@@ -851,10 +851,10 @@ func TestManagerSidecarLifecycle(t *testing.T) {
 	if view.State != LifecycleEnabled {
 		t.Fatalf("enabled view = %+v", view)
 	}
-	if !contains(harness.tools.list(), "demo.sidecar.greet") {
+	if !contains(harness.tools.list(), "demo_sidecar_greet") {
 		t.Fatalf("the model's tool surface = %v, want the sidecar tool", harness.tools.list())
 	}
-	if !contains(view.Provides.Tools, "demo.sidecar.greet") {
+	if !contains(view.Provides.Tools, "demo_sidecar_greet") {
 		t.Fatalf("view provides = %v, want the published tool name", view.Provides.Tools)
 	}
 	if view.Runtime == nil || view.Runtime.State != PluginActive {
@@ -905,7 +905,7 @@ func TestManagerSidecarLifecycle(t *testing.T) {
 	if view.State != LifecycleDisabled || len(view.Tools) != 0 {
 		t.Fatalf("disabled view = %+v", view)
 	}
-	if contains(harness.tools.list(), "demo.sidecar.greet") {
+	if contains(harness.tools.list(), "demo_sidecar_greet") {
 		t.Fatalf("the model's tool surface still has the disabled plugin's tool: %v", harness.tools.list())
 	}
 	waitUntil(t, 5*time.Second, func() bool { return !processAlive(newPID) }, "the disabled plugin's process is still alive")
@@ -964,8 +964,11 @@ func TestManagerAuditsUndeclaredSidecarTools(t *testing.T) {
 	if detail.Kind != PermissionTool || detail.Target != "exfiltrate" {
 		t.Fatalf("denial detail = %+v", detail)
 	}
-	if contains(harness.tools.list(), "demo.sidecar.exfiltrate") {
+	if contains(harness.tools.list(), "demo_sidecar_exfiltrate") || contains(harness.tools.list(), "demo.sidecar.exfiltrate") {
 		t.Fatalf("the undeclared tool reached the model: %v", harness.tools.list())
+	}
+	if !contains(harness.tools.list(), "demo_sidecar_greet") {
+		t.Fatalf("the declared tool is not published: %v", harness.tools.list())
 	}
 }
 
