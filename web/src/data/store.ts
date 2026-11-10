@@ -1,6 +1,8 @@
-// The app's one store: sessions, the active conversation, the transport mode
+// The app's one store: sessions, the active conversation, the connection state
 // and every command the screens issue. Screens read signals; nothing outside
-// the data layer talks to fetch or to the fixture.
+// the data layer talks to fetch. The fixture transport exists for development
+// only (`?fixture=1` on the page, `host.params.fixture` elsewhere): a failed
+// connection is an offline face with a retry, never a demo standing in for it.
 import { host, signal } from "nsh";
 import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
@@ -30,11 +32,28 @@ import type {
 } from "./contract";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
 
-export type Mode = "checking" | "fixture" | "http";
+/** The connection state: probing, a live service, or nothing to talk to. There
+ * is no demo state — the fixture is a development transport, not a mode the
+ * product can present. */
+export type Mode = "checking" | "http" | "offline";
 
 /** The top-level route. The app shell renders the workspace (session list +
- * conversation) or the standalone settings page (change keel-model-settings). */
-export type Route = "workspace" | "settings";
+ * conversation), the standalone settings page (change keel-model-settings), the
+ * plugin page, or the kit gallery (change keel-harness-shell, task S3). */
+export type Route = "workspace" | "settings" | "plugins" | "kit";
+
+/** The route a page path names: the web host's `keel.route` answer and its
+ * back/forward events both arrive as paths, so a deep link (`/settings`,
+ * `/plugins`) and the address bar agree with the shell. `/kit` is the kit
+ * gallery — a developer route, mapped only for a dev launch (`?fixture=1` /
+ * `host.params.fixture`); no product link enters it and a product URL falls
+ * back to the workspace. */
+const routeOf = (path: string, dev: boolean): Route => {
+  if (path.startsWith("/settings")) return "settings";
+  if (path.startsWith("/plugins")) return "plugins";
+  if (dev && path.startsWith("/kit")) return "kit";
+  return "workspace";
+};
 
 export interface Notice {
   tone: "info" | "warn" | "danger" | "success";
@@ -158,8 +177,9 @@ class KeelStore {
   /** The turn whose retry is in flight (the retry button's pending state). */
   readonly retryingTurn = signal<string | null>(null);
 
-  /** The top-level route: `/settings` deep-links straight into the settings
-   * page; the workspace stays otherwise untouched. */
+  /** The top-level route: `/settings`, `/plugins` and the dev-only `/kit`
+   * deep-link straight into their screens; the workspace stays otherwise
+   * untouched. */
   readonly route = signal<Route>("workspace");
 
   // ---- settings face (change keel-model-settings) ------------------------
@@ -206,9 +226,14 @@ class KeelStore {
    * tenant default in the settings document). */
   readonly sessionSelection = signal<ModelSelection | null>(null);
 
-  private readonly fixture = new FixtureClient();
+  /** The development-only transport; constructed only when a dev launch asked
+   * for it, so a product run never seeds any demo state. */
+  private fixture: FixtureClient | null = null;
   private http: KeelHttp | null = null;
-  private client: Client = this.fixture;
+  /** The transport every call goes through. A real HTTP client from the start:
+   * before (and without) a live service its calls fail with the network's own
+   * reason — the store never swaps in a fabricated one. */
+  private client: Client = new KeelHttp("");
   private engine: CoreEngine | null = null;
   private unsubscribeEngine: (() => void) | null = null;
   private unsubscribeStream: (() => void) | null = null;
@@ -231,31 +256,106 @@ class KeelStore {
   private routeTouched = false;
   /** True once the host answered as the web page host (route plumbing on). */
   private routePlumbed = false;
+  /** The page's route as the web host answered it (`keel.route`), read once and
+   * shared by the route boot and the dev-launch read. `null` = not the web page
+   * host (TUI, desktop, tests), where the route stays in-app. */
+  private pageRouteRequest: Promise<{ path: string; search: string } | null> | null = null;
+  /** A development launch (`?fixture=1` / `host.params.fixture`): the one way
+   * the fixture transport is used. */
+  private dev = false;
+  private devRequest: Promise<boolean> | null = null;
 
   constructor() {
     void this.detect();
     void this.initRoute();
   }
 
+  /** The page's route from the web host, read once: `keel.info` gates it so
+   * only the real web host (which answers both) takes part — native hosts and
+   * test hosts keep their routes fully in-app. */
+  private pageRoute(): Promise<{ path: string; search: string } | null> {
+    this.pageRouteRequest ??= this.readPageRoute();
+    return this.pageRouteRequest;
+  }
+
+  private async readPageRoute(): Promise<{ path: string; search: string } | null> {
+    if (!host.available()) return null;
+    try {
+      const info = await host.call<{ origin?: string }>("keel.info", {}, { timeout: 1200 });
+      if (typeof info?.origin !== "string" || !info.origin) return null;
+    } catch {
+      return null;
+    }
+    try {
+      const answer = await host.call<{ path?: string; search?: string }>("keel.route", {}, { timeout: 1200 });
+      return {
+        path: typeof answer?.path === "string" ? answer.path : "/",
+        search: typeof answer?.search === "string" ? answer.search : "",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Did this launch ask for the development transport? The embedding app says
+   * so in its launch parameters (`host.params.fixture === true` — the TUI host
+   * and the tests); the web page says so in its own query string
+   * (`?fixture=1`). Nothing else turns it on. */
+  private devLaunch(): Promise<boolean> {
+    this.devRequest ??= this.readDevLaunch();
+    return this.devRequest;
+  }
+
+  private async readDevLaunch(): Promise<boolean> {
+    if (host.params?.fixture === true) {
+      this.dev = true;
+      return true;
+    }
+    const page = await this.pageRoute();
+    this.dev = new URLSearchParams(page?.search ?? "").get("fixture") === "1";
+    return this.dev;
+  }
+
   private async detect() {
     this.sessionsLoading.set(true);
+    // Development only: the scripted transport stands in for a live service.
+    // The product never reaches this branch — it is asked for at launch.
+    if (await this.devLaunch()) {
+      if (!this.fixture) this.fixture = new FixtureClient();
+      this.http = null;
+      this.client = this.fixture;
+      this.auth.set("ok");
+      this.mode.set("http");
+      await this.refreshSessions();
+      return;
+    }
     const http = new KeelHttp("");
     let status: "ok" | "auth" | "down" = "down";
+    let reason = "/v1/capabilities 没有有效响应";
     try {
       status = await http.probe();
       if (status === "ok") {
         // A static server may answer every path with index.html; the API's
         // capabilities endpoint must be JSON to count as a live service.
         const capabilities = await http.capabilities().catch(() => null);
-        if (!capabilities) status = "down";
+        if (!capabilities) {
+          status = "down";
+          reason = "服务在线，但 /v1/capabilities 返回的不是 Keel API 的 JSON";
+        }
       }
-    } catch {
+    } catch (error) {
       status = "down";
+      reason = messageOf(error);
     }
     if (status === "down") {
-      this.client = this.fixture;
-      this.mode.set("fixture");
-      await this.refreshSessions();
+      // An honest offline face: the transport stays a real one (its calls fail
+      // with the network's own reason) and the reason stands with a retry.
+      this.http = null;
+      this.client = http;
+      this.mode.set("offline");
+      this.auth.set("unknown");
+      this.sessionsError.set(`无法连接 Keel 服务：${reason}。确认服务已启动后重试。`);
+      this.sessionsLoading.set(false);
       return;
     }
     // A live server: authenticated, or waiting for the login gate.
@@ -263,6 +363,8 @@ class KeelStore {
     this.client = http;
     this.mode.set("http");
     this.auth.set(status === "ok" ? "ok" : "required");
+    // The server answered: any earlier offline reason is history.
+    this.sessionsError.set(null);
     if (status === "auth") {
       this.sessionsLoading.set(false);
       return;
@@ -293,9 +395,9 @@ class KeelStore {
   }
 
   /**
-   * Probe the server again from a fixture view (the settings page's "重试连接").
-   * The answer decides where we land: a live server, the login gate, or back
-   * to the demo fixture — never a silently fabricated one.
+   * Probe the server again (the settings page's "重试连接", the list's 重试).
+   * The answer decides where we land: a live server, the login gate, or the
+   * offline face — never a silently fabricated one.
    */
   async reconnect() {
     if (this.mode() === "checking") return;
@@ -307,62 +409,34 @@ class KeelStore {
     await this.detect();
   }
 
-  /** Switch transports by hand (the sidebar footer's badge). */
-  async switchMode(mode: Mode) {
-    if (mode === this.mode() || mode === "checking") return;
-    this.closeStream();
-    this.activeId.set(null);
-    this.conversation.set(null);
-    if (mode === "http") {
-      this.http = this.http ?? new KeelHttp("");
-      this.client = this.http;
-    } else {
-      this.client = this.fixture;
-    }
-    this.mode.set(mode);
-    this.resetSettingsState();
-    await this.refreshSessions();
-  }
-
   // ---- route --------------------------------------------------------------
 
   /**
    * Read the route once at boot: a web page served at `/settings` (the SPA
-   * fallback) starts on the settings page; every other host starts on the
-   * workspace. The read is the host's (`keel.route` in host.js), because the
-   * app's JS sandbox has no `location` of its own — and it is gated on
-   * `keel.info` so only the real web host (which answers both) takes part:
-   * native hosts and test hosts keep their routes fully in-app.
+   * fallback), `/plugins` or `/kit` (dev) starts there; every other host starts
+   * on the workspace. The read is the host's (`keel.route` in host.js), because
+   * the app's JS sandbox has no `location` of its own — `pageRoute` gates it on
+   * `keel.info`, so only the real web host takes part.
    */
   private async initRoute() {
-    if (!host.available()) return;
-    try {
-      const info = await host.call<{ origin?: string }>("keel.info", {}, { timeout: 1200 });
-      if (typeof info?.origin !== "string" || !info.origin) return;
-    } catch {
-      return;
-    }
+    const [page] = await Promise.all([this.pageRoute(), this.devLaunch()]);
+    if (!page) return;
     this.routePlumbed = true;
-    try {
-      const info = await host.call<{ path?: string }>("keel.route", {}, { timeout: 1200 });
-      const path = typeof info?.path === "string" ? info.path : "/";
-      if (!this.routeTouched) this.route.set(path.startsWith("/settings") ? "settings" : "workspace");
-    } catch {
-      /* keep the in-app route */
-    }
+    if (!this.routeTouched) this.route.set(routeOf(page.path, this.dev));
     try {
       // Browser back/forward: the URL is authoritative again.
-      host.on<{ path?: string }>("keel.route", (payload) => {
+      host.on<{ path?: string; search?: string }>("keel.route", (payload) => {
         const next = typeof payload?.path === "string" ? payload.path : "";
-        this.route.set(next.startsWith("/settings") ? "settings" : "workspace");
+        this.route.set(routeOf(next, this.dev));
       });
     } catch {
       /* a host without events is fine: routes stay in-app */
     }
   }
 
-  /** Keep the page URL in step with the shell (`/settings` is a real route;
-   * a host without a URL — TUI, desktop, tests — just ignores it). */
+  /** Keep the page URL in step with the shell (`/settings`, `/plugins` and the
+   * dev-only `/kit` are real routes; a host without a URL — TUI, desktop,
+   * tests — just ignores it). */
   private navigate(path: string) {
     if (!this.routePlumbed) return;
     // The call goes through the same channel as the route read: the web host
@@ -380,8 +454,18 @@ class KeelStore {
     this.navigate("/settings");
   }
 
+  /** The plugin page (`/plugins`), the same route the settings page's
+   * 「打开插件页」 enters: the address bar and the back button follow it, and a
+   * `/plugins` deep link opens it. */
+  openPlugins() {
+    this.routeTouched = true;
+    if (this.route() === "plugins") return;
+    this.route.set("plugins");
+    this.navigate("/plugins");
+  }
+
   /** Back to the workspace; the open session is preserved (the store keeps it
-   * across the shell swap). */
+   * across the shell swap). Works from every non-workspace route. */
   closeSettings() {
     this.routeTouched = true;
     if (this.route() === "workspace") return;
@@ -632,6 +716,12 @@ class KeelStore {
 
   async refreshSessions() {
     if (this.mode() === "checking") return;
+    if (this.mode() === "offline") {
+      // The list's 重试 is a connection retry, not a re-read of nothing: probe
+      // again, and read the list when the probe lands on a live service.
+      await this.detect();
+      return;
+    }
     try {
       const rows = await this.client.listSessions(60);
       this.mergeSessions(rows);
@@ -1054,11 +1144,6 @@ class KeelStore {
     );
     if (this.engine === engine) this.unsubscribeStream = detach;
     else detach();
-  }
-
-  simulateDrop() {
-    const sessionId = this.activeId();
-    if (sessionId && this.client === this.fixture) this.fixture.simulateDrop(sessionId);
   }
 
   dismissNotice() {

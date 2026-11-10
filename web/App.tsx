@@ -1,174 +1,449 @@
-// The app root: a sidebar + conversation on wide screens, two screens on
-// narrow ones (and in the TUI's narrow grid). One code path for web and the
-// TUI target; the only platform check is the window width.
+// The app root: the route picks the shell, the kit draws it.
 //
-// The route decides the shell: `settings` renders the standalone settings page
-// (`/settings` deep-links straight into it, and the workspace state — the open
-// session included — waits untouched underneath), anything else the workspace.
-import { effect, mount, signal, Text, View, windowSize } from "nsh";
-import { store } from "./src/data/store";
-import { Icon } from "./src/ui/icons";
-import { Press, Spinner } from "./src/ui/primitives";
-import { alpha, colors, glass, radius, space } from "./src/ui/theme";
-import { SessionList } from "./src/screens/session-list";
+//   workspace  the three columns — the session list (sidebar), the conversation
+//              (main) and the status pane (right) — `WorkspaceShell`
+//   settings   the standalone settings page
+//   plugins    the plugin page (its own entry; a placeholder stands in here)
+//   kit        the kit gallery — a developer route (the store maps `/kit` while
+//              developing, and nothing in the product links to it)
+//
+// The h-12 header row, the sidebar panel, the right pane, the collapsed strip,
+// the ≤767 single column and every threshold between them are the kit's blocks
+// (change keel-ui-kit); this file fills the slots and holds only the state the
+// shell takes from its owner: which screen the single column shows, whether the
+// right pane is open, and the notices. Overlays come from the kit as well —
+// `ToastViewport` for the store's notices, `AlertDialog` for the delete
+// confirmation, the session model picker's own `Dialog`, and the global
+// command palette (`CommandPalette`: Mod+K over every route).
+//
+// Two seams wait on parallel entries, each marked `SEAM` where it sits: the
+// plugin page (`src/screens/plugins.tsx`) and the right pane's facts
+// (`src/screens/session-status-pane.tsx`).
+//
+// NSH components run once: every reactive read lives in the vnode getters (JSX
+// or an `<If>`), never in a body-level `if` or a local.
+import { effect, mount, platform, signal, Storage, Text, View, windowSize } from "nsh";
+
+import type { SessionSummary } from "./src/data/contract";
+import { store, type Notice } from "./src/data/store";
+import { KitGallery } from "./kit/KitGallery";
+import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
-import { DeleteDialog } from "./src/screens/delete-dialog";
+import { deleteRequest } from "./src/screens/delete-dialog";
 import { LoginScreen } from "./src/screens/login";
+import { SessionModelChip, SessionModelPicker } from "./src/screens/model-picker";
+import { PluginsScreen } from "./src/screens/plugins";
+import { SessionList } from "./src/screens/session-list";
 import { SettingsScreen } from "./src/screens/settings";
-import { SessionModelPicker } from "./src/screens/model-picker";
+import { restoreAppearance } from "./src/ui/appearance";
+import { type IconName } from "./src/ui/icons";
+import {
+  AlertDialog,
+  Badge,
+  Button,
+  color,
+  ConversationStatusRail,
+  IconButton,
+  space,
+  ToastViewport,
+  type BadgeVariant,
+  type ToastItem,
+  type ToastTone,
+  typeScale,
+  weight,
+  WORKSPACE_SHELL_SINGLE_COLUMN_MAX_PX,
+  WorkspaceShell,
+} from "./src/ui/kit";
+import { conversationState, runStateLabel, runStateTone, type RunTone } from "./src/ui/run-state";
+import { sessionTitle } from "./src/ui/session-title";
 
-const isWide = () => windowSize().width >= 900;
+// ---- the route ------------------------------------------------------------
 
-// Held at module level so leaving the settings page and coming back lands on
-// the screen (and session) the user was reading.
+/** The routes the root knows how to render. The store's own `Route` gains
+ * `plugins` and `kit` in its own entry; until that lands this file narrows the
+ * store's value here (`as unknown as AppRoute`, at the one boundary between the
+ * two) and every other value falls back to the workspace, so the two agree the
+ * moment the store's union grows — same value space, no cross-file edit. */
+type AppRoute = "workspace" | "settings" | "plugins" | "kit";
+
+const appRoute = (): AppRoute => {
+  const route = store.route() as unknown as AppRoute;
+  return route === "settings" || route === "plugins" || route === "kit" ? route : "workspace";
+};
+
+// ---- the single column (≤767) ---------------------------------------------
+
+/** The kit's own breakpoint, read only to know which screen the single column
+ * shows: the shell decides the layout itself. */
+const singleColumn = () => windowSize().width <= WORKSPACE_SHELL_SINGLE_COLUMN_MAX_PX;
+
+/** Which screen the single column shows: the session list or the conversation.
+ * A wide layout shows both at once and never reads it. Module-level, so leaving
+ * to the settings page and coming back lands where the reader was. */
 const screen = signal<"list" | "chat">("list");
-const autoOpened = signal(false);
 
-function NoticeToast() {
-  return (
-    <If when={store.notice()}>
-      <View style={{ position: "absolute", top: 12, left: 0, right: 0, alignItems: "center", zIndex: 10 }}>
-        <Press
-          onPress={() => store.dismissNotice()}
-          accessibilityLabel="关闭提示"
-          style={{
-            maxWidth: 640,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: space.sm,
-            paddingHorizontal: 14,
-            minHeight: 36,
-            borderRadius: radius.card,
-            ...glass.popover,
-            backgroundColor:
-              store.notice()?.tone === "danger"
-                ? colors.dangerTint
-                : store.notice()?.tone === "warn"
-                  ? colors.warningTint
-                  : store.notice()?.tone === "success"
-                    ? colors.successTint
-                    : colors.infoTint,
-            borderColor:
-              store.notice()?.tone === "danger"
-                ? alpha(colors.danger, 0.32)
-                : store.notice()?.tone === "warn"
-                  ? alpha(colors.warning, 0.32)
-                  : store.notice()?.tone === "success"
-                    ? alpha(colors.success, 0.32)
-                    : alpha(colors.info, 0.32),
-          }}
-        >
-          <Icon
-            name={store.notice()?.tone === "danger" || store.notice()?.tone === "warn" ? "alert" : "check"}
-            size={14}
-            tint={
-              store.notice()?.tone === "danger"
-                ? colors.danger
-                : store.notice()?.tone === "warn"
-                  ? colors.warning
-                  : store.notice()?.tone === "success"
-                    ? colors.success
-                    : colors.info
-            }
-          />
-          <Text style={{ flex: 1, fontSize: 12, color: colors.foreground }}>{store.notice()?.text ?? ""}</Text>
-          <Icon name="x" size={12} tint={colors.mutedForeground} />
-        </Press>
-      </View>
-    </If>
-  );
-}
+const selectSession = (sessionId: string) => {
+  void store.openSession(sessionId);
+  if (singleColumn()) screen.set("chat");
+};
 
-function ProbeBadge() {
-  return (
-    <If when={store.mode() === "checking"}>
-      <View
-        style={{
-          position: "absolute",
-          top: 10,
-          right: 12,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 6,
-          paddingHorizontal: 10,
-          height: 28,
-          borderRadius: radius.pill,
-          ...glass.popover,
-        }}
-      >
-        <Spinner size={11} tint={colors.brand} />
-        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>正在探测 keel serve…</Text>
-      </View>
-    </If>
-  );
-}
+/** Back to the list; the conversation stays open (the list still marks it). */
+const showSessionList = () => screen.set("list");
 
-function Shell() {
-  effect(() => {
-    if (!isWide() || store.mode() === "checking" || autoOpened() || store.activeId()) return;
-    const rows = store.sessions();
-    if (rows.length === 0) return;
-    autoOpened.set(true);
-    void store.openSession(rows[0].sessionId);
+/** The open session's row — what the header's title comes from. */
+const activeRow = (): SessionSummary | undefined => {
+  const id = store.activeId();
+  return id ? store.sessions().find((row) => row.sessionId === id) : undefined;
+};
+
+/** The header's title: the open session's (one source with the list), or the
+ * app's own name while no session is open. */
+const headerTitle = () => {
+  const row = activeRow();
+  return row ? sessionTitle(row) : "Keel";
+};
+
+/** The run state's badge family: the shared vocabulary's tone, in the kit's
+ * variants. */
+const stateBadge: Record<RunTone, BadgeVariant> = {
+  neutral: "secondary",
+  brand: "info",
+  warning: "warning",
+  danger: "destructive",
+};
+
+// ---- the right pane --------------------------------------------------------
+
+/** The key the pane's own choice is kept under. */
+const SIDE_PANE_STORAGE_KEY = "keel:workspace-shell:side-pane-open";
+
+/** The pane starts CLOSED — the reference's rule for the right shared panel
+ * (`useAppPanels.ts:200-208`: it must not eat the conversation's room before
+ * the reader asks for it) — and only the stored choice or the header's toggle
+ * opens it. So a 1280 window gives the conversation the whole pane width the
+ * kit's column geometry is keyed on (1280 − 264 = 1016 → the 896/48 band). */
+const sidePaneOpen = signal(false);
+/** The stored choice, once the host answered (`undefined` while it reads). */
+let storedSidePane: string | null | undefined = undefined;
+/** Someone decided: the user's toggle, or the shell's auto-collapse policy. */
+let sidePaneTouched = false;
+/** The stored choice was read (once per launch). */
+let sidePaneRestored = false;
+/** The stored appearance was applied. */
+let appearanceApplied = false;
+
+/** The header's toggle: the user's choice, kept for the next launch. */
+const chooseSidePane = (open: boolean) => {
+  sidePaneTouched = true;
+  sidePaneOpen.set(open);
+  void Storage.setItem(SIDE_PANE_STORAGE_KEY, open ? "1" : "0").catch(() => {
+    /* a host without storage just forgets the choice */
   });
+};
 
-  const select = (id: string) => {
-    void store.openSession(id);
-    if (!isWide()) screen.set("chat");
-  };
-  // Going back keeps the conversation open: the list still highlights the
-  // session the user was just reading.
-  const back = () => screen.set("list");
+/** Boot: the stored choice (it is the user's) over the width's own default. */
+const restoreSidePane = async () => {
+  try {
+    storedSidePane = await Storage.getItem(SIDE_PANE_STORAGE_KEY);
+  } catch {
+    /* no storage: the width's own answer stands */
+  }
+  if (sidePaneTouched) return;
+  if (storedSidePane === "1" || storedSidePane === "0") sidePaneOpen.set(storedSidePane === "1");
+};
 
+// ---- the workspace header --------------------------------------------------
+
+/** An action of the h-12 row. A terminal draws no icon: an icon-only button is
+ * a view with no characters there — the TUI host neither shows it nor lets a
+ * test address it — so a terminal gets the same action as a short text button,
+ * the way the kit's own sidebar strip carries a glyph instead of its drawn
+ * grip. One accessibility label either way. */
+function HeaderAction(props: {
+  icon: IconName;
+  label: string;
+  text: string;
+  onPress: () => void;
+  selected?: boolean;
+  testID?: string;
+}) {
+  return (
+    <If
+      when={platform.idiom === "terminal"}
+      else={
+        <IconButton
+          testID={props.testID}
+          icon={props.icon}
+          label={props.label}
+          selected={props.selected}
+          onPress={props.onPress}
+        />
+      }
+    >
+      <Button
+        testID={props.testID}
+        variant="ghost"
+        size="sm"
+        label={props.text}
+        accessibilityLabel={props.label}
+        selected={props.selected}
+        onPress={props.onPress}
+      />
+    </If>
+  );
+}
+
+/** What the shell's h-12 row holds: the narrow screen's back entry, the
+ * session's title, its state word, the session's model chip and the right
+ * pane's toggle. */
+function WorkspaceHeader() {
   return (
     <View
-      style={{
-        flex: 1,
-        flexDirection: isWide() ? "row" : "column",
-        backgroundColor: colors.background,
-      }}
+      testID="workspace-header-content"
+      style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: space.md }}
     >
-      <If
-        when={isWide()}
-        else={
-          <If
-            when={screen() === "chat" && !!store.activeId()}
-            else={<SessionList onSelect={select} activeId={store.activeId()} wide={false} />}
-          >
-            <Conversation wide={false} onBack={back} onOpenList={back} />
-          </If>
-        }
-      >
-        <SessionList onSelect={select} activeId={store.activeId()} wide />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Conversation wide />
-        </View>
+      <If when={singleColumn()}>
+        <HeaderAction
+          testID="workspace-header-back"
+          icon="chevron-left"
+          text="返回"
+          label="返回会话列表"
+          onPress={showSessionList}
+        />
+      </If>
+      {/* The title's own column: a terminal lays a flexible text out at no
+          width at all, so the flex belongs to this box, never to the Text. */}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          testID="workspace-header-title"
+          style={{
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+            fontSize: typeScale.base,
+            fontWeight: weight.semibold,
+            color: color.foreground,
+          }}
+        >
+          {headerTitle()}
+        </Text>
+      </View>
+      {/* The state word rides both headers. The model chip is the same control
+          at both widths, label and all: its label is what the session's own
+          selection reads as (「默认 provider/model · 档」), and the existing TUI
+          acceptance asserts exactly that text where the terminal runs — at the
+          single column's width (`keel-harness-shell` spec: the 7 TUI tests MUST
+          stay green). Its full label is 283px at a 390 viewport, so on that
+          column the row pays with the title's ellipsis; title room comes back
+          from the row's other occupants (the state word, the back entry), not
+          from hiding the chip. Same accessibility label (`label:本会话模型`)
+          and the same picker Dialog either way. */}
+      <If when={!!store.activeId()}>
+        <Badge
+          testID="workspace-header-state"
+          variant={stateBadge[runStateTone[conversationState(store.conversation())]]}
+          label={runStateLabel[conversationState(store.conversation())]}
+        />
+      </If>
+      <If when={!!store.activeId()}>
+        <SessionModelChip />
+      </If>
+      <If when={!singleColumn()}>
+        <HeaderAction
+          testID="workspace-header-side-pane"
+          icon="panel"
+          text={sidePaneOpen() ? "收起右栏" : "展开右栏"}
+          label={sidePaneOpen() ? "收起右侧状态栏" : "展开右侧状态栏"}
+          selected={sidePaneOpen()}
+          onPress={() => chooseSidePane(!sidePaneOpen())}
+        />
       </If>
     </View>
   );
 }
 
+// ---- the workspace ---------------------------------------------------------
+
+/** The workspace: the kit's shell with its three slots filled. On a single
+ * column the sidebar slot stays empty on purpose — a drawer only the shell can
+ * close would fight the app's own two screens — and the main column shows the
+ * list or the conversation by `screen`. */
+function Workspace() {
+  return (
+    <WorkspaceShell
+      testID="workspace-shell"
+      header={singleColumn() && screen() === "list" ? undefined : <WorkspaceHeader />}
+      sidebar={
+        singleColumn() ? undefined : <SessionList onSelect={selectSession} activeId={store.activeId()} wide />
+      }
+      main={
+        singleColumn() && screen() === "list" ? (
+          <SessionList onSelect={selectSession} activeId={store.activeId()} wide={false} />
+        ) : (
+          // `wide` is the layout word the conversation still speaks: off, its
+          // composer and error banner go compact (the single column).
+          <Conversation wide={!singleColumn()} />
+        )
+      }
+      sidePane={
+        <View style={{ flex: 1, padding: space.xl }}>
+          {/* SEAM: the pane's facts (模型/思考档/用量/工具/插件) come from the
+              parallel entry `src/screens/session-status-pane.tsx`; when it lands
+              this becomes `sidePane={<SessionStatusPane />}`. Until then the
+              kit's own status surface stands in — its compact form, because the
+              `inline` form is the 320px floating rail this shell replaced. */}
+          <ConversationStatusRail variant="mini" label="会话状态">
+            <If when={!!store.activeId()}>
+              <Badge
+                variant={stateBadge[runStateTone[conversationState(store.conversation())]]}
+                label={runStateLabel[conversationState(store.conversation())]}
+              />
+            </If>
+          </ConversationStatusRail>
+        </View>
+      }
+      sidePaneOpen={sidePaneOpen()}
+      onSidePaneOpenChange={(open) => {
+        // The shell reports its own moves too (the auto-collapse after a
+        // resize): the flag follows them, the stored choice does not.
+        sidePaneTouched = true;
+        sidePaneOpen.set(open);
+      }}
+    />
+  );
+}
+
+// ---- the other routes ------------------------------------------------------
+
+/** `/settings`, `/plugins` and `/kit` — the workspace's else. */
+function Routed() {
+  return (
+    <If when={appRoute() === "workspace"} else={<NotWorkspace />}>
+      <Workspace />
+    </If>
+  );
+}
+
+function NotWorkspace() {
+  return (
+    <If when={appRoute() === "settings"} else={<NotSettings />}>
+      <SettingsScreen />
+    </If>
+  );
+}
+
+function NotSettings() {
+  return (
+    <If when={appRoute() === "plugins"} else={<KitGallery />}>
+      <PluginsRoute />
+    </If>
+  );
+}
+
+/** The plugin route: the plugin page's own screen (`src/screens/plugins.tsx`),
+ * the same one the settings page's 「打开插件页」 sets the route to. */
+function PluginsRoute() {
+  return <PluginsScreen />;
+}
+
+// ---- overlays --------------------------------------------------------------
+
+/** The store's notices, drawn by the kit's viewport (the stack's placement is
+ * the kit's own; nothing here offsets a toast). The store keeps one notice at a
+ * time, so a toast goes when its notice does — the store's six-second timer or
+ * a dismissal. */
+const toasts = signal<ToastItem[]>([]);
+let toastSeq = 0;
+let lastNotice: Notice | null = null;
+
+const noticeTone = (tone: Notice["tone"]): ToastTone =>
+  tone === "warn" ? "warning" : tone === "info" ? "default" : tone;
+
+function NoticeToasts() {
+  effect(() => {
+    const notice = store.notice();
+    if (notice === lastNotice) return;
+    const previous = lastNotice;
+    lastNotice = notice;
+    if (notice) {
+      const id = `notice-${++toastSeq}`;
+      toasts.update((list) => [...list, { id, title: notice.text, tone: noticeTone(notice.tone) }]);
+    } else if (previous) {
+      toasts.set([]);
+    }
+  });
+  return (
+    <ToastViewport
+      testID="app-toasts"
+      toasts={toasts()}
+      onDismiss={(id) => {
+        toasts.update((list) => list.filter((item) => item.id !== id));
+        store.dismissNotice();
+      }}
+    />
+  );
+}
+
+/** The one destructive confirmation, at the root: the kit's AlertDialog over
+ * the request a list row raises, so it covers the sidebar and the conversation
+ * both and never pushes the list around. */
+function DeleteConfirm() {
+  const confirmText = () => {
+    const item = deleteRequest();
+    return item ? `「${item.title}」及其消息将被删除，此操作不可撤销。` : "";
+  };
+  return (
+    <AlertDialog
+      testID="delete-session-dialog"
+      open={!!deleteRequest()}
+      title="删除会话？"
+      description={confirmText()}
+      confirmLabel="删除"
+      cancelLabel="取消"
+      destructive
+      onConfirm={() => {
+        const item = deleteRequest();
+        deleteRequest.set(null);
+        if (item) void store.deleteSession(item.sessionId);
+      }}
+      onCancel={() => deleteRequest.set(null)}
+    />
+  );
+}
+
 // The auth gate is an If, not an early return: a component body in NSH runs once
 // and its reactive reads live in the vnode getters, so a body-level `if` would
-// freeze the decision made before the async probe finished. The same shape
-// decides the shell from the route (a `/settings` deep link included).
+// freeze the decision made before the async probe finished.
 function App() {
+  // Boot: the appearance the last session chose (the settings page's 外观
+  // section writes it through the same source) …
+  effect(() => {
+    if (appearanceApplied) return;
+    appearanceApplied = true;
+    void restoreAppearance();
+  });
+  // … and the right pane: only the stored choice reopens it — no width-driven
+  // default (the reference keeps the shared right panel closed until the reader
+  // opens it; the kit's own policy then closes it again if the conversation
+  // would fall under its 480px floor).
+  effect(() => {
+    if (sidePaneRestored) return;
+    sidePaneRestored = true;
+    void restoreSidePane();
+  });
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <If
-        when={store.auth() === "required"}
-        else={
-          <If when={store.route() === "settings"} else={<Shell />}>
-            <SettingsScreen />
-          </If>
-        }
-      >
+    <View style={{ flex: 1, backgroundColor: color.background }}>
+      <If when={store.auth() === "required"} else={<Routed />}>
         <LoginScreen />
       </If>
-      <NoticeToast />
-      <ProbeBadge />
-      <DeleteDialog />
+      <NoticeToasts />
+      <DeleteConfirm />
       <SessionModelPicker />
+      {/* The global palette: mounted at the root so Mod+K opens it over every
+          route, and a choice can leave the settings/plugin page for the
+          workspace. It opens a session through the same `selectSession` the
+          sidebar uses, so the ≤767 single column follows the choice into the
+          conversation. */}
+      <CommandPalette onOpenSession={selectSession} />
     </View>
   );
 }

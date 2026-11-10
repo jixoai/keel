@@ -1,101 +1,125 @@
-// The one destructive confirmation: a centered dialog over a scrim, with two
-// proper buttons (取消 secondary, 删除 danger). It is rendered at the app root
-// so it covers both the sidebar and the conversation, and it never pushes the
-// list around.
-import { signal, Text, View } from "nsh";
+// The one confirmation the app asks: a page raises a question, the kit's
+// `AlertDialog` draws it. This file owns no chrome — the scrim, the dialog's
+// width, the z-index, the icon block and the two button faces are all the kit's
+// (`web/src/ui/kit/components/alert-dialog.tsx`: its own blur scrim, its
+// `width 400 / maxWidth 92%`, its alert glyph, its Button pair — the cancel an
+// `outline`, the confirm `destructive` or `default`). What this file owns is the
+// *question*: a title, a description, the two labels and the one action.
+//
+// `ConfirmRequest` is deliberately generic: a question is a title, a
+// description, the two labels (the kit's defaults when absent) and the one
+// action the confirm runs. The dialog shares no business logic between
+// questions — it closes the question first and then runs that request's single
+// `onConfirm`, so every caller keeps its own.
+//
+// Raised through it today: the session delete (`requestDelete(sessionId,
+// title)` — this file's own instance, the one that knows which session a row's
+// delete entry means; it exposes that id as `pendingDeleteId`, which has no
+// consumer yet). The two settings questions — the model reset and the secret
+// delete — still raise their own `AlertDialog`s in `screens/settings.tsx`;
+// moving them here is a `requestConfirm(request)` call each, which this file
+// takes unchanged.
+//
+// Mounted once, at the app root: `<DeleteDialog />`. That replaces the app
+// root's own copy (`DeleteConfirm` in `App.tsx`) together with the
+// `deleteRequest` shim at the bottom of this file.
+import { signal } from "nsh";
 import { store } from "../data/store";
-import { Icon } from "../ui/icons";
-import { PillButton, Press } from "../ui/primitives";
-import { alpha, colors, glass, radius } from "../ui/theme";
+import { AlertDialog } from "../ui/kit";
 
-interface DeleteRequest {
-  sessionId: string;
+/** One confirmation: the question, its explanation, the two labels (the kit's
+ * defaults when absent) and the single action the confirm runs. */
+export type ConfirmRequest = {
   title: string;
-}
+  description: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive: boolean;
+  onConfirm: () => void;
+};
 
-export const deleteRequest = signal<DeleteRequest | null>(null);
+/** The question a confirmation is showing, if any — the one source of truth
+ * for the dialog. Every closer (confirm, cancel, Escape, backdrop) clears it. */
+export const confirmRequest = signal<ConfirmRequest | null>(null);
 
-/** The session a delete dialog is waiting on, if any. */
-export const pendingDeleteId = () => deleteRequest()?.sessionId ?? null;
+/** The session a delete question is about, if any. Written by `requestDelete`
+ * only, so every other question leaves it null. */
+const sessionUnderConfirm = signal<{ sessionId: string; title: string } | null>(null);
 
-export const requestDelete = (sessionId: string, title: string) =>
-  deleteRequest.set({ sessionId, title });
+/** The session a delete dialog is waiting on, if any — exported for a list that
+ * wants to mark that row. Nothing reads it yet (the delete path today is
+ * `requestDelete` → the app root's interim `AlertDialog`). */
+export const pendingDeleteId = () => sessionUnderConfirm()?.sessionId ?? null;
 
+/** Ask the one confirmation. Each page brings its own action and its own
+ * business: the dialog never knows what a confirm *does*, only that it closes
+ * and then runs it. */
+export const requestConfirm = (request: ConfirmRequest) => {
+  sessionUnderConfirm.set(null);
+  confirmRequest.set(request);
+};
+
+/** Dismiss without acting: the cancel button, Escape, the backdrop. */
+export const cancelConfirm = () => {
+  sessionUnderConfirm.set(null);
+  confirmRequest.set(null);
+};
+
+/** The session delete instance — a list row's delete entry. The question names
+ * the session; the action is this file's own. */
+export const requestDelete = (sessionId: string, title: string) => {
+  sessionUnderConfirm.set({ sessionId, title });
+  confirmRequest.set({
+    title: "删除会话？",
+    description: `「${title}」及其消息将被删除，此操作不可撤销。`,
+    confirmLabel: "删除",
+    cancelLabel: "取消",
+    destructive: true,
+    onConfirm: () => {
+      void store.deleteSession(sessionId);
+    },
+  });
+};
+
+/** The one confirmation: the kit's AlertDialog, filled from the request the
+ * current page raised. `cancelLabel` defaults to the kit's 取消 — a question
+ * with a destructive answer always keeps a way out. */
 export function DeleteDialog() {
-  const request = () => deleteRequest();
-  const close = () => deleteRequest.set(null);
-  const confirm = () => {
-    const item = request();
-    deleteRequest.set(null);
-    if (item) void store.deleteSession(item.sessionId);
-  };
   return (
-    <If when={!!request()}>
-      <View
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 30,
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 24,
-        }}
-      >
-        <Press
-          onPress={close}
-          accessibilityLabel="取消删除"
-          activeStyle={{ opacity: 1 }}
-          hoverStyle={{ opacity: 1 }}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: alpha(colors.background, 0.68),
-          }}
-        >
-          <View style={{ flex: 1 }} />
-        </Press>
-        <View
-          accessibilityLabel="删除会话确认"
-          style={{
-            width: "100%",
-            maxWidth: 384,
-            borderRadius: radius.card,
-            ...glass.popover,
-            backgroundColor: colors.popover,
-            padding: 18,
-            gap: 14,
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 10,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: colors.dangerTint,
-              }}
-            >
-              <Icon name="trash" size={15} tint={colors.danger} />
-            </View>
-            <Text style={{ flex: 1, fontSize: 15, fontWeight: "700", color: colors.foreground }}>删除会话？</Text>
-          </View>
-          <Text style={{ fontSize: 12.5, lineHeight: 19, color: colors.mutedForeground }}>
-            「{request()?.title ?? "会话"}」及其消息将被删除，此操作不可撤销。
-          </Text>
-          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
-            <PillButton label="取消" tone="secondary" onPress={close} />
-            <PillButton label="删除" tone="destructive" onPress={confirm} />
-          </View>
-        </View>
-      </View>
-    </If>
+    <AlertDialog
+      testID="confirm-dialog"
+      open={confirmRequest() !== null}
+      title={confirmRequest()?.title}
+      description={confirmRequest()?.description}
+      confirmLabel={confirmRequest()?.confirmLabel}
+      cancelLabel={confirmRequest()?.cancelLabel ?? "取消"}
+      destructive={confirmRequest()?.destructive ?? false}
+      onConfirm={() => {
+        // Close first, then act: the question is answered before its action
+        // runs, so an action that raises the next question (or fails) cannot
+        // land behind a dialog that is still the previous one.
+        const request = confirmRequest();
+        cancelConfirm();
+        request?.onConfirm();
+      }}
+      onCancel={cancelConfirm}
+    />
   );
 }
+
+/** Interim compatibility with the app root's own copy of this dialog
+ * (`DeleteConfirm` in `App.tsx` reads the pending delete through these): the
+ * read is the pending session delete, the write is only the close. Mounting
+ * `<DeleteDialog />` at the root replaces that copy; delete it and this export
+ * together, and the request above stays the only source. Its `set(null)` clears
+ * the request too, so a dialog the root dismissed cannot reopen from a stale
+ * question once `DeleteDialog` is the one on screen. */
+export const deleteRequest: {
+  (): { sessionId: string; title: string } | null;
+  set: (value: null) => void;
+} = Object.assign(() => sessionUnderConfirm(), {
+  set: (value: null) => {
+    if (value !== null) return;
+    cancelConfirm();
+  },
+});

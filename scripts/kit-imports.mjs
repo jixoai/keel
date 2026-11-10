@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// kit-imports.mjs — the consumer gate for the Keel screens (change keel-ui-kit,
-// task G3): after the kit lands, web/src/screens may only be built from the kit
-// and must not re-invent the shell. Four rules, one violation each:
+// kit-imports.mjs — the consumer gate for the Keel app (change keel-ui-kit,
+// task G3): after the kit lands, **web/src/screens and the app root web/App.tsx**
+// may only be built from the kit and must not re-invent the shell. Four rules,
+// one violation each:
 //
 //   1. `from "../ui/primitives"` — the pre-kit atoms; the rewritten screens use
 //      web/src/ui/kit only.
@@ -152,7 +153,7 @@ function scanFile(file, display, options) {
   return violations;
 }
 
-/** <web>/src/screens/**, the only consumer surface this gate owns. */
+/** <web>/src/screens/**, the screens' consumer surface. */
 function scanScreens(webDir, options) {
   const root = path.join(webDir, "src", "screens");
   if (!fs.existsSync(root)) throw new Error(`no screens directory at ${root} (pass --web <dir>)`);
@@ -163,6 +164,20 @@ function scanScreens(webDir, options) {
     violations.push(...scanFile(file, display, options));
   }
   return violations;
+}
+
+/** <web>/App.tsx — the app root: the same four rules. It wires the shell the
+ * screens live in (the route branches, the h-12 header's slots, the overlays),
+ * so its widths, layout primitives and colours are the kit's too. */
+function scanAppEntry(webDir, options) {
+  const file = path.join(webDir, "App.tsx");
+  if (!fs.existsSync(file)) return [];
+  return scanFile(file, path.join(path.basename(webDir), "App.tsx"), options);
+}
+
+/** Every consumer surface this gate owns: the screens and the app root. */
+function scanConsumer(webDir, options) {
+  return [...scanScreens(webDir, options), ...scanAppEntry(webDir, options)];
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +223,22 @@ function runSelfTest() {
   if (bad.length > 0 && !bad.every((violation) => violation.line > 0 && violation.file.includes("web/src/screens/"))) {
     problems.push("violations lack a file:line");
   }
+
+  // The app root is a consumer surface too: one violation there is caught, and
+  // removing it scans clean (the second negative control).
+  const appEntry = path.join(dir, "web", "App.tsx");
+  fs.writeFileSync(
+    appEntry,
+    `import { Sidebar } from "./src/ui/kit";\nexport function App() {\n  return <Sidebar collapsed={false} />;\n}\n`,
+  );
+  const appBad = scanAppEntry(path.join(dir, "web"), options);
+  if (appBad.length === 0) problems.push("a violating web/App.tsx produced no violation");
+  if (appBad.length > 0 && !appBad.every((violation) => violation.file === path.join("web", "App.tsx"))) {
+    problems.push("the web/App.tsx control reports the wrong file");
+  }
+  fs.rmSync(appEntry);
+  const appClean = scanAppEntry(path.join(dir, "web"), options);
+  if (appClean.length > 0) problems.push(`a clean web/App.tsx still reports ${appClean.length} violation(s)`);
 
   // Remove the violations: the same fixture must now scan clean.
   fs.rmSync(path.join(screens, "bad-legacy.tsx"));
@@ -269,7 +300,7 @@ function main() {
 
   let violations;
   try {
-    violations = scanScreens(args.web, { colors: args.colors });
+    violations = scanConsumer(args.web, { colors: args.colors });
   } catch (error) {
     console.error(`kit-imports: ${error.message}`);
     return 2;
@@ -278,12 +309,16 @@ function main() {
   for (const violation of violations) {
     console.log(`${violation.file}:${violation.line} ${violation.reason}`);
   }
-  const screens = path.join(path.basename(args.web), "src", "screens");
+  const webRoot = path.basename(args.web);
+  const screens = path.join(webRoot, "src", "screens");
+  const appEntry = path.join(webRoot, "App.tsx");
   if (violations.length > 0) {
-    console.log(`kit-imports: ${violations.length} violation(s) in ${screens}`);
+    console.log(`kit-imports: ${violations.length} violation(s) in ${screens} and ${appEntry}`);
     return 1;
   }
-  console.log(`kit-imports: clean — ${screens} imports only the kit, writes no shell widths and no raw colours`);
+  console.log(
+    `kit-imports: clean — ${screens} and ${appEntry} import only the kit, write no shell widths and no raw colours`,
+  );
   return failed;
 }
 

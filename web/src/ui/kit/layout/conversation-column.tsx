@@ -12,6 +12,12 @@
 //   |                            | left 168px (`-translate-x-42`) for the rail        |
 //   | status rail                | 320px (`w-80`) at the pane's top right from 1280px |
 //
+// The shift exists to make room for the inline rail: the reference applies it
+// only when the status panel's layout is not `"none"`
+// (conversationLayout.ts:43-50), so the block takes a `rail` switch (default
+// `true`) — a pane whose status surface is not an inline rail passes `false`
+// and the column stays centred.
+//
 // Breakpoints are read from `windowSize()`, not from container queries: the
 // reference keys off the conversation *container* (`@min-[864px]/conversation`),
 // and NSH has no container queries. The shells here are single panes, so the
@@ -73,12 +79,20 @@ export function conversationColumnMaxWidthPx(event: {
   return null;
 }
 
-/** The column's leftward shift: 168px only in the wide, non-draft layout. */
+/** The column's leftward shift: 168px only in the wide, non-draft layout of a
+ * pane that actually carries an inline status rail. The reference keys the
+ * offset off the status panel's layout and returns none for `"none"`
+ * (`getConversationStatusPanelOffsetClassName`, conversationLayout.ts:43-50);
+ * without a rail the shift would move the column 168px off the pane's centre
+ * for a rail that is not there. */
 export function conversationColumnOffsetPx(event: {
   draft: boolean;
   windowWidthPx: number;
+  /** An inline status rail shares this pane's width budget (default `true`,
+   * the reference's layout). A pane without one passes `false`. */
+  rail?: boolean;
 }): number {
-  return !event.draft && event.windowWidthPx >= CONVERSATION_WIDE_MIN_VIEWPORT_PX
+  return !event.draft && (event.rail ?? true) && event.windowWidthPx >= CONVERSATION_WIDE_MIN_VIEWPORT_PX
     ? -CONVERSATION_WIDE_OFFSET_PX
     : 0;
 }
@@ -87,6 +101,11 @@ export interface ConversationColumnProps {
   /** The draft/empty state: `max-w-2xl`, no shift (the reference's centered
    * draft layout). */
   draft?: boolean;
+  /** The pane has an inline status rail in its width budget (default `true`):
+   * the 1280px layout then shifts the column left by 168px to make room for it.
+   * Pass `false` for a pane whose status surface is not an inline rail (a
+   * side pane, a chip), and the column stays centred. */
+  rail?: boolean;
   /** A viewport width other than the window's (a gallery or a test). */
   windowWidthPx?: number;
   children: JSX.Element;
@@ -101,6 +120,7 @@ export function ConversationColumn(props: ConversationColumnProps) {
   const geometry = () => ({
     draft: props.draft ?? false,
     windowWidthPx: viewportWidthPx(),
+    rail: props.rail ?? true,
   });
   return (
     <View

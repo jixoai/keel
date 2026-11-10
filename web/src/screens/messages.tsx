@@ -3,8 +3,19 @@
 // attachments and the approval card. Every row is a pure function of a
 // `TurnView` / `DecisionView`; state that survives cell recycling lives in
 // module signals keyed by turn/segment id.
+//
+// Every row is built from the kit (`web/src/ui/kit`): Card for a block, the
+// Collapsible trigger for a fold's handle, Badge for a state token, Separator
+// for the stream's rules, Button (ghost) for the turn's own actions, Radio for
+// the approval options. No numeric font size, radius or z-index is written
+// here — `typeScale` / `radius` / `iconSize` / `space` carry them, which is
+// what the migration gate (`scripts/kit-imports.mjs` + review) reads for.
+//
+// Tool families are *derived* from the tool's own name (`./tool-families`):
+// `ToolCallView` is a frozen contract with no family field, so the words and
+// the counts the summary line says them with live in that pure module.
 import { Clipboard, Image, type JSX, keymap, platform, signal, Text, View, windowSize } from "nsh";
-import { TextView } from "nsh/base";
+import { Radio, RadioGroup as NativeRadioGroup, TextView } from "nsh/base";
 import type {
   AttachmentRef,
   DecisionView,
@@ -18,10 +29,46 @@ import type {
 } from "../data/contract";
 import { formatDuration, formatTime, formatTokens, preview } from "../data/wire";
 import { store } from "../data/store";
-import { Caret, Divider, IconButton, Press, Spinner, StatusDot } from "../ui/primitives";
-import { fitCells, wrapCells } from "../ui/text";
 import { Icon, type IconName } from "../ui/icons";
-import { alpha, colors, glass, mono, radius, space } from "../ui/theme";
+import { fitCells, wrapCells } from "../ui/text";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Collapsible,
+  CollapsibleTrigger,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle,
+  IconButton,
+  Separator,
+  Spinner,
+  alpha,
+  color,
+  disabledOpacity,
+  font,
+  iconSize,
+  lineHeight,
+  motion,
+  radius,
+  row,
+  space,
+  typeScale,
+  weight,
+  type BadgeVariant,
+} from "../ui/kit";
+import {
+  FAMILY_ICON,
+  FAMILY_LABEL,
+  familyDetail,
+  groupToolCalls,
+  summarizeCalls,
+  toolTone,
+  type ToolFamily,
+} from "./tool-families";
 
 const expandedTools = signal<Record<string, boolean>>({});
 const expandedThinking = signal<Record<string, boolean>>({});
@@ -55,73 +102,77 @@ const statusLabel = (status: TurnStatus): string =>
         ? "已停止"
         : "失败";
 
-const statusTone = (status: TurnStatus): "done" | "running" | "failed" | "idle" =>
-  status === "completed" ? "done" : status === "running" ? "running" : status === "failed" ? "failed" : "idle";
+/** A run state's tint family, as the kit's one status token. */
+const statusVariant = (status: TurnStatus): BadgeVariant =>
+  status === "completed"
+    ? "success"
+    : status === "running" || status === "settling"
+      ? "info"
+      : status === "failed"
+        ? "destructive"
+        : "secondary";
+
+/** The state's tint as a dot: the kit's Badge carries one tint per variant and
+ * an empty badge renders exactly that face (`label` absent). Keeps the run line
+ * readable at a glance without a second dot language. */
+function ToneDot(props: { variant: BadgeVariant }) {
+  return (
+    <Badge
+      variant={props.variant}
+      style={{ width: space.md, height: space.md, paddingHorizontal: space.none }}
+    />
+  );
+}
 
 function AttachmentChip(props: { item: AttachmentRef }) {
   const image = () => (props.item.mime ?? "").startsWith("image/") && !!props.item.url;
+  const sizeLabel = () =>
+    !props.item.size
+      ? ""
+      : props.item.size > 1024 * 1024
+        ? `${(props.item.size / 1024 / 1024).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(props.item.size / 1024))} KB`;
   return (
-    <View style={{ gap: space.sm, alignItems: "flex-end" }}>
-      {image() ? (
+    <Card size="sm" style={{ alignSelf: "flex-end", maxWidth: "100%", gap: space.sm, padding: space.sm }}>
+      <If when={image()}>
         <Image
-          src={props.item.url!}
+          src={props.item.url ?? ""}
           style={{
             width: 280,
             maxWidth: "100%",
             height: 158,
-            borderRadius: radius.inset,
+            borderRadius: radius.sm,
             objectFit: "cover",
             borderWidth: 1,
-            borderColor: colors.glassEdge,
+            borderColor: color.border,
           }}
         />
-      ) : null}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.sm,
-          paddingHorizontal: 10,
-          height: 34,
-          alignSelf: "flex-end",
-          maxWidth: "100%",
-          borderRadius: radius.control,
-          ...glass.control,
-        }}
-      >
-        <Icon name={image() ? "image" : "file"} size={13} tint={colors.mutedForeground} />
-        <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.foreground }}>{props.item.name}</Text>
-        {props.item.size ? (
-          <Text style={{ fontSize: 11, color: colors.mutedForeground }}>
-            {props.item.size > 1024 * 1024
-              ? `${(props.item.size / 1024 / 1024).toFixed(1)} MB`
-              : `${Math.max(1, Math.round(props.item.size / 1024))} KB`}
-          </Text>
-        ) : null}
+      </If>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, alignSelf: "flex-end" }}>
+        <Icon name={image() ? "image" : "file"} size={iconSize.sm} tint={color.mutedForeground} />
+        <Text style={{ numberOfLines: 1, fontSize: typeScale.sm, color: color.foreground }}>
+          {props.item.name}
+        </Text>
+        <If when={!!props.item.size}>
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{sizeLabel()}</Text>
+        </If>
       </View>
-    </View>
+    </Card>
   );
 }
+
+/** The guide states as the kit's own tokens: a landed guide is done, a queued
+ * one waits, an inert one is quiet. */
+const guideVariant = (state: "consumed" | "pending" | "inert"): BadgeVariant =>
+  state === "consumed" ? "success" : state === "pending" ? "warning" : "ghost";
 
 function UserInputRow(props: { turnId: string; input: InputView; attachments?: AttachmentRef[]; running?: boolean }) {
   const guideState = (): "consumed" | "pending" | "inert" =>
     props.input.consumed ? "consumed" : props.running ? "pending" : "inert";
   const guideLabel = () =>
     guideState() === "consumed" ? "引导已生效" : guideState() === "pending" ? "引导排队中" : "引导未生效";
-  const guideFill = () =>
-    guideState() === "consumed"
-      ? colors.successTint
-      : guideState() === "pending"
-        ? colors.warningTint
-        : colors.muted;
-  const guideInk = () =>
-    guideState() === "consumed"
-      ? colors.success
-      : guideState() === "pending"
-        ? colors.warning
-        : colors.mutedForeground;
   return (
-    <View style={{ alignItems: "flex-end", gap: space.sm, paddingVertical: 6 }}>
+    <View style={{ alignItems: "flex-end", gap: space.sm, paddingVertical: space.sm }}>
       {props.attachments?.length ? (
         <View style={{ alignItems: "flex-end", gap: space.sm }}>
           {props.attachments.map((item) => (
@@ -129,46 +180,36 @@ function UserInputRow(props: { turnId: string; input: InputView; attachments?: A
           ))}
         </View>
       ) : null}
-      <View
+      {/* The reader's own words: the kit's card face, with the bubble's corner
+          cut to the small radius. */}
+      <Card
+        size="sm"
         style={{
           maxWidth: "86%",
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          borderRadius: radius.card,
-          borderBottomRightRadius: 5,
-          borderWidth: 1,
-          borderColor: colors.glassStateRim,
-          backgroundColor: colors.glassState,
-          boxShadow: `inset 0 1px 0 ${colors.glassStateRim}`,
+          borderBottomRightRadius: radius.sm,
+          paddingHorizontal: space.lg,
+          paddingVertical: space.md,
+          gap: space.none,
         }}
       >
-        <Text style={{ userSelect: "text", fontSize: 14, lineHeight: 21, color: colors.foreground }}>
+        <Text
+          style={{
+            userSelect: "text",
+            fontSize: typeScale.base,
+            lineHeight: Math.round(typeScale.base * lineHeight.normal),
+            color: color.foreground,
+          }}
+        >
           {props.input.text}
         </Text>
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        {props.input.delivery === "guide" ? (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 4,
-              paddingHorizontal: 6,
-              height: 18,
-              borderRadius: radius.pill,
-              backgroundColor: guideFill(),
-            }}
-          >
-            <Icon name="external" size={10} tint={guideInk()} />
-            <Text style={{ fontSize: 10, fontWeight: "600", color: guideInk() }}>{guideLabel()}</Text>
-          </View>
-        ) : null}
-        {props.input.downgraded ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Icon name="clock" size={10} tint={colors.warning} />
-            <Text style={{ fontSize: 10, color: colors.warning }}>已降级为队列</Text>
-          </View>
-        ) : null}
+      </Card>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <If when={props.input.delivery === "guide"}>
+          <Badge variant={guideVariant(guideState())} icon="external" label={guideLabel()} />
+        </If>
+        <If when={!!props.input.downgraded}>
+          <Badge variant="warning" icon="clock" label="已降级为队列" />
+        </If>
       </View>
       {/* A user's own message is copyable text too (C3). */}
       <ActionLine turnId={props.turnId} time={props.input.createdAt}>
@@ -189,69 +230,92 @@ function lastLineOf(text: string, max = 48): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+/** The settled thinking span in whole seconds, as the reference's copy says it
+ * (`chat.reasoning.durationSeconds`: 持续了 {seconds} 秒): 6.4s reads 6 秒. */
+const thinkingSeconds = (durationMs: number | undefined): number | undefined =>
+  durationMs === undefined ? undefined : Math.max(1, Math.round(durationMs / 1000));
+
 /** Thinking is folded by default — streaming shows one live summary line,
- * once settled the fold is titled with how long it took (C11). */
+ * once settled the fold is titled with how long it took (C11). The fold is the
+ * kit's Collapsible, so the chevron is the component's own. */
 function ThinkingBlock(props: { turnId: string; text: string; running: boolean; durationMs?: number }) {
   const key = `${props.turnId}-thinking`;
   const open = () => isOpen(expandedThinking(), key, false);
   const label = () => {
+    // The reference's own words (`chat.reasoning.thinking` / `.thought` /
+    // `.durationFewSeconds` / `.durationSeconds`, zh-CN.ts:5374-5377): a
+    // Chinese surface never mixes "Thinking" / "Thought · 6.4s" in.
     if (props.running) {
       const line = lastLineOf(props.text);
-      return line ? `Thinking · ${line}` : "Thinking";
+      return line ? `正在思考 · ${line}` : "正在思考";
     }
-    const duration = formatDuration(props.durationMs);
-    return duration ? `Thought · ${duration}` : "Thought";
+    const seconds = thinkingSeconds(props.durationMs);
+    return seconds === undefined ? "思考 · 持续了几秒" : `思考 · 持续了 ${seconds} 秒`;
   };
   return (
-    <View style={{ gap: space.xs }}>
-      <Press
-        onPress={() => toggle(expandedThinking, key, false)}
-        accessibilityLabel="思考过程"
-        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", height: 28 }}
-      >
-        {props.running ? (
-          <Spinner size={12} tint={colors.mutedForeground} />
-        ) : (
-          <Icon name="brain" size={13} tint={colors.mutedForeground} />
-        )}
-        <Text
-          style={{
-            numberOfLines: 1,
-            maxWidth: 480,
-            fontSize: 12,
-            fontWeight: "500",
-            color: colors.mutedForeground,
-          }}
-        >
-          {label()}
-        </Text>
-        <View
-          style={{
-            transform: open() ? "rotate(0deg)" : "rotate(-90deg)",
-            transitionProperty: "transform",
-            transitionDuration: 180,
-          }}
-        >
-          <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
-        </View>
-      </Press>
-      {open() ? (
-        <View style={{ flexDirection: "row", gap: space.sm, paddingLeft: 5 }}>
-          <View style={{ width: 2, borderRadius: 1, backgroundColor: alpha(colors.border, 1) }} />
+    <Collapsible
+      open={open()}
+      accessibilityLabel="思考过程"
+      content={
+        <View style={{ flexDirection: "row", gap: space.sm, paddingLeft: space.xs }}>
+          <View style={{ width: space.xxs, backgroundColor: color.border, borderRadius: radius.pill }} />
           <Text
             style={{
               flex: 1,
               userSelect: "text",
-              fontSize: 12.5,
-              lineHeight: 19,
-              color: colors.mutedForeground,
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.relaxed),
+              color: color.mutedForeground,
             }}
           >
             {props.text}
           </Text>
         </View>
-      ) : null}
-    </View>
+      }
+    >
+      <CollapsibleTrigger
+        accessibilityLabel="思考过程"
+        expanded={open()}
+        onPress={() => toggle(expandedThinking, key, false)}
+      >
+        {props.running ? (
+          <Spinner size={iconSize.xs} tint={color.mutedForeground} />
+        ) : (
+          <Icon name="brain" size={iconSize.sm} tint={color.mutedForeground} />
+        )}
+        <Text
+          style={{
+            flex: 1,
+            numberOfLines: 1,
+            fontSize: typeScale.sm,
+            fontWeight: weight.medium,
+            color: color.mutedForeground,
+          }}
+        >
+          {label()}
+        </Text>
+      </CollapsibleTrigger>
+    </Collapsible>
+  );
+}
+
+/** The streaming caret the kit has no piece for (its one gap in this file): a
+ * 2px token bar that pulses where the text is arriving. `TextView` takes it as
+ * an element, so it stays a decoration, not a component of its own. */
+function StreamCaret() {
+  return (
+    <View
+      style={{
+        width: space.xxs,
+        height: typeScale.lg,
+        marginLeft: space.xxs,
+        borderRadius: radius.pill,
+        backgroundColor: color.brand,
+        animationName: "pulse",
+        animationDuration: 900,
+        animationIterationCount: "infinite",
+      }}
+    />
   );
 }
 
@@ -269,17 +333,17 @@ function AssistantText(props: { text: string; streaming: boolean }) {
           markdown={props.text}
           selectable
           options={{ streaming: props.streaming }}
-          streamingCaret={props.streaming ? <Caret /> : undefined}
+          streamingCaret={props.streaming ? <StreamCaret /> : undefined}
         />
       }
     >
       <Text
         style={{
           userSelect: "text",
-          fontSize: 13.5,
-          lineHeight: 20,
+          fontSize: typeScale.base,
+          lineHeight: Math.round(typeScale.base * lineHeight.normal),
           numberOfLines: props.streaming ? 3 : undefined,
-          color: colors.foreground,
+          color: color.foreground,
         }}
       >
         {props.streaming
@@ -289,52 +353,6 @@ function AssistantText(props: { text: string; streaming: boolean }) {
     </If>
   );
 }
-
-function toolTone(call: ToolCallView): "running" | "done" | "failed" {
-  if (call.error) return "failed";
-  return call.result !== undefined ? "done" : "running";
-}
-
-// ---- tool families (C9) ---------------------------------------------------
-
-type ToolFamily = "explore" | "terminal" | "changes" | "other";
-
-/** The words a tool name carries its family in (matched on `a.b_c-d` tokens). */
-const FAMILY_WORDS: Record<Exclude<ToolFamily, "other">, string[]> = {
-  terminal: ["shell", "bash", "sh", "zsh", "exec", "run", "terminal", "command", "cmd", "process", "spawn"],
-  changes: [
-    "edit", "write", "patch", "apply", "replace", "create", "delete", "remove", "mkdir",
-    "move", "rename", "git", "commit", "diff", "build", "test", "install", "deploy", "publish",
-  ],
-  explore: [
-    "read", "list", "search", "grep", "glob", "find", "open", "load", "fetch", "view", "show",
-    "cat", "ls", "tree", "stat", "head", "tail", "inspect", "check", "health", "status",
-    "context", "workspace", "calendar", "transcript", "web", "http",
-  ],
-};
-
-function familyOf(name: string): ToolFamily {
-  const tokens = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  const has = (words: string[]) => tokens.some((token) => words.includes(token));
-  if (has(FAMILY_WORDS.terminal)) return "terminal";
-  if (has(FAMILY_WORDS.changes)) return "changes";
-  if (has(FAMILY_WORDS.explore)) return "explore";
-  return "other";
-}
-
-const FAMILY_LABEL: Record<ToolFamily, string> = {
-  explore: "探索",
-  terminal: "终端",
-  changes: "变更",
-  other: "工具",
-};
-
-const FAMILY_ICON: Record<ToolFamily, IconName> = {
-  explore: "search",
-  terminal: "terminal",
-  changes: "file",
-  other: "tool",
-};
 
 /** `service=api · timeoutMs=2000` — a call's arguments as one readable line,
  * never raw JSON as the main view (C9). */
@@ -372,6 +390,7 @@ function argumentBody(value: unknown): string {
   return parts.join("\n");
 }
 
+/** One call inside a group: the kit's Collapsible row, its detail below. */
 function ToolRow(props: { call: ToolCallView; waiting?: boolean }) {
   const key = `tool-${props.call.toolCallId}`;
   const open = () => isOpen(expandedToolsDetails(), key, false);
@@ -379,108 +398,123 @@ function ToolRow(props: { call: ToolCallView; waiting?: boolean }) {
   /** A call with no result while the conversation is parked on an open
    * question: the question is the activity, so no motion (C2). */
   const parked = () => tone === "running" && props.waiting === true;
-  const duration = props.call.finishedAt && props.call.startedAt
-    ? formatDuration(props.call.finishedAt - props.call.startedAt)
-    : "";
-  const argsLine = formatArgs(props.call.args, 72);
+  const duration = () =>
+    props.call.finishedAt && props.call.startedAt
+      ? formatDuration(props.call.finishedAt - props.call.startedAt)
+      : "";
   const resultText = () =>
     props.call.error ?? (props.call.result === undefined ? "" : preview(props.call.result, 1400));
+  const toneFace = () =>
+    tone === "failed" ? color.dangerTint : tone === "done" ? color.successTint : color.muted;
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-      <Press
-        onPress={() => toggle(expandedToolsDetails, key, false)}
-        accessibilityLabel={`工具 ${props.call.name}`}
-        style={{ flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: 8, minHeight: 38 }}
-        hoverStyle={{ backgroundColor: colors.hover }}
-      >
+    <Collapsible
+      open={open()}
+      accessibilityLabel={`工具 ${props.call.name}`}
+      content={
         <View
           style={{
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor:
-              tone === "failed" ? colors.dangerTint : tone === "done" ? colors.successTint : colors.muted,
-          }}
-        >
-          {tone === "running" ? (
-            parked() ? (
-              <Icon name="clock" size={12} tint={colors.warning} />
-            ) : (
-              <Spinner size={11} tint={colors.brand} />
-            )
-          ) : (
-            <Icon
-              name={tone === "failed" ? "alert" : "check"}
-              size={12}
-              tint={tone === "failed" ? colors.danger : colors.success}
-            />
-          )}
-        </View>
-        <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{props.call.name}</Text>
-        <Text style={{ flex: 1, numberOfLines: 1, fontSize: 11.5, color: colors.mutedForeground }}>
-          {argsLine}
-        </Text>
-        {duration ? (
-          <Text style={{ fontSize: 11, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
-            {duration}
-          </Text>
-        ) : null}
-        <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
-      </Press>
-      {open() ? (
-        <View
-          style={{
-            gap: 6,
-            padding: 10,
-            marginBottom: 8,
-            borderRadius: radius.control,
-            backgroundColor: colors.muted,
+            gap: space.sm,
+            padding: space.md,
+            marginBottom: space.md,
+            borderRadius: radius.md,
+            backgroundColor: color.muted,
             borderWidth: 1,
-            borderColor: colors.glassEdge,
+            borderColor: color.border,
           }}
         >
           {/* Result first: what a call did matters more than what it was asked. */}
-          {props.call.result !== undefined || props.call.error ? (
-            <>
-              <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.mutedForeground }}>结果</Text>
-              <Text
-                style={{
-                  userSelect: "text",
-                  fontSize: 11.5,
-                  lineHeight: 17,
-                  color: props.call.error ? colors.danger : colors.foreground,
-                }}
-              >
-                {resultText()}
-              </Text>
-            </>
-          ) : (
-            <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>等待结果…</Text>
-          )}
-          <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.mutedForeground, marginTop: 4 }}>
+          <If
+            when={props.call.result !== undefined || !!props.call.error}
+            else={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>等待结果…</Text>}
+          >
+            <Text style={{ fontSize: typeScale.xs, fontWeight: weight.bold, color: color.mutedForeground }}>
+              结果
+            </Text>
+            <Text
+              style={{
+                userSelect: "text",
+                fontSize: typeScale.sm,
+                lineHeight: Math.round(typeScale.sm * lineHeight.snug),
+                color: props.call.error ? color.danger : color.foreground,
+              }}
+            >
+              {resultText()}
+            </Text>
+          </If>
+          <Text
+            style={{
+              fontSize: typeScale.xs,
+              fontWeight: weight.bold,
+              color: color.mutedForeground,
+              marginTop: space.xs,
+            }}
+          >
             参数
           </Text>
           <Text
             style={{
               userSelect: "text",
-              fontSize: 11,
-              lineHeight: 16,
-              color: colors.mutedForeground,
-              fontFamily: mono(),
+              fontSize: typeScale.xs,
+              lineHeight: Math.round(typeScale.xs * lineHeight.snug),
+              color: color.mutedForeground,
+              fontFamily: font.mono,
             }}
           >
             {argumentBody(props.call.args) || "（无）"}
           </Text>
         </View>
-      ) : null}
-    </View>
+      }
+    >
+      <CollapsibleTrigger
+        accessibilityLabel={`工具 ${props.call.name}`}
+        expanded={open()}
+        onPress={() => toggle(expandedToolsDetails, key, false)}
+      >
+        <View
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: radius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: toneFace(),
+          }}
+        >
+          {tone === "running" ? (
+            parked() ? (
+              <Icon name="clock" size={iconSize.xs} tint={color.warning} />
+            ) : (
+              <Spinner size={iconSize.xs} tint={color.brand} />
+            )
+          ) : (
+            <Icon
+              name={tone === "failed" ? "alert" : "check"}
+              size={iconSize.xs}
+              tint={tone === "failed" ? color.danger : color.success}
+            />
+          )}
+        </View>
+        <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+          {props.call.name}
+        </Text>
+        <Text style={{ flex: 1, numberOfLines: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>
+          {formatArgs(props.call.args, 72)}
+        </Text>
+        <If when={!!duration()}>
+          <Text
+            style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}
+          >
+            {duration()}
+          </Text>
+        </If>
+      </CollapsibleTrigger>
+    </Collapsible>
   );
 }
 
 /** One family of a segment's calls, collapsed by default: the segment's own
- * summary line already says how many and how many failed (C9). */
+ * summary line already says how many and how many failed (C9). The count sits
+ * in the kit's badge, so the row reads as one summary + one state token. */
 function ToolFamilyGroup(props: {
   groupId: string;
   family: ToolFamily;
@@ -490,152 +524,97 @@ function ToolFamilyGroup(props: {
   const key = `${props.groupId}-${props.family}`;
   const open = () => isOpen(expandedFamilies(), key, false);
   const failed = () => props.calls.filter((call) => toolTone(call) === "failed").length;
-  const done = () => props.calls.filter((call) => toolTone(call) === "done").length;
-  const pending = () => props.calls.length - failed() - done();
-  const detail = () =>
-    failed() > 0 ? `${failed()} 个失败` : pending() > 0 ? `${pending()} 个进行中` : "全部完成";
   return (
-    <View style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-      <Press
-        onPress={() => toggle(expandedFamilies, key, false)}
-        accessibilityLabel={`工具家族 ${FAMILY_LABEL[props.family]}`}
-        style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: 34 }}
-        hoverStyle={{ backgroundColor: colors.hover }}
-      >
-        <Icon name={FAMILY_ICON[props.family]} size={12} tint={colors.mutedForeground} />
-        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>
-          {FAMILY_LABEL[props.family]}
-        </Text>
-        <Text style={{ fontSize: 11, color: failed() > 0 ? colors.danger : colors.mutedForeground }}>
-          {props.calls.length} 个 · {detail()}
-        </Text>
-        <View style={{ flex: 1 }} />
-        <View
-          style={{
-            transform: open() ? "rotate(0deg)" : "rotate(-90deg)",
-            transitionProperty: "transform",
-            transitionDuration: 180,
-          }}
-        >
-          <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
-        </View>
-      </Press>
-      {open() ? (
-        <View style={{ paddingLeft: 2, paddingBottom: 2 }}>
+    <Collapsible
+      open={open()}
+      accessibilityLabel={`工具家族 ${FAMILY_LABEL[props.family]}`}
+      content={
+        <View style={{ paddingLeft: space.xxs, paddingBottom: space.xxs }}>
           {props.calls.map((call) => (
             <ToolRow call={call} waiting={props.waiting} />
           ))}
         </View>
-      ) : null}
-    </View>
+      }
+    >
+      <CollapsibleTrigger
+        icon={FAMILY_ICON[props.family]}
+        label={FAMILY_LABEL[props.family]}
+        expanded={open()}
+        onPress={() => toggle(expandedFamilies, key, false)}
+        accessibilityLabel={`工具家族 ${FAMILY_LABEL[props.family]}`}
+      >
+        <Badge
+          variant={failed() > 0 ? "destructive" : "ghost"}
+          label={`${props.calls.length} 个 · ${familyDetail(props.calls)}`}
+        />
+      </CollapsibleTrigger>
+    </Collapsible>
   );
 }
 
+/** A segment's tool work as one card: the kit's Card face, the summary row as
+ * the fold's handle, each family (or lone call) as a row inside. */
 function ToolGroup(props: { segment: WorkSegment; running: boolean; waiting?: boolean }) {
   const key = props.segment.segmentId;
   const calls = () => props.segment.toolCalls;
   const open = () => isOpen(expandedTools(), key, true);
   const failed = () => calls().filter((call) => toolTone(call) === "failed").length;
-  const done = () => calls().filter((call) => toolTone(call) === "done").length;
-  const unfinished = () => calls().length - failed() - done();
-  /** The line every tool block is read by: how many, how many failed. */
-  const summary = () => {
-    const total = calls().length;
-    const families = new Set(calls().map((call) => familyOf(call.name)));
-    const noun = families.size === 1 && families.has("terminal") ? "命令" : "工具";
-    const failures = failed();
-    if (failures > 0) return `${total} 个${noun}，${failures} 个失败`;
-    if (!props.running && unfinished() > 0) return `${total} 个${noun}，${unfinished()} 个未完成`;
-    if (total > 0 && done() === total) return `${total} 个${noun}，全部完成`;
-    return `${total} 个${noun}`;
-  };
-  /** Families in first-appearance order, only those with two or more members;
-   * everything else stays a standalone row (C9). */
-  const items = () => {
-    const groups = new Map<ToolFamily, ToolCallView[]>();
-    for (const call of calls()) {
-      const family = familyOf(call.name);
-      const bucket = groups.get(family);
-      if (bucket) bucket.push(call);
-      else groups.set(family, [call]);
-    }
-    const emitted = new Set<ToolFamily>();
-    const list: Array<{ kind: "family"; family: ToolFamily; calls: ToolCallView[] } | { kind: "call"; call: ToolCallView }> = [];
-    for (const call of calls()) {
-      const family = familyOf(call.name);
-      const bucket = groups.get(family) ?? [];
-      if (bucket.length < 2) {
-        list.push({ kind: "call", call });
-        continue;
-      }
-      if (emitted.has(family)) continue;
-      emitted.add(family);
-      list.push({ kind: "family", family, calls: bucket });
-    }
-    return list;
-  };
   return (
-    <View
-      style={{
-        borderRadius: radius.card,
-        ...glass.card,
-        overflow: "hidden",
-        paddingHorizontal: 12,
-        paddingTop: 2,
-      }}
-    >
-      <Press
-        onPress={() => toggle(expandedTools, key, true)}
+    <Card size="sm" style={{ padding: space.sm, gap: space.none }}>
+      <Collapsible
+        open={open()}
         accessibilityLabel="工具调用组"
-        style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: 38 }}
-        hoverStyle={{ opacity: 0.86 }}
+        content={
+          <View style={{ paddingBottom: space.xxs }}>
+            {groupToolCalls(calls()).map((item) =>
+              item.kind === "family" ? (
+                <ToolFamilyGroup
+                  groupId={key}
+                  family={item.family}
+                  calls={item.calls}
+                  waiting={props.waiting}
+                />
+              ) : (
+                <ToolRow call={item.call} waiting={props.waiting} />
+              ),
+            )}
+            {calls().length === 0 ? (
+              <Text
+                style={{
+                  fontSize: typeScale.sm,
+                  color: color.mutedForeground,
+                  paddingVertical: space.md,
+                }}
+              >
+                正在准备工具…
+              </Text>
+            ) : null}
+          </View>
+        }
       >
-        <View
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: 7,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: colors.muted,
-          }}
+        <CollapsibleTrigger
+          icon="tool"
+          label={summarizeCalls(calls(), props.running)}
+          expanded={open()}
+          onPress={() => toggle(expandedTools, key, true)}
+          accessibilityLabel="工具调用组"
         >
-          <Icon name="tool" size={13} tint={colors.mutedForeground} />
-        </View>
-        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>{summary()}</Text>
-        {props.running ? (
-          <Spinner size={11} tint={colors.mutedForeground} />
-        ) : failed() > 0 ? (
-          <Text style={{ fontSize: 11, color: colors.danger }}>· 需要留意</Text>
-        ) : null}
-        <View style={{ flex: 1 }} />
-        <View style={{ transform: open() ? "rotate(0deg)" : "rotate(-90deg)", transitionProperty: "transform", transitionDuration: 180 }}>
-          <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
-        </View>
-      </Press>
-      {open() ? (
-        <View style={{ paddingBottom: 4 }}>
-          {items().map((item) =>
-            item.kind === "family" ? (
-              <ToolFamilyGroup groupId={key} family={item.family} calls={item.calls} waiting={props.waiting} />
-            ) : (
-              <ToolRow call={item.call} waiting={props.waiting} />
-            ),
-          )}
-          {calls().length === 0 ? (
-            <Text style={{ fontSize: 12, color: colors.mutedForeground, paddingVertical: 10 }}>
-              正在准备工具…
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
+          <If when={props.running}>
+            <Spinner size={iconSize.xs} tint={color.mutedForeground} />
+          </If>
+          <If when={!props.running && failed() > 0}>
+            <Badge variant="destructive" icon="alert" label="需要留意" />
+          </If>
+        </CollapsibleTrigger>
+      </Collapsible>
+    </Card>
   );
 }
 
+/** The ledger's own line about a run: state, what it cost, and who answered —
+ * the identity fact (provider/model) lines up with the model in settings. */
 function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
   const summary = props.summary;
-  const tone = statusTone(props.status);
   const text = () => {
     if (!summary) return statusLabel(props.status);
     const duration = summary.durationMs ? ` · ${formatDuration(summary.durationMs)}` : "";
@@ -645,8 +624,6 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
         : "";
     return `${statusLabel(props.status)}${duration}${tokens}`;
   };
-  /** Who answered this run — the ledger's own identity fact, shown beside the
-   * cost so it lines up with the model configured in settings. */
   const identity = () => {
     if (!summary || (!summary.provider && !summary.model)) return "";
     return `${summary.provider ? `${summary.provider}/` : ""}${summary.model ?? ""}`;
@@ -662,47 +639,74 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
     return reason;
   };
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 }}>
-      <StatusDot tone={tone} size={6} />
-      <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: space.xs }}>
+      <ToneDot variant={statusVariant(props.status)} />
+      <Text
+        style={{ fontSize: typeScale.sm, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}
+      >
         {text()}
       </Text>
-      {noteReason() ? <Text style={{ fontSize: 10.5, color: colors.warning }}>{noteReason()}</Text> : null}
-      {identity() ? (
-        <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: mono() }}>{identity()}</Text>
-      ) : null}
+      <If when={!!noteReason()}>
+        <Badge variant="warning" label={noteReason()} />
+      </If>
+      <If when={!!identity()}>
+        <Badge variant="ghost" accessibilityLabel={identity()}>
+          <Text
+            style={{ fontSize: typeScale.sm, color: color.mutedForeground, fontFamily: font.mono }}
+          >
+            {identity()}
+          </Text>
+        </Badge>
+      </If>
     </View>
   );
 }
 
 /** The one retry control: re-asks the turn's own input as a new commit
  * (`POST /v1/sessions/{id}/retry`), spinning while the server is working. */
-function RetryPress(props: { turnId: string; compact?: boolean }) {  const pending = () => store.retryingTurn() === props.turnId;
+function RetryPress(props: { turnId: string; compact?: boolean }) {
+  const pending = () => store.retryingTurn() === props.turnId;
   return (
-    <Press
-      onPress={pending() ? undefined : () => void store.retryTurn(props.turnId)}
+    <Button
+      variant="ghost"
+      size={props.compact ? "sm" : "default"}
+      icon="refresh"
+      loading={pending()}
       disabled={pending()}
+      label={pending() ? "重试中" : "重试"}
       accessibilityLabel="重试本回合"
-      hitSlop={props.compact ? 4 : undefined}
-      hoverStyle={{ backgroundColor: colors.hover }}
+      onPress={() => void store.retryTurn(props.turnId)}
+    />
+  );
+}
+
+/** The ledger's own error line inside a turn (the actionable one is the banner
+ * above the composer). */
+function InlineError(props: { text: string }) {
+  return (
+    <Card
       style={{
         flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        height: 26,
-        paddingHorizontal: 8,
-        borderRadius: radius.control,
+        alignItems: "flex-start",
+        gap: space.sm,
+        padding: space.md,
+        backgroundColor: color.dangerTint,
+        borderColor: alpha(color.danger, 0.3),
       }}
     >
-      {pending() ? (
-        <Spinner size={11} tint={colors.mutedForeground} />
-      ) : (
-        <Icon name="refresh" size={12} tint={colors.mutedForeground} />
-      )}
-      <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.mutedForeground }}>
-        {pending() ? "重试中" : "重试"}
+      <Icon name="alert" size={iconSize.sm} tint={color.danger} />
+      <Text
+        style={{
+          flex: 1,
+          userSelect: "text",
+          fontSize: typeScale.sm,
+          lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+          color: color.danger,
+        }}
+      >
+        {props.text}
       </Text>
-    </Press>
+    </Card>
   );
 }
 
@@ -717,40 +721,40 @@ export function TurnErrorBanner(props: { compact?: boolean }) {
   };
   return (
     <If when={!!error()}>
+      {/* The dock already pads its children by the column's `px-4`
+          (`COMPOSER_DOCK_INSET_PX`, composer-dock.tsx:134): a second inset here
+          would push the banner off the input shell it belongs to. */}
       <View
         style={{
           width: "100%",
           maxWidth: 880,
           alignSelf: "center",
-          paddingHorizontal: props.compact ? 10 : 16,
           marginBottom: space.sm,
         }}
       >
-        <View
+        <Card
           accessibilityLabel="回合失败"
           style={{
             flexDirection: "row",
             alignItems: "center",
-            gap: space.sm,
-            paddingLeft: 12,
-            paddingRight: 4,
-            paddingVertical: 8,
-            borderRadius: radius.card,
-            backgroundColor: colors.dangerTint,
-            borderWidth: 1,
-            borderColor: alpha(colors.danger, 0.32),
+            gap: space.md,
+            paddingVertical: space.sm,
+            paddingLeft: space.lg,
+            paddingRight: space.xs,
+            backgroundColor: color.dangerTint,
+            borderColor: alpha(color.danger, 0.32),
           }}
         >
-          <Icon name="alert" size={14} tint={colors.danger} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={{ fontSize: 11, fontWeight: "700", color: colors.danger }}>
+          <Icon name="alert" size={iconSize.sm} tint={color.danger} />
+          <View style={{ flex: 1, gap: space.xxs }}>
+            <Text style={{ fontSize: typeScale.xs, fontWeight: weight.bold, color: color.danger }}>
               这次运行失败了
             </Text>
             <Text
               style={{
-                fontSize: 11.5,
-                lineHeight: 17,
-                color: colors.foreground,
+                fontSize: typeScale.sm,
+                lineHeight: Math.round(typeScale.sm * lineHeight.snug),
+                color: color.foreground,
                 userSelect: "text",
                 numberOfLines: 3,
               }}
@@ -761,61 +765,48 @@ export function TurnErrorBanner(props: { compact?: boolean }) {
           <If when={!!error()?.turnId && !!error()?.retryable}>
             <RetryPress turnId={error()?.turnId ?? ""} compact={props.compact} />
           </If>
-          <IconButton
-            icon="x"
-            label="关闭错误提示"
-            size={28}
-            iconSize={13}
-            onPress={() => store.dismissTurnError()}
-          />
-        </View>
+          <IconButton icon="x" label="关闭错误提示" onPress={() => store.dismissTurnError()} />
+        </Card>
       </View>
     </If>
   );
 }
 
+/** A compaction, as the stream's one rule (the kit's Separator). */
 function CompactionRow(props: { note?: string }) {
   return (
-    <View style={{ paddingVertical: space.sm, gap: 6 }}>
-      <Divider label="上下文已压缩" icon="layers" tone="warning" style={{ paddingVertical: space.xs }} />
-      {props.note ? (
+    <View style={{ paddingVertical: space.sm, gap: space.sm }}>
+      <Separator label="上下文已压缩" />
+      <If when={!!props.note}>
         <Text
           style={{
             alignSelf: "flex-start",
             maxWidth: 680,
             numberOfLines: 3,
             textOverflow: "ellipsis",
-            fontSize: 12,
-            lineHeight: 18,
-            color: colors.foreground,
+            fontSize: typeScale.sm,
+            lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+            color: color.foreground,
           }}
         >
-          {props.note}
+          {props.note ?? ""}
         </Text>
-      ) : null}
+      </If>
     </View>
   );
 }
 
 function AssistantHeader(props: { ordinal: number }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: 24 }}>
-      <View
-        style={{
-          width: 20,
-          height: 20,
-          borderRadius: 10,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.muted,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Icon name="spark" size={11} tint={colors.brand} />
-      </View>
-      <Text style={{ fontSize: 12, fontWeight: "700", color: colors.foreground }}>Keel</Text>
-      <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>#{props.ordinal}</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: space["2xl"] }}>
+      <Avatar
+        size={20}
+        accessibilityLabel=""
+        fallback={<Icon name="spark" size={iconSize.xs} tint={color.brand} />}
+        style={{ borderWidth: 1, borderColor: color.border }}
+      />
+      <Text style={{ fontSize: typeScale.sm, fontWeight: weight.bold, color: color.foreground }}>Keel</Text>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>#{props.ordinal}</Text>
     </View>
   );
 }
@@ -870,7 +861,8 @@ function firstLineOf(text: string | undefined, max = 64): string {
 }
 
 /** The one work-segment header: 工作中 N 秒 / 已工作 N 秒 / 已停止 (C10). It is
- * the fold's handle; the latest answer always renders outside the fold. */
+ * the fold's handle; the latest answer always renders outside the fold. A
+ * segment with nothing to fold keeps the same row, without a dead chevron. */
 function SegmentHeader(props: {
   label: () => string;
   preview: () => string;
@@ -879,50 +871,48 @@ function SegmentHeader(props: {
   open: () => boolean;
   onToggle: () => void;
 }) {
-  return (
-    <Press
-      onPress={props.foldable() ? props.onToggle : undefined}
-      accessibilityLabel={props.label()}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        height: 30,
-        paddingHorizontal: 6,
-        borderRadius: radius.control,
-      }}
-      hoverStyle={props.foldable() ? { backgroundColor: colors.hover } : undefined}
-    >
+  const content = () => (
+    <>
       {props.running() ? (
-        <Spinner size={11} tint={colors.mutedForeground} />
+        <Spinner size={iconSize.xs} tint={color.mutedForeground} />
       ) : (
-        <Icon name="clock" size={12} tint={colors.mutedForeground} />
+        <Icon name="clock" size={iconSize.sm} tint={color.mutedForeground} />
       )}
       <Text
         style={{
-          fontSize: 11.5,
-          fontWeight: "600",
-          color: colors.mutedForeground,
+          fontSize: typeScale.sm,
+          fontWeight: weight.semibold,
+          color: color.mutedForeground,
           fontVariant: ["tabular-nums"],
         }}
       >
         {props.label()}
       </Text>
-      <Text style={{ flex: 1, numberOfLines: 1, fontSize: 11, color: colors.mutedForeground }}>
+      <Text style={{ flex: 1, numberOfLines: 1, fontSize: typeScale.xs, color: color.mutedForeground }}>
         {props.preview()}
       </Text>
-      <If when={props.foldable()}>
-        <View
-          style={{
-            transform: props.open() ? "rotate(0deg)" : "rotate(-90deg)",
-            transitionProperty: "transform",
-            transitionDuration: 180,
-          }}
-        >
-          <Icon name="chevron-down" size={12} tint={colors.mutedForeground} />
-        </View>
-      </If>
-    </Press>
+    </>
+  );
+  return props.foldable() ? (
+    <CollapsibleTrigger
+      accessibilityLabel={props.label()}
+      expanded={props.open()}
+      onPress={props.onToggle}
+    >
+      {content()}
+    </CollapsibleTrigger>
+  ) : (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        height: space["3xl"],
+        paddingHorizontal: space.sm,
+      }}
+    >
+      {content()}
+    </View>
   );
 }
 
@@ -948,30 +938,14 @@ function CopyPress(props: { id: string; text: string; label?: string }) {
     );
   };
   return (
-    <Press
-      onPress={copy}
+    <Button
+      variant="ghost"
+      size="sm"
+      icon={copied() ? "check" : "file"}
+      label={copied() ? "已复制" : props.label ?? "复制"}
       accessibilityLabel={props.label ?? "复制"}
-      hoverStyle={{ backgroundColor: colors.hover }}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        height: 26,
-        paddingHorizontal: 8,
-        borderRadius: radius.control,
-      }}
-    >
-      <Icon name={copied() ? "check" : "file"} size={12} tint={copied() ? colors.success : colors.mutedForeground} />
-      <Text
-        style={{
-          fontSize: 11.5,
-          fontWeight: "600",
-          color: copied() ? colors.success : colors.mutedForeground,
-        }}
-      >
-        {copied() ? "已复制" : props.label ?? "复制"}
-      </Text>
-    </Press>
+      onPress={copy}
+    />
   );
 }
 
@@ -986,24 +960,27 @@ function ActionLine(props: { turnId: string; time?: number; children: JSX.Elemen
   const revealed = () => actionsAlwaysVisible() || hoveredTurn() === props.turnId;
   return (
     <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 2,
-        height: 26,
-        opacity: revealed() ? 1 : 0,
-        pointerEvents: revealed() ? "auto" : "none",
-        transitionProperty: "opacity",
-        transitionDuration: 180,
-      }}
+      style={[
+        row(),
+        {
+          gap: space.xxs,
+          height: space["2xl"],
+          opacity: revealed() ? 1 : 0,
+          pointerEvents: revealed() ? "auto" : "none",
+          transitionProperty: "opacity",
+          transitionDuration: motion.base,
+        },
+      ]}
     >
       {props.children}
       <View style={{ flex: 1 }} />
-      {props.time ? (
-        <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
-          {formatTime(props.time)}
+      <If when={!!props.time}>
+        <Text
+          style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}
+        >
+          {formatTime(props.time ?? 0)}
         </Text>
-      ) : null}
+      </If>
     </View>
   );
 }
@@ -1078,7 +1055,13 @@ export function TurnRow(props: {
       onMouseLeave={() => {
         if (hoveredTurn() === props.turn().turnId) hoveredTurn.set(null);
       }}
-      style={{ paddingVertical: space.sm }}
+      // The row's own `px-4`: the reference's timeline content container pads
+      // its rows 16px inside the column (`ConversationTimeline.tsx:2005`), and
+      // the kit's message column carries the column inset/cap but no inner
+      // pad, while `ComposerDock` does (`COMPOSER_DOCK_INSET_PX` 16,
+      // composer-dock.tsx:52,134). Without it the rows and the composer below
+      // them disagree by 16px.
+      style={{ paddingHorizontal: space.xl, paddingVertical: space.sm }}
     >
       <If when={synthetic()}>
         <View style={{ paddingVertical: space.xs }}>
@@ -1098,7 +1081,7 @@ export function TurnRow(props: {
             />
           ))}
           <AssistantHeader ordinal={props.turn().ordinal} />
-          <View style={{ gap: space.md, paddingLeft: 2 }}>
+          <View style={{ gap: space.md }}>
             {props.turn().workSegments.map((segment, index) => {
               const isLast = () => index === props.turn().workSegments.length - 1;
               const segmentKey = `${props.turn().turnId}:seg:${segment.segmentId}`;
@@ -1125,54 +1108,59 @@ export function TurnRow(props: {
                   : firstLineOf(segment.assistantText) ||
                     firstLineOf(segment.assistantThinking) ||
                     (segment.toolCalls.length ? `${segment.toolCalls.length} 个工具` : "");
-              const headerVisible = () => props.turn().workSegments.length > 1 || (isLast() && props.turn().status === "running");
+              const headerVisible = () =>
+                props.turn().workSegments.length > 1 || (isLast() && props.turn().status === "running");
               return (
-                <View style={{ gap: 10 }}>
+                <View style={{ gap: space.md }}>
                   <If when={index > 0 && !!segment.triggerInput}>
-                    <Divider label="引导生效 · 新工作段" tone="brand" />
+                    <Separator label="引导生效 · 新工作段" />
                   </If>
-                  <If when={headerVisible()}>
-                    <SegmentHeader
-                      label={segmentLabel}
-                      preview={segmentPreview}
-                      running={() => isLast() && props.turn().status === "running" && !props.waiting()}
-                      foldable={foldable}
-                      open={foldOpen}
-                      onToggle={() => toggle(expandedSegments, segmentKey, isLast())}
-                    />
-                  </If>
-                  <If when={foldOpen()}>
-                    <View style={{ gap: 10 }}>
-                      <If when={!!segment.assistantThinking}>
-                        <ThinkingBlock
-                          turnId={props.turn().turnId}
-                          text={segment.assistantThinking ?? ""}
-                          durationMs={thinkingDurationMs(props.turn(), segment)}
-                          running={
-                            props.turn().status === "running" &&
-                            !props.waiting() &&
-                            isLast() &&
-                            !segment.assistantText &&
-                            segment.toolCalls.length === 0
-                          }
-                        />
-                      </If>
-                      <If when={segment.toolCalls.length > 0}>
-                        <ToolGroup
-                          segment={segment}
-                          waiting={props.waiting()}
-                          running={
-                            props.turn().status === "running" &&
-                            !props.waiting() &&
-                            segment.toolCalls.some((call) => call.result === undefined && !call.error)
-                          }
-                        />
-                      </If>
-                      <If when={!!segment.assistantText && !isLast()}>
-                        <AssistantText text={segment.assistantText ?? ""} streaming={false} />
-                      </If>
-                    </View>
-                  </If>
+                  <Collapsible
+                    open={foldOpen()}
+                    content={
+                      <View style={{ gap: space.md }}>
+                        <If when={!!segment.assistantThinking}>
+                          <ThinkingBlock
+                            turnId={props.turn().turnId}
+                            text={segment.assistantThinking ?? ""}
+                            durationMs={thinkingDurationMs(props.turn(), segment)}
+                            running={
+                              props.turn().status === "running" &&
+                              !props.waiting() &&
+                              isLast() &&
+                              !segment.assistantText &&
+                              segment.toolCalls.length === 0
+                            }
+                          />
+                        </If>
+                        <If when={segment.toolCalls.length > 0}>
+                          <ToolGroup
+                            segment={segment}
+                            waiting={props.waiting()}
+                            running={
+                              props.turn().status === "running" &&
+                              !props.waiting() &&
+                              segment.toolCalls.some((call) => call.result === undefined && !call.error)
+                            }
+                          />
+                        </If>
+                        <If when={!!segment.assistantText && !isLast()}>
+                          <AssistantText text={segment.assistantText ?? ""} streaming={false} />
+                        </If>
+                      </View>
+                    }
+                  >
+                    <If when={headerVisible()}>
+                      <SegmentHeader
+                        label={segmentLabel}
+                        preview={segmentPreview}
+                        running={() => isLast() && props.turn().status === "running" && !props.waiting()}
+                        foldable={foldable}
+                        open={foldOpen}
+                        onToggle={() => toggle(expandedSegments, segmentKey, isLast())}
+                      />
+                    </If>
+                  </Collapsible>
                   {/* The latest answer is never inside the fold. */}
                   <If when={!!segment.assistantText && isLast()}>
                     <AssistantText text={segment.assistantText ?? ""} streaming={false} />
@@ -1189,56 +1177,22 @@ export function TurnRow(props: {
             {/* A failed turn keeps its reason in history: the banner above the
                 composer is the actionable one, this is the ledger's own. */}
             <If when={props.turn().status === "failed" && !!props.turn().error}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  gap: space.sm,
-                  padding: 10,
-                  borderRadius: radius.control,
-                  backgroundColor: colors.dangerTint,
-                  borderWidth: 1,
-                  borderColor: alpha(colors.danger, 0.3),
-                }}
-              >
-                <Icon name="alert" size={14} tint={colors.danger} />
-                <Text style={{ flex: 1, userSelect: "text", fontSize: 12, lineHeight: 18, color: colors.danger }}>
-                  {props.turn().error ?? ""}
-                </Text>
-              </View>
+              <InlineError text={props.turn().error ?? ""} />
             </If>
             <If when={waitingForWords()}>
               {/* Loading is motion only (C7): no "thinking…" words. */}
-              <View style={{ flexDirection: "row", alignItems: "center", height: 24 }}>
-                <Spinner size={12} tint={colors.brand} />
+              <View style={{ flexDirection: "row", alignItems: "center", height: space["2xl"] }}>
+                <Spinner size={iconSize.xs} tint={color.brand} />
               </View>
             </If>
             {props.turn().postTurnEvents.map((event) => {
               if (event.kind === "compaction") return <CompactionRow note={event.note} />;
               if (event.kind === "assistant.error") {
-                return (
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "flex-start",
-                      gap: space.sm,
-                      padding: 10,
-                      borderRadius: radius.control,
-                      backgroundColor: colors.dangerTint,
-                      borderWidth: 1,
-                      borderColor: alpha(colors.danger, 0.3),
-                    }}
-                  >
-                    <Icon name="alert" size={14} tint={colors.danger} />
-                    <Text style={{ flex: 1, userSelect: "text", fontSize: 12, lineHeight: 18, color: colors.danger }}>
-                      {event.note ?? "模型返回错误"}
-                    </Text>
-                  </View>
-                );
+                return <InlineError text={event.note ?? "模型返回错误"} />;
               }
               if (event.kind === "external.event") {
                 return (
-                  <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>
+                  <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                     外部事件 · {event.note ?? event.kind}
                   </Text>
                 );
@@ -1302,23 +1256,35 @@ export function ApprovalCard(props: {
   };
   const withSubtitles = () => props.decision().options.every((option) => !!option.description);
   const rowMinHeight = () => (withSubtitles() ? 52 : 44);
-  const cursorIndex = () => {
+  /** The keyboard cursor's option — undefined until the terminal's ↑↓ moved
+   * it. It is what the radios call checked: the question has no answer until
+   * the human gives one. */
+  const cursor = (): number | undefined => {
     const decision = props.decision();
     const stored = approvalCursor()[decision.decisionId];
-    if (stored !== undefined && stored < decision.options.length) return stored;
+    return stored !== undefined && stored < decision.options.length ? stored : undefined;
+  };
+  /** What Enter answers: the cursor's option, else the recommendation (the
+   * 推荐位), else the first. */
+  const answerIndex = (): number => {
+    const decision = props.decision();
+    const at = cursor();
+    if (at !== undefined) return at;
     const recommended = decision.options.findIndex((option) => option.optionId === decision.recommendation);
     return recommended >= 0 ? recommended : 0;
   };
   const moveCursor = (delta: number) => {
     const count = props.decision().options.length;
     if (!count) return;
-    const next = (cursorIndex() + delta + count) % count;
+    const next = (answerIndex() + delta + count) % count;
     approvalCursor.update((map) => ({ ...map, [props.decision().decisionId]: next }));
   };
   const answerCursor = () => {
-    const option = props.decision().options[cursorIndex()];
+    const option = props.decision().options[answerIndex()];
     if (option) props.onAnswer(props.decision().decisionId, option.optionId);
   };
+  /** The rows are locked while the question is not answerable any more. */
+  const locked = () => !open() || expired() || props.submitting();
   const keyboardReady = () => open() && !expired() && !props.submitting() && props.active();
   if (platform.idiom === "terminal") {
     keymap.bind("up", () => keyboardReady() && moveCursor(-1), { when: "notEditing" });
@@ -1329,71 +1295,63 @@ export function ApprovalCard(props: {
   }
 
   const title = () => (open() ? "需要你的确认" : answered() ? "已确认" : timedOut() ? "已超时" : "已取消");
-  const tone = () =>
-    open() && !expired() ? "warning" : timedOut() || cancelled() ? "warning" : "neutral";
-  const icon = () => (open() && !expired() ? "alert" : answered() ? "check" : "clock");
-  const iconInk = () =>
-    open() && !expired()
-      ? colors.warning
-      : timedOut() || cancelled()
-        ? colors.warning
-        : colors.mutedForeground;
-  const iconFill = () =>
-    open() && !expired()
-      ? colors.warningTint
-      : timedOut() || cancelled()
-        ? colors.warningTint
-        : colors.muted;
+  /** Waiting — the card is parked on the human — is the warning family: this
+   * theme has no `interaction-confirmation-*` pair (zcode's green waiting
+   * treatment), so the warning tokens carry it. Registered deviation. */
+  const waiting = () => open() && !expired();
+  const icon = (): IconName => (waiting() ? "alert" : answered() ? "check" : "clock");
+  const ink = () =>
+    waiting() || timedOut() || cancelled() ? color.warning : color.mutedForeground;
+  const fill = () =>
+    waiting() || timedOut() || cancelled() ? color.warningTint : color.muted;
 
   return (
-    <View
-      style={{
-        borderRadius: radius.card,
-        ...(answered()
-          ? { backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.glassEdge }
-          : glass.popover),
-        padding: 16,
-        gap: 12,
-        borderColor: tone() === "warning" ? alpha(colors.warning, 0.36) : colors.glassEdge,
-      }}
+    // The row's `px-4`, as the turns have it: the message column carries the
+    // column inset/cap but no inner pad, while the composer's dock carries 16
+    // (`COMPOSER_DOCK_INSET_PX`), so the card keeps the same left/right edge.
+    <Card
+      accessibilityLabel={`审批 ${props.decision().question}`}
+      style={[
+        { gap: space.lg, marginHorizontal: space.xl },
+        answered() ? { backgroundColor: color.muted } : null,
+        waiting() ? { borderColor: alpha(color.warning, 0.36) } : null,
+      ]}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         <View
           style={{
             width: 26,
             height: 26,
-            borderRadius: 8,
+            borderRadius: radius.md,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: iconFill(),
+            backgroundColor: fill(),
           }}
         >
-          <Icon name={icon()} size={14} tint={iconInk()} />
+          <Icon name={icon()} size={iconSize.sm} tint={ink()} />
         </View>
-        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.foreground }}>{title()}</Text>
+        <Text style={{ fontSize: typeScale.caption, fontWeight: weight.bold, color: color.foreground }}>
+          {title()}
+        </Text>
         <View style={{ flex: 1 }} />
         <If when={open() && props.timeoutAt() !== undefined}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Icon name="clock" size={11} tint={expired() ? colors.danger : colors.mutedForeground} />
-            <Text
-              style={{
-                fontSize: 11,
-                color: expired() ? colors.danger : colors.mutedForeground,
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {expired() ? "已超时" : `剩余 ${remaining()}`}
-            </Text>
-          </View>
+          {/* The deadline is the ledger's own (`store.decisionTimeout`); the
+              waiting time is a token, not a progress bar. */}
+          <Badge
+            variant="warning"
+            icon="clock"
+            label={expired() ? "已超时" : `剩余 ${remaining()}`}
+            accessibilityLabel={expired() ? "剩余时间已超时" : `剩余 ${remaining()}`}
+          />
         </If>
       </View>
       <Text
         style={{
           userSelect: "text",
-          fontSize: answered() ? 13 : 14.5,
-          lineHeight: 21,
-          fontWeight: "600",
-          color: answered() ? colors.mutedForeground : colors.foreground,
+          fontSize: typeScale.base,
+          lineHeight: Math.round(typeScale.base * lineHeight.normal),
+          fontWeight: weight.semibold,
+          color: answered() ? color.mutedForeground : color.foreground,
         }}
       >
         {props.decision().question}
@@ -1408,97 +1366,132 @@ export function ApprovalCard(props: {
                 when={cancelled()}
                 else={
                   <View style={{ gap: space.sm }}>
-                    {props.decision().options.map((option, index) => {
-                      const recommended = () => props.decision().recommendation === option.optionId;
-                      const onCursor = () => cursorIndex() === index;
-                      const highlighted = () => recommended() || onCursor();
-                      return (
-                        <Press
-                          onPress={() =>
-                            open() && !expired() && !props.submitting()
-                              ? props.onAnswer(props.decision().decisionId, option.optionId)
-                              : undefined
-                          }
-                          disabled={!open() || expired() || props.submitting()}
-                          accessibilityLabel={option.label}
-                          accessibilityState={{ selected: onCursor() }}
-                          hoverStyle={{ backgroundColor: colors.hover }}
-                          activeStyle={{ backgroundColor: colors.glassStateArmed }}
-                          style={{
-                            width: "100%",
-                            minHeight: rowMinHeight(),
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 10,
-                            paddingHorizontal: 12,
-                            paddingVertical: 8,
-                            borderRadius: radius.control,
-                            borderWidth: 1,
-                            borderColor: highlighted() ? alpha(colors.brand, 0.45) : colors.glassEdge,
-                            backgroundColor: highlighted() ? colors.brandMuted : colors.glassControl,
-                          }}
-                        >
-                          <View
-                            style={{
-                              width: 18,
-                              height: 18,
-                              borderRadius: 9,
-                              borderWidth: 1.5,
-                              borderColor: highlighted() ? colors.brand : colors.input,
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <If when={highlighted()}>
-                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brand }} />
-                            </If>
-                          </View>
-                          <View style={{ flex: 1, gap: 2, justifyContent: "center" }}>
-                            <Text style={{ fontSize: 13, lineHeight: 18, fontWeight: "600", color: colors.foreground }}>
-                              {option.label}
-                            </Text>
-                            <If when={withSubtitles()}>
-                              <Text style={{ fontSize: 11.5, lineHeight: 16, color: colors.mutedForeground }}>
-                                {option.description ?? ""}
-                              </Text>
-                            </If>
-                          </View>
-                          <If when={recommended()}>
-                            <View
-                              style={{
-                                paddingHorizontal: 6,
-                                height: 18,
-                                borderRadius: radius.pill,
-                                backgroundColor: colors.brandTint,
-                                alignItems: "center",
-                                justifyContent: "center",
+                    {/* The options are one set of radios — the base's own
+                        group (role/checked for AT) with the app's children:
+                        indicator, label, description, the recommendation. */}
+                    <View
+                      role="radiogroup"
+                      accessibilityLabel={props.decision().question}
+                      style={{ flexDirection: "column" }}
+                    >
+                      <NativeRadioGroup style={{ flexDirection: "column", gap: space.sm }}>
+                        {props.decision().options.map((option, index) => {
+                          const recommended = () => props.decision().recommendation === option.optionId;
+                          /** The keyboard cursor is this option — the one radio
+                           * of the set that is checked. `checked` follows the
+                           * cursor and never a pre-answered option, because
+                           * the base reports a press on a checked radio as
+                           * nothing: a press here always answers (C4). */
+                          const onCursor = () => cursor() === index;
+                          return (
+                            <Radio
+                              checked={onCursor()}
+                              disabled={locked()}
+                              accessibilityLabel={option.label}
+                              onChange={() => {
+                                if (locked()) return;
+                                approvalCursor.update((map) => ({
+                                  ...map,
+                                  [props.decision().decisionId]: index,
+                                }));
+                                props.onAnswer(props.decision().decisionId, option.optionId);
                               }}
+                              hoverStyle={{ backgroundColor: color.hover }}
+                              disabledStyle={{ opacity: disabledOpacity }}
+                              style={[
+                                {
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: space.md,
+                                  width: "100%",
+                                  minHeight: rowMinHeight(),
+                                  paddingHorizontal: space.lg,
+                                  paddingVertical: space.md,
+                                  borderRadius: radius.md,
+                                  borderWidth: 1,
+                                  backgroundColor: color.card,
+                                },
+                                onCursor()
+                                  ? { borderColor: color.primary, backgroundColor: color.secondary }
+                                  : { borderColor: color.border },
+                              ]}
                             >
-                              <Text style={{ fontSize: 10, fontWeight: "700", color: colors.brand }}>推荐</Text>
-                            </View>
-                          </If>
-                        </Press>
-                      );
-                    })}
+                              {/* A terminal draws the base's own radio; the
+                                  other hosts get this one indicator. */}
+                              <If when={platform.idiom !== "terminal"}>
+                                <View
+                                  style={{
+                                    width: iconSize.lg,
+                                    height: iconSize.lg,
+                                    borderRadius: radius.pill,
+                                    borderWidth: 1,
+                                    borderColor: onCursor() ? color.primary : color.input,
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                  }}
+                                >
+                                  <If when={onCursor()}>
+                                    <View
+                                      style={{
+                                        width: space.md,
+                                        height: space.md,
+                                        borderRadius: radius.pill,
+                                        backgroundColor: color.primary,
+                                      }}
+                                    />
+                                  </If>
+                                </View>
+                              </If>
+                              <View style={{ flex: 1, gap: space.xxs, justifyContent: "center" }}>
+                                <Text
+                                  style={{
+                                    fontSize: typeScale.caption,
+                                    lineHeight: Math.round(typeScale.caption * lineHeight.snug),
+                                    fontWeight: weight.semibold,
+                                    color: color.foreground,
+                                  }}
+                                >
+                                  {option.label}
+                                </Text>
+                                <If when={withSubtitles()}>
+                                  <Text
+                                    style={{
+                                      fontSize: typeScale.sm,
+                                      lineHeight: Math.round(typeScale.sm * lineHeight.snug),
+                                      color: color.mutedForeground,
+                                    }}
+                                  >
+                                    {option.description ?? ""}
+                                  </Text>
+                                </If>
+                              </View>
+                              <If when={recommended()}>
+                                <Badge variant="secondary" label="推荐" />
+                              </If>
+                            </Radio>
+                          );
+                        })}
+                      </NativeRadioGroup>
+                    </View>
                     <If when={props.submitting()}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <Spinner size={11} tint={colors.brand} />
-                        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>提交中…</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+                        <Spinner size={iconSize.sm} tint={color.brand} />
+                        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>提交中…</Text>
                       </View>
                     </If>
                     <If when={platform.idiom === "terminal"}>
-                      <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
+                      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
                         ↑↓ 选择 · Enter 确认
                       </Text>
                     </If>
                   </View>
                 }
               >
-                <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>审批已取消。</Text>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>审批已取消。</Text>
               </If>
             }
           >
-            <Text style={{ fontSize: 12.5, color: colors.warning }}>已超时，选项不再可用。</Text>
+            <Text style={{ fontSize: typeScale.sm, color: color.warning }}>已超时，选项不再可用。</Text>
           </If>
         }
       >
@@ -1506,21 +1499,21 @@ export function ApprovalCard(props: {
           style={{
             flexDirection: "row",
             alignItems: "center",
-            gap: 8,
-            paddingHorizontal: 10,
-            minHeight: 32,
-            borderRadius: radius.control,
-            backgroundColor: colors.glassControl,
+            gap: space.md,
+            paddingHorizontal: space.md,
+            minHeight: space["3xl"],
+            borderRadius: radius.md,
+            backgroundColor: color.muted,
             alignSelf: "flex-start",
           }}
         >
-          <Icon name="check" size={13} tint={colors.mutedForeground} />
-          <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>
+          <Icon name="check" size={iconSize.sm} tint={color.mutedForeground} />
+          <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
             {answerLabel() || "已选择"} · 已记录你的选择
           </Text>
         </View>
       </If>
-    </View>
+    </Card>
   );
 }
 
@@ -1528,47 +1521,47 @@ export function ApprovalCard(props: {
  * stream — the place it will be injected — instead of a banner above the
  * composer, so a reader sees where the guidance is going to arrive. */
 export function GuideWaitingRow(props: { item: QueueItemView; stopping: boolean }) {
-  const ink = () => (props.stopping ? colors.warning : colors.brand);
+  const ink = () => (props.stopping ? color.warning : color.brand);
   return (
-    <View
+    // The row's `px-4`, like the turns and the approval card beside it.
+    <Card
       accessibilityLabel="等待引导当前任务"
       style={{
         alignSelf: "flex-start",
         maxWidth: "86%",
-        gap: 5,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: radius.card,
-        backgroundColor: props.stopping ? colors.warningTint : colors.brandMuted,
-        borderWidth: 1,
+        marginHorizontal: space.xl,
+        gap: space.sm,
+        paddingHorizontal: space.lg,
+        paddingVertical: space.md,
+        backgroundColor: props.stopping ? color.warningTint : color.brandMuted,
         borderColor: alpha(ink(), 0.3),
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         {props.stopping ? (
-          <Icon name="clock" size={12} tint={ink()} />
+          <Icon name="clock" size={iconSize.sm} tint={ink()} />
         ) : (
-          <Spinner size={12} tint={ink()} />
+          <Spinner size={iconSize.sm} tint={ink()} />
         )}
-        <Text style={{ fontSize: 12, fontWeight: "600", color: ink() }}>
+        <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: ink() }}>
           {props.stopping ? "停止中 · 引导将转为队列" : "等待引导当前任务…"}
         </Text>
       </View>
       <Text
         style={{
           userSelect: "text",
-          fontSize: 13,
-          lineHeight: 19,
+          fontSize: typeScale.sm,
+          lineHeight: Math.round(typeScale.sm * lineHeight.normal),
           numberOfLines: 3,
-          color: colors.foreground,
+          color: color.foreground,
         }}
       >
         {props.item.text}
       </Text>
-      <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
         {props.stopping ? "任务结束后按顺序入队" : "将在工具轮边界注入当前任务"}
       </Text>
-    </View>
+    </Card>
   );
 }
 
@@ -1577,42 +1570,49 @@ export function QueuePanel(props: { queue: QueueItemView[]; onRemove?: (requestI
   const items = () => props.queue.filter((item) => item.delivery !== "guide");
   return (
     <If when={items().length > 0}>
-      <View
-        style={{
-          borderRadius: radius.card,
-          ...glass.card,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          gap: 6,
-        }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Icon name="clock" size={12} tint={colors.mutedForeground} />
-          <Text style={{ fontSize: 11, fontWeight: "700", color: colors.mutedForeground }}>
-            队列 · {items().length}
+      <Card size="sm" accessibilityLabel="队列" style={{ gap: space.sm }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+          <Icon name="clock" size={iconSize.sm} tint={color.mutedForeground} />
+          <Text style={{ fontSize: typeScale.sm, fontWeight: weight.bold, color: color.mutedForeground }}>
+            {`队列 · ${items().length}`}
           </Text>
-          <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>当前任务结束后按顺序发送</Text>
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            当前任务结束后按顺序发送
+          </Text>
         </View>
         {items().map((item, index) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minHeight: 26 }}>
-            <Text style={{ width: 16, fontSize: 10.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: space.sm,
+              minHeight: space["2xl"],
+            }}
+          >
+            <Text
+              style={{
+                width: space.xl,
+                fontSize: typeScale.xs,
+                color: color.mutedForeground,
+                fontVariant: ["tabular-nums"],
+              }}
+            >
               {index + 1}
             </Text>
-            <Text style={{ flex: 1, numberOfLines: 1, fontSize: 12, color: colors.foreground }}>
+            <Text style={{ flex: 1, numberOfLines: 1, fontSize: typeScale.sm, color: color.foreground }}>
               {item.text}
             </Text>
             <If when={!!props.onRemove}>
               <IconButton
                 icon="x"
                 label="移出队列"
-                size={22}
-                iconSize={12}
+                size="sm"
                 onPress={() => props.onRemove?.(item.requestId)}
               />
             </If>
           </View>
         ))}
-      </View>
+      </Card>
     </If>
   );
 }
@@ -1634,50 +1634,23 @@ export function EmptyConversation(props: { onSuggestion: (text: string) => void 
     "把行动项按负责人分组",
   ];
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 18 }}>
-      <View
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 18,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.muted,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Icon name="spark" size={26} tint={colors.brand} />
+    <Empty accessibilityLabel="空会话" style={{ flex: 1, justifyContent: "center" }}>
+      <EmptyMedia icon="spark" tone="brand" />
+      <View style={{ alignItems: "center", gap: space.sm }}>
+        <EmptyTitle label={`${greetingFor(new Date())}，我是 Keel`} />
+        <EmptyDescription label="发送一条消息，Keel 会在这里开始工作。" />
+        <EmptyDescription label="运行中可以补充引导，需要时再处理审批。" />
       </View>
-      <View style={{ alignItems: "center", gap: 6 }}>
-        <Text style={{ fontSize: 20, fontWeight: "700", color: colors.foreground }}>
-          {greetingFor(new Date())}，我是 Keel
-        </Text>
-        <Text style={{ maxWidth: 420, fontSize: 13, lineHeight: 19, color: colors.mutedForeground, textAlign: "center" }}>
-          发送一条消息，Keel 会在这里开始工作。
-        </Text>
-        <Text style={{ maxWidth: 420, fontSize: 13, lineHeight: 19, color: colors.mutedForeground, textAlign: "center" }}>
-          运行中可以补充引导，需要时再处理审批。
-        </Text>
-      </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: space.sm, maxWidth: 560 }}>
+      <EmptyContent style={{ flexWrap: "wrap", justifyContent: "center", maxWidth: 560 }}>
         {suggestions.map((text) => (
-          <Press
-            onPress={() => props.onSuggestion(text)}
+          <Button
+            variant="secondary"
+            label={text}
             accessibilityLabel={`使用建议 ${text}`}
-            hitSlop={6}
-            hoverStyle={{ backgroundColor: colors.hover }}
-            style={{
-              paddingHorizontal: 12,
-              height: 32,
-              borderRadius: radius.pill,
-              ...glass.control,
-            }}
-          >
-            <Text style={{ fontSize: 12, color: colors.foreground }}>{text}</Text>
-          </Press>
+            onPress={() => props.onSuggestion(text)}
+          />
         ))}
-      </View>
-    </View>
+      </EmptyContent>
+    </Empty>
   );
 }

@@ -26,11 +26,18 @@
 // the title, description and both actions are text rows; `press` on them fires
 // `onConfirm` / `onCancel`.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
-import { Text, View } from "nsh";
+import { Text, View, windowSize } from "nsh";
 import { Dialog as NativeDialog } from "nsh/base";
 import { Icon } from "../../icons";
 import { alpha, color, radius, space, typeScale, weight } from "../tokens";
 import { Button } from "./button";
+
+/** Where the footer stops being one row and stacks, shadcn's `sm` (`flex-col-reverse
+ * gap-2 sm:flex-row sm:justify-end`): below it the two buttons would push each
+ * other off a long-labelled dialog (`取消删除密钥 <name>` and its confirm). */
+const ALERT_DIALOG_FOOTER_STACK_BELOW_PX = 640;
+
+const footerStacked = () => windowSize().width < ALERT_DIALOG_FOOTER_STACK_BELOW_PX;
 
 export function AlertDialog(props: {
   open?: boolean;
@@ -68,6 +75,14 @@ export function AlertDialog(props: {
           borderColor: color.popoverEdge,
           backgroundColor: color.popover,
           boxShadow: `0 24px 64px ${alpha(color.glassShade, 1)}`,
+          // shadcn's placement (`fixed top-1/2 left-1/2 -translate-x-1/2
+          // -translate-y-1/2`): the dialog layer is a full-window column, so the
+          // cross axis centers with `alignSelf` and the main axis with auto
+          // margins. Without these the popup sits at the window's top-left
+          // corner — the runtime gives the layer no placement of its own.
+          alignSelf: "center",
+          marginTop: "auto",
+          marginBottom: "auto",
         },
         props.style ?? null,
       ]}
@@ -106,7 +121,18 @@ export function AlertDialog(props: {
         </View>
       </View>
       {props.children}
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>
+      <View
+        style={{
+          flexDirection: footerStacked() ? "column-reverse" : "row",
+          // A row keeps its line only while both labels fit: a long question
+          // (`确认删除密钥 <name>`) wraps the second button onto its own line
+          // instead of pushing the first one out of the dialog.
+          flexWrap: footerStacked() ? undefined : "wrap",
+          alignItems: footerStacked() ? "stretch" : undefined,
+          justifyContent: footerStacked() ? undefined : "flex-end",
+          gap: footerStacked() ? space.sm : space.md,
+        }}
+      >
         {props.cancelLabel !== undefined ? (
           <Button
             variant="outline"

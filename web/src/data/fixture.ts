@@ -1,7 +1,8 @@
-// The fixture transport: a local, scripted keel service so the UI runs before
-// `@keel/chat-surface` and `keel serve` are wired. It implements the same
-// `EventSource` / `SurfaceCommands` / session-list surface as `KeelHttp`, so
-// switching modes changes one object, not the UI.
+// The fixture transport: a local, scripted keel service for development runs
+// (`?fixture=1` on the page, `host.params.fixture` elsewhere). It implements
+// the same `EventSource` / `SurfaceCommands` / session-list surface as
+// `KeelHttp`, so the UI is the same either way — but nothing in the product
+// selects it: a failed connection is offline with its own reason and retry.
 //
 // The scripts reproduce the shapes the kernel writes (user.message with
 // delivery, assistant.message with inputSeqs/toolCall blocks, tool.result,
@@ -58,7 +59,6 @@ type Peer = {
   queue: QueuedInput[];
   timers: number[];
   subscribers: Subscriber[];
-  offline: boolean;
   drainPaused: boolean;
 };
 
@@ -147,7 +147,6 @@ interface DemoModelResolution {
 }
 
 const nowISO = () => new Date().toISOString();
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function textPreview(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
@@ -610,34 +609,6 @@ export class FixtureClient implements SettingsApi {
     return issues;
   }
 
-  /** The QA hook behind the sidebar's connection demo: events keep arriving
-   * while the stream is down; reconnect flushes them in order, once. */
-  simulateDrop(sessionId: string, ms = 2600): void {
-    const peer = this.sessions.get(sessionId);
-    if (!peer) return;
-    peer.offline = true;
-    for (const sub of peer.subscribers) sub.onState("reconnecting");
-    const timer = setTimeout(() => {
-      this.append(peer, "decision", {
-        decisionId: "dec-reconnect",
-        question: "网络抖动期间到达的审批：是否保留当前草稿？",
-        options: [
-          { optionId: "keep", label: "保留草稿", description: "继续编辑，不丢失内容" },
-          { optionId: "discard", label: "放弃草稿" },
-        ],
-        recommendation: "keep",
-        status: "open",
-      });
-    }, 700) as unknown as number;
-    peer.timers.push(timer);
-    const back = setTimeout(() => {
-      peer.offline = false;
-      for (const sub of peer.subscribers) sub.onState("open");
-      this.flush(peer);
-    }, ms) as unknown as number;
-    peer.timers.push(back);
-  }
-
   // ---- seeds ------------------------------------------------------------
 
   private peer(id: string, title: string, runStatus = "done"): Peer {
@@ -659,7 +630,6 @@ export class FixtureClient implements SettingsApi {
       queue: [],
       timers: [],
       subscribers: [],
-      offline: false,
       drainPaused: false,
     };
   }
@@ -932,7 +902,7 @@ export class FixtureClient implements SettingsApi {
     if (preview) peer.meta.lastMessage = preview;
     peer.meta.lastMessageAt = nowISO();
     peer.meta.updatedAt = nowISO();
-    if (!peer.offline) this.deliver(peer, event);
+    this.deliver(peer, event);
     return event;
   }
 
@@ -957,7 +927,6 @@ export class FixtureClient implements SettingsApi {
   }
 
   private partial(peer: Peer, text: string, turnId?: string) {
-    if (peer.offline) return;
     for (const sub of peer.subscribers) {
       if (sub.partials) sub.onPartial?.({ text, turnId });
     }
@@ -982,8 +951,8 @@ export class FixtureClient implements SettingsApi {
     };
     peer.subscribers.push(sub);
     const open = setTimeout(() => {
-      sub.onState(peer.offline ? "reconnecting" : "open");
-      if (!peer.offline) this.flush(peer);
+      sub.onState("open");
+      this.flush(peer);
     }, 20) as unknown as number;
     void open;
     return () => {
@@ -1141,7 +1110,7 @@ export class FixtureClient implements SettingsApi {
     }
     const full = withTools
       ? "已检查当前工作区：src/、web/、docs/ 均可读，没有阻塞项。\n\n下一步建议：\n1. 先跑一遍 web 构建；\n2. 再用真实服务验证审批与停止；\n3. 最后补发布说明。"
-      : `已收到：「${prompt}」。这是演示数据下的流式回复——\n\n- 会话、工具卡、审批与停止都可以操作；\n- 打开「partial」可以看 token 级增量；\n- 接入真实服务后，同一份界面直接消费 AgentAPI。`;
+      : `已收到：「${prompt}」。这是开发态本地脚本传输的流式回复——\n\n- 会话、工具卡、审批与停止都可以操作；\n- 打开「partial」可以看 token 级增量；\n- 接入真实服务后，同一份界面直接消费 AgentAPI。`;
     const chunks = full.match(/.{1,12}/gs) ?? [full];
     chunks.forEach((_, index) => {
       this.schedule(peer, start + index * 70, () => {
@@ -1197,7 +1166,3 @@ export class FixtureClient implements SettingsApi {
     peer.timers = [];
   }
 }
-
-/** A tiny helper for the empty-state demo: wait a beat before the first paint
- * so the loading skeleton is visible in screenshots. */
-export const fixtureBootDelay = () => delay(120);
