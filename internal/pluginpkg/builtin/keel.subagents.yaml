@@ -1,0 +1,14 @@
+id: keel.subagents
+version: 1.0.0
+kind: in-process
+description: Exposes the spawn_subagent primitive so the model can delegate a task to an independent session.
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - spawn_subagent
+permissions:
+  tools:
+    - spawn_subagent
+source:
+  type: builtin
