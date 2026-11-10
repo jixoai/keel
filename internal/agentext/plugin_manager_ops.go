@@ -369,8 +369,8 @@ func (m *Manager) materializeLocked(ctx context.Context, entry *managerEntry) (*
 			return nil, pluginErrf(ErrPluginKind, "assemble", entry.id, "loader failed: %v", err)
 		}
 	default:
-		loader, ok := m.loaders[entry.manifest.Kind]
-		if !ok {
+		loader := m.loaderForKind(entry.manifest)
+		if loader == nil {
 			return nil, pluginErrf(ErrPluginKind, "assemble", entry.id,
 				"kind %s has no loader in this build (%s)", entry.manifest.Kind, entry.kindHint())
 		}
@@ -396,6 +396,25 @@ func (m *Manager) materializeLocked(ctx context.Context, entry *managerEntry) (*
 	return plugin, nil
 }
 
+// loaderForKind resolves the loader of a package by its manifest. A webview that
+// declares an `entry.command` is loaded by the sidecar loader: the spec makes a
+// webview's optional backend a sidecar ("webview 可带 sidecar 后端"), so a host
+// registers that one loader and both kinds use it. Without the fallback a host
+// that wires only `KindSidecar` (the production wiring) could never enable a
+// webview package with a backend.
+func (m *Manager) loaderForKind(manifest *pluginpkg.Manifest) PluginLoader {
+	if manifest == nil {
+		return nil
+	}
+	if loader, ok := m.loaders[manifest.Kind]; ok {
+		return loader
+	}
+	if manifest.Kind == pluginpkg.KindWebview && len(manifest.Entry.Command) > 0 {
+		return m.loaders[pluginpkg.KindSidecar]
+	}
+	return nil
+}
+
 // kindHint explains what to do about a missing loader, per kind.
 func (entry *managerEntry) kindHint() string {
 	if entry.manifest == nil {
@@ -408,7 +427,7 @@ func (entry *managerEntry) kindHint() string {
 		return "the sidecar loader (agentext.NewSidecarLoader) is not wired into this deployment's ManagerOptions.Loaders"
 	case pluginpkg.KindWebview:
 		if len(entry.manifest.Entry.Command) > 0 {
-			return "this webview package declares a sidecar backend, which needs the sidecar loader"
+			return "this webview package declares a sidecar backend, which needs the sidecar loader (agentext.NewSidecarLoader) registered under kind sidecar"
 		}
 		return "a UI-only webview plugin has no runtime surface to load"
 	default:
@@ -1249,6 +1268,21 @@ func (m *Manager) Audit(ctx context.Context, tenantID *uuid.UUID, pluginID strin
 	}
 	return m.store.ListPluginAudit(ctx, tenantID, pluginID, after, limit)
 }
+
+// RecordAudit appends one lifecycle audit row on behalf of a product flow that
+// drives the manager indirectly. It exists for the outcomes the manager itself
+// never sees: a creation flow that refused to install (the approver said no, or
+// the generated package failed validation) still has to leave a row, and the
+// row must use the same vocabulary and the same table as every lifecycle
+// action. The action/result strings are the store's (install/uninstall/... and
+// ok/refused/failed); the detail carries the flow-specific facts.
+func (m *Manager) RecordAudit(ctx context.Context, audit AuditContext, pluginID, version, action, result string, detail map[string]any) {
+	m.auditLocked(ctx, audit, pluginID, version, action, result, detail)
+}
+
+// Root is the managed plugins root (empty when this deployment has none: a host
+// that only ships builtins does not need one).
+func (m *Manager) Root() string { return m.root }
 
 // --- small helpers --------------------------------------------------------
 

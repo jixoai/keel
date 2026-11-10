@@ -358,11 +358,13 @@ type sidecarRefusal struct {
 // REFUSED — it is not published to the model, and the refusal is audited. A
 // plugin cannot widen its own surface at run time.
 //
-// Published names are `<plugin>.<tool>` (spec S3): the sidecar speaks its own
-// local names, the host namespaces them, so two plugins can both ship a
-// `search` tool without a global-uniqueness accident. A declared entry matches
-// either the local name or the already-namespaced one, because both readings of
-// "provides.tools" are natural in a manifest.
+// Published names are `<plugin>.<tool>` (spec S3), normalized to the wire
+// grammar (spec: 发布名必须是 wire 安全的 `<a-zA-Z0-9_->{1,64}`): the sidecar
+// speaks its own local names, the host namespaces them, so two plugins can both
+// ship a `search` tool without a global-uniqueness accident, and `demo.sidecar`
+// + `greet` is published as `demo_sidecar_greet` — a name a real model can call.
+// A declared entry matches either the local name or the already-namespaced one,
+// because both readings of "provides.tools" are natural in a manifest.
 func (l *SidecarLoader) catalog(manifest *pluginpkg.Manifest, definitions []gateway.ToolDefinition) ([]ToolSpec, []sidecarRefusal) {
 	declared := make(map[string]bool, len(manifest.Provides.Tools))
 	for _, name := range manifest.Provides.Tools {
@@ -379,6 +381,15 @@ func (l *SidecarLoader) catalog(manifest *pluginpkg.Manifest, definitions []gate
 				reason: fmt.Sprintf("the sidecar offers tool %q but the manifest does not declare it in provides.tools (expected %q)", local, qualified)})
 			continue
 		}
+		// A published name outside the wire grammar cannot be called by a model
+		// (manifest validation already refuses such a declaration; this is the
+		// runtime half of the same rule, for a package edited on disk).
+		if !pluginpkg.ValidPublishedToolName(qualified) {
+			refused = append(refused, sidecarRefusal{name: local,
+				reason: fmt.Sprintf("the published tool name %q (from %q) must match ^[A-Za-z0-9_-]{1,%d}$",
+					qualified, local, pluginpkg.MaxPublishedToolName)})
+			continue
+		}
 		if seen[qualified] {
 			refused = append(refused, sidecarRefusal{name: local,
 				reason: fmt.Sprintf("the sidecar lists tool %q twice", local)})
@@ -392,13 +403,15 @@ func (l *SidecarLoader) catalog(manifest *pluginpkg.Manifest, definitions []gate
 }
 
 // qualifiedToolName is the model-facing name of a sidecar's local tool: the
-// host namespaces it, so two plugins can both ship a `search` tool. A sidecar
-// that already namespaces its own tools keeps its name.
+// host namespaces it, so two plugins can both ship a `search` tool, and the
+// result is normalized to the wire grammar (`.` is not a callable function name
+// on an OpenAI-compatible endpoint). A sidecar that already namespaces its own
+// tools keeps its name; both spellings normalize to the same publication name.
 func qualifiedToolName(pluginID, local string) string {
 	if strings.HasPrefix(local, pluginID+".") {
-		return local
+		return pluginpkg.NormalizePublishedToolName(local)
 	}
-	return pluginID + "." + local
+	return pluginpkg.NamespacedPublishedToolName(pluginID, local)
 }
 
 // declaredTool reports whether the manifest declares this sidecar tool, in

@@ -475,6 +475,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if err != nil {
 		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
 	}
+	// Creation mode drives the plugin manager itself, so its factory resolves the
+	// manager lazily: the manager is built with (and after) this builtin set.
+	var pluginManager *agentext.Manager
 	builtinFactories := map[string]func() *agentext.Plugin{
 		agentext.ExamplePluginID: func() *agentext.Plugin {
 			return agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
@@ -483,6 +486,12 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			})
 		},
 		"keel.subagents": func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
+		agentext.CreationPluginID: func() *agentext.Plugin {
+			return agentext.NewCreationPlugin(agentext.CreationOptions{
+				Manager:  func() *agentext.Manager { return pluginManager },
+				TenantID: opts.TenantID,
+			})
+		},
 	}
 	builtins := make([]agentext.Builtin, 0, len(builtinManifests))
 	for _, manifest := range builtinManifests {
@@ -528,6 +537,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if err != nil {
 		return nil, fmt.Errorf("plugin manager: %w", err)
 	}
+	pluginManager = manager
 	// The plugin inventory is reconciled against what is on disk and assembled
 	// from persisted intent: a plugin an operator disabled stays disabled.
 	applyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)

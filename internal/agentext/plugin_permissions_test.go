@@ -494,8 +494,8 @@ func TestManagerInvokePluginToolEnforcesTheWhitelist(t *testing.T) {
 	if err := json.Unmarshal(row.Detail, &detail); err != nil {
 		t.Fatalf("denial detail: %v", err)
 	}
-	if detail.Kind != PermissionTool || detail.Target != "demo.rules.own_tool" {
-		t.Fatalf("denial detail = %+v", detail)
+	if detail.Kind != PermissionTool || detail.Target != "demo_rules_own_tool" {
+		t.Fatalf("denial detail = %+v (the audit names the published wire name)", detail)
 	}
 	// A tool nothing provides is not a permission decision.
 	if _, err := harness.manager.InvokePluginTool(ctx, "demo.rules", "no.such.tool", json.RawMessage(`{}`)); err == nil {
@@ -530,12 +530,12 @@ func TestManagerViewPublishesSidecarToolNamesAndCrashState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	if !contains(view.Provides.Tools, "demo.sidecar.greet") {
+	if !contains(view.Provides.Tools, "demo_sidecar_greet") {
 		t.Fatalf("provides = %v, want the qualified tool name", view.Provides.Tools)
 	}
 	// The bridge's own rule (a tool is callable when it is declared AND live)
 	// holds with this view: both lists carry the same name.
-	if !contains(view.Tools, "demo.sidecar.greet") {
+	if !contains(view.Tools, "demo_sidecar_greet") {
 		t.Fatalf("live tools = %v", view.Tools)
 	}
 

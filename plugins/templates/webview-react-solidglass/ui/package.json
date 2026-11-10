@@ -1,0 +1,15 @@
+{
+  "name": "plugin-panel-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild app.jsx --bundle --minify --format=iife --target=es2020 --jsx=automatic --outfile=app.js"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
+}

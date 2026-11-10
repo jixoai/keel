@@ -25,6 +25,7 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 	}{
 		{ExamplePluginID, NewExamplePlugin(ExamplePluginOptions{})},
 		{"keel.subagents", NewSubagentPlugin(nil)},
+		{CreationPluginID, NewCreationPlugin(CreationOptions{})},
 	}
 	if len(manifests) != len(pairs) {
 		t.Fatalf("embedded manifests = %d, registered builtins = %d", len(manifests), len(pairs))

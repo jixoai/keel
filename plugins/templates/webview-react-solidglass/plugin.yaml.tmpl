@@ -1,0 +1,19 @@
+id: {{id}}
+version: {{version}}
+kind: webview
+description: {{description}}
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - {{tool}}
+  ui:
+    entry: ui/index.html
+    title: {{title}}
+permissions:
+  tools:
+    - {{tool}}
+entry:
+  command: [node, backend/server.mjs]
+source:
+  type: local

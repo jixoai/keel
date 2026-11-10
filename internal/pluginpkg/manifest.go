@@ -198,6 +198,111 @@ var secretPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 // envPattern is the grammar of an entry.env variable name.
 var envPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 
+// MaxPublishedToolName bounds a model-facing tool name. OpenAI-compatible
+// endpoints accept `^[a-zA-Z0-9_-]{1,64}$` as a function name; a published name
+// outside that grammar is not callable by a real model, so a manifest that
+// would publish one is refused at install instead of failing at call time.
+const MaxPublishedToolName = 64
+
+// publishedToolPattern is the wire grammar of a published (model-facing) tool
+// name. A manifest may DECLARE a richer name (`provides.tools` follows the id
+// grammar plus ':'); what the host PUBLISHES must satisfy this pattern.
+var publishedToolPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// isWireSafeRune reports whether r may appear in a published tool name.
+func isWireSafeRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		return true
+	}
+	return false
+}
+
+// NormalizePublishedToolName rewrites every character outside [A-Za-z0-9_-] to
+// '_'. The host namespaces a sidecar's tools as `<plugin>.<tool>`, and a '.' on
+// the wire is a function name no OpenAI-compatible endpoint accepts, so
+// `demo.sidecar.greet` is published as `demo_sidecar_greet`. A name that is
+// already wire safe is returned verbatim: that compatibility rule is why
+// publication normalizes instead of rejecting (`example_status` and
+// `spawn_subagent` must never change).
+func NormalizePublishedToolName(name string) string {
+	clean := true
+	for _, r := range name {
+		if !isWireSafeRune(r) {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return name
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if isWireSafeRune(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	return b.String()
+}
+
+// ValidPublishedToolName reports whether a name satisfies the wire grammar the
+// model-facing surface must obey.
+func ValidPublishedToolName(name string) bool { return publishedToolPattern.MatchString(name) }
+
+// NamespacedPublishedToolName is the published name of a sidecar (or webview
+// backend) tool: the plugin id joined with the local name, then normalized.
+// local is the name the plugin itself speaks (`greet`), never a declared
+// spelling, so the same tool cannot be qualified twice.
+func NamespacedPublishedToolName(pluginID, local string) string {
+	if pluginID == "" {
+		return NormalizePublishedToolName(local)
+	}
+	return NormalizePublishedToolName(pluginID + "." + local)
+}
+
+// PublishedTool is one `provides.tools` declaration and the model-facing name it
+// is published under.
+type PublishedTool struct {
+	// Declared is the manifest spelling (`greet`, `demo.sidecar.greet`).
+	Declared string `json:"declared"`
+	// Local is the name the plugin itself speaks: the declared name without the
+	// host's `<id>.` namespace, which is what a sidecar lists in tools/list.
+	Local string `json:"local"`
+	// Published is the wire-safe name the model calls (`demo_sidecar_greet`).
+	Published string `json:"published"`
+}
+
+// NamespacesTools reports whether the host publishes this kind's tools as
+// `<id>.<local>`: a sidecar (and a webview's optional sidecar backend) speaks
+// local tool names, so the host namespaces them; an in-process plugin names its
+// model-facing tools directly.
+func (m *Manifest) NamespacesTools() bool {
+	return m.Kind == KindSidecar || m.Kind == KindWebview
+}
+
+// PublishedTools maps every `provides.tools` entry onto its declared, local and
+// published spellings. It is the one conversion the validator, the loaders, the
+// permission policy and the inventory view share, so "what the model calls"
+// cannot drift between them.
+func (m *Manifest) PublishedTools() []PublishedTool {
+	tools := make([]PublishedTool, 0, len(m.Provides.Tools))
+	namespaced := m.NamespacesTools()
+	for _, declared := range m.Provides.Tools {
+		published := PublishedTool{Declared: declared, Local: declared}
+		if namespaced {
+			published.Local = strings.TrimPrefix(declared, m.ID+".")
+			published.Published = NamespacedPublishedToolName(m.ID, published.Local)
+		} else {
+			published.Published = NormalizePublishedToolName(declared)
+		}
+		tools = append(tools, published)
+	}
+	return tools
+}
+
 // FieldError is one field-level validation failure.
 type FieldError struct {
 	// Field is the manifest path ("provides.tools[1]", "engines.keel").
@@ -399,6 +504,25 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 		default:
 			seenTools[name] = true
 		}
+	}
+	// The publication half of the tool contract: what the host puts on the wire
+	// must satisfy the model endpoint's function-name grammar. The check runs
+	// here, at manifest validation (install), so a package that would publish an
+	// uncallable name is refused with a field error instead of failing when a
+	// model finally calls it.
+	seenPublished := map[string]string{}
+	for i, tool := range m.PublishedTools() {
+		field := fmt.Sprintf("provides.tools[%d]", i)
+		if !ValidPublishedToolName(tool.Published) {
+			errs.add(field, "published tool name %q (from %q) must match ^[A-Za-z0-9_-]{1,%d}$",
+				tool.Published, tool.Declared, MaxPublishedToolName)
+			continue
+		}
+		if previous, exists := seenPublished[tool.Published]; exists && previous != tool.Declared {
+			errs.add(field, "tool %q publishes the same name %q as %q", tool.Declared, tool.Published, previous)
+			continue
+		}
+		seenPublished[tool.Published] = tool.Declared
 	}
 	seenHooks := map[string]bool{}
 	for i, event := range m.Provides.Hooks {
