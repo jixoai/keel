@@ -181,8 +181,8 @@ type promptService struct {
 
 func (p *promptService) SystemPrompt() string           { return p.host.SystemPrompt() }
 func (p *promptService) Tools() *agenttool.ToolRegistry { return p.host.Tools() }
-func (p *promptService) RefreshMCP(extra []agentcore.AgentTool, section string) error {
-	return p.host.RefreshMCP(extra, section)
+func (p *promptService) RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []host.Section) error {
+	return p.host.RefreshSections(extra, mcpSection, pluginSections)
 }
 func (p *promptService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (p *promptService) Stop(context.Context) error                             { return nil }
@@ -260,8 +260,8 @@ type toolsService struct {
 
 func (t *toolsService) SystemPrompt() string           { return t.prompt.SystemPrompt() }
 func (t *toolsService) Tools() *agenttool.ToolRegistry { return t.prompt.Tools() }
-func (t *toolsService) RefreshMCP(extra []agentcore.AgentTool, section string) error {
-	return t.prompt.RefreshMCP(extra, section)
+func (t *toolsService) RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []host.Section) error {
+	return t.prompt.RefreshSections(extra, mcpSection, pluginSections)
 }
 func (t *toolsService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (t *toolsService) Stop(context.Context) error                             { return nil }

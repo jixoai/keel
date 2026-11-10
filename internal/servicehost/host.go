@@ -209,6 +209,13 @@ type Runtime struct {
 	snapshot *servicegraph.Snapshot
 	closed   bool
 
+	// publishMu guards the product layer's republish state: the dynamic tools
+	// and the plugin prompt sections are the two halves of the assembly the
+	// product publishes, and either sink may fire first (see refreshAssembly).
+	publishMu      sync.Mutex
+	pluginTools    []agentcore.AgentTool
+	pluginSections []host.Section
+
 	// rejectedOverride is the stored model settings override this boot refused
 	// to serve (its credentials no longer resolve). Nil when what is stored is
 	// what is running.
@@ -624,11 +631,10 @@ func (r *Runtime) ReconnectMCP(ctx context.Context, name string) error {
 	if err := mcpService.Reconnect(ctx, name); err != nil {
 		return err
 	}
-	assembly := r.Assembly()
-	if assembly == nil {
-		return fmt.Errorf("servicehost: host assembly is not available")
-	}
-	if err := assembly.RefreshMCP(mcpService.manager.Tools(), mcpService.manager.PromptSection()); err != nil {
+	// The republish is the product form, not an MCP-only refresh: the plugin
+	// tools and prompt sections the product published stay live across a
+	// reconnect, exactly as the MCP surface survives a plugin change.
+	if err := r.refreshAssembly(); err != nil {
 		return fmt.Errorf("refresh host after MCP reconnect: %w", err)
 	}
 	return nil
@@ -637,17 +643,55 @@ func (r *Runtime) ReconnectMCP(ctx context.Context, name string) error {
 // RefreshProductTools republishes the host tool registry with the product
 // layer's dynamic tool set (plugin tools). It preserves the MCP and external
 // tool providers, which share the one registry, so a refresh never silently
-// drops a capability. The registry swap is live: an already running attempt
-// resolves tools per model call, so a newly assembled plugin is visible without
-// a restart (and an unloaded one disappears).
+// drops a capability, and — because the republish composes both halves of the
+// dynamic surface — the plugin prompt sections published through
+// RefreshProductPrompt stay live as well. The registry swap is live: an already
+// running attempt resolves tools per model call, so a newly assembled plugin is
+// visible without a restart (and an unloaded one disappears).
 func (r *Runtime) RefreshProductTools(dynamic []agentcore.AgentTool) error {
 	if r == nil {
 		return fmt.Errorf("servicehost: runtime closed")
 	}
+	r.publishMu.Lock()
+	r.pluginTools = append([]agentcore.AgentTool(nil), dynamic...)
+	r.publishMu.Unlock()
+	return r.refreshAssembly()
+}
+
+// RefreshProductPrompt republishes the host's dynamic prompt sections with the
+// product layer's plugin-contributed set. The sections are appended to the
+// assembly's configured sections (and after the MCP section) and reach the
+// model on the next assembly read — the runner assembles the system prompt per
+// attempt from this host, so a plugin that starts or stops is effective without
+// a restart. The call composes the same republish as RefreshProductTools: the
+// MCP section, the MCP/external/static/plugin tools and the tenant sections all
+// survive; a refresh never publishes a partial surface.
+func (r *Runtime) RefreshProductPrompt(sections []host.Section) error {
+	if r == nil {
+		return fmt.Errorf("servicehost: runtime closed")
+	}
+	r.publishMu.Lock()
+	r.pluginSections = append([]host.Section(nil), sections...)
+	r.publishMu.Unlock()
+	return r.refreshAssembly()
+}
+
+// refreshAssembly republishes the host assembly's dynamic surface: every tool
+// (MCP, external providers, static product tools, plugin tools) and every
+// dynamic prompt section (mcp_servers, plugin contributions). The product layer
+// publishes tools and prompt sections through separate sinks; both halves are
+// composed here from the same live state, so a refresh on one sink never drops
+// what the other published — the rule is the one the tool registry already
+// follows: the published set is replaced wholesale, never merged into.
+func (r *Runtime) refreshAssembly() error {
 	assembly := r.Assembly()
 	if assembly == nil {
 		return fmt.Errorf("servicehost: host assembly is not available")
 	}
+	r.publishMu.Lock()
+	pluginTools := append([]agentcore.AgentTool(nil), r.pluginTools...)
+	pluginSections := append([]host.Section(nil), r.pluginSections...)
+	r.publishMu.Unlock()
 	var extra []agentcore.AgentTool
 	section := ""
 	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
@@ -662,8 +706,8 @@ func (r *Runtime) RefreshProductTools(dynamic []agentcore.AgentTool) error {
 		}
 	}
 	extra = append(extra, r.cfg.Product.ExtraTools...)
-	extra = append(extra, dynamic...)
-	return assembly.RefreshMCP(extra, section)
+	extra = append(extra, pluginTools...)
+	return assembly.RefreshSections(extra, section, pluginSections)
 }
 
 // StopWorker stops claiming new runs (SIGTERM drain) without unloading the
@@ -718,6 +762,14 @@ func (r *Runtime) Reload(ctx context.Context, tenant host.TenantConfig, opts loa
 	if r.cfg.Seams.Limits != nil {
 		r.cfg.Seams.Limits.Update(tenant.Quota)
 	}
+	// A reload assembles a fresh host, and the plugin runtime has no reason to
+	// publish again: the product's dynamic surface (plugin tools and prompt
+	// sections) is republished onto the new generation here, so a model settings
+	// write never silently drops what the plugin layer published. A failure is
+	// reported, not fatal — the reload itself already succeeded.
+	if err := r.refreshAssembly(); err != nil {
+		r.cfg.Seams.Logger.Warn("republish product surface after reload", "err", err)
+	}
 	r.cfg.Seams.Logger.Info("service loadout reloaded",
 		"loadout", snap.LoadoutID, "revision", snap.Revision, "generation", snap.Generation,
 		"summary", snap.Summary, "retiring", len(snap.Retiring))
@@ -748,6 +800,12 @@ func (r *Runtime) restore(ctx context.Context) {
 		r.mu.Lock()
 		r.snapshot = snap
 		r.mu.Unlock()
+	}
+	// The rollback generation is a fresh host too: republish the product surface
+	// onto it so a rejected reload does not leave the plugin tools and prompt
+	// sections behind on the replaced generation.
+	if err := r.refreshAssembly(); err != nil {
+		r.cfg.Seams.Logger.Warn("republish product surface after rollback", "err", err)
 	}
 	r.cfg.Seams.Logger.Warn("rejected reload rolled back to the serving configuration",
 		"loadout", lo.ID, "revision", lo.Revision)
@@ -847,10 +905,11 @@ var _ agent.RunBinding = (*graphBinding)(nil)
 var _ agent.BoundRun = (*boundRun)(nil)
 
 // RefreshableAssembly is the host view the HTTP shell uses; it is agent.Assembly
-// plus the MCP refresh seam.
+// plus the republish seam for the dynamic surface of the assembly: the tools
+// and the prompt sections that MCP servers and plugins contribute.
 type RefreshableAssembly interface {
 	agent.Assembly
-	RefreshMCP(extra []agentcore.AgentTool, section string) error
+	RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []host.Section) error
 }
 
 var _ RefreshableAssembly = (*toolsService)(nil)

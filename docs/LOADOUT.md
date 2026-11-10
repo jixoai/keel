@@ -43,7 +43,7 @@ host.TenantConfig ──resolve──▶ Loadout(revision, summary) ──Apply�
 
 - **prompt 与 tools 共享同一个 host 对象**。技能、内置工具、MCP 工具、外部
   ToolProvider 工具都注册在 `host.Host` 的 registry 里；`tools` 是它的视图，不是
-  第二份 registry（否则 `RefreshMCP` 会让两份注册表分叉）。因此 `tools` requires
+  第二份 registry（否则 `RefreshSections` 会让两份注册表分叉）。因此 `tools` requires
   `prompt`，`external-tools` 是 prompt 的 optional 依赖。
 - **sandbox 不造空工厂**。未实现的服务只是蓝图里的 optional 提供者；没有工厂时
   依赖方按 optional 缺失记录降级诊断，不会半启动。

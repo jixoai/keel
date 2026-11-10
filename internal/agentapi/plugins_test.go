@@ -580,3 +580,47 @@ func TestPluginAPIPluginErrorsAreNotWrapped(t *testing.T) {
 		t.Fatalf("plain error = %d %+v", code, body)
 	}
 }
+
+// TestPluginsInventoryCarriesEffectivePrompt pins the top-level `prompt` field
+// of GET /v1/plugins: it mirrors the effective prompt contribution of the
+// enabled plugins (the sections the host appends to the running system prompt),
+// so a settings page reads the live vocabulary without descending into each
+// plugin row. An empty contribution is an empty list, never an absent field.
+func TestPluginsInventoryCarriesEffectivePrompt(t *testing.T) {
+	section := agentext.PromptSection{Name: "plugin_standard", Content: "Creation mode builds plugins by writing real plugin packages."}
+	manager := &fakePluginManager{inventory: agentext.PluginInventory{
+		Revision: 5, Generation: 2,
+		Plugins: []agentext.PluginView{{
+			ID: "keel.creation", State: agentext.LifecycleEnabled, Bundled: true,
+			Prompt: []agentext.PromptSection{section},
+		}},
+		Prompt:  []agentext.PromptSection{section},
+		Enabled: []string{"keel.creation"},
+	}}
+	server := newPluginAPIServer(t, manager)
+	tenant := uuid.New()
+	var inventory struct {
+		Prompt []agentext.PromptSection `json:"prompt"`
+	}
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/plugins", tenant, nil, &inventory); code != 200 {
+		t.Fatalf("GET /v1/plugins = %d", code)
+	}
+	if len(inventory.Prompt) != 1 || inventory.Prompt[0].Name != "plugin_standard" ||
+		!strings.Contains(inventory.Prompt[0].Content, "Creation mode builds plugins") {
+		t.Fatalf("inventory prompt = %+v", inventory.Prompt)
+	}
+
+	// Nothing contributed: the field is present and empty.
+	manager.mu.Lock()
+	manager.inventory = agentext.PluginInventory{Revision: 6}
+	manager.mu.Unlock()
+	inventory = struct {
+		Prompt []agentext.PromptSection `json:"prompt"`
+	}{}
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/plugins", tenant, nil, &inventory); code != 200 {
+		t.Fatalf("GET /v1/plugins = %d", code)
+	}
+	if inventory.Prompt == nil || len(inventory.Prompt) != 0 {
+		t.Fatalf("empty contribution must be an empty list, got %#v", inventory.Prompt)
+	}
+}

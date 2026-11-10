@@ -468,84 +468,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Logger:  log,
 	})
 
-	// Bundled plugins are ordinary plugin packages whose manifest lives in the
-	// binary; the manager drives their enablement like any other plugin, so
-	// `keel.example` can be disabled from the API and stays disabled.
-	builtinManifests, err := builtin.Manifests()
+	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, subagents, partials, log)
 	if err != nil {
-		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
+		return nil, err
 	}
-	// Creation mode drives the plugin manager itself, so its factory resolves the
-	// manager lazily: the manager is built with (and after) this builtin set.
-	var pluginManager *agentext.Manager
-	builtinFactories := map[string]func() *agentext.Plugin{
-		agentext.ExamplePluginID: func() *agentext.Plugin {
-			return agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
-				TenantID: opts.TenantID.String(),
-				Interval: opts.ExampleInterval,
-			})
-		},
-		"keel.subagents": func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
-		agentext.CreationPluginID: func() *agentext.Plugin {
-			return agentext.NewCreationPlugin(agentext.CreationOptions{
-				Manager:  func() *agentext.Manager { return pluginManager },
-				TenantID: opts.TenantID,
-			})
-		},
-	}
-	builtins := make([]agentext.Builtin, 0, len(builtinManifests))
-	for _, manifest := range builtinManifests {
-		factory, ok := builtinFactories[manifest.ID]
-		if !ok {
-			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
-		}
-		builtins = append(builtins, agentext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: true})
-	}
-	// The tool index mirrors the dynamic tool set the plugin runtime publishes:
-	// the plugin UI bridge calls a plugin's own tools through it, so a bridge call
-	// executes exactly what the model would execute.
-	toolIndex := newProductToolIndex()
-	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
-		Hooks:     hooks,
-		Triggers:  triggers,
-		Decisions: decisions,
-		Subagents: subagents,
-		Partials:  partials,
-		Tools: func(tools []agentcore.AgentTool) error {
-			toolIndex.publish(tools)
-			return rt.RefreshProductTools(tools)
-		},
-		Logger: log,
-	})
-	manager, err := agentext.NewPluginManager(agentext.ManagerOptions{
-		Root:        opts.PluginsRoot,
-		Runtime:     plugins,
-		Persistence: st,
-		Builtins:    builtins,
-		// The sidecar loader is the one loading strategy this build ships for
-		// non-compiled kinds; the manager installs its denial sink so a sidecar's
-		// permission refusals land in the audit trail (spec P3).
-		Loaders: map[pluginpkg.Kind]agentext.PluginLoader{
-			pluginpkg.KindSidecar: agentext.NewSidecarLoader(agentext.SidecarOptions{
-				KeelVersion: version,
-				Logger:      log,
-			}),
-		},
-		KeelVersion: version,
-		Logger:      log,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("plugin manager: %w", err)
-	}
-	pluginManager = manager
-	// The plugin inventory is reconciled against what is on disk and assembled
-	// from persisted intent: a plugin an operator disabled stays disabled.
-	applyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	err = manager.Boot(applyCtx)
-	cancel()
-	if err != nil {
-		return nil, fmt.Errorf("assemble plugins: %w", err)
-	}
+	manager, toolIndex, plugins := surface.manager, surface.toolIndex, surface.runtime
 
 	cancelFn := func(cancelCtx context.Context, tenantID, sessionID uuid.UUID) (agentext.CancelResult, error) {
 		owner, exists, err := st.SessionOwner(cancelCtx, tenantID, sessionID)
@@ -636,6 +563,139 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		func(context.Context) { hooks.Close() },
 	}
 	return layer, nil
+}
+
+// pluginSurface is the product's plugin layer: the lifecycle authority, the
+// tool index the UI bridge shares with the model registry, and the runtime the
+// api reads snapshots from.
+type pluginSurface struct {
+	manager   *agentext.Manager
+	toolIndex *productToolIndex
+	runtime   *agentext.Runtime
+}
+
+// newPluginSurface builds the plugin lifecycle authority over the live host
+// assembly: the bundled plugin set this product ships (ordinary plugin packages
+// whose manifests live in the binary — the manager drives their enablement like
+// any other plugin, so `keel.example` can be disabled from the API and stays
+// disabled), the runtime publication sinks, and the sidecar loader of this
+// build. persistence is the durable inventory/audit store (nil keeps the
+// manager in memory). The manager is booted — the inventory is reconciled
+// against what is on disk and assembled from persisted intent, so a plugin an
+// operator disabled stays disabled — before it is returned.
+//
+// It is a constructor rather than inline code so the serving path and its tests
+// share exactly this wiring: the model-side proof that a plugin's prompt
+// section reaches the system prompt rides on these sinks.
+func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence agentext.PluginPersistence, opts serveOptions, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, log *slog.Logger) (*pluginSurface, error) {
+	builtinManifests, err := builtin.Manifests()
+	if err != nil {
+		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
+	}
+	// Creation mode drives the plugin manager itself, so its factory resolves the
+	// manager lazily: the manager is built with (and after) this builtin set.
+	var pluginManager *agentext.Manager
+	builtinFactories := map[string]func() *agentext.Plugin{
+		agentext.ExamplePluginID: func() *agentext.Plugin {
+			return agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
+				TenantID: opts.TenantID.String(),
+				Interval: opts.ExampleInterval,
+			})
+		},
+		"keel.subagents": func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
+		agentext.CreationPluginID: func() *agentext.Plugin {
+			return agentext.NewCreationPlugin(agentext.CreationOptions{
+				Manager:  func() *agentext.Manager { return pluginManager },
+				TenantID: opts.TenantID,
+			})
+		},
+	}
+	builtins := make([]agentext.Builtin, 0, len(builtinManifests))
+	for _, manifest := range builtinManifests {
+		factory, ok := builtinFactories[manifest.ID]
+		if !ok {
+			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
+		}
+		builtins = append(builtins, agentext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: true})
+	}
+	// The tool index mirrors the dynamic tool set the plugin runtime publishes:
+	// the plugin UI bridge calls a plugin's own tools through it, so a bridge call
+	// executes exactly what the model would execute.
+	toolIndex := newProductToolIndex()
+	plugins := newPluginRuntime(rt, toolIndex, hooks, triggers, decisions, subagents, partials, log)
+	manager, err := agentext.NewPluginManager(agentext.ManagerOptions{
+		Root:        opts.PluginsRoot,
+		Runtime:     plugins,
+		Persistence: persistence,
+		Builtins:    builtins,
+		// The sidecar loader is the one loading strategy this build ships for
+		// non-compiled kinds; the manager installs its denial sink so a sidecar's
+		// permission refusals land in the audit trail (spec P3).
+		Loaders: map[pluginpkg.Kind]agentext.PluginLoader{
+			pluginpkg.KindSidecar: agentext.NewSidecarLoader(agentext.SidecarOptions{
+				KeelVersion: version,
+				Logger:      log,
+			}),
+		},
+		KeelVersion: version,
+		Logger:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin manager: %w", err)
+	}
+	pluginManager = manager
+	applyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	err = manager.Boot(applyCtx)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("assemble plugins: %w", err)
+	}
+	return &pluginSurface{manager: manager, toolIndex: toolIndex, runtime: plugins}, nil
+}
+
+// newPluginRuntime wires the plugin runtime's publication sinks to the live
+// host assembly. Both are the republish form — whatever the runtime currently
+// publishes becomes the surface — so a plugin that starts or stops is effective
+// on the next model call, without a restart:
+//
+//	Tools  → the bridge's tool index + the host registry (servicehost composes
+//	         the MCP, external, static and plugin tools);
+//	Prompt → the host's dynamic prompt sections (servicehost composes the MCP
+//	         section and the plugin sections; the tenant/static sections stay).
+//
+// The prompt sink is what makes a plugin's PromptSections reach the model:
+// RuntimeOptions.Prompt is the runtime's seam, and this is its wiring.
+func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, log *slog.Logger) *agentext.Runtime {
+	return agentext.NewRuntime(agentext.RuntimeOptions{
+		Hooks:     hooks,
+		Triggers:  triggers,
+		Decisions: decisions,
+		Subagents: subagents,
+		Partials:  partials,
+		Tools: func(tools []agentcore.AgentTool) error {
+			toolIndex.publish(tools)
+			return rt.RefreshProductTools(tools)
+		},
+		Prompt: func(sections []agentext.PromptSection) error {
+			return rt.RefreshProductPrompt(pluginPromptSections(sections))
+		},
+		Logger: log,
+	})
+}
+
+// pluginPromptSections projects the plugin runtime's published prompt sections
+// onto the host assembly's section type. Section names carry over verbatim: the
+// name is what the model sees (<name>...</name>), and the runtime has already
+// dropped empty contributions.
+func pluginPromptSections(sections []agentext.PromptSection) []host.Section {
+	if len(sections) == 0 {
+		return nil
+	}
+	out := make([]host.Section, 0, len(sections))
+	for _, section := range sections {
+		out = append(out, host.Section{Name: section.Name, Content: section.Content})
+	}
+	return out
 }
 
 // storeSessions adapts the durable store to the product seams: the session gate

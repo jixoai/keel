@@ -66,17 +66,22 @@ func (s *Server) pluginRoutes() {
 
 // pluginInventoryResponse is the GET /v1/plugins body.
 type pluginInventoryResponse struct {
-	Root       string                   `json:"root,omitempty"`
-	Revision   int64                    `json:"revision"`
-	Generation int64                    `json:"generation"`
-	Plugins    []agentext.PluginView    `json:"plugins"`
-	Tools      []string                 `json:"tools"`
-	Enabled    []string                 `json:"enabled"`
-	Hooks      agentext.StatsSummary    `json:"hooks"`
-	HookStats  []agentext.HookStat      `json:"hookStats,omitempty"`
-	Triggers   []agentext.TriggerStatus `json:"triggers,omitempty"`
-	Lifecycle  string                   `json:"lifecycle"`
-	Limits     map[string]int           `json:"limits,omitempty"`
+	Root       string                `json:"root,omitempty"`
+	Revision   int64                 `json:"revision"`
+	Generation int64                 `json:"generation"`
+	Plugins    []agentext.PluginView `json:"plugins"`
+	Tools      []string              `json:"tools"`
+	// Prompt is the effective prompt contribution of the enabled plugins: the
+	// sections the host appends to the running system prompt. It mirrors the
+	// per-plugin `prompt` fields at the top level, so a client reads the live
+	// vocabulary without descending into each plugin.
+	Prompt    []agentext.PromptSection `json:"prompt"`
+	Enabled   []string                 `json:"enabled"`
+	Hooks     agentext.StatsSummary    `json:"hooks"`
+	HookStats []agentext.HookStat      `json:"hookStats,omitempty"`
+	Triggers  []agentext.TriggerStatus `json:"triggers,omitempty"`
+	Lifecycle string                   `json:"lifecycle"`
+	Limits    map[string]int           `json:"limits,omitempty"`
 }
 
 // pluginsInventory implements GET /v1/plugins. Without a manager it answers the
@@ -96,6 +101,7 @@ func (s *Server) pluginsInventory(w http.ResponseWriter, r *http.Request) {
 		Generation: inventory.Generation,
 		Plugins:    inventory.Plugins,
 		Tools:      inventory.Tools,
+		Prompt:     inventory.Prompt,
 		Enabled:    inventory.Enabled,
 		Hooks:      inventory.Hooks,
 		Lifecycle:  "dynamic",
@@ -112,6 +118,9 @@ func (s *Server) pluginsInventory(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Tools == nil {
 		body.Tools = []string{}
+	}
+	if body.Prompt == nil {
+		body.Prompt = []agentext.PromptSection{}
 	}
 	if body.Enabled == nil {
 		body.Enabled = []string{}

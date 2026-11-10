@@ -25,14 +25,21 @@ type Config struct {
 }
 
 // Host composes the system prompt, skills, and tools for a run. The tool
-// registry and MCP prompt section can be refreshed after an MCP sign-in; an
-// in-flight run keeps using the registry it already resolved.
+// registry and the dynamic prompt sections can be refreshed after an MCP
+// sign-in or a plugin change; an in-flight run keeps using the registry it
+// already resolved.
 type Host struct {
 	mu       sync.RWMutex
 	cfg      Config
 	skills   []skills.Skill
 	warnings []skills.Warning
 	tools    *agenttool.ToolRegistry
+	// dynamic holds the sections the refresh seam owns: the mcp_servers section
+	// and the sections plugins contribute. SystemPrompt renders cfg.Sections
+	// (the preamble's static and tenant sections) followed by these, so a refresh
+	// replaces exactly the dynamic surface and never touches the sections the
+	// configuration assembled.
+	dynamic []Section
 }
 
 // New discovers skills and builds the tool registry. Skill discovery failures
@@ -75,22 +82,40 @@ func buildRegistry(cfg Config, discovered []skills.Skill) (*agenttool.ToolRegist
 // registry is built and validated before it is published; callers already
 // holding the old registry (an in-flight run) continue safely.
 func (h *Host) RefreshMCP(extra []agentcore.AgentTool, section string) error {
+	return h.RefreshSections(extra, section, nil)
+}
+
+// RefreshSections replaces the host's dynamic surface: the extra tools, the
+// mcp_servers section and any additional named sections the serving process
+// publishes (plugin prompt contributions). It is RefreshMCP generalized to more
+// than one dynamic section, so a caller republishing because of a change in one
+// of them (a plugin enable/disable) never drops the others (the MCP section).
+// The caller passes the complete dynamic set — exactly like the tool registry
+// is republished — so a refresh replaces that set wholesale and never leaves a
+// retired section behind. The new registry is built and validated before it is
+// published; callers already holding the old registry (an in-flight run)
+// continue safely.
+func (h *Host) RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []Section) error {
 	h.mu.RLock()
 	cfg := h.cfg
 	discovered := h.skills
 	h.mu.RUnlock()
 
 	cfg.ExtraTools = append([]agentcore.AgentTool(nil), extra...)
-	sections := make([]Section, 0, len(cfg.Sections)+1)
+	// The construction-time mcp section (when the assembly was built with one) is
+	// retired here: the dynamic set owns it from now on.
+	static := make([]Section, 0, len(cfg.Sections))
 	for _, s := range cfg.Sections {
 		if s.Name != "mcp_servers" {
-			sections = append(sections, s)
+			static = append(static, s)
 		}
 	}
-	if section != "" {
-		sections = append(sections, Section{Name: "mcp_servers", Content: section})
+	cfg.Sections = static
+	dynamic := make([]Section, 0, len(pluginSections)+1)
+	if mcpSection != "" {
+		dynamic = append(dynamic, Section{Name: "mcp_servers", Content: mcpSection})
 	}
-	cfg.Sections = sections
+	dynamic = append(dynamic, pluginSections...)
 
 	reg, err := buildRegistry(cfg, discovered)
 	if err != nil {
@@ -98,6 +123,7 @@ func (h *Host) RefreshMCP(extra []agentcore.AgentTool, section string) error {
 	}
 	h.mu.Lock()
 	h.cfg = cfg
+	h.dynamic = dynamic
 	h.tools = reg
 	h.mu.Unlock()
 	return nil
@@ -121,15 +147,21 @@ func visibleSkills(discovered []skills.Skill) []skills.Skill {
 	return out
 }
 
-// SystemPrompt renders the PI-shaped sections including the skills index.
+// SystemPrompt renders the PI-shaped sections including the skills index. The
+// dynamic sections (mcp_servers and plugin contributions) render after the
+// configured ones and before the skills index.
 func (h *Host) SystemPrompt() string {
 	h.mu.RLock()
 	cfg := h.cfg
 	discovered := h.skills
+	dynamic := append([]Section(nil), h.dynamic...)
 	h.mu.RUnlock()
+	sections := make([]Section, 0, len(cfg.Sections)+len(dynamic))
+	sections = append(sections, cfg.Sections...)
+	sections = append(sections, dynamic...)
 	return BuildSystemPrompt(PromptConfig{
 		Preamble:     cfg.Preamble,
-		Sections:     cfg.Sections,
+		Sections:     sections,
 		Skills:       discovered,
 		FileReadTool: cfg.FileReadTool,
 	})
