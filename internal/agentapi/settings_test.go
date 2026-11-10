@@ -16,6 +16,7 @@ import (
 
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/modelcfg"
+	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -673,29 +674,31 @@ func TestSettingsSecretsUnavailable(t *testing.T) {
 
 // --- plugins -------------------------------------------------------------
 
-// TestSettingsPluginsInventory: the settings plugin section is the assembled
-// snapshot plus the trigger list, and it states the boot-time lifecycle instead
-// of implying plugin management.
+// TestSettingsPluginsInventory: the settings plugin section is the MANAGED
+// inventory (the plugin manager's rows with their state, revision and declared
+// surface), not a boot-time snapshot, and it states the approval policy of the
+// write path.
 func TestSettingsPluginsInventory(t *testing.T) {
-	starter := &countingStarter{}
 	hooks := agentext.NewHookBus(agentext.HookBusOptions{Logger: testLogger()})
 	defer hooks.Close()
-	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Starter: starter, Hooks: hooks, Logger: testLogger()})
+	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Starter: &countingStarter{}, Hooks: hooks, Logger: testLogger()})
 	defer triggers.Close()
-	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
-		Plugins: []*agentext.Plugin{{
-			ID:       "test.plugin",
-			Version:  "1.0.0",
-			Triggers: []agentext.TriggerSpec{{ID: "test.webhook", Kind: agentext.TriggerWebhook, Prompt: "go", Enabled: true}},
+	manager := &fakePluginManager{inventory: agentext.PluginInventory{
+		Root:       "/var/keel/plugins",
+		Revision:   12,
+		Generation: 4,
+		Plugins: []agentext.PluginView{{
+			ID: "test.plugin", Version: "1.0.0", Kind: "webview", State: agentext.LifecycleEnabled,
+			Provides: pluginpkg.Provides{Tools: []string{"test_tool"}, UI: &pluginpkg.UI{Entry: "ui/index.html"}},
 		}},
-		Hooks: hooks, Triggers: triggers, Logger: testLogger(),
-	})
-	if err := plugins.Apply(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	defer plugins.Close(context.Background())
+		Tools:   []string{"test_tool"},
+		Enabled: []string{"test.plugin"},
+	}}
+	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Logger: testLogger()})
+	defer decisions.Close()
 	server := settingsServer(t, func(cfg *Config) {
-		cfg.Plugins = plugins
+		cfg.PluginManager = manager
+		cfg.Decisions = decisions
 		cfg.Hooks = hooks
 		cfg.Triggers = triggers
 	})
@@ -709,30 +712,47 @@ func TestSettingsPluginsInventory(t *testing.T) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Lifecycle != "boot" || !strings.Contains(body.Description, "boot") {
-		t.Fatalf("the inventory must state the lifecycle: %+v", body)
+	if body.Lifecycle != "dynamic" || !strings.Contains(body.Description, "runtime") {
+		t.Fatalf("the section must state the managed lifecycle: %+v", body)
 	}
-	if body.Generation != 1 || len(body.Plugins) != 1 || body.Plugins[0].ID != "test.plugin" {
-		t.Fatalf("the inventory must carry the snapshot: %+v", body.Plugins)
+	if body.Revision != 12 || body.Generation != 4 {
+		t.Fatalf("the change identities must travel: %+v", body)
 	}
-	if len(body.Triggers) != 1 || body.Triggers[0].ID != "test.webhook" {
-		t.Fatalf("the inventory must carry the triggers: %+v", body.Triggers)
+	if len(body.Plugins) != 1 || body.Plugins[0].ID != "test.plugin" || body.Plugins[0].State != agentext.LifecycleEnabled {
+		t.Fatalf("the inventory must carry the manager's rows: %+v", body.Plugins)
 	}
-	if body.Tools == nil {
+	if len(body.Plugins[0].Provides.Tools) != 1 || body.Plugins[0].Provides.UI == nil {
+		t.Fatalf("the row must carry what the plugin provides: %+v", body.Plugins[0].Provides)
+	}
+	if !body.ApprovalRequired || !body.ApprovalsWired {
+		t.Fatalf("the write policy must be stated: %+v", body)
+	}
+	if body.Audit.URL != "/v1/plugins/audit" || body.Audit.Approval == "" {
+		t.Fatalf("the section must point at the audit and approval routes: %+v", body.Audit)
+	}
+	if len(body.Enabled) != 1 || body.Enabled[0] != "test.plugin" {
+		t.Fatalf("the enabled list must travel: %+v", body.Enabled)
+	}
+	if body.Tools == nil || body.Plugins == nil || body.Triggers == nil || body.Enabled == nil {
 		t.Fatalf("empty lists must render as []: %s", raw)
 	}
+}
 
-	// The fire action is the existing endpoint, and its result is the whole
-	// answer the page needs.
-	var fire struct {
-		Result agentext.FireResult `json:"result"`
+// TestSettingsPluginsStatesApprovalsUnwired: a deployment without the decision
+// primitive still reports its inventory, and says that approval cannot be asked
+// here (lifecycle writes are refused in that case, never silently unapproved).
+func TestSettingsPluginsStatesApprovalsUnwired(t *testing.T) {
+	manager := &fakePluginManager{inventory: agentext.PluginInventory{Revision: 1, Plugins: []agentext.PluginView{}}}
+	server := settingsServer(t, func(cfg *Config) { cfg.PluginManager = manager })
+	var body settingsPluginsResponse
+	if code := doSettingsJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/settings/plugins", uuid.New(), nil, &body); code != 200 {
+		t.Fatalf("plugins inventory = %d", code)
 	}
-	if code := doSettingsJSON(t, client, http.MethodPost, server.URL+"/v1/triggers/test.webhook/fire", uuid.New(),
-		map[string]any{"idempotencyKey": "settings-ui"}, &fire); code != 200 {
-		t.Fatalf("fire = %d", code)
+	if !body.ApprovalRequired || body.ApprovalsWired {
+		t.Fatalf("the policy and the deployment must be told apart: %+v", body)
 	}
-	if fire.Result.Status != "fired" || fire.Result.TriggerID != "test.webhook" || fire.Result.SessionID == "" {
-		t.Fatalf("fire result = %+v", fire.Result)
+	if body.Plugins == nil || body.Triggers == nil {
+		t.Fatalf("empty lists must render as []: %+v", body)
 	}
 }
 

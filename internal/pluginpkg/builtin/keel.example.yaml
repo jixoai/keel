@@ -1,0 +1,22 @@
+id: keel.example
+version: 1.0.0
+kind: in-process
+description: "Built-in example plugin: two tools, three hook subscriptions and a webhook trigger that starts a real turn."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - example_status
+    - example_audit_tail
+  hooks:
+    - trigger.after
+    - decision.answered
+    - subagent.finished
+  triggers:
+    - keel.example.ping
+permissions:
+  tools:
+    - example_status
+    - example_audit_tail
+source:
+  type: builtin

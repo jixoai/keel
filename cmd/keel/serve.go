@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/host"
@@ -25,6 +26,8 @@ import (
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/modelcfg"
+	"github.com/jixoai/keel/internal/pluginpkg"
+	"github.com/jixoai/keel/internal/pluginpkg/builtin"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
@@ -57,7 +60,11 @@ type serveOptions struct {
 	MCPProject      string
 	// ModelsConfig is the path of the tenant models document
 	// (providers/rules/selection); empty leaves provider configuration off.
-	ModelsConfig    string
+	ModelsConfig string
+	// PluginsRoot is the managed plugin directory tree
+	// ($KEEL_HOME/plugins/<id>/plugin.yaml). An empty root disables install and
+	// discovery; bundled plugins still load.
+	PluginsRoot     string
 	ExampleInterval time.Duration
 	Log             *slog.Logger
 }
@@ -279,7 +286,15 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 
 	// --- product layer (keel-agent) ---
-	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, secretBox, secretReason, log)
+	// The web build is resolved before the product layer so the layer can hand
+	// the host theme tokens (web/theme.json) to plugin UIs through the bridge.
+	static := newStaticHandler(opts.WebDir, log)
+	if !static.available() {
+		log.Warn("web build not found; keel serve answers 404 for non-API paths", "web_dir", opts.WebDir,
+			"hint", "build the NSH web target into web/dist")
+	}
+	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, secretBox, secretReason,
+		loadHostTheme(static.root, log), log)
 	if err != nil {
 		return err
 	}
@@ -322,18 +337,21 @@ func runServe(parent context.Context, opts serveOptions) error {
 	product.auth.register(apiMux)
 	apiMux.Handle("/", api)
 
-	static := newStaticHandler(opts.WebDir, log)
-	if !static.available() {
-		log.Warn("web build not found; keel serve answers 404 for non-API paths", "web_dir", opts.WebDir,
-			"hint", "build the NSH web target into web/dist")
-	}
+	// Plugin UIs are hosted on the same origin (the bridge and the static app
+	// share it), and they are not part of the /v1 API surface: the dispatcher
+	// routes /plugins/<id>/ to the plugin UI handler before the static app, which
+	// serves the same path from the web build only if no plugin claims it.
+	pluginUI := newPluginUIHandler(product.pluginManager, log)
 
 	dispatch := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/metrics" {
+		switch {
+		case r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/metrics":
 			apiMux.ServeHTTP(w, r)
-			return
+		case r.URL.Path == "/plugins" || strings.HasPrefix(r.URL.Path, "/plugins/"):
+			pluginUI.ServeHTTP(w, r)
+		default:
+			static.ServeHTTP(w, r)
 		}
-		static.ServeHTTP(w, r)
 	})
 	handler := product.auth.wrap(dispatch)
 
@@ -351,10 +369,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", opts.Addr, err)
 	}
+	inventory := product.pluginManager.Snapshot()
 	log.Info("keel serve listening", "addr", opts.Addr, "tenant", opts.TenantID.String(),
 		"auth", product.auth.mode(), "web", webBuildSummary(opts.WebDir), "web_ready", static.available(),
 		"worker", !opts.NoWorker, "provider", rt.ProviderName(), "model", rt.Model(),
-		"plugins", len(product.pluginSnapshot().Plugins), "triggers", len(product.triggers.List()))
+		"plugins", len(inventory.Plugins), "plugins_enabled", len(inventory.Enabled),
+		"plugins_root", opts.PluginsRoot, "triggers", len(product.triggers.List()))
 	go func() {
 		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("serve", "err", err)
@@ -403,8 +423,11 @@ type productLayer struct {
 	subagents *agentext.SubagentRunner
 	triggers  *agentext.TriggerEngine
 	plugins   *agentext.Runtime
-	api       *agentapi.Server
-	auth      *authController
+	// pluginManager is the lifecycle authority over plugins; api serves it and
+	// the runtime is only ever told what to load through it.
+	pluginManager *agentext.Manager
+	api           *agentapi.Server
+	auth          *authController
 
 	closeFns []func(context.Context)
 }
@@ -417,17 +440,12 @@ func (p *productLayer) close() {
 	}
 }
 
-func (p *productLayer) pluginSnapshot() agentext.Snapshot {
-	if p.plugins == nil {
-		return agentext.Snapshot{}
-	}
-	return p.plugins.Snapshot()
-}
-
 // newProductLayer assembles the extension surface over an already-booted
 // service runtime. secretBox (nil when KEEL_SECRET_KEY is unset) enables the
-// settings secret store; secretReason explains its absence to an operator.
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, secretBox *store.SecretBox, secretReason string, log *slog.Logger) (*productLayer, error) {
+// settings secret store; secretReason explains its absence to an operator;
+// theme is the host theme token document handed to plugin UIs through the
+// bridge (nil when the web build has none).
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, secretBox *store.SecretBox, secretReason string, theme json.RawMessage, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -450,22 +468,70 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Logger:  log,
 	})
 
-	plugin := agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
-		TenantID: opts.TenantID.String(),
-		Interval: opts.ExampleInterval,
-	})
+	// Bundled plugins are ordinary plugin packages whose manifest lives in the
+	// binary; the manager drives their enablement like any other plugin, so
+	// `keel.example` can be disabled from the API and stays disabled.
+	builtinManifests, err := builtin.Manifests()
+	if err != nil {
+		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
+	}
+	builtinFactories := map[string]func() *agentext.Plugin{
+		agentext.ExamplePluginID: func() *agentext.Plugin {
+			return agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
+				TenantID: opts.TenantID.String(),
+				Interval: opts.ExampleInterval,
+			})
+		},
+		"keel.subagents": func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
+	}
+	builtins := make([]agentext.Builtin, 0, len(builtinManifests))
+	for _, manifest := range builtinManifests {
+		factory, ok := builtinFactories[manifest.ID]
+		if !ok {
+			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
+		}
+		builtins = append(builtins, agentext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: true})
+	}
+	// The tool index mirrors the dynamic tool set the plugin runtime publishes:
+	// the plugin UI bridge calls a plugin's own tools through it, so a bridge call
+	// executes exactly what the model would execute.
+	toolIndex := newProductToolIndex()
 	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
-		Plugins:   []*agentext.Plugin{plugin, agentext.NewSubagentPlugin(subagents)},
 		Hooks:     hooks,
 		Triggers:  triggers,
 		Decisions: decisions,
 		Subagents: subagents,
 		Partials:  partials,
-		Tools:     rt.RefreshProductTools,
-		Logger:    log,
+		Tools: func(tools []agentcore.AgentTool) error {
+			toolIndex.publish(tools)
+			return rt.RefreshProductTools(tools)
+		},
+		Logger: log,
 	})
+	manager, err := agentext.NewPluginManager(agentext.ManagerOptions{
+		Root:        opts.PluginsRoot,
+		Runtime:     plugins,
+		Persistence: st,
+		Builtins:    builtins,
+		// The sidecar loader is the one loading strategy this build ships for
+		// non-compiled kinds; the manager installs its denial sink so a sidecar's
+		// permission refusals land in the audit trail (spec P3).
+		Loaders: map[pluginpkg.Kind]agentext.PluginLoader{
+			pluginpkg.KindSidecar: agentext.NewSidecarLoader(agentext.SidecarOptions{
+				KeelVersion: version,
+				Logger:      log,
+			}),
+		},
+		KeelVersion: version,
+		Logger:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin manager: %w", err)
+	}
+	// The plugin inventory is reconciled against what is on disk and assembled
+	// from persisted intent: a plugin an operator disabled stays disabled.
 	applyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	err := plugins.Apply(applyCtx)
+	err = manager.Boot(applyCtx)
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("assemble plugins: %w", err)
@@ -505,12 +571,20 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			_, exists, err := st.SessionOwner(ctx, tenantID, sessionID)
 			return exists, err
 		},
-		Decisions: decisions,
-		Partials:  partials,
-		Plugins:   plugins,
-		Triggers:  triggers,
-		Subagents: subagents,
-		Hooks:     hooks,
+		Decisions:     decisions,
+		Partials:      partials,
+		Plugins:       plugins,
+		PluginManager: manager,
+		// The approval refusal of a lifecycle write never reaches the manager, so
+		// the product API writes its audit row through the store directly; the
+		// bridge's tool calls execute over the same registry the model uses, and
+		// plugin UIs receive the host theme tokens with their state.
+		PluginAuditWriter: pluginAuditStore{store: st},
+		PluginTools:       &pluginToolBridge{index: toolIndex, manager: manager},
+		Theme:             theme,
+		Triggers:          triggers,
+		Subagents:         subagents,
+		Hooks:             hooks,
 		ModelsLive: func() agentapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil
@@ -533,16 +607,17 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}, log)
 
 	layer := &productLayer{
-		hooks:     hooks,
-		decisions: decisions,
-		partials:  partials,
-		runCtrl:   runControl,
-		starter:   starter,
-		subagents: subagents,
-		triggers:  triggers,
-		plugins:   plugins,
-		api:       api,
-		auth:      auth,
+		hooks:         hooks,
+		decisions:     decisions,
+		partials:      partials,
+		runCtrl:       runControl,
+		starter:       starter,
+		subagents:     subagents,
+		triggers:      triggers,
+		plugins:       plugins,
+		pluginManager: manager,
+		api:           api,
+		auth:          auth,
 	}
 	layer.closeFns = []func(context.Context){
 		func(ctx context.Context) { plugins.Close(ctx) },

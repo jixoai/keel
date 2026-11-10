@@ -123,6 +123,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		// modelsConfig carries the tenant models document (providers/rules/selection).
 		modelsConfig = fs.String("models-config", os.Getenv("KEEL_MODELS_CONFIG"), "tenant models document (providers/rules/selection; empty disables provider configuration)")
 		exampleInt   = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
+		pluginsRoot  = fs.String("plugins-root", defaultPluginsRoot(), "managed plugins directory ($KEEL_HOME/plugins)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -155,6 +156,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		MCPConfig:       *mcpConfig,
 		MCPProject:      *mcpProject,
 		ModelsConfig:    *modelsConfig,
+		PluginsRoot:     *pluginsRoot,
 		ExampleInterval: *exampleInt,
 		Log:             log,
 	}
@@ -163,6 +165,25 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// defaultPluginsRoot resolves the managed plugins root: KEEL_PLUGINS_ROOT wins,
+// then $KEEL_HOME/plugins, then ~/.keel/plugins. The root is where installed
+// packages live (one directory per plugin id); it is created on first install.
+func defaultPluginsRoot() string {
+	if root := os.Getenv("KEEL_PLUGINS_ROOT"); root != "" {
+		return root
+	}
+	home := os.Getenv("KEEL_HOME")
+	if home == "" {
+		if dir, err := os.UserHomeDir(); err == nil {
+			home = filepath.Join(dir, ".keel")
+		}
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, "plugins")
 }
 
 func envOr(name, def string) string {

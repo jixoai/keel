@@ -417,3 +417,46 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_credentials (
     PRIMARY KEY (tenant_id, server)
 );
 
+
+-- Plugin inventory (change keel-plugin-core): one row per plugin id known to
+-- this deployment. Plugin enablement is a property of the process, not of a
+-- tenant (one plugins root, one assembled tool surface), so the table carries
+-- no tenant_id; the lifecycle *audit* below does, because "who did it" is a
+-- tenant-scoped fact. path is always inside the managed plugins root; a row
+-- whose package is missing or invalid keeps its state so the reason is
+-- visible instead of the plugin silently disappearing.
+CREATE TABLE IF NOT EXISTS plugins (
+    id           text PRIMARY KEY,
+    version      text NOT NULL,
+    kind         text NOT NULL,
+    state        text NOT NULL DEFAULT 'installed',
+    bundled      boolean NOT NULL DEFAULT false,
+    source       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    manifest     jsonb NOT NULL DEFAULT '{}'::jsonb,
+    content_hash text NOT NULL DEFAULT '',
+    path         text NOT NULL DEFAULT '',
+    diagnostics  jsonb NOT NULL DEFAULT '[]'::jsonb,
+    installed_at timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    enabled_at   timestamptz,
+    disabled_at  timestamptz
+);
+
+-- Plugin lifecycle audit: one row per state-changing action (install / enable /
+-- disable / uninstall / update) and per refused action, written before the HTTP
+-- response. audit_id is the keyset cursor of GET /v1/plugins/audit: it orders
+-- identically to ts and never repeats.
+CREATE TABLE IF NOT EXISTS plugin_audit (
+    audit_id  bigserial PRIMARY KEY,
+    ts        timestamptz NOT NULL DEFAULT now(),
+    tenant_id uuid,
+    actor     text NOT NULL DEFAULT '',
+    plugin_id text NOT NULL,
+    version   text NOT NULL DEFAULT '',
+    action    text NOT NULL,
+    result    text NOT NULL,
+    detail    jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS plugin_audit_tenant ON plugin_audit (tenant_id, audit_id);
+CREATE INDEX IF NOT EXISTS plugin_audit_plugin ON plugin_audit (plugin_id, audit_id);

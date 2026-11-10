@@ -657,47 +657,90 @@ func documentReferencesSecret(document json.RawMessage, name string) bool {
 // --- plugins -------------------------------------------------------------
 
 // settingsPluginsResponse is the GET /v1/settings/plugins body: the settings
-// page's plugin inventory. It aggregates the surfaces that already exist
-// (GET /v1/plugins, GET /v1/triggers) so the page needs one request, and it
-// says explicitly what this surface does not do: plugins load at boot, the
-// inventory reports their state, and firing a trigger is the one control.
+// page's plugin section, backed by the plugin manager — the lifecycle authority
+// — instead of a boot-time snapshot.
 //
-// Firing stays on POST /v1/triggers/{id}/fire: its 200 body already carries the
-// FireResult (status, sessionId, seq, deduped, attempts, error), which is the
-// whole result the page shows.
+// The distinction the old shape got wrong: plugins are managed at runtime now
+// (install/enable/disable/uninstall/update through /v1/plugins, each
+// install/enable/update approved through a durable decision), so the page must
+// render live state — the inventory rows with their state, revision and
+// declared surface — not a boot-time list with a "plugin code is not configured
+// here" note. Firing a registered trigger stays on
+// POST /v1/triggers/{id}/fire: its 200 body already carries the FireResult the
+// page shows.
 type settingsPluginsResponse struct {
-	Generation  int64                    `json:"generation"`
-	Plugins     []agentext.PluginStatus  `json:"plugins"`
-	Hooks       agentext.StatsSummary    `json:"hooks"`
-	HookStats   []agentext.HookStat      `json:"hookStats,omitempty"`
-	Tools       []string                 `json:"tools"`
-	Triggers    []agentext.TriggerStatus `json:"triggers"`
-	Lifecycle   string                   `json:"lifecycle"`
-	Description string                   `json:"description"`
+	// Root is the managed plugins directory; Revision is the inventory's change
+	// identity (it advances on every install/enable/disable/uninstall/update) and
+	// Generation the runtime assembly's, so a page detects a hot change without
+	// polling every row.
+	Root       string `json:"root,omitempty"`
+	Revision   int64  `json:"revision"`
+	Generation int64  `json:"generation"`
+	// Lifecycle is "dynamic": the inventory below is changeable at runtime.
+	Lifecycle string `json:"lifecycle"`
+	// Plugins is the inventory: each row carries state, kind, version, the
+	// declared surface (provides/permissions) and the live one (tools/hooks/
+	// triggers), which is what a management UI renders.
+	Plugins   []agentext.PluginView    `json:"plugins"`
+	Tools     []string                 `json:"tools"`
+	Enabled   []string                 `json:"enabled"`
+	Hooks     agentext.StatsSummary    `json:"hooks"`
+	HookStats []agentext.HookStat      `json:"hookStats,omitempty"`
+	Triggers  []agentext.TriggerStatus `json:"triggers"`
+	Limits    map[string]int           `json:"limits,omitempty"`
+	// ApprovalRequired states the write policy (installing, enabling or upgrading
+	// executes code, so it is a durable question, never a default);
+	// ApprovalsWired states whether this deployment can ask it. They differ only
+	// when the decision primitive is missing — and then lifecycle writes are
+	// refused rather than silently unapproved.
+	ApprovalRequired bool             `json:"approvalRequired"`
+	ApprovalsWired   bool             `json:"approvalsWired"`
+	Audit            settingsAuditRef `json:"audit"`
+	Description      string           `json:"description"`
+}
+
+// settingsAuditRef points the page at the lifecycle audit trail.
+type settingsAuditRef struct {
+	URL      string `json:"url"`
+	PageMax  int    `json:"pageMax"`
+	Approval string `json:"approvalUrl,omitempty"`
 }
 
 // settingsPlugins implements GET /v1/settings/plugins: the settings page's one
-// request for the plugin section. It does not invent plugin management — the
-// inventory is the assembled surface as it is, and `lifecycle: "boot"` plus the
-// description state the contract the client must render.
+// request for the plugin section.
 func (s *Server) settingsPlugins(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantFrom(w, r); !ok {
 		return
 	}
-	if s.cfg.Plugins == nil {
-		notWired(w, "plugins are not wired")
+	if s.cfg.PluginManager == nil {
+		// The section reports the *managed* lifecycle; a deployment without the
+		// manager (a host that only compiles plugins in) has nothing live to report
+		// here — GET /v1/plugins still answers its assembled snapshot.
+		notWired(w, "the plugin manager is not wired in this deployment")
 		return
 	}
-	snapshot := s.cfg.Plugins.Snapshot()
+	inventory := s.cfg.PluginManager.Snapshot()
 	body := settingsPluginsResponse{
-		Generation: snapshot.Generation,
-		Plugins:    snapshot.Plugins,
-		Hooks:      snapshot.Hooks,
-		Tools:      snapshot.Tools,
-		Triggers:   []agentext.TriggerStatus{},
-		Lifecycle:  "boot",
-		Description: "plugins are loaded at boot: this section reports each plugin's state, tools, hooks and " +
-			"triggers, and can fire a registered trigger (POST /v1/triggers/{id}/fire). Plugin code is not configured here.",
+		Root:             inventory.Root,
+		Revision:         inventory.Revision,
+		Generation:       inventory.Generation,
+		Lifecycle:        "dynamic",
+		Plugins:          inventory.Plugins,
+		Tools:            inventory.Tools,
+		Enabled:          inventory.Enabled,
+		Hooks:            inventory.Hooks,
+		Triggers:         []agentext.TriggerStatus{},
+		Limits:           map[string]int{"auditPageMax": pluginAuditMaxLimit},
+		ApprovalRequired: true,
+		ApprovalsWired:   s.cfg.Decisions != nil,
+		Audit: settingsAuditRef{
+			URL:      "/v1/plugins/audit",
+			PageMax:  pluginAuditMaxLimit,
+			Approval: "/v1/plugin-approvals/{decisionId}",
+		},
+		Description: "plugins are managed at runtime: install, enable, disable, uninstall and update through " +
+			"/v1/plugins; installing, enabling and updating are approved through a durable decision " +
+			"(answered at /v1/plugin-approvals/{decisionId}), and the trail is GET /v1/plugins/audit",
 	}
 	if s.cfg.Hooks != nil {
 		body.HookStats = s.cfg.Hooks.Stats()
@@ -706,10 +749,13 @@ func (s *Server) settingsPlugins(w http.ResponseWriter, r *http.Request) {
 		body.Triggers = s.cfg.Triggers.List()
 	}
 	if body.Plugins == nil {
-		body.Plugins = []agentext.PluginStatus{}
+		body.Plugins = []agentext.PluginView{}
 	}
 	if body.Tools == nil {
 		body.Tools = []string{}
+	}
+	if body.Enabled == nil {
+		body.Enabled = []string{}
 	}
 	if body.Triggers == nil {
 		body.Triggers = []agentext.TriggerStatus{}

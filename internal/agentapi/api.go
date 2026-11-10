@@ -10,7 +10,9 @@
 //   - the token-level partial transport (?partials=1), wired into the runtime's
 //     SSE handler through a narrow seam;
 //   - capability discovery and the extension query/control plane
-//     (plugins/triggers/sub-agents);
+//     (plugins/triggers/sub-agents), including the plugin lifecycle surface
+//     (internal/agentapi/plugins.go: inventory, install, enable/disable/
+//     uninstall/update, audit);
 //   - the settings surface (internal/agentapi/settings.go): the tenant model
 //     configuration write path, secret storage and the plugin inventory —
 //     separate from the workspace, mounted under /v1/settings/.
@@ -80,6 +82,23 @@ type Config struct {
 	// Plugins is the assembled extension runtime. Nil answers 503 on
 	// GET /v1/plugins.
 	Plugins *agentext.Runtime
+	// PluginManager is the plugin lifecycle surface (inventory, install,
+	// enable/disable/uninstall/update, audit). When set, GET /v1/plugins answers
+	// the managed inventory; when nil, it answers the assembled snapshot (a host
+	// that only compiles plugins in) and the write routes answer 503.
+	PluginManager PluginManager
+	// PluginAuditWriter records audit rows for lifecycle writes that never
+	// reached the plugin manager (approval refusals). Nil logs the refusal
+	// instead: the action is refused either way, but only a wired writer makes
+	// it queryable through GET /v1/plugins/audit as `refused`.
+	PluginAuditWriter PluginAuditWriter
+	// PluginTools is the plugin UI bridge's tool invocation seam: calling a tool
+	// the plugin declared. Nil answers 501 on bridge calls.
+	PluginTools PluginToolInvoker
+	// Theme is the host theme token document pushed to plugin UIs through the
+	// bridge state verb ("宿主把主题令牌下发给插件 UI"). The host process reads
+	// it from the web build (web/theme.json); nil omits it from the answer.
+	Theme json.RawMessage
 	// Triggers is the trigger engine. Nil answers 503 on the trigger routes.
 	Triggers *agentext.TriggerEngine
 	// Subagents is the sub-agent runner. Nil answers 503 on the sub-agent
@@ -174,7 +193,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions", s.openDecision)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions/{decisionId}", s.getDecision)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions/{decisionId}", s.answerDecision)
-	s.mux.HandleFunc("GET /v1/plugins", s.listPlugins)
+	s.pluginRoutes()
 	s.mux.HandleFunc("GET /v1/triggers", s.listTriggers)
 	s.mux.HandleFunc("POST /v1/triggers/{id}/fire", s.fireTrigger)
 	s.mux.HandleFunc("GET /v1/subagents", s.listSubagents)
@@ -252,6 +271,11 @@ type Capabilities struct {
 	Features       map[string]bool `json:"features"`
 	Limits         map[string]int  `json:"limits"`
 	Hooks          []string        `json:"hooks"`
+	// Plugins is the enabled plugin ids of the current inventory, and
+	// PluginRevision is its change identity: an enable/disable/install moves it,
+	// so a client can see hot plugin changes without polling the full inventory.
+	Plugins        []string `json:"plugins,omitempty"`
+	PluginRevision int64    `json:"pluginRevision,omitempty"`
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
@@ -261,9 +285,17 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		"decisions":       s.cfg.Decisions != nil,
 		"partials":        s.cfg.Partials != nil,
 		"plugins":         s.cfg.Plugins != nil,
-		"triggers":        s.cfg.Triggers != nil,
-		"subagents":       s.cfg.Subagents != nil,
-		"hooks":           s.cfg.Plugins != nil,
+		"plugins.manage":  s.cfg.PluginManager != nil,
+		"plugins.audit":   s.cfg.PluginManager != nil,
+		// plugins.approvals gates a capability this deployment may not serve: the
+		// manager without the decision primitive refuses every lifecycle write
+		// (fail closed), so a client must be able to see that before offering the
+		// control. plugins.bridge is the plugin-UI capability channel.
+		"plugins.approvals": s.cfg.PluginManager != nil && s.cfg.Decisions != nil,
+		"plugins.bridge":    s.cfg.PluginManager != nil,
+		"triggers":          s.cfg.Triggers != nil,
+		"subagents":         s.cfg.Subagents != nil,
+		"hooks":             s.cfg.Plugins != nil,
 		// Settings is its own surface: the model write path and secret storage
 		// are separately discoverable, so a client can hide a section this
 		// deployment does not serve.
@@ -274,7 +306,7 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 	for _, event := range agentext.HookEvents() {
 		hooks = append(hooks, string(event))
 	}
-	writeJSON(w, http.StatusOK, Capabilities{
+	capabilities := Capabilities{
 		APIVersion:     APIVersion,
 		ServiceVersion: Version,
 		Features:       features,
@@ -284,7 +316,16 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 			"subagentsPageMax":    200,
 		},
 		Hooks: hooks,
-	})
+	}
+	if s.cfg.PluginManager != nil {
+		inventory := s.cfg.PluginManager.Snapshot()
+		capabilities.Plugins = inventory.Enabled
+		capabilities.PluginRevision = inventory.Revision
+		if capabilities.Plugins == nil {
+			capabilities.Plugins = []string{}
+		}
+	}
+	writeJSON(w, http.StatusOK, capabilities)
 }
 
 // queryInt parses an optional bounded integer query parameter.
