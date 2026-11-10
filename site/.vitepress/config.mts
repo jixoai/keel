@@ -3,6 +3,27 @@ import { defineConfig } from 'vitepress'
 // The English tree is the site root (/), the Chinese tree lives under /zh/.
 // Both locales carry the same page set at the same paths: the parity gate in
 // site/scripts/parity.mjs fails the build when a page exists on one side only.
+
+// Canonical host for the deployed site (site/docs/public/CNAME).
+const SITE_URL = 'https://keel.jixoai.com'
+
+// One page has exactly one canonical URL, and every page is published in two
+// languages at the same path. `cleanUrls: true` means the canonical form is
+// the extensionless one (/glossary), while the generator still writes
+// glossary.html; both resolve on GitHub Pages, so the duplicate form is
+// settled by the canonical link rather than by a redirect.
+function pagePaths(relativePath: string) {
+  const withoutExt = relativePath.replace(/\.md$/, '')
+  const isIndex = withoutExt === 'index' || withoutExt.endsWith('/index')
+  const clean = isIndex
+    ? `/${withoutExt.slice(0, withoutExt.length - 'index'.length)}`
+    : `/${withoutExt}`
+  const canonical = clean
+  const isZh = canonical.startsWith('/zh/')
+  const en = isZh ? canonical.replace(/^\/zh/, '') || '/' : canonical
+  const zh = isZh ? canonical : canonical === '/' ? '/zh/' : `/zh${canonical}`
+  return { canonical, en, zh }
+}
 const coreSidebarEn = [
   {
     text: 'Core · Overview',
@@ -60,13 +81,11 @@ const harnessSidebarEn = [
   }
 ]
 
-const glossaryEn = [{ text: 'Glossary', link: '/glossary' }]
-
 const coreSidebarZh = [
   {
     text: 'Core · 总览',
     items: [
-      { text: 'keel 是什么', link: '/zh/core/' },
+      { text: 'Keel 是什么', link: '/zh/core/' },
       { text: '架构', link: '/zh/core/architecture' },
       { text: '事件与协议', link: '/zh/core/events' },
       { text: 'AgentAPI 参考', link: '/zh/core/agentapi' },
@@ -106,8 +125,8 @@ const harnessSidebarZh = [
       { text: '插件种类', link: '/zh/harness/plugins/kinds' },
       { text: '生命周期与副作用', link: '/zh/harness/plugins/lifecycle' },
       { text: '权限与审计', link: '/zh/harness/plugins/permissions' },
-      { text: 'UI 承载', link: '/zh/harness/plugins/ui' },
-      { text: '测试与 conformance', link: '/zh/harness/plugins/testing' }
+      { text: 'UI 界面', link: '/zh/harness/plugins/ui' },
+      { text: '测试与一致性', link: '/zh/harness/plugins/testing' }
     ]
   },
   {
@@ -118,8 +137,6 @@ const harnessSidebarZh = [
     ]
   }
 ]
-
-const glossaryZh = [{ text: '术语表', link: '/zh/glossary' }]
 
 const searchOptionsEn = {
   translations: {
@@ -171,13 +188,39 @@ export default defineConfig({
   // Output lands in site/dist (the Pages artifact path the workflow uploads).
   outDir: 'dist',
   cleanUrls: true,
-  appearance: 'dark',
+  // Dark is the only appearance the site has. 'force-dark' pins the `dark`
+  // class and does not render the appearance switch at all — the previous
+  // 'dark' default still shipped a toggle that dropped the whole site back to
+  // the untouched VitePress light palette.
+  appearance: 'force-dark',
   lastUpdated: false,
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     ['meta', { name: 'theme-color', content: '#161616' }],
     ['meta', { property: 'og:title', content: 'Keel — ledger core + Harness' }]
   ],
+  transformHead({ pageData }) {
+    const relativePath = pageData?.relativePath ?? ''
+    if (!relativePath || relativePath.startsWith('404')) return []
+    const { canonical, en, zh } = pagePaths(relativePath)
+    return [
+      ['link', { rel: 'canonical', href: SITE_URL + canonical }],
+      ['link', { rel: 'alternate', hreflang: 'en-US', href: SITE_URL + en }],
+      ['link', { rel: 'alternate', hreflang: 'zh-CN', href: SITE_URL + zh }],
+      ['link', { rel: 'alternate', hreflang: 'x-default', href: SITE_URL + en }]
+    ]
+  },
+  markdown: {
+    // A wide table must be able to scroll inside its own box (with a visible
+    // affordance) instead of being clipped by the content column: wrap every
+    // table in a scroll container. The styling lives in theme/tokens.css.
+    config: (md) => {
+      md.renderer.rules.table_open = (tokens, idx, options, _env, self) =>
+        `<div class="keel-table-wrap">${self.renderToken(tokens, idx, options)}`
+      md.renderer.rules.table_close = (tokens, idx, options, _env, self) =>
+        `${self.renderToken(tokens, idx, options)}</div>`
+    }
+  },
   themeConfig: {
     siteTitle: 'Keel',
     outline: { level: [2, 3] },
@@ -195,8 +238,7 @@ export default defineConfig({
     ],
     sidebar: {
       '/core/': coreSidebarEn,
-      '/harness/': harnessSidebarEn,
-      '/glossary': glossaryEn
+      '/harness/': harnessSidebarEn
     }
   },
   locales: {
@@ -222,6 +264,14 @@ export default defineConfig({
           copyright: 'Keel —— 开源智能体运行时'
         },
         search: { provider: 'local', options: searchOptionsZh },
+        // The 404 page is served for any missing path, including /zh/*: the
+        // theme resolves this locale from the URL and renders these strings.
+        notFound: {
+          title: '页面不存在',
+          quote: '但如果你不改变方向，并且一直寻找，你或许会到达你要去的地方。',
+          linkText: '回到首页',
+          linkLabel: '回到首页'
+        },
         nav: [
           { text: 'Core', link: '/zh/core/' },
           { text: 'Harness', link: '/zh/harness/' },
@@ -230,8 +280,7 @@ export default defineConfig({
         ],
         sidebar: {
           '/zh/core/': coreSidebarZh,
-          '/zh/harness/': harnessSidebarZh,
-          '/zh/glossary': glossaryZh
+          '/zh/harness/': harnessSidebarZh
         }
       }
     }

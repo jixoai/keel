@@ -2,7 +2,7 @@
 
 > **Planned** lifecycle API (`installed → enabled → disabled → uninstalled`,
 > install/enable/disable/uninstall endpoints, version replacement) per
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("生命周期").
+> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("lifecycle").
 > The *assembly mechanics* it builds on are **implemented** in
 > `internal/agentext` and `internal/servicegraph` and are cited below.
 
@@ -46,14 +46,14 @@ in-process plugins, and the planned lifecycle reuses it:
 The spec's acceptance scenario is the same statement in product terms:
 *enable a plugin that provides tool `x` and a webhook trigger, disable it, and
 the model no longer has `x`, the trigger no longer fires, the inventory shows
-`disabled`, and nothing errors* (`spec: 停用即撤销`).
+`disabled`, and nothing errors* (`spec: disabling revokes immediately`).
 
 ## 2. Dependency rules
 
 - `requires` names **plugins or services**. A requirement is satisfied when
   something active `provides` it; a plugin that cannot be satisfied stays
   `disabled` with a named reason. It is never partially loaded
-  (`spec: 依赖缺失不装载`; mechanism: `internal/agentext/plugin.go:291`).
+  (`spec: a missing dependency blocks load`; mechanism: `internal/agentext/plugin.go:291`).
 - Tools are a global namespace: two enabled plugins may not provide the same
   tool name. The second one fails closed with a diagnostic, whichever order
   they are assembled in (`internal/agentext/plugin.go:236`, `:454`).
@@ -100,7 +100,7 @@ Two levels of protection keep it from disturbing work in progress:
 Every lifecycle action — `install`, `enable`, `disable`, `uninstall`, `update`
 — and every permission refusal must record **time, operator, plugin id,
 version, action, result**, and be queryable through `GET /v1/plugins/audit`
-(`spec: 审计`). The audit lane reuses the same discipline as the trigger audit
+(`spec: audit`). The audit lane reuses the same discipline as the trigger audit
 today: bounded records, ordered by time, with the actor and the outcome
 (`internal/agentext/triggers.go:86` for the existing audit-entry shape).
 

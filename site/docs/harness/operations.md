@@ -78,7 +78,7 @@ plugin UIs — plugin rows open a web URL instead
 | Where plugins come from | compiled into the binary (two built-ins: `keel.example`, `keel.subagents` — `internal/agentext/builtin.go:38`, `:256`) | `<plugins-root>/<id>/` packages discovered at boot |
 | Enable/disable | process assembly (`agentext.Runtime.Apply`) | lifecycle API + approval ([Lifecycle](/harness/plugins/lifecycle)) |
 | State | `active`/`pending`/`failed`/`stopped` per plugin, generation counter, diagnostics | plus `installed`/`disabled`, install/uninstall/update audit |
-| Visible at | `GET /v1/plugins` + web settings › 插件 (`internal/agentapi/ext.go:18`, `web/src/screens/settings.tsx:1148`) | same endpoints extended, not replaced |
+| Visible at | `GET /v1/plugins` + web settings › Plugins (`internal/agentapi/ext.go:18`, `web/src/screens/settings.tsx:1148`) | same endpoints extended, not replaced |
 
 The planned plugins root is a **managed directory**: packages are copied into
 it, content-hashed at install, and never referenced in place
@@ -130,7 +130,7 @@ Mandatory discipline:
   TTL;
 - rollback = drain → stop new → start old; **do not roll back data** — the
   ledger is append-only and old binaries skip unknown kinds when reading
-  (`docs/HANDOFF.md` «回滚手册»).
+  (`docs/HANDOFF.md`, the "rollback manual" section).
 
 ## 6. Capacity notes
 

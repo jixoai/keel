@@ -2,7 +2,7 @@
 
 > **Planned.** The three kinds, their `entry` shapes and the isolation promises
 > come from `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md`
-> ("三种 kind"). The supervision machinery a sidecar reuses already exists in
+> ("the three kinds kind"). The supervision machinery a sidecar reuses already exists in
 > `internal/gateway` — that part is implemented and is cited below.
 
 A plugin is exactly one of three kinds. The kind decides what `entry` means,
@@ -26,7 +26,7 @@ the kind the current `agentext` runtime already implements for built-ins
 ## 2. `sidecar`
 
 An external process speaking **stdio, newline-delimited JSON-RPC**
-(`spec: 三种 kind`). The method set is the gateway's existing one — the plugin
+(`spec: the three kinds kind`). The method set is the gateway's existing one — the plugin
 spec explicitly reuses it:
 
 | Method | Direction | Semantics |
@@ -56,7 +56,7 @@ What the plugin inherits from the same implementation (all **implemented**, in
 - **restart policy** — a crashed backend is restarted with backoff per
   `gateway.RestartPolicy` (`internal/gateway/process.go:26`).
 
-The isolation promise, restated plainly (`spec: sidecar 崩溃隔离`):
+The isolation promise, restated plainly (`spec: sidecar crash isolation`):
 
 > When a sidecar plugin's process is killed, its tool calls fail with a clear
 > error and the plugin's state becomes `failed`; every other plugin and the
@@ -77,7 +77,7 @@ restated for plugins (`docs/DSH-REFERENCE.md` §4):
 ## 3. `webview`
 
 A UI package under `ui/`, hosted by the host and rendered in a WebView
-(`spec: 三种 kind` and "UI 承载与桥接"):
+(`spec: the three kinds kind` and "UI surfaces and bridging"):
 
 ```
 <plugins-root>/<id>/ui/
@@ -86,14 +86,14 @@ A UI package under `ui/`, hosted by the host and rendered in a WebView
 ```
 
 - The host serves the package at **`/plugins/<id>/`**; opening the plugin from
-  the inventory loads that path (`spec: UI 承载与桥接`).
+  the inventory loads that path (`spec: UI surfaces and bridging`).
 - The UI talks to the host **only** through the bridge `keel.plugin.*`
   (read own state, call own tools, request an approval, subscribe to events)
-  and never receives host secrets (`spec: UI 承载与桥接`). Details in
+  and never receives host secrets (`spec: UI surfaces and bridging`). Details in
   [Plugin UI](/harness/plugins/ui).
 - A webview plugin **may carry a sidecar backend**; the UI then reaches its own
   process through its own tools, never by direct IPC.
-- **TUI behavior** (`spec: TUI 行为`, planned): the TUI must not render plugin
+- **TUI behavior** (`spec: TUI behavior`, planned): the TUI must not render plugin
   UI. A plugin row offers "Open", which calls `openUrl` on the web deep link;
   when the host has no URL opener, it must display the copyable URL instead.
 

@@ -29,7 +29,7 @@ closed when denied" is the interesting one.
 
 - Manifest: missing `id`/`version`/`kind`, bad id grammar, bad semver, unknown
   `kind`, `engines.keel` outside range — each must fail with a **field-level
-  reason** and leave the plugin directory unadopted (`spec: 清单非法即拒绝`).
+  reason** and leave the plugin directory unadopted (`spec: an illegal manifest is rejected`).
 - `provides.hooks` entries outside the closed set must be rejected at
   registration, never silently ignored (`internal/agentext/hooks.go:249`).
 - Tool-name conflict detection is order-independent: whichever plugin is
@@ -43,7 +43,7 @@ fire → hook delivery → sub-agent spawn → cancel of an online attempt*
 plugin-suite integration test must additionally prove the disable
 path: after disabling a plugin that provided tool `x` and a webhook trigger,
 the tool is gone from the model's tool set, the trigger no longer fires, and
-the inventory shows `disabled` with no error residue (`spec: 停用即撤销`).
+the inventory shows `disabled` with no error residue (`spec: disabling revokes immediately`).
 
 ### Conformance
 
@@ -64,10 +64,10 @@ the inventory shows `disabled` with no error residue (`spec: 停用即撤销`).
 | version gate | `engines.keel` excludes the host | install **and** enable refused, range named |
 | missing dependency | enable B while `requires: [A]` is absent | state `disabled`, named reason, nothing half-loaded |
 | duplicate tool | two enabled plugins declare the same tool name | second plugin `FAILED`, first untouched |
-| sidecar crash | kill the sidecar process mid-run | its tool calls fail clearly, state `failed`, other plugins and the Harness unaffected, re-enable recovers (`spec: sidecar 崩溃隔离`) |
-| permission denial | call an undeclared tool / read an undeclared secret | call fails clearly **and** an audit row exists (`spec: 越权被拒`) |
+| sidecar crash | kill the sidecar process mid-run | its tool calls fail clearly, state `failed`, other plugins and the Harness unaffected, re-enable recovers (`spec: sidecar crash isolation`) |
+| permission denial | call an undeclared tool / read an undeclared secret | call fails clearly **and** an audit row exists (`spec: over-reach is denied`) |
 | approval denied / timed out | answer `deny` (or never answer) | plugin not applied; audit records the refusal; fail-closed on timeout |
-| creation-mode failure | make generation/validation fail | no half-installed state, error returned verbatim, temp artifacts cleaned (`spec: 生成失败可回滚`) |
+| creation-mode failure | make generation/validation fail | no half-installed state, error returned verbatim, temp artifacts cleaned (`spec: a failed generation rolls back`) |
 | host SIGKILL with a live sidecar | kill -9 the host | the child exits on stdin EOF (protocol obligation); a sweep gap is a **documented** known limit, asserted as such, not hidden (`docs/DSH-REFERENCE.md` §4) |
 
 The sidecar rows reuse the machinery already exercised by
@@ -83,11 +83,11 @@ For `webview` plugins (planned):
 
 1. serve the package and assert the page actually loads from `/plugins/<id>/`;
 2. assert the page can read its own state and call its own tool through the
-   bridge (`spec: 插件 UI 可用`);
+   bridge (`spec: plugin UI works`);
 3. assert the negative: attempting a non-bridged call (host secret access,
    another plugin's tool) fails;
 4. TUI assertion: the plugin row opens a URL, and **no** HTML/WebView renders
-   in the TUI (`spec: TUI 行为`).
+   in the TUI (`spec: TUI behavior`).
 
 ## 4. Running the suites
 

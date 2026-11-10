@@ -1,8 +1,8 @@
 # Plugin permissions and audit
 
 > **Planned** enforcement (allowlists, approvals, audit) per
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("权限与沙箱",
-> "审计"). The credential-reference discipline and the process/environment
+> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("permissions and sandbox",
+> "audit"). The credential-reference discipline and the process/environment
 > isolation it builds on are **implemented** in `internal/gateway`,
 > `internal/host` and `internal/servicehost`; those are cited inline.
 
@@ -66,7 +66,7 @@ install request ──▶ decision (kind=approval, options=[allow, deny])
                       └─ timed out / no answer ──▶ not applied (fail-closed)
 ```
 
-Rules the spec makes explicit (`spec: 权限与沙箱`): approval gates
+Rules the spec makes explicit (`spec: permissions and sandbox`): approval gates
 install/enable/upgrade; a denial means the plugin does not take effect; and the
 approval itself is a durable row with an answer journal (never a transient
 dialog). Timeouts fail closed.
@@ -76,7 +76,7 @@ dialog). Timeouts fail closed.
 Every lifecycle action (`install`/`enable`/`disable`/`uninstall`/`update`) and
 every permission refusal records **time, operator, plugin id, version, action,
 result**, and is queryable through `GET /v1/plugins/audit`
-(`spec: 审计`). The current codebase already demonstrates the pattern at two
+(`spec: audit`). The current codebase already demonstrates the pattern at two
 levels:
 
 - the trigger audit keeps per-fire history and the last-N audit window

@@ -1,8 +1,8 @@
 # Manifest (`plugin.yaml`)
 
 > **Planned.** The package format and every rule on this page come from
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("插件包与清单"
-> and "发现、安装与包存储"). Nothing here is implemented in the current
+> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("package and manifest"
+> and "discovery, install and package store"). Nothing here is implemented in the current
 > checkout; the implemented in-process contract is described at the end of this
 > page for contrast.
 
@@ -21,7 +21,7 @@ A plugin **is a directory**:
 
 The package contents are stored in a **managed directory**; a manifest may not
 point at arbitrary external paths, and installation records a content hash
-(`spec: 发现、安装与包存储`).
+(`spec: discovery, install and package store`).
 
 ## 2. The manifest — full field list
 
@@ -66,14 +66,14 @@ Field-by-field semantics and enforcement points:
 Rules that are *not* field-level but are part of the same contract:
 
 - **invalid manifest → refusal with a field-level reason**; the plugin
-  directory is not adopted (`spec: 清单非法即拒绝`);
+  directory is not adopted (`spec: an illegal manifest is rejected`);
 - **version gate** — `engines.keel` mismatch refuses install and enable, naming
-  the supported range (`spec: 版本门`);
+  the supported range (`spec: version gate`);
 - **content hash + audit** — installation validates manifest, version gate and
-  package content hash, and writes an audit record (`spec: 发现、安装与包存储`);
+  package content hash, and writes an audit record (`spec: discovery, install and package store`);
 - **install is immediately visible** — after install, `GET /v1/plugins` lists
   the plugin (state `installed`/`enabled`) and the UI inventory refreshes
-  (`spec: 安装即出现`).
+  (`spec: install is immediately visible`).
 
 ## 3. Discovery, install and storage (planned API surface)
 

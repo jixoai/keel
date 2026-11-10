@@ -92,7 +92,7 @@ claim、loop、提交、投影——都真实跑过。要真实回答，把 `KEE
 
 ## 接下来读什么
 
-- **Core** —— 从 [keel 是什么](/zh/core/) 开始，然后是[架构](/zh/core/architecture)、
+- **Core** —— 从 [Keel 是什么](/zh/core/) 开始，然后是[架构](/zh/core/architecture)、
   [事件与协议](/zh/core/events)、[AgentAPI](/zh/core/agentapi)、[存储与运行](/zh/core/storage)，
   以及[扩展地图](/zh/core/extend/)。
 - **Harness** —— 从 [Harness 是什么](/zh/harness/) 与[插件](/zh/harness/plugins/)开始。

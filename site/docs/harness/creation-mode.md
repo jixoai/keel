@@ -1,8 +1,8 @@
 # Creation mode
 
 > **Planned.** Creation mode is specified in
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("创造模式（作为
-> 内置插件 `keel.creation`）") and tracked in `plugins/COVERAGE.md`. Nothing on
+> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("creation mode (shipped as
+> the built-in plugin `keel.creation`)") and tracked in `plugins/COVERAGE.md`. Nothing on
 > this page exists in the current checkout; every mechanism it builds on is
 > implemented and cited.
 
@@ -14,7 +14,7 @@ approval and audit rules as everything else.
 
 A **built-in plugin** named `keel.creation`. It is not a privileged core
 feature: it can be disabled like any other plugin, and it is subject to its own
-permission set (`spec: 创造模式`). What it does:
+permission set (`spec: creation mode`). What it does:
 
 ```
 user describes a capability in natural language
@@ -38,7 +38,7 @@ The spec's acceptance scenario is the shortest possible statement of the
 feature: *say "make a small panel showing this session's token usage", and a
 webview plugin package is generated, installed and enabled; the plugin appears
 in the inventory; opening its UI shows the data; the audit has `install` and
-`enable` records* (`spec: 一句话生成插件`).
+`enable` records* (`spec: one sentence generates a plugin`).
 
 ## 2. Why it is a plugin, not a core mode
 
@@ -54,12 +54,12 @@ the point:
    around the rules.
 3. **Uniform artifacts.** A generated plugin is a normal package in the
    managed directory: listable, disable-able, deletable, auditable
-   (`spec: 产物 MUST 可列举、可停用、可删除`).
+   (`spec: artifacts MUST be listable, disableable and deletable`).
 
 ## 3. Failure is a first-class outcome
 
 Generation is a model-driven activity; it will fail sometimes, and the failure
-path is specified as strictly as the success path (`spec: 生成失败可回滚`):
+path is specified as strictly as the success path (`spec: a failed generation rolls back`):
 
 - a failed generation or validation produces **no half-installed state** — the
   install step is atomic at the package level;

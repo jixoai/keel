@@ -120,6 +120,6 @@ The planned plugin standard adds one more consumer: a plugin UI can **request
 an approval** through the host bridge (`keel.plugin.*`), and plugin
 installation/enablement itself must go through a durable approval before it
 takes effect
-(`openspec/changes/keel-plugin-core/specs/plugin-system/spec.md`, "权限与沙箱").
+(`openspec/changes/keel-plugin-core/specs/plugin-system/spec.md`, "permissions and sandbox").
 Both are marked **planned** — the current checkout has no plugin bridge and no
 plugin install path.

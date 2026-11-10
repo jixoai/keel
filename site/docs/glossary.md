@@ -1,3 +1,9 @@
+---
+# The glossary is a single page: a sidebar rail holding one entry would just be
+# an empty column, so this page runs without a sidebar.
+sidebar: false
+---
+
 # Glossary
 
 > Naming rule of this project: the product layer is called **Harness** (formerly
@@ -12,7 +18,7 @@
 | --- | --- | --- |
 | **Keel** | The project: a stateless, multi-tenant agent runtime base. | `README.md` |
 | **Core** | The contract kernel + event ledger + service graph + loadout + storage + handoff. The part that cannot be swapped. | `docs/SERVICE-GRAPH.md`, `docs/KERNEL.md` |
-| **Harness** (原 Agent) | The product layer over the Core: sessions, turns, tools, approvals, plugins, triggers, sub-agents, and the client surfaces. The process is `keel serve`. | `internal/agentext/doc.go`, `docs/HARNESS.md` |
+| **Harness** (formerly "Agent") | The product layer over the Core: sessions, turns, tools, approvals, plugins, triggers, sub-agents, and the client surfaces. The process is `keel serve`. | `internal/agentext/doc.go`, `docs/HARNESS.md` |
 | **AgentAPI** | The `/v1` product API contract (alias: Harness API). Name kept; it is a wire contract consumed by the web UI and TUI. | `internal/agentapi/api.go:43` |
 | **AgentBackend** | The protocol a foreign agent runtime (for example DSH) implements to be driven as an external backend. Name kept. | `internal/gateway/protocol.go`, `docs/DSH-REFERENCE.md` |
 | **DSH** | DeepSeek Harness — an external reference for the plugin model and an external-agent target. A reference, not this project's source of truth. | `docs/DSH-REFERENCE.md` |

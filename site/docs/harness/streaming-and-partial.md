@@ -130,7 +130,7 @@ clients does not reconnect in a thundering herd
 (`internal/httpapi/drain.go:105`). The client reconnects to the new runtime and
 resumes from its cursor: the first frame after reconnection is `cursor + 1` —
 committed events are neither lost nor duplicated across a handoff
-(`docs/HANDOFF.md` §「怎么用」).
+(`docs/HANDOFF.md`, the "how to use" section).
 
 ## 6. Acceptance evidence
 

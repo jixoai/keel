@@ -122,7 +122,7 @@ this:
 | bundle = a patch layer of config/plugins | the planned enablement list + `plugin.yaml` (`keel-plugin-core`); today the closest analogue is the default loadout blueprint (`internal/loadout/loadout.go:63`) | **Planned** |
 | profile = an ordered stack of bundles | loadout: an immutable snapshot `{id, revision, version, summary, services}` pinned per run (`docs/LOADOUT.md` §1) | **Implemented** (services), planned (plugins in the set) |
 | plugin can provide tool / hook / command / UI slot / provider / storage | tools, hooks, triggers implemented (`internal/agentext/plugin.go:67`); commands, UI slots, providers-as-plugins and storage are on the W1/W2 waves (`plugins/COVERAGE.md`) | **Partly implemented / planned** |
-| installing third-party code executes it; explicit permission is required | today: code is compiled in, so trust is implicit; planned: permission enforcement + durable install approval (`keel-plugin-core` "权限与沙箱") | **Planned** |
+| installing third-party code executes it; explicit permission is required | today: code is compiled in, so trust is implicit; planned: permission enforcement + durable install approval (`keel-plugin-core` "permissions and sandbox") | **Planned** |
 | Cordis runtime (in-process object graph, synchronous `get/provide`, effect system, event bus) | **not ported.** keel expresses the same semantics with Go `agentext` + `servicegraph`; introducing a second plugin runtime would violate the single-source-of-truth rule (`plugins/COVERAGE.md` §D, `vendor/cordis` = absent with reason) | **Deliberate difference** |
 
 Two more differences worth knowing before reading the plugin pages:

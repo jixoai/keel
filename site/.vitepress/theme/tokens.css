@@ -3,8 +3,14 @@
  *
  * Dark-first palette taken from the product tokens documented for the keel
  * workstream: background #161616, panel #202020, card #2b2b2b,
- * border rgba(255,255,255,.1), brand #fff, accent #001d3d.
- * The surface must stay quiet: no animation beyond the VitePress defaults.
+ * border rgba(255,255,255,.1), brand #fff, solid fill for primary actions
+ * #2b2b2b. The surface must stay quiet: no animation beyond the VitePress
+ * defaults.
+ *
+ * Dark is the only appearance the site has (`appearance: 'force-dark'` in
+ * .vitepress/config.mts): this file carries no light branch, and the mapping
+ * below applies from the document root as well as from `html.dark`, so the
+ * palette cannot fall back to the VitePress light defaults.
  */
 
 :root {
@@ -14,12 +20,17 @@
   --keel-card: #2b2b2b;
   --keel-border: rgba(255, 255, 255, 0.1);
   --keel-brand: #fff;
-  --keel-accent: #001d3d;
+  --keel-accent: #2b2b2b;
   --keel-text: rgba(255, 255, 255, 0.92);
   --keel-text-2: rgba(255, 255, 255, 0.66);
+  --keel-scrollbar: rgba(255, 255, 255, 0.24);
+  --keel-scrollbar-hover: rgba(255, 255, 255, 0.4);
 }
 
-.dark {
+:root,
+html.dark {
+  color-scheme: dark;
+
   /* Backgrounds */
   --vp-c-bg: var(--keel-bg);
   --vp-c-bg-alt: var(--keel-panel);
@@ -63,12 +74,18 @@
   --vp-custom-block-danger-border: rgba(255, 255, 255, 0.28);
   --vp-custom-block-danger-bg: var(--keel-panel);
 
+  /* Primary action ("brand") buttons: a card-coloured pill with a hairline
+   * border. These are the home-page CTAs — a navy or light-mode fill here
+   * reads as a hole in the dark page. */
   --vp-button-brand-bg: var(--keel-accent);
-  --vp-button-brand-hover-bg: #00305f;
+  --vp-button-brand-hover-bg: #3a3a3a;
   --vp-button-brand-active-bg: var(--keel-accent);
-  --vp-button-brand-border: var(--keel-border);
+  --vp-button-brand-border: rgba(255, 255, 255, 0.28);
+  --vp-button-brand-hover-border: rgba(255, 255, 255, 0.44);
+  --vp-button-brand-active-border: rgba(255, 255, 255, 0.28);
   --vp-button-brand-text: #fff;
   --vp-button-brand-hover-text: #fff;
+  --vp-button-brand-active-text: #fff;
 
   --vp-button-alt-bg: var(--keel-card);
   --vp-button-alt-hover-bg: #333;
@@ -119,14 +136,206 @@
   font-size: 0.9rem;
 }
 
-table {
-  display: table;
-  width: 100%;
+/* --- Home page prose measure ---------------------------------------------
+ * The home markdown body runs full-bleed (a 1440 viewport gives it 1152px
+ * lines, ~150 characters). Keep the measure in line with the doc pages.
+ * (816px = the 688px doc column + the container's 64px side paddings.) */
+.VPHome .vp-doc.container {
+  max-width: 816px;
+  margin: 0 auto;
 }
 
-/* Keep wide reference tables scrollable on narrow viewports instead of
- * breaking the layout. */
-.vp-doc table {
-  display: block;
+/* --- Wide content: tables -------------------------------------------------
+ * The markdown pipeline wraps every table in `.keel-table-wrap` (see
+ * .vitepress/config.mts). The wrapper is the scroll container, so the table
+ * keeps its natural column widths instead of being squeezed into the content
+ * column; the styled scrollbar and the right-edge shadow are the cues that say
+ * "this scrolls" instead of looking truncated.
+ *
+ * The shadow is the standard two-layer trick: the `local` covers scroll with
+ * the content and hide the `scroll`-attached shadow exactly when the table is
+ * scrolled to that end. It needs translucent rows to show through, hence the
+ * row/header backgrounds below are alpha overlays instead of opaque fills. */
+.keel-table-wrap {
+  position: relative;
+  margin: 20px 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background-image:
+    linear-gradient(to right, var(--vp-c-bg) 60%, rgba(22, 22, 22, 0)),
+    linear-gradient(to left, var(--vp-c-bg) 60%, rgba(22, 22, 22, 0)),
+    linear-gradient(to right, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 24px 100%, 24px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.keel-table-wrap table {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  overflow: visible;
+}
+
+.vp-doc .keel-table-wrap tr,
+.vp-doc .keel-table-wrap tr:nth-child(2n) {
+  background-color: transparent;
+}
+
+.vp-doc .keel-table-wrap tr:nth-child(2n) {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+.vp-doc .keel-table-wrap th {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Long identifiers and paths may be wider than the cell; break them only when
+ * they would otherwise be force a column wider than the whole viewport. */
+.vp-doc .keel-table-wrap th,
+.vp-doc .keel-table-wrap td {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 639px) {
+  .vp-doc .keel-table-wrap th,
+  .vp-doc .keel-table-wrap td {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+}
+
+/* --- Wide content: code blocks --------------------------------------------
+ * `pre` scrolls horizontally (VitePress sets `overflow-x: auto`), but with no
+ * visible affordance a clipped line reads as lost content. Same two-layer cue
+ * as the tables: the `pre` background is transparent, the block colour comes
+ * from the wrapper, so the covers use --vp-code-block-bg. */
+.vp-doc div[class*='language-'] pre {
+  background-image:
+    linear-gradient(to right, var(--vp-code-block-bg) 60%, rgba(32, 32, 32, 0)),
+    linear-gradient(to left, var(--vp-code-block-bg) 60%, rgba(32, 32, 32, 0)),
+    linear-gradient(to right, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 24px 100%, 24px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* Visible horizontal scrollbar on the two scrollable surfaces. Styling
+ * ::-webkit-scrollbar also turns macOS overlay scrollbars into classic ones,
+ * so the cue exists before the user starts scrolling. */
+.keel-table-wrap,
+.vp-doc div[class*='language-'] pre {
+  scrollbar-width: thin;
+  scrollbar-color: var(--keel-scrollbar) transparent;
+}
+
+.keel-table-wrap::-webkit-scrollbar,
+.vp-doc div[class*='language-'] pre::-webkit-scrollbar {
+  height: 10px;
+}
+
+.keel-table-wrap::-webkit-scrollbar-track,
+.vp-doc div[class*='language-'] pre::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.keel-table-wrap::-webkit-scrollbar-thumb,
+.vp-doc div[class*='language-'] pre::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: var(--keel-scrollbar);
+  background-clip: content-box;
+}
+
+.keel-table-wrap::-webkit-scrollbar-thumb:hover,
+.vp-doc div[class*='language-'] pre::-webkit-scrollbar-thumb:hover {
+  background-color: var(--keel-scrollbar-hover);
+}
+
+/* Touch devices have no hover: the copy button has to be visible on its own.
+ * (This is VitePress's own rule with the opacity flipped.) */
+@media (hover: none) {
+  .vp-doc [class*='language-'] > button.copy {
+    opacity: 1;
+  }
+}
+
+/* --- Sticky nav -----------------------------------------------------------
+ * The nav paints a translucent --vp-nav-bg-color surface over scrolling
+ * content; without a blur the page text bleeds through it. The blur rides on
+ * the same elements VitePress paints the surface on. */
+.VPNavBar:not(.home.top) .content-body,
+.VPNavBar:not(.has-sidebar):not(.home.top) {
+  -webkit-backdrop-filter: saturate(50%) blur(10px);
+  backdrop-filter: saturate(50%) blur(10px);
+}
+
+@media (max-width: 959px) {
+  .VPNavBar:not(.home) {
+    -webkit-backdrop-filter: saturate(50%) blur(10px);
+    backdrop-filter: saturate(50%) blur(10px);
+  }
+}
+
+/* --- Mobile sidebar drawer ------------------------------------------------
+ * The drawer used to open over the whole viewport, navbar included, and had no
+ * control inside itself to close it. Start it below the navbar (that also
+ * keeps Escape and the backdrop as the documented close paths) and give it a
+ * close button, rendered by theme/index.ts into the sidebar-nav-before slot.
+ * `.Layout >` outranks the scoped default-theme selector for the same rule. */
+.Layout > .VPSidebar {
+  top: var(--vp-layout-top-height, 0px);
+}
+
+@media (max-width: 959px) {
+  .Layout > .VPSidebar {
+    top: var(--vp-nav-height);
+  }
+}
+
+.keel-sidebar-close {
+  display: none;
+}
+
+@media (max-width: 959px) {
+  .keel-sidebar-close {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 0 0 16px;
+    padding: 8px 12px;
+    border: 1px solid var(--keel-border);
+    border-radius: 6px;
+    background-color: var(--keel-card);
+    color: var(--vp-c-text-1);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .keel-sidebar-close:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+    background-color: #333;
+  }
+}
+
+/* --- Mobile nav screen ----------------------------------------------------
+ * VitePress fades the whole mobile menu panel — background included — in and
+ * out over 250ms, so for those 250ms the page text shows through underneath
+ * the menu text. The panel must be opaque from its first frame; the scoped
+ * default-theme rules carry a data-v attribute, hence !important. */
+.VPNavScreen,
+.VPNavScreen.fade-enter-active,
+.VPNavScreen.fade-leave-active,
+.VPNavScreen.fade-enter-from,
+.VPNavScreen.fade-leave-to {
+  transition: none !important;
+  opacity: 1 !important;
 }

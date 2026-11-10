@@ -2,8 +2,8 @@
 
 > **Planned.** The webview hosting path, the `keel.plugin.*` bridge and the
 > template requirement come from
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("UI 承载与桥接",
-> "TUI 行为", "创造模式"). The theme vocabulary and the client stack the template
+> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("UI surfaces and bridging",
+> "TUI behavior", "creation mode"). The theme vocabulary and the client stack the template
 > targets are **implemented** in this repository and are cited below.
 
 ## 1. How a plugin UI is hosted
@@ -25,9 +25,9 @@ Rules the spec fixes:
 
 - the page loads from **`/plugins/<id>/`** and can display its own state and
   call its own tools — verification for this is part of the acceptance
-  scenario (`spec: 插件 UI 可用`);
+  scenario (`spec: plugin UI works`);
 - the bridge is the only channel: **the UI must never receive host secrets**
-  (`spec: UI 承载与桥接`);
+  (`spec: UI surfaces and bridging`);
 - the theme must use **host tokens**, i.e. the webview + react + solid-glass
   template (§3).
 
@@ -55,8 +55,8 @@ permission ([Permissions](/harness/plugins/permissions)).
 ## 3. The template: webview + react + solid-glass
 
 The spec requires exactly one template — **webview + react + solid-glass** —
-for both hand-written and creation-mode plugins (`spec: 创造模式`, "生成插件包
-（webview+react+solid-glass 模板）"). "Solid glass" is not a mood word here; it
+for both hand-written and creation-mode plugins (`spec: creation mode`, "the generated plugin package
+(webview+react+solid-glass template)"). "Solid glass" is not a mood word here; it
 is the theme the web client already ships:
 
 - the token document is `web/theme.json` ("Keel Solid Glass"): OKLCH color
@@ -99,7 +99,7 @@ A minimal `ui/index.html` following the template:
 ## 4. TUI behavior
 
 The TUI is a first-class client with a deliberate limitation
-(`spec: TUI 行为`):
+(`spec: TUI behavior`):
 
 - the TUI **must not render plugin UI** (no WebView, no HTML);
 - a plugin row offers **Open**, which calls `openUrl` on the web deep link
