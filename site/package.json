@@ -1,0 +1,16 @@
+{
+  "name": "keel-site",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.10.0",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "node scripts/build.mjs",
+    "preview": "vitepress preview --port 13751",
+    "parity": "node scripts/parity.mjs",
+    "citations": "node scripts/check-citations.mjs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

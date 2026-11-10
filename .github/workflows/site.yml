@@ -1,0 +1,59 @@
+name: Site
+
+# Builds site/ and publishes it to GitHub Pages at https://keel.jixoai.com
+# (the custom domain is carried by site/docs/public/CNAME).
+#
+# A failed build never deploys: the deploy job depends on the build job, so a
+# dead link (VitePress fails the build on those), a bilingual parity break or a
+# stale `path:line` citation leaves the previous revision online.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes an in-flight build.
+concurrency:
+  group: site-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the Node major the site build was verified against locally.
+          node-version: "26"
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - name: install
+        run: pnpm --dir site install --frozen-lockfile
+      - name: build (dead links, parity and citations are gates)
+        run: pnpm --dir site build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -20,7 +20,7 @@ keel 的内核只有一个职责：**把一个会话的一次运行（run）跑�
 
 产品层（**只能依赖内核，不能被内核依赖**）：
 
-- `internal/agentapi` —— `/v1` AgentAPI（会话列表/停止/审批/扩展面）
+- `internal/agentapi` —— `/v1` AgentAPI（协议名保留，即 Harness API；会话列表/停止/审批/扩展面）
 - `internal/agentext` —— 插件、触发器、subagent、hooks、RunControl、partials
 - `internal/servicehost` —— 服务图装配（loadout / generation）
 - `cmd/keel` —— `keel serve` / `keel tui`

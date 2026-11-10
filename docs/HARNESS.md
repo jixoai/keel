@@ -1,8 +1,11 @@
-# AGENT — `keel serve` 产品层
+# HARNESS — `keel serve` 产品层
 
-`keel` 是内核（`docs/KERNEL.md`）之上的**第一个验证者**：一个 Agent 服务 + 一套产品 API +
+`keel` 是内核（`docs/KERNEL.md`）之上的**第一个验证者**：一个 Harness 服务 + 一套产品 API +
 扩展面（插件/触发器/subagent/hooks/审批），供 AI UI（`web/` 的 NSH 客户端、TUI）对接。
 内核不知道它存在；依赖方向只有 `cmd/keel → agentapi/agentext → kernel`。
+
+> 命名：产品层对外统一 **Harness**（原 Agent）；协议名 `AgentAPI` / `AgentBackend` 是契约，
+> 予以保留。术语与别名说明见官网术语表（`site/docs/glossary.md`）。
 
 ## 1. 启动
 
@@ -62,7 +65,7 @@ keel version
 
 | 能力 | 契约 |
 | --- | --- |
-| 插件 | `plugin.yaml` 式契约：provides/requires、tools、hooks、triggers、effects；依赖拓扑激活，反序卸载；generation+1；缺依赖 PENDING 可见 |
+| 插件 | **进程内声明式契约**（`agentext.Plugin`，`internal/agentext/plugin.go:67`）：`ID/Version/Provides/Requires/Tools/Hooks/Triggers/Effects/Start/Stop`；依赖拓扑激活（缺依赖 `PENDING` 可见）、反序卸载（hook 订阅/触发器/effects 精确撤销，无残留）、`generation+1`、工具重名 fail-closed（第二个插件 `FAILED`）；装配结果经唯一 sink 发布给模型工具集（`cmd/keel/serve.go` 用 `rt.RefreshProductTools`）。web 设置 › 插件（`web/src/screens/settings.tsx:1148`）渲染该装配面。**规划中**（`keel-plugin-core`，勿当作已实现）：`plugin.yaml` 包与安装/启用/禁用 API、三种 kind（in-process/sidecar/webview）、运维权限与审计、webview UI 托管与 `keel.plugin.*` 桥、创造模式 |
 | 触发器 | `cron` / `interval` / `webhook`；幂等键（确定性 session + kernel requestId 双保险）；有界重试；审计在 `/v1/triggers` |
 | Sub-agent | `spawn_subagent` 工具：独立子会话 + 结构化结果 `{status,summary,artifacts,usage}` + 预算（turns/tokens/timeout）；父会话经 `parentSessionId` 可查 |
 | Hooks | 闭集：`subagent.started\|finished`、`trigger.before\|after`、`turn.started\|finished`、`decision.opened\|answered`；有界异步队列，不阻塞账本，失败可见 |
@@ -81,3 +84,4 @@ keel version
 
 `internal/agentapi`、`internal/agentext`、`cmd/keel` 均有 PG 集成测试；扩展面 E2E 覆盖
 插件注册→触发→hook→subagent→取消在线 attempt。全量门禁见 `scripts/acceptance-all.sh`。
+对外文档的术语纪律由 `scripts/naming-scan.sh` 扫描。

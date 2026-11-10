@@ -1,7 +1,7 @@
-# Keel · Agent Runtime
+# Keel · Harness
 
 > **Keel（龙骨）**——船体最承重的结构。Keel 是智能体集群的龙骨：
-> 一个**通用、无状态、多租户**的 Agent 运行时底座。
+> 一个**通用、无状态、多租户**的运行时底座：契约内核（Core）+ 产品层（**Harness**，原 Agent）。
 >
 > **Keel 是 [PI](https://github.com/earendil-works/pi) 的 Go 重构**：接口、事件语义与
 > 生态产物（SKILL.md / MCP / 压缩 / 遥测）以 PI 为唯一参照；只替换运行时
@@ -41,7 +41,7 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
                     ┌──────────────────────────────────────┐
    HTTP/SSE  ──────▶│  Keel (Go, 1 process)                 │
    (1000 conn)      │  ┌─────────┐ ┌─────────┐ ┌────────┐  │
-                    │  │ API/SSE │ │ Agent   │ │ Blob   │  │
+                    │  │ API/SSE │ │ Harness │ │ Blob   │  │
                     │  │  lane   │ │ loop    │ │ stream │  │
                     │  └─────────┘ └─────────┘ └────────┘  │
                     └───────┬───────────────┬──────────────┘
@@ -57,14 +57,15 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
 - **反压三层**：阻塞 `Write` 提供天然背压，全局 token bucket 塑形总带宽，per-write deadline 杀慢客户端。
 
 详细设计：[PI 对齐基线](docs/PI-PARITY.md) · [官方测试对齐矩阵](docs/PI-CONFORMANCE.md) · [架构与决策](docs/ARCHITECTURE.md) · [反压设计](docs/BACKPRESSURE.md) ·
-[存储调研](docs/BLOB-STORAGE-RESEARCH.md) · [文件协议](docs/FILE-PROTOCOL.md) · [运行手册](docs/RUNBOOK.md)
+[存储调研](docs/BLOB-STORAGE-RESEARCH.md) · [文件协议](docs/FILE-PROTOCOL.md) · [运行手册](docs/RUNBOOK.md) ·
+[Harness 产品层](docs/HARNESS.md)（对外文档：<https://keel.jixoai.com>）
 
 ## 技术栈
 
 | 层 | 选择 |
 |---|---|
 | 语言 | **Go 1.27.3** |
-| Agent 引擎 | 从 [pigo](https://github.com/smallnest/pigo)（MIT）搬运最小必要代码后改造；不 fork |
+| 智能体引擎 | 从 [pigo](https://github.com/smallnest/pigo)（MIT）搬运最小必要代码后改造；不 fork |
 | 状态存储 | **PostgreSQL 18**（单库 + `tenant_id`） |
 | 接入 | `net/http`（SSE 与图片流）、pgx/v5 |
 | 图片 | PG 64KiB 分块 `bytea`（≤1MiB）＋ 本地内容寻址存储（>1MiB） |
@@ -85,7 +86,7 @@ go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 ## 状态与路线
 
 **可运行底座 + PI 对齐**（2026-11-06）。已实现：PG schema、64KiB 分块 blob、流式 base64、
-SSE 续传、三类分池与全局带宽；**Agent 执行**——事件溯源上下文、持久 run（租约 +
+SSE 续传、三类分池与全局带宽；**Harness 执行**——事件溯源上下文、持久 run（租约 +
 `FOR UPDATE SKIP LOCKED`）、工具执行、崩溃恢复（模型调用中 / 工具执行中 kill 均可续跑）；
 以及 **PI 能力的宿主装配**——system prompt sections、Skills（`SKILL.md` + 按需加载）、
 Hooks（扩展事件 + 命令钩子）、Compaction（PI policy + checkpoint 事件）、MCP（stdio /
@@ -105,7 +106,7 @@ G5（规模与运维）六级验收，**GA = 六项能力全部 G5**。规划见
 pigo 是 MIT 许可的 Go 版 pi Agent。Keel **不 fork**，只搬运并改造以下模块（保留原始版权头）：
 
 - `provider`（OpenAI/Anthropic/OpenRouter/Ollama 协议与流式）
-- `runtime` 的 Agent loop（两层循环、工具轮、停止原因）
+- `runtime` 的 agent loop（两层循环、工具轮、停止原因）
 - `agenttool` 的工具执行器（并行/流式/结果裁剪）
 - `compaction`（上下文压缩）
 - `agentcore` 的内容类型（text/thinking/toolCall/toolResult/image）

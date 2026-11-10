@@ -1141,7 +1141,7 @@ export class FixtureClient implements SettingsApi {
     }
     const full = withTools
       ? "已检查当前工作区：src/、web/、docs/ 均可读，没有阻塞项。\n\n下一步建议：\n1. 先跑一遍 web 构建；\n2. 再用真实服务验证审批与停止；\n3. 最后补发布说明。"
-      : `已收到：「${prompt}」。这是演示数据下的流式回复——\n\n- 会话、工具卡、审批与停止都可以操作；\n- 打开「partial」可以看 token 级增量；\n- 接入真实服务后，同一份界面直接消费 AgentAPI。`;
+      : `已收到：「${prompt}」。这是演示数据下的流式回复——\n\n- 会话、工具卡、审批与停止都可以操作；\n- 打开「partial」可以看 token 级增量；\n- 接入真实服务后，同一份界面直接消费 Harness API。`;
     const chunks = full.match(/.{1,12}/gs) ?? [full];
     chunks.forEach((_, index) => {
       this.schedule(peer, start + index * 70, () => {

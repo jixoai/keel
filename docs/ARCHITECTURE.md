@@ -20,7 +20,7 @@
                     ┌──────────────────────────────────────┐
    HTTP/SSE  ──────▶│  keel (Go, 1 process)  │
    (1000 conn)      │  ┌─────────┐ ┌─────────┐ ┌────────┐  │
-                    │  │ API/SSE │ │ Agent   │ │ Blob   │  │
+                    │  │ API/SSE │ │ Harness │ │ Blob   │  │
                     │  │  lane   │ │ loop    │ │ stream │  │
                     │  └─────────┘ └─────────┘ └────────┘  │
                     └───────┬───────────────┬──────────────┘
@@ -156,5 +156,5 @@ CREATE TABLE blob_chunks (
 - **反压**：网络是唯一显式上限；阻塞 Write + token bucket + per-write deadline 三者分工。
 
 待办：
-- Agent loop 与事件日志的持久任务接线（工具执行/压缩的 resume）。
+- agent loop 与事件日志的持久任务接线（工具执行/压缩的 resume）。
 - provider 文件协议 adapter（Gemini → OpenAI Responses → Anthropic URL → …）。

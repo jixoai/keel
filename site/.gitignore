@@ -1,0 +1,6 @@
+# Build output and local installs for the docs site. The built site is a Pages
+# artifact, never a repository file.
+node_modules/
+dist/
+.vitepress/cache/
+.vitepress/dist/

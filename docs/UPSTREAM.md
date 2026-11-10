@@ -24,7 +24,7 @@
 - 仓库：https://github.com/smallnest/pigo
 - 许可：MIT
 - Pin commit：`891d1f372cefa92b5f5a104db20521238ba5a9fe`（2026-09-12，`test: restore RegisterLiveCommands three-arg call in think_test`）
-- 搬运范围：`provider`、`runtime`（Agent loop）、`agenttool`、`compaction`、`agentcore`
+- 搬运范围：`provider`、`runtime`（agent loop）、`agenttool`、`compaction`、`agentcore`
 - 不搬：CLI/TUI/REPL、session JSONL、trust、plugin/pkgmgr、selfupdate、内置 coding 工具
 
 ### 搬运纪律

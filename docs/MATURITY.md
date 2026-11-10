@@ -31,7 +31,7 @@
 
 | 能力 | 当前 | 目标 | 主要缺口 |
 |---|---|---|---|
-| Agent 执行 | G1（fake 可跑） | G5 | G2 混沌、G3 遥测、G4 生态、G5 规模 |
+| 智能体执行 | G1（fake 可跑） | G5 | G2 混沌、G3 遥测、G4 生态、G5 规模 |
 | 可恢复性 | G1（模型/工具 kill 各一例） | G5 | generation 幂等、task 状态机、checkpoint 回放、10min 混沌 |
 | 上下文压缩 | G0（代码在，未接线） | G5 | 压缩事件/checkpoint 投影、手动压缩、token 账 |
 | 可观测 | G0 | G5 | run.finished、指标、日志字段、trace 可选 |

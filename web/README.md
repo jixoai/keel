@@ -2,7 +2,7 @@
 
 `web/` 是 keel 的 NSH 客户端：同一份 TSX 经 `nsh` 打包为 **web 静态站点**，同一份代码
 用 NSH **TUI target** 在终端运行。UI 只消费 `packages/chat-surface/src/types.ts` 的冻结契约
-和 AgentAPI（`/v1/*`），不直连内核。
+和 AgentAPI（Harness API，`/v1/*`；协议名保留），不直连内核。
 
 ## NSH 版本与用到的特性
 

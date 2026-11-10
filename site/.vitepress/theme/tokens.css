@@ -1,0 +1,132 @@
+/*
+ * Keel site theme tokens.
+ *
+ * Dark-first palette taken from the product tokens documented for the keel
+ * workstream: background #161616, panel #202020, card #2b2b2b,
+ * border rgba(255,255,255,.1), brand #fff, accent #001d3d.
+ * The surface must stay quiet: no animation beyond the VitePress defaults.
+ */
+
+:root {
+  /* Palette (single source for the values above). */
+  --keel-bg: #161616;
+  --keel-panel: #202020;
+  --keel-card: #2b2b2b;
+  --keel-border: rgba(255, 255, 255, 0.1);
+  --keel-brand: #fff;
+  --keel-accent: #001d3d;
+  --keel-text: rgba(255, 255, 255, 0.92);
+  --keel-text-2: rgba(255, 255, 255, 0.66);
+}
+
+.dark {
+  /* Backgrounds */
+  --vp-c-bg: var(--keel-bg);
+  --vp-c-bg-alt: var(--keel-panel);
+  --vp-c-bg-soft: var(--keel-panel);
+  --vp-c-bg-elv: var(--keel-card);
+
+  /* Brand: white text/links; the deep accent is a surface, never a text colour. */
+  --vp-c-brand-1: var(--keel-brand);
+  --vp-c-brand-2: #e6e6e6;
+  --vp-c-brand-3: var(--keel-accent);
+  --vp-c-brand-soft: rgba(255, 255, 255, 0.08);
+
+  /* Text */
+  --vp-c-text-1: var(--keel-text);
+  --vp-c-text-2: var(--keel-text-2);
+  --vp-c-text-3: rgba(255, 255, 255, 0.44);
+
+  /* Lines */
+  --vp-c-border: var(--keel-border);
+  --vp-c-divider: var(--keel-border);
+  --vp-c-gutter: var(--keel-border);
+
+  /* Surfaces used by buttons, code and custom blocks */
+  --vp-c-default-1: var(--keel-card);
+  --vp-c-default-2: var(--keel-card);
+  --vp-c-default-3: var(--keel-card);
+  --vp-c-default-soft: rgba(255, 255, 255, 0.06);
+
+  --vp-code-block-bg: var(--keel-panel);
+  --vp-code-block-bg-alt: var(--keel-panel);
+  --vp-code-copy-code-bg: var(--keel-card);
+  --vp-code-copy-code-hover-bg: #333;
+
+  --vp-custom-block-tip-border: var(--keel-border);
+  --vp-custom-block-tip-bg: var(--keel-panel);
+  --vp-custom-block-tip-text: var(--keel-text);
+  --vp-custom-block-info-border: var(--keel-border);
+  --vp-custom-block-info-bg: var(--keel-panel);
+  --vp-custom-block-warning-border: rgba(255, 255, 255, 0.2);
+  --vp-custom-block-warning-bg: var(--keel-panel);
+  --vp-custom-block-danger-border: rgba(255, 255, 255, 0.28);
+  --vp-custom-block-danger-bg: var(--keel-panel);
+
+  --vp-button-brand-bg: var(--keel-accent);
+  --vp-button-brand-hover-bg: #00305f;
+  --vp-button-brand-active-bg: var(--keel-accent);
+  --vp-button-brand-border: var(--keel-border);
+  --vp-button-brand-text: #fff;
+  --vp-button-brand-hover-text: #fff;
+
+  --vp-button-alt-bg: var(--keel-card);
+  --vp-button-alt-hover-bg: #333;
+  --vp-button-alt-border: var(--keel-border);
+
+  --vp-nav-bg-color: rgba(22, 22, 22, 0.86);
+  --vp-sidebar-bg-color: var(--keel-bg);
+  --vp-local-search-bg: var(--keel-panel);
+}
+
+/* The midnight accent reads as a surface: give it a hairline so it does not
+ * dissolve into the #161616 background. */
+.VPHero .name,
+.VPHero .text {
+  color: var(--vp-c-text-1);
+}
+
+.VPHero .tagline {
+  color: var(--vp-c-text-2);
+}
+
+.VPHero .text {
+  max-width: 46rem;
+}
+
+.VPFeature {
+  background-color: var(--keel-card) !important;
+  border: 1px solid var(--keel-border);
+}
+
+.VPFeature.link:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.keel-accent {
+  background: var(--keel-accent);
+  border: 1px solid var(--keel-border);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+}
+
+.keel-meta {
+  border: 1px solid var(--keel-border);
+  background: var(--keel-panel);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: var(--vp-c-text-2);
+  font-size: 0.9rem;
+}
+
+table {
+  display: table;
+  width: 100%;
+}
+
+/* Keep wide reference tables scrollable on narrow viewports instead of
+ * breaking the layout. */
+.vp-doc table {
+  display: block;
+  overflow-x: auto;
+}

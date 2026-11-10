@@ -27,7 +27,7 @@
 
 ## 2. 本轮矩阵
 
-### 2.1 Agent loop（`internal/loop/conformance_test.go`）
+### 2.1 agent loop（`internal/loop/conformance_test.go`）
 
 | PI 测试（`packages/agent/test/agent-loop.test.ts`） | Go 测试 | 状态 |
 |---|---|---|

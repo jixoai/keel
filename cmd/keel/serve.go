@@ -64,7 +64,7 @@ type serveOptions struct {
 
 const (
 	defaultServeAddr     = "127.0.0.1:13750"
-	defaultSystemPrompt  = "You are an AI employee running on the Keel agent runtime. Use the available tools when they help."
+	defaultSystemPrompt  = "You are an AI employee running on the Keel Harness. Use the available tools when they help."
 	defaultServeWebDir   = "web/dist"
 	serveShutdownTimeout = 10 * time.Second
 )
