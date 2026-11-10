@@ -1,209 +1,215 @@
-// Solid Glass tokens for the NSH client.
+// Legacy theme projection for the pre-kit screens.
 //
-// The values live in `web/theme.json` (the theme file NSH compiles into the
-// app); this module only names them for TSX. Every color read goes through
-// `token()` (or a theme class), so switching appearance re-renders with no
-// local light/dark branches. Motion constants are code tokens because NSH's
-// theme file carries design tokens (colors, lengths, fonts), not curves.
+// The single source of design values is now the kit: `web/theme.json` (colors,
+// named radii, font stacks) read through `./kit/tokens`. This module only keeps
+// the old names alive so `web/src/screens/**` keeps rendering while it migrates
+// to `web/src/ui/kit` — it holds no values of its own. New code imports the kit
+// (`./kit/tokens`, `./kit/layout`), never this file.
+//
+// The values themselves moved to the zcode `theme-zai-dark` scale (14/12/10/9
+// type, 6/12/16 radii, #161616/#202020/#2b2b2b surfaces, 10% white border,
+// brand #fff, accent #001d3d, 5/10% surface/hover/selected washes) when
+// `theme.json` was switched; every name below is a projection of that file.
 import { token } from "nsh";
+import { alpha, color, font, motion as kitMotion, radius as kitRadius, space as kitSpace } from "./kit/tokens";
 
+export { alpha };
+
+/** Appearance colors, one getter per theme key. Kept for the old screens. */
 export const colors = {
   get background() {
-    return token("background");
+    return color.background;
   },
   get foreground() {
-    return token("foreground");
+    return color.foreground;
   },
   get panel() {
-    return token("panel");
+    return color.panel;
   },
   get card() {
-    return token("card");
+    return color.card;
   },
   get cardForeground() {
-    return token("card-foreground");
+    return color.cardForeground;
   },
   get popover() {
-    return token("popover");
+    return color.popover;
   },
   get primary() {
-    return token("primary");
+    return color.primary;
   },
   get primaryForeground() {
-    return token("primary-foreground");
+    return color.primaryForeground;
   },
   get secondary() {
-    return token("secondary");
+    return color.secondary;
   },
   get muted() {
-    return token("muted");
+    return color.muted;
   },
   get mutedForeground() {
-    return token("muted-foreground");
+    return color.mutedForeground;
   },
   get accent() {
-    return token("accent");
+    return color.accent;
   },
   get accentForeground() {
-    return token("accent-foreground");
+    return color.accentForeground;
   },
   get destructive() {
-    return token("destructive");
+    return color.destructive;
   },
   get destructiveForeground() {
-    return token("destructive-foreground");
+    return color.destructiveForeground;
   },
   get headerBorder() {
-    return token("header-border");
+    return color.headerBorder;
   },
   get mark() {
-    return token("mark");
+    return color.mark;
   },
   get markForeground() {
-    return token("mark-foreground");
+    return color.markForeground;
   },
   get border() {
-    return token("border");
+    return color.border;
   },
   get input() {
-    return token("input");
+    return color.input;
   },
   get ring() {
-    return token("ring");
+    return color.ring;
   },
   get brand() {
-    return token("brand");
+    return color.brand;
   },
   get brandForeground() {
-    return token("brand-foreground");
+    return color.brandForeground;
   },
   get brandMuted() {
-    return token("brand-muted");
+    return color.brandMuted;
   },
   get link() {
-    return token("link");
+    return color.link;
   },
   get success() {
-    return token("success");
+    return color.success;
   },
   get warning() {
-    return token("warning");
+    return color.warning;
   },
   get danger() {
-    return token("danger");
+    return color.danger;
   },
   get info() {
-    return token("info");
+    return color.info;
   },
   get statusRunning() {
-    return token("status-running");
+    return color.statusRunning;
   },
   get statusDone() {
-    return token("status-done");
+    return color.statusDone;
   },
   get statusInterrupted() {
-    return token("status-interrupted");
+    return color.statusInterrupted;
   },
   get sidebar() {
-    return token("sidebar");
+    return color.sidebar;
   },
   get sidebarAccent() {
-    return token("sidebar-accent");
+    return color.sidebarAccent;
   },
   get sidebarBorder() {
-    return token("sidebar-border");
+    return color.sidebarBorder;
   },
   get glassRim() {
-    return token("glass-rim");
+    return color.glassRim;
   },
   get glassInner() {
-    return token("glass-inner");
+    return color.glassInner;
   },
   get glassEdge() {
-    return token("glass-edge");
+    return color.glassEdge;
   },
   get glassShade() {
-    return token("glass-shade");
+    return color.glassShade;
   },
   get glassContact() {
-    return token("glass-contact");
+    return color.glassContact;
   },
   get glassLift() {
-    return token("glass-lift");
+    return color.glassLift;
   },
   get glassControl() {
-    return token("glass-control");
+    return color.glassControl;
   },
   get glassControlRim() {
-    return token("glass-control-rim");
+    return color.glassControlRim;
   },
   get glassState() {
-    return token("glass-state");
+    return color.glassState;
   },
   get glassStateRim() {
-    return token("glass-state-rim");
+    return color.glassStateRim;
   },
   get glassStateArmed() {
-    return token("glass-state-armed");
+    return color.glassStateArmed;
   },
   get hover() {
-    return token("hover");
+    return color.hover;
   },
   get field() {
-    return token("field");
+    return color.field;
   },
   get fieldRim() {
-    return token("field-rim");
+    return color.fieldRim;
   },
   get fieldEdge() {
-    return token("field-edge");
+    return color.fieldEdge;
   },
   get focusLine() {
-    return token("focus-line");
+    return color.focusLine;
   },
   get codeInline() {
-    return token("code-inline");
+    return color.codeInline;
   },
   get brandTint() {
-    return token("brand-tint");
+    return color.brandTint;
   },
   get successTint() {
-    return token("success-tint");
+    return color.successTint;
   },
   get warningTint() {
-    return token("warning-tint");
+    return color.warningTint;
   },
   get dangerTint() {
-    return token("danger-tint");
+    return color.dangerTint;
   },
   get infoTint() {
-    return token("info-tint");
+    return color.infoTint;
   },
 } as const;
 
+/** The named radii of the theme file, plus the pill sentinel. */
 export const radius = {
   get card() {
-    return token("radius-card");
+    return kitRadius.card;
   },
   get inset() {
-    return token("radius");
+    return kitRadius.inset;
   },
   get control() {
-    return token("radius-control");
+    return kitRadius.control;
   },
   get pill() {
     return token("radius-pill");
   },
 };
 
-/** `color` at opacity `a`, without writing a raw color. */
-export const alpha = (color: string, a: number) =>
-  `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
+export const mono = () => font.mono;
 
-export const mono = () => token("font-mono");
-
-/** The four Solid Glass finishes: rim + hairline + shade, never a face
- * gradient. Thickness order: panel < card < popover. */
+/** The four Solid Glass finishes. They now sit on the zai-dark washes
+ * (5% surface / 10% border) rather than a light material. */
 export const glass = {
   get panel() {
     return {
@@ -253,11 +259,21 @@ export const glass = {
   },
 };
 
+/** Motion, from the kit tokens (`fade` is the kit's `base` duration). */
 export const motion = {
-  press: { stiffness: 560, damping: 38 },
-  settle: { stiffness: 320, damping: 30 },
-  fade: 180,
-  stream: 90,
+  press: kitMotion.press,
+  settle: kitMotion.settle,
+  fade: kitMotion.base,
+  stream: kitMotion.stream,
 } as const;
 
-export const space = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
+/** The old dense spacing ladder, projected on the kit's 4px ladder. */
+export const space = {
+  xxs: kitSpace.xxs,
+  xs: kitSpace.xs,
+  sm: kitSpace.sm,
+  md: kitSpace.md,
+  lg: kitSpace.lg,
+  xl: kitSpace.xl,
+  xxl: kitSpace["2xl"],
+} as const;

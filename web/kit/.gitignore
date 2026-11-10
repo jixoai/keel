@@ -1,0 +1,5 @@
+# The gallery app's own generated cache and build output. web/.gitignore also
+# covers these (patterns without a leading slash match at any depth); this file
+# only makes the kit app's rule explicit where the app lives.
+.nsh/
+dist/
