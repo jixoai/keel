@@ -2,12 +2,16 @@
 // browser exchanges the passphrase for the server's HttpOnly session cookie.
 // This screen is the whole of the client's auth surface — the server owns the
 // cookie, the tenant and the TTL.
-import { signal, Text, View } from "nsh";
-import { Input } from "nsh/base";
+//
+// The gate itself is a kit panel: Card (Header / Content) carrying one Field
+// around the passphrase Input and one Button. The only layout written here is
+// the centering frame — the control heights, radii, ink and padding are the
+// kit's, so the gate cannot drift from the rest of the app. A refused
+// passphrase is the field's own error (Field takes the server's message); a
+// submit in flight is the Button's loading state.
+import { signal, View } from "nsh";
+import { Button, Card, CardContent, CardHeader, Field, Input, color, space } from "../ui/kit";
 import { store } from "../data/store";
-import { Icon } from "../ui/icons";
-import { Press, Spinner } from "../ui/primitives";
-import { alpha, colors, glass, radius, space } from "../ui/theme";
 
 export function LoginScreen() {
   const password = signal("");
@@ -21,88 +25,57 @@ export function LoginScreen() {
     if (ok) password.set("");
   };
 
+  // The server's answer, as the field's error: a wrong passphrase belongs to
+  // this field, not to a loose line under the form.
+  const error = () => store.authError() ?? undefined;
+
   return (
     <View
       style={{
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: colors.background,
-        padding: space.lg,
+        backgroundColor: color.background,
+        padding: space["2xl"],
       }}
     >
-      <View style={{ width: "100%", maxWidth: 360, gap: space.md }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: radius.control,
-              alignItems: "center",
-              justifyContent: "center",
-              ...glass.control,
-            }}
+      <Card
+        testID="login-gate"
+        accessibilityLabel="登录 Keel"
+        // shadcn's login column (`max-w-sm`, 24rem): the form never widens
+        // into a page-wide panel on a large window.
+        style={{ width: "100%", maxWidth: 384 }}
+      >
+        <CardHeader title="Keel" description="AI 员工会话" />
+        <CardContent>
+          <Field
+            label="服务口令"
+            hint="这个服务已开启口令保护，请输入启动服务时设置的口令。"
+            error={error()}
           >
-            <Icon name="spark" size={18} tint={colors.brand} />
-          </View>
-          <View style={{ gap: 2 }}>
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground }}>Keel</Text>
-            <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>AI 员工会话</Text>
-          </View>
-        </View>
-
-        <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-          <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>
-            这个 keel serve 需要口令。口令在启动时设置（KEEL_SERVE_PASSWORD）。
-          </Text>
-          <Input
-            testID="login-password"
-            value={password()}
-            onChange={({ value }: { value: string }) => password.set(value)}
-            masked
-            placeholder="服务口令"
-            autoCapitalize="none"
-            autoCorrect={false}
-            submitBehavior="submit"
-            onSubmit={() => void submit()}
-            style={{
-              height: 38,
-              fontSize: 14,
-              color: colors.foreground,
-              placeholderColor: colors.mutedForeground,
-              caretColor: colors.brand,
-              selectionColor: alpha(colors.brand, 0.3),
-              paddingHorizontal: 12,
-              borderRadius: radius.control,
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: colors.background,
-            }}
-          />
-          <Press
-            onPress={() => void submit()}
+            <Input
+              testID="login-password"
+              value={password()}
+              onChange={(value) => password.set(value)}
+              masked
+              invalid={error() !== undefined}
+              placeholder="输入服务口令"
+              submitBehavior="submit"
+              onSubmit={() => void submit()}
+              accessibilityLabel="服务口令"
+            />
+          </Field>
+          <Button
+            testID="login-submit"
+            variant="default"
+            label={submitting() ? "验证中…" : "进入"}
+            loading={submitting()}
             disabled={submitting() || !password().trim()}
-            accessibilityLabel="进入 Keel"
-            style={{
-              height: 38,
-              borderRadius: radius.control,
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "row",
-              gap: 8,
-              backgroundColor: colors.brand,
-            }}
-          >
-            <If when={submitting()} else={<Text style={{ fontSize: 13, fontWeight: "600", color: colors.brandForeground }}>进入</Text>}>
-              <Spinner size={13} tint={colors.brandForeground} />
-              <Text style={{ fontSize: 13, fontWeight: "600", color: colors.brandForeground }}>验证中…</Text>
-            </If>
-          </Press>
-          <If when={store.authError()}>
-            <Text style={{ fontSize: 11.5, color: colors.danger }}>{store.authError() ?? ""}</Text>
-          </If>
-        </View>
-      </View>
+            accessibilityLabel={submitting() ? "正在验证口令" : "进入 Keel"}
+            onPress={() => void submit()}
+          />
+        </CardContent>
+      </Card>
     </View>
   );
 }

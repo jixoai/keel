@@ -1,14 +1,38 @@
 // The session's model picker: a chip in the conversation header showing the
-// session's own selection (distinct from the tenant default) and a dialog that
-// picks it from /v1/models. The choice is an input fact — it rides every
-// subsequent input and never writes the tenant document.
-import { Scroll, signal, Text, View, windowSize } from "nsh";
+// session's own selection (distinct from the tenant default) and the kit's
+// Dialog that picks it from /v1/models. The choice is an input fact — it rides
+// every subsequent input and never writes the tenant document: the settings
+// page stays the document's only writer, and the tenant default is shown here
+// read-only.
+//
+// One press on the chip opens the Dialog itself — there is no popover layer in
+// between. Every piece is a kit component (Button / Dialog / Badge / RadioGroup
+// / ScrollArea / Separator) and every size a token: no hand-drawn pill, no
+// scrim, no z-index and no breakpoint in this file.
+import { signal, Text, View } from "nsh";
 import type { ModelSelection, ModelView } from "../data/contract";
 import { store } from "../data/store";
 import { modelFacts, reasoningLabel, selectionLabel } from "../data/wire";
 import { Icon } from "../ui/icons";
-import { Press, Spinner } from "../ui/primitives";
-import { alpha, colors, glass, mono, radius, space } from "../ui/theme";
+import {
+  Badge,
+  Button,
+  Dialog,
+  RadioGroup,
+  ScrollArea,
+  Separator,
+  Spinner,
+  alpha,
+  color,
+  controlIconSize,
+  font,
+  iconSize,
+  lineHeight,
+  radius,
+  space,
+  typeScale,
+  weight,
+} from "../ui/kit";
 
 export const pickerOpen = signal(false);
 
@@ -46,7 +70,11 @@ const selectModel = (model: ModelView, reasoningLevel?: string) => {
   store.setSessionSelection(next);
 };
 
-/** The header chip: the session's current model, or 默认. */
+/** One model's declared levels as radio options (低 / 高 …). */
+const levelOptions = (levels: string[]) => levels.map((level) => ({ value: level, label: reasoningLabel(level) }));
+
+/** The header chip: the session's current model, or 默认. A kit Button — one
+ * press opens the picker Dialog directly. */
 export function SessionModelChip() {
   const session = () => store.sessionSelection();
   const tenant = () => store.tenantSelection();
@@ -56,40 +84,17 @@ export function SessionModelChip() {
     const fallback = tenant();
     return fallback ? `默认 ${selectionLabel(fallback)}` : "默认";
   };
-  const wide = () => windowSize().width >= 660;
   return (
-    <Press
-      onPress={openModelPicker}
+    <Button
+      variant="outline"
+      size="sm"
+      icon="brain"
+      iconTrailing="chevron-down"
+      label={label()}
+      selected={!!session()}
       accessibilityLabel="本会话模型"
-      accessibilityState={{ selected: !!session() }}
-      hoverStyle={{ backgroundColor: colors.hover }}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        height: 26,
-        maxWidth: wide() ? 260 : 132,
-        paddingHorizontal: 9,
-        borderRadius: radius.pill,
-        backgroundColor: session() ? colors.brandTint : colors.muted,
-        borderWidth: 1,
-        borderColor: session() ? alpha(colors.brand, 0.36) : colors.glassEdge,
-      }}
-    >
-      <Icon name="brain" size={11} tint={session() ? colors.brand : colors.mutedForeground} />
-      <Text
-        style={{
-          numberOfLines: 1,
-          textOverflow: "ellipsis",
-          fontSize: 10.5,
-          fontWeight: "600",
-          color: session() ? colors.brand : colors.mutedForeground,
-        }}
-      >
-        {label()}
-      </Text>
-      <Icon name="chevron-down" size={10} tint={session() ? colors.brand : colors.mutedForeground} />
-    </Press>
+      onPress={() => openModelPicker()}
+    />
   );
 }
 
@@ -99,82 +104,46 @@ function PickerModelRow(props: { model: () => ModelView }) {
     return !!current && current.modelId === props.model().modelId && current.providerId === props.model().providerId;
   };
   const levels = () => props.model().options?.reasoningLevel?.values ?? [];
+  const level = () => (isCurrent() ? store.sessionSelection()?.reasoningLevel : undefined);
   return (
     <View
       style={{
-        gap: 5,
+        gap: space.xs,
         padding: space.sm,
-        borderRadius: radius.control,
+        borderRadius: radius.lg,
         borderWidth: 1,
-        borderColor: isCurrent() ? alpha(colors.brand, 0.42) : colors.glassEdge,
-        backgroundColor: isCurrent() ? colors.brandTint : undefined,
+        borderColor: isCurrent() ? alpha(color.brand, 0.42) : color.border,
+        backgroundColor: isCurrent() ? color.brandTint : undefined,
       }}
     >
-      <Press
-        onPress={() => selectModel(props.model())}
-        accessibilityLabel={`选择模型 ${props.model().providerId}/${props.model().modelId}`}
-        hoverStyle={{ opacity: 0.92 }}
-        style={{ gap: 3 }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>
-            {props.model().modelId}
-          </Text>
-          <Text style={{ fontSize: 10, fontFamily: mono(), color: colors.mutedForeground }}>
-            {props.model().providerId}
-          </Text>
-          <If when={isCurrent()}>
-            <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.brand }}>本会话使用中</Text>
-          </If>
-        </View>
-        <Text style={{ fontSize: 10.5, lineHeight: 15, color: colors.mutedForeground }}>
-          {modelFacts(props.model())}
-        </Text>
-      </Press>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <Button
+          variant="ghost"
+          size="sm"
+          label={`${props.model().providerId}/${props.model().modelId}`}
+          accessibilityLabel={`选择模型 ${props.model().providerId}/${props.model().modelId}`}
+          selected={isCurrent()}
+          onPress={() => selectModel(props.model())}
+        />
+        <If when={isCurrent()}>
+          <Badge variant="info" label="本会话使用中" />
+        </If>
+      </View>
+      <Text style={{ fontSize: typeScale.xs, lineHeight: lineHeight.normal, color: color.mutedForeground }}>
+        {modelFacts(props.model())}
+      </Text>
       <If when={levels().length > 0}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-          <Text style={{ fontSize: 10, color: colors.mutedForeground }}>思考档</Text>
-          <Each of={levels()} key="index">
-            {(level) => (
-              <Press
-                onPress={() => selectModel(props.model(), level())}
-                accessibilityLabel={`本会话思考档 ${reasoningLabel(level())}`}
-                accessibilityState={{
-                  selected: isCurrent() && store.sessionSelection()?.reasoningLevel === level(),
-                }}
-                hoverStyle={{ opacity: 0.9 }}
-                style={{
-                  paddingHorizontal: 8,
-                  height: 22,
-                  borderRadius: radius.pill,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor:
-                    isCurrent() && store.sessionSelection()?.reasoningLevel === level()
-                      ? colors.glassControl
-                      : colors.muted,
-                  borderWidth: 1,
-                  borderColor:
-                    isCurrent() && store.sessionSelection()?.reasoningLevel === level()
-                      ? colors.glassControlRim
-                      : colors.glassEdge,
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 10,
-                    fontWeight: "600",
-                    color:
-                      isCurrent() && store.sessionSelection()?.reasoningLevel === level()
-                        ? colors.foreground
-                        : colors.mutedForeground,
-                  }}
-                >
-                  {reasoningLabel(level())}
-                </Text>
-              </Press>
-            )}
-          </Each>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <Text style={{ fontSize: typeScale.xs, fontWeight: weight.medium, color: color.mutedForeground }}>
+            思考档
+          </Text>
+          <RadioGroup
+            orientation="horizontal"
+            options={levelOptions(levels())}
+            value={level()}
+            onChange={(value) => selectModel(props.model(), value)}
+            accessibilityLabel={`思考档 ${props.model().providerId}/${props.model().modelId}`}
+          />
         </View>
       </If>
     </View>
@@ -197,31 +166,31 @@ function PickerGroups() {
     }));
   };
   return (
-    <View style={{ gap: space.sm }}>
+    <View style={{ gap: space.md }}>
       <If when={store.modelsError() || store.providersError()}>
-        <Text style={{ fontSize: 11.5, lineHeight: 17, color: colors.danger }}>
+        <Text style={{ fontSize: typeScale.sm, lineHeight: lineHeight.normal, color: color.danger }}>
           {store.modelsError() ?? store.providersError() ?? ""}
         </Text>
       </If>
       <If when={!store.registryLoaded() && !store.modelsError()}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: space.sm }}>
-          <Spinner size={13} tint={colors.brand} />
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>正在读取可执行模型…</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.sm }}>
+          <Spinner size={iconSize.sm} tint={color.brand} />
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>正在读取可执行模型…</Text>
         </View>
       </If>
       <If when={store.registryLoaded() && groups().length === 0}>
-        <Text style={{ fontSize: 12, lineHeight: 18, color: colors.mutedForeground }}>
+        <Text style={{ fontSize: typeScale.sm, lineHeight: lineHeight.normal, color: color.mutedForeground }}>
           没有可选的模型：当前进程解析不到任何 provider 的凭据。配置密钥或环境变量后再试。
         </Text>
       </If>
       <Each of={groups()} key={(group) => group.providerId}>
         {(group) => (
-          <View style={{ gap: 5 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.mutedForeground }}>
+          <View style={{ gap: space.sm }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.mutedForeground }}>
                 {group().name}
               </Text>
-              <Text style={{ fontSize: 10, fontFamily: mono(), color: colors.mutedForeground }}>
+              <Text style={{ fontSize: typeScale.xs, fontFamily: font.mono, color: color.mutedForeground }}>
                 {group().providerId}
               </Text>
             </View>
@@ -235,136 +204,94 @@ function PickerGroups() {
   );
 }
 
-/** The picker dialog: session current vs tenant default, then the selectable
- * models with their reasoning levels. */
+/** The picker dialog: the session's own selection next to the tenant default
+ * (read-only here — the settings page is the tenant document's only writer),
+ * then the selectable models with their reasoning levels. */
 export function SessionModelPicker() {
-  const close = () => pickerOpen.set(false);
   const session = () => store.sessionSelection();
-  const compact = () => windowSize().width < 720 || windowSize().height < 560;
   return (
-    <If when={pickerOpen() && store.route() === "workspace" && !!store.activeId()}>
-      <View
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 25,
-          alignItems: "center",
-          justifyContent: "center",
-          padding: compact() ? 10 : 24,
-        }}
-      >
-        <Press
-          onPress={close}
-          accessibilityLabel="关闭本会话模型选择"
-          activeStyle={{ opacity: 1 }}
-          hoverStyle={{ opacity: 1 }}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: alpha(colors.background, 0.68),
-          }}
+    <Dialog
+      open={pickerOpen() && store.route() === "workspace" && !!store.activeId()}
+      size="default"
+      // The popup never grows past its natural height: the model list below
+      // carries its own viewport cap and scrolls inside it.
+      maxHeight={600}
+      // Center the card in the runtime's dialog layer: nsh's dialog popup sits
+      // where its own style puts it, and `margin: auto` is the documented way
+      // to center it there (nsh `elements/dialog.md`, "a card centered over
+      // it"; the kit Dialog carries no placement of its own).
+      style={{ margin: "auto" }}
+      title="本会话模型"
+      description="会话选择随之后每条输入发送，不修改租户配置；恢复默认后输入不带选择。"
+      accessibilityLabel="本会话模型选择"
+      testID="session-model-picker"
+      onOpenChange={(event) => {
+        if (!event.open) pickerOpen.set(false);
+      }}
+      onClose={() => pickerOpen.set(false)}
+      footer={
+        <Button
+          variant="ghost"
+          size="sm"
+          accessibilityLabel="恢复默认"
+          // danger-ghost: the kit's Button carries the ghost face and this
+          // button's own children carry the danger ink (there is no danger
+          // variant on the Button, and a hand-styled button would be a second
+          // button language).
+          disabled={!session()}
+          onPress={() => store.setSessionSelection(null)}
+          hoverStyle={{ backgroundColor: color.dangerTint }}
         >
-          <View style={{ flex: 1 }} />
-        </Press>
-        <View
-          accessibilityLabel="本会话模型选择"
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            maxHeight: "86%",
-            borderRadius: radius.card,
-            ...glass.popover,
-            backgroundColor: colors.popover,
-            padding: space.md,
-            gap: space.sm,
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Icon name="brain" size={15} tint={colors.brand} />
-            <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: colors.foreground }}>
-              本会话模型
+          <Icon name="refresh" size={controlIconSize("sm")} tint={color.danger} />
+          <Text style={{ fontSize: typeScale.base, fontWeight: weight.medium, color: color.danger }}>恢复默认</Text>
+        </Button>
+      }
+    >
+      <View style={{ gap: space.lg }}>
+        <View style={{ gap: space.xs }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.mutedForeground }}>
+              本会话当前
             </Text>
-            <Press
-              onPress={close}
-              accessibilityLabel="关闭"
-              hoverStyle={{ backgroundColor: colors.hover }}
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: radius.control,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+            <If
+              when={!!session()}
+              else={<Text style={{ fontSize: typeScale.sm, color: color.foreground }}>未选择 · 使用租户默认</Text>}
             >
-              <Icon name="x" size={13} tint={colors.mutedForeground} />
-            </Press>
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+                {selectionLabel(session())}
+              </Text>
+            </If>
           </View>
-          <View style={{ gap: 4 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.mutedForeground }}>本会话当前</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.mutedForeground }}>
+              租户默认
+            </Text>
+            <If
+              when={!!store.settings()}
+              else={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>读取中…</Text>}
+            >
               <If
-                when={!!session()}
-                else={<Text style={{ fontSize: 11.5, color: colors.foreground }}>未选择 · 使用租户默认</Text>}
+                when={!!store.tenantSelection()}
+                else={<Text style={{ fontSize: typeScale.sm, color: color.warning }}>未设置</Text>}
               >
-                <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.foreground }}>
-                  {selectionLabel(session())}
-                </Text>
-              </If>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.mutedForeground }}>租户默认</Text>
-              <If
-                when={!!store.settings()}
-                else={<Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>读取中…</Text>}
-              >
-                <If
-                  when={!!store.tenantSelection()}
-                  else={<Text style={{ fontSize: 11.5, color: colors.warning }}>未设置</Text>}
-                >
-                  <Text style={{ fontSize: 11.5, color: colors.foreground }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+                  <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
                     {selectionLabel(store.tenantSelection())}
                   </Text>
-                </If>
+                  <Badge variant="outline" label="只读" />
+                </View>
               </If>
-            </View>
+            </If>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Press
-              onPress={session() ? () => store.setSessionSelection(null) : undefined}
-              disabled={!session()}
-              accessibilityLabel="恢复默认"
-              hoverStyle={{ opacity: 0.9 }}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                height: 28,
-                paddingHorizontal: 11,
-                borderRadius: radius.control,
-                backgroundColor: colors.dangerTint,
-                borderWidth: 1,
-                borderColor: alpha(colors.danger, 0.3),
-              }}
-            >
-              <Icon name="refresh" size={12} tint={colors.danger} />
-              <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.danger }}>恢复默认</Text>
-            </Press>
-            <Text style={{ flex: 1, fontSize: 10, lineHeight: 14, color: colors.mutedForeground }}>
-              会话选择只随之后每条输入发送，不修改租户配置；恢复默认后输入不带选择。
-            </Text>
-          </View>
-          <View style={{ height: 1, backgroundColor: colors.border }} />
-          <Scroll style={{ maxHeight: compact() ? 300 : 380 }} contentStyle={{ paddingRight: 2 }}>
-            <PickerGroups />
-          </Scroll>
+          <Text style={{ fontSize: typeScale.xs, lineHeight: lineHeight.normal, color: color.mutedForeground }}>
+            租户默认只在设置页的「模型」分区修改；这里显示它，不在这里写它。
+          </Text>
         </View>
+        <Separator />
+        <ScrollArea maxHeight={380} fade accessibilityLabel="可选模型">
+          <PickerGroups />
+        </ScrollArea>
       </View>
-    </If>
+    </Dialog>
   );
 }

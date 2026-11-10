@@ -1,24 +1,40 @@
-// The conversation: a bottom-aligned List (new content grows from the bottom;
-// only a list already at its end follows a streaming reply), the approval
-// cards, the run state and the composer. It owns no conversation semantics —
-// the projection lives in the data layer.
+// The conversation panel — the column's geometry, the row list, and the
+// composer's anchor. Nothing else belongs to this file.
+//
+// One geometry owner, two consumers. Every number of the column lives in the
+// kit's layout blocks (change keel-ui-kit): `ConversationColumn` carries the
+// inset (48 / 192 per side), the cap (896 / 1152) and the 168px rail shift, and
+// `ComposerDock` carries the same geometry plus the dock's own insets. This
+// panel writes no width at all. The two blocks are SIBLINGS inside the panel's
+// `position: relative` box: nesting them would apply the insets and the shift
+// twice (each block brings its own padding + maxWidth + translate), so the
+// composer would sit narrower than the rows it belongs to.
+//
+// The geometry is keyed on the PANEL's width, not the window's: the sidebar and
+// the status rail take their share out of the conversation's budget, so at a
+// 1280px window with the 264px sidebar the column is in the 864–1280 band
+// (896 cap, 48px insets) rather than the wide one. The panel measures itself
+// (`onLayout`) and hands that number to both blocks.
+//
+// What is deliberately NOT here (change keel-harness-shell):
+//   · the header — title, model chip, run state and the back affordance are the
+//     shell's (`WorkspaceShell`'s h-12 header slot). This panel draws no second
+//     header, and the gradient mask that softened content scrolling under it is
+//     gone with it;
+//   · the delete confirmation — `DeleteDialog` is a root-level `AlertDialog`
+//     covering the app; the panel paints no second overlay of its own;
+//   · connection state — a kit `Badge` on a status strip, never a hand-mixed
+//     alpha bar.
 //
 // NSH components run once and update through fine-grained bindings: every
-// signal/prop is read inside JSX or an `<If>`, never copied into a local at
-// the top of a component (that would freeze the value).
-import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View } from "nsh";
+// signal/prop is read inside JSX or an `<If>`, never copied into a local at the
+// top of a component (that would freeze the value).
+import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View, windowSize } from "nsh";
 import type { ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
-import { formatTime } from "../data/wire";
-import { Icon } from "../ui/icons";
-import { IconButton, PillButton, Spinner, StatusPill } from "../ui/primitives";
-import { conversationState } from "../ui/run-state";
-import { alpha, colors, space } from "../ui/theme";
+import { Badge, color, ComposerDock, ConversationColumn, row, Skeleton, space, typeScale } from "../ui/kit";
 import { ApprovalCard, EmptyConversation, GuideWaitingRow, TurnErrorBanner, TurnRow } from "./messages";
 import { Composer, prefillComposer } from "./composer";
-import { ConnectionBadge } from "./session-list";
-import { pendingDeleteId } from "./delete-dialog";
-import { SessionModelChip } from "./model-picker";
 
 interface Row {
   kind: "turn" | "decision" | "guide";
@@ -31,7 +47,7 @@ interface Row {
 const submitting = signal<Record<string, boolean>>({});
 const now = signal(Date.now());
 
-// The reader's scroll intent for the OPEN session (C4). The value is replaced
+// The reader's scroll intent for the OPEN session (C5). The value is replaced
 // from the store's per-session memory whenever a session opens, and every
 // scroll writes it back — so the intent and the reading position can never
 // leak across sessions.
@@ -58,50 +74,9 @@ const rowsOf = (view: ConversationView | null): Row[] => {
   ];
 };
 
-function ConversationHeader(props: {
-  title: string;
-  wide: boolean;
-  view: ConversationView | null;
-  onBack: () => void;
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.sm,
-        height: 48,
-        paddingHorizontal: space.md,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.headerBorder,
-        backgroundColor: colors.background,
-        zIndex: 4,
-      }}
-    >
-      <If when={!props.wide}>
-        <IconButton
-          icon="chevron-left"
-          label="返回会话列表"
-          size={platform.idiom === "terminal" ? 30 : 44}
-          iconSize={20}
-          onPress={props.onBack}
-        />
-      </If>
-      <View style={{ flex: 1, gap: 1, alignItems: "flex-start" }}>
-        <Text style={{ numberOfLines: 1, textOverflow: "ellipsis", fontSize: 14, fontWeight: "700", color: colors.foreground }}>
-          {props.title}
-        </Text>
-        <If when={platform.idiom !== "terminal" && props.view?.connection.status !== "reconnecting"}>
-          <ConnectionBadge />
-        </If>
-      </View>
-      <SessionModelChip />
-      <StatusPill state={conversationState(props.view)} />
-    </View>
-  );
-}
-
-function RowCell(props: { row: () => Row; wide: boolean }) {
+/** The rows' cells: content only. Their width, insets and shift are the
+ * column's (`ConversationColumn`), never a `maxWidth` of their own. */
+function RowCell(props: { row: () => Row }) {
   const isLastRunning = () => {
     const turns = store.conversation()?.turns ?? [];
     const last = turns[turns.length - 1];
@@ -122,14 +97,7 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
     return false;
   };
   return (
-    <View
-      style={{
-        width: "100%",
-        maxWidth: 900,
-        alignSelf: "center",
-        paddingHorizontal: props.wide ? 24 : 12,
-      }}
-    >
+    <View style={{ width: "100%" }}>
       <If when={props.row().kind === "turn"}>
         <TurnRow
           turn={() => props.row().turn!}
@@ -172,54 +140,39 @@ function RowCell(props: { row: () => Row; wide: boolean }) {
   );
 }
 
-function NoSession(props: { wide: boolean; onOpenList?: () => void }) {
+/** The snapshot has not arrived yet: the shape of the answer, not a claim about
+ * it (the kit's `Skeleton`, which announces "加载中" to screen readers and
+ * draws muted cells in the terminal). */
+function LoadingRows() {
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 14 }}>
-      <View
-        style={{
-          width: 64,
-          height: 64,
-          borderRadius: 20,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.muted,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Icon name="message" size={28} tint={colors.brand} />
-      </View>
-      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground }}>选择一个会话</Text>
-      <Text style={{ maxWidth: 420, textAlign: "center", fontSize: 12.5, lineHeight: 19, color: colors.mutedForeground }}>
-        从左侧选择一个会话，或新建一个开始。
-      </Text>
-      <Text style={{ maxWidth: 420, textAlign: "center", fontSize: 12.5, lineHeight: 19, color: colors.mutedForeground }}>
-        审批、工具和流式回复会实时出现在这里。
-      </Text>
-      <If
-        when={!props.wide}
-        else={<PillButton label="新建会话" tone="primary" onPress={() => void store.createSession()} />}
-      >
-        <PillButton label="打开会话列表" tone="primary" onPress={() => props.onOpenList?.()} />
-      </If>
+    <View style={{ flexDirection: "column", gap: space["2xl"], paddingVertical: space["3xl"] }}>
+      <Skeleton lines={3} />
+      <Skeleton lines={2} />
     </View>
   );
 }
 
+// The panel keeps the two callbacks the old in-panel header used (`onBack`,
+// `onOpenList`): the signature is shared with the shell, which owns those
+// affordances now, and a shell that still hands them down must keep compiling.
 export function Conversation(props: { wide: boolean; onOpenList?: () => void; onBack?: () => void }) {
   let list: ListRef | undefined;
-  const title = () => {
-    const id = store.activeId();
-    const row = store.sessions().find((item) => item.sessionId === id);
-    const named = (row?.title ?? "").trim();
-    // Never a raw id as a title (C1): an unnamed session reads as "新会话"
-    // plus how long ago it was created (no createdAt: just the name). The
-    // store's placeholder name counts as unnamed, so the header and the list
-    // row say the same thing.
-    const created = formatTime(row?.createdAt);
-    if (named && named !== "新会话") return named;
-    return created ? `新会话 · ${created}` : "新会话";
-  };
+  // The conversation's own width: what the kit's blocks are keyed on. 0 until
+  // the first layout lands — the window is the stand-in for that one frame.
+  const paneWidthPx = signal(0);
+  const paneWidth = () => (paneWidthPx() > 0 ? paneWidthPx() : windowSize().width);
+  const rows = () => rowsOf(store.conversation());
+  // The centered (draft) layout, defined once and nowhere else: nothing to read
+  // yet — no open session, or a session whose snapshot is in and has no rows.
+  // The reference's `centeredEmptyLayout = centerEmptyStateWithDock &&
+  // renderUnits.length === 0` (ConversationTimeline.tsx:526): a brand-new
+  // session gets the 672px column, not the wide one.
+  const draft = () => !store.activeId() || (!!store.conversation() && rows().length === 0);
+  // A draft has no snapshot to wait for: the greeting is the honest state, not
+  // a loading that cannot finish.
+  const loading = () => !draft() && !store.conversation();
+  const ready = () => !loading();
+  const empty = () => draft() || rows().length === 0;
   const jumpToEnd = () => {
     const id = store.activeId();
     scroll.set({ intent: "following", offset: 0 });
@@ -272,131 +225,105 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
   cleanup(() => clearInterval(timer));
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <If when={store.activeId()} else={<NoSession wide={props.wide} onOpenList={props.onOpenList} />}>
-        <View style={{ flex: 1 }}>
-          <ConversationHeader
-            title={title()}
-            wide={props.wide}
-            view={store.conversation()}
-            onBack={props.onBack ?? (() => store.closeSession())}
-          />
-          <If when={store.connection().status === "reconnecting"}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: space.sm,
-                paddingHorizontal: space.md,
-                height: 30,
-                backgroundColor: colors.warningTint,
-                borderBottomWidth: 1,
-                borderBottomColor: alpha(colors.warning, 0.26),
-              }}
-            >
-              <Spinner size={11} tint={colors.warning} />
-              <Text style={{ fontSize: 11, color: colors.warning }}>
-                连接中断，正在续接缺失的事件；缺口会补发且不重复。
-              </Text>
-            </View>
-          </If>
-          <View style={{ flex: 1, minHeight: 0 }}>
-            <If
-              when={store.conversation()}
-              else={
-                <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 10 }}>
-                  <Spinner size={18} tint={colors.brand} />
-                  <Text style={{ fontSize: 12, color: colors.mutedForeground }}>正在载入事件快照…</Text>
-                </View>
-              }
-            >
-              <If
-                when={rowsOf(store.conversation()).length > 0}
-                else={<EmptyConversation onSuggestion={(text) => prefillComposer(text)} />}
-              >
-                <List
-                  ref={list}
-                  each={rowsOf(store.conversation())}
-                  keyExtractor={(row) => row.id}
-                  estimatedItemSize={160}
-                  alignment="bottom"
-                  maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 48 }}
-                  scrollbar={platform.idiom === "terminal" ? false : undefined}
-                  style={{ flex: 1 }}
-                  contentStyle={{ paddingTop: 16, paddingBottom: 12 }}
-                  onScroll={(event) => {
-                    const id = store.activeId();
-                    // A restore in flight is not a reader's intent: re-apply the
-                    // remembered offset (bounded) instead of recording.
-                    if (id && pendingRestore && pendingRestore.sessionId === id) {
-                      if (Math.abs(event.offset.y - pendingRestore.offset) > 4 && pendingRestore.tries < 6) {
-                        pendingRestore.tries += 1;
-                        list?.scrollToOffset({ offset: pendingRestore.offset, animated: false });
-                        return;
-                      }
-                      pendingRestore = null;
-                    }
-                    const atEnd = event.offset.y + event.size.height >= event.contentSize.height - 48;
-                    const next: ScrollState = { intent: atEnd ? "following" : "detached", offset: event.offset.y };
-                    scroll.set(next);
-                    overflowing.set(event.contentSize.height > event.size.height + 8);
-                    if (id) store.saveScrollState(id, next);
-                  }}
-                >
-                  {(row) => <RowCell row={row} wide={props.wide} />}
-                </List>
-              </If>
-            </If>
-            {/* Content scrolling under the header softens instead of hard-cutting. */}
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 22,
-                backgroundImage: `linear-gradient(to bottom, ${colors.background}, ${alpha(colors.background, 0)})`,
-                pointerEvents: "none",
-                zIndex: 3,
-              }}
-            />
-            <If when={scroll().intent === "detached" && overflowing()}>
-              <View style={{ position: "absolute", right: 18, bottom: 12 }}>
-                <PillButton label="回到底部" icon="arrow-down" compact onPress={jumpToEnd} />
-              </View>
-            </If>
-          </View>
-          <View style={{ paddingTop: 12, paddingBottom: 10 }}>
-            <TurnErrorBanner compact={!props.wide} />
-            <Composer view={store.conversation()} compact={!props.wide} />
-          </View>
-          {/* The right pane never keeps showing a session that is about to be
-              deleted: the confirmation covers it with a neutral placeholder. */}
-          <If when={pendingDeleteId() === store.activeId()}>
-            <View
-              style={{
-                position: "absolute",
-                top: 48,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 3,
-                backgroundColor: colors.background,
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                padding: 24,
-              }}
-            >
-              <Icon name="trash" size={22} tint={colors.mutedForeground} />
-              <Text style={{ fontSize: 13, fontWeight: "600", color: colors.mutedForeground }}>
-                此会话等待删除确认
-              </Text>
-              <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>取消后可以继续查看。</Text>
-            </View>
-          </If>
+    <View
+      testID="conversation-panel"
+      onLayout={(event) => paneWidthPx.set(event.bounds.size.width)}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        // The containing block for the absolute layers a kit block may draw
+        // (the status rail, the dock's back-to-bottom button), and the sibling
+        // of both columns' geometry.
+        position: "relative",
+        backgroundColor: color.background,
+      }}
+    >
+      {/* Connection state is a kit Badge, not a hand-mixed alpha bar: one short
+          status token, and the sentence that says what happens next. */}
+      <If when={store.connection().status === "reconnecting"}>
+        <View style={[row(), { gap: space.md, paddingHorizontal: space.xl, paddingVertical: space.sm }]}>
+          <Badge variant="warning" icon="alert" label="重连中" />
+          <Text style={{ flex: 1, numberOfLines: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>
+            连接中断，正在续接缺失的事件；缺口会补发且不重复。
+          </Text>
         </View>
       </If>
+      <ConversationColumn
+        draft={draft()}
+        // No inline status rail in this pane: the shell's status surface is its
+        // own side pane / a chip, so the column must stay centred instead of
+        // shifting 168px for a rail that is not there (the reference keys the
+        // offset off the panel's layout, conversationLayout.ts:43-50).
+        rail={false}
+        windowWidthPx={paneWidth()}
+        testID="conversation-column"
+        // `flexDirection: "row"`: the height hand-off. The kit's block owns the
+        // width, but its inner column is content-sized, so the outer edge is
+        // laid out as a row and the inner column stretches (flexbox's default
+        // `alignItems: stretch`) to the panel's height — which is what lets the
+        // list scroll inside its own viewport instead of growing past it. No
+        // width, height or inset is written here.
+        style={{ flex: 1, minHeight: 0, flexDirection: "row" }}
+      >
+        {/* Three states, one surface: the answer is loading, there is nothing
+            to show yet (the greeting), or there are rows. The list keeps its
+            own `<List>` element (the rows are recycled through it), so it is a
+            plain sibling `<If>` rather than a branch of an `else` prop. */}
+        <If when={loading()}>
+          <LoadingRows />
+        </If>
+        <If when={ready() && empty()}>
+          <EmptyConversation onSuggestion={(text) => prefillComposer(text)} />
+        </If>
+        <If when={ready() && !empty()}>
+          <List
+            ref={list}
+            testID="conversation-list"
+            each={rows()}
+            keyExtractor={(row) => row.id}
+            estimatedItemSize={160}
+            alignment="bottom"
+            maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 48 }}
+            scrollbar={platform.idiom === "terminal" ? false : undefined}
+            style={{ flex: 1 }}
+            contentStyle={{ paddingTop: space.xl, paddingBottom: space.lg }}
+            onScroll={(event) => {
+              const id = store.activeId();
+              // A restore in flight is not a reader's intent: re-apply the
+              // remembered offset (bounded) instead of recording.
+              if (id && pendingRestore && pendingRestore.sessionId === id) {
+                if (Math.abs(event.offset.y - pendingRestore.offset) > 4 && pendingRestore.tries < 6) {
+                  pendingRestore.tries += 1;
+                  list?.scrollToOffset({ offset: pendingRestore.offset, animated: false });
+                  return;
+                }
+                pendingRestore = null;
+              }
+              const atEnd = event.offset.y + event.size.height >= event.contentSize.height - 48;
+              const next: ScrollState = { intent: atEnd ? "following" : "detached", offset: event.offset.y };
+              scroll.set(next);
+              overflowing.set(event.contentSize.height > event.size.height + 8);
+              if (id) store.saveScrollState(id, next);
+            }}
+          >
+            {(row) => <RowCell row={row} />}
+          </List>
+        </If>
+      </ConversationColumn>
+      <ComposerDock
+        draft={draft()}
+        rail={false}
+        windowWidthPx={paneWidth()}
+        backToBottomVisible={scroll().intent === "detached" && overflowing()}
+        onBackToBottom={jumpToEnd}
+        backToBottomLabel="回到底部"
+        testID="composer-dock"
+      >
+        {/* The failure's reason sits directly above the input it belongs to
+            (C5): same column, same layer, closable and retryable. */}
+        <TurnErrorBanner compact={!props.wide} />
+        <Composer view={store.conversation()} compact={!props.wide} />
+      </ComposerDock>
     </View>
   );
 }

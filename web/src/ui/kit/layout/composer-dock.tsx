@@ -6,10 +6,18 @@
 //   | item                | value                                                   |
 //   |---------------------|---------------------------------------------------------|
 //   | dock                | `sticky bottom-0`, full width, centered column           |
-//   | column              | the conversation column's own caps and 168px shift       |
-//   | dock insets         | px-4 pb-4 (16px)                                         |
+//   | column              | the conversation column's own inset, caps and shift      |
+//   | shell inset         | px-4 pb-4 (16px), inside that column                     |
 //   | input shell         | rounded-2xl (16px), 1px border, p-3 (12px), focus ring    |
 //   | back to bottom      | a round button above the shell, centered on it            |
+//
+// The column resolves to the SAME width as the message column: the inset is
+// taken off the wrapper's width (as the messages' block takes it off its own),
+// and `px-4` is inner padding on the column — the reference puts one width
+// class on both columns (ConversationTimeline.tsx:2043-2061, 2169-2174) and only
+// `px-4 pb-4` on the dock's. Applying the inset as padding on a 100%-wide column
+// would narrow the shell by it twice (the reviewer measured 800 vs 896 at a
+// 1016px pane).
 //
 // `sticky` is a real NSH style (`ViewStyle.position`), so the dock sticks to the
 // bottom of the scroll view around it — the reference's own arrangement: the
@@ -54,6 +62,10 @@ export interface ComposerDockProps {
   /** The floating layout: an absolute layer on the bottom edge, so the dock
    * does not scroll with the messages. */
   floating?: boolean;
+  /** The pane has an inline status rail in its width budget (default `true`):
+   * the column then carries the same 168px shift the messages do. A pane
+   * without one passes `false` and the dock stays centred with them. */
+  rail?: boolean;
   /** A viewport width other than the window's (a gallery or a test). */
   windowWidthPx?: number;
   /** Show the round "back to bottom" button above the shell. */
@@ -70,6 +82,7 @@ export function ComposerDock(props: ComposerDockProps) {
   const geometry = () => ({
     draft: props.draft ?? false,
     windowWidthPx: props.windowWidthPx ?? windowSize().width,
+    rail: props.rail ?? true,
   });
   return (
     <View
@@ -100,7 +113,11 @@ export function ComposerDock(props: ComposerDockProps) {
           width: "100%",
           flexShrink: 0,
           pointerEvents: "box-none",
-          paddingHorizontal: props.draft || props.floating ? 0 : COMPOSER_DOCK_INSET_PX,
+          // The column's own inset — the same one the messages' column applies
+          // to its width — so the dock's column and the message column resolve
+          // to one width (the reference puts the same width class on both,
+          // ConversationTimeline.tsx:2043-2061 and 2169-2174).
+          paddingHorizontal: props.draft || props.floating ? 0 : conversationColumnInsetPx(geometry()),
           paddingBottom: props.draft || props.floating ? 0 : COMPOSER_DOCK_INSET_PX,
         }}
       >
@@ -111,8 +128,10 @@ export function ComposerDock(props: ComposerDockProps) {
             maxWidth: conversationColumnMaxWidthPx(geometry()) ?? undefined,
             marginHorizontal: "auto",
             translate: [conversationColumnOffsetPx(geometry()), 0],
-            paddingHorizontal:
-              props.draft || props.floating ? 0 : conversationColumnInsetPx(geometry()),
+            // `px-4` inside the column (the reference's `px-4 pb-4` on the same
+            // element as the width class): the shell sits 16px in from the
+            // column's edges, never another column inset on top of it.
+            paddingHorizontal: props.draft || props.floating ? 0 : COMPOSER_DOCK_INSET_PX,
           }}
         >
           <If when={props.backToBottomVisible}>

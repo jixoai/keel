@@ -8,15 +8,23 @@
 // list → open → type → reply → approve, plus guide/stop and the partial
 // switch. The settings page and the session model picker (change
 // keel-model-settings) are covered below against the fixture transport.
+//
+// The fixture is development-only (change keel-harness-shell, task X1): a test
+// asks for it the way the TUI host does, in the launch parameters
+// (`host.params.fixture === true`). Without them the app is offline, which is
+// the product's real face.
 import { expect, open, test } from "nsh/test";
 
 const TITLE = (name: string) => `label:打开会话 ${name}`;
 
+/** The app on the terminal host, with the development transport enabled. */
+const openApp = () => open("./App.tsx", { host: { params: { fixture: true } } });
+
 test("TUI: 会话列表 → 打开会话 → 输入 → 显示回复", async () => {
-  const app = await open("./App.tsx");
+  const app = await openApp();
   expect(app.texts()).toContain("发布准备周报");
   expect(app.texts()).toContain("发布审批");
-  expect(app.texts()).toContain("演示数据 · 未连接服务");
+  expect(app.texts()).toContain("未连接");
 
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("text:/本周发布准备已基本就绪/");
@@ -29,7 +37,7 @@ test("TUI: 会话列表 → 打开会话 → 输入 → 显示回复", async () 
 });
 
 test("TUI: 审批卡一键作答", async () => {
-  const app = await open("./App.tsx");
+  const app = await openApp();
   await app.press(TITLE("发布审批"));
   await app.waitFor("text:需要你的确认");
   expect(app.texts()).toContain("推荐");
@@ -39,7 +47,7 @@ test("TUI: 审批卡一键作答", async () => {
 });
 
 test("TUI: guide 等待与停止", async () => {
-  const app = await open("./App.tsx");
+  const app = await openApp();
   await app.press(TITLE("会议纪要整理"));
   await app.waitFor("text:等待引导当前任务…");
   await app.press("text:引导");
@@ -51,15 +59,20 @@ test("TUI: guide 等待与停止", async () => {
 });
 
 test("TUI: partial 开关", async () => {
-  const app = await open("./App.tsx");
-  expect(app.texts()).toContain("partial 开");
+  const app = await openApp();
+  // The token-level partial switch lives in the settings page's 通用 section
+  // (change keel-harness-shell: the sidebar footer carries only the connection
+  // badge — the workspace shows no switch). One switch, the store's one fact.
+  await app.press("label:打开设置");
+  await app.press("id:settings-section-general");
+  await app.waitFor("text:partial 开");
   await app.press("label:切换 token 级 partial");
   await app.waitFor("text:partial 关");
   expect(app.texts()).toContain("partial 关");
 });
 
 test("TUI: 设置页——模型分区读/写/重置与分区导航", async () => {
-  const app = await open("./App.tsx");
+  const app = await openApp();
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("text:/本周发布准备已基本就绪/");
 
@@ -78,7 +91,10 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
     code: "ERR_NSH_TEST_DISABLED",
   });
 
-  // 坏文档：400 的字段级 issues 原样呈现。
+  // 坏文档：400 的字段级 issues 原样呈现。原始文档在「高级」折叠里（spec：
+  // 原始 JSON 只放折叠内），先展开再编辑。
+  await app.press("id:settings-advanced");
+  await app.waitFor("id:settings-raw-document");
   await app.clear("id:settings-raw-document");
   await app.type(
     "id:settings-raw-document",
@@ -110,13 +126,14 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   expect(app.texts()).toContain("部署默认");
   await app.waitFor("text:/revision 5/");
 
-  // 分区导航：密钥（名字与时间，值不回显）与插件（清单/触发器）。
-  await app.press("label:设置分区 密钥");
+  // 分区导航：密钥（名字与时间，值不回显）与插件（清单/触发器）。分区入口是
+  // kit 的图标 rail，按 testID 寻址（`settings-section-<id>`）。
+  await app.press("id:settings-section-secrets");
   await app.waitFor("text:写入 / 覆盖");
   expect(app.texts()).toContain("webhook-token");
   expect(app.texts()).toContain("secret:webhook-token");
 
-  await app.press("label:设置分区 插件");
+  await app.press("id:settings-section-plugins");
   await app.waitFor("text:插件清单");
   expect(app.texts()).toContain("generation 3");
   expect(app.texts()).toContain("demo.workflow");
@@ -139,7 +156,7 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   await app.waitFor("text:/本周发布准备已基本就绪/");
 });
 
-test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分开", async () => {  const app = await open("./App.tsx");
+test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分开", async () => {  const app = await openApp();
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("text:/本周发布准备已基本就绪/");
 
@@ -155,7 +172,7 @@ test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分�
   await app.press("label:选择模型 s2api/deepseek-v4.1-flash");
   await app.waitFor("text:本会话使用中");
   // 思考档：选择器内点「低」（两个 provider 同名模型的档位都叫「低」，取第一个）。
-  await app.press("label:本会话思考档 低 >> nth=0");
+  await app.press("label:低 >> nth=0");
   await app.press("label:关闭");
   expect(app.texts()).toContain("s2api/deepseek-v4.1-flash · 低");
 
@@ -176,7 +193,7 @@ test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分�
 // carries its reason in a banner that can retry, and a suggestion only
 // prefills the composer (never sends).
 test("TUI: 打磨——不落裸 id/等待确认不是思考/错误横幅与重试/空态只预填", async () => {
-  const app = await open("./App.tsx");
+  const app = await openApp();
   const screen = () => app.texts().join("\n");
 
   // C1：行上是标题（未命名会话是「新会话 · 时间」）；屏幕上没有任何裸 session id。
@@ -228,4 +245,42 @@ test("TUI: 打磨——不落裸 id/等待确认不是思考/错误横幅与重�
   await app.waitFor("text:/把行动项按负责人分组/");
   expect(app.value("id:composer-input")).toBe("把行动项按负责人分组");
   expect(app.texts()).toContain("发送一条消息，Keel 会在这里开始工作。");
+});
+
+// The global command palette (change keel-harness-shell, S2): Mod+K opens it
+// over the workspace; its search field takes the keys at once (a bare key
+// lands in the field — no press on it first); a row runs its action (the
+// settings entry leaves the workspace for the settings page); Escape closes.
+test("TUI: 命令面板——Mod+K 打开、焦点在搜索框、选中设置", async () => {
+  const app = await openApp();
+  await app.waitFor("id:workspace-shell");
+
+  await app.keyboard.press("mod+k");
+  await app.waitFor("id:command-palette");
+
+  // The field has the focus on open: a key pressed without addressing it is
+  // the query (the native Command's `autoFocus`, forwarded by the kit).
+  await app.keyboard.press("s");
+  expect(app.value("id:command-palette")).toBe("s");
+  // The query filters: `settings` (the settings row's keyword) is the search
+  // that leaves the settings entry, and pressing it runs `store.openSettings`.
+  await app.type("id:command-palette", "ettings");
+  await app.waitFor("text:打开设置");
+  // Scoped to the palette: the session list's own header carries a settings
+  // action with the same text, and the palette's row is the one being tested.
+  await app.press("id:command-palette >> text:打开设置");
+  await app.waitFor("text:当前生效");
+});
+
+test("TUI: 命令面板——Esc 关闭", async () => {
+  const app = await openApp();
+  await app.waitFor("id:workspace-shell");
+  await app.keyboard.press("mod+k");
+  await app.waitFor("id:command-palette");
+  // The palette opens on an empty query: one Escape closes it (the native
+  // command reports cancel; with a typed query its own view-level Escape
+  // binding clears the query first — the file's header note).
+  await app.keyboard.press("escape");
+  await app.wait(150);
+  expect(app.shows("id:command-palette")).toBe(false);
 });

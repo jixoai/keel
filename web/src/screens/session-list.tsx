@@ -1,79 +1,124 @@
-// The session list: create, delete (a centered confirmation, never an inline
-// row push), search, empty/loading/error states, last-message summary and a
-// quiet projection of the run state. On a wide screen it is the sidebar; on a
-// narrow one (and in the TUI's narrow grid) it is the first screen, with the
-// conversation a second one.
+// The session list — the *content* of the kit's Sidebar panel (change
+// keel-harness-shell, tasks L1–L3).
 //
-// Change keel-workspace-polish (C1/C2/C5):
-//   - a row never renders a raw session id: an untitled session reads
-//     "新会话 · <相对时间>" (the store keeps the title empty rather than
-//     faking one from the id);
-//   - a session parked on an open decision carries the "等待确认" badge and a
-//     still amber clock instead of a pulsing dot: waiting for a human is not
-//     activity, so it lights no running pulse and no unread-style emphasis;
-//   - the rows are the store's own order (`Each` by session id), so a refresh
-//     that only changes state updates rows in place instead of re-shuffling.
-import { platform, signal, Text, type TextStyle, View, windowSize } from "nsh";
-import { Input } from "nsh/base";
+// The shell owns the panel this screen fills: the sidebar's default and minimum
+// width, its container-relative ceiling, the keyboard step, the collapsed strip
+// and the persisted width key all live in
+// `web/src/ui/kit/layout/sidebar.tsx`. This file draws no width, no breakpoint
+// and no other shell number of its own (`scripts/kit-imports.mjs` gates that),
+// and it never mounts a `Sidebar` — the shell does.
+//
+// What the panel holds, top to bottom:
+//   · the header row — h-12 (`WORKSPACE_SHELL_HEADER_HEIGHT_PX`, the height the
+//     shell gives its own header): the logo tile (12px-rounded, the reference's
+//     titlebar mark), the wordmark, and three `IconButton`s — 新建会话 / 刷新会话 /
+//     the *one* settings entry (打开设置). The footer's second settings control
+//     is gone.
+//   · the search field — the kit's `Input` (the hand-drawn glass pill is gone).
+//   · the rows — `Each` over the store's own order, so a refresh that only
+//     changes state updates rows in place (the polish change's C5). A row is a
+//     clickable composition in the kit's vocabulary: a `View` that takes the
+//     press (`role="button"`, one `accessibilityLabel`,
+//     `accessibilityState.selected`), the Card's geometry (radius + hairline)
+//     with the theme's washes for the pointer and for the selection, the title /
+//     preview / relative time and the one run-state Badge. Its actions are a
+//     `DropdownMenu` (no opacity-faded button any more), and the secondary click
+//     — or a held finger — is the kit's `ContextMenu`. An untitled session
+//     reads「新会话 · <相对时间>」(`src/ui/session-title.ts` is the title's single
+//     source — the rows, the workspace header and the conversation read one
+//     name), and a raw session id is never rendered.
+//   · the footer — the connection status Badge and nothing else: the mode
+//     switches, the token-level switch (moved to the settings page) and the
+//     data-source prose are gone (task X1: the product surface carries no mode
+//     wording at all).
+//
+// Registered deviations from the zcode reference:
+//   · the selected row's face is `color.sidebarAccent`. The reference paints
+//     `bg-selected` (`styles.css:698`), which has no Keel token;
+//     `sidebar-accent` is the theme's own wash over the sidebar and is the only
+//     selection face this file draws.
+//   · the rows are flat like the reference's (`TaskListItem.tsx:570-578`): the
+//     Card's contribution is its geometry (radius + hairline), never a fill. A
+//     card face made the selected row the darkest one on the column (round-2
+//     review), so the washes are the only faces.
+//   · the header's logo is a token tile with `radius.lg` (12px) — the shape the
+//     reference's titlebar logo has (`DesktopTopOverlay.tsx:144`,
+//     `rounded-lg`). The kit `Avatar`'s pill is outside the 6/12/16 ladder.
+import { signal, Text, type TextStyle, View } from "nsh";
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
 import { formatTime } from "../data/wire";
+import {
+  Badge,
+  Button,
+  ContextMenu,
+  ContextMenuItem,
+  DropdownMenu,
+  DropdownMenuItem,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle,
+  IconButton,
+  Input,
+  ScrollArea,
+  Separator,
+  Skeleton,
+  Spinner,
+  Tooltip,
+  WORKSPACE_SHELL_HEADER_HEIGHT_PX,
+  color,
+  controlHeight,
+  focusRing,
+  iconSize,
+  radius,
+  space,
+  typeScale,
+  weight,
+  type BadgeVariant,
+} from "../ui/kit";
 import { Icon } from "../ui/icons";
-import { Badge, IconButton, PillButton, Press, Spinner, StatusDot } from "../ui/primitives";
-import { conversationState, runStateLabel, sessionState } from "../ui/run-state";
-import { cellWidth, fitCells } from "../ui/text";
-import { alpha, colors, glass, radius, space } from "../ui/theme";
+import { conversationState, runStateLabel, sessionState, type RunState } from "../ui/run-state";
+import { oneLine, sessionTitle } from "../ui/session-title";
 import { requestDelete } from "./delete-dialog";
 
 const query = signal("");
 const refreshing = signal(false);
 
-const isTerminal = () => platform.idiom === "terminal";
-const isPhone = () => !isTerminal() && windowSize().width < 900;
-
-/** One line, trimmed: a derived title/preview is user text and must not push
- * the row around. */
-const oneLine = (text: string | undefined): string => (text ?? "").replace(/\s+/g, " ").trim();
-
-/** The title's floor in the terminal's narrow grid: the cells a common
- * four-character title needs. Badges and the time give way to it, never the
- * other way around. */
-const MIN_TITLE_CELLS = 8;
-
-/** The row's title (C1). Never a raw session id: a session without a derived
- * title — the server leaves it empty, and "新会话" is also what the store's
- * "one untouched session" rule reads as untouched — shows "新会话" plus when
- * it was created, so two fresh sessions never look alike. */
-const titleOf = (row: SessionSummary): string => {
-  const title = oneLine(row.title);
-  if (title && title !== "新会话") return title;
-  const time = formatTime(row.createdAt ?? row.lastMessageAt);
-  return time ? `新会话 · ${time}` : "新会话";
-};
-
-/** The row's preview line: the last message, or the fact that there is none. */
+/** The row's preview line: the last message, or the fact that there is none.
+ * The title is not derived here: `../ui/session-title` is its single source
+ * (the list rows, the workspace header and the conversation read one name). */
 const summaryOf = (row: SessionSummary): string => oneLine(row.lastMessage) || "还没有消息";
 
 /** The one-word state of a row: the active row projects the open conversation
  * (which knows about stopping), every other row projects runStatus. */
-const rowStateOf = (row: SessionSummary, active: boolean) => {
+const rowStateOf = (row: SessionSummary, active: boolean): RunState => {
   if (active && store.conversation()) return conversationState(store.conversation());
   return sessionState(row.runStatus);
 };
 
-/** The dot of a row that is not parked on a question (`waiting` has its own
- * marker: an open decision is not activity). */
-const rowDotTone = (state: ReturnType<typeof rowStateOf>) =>
-  state === "running"
-    ? "running"
-    : state === "failed"
-      ? "failed"
-      : state === "waiting" || state === "stopping" || state === "reconnecting"
-        ? "warning"
-        : state === "stopped"
-          ? "idle"
-          : "done";
+/** The single status word a row shows, or none at all.
+ *
+ * A parked question is not a run: `waiting` gets the badge and never motion
+ * (the polish change's C2). The active row stays quiet about its own run — the
+ * conversation's header already says what it is doing — but it still reports a
+ * wait, and a failure is never hidden. */
+const rowBadgeOf = (
+  state: RunState,
+  waiting: boolean,
+  active: boolean,
+): { variant: BadgeVariant; label: string; icon?: "clock" | "alert" } | null => {
+  if (waiting) return { variant: "warning", label: runStateLabel.waiting, icon: "clock" };
+  if (active) return null;
+  if (state === "failed") return { variant: "destructive", label: runStateLabel.failed, icon: "alert" };
+  if (state === "running") return { variant: "info", label: runStateLabel.running };
+  if (state === "stopping" || state === "reconnecting") return { variant: "warning", label: runStateLabel[state] };
+  return null;
+};
 
+/** The search's own emphasis: the matched run of a title/preview, in the theme's
+ * mark pair (the kit has no highlight primitive; this is one `Text` span). */
 function Highlighted(props: { text: string; style: TextStyle }) {
   const parts = () => {
     const needle = query().trim().toLowerCase();
@@ -97,7 +142,7 @@ function Highlighted(props: { text: string; style: TextStyle }) {
     <Text style={props.style}>
       {parts().map((part) =>
         part.match ? (
-          <Text style={{ backgroundColor: colors.mark, color: colors.markForeground }}>{part.text}</Text>
+          <Text style={{ backgroundColor: color.mark, color: color.markForeground }}>{part.text}</Text>
         ) : (
           part.text
         ),
@@ -106,176 +151,163 @@ function Highlighted(props: { text: string; style: TextStyle }) {
   );
 }
 
-function SessionRow(props: { row: () => SessionSummary; active: boolean; onSelect: () => void; wide: boolean }) {
-  const hovered = signal(false);
-  const focused = signal(false);
+/** One row of the list: pressable, selectable, and the subject of two menus —
+ * the trailing `DropdownMenu` (a pointer, the wide layout) and the
+ * `ContextMenu` the row itself is the trigger of (the secondary click on a
+ * desktop, a held finger on a touch screen). */
+function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: boolean; onSelect: () => void }) {
   const row = () => props.row();
-  const title = () => titleOf(row());
-  const summary = () => summaryOf(row());
-  const searching = () => query().trim().length > 0;
-  // Mobile reveals delete with a long press; desktop with the row's overflow
-  // button (hover or keyboard focus). Neither is a persistent trash icon.
-  const canLongPress = () => isPhone() && !searching();
-  const showMenu = () => props.wide && !isTerminal() && !searching();
-  // C2: a parked question is not a run. The row shows the badge and a still
-  // marker, and no state word may claim the session is running (or, further
-  // down, that a failure is the headline when the wait blocks it).
-  const waiting = () => store.waiting(row().sessionId);
-  const state = () => rowStateOf(row(), props.active);
-  // The active row's state is the header pill's job; rows only surface a
-  // failure, so no run word is repeated down the sidebar.
-  const stateLabel = () => (!props.active && !waiting() && state() === "failed" ? runStateLabel.failed : null);
+  const title = () => sessionTitle(row());
+  const preview = () => summaryOf(row());
   const time = () => formatTime(row().lastMessageAt);
-  const cells = () =>
-    isTerminal() ? Math.max(24, Math.floor(windowSize().width / 8)) : Math.max(24, Math.floor(windowSize().width));
-  // The terminal grid truncates by hand, so the waiting badge and the failure
-  // word both eat into the title's cells. The badge's footprint is its label
-  // plus one cell of pill padding either side (measured in the grid) — never
-  // the pixel padding the badge draws with on the web.
-  const trailingCells = () =>
-    (waiting() ? cellWidth(runStateLabel.waiting) + 2 : 0) + (stateLabel() ? cellWidth(stateLabel()!) + 6 : 0);
-  // A row title always keeps room for a common four-character title (8 cells):
-  // the badge must never starve it into an ellipsis.
-  const titleBudget = () => Math.max(MIN_TITLE_CELLS, cells() - 12 - cellWidth(time()) - trailingCells());
-  const previewBudget = () =>
-    Math.max(6, cells() - 8 - (stateLabel() ? cellWidth(stateLabel()!) + 1 : 0));
-  const titleText = () => (isTerminal() ? fitCells(title(), titleBudget()) : title());
-  const summaryText = () => (isTerminal() ? fitCells(summary(), previewBudget()) : summary());
+  const waiting = () => store.waiting(row().sessionId);
+  const badge = () => rowBadgeOf(rowStateOf(row(), props.active), waiting(), props.active);
   const openDelete = () => requestDelete(row().sessionId, title());
 
-  return (
+  const trigger = (
     <View
-      onMouseEnter={() => hovered.set(true)}
-      onMouseLeave={() => hovered.set(false)}
+      testID={`session-row-${row().sessionId}`}
+      role="button"
+      focusable
+      onPress={props.onSelect}
+      accessibilityLabel={`打开会话 ${title()}`}
+      accessibilityState={{ selected: props.active }}
+      // The selection is the accessibility state itself (`selectedStyle`), so
+      // the face and `accessibilityState.selected` can never drift apart. The
+      // row is flat like the reference's (`TaskListItem.tsx:570`, no fill): the
+      // washes are the only faces, so a selected row is a highlight over the
+      // sidebar — never a darker card than its neighbours.
+      selectedStyle={{ backgroundColor: color.sidebarAccent }}
+      hoverStyle={props.active ? undefined : { backgroundColor: color.hover }}
+      focusStyle={focusRing()}
       style={{
         flexDirection: "row",
         alignItems: "center",
-        borderRadius: radius.control,
-        backgroundColor: props.active ? colors.brandTint : alpha(colors.foreground, 0),
-        borderLeftWidth: props.active ? 2 : 0,
-        borderLeftColor: colors.brand,
-        transitionProperty: "background-color",
-        transitionDuration: 160,
+        gap: space.sm,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: color.border,
       }}
     >
-      <Press
-        onPress={props.onSelect}
-        onLongPress={canLongPress() ? openDelete : undefined}
-        onFocus={() => focused.set(true)}
-        onBlur={() => focused.set(false)}
-        accessibilityLabel={`打开会话 ${title()}`}
-        accessibilityState={{ selected: props.active }}
-        hoverStyle={{ backgroundColor: props.active ? undefined : colors.hover }}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          paddingLeft: props.active ? 8 : 10,
-          paddingRight: 6,
-          paddingVertical: 8,
-          gap: 3,
-          borderRadius: radius.control,
-        }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {/* Waiting is a parked state, not activity: a still clock marks it
-              (the row never gets the running pulse), and the badge carries
-              the words. The clock is the state's own tone (warning); the
-              terminal's grid cannot draw the icon, so it keeps the dot. */}
-          {waiting() ? (
-            isTerminal() ? (
-              <StatusDot tone="warning" animated={false} />
-            ) : (
-              <Icon name="clock" size={11} tint={colors.warning} />
-            )
-          ) : (
-            <StatusDot tone={rowDotTone(state())} />
-          )}
+      <View style={{ flexDirection: "column", flex: 1, minWidth: 0, gap: space.xxs }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           <Highlighted
-            text={titleText()}
+            text={title()}
             style={{
               flex: 1,
               numberOfLines: 1,
               textOverflow: "ellipsis",
-              fontSize: 13,
-              fontWeight: props.active ? "700" : "600",
-              color: colors.foreground,
+              fontSize: typeScale.base,
+              fontWeight: props.active ? weight.semibold : weight.medium,
+              color: color.sidebarForeground,
             }}
           />
-          <If when={waiting()}>
-            <Badge label={runStateLabel.waiting} tone="warning" />
+          <If when={badge()}>
+            {(current) => <Badge variant={current().variant} label={current().label} icon={current().icon} />}
           </If>
-          <If when={!!stateLabel()}>
-            <Text
-              style={{
-                fontSize: 9.5,
-                fontWeight: "600",
-                color: state() === "failed" ? colors.danger : colors.mutedForeground,
-              }}
-            >
-              {stateLabel() ?? ""}
+          <If when={time() !== ""}>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}>
+              {time()}
             </Text>
           </If>
-          <Text
-            style={{
-              fontSize: 10,
-              color: colors.mutedForeground,
-              fontVariant: ["tabular-nums"],
-              numberOfLines: 1,
-            }}
-          >
-            {time()}
-          </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: isTerminal() ? 0 : 13 }}>
-          <Highlighted
-            text={summaryText()}
-            style={{
-              flex: 1,
-              numberOfLines: 1,
-              textOverflow: "ellipsis",
-              fontSize: 11.5,
-              color: colors.mutedForeground,
-            }}
-          />
-        </View>
-      </Press>
-      <If when={showMenu()}>
-        <View
+        <Highlighted
+          text={preview()}
           style={{
-            width: 28,
-            marginRight: 3,
-            opacity: hovered() || focused() ? 1 : 0,
-            transitionProperty: "opacity",
-            transitionDuration: 160,
-            pointerEvents: hovered() || focused() ? "auto" : "none",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+            fontSize: typeScale.sm,
+            color: color.mutedForeground,
           }}
+        />
+      </View>
+      <If when={props.wide}>
+        <DropdownMenu
+          accessibilityLabel={`会话操作 ${title()}`}
+          trigger={
+            <Button
+              icon="dots"
+              size="icon"
+              variant="ghost"
+              accessibilityLabel="会话操作"
+              tooltip={<Tooltip label="会话操作" />}
+            />
+          }
         >
-          <IconButton
-            icon="dots"
-            label="删除会话"
-            size={26}
-            iconSize={14}
-            hitSlop={6}
-            onPress={openDelete}
-            onFocus={() => focused.set(true)}
-            onBlur={() => focused.set(false)}
-          />
-        </View>
+          <DropdownMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />
+        </DropdownMenu>
       </If>
+    </View>
+  );
+
+  return (
+    <ContextMenu
+      accessibilityLabel={`会话操作 ${title()}`}
+      trigger={trigger}
+      menu={<ContextMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />}
+    />
+  );
+}
+
+/** The list while the first load runs: the kit's pulsing blocks, one per row. */
+function SessionListSkeleton() {
+  return (
+    <View style={{ flexDirection: "column", gap: space.lg, padding: space.md }}>
+      <Skeleton lines={2} accessibilityLabel="正在加载会话" />
+      <Skeleton lines={2} />
+      <Skeleton lines={2} />
+      <Skeleton lines={2} />
     </View>
   );
 }
 
-function Skeleton() {
+/** A list that could not be read: the reason the store kept, and one retry. */
+function SessionListError(props: { message: string; retrying: boolean; onRetry: () => void }) {
   return (
-    <View style={{ gap: space.sm, padding: space.md }}>
-      {[0, 1, 2, 3].map((i) => (
-        <View style={{ gap: 6, paddingVertical: 6 }}>
-          <View style={{ width: `${70 - i * 8}%`, height: 12, borderRadius: 6, backgroundColor: colors.muted }} />
-          <View style={{ width: `${88 - i * 5}%`, height: 10, borderRadius: 5, backgroundColor: colors.muted }} />
-        </View>
-      ))}
+    <View style={{ padding: space.md }}>
+      <Empty accessibilityLabel="会话列表加载失败" testID="session-list-error">
+        <EmptyMedia icon="alert" tone="danger" />
+        <EmptyTitle label="会话列表加载失败" />
+        <EmptyDescription label={props.message} />
+        <EmptyContent>
+          <Button
+            variant="outline"
+            icon="refresh"
+            label="重试"
+            loading={props.retrying}
+            onPress={props.onRetry}
+            testID="session-list-retry"
+          />
+        </EmptyContent>
+      </Empty>
     </View>
+  );
+}
+
+/** No rows at all, or none left after the search: the kit's empty state, with
+ * the one action that makes sense in each case. */
+function SessionListEmpty(props: { searching: boolean }) {
+  return (
+    <Empty
+      accessibilityLabel={props.searching ? "没有匹配的会话" : "还没有会话"}
+      testID="session-list-empty"
+    >
+      <EmptyMedia icon="message" />
+      <EmptyTitle label={props.searching ? "没有匹配的会话" : "还没有会话"} />
+      <EmptyDescription
+        label={props.searching ? "换个关键词，或者清除搜索看看全部会话。" : "新建一个会话，Keel 会从第一条消息开始。"}
+      />
+      <EmptyContent>
+        <If
+          when={props.searching}
+          else={<Button icon="plus" label="新建会话" onPress={() => void store.createSession()} />}
+        >
+          <Button variant="outline" icon="x" label="清除搜索" onPress={() => query.set("")} />
+        </If>
+      </EmptyContent>
+    </Empty>
   );
 }
 
@@ -288,149 +320,88 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
     const needle = query().trim().toLowerCase();
     const all = store.sessions();
     if (!needle) return all;
-    return all.filter((row) => `${titleOf(row)} ${summaryOf(row)}`.toLowerCase().includes(needle));
+    return all.filter((row) => `${sessionTitle(row)} ${summaryOf(row)}`.toLowerCase().includes(needle));
   };
   const refresh = async () => {
     refreshing.set(true);
     await store.refreshSessions();
     refreshing.set(false);
   };
-  const chipSlop = () => (isPhone() ? 11 : undefined);
   return (
-    <View
-      style={{
-        flex: 1,
-        width: props.wide ? 300 : "100%",
-        backgroundColor: colors.sidebar,
-        borderRightWidth: props.wide ? 1 : 0,
-        borderRightColor: colors.sidebarBorder,
-      }}
-    >
-      <View style={{ padding: space.md, gap: space.sm }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, height: 36 }}>
-          <If when={!isTerminal()}>
-            <View
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 9,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: colors.muted,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Icon name="spark" size={15} tint={colors.brand} />
-            </View>
-          </If>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>Keel</Text>
-            <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>AI 员工会话</Text>
-          </View>
-          <IconButton
-            icon="settings"
-            label="设置"
-            size={30}
-            iconSize={15}
-            hitSlop={isPhone() ? 7 : undefined}
-            onPress={() => store.openSettings()}
-          />
-          <IconButton
-            icon="refresh"
-            label="刷新会话"
-            size={30}
-            iconSize={15}
-            disabled={refreshing()}
-            hitSlop={isPhone() ? 7 : undefined}
-            onPress={() => void refresh()}
-          />
-          <IconButton
-            icon="plus"
-            label="新建会话"
-            size={30}
-            iconSize={16}
-            tint={colors.brand}
-            hitSlop={isPhone() ? 7 : undefined}
-            onPress={() => void store.createSession()}
-          />
-        </View>
+    <View testID="session-list" style={{ flexDirection: "column", flex: 1, minWidth: 0 }}>
+      {/* L1 · the panel's own header, h-12 — the shell's header height. */}
+      <View
+        style={{
+          height: WORKSPACE_SHELL_HEADER_HEIGHT_PX,
+          flexShrink: 0,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.sm,
+          paddingHorizontal: space.md,
+          borderBottomWidth: 1,
+          borderColor: color.sidebarBorder,
+        }}
+      >
         <View
+          accessibilityLabel="Keel"
           style={{
-            flexDirection: "row",
+            // The reference's titlebar logo is a 12px-rounded tile
+            // (`DesktopTopOverlay.tsx:144`, `rounded-lg`); the kit's Avatar
+            // face is a pill, so the mark is drawn in the tokens instead.
+            width: controlHeight("lg"),
+            height: controlHeight("lg"),
+            borderRadius: radius.lg,
             alignItems: "center",
-            gap: 6,
-            height: 34,
-            paddingHorizontal: 9,
-            borderRadius: radius.control,
-            ...glass.field,
+            justifyContent: "center",
+            backgroundColor: color.muted,
+            borderWidth: 1,
+            borderColor: color.border,
           }}
         >
-          <Icon name="search" size={14} tint={colors.mutedForeground} />
-          <Input
-            value={query()}
-            onChange={({ value }) => query.set(value)}
-            placeholder="搜索会话"
-            style={{
-              flex: 1,
-              height: 30,
-              fontSize: 12.5,
-              color: colors.foreground,
-              placeholderColor: colors.mutedForeground,
-              caretColor: colors.brand,
-            }}
-          />
-          {query() ? (
-            <IconButton
-              icon="x"
-              label="清除搜索"
-              size={22}
-              iconSize={11}
-              hitSlop={11}
-              onPress={() => query.set("")}
-            />
-          ) : null}
+          <Icon name="spark" size={iconSize.md} tint={color.brand} />
         </View>
-        <If when={query().trim().length > 0}>
-          <Text style={{ paddingLeft: 2, fontSize: 10.5, color: colors.mutedForeground }}>
-            {rows().length > 0 ? `${rows().length} 个结果` : "没有结果"}
+        <View style={{ flexDirection: "column", flex: 1, minWidth: 0 }}>
+          <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.sidebarForeground }}>
+            Keel
           </Text>
-        </If>
+          <Text style={{ fontSize: typeScale["2xs"], color: color.mutedForeground }}>AI 员工会话</Text>
+        </View>
+        <IconButton icon="plus" label="新建会话" onPress={() => void store.createSession()} />
+        <IconButton
+          icon="refresh"
+          label="刷新会话"
+          disabled={refreshing()}
+          onPress={() => void refresh()}
+        />
+        <IconButton icon="settings" label="打开设置" onPress={() => store.openSettings()} />
       </View>
-
-      <View style={{ flex: 1, minHeight: 0 }}>
+      {/* L1 · the search: the kit's Input, nothing drawn around it. */}
+      <View style={{ paddingHorizontal: space.md, paddingVertical: space.md }}>
+        <Input
+          value={query()}
+          onChange={(value) => query.set(value)}
+          placeholder="搜索会话"
+          accessibilityLabel="搜索会话"
+          testID="session-search"
+        />
+      </View>
+      <ScrollArea
+        testID="session-list-scroll"
+        accessibilityLabel="会话列表"
+        style={{ flex: 1, minHeight: 0 }}
+      >
         {store.sessionsLoading() ? (
-          <Skeleton />
-        ) : store.sessionsError() ? (
-          <View style={{ padding: space.lg, gap: space.sm }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Icon name="alert" size={14} tint={colors.danger} />
-              <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.danger }}>会话列表加载失败</Text>
-            </View>
-            <Text style={{ fontSize: 11.5, lineHeight: 17, color: colors.mutedForeground }}>
-              {store.sessionsError()}
-            </Text>
-            <PillButton
-              label={refreshing() ? "重试中…" : "重试"}
-              compact
-              disabled={refreshing()}
-              onPress={() => void refresh()}
-            />
-          </View>
+          <SessionListSkeleton />
+        ) : store.sessionsError() !== null ? (
+          <SessionListError
+            message={store.sessionsError() ?? ""}
+            retrying={refreshing()}
+            onRetry={() => void refresh()}
+          />
         ) : rows().length === 0 ? (
-          <View style={{ padding: space.xl, alignItems: "center", gap: space.sm }}>
-            <Icon name="message" size={22} tint={colors.mutedForeground} />
-            <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>
-              {query() ? "没有匹配的会话" : "还没有会话"}
-            </Text>
-            {query() ? (
-              <PillButton label="清除搜索" compact onPress={() => query.set("")} />
-            ) : (
-              <PillButton label="新建会话" tone="primary" compact onPress={() => void store.createSession()} />
-            )}
-          </View>
+          <SessionListEmpty searching={query().trim().length > 0} />
         ) : (
-          <View style={{ gap: 2, paddingHorizontal: 6, paddingBottom: 8 }}>
+          <View style={{ flexDirection: "column", gap: space.sm, padding: space.md }}>
             <Each of={rows()} key={(row) => row.sessionId}>
               {(row) => (
                 <SessionRow
@@ -443,179 +414,55 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             </Each>
           </View>
         )}
-      </View>
-
-      <View
-        style={{
-          padding: space.md,
-          gap: space.sm,
-          borderTopWidth: 1,
-          borderTopColor: colors.sidebarBorder,
-        }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Icon
-            name={store.connection().status === "open" ? "wifi" : "wifi-off"}
-            size={12}
-            tint={
-              store.connection().status === "open"
-                ? colors.success
-                : store.connection().status === "reconnecting"
-                  ? colors.warning
-                  : colors.mutedForeground
-            }
-          />
-          <Text style={{ flex: 1, fontSize: 10.5, color: colors.mutedForeground }}>
-            {store.mode() === "checking"
-              ? "正在探测 keel serve…"
-              : store.mode() === "fixture"
-                ? "演示数据 · 未连接服务"
-                : store.connection().status === "open"
-                  ? `实时服务 · 已连接${store.connection().lastSeq ? ` @${store.connection().lastSeq}` : ""}`
-                  : store.connection().status === "reconnecting"
-                    ? "实时服务 · 重连中…"
-                    : "实时服务 · 未连接"}
-          </Text>
-          {store.mode() !== "checking" ? (
-            <Press
-              onPress={() => void store.switchMode(store.mode() === "fixture" ? "http" : "fixture")}
-              accessibilityLabel="切换数据源"
-              hitSlop={chipSlop()}
-              hoverStyle={{ opacity: 0.88 }}
-              style={{
-                paddingHorizontal: 8,
-                height: 22,
-                borderRadius: radius.pill,
-                backgroundColor: store.mode() === "fixture" ? colors.warningTint : colors.successTint,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 10,
-                  fontWeight: "600",
-                  color: store.mode() === "fixture" ? colors.warning : colors.success,
-                }}
-              >
-                {store.mode() === "fixture" ? "切到实时" : "切到演示"}
-              </Text>
-            </Press>
-          ) : null}
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Press
-            onPress={() => store.openSettings()}
-            accessibilityLabel="打开设置"
-            hitSlop={chipSlop()}
-            hoverStyle={{ opacity: 0.88 }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              paddingHorizontal: 8,
-              height: 22,
-              borderRadius: radius.pill,
-              backgroundColor: colors.muted,
-            }}
-          >
-            <Icon name="settings" size={10} tint={colors.mutedForeground} />
-            <Text style={{ fontSize: 10, fontWeight: "600", color: colors.mutedForeground }}>设置</Text>
-          </Press>
-          <Press
-            onPress={() => void store.setPartials(!store.showPartials())}
-            accessibilityLabel="切换 token 级 partial"
-            accessibilityState={{ selected: store.showPartials() }}
-            hitSlop={chipSlop()}
-            hoverStyle={{ opacity: 0.88 }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              paddingHorizontal: 8,
-              height: 22,
-              borderRadius: radius.pill,
-              backgroundColor: store.showPartials() ? colors.brandTint : colors.muted,
-            }}
-          >
-            <Icon name="spark" size={10} tint={store.showPartials() ? colors.brand : colors.mutedForeground} />
-            <Text
-              style={{
-                fontSize: 10,
-                fontWeight: "600",
-                color: store.showPartials() ? colors.brand : colors.mutedForeground,
-              }}
-            >
-              partial {store.showPartials() ? "开" : "关"}
-            </Text>
-          </Press>
-          {store.mode() === "fixture" ? (
-            <Press
-              onPress={() => store.simulateDrop()}
-              accessibilityLabel="模拟断线重连"
-              hitSlop={chipSlop()}
-              hoverStyle={{ opacity: 0.88 }}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 8,
-                height: 22,
-                borderRadius: radius.pill,
-                backgroundColor: colors.muted,
-              }}
-            >
-              <Icon name="wifi-off" size={10} tint={colors.mutedForeground} />
-              <Text style={{ fontSize: 10, fontWeight: "600", color: colors.mutedForeground }}>断线演示</Text>
-            </Press>
-          ) : null}
-          <View style={{ flex: 1 }} />
-          <If when={!isTerminal()}>
-            <Text style={{ fontSize: 9.5, color: colors.mutedForeground }}>NSH nightly</Text>
-          </If>
-        </View>
+      </ScrollArea>
+      {/* L1 · the footer: the connection status Badge, and nothing else. */}
+      <Separator />
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.md, paddingVertical: space.sm }}>
+        <ConnectionBadge />
       </View>
     </View>
   );
 }
 
-/** A compact connection strip for the conversation header. */
+/** The panel footer's one readout: what the live channel is really doing. It
+ * reports the transport's own state (probing / connected / connecting /
+ * reconnecting / offline) — never a mode name, and no sequence number. */
 export function ConnectionBadge() {
   const state = () => store.connection();
-  const mode = () => store.mode();
-  const tone = () =>
-    state().status === "open" ? "success" : state().status === "reconnecting" ? "warning" : "neutral";
+  const probing = () => store.mode() === "checking";
   const label = () =>
-    mode() === "checking"
+    probing()
       ? "探测中"
-      : mode() === "fixture"
-        ? "演示"
-        : state().status === "open"
-          ? "已连接"
+      : state().status === "open"
+        ? "已连接"
+        : state().status === "connecting"
+          ? "连接中"
           : state().status === "reconnecting"
             ? "重连中"
-            : state().status === "connecting"
-              ? "连接中"
-              : "未连接";
+            : "未连接";
+  const variant = (): BadgeVariant =>
+    probing()
+      ? "secondary"
+      : state().status === "open"
+        ? "success"
+        : state().status === "connecting" || state().status === "reconnecting"
+          ? "warning"
+          : "destructive";
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-      {state().status === "reconnecting" || state().status === "connecting" ? (
-        <Spinner size={10} tint={tone() === "warning" ? colors.warning : colors.mutedForeground} />
-      ) : (
-        <StatusDot tone={tone() === "success" ? "done" : tone() === "warning" ? "warning" : "idle"} size={6} />
-      )}
-      <Text
-        style={{
-          fontSize: 10.5,
-          color:
-            tone() === "success" ? colors.success : tone() === "warning" ? colors.warning : colors.mutedForeground,
-        }}
-      >
-        {label()}
-      </Text>
-      {mode() === "http" && state().lastSeq ? (
-        <Text style={{ fontSize: 9.5, color: colors.mutedForeground }}>@{state().lastSeq}</Text>
-      ) : null}
-    </View>
+    <Badge
+      testID="connection-badge"
+      variant={variant()}
+      label={label()}
+      icon={state().status === "open" ? "wifi" : "wifi-off"}
+      accessibilityLabel={`连接状态：${label()}`}
+    >
+      <If when={state().status === "connecting" || state().status === "reconnecting"}>
+        <Spinner
+          size={iconSize.xs}
+          tint={variant() === "warning" ? color.warning : color.mutedForeground}
+          accessibilityLabel="正在连接"
+        />
+      </If>
+    </Badge>
   );
 }

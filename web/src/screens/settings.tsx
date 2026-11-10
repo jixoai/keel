@@ -1,22 +1,44 @@
-// The settings page (change keel-model-settings): its own route (`/settings`,
-// deep-linkable through keel serve's SPA fallback), reachable from the session
-// list and dismissible back to the workspace. Three sections:
+// The settings page (change keel-harness-shell, tasks G1–G5).
 //
-//   模型   source/revision/default selection, the resolved provider and model
-//          registry with their issues, the default model + reasoning level,
-//          and the raw document with save / reset (per-field server errors).
-//   密钥   names and times only; values go one way (write-only) and the
-//          section is disabled with the server's reason when the secret box
-//          is not configured.
-//   插件   the assembled extension surface: generation, plugin states, tools,
-//          hooks, triggers and diagnostics, plus manual fires. Plugins load at
-//          boot — this page observes and triggers, it does not edit them.
+// The frame is the kit's `SettingsShell`: the icon rail (68px, 268px from the
+// wide breakpoint), the h-12 breadcrumb row, the content card and the
+// max-w-4xl content column with its 32px section rhythm all belong to that
+// block (`web/src/ui/kit/layout/settings-shell.tsx`). This file draws none of
+// them.
 //
-// NSH components run once: every value read happens inside JSX or an <If>,
-// never copied into a local at the top of a component. Lists are <Each>, rows
-// read their item through the accessor `Each` hands them.
-import { cleanup, effect, platform, Scroll, signal, Text, View, windowSize } from "nsh";
-import { Input } from "nsh/base";
+// Seven sections, in the rail's order:
+//   · 通用       the token-level partial switch (moved here from the session
+//                list: it is a reading preference, not a session action).
+//   · 外观       follow the system / light / dark, written through
+//                `applyAppearance` (`src/ui/appearance.ts`), which is also
+//                what the app root reads at boot — one source, so the page and
+//                the boot agree.
+//   · 模型与 Provider  the effective document, its resolved providers/models,
+//                a structured form over the document's default selection and
+//                each provider's template / endpoint / credential reference,
+//                and the raw document behind one collapsed「高级」disclosure.
+//   · 密钥       names and times only: values go one way (write-only) and are
+//                never read back, echoed or kept.
+//   · 插件       the assembled extension surface (generation, plugin states,
+//                tools, hooks, triggers) with a diagnostics table that stays
+//                collapsed, and the entry to the plugin page (`/plugins`).
+//   · 快捷键     the key vocabulary, as keycaps.
+//   · 关于       keel.info's version / online / user agent plus the build tag.
+//
+// The section is *controlled*: this file owns the signal and its storage
+// (`SETTINGS_SECTION_STORAGE_KEY`, read on mount and written on every move),
+// the shell only renders the rail (`settings-shell.tsx` persists only its own
+// uncontrolled state). The page opens on 模型与 Provider — the section the
+// previous settings page was — until a remembered section replaces it.
+//
+// Three confirmations ask through the kit's `AlertDialog`: the model reset and
+// the secret delete live here (the session delete is the session list's).
+//
+// NSH components run once: every reactive read sits inside JSX, an `<If>` or a
+// function the JSX calls; nothing is copied into a local at the top of a
+// component.
+import type { JSX } from "nsh";
+import { cleanup, colorScheme, effect, host, signal, Storage, Text, View } from "nsh";
 import type {
   ModelSelection,
   ModelView,
@@ -28,30 +50,120 @@ import type {
 } from "../data/contract";
 import { store } from "../data/store";
 import { formatTime, modelFacts, reasoningLabel, selectionLabel } from "../data/wire";
-import { Icon, type IconName } from "../ui/icons";
-import { Badge, Press, Spinner } from "../ui/primitives";
-import { alpha, colors, glass, mono, radius, space } from "../ui/theme";
+import { applyAppearance, appearancePreference, type Appearance } from "../ui/appearance";
+import { Icon } from "../ui/icons";
+import {
+  AlertDialog,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  Collapsible,
+  CollapsibleTrigger,
+  Empty,
+  EmptyDescription,
+  EmptyTitle,
+  Field,
+  FieldGroup,
+  Input,
+  Kbd,
+  Label,
+  RadioGroup,
+  Select,
+  Separator,
+  SETTINGS_SECTION_STORAGE_KEY,
+  SettingsShell,
+  Skeleton,
+  Spinner,
+  Switch,
+  Table,
+  TableBody,
+  TableBodyRow,
+  TableHeaderRow,
+  Td,
+  Textarea,
+  Th,
+  alpha,
+  color,
+  font,
+  iconSize,
+  lineHeight,
+  radius,
+  space,
+  typeScale,
+  weight,
+  type SelectItem,
+  type SettingsSectionEntry,
+} from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
 
-export type SettingsSection = "models" | "secrets" | "plugins";
+// ---- the section ----------------------------------------------------------
 
-/** The open section (module-level so it survives a route swap). */
+/** The seven sections the rail offers. */
+export type SettingsSection =
+  | "general"
+  | "appearance"
+  | "models"
+  | "secrets"
+  | "plugins"
+  | "shortcuts"
+  | "about";
+
+/** The open section. Module-level, so leaving the page and coming back lands
+ * where the reader was; the storage below survives the process. */
 export const settingsSection = signal<SettingsSection>("models");
 
-/** The raw-document editor's text; it follows the loaded document until the
- * user types, and is the single source of truth for a save. */
+/** The rail's entries. `group` sits on the first entry of each run, because
+ * the shell prints a group label above every entry that carries one. */
+const SECTIONS: SettingsSectionEntry[] = [
+  { id: "general", label: "通用", icon: "settings", group: "常规" },
+  { id: "appearance", label: "外观", icon: "sun" },
+  { id: "models", label: "模型与 Provider", icon: "brain", group: "配置" },
+  { id: "secrets", label: "密钥", icon: "key" },
+  { id: "plugins", label: "插件", icon: "layers" },
+  { id: "shortcuts", label: "快捷键", icon: "terminal", group: "参考" },
+  { id: "about", label: "关于", icon: "message" },
+];
+
+const isSection = (value: string): value is SettingsSection =>
+  SECTIONS.some((entry) => entry.id === value);
+
+const sectionLabel = (): string =>
+  SECTIONS.find((entry) => entry.id === settingsSection())?.label ?? "设置";
+
+/** Bumped whenever the section moves by hand: a storage read that resolves
+ * afterwards must not pull the reader back to the remembered section. */
+let storageReadToken = 0;
+
+const chooseSection = (sectionId: string) => {
+  if (!isSection(sectionId)) return;
+  storageReadToken += 1;
+  settingsSection.set(sectionId);
+  void Storage.setItem(SETTINGS_SECTION_STORAGE_KEY, sectionId).catch(() => {
+    /* a host without storage just forgets the choice */
+  });
+};
+
+// ---- the document draft ---------------------------------------------------
+
+/** The raw-document editor's text: the one draft a save submits. Structured
+ * controls write through it, so the form and the JSON can never disagree. */
 const rawDocument = signal("");
 const rawDirty = signal(false);
 const rawParseError = signal<string | null>(null);
-const confirmingReset = signal(false);
+/** The「高级」disclosure: closed until the reader opens it. */
+const rawOpen = signal(false);
 
-const secretName = signal("");
-const secretValue = signal("");
-/** The secret row whose delete is waiting for its confirmation. */
-const confirmingSecretDelete = signal<string | null>(null);
-
-const isTerminal = () => platform.idiom === "terminal";
-const compact = () => isTerminal() || windowSize().width < 720;
+/** The model reset's question. */
+const confirmReset = signal(false);
+/** The secret row whose delete is waiting for its question. */
+const confirmingSecret = signal<string | null>(null);
+/** The model list's filter: only models the process can run. */
+const modelsOnlyExecutable = signal(false);
+/** Both diagnostics tables start collapsed. */
+const modelsDiagnosticsOpen = signal(false);
+const pluginDiagnosticsOpen = signal(false);
 
 const parseDocument = (text: string): { document?: Record<string, unknown>; error?: string } => {
   try {
@@ -65,10 +177,37 @@ const parseDocument = (text: string): { document?: Record<string, unknown>; erro
   }
 };
 
+const asRecord = (value: unknown): Record<string, unknown> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+};
+
+/** The draft while it is readable, else the server's document: structured
+ * controls stay legible even while the raw text is broken. */
+const draftDocument = (): Record<string, unknown> | null => {
+  const text = rawDocument();
+  if (text.trim() === "") return store.settings()?.document ?? null;
+  return parseDocument(text).document ?? null;
+};
+
+/** Apply one structural change to the draft. A broken raw text blocks the
+ * change and opens the disclosure that repairs it — never a silent rewrite. */
+const updateDraft = (mutate: (document: Record<string, unknown>) => void) => {
+  const text = rawDocument();
+  const parsed = text.trim() === "" ? { document: store.settings()?.document } : parseDocument(text);
+  if (!parsed.document) {
+    rawParseError.set(parsed.error ?? "文档不是合法的 JSON");
+    rawOpen.set(true);
+    return;
+  }
+  mutate(parsed.document);
+  rawDocument.set(JSON.stringify(parsed.document, null, 2));
+  rawDirty.set(true);
+  rawParseError.set(null);
+};
+
 const selectionOfDocument = (document: Record<string, unknown>): ModelSelection | null => {
-  const row = document.selection;
-  if (!row || typeof row !== "object") return null;
-  const selection = row as Record<string, unknown>;
+  const selection = asRecord(document.selection);
   if (typeof selection.modelId !== "string" || !selection.modelId) return null;
   return {
     providerId: typeof selection.providerId === "string" ? selection.providerId : undefined,
@@ -77,287 +216,439 @@ const selectionOfDocument = (document: Record<string, unknown>): ModelSelection 
   };
 };
 
-/** Rewrite the edited document's default selection (the raw editor is the one
- * source of truth; a parse error blocks this and says so). */
-const writeSelection = (next: ModelSelection) => {
-  const parsed = parseDocument(rawDocument());
-  if (!parsed.document) return;
-  const selection: Record<string, unknown> = { providerId: next.providerId, modelId: next.modelId };
-  if (next.reasoningLevel) selection.reasoningLevel = next.reasoningLevel;
-  rawDocument.set(JSON.stringify({ ...parsed.document, selection }, null, 2));
-  rawDirty.set(true);
-  rawParseError.set(null);
+/** The draft's default selection (what the structured form edits). */
+const documentSelection = (): ModelSelection | null => {
+  const document = draftDocument();
+  return document ? selectionOfDocument(document) : null;
 };
+
+const writeSelection = (next: ModelSelection) => {
+  updateDraft((document) => {
+    const selection: Record<string, unknown> = { providerId: next.providerId, modelId: next.modelId };
+    if (next.reasoningLevel) selection.reasoningLevel = next.reasoningLevel;
+    document.selection = selection;
+  });
+};
+
+/** One provider as the draft declares it — the shape the editor form reads. */
+interface DraftProvider {
+  id: string;
+  name: string;
+  apiType: string;
+  baseUrl: string;
+  credential: string;
+  modelIds: string[];
+}
+
+const draftProviders = (): DraftProvider[] => {
+  const document = draftDocument();
+  const rows = document && Array.isArray(document.providers) ? document.providers : [];
+  const providers: DraftProvider[] = [];
+  for (const raw of rows) {
+    const provider = asRecord(raw);
+    const id = typeof provider.id === "string" ? provider.id : "";
+    if (!id) continue;
+    const api = asRecord(provider.api);
+    const access = asRecord(provider.access);
+    const credential =
+      typeof access.env === "string" && access.env
+        ? access.env
+        : typeof access.ref === "string"
+          ? access.ref
+          : "";
+    providers.push({
+      id,
+      name: typeof provider.name === "string" ? provider.name : "",
+      apiType: typeof api.type === "string" ? api.type : "",
+      baseUrl: typeof api.baseUrl === "string" ? api.baseUrl : "",
+      credential,
+      modelIds: Array.isArray(provider.modelIds) ? provider.modelIds.map(String) : [],
+    });
+  }
+  return providers;
+};
+
+const patchProvider = (providerId: string, mutate: (provider: Record<string, unknown>) => void) => {
+  updateDraft((document) => {
+    const rows = Array.isArray(document.providers) ? document.providers : [];
+    for (const raw of rows) {
+      const provider = asRecord(raw);
+      if (provider.id !== providerId) continue;
+      mutate(provider);
+      return;
+    }
+  });
+};
+
+const setProviderApiType = (providerId: string, apiType: string) => {
+  patchProvider(providerId, (provider) => {
+    const api: Record<string, unknown> = { ...asRecord(provider.api) };
+    api.type = apiType;
+    if (typeof api.baseUrl !== "string") api.baseUrl = "";
+    provider.api = api;
+  });
+};
+
+const setProviderBaseUrl = (providerId: string, baseUrl: string) => {
+  patchProvider(providerId, (provider) => {
+    provider.api = { ...asRecord(provider.api), baseUrl };
+  });
+};
+
+/** The credential is a *reference*: an env variable name, or `secret:NAME`
+ * for the secret box. The value itself never reaches this form. */
+const setProviderCredential = (providerId: string, credential: string) => {
+  patchProvider(providerId, (provider) => {
+    const access = { ...asRecord(provider.access) };
+    access.type = typeof access.type === "string" ? access.type : "api-key";
+    if (credential.startsWith("secret:")) {
+      access.ref = credential;
+      delete access.env;
+    } else {
+      access.env = credential;
+      delete access.ref;
+    }
+    provider.access = access;
+  });
+};
+
+/** The templates the document validator knows; anything else stays a raw-JSON
+ * edit. */
+const API_PROTOCOLS: SelectItem[] = [
+  { value: "openai-chat-completions", title: "openai-chat-completions" },
+  { value: "openai-responses", title: "openai-responses" },
+  { value: "anthropic-messages", title: "anthropic-messages" },
+];
 
 // ---- shared pieces --------------------------------------------------------
 
-function IssueRow(props: { issue: () => SettingsIssue }) {
+function IssueLine(props: { issue: () => SettingsIssue }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
-      <Icon name="alert" size={12} tint={colors.danger} />
-      <View style={{ flex: 1, gap: 1 }}>
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.sm }}>
+      <Icon name="alert" size={iconSize.xs} tint={color.danger} />
+      <View style={{ flex: 1, gap: space.xxs }}>
         <If when={!!props.issue().field}>
-          <Text style={{ fontSize: 10.5, fontFamily: mono(), color: colors.danger }}>{props.issue().field}</Text>
+          <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.danger }}>
+            {props.issue().field}
+          </Text>
         </If>
-        <Text style={{ fontSize: 11.5, lineHeight: 17, color: colors.foreground }}>{props.issue().message}</Text>
+        <Text
+          style={{
+            fontSize: typeScale.sm,
+            lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+            color: color.foreground,
+          }}
+        >
+          {props.issue().message}
+        </Text>
       </View>
     </View>
   );
 }
 
-function Issues(props: { issues: () => SettingsIssue[]; label?: string }) {
+function IssueList(props: { issues: () => SettingsIssue[]; label?: string }) {
   return (
     <If when={props.issues().length > 0}>
-      <View style={{ gap: 4 }}>
-        <If when={!!props.label}>
-          <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.mutedForeground }}>{props.label ?? ""}</Text>
+      <View style={{ gap: space.sm }}>
+        <If when={props.label !== undefined}>
+          <Text style={{ fontSize: typeScale.xs, fontWeight: weight.semibold, color: color.mutedForeground }}>
+            {props.label ?? ""}
+          </Text>
         </If>
         <Each of={props.issues()} key={(issue) => `${issue.field}|${issue.message}`}>
-          {(issue) => <IssueRow issue={issue} />}
+          {(issue) => <IssueLine issue={issue} />}
         </Each>
       </View>
     </If>
   );
 }
 
-function FieldLabel(props: { text: string }) {
-  return <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.mutedForeground }}>{props.text}</Text>;
-}
-
-function StateChip(props: { label: string; tone: "neutral" | "brand" | "success" | "warning" | "danger" | "info" }) {
-  return <Badge label={props.label} tone={props.tone} />;
-}
-
 function LoadingRow(props: { text: string }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: space.md }}>
-      <Spinner size={14} tint={colors.brand} />
-      <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{props.text}</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.sm }}>
+      <Spinner size={iconSize.sm} tint={color.brand} />
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.text}</Text>
     </View>
   );
 }
 
-function ErrorRow(props: { text: string; onRetry?: () => void }) {
+/** A tonal notice: the Card's face, retinted. The kit has no banner of its own
+ * and this is the same composition the conversation's failure banner uses. */
+function Notice(props: {
+  tone: "danger" | "warning";
+  children?: JSX.Element;
+  accessibilityLabel?: string;
+  testID?: string;
+}) {
   return (
-    <View
+    <Card
+      testID={props.testID}
+      accessibilityLabel={props.accessibilityLabel}
       style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
+        gap: space.sm,
         padding: space.md,
-        borderRadius: radius.control,
-        backgroundColor: colors.dangerTint,
-        borderWidth: 1,
-        borderColor: alpha(colors.danger, 0.3),
+        backgroundColor: props.tone === "danger" ? color.dangerTint : color.warningTint,
+        borderColor: alpha(props.tone === "danger" ? color.danger : color.warning, 0.3),
       }}
     >
-      <Icon name="alert" size={14} tint={colors.danger} />
-      <Text style={{ flex: 1, fontSize: 11.5, lineHeight: 17, color: colors.foreground }}>{props.text}</Text>
-      <If when={!!props.onRetry}>
-        <Press
-          onPress={props.onRetry}
-          accessibilityLabel="重试"
-          hoverStyle={{ opacity: 0.9 }}
+      {props.children}
+    </Card>
+  );
+}
+
+function ErrorBlock(props: { text: string; onRetry?: () => void }) {
+  return (
+    <Notice tone="danger" accessibilityLabel="加载失败">
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+        <Icon name="alert" size={iconSize.sm} tint={color.danger} />
+        <Text
           style={{
-            paddingHorizontal: 10,
-            height: 26,
-            borderRadius: radius.control,
-            alignItems: "center",
-            justifyContent: "center",
-            ...glass.control,
+            flex: 1,
+            fontSize: typeScale.sm,
+            lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+            color: color.foreground,
           }}
         >
-          <Text style={{ fontSize: 11, fontWeight: "600", color: colors.foreground }}>重试</Text>
-        </Press>
-      </If>
-    </View>
-  );
-}
-
-function CardTitle(props: { icon: IconName; title: string; note?: string }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <View
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 8,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.muted,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Icon name={props.icon} size={13} tint={colors.brand} />
-      </View>
-      <View style={{ flex: 1, gap: 1 }}>
-        <Text style={{ fontSize: 13.5, fontWeight: "700", color: colors.foreground }}>{props.title}</Text>
-        <If when={!!props.note}>
-          <Text style={{ fontSize: 10.5, lineHeight: 15, color: colors.mutedForeground }}>{props.note ?? ""}</Text>
+          {props.text}
+        </Text>
+        <If when={!!props.onRetry}>
+          <Button variant="outline" size="sm" label="重试" onPress={props.onRetry} />
         </If>
       </View>
+    </Notice>
+  );
+}
+
+/** One field of the「关于」readout: a name over its value. */
+function AboutRow(props: { name: string; value?: string; children?: JSX.Element }) {
+  return (
+    <View style={{ gap: space.xxs }}>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{props.name}</Text>
+      {props.value !== undefined ? (
+        <Text style={{ fontSize: typeScale.sm, color: color.foreground, userSelect: "text" }}>
+          {props.value}
+        </Text>
+      ) : (
+        props.children
+      )}
     </View>
   );
 }
 
-function SmallButton(props: { label: string; onPress?: () => void; disabled?: boolean; tone?: "ghost" | "primary" | "danger" }) {
-  const tone = props.tone ?? "ghost";
+// ---- 通用 -----------------------------------------------------------------
+
+function GeneralSection() {
   return (
-    <Press
-      onPress={props.disabled ? undefined : props.onPress}
-      disabled={props.disabled}
-      accessibilityLabel={props.label}
-      hoverStyle={{ opacity: 0.9 }}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        height: 26,
-        paddingHorizontal: 10,
-        borderRadius: radius.pill,
-        justifyContent: "center",
-        backgroundColor:
-          tone === "primary" ? colors.primary : tone === "danger" ? colors.dangerTint : colors.glassControl,
-        borderWidth: tone === "ghost" ? 1 : 0,
-        borderColor: colors.glassControlRim,
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 10.5,
-          fontWeight: "600",
-          color:
-            tone === "primary"
-              ? colors.primaryForeground
-              : tone === "danger"
-                ? colors.danger
-                : colors.foreground,
-        }}
-      >
-        {props.label}
-      </Text>
-    </Press>
+    <Card testID="settings-general">
+      <CardHeader title="通用" description="会话的阅读偏好；只影响这台设备的界面，不进模型文档。" />
+      <CardContent>
+        <Field
+          orientation="horizontal"
+          hint="流式回答按 token 增量刷新；关闭后整段回复到达才显示。运行中的任务不受影响，下一次订阅按新设置进行。"
+        >
+          <Switch
+            checked={store.showPartials()}
+            onChange={(checked) => void store.setPartials(checked)}
+            label={`partial ${store.showPartials() ? "开" : "关"}`}
+            accessibilityLabel="切换 token 级 partial"
+            testID="settings-partials"
+          />
+        </Field>
+      </CardContent>
+    </Card>
   );
 }
 
-// ---- 模型 section ----------------------------------------------------------
+// ---- 外观 -----------------------------------------------------------------
+
+/** The one write for the appearance: `applyAppearance` calls nsh's
+ * `setColorScheme` (the color scheme, the components' theme and the platform's
+ * controls follow at once) and keeps the choice under `keel:appearance` — the
+ * same value the app root restores at boot (`src/ui/appearance.ts`), so the
+ * page and the boot can never disagree. */
+function AppearanceSection() {
+  const currentScheme = () =>
+    colorScheme() === "dark" ? "深色" : "浅色";
+  return (
+    <Card testID="settings-appearance">
+      <CardHeader title="外观" description="主题跟随系统，或固定为浅色 / 深色；选择会被记住，下次启动照此显示。" />
+      <CardContent>
+        <Field
+          label="颜色偏好"
+          hint={`当前生效：${currentScheme()}${
+            appearancePreference() === "system" ? " · 跟随系统" : ""
+          }`}
+        >
+          <RadioGroup
+            value={appearancePreference()}
+            options={[
+              { value: "system", label: "跟随系统" },
+              { value: "light", label: "浅色" },
+              { value: "dark", label: "深色" },
+            ]}
+            onChange={(value) => applyAppearance(value as Appearance)}
+            accessibilityLabel="颜色偏好"
+            testID="settings-appearance-preference"
+          />
+        </Field>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---- 模型与 Provider ------------------------------------------------------
 
 function CurrentCard() {
-  const settings = () => store.settings();
   return (
-    <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-      <CardTitle icon="spark" title="当前生效" note="配置保存后立即生效，无需重启；在飞的任务继续用旧配置跑完。" />
-      <If when={store.settingsLoading() && !settings()}>
-        <LoadingRow text="正在读取模型配置…" />
-      </If>
-      <If when={!!store.settingsError()}>
-        <ErrorRow text={store.settingsError() ?? ""} onRetry={() => void store.loadModelsSettings()} />
-      </If>
-      <If when={!!settings()}>
-        <View style={{ gap: 6 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <StateChip
-              label={settings()?.source === "stored" ? "已保存覆盖" : "部署默认"}
-              tone={settings()?.source === "stored" ? "brand" : "neutral"}
-            />
-            <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
-              revision {settings()?.revision ?? 0}
-            </Text>
-            <SmallButton label="刷新" onPress={() => void store.loadModelsPanel()} />
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <FieldLabel text="默认模型" />
-            <If
-              when={!!store.tenantSelection()}
-              else={
-                <Text style={{ fontSize: 11.5, color: colors.warning }}>未设置（文档里没有 selection）</Text>
-              }
-            >
-              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>
-                {selectionLabel(store.tenantSelection())}
-              </Text>
-            </If>
-          </View>
-          <If when={!!store.settingsSavedSummary()}>
-            <Text style={{ fontSize: 10.5, color: colors.success }}>
-              最近一次写入：{store.settingsSavedSummary() ?? ""}
-            </Text>
-          </If>
-          <Issues issues={() => settings()?.issues ?? []} label="解析诊断" />
-          <If when={(settings()?.issues ?? []).length === 0}>
-            <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>解析诊断：无</Text>
-          </If>
-        </View>
-      </If>
-    </View>
-  );
-}
-
-function ReasoningChips() {
-  const levels = (): string[] => {
-    const selection = store.tenantSelection();
-    if (!selection) return [];
-    const model = store
-      .models()
-      .find((item) => item.modelId === selection.modelId && item.providerId === selection.providerId);
-    return model?.options?.reasoningLevel?.values ?? [];
-  };
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-      <FieldLabel text="思考档" />
-      <If
-        when={levels().length > 0}
-        else={<Text style={{ fontSize: 11, color: colors.mutedForeground }}>选择模型后可选思考档</Text>}
-      >
-        <Each of={levels()} key="index">
-          {(level) => (
-            <Press
-              onPress={() => {
-                const selection = store.tenantSelection();
-                if (!selection) return;
-                writeSelection({ ...selection, reasoningLevel: level() });
-              }}
-              accessibilityLabel={`思考档 ${reasoningLabel(level())}`}
-              accessibilityState={{ selected: store.tenantSelection()?.reasoningLevel === level() }}
-              hoverStyle={{ opacity: 0.9 }}
-              style={{
-                paddingHorizontal: 9,
-                height: 24,
-                borderRadius: radius.pill,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor:
-                  store.tenantSelection()?.reasoningLevel === level() ? colors.brandTint : colors.muted,
-                borderWidth: 1,
-                borderColor:
-                  store.tenantSelection()?.reasoningLevel === level() ? alpha(colors.brand, 0.4) : colors.glassEdge,
-              }}
-            >
+    <Card testID="settings-current">
+      <CardHeader
+        title="当前生效"
+        description="配置保存后立即生效，无需重启；在飞的任务继续用旧配置跑完。"
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="refresh"
+            label="刷新"
+            accessibilityLabel="刷新模型配置"
+            onPress={() => void store.loadModelsPanel()}
+          />
+        }
+      />
+      <CardContent>
+        <If when={store.settingsLoading() && !store.settings()}>
+          <LoadingRow text="正在读取模型配置…" />
+        </If>
+        <If when={!!store.settingsError()}>
+          <ErrorBlock
+            text={store.settingsError() ?? ""}
+            onRetry={() => void store.loadModelsPanel()}
+          />
+        </If>
+        <If when={!!store.settings()}>
+          <View style={{ gap: space.md }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Badge
+                variant={store.settings()?.source === "stored" ? "info" : "secondary"}
+                label={store.settings()?.source === "stored" ? "已保存覆盖" : "部署默认"}
+              />
               <Text
                 style={{
-                  fontSize: 11,
-                  fontWeight: "600",
-                  color:
-                    store.tenantSelection()?.reasoningLevel === level() ? colors.brand : colors.mutedForeground,
+                  fontSize: typeScale.sm,
+                  color: color.mutedForeground,
+                  fontVariant: ["tabular-nums"],
                 }}
               >
-                {reasoningLabel(level())}
+                revision {store.settings()?.revision ?? 0}
               </Text>
-            </Press>
-          )}
-        </Each>
-      </If>
-    </View>
+            </View>
+            <Field label="默认模型">
+              <If
+                when={!!store.tenantSelection()}
+                else={
+                  <Text style={{ fontSize: typeScale.sm, color: color.warning }}>
+                    未设置（文档里没有 selection）
+                  </Text>
+                }
+              >
+                <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+                  {selectionLabel(store.tenantSelection())}
+                </Text>
+              </If>
+            </Field>
+            <If when={!!store.settingsSavedSummary()}>
+              <Text style={{ fontSize: typeScale.xs, color: color.success }}>
+                最近一次写入：{store.settingsSavedSummary() ?? ""}
+              </Text>
+            </If>
+            <IssueList issues={() => store.settings()?.issues ?? []} label="解析诊断" />
+            <If when={(store.settings()?.issues ?? []).length === 0}>
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>解析诊断：无</Text>
+            </If>
+          </View>
+        </If>
+      </CardContent>
+    </Card>
   );
 }
 
-function EditCard() {
-  const defaultSelection = () => store.tenantSelection();
+/** The provider choices of the structured form: the draft's declared ids. */
+const providerItems = (): SelectItem[] =>
+  draftProviders().map((provider) => ({
+    value: provider.id,
+    title: provider.name ? `${provider.name} · ${provider.id}` : provider.id,
+  }));
+
+/** The model choices for the selected provider (or all declared models). */
+const modelItems = (selection: ModelSelection | null): SelectItem[] => {
+  const providers = draftProviders();
+  const chosen = providers.find((provider) => provider.id === selection?.providerId);
+  const rows = (chosen ? [chosen] : providers).flatMap((provider) =>
+    provider.modelIds.map((modelId) => {
+      const resolved = store
+        .models()
+        .find((model) => model.providerId === provider.id && model.modelId === modelId);
+      const unavailable = resolved?.selectable === false;
+      return {
+        value: chosen ? modelId : `${provider.id}/${modelId}`,
+        title: `${chosen ? modelId : `${provider.id}/${modelId}`}${unavailable ? "（不可执行）" : ""}`,
+        disabled: unavailable,
+      };
+    }),
+  );
+  return rows;
+};
+
+const reasoningItems = (selection: ModelSelection | null): SelectItem[] => {
+  const model = store
+    .models()
+    .find(
+      (row) =>
+        row.modelId === selection?.modelId &&
+        (!selection?.providerId || row.providerId === selection.providerId),
+    );
+  const levels = model?.options?.reasoningLevel?.values ?? [];
+  return [{ value: "", title: "不指定" }, ...levels.map((level) => ({ value: level, title: reasoningLabel(level) }))];
+};
+
+function SelectionCard() {
+  const selection = () => documentSelection();
+  const chooseProvider = (providerId: string) => {
+    const provider = draftProviders().find((row) => row.id === providerId);
+    const modelId = provider?.modelIds[0] ?? "";
+    const resolved = store
+      .models()
+      .find((model) => model.providerId === providerId && model.modelId === modelId);
+    writeSelection({
+      providerId,
+      modelId,
+      reasoningLevel: resolved ? defaultReasoningFor(resolved, selection()) : undefined,
+    });
+  };
+  const chooseModel = (value: string) => {
+    const current = selection();
+    const slash = value.indexOf("/");
+    const providerId = current?.providerId ?? (slash > 0 ? value.slice(0, slash) : undefined);
+    const modelId = slash > 0 && !current?.providerId ? value.slice(slash + 1) : value;
+    const resolved = store
+      .models()
+      .find((model) => model.modelId === modelId && (!providerId || model.providerId === providerId));
+    writeSelection({
+      providerId,
+      modelId,
+      reasoningLevel: resolved ? defaultReasoningFor(resolved, current) : undefined,
+    });
+  };
+  const chooseReasoning = (value: string) => {
+    const current = selection();
+    if (!current) return;
+    writeSelection({ ...current, reasoningLevel: value === "" ? undefined : value });
+  };
   const save = () => {
     const parsed = parseDocument(rawDocument());
     if (!parsed.document) {
       rawParseError.set(parsed.error ?? "文档不是合法的 JSON");
+      rawOpen.set(true);
       return;
     }
     void store.saveModelsSettings(parsed.document).then(() => {
@@ -365,321 +656,458 @@ function EditCard() {
       // follows the reloaded document; on failure the text stays as typed.
       if (store.settingsIssues().length === 0 && store.settingsConflict() === null) {
         rawDirty.set(false);
-        confirmingReset.set(false);
       }
     });
   };
   return (
-    <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-      <CardTitle
-        icon="layers"
-        title="编辑"
-        note="设置默认模型与思考档，或直接编辑原始文档。保存即校验：字段级错误原样呈现。"
+    <Card testID="settings-selection">
+      <CardHeader
+        title="部署默认"
+        description="结构化编辑模型文档的默认选择；保存时整份文档提交（带 expectedRevision），服务端逐字段校验。"
       />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <FieldLabel text="默认模型" />
-        <If
-          when={!!defaultSelection()}
-          else={<Text style={{ fontSize: 11.5, color: colors.warning }}>未设置：在下方模型列表点选一个模型</Text>}
-        >
-          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>
-            {selectionLabel(defaultSelection())}
-          </Text>
+      <CardContent>
+        <If when={store.settingsIssues().length > 0}>
+          <Notice tone="danger" accessibilityLabel="保存被拒绝">
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.danger }}>
+              保存被拒绝（{store.settingsIssues().length} 项）
+            </Text>
+            <IssueList issues={() => store.settingsIssues()} />
+          </Notice>
         </If>
-      </View>
-      <ReasoningChips />
-      <If when={!!rawParseError()}>
-        <View
-          style={{
-            gap: 3,
-            padding: space.sm,
-            borderRadius: radius.control,
-            backgroundColor: colors.dangerTint,
-            borderWidth: 1,
-            borderColor: alpha(colors.danger, 0.3),
-          }}
-        >
-          <Text style={{ fontSize: 11, fontWeight: "600", color: colors.danger }}>原始文档不是合法 JSON</Text>
-          <Text style={{ fontSize: 11, lineHeight: 16, fontFamily: mono(), color: colors.foreground }}>
-            {rawParseError() ?? ""}
-          </Text>
-        </View>
-      </If>
-      <If when={store.settingsIssues().length > 0}>
-        <View
-          style={{
-            gap: 6,
-            padding: space.sm,
-            borderRadius: radius.control,
-            backgroundColor: colors.dangerTint,
-            borderWidth: 1,
-            borderColor: alpha(colors.danger, 0.3),
-          }}
-        >
-          <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.danger }}>
-            保存被拒绝（{store.settingsIssues().length} 项）
-          </Text>
-          <Issues issues={() => store.settingsIssues()} />
-        </View>
-      </If>
-      <If when={store.settingsConflict() !== null}>
-        <View
-          style={{
-            gap: 6,
-            padding: space.sm,
-            borderRadius: radius.control,
-            backgroundColor: colors.warningTint,
-            borderWidth: 1,
-            borderColor: alpha(colors.warning, 0.32),
-          }}
-        >
-          <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.warning }}>
-            文档已被其它写入更新（当前 revision {store.settingsConflict() ?? "?"}）
-          </Text>
-          <Text style={{ fontSize: 11, lineHeight: 16, color: colors.foreground }}>
-            刷新以载入最新文档，再重新保存你的改动；本次修改没有被写入。
-          </Text>
-          <View style={{ flexDirection: "row" }}>
-            <SmallButton
-              label="刷新最新文档"
-              onPress={() => {
-                confirmingReset.set(false);
-                void store.loadModelsPanel();
+        <If when={store.settingsConflict() !== null}>
+          <Notice tone="warning" accessibilityLabel="文档冲突">
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.warning }}>
+              文档已被其它写入更新（当前 revision {store.settingsConflict() ?? "?"}）
+            </Text>
+            <Text
+              style={{
+                fontSize: typeScale.sm,
+                lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                color: color.foreground,
+              }}
+            >
+              刷新以载入最新文档，再重新保存你的改动；本次修改没有被写入。
+            </Text>
+            <View style={{ flexDirection: "row" }}>
+              <Button
+                variant="outline"
+                size="sm"
+                label="刷新最新文档"
+                onPress={() => {
+                  rawDirty.set(false);
+                  void store.loadModelsPanel();
+                }}
+              />
+            </View>
+          </Notice>
+        </If>
+        <FieldGroup>
+          <Field label="Provider" hint="来自当前文档的 providers；保存后服务端按凭据解析可执行性。">
+            <Select
+              testID="settings-selection-provider"
+              accessibilityLabel="默认 Provider"
+              items={providerItems()}
+              value={selection()?.providerId ?? null}
+              placeholder="选择 provider"
+              onChange={(value) => {
+                if (value) chooseProvider(value);
               }}
             />
-          </View>
-        </View>
-      </If>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Press
-          onPress={store.settingsSaving() || !!rawParseError() || !rawDocument().trim() ? undefined : save}
-          disabled={store.settingsSaving() || !!rawParseError() || !rawDocument().trim()}
-          accessibilityLabel="保存模型配置"
-          hoverStyle={{ opacity: 0.92 }}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            height: 32,
-            paddingHorizontal: 14,
-            borderRadius: radius.control,
-            backgroundColor: colors.primary,
-          }}
-        >
-          <If when={store.settingsSaving()} else={<Icon name="check" size={13} tint={colors.primaryForeground} />}>
-            <Spinner size={12} tint={colors.primaryForeground} />
-          </If>
-          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.primaryForeground }}>
-            {store.settingsSaving() ? "保存中…" : "保存并生效"}
-          </Text>
-        </Press>
-        <If
-          when={confirmingReset()}
-          else={
-            <Press
-              onPress={store.settingsSaving() ? undefined : () => confirmingReset.set(true)}
-              disabled={store.settingsSaving()}
-              accessibilityLabel="重置为部署默认"
-              hoverStyle={{ opacity: 0.9 }}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                height: 32,
-                paddingHorizontal: 12,
-                borderRadius: radius.control,
-                backgroundColor: colors.dangerTint,
-                borderWidth: 1,
-                borderColor: alpha(colors.danger, 0.32),
+          </Field>
+          <Field
+            label="模型"
+            hint={
+              modelItems(selection()).length === 0
+                ? "该 provider 在文档里没有声明模型。"
+                : "可选的模型才能保存为默认；不可执行的会标明原因。"
+            }
+          >
+            <Select
+              testID="settings-selection-model"
+              accessibilityLabel="默认模型"
+              items={modelItems(selection())}
+              value={
+                selection()?.providerId
+                  ? (selection()?.modelId ?? null)
+                  : selection()
+                    ? `${selection()?.providerId ?? ""}/${selection()?.modelId ?? ""}`
+                    : null
+              }
+              disabled={modelItems(selection()).length === 0}
+              placeholder="选择模型"
+              onChange={(value) => {
+                if (value) chooseModel(value);
               }}
-            >
-              <Icon name="refresh" size={13} tint={colors.danger} />
-              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.danger }}>重置</Text>
-            </Press>
-          }
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <Text style={{ fontSize: 11.5, color: colors.danger }}>重置会删除已保存的覆盖，回到部署默认；确定吗？</Text>
-            <Press
-              onPress={() => {
-                confirmingReset.set(false);
-                void store.resetModelsSettings().then(() => {
-                  if (store.settingsConflict() === null) rawDirty.set(false);
-                });
-              }}
-              accessibilityLabel="确认重置"
-              hoverStyle={{ opacity: 0.9 }}
-              style={{
-                height: 28,
-                paddingHorizontal: 12,
-                borderRadius: radius.control,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: colors.destructive,
-              }}
-            >
-              <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.destructiveForeground }}>
-                确认重置
-              </Text>
-            </Press>
-            <Press
-              onPress={() => confirmingReset.set(false)}
-              accessibilityLabel="取消重置"
-              hoverStyle={{ opacity: 0.9 }}
-              style={{
-                height: 28,
-                paddingHorizontal: 12,
-                borderRadius: radius.control,
-                alignItems: "center",
-                justifyContent: "center",
-                ...glass.control,
-              }}
-            >
-              <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.foreground }}>取消</Text>
-            </Press>
-          </View>
-        </If>
-        <View style={{ flex: 1 }} />
-        <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
-          {rawDirty() ? "有未保存的修改" : "编辑区与当前生效配置一致"}
-        </Text>
-      </View>
-      <View style={{ gap: 4 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <FieldLabel text="原始文档" />
-          <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-            完整 models 文档（schemaVersion / providers / 规则数组 / selection）
+            />
+          </Field>
+          <Field label="思考档" hint="只列出该模型声明的档位；不指定则用模型默认。">
+            <Select
+              testID="settings-selection-reasoning"
+              accessibilityLabel="默认思考档"
+              items={reasoningItems(selection())}
+              value={selection()?.reasoningLevel ?? ""}
+              disabled={reasoningItems(selection()).length <= 1}
+              onChange={(value) => chooseReasoning(value ?? "")}
+            />
+          </Field>
+        </FieldGroup>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+          <Button
+            icon="check"
+            label="保存并生效"
+            accessibilityLabel="保存模型配置"
+            loading={store.settingsSaving()}
+            disabled={store.settingsSaving() || !!rawParseError() || !rawDocument().trim()}
+            onPress={save}
+          />
+          <Button
+            variant="outline"
+            icon="refresh"
+            label="重置"
+            accessibilityLabel="重置为部署默认"
+            disabled={store.settingsSaving()}
+            onPress={() => confirmReset.set(true)}
+          />
+          <View style={{ flex: 1 }} />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            {rawDirty() ? "有未保存的修改" : "编辑区与当前生效配置一致"}
           </Text>
         </View>
-        <Input
-          testID="settings-raw-document"
-          value={rawDocument()}
-          onChange={({ value }) => {
-            rawDocument.set(value);
-            rawDirty.set(true);
-            rawParseError.set(parseDocument(value).error ?? null);
-          }}
-          multiline
-          submitBehavior="newline"
-          placeholder={'{\n  "schemaVersion": 1,\n  "providers": [],\n  "selection": {}\n}'}
-          style={{
-            minHeight: compact() ? 180 : 240,
-            fontSize: 11.5,
-            lineHeight: 16,
-            fontFamily: mono(),
-            color: colors.foreground,
-            placeholderColor: colors.mutedForeground,
-            caretColor: colors.brand,
-            selectionColor: alpha(colors.brand, 0.3),
-            paddingHorizontal: 10,
-            paddingVertical: 8,
-            borderRadius: radius.control,
-            borderWidth: 1,
-            borderColor: rawParseError() ? colors.danger : colors.border,
-            backgroundColor: colors.background,
-          }}
-        />
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-          保存时整份文档提交（带 expectedRevision）；服务端校验失败会按字段路径列出原因。
+      </CardContent>
+      <AlertDialog
+        testID="settings-reset"
+        open={confirmReset()}
+        title="重置为部署默认"
+        description="重置会删除已保存的覆盖，回到部署默认；确定吗？"
+        confirmLabel="确认重置"
+        cancelLabel="取消"
+        destructive
+        onConfirm={() => {
+          confirmReset.set(false);
+          rawDirty.set(false);
+          void store.resetModelsSettings();
+        }}
+        onCancel={() => confirmReset.set(false)}
+      />
+    </Card>
+  );
+}
+
+/** One provider's structured row: template, endpoint, credential reference. */
+function ProviderEditorRow(props: { provider: () => DraftProvider }) {
+  return (
+    <View
+      style={{
+        gap: space.md,
+        padding: space.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: color.border,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+          {props.provider().name
+            ? `${props.provider().name} · ${props.provider().id}`
+            : props.provider().id}
         </Text>
+        <Badge variant="secondary" label={`${props.provider().modelIds.length} 个模型`} />
       </View>
+      <FieldGroup>
+        <Field label="模板" hint="文档里的 api.type；其它取值走「高级」的原始文档。">
+          <Select
+            testID={`settings-provider-template-${props.provider().id}`}
+            accessibilityLabel={`${props.provider().id} 模板`}
+            items={API_PROTOCOLS}
+            value={props.provider().apiType}
+            placeholder="选择模板"
+            onChange={(value) => {
+              if (value) setProviderApiType(props.provider().id, value);
+            }}
+          />
+        </Field>
+        <Field label="endpoint" hint="api.baseUrl，例如 https://api.example.com/v1。">
+          <Input
+            testID={`settings-provider-endpoint-${props.provider().id}`}
+            accessibilityLabel={`${props.provider().id} endpoint`}
+            value={props.provider().baseUrl}
+            placeholder="https://…"
+            onChange={(value) => setProviderBaseUrl(props.provider().id, value)}
+          />
+        </Field>
+        <Field
+          label="凭据引用"
+          hint="env 变量名，或 secret:名字（写到「密钥」分区）；这里永远不存凭据的值。"
+        >
+          <Input
+            testID={`settings-provider-credential-${props.provider().id}`}
+            accessibilityLabel={`${props.provider().id} 凭据引用`}
+            value={props.provider().credential}
+            placeholder="S2API_KEY 或 secret:name"
+            onChange={(value) => setProviderCredential(props.provider().id, value)}
+          />
+        </Field>
+      </FieldGroup>
     </View>
+  );
+}
+
+function ProviderEditorCard() {
+  const providers = () => draftProviders();
+  return (
+    <Card testID="settings-provider-editor">
+      <CardHeader
+        title="Provider 接入"
+        description="按 provider 编辑模板、endpoint 与凭据引用；改的是待保存的文档，按上方「保存模型配置」生效。"
+      />
+      <CardContent>
+        <If when={providers().length === 0}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            当前文档没有 provider；在「高级」里补上 providers 数组，或重置为部署默认。
+          </Text>
+        </If>
+        <Each of={providers()} key={(provider) => provider.id}>
+          {(provider) => <ProviderEditorRow provider={provider} />}
+        </Each>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The raw document, behind one closed disclosure: the escape hatch, never the
+ * primary surface. */
+function AdvancedCard() {
+  return (
+    <Card testID="settings-advanced-card">
+      <Collapsible
+        open={rawOpen()}
+        accessibilityLabel="高级"
+        content={
+          <View style={{ gap: space.md }}>
+            <Text
+              style={{
+                fontSize: typeScale.sm,
+                lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                color: color.mutedForeground,
+              }}
+            >
+              完整的 models 文档（schemaVersion / providers / 规则数组 / selection）。保存时整份文档提交；
+              服务端校验失败会按字段路径列出原因。
+            </Text>
+            <Textarea
+              testID="settings-raw-document"
+              accessibilityLabel="原始 models 文档"
+              value={rawDocument()}
+              onChange={(value) => {
+                rawDocument.set(value);
+                rawDirty.set(true);
+                rawParseError.set(parseDocument(value).error ?? null);
+              }}
+              rows={10}
+              invalid={rawParseError() !== null}
+              placeholder={'{\n  "schemaVersion": 1,\n  "providers": [],\n  "selection": {}\n}'}
+            />
+            <If when={!!rawParseError()}>
+              <Text
+                style={{
+                  fontSize: typeScale.xs,
+                  lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+                  fontFamily: font.mono,
+                  color: color.danger,
+                }}
+              >
+                原始文档不是合法 JSON：{rawParseError() ?? ""}
+              </Text>
+            </If>
+          </View>
+        }
+      >
+        <CollapsibleTrigger
+          testID="settings-advanced"
+          label="高级"
+          icon="file"
+          expanded={rawOpen()}
+          onPress={() => rawOpen.set(!rawOpen())}
+        />
+      </Collapsible>
+    </Card>
   );
 }
 
 function ModelRow(props: { model: () => ModelView }) {
   const tenant = () => store.tenantSelection();
   const isDefault = () =>
-    tenant()?.modelId === props.model().modelId && tenant()?.providerId === props.model().providerId;
+    tenant()?.modelId === props.model().modelId &&
+    tenant()?.providerId === props.model().providerId;
   const choose = () => {
     const model = props.model();
-    const current = selectionOfDocument(store.settings()?.document ?? {});
     writeSelection({
       providerId: model.providerId,
       modelId: model.modelId,
-      reasoningLevel: defaultReasoningFor(model, current),
+      reasoningLevel: defaultReasoningFor(model, documentSelection()),
     });
   };
   return (
-    <Press
-      onPress={props.model().selectable === false ? undefined : choose}
-      disabled={props.model().selectable === false}
-      accessibilityLabel={`设为默认 ${props.model().providerId}/${props.model().modelId}`}
-      hoverStyle={{ backgroundColor: colors.hover }}
+    <View
       style={{
-        gap: 4,
-        padding: space.sm,
-        borderRadius: radius.control,
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: space.md,
+        padding: space.md,
+        borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: isDefault() ? alpha(colors.brand, 0.4) : colors.glassEdge,
-        backgroundColor: isDefault() ? colors.brandTint : undefined,
+        borderColor: isDefault() ? alpha(color.brand, 0.4) : color.border,
+        backgroundColor: isDefault() ? color.brandTint : undefined,
+        flexWrap: "wrap",
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>
-          {props.model().providerId}/{props.model().modelId}
-        </Text>
-        <If when={isDefault()}>
-          <StateChip label="当前默认" tone="brand" />
-        </If>
-        <If when={props.model().selectable === false}>
-          <StateChip label="不可选" tone="warning" />
-        </If>
-        <If when={props.model().enabled === false}>
-          <StateChip label="已禁用" tone="neutral" />
-        </If>
-        <View style={{ flex: 1 }} />
-        <If when={props.model().selectable !== false}>
-          <Text
-            style={{
-              fontSize: 10.5,
-              fontWeight: "600",
-              color: isDefault() ? colors.brand : colors.mutedForeground,
-            }}
-          >
-            {isDefault() ? "已选为默认" : "设为默认"}
+      <View style={{ flex: 1, minWidth: 0, gap: space.xxs }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+            {props.model().providerId}/{props.model().modelId}
           </Text>
-        </If>
+          <If when={isDefault()}>
+            <Badge variant="info" label="当前默认" />
+          </If>
+          <If when={props.model().selectable === false}>
+            <Badge variant="warning" label="不可选" />
+          </If>
+          <If when={props.model().enabled === false}>
+            <Badge variant="secondary" label="已禁用" />
+          </If>
+        </View>
+        <Text style={{ fontSize: typeScale.xs, lineHeight: Math.round(typeScale.xs * lineHeight.normal), color: color.mutedForeground }}>
+          {modelFacts(props.model())}
+        </Text>
+        <IssueList issues={() => props.model().issues ?? []} />
       </View>
-      <Text style={{ fontSize: 10.5, lineHeight: 15, color: colors.mutedForeground }}>
-        {modelFacts(props.model())}
-      </Text>
-      <Issues issues={() => props.model().issues ?? []} />
-    </Press>
+      <If when={!isDefault()}>
+        <Button
+          variant="outline"
+          size="sm"
+          label="设为默认"
+          accessibilityLabel={`设为默认 ${props.model().providerId}/${props.model().modelId}`}
+          disabled={props.model().selectable === false}
+          onPress={choose}
+        />
+      </If>
+    </View>
   );
 }
 
-function ModelsList() {
-  const models = () => store.models();
+/** The capability gate's diagnostics: one table, closed until asked for. */
+function ModelsDiagnostics() {
+  const enforcement = () => store.enforcement();
   return (
-    <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-      <CardTitle
-        icon="brain"
+    <If when={!!enforcement()}>
+      <Collapsible
+        open={modelsDiagnosticsOpen()}
+        accessibilityLabel="模型诊断"
+        content={
+          <View style={{ gap: space.md }}>
+            <Label label="能力执行门" />
+            <Table bare accessibilityLabel="能力执行门">
+              <TableHeaderRow>
+                <Th>
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>能力</Text>
+                </Th>
+                <Th>
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>执行</Text>
+                </Th>
+              </TableHeaderRow>
+              <TableBody>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>工具调用</Text>
+                  </Td>
+                  <Td>
+                    <Badge
+                      variant={enforcement()?.toolCall ? "success" : "warning"}
+                      label={enforcement()?.toolCall ? "强制" : "未强制"}
+                    />
+                  </Td>
+                </TableBodyRow>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>媒体</Text>
+                  </Td>
+                  <Td>
+                    <Badge
+                      variant={enforcement()?.media ? "success" : "warning"}
+                      label={enforcement()?.media ? "强制" : "记录但未强制"}
+                    />
+                  </Td>
+                </TableBodyRow>
+              </TableBody>
+            </Table>
+          </View>
+        }
+      >
+        <CollapsibleTrigger
+          testID="settings-models-diagnostics"
+          label="诊断"
+          icon="tool"
+          expanded={modelsDiagnosticsOpen()}
+          onPress={() => modelsDiagnosticsOpen.set(!modelsDiagnosticsOpen())}
+        />
+      </Collapsible>
+    </If>
+  );
+}
+
+function ModelsListCard() {
+  const models = () =>
+    store.models().filter((model) => !modelsOnlyExecutable() || model.selectable !== false);
+  return (
+    <Card testID="settings-models">
+      <CardHeader
         title="模型列表"
-        note="来自 /v1/models：只含凭据可解析的可见 provider；可选的模型可以点选为默认。"
+        description="来自 /v1/models：只含凭据可解析的可见 provider；可选的模型可以点选为默认。"
       />
-      <If when={!!store.modelsError()}>
-        <ErrorRow text={store.modelsError() ?? ""} onRetry={() => void store.loadRegistry()} />
-      </If>
-      <If when={!store.modelsError() && !store.registryLoaded()}>
-        <LoadingRow text="正在读取模型列表…" />
-      </If>
-      <If when={!store.modelsError() && store.registryLoaded() && models().length === 0}>
-        <Text style={{ fontSize: 12, color: colors.mutedForeground }}>
-          没有可用的模型：当前进程解析不到任何 provider 的凭据，或配置为空。
-        </Text>
-      </If>
-      <Each of={models()} key={(model) => `${model.providerId}/${model.modelId}`}>
-        {(model) => <ModelRow model={model} />}
-      </Each>
-      <Issues issues={() => store.modelIssues()} label="列表诊断" />
-      <If when={!!store.enforcement()}>
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-          能力执行门：工具调用 {store.enforcement()?.toolCall ? "强制" : "未强制"} · 媒体{" "}
-          {store.enforcement()?.media ? "强制" : "记录但未强制"}
-        </Text>
-      </If>
-    </View>
+      <CardContent>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+          <Switch
+            checked={modelsOnlyExecutable()}
+            onChange={(checked) => modelsOnlyExecutable.set(checked)}
+            label="只看可执行"
+            accessibilityLabel="只看可执行模型"
+          />
+          <View style={{ flex: 1 }} />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            {models().length} / {store.models().length} 个模型
+          </Text>
+        </View>
+        <If when={!!store.modelsError()}>
+          <ErrorBlock text={store.modelsError() ?? ""} onRetry={() => void store.loadRegistry()} />
+        </If>
+        <If when={!store.modelsError() && !store.registryLoaded()}>
+          <LoadingRow text="正在读取模型列表…" />
+        </If>
+        <If when={!store.modelsError() && store.registryLoaded() && store.models().length === 0}>
+          <Empty accessibilityLabel="没有可用的模型">
+            <EmptyTitle label="没有可用的模型" />
+            <EmptyDescription label="当前进程解析不到任何 provider 的凭据，或配置为空。" />
+          </Empty>
+        </If>
+        <If
+          when={
+            !store.modelsError() &&
+            store.registryLoaded() &&
+            store.models().length > 0 &&
+            models().length === 0
+          }
+        >
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            没有可执行的模型；关掉「只看可执行」查看全部。
+          </Text>
+        </If>
+        <Each of={models()} key={(model) => `${model.providerId}/${model.modelId}`}>
+          {(model) => <ModelRow model={model} />}
+        </Each>
+        <IssueList issues={() => store.modelIssues()} label="列表诊断" />
+        <ModelsDiagnostics />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -690,40 +1118,44 @@ function ProviderRow(props: { provider: () => ProviderView }) {
     if (props.provider().access?.ref) parts.push(`ref ${props.provider().access?.ref}`);
     return parts.join(" · ") || "无凭据引用";
   };
-  const modelIssues = () => (props.provider().models ?? []).filter((model) => (model.issues ?? []).length > 0);
+  const modelIssues = () =>
+    (props.provider().models ?? []).filter((model) => (model.issues ?? []).length > 0);
   return (
     <View
       style={{
-        gap: 4,
-        padding: space.sm,
-        borderRadius: radius.control,
+        gap: space.sm,
+        padding: space.md,
+        borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: colors.glassEdge,
+        borderColor: color.border,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
           {props.provider().name
             ? `${props.provider().name} · ${props.provider().providerId}`
             : props.provider().providerId}
         </Text>
-        <StateChip
+        <Badge
+          variant={props.provider().executable ? "success" : "destructive"}
           label={props.provider().executable ? "可执行" : "不可执行"}
-          tone={props.provider().executable ? "success" : "danger"}
         />
-        <StateChip label={`${(props.provider().models ?? []).length} 个模型`} tone="neutral" />
+        <Badge variant="secondary" label={`${(props.provider().models ?? []).length} 个模型`} />
       </View>
-      <Text style={{ fontSize: 10.5, fontFamily: mono(), color: colors.mutedForeground }}>
+      <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
         {accessLabel()} · {props.provider().api?.type ?? ""} {props.provider().api?.baseUrl ?? ""}
       </Text>
-      <Issues issues={() => props.provider().issues ?? []} />
-      <Each of={modelIssues()} key={(model) => `${model.providerId}/${model.modelId}`}>
+      <IssueList issues={() => props.provider().issues ?? []} />
+      <Each
+        of={modelIssues()}
+        key={(model) => `${model.providerId}/${model.modelId}`}
+      >
         {(model) => (
-          <View style={{ gap: 3 }}>
-            <Text style={{ fontSize: 10.5, fontFamily: mono(), color: colors.mutedForeground }}>
+          <View style={{ gap: space.xxs }}>
+            <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
               {model().providerId}/{model().modelId}
             </Text>
-            <Issues issues={() => model().issues ?? []} />
+            <IssueList issues={() => model().issues ?? []} />
           </View>
         )}
       </Each>
@@ -731,33 +1163,36 @@ function ProviderRow(props: { provider: () => ProviderView }) {
   );
 }
 
-function ProvidersList() {
+function ProvidersListCard() {
   return (
-    <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-      <CardTitle
-        icon="layers"
+    <Card testID="settings-providers">
+      <CardHeader
         title="Provider 列表"
-        note="来自 /v1/providers（只含可见 provider）：凭据状态、可执行性与逐条诊断。"
+        description="来自 /v1/providers（只含可见 provider）：凭据状态、可执行性与逐条诊断。"
       />
-      <If when={!!store.providersError()}>
-        <ErrorRow text={store.providersError() ?? ""} onRetry={() => void store.loadRegistry()} />
-      </If>
-      <If when={!store.providersError() && !store.registryLoaded()}>
-        <LoadingRow text="正在读取 provider…" />
-      </If>
-      <If when={!store.providersError() && store.registryLoaded() && store.providers().length === 0}>
-        <Text style={{ fontSize: 12, color: colors.mutedForeground }}>没有可见的 provider。</Text>
-      </If>
-      <Each of={store.providers()} key={(provider) => provider.providerId}>
-        {(provider) => <ProviderRow provider={provider} />}
-      </Each>
-      <Issues issues={() => store.providersIssues()} label="解析诊断" />
-    </View>
+      <CardContent>
+        <If when={!!store.providersError()}>
+          <ErrorBlock text={store.providersError() ?? ""} onRetry={() => void store.loadRegistry()} />
+        </If>
+        <If when={!store.providersError() && !store.registryLoaded()}>
+          <LoadingRow text="正在读取 provider…" />
+        </If>
+        <If
+          when={!store.providersError() && store.registryLoaded() && store.providers().length === 0}
+        >
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有可见的 provider。</Text>
+        </If>
+        <Each of={store.providers()} key={(provider) => provider.providerId}>
+          {(provider) => <ProviderRow provider={provider} />}
+        </Each>
+        <IssueList issues={() => store.providersIssues()} label="解析诊断" />
+      </CardContent>
+    </Card>
   );
 }
 
 function ModelsSection() {
-  // The editor follows the loaded document until the user types in it; every
+  // The editor follows the loaded document until the reader types in it; every
   // successful write and reload makes the server's document authoritative.
   effect(() => {
     const loaded = store.settings();
@@ -765,91 +1200,60 @@ function ModelsSection() {
     if (!rawDirty()) rawDocument.set(JSON.stringify(loaded.document, null, 2));
   });
   return (
-    <View style={{ gap: space.md }}>
+    <View style={{ gap: space["3xl"] }}>
       <CurrentCard />
-      <EditCard />
-      <ModelsList />
-      <ProvidersList />
+      <SelectionCard />
+      <AdvancedCard />
+      <ProviderEditorCard />
+      <ModelsListCard />
+      <ProvidersListCard />
     </View>
   );
 }
 
-// ---- 密钥 section -----------------------------------------------------------
+/** The secret form's draft: the value lives only in this signal, and is
+ * cleared the moment the server accepts it. */
+const secretName = signal("");
+const secretValue = signal("");
+
+// ---- 密钥 -----------------------------------------------------------------
 
 function SecretRow(props: { secret: () => SecretMeta }) {
-  const confirming = () => confirmingSecretDelete() === props.secret().name;
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        gap: 8,
-        padding: space.sm,
-        borderRadius: radius.control,
+        gap: space.md,
+        padding: space.md,
+        borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: confirming() ? alpha(colors.danger, 0.36) : colors.glassEdge,
+        borderColor: color.border,
         flexWrap: "wrap",
       }}
     >
-      <Icon name="key" size={13} tint={colors.mutedForeground} />
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
-        <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{props.secret().name}</Text>
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>secret:{props.secret().name}</Text>
+      <Icon name="key" size={iconSize.sm} tint={color.mutedForeground} />
+      <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.xs, flexWrap: "wrap" }}>
+        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+          {props.secret().name}
+        </Text>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
+          secret:{props.secret().name}
+        </Text>
       </View>
       <View style={{ flex: 1 }} />
-      <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
         创建 {formatTime(props.secret().createdAt)} · 更新 {formatTime(props.secret().updatedAt)}
       </Text>
-      <If
-        when={confirming()}
-        else={
-          <SmallButton
-            label="删除"
-            tone="danger"
-            disabled={store.secretsBusy()}
-            onPress={() => confirmingSecretDelete.set(props.secret().name)}
-          />
-        }
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <Text style={{ fontSize: 10.5, color: colors.danger }}>删除 {props.secret().name}？</Text>
-          <Press
-            onPress={() => {
-              confirmingSecretDelete.set(null);
-              void store.deleteSecret(props.secret().name);
-            }}
-            accessibilityLabel={`确认删除密钥 ${props.secret().name}`}
-            hoverStyle={{ opacity: 0.9 }}
-            style={{
-              height: 24,
-              paddingHorizontal: 9,
-              borderRadius: radius.control,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: colors.destructive,
-            }}
-          >
-            <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.destructiveForeground }}>
-              确认删除
-            </Text>
-          </Press>
-          <Press
-            onPress={() => confirmingSecretDelete.set(null)}
-            accessibilityLabel={`取消删除密钥 ${props.secret().name}`}
-            hoverStyle={{ opacity: 0.9 }}
-            style={{
-              height: 24,
-              paddingHorizontal: 9,
-              borderRadius: radius.control,
-              alignItems: "center",
-              justifyContent: "center",
-              ...glass.control,
-            }}
-          >
-            <Text style={{ fontSize: 10.5, fontWeight: "600", color: colors.foreground }}>取消</Text>
-          </Press>
-        </View>
-      </If>
+      <Button
+        variant="ghost"
+        size="sm"
+        icon="trash"
+        label="删除"
+        accessibilityLabel={`删除密钥 ${props.secret().name}`}
+        disabled={store.secretsBusy()}
+        onPress={() => confirmingSecret.set(props.secret().name)}
+      />
     </View>
   );
 }
@@ -869,191 +1273,201 @@ function SecretsSection() {
       if (!ok) return;
       // The value is done the moment it is accepted: clear it, keep nothing.
       secretValue.set("");
-      confirmingSecretDelete.set(null);
+      confirmingSecret.set(null);
     });
   };
   return (
-    <View style={{ gap: space.md }}>
-      <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-        <CardTitle
-          icon="key"
+    <View style={{ gap: space["3xl"] }}>
+      <Card testID="settings-secrets">
+        <CardHeader
           title="密钥"
-          note={'按名字写入/覆盖/删除；值只写不回读（响应、日志、列表都不含它）。模型配置用 access.ref = "secret:NAME" 引用。'}
+          description={'按名字写入/覆盖/删除；值只写不回读（响应、日志、列表都不含它）。模型配置用 access.ref = "secret:NAME" 引用。'}
         />
-        <If when={!available()}>
-          <View
-            style={{
-              gap: 4,
-              padding: space.sm,
-              borderRadius: radius.control,
-              backgroundColor: colors.warningTint,
-              borderWidth: 1,
-              borderColor: alpha(colors.warning, 0.32),
-            }}
-          >
-            <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.warning }}>密钥存储未启用</Text>
-            <Text style={{ fontSize: 11, lineHeight: 16, color: colors.foreground }}>
-              {store.secretsReason() || "服务端没有配置 KEEL_SECRET_KEY（密钥盒）。"}
-            </Text>
-            <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
-              不会回退为明文存储；配置密钥盒后这里即可写入。
-            </Text>
-          </View>
-        </If>
-        <If when={store.secretsLoading()}>
-          <LoadingRow text="正在读取密钥…" />
-        </If>
-        <If when={!!store.secretsError()}>
-          <ErrorRow text={store.secretsError() ?? ""} onRetry={() => void store.loadSecrets()} />
-        </If>
-        <If when={!store.secretsError() && !store.secretsLoading() && store.secrets().length === 0}>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>还没有密钥。</Text>
-        </If>
-        <Each of={store.secrets()} key={(secret) => secret.name}>
-          {(secret) => <SecretRow secret={secret} />}
-        </Each>
-        <View style={{ gap: 6, paddingTop: 4 }}>
-          <FieldLabel text={available() ? "写入 / 覆盖" : "写入（不可用）"} />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <Input
-              testID="secret-name"
-              value={secretName()}
-              onChange={({ value }) => secretName.set(value)}
-              placeholder="名字，例如 s2api"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={128}
-              style={{
-                width: compact() ? "100%" : 200,
-                height: 34,
-                fontSize: 12.5,
-                color: colors.foreground,
-                placeholderColor: colors.mutedForeground,
-                caretColor: colors.brand,
-                paddingHorizontal: 10,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: colors.background,
-                opacity: available() ? 1 : 0.38,
-              }}
-            />
-            <Input
-              testID="secret-value"
-              value={secretValue()}
-              onChange={({ value }) => secretValue.set(value)}
-              placeholder="值（保存后不再显示）"
-              masked
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={4096}
-              style={{
-                width: compact() ? "100%" : 260,
-                height: 34,
-                fontSize: 12.5,
-                color: colors.foreground,
-                placeholderColor: colors.mutedForeground,
-                caretColor: colors.brand,
-                paddingHorizontal: 10,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: colors.background,
-                opacity: available() ? 1 : 0.38,
-              }}
-            />
-            <Press
-              onPress={available() && !store.secretsBusy() ? submit : undefined}
-              disabled={!available() || store.secretsBusy() || !secretName().trim() || !secretValue()}
-              accessibilityLabel="保存密钥"
-              hoverStyle={{ opacity: 0.92 }}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                height: 34,
-                paddingHorizontal: 14,
-                borderRadius: radius.control,
-                backgroundColor: colors.primary,
-              }}
-            >
-              <If
-                when={store.secretsBusy()}
-                else={<Icon name="check" size={13} tint={colors.primaryForeground} />}
-              >
-                <Spinner size={12} tint={colors.primaryForeground} />
-              </If>
-              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.primaryForeground }}>
-                {store.secretsBusy() ? "写入中…" : isOverwrite() ? "覆盖保存" : "保存密钥"}
+        <CardContent>
+          <If when={!available()}>
+            <Notice tone="warning" accessibilityLabel="密钥存储未启用">
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.warning }}>
+                密钥存储未启用
               </Text>
-            </Press>
-          </View>
-          <If when={!!store.secretsActionError()}>
-            <Text style={{ fontSize: 11.5, color: colors.danger }}>{store.secretsActionError() ?? ""}</Text>
+              <Text
+                style={{
+                  fontSize: typeScale.sm,
+                  lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                  color: color.foreground,
+                }}
+              >
+                {store.secretsReason() || "服务端没有配置 KEEL_SECRET_KEY（密钥盒）。"}
+              </Text>
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                不会回退为明文存储；配置密钥盒后这里即可写入。
+              </Text>
+            </Notice>
           </If>
-          <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-            保存后输入框清空；之后的界面只显示名字与时间。
-          </Text>
-        </View>
-      </View>
+          <If when={store.secretsLoading()}>
+            <LoadingRow text="正在读取密钥…" />
+          </If>
+          <If when={!!store.secretsError()}>
+            <ErrorBlock text={store.secretsError() ?? ""} onRetry={() => void store.loadSecrets()} />
+          </If>
+          <If when={!store.secretsError() && !store.secretsLoading() && store.secrets().length === 0}>
+            <Empty accessibilityLabel="还没有密钥">
+              <EmptyTitle label="还没有密钥" />
+              <EmptyDescription label="写入一个名字和值；之后这里只显示名字与时间。" />
+            </Empty>
+          </If>
+          <Each of={store.secrets()} key={(secret) => secret.name}>
+            {(secret) => <SecretRow secret={secret} />}
+          </Each>
+          <Separator />
+          <View style={{ gap: space.md }}>
+            <Label label={available() ? "写入 / 覆盖" : "写入（不可用）"} />
+            <FieldGroup>
+              <Field label="名字" hint="写入同名名字即覆盖；模型文档用 secret:名字 引用它。">
+                <Input
+                  testID="secret-name"
+                  accessibilityLabel="密钥名字"
+                  value={secretName()}
+                  onChange={(value) => secretName.set(value)}
+                  placeholder="名字，例如 s2api"
+                  maxLength={128}
+                  disabled={!available()}
+                />
+              </Field>
+              <Field label="值" hint="保存后输入框清空；之后的界面只显示名字与时间。">
+                <Input
+                  testID="secret-value"
+                  accessibilityLabel="密钥值"
+                  value={secretValue()}
+                  onChange={(value) => secretValue.set(value)}
+                  placeholder="值（保存后不再显示）"
+                  masked
+                  maxLength={4096}
+                  disabled={!available()}
+                />
+              </Field>
+            </FieldGroup>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Button
+                icon="check"
+                label={isOverwrite() ? "覆盖保存" : "保存密钥"}
+                accessibilityLabel="保存密钥"
+                loading={store.secretsBusy()}
+                disabled={!available() || store.secretsBusy() || !secretName().trim() || !secretValue()}
+                onPress={submit}
+              />
+              <If when={!!store.secretsActionError()}>
+                <Text style={{ fontSize: typeScale.sm, color: color.danger }}>
+                  {store.secretsActionError() ?? ""}
+                </Text>
+              </If>
+            </View>
+          </View>
+        </CardContent>
+      </Card>
+      <AlertDialog
+        testID="settings-secret-delete"
+        open={!!confirmingSecret()}
+        title={`删除密钥 ${confirmingSecret() ?? ""}？`}
+        description="删除后引用它的 provider 会解析不到凭据，相关模型不可执行；此操作不可撤销。"
+        confirmLabel={`确认删除密钥 ${confirmingSecret() ?? ""}`}
+        cancelLabel={`取消删除密钥 ${confirmingSecret() ?? ""}`}
+        destructive
+        onConfirm={() => {
+          const name = confirmingSecret();
+          confirmingSecret.set(null);
+          if (name) void store.deleteSecret(name);
+        }}
+        onCancel={() => confirmingSecret.set(null)}
+      />
     </View>
   );
 }
 
-// ---- 插件 section -----------------------------------------------------------
+// ---- 插件 -----------------------------------------------------------------
 
-const pluginStateTone = (state: string | undefined): "success" | "danger" | "neutral" | "warning" =>
-  state === "ready" ? "success" : state === "failed" ? "danger" : state === "stopped" ? "neutral" : "warning";
+const pluginStateVariant = (state: string | undefined) => {
+  switch (state) {
+    case "ready":
+      return "success" as const;
+    case "failed":
+      return "destructive" as const;
+    case "stopped":
+      return "secondary" as const;
+    default:
+      return "warning" as const;
+  }
+};
+
+/** The plugin page's route (`App.tsx` renders it). SEAM: the store's `Route`
+ * union grows `plugins` with the parallel plugin entry; this is the same narrow
+ * cast the app root makes at its own boundary, so the two agree the moment the
+ * union grows. */
+const openPluginPage = () => {
+  (store.route as unknown as { set: (route: "plugins") => void }).set("plugins");
+};
 
 function PluginRow(props: { plugin: () => PluginStatusView }) {
   return (
     <View
       style={{
-        gap: 5,
-        padding: space.sm,
-        borderRadius: radius.control,
+        gap: space.sm,
+        padding: space.md,
+        borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: colors.glassEdge,
+        borderColor: color.border,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{props.plugin().id}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+          {props.plugin().id}
+        </Text>
         <If when={!!props.plugin().version}>
-          <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>v{props.plugin().version}</Text>
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>v{props.plugin().version}</Text>
         </If>
-        <StateChip label={props.plugin().state ?? "unknown"} tone={pluginStateTone(props.plugin().state)} />
+        <Badge
+          variant={pluginStateVariant(props.plugin().state)}
+          label={props.plugin().state ?? "unknown"}
+        />
         <View style={{ flex: 1 }} />
-        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+        <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
           {props.plugin().startedAt ? `启动 ${formatTime(props.plugin().startedAt)}` : ""}
           {props.plugin().stoppedAt ? ` · 停止 ${formatTime(props.plugin().stoppedAt)}` : ""}
         </Text>
       </View>
       <If when={(props.plugin().provides ?? []).length > 0 || (props.plugin().requires ?? []).length > 0}>
-        <Text style={{ fontSize: 10.5, color: colors.mutedForeground }}>
+        <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
           提供 {(props.plugin().provides ?? []).join("/") || "—"} · 依赖{" "}
           {(props.plugin().requires ?? []).join("/") || "无"}
         </Text>
       </If>
       <If when={(props.plugin().tools ?? []).length > 0}>
-        <Text style={{ fontSize: 10.5, fontFamily: mono(), color: colors.mutedForeground }}>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
           工具：{(props.plugin().tools ?? []).join(" · ")}
         </Text>
       </If>
       <If when={(props.plugin().hooks ?? []).length > 0}>
-        <Text style={{ fontSize: 10.5, fontFamily: mono(), color: colors.mutedForeground }}>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
           hook：{(props.plugin().hooks ?? []).join(" · ")}
         </Text>
       </If>
       <If when={(props.plugin().triggers ?? []).length > 0}>
-        <Text style={{ fontSize: 10.5, fontFamily: mono(), color: colors.mutedForeground }}>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
           触发器：{(props.plugin().triggers ?? []).map((trigger) => trigger.id).join(" · ")}
         </Text>
       </If>
       <Each of={props.plugin().diagnostics ?? []} key="index">
         {(line) => (
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
-            <Icon name="alert" size={11} tint={colors.warning} />
-            <Text style={{ flex: 1, fontSize: 10.5, lineHeight: 15, fontFamily: mono(), color: colors.warning }}>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.sm }}>
+            <Icon name="alert" size={iconSize.xs} tint={color.warning} />
+            <Text
+              style={{
+                flex: 1,
+                fontFamily: font.mono,
+                fontSize: typeScale.xs,
+                lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+                color: color.warning,
+              }}
+            >
               {line()}
             </Text>
           </View>
@@ -1065,63 +1479,51 @@ function PluginRow(props: { plugin: () => PluginStatusView }) {
 
 function TriggerRow(props: { trigger: () => TriggerStatusView }) {
   const firing = () => store.firingTrigger() === props.trigger().id;
-  const outcome = () => (store.fireOutcome()?.triggerId === props.trigger().id ? store.fireOutcome() : null);
+  const outcome = () =>
+    store.fireOutcome()?.triggerId === props.trigger().id ? store.fireOutcome() : null;
   const canFire = () => props.trigger().enabled !== false;
   return (
     <View
       style={{
-        gap: 5,
-        padding: space.sm,
-        borderRadius: radius.control,
+        gap: space.sm,
+        padding: space.md,
+        borderRadius: radius.md,
         borderWidth: 1,
-        borderColor: colors.glassEdge,
+        borderColor: color.border,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Icon name="clock" size={12} tint={colors.mutedForeground} />
-        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>{props.trigger().id}</Text>
-        <StateChip label={props.trigger().kind ?? "trigger"} tone="neutral" />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Icon name="clock" size={iconSize.xs} tint={color.mutedForeground} />
+        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+          {props.trigger().id}
+        </Text>
+        <Badge variant="secondary" label={props.trigger().kind ?? "trigger"} />
         <If when={props.trigger().enabled === false}>
-          <StateChip label="已禁用" tone="warning" />
+          <Badge variant="warning" label="已禁用" />
         </If>
         <View style={{ flex: 1 }} />
-        <Text style={{ fontSize: 10, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
+        <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}>
           {props.trigger().fires ?? 0} 次触发 · {props.trigger().failures ?? 0} 失败
         </Text>
-        <Press
+        <Button
           testID={`trigger-fire-${props.trigger().id}`}
-          onPress={canFire() && !firing() ? () => void store.fireTrigger(props.trigger().id) : undefined}
-          disabled={!canFire() || firing()}
+          variant="outline"
+          size="sm"
+          icon="play"
+          label={firing() ? "触发中…" : "触发"}
           accessibilityLabel={`手动触发 ${props.trigger().id}`}
-          hoverStyle={{ opacity: 0.92 }}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 5,
-            height: 26,
-            paddingHorizontal: 10,
-            borderRadius: radius.pill,
-            backgroundColor: canFire() ? colors.brandTint : colors.muted,
-          }}
-        >
-          <If
-            when={firing()}
-            else={<Icon name="play" size={11} tint={canFire() ? colors.brand : colors.mutedForeground} />}
-          >
-            <Spinner size={11} tint={colors.brand} />
-          </If>
-          <Text
-            style={{
-              fontSize: 10.5,
-              fontWeight: "600",
-              color: canFire() ? colors.brand : colors.mutedForeground,
-            }}
-          >
-            {firing() ? "触发中…" : "触发"}
-          </Text>
-        </Press>
+          loading={firing()}
+          disabled={!canFire() || firing()}
+          onPress={() => void store.fireTrigger(props.trigger().id)}
+        />
       </View>
-      <Text style={{ fontSize: 10.5, lineHeight: 15, color: colors.mutedForeground }}>
+      <Text
+        style={{
+          fontSize: typeScale.xs,
+          lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+          color: color.mutedForeground,
+        }}
+      >
         {props.trigger().schedule ? `计划 ${props.trigger().schedule} · ` : ""}
         {props.trigger().prompt ? `提示「${props.trigger().prompt}」 · ` : ""}
         上次 {formatTime(props.trigger().lastFireAt) || "未触发"}
@@ -1131,10 +1533,10 @@ function TriggerRow(props: { trigger: () => TriggerStatusView }) {
       <If when={!!outcome()}>
         <Text
           style={{
-            fontSize: 11,
-            lineHeight: 16,
-            fontFamily: mono(),
-            color: outcome()?.ok ? colors.success : colors.danger,
+            fontFamily: font.mono,
+            fontSize: typeScale.xs,
+            lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+            color: outcome()?.ok ? color.success : color.danger,
           }}
         >
           {outcome()?.ok ? "触发结果：" : "触发失败："}
@@ -1145,194 +1547,384 @@ function TriggerRow(props: { trigger: () => TriggerStatusView }) {
   );
 }
 
-function PluginsSection() {
-  const plugins = () => store.plugins()?.plugins ?? [];
+/** The hook pipeline's counters: a table, collapsed, with the health as one
+ * Badge — a number nobody can read at a glance is not a status. */
+function PluginDiagnostics() {
   const hooks = () => store.plugins()?.hookStats ?? store.plugins()?.hooks;
+  const degraded = () => (hooks()?.dropped ?? 0) > 0 || (hooks()?.failed ?? 0) > 0;
   return (
-    <View style={{ gap: space.md }}>
-      <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-        <CardTitle
-          icon="layers"
-          title="插件清单"
-          note="插件在进程启动时装载并与依赖一起装配；这里看状态与控制触发，不做代码级配置。"
-        />
-        <If when={store.pluginsLoading()}>
-          <LoadingRow text="正在读取插件清单…" />
-        </If>
-        <If when={!!store.pluginsError()}>
-          <ErrorRow text={store.pluginsError() ?? ""} onRetry={() => void store.loadPlugins()} />
-        </If>
-        <If when={!store.pluginsError() && !store.pluginsLoading()}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <StateChip label={`generation ${store.plugins()?.generation ?? "-"}`} tone="brand" />
-            <Text style={{ fontSize: 11, color: colors.mutedForeground }}>
-              {(store.plugins()?.tools ?? []).length} 个工具 · {plugins().length} 个插件
-            </Text>
-            <SmallButton label="刷新" onPress={() => void store.loadPlugins()} />
+    <If when={!!hooks()}>
+      <Collapsible
+        open={pluginDiagnosticsOpen()}
+        accessibilityLabel="插件诊断"
+        content={
+          <View style={{ gap: space.md }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Label label="hook 管道" />
+              <Badge
+                variant={degraded() ? "destructive" : "success"}
+                label={degraded() ? "有丢弃或失败" : "正常"}
+              />
+            </View>
+            <Table bare accessibilityLabel="hook 诊断">
+              <TableHeaderRow>
+                <Th>
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>指标</Text>
+                </Th>
+                <Th>
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>数值</Text>
+                </Th>
+              </TableHeaderRow>
+              <TableBody>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>订阅</Text>
+                  </Td>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground, fontVariant: ["tabular-nums"] }}>
+                      {hooks()?.subscriptions ?? 0}
+                    </Text>
+                  </Td>
+                </TableBodyRow>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>发出</Text>
+                  </Td>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground, fontVariant: ["tabular-nums"] }}>
+                      {hooks()?.emitted ?? 0}
+                    </Text>
+                  </Td>
+                </TableBodyRow>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>投递</Text>
+                  </Td>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground, fontVariant: ["tabular-nums"] }}>
+                      {hooks()?.delivered ?? 0}
+                    </Text>
+                  </Td>
+                </TableBodyRow>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>丢弃</Text>
+                  </Td>
+                  <Td>
+                    <Badge
+                      variant={(hooks()?.dropped ?? 0) > 0 ? "destructive" : "secondary"}
+                      label={String(hooks()?.dropped ?? 0)}
+                    />
+                  </Td>
+                </TableBodyRow>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>失败</Text>
+                  </Td>
+                  <Td>
+                    <Badge
+                      variant={(hooks()?.failed ?? 0) > 0 ? "destructive" : "secondary"}
+                      label={String(hooks()?.failed ?? 0)}
+                    />
+                  </Td>
+                </TableBodyRow>
+                <TableBodyRow>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>队列</Text>
+                  </Td>
+                  <Td>
+                    <Text style={{ fontSize: typeScale.sm, color: color.foreground, fontVariant: ["tabular-nums"] }}>
+                      {hooks()?.queued ?? 0}/{hooks()?.capacity ?? 0}
+                    </Text>
+                  </Td>
+                </TableBodyRow>
+              </TableBody>
+            </Table>
           </View>
-          <If when={!!hooks()}>
-            <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
-              hook 订阅 {hooks()?.subscriptions ?? 0} · 发出 {hooks()?.emitted ?? 0} · 投递{" "}
-              {hooks()?.delivered ?? 0} · 丢弃 {hooks()?.dropped ?? 0} · 失败 {hooks()?.failed ?? 0} · 队列{" "}
-              {hooks()?.queued ?? 0}/{hooks()?.capacity ?? 0}
-            </Text>
-          </If>
-          <If when={(store.plugins()?.tools ?? []).length > 0}>
-            <Text style={{ fontSize: 10.5, lineHeight: 15, fontFamily: mono(), color: colors.mutedForeground }}>
-              工具：{(store.plugins()?.tools ?? []).join(" · ")}
-            </Text>
-          </If>
-          <If when={plugins().length === 0}>
-            <Text style={{ fontSize: 12, color: colors.mutedForeground }}>没有已装载的插件。</Text>
-          </If>
-        </If>
-        <Each of={plugins()} key={(plugin) => plugin.id}>
-          {(plugin) => <PluginRow plugin={plugin} />}
-        </Each>
-      </View>
-
-      <View style={{ borderRadius: radius.card, ...glass.card, padding: space.md, gap: space.sm }}>
-        <CardTitle
-          icon="clock"
-          title="触发器"
-          note="来自 /v1/triggers：手动触发以 manual 来源记录审计；被禁用的触发器无法触发。"
-        />
-        <If when={!store.pluginsError() && !store.pluginsLoading() && store.triggers().length === 0}>
-          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>没有注册的触发器。</Text>
-        </If>
-        <Each of={store.triggers()} key={(trigger) => trigger.id}>
-          {(trigger) => <TriggerRow trigger={trigger} />}
-        </Each>
-      </View>
-    </View>
-  );
-}
-
-// ---- the page ---------------------------------------------------------------
-
-function SectionTabs() {
-  const options: Array<{ value: SettingsSection; label: string; icon: IconName }> = [
-    { value: "models", label: "模型", icon: "brain" },
-    { value: "secrets", label: "密钥", icon: "key" },
-    { value: "plugins", label: "插件", icon: "layers" },
-  ];
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        padding: 3,
-        gap: 2,
-        borderRadius: radius.control,
-        backgroundColor: colors.muted,
-        borderWidth: 1,
-        borderColor: colors.glassEdge,
-      }}
-    >
-      <Each of={options} key={(option) => option.value}>
-        {(option) => (
-          <Press
-            onPress={() => settingsSection.set(option().value)}
-            accessibilityLabel={`设置分区 ${option().label}`}
-            accessibilityState={{ selected: settingsSection() === option().value }}
-            hoverStyle={{ backgroundColor: colors.hover }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              height: 28,
-              paddingHorizontal: 12,
-              borderRadius: radius.control - 3,
-              backgroundColor: settingsSection() === option().value ? colors.glassControl : undefined,
-              boxShadow:
-                settingsSection() === option().value ? `inset 0 1px 0 ${colors.glassControlRim}` : undefined,
-            }}
-          >
-            <Icon
-              name={option().icon}
-              size={12}
-              tint={settingsSection() === option().value ? colors.foreground : colors.mutedForeground}
-            />
-            <Text
-              style={{
-                fontSize: 12,
-                fontWeight: "600",
-                color: settingsSection() === option().value ? colors.foreground : colors.mutedForeground,
-              }}
-            >
-              {option().label}
-            </Text>
-          </Press>
-        )}
-      </Each>
-    </View>
-  );
-}
-
-/** The standalone settings page. Rendered by the app shell when the route is
- * `settings`; the workspace (and its open session) waits underneath. */
-/**
- * The settings page edits server state, so it must say when there is no server
- * behind it: fixture mode is a demo, never the product's answer. The strip sits
- * above every section and offers the honest way back — probe again.
- */
-function DataSourceStrip() {
-  return (
-    <If when={store.mode() !== "http"}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.sm,
-          paddingHorizontal: space.md,
-          paddingVertical: 7,
-          backgroundColor: store.mode() === "checking" ? colors.infoTint : colors.warningTint,
-          borderBottomWidth: 1,
-          borderBottomColor:
-            store.mode() === "checking" ? alpha(colors.info, 0.32) : alpha(colors.warning, 0.32),
-        }}
+        }
       >
-        <If
-          when={store.mode() === "checking"}
-          else={<Icon name="alert" size={13} tint={colors.warning} />}
-        >
-          <Spinner size={12} tint={colors.info} />
-        </If>
-        <Text style={{ flex: 1, fontSize: 11.5, color: colors.foreground }}>
-          {store.mode() === "checking"
-            ? "正在探测 keel serve…连接后本页显示服务端的真实配置。"
-            : "演示数据 · 未连接服务：以下内容来自本地 fixture，不是服务端的真实状态。"}
-        </Text>
-        <If when={store.mode() === "fixture"}>
-          <Press
-            onPress={() => void store.reconnect()}
-            accessibilityLabel="重试连接服务"
-            hoverStyle={{ opacity: 0.88 }}
-            style={{
-              paddingHorizontal: 10,
-              height: 22,
-              borderRadius: radius.pill,
-              backgroundColor: colors.warning,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Text style={{ fontSize: 10, fontWeight: "600", color: colors.primaryForeground }}>
-              重试连接
-            </Text>
-          </Press>
-        </If>
-      </View>
+        <CollapsibleTrigger
+          testID="settings-plugin-diagnostics"
+          label="诊断"
+          icon="tool"
+          expanded={pluginDiagnosticsOpen()}
+          onPress={() => pluginDiagnosticsOpen.set(!pluginDiagnosticsOpen())}
+        />
+      </Collapsible>
     </If>
   );
 }
 
+function PluginsSection() {
+  const plugins = () => store.plugins()?.plugins ?? [];
+  return (
+    <View style={{ gap: space["3xl"] }}>
+      <Card testID="settings-plugins">
+        <CardHeader
+          title="插件清单"
+          description="插件在进程启动时装载并与依赖一起装配；这里看状态与控制触发，不做代码级配置。"
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="refresh"
+              label="刷新"
+              accessibilityLabel="刷新插件清单"
+              onPress={() => void store.loadPlugins()}
+            />
+          }
+        />
+        <CardContent>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+            <View style={{ flex: 1, gap: space.xxs }}>
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+                插件页面
+              </Text>
+              <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
+                /plugins
+              </Text>
+            </View>
+            <Button
+              variant="outline"
+              size="sm"
+              icon="external"
+              label="打开插件页"
+              accessibilityLabel="打开插件页"
+              onPress={openPluginPage}
+            />
+          </View>
+          <If when={store.pluginsLoading()}>
+            <LoadingRow text="正在读取插件清单…" />
+          </If>
+          <If when={!!store.pluginsError()}>
+            <ErrorBlock text={store.pluginsError() ?? ""} onRetry={() => void store.loadPlugins()} />
+          </If>
+          <If when={!store.pluginsError() && !store.pluginsLoading()}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Badge variant="info" label={`generation ${store.plugins()?.generation ?? "-"}`} />
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                {(store.plugins()?.tools ?? []).length} 个工具 · {plugins().length} 个插件
+              </Text>
+            </View>
+            <If when={(store.plugins()?.tools ?? []).length > 0}>
+              <Text
+                style={{
+                  fontFamily: font.mono,
+                  fontSize: typeScale.xs,
+                  lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+                  color: color.mutedForeground,
+                }}
+              >
+                工具：{(store.plugins()?.tools ?? []).join(" · ")}
+              </Text>
+            </If>
+            <If when={plugins().length === 0}>
+              <Empty accessibilityLabel="没有已装载的插件">
+                <EmptyTitle label="没有已装载的插件" />
+                <EmptyDescription label="插件随进程启动装载；装入后刷新本页。" />
+              </Empty>
+            </If>
+          </If>
+          <Each of={plugins()} key={(plugin) => plugin.id}>
+            {(plugin) => <PluginRow plugin={plugin} />}
+          </Each>
+          <PluginDiagnostics />
+        </CardContent>
+      </Card>
+
+      <Card testID="settings-triggers">
+        <CardHeader
+          title="触发器"
+          description="来自 /v1/triggers：手动触发以 manual 来源记录审计；被禁用的触发器无法触发。"
+        />
+        <CardContent>
+          <If
+            when={!store.pluginsError() && !store.pluginsLoading() && store.triggers().length === 0}
+          >
+            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有注册的触发器。</Text>
+          </If>
+          <Each of={store.triggers()} key={(trigger) => trigger.id}>
+            {(trigger) => <TriggerRow trigger={trigger} />}
+          </Each>
+        </CardContent>
+      </Card>
+    </View>
+  );
+}
+
+// ---- 快捷键 ---------------------------------------------------------------
+
+const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["mod", "K"], label: "聚焦会话搜索" },
+  { keys: ["Enter"], label: "发送消息" },
+  { keys: ["Shift", "Enter"], label: "输入换行" },
+  { keys: ["Esc"], label: "关闭弹层、取消当前选择" },
+];
+
+function ShortcutsSection() {
+  return (
+    <Card testID="settings-shortcuts">
+      <CardHeader title="快捷键" description="当前版本的键位；这里只读展示，不做改键。" />
+      <CardContent>
+        <Each of={SHORTCUTS} key={(row) => row.label}>
+          {(row) => (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: space.lg,
+                paddingVertical: space.sm,
+              }}
+            >
+              <Kbd keys={row().keys} accessibilityLabel={row().keys.join("+")} />
+              <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.foreground }}>{row().label}</Text>
+            </View>
+          )}
+        </Each>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---- 关于 -----------------------------------------------------------------
+
+interface HostInfo {
+  version?: string;
+  online?: boolean;
+  userAgent?: string;
+  origin?: string;
+}
+
+const hostInfo = signal<HostInfo | null>(null);
+const hostInfoError = signal<string | null>(null);
+
+function AboutSection() {
+  effect(() => {
+    void (async () => {
+      if (!host.available()) {
+        hostInfo.set({});
+        return;
+      }
+      try {
+        const info = await host.call<HostInfo>("keel.info", {}, { timeout: 1200 });
+        hostInfo.set(info ?? {});
+      } catch (error) {
+        hostInfoError.set(error instanceof Error ? error.message : String(error));
+      }
+    })();
+  });
+  return (
+    <Card testID="settings-about">
+      <CardHeader title="关于" description="版本、运行环境与构建标签。" />
+      <CardContent>
+        <If when={hostInfo() === null && !hostInfoError()}>
+          <Skeleton lines={3} accessibilityLabel="正在读取运行信息" />
+        </If>
+        <If when={!!hostInfoError()}>
+          <ErrorBlock text={hostInfoError() ?? ""} />
+        </If>
+        <If when={hostInfo() !== null}>
+          <View style={{ gap: space.lg }}>
+            <AboutRow name="版本" value={hostInfo()?.version ?? "—"} />
+            <AboutRow
+              name="在线"
+              value={hostInfo()?.online === undefined ? "—" : hostInfo()?.online ? "在线" : "离线"}
+            />
+            <AboutRow name="构建">
+              <Badge variant="secondary" label="NSH nightly" />
+            </AboutRow>
+            <AboutRow name="运行环境">
+              <Text
+                style={{
+                  fontSize: typeScale.sm,
+                  lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                  color: color.foreground,
+                  userSelect: "text",
+                }}
+              >
+                {hostInfo()?.userAgent ?? "宿主未提供运行信息。"}
+              </Text>
+            </AboutRow>
+            <If when={!!hostInfo()?.origin}>
+              <AboutRow name="来源" value={hostInfo()?.origin ?? ""} />
+            </If>
+          </View>
+        </If>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---- the page -------------------------------------------------------------
+
+function SectionBody() {
+  return (
+    <If when={settingsSection() === "general"} else={<SectionBodyNext />}>
+      <GeneralSection />
+    </If>
+  );
+}
+
+function SectionBodyNext() {
+  return (
+    <If when={settingsSection() === "appearance"} else={<SectionBodyNextNext />}>
+      <AppearanceSection />
+    </If>
+  );
+}
+
+function SectionBodyNextNext() {
+  return (
+    <If when={settingsSection() === "models"} else={<SectionBodyRest />}>
+      <ModelsSection />
+    </If>
+  );
+}
+
+function SectionBodyRest() {
+  return (
+    <If when={settingsSection() === "secrets"} else={<SectionBodyTail />}>
+      <SecretsSection />
+    </If>
+  );
+}
+
+function SectionBodyTail() {
+  return (
+    <If when={settingsSection() === "plugins"} else={<SectionBodyEnd />}>
+      <PluginsSection />
+    </If>
+  );
+}
+
+function SectionBodyEnd() {
+  return (
+    <If when={settingsSection() === "shortcuts"} else={<AboutSection />}>
+      <ShortcutsSection />
+    </If>
+  );
+}
+
+/** The standalone settings page. The workspace (and its open session) waits
+ * underneath; the shell remembers nothing itself because the section is
+ * controlled from here. */
 export function SettingsScreen() {
-  const load = () => {
-    const section = settingsSection();
-    if (section === "models") void store.loadModelsPanel();
-    else if (section === "secrets") void store.loadSecrets();
-    else void store.loadPlugins();
-  };
+  // The remembered section, read once per mount. A choice made before the read
+  // resolves wins: its token bump makes the late answer stale.
+  effect(() => {
+    const token = ++storageReadToken;
+    void (async () => {
+      let stored: string | null = null;
+      try {
+        stored = await Storage.getItem(SETTINGS_SECTION_STORAGE_KEY);
+      } catch {
+        /* a host without storage: no memory to restore */
+      }
+      if (token !== storageReadToken) return;
+      if (stored !== null && isSection(stored)) settingsSection.set(stored);
+    })();
+  });
+
   // Each section loads what it shows; switching sections (or re-entering the
   // page) refreshes that section. A booting probe is waited for, not raced:
   // the effect re-runs when `mode` settles, which is when the transport the
@@ -1343,89 +1935,27 @@ export function SettingsScreen() {
   effect(() => {
     if (store.route() !== "settings") return;
     if (store.mode() === "checking") return;
-    settingsSection();
-    const timer = setTimeout(load, 0);
+    const section = settingsSection();
+    const timer = setTimeout(() => {
+      if (section === "models") void store.loadModelsPanel();
+      else if (section === "secrets") void store.loadSecrets();
+      else if (section === "plugins") void store.loadPlugins();
+    }, 0);
     cleanup(() => clearTimeout(timer));
   });
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.sm,
-          minHeight: 48,
-          paddingHorizontal: space.md,
-          paddingVertical: compact() ? 6 : 0,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.headerBorder,
-          backgroundColor: colors.background,
-          flexWrap: "wrap",
-          zIndex: 4,
-        }}
-      >
-        <Press
-          onPress={() => store.closeSettings()}
-          accessibilityLabel="返回工作区"
-          hoverStyle={{ backgroundColor: colors.hover }}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            height: 30,
-            paddingHorizontal: 8,
-            borderRadius: radius.control,
-          }}
-        >
-          <Icon name="chevron-left" size={16} tint={colors.mutedForeground} />
-          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.mutedForeground }}>工作区</Text>
-        </Press>
-        <View style={{ gap: 1 }}>
-          <Text style={{ fontSize: 15, fontWeight: "700", color: colors.foreground }}>设置</Text>
-          <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
-            模型 / 密钥 / 插件 · 独立设置页{isTerminal() ? "" : " · /settings"}
-          </Text>
-        </View>
-        <View style={{ flex: 1 }} />
-        <SectionTabs />
-        <Press
-          onPress={load}
-          accessibilityLabel="刷新设置分区"
-          hoverStyle={{ backgroundColor: colors.hover }}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: radius.control,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Icon name="refresh" size={15} tint={colors.mutedForeground} />
-        </Press>
+    <SettingsShell
+      testID="settings-page"
+      sections={SECTIONS}
+      section={settingsSection()}
+      onSectionChange={chooseSection}
+      breadcrumb={["设置", sectionLabel()]}
+      onBack={() => store.closeSettings()}
+    >
+      <View testID="settings-section-body" style={{ flexDirection: "column" }}>
+        <SectionBody />
       </View>
-      <DataSourceStrip />
-      <Scroll style={{ flex: 1 }} contentStyle={{ alignItems: "center" }}>
-        <View
-          style={{
-            width: "100%",
-            maxWidth: 880,
-            padding: compact() ? space.md : space.lg,
-            paddingBottom: space.xxl,
-            gap: space.md,
-          }}
-        >
-          <If
-            when={settingsSection() === "models"}
-            else={
-              <If when={settingsSection() === "secrets"} else={<PluginsSection />}>
-                <SecretsSection />
-              </If>
-            }
-          >
-            <ModelsSection />
-          </If>
-        </View>
-      </Scroll>
-    </View>
+    </SettingsShell>
   );
 }

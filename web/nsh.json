@@ -11,6 +11,17 @@
         "*"
       ]
     },
+    "webview": {
+      "hosts": [
+        "*"
+      ]
+    },
+    "openUrl": {
+      "schemes": [
+        "https",
+        "http"
+      ]
+    },
     "host": [
       "keel.*"
     ],

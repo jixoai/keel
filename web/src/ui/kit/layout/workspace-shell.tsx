@@ -162,30 +162,43 @@ export function WorkspaceShell(props: WorkspaceShellProps) {
         paneWidthOrZero(),
     );
 
-  // The auto-collapse policy, on window resizes only (300ms of idle, as the
-  // reference): it reacts to the user resizing the window, never to a panel
-  // opening by hand and never at mount, where the owner's own state decides.
-  // The last width is a plain closure variable — a signal here would re-run the
-  // effect as soon as it is written, and the effect's own cleanup would clear
-  // the timer before it ever fires.
+  // The auto-collapse policy: at mount, as soon as the shell has a width, and
+  // then on window resizes (300ms of idle, as the reference). Mount matters on
+  // its own — a pane restored at 1280 already costs the conversation 576px, so
+  // the "conversation under 480px closes the pane" rule has to hold from the
+  // first layout, not only after the user's first resize.
+  const runAutoCollapse = () => {
+    const decision = untracked(() =>
+      autoCollapseDecision({
+        conversationWidthPx: conversationWidthPx(),
+        sidePaneOpen: sidePaneOpen(),
+        sidebarCollapsed: sidebarCollapsed(),
+        singleColumn: singleColumn(),
+      }),
+    );
+    if (decision.closeSidePane) setSidePaneOpen(false);
+    if (decision.collapseSidebar) setSidebarCollapsed(true);
+  };
+  // The mount pass waits on the shell's own measurement: before it, every width
+  // is the window's and the conversation's share is a guess.
+  let mountPolicyRan = false;
+  effect(() => {
+    if (mountPolicyRan) return;
+    if (!(shellWidthPx() > 0)) return;
+    mountPolicyRan = true;
+    runAutoCollapse();
+  });
+  // The resize pass tracks the window width alone: a second tracked read (the
+  // shell's) would re-run the effect mid-gesture, and that run's cleanup would
+  // clear the pending timer — the policy would never see a resize.
+  // The last width is a plain closure variable for the same reason.
   let lastViewportWidthPx = -1;
   effect(() => {
     const viewportWidthPx = windowSize().width;
     const previousWidthPx = lastViewportWidthPx;
     lastViewportWidthPx = viewportWidthPx;
     if (previousWidthPx <= 0 || previousWidthPx === viewportWidthPx) return;
-    const timer = setTimeout(() => {
-      const decision = untracked(() =>
-        autoCollapseDecision({
-          conversationWidthPx: conversationWidthPx(),
-          sidePaneOpen: sidePaneOpen(),
-          sidebarCollapsed: sidebarCollapsed(),
-          singleColumn: singleColumn(),
-        }),
-      );
-      if (decision.closeSidePane) setSidePaneOpen(false);
-      if (decision.collapseSidebar) setSidebarCollapsed(true);
-    }, CONVERSATION_AUTO_COLLAPSE_RESIZE_IDLE_MS);
+    const timer = setTimeout(runAutoCollapse, CONVERSATION_AUTO_COLLAPSE_RESIZE_IDLE_MS);
     return () => clearTimeout(timer);
   });
 
@@ -373,8 +386,13 @@ export function SidePane(props: SidePaneProps) {
   const expandedSizePx = () => {
     if (props.widthPx !== undefined) return props.widthPx;
     if (draggedWidthPx() > 0) return draggedWidthPx();
-    const shellWidthPx = ResizableGroupWidth();
-    return Math.round(Math.max(SIDE_PANE_MIN_WIDTH_PX, shellWidthPx * SIDE_PANE_EXPANDED_RATIO));
+    // The group reports its width on its first layout; until then the window is
+    // the shell's own stand-in (the same fallback `paneWidthOrZero` uses), so
+    // the pane opens at its 45% instead of clamping to the 240px minimum — the
+    // shell already reports that 45% in its layout event, so the drawn pane and
+    // the reported one agree.
+    const groupWidthPx = ResizableGroupWidth() > 0 ? ResizableGroupWidth() : windowSize().width;
+    return Math.round(Math.max(SIDE_PANE_MIN_WIDTH_PX, groupWidthPx * SIDE_PANE_EXPANDED_RATIO));
   };
   return (
     <ResizablePanel
