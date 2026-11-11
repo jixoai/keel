@@ -42,7 +42,7 @@
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
 | `layerfs` | 字节对象与 tree 对象、去重、引用计数、GC、租户配额 | 路径含义、任务归属、权限 | F1/F2 |
-| `keel.fs` | `read`/`write`/`edit`/搜索/patch 与**写前置条件** | capture（shell 的）、任务归属（harness 的） | F3 |
+| `keel.fs` | `read`/`write`/`edit` 与**写前置条件**（搜索/补丁不单独暴露） | capture（shell 的）、任务归属（harness 的） | F3 |
 | `keel.shell` | gbash 适配、`timeout` 参数、超时转后台、输出落 blob | 作业表（jobs 的）、安全策略（非目标） | F1 / D3 |
 | `keel.jobs` | 作业登记、上限、查询、收养、孤儿回收 | 命令语义 | D3 |
 | `keel.exec-surface` | **执行面自研契约**：`materialize` / `capture` 与其能力矩阵 | 远端具体实现（适配器负责） | F1/F2 |

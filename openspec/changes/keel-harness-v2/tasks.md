@@ -5,9 +5,9 @@
 
 ## W0 契约与骨架
 
-- [ ] 冻结本 change 的**全部 9 份 spec**（`harness-core` / `agent-loop-contract` / `layerfs` /
+- [ ] 冻结本 change 的**全部 10 份 spec**（`harness-core` / `agent-loop-contract` / `layerfs` /
       `task-log` / `tool-surface` / `plugin-architecture` / `plugin-ui-extension` / `supervision` /
-      `plugin-system` 的 MODIFIED delta），
+      `client-shell` / `plugin-system` 的 MODIFIED delta），
       后续实现不得偏离；偏离走新 change
 - [ ] **kind 表**：每个新 kind 定 `class`（owner/edge/external/system）、`key`/fence、提交者；
       新增 `task.created|updated|attached|detached|closed|note`、`fs.write`、`fs.capture`、
@@ -28,7 +28,7 @@
 - [ ] **ADR 0001**：layerfs Rust+gRPC 的推翻记录与证据门；CI 工具链、Dockerfile/compose、
       健康检查、端口登记（13610–13799）、SIGKILL sweep
 - [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离；
-      `plugin_state(tenant_id, plugin_id, enabled, config, generation)` 与 `/v1/plugins` 过滤；
+      `plugin_state(tenant_id, plugin_id, status, config_version, reason)` 与 `/v1/plugins` 过滤；
       `AGENTS.md` 修订为「默认单进程多租户；`user` 放置是显式 SKU」
 - [ ] **内核键命名空间**：扩展 `KeyKind` 与 `CommitRequest`（`fs:`/`capture:`/`task:`/`config:`/
       `placement:`/`supervision:`/`guardrail:`/`resume:`/`notif-ack:`/`notif-push:`/`run:`），
@@ -176,7 +176,8 @@
 
 - [ ] **E0 既有门零回归**：`scripts/acceptance-all.sh` 全绿、R1 `unexpected=0`、allowlist 每条
       有理由、事件基线已重新 pin
-- [ ] G0 契约门（含终局工具集快照 + 迁移表 grep 零命中）· G1 状态机门（转移矩阵 + 拒绝事实）先行；
+- [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 +
+      拒绝事实）先行；
       未绿则后续门不作为依据
 - [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务
 - [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用）
@@ -217,8 +218,8 @@
       `.message-part` / `.sidebar` / `.settings-section` / `.surface`）；任务卡部件槽位由
       `keel.tasks` 声明为 `keel.tasks.widget`；
       第一方面板改为贡献物
-- [ ] 三形态落地：`chunk`（NSH 动态导入，同 VM）、`package`（签名包，独立 VM + HostLimits，
-      远小于默认 256MB）、`iframe`（兜底，显式标注）
+- [ ] 四形态落地：`chunk`（NSH 动态导入，同 VM）、`package`（签名包，独立 VM + HostLimits，
+      远小于默认 256MB）、`iframe`（兜底，显式标注）、`data`（导航项/动作 JSON，按槽位 schema）
 - [ ] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误
 - [ ] **验收：AI 现场写一个 Native 插件**（chunk 贡献），装→渲染→卸载无残留（web + `macos`）
 - [ ] `creation` 工具始终存在；`keel.creation` 停用时 actions 返回 `plugin_disabled`，工具名不消失

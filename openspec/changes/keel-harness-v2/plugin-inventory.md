@@ -84,7 +84,7 @@
 | id | 职责 | DSH 对应 | 波次 |
 |---|---|---|---|
 | `layerfs`（service） | 内容寻址：file object + tree object + refcount/GC | `fs-local`/`fs-sandbox` 的字节层 | W1 |
-| `keel.fs` | `read`/`write`/`edit`（内部搜索/补丁供 skills 与 task 使用，模型入口只有三个） | `fs`、`tool-fs`、`tool-fs-search`、`tool-str-replace-editor` | W1 |
+| `keel.fs` | `read`/`write`/`edit`（模型入口只有三个；搜索/补丁不单独暴露，skills 走 `edit`） | `fs`、`tool-fs`、`tool-fs-search`、`tool-str-replace-editor` | W1 |
 | `keel.shell` | bash（gbash）+ 持久终端 | `shell`、`tool-bash`、`tool-bash-persistent`、`shell-env` | W1 |
 | `keel.jobs` | 后台作业表、收养、孤儿回收 | `jobs`、`tool-jobs` | W1 |
 | `keel.exec-surface` | 执行面契约与适配器（本地 / 远端；**自研抽象**） | 不照搬 `ssh`；契约由本仓定义 | W1 |
@@ -205,7 +205,7 @@
 ## 4. 与既有 COVERAGE / catalog 的对账
 
 `plugins/keel.plugin-market/catalog.json` 是**唯一机读真源**（需补 `wave` 与统一 status 枚举）；
-`COVERAGE.md` 逐行映射到 `keelPluginId`，本清单覆盖全部 `keelPluginId`。现状口径：COVERAGE 约
+`COVERAGE.md` 逐行映射到 `keelPluginId`（本清单是设计期附录，不作对账门）。现状口径：COVERAGE 约
 75 个 id、本清单 60 余项、catalog 约 60 个 `keelPluginId`，status 还多出 `partial`——三者不是
 id 集合相等关系。已知冲突逐行处置：
 
@@ -227,15 +227,15 @@ id 集合相等关系。已知冲突逐行处置：
 
 **仅存在于 catalog / COVERAGE 的 id**（W0.5 MUST 逐条处置，否则对账必失败）：
 
-- **catalog 独有 19 个**：`keel.core`、`keel.session`、`keel.ssh`、`keel.sandbox`、`keel.sdk`、
+- **catalog 独有 20 个**：`keel.core`、`keel.interaction`、`keel.session`、`keel.ssh`、`keel.sandbox`、`keel.sdk`、
   `keel.api`、`keel.client-ui`、`keel.host`、`keel.util`、`keel.acp`、`keel.desktop`、
   `keel.mobile-gateway`、`keel.llm.subscription`、`keel.plugin-gate`、`keel.session-migrate`、
   `keel.research.literature`、`keel.blender`、`keel.theme.glass`、`keel.subagent-adapter`
   → catalog 标 `out-of-scope` 或合并进现有 id，逐条给理由。
-- **COVERAGE 独有 10 个**：`keel.boot`、`keel.cli`、`keel.context`、`keel.plugin-manager`、
-  `keel.shell.pwsh`、`keel.skill-store`、`keel.skill.distill`、`keel.subagent.claude-code`、
-  `keel.tools`、`keel.web` → catalog 补 `absent`/`merged` 行与理由（其中 `keel.context`、
-  `keel.plugin-manager` 等已在本清单，补进 catalog 即可）。
+- **COVERAGE 有、catalog 无的 10 个 id**（相对 catalog 的差集，与 inventory 无关，含 §C 能力行）：
+  `keel.boot`、`keel.cli`、`keel.context`、`keel.plugin-manager`、`keel.shell.pwsh`、`keel.skill-store`、
+  `keel.skill.distill`、`keel.subagent.claude-code`、`keel.tools`、`keel.web` → catalog 补
+  `absent`/`merged` 行与理由（`keel.context`/`keel.plugin-manager` 等已在本清单，补进 catalog 即可）。
 
 W0.5 MUST 跑 catalog 对账脚本（COVERAGE §A/§B 行 → `keelPluginId`），差异逐条列出并以非零退出。
 

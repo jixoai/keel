@@ -82,10 +82,11 @@ TUI MUST NOT 渲染 WebView/iframe 或 `package`（签名包独立 surface）形
 仓库 MUST 维护 `plugins/COVERAGE.md` 与 `plugins/keel.plugin-market/catalog.json`，并以
 `catalog.json` 为**唯一机读真源**：每条 MUST 有 `id` / `keelPluginId` / `status` / `wave` /
 `dshGroups[]`；`COVERAGE.md` MUST 由该真源生成或经脚本比对。
-映射规则（不是 id 集合相等）：`COVERAGE.md` §A 的能力行与 §B 的 bundle 行 MUST 各映射到
-`catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；§B 的 bundle 行统一映射到 `keel.bundles`；
-末尾来源表（§F）不参与映射。`catalog.json` 每个条目 MUST 有 `status` 与 `wave`。
-设计期清单 `plugin-inventory.md` 只是 change 附录，MUST NOT 作为归档后的规范引用。
+映射规则（不是 id 集合相等）：`COVERAGE.md` §A/§B/§C 的能力行 MUST 各映射到 `catalog.json` 的
+`keelPluginId`（或 `absent` + 理由）；§B 的 bundle 行统一映射到 `keel.bundles`；§D/E/F/G 的
+来源表不参与映射。`catalog.json` 每个条目 MUST 有 `status` 与 `wave`。本 change 的 W1 只承诺
+v2 核心；v1 已有能力面的插件化按 catalog 的 `wave` 推进。设计期清单 `plugin-inventory.md`
+只是 change 附录，MUST NOT 作为归档后的规范引用。
 已合并/废弃的 id MUST 显式标记：
 
 - `goal` / `todo` / `plan-mode` 并入 `keel.tasks`（all-in-one plan-plugin）；
@@ -194,8 +195,8 @@ source: { type: builtin|local|git|npm, ... }
    版本替换；HMR 为 `reloading → rolled_back`（失败回滚）。`generation` 是**进程级**代码代际，
    MUST NOT 按租户分叉。
 2. **租户级**（启用与可见性）：`disabled → enabled → disabled`；依赖缺失 MUST 进入 `PENDING`
-   （可见、带原因，不半装载），装配失败为 `FAILED`。`plugin_state(tenant_id, plugin_id, enabled,
-   config_version)` 记录该层。
+   （可见、带原因，不半装载），装配失败为 `FAILED`。`plugin_state(tenant_id, plugin_id, status,
+   config_version, reason)` 记录该层；`status` ∈ {disabled, enabled, PENDING, FAILED}。
 
 启用/停用 MUST 走 agentext 的依赖拓扑装载与**反序卸载**；工具/hook/trigger/UI 的注册副作用
 MUST 在停用时全部撤销（无残留工具、无残留订阅、无残留触发）。
@@ -217,7 +218,7 @@ MUST 在停用时全部撤销（无残留工具、无残留订阅、无残留触
 插件**包安装** MUST 为进程级（二进制/文件/受管目录）；**启用、配置、可见性** MUST 为租户级：
 
 ```
-plugin_state(tenant_id, plugin_id, enabled, config_version)
+plugin_state(tenant_id, plugin_id, status, config_version, reason)
 ```
 
 `/v1/plugins` MUST 按调用者租户过滤；同一 Group 内不同租户的启用状态 MUST 互不影响；

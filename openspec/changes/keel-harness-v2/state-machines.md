@@ -170,11 +170,25 @@ durable 事实，必须有自然幂等键）。每个新 kind MUST 在 `kindRegi
 
 ## E. 插件与 UI
 
-### E1. 插件生命周期（沿用 v1，补两点）
+### E1. 插件生命周期（双态机）
 
-`installed → enabled → disabled → uninstalled`；`PENDING`（缺依赖）；`FAILED`（fail-closed）。
-补：`enabled → reloading → rolled_back`（HMR 失败回滚，不打断 run）；`generation+1` 单调。
-非法：同 generation 内两次装载；卸载后残留注册。
+**包/进程级**（权威事实：受管目录 + 进程注册表）：
+
+| 状态 | 权威事实 | 说明 |
+|---|---|---|
+| `installed` | 包目录 + 清单 | 已落盘，未校验 |
+| `verified` | 校验结果 + 包 hash | 清单/版本门/签名通过 |
+| `available` | 进程注册表 | 可被租户启用 |
+| `removed` | 包目录已删 + 审计 | 终态 |
+| `reloading` | HMR 事务 | 仅从 `available` 进入 |
+| `rolled_back` | 上一代 generation | HMR 失败，回到可用 |
+
+`generation` 是**进程级**代码代际，单调 +1；MUST NOT 按租户分叉。
+
+**租户级**（权威事实：`plugin_state(tenant_id, plugin_id, status, config_version, reason)`）：
+
+`disabled` ↔ `enabled`；`PENDING`（缺依赖，带 reason）；`FAILED`（装配失败，带 reason）。
+非法：同 generation 内两次装载；卸载后残留注册；把 `generation` 写进租户行。
 
 ### E2. 扩展面声明（新增）
 

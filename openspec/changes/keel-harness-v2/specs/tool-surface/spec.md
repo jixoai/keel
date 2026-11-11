@@ -43,7 +43,8 @@
 `tasks`、`agent`、`approve`、`notify`、`creation`。**动态能力**（MCP server、技能、任务、订阅源）
 MUST 通过 action 进入，MUST NOT 为其新增工具名。工具总数 MUST 与接入的 MCP server 数、技能数、
 任务数无关。`creation` MUST 始终存在于内建面；`keel.creation` 停用时其 actions MUST 返回
-`plugin_disabled`，工具名不消失。插件 MAY 在安装时通过 `provides.tools` 显式扩展工具面（安装审批、改变清单哈希、
+`plugin_disabled`，工具名不消失。`creation` 工具由 Harness 内建持有，`keel.creation` 只提供 action
+后端；停用不触发「插件工具注册副作用」的撤销范围。插件 MAY 在安装时通过 `provides.tools` 显式扩展工具面（安装审批、改变清单哈希、
 面板可见）；MUST NOT 在运行中静默增删。
 
 #### Scenario: 挂 100 个 MCP server 工具面不变
@@ -67,8 +68,9 @@ v1 已在模型面暴露的工具 MUST 按「v1 工具名迁移表」迁移；�
 - **THEN** 返回 `unknown_tool`，不路由到新 action，不留兼容层
 
 #### Scenario: 迁移表可机检
-- **WHEN** 运行迁移断言
-- **THEN** 代码中不存在上表「删除」列的工具名（测试夹具白名单除外），`grep` 零命中
+- **WHEN** 运行工具注册表快照断言
+- **THEN** 快照中不存在上表「删除」列的具体名字（精确名，不用子串 grep）；
+  `spawn_subagent` / `creation_*` / `mcp__<server>__<tool>` 的注册点为 0
 
 ### Requirement: 各聚合工具的 action 表（闭集）
 

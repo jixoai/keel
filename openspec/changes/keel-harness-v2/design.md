@@ -136,7 +136,7 @@ task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账�
 ```
 
 - 任务卡是 DB 行；所有修改都是追加事件（`task.created` / `task.updated` /
-  `task.attached` / `task.closed` / `task.note`）。
+  `task.attached` / `task.detached` / `task.closed` / `task.note`）。
 - 会话启动时自动创建初始卡；**每次工具调用必须带 `taskId`**（强制，缺省拒绝）。
 - 任务树的当前状态是投影；历史永远可读。
 
@@ -210,7 +210,7 @@ task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账�
 | `read` / `write` / `edit` | 高频例外，直连 file-plugin |
 | `mcp` | 工具生态的聚合工具（list/describe/call） |
 | `skills` | 知识库的聚合工具（ls/view/manage） |
-| `tasks` | 记忆图的聚合工具（create/update/attach/close/list） |
+| `tasks` | 记忆图的聚合工具（create/update/attach/detach/close/list/show/note） |
 | `agent` | 内部子代理的聚合工具（spawn/fork/resume/cancel/list/status） |
 | `creation` | 创造模式的聚合工具（catalog/scaffold/validate/install/list/remove） |
 | `approve` | 对话式审批（confirm/prompt/choice） |
@@ -289,13 +289,14 @@ task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账�
 `.settings-section` / `.surface`）；任务卡部件槽位由 `keel.tasks` 声明为 `keel.tasks.widget`。
 第一方面板（任务板、通知、作业、技能…）只是这些槽位的贡献物。
 
-贡献有三种形态，由槽位所有者声明允许集：
+贡献有四种形态，由槽位所有者声明允许集：
 
 | 形态 | 运行方式 | 隔离 | 备注 |
 |---|---|---|---|
 | `chunk` | NSH 动态导入，同宿主 VM，作为组件渲染 | 无 | 跨 target（含 TUI）、零额外 VM |
 | `package` | NSH 签名包，独立 surface + `HostLimits` | 独立 VM + 能力强制 | 重型工具；独立表面 |
 | `iframe` | iframe / `WebView` | 浏览器级 | 兜底：非 NSH 存量插件；不主题化、TUI 不可用 |
+| `data` | 宿主消费的 JSON（导航项/动作） | 无 | 无 VM；schema 由槽位声明 |
 
 **创造模式（`keel.creation`，内置）** 聚合本机所有插件的可扩展面文档（`EXTENSIBILITY.md` +
 `extensibility.json`）成本机目录，经只读发现工具交给 AI；AI 据此写 Native 插件（chunk 贡献），

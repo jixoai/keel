@@ -5,7 +5,7 @@
 
 ## 0. 口径
 
-- **验收单元**：`proposal.md`、`design.md`、`tasks.md`、9 份 spec（含 `plugin-system` 的 MODIFIED delta）、`plugin-inventory.md`、
+- **验收单元**：`proposal.md`、`design.md`、`tasks.md`、10 份 spec（含 `plugin-system` 的 MODIFIED delta 与 `client-shell`）、`plugin-inventory.md`、
   `plugin-boundaries.md`、`state-machines.md`、本文件、`adr/0001-layerfs-rust-grpc.md` 逐条对表；
   未覆盖项必须显式登记并说明为什么不可验收。
 - **预算（硬）**：后端整体（各 group worker + layerfs + 控制面）**目标 ≤300MB，上限 ≤500MB**。
@@ -32,8 +32,9 @@
 
 - **判据**：内核包不得 import 产品层；插件不得访问同层内部状态；无第二套插件运行时；
   **工具注册名快照精确等于 11 个内建工具 ∪ 已审批 `provides.tools`**；负控：注册
-  `spawn_subagent` 或 `mcp__*` 必须失败（不用子串 grep）。
-- **证据**：`go test ./internal/architecture/...`、工具清单快照、迁移 grep、依赖图；
+  `spawn_subagent` 或具体名 `mcp__fs__read` 必须失败；对 `mcp__` 族生成 N 个具体名逐个注册均失败
+  （不用子串 grep）。
+- **证据**：`go test ./internal/architecture/...`、工具注册表快照、依赖图；
   RSS 门由 `scripts/acceptance-rss.sh` 并入 `acceptance-all.sh` 执行。
 - **负控**：加一行 `import placement`、注册 `spawn_subagent`、或让插件直读另一插件状态 → 失败。
 
@@ -80,8 +81,8 @@
 
 - **判据**：安装/启停/卸载**零残留**；缺依赖 `PENDING` 且原因可见；HMR 失败回滚且不打断 run；
   `extensibility.json` 缺失的官方插件发布被拒；**`catalog.json` 为唯一机读真源**，
-  `COVERAGE.md` 每行映射到 `keelPluginId`，`plugin-inventory.md` 覆盖所有 `keelPluginId`，
-  `status`/`wave` 一致。
+  `COVERAGE.md` §A/§B/§C 每个能力行映射到 `keelPluginId`（或 absent+理由），catalog 每个条目
+  有 `status`/`wave`；`plugin-inventory.md` 只是设计期附录，**不作门**。
 - **证据**：注册表 diff + generation 序列 + catalog 对账脚本输出。
 - **负控**：卸载同时注册工具与 UI 贡献的插件；缺文档的包发布。
 
@@ -90,10 +91,11 @@
 - **判据**：槽位由插件声明（Harness 无内置清单）；贡献只用槽位允许的形态；主题令牌来自宿主
   （无硬编码色值/阴影）；`iframe` 显式标注非原生主题；**TUI 中 `package`/`iframe` 显式不可用、
   `chunk` 正常渲染**；**至少一个原生 target 渲染 chunk**；桥按能力裁剪，越权 `ERR_ACCESS_DENIED`；
-  系统级推送在原生 target 用系统通知，web target 无 service worker 时显式降级（登记缺口）。
+  系统级推送在原生 target 用系统通知，web target 无 service worker 时显式降级（登记缺口）；
+  **`data` 贡献（导航项/动作）按槽位 schema 装载并校验**。
 - **证据**：web + **`macos`（`nsh package --target macos`）** + TUI（`nsh run --target tui` 真终端）
   三组截图/日志；越权审计；主题切换前后截图；桌面壳（单实例/托盘/全局快捷键/深链/系统通知）证据。
-- **负控**：给只允许 `chunk` 的槽位投 `iframe`；越权桥调用。
+- **负控**：给只允许 `chunk` 的槽位投 `iframe`；`data` 贡献不符合 schema；越权桥调用。
 
 ## G8 创造模式门
 
