@@ -119,11 +119,16 @@ jobs:
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "keel ${{ steps.ver.outputs.version }}" --notes "$NOTES" --verify-tag || \
             gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
 
+      # `secrets` is not available in a step's `if`, so the branch lives here.
       - name: mirror to the aggregate outlet (when the token is configured)
-        if: ${{ secrets.FDE2E_RELEASES_TOKEN != '' }}
         env:
-          GH_TOKEN: ${{ secrets.FDE2E_RELEASES_TOKEN }}
+          AGG_TOKEN: ${{ secrets.FDE2E_RELEASES_TOKEN }}
         run: |
+          if [ -z "${AGG_TOKEN:-}" ]; then
+            echo "no FDE2E_RELEASES_TOKEN configured — skipping the aggregate mirror"
+            exit 0
+          fi
+          export GH_TOKEN="$AGG_TOKEN"
           TAG="keel-${{ steps.ver.outputs.tag }}"
           gh release create "$TAG" dist/* --repo jixoai/fde2e-releases \
             --title "keel ${{ steps.ver.outputs.version }}" \
