@@ -170,7 +170,7 @@ web-search / context-memory 继续复用。
 - **新表**：`groups`、`session_placement`、`plugin_state`、`task_cards`、`task_events`（账本投影，
   不直接写）、`file_manifest`、`session_snapshot`、`blob_refs`。
 - **范围调整**：v1 `plugin-system` 的「W1 MUST 覆盖全部 keel 已有能力面」在本 change 改为按
-  `plugin-inventory.md` 的波次推进；W1 只承诺 v2 核心（显式记录，不静默丢失）。
+  `catalog.json` 的 `wave` 推进；W1 只承诺 v2 核心（显式记录，不静默丢失）。
 - **客户端基线**：pin **NSH 0.5.0**（TUI ratatui 后端、桌面多窗口/托盘/全局快捷键/单实例/
   系统通知与 badge、自更新与签名 OTA、RichEditor/流式 Markdown、长列表与内存优化）；
   破坏性变更与壳层要求见 `client-shell` spec。

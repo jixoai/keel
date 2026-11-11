@@ -103,7 +103,7 @@ v2 核心；v1 已有能力面的插件化按 catalog 的 `wave` 推进。设计
 
 #### Scenario: 映射对账
 - **WHEN** 运行对账脚本
-- **THEN** `COVERAGE.md` §A/§B 每一行都映射到 `catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；
+- **THEN** `COVERAGE.md` §A/§B/§C 每一行都映射到 `catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；
   `catalog.json` 每个条目都有 `status` 与 `wave`；差异逐条列出并以非零退出
 
 #### Scenario: absent 有理由

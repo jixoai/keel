@@ -225,7 +225,7 @@ id 集合相等关系。已知冲突逐行处置：
 | `keel.browser-use` / `keel.computer-use` | 登记 | 接 fde2e-bu / fde2e-cu |
 | `keel.creation` | 保留（内置），主路径改 chunk | 创造模式见 §3.9 |
 
-**仅存在于 catalog / COVERAGE 的 id**（W0.5 MUST 逐条处置，否则对账必失败）：
+**本清单设计表未覆盖的 catalog id**（W0.5 MUST 逐条处置，否则对账必失败）：
 
 - **catalog 独有 20 个**：`keel.core`、`keel.interaction`、`keel.session`、`keel.ssh`、`keel.sandbox`、`keel.sdk`、
   `keel.api`、`keel.client-ui`、`keel.host`、`keel.util`、`keel.acp`、`keel.desktop`、
@@ -237,7 +237,7 @@ id 集合相等关系。已知冲突逐行处置：
   `keel.skill.distill`、`keel.subagent.claude-code`、`keel.tools`、`keel.web` → catalog 补
   `absent`/`merged` 行与理由（`keel.context`/`keel.plugin-manager` 等已在本清单，补进 catalog 即可）。
 
-W0.5 MUST 跑 catalog 对账脚本（COVERAGE §A/§B 行 → `keelPluginId`），差异逐条列出并以非零退出。
+W0.5 MUST 跑 catalog 对账脚本（COVERAGE §A/§B/§C 行 → `keelPluginId`），差异逐条列出并以非零退出。
 
 ## 5. 与 DSH 的关键差异
 

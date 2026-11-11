@@ -36,7 +36,7 @@
 - [ ] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、
       纯 chunk 包（无 `ui.entry`）、`plugin_state` 租户字段；`KnownFields(true)` 同步
 - [ ] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status
-      枚举（含 `partial`）；生成/比对 `COVERAGE.md` 与 `plugin-inventory.md`；比对脚本进 CI
+      枚举（含 `partial`）；生成/比对 `COVERAGE.md`（对照 catalog）；比对脚本进 CI
 - [ ] **RSS 采样器**：`scripts/acceptance-rss.sh` 采样后端进程 `VmRSS` 求和，接 `acceptance-all.sh`，
       断言 ≤500MB（目标 ≤300MB）；cgroup peak 单列
 - [ ] **原生 target 可执行**：`web` 与 `macos`（`nsh package --target macos`）构建产物 + 截图；
@@ -59,7 +59,7 @@
 
 ## W0.5 插件全景（对表 DSH）
 
-- [ ] 冻结 `plugin-inventory.md` 的 60 余项与波次；后续新增插件必须先进这份清单
+- [ ] 冻结 `catalog.json` 的 id/status/wave；`plugin-inventory.md` 仅作设计期附录，不作为波次真值
 - [ ] 五种 **layer**（kernel/harness/provider/ui/service）的装载边界与架构测试；
       承载 `kind` 仍是三种（in-process/sidecar/webview），两者正交
 - [ ] 四层装配（base/mode/preset/config.toml）与 row id overlay 语义
@@ -67,8 +67,8 @@
 - [ ] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
 - [ ] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
       `EXTENSIBILITY.md`（创造模式的聚合输入）
-- [ ] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` 逐行映射到
-      `keelPluginId`、`plugin-inventory.md` 覆盖全部 `keelPluginId`；`goal`/`todo`/`plan` 并入 `keel.tasks`、
+- [ ] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` §A/§B/§C 逐行映射到
+      `keelPluginId`；`goal`/`todo`/`plan` 并入 `keel.tasks`、
       `team` absent、`workspace` 并入 Group、`guard` 并入 `keel.supervisor`，逐行给出处置
 - [ ] 为 v1 已交付的官方插件补 `extensibility.json` + `EXTENSIBILITY.md`（否则创造模式无法利用，
       且官方发布门禁会拒绝）
