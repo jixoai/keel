@@ -132,7 +132,7 @@ session_placement(session_id PK, group_id, worker_id, epoch, lease_until)
 
 ```sql
 task_cards(id, session_id, parent_task_id, title, status, created_seq, closed_seq)
-task_events(id, task_id, seq, kind, payload, created_at)
+task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账本重建，不直接写
 ```
 
 - 任务卡是 DB 行；所有修改都是追加事件（`task.created` / `task.updated` /
@@ -211,7 +211,8 @@ task_events(id, task_id, seq, kind, payload, created_at)
 | `mcp` | 工具生态的聚合工具（list/describe/call） |
 | `skills` | 知识库的聚合工具（ls/view/manage） |
 | `tasks` | 记忆图的聚合工具（create/update/attach/close/list） |
-| `agent` | 内部子代理的聚合工具（spawn/fork/resume/cancel/list） |
+| `agent` | 内部子代理的聚合工具（spawn/fork/resume/cancel/list/status） |
+| `creation` | 创造模式的聚合工具（catalog/scaffold/validate/install/list/remove） |
 | `approve` | 对话式审批（confirm/prompt/choice） |
 | `notify` | 通知（多消费器，系统推送兜底） |
 
@@ -285,7 +286,8 @@ task_events(id, task_id, seq, kind, payload, created_at)
 **槽位不由 Harness 内置**。Harness 只提供机制：注册/注销槽位、装载/卸载贡献、schema 校验、
 目标降级。槽位由插件声明，id 带声明者命名空间；最大的槽位提供者是第一方客户端插件
 `keel.ui`（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` / `.message-part` / `.sidebar` /
-`.settings-section` / `.task-widget` / `.surface`）。第一方面板（任务板、通知、作业、技能…）只是这些槽位的贡献物。
+`.settings-section` / `.surface`）；任务卡部件槽位由 `keel.tasks` 声明为 `keel.tasks.widget`。
+第一方面板（任务板、通知、作业、技能…）只是这些槽位的贡献物。
 
 贡献有三种形态，由槽位所有者声明允许集：
 

@@ -7,9 +7,10 @@
 
 ### Requirement: 内核与 Harness 的边界
 
-内核 MUST 只做「把一个会话的一次 run 跑成可重放账本」；内核 MUST NOT 感知用户、租户、
-Group、插件、文件系统。Harness MUST 通过注入（工具清单、system sections、message-parts、
-invoke 回调）向内核提供一切能力。内核包 MUST NOT import 任何产品层包，该约束 MUST 由
+内核 MUST 只做「把一个会话的一次 run 跑成可重放账本」；**AgentLoop 包** MUST NOT 感知插件
+运行时、用户、租户、Group、文件系统。`kernel` layer 插件由内核宿主在装配期装载，loop 只看到
+注入能力。Harness MUST 通过注入（工具清单、system sections、message-parts、invoke 回调）
+向内核提供一切能力。内核包 MUST NOT import 任何产品层包，该约束 MUST 由
 架构测试钉住（沿用 `internal/architecture` 的 `go list -deps` 断言模式）。
 
 #### Scenario: 内核包 import 产品层即失败
@@ -93,7 +94,7 @@ URL 形态的消费 MUST 单次有效且不可猜。
 - **THEN** 不触发系统原生推送；ack 落为持久事件
 
 #### Scenario: 离线时推送一次
-- **GIVEN** 没有任何在线消费者
+- **GIVEN** 没有任何具备 ack 能力的在线消费者
 - **WHEN** 通知超过窗口未被 ack
 - **THEN** 触发一次原生推送；进程重启后不重复推送
 
@@ -113,8 +114,8 @@ URL 形态的消费 MUST 单次有效且不可猜。
 ### Requirement: 多用户进程与装配隔离
 
 本 change MUST 把 `keel serve` 升级为**多用户进程**：MUST 按凭据解析用户/租户；MUST 在
-`/v1/plugins`、triggers、工具面与设置读接口上按租户过滤；MUST 保证一个租户的装配（插件/技能/
-MCP/工具）不影响另一个租户。`AGENTS.md` 的「不做每用户进程」MUST 修订为「默认单进程多租户；
+`/v1/plugins`、triggers、工具面与设置读接口上按租户过滤；插件启用/配置/可见性 MUST 走租户级
+`plugin_state`（见 `plugin-system`）；MUST 保证一个租户的装配（插件/技能/MCP/工具）不影响另一个租户。`AGENTS.md` 的「不做每用户进程」MUST 修订为「默认单进程多租户；
 `user` 放置是显式 SKU，其资源代价由 cgroup 证据承担」。
 
 #### Scenario: 租户互不可见

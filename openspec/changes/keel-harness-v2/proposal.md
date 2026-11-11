@@ -77,8 +77,8 @@ Harness 编排。** 每个插件只依赖自己的契约，不打听同层的保
 工具面恒定且小，能力一律经**聚合工具**进入：
 
 `bash`（操作系统的聚合工具）· `mcp`（工具生态的聚合工具）· `skills`（知识库的聚合工具）·
-`tasks`（记忆图的聚合工具）· `agent`（内部子代理的聚合工具）· `approve` · `notify` ·
-`read`/`write`/`edit`（高频例外）。
+`tasks`（记忆图的聚合工具）· `agent`（内部子代理的聚合工具）· `creation`（创造模式的聚合工具）·
+`approve` · `notify` · `read`/`write`/`edit`（高频例外）。
 
 - **禁止** `mcp__<server>__<tool>` 式硬编码工具名；MCP server 增删不改变工具清单。
 - 插件 MAY 在安装时通过 `provides.tools` 显式扩展工具面（经安装审批、改变清单哈希），
@@ -166,8 +166,8 @@ web-search / context-memory 继续复用。
 - **Harness**：新增 placement（group/lease）、task、file、bash、mcp、skills、approve、
   notification、oar 插件。
 - **新服务**：`layerfs`（Rust + gRPC），随 Harness 部署。
-- **新表**：`groups`、`session_placement`、`task_cards`、`task_events`、`file_manifest`、
-  `blob_refs`。
+- **新表**：`groups`、`session_placement`、`plugin_state`、`task_cards`、`task_events`（账本投影，
+  不直接写）、`file_manifest`、`session_snapshot`、`blob_refs`。
 - **文档**：`docs/HARNESS.md`、`docs/KERNEL.md` 增补；`AGENTS.md` 补一句放置原则
   （默认单进程多租户；进程切分由 Harness 放置策略决定）。
 - **预算**：后端整体（内核 + Harness + layerfs + 控制面）**目标 ≤300MB、上限 ≤500MB**；前端

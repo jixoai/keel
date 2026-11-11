@@ -27,7 +27,8 @@ MUST NOT 内置任何具体槽位。槽位 MUST 由插件声明，其 id MUST �
 
 **Native 插件**在本 spec 中定义为：**以 `chunk` 形态贡献、由 NSH 原生渲染的插件**（不是 iframe，
 也不是仅 web 页面）。它 MUST 在 web target 与至少一个原生 target 上渲染一致；原生 target MUST
-由 NSH 的多平台构建直接产出，MUST NOT 作为独立产品线另起工程。
+由 NSH 的多平台构建直接产出，MUST NOT 作为独立产品线另起工程。本 change 的原生 target MUST
+至少包含 `macos`（`nsh package --target macos`，ad hoc 签名 .app）。
 
 #### Scenario: 声明缺字段
 - **WHEN** 一个槽位声明缺少允许形态集合或 target 集合
@@ -128,7 +129,8 @@ MUST 由 NSH 的多平台构建直接产出；本 change MUST NOT 为原生 targ
 
 ### Requirement: 创造模式的聚合协议
 
-每个插件 MUST 随包提供 `EXTENSIBILITY.md`（人读）与 `extensibility.json`（机读），声明它提供
+**官方插件** MUST 随包提供 `EXTENSIBILITY.md`（人读）与 `extensibility.json`（机读）；第三方
+插件 MAY 提供（缺失时标记「不可被创造模式利用」，不影响安装）。声明它提供
 的槽位、接受的配置、可挂 hook、可替换 provider、示例与限制。**`keel.creation` MUST 聚合
 本机所有已安装插件（含第三方）的这些文档**，形成机器可读目录，并经只读发现工具交给 AI；
 聚合目录 MUST 与装配事实同源（插件启停后目录同步更新）。

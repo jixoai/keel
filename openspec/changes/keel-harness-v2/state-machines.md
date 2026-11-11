@@ -64,19 +64,23 @@
 v1 的 class 是 `edge` / `owner` / `external`；v2 新增 **`system`**（Harness 驱动、无 lease 的
 durable 事实，必须有自然幂等键）。每个新 kind MUST 在 `kindRegistry` 有 class 与 key：
 
-| kind | class | key / fence | 提交者 |
+| kind | class | dedupe key（独立命名空间） | 提交者 |
 |---|---|---|---|
-| `task.created/updated/attached/detached/closed/note` | owner（run 内）/ system（会话启动初始卡） | `generationId` / `taskId+seq` | kernel / harness |
-| `fs.write` | owner | `toolCallId` | file-plugin |
-| `fs.capture` | owner | `toolCallId + baseSeq` | shell/capture |
-| `config.rotated` | system | `configHash` | harness |
-| `placement.joined/left` | system | `sessionId + epoch` | placement |
-| `supervision.escalated` | system | `sessionId + attempt` | supervisor |
-| `guardrail.tripped` | system | `sessionId + trigger + seq` | supervisor |
-| `resume.attempt` | system | `sessionId + attempt` | supervisor |
-| `notification.ack` | system | `notificationId + consumerId` | notify |
-| `notification.push_sent` | system | `notificationId` | notify |
-| `run.finished`（payload 扩展） | owner | lease | kernel |
+| `task.*` | owner（run 内）/ system（初始卡） | `task:<taskId>:<kind>:<seq>`；初始卡 `task:<sessionId>:init` | kernel / harness |
+| `fs.write` | owner | `fs:<toolCallId>:<path>` | file-plugin |
+| `fs.capture` | owner | `capture:<toolCallId>:<baseSeq>` | shell/capture |
+| `config.rotated` | system | `config:<configHash>` | harness |
+| `placement.joined/left` | system | `placement:<sessionId>:<epoch>:<kind>` | placement |
+| `supervision.escalated` | system | `supervision:<sessionId>:<attempt>` | supervisor |
+| `guardrail.tripped` | system | `guardrail:<sessionId>:<trigger>:<seq>` | supervisor |
+| `resume.attempt` | system | `resume:<sessionId>:<attempt>` | supervisor |
+| `notification.ack` | system | `notif-ack:<notificationId>:<consumerId>` | notify |
+| `notification.push_sent` | system | `notif-push:<notificationId>` | notify |
+| `run.finished`（payload 扩展） | owner | `run:<runId>`（lease/fence） | kernel |
+
+**每个 kind MUST 有独立 KeyKind，MUST NOT 复用 `tool:` 前缀**（否则 `fs.write` 与同一次调用的
+`tool.result` 撞键）。内核 `CommitRequest` MUST 为这些命名空间新增键字段；「同 toolCallId 的
+`tool.result` 后紧接 `fs.write`」 MUST 作为负控单测。
 
 「只追加」的准确含义是：**账本历史只追加**；模型上下文可以被 `compaction`/checkpoint 投影替换，
 替换本身以 `compaction` 事件为准（v1 已如此）。
@@ -150,7 +154,7 @@ durable 事实，必须有自然幂等键）。每个新 kind MUST 在 `kindRegi
 
 ### D2. 通知（notification）
 
-`created` → `delivered(consumer_i)` → `consumed(任一 ack)`；无 ack 能力消费者时：`created` →
+`created` → `delivered(consumer_i)` → `consumed(任一 ack)`；无可 ack 消费者时：`created` →
 `push_sent` → `consumed`/`expired`。每个消费者一个状态，**任一 ack 即 consumed**。
 非法：已 consumed 再推原生通知；重启后重复推送（ack 与推送都必须持久）。
 

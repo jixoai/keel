@@ -8,11 +8,12 @@
 
 ### Requirement: 插件 layer 与装载边界
 
-插件 MUST 声明 `layer`，取值只能是 `kernel` / `harness` / `provider` / `ui` / `service`
-（`kind` 仍是 `in-process` / `sidecar` / `webview` 的承载形态，见 `plugin-system`；两者正交）。
-kernel 只实现 loop seam、MUST NOT 直连 DB/网络/文件；provider 在独立进程、崩溃 MUST NOT
-拖垮 Harness；ui 只消费投影、MUST NOT 写入真值；service 只经 gRPC。Harness MUST 按 layer
-选择装载、隔离与回收策略。
+插件 MAY 声明 `layer`；缺省按 `kind` 推导。取值只能是 `kernel` / `harness` / `provider` / `ui` /
+`service`（`kind` 仍是 `in-process` / `sidecar` / `webview` 的承载形态，见 `plugin-system`；
+两者正交）。kernel 只实现 loop seam、MUST NOT 直连 DB/网络/文件（IO 经注入接口，如 llm 的
+HTTP client、context 的 fs 读取）；provider 在独立进程、崩溃 MUST NOT 拖垮 Harness；ui 只消费
+投影、MUST NOT 直写领域真值（MAY 经宿主桥发起审批/工具调用，有审计）；service 只经 gRPC。
+Harness MUST 按 layer 选择装载、隔离与回收策略。
 
 #### Scenario: provider 崩溃隔离
 - **WHEN** 一个 provider 插件进程崩溃

@@ -19,6 +19,19 @@ MUST NOT 就地覆盖历史。任务卡的当前状态 MUST 是事件投影。
 - **WHEN** 任务被关闭
 - **THEN** 其全部事件、资源引用与关联工具调用仍可读取，不随关闭删除
 
+### Requirement: 任务事件是账本投影
+
+`task_events` MUST 是从所属会话账本重建的**物化投影**，MUST NOT 直接写入；重建 MUST 幂等，
+且与账本中的 `task.*` 事件逐条一致。任务树与面板 MUST 只读该投影。
+
+#### Scenario: 重建一致
+- **WHEN** 从账本重建 `task_events`
+- **THEN** 行数与 `task.*` 事件数一致，payload 逐条相等；重复重建不产生重复行
+
+#### Scenario: 直接写入被拒
+- **WHEN** 任何代码绕过账本直接写 `task_events`
+- **THEN** 被拒绝（或在一致性测试中被判失败）
+
 ### Requirement: 每次工具调用必须带 taskId
 
 Harness MUST 要求每一次工具调用携带 `taskId`；缺失 MUST 拒绝执行并返回类型化错误。

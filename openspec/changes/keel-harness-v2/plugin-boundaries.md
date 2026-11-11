@@ -9,7 +9,7 @@
    在装配期决定并注入。（反例：skills 的 patch 去问文件系统有没有写保护。）
 2. **单一真值**：结构在 DB，字节在 layerfs（内容寻址），执行空间是可丢弃的物化视图。
 3. **插件粒度 ≠ 工具粒度**：模型只见恒定聚合工具面（`bash`/`read`/`write`/`edit`/`mcp`/
-   `skills`/`tasks`/`agent`/`approve`/`notify`）；动态能力以 action 进入。
+   `skills`/`tasks`/`agent`/`creation`/`approve`/`notify`）；动态能力以 action 进入。
 4. **状态即事实**：每个状态指名权威事实；非法转移 fail-closed 并留下拒绝事实（`state-machines.md`）。
 5. **可逆副作用**：装载即注册可撤销副作用；卸载反序撤销，工具/hook/触发器/UI/VM/进程/端口零残留。
 6. **幂等**：有副作用的调用带幂等键（`requestId`/`generationId`/`toolCallId`）；重试不产生第二次效果。
@@ -21,7 +21,7 @@
 11. **文档是契约的一部分**：每个插件必须交 `extensibility.json` + `EXTENSIBILITY.md`，否则
     不可被创造模式利用（官方插件发布门禁直接拒绝）。
 
-## 1. 内核 seam（kind: kernel）
+## 1. 内核 seam（layer: kernel）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
@@ -37,7 +37,7 @@
 失败语义（统一）：seam 失败 MUST 降级到「最小可用」并留事实（如摘要失败保留原上下文、
 缓存失效退化为无缓存），MUST NOT 吞掉原始状态。
 
-## 2. 环境（service / harness / provider）
+## 2. 环境（layer: service / harness / provider）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
@@ -52,7 +52,7 @@
 | `keel.subprocess` | 共享子进程及生命周期 | 作业调度 | D3 |
 | `keel.terminal` | 持久终端会话（provider） | 命令解释（shell 的） | F1 |
 
-## 3. 记忆与任务（harness）
+## 3. 记忆与任务（layer: harness）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
@@ -64,7 +64,7 @@
 | `keel.supervisor` | 自动恢复、重试预算、退避、升级阶梯、护栏触发与处置记录 | 具体处置动作（L1+ 代理做的） | G1–G4 |
 | `keel.super-agent` | 多 main-agent 编排、结果收敛（插件，非内核） | 内核契约 | G2 |
 
-## 4. 交互（harness / ui）
+## 4. 交互（layer: harness / ui）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
@@ -74,7 +74,7 @@
 | `keel.commands` | slash 命令注册、补全、命令反馈 | 工具 | E1 |
 | `keel.feedback` | 消息/会话反馈采集 | 真值 | — |
 
-## 5. 能力接入（harness / provider）
+## 5. 能力接入（layer: harness / provider）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
@@ -89,14 +89,14 @@
 | `keel.document` | Office→PDF（provider） | — | 登记 |
 | `keel.ptc` / `keel.workflow` | 程序化工具调用 / 模型自写编排 | — | 登记 |
 
-## 6. 触发器（harness）
+## 6. 触发器（layer: harness）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
 | `keel.triggers` | cron/interval/webhook、HMAC、幂等去重、漏跑补偿、每触发器并发上限 | 工作流编排（非目标） | H4 |
 | `keel.schedule` | Host 定时任务与提醒 | 会话真值 | H4 |
 
-## 7. 插件基础设施（harness）
+## 7. 插件基础设施（layer: harness）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|
@@ -113,7 +113,7 @@
 | `keel.identity` | 匿名 id | 身份/授权 | — |
 | `keel.creation` | **聚合扩展面文档**、只读发现、脚手架、校验、审批安装、列举/删除 | 插件实现质量、槽位定义（属提供者） | I-创造模式 |
 
-## 8. UI 与槽位（kind: ui）
+## 8. UI 与槽位（layer: ui）
 
 | id | 管什么 | 不管什么 | 状态机 |
 |---|---|---|---|

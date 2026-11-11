@@ -42,7 +42,8 @@
 模型可见的**内建**工具集合 MUST 恒定为：`bash`、`read`、`write`、`edit`、`mcp`、`skills`、
 `tasks`、`agent`、`approve`、`notify`、`creation`。**动态能力**（MCP server、技能、任务、订阅源）
 MUST 通过 action 进入，MUST NOT 为其新增工具名。工具总数 MUST 与接入的 MCP server 数、技能数、
-任务数无关。插件 MAY 在安装时通过 `provides.tools` 显式扩展工具面（安装审批、改变清单哈希、
+任务数无关。`creation` MUST 始终存在于内建面；`keel.creation` 停用时其 actions MUST 返回
+`plugin_disabled`，工具名不消失。插件 MAY 在安装时通过 `provides.tools` 显式扩展工具面（安装审批、改变清单哈希、
 面板可见）；MUST NOT 在运行中静默增删。
 
 #### Scenario: 挂 100 个 MCP server 工具面不变

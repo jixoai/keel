@@ -27,7 +27,20 @@
 - [ ] **ADR 0001**：layerfs Rust+gRPC 的推翻记录与证据门；CI 工具链、Dockerfile/compose、
       健康检查、端口登记（13610–13799）、SIGKILL sweep
 - [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离；
+      `plugin_state(tenant_id, plugin_id, enabled, config, generation)` 与 `/v1/plugins` 过滤；
       `AGENTS.md` 修订为「默认单进程多租户；`user` 放置是显式 SKU」
+- [ ] **内核键命名空间**：扩展 `KeyKind` 与 `CommitRequest`（`fs:`/`capture:`/`task:`/`config:`/
+      `placement:`/`supervision:`/`guardrail:`/`resume:`/`notif-ack:`/`notif-push:`/`run:`），
+      禁止复用 `tool:` 前缀；加「tool.result 后紧接 fs.write」负控单测
+- [ ] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、
+      纯 chunk 包（无 `ui.entry`）、`plugin_state` 租户字段；`KnownFields(true)` 同步
+- [ ] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status
+      枚举（含 `partial`）；生成/比对 `COVERAGE.md` 与 `plugin-inventory.md`；比对脚本进 CI
+- [ ] **RSS 采样器**：`scripts/acceptance-rss.sh` 采样后端进程 `VmRSS` 求和，接 `acceptance-all.sh`，
+      断言 ≤500MB（目标 ≤300MB）；cgroup peak 单列
+- [ ] **原生 target 可执行**：`web` 与 `macos`（`nsh package --target macos`）构建产物 + 截图；
+      TUI 用 `nsh test --target tui` 的 cell dump
+- [ ] 废止代码里的旧工具名注释（`internal/agentext/plugin.go` 的 `spawn_subagent`/`creation_*`）
 - [ ] `docs/HARNESS.md` 增补 Harness/内核边界、放置模型与多用户升级
 - [ ] 架构测试：内核包不得 import placement/task/fs（沿用 `internal/architecture` 断言模式）
 
@@ -41,8 +54,8 @@
 - [ ] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
 - [ ] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
       `EXTENSIBILITY.md`（创造模式的聚合输入）
-- [ ] **三面对账**：`plugins/COVERAGE.md` ↔ `plugins/keel.plugin-market/catalog.json` ↔
-      `plugin-inventory.md` 的 id/状态/波次零差异；`goal`/`todo`/`plan` 并入 `keel.tasks`、
+- [ ] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` 逐行映射到
+      `keelPluginId`、`plugin-inventory.md` 覆盖全部 `keelPluginId`；`goal`/`todo`/`plan` 并入 `keel.tasks`、
       `team` absent、`workspace` 并入 Group、`guard` 并入 `keel.supervisor`，逐行给出处置
 - [ ] 为 v1 已交付的官方插件补 `extensibility.json` + `EXTENSIBILITY.md`（否则创造模式无法利用，
       且官方发布门禁会拒绝）
@@ -80,7 +93,7 @@
 
 ## W4 task-log（plan-plugin）与面板
 
-- [ ] `task_cards` / `task_events` 表；会话启动自动建初始卡
+- [ ] `task_cards` 行 + `task_events` **投影**（从账本重建，含重建一致性测试）；会话启动自动建初始卡
 - [ ] 强制 `taskId`：所有工具调用缺 `taskId` 直接拒绝（含内部子代理）
 - [ ] `tasks` 聚合工具：`create/update/attach/close/list/show`
 - [ ] 任务树投影：父子关系、跨会话 `parentTaskId` 拼接
@@ -188,12 +201,14 @@
 - [ ] 脚手架 / 校验 / 审批安装 / 列举 / 删除；校验 fail-closed 且给字段级原因
 - [ ] `keel.ui` 槽位机制：槽位注册与注销、贡献装载/卸载、schema 校验、目标降级
 - [ ] `keel.ui` 声明基础槽位（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` /
-      `.message-part` / `.sidebar` / `.settings-section` / `.task-widget` / `.surface`），
+      `.message-part` / `.sidebar` / `.settings-section` / `.surface`）；任务卡部件槽位由
+      `keel.tasks` 声明为 `keel.tasks.widget`；
       第一方面板改为贡献物
 - [ ] 三形态落地：`chunk`（NSH 动态导入，同 VM）、`package`（签名包，独立 VM + HostLimits，
       远小于默认 256MB）、`iframe`（兜底，显式标注）
 - [ ] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误
-- [ ] **验收：AI 现场写一个 Native 插件**（chunk 贡献），装→渲染→卸载无残留（web + 一个原生 target）
+- [ ] **验收：AI 现场写一个 Native 插件**（chunk 贡献），装→渲染→卸载无残留（web + `macos`）
+- [ ] `creation` 工具始终存在；`keel.creation` 停用时 actions 返回 `plugin_disabled`，工具名不消失
 - [ ] TUI 降级：`package`/`iframe` 槽位在终端显式不可用，`chunk` 可用
 
 **产品完整度（W2）**

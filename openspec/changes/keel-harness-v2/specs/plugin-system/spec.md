@@ -79,9 +79,12 @@ TUI MUST NOT 渲染 WebView/iframe 或 `package`（签名包独立 surface）形
 
 ### Requirement: 官方插件套件覆盖矩阵
 
-仓库 MUST 维护 `plugins/COVERAGE.md` 与 `plugins/keel.plugin-market/catalog.json`，并 MUST 与
-`openspec/changes/keel-harness-v2/plugin-inventory.md` **三面一致**（id 集合、状态、波次）。
-每个 DSH 能力组 MUST 有映射与状态；`absent` MUST 给理由。已合并/废弃的 id MUST 显式标记：
+仓库 MUST 维护 `plugins/COVERAGE.md` 与 `plugins/keel.plugin-market/catalog.json`，并以
+`catalog.json` 为**唯一机读真源**：每条 MUST 有 `id` / `keelPluginId` / `status` / `wave` /
+`dshGroups[]`；`COVERAGE.md` 与 `plugin-inventory.md` MUST 由该真源生成或经脚本比对。
+映射规则（不是三份 id 集合相等）：`COVERAGE.md` 的每一行 MUST 映射到 `catalog.json` 的
+`keelPluginId`（或 `absent` + 理由）；`catalog.json` 的每个 `keelPluginId` MUST 在
+`plugin-inventory.md` 中存在；三者的 `status` 与 `wave` MUST 一致。已合并/废弃的 id MUST 显式标记：
 
 - `goal` / `todo` / `plan-mode` 并入 `keel.tasks`（all-in-one plan-plugin）；
 - `team` → absent（另有结构方案）；
@@ -89,17 +92,114 @@ TUI MUST NOT 渲染 WebView/iframe 或 `package`（签名包独立 surface）形
 - `guard` 并入 `keel.supervisor`；
 - `keel.skill` / `keel.preset` 统一为 `keel.skills` / `keel.presets`。
 
-一条脚本 MUST 能比对三面为零差异（id 集合、状态、波次）。
+一条脚本 MUST 能完成上述映射比对（COVERAGE 行 → `keelPluginId` → catalog 条目）并以非零退出报告差异。
 
 #### Scenario: 矩阵无空行
 - **WHEN** 审查 `plugins/COVERAGE.md`
 - **THEN** 每个 DSH 能力组都有映射与状态，absent 行必须有理由
 
-#### Scenario: 三面比对
-- **WHEN** 运行三面比对脚本
-- **THEN** `COVERAGE.md`、`catalog.json`、`plugin-inventory.md` 的 id 集合与状态完全一致；
+#### Scenario: 映射对账
+- **WHEN** 运行对账脚本
+- **THEN** `COVERAGE.md` 每一行都映射到 `catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；
+  `catalog.json` 每个 `keelPluginId` 都在 `plugin-inventory.md` 存在；`status` 与 `wave` 一致；
   差异逐条列出并以非零退出
 
 #### Scenario: absent 有理由
 - **WHEN** 审查任一 `absent` 行
 - **THEN** 该行给出理由与替代能力，不允许空理由
+
+### Requirement: 插件包与清单
+
+插件 MUST 是一个目录 `<plugins-root>/<id>/`，含 `plugin.yaml`：
+
+```yaml
+id: vendor.name                # ^[a-z][a-z0-9._-]{1,63}$，全局唯一
+version: 1.2.3                 # semver；同 id 只能有一个启用版本
+kind: in-process|sidecar|webview
+layer: kernel|harness|provider|ui|service   # 可选；缺省按 kind 推导
+description: 一句话
+engines: { keel: ">=0.2.0 <0.3.0" }
+provides:
+  tools: [name, ...]
+  hooks: [event, ...]
+  triggers: [id, ...]
+  slots: [{ id, forms, arity, schema?, targets }]        # 本插件提供的槽位
+  ui: { entry: ui/index.html, title: "..." }             # 仅 iframe/webview 形态必填
+contributes:
+  - { slot: <slot-id>, form: chunk|package|iframe, entry: ui/settings.js }
+extensibility: { doc: EXTENSIBILITY.md, schema: extensibility.json }  # 官方插件必填，第三方可选
+requires: [plugin-or-service-id, ...]
+permissions: { fs: [workspace-write], net: [host...], secrets: [NAME...], tools: [name...] }
+entry: { command: [...], args: [...], env: [...] }   # sidecar 必填；in-process 可为空
+source: { type: builtin|local|git|npm, ... }
+```
+
+`webview` 的 `ui.entry` MUST 在贡献含 `iframe` 形态时必填；**纯 chunk 包 MUST 允许省略
+`ui`**。`layer` 可选，缺省按 kind 推导（webview→ui、sidecar→provider、in-process→harness）。
+`extensibility` 对官方插件 MUST 必填，对第三方 MAY 缺省（缺失时标记「不可被创造模式利用」）。
+
+#### Scenario: 清单非法即拒绝
+- **WHEN** `plugin.yaml` 缺 id/version/kind 或 id 不合文法
+- **THEN** 安装失败并返回字段级原因；插件目录不被采用
+
+#### Scenario: 版本门
+- **WHEN** 插件的 `engines.keel` 与当前版本不匹配
+- **THEN** 安装与启用都被拒绝，提示不匹配区间
+
+#### Scenario: 纯 chunk 包可安装
+- **WHEN** 一个 `kind: webview` 包只有 `contributes[form=chunk]` 而没有 `ui.entry`
+- **THEN** 校验通过并可安装；装配后贡献在宿主树内原生渲染，不需要 `/plugins/<id>/`
+
+### Requirement: 工具发布名 wire 安全
+
+`provides.tools` MUST 接受两种声明写法：裸本地名（`greet`）或已限定名（`<plugin>.greet`）。
+宿主发布的模型可见工具名 MUST 匹配 `^[A-Za-z0-9_-]{1,64}$`；发布 MUST 先把 `<plugin>` 与
+本地名以 `.` 连接、再把所有 `[^A-Za-z0-9_-]` 字符归一为 `_`；已经合规的名字 MUST 逐字不变。
+归一后的发布名 MUST 在安装时校验：不满足文法或两个声明归一后同名 MUST 以字段级错误拒绝。
+**`spawn_subagent` 的 v1「兼容红线」MUST 废止**：模型可见工具面以 `tool-surface` 为唯一真源；
+插件 `provides.tools` 仍按本规则归一。
+
+#### Scenario: 归一后一次调用闭环
+- **GIVEN** 一个 sidecar 插件 `demo.sidecar` 在清单与 `tools/list` 中都提供本地工具 `greet`
+- **WHEN** 它被启用后模型面上出现工具
+- **THEN** 可见名是 `demo_sidecar_greet`；以该名调用解析回本地工具 `greet`、在 sidecar 上真的执行、结果原样返回
+
+#### Scenario: 不合规即安装拒绝
+- **WHEN** 声明的工具归一后不匹配 `^[A-Za-z0-9_-]{1,64}$`（例如超长），或两个声明归一后同名
+- **THEN** 安装返回 `provides.tools[i]` 字段级错误并且包不被采用（清单不落库、包不入受管目录）
+
+### Requirement: UI 承载与桥接
+
+插件 UI MUST 按**槽位**装载，贡献形态由槽位声明：`chunk`（宿主树内原生渲染）、`package`
+（签名包独立 surface）、`iframe`（`/plugins/<id>/`，兜底且显式标注非原生主题）。插件 UI MUST
+经宿主桥 `keel.plugin.*`（读自身状态、调自身工具、请求审批、订阅事件）访问能力，MUST NOT
+获得宿主任何密钥；主题 MUST 使用宿主令牌。`/plugins/<id>/` 不再是唯一承载方式。
+
+#### Scenario: 插件 UI 可用
+- **WHEN** 打开已启用插件的一个 `iframe` 贡献
+- **THEN** 页面加载自 `/plugins/<id>/`，能显示自身状态并调用自身工具得到结果
+
+#### Scenario: chunk 贡献在宿主树内
+- **WHEN** 打开一个 `chunk` 贡献
+- **THEN** 它作为宿主树里的组件渲染，无 iframe、无 `/plugins/<id>/` 请求，主题随宿主切换
+
+## ADDED Requirements
+
+### Requirement: 插件状态与租户作用域
+
+插件**包安装** MUST 为进程级（二进制/文件/受管目录）；**启用、配置、可见性** MUST 为租户级：
+
+```
+plugin_state(tenant_id, plugin_id, enabled, config, generation)
+```
+
+`/v1/plugins` MUST 按调用者租户过滤；同一 Group 内不同租户的启用状态 MUST 互不影响；
+插件工具面 MUST 按租户装配。`user` 放置不改变该语义。
+
+#### Scenario: 租户各自启用
+- **WHEN** 租户 A 启用插件 P，租户 B 未启用
+- **THEN** A 的 `/v1/plugins` 与工具面包含 P，B 的都不包含；同机安装的包不重复
+
+#### Scenario: 同组跨用户隔离
+- **WHEN** 一个 `pack` Group 同时承载租户 A 与 B 的会话
+- **THEN** A 的插件配置与可见性不泄漏给 B，禁用 A 的插件不影响 B

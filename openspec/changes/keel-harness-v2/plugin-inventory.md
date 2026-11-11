@@ -195,7 +195,7 @@
 | `keel.ui.message-part` 消息部件 | chunk | 官方插件优先 |
 | `keel.ui.sidebar` 侧栏面板 | chunk / iframe | 官方插件优先 |
 | `keel.ui.settings-section` 设置分区 | chunk | 各插件 |
-| `keel.ui.task-widget` 任务卡部件 | chunk | 官方插件优先 |
+| `keel.tasks.widget` 任务卡部件 | chunk | 官方插件优先（槽位由 `keel.tasks` 声明） |
 | `keel.ui.surface` 独立表面 | package（签名）/ iframe | 重型工具 |
 
 第一方面板是这些槽位的**贡献物**（不是 Harness 的固定清单）：`ui-session`、`ui-tool-renderer`、
@@ -204,8 +204,10 @@
 
 ## 4. 与既有 COVERAGE / catalog 的对账
 
-`plugins/COVERAGE.md` 与 `plugins/keel.plugin-market/catalog.json` 是 v1 的单一真值；本清单与它们
-**三面必须一致**（id、状态、波次）。已知冲突逐行处置：
+`plugins/keel.plugin-market/catalog.json` 是**唯一机读真源**（需补 `wave` 与统一 status 枚举）；
+`COVERAGE.md` 逐行映射到 `keelPluginId`，本清单覆盖全部 `keelPluginId`。现状口径：COVERAGE 约
+75 个 id、本清单 60 余项、catalog 约 60 个 `keelPluginId`，status 还多出 `partial`——三者不是
+id 集合相等关系。已知冲突逐行处置：
 
 | 既有 id | 本清单处置 | 说明 |
 |---|---|---|
@@ -223,7 +225,7 @@
 | `keel.browser-use` / `keel.computer-use` | 登记 | 接 fde2e-bu / fde2e-cu |
 | `keel.creation` | 保留（内置），主路径改 chunk | 创造模式见 §3.9 |
 
-W0.5 MUST 跑三面比对脚本，差异逐条列出并以非零退出。
+W0.5 MUST 跑 catalog 对账脚本（COVERAGE 行 → `keelPluginId`），差异逐条列出并以非零退出。
 
 ## 5. 与 DSH 的关键差异
 

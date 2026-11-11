@@ -31,7 +31,8 @@
 - **判据**：内核包不得 import 产品层；插件不得访问同层内部状态；无第二套插件运行时；
   **模型可见工具集精确等于 11 个内建工具 ∪ 已审批 `provides.tools`**；迁移表「删除」列在代码中
   `grep` 零命中（测试夹具白名单除外）。
-- **证据**：`go test ./internal/architecture/...`、工具清单快照、迁移 grep、依赖图。
+- **证据**：`go test ./internal/architecture/...`、工具清单快照、迁移 grep、依赖图；
+  RSS 门由 `scripts/acceptance-rss.sh` 并入 `acceptance-all.sh` 执行。
 - **负控**：加一行 `import placement`、注册 `spawn_subagent`、或让插件直读另一插件状态 → 失败。
 
 ## G1 状态机门
@@ -76,9 +77,10 @@
 ## G6 插件门
 
 - **判据**：安装/启停/卸载**零残留**；缺依赖 `PENDING` 且原因可见；HMR 失败回滚且不打断 run；
-  `extensibility.json` 缺失的官方插件发布被拒；**`COVERAGE.md` / `catalog.json` /
-  `plugin-inventory.md` 三面 id 集合、状态、波次零差异**。
-- **证据**：注册表 diff + generation 序列 + 三面比对脚本输出。
+  `extensibility.json` 缺失的官方插件发布被拒；**`catalog.json` 为唯一机读真源**，
+  `COVERAGE.md` 每行映射到 `keelPluginId`，`plugin-inventory.md` 覆盖所有 `keelPluginId`，
+  `status`/`wave` 一致。
+- **证据**：注册表 diff + generation 序列 + catalog 对账脚本输出。
 - **负控**：卸载同时注册工具与 UI 贡献的插件；缺文档的包发布。
 
 ## G7 UI 与槽位门
@@ -87,13 +89,14 @@
   （无硬编码色值/阴影）；`iframe` 显式标注非原生主题；**TUI 中 `package`/`iframe` 显式不可用、
   `chunk` 正常渲染**；**至少一个原生 target 渲染 chunk**；桥按能力裁剪，越权 `ERR_ACCESS_DENIED`；
   系统级推送在原生 target 用系统通知，web target 无 service worker 时显式降级（登记缺口）。
-- **证据**：web + 原生 target + TUI 三组截图/日志；越权审计；主题切换前后截图。
+- **证据**：web + **`macos`（`nsh package --target macos`）** + TUI（`nsh test --target tui`）
+  三组截图/日志；越权审计；主题切换前后截图。
 - **负控**：给只允许 `chunk` 的槽位投 `iframe`；越权桥调用。
 
 ## G8 创造模式门
 
 - **判据**：**AI 现场写出一个 Native 插件**（chunk 槽位贡献），从聚合目录出发 → 生成包 →
-  校验 → 审批安装 → 在 **web 与至少一个原生 target** 渲染 → 卸载无残留；给出 TUI 渲染或
+  校验 → 审批安装 → 在 **web 与 `macos` 原生 target** 渲染 → 卸载无残留；给出 TUI 渲染或
   显式降级证据；缺文档/非法形态/硬编码令牌的包被拒且理由字段级可读。
 - **证据**：AI 会话记录 + 生成的包 + 三端截图 + 卸载 diff。
 - **负控**：硬编码主题色、贡献到不存在的槽位、缺 `extensibility.json` → 安装前被拒。
