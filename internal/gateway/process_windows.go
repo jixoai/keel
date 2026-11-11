@@ -47,12 +47,18 @@ func KillTree(pid int) error {
 // processGroupExists always reports false on Windows: groups are not tracked.
 func processGroupExists(int) bool { return false }
 
+// processQueryLimitedInformation is PROCESS_QUERY_LIMITED_INFORMATION from
+// winnt.h. Go's syscall package does not export it (the constant lives in
+// golang.org/x/sys/windows), and pulling that module in for one number is not
+// worth it — the value is part of the stable Win32 ABI.
+const processQueryLimitedInformation = 0x1000
+
 // processExists reports whether pid is alive.
 func processExists(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	handle, err := syscall.OpenProcess(syscall.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	handle, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
 	if err != nil {
 		return false
 	}
