@@ -37,7 +37,7 @@
 import { cleanup, effect, host, openUrl, platform, signal, Text, View, WebView } from "nsh";
 import type { PluginStatusView, TriggerSpecView, TriggerStatusView } from "../data/contract";
 import { store } from "../data/store";
-import { formatTime, pluginStateLabel } from "../data/wire";
+import { displayNameOf, formatTime, pluginStateLabel } from "../data/wire";
 import { Icon } from "../ui/icons";
 import {
   Badge,
@@ -45,6 +45,8 @@ import {
   Card,
   CardContent,
   CardHeader,
+  Collapsible,
+  CollapsibleTrigger,
   Empty,
   EmptyDescription,
   EmptyMedia,
@@ -409,19 +411,69 @@ function TriggerTable(props: { pluginId: string; triggers: TriggerSpecView[] }) 
 
 // ---- one plugin -----------------------------------------------------------
 
+/** The card's detail fold, per plugin: closed until asked for. */
+const detailOpen = signal<Record<string, boolean>>({});
+
+const detailShown = (id: string): boolean => detailOpen()[id] ?? false;
+
+const toggleDetail = (id: string) => {
+  const next = { ...detailOpen() };
+  next[id] = !(next[id] ?? false);
+  detailOpen.set(next);
+};
+
+/** The plugin under a name a reader can say: the id's dotted/dashed segments
+ * read as words. The id itself is a detail. */
+const pluginName = (id: string): string => displayNameOf(id.replace(/[._]/g, " ").trim());
+
+/** One id or raw diagnostic line inside the detail fold: mono, selectable,
+ * never a headline. */
+function DetailText(props: { text: string; tone?: "muted" | "danger" }) {
+  return (
+    <Text
+      style={{
+        fontFamily: font.mono,
+        fontSize: typeScale.xs,
+        lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+        color: props.tone === "danger" ? color.danger : color.mutedForeground,
+        userSelect: "text",
+      }}
+    >
+      {props.text}
+    </Text>
+  );
+}
+
 function PluginCard(props: { plugin: () => PluginStatusView }) {
   const state = () => props.plugin().state ?? "unknown";
   const tools = () => props.plugin().tools ?? [];
   const hooks = () => props.plugin().hooks ?? [];
   const diagnostics = () => props.plugin().diagnostics ?? [];
   const triggers = () => props.plugin().triggers ?? [];
-  const subtitle = () => {
+  const detail = () => detailShown(props.plugin().id);
+
+  /** The trigger surface in one phrase: how many, whether they are armed, and
+   * when one last fired. */
+  const triggerStatus = () => {
+    if (triggers().length === 0) return "没有触发器";
+    const rows = triggers().map((trigger) => store.triggers().find((row) => row.id === trigger.id));
+    const disabled = triggers().filter(
+      (trigger, index) => trigger.enabled === false || rows[index]?.enabled === false,
+    ).length;
+    const lastFired = rows
+      .filter((row): row is TriggerStatusView => !!row?.lastFireAt)
+      .sort((a, b) => (a.lastFireAt ?? "").localeCompare(b.lastFireAt ?? ""))
+      .pop();
+    const stateText = disabled > 0 ? `${disabled} 个已停用` : "全部启用";
+    const lastText = lastFired ? `上次 ${formatTime(lastFired.lastFireAt)}` : "尚未触发";
+    return `触发器 ${triggers().length} 个 · ${stateText} · ${lastText}`;
+  };
+  const timeline = () => {
     const parts = [
-      props.plugin().version ? `v${props.plugin().version}` : "",
       props.plugin().startedAt ? `启动 ${formatTime(props.plugin().startedAt)}` : "",
       props.plugin().stoppedAt ? `停止 ${formatTime(props.plugin().stoppedAt)}` : "",
     ].filter((part) => part.length > 0);
-    return parts.length > 0 ? parts.join(" · ") : undefined;
+    return parts.join(" · ");
   };
   const outcome = () => {
     const row = browserOutcome();
@@ -431,11 +483,10 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
     <Card
       size="sm"
       testID={`plugin-${props.plugin().id}`}
-      accessibilityLabel={`插件 ${props.plugin().id}`}
+      accessibilityLabel={`插件 ${pluginName(props.plugin().id)}`}
     >
       <CardHeader
-        title={props.plugin().id}
-        description={subtitle()}
+        title={pluginName(props.plugin().id)}
         action={
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
             <Badge variant={pluginStateVariant(state())} label={pluginStateLabel(state())} />
@@ -445,79 +496,22 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
               size="sm"
               icon="external"
               label={platform.idiom === "terminal" ? "在浏览器打开" : "打开"}
-              accessibilityLabel={`打开插件 ${props.plugin().id}`}
+              accessibilityLabel={`打开插件 ${pluginName(props.plugin().id)}`}
               onPress={() => openPlugin(props.plugin().id)}
             />
           </View>
         }
       />
       <CardContent>
-        {/* 来源：the three contract fields that say where the plugin sits. */}
-        <View style={{ flexDirection: "row", gap: space["2xl"], flexWrap: "wrap" }}>
-          <Fact label="提供" value={(props.plugin().provides ?? []).join(" · ") || "—"} />
-          <Fact label="依赖" value={(props.plugin().requires ?? []).join(" · ") || "无"} />
-          <Fact label="效果" value={(props.plugin().effects ?? []).join(" · ") || "—"} />
-        </View>
-
+        {/* 主卡只说人话：版本、工具数、触发器状态。id、能力令牌与原始诊断在
+            「详情」里。 */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <If when={!!props.plugin().version}>
+            <Badge variant="outline" label={`v${props.plugin().version}`} />
+          </If>
           <Badge variant="secondary" label={`${tools().length} 个工具`} />
-          <Badge variant="secondary" label={`${hooks().length} 个钩子`} />
-          <Badge variant="secondary" label={`${triggers().length} 个触发器`} />
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{triggerStatus()}</Text>
         </View>
-
-        <If when={tools().length > 0}>
-          <Text
-            style={{
-              fontFamily: font.mono,
-              fontSize: typeScale.xs,
-              lineHeight: Math.round(typeScale.xs * lineHeight.normal),
-              color: color.mutedForeground,
-              userSelect: "text",
-            }}
-          >
-            {`工具：${tools().join(" · ")}`}
-          </Text>
-        </If>
-        <If when={hooks().length > 0}>
-          <Text
-            style={{
-              fontFamily: font.mono,
-              fontSize: typeScale.xs,
-              lineHeight: Math.round(typeScale.xs * lineHeight.normal),
-              color: color.mutedForeground,
-              userSelect: "text",
-            }}
-          >
-            {`钩子：${hooks().join(" · ")}`}
-          </Text>
-        </If>
-
-        <If when={triggers().length > 0}>
-          <TriggerTable pluginId={props.plugin().id} triggers={triggers()} />
-        </If>
-        <If when={triggers().length === 0}>
-          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>没有声明触发器。</Text>
-        </If>
-
-        <If when={diagnostics().length > 0}>
-          <View style={{ gap: space.xxs }}>
-            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>诊断</Text>
-            <Each of={diagnostics()} key="index">
-              {(line) => (
-                <Text
-                  style={{
-                    fontSize: typeScale.sm,
-                    lineHeight: Math.round(typeScale.sm * lineHeight.normal),
-                    color: color.danger,
-                    userSelect: "text",
-                  }}
-                >
-                  {line()}
-                </Text>
-              )}
-            </Each>
-          </View>
-        </If>
 
         {/* The terminal's browser hand-off: what openUrl answered, and — on a
             refusal — the address itself, clickable to try again. */}
@@ -543,6 +537,58 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
             </If>
           </View>
         </If>
+
+        <Collapsible
+          open={detail()}
+          accessibilityLabel={`${pluginName(props.plugin().id)} 详情`}
+        >
+          <CollapsibleTrigger
+            testID={`plugin-detail-${props.plugin().id}`}
+            label="详情"
+            icon="file"
+            expanded={detail()}
+            onPress={() => toggleDetail(props.plugin().id)}
+          />
+          <View style={{ gap: space.md, paddingTop: space.sm }}>
+            <View style={{ flexDirection: "row", gap: space["2xl"], flexWrap: "wrap" }}>
+              <Fact label="插件 id" value={props.plugin().id} />
+              <If when={!!props.plugin().version}>
+                <Fact label="版本" value={props.plugin().version ?? ""} />
+              </If>
+              <If when={!!timeline()}>
+                <Fact label="运行" value={timeline()} />
+              </If>
+            </View>
+            <View style={{ flexDirection: "row", gap: space["2xl"], flexWrap: "wrap" }}>
+              <Fact label="提供" value={(props.plugin().provides ?? []).join(" · ") || "—"} />
+              <Fact label="依赖" value={(props.plugin().requires ?? []).join(" · ") || "无"} />
+              <Fact label="效果" value={(props.plugin().effects ?? []).join(" · ") || "—"} />
+            </View>
+            <If when={tools().length > 0}>
+              <View style={{ gap: space.xxs }}>
+                <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>工具</Text>
+                <DetailText text={tools().join(" · ")} />
+              </View>
+            </If>
+            <If when={hooks().length > 0}>
+              <View style={{ gap: space.xxs }}>
+                <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>钩子</Text>
+                <DetailText text={hooks().join(" · ")} />
+              </View>
+            </If>
+            <If when={triggers().length > 0}>
+              <TriggerTable pluginId={props.plugin().id} triggers={triggers()} />
+            </If>
+            <If when={diagnostics().length > 0}>
+              <View style={{ gap: space.xxs }}>
+                <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>诊断</Text>
+                <Each of={diagnostics()} key="index">
+                  {(line) => <DetailText text={line()} tone="danger" />}
+                </Each>
+              </View>
+            </If>
+          </View>
+        </Collapsible>
       </CardContent>
     </Card>
   );

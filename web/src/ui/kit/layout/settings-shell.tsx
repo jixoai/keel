@@ -18,11 +18,14 @@
 //
 // Platform notes:
 //   · terminal: 68px/896px are laid out on the cell grid (widths near a few
-//     cells); the rail's labels are hidden in the rail mode either way, so the
-//     narrow layout is legible there.
-//   · web/desktop: as the reference.
+//     cells); a terminal keeps the icon square in the narrow rail (its rows
+//     are too tall for eight labelled entries), so it reads the wide rail's
+//     labelled form on wider windows.
+//   · web/desktop: as the reference, except that the narrow rail stacks a
+//     label under each icon — an icon-only rail asks the reader to guess seven
+//     glyphs, and semantic icons alone are not an accessible label.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
-import { effect, Scroll, Storage, signal, Text, View, windowSize } from "nsh";
+import { effect, platform, Scroll, Storage, signal, Text, View, windowSize } from "nsh";
 import { Icon, type IconName } from "../../icons";
 import { color, motion, radius as kitRadius, typeScale } from "../tokens";
 
@@ -67,6 +70,10 @@ export function SettingsShell(props: SettingsShellProps) {
   const ownSection = signal(props.initialSection ?? props.sections[0]?.id ?? "general");
   const activeSection = () => props.section ?? ownSection();
   const wideRail = () => windowSize().width >= SETTINGS_RAIL_WIDE_MIN_WINDOW_PX;
+  /** The narrow rail stacks a label under each glyph on pointer-driven hosts:
+   * 68px holds four Chinese characters at `typeScale.sm`, so every section is
+   * named, not guessed. */
+  const stackedRail = () => !wideRail() && platform.idiom !== "terminal";
 
   // The remembered section, read once on mount (async storage).
   effect(() => {
@@ -117,6 +124,7 @@ export function SettingsShell(props: SettingsShellProps) {
                 label={props.backLabel ?? "返回工作区"}
                 testID="settings-back"
                 wide={wideRail()}
+                stacked={stackedRail()}
                 onPress={() => props.onBack?.()}
               />
             </If>
@@ -125,6 +133,7 @@ export function SettingsShell(props: SettingsShellProps) {
                 <SettingsRailEntry
                   entry={entry()}
                   wide={wideRail()}
+                  stacked={stackedRail()}
                   selected={activeSection() === entry().id}
                   onSelect={selectSection}
                 />
@@ -202,11 +211,12 @@ export function SettingsShell(props: SettingsShellProps) {
   );
 }
 
-/** One rail entry: icon always, label only in the wide rail (the reference's
- * `max-lg:sr-only`). */
+/** One rail entry: icon always, label beside it in the wide rail and under it
+ * in the narrow (pointer-driven) rail. */
 function SettingsRailEntry(props: {
   entry: SettingsSectionEntry;
   wide: boolean;
+  stacked: boolean;
   selected: boolean;
   onSelect: (sectionId: string) => void;
 }) {
@@ -231,6 +241,7 @@ function SettingsRailEntry(props: {
         label={props.entry.label}
         testID={`settings-section-${props.entry.id}`}
         wide={props.wide}
+        stacked={props.stacked}
         selected={props.selected}
         onPress={() => props.onSelect(props.entry.id)}
       />
@@ -238,12 +249,14 @@ function SettingsRailEntry(props: {
   );
 }
 
-/** A rail row: 40px tall in the wide rail, a 40px square in the icon rail. */
+/** A rail row: 40px tall in the wide rail, a 40px square in the icon rail, and
+ * icon-over-label in the narrow rail of a pointer-driven host. */
 function SettingsRailButton(props: {
   icon: IconName;
   label: string;
   testID: string;
   wide: boolean;
+  stacked: boolean;
   selected?: boolean;
   onPress: () => void;
 }) {
@@ -258,11 +271,11 @@ function SettingsRailButton(props: {
       hoverStyle={{ backgroundColor: color.hover }}
       activeStyle={{ backgroundColor: color.glassStateArmed }}
       style={{
-        height: 40,
-        flexDirection: "row",
+        height: props.stacked ? 56 : 40,
+        flexDirection: props.stacked ? "column" : "row",
         alignItems: "center",
         justifyContent: props.wide ? "flex-start" : "center",
-        gap: 8,
+        gap: props.stacked ? 4 : 8,
         paddingHorizontal: props.wide ? 10 : 0,
         borderRadius: kitRadius.md,
         backgroundColor: props.selected ? color.glassState : undefined,
@@ -277,12 +290,14 @@ function SettingsRailButton(props: {
         size={16}
         tint={props.selected ? color.foreground : color.mutedForeground}
       />
-      <If when={props.wide}>
+      <If when={props.wide || props.stacked}>
         <Text
           style={{
-            fontSize: typeScale.base,
+            fontSize: props.stacked ? typeScale.sm : typeScale.base,
             fontWeight: props.selected ? 600 : 400,
             color: props.selected ? color.foreground : color.mutedForeground,
+            numberOfLines: 1,
+            textAlign: "center",
           }}
         >
           {props.label}

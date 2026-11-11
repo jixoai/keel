@@ -90,7 +90,10 @@ const screen = signal<"list" | "chat">("list");
 
 const selectSession = (sessionId: string) => {
   void store.openSession(sessionId);
-  if (singleColumn()) screen.set("chat");
+  // Set unconditionally: in the wide layout nothing reads it, but shrinking the
+  // window to the single-column breakpoint must land on the session the reader
+  // was in, not back on the list.
+  screen.set("chat");
 };
 
 /** Back to the list; the conversation stays open (the list still marks it). */

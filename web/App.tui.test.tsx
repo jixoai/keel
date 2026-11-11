@@ -81,12 +81,12 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   await app.press("label:打开设置");
   await app.waitFor("text:当前生效");
   expect(app.texts()).toContain("部署默认");
-  expect(app.texts()).toContain("配置版本 3");
+  expect(app.texts().join("\n")).toContain("第 3 版");
   // The name the reader picks by, and the wire identity as the detail line.
   expect(app.texts()).toContain("DeepSeek V4.1 Flash · 高");
-  expect(app.texts()).toContain("s2api/deepseek-v4.1-flash · 高");
+  expect(app.texts()).toContain("s2api/deepseek-v4.1-flash");
   expect(app.texts()).toContain("模型列表");
-  expect(app.texts()).toContain("Provider 列表");
+  expect(app.texts()).toContain("服务商列表");
   // 不可执行的 provider 的模型不可选（anthropic 在演示里没有凭据）。
   expect(app.texts()).toContain("不可执行");
   await expect(app.press("label:设为默认 Claude Sonnet 5")).rejects.toMatchObject({
@@ -106,17 +106,17 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   await app.waitFor("text:/保存被拒绝/");
   expect(app.texts()).toContain("selection.modelId");
   expect(app.texts()).toContain("selection s2api/nope does not match any declared model");
-  // 配置版本没有被写走。
-  expect(app.texts()).toContain("配置版本 3");
+  // 版本号没有被写走（失败的保存不留痕）。
+  expect(app.texts().join("\n")).toContain("第 3 版");
 
-  // 好文档：保存即生效，配置版本 +1，来源变「已保存覆盖」。
+  // 好文档：保存即生效，版本号 +1，来源变「已保存覆盖」。
   await app.clear("id:settings-raw-document");
   await app.type(
     "id:settings-raw-document",
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"deepseek-v4.1-flash","reasoningLevel":"low"}}',
   );
   await app.press("label:保存模型配置");
-  await app.waitFor("text:/配置版本 4/");
+  await app.waitFor("text:/第 4 版/");
   expect(app.texts()).toContain("已保存覆盖");
   await app.waitFor("text:/DeepSeek V4\\.1 Flash · 低/");
 
@@ -126,7 +126,7 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   await app.press("label:确认重置");
   await app.waitFor("text:/已重置为部署默认/");
   expect(app.texts()).toContain("部署默认");
-  await app.waitFor("text:/配置版本 5/");
+  await app.waitFor("text:/第 5 版/");
 
   // 分区导航：密钥（名字与时间，值不回显）与插件（清单/触发器）。分区入口是
   // kit 的图标 rail，按 testID 寻址（`settings-section-<id>`）。
@@ -168,7 +168,7 @@ test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分�
   await app.waitFor("text:本会话当前");
   expect(app.texts()).toContain("租户默认");
   expect(app.texts()).toContain("DeepSeek V4.1 Flash · 高");
-  // 裸 id 只作详情行（弹层内），不做主标签。
+  // 主标签是展示名；裸 id 只作详情行（弹层内），不做主标签。
   expect(app.texts()).toContain("s2api/deepseek-v4.1-flash · 高");
 
   // 选择 claude-sonnet-5（fixture 里 anthropic 无凭据 → 不在选择器里）。

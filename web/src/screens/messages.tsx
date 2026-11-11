@@ -27,7 +27,7 @@ import type {
   TurnView,
   WorkSegment,
 } from "../data/contract";
-import { formatDuration, formatTime, formatTokens, preview } from "../data/wire";
+import { displayNameOf, formatDuration, formatTime, formatTokens, preview } from "../data/wire";
 import { store } from "../data/store";
 import { Icon, type IconName } from "../ui/icons";
 import { fitCells, wrapCells } from "../ui/text";
@@ -612,7 +612,8 @@ function ToolGroup(props: { segment: WorkSegment; running: boolean; waiting?: bo
 }
 
 /** The ledger's own line about a run: state, what it cost, and who answered —
- * the identity fact (provider/model) lines up with the model in settings. */
+ * the model under its display name; the wire identity stays the badge's
+ * accessible name, never its label. */
 function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
   const summary = props.summary;
   const text = () => {
@@ -627,6 +628,11 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
   const identity = () => {
     if (!summary || (!summary.provider && !summary.model)) return "";
     return `${summary.provider ? `${summary.provider}/` : ""}${summary.model ?? ""}`;
+  };
+  const identityName = () => {
+    if (!summary) return "";
+    if (summary.model) return displayNameOf(summary.model);
+    return summary.provider ? displayNameOf(summary.provider) : "";
   };
   /** An unusual end to a run that nevertheless completed (a truncated answer,
    * a tool round). A failure or a stop already says so in the status word. */
@@ -651,10 +657,8 @@ function RunSummaryRow(props: { status: TurnStatus; summary?: RunSummary }) {
       </If>
       <If when={!!identity()}>
         <Badge variant="ghost" accessibilityLabel={identity()}>
-          <Text
-            style={{ fontSize: typeScale.sm, color: color.mutedForeground, fontFamily: font.mono }}
-          >
-            {identity()}
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            {identityName()}
           </Text>
         </Badge>
       </If>

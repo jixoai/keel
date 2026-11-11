@@ -37,6 +37,8 @@ export type IconName =
   | "layers"
   | "settings"
   | "key"
+  | "keyboard"
+  | "info"
   | "play";
 
 const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
@@ -79,6 +81,19 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
     "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   ],
   key: ["M21 2l-9.6 9.6", "M15.5 7.5l3 3L22 7l-3-3", "M7.5 21a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11z"],
+  // lucide's `keyboard` (a key row, the space bar) and `info` (a circled i).
+  keyboard: [
+    "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+    "M6 8h.01",
+    "M10 8h.01",
+    "M14 8h.01",
+    "M18 8h.01",
+    "M8 12h.01",
+    "M12 12h.01",
+    "M16 12h.01",
+    "M7 16h10",
+  ],
+  info: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5", "M12 8h.01"],
   play: ["M6 3l14 9-14 9V3z"],
 };
 

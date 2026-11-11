@@ -103,11 +103,13 @@ const messageOf = (error: unknown): string => {
   return String(error);
 };
 
-/** Newest first by createdAt (the API's own clock), stable for rows without
- * one — a listing order, never a re-sort of what is already on screen. */
+/** Newest first by `lastMessageAt` — the same clock the row displays, so the
+ * order and the "3 分钟前" beside it can never contradict each other (sorting by
+ * `createdAt` while printing `lastMessageAt` put a session that moved five
+ * seconds ago at the bottom). Ties keep the server's order. */
 const sortNewestFirst = (rows: SessionSummary[]): SessionSummary[] => {
   const stamp = (row: SessionSummary) => {
-    const raw = row.createdAt ?? row.lastMessageAt ?? "";
+    const raw = row.lastMessageAt ?? row.createdAt ?? "";
     const at = Date.parse(raw);
     return Number.isFinite(at) ? at : 0;
   };

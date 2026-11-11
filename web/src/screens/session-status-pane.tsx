@@ -7,8 +7,8 @@
 //   · the run state       `conversationState(store.conversation())` — the same
 //                         vocabulary the header's badge uses, one word;
 //   · the model           the session's own selection, else the tenant default
-//                         (`selectionDisplay` for the reader, the wire identity
-//                         as a mono detail line);
+//                         (`selectionDisplay`: the display name, never the raw
+//                         wire identity);
 //   · the reasoning level that selection's level, in the pickers' words;
 //   · the usage           the open view's run summaries added up;
 //   · the tool calls      every work segment's tool calls, counted;
@@ -23,12 +23,11 @@
 // (or in an `<If>`), never in a body-level local.
 import { cleanup, effect, Text, View } from "nsh";
 import { store } from "../data/store";
-import { formatTokens, reasoningLabel, selectionDisplay, selectionLabel } from "../data/wire";
+import { formatTokens, reasoningLabel, selectionDisplay } from "../data/wire";
 import {
   Badge,
   ScrollArea,
   color,
-  font,
   lineHeight,
   space,
   typeScale,
@@ -58,9 +57,8 @@ const connectionLabel = (status: string): string => {
   }
 };
 
-/** One fact: its name above its value (a detail line under it, when the wire
- * form is worth keeping). */
-function StatusFact(props: { label: string; value: string; detail?: string }) {
+/** One fact: its name above its value. */
+function StatusFact(props: { label: string; value: string }) {
   return (
     <View style={{ gap: space.xxs }}>
       <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{props.label}</Text>
@@ -74,18 +72,6 @@ function StatusFact(props: { label: string; value: string; detail?: string }) {
       >
         {props.value}
       </Text>
-      {props.detail !== undefined && props.detail.length > 0 ? (
-        <Text
-          style={{
-            fontFamily: font.mono,
-            fontSize: typeScale["2xs"],
-            color: color.mutedForeground,
-            userSelect: "text",
-          }}
-        >
-          {props.detail}
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -195,11 +181,7 @@ export function SessionStatusPane() {
           }
         >
           <If when={!!effectiveSelection()}>
-            <StatusFact
-              label="模型"
-              value={selectionDisplay(effectiveSelection())}
-              detail={selectionLabel(effectiveSelection())}
-            />
+            <StatusFact label="模型" value={selectionDisplay(effectiveSelection())} />
           </If>
           <If when={!!effectiveSelection()?.reasoningLevel}>
             <StatusFact

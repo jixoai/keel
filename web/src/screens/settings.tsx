@@ -13,7 +13,7 @@
 //                `applyAppearance` (`src/ui/appearance.ts`), which is also
 //                what the app root reads at boot — one source, so the page and
 //                the boot agree.
-//   · 模型与 Provider  the effective document, its resolved providers/models,
+//   · 模型接入   the effective document, its resolved providers/models,
 //                a structured form over the document's default selection and
 //                each provider's template / endpoint / credential reference,
 //                and the raw document behind one collapsed「高级」disclosure.
@@ -28,8 +28,8 @@
 // The section is *controlled*: this file owns the signal and its storage
 // (`SETTINGS_SECTION_STORAGE_KEY`, read on mount and written on every move),
 // the shell only renders the rail (`settings-shell.tsx` persists only its own
-// uncontrolled state). The page opens on 模型与 Provider — the section the
-// previous settings page was — until a remembered section replaces it.
+// uncontrolled state). The page opens on 模型接入 — the section the previous
+// settings page was — until a remembered section replaces it.
 //
 // Three confirmations ask through the kit's `AlertDialog`: the model reset and
 // the secret delete live here (the session delete is the session list's).
@@ -57,7 +57,6 @@ import {
   providerDisplayName,
   reasoningLabel,
   selectionDisplay,
-  selectionLabel,
 } from "../data/wire";
 import { applyAppearance, appearancePreference, type Appearance } from "../ui/appearance";
 import { Icon } from "../ui/icons";
@@ -128,11 +127,11 @@ export const settingsSection = signal<SettingsSection>("models");
 const SECTIONS: SettingsSectionEntry[] = [
   { id: "general", label: "通用", icon: "settings", group: "常规" },
   { id: "appearance", label: "外观", icon: "sun" },
-  { id: "models", label: "模型与 Provider", icon: "brain", group: "配置" },
+  { id: "models", label: "模型接入", icon: "brain", group: "配置" },
   { id: "secrets", label: "密钥", icon: "key" },
   { id: "plugins", label: "插件", icon: "layers" },
-  { id: "shortcuts", label: "快捷键", icon: "terminal", group: "参考" },
-  { id: "about", label: "关于", icon: "message" },
+  { id: "shortcuts", label: "快捷键", icon: "keyboard", group: "参考" },
+  { id: "about", label: "关于", icon: "info" },
 ];
 
 const isSection = (value: string): value is SettingsSection =>
@@ -321,13 +320,20 @@ const setProviderCredential = (providerId: string, credential: string) => {
   });
 };
 
-/** The templates the document validator knows; anything else stays a raw-JSON
- * edit. */
+/** The protocol templates the document validator knows, each under the name a
+ * reader picks by. The value stays the document's own token; a document that
+ * carries a token outside this list keeps its raw text (the「高级」editor is
+ * where it is changed). */
 const API_PROTOCOLS: SelectItem[] = [
-  { value: "openai-chat-completions", title: "openai-chat-completions" },
-  { value: "openai-responses", title: "openai-responses" },
-  { value: "anthropic-messages", title: "anthropic-messages" },
+  { value: "openai-chat-completions", title: "OpenAI 兼容" },
+  { value: "openai-responses", title: "OpenAI Responses" },
+  { value: "anthropic-messages", title: "Anthropic Messages" },
 ];
+
+/** A protocol token in the reader's words; an unknown token is shown as it is
+ * (never mapped onto a made-up name). */
+const protocolLabel = (value: string | undefined): string =>
+  API_PROTOCOLS.find((item) => item.value === value)?.title ?? (value ?? "");
 
 // ---- shared pieces --------------------------------------------------------
 
@@ -505,7 +511,7 @@ function AppearanceSection() {
   );
 }
 
-// ---- 模型与 Provider ------------------------------------------------------
+// ---- 模型接入 ------------------------------------------------------------
 
 function CurrentCard() {
   return (
@@ -541,14 +547,13 @@ function CurrentCard() {
                 variant={store.settings()?.source === "stored" ? "info" : "secondary"}
                 label={store.settings()?.source === "stored" ? "已保存覆盖" : "部署默认"}
               />
-              <Text
-                style={{
-                  fontSize: typeScale.sm,
-                  color: color.mutedForeground,
-                  fontVariant: ["tabular-nums"],
-                }}
-              >
-                配置版本 {store.settings()?.revision ?? 0}
+              {/* The revision stays visible but in the reader's words: it is the
+               * only proof a save took effect, and "第 4 版" is a version a
+               * customer understands. */}
+              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                {store.settings()?.source === "stored"
+                  ? `最近更新：已保存覆盖部署默认 · 第 ${store.settings()?.revision ?? 0} 版`
+                  : `最近更新：沿用部署默认 · 第 ${store.settings()?.revision ?? 0} 版`}
               </Text>
             </View>
             <Field label="默认模型">
@@ -560,33 +565,11 @@ function CurrentCard() {
                   </Text>
                 }
               >
-                <View style={{ gap: space.xxs }}>
-                  <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-                    {selectionDisplay(store.tenantSelection())}
-                  </Text>
-                  {/* The wire identity as the detail line. */}
-                  <Text
-                    style={{
-                      fontFamily: font.mono,
-                      fontSize: typeScale["2xs"],
-                      color: color.mutedForeground,
-                      userSelect: "text",
-                    }}
-                  >
-                    {selectionLabel(store.tenantSelection())}
-                  </Text>
-                </View>
+                <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+                  {selectionDisplay(store.tenantSelection())}
+                </Text>
               </If>
             </Field>
-            <If when={!!store.settingsSavedSummary()}>
-              <Text style={{ fontSize: typeScale.xs, color: color.success }}>
-                最近一次写入：{store.settingsSavedSummary() ?? ""}
-              </Text>
-            </If>
-            <IssueList issues={() => store.settings()?.issues ?? []} label="解析诊断" />
-            <If when={(store.settings()?.issues ?? []).length === 0}>
-              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>解析诊断：无</Text>
-            </If>
           </View>
         </If>
       </CardContent>
@@ -694,7 +677,7 @@ function SelectionCard() {
     <Card testID="settings-selection">
       <CardHeader
         title="部署默认"
-        description="结构化编辑默认选择；保存时整份配置一起提交，并核对打开时的配置版本，服务端逐字段校验。"
+        description="结构化编辑默认选择；保存时整份配置一起提交，服务端按打开时读到的配置核对，并逐字段校验。"
       />
       <CardContent>
         <If when={store.settingsIssues().length > 0}>
@@ -708,7 +691,7 @@ function SelectionCard() {
         <If when={store.settingsConflict() !== null}>
           <Notice tone="warning" accessibilityLabel="文档冲突">
             <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.warning }}>
-              配置已被其它写入更新（当前版本 {store.settingsConflict() ?? "?"}）
+              配置已被其它写入更新
             </Text>
             <Text
               style={{
@@ -733,13 +716,13 @@ function SelectionCard() {
           </Notice>
         </If>
         <FieldGroup>
-          <Field label="Provider" hint="来自当前配置的 Provider；保存后服务端按凭据解析可执行性。">
+          <Field label="服务商" hint="来自当前配置的服务商；保存后服务端按凭据解析可执行性。">
             <Select
               testID="settings-selection-provider"
-              accessibilityLabel="默认 Provider"
+              accessibilityLabel="默认服务商"
               items={providerItems()}
               value={selection()?.providerId ?? null}
-              placeholder="选择 Provider"
+              placeholder="选择服务商"
               onChange={(value) => {
                 if (value) chooseProvider(value);
               }}
@@ -749,7 +732,7 @@ function SelectionCard() {
             label="模型"
             hint={
               modelItems(selection()).length === 0
-                ? "该 Provider 还没有声明模型。"
+                ? "该服务商还没有声明模型。"
                 : "可选的模型才能保存为默认；不可执行的会标明原因。"
             }
           >
@@ -849,7 +832,7 @@ function ProviderEditorRow(props: { provider: () => DraftProvider }) {
         <Badge variant="secondary" label={`${props.provider().modelIds.length} 个模型`} />
       </View>
       <FieldGroup>
-        <Field label="接口协议" hint="只列常用协议；其它取值可在「高级」的原始配置里改。">
+        <Field label="接口协议" hint="只列常用的三种；其它取值可在「高级」的原始配置里改。">
           <Select
             testID={`settings-provider-template-${props.provider().id}`}
             accessibilityLabel={`${name()} 接口协议`}
@@ -861,7 +844,7 @@ function ProviderEditorRow(props: { provider: () => DraftProvider }) {
             }}
           />
         </Field>
-        <Field label="服务地址" hint="Provider 的接口根地址，例如 https://api.example.com/v1。">
+        <Field label="服务地址" hint="服务商的接口根地址，例如 https://api.example.com/v1。">
           <Input
             testID={`settings-provider-endpoint-${props.provider().id}`}
             accessibilityLabel={`${name()} 服务地址`}
@@ -892,13 +875,13 @@ function ProviderEditorCard() {
   return (
     <Card testID="settings-provider-editor">
       <CardHeader
-        title="Provider 接入"
-        description="按 Provider 编辑接口协议、服务地址与凭据引用；改的是待保存的配置，按上方「保存模型配置」生效。"
+        title="服务商接入"
+        description="按服务商编辑接口协议、服务地址与凭据引用；改的是待保存的配置，按上方「保存并生效」生效。"
       />
       <CardContent>
         <If when={providers().length === 0}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            当前文档没有 provider；在「高级」里补上 providers 数组，或重置为部署默认。
+            当前配置里还没有服务商；在「高级」里补上服务商列表，或重置为部署默认。
           </Text>
         </If>
         <Each of={providers()} key={(provider) => provider.id}>
@@ -910,8 +893,10 @@ function ProviderEditorCard() {
 }
 
 /** The raw document, behind one closed disclosure: the escape hatch, never the
- * primary surface. */
+ * primary surface. The parse diagnostics live here too — the main cards show
+ * what the configuration is, not what the validator said about it. */
 function AdvancedCard() {
+  const diagnostics = () => [...(store.settings()?.issues ?? []), ...store.providersIssues()];
   return (
     <Card testID="settings-advanced-card">
       <Collapsible
@@ -926,7 +911,7 @@ function AdvancedCard() {
                 color: color.mutedForeground,
               }}
             >
-              完整的模型配置：版本号、Provider 列表、模型规则与默认选择。保存时整份提交；
+              完整的模型配置：服务商列表、模型规则与默认选择。保存时整份提交；
               服务端校验失败会按字段列出原因。
             </Text>
             <Textarea
@@ -953,6 +938,12 @@ function AdvancedCard() {
               >
                 原始文档不是合法 JSON：{rawParseError() ?? ""}
               </Text>
+            </If>
+            <If when={diagnostics().length > 0}>
+              <View style={{ gap: space.sm }}>
+                <Label label="配置诊断" />
+                <IssueList issues={diagnostics} />
+              </View>
             </If>
           </View>
         }
@@ -1100,7 +1091,7 @@ function ModelsListCard() {
     <Card testID="settings-models">
       <CardHeader
         title="模型列表"
-        description="来自服务端清单：只含凭据可解析的可见 Provider；可选的模型可以点选为默认。"
+        description="来自服务端清单：只含凭据可解析的可见服务商；可选的模型可以点选为默认。"
       />
       <CardContent>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
@@ -1124,7 +1115,7 @@ function ModelsListCard() {
         <If when={!store.modelsError() && store.registryLoaded() && store.models().length === 0}>
           <Empty accessibilityLabel="没有可用的模型">
             <EmptyTitle label="没有可用的模型" />
-            <EmptyDescription label="当前进程解析不到任何 provider 的凭据，或配置为空。" />
+            <EmptyDescription label="当前进程解析不到任何服务商的凭据，或配置为空。" />
           </Empty>
         </If>
         <If
@@ -1182,7 +1173,7 @@ function ProviderRow(props: { provider: () => ProviderView }) {
         <Badge variant="secondary" label={`${(props.provider().models ?? []).length} 个模型`} />
       </View>
       <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
-        {accessLabel()} · {props.provider().api?.type ?? ""} {props.provider().api?.baseUrl ?? ""}
+        {accessLabel()} · {protocolLabel(props.provider().api?.type)} {props.provider().api?.baseUrl ?? ""}
       </Text>
       <IssueList issues={() => props.provider().issues ?? []} />
       <Each
@@ -1206,25 +1197,24 @@ function ProvidersListCard() {
   return (
     <Card testID="settings-providers">
       <CardHeader
-        title="Provider 列表"
-        description="来自服务端清单（只含可见 Provider）：凭据状态、可执行性与逐条诊断。"
+        title="服务商列表"
+        description="来自服务端清单（只含可见服务商）：凭据状态与可执行性。"
       />
       <CardContent>
         <If when={!!store.providersError()}>
           <ErrorBlock text={store.providersError() ?? ""} onRetry={() => void store.loadRegistry()} />
         </If>
         <If when={!store.providersError() && !store.registryLoaded()}>
-          <LoadingRow text="正在读取 provider…" />
+          <LoadingRow text="正在读取服务商…" />
         </If>
         <If
           when={!store.providersError() && store.registryLoaded() && store.providers().length === 0}
         >
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有可见的 provider。</Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有可见的服务商。</Text>
         </If>
         <Each of={store.providers()} key={(provider) => provider.providerId}>
           {(provider) => <ProviderRow provider={provider} />}
         </Each>
-        <IssueList issues={() => store.providersIssues()} label="解析诊断" />
       </CardContent>
     </Card>
   );
@@ -1414,7 +1404,7 @@ function SecretsSection() {
         testID="settings-secret-delete"
         open={!!confirmingSecret()}
         title={`删除密钥 ${confirmingSecret() ?? ""}？`}
-        description="删除后引用它的 provider 会解析不到凭据，相关模型不可执行；此操作不可撤销。"
+        description="删除后引用它的服务商会解析不到凭据，相关模型不可执行；此操作不可撤销。"
         confirmLabel={`确认删除密钥 ${confirmingSecret() ?? ""}`}
         cancelLabel={`取消删除密钥 ${confirmingSecret() ?? ""}`}
         destructive
