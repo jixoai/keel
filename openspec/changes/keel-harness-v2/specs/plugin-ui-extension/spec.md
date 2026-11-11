@@ -10,18 +10,32 @@ NSH（`nsh/base` + `host.call`），细节见 `docs/WEBUI.md`。
 
 Harness MUST 只提供槽位注册机制（注册/注销、贡献装载、schema 校验、目标降级），
 MUST NOT 内置任何具体槽位。槽位 MUST 由插件声明，其 id MUST 以声明者命名空间为前缀
-（`<plugin>.<name>`，如 `ui.route`、`plan.task-widget`），MUST 避免全局裸名。
+（`<plugin>.<name>`，如 `keel.ui.route`、`keel.tasks.widget`），MUST 避免全局裸名。
+
+#### Scenario: ui 插件声明槽位
+- **WHEN** `keel.ui` 启用并声明 `keel.ui.route`、`keel.ui.tool-renderer`、`keel.ui.sidebar`
+- **THEN** 这些槽位出现在槽位目录中；卸载 `keel.ui` 时槽位与其贡献一并撤销，不留残缺 UI
+
+#### Scenario: 第三方插件声明自己的槽位
+- **WHEN** `keel.tasks` 声明 `keel.tasks.widget`
+- **THEN** 第三方插件可向该槽位投贡献，命名不与其他插件冲突，无需改 Harness
+
+### Requirement: 槽位声明与 Native 插件定义
 
 槽位声明 MUST 包含：id、允许的贡献形态集合（`chunk` / `package` / `iframe` / `data`）、
 贡献数量语义（单例 / 多值 / 有序）、数据 schema（若有）、支持的 target 集合、生命周期钩子。
 
-#### Scenario: ui 插件声明槽位
-- **WHEN** `keel.ui` 启用并声明 `ui.route`、`ui.tool-renderer`、`ui.sidebar`
-- **THEN** 这些槽位出现在槽位目录中；卸载 `keel.ui` 时槽位与其贡献一并撤销，不留残缺 UI
+**Native 插件**在本 spec 中定义为：**以 `chunk` 形态贡献、由 NSH 原生渲染的插件**（不是 iframe，
+也不是仅 web 页面）。它 MUST 在 web target 与至少一个原生 target 上渲染一致；原生 target MUST
+由 NSH 的多平台构建直接产出，MUST NOT 作为独立产品线另起工程。
 
-#### Scenario: 第三方插件声明自己的槽位
-- **WHEN** `keel.tasks` 声明 `plan.task-widget`
-- **THEN** 第三方插件可向该槽位投贡献，命名不与其他插件冲突，无需改 Harness
+#### Scenario: 声明缺字段
+- **WHEN** 一个槽位声明缺少允许形态集合或 target 集合
+- **THEN** 装配期拒绝该槽位并给出字段级原因
+
+#### Scenario: Native 插件跨端
+- **WHEN** 一个 chunk 贡献被装配
+- **THEN** 它在 web 与至少一个原生 target 上渲染一致；TUI 按其 target 声明渲染或显式降级
 
 ### Requirement: 贡献形态三选，由槽位所有者决定允许集
 
@@ -105,7 +119,8 @@ MUST NOT 暴露任何宿主密钥、凭据或跨租户数据。桥调用 MUST �
 
 槽位 MUST 声明支持的 target 集合（web / native / tui）。在不支持的目标上，宿主 MUST 显式
 降级（入口隐藏或标注不可用），MUST NOT 静默消失或渲染空白。`iframe` 与 `package` 形态在 TUI
-MUST 视为不可用（TUI 无 WebView），`chunk` 形态 MUST 在所有 NSH 目标上可用。
+MUST 视为不可用（TUI 无 WebView），`chunk` 形态 MUST 在所有 NSH 目标上可用。原生 target
+MUST 由 NSH 的多平台构建直接产出；本 change MUST NOT 为原生 target 另起构建/签名产品线。
 
 #### Scenario: TUI 中的不可用贡献
 - **WHEN** 在 `keel tui` 中打开一个只有 `iframe` 贡献的槽位
@@ -130,7 +145,8 @@ MUST 视为不可用（TUI 无 WebView），`chunk` 形态 MUST 在所有 NSH �
 
 创造模式 MUST 用一条端到端用例证明 **AI 能写出 Native 插件**：AI 从聚合目录出发，生成一个
 带 `chunk` 槽位贡献的插件包（含清单、`extensibility.*`、贡献代码），经校验与审批安装后，
-在 NSH 客户端（web 与至少一个原生 target）中渲染出该贡献，且资产与主题正确。
+在 NSH 客户端（**web 与至少一个原生 target**）中渲染出该贡献，且资产与主题正确；同时给出
+TUI 的渲染或显式降级证据。
 
 #### Scenario: AI 现场写插件
 - **WHEN** 给创造模式一个需求「给任务卡加一个显示耗时的部件」

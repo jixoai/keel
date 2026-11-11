@@ -83,7 +83,9 @@ layerfs 是否强一致）。需要组合语义时 MUST 由 Harness 在装配期
 
 通知的「已消费」MUST 是持久事件（ack）；审批的 open/answer/timeout MUST 是 durable 状态，
 不得用进程内定时器推断。系统级原生推送 MUST 只在「有 ack 能力且在线」的消费者未在窗口内
-ack 时触发，不得以「没人点已读」作为唯一判据。URL 形态的消费 MUST 单次有效且不可猜。
+ack 时触发，不得以「没人点已读」作为唯一判据。**原生 target MUST 使用系统通知；web target
+在无 service worker 能力时 MUST 显式降级为页内通知并登记缺口**，不得假装已推送。
+URL 形态的消费 MUST 单次有效且不可猜。
 
 #### Scenario: 在线客户端即时消费
 - **GIVEN** 一个持有 live 连接的客户端已收到通知
@@ -108,18 +110,45 @@ ack 时触发，不得以「没人点已读」作为唯一判据。URL 形态的
 - **WHEN** 以 `pack` 策略在单进程内跑 1000 个会话
 - **THEN** 行为与 v1 一致，且 RSS 满足下一条「内存预算」的要求
 
+### Requirement: 多用户进程与装配隔离
+
+本 change MUST 把 `keel serve` 升级为**多用户进程**：MUST 按凭据解析用户/租户；MUST 在
+`/v1/plugins`、triggers、工具面与设置读接口上按租户过滤；MUST 保证一个租户的装配（插件/技能/
+MCP/工具）不影响另一个租户。`AGENTS.md` 的「不做每用户进程」MUST 修订为「默认单进程多租户；
+`user` 放置是显式 SKU，其资源代价由 cgroup 证据承担」。
+
+#### Scenario: 租户互不可见
+- **WHEN** 租户 A 安装了插件并注册了工具
+- **THEN** 租户 B 的 `/v1/plugins`、工具清单与设置面都看不到它；B 的调用不能命中 A 的实例
+
+#### Scenario: user 放置是显式 SKU
+- **WHEN** 某租户选择 `user` 策略（一人一组）
+- **THEN** 其进程边界、内存上限与成本可见，且默认策略仍是 `pack`
+
 ### Requirement: 内存预算
 
-后端整体（内核 + Harness + layerfs）MUST 满足：**目标 ≤300MB、硬上限 ≤500MB**（以 RSS 计）。
-前端（NSH 客户端）MUST 可分离部署（另一台机器 / 手机浏览器），其 surface VM MUST 有配额
-（默认单 surface 32–64MB）且关闭即卸。各组件 MUST 遵守自己的缓冲、输出与并发上限；MUST NOT
-以"整体上限宽松"为由取消单项有界约束。参考：v1 实测 1000 会话峰值 523.8–639.1MB，**本预算
-低于既有基线，是待达标项**。
+后端整体（各 group worker + layerfs + 控制面）MUST 满足：**目标 ≤300MB、硬上限 ≤500MB**。
+前端（NSH 客户端）可分离部署，其 surface VM MUST 有配额（默认单 surface 32–64MB）且关闭即卸；
+MUST NOT 以"前端可分离"为由取消前端配额。测量协议见下一条。
 
-#### Scenario: 时间线不回归
+#### Scenario: 内存不回归
 - **WHEN** 以 `pack` 跑 1000 会话 + M 并发 run，并打开与关闭重型插件面板
-- **THEN** 后端 RSS 峰值 ≤500MB、稳态落在 ≤300MB 目标区间且可解释；面板关闭后内存回落可测
+- **THEN** RSS 峰值 ≤500MB、稳态落在 ≤300MB 目标区间且可解释；面板关闭后内存回落可测
 
 #### Scenario: 单组越界不扩散
 - **WHEN** 一个 Group 的资源触顶
 - **THEN** 只有该组的会话受影响，其它组的 RSS 与连接不受影响
+
+### Requirement: 内存测量协议
+
+- **RSS**：对所有后端进程（各 group worker、layerfs、控制面）读 `/proc/<pid>/status` 的
+  `VmRSS` 定时采样（≤10s）并求和；`VmRSS` 不含 page cache。
+- **cgroup peak**：同时单列 `memory.peak`（含 page cache），仅用于与 v1 基线对比。
+- **作用域**：预算指**全机后端总和**；MUST 另报每 group 的分解。
+
+v1 基线为 cgroup `memory.peak` **523.8–639.1MB**；RSS 基线 MUST 在本 change 中实测补登，
+MUST NOT 用 cgroup peak 与 RSS 直接比较。
+
+#### Scenario: 两种读数都在
+- **WHEN** 提交 G4 内存报告
+- **THEN** 同时给出 RSS 与 cgroup peak、全机与每 group 分解，并注明采样间隔与进程清单

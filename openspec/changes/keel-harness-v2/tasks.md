@@ -5,25 +5,47 @@
 
 ## W0 契约与骨架
 
-- [ ] 冻结本 change 的五个 spec（`harness-core` / `agent-loop-contract` / `layerfs` /
-      `task-log` / `tool-surface`），后续实现不得偏离；偏离走新 change
-- [ ] 新增事件 kind：`task.created|updated|attached|closed|note`、`fs.write|fs.capture_failed`、
-      `placement.joined|left`；同步 `kindRegistry`、`internal/store` 常量、转录与 SSE 规则
-- [ ] `docs/HARNESS.md` 增补 Harness/内核边界与本 change 的放置模型
-- [ ] `AGENTS.md` 补一句：「默认单进程多租户；进程切分由 Harness 放置策略（group）决定」
+- [ ] 冻结本 change 的**全部 9 份 spec**（`harness-core` / `agent-loop-contract` / `layerfs` /
+      `task-log` / `tool-surface` / `plugin-architecture` / `plugin-ui-extension` / `supervision` /
+      `plugin-system` 的 MODIFIED delta），
+      后续实现不得偏离；偏离走新 change
+- [ ] **kind 表**：每个新 kind 定 `class`（owner/edge/external/system）、`key`/fence、提交者；
+      新增 `task.*`、`fs.write`、`fs.capture`、`config.rotated`、`placement.joined|left`、
+      `supervision.escalated`、`guardrail.tripped`、`resume.attempt`、`notification.ack|push_sent`；
+      `run.finished` payload 增 `configHashBefore/After`；同步 `kindRegistry`、`internal/store`
+      常量、转录/SSE/R1 规则
+- [ ] **既有门承接**：扩展 `cmd/r1diff` 场景与 allowlist（每条附理由）、重新 pin 基线；
+      `scripts/acceptance-all.sh` 必须全绿（E0）
+- [ ] **工具面迁移**：按 `tool-surface` 的破坏性迁移表删除旧工具名（无 shim），加「终局工具集」
+      快照断言；`agentcore.AgentTool` 缺的字段（幂等键/超时/取消/截断/错误码/内存档位）单列
+      接口扩展任务
+- [ ] **PI 偏离登记**：`docs/PI-PARITY.md` 写明 MCP 工具命名的偏离（理由/影响面/验收方式）；
+      删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测
+- [ ] **契约冻结 spike**：`docs/GBASH-CONTRACT.md`（版本/协议帧/进程模型/许可证）与
+      OAR 契约（record stream schema/typed 码表/进程组回收/与 `internal/externalgw` 的复用关系）；
+      未冻结前 bash 与 `keel.oar` 的实现任务保持阻塞
+- [ ] **ADR 0001**：layerfs Rust+gRPC 的推翻记录与证据门；CI 工具链、Dockerfile/compose、
+      健康检查、端口登记（13610–13799）、SIGKILL sweep
+- [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离；
+      `AGENTS.md` 修订为「默认单进程多租户；`user` 放置是显式 SKU」
+- [ ] `docs/HARNESS.md` 增补 Harness/内核边界、放置模型与多用户升级
 - [ ] 架构测试：内核包不得 import placement/task/fs（沿用 `internal/architecture` 断言模式）
 
 ## W0.5 插件全景（对表 DSH）
 
-- [ ] 冻结 `plugin-inventory.md` 的约 60 项与波次；后续新增插件必须先进这份清单
-- [ ] 五种 kind 的装载边界与架构测试（kernel 不得 import 产品层；provider 崩溃隔离）
+- [ ] 冻结 `plugin-inventory.md` 的 60 余项与波次；后续新增插件必须先进这份清单
+- [ ] 五种 **layer**（kernel/harness/provider/ui/service）的装载边界与架构测试；
+      承载 `kind` 仍是三种（in-process/sidecar/webview），两者正交
 - [ ] 四层装配（base/mode/preset/config.toml）与 row id overlay 语义
 - [ ] 能力 seam 清单（fs/shell/subprocess/exec-surface/terminal）与 capability matrix
 - [ ] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
-- [ ] 冻结两份新契约：`plugin-ui-extension`（槽位由插件提供、三形态、桥）与
-      `supervision`（自动恢复默认、子代理可续、升级阶梯）
-- [ ] 冻结扩展面声明格式：`provides.slots` / `contributes` / `extensibility.json` +
+- [ ] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
       `EXTENSIBILITY.md`（创造模式的聚合输入）
+- [ ] **三面对账**：`plugins/COVERAGE.md` ↔ `plugins/keel.plugin-market/catalog.json` ↔
+      `plugin-inventory.md` 的 id/状态/波次零差异；`goal`/`todo`/`plan` 并入 `keel.tasks`、
+      `team` absent、`workspace` 并入 Group、`guard` 并入 `keel.supervisor`，逐行给出处置
+- [ ] 为 v1 已交付的官方插件补 `extensibility.json` + `EXTENSIBILITY.md`（否则创造模式无法利用，
+      且官方发布门禁会拒绝）
 
 ## W1 layerfs 服务（Rust + gRPC）
 
@@ -80,7 +102,7 @@
 - [ ] `mcp` 聚合工具：`list/describe/call`，schema 发现与缓存
 - [ ] 二进制内容走 content block，不走 stdout
 - [ ] gbash 的 `mcp` CLI：与聚合工具共用同一个 registry（shim，不复制实现）
-- [ ] 移除/不实现 `mcp__<server>__<tool>` 硬编码命名
+- [ ] 删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测（PI-PARITY 已登记偏离）
 - [ ] MCP server 增删不改变工具清单（清单哈希断言）
 
 ## W7 skills
@@ -96,7 +118,7 @@
 ## W8 agent-plugin 与 fork
 
 - [ ] 内部子代理：同进程协程，独立会话 + 独立任务卡（`parentTaskId`）
-- [ ] `agent` 工具：`spawn/fork/resume/cancel`；fork 原点 `eventSeq`
+- [ ] `agent` 工具：`spawn/fork/resume/cancel/list/status`；fork 原点 `eventSeq`
 - [ ] 子代理继承父的 `config.toml` 版本，随后可写自己的配置
 - [ ] 并发槽位记账：父与子都占组槽位，超限排队
 - [ ] 子代理返回：结构化结果 + 产物 blob 引用；父卡追加 `task.note`
@@ -124,9 +146,12 @@
 - [ ] 工具清单稳定性：增删 MCP server / 技能后清单哈希不变（除非 config 轮转）
 - [ ] 真实模型 E2E：至少一条真 provider 链路（无凭据时用 fake provider），不得只测 happy path
 
-**门（按 `acceptance.md` 的依赖顺序）**
+**门（按 `acceptance.md` 的依赖顺序；W12 的护栏/创造/槽位项 MUST 先于本门完成）**
 
-- [ ] G0 契约门 · G1 状态机门（转移矩阵 + 拒绝事实）先行；未绿则后续门不作为依据
+- [ ] **E0 既有门零回归**：`scripts/acceptance-all.sh` 全绿、R1 `unexpected=0`、allowlist 每条
+      有理由、事件基线已重新 pin
+- [ ] G0 契约门（含终局工具集快照 + 迁移表 grep 零命中）· G1 状态机门（转移矩阵 + 拒绝事实）先行；
+      未绿则后续门不作为依据
 - [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务
 - [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用）
 - [ ] G4 内存门：后端 RSS ≤500MB（目标 ≤300MB），组 OOM 不扩散，前端 VM 配额独立断言
@@ -162,8 +187,9 @@
 - [ ] 只读发现工具：AI 可查「本机装了什么、能怎么扩展」；目录与装配事实同源
 - [ ] 脚手架 / 校验 / 审批安装 / 列举 / 删除；校验 fail-closed 且给字段级原因
 - [ ] `keel.ui` 槽位机制：槽位注册与注销、贡献装载/卸载、schema 校验、目标降级
-- [ ] `keel.ui` 声明基础槽位（route / nav / action / tool-renderer / message-part /
-      sidebar / settings-section / task-widget / surface），第一方面板改为贡献物
+- [ ] `keel.ui` 声明基础槽位（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` /
+      `.message-part` / `.sidebar` / `.settings-section` / `.task-widget` / `.surface`），
+      第一方面板改为贡献物
 - [ ] 三形态落地：`chunk`（NSH 动态导入，同 VM）、`package`（签名包，独立 VM + HostLimits，
       远小于默认 256MB）、`iframe`（兜底，显式标注）
 - [ ] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误

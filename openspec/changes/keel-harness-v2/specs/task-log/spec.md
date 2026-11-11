@@ -50,31 +50,32 @@ MUST NOT 引入第二套全局账本。
 ### Requirement: fork 以 eventSeq 为原点
 
 fork MUST 只接受一个 `eventSeq` 作为原点，创建新会话并继承该点之前的账本与文件视图；
-MUST NOT 要求额外的文件系统版本号（字节不可变、路径映射在账本中）。fork MUST 创建新的
-任务卡并以 `parentTaskId` 指向原点所在卡。
+MUST NOT 要求额外的文件系统版本号。文件视图 MUST 由 `session_snapshot(session_id, eventSeq)` 的
+tree hash 解析（O(1)），MUST NOT 复制 manifest 行或字节。fork MUST 创建新的任务卡并以
+`parentTaskId` 指向原点所在卡。
 
 #### Scenario: 并行子代理从同一点岔出
 - **WHEN** 从 `eventSeq=100` 连续 fork 出三个子代理
-- **THEN** 三者看到相同的文件视图，各自的后续写入互不可见，字节不重复存储
+- **THEN** 三者看到相同的文件视图，各自的后续写入互不可见，字节与 manifest 行都不重复存储
 
 #### Scenario: 技能版本 A/B 对比
 - **GIVEN** 两个技能版本在同一 `eventSeq` 处 fork
 - **WHEN** 两个分支执行同一任务
 - **THEN** 两条分支的账本可逐事件对比，文件差异可归因到各自分支
 
-### Requirement: 资源关联只记引用
+### Requirement: 资源关联只记引用，可解绑
 
 任务关联的文件 MUST 以 `(path, hash)` 形式记录（`task.attached`），MUST NOT 复制字节。
-MUST NOT 对任务关联的资源承诺版本语义之外的东西（例如「资源永不变」）；变化通过新事件
-表达。
+解绑 MUST 通过 `task.detached` 事件表达；引用归零后由 GC 回收。MUST NOT 对任务关联的资源承诺
+版本语义之外的东西（例如「资源永不变」）；变化通过新事件表达。
 
 #### Scenario: 挂载构建产物
 - **WHEN** 一个任务执行完 `pnpm build` 并把 `dist/` 挂到卡上
 - **THEN** 卡上出现 `(path, hash)` 引用集合，layerfs 按内容去重，不复制已有字节
 
-#### Scenario: 替换资源
-- **WHEN** 同一路径被重新挂载为新内容
-- **THEN** 追加一条新引用事件，旧 hash 仍可回看，直到引用归零被 GC
+#### Scenario: 替换与解绑
+- **WHEN** 同一路径被重新挂载为新内容，或资源被显式解绑
+- **THEN** 追加新的 `task.attached` / `task.detached` 事件；旧 hash 仍可回看，直到引用归零被 GC
 
 ### Requirement: bash 只追加执行事实
 

@@ -6,12 +6,13 @@
 
 ## ADDED Requirements
 
-### Requirement: 插件 kind 与装载边界
+### Requirement: 插件 layer 与装载边界
 
-插件 MUST 声明 `kind`，取值只能是 `kernel` / `harness` / `provider` / `ui` / `service`
-（边界表见 `plugin-inventory.md` §2）。Harness MUST 按 kind 选择装载、隔离与回收策略；
-kernel 插件 MUST NOT 直接读 DB/网络/文件（只能用注入物）；provider 崩溃 MUST NOT 拖垮
-Harness 进程；ui 插件 MUST NOT 写入真值。
+插件 MUST 声明 `layer`，取值只能是 `kernel` / `harness` / `provider` / `ui` / `service`
+（`kind` 仍是 `in-process` / `sidecar` / `webview` 的承载形态，见 `plugin-system`；两者正交）。
+kernel 只实现 loop seam、MUST NOT 直连 DB/网络/文件；provider 在独立进程、崩溃 MUST NOT
+拖垮 Harness；ui 只消费投影、MUST NOT 写入真值；service 只经 gRPC。Harness MUST 按 layer
+选择装载、隔离与回收策略。
 
 #### Scenario: provider 崩溃隔离
 - **WHEN** 一个 provider 插件进程崩溃
@@ -69,11 +70,11 @@ MUST 能在不改上层工具的前提下替换实现（本地 / 远端 / SSH）
 
 ### Requirement: 插件的扩展面声明
 
-插件清单 MUST 能声明三件事：**提供的槽位**（`provides.slots`）、**投出的贡献**
-（`contributes`：目标槽位 + 形态 + 入口）、**可扩展面文档**（`extensibility.json` 机读 +
-`EXTENSIBILITY.md` 人读，声明配置项、可挂 hook、可替换 provider、示例与限制）。贡献 MUST 只
-针对已声明的槽位与槽位允许的形态；装配期 MUST 校验并 fail-closed。**Harness MUST NOT 内置任何
-具体槽位**：槽位由插件声明，机制与形态见 `plugin-ui-extension`。
+插件清单 MUST 能声明四件事：**架构层**（`layer`）、**提供的槽位**（`provides.slots`）、
+**投出的贡献**（`contributes`：目标槽位 + 形态 + 入口）、**可扩展面文档**
+（`extensibility.json` 机读 + `EXTENSIBILITY.md` 人读，声明配置项、可挂 hook、可替换 provider、
+示例与限制）。贡献 MUST 只针对已声明的槽位与槽位允许的形态；装配期 MUST 校验并 fail-closed。
+**Harness MUST NOT 内置任何具体槽位**：槽位由插件声明，机制与形态见 `plugin-ui-extension`。
 
 #### Scenario: 贡献到不存在的槽位
 - **WHEN** 一个插件的 `contributes` 指向未声明的槽位或槽位不允许的形态

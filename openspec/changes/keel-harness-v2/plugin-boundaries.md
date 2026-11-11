@@ -80,9 +80,9 @@
 |---|---|---|---|
 | `keel.mcp` | MCP registry、`list/describe/call`、二进制 content block、gbash CLI shim 共用同一 registry | 模型可见工具清单（恒定） | H1 |
 | `keel.skills` | 技能索引/正文/管理/订阅源、内容哈希 | 脚本执行（走 bash 策略） | H3 |
-| `keel.web-search` | 搜索与抓取（provider，v1 已交付） | 渲染 | H4 |
-| `keel.subagent` | 内部子代理 `spawn/fork/resume/cancel/control`、独立会话与卡 | 外部运行时 | A2 / C3 |
-| `keel.oar` | 外部运行时适配、带外 record stream、typed rejection | **任务图**（外部调用不进任务卡） | H2 |
+| `keel.web-search` | 搜索与抓取（provider，v1 已交付） | 渲染 | — |
+| `keel.subagent` | 内部子代理 `spawn/fork/resume/cancel/list/status`、独立会话与卡 | 外部运行时 | A2 / C3 |
+| `keel.oar` | 外部运行时适配、带外 record stream、typed rejection | **任务图**（外部调用归属发起卡、不建子卡；内部细节只进渲染器） | H2 |
 | `keel.lsp` | 代码导航（provider） | — | 登记 |
 | `keel.browser-use` | 浏览器操作（provider，接 fde2e-bu） | — | 登记 |
 | `keel.computer-use` | 桌面操作（provider，接 fde2e-cu） | — | 登记 |
@@ -127,3 +127,7 @@
 3. 一个状态只有内存版本 → **判不合格**，必须落事实。
 4. 一个副作用没有反向撤销路径 → **判不合格**。
 5. 一个失败没有 owner（护栏/阶梯） → **判不合格**。
+6. **失败 owner 默认阶梯**：supervisor → 父/主代理 → owner → super-agent。特殊项：进程类失败
+   （layerfs / jobs / exec-surface / sidecar）→ JobManager 收养或标 `lost`；外部运行时失败 →
+   网关重连策略 + `lost`；`keel.supervisor` 自身失败 → owner（不得自恢复）；`keel.super-agent`
+   失败 → owner。

@@ -64,19 +64,19 @@
 - 变化通过**追加**进入下一次请求（v1 的 `guide` 模式：当前 turn 内注入、在所有 sibling
   tool results 提交之后、不打断模型流）。**永远不重写历史**。
 
-### 3.2 一切皆文件
+### 3.2 一切来源皆文件或文件投影
 
-上下文的每个来源都是一个文件（或文件投影）：
+上下文的每个来源 MUST 可指到一个**文件**或一个**文件投影**（投影的版本由账本 seq 决定）：
 
-| 来源 | 文件 | 何时变化 |
+| 来源 | 文件 / 投影 | 何时变化 |
 |---|---|---|
 | 配置 | `config.toml`（轮转版本） | 用户/Agent 主动改写 |
 | 技能索引 | `SKILL.md` 的 frontmatter | 技能增删 |
-| 任务上下文 | `task_cards` 的事件投影（非文件，但同构） | 工具调用 |
+| 任务上下文 | `task_cards` 的事件投影（同构于文件） | 工具调用 |
 | 工具描述 | 工具清单（装配期生成） | 配置轮转 |
 | 引导输入 | `user.message{delivery:guide}` | 用户/触发器 |
 
-规则：**新增上下文来源 = 新增一个文件 + 一条装配规则**，不改内核。
+规则：**新增上下文来源 = 新增一个文件或一个带 seq 的投影 + 一条装配规则**，不改内核。
 
 ### 3.3 请求快照
 
@@ -96,6 +96,8 @@ Group 是**项目组**，也是**资源与放置容器**：
 
 - 一个 Group 由 Harness worker 进程承载；本 change 内一组一 worker，一组多 worker 的扩展
   留到后续 change（`session_placement` 预留 `worker_id`）。
+- `keel serve` 由单租户升级为**多用户进程**：凭据解析租户、`/v1/plugins`/triggers/工具面/
+  设置面按租户过滤、装配隔离（见 `harness-core`）。
 - 一个 Group 可以承载多个用户的会话（项目组里不同成员派来的 Agent）。
 - 一个用户的不同会话可以加入不同 Group（例如擅长设计的 Agent 被拉进某项目组）。
 - Group 拥有：`max_concurrent_runs`（并发槽位）、内存上限、插件装配集、健康状态。
@@ -165,13 +167,16 @@ task_events(id, task_id, seq, kind, payload, created_at)
 - tree object 让「十万个没变的文件」在下一版里只是同一个树哈希。
 - 引用计数 + GC：没有引用的对象才回收；fork/并行子代理共享引用。
 
-### 6.2 路径在 DB，不在 layerfs
+### 6.2 路径在 DB，且是会话作用域
 
-- `file_manifest(task_id, path, hash, mode, size, updated_seq)` 是当前态投影。
-- 每次写追加一条 `fs.write{taskId, path, hash, mode}` 到会话账本。
+- `file_manifest(session_id, path, hash, mode, size, updated_seq, last_task_id)` 是当前态投影；
+  **键是 `(session_id, path)`，`task_id` 只做最后写者归因**——任务不是文件隔离边界（与
+  "任务只是日志"的裁决一致）。
+- `session_snapshot(session_id, seq, tree_hash)` 记录事件 seq 处的目录树；fork 以它做 O(1) 继承。
+- 显式写（`write`/`edit`）追加一条 `fs.write{sessionId, taskId, path, hash, mode}`。
 - layerfs 只提供 `Put / Get / Stat / RefCount / GC` 与流式接口；它不认识路径。
 
-### 6.3 capture 策略（默认实时）
+### 6.3 capture 策略（默认实时，按批）
 
 `fs.capture` 决定执行空间的产物何时进入 layerfs：
 
@@ -182,12 +187,16 @@ task_events(id, task_id, seq, kind, payload, created_at)
 | `manual` | 只接受显式 attach |
 
 - 默认实时，但**不重扫全树**：只对 mtime/size 变化的文件算哈希。
+- **一次结算只追加一条批事件** `fs.capture{baseSeq, count, treeHash}`，manifest 批量 upsert；
+  十万文件不产生十万条账本事件。
 - 忽略清单默认只有 `.git/objects`（它本身就是内容寻址，收进来是双重存储）。
 - 远端执行面由 adapter 提供增量（changed paths + hashes），Harness 不假设能扫盘。
 
 ### 6.4 执行空间
 
-- 任务开始时按 `file_manifest` 物化到执行空间（本地目录或远端机器）。
+- 会话/任务开始时按 `file_manifest` 物化到执行空间（本地目录或远端机器）。
+- **显式写必须写穿**：`write`/`edit` 同时落 layerfs 与已物化的执行空间，随后 `bash cat` 立即可读；
+  capture 不得把这次写重复算成新对象。
 - 平台**不做全量镜像承诺**：执行空间可丢弃，产物靠 capture 回 layerfs。
 - 适配器契约：`materialize(manifest) → exec handle`；`capture(exec handle, since) → delta`。
 
@@ -228,11 +237,15 @@ task_events(id, task_id, seq, kind, payload, created_at)
 ## 8. 外部运行时
 
 - 内部 Keel Agent：真 agent（有任务卡、有账本）。
-- Codex/Claude/DSH：外部工具（有渲染器、无任务卡）。通过 `oar-plugin`（sidecar）接入
-  OAR：runtime 能力矩阵、带外 record stream（`seq` + `agentPath`）、typed rejection。
+- Codex/Claude/DSH：外部工具（有渲染器、无子卡）。通过 `oar-plugin`（sidecar）接入 OAR：
+  runtime 能力矩阵、带外 record stream（`seq` + `agentPath`）、typed rejection。
+- **与既有 `internal/externalgw` 的关系**：OAR 是外部网关的一种 backend，复用既有
+  `external.event`、`stateOwner=external` 与"原生 `/input` 409"规则，**不另起第二套外部会话
+  模型**。OAR 的协议帧、record stream schema、typed 码表与进程组回收 MUST 在 W0 契约冻结中
+  写清并 pin；未冻结前 `keel.oar` 的实现任务保持阻塞。
 - 不给外部 runtime 注入「请记录任务卡」的指令——主动记录会拉低它的表现；归属由带外
   record stream 提供。
-- 外部工具调用仍占用发起它的任务卡的 `taskId`（作为工具调用事实），但其内部细节只进
+- 外部运行时的调用**归属发起它的任务卡**（作为工具调用事实），**不建子卡**；其内部细节只进
   渲染器数据，不进任务图。
 
 ## 9. 失败语义
@@ -249,7 +262,7 @@ task_events(id, task_id, seq, kind, payload, created_at)
 
 ## 10. 插件全景与装配
 
-完整清单见 `plugin-inventory.md`（约 60 项，五种 kind）。装配模型借 DSH：
+完整清单见 `plugin-inventory.md`（60 余项，五种 `layer`；承载 `kind` 仍是 in-process/sidecar/webview）。装配模型借 DSH：
 
 - **四层叠加**：base bundle → mode bundle（serve/headless/tui/sdk）→ preset → 用户
   `config.toml`；按 row id 覆盖，last write wins；激活由服务可用性驱动。
@@ -271,8 +284,8 @@ task_events(id, task_id, seq, kind, payload, created_at)
 
 **槽位不由 Harness 内置**。Harness 只提供机制：注册/注销槽位、装载/卸载贡献、schema 校验、
 目标降级。槽位由插件声明，id 带声明者命名空间；最大的槽位提供者是第一方客户端插件
-`keel.ui`（route / nav / action / tool-renderer / message-part / sidebar / settings-section /
-task-widget / surface）。第一方面板（任务板、通知、作业、技能…）只是这些槽位的贡献物。
+`keel.ui`（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` / `.message-part` / `.sidebar` /
+`.settings-section` / `.task-widget` / `.surface`）。第一方面板（任务板、通知、作业、技能…）只是这些槽位的贡献物。
 
 贡献有三种形态，由槽位所有者声明允许集：
 

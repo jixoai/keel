@@ -59,6 +59,28 @@
 → 新 `active`。每次 run 记录 `(configHash, anchorEventSeq)`。非法：无锚点地替换（必须补锚点）；
 恢复时使用未记录的版本。
 
+### A5. 事件分类与提交者（v2 新增 kind）
+
+v1 的 class 是 `edge` / `owner` / `external`；v2 新增 **`system`**（Harness 驱动、无 lease 的
+durable 事实，必须有自然幂等键）。每个新 kind MUST 在 `kindRegistry` 有 class 与 key：
+
+| kind | class | key / fence | 提交者 |
+|---|---|---|---|
+| `task.created/updated/attached/detached/closed/note` | owner（run 内）/ system（会话启动初始卡） | `generationId` / `taskId+seq` | kernel / harness |
+| `fs.write` | owner | `toolCallId` | file-plugin |
+| `fs.capture` | owner | `toolCallId + baseSeq` | shell/capture |
+| `config.rotated` | system | `configHash` | harness |
+| `placement.joined/left` | system | `sessionId + epoch` | placement |
+| `supervision.escalated` | system | `sessionId + attempt` | supervisor |
+| `guardrail.tripped` | system | `sessionId + trigger + seq` | supervisor |
+| `resume.attempt` | system | `sessionId + attempt` | supervisor |
+| `notification.ack` | system | `notificationId + consumerId` | notify |
+| `notification.push_sent` | system | `notificationId` | notify |
+| `run.finished`（payload 扩展） | owner | lease | kernel |
+
+「只追加」的准确含义是：**账本历史只追加**；模型上下文可以被 `compaction`/checkpoint 投影替换，
+替换本身以 `compaction` 事件为准（v1 已如此）。
+
 ---
 
 ## B. 放置（harness-core）
@@ -182,8 +204,9 @@ MUST 关闭即卸 VM。
 
 ### F3. 文件写与冲突
 
-`read(v)` → `write(precondition v)`：命中 → 提交新版本；未命中 → `conflict`（agent 重读重试）。
-非法：无前置条件的覆盖写（file-plugin 契约内必须带版本令牌）。
+`read(v)` → `write(precondition v)`：命中 → 提交新版本并**写穿到已物化的执行空间**；未命中 →
+`conflict`（agent 重读重试）。非法：无前置条件的覆盖写（file-plugin 契约内必须带版本令牌）；
+capture 重复结算显式写的产物。
 
 ---
 
