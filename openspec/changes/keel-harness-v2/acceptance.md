@@ -29,8 +29,8 @@
 ## G0 契约门
 
 - **判据**：内核包不得 import 产品层；插件不得访问同层内部状态；无第二套插件运行时；
-  **模型可见工具集精确等于 11 个内建工具 ∪ 已审批 `provides.tools`**；迁移表「删除」列在代码中
-  `grep` 零命中（测试夹具白名单除外）。
+  **工具注册名快照精确等于 11 个内建工具 ∪ 已审批 `provides.tools`**；负控：注册
+  `spawn_subagent` 或 `mcp__*` 必须失败（不用子串 grep）。
 - **证据**：`go test ./internal/architecture/...`、工具清单快照、迁移 grep、依赖图；
   RSS 门由 `scripts/acceptance-rss.sh` 并入 `acceptance-all.sh` 执行。
 - **负控**：加一行 `import placement`、注册 `spawn_subagent`、或让插件直读另一插件状态 → 失败。
@@ -61,7 +61,7 @@
 
 ## G4 内存门
 
-- **判据**：按 §0 的测量协议，后端 RSS **≤500MB（上限）/ ≤300MB（目标）**，覆盖：单机组
+- **判据**：按 §0 的测量协议，RSS **>500MB 直接失败；300–500MB 通过但记「未达目标」；≤300MB 达标**。覆盖：单机组
   `pack` × N 会话 × M 并发 run、layerfs 1GB 流式读写、`npm install` 十万文件 capture、
   1000 会话空闲态、打开/关闭重型面板；**组 OOM 不扩散**；前端 surface VM 配额执行且关闭回落。
 - **证据**：RSS 曲线 + cgroup peak + 全机/每 group 分解 + 面板前后对比。

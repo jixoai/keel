@@ -10,7 +10,8 @@
       `plugin-system` 的 MODIFIED delta），
       后续实现不得偏离；偏离走新 change
 - [ ] **kind 表**：每个新 kind 定 `class`（owner/edge/external/system）、`key`/fence、提交者；
-      新增 `task.*`、`fs.write`、`fs.capture`、`config.rotated`、`placement.joined|left`、
+      新增 `task.created|updated|attached|detached|closed|note`、`fs.write`、`fs.capture`、
+      `fs.capture_failed`、`config.rotated`、`placement.joined|left`、
       `supervision.escalated`、`guardrail.tripped`、`resume.attempt`、`notification.ack|push_sent`；
       `run.finished` payload 增 `configHashBefore/After`；同步 `kindRegistry`、`internal/store`
       常量、转录/SSE/R1 规则
@@ -40,7 +41,8 @@
       断言 ≤500MB（目标 ≤300MB）；cgroup peak 单列
 - [ ] **原生 target 可执行**：`web` 与 `macos`（`nsh package --target macos`）构建产物 + 截图；
       TUI 用 `nsh test --target tui` 的 cell dump
-- [ ] 废止代码里的旧工具名注释（`internal/agentext/plugin.go` 的 `spawn_subagent`/`creation_*`）
+- [ ] 废止代码里的旧工具名注释与兼容红线：`internal/agentext/plugin.go`、`creation.go`、
+      `subagent.go`、`internal/pluginpkg/manifest.go:227`
 - [ ] `docs/HARNESS.md` 增补 Harness/内核边界、放置模型与多用户升级
 - [ ] 架构测试：内核包不得 import placement/task/fs（沿用 `internal/architecture` 断言模式）
 
@@ -95,9 +97,9 @@
 
 - [ ] `task_cards` 行 + `task_events` **投影**（从账本重建，含重建一致性测试）；会话启动自动建初始卡
 - [ ] 强制 `taskId`：所有工具调用缺 `taskId` 直接拒绝（含内部子代理）
-- [ ] `tasks` 聚合工具：`create/update/attach/close/list/show`
+- [ ] `tasks` 聚合工具：`create/update/attach/detach/close/list/show/note`
 - [ ] 任务树投影：父子关系、跨会话 `parentTaskId` 拼接
-- [ ] 资源关联：`task.attached{path, hash}`；面板可打开对应 blob
+- [ ] 资源关联：`task.attached{path, hash}` / `task.detached`；面板可打开对应 blob
 - [ ] fork：`(eventSeq)` 原点；新会话 + 前缀引用 + 新卡（`parentTaskId`）
 - [ ] 面板：任务图、事件流、资源预览；纯投影，不写额外真值
 

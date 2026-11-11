@@ -2,7 +2,7 @@
 
 本 spec 定义 Keel Harness v2 的插件分类、装配模型、能力 seam 与生命周期。DSH 是参照，
 不是事实源：我们借它的**装配与 seam 思想**，不借它的 Cordis/typert 运行时与
-「一能力一工具」形态。完整插件清单见 `plugin-inventory.md`。
+「一能力一工具」形态。插件清单的机读真源见 `plugins/keel.plugin-market/catalog.json`。
 
 ## ADDED Requirements
 
@@ -58,8 +58,9 @@ MUST 能在不改上层工具的前提下替换实现（本地 / 远端 / SSH）
 
 ### Requirement: 插件粒度不等于工具粒度
 
-插件 MUST 能只向聚合工具注册 action，MUST NOT 强制为每个能力新增模型可见工具名。
-只有安装期显式声明 `provides.tools` 的插件才扩展工具面（见 `tool-surface`）。
+插件 MUST 只实现聚合工具的**既有 action 后端**（`provides.backends`），MUST NOT 新增 action 名；
+新增模型可见能力 MUST 经 `provides.tools`（安装期显式）或由聚合工具拥有者新增 action
+（见 `tool-surface`）。
 
 #### Scenario: web 搜索不新增核心工具
 - **WHEN** 安装一个搜索 provider
@@ -68,6 +69,10 @@ MUST 能在不改上层工具的前提下替换实现（本地 / 远端 / SSH）
 #### Scenario: 一个能力组拆多个插件
 - **WHEN** 一个 DSH 能力组（如 shell）在 Keel 拆成 `keel.shell` + `keel.jobs` + `keel.terminal`
 - **THEN** 模型看到的仍是 `bash` 与作业动作，插件边界对模型不可见
+
+#### Scenario: 新增 action 被拒
+- **WHEN** 一个插件声明 `provides.backends` 指向不存在的 action，或试图新增 action 名
+- **THEN** 装配期拒绝并列出该聚合工具的闭集 action
 
 ### Requirement: 插件的扩展面声明
 

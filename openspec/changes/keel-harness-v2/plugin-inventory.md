@@ -84,7 +84,7 @@
 | id | 职责 | DSH 对应 | 波次 |
 |---|---|---|---|
 | `layerfs`（service） | 内容寻址：file object + tree object + refcount/GC | `fs-local`/`fs-sandbox` 的字节层 | W1 |
-| `keel.fs` | `read`/`write`/`edit` + 文件搜索 + patch | `fs`、`tool-fs`、`tool-fs-search`、`tool-str-replace-editor` | W1 |
+| `keel.fs` | `read`/`write`/`edit`（内部搜索/补丁供 skills 与 task 使用，模型入口只有三个） | `fs`、`tool-fs`、`tool-fs-search`、`tool-str-replace-editor` | W1 |
 | `keel.shell` | bash（gbash）+ 持久终端 | `shell`、`tool-bash`、`tool-bash-persistent`、`shell-env` | W1 |
 | `keel.jobs` | 后台作业表、收养、孤儿回收 | `jobs`、`tool-jobs` | W1 |
 | `keel.exec-surface` | 执行面契约与适配器（本地 / 远端；**自研抽象**） | 不照搬 `ssh`；契约由本仓定义 | W1 |
@@ -225,7 +225,19 @@ id 集合相等关系。已知冲突逐行处置：
 | `keel.browser-use` / `keel.computer-use` | 登记 | 接 fde2e-bu / fde2e-cu |
 | `keel.creation` | 保留（内置），主路径改 chunk | 创造模式见 §3.9 |
 
-W0.5 MUST 跑 catalog 对账脚本（COVERAGE 行 → `keelPluginId`），差异逐条列出并以非零退出。
+**仅存在于 catalog / COVERAGE 的 id**（W0.5 MUST 逐条处置，否则对账必失败）：
+
+- **catalog 独有 19 个**：`keel.core`、`keel.session`、`keel.ssh`、`keel.sandbox`、`keel.sdk`、
+  `keel.api`、`keel.client-ui`、`keel.host`、`keel.util`、`keel.acp`、`keel.desktop`、
+  `keel.mobile-gateway`、`keel.llm.subscription`、`keel.plugin-gate`、`keel.session-migrate`、
+  `keel.research.literature`、`keel.blender`、`keel.theme.glass`、`keel.subagent-adapter`
+  → catalog 标 `out-of-scope` 或合并进现有 id，逐条给理由。
+- **COVERAGE 独有 10 个**：`keel.boot`、`keel.cli`、`keel.context`、`keel.plugin-manager`、
+  `keel.shell.pwsh`、`keel.skill-store`、`keel.skill.distill`、`keel.subagent.claude-code`、
+  `keel.tools`、`keel.web` → catalog 补 `absent`/`merged` 行与理由（其中 `keel.context`、
+  `keel.plugin-manager` 等已在本清单，补进 catalog 即可）。
+
+W0.5 MUST 跑 catalog 对账脚本（COVERAGE §A/§B 行 → `keelPluginId`），差异逐条列出并以非零退出。
 
 ## 5. 与 DSH 的关键差异
 

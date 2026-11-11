@@ -4,6 +4,17 @@
 是第一方客户端插件 `keel.ui`；Harness 只提供槽位注册与贡献装载的机制。UI 承载与桥的底座是
 NSH（`nsh/base` + `host.call`），细节见 `docs/WEBUI.md`。
 
+## 规范性表
+
+### 贡献形态表
+
+| 形态 | 运行方式 | 隔离 | 备注 |
+|---|---|---|---|
+| `chunk` | NSH 动态导入（`__nsh_import`），与宿主同一 VM，作为宿主树里的组件渲染 | 无（同崩溃/内存域） | 跨 target（含 TUI）；零额外 VM |
+| `package` | NSH 签名包 `.nshpkg`，`run_package` 作为独立 surface 运行 | 独立 QuickJS VM + `HostLimits` + 能力强制 | 重型工具；独立表面，不是宿主树里的组件 |
+| `iframe` | `<iframe>` / `WebView` 指向插件自托管页面 | 浏览器级隔离 | 兜底：非 NSH、存量 React/HTML 插件；不主题化、TUI 不可用 |
+| `data` | 宿主消费的 JSON（导航项/动作/菜单），不执行代码 | 无 | 无 VM；schema 由槽位声明 |
+
 ## ADDED Requirements
 
 ### Requirement: 槽位由插件声明，Harness 不内置槽位清单
@@ -38,17 +49,10 @@ MUST NOT 内置任何具体槽位。槽位 MUST 由插件声明，其 id MUST �
 - **WHEN** 一个 chunk 贡献被装配
 - **THEN** 它在 web 与至少一个原生 target 上渲染一致；TUI 按其 target 声明渲染或显式降级
 
-### Requirement: 贡献形态三选，由槽位所有者决定允许集
+### Requirement: 贡献形态由槽位所有者决定
 
-贡献 MUST 是三种形态之一，且 MUST 只使用槽位声明允许的形态：
-
-| 形态 | 运行方式 | 隔离 | 备注 |
-|---|---|---|---|
-| `chunk` | NSH 动态导入（`__nsh_import`），与宿主同一 VM，作为宿主树里的组件渲染 | 无（同崩溃/内存域） | 跨 target（含 TUI）；零额外 VM |
-| `package` | NSH 签名包 `.nshpkg`，`run_package` 作为独立 surface 运行 | 独立 QuickJS VM + `HostLimits` + 能力强制 | 重型工具；独立表面，不是宿主树里的组件 |
-| `iframe` | `<iframe>` / `WebView` 指向插件自托管页面 | 浏览器级隔离 | 兜底：非 NSH、存量 React/HTML 插件；不主题化、TUI 不可用 |
-
-槽位所有者 MUST 显式列出它接受的形态；插件 MUST NOT 使用未列出的形态。
+贡献 MUST 是「贡献形态表」中的四种之一（`chunk` / `package` / `iframe` / `data`），且 MUST 只使用
+槽位声明允许的形态。槽位所有者 MUST 显式列出它接受的形态；插件 MUST NOT 使用未列出的形态。
 
 #### Scenario: 一个槽位只收 chunk
 - **WHEN** 某槽位只允许 `chunk`，而某插件的贡献是 `iframe`

@@ -66,9 +66,10 @@ durable 事实，必须有自然幂等键）。每个新 kind MUST 在 `kindRegi
 
 | kind | class | dedupe key（独立命名空间） | 提交者 |
 |---|---|---|---|
-| `task.*` | owner（run 内）/ system（初始卡） | `task:<taskId>:<kind>:<seq>`；初始卡 `task:<sessionId>:init` | kernel / harness |
+| `task.created/updated/attached/detached/closed/note` | owner（run 内）/ system（初始卡） | `task:<taskId>:<kind>:<seq>`；初始卡 `task:<sessionId>:init` | kernel / harness |
 | `fs.write` | owner | `fs:<toolCallId>:<path>` | file-plugin |
 | `fs.capture` | owner | `capture:<toolCallId>:<baseSeq>` | shell/capture |
+| `fs.capture_failed` | system | `capture-failed:<sessionId>:<toolCallId>:<seq>` | shell/capture |
 | `config.rotated` | system | `config:<configHash>` | harness |
 | `placement.joined/left` | system | `placement:<sessionId>:<epoch>:<kind>` | placement |
 | `supervision.escalated` | system | `supervision:<sessionId>:<attempt>` | supervisor |
@@ -154,8 +155,9 @@ durable 事实，必须有自然幂等键）。每个新 kind MUST 在 `kindRegi
 
 ### D2. 通知（notification）
 
-`created` → `delivered(consumer_i)` → `consumed(任一 ack)`；无可 ack 消费者时：`created` →
-`push_sent` → `consumed`/`expired`。每个消费者一个状态，**任一 ack 即 consumed**。
+`created` → `delivered(consumer_i)` → `consumed(任一 ack)`。三态真值表：①在线且声明 ack 能力者
+窗口内 ack → 不推；②在线但窗口内未 ack → `push_sent` 一次；③无在线 ack 消费者 → `push_sent`
+一次。每个消费者一个状态，**任一 ack 即 consumed**。
 非法：已 consumed 再推原生通知；重启后重复推送（ack 与推送都必须持久）。
 
 ### D3. 后台作业（JobManager）

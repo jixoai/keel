@@ -267,7 +267,7 @@ task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账�
 
 - **四层叠加**：base bundle → mode bundle（serve/headless/tui/sdk）→ preset → 用户
   `config.toml`；按 row id 覆盖，last write wins；激活由服务可用性驱动。
-- **kind 边界**：kernel（loop seam）/ harness（工具与服务）/ provider（独立进程）/
+- **layer 边界**：kernel（loop seam）/ harness（工具与服务）/ provider（独立进程）/
   ui（面板）/ service（layerfs）。
 - **能力 seam**：fs / shell / subprocess / exec-surface / terminal 均可换实现（本地/远端/SSH），
   上层工具契约不变。
@@ -315,7 +315,8 @@ task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账�
 
 在本 change 立项时已确认的假设：
 
-- A1：内核不改契约；新事件 kind 通过 `kindRegistry` 扩展。
+- A1：内核 **agent-loop 注入契约**不变；账本 commit API 有增量（键命名空间、`run.finished` payload），
+  新事件 kind 通过 `kindRegistry` 扩展。
 - A2：一个 Group = 一个进程；单机内的 placement，跨机迁移不在本 change。
 - A3：默认 `pack` 策略；`user` 是隔离 SKU。
 - A4：capture 默认 `per-tool-call`，实现必须走增量，不得全树重扫。

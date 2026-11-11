@@ -83,15 +83,21 @@ layerfs 是否强一致）。需要组合语义时 MUST 由 Harness 在装配期
 ### Requirement: 通知与审批是持久事实
 
 通知的「已消费」MUST 是持久事件（ack）；审批的 open/answer/timeout MUST 是 durable 状态，
-不得用进程内定时器推断。系统级原生推送 MUST 只在「有 ack 能力且在线」的消费者未在窗口内
-ack 时触发，不得以「没人点已读」作为唯一判据。**原生 target MUST 使用系统通知；web target
-在无 service worker 能力时 MUST 显式降级为页内通知并登记缺口**，不得假装已推送。
+不得用进程内定时器推断。推送 MUST 按三态真值表：①在线且声明 ack 能力者在窗口内 ack → 不推，
+ack 落账；②在线且声明 ack 能力者窗口内未 ack → 窗口后推一次，之后仍可 ack；③没有任何具备
+ack 能力的在线消费者 → 窗口后推一次。**原生 target MUST 使用系统通知；web target 在无
+service worker 能力时 MUST 显式降级为页内通知并登记缺口**，不得假装已推送。
 URL 形态的消费 MUST 单次有效且不可猜。
 
 #### Scenario: 在线客户端即时消费
-- **GIVEN** 一个持有 live 连接的客户端已收到通知
+- **GIVEN** 一个持有 live 连接且声明 ack 能力的客户端已收到通知
 - **WHEN** 客户端在窗口内 ack
 - **THEN** 不触发系统原生推送；ack 落为持久事件
+
+#### Scenario: 在线但未 ack
+- **GIVEN** 一个持有 live 连接且声明 ack 能力的客户端已收到通知
+- **WHEN** 窗口内未 ack
+- **THEN** 窗口后推送一次；之后仍可 ack，不重复推送
 
 #### Scenario: 离线时推送一次
 - **GIVEN** 没有任何具备 ack 能力的在线消费者
@@ -128,7 +134,8 @@ URL 形态的消费 MUST 单次有效且不可猜。
 
 ### Requirement: 内存预算
 
-后端整体（各 group worker + layerfs + 控制面）MUST 满足：**目标 ≤300MB、硬上限 ≤500MB**。
+后端整体（各 group worker + layerfs + 控制面）MUST 满足 **硬上限 ≤500MB、目标 ≤300MB**。
+判据：>500 失败；300–500 通过但记「未达目标」；≤300 达标。
 前端（NSH 客户端）可分离部署，其 surface VM MUST 有配额（默认单 surface 32–64MB）且关闭即卸；
 MUST NOT 以"前端可分离"为由取消前端配额。测量协议见下一条。
 

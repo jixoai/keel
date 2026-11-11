@@ -1,8 +1,8 @@
 # Proposal: keel-harness-v2
 
 > 立项：Owner 2026-11-11。本 change 是 **Harness 层**的下一版架构。
-> 不动内核契约：内核（AgentLoop）仍是单进程、无状态、账本唯一真值；
-> 多用户、放置、环境、工具、UI 全部在 Harness。
+> agent-loop 注入契约不变：内核（AgentLoop）仍是单进程、无状态、账本唯一真值；账本 commit API
+> 有增量（键命名空间、`run.finished` payload）。多用户、放置、环境、工具、UI 全部在 Harness。
 
 ## Why
 
@@ -161,13 +161,16 @@ web-search / context-memory 继续复用。
 
 ## Impact
 
-- **内核**：不改既有契约。新增 `task.*`、`fs.*` 类事件需同步 `kindRegistry` /
-  `internal/store` 常量 / 转录与 SSE 规则（本 change 内完成）。
+- **内核**：agent-loop 注入契约不变；账本 commit API 增加键命名空间与 `run.finished` payload。
+  新增 `task.created/updated/attached/detached/closed/note`、`fs.write`、`fs.capture`、
+  `fs.capture_failed` 等 kind 需同步 `kindRegistry` / `internal/store` 常量 / 转录与 SSE 规则。
 - **Harness**：新增 placement（group/lease）、task、file、bash、mcp、skills、approve、
   notification、oar 插件。
 - **新服务**：`layerfs`（Rust + gRPC），随 Harness 部署。
 - **新表**：`groups`、`session_placement`、`plugin_state`、`task_cards`、`task_events`（账本投影，
   不直接写）、`file_manifest`、`session_snapshot`、`blob_refs`。
+- **范围调整**：v1 `plugin-system` 的「W1 MUST 覆盖全部 keel 已有能力面」在本 change 改为按
+  `plugin-inventory.md` 的波次推进；W1 只承诺 v2 核心（显式记录，不静默丢失）。
 - **文档**：`docs/HARNESS.md`、`docs/KERNEL.md` 增补；`AGENTS.md` 补一句放置原则
   （默认单进程多租户；进程切分由 Harness 放置策略决定）。
 - **预算**：后端整体（内核 + Harness + layerfs + 控制面）**目标 ≤300MB、上限 ≤500MB**；前端

@@ -81,10 +81,12 @@ TUI MUST NOT 渲染 WebView/iframe 或 `package`（签名包独立 surface）形
 
 仓库 MUST 维护 `plugins/COVERAGE.md` 与 `plugins/keel.plugin-market/catalog.json`，并以
 `catalog.json` 为**唯一机读真源**：每条 MUST 有 `id` / `keelPluginId` / `status` / `wave` /
-`dshGroups[]`；`COVERAGE.md` 与 `plugin-inventory.md` MUST 由该真源生成或经脚本比对。
-映射规则（不是三份 id 集合相等）：`COVERAGE.md` 的每一行 MUST 映射到 `catalog.json` 的
-`keelPluginId`（或 `absent` + 理由）；`catalog.json` 的每个 `keelPluginId` MUST 在
-`plugin-inventory.md` 中存在；三者的 `status` 与 `wave` MUST 一致。已合并/废弃的 id MUST 显式标记：
+`dshGroups[]`；`COVERAGE.md` MUST 由该真源生成或经脚本比对。
+映射规则（不是 id 集合相等）：`COVERAGE.md` §A 的能力行与 §B 的 bundle 行 MUST 各映射到
+`catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；§B 的 bundle 行统一映射到 `keel.bundles`；
+末尾来源表（§F）不参与映射。`catalog.json` 每个条目 MUST 有 `status` 与 `wave`。
+设计期清单 `plugin-inventory.md` 只是 change 附录，MUST NOT 作为归档后的规范引用。
+已合并/废弃的 id MUST 显式标记：
 
 - `goal` / `todo` / `plan-mode` 并入 `keel.tasks`（all-in-one plan-plugin）；
 - `team` → absent（另有结构方案）；
@@ -100,9 +102,8 @@ TUI MUST NOT 渲染 WebView/iframe 或 `package`（签名包独立 surface）形
 
 #### Scenario: 映射对账
 - **WHEN** 运行对账脚本
-- **THEN** `COVERAGE.md` 每一行都映射到 `catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；
-  `catalog.json` 每个 `keelPluginId` 都在 `plugin-inventory.md` 存在；`status` 与 `wave` 一致；
-  差异逐条列出并以非零退出
+- **THEN** `COVERAGE.md` §A/§B 每一行都映射到 `catalog.json` 的 `keelPluginId`（或 `absent` + 理由）；
+  `catalog.json` 每个条目都有 `status` 与 `wave`；差异逐条列出并以非零退出
 
 #### Scenario: absent 有理由
 - **WHEN** 审查任一 `absent` 行
@@ -124,9 +125,10 @@ provides:
   hooks: [event, ...]
   triggers: [id, ...]
   slots: [{ id, forms, arity, schema?, targets }]        # 本插件提供的槽位
-  ui: { entry: ui/index.html, title: "..." }             # 仅 iframe/webview 形态必填
+  ui: { entry: ui/index.html, title: "..." }   # 仅当贡献含 iframe 时必填；纯 chunk 包可省略
+  backends: [{ tool: skills, action: view, impl: ... }]   # 可选：实现既有 action 的后端
 contributes:
-  - { slot: <slot-id>, form: chunk|package|iframe, entry: ui/settings.js }
+  - { slot: <slot-id>, form: chunk|package|iframe|data, entry?: ui/settings.js, payload?: ... }
 extensibility: { doc: EXTENSIBILITY.md, schema: extensibility.json }  # 官方插件必填，第三方可选
 requires: [plugin-or-service-id, ...]
 permissions: { fs: [workspace-write], net: [host...], secrets: [NAME...], tools: [name...] }
@@ -171,7 +173,8 @@ source: { type: builtin|local|git|npm, ... }
 ### Requirement: UI 承载与桥接
 
 插件 UI MUST 按**槽位**装载，贡献形态由槽位声明：`chunk`（宿主树内原生渲染）、`package`
-（签名包独立 surface）、`iframe`（`/plugins/<id>/`，兜底且显式标注非原生主题）。插件 UI MUST
+（签名包独立 surface）、`iframe`（`/plugins/<id>/`，兜底且显式标注非原生主题）、`data`
+（宿主消费的 JSON，如导航项/动作）。插件 UI MUST
 经宿主桥 `keel.plugin.*`（读自身状态、调自身工具、请求审批、订阅事件）访问能力，MUST NOT
 获得宿主任何密钥；主题 MUST 使用宿主令牌。`/plugins/<id>/` 不再是唯一承载方式。
 
@@ -183,6 +186,30 @@ source: { type: builtin|local|git|npm, ... }
 - **WHEN** 打开一个 `chunk` 贡献
 - **THEN** 它作为宿主树里的组件渲染，无 iframe、无 `/plugins/<id>/` 请求，主题随宿主切换
 
+### Requirement: 生命周期
+
+插件状态机 MUST 拆成两台：
+
+1. **包/进程级**（安装与代码代际）：`installed → verified → available → removed`；升级为同 id 的
+   版本替换；HMR 为 `reloading → rolled_back`（失败回滚）。`generation` 是**进程级**代码代际，
+   MUST NOT 按租户分叉。
+2. **租户级**（启用与可见性）：`disabled → enabled → disabled`；依赖缺失 MUST 进入 `PENDING`
+   （可见、带原因，不半装载），装配失败为 `FAILED`。`plugin_state(tenant_id, plugin_id, enabled,
+   config_version)` 记录该层。
+
+启用/停用 MUST 走 agentext 的依赖拓扑装载与**反序卸载**；工具/hook/trigger/UI 的注册副作用
+MUST 在停用时全部撤销（无残留工具、无残留订阅、无残留触发）。
+
+#### Scenario: 停用即撤销
+- **GIVEN** 一个提供工具 `x` 与 webhook 触发的插件已启用
+- **WHEN** 停用它
+- **THEN** 模型侧不再有 `x`；触发器不再触发；插件区显示 disabled；无错误残留
+
+#### Scenario: 依赖缺失不装载
+- **GIVEN** 插件 B 声明 `requires: [A]`
+- **WHEN** A 未启用即启用 B
+- **THEN** B 进入 `PENDING` 并给出缺失依赖原因（不半装载）；A 启用后可转 `enabled`
+
 ## ADDED Requirements
 
 ### Requirement: 插件状态与租户作用域
@@ -190,11 +217,12 @@ source: { type: builtin|local|git|npm, ... }
 插件**包安装** MUST 为进程级（二进制/文件/受管目录）；**启用、配置、可见性** MUST 为租户级：
 
 ```
-plugin_state(tenant_id, plugin_id, enabled, config, generation)
+plugin_state(tenant_id, plugin_id, enabled, config_version)
 ```
 
 `/v1/plugins` MUST 按调用者租户过滤；同一 Group 内不同租户的启用状态 MUST 互不影响；
-插件工具面 MUST 按租户装配。`user` 放置不改变该语义。
+插件工具面 MUST 按租户装配。`user` 放置不改变该语义。`generation` MUST 是**进程级**代码代际
+（HMR/装载），MUST NOT 放进租户行；租户配置版本用 `config_version`。
 
 #### Scenario: 租户各自启用
 - **WHEN** 租户 A 启用插件 P，租户 B 未启用
