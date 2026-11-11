@@ -16,6 +16,8 @@
     MUST NOT 用 cgroup peak 与 RSS 直接比较。
 - **前端可分离**：NSH 客户端可跑在另一台机器 / 手机浏览器；surface VM 配额单独断言
   （默认单 surface 32–64MB，关闭即卸），不计入后端预算，但不得回退。
+- **客户端基线**：pin **NSH 0.5.0**；破坏性变更（Window API / 媒体 capabilities / `focus-visible:`
+  / macOS `activationPolicy`）MUST 全部处理；TUI 用 ratatui 后端（`nsh run --target tui`）。
 - **负控**：每道门必须给出**能把它判失败**的构造，否则该门不成立。
 - **原生 target**：由 NSH 多平台构建直接产出；本 change 不另起构建/签名产品线。
 
@@ -89,8 +91,8 @@
   （无硬编码色值/阴影）；`iframe` 显式标注非原生主题；**TUI 中 `package`/`iframe` 显式不可用、
   `chunk` 正常渲染**；**至少一个原生 target 渲染 chunk**；桥按能力裁剪，越权 `ERR_ACCESS_DENIED`；
   系统级推送在原生 target 用系统通知，web target 无 service worker 时显式降级（登记缺口）。
-- **证据**：web + **`macos`（`nsh package --target macos`）** + TUI（`nsh test --target tui`）
-  三组截图/日志；越权审计；主题切换前后截图。
+- **证据**：web + **`macos`（`nsh package --target macos`）** + TUI（`nsh run --target tui` 真终端）
+  三组截图/日志；越权审计；主题切换前后截图；桌面壳（单实例/托盘/全局快捷键/深链/系统通知）证据。
 - **负控**：给只允许 `chunk` 的槽位投 `iframe`；越权桥调用。
 
 ## G8 创造模式门
@@ -98,7 +100,8 @@
 - **判据**：**AI 现场写出一个 Native 插件**（chunk 槽位贡献），从聚合目录出发 → 生成包 →
   校验 → 审批安装 → 在 **web 与 `macos` 原生 target** 渲染 → 卸载无残留；给出 TUI 渲染或
   显式降级证据；缺文档/非法形态/硬编码令牌的包被拒且理由字段级可读。
-- **证据**：AI 会话记录 + 生成的包 + 三端截图 + 卸载 diff。
+- **证据**：AI 会话记录 + 生成的包 + 三端截图 + 卸载 diff；1000 条消息会话的滚动保真与
+  内存回落；自更新/OTA 试验回滚。
 - **负控**：硬编码主题色、贡献到不存在的槽位、缺 `extensibility.json` → 安装前被拒。
 
 ## G9 有界门

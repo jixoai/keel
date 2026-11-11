@@ -40,7 +40,18 @@
 - [ ] **RSS 采样器**：`scripts/acceptance-rss.sh` 采样后端进程 `VmRSS` 求和，接 `acceptance-all.sh`，
       断言 ≤500MB（目标 ≤300MB）；cgroup peak 单列
 - [ ] **原生 target 可执行**：`web` 与 `macos`（`nsh package --target macos`）构建产物 + 截图；
-      TUI 用 `nsh test --target tui` 的 cell dump
+      TUI 用 `nsh run --target tui` 真终端（0.5.0 ratatui 后端），测试用 `nsh test --target tui`
+- [ ] **NSH 0.5.0 升级**：pin 0.5.0；Port Window API（`WindowRef`/`<Window>`/window kinds）；
+      媒体加载 `fs.read`/`${pluginDir}` grant；`focus-visible:` 仅键盘；macOS `activationPolicy`
+- [ ] **客户端壳**：单实例、托盘、全局快捷键、URL Scheme 深链、文件关联、启动隐藏/菜单栏模式；
+      任务板/交付物可开独立窗口
+- [ ] **系统集成**：系统通知（含 silent）＋ badge；通知点击深链；WebView `evaluate` 返回值、
+      自有 URL scheme、请求头、incognito、摄像头/麦克风（不支持时显式降级）
+- [ ] **更新与分发**：`nsh/updater` 自更新（check/download/install/restart）＋签名 OTA 包；
+      试验期失败回滚；运行时变化走完整应用更新
+- [ ] **长会话性能**：1000 条消息滚动保真、离屏增量创建、大表格避免重复布局、视图树消失释放内存
+- [ ] **编辑器**：Composer RichEditor（HTML 导入/导出）；消息流式 Markdown；代码/Diff/终端独立字号；
+      用 NSH `Terminal` 组件渲染后台输出
 - [ ] 废止代码里的旧工具名注释与兼容红线：`internal/agentext/plugin.go`、`creation.go`、
       `subagent.go`、`internal/pluginpkg/manifest.go:227`
 - [ ] `docs/HARNESS.md` 增补 Harness/内核边界、放置模型与多用户升级

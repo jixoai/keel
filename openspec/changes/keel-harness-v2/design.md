@@ -322,6 +322,8 @@ task_events(id, task_id, session_seq, kind, payload)  -- 投影：从会话账�
 - A4：capture 默认 `per-tool-call`，实现必须走增量，不得全树重扫。
 - A5：忽略清单默认为 `.git/objects`。
 - A6：外部内核只作为外部工具，不要求它维护任务卡。
+- A7：客户端 pin NSH 0.5.0；TUI 是一等 target（ratatui），`chunk` 贡献在 TUI 渲染；
+  桌面壳支持多窗口/托盘/全局快捷键/单实例/系统通知/badge/自更新 OTA。
 
 未决（留给后续 change）：跨机迁移、多机共享 layerfs、技能脚本沙箱、
 triggers 的流程编排能力、面板的实时投影实现。

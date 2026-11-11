@@ -171,6 +171,9 @@ web-search / context-memory 继续复用。
   不直接写）、`file_manifest`、`session_snapshot`、`blob_refs`。
 - **范围调整**：v1 `plugin-system` 的「W1 MUST 覆盖全部 keel 已有能力面」在本 change 改为按
   `plugin-inventory.md` 的波次推进；W1 只承诺 v2 核心（显式记录，不静默丢失）。
+- **客户端基线**：pin **NSH 0.5.0**（TUI ratatui 后端、桌面多窗口/托盘/全局快捷键/单实例/
+  系统通知与 badge、自更新与签名 OTA、RichEditor/流式 Markdown、长列表与内存优化）；
+  破坏性变更与壳层要求见 `client-shell` spec。
 - **文档**：`docs/HARNESS.md`、`docs/KERNEL.md` 增补；`AGENTS.md` 补一句放置原则
   （默认单进程多租户；进程切分由 Harness 放置策略决定）。
 - **预算**：后端整体（内核 + Harness + layerfs + 控制面）**目标 ≤300MB、上限 ≤500MB**；前端

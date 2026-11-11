@@ -11,7 +11,7 @@ NSH（`nsh/base` + `host.call`），细节见 `docs/WEBUI.md`。
 | 形态 | 运行方式 | 隔离 | 备注 |
 |---|---|---|---|
 | `chunk` | NSH 动态导入（`__nsh_import`），与宿主同一 VM，作为宿主树里的组件渲染 | 无（同崩溃/内存域） | 跨 target（含 TUI）；零额外 VM |
-| `package` | NSH 签名包 `.nshpkg`，`run_package` 作为独立 surface 运行 | 独立 QuickJS VM + `HostLimits` + 能力强制 | 重型工具；独立表面，不是宿主树里的组件 |
+| `package` | NSH 签名包 `.nshpkg`，`run_package` 作为独立 surface 运行；桌面可作为 `<Window>` 独立窗口 | 独立 QuickJS VM + `HostLimits` + 能力强制 | 重型工具；独立表面/窗口，不是宿主树里的组件 |
 | `iframe` | `<iframe>` / `WebView` 指向插件自托管页面 | 浏览器级隔离 | 兜底：非 NSH、存量 React/HTML 插件；不主题化、TUI 不可用 |
 | `data` | 宿主消费的 JSON（导航项/动作/菜单），不执行代码 | 无 | 无 VM；schema 由槽位声明 |
 
@@ -110,7 +110,9 @@ MUST 在其槽位首次使用时才加载。
 插件 UI MUST 只经宿主桥（NSH `host.call` / `host.on`，命名空间 `keel.*`）访问能力：读自身
 状态、调用自身工具、请求审批、订阅事件。宿主 MUST 按插件声明裁剪可授予的 name 前缀，
 MUST NOT 暴露任何宿主密钥、凭据或跨租户数据。桥调用 MUST 类型化失败（`ERR_ACCESS_DENIED`
-/ `ETIMEDOUT` / 插件自身错误）并可被插件处理。
+/ `ETIMEDOUT` / 插件自身错误）并可被插件处理。WebView 形态 MUST 遵守 NSH 0.5.0 的
+`evaluate` 返回值、应用自有 URL scheme、请求头、incognito 与摄像头/麦克风能力，并按
+`capabilities`（含 `fs.read` / `${pluginDir}`）授权。
 
 #### Scenario: 越权访问被拒
 - **WHEN** 一个只声明了 `keel.plugin.self.*` 的插件调用 `keel.admin.*`
@@ -123,9 +125,10 @@ MUST NOT 暴露任何宿主密钥、凭据或跨租户数据。桥调用 MUST �
 ### Requirement: 目标降级
 
 槽位 MUST 声明支持的 target 集合（web / native / tui）。在不支持的目标上，宿主 MUST 显式
-降级（入口隐藏或标注不可用），MUST NOT 静默消失或渲染空白。`iframe` 与 `package` 形态在 TUI
-MUST 视为不可用（TUI 无 WebView），`chunk` 形态 MUST 在所有 NSH 目标上可用。原生 target
-MUST 由 NSH 的多平台构建直接产出；本 change MUST NOT 为原生 target 另起构建/签名产品线。
+降级（入口隐藏或标注不可用），MUST NOT 静默消失或渲染空白。**TUI 由 NSH 0.5.0 的 ratatui
+后端承载，是一等 target**：`chunk` 形态 MUST 在 TUI 渲染；`iframe` 与 `package` 在 TUI MUST
+视为不可用（无 WebView/独立窗口），并提供「在图形界面打开」入口。原生 target MUST 由 NSH 的
+多平台构建直接产出；本 change MUST NOT 为原生 target 另起构建/签名产品线。
 
 #### Scenario: TUI 中的不可用贡献
 - **WHEN** 在 `keel tui` 中打开一个只有 `iframe` 贡献的槽位

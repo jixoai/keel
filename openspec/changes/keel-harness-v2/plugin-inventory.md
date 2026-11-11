@@ -92,7 +92,7 @@
 | `keel.attachment` | 图片/文件附件 | `attachment-local` | W2 |
 | `keel.deliverables` | 交付物登记 + 工作区变更 | `deliverables`、`workspace-changes` | W2 |
 | `keel.subprocess` | 共享子进程服务 | `subprocess-local` | W2 |
-| `keel.terminal` | 持久终端（provider） | `terminal` | W2 |
+| `keel.terminal` | 持久终端；图形界面用 NSH 0.5.0 `Terminal` 组件内嵌输出 | `terminal` | W2 |
 
 ### 3.3 记忆与任务（layer: harness）
 
@@ -112,7 +112,7 @@
 | id | 职责 | DSH 对应 | 波次 |
 |---|---|---|---|
 | `keel.approve` | confirm/prompt/choice + 「其它」逃逸 | `user-approval`、`user-questions`、`tool-ask-user` | W1 |
-| `keel.notify` | 多消费器通知 + 原生推送兜底 | `schedule`（部分） | W1 |
+| `keel.notify` | 多消费器通知 + 系统通知/badge 兜底（NSH 0.5.0） | `schedule`（部分） | W1 |
 | `keel.permission` | 权限预设/策略 UI | `permission-presets` | W2 |
 | `keel.commands` | slash commands + 命令反馈 | `commands`、`command-feedback`、`command-goal`、`command-compact` | W2 |
 | `keel.feedback` | 消息/会话反馈 | `message-feedback` | W2 |
@@ -129,7 +129,7 @@
 | `keel.lsp` | 代码导航（provider） | `lsp` | 登记（内核稳定后） |
 | `keel.browser-use` | 浏览器操作（provider） | `browser-use` | 登记：接 fde2e-bu（裁决 4） |
 | `keel.computer-use` | 桌面操作（provider） | `computer-use` | 登记：接 fde2e-cu（裁决 4） |
-| `keel.document` | Office→PDF（provider） | `document` | 登记 |
+| `keel.document` | Office→PDF（provider）；编辑器用 NSH `RichEditor` | `document` | 登记 |
 | `keel.ptc` | 程序化工具调用 | `ptc-runtime`、`tool-executor-ptc` | 登记 |
 | `keel.workflow` | 模型自写编排 | `workflow-ptc`、`tool-workflow` | 登记 |
 
