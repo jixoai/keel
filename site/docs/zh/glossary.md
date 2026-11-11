@@ -16,7 +16,7 @@ sidebar: false
 | **Keel** | 本项目：无状态、多租户的智能体运行时底座。 | `README.md` |
 | **Core** | 契约内核 + 事件账本 + 服务图 + loadout + 存储 + handoff。不可替换的部分。 | `docs/SERVICE-GRAPH.md`、`docs/KERNEL.md` |
 | **Harness**（原 Agent） | Core 之上的产品层：会话、回合、工具、审批、插件、触发器、子代理与客户端界面。进程即 `keel serve`。 | `internal/agentext/doc.go`、`docs/HARNESS.md` |
-| **AgentAPI** | `/v1` 产品 API 契约（别名：Harness API）。名称保留；web UI 与 TUI 消费的 wire 契约。 | `internal/agentapi/api.go:43` |
+| **AgentAPI** | `/v1` 产品 API 契约（别名：Harness API）。名称保留；web UI 与 TUI 消费的 wire 契约。 | `internal/agentapi/api.go:49` |
 | **AgentBackend** | 外部智能体运行时（例如 DSH）作为 external backend 被驱动的协议。名称保留。 | `internal/gateway/protocol.go`、`docs/DSH-REFERENCE.md` |
 | **DSH** | DeepSeek Harness——插件模型的外部参照，也是 external-agent 目标。是参照，不是本项目的事实源。 | `docs/DSH-REFERENCE.md` |
 

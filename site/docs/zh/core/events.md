@@ -165,7 +165,7 @@ data: {"retry_after_ms":3000}
 
 ## 9. 问服务端，不要猜
 
-客户端的线契约是版本化的：`AgentAPI` 以 `/v1` 前缀且只增不改（`internal/agentapi/api.go:46`）。
+客户端的线契约是版本化的：`AgentAPI` 以 `/v1` 前缀且只增不改（`internal/agentapi/api.go:268`）。
 客户端不得从二进制版本推断特性；它问 `GET /v1/capabilities` 并对 `false` 降级。实测响应：
 
 ```json

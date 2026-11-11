@@ -20,7 +20,7 @@ Core 各包（`internal/kernel`、`internal/loop`、`internal/agentcore`、`inte
 | 模型看到什么？ | Harness 宿主装配 + loop | `internal/agent/runner.go:280` |
 | 这次 run 有哪些工具？ | Harness（宿主 registry + 插件工具） | `internal/agenttool/registry.go` |
 | 这个工具可以执行吗？它看到了什么？ | Harness（hooks、审批、策略） | `internal/agentext/hooks.go:18` |
-| 哪些插件处于激活状态？ | Harness（插件运行时） | `internal/agentext/plugin.go:186` |
+| 哪些插件处于激活状态？ | Harness（插件运行时） | `internal/agentext/plugin.go:163` |
 | 客户端展示什么？ | Harness 投影（`@keel/chat-surface`） | `packages/chat-surface/src/types.ts` |
 
 依赖方向只有一条：**Harness → Core**。内核包永远不允许 import 产品包，且有测试机器把守
@@ -62,7 +62,7 @@ keel serve（单进程）
 │   ├─ 触发器           GET /v1/triggers, POST …/{id}/fire          internal/agentapi/ext.go:39
 │   └─ 子代理           GET /v1/subagents, POST …/{id}/subagents    internal/agentapi/ext.go:128
 ├─ 扩展面（agentext）
-│   ├─ 插件运行时       声明式插件、generation、反序卸载            internal/agentext/plugin.go:186
+│   ├─ 插件运行时       声明式插件、generation、反序卸载            internal/agentext/plugin.go:163
 │   ├─ hook 总线        闭集事件、异步、有界队列                    internal/agentext/hooks.go:298
 │   ├─ 审批             开/答/等/超时/取消 + durable 行             internal/agentext/decisions.go:233
 │   ├─ 触发器           interval/cron/webhook + 幂等 + 审计         internal/agentext/triggers.go:305

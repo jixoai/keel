@@ -233,6 +233,7 @@ export default defineConfig({
     nav: [
       { text: 'Core', link: '/core/' },
       { text: 'Harness', link: '/harness/' },
+      { text: 'Download', link: '/downloads' },
       { text: 'Glossary', link: '/glossary' },
       { text: 'GitHub', link: 'https://github.com/jixoai/keel' }
     ],
@@ -275,6 +276,7 @@ export default defineConfig({
         nav: [
           { text: 'Core', link: '/zh/core/' },
           { text: 'Harness', link: '/zh/harness/' },
+          { text: '下载', link: '/zh/downloads' },
           { text: '术语表', link: '/zh/glossary' },
           { text: 'GitHub', link: 'https://github.com/jixoai/keel' }
         ],

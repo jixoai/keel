@@ -35,10 +35,10 @@ in-process plugins, and the planned lifecycle reuses it:
 
 | Promise | Mechanism (implemented) | Citation |
 | --- | --- | --- |
-| dependency-ordered activation | iterative activation loop; dependents activate once their requirements are provided | `internal/agentext/plugin.go:257` |
+| dependency-ordered activation | iterative activation loop; dependents activate once their requirements are provided | `internal/agentext/plugin.go:237` |
 | missing dependency ⇒ not loaded, visibly | state `PENDING` + `waiting for: <ids>` diagnostic | `internal/agentext/plugin.go:291` |
 | disable removes tools | the published tool set is recomputed after every assembly | `internal/agentext/plugin.go:438` |
-| disable removes subscriptions/triggers | `unsubs` and `triggerStops` are released in reverse order | `internal/agentext/plugin.go:387` |
+| disable removes subscriptions/triggers | `unsubs` and `triggerStops` are released in reverse order | `internal/agentext/plugin.go:386` |
 | disable runs declared cleanups exactly once | `effectsRun` bookkeeping prevents double execution on partial unload | `internal/agentext/plugin.go:396` |
 | a failed activation rolls back its own effects | failure path calls `cleanup` before returning | `internal/agentext/plugin.go:317` |
 | every change is visible | generation increments once per assembly; snapshot reports states + diagnostics | `internal/agentext/plugin.go:209`, `:505` |
@@ -70,7 +70,7 @@ Two levels of protection keep it from disturbing work in progress:
    callbacks and trigger fires that reference removed plugins fail visibly in
    their own counters; committed runs are untouched because the run's own
    registrations live in its transcript, not in the plugin table
-   (`internal/agentext/plugin.go:186`, `internal/agentext/hooks.go:399`).
+   (`internal/agentext/plugin.go:163`, `internal/agentext/hooks.go:399`).
 2. **Service level (where plugins become services).** The planned unification
    routes official plugins through the service graph, which adds generations
    with in-flight references: `RETIRING` instances accept no new runs and are
@@ -92,7 +92,7 @@ Two levels of protection keep it from disturbing work in progress:
 | sidecar process | `close` on the protocol, then stdin close → grace → SIGTERM → SIGKILL on the process group |
 | sub-agent sessions the plugin spawned | keep running — they are sessions in the ledger, not plugin state |
 
-(`internal/agentext/plugin.go:387` for effects; sidecar close path
+(`internal/agentext/plugin.go:386` for effects; sidecar close path
 `internal/gateway/stdio.go:228`.)
 
 ## 5. Audit

@@ -194,7 +194,7 @@ in the log is permanent (`internal/kernel/validate.go:265`):
 ## 9. Ask the server, do not guess
 
 The wire contract for clients is versioned: `AgentAPI` is prefixed `/v1` and only grows
-(`internal/agentapi/api.go:46`). A client must not infer features from a binary version; it asks
+(`internal/agentapi/api.go:268`). A client must not infer features from a binary version; it asks
 `GET /v1/capabilities` and downgrades on `false` flags. The response (verified):
 
 ```json

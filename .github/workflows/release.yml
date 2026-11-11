@@ -1,0 +1,131 @@
+name: Release
+
+# Publishes the keel product artifacts for a `v*` tag: the `keel` server/client
+# binary for five platforms, the packaged web client, and SHA256SUMS.txt.
+#
+# The binaries are cross-compiled from the same commit the tag points at, with
+# `-trimpath` so the same source produces the same bytes on a rerun. Nothing is
+# built on a laptop: a tag (or a manual dispatch) is the only trigger, which is
+# what keeps a published SHA meaningful.
+#
+# Assets land on this repository's Release page. `jixoai/fde2e-releases` (the
+# aggregate download outlet the other products use) needs FDE2E_RELEASES_TOKEN;
+# when that secret is present the job mirrors the same bytes there under the
+# `keel-v<ver>` tag, and the site links both.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: version gate (tag ↔ keel version)
+        id: ver
+        run: |
+          REF="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          VERSION="${REF#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          # `keel version` must agree with the tag before anything is published:
+          # a mismatched tag makes the SHA and the version line lie about each
+          # other.
+          BUILT="$(go run ./cmd/keel version | sed -n 's/^keel //p' | head -1)"
+          if [ "$BUILT" != "$VERSION" ]; then
+            echo "::error::tag v$VERSION ≠ reported version '$BUILT' — bump the version constant before tagging"
+            exit 1
+          fi
+          echo "✓ tag v$VERSION matches the binary's reported version"
+
+      - name: build binaries (five platforms)
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          VERSION="${{ steps.ver.outputs.version }}"
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            OUT="keel"
+            [ "$GOOS" = "windows" ] && OUT="keel.exe"
+            echo "→ $GOOS/$GOARCH"
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o "build/$GOOS-$GOARCH/$OUT" ./cmd/keel
+            cp README.md "build/$GOOS-$GOARCH/README.md" 2>/dev/null || true
+            if [ "$GOOS" = "windows" ]; then
+              (cd "build/$GOOS-$GOARCH" && zip -q -r "../../dist/keel-$VERSION-$GOOS-$GOARCH.zip" .)
+            else
+              tar -C "build/$GOOS-$GOARCH" -czf "dist/keel-$VERSION-$GOOS-$GOARCH.tar.gz" .
+            fi
+          done
+          ls -la dist
+
+      - name: build the web client
+        id: web
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # The client is an NSH app; package it with the same nightly the repo
+          # pins (see web/README.md) so the bundle matches what the product runs.
+          curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
+          export PATH="$HOME/.nsh/bin:$PATH"
+          nsh --version
+          (cd web && nsh package --target web -o "$RUNNER_TEMP/webdist")
+          VERSION="${{ steps.ver.outputs.version }}"
+          (cd "$RUNNER_TEMP/webdist" && zip -q -r "$GITHUB_WORKSPACE/dist/keel-web-$VERSION.zip" .)
+          ls -la dist
+
+      - name: checksums
+        run: |
+          cd dist
+          rm -f SHA256SUMS.txt
+          # Sorted, one line per artifact: the page and the docs quote these
+          # exact strings, so a stable order keeps the three faces comparable.
+          for f in $(ls | grep -v '^SHA256SUMS.txt$' | sort); do
+            sha256sum "$f" >> SHA256SUMS.txt
+          done
+          cat SHA256SUMS.txt
+
+      - name: publish (this repository)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          NOTES="keel ${{ steps.ver.outputs.version }} — ${{ github.event.repository.name }} build ${GITHUB_SHA::7}
+          
+          Binary: serve / tui / doctor / version. The web client is the separate \`keel-web-*.zip\`;
+          serve it with \`keel serve -web-dir <unzipped dir>\`. Nothing is code-signed: macOS needs
+          \`xattr -dr com.apple.quarantine ./keel\` before the first run."
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "keel ${{ steps.ver.outputs.version }}" --notes "$NOTES" --verify-tag || \
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: mirror to the aggregate outlet (when the token is configured)
+        if: ${{ secrets.FDE2E_RELEASES_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.FDE2E_RELEASES_TOKEN }}
+        run: |
+          TAG="keel-${{ steps.ver.outputs.tag }}"
+          gh release create "$TAG" dist/* --repo jixoai/fde2e-releases \
+            --title "keel ${{ steps.ver.outputs.version }}" \
+            --notes "keel ${{ steps.ver.outputs.version }} — mirrored from ${{ github.repository }}" || \
+          gh release upload "$TAG" dist/* --repo jixoai/fde2e-releases --clobber

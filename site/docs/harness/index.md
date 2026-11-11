@@ -26,7 +26,7 @@ partials (`internal/agentext/doc.go:1`).
 | What does the model see? | Harness host assembly + the loop | `internal/agent/runner.go:280` |
 | Which tools exist for this run? | Harness (host registry + plugin tools) | `internal/agenttool/registry.go` |
 | May this tool run? What did it see? | Harness (hooks, approvals, policy) | `internal/agentext/hooks.go:18` |
-| Which plugins are active? | Harness (plugin runtime) | `internal/agentext/plugin.go:186` |
+| Which plugins are active? | Harness (plugin runtime) | `internal/agentext/plugin.go:163` |
 | What does the client display? | Harness projection (`@keel/chat-surface`) | `packages/chat-surface/src/types.ts` |
 
 The dependency direction is one-way: **Harness → Core**. A kernel package is
@@ -75,7 +75,7 @@ keel serve (one process)
 │   ├─ triggers         GET /v1/triggers, POST …/{id}/fire          internal/agentapi/ext.go:39
 │   └─ sub-agents       GET /v1/subagents, POST …/{id}/subagents    internal/agentapi/ext.go:128
 ├─ Extension surface (agentext)
-│   ├─ plugin runtime   declarative plugins, generation, reverse unload   internal/agentext/plugin.go:186
+│   ├─ plugin runtime   declarative plugins, generation, reverse unload   internal/agentext/plugin.go:163
 │   ├─ hook bus         closed event set, async, bounded queue            internal/agentext/hooks.go:298
 │   ├─ decisions        approval/clarify primitive with durable rows      internal/agentext/decisions.go:233
 │   ├─ triggers         interval/cron/webhook + idempotency + audit       internal/agentext/triggers.go:305

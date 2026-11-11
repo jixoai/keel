@@ -26,7 +26,7 @@ Two mechanisms express the same semantics in Go:
 | Mechanism | What it assembles | Citation |
 | --- | --- | --- |
 | **Service graph** (`internal/servicegraph` + `internal/loadout`) | first-party runtime services: store, llm, prompt, tools, loop, compaction, projection, telemetry, external gateways | `internal/loadout/loadout.go:63` |
-| **Plugin runtime** (`internal/agentext`) | product extensions: tools, hooks, triggers, and their cleanup | `internal/agentext/plugin.go:186` |
+| **Plugin runtime** (`internal/agentext`) | product extensions: tools, hooks, triggers, and their cleanup | `internal/agentext/plugin.go:163` |
 
 Both use the same vocabulary — `provides`/`requires`/`optional`, ordered
 activation, **reverse-order reversal** of every registered side effect, a
@@ -67,7 +67,7 @@ Guarantees the host provides, each with a test in
   diagnostic instead of half-loading (`internal/agentext/plugin.go:291`);
 - **reversible registration** — hook subscriptions, trigger registrations and
   declared effects are released in exact reverse order; an unload cannot leave
-  a listener, timer or tool behind (`internal/agentext/plugin.go:387`,
+  a listener, timer or tool behind (`internal/agentext/plugin.go:386`,
   `:417`);
 - **fail-closed tool namespace** — two plugins declaring the same tool name
   make the second plugin `FAILED`; the model never sees an ambiguous name

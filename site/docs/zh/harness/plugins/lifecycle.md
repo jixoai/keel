@@ -30,10 +30,10 @@
 
 | 承诺 | 机制（已实现） | 出处 |
 | --- | --- | --- |
-| 依赖顺序激活 | 迭代式激活循环；依赖被 provide 后依赖方才激活 | `internal/agentext/plugin.go:257` |
+| 依赖顺序激活 | 迭代式激活循环；依赖被 provide 后依赖方才激活 | `internal/agentext/plugin.go:237` |
 | 依赖缺失 ⇒ 不装载且可见 | 状态 `PENDING` + `waiting for: <ids>` 诊断 | `internal/agentext/plugin.go:291` |
 | 停用移除工具 | 每次装配后重算已发布工具集 | `internal/agentext/plugin.go:438` |
-| 停用移除订阅/触发器 | `unsubs` 与 `triggerStops` 按反序释放 | `internal/agentext/plugin.go:387` |
+| 停用移除订阅/触发器 | `unsubs` 与 `triggerStops` 按反序释放 | `internal/agentext/plugin.go:386` |
 | 停用时声明的清理恰好执行一次 | `effectsRun` 记账防止部分卸载重复执行 | `internal/agentext/plugin.go:396` |
 | 激活失败回滚自身 effects | 失败路径在返回前调用 `cleanup` | `internal/agentext/plugin.go:317` |
 | 每次变化可见 | 每次装配 generation 恰好 +1；快照报告状态与诊断 | `internal/agentext/plugin.go:209`、`:505` |
@@ -59,7 +59,7 @@
 1. **产品层（今天）。** `Runtime.Apply` 先卸载上一代装配，再激活新装配并令 generation 恰好
    +1。引用已移除插件的 hook 回调与触发器触发会在各自计数器上可见地失败；已提交的 run 不受
    影响，因为 run 自身的注册活在转录里，而不是插件表里
-   （`internal/agentext/plugin.go:186`、`internal/agentext/hooks.go:399`）。
+   （`internal/agentext/plugin.go:163`、`internal/agentext/hooks.go:399`）。
 2. **服务层（插件成为服务之处）。** 规划中的统一把官方插件路由到服务图，后者为在途引用引入
    generation：`RETIRING` 实例不接新 run，待引用归零后按反序依赖卸载，或超过退休截止强制
    卸载——强制退休会把持有者的租约标记为 broken，使 run 以 `drain-expired` 诊断失败，而不是
@@ -77,7 +77,7 @@
 | sidecar 进程 | 协议层 `close`，随后关 stdin → 宽限 → 进程组 SIGTERM → SIGKILL |
 | 插件派生的子代理会话 | 继续运行——它们是账本中的会话，不是插件状态 |
 
-（effects 见 `internal/agentext/plugin.go:387`；sidecar 关闭路径见
+（effects 见 `internal/agentext/plugin.go:386`；sidecar 关闭路径见
 `internal/gateway/stdio.go:228`。）
 
 ## 5. 审计

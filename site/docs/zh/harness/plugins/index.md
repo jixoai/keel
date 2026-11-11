@@ -21,7 +21,7 @@ Go 里用两个机制表达同一套语义：
 | 机制 | 装配什么 | 出处 |
 | --- | --- | --- |
 | **服务图**（`internal/servicegraph` + `internal/loadout`） | 一方运行时服务：store、llm、prompt、tools、loop、compaction、projection、telemetry、外部网关 | `internal/loadout/loadout.go:63` |
-| **插件运行时**（`internal/agentext`） | 产品扩展：工具、hooks、触发器及其清理 | `internal/agentext/plugin.go:186` |
+| **插件运行时**（`internal/agentext`） | 产品扩展：工具、hooks、触发器及其清理 | `internal/agentext/plugin.go:163` |
 
 两者的词汇相同——`provides`/`requires`/`optional`、有序激活、对每个注册副作用做**反序撤销**、
 generation 计数、可观测诊断。装配身份未变的服务跨代共享（`docs/LOADOUT.md` §4）；插件则在
@@ -55,7 +55,7 @@ type Plugin struct {
 - **依赖拓扑**——按依赖顺序激活；依赖缺失的插件保持 `PENDING` 并给出 `waiting for: …`
   诊断，绝不半装载（`internal/agentext/plugin.go:291`）；
 - **可逆注册**——hook 订阅、触发器注册与声明的 effects 按精确反序释放；一次卸载不可能留下
-  监听器、定时器或工具（`internal/agentext/plugin.go:387`、`:417`）；
+  监听器、定时器或工具（`internal/agentext/plugin.go:386`、`:417`）；
 - **fail-closed 工具命名空间**——两个插件声明同名工具时，第二个插件进入 `FAILED`；模型永远
   看不到有歧义的名字（`internal/agentext/plugin.go:236`）；
 - **generation**——每次 `Apply` 令 generation 恰好 +1；快照可查（`internal/agentext/plugin.go:213`、

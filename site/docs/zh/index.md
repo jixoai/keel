@@ -7,6 +7,9 @@ hero:
   tagline: 开源的 Go 智能体运行时。无状态、多租户，2GB 预算内跑 1000 个持续会话——杀掉进程，会话继续。
   actions:
     - theme: brand
+      text: 下载 v0.1.0
+      link: /zh/downloads
+    - theme: alt
       text: Core —— 原理
       link: /zh/core/
     - theme: alt

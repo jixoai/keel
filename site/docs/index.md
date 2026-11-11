@@ -7,6 +7,9 @@ hero:
   tagline: Open-source agent runtime in Go. Stateless, multi-tenant, 1000 concurrent sessions inside a 2GB budget — kill the process and sessions continue.
   actions:
     - theme: brand
+      text: Download v0.1.0
+      link: /downloads
+    - theme: alt
       text: Core — how it works
       link: /core/
     - theme: alt
