@@ -117,6 +117,7 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 | 6 | 稳定 SDK：暂不抽（主代理决策） | 内部 API 先行，GA 前再评估 |
 | 7 | PI pin：跟随上游（主代理决策） | 每次升级独立 change：pin + conformance + PI-PARITY |
 | 8 | 媒体适配器顺序（主代理决策） | 图 → 决策 → 音 → 视 |
+| 9 | **Alpha 阶段零兼容**（Owner 指令 2026-11-14，记住！） | 不考虑任何向下兼容；发现任何架构异常**推进到底完全重做**，不留兼容层/迁移垫片（如工具面迁移直接删除 `mcp__` 方言）；Owner 提出的需求一律 T0/T1，不再回问优先级 |
 
 ## 5.1 对账冲突裁决（2026-11-14，主代理）
 
@@ -143,3 +144,6 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 - 真库 E2E：agents/teams CLI 全链（403/409 权限与引用保护）· 会话删除 UI 全路径（37→36）· 直接配置凭据（DIRECT-CONFIG-OK）· 六插件能力树
 - 审计报告（公网）：`https://local-gaubee-keel-harness.fde2e.com/report.html`
 - 正在跑：运行注入实现（线 A，P1→P6）
+- **MCP Apps 双 origin 沙箱域开通**（2026-11-14）：`https://mcp-app.fde2e.com/` +
+  `https://<app>.mcp-app.fde2e.com`（证书/路由/frpc/浏览器渲染全链验收；证据
+  `openspec/changes/feat-mcp-apps-events/evidence/domain-provision.md`）

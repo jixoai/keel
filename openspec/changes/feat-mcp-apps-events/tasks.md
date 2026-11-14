@@ -13,6 +13,11 @@
       （验收：附录 A 每行可点开、结论与 `design.md` §0 一致）
 - [ ] T0.3 `docs/PI-PARITY.md` 登记偏离：MCP Apps 与 events 是 PI 没有的面；
       legacy 的 MCP 行为逐条不变（验收：偏离表含「理由/影响面/验收方式」三列）
+- [x] T0.4 双 origin 沙箱域开通（2026-11-14）：`mcp-app.fde2e.com` + `*.mcp-app.fde2e.com` ——
+      DNS 泛解析已覆盖（二级通配实测）、acme.sh DNS-01 证书（两域一体，LE ec-256）、
+      `conf.d/mcp-app.fde2e.com.conf`（80→443、Host 透传 → frps 13601）、frpc 片段
+      `mcp-app-fde2e.toml`（pin，→ dev keel 13760）；生产由 keel 正式位接管同域
+      （验收：`evidence/domain-provision.md`——服务器侧 200/301/SAN + 公网直连 + 浏览器渲染）
 
 ## P1 — 元数据、资源与 visibility（无 UI）
 
