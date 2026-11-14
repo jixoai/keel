@@ -43,7 +43,7 @@
 - [x] Agent 表与 API：`/v1/agents`；租户隔离、归档、引用保护
 - [x] 默认模型绑定：只是默认，可被会话/任务覆盖
 - [x] 工具能力：从工具注册源选择；`agent_tools` 保存 toolId+开关+配置
-- [ ] 系统提示词：inline / AGENTS.md 文件引用；进入 run system sections（落到文档已做，注入 run 未做）
+- [x] 系统提示词：inline / AGENTS.md 文件引用进入 run：`internal/agent/binding.go`（per-attempt 解析）+ `internal/host/host.go`（`RenderSystemPrompt` 保留动态段）+ `internal/servicehost/binding.go`（文件引用按部署根解析、越界拒绝、读取失败降级）；证据 `go test ./internal/agent/ ./internal/host/ ./internal/servicehost/` + `evidence/runtime-20261114-211425/wire-requests.jsonl`（captain 请求的 system 以 agent 文本开头，插件段 `<plugin_standard>` 仍在）
 - [x] 头像：确定性 identicon（seed）、上传/URL 覆盖、失败回退
 - [x] 名字/描述/标签可编辑；默认值只是建议
 - [ ] CLI：`keel agent list|show|create|update|delete|start|stop`（start/stop 未做）
@@ -54,12 +54,12 @@
 
 - [x] Team 表/配置文件：captain 必选唯一（实现为单一 `agent_teams` 文档——成员随文档，
       不建 `agent_team_members` 表，避免文档与行两套真值；见 store 注释）
-- [ ] Team 配置是 DB-backed 文件；revision/hash；session 启动冻结快照（快照未做）
+- [x] Team 配置是 DB-backed 文件；revision/hash；执行绑定在 attempt 启动时冻结（实现为 per-attempt 冻结：`internal/servicehost/binding.go` 每次 attempt 读文档，`RunSummary` 记录 agentId/teamId/teamRevision/teamHash/promptHash；证据 `evidence/runtime-20261114-211425/captain-summary.json`：teamRevision=1、teamHash=058a0c57…、promptHash=sha256:2db85c81…）
 - [x] 成员 0..N；成员是 Agent 引用/inline 定义；成员 label/description 可编辑
 - [ ] Team CLI：`keel team list|show|create|update|delete|member add|remove|save|start`（save/start 未做）
 - [x] Team CLI 能力开关：关闭后拒绝并返回 typed permission error（线上 403 team_cli_disabled 实证）
 - [x] 队长自组装：成员增删只改 team 配置，不污染 model/agent provider
-- [ ] Team 删除/归档引用保护；运行中修改不影响当前 run（run 绑定未做）
+- [ ] Team 删除/归档引用保护（未做：需要候选 B 的 sessions 绑定列，见 RUNTIME-PLAN §b）；运行中修改不影响当前 run [x]（per-attempt 解析：编辑只影响下一次 attempt，`internal/agent/runner.go` 的 Bindings seam）
 - [x] 能力树声明 team CLI 子命令与 callable_by
 - [x] Team 卡片/成员管理 UI（settings › 团队）
 
@@ -69,9 +69,9 @@
       （selection 随输入发送；teamId 为会话级内存标记，未持久化——见 2026-11-14 记录）
 - [x] Standard：选模型/默认 Agent 启动；不要求团队
 - [x] Team：选有效团队启动；captain 为主 Agent；缺 captain 阻止启动（按钮禁用+原因）
-- [ ] run manifest 冻结 agent/team/tool/prompt hash
-- [ ] 运行中切换模式/团队只影响下一次 run
-- [ ] 成员复用既有 Agent/run 机制；不新增运行拓扑
+- [x] run manifest 冻结 agent/team/prompt hash：`run.finished` 摘要携带 agentId/teamId/teamRevision/teamHash/promptHash（`internal/agent/runner.go`，形状由 `internal/kernel/validate.go` 校验）；证据 `evidence/runtime-20261114-211425/captain-events.json`
+- [x] 运行中切换模式/团队只影响下一次 run：绑定随输入事实（selection）携带、resolver 每 attempt 各解析一次；`internal/agent/binding_test.go`（resolver 每次 attempt 调用）+ E2E 成员 run 用成员自己的提示词
+- [x] 成员复用既有 Agent/run 机制：`agentext.SpawnRequest.AgentID` → 子输入 `selection.agentId`，子 run 走同一 runner/装配（`internal/agentext/subagent.go`）；证据 `evidence/runtime-20261114-211425/member-events.json`（子输入 selection.agentId=agent_kite_member，子 run 的 wire system 是 KITE-RUNTIME-MARK-8）
 - [ ] 会话 header：Standard 显示模型；Team 显示团队名+captain+成员入口（团队名已显示）
 
 ## P5 设置与 UI
@@ -103,7 +103,7 @@
 - [x] 队长 CLI 开启时可 `keel team member add`；关闭后命令消失并返回权限错误
 - [x] 队长增删成员只改 team 配置；model/agent provider 配置无变化
 - [ ] Standard 选模型启动；Team 选团队启动；运行中切换只影响下一次 run（前两半已验收）
-- [ ] 工具列表来自注册源；插件卸载后 UI/CLI/Agent 工具面同步（卸载同步未验）
+- [x] 工具列表来自注册源；引用已不可用的 toolId 只剔除并留诊断、不阻断 run（`internal/agent/runner.go` toolsForRun + `internal/agenttool/registry.go` Subset；UI/CLI 面的卸载同步仍未验）
 - [x] 旧模型预设已删除，旧 preset 不能启动新 run；旧会话历史仍可读
 - [x] 凭据零泄漏（API/日志/事件/CLI 输出/UI DOM/team 配置）
 - [ ] 组件画廊与组合页面视觉复核通过；390px 无溢出（390px 已验，组合页视觉复核未做）

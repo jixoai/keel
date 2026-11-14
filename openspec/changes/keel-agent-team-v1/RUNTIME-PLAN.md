@@ -663,3 +663,134 @@ checkpoints / blob_refs / usage_ledger 本为 0
    P1 的 `modelcfg` 部分与 P2 的 `internal/agent` 部分与线 B 无文件重叠，
    开班后可按 P1→P3→(P4∥)→P5→P6 连续执行。
 
+
+---
+
+## 实施记录（2026-11-14，本仓库 worktree）
+
+按「审查裁决」四条执行 P1→P6。每阶段：改动文件 / 命令与结果 / 偏差。
+
+### P1 selection 词表扩展 + 存在性校验
+
+**改动**
+- `internal/modelcfg/catalog.go`：`selectionKeys`（模型词表）与新的 `selectionBindingKeys`
+  （+`agentId`/`teamId`）分离；新增 `SelectionScope`（`input`/`document`）与
+  `ValidateSelectionFactIn`；`decodeSelection` 解出两个新键；`ValidateSelectionFact` 等价
+  `…In(input)`。
+- `internal/modelcfg/types.go`：`Selection` 增 `AgentID`/`TeamID`。
+- `internal/modelcfg/tenant.go`：文档 selection 改用 `SelectionScopeDocument.keys()`（R2）。
+- `internal/modelcfg/catalog_test.go`：新增 3 条输入词表用例 + `TestSelectionScopeDocumentRefusesBinding`
+  （文档带 teamId/agentId 必须拒）。
+- `internal/servicehost/binding.go`（新）：`BindingReader`、`LoadBinding`、`RunBinding.ToolIDs`、
+  `ValidateSelectionBinding`、`bindingResolver`（run 装配用）、`Runtime.ValidateSelection`。
+- `internal/servicehost/host.go`：`BindingsOptions`（Reader/TenantID/Root）+ `Config.Bindings`；
+  `RefreshableAssembly` 增 `agent.PreambleRenderer`。
+
+**命令与结果**
+- `go test ./internal/modelcfg/ ./internal/servicehost/ ./internal/host/ ./internal/agenttool/`
+  → 全绿（新增用例逐条 PASS）。
+
+**偏差**：计划写「`servicehost/models.go:260` 的 `ValidateSelection` 增加存在性校验」；
+实现改为 `Runtime.ValidateSelection`（binding.go）——校验需要读 store 与 binding，放在
+`modelsService` 会把 store 依赖塞进「纯配置」类型。`cmd/keel/serve.go` 的
+`selectFromCurrentGeneration` 改为委托 `rt.ValidateSelection`，语义不变。
+
+### P2 resolver 骨架
+
+**改动**
+- `internal/agent/binding.go`（新）：`RunSurface`（Prompt/PromptHash/ToolIDs/TeamMode/身份/
+  DefaultModel）、`BindingResolver`、`MergeSelectionDefaultModel`、`Runner.resolveSurface`。
+- `internal/agent/runner.go`：`Runner.Bindings` 字段；`run()` 中先解析 binding、再做模型解析
+  （合并 agent 默认模型）；`RunSummary` 增 `AgentID/TeamID/TeamRevision/TeamHash/PromptHash`；
+  `systemPromptFor`（PreambleRenderer 优先，缺渲染器时用 binding 文本并留注释）；`toolsForRun`。
+- `internal/agent/model.go`：拆出 `activeModelFor(ctx, lease, events, selection)`，`activeModel`
+  委托之。
+- `internal/servicehost/services.go`：`newPiLoopFactory` 按 `cfg.Bindings.Reader` 挂 resolver。
+- `internal/agent/binding_test.go`（新）：无 resolver 兼容线、prompt 命中 wire、工具过滤、
+  团队保留委派原语、默认模型合并、resolver 失败在任何 commit 前失败、`MergeSelectionDefaultModel` 规则。
+
+**命令与结果**：`go test ./internal/agent/ -count=1` → ok。
+
+### P3 systemPrompt 注入 + 优先级链
+
+**改动**
+- `internal/host/host.go`：`SystemPrompt()` 委托 `RenderSystemPrompt("")`；新增
+  `RenderSystemPrompt(preamble)`（空 preamble 回落配置值，动态段/技能索引照常渲染）。
+- `internal/servicehost/services.go`：`promptService`/`toolsService` 转发 `RenderSystemPrompt`。
+- `internal/host/prompt_test.go`、`internal/servicehost/prompt_test.go`：新增「binding preamble
+  生效时插件段/mcp 段/租户段仍在」用例。
+- `internal/servicehost/binding.go`：`bindingResolver.promptText`（inline / 文件引用，越界拒绝、
+  读取失败降级为无该段）、`promptDigest`（`sha256:` 前缀）。
+
+**命令与结果**：`go test ./internal/host/ ./internal/servicehost/` → ok；
+E2E wire：captain 请求 system 以 `KITE-RUNTIME-MARK-7 …` 开头且含 `<plugin_standard>`。
+
+### P4 工具面过滤
+
+**改动**
+- `internal/agenttool/registry.go`：新增 `Subset(names)`（复制 + 重新 Register，schema 重新编译；
+  未知名跳过）与 `Names()`。
+- `internal/agent/runner.go`：`toolsForRun`（nil 授权=全量；声明授权=只留 enabled；
+  R3：team 模式自动并集 `spawn_subagent`，唯一例外是显式 `enabled=false`；未安装的 toolId
+  剔除 + warn）。
+- `internal/agenttool/agenttool_test.go`：`TestToolRegistrySubset`。
+- `internal/agent/binding_test.go`：过滤矩阵 4 例（含团队三态）。
+
+**命令与结果**：`go test ./internal/agenttool/ ./internal/agent/` → ok。
+E2E 断言：captain wire tools `["clock","spawn_subagent"]`；member `["echo"]`。
+
+**偏差**：no-tool 模型守卫（`runner.go` 的 `SupportsToolCall=false` 分支）行为随过滤改变——
+过滤后工具面可能为空，于是不再必然失败。未加专门测试（计划里提到「要有测试固定」），
+作为已知缺口登记在下方。
+
+### P5 team 编排：captain + 成员 selection 传递
+
+**改动**
+- `internal/agentext/subagent.go`：`SpawnRequest.AgentID` + `Selection`；`childSelection()`
+  写入子输入 `extras["selection"]`；`SubagentTool` schema/Execute 增 `agentId`。
+- `internal/agentapi/ext.go`：HTTP spawn 表单增 `agentId`/`selection`（与工具面保持一致）。
+- `internal/agentext/subagent_binding_test.go`（新）：子输入带 `selection.agentId`；无绑定不发明事实。
+
+**命令与结果**：`go test ./internal/agentext/ -run TestSubagentSpawnCarriesTheMemberBinding` → ok；
+E2E：成员子 run 的 wire system 以 `KITE-RUNTIME-MARK-8 …` 开头。
+
+### P6 run 快照落盘 + 前端去权威化
+
+**改动**
+- `internal/kernel/validate.go`：`run.finished` 形状校验新增
+  `agentId/teamId/teamHash/promptHash`（string）与 `teamRevision`（非负整数）；
+  `internal/kernel/run_finished_test.go` 补正反例。
+- `web/src/data/contract.ts`：`ModelSelection` 增 `agentId`/`teamId`。
+- `web/src/data/selection.ts`（新）：`selectionForSend(model, team)`（团队会话同时带 modelId + teamId）。
+- `web/src/data/store.ts`：发送路径改用 `selectionForSend`；团队标记注释改为「服务端权威」。
+- `web/src/data/selection.test.ts`（新，4 例，TUI 套件内运行）。
+- `scripts/agent-runtime-e2e.sh`（新）+ `openspec/changes/keel-agent-team-v1/evidence/runtime-20261114-211425/`。
+
+**命令与结果**
+- `nsh check` → exit 0；`nsh test --target tui` → **110 tests: 110 passed, 0 failed**。
+- `go build ./...` → OK；`gofmt -l ./internal ./cmd` → 空；
+- `go test ./internal/... ./cmd/...`（KEEL_TEST_DSN→独立库 `keel_test`）→ exit 0（43 ok，0 FAIL）；
+- `go test ./internal/architecture/` → ok（store ↛ agentteam、agentteam ↛ store/agent/agentext 仍成立）；
+- `openspec validate keel-agent-team-v1 --strict` → 仅既有风格类 warning（长 requirement 文本），无 error；
+- E2E：`./scripts/agent-runtime-e2e.sh` → PASS，证据见 `evidence/runtime-20261114-211425/`
+  （`wire-requests.jsonl`、`captain-summary.json`、`member-events.json`、`refused-unknown-team.json`、
+  `port-release.txt`；独立库已 DROP，两端口均无监听。失败的三次尝试目录已删除，只留通过的那轮；
+  证据里不含口令/DSN/cookie——脚本在清理时删掉会话 cookie 文件）。
+- 复核补充（同一轮内）：`internal/agent/binding_test.go`
+  `TestBindingEmptyToolSurfaceUnblocksNoToolModels`（见 P4 偏差 → 已补测）。
+
+**偏差与未完成（如实登记）**
+1. **候选 B 未实现**：`sessions.binding` 列与「团队被会话引用时禁删」仍是缺口（tasks.md 未勾）。
+2. ~~no-tool 守卫的行为变更没有专门测试~~ → 已补：`internal/agent/binding_test.go`
+   `TestBindingEmptyToolSurfaceUnblocksNoToolModels`（过滤后空工具面使 no-tool 模型可运行；
+   无绑定时仍拒绝全量工具面）。
+3. **UI 团队标记仍是内存态**：本次只保证「发往服务端的 selection 带 teamId」；
+   刷新后会话的团队标记仍会丢（那是候选 B 的范围）。
+4. **模拟/演示口径**：E2E 用本地 recording stub provider（非真实厂商模型）；这满足
+   「wire 上必须出现标记串」的证据要求，但没有走真实厂商凭据（本机 `KEEL_API_KEY` 对该网关
+   返回 401，已在前次勘察记录）。
+5. **`agentapi/ext.go` 与 `agentext/subagent.go` 的 HTTP 表单**超出计划 §c.3 列的文件面
+   （计划只写了 subagent.go/builtin.go）：为保持「工具面与 HTTP 面同形」一并改了，改的是同一
+   P5 语义，未引入新概念。
+6. **P3 计划的 demo-provider leg 未单列**：E2E 的 stub provider 同时完成「run 走完 loop」与
+   「wire 捕获」两件事，比「demo 一段 + recorder 一段」更少机制；未做 demo leg（无损失）。

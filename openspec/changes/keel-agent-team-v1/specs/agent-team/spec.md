@@ -38,18 +38,15 @@ AgentTeam MUST 是一个命名的团队配置，MUST 恰好包含一个 captain�
 
 ### Requirement: 团队 CLI 与自组装
 
-AgentTeam 插件 MUST 提供 CLI：`keel team list|show|create|update|delete|member add|remove|list|save|start`。
-每个子命令 MUST 在插件能力树中声明 summary/description/args_schema/output_schema/permissions/
-danger/callable_by。
+AgentTeam 插件 MUST 提供 CLI：
+`keel team list|show|create|update|delete|member add|remove|list|save|start`；
+每个子命令 MUST 在能力树声明 summary/description/schema/permissions/danger/callable_by。
 
-- captain 是否可调用团队 CLI MUST 由团队/Agent 的 `teamCli.enabled` 与逐命令白名单决定。
-  Agent 级与团队级 `teamCli` 同时存在时 MUST 有单一裁决：两侧都启用才启用，白名单取交集，
-  任一侧关闭即关闭（`EffectiveTeamCLI`）。
-- 关闭时 MUST 从 captain 的工具/CLI 面移除，而不是只在提示词里劝阻；调用返回 typed
-  permission error（`team_cli_disabled` / `team_cli_not_allowed` / `team_cli_not_declared`）。
-- team 配置是一份 DB-backed 文件；成员增删 MUST 修改这份 team 配置，MUST NOT 改写
-  modelprovider/agentprovider 的共享配置。session 启动时冻结团队快照，运行中修改不影响当前 run。
-- 运行中的成员变更 MUST NOT 改写已启动 run 的历史快照；下一次成员启动使用新配置。
+- captain 能否调用 CLI MUST 由 Agent/团队两级 `teamCli.enabled` 与逐命令白名单单一裁决
+  （`EffectiveTeamCLI`：两侧均启用、白名单取交集）；关闭 MUST 从工具/CLI 面移除并返回
+  typed error（`team_cli_disabled`/`team_cli_not_allowed`/`team_cli_not_declared`）。
+- 成员增删 MUST 只改 team 配置（DB-backed），MUST NOT 改写共享 provider 配置；
+  运行中修改 MUST NOT 影响已启动 run。
 
 #### Scenario: captain 自建成员
 - **WHEN** `teamCli.enabled` 为 true 且允许 member.add
@@ -97,3 +94,49 @@ MUST NOT 启动：启动门 MUST 要求已 Seal（`not_sealed`），否则 manif
 #### Scenario: 删除被引用的 Agent
 - **WHEN** 用户删除团队中的成员 Agent
 - **THEN** 删除被拒绝并列出团队；提供从团队移除或归档的修复动作
+
+### Requirement: 会话绑定随输入携带（selection.teamId / agentId）
+
+会话的执行绑定 MUST 随输入事实携带：`user.message.payload.selection` 增加 `agentId` 与
+`teamId` 键，同现时 `teamId` 优先。租户文档默认 `selection` MUST 仍只接受模型键——
+文档级绑定会让租户内所有会话静默变成某个 Agent。
+
+- 提交时 MUST 解析绑定（存在性/归档/团队已 Seal）：未知/归档/未封存 MUST 在提交处 400、
+  字段路径点名，MUST NOT 先存历史后失败。
+- 团队模式 run 的工具面 MUST 自动包含委派原语（`spawn_subagent`）；唯一例外是 captain 的
+  `tools` 显式列出它且 `enabled=false`。
+- 团队模式队长的系统提示词 MUST 按「输入 selection > Agent 默认模型 > 租户默认」解析。
+
+#### Scenario: 团队会话的输入
+- **WHEN** 输入的 selection 为 `{providerId, modelId, teamId}`
+- **THEN** 提交通过；该 run 使用 captain 的 systemPrompt 与工具授权，队长的默认模型仅在没有
+  显式 modelId 时兜底
+
+#### Scenario: 未知团队
+- **WHEN** 输入的 selection 命名一个不存在或已归档的 teamId
+- **THEN** 提交返回 400 并点名该 teamId；事件日志不新增任何事件
+
+#### Scenario: 文档不得绑定执行身份
+- **WHEN** 租户文档的 selection 携带 teamId 或 agentId
+- **THEN** 文档被拒绝（未知键），文档仍只描述模型身份
+
+### Requirement: run 冻结执行绑定快照
+
+每次 attempt 启动时 MUST 冻结执行绑定并把身份写进 `run.finished` 的 attempt 摘要：
+`agentId`、`teamId`（团队模式）、`teamRevision`、`teamHash`、`promptHash`（attempt 实际
+system prompt 的摘要）。运行中编辑 Agent/Team MUST NOT 影响已启动的 attempt；下一次 attempt
+解析新配置。
+
+- teamHash/teamRevision MUST 来自存储文档（`agentteam.Seal` 的 revision 与内容 hash），
+  MUST NOT 由客户端提供。
+- 无法解析绑定（文档缺失/损坏）时 attempt MUST 在任何 commit 之前失败，MUST NOT 降级为
+  「无绑定」静默运行。
+
+#### Scenario: 运行中修改团队
+- **WHEN** 团队 run 执行期间用户改了成员或提示词
+- **THEN** 该 attempt 的 promptHash/teamHash 仍是旧值；下一次 attempt 使用新快照
+
+#### Scenario: 摘要可审计
+- **WHEN** 读取该会话的事件流
+- **THEN** `run.finished` 带 agentId/teamId/teamRevision/teamHash/promptHash，可据此证明
+  「哪个 Agent、哪一版团队、哪份提示词」回答了这次 attempt

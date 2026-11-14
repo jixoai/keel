@@ -56,20 +56,15 @@ UI MUST 提供 seed 重生成、上传与 URL 覆盖；头像加载失败 MUST �
 
 ### Requirement: Agent CLI 管理能力
 
-agent-plugin MUST 提供可发现的 CLI 能力树，至少包含：
+agent-plugin MUST 提供可发现的 CLI 能力树：
+`keel agent list|show|create|update|delete|start|stop`，每个子命令 MUST 声明
+summary/description/args·output schema/权限/danger/idempotent/callable_by；
+CLI 写操作 MUST 与 UI 同一校验与租户边界，MUST NOT 出现只能启动不能管理的残缺能力。
 
-- `keel agent list` / `show`
-- `keel agent create` / `update` / `delete`
-- `keel agent start` / `stop`
-
-每个子命令 MUST 有 summary、description、参数/输出 schema、权限、danger、idempotent、
-callable_by。CLI 的写操作 MUST 与 UI 使用同一校验与租户边界；MUST NOT 出现只能启动、
-不能管理 Agent 的残缺能力。
-
-- 创建请求 MAY 省略 id（只填名字）：系统 MUST 生成稳定 id（`agent_` + 无横线 UUID）与
-  以该 id 为 seed 的确定性 identicon。更新请求 MUST 携带 id，MUST NOT 静默生成新身份。
-- 保存 Agent 时 MUST 校验每个 toolId 在当前租户的工具注册源中存在；不存在的引用 MUST
-  保留并以 `tool_not_found` 报告，MUST NOT 静默删除。
+- 创建 MAY 省略 id：系统 MUST 生成稳定 id（`agent_` + 无横线 UUID）与以该 id 为 seed 的
+  确定性 identicon；更新 MUST 携带 id，MUST NOT 静默生成新身份。
+- 保存 MUST 校验每个 toolId 存在于当前租户工具注册源；缺失引用 MUST 保留并报
+  `tool_not_found`，MUST NOT 静默删除。
 
 #### Scenario: CLI 管理 Agent
 - **WHEN** 用户运行 `keel agent update <id> --name ...`
@@ -83,3 +78,41 @@ Agent 被团队或会话引用时 MUST NOT 被硬删除；只能归档/禁用，
 #### Scenario: 删除被团队引用的 Agent
 - **WHEN** 用户删除一个团队成员 Agent
 - **THEN** 删除被拒绝并列出团队；UI 提供“从团队移除后删除”或“归档”动作
+
+### Requirement: Agent 配置在 run 装配中生效
+
+Agent 的配置 MUST 在 run 装配中真正生效，而不只是可保存：
+
+- `systemPrompt`（inline 或文件引用）MUST 成为该 attempt 的 system prompt；宿主装配的
+  动态段（mcp_servers、插件段落、skills 索引）MUST 照常渲染，选择 Agent MUST NOT 静默
+  关掉它们。无绑定时装配结果 MUST 与既有行为逐字节一致。
+- `tools[]` MUST 过滤该 attempt 的工具面：声明了授权时只保留 `enabled=true` 的 toolId；
+  未声明授权时保留全量（默认）。引用的 toolId 已不可用（插件卸载）时 MUST 只剔除并留诊断，
+  MUST NOT 阻断 run。
+- `defaultModel` MUST 只作为兜底：输入显式选择了模型时 MUST NOT 覆盖。
+- 文件引用读取失败 MUST 降级为「无该段」并留诊断，MUST NOT 阻断 run；引用越出部署根目录
+  MUST 被拒绝。
+
+#### Scenario: 选择 Agent 启动
+- **WHEN** 输入命名一个带 inline systemPrompt 与 `[clock]` 授权的 Agent
+- **THEN** provider 请求的 system prompt 是该 Agent 的文本；工具声明只含被授权的工具
+
+#### Scenario: 工具有引用但已卸载
+- **WHEN** Agent 授权的 toolId 当前注册源不提供
+- **THEN** 该工具不进入工具面，run 照常执行，日志留下诊断
+
+#### Scenario: 未绑定的输入
+- **WHEN** 输入未命名 Agent/Team
+- **THEN** system prompt 与工具面与改动前一致（部署提示词 + 全量工具）
+
+### Requirement: 成员以独立 Agent 启动
+
+sub-agent 生成 MUST 支持按 Agent 库条目启动：请求携带 `agentId` 时，子会话的输入 MUST
+携带 `selection.agentId`，子 run MUST 使用该 Agent 的 systemPrompt、工具授权与默认模型。
+成员结果 MUST 以该次工具调用的 tool result（结构化 `SubagentResult`）回到父会话时间线，
+MUST NOT 把成员 transcript 注入父会话上下文。
+
+#### Scenario: 队长委派成员
+- **WHEN** captain 以 `spawn_subagent {agentId}` 委派
+- **THEN** 子会话输入带该 agentId；子 run 的 system prompt 是成员自己的提示词，工具面是
+  成员自己的授权（不含团队模式自动追加的委派原语）

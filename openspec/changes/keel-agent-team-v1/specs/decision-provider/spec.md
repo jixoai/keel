@@ -4,18 +4,15 @@
 
 ### Requirement: 决策模型使用 System One 协议
 
-决策 Provider MUST 实现 **System One API 0.2.0**（OpenAPI 3.1）的
-`state` + `questions` → `answers` 形状。决策 Provider MUST NOT 被建模成
-「带特殊提示词的 LLM」；请求 MUST NOT 使用 `messages`，响应 MUST NOT 期望自由文本。
+决策 Provider MUST 实现 System One API 0.2.0（`state`+`questions`→`answers`），
+MUST NOT 被建模成「带特殊提示词的 LLM」（不用 `messages`、无自由文本）；
+streaming/tools/temperature/max_tokens/response_format MUST 被拒绝。
 
-- `questions` MUST 是 host 命名的 map，至少一个；每个问题 MUST 声明
-  `type: noul | choice | score`，TypeSafe 后端 MAY 额外支持 `box`。
-- `answers` MUST 以相同 question id 返回，并 MUST 按 `type` 判别。
-- `choice`/`score` MUST 返回 `probabilities`，并在支持时返回 `confidence`；`noul` MUST
-  只返回概率，MUST NOT 伪造 confidence。
-- 原生决策模型 MUST NOT 被要求返回 rationale/explanation；需要解释时由宿主另行调用 LLM。
-- 决策 Provider MUST NOT 支持 streaming、tools、temperature、max_tokens 或
-  response_format；这些字段 MUST 被拒绝，不得静默忽略。
+- `questions` MUST 是 host 命名的 map（≥1 个），每个问题 MUST 声明
+  `type: noul|choice|score`；TypeSafe 后端 MAY 支持 `box`。
+- `answers` MUST 以相同 id 按 `type` 判别返回；`choice`/`score` MUST 返回
+  `probabilities`（支持时含 `confidence`）；`noul` MUST 只返回概率，MUST NOT 伪造 confidence。
+- 原生决策模型 MUST NOT 被要求返回 rationale；解释由宿主另调 LLM。
 
 #### Scenario: Noul 问题
 - **WHEN** 宿主提交 `{"urgent":{"type":"noul","instructions":"..."}}`
@@ -41,19 +38,14 @@ Cloudflare `{result,success,errors,messages}` envelope。AI Gateway 只作为控
 
 ### Requirement: 能力预检与限制
 
-决策 Provider 的 descriptor MUST 声明并校验：
+决策 Provider descriptor MUST 声明并校验：`question_types`（含/不含 box）、`input_modalities`
+（text/json/image，可选 audio/video）、`confidence` 语义与 `probabilities` 来源、各 max_*
+上限、context/body/media limits、`streaming:false`/`batched_questions:true`/
+`cross_question_visibility:false`/`rationale:false`/`advisory_only:true`、
+`native_decision` 或 `llm_adapter`（后者 MUST 标记 `calibration:none`）。
 
-- `question_types`（含/不含 box）
-- `input_modalities`（text/json/image，可选 audio/video）
-- `confidence` 语义（none / choice_score / +box）与 `probabilities` 来源
-  （native/derived/normalized）
-- `max_questions`、`max_choice_options`、`max_score_levels`、context/body/media limits
-- `streaming:false`、`batched_questions:true`、`cross_question_visibility:false`、
-  `rationale:false`、`advisory_only:true`
-- `native_decision` 或 `llm_adapter`；LLM adapter MUST 标记 `calibration:none`
-
-注册/保存绑定时 MUST 预检：Cloudflare 拒绝 `box`、超限 questions/choices/levels、文本模型
-携带媒体、远程图片 URL；不符合 MUST 返回字段级错误，不得等到运行时才失败。
+注册/保存绑定 MUST 预检（Cloudflare 拒 `box`、超限 questions/choices/levels、文本模型带媒体、
+远程图片 URL）；不符合 MUST 返回字段级错误，不得等到运行时。
 
 #### Scenario: Box 绑定 Cloudflare
 - **WHEN** 预设把一个含 `box` 问题的 rubric 绑定到 Clef

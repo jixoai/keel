@@ -27,19 +27,15 @@ Provider **类型**（capability family）MUST 由插件声明，Harness 与 UI 
 
 ### Requirement: Provider 实例与租户隔离
 
-Provider 实例 MUST 由租户创建并只对创建租户可见。实例 MUST 记录类型、插件来源、名称、
-凭据引用、endpoint、配置、模型目录、启用状态与健康状态。
+Provider 实例 MUST 由租户创建并仅对其可见，记录类型/插件来源/名称/凭据引用/endpoint/配置/
+模型目录/启用与健康状态。
 
-- 启用状态与健康 MUST 是两个独立轴：`status` = 用户启用状态（`active` / `disabled`），
-  `health` = 健康检查结果（`ready` / `needs_auth` / `unreachable` / `invalid_config` /
-  `degraded`）。同一字段名 MUST NOT 同时表达两者；写读 MUST 可往返（写入 `disabled`
-  后读回仍是 `disabled`，且其健康值不被覆盖）。
-- 凭据 MUST 只以 `credentialRef` 形式出现；实例、API 响应、事件、日志和 UI 状态 MUST NOT
-  包含明文密钥。
-- Provider 实例 MUST NOT 被硬删除当它仍被任何预设引用；删除 MUST 返回引用方，只允许禁用。
-- 模型目录 MAY 来自静态声明或运行时发现；缓存 MUST 绑定 Provider 配置 hash，配置变更即失效。
-- Provider 健康检查 MUST 区分 `needs_auth` / `unreachable` / `invalid_config` / `degraded`
-  与 `ready`，且失败 MUST NOT 删除用户配置。
+- `status`（用户启用 `active`/`disabled`）与 `health`（`ready`/`needs_auth`/`unreachable`/
+  `invalid_config`/`degraded`）MUST 为两个独立轴；写读往返 MUST 不互相覆盖。
+- 凭据 MUST 只以 `credentialRef` 出现；任何读取面 MUST NOT 含明文密钥。
+- 仍被预设引用的实例 MUST NOT 被硬删除：删除 MUST 返回引用方，只允许禁用。
+- 模型目录 MAY 静态声明或运行时发现；缓存 MUST 绑定配置 hash，变更即失效。
+- 健康检查失败 MUST NOT 删除用户配置。
 
 #### Scenario: 被引用的 Provider 删除
 - **WHEN** 用户删除一个被两个预设引用的 Provider

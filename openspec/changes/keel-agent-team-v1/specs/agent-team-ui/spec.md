@@ -39,3 +39,14 @@ Team 的 captain MUST 能够通过 CLI 增删成员；当 captain 的 `teamCli` 
 #### Scenario: 查看插件能力
 - **WHEN** 用户打开设置 › 插件并选中一个声明了 CLI 的插件
 - **THEN** 界面列出它的命令路径（如 `keel team member add`）与 `danger` / `callable_by`
+
+### Requirement: 团队会话的选择随输入下发
+
+团队模式下，客户端 MUST 把执行绑定随输入下发：`selection` 同时含模型键与 `teamId`。
+客户端对 captain 默认模型的换算只是展示与「能否启动」的门，模型优先级与绑定解析的权威
+MUST 在服务端（输入 selection > Agent 默认模型 > 租户默认）。客户端 MUST NOT 用本地推导
+的模型覆盖用户的显式选择。
+
+#### Scenario: 从团队开始会话后发一条消息
+- **WHEN** 用户以团队模式开始会话并发送一条消息
+- **THEN** 该输入的 selection 同时含 `modelId` 与 `teamId`
