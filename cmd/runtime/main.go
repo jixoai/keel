@@ -413,7 +413,15 @@ func main() {
 		Metrics:     runtimeMetrics,
 		Prompt:      servicehost.PromptOptions{Preamble: envOr("KEEL_SYSTEM_PROMPT", defaultSystemPrompt)},
 		MCP:         mcpOptions,
-		LLM:         servicehost.LLMOptions{APIKey: os.Getenv("KEEL_API_KEY"), LookupEnv: os.LookupEnv},
+		LLM: servicehost.LLMOptions{
+			APIKey:    os.Getenv("KEEL_API_KEY"),
+			LookupEnv: os.LookupEnv,
+			// Outbound image resolution (keel-ga §3 provider-files): a transcript
+			// image is a blob reference resolved into a wire form here. Without it
+			// the reference degrades to a named text notice (never a silent drop).
+			Images:        &blob.ImageSource{Store: st, Reader: blob.NewReader(st, *streamCap, *batch)},
+			PublicBaseURL: os.Getenv("KEEL_PUBLIC_BASE_URL"),
+		},
 		External: servicehost.ExternalOptions{
 			LookupEnv: os.LookupEnv,
 			Environ:   os.Environ(),

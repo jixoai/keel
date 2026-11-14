@@ -459,11 +459,13 @@ print("captain wire tools:", captain_tools)
 print("member wire tools:", member_tools)
 assert captain_tools == ["clock", "spawn_subagent"], captain_tools
 assert member_tools == ["echo"], member_tools
-# The deployment prompt is not sent as the base instruction of a bound run.
-base = "\n".join((r["messages"] or [{}])[0].get("system", "") for r in [])
-for row in (captain[-1], member[-1]):
+# The deployment prompt must NOT be the base instruction of a bound run, while the
+# dynamic sections the host appends (plugin standard) must still be present: the
+# binding replaces the preamble, it does not drop everything around it.
+for label, row in (("captain", captain[-1]), ("member", member[-1])):
     text = system_of(row)
-    assert "agent_kite" in text or "KITE-RUNTIME-MARK" in text
+    assert "You are an AI employee" not in text, label + " kept the deployment preamble"
+    assert "<plugin_standard>" in text, label + " lost the host's dynamic prompt sections"
 json.dump({
     "captainTools": captain_tools,
     "memberTools": member_tools,

@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -364,9 +365,9 @@ func TestRuntimeValidateSelectionBinding(t *testing.T) {
 	if err := rt.ValidateSelection(ctx, json.RawMessage(`{"providerId":"tenant-gw","modelId":"deepseek-v4.1-flash"}`)); err != nil {
 		t.Fatalf("ValidateSelection(model only): %v", err)
 	}
-	// A runtime without the binding seam treats the binding keys as inert: the
-	// model gate alone decides (the pre-binding behaviour of a deployment that
-	// wires no agent registry).
+	// A runtime without the binding seam refuses a fact that names one: the fact
+	// cannot be honoured here, and accepting it would silently run the deployment
+	// prompt with the full tool surface (the degradation spec agent-team forbids).
 	noBindings, err := Boot(context.Background(), Config{
 		Seams:     Seams{Committer: kern, Reader: kern, Leases: kern, External: kern, Runs: fakeMirror{}, Logger: discardLogger()},
 		Tenant:    tenant,
@@ -378,8 +379,143 @@ func TestRuntimeValidateSelectionBinding(t *testing.T) {
 		t.Fatalf("Boot (no bindings): %v", err)
 	}
 	t.Cleanup(func() { _ = noBindings.Close(context.Background()) })
-	if err := noBindings.ValidateSelection(ctx, json.RawMessage(`{"agentId":"agent_nope"}`)); err != nil {
-		t.Fatalf("a runtime without the binding seam must ignore the binding keys: %v", err)
+	if err := noBindings.ValidateSelection(ctx, json.RawMessage(`{"agentId":"agent_nope"}`)); !errors.Is(err, ErrBindingUnavailable) {
+		t.Fatalf("a runtime without the binding seam must refuse a binding fact, got %v", err)
+	}
+	// A model-only fact still passes: the model gate alone decides, exactly as
+	// before the binding existed.
+	if err := noBindings.ValidateSelection(ctx, json.RawMessage(`{"providerId":"tenant-gw","modelId":"deepseek-v4.1-flash"}`)); err != nil {
+		t.Fatalf("ValidateSelection(model only, no bindings): %v", err)
 	}
 	_ = agent.SurfaceModelBinding{}
+}
+
+// TestBindingResolverRefusesCredentialPromptFiles pins the credential boundary
+// on file-kind system prompts. The deployment root is the process working
+// directory — where .env.local / .env.personal / .admin-key-note live — so a
+// prompt ref that resolves to one of them would ship the whole file to the
+// provider as a system prompt (a credential leak that leaves the process, not
+// just the machine).
+func TestBindingResolverRefusesCredentialPromptFiles(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  string
+	}{
+		{"dotenv local", ".env.local"},
+		{"dotenv personal", ".env.personal"},
+		{"dotenv team", ".env.team"},
+		{"admin key note", ".admin-key-note"},
+		{"private key", "deploy/server.pem"},
+		{"key extension", "certs/service.key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newBindingFixture(t)
+			root := t.TempDir()
+			// Every candidate file really exists: the refusal must come from the
+			// credential rule, not from a read failure.
+			path := filepath.Join(root, filepath.FromSlash(tc.ref))
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("KEEL_DSN=postgres://secret\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			agentDoc := agentteam.Agent{
+				ID:   "agent_creds",
+				Name: "Creds",
+			}.Normalized()
+			raw, err := json.Marshal(map[string]any{
+				"id":           agentDoc.ID,
+				"name":         agentDoc.Name,
+				"avatar":       agentDoc.Avatar,
+				"systemPrompt": map[string]any{"kind": "file", "ref": tc.ref},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.store.agents[agentDoc.ID] = store.AgentRecord{ID: agentDoc.ID, Document: raw}
+			resolver := &bindingResolver{reader: fixture.store, root: root, log: discardLogger()}
+			_, err = resolver.ResolveBinding(context.Background(), kernel.Scope{},
+				json.RawMessage(`{"agentId":"agent_creds"}`))
+			if !errors.Is(err, ErrPromptIsCredential) {
+				t.Fatalf("prompt ref %q resolved without the credential refusal: %v", tc.ref, err)
+			}
+		})
+	}
+}
+
+// TestBindingResolverRefusesSymlinkEscapingRoot pins the resolved-path half of
+// the containment check: a symlink inside the root that points outside it passes
+// a purely lexical Rel, and only the EvalSymlinks comparison catches it.
+func TestBindingResolverRefusesSymlinkEscapingRoot(t *testing.T) {
+	fixture := newBindingFixture(t)
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside the deployment root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "prompt.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	agentDoc := agentteam.Agent{ID: "agent_link", Name: "Link"}.Normalized()
+	raw, err := json.Marshal(map[string]any{
+		"id":           agentDoc.ID,
+		"name":         agentDoc.Name,
+		"avatar":       agentDoc.Avatar,
+		"systemPrompt": map[string]any{"kind": "file", "ref": "prompt.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.store.agents[agentDoc.ID] = store.AgentRecord{ID: agentDoc.ID, Document: raw}
+	resolver := &bindingResolver{reader: fixture.store, root: root, log: discardLogger()}
+	_, err = resolver.ResolveBinding(context.Background(), kernel.Scope{},
+		json.RawMessage(`{"agentId":"agent_link"}`))
+	if !errors.Is(err, ErrPromptEscapesRoot) {
+		t.Fatalf("a symlink leaving the root must be refused, got %v", err)
+	}
+}
+
+// TestTeamModelOverrideIsTheSingleArbiter pins the team-level default model. The
+// field exists so a team can pin one model without editing every Agent document,
+// and it must actually take effect: a stored-but-unread override is a settings
+// control that lies. Precedence stays 输入 selection > 团队 override > Agent 默认.
+func TestTeamModelOverrideIsTheSingleArbiter(t *testing.T) {
+	cases := []struct {
+		name     string
+		override *agentteam.ModelBinding
+		agent    agentteam.ModelBinding
+		want     agentteam.ModelBinding
+	}{
+		{
+			name:     "override wins over the agent default",
+			override: &agentteam.ModelBinding{ProviderID: "team-gw", ModelID: "team-model"},
+			agent:    agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
+			want:     agentteam.ModelBinding{ProviderID: "team-gw", ModelID: "team-model"},
+		},
+		{
+			name:     "incomplete override falls back to the agent default",
+			override: &agentteam.ModelBinding{ProviderID: "team-gw"},
+			agent:    agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
+			want:     agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
+		},
+		{
+			name:  "no override keeps the agent default",
+			agent: agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
+			want:  agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			team := &agentteam.AgentTeam{Defaults: agentteam.TeamDefaults{ModelOverride: tc.override}}
+			binding := RunBinding{
+				Agent: agentteam.Agent{ID: "agent_captain", DefaultModel: tc.agent},
+				Team:  team,
+			}
+			if got := binding.effectiveDefaultModel(); got.ProviderID != tc.want.ProviderID || got.ModelID != tc.want.ModelID {
+				t.Fatalf("effective default = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
 }

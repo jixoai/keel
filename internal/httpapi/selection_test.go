@@ -249,3 +249,70 @@ func TestInputSelectionRefusedWithoutValidator(t *testing.T) {
 		}
 	}
 }
+
+// TestEdgeEventSelectionIsVetted pins the second door into the event log: the
+// edge event endpoint must apply the same selection gate as POST /input.
+// Without it a selection the server cannot honour is persisted verbatim, and
+// the runner — which resolves the newest user.message carrying a selection —
+// would fail every later attempt of that session before any commit, which no
+// client-side retry can recover from.
+func TestEdgeEventSelectionIsVetted(t *testing.T) {
+	hs, st := newTestServer(t, func(c *Config) {
+		c.ValidateSelection = func(raw json.RawMessage) error {
+			var sel struct {
+				TeamID string `json:"teamId"`
+			}
+			if err := json.Unmarshal(raw, &sel); err != nil {
+				return err
+			}
+			if sel.TeamID != "" {
+				return errors.New(`selection binding is not available: teamId "` + sel.TeamID + `" does not exist`)
+			}
+			return nil
+		}
+	})
+	hc := hs.Client()
+	tenant := uuid.NewString()
+	session := inputSetup(t, hs, tenant)
+	tenantID := uuid.MustParse(tenant)
+	url := hs.URL + "/v1/sessions/" + session.String() + "/events"
+
+	var out struct {
+		Error string `json:"error"`
+	}
+	body := map[string]any{
+		"kind": "user.message",
+		"payload": map[string]any{
+			"text":      "smuggle a binding",
+			"requestId": "evt-bad-team",
+			"selection": map[string]any{"teamId": "team_x", "agentId": "agent_nope"},
+		},
+	}
+	if code := doJSON(t, hc, "POST", url, tenant, body, &out); code != 400 {
+		t.Fatalf("edge event with an unresolvable selection = %d (%+v), want 400", code, out)
+	}
+	if !strings.Contains(out.Error, "team_x") {
+		t.Fatalf("error should name the refused binding, got %q", out.Error)
+	}
+	events, err := st.LoadEvents(context.Background(), tenantID, session, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		var payload struct {
+			RequestID string `json:"requestId"`
+		}
+		_ = json.Unmarshal(ev.Payload, &payload)
+		if payload.RequestID == "evt-bad-team" {
+			t.Fatal("the refused selection reached the log through the edge event door")
+		}
+	}
+
+	// A selection-free edge event still passes byte-for-byte (the gate must not
+	// narrow the endpoint's contract).
+	ok := map[string]any{"kind": "user.message",
+		"payload": map[string]any{"text": "plain", "requestId": "evt-plain"}}
+	if code := doJSON(t, hc, "POST", url, tenant, ok, nil); code != 201 {
+		t.Fatalf("selection-free edge event = %d, want 201", code)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/httpapi"
@@ -109,7 +111,13 @@ func runServe(parent context.Context, opts serveOptions) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.Open(ctx, store.Config{DSN: opts.DSN})
+	st, err := store.Open(ctx, store.Config{
+		DSN: opts.DSN,
+		// A cluster that forbids CREATE ROLE (a managed service) has to provision
+		// the tenant role out of band; KEEL_RLS=off is the explicit switch for
+		// that deployment. The default is on, because RLS is the schema contract.
+		DisableRLS: strings.EqualFold(strings.TrimSpace(os.Getenv("KEEL_RLS")), "off"),
+	})
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -251,6 +259,15 @@ func runServe(parent context.Context, opts serveOptions) error {
 			APIKey:       opts.APIKey,
 			LookupEnv:    os.LookupEnv,
 			LookupSecret: tenantSecretLookup(st, secretBox, opts.TenantID, log),
+			// Outbound image resolution (keel-ga §3 provider-files): events carry
+			// only a blobId, and the worker streams the bytes here before the
+			// request leaves. Without it an image reference degrades to a named
+			// text notice instead of a silent drop.
+			Images: &blob.ImageSource{Store: st, Reader: blob.NewReader(st, 256, 1)},
+			// Prefix under which a provider may fetch images itself; empty means
+			// the url form degrades to file_id/base64 rather than emitting a URL
+			// the provider cannot reach.
+			PublicBaseURL: os.Getenv("KEEL_PUBLIC_BASE_URL"),
 		},
 		// The execution binding reads the tenant's Agent/AgentTeam documents.
 		// Prompt-file references resolve against the process working directory
@@ -301,8 +318,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 		log.Warn("web build not found; keel serve answers 404 for non-API paths", "web_dir", opts.WebDir,
 			"hint", "build the NSH web target into web/dist")
 	}
+	// The edge quota enforcer is built before the product layer: the tenant's
+	// quota projection reports the same counters the stream and upload paths
+	// enforce, so "my usage" and "why was I refused" cannot disagree.
+	edge := newEdgeQuota(st)
 	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, secretBox, secretReason,
-		loadHostTheme(static.root, log), log)
+		loadHostTheme(static.root, log), edge, log)
 	if err != nil {
 		return err
 	}
@@ -377,7 +398,26 @@ func runServe(parent context.Context, opts serveOptions) error {
 			static.ServeHTTP(w, r)
 		}
 	})
-	handler := product.auth.wrap(dispatch)
+	// Credential order matters: a machine credential (Bearer keel_* / X-API-Key)
+	// is resolved first and wins over the cookie/passphrase session, because a
+	// key names its own tenant and a client holding one must never have the
+	// server's configured tenant substituted for it. Every request without a
+	// key-shaped credential falls through to the cookie handler unchanged, so a
+	// deployment whose tenants use the browser session is unaffected.
+	//
+	// The quota middleware sits inside the cookie handler, after the tenant is
+	// known: it needs the resolved X-Tenant-ID to charge the right tenant.
+	quotaEdge := &edgeQuotaMiddleware{Edge: edge, Next: dispatch}
+	// A verified key goes straight to the dispatch (through the quota check): the
+	// cookie handler would refuse a key-only request for lacking a session, which
+	// is exactly the shape a machine client has. Everything else keeps the
+	// passphrase path unchanged.
+	authorizer := &auth.Authorizer{
+		Keys:     apiKeyStore{store: st},
+		Verified: quotaEdge,
+		Next:     product.auth.wrap(quotaEdge),
+	}
+	var handler http.Handler = authorizer
 
 	hs := &http.Server{
 		Addr:              opts.Addr,
@@ -469,7 +509,7 @@ func (p *productLayer) close() {
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, secretBox *store.SecretBox, secretReason string, theme json.RawMessage, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, secretBox *store.SecretBox, secretReason string, theme json.RawMessage, edge *quota.Edge, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -562,6 +602,12 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		ProviderReferences: st,
 		SecretStore:        secretStore,
 		SecretStoreReason:  secretReason,
+		// Tenancy surface (change keel-ga §2): the operator provisioning path and
+		// the tenant's own quota projection. Both read the same store the request
+		// path uses; neither is reachable with a tenant credential alone.
+		Provisioner: apiKeyStore{store: st},
+		Quota:       quotaReporter{store: st, edge: edge},
+		AdminKey:    adminKeyFromEnv,
 		RunStatus: func(tenantID, sessionID uuid.UUID) (string, bool) {
 			return runControl.Status(kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 		},
@@ -940,6 +986,22 @@ func (a *authController) mode() string {
 		return "disabled"
 	}
 	return "password"
+}
+
+// adminKeyFromEnv decides whether a request carries the deployment's operator
+// key. It reads KEEL_ADMIN_KEY per request (the key may be rotated without a
+// restart) and compares in constant time; the value is never logged.
+func adminKeyFromEnv(r *http.Request) bool {
+	expected := strings.TrimSpace(os.Getenv("KEEL_ADMIN_KEY"))
+	if expected == "" {
+		return false
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	scheme, token, found := strings.Cut(header, " ")
+	if !found || !strings.EqualFold(scheme, "bearer") {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(token)), []byte(expected)) == 1
 }
 
 func runtimeID() string {

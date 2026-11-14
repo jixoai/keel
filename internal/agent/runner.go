@@ -92,6 +92,16 @@ type Runner struct {
 	Compaction *CompactionOptions
 	MaxTurns   int
 	Logger     *slog.Logger
+	// Images resolves the durable image references in the transcript into the
+	// wire form the attempt's provider accepts, immediately before each request
+	// (see internal/agent/images.go). Nil means the deployment has no image
+	// pipeline: a referenced image degrades to a text notice naming why, and the
+	// run continues.
+	Images ImageResolver
+	// ImageWorkspace is the blob scope images resolve against (the tenant id).
+	// Empty with a non-nil Images is refused per image, not per run: the
+	// transcript still reaches the model.
+	ImageWorkspace string
 }
 
 // registry returns the tool registry for this run, preferring the host.
@@ -120,16 +130,30 @@ func (r *Runner) systemPrompt() string {
 func (r *Runner) systemPromptFor(surface RunSurface) string {
 	prompt := strings.TrimSpace(surface.Prompt)
 	if prompt == "" {
+		// A team captain with no declared prompt still needs the roster: it is
+		// the only way delegation can name a member.
+		if roster := renderTeamMembers(surface.Members); roster != "" {
+			prompt = roster
+			if renderer, ok := r.Assembly.(PreambleRenderer); ok {
+				return renderer.RenderSystemPrompt(prompt)
+			}
+			return r.systemPrompt() + "\n\n" + roster
+		}
 		return r.systemPrompt()
+	}
+	if roster := renderTeamMembers(surface.Members); roster != "" {
+		prompt += "\n\n" + roster
 	}
 	if renderer, ok := r.Assembly.(PreambleRenderer); ok {
 		return renderer.RenderSystemPrompt(prompt)
 	}
-	// A host that cannot re-render the preamble around its dynamic sections is
-	// not silently used: the binding's prompt is the run's prompt, and the
-	// dynamic sections are gone. That is a wiring error (the servicehost host
-	// implements the renderer), so it is worth a diagnostic rather than a
-	// guess.
+	// A host that cannot re-render the preamble around its dynamic sections is a
+	// wiring error (the servicehost host does implement the renderer). The
+	// binding's prompt is still the run's prompt — dropping the MCP/plugin/skills
+	// sections is bad, but refusing the attempt is worse — so the degradation is
+	// recorded instead of being silent.
+	r.Logger.Warn("host cannot render dynamic prompt sections; the bound prompt is sent alone",
+		"agent", surface.AgentID)
 	return prompt
 }
 
@@ -435,7 +459,6 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	res.Summary.TeamID = surface.TeamID
 	res.Summary.TeamRevision = surface.TeamRevision
 	res.Summary.TeamHash = surface.TeamHash
-	res.Summary.PromptHash = surface.PromptHash
 	tools, err := r.toolsForRun(surface)
 	if err != nil {
 		return res, err
@@ -453,8 +476,12 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 
 	// A previous process may have died after committing an assistant tool call
 	// but before committing its results. Execute the missing calls now (at least
-	// once) so the model sees a complete turn.
-	msgs, seqs, cursor, err = r.fillMissingToolResults(ctx, lease, msgs, seqs, cursor)
+	// once) so the model sees a complete turn — through THIS attempt's filtered
+	// registry, never the host-wide one: a crash must not become a way to run a
+	// tool the binding does not grant (a removed grant, or a captain that
+	// explicitly disabled delegation, would otherwise only hold until the next
+	// restart).
+	msgs, seqs, cursor, err = r.fillMissingToolResults(ctx, lease, msgs, seqs, cursor, tools)
 	res.Cursor = cursor
 	if err != nil {
 		return res, err
@@ -490,6 +517,26 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				inputSeqs = append(inputSeqs, seqs[i])
 			}
 		}
+	}
+
+	// Outbound image resolution: the transcript stores references (blobId), the
+	// provider wire wants bytes, a URL or a file handle. This is the boundary
+	// crossing, and it happens per attempt because the right form depends on the
+	// provider chosen for this attempt and on handle state (a Gemini handle past
+	// its 48h window is re-uploaded here). Nothing resolved enters the log: only
+	// this attempt's in-memory view changes.
+	msgs, imageReport := r.resolveImages(ctx, msgs, imageResolution{
+		resolver:  r.Images,
+		workspace: r.imageWorkspace(lease),
+		target: provider.ImageTarget{
+			Provider: model.ProviderID,
+			BaseURL:  model.Endpoint,
+			APIKey:   model.APIKey,
+		},
+		caps: imageCapsFor(model),
+	})
+	if !imageReport.empty() {
+		logImageResolution(r.Logger, lease, model, imageReport)
 	}
 
 	// Generation identity: the kernel dedupes assistant messages by
@@ -613,8 +660,21 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if len(model.RequestPatch) > 0 {
 		cfg.Extra = model.RequestPatch
 	}
+	// The prompt that actually goes on the wire: the host renders its dynamic
+	// sections (MCP, plugin, skills) around the binding's preamble, so the digest
+	// must be taken here, not over the binding text. A reader of run.finished then
+	// sees which prompt answered the attempt — including a host-side section
+	// change that leaves the agent's own text untouched.
+	systemPrompt := r.systemPromptFor(surface)
+	if surface.PromptHash == "" && strings.TrimSpace(surface.Prompt) != "" {
+		// No host renderer contributed sections: the wire prompt IS the binding
+		// text, so its digest is the binding's.
+		res.Summary.PromptHash = digestPrompt(surface.Prompt)
+	} else if strings.TrimSpace(surface.Prompt) != "" || strings.TrimSpace(systemPrompt) != "" {
+		res.Summary.PromptHash = digestPrompt(systemPrompt)
+	}
 	agentCtx := &agentcore.AgentContext{
-		SystemPrompt: r.systemPromptFor(surface),
+		SystemPrompt: systemPrompt,
 		Messages:     msgs,
 		Tools:        tools.List(),
 	}
@@ -935,7 +995,11 @@ func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
 // fillMissingToolResults executes tool calls that a crashed process left
 // unresolved. The call is at-least-once; tools are expected to be idempotent or
 // to carry their own idempotency keys.
-func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease, msgs agentcore.MessageList, seqs []int64, cursor int64) (agentcore.MessageList, []int64, int64, error) {
+//
+// The registry is the attempt's filtered surface (toolsForRun), not the host
+// one: recovery replays work the same agent asked for under the same grants, so
+// a call outside the surface must fail as an unknown tool rather than execute.
+func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease, msgs agentcore.MessageList, seqs []int64, cursor int64, tools *agenttool.ToolRegistry) (agentcore.MessageList, []int64, int64, error) {
 	lastAssistant := -1
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if _, ok := msgs[i].(agentcore.AssistantMessage); ok {
@@ -968,7 +1032,7 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease,
 	}
 	r.Logger.Warn("resuming unresolved tool calls", "session", lease.Scope.SessionID, "count", len(missing))
 	results, _ := agenttool.ExecuteToolCalls(ctx, agenttool.BatchConfig{
-		ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: r.registry()},
+		ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: tools},
 	}, missing, nil)
 	for _, tr := range results {
 		msgs = append(msgs, tr)

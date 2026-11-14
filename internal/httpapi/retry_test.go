@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -407,7 +408,13 @@ func TestRetryTurnRefusals(t *testing.T) {
 // selection the current configuration can no longer resolve is refused before
 // anything is written, instead of being committed and failing asynchronously as
 // a run.
+//
+// The stored selection is accepted at submit time and becomes unresolvable
+// afterwards (its provider was removed). This is the production shape of the
+// scenario: the edge gate admits what the configuration honours *then*, and the
+// re-ask gate re-vets the copy against the configuration *now*.
 func TestRetryRefusesAnUnresolvableStoredSelection(t *testing.T) {
+	var gone atomic.Bool
 	hs, st := newTestServer(t, func(c *Config) {
 		c.ValidateSelection = func(raw json.RawMessage) error {
 			var sel struct {
@@ -417,7 +424,7 @@ func TestRetryRefusesAnUnresolvableStoredSelection(t *testing.T) {
 			if err := json.Unmarshal(raw, &sel); err != nil {
 				return err
 			}
-			if sel.ProviderID != "s2api" {
+			if sel.ProviderID == "gone-gw" && gone.Load() {
 				return fmt.Errorf("unknown provider %q", sel.ProviderID)
 			}
 			return nil
@@ -428,6 +435,7 @@ func TestRetryRefusesAnUnresolvableStoredSelection(t *testing.T) {
 	session := inputSetup(t, hs, tenant)
 	tenantID := uuid.MustParse(tenant)
 
+	// Submit the original input while the provider still exists.
 	var appended struct {
 		Seq int64 `json:"seq"`
 	}
@@ -442,6 +450,8 @@ func TestRetryRefusesAnUnresolvableStoredSelection(t *testing.T) {
 		}, &appended); code != 201 {
 		t.Fatalf("append original input: %d", code)
 	}
+	// The provider disappears; every later vet of that selection fails.
+	gone.Store(true)
 	before := loadSessionEvents(t, st, tenantID, session)
 
 	var retry retryBody

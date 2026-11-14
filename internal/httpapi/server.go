@@ -383,6 +383,23 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// vetEventPayload applies the input gate to an edge event payload. Only
+// user.message may carry a selection today (the edge whitelist is
+// user.message), so the check is a targeted extraction rather than a second
+// schema: a payload without a selection passes untouched and byte-identical.
+func (s *Server) vetEventPayload(payload json.RawMessage) error {
+	var probe struct {
+		Selection json.RawMessage `json:"selection"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return nil // the kernel owns payload shape; not this gate's business
+	}
+	if len(probe.Selection) == 0 || string(probe.Selection) == "null" {
+		return nil
+	}
+	return s.vetSelection(probe.Selection)
+}
+
 // vetSelection checks a client-supplied selection before the input is
 // committed. Object shape is the shell's own contract (the kernel persists the
 // fact without interpreting it); the provider/model vocabulary belongs to the
@@ -525,6 +542,17 @@ func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(body.Payload) == 0 {
 		body.Payload = json.RawMessage(`{}`)
+	}
+	// The edge event is a second door into the event log, so it must apply the
+	// same selection gate as POST /input. Without it a selection the server
+	// cannot honour (unknown/archived/unsealed teamId, unknown agentId) would be
+	// persisted verbatim; the runner resolves the newest user.message carrying a
+	// selection, so every later attempt of that session would then fail before
+	// any commit — unrecoverable from the client side (spec agent-team:
+	// "MUST 在提交处拒绝，MUST NOT 先存历史后失败").
+	if err := s.vetEventPayload(body.Payload); err != nil {
+		writeErr(w, 400, err)
+		return
 	}
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" {

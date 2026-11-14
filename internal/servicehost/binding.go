@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -47,6 +48,12 @@ type BindingReader interface {
 // ErrBindingMissing marks a selection that names an agent/team this tenant does
 // not have (or has archived). It is a validation failure, not a runtime one.
 var ErrBindingMissing = errors.New("selection binding is not available")
+
+// ErrBindingUnavailable marks a selection that names an execution binding while
+// this process has no binding seam wired at all. Refusing is the only honest
+// answer: accepting it would store a fact the attempt cannot honour, and the run
+// would degrade to the deployment prompt plus the full tool surface.
+var ErrBindingUnavailable = errors.New("selection binding is not available: this server cannot resolve an agent/team binding")
 
 // BindingsOptions carries the execution-binding resolver inputs: the read seam
 // of the tenant's Agent/AgentTeam documents and the root a file-kind system
@@ -95,6 +102,20 @@ func (b RunBinding) PromptText() string {
 		return ""
 	}
 	return strings.TrimSpace(prompt.Text)
+}
+
+// effectiveDefaultModel is the single arbiter between the team-level override and
+// the agent's own default model. `team.defaults.modelOverride` exists so a team
+// can pin one model without editing every Agent document; when it is complete it
+// wins, otherwise the agent's default applies. A selection that names a model
+// still outranks both (the resolver merges it before the model gate).
+func (b RunBinding) effectiveDefaultModel() agentteam.ModelBinding {
+	if b.Team != nil {
+		if override := b.Team.Defaults.ModelOverride; override != nil && override.Complete() {
+			return *override
+		}
+	}
+	return b.Agent.DefaultModel
 }
 
 // ToolIDs returns the effective tool grant map of the binding: the agent's own
@@ -157,6 +178,18 @@ func bindingFromSelection(raw json.RawMessage) (agentID, teamID string, err erro
 		agentID = ""
 	}
 	return agentID, teamID, nil
+}
+
+// bindingNamingSelection reports whether the fact names an execution binding at
+// all (a teamId, or an agentId with no teamId winning). It is the fail-closed
+// test used when this process has no binding seam: such a fact cannot be
+// honoured here, so it must be refused rather than stored.
+func bindingNamingSelection(raw json.RawMessage) (bool, error) {
+	agentID, teamID, err := bindingFromSelection(raw)
+	if err != nil {
+		return false, err
+	}
+	return agentID != "" || teamID != "", nil
 }
 
 // LoadBinding resolves a selection fact into the run binding. A nil reader, or a
@@ -307,6 +340,18 @@ func (r *Runtime) ValidateSelection(ctx context.Context, selection json.RawMessa
 		return errors.New("selection is not supported by this server")
 	}
 	if r.cfg.Bindings.Reader == nil || r.cfg.Bindings.TenantID == uuid.Nil {
+		// No binding seam: a selection naming no agent/team is fine (the model
+		// gate alone applies), but one that names a binding must be refused.
+		// Accepting it would persist a fact this process can never honour, and the
+		// attempt would fall back to the deployment prompt and the full tool
+		// surface — the silent degradation spec agent-team forbids.
+		named, err := bindingNamingSelection(selection)
+		if err != nil {
+			return err
+		}
+		if named {
+			return ErrBindingUnavailable
+		}
 		return service.ValidateSelection(selection)
 	}
 	binding, err := LoadBinding(ctx, r.cfg.Bindings.Reader, r.cfg.Bindings.TenantID, selection)
@@ -316,7 +361,7 @@ func (r *Runtime) ValidateSelection(ctx context.Context, selection json.RawMessa
 	if !binding.Bound() {
 		return service.ValidateSelection(selection)
 	}
-	merged := agent.MergeSelectionDefaultModel(selection, commandModelBinding(binding.Agent.DefaultModel))
+	merged := agent.MergeSelectionDefaultModel(selection, commandModelBinding(binding.effectiveDefaultModel()))
 	return service.ValidateSelection(merged)
 }
 
@@ -364,14 +409,45 @@ func (r *bindingResolver) ResolveBinding(ctx context.Context, scope kernel.Scope
 		ToolIDs:      binding.ToolIDs(),
 		TeamMode:     binding.Team != nil,
 		AgentID:      binding.Agent.ID,
-		DefaultModel: commandModelBinding(binding.Agent.DefaultModel),
+		DefaultModel: commandModelBinding(binding.effectiveDefaultModel()),
 	}
 	if binding.Team != nil {
 		surface.TeamID = binding.Team.ID
 		surface.TeamRevision = binding.TeamRevision
 		surface.TeamHash = binding.TeamHash
+		surface.Members = memberRoster(binding.Members)
 	}
 	return surface, nil
+}
+
+// memberRoster projects the team's member seats onto the runtime's plain-data
+// form. The captain needs it to delegate: spawn_subagent takes an agentId, and
+// without the roster the only way to learn one is to guess. The label and role
+// text travel with the id because they are what makes a choice informed.
+func memberRoster(members []agentteam.TeamMember) []agent.RosterMember {
+	if len(members) == 0 {
+		return nil
+	}
+	out := make([]agent.RosterMember, 0, len(members))
+	for _, m := range members {
+		id := strings.TrimSpace(m.AgentID)
+		if id == "" {
+			continue
+		}
+		label := strings.TrimSpace(m.Label)
+		if label == "" && m.Inline != nil {
+			label = strings.TrimSpace(m.Inline.Name)
+		}
+		out = append(out, agent.RosterMember{
+			AgentID:     id,
+			Label:       label,
+			Description: strings.TrimSpace(m.Description),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // promptText resolves the binding's system prompt: inline text as-is, a file
@@ -395,16 +471,106 @@ func (r *bindingResolver) promptText(binding RunBinding) (string, error) {
 	path := filepath.Join(r.root, filepath.FromSlash(ref))
 	// The ref grammar is validated at save time (agentteam.safePromptRef); the
 	// containment check is repeated here because the root is a runtime value.
-	rel, err := filepath.Rel(r.root, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("agent %q: system prompt ref %q escapes the deployment root", binding.Agent.ID, ref)
+	// It runs on the RESOLVED path: a lexical check alone lets a symlink inside
+	// the root read anything on the host, and the deployment root is the process
+	// working directory — where credential files (.env.local, .env.personal,
+	// .admin-key-note) actually live.
+	resolved, err := containedRealPath(r.root, path)
+	if err != nil {
+		return "", fmt.Errorf("agent %q: system prompt ref %q %w", binding.Agent.ID, ref, err)
 	}
-	raw, err := os.ReadFile(path)
+	if err := refuseCredentialPath(resolved); err != nil {
+		// A prompt that resolves to a credential file is an operator error at
+		// best and an exfiltration attempt at worst; it must fail, not degrade:
+		// the alternative sends the file to the provider as a system prompt.
+		return "", fmt.Errorf("agent %q: system prompt ref %q %w", binding.Agent.ID, ref, err)
+	}
+	raw, err := os.ReadFile(resolved)
 	if err != nil {
 		r.log.Warn("agent system prompt file unreadable", "agent", binding.Agent.ID, "ref", ref, "err", err)
 		return "", nil
 	}
 	return strings.TrimSpace(string(raw)), nil
+}
+
+// ErrPromptEscapesRoot reports a prompt ref that resolves outside the
+// deployment root (lexically or through a symlink).
+var ErrPromptEscapesRoot = errors.New("escapes the deployment root")
+
+// ErrPromptIsCredential reports a prompt ref that resolves to a credential-shaped
+// file. Credentials never belong in a system prompt: the prompt leaves the
+// process as a provider request.
+var ErrPromptIsCredential = errors.New("resolves to a credential file and is refused")
+
+// containedRealPath resolves path (following symlinks) and requires the result
+// to stay under root (itself resolved the same way). Comparing resolved paths is
+// what makes the check meaningful: a lexical Rel passes for a symlink that
+// points anywhere.
+//
+// The lexical check runs first and unconditionally: a ref like "../../etc/hosts"
+// must be refused by grammar alone, even when the target does not exist (a
+// missing file is the caller's diagnostic, never a containment pass).
+func containedRealPath(root, path string) (string, error) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", ErrPromptEscapesRoot
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("deployment root %q: %w", root, err)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// A missing file is the caller's diagnostic (it warns and uses no
+		// prompt); an unreadable *resolved* path is not a containment failure.
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		return "", fmt.Errorf("resolve %q: %w", path, err)
+	}
+	realRel, err := filepath.Rel(realRoot, realPath)
+	if err != nil || realRel == ".." || strings.HasPrefix(realRel, ".."+string(filepath.Separator)) {
+		return "", ErrPromptEscapesRoot
+	}
+	return realPath, nil
+}
+
+// credentialFileNames are the exact basenames that carry deployment credentials
+// in this project. They are matched case-insensitively; dotenv siblings with a
+// different suffix (.env.local, .env.personal, .env.team) match the prefix rule
+// below.
+var credentialFileNames = []string{".admin-key-note", ".npmrc", ".netrc", "id_rsa", "id_ed25519"}
+
+// credentialFilePrefixes are basename prefixes whose matches are all treated as
+// credential material.
+var credentialFilePrefixes = []string{".env"}
+
+// credentialFileExts are extensions that conventionally carry private key
+// material.
+var credentialFileExts = []string{".pem", ".key", ".p12", ".pfx"}
+
+// refuseCredentialPath rejects a prompt file that is credential-shaped. The
+// check is on the resolved basename so a symlink or a nested path cannot launder
+// the name.
+func refuseCredentialPath(path string) error {
+	base := strings.ToLower(filepath.Base(path))
+	for _, prefix := range credentialFilePrefixes {
+		if strings.HasPrefix(base, prefix) {
+			return ErrPromptIsCredential
+		}
+	}
+	for _, name := range credentialFileNames {
+		if base == name {
+			return ErrPromptIsCredential
+		}
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	for _, want := range credentialFileExts {
+		if ext == want {
+			return ErrPromptIsCredential
+		}
+	}
+	return nil
 }
 
 // commandModelBinding projects the domain binding onto the runtime's plain-data

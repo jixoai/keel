@@ -19,6 +19,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 
@@ -52,6 +54,10 @@ type RunSurface struct {
 	// TeamMode reports that the binding came from a team selection. A team run
 	// always keeps the delegation primitive available (see Runner.toolsForRun).
 	TeamMode bool
+	// Members is the captain's roster in team mode (nil in standard mode). It is
+	// rendered into the prompt so delegation can name a member instead of
+	// guessing an agentId.
+	Members []RosterMember
 	// AgentID, TeamID, TeamRevision and TeamHash are the identity facts frozen
 	// into the run summary ("" / 0 when absent).
 	AgentID      string
@@ -123,4 +129,53 @@ func MergeSelectionDefaultModel(selection json.RawMessage, binding *SurfaceModel
 		return selection
 	}
 	return merged
+}
+
+// digestPrompt is the stable identity of a system prompt in the run summary:
+// "sha256:<hex>" over the trimmed bytes, "" for an empty prompt. The digest is
+// taken over the prompt that goes on the wire (the host's rendered form), so a
+// change in a host-side section — MCP servers, plugin standard, skills index —
+// changes the summary even when the agent's own text did not.
+func digestPrompt(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// RosterMember is one teammate as the captain sees it: the id spawn_subagent
+// takes, plus the label and role text that make the choice informed.
+type RosterMember struct {
+	AgentID     string
+	Label       string
+	Description string
+}
+
+// renderTeamMembers is the prompt section listing the team's members. An empty
+// roster renders nothing (a captain-only team has no one to delegate to).
+func renderTeamMembers(members []RosterMember) string {
+	if len(members) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<team_members>\n")
+	for _, m := range members {
+		label := strings.TrimSpace(m.Label)
+		if label == "" {
+			label = m.AgentID
+		}
+		b.WriteString("- ")
+		b.WriteString(m.AgentID)
+		b.WriteString(" — ")
+		b.WriteString(label)
+		if role := strings.TrimSpace(m.Description); role != "" {
+			b.WriteString(": ")
+			b.WriteString(role)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("</team_members>")
+	return b.String()
 }

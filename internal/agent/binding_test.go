@@ -29,6 +29,7 @@ import (
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // stubBindings answers every run with one fixed surface.
@@ -180,8 +181,14 @@ func TestBindingWithoutResolverKeepsDeploymentPromptAndTools(t *testing.T) {
 		t.Fatalf("tool surface = %v, want the whole registry", tools[0])
 	}
 	summary := res.Summary
-	if summary.AgentID != "" || summary.TeamID != "" || summary.PromptHash != "" {
+	if summary.AgentID != "" || summary.TeamID != "" {
 		t.Fatalf("summary carries a binding without a resolver: %+v", summary)
+	}
+	// The prompt hash is an audit fact about the request that was sent, not a
+	// property of the binding: an unbound run still names the prompt that
+	// answered it.
+	if summary.PromptHash == "" {
+		t.Fatalf("summary has no prompt hash for the wire prompt: %+v", summary)
 	}
 }
 
@@ -209,8 +216,17 @@ func TestBindingPromptReachesProviderAndKeepsSections(t *testing.T) {
 		t.Fatalf("the dynamic section was dropped by the preamble swap: %q", prompts[0])
 	}
 	summary := res.Summary
-	if summary.AgentID != "agent_kite7" || summary.PromptHash != "sha256:test" {
+	if summary.AgentID != "agent_kite7" {
 		t.Fatalf("summary = %+v, want the frozen binding identity", summary)
+	}
+	// The hash identifies the prompt that actually went on the wire: the binding
+	// text wrapped in the host's dynamic sections. A host-section change must
+	// move it even when the agent's own text is untouched.
+	if summary.PromptHash == "" || summary.PromptHash == "sha256:test" {
+		t.Fatalf("promptHash did not digest the wire prompt: %q", summary.PromptHash)
+	}
+	if want := digestPrompt(prompts[0]); summary.PromptHash != want {
+		t.Fatalf("promptHash = %q, want the digest of the sent prompt %q", summary.PromptHash, want)
 	}
 	if summary.TeamID != "" {
 		t.Fatalf("standard mode froze a team id: %+v", summary)
@@ -416,5 +432,111 @@ func TestBindingEmptyToolSurfaceUnblocksNoToolModels(t *testing.T) {
 	lease := claimScope(t, k2, tenant2, session2)
 	if _, err := r2.Run(context.Background(), lease); err == nil || !strings.Contains(err.Error(), "declares no tool-call support") {
 		t.Fatalf("run error = %v, want the no-tool refusal", err)
+	}
+}
+
+// TestRecoveryDoesNotExecuteToolsOutsideTheGrant pins the crash-recovery
+// boundary: an assistant tool call left unresolved by a crashed process is
+// replayed through the attempt's filtered surface, not the host registry. A
+// binding that grants only clock must not gain echo just because the process
+// died mid-turn — otherwise removing a grant, or a captain explicitly disabling
+// delegation, would only hold until the next restart.
+func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session := newSession(t, st)
+	k := testKernel(t, st)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	commitBindingInput(t, k, tenant, session, "binding-recovery", `{"modelId":"m","agentId":"agent_grant"}`)
+	// A previous attempt committed an assistant tool call for "echo" and died
+	// before committing its result.
+	lease := claimScope(t, k, tenant, session)
+	orphan := mustJSON(map[string]any{
+		"role":       "assistant",
+		"content":    []map[string]any{{"type": "toolCall", "id": "call_orphan", "name": "echo", "arguments": map[string]any{"text": "hi"}}},
+		"stopReason": "tool_use",
+	})
+	if _, err := k.Commit(ctx, kernel.CommitRequest{Scope: scope, Kind: kernel.KindAssistantMessage,
+		Token: lease.Token, GenerationID: "orphan-a0", Payload: orphan}); err != nil {
+		t.Fatalf("commit orphan tool call: %v", err)
+	}
+	if err := k.Release(ctx, lease); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	rec := &captureStream{}
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "echo")},
+		&stubBindings{surface: RunSurface{ToolIDs: map[string]bool{"clock": true}, AgentID: "agent_grant"}},
+		nil, rec.fn())
+	runAttemptOf(t, k, r, tenant, session)
+
+	// The recovery replay must refuse the ungranted tool, and the refusal must be
+	// recorded as an error result rather than the tool's own output.
+	events, err := st.LoadEvents(ctx, tenant, session, 0, 1000)
+	if err != nil {
+		t.Fatalf("load events: %v", err)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.Kind != store.EventToolResult {
+			continue
+		}
+		var payload struct {
+			ToolCallID string          `json:"toolCallId"`
+			IsError    bool            `json:"isError"`
+			Content    json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if payload.ToolCallID != "call_orphan" {
+			continue
+		}
+		found = true
+		if !payload.IsError {
+			t.Fatalf("recovery executed the ungranted tool echo: %s", ev.Payload)
+		}
+	}
+	if !found {
+		t.Fatal("recovery committed no result for the orphan tool call")
+	}
+}
+
+// TestCaptainSeesTheTeamRoster pins the delegation affordance: the captain's
+// prompt lists the team's members, so spawn_subagent can name one instead of
+// guessing an agentId (spawn_subagent's schema takes a free-text id).
+func TestCaptainSeesTheTeamRoster(t *testing.T) {
+	st := testStore(t)
+	tenant, session := newSession(t, st)
+	k := testKernel(t, st)
+	commitBindingInput(t, k, tenant, session, "binding-roster", `{"modelId":"m","teamId":"team_kite"}`)
+	rec := &captureStream{}
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "spawn_subagent")},
+		&stubBindings{surface: RunSurface{
+			Prompt:   "KITE-RUNTIME-MARK-7 captain instructions",
+			TeamMode: true,
+			AgentID:  "agent_captain",
+			TeamID:   "team_kite",
+			Members: []RosterMember{
+				{AgentID: "agent_reviewer", Label: "Reviewer", Description: "reviews the draft"},
+				{AgentID: "agent_writer", Label: "Writer"},
+			},
+		}}, nil, rec.fn())
+	runAttemptOf(t, k, r, tenant, session)
+	prompts, _ := rec.snapshot()
+	if len(prompts) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(prompts))
+	}
+	text := prompts[0]
+	for _, want := range []string{"<team_members>", "agent_reviewer", "Reviewer", "reviews the draft", "agent_writer", "</team_members>"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("captain prompt is missing %q:\n%s", want, text)
+		}
+	}
+	// The roster is part of the prompt that goes on the wire, so the hash covers
+	// it: two teams differing only in members must not collide.
+	if !strings.Contains(text, "KITE-RUNTIME-MARK-7") {
+		t.Fatalf("the roster replaced the captain prompt instead of extending it:\n%s", text)
 	}
 }
