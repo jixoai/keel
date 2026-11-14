@@ -27,8 +27,8 @@
 | keel-service-graph（已归档） | 89/91 | 归档时留 2 个**已知缺口**：DSH sidecar 参考适配器 pin、gateway 故障 scenario（crash-loop/大帧取消/stderr 洪泛） | 缺口并入 Wave 3/4 |
 | keel-tenancy-usage（已归档） | 29/29 | tenant-config / usage-ledger / provider-telemetry 全交付；**不含** api_keys/auth/RLS/配额 | 完成 |
 | keel-ga | 17/43 | 26 项，其中 tenancy 实为 5 真项（api_keys/auth/provisioning/RLS/带宽·存储配额）+ 2 核验项（用量字节、跨租户测试；token 用量账本已有）· provider-files 7 · blob-lifecycle 5 · agent-execution 2 · 验收 5 | **下一主战场** |
-| keel-ecosystem | 4/72 | **冻结历史板**（同 runtime-foundation，勿勾选）；68 条的实际去向待对账：已由 service-graph 交付 / 成为孤儿项 | **处置中**（对账线） |
-| keel-harness-v2 | 0/142 | W12 插件补全 40 · W0 22 · W11 验收 13 · W1-W10 各 3-8（含大量已落地未勾） | **先对账** |
+| keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
+| keel-harness-v2 | 15/142（已勾） | **对账完成**：已实现 14 / 部分实现 42 / 未实现 85 / 废弃 1；真缺口以 `RECONCILIATION.md` TOP10 为准 | **已对账** |
 
 ## 2. 去重归并（多 change 重复项只算一次）
 
@@ -45,38 +45,50 @@
 
 ## 3. 计划（波次；每波开头对账，结尾 G 级证据 + 勾选 + 提交）
 
+> 2026-11-14 对账后重排：真缺口 TOP10 集中在 **W0/W3/W4/W5/W7/W12**（恒定工具面、task-log、
+> layerfs、bash-plugin、approve/notify），即「依赖注入注册面」本身——按 Owner 口径，
+> 这是主干而不是插件尾巴。Wave 2 因此独立为「注册面主干」。
+
 ### Wave 0 — 运行注入收口（进行中）
 - 线 A：RUNTIME-PLAN P1→P6（selection 词表 → PromptResolver → 工具面过滤 → captain/成员 → run 快照/前端）
 - 同名密钥回退（provider-secret-direct-config 待实现项）
 - 门：wire 标记 `KITE-RUNTIME-MARK-7/8` + 全量 Go/TUI 绿 + tasks 勾选 + 提交推送
 
-### Wave 1 — GA 底座（并行 3 条）
-1. **harness-v2 任务对账**（1 条）：产出「已落地/未落地/被替代」表，更新 tasks.md；这是后续排期的前提
-2. **keel-ga tenancy-quotas**（后端）：api_keys 表 + internal/auth + provisioning + RLS + 配额(429) + 用量事件 + 跨租户测试
-3. **keel-ga provider-files**（后端）：ImageRefContent/事件只存 blobId/能力位/resolver(file_id>url>base64)/Gemini·OpenAI·Anthropic 适配/缓存/内存上限测试
+### Wave 1 — GA 底座（并行 2 条后端线）
+1. **keel-ga tenancy-quotas**：api_keys 表 + internal/auth + provisioning + RLS + 带宽/存储配额 + 跨租户测试
+   （run/流配额与 token 用量账本已有，只补差）
+2. **keel-ga provider-files**：ImageRefContent/事件只存 blobId/能力位/resolver(file_id>url>base64)/Gemini·OpenAI·Anthropic 适配/缓存/内存上限测试
 
-### Wave 2 — 运维与产品尾项（并行 3 条）
-4. **blob-lifecycle**：缩略图异步 + 事件引用计数 + TTL sweeper + base64 fuzz + 文档
-5. **agent-team 尾项**：CLI `agent start/stop`、`team save/start`、AGENTS.md 文件引用编辑器、五态/390 复检、组合页视觉复核
-6. **媒体适配器**：image/video/tts/stt/decision 五族（provider 崩溃隔离 + usage 计量不写价格）
+### Wave 2 — 注册面主干（DI spine；TOP10 #1-#5）
+3. **恒定工具面与聚合工具**：read/write/edit/bash/tasks/approve/notify/mcp.call/skills/agent/creation…
+   （`mcp__` 方言删除，PI 偏离登记；工具面注册 = 插件 provides）
+4. **bash-plugin + JobManager**：gbash 契约、timeout→后台、head/tail→blob、作业收养（skills 脚本执行的依赖）
+5. **task-log**：task_cards/task_events 投影、强制 taskId、tasks 工具、fork
+6. **layerfs（Go CAS 路线 Phase A）+ file-plugin**：CAS/tree/refcount/capture/写穿；Rust+gRPC 保留为
+   同接口的扩展实现（裁决见 §5.1-5）
+7. **approve + notify**：三模式审批、validated provenance、多消费器、URL 生命周期
+- 门：G1-G2（fake 全链 + 固定崩溃矩阵进 CI）
 
-### Wave 3 — 可观测/恢复/压缩（ecosystem P1）
-observability（run.finished 已存在→指标/日志字段补齐）→ recoverability（generation 幂等/task 状态机/checkpoint 回放/10min 混沌）→ compaction（事件+checkpoint 投影/手动压缩/token 账）
+### Wave 3 — 运维与产品尾项（并行 3 条）
+8. **blob-lifecycle**：缩略图异步 + 事件引用计数 + TTL sweeper + base64 fuzz + 文档
+9. **agent-team 尾项**：CLI `agent start/stop`、`team save/start`、AGENTS.md 文件引用编辑器、五态/390、组合页视觉复核
+10. **媒体适配器**：图 → 决策 → 音 → 视（provider 崩溃隔离 + usage 计量不写价格）
 
-### Wave 3.5 — MCP 标准对接（Owner 2026-11-14 追加：MCP Apps + MCP events）
-- **MCP Apps**（官方扩展 SEP-1865，`io.modelcontextprotocol/ui`）：keel 作为 host 渲染 `ui://` 应用——
-  工具元数据 `_meta.ui` 贯通 → 沙箱 iframe/WebView 托管 → `ui/initialize` 握手与
-  tool-input/tool-result 通知 → 出站 `tools/call`/`ui/message`/`ui/open-link`/`ui/update-model-context`。
-- **MCP events**（Transports 规范事件面：`notifications/*`、`subscriptions/listen`、2026-07-28 的
-  stateless/MRTR 语义）：通知分类映射（事件账本 vs 瞬态 UI）、`tools/list_changed` → 工具注册面热更新、
-  MRTR 与 decision/consent 对接、版本对齐。
-- 设计先行（change `feat-mcp-apps-events`），实现排 Wave 4 的 mcp 波（与 skills/hooks 同一注册面）。
+### Wave 4 — 可观测/恢复/压缩（ecosystem P1 + 孤儿项）
+observability（指标/spans 接入、OTLP adapter 默认关）→ recoverability（generation 幂等/task 状态机/checkpoint
+回放/10min 混沌 + SG-2 gateway 故障格含「双租户同名工具」「provider 图片内容」）→ compaction（手动 compact 端点、token 账）
 
-### Wave 4 — 生态 P2/P3 + harness-v2 主力
-skills（加载/渐进披露/租户隔离/权限）→ hooks（事件对齐/命令钩子/审计）→ mcp（stdio/传输/命名空间/重连/鉴权）→ harness-v2 对账后剩余 W 波（W0 收尾、W6/W8/W9/W10/W12）
+### Wave 5 — 生态产品面 + MCP 标准（含 16 孤儿项）
+skills 产品面（`/skill:name`、租户注册表 hash 不可变、allowed-tools 执行期交集、热更新）·
+hooks 补缺口（已基本实现）· MCP 产品面（per-tenant manager、env/headers 加密、健康检查/退避、破坏性默认审批、
+真实 server G4）· **MCP Apps + MCP events（Wave 3.5 设计 → 本波实现）** · SG-1 DSH sidecar 适配器
 
-### Wave 5 — GA 验收与收口
-1000 会话/64 并发 run/2GB/SIGKILL 10min 混沌/交叉复核（子代理，本项目不用 Codex）/报告归档/全部 change archive/主仓指针跟进
+### Wave 6 — 插件 UI 槽位与放置模型（W12 剩余 + W2 放置）
+keel.ui 四形态（inline/fullscreen/pip/panel 槽位）、TUI 降级、AI 现场写插件（Native chunk）·
+groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
+
+### Wave 7 — GA 验收与收口
+1000 会话/64 并发 run/2GB/SIGKILL 10min 混沌/交叉复核（子代理）/每能力文档/全部 change archive/主仓指针
 
 ## 4. 本机部署现状（今天调整）
 
@@ -105,6 +117,24 @@ skills（加载/渐进披露/租户隔离/权限）→ hooks（事件对齐/命�
 | 6 | 稳定 SDK：暂不抽（主代理决策） | 内部 API 先行，GA 前再评估 |
 | 7 | PI pin：跟随上游（主代理决策） | 每次升级独立 change：pin + conformance + PI-PARITY |
 | 8 | 媒体适配器顺序（主代理决策） | 图 → 决策 → 音 → 视 |
+
+## 5.1 对账冲突裁决（2026-11-14，主代理）
+
+对账 `RECONCILIATION.md §4` 提出 5 项归属/口径冲突，裁决如下：
+
+1. **`spawn_subagent` 去留**：**保留**。它是 agentext 子代理插件的注册工具，团队模式（R3）依赖它；
+   harness-v2 W8 负责设计「成员/子代理」的终局形态，迁移表把它登记为**过渡能力**，
+   在 W8 落地前不删除。
+2. **`mcp__` 命名**：以 **harness-v2 W0 为准**——终局工具面 = 恒定聚合工具（`mcp.call`），
+   `mcp__<server>__<tool>` 适配删除；与 PI 的差异按 W0 既有机制在 `PI-PARITY.md` 登记为
+   **有意偏离**（理由：恒定工具面是 DI 注册与可替换性的前提）。
+3. **agent-team Non-Goal 口径**：保持在该 change 范围内生效，不扩散；harness-v2 要覆盖时
+   以自身条目/新 change 记录（如「成员输出实时投影」仍属独立 change）。
+4. **run 快照归属**：RUNTIME-PLAN P6 先落 agent/team/prompt 快照字段；harness-v2 W2-6 记
+   「部分承接」，剩余 = 全量 `configHash` 冻结，留在 W2 波完成。
+5. **layerfs 路线**：**Phase A = Go 原生 CAS/tree**（复用现有 blob store，补 tree manifest/
+   refcount/capture），与 file-plugin、bash-plugin 同波交付；Rust+gRPC 保留为**同接口扩展实现**
+   （spec 保留 gRPC 边界），等规模需要时再引入，不现在上第二运行时。
 
 ## 6. 今日已到账（证据锚点）
 

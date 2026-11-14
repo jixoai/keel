@@ -5,16 +5,20 @@
 
 ## W0 契约与骨架
 
-- [ ] 冻结本 change 的**全部 10 份 spec**（`harness-core` / `agent-loop-contract` / `layerfs` /
+- [x] 冻结本 change 的**全部 10 份 spec**（`harness-core` / `agent-loop-contract` / `layerfs` /
       `task-log` / `tool-surface` / `plugin-architecture` / `plugin-ui-extension` / `supervision` /
       `client-shell` / `plugin-system` 的 MODIFIED delta），
       后续实现不得偏离；偏离走新 change
-- [ ] **kind 表**：每个新 kind 定 `class`（owner/edge/external/system）、`key`/fence、提交者；
+      （对账：`openspec/changes/keel-harness-v2/specs/*/spec.md` 恰好 10 份，随 change 提交）
+- [x] **kind 表**：每个新 kind 定 `class`（owner/edge/external/system）、`key`/fence、提交者；
       新增 `task.created|updated|attached|detached|closed|note`、`fs.write`、`fs.capture`、
       `fs.capture_failed`、`config.rotated`、`placement.joined|left`、
       `supervision.escalated`、`guardrail.tripped`、`resume.attempt`、`notification.ack|push_sent`；
       `run.finished` payload 增 `configHashBefore/After`；同步 `kindRegistry`、`internal/store`
       常量、转录/SSE/R1 规则
+      （对账：`internal/kernel/kernel.go:99-135`、`internal/kernel/validate.go:44-77`、
+      `internal/store/events.go:24-47`、`internal/agent/runner.go:248-253`、pin 测试
+      `internal/kernel/kernel_test.go:1481`；新 kind 尚无 emitter，R1 只登记 run.* bookkeeping）
 - [ ] **既有门承接**：扩展 `cmd/r1diff` 场景与 allowlist（每条附理由）、重新 pin 基线；
       `scripts/acceptance-all.sh` 必须全绿（E0）
 - [ ] **工具面迁移**：按 `tool-surface` 的破坏性迁移表删除旧工具名（无 shim），加「终局工具集」
@@ -30,9 +34,12 @@
 - [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离；
       `plugin_state(tenant_id, plugin_id, status, config_version, reason)` 与 `/v1/plugins` 过滤；
       `AGENTS.md` 修订为「默认单进程多租户；`user` 放置是显式 SKU」
-- [ ] **内核键命名空间**：扩展 `KeyKind` 与 `CommitRequest`（`fs:`/`capture:`/`task:`/`config:`/
+- [x] **内核键命名空间**：扩展 `KeyKind` 与 `CommitRequest`（`fs:`/`capture:`/`task:`/`config:`/
       `placement:`/`supervision:`/`guardrail:`/`resume:`/`notif-ack:`/`notif-push:`/`run:`），
       禁止复用 `tool:` 前缀；加「tool.result 后紧接 fs.write」负控单测
+      （对账：`internal/kernel/kernel.go:217-243`、`CommitRequest` `:325-370`、
+      `internal/kernel/validate.go:181-205`；负控 `internal/kernel/contract_v2_test.go:62`、
+      键齐全性 `:95`、前缀隔离 `internal/kernel/kernel_test.go:1527-1555`）
 - [ ] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、
       纯 chunk 包（无 `ui.entry`）、`plugin_state` 租户字段；`KnownFields(true)` 同步
 - [ ] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status
@@ -88,7 +95,10 @@
 - [ ] 三种策略：`pack`（默认）/ `user` / `pin`；策略在 Harness，不进内核
 - [ ] 组内并发槽位（`max_concurrent_runs`）：满时排队 + ETA；用户配额在 DB 侧聚合
 - [ ] 进程生命周期：启动、drain、接管、SIGTERM 排水；组 OOM 不扩散
-- [ ] 注入式 run 契约：工具清单 + system sections + message-parts + invoke 回调
+- [x] 注入式 run 契约：工具清单 + system sections + message-parts + invoke 回调
+      （对账：`internal/agentloop/loop.go:96-140`（Input：SystemPrompt/Messages/Tools/Batch）、
+      `agentloop/pi.go:70-110`；loop 不持账本/不触 store；单测 `agentloop/contract_test.go:110`、
+      `equivalence_test.go:108-143`；「invoke 回调」由注入的 AgentTool 对象承担）
 - [ ] run 快照：`configHash` + `anchorEventSeq` + `toolManifestHash` 写入 run 事件
 - [ ] 外部内核能力矩阵与 typed rejection（沿用 v1 external 通道）
 
@@ -118,7 +128,11 @@
 
 - [ ] `approve` 工具：`confirm/prompt/choice` 三模式 + 「其它」逃逸
 - [ ] 逃逸值带 `validated:false` provenance，下游可区分
-- [ ] 超时默认取安全侧；durable 决策（open/wait/answer/timeout）沿用 v1 decision 原语
+- [x] 超时默认取安全侧；durable 决策（open/wait/answer/timeout）沿用 v1 decision 原语
+      （对账：`internal/agentext/decisions.go:24-32,231-301,495-538`（四状态 + 持久 deadline +
+      重启后 normalize/expire）、`decisions_store.go:13-20,152-200`（复用 tasks 行持久化）；
+      安全侧：插件审批超时/未答走 refused 分支 `creation.go:845-860`；
+      测试 `agentext_test.go:72,126,179`）
 - [ ] `notify` 工具与通知面板：多消费器（img 埋点 / URL 访问 / 客户端 ack）
 - [ ] 消费是持久事实；有 ack 能力的消费者在场时即时消费；原生推送只做兜底
 - [ ] 通知 URL 单次有效、不可猜；重启不重推
@@ -126,7 +140,10 @@
 ## W6 MCP 聚合工具
 
 - [ ] `mcp` 聚合工具：`list/describe/call`，schema 发现与缓存
-- [ ] 二进制内容走 content block，不走 stdout
+- [x] 二进制内容走 content block，不走 stdout
+      （对账：`internal/mcp/content.go:60-95`（image/resource → ImageContent，其它块给文本占位，
+      structuredContent 回退 JSON）、`internal/mcp/output_limit.go` 20KB 上限；
+      测试 `internal/mcp/content_test.go:14-40`、`output_limit_test.go`）
 - [ ] gbash 的 `mcp` CLI：与聚合工具共用同一个 registry（shim，不复制实现）
 - [ ] 删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测（PI-PARITY 已登记偏离）
 - [ ] MCP server 增删不改变工具清单（清单哈希断言）
@@ -154,14 +171,23 @@
 - [ ] sidecar 接入 OAR：runtime 能力矩阵、record stream（`seq` + `agentPath`）
 - [ ] 外部工具渲染器：把 record stream 折叠成可读的调用/结果视图
 - [ ] 不注入「请记录任务卡」；归属由 record stream 带外提供
-- [ ] typed rejection：runtime 不支持的能力在启动前拒绝
-- [ ] 进程回收：外部 runtime 退出/崩溃后的孤儿清理
+- [x] typed rejection：runtime 不支持的能力在启动前拒绝
+      （对账：通用外部网关已实现——`internal/gateway/initialize.go:81-121` 能力集、
+      `:150+` `validateInitializeResult`、`internal/gateway/errors.go:124-144` 类型化握手错误；
+      测试 `internal/gateway/conn_test.go:18,40,56`。注：OAR 专用绑定仍缺，见上一条）
+- [x] 进程回收：外部 runtime 退出/崩溃后的孤儿清理
+      （对账：通用外部网关已实现——`internal/gateway/process_unix.go`（Setpgid 进程组、
+      terminateProcessTree/killProcessTree/KillTree）、测试 `internal/gateway/spawn_unix_test.go:18`、
+      `internal/externalgw/agent.go` 监督重启。注：OAR 专用 runtime 未接）
 
 ## W10 triggers 对齐
 
 - [ ] 沿用 v1 的 `cron/interval/webhook`；补 HMAC、去重键、漏跑补偿
 - [ ] 每触发器并发上限；触发产生的会话自动建初始任务卡
-- [ ] webhook 端口只绑回环或受控入口；记录审计
+- [x] webhook 端口只绑回环或受控入口；记录审计
+      （对账：默认监听 `127.0.0.1:13750`——`cmd/keel/serve.go:73` `defaultServeAddr`，
+      `KEEL_SERVE_ADDR` 可指向受控入口；每次 fire 落审计 `internal/agentext/triggers.go:85-110`+`:424`，
+      `GET /v1/triggers` 可读；测试 `agentext_test.go:279,328`）
 
 ## W11 验收（收口门，判据见 `acceptance.md`）
 
@@ -170,7 +196,9 @@
 - [ ] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
 - [ ] 工具清单稳定性：增删 MCP server / 技能后清单哈希不变（除非 config 轮转）
-- [ ] 真实模型 E2E：至少一条真 provider 链路（无凭据时用 fake provider），不得只测 happy path
+- [x] 真实模型 E2E：至少一条真 provider 链路（无凭据时用 fake provider），不得只测 happy path
+      （对账：`scripts/real-model-e2e.sh`（成功 + `--with-failure`/`--failure-auth` 失败路径 +
+      `--models` 配置到 wire 断言）、`docs/REAL-MODEL-E2E.md`、`acceptance-all.sh` 的 opt-in 门）
 
 **门（按 `acceptance.md` 的依赖顺序；W12 的护栏/创造/槽位项 MUST 先于本门完成）**
 
@@ -212,7 +240,10 @@
 
 - [ ] `keel.creation`（内置）：聚合本机所有插件的 `extensibility.json` / `EXTENSIBILITY.md`
 - [ ] 只读发现工具：AI 可查「本机装了什么、能怎么扩展」；目录与装配事实同源
-- [ ] 脚手架 / 校验 / 审批安装 / 列举 / 删除；校验 fail-closed 且给字段级原因
+- [x] 脚手架 / 校验 / 审批安装 / 列举 / 删除；校验 fail-closed 且给字段级原因
+      （对账：`internal/agentext/creation.go:86-90`（5 工具）、`:254-330`（scaffold/validate/install/
+      list/remove）、`:375-460`（字段级 fieldFailure）；审批 `:791-860`；
+      测试 `creation_test.go:168,308,342`；归档 keel-plugin-core C1–C4/Q3）
 - [ ] `keel.ui` 槽位机制：槽位注册与注销、贡献装载/卸载、schema 校验、目标降级
 - [ ] `keel.ui` 声明基础槽位（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` /
       `.message-part` / `.sidebar` / `.settings-section` / `.surface`）；任务卡部件槽位由
@@ -237,17 +268,26 @@
 
 - [ ] `keel.bundles`（base/mode 装配面）
 - [ ] `keel.presets`（agent preset 覆盖）
-- [ ] `keel.hmr`（插件热重载，不打断进行中的 run）
+- [x] `keel.hmr`（插件热重载，不打断进行中的 run）
+      （对账：热更/回滚 `internal/agentext/plugin_manager_ops.go:968-1071`，测试
+      `plugin_manager_test.go:564`；在飞 run 不被打断 `internal/servicegraph/lifecycle.go:12-25`、
+      `engine.go:647-669` + run 工具面快照 `internal/agenttool/registry.go:93-108`；
+      无同名插件实体，按能力口径勾选）
 - [ ] `keel.telemetry`（指标 + OTel）
 - [ ] `keel.testkit`（无密钥测试台 / mock-replay）
 - [ ] `keel.credentials`、`keel.storage`、`keel.identity`
 
 **能力接入**
 
-- [ ] `keel.web-search`（复用 v1 已交付）
+- [x] `keel.web-search`（复用 v1 已交付）
+      （对账：`plugins/keel.web-search/`（plugin.yaml + sidecar.mjs 五上游回退链）；
+      `plugins/COVERAGE.md:65` delivered；归档 keel-plugin-core O3）
 - [ ] `keel.oar`（外部运行时＝外部工具，专用渲染器，不进任务图）
-- [ ] 登记（内核稳定后再接）：`keel.lsp`、`keel.browser-use`（fde2e-bu）、
+- [x] 登记（内核稳定后再接）：`keel.lsp`、`keel.browser-use`（fde2e-bu）、
       `keel.computer-use`（fde2e-cu）、`keel.document`、`keel.knowledge`、`keel.ptc`、`keel.workflow`
+      （对账：catalog 均有 keelPluginId 登记——`plugins/keel.plugin-market/catalog.json:1352`（lsp）、
+      :538（browser-use）、:923（computer-use）、:1038（document）、:2163（knowledge）、
+      :1454（ptc）、:660（workflow），状态 planned/registered）
 
 **UI 贡献（W1–W2）**
 
@@ -257,5 +297,8 @@
 
 **明确不做**
 
-- [ ] 不新增 `agent-team`、不新增 `goal`/`plan-mode`/`todo` 独立插件（并入 plan-plugin）、
+- [x] 不新增 `agent-team`、不新增 `goal`/`plan-mode`/`todo` 独立插件（并入 plan-plugin）、
       不照搬 DSH ssh 执行面、不引入 Cordis/typert
+      （对账：已废弃——proposal Non-Goals 与 plugin-inventory §0/§1.1 已固化；
+      注：`keel-agent-team-v1` 新增的是 Agent/Team 产品面而非 agent-team 协调插件，
+      口径待 Owner 确认，见 RECONCILIATION 冲突登记）
