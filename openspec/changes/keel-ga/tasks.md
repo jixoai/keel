@@ -3,6 +3,10 @@
 > W1 契约内核、W2 服务图与 loadout、W3 PI loop 与 conformance 门、W4 handoff、
 > W5 外部网关、W6 集成与验收）。本板保留原文，仅作历史对照；后续以
 > `keel-service-graph` 为准，勿在此勾选。
+>
+> **2026-11-15 重激活**：service-graph 已归档（89/91）；按 `docs/RESIDUAL-PLAN.md` §1/§2 的
+> 去重归并，**§2 tenancy-quotas 与 §3 provider-files 由本板履行并恢复勾选**（其余条目
+> ——§1 剩余、§4–§6——维持历史对照，去向以 RESIDUAL-PLAN 各 Wave 为准）。
 
 # Tasks: keel-ga
 
