@@ -26,9 +26,15 @@
       接口扩展任务
 - [ ] **PI 偏离登记**：`docs/PI-PARITY.md` 写明 MCP 工具命名的偏离（理由/影响面/验收方式）；
       删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测
-- [ ] **契约冻结 spike**：`docs/GBASH-CONTRACT.md`（版本/协议帧/进程模型/许可证）与
+- [x] **契约冻结 spike**：`docs/GBASH-CONTRACT.md`（版本/协议帧/进程模型/许可证）与
       OAR 契约（record stream schema/typed 码表/进程组回收/与 `internal/externalgw` 的复用关系）；
       未冻结前 bash 与 `keel.oar` 的实现任务保持阻塞
+      （对账：gbash 侧已冻结——pin `v0.0.41` @ `7cc3528`，模块 `github.com/ewhauser/gbash`，
+      Apache-2.0 + in-tree `mvdan/sh` fork BSD-3-Clause；10 章、约 40 条实测断言探针；
+      **三条实现级收窄已回写本 change 的 `tool-surface` spec**：①作业=独立 Session+goroutine、
+      重启一律收敛终态（原「重启后收养」物理不可行）②禁用上游 `ExecutionRequest.Timeout`
+      （语义是取消+杀）③layerfs 只挂非根挂载点（根 FS 会被 263 次命令桩污染）。
+      **OAR 契约仍未冻结**，`keel.oar` 阻塞保持）
 - [ ] **ADR 0001**：layerfs Rust+gRPC 的推翻记录与证据门；CI 工具链、Dockerfile/compose、
       健康检查、端口登记（13610–13799）、SIGKILL sweep
 - [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离；

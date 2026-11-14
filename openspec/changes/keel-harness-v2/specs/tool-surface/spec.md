@@ -98,14 +98,17 @@ MUST NOT 为它建子卡、MUST NOT 把其内部细节写进任务图。
 ### Requirement: bash 是主桥
 
 Agent MUST 能通过 `bash` 完成系统操作；bash MUST 由 gbash 提供（可注入自定义命令、自定义
-文件系统、跨平台）。gbash 的版本、协议帧、进程模型与许可证 MUST 在 W0 契约冻结中 pin 并写入
-`docs/GBASH-CONTRACT.md`。`timeout` MUST 是工具参数，MUST NOT 依赖 bash 的 `timeout` 命令。
-超时 MUST NOT 直接 kill 命令，而是转入后台并返回超时信息、终端信息与后台 pid。
+文件系统、跨平台）。gbash 的版本、协议帧、进程模型与许可证 MUST 冻结在
+`docs/GBASH-CONTRACT.md`（pin `v0.0.41`；进程内 goroutine、无真实进程、`$$`=1）。
+`timeout` MUST 是工具参数，MUST NOT 依赖 bash 的 `timeout` 命令，MUST NOT 使用上游
+`ExecutionRequest.Timeout`（其语义是取消+杀，与 keel 冲突）。超时 MUST NOT kill 命令，
+而是转入后台作业并返回超时信息与作业 id。
 
 #### Scenario: 超时转后台
 - **GIVEN** 一条命令以 `timeout=30s` 启动
 - **WHEN** 30 秒后仍未结束
-- **THEN** 命令转入后台继续执行，返回超时说明与可查询的作业 id，不丢输出
+- **THEN** 命令转入后台作业（独立 Session+goroutine，非同一 session 的 `&`）继续执行，
+  返回超时说明与可查询的作业 id，不丢已产生的输出
 
 #### Scenario: 契约 pin 后才可开工
 - **WHEN** `docs/GBASH-CONTRACT.md` 未冻结
@@ -140,10 +143,13 @@ registry，CLI 只是 shim。二进制内容 MUST 以 content block 返回，MUS
 `read`/`write`/`edit` MUST 只是 file-plugin 的薄接口：解析 `file_manifest`（**会话作用域**）、
 调用 layerfs、追加 `fs.write` 事件、并**写穿到执行空间**（若已物化）。它们 MUST NOT 引入第二套
 写路径，MUST NOT 在工具层做版本合并或冲突策略（冲突语义属于 file-plugin 契约）。
+bash 执行空间的 layerfs MUST 挂在**非根挂载点**（`MountableFileSystem`）：gbash 在 session
+初始化时向根 FS 写约 263 次虚拟命令桩（`/bin/*`、`/usr/bin/*`），直接把 layerfs 作为根会让
+这些桩污染内容寻址层（`docs/GBASH-CONTRACT.md` §4.2，实测）。
 
 #### Scenario: write 后 bash 立即可读
 - **WHEN** 先 `write a.txt`，再 `bash cat a.txt`
-- **THEN** 能读到新内容（写穿生效），不需要重新物化
+- **THEN** 能读到新内容（写穿生效），不需要重新物化，且 layerfs 中不出现 gbash 的命令桩
 
 #### Scenario: read 支持分页
 - **WHEN** 读取一个超大文本文件
@@ -165,14 +171,20 @@ registry，CLI 只是 shim。二进制内容 MUST 以 content block 返回，MUS
 
 ### Requirement: JobManager 统一管理后台作业
 
-后台作业 MUST 由 JobManager 统一登记（围绕 `nohup/jobs/ps` 的视图）。JobManager MUST 提供全局与
-每组上限、查询、输出引用、退出状态与收养语义；孤儿进程 MUST 可回收。超限 MUST 拒绝新作业，
-MUST NOT kill 已有作业。
+后台作业 MUST 由 JobManager 统一登记（`nohup/jobs/ps` 视图是 keel 自研命令，读 JobManager）。
+一个作业 MUST 独占一个独立 gbash `Session` 与独立 goroutine（同 session 的 `Exec` 串行且后台任务
+出 `Exec` 即 cancel，故同 session `&` 不能承载跨调用存活）。其「pid」MUST 是 keel 作业 id，
+MUST NOT 暴露 gbash 的 `$$`/`$!`（前者恒为 1，后者是虚拟标签）。JobManager MUST 提供全局与
+每组上限、查询、输出引用（blob）与退出状态；超限 MUST 拒绝新作业，MUST NOT kill 已有作业。
+作业持久化事实（id/命令/cwd/输出引用/退出码）MUST 落库；**因作业载体是进程内 goroutine，
+Harness 重启 MUST 把未收敛作业一律收敛为终态（`exited`/`interrupted`）并保留可读输出**，
+MUST NOT 声称「重新挂上仍在运行的作业」。
 
-#### Scenario: 重启后收养
-- **WHEN** Harness 进程重启而一个后台作业仍在运行
-- **THEN** JobManager 能重新登记该作业并继续查询其状态与输出
+#### Scenario: 重启后恢复事实并收敛终态
+- **WHEN** Harness 进程重启而一个后台作业此前未收敛
+- **THEN** JobManager 从持久化事实恢复其查询与输出引用，状态收敛为 `interrupted`
+  （原因标注 harness restart），MUST NOT 出现「仍在运行」的假状态
 
 #### Scenario: 孤儿回收
 - **WHEN** 一个会话被删除而其后台作业仍存活
-- **THEN** 作业被标记并按策略终止，进程表中不留孤儿
+- **THEN** 作业的 session context 被取消并按策略终止，作业被标记终态，进程内不留孤儿 goroutine
