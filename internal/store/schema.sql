@@ -49,6 +49,13 @@ CREATE INDEX IF NOT EXISTS sessions_external_backend
     ON sessions (tenant_id, external_backend)
     WHERE state_owner = 'external';
 
+-- Sessions are deleted from the user's view as a soft delete
+-- (DELETE /v1/sessions/{id}): the session leaves the list while every
+-- event/run/usage row stays — the ledger is the metering and audit truth and
+-- is never deleted by a product call. archived_at is that mark; it is set
+-- once and never cleared by the delete route (idempotent).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+
 CREATE TABLE IF NOT EXISTS events (
     tenant_id   uuid NOT NULL,
     session_id  uuid NOT NULL,

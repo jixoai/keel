@@ -907,3 +907,148 @@ func TestSecretDeleteRefusesWhileReferenced(t *testing.T) {
 		t.Fatalf("DELETE unreferenced secret: %d (%+v), want 200", code, out)
 	}
 }
+
+// fakeProviderReferences is the deletion-protection seam: the references it
+// answers per provider id, plus a forced failure for the read.
+type fakeProviderReferences struct {
+	refs map[string][]store.ProviderReference
+	err  error
+}
+
+func (f *fakeProviderReferences) ProvidersReferencingProvider(_ context.Context, _ uuid.UUID, providerID string) ([]store.ProviderReference, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.refs[providerID], nil
+}
+
+// TestModelSettingsWriteRefusesRemovingReferencedProvider is the provider
+// registry's deletion protection on the models write path (specs/provider-
+// registry: a referenced provider instance is not hard-deleted; the refusal
+// lists the referrers and the operator can disable it instead). "Removal" is
+// decided against what the candidate still resolves: omitting a built-in
+// catalog provider is not a removal (the catalog still ships it), so only a
+// provider the candidate no longer serves can trip the guard.
+func TestModelSettingsWriteRefusesRemovingReferencedProvider(t *testing.T) {
+	settings := newFakeModelSettingsStore()
+	tenant := uuid.New()
+	serving := `{"providers":[{"id":"magpie","api":{"type":"openai-chat-completions","baseUrl":"https://magpie.example.test/v1"},"modelIds":["m1"]}],"selection":{"providerId":"magpie","modelId":"m1"}}`
+	if _, err := settings.SetModelSettings(context.Background(), tenant, 0, json.RawMessage(serving)); err != nil {
+		t.Fatalf("seed override: %v", err)
+	}
+	runtime := &fakeSettingsRuntime{
+		deployment: json.RawMessage(nil),
+		candidate: ModelCandidate{
+			Selection:        modelcfg.Selection{ProviderID: "s2api", ModelID: "deepseek-v4.1-flash"},
+			ProviderIDs:      []string{"s2api"},
+			ModelsSelectable: 1,
+		},
+	}
+	references := &fakeProviderReferences{refs: map[string][]store.ProviderReference{
+		"magpie": {{Kind: "agent", ID: "agent_publication", Name: "发布助手", Field: "defaultModel"}},
+	}}
+	server := settingsServer(t, func(cfg *Config) {
+		cfg.ModelSettingsStore = settings
+		cfg.ModelSettingsRuntime = runtime
+		cfg.ProviderReferences = references
+		cfg.Models = stubCatalog{}
+	})
+	client := server.Client()
+
+	// The candidate drops magpie and the agent still binds it: 409 with the
+	// registry's shape (code + references) and the field a form highlights.
+	document := map[string]any{
+		"providers": []any{map[string]any{"id": "s2api", "modelIds": []string{"deepseek-v4.1-flash"}}},
+		"selection": map[string]any{"providerId": "s2api", "modelId": "deepseek-v4.1-flash"},
+	}
+	var refusal struct {
+		Error      string              `json:"error"`
+		Code       string              `json:"code"`
+		Fields     []map[string]any    `json:"fields"`
+		References []ProviderReference `json:"references"`
+	}
+	if code := doSettingsJSON(t, client, http.MethodPut, server.URL+"/v1/settings/models", tenant, document, &refusal); code != 409 {
+		t.Fatalf("PUT removing a referenced provider = %d (%+v), want 409", code, refusal)
+	}
+	if refusal.Code != "provider_in_use" {
+		t.Fatalf("refusal code = %q", refusal.Code)
+	}
+	if !strings.Contains(refusal.Error, "magpie") || !strings.Contains(refusal.Error, "agent_publication") {
+		t.Fatalf("refusal does not name the provider and the referrer: %s", refusal.Error)
+	}
+	if len(refusal.Fields) != 1 || refusal.Fields[0]["field"] != "providers[magpie]" || refusal.Fields[0]["code"] != "provider_in_use" {
+		t.Fatalf("refusal fields = %+v", refusal.Fields)
+	}
+	if len(refusal.References) != 1 {
+		t.Fatalf("refusal references = %+v", refusal.References)
+	}
+	if got := refusal.References[0]; got.ProviderID != "magpie" || got.Kind != "agent" || got.ID != "agent_publication" || got.Name != "发布助手" || got.Field != "defaultModel" {
+		t.Fatalf("reference = %+v", got)
+	}
+	// Nothing was stored or applied: the serving generation is untouched.
+	if revision := settingsRow(t, settings, tenant); revision != 1 {
+		t.Fatalf("store revision moved to %d after a refused removal", revision)
+	}
+	if applied := runtime.appliedDocuments(); len(applied) != 0 {
+		t.Fatalf("a refused removal reached the runtime: %q", applied)
+	}
+
+	// A candidate that keeps magpie is accepted (no removal).
+	keeping := map[string]any{
+		"providers": []any{map[string]any{"id": "magpie", "api": map[string]any{"type": "openai-chat-completions", "baseUrl": "https://magpie.example.test/v1"}, "modelIds": []string{"m1"}}, map[string]any{"id": "s2api"}},
+		"selection": map[string]any{"providerId": "s2api", "modelId": "deepseek-v4.1-flash"},
+	}
+	var written modelSettingsWriteResponse
+	if code := doSettingsJSON(t, client, http.MethodPut, server.URL+"/v1/settings/models", tenant, keeping, &written); code != 200 {
+		t.Fatalf("PUT keeping the referenced provider = %d (%+v), want 200", code, written)
+	}
+
+	// Omitting a provider the candidate still resolves is not a removal: the
+	// built-in catalog ships it, so nothing disappears and the guard stays out
+	// of the way (the candidate's ProviderIDs are the truth here).
+	catalogRuntime := &fakeSettingsRuntime{
+		candidate: ModelCandidate{
+			Selection:   modelcfg.Selection{ProviderID: "s2api", ModelID: "deepseek-v4.1-flash"},
+			ProviderIDs: []string{"s2api", "magpie"},
+		},
+	}
+	catalogServer := settingsServer(t, func(cfg *Config) {
+		cfg.ModelSettingsStore = settings
+		cfg.ModelSettingsRuntime = catalogRuntime
+		cfg.ProviderReferences = references
+	})
+	omitted := map[string]any{
+		"providers": []any{map[string]any{"id": "s2api", "modelIds": []string{"deepseek-v4.1-flash"}}},
+		"selection": map[string]any{"providerId": "s2api", "modelId": "deepseek-v4.1-flash"},
+	}
+	if code := doSettingsJSON(t, catalogServer.Client(), http.MethodPut, catalogServer.URL+"/v1/settings/models", tenant, omitted, &written); code != 200 {
+		t.Fatalf("PUT omitting a still-resolved provider = %d (%+v), want 200", code, written)
+	}
+
+	// No reference: the removal goes through.
+	unreferenced := &fakeProviderReferences{}
+	unreferencedServer := settingsServer(t, func(cfg *Config) {
+		cfg.ModelSettingsStore = settings
+		cfg.ModelSettingsRuntime = runtime
+		cfg.ProviderReferences = unreferenced
+	})
+	if code := doSettingsJSON(t, unreferencedServer.Client(), http.MethodPut, unreferencedServer.URL+"/v1/settings/models", tenant, document, &written); code != 200 {
+		t.Fatalf("PUT removing an unreferenced provider = %d (%+v), want 200", code, written)
+	}
+
+	// A failing reference read is a 500, never an implicit pass: the write path
+	// must not delete a provider it could not check.
+	failing := &fakeProviderReferences{err: errors.New("registry unavailable")}
+	failingServer := settingsServer(t, func(cfg *Config) {
+		cfg.ModelSettingsStore = settings
+		cfg.ModelSettingsRuntime = runtime
+		cfg.ProviderReferences = failing
+	})
+	// Re-seed magpie: the accepted writes above replaced the override.
+	if _, err := settings.SetModelSettings(context.Background(), tenant, 0, json.RawMessage(serving)); err != nil {
+		t.Fatalf("re-seed override: %v", err)
+	}
+	if code := doSettingsJSON(t, failingServer.Client(), http.MethodPut, failingServer.URL+"/v1/settings/models", tenant, document, &written); code != 500 {
+		t.Fatalf("PUT with a failing reference read = %d, want 500", code)
+	}
+}

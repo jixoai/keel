@@ -512,7 +512,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 	api := agentapi.New(agentapi.Config{
 		Sessions: agentapi.NewPGSessionLister(st),
-		Cancel:   cancelFn,
+		// DELETE /v1/sessions/{id} is the soft delete: the session leaves the
+		// list, its ledger stays (see store.ArchiveSession).
+		ArchiveSession: st.ArchiveSession,
+		Cancel:         cancelFn,
 		// A product write must land on a session this tenant owns: a decision
 		// opened on a missing session would be an orphan row.
 		SessionExists: func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
@@ -541,8 +544,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		},
 		ModelSettingsStore:   st,
 		ModelSettingsRuntime: modelSeam,
-		SecretStore:          secretStore,
-		SecretStoreReason:    secretReason,
+		// Provider deletion protection reads the agent/team registry (a provider
+		// an agent or a team still binds is refused, with the referrers listed).
+		ProviderReferences: st,
+		SecretStore:        secretStore,
+		SecretStoreReason:  secretReason,
 		RunStatus: func(tenantID, sessionID uuid.UUID) (string, bool) {
 			return runControl.Status(kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 		},
@@ -781,6 +787,7 @@ func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (agen
 		Selection:           candidate.Selection,
 		ProvidersExecutable: candidate.ProvidersExecutable,
 		ModelsSelectable:    candidate.ModelsSelectable,
+		ProviderIDs:         candidate.ProviderIDs,
 	}, nil, nil
 }
 

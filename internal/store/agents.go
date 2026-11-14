@@ -79,6 +79,66 @@ type TeamReference struct {
 	Name string
 }
 
+// ProviderReference names one registry document that references a model
+// provider instance, and the field inside it that carries the reference. It is
+// what a refused provider removal reports so the caller can offer "repoint that
+// agent/team first, or disable the provider instead".
+type ProviderReference struct {
+	// Kind is the referencing document's domain: "agent" or "team".
+	Kind string
+	// ID is the referencing document's identity.
+	ID string
+	// Name is the referencing document's display name ("" when it carries none).
+	Name string
+	// Field is the document field carrying the reference:
+	// "defaultModel" (an agent), "defaults.modelOverride" (a team's members'
+	// default binding) or "members[].inline.defaultModel" (an agent definition
+	// authored inside a team).
+	Field string
+}
+
+// ProvidersReferencingProvider lists the tenant's agents and teams that name
+// providerID in a model binding: an agent's defaultModel, a team's
+// defaults.modelOverride, or an inline member agent's defaultModel. It is the
+// read behind the provider registry's deletion protection, and like
+// TeamsReferencingAgent it answers a document query — the caller decides what a
+// reference means (an archived row still counts here: it is restorable).
+func (s *Store) ProvidersReferencingProvider(ctx context.Context, tenantID uuid.UUID, providerID string) ([]ProviderReference, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT 'agent', agent_id, COALESCE(document->>'name', ''), 'defaultModel'
+		   FROM agents
+		  WHERE tenant_id = $1 AND (document->'defaultModel'->>'providerId') = $2
+		 UNION ALL
+		 SELECT 'team', team_id, COALESCE(document->>'name', ''), 'defaults.modelOverride'
+		   FROM agent_teams
+		  WHERE tenant_id = $1 AND (document->'defaults'->'modelOverride'->>'providerId') = $2
+		 UNION ALL
+		 SELECT 'team', team_id, COALESCE(document->>'name', ''), 'members[].inline.defaultModel'
+		   FROM agent_teams team_row
+		  WHERE team_row.tenant_id = $1
+		    AND EXISTS (
+		      SELECT 1
+		      FROM jsonb_array_elements(
+		        CASE WHEN jsonb_typeof(team_row.document->'members') = 'array'
+		             THEN team_row.document->'members' ELSE '[]'::jsonb END) AS member
+		      WHERE (member->'inline'->'defaultModel'->>'providerId') = $2
+		    )
+		 ORDER BY 1, 2`, tenantID, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("store: providers referencing provider: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ProviderReference, 0)
+	for rows.Next() {
+		var reference ProviderReference
+		if err := rows.Scan(&reference.Kind, &reference.ID, &reference.Name, &reference.Field); err != nil {
+			return nil, fmt.Errorf("store: scan provider reference: %w", err)
+		}
+		out = append(out, reference)
+	}
+	return out, rows.Err()
+}
+
 // CreateAgent inserts a new agent row. created=false means the id already
 // exists for this tenant and nothing was written: a create never silently
 // overwrites a stored agent.

@@ -87,6 +87,10 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 			"model providers",
 			"model list",
 			"model show",
+			"model provider add",
+			"model provider update",
+			"model provider remove",
+			"model provider test",
 		},
 		AgentPluginID: {
 			"agent list",
@@ -152,6 +156,38 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 		if !byKey[key].Idempotent {
 			t.Fatalf("%s must be declared idempotent", key)
 		}
+	}
+
+	// The model plugin's provider write subset declares its risk classes the
+	// same way: a removal is destructive and stays out of every agent face, an
+	// edit is a retryable write, and the probe is read-only (it reads the
+	// server's resolution and never calls upstream).
+	model, _ := builtin.Manifest(ModelPluginID)
+	modelByKey := map[string]pluginpkg.CLICapability{}
+	for _, capability := range model.Provides.CLI {
+		modelByKey[capability.Key()] = capability
+	}
+	if modelByKey["model provider remove"].Danger != pluginpkg.DangerDestructive {
+		t.Fatalf("model provider remove danger = %s, want destructive", modelByKey["model provider remove"].Danger)
+	}
+	if modelByKey["model provider remove"].CallableByCaller(pluginpkg.CallerAgent) ||
+		modelByKey["model provider remove"].CallableByCaller(pluginpkg.CallerTeamCaptain) {
+		t.Fatal("model provider remove must not be callable by an agent or a team captain")
+	}
+	for _, key := range []string{"model provider add", "model provider update"} {
+		if modelByKey[key].Danger != pluginpkg.DangerWrite {
+			t.Fatalf("%s danger = %s, want write", key, modelByKey[key].Danger)
+		}
+	}
+	if !modelByKey["model provider update"].Idempotent || !modelByKey["model provider test"].Idempotent {
+		t.Fatal("model provider update/test must be declared idempotent")
+	}
+	if modelByKey["model provider test"].Danger != pluginpkg.DangerRead {
+		t.Fatalf("model provider test danger = %s, want read (it reads the server's resolution)", modelByKey["model provider test"].Danger)
+	}
+	if !modelByKey["model provider add"].CallableByCaller(pluginpkg.CallerUI) ||
+		!modelByKey["model provider test"].CallableByCaller(pluginpkg.CallerAgent) {
+		t.Fatal("model provider add/test must stay callable by the declared faces")
 	}
 }
 

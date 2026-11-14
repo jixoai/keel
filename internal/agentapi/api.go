@@ -126,6 +126,11 @@ type Config struct {
 	// be live; either nil answers 501.
 	ModelSettingsStore   ModelSettingsStore
 	ModelSettingsRuntime ModelSettingsRuntime
+	// ProviderReferences is the registry read behind provider deletion
+	// protection: the agents/teams whose model bindings name a provider the
+	// write would remove. Nil skips the check (a deployment without the
+	// agent/team registry).
+	ProviderReferences ProviderReferences
 	// SecretStore is the tenant secret storage (GET/PUT/DELETE
 	// /v1/settings/secrets). Nil means this deployment has no secret storage:
 	// the list reports unavailable with SecretStoreReason and writes answer 503.
@@ -137,6 +142,11 @@ type Config struct {
 	// product endpoint writes to it (a decision opened on a missing session
 	// would be an orphan row). Nil skips the check (tests without a store).
 	SessionExists func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error)
+	// ArchiveSession backs DELETE /v1/sessions/{id}: a soft delete that takes
+	// the session out of the list while its event ledger stays (usage/audit
+	// truth is never deleted). It reports false for a missing or foreign
+	// session, which the route answers 404. Nil answers 503.
+	ArchiveSession func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error)
 	// RunStatus optionally overrides the durable run status (a cancelled run
 	// settles as failed in the kernel policy table; the product snapshot
 	// remembers the cancellation).
@@ -189,6 +199,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/models", s.listModels)
 	s.settingsRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions", s.openDecision)

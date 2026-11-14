@@ -300,3 +300,84 @@ func TestTeamRecordsCRUDRevisionGuardAndReferences(t *testing.T) {
 		t.Fatalf("get after delete: found=%v err=%v", found, err)
 	}
 }
+
+// TestProvidersReferencingProvider pins the query behind the provider
+// registry's deletion protection: an agent's defaultModel, a team's
+// defaults.modelOverride and an inline member agent's defaultModel are the
+// three bindings that name a provider; a team whose members reference agents
+// from the library, or one naming a different provider, does not count.
+func TestProvidersReferencingProvider(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	t.Cleanup(func() {
+		_, _ = st.DeleteAgent(ctx, tenant, "agent_ref_provider")
+		_, _ = st.DeleteTeam(ctx, tenant, "team_ref_provider")
+		_, _ = st.DeleteTeam(ctx, tenant, "team_inline_provider")
+	})
+
+	agentDocument, _ := json.Marshal(map[string]any{
+		"id": "agent_ref_provider", "name": "provider referrer",
+		"defaultModel": map[string]any{"providerId": "prov_ref", "modelId": "m1"},
+	})
+	if _, err := st.CreateAgent(ctx, AgentRecord{TenantID: tenant, ID: "agent_ref_provider", Document: agentDocument}); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	teamDocument, _ := json.Marshal(map[string]any{
+		"id": "team_ref_provider", "name": "team referrer",
+		"captain": map[string]any{"agentId": "agent_ref_provider"},
+		"defaults": map[string]any{
+			"modelOverride": map[string]any{"providerId": "prov_ref", "modelId": "m2"},
+		},
+	})
+	if _, err := st.CreateTeam(ctx, TeamRecord{
+		TenantID: tenant, ID: "team_ref_provider", Revision: 1, ContentHash: "hash-team_ref_provider", Document: teamDocument,
+	}); err != nil {
+		t.Fatalf("insert team: %v", err)
+	}
+	inlineDocument, _ := json.Marshal(map[string]any{
+		"id": "team_inline_provider", "name": "inline referrer",
+		"captain": map[string]any{"agentId": "agent_inline"},
+		"members": []any{map[string]any{
+			"agentId": "agent_inline",
+			"inline": map[string]any{
+				"id": "agent_inline", "name": "inline agent",
+				"defaultModel": map[string]any{"providerId": "prov_ref", "modelId": "m3"},
+			},
+		}},
+	})
+	if _, err := st.CreateTeam(ctx, TeamRecord{
+		TenantID: tenant, ID: "team_inline_provider", Revision: 1, ContentHash: "hash-team_inline_provider", Document: inlineDocument,
+	}); err != nil {
+		t.Fatalf("insert inline team: %v", err)
+	}
+
+	references, err := st.ProvidersReferencingProvider(ctx, tenant, "prov_ref")
+	if err != nil {
+		t.Fatalf("references: %v", err)
+	}
+	if len(references) != 3 {
+		t.Fatalf("references = %+v, want 3", references)
+	}
+	byKey := map[string]ProviderReference{}
+	for _, reference := range references {
+		byKey[reference.Kind+"/"+reference.ID] = reference
+	}
+	if got := byKey["agent/agent_ref_provider"]; got.Field != "defaultModel" || got.Name != "provider referrer" {
+		t.Fatalf("agent reference = %+v", got)
+	}
+	if got := byKey["team/team_ref_provider"]; got.Field != "defaults.modelOverride" || got.Name != "team referrer" {
+		t.Fatalf("team reference = %+v", got)
+	}
+	if got := byKey["team/team_inline_provider"]; got.Field != "members[].inline.defaultModel" {
+		t.Fatalf("inline reference = %+v", got)
+	}
+
+	// Another provider id (and a tenant without a row) answers nothing.
+	if other, err := st.ProvidersReferencingProvider(ctx, tenant, "prov_other"); err != nil || len(other) != 0 {
+		t.Fatalf("references for an unrelated provider = %+v (%v)", other, err)
+	}
+	if none, err := st.ProvidersReferencingProvider(ctx, uuid.New(), "prov_ref"); err != nil || len(none) != 0 {
+		t.Fatalf("a foreign tenant must see nothing: %+v (%v)", none, err)
+	}
+}

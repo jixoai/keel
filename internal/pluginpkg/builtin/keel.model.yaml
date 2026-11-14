@@ -1,7 +1,7 @@
 id: keel.model
 version: 1.0.0
 kind: in-process
-description: "Model registry plugin: reads the configured providers and their models (families, session surfaces, selectability) through the same resolved projection the settings page serves."
+description: "Model registry plugin: reads the configured providers and their models (families, session surfaces, selectability) through the same resolved projection the settings page serves, and edits the tenant models document's provider entries through its one write path."
 engines:
   keel: ">=0.1.0 <1.0.0"
 provides:
@@ -89,5 +89,122 @@ provides:
       idempotent: true
       callable_by: [ui, agent]
       examples: ["keel model show s2api/deepseek-v4.1-flash"]
+    - path: [model, provider, add]
+      summary: "Declare a provider entry in the tenant models document."
+      description: "Declares one provider entry (id, name, family, api.type/baseUrl/headers, access.env or access.ref, modelIds, visibility) in the tenant models document and writes it with the revision guard (PUT /v1/settings/models). Credentials are references only (an env var name or a secret reference); the command neither accepts nor prints a value. The server's validation is the only authority on the resulting configuration: a rejected write prints its field-level issues and nothing is stored."
+      args_schema:
+        type: object
+        properties:
+          id:
+            type: string
+            description: "provider id (the entry's identity)"
+          name: { type: string }
+          type:
+            type: string
+            description: "provider family (llm, image, tts, ...; plugin-declared, open vocabulary)"
+          api_type:
+            type: string
+            description: "wire API (openai-chat-completions, openai-responses, anthropic-messages)"
+          base_url: { type: string }
+          env:
+            type: string
+            description: "credential env var NAME (a reference, never a value)"
+          ref: { type: string }
+          model: { type: array, items: { type: string } }
+          header: { type: array, items: { type: string } }
+          visibility: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          revision: { type: integer }
+          providersExecutable: { type: integer }
+          modelsSelectable: { type: integer }
+        required: [revision]
+      permissions: [model.write]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel model provider add magpie --type llm --base-url https://magpie.example.test/v1 --env MAGPIE_API_KEY --model m1"]
+    - path: [model, provider, update]
+      summary: "Edit one provider entry (or start a patch of a catalog provider)."
+      description: "Read-modify-write of the tenant models document: only the flags passed are applied to the named entry, and everything else — including the fields this CLI does not edit — is sent back verbatim under the revision it was read at. A provider the document does not declare yet (a built-in catalog entry) gets a patch entry of the same id, the documented incremental-adoption path. The same values repeated produce the same document, so a retry is safe."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          type: { type: string }
+          api_type: { type: string }
+          base_url: { type: string }
+          env: { type: string }
+          ref: { type: string }
+          model: { type: array, items: { type: string } }
+          header: { type: array, items: { type: string } }
+          visibility: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          revision: { type: integer }
+          providersExecutable: { type: integer }
+          modelsSelectable: { type: integer }
+        required: [revision]
+      permissions: [model.write]
+      danger: write
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model provider update magpie --visibility hidden", "keel model provider update s2api --model deepseek-v4.1-flash"]
+    - path: [model, provider, remove]
+      summary: "Drop one provider entry the document declares (reference protected)."
+      description: "Removes one providers[] entry the tenant models document declares and writes the document with the revision guard. A provider an agent or a team still binds is refused with 409 provider_in_use and the referring registry rows (id/name/field), so a binding is never silently orphaned: repoint those bindings, or disable the provider instead. When the document's own default selection names the provider, --repoint-selection must name its replacement (the command never guesses one). The built-in catalog's own providers cannot be removed this way and the command says so; the entry's values simply stop applying when it is gone. Destructive, so only the human face may call it."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          repoint_selection:
+            type: string
+            description: "\"providerId/modelId\" the document's default selection moves to; required when the selection names the removed provider"
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          removed: { type: string }
+          revision: { type: integer }
+          stillServedByCatalog: { type: boolean }
+        required: [removed]
+      permissions: [model.write]
+      danger: destructive
+      idempotent: false
+      callable_by: [ui]
+      examples: ["keel model provider remove magpie"]
+    - path: [model, provider, test]
+      summary: "Probe one provider's resolved state: executable, models, issues."
+      description: "Reads the server's own resolved projections (GET /v1/providers and GET /v1/models) and reports the provider's family, executable/selectable state, its issues and every model it serves with that model's enabled/executable/selectable state. It never calls the upstream provider: no request leaves the server for a probe, so it costs nothing and is safe to repeat. Exit status is 0 only when the provider is executable with an enabled, executable model."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          providerId: { type: string }
+          providerType: { type: string }
+          executable: { type: boolean }
+          selectable: { type: boolean }
+          models: { type: array }
+          issues: { type: array }
+          ok: { type: boolean }
+        required: [providerId, ok]
+      permissions: [model.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model provider test s2api", "keel model provider test magpie --json"]
 source:
   type: builtin

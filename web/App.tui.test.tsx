@@ -160,7 +160,7 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   await app.waitFor("text:/触发结果/");
 
   // 插件页（独立路由 /plugins）：详情折叠里渲染 provides.cli 的能力树——
-  // 每条命令带风险徽标、可重试标记与可调用方，声明即所见。
+  // 每条命令带风险徽标、可重试标记、权限列表、可调用方与复制动作，声明即所见。
   await app.press("label:打开插件页");
   await app.waitFor("text:已装插件");
   await app.press("id:plugin-detail-demo.workflow");
@@ -171,7 +171,20 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   expect(app.texts()).toContain("只读");
   expect(app.texts()).toContain("可重试");
   expect(app.texts().join("\n")).toContain("可调用：人工 · Agent");
+  // 权限列表是 manifest 的 permissions 原样渲染（词汇开放，不做翻译）。
+  expect(app.texts().join("\n")).toContain("权限：workflow.write");
+  expect(app.texts().join("\n")).toContain("权限：workflow.read");
 
+  // 复制动作可达：按下去不崩，平台自己给出的结果（已复制 / 当前平台不支持）
+  // 就落在该命令行内，命令文字本身仍在屏幕上可选。
+  await app.press("label:复制命令 keel workflow plan");
+  await app.waitFor("text:/已复制到剪贴板|复制失败/");
+  // The platform's own answer decides which branch ran; when it said the copy
+  // happened, the command really is on the clipboard (the terminal host
+  // implements Clipboard.writeText).
+  if (app.texts().includes("已复制到剪贴板")) {
+    expect(app.clipboard()).toBe("keel workflow plan");
+  }
   // 返回工作区：工作区原样回来（会话列表仍在，原会话仍是打开状态——store 持有
   // activeId/engine，跨 shell 切换不丢；列表行回到会话即见到此前的内容）。
   await app.press("label:返回工作区");

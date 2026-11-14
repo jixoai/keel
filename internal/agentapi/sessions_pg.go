@@ -39,7 +39,9 @@ func NewPGSessionLister(st *store.Store) *PGSessionLister {
 // row, its run status, the last event time, and the title source — the text of
 // the session's first user.message, read with a lateral so the page never
 // degrades into a per-row query. Only the payload's "text" field is read: the
-// title must never pick up selection/attachments JSON.
+// title must never pick up selection/attachments JSON. Archived sessions
+// (deleted from the user's view by DELETE /v1/sessions/{id}) leave the list;
+// their ledger rows stay.
 const sessionSelect = `SELECT s.session_id, s.created_at, s.updated_at,
        GREATEST(s.next_seq - 1, 0) AS last_seq,
        COALESCE(r.status, '') AS run_status,
@@ -56,7 +58,8 @@ const sessionSelect = `SELECT s.session_id, s.created_at, s.updated_at,
         ORDER BY e.seq
         LIMIT 1
   ) first_input ON true
- WHERE s.tenant_id = $1`
+ WHERE s.tenant_id = $1
+   AND s.archived_at IS NULL`
 
 // ListSessionSummaries reads one page, newest activity first.
 func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uuid.UUID, limit int, after string) (SessionPage, error) {

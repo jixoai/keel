@@ -62,8 +62,10 @@ if [[ ! -f "$PERSONAL" ]]; then
   exit 1
 fi
 
-# Read only the KEEL_* assignments. The env file is shared with other tools and
-# may contain prose or non-shell lines; executing it wholesale would run them.
+# Read only KEY-shaped assignments (KEEL_* plus provider credential keys like
+# S2API_KEY / DEEPSEEK_API_KEY — the shape the builtin catalog declares in
+# `access.env`). The env file is shared with other tools and may contain prose
+# or non-shell lines; executing it wholesale would run them.
 while IFS= read -r line; do
   key="${line%%=*}"
   value="${line#*=}"
@@ -71,7 +73,7 @@ while IFS= read -r line; do
   value="${value%\"}"; value="${value#\"}"
   value="${value%\'}"; value="${value#\'}"
   export "$key=$value"
-done < <(grep -E '^KEEL_[A-Z0-9_]+=' "$PERSONAL")
+done < <(grep -E '^(KEEL_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_KEY)=' "$PERSONAL")
 
 : "${KEEL_SERVE_PASSWORD:?KEEL_SERVE_PASSWORD is not set in $PERSONAL}"
 : "${KEEL_SERVE_TENANT:?KEEL_SERVE_TENANT is not set in $PERSONAL}"

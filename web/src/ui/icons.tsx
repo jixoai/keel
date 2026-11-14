@@ -39,7 +39,8 @@ export type IconName =
   | "key"
   | "keyboard"
   | "info"
-  | "play";
+  | "play"
+  | "copy";
 
 const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   plus: ["M5 12h14", "M12 5v14"],
@@ -95,6 +96,8 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   ],
   info: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5", "M12 8h.01"],
   play: ["M6 3l14 9-14 9V3z"],
+  // lucide's `copy`: the sheet copied from (behind) and the copy (in front).
+  copy: ["M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", "M8 8h14v14H8z"],
 };
 
 export function Icon(props: { name: IconName; size?: number; tint: string }) {

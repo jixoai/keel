@@ -1,6 +1,7 @@
 package agentapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -91,5 +92,48 @@ func TestSessionListRowCarriesTitleAndCreatedAt(t *testing.T) {
 		if i == 1 && titleText != "" {
 			t.Fatalf("row 1 title = %q, want the empty string to be emitted", titleText)
 		}
+	}
+}
+
+// TestArchiveSessionRoute pins DELETE /v1/sessions/{id} (change
+// fix-session-delete-soft-archive): 200 + archived:true for an existing
+// session, an idempotent repeat, 404 for a missing or foreign session, and 503
+// when the deployment wired no archive seam. The web client has always called
+// this route; before the change the server had no such pattern at all.
+func TestArchiveSessionRoute(t *testing.T) {
+	tenant := uuid.New()
+	existing := uuid.New()
+	calls := 0
+	archive := func(_ context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
+		calls++
+		return tenantID == tenant && sessionID == existing, nil
+	}
+	server := httptest.NewServer(New(Config{ArchiveSession: archive, Logger: testLogger()}))
+	defer server.Close()
+
+	var body map[string]any
+	if code := doJSON(t, server.Client(), http.MethodDelete, server.URL+"/v1/sessions/"+existing.String(), tenant, nil, &body); code != 200 {
+		t.Fatalf("delete: %d", code)
+	}
+	if body["archived"] != true || body["sessionId"] != existing.String() {
+		t.Fatalf("body = %v", body)
+	}
+	if code := doJSON(t, server.Client(), http.MethodDelete, server.URL+"/v1/sessions/"+existing.String(), tenant, nil, &body); code != 200 {
+		t.Fatalf("repeat delete must be idempotent: %d", code)
+	}
+	if code := doJSON(t, server.Client(), http.MethodDelete, server.URL+"/v1/sessions/"+uuid.NewString(), tenant, nil, &body); code != 404 {
+		t.Fatalf("missing delete: %d", code)
+	}
+	if calls != 3 {
+		t.Fatalf("archive calls = %d, want 3", calls)
+	}
+}
+
+func TestArchiveSessionNotWired(t *testing.T) {
+	server := httptest.NewServer(New(Config{Logger: testLogger()}))
+	defer server.Close()
+	var body map[string]any
+	if code := doJSON(t, server.Client(), http.MethodDelete, server.URL+"/v1/sessions/"+uuid.NewString(), uuid.New(), nil, &body); code != 503 {
+		t.Fatalf("unwired delete: %d", code)
 	}
 }

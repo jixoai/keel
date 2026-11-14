@@ -449,14 +449,20 @@ func (r *Runtime) DeploymentModels() json.RawMessage {
 }
 
 // ModelsCandidate is a validated candidate models document: the default
-// selection the next generation would execute, and how many providers/models
-// this process could actually serve under it. It is the write path's summary —
-// derived from the same resolution the generation would run, never from a
-// second parse.
+// selection the next generation would execute, how many providers/models this
+// process could actually serve under it, and which providers it serves. It is
+// the write path's summary — derived from the same resolution the generation
+// would run, never from a second parse.
 type ModelsCandidate struct {
 	Selection           modelcfg.Selection
 	ProvidersExecutable int
 	ModelsSelectable    int
+	// ProviderIDs is the id of every provider the candidate resolves to (the
+	// projection GET /v1/providers serves), in resolution order. A provider id
+	// missing here is not served by the candidate at all, which is how the
+	// write path tells "the document stopped declaring it AND it is gone" from
+	// "the built-in catalog still ships it".
+	ProviderIDs []string
 }
 
 // ValidateModelsDocument resolves a candidate models document exactly as the
@@ -502,7 +508,19 @@ func (r *Runtime) ValidateModelsDocument(document json.RawMessage) (ModelsCandid
 		},
 		ProvidersExecutable: service.ProvidersExecutable(),
 		ModelsSelectable:    service.ModelsSelectable(),
+		ProviderIDs:         service.providerIDs(),
 	}, nil, nil
+}
+
+// providerIDs returns the ids of the providers the current resolution serves,
+// in resolution order (the same order GET /v1/providers renders).
+func (m *modelsService) providerIDs() []string {
+	views := m.ProviderViews()
+	ids := make([]string, 0, len(views))
+	for _, view := range views {
+		ids = append(ids, view.ProviderID)
+	}
+	return ids
 }
 
 // ApplyModels reassembles the runtime with the tenant's models section replaced

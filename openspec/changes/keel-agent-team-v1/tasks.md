@@ -29,9 +29,13 @@
 
 - [x] `provider_types` / provider 实例 / 模型目录 / 参数 schema / 健康检查（沿用原设计）
 - [ ] CLI：`keel model provider list|show|add|update|remove|test`、`keel model catalog`
-      （已交付只读子集：`keel model providers|list|show`；写命令未做）
+      （已交付：只读子集 `keel model providers|list|show` + **写子集 `keel model provider add|update|remove`
+      （整文档读-改-写，PUT /v1/settings/models，revision 守卫）与只读探测 `keel model provider test`**；
+      未做：`model provider list|show`（读面已在 `model providers`/`model show`）、`model catalog`）
 - [x] CLI 与 UI 共用 schema/租户边界；凭据只接受引用
-- [ ] Provider 删除保护：被 Agent/Team 引用时拒绝并列出引用方
+- [x] Provider 删除保护：被 Agent/Team 引用时拒绝并列出引用方
+      （写路径 409 provider_in_use + references（agent.defaultModel / team.defaults.modelOverride /
+      inline member defaultModel）；真库实证；未被引用时按文档条目移除，"禁用"（visibility hidden）仍可行）
 - [x] 能力树声明 model CLI 子命令（声明 == 已实现子集，双向由测试锁死）
 
 ## P2 Agent 插件（agent-plugin）
@@ -76,7 +80,9 @@
 - [ ] Agent 卡片、Agent 编辑器、头像生成、工具注册源选择器、AGENTS.md 编辑器（AGENTS.md 文件引用编辑未做）
 - [ ] 团队卡片、团队画布、captain 槽、成员库/新建 Agent、Team CLI 能力面板
 - [x] 会话启动模式选择（Standard/Team）、团队选择器、缺 captain 阻塞态
-- [ ] 插件能力树 UI（命令/子命令/描述/权限/danger/callable_by/复制）（权限列表与复制未做）
+- [x] 插件能力树 UI（命令/子命令/描述/权限/danger/callable_by/复制）
+      （权限列表与复制动作已补：plugins.tsx 的 CliCapabilityRow 渲染 manifest 的 permissions 原样，
+      复制走 Clipboard.writeText 并把平台结果回显在行内；TUI 断言含真剪贴板回读）
 - [ ] 五态（空/加载/错误/权限不足/成功）、390px 单列、键盘可达
 - [x] shadcn 官方组件 + solid-glass；禁止手写仿制
 - [x] 组件画廊先行；组合页面后验收

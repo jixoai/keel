@@ -353,7 +353,20 @@ func reportError(stderr io.Writer, err error) int {
 		for _, reference := range refusal.References {
 			id, _ := reference["id"].(string)
 			name, _ := reference["name"].(string)
-			fmt.Fprintf(stderr, "  referencing team: %s %s\n", id, name)
+			// The registry's original refusal (agent_in_use) named teams only;
+			// newer ones (provider_in_use) carry the domain and the field. An
+			// absent kind keeps the original wording, so old refusals render
+			// exactly as before.
+			kind, _ := reference["kind"].(string)
+			if strings.TrimSpace(kind) == "" {
+				kind = "team"
+			}
+			field, _ := reference["field"].(string)
+			if strings.TrimSpace(field) != "" {
+				fmt.Fprintf(stderr, "  referencing %s: %s %s (field %s)\n", kind, id, name, field)
+				continue
+			}
+			fmt.Fprintf(stderr, "  referencing %s: %s %s\n", kind, id, name)
 		}
 	}
 	return 1

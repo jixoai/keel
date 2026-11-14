@@ -266,6 +266,33 @@ func (s *Store) CreateSession(ctx context.Context, tenantID, sessionID uuid.UUID
 	return nil
 }
 
+// ArchiveSession marks a session archived (the soft delete behind DELETE
+// /v1/sessions/{id}). The event ledger is never touched: events, runs and
+// usage rows stay — the ledger is the metering and audit truth. The result
+// reports whether the session exists in this tenant, so a foreign or missing
+// id is a 404 rather than a silent success. Idempotent: archiving an
+// already-archived session reports true again.
+func (s *Store) ArchiveSession(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE sessions SET archived_at = now()
+		  WHERE tenant_id = $1 AND session_id = $2 AND archived_at IS NULL`, tenantID, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("store: archive session: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	// No row updated: the session is either already archived or absent. The
+	// caller needs existence, not change, so ask that question directly.
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM sessions WHERE tenant_id = $1 AND session_id = $2)`,
+		tenantID, sessionID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: archive session: %w", err)
+	}
+	return exists, nil
+}
+
 // Event is one committed fact.
 type Event struct {
 	Seq     int64           `json:"seq"`

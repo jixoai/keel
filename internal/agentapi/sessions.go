@@ -122,6 +122,36 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// archiveSession implements DELETE /v1/sessions/{id}: a soft delete. The
+// session leaves the list; every event, run and usage row stays — the ledger
+// is the metering and audit truth and a product call never deletes it.
+// Idempotent: deleting an existing (already archived) session succeeds again;
+// a missing or foreign session is a 404, never a silent success.
+func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFrom(w, r)
+	if !ok {
+		return
+	}
+	sessionID, ok := sessionFrom(w, r)
+	if !ok {
+		return
+	}
+	if s.cfg.ArchiveSession == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("session archiving is not wired"))
+		return
+	}
+	found, err := s.cfg.ArchiveSession(r.Context(), tenantID, sessionID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, errors.New("session not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessionId": sessionID.String(), "archived": true})
+}
+
 // cancelSession implements POST /v1/sessions/{id}/cancel. It is idempotent: a
 // repeated call reports the same terminal state, never a second cancellation.
 func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {

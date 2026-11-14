@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,12 +81,46 @@ type ModelSettingsRuntime interface {
 }
 
 // ModelCandidate is the validated summary the PUT response publishes: the
-// default selection the next generation would execute, and how many providers
-// and models this process could actually serve.
+// default selection the next generation would execute, how many providers and
+// models this process could actually serve, and the provider ids that
+// generation serves (the write path's deletion protection compares them with
+// what is serving now).
 type ModelCandidate struct {
 	Selection           modelcfg.Selection
 	ProvidersExecutable int
 	ModelsSelectable    int
+	// ProviderIDs are the ids of every provider the candidate resolves to (the
+	// projection GET /v1/providers would serve), in resolution order. A provider
+	// missing here is not served by the candidate at all — which is the fact the
+	// removal protection needs.
+	ProviderIDs []string
+}
+
+// ProviderReferences is the registry read behind provider deletion protection:
+// which agents and teams name a provider instance in a model binding. It is the
+// store package's query verbatim, so *store.Store satisfies it without an
+// adapter; the implementation lives in the hosting process, so this package
+// never depends on the agent/team domain. Nil skips the protection (a
+// deployment without the registry surface).
+type ProviderReferences interface {
+	ProvidersReferencingProvider(ctx context.Context, tenantID uuid.UUID, providerID string) ([]store.ProviderReference, error)
+}
+
+// ProviderReference is one registry document referencing a provider instance,
+// as the refusal publishes it: id/name first (what a person acts on), the
+// referencing domain and the field path carrying the reference.
+type ProviderReference struct {
+	// ProviderID is the provider the document references.
+	ProviderID string `json:"providerId"`
+	// Kind is the referencing domain: "agent" or "team".
+	Kind string `json:"kind"`
+	// ID is the referencing document's identity.
+	ID string `json:"id"`
+	// Name is the referencing document's display name ("" when it carries none).
+	Name string `json:"name,omitempty"`
+	// Field is the document field carrying the reference ("defaultModel",
+	// "defaults.modelOverride", ...).
+	Field string `json:"field"`
 }
 
 // SecretStore is the tenant secret storage seam (PUT/GET/DELETE
@@ -260,9 +295,10 @@ type settingsWriteResult struct {
 
 // applyModelSettings is the PUT composition: validate through the runtime's own
 // construction (so a stored document can never be one an attempt would deny),
-// persist, then apply. A write the runtime refuses to assemble is compensated —
-// the store returns to its previous state — so the stored override never lies
-// about what is serving, and the client gets the reload error.
+// refuse a write that would remove a referenced provider, persist, then apply.
+// A write the runtime refuses to assemble is compensated — the store returns to
+// its previous state — so the stored override never lies about what is serving,
+// and the client gets the reload error.
 func (s *Server) applyModelSettings(ctx context.Context, tenantID uuid.UUID, expectedRevision int64, document json.RawMessage) (settingsWriteResult, error) {
 	runtime := s.cfg.ModelSettingsRuntime
 	candidate, issues, err := runtime.ValidateModelsDocument(document)
@@ -271,6 +307,9 @@ func (s *Server) applyModelSettings(ctx context.Context, tenantID uuid.UUID, exp
 	}
 	if len(issues) > 0 {
 		return settingsWriteResult{}, &settingsValidationError{issues: issues}
+	}
+	if err := s.protectReferencedProviders(ctx, tenantID, document, candidate); err != nil {
+		return settingsWriteResult{}, err
 	}
 	previous, _, _, hadOverride, err := s.cfg.ModelSettingsStore.GetModelSettings(ctx, tenantID)
 	if err != nil {
@@ -285,6 +324,112 @@ func (s *Server) applyModelSettings(ctx context.Context, tenantID uuid.UUID, exp
 		return settingsWriteResult{}, &settingsReloadError{err: err}
 	}
 	return settingsWriteResult{revision: revision, candidate: candidate}, nil
+}
+
+// protectReferencedProviders is the provider registry's deletion protection on
+// this surface (specs/provider-registry: a provider referenced by an agent or a
+// team is not hard-deleted; the refusal names the referrers). The models
+// document is the only provider write path this deployment serves, so "removing
+// a provider" here means "an entry the serving document declares, the candidate
+// no longer declares, and the candidate no longer resolves" — there is
+// deliberately no way to delete a built-in catalog provider by omitting it (the
+// catalog still ships it), so omitting one that stays resolvable is not a
+// removal and is not refused. A referenced provider that would really
+// disappear is refused with the referrers, and the operator can disable it
+// (status/visibility) instead.
+func (s *Server) protectReferencedProviders(ctx context.Context, tenantID uuid.UUID, candidate json.RawMessage, summary ModelCandidate) error {
+	if s.cfg.ProviderReferences == nil {
+		return nil
+	}
+	serving, err := s.effectiveModelsDocument(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	stillServed := make(map[string]struct{}, len(summary.ProviderIDs))
+	for _, id := range summary.ProviderIDs {
+		stillServed[id] = struct{}{}
+	}
+	candidateDeclares := declaredProviderIDs(candidate)
+	removed := make([]string, 0)
+	for id := range declaredProviderIDs(serving) {
+		if _, served := stillServed[id]; served {
+			continue
+		}
+		if _, declared := candidateDeclares[id]; declared {
+			continue
+		}
+		removed = append(removed, id)
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	sort.Strings(removed)
+	references := make([]ProviderReference, 0)
+	for _, providerID := range removed {
+		found, err := s.cfg.ProviderReferences.ProvidersReferencingProvider(ctx, tenantID, providerID)
+		if err != nil {
+			return err
+		}
+		for _, reference := range found {
+			references = append(references, ProviderReference{
+				ProviderID: providerID,
+				Kind:       reference.Kind,
+				ID:         reference.ID,
+				Name:       reference.Name,
+				Field:      reference.Field,
+			})
+		}
+	}
+	if len(references) == 0 {
+		return nil
+	}
+	return &settingsProviderInUseError{references: references}
+}
+
+// declaredProviderIDs indexes a models document's own providers[] entries by
+// id. A document that declares none (or is not an object) answers an empty
+// index — the candidate's resolvability, not this function, decides what is
+// really served.
+func declaredProviderIDs(document json.RawMessage) map[string]string {
+	index := map[string]string{}
+	trimmed := bytes.TrimSpace(document)
+	if len(trimmed) == 0 {
+		return index
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil || fields == nil {
+		return index
+	}
+	var entries []struct {
+		ID string `json:"id"`
+	}
+	if raw, ok := fields["providers"]; ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return index
+		}
+	}
+	for _, entry := range entries {
+		if id := strings.TrimSpace(entry.ID); id != "" {
+			index[id] = id
+		}
+	}
+	return index
+}
+
+// effectiveModelsDocument is the document serving right now, exactly the one
+// GET /v1/settings/models reports: the stored override when it is in effect,
+// the deployment document otherwise (including a stored override this process
+// refused at boot).
+func (s *Server) effectiveModelsDocument(ctx context.Context, tenantID uuid.UUID) (json.RawMessage, error) {
+	document, _, _, found, err := s.cfg.ModelSettingsStore.GetModelSettings(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	_, _, rejected := s.cfg.ModelSettingsRuntime.RejectedModelsOverride()
+	if found && !rejected {
+		return document, nil
+	}
+	return s.cfg.ModelSettingsRuntime.DeploymentModels(), nil
 }
 
 // rollbackModelSettings restores the stored state a rejected write replaced:
@@ -397,6 +542,32 @@ func (e *settingsReloadError) Error() string {
 }
 func (e *settingsReloadError) Unwrap() error { return e.err }
 
+// settingsProviderInUseError is a refused provider removal: the write would
+// drop providers that registry documents still reference. It carries the
+// referrers verbatim, so the caller can offer "repoint that agent/team first,
+// or disable the provider instead" without parsing prose.
+type settingsProviderInUseError struct{ references []ProviderReference }
+
+func (e *settingsProviderInUseError) Error() string {
+	providers := make([]string, 0, len(e.references))
+	seen := map[string]bool{}
+	names := make([]string, 0, len(e.references))
+	for _, reference := range e.references {
+		if !seen[reference.ProviderID] {
+			seen[reference.ProviderID] = true
+			providers = append(providers, reference.ProviderID)
+		}
+		name := reference.ID
+		if reference.Name != "" {
+			name = reference.ID + " " + reference.Name
+		}
+		names = append(names, fmt.Sprintf("%s %s (field %s)", reference.Kind, name, reference.Field))
+	}
+	return fmt.Sprintf(
+		"provider %s is referenced by %s; repoint those bindings or disable the provider instead of removing it",
+		strings.Join(providers, ", "), strings.Join(names, "; "))
+}
+
 // writeSettingsError maps the write path's failures onto the wire: a rejected
 // document is 400 with its issues, a revision guard failure is 409 with the
 // revision that won, a document the runtime refuses to assemble is 422 (it
@@ -420,6 +591,33 @@ func (s *Server) writeSettingsError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":    err.Error(),
 			"revision": conflict.Current,
+		})
+		return
+	}
+	// A referenced provider is not removed: 409 with the registry shape the
+	// agent deletion refusal uses (code + references), plus the field paths a
+	// form highlights. See protectReferencedProviders for why "removed" is
+	// decided against what the candidate still resolves.
+	var inUse *settingsProviderInUseError
+	if errors.As(err, &inUse) {
+		fields := make([]map[string]any, 0, len(inUse.references))
+		seen := map[string]bool{}
+		for _, reference := range inUse.references {
+			if seen[reference.ProviderID] {
+				continue
+			}
+			seen[reference.ProviderID] = true
+			fields = append(fields, map[string]any{
+				"field":   "providers[" + reference.ProviderID + "]",
+				"code":    "provider_in_use",
+				"message": fmt.Sprintf("provider %s is still referenced by a registry document", reference.ProviderID),
+			})
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":      inUse.Error(),
+			"code":       "provider_in_use",
+			"fields":     fields,
+			"references": inUse.references,
 		})
 		return
 	}
