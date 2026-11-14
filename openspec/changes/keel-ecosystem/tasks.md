@@ -3,6 +3,10 @@
 > W1 契约内核、W2 服务图与 loadout、W3 PI loop 与 conformance 门、W4 handoff、
 > W5 外部网关、W6 集成与验收）。本板保留原文，仅作历史对照；后续以
 > `keel-service-graph` 为准，勿在此勾选。
+>
+> **2026-11-14 注**：service-graph 已归档（89/91，留 2 个已知缺口）；本板各条目的**实际去向**
+> （已由 service-graph 交付 / 成为孤儿项）正在做逐条对账，结果见
+> `docs/RESIDUAL-PLAN.md` 与对账产物；Owner 2026-11-14 的四条架构裁决同样记录在那里。
 
 # Tasks: keel-ecosystem
 

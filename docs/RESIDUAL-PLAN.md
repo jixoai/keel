@@ -27,7 +27,7 @@
 | keel-service-graph（已归档） | 89/91 | 归档时留 2 个**已知缺口**：DSH sidecar 参考适配器 pin、gateway 故障 scenario（crash-loop/大帧取消/stderr 洪泛） | 缺口并入 Wave 3/4 |
 | keel-tenancy-usage（已归档） | 29/29 | tenant-config / usage-ledger / provider-telemetry 全交付；**不含** api_keys/auth/RLS/配额 | 完成 |
 | keel-ga | 17/43 | 26 项，其中 tenancy 实为 5 真项（api_keys/auth/provisioning/RLS/带宽·存储配额）+ 2 核验项（用量字节、跨租户测试；token 用量账本已有）· provider-files 7 · blob-lifecycle 5 · agent-execution 2 · 验收 5 | **下一主战场** |
-| keel-ecosystem | 4/72 | 68：observability 7 · recoverability 9 · compaction 7 · skills 9 · hooks 6 · mcp 9 · PI 基座 5 · 收口 7 · **待 Owner 决策 6** | 中期主战场 |
+| keel-ecosystem | 4/72 | **冻结历史板**（同 runtime-foundation，勿勾选）；68 条的实际去向待对账：已由 service-graph 交付 / 成为孤儿项 | **处置中**（对账线） |
 | keel-harness-v2 | 0/142 | W12 插件补全 40 · W0 22 · W11 验收 13 · W1-W10 各 3-8（含大量已落地未勾） | **先对账** |
 
 ## 2. 去重归并（多 change 重复项只算一次）
@@ -63,6 +63,15 @@
 ### Wave 3 — 可观测/恢复/压缩（ecosystem P1）
 observability（run.finished 已存在→指标/日志字段补齐）→ recoverability（generation 幂等/task 状态机/checkpoint 回放/10min 混沌）→ compaction（事件+checkpoint 投影/手动压缩/token 账）
 
+### Wave 3.5 — MCP 标准对接（Owner 2026-11-14 追加：MCP Apps + MCP events）
+- **MCP Apps**（官方扩展 SEP-1865，`io.modelcontextprotocol/ui`）：keel 作为 host 渲染 `ui://` 应用——
+  工具元数据 `_meta.ui` 贯通 → 沙箱 iframe/WebView 托管 → `ui/initialize` 握手与
+  tool-input/tool-result 通知 → 出站 `tools/call`/`ui/message`/`ui/open-link`/`ui/update-model-context`。
+- **MCP events**（Transports 规范事件面：`notifications/*`、`subscriptions/listen`、2026-07-28 的
+  stateless/MRTR 语义）：通知分类映射（事件账本 vs 瞬态 UI）、`tools/list_changed` → 工具注册面热更新、
+  MRTR 与 decision/consent 对接、版本对齐。
+- 设计先行（change `feat-mcp-apps-events`），实现排 Wave 4 的 mcp 波（与 skills/hooks 同一注册面）。
+
 ### Wave 4 — 生态 P2/P3 + harness-v2 主力
 skills（加载/渐进披露/租户隔离/权限）→ hooks（事件对齐/命令钩子/审计）→ mcp（stdio/传输/命名空间/重连/鉴权）→ harness-v2 对账后剩余 W 波（W0 收尾、W6/W8/W9/W10/W12）
 
@@ -80,17 +89,22 @@ skills（加载/渐进披露/租户隔离/权限）→ hooks（事件对齐/命�
   （假上游断言 Bearer 命中，`run.finished=done`）。
 - `serve-local.sh` 同时支持 `*_KEY` env 透传（云端部署形态不受影响）。
 
-## 5. 待 Owner 决策（阻塞对应工作流）
+## 5. Owner 裁决（2026-11-14）
 
-| # | 决策 | 建议/影响 |
+**架构第一原则（Owner 原话提炼）**：「插件的本质，就是依赖。一切皆插件，本质就是在实现一套
+围绕依赖注入搭建起来的系统」——插件注册 = 功能模块注册；hooks / tools / providers / skills
+都是同一注册面上的能力，不是可选项。本计划据此排序：**先补注册面（plugin/DI 基座），再补能力**。
+
+| # | 裁决 | 落地含义 |
 |---|---|---|
-| 1 | Skill 是否允许携带可执行脚本 | 影响 skills 权限模型（Wave 4） |
-| 2 | MCP v1 是否包含 stdio | PI 默认支持，建议包含（影响进程管理） |
-| 3 | Hook 是否命令+决策两者都做 | 建议是 |
-| 4 | 可观测是否上 OTLP | 默认关，需要再开 |
-| 5 | 是否抽 `pkg/` 稳定 SDK | 影响对外 API 承诺 |
-| 6 | PI pin 升级策略（当前 `55a5c69`） | 跟上游节奏 |
-| 7 | 媒体适配器优先级（图/视/音/决策先做哪族） | Wave 2 内部排序 |
+| 1 | Skill 可执行脚本：**默认允许**（可选安全模式） | skills-plugin **依赖** bash-plugin；无 bash 则脚本不可运行（按能力缺失呈现），不在 skills 内造执行器 |
+| 2 | MCP v1 **含 stdio** | 与 PI 对齐；进程管理归 mcp 插件 |
+| 3 | Hooks **必须完备** | hooks 是插件暴露的能力、DI 架构的基础功能；「做不做」不是问题，「随插件一起完备」才是要求 |
+| 4 | 可观测 **全面支持 OTLP，默认关** | 配置开启；架构不留死路 |
+| 5 | 决策模型（decision 家族）**必须支持** | 主流标准模型之一，作为 provider 能力族一等公民，提前到 Wave 2 |
+| 6 | 稳定 SDK：暂不抽（主代理决策） | 内部 API 先行，GA 前再评估 |
+| 7 | PI pin：跟随上游（主代理决策） | 每次升级独立 change：pin + conformance + PI-PARITY |
+| 8 | 媒体适配器顺序（主代理决策） | 图 → 决策 → 音 → 视 |
 
 ## 6. 今日已到账（证据锚点）
 
