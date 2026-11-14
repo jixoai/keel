@@ -22,5 +22,7 @@
 
 - [x] 真库：4 个探针会话 DELETE → 200 archived:true；`GET /v1/sessions` 41→37、探针 0 残留；
       归档会话 `GET …/events` 仍可读；重复 DELETE → 200；未知 id → 404
+- [x] **UI 全路径**（浏览器 1440×900，真库）：行悬停 → 会话操作菜单 → 删除会话 → 确认框
+      「删除会话？」→ 删除 → 行消失、无失败提示（列表 37→36）——原「UI 删除恒 404」在用户视角闭环
 - [x] `go build ./...` OK；`gofmt -l` 空；`go test ./internal/store/... ./internal/agentapi/... ./cmd/keel/...` 全绿
-- [x] web 侧无需改动（客户端调用形态本已正确）；TUI 套件随本批提交前统一复跑
+- [x] web 侧无需改动（客户端调用形态本已正确）；TUI 套件随本批提交前统一复跑 106/106
