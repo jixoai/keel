@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/audio/speech",
+    "body": {
+      "model": "bailian-token-plan/tts-1",
+      "input": "hello",
+      "voice": "alloy"
+    }
+  },
+  "response": {
+    "status": 404,
+    "contentType": "application/json",
+    "body": {
+      "error": {
+        "code": null,
+        "message": "token-plan.cn-beijing.maas.aliyuncs.com: 404 Not Found: {\"code\":\"InvalidParameter\",\"message\":\"Model not exist.\",\"request_id\":\"<redacted-request-id>\"} — Bailian Token Plan may not serve this API",
+        "param": null,
+        "type": "not_found_error"
+      }
+    }
+  }
+}

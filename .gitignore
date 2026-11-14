@@ -4,3 +4,5 @@ vendor/
 /data/
 *.log
 .env
+.env.local
+.env.*.local

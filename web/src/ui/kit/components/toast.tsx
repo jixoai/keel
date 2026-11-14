@@ -32,6 +32,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Toast as NativeToast, ToastStack as NativeToastStack, type Anchor, type ToastTransitionStatus } from "nsh/base";
 import { color, radius, space, typeScale, weight, zIndex } from "../tokens";
+import { IconButton } from "./button";
 
 export type ToastTone = "default" | "success" | "warning" | "danger";
 
@@ -104,14 +105,14 @@ export function Toast(props: {
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           {props.action}
-          <Text
-            accessibilityLabel="关闭提示"
-            role="button"
-            onPress={props.onDismiss}
-            style={{ fontSize: typeScale.sm, color: color.mutedForeground, paddingHorizontal: space.xs }}
-          >
-            ×
-          </Text>
+          {/* A real button, not a `×` inside a `Text`: NSH's `Text` takes no
+              `focusable` / `focusStyle` / `hitSlop`, so the old control could
+              not join the tab order and drew no focus (2.4.7), and its glyph
+              was under 2.5.8's 24px target. The kit's smallest icon button is a
+              24px square with the ring every other control carries; the
+              accessible name stays "关闭提示", which is also the existing
+              test's selector. */}
+          <IconButton icon="x" size="sm" label="关闭提示" onPress={props.onDismiss} />
         </View>
       </View>
     </NativeToast>

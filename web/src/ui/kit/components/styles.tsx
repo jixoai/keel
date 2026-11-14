@@ -23,16 +23,37 @@ export const controlRadius = (size: ControlSize): number =>
 /** Horizontal padding of a control at each size. */
 export const controlPadding = (size: ControlSize): number => (size === "sm" ? space.md : size === "lg" ? space.lg : space.md);
 
-/** The keyboard focus ring (shadcn's `ring-2 ring-ring/35`). */
+/** The keyboard focus ring (shadcn's `ring-2 ring-ring/35`, at a contrast the
+ * WCAG non-text floor actually sees).
+ *
+ * `color.ring` is a translucent wash meant for a resting border: in the dark
+ * appearance it is `rgba(255,255,255,0.15)`, and multiplying it by `0.35` again
+ * left an effective alpha of 0.0525 — measured 1.14:1 against the background,
+ * where 1.4.11 asks for 3:1. The ring therefore derives from the foreground
+ * token at `0.65`: measured 5.78:1 on the dark background (5.44 on the panel,
+ * 4.96 on a popover) and 3.73:1 on the light background (3.66 panel, 3.80
+ * popover), so one value clears the floor on every surface a control sits on.
+ * The resting border keeps `color.ring` — only the ring's contrast changes. */
 export const focusRing = (): StyleProp<ViewStyle> => ({
   borderColor: color.ring,
-  boxShadow: `0 0 0 2px ${alpha(color.ring, 0.35)}`,
+  // An outline, not a box-shadow: the focus ring must survive the web target's
+  // style pipeline (a box-shadow set through `focusStyle` reached the element as
+  // `none` in the browser, so keyboard users saw no ring at all). The outline is
+  // a first-class style property on every platform and paints outside the border
+  // box, which is exactly the 2px halo the spec asks for.
+  outlineStyle: "solid",
+  outlineWidth: 2,
+  outlineColor: alpha(color.foreground, 0.65),
+  outlineOffset: 0,
 });
 
 /** The invalid/error ring (shadcn's `aria-invalid:ring-destructive/25`). */
 export const invalidRing = (): StyleProp<ViewStyle> => ({
   borderColor: color.destructive,
-  boxShadow: `0 0 0 2px ${alpha(color.destructive, 0.25)}`,
+  outlineStyle: "solid",
+  outlineWidth: 2,
+  outlineColor: alpha(color.destructive, 0.45),
+  outlineOffset: 0,
 });
 
 /** The shell of an input-like field (Input, Select trigger, Combobox). */
@@ -69,7 +90,7 @@ export const menuRow = (): StyleProp<ViewStyle> => ({
   flexDirection: "row",
   alignItems: "center",
   gap: space.md,
-  height: 28,
+  height: controlHeight("default"),
   paddingHorizontal: space.sm,
   borderRadius: radius.sm,
 });

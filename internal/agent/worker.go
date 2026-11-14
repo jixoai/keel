@@ -390,6 +390,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 			w.Logger.Warn("marshal run summary", "run_id", runID, "err", err)
 		} else if receipt, err := w.Committer.Commit(ctx, kernel.CommitRequest{
 			Scope: lease.Scope, Token: lease.Token, Kind: kernel.KindRunFinished, Payload: payload,
+			RunID: runID,
 		}); err != nil {
 			w.Logger.Warn("commit run summary", "run_id", runID, "err", err)
 		} else {

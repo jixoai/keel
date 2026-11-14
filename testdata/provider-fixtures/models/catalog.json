@@ -1,0 +1,2252 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "group/cheap-first",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/glm-5.3-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/glm-5.3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/deepseek-v4.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "group/deepseek-paid",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "group/gpt-6-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "group/gpt-6.1-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "group/gpt-6.1-terra",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-6.1-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-5.6-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-6-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "group/free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "group/deepseek-v4.1-flash-slow",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/deepseek-v4-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/glm-5.2",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/grok-4.7",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-5.6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/claude-haiku-5-5",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/hy3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/hy4-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/kimi-k2.7-code",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/kimi-k3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/mimo-v2.6-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/mimo-v2.6-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/minimax-m3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/minimax-m3.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/step-5-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/qwen3.8-max",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/qwen3.8-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/qwen3.7-plus",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/kimi-k3.1-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gemini-4-argon",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/glm-5-turbo",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/glm-5.3-flashx",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/deepseek-v4-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/deepseek-v4-flash-0731",
+      "type": "model"
+    },
+    {
+      "id": "auto/deepseek-v4-flash-vision-exp",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/deepseek-v4-pro-0813",
+      "type": "model"
+    },
+    {
+      "id": "auto/deepseek-v4.1-flash-1017",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      }
+    },
+    {
+      "id": "auto/gemini-3.8-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-5.6-terra",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/gpt-6-astra",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/minimax-h3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      }
+    },
+    {
+      "id": "auto/qwen3.7-max",
+      "type": "model"
+    },
+    {
+      "id": "auto/wan3.0-video",
+      "type": "model"
+    },
+    {
+      "id": "auto/hy4free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/hy4std",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "auto/auto",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "opencode-gaubee/deepseek-v4.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/deepseek-v4-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/glm-5.2",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/glm-5.3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/grok-4.7",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/muse-spark-1.2-contributor",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video",
+          "pdf",
+          "audio"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/muse-spark-1.3-contributor",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video",
+          "pdf",
+          "audio"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/glm-5.3-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/gpt-5.6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/gpt-6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/claude-haiku-5-5",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/hy3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/hy4-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/kimi-k2.7-code",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/kimi-k3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/mimo-v2.6-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/mimo-v2.6-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/minimax-m3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/minimax-m3.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/longcat-2.0",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/step-5-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/beam-free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/qwen3.8-max",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/qwen3.8-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/qwen3.7-plus",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/kimi-k3.1-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/iceman-contributor-free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/gemini-4-argon",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "opencode-gaubee/hy4",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opencode-gaubee/longcat-2.5-free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "comcode/deepseek/deepseek-v4-flash",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "comcode/z-ai/glm-5.3-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "apib/MiniMax-H3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "apib/MiniMax-H3-Max",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "zcode/GLM-5.3-Flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "zcode/GLM-5.2",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "zcode/GLM-5-Turbo",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "workbuddy/hy4free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/hy4std",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/auto",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/hy3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/hy3-x",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/deepseek-v4.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/glm-5.3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/glm-5.3-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/glm-5.2",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/kimi-k3-1",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/deepseek-v4-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/step-5-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/space-bunny",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/minimax-m3.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/kimi-k3.1-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/kimi-k2.8-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy/mimo-v2.6-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/max-model",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/hy4free",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/hy4std",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/default-model",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/hy3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/deepseek-v4.1-flash-sg",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-6-astra",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-6.1-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-6-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-5.6-sol",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-5.6-terra",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gpt-5.6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/grok-4.7",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/gemini-3.8-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/glm-5.3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/glm-5.3-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/kimi-k3.1-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/kimi-k3.1-pro-highspeed",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/kimi-k3",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "workbuddy-ai/minimax-m3.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "moxuna/deepseek-v4.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/qwen3.7-max",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/qwen3.7-plus",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/qwen3.6-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/glm-5.2",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/deepseek-v4-pro",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/deepseek-v4-flash-0731",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/qwen3.8-max",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/deepseek-v4-pro-0813",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/qwen3.8-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/deepseek-v4.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/glm-5.3",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/auto",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/wan3.0-video",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/deepseek-v4.1-flash-1017",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "bailian-token-plan/qwen4-max-preview",
+      "type": "model",
+      "native_endpoints": [
+        "/v1/chat/completions",
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opendesign/claude-haiku-5.5",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opendesign/deepseek-v4-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/deepseek-v4-flash-vision-exp",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/deepseek-v4-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/responses"
+      ]
+    },
+    {
+      "id": "opendesign/deepseek-v4.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/deepseek-v4.1-flash-eco",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/glm-5.3-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/messages"
+      ]
+    },
+    {
+      "id": "opendesign/glm-5.3-flashx",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/gpt-6-luna",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/hy4-preview",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/kimi-k2.7-code",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/mimo-v2.6-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/mimo-v2.6-pro",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    },
+    {
+      "id": "opendesign/minimax-m3.1-flash",
+      "type": "model",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "native_endpoints": [
+        "/v1/chat/completions"
+      ]
+    }
+  ]
+}

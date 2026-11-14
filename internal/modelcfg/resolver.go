@@ -38,18 +38,28 @@ func (r *Resolver) Resolve() Resolution {
 	return cloneResolution(r.resolution)
 }
 
-// Models returns the flat, selectable model list in stable catalog order.
+// Models returns the flat list of models a session could use, in stable
+// catalog order: every complete, enabled model of a complete provider. It is
+// wider than the picker: Selectable is the narrower fact (the model's family
+// also has a session surface a client can open), and a non-selectable entry
+// stays in this list so the settings view can show it with its issues. Callers
+// that offer a choice must filter on Selectable.
 func (r *Resolution) Models() []ModelView {
 	out := make([]ModelView, 0)
 	if r == nil {
 		return out
 	}
 	for i := range r.Providers {
-		for j := range r.Providers[i].Models {
-			model := r.Providers[i].Models[j]
-			if model.Selectable {
-				out = append(out, cloneModelView(model))
+		provider := r.Providers[i]
+		if provider.Visibility == VisibilityHidden || !provider.Executable {
+			continue
+		}
+		for j := range provider.Models {
+			model := provider.Models[j]
+			if !model.Executable || !model.Enabled {
+				continue
 			}
+			out = append(out, cloneModelView(model))
 		}
 	}
 	return out
@@ -110,14 +120,17 @@ func resolveProvider(provider ProviderConfig, doc document) ProviderView {
 	if visibility == "" {
 		visibility = VisibilityVisible
 	}
+	providerType, surfaceKind := providerSurface(provider)
 	modelIDs := resolveModelIDs(provider, doc.providerModelRules)
 	view := ProviderView{
-		ProviderID: provider.ID,
-		Name:       provider.Name,
-		Visibility: visibility,
-		API:        cloneAPI(provider.API),
-		Access:     provider.Access,
-		Models:     make([]ModelView, 0, len(modelIDs)),
+		ProviderID:   provider.ID,
+		Name:         provider.Name,
+		ProviderType: providerType,
+		SurfaceKind:  surfaceKind,
+		Visibility:   visibility,
+		API:          cloneAPI(provider.API),
+		Access:       provider.Access,
+		Models:       make([]ModelView, 0, len(modelIDs)),
 	}
 	issues, complete := providerIssues(provider, len(modelIDs))
 	view.Issues = issues
@@ -126,7 +139,14 @@ func resolveProvider(provider ProviderConfig, doc document) ProviderView {
 	anySelectable := false
 	for _, modelID := range modelIDs {
 		model := resolveModel(provider, modelID, doc)
-		model.Selectable = model.Executable && model.Enabled && complete && visibility != VisibilityHidden
+		// Selectable means "can be chosen as a session model in the picker", so
+		// it additionally requires a family a client has a session surface for.
+		// A decision model is executable (the gateway answers it) but not
+		// selectable: choosing it would open the generic "no dedicated panel"
+		// placeholder, a dead end the user cannot leave except by picking
+		// again. See sessionSelectableFamily's doc comment.
+		model.Selectable = model.Executable && model.Enabled && complete &&
+			visibility != VisibilityHidden && sessionSelectableFamily(model.ProviderType)
 		if model.Selectable {
 			anySelectable = true
 		}
@@ -163,22 +183,44 @@ func resolveModelIDs(provider ProviderConfig, rules []rule) []string {
 	return out
 }
 
+// providerSurface resolves the provider's family and the session surface it
+// opens. The type defaults to llm so a document that predates provider types
+// reads exactly as it did before; an unrecognized family is the generic surface
+// (never a silent llm promotion).
+func providerSurface(provider ProviderConfig) (providerType, surfaceKind string) {
+	providerType = normalizeProviderType(provider.Type)
+	return providerType, SurfaceKindForType(providerType)
+}
+
 func resolveModel(provider ProviderConfig, modelID string, doc document) ModelView {
 	config, exact := evaluateModelConfig(provider, modelID, doc)
+	providerType, surfaceKind := providerSurface(provider)
 	decoded, err := decodeModelConfig(config)
 	if err != nil {
 		// Validated inputs make this unreachable, but reporting an issue is
 		// preferable to dropping the model or panicking.
 		return ModelView{
-			ProviderID: provider.ID,
-			ModelID:    modelID,
-			API:        cloneAPI(provider.API),
-			Enabled:    true,
+			ProviderID:   provider.ID,
+			ModelID:      modelID,
+			ProviderType: providerType,
+			SurfaceKind:  surfaceKind,
+			API:          cloneAPI(provider.API),
+			Enabled:      true,
 			Issues: []Issue{{
 				Field:   "options",
 				Message: "invalid resolved model configuration: " + err.Error(),
 			}},
 		}
+	}
+
+	// A per-model family overrides the provider's family: one provider may serve
+	// several families (an aggregator gateway, the multi-family demo provider),
+	// and the model's own declaration is the finer fact. An absent override
+	// inherits the provider family, so a document that never declared one
+	// resolves exactly as before.
+	if decoded.ProviderType != "" {
+		providerType = normalizeProviderType(decoded.ProviderType)
+		surfaceKind = SurfaceKindForType(providerType)
 	}
 
 	enabled := true
@@ -193,17 +235,28 @@ func resolveModel(provider ProviderConfig, modelID string, doc document) ModelVi
 	if decoded.Options != nil {
 		options = *decoded.Options
 	}
-	issues, complete := modelIssues(decoded, enabled, exact)
+	issues, complete := modelIssues(decoded, providerType, enabled, exact)
+	// A capability-endpoint family is executable but not a session model; the
+	// issue explains the missing Selectable flag next to the model in Settings.
+	// It is not a completeness defect, so it never clears Executable.
+	if !sessionSelectableFamily(providerType) {
+		issues = append(issues, Issue{
+			Field:   "providerType",
+			Message: "decision models are capability endpoints called through /v1/decisions/ask (or /v1/media/decision), not session models: the picker does not offer them as a conversation",
+		})
+	}
 	return ModelView{
-		ProviderID: provider.ID,
-		ModelID:    modelID,
-		API:        cloneAPI(provider.API),
-		Properties: properties,
-		Options:    cloneOptions(options),
-		Enabled:    enabled,
-		Executable: complete,
-		Baseline:   !exact,
-		Issues:     issues,
+		ProviderID:   provider.ID,
+		ModelID:      modelID,
+		ProviderType: providerType,
+		SurfaceKind:  surfaceKind,
+		API:          cloneAPI(provider.API),
+		Properties:   properties,
+		Options:      cloneOptions(options),
+		Enabled:      enabled,
+		Executable:   complete,
+		Baseline:     !exact,
+		Issues:       issues,
 	}
 }
 
@@ -284,10 +337,49 @@ func normalizeModelConfig(config *ModelConfig) {
 	}
 }
 
+// requiresTextOutput reports whether a model of this family must declare text
+// output to be executable. Text and realtime families answer a conversation, so
+// a text-less model of those families cannot serve a turn. The medium families
+// (image/video/tts/stt) and a decision family legitimately produce something
+// else; requiring text there would make the whole family unusable.
+func requiresTextOutput(providerType string) bool {
+	switch normalizeProviderType(providerType) {
+	case ProviderTypeLLM, ProviderTypeRealtime:
+		return true
+	default:
+		return false
+	}
+}
+
+// sessionSelectableFamily reports whether a provider family can be chosen as a
+// session model from the picker. A decision model is a capability endpoint:
+// clients call POST /v1/decisions/ask (or POST /v1/media/decision) with a
+// structured request, and the client surface registry has no decision panel, so
+// selecting one in the picker would land on the generic "no dedicated panel"
+// placeholder — a dead end the user can only leave by picking again. Such a
+// model stays Executable (the gateway does answer it) and stays in the settings
+// view with an issue (the capability exists and must be readable there); only
+// Selectable is false.
+//
+// The check reads the model's *effective* family (a per-model providerType
+// override wins over the provider's), never the provider-level family: the demo
+// provider is generic at provider level and declares decision on one model.
+func sessionSelectableFamily(providerType string) bool {
+	return normalizeProviderType(providerType) != ProviderTypeDecision
+}
+
 // modelIssues checks the completeness contract and records field paths.
-// enabled is separate from completeness: a disabled model can be complete and
-// still never be selectable.
-func modelIssues(config ModelConfig, enabled, exact bool) ([]Issue, bool) {
+// providerType is the model's effective family (it decides whether text output
+// is required). enabled is separate from completeness: a disabled model can be
+// complete and still never be selectable.
+//
+// The text-output requirement is gated on the family: a text model that
+// produces no text cannot answer a turn, but an image, video, tts or realtime
+// model legitimately produces another medium (a realtime model declares text
+// and audio; an image model declares image only). Requiring text everywhere
+// would make every non-text model unexecutable, which is exactly what the
+// capability families exist to express.
+func modelIssues(config ModelConfig, providerType string, enabled, exact bool) ([]Issue, bool) {
 	issues := make([]Issue, 0, 5)
 	complete := true
 
@@ -306,7 +398,7 @@ func modelIssues(config ModelConfig, enabled, exact bool) ([]Issue, bool) {
 			})
 			complete = false
 		}
-		if !properties.OutputFormat.Text {
+		if !properties.OutputFormat.Text && requiresTextOutput(providerType) {
 			issues = append(issues, Issue{
 				Field:   "properties.outputFormat.text",
 				Message: "text output must be supported",
@@ -388,21 +480,29 @@ func providerIssues(provider ProviderConfig, modelCount int) ([]Issue, bool) {
 		})
 		complete = false
 	}
-	if strings.TrimSpace(provider.API.BaseURL) == "" {
+	// The demo protocol runs in-process: it has no endpoint to reach, so a base
+	// URL is neither required nor meaningful. Every other protocol needs one, and
+	// requiring it for demo too would make the provider incomplete by
+	// construction (a base URL nobody dials is a lie about the transport).
+	isDemo := strings.EqualFold(strings.TrimSpace(provider.API.Type), APITypeDemo)
+	if !isDemo && strings.TrimSpace(provider.API.BaseURL) == "" {
 		issues = append(issues, Issue{Field: "api.baseUrl", Message: "base URL is required"})
 		complete = false
 	}
+	freeAccess := provider.Access.CredentialFree()
 	switch {
 	case provider.Access.Type == "":
 		issues = append(issues, Issue{
 			Field:   "access.type",
-			Message: "access type is required (want " + AccessTypeAPIKey + ")",
+			Message: "access type is required (want " + AccessTypeAPIKey + "|" + AccessTypeNone + ")",
 		})
 		complete = false
+	case freeAccess:
+		// No credential to resolve; the credential block is complete as declared.
 	case provider.Access.Type != AccessTypeAPIKey:
 		issues = append(issues, Issue{
 			Field:   "access.type",
-			Message: fmt.Sprintf("unsupported access type %q (want %s)", provider.Access.Type, AccessTypeAPIKey),
+			Message: fmt.Sprintf("unsupported access type %q (want %s|%s)", provider.Access.Type, AccessTypeAPIKey, AccessTypeNone),
 		})
 		complete = false
 	}
@@ -413,7 +513,7 @@ func providerIssues(provider ProviderConfig, modelCount int) ([]Issue, bool) {
 		})
 		complete = false
 	}
-	if strings.TrimSpace(provider.Access.Env) == "" && strings.TrimSpace(provider.Access.Ref) == "" {
+	if !freeAccess && strings.TrimSpace(provider.Access.Env) == "" && strings.TrimSpace(provider.Access.Ref) == "" {
 		issues = append(issues, Issue{
 			Field:   "access",
 			Message: "access environment variable name or secret reference is required",

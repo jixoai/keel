@@ -121,7 +121,7 @@ web/
 
 - **模型**：当前生效（`source` 部署默认/已保存覆盖 + `revision` + 默认 selection + 解析诊断）、
   `编辑`（默认模型、思考档 chips 来自该模型 `options.reasoningLevel.values`、原始文档 textarea、
-  保存并生效 / 两步重置）、模型列表（`/v1/models`：能力事实、基线推断、issues、点选设为默认）、
+  保存模型配置 / 两步重置）、模型列表（`/v1/models`：能力事实、基线推断、issues、点选设为默认）、
   Provider 列表（`/v1/providers`：可执行/可选状态、`access.env`/`access.ref`、逐条 issues）。
   保存 PUT 整份文档（带 `expectedRevision`）：400 的 `issues` 按字段路径原样列出，409 给出
   「文档已被其它写入更新 + 当前 revision」并给刷新入口；成功后显示新 revision 并刷新

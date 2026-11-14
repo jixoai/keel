@@ -27,7 +27,19 @@ export function LoginScreen() {
 
   // The server's answer, as the field's error: a wrong passphrase belongs to
   // this field, not to a loose line under the form.
-  const error = () => store.authError() ?? undefined;
+  //
+  // The store's 401 word is 「口令不正确」 — what failed, with no way forward
+  // (`better-writing`: an error names the next step). The mapping lives here,
+  // in the presentation, so the store keeps carrying the server's own meaning
+  // and every other failure (a network error, a 5xx) still shows verbatim.
+  const error = () => {
+    const message = store.authError();
+    if (message === null) return undefined;
+    if (message === "口令不正确") {
+      return "口令不正确。请向管理员或启动服务的终端确认 KEEL_SERVE_PASSWORD，再重新输入。";
+    }
+    return message;
+  };
 
   return (
     <View
@@ -50,7 +62,7 @@ export function LoginScreen() {
         <CardContent>
           <Field
             label="服务口令"
-            hint="这个服务已开启口令保护，请输入启动服务时设置的口令。"
+            hint="这个服务已开启口令保护。口令由启动服务的人设置（服务端环境变量 KEEL_SERVE_PASSWORD）。"
             error={error()}
           >
             <Input

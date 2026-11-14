@@ -135,6 +135,12 @@ func (f *Factory) Resolve(selection Selection) (ActiveModel, error) {
 	case APITypeAnthropicMessages:
 		requestPatch["max_tokens"] = maxOutputTokens
 		clampThinkingBudget(requestPatch, maxOutputTokens)
+	case APITypeDemo:
+		// The demo protocol is in-process: there is no wire request to shape, so
+		// the resolved patch is recorded for diagnostics only. Carrying the same
+		// key a vendor patch would (max_tokens) keeps the resolved value
+		// introspectable without pretending a request will be built.
+		requestPatch["max_tokens"] = maxOutputTokens
 	default:
 		return ActiveModel{}, notExecutableError(provider.ProviderID, model.ModelID, []Issue{{
 			Field:   "api.type",

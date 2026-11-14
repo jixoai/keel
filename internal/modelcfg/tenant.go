@@ -81,6 +81,15 @@ func validateProviderPatch(obj map[string]any) error {
 			return errors.New("name must be a string")
 		}
 	}
+	if raw, ok := obj["type"]; ok && raw != nil {
+		value, ok := raw.(string)
+		if !ok {
+			return errors.New("type must be a string")
+		}
+		if err := validateProviderType(value); err != nil {
+			return fmt.Errorf("type: %w", err)
+		}
+	}
 	if raw, ok := obj["visibility"]; ok && raw != nil {
 		value, ok := raw.(string)
 		if !ok || (value != VisibilityVisible && value != VisibilityHidden) {
@@ -133,8 +142,8 @@ func validateProviderPatch(obj map[string]any) error {
 		}
 		if t, ok := access["type"]; ok && t != nil {
 			value, ok := t.(string)
-			if !ok || value != AccessTypeAPIKey {
-				return fmt.Errorf("access.type must be %q", AccessTypeAPIKey)
+			if !ok || !validAccessType(value) {
+				return fmt.Errorf("access.type must be %q or %q", AccessTypeAPIKey, AccessTypeNone)
 			}
 		}
 		for _, field := range []string{"env", "ref"} {

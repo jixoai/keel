@@ -311,3 +311,84 @@ func TestModelsResponsePublishesTheEnforcementLedger(t *testing.T) {
 		t.Fatal("the media gate is a recorded deferral; claiming enforcement would be a lie")
 	}
 }
+
+// TestModelsListCarriesProviderTypeAndSurfaceKind pins the B1 wire contract:
+// the resolved providerType/surfaceKind reach the client on both views, which
+// is what lets the picker open the realtime panel for a real realtime model
+// instead of treating it as a legacy text model.
+func TestModelsListCarriesProviderTypeAndSurfaceKind(t *testing.T) {
+	realtimeModel := modelcfg.ModelView{
+		ProviderID:   "omni",
+		ModelID:      "qwen-omni-realtime",
+		ProviderType: modelcfg.ProviderTypeRealtime,
+		SurfaceKind:  modelcfg.SurfaceKindRealtime,
+		Properties: modelcfg.Properties{
+			ContextWindow: 65536,
+			InputFormat:   modelcfg.MediaIn{Text: true, Audio: true},
+			OutputFormat:  modelcfg.MediaOut{Text: true, Audio: true},
+		},
+		Enabled:    true,
+		Executable: true,
+		Selectable: true,
+	}
+	provider := modelcfg.ProviderView{
+		ProviderID:   "omni",
+		Name:         "Omni",
+		ProviderType: modelcfg.ProviderTypeRealtime,
+		SurfaceKind:  modelcfg.SurfaceKindRealtime,
+		Visibility:   modelcfg.VisibilityVisible,
+		Access:       modelcfg.Access{Type: modelcfg.AccessTypeAPIKey, Env: "OMNI_KEY"},
+		Models:       []modelcfg.ModelView{realtimeModel},
+		Executable:   true,
+		Selectable:   true,
+	}
+	server := httptest.NewServer(New(Config{
+		Models: stubCatalog{
+			providers: []modelcfg.ProviderView{provider},
+			models:    []modelcfg.ModelView{realtimeModel},
+		},
+		Logger: testLogger(),
+	}))
+	defer server.Close()
+	tenant := uuid.New()
+
+	var raw json.RawMessage
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/models", tenant, nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/models = %d %s", code, raw)
+	}
+	for _, want := range []string{`"providerType":"realtime"`, `"surfaceKind":"realtime"`, `"audio":true`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("model list missing %s: %s", want, raw)
+		}
+	}
+	var list modelsResponse
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Models) != 1 {
+		t.Fatalf("models = %+v", list.Models)
+	}
+	if got := list.Models[0].ProviderType; got != modelcfg.ProviderTypeRealtime {
+		t.Fatalf("model providerType = %q, want realtime", got)
+	}
+	if got := list.Models[0].SurfaceKind; got != modelcfg.SurfaceKindRealtime {
+		t.Fatalf("model surfaceKind = %q, want realtime", got)
+	}
+
+	raw = nil
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/providers", tenant, nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/providers = %d %s", code, raw)
+	}
+	for _, want := range []string{`"providerType":"realtime"`, `"surfaceKind":"realtime"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("settings view missing %s: %s", want, raw)
+		}
+	}
+	var settings providersResponse
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Providers) != 1 || settings.Providers[0].ProviderType != modelcfg.ProviderTypeRealtime {
+		t.Fatalf("provider view = %+v", settings.Providers)
+	}
+}

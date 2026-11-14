@@ -20,7 +20,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Icon, type IconName } from "../../icons";
-import { alpha, color, radius, space, typeScale, weight } from "../tokens";
+import { alpha, color, lineHeight, radius, space, typeScale, weight } from "../tokens";
 
 export function Empty(props: {
   children?: JSX.Element;
@@ -84,9 +84,20 @@ export function EmptyTitle(props: { label?: string; children?: JSX.Element; test
   );
 }
 
+/** The description is prose that wraps on a narrow column, so it carries a 1.5
+ * line height: the host's default lands near 1.25, which packs a two-line
+ * sentence into a block of unreadable ink. */
 export function EmptyDescription(props: { label?: string; children?: JSX.Element; testID?: string }) {
   return (
-    <Text testID={props.testID} style={{ fontSize: typeScale.sm, color: color.mutedForeground, textAlign: "center" }}>
+    <Text
+      testID={props.testID}
+      style={{
+        fontSize: typeScale.sm,
+        lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+        color: color.mutedForeground,
+        textAlign: "center",
+      }}
+    >
       {props.label ?? ""}
       {props.children}
     </Text>

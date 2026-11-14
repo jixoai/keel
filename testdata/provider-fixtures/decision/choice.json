@@ -1,0 +1,33 @@
+{
+  "answers": [
+    {
+      "choice": "B",
+      "confidence": 0.21,
+      "name": null,
+      "probabilities": [
+        {
+          "probability": 0.39,
+          "value": "A"
+        },
+        {
+          "probability": 0.61,
+          "value": "B"
+        }
+      ],
+      "type": "choice"
+    }
+  ],
+  "model": "decision-model-preview",
+  "usage": {
+    "input_tokens": 18,
+    "input_tokens_details": {
+      "cache_write_tokens": 0,
+      "cached_tokens": 0
+    },
+    "output_tokens": 0,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 18
+  }
+}

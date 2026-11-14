@@ -27,6 +27,13 @@ func testProvider(id, apiType, baseURL, env string, modelIDs ...string) map[stri
 	}
 }
 
+// testProviderWithType is testProvider with a declared provider family.
+func testProviderWithType(id, providerType, apiType, baseURL, env string, modelIDs ...string) map[string]any {
+	provider := testProvider(id, apiType, baseURL, env, modelIDs...)
+	provider["type"] = providerType
+	return provider
+}
+
 func baselineModelRule() map[string]any {
 	return map[string]any{
 		"match": "*",

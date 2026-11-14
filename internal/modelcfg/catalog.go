@@ -277,8 +277,10 @@ func ParseSelection(raw []byte) (Selection, error) {
 
 // selectionKeys is the exact key vocabulary of a selection fact (and of a
 // tenant document's selection). The fact is persisted verbatim by the kernel,
-// so this vocabulary is the whole contract.
-var selectionKeys = []string{"providerId", "modelId", "reasoningLevel", "options"}
+// so this vocabulary is the whole contract. providerType and surfaceKind are
+// picker hints: resolution never routes on them, but they are accepted so a
+// client can record which surface a demo or newly registered provider opens.
+var selectionKeys = []string{"providerId", "modelId", "reasoningLevel", "providerType", "surfaceKind", "options"}
 
 var selectionOptionKeys = []string{"reasoningLevel"}
 
@@ -363,6 +365,8 @@ func decodeSelection(raw any) (Selection, error) {
 		ProviderID     string `json:"providerId"`
 		ModelID        string `json:"modelId"`
 		ReasoningLevel string `json:"reasoningLevel"`
+		ProviderType   string `json:"providerType"`
+		SurfaceKind    string `json:"surfaceKind"`
 		Options        *struct {
 			ReasoningLevel string `json:"reasoningLevel"`
 		} `json:"options"`
@@ -370,15 +374,43 @@ func decodeSelection(raw any) (Selection, error) {
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		return Selection{}, fmt.Errorf("selection: %w", err)
 	}
+	providerType, err := normalizeSelectionToken(decoded.ProviderType, "providerType")
+	if err != nil {
+		return Selection{}, err
+	}
+	surfaceKind, err := normalizeSelectionToken(decoded.SurfaceKind, "surfaceKind")
+	if err != nil {
+		return Selection{}, err
+	}
 	selection := Selection{
 		ProviderID:     strings.TrimSpace(decoded.ProviderID),
 		ModelID:        strings.TrimSpace(decoded.ModelID),
 		ReasoningLevel: strings.TrimSpace(decoded.ReasoningLevel),
+		ProviderType:   providerType,
+		SurfaceKind:    surfaceKind,
 	}
 	if selection.ReasoningLevel == "" && decoded.Options != nil {
 		selection.ReasoningLevel = strings.TrimSpace(decoded.Options.ReasoningLevel)
 	}
 	return selection, nil
+}
+
+// normalizeSelectionToken validates and normalizes one client-supplied surface
+// hint. The hint is not a routing fact, but it is persisted and replayed, so a
+// value that is not a token (embedded whitespace, control characters) would be
+// a smuggled field rather than a UI label; it is refused instead of stored.
+func normalizeSelectionToken(value, field string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	if strings.TrimSpace(value) != value {
+		return "", fmt.Errorf("%s must not have surrounding whitespace", field)
+	}
+	token := strings.ToLower(value)
+	if !providerTypePattern.MatchString(token) {
+		return "", fmt.Errorf("%s %q must be a token of letters, digits, '.', '_' or '-'", field, value)
+	}
+	return token, nil
 }
 
 func validateRule(decoded ruleDoc, kind ruleKind) error {
@@ -443,9 +475,16 @@ func validateProviderConfig(provider ProviderConfig) error {
 	if provider.Name != "" && strings.ContainsAny(provider.Name, "\r\n") {
 		return errors.New("name must not contain line breaks")
 	}
+	if err := validateProviderType(provider.Type); err != nil {
+		return fmt.Errorf("type: %w", err)
+	}
 	if provider.API.Type != "" && !validAPIType(provider.API.Type) {
-		return fmt.Errorf("api.type %q is not supported (want %s|%s|%s)",
-			provider.API.Type, APITypeOpenAIChatCompletions, APITypeOpenAIResponses, APITypeAnthropicMessages)
+		return fmt.Errorf("api.type %q is not supported (want %s|%s|%s|%s)",
+			provider.API.Type, APITypeOpenAIChatCompletions, APITypeOpenAIResponses, APITypeAnthropicMessages, APITypeDemo)
+	}
+	if provider.Access.Type != "" && !validAccessType(provider.Access.Type) {
+		return fmt.Errorf("access.type %q is not supported (want %s|%s)",
+			provider.Access.Type, AccessTypeAPIKey, AccessTypeNone)
 	}
 	if provider.API.BaseURL != "" {
 		if err := validateBaseURL(provider.API.BaseURL); err != nil {
@@ -527,7 +566,21 @@ func requireSchemaVersion(doc map[string]any) error {
 
 func validAPIType(apiType string) bool {
 	switch apiType {
-	case APITypeOpenAIChatCompletions, APITypeOpenAIResponses, APITypeAnthropicMessages:
+	case APITypeOpenAIChatCompletions, APITypeOpenAIResponses, APITypeAnthropicMessages, APITypeDemo:
+		return true
+	default:
+		return false
+	}
+}
+
+// validAccessType reports whether a declared access mechanism is one this
+// package can resolve. An absent type means "not declared" and is reported
+// separately; both a credential reference (api-key) and the explicit
+// no-credential declaration (none, used by the in-process demo provider) are
+// accepted.
+func validAccessType(value string) bool {
+	switch strings.TrimSpace(value) {
+	case AccessTypeAPIKey, AccessTypeNone:
 		return true
 	default:
 		return false
@@ -536,6 +589,10 @@ func validAPIType(apiType string) bool {
 
 var (
 	envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// providerTypePattern is the provider-family token grammar. The vocabulary
+	// is open (a plugin may declare "embedding"), so the shape is checked, not
+	// membership: an unrecognized family resolves to the generic surface.
+	providerTypePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	// secretRefPattern is the tenant-document secret reference vocabulary of
 	// internal/host/config.go, mirrored here so provider access.ref speaks the
 	// host's exact language: a credential is always an indirection — ${NAME},
@@ -555,6 +612,23 @@ func validateIdentifier(value, field string) error {
 		if r <= 0x20 || r == 0x7f {
 			return fmt.Errorf("%s %q must not contain whitespace or control characters", field, value)
 		}
+	}
+	return nil
+}
+
+// validateProviderType checks the shape of a provider family token. The empty
+// string is legal and means llm (the legacy default); membership is not
+// checked because the family vocabulary is open and an unknown family is a
+// generic surface, not a configuration error.
+func validateProviderType(value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.TrimSpace(value) != value {
+		return errors.New("must not have surrounding whitespace")
+	}
+	if !providerTypePattern.MatchString(strings.ToLower(value)) {
+		return fmt.Errorf("%q must be a token of letters, digits, '.', '_' or '-'", value)
 	}
 	return nil
 }
@@ -651,8 +725,17 @@ func validateModelConfigMap(config map[string]any) error {
 	if config == nil {
 		return errors.New("config must be an object")
 	}
-	if err := rejectUnknownKeys(config, "enabled", "properties", "options"); err != nil {
+	if err := rejectUnknownKeys(config, "enabled", "providerType", "properties", "options"); err != nil {
 		return err
+	}
+	if value, ok := config["providerType"]; ok && value != nil {
+		family, ok := value.(string)
+		if !ok {
+			return errors.New("providerType must be a string or null")
+		}
+		if err := validateProviderType(family); err != nil {
+			return fmt.Errorf("providerType: %w", err)
+		}
 	}
 	if value, ok := config["enabled"]; ok && value != nil {
 		if _, ok := value.(bool); !ok {
@@ -705,7 +788,10 @@ func validatePropertiesMap(properties map[string]any) error {
 				return fmt.Errorf("inputFormat: %w", err)
 			}
 		} else {
-			if err := validateBoolFields(media, "text"); err != nil {
+			// Output modalities: text and audio (realtime/tts), image and video
+			// (media generation). The set is the MediaOut vocabulary; an unknown
+			// key is still refused so a typo cannot silently declare a capability.
+			if err := validateBoolFields(media, "text", "image", "video", "audio"); err != nil {
 				return fmt.Errorf("outputFormat: %w", err)
 			}
 		}

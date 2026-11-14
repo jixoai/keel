@@ -25,7 +25,7 @@
 // block whose title/description/content render as text rows.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
-import { color, radius, space, typeScale, weight } from "../tokens";
+import { color, lineHeight, radius, space, typeScale, weight } from "../tokens";
 
 export type CardSize = "default" | "sm";
 
@@ -83,7 +83,16 @@ export function CardHeader(props: {
           </Text>
         ) : null}
         {props.description !== undefined ? (
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.description}</Text>
+          // The description is prose that wraps: 1.5, not the host's ~1.25.
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.mutedForeground,
+            }}
+          >
+            {props.description}
+          </Text>
         ) : null}
         {props.children}
       </View>

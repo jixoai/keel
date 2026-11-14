@@ -6,7 +6,7 @@
 // block (`web/src/ui/kit/layout/settings-shell.tsx`). This file draws none of
 // them.
 //
-// Seven sections, in the rail's order:
+// Eight sections, in the rail's order:
 //   · 通用       the token-level partial switch (moved here from the session
 //                list: it is a reading preference, not a session action).
 //   · 外观       follow the system / light / dark, written through
@@ -17,6 +17,11 @@
 //                a structured form over the document's default selection and
 //                each provider's template / endpoint / credential reference,
 //                and the raw document behind one collapsed「高级」disclosure.
+//   · 能力       what this deployment can actually do: the media gateway's
+//                capabilities and the realtime bridge's preflight, each as
+//                available / unconfigured (with the environment variable names
+//                to set) / unsupported by the provider. Read-only, and never a
+//                URL, a key or a raw runtime error.
 //   · 密钥       names and times only: values go one way (write-only) and are
 //                never read back, echoed or kept.
 //   · 插件       the assembled extension surface (generation, plugin states,
@@ -40,14 +45,20 @@
 import type { JSX } from "nsh";
 import { cleanup, colorScheme, effect, host, signal, Storage, Text, View } from "nsh";
 import type {
+  DeploymentCapabilitiesApi,
+  MediaCapabilitiesView,
+  MediaCapabilityStatus,
+  MediaCapabilityView,
   ModelSelection,
   ModelView,
   PluginStatusView,
   ProviderView,
+  RealtimeStatusView,
   SecretMeta,
   SettingsIssue,
   TriggerStatusView,
 } from "../data/contract";
+import { KeelApiError, KeelHttp, type FetchLike } from "../data/http";
 import { store } from "../data/store";
 import {
   displayNameOf,
@@ -108,11 +119,12 @@ import { defaultReasoningFor } from "./model-picker";
 
 // ---- the section ----------------------------------------------------------
 
-/** The seven sections the rail offers. */
+/** The eight sections the rail offers. */
 export type SettingsSection =
   | "general"
   | "appearance"
   | "models"
+  | "capabilities"
   | "secrets"
   | "plugins"
   | "shortcuts"
@@ -128,6 +140,7 @@ const SECTIONS: SettingsSectionEntry[] = [
   { id: "general", label: "通用", icon: "settings", group: "常规" },
   { id: "appearance", label: "外观", icon: "sun" },
   { id: "models", label: "模型接入", icon: "brain", group: "配置" },
+  { id: "capabilities", label: "能力", icon: "spark" },
   { id: "secrets", label: "密钥", icon: "key" },
   { id: "plugins", label: "插件", icon: "layers" },
   { id: "shortcuts", label: "快捷键", icon: "keyboard", group: "参考" },
@@ -768,7 +781,14 @@ function SelectionCard() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
           <Button
             icon="check"
-            label="保存并生效"
+            // The visible label and the accessible name are now the same
+            // string, and it is verb + object: the old pair 「保存并生效」 /
+            // 「保存模型配置」 broke 2.5.3 (a speech user saying the visible
+            // words could not reach the control) and the new label is the one
+            // `better-writing` asks for. "Takes effect immediately" is already
+            // stated by the card above («配置保存后立即生效，无需重启»), so no
+            // meaning is lost.
+            label="保存模型配置"
             accessibilityLabel="保存模型配置"
             loading={store.settingsSaving()}
             disabled={store.settingsSaving() || !!rawParseError() || !rawDocument().trim()}
@@ -876,7 +896,7 @@ function ProviderEditorCard() {
     <Card testID="settings-provider-editor">
       <CardHeader
         title="服务商接入"
-        description="按服务商编辑接口协议、服务地址与凭据引用；改的是待保存的配置，按上方「保存并生效」生效。"
+        description="按服务商编辑接口协议、服务地址与凭据引用；改的是待保存的配置，按上方「保存模型配置」生效。"
       />
       <CardContent>
         <If when={providers().length === 0}>
@@ -1787,6 +1807,423 @@ function PluginsSection() {
   );
 }
 
+// ---- 能力 -----------------------------------------------------------------
+//
+// What this deployment can actually do, instead of a generic model list. Two
+// read-only probes answer it: `GET /v1/media/capabilities` (the media
+// gateway's own rows) and `GET /v1/realtime/status` (the voice bridge's
+// preflight). The server owns every fact; this page renders availability, the
+// environment variable NAMES an operator sets when a row is unconfigured, and
+// the provider's reason when it declines a capability. The transport drops
+// URLs, keys and runtime errors before they can reach the screen, so the page
+// never has raw infrastructure text to print.
+
+type CapabilityRowStatus = MediaCapabilityStatus | "auth" | "unknown";
+
+interface CapabilityRowView {
+  id: string;
+  label: string;
+  status: CapabilityRowStatus;
+  /** One short line in the reader's words; no infrastructure text. */
+  detail?: string;
+  /** Environment variable NAMES (never values). */
+  env: string[];
+}
+
+interface CapabilitiesState {
+  loading: boolean;
+  rows: CapabilityRowView[];
+  /** A probe that could not answer, in the order the banner prioritizes. */
+  notice: "auth" | "unsupported" | "unreachable" | null;
+}
+
+type CapabilityProbeFailure = "auth" | "unsupported" | "unreachable";
+
+interface CapabilityRowSpec {
+  id: string;
+  label: string;
+  /** Wire ids that mean this row (canonicalized before comparison). */
+  aliases: string[];
+  /** The per-capability model override an operator sets. */
+  env: string;
+}
+
+/** The rows, in reading order. A media capability row is named after the
+ * operation, not the provider family (image generation and image editing are
+ * separate answers). */
+const MEDIA_CAPABILITY_ROWS: CapabilityRowSpec[] = [
+  {
+    id: "chat",
+    label: "文本对话",
+    aliases: ["chat", "text", "llm", "chat-completions", "text-chat"],
+    env: "KEEL_MEDIA_MODEL_CHAT",
+  },
+  {
+    id: "image",
+    label: "图像生成",
+    aliases: ["image", "images", "image-generation", "image-generate", "text-to-image"],
+    env: "KEEL_MEDIA_MODEL_IMAGE",
+  },
+  {
+    id: "image-edit",
+    label: "图像编辑",
+    aliases: ["image-edit", "image-editing", "edit-image", "image-editor"],
+    env: "KEEL_MEDIA_MODEL_IMAGE_EDIT",
+  },
+  {
+    id: "decision",
+    label: "决策",
+    aliases: ["decision", "decisions", "decide", "system-one", "systemone", "noul"],
+    env: "KEEL_MEDIA_MODEL_DECISION",
+  },
+  {
+    id: "video",
+    label: "视频",
+    aliases: ["video", "videos", "video-generation", "video-generate", "text-to-video"],
+    env: "KEEL_MEDIA_MODEL_VIDEO",
+  },
+  {
+    id: "tts",
+    label: "语音合成",
+    aliases: ["tts", "speech", "speech-synthesis", "text-to-speech", "audio-tts"],
+    env: "KEEL_MEDIA_MODEL_TTS",
+  },
+  {
+    id: "stt",
+    label: "语音识别",
+    aliases: ["stt", "transcription", "speech-recognition", "speech-to-text", "audio-stt", "transcribe"],
+    env: "KEEL_MEDIA_MODEL_STT",
+  },
+];
+
+const REALTIME_CAPABILITY_ROW: CapabilityRowSpec = {
+  id: "realtime",
+  label: "实时语音",
+  aliases: ["realtime", "real-time", "voice", "live-voice"],
+  env: "KEEL_REALTIME_MODEL",
+};
+
+const CAPABILITY_ROWS: CapabilityRowSpec[] = [...MEDIA_CAPABILITY_ROWS, REALTIME_CAPABILITY_ROW];
+
+/** The gateway-level variables, shown when the media gateway itself is absent. */
+const MEDIA_GATEWAY_ENV = ["KEEL_MEDIA_BASE_URL", "KEEL_MEDIA_API_KEY"];
+/** The voice bridge's variables (the built-in provider reads exactly these). */
+const REALTIME_ENV = ["KEEL_REALTIME_WS_URL", "KEEL_REALTIME_API_KEY", "KEEL_REALTIME_MODEL"];
+
+const canonicalCapabilityId = (value: string): string =>
+  value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase()
+    .replace(/[_.\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+const capabilityRowIdOf = (value: string): string => {
+  const id = canonicalCapabilityId(value);
+  const spec = CAPABILITY_ROWS.find((row) => row.id === id || row.aliases.includes(id));
+  return spec?.id ?? id;
+};
+
+const capabilitiesState = signal<CapabilitiesState>({
+  loading: true,
+  rows: CAPABILITY_ROWS.map((row) => ({ id: row.id, label: row.label, status: "unknown", env: [] })),
+  notice: null,
+});
+
+/** The probes' transport. Lazy, so a harness that never opens the section
+ * never constructs one. */
+let capabilityClient: KeelHttp | null = null;
+let capabilityFetch: FetchLike | null = null;
+
+/** Test/host seam: answers the two probes without a network. The product
+ * never calls this — a real run leaves it null and the transport uses the
+ * platform's `globalThis.fetch`, same origin as the app. The TUI harness needs
+ * it because an in-memory terminal has no origin for a relative URL to resolve
+ * against. */
+export const setCapabilityFetch = (fetchImpl: FetchLike | null): void => {
+  capabilityFetch = fetchImpl;
+  capabilityClient = null;
+};
+
+const capabilityTransport = (): DeploymentCapabilitiesApi =>
+  (capabilityClient ??= new KeelHttp("", capabilityFetch ?? undefined));
+
+/** Bumped per load: a section switch unmounts and remounts, and the older
+ * answer must not overwrite the newer one. */
+let capabilityLoadToken = 0;
+
+const capabilityFailureOf = (error: unknown): CapabilityProbeFailure => {
+  if (error instanceof KeelApiError) {
+    if (error.status === 401 || error.status === 403) return "auth";
+    if (error.status === 404) return "unsupported";
+  }
+  return "unreachable";
+};
+
+const capabilityFailureRow = (spec: CapabilityRowSpec, failure: CapabilityProbeFailure): CapabilityRowView => {
+  if (failure === "auth") {
+    return { id: spec.id, label: spec.label, status: "auth", detail: "需要登录后才能读取。", env: [] };
+  }
+  if (failure === "unsupported") {
+    return { id: spec.id, label: spec.label, status: "unsupported", detail: "当前服务端不支持能力探测。", env: [] };
+  }
+  return { id: spec.id, label: spec.label, status: "unknown", detail: "暂时无法读取状态。", env: [] };
+};
+
+const mediaCapabilityRowViews = (
+  view: MediaCapabilitiesView | null,
+  failure: CapabilityProbeFailure | null,
+): CapabilityRowView[] => {
+  if (failure) return MEDIA_CAPABILITY_ROWS.map((spec) => capabilityFailureRow(spec, failure));
+  const byId = new Map<string, MediaCapabilityView>();
+  for (const capability of view?.capabilities ?? []) {
+    const id = capabilityRowIdOf(capability.id);
+    if (!byId.has(id)) byId.set(id, capability);
+  }
+  return MEDIA_CAPABILITY_ROWS.map((spec) => {
+    const capability = byId.get(spec.id);
+    if (!capability) {
+      // A complete gateway document that omits the operation is a statement
+      // that the deployment does not provide it; a gateway-level "not
+      // configured" is the ordinary warning state instead.
+      if (view && !view.configured) {
+        return {
+          id: spec.id,
+          label: spec.label,
+          status: "unconfigured",
+          detail: "未配置；设置以下环境变量后可用。",
+          env: [...MEDIA_GATEWAY_ENV, spec.env],
+        };
+      }
+      return view
+        ? { id: spec.id, label: spec.label, status: "unsupported", detail: "该部署未提供此能力。", env: [] }
+        : capabilityFailureRow(spec, "unreachable");
+    }
+    if (capability.status === "available") {
+      return {
+        id: spec.id,
+        label: spec.label,
+        status: "available",
+        detail: capability.model ? `模型：${capability.model}` : "已配置",
+        env: [],
+      };
+    }
+    if (capability.status === "unsupported") {
+      return {
+        id: spec.id,
+        label: spec.label,
+        status: "unsupported",
+        detail: capability.reason ?? "Provider 不支持此能力。",
+        env: [],
+      };
+    }
+    const env = capability.env?.length
+      ? capability.env
+      : view && !view.configured
+        ? [...MEDIA_GATEWAY_ENV, spec.env]
+        : [spec.env];
+    return { id: spec.id, label: spec.label, status: "unconfigured", detail: "未配置；设置以下环境变量后可用。", env };
+  });
+};
+
+const realtimeCapabilityRowView = (
+  view: RealtimeStatusView | null,
+  failure: CapabilityProbeFailure | null,
+): CapabilityRowView => {
+  const spec = REALTIME_CAPABILITY_ROW;
+  if (failure) return capabilityFailureRow(spec, failure);
+  if (!view) return capabilityFailureRow(spec, "unreachable");
+  if (!view.configured) {
+    return {
+      id: spec.id,
+      label: spec.label,
+      status: "unconfigured",
+      detail: "未配置；设置以下环境变量后可用。",
+      env: [...REALTIME_ENV],
+    };
+  }
+  const models = view.models.slice(0, 3).join(" / ");
+  return {
+    id: spec.id,
+    label: spec.label,
+    status: "available",
+    detail: models ? `模型：${models}` : "已配置",
+    env: [],
+  };
+};
+
+const loadDeploymentCapabilities = async () => {
+  const token = ++capabilityLoadToken;
+  capabilitiesState.set({ ...capabilitiesState(), loading: true, notice: null });
+  const [media, realtime] = await Promise.allSettled([
+    capabilityTransport().mediaCapabilities(),
+    capabilityTransport().realtimeStatus(),
+  ]);
+  if (token !== capabilityLoadToken) return;
+  const mediaFailure = media.status === "rejected" ? capabilityFailureOf(media.reason) : null;
+  const realtimeFailure = realtime.status === "rejected" ? capabilityFailureOf(realtime.reason) : null;
+  const rows = [
+    ...mediaCapabilityRowViews(media.status === "fulfilled" ? media.value : null, mediaFailure),
+    realtimeCapabilityRowView(realtime.status === "fulfilled" ? realtime.value : null, realtimeFailure),
+  ];
+  const failures = [mediaFailure, realtimeFailure].filter(
+    (failure): failure is CapabilityProbeFailure => failure !== null,
+  );
+  const notice = failures.includes("unreachable")
+    ? "unreachable"
+    : failures.includes("auth")
+      ? "auth"
+      : failures.includes("unsupported")
+        ? "unsupported"
+        : null;
+  capabilitiesState.set({ loading: false, rows, notice });
+};
+
+const capabilityBadge = (
+  status: CapabilityRowStatus,
+): { variant: "success" | "warning" | "secondary" | "outline"; label: string } => {
+  switch (status) {
+    case "available":
+      return { variant: "success", label: "可用" };
+    case "unconfigured":
+      return { variant: "warning", label: "未配置" };
+    case "unsupported":
+      return { variant: "secondary", label: "不支持" };
+    case "auth":
+      return { variant: "outline", label: "需要登录" };
+    default:
+      return { variant: "outline", label: "状态未知" };
+  }
+};
+
+function CapabilityRow(props: { row: () => CapabilityRowView }) {
+  const badge = () => capabilityBadge(props.row().status);
+  return (
+    <View
+      testID={`capability-row-${props.row().id}`}
+      style={{
+        gap: space.sm,
+        padding: space.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: color.border,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+          {props.row().label}
+        </Text>
+        <Badge testID={`capability-status-${props.row().id}`} variant={badge().variant} label={badge().label} />
+        <If when={!!props.row().detail}>
+          <Text
+            style={{
+              flex: 1,
+              minWidth: 160,
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.mutedForeground,
+            }}
+          >
+            {props.row().detail ?? ""}
+          </Text>
+        </If>
+      </View>
+      <If when={props.row().env.length > 0}>
+        <Text
+          testID={`capability-env-${props.row().id}`}
+          style={{
+            fontFamily: font.mono,
+            fontSize: typeScale.xs,
+            lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+            color: color.mutedForeground,
+            userSelect: "text",
+          }}
+        >
+          {`需要设置：${props.row().env.join(" · ")}`}
+        </Text>
+      </If>
+    </View>
+  );
+}
+
+/** The read-only 能力 page. It loads its own two probes on mount: they are
+ * facts of the live process, not of the settings document or the sessions
+ * store, and the section owns nothing writable. */
+export function CapabilitiesSection() {
+  effect(() => {
+    const timer = setTimeout(() => void loadDeploymentCapabilities(), 0);
+    cleanup(() => clearTimeout(timer));
+  });
+  const count = (status: CapabilityRowStatus): number =>
+    capabilitiesState().rows.filter((row) => row.status === status).length;
+  const unresolved = (): number => count("auth") + count("unknown");
+  return (
+    <Card testID="settings-capabilities">
+      <CardHeader
+        title="能力"
+        description="当前部署实际可用的模型能力（只读）。配置来自服务端进程的环境变量，这里只显示变量名，不显示端点或密钥。"
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            label="刷新"
+            accessibilityLabel="刷新能力状态"
+            onPress={() => void loadDeploymentCapabilities()}
+          />
+        }
+      />
+      <CardContent>
+        <If when={capabilitiesState().loading}>
+          <LoadingRow text="正在读取部署能力…" />
+        </If>
+        <If when={!capabilitiesState().loading}>
+          <View style={{ gap: space["3xl"] }}>
+            <Text
+              testID="capabilities-summary"
+              style={{ fontSize: typeScale.sm, color: color.mutedForeground }}
+            >
+              {`${count("available")} 项可用 · ${count("unconfigured")} 项未配置 · ${count("unsupported")} 项不支持${
+                unresolved() > 0 ? ` · ${unresolved()} 项状态未知` : ""
+              }`}
+            </Text>
+            <If when={capabilitiesState().notice === "auth"}>
+              <Notice tone="warning" testID="capabilities-notice-auth" accessibilityLabel="需要登录">
+                <Text
+                  style={{
+                    fontSize: typeScale.sm,
+                    lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                    color: color.foreground,
+                  }}
+                >
+                  需要登录后才能读取部署能力。
+                </Text>
+              </Notice>
+            </If>
+            <If when={capabilitiesState().notice === "unreachable"}>
+              <ErrorBlock
+                text="暂时无法读取部署能力，请稍后重试。"
+                onRetry={() => void loadDeploymentCapabilities()}
+              />
+            </If>
+            <If when={capabilitiesState().notice === "unsupported"}>
+              <Text
+                testID="capabilities-notice-unsupported"
+                style={{ fontSize: typeScale.sm, color: color.mutedForeground }}
+              >
+                当前服务端不提供部分能力探测；标注「不支持」的行即该情况。
+              </Text>
+            </If>
+            <Each of={capabilitiesState().rows} key={(row) => row.id}>
+              {(row) => <CapabilityRow row={row} />}
+            </Each>
+          </View>
+        </If>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ---- 快捷键 ---------------------------------------------------------------
 
 const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
@@ -1934,8 +2371,16 @@ function SectionBodyTail() {
 
 function SectionBodyEnd() {
   return (
-    <If when={settingsSection() === "shortcuts"} else={<AboutSection />}>
+    <If when={settingsSection() === "shortcuts"} else={<SectionBodyCapabilities />}>
       <ShortcutsSection />
+    </If>
+  );
+}
+
+function SectionBodyCapabilities() {
+  return (
+    <If when={settingsSection() === "capabilities"} else={<AboutSection />}>
+      <CapabilitiesSection />
     </If>
   );
 }

@@ -24,6 +24,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { effect, platform, signal, Storage, Text, untracked, View, windowSize } from "nsh";
 import { color, radius as kitRadius, typeScale } from "../tokens";
+import { focusRing } from "../components/styles";
 import {
   clampMaxSize,
   ResizableGroupWidth,
@@ -230,6 +231,9 @@ export function SidebarCollapseStrip(props: {
       // visible; pressed it arms (zcode's handle states).
       hoverStyle={{ backgroundColor: color.hover }}
       activeStyle={{ backgroundColor: color.glassStateArmed }}
+      // A keyboard user must see where the focus is: this 4px strip is the only
+      // way back to an expanded sidebar.
+      focusStyle={focusRing()}
       style={[
         { alignItems: "center", justifyContent: "center", backgroundColor: color.sidebar },
         props.style ?? null,

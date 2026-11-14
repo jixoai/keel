@@ -31,18 +31,27 @@ export type BadgeVariant =
   | "info"
   | "ghost";
 
+/** A tint family's faces. The semantic hue lives in `face` and `border` — the
+ * tint that *is* the meaning — while the glyph and the label both take
+ * `color.foreground`.
+ *
+ * Painting the label in the hue failed 1.4.3 measured against its own tinted
+ * face: light warning 2.46:1, success 2.77, info 3.38, destructive 3.85 (dark
+ * info 3.83, destructive 3.78). The same faces with the foreground ink measure
+ * 8.26–8.72 light and 7.19–7.73 dark. Colour is never the only channel here
+ * either: a status badge always carries an icon and a word. */
 const badgeTint = (variant: BadgeVariant): { face: string; ink: string; border: string } => {
   switch (variant) {
     case "secondary":
       return { face: color.secondary, ink: color.secondaryForeground, border: "transparent" };
     case "destructive":
-      return { face: alpha(color.destructive, 0.14), ink: color.destructive, border: alpha(color.destructive, 0.3) };
+      return { face: alpha(color.destructive, 0.14), ink: color.foreground, border: alpha(color.destructive, 0.3) };
     case "success":
-      return { face: color.successTint, ink: color.success, border: alpha(color.success, 0.3) };
+      return { face: color.successTint, ink: color.foreground, border: alpha(color.success, 0.3) };
     case "warning":
-      return { face: color.warningTint, ink: color.warning, border: alpha(color.warning, 0.3) };
+      return { face: color.warningTint, ink: color.foreground, border: alpha(color.warning, 0.3) };
     case "info":
-      return { face: color.infoTint, ink: color.info, border: alpha(color.info, 0.3) };
+      return { face: color.infoTint, ink: color.foreground, border: alpha(color.info, 0.3) };
     case "outline":
       return { face: "transparent", ink: color.foreground, border: color.border };
     case "ghost":

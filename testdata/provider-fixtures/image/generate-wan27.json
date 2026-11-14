@@ -1,0 +1,14 @@
+{
+  "created": 0,
+  "data": [
+    {
+      "url": "https://<redacted-asset-host>/..."
+    }
+  ],
+  "model": "bailian-token-plan/wan2.7-image",
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  }
+}

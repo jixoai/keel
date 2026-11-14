@@ -11,11 +11,17 @@ import (
 
 // kindSpec is the kernel's contract for one event kind.
 type kindSpec struct {
-	// class is the commit category: owner-scoped kinds carry the fence,
-	// edge-scoped kinds are client input and never see the lease.
+	// class is the default commit category: owner-scoped kinds carry the fence,
+	// edge-scoped kinds are client input, external-scoped kinds are the
+	// gateway's compatibility log, and system-scoped kinds are harness-driven
+	// facts with no lease.
 	class CommitClass
 	// key is the idempotency space the kind carries ("" = none).
 	key KeyKind
+	// system marks an owner-scoped kind that may also be committed through the
+	// system lane without a lease (task events for the initial card). It is
+	// irrelevant for pure ClassSystem kinds, which always require that lane.
+	system bool
 }
 
 // kindRegistry is the registered event kinds. A kind absent here cannot enter
@@ -32,7 +38,9 @@ type kindSpec struct {
 // run.finished is different: the worker DOES emit it once per settled attempt
 // (the attempt-level summary), because a client needs turns/tokens/stop reason
 // without reconstructing them from the transcript. It is bookkeeping, not a
-// message: the transcript decoder skips it.
+// message: the transcript decoder skips it. Each attempt carries its own run id
+// in the "run:" namespace, so a retried attempt is a new fact while a commit
+// retry of the same attempt dedupes.
 var kindRegistry = map[EventKind]kindSpec{
 	KindUserMessage:      {class: ClassEdge, key: KeyRequest},
 	KindAssistantMessage: {class: ClassOwner, key: KeyGeneration},
@@ -40,8 +48,33 @@ var kindRegistry = map[EventKind]kindSpec{
 	KindCompaction:       {class: ClassOwner},
 	KindRunStarted:       {class: ClassOwner},
 	KindRunFailed:        {class: ClassOwner},
-	KindRunFinished:      {class: ClassOwner},
+	KindRunFinished:      {class: ClassOwner, key: KeyRun},
 	KindExternalEvent:    {class: ClassExternal, key: KeyRequest},
+
+	// Task cards are owner-scoped during a run; the initial card is created
+	// before any run exists and therefore may use the system lane.
+	KindTaskCreated:  {class: ClassOwner, key: KeyTask, system: true},
+	KindTaskUpdated:  {class: ClassOwner, key: KeyTask, system: true},
+	KindTaskAttached: {class: ClassOwner, key: KeyTask, system: true},
+	KindTaskDetached: {class: ClassOwner, key: KeyTask, system: true},
+	KindTaskClosed:   {class: ClassOwner, key: KeyTask, system: true},
+	KindTaskNote:     {class: ClassOwner, key: KeyTask, system: true},
+
+	KindFSWrite:         {class: ClassOwner, key: KeyFSWrite},
+	KindFSCapture:       {class: ClassOwner, key: KeyFSCapture},
+	KindFSCaptureFailed: {class: ClassSystem, key: KeyFSCaptureFailed},
+
+	KindConfigRotated: {class: ClassSystem, key: KeyConfig},
+
+	KindPlacementJoined: {class: ClassSystem, key: KeyPlacement},
+	KindPlacementLeft:   {class: ClassSystem, key: KeyPlacement},
+
+	KindSupervisionEscalated: {class: ClassSystem, key: KeySupervision},
+	KindGuardrailTripped:     {class: ClassSystem, key: KeyGuardrail},
+	KindResumeAttempt:        {class: ClassSystem, key: KeyResume},
+
+	KindNotificationAck:      {class: ClassSystem, key: KeyNotificationAck},
+	KindNotificationPushSent: {class: ClassSystem, key: KeyNotificationPush},
 }
 
 // RegisteredKind reports whether the kind may be committed.
@@ -83,22 +116,74 @@ func Kinds() []EventKind {
 		KindRunFailed,
 		KindRunFinished,
 		KindExternalEvent,
+		KindTaskCreated,
+		KindTaskUpdated,
+		KindTaskAttached,
+		KindTaskDetached,
+		KindTaskClosed,
+		KindTaskNote,
+		KindFSWrite,
+		KindFSCapture,
+		KindFSCaptureFailed,
+		KindConfigRotated,
+		KindPlacementJoined,
+		KindPlacementLeft,
+		KindSupervisionEscalated,
+		KindGuardrailTripped,
+		KindResumeAttempt,
+		KindNotificationAck,
+		KindNotificationPushSent,
+	}
+}
+
+// keyOrder is the stable order used for validation and diagnostics.
+var keyOrder = []KeyKind{
+	KeyRequest,
+	KeyGeneration,
+	KeyToolCall,
+	KeyTask,
+	KeyFSWrite,
+	KeyFSCapture,
+	KeyFSCaptureFailed,
+	KeyConfig,
+	KeyPlacement,
+	KeySupervision,
+	KeyGuardrail,
+	KeyResume,
+	KeyNotificationAck,
+	KeyNotificationPush,
+	KeyRun,
+}
+
+// keyValues collects every idempotency key the request supplies. A kind takes
+// exactly one; an extra key is a caller bug, not a second dedupe dimension.
+func keyValues(req CommitRequest) map[KeyKind]string {
+	return map[KeyKind]string{
+		KeyRequest:          req.RequestID,
+		KeyGeneration:       req.GenerationID,
+		KeyToolCall:         req.ToolCallID,
+		KeyTask:             req.TaskEventKey,
+		KeyFSWrite:          req.FSWriteKey,
+		KeyFSCapture:        req.FSCaptureKey,
+		KeyFSCaptureFailed:  req.FSCaptureFailedKey,
+		KeyConfig:           req.ConfigKey,
+		KeyPlacement:        req.PlacementKey,
+		KeySupervision:      req.SupervisionKey,
+		KeyGuardrail:        req.GuardrailKey,
+		KeyResume:           req.ResumeKey,
+		KeyNotificationAck:  req.NotificationAckKey,
+		KeyNotificationPush: req.NotificationPushKey,
+		KeyRun:              req.RunID,
 	}
 }
 
 // keyFor validates the idempotency key shape of a request against its kind.
 func (s kindSpec) keyFor(req CommitRequest) (KeyRef, error) {
-	present := make(map[KeyKind]string, 3)
-	for _, kv := range []struct {
-		kind  KeyKind
-		value string
-	}{
-		{KeyRequest, req.RequestID},
-		{KeyGeneration, req.GenerationID},
-		{KeyToolCall, req.ToolCallID},
-	} {
-		if kv.value != "" {
-			present[kv.kind] = kv.value
+	values := keyValues(req)
+	present := make(map[KeyKind]string, 1)
+	for _, kind := range keyOrder {
+		if values[kind] != "" {
+			present[kind] = values[kind]
 		}
 	}
 	if s.key == "" {
@@ -121,7 +206,7 @@ func (s kindSpec) keyFor(req CommitRequest) (KeyRef, error) {
 
 func keyList(present map[KeyKind]string) string {
 	out := ""
-	for _, k := range []KeyKind{KeyRequest, KeyGeneration, KeyToolCall} {
+	for _, k := range keyOrder {
 		if _, ok := present[k]; !ok {
 			continue
 		}
@@ -351,7 +436,7 @@ func validateRunFinishedPayload(raw json.RawMessage) error {
 	// provider and model are the execution identity the attempt resolved to.
 	// The kernel checks their shape only: which providers exist is product
 	// configuration, not kernel vocabulary.
-	for _, field := range []string{"provider", "model"} {
+	for _, field := range []string{"provider", "model", "configHashBefore", "configHashAfter"} {
 		if v, ok := payload[field]; ok && !isJSONString(v) {
 			return fmt.Errorf(`run.finished payload %q must be a string`, field)
 		}

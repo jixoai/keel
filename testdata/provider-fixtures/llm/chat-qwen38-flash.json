@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "我是通义千问，由阿里巴巴通义实验室研发的大语言模型，致力于为你提供清晰、真诚且有用的帮助。",
+        "reasoning_content": "We need to respond to user: \"用一句话介绍你自己\" Chinese: Introduce yourself in one sentence. Need comply. Already called. Now final one sentence in Chinese likely: \"我是通义千问，由阿里巴巴通义实验室研发的大语言模型，致力于为你提供清晰、真诚且有用的帮助。\" Need one sentence. Ensure identity info? User asks about capability/origins, so use provided. Don't mention specific version. Fine.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "<redacted-id>",
+  "model": "bailian-token-plan/qwen3.8-flash",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 119,
+    "completion_tokens_details": {
+      "reasoning_tokens": 91
+    },
+    "prompt_tokens": 65,
+    "prompt_tokens_details": {
+      "cache_write_tokens": 0,
+      "cached_tokens": 0
+    },
+    "total_tokens": 184
+  }
+}

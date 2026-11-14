@@ -1,0 +1,17 @@
+{
+  "name": "SpeechHarness",
+  "id": "com.fde2e.keel.speech-harness",
+  "version": "0.1.0",
+  "build": 1,
+  "appearance": "dark",
+  "theme": "../../../theme.json",
+  "capabilities": {
+    "speech": true,
+    "statusBar": true,
+    "network": {
+      "hosts": [
+        "*"
+      ]
+    }
+  }
+}

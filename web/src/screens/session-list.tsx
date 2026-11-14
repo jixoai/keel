@@ -171,6 +171,12 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
   /** The pointer is on the row: the wide layout's overflow action only shows
    * then (or while the row is the open one — a terminal has no hover). */
   const hovered = signal(false);
+  /** The keyboard focus is on (or inside) the row. The overflow action is
+   * pointer-only unless this is tracked too: a row is `focusable`, so Tab
+   * lands on it, and without this the one control that reaches 「删除会话」
+   * would stay unmounted for every keyboard user (2.1.1: a pointer path with
+   * no keyboard path). */
+  const focused = signal(false);
 
   const trigger = (
     // The row is the trigger's *content*, never the trigger's element: the
@@ -188,6 +194,9 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
         accessibilityState={{ selected: props.active }}
         onMouseEnter={() => hovered.set(true)}
         onMouseLeave={() => hovered.set(false)}
+        // Tabbing onto the row reveals the same action the pointer does.
+        onFocus={() => focused.set(true)}
+        onBlur={() => focused.set(false)}
         // The selection is the accessibility state itself (`selectedStyle`), so
         // the face and `accessibilityState.selected` can never drift apart. The
         // row is flat like the reference's (`TaskListItem.tsx:570-577`, no
@@ -240,16 +249,28 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
               }}
             />
             <If when={time() !== ""}>
-              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}>
+              {/* 12px, not 10: UI text below 12px stops being readable at 1×,
+                  and a CJK timestamp at 10px is a smear. `flexShrink: 0` keeps
+                  the time whole — the preview next to it is the value allowed
+                  to truncate (truncation with no way back is the worse
+                  failure). */}
+              <Text
+                style={{
+                  flexShrink: 0,
+                  fontSize: typeScale.sm,
+                  color: color.mutedForeground,
+                  fontVariant: ["tabular-nums"],
+                }}
+              >
                 {time()}
               </Text>
             </If>
           </View>
         </View>
-        {/* The row's actions are a pointer's, never a permanent column of
-            glyphs: they show while the pointer is on the row or the row is the
-            open one, and the title keeps the room they would take. */}
-        <If when={props.wide && (hovered() || props.active)}>
+        {/* The row's actions are a pointer's — or the keyboard's, once the row
+            holds the focus (a terminal has no hover, so the open row keeps
+            them too). The title keeps the room they would take. */}
+        <If when={props.wide && (hovered() || focused() || props.active)}>
           <DropdownMenu
             accessibilityLabel={`会话操作 ${title()}`}
             trigger={
@@ -391,16 +412,23 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.sidebarForeground }}>
             Keel
           </Text>
-          <Text style={{ fontSize: typeScale["2xs"], color: color.mutedForeground }}>AI 员工会话</Text>
+          {/* 12px is the UI floor; 9px CJK ink read as a solid block. */}
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>AI 员工会话</Text>
         </View>
-        <IconButton icon="plus" label="新建会话" onPress={() => void store.createSession()} />
-        <IconButton
-          icon="refresh"
-          label="刷新会话"
-          disabled={refreshing()}
-          onPress={() => void refresh()}
-        />
-        <IconButton icon="settings" label="打开设置" onPress={() => store.openSettings()} />
+        {/* The three icon buttons are borderless and gapless-looking at 6px: a
+            row gap one step wider (8px) plus their own padding keeps them apart
+            as three targets, so 「新建会话」 and 「刷新会话」 are not one press
+            away from each other by accident. */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+          <IconButton icon="plus" label="新建会话" onPress={() => void store.createSession()} />
+          <IconButton
+            icon="refresh"
+            label="刷新会话"
+            disabled={refreshing()}
+            onPress={() => void refresh()}
+          />
+          <IconButton icon="settings" label="打开设置" onPress={() => store.openSettings()} />
+        </View>
       </View>
       {/* L1 · the search: the kit's Input, nothing drawn around it. */}
       <View style={{ paddingHorizontal: space.md, paddingVertical: space.md }}>

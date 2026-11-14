@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/decisions",
+    "body": {
+      "model": "bailian-token-plan/decision-model-preview",
+      "input": "Rate the quality of this message: hello.",
+      "questions": [
+        {
+          "type": "score",
+          "predicate": "quality",
+          "levels": [
+            "bad",
+            "great"
+          ]
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 400,
+    "contentType": "application/json",
+    "body": {
+      "error": {
+        "code": null,
+        "message": "questions[0] is not a question: json: cannot unmarshal string into Go struct field question.levels of type struct { Label string \"json:\\\"label\\\"\"; Description string \"json:\\\"description\\\"\" }",
+        "param": null,
+        "type": "invalid_request_error"
+      }
+    }
+  }
+}

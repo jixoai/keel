@@ -110,7 +110,12 @@ func buildModelsService(tenant host.TenantConfig, llm LLMOptions, wrap func(prov
 	if err != nil {
 		return nil, fmt.Errorf("model configuration: %w", err)
 	}
-	resolver, err := modelcfg.NewResolver(modelcfg.EmbeddedBuiltin(), overlay)
+	// The catalog is the built-in one plus the demo layer when this process
+	// enables it. The switch is read from the process environment (the same
+	// answer every other surface gives), so a deployment that does not set it
+	// resolves the embedded catalog itself and cannot differ from the previous
+	// release.
+	resolver, err := modelcfg.NewResolver(modelcfg.DemoCatalogFromEnv(), overlay)
 	if err != nil {
 		return nil, fmt.Errorf("model configuration: %w", err)
 	}
@@ -296,12 +301,16 @@ func (m *modelsService) ProviderViews() []modelcfg.ProviderView {
 	return out
 }
 
-// ModelViews returns the flat, selectable model list of the visible providers
-// whose credential this process can actually resolve. A model that is
-// selectable on paper but cannot authenticate here is not a choice: the picker
-// must not offer what an attempt would fail on. The visibility filter is
-// repeated here (the resolution already refuses to resolve hidden providers) so
-// a hidden provider can never leak into a picker projection.
+// ModelViews returns the flat registry list of the visible providers whose
+// credential this process can actually resolve: every complete, enabled model,
+// including a non-selectable one (a decision model is executable but opens no
+// session surface). Selectable is the picker's narrower fact — the client skips
+// selectable=false rows and the settings view shows them with their issues. A
+// model that is selectable on paper but cannot authenticate here is still not
+// offered: the picker must not list what an attempt would fail on, so a
+// provider without a resolvable credential contributes nothing. The visibility
+// filter is repeated here (the resolution already refuses to resolve hidden
+// providers) so a hidden provider can never leak into a picker projection.
 func (m *modelsService) ModelViews() []modelcfg.ModelView {
 	visible := make(map[string]modelcfg.ProviderView, len(m.resolution.Providers))
 	for _, view := range m.resolution.Providers {
@@ -351,9 +360,19 @@ func (m *modelsService) ProvidersExecutable() int {
 	return count
 }
 
-// ModelsSelectable counts the models a picker may offer: the flat selectable
-// list of the visible, credential-resolvable providers.
-func (m *modelsService) ModelsSelectable() int { return len(m.ModelViews()) }
+// ModelsSelectable counts the models a picker may offer: the selectable subset
+// of the flat registry list. ModelViews also carries non-selectable entries (a
+// decision model is executable but opens no session), so this is a filter, not
+// a length.
+func (m *modelsService) ModelsSelectable() int {
+	count := 0
+	for _, model := range m.ModelViews() {
+		if model.Selectable {
+			count++
+		}
+	}
+	return count
+}
 
 // resolveActive is the shared fail-closed core of Resolve and
 // ValidateSelection. It performs no IO.
@@ -457,6 +476,13 @@ func (m *modelsService) contextWindow(active modelcfg.ActiveModel) int {
 // environment value is ever logged.
 func (m *modelsService) credential(active modelcfg.ActiveModel) (string, error) {
 	access := active.Access
+	// A provider that declares no credential resolves to the empty key. This is
+	// not a fallback: the declaration is the fact, and asking the environment for
+	// a value the provider never wanted would be the bug. The demo protocol and a
+	// local endpoint are the two shapes that declare it.
+	if access.CredentialFree() && strings.TrimSpace(access.Ref) == "" && strings.TrimSpace(access.Env) == "" {
+		return "", nil
+	}
 	if ref := strings.TrimSpace(access.Ref); ref != "" {
 		value, reason := m.resolveRef(ref)
 		if reason == "" {
@@ -502,6 +528,11 @@ func (m *modelsService) credentialAvailable(access modelcfg.Access) bool {
 // diagnostic come from one function, so the picker and the settings view can
 // never disagree about whether a provider can authenticate.
 func (m *modelsService) credentialIssue(access modelcfg.Access) (modelcfg.Issue, bool) {
+	// A declared credential-free provider has nothing to resolve, so it is
+	// available by construction — the same verdict credential() returns.
+	if access.CredentialFree() && strings.TrimSpace(access.Ref) == "" && strings.TrimSpace(access.Env) == "" {
+		return modelcfg.Issue{}, false
+	}
 	if ref := strings.TrimSpace(access.Ref); ref != "" {
 		if _, reason := m.resolveRef(ref); reason == "" {
 			return modelcfg.Issue{}, false
@@ -613,6 +644,11 @@ func (m *modelsService) stream(active modelcfg.ActiveModel) (provider.StreamFn, 
 		driver = provider.NewOpenAIResponsesProvider(active.ProviderID, active.API.BaseURL, nil)
 	case modelcfg.APITypeAnthropicMessages:
 		driver = provider.NewAnthropicProvider(active.API.BaseURL, nil)
+	case modelcfg.APITypeDemo:
+		// The in-process demo driver. It reaches no endpoint and needs no
+		// credential, which is exactly why the protocol is distinct: a fake base
+		// URL would be dialed the day this branch is missed.
+		driver = provider.NewDemoProvider()
 	default:
 		return nil, fmt.Errorf("model %s: unsupported API type %q", modelIdentity(active), active.API.Type)
 	}

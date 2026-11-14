@@ -334,6 +334,12 @@ func selectionToMap(selection Selection) map[string]any {
 	if selection.ReasoningLevel != "" {
 		out["reasoningLevel"] = selection.ReasoningLevel
 	}
+	if selection.ProviderType != "" {
+		out["providerType"] = selection.ProviderType
+	}
+	if selection.SurfaceKind != "" {
+		out["surfaceKind"] = selection.SurfaceKind
+	}
 	return out
 }
 

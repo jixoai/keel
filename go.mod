@@ -3,6 +3,7 @@ module github.com/jixoai/keel
 go 1.27.3
 
 require (
+	github.com/coder/websocket v1.8.13
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/openai/openai-go v1.12.0

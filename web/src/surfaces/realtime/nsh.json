@@ -1,0 +1,14 @@
+{
+  "name": "RealtimeHarness",
+  "id": "com.fde2e.keel.realtime-harness",
+  "version": "0.1.0",
+  "build": 1,
+  "appearance": "dark",
+  "theme": "../../../theme.json",
+  "capabilities": {
+    "host": [
+      "keel.*"
+    ],
+    "statusBar": true
+  }
+}

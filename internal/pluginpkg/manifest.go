@@ -1,14 +1,17 @@
 // Package pluginpkg is the plugin package contract: the `plugin.yaml` manifest,
-// its validation rules (field-level errors), package discovery under a plugins
-// root, the version gate (`engines.keel`) and the content-addressed package
-// store (tree hash + managed copy).
+// its validation rules (field-level errors), the CLI capability tree
+// (`provides.cli`, see cli.go), package discovery under a plugins root, the
+// version gate (`engines.keel`) and the content-addressed package store (tree
+// hash + managed copy).
 //
 // The package never loads a plugin. Loading is the agentext plugin manager's
 // job, which consumes the types here; keeping the split means a manifest can be
 // parsed, validated and audited in tests (and by tooling) without a runtime.
 //
 // Spec: openspec/changes/keel-plugin-core/specs/plugin-system/spec.md
-// (Requirement: 插件包与清单 / 发现、安装与包存储).
+// (Requirement: 插件包与清单 / 发现、安装与包存储);
+// openspec/changes/keel-agent-team-v1/specs/plugin-capabilities/spec.md
+// (Requirement: 每个插件声明能力树).
 package pluginpkg
 
 import (
@@ -18,6 +21,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jixoai/keel/internal/modelprovider"
 )
 
 // PluginFileName is the manifest file inside a plugin package directory.
@@ -112,8 +117,45 @@ type Provides struct {
 	Hooks []string `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 	// Triggers are trigger ids the plugin owns.
 	Triggers []string `yaml:"triggers,omitempty" json:"triggers,omitempty"`
+	// ProviderTypes are the provider capability families the plugin declares
+	// (`provides.provider_types`). Each declaration carries the display name,
+	// capabilities and the config/auth/model/parameter schemas the settings UI
+	// renders and the harness validates instances against; the type vocabulary is
+	// open, so a plugin may declare "embedding" without a code change.
+	ProviderTypes []modelprovider.ProviderType `yaml:"provider_types,omitempty" json:"provider_types,omitempty"`
+	// Provider marks the plugin as a provider plugin (`provides.provider`): the
+	// spec requires `layer: provider`, and the plugin may list the feature ports
+	// it serves.
+	Provider *ProviderPluginDecl `yaml:"provider,omitempty" json:"provider,omitempty"`
+	// FeaturePorts are the feature ports the plugin itself serves
+	// (`provides.feature_ports`), distinct from the ports a single provider type
+	// declares.
+	FeaturePorts []string `yaml:"feature_ports,omitempty" json:"feature_ports,omitempty"`
+	// Agents are the agent ids the plugin contributes (`provides.agents`).
+	Agents []string `yaml:"agents,omitempty" json:"agents,omitempty"`
+	// AgentTeams are the agent-team ids the plugin contributes
+	// (`provides.agent_teams`).
+	AgentTeams []string `yaml:"agent_teams,omitempty" json:"agent_teams,omitempty"`
+	// CLI is the plugin's capability tree: every command and sub-command it
+	// contributes below `keel`, with the summary, schemas, permissions, danger,
+	// idempotency and callers that `--help`, the settings page, creation mode
+	// and the agent tool face share as one source of truth.
+	CLI []CLICapability `yaml:"cli,omitempty" json:"cli,omitempty"`
 	// UI is the webview resource declaration; required for kind webview.
 	UI *UI `yaml:"ui,omitempty" json:"ui,omitempty"`
+}
+
+// ProviderPluginLayer is the only legal value of `provides.provider.layer`.
+const ProviderPluginLayer = "provider"
+
+// ProviderPluginDecl is the plugin-level provider declaration
+// (`provides.provider`): a provider plugin MUST declare `layer: provider`
+// (specs/provider-registry, Requirement: Provider 插件隔离与崩溃边界).
+type ProviderPluginDecl struct {
+	// Layer is the plugin layer; must be ProviderPluginLayer.
+	Layer string `yaml:"layer" json:"layer"`
+	// FeaturePorts are the feature ports this provider plugin serves.
+	FeaturePorts []string `yaml:"feature_ports,omitempty" json:"feature_ports,omitempty"`
 }
 
 // UI is a webview plugin's resource declaration.
@@ -552,6 +594,9 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 			seenTriggers[id] = true
 		}
 	}
+	m.validateProviderProvides(errs)
+	m.validateAgentProvides(errs)
+	m.validateCLI(errs)
 	if m.Provides.UI == nil {
 		if validKind && m.Kind == KindWebview {
 			errs.add("provides.ui", "kind webview requires provides.ui.entry")
@@ -564,6 +609,150 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 	if len([]rune(m.Provides.UI.Title)) > 128 {
 		errs.add("provides.ui.title", "title must be at most 128 characters")
 	}
+}
+
+// providerDeclarationFieldNames maps the domain field names of a provider type
+// declaration onto the manifest's snake_case names, so a field error names the
+// key the plugin author wrote.
+var providerDeclarationFieldNames = map[string]string{
+	"typeId":       "type_id",
+	"displayName":  "display_name",
+	"pluginId":     "plugin_id",
+	"configSchema": "config_schema",
+	"authSchema":   "auth_schema",
+	"modelSchema":  "model_schema",
+	"featurePorts": "feature_ports",
+	"surface":      "surface",
+	// The surface block's nested fields use camelCase in the domain and
+	// snake_case in a plugin manifest; the exact paths keep a nested error
+	// naming the key the author wrote.
+	"surface.surfaceKind":                        "surface.surface_kind",
+	"surface.realtime.maxConcurrentSessions":     "surface.realtime.max_concurrent_sessions",
+	"surface.realtime.maxSessionDurationSeconds": "surface.realtime.max_session_duration_seconds",
+}
+
+// manifestFieldPath renders a provider declaration field error path in the
+// manifest's own spelling ("provides.provider_types[0].config_schema").
+func manifestFieldPath(prefix, domainField string) string {
+	if domainField == "" {
+		return prefix
+	}
+	for camel, snake := range providerDeclarationFieldNames {
+		switch {
+		case domainField == camel:
+			return prefix + "." + snake
+		case strings.HasPrefix(domainField, camel+"."), strings.HasPrefix(domainField, camel+"["):
+			return prefix + "." + snake + domainField[len(camel):]
+		}
+	}
+	return prefix + "." + domainField
+}
+
+// validateProviderProvides checks the provider extension surface:
+// `provides.provider_types`, `provides.provider` and `provides.feature_ports`.
+// A manifest that writes these fields to the spec must be accepted by
+// KnownFields(true), and a declaration that could not be assembled must fail
+// here with the field that is wrong.
+func (m *Manifest) validateProviderProvides(errs *fieldSet) {
+	for index, declaration := range m.Provides.ProviderTypes {
+		prefix := fmt.Sprintf("provides.provider_types[%d]", index)
+		if err := declaration.ValidateDeclaration(); err != nil {
+			for _, failure := range modelprovider.FieldErrors(err) {
+				errs.add(manifestFieldPath(prefix, failure.Field), "%s", failure.Message)
+			}
+		}
+		if declaration.PluginID != "" && m.ID != "" && declaration.PluginID != m.ID {
+			errs.add(
+				prefix+".plugin_id",
+				"provider type %q names plugin %q but is declared by this manifest (%q); a type declared here is owned by the manifest's plugin",
+				declaration.TypeID, declaration.PluginID, m.ID,
+			)
+		}
+	}
+
+	seenPorts := map[string]bool{}
+	for index, port := range m.Provides.FeaturePorts {
+		field := fmt.Sprintf("provides.feature_ports[%d]", index)
+		switch {
+		case strings.TrimSpace(port) == "":
+			errs.add(field, "feature port must not be empty")
+		case !modelprovider.ValidFeaturePort(port):
+			errs.add(field, "feature port %q must be lowercase, start with a letter and contain only letters, digits, '.', '_', ':' or '-'", port)
+		case seenPorts[port]:
+			errs.add(field, "feature port %q is declared twice", port)
+		default:
+			seenPorts[port] = true
+		}
+	}
+
+	declaration := m.Provides.Provider
+	switch {
+	case declaration == nil:
+		if len(m.Provides.ProviderTypes) > 0 {
+			errs.add("provides.provider", "a manifest declaring provides.provider_types must also declare provides.provider with layer: provider")
+		}
+		return
+	case declaration.Layer != ProviderPluginLayer:
+		errs.add("provides.provider.layer", "provider plugin layer must be %q, got %q", ProviderPluginLayer, declaration.Layer)
+	}
+	if len(m.Provides.ProviderTypes) == 0 {
+		errs.add("provides.provider_types", "a provider plugin must declare at least one provider type")
+	}
+	seenProviderPorts := map[string]bool{}
+	for index, port := range declaration.FeaturePorts {
+		field := fmt.Sprintf("provides.provider.feature_ports[%d]", index)
+		switch {
+		case strings.TrimSpace(port) == "":
+			errs.add(field, "feature port must not be empty")
+		case !modelprovider.ValidFeaturePort(port):
+			errs.add(field, "feature port %q must be lowercase, start with a letter and contain only letters, digits, '.', '_', ':' or '-'", port)
+		case seenProviderPorts[port]:
+			errs.add(field, "feature port %q is declared twice", port)
+		default:
+			seenProviderPorts[port] = true
+		}
+	}
+}
+
+// validateAgentProvides checks the agent/team extension surface
+// (`provides.agents`, `provides.agent_teams`): declared ids follow the manifest
+// name grammar and are unique, so an install cannot contribute one agent twice.
+func (m *Manifest) validateAgentProvides(errs *fieldSet) {
+	validateDeclaredNames := func(field string, names []string) {
+		seen := map[string]bool{}
+		for index, name := range names {
+			path := fmt.Sprintf("%s[%d]", field, index)
+			switch {
+			case strings.TrimSpace(name) == "":
+				errs.add(path, "name must not be empty")
+			case !namePattern.MatchString(name):
+				errs.add(path, "name %q must match %s", name, namePattern.String())
+			case seen[name]:
+				errs.add(path, "name %q is declared twice", name)
+			default:
+				seen[name] = true
+			}
+		}
+	}
+	validateDeclaredNames("provides.agents", m.Provides.Agents)
+	validateDeclaredNames("provides.agent_teams", m.Provides.AgentTeams)
+}
+
+// ProviderTypes returns the declared provider types with the declaring plugin
+// filled in, ready for assembly against the plugin's SchemaSet. The result is a
+// copy: editing it cannot edit the manifest.
+func (m *Manifest) ProviderTypes() []modelprovider.ProviderType {
+	if len(m.Provides.ProviderTypes) == 0 {
+		return nil
+	}
+	types := make([]modelprovider.ProviderType, len(m.Provides.ProviderTypes))
+	for index, declaration := range m.Provides.ProviderTypes {
+		types[index] = declaration.Normalized()
+		if types[index].PluginID == "" {
+			types[index].PluginID = m.ID
+		}
+	}
+	return types
 }
 
 // validateRelPath refuses absolute paths and any ".." segment: a UI entry may

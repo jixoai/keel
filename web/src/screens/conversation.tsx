@@ -35,6 +35,11 @@ import { store } from "../data/store";
 import { Badge, color, ComposerDock, ConversationColumn, row, Skeleton, space, typeScale } from "../ui/kit";
 import { ApprovalCard, EmptyConversation, GuideWaitingRow, OfflineBanner, TurnErrorBanner, TurnRow } from "./messages";
 import { Composer, prefillComposer } from "./composer";
+import { ImageSurface } from "../surfaces/image";
+import { RealtimeSurface } from "../surfaces/realtime";
+import { SpeechSurface } from "../surfaces/speech";
+import { UnsupportedSurface } from "../surfaces/unsupported";
+import { resolveSelectionSurface, type SurfaceDescriptor } from "../surfaces/registry";
 
 interface Row {
   kind: "turn" | "decision" | "guide";
@@ -155,7 +160,7 @@ function LoadingRows() {
 // The panel keeps the two callbacks the old in-panel header used (`onBack`,
 // `onOpenList`): the signature is shared with the shell, which owns those
 // affordances now, and a shell that still hands them down must keep compiling.
-export function Conversation(props: { wide: boolean; onOpenList?: () => void; onBack?: () => void }) {
+function LlmConversation(props: { wide: boolean; onOpenList?: () => void; onBack?: () => void }) {
   let list: ListRef | undefined;
   // The conversation's own width: what the kit's blocks are keyed on. 0 until
   // the first layout lands — the window is the stand-in for that one frame.
@@ -328,5 +333,64 @@ export function Conversation(props: { wide: boolean; onOpenList?: () => void; on
         <Composer view={store.conversation()} compact={!props.wide} />
       </ComposerDock>
     </View>
+  );
+}
+
+/** The session's surface: the provider kind decides the composer/timeline pair
+ * (`keel-session-surfaces-v1`). LLM is the regression baseline; image,
+ * realtime and speech mount their own panels. A real selection resolves
+ * through the registry, so the standard-mode model chip follows the same rule
+ * once the registry projects a provider type.
+ *
+ * The dispatch is exhaustive on purpose. `video` and `generic` have no shipped
+ * panel, and they mount the honest placeholder — falling through to the chat
+ * shell (the old behaviour) presented a video or unknown-provider session as a
+ * text conversation with an empty history. */
+export function Conversation(props: { wide: boolean; onOpenList?: () => void; onBack?: () => void }) {
+  const resolved = () =>
+    resolveSelectionSurface(
+      store.sessionSelection() ?? store.tenantSelection(),
+      store.models(),
+      store.providers(),
+    );
+  const kind = () => resolved().kind;
+  const descriptor = () => (kind() === "llm" ? null : resolved().descriptor) as SurfaceDescriptor | null;
+  const openSettings = () => {
+    store.openSettings();
+    if (store.mode() === "http" && !store.settings() && !store.settingsLoading()) void store.loadModelsSettings();
+  };
+  return (
+    <If
+      when={kind() === "image"}
+      else={
+        <If
+          when={kind() === "realtime"}
+          else={
+            <If
+              when={kind() === "speech"}
+              else={
+                <If
+                  when={kind() === "video" || kind() === "generic"}
+                  else={<LlmConversation wide={props.wide} onOpenList={props.onOpenList} onBack={props.onBack} />}
+                >
+                  <UnsupportedSurface
+                    wide={props.wide}
+                    kind={kind()}
+                    descriptor={descriptor()!}
+                    onOpenSettings={openSettings}
+                  />
+                </If>
+              }
+            >
+              <SpeechSurface wide={props.wide} mode={descriptor()?.speechMode ?? "stt"} />
+            </If>
+          }
+        >
+          <RealtimeSurface wide={props.wide} />
+        </If>
+      }
+    >
+      <ImageSurface wide={props.wide} />
+    </If>
   );
 }

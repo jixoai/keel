@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/realtime/sessions",
+    "body": {
+      "model": "bailian-token-plan/qwen3.8-flash"
+    }
+  },
+  "response": {
+    "status": 401,
+    "contentType": "text/plain; charset=utf-8",
+    "body": "open the link magpie web printed when it started: it carries the key. This browser sent no sign-in cookie for this address. A browser keeps cookies per host, not per port, so another service on this host's other ports can take it away: by clearing its site data (a sign-out often does), or by filling the host's cookie limit. A page opened at another address than the one signed in at (an IP instead of a name) has none either.\n"
+  }
+}

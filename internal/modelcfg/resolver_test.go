@@ -1,6 +1,7 @@
 package modelcfg
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -618,4 +619,130 @@ func TestReasoningValuesOutsideTheRuntimeVocabulary(t *testing.T) {
 		t.Fatalf("a model with a non-runtime reasoning level must not execute: %#v", model)
 	}
 	requireIssue(t, model.Issues, "options.reasoningLevel.values", `reasoning level "turbo" is not a runtime level (want off|minimal|low|medium|high|xhigh|max)`)
+}
+
+// TestSurfaceKindForType pins the provider family → session surface mapping.
+// Only the families with a dedicated panel are mapped; everything else is the
+// generic surface, never a silent llm.
+func TestSurfaceKindForType(t *testing.T) {
+	tests := map[string]string{
+		"":          SurfaceKindLLM, // legacy: absent type is llm
+		"llm":       SurfaceKindLLM,
+		" LLM ":     SurfaceKindLLM,
+		"realtime":  SurfaceKindRealtime,
+		"Realtime":  SurfaceKindRealtime,
+		"image":     SurfaceKindImage,
+		"video":     SurfaceKindVideo,
+		"tts":       SurfaceKindSpeech,
+		"stt":       SurfaceKindSpeech,
+		"generic":   SurfaceKindGeneric,
+		"embedding": SurfaceKindGeneric, // a plugin family with no panel
+	}
+	for providerType, want := range tests {
+		if got := SurfaceKindForType(providerType); got != want {
+			t.Fatalf("SurfaceKindForType(%q) = %q, want %q", providerType, got, want)
+		}
+	}
+}
+
+// TestLegacyProviderDefaultsToLLM pins the upgrade promise: a document written
+// before provider types existed resolves as an llm provider on both views, so
+// every existing deployment keeps its picker and session surface unchanged.
+func TestLegacyProviderDefaultsToLLM(t *testing.T) {
+	doc := testCatalogDoc([]any{
+		testProvider("legacy", APITypeOpenAIChatCompletions, "https://legacy.example/v1", "LEGACY_KEY", "legacy-model"),
+	})
+	resolution := resolveFrom(t, loadTestCatalog(t, doc), Overlay{})
+
+	provider := mustFindProvider(t, resolution, "legacy")
+	if provider.ProviderType != ProviderTypeLLM || provider.SurfaceKind != SurfaceKindLLM {
+		t.Fatalf("legacy provider = %s/%s, want llm/llm", provider.ProviderType, provider.SurfaceKind)
+	}
+	model := mustFindModel(t, resolution, "legacy", "legacy-model")
+	if model.ProviderType != ProviderTypeLLM || model.SurfaceKind != SurfaceKindLLM {
+		t.Fatalf("legacy model = %s/%s, want llm/llm", model.ProviderType, model.SurfaceKind)
+	}
+}
+
+// TestRealtimeProviderReachesThePicker pins the blocker: a provider declared
+// with type realtime, and a model that declares audio output, resolves to a
+// selectable model whose views carry providerType/surfaceKind on the wire.
+func TestRealtimeProviderReachesThePicker(t *testing.T) {
+	doc := testCatalogDoc([]any{
+		testProviderWithType("omni", ProviderTypeRealtime,
+			APITypeOpenAIChatCompletions, "https://omni.example/v1", "OMNI_KEY", "qwen-omni"),
+	})
+	doc["providerModelRules"] = []any{
+		map[string]any{
+			"providerId": "omni",
+			"modelId":    "qwen-omni",
+			"config": map[string]any{
+				"properties": map[string]any{
+					"inputFormat":  map[string]any{"text": true, "audio": true},
+					"outputFormat": map[string]any{"text": true, "audio": true},
+				},
+			},
+		},
+	}
+	resolution := resolveFrom(t, loadTestCatalog(t, doc), Overlay{})
+
+	provider := mustFindProvider(t, resolution, "omni")
+	if provider.ProviderType != ProviderTypeRealtime || provider.SurfaceKind != SurfaceKindRealtime {
+		t.Fatalf("realtime provider = %s/%s, want realtime/realtime", provider.ProviderType, provider.SurfaceKind)
+	}
+	model := mustFindModel(t, resolution, "omni", "qwen-omni")
+	if model.ProviderType != ProviderTypeRealtime || model.SurfaceKind != SurfaceKindRealtime {
+		t.Fatalf("realtime model = %s/%s, want realtime/realtime", model.ProviderType, model.SurfaceKind)
+	}
+	if !model.Properties.OutputFormat.Text || !model.Properties.OutputFormat.Audio {
+		t.Fatalf("realtime outputFormat = %+v, want text and audio", model.Properties.OutputFormat)
+	}
+	if !model.Properties.InputFormat.Audio {
+		t.Fatalf("realtime inputFormat = %+v, want audio input", model.Properties.InputFormat)
+	}
+	if !model.Executable || !model.Selectable {
+		t.Fatalf("a complete realtime model must be selectable, issues: %v", issueMessages(model.Issues))
+	}
+
+	picker := resolution.Models()
+	found := false
+	for _, candidate := range picker {
+		if candidate.ProviderID == "omni" && candidate.ModelID == "qwen-omni" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the realtime model is missing from the picker projection: %+v", picker)
+	}
+
+	wire, err := json.Marshal(model)
+	if err != nil {
+		t.Fatalf("marshal model view: %v", err)
+	}
+	for _, want := range []string{`"providerType":"realtime"`, `"surfaceKind":"realtime"`, `"audio":true`} {
+		if !strings.Contains(string(wire), want) {
+			t.Fatalf("model view JSON missing %s: %s", want, wire)
+		}
+	}
+}
+
+// TestUnknownProviderTypeFloorsToGeneric pins the documented policy: the family
+// vocabulary is open, so an unrecognized type is accepted (not rejected) and
+// resolves to the generic surface, which the client renders as "no dedicated
+// panel" instead of a fake chat model.
+func TestUnknownProviderTypeFloorsToGeneric(t *testing.T) {
+	doc := testCatalogDoc([]any{
+		testProviderWithType("holo", "hologram",
+			APITypeOpenAIChatCompletions, "https://holo.example/v1", "HOLO_KEY", "holo-model"),
+	})
+	resolution := resolveFrom(t, loadTestCatalog(t, doc), Overlay{})
+
+	provider := mustFindProvider(t, resolution, "holo")
+	if provider.ProviderType != "hologram" || provider.SurfaceKind != SurfaceKindGeneric {
+		t.Fatalf("unknown family = %s/%s, want hologram/generic", provider.ProviderType, provider.SurfaceKind)
+	}
+	model := mustFindModel(t, resolution, "holo", "holo-model")
+	if model.ProviderType != "hologram" || model.SurfaceKind != SurfaceKindGeneric {
+		t.Fatalf("unknown family model = %s/%s, want hologram/generic", model.ProviderType, model.SurfaceKind)
+	}
 }

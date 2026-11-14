@@ -260,14 +260,16 @@ const startCreation = () => {
 // ---- small pieces ---------------------------------------------------------
 
 /** A table's header ink, read per render: the `color` tokens are getters, so a
- * module-level object would freeze the appearance it was imported under. */
-const headText = () => ({ fontSize: typeScale.xs, color: color.mutedForeground });
+ * module-level object would freeze the appearance it was imported under.
+ * 12px is the UI floor — a column header is read, not decoration. */
+const headText = () => ({ fontSize: typeScale.sm, color: color.mutedForeground });
 
-/** One label over one value: the shape every "来源" fact takes. */
+/** One label over one value: the shape every "来源" fact takes. The label is
+ * quiet but still read, so it takes the same 12px floor as the table header. */
 function Fact(props: { label: string; value: string }) {
   return (
     <View style={{ gap: space.xxs, minWidth: 96 }}>
-      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{props.label}</Text>
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.label}</Text>
       <Text
         style={{
           fontSize: typeScale.sm,

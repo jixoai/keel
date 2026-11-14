@@ -8,12 +8,16 @@ import type {
   Delivery,
   EventSource,
   FireResultView,
+  MediaCapabilitiesView,
+  MediaCapabilityStatus,
+  MediaCapabilityView,
   ModelsResponse,
   ModelsSettingsReset,
   ModelsSettingsSaved,
   ModelsSettingsView,
   PluginsView,
   ProvidersResponse,
+  RealtimeStatusView,
   RetryResult,
   SecretSaved,
   SecretsView,
@@ -41,6 +45,11 @@ export class KeelApiError extends Error {
 }
 
 const retryable = (status: number) => status === 408 || status === 429 || status >= 500;
+
+/** The slice of `fetch` this transport needs. Injectable so a test (or an
+ * embedding host) can answer requests without a network; production always
+ * uses the platform's `globalThis.fetch`. */
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -89,19 +98,214 @@ async function readError(response: Response): Promise<string> {
   return (await readErrorBody(response)).message;
 }
 
+// ---- deployment capability normalization ---------------------------------
+//
+// `GET /v1/media/capabilities` and `GET /v1/realtime/status` describe the
+// deployment's own process, so their bodies are operator facts, not model
+// output. This layer keeps only what the settings page may print: documented
+// KEEL_* environment NAMES, a short human reason and a model id. URLs, keys,
+// stack traces and transport errors are dropped here, before any screen sees
+// them.
+
+/** The environment names the settings page may show. Anything else in a
+ * server body is not a documented operator hint and is not displayed. */
+const CAPABILITY_ENV_NAME = /^KEEL_(?:MEDIA|REALTIME)_[A-Z0-9_]+$/;
+
+const envNamesOf = (value: unknown): string[] => {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,\s]+/) : [];
+  const names: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!CAPABILITY_ENV_NAME.test(name) || names.includes(name)) continue;
+    names.push(name);
+  }
+  return names;
+};
+
+/** A provider reason is free text from outside this process. A reader can act
+ * on a sentence; a URL, a credential, a stack trace or a transport error is a
+ * deployment internal (and printing it would leak what the page promises not
+ * to). */
+const isSafeReason = (text: string): boolean => {
+  if (!text || text.length > 160) return false;
+  if (/https?:\/\//i.test(text)) return false;
+  if (/\b(?:api[_-]?key|access[_-]?key|token|secret|bearer|authorization|password)\b\s*[:=]/i.test(text)) {
+    return false;
+  }
+  if (/\b(?:panic|goroutine|runtime error|segmentation fault|nil pointer)\b/i.test(text)) return false;
+  if (/\b[\w.-]+\.go:\d+\b/.test(text)) return false;
+  if (/\b(?:dial tcp|connection refused|connection reset|no such host|i\/o timeout)\b/i.test(text)) return false;
+  if (/[A-Za-z0-9_-]{32,}/.test(text)) return false;
+  return true;
+};
+
+const reasonOf = (row: Record<string, unknown>): string | undefined => {
+  const raw = row.reason ?? row.detail ?? row.message;
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim().replace(/\s+/g, " ");
+  return text && isSafeReason(text) ? text : undefined;
+};
+
+const modelIdOf = (row: Record<string, unknown>): string | undefined => {
+  const raw = row.model ?? row.modelId ?? row.defaultModel;
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim();
+  if (!text || text.length > 120 || /\s/.test(text) || text.includes("://")) return undefined;
+  return text;
+};
+
+const capabilityStatusOf = (row: Record<string, unknown>): MediaCapabilityStatus => {
+  const token = typeof row.status === "string" ? row.status.trim().toLowerCase().replace(/_/g, "-") : "";
+  if (["available", "configured", "ready", "ok", "enabled", "supported", "on"].includes(token)) {
+    return "available";
+  }
+  if (["unsupported", "not-supported", "unavailable", "disabled", "unimplemented", "off"].includes(token)) {
+    return "unsupported";
+  }
+  if (["unconfigured", "not-configured", "missing", "needs-config", "needs-configuration"].includes(token)) {
+    return "unconfigured";
+  }
+  if (typeof row.available === "boolean") return row.available ? "available" : "unconfigured";
+  if (typeof row.configured === "boolean") return row.configured ? "available" : "unconfigured";
+  if (typeof row.supported === "boolean") return row.supported ? "available" : "unsupported";
+  if (row.enabled === true) return "available";
+  return "unconfigured";
+};
+
+/** `imageEdit` / `image_edit` / `image.edit` all name the same row. */
+const canonicalCapabilityId = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase()
+    .replace(/[_.\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+};
+
+const rowRecordOf = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+const capabilityViewOf = (id: string, row: Record<string, unknown>): MediaCapabilityView => ({
+  id: canonicalCapabilityId(id),
+  status: capabilityStatusOf(row),
+  reason: reasonOf(row),
+  env: envNamesOf(row.env ?? row.envs ?? row.missingEnv ?? row.missingEnvVars ?? row.requiredEnv ?? row.requiredEnvVars),
+  model: modelIdOf(row),
+});
+
+const CAPABILITY_CONTAINERS = ["capabilities", "media", "mediaCapabilities", "items"] as const;
+
+/** Keys of the flat report that are not capabilities themselves. */
+const FLAT_REPORT_KEYS = new Set(["configured", "ready", "models", "env", "envs", "missingEnv", "requiredEnv"]);
+
+/** The gateway's own report is a flat map: `{configured, llm, image, decision,
+ * video, tts, stt, realtime, models}`. `true` means the deployment can serve
+ * it, `false` means it cannot; `models` names the model behind each one. A
+ * false is「不支持」, not「未配置」: the gateway answered, and the answer was no. */
+const flatCapabilityRowsOf = (body: Record<string, unknown>): MediaCapabilityView[] => {
+  const models = rowRecordOf(body.models) ?? {};
+  const rows: MediaCapabilityView[] = [];
+  for (const [key, value] of Object.entries(body)) {
+    if (typeof value !== "boolean" || FLAT_REPORT_KEYS.has(key)) continue;
+    const id = canonicalCapabilityId(key);
+    if (!id) continue;
+    const model = typeof models[key] === "string" ? (models[key] as string) : undefined;
+    rows.push({ id, status: value ? "available" : "unsupported", env: [], ...(model ? { model } : {}) });
+  }
+  // Editing rides on the image model: a deployment that can generate can also
+  // edit with the same provider, while the screen lists the two operations apart.
+  const image = rows.find((row) => row.id === "image" && row.status === "available");
+  if (image && !rows.some((row) => row.id === "image-edit")) {
+    rows.push({ ...image, id: "image-edit" });
+  }
+  return rows;
+};
+
+/** Tolerates the three natural wire shapes: a map keyed by capability id, an
+ * array of rows carrying `id`/`capability`/`kind`, and the gateway's own flat
+ * boolean report. */
+const mediaCapabilityRowsOf = (body: Record<string, unknown>): MediaCapabilityView[] => {
+  const containerKey = CAPABILITY_CONTAINERS.find((key) => key in body);
+  if (containerKey === undefined) return flatCapabilityRowsOf(body);
+  const container = body[containerKey];
+  const rows: MediaCapabilityView[] = [];
+  if (Array.isArray(container)) {
+    for (const item of container) {
+      const row = rowRecordOf(item);
+      if (!row) continue;
+      const id = canonicalCapabilityId(row.id ?? row.capability ?? row.kind ?? row.name ?? row.type);
+      if (id) rows.push(capabilityViewOf(id, row));
+    }
+    return rows;
+  }
+  const map = rowRecordOf(container);
+  if (!map) return rows;
+  for (const [key, value] of Object.entries(map)) {
+    if (typeof value === "boolean") {
+      const id = canonicalCapabilityId(key);
+      if (id) rows.push({ id, status: value ? "available" : "unconfigured", env: [] });
+      continue;
+    }
+    const row = rowRecordOf(value);
+    if (!row) continue;
+    const id = canonicalCapabilityId(row.id ?? row.capability ?? key);
+    if (id) rows.push(capabilityViewOf(id, row));
+  }
+  return rows;
+};
+
+const mediaCapabilitiesOf = (body: Record<string, unknown>): MediaCapabilitiesView => ({
+  configured:
+    typeof body.configured === "boolean" ? body.configured : typeof body.ready === "boolean" ? body.ready : true,
+  capabilities: mediaCapabilityRowsOf(body),
+  env: envNamesOf(body.env ?? body.envs ?? body.missingEnv ?? body.requiredEnv),
+});
+
+/** A provider/kind name is a display label; a URL smuggled into one is not. */
+const safeLabelOf = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (!text || text.length > 80 || text.includes("://")) return undefined;
+  return text;
+};
+
+const realtimeStatusOf = (body: Record<string, unknown>): RealtimeStatusView => ({
+  configured: body.configured === true,
+  provider: safeLabelOf(body.provider),
+  kind: safeLabelOf(body.kind),
+  models: Array.isArray(body.models)
+    ? body.models.map((model) => safeLabelOf(model)).filter((model): model is string => model !== undefined)
+    : [],
+  inputSampleRate: typeof body.inputSampleRate === "number" ? body.inputSampleRate : undefined,
+  outputSampleRate: typeof body.outputSampleRate === "number" ? body.outputSampleRate : undefined,
+});
+
 export class KeelHttp implements SettingsApi {
   readonly base: string;
+  private readonly fetchImpl: FetchLike;
 
-  constructor(base = "") {
+  constructor(base = "", fetchImpl?: FetchLike) {
     this.base = base.replace(/\/$/, "");
+    // Deferred, so constructing a client never touches a platform without
+    // `fetch`; only a request does.
+    this.fetchImpl = fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   url(path: string): string {
     return `${this.base}${path}`;
   }
 
+  /** The request transport. The event stream needs it too, so the type stays
+   * usable by a test or a host that supplies its own fetch. */
+  transport(): FetchLike {
+    return this.fetchImpl;
+  }
+
   async request(path: string, init?: RequestInit): Promise<Response> {
-    const response = await fetch(this.url(path), {
+    const response = await this.fetchImpl(this.url(path), {
       credentials: "same-origin",
       ...init,
     });
@@ -323,6 +527,38 @@ export class KeelHttp implements SettingsApi {
     };
   }
 
+  /** `GET /v1/media/capabilities` — what this deployment's media gateway can
+   * actually do. A 503 means the gateway itself is not configured: an ordinary
+   * operator state the page renders as「未配置」, so it is folded into the view
+   * instead of thrown. */
+  async mediaCapabilities(): Promise<MediaCapabilitiesView> {
+    let response: Response;
+    try {
+      response = await this.request("/v1/media/capabilities");
+    } catch (error) {
+      if (error instanceof KeelApiError && error.status === 503) {
+        return { configured: false, capabilities: [], env: [] };
+      }
+      throw error;
+    }
+    return mediaCapabilitiesOf(asRecord(await response.json()));
+  }
+
+  /** `GET /v1/realtime/status` — the voice bridge's preflight report. 503 is
+   * the bridge's own "not configured" answer, never a page error. */
+  async realtimeStatus(): Promise<RealtimeStatusView> {
+    let response: Response;
+    try {
+      response = await this.request("/v1/realtime/status");
+    } catch (error) {
+      if (error instanceof KeelApiError && error.status === 503) {
+        return { configured: false, models: [] };
+      }
+      throw error;
+    }
+    return realtimeStatusOf(asRecord(await response.json()));
+  }
+
   /** `GET /v1/settings/secrets` — names and times only, never values. */
   async secrets(): Promise<SecretsView> {
     const response = await this.request("/v1/settings/secrets");
@@ -422,6 +658,14 @@ export class HttpEventSource implements EventSource {
     let stopped = false;
     let cursor = opts.after;
     let attempt = 0;
+    // A 404 from the stream route is not proof that the session is gone: the
+    // session may have been committed a moment ago, and a proxy in front of the
+    // server can answer before the row is visible. The request is an idempotent
+    // GET, so a bounded number of retries is safe — and it is what keeps a
+    // transient miss from terminating the live channel for the rest of the
+    // session (a "closed" stream never re-subscribes).
+    let notFoundRetries = 0;
+    const maxNotFoundRetries = 3;
     let controller: AbortController | null = null;
     let retryTimer: number | undefined;
 
@@ -442,12 +686,20 @@ export class HttpEventSource implements EventSource {
       if (cursor > 0) headers["Last-Event-ID"] = String(cursor);
       opts.onState(attempt === 0 ? "connecting" : "reconnecting");
       try {
-        const response = await fetch(
+        // The injected transport, like every other call: a test (or a host with
+        // its own fetch) must be able to drive the stream too, and reading the
+        // global here silently bypassed it.
+        const response = await this.http.transport()(
           this.http.url(`/v1/sessions/${encodeURIComponent(this.sessionId)}/events/stream?${query.toString()}`),
           { headers, signal: controller.signal, credentials: "same-origin" },
         );
         if (!response.ok) {
           const message = await readError(response);
+          if (response.status === 404 && notFoundRetries < maxNotFoundRetries) {
+            notFoundRetries += 1;
+            schedule();
+            return;
+          }
           if (!retryable(response.status)) {
             stopped = true;
             opts.onState("closed");
@@ -456,6 +708,7 @@ export class HttpEventSource implements EventSource {
           schedule();
           return;
         }
+        notFoundRetries = 0;
         if (!response.body) {
           schedule();
           return;

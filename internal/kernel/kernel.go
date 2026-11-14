@@ -94,6 +94,33 @@ const (
 	// 事件"), and the payload carries external_backend/state_owner marks so a
 	// UI can tell it apart from a native assistant message.
 	KindExternalEvent EventKind = "external.event"
+
+	// v2 contract kinds. Registering the vocabulary freezes the durable names
+	// and their commit lanes now; the emitters (task-log, layerfs, placement,
+	// supervision, notifications) land in later waves. Every new kind is
+	// bookkeeping: no transcript decoder appends it to the model context.
+	KindTaskCreated  EventKind = "task.created"
+	KindTaskUpdated  EventKind = "task.updated"
+	KindTaskAttached EventKind = "task.attached"
+	KindTaskDetached EventKind = "task.detached"
+	KindTaskClosed   EventKind = "task.closed"
+	KindTaskNote     EventKind = "task.note"
+
+	KindFSWrite         EventKind = "fs.write"
+	KindFSCapture       EventKind = "fs.capture"
+	KindFSCaptureFailed EventKind = "fs.capture_failed"
+
+	KindConfigRotated EventKind = "config.rotated"
+
+	KindPlacementJoined EventKind = "placement.joined"
+	KindPlacementLeft   EventKind = "placement.left"
+
+	KindSupervisionEscalated EventKind = "supervision.escalated"
+	KindGuardrailTripped     EventKind = "guardrail.tripped"
+	KindResumeAttempt        EventKind = "resume.attempt"
+
+	KindNotificationAck      EventKind = "notification.ack"
+	KindNotificationPushSent EventKind = "notification.push_sent"
 )
 
 // Run status values for the runs row (mirrored from internal/store).
@@ -196,6 +223,23 @@ const (
 	KeyGeneration KeyKind = "generationId"
 	// KeyToolCall is the tool call id (tool.result).
 	KeyToolCall KeyKind = "toolCallId"
+
+	// v2 idempotency spaces. The literal value is also the dedupe prefix, so
+	// KeyFSWrite + "call-1:src/a" stores "fs:call-1:src/a". Keeping each one
+	// distinct is load-bearing: fs.write and tool.result for the same tool call
+	// must not collide.
+	KeyTask             KeyKind = "task"
+	KeyFSWrite          KeyKind = "fs"
+	KeyFSCapture        KeyKind = "capture"
+	KeyFSCaptureFailed  KeyKind = "capture-failed"
+	KeyConfig           KeyKind = "config"
+	KeyPlacement        KeyKind = "placement"
+	KeySupervision      KeyKind = "supervision"
+	KeyGuardrail        KeyKind = "guardrail"
+	KeyResume           KeyKind = "resume"
+	KeyNotificationAck  KeyKind = "notif-ack"
+	KeyNotificationPush KeyKind = "notif-push"
+	KeyRun              KeyKind = "run"
 )
 
 // KeyRef is one idempotency key value.
@@ -256,18 +300,25 @@ const (
 	// runtime commits what it received, tagged with the session's external
 	// marks, and SSE replays the Keel-recorded fact.
 	ClassExternal CommitClass = "external-scoped"
+	// ClassSystem marks harness-driven durable facts that carry no lease
+	// (capture failures, placement, supervision, notifications). They are not
+	// client-writable and are accepted only through the explicit system lane
+	// (CommitRequest.System). Task kinds are owner-scoped during a run and may
+	// also use this lane for the initial card created before any run exists.
+	ClassSystem CommitClass = "system-scoped"
 )
 
 // CommitRequest is a proposal to append exactly one event.
 //
 // Scope and Kind are required. Token is required for owner-scoped kinds
-// (assistant.message, tool.result, compaction, run.started, run.failed) and
-// carries the fencing token returned by Claim; edge-scoped and external-scoped
-// kinds must not present one. Exactly one idempotency key is required per kind:
-// requestId for user.message, generationId for assistant.message, toolCallId for
-// tool.result, and requestId again for external.event (the gateway's per-event
-// identity, e.g. "<backend>:<externalRef>:<seq>"). Bookkeeping kinds carry no
-// key. Payload is the JSON document to store; for tool.result it must contain
+// (assistant.message, tool.result, compaction, run lifecycle events, task
+// events created during a run, fs.write/capture) and carries the fencing token
+// returned by Claim; edge-scoped, external-scoped and system-scoped kinds must
+// not present one. Exactly one idempotency key is required per kind: requestId
+// for user.message, generationId for assistant.message, toolCallId for
+// tool.result, requestId again for external.event, and the matching v2
+// namespace for task/fs/capture/config/placement/supervision/resume/notify/run
+// kinds. Payload is the JSON document to store; for tool.result it must contain
 // the same toolCallId as the request, and for assistant.message every toolCall
 // block must have a non-empty, unique id. external.event needs a JSON object
 // with non-empty "backend" and "externalRef" strings (the provenance marks).
@@ -288,10 +339,31 @@ type CommitRequest struct {
 	// only valid on ClassEdge kinds.
 	NativeEdge bool
 
-	// Idempotency keys. See KeyKind for which kind requires which key.
+	// System selects the harness-driven system lane: no lease, no client
+	// write path. It is required for ClassSystem kinds and allowed on the
+	// dual-lane task kinds (initial card before a run exists). It is rejected
+	// on every other kind, so a caller cannot silently bypass the fence.
+	System bool
+
+	// Idempotency keys. See KeyKind for which kind requires which key. Values
+	// are the per-kind natural identity; the namespace prefix is added by
+	// KeyRef.dedupeKey.
 	RequestID    string
 	GenerationID string
 	ToolCallID   string
+
+	TaskEventKey        string // <taskId>:<kind>:<seq>, or <sessionId>:init
+	FSWriteKey          string // <toolCallId>:<path>
+	FSCaptureKey        string // <toolCallId>:<baseSeq>
+	FSCaptureFailedKey  string // <sessionId>:<toolCallId>:<seq>
+	ConfigKey           string // <configHash>
+	PlacementKey        string // <sessionId>:<epoch>:<kind>
+	SupervisionKey      string // <sessionId>:<attempt>
+	GuardrailKey        string // <sessionId>:<trigger>:<seq>
+	ResumeKey           string // <sessionId>:<attempt>
+	NotificationAckKey  string // <notificationId>:<consumerId>
+	NotificationPushKey string // <notificationId>
+	RunID               string // the attempt/run id (run.finished)
 }
 
 // FinishRequest settles a claimed run. Cursor is the last sequence the run
@@ -635,19 +707,33 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 	if err != nil {
 		return Receipt{}, k.reject(ReasonKeyKindMismatch, OpCommit, req.Scope, req.Kind, req.Token, err.Error(), ErrKeyKindMismatch)
 	}
-	if spec.class == ClassOwner && req.Token.IsZero() {
+	class := spec.class
+	if req.System {
+		if spec.class != ClassSystem && !spec.system {
+			return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token,
+				fmt.Sprintf("kind %q does not accept the system lane", req.Kind), ErrInvalidRequest)
+		}
+		class = ClassSystem
+	} else if spec.class == ClassSystem {
+		return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token,
+			fmt.Sprintf("kind %q requires the system lane", req.Kind), ErrInvalidRequest)
+	}
+	if class == ClassOwner && req.Token.IsZero() {
 		return Receipt{}, k.reject(ReasonMissingToken, OpCommit, req.Scope, req.Kind, req.Token, "owner-scoped kinds need the fencing token returned by Claim", ErrMissingToken)
 	}
-	if spec.class == ClassEdge && !req.Token.IsZero() {
+	if class == ClassEdge && !req.Token.IsZero() {
 		return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, "edge-scoped kinds do not take an owner token", ErrInvalidRequest)
 	}
-	if spec.class == ClassExternal && !req.Token.IsZero() {
+	if class == ClassExternal && !req.Token.IsZero() {
 		return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, "external-scoped kinds do not take an owner token", ErrInvalidRequest)
 	}
+	if class == ClassSystem && !req.Token.IsZero() {
+		return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, "system-scoped kinds do not take an owner token", ErrInvalidRequest)
+	}
 	// NativeEdge is a native-client marker: it is meaningless (and rejected) on
-	// owner-scoped and external-scoped kinds; the gateway's external-class
-	// commits never set it.
-	if req.NativeEdge && spec.class != ClassEdge {
+	// owner-scoped, external-scoped and system-scoped kinds; the gateway's
+	// external-class commits never set it.
+	if req.NativeEdge && class != ClassEdge {
 		return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, "NativeEdge is only valid for edge-scoped kinds", ErrInvalidRequest)
 	}
 	if k.limits != nil {
@@ -703,7 +789,7 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 	//     session (see the ClassEdge branch below);
 	//   - an external-scoped commit may only extend a session the backend owns
 	//     (see the ClassExternal branch below).
-	if spec.class == ClassOwner {
+	if class == ClassOwner {
 		state, err := txn.Lease(ctx)
 		if err != nil {
 			return Receipt{}, k.classifyStoreError(OpCommit, req, err)
@@ -712,7 +798,7 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 			return Receipt{}, k.classifyStoreError(OpCommit, req, err)
 		}
 	}
-	if spec.class == ClassExternal {
+	if class == ClassExternal {
 		// The external lane is only for sessions the backend owns. This is the
 		// structural refusal of "an external event dressed up as a native
 		// session": the marks are read under the same session lock the append
@@ -731,7 +817,7 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 				"the external session is closed", ErrNotExternalSession)
 		}
 	}
-	if spec.class == ClassEdge && req.NativeEdge {
+	if class == ClassEdge && req.NativeEdge {
 		// A native message for an external session would be committed and then
 		// never picked up by a native run. The check is inside the locked
 		// transaction (not only in the HTTP pre-check), so a promotion that

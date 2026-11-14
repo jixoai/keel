@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/decisions",
+    "body": {
+      "model": "bailian-token-plan/decision-model-preview",
+      "input": "Rate the quality of this message: hello.",
+      "questions": [
+        {
+          "type": "score",
+          "predicate": "quality",
+          "criteria": [
+            {
+              "value": 1,
+              "description": "bad"
+            },
+            {
+              "value": 5,
+              "description": "great"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 400,
+    "contentType": "application/json",
+    "body": {
+      "code": "ValidationError",
+      "message": "<400> InternalError.Algo.ValidationError: questions.question_1.criteria: 0 score levels outside the allowed 1..255",
+      "request_id": "<redacted-request-id>"
+    }
+  }
+}

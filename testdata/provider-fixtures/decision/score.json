@@ -1,0 +1,35 @@
+{
+  "answers": [
+    {
+      "confidence": 0.93,
+      "name": null,
+      "probabilities": [
+        {
+          "label": "bad",
+          "probability": 0.93,
+          "value": 0
+        },
+        {
+          "label": "great",
+          "probability": 0.07,
+          "value": 1
+        }
+      ],
+      "score": 0.07,
+      "type": "score"
+    }
+  ],
+  "model": "decision-model-preview",
+  "usage": {
+    "input_tokens": 22,
+    "input_tokens_details": {
+      "cache_write_tokens": 0,
+      "cached_tokens": 0
+    },
+    "output_tokens": 0,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 22
+  }
+}

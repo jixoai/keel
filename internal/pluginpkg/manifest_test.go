@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/jixoai/keel/internal/modelprovider"
 )
 
 func testEnv() Environment {
@@ -28,7 +30,18 @@ func validManifest() *Manifest {
 			Tools:    []string{"thing_run"},
 			Hooks:    []string{"turn.finished"},
 			Triggers: []string{"vendor.thing.tick"},
-			UI:       &UI{Entry: "ui/index.html", Title: "Thing"},
+			CLI: []CLICapability{{
+				Path:         []string{"thing", "run"},
+				Summary:      "Run the thing.",
+				Description:  "Runs the thing once; no retries on failure.",
+				ArgsSchema:   map[string]any{"type": "object"},
+				OutputSchema: map[string]any{"type": "object"},
+				Permissions:  []string{"thing.write"},
+				Danger:       DangerWrite,
+				CallableBy:   []Caller{CallerUI, CallerAgent},
+				Examples:     []string{"keel thing run"},
+			}},
+			UI: &UI{Entry: "ui/index.html", Title: "Thing"},
 		},
 		Requires:    []string{"keel.fs"},
 		Permissions: Permissions{FS: []string{"workspace-write"}, Net: []string{"api.example.com"}, Secrets: []string{"THING_TOKEN"}, Tools: []string{"thing_run"}},
@@ -112,6 +125,10 @@ func TestManifestValidateFieldErrors(t *testing.T) {
 		{"hook duplicated", func(m *Manifest) { m.Provides.Hooks = []string{"turn.started", "turn.started"} }, "provides.hooks[1]"},
 		{"trigger empty", func(m *Manifest) { m.Provides.Triggers = []string{""} }, "provides.triggers[0]"},
 		{"trigger duplicated", func(m *Manifest) { m.Provides.Triggers = []string{"t", "t"} }, "provides.triggers[1]"},
+		{"cli path empty", func(m *Manifest) { m.Provides.CLI[0].Path = nil }, "provides.cli[0].path"},
+		{"cli danger unknown", func(m *Manifest) { m.Provides.CLI[0].Danger = "purge" }, "provides.cli[0].danger"},
+		{"cli path duplicated", func(m *Manifest) { m.Provides.CLI = append(m.Provides.CLI, m.Provides.CLI[0]) }, "provides.cli[1].path"},
+		{"cli description empty", func(m *Manifest) { m.Provides.CLI[0].Description = " " }, "provides.cli[0].description"},
 		{"ui entry escaping", func(m *Manifest) { m.Provides.UI = &UI{Entry: "../outside.html"} }, "provides.ui.entry"},
 		{"ui entry absolute", func(m *Manifest) { m.Provides.UI = &UI{Entry: "/etc/passwd"} }, "provides.ui.entry"},
 		{"webview without ui", func(m *Manifest) {
@@ -220,5 +237,141 @@ func TestPluginIDGrammar(t *testing.T) {
 		if got := ValidatePluginID(id); got != want {
 			t.Fatalf("ValidatePluginID(%q) = %v, want %v", id, got, want)
 		}
+	}
+}
+
+// TestManifestProviderExtensionSurface is the spec-shaped manifest half of the
+// provider contract: `provides.provider_types`, `provides.provider` and
+// `provides.feature_ports` (plus `provides.agents`/`provides.agent_teams`) are
+// known fields, decode with the spec's snake_case names, and validate with
+// field-level reasons. Before this, KnownFields(true) rejected every manifest
+// written to the spec.
+func TestManifestProviderExtensionSurface(t *testing.T) {
+	raw := []byte(`
+id: vendor.media
+version: 1.0.0
+kind: sidecar
+description: Media provider plugin.
+entry: { command: [node, sidecar.js] }
+provides:
+  provider:
+    layer: provider
+    feature_ports: [image.generate, video.generate]
+  feature_ports: [image.generate]
+  provider_types:
+    - type_id: image
+      display_name: Image
+      icon: image
+      capabilities: [image.generate]
+      config_schema: { type: object }
+      auth_schema:
+        fields:
+          - { name: apiKey, label: API key, secret: true, required: true }
+      model_schema: { type: object }
+      parameters:
+        defaults: { steps: 30 }
+      feature_ports: [image.generate]
+  agents: [agent_media_lead]
+  agent_teams: [team_media]
+`)
+	manifest, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("a spec-shaped provider manifest must parse: %v", err)
+	}
+	if err := manifest.Validate(testEnv()); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if got := len(manifest.Provides.ProviderTypes); got != 1 {
+		t.Fatalf("provider_types = %d, want 1", got)
+	}
+	declaration := manifest.Provides.ProviderTypes[0]
+	if declaration.TypeID != "image" || declaration.DisplayName != "Image" {
+		t.Fatalf("declaration = %+v", declaration)
+	}
+	if declaration.AuthSchema == nil || len(declaration.AuthSchema.Fields) != 1 || !declaration.AuthSchema.Fields[0].Secret {
+		t.Fatalf("auth_schema did not decode: %+v", declaration.AuthSchema)
+	}
+	if manifest.Provides.Provider == nil || manifest.Provides.Provider.Layer != ProviderPluginLayer {
+		t.Fatalf("provides.provider did not decode: %+v", manifest.Provides.Provider)
+	}
+
+	// The manifest id fills the declaring plugin for assembly.
+	types := manifest.ProviderTypes()
+	if len(types) != 1 || types[0].PluginID != "vendor.media" {
+		t.Fatalf("ProviderTypes() = %+v, want the manifest id as plugin", types)
+	}
+	if types[0].Parameters.Defaults["steps"] != 30 {
+		t.Fatalf("parameter defaults = %v", types[0].Parameters.Defaults)
+	}
+}
+
+// TestManifestProviderExtensionSurfaceRejectsBrokenDeclarations covers the
+// field-level failures: a declaration missing a required schema, a provider
+// plugin without its layer, a type owned by another plugin, and malformed
+// feature ports / agent ids.
+func TestManifestProviderExtensionSurfaceRejectsBrokenDeclarations(t *testing.T) {
+	base := func() *Manifest {
+		manifest := validManifest()
+		manifest.Provides.Provider = &ProviderPluginDecl{Layer: ProviderPluginLayer}
+		manifest.Provides.ProviderTypes = []modelprovider.ProviderType{{
+			TypeID:       "image",
+			DisplayName:  "Image",
+			Capabilities: modelprovider.Capabilities{"image.generate"},
+			ConfigSchema: modelprovider.SchemaRef{Inline: []byte(`{"type":"object"}`)},
+			AuthSchema:   &modelprovider.AuthSchema{},
+			ModelSchema:  modelprovider.SchemaRef{Inline: []byte(`{"type":"object"}`)},
+		}}
+		return manifest
+	}
+	if err := base().Validate(testEnv()); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*Manifest)
+		field  string
+	}{
+		{"config schema missing", func(m *Manifest) {
+			m.Provides.ProviderTypes[0].ConfigSchema = modelprovider.SchemaRef{}
+		}, "provides.provider_types[0].config_schema"},
+		{"auth schema missing", func(m *Manifest) {
+			m.Provides.ProviderTypes[0].AuthSchema = nil
+		}, "provides.provider_types[0].auth_schema"},
+		{"model schema missing", func(m *Manifest) {
+			m.Provides.ProviderTypes[0].ModelSchema = modelprovider.SchemaRef{}
+		}, "provides.provider_types[0].model_schema"},
+		{"type without provider declaration", func(m *Manifest) {
+			m.Provides.Provider = nil
+		}, "provides.provider"},
+		{"provider without types", func(m *Manifest) {
+			m.Provides.ProviderTypes = nil
+		}, "provides.provider_types"},
+		{"wrong layer", func(m *Manifest) {
+			m.Provides.Provider.Layer = "tool"
+		}, "provides.provider.layer"},
+		{"foreign plugin id", func(m *Manifest) {
+			m.Provides.ProviderTypes[0].PluginID = "vendor.other"
+		}, "provides.provider_types[0].plugin_id"},
+		{"bad feature port", func(m *Manifest) {
+			m.Provides.FeaturePorts = []string{"Image Generate"}
+		}, "provides.feature_ports[0]"},
+		{"bad provider feature port", func(m *Manifest) {
+			m.Provides.Provider.FeaturePorts = []string{"image generate"}
+		}, "provides.provider.feature_ports[0]"},
+		{"duplicate agent", func(m *Manifest) {
+			m.Provides.Agents = []string{"agent_a", "agent_a"}
+		}, "provides.agents[1]"},
+		{"bad team id", func(m *Manifest) {
+			m.Provides.AgentTeams = []string{"bad team"}
+		}, "provides.agent_teams[0]"},
+	}
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			manifest := base()
+			testCase.mutate(manifest)
+			requireField(t, manifest.Validate(testEnv()), testCase.field)
+		})
 	}
 }

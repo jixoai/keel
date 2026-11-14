@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/decisions",
+    "body": {
+      "model": "bailian-token-plan/decision-model-preview",
+      "input": "The server is down and nobody can log in.",
+      "questions": [
+        {
+          "type": "predicate",
+          "predicate": "this is a production incident"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "answers": [
+        {
+          "name": null,
+          "probability": 0.85,
+          "type": "predicate"
+        }
+      ],
+      "model": "decision-model-preview",
+      "usage": {
+        "input_tokens": 19,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 19
+      }
+    }
+  }
+}

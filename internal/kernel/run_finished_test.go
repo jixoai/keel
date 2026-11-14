@@ -114,19 +114,27 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				"toolTimings":[{"tool":"clock","durationMs":3},{"tool":"echo","durationMs":1,"isError":true}],
 				"context":{"messages":6,"tokens":120},
 				"stopReason":"end_turn","durationMs":900}`)
-			first := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, Payload: valid})
+			first := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-1", Payload: valid})
 			if first.Kind != KindRunFinished || first.Deduped {
 				t.Fatalf("run.finished = %+v", first)
 			}
-			// Bookkeeping kinds carry no idempotency key: a retried attempt's
-			// summary is a second fact.
-			second := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token,
+			// A commit retry of the same attempt dedupes by run id; a new
+			// attempt is a new fact.
+			replay := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-1", Payload: valid})
+			if !replay.Deduped || replay.Seq != first.Seq {
+				t.Fatalf("run.finished replay = %+v, want deduped seq %d", replay, first.Seq)
+			}
+			if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-1",
+				Payload: json.RawMessage(`{"status":"failed","stopReason":"error"}`)}); !iso(err, ErrKeyConflict) {
+				t.Fatalf("run.finished key reuse with different payload = %v, want key conflict", err)
+			}
+			second := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-2",
 				Payload: json.RawMessage(`{"status":"failed","stopReason":"error"}`)})
 			if second.Seq != first.Seq+1 {
 				t.Fatalf("second run.finished seq = %d, want %d", second.Seq, first.Seq+1)
 			}
 			// A cancelled attempt is a terminal attempt outcome, not a failure.
-			h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token,
+			h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-3",
 				Payload: json.RawMessage(`{"status":"cancelled","stopReason":"aborted"}`)})
 
 			before := h.eventCount(h.scope)
@@ -142,9 +150,11 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				json.RawMessage(`{"status":"done","toolTimings":[{"isError":"yes"}]}`),
 				json.RawMessage(`{"status":"done","provider":7}`),
 				json.RawMessage(`{"status":"done","model":["gpt"]}`),
+				json.RawMessage(`{"status":"done","configHashBefore":7}`),
+				json.RawMessage(`{"status":"done","configHashAfter":[]}`),
 				json.RawMessage(`[]`),
 			} {
-				if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: lease.Token, Payload: bad}); !iso(err, ErrInvalidRequest) {
+				if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-bad", Payload: bad}); !iso(err, ErrInvalidRequest) {
 					t.Fatalf("payload %s = %v, want invalid-request", bad, err)
 				}
 			}
@@ -152,13 +162,13 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				t.Fatal("rejected summaries reached the log")
 			}
 			// The summary is owner-scoped: without the fence it cannot be written.
-			if err := h.commitErr(CommitRequest{Kind: KindRunFinished,
+			if err := h.commitErr(CommitRequest{Kind: KindRunFinished, RunID: "run-nofence",
 				Payload: json.RawMessage(`{"status":"done"}`)}); !iso(err, ErrMissingToken) {
 				t.Fatalf("unfenced run.finished = %v", err)
 			}
 			// A stale owner cannot write a summary after its lease was taken over.
 			stale := OwnerToken{Owner: "runtime-a", Epoch: lease.Token.Epoch - 1}
-			if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: stale,
+			if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: stale, RunID: "run-stale",
 				Payload: json.RawMessage(`{"status":"done"}`)}); !iso(err, ErrStaleEpoch) {
 				t.Fatalf("stale run.finished = %v", err)
 			}

@@ -57,11 +57,13 @@ const connectionLabel = (status: string): string => {
   }
 };
 
-/** One fact: its name above its value. */
+/** One fact: its name above its value. The name is the quiet line, but it is
+ * still read at 1× on a wide screen — 12px is the UI floor (10px CJK ink
+ * smears), while the value keeps its 1.5 line height because it wraps. */
 function StatusFact(props: { label: string; value: string }) {
   return (
     <View style={{ gap: space.xxs }}>
-      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{props.label}</Text>
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.label}</Text>
       <Text
         style={{
           fontSize: typeScale.sm,

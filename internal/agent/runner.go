@@ -169,6 +169,12 @@ type RunSummary struct {
 	// replaces.
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// ConfigHashBefore/After pin the harness configuration identity around the
+	// attempt. They let a retry distinguish "same config, transient failure"
+	// from "configuration changed between attempts" without re-reading the
+	// whole run manifest. Empty is allowed for logs predating the field.
+	ConfigHashBefore string `json:"configHashBefore,omitempty"`
+	ConfigHashAfter  string `json:"configHashAfter,omitempty"`
 }
 
 // TokenTotals is the objective token accounting of an attempt (no prices: the

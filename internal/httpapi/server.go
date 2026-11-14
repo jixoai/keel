@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 )
@@ -160,6 +161,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/events", s.appendEvent)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.listEvents)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events/stream", s.streamEvents)
+	s.mux.HandleFunc("GET /v1/realtime/status", s.realtimeStatus)
+	s.mux.HandleFunc("GET /v1/realtime", s.realtime)
+	// Media gateway: the provider credential stays server-side and the client
+	// only reaches capability endpoints (503 until the provider is configured).
+	s.registerMediaRoutes()
+	s.registerMediaAudioRoutes()
+	s.registerDemoAssetRoutes()
+	s.registerDecisionRoutes()
 	s.mux.HandleFunc("POST /v1/files", s.upload)
 	s.mux.HandleFunc("GET /v1/files/{id}/meta", s.fileMeta)
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
@@ -1077,5 +1086,8 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func writeErr(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]any{"error": err.Error()})
+	// An error message is composed by hand somewhere; masking credential-shaped
+	// substrings here keeps a future `fmt.Errorf("... %s", key)` from becoming
+	// a response-body leak. The status still carries the classification.
+	writeJSON(w, status, map[string]any{"error": logsafe.Redact(err.Error())})
 }

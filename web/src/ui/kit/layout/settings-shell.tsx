@@ -28,6 +28,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { effect, platform, Scroll, Storage, signal, Text, View, windowSize } from "nsh";
 import { Icon, type IconName } from "../../icons";
 import { color, motion, radius as kitRadius, typeScale } from "../tokens";
+import { focusRing } from "../components/styles";
 
 /** The rail's two widths (zcode's `grid-cols-[68px…] lg:grid-cols-[268px…]`). */
 export const SETTINGS_RAIL_WIDTH_PX = 68;
@@ -270,6 +271,11 @@ function SettingsRailButton(props: {
       onPress={props.onPress}
       hoverStyle={{ backgroundColor: color.hover }}
       activeStyle={{ backgroundColor: color.glassStateArmed }}
+      // The rail is the settings page's primary navigation and it is a `View`
+      // with `role="button"`, so the host draws no ring of its own: without
+      // this a keyboard reader cannot tell which section Tab is on (2.4.7).
+      // Same ring as every other control (`components/styles.tsx`).
+      focusStyle={focusRing()}
       style={{
         height: props.stacked ? 56 : 40,
         flexDirection: props.stacked ? "column" : "row",

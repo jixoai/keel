@@ -513,3 +513,92 @@ func TestValidateSelectionFact(t *testing.T) {
 		})
 	}
 }
+
+// TestProviderTypeValidation pins the provider family token. A declared family
+// (including a plugin family this package does not know) is accepted; a value
+// that is not a token is refused at load time, and a tenant patch obeys the
+// same grammar.
+func TestProviderTypeValidation(t *testing.T) {
+	doc := validCatalogDocument()
+	doc["providers"].([]any)[0].(map[string]any)["type"] = "realtime"
+	if _, err := LoadCatalog(marshalJSON(t, doc)); err != nil {
+		t.Fatalf("a declared provider type must be accepted: %v", err)
+	}
+
+	for _, invalid := range []any{"realtime audio", " llm", 7, "real/time"} {
+		doc := validCatalogDocument()
+		doc["providers"].([]any)[0].(map[string]any)["type"] = invalid
+		if _, err := LoadCatalog(marshalJSON(t, doc)); err == nil {
+			t.Fatalf("provider type %#v must be refused", invalid)
+		}
+	}
+
+	for _, tenantDoc := range []string{
+		`{"providers":[{"id":"p","type":"realtime audio"}]}`,
+		`{"providers":[{"id":"p","type":7}]}`,
+	} {
+		if _, err := OverlayFromDocument([]byte(tenantDoc), LegacyAgent{}); err == nil {
+			t.Fatalf("tenant provider patch %s must be refused", tenantDoc)
+		}
+	}
+}
+
+// TestOutputFormatAcceptsAudioAndMedia pins the MediaOut vocabulary extension:
+// audio is a declared output (realtime/tts), image and video are declared
+// outputs (media generation), and an unknown key is still refused so a typo
+// cannot silently declare a capability.
+func TestOutputFormatAcceptsAudioAndMedia(t *testing.T) {
+	for _, output := range []map[string]any{
+		{"text": true, "audio": true},
+		{"audio": true},
+		{"text": true, "image": true, "video": true, "audio": true},
+	} {
+		doc := validCatalogDocument()
+		doc["modelRules"] = []any{
+			map[string]any{
+				"match":  "*",
+				"config": map[string]any{"properties": map[string]any{"outputFormat": output}},
+			},
+		}
+		if _, err := LoadCatalog(marshalJSON(t, doc)); err != nil {
+			t.Fatalf("outputFormat %v rejected: %v", output, err)
+		}
+	}
+
+	doc := validCatalogDocument()
+	doc["modelRules"] = []any{
+		map[string]any{
+			"match": "*",
+			"config": map[string]any{
+				"properties": map[string]any{"outputFormat": map[string]any{"text": true, "hologram": true}},
+			},
+		},
+	}
+	if _, err := LoadCatalog(marshalJSON(t, doc)); err == nil {
+		t.Fatal("an unknown outputFormat key must be refused")
+	}
+}
+
+// TestParseSelectionSurfaceHints pins the picker hint vocabulary: the hints are
+// accepted by the strict fact gate (so the picker can record the surface), are
+// normalized to lowercase tokens, and a non-token value is refused instead of
+// stored.
+func TestParseSelectionSurfaceHints(t *testing.T) {
+	fact := `{"providerId":"omni","modelId":"qwen-omni","providerType":"Realtime","surfaceKind":"Realtime"}`
+	if err := ValidateSelectionFact([]byte(fact)); err != nil {
+		t.Fatalf("surface hints must be accepted: %v", err)
+	}
+	selection, err := ParseSelection([]byte(fact))
+	if err != nil {
+		t.Fatalf("ParseSelection: %v", err)
+	}
+	if selection.ProviderType != ProviderTypeRealtime || selection.SurfaceKind != SurfaceKindRealtime {
+		t.Fatalf("selection hints = %s/%s, want realtime/realtime", selection.ProviderType, selection.SurfaceKind)
+	}
+	if err := ValidateSelectionFact([]byte(`{"modelId":"m","surfaceKind":"realtime audio"}`)); err == nil {
+		t.Fatal("a non-token surfaceKind must be refused")
+	}
+	if err := ValidateSelectionFact([]byte(`{"modelId":"m","providerType":" "}`)); err == nil {
+		t.Fatal("a blank-but-present providerType must be refused")
+	}
+}

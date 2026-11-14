@@ -39,6 +39,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/logsafe"
 )
 
 // Version is the AgentAPI service version reported by /v1/capabilities.
@@ -257,8 +258,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_, _ = w.Write(raw)
 }
 
+// writeErr is the product API's error body. Like httpapi's, it masks
+// credential-shaped substrings: the text is composed somewhere else, and this is
+// the one place every agent API error passes through.
 func writeErr(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]any{"error": err.Error()})
+	writeJSON(w, status, map[string]any{"error": logsafe.Redact(err.Error())})
 }
 
 // --- capabilities --------------------------------------------------------

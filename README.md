@@ -83,6 +83,21 @@ go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 
 完整命令（测试、E2E、压测、2GB cgroup 复跑）见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
 
+### 本地评审服务器（口令在 env 文件里）
+
+`scripts/serve-local.sh` 从**个人 env 文件**读取 `KEEL_SERVE_PASSWORD` / `KEEL_SERVE_TENANT` /
+`KEEL_DSN` / `KEEL_SERVE_ADDR`，再启动 `keel serve`。口令与 DSN 因此不出现在命令行、shell 历史
+或 `ps` 输出里。
+
+```bash
+scripts/serve-local.sh --build   # 编译并前台启动
+scripts/serve-local.sh --stop    # 停止
+```
+
+env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.personal`（gitignored）；
+本 worktree 会自动向上解析三层。需要新增变量时只改那个文件，脚本本身不保存任何凭据。
+
+
 ## 状态与路线
 
 **可运行底座 + PI 对齐**（2026-11-06）。已实现：PG schema、64KiB 分块 blob、流式 base64、

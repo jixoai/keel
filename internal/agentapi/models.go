@@ -19,9 +19,12 @@ type ModelCatalog interface {
 	// provider whose credential this process cannot resolve stays visible with
 	// an issue; only the picker list drops it.
 	ProviderViews() []modelcfg.ProviderView
-	// ModelViews returns the flat, selectable model list in stable order
-	// (models of visible providers whose credential this process can resolve;
-	// the executable registry projection).
+	// ModelViews returns the flat registry list of the models of visible
+	// providers whose credential this process can resolve (the executable
+	// registry projection). It includes complete, enabled models that are not
+	// session-selectable — a decision model is a capability endpoint and carries
+	// selectable=false — so the settings view can list it with its issue; the
+	// picker is the client's `selectable !== false` filter.
 	ModelViews() []modelcfg.ModelView
 	// ResolutionIssues reports resolution-level diagnostics that no single
 	// provider view can carry (an empty resolution, every provider hidden).
@@ -144,11 +147,14 @@ func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listModels implements GET /v1/models: the flat selectable list a picker
-// consumes, derived from the same resolution as /v1/providers. Selectability
-// is the seam's business (complete + enabled + usable provider); this handler
-// only enforces the visibility boundary, so a model of a hidden provider can
-// never be picked.
+// listModels implements GET /v1/models: the flat model registry a client
+// consumes, derived from the same resolution as /v1/providers. Selectability is
+// the seam's business (complete + enabled + usable provider + a session-capable
+// family); this handler only enforces the visibility boundary, so a model of a
+// hidden provider can never be picked. Non-selectable rows travel on purpose —
+// a decision model is executable yet opens no session surface — and the client
+// filters them out of the picker while the settings view renders them with
+// their issues.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantFrom(w, r); !ok {
 		return

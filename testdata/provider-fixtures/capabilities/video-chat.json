@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body": {
+      "model": "bailian-token-plan/wan3.0-video",
+      "messages": [
+        {
+          "role": "user",
+          "content": "a glass dove"
+        }
+      ],
+      "max_tokens": 64
+    }
+  },
+  "response": {
+    "status": 400,
+    "contentType": "application/json",
+    "body": {
+      "error": {
+        "message": "Bailian Token Plan: url error, please check url！ For details, see: https://<redacted-asset-host>/...",
+        "id": "<redacted-id>",
+        "type": "invalid_request_error",
+        "code": "invalid_parameter_error"
+      }
+    }
+  }
+}

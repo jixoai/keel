@@ -38,6 +38,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { View, windowSize } from "nsh";
 import { Icon } from "../../icons";
 import { alpha, color, motion, zIndex } from "../tokens";
+import { focusRing } from "../components/styles";
 import {
   conversationColumnInsetPx,
   conversationColumnMaxWidthPx,
@@ -158,6 +159,7 @@ export function ComposerBackToBottomButton(props: { label: string; onPress?: () 
       onPress={() => props.onPress?.()}
       hoverStyle={{ backgroundColor: color.hover }}
       activeStyle={{ backgroundColor: color.glassStateArmed }}
+      focusStyle={focusRing()}
       style={{
         position: "absolute",
         bottom: "100%",

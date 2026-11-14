@@ -352,6 +352,12 @@ var (
 
 // redactText masks credential-shaped substrings in free text (for example an
 // error string from an upstream provider).
+// Redact masks credential-shaped substrings in free text (Bearer tokens, JSON
+// `"api_key":"…"`, `token=` query values). Callers that return text to a
+// client — an error body, a settings message — use it so a future error that
+// happens to embed a credential cannot leak through that path.
+func Redact(s string) string { return redactText(s) }
+
 func redactText(s string) string {
 	if s == "" {
 		return s

@@ -1480,14 +1480,31 @@ func TestClaimRefusesARunWithALiveMirror(t *testing.T) {
 // constants internal/store publishes.
 func TestEventKindsMatchStore(t *testing.T) {
 	pairs := map[EventKind]string{
-		KindUserMessage:      store.EventUserMessage,
-		KindAssistantMessage: store.EventAssistantMessage,
-		KindToolResult:       store.EventToolResult,
-		KindCompaction:       store.EventCompaction,
-		KindRunStarted:       store.EventRunStarted,
-		KindRunFailed:        store.EventRunFailed,
-		KindRunFinished:      store.EventRunFinished,
-		KindExternalEvent:    store.EventExternalEvent,
+		KindUserMessage:          store.EventUserMessage,
+		KindAssistantMessage:     store.EventAssistantMessage,
+		KindToolResult:           store.EventToolResult,
+		KindCompaction:           store.EventCompaction,
+		KindRunStarted:           store.EventRunStarted,
+		KindRunFailed:            store.EventRunFailed,
+		KindRunFinished:          store.EventRunFinished,
+		KindExternalEvent:        store.EventExternalEvent,
+		KindTaskCreated:          store.EventTaskCreated,
+		KindTaskUpdated:          store.EventTaskUpdated,
+		KindTaskAttached:         store.EventTaskAttached,
+		KindTaskDetached:         store.EventTaskDetached,
+		KindTaskClosed:           store.EventTaskClosed,
+		KindTaskNote:             store.EventTaskNote,
+		KindFSWrite:              store.EventFSWrite,
+		KindFSCapture:            store.EventFSCapture,
+		KindFSCaptureFailed:      store.EventFSCaptureFailed,
+		KindConfigRotated:        store.EventConfigRotated,
+		KindPlacementJoined:      store.EventPlacementJoined,
+		KindPlacementLeft:        store.EventPlacementLeft,
+		KindSupervisionEscalated: store.EventSupervisionEscalated,
+		KindGuardrailTripped:     store.EventGuardrailTripped,
+		KindResumeAttempt:        store.EventResumeAttempt,
+		KindNotificationAck:      store.EventNotificationAck,
+		KindNotificationPushSent: store.EventNotificationPushSent,
 	}
 	for kind, want := range pairs {
 		if string(kind) != want {
@@ -1506,16 +1523,36 @@ func TestEventKindsMatchStore(t *testing.T) {
 // carry "tool:" keys, so the kernel must keep that prefix).
 func TestDedupeKeyNamespace(t *testing.T) {
 	cases := map[KeyRef]string{
-		{Kind: KeyToolCall, Value: "c1"}:      "tool:c1",
-		{Kind: KeyRequest, Value: "r1"}:       "req:r1",
-		{Kind: KeyGeneration, Value: "g1"}:    "gen:g1",
-		{Kind: KeyKind("custom"), Value: "x"}: "custom:x",
-		{}:                                    "",
+		{Kind: KeyToolCall, Value: "c1"}:             "tool:c1",
+		{Kind: KeyRequest, Value: "r1"}:              "req:r1",
+		{Kind: KeyGeneration, Value: "g1"}:           "gen:g1",
+		{Kind: KeyTask, Value: "t1:created:1"}:       "task:t1:created:1",
+		{Kind: KeyFSWrite, Value: "c1:src/a"}:        "fs:c1:src/a",
+		{Kind: KeyFSCapture, Value: "c1:9"}:          "capture:c1:9",
+		{Kind: KeyFSCaptureFailed, Value: "s:c1:10"}: "capture-failed:s:c1:10",
+		{Kind: KeyConfig, Value: "sha256:abc"}:       "config:sha256:abc",
+		{Kind: KeyPlacement, Value: "s:7:joined"}:    "placement:s:7:joined",
+		{Kind: KeySupervision, Value: "s:2"}:         "supervision:s:2",
+		{Kind: KeyGuardrail, Value: "s:repeat:4"}:    "guardrail:s:repeat:4",
+		{Kind: KeyResume, Value: "s:3"}:              "resume:s:3",
+		{Kind: KeyNotificationAck, Value: "n1:c1"}:   "notif-ack:n1:c1",
+		{Kind: KeyNotificationPush, Value: "n1"}:     "notif-push:n1",
+		{Kind: KeyRun, Value: "run-1"}:               "run:run-1",
+		{Kind: KeyKind("custom"), Value: "x"}:        "custom:x",
+		{}:                                           "",
 	}
 	for key, want := range cases {
 		if got := key.dedupeKey(); got != want {
 			t.Errorf("dedupeKey(%v) = %q, want %q", key, got, want)
 		}
+	}
+	// Negative control: a fs.write for tool call "c1" must not share the
+	// tool.result dedupe key of the same call. This is the collision the v2
+	// namespaces exist to prevent.
+	toolKey := KeyRef{Kind: KeyToolCall, Value: "c1"}.dedupeKey()
+	fsKey := KeyRef{Kind: KeyFSWrite, Value: "c1:src/a"}.dedupeKey()
+	if toolKey == fsKey {
+		t.Fatalf("tool.result and fs.write share a dedupe key: %q", toolKey)
 	}
 }
 
@@ -1538,6 +1575,10 @@ func TestCommitClassesAndEdgeWhitelist(t *testing.T) {
 			want = ClassEdge
 		case KindExternalEvent:
 			want = ClassExternal
+		case KindFSCaptureFailed, KindConfigRotated, KindPlacementJoined,
+			KindPlacementLeft, KindSupervisionEscalated, KindGuardrailTripped,
+			KindResumeAttempt, KindNotificationAck, KindNotificationPushSent:
+			want = ClassSystem
 		}
 		if class != want {
 			t.Errorf("kind %s class = %s, want %s", kind, class, want)

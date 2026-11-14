@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/images/edits",
+    "body": {
+      "model": "bailian-token-plan/wan2.7-image",
+      "prompt": "把背景改成暖白色",
+      "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    }
+  },
+  "response": {
+    "status": 400,
+    "contentType": "application/json",
+    "body": {
+      "error": {
+        "code": null,
+        "message": "token-plan.cn-beijing.maas.aliyuncs.com: 400 Bad Request: Error validating image, image https://<redacted-asset-host>/... resolution must be at least 240x240, got 1x1 (InvalidParameter)",
+        "param": null,
+        "type": "invalid_request_error"
+      }
+    }
+  }
+}

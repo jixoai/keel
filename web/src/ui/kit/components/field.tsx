@@ -19,7 +19,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Icon } from "../../icons";
-import { color, radius, space, typeScale } from "../tokens";
+import { color, lineHeight, radius, space, typeScale } from "../tokens";
 import { Label } from "./label";
 
 export function Field(props: {
@@ -61,12 +61,29 @@ export function Field(props: {
             style={{ flexDirection: "row", alignItems: "center", gap: space.xs, paddingTop: space.xxs }}
           >
             <Icon name="alert" size={12} tint={color.destructive} />
-            <Text style={{ fontSize: typeScale.sm, color: color.destructive, borderRadius: radius.none }}>
+            <Text
+              style={{
+                fontSize: typeScale.sm,
+                // A hint or an error is prose that wraps: at least 1.4 (the
+                // host's default lands near 1.25), so a two-line message stays
+                // readable.
+                lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                color: color.destructive,
+                borderRadius: radius.none,
+              }}
+            >
               {props.error ?? ""}
             </Text>
           </View>
         ) : props.hint !== undefined ? (
-          <Text style={{ fontSize: typeScale.sm, color: props.disabled ? color.mutedForeground : color.mutedForeground, paddingTop: space.xxs }}>
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.mutedForeground,
+              paddingTop: space.xxs,
+            }}
+          >
             {props.hint}
           </Text>
         ) : null}

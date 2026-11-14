@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/decisions",
+    "body": {
+      "model": "bailian-token-plan/decision-model-preview",
+      "input": "Is the message urgent? Answer yes or no.",
+      "questions": [
+        {
+          "type": "predicate",
+          "predicate": "the message is urgent"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 502,
+    "contentType": "application/json",
+    "body": {
+      "error": {
+        "code": null,
+        "message": "Bailian Token Plan: Post \"https://<redacted-asset-host>/...\": read tcp 10.255.4.3:50802->39.106.104.16:443: read: connection reset by peer",
+        "param": null,
+        "type": "api_error"
+      }
+    }
+  }
+}

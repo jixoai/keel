@@ -85,6 +85,10 @@ export interface ModelSelection {
   providerId?: string;
   modelId: string;
   reasoningLevel?: string;
+  /** The surface this selection opens (`keel-session-surfaces-v1`). The server
+   * resolves it from the provider descriptor when absent; the client carries it
+   * so a newly registered provider can render before a session starts. */
+  surfaceKind?: string;
 }
 
 /** What the composer sends: the contract's `send` plus attachments and the
@@ -151,6 +155,12 @@ export interface ModelOptionSpecsView {
 export interface ModelView {
   providerId: string;
   modelId: string;
+  /** The provider family this model belongs to (`llm` / `realtime` / `image`
+   * / `video` / `tts` / `stt`), resolved from the provider document. */
+  providerType?: string;
+  /** The session surface this model opens. It overrides the client's inference
+   * when a provider plugin ships its own descriptor. */
+  surfaceKind?: string;
   api?: ProviderApiView;
   properties?: ModelPropertiesView;
   options?: ModelOptionSpecsView;
@@ -166,6 +176,10 @@ export interface ModelView {
 export interface ProviderView {
   providerId: string;
   name?: string;
+  /** `llm` / `realtime` / `image` / `video` / `tts` / `stt`; absent means the
+   * server's legacy text provider. */
+  providerType?: string;
+  surfaceKind?: string;
   visibility?: string;
   api?: ProviderApiView;
   access?: ProviderAccessView;
@@ -314,9 +328,68 @@ export interface FireResultView {
   error?: string;
 }
 
+// ---- deployment capabilities (settings「能力」) ----------------------------
+
+/** One media capability's status as this deployment reports it.
+ *
+ * `available` is a working configuration; `unconfigured` is the ordinary
+ * "the operator has not set the environment yet" state (writable only by the
+ * server's process); `unsupported` is the provider declining the capability
+ * itself. The client never invents a status. */
+export type MediaCapabilityStatus = "available" | "unconfigured" | "unsupported";
+
+/** One row of `GET /v1/media/capabilities`. It carries facts an operator can
+ * act on — a status, an optional provider reason, environment variable NAMES
+ * and a model id — and never a URL, a key or a runtime error. */
+export interface MediaCapabilityView {
+  /** The operational id: `chat`, `image`, `image-edit`, `decision`, `video`,
+   * `tts`, `stt` (plugin families may report others; the settings page only
+   * renders the rows it knows). */
+  id: string;
+  status: MediaCapabilityStatus;
+  /** Why a provider does not offer the capability. The transport sanitizes it
+   * before it reaches the page: a URL, a credential or a Go error is dropped. */
+  reason?: string;
+  /** Environment variable NAMES that enable the capability (never values). */
+  env?: string[];
+  /** The model id this deployment routes the capability to, when resolved. */
+  model?: string;
+}
+
+/** `GET /v1/media/capabilities` — what this deployment's media gateway can do.
+ * A 503 from the endpoint means "the gateway itself is not configured" and is
+ * reported as `configured: false`, not as an error. */
+export interface MediaCapabilitiesView {
+  configured: boolean;
+  capabilities: MediaCapabilityView[];
+  /** Gateway-level environment variable NAMES (base URL / credential). */
+  env?: string[];
+}
+
+/** `GET /v1/realtime/status` — the voice bridge's preflight facts. The
+ * provider URL and key stay on the server; only the protocol family and the
+ * allowlisted model names cross the wire. */
+export interface RealtimeStatusView {
+  configured: boolean;
+  /** The provider's display name (a protocol family, not an endpoint). */
+  provider?: string;
+  kind?: string;
+  models: string[];
+  inputSampleRate?: number;
+  outputSampleRate?: number;
+}
+
+/** The deployment-capability probes the settings page reads. `KeelHttp`
+ * implements it; the scripted fixture does not (these are facts of the live
+ * process, not of the fixture). */
+export interface DeploymentCapabilitiesApi {
+  mediaCapabilities(): Promise<MediaCapabilitiesView>;
+  realtimeStatus(): Promise<RealtimeStatusView>;
+}
+
 /** The settings face of a transport. Both `KeelHttp` and the fixture client
  * implement it, so the settings screens and the session picker work against
- * the same store in live and demo mode. */
+ * the same store in live and fixture mode. */
 export interface SettingsApi {
   modelsSettings(): Promise<ModelsSettingsView>;
   saveModelsSettings(document: Record<string, unknown>, expectedRevision?: number): Promise<ModelsSettingsSaved>;

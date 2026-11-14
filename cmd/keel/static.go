@@ -115,7 +115,63 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
+	if h.servePrecompressed(w, r, target) {
+		return
+	}
 	h.file.ServeHTTP(w, r)
+}
+
+// servePrecompressed answers from the build's `<asset>.br` / `<asset>.gz`
+// sidecars when the client accepts that encoding. NSH packages both sidecars
+// next to every asset; without this a 7.2 MB wasm body crosses the network
+// uncompressed (a 30 s cold start behind the dev tunnel) even though a 1-2 MB
+// sidecar sits beside it. index.html is excluded: it is small and must stay
+// byte-identical to the build for cache debugging.
+func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Request, target string) bool {
+	base := filepath.Base(target)
+	if base == "index.html" || r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if strings.Contains(r.Header.Get("Range"), "=") {
+		// Range over a re-encoded body would need offset mapping; let the file
+		// server answer the (rare) partial request from the original bytes.
+		return false
+	}
+	for _, encoding := range preferredEncodings(r.Header.Get("Accept-Encoding")) {
+		sidecar := target + "." + encoding
+		info, err := os.Stat(sidecar)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		file, err := os.Open(sidecar)
+		if err != nil {
+			continue
+		}
+		defer file.Close()
+		w.Header().Set("Content-Encoding", encoding)
+		w.Header().Add("Vary", "Accept-Encoding")
+		// ServeContent types the body by the original name (".wasm", ".js"),
+		// which is what the browser needs; the ".br"/".gz" suffix is transport.
+		http.ServeContent(w, r, base, info.ModTime(), file)
+		return true
+	}
+	return false
+}
+
+// preferredEncodings lists the encodings to try, most compact first, from an
+// Accept-Encoding header. Only the two encodings the build ships sidecars for
+// are considered; q-values are ignored because the sidecars are always smaller
+// than the original.
+func preferredEncodings(header string) []string {
+	lowered := strings.ToLower(header)
+	var encodings []string
+	if strings.Contains(lowered, "br") {
+		encodings = append(encodings, "br")
+	}
+	if strings.Contains(lowered, "gzip") {
+		encodings = append(encodings, "gz")
+	}
+	return encodings
 }
 
 func (h *staticHandler) serveIndex(w http.ResponseWriter, r *http.Request) {

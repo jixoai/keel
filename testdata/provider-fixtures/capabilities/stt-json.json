@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/audio/transcriptions",
+    "body": {
+      "model": "bailian-token-plan/stt-1"
+    }
+  },
+  "response": {
+    "status": 400,
+    "contentType": "application/json",
+    "body": {
+      "error": {
+        "code": null,
+        "message": "send the audio as multipart/form-data, as OpenAI's /v1/audio/transcriptions takes it: a file and a model",
+        "param": null,
+        "type": "invalid_request_error"
+      }
+    }
+  }
+}
