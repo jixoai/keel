@@ -441,6 +441,18 @@ func validateRunFinishedPayload(raw json.RawMessage) error {
 			return fmt.Errorf(`run.finished payload %q must be a string`, field)
 		}
 	}
+	// The execution binding the attempt froze (change keel-agent-team-v1): the
+	// Agent/AgentTeam identity, the team's revision and content hash, and the
+	// system-prompt digest. Shape-checked only, like provider/model: the
+	// vocabulary belongs to the product layer.
+	for _, field := range []string{"agentId", "teamId", "teamHash", "promptHash"} {
+		if v, ok := payload[field]; ok && !isJSONString(v) {
+			return fmt.Errorf(`run.finished payload %q must be a string`, field)
+		}
+	}
+	if v, ok := payload["teamRevision"]; ok && !isJSONCount(v) {
+		return errors.New(`run.finished payload "teamRevision" must be a non-negative integer`)
+	}
 	for _, field := range []string{"tokens", "context"} {
 		v, ok := payload[field]
 		if !ok {

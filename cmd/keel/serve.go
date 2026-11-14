@@ -252,6 +252,14 @@ func runServe(parent context.Context, opts serveOptions) error {
 			LookupEnv:    os.LookupEnv,
 			LookupSecret: tenantSecretLookup(st, secretBox, opts.TenantID, log),
 		},
+		// The execution binding reads the tenant's Agent/AgentTeam documents.
+		// Prompt-file references resolve against the process working directory
+		// (the deployment root the CLI and the web app share).
+		Bindings: servicehost.BindingsOptions{
+			Reader:   st,
+			TenantID: opts.TenantID,
+			Root:     deploymentRoot(),
+		},
 		External: servicehost.ExternalOptions{
 			LookupEnv: os.LookupEnv,
 			Environ:   os.Environ(),
@@ -338,6 +346,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// time: a settings write installs a new model service, and the input edge
 		// must accept exactly what that generation can run. A runtime without
 		// provider configuration still refuses every selection.
+		//
+		// The execution binding (agentId/teamId) is part of that same gate: the
+		// submit path resolves it exactly as an attempt would (existence, archive,
+		// seal) and merges the agent's default model into a fact that named none,
+		// so "what the edge accepts" stays "what the next attempt runs".
 		ValidateSelection: selectFromCurrentGeneration(rt),
 	})
 
@@ -797,18 +810,33 @@ func (m modelRuntimeSeam) ApplyModels(ctx context.Context, document json.RawMess
 	return err
 }
 
+// deploymentRoot is the directory an agent's prompt-file reference resolves
+// against: the process working directory, which is the deployment root the CLI
+// and the web app share. An unresolvable cwd yields "" (file prompts are then
+// refused with a diagnostic instead of guessing).
+func deploymentRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
 // selectFromCurrentGeneration is the input edge's selection validator: it
 // validates against the model service the runtime is serving right now, so a
 // settings write changes what the next input may ask for without a restart. A
 // runtime without provider configuration refuses every selection, exactly like
 // a boot without a models document always did.
+//
+// It delegates to the runtime's own gate so the execution binding (agentId/
+// teamId) travels the same path: resolving it here as well would be a second
+// rule that could drift from what the attempt runs.
 func selectFromCurrentGeneration(rt *servicehost.Runtime) func(json.RawMessage) error {
 	return func(selection json.RawMessage) error {
-		service := rt.Models()
-		if service == nil {
+		if rt == nil {
 			return errors.New("selection is not supported by this server")
 		}
-		return service.ValidateSelection(selection)
+		return rt.ValidateSelection(context.Background(), selection)
 	}
 }
 

@@ -88,6 +88,53 @@ func (r *ToolRegistry) List() []agentcore.AgentTool {
 	return out
 }
 
+// Subset returns a new registry holding only the named tools, in the same
+// registration form (each tool's JSON Schema is recompiled, so the subset
+// validates arguments exactly like the full registry). Names the registry does
+// not serve are skipped: an agent grant that names an uninstalled plugin tool is
+// kept in configuration and simply does not enter the surface (spec:
+// 插件卸载后引用 MUST 标记为不可用，MUST NOT 阻断运行).
+//
+// The copy is deliberate: the returned registry is what one run hands the loop
+// (AgentContext.Tools), so sharing the source registry would let a later
+// registration in this process change the tool surface of an attempt in flight.
+func (r *ToolRegistry) Subset(names []string) (*ToolRegistry, error) {
+	r.mu.RLock()
+	selected := make([]agentcore.AgentTool, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if _, duplicate := seen[name]; duplicate {
+			continue
+		}
+		seen[name] = struct{}{}
+		if tool, ok := r.tools[name]; ok {
+			selected = append(selected, tool)
+		}
+	}
+	r.mu.RUnlock()
+
+	out := NewToolRegistry()
+	for _, tool := range selected {
+		if err := out.Register(tool); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// Names returns the registered tool names, sorted. It is the cheap projection a
+// caller uses to compare two surfaces without materializing the tools.
+func (r *ToolRegistry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // FieldError is a single validation failure located at a JSON-pointer path
 // within the arguments.
 type FieldError struct {

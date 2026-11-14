@@ -247,6 +247,13 @@ type Selection struct {
 	ReasoningLevel string `json:"reasoningLevel,omitempty"`
 	ProviderType   string `json:"providerType,omitempty"`
 	SurfaceKind    string `json:"surfaceKind,omitempty"`
+	// AgentID and TeamID are the input fact's execution binding: they name the
+	// configured Agent (standard mode) or AgentTeam (team mode) that answers
+	// this input. They never select a model — the resolver reads them for the
+	// prompt and tool surface — and a tenant document must not carry them (see
+	// SelectionScopeDocument).
+	AgentID string `json:"agentId,omitempty"`
+	TeamID  string `json:"teamId,omitempty"`
 }
 
 // Issue is one configuration problem tied to a dotted field path.

@@ -167,3 +167,62 @@ func TestRunToolCallAfterToolCallStructuredContent(t *testing.T) {
 }
 
 func anyPtr(v any) *any { return &v }
+
+// TestToolRegistrySubset pins the execution-binding surface primitive
+// (change keel-agent-team-v1, RUNTIME-PLAN §c.2): the subset re-registers the
+// selected tools (schemas recompiled, so argument validation works), skips
+// names the registry does not serve, dedupes, and never mutates the source
+// registry — a run's tool surface must not change because a later registration
+// happened in this process.
+func TestToolRegistrySubset(t *testing.T) {
+	full := NewToolRegistry()
+	for _, tool := range []agentcore.AgentTool{echoToolWithOutput{}, failingTool{}, clockToolForSubset{}} {
+		if err := full.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	subset, err := full.Subset([]string{"echo", "missing-tool", "echo", "failing"})
+	if err != nil {
+		t.Fatalf("Subset: %v", err)
+	}
+	if got := subset.Names(); !reflect.DeepEqual(got, []string{"echo", "failing"}) {
+		t.Fatalf("subset names = %v, want [echo failing]", got)
+	}
+	if _, ok := subset.Get("clock"); ok {
+		t.Fatal("the subset serves a tool it was not asked for")
+	}
+	// The schema travelled with the tool: validation still works.
+	if errs := subset.Validate("echo", json.RawMessage(`{}`)); len(errs) == 0 {
+		t.Fatal("the subset's echo tool lost its schema")
+	}
+	if errs := subset.Validate("echo", json.RawMessage(`{"value":"hi"}`)); len(errs) != 0 {
+		t.Fatalf("valid args refused: %v", errs)
+	}
+
+	// The source registry is untouched.
+	if got := full.Names(); !reflect.DeepEqual(got, []string{"clock", "echo", "failing"}) {
+		t.Fatalf("source names = %v", got)
+	}
+	// An empty selection is a legal empty surface.
+	empty, err := full.Subset(nil)
+	if err != nil {
+		t.Fatalf("Subset(nil): %v", err)
+	}
+	if got := empty.Names(); len(got) != 0 {
+		t.Fatalf("empty subset names = %v", got)
+	}
+}
+
+// clockToolForSubset is a distinct third tool for the subset test.
+type clockToolForSubset struct{}
+
+func (clockToolForSubset) Name() string            { return "clock" }
+func (clockToolForSubset) Description() string     { return "Clock tool" }
+func (clockToolForSubset) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (clockToolForSubset) ExecutionMode() agentcore.ToolExecutionMode {
+	return agentcore.ToolExecutionParallel
+}
+func (clockToolForSubset) Execute(context.Context, string, json.RawMessage, agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	return agentcore.AgentToolResult{}, nil
+}

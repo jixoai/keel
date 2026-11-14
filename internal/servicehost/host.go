@@ -185,6 +185,10 @@ type Config struct {
 	Prompt PromptOptions
 	MCP    MCPOptions
 	LLM    LLMOptions
+	// Bindings carries the execution-binding read seam (the tenant's Agent and
+	// AgentTeam documents) and the root prompt-file references resolve against.
+	// A zero value disables the binding surface.
+	Bindings BindingsOptions
 	// External carries the external gateway's hosting-process inputs. The
 	// tenant document (Tenant.External) declares the providers; this is only
 	// how the process resolves their secrets and supervises them.
@@ -927,6 +931,10 @@ var _ agent.BoundRun = (*boundRun)(nil)
 // and the prompt sections that MCP servers and plugins contribute.
 type RefreshableAssembly interface {
 	agent.Assembly
+	// agent.PreambleRenderer is the seam the execution binding renders through:
+	// the host is the only place that can re-render its dynamic sections around
+	// a different preamble, so the runner must never assemble a prompt itself.
+	agent.PreambleRenderer
 	RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []host.Section) error
 }
 

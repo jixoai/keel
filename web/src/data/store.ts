@@ -7,6 +7,7 @@ import { host, signal } from "nsh";
 import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
 import { KeelApiError, KeelHttp } from "./http";
+import { selectionForSend } from "./selection";
 import type {
   AgentTeamApi,
   AgentTeamsResponse,
@@ -647,8 +648,10 @@ class KeelStore {
 
   /** Set (or clear) the open session's team marker. Picking a model in
    * standard mode clears it (the session stops being a team session); picking
-   * a team sets it together with the captain's selection. Picking a model in
-   * standard mode is the caller's business — this method only records. */
+   * a team sets it together with the captain's selection. The marker is what
+   * `selectionForSend` turns into the input's `teamId`; the server resolves
+   * the captain and the frozen team snapshot from it, so the client's model
+   * mirror is convenience, never the authority. */
   setSessionTeam(team: AgentTeamView | null) {
     const sessionId = this.activeId();
     if (!sessionId) return;
@@ -1190,9 +1193,11 @@ class KeelStore {
     const delivery: Delivery = this.busy() ? mode : "queue";
     const requestId = newRequestId();
     const commands = this.client.commands(sessionId);
-    // The session's model selection rides every input; without one the server
-    // resolves the tenant default (the field is then absent on the wire).
-    const selection = this.sessionSelection() ?? undefined;
+    // The session's selection fact rides every input: the model choice plus,
+    // for a team session, the execution binding the server resolves the
+    // captain's prompt/tools/model from. Without one the server resolves the
+    // tenant default (the field is then absent on the wire).
+    const selection = selectionForSend(this.sessionSelection(), this.sessionTeam()) ?? undefined;
     const optimistic: AttachmentRef[] = pending.map((item) => ({
       name: item.name,
       mime: item.mime,

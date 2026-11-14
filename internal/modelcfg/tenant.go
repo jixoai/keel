@@ -58,15 +58,17 @@ func validateTenantDocument(doc map[string]any) error {
 		if _, err := decodeSelection(raw); err != nil {
 			return err
 		}
-		// The document's selection speaks the same vocabulary as an input's
-		// selection fact: a key the resolver never reads (a stored baseUrl, say)
-		// must not be storable — it would look like it applied while nothing
-		// reads it.
+		// The document's selection is a *model* default and speaks the model
+		// vocabulary only: a key the resolver never reads (a stored baseUrl, say)
+		// must not be storable, and the input fact's execution binding
+		// (agentId/teamId) is refused too — a document that pinned an agent would
+		// silently make every session of the tenant that agent, while the binding
+		// belongs to an input.
 		encoded, err := json.Marshal(raw)
 		if err != nil {
 			return fmt.Errorf("selection: %w", err)
 		}
-		if err := checkSelectionKeys(encoded, selectionKeys); err != nil {
+		if err := checkSelectionKeys(encoded, SelectionScopeDocument.keys()); err != nil {
 			return fmt.Errorf("selection: %w", err)
 		}
 	}

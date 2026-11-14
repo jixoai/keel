@@ -89,6 +89,14 @@ export interface ModelSelection {
    * resolves it from the provider descriptor when absent; the client carries it
    * so a newly registered provider can render before a session starts. */
   surfaceKind?: string;
+  /** The execution binding (`keel-agent-team-v1`): the Agent library entry this
+   * input runs as. The server resolves its system prompt, tool grants and
+   * default model; the client never invents one. */
+  agentId?: string;
+  /** The AgentTeam this input runs as: the server resolves the captain and the
+   * frozen team snapshot (revision/hash) into the run. A selection naming both
+   * ids is a team fact — the team decides the captain. */
+  teamId?: string;
 }
 
 /** What the composer sends: the contract's `send` plus attachments and the

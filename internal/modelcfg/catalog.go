@@ -261,8 +261,9 @@ func decodeRule(obj map[string]any) (ruleDoc, error) {
 // ParseSelection decodes a selection fact: the "selection" field of a
 // user.message payload, or a tenant document's selection. An empty or null
 // payload yields the zero selection, which callers read as "no choice made".
-// The fact and the document share one vocabulary, so the two cannot drift
-// apart.
+// The fact and the document share one model vocabulary, so the two cannot drift
+// apart; the input fact additionally carries the execution binding
+// (agentId/teamId), which is normalized here and never routes a model.
 func ParseSelection(raw []byte) (Selection, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
@@ -275,14 +276,47 @@ func ParseSelection(raw []byte) (Selection, error) {
 	return decodeSelection(value)
 }
 
-// selectionKeys is the exact key vocabulary of a selection fact (and of a
-// tenant document's selection). The fact is persisted verbatim by the kernel,
-// so this vocabulary is the whole contract. providerType and surfaceKind are
-// picker hints: resolution never routes on them, but they are accepted so a
-// client can record which surface a demo or newly registered provider opens.
+// selectionKeys is the model vocabulary of a selection fact (and of a tenant
+// document's selection). The fact is persisted verbatim by the kernel, so this
+// vocabulary is the whole contract. providerType and surfaceKind are picker
+// hints: resolution never routes on them, but they are accepted so a client can
+// record which surface a demo or newly registered provider opens.
 var selectionKeys = []string{"providerId", "modelId", "reasoningLevel", "providerType", "surfaceKind", "options"}
 
+// selectionBindingKeys is the input-fact vocabulary: the model keys plus the
+// execution binding. agentId/teamId say *which configured agent or team* answers
+// this input; they never name a model, so the resolver reads them for the
+// prompt/tool surface and nothing else. A tenant document MUST NOT carry them
+// (ValidateDocumentSelectionFact uses selectionKeys alone): the deployment
+// default is a model identity, and a document that pinned an agent would make
+// every session of the tenant that agent without any session saying so.
+var selectionBindingKeys = append(append([]string{}, selectionKeys...), "agentId", "teamId")
+
 var selectionOptionKeys = []string{"reasoningLevel"}
+
+// SelectionScope names which vocabulary a selection payload is validated
+// against. The two scopes exist so the document and the input fact cannot
+// silently share a key the other must refuse.
+type SelectionScope string
+
+const (
+	// SelectionScopeInput is the vocabulary of a user.message selection fact:
+	// model identity plus the execution binding (agentId/teamId).
+	SelectionScopeInput SelectionScope = "input"
+	// SelectionScopeDocument is the vocabulary of a tenant document's default
+	// selection: model identity only.
+	SelectionScopeDocument SelectionScope = "document"
+)
+
+// keys returns the key vocabulary of the scope. An unknown scope falls back to
+// the narrower document vocabulary (fail closed: an unrecognized caller cannot
+// widen what a stored fact may carry).
+func (s SelectionScope) keys() []string {
+	if s == SelectionScopeInput {
+		return selectionBindingKeys
+	}
+	return selectionKeys
+}
 
 // ValidateSelectionFact is the strict gate for a client-supplied selection
 // fact. Unlike ParseSelection it refuses unknown and duplicate keys, so a
@@ -290,12 +324,21 @@ var selectionOptionKeys = []string{"reasoningLevel"}
 // example a baseUrl) into a session's history. The documented
 // options.reasoningLevel alias is accepted alongside the flattened spelling.
 // The empty and null payloads are the "no choice made" fact.
+//
+// It is ValidateSelectionFactIn(SelectionScopeInput); the named form keeps the
+// historical call sites readable.
 func ValidateSelectionFact(raw []byte) error {
+	return ValidateSelectionFactIn(raw, SelectionScopeInput)
+}
+
+// ValidateSelectionFactIn is the scoped form: the input path accepts the
+// execution binding, the document path refuses it (see SelectionScope).
+func ValidateSelectionFactIn(raw []byte, scope SelectionScope) error {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
-	if err := checkSelectionKeys(trimmed, selectionKeys); err != nil {
+	if err := checkSelectionKeys(trimmed, scope.keys()); err != nil {
 		return fmt.Errorf("selection: %w", err)
 	}
 	_, err := ParseSelection(trimmed)
@@ -367,6 +410,8 @@ func decodeSelection(raw any) (Selection, error) {
 		ReasoningLevel string `json:"reasoningLevel"`
 		ProviderType   string `json:"providerType"`
 		SurfaceKind    string `json:"surfaceKind"`
+		AgentID        string `json:"agentId"`
+		TeamID         string `json:"teamId"`
 		Options        *struct {
 			ReasoningLevel string `json:"reasoningLevel"`
 		} `json:"options"`
@@ -388,6 +433,8 @@ func decodeSelection(raw any) (Selection, error) {
 		ReasoningLevel: strings.TrimSpace(decoded.ReasoningLevel),
 		ProviderType:   providerType,
 		SurfaceKind:    surfaceKind,
+		AgentID:        strings.TrimSpace(decoded.AgentID),
+		TeamID:         strings.TrimSpace(decoded.TeamID),
 	}
 	if selection.ReasoningLevel == "" && decoded.Options != nil {
 		selection.ReasoningLevel = strings.TrimSpace(decoded.Options.ReasoningLevel)

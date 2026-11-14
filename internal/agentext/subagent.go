@@ -1,6 +1,7 @@
 package agentext
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,11 +47,40 @@ type SpawnRequest struct {
 	ParentSessionID uuid.UUID `json:"-"`
 	Task            string    `json:"task"`
 	Agent           string    `json:"agent,omitempty"`
+	// AgentID is the Agent library entry the child session runs as. It travels
+	// into the child's input as selection.agentId, so the child attempt resolves
+	// that agent's prompt, tool grants and default model exactly like any other
+	// bound run (change keel-agent-team-v1: 成员以自己的 Agent 配置启动独立
+	// session/run). Agent stays the free-form label the record and hooks carry.
+	AgentID string `json:"agentId,omitempty"`
+	// Selection, when set, is a complete selection fact for the child input
+	// (model identity and/or execution binding). It takes precedence over
+	// AgentID, which the runner folds into it.
+	Selection json.RawMessage `json:"selection,omitempty"`
 	// IdempotencyKey makes the derived child session deterministic: the same
 	// key in the same parent always targets the same child session, so a retry
 	// reuses the committed input instead of spawning a second agent.
 	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 	Budget         Budget `json:"budget,omitempty"`
+}
+
+// childSelection derives the child input's selection fact from the request. It
+// is a fact like any other: the child attempt resolves its Agent binding from
+// it, and an empty result stays absent (the child then runs the deployment
+// default).
+func (r SpawnRequest) childSelection() json.RawMessage {
+	if raw := bytes.TrimSpace(r.Selection); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		return append(json.RawMessage(nil), raw...)
+	}
+	agentID := strings.TrimSpace(r.AgentID)
+	if agentID == "" {
+		return nil
+	}
+	encoded, err := json.Marshal(map[string]string{"agentId": agentID})
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 // Artifact is one provenance entry of a sub-agent run (for now: the tool calls
@@ -204,6 +234,12 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 			"idempotencyKey":  key,
 			"budget":          req.Budget,
 		},
+	}
+	// The child's execution binding travels as the input's own selection fact:
+	// the child attempt then resolves the member's prompt, tools and model,
+	// exactly like a session that picked that agent.
+	if selection := req.childSelection(); len(selection) > 0 {
+		extras["selection"] = selection
 	}
 	start, err := r.starter.StartTurn(ctx, StartTurnRequest{
 		TenantID:  req.TenantID,
@@ -636,7 +672,8 @@ func (t *SubagentTool) Description() string {
 func (t *SubagentTool) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` +
 		`"task":{"type":"string","description":"What the sub-agent must do."},` +
-		`"agent":{"type":"string","description":"Optional agent/profile name."},` +
+		`"agent":{"type":"string","description":"Optional free-form label recorded on the sub-agent."},` +
+		`"agentId":{"type":"string","description":"Optional Agent library id the sub-agent runs as: it resolves that agent's system prompt, tool grants and default model."},` +
 		`"maxTurns":{"type":"integer","minimum":0},` +
 		`"maxTokens":{"type":"integer","minimum":0},` +
 		`"timeoutMs":{"type":"integer","minimum":0}` +
@@ -657,6 +694,7 @@ func (t *SubagentTool) Execute(ctx context.Context, _ string, args json.RawMessa
 	var input struct {
 		Task      string `json:"task"`
 		Agent     string `json:"agent"`
+		AgentID   string `json:"agentId"`
 		MaxTurns  int    `json:"maxTurns"`
 		MaxTokens int    `json:"maxTokens"`
 		TimeoutMs int64  `json:"timeoutMs"`
@@ -669,6 +707,7 @@ func (t *SubagentTool) Execute(ctx context.Context, _ string, args json.RawMessa
 		ParentSessionID: scope.SessionID,
 		Task:            input.Task,
 		Agent:           input.Agent,
+		AgentID:         input.AgentID,
 		Budget:          Budget{MaxTurns: input.MaxTurns, MaxTokens: input.MaxTokens, TimeoutMs: input.TimeoutMs},
 	})
 	if err != nil {

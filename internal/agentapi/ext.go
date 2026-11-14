@@ -2,6 +2,7 @@ package agentapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -182,6 +183,8 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 type spawnSubagentRequest struct {
 	Task           string          `json:"task"`
 	Agent          string          `json:"agent"`
+	AgentID        string          `json:"agentId"`
+	Selection      json.RawMessage `json:"selection"`
 	IdempotencyKey string          `json:"idempotencyKey"`
 	Budget         agentext.Budget `json:"budget"`
 	Wait           bool            `json:"wait"`
@@ -210,6 +213,8 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		ParentSessionID: parentID,
 		Task:            body.Task,
 		Agent:           body.Agent,
+		AgentID:         body.AgentID,
+		Selection:       body.Selection,
 		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
 	})

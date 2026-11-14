@@ -107,13 +107,17 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 			h := im.build(t)
 			lease := h.claimScope(h.scope, "runtime-a")
 
-			// The full shape the worker writes.
+			// The full shape the worker writes, including the frozen execution
+			// binding (change keel-agent-team-v1): the Agent/AgentTeam identity,
+			// the team revision/hash and the system-prompt digest.
 			valid := json.RawMessage(`{
 				"status":"done","turns":2,
 				"tokens":{"input":120,"output":30,"total":150},
 				"toolTimings":[{"tool":"clock","durationMs":3},{"tool":"echo","durationMs":1,"isError":true}],
 				"context":{"messages":6,"tokens":120},
-				"stopReason":"end_turn","durationMs":900}`)
+				"stopReason":"end_turn","durationMs":900,
+				"agentId":"agent_captain","teamId":"team_kite","teamRevision":3,
+				"teamHash":"sha256:abc","promptHash":"sha256:def"}`)
 			first := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-1", Payload: valid})
 			if first.Kind != KindRunFinished || first.Deduped {
 				t.Fatalf("run.finished = %+v", first)
@@ -152,6 +156,12 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				json.RawMessage(`{"status":"done","model":["gpt"]}`),
 				json.RawMessage(`{"status":"done","configHashBefore":7}`),
 				json.RawMessage(`{"status":"done","configHashAfter":[]}`),
+				json.RawMessage(`{"status":"done","agentId":7}`),
+				json.RawMessage(`{"status":"done","teamId":["t"]}`),
+				json.RawMessage(`{"status":"done","teamHash":7}`),
+				json.RawMessage(`{"status":"done","promptHash":{}}`),
+				json.RawMessage(`{"status":"done","teamRevision":"three"}`),
+				json.RawMessage(`{"status":"done","teamRevision":-1}`),
 				json.RawMessage(`[]`),
 			} {
 				if err := h.commitErr(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-bad", Payload: bad}); !iso(err, ErrInvalidRequest) {

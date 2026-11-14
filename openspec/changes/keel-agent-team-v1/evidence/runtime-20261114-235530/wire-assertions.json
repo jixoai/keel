@@ -1,0 +1,12 @@
+{
+  "captainTools": [
+    "clock",
+    "spawn_subagent"
+  ],
+  "memberTools": [
+    "echo"
+  ],
+  "captainSystemHead": "KITE-RUNTIME-MARK-7 captain instructions: coordinate the team.\n\n<plugin_standard>\nCreation mode builds plugins by writing real plugin packages. You are the auth",
+  "memberSystemHead": "KITE-RUNTIME-MARK-8 member instructions: review the draft.\n\n<plugin_standard>\nCreation mode builds plugins by writing real plugin packages. You are the author;\n",
+  "requests": 2
+}

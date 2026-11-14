@@ -179,7 +179,10 @@ type promptService struct {
 	host *host.Host
 }
 
-func (p *promptService) SystemPrompt() string           { return p.host.SystemPrompt() }
+func (p *promptService) SystemPrompt() string { return p.host.SystemPrompt() }
+func (p *promptService) RenderSystemPrompt(preamble string) string {
+	return p.host.RenderSystemPrompt(preamble)
+}
 func (p *promptService) Tools() *agenttool.ToolRegistry { return p.host.Tools() }
 func (p *promptService) RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []host.Section) error {
 	return p.host.RefreshSections(extra, mcpSection, pluginSections)
@@ -258,7 +261,10 @@ type toolsService struct {
 	prompt *promptService
 }
 
-func (t *toolsService) SystemPrompt() string           { return t.prompt.SystemPrompt() }
+func (t *toolsService) SystemPrompt() string { return t.prompt.SystemPrompt() }
+func (t *toolsService) RenderSystemPrompt(preamble string) string {
+	return t.prompt.RenderSystemPrompt(preamble)
+}
 func (t *toolsService) Tools() *agenttool.ToolRegistry { return t.prompt.Tools() }
 func (t *toolsService) RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []host.Section) error {
 	return t.prompt.RefreshSections(extra, mcpSection, pluginSections)
@@ -429,6 +435,17 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 			runner.Models = models
 		}
 		runner.Assembly = assembly
+		// The execution binding (Agent/AgentTeam the input selected) resolves per
+		// attempt through this seam: the runner reads the binding the selection
+		// fact names and freezes its identity into the run summary. A zero
+		// BindingsOptions keeps the pre-binding behaviour.
+		if cfg.Bindings.Reader != nil {
+			runner.Bindings = &bindingResolver{
+				reader: cfg.Bindings.Reader,
+				root:   cfg.Bindings.Root,
+				log:    cfg.Seams.Logger,
+			}
+		}
 		if cfg.Tenant.Agent.MaxTurns > 0 {
 			runner.MaxTurns = cfg.Tenant.Agent.MaxTurns
 		}

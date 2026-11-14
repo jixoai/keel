@@ -253,3 +253,34 @@ func TestReloadKeepsPluginPromptSurface(t *testing.T) {
 		t.Fatal("the reload dropped the plugin tool")
 	}
 }
+
+// TestAgentBindingPreambleKeepsThePluginSurface is the binding half of the
+// prompt contract: an Agent's system prompt replaces the deployment preamble
+// through the assembly seam, and the plugin sections the publish path owns stay
+// live in the rendered prompt. It is the guard against "selecting an Agent
+// silently turned the plugin/MCP surface off".
+func TestAgentBindingPreambleKeepsThePluginSurface(t *testing.T) {
+	rt := bootForTest(t, promptTestTenant(), loadout.Options{})
+	if err := rt.RefreshProductPrompt([]host.Section{{Name: "plugin_standard", Content: pluginStandardText}}); err != nil {
+		t.Fatal(err)
+	}
+	assembly := rt.Assembly()
+	if assembly == nil {
+		t.Fatal("assembly is not available")
+	}
+	const agentPrompt = "KITE-RUNTIME-MARK-7 captain instructions"
+	rendered := assembly.RenderSystemPrompt(agentPrompt)
+	for _, want := range []string{agentPrompt, pluginStandardText, "Tenant rule text."} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("the binding prompt dropped %q: %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "You are the test agent.") {
+		t.Fatalf("the deployment preamble survived the swap: %q", rendered)
+	}
+	// The plain reader is unchanged: a run without a binding renders the
+	// configured prompt byte-for-byte.
+	if got := assembly.SystemPrompt(); !strings.Contains(got, "You are the test agent.") || strings.Contains(got, agentPrompt) {
+		t.Fatalf("assembly prompt drifted: %q", got)
+	}
+}

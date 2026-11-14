@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -74,7 +75,12 @@ type Runner struct {
 	// consulted per attempt, so a configuration change applies to runs that
 	// start after it without disturbing the ones already in flight.
 	Models ModelResolver
-	Tools  *agenttool.ToolRegistry
+	// Bindings, when set, resolves the attempt's execution binding: the Agent or
+	// AgentTeam the input selected, its system prompt and its tool grants. It is
+	// consulted per attempt (next to Models), so a team/agent edit applies to
+	// the next attempt without touching an attempt already in flight.
+	Bindings BindingResolver
+	Tools    *agenttool.ToolRegistry
 	// Assembly, when set, overrides Tools and supplies the system prompt. It is
 	// the host layer (skills, MCP tools, tenant instructions) plugged into the
 	// runtime; the kernel loop never knows about it.
@@ -104,6 +110,76 @@ func (r *Runner) systemPrompt() string {
 		return r.Assembly.SystemPrompt()
 	}
 	return ""
+}
+
+// systemPromptFor returns the prompt of this attempt: the binding's system
+// prompt when it contributes one, otherwise the host-assembled deployment
+// prompt. The host keeps rendering its dynamic surface (MCP section, plugin
+// sections, skills index) around the preamble, so selecting an Agent never
+// silently drops those.
+func (r *Runner) systemPromptFor(surface RunSurface) string {
+	prompt := strings.TrimSpace(surface.Prompt)
+	if prompt == "" {
+		return r.systemPrompt()
+	}
+	if renderer, ok := r.Assembly.(PreambleRenderer); ok {
+		return renderer.RenderSystemPrompt(prompt)
+	}
+	// A host that cannot re-render the preamble around its dynamic sections is
+	// not silently used: the binding's prompt is the run's prompt, and the
+	// dynamic sections are gone. That is a wiring error (the servicehost host
+	// implements the renderer), so it is worth a diagnostic rather than a
+	// guess.
+	return prompt
+}
+
+// toolsForRun returns the attempt's tool registry: the host registry filtered by
+// the binding's grants, or the whole registry when the binding declares none.
+func (r *Runner) toolsForRun(surface RunSurface) (*agenttool.ToolRegistry, error) {
+	registry := r.registry()
+	if registry == nil || surface.ToolIDs == nil {
+		return registry, nil
+	}
+	names := make([]string, 0, len(surface.ToolIDs))
+	for name, enabled := range surface.ToolIDs {
+		if !enabled {
+			continue
+		}
+		names = append(names, name)
+	}
+	// A tool id the registry does not serve (an uninstalled plugin) is dropped
+	// with a diagnostic: the spec keeps the user's configuration and shows it as
+	// unavailable, it never blocks the run.
+	for _, name := range names {
+		if _, ok := registry.Get(name); !ok {
+			r.Logger.Warn("agent binding grants an unavailable tool", "tool", name, "agent", surface.AgentID)
+		}
+	}
+	if surface.TeamMode {
+		// R3: a team whose captain could never delegate is a silently broken
+		// product. The delegation primitive stays available unless the captain
+		// explicitly disabled it in its own grants (an explicit decision wins).
+		if enabled, declared := surface.ToolIDs[SpawnToolName]; !declared || enabled {
+			if _, ok := registry.Get(SpawnToolName); ok {
+				names = append(names, SpawnToolName)
+			}
+		}
+	}
+	subset, err := registry.Subset(names)
+	if err != nil {
+		return nil, fmt.Errorf("agent: agent binding tool surface: %w", err)
+	}
+	return subset, nil
+}
+
+// SpawnToolName is the delegation primitive a team run always keeps.
+const SpawnToolName = "spawn_subagent"
+
+// PreambleRenderer is the host capability the binding needs: render the loaded
+// assembly with a different preamble (the agent's system prompt) while keeping
+// the dynamic sections (MCP, plugins, skills) in place.
+type PreambleRenderer interface {
+	RenderSystemPrompt(preamble string) string
 }
 
 // NewRunner wires the production defaults: clock + echo tools and a turn cap.
@@ -175,6 +251,16 @@ type RunSummary struct {
 	// whole run manifest. Empty is allowed for logs predating the field.
 	ConfigHashBefore string `json:"configHashBefore,omitempty"`
 	ConfigHashAfter  string `json:"configHashAfter,omitempty"`
+	// AgentID, TeamID, TeamRevision, TeamHash and PromptHash are the execution
+	// binding the attempt froze (RUNTIME-PLAN §b): which Agent answered, which
+	// AgentTeam it came from, that team's stored revision and content hash, and
+	// the digest of the system prompt the attempt used. Empty means "the
+	// deployment default answered" (the pre-binding behaviour).
+	AgentID      string `json:"agentId,omitempty"`
+	TeamID       string `json:"teamId,omitempty"`
+	TeamRevision uint64 `json:"teamRevision,omitempty"`
+	TeamHash     string `json:"teamHash,omitempty"`
+	PromptHash   string `json:"promptHash,omitempty"`
 }
 
 // TokenTotals is the objective token accounting of an attempt (no prices: the
@@ -324,7 +410,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// selection fact before anything is committed: a selection that cannot be
 	// executed fails the attempt here, where no tool call has been dispatched
 	// and no event written, so the retry (or the operator's fix) starts clean.
-	model, err := r.activeModel(ctx, lease, events)
+	//
+	// The binding resolves first because it may supply the default model an
+	// input without a model falls back to (selection > agent default > tenant
+	// default); the identity resolution then runs on the merged fact.
+	selection := runSelection(events)
+	surface, err := r.resolveSurface(ctx, lease, selection)
+	if err != nil {
+		return res, fmt.Errorf("agent: resolve agent binding: %w", err)
+	}
+	model, err := r.activeModelFor(ctx, lease, events, MergeSelectionDefaultModel(selection, surface.DefaultModel))
 	if err != nil {
 		return res, fmt.Errorf("agent: resolve model: %w", err)
 	}
@@ -336,7 +431,15 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	}
 	res.Summary.Provider = model.ProviderID
 	res.Summary.Model = model.Model
-	tools := r.registry()
+	res.Summary.AgentID = surface.AgentID
+	res.Summary.TeamID = surface.TeamID
+	res.Summary.TeamRevision = surface.TeamRevision
+	res.Summary.TeamHash = surface.TeamHash
+	res.Summary.PromptHash = surface.PromptHash
+	tools, err := r.toolsForRun(surface)
+	if err != nil {
+		return res, err
+	}
 	// A model that cannot run the request must be refused before anything is
 	// committed (the same rule the identity resolution follows): the tool list is
 	// part of the request, so a model whose configuration denies tool calls may not
@@ -511,7 +614,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		cfg.Extra = model.RequestPatch
 	}
 	agentCtx := &agentcore.AgentContext{
-		SystemPrompt: r.systemPrompt(),
+		SystemPrompt: r.systemPromptFor(surface),
 		Messages:     msgs,
 		Tools:        tools.List(),
 	}

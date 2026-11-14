@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jixoai/keel/internal/agentcore"
@@ -151,16 +152,29 @@ func visibleSkills(discovered []skills.Skill) []skills.Skill {
 // dynamic sections (mcp_servers and plugin contributions) render after the
 // configured ones and before the skills index.
 func (h *Host) SystemPrompt() string {
+	return h.RenderSystemPrompt("")
+}
+
+// RenderSystemPrompt renders the assembly with preamble as the base instruction;
+// an empty preamble keeps the configured one. It exists for the execution
+// binding (change keel-agent-team-v1): an Agent's system prompt replaces the
+// deployment preamble while the dynamic surface (mcp_servers, plugin sections,
+// skills index) keeps rendering around it, so selecting an Agent never silently
+// drops those sections.
+func (h *Host) RenderSystemPrompt(preamble string) string {
 	h.mu.RLock()
 	cfg := h.cfg
 	discovered := h.skills
 	dynamic := append([]Section(nil), h.dynamic...)
 	h.mu.RUnlock()
+	if strings.TrimSpace(preamble) == "" {
+		preamble = cfg.Preamble
+	}
 	sections := make([]Section, 0, len(cfg.Sections)+len(dynamic))
 	sections = append(sections, cfg.Sections...)
 	sections = append(sections, dynamic...)
 	return BuildSystemPrompt(PromptConfig{
-		Preamble:     cfg.Preamble,
+		Preamble:     preamble,
 		Sections:     sections,
 		Skills:       discovered,
 		FileReadTool: cfg.FileReadTool,

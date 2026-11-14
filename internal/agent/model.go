@@ -85,6 +85,15 @@ func runSelection(events []store.Event) json.RawMessage {
 // any commit of the attempt (in particular before fillMissingToolResults):
 // an unexecutable selection must not leave tool calls half-executed.
 func (r *Runner) activeModel(ctx context.Context, lease kernel.Lease, events []store.Event) (ActiveModel, error) {
+	return r.activeModelFor(ctx, lease, events, runSelection(events))
+}
+
+// activeModelFor resolves the attempt's execution identity from an explicit
+// selection fact. The caller supplies the fact because the execution binding may
+// contribute a default model the input itself did not name
+// (selection > agent default > tenant default); everything else is the historic
+// path.
+func (r *Runner) activeModelFor(ctx context.Context, lease kernel.Lease, _ []store.Event, selection json.RawMessage) (ActiveModel, error) {
 	am := ActiveModel{
 		ProviderID:    r.ProviderName,
 		Model:         r.Model,
@@ -98,7 +107,7 @@ func (r *Runner) activeModel(ctx context.Context, lease kernel.Lease, events []s
 	if r.Models == nil {
 		return am, nil
 	}
-	resolved, err := r.Models.Resolve(ctx, lease.Scope, runSelection(events))
+	resolved, err := r.Models.Resolve(ctx, lease.Scope, selection)
 	if err != nil {
 		return ActiveModel{}, err
 	}
