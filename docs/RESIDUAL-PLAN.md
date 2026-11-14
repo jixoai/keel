@@ -68,6 +68,16 @@
    同接口的扩展实现（裁决见 §5.1-5）
 7. **approve + notify**：三模式审批、validated provenance、多消费器、URL 生命周期
 - 门：G1-G2（fake 全链 + 固定崩溃矩阵进 CI）
+- **派工定界（2026-11-15）**：spec 已齐（本 change `specs/tool-surface|task-log|layerfs|plugin-*`，
+  strict 校验过），**不另立 change**；按下列阶段推进——
+  - W2.0 `docs/GBASH-CONTRACT.md` 契约 pin（bash 开工硬前置；研究 spike 进行中）；
+    OAR 契约随 W9 前另派
+  - W2.1 工具面骨架**单线先行**：11 工具注册面 + action 闭集路由 + 清单哈希 + 迁移快照断言 +
+    `mcp__` 适配删除 + PI-PARITY 偏离登记（`spawn_subagent` 按 §5.1-1 保留至 W8，登记为过渡能力）
+  - W2.2–W2.5 在 W2.1 合入后**并行分线（文件分区）**：bash+JobManager / layerfs+file /
+    task-log / approve+notify
+  - 顺序依赖：W2.2 待 W2.0；W2.3 复用 blob（Wave 1 线 B 之后）；W2.4/W2.5 的 store/agentapi
+    增面待 Wave 1 收口
 
 ### Wave 3 — 运维与产品尾项（并行 3 条）
 8. **blob-lifecycle**：缩略图异步 + 事件引用计数 + TTL sweeper + base64 fuzz + 文档
