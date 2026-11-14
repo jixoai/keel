@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -936,5 +937,258 @@ func TestModelServiceToolGateReachesTheRuntime(t *testing.T) {
 	}
 	if active.Properties.SupportsToolCall {
 		t.Fatal("the document declares supportsToolCall=false; the facts must say so")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Direct configuration: the same-name secret channel
+// (provider-secret-direct-config)
+// ---------------------------------------------------------------------------
+
+// directConfigDocument is the shape the change is about: a built-in catalog
+// provider declares `access.env: S2API_KEY`, which on a self-hosted deployment
+// nobody exports — the tenant stores a secret of that name instead.
+const directConfigDocument = `{
+  "providers": [
+    {"id": "s2api", "api": {"type": "openai-chat-completions", "baseUrl": "https://s2.example/v1"},
+     "access": {"type": "api-key", "env": "S2API_KEY"},
+     "modelIds": ["deepseek-v4.1-flash"]}
+  ],
+  "selection": {"providerId": "s2api", "modelId": "deepseek-v4.1-flash"}
+}`
+
+// secretLLM builds LLM options whose secret store is a map (stored secrets) and
+// whose environment lookup is a second map (exported variables).
+func secretLLM(env, secrets map[string]string, flatKey string) LLMOptions {
+	return LLMOptions{
+		APIKey: flatKey,
+		LookupEnv: func(name string) (string, bool) {
+			value, ok := env[name]
+			return value, ok
+		},
+		LookupSecret: func(name string) (string, bool) {
+			value, ok := secrets[name]
+			return value, ok
+		},
+	}
+}
+
+// ungatedModels builds the model service without applying the boot gate, so a
+// document whose default selection cannot authenticate can still be inspected
+// through the views (that is exactly what the settings screen does).
+func ungatedModels(t *testing.T, document string, llm LLMOptions) *modelsService {
+	t.Helper()
+	service, err := buildModelsService(host.TenantConfig{Models: json.RawMessage(document)}, llm, nil)
+	if err != nil {
+		t.Fatalf("buildModelsService: %v", err)
+	}
+	return service
+}
+
+// TestCredentialFallsBackToTheSameNameSecret pins the change's primary scenario:
+// the declared environment variable is not set, the tenant secret store has a
+// secret of that name, and the attempt authenticates with the stored value while
+// the settings view reports the provider executable.
+func TestCredentialFallsBackToTheSameNameSecret(t *testing.T) {
+	service := ungatedModels(t, directConfigDocument,
+		secretLLM(nil, map[string]string{"S2API_KEY": "secret-value"}, ""))
+
+	active, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if active.APIKey != "secret-value" {
+		t.Fatalf("APIKey = %q, want the same-name secret's value", active.APIKey)
+	}
+	views := service.ProviderViews()
+	view, ok := findProviderView(views, "s2api")
+	if !ok {
+		t.Fatalf("the s2api provider must be visible: %+v", views)
+	}
+	if !view.Executable || !view.Selectable {
+		t.Fatalf("provider view = executable=%v selectable=%v issues=%+v, want both true",
+			view.Executable, view.Selectable, view.Issues)
+	}
+	for _, issue := range view.Issues {
+		if issue.Field == "access.env" || issue.Field == "access" {
+			t.Fatalf("a resolvable credential must not produce an access issue: %+v", issue)
+		}
+	}
+	found := false
+	for _, model := range service.ModelViews() {
+		if model.ProviderID == "s2api" && model.ModelID == "deepseek-v4.1-flash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the picker list must include the model whose credential resolves through the secret")
+	}
+	selection := json.RawMessage(`{"providerId":"s2api","modelId":"deepseek-v4.1-flash"}`)
+	if err := service.ValidateSelection(selection); err != nil {
+		t.Fatalf("ValidateSelection must accept what Resolve accepts: %v", err)
+	}
+	// The value itself never appears in a projection: only names and timestamps
+	// may travel (provider-credentials spec, "密钥值不回读").
+	for _, candidate := range views {
+		if strings.Contains(fmt.Sprintf("%+v", candidate), "secret-value") {
+			t.Fatalf("a provider view leaked a credential value: %+v", candidate)
+		}
+	}
+}
+
+// findProviderView returns the view of one provider id.
+func findProviderView(views []modelcfg.ProviderView, providerID string) (modelcfg.ProviderView, bool) {
+	for _, view := range views {
+		if view.ProviderID == providerID {
+			return view, true
+		}
+	}
+	return modelcfg.ProviderView{}, false
+}
+
+// TestCredentialEnvironmentBeatsTheSameNameSecret pins the cloud behavior: an
+// exported variable wins over a stored secret of the same name, so a deployment
+// that sets the variable is unaffected by a leftover secret row.
+func TestCredentialEnvironmentBeatsTheSameNameSecret(t *testing.T) {
+	service := ungatedModels(t, directConfigDocument,
+		secretLLM(map[string]string{"S2API_KEY": "env-value"}, map[string]string{"S2API_KEY": "secret-value"}, "flat-key"))
+
+	active, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if active.APIKey != "env-value" {
+		t.Fatalf("APIKey = %q, want the exported variable's value (env wins)", active.APIKey)
+	}
+}
+
+// TestCredentialLegacyKeyStillAppliesWithoutASecret pins backward compatibility:
+// with neither the variable nor a secret, the process-wide key is the documented
+// fallback and the provider stays executable.
+func TestCredentialLegacyKeyStillAppliesWithoutASecret(t *testing.T) {
+	service := ungatedModels(t, directConfigDocument, secretLLM(nil, nil, "flat-key"))
+
+	active, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if active.APIKey != "flat-key" {
+		t.Fatalf("APIKey = %q, want the process-wide key", active.APIKey)
+	}
+	if view, ok := findProviderView(service.ProviderViews(), "s2api"); !ok || !view.Executable || !view.Selectable {
+		t.Fatalf("the legacy path must keep the provider executable: ok=%v view=%+v", ok, view)
+	}
+}
+
+// TestCredentialSetButEmptyEnvIgnoresTheSameNameSecret pins the precedence
+// boundary: a variable that is set but empty is a deliberate empty value, so it
+// fails closed instead of silently substituting a stored secret (which would
+// override the operator's explicit decision).
+func TestCredentialSetButEmptyEnvIgnoresTheSameNameSecret(t *testing.T) {
+	service := ungatedModels(t, directConfigDocument,
+		secretLLM(map[string]string{"S2API_KEY": ""}, map[string]string{"S2API_KEY": "secret-value"}, "flat-key"))
+
+	_, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err == nil {
+		t.Fatal("a set-but-empty variable must fail closed even with a same-name secret stored")
+	}
+	if !strings.Contains(err.Error(), "set but empty") {
+		t.Fatalf("error must name the reason: %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "flat-key") {
+		t.Fatalf("the error must never carry a credential value: %v", err)
+	}
+	// The settings projection must agree with the attempt: the provider is
+	// visible with the access.env issue and is not selectable.
+	view, ok := findProviderView(service.ProviderViews(), "s2api")
+	if !ok {
+		t.Fatal("the provider must stay visible with its diagnostic")
+	}
+	if view.Selectable {
+		t.Fatalf("a provider whose credential fails closed must not be selectable: %+v", view)
+	}
+}
+
+// TestCredentialWithoutStorageFailsClosedWithAReadableIssue pins the diagnostic
+// half: a deployment with no secret storage (lookupSecret nil) that a document
+// references via `secret:` still fails closed, and the issue names the missing
+// storage so an operator knows what to configure.
+func TestCredentialWithoutStorageFailsClosedWithAReadableIssue(t *testing.T) {
+	doc := `{
+	  "providers": [{"id": "ref-gw", "api": {"type": "openai-chat-completions", "baseUrl": "https://ref.example/v1"},
+	                 "access": {"type": "api-key", "ref": "secret:S2API_KEY"},
+	                 "modelIds": ["m1"]}],
+	  "selection": {"providerId": "ref-gw", "modelId": "m1"}
+	}`
+	service := ungatedModels(t, doc, LLMOptions{
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+
+	_, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err == nil {
+		t.Fatal("a secret: reference on a deployment without secret storage must fail closed")
+	}
+	if !strings.Contains(err.Error(), "S2API_KEY") || !strings.Contains(err.Error(), "KEEL_SECRET_KEY") {
+		t.Fatalf("the issue must name the secret and the missing storage: %v", err)
+	}
+	view, ok := findProviderView(service.ProviderViews(), "ref-gw")
+	if !ok {
+		t.Fatal("the provider must stay visible with its diagnostic")
+	}
+	if view.Selectable {
+		t.Fatalf("the provider must not be selectable: %+v", view)
+	}
+	found := false
+	for _, issue := range view.Issues {
+		if strings.Contains(issue.Message, "KEEL_SECRET_KEY") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the settings issue must explain the missing secret storage: %+v", view.Issues)
+	}
+}
+
+// TestCredentialEnvMissWithoutSecretNamesBothSources pins the fail-closed message
+// when secret storage exists but holds no such secret: the operator must learn
+// that both channels were consulted, not just one.
+func TestCredentialEnvMissWithoutSecretNamesBothSources(t *testing.T) {
+	service := ungatedModels(t, directConfigDocument, secretLLM(nil, map[string]string{"OTHER_KEY": "other-value"}, ""))
+
+	_, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err == nil {
+		t.Fatal("with no env, no same-name secret and no legacy key the attempt must fail")
+	}
+	if !strings.Contains(err.Error(), "S2API_KEY") {
+		t.Fatalf("the error must name the declaration: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no secret named") {
+		t.Fatalf("the error must say the secret store was consulted: %v", err)
+	}
+	if strings.Contains(err.Error(), "other-value") {
+		t.Fatalf("the error must never carry another secret's value: %v", err)
+	}
+}
+
+// TestCredentialSecretReferenceStillWinsOverEnv pins that an explicit reference
+// is not disturbed by the new same-name fallback: a document that asks for
+// secret:NAME gets exactly that secret, and the declared env is inert.
+func TestCredentialSecretReferenceStillWinsOverEnv(t *testing.T) {
+	doc := `{
+	  "providers": [{"id": "ref-gw", "api": {"type": "openai-chat-completions", "baseUrl": "https://ref.example/v1"},
+	                 "access": {"type": "api-key", "env": "S2API_KEY", "ref": "secret:OTHER"},
+	                 "modelIds": ["m1"]}],
+	  "selection": {"providerId": "ref-gw", "modelId": "m1"}
+	}`
+	service := ungatedModels(t, doc, secretLLM(
+		map[string]string{"S2API_KEY": "env-value"},
+		map[string]string{"S2API_KEY": "same-name", "OTHER": "referenced"}, "flat-key"))
+
+	active, err := service.Resolve(context.Background(), kernel.Scope{}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if active.APIKey != "referenced" {
+		t.Fatalf("APIKey = %q, want the explicitly referenced secret", active.APIKey)
 	}
 }

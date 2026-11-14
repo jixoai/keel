@@ -224,8 +224,12 @@ func encodeOpenAIMessage(m agentcore.Message) []map[string]any {
 // openAIUserContent shapes a user content list for the OpenAI wire. When there
 // are no images it collapses to a plain string (the common case, and what most
 // OpenAI-compatible gateways expect). When images are present it emits the
-// multimodal array form: text parts plus image_url parts carrying a base64 data
-// URI (data:<mime>;base64,<data>).
+// multimodal array form: text parts plus one image_url part per image.
+//
+// The url field takes either an absolute provider-fetchable URL or a base64 data
+// URI, so the resolver's url and base64 forms both map here verbatim; a file_id
+// block is refused, because the Chat Completions wire has no file_id field (the
+// Responses driver carries those).
 func openAIUserContent(content agentcore.ContentList) any {
 	hasImage := false
 	for _, c := range content {
@@ -246,15 +250,35 @@ func openAIUserContent(content agentcore.ContentList) any {
 			}
 			parts = append(parts, map[string]any{"type": "text", "text": b.Text})
 		case agentcore.ImageContent:
-			parts = append(parts, map[string]any{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url": fmt.Sprintf("data:%s;base64,%s", b.MimeType, b.Data),
-				},
-			})
+			if part, ok := openAIImagePart(b); ok {
+				parts = append(parts, part)
+			}
 		}
 	}
 	return parts
+}
+
+// openAIImagePart renders one image block as an image_url part. A block whose
+// source the chat wire cannot carry (a file_id) or that carries no source at all
+// becomes a text notice: the alternative is dropping the image silently, which is
+// exactly the "the model never saw it" failure this change removes. The notice is
+// a valid content part, so the request still succeeds.
+func openAIImagePart(img agentcore.ImageContent) (map[string]any, bool) {
+	wire, err := splitImage(img)
+	if err == nil && wire.form() == ImageFormFileID {
+		err = requireForm("openai-chat", wire, ImageFormURL, ImageFormBase64)
+	}
+	if err != nil {
+		return map[string]any{"type": "text", "text": "[image omitted: " + err.Error() + "]"}, true
+	}
+	target := wire.URL
+	if wire.form() == ImageFormBase64 {
+		target = wire.dataURI()
+	}
+	return map[string]any{
+		"type":      "image_url",
+		"image_url": map[string]any{"url": target},
+	}, true
 }
 
 // encodeOpenAITools maps AgentTools onto the OpenAI function-tool schema.
@@ -552,10 +576,13 @@ func encodeAnthropicMessage(m agentcore.Message) map[string]any {
 }
 
 // anthropicUserContent shapes a user content list for the Anthropic Messages
-// wire. When there are no images it collapses to a plain string. When images
-// are present it emits the content-block array form: text blocks plus image
-// blocks with a base64 source ({"type":"image","source":{"type":"base64",
-// "media_type":<mime>,"data":<b64>}}).
+// wire. When there are no images it collapses to a plain string. When images are
+// present it emits the content-block array form: text blocks plus one image block
+// per image, with the source type the resolver chose:
+//
+//	base64 → {"type":"image","source":{"type":"base64","media_type":…,"data":…}}
+//	url    → {"type":"image","source":{"type":"url","url":…}}
+//	file   → {"type":"image","source":{"type":"file","file_id":…}}
 func anthropicUserContent(content agentcore.ContentList) any {
 	hasImage := false
 	for _, c := range content {
@@ -576,21 +603,49 @@ func anthropicUserContent(content agentcore.ContentList) any {
 			}
 			blocks = append(blocks, map[string]any{"type": "text", "text": b.Text})
 		case agentcore.ImageContent:
-			blocks = append(blocks, map[string]any{
-				"type": "image",
-				"source": map[string]any{
-					"type":       "base64",
-					"media_type": b.MimeType,
-					"data":       b.Data,
-				},
-			})
+			blocks = append(blocks, anthropicImageBlock(b))
 		}
 	}
 	return blocks
 }
 
+// anthropicImageBlock renders one image block as an Anthropic image content
+// block. A block with no usable source becomes a text block naming the reason, so
+// the turn still reaches the model with the surrounding prompt instead of failing
+// or silently losing the attachment.
+func anthropicImageBlock(img agentcore.ImageContent) map[string]any {
+	wire, err := splitImage(img)
+	if err != nil {
+		return map[string]any{"type": "text", "text": "[image omitted: " + err.Error() + "]"}
+	}
+	switch wire.form() {
+	case ImageFormFileID:
+		return map[string]any{
+			"type":   "image",
+			"source": map[string]any{"type": "file", "file_id": wire.FileID},
+		}
+	case ImageFormURL:
+		return map[string]any{
+			"type":   "image",
+			"source": map[string]any{"type": "url", "url": wire.URL},
+		}
+	default:
+		return map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": wire.mime(),
+				"data":       wire.Data,
+			},
+		}
+	}
+}
+
 // contextHasImage reports whether any message in the context carries an image
-// content block, so a driver can reject image input on a non-multimodal model.
+// content block (wire form) or an image reference (durable form), so a driver can
+// reject image input on a non-multimodal model. Both count: a reference the
+// resolver has not expanded yet is still image input, and silently treating it as
+// text would defeat the capability gate.
 func contextHasImage(msgs []agentcore.Message) bool {
 	for _, m := range msgs {
 		var content agentcore.ContentList
@@ -603,7 +658,8 @@ func contextHasImage(msgs []agentcore.Message) bool {
 			continue
 		}
 		for _, c := range content {
-			if _, ok := c.(agentcore.ImageContent); ok {
+			switch c.(type) {
+			case agentcore.ImageContent, agentcore.ImageRefContent:
 				return true
 			}
 		}

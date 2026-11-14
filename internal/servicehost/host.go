@@ -116,7 +116,22 @@ type LLMOptions struct {
 	// deployment has no secret storage: a secret: reference fails closed naming
 	// the secret instead of falling back to the environment.
 	LookupSecret func(name string) (string, bool)
+	// Images, when set, is the platform blob source outbound image resolution
+	// reads from (keel-ga §3 provider-files). Nil means this deployment has no
+	// image pipeline: a transcript image reference degrades to a text notice
+	// naming the reason, and the run continues. cmd/keel wires it to
+	// blob.ImageSource (store + streaming reader).
+	Images BlobSource
+	// PublicBaseURL is the origin providers can fetch images from (the url form
+	// of an outbound image). Empty disables that form, and the resolver degrades
+	// to file_id/base64 — because an unusable URL is worse than no URL.
+	PublicBaseURL string
 }
+
+// BlobSource is the platform blob seam outbound image resolution reads through
+// (provider.BlobSource, restated here so the host input does not name the
+// provider package's internals).
+type BlobSource = provider.BlobSource
 
 // ExternalOptions carries the hosting-process inputs the external gateway
 // needs beyond the kernel seams: secret resolution for the declared provider

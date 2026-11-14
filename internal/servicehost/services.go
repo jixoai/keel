@@ -457,8 +457,42 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 			opts := policy.Options()
 			runner.Compaction = &opts
 		}
+		// The outbound image pipeline (keel-ga §3 provider-files): the runner
+		// resolves a transcript image reference (blobId) into the wire form the
+		// attempt's provider accepts, right before each request. A deployment
+		// without a blob source keeps the nil resolver, and a referenced image
+		// degrades to a text notice naming why (never a silent drop).
+		if resolver := newImageResolver(cfg); resolver != nil {
+			// Assigned only when non-nil: a typed nil in the interface would look
+			// wired to every nil check downstream.
+			runner.Images = resolver
+		}
 		return &loopService{runner: runner}, nil
 	}
+}
+
+// newImageResolver builds the outbound image resolver from the hosting process
+// inputs. Uploaders are created per attempt from the attempt's own endpoint and
+// credential (see provider.ImageTarget): a provider file handle is only usable by
+// the account that uploaded it, so the resolver never borrows another key. The
+// file cache dedupes uploads by (sha256, provider, workspace) and refreshes an
+// expired handle lazily (Gemini's 48h window).
+//
+// A deployment with no blob source returns nil: the runner's degradation path is
+// the honest answer there, and constructing uploaders nothing can feed would only
+// hide the missing wiring.
+func newImageResolver(cfg Config) *provider.ImageResolver {
+	if cfg.LLM.Images == nil {
+		return nil
+	}
+	resolver := &provider.ImageResolver{
+		Blobs: cfg.LLM.Images,
+		Files: provider.NewFileCache(0),
+	}
+	if base := strings.TrimSpace(cfg.LLM.PublicBaseURL); base != "" {
+		resolver.URLs = &provider.PathURLSigner{Base: base}
+	}
+	return resolver
 }
 
 // --- worker --------------------------------------------------------------

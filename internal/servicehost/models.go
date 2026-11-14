@@ -453,6 +453,13 @@ func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveM
 			SupportsNativeWebSearch:  active.Properties.SupportsNativeWebSearch,
 			ImageInput:               active.Properties.InputFormat.Image,
 		},
+		// The outbound image pipeline needs the endpoint and the wire's image
+		// declaration: the endpoint so a provider file upload lands in the account
+		// the request uses, the declaration so the resolver picks a form the wire
+		// actually accepts (file_id > url > base64). The declaration is read from
+		// the protocol, which is the fact this function already switches on.
+		Endpoint:  active.API.BaseURL,
+		ImageCaps: provider.ImageCapsForAPI(active.API.Type),
 	}, nil, nil
 }
 
@@ -474,44 +481,125 @@ func (m *modelsService) contextWindow(active modelcfg.ActiveModel) int {
 // cannot produce a value fails closed — falling back to another credential
 // would silently send the wrong provider's key — and neither the key nor the
 // environment value is ever logged.
+//
+// The environment branch has a second source (provider-secret-direct-config):
+// when the declared variable is *not set at all*, the tenant secret store is
+// consulted for a secret of the same name, so a self-hosted deployment can
+// configure a built-in provider through `settings › 密钥` without touching its
+// process environment. The order is fixed by the spec — env set wins, then the
+// same-name secret, then the process-wide legacy key — and credentialIssue
+// applies exactly the same order (credentialDecision), so the picker and the
+// settings view can never disagree.
 func (m *modelsService) credential(active modelcfg.ActiveModel) (string, error) {
-	access := active.Access
+	decision := m.credentialDecision(active.Access)
+	if decision.found {
+		return decision.value, nil
+	}
+	return "", fmt.Errorf("model %s: no credential: %s", modelIdentity(active), decision.reason)
+}
+
+// credentialDecision is the single credential-ordering fact. It answers either a
+// value (found == true; a credential-free provider answers found with an empty
+// value) or the reason there is none (always naming the field and the source,
+// never a value). credential() and credentialIssue() both consume it, which is
+// what makes "settings says available" and "the run authenticates" one decision
+// instead of two implementations that drift.
+type credentialDecision struct {
+	// found reports that a source produced an answer. A credential-free provider
+	// is found with an empty value (its declaration is the whole fact).
+	found  bool
+	value  string
+	reason string
+	// field is the dotted path the settings view attaches the reason to.
+	field string
+}
+
+// credentialDecision resolves one access declaration:
+//
+//	credential-free  → "" (the declaration is the fact; no lookup)
+//	access.ref       → the reference's own source only (never another)
+//	access.env set   → the declared variable is authoritative; empty is a
+//	                   deliberate empty value and fails closed
+//	access.env unset → the tenant secret of the same name (direct configuration),
+//	                   then the process-wide legacy key
+//	no declaration   → the process-wide legacy key
+func (m *modelsService) credentialDecision(access modelcfg.Access) credentialDecision {
 	// A provider that declares no credential resolves to the empty key. This is
 	// not a fallback: the declaration is the fact, and asking the environment for
 	// a value the provider never wanted would be the bug. The demo protocol and a
 	// local endpoint are the two shapes that declare it.
 	if access.CredentialFree() && strings.TrimSpace(access.Ref) == "" && strings.TrimSpace(access.Env) == "" {
-		return "", nil
+		return credentialDecision{found: true}
 	}
 	if ref := strings.TrimSpace(access.Ref); ref != "" {
 		value, reason := m.resolveRef(ref)
 		if reason == "" {
-			return value, nil
+			return credentialDecision{found: true, value: value}
 		}
-		return "", fmt.Errorf("model %s: no credential: access.ref (%s) %s", modelIdentity(active), ref, reason)
+		return credentialDecision{
+			field:  "access.ref",
+			reason: fmt.Sprintf("access.ref (%s) %s", ref, reason),
+		}
 	}
 	if env := strings.TrimSpace(access.Env); env != "" {
 		value, found := m.lookupEnv(env)
 		switch {
 		case found && value != "":
-			return value, nil
-		case !found && m.legacyKey != "":
-			// The variable is not set at all: the process-wide key is the
-			// documented fallback. A variable that is set but empty never falls
-			// back — that is a deliberate empty value, not a missing one.
-			return m.legacyKey, nil
+			return credentialDecision{found: true, value: value}
 		case found:
-			return "", fmt.Errorf("model %s: no credential: access.env (%s) is set but empty", modelIdentity(active), env)
-		default:
-			return "", fmt.Errorf("model %s: no credential: access.env (%s) is not set in this process and no API key is configured",
-				modelIdentity(active), env)
+			// A variable that is set but empty is a deliberate empty value, not a
+			// missing one: it never falls back to the secret store or the process
+			// key, because either would override an explicit decision.
+			return credentialDecision{
+				field:  "access.env",
+				reason: fmt.Sprintf("access.env (%s) is set but empty", env),
+			}
+		}
+		// The variable is not set at all. First the tenant secret of the same name
+		// (the direct-configuration channel: a built-in provider's env declaration
+		// doubles as its secret name), then the process-wide key.
+		if value, found := m.lookupSameNameSecret(env); found && value != "" {
+			return credentialDecision{found: true, value: value}
+		}
+		if m.legacyKey != "" {
+			return credentialDecision{found: true, value: m.legacyKey}
+		}
+		if m.lookupSecret != nil {
+			return credentialDecision{
+				field: "access.env",
+				reason: fmt.Sprintf("access.env (%s) is not set in this process, no secret named %q is stored for this tenant, and no API key is configured",
+					env, env),
+			}
+		}
+		return credentialDecision{
+			field: "access.env",
+			reason: fmt.Sprintf("access.env (%s) is not set in this process and no API key is configured "+
+				"(this deployment has no tenant secret storage; KEEL_SECRET_KEY is not configured)", env),
 		}
 	}
 	if m.legacyKey != "" {
-		return m.legacyKey, nil
+		return credentialDecision{found: true, value: m.legacyKey}
 	}
-	return "", fmt.Errorf("model %s: no credential: the provider declares no access reference and no API key is configured",
-		modelIdentity(active))
+	return credentialDecision{
+		field:  "access",
+		reason: "the provider declares no access reference and no API key is configured",
+	}
+}
+
+// lookupSameNameSecret resolves a tenant secret by the name the provider's
+// access.env declares. It is the direct-configuration channel: a built-in
+// catalog provider says `env: S2API_KEY`, and a self-hosted tenant may store a
+// secret literally named S2API_KEY instead of exporting the variable. A
+// deployment without secret storage (lookupSecret nil) finds nothing, so the
+// behavior is exactly the pre-change one.
+func (m *modelsService) lookupSameNameSecret(name string) (string, bool) {
+	if m.lookupSecret == nil {
+		return "", false
+	}
+	if strings.TrimSpace(name) == "" {
+		return "", false
+	}
+	return m.lookupSecret(name)
 }
 
 // credentialAvailable reports whether this process can produce a credential
@@ -525,50 +613,26 @@ func (m *modelsService) credentialAvailable(access modelcfg.Access) bool {
 
 // credentialIssue reports why a provider's credential cannot be resolved here,
 // as an operator-readable issue for the settings view. Availability and the
-// diagnostic come from one function, so the picker and the settings view can
+// diagnostic come from one function — and that function reads the same
+// credentialDecision credential() uses — so the picker and the settings view can
 // never disagree about whether a provider can authenticate.
 func (m *modelsService) credentialIssue(access modelcfg.Access) (modelcfg.Issue, bool) {
-	// A declared credential-free provider has nothing to resolve, so it is
-	// available by construction — the same verdict credential() returns.
-	if access.CredentialFree() && strings.TrimSpace(access.Ref) == "" && strings.TrimSpace(access.Env) == "" {
+	decision := m.credentialDecision(access)
+	if decision.found {
 		return modelcfg.Issue{}, false
 	}
-	if ref := strings.TrimSpace(access.Ref); ref != "" {
-		if _, reason := m.resolveRef(ref); reason == "" {
-			return modelcfg.Issue{}, false
-		} else {
-			return modelcfg.Issue{
-				Field:   "access.ref",
-				Message: fmt.Sprintf("secret reference %q %s", ref, reason),
-			}, true
-		}
+	field := decision.field
+	if field == "" {
+		field = "access"
 	}
-	if env := strings.TrimSpace(access.Env); env != "" {
-		value, found := m.lookupEnv(env)
-		switch {
-		case found && value != "":
-			return modelcfg.Issue{}, false
-		case found:
-			return modelcfg.Issue{
-				Field:   "access.env",
-				Message: fmt.Sprintf("environment variable %q is set but empty", env),
-			}, true
-		case m.legacyKey != "":
-			return modelcfg.Issue{}, false
-		default:
-			return modelcfg.Issue{
-				Field:   "access.env",
-				Message: fmt.Sprintf("environment variable %q is not set and no process API key is configured", env),
-			}, true
-		}
+	message := decision.reason
+	// An env-shaped reason already names the field ("access.env (X) …"), which
+	// reads naturally in the settings view's issue line; a ref-shaped reason is
+	// phrased for a bare field. Normalize so both read as one sentence.
+	if field == "access.ref" {
+		message = "secret reference " + strings.TrimPrefix(strings.TrimSpace(message), "access.ref ")
 	}
-	if m.legacyKey != "" {
-		return modelcfg.Issue{}, false
-	}
-	return modelcfg.Issue{
-		Field:   "access",
-		Message: "no access reference is declared and no process API key is configured",
-	}, true
+	return modelcfg.Issue{Field: field, Message: message}, true
 }
 
 // resolveRef resolves a declared secret reference. The reference kind decides

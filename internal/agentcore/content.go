@@ -29,11 +29,20 @@ type Content interface {
 }
 
 // Content type discriminants, matching pi's wire format.
+//
+// ContentTypeImageRef is Keel's addition (keel-ga §3 provider-files): a
+// persisted image is a *reference* to a blob, not bytes. The distinction is the
+// whole point of the durable contract — the event log must never carry base64
+// (pi issue #9613: a session file of 2.6GB / 6739 inline images) — so an image
+// the transcript stores is always {"type":"imageRef","blobId":…}. The byte
+// carrying ImageContent remains the *wire* form: it is produced at the provider
+// boundary by the resolver and never committed.
 const (
 	ContentTypeText     = "text"
 	ContentTypeThinking = "thinking"
 	ContentTypeToolCall = "toolCall"
 	ContentTypeImage    = "image"
+	ContentTypeImageRef = "imageRef"
 )
 
 // TextContent is a plain text block.
@@ -61,17 +70,64 @@ type ToolCallContent struct {
 	ThoughtSignature string          `json:"thoughtSignature,omitempty"`
 }
 
-// ImageContent is an image block (base64 data + mime type).
+// ImageContent is an image block in its *transport* form: exactly one of the
+// three sources is populated, and the provider adapter reads them in the order
+// file_id > url > data (api-key style gateways differ per vendor; the resolver
+// picks the form the target declared, see internal/provider/image_resolve.go).
+//
+// It is never what the event log stores (see ImageRefContent): Data holds base64
+// without the data: prefix; FileID is a provider-side file handle; URL is an
+// absolute http(s) URL a provider may fetch.
 type ImageContent struct {
 	Type     string `json:"type"`
-	Data     string `json:"data"`
-	MimeType string `json:"mimeType"`
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	FileID   string `json:"fileId,omitempty"`
+	URL      string `json:"url,omitempty"`
+}
+
+// WireForm reports which source this block carries ("file_id", "url", "base64",
+// or "" when none is set). Providers use it for diagnostics; encoders switch on
+// the fields directly.
+func (c ImageContent) WireForm() string {
+	switch {
+	case c.FileID != "":
+		return "file_id"
+	case c.URL != "":
+		return "url"
+	case c.Data != "":
+		return "base64"
+	}
+	return ""
+}
+
+// ImageRefContent is a durable reference to one stored image: the blob id plus
+// the metadata a client needs to render and a provider needs to size-check it.
+//
+// The event log stores this shape and only this shape (keel-ga §3, "事件只存
+// blobId"): the same image referenced from many sessions/turns is one blob row
+// and one copy of the bytes. Resolution to a provider-usable form happens in the
+// worker before the outbound request, against the target provider's declared
+// capabilities.
+//
+// BlobID is the platform file id (uuid string). Size is the byte length of the
+// original bytes (0 = unknown); Width/Height are informational (0 = unknown).
+type ImageRefContent struct {
+	Type     string `json:"type"`
+	BlobID   string `json:"blobId"`
+	MimeType string `json:"mimeType,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
+	// Name is a client-supplied display name (never used for routing).
+	Name string `json:"name,omitempty"`
 }
 
 func (TextContent) isContent()     {}
 func (ThinkingContent) isContent() {}
 func (ToolCallContent) isContent() {}
 func (ImageContent) isContent()    {}
+func (ImageRefContent) isContent() {}
 
 // MarshalJSON encodes a ToolCallContent, tolerating malformed Arguments. A
 // model can stream syntactically invalid tool-call JSON (a truncated or
@@ -132,6 +188,14 @@ func NewImageContent(data, mimeType string) ImageContent {
 	return ImageContent{Type: ContentTypeImage, Data: data, MimeType: mimeType}
 }
 
+// NewImageRefContent returns an ImageRefContent with the type discriminant set.
+// An empty blobID is refused by the constructor's caller (the blob is the whole
+// reference, so a ref without one is not a reference); validation lives one
+// layer up where the error can name the offending input.
+func NewImageRefContent(blobID, mimeType string) ImageRefContent {
+	return ImageRefContent{Type: ContentTypeImageRef, BlobID: blobID, MimeType: mimeType}
+}
+
 // decodeContent peeks at the "type" field of a JSON object and decodes it into
 // the matching concrete Content struct. This is the single dispatch point used
 // by every container that holds Content (messages, tool results, session
@@ -164,6 +228,12 @@ func decodeContent(raw json.RawMessage) (Content, error) {
 		return c, nil
 	case ContentTypeImage:
 		var c ImageContent
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+		return c, nil
+	case ContentTypeImageRef:
+		var c ImageRefContent
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, err
 		}

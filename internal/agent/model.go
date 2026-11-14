@@ -34,6 +34,15 @@ type ActiveModel struct {
 	// capability": the runtime only refuses what the configuration explicitly
 	// denies.
 	Properties *ModelProperties
+	// ImageCaps is the wire driver's image transport declaration (file_id / url /
+	// base64 plus the byte ceilings). Outbound image resolution reads it to pick
+	// the form; the zero value means "base64 only", the universally supported
+	// shape.
+	ImageCaps provider.ImageCaps
+	// Endpoint is the API root the attempt calls (…/v1, …/v1beta). The outbound
+	// image pipeline uploads provider files against it, so a handle lands in the
+	// same account the request uses.
+	Endpoint string
 }
 
 // ModelProperties is the capability fact sheet of an attempt's model, as plain

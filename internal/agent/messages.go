@@ -6,6 +6,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/store"
@@ -43,15 +44,18 @@ func DecodeMessages(events []store.Event, diagnose func(seq int64, kind string, 
 		switch ev.Kind {
 		case store.EventUserMessage:
 			var p struct {
-				Text string `json:"text"`
+				Text        string                `json:"text"`
+				Attachments []attachmentReference `json:"attachments"`
 			}
 			if err := json.Unmarshal(ev.Payload, &p); err != nil {
 				skip(ev, fmt.Errorf("decode user event %d: %w", ev.Seq, err))
 				continue
 			}
+			content := agentcore.ContentList{agentcore.NewTextContent(p.Text)}
+			content = append(content, attachmentImages(p.Attachments)...)
 			appendMsg(ev.Seq, agentcore.UserMessage{
 				RoleField: agentcore.RoleUser,
-				Content:   agentcore.ContentList{agentcore.NewTextContent(p.Text)},
+				Content:   content,
 			})
 		case store.EventAssistantMessage:
 			var m agentcore.AssistantMessage
@@ -112,6 +116,49 @@ func ContentText(content agentcore.ContentList) string {
 		if t, ok := c.(agentcore.TextContent); ok {
 			out += t.Text
 		}
+	}
+	return out
+}
+
+// attachmentReference is one entry of a user.message payload's attachments
+// array. The client sends what the upload endpoint returned — a fileId plus
+// display metadata — and nothing else: the durable form of an attachment is a
+// blob reference, never bytes. The shape is deliberately tolerant (unknown
+// fields ignored) because the payload is client data and a newer client may add
+// fields the runtime does not need.
+type attachmentReference struct {
+	FileID string `json:"fileId"`
+	Name   string `json:"name"`
+	Mime   string `json:"mime"`
+	Size   int64  `json:"size"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// imageContent maps the attachments a turn carries onto image references. Only
+// entries with an image mime type AND a fileId participate: an attachment
+// without a blob id is not resolvable (there are no bytes to send), and a
+// non-image attachment stays a UI-only fact — the model never received file
+// contents through this channel, and inventing a text placeholder for it would
+// be a silent behavior change.
+func attachmentImages(refs []attachmentReference) agentcore.ContentList {
+	var out agentcore.ContentList
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.FileID) == "" {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ref.Mime)), "image/") {
+			continue
+		}
+		out = append(out, agentcore.ImageRefContent{
+			Type:     agentcore.ContentTypeImageRef,
+			BlobID:   strings.TrimSpace(ref.FileID),
+			MimeType: strings.TrimSpace(ref.Mime),
+			Size:     ref.Size,
+			Width:    ref.Width,
+			Height:   ref.Height,
+			Name:     ref.Name,
+		})
 	}
 	return out
 }

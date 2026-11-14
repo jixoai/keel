@@ -441,9 +441,11 @@ func appendInputItems(items responses.ResponseInputParam, m agentcore.Message) r
 
 // imageInputParts builds a Responses content-part list for a message that
 // carries at least one image: leading input_text (the concatenated text, if
-// any) followed by one input_image per image, each as a data URI. It returns
-// ok=false when the message has no images, so the caller keeps the plain-text
-// path.
+// any) followed by one input_image per image. Each image uses the form the
+// resolver chose — file_id when a provider handle exists (the cheapest form, as
+// the bytes cross the wire once), otherwise an image_url holding either the
+// absolute URL or the base64 data URI. It returns ok=false when the message has
+// no images, so the caller keeps the plain-text path.
 func imageInputParts(m agentcore.Message) (responses.ResponseInputMessageContentListParam, bool) {
 	content := messageContent(m)
 	var hasImage bool
@@ -465,11 +467,31 @@ func imageInputParts(m agentcore.Message) (responses.ResponseInputMessageContent
 		if !ok {
 			continue
 		}
-		part := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailAuto)
-		part.OfInputImage.ImageURL = openai.String(fmt.Sprintf("data:%s;base64,%s", img.MimeType, img.Data))
-		parts = append(parts, part)
+		parts = append(parts, responsesImagePart(img))
 	}
 	return parts, true
+}
+
+// responsesImagePart renders one image block as an input_image content part. A
+// block with no usable source becomes an input_text notice: the request still
+// succeeds and the model is told the image was dropped, which beats a silent
+// omission or a failed turn.
+func responsesImagePart(img agentcore.ImageContent) responses.ResponseInputContentUnionParam {
+	wire, err := splitImage(img)
+	if err != nil {
+		return responses.ResponseInputContentParamOfInputText("[image omitted: " + err.Error() + "]")
+	}
+	part := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailAuto)
+	if wire.form() == ImageFormFileID {
+		part.OfInputImage.FileID = openai.String(wire.FileID)
+		return part
+	}
+	target := wire.URL
+	if wire.form() == ImageFormBase64 {
+		target = wire.dataURI()
+	}
+	part.OfInputImage.ImageURL = openai.String(target)
+	return part
 }
 
 // responsesReasoningEffort maps pigo's thinking level to a Responses API

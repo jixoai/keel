@@ -1250,7 +1250,7 @@ function ProviderConfigDialog() {
           <Field
             label="凭据引用"
             required
-            hint="三种写法：${NAME} 或 env:NAME 指环境变量，secret:NAME 指「密钥」分区里保存的密钥；这里永远不存凭据的值。"
+            hint="三种写法：${NAME} 或 env:NAME 指环境变量，secret:NAME 指「密钥」分区里保存的密钥；这里永远不存凭据的值。内置 Provider 的 env:NAME 在环境变量未设置时，会自动改用「密钥」里同名的密钥（环境变量优先），所以自托管只需在「密钥」存一个同名条目即可。"
             error={editorCredentialError() ?? undefined}
           >
             <Input

@@ -105,6 +105,11 @@ func contentListChars(content agentcore.ContentList) int {
 			}
 		case agentcore.ImageContent:
 			chars += estimatedImageChars
+		case agentcore.ImageRefContent:
+			// A durable image reference costs the same as an image block: the
+			// resolver turns it into bytes (or a provider file handle) before the
+			// request, so the budget must not price the reference as free.
+			chars += estimatedImageChars
 		}
 	}
 	return chars
