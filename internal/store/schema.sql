@@ -555,3 +555,73 @@ CREATE TABLE IF NOT EXISTS agent_teams (
 );
 
 CREATE INDEX IF NOT EXISTS agent_teams_by_tenant ON agent_teams (tenant_id, updated_at DESC);
+
+-- --- tenancy-quotas (change keel-ga §2) -------------------------------------
+--
+-- API keys (spec: tenancy-quotas / API key 鉴权). Only the SHA-256 hash of the
+-- plaintext key and a display prefix ever reach the database; the plaintext is
+-- returned exactly once, by the provisioning command, and is never stored,
+-- logged or echoed again. role is the key's authority ('tenant' or 'admin');
+-- it is a property of the credential, not a second account model.
+--
+-- The unique index on key_hash is the lookup path: a request presents a key,
+-- the hash is computed, one index probe resolves (tenant, role). It is not
+-- tenant-scoped because the tenant is the answer, not the question.
+CREATE TABLE IF NOT EXISTS api_keys (
+    tenant_id  uuid NOT NULL,
+    key_id     uuid NOT NULL,
+    key_hash   bytea NOT NULL,
+    key_prefix text NOT NULL,
+    role       text NOT NULL DEFAULT 'tenant',
+    label      text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    revoked_at timestamptz,
+    PRIMARY KEY (tenant_id, key_id),
+    CONSTRAINT api_keys_role_check CHECK (role IN ('tenant', 'admin')),
+    CONSTRAINT api_keys_hash_len_check CHECK (octet_length(key_hash) = 32)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS api_keys_hash ON api_keys (key_hash);
+CREATE INDEX IF NOT EXISTS api_keys_by_tenant ON api_keys (tenant_id, created_at DESC);
+
+-- Per-tenant quota row. The run-concurrency and admitted-event budgets live in
+-- the tenant configuration document (host.QuotaConfig, one vocabulary the admin
+-- API writes); these columns are the dimensions the process edge enforces
+-- before a request reaches a session: concurrent streams, outbound bytes per
+-- second and the storage ceiling. Zero means unlimited for every column.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS quota_streams int NOT NULL DEFAULT 20;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS quota_bytes_per_sec bigint NOT NULL DEFAULT 0;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS quota_storage_bytes bigint NOT NULL DEFAULT 0;
+
+-- Objective usage facts that are not provider token counts (spec: tenancy-
+-- quotas / 计量事件). Token accounting has exactly one home — usage_ledger
+-- above — and is never duplicated here; this table carries the byte dimensions
+-- the ledger has no column for:
+--
+--   image_bytes   bytes of an image blob a tenant stored (upload completion);
+--   storage_bytes bytes of any blob a tenant stored (upload completion).
+--
+-- dedupe_key makes recording idempotent: one row per (tenant, kind, blob).
+-- There is deliberately no price, amount or currency column: prices live in
+-- contracts, the runtime records objective quantities only.
+CREATE TABLE IF NOT EXISTS tenant_usage (
+    usage_id    bigserial PRIMARY KEY,
+    tenant_id   uuid NOT NULL,
+    kind        text NOT NULL,
+    quantity    bigint NOT NULL,
+    source      text NOT NULL DEFAULT '',
+    session_id  uuid,
+    blob_id     uuid,
+    dedupe_key  text,
+    recorded_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT tenant_usage_kind_check CHECK (kind IN ('image_bytes', 'storage_bytes')),
+    CONSTRAINT tenant_usage_quantity_check CHECK (quantity >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_usage_dedupe
+    ON tenant_usage (tenant_id, kind, dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tenant_usage_by_tenant_time
+    ON tenant_usage (tenant_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS tenant_usage_by_kind
+    ON tenant_usage (tenant_id, kind, recorded_at DESC);

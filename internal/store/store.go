@@ -39,6 +39,15 @@ type Config struct {
 	// locks for MCP OAuth refreshes. It must stay small: a lock holder runs its
 	// callback on the main pool, so the two pools must never be the same.
 	MCPOAuthLockConns int32 // default 4
+	// DisableRLS skips the row-level-security migration (see rls.go). RLS is
+	// part of the schema contract, so only a deployment whose cluster forbids
+	// CREATE ROLE and provisioned the role out of band — or a test asserting the
+	// pre-RLS behaviour — sets this. The default is to apply it.
+	DisableRLS bool
+	// TenantConns bounds the tenant-scoped pool: the connections that run as the
+	// non-owner RLS role and serve per-request tenant transactions. Zero uses the
+	// default (8). The pool is created only when RLS is applied.
+	TenantConns int32
 }
 
 func (c *Config) applyDefaults() {
@@ -57,6 +66,9 @@ func (c *Config) applyDefaults() {
 	if c.MCPOAuthLockConns == 0 {
 		c.MCPOAuthLockConns = 4
 	}
+	if c.TenantConns == 0 {
+		c.TenantConns = 8
+	}
 }
 
 // Store wraps a pgx pool.
@@ -70,6 +82,12 @@ type Store struct {
 	// Lock holders run their callback on the main pool; sharing one pool would
 	// let MaxConns lock holders deadlock every other query.
 	lockPool *pgxpool.Pool
+	// tenantPool runs as the non-owner RLS role. Every connection in it is
+	// already SET ROLE'd, so a query without app.tenant_id returns zero rows.
+	// Only TenantScoped uses it; nil when RLS is disabled.
+	tenantPool *pgxpool.Pool
+	// skipRLS keeps Migrate from applying the RLS migration (see Config).
+	skipRLS bool
 }
 
 // Open connects, tunes the session, and applies the schema (idempotent).
@@ -86,8 +104,16 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	pc.HealthCheckPeriod = 30 * time.Second
 	pc.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		// SET does not accept bind parameters; the value is an int64 we control.
+		//
+		// app.bypass_rls='on' marks this pool as the trusted internal path. Every
+		// query on it already carries tenant_id, and the pool serves work that is
+		// inherently cross-tenant (the migration, provisioning, the admin API, the
+		// run queue's global claim). Without the marker a deployment whose DSN
+		// names the table owner would see zero rows from FORCE ROW LEVEL SECURITY.
+		// Request-scoped tenant access uses the separate tenant pool, which pins
+		// the marker to 'off'.
 		_, err := conn.Exec(ctx, fmt.Sprintf(
-			"SET statement_timeout = %d; SET idle_in_transaction_session_timeout = '3s'",
+			"SET statement_timeout = %d; SET idle_in_transaction_session_timeout = '3s'; SET app.bypass_rls = 'on'",
 			cfg.StatementTimeout.Milliseconds()))
 		return err
 	}
@@ -118,17 +144,65 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("store: lock pool: %w", err)
 	}
-	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout, lockPool: lockPool}
+	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout, lockPool: lockPool, skipRLS: cfg.DisableRLS}
 	if err := s.Migrate(ctx); err != nil {
 		lockPool.Close()
 		pool.Close()
 		return nil, err
 	}
+	if !cfg.DisableRLS {
+		// RLS comes after the base schema: the policies name every tenant table,
+		// so applying it first would leave the later-created tables unprotected.
+		if err := s.ApplyRLS(ctx); err != nil {
+			lockPool.Close()
+			pool.Close()
+			return nil, err
+		}
+		if err := s.openTenantPool(ctx, cfg); err != nil {
+			lockPool.Close()
+			pool.Close()
+			return nil, err
+		}
+	}
 	return s, nil
+}
+
+// openTenantPool builds the pool whose connections run as the non-owner RLS
+// role. Every connection is SET ROLE'd once (in AfterConnect) and carries
+// app.bypass_rls='off' explicitly, so a leaked session variable can never make
+// a tenant transaction see another tenant's rows.
+func (s *Store) openTenantPool(ctx context.Context, cfg Config) error {
+	tenantConfig, err := pgxpool.ParseConfig(cfg.DSN)
+	if err != nil {
+		return fmt.Errorf("store: parse tenant dsn: %w", err)
+	}
+	tenantConfig.MaxConns = cfg.TenantConns
+	tenantConfig.MinConns = 0
+	tenantConfig.MaxConnLifetime = 30 * time.Minute
+	tenantConfig.MaxConnIdleTime = 5 * time.Minute
+	tenantConfig.HealthCheckPeriod = 30 * time.Second
+	tenantConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		// SET ROLE makes the connection a member of the non-owner role, so FORCE
+		// ROW LEVEL SECURITY applies to it; the role attributes are asserted by
+		// the migration. statement_timeout mirrors the operator pool.
+		_, err := conn.Exec(ctx, fmt.Sprintf(
+			"SET statement_timeout = %d; SET idle_in_transaction_session_timeout = '3s'; SET ROLE %s; SET app.bypass_rls = 'off'",
+			cfg.StatementTimeout.Milliseconds(), pgx.Identifier{RLSRoleName}.Sanitize()))
+		return err
+	}
+	tenantPool, err := pgxpool.NewWithConfig(ctx, tenantConfig)
+	if err != nil {
+		return fmt.Errorf("store: tenant pool: %w", err)
+	}
+	s.tenantPool = tenantPool
+	return nil
 }
 
 // Close releases both pools.
 func (s *Store) Close() {
+	if s.tenantPool != nil {
+		s.tenantPool.Close()
+	}
 	if s.lockPool != nil {
 		s.lockPool.Close()
 	}
@@ -246,13 +320,21 @@ func (s *Store) Acquire(ctx context.Context) (*pgxpool.Conn, error) {
 
 // CreateTenant inserts a tenant (idempotent by id).
 func (s *Store) CreateTenant(ctx context.Context, tenantID uuid.UUID, name string) error {
-	_, err := s.pool.Exec(ctx,
+	_, err := s.CreateTenantReport(ctx, tenantID, name)
+	return err
+}
+
+// CreateTenantReport is CreateTenant with the outcome: created=false means the
+// tenant already existed (the provisioning surface reports it instead of
+// silently overwriting a tenant's name).
+func (s *Store) CreateTenantReport(ctx context.Context, tenantID uuid.UUID, name string) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
 		`INSERT INTO tenants (tenant_id, name) VALUES ($1, $2)
 		 ON CONFLICT (tenant_id) DO NOTHING`, tenantID, name)
 	if err != nil {
-		return fmt.Errorf("store: create tenant: %w", err)
+		return false, fmt.Errorf("store: create tenant: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 // CreateSession inserts a session (idempotent).

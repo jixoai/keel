@@ -41,6 +41,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runTeamCmd(args[1:], stdout, stderr)
 	case "model":
 		return runModelCmd(args[1:], stdout, stderr)
+	case "admin":
+		return runAdminCmd(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctorCmd(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
@@ -65,6 +67,7 @@ Usage:
   keel agent <cmd>       Manage the Agent library (list|show|create|update|delete)
   keel team <cmd>        Manage agent teams (list|show|create|update|delete|member add|remove)
   keel model <cmd>       Read the model registry (providers|list|show)
+  keel admin <cmd>       Provision tenants, API keys and quotas (operator)
   keel doctor [flags]    Diagnose configuration and build artifacts
   keel version           Print version and build information
 

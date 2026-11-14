@@ -23,8 +23,15 @@ type PGQuerier interface {
 // PGSessionLister answers GET /v1/sessions from PostgreSQL with keyset
 // pagination: the cursor is (updated_at, session_id), so pages are stable even
 // while sessions are being written (no OFFSET drift, no duplicates).
+//
+// When the store has the RLS tenant pool, every page query runs inside a
+// tenant-scoped transaction (set_config('app.tenant_id')): the listing is then
+// filtered twice — once by its own predicate, once by row-level security. That
+// is the request-path proof the spec asks for ("应用连接 MUST 是非 owner 角色，
+// 并在事务内设置 app.tenant_id"), not just a storage-seam demonstration.
 type PGSessionLister struct {
-	db PGQuerier
+	db    PGQuerier
+	store *store.Store
 }
 
 // NewPGSessionLister builds the production session lister over a store.
@@ -32,7 +39,7 @@ func NewPGSessionLister(st *store.Store) *PGSessionLister {
 	if st == nil {
 		return nil
 	}
-	return &PGSessionLister{db: st.Pool()}
+	return &PGSessionLister{db: st.Pool(), store: st}
 }
 
 // sessionSelect is the whole list projection in one round trip: the session
@@ -84,47 +91,60 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
  LIMIT $4`
 		args = []any{tenantID, cursor.updatedAt, cursor.sessionID, limit + 1}
 	}
-	rows, err := l.db.Query(ctx, query, args...)
-	if err != nil {
-		return SessionPage{}, fmt.Errorf("agentapi: list sessions: %w", err)
-	}
-	defer rows.Close()
 	type row struct {
 		summary SessionSummary
 		updated time.Time
 		id      uuid.UUID
 	}
 	collected := make([]row, 0, limit+1)
-	for rows.Next() {
-		var (
-			sessionID     uuid.UUID
-			createdAt     time.Time
-			updatedAt     time.Time
-			lastSeq       int64
-			runStatus     string
-			lastMessageAt sql.NullTime
-			firstInput    sql.NullString
-		)
-		if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt, &firstInput); err != nil {
-			return SessionPage{}, fmt.Errorf("agentapi: scan session: %w", err)
+	// collect reads one page into collected. It runs inside the tenant-scoped
+	// transaction when the store has the RLS pool, so the rows are fully drained
+	// before the transaction commits (a portal cannot outlive its transaction).
+	collect := func(querier rowQuerier) error {
+		rows, err := querier.Query(ctx, query, args...)
+		if err != nil {
+			return err
 		}
-		summary := SessionSummary{
-			SessionID: sessionID.String(),
-			CreatedAt: createdAt.UTC(),
-			UpdatedAt: updatedAt.UTC(),
-			LastSeq:   lastSeq,
-			RunStatus: runStatus,
-			Title:     deriveSessionTitle(firstInput.String),
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				sessionID     uuid.UUID
+				createdAt     time.Time
+				updatedAt     time.Time
+				lastSeq       int64
+				runStatus     string
+				lastMessageAt sql.NullTime
+				firstInput    sql.NullString
+			)
+			if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt, &firstInput); err != nil {
+				return fmt.Errorf("agentapi: scan session: %w", err)
+			}
+			summary := SessionSummary{
+				SessionID: sessionID.String(),
+				CreatedAt: createdAt.UTC(),
+				UpdatedAt: updatedAt.UTC(),
+				LastSeq:   lastSeq,
+				RunStatus: runStatus,
+				Title:     deriveSessionTitle(firstInput.String),
+			}
+			if lastMessageAt.Valid {
+				at := lastMessageAt.Time.UTC()
+				summary.LastMessageAt = &at
+			}
+			collected = append(collected, row{summary: summary, updated: updatedAt, id: sessionID})
 		}
-		if lastMessageAt.Valid {
-			at := lastMessageAt.Time.UTC()
-			summary.LastMessageAt = &at
-		}
-		collected = append(collected, row{summary: summary, updated: updatedAt, id: sessionID})
+		return rows.Err()
 	}
-	if err := rows.Err(); err != nil {
+	if l.store != nil && l.store.RLSEnabled() {
+		if err := l.store.TenantScoped(ctx, tenantID, func(tx store.TenantTx) error {
+			return collect(tx)
+		}); err != nil {
+			return SessionPage{}, fmt.Errorf("agentapi: list sessions: %w", err)
+		}
+	} else if err := collect(poolQuerier{l.db}); err != nil {
 		return SessionPage{}, fmt.Errorf("agentapi: list sessions: %w", err)
 	}
+
 	page := SessionPage{HasMore: len(collected) > limit}
 	if page.HasMore {
 		collected = collected[:limit]
@@ -138,6 +158,21 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
 		page.NextCursor = encodeSessionCursor(last.updated, last.id)
 	}
 	return page, nil
+}
+
+// rowQuerier is the query seam both the pool and a tenant transaction satisfy.
+type rowQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// poolQuerier adapts PGQuerier (the lister's injected seam) to rowQuerier.
+type poolQuerier struct{ db PGQuerier }
+
+func (p poolQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if p.db == nil {
+		return nil, fmt.Errorf("agentapi: session lister is not configured")
+	}
+	return p.db.Query(ctx, sql, args...)
 }
 
 type sessionCursor struct {

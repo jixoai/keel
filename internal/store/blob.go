@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -93,12 +94,63 @@ func (s *Store) AppendChunk(ctx context.Context, tenantID, blobID uuid.UUID, seq
 	return nil
 }
 
-// CompleteBlob marks an upload finished.
+// CompleteBlob marks an upload finished and records the blob's byte usage
+// (spec: tenancy-quotas / 计量事件: 图片字节、存储字节).
+//
+// Both facts are objective quantities of the stored object, so they are
+// recorded at the moment the object becomes readable rather than when a request
+// claimed to be sending one. The dedupe key is the blob id: a retried
+// completion records nothing new, and a content-deduped upload (same sha256,
+// same blob id) counts once.
+//
+// There is no price column anywhere in this path: prices live in contracts.
+//
+// Two statements in one transaction rather than one data-modifying CTE: a CTE
+// that both updates `blobs` and inserts into `tenant_usage` can deadlock under
+// concurrent uploads (the insert's unique-index probe and the update's row lock
+// are taken in an order PostgreSQL does not fix for you — observed as a 40P01
+// under parallel test packages). Updating first, then reading the row, gives a
+// single deterministic lock order per blob.
 func (s *Store) CompleteBlob(ctx context.Context, tenantID, blobID uuid.UUID, chunks int32) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE blobs SET complete = true WHERE tenant_id = $1 AND blob_id = $2`,
-		tenantID, blobID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("store: complete blob: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		size int64
+		mime string
+	)
+	err = tx.QueryRow(ctx,
+		`UPDATE blobs SET complete = true
+		  WHERE tenant_id = $1 AND blob_id = $2
+		  RETURNING size, mime`, tenantID, blobID).Scan(&size, &mime)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A blob that does not exist records nothing: metering follows the
+		// object, never a request that claimed to finish one.
+		return fmt.Errorf("store: complete blob: %w", ErrNoBlob)
+	}
+	if err != nil {
+		return fmt.Errorf("store: complete blob: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenant_usage (tenant_id, kind, quantity, source, blob_id, dedupe_key)
+		 VALUES ($1, 'storage_bytes', $2, 'upload', $3, $4)
+		 ON CONFLICT (tenant_id, kind, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+		tenantID, size, blobID, blobID.String()); err != nil {
+		return fmt.Errorf("store: record storage usage: %w", err)
+	}
+	if strings.HasPrefix(mime, "image/") {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO tenant_usage (tenant_id, kind, quantity, source, blob_id, dedupe_key)
+			 VALUES ($1, 'image_bytes', $2, 'upload', $3, $4)
+			 ON CONFLICT (tenant_id, kind, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+			tenantID, size, blobID, blobID.String()); err != nil {
+			return fmt.Errorf("store: record image usage: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("store: complete blob: %w", err)
 	}
 	return nil

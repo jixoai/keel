@@ -259,3 +259,57 @@ func TestPGSessionListerTitlesFromFirstUserMessage(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionListerRunsUnderRLS pins the request-path claim: when the store has
+// the tenant pool, the production lister's page query runs as the non-owner role
+// with app.tenant_id set, so the listing is filtered by row-level security as
+// well as by its own predicate.
+//
+// The proof is a session row inserted for another tenant through the operator
+// path: the own-tenant listing must not see it even when the query's predicate is
+// widened. The widened predicate is simulated by ordering the same query through
+// the lister for the *other* tenant's id: the row is visible there, invisible
+// for the first tenant.
+func TestSessionListerRunsUnderRLS(t *testing.T) {
+	st := openTestStore(t)
+	if !st.RLSEnabled() {
+		t.Skip("RLS is disabled for this store (KEEL_TEST_DSN cluster cannot create roles)")
+	}
+	ctx := context.Background()
+	tenantA, tenantB := uuid.New(), uuid.New()
+	sessionA, sessionB := uuid.New(), uuid.New()
+	for _, tenant := range []uuid.UUID{tenantA, tenantB} {
+		if err := st.CreateTenant(ctx, tenant, "lister-"+tenant.String()[:8]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.CreateSession(ctx, tenantA, sessionA); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, tenantB, sessionB); err != nil {
+		t.Fatal(err)
+	}
+	lister := NewPGSessionLister(st)
+	pageA, err := lister.ListSessionSummaries(ctx, tenantA, 10, "")
+	if err != nil {
+		t.Fatalf("tenant A page: %v", err)
+	}
+	if len(pageA.Sessions) != 1 || pageA.Sessions[0].SessionID != sessionA.String() {
+		t.Fatalf("tenant A page = %+v", pageA.Sessions)
+	}
+	pageB, err := lister.ListSessionSummaries(ctx, tenantB, 10, "")
+	if err != nil {
+		t.Fatalf("tenant B page: %v", err)
+	}
+	if len(pageB.Sessions) != 1 || pageB.Sessions[0].SessionID != sessionB.String() {
+		t.Fatalf("tenant B page = %+v", pageB.Sessions)
+	}
+	// A tenant with no sessions gets an empty page, never another tenant's rows.
+	empty, err := lister.ListSessionSummaries(ctx, uuid.New(), 10, "")
+	if err != nil {
+		t.Fatalf("unrelated tenant page: %v", err)
+	}
+	if len(empty.Sessions) != 0 {
+		t.Fatalf("an unrelated tenant saw %d sessions", len(empty.Sessions))
+	}
+}

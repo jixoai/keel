@@ -28,23 +28,60 @@
 
 ## 2. tenancy-quotas
 
-- [ ] schema：`api_keys`（hash/prefix/tenant_id/role）、`tenant_usage`
-- [ ] `internal/auth`：Bearer / X-API-Key → tenant；401 语义
-- [ ] 管理员 provisioning（创建 tenant + key，返回一次明文 key）
-- [ ] RLS 迁移：`FORCE ROW LEVEL SECURITY` + 非 owner 角色 + `app.tenant_id`
-- [ ] 配额：并发 run / 流 / 带宽 / 存储；429/413 + Retry-After
-- [ ] 用量事件：token / 图片字节 / 存储字节（无价格字段）
-- [ ] 测试：跨租户 404；单租户打满不影响他人
+- [x] schema：`api_keys`（hash/prefix/tenant_id/role）、`tenant_usage`
+      （`internal/store/keys.go`、`byte_usage.go`、`schema.sql`；用量无价格字段）
+- [x] `internal/auth`：Bearer / X-API-Key → tenant；401 语义
+      （`internal/auth/keys.go`：`keel_<role>_` 前缀、未知/撤销一律 401 不区分、非 key 流量原样透传）
+- [x] 管理员 provisioning（创建 tenant + key，返回一次明文 key）
+      （`cmd/keel/admin.go` 直连 DB 自举 + `POST /v1/admin/tenants`；`TestAdminTenantCreatePrintsKeyOnce`）
+- [x] RLS 迁移：`FORCE ROW LEVEL SECURITY` + 非 owner 角色 + `app.tenant_id`
+      （`internal/store/rls.go` 双角色：operator 池 `app.bypass_rls='on'`、tenant 池 `SET ROLE keel_app` +
+      `'off'`；`SET LOCAL` 不跨连接泄漏；19 张租户表；幂等 + advisory lock）
+- [x] 配额：并发 run / 流 / 带宽 / 存储；429/413 + Retry-After
+      （`internal/quota/edge.go`：run 沿用 kernel 配额；流/存储硬拒，带宽为整形不拒绝——见记账）
+- [x] 用量事件：token / 图片字节 / 存储字节（无价格字段）
+      （token 复用 `usage_ledger`；字节走 `tenant_usage`，`CompleteBlob` 同事务记账）
+- [x] 测试：跨租户 404；单租户打满不影响他人
+      （`TestRLSCrossTenantReadsReturnNoRows`/`TestRLSBlocksCrossTenantWrite`/
+      `TestCrossTenantSessionIs404`/`TestEdgeStreamQuotaIsPerTenant`；主代理独立复跑 `go test -race` 5 包全绿）
+
+> **记账（2026-11-15，主代理审查）**：① RLS 目前只覆盖会话列表这一个请求路径（`sessions_pg.go`），
+> 其余请求路径仍走 operator 池——「第二道防线」尚未全路径生效，留 W2/W3 收口；
+> ② 带宽配额按整形实现而非 429（取整形语义，已在代码注释说明）；
+> ③ chunked 上传无 `Content-Length` 时不做存储预检，只在 `CompleteBlob` 计量（流式中断需改
+> blob.Uploader，留待后续）；④ `internal/httpapi`（`cmd/runtime` 单租户路径）未承载租户配额。
 
 ## 3. provider-files
 
-- [ ] `agentcore` 增加 `ImageRefContent{BlobID, Mime, Width, Height}`（或 `ImageContent.BlobID`）
-- [ ] 事件只存 blobId；worker 出站前解析
-- [ ] provider 能力位：`SupportsImageURL` / `SupportsFileID` / `MaxImageBytes`
-- [ ] resolver：`file_id` > `url` > `base64`，流式读取
-- [ ] adapter：Gemini Files（48h）→ OpenAI Responses file_id → Anthropic URL → Anthropic Files
-- [ ] provider file 缓存 `(sha256, provider, workspace)` + TTL 懒刷新
-- [ ] 测试：mock provider server 断言 wire 形态与内存上限
+- [x] `agentcore` 增加 `ImageRefContent{BlobID, Mime, Width, Height}`（或 `ImageContent.BlobID`）
+      （对账：`internal/agentcore/content.go` 新增 `ContentTypeImageRef`/`ImageRefContent`
+      （BlobID/MimeType/Size/Width/Height/Name）+ `decodeContent` 分支；wire 形态 `ImageContent`
+      扩出 `FileID`/`URL`，`WireForm()` 自述形态）
+- [x] 事件只存 blobId；worker 出站前解析
+      （对账：`internal/agent/messages.go` 把 user.message `attachments[{fileId,mime:image/*}]`
+      解成 `ImageRefContent`（base64 永不入事件）；`internal/agent/images.go` 在 runner 出站前
+      逐 block 替换为 wire 形态，失败降级为具名文本提示 + warn，不炸 run）
+- [x] provider 能力位：`SupportsImageURL` / `SupportsFileID` / `MaxImageBytes`
+      （对账：`internal/provider/imagecaps.go` `ImageCaps{SupportsFileID,SupportsImageURL,
+      MaxImageBytes,MaxInlineBytes}` + `ImageCapsForAPI(apiType)` 按协议声明；`internal/agent/model.go`
+      `ActiveModel.ImageCaps`，`internal/servicehost/models.go` 解析时填充）
+- [x] resolver：`file_id` > `url` > `base64`，流式读取
+      （对账：`internal/provider/imagefiles.go` `ImageResolver.Resolve` 固定降级序 + 逐级记录降级理由；
+      base64 只分配 `WireLen(size)` 单缓冲，upload 走 `io.Pipe` 流式；`internal/blob/image_source.go`
+      `Info`/`Open`/`EncodeBase64` 三面）
+- [x] adapter：Gemini Files（48h）→ OpenAI Responses file_id → Anthropic URL → Anthropic Files
+      （对账：`internal/provider/imageupload.go` `GeminiFileUploader`（resumable 两跳，48h TTL）、
+      `OpenAIFileUploader`（multipart purpose user_data → Responses `file_id`）、
+      `AnthropicFileUploader`（beta 头）、`PathURLSigner`（url 形态）；`internal/provider/providers.go`
+      anthropic 编码器发 base64/url/file 三形态，`internal/provider/responses.go` 发 file_id/image_url）
+- [x] provider file 缓存 `(sha256, provider, workspace)` + TTL 懒刷新
+      （对账：`internal/provider/imagefiles.go` `FileCache.GetOrUpload`，key 为 sha256+provider+workspace
+      摘要，过期 handle 下次读取时重传（Gemini 48h），超界按最近过期淘汰）
+- [x] 测试：mock provider server 断言 wire 形态与内存上限
+      （对账：`internal/provider/imagewire_test.go` 三形态 × 各 adapter（含 mock server 端到端断言
+      file_id/url/data-URI）；`internal/provider/imagefiles_test.go` 降级序、TTL 刷新、内容摘要去重、
+      超限拒绝、base64 单缓冲与三厂商上传 wire；`internal/servicehost/images_test.go`
+      真 Boot 装配 → 真 resolver → mock vendor 断言；未接线时 nil resolver 降级有测）
 
 ## 4. ops-runtime
 

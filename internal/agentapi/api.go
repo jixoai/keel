@@ -151,6 +151,17 @@ type Config struct {
 	// settles as failed in the kernel policy table; the product snapshot
 	// remembers the cancellation).
 	RunStatus func(tenantID, sessionID uuid.UUID) (string, bool)
+	// Provisioner is the tenant provisioning surface (POST /v1/admin/tenants
+	// and the per-tenant key routes). Nil answers 501: a deployment without it
+	// has no operator path, which is a configuration choice, not a bug.
+	Provisioner Provisioner
+	// Quota reports the tenant's limits and current usage (GET /v1/quota). Nil
+	// answers 501.
+	Quota QuotaReporter
+	// AdminKey decides whether a request carries the deployment's operator key.
+	// The provisioner routes accept it in addition to an api_keys admin
+	// credential. Nil means "KEEL_ADMIN_KEY only".
+	AdminKey func(r *http.Request) bool
 	// SubagentWaitDefault bounds the synchronous wait of a sub-agent spawn over
 	// HTTP when the request does not set a budget (default 60s).
 	SubagentWaitDefault time.Duration
@@ -211,6 +222,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/subagents", s.listSubagents)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/subagents", s.spawnSubagent)
 	s.mux.HandleFunc("GET /v1/subagents/{id}", s.getSubagent)
+	// Tenancy surface (change keel-ga §2): who am I, provisioning, quota.
+	s.registerTenancyRoutes()
 }
 
 // --- shared helpers ------------------------------------------------------
