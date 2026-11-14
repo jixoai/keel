@@ -274,3 +274,36 @@ func NewSubagentPlugin(runner *SubagentRunner) *Plugin {
 func ExamplePingPrompt() string {
 	return fmt.Sprintf("Example plugin ping (%s).", ExamplePingTriggerID)
 }
+
+// Capability plugin ids (change keel-agent-team-v1): the three management
+// surfaces the product ships as declared plugins. Their behavioural surface is
+// the CLI tree each manifest declares (`provides.cli`), enforced by the real
+// `keel model` / `keel agent` / `keel team` commands — so the Go side stays an
+// empty in-process plugin: it carries its registry capability marker and
+// contributes nothing to the model's tool face.
+const (
+	// ModelPluginID is the model-registry plugin (providers, models, families).
+	ModelPluginID = "keel.model"
+	// AgentPluginID is the agent-registry plugin (the Agent library).
+	AgentPluginID = "keel.agent"
+	// TeamPluginID is the agent-team plugin (teams, captain, members, the
+	// captain's team-CLI switch).
+	TeamPluginID = "keel.team"
+	// CapabilityPluginVersion is the version all three capability plugins ship.
+	CapabilityPluginVersion = "1.0.0"
+)
+
+// NewModelPlugin builds the model-registry plugin.
+func NewModelPlugin() *Plugin {
+	return &Plugin{ID: ModelPluginID, Version: CapabilityPluginVersion, Provides: []string{"cap:model-registry"}}
+}
+
+// NewAgentPlugin builds the agent-registry plugin.
+func NewAgentPlugin() *Plugin {
+	return &Plugin{ID: AgentPluginID, Version: CapabilityPluginVersion, Provides: []string{"cap:agent-registry"}}
+}
+
+// NewTeamPlugin builds the agent-team plugin.
+func NewTeamPlugin() *Plugin {
+	return &Plugin{ID: TeamPluginID, Version: CapabilityPluginVersion, Provides: []string{"cap:team-registry"}}
+}

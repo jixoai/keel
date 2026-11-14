@@ -35,6 +35,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runServeCmd(args[1:], stdout, stderr)
 	case "tui":
 		return runTUICmd(args[1:], stdout, stderr)
+	case "agent":
+		return runAgentCmd(args[1:], stdout, stderr)
+	case "team":
+		return runTeamCmd(args[1:], stdout, stderr)
+	case "model":
+		return runModelCmd(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctorCmd(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
@@ -56,6 +62,9 @@ func usage(w io.Writer) {
 Usage:
   keel serve [flags]     Host the AgentAPI (/v1), the web UI and SSE on one origin
   keel tui [flags]       Run the NSH TUI client against a running keel serve
+  keel agent <cmd>       Manage the Agent library (list|show|create|update|delete)
+  keel team <cmd>        Manage agent teams (list|show|create|update|delete|member add|remove)
+  keel model <cmd>       Read the model registry (providers|list|show)
   keel doctor [flags]    Diagnose configuration and build artifacts
   keel version           Print version and build information
 
@@ -70,10 +79,14 @@ Environment (serve):
   KEEL_MODELS_CONFIG       tenant models document (providers/rules/selection)
   KEEL_SKILLS_ROOTS        OS path list of skill roots (PI-compatible)
 
-Environment (tui):
+Environment (tui, agent, team):
   KEEL_TUI_BIN             path to the NSH TUI binary
   KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13750)
   KEEL_AGENT_TOKEN         bearer token (the serve passphrase)
+  KEEL_SERVE_ADDR          server address for keel agent / keel team
+  KEEL_SERVE_PASSWORD      passphrase exchanged for the session cookie (never printed)
+
+Run "keel agent --help" or "keel team --help" for the full command surface.
 `)
 }
 

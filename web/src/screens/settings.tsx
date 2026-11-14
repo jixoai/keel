@@ -49,10 +49,7 @@ import type {
   MediaCapabilitiesView,
   MediaCapabilityStatus,
   MediaCapabilityView,
-  ModelSelection,
-  ModelView,
   PluginStatusView,
-  ProviderView,
   RealtimeStatusView,
   SecretMeta,
   SettingsIssue,
@@ -63,11 +60,11 @@ import { store } from "../data/store";
 import {
   displayNameOf,
   formatTime,
-  modelFacts,
   pluginStateLabel,
   providerDisplayName,
   reasoningLabel,
   selectionDisplay,
+  selectionLabel,
 } from "../data/wire";
 import { applyAppearance, appearancePreference, type Appearance } from "../ui/appearance";
 import { Icon } from "../ui/icons";
@@ -77,11 +74,15 @@ import {
   Button,
   Card,
   CardContent,
+  CardFooter,
   CardHeader,
   Collapsible,
   CollapsibleTrigger,
+  Dialog,
   Empty,
+  EmptyContent,
   EmptyDescription,
+  EmptyMedia,
   EmptyTitle,
   Field,
   FieldGroup,
@@ -116,13 +117,16 @@ import {
   type SettingsSectionEntry,
 } from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
+import { AgentTeamSettingsSection } from "./settings-agents";
 
 // ---- the section ----------------------------------------------------------
 
-/** The eight sections the rail offers. */
+/** The ten sections the rail offers. */
 export type SettingsSection =
   | "general"
   | "appearance"
+  | "agents"
+  | "teams"
   | "models"
   | "capabilities"
   | "secrets"
@@ -140,6 +144,8 @@ const SECTIONS: SettingsSectionEntry[] = [
   { id: "general", label: "通用", icon: "settings", group: "常规" },
   { id: "appearance", label: "外观", icon: "sun" },
   { id: "models", label: "模型接入", icon: "brain", group: "配置" },
+  { id: "agents", label: "Agents", icon: "terminal" },
+  { id: "teams", label: "团队", icon: "message" },
   { id: "capabilities", label: "能力", icon: "spark" },
   { id: "secrets", label: "密钥", icon: "key" },
   { id: "plugins", label: "插件", icon: "layers" },
@@ -180,11 +186,47 @@ const rawOpen = signal(false);
 const confirmReset = signal(false);
 /** The secret row whose delete is waiting for its question. */
 const confirmingSecret = signal<string | null>(null);
-/** The model list's filter: only models the process can run. */
-const modelsOnlyExecutable = signal(false);
 /** Both diagnostics tables start collapsed. */
 const modelsDiagnosticsOpen = signal(false);
 const pluginDiagnosticsOpen = signal(false);
+
+// ---- the second level: one dialog per job -------------------------------
+//
+// The list is the page; every write happens in a modal that edits *one* thing.
+// The signals below are the modal's draft, separate from the raw document so a
+// rejected save never loses what the reader typed.
+
+/** The provider editor: closed, editing an existing provider, or adding one. */
+type ProviderEditorMode = "closed" | "edit" | "new";
+const providerEditorMode = signal<ProviderEditorMode>("closed");
+/** The id the editor opened on (empty for a new provider). */
+const editingProviderId = signal("");
+const editorId = signal("");
+const editorName = signal("");
+const editorApiType = signal("openai-chat-completions");
+const editorBaseUrl = signal("");
+const editorCredential = signal("");
+const editorModelIds = signal<string[]>([]);
+const editorModelInput = signal("");
+const editorIdError = signal<string | null>(null);
+const editorBaseUrlError = signal<string | null>(null);
+const editorCredentialError = signal<string | null>(null);
+const editorDocumentError = signal<string | null>(null);
+const confirmDeleteProvider = signal(false);
+
+/** The「更换」dialog: provider + model + reasoning for the default selection. */
+const replaceOpen = signal(false);
+const replaceProviderId = signal<string | null>(null);
+const replaceModelId = signal<string | null>(null);
+const replaceReasoning = signal("");
+const replaceError = signal<string | null>(null);
+
+/** A save that the server never acknowledged (a transport failure, not a 400:
+ * the 400's field issues have their own place). */
+const saveFailure = signal<string | null>(null);
+/** Feedback belongs to this attempt: a stale rejection from an earlier dialog
+ * must not greet the next one. */
+const saveAttempted = signal(false);
 
 const parseDocument = (text: string): { document?: Record<string, unknown>; error?: string } => {
   try {
@@ -208,55 +250,82 @@ const asRecord = (value: unknown): Record<string, unknown> => {
 const draftDocument = (): Record<string, unknown> | null => {
   const text = rawDocument();
   if (text.trim() === "") return store.settings()?.document ?? null;
-  return parseDocument(text).document ?? null;
+  return parseDocument(text).document ?? store.settings()?.document ?? null;
 };
 
-/** Apply one structural change to the draft. A broken raw text blocks the
- * change and opens the disclosure that repairs it — never a silent rewrite. */
-const updateDraft = (mutate: (document: Record<string, unknown>) => void) => {
+/** A copy of the document a dialog edits: a rejected save leaves the raw draft
+ * exactly as it was, so nothing the reader typed is lost. */
+const copyDocument = (document: Record<string, unknown>): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(document)) as Record<string, unknown>;
+
+/** The candidate document a dialog writes: the typed raw text while it is
+ * readable, else the server's document it was opened on. */
+const currentDocument = (): { document?: Record<string, unknown>; error?: string } => {
   const text = rawDocument();
-  const parsed = text.trim() === "" ? { document: store.settings()?.document } : parseDocument(text);
-  if (!parsed.document) {
-    rawParseError.set(parsed.error ?? "配置不是合法的 JSON");
-    rawOpen.set(true);
+  if (text.trim() === "") {
+    const server = store.settings()?.document;
+    return server ? { document: copyDocument(server) } : { error: "还没有读取到模型配置" };
+  }
+  return parseDocument(text);
+};
+
+/** Submit one candidate document and report whether the server accepted it.
+ * The revision is the acknowledgement: a 400 / 409 / transport failure leaves
+ * it where it was, and the dialog keeps its draft. */
+const saveCandidate = async (document: Record<string, unknown>): Promise<boolean> => {
+  const before = store.settings()?.revision ?? -1;
+  saveAttempted.set(true);
+  saveFailure.set(null);
+  await store.saveModelsSettings(document);
+  const after = store.settings()?.revision ?? -1;
+  const accepted =
+    after > before && store.settingsIssues().length === 0 && store.settingsConflict() === null;
+  if (accepted) {
+    rawDirty.set(false);
+    rawParseError.set(null);
+    const loaded = store.settings();
+    if (loaded) rawDocument.set(JSON.stringify(loaded.document, null, 2));
+    return true;
+  }
+  if (store.settingsIssues().length === 0 && store.settingsConflict() === null) {
+    saveFailure.set("保存没有生效：服务端没有返回新版本，请检查连接后重试。");
+  }
+  return false;
+};
+
+/** The credential is a *reference*, never a value. Three spellings reach the
+ * same document field: `${NAME}`, `env:NAME` and a bare `NAME` name an
+ * environment variable; `secret:NAME` points at the secret box. */
+const applyCredential = (access: Record<string, unknown>, raw: string) => {
+  const value = raw.trim();
+  if (!value) {
+    delete access.env;
+    delete access.ref;
     return;
   }
-  mutate(parsed.document);
-  rawDocument.set(JSON.stringify(parsed.document, null, 2));
-  rawDirty.set(true);
-  rawParseError.set(null);
+  if (value.startsWith("secret:")) {
+    access.ref = value;
+    delete access.env;
+    return;
+  }
+  if (value.startsWith("env:")) {
+    access.env = value.slice("env:".length).trim();
+    delete access.ref;
+    return;
+  }
+  const braced = /^\$\{([^}]+)\}$/.exec(value);
+  access.env = braced ? braced[1] : value;
+  delete access.ref;
 };
 
-const selectionOfDocument = (document: Record<string, unknown>): ModelSelection | null => {
-  const selection = asRecord(document.selection);
-  if (typeof selection.modelId !== "string" || !selection.modelId) return null;
-  return {
-    providerId: typeof selection.providerId === "string" ? selection.providerId : undefined,
-    modelId: selection.modelId,
-    reasoningLevel: typeof selection.reasoningLevel === "string" ? selection.reasoningLevel : undefined,
-  };
-};
-
-/** The draft's default selection (what the structured form edits). */
-const documentSelection = (): ModelSelection | null => {
-  const document = draftDocument();
-  return document ? selectionOfDocument(document) : null;
-};
-
-const writeSelection = (next: ModelSelection) => {
-  updateDraft((document) => {
-    const selection: Record<string, unknown> = { providerId: next.providerId, modelId: next.modelId };
-    if (next.reasoningLevel) selection.reasoningLevel = next.reasoningLevel;
-    document.selection = selection;
-  });
-};
-
-/** One provider as the draft declares it — the shape the editor form reads. */
+/** One provider as the draft declares it — the shape the cards and the editor
+ * read. */
 interface DraftProvider {
   id: string;
   name: string;
   apiType: string;
   baseUrl: string;
+  /** The reference as the form reads it: `env:NAME` or `secret:NAME`. */
   credential: string;
   modelIds: string[];
 }
@@ -272,10 +341,10 @@ const draftProviders = (): DraftProvider[] => {
     const api = asRecord(provider.api);
     const access = asRecord(provider.access);
     const credential =
-      typeof access.env === "string" && access.env
-        ? access.env
-        : typeof access.ref === "string"
-          ? access.ref
+      typeof access.ref === "string" && access.ref
+        ? access.ref
+        : typeof access.env === "string" && access.env
+          ? `env:${access.env}`
           : "";
     providers.push({
       id,
@@ -289,48 +358,25 @@ const draftProviders = (): DraftProvider[] => {
   return providers;
 };
 
-const patchProvider = (providerId: string, mutate: (provider: Record<string, unknown>) => void) => {
-  updateDraft((document) => {
-    const rows = Array.isArray(document.providers) ? document.providers : [];
-    for (const raw of rows) {
-      const provider = asRecord(raw);
-      if (provider.id !== providerId) continue;
-      mutate(provider);
-      return;
-    }
-  });
-};
+const providerNameOf = (provider: DraftProvider): string =>
+  provider.name.trim() || displayNameOf(provider.id);
 
-const setProviderApiType = (providerId: string, apiType: string) => {
-  patchProvider(providerId, (provider) => {
-    const api: Record<string, unknown> = { ...asRecord(provider.api) };
-    api.type = apiType;
-    if (typeof api.baseUrl !== "string") api.baseUrl = "";
-    provider.api = api;
-  });
-};
+interface ProviderStatus {
+  variant: "success" | "warning" | "destructive";
+  label: "已配置" | "未配置" | "不可用";
+}
 
-const setProviderBaseUrl = (providerId: string, baseUrl: string) => {
-  patchProvider(providerId, (provider) => {
-    provider.api = { ...asRecord(provider.api), baseUrl };
-  });
-};
-
-/** The credential is a *reference*: an env variable name, or `secret:NAME`
- * for the secret box. The value itself never reaches this form. */
-const setProviderCredential = (providerId: string, credential: string) => {
-  patchProvider(providerId, (provider) => {
-    const access = { ...asRecord(provider.access) };
-    access.type = typeof access.type === "string" ? access.type : "api-key";
-    if (credential.startsWith("secret:")) {
-      access.ref = credential;
-      delete access.env;
-    } else {
-      access.env = credential;
-      delete access.ref;
-    }
-    provider.access = access;
-  });
+/** The badge's state. 已配置 = the process can resolve the credential and the
+ * provider declares models; 未配置 = a field the reader still has to fill;
+ * 不可用 = the process cannot resolve it. */
+const providerStatusOf = (provider: DraftProvider): ProviderStatus => {
+  if (!provider.credential.trim() || provider.modelIds.length === 0) {
+    return { variant: "warning", label: "未配置" };
+  }
+  const resolved = store.providers().find((row) => row.providerId === provider.id);
+  return resolved?.executable
+    ? { variant: "success", label: "已配置" }
+    : { variant: "destructive", label: "不可用" };
 };
 
 /** The protocol templates the document validator knows, each under the name a
@@ -525,27 +571,65 @@ function AppearanceSection() {
 }
 
 // ---- 模型接入 ------------------------------------------------------------
+//
+// Two levels, and only two:
+//
+//   · The page — 当前默认模型 (one Card: what is in force, with「更换」「刷新」)
+//     and one Card per provider (name, status badge, model chips,「配置」).
+//     It answers the three questions a reader actually has: which model am I
+//     using, which providers exist, and what do I do to add one.
+//   · The dialogs — every write. A provider's protocol / endpoint / credential
+//     reference / models are edited in a modal that covers one provider; the
+//     default selection has its own small modal. The raw document stays at the
+//     bottom behind one closed「高级」disclosure.
+//
+// The old long page is gone: 部署默认's inline form merged into 当前默认模型 and
+// its「更换」dialog; 服务商接入's per-provider forms became the cards and their
+// dialogs; 模型列表 and 服务商列表 became the model chips and status badges on
+// those cards.
 
-function CurrentCard() {
+/** The page's first level: what is in force right now. */
+function CurrentModelCard() {
+  const selection = () => store.tenantSelection();
+  const providerName = () => {
+    const current = selection();
+    if (!current) return "";
+    const draft = draftProviders().find((provider) => provider.id === current.providerId);
+    if (draft) return providerNameOf(draft);
+    const resolved = store.providers().find((provider) => provider.providerId === current.providerId);
+    if (resolved) return providerDisplayName(resolved);
+    return current.providerId ? displayNameOf(current.providerId) : "未指定服务商";
+  };
   return (
     <Card testID="settings-current">
       <CardHeader
-        title="当前生效"
+        title="当前默认模型"
         description="配置保存后立即生效，无需重启；在飞的任务继续用旧配置跑完。"
         action={
-          <Button
-            variant="ghost"
-            size="sm"
-            icon="refresh"
-            label="刷新"
-            accessibilityLabel="刷新模型配置"
-            onPress={() => void store.loadModelsPanel()}
-          />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <Button
+              testID="settings-change-default"
+              variant="outline"
+              size="sm"
+              label="更换"
+              accessibilityLabel="更换默认模型"
+              onPress={openReplaceDialog}
+            />
+            <Button
+              testID="settings-refresh-models"
+              variant="ghost"
+              size="sm"
+              icon="refresh"
+              label="刷新"
+              accessibilityLabel="刷新模型配置"
+              onPress={() => void store.loadModelsPanel()}
+            />
+          </View>
         }
       />
       <CardContent>
         <If when={store.settingsLoading() && !store.settings()}>
-          <LoadingRow text="正在读取模型配置…" />
+          <Skeleton lines={2} accessibilityLabel="正在读取模型配置" testID="settings-models-loading" />
         </If>
         <If when={!!store.settingsError()}>
           <ErrorBlock
@@ -554,35 +638,54 @@ function CurrentCard() {
           />
         </If>
         <If when={!!store.settings()}>
-          <View style={{ gap: space.md }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-              <Badge
-                variant={store.settings()?.source === "stored" ? "info" : "secondary"}
-                label={store.settings()?.source === "stored" ? "已保存覆盖" : "部署默认"}
-              />
-              {/* The revision stays visible but in the reader's words: it is the
-               * only proof a save took effect, and "第 4 版" is a version a
-               * customer understands. */}
-              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                {store.settings()?.source === "stored"
-                  ? `最近更新：已保存覆盖部署默认 · 第 ${store.settings()?.revision ?? 0} 版`
-                  : `最近更新：沿用部署默认 · 第 ${store.settings()?.revision ?? 0} 版`}
+          <If
+            when={!!selection()}
+            else={
+              <View style={{ gap: space.xs }}>
+                <Text
+                  style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.warning }}
+                >
+                  还没有默认模型
+                </Text>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                  点「更换」选一个服务商与模型；保存后新会话立即使用它。
+                </Text>
+              </View>
+            }
+          >
+            <View style={{ gap: space.xs }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+                <Icon name="brain" size={iconSize.sm} tint={color.brand} />
+                <Text
+                  testID="settings-default-provider"
+                  style={{ fontSize: typeScale.sm, color: color.mutedForeground }}
+                >
+                  {providerName()}
+                </Text>
+              </View>
+              <Text
+                testID="settings-default-model"
+                style={{ fontSize: typeScale.lg, fontWeight: weight.semibold, color: color.foreground }}
+              >
+                {selectionDisplay(selection())}
+              </Text>
+              <Text
+                testID="settings-default-wire"
+                style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}
+              >
+                {selectionLabel(selection())}
               </Text>
             </View>
-            <Field label="默认模型">
-              <If
-                when={!!store.tenantSelection()}
-                else={
-                  <Text style={{ fontSize: typeScale.sm, color: color.warning }}>
-                    未设置（还没有默认选择）
-                  </Text>
-                }
-              >
-                <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-                  {selectionDisplay(store.tenantSelection())}
-                </Text>
-              </If>
-            </Field>
+          </If>
+          <Separator />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+            <Badge
+              variant={store.settings()?.source === "stored" ? "info" : "secondary"}
+              label={store.settings()?.source === "stored" ? "已保存覆盖" : "部署默认"}
+            />
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+              第 {store.settings()?.revision ?? 0} 版
+            </Text>
           </View>
         </If>
       </CardContent>
@@ -590,122 +693,493 @@ function CurrentCard() {
   );
 }
 
-/** The provider choices of the structured form: readable names, the id as the
- * value (what the document stores). */
-const providerItems = (): SelectItem[] =>
-  draftProviders().map((provider) => ({
-    value: provider.id,
-    title: provider.name.trim().length > 0 ? provider.name : displayNameOf(provider.id),
-  }));
-
-/** The model choices for the selected provider (or all declared models):
- * readable names, the wire identity as the value. */
-const modelItems = (selection: ModelSelection | null): SelectItem[] => {
-  const providers = draftProviders();
-  const chosen = providers.find((provider) => provider.id === selection?.providerId);
-  const rows = (chosen ? [chosen] : providers).flatMap((provider) =>
-    provider.modelIds.map((modelId) => {
-      const resolved = store
-        .models()
-        .find((model) => model.providerId === provider.id && model.modelId === modelId);
-      const unavailable = resolved?.selectable === false;
-      const name = displayNameOf(modelId);
-      const title =
-        chosen || providers.length === 1
-          ? `${name}${unavailable ? "（不可执行）" : ""}`
-          : `${name} · ${provider.name.trim().length > 0 ? provider.name : displayNameOf(provider.id)}${
-              unavailable ? "（不可执行）" : ""
-            }`;
-      return {
-        value: chosen ? modelId : `${provider.id}/${modelId}`,
-        title,
-        disabled: unavailable,
-      };
-    }),
+/** The one place a rejected save (or a conflict) is explained, so the dialogs
+ * and the advanced editor say the same thing. */
+function SaveFeedback() {
+  return (
+    <>
+      <If when={saveAttempted() && store.settingsIssues().length > 0}>
+        <Notice tone="danger" accessibilityLabel="保存被拒绝" testID="settings-save-issues">
+          <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.danger }}>
+            保存被拒绝（{store.settingsIssues().length} 项）
+          </Text>
+          <IssueList issues={() => store.settingsIssues()} />
+        </Notice>
+      </If>
+      <If when={saveAttempted() && store.settingsConflict() !== null}>
+        <Notice tone="warning" accessibilityLabel="文档冲突" testID="settings-save-conflict">
+          <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.warning }}>
+            配置已被其它写入更新
+          </Text>
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.foreground,
+            }}
+          >
+            刷新以载入最新文档，再重新保存你的改动；本次修改没有被写入。
+          </Text>
+          <View style={{ flexDirection: "row" }}>
+            <Button
+              variant="outline"
+              size="sm"
+              label="刷新最新文档"
+              onPress={() => {
+                rawDirty.set(false);
+                void store.loadModelsPanel();
+              }}
+            />
+          </View>
+        </Notice>
+      </If>
+      <If when={saveAttempted() && !!saveFailure()}>
+        <Notice tone="danger" accessibilityLabel="保存失败" testID="settings-save-failure">
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.foreground,
+            }}
+          >
+            {saveFailure() ?? ""}
+          </Text>
+        </Notice>
+      </If>
+    </>
   );
-  return rows;
+}
+
+// ---- the dialogs' actions -------------------------------------------------
+
+const closeProviderEditor = () => {
+  providerEditorMode.set("closed");
+  editingProviderId.set("");
+  editorDocumentError.set(null);
+  editorIdError.set(null);
+  editorBaseUrlError.set(null);
+  editorCredentialError.set(null);
+  confirmDeleteProvider.set(false);
+  saveFailure.set(null);
+  saveAttempted.set(false);
 };
 
-const reasoningItems = (selection: ModelSelection | null): SelectItem[] => {
-  const model = store
-    .models()
-    .find(
-      (row) =>
-        row.modelId === selection?.modelId &&
-        (!selection?.providerId || row.providerId === selection.providerId),
-    );
-  const levels = model?.options?.reasoningLevel?.values ?? [];
-  return [{ value: "", title: "不指定" }, ...levels.map((level) => ({ value: level, title: reasoningLabel(level) }))];
+const seedEditor = (provider: DraftProvider) => {
+  providerEditorMode.set("edit");
+  editingProviderId.set(provider.id);
+  editorId.set(provider.id);
+  editorName.set(provider.name);
+  editorApiType.set(provider.apiType || "openai-chat-completions");
+  editorBaseUrl.set(provider.baseUrl);
+  editorCredential.set(provider.credential);
+  editorModelIds.set([...provider.modelIds]);
+  editorModelInput.set("");
+  editorIdError.set(null);
+  editorBaseUrlError.set(null);
+  editorCredentialError.set(null);
+  editorDocumentError.set(null);
+  saveFailure.set(null);
+  saveAttempted.set(false);
 };
 
-function SelectionCard() {
-  const selection = () => documentSelection();
-  const chooseProvider = (providerId: string) => {
-    const provider = draftProviders().find((row) => row.id === providerId);
-    const modelId = provider?.modelIds[0] ?? "";
-    const resolved = store
-      .models()
-      .find((model) => model.providerId === providerId && model.modelId === modelId);
-    writeSelection({
-      providerId,
-      modelId,
-      reasoningLevel: resolved ? defaultReasoningFor(resolved, selection()) : undefined,
+const openProviderEditor = (providerId: string) => {
+  const provider = draftProviders().find((row) => row.id === providerId);
+  if (provider) seedEditor(provider);
+};
+
+const openNewProvider = () => {
+  providerEditorMode.set("new");
+  editingProviderId.set("");
+  editorId.set("");
+  editorName.set("");
+  editorApiType.set("openai-chat-completions");
+  editorBaseUrl.set("");
+  editorCredential.set("");
+  editorModelIds.set([]);
+  editorModelInput.set("");
+  editorIdError.set(null);
+  editorBaseUrlError.set(null);
+  editorCredentialError.set(null);
+  editorDocumentError.set(null);
+  saveFailure.set(null);
+  saveAttempted.set(false);
+};
+
+const addEditorModel = () => {
+  const value = editorModelInput().trim();
+  if (!value) return;
+  if (!editorModelIds().includes(value)) editorModelIds.set([...editorModelIds(), value]);
+  editorModelInput.set("");
+};
+
+const removeEditorModel = (modelId: string) => {
+  editorModelIds.set(editorModelIds().filter((row) => row !== modelId));
+};
+
+const saveProvider = async () => {
+  editorIdError.set(null);
+  editorBaseUrlError.set(null);
+  editorCredentialError.set(null);
+  editorDocumentError.set(null);
+  saveFailure.set(null);
+  const isNew = providerEditorMode() === "new";
+  const originalId = editingProviderId();
+  const id = editorId().trim();
+  const baseUrl = editorBaseUrl().trim();
+  const credential = editorCredential().trim();
+  let invalid = false;
+  if (!id) {
+    editorIdError.set("给这个 Provider 一个 id，例如 s2api。");
+    invalid = true;
+  } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) {
+    editorIdError.set("id 只能包含字母、数字、点、下划线和连字符。");
+    invalid = true;
+  } else if (isNew && draftProviders().some((provider) => provider.id === id)) {
+    editorIdError.set("这个 id 已经被另一个 Provider 使用。");
+    invalid = true;
+  }
+  if (!baseUrl) {
+    editorBaseUrlError.set("服务地址不能为空，例如 https://api.example.com/v1。");
+    invalid = true;
+  }
+  if (!credential) {
+    editorCredentialError.set("凭据引用不能为空：env:NAME 或 secret:NAME。");
+    invalid = true;
+  }
+  if (invalid) return;
+
+  const candidate = currentDocument();
+  if (!candidate.document) {
+    editorDocumentError.set(candidate.error ?? "配置不是合法的 JSON，先到「高级」修复原始文档。");
+    return;
+  }
+  const document = candidate.document;
+  const rows = Array.isArray(document.providers) ? [...document.providers] : [];
+  const index = rows.findIndex((raw) => asRecord(raw).id === originalId);
+  const provider: Record<string, unknown> = index >= 0 ? { ...asRecord(rows[index]) } : { id };
+  provider.id = id;
+  if (editorName().trim()) provider.name = editorName().trim();
+  else delete provider.name;
+  provider.api = { ...asRecord(provider.api), type: editorApiType(), baseUrl };
+  const access = { ...asRecord(provider.access) };
+  access.type = typeof access.type === "string" && access.type ? access.type : "api-key";
+  applyCredential(access, credential);
+  provider.access = access;
+  provider.modelIds = editorModelIds().map((modelId) => modelId.trim()).filter(Boolean);
+  if (index >= 0) rows[index] = provider;
+  else rows.push(provider);
+  document.providers = rows;
+  if (originalId && originalId !== id) {
+    const selection = asRecord(document.selection);
+    if (selection.providerId === originalId) document.selection = { ...selection, providerId: id };
+  }
+  // An empty deployment has no default yet; the first provider that declares a
+  // model becomes it, so "add a provider" alone leads to a working state. A
+  // valid existing selection is never touched.
+  const currentSelection = asRecord(document.selection);
+  const selectionValid =
+    typeof currentSelection.modelId === "string" &&
+    currentSelection.modelId.length > 0 &&
+    rows.some((raw) => {
+      const row = asRecord(raw);
+      return (
+        row.id === currentSelection.providerId &&
+        Array.isArray(row.modelIds) &&
+        row.modelIds.map(String).includes(String(currentSelection.modelId))
+      );
     });
-  };
-  const chooseModel = (value: string) => {
-    const current = selection();
-    const slash = value.indexOf("/");
-    const providerId = current?.providerId ?? (slash > 0 ? value.slice(0, slash) : undefined);
-    const modelId = slash > 0 && !current?.providerId ? value.slice(slash + 1) : value;
-    const resolved = store
-      .models()
-      .find((model) => model.modelId === modelId && (!providerId || model.providerId === providerId));
-    writeSelection({
-      providerId,
-      modelId,
-      reasoningLevel: resolved ? defaultReasoningFor(resolved, current) : undefined,
-    });
-  };
-  const chooseReasoning = (value: string) => {
-    const current = selection();
-    if (!current) return;
-    writeSelection({ ...current, reasoningLevel: value === "" ? undefined : value });
-  };
-  const save = () => {
-    const parsed = parseDocument(rawDocument());
-    if (!parsed.document) {
-      rawParseError.set(parsed.error ?? "配置不是合法的 JSON");
-      rawOpen.set(true);
-      return;
+  if (!selectionValid) {
+    const modelIds = Array.isArray(provider.modelIds) ? provider.modelIds.map(String) : [];
+    if (modelIds.length > 0) document.selection = { providerId: id, modelId: modelIds[0] };
+  }
+  const ok = await saveCandidate(document);
+  if (ok) closeProviderEditor();
+};
+
+const deleteProvider = async () => {
+  confirmDeleteProvider.set(false);
+  const id = editingProviderId();
+  const candidate = currentDocument();
+  if (!candidate.document) {
+    editorDocumentError.set(candidate.error ?? "配置不是合法的 JSON，先到「高级」修复原始文档。");
+    return;
+  }
+  const document = candidate.document;
+  const rows = (Array.isArray(document.providers) ? document.providers : []).filter(
+    (raw) => asRecord(raw).id !== id,
+  );
+  document.providers = rows;
+  const selection = asRecord(document.selection);
+  if (selection.providerId === id) {
+    const next = rows
+      .map(asRecord)
+      .find((row) => Array.isArray(row.modelIds) && row.modelIds.length > 0);
+    if (next) {
+      document.selection = { providerId: next.id, modelId: String((next.modelIds as unknown[])[0]) };
+    } else {
+      delete document.selection;
     }
-    void store.saveModelsSettings(parsed.document).then(() => {
-      // The server is authoritative after a write: on success the editor
-      // follows the reloaded document; on failure the text stays as typed.
-      if (store.settingsIssues().length === 0 && store.settingsConflict() === null) {
-        rawDirty.set(false);
-      }
-    });
+  }
+  const ok = await saveCandidate(document);
+  if (ok) closeProviderEditor();
+};
+
+const openReplaceDialog = () => {
+  const current = store.tenantSelection();
+  const providers = draftProviders();
+  const chosen = providers.find((provider) => provider.id === current?.providerId) ?? providers[0];
+  const modelId =
+    chosen && current && chosen.modelIds.includes(current.modelId)
+      ? current.modelId
+      : chosen?.modelIds[0];
+  replaceProviderId.set(chosen?.id ?? null);
+  replaceModelId.set(modelId ?? null);
+  replaceReasoning.set(current?.reasoningLevel ?? "");
+  replaceError.set(null);
+  saveFailure.set(null);
+  saveAttempted.set(false);
+  replaceOpen.set(true);
+};
+
+const chooseReplaceProvider = (providerId: string) => {
+  replaceProviderId.set(providerId);
+  const provider = draftProviders().find((row) => row.id === providerId);
+  const modelId = provider?.modelIds[0] ?? null;
+  replaceModelId.set(modelId);
+  const resolved = store
+    .models()
+    .find((model) => model.providerId === providerId && model.modelId === modelId);
+  replaceReasoning.set(
+    resolved ? defaultReasoningFor(resolved, store.tenantSelection()) ?? "" : "",
+  );
+  replaceError.set(null);
+};
+
+const chooseReplaceModel = (modelId: string) => {
+  replaceModelId.set(modelId);
+  const providerId = replaceProviderId();
+  const resolved = store
+    .models()
+    .find((model) => model.providerId === providerId && model.modelId === modelId);
+  replaceReasoning.set(
+    resolved ? defaultReasoningFor(resolved, store.tenantSelection()) ?? "" : "",
+  );
+  replaceError.set(null);
+};
+
+const saveReplacement = async () => {
+  replaceError.set(null);
+  const providerId = replaceProviderId();
+  const modelId = replaceModelId();
+  if (!providerId || !modelId) {
+    replaceError.set("先选择服务商与模型。");
+    return;
+  }
+  const candidate = currentDocument();
+  if (!candidate.document) {
+    replaceError.set(candidate.error ?? "配置不是合法的 JSON");
+    return;
+  }
+  const selection: Record<string, unknown> = { providerId, modelId };
+  if (replaceReasoning()) selection.reasoningLevel = replaceReasoning();
+  candidate.document.selection = selection;
+  const ok = await saveCandidate(candidate.document);
+  if (ok) replaceOpen.set(false);
+};
+
+// ---- the first level: provider cards --------------------------------------
+
+function ProviderCard(props: { provider: () => DraftProvider }) {
+  const status = () => providerStatusOf(props.provider());
+  const resolved = () =>
+    store.providers().find((provider) => provider.providerId === props.provider().id);
+  const wire = () => {
+    const provider = props.provider();
+    const protocol = protocolLabel(provider.apiType) || "协议未设置";
+    return provider.baseUrl
+      ? `${protocol} · ${provider.baseUrl}`
+      : `${protocol} · 服务地址未设置`;
   };
   return (
-    <Card testID="settings-selection">
+    <Card
+      testID={`provider-card-${props.provider().id}`}
+      accessibilityLabel={`Provider ${providerNameOf(props.provider())}`}
+    >
       <CardHeader
-        title="部署默认"
-        description="结构化编辑默认选择；保存时整份配置一起提交，服务端按打开时读到的配置核对，并逐字段校验。"
+        title={providerNameOf(props.provider())}
+        description={wire()}
+        action={
+          <Badge
+            testID={`provider-status-${props.provider().id}`}
+            variant={status().variant}
+            label={status().label}
+          />
+        }
       />
       <CardContent>
-        <If when={store.settingsIssues().length > 0}>
-          <Notice tone="danger" accessibilityLabel="保存被拒绝">
-            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.danger }}>
-              保存被拒绝（{store.settingsIssues().length} 项）
-            </Text>
-            <IssueList issues={() => store.settingsIssues()} />
-          </Notice>
-        </If>
-        <If when={store.settingsConflict() !== null}>
-          <Notice tone="warning" accessibilityLabel="文档冲突">
-            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.warning }}>
-              配置已被其它写入更新
-            </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <If when={props.provider().modelIds.length === 0}>
+            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>还没有模型</Text>
+          </If>
+          <Each of={props.provider().modelIds} key={(modelId) => modelId}>
+            {(modelId) => (
+              <Badge
+                testID={`provider-model-${props.provider().id}-${modelId()}`}
+                variant="secondary"
+                label={displayNameOf(modelId())}
+              />
+            )}
+          </Each>
+        </View>
+        <IssueList issues={() => resolved()?.issues ?? []} />
+      </CardContent>
+      <CardFooter>
+        <Text
+          style={{
+            fontFamily: font.mono,
+            fontSize: typeScale["2xs"],
+            color: color.mutedForeground,
+          }}
+        >
+          {props.provider().credential || "凭据未设置"}
+        </Text>
+        <View style={{ flex: 1 }} />
+        <Button
+          testID={`provider-configure-${props.provider().id}`}
+          variant="link"
+          size="sm"
+          label="配置"
+          accessibilityLabel={`配置 ${providerNameOf(props.provider())}`}
+          onPress={() => openProviderEditor(props.provider().id)}
+        />
+      </CardFooter>
+    </Card>
+  );
+}
+
+function ProvidersSection() {
+  const providers = () => draftProviders();
+  const loading = () =>
+    (store.settingsLoading() && !store.settings()) ||
+    (!store.registryLoaded() && !store.providersError() && !store.modelsError());
+  return (
+    <View style={{ gap: space.lg }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: space.md, flexWrap: "wrap" }}>
+        <View style={{ flex: 1, minWidth: 200, gap: space.xxs }}>
+          <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+            Provider
+          </Text>
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.mutedForeground,
+            }}
+          >
+            一个服务商一张卡片；点「配置」只编辑这一个，保存后立即生效。
+          </Text>
+        </View>
+        <Button
+          testID="provider-add"
+          variant="outline"
+          size="sm"
+          icon="plus"
+          label="添加 Provider"
+          accessibilityLabel="添加 Provider"
+          onPress={openNewProvider}
+        />
+      </View>
+      <If when={loading()}>
+        <Skeleton lines={3} accessibilityLabel="正在读取服务商" testID="providers-loading" />
+      </If>
+      <If when={!loading() && providers().length === 0 && !!store.settings()}>
+        <Card testID="providers-empty">
+          <Empty accessibilityLabel="还没有 Provider">
+            <EmptyMedia icon="plus" tone="brand" />
+            <EmptyTitle label="还没有 Provider" />
+            <EmptyDescription label="添加一个 Provider 需要两项：接口地址（例如 https://api.example.com/v1）与凭据引用（env:NAME 或 secret:NAME）。" />
+            <EmptyContent>
+              <Button
+                icon="plus"
+                label="添加 Provider"
+                accessibilityLabel="添加 Provider"
+                onPress={openNewProvider}
+              />
+            </EmptyContent>
+          </Empty>
+        </Card>
+      </If>
+      <Each of={providers()} key={(provider) => provider.id}>
+        {(provider) => <ProviderCard provider={provider} />}
+      </Each>
+    </View>
+  );
+}
+
+// ---- the second level: one provider ---------------------------------------
+
+function ProviderConfigDialog() {
+  const mode = () => providerEditorMode();
+  const isNew = () => mode() === "new";
+  const title = () =>
+    isNew()
+      ? "添加 Provider"
+      : `配置 ${editorName().trim() || displayNameOf(editingProviderId())}`;
+  return (
+    <>
+      <Dialog
+        testID="provider-config-dialog"
+        open={mode() !== "closed"}
+        // `margin: auto` is how nsh's dialog layer centers a card (the kit Dialog
+        // carries no placement of its own); without it the popup sits where the
+        // layer's default puts it and a tall form overflows over the sidebar.
+        // The cap keeps a long form on screen; the body below scrolls inside it.
+        style={{ margin: "auto" }}
+        maxHeight={720}
+        title={title()}
+        description={
+          isNew()
+            ? "填接口地址与凭据引用，再声明这个服务商可用的模型；保存后立即生效。"
+            : "只编辑这一个 Provider；保存后回到列表，状态与徽标随之更新。"
+        }
+        onOpenChange={(event) => {
+          if (!event.open) closeProviderEditor();
+        }}
+        footer={
+          <>
+            <If when={!isNew()}>
+              <Button
+                variant="destructive"
+                size="sm"
+                icon="trash"
+                label="删除该 Provider"
+                accessibilityLabel="删除该 Provider"
+                disabled={store.settingsSaving()}
+                onPress={() => confirmDeleteProvider.set(true)}
+              />
+            </If>
+            <View style={{ flex: 1 }} />
+            <Button
+              variant="outline"
+              label="取消"
+              accessibilityLabel="取消"
+              disabled={store.settingsSaving()}
+              onPress={closeProviderEditor}
+            />
+            <Button
+              icon="check"
+              label="保存并生效"
+              accessibilityLabel="保存并生效"
+              loading={store.settingsSaving()}
+              disabled={store.settingsSaving()}
+              onPress={() => void saveProvider()}
+            />
+          </>
+        }
+      >
+        <SaveFeedback />
+        <If when={!!editorDocumentError()}>
+          <Notice tone="danger" accessibilityLabel="配置不可编辑">
             <Text
               style={{
                 fontSize: typeScale.sm,
@@ -713,208 +1187,285 @@ function SelectionCard() {
                 color: color.foreground,
               }}
             >
-              刷新以载入最新文档，再重新保存你的改动；本次修改没有被写入。
+              {editorDocumentError() ?? ""}
             </Text>
-            <View style={{ flexDirection: "row" }}>
-              <Button
-                variant="outline"
-                size="sm"
-                label="刷新最新文档"
-                onPress={() => {
-                  rawDirty.set(false);
-                  void store.loadModelsPanel();
-                }}
-              />
-            </View>
           </Notice>
         </If>
         <FieldGroup>
-          <Field label="服务商" hint="来自当前配置的服务商；保存后服务端按凭据解析可执行性。">
-            <Select
-              testID="settings-selection-provider"
-              accessibilityLabel="默认服务商"
-              items={providerItems()}
-              value={selection()?.providerId ?? null}
-              placeholder="选择服务商"
+          <Field
+            label="Provider ID"
+            required
+            hint="配置里唯一的标识，例如 s2api；改名会同步更新指向它的默认选择。"
+            error={editorIdError() ?? undefined}
+          >
+            <Input
+              testID="provider-config-id"
+              accessibilityLabel="Provider ID"
+              value={editorId()}
+              placeholder="s2api"
               onChange={(value) => {
-                if (value) chooseProvider(value);
+                editorId.set(value);
+                editorIdError.set(null);
+              }}
+            />
+          </Field>
+          <Field label="显示名称" hint="给读者看的名字；留空则用 id。">
+            <Input
+              testID="provider-config-name"
+              accessibilityLabel="显示名称"
+              value={editorName()}
+              placeholder="例如 S2API"
+              onChange={(value) => editorName.set(value)}
+            />
+          </Field>
+          <Field label="接口协议" hint="只列常用的三种；其它取值可在「高级」的原始配置里改。">
+            <Select
+              testID="provider-config-protocol"
+              accessibilityLabel="接口协议"
+              items={API_PROTOCOLS}
+              value={editorApiType()}
+              placeholder="选择协议"
+              onChange={(value) => {
+                if (value) editorApiType.set(value);
               }}
             />
           </Field>
           <Field
-            label="模型"
-            hint={
-              modelItems(selection()).length === 0
-                ? "该服务商还没有声明模型。"
-                : "可选的模型才能保存为默认；不可执行的会标明原因。"
-            }
+            label="服务地址"
+            required
+            hint="服务商的接口根地址，例如 https://api.example.com/v1。"
+            error={editorBaseUrlError() ?? undefined}
           >
-            <Select
-              testID="settings-selection-model"
-              accessibilityLabel="默认模型"
-              items={modelItems(selection())}
-              value={
-                selection()?.providerId
-                  ? (selection()?.modelId ?? null)
-                  : selection()
-                    ? `${selection()?.providerId ?? ""}/${selection()?.modelId ?? ""}`
-                    : null
-              }
-              disabled={modelItems(selection()).length === 0}
-              placeholder="选择模型"
+            <Input
+              testID="provider-config-endpoint"
+              accessibilityLabel="服务地址"
+              value={editorBaseUrl()}
+              placeholder="https://…"
               onChange={(value) => {
-                if (value) chooseModel(value);
+                editorBaseUrl.set(value);
+                editorBaseUrlError.set(null);
               }}
             />
           </Field>
-          <Field label="思考档" hint="只列出该模型声明的档位；不指定则用模型默认。">
-            <Select
-              testID="settings-selection-reasoning"
-              accessibilityLabel="默认思考档"
-              items={reasoningItems(selection())}
-              value={selection()?.reasoningLevel ?? ""}
-              disabled={reasoningItems(selection()).length <= 1}
-              onChange={(value) => chooseReasoning(value ?? "")}
+          <Field
+            label="凭据引用"
+            required
+            hint="三种写法：${NAME} 或 env:NAME 指环境变量，secret:NAME 指「密钥」分区里保存的密钥；这里永远不存凭据的值。"
+            error={editorCredentialError() ?? undefined}
+          >
+            <Input
+              testID="provider-config-credential"
+              accessibilityLabel="凭据引用"
+              value={editorCredential()}
+              placeholder="env:S2API_KEY 或 secret:name"
+              onChange={(value) => {
+                editorCredential.set(value);
+                editorCredentialError.set(null);
+              }}
             />
           </Field>
+          <View style={{ gap: space.sm }}>
+            <Label label="模型列表" />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+              <If when={editorModelIds().length === 0}>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                  还没有模型；在下面添加模型 ID。
+                </Text>
+              </If>
+              <Each of={editorModelIds()} key={(modelId) => modelId}>
+                {(modelId) => (
+                  <Badge
+                    testID={`provider-config-model-${modelId()}`}
+                    variant="secondary"
+                    icon="x"
+                    label={displayNameOf(modelId())}
+                    accessibilityLabel={`移除模型 ${displayNameOf(modelId())}`}
+                    onPress={() => removeEditorModel(modelId())}
+                  />
+                )}
+              </Each>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+              <View style={{ flex: 1 }}>
+                <Input
+                  testID="provider-config-model-input"
+                  accessibilityLabel="要添加的模型 ID"
+                  value={editorModelInput()}
+                  placeholder="模型 ID，例如 deepseek-v4.1-flash"
+                  submitBehavior="submit"
+                  onChange={(value) => editorModelInput.set(value)}
+                  onSubmit={() => addEditorModel()}
+                />
+              </View>
+              <Button
+                variant="outline"
+                size="sm"
+                icon="plus"
+                label="添加模型"
+                accessibilityLabel="添加模型"
+                onPress={addEditorModel}
+              />
+            </View>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+              模型 ID 必须与服务商的清单一致；保存后按凭据解析可执行性。
+            </Text>
+          </View>
         </FieldGroup>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-          <Button
-            icon="check"
-            // The visible label and the accessible name are now the same
-            // string, and it is verb + object: the old pair 「保存并生效」 /
-            // 「保存模型配置」 broke 2.5.3 (a speech user saying the visible
-            // words could not reach the control) and the new label is the one
-            // `better-writing` asks for. "Takes effect immediately" is already
-            // stated by the card above («配置保存后立即生效，无需重启»), so no
-            // meaning is lost.
-            label="保存模型配置"
-            accessibilityLabel="保存模型配置"
-            loading={store.settingsSaving()}
-            disabled={store.settingsSaving() || !!rawParseError() || !rawDocument().trim()}
-            onPress={save}
-          />
-          <Button
-            variant="outline"
-            icon="refresh"
-            label="重置"
-            accessibilityLabel="重置为部署默认"
-            disabled={store.settingsSaving()}
-            onPress={() => confirmReset.set(true)}
-          />
-          <View style={{ flex: 1 }} />
-          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-            {rawDirty() ? "有未保存的修改" : "编辑区与当前生效配置一致"}
-          </Text>
-        </View>
-      </CardContent>
+      </Dialog>
       <AlertDialog
-        testID="settings-reset"
-        open={confirmReset()}
-        title="重置为部署默认"
-        description="重置会删除已保存的覆盖，回到部署默认；确定吗？"
-        confirmLabel="确认重置"
-        cancelLabel="取消"
+        testID="settings-provider-delete"
+        open={confirmDeleteProvider()}
+        title={`删除 Provider ${editorName().trim() || displayNameOf(editingProviderId())}？`}
+        description="删除后指向它的默认选择会改到下一个可用 Provider；此操作不可撤销。"
+        confirmLabel="确认删除"
+        cancelLabel="取消删除"
         destructive
-        onConfirm={() => {
-          confirmReset.set(false);
-          rawDirty.set(false);
-          void store.resetModelsSettings();
-        }}
-        onCancel={() => confirmReset.set(false)}
+        onConfirm={() => void deleteProvider()}
+        onCancel={() => confirmDeleteProvider.set(false)}
       />
-    </Card>
+    </>
   );
 }
 
-/** One provider's structured row: template, endpoint, credential reference. */
-function ProviderEditorRow(props: { provider: () => DraftProvider }) {
-  const name = () => props.provider().name.trim() || displayNameOf(props.provider().id);
+// ---- the second level: the default selection ------------------------------
+
+function ChangeDefaultDialog() {
+  const providers = () => draftProviders();
+  const modelItems = (): SelectItem[] => {
+    const provider = providers().find((row) => row.id === replaceProviderId());
+    return (provider?.modelIds ?? []).map((modelId) => {
+      const resolved = store
+        .models()
+        .find((model) => model.providerId === provider?.id && model.modelId === modelId);
+      const unavailable = resolved?.selectable === false;
+      return {
+        value: modelId,
+        title: `${displayNameOf(modelId)}${unavailable ? "（不可执行）" : ""}`,
+        disabled: unavailable,
+      };
+    });
+  };
+  const reasoningItems = (): SelectItem[] => {
+    const model = store
+      .models()
+      .find(
+        (row) =>
+          row.providerId === replaceProviderId() && row.modelId === replaceModelId(),
+      );
+    const levels = model?.options?.reasoningLevel?.values ?? [];
+    return [
+      { value: "", title: "不指定" },
+      ...levels.map((level) => ({ value: level, title: reasoningLabel(level) })),
+    ];
+  };
   return (
-    <View
-      style={{
-        gap: space.md,
-        padding: space.md,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: color.border,
+    <Dialog
+      testID="default-model-dialog"
+      open={replaceOpen()}
+      style={{ margin: "auto" }}
+      maxHeight={640}
+      title="更换默认模型"
+      description="保存后新的默认选择立即生效；在飞的任务继续用旧配置跑完。"
+      onOpenChange={(event) => {
+        if (!event.open) replaceOpen.set(false);
       }}
+      footer={
+        <>
+          <Button
+            variant="outline"
+            label="取消"
+            accessibilityLabel="取消更换默认模型"
+            disabled={store.settingsSaving()}
+            onPress={() => replaceOpen.set(false)}
+          />
+          <Button
+            icon="check"
+            label="保存并生效"
+            accessibilityLabel="保存默认模型"
+            loading={store.settingsSaving()}
+            disabled={store.settingsSaving() || providers().length === 0}
+            onPress={() => void saveReplacement()}
+          />
+        </>
+      }
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-          {name()}
-        </Text>
-        {/* The document's own key, as a detail: the name above is what the
-            reader edits by. */}
-        <Text style={{ fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground }}>
-          {props.provider().id}
-        </Text>
-        <Badge variant="secondary" label={`${props.provider().modelIds.length} 个模型`} />
-      </View>
+      <SaveFeedback />
+      <If when={providers().length === 0}>
+        <Notice tone="warning" accessibilityLabel="还没有 Provider">
+          <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
+            还没有 Provider；先在列表里添加一个，再选默认模型。
+          </Text>
+        </Notice>
+      </If>
+      <If when={!!replaceError()}>
+        <Notice tone="danger" accessibilityLabel="默认模型未保存">
+          <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{replaceError() ?? ""}</Text>
+        </Notice>
+      </If>
       <FieldGroup>
-        <Field label="接口协议" hint="只列常用的三种；其它取值可在「高级」的原始配置里改。">
+        <Field label="服务商" hint="来自当前配置的服务商。">
           <Select
-            testID={`settings-provider-template-${props.provider().id}`}
-            accessibilityLabel={`${name()} 接口协议`}
-            items={API_PROTOCOLS}
-            value={props.provider().apiType}
-            placeholder="选择协议"
+            testID="default-provider"
+            accessibilityLabel="默认服务商"
+            items={providers().map((provider) => ({
+              value: provider.id,
+              title: providerNameOf(provider),
+            }))}
+            value={replaceProviderId()}
+            placeholder="选择服务商"
             onChange={(value) => {
-              if (value) setProviderApiType(props.provider().id, value);
+              if (value) chooseReplaceProvider(value);
             }}
           />
         </Field>
-        <Field label="服务地址" hint="服务商的接口根地址，例如 https://api.example.com/v1。">
-          <Input
-            testID={`settings-provider-endpoint-${props.provider().id}`}
-            accessibilityLabel={`${name()} 服务地址`}
-            value={props.provider().baseUrl}
-            placeholder="https://…"
-            onChange={(value) => setProviderBaseUrl(props.provider().id, value)}
+        <Field
+          label="模型"
+          hint={
+            modelItems().length === 0
+              ? "该服务商还没有声明模型。"
+              : "不可执行的模型会标明原因并禁用。"
+          }
+        >
+          <Select
+            testID="default-model"
+            accessibilityLabel="默认模型"
+            items={modelItems()}
+            value={replaceModelId()}
+            disabled={modelItems().length === 0}
+            placeholder="选择模型"
+            onChange={(value) => {
+              if (value) chooseReplaceModel(value);
+            }}
           />
         </Field>
-        <Field
-          label="凭据引用"
-          hint="环境变量的名字，或「密钥」分区里保存的名字；这里永远不存凭据的值。"
-        >
-          <Input
-            testID={`settings-provider-credential-${props.provider().id}`}
-            accessibilityLabel={`${name()} 凭据引用`}
-            value={props.provider().credential}
-            placeholder="S2API_KEY 或 secret:name"
-            onChange={(value) => setProviderCredential(props.provider().id, value)}
+        <Field label="思考档" hint="只列出该模型声明的档位；不指定则用模型默认。">
+          <Select
+            testID="default-reasoning"
+            accessibilityLabel="默认思考档"
+            items={reasoningItems()}
+            value={replaceReasoning()}
+            disabled={reasoningItems().length <= 1}
+            onChange={(value) => replaceReasoning.set(value ?? "")}
           />
         </Field>
       </FieldGroup>
-    </View>
+    </Dialog>
   );
 }
 
-function ProviderEditorCard() {
-  const providers = () => draftProviders();
-  return (
-    <Card testID="settings-provider-editor">
-      <CardHeader
-        title="服务商接入"
-        description="按服务商编辑接口协议、服务地址与凭据引用；改的是待保存的配置，按上方「保存模型配置」生效。"
-      />
-      <CardContent>
-        <If when={providers().length === 0}>
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            当前配置里还没有服务商；在「高级」里补上服务商列表，或重置为部署默认。
-          </Text>
-        </If>
-        <Each of={providers()} key={(provider) => provider.id}>
-          {(provider) => <ProviderEditorRow provider={provider} />}
-        </Each>
-      </CardContent>
-    </Card>
-  );
-}
+// ---- 高级 -----------------------------------------------------------------
 
-/** The raw document, behind one closed disclosure: the escape hatch, never the
- * primary surface. The parse diagnostics live here too — the main cards show
- * what the configuration is, not what the validator said about it. */
+const saveRawDocument = () => {
+  const parsed = parseDocument(rawDocument());
+  if (!parsed.document) {
+    rawParseError.set(parsed.error ?? "配置不是合法的 JSON");
+    return;
+  }
+  void saveCandidate(parsed.document);
+};
+
+/** The raw document, behind one closed disclosure at the bottom: the escape
+ * hatch, never the primary surface. */
 function AdvancedCard() {
   const diagnostics = () => [...(store.settings()?.issues ?? []), ...store.providersIssues()];
   return (
@@ -931,8 +1482,7 @@ function AdvancedCard() {
                 color: color.mutedForeground,
               }}
             >
-              完整的模型配置：服务商列表、模型规则与默认选择。保存时整份提交；
-              服务端校验失败会按字段列出原因。
+              直接编辑整份配置，保存后立即生效。服务商列表、模型规则与默认选择都在这里；服务端按字段列出拒绝原因。
             </Text>
             <Textarea
               testID="settings-raw-document"
@@ -959,12 +1509,36 @@ function AdvancedCard() {
                 原始文档不是合法 JSON：{rawParseError() ?? ""}
               </Text>
             </If>
+            <SaveFeedback />
             <If when={diagnostics().length > 0}>
               <View style={{ gap: space.sm }}>
                 <Label label="配置诊断" />
                 <IssueList issues={diagnostics} />
               </View>
             </If>
+            <ModelsDiagnostics />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Button
+                icon="check"
+                label="保存配置"
+                accessibilityLabel="保存配置"
+                loading={store.settingsSaving()}
+                disabled={store.settingsSaving() || !!rawParseError() || !rawDocument().trim()}
+                onPress={saveRawDocument}
+              />
+              <Button
+                variant="outline"
+                icon="refresh"
+                label="重置为部署默认"
+                accessibilityLabel="重置为部署默认"
+                disabled={store.settingsSaving()}
+                onPress={() => confirmReset.set(true)}
+              />
+              <View style={{ flex: 1 }} />
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                {rawDirty() ? "有未保存的修改" : "编辑区与当前生效配置一致"}
+              </Text>
+            </View>
           </View>
         }
       >
@@ -976,71 +1550,22 @@ function AdvancedCard() {
           onPress={() => rawOpen.set(!rawOpen())}
         />
       </Collapsible>
+      <AlertDialog
+        testID="settings-reset"
+        open={confirmReset()}
+        title="重置为部署默认"
+        description="重置会删除已保存的覆盖，回到部署默认；确定吗？"
+        confirmLabel="确认重置"
+        cancelLabel="取消"
+        destructive
+        onConfirm={() => {
+          confirmReset.set(false);
+          rawDirty.set(false);
+          void store.resetModelsSettings();
+        }}
+        onCancel={() => confirmReset.set(false)}
+      />
     </Card>
-  );
-}
-
-function ModelRow(props: { model: () => ModelView }) {
-  const tenant = () => store.tenantSelection();
-  const isDefault = () =>
-    tenant()?.modelId === props.model().modelId &&
-    tenant()?.providerId === props.model().providerId;
-  const choose = () => {
-    const model = props.model();
-    writeSelection({
-      providerId: model.providerId,
-      modelId: model.modelId,
-      reasoningLevel: defaultReasoningFor(model, documentSelection()),
-    });
-  };
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "flex-start",
-        gap: space.md,
-        padding: space.md,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: isDefault() ? alpha(color.brand, 0.4) : color.border,
-        backgroundColor: isDefault() ? color.brandTint : undefined,
-        flexWrap: "wrap",
-      }}
-    >
-      <View style={{ flex: 1, minWidth: 0, gap: space.xxs }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
-          <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-            {displayNameOf(props.model().modelId)}
-          </Text>
-          <Text style={{ fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground }}>
-            {props.model().providerId}/{props.model().modelId}
-          </Text>
-          <If when={isDefault()}>
-            <Badge variant="info" label="当前默认" />
-          </If>
-          <If when={props.model().selectable === false}>
-            <Badge variant="warning" label="不可选" />
-          </If>
-          <If when={props.model().enabled === false}>
-            <Badge variant="secondary" label="已禁用" />
-          </If>
-        </View>
-        <Text style={{ fontSize: typeScale.xs, lineHeight: Math.round(typeScale.xs * lineHeight.normal), color: color.mutedForeground }}>
-          {modelFacts(props.model())}
-        </Text>
-        <IssueList issues={() => props.model().issues ?? []} />
-      </View>
-      <If when={!isDefault()}>
-        <Button
-          variant="outline"
-          size="sm"
-          label="设为默认"
-          accessibilityLabel={`设为默认 ${displayNameOf(props.model().modelId)}`}
-          disabled={props.model().selectable === false}
-          onPress={choose}
-        />
-      </If>
-    </View>
   );
 }
 
@@ -1104,143 +1629,7 @@ function ModelsDiagnostics() {
   );
 }
 
-function ModelsListCard() {
-  const models = () =>
-    store.models().filter((model) => !modelsOnlyExecutable() || model.selectable !== false);
-  return (
-    <Card testID="settings-models">
-      <CardHeader
-        title="模型列表"
-        description="来自服务端清单：只含凭据可解析的可见服务商；可选的模型可以点选为默认。"
-      />
-      <CardContent>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-          <Switch
-            checked={modelsOnlyExecutable()}
-            onChange={(checked) => modelsOnlyExecutable.set(checked)}
-            label="只看可执行"
-            accessibilityLabel="只看可执行模型"
-          />
-          <View style={{ flex: 1 }} />
-          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-            {models().length} / {store.models().length} 个模型
-          </Text>
-        </View>
-        <If when={!!store.modelsError()}>
-          <ErrorBlock text={store.modelsError() ?? ""} onRetry={() => void store.loadRegistry()} />
-        </If>
-        <If when={!store.modelsError() && !store.registryLoaded()}>
-          <LoadingRow text="正在读取模型列表…" />
-        </If>
-        <If when={!store.modelsError() && store.registryLoaded() && store.models().length === 0}>
-          <Empty accessibilityLabel="没有可用的模型">
-            <EmptyTitle label="没有可用的模型" />
-            <EmptyDescription label="当前进程解析不到任何服务商的凭据，或配置为空。" />
-          </Empty>
-        </If>
-        <If
-          when={
-            !store.modelsError() &&
-            store.registryLoaded() &&
-            store.models().length > 0 &&
-            models().length === 0
-          }
-        >
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            没有可执行的模型；关掉「只看可执行」查看全部。
-          </Text>
-        </If>
-        <Each of={models()} key={(model) => `${model.providerId}/${model.modelId}`}>
-          {(model) => <ModelRow model={model} />}
-        </Each>
-        <IssueList issues={() => store.modelIssues()} label="列表诊断" />
-        <ModelsDiagnostics />
-      </CardContent>
-    </Card>
-  );
-}
-
-function ProviderRow(props: { provider: () => ProviderView }) {
-  const accessLabel = () => {
-    const parts: string[] = [];
-    if (props.provider().access?.env) parts.push(`env ${props.provider().access?.env}`);
-    if (props.provider().access?.ref) parts.push(`ref ${props.provider().access?.ref}`);
-    return parts.join(" · ") || "无凭据引用";
-  };
-  const modelIssues = () =>
-    (props.provider().models ?? []).filter((model) => (model.issues ?? []).length > 0);
-  return (
-    <View
-      style={{
-        gap: space.sm,
-        padding: space.md,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: color.border,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-        <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
-          {providerDisplayName(props.provider())}
-        </Text>
-        <Text style={{ fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground }}>
-          {props.provider().providerId}
-        </Text>
-        <Badge
-          variant={props.provider().executable ? "success" : "destructive"}
-          label={props.provider().executable ? "可执行" : "不可执行"}
-        />
-        <Badge variant="secondary" label={`${(props.provider().models ?? []).length} 个模型`} />
-      </View>
-      <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
-        {accessLabel()} · {protocolLabel(props.provider().api?.type)} {props.provider().api?.baseUrl ?? ""}
-      </Text>
-      <IssueList issues={() => props.provider().issues ?? []} />
-      <Each
-        of={modelIssues()}
-        key={(model) => `${model.providerId}/${model.modelId}`}
-      >
-        {(model) => (
-          <View style={{ gap: space.xxs }}>
-            <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
-              {model().providerId}/{model().modelId}
-            </Text>
-            <IssueList issues={() => model().issues ?? []} />
-          </View>
-        )}
-      </Each>
-    </View>
-  );
-}
-
-function ProvidersListCard() {
-  return (
-    <Card testID="settings-providers">
-      <CardHeader
-        title="服务商列表"
-        description="来自服务端清单（只含可见服务商）：凭据状态与可执行性。"
-      />
-      <CardContent>
-        <If when={!!store.providersError()}>
-          <ErrorBlock text={store.providersError() ?? ""} onRetry={() => void store.loadRegistry()} />
-        </If>
-        <If when={!store.providersError() && !store.registryLoaded()}>
-          <LoadingRow text="正在读取服务商…" />
-        </If>
-        <If
-          when={!store.providersError() && store.registryLoaded() && store.providers().length === 0}
-        >
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有可见的服务商。</Text>
-        </If>
-        <Each of={store.providers()} key={(provider) => provider.providerId}>
-          {(provider) => <ProviderRow provider={provider} />}
-        </Each>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ModelsSection() {
+export function ModelsSection() {
   // The editor follows the loaded document until the reader types in it; every
   // successful write and reload makes the server's document authoritative.
   effect(() => {
@@ -1248,14 +1637,20 @@ function ModelsSection() {
     if (!loaded) return;
     if (!rawDirty()) rawDocument.set(JSON.stringify(loaded.document, null, 2));
   });
+  effect(() => {
+    cleanup(() => {
+      providerEditorMode.set("closed");
+      replaceOpen.set(false);
+      confirmDeleteProvider.set(false);
+    });
+  });
   return (
     <View style={{ gap: space["3xl"] }}>
-      <CurrentCard />
-      <SelectionCard />
+      <CurrentModelCard />
+      <ProvidersSection />
       <AdvancedCard />
-      <ProviderEditorCard />
-      <ModelsListCard />
-      <ProvidersListCard />
+      <ProviderConfigDialog />
+      <ChangeDefaultDialog />
     </View>
   );
 }
@@ -1443,14 +1838,17 @@ function SecretsSection() {
 
 const pluginStateVariant = (state: string | undefined) => {
   switch (state) {
-    case "ready":
+    case "enabled":
       return "success" as const;
-    case "failed":
-      return "destructive" as const;
-    case "stopped":
+    case "installed":
+    case "disabled":
+    case "uninstalled":
       return "secondary" as const;
+    case "failed":
+    case "invalid":
+      return "destructive" as const;
     default:
-      return "warning" as const;
+      return "outline" as const;
   }
 };
 
@@ -1490,10 +1888,19 @@ function PluginRow(props: { plugin: () => PluginStatusView }) {
           {props.plugin().stoppedAt ? ` · 停止 ${formatTime(props.plugin().stoppedAt)}` : ""}
         </Text>
       </View>
-      <If when={(props.plugin().provides ?? []).length > 0 || (props.plugin().requires ?? []).length > 0}>
+      <If
+        when={
+          (props.plugin().provides?.tools ?? []).length > 0 ||
+          (props.plugin().provides?.cli ?? []).length > 0 ||
+          (props.plugin().requires ?? []).length > 0
+        }
+      >
         <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-          提供 {(props.plugin().provides ?? []).join("/") || "—"} · 依赖{" "}
+          提供 {(props.plugin().provides?.tools ?? []).join("/") || "—"} · 依赖{" "}
           {(props.plugin().requires ?? []).join("/") || "无"}
+          {(props.plugin().provides?.cli ?? []).length > 0
+            ? ` · CLI ${(props.plugin().provides?.cli ?? []).length} 条`
+            : ""}
         </Text>
       </If>
       <If when={(props.plugin().tools ?? []).length > 0}>
@@ -2330,6 +2737,14 @@ function AboutSection() {
 // ---- the page -------------------------------------------------------------
 
 function SectionBody() {
+  return (
+    <If when={settingsSection() === "agents" || settingsSection() === "teams"} else={<SectionBodyGeneral />}>
+      <AgentTeamSettingsSection section={() => settingsSection()} />
+    </If>
+  );
+}
+
+function SectionBodyGeneral() {
   return (
     <If when={settingsSection() === "general"} else={<SectionBodyNext />}>
       <GeneralSection />

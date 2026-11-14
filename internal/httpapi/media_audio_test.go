@@ -145,14 +145,38 @@ func parseWAV(t *testing.T, raw []byte) wavInfo {
 		t.Fatalf("not a RIFF/WAVE file with a data chunk: riff=%q wave=%q chunk=%q",
 			info.riff, info.wave, string(raw[36:40]))
 	}
-	if int(info.dataLen) != len(raw)-wavHeaderLen {
-		t.Fatalf("data chunk = %d, actual payload = %d", info.dataLen, len(raw)-wavHeaderLen)
+	// demo.WithInfoComment appends a LIST/INFO chunk after the PCM data, a legal
+	// RIFF layout, so the file may be longer than header+data. The invariant is
+	// that the declared data chunk fits in the file and everything after it is a
+	// chain of complete chunks up to EOF — not that data is the last chunk.
+	payload := len(raw) - wavHeaderLen
+	if int(info.dataLen) > payload {
+		t.Fatalf("data chunk = %d exceeds file payload = %d", info.dataLen, payload)
+	}
+	if trailing := raw[wavHeaderLen+int(info.dataLen):]; !wellFormedChunks(trailing) {
+		t.Fatalf("%d bytes after the data chunk are not complete RIFF chunks", len(trailing))
 	}
 	byteRate := float64(info.sampleRate) * float64(info.channels) * float64(info.bitsPer) / 8
 	info.durationMS = float64(info.dataLen) / byteRate * 1000
 	return info
 }
 
+// wellFormedChunks reports whether raw is a chain of complete RIFF chunks
+// (`id` 4 bytes, little-endian size, payload padded to an even length).
+func wellFormedChunks(raw []byte) bool {
+	for offset := 0; offset < len(raw); {
+		if offset+8 > len(raw) {
+			return false
+		}
+		size := int(binary.LittleEndian.Uint32(raw[offset+4 : offset+8]))
+		next := offset + 8 + size + size%2
+		if next > len(raw) {
+			return false
+		}
+		offset = next
+	}
+	return true
+}
 func TestAudioSpeechDemoReturnsPlayableWAV(t *testing.T) {
 	setDemoAudioEnv(t, true)
 	hs := newAudioServer(t)

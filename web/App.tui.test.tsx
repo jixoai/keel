@@ -71,7 +71,7 @@ test("TUI: 逐字预览开关", async () => {
   expect(app.texts()).toContain("逐字预览 关");
 });
 
-test("TUI: 设置页——模型分区读/写/重置与分区导航", async () => {
+test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片）与读写重置", async () => {
   const app = await openApp();
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("text:/本周发布准备已基本就绪/");
@@ -79,19 +79,29 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   // 工作区入口（窄屏在会话列表头部）→ 独立设置页（工作区不再是当前 shell）。
   await app.press("label:返回会话列表");
   await app.press("label:打开设置");
-  await app.waitFor("text:当前生效");
+  await app.waitFor("text:当前默认模型");
   expect(app.texts()).toContain("部署默认");
   expect(app.texts().join("\n")).toContain("第 3 版");
   // The name the reader picks by, and the wire identity as the detail line.
   expect(app.texts()).toContain("DeepSeek V4.1 Flash · 高");
-  expect(app.texts()).toContain("s2api/deepseek-v4.1-flash");
-  expect(app.texts()).toContain("模型列表");
-  expect(app.texts()).toContain("服务商列表");
-  // 不可执行的 provider 的模型不可选（anthropic 在演示里没有凭据）。
-  expect(app.texts()).toContain("不可执行");
-  await expect(app.press("label:设为默认 Claude Sonnet 5")).rejects.toMatchObject({
-    code: "ERR_NSH_TEST_DISABLED",
-  });
+  expect(app.texts().join("\n")).toContain("s2api/deepseek-v4.1-flash");
+  // 第一级是一个 provider 一张卡片：名字、状态徽标、模型 chips。
+  expect(app.texts()).toContain("S2API");
+  expect(app.texts()).toContain("A6API");
+  expect(app.texts()).toContain("Anthropic");
+  expect(app.texts()).toContain("已配置");
+  expect(app.texts()).toContain("不可用");
+  expect(app.shows("id:provider-card-s2api")).toBe(true);
+  // 旧的超长滚动页（模型列表 / 服务商列表）已经消失。
+  expect(app.texts()).not.toContain("模型列表");
+  expect(app.texts()).not.toContain("服务商列表");
+
+  // 第二级：点「配置」只编辑这一个 provider；字段回填后取消。
+  await app.press("label:配置 S2API");
+  await app.waitFor("id:provider-config-dialog");
+  expect(app.value("id:provider-config-endpoint")).toBe("https://s2api.top/v1");
+  await app.press("label:取消");
+  await app.waitFor("id:provider-config-dialog", { state: "gone" });
 
   // 坏文档：400 的字段级 issues 原样呈现。原始文档在「高级」折叠里（spec：
   // 原始 JSON 只放折叠内），先展开再编辑。
@@ -102,7 +112,7 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
     "id:settings-raw-document",
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"nope"}}',
   );
-  await app.press("label:保存模型配置");
+  await app.press("label:保存配置");
   await app.waitFor("text:/保存被拒绝/");
   expect(app.texts()).toContain("selection.modelId");
   expect(app.texts()).toContain("selection s2api/nope does not match any declared model");
@@ -115,7 +125,7 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
     "id:settings-raw-document",
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"deepseek-v4.1-flash","reasoningLevel":"low"}}',
   );
-  await app.press("label:保存模型配置");
+  await app.press("label:保存配置");
   await app.waitFor("text:/第 4 版/");
   expect(app.texts()).toContain("已保存覆盖");
   await app.waitFor("text:/DeepSeek V4\\.1 Flash · 低/");
@@ -148,6 +158,19 @@ test("TUI: 设置页——模型分区读/写/重置与分区导航", async () =
   // 手动触发触发器并看到结果。
   await app.press("label:手动触发 demo.workflow.daily");
   await app.waitFor("text:/触发结果/");
+
+  // 插件页（独立路由 /plugins）：详情折叠里渲染 provides.cli 的能力树——
+  // 每条命令带风险徽标、可重试标记与可调用方，声明即所见。
+  await app.press("label:打开插件页");
+  await app.waitFor("text:已装插件");
+  await app.press("id:plugin-detail-demo.workflow");
+  await app.waitFor("text:/CLI 能力 2 条/");
+  expect(app.texts()).toContain("keel workflow plan");
+  expect(app.texts()).toContain("写入");
+  expect(app.texts()).toContain("keel workflow status");
+  expect(app.texts()).toContain("只读");
+  expect(app.texts()).toContain("可重试");
+  expect(app.texts().join("\n")).toContain("可调用：人工 · Agent");
 
   // 返回工作区：工作区原样回来（会话列表仍在，原会话仍是打开状态——store 持有
   // activeId/engine，跨 shell 切换不丢；列表行回到会话即见到此前的内容）。
@@ -192,6 +215,41 @@ test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分�
   await app.press("label:恢复默认");
   await app.press("label:关闭");
   expect(app.texts()).toContain("DeepSeek V4.1 Flash · 高");
+});
+
+test("TUI: 团队模式——以队长的默认模型开始，手动选模型退出团队模式", async () => {
+  const app = await openApp();
+  await app.press(TITLE("发布准备周报"));
+  await app.waitFor("text:/本周发布准备已基本就绪/");
+
+  // 打开选择器 → 切到团队模式：队长、成员数与将要运行的模型都写清。
+  await app.press("id:session-model-chip");
+  await app.waitFor("text:本会话当前");
+  await app.press("id:picker-mode-team");
+  await app.waitFor("text:品牌发布小组");
+  expect(app.texts()).toContain("队长 设计师");
+  expect(app.texts()).toContain("成员 1");
+  expect(app.texts()).toContain("将以 DeepSeek V4.1 Flash 开始对话");
+
+  // 以此团队开始：chip 变成团队标记，启动模式记录在「本会话当前」里。
+  await app.press("id:picker-team-start-team_demo_brand");
+  await app.waitFor("text:团队 · 品牌发布小组");
+  await app.press("id:session-model-chip");
+  await app.waitFor("text:启动模式");
+  await app.press("label:关闭");
+
+  // 团队会话照常输入（selection 是队长的默认模型）。
+  await app.type("id:composer-input", "以团队模式回一句话");
+  await app.press("label:发送");
+  await app.waitFor("text:/已收到/", { timeout: 10_000 });
+
+  // 标准模式手动选模型 → 退出团队模式（否则面板会继续说自己是团队会话）。
+  await app.press("id:session-model-chip");
+  await app.press("id:picker-mode-standard");
+  await app.press("label:选择模型 DeepSeek V4.1 Flash >> nth=0");
+  await app.press("label:关闭");
+  await app.waitFor("text:/DeepSeek V4\\.1 Flash · 高/");
+  expect(app.texts()).not.toContain("团队 · 品牌发布小组");
 });
 
 // The workspace-polish change (keel-workspace-polish) on the same fixture:
@@ -275,7 +333,7 @@ test("TUI: 命令面板——Mod+K 打开、焦点在搜索框、选中设置", 
   // Scoped to the palette: the session list's own header carries a settings
   // action with the same text, and the palette's row is the one being tested.
   await app.press("id:command-palette >> text:打开设置");
-  await app.waitFor("text:当前生效");
+  await app.waitFor("text:当前默认模型");
 });
 
 test("TUI: 命令面板——Esc 关闭", async () => {

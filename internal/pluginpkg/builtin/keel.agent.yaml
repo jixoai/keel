@@ -1,0 +1,131 @@
+id: keel.agent
+version: 1.0.0
+kind: in-process
+description: "Agent registry plugin: manages the Agent library (default model, tool grants, system prompt, avatar) behind /v1/agents and the keel agent CLI."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  cli:
+    - path: [agent, list]
+      summary: "List the Agent library: id, name, default model, tool count."
+      description: "Reads GET /v1/agents. Archived agents are listed with their archived mark, never silently dropped. It does not resolve members of teams — a team's roster is read through keel team show."
+      args_schema:
+        type: object
+        properties:
+          json:
+            type: boolean
+            description: "print the raw response instead of a table"
+      output_schema:
+        type: object
+        properties:
+          agents:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+        required: [agents]
+      permissions: [agent.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel agent list", "keel agent list --json"]
+    - path: [agent, show]
+      summary: "Show one Agent's full document as JSON."
+      description: "Reads GET /v1/agents/{id}: default model binding, tool grants, system prompt (inline text or a file reference), skills and the captain's team-CLI switch. It renders the stored document; it does not resolve the referenced prompt file or agent."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          defaultModel: { type: object }
+          tools: { type: array }
+      permissions: [agent.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel agent show agent_3f1c…"]
+    - path: [agent, create]
+      summary: "Create an Agent from flags; only --name is required."
+      description: "POSTs /v1/agents. A default model is a pair (--provider and --model together); tool grants are validated against the tenant's tool registry at save time. The id is minted unless --id names one. It does not join the agent to any team."
+      args_schema:
+        type: object
+        properties:
+          name: { type: string }
+          id: { type: string }
+          description: { type: string }
+          provider: { type: string }
+          model: { type: string }
+          tool: { type: string }
+          prompt: { type: string }
+          prompt_file: { type: string }
+          skills: { type: string }
+          team_cli: { type: boolean }
+          team_cli_commands: { type: string }
+          json: { type: boolean }
+        required: [name]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+        required: [id]
+      permissions: [agent.write]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel agent create --name 发布助手 --provider demo --model demo-llm"]
+    - path: [agent, update]
+      summary: "Update an Agent; fields not passed are preserved."
+      description: "PUTs /v1/agents/{id} as read-modify-write: the current document is read, the flags that were set are applied, and the result is written under the current revision. A tool list passed with --tool replaces the whole list."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          description: { type: string }
+          provider: { type: string }
+          model: { type: string }
+          tool: { type: string }
+          prompt: { type: string }
+          skills: { type: string }
+          team_cli: { type: boolean }
+          team_cli_commands: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+        required: [id]
+      permissions: [agent.write]
+      danger: write
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel agent update agent_3f1c… --model deepseek-v4.1-flash"]
+    - path: [agent, delete]
+      summary: "Delete an Agent."
+      description: "DELETEs /v1/agents/{id}. An agent that a team still references is refused with 409 and the referencing teams' names; remove it from those teams first (or delete those teams). The deletion is a hard delete of this registry record."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          deleted: { type: boolean }
+      permissions: [agent.write]
+      danger: destructive
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel agent delete agent_3f1c…"]
+source:
+  type: builtin

@@ -3,6 +3,17 @@
 // serve` hosts the web build, the API and the stream), so no CORS and no
 // tenant headers in the browser; a dev origin can be passed explicitly.
 import type {
+  AgentAvatarView,
+  AgentModelBindingView,
+  AgentsResponse,
+  AgentSystemPromptView,
+  AgentTeamApi,
+  AgentTeamsResponse,
+  AgentTeamView,
+  AgentTeamWriteRequest,
+  AgentToolGrantView,
+  AgentView,
+  AgentWriteRequest,
   AttachmentRef,
   ConnectionState,
   Delivery,
@@ -25,6 +36,7 @@ import type {
   SessionSummary,
   SettingsApi,
   SettingsIssue,
+  TeamMemberView,
   TriggersView,
   UiCommands,
   WireEvent,
@@ -283,7 +295,191 @@ const realtimeStatusOf = (body: Record<string, unknown>): RealtimeStatusView => 
   outputSampleRate: typeof body.outputSampleRate === "number" ? body.outputSampleRate : undefined,
 });
 
-export class KeelHttp implements SettingsApi {
+// ---- agent & team registry normalization ---------------------------------
+//
+// The shapes are `internal/httpapi/agentteam_dto.go`. A listing may arrive as
+// `{agents:[...]}` / `{teams:[...]}` or as a bare array (the envelope is the
+// DTO's; a bare collection is accepted so a route that answers the array
+// directly still renders). Every field is coerced here so a malformed row can
+// never crash a card; ids and names survive even when the rest is missing.
+
+const textOr = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() !== "" ? value : undefined;
+
+const objectOr = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+
+const avatarOf = (value: unknown): AgentAvatarView | undefined => {
+  const row = objectOr(value);
+  if (!row) return undefined;
+  return { kind: textOr(row.kind), seed: textOr(row.seed), ref: textOr(row.ref), url: textOr(row.url) };
+};
+
+const modelBindingOf = (value: unknown): AgentModelBindingView | undefined => {
+  const row = objectOr(value);
+  if (!row) return undefined;
+  const binding: AgentModelBindingView = {
+    providerId: textOr(row.providerId),
+    modelId: textOr(row.modelId),
+  };
+  const tuning = objectOr(row.tuning);
+  if (tuning) binding.tuning = tuning;
+  return binding;
+};
+
+const toolGrantsOf = (value: unknown): AgentToolGrantView[] => {
+  if (!Array.isArray(value)) return [];
+  const grants: AgentToolGrantView[] = [];
+  for (const item of value) {
+    const row = objectOr(item);
+    const toolId = textOr(row?.toolId);
+    if (!row || !toolId) continue;
+    const grant: AgentToolGrantView = { toolId, enabled: row.enabled !== false };
+    const config = objectOr(row.config);
+    if (config) grant.config = config;
+    grants.push(grant);
+  }
+  return grants;
+};
+
+const systemPromptOf = (value: unknown): AgentSystemPromptView | undefined => {
+  const row = objectOr(value);
+  if (!row) return undefined;
+  return { kind: textOr(row.kind), text: textOr(row.text), ref: textOr(row.ref) };
+};
+
+const agentViewOf = (value: unknown): AgentView => {
+  const row = objectOr(value) ?? {};
+  const view: AgentView = {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? ""),
+    tools: toolGrantsOf(row.tools),
+  };
+  if (textOr(row.tenantId)) view.tenantId = String(row.tenantId);
+  if (textOr(row.description)) view.description = String(row.description);
+  const avatar = avatarOf(row.avatar);
+  if (avatar) view.avatar = avatar;
+  const binding = modelBindingOf(row.defaultModel);
+  if (binding) view.defaultModel = binding;
+  const prompt = systemPromptOf(row.systemPrompt);
+  if (prompt) view.systemPrompt = prompt;
+  if (Array.isArray(row.skills)) view.skills = row.skills.filter((skill): skill is string => typeof skill === "string");
+  if (row.archived === true) view.archived = true;
+  return view;
+};
+
+const agentViewsOf = (body: unknown): AgentView[] => {
+  const record = objectOr(body);
+  const rows = Array.isArray(body) ? body : Array.isArray(record?.agents) ? (record?.agents as unknown[]) : [];
+  return rows.map(agentViewOf).filter((agent) => agent.id !== "" || agent.name !== "");
+};
+
+const teamMemberOf = (value: unknown): TeamMemberView => {
+  const row = objectOr(value) ?? {};
+  const member: TeamMemberView = { agentId: String(row.agentId ?? "") };
+  if (textOr(row.label)) member.label = String(row.label);
+  if (textOr(row.description)) member.description = String(row.description);
+  const inline = objectOr(row.inline);
+  if (inline) member.inline = agentViewOf(inline);
+  return member;
+};
+
+const teamMembersOf = (value: unknown): TeamMemberView[] =>
+  Array.isArray(value) ? value.map(teamMemberOf).filter((member) => member.agentId !== "" || member.inline) : [];
+
+const teamViewOf = (value: unknown): AgentTeamView => {
+  const row = objectOr(value) ?? {};
+  const view: AgentTeamView = {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? ""),
+    captain: teamMemberOf(row.captain),
+  };
+  if (textOr(row.tenantId)) view.tenantId = String(row.tenantId);
+  if (textOr(row.description)) view.description = String(row.description);
+  if (Array.isArray(row.members)) view.members = teamMembersOf(row.members);
+  const defaults = objectOr(row.defaults);
+  if (defaults) {
+    view.defaults = {
+      tools: Array.isArray(defaults.tools)
+        ? defaults.tools.filter((tool): tool is string => typeof tool === "string")
+        : undefined,
+      modelOverride: modelBindingOf(defaults.modelOverride),
+    };
+  }
+  const capabilities = objectOr(row.capabilities);
+  if (capabilities) {
+    const teamCli = objectOr(capabilities.teamCli);
+    view.capabilities = {
+      teamCli: teamCli
+        ? {
+            enabled: teamCli.enabled === true,
+            commands: Array.isArray(teamCli.commands)
+              ? teamCli.commands.filter((command): command is string => typeof command === "string")
+              : undefined,
+          }
+        : undefined,
+    };
+  }
+  if (Array.isArray(row.featureBindings)) {
+    view.featureBindings = row.featureBindings
+      .map((binding) => objectOr(binding))
+      .filter((binding): binding is Record<string, unknown> => binding !== undefined)
+      .map((binding) => ({ port: String(binding.port ?? ""), cli: textOr(binding.cli) }))
+      .filter((binding) => binding.port !== "");
+  }
+  if (row.archived === true) view.archived = true;
+  if (textOr(row.status)) view.status = String(row.status);
+  if (typeof row.revision === "number" && Number.isFinite(row.revision)) view.revision = row.revision;
+  if (textOr(row.hash)) view.hash = String(row.hash);
+  return view;
+};
+
+const teamViewsOf = (body: unknown): AgentTeamView[] => {
+  const record = objectOr(body);
+  const rows = Array.isArray(body) ? body : Array.isArray(record?.teams) ? (record?.teams as unknown[]) : [];
+  return rows.map(teamViewOf).filter((team) => team.id !== "" || team.name !== "");
+};
+
+/** A team answer may be 204 (a member write with no body): the store reloads
+ * the list anyway, so an empty answer becomes an empty view, never a throw. */
+async function readTeam(response: Response): Promise<AgentTeamView> {
+  const text = await response.text();
+  if (!text) return { id: "", name: "", captain: { agentId: "" } };
+  try {
+    return teamViewOf(JSON.parse(text));
+  } catch {
+    return { id: "", name: "", captain: { agentId: "" } };
+  }
+}
+
+/** The write bodies carry only declared fields: the server's strict decoder
+ * rejects `tenantId`, `archived`, `status`, `revision` and `hash`, so a body
+ * built from a view is filtered rather than spread. */
+const agentBodyOf = (agent: AgentWriteRequest): Record<string, unknown> => {
+  const body: Record<string, unknown> = { name: agent.name };
+  if (agent.id !== undefined) body.id = agent.id;
+  if (agent.description !== undefined) body.description = agent.description;
+  if (agent.avatar !== undefined) body.avatar = agent.avatar;
+  if (agent.defaultModel !== undefined) body.defaultModel = agent.defaultModel;
+  if (agent.tools !== undefined) body.tools = agent.tools;
+  if (agent.systemPrompt !== undefined) body.systemPrompt = agent.systemPrompt;
+  if (agent.teamCli !== undefined) body.teamCli = agent.teamCli;
+  if (agent.skills !== undefined) body.skills = agent.skills;
+  return body;
+};
+
+const teamBodyOf = (team: AgentTeamWriteRequest): Record<string, unknown> => {
+  const body: Record<string, unknown> = { name: team.name, captain: team.captain };
+  if (team.id !== undefined) body.id = team.id;
+  if (team.description !== undefined) body.description = team.description;
+  if (team.members !== undefined) body.members = team.members;
+  if (team.defaults !== undefined) body.defaults = team.defaults;
+  if (team.capabilities !== undefined) body.capabilities = team.capabilities;
+  if (team.featureBindings !== undefined) body.featureBindings = team.featureBindings;
+  return body;
+};
+
+export class KeelHttp implements SettingsApi, AgentTeamApi {
   readonly base: string;
   private readonly fetchImpl: FetchLike;
 
@@ -618,6 +814,87 @@ export class KeelHttp implements SettingsApi {
     });
     const body = asRecord(await response.json());
     return asRecord(body.result).triggerId ? (asRecord(body.result) as FireResultView) : (body as FireResultView);
+  }
+
+  // ---- agent & team registry (change keel-agent-team-v1) -----------------
+  //
+  // Routes: `/v1/agents` and `/v1/teams` (CRUD), member writes under
+  // `/v1/teams/{id}/members`. The create bodies omit `id` — the server mints
+  // the stable identity (agent) or derives it (team) — and every update names
+  // its id in the path, so an update can never mint a second identity.
+
+  async listAgents(): Promise<AgentsResponse> {
+    const response = await this.request("/v1/agents");
+    return { agents: agentViewsOf(await response.json()) };
+  }
+
+  async createAgent(agent: AgentWriteRequest): Promise<AgentView> {
+    const response = await this.request("/v1/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(agentBodyOf(agent)),
+    });
+    return agentViewOf(await response.json());
+  }
+
+  async updateAgent(id: string, agent: AgentWriteRequest): Promise<AgentView> {
+    const response = await this.request(`/v1/agents/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(agentBodyOf({ ...agent, id })),
+    });
+    return agentViewOf(await response.json());
+  }
+
+  async deleteAgent(id: string): Promise<void> {
+    await this.request(`/v1/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async listTeams(): Promise<AgentTeamsResponse> {
+    const response = await this.request("/v1/teams");
+    return { teams: teamViewsOf(await response.json()) };
+  }
+
+  async createTeam(team: AgentTeamWriteRequest): Promise<AgentTeamView> {
+    const response = await this.request("/v1/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(teamBodyOf({ ...team, id: team.id })),
+    });
+    return readTeam(response);
+  }
+
+  async updateTeam(id: string, team: AgentTeamWriteRequest): Promise<AgentTeamView> {
+    const response = await this.request(`/v1/teams/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(teamBodyOf({ ...team, id })),
+    });
+    return readTeam(response);
+  }
+
+  async deleteTeam(id: string): Promise<void> {
+    await this.request(`/v1/teams/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** Add one seat: `POST /v1/teams/{id}/members` `{agentId}`. */
+  async addTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
+    const response = await this.request(`/v1/teams/${encodeURIComponent(id)}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId }),
+    });
+    return readTeam(response);
+  }
+
+  /** Remove one seat: `DELETE /v1/teams/{id}/members/{agentId}`. The captain
+   * is not removable; the server answers its refusal and the store shows it. */
+  async removeTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
+    const response = await this.request(
+      `/v1/teams/${encodeURIComponent(id)}/members/${encodeURIComponent(agentId)}`,
+      { method: "DELETE" },
+    );
+    return readTeam(response);
   }
 }
 

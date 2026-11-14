@@ -117,12 +117,14 @@ web/
 底部「设置」入口；返回「工作区」按钮回到工作区，**原会话保持打开**（store 跨 shell 切换持有
 `activeId`/engine，narrow 布局的屏幕位也保留）。
 
-设置页三个分区（同一套 primitives/theme，不引入第二套组件体系）：
+设置页的分区（同一套 primitives/theme，不引入第二套组件体系）：
 
-- **模型**：当前生效（`source` 部署默认/已保存覆盖 + `revision` + 默认 selection + 解析诊断）、
-  `编辑`（默认模型、思考档 chips 来自该模型 `options.reasoningLevel.values`、原始文档 textarea、
-  保存模型配置 / 两步重置）、模型列表（`/v1/models`：能力事实、基线推断、issues、点选设为默认）、
-  Provider 列表（`/v1/providers`：可执行/可选状态、`access.env`/`access.ref`、逐条 issues）。
+- **模型接入**：两级结构。第一级＝「当前默认模型」卡（provider / 模型 / 思考档 / 来源与版本，
+  右侧只有「更换」「刷新」）＋ 一个 Provider 一张卡（显示名、已配置/未配置/不可用徽标、
+  模型 chips、右下「配置」）；空态给「添加 Provider」引导。第二级＝点「配置」打开的 Dialog，
+  只编辑这一个 Provider（接口协议 / 服务地址 / 凭据引用 `${NAME}`·`env:NAME`·`secret:NAME` /
+  模型列表可增删；保存并生效 / 取消 / 删除该 Provider 二次确认）。原始 JSON 降到卡片列表
+  底部的「高级」折叠（默认收起，直接编辑整份配置，保存后立即生效）。
   保存 PUT 整份文档（带 `expectedRevision`）：400 的 `issues` 按字段路径原样列出，409 给出
   「文档已被其它写入更新 + 当前 revision」并给刷新入口；成功后显示新 revision 并刷新
   `/v1/providers` + `/v1/models`。

@@ -323,6 +323,17 @@ func runServe(parent context.Context, opts serveOptions) error {
 		CASDir:    opts.CASDir,
 		Product:   product.api,
 		Partials:  agentapi.PartialSource(product.partials),
+		// Agent registry and agent teams: the store owns the documents, the HTTP
+		// surface owns the rules (change keel-agent-team-v1, P2/P3).
+		AgentTeams: st,
+		// A saved agent may only grant tools the current assembled surface
+		// actually serves. The lookup is resolved per request, so a plugin
+		// install/uninstall moves what a new save may reference without a restart
+		// (spec: 保存 Agent 时校验 toolId 存在且当前租户可用).
+		ToolExists: func(toolID string) bool {
+			_, ok := rt.Assembly().Tools().Get(toolID)
+			return ok
+		},
 		// The selection vocabulary is read from the CURRENT generation at call
 		// time: a settings write installs a new model service, and the input edge
 		// must accept exactly what that generation can run. A runtime without
@@ -602,7 +613,10 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				Interval: opts.ExampleInterval,
 			})
 		},
-		"keel.subagents": func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
+		"keel.subagents":       func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
+		agentext.ModelPluginID: func() *agentext.Plugin { return agentext.NewModelPlugin() },
+		agentext.AgentPluginID: func() *agentext.Plugin { return agentext.NewAgentPlugin() },
+		agentext.TeamPluginID:  func() *agentext.Plugin { return agentext.NewTeamPlugin() },
 		agentext.CreationPluginID: func() *agentext.Plugin {
 			return agentext.NewCreationPlugin(agentext.CreationOptions{
 				Manager:  func() *agentext.Manager { return pluginManager },

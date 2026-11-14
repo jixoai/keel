@@ -315,18 +315,22 @@ export function selectionDisplay(selection: ModelSelection | null | undefined): 
   return selection.reasoningLevel ? `${name} · ${reasoningLabel(selection.reasoningLevel)}` : name;
 }
 
-/** A plugin's lifecycle in the reader's words. A token this build does not
- * know is never mapped onto a made-up state: it reads as 未知状态. */
+/** A plugin's lifecycle in the reader's words. The vocabulary is the server's
+ * (`agentext.LifecycleState`, persisted by internal/store) — installed|
+ * enabled|disabled|failed|invalid|uninstalled; a token this build does not
+ * know keeps its raw text and is never mapped onto a made-up state. */
 export const pluginStateLabels: Record<string, string> = {
-  active: "已启用",
-  ready: "已就绪",
-  pending: "等待依赖",
+  enabled: "已启用",
+  installed: "已安装",
+  disabled: "已停用",
   failed: "失败",
-  stopped: "已停止",
+  invalid: "无效",
+  uninstalled: "已卸载",
 };
 
 export function pluginStateLabel(state: string | undefined): string {
-  return (state ? pluginStateLabels[state] : undefined) ?? "未知状态";
+  if (!state) return "未知状态";
+  return pluginStateLabels[state] ?? state;
 }
 
 /** The first model identity of a `/v1/models` row. */

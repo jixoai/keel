@@ -10,6 +10,12 @@
 // to an idle session is queued; a guide sent while running joins the turn and
 // is consumed by the next assistant message; stop leaves queued input alone.
 import type {
+  AgentTeamsResponse,
+  AgentTeamView,
+  AgentTeamWriteRequest,
+  AgentsResponse,
+  AgentView,
+  AgentWriteRequest,
   AttachmentRef,
   ConnectionState,
   Delivery,
@@ -171,6 +177,41 @@ export class FixtureClient implements SettingsApi {
     { name: "webhook-token", createdAt: new Date(Date.now() - 172_800_000).toISOString(), updatedAt: new Date(Date.now() - 172_800_000).toISOString() },
   ];
   private triggerFires = 12;
+  /** The demo agent registry (the settings Agents section) — editable in the
+   * fixture so the demo's create/edit/delete paths are real, not stubs. */
+  private agentState: AgentView[] = [
+    {
+      id: "agent_demo_design",
+      name: "设计师",
+      description: "负责界面与品牌视觉",
+      avatar: { kind: "identicon", seed: "agent_demo_design" },
+      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
+      tools: [{ toolId: "workspace.read", enabled: true }],
+      systemPrompt: { kind: "inline", text: "你是资深视觉设计师。" },
+    },
+    {
+      id: "agent_demo_research",
+      name: "研究员",
+      description: "负责资料检索与整理",
+      avatar: { kind: "identicon", seed: "agent_demo_research" },
+      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
+      tools: [{ toolId: "web.fetch", enabled: true }],
+    },
+  ];
+  private teamState: AgentTeamView[] = [
+    {
+      id: "team_demo_brand",
+      name: "品牌发布小组",
+      description: "负责新品发布的全链路交付",
+      captain: { agentId: "agent_demo_design" },
+      members: [{ agentId: "agent_demo_research" }],
+      status: "valid",
+      revision: 1,
+      hash: "demo-brand",
+    },
+  ];
+  private agentSequence = 0;
+  private teamSequence = 0;
 
   constructor(private readonly imageURL: string = demoShot.url) {
     this.seed();
@@ -338,8 +379,34 @@ export class FixtureClient implements SettingsApi {
         {
           id: "demo.workflow",
           version: "0.4.1",
-          state: "ready",
-          provides: ["tools", "triggers"],
+          state: "enabled",
+          // The server sends `provides` as the manifest's object (tools/hooks/
+          // triggers/cli…), never as a bare list; the fixture mirrors that.
+          provides: {
+            tools: ["workflow.plan", "workflow.status"],
+            hooks: ["turn.start", "turn.end"],
+            triggers: ["demo.workflow.daily"],
+            cli: [
+              {
+                path: ["workflow", "plan"],
+                summary: "把一段目标拆成可执行的计划并入库。",
+                description: "写入计划，可被后续运行读取；不修改既有计划。",
+                permissions: ["workflow.write"],
+                danger: "write",
+                idempotent: false,
+                callable_by: ["ui"],
+                examples: ["keel workflow plan --goal 发布"],
+              },
+              {
+                path: ["workflow", "status"],
+                summary: "读取当前计划与各步骤状态。",
+                permissions: ["workflow.read"],
+                danger: "read",
+                idempotent: true,
+                callable_by: ["ui", "agent"],
+              },
+            ],
+          },
           requires: [],
           tools: ["workflow.plan", "workflow.status"],
           hooks: ["turn.start", "turn.end"],
@@ -360,7 +427,7 @@ export class FixtureClient implements SettingsApi {
           id: "demo.webhook",
           version: "0.2.0",
           state: "failed",
-          provides: ["triggers"],
+          provides: { hooks: ["turn.end"] },
           requires: ["demo.workflow"],
           tools: [],
           hooks: ["turn.end"],
@@ -459,6 +526,139 @@ export class FixtureClient implements SettingsApi {
     const requestId = `retry:${this.sequence++}-${Math.random().toString(36).slice(2, 8)}`;
     await this.send(peer, source.text ?? "", "queue", requestId, undefined, source.selection);
     return { created: true, seq: peer.nextSeq - 1, requestId };
+  }
+
+  // ---- agent & team registry (demo) --------------------------------------
+  //
+  // The same shapes the HTTP DTOs declare, kept in memory: the demo's Agents
+  // and 团队 sections create, edit and delete for real, and the captain /
+  // reference rules answer with the same readable refusals the server does.
+
+  async listAgents(): Promise<AgentsResponse> {
+    return { agents: this.agentState.map((agent) => ({ ...agent })) };
+  }
+
+  async createAgent(request: AgentWriteRequest): Promise<AgentView> {
+    if (!request.name.trim()) throw new KeelApiError(400, "Agent 名字不能为空");
+    const created: AgentView = {
+      id: request.id || `agent_demo_new_${++this.agentSequence}`,
+      name: request.name,
+      description: request.description,
+      avatar: request.avatar,
+      defaultModel: request.defaultModel,
+      tools: request.tools,
+      systemPrompt: request.systemPrompt,
+      skills: request.skills,
+    };
+    this.agentState = [...this.agentState, created];
+    return created;
+  }
+
+  async updateAgent(id: string, request: AgentWriteRequest): Promise<AgentView> {
+    const index = this.agentState.findIndex((agent) => agent.id === id);
+    if (index < 0) throw new KeelApiError(404, `Agent ${id} 不存在`);
+    const updated: AgentView = {
+      ...this.agentState[index],
+      id,
+      name: request.name,
+      description: request.description,
+      avatar: request.avatar,
+      defaultModel: request.defaultModel,
+      tools: request.tools,
+      systemPrompt: request.systemPrompt,
+      skills: request.skills,
+    };
+    this.agentState = this.agentState.map((agent, at) => (at === index ? updated : agent));
+    return updated;
+  }
+
+  async deleteAgent(id: string): Promise<void> {
+    const referencing = this.teamState.find(
+      (team) =>
+        team.captain.agentId === id || (team.members ?? []).some((member) => member.agentId === id),
+    );
+    if (referencing) {
+      throw new KeelApiError(409, `Agent ${id} 正被团队「${referencing.name}」引用，先移出团队再删除。`);
+    }
+    if (!this.agentState.some((agent) => agent.id === id)) throw new KeelApiError(404, `Agent ${id} 不存在`);
+    this.agentState = this.agentState.filter((agent) => agent.id !== id);
+  }
+
+  async listTeams(): Promise<AgentTeamsResponse> {
+    return { teams: this.teamState.map((team) => ({ ...team })) };
+  }
+
+  /** The demo's team rules: a captain is mandatory, exists, and is never a
+   * member; the captain seat itself is not removable. */
+  private teamViewOf(id: string, request: AgentTeamWriteRequest): AgentTeamView {
+    if (!request.captain?.agentId) throw new KeelApiError(400, "团队必须有队长");
+    if (!this.agentState.some((agent) => agent.id === request.captain.agentId)) {
+      throw new KeelApiError(400, "队长必须是已存在的 Agent");
+    }
+    return {
+      id,
+      name: request.name,
+      description: request.description,
+      captain: { agentId: request.captain.agentId },
+      members: (request.members ?? []).filter(
+        (member) => member.agentId && member.agentId !== request.captain.agentId,
+      ),
+      defaults: request.defaults,
+      capabilities: request.capabilities,
+      featureBindings: request.featureBindings,
+      status: "valid",
+      revision: 1,
+    };
+  }
+
+  async createTeam(request: AgentTeamWriteRequest): Promise<AgentTeamView> {
+    if (!request.name.trim()) throw new KeelApiError(400, "团队名字不能为空");
+    const created = this.teamViewOf(request.id || `team_demo_new_${++this.teamSequence}`, request);
+    this.teamState = [...this.teamState, created];
+    return created;
+  }
+
+  async updateTeam(id: string, request: AgentTeamWriteRequest): Promise<AgentTeamView> {
+    if (!this.teamState.some((team) => team.id === id)) throw new KeelApiError(404, `团队 ${id} 不存在`);
+    const updated = this.teamViewOf(id, request);
+    this.teamState = this.teamState.map((team) => (team.id === id ? updated : team));
+    return updated;
+  }
+
+  async deleteTeam(id: string): Promise<void> {
+    if (!this.teamState.some((team) => team.id === id)) throw new KeelApiError(404, `团队 ${id} 不存在`);
+    this.teamState = this.teamState.filter((team) => team.id !== id);
+  }
+
+  private mutateTeam(id: string, mutate: (team: AgentTeamView) => AgentTeamView): AgentTeamView {
+    const team = this.teamState.find((item) => item.id === id);
+    if (!team) throw new KeelApiError(404, `团队 ${id} 不存在`);
+    const next = mutate(team);
+    this.teamState = this.teamState.map((item) => (item.id === id ? next : item));
+    return next;
+  }
+
+  async addTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
+    if (!this.agentState.some((agent) => agent.id === agentId)) {
+      throw new KeelApiError(400, `Agent ${agentId} 不存在`);
+    }
+    return this.mutateTeam(id, (team) => {
+      if (team.captain.agentId === agentId) {
+        throw new KeelApiError(400, "队长已经在队内，不能作为普通成员重复添加");
+      }
+      const members = team.members ?? [];
+      if (members.some((member) => member.agentId === agentId)) return team;
+      return { ...team, members: [...members, { agentId }] };
+    });
+  }
+
+  async removeTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
+    return this.mutateTeam(id, (team) => {
+      if (team.captain.agentId === agentId) {
+        throw new KeelApiError(400, "队长不可移除：请先改派队长");
+      }
+      return { ...team, members: (team.members ?? []).filter((member) => member.agentId !== agentId) };
+    });
   }
 
   private guardRevision(expectedRevision: number | undefined) {

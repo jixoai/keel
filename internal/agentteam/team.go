@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // TeamStatus is the derived state of a team configuration. It is never stored:
@@ -156,6 +158,14 @@ type AgentTeam struct {
 // team CLI allowlist permits it.
 func NewTeam(id, name string, captain TeamMember) *AgentTeam {
 	return &AgentTeam{ID: id, Name: name, Captain: captain}
+}
+
+// GenerateTeamID mints a stable team id for a create request that carries only a
+// name and a captain: "team_" plus a dashless UUIDv4. It is the team counterpart
+// of GenerateAgentID and satisfies the same id grammar, so `keel team create
+// --captain ... --name ...` needs no store round-trip to learn its identity.
+func GenerateTeamID() string {
+	return "team_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 }
 
 // Revision is the monotonic configuration revision. It is 0 until the team is

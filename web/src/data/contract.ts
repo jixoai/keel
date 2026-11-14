@@ -256,11 +256,39 @@ export interface TriggerSpecView {
   maxAttempts?: number;
 }
 
+/** One node of a plugin's declared CLI capability tree (`provides.cli`): the
+ * command below `keel`, its summary, the argument/output schemas the agent tool
+ * face publishes, and the risk attributes --help and the settings page render. */
+export interface CliCapabilityView {
+  path: string[];
+  summary: string;
+  description?: string;
+  args_schema?: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
+  permissions?: string[];
+  danger?: string;
+  idempotent?: boolean;
+  callable_by?: string[];
+  examples?: string[];
+}
+
+/** What one plugin declares it contributes (`provides`). The server sends the
+ * manifest section verbatim; a client renders only the fields it knows. */
+export interface PluginProvidesView {
+  tools?: string[];
+  hooks?: string[];
+  triggers?: string[];
+  cli?: CliCapabilityView[];
+  agents?: string[];
+  agent_teams?: string[];
+  feature_ports?: string[];
+}
+
 export interface PluginStatusView {
   id: string;
   version?: string;
   state?: string;
-  provides?: string[];
+  provides?: PluginProvidesView;
   requires?: string[];
   tools?: string[];
   hooks?: string[];
@@ -405,6 +433,159 @@ export interface SettingsApi {
   /** Re-ask the input an earlier turn answered: a new user.message carrying
    * retryOf, plus a run. The ledger only grows. */
   retryTurn(sessionId: string, turnId: string): Promise<RetryResult>;
+}
+
+// ---- agent & team registry (change keel-agent-team-v1) --------------------
+//
+// The wire shapes are `internal/httpapi/agentteam_dto.go`'s JSON field names
+// (`agentteam.Agent` / `agentteam.AgentTeam` nested structs included). Request
+// bodies declare only what a client may write: tenant, archived, status,
+// revision and hash are server projections, and the API's strict decoder
+// rejects them.
+
+/** A picture source: the deterministic identicon (`kind`/`seed`) or an
+ * explicit `url`. All fields are optional on a write; omitting them means the
+ * server keeps (`update`) or mints by id (`create`) the identicon. */
+export interface AgentAvatarView {
+  kind?: string;
+  seed?: string;
+  ref?: string;
+  url?: string;
+}
+
+/** A default model binding. It is only a default: a session or the team may
+ * override it. */
+export interface AgentModelBindingView {
+  providerId?: string;
+  modelId?: string;
+  tuning?: Record<string, unknown>;
+}
+
+/** One tool grant: a registry tool id plus its own switch and config. */
+export interface AgentToolGrantView {
+  toolId: string;
+  enabled: boolean;
+  config?: Record<string, unknown>;
+}
+
+/** The system prompt: inline text or a prompt-file reference. */
+export interface AgentSystemPromptView {
+  kind?: string;
+  text?: string;
+  ref?: string;
+}
+
+/** The captain's team-CLI self-assembly allowlist. */
+export interface AgentTeamCLIView {
+  enabled?: boolean;
+  commands?: string[];
+}
+
+/** One agent (`GET /v1/agents`). */
+export interface AgentView {
+  tenantId?: string;
+  id: string;
+  name: string;
+  description?: string;
+  avatar?: AgentAvatarView;
+  defaultModel?: AgentModelBindingView;
+  tools?: AgentToolGrantView[];
+  systemPrompt?: AgentSystemPromptView;
+  teamCli?: AgentTeamCLIView;
+  skills?: string[];
+  archived?: boolean;
+}
+
+export interface AgentsResponse {
+  agents?: AgentView[];
+  issues?: SettingsIssue[];
+}
+
+/** The body of creating or updating an agent (`id` only on update). */
+export interface AgentWriteRequest {
+  id?: string;
+  name: string;
+  description?: string;
+  avatar?: AgentAvatarView;
+  defaultModel?: AgentModelBindingView;
+  tools?: AgentToolGrantView[];
+  systemPrompt?: AgentSystemPromptView;
+  teamCli?: AgentTeamCLIView;
+  skills?: string[];
+}
+
+/** One seat in a team. `inline` is a member defined on the spot; a stored
+ * agent is referenced by `agentId`. */
+export interface TeamMemberView {
+  agentId: string;
+  label?: string;
+  description?: string;
+  inline?: AgentView;
+}
+
+export interface TeamDefaultsView {
+  tools?: string[];
+  modelOverride?: AgentModelBindingView;
+}
+
+export interface TeamCapabilitiesView {
+  teamCli?: AgentTeamCLIView;
+}
+
+export interface FeatureBindingView {
+  port: string;
+  cli?: string;
+}
+
+/** One team (`GET /v1/teams`). `captain` is mandatory and unique; `members`
+ * are the additional seats (0..N, never the captain). */
+export interface AgentTeamView {
+  tenantId?: string;
+  id: string;
+  name: string;
+  description?: string;
+  captain: TeamMemberView;
+  members?: TeamMemberView[];
+  defaults?: TeamDefaultsView;
+  capabilities?: TeamCapabilitiesView;
+  featureBindings?: FeatureBindingView[];
+  archived?: boolean;
+  status?: string;
+  revision?: number;
+  hash?: string;
+}
+
+export interface AgentTeamsResponse {
+  teams?: AgentTeamView[];
+  issues?: SettingsIssue[];
+}
+
+/** The body of creating or updating a team (`id` only on update). */
+export interface AgentTeamWriteRequest {
+  id?: string;
+  name: string;
+  description?: string;
+  captain: TeamMemberView;
+  members?: TeamMemberView[];
+  defaults?: TeamDefaultsView;
+  capabilities?: TeamCapabilitiesView;
+  featureBindings?: FeatureBindingView[];
+}
+
+/** The agent/team registry surface. `KeelHttp` implements it; a transport that
+ * has no such surface (the scripted fixture) omits it and the store answers a
+ * readable refusal instead of inventing rows. */
+export interface AgentTeamApi {
+  listAgents(): Promise<AgentsResponse>;
+  createAgent(agent: AgentWriteRequest): Promise<AgentView>;
+  updateAgent(id: string, agent: AgentWriteRequest): Promise<AgentView>;
+  deleteAgent(id: string): Promise<void>;
+  listTeams(): Promise<AgentTeamsResponse>;
+  createTeam(team: AgentTeamWriteRequest): Promise<AgentTeamView>;
+  updateTeam(id: string, team: AgentTeamWriteRequest): Promise<AgentTeamView>;
+  deleteTeam(id: string): Promise<void>;
+  addTeamMember(id: string, agentId: string): Promise<AgentTeamView>;
+  removeTeamMember(id: string, agentId: string): Promise<AgentTeamView>;
 }
 
 /** The engine the UI runs against. `setConnection` is a client-side seam: the

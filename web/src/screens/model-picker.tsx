@@ -10,7 +10,7 @@
 // / ScrollArea / Separator) and every size a token: no hand-drawn pill, no
 // scrim, no z-index and no breakpoint in this file.
 import { signal, Text, View } from "nsh";
-import type { ModelSelection, ModelView } from "../data/contract";
+import type { AgentTeamView, ModelSelection, ModelView } from "../data/contract";
 import { store } from "../data/store";
 import {
   checkSurfaceSwitch,
@@ -52,6 +52,12 @@ import {
 
 export const pickerOpen = signal(false);
 
+/** The picker's start mode (change keel-agent-team-v1): 标准模式 picks a model
+ * and starts a plain session; 团队模式 picks an agent team whose captain's
+ * default model runs the session. Opening the picker on a team session starts
+ * on team mode; elsewhere it starts on standard. */
+export const pickerMode = signal<"standard" | "team">("standard");
+
 /** The registry note's raw-detail disclosure: closed by default, and closed
  * again on every open, so the next picker always starts quiet. */
 const errorDetailOpen = signal(false);
@@ -61,10 +67,17 @@ export const openModelPicker = () => {
   // detail is a disclosure, never the default face of the dialog.
   errorDetailOpen.set(false);
   pickerOpen.set(true);
+  // A team session re-opens on team mode; a plain one starts on standard — the
+  // dialog then shows the mode the session is actually running.
+  pickerMode.set(store.sessionTeam() ? "team" : "standard");
   // The options come from the resolved registry; load it if this is the first
   // look (the settings page shares the same load).
   void store.loadRegistry();
   if (!store.settings()) void store.loadModelsSettings();
+  // Team mode resolves the captain's default model, so both registries load
+  // behind the dialog (their failures are the rows' own error faces).
+  void store.loadAgents();
+  void store.loadTeams();
 };
 
 /** The level a model is picked with: the choice already naming this model,
@@ -87,10 +100,34 @@ export function defaultReasoningFor(model: ModelView, current: ModelSelection | 
 
 /** A model whose surface differs from the open session's: applying it starts a
  * new session, it never replaces the open one's history. */
-const pendingSwitch = signal<{ model: ModelView; level?: string; reason: string } | null>(null);
+const pendingSwitch = signal<{ model: ModelView; level?: string; reason: string; team?: AgentTeamView } | null>(
+  null,
+);
 
 const providerOf = (model: ModelView) =>
   store.providers().find((provider) => provider.providerId === model.providerId) ?? null;
+
+/** The team's captain as a stored agent (or its inline definition). */
+const captainOf = (team: AgentTeamView) =>
+  team.captain?.inline ?? store.agents().find((agent) => agent.id === team.captain?.agentId) ?? null;
+
+/** What picking a team applies: the captain's default model as the session's
+ * selection, or the reason resulting in nothing being applied. A team without
+ * a runnable conversation model cannot start a session — the row says so
+ * instead of guessing. */
+export const captainSelectionOf = (team: AgentTeamView): { model: ModelView | null; note: string | null } => {
+  const binding = captainOf(team)?.defaultModel;
+  if (!binding?.modelId) return { model: null, note: "队长还没有默认模型：先给队长配一个对话模型。" };
+  const model =
+    store.models().find(
+      (row) => row.modelId === binding.modelId && (!binding.providerId || row.providerId === binding.providerId),
+    ) ?? null;
+  if (!model) return { model: null, note: "队长的默认模型不在当前可用列表里，无法以此团队开始会话。" };
+  if (resolveSurface(model, providerOf(model)).kind !== "llm") {
+    return { model: null, note: "队长的默认模型不是对话模型，无法以此团队开始会话。" };
+  }
+  return { model, note: null };
+};
 
 const selectModel = (model: ModelView, reasoningLevel?: string) => {
   const current = store.sessionSelection() ?? store.tenantSelection();
@@ -109,6 +146,31 @@ const selectModel = (model: ModelView, reasoningLevel?: string) => {
   const next: ModelSelection = { providerId: model.providerId, modelId: model.modelId };
   if (level) next.reasoningLevel = level;
   store.setSessionSelection(next);
+  // Picking a model by hand is standard mode: the session stops being a team
+  // session (the captain's model would no longer be what runs).
+  store.setSessionTeam(null);
+};
+
+/** Picking a team: the session runs the captain's default model and carries
+ * the team marker. A captain model on another panel needs a new session, so it
+ * rides the same confirmation card as a cross-panel model switch. */
+const selectTeam = (team: AgentTeamView) => {
+  const resolved = captainSelectionOf(team);
+  if (!resolved.model) return; // the row's action is disabled instead
+  const current = store.sessionSelection() ?? store.tenantSelection();
+  const currentKind = resolveSelectionSurface(current, store.models(), store.providers()).kind;
+  if (currentKind !== "llm") {
+    pendingSwitch.set({
+      model: resolved.model,
+      reason: "团队会话在对话面板中运行；当前会话是另一种面板。",
+      team,
+    });
+    return;
+  }
+  pendingSwitch.set(null);
+  store.setSessionSelection({ providerId: resolved.model.providerId, modelId: resolved.model.modelId });
+  store.setSessionTeam(team);
+  pickerOpen.set(false);
 };
 
 const confirmSurfaceSwitch = async () => {
@@ -120,6 +182,7 @@ const confirmSurfaceSwitch = async () => {
   const next: ModelSelection = { providerId: pending.model.providerId, modelId: pending.model.modelId };
   if (pending.level) next.reasoningLevel = pending.level;
   store.setSessionSelection(next);
+  store.setSessionTeam(pending.team ?? null);
   pickerOpen.set(false);
 };
 
@@ -135,9 +198,19 @@ const levelOptions = (levels: string[]) => levels.map((level) => ({ value: level
 export function SessionModelChip(props: { iconOnly?: boolean } = {}) {
   const session = () => store.sessionSelection();
   const tenant = () => store.tenantSelection();
+  const team = () => store.sessionTeam();
   const effective = () => session() ?? tenant();
-  const label = () => selectionDisplay(effective()) || "选择模型";
-  const detail = () => selectionLabel(effective());
+  const label = () => {
+    const current = team();
+    if (current) return `团队 · ${current.name}`;
+    return selectionDisplay(effective()) || "选择模型";
+  };
+  const detail = () => {
+    const current = team();
+    const line = selectionLabel(effective());
+    if (current) return line ? `团队 ${current.id} · 队长模型 ${line}` : `团队 ${current.id}`;
+    return line;
+  };
   return (
     <If
       when={!props.iconOnly}
@@ -368,6 +441,103 @@ function PickerGroups() {
   );
 }
 
+/** Team mode: the tenant's teams, each with its captain and the model the
+ * session would run. A team whose captain has no runnable conversation model
+ * says so and cannot start a session. */
+function TeamListBody() {
+  const teams = () => store.teams();
+  const error = () => store.teamsError();
+  return (
+    <View style={{ gap: space.sm }}>
+      <If when={!!error()}>
+        <Text style={{ fontSize: typeScale.sm, color: color.danger }}>{error() ?? ""}</Text>
+      </If>
+      <If when={store.teamsLoading() && teams().length === 0}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>正在读取团队…</Text>
+      </If>
+      <If when={!error() && !store.teamsLoading() && teams().length === 0}>
+        <Text
+          style={{
+            fontSize: typeScale.sm,
+            lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+            color: color.mutedForeground,
+          }}
+        >
+          还没有团队。团队必须要有一位队长——先到「设置 › 团队」创建一个，再回来以团队模式开始会话。
+        </Text>
+      </If>
+      <Each of={teams()} key={(team) => team.id}>
+        {(team) => <PickerTeamRow team={team()} />}
+      </Each>
+    </View>
+  );
+}
+
+function PickerTeamRow(props: { team: AgentTeamView }) {
+  const resolved = () => captainSelectionOf(props.team);
+  const captainName = () => captainOf(props.team)?.name ?? props.team.captain?.agentId ?? "未命名队长";
+  const members = () => props.team.members?.length ?? 0;
+  const teamCli = () => props.team.capabilities?.teamCli?.enabled === true;
+  return (
+    <Card size="sm" testID={`picker-team-${props.team.id}`} accessibilityLabel={`团队 ${props.team.name}`}>
+      <CardContent>
+        <View style={{ gap: space.xs }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+              {props.team.name}
+            </Text>
+            <Badge variant="outline" label={`队长 ${captainName()}`} />
+            <If when={members() > 0}>
+              <Badge variant="outline" label={`成员 ${members()}`} />
+            </If>
+            <If when={teamCli()}>
+              <Badge variant="outline" label="队长 CLI 已启用" />
+            </If>
+          </View>
+          <If when={!!props.team.description}>
+            <Text
+              style={{
+                fontSize: typeScale.xs,
+                lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+                color: color.mutedForeground,
+              }}
+            >
+              {props.team.description ?? ""}
+            </Text>
+          </If>
+          <If
+            when={!!resolved().model}
+            else={
+              <Text
+                style={{
+                  fontSize: typeScale.xs,
+                  lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+                  color: color.warning,
+                }}
+              >
+                {resolved().note ?? ""}
+              </Text>
+            }
+          >
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+              {`将以 ${displayNameOf(resolved().model?.modelId ?? "")} 开始对话`}
+            </Text>
+          </If>
+          <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+            <Button
+              testID={`picker-team-start-${props.team.id}`}
+              size="sm"
+              label="以此团队开始"
+              disabled={!resolved().model}
+              onPress={() => selectTeam(props.team)}
+            />
+          </View>
+        </View>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** The picker dialog: the session's own selection next to the tenant default
  * (read-only here — the settings page is the tenant document's only writer),
  * then the selectable models with their reasoning levels. */
@@ -427,15 +597,40 @@ export function SessionModelPicker() {
             label="恢复默认"
             accessibilityLabel="恢复默认"
             tooltip={<Tooltip label="清除本会话的模型选择" />}
-            disabled={!session()}
+            disabled={!session() && !store.sessionTeam()}
             onPress={() => {
               store.setSessionSelection(null);
+              store.setSessionTeam(null);
             }}
           />
         </View>
       }
     >
       <View style={{ gap: space.lg }}>
+        {/* 启动模式：标准模式选模型；团队模式选团队，以队长的默认模型运行。 */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <Button
+            testID="picker-mode-standard"
+            size="sm"
+            variant={pickerMode() === "standard" ? "default" : "outline"}
+            label="标准模式"
+            selected={pickerMode() === "standard"}
+            onPress={() => pickerMode.set("standard")}
+          />
+          <Button
+            testID="picker-mode-team"
+            size="sm"
+            variant={pickerMode() === "team" ? "default" : "outline"}
+            label="团队模式"
+            selected={pickerMode() === "team"}
+            onPress={() => pickerMode.set("team")}
+          />
+          <If when={pickerMode() === "team"}>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+              以队长的默认模型运行；队长可以用 CLI 自行管理成员。
+            </Text>
+          </If>
+        </View>
         <View style={{ gap: space.xs }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
             <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.mutedForeground }}>
@@ -452,6 +647,14 @@ export function SessionModelPicker() {
               </Text>
             </If>
           </View>
+          <If when={!!store.sessionTeam()}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.mutedForeground }}>
+                启动模式
+              </Text>
+              <Badge variant="outline" label={`团队 · ${store.sessionTeam()?.name ?? ""}`} />
+            </View>
+          </If>
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
             <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.mutedForeground }}>
               租户默认
@@ -554,33 +757,45 @@ export function SessionModelPicker() {
           </Card>
         </If>
         <Separator />
-        {/* The list's own viewport, with the scroll cue the sliced row needs:
-            the content keeps a bottom inset so the last row can clear the
-            gradient, and the gradient (transparent → the popover's own face)
-            fades whatever is below the fold instead of cutting it. The strip
-            is invisible when nothing scrolls under it, so a short list shows
-            no false "more below" hint. */}
-        <View style={{ position: "relative" }}>
+        <If when={pickerMode() === "standard"}>
+          {/* The list's own viewport, with the scroll cue the sliced row needs:
+              the content keeps a bottom inset so the last row can clear the
+              gradient, and the gradient (transparent → the popover's own face)
+              fades whatever is below the fold instead of cutting it. The strip
+              is invisible when nothing scrolls under it, so a short list shows
+              no false "more below" hint. */}
+          <View style={{ position: "relative" }}>
+            <ScrollArea
+              maxHeight={380}
+              fade
+              accessibilityLabel="可选模型"
+              contentStyle={{ paddingBottom: space["2xl"] }}
+            >
+              <PickerGroups />
+            </ScrollArea>
+            <View
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: space["2xl"],
+                pointerEvents: "none",
+                backgroundImage: `linear-gradient(to top, ${alpha(color.popover, 1)}, ${alpha(color.popover, 0)})`,
+              }}
+            />
+          </View>
+        </If>
+        <If when={pickerMode() === "team"}>
           <ScrollArea
             maxHeight={380}
             fade
-            accessibilityLabel="可选模型"
+            accessibilityLabel="可选团队"
             contentStyle={{ paddingBottom: space["2xl"] }}
           >
-            <PickerGroups />
+            <TeamListBody />
           </ScrollArea>
-          <View
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: space["2xl"],
-              pointerEvents: "none",
-              backgroundImage: `linear-gradient(to top, ${alpha(color.popover, 1)}, ${alpha(color.popover, 0)})`,
-            }}
-          />
-        </View>
+        </If>
       </View>
     </Dialog>
   );

@@ -1,0 +1,93 @@
+id: keel.model
+version: 1.0.0
+kind: in-process
+description: "Model registry plugin: reads the configured providers and their models (families, session surfaces, selectability) through the same resolved projection the settings page serves."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  cli:
+    - path: [model, providers]
+      summary: "List every configured provider with its family, executable state and model count."
+      description: "Reads GET /v1/providers — the resolved settings projection. It shows no credential material; a provider whose credential this process cannot resolve stays visible with its issue, so an operator can read why it is unavailable. It does not edit configuration: the settings page is the document's only writer."
+      args_schema:
+        type: object
+        properties:
+          json:
+            type: boolean
+            description: "print the raw response instead of a table"
+      output_schema:
+        type: object
+        properties:
+          providers:
+            type: array
+            items:
+              type: object
+              properties:
+                providerId: { type: string }
+                name: { type: string }
+                providerType: { type: string }
+                executable: { type: boolean }
+                selectable: { type: boolean }
+          issues:
+            type: array
+        required: [providers]
+      permissions: [model.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model providers", "keel model providers --json"]
+    - path: [model, list]
+      summary: "List the flat model registry: provider/model, family, session surface, selectability."
+      description: "Reads GET /v1/models — the executable registry projection. It includes complete, enabled models that are not session-selectable (a decision model carries selectable=false) so the whole capability surface is visible. It does not filter by what a picker would offer; that filter is the client's."
+      args_schema:
+        type: object
+        properties:
+          json:
+            type: boolean
+            description: "print the raw response instead of a table"
+      output_schema:
+        type: object
+        properties:
+          models:
+            type: array
+            items:
+              type: object
+              properties:
+                providerId: { type: string }
+                modelId: { type: string }
+                providerType: { type: string }
+                surfaceKind: { type: string }
+                selectable: { type: boolean }
+          issues:
+            type: array
+        required: [models]
+      permissions: [model.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model list", "keel model list --json"]
+    - path: [model, show]
+      summary: "Show one model by \"provider/model\" (a bare model id must be unique)."
+      description: "Prints the model's full resolved view as JSON: family, surface, API type, properties, option specs, selectability and its issues. An ambiguous bare id names the candidate providers instead of guessing."
+      args_schema:
+        type: object
+        properties:
+          id:
+            type: string
+            description: "\"providerId/modelId\", or a bare modelId that exactly one provider carries"
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          providerId: { type: string }
+          modelId: { type: string }
+          providerType: { type: string }
+          surfaceKind: { type: string }
+          options: { type: object }
+      permissions: [model.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model show s2api/deepseek-v4.1-flash"]
+source:
+  type: builtin

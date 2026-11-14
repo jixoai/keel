@@ -460,3 +460,91 @@ CREATE TABLE IF NOT EXISTS plugin_audit (
 
 CREATE INDEX IF NOT EXISTS plugin_audit_tenant ON plugin_audit (tenant_id, audit_id);
 CREATE INDEX IF NOT EXISTS plugin_audit_plugin ON plugin_audit (plugin_id, audit_id);
+
+-- Agent registry (change keel-agent-team-v1, P2). One row per agent per tenant.
+-- The configuration is a single JSON document — the same "everything is a file"
+-- unit the CLI edits and a session freezes — because the agent schema is owned
+-- by internal/agentteam and this layer must not keep a second dialect of it.
+-- `archived` is lifted out: it is a lifecycle column the list filters on, and
+-- keeping it inside the document would make "list active agents" a JSON scan.
+-- No foreign key to tenants: the registry belongs to the tenant the caller
+-- names, exactly like model_settings (a deployment that never created a tenants
+-- row still has agents).
+-- Reconciliation with the unreleased earlier shape (same discipline as the
+-- submissions and usage_ledger migrations above): a database that already holds
+-- an `agents` table without the document column turns the CREATE below into a
+-- silent no-op, and every query then fails at request time with "column
+-- document does not exist" (observed on a dev database that carried an
+-- abandoned prototype table). Resolve it at startup, where the outcome is
+-- either a fix or a loud refusal:
+--   * empty leftover -> drop it (no data is lost) and create the canonical row;
+--   * rows present   -> refuse the migration naming the conflict, so keel serve
+--                       does not start and serve 500s.
+DO $$
+BEGIN
+    IF to_regclass('public.agents') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'agents' AND column_name = 'document'
+       )
+    THEN
+        IF EXISTS (SELECT 1 FROM public.agents) THEN
+            RAISE EXCEPTION 'agents: an incompatible agents table exists (no document column) and holds rows; migrate or drop it before starting keel';
+        END IF;
+        DROP TABLE public.agents CASCADE;
+    END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS agents (
+    tenant_id  uuid NOT NULL,
+    agent_id   text NOT NULL,
+    document   jsonb NOT NULL,
+    archived   boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS agents_by_tenant ON agents (tenant_id, updated_at DESC);
+
+-- Agent teams (P3). The team configuration is one DB-backed file: the document
+-- is exactly what the captain CLI edits and the session start path freezes, so
+-- members and the captain live inside it and nowhere else (a member table would
+-- be a second truth to keep in sync). revision and content_hash are lifted out
+-- because they are the change identity clients compare and the optimistic guard
+-- for writes; they are always derived from the document by agentteam.Seal, never
+-- written by a client.
+-- The same reconciliation for teams: an earlier agent_teams table carried
+-- captain_id/config/config_revision/config_hash and no document, which the
+-- CREATE below would skip. Empty leftovers are dropped; a table with rows is a
+-- loud startup refusal instead of a silent runtime 500.
+DO $$
+BEGIN
+    IF to_regclass('public.agent_teams') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'agent_teams' AND column_name = 'document'
+       )
+    THEN
+        IF EXISTS (SELECT 1 FROM public.agent_teams) THEN
+            RAISE EXCEPTION 'agent_teams: an incompatible agent_teams table exists (no document column) and holds rows; migrate or drop it before starting keel';
+        END IF;
+        DROP TABLE public.agent_teams CASCADE;
+    END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS agent_teams (
+    tenant_id    uuid NOT NULL,
+    team_id      text NOT NULL,
+    revision     bigint NOT NULL DEFAULT 0,
+    content_hash text NOT NULL DEFAULT '',
+    document     jsonb NOT NULL,
+    archived     boolean NOT NULL DEFAULT false,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, team_id)
+);
+
+CREATE INDEX IF NOT EXISTS agent_teams_by_tenant ON agent_teams (tenant_id, updated_at DESC);

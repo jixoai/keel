@@ -1,0 +1,172 @@
+id: keel.team
+version: 1.0.0
+kind: in-process
+description: "Agent-team plugin: manages teams (a mandatory captain plus members) behind /v1/teams and the keel team CLI, and enforces the captain's own team-CLI switch."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  cli:
+    - path: [team, list]
+      summary: "List teams: id, name, captain, member count."
+      description: "Reads GET /v1/teams. Captains render as the captain agent's id (and inline captains as inline); the list does not resolve every member. Archived teams carry their archived mark."
+      args_schema:
+        type: object
+        properties:
+          json:
+            type: boolean
+            description: "print the raw response instead of a table"
+      output_schema:
+        type: object
+        properties:
+          teams:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+        required: [teams]
+      permissions: [team.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent, team_captain]
+      examples: ["keel team list", "keel team list --json"]
+    - path: [team, show]
+      summary: "Show one team's full document as JSON, captain first."
+      description: "Reads GET /v1/teams/{id}: the mandatory captain seat, members, defaults (tool grants, model override) and capabilities (the captain's team CLI switch and its command allowlist)."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          captain: { type: object }
+          members: { type: array }
+      permissions: [team.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent, team_captain]
+      examples: ["keel team show team_9a02…"]
+    - path: [team, create]
+      summary: "Create a team; --captain is mandatory (a team without a captain is invalid)."
+      description: "POSTs /v1/teams. The captain must be an existing agent, is seated as the captain field (never among members), and is the only agent that may manage the team through its own team CLI. Arbitrary cap: a member may be a stored agent (--agent) or an inline definition (--inline-agent)."
+      args_schema:
+        type: object
+        properties:
+          name: { type: string }
+          id: { type: string }
+          captain: { type: string }
+          description: { type: string }
+          member: { type: string }
+          tool: { type: string }
+          team_cli: { type: boolean }
+          team_cli_commands: { type: string }
+          json: { type: boolean }
+        required: [name, captain]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          captain: { type: object }
+        required: [id]
+      permissions: [team.write]
+      danger: write
+      idempotent: false
+      callable_by: [ui]
+      examples: ["keel team create --name 评审小组 --captain agent_3f1c… --team-cli --team-cli-commands member.add"]
+    - path: [team, update]
+      summary: "Update a team; fields not passed are preserved."
+      description: "PUTs /v1/teams/{id} as a read-modify-write under the current revision (revision CAS: a concurrent writer is refused with 409). The captain seat cannot be vacated; pass --captain to change the captain."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          captain: { type: string }
+          description: { type: string }
+          team_cli: { type: boolean }
+          team_cli_commands: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+        required: [id]
+      permissions: [team.write]
+      danger: write
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel team update team_9a02… --name 发布评审小组"]
+    - path: [team, delete]
+      summary: "Delete a team (the agents it seated are untouched)."
+      description: "DELETEs /v1/teams/{id}. Deleting a team removes only the team document; the member agents stay in the library. This is not the way to remove one member — use member remove."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          deleted: { type: boolean }
+      permissions: [team.write]
+      danger: destructive
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel team delete team_9a02…"]
+    - path: [team, member, add]
+      summary: "Seat an agent on a team (a captain may seat members through its own team CLI)."
+      description: "POSTs /v1/teams/{id}/members. A captain acting as itself (--as <captainId>) is allowed only when the team enables its team CLI and the allowlist covers member.add; the operator surface is not gated by that switch. The captain seat itself is never a member."
+      args_schema:
+        type: object
+        properties:
+          team: { type: string }
+          agent: { type: string }
+          inline_agent: { type: string }
+          label: { type: string }
+          as: { type: string }
+          json: { type: boolean }
+        required: [team, agent]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          members:
+            type: array
+        required: [id]
+      permissions: [team.write]
+      danger: write
+      idempotent: false
+      callable_by: [ui, team_captain]
+      examples: ["keel team member add team_9a02… agent_77bd… --as agent_3f1c…"]
+    - path: [team, member, remove]
+      summary: "Unseat an agent from a team (a captain may unseat members through its own team CLI)."
+      description: "DELETEs /v1/teams/{id}/members/{agentId}, under the same captain gate as member add. The captain cannot be removed from its own seat by this command; change the captain instead."
+      args_schema:
+        type: object
+        properties:
+          team: { type: string }
+          agent: { type: string }
+          as: { type: string }
+        required: [team, agent]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          members:
+            type: array
+        required: [id]
+      permissions: [team.write]
+      danger: destructive
+      idempotent: true
+      callable_by: [ui, team_captain]
+      examples: ["keel team member remove team_9a02… agent_77bd… --as agent_3f1c…"]
+source:
+  type: builtin

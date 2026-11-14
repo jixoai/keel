@@ -35,7 +35,7 @@
 // NSH components run once: every reactive read sits inside JSX, an `<If>` or a
 // function the JSX calls — nothing is copied into a local at the top.
 import { cleanup, effect, host, openUrl, platform, signal, Text, View, WebView } from "nsh";
-import type { PluginStatusView, TriggerSpecView, TriggerStatusView } from "../data/contract";
+import type { CliCapabilityView, PluginStatusView, TriggerSpecView, TriggerStatusView } from "../data/contract";
 import { store } from "../data/store";
 import { displayNameOf, formatTime, pluginStateLabel } from "../data/wire";
 import { Icon } from "../ui/icons";
@@ -192,15 +192,15 @@ const navigate = (path: string) => {
  * state. */
 const pluginStateVariant = (state: string): BadgeVariant => {
   switch (state) {
-    case "active":
-    case "ready":
+    case "enabled":
       return "success";
-    case "pending":
-      return "warning";
-    case "failed":
-      return "destructive";
-    case "stopped":
+    case "installed":
+    case "disabled":
+    case "uninstalled":
       return "secondary";
+    case "failed":
+    case "invalid":
+      return "destructive";
     default:
       return "outline";
   }
@@ -446,12 +446,64 @@ function DetailText(props: { text: string; tone?: "muted" | "danger" }) {
   );
 }
 
+// ---- the declared CLI capability tree --------------------------------------
+
+/** The danger badge of one capability: the closed set read|write|destructive,
+ * rendered by what a caller must expect (a retry hint, a human confirmation),
+ * never by colour alone. */
+const dangerVariant = (danger: string | undefined): BadgeVariant =>
+  danger === "destructive" ? "destructive" : danger === "write" ? "warning" : "outline";
+const dangerLabel = (danger: string | undefined): string =>
+  danger === "destructive" ? "破坏性" : danger === "write" ? "写入" : "只读";
+
+/** One `callable_by` value in the reader's words. */
+const callerLabel = (caller: string): string =>
+  caller === "team_captain" ? "队长" : caller === "agent" ? "Agent" : "人工";
+
+/** One declared CLI capability (`provides.cli`): the command path, the risk
+ * attributes the manifest declares, and the one-line summary. The tree is the
+ * manifest's own declaration — nothing here invents a command the plugin does
+ * not declare, and nothing the plugin declares is hidden. */
+function CliCapabilityRow(props: { capability: CliCapabilityView }) {
+  const command = `keel ${props.capability.path.join(" ")}`;
+  const callers = (props.capability.callable_by ?? []).map(callerLabel).join(" · ");
+  return (
+    <View style={{ gap: space.xxs, paddingVertical: space.xs }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <Text
+          style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.foreground, userSelect: "text" }}
+        >
+          {command}
+        </Text>
+        <Badge variant={dangerVariant(props.capability.danger)} label={dangerLabel(props.capability.danger)} />
+        <If when={props.capability.idempotent === true}>
+          <Badge variant="outline" label="可重试" />
+        </If>
+        <If when={callers.length > 0}>
+          <Text style={{ fontSize: typeScale["2xs"], color: color.mutedForeground }}>{`可调用：${callers}`}</Text>
+        </If>
+      </View>
+      <Text
+        style={{
+          fontSize: typeScale.xs,
+          lineHeight: Math.round(typeScale.xs * lineHeight.normal),
+          color: color.mutedForeground,
+        }}
+      >
+        {props.capability.summary}
+      </Text>
+    </View>
+  );
+}
+
 function PluginCard(props: { plugin: () => PluginStatusView }) {
   const state = () => props.plugin().state ?? "unknown";
   const tools = () => props.plugin().tools ?? [];
   const hooks = () => props.plugin().hooks ?? [];
   const diagnostics = () => props.plugin().diagnostics ?? [];
   const triggers = () => props.plugin().triggers ?? [];
+  const provides = () => props.plugin().provides;
+  const cli = () => provides()?.cli ?? [];
   const detail = () => detailShown(props.plugin().id);
 
   /** The trigger surface in one phrase: how many, whether they are armed, and
@@ -562,7 +614,7 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
               </If>
             </View>
             <View style={{ flexDirection: "row", gap: space["2xl"], flexWrap: "wrap" }}>
-              <Fact label="提供" value={(props.plugin().provides ?? []).join(" · ") || "—"} />
+              <Fact label="提供" value={(provides()?.tools ?? []).join(" · ") || "—"} />
               <Fact label="依赖" value={(props.plugin().requires ?? []).join(" · ") || "无"} />
               <Fact label="效果" value={(props.plugin().effects ?? []).join(" · ") || "—"} />
             </View>
@@ -580,6 +632,20 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
             </If>
             <If when={triggers().length > 0}>
               <TriggerTable pluginId={props.plugin().id} triggers={triggers()} />
+            </If>
+            {/* The declared CLI capability tree: every command the plugin
+                contributes below `keel`, with the risk attributes the manifest
+                declares. This is the "能力树"面 — the same declaration --help
+                and the agent tool face render. */}
+            <If when={cli().length > 0}>
+              <View style={{ gap: space.xxs }}>
+                <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                  {`CLI 能力 ${cli().length} 条`}
+                </Text>
+                <Each of={cli()} key={(capability) => capability.path.join(" ")}>
+                  {(capability) => <CliCapabilityRow capability={capability()} />}
+                </Each>
+              </View>
             </If>
             <If when={diagnostics().length > 0}>
               <View style={{ gap: space.xxs }}>

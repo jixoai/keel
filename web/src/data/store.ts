@@ -8,6 +8,12 @@ import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
 import { KeelApiError, KeelHttp } from "./http";
 import type {
+  AgentTeamApi,
+  AgentTeamsResponse,
+  AgentTeamView,
+  AgentTeamWriteRequest,
+  AgentView,
+  AgentWriteRequest,
   AttachmentRef,
   ConnectionState,
   ConversationView,
@@ -78,6 +84,19 @@ interface Client extends SettingsApi {
   source(sessionId: string): EventSource;
   commands(sessionId: string): UiCommands;
   tail?(sessionId: string, lastSeq: number, count?: number): Promise<WireEvent[]>;
+  /** The agent/team registry surface. Optional: the scripted fixture has no
+   * such surface, and the store answers a readable refusal instead of rows it
+   * did not read. */
+  listAgents?: AgentTeamApi["listAgents"];
+  createAgent?: AgentTeamApi["createAgent"];
+  updateAgent?: AgentTeamApi["updateAgent"];
+  deleteAgent?: AgentTeamApi["deleteAgent"];
+  listTeams?: AgentTeamApi["listTeams"];
+  createTeam?: AgentTeamApi["createTeam"];
+  updateTeam?: AgentTeamApi["updateTeam"];
+  deleteTeam?: AgentTeamApi["deleteTeam"];
+  addTeamMember?: AgentTeamApi["addTeamMember"];
+  removeTeamMember?: AgentTeamApi["removeTeamMember"];
 }
 
 const newRequestId = () => {
@@ -224,14 +243,39 @@ class KeelStore {
   /** The last manual fire's outcome, per trigger id. */
   readonly fireOutcome = signal<{ triggerId: string; ok: boolean; text: string } | null>(null);
 
+  /** `GET /v1/agents` — the tenant's agents (settings「Agents」). */
+  readonly agents = signal<AgentView[]>([]);
+  readonly agentsLoading = signal(false);
+  readonly agentsError = signal<string | null>(null);
+  readonly agentsSaving = signal(false);
+  /** A create/update/delete refusal (the server's reason, kept next to the
+   * form so the reader's input is still there). */
+  readonly agentsActionError = signal<string | null>(null);
+
+  /** `GET /v1/teams` — the tenant's teams (settings「团队」). */
+  readonly teams = signal<AgentTeamView[]>([]);
+  readonly teamsLoading = signal(false);
+  readonly teamsError = signal<string | null>(null);
+  readonly teamsSaving = signal(false);
+  readonly teamsActionError = signal<string | null>(null);
+
   /** The open session's model selection (an input fact, separate from the
    * tenant default in the settings document). */
   readonly sessionSelection = signal<ModelSelection | null>(null);
+
+  /** The open session's agent team when it was started in team mode: the
+   * session's inputs run the captain's default model (the selection above),
+   * and the marker names the team. In-memory, like the session selection. */
+  readonly sessionTeam = signal<AgentTeamView | null>(null);
 
   /** The development-only transport; constructed only when a dev launch asked
    * for it, so a product run never seeds any demo state. */
   private fixture: FixtureClient | null = null;
   private http: KeelHttp | null = null;
+  /** Test/host seam for the agent/team registry (the settings harness answers
+   * it in memory so the real `KeelHttp` parsing runs without a network).
+   * `null` = the app's own transport. */
+  private agentTeamClient: AgentTeamApi | null = null;
   /** The transport every call goes through. A real HTTP client from the start:
    * before (and without) a live service its calls fail with the network's own
    * reason — the store never swaps in a fabricated one. */
@@ -245,6 +289,8 @@ class KeelStore {
   private answered = new Set<string>();
   /** Per-session selections, kept while the session list lives in memory. */
   private sessionSelections = new Map<string, ModelSelection>();
+  /** Per-session team markers, same lifetime as the selections above. */
+  private sessionTeams = new Map<string, AgentTeamView>();
   /** Per-session scroll memory (C4): intent plus the offset it was seen at. */
   private scrollStates = new Map<string, ScrollState>();
   /** The turn whose failure the reader closed (C6): dismissal hides the banner
@@ -599,6 +645,18 @@ class KeelStore {
     this.sessionSelection.set(selection);
   }
 
+  /** Set (or clear) the open session's team marker. Picking a model in
+   * standard mode clears it (the session stops being a team session); picking
+   * a team sets it together with the captain's selection. Picking a model in
+   * standard mode is the caller's business — this method only records. */
+  setSessionTeam(team: AgentTeamView | null) {
+    const sessionId = this.activeId();
+    if (!sessionId) return;
+    if (team) this.sessionTeams.set(sessionId, team);
+    else this.sessionTeams.delete(sessionId);
+    this.sessionTeam.set(team);
+  }
+
   // ---- secrets ------------------------------------------------------------
 
   async loadSecrets() {
@@ -693,6 +751,180 @@ class KeelStore {
     }
   }
 
+  // ---- agents & teams (change keel-agent-team-v1) -------------------------
+  //
+  // One store, the same shape as the other settings faces: a read fills its
+  // list + error, a write runs with its `*Saving` flag, and a refusal lands in
+  // `*ActionError` (the dialog stays open and keeps the reader's input). The
+  // transport is the app's own `KeelHttp`; the harness may install a seam so
+  // the same parsing runs without a network.
+
+  /** Test/host seam: answer the agent/team registry without a network. `null`
+   * restores the app's own transport. */
+  setAgentTeamTransport(client: AgentTeamApi | null): void {
+    this.agentTeamClient = client;
+  }
+
+  private teamTransport(): AgentTeamApi {
+    const client = this.agentTeamClient ?? this.client;
+    if (typeof client.listAgents !== "function") {
+      throw new Error("当前服务端不支持 Agent 与团队管理。");
+    }
+    return client as AgentTeamApi;
+  }
+
+  async loadAgents() {
+    if (this.agentsLoading()) return;
+    this.agentsLoading.set(true);
+    this.agentsError.set(null);
+    try {
+      const view = await this.teamTransport().listAgents();
+      this.agents.set(view.agents ?? []);
+    } catch (error) {
+      this.agentsError.set(messageOf(error));
+    } finally {
+      this.agentsLoading.set(false);
+    }
+  }
+
+  /** Create (no `id`) or update (with `id`). The list reloads on success, so a
+   * card always shows what the server stored, not what was typed. */
+  async saveAgent(agent: AgentWriteRequest, id?: string): Promise<boolean> {
+    if (this.agentsSaving()) return false;
+    this.agentsSaving.set(true);
+    this.agentsActionError.set(null);
+    try {
+      const transport = this.teamTransport();
+      const saved = id ? await transport.updateAgent(id, agent) : await transport.createAgent(agent);
+      await this.loadAgents();
+      this.flash({
+        tone: "success",
+        text: id ? `Agent 已保存：${saved.name || agent.name}` : `Agent 已创建：${saved.name || agent.name}`,
+      });
+      return true;
+    } catch (error) {
+      this.agentsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.agentsSaving.set(false);
+    }
+  }
+
+  /** `DELETE /v1/agents/{id}`. A team that references the agent refuses the
+   * delete; the server's reason is kept readable in `agentsActionError`. */
+  async deleteAgent(id: string): Promise<boolean> {
+    if (this.agentsSaving()) return false;
+    this.agentsSaving.set(true);
+    this.agentsActionError.set(null);
+    try {
+      await this.teamTransport().deleteAgent(id);
+      await this.loadAgents();
+      this.flash({ tone: "success", text: `Agent 已删除：${id}` });
+      return true;
+    } catch (error) {
+      this.agentsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.agentsSaving.set(false);
+    }
+  }
+
+  clearAgentActionError() {
+    this.agentsActionError.set(null);
+  }
+
+  async loadTeams() {
+    if (this.teamsLoading()) return;
+    this.teamsLoading.set(true);
+    this.teamsError.set(null);
+    try {
+      const view: AgentTeamsResponse = await this.teamTransport().listTeams();
+      this.teams.set(view.teams ?? []);
+    } catch (error) {
+      this.teamsError.set(messageOf(error));
+    } finally {
+      this.teamsLoading.set(false);
+    }
+  }
+
+  async saveTeam(team: AgentTeamWriteRequest, id?: string): Promise<boolean> {
+    if (this.teamsSaving()) return false;
+    this.teamsSaving.set(true);
+    this.teamsActionError.set(null);
+    try {
+      const transport = this.teamTransport();
+      const saved = id ? await transport.updateTeam(id, team) : await transport.createTeam(team);
+      await this.loadTeams();
+      this.flash({
+        tone: "success",
+        text: id ? `团队已保存：${saved.name || team.name}` : `团队已创建：${saved.name || team.name}`,
+      });
+      return true;
+    } catch (error) {
+      this.teamsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.teamsSaving.set(false);
+    }
+  }
+
+  async deleteTeam(id: string): Promise<boolean> {
+    if (this.teamsSaving()) return false;
+    this.teamsSaving.set(true);
+    this.teamsActionError.set(null);
+    try {
+      await this.teamTransport().deleteTeam(id);
+      await this.loadTeams();
+      this.flash({ tone: "success", text: `团队已删除：${id}` });
+      return true;
+    } catch (error) {
+      this.teamsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.teamsSaving.set(false);
+    }
+  }
+
+  /** Add one seat through the member route (the team edit path uses it when
+   * only the roster changed). */
+  async addTeamMember(teamId: string, agentId: string): Promise<boolean> {
+    if (this.teamsSaving()) return false;
+    this.teamsSaving.set(true);
+    this.teamsActionError.set(null);
+    try {
+      await this.teamTransport().addTeamMember(teamId, agentId);
+      await this.loadTeams();
+      return true;
+    } catch (error) {
+      this.teamsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.teamsSaving.set(false);
+    }
+  }
+
+  /** Remove one seat. The captain is not removable — the server refuses, and
+   * that reason is what the dialog says. */
+  async removeTeamMember(teamId: string, agentId: string): Promise<boolean> {
+    if (this.teamsSaving()) return false;
+    this.teamsSaving.set(true);
+    this.teamsActionError.set(null);
+    try {
+      await this.teamTransport().removeTeamMember(teamId, agentId);
+      await this.loadTeams();
+      return true;
+    } catch (error) {
+      this.teamsActionError.set(messageOf(error));
+      return false;
+    } finally {
+      this.teamsSaving.set(false);
+    }
+  }
+
+  clearTeamActionError() {
+    this.teamsActionError.set(null);
+  }
+
   private resetSettingsState() {
     this.settings.set(null);
     this.settingsError.set(null);
@@ -714,6 +946,12 @@ class KeelStore {
     this.pluginsError.set(null);
     this.triggers.set([]);
     this.fireOutcome.set(null);
+    this.agents.set([]);
+    this.agentsError.set(null);
+    this.agentsActionError.set(null);
+    this.teams.set([]);
+    this.teamsError.set(null);
+    this.teamsActionError.set(null);
   }
 
   async refreshSessions() {
@@ -815,6 +1053,7 @@ class KeelStore {
     this.activeId.set(sessionId);
     // The session's own model selection (kept in memory while the app runs).
     this.sessionSelection.set(this.sessionSelections.get(sessionId) ?? null);
+    this.sessionTeam.set(this.sessionTeams.get(sessionId) ?? null);
     // The header's model chip shows the session's choice against the tenant
     // default: read the effective document once.
     if (!this.settings()) void this.loadModelsSettings();
@@ -927,6 +1166,7 @@ class KeelStore {
     this.busy.set(false);
     this.stopping.set(false);
     this.sessionSelection.set(null);
+    this.sessionTeam.set(null);
     this.connection.set({ status: "closed", lastSeq: 0 });
     this.decisionDeadlines.set({});
   }
