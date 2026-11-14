@@ -1,0 +1,3 @@
+before resize: {"grid":5,"asset":2,"pane":1,"gridLayout":0}
+after resize : {"grid":9,"asset":4,"pane":2,"gridLayout":0}
+deltas: {"grid":4,"asset":2,"pane":1,"gridLayout":0}

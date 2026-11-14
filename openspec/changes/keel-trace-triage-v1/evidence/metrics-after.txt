@@ -1,0 +1,40 @@
+
+== idle window (after gallery built, before control) ==
+window: 0ms .. 8638.593ms (8639ms)
+RunTask: 881 | >=200ms: 0 
+main-thread busy: 107.8ms = 1.2%
+frames: presented 0 | dropped 0 | no-update-desired 2 (of 2 reported)
+GC: 0 (total 0.0ms) | MinorGC 0 / MajorGC 0
+Paint: 0
+UpdateLayoutTree: 0
+Layout: 0
+ScheduleStyleRecalculation: 0
+InvalidateLayout: 0
+AddedModifiedNodeInAnimationFrame: 0
+RecalcStyle: 0
+ParseHTML: 0
+TimerFire: 0
+Commit: 0
+EventDispatch: 0
+EventDispatch(load): 0
+top: RunTask=894 ScriptCatchup=275 V8.GC_HEAP_ENSURE_SWEEPING_COMPLETED=16 ActiveProcesses=14 TimerBase::run=9 CorsURLLoader::HandleComplete=6 CorsURLLoader::~CorsURLLoader=6 RunMicrotasks=5 V8.GC_TIME_TO_SAFEPOINT=4 CorsURLLoader::CorsURLLoader=3 CorsURLLoader::Start=3 CorsURLLoader::StartRequest=3
+
+== control window (first mouse/pointer EventTiming … hover) ==
+window: 8638.593ms .. 10434.466ms (1796ms)
+RunTask: 657 | >=200ms: 0 
+main-thread busy: 216.7ms = 12.1%
+frames: presented 4 | dropped 0 | no-update-desired 11 (of 15 reported)
+GC: 0 (total 0.0ms) | MinorGC 0 / MajorGC 0
+Paint: 8
+UpdateLayoutTree: 4
+Layout: 2
+ScheduleStyleRecalculation: 4
+InvalidateLayout: 3
+AddedModifiedNodeInAnimationFrame: 0
+RecalcStyle: 0
+ParseHTML: 0
+TimerFire: 2
+Commit: 24
+EventDispatch: 56
+EventDispatch(load): 0
+top: RunTask=670 Graphics.Pipeline=284 LatencyInfo.Flow=256 LocalFrameView::UpdateStyleAndLayout=190 Document::UpdateStyleAndLayout=122 Blink.ForcedStyleAndLayout.UpdateTime=122 EventTiming=100 Canvas2DResourceProvider::ProduceCanvasResource=92 CanvasResource::PrepareTransferableResource=92 ProfileChunk=85 v8.callFunction=70 FunctionCall=70

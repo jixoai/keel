@@ -1,0 +1,6 @@
+{
+ "note": "no-model request on the demo deployment: vendor-first routing (the deployment default), NOT the demo provider; the vendor URL was a signed OSS link and has been redacted here",
+ "model": "bailian-token-plan/wan2.7-image",
+ "assetCount": 1,
+ "assetUrlScheme": "https://<vendor-oss-host>/<path>?Expires=…&OSSAccessKeyId=…&Signature=…（签名 URL，已脱敏）"
+}

@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: audio/wav
+X-Keel-Model: demo-tts
+X-Request-Id: 50d1c416-2e27-4b6e-be60-5131769df5d9
+Date: Sat, 14 Nov 2026 08:03:36 GMT
+Transfer-Encoding: chunked
+

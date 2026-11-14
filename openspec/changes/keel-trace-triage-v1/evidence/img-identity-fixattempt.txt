@@ -1,0 +1,4 @@
+before resize: ["t0","t1"]
+after  resize: [null,null]
+same element identities (no rebuild): false
+IMG load events during resize: 4

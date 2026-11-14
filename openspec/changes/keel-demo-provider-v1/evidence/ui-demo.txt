@@ -1,0 +1,235 @@
+login ok; workspace text head: Keel AI 员工会话 新会话 · 1 分钟前 还没有消息 新会话 · 3 分钟前 还没有消息 新会话 · 4 分钟前 还没有消息 新会话 · 6 分钟前 还没有消息 新会话 · 11 分钟前 还没有消息 你好，请用一句话自我介绍。 还没有消息 16 分钟前 新会话 · 20 分钟前 还没有消息 未连接 Keel 下
+picker buttons:
+   本会话模型选择|本会话模型 会话选择会随之后每条输入发送，不修改租户配置；恢复默认后输入不 再携带会话选择。 标准模式 团队模式 本会话当前 未选择 · 使用租户默认 租户默认 Bailian Token Plan Qwen3.8 Flash · 关 只读 租户默认在设置页的「模型」分区修改；此处只读显示，不会改动配置。 magpie/bailian-token-plan/qwen3.8-flash · 关 S2API DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 A6API DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 DeepSeek DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 DeepSeek Chat 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 DeepSeek Reasoner 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 Anthropic Claude Sonnet 4 5 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 OpenAI GPT 5 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 OpenRouter Openai GPT 5 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 Ollama Llama3.2 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 Demo Demo LLM 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 对话 思考档 关 低 中 高 Demo Image 128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 图像生成 · 专用面板 思考档 关 低 中 高 Demo Realtime 128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 实时语音 · 专用面板 思考档 关 低 中 高 Demo TTS 128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 文本转语音 · 专用面板 思考档 关 低 中 高 Demo STT 128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 语音转文本 · 专用面板 思考档 关 低 中 高 Magpie Bailian Token Plan Qwen3.8 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 恢复默认
+   本会话模型|本会话模型
+   会话选择会随之后每条输入发送，不修改租户配置；恢复默认后输入不再携带会话选择。|会话选择会随之后每条输入发送，不修改租户配置；恢复默认后输入不 再携带会话选择。
+   关闭|
+   标准模式|标准模式
+   标准模式|标准模式
+   团队模式|团队模式
+   团队模式|团队模式
+   本会话当前|本会话当前
+   未选择 · 使用租户默认|未选择 · 使用租户默认
+   租户默认|租户默认
+   Bailian Token Plan Qwen3.8 Flash · 关|Bailian Token Plan Qwen3.8 Flash · 关
+   只读|只读
+   只读|只读
+   租户默认在设置页的「模型」分区修改；此处只读显示，不会改动配置。|租户默认在设置页的「模型」分区修改；此处只读显示，不会改动配置。
+   magpie/bailian-token-plan/qwen3.8-flash · 关|magpie/bailian-token-plan/qwen3.8-flash · 关
+   可选模型|S2API DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 A6API DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 DeepSeek DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 DeepSeek Chat 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 DeepSeek Reasoner 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 Anthropic Claude Sonnet 4 5 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 OpenAI GPT 5 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 OpenRouter Openai GPT 5 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 Ollama Llama3.2 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 Demo Demo LLM 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 对话 思考档 关 低 中 高 Demo Image 128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 图像生成 · 专用面板 思考档 关 低 中 高 Demo Realtime 128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 实时语音 · 专用面板 思考档 关 低 中 高 Demo TTS 128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 文本转语音 · 专用面板 思考档 关 低 中 高 Demo STT 128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 语音转文本 · 专用面板 思考档 关 低 中 高 Magpie Bailian Token Plan Qwen3.8 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高
+   S2API|S2API
+   选择模型 DeepSeek V4.1 Flash|DeepSeek V4.1 Flash
+   DeepSeek V4.1 Flash|DeepSeek V4.1 Flash
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 DeepSeek V4.1 Flash|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   A6API|A6API
+   选择模型 DeepSeek V4.1 Flash|DeepSeek V4.1 Flash
+   DeepSeek V4.1 Flash|DeepSeek V4.1 Flash
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 DeepSeek V4.1 Flash|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   DeepSeek|DeepSeek
+   选择模型 DeepSeek V4.1 Flash|DeepSeek V4.1 Flash
+   DeepSeek V4.1 Flash|DeepSeek V4.1 Flash
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 DeepSeek V4.1 Flash|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   选择模型 DeepSeek Chat|DeepSeek Chat
+   DeepSeek Chat|DeepSeek Chat
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 DeepSeek Chat|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   选择模型 DeepSeek Reasoner|DeepSeek Reasoner
+   DeepSeek Reasoner|DeepSeek Reasoner
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 DeepSeek Reasoner|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   Anthropic|Anthropic
+   选择模型 Claude Sonnet 4 5|Claude Sonnet 4 5
+   Claude Sonnet 4 5|Claude Sonnet 4 5
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 Claude Sonnet 4 5|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   OpenAI|OpenAI
+   选择模型 GPT 5|GPT 5
+   GPT 5|GPT 5
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 GPT 5|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   OpenRouter|OpenRouter
+   选择模型 Openai GPT 5|Openai GPT 5
+   Openai GPT 5|Openai GPT 5
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 Openai GPT 5|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   Ollama|Ollama
+   选择模型 Llama3.2|Llama3.2
+   Llama3.2|Llama3.2
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 Llama3.2|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   Demo|Demo
+   选择模型 Demo LLM|Demo LLM
+   Demo LLM|Demo LLM
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 对话
+   思考档|思考档
+   思考档 Demo LLM|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   选择模型 Demo Image|Demo Image
+   Demo Image|Demo Image
+   128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 图像生成 · 专用面板|128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 图像生成 · 专用面板
+   思考档|思考档
+   思考档 Demo Image|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   选择模型 Demo Realtime|Demo Realtime
+   Demo Realtime|Demo Realtime
+   128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 实时语音 · 专用面板|128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 实时语音 · 专用面板
+   思考档|思考档
+   思考档 Demo Realtime|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   选择模型 Demo TTS|Demo TTS
+   Demo TTS|Demo TTS
+   128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 文本转语音 · 专用面板|128K 上下文 · 仅文本输入 · 思考档 关/低/中/高 · 文本转语音 · 专用面板
+   思考档|思考档
+   思考档 Demo TTS|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   选择模型 Demo STT|Demo STT
+   Demo STT|Demo STT
+   128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 语音转文本 · 专用面板|128K 上下文 · 输入 音频 · 思考档 关/低/中/高 · 语音转文本 · 专用面板
+   思考档|思考档
+   思考档 Demo STT|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   Magpie|Magpie
+   选择模型 Bailian Token Plan Qwen3.8 Flash|Bailian Token Plan Qwen3.8 Flash
+   Bailian Token Plan Qwen3.8 Flash|Bailian Token Plan Qwen3.8 Flash
+   128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话|128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话
+   思考档|思考档
+   思考档 Bailian Token Plan Qwen3.8 Flash|关 低 中 高
+   关|关
+   关|关
+   低|低
+   低|低
+   中|中
+   中|中
+   高|高
+   高|高
+   恢复默认|恢复默认
+   恢复默认|恢复默认
+picker has Demo group: true | has demo-llm: false
+clicking row: "选择模型 Demo LLM"
+row box: {"x":444,"y":534,"width":87,"height":24}
+after pick, chip = Demo LLM · 高
+picker still open after pick: 1
+picker count after close: 0
+reply present: true
+user message present: true
+body excerpt: Keel AI 员工会话 新会话 · 刚刚 还没有消息 新会话 · 1 分钟前 还没有消息 新会话 · 3 分钟前 还没有消息 新会话 · 4 分钟前 还没有消息 新会话 · 6 分钟前 还没有消息 新会话 · 11 分钟前 还没有消息 你好，请用一句话自我介绍。 已收到。这是 keel 服务端直… 16 分钟前 新会话 · 20 分钟前 还没有消息 已连接 新会话 · 刚刚 运行中 Demo LLM · 高 你好，请用一句话自我介绍。 复制 1970年1月1日 08:00 Keel #1 工作中 29910735 分 21 秒 已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染 链路。 复制回答 队列 引导 当前任务结束后按顺序发送 停止
+no 「演示」 wording on this demo deployment UI: true

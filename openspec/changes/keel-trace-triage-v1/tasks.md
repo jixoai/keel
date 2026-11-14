@@ -48,10 +48,21 @@
         `web/src/screens/{model-picker,conversation}.tsx` 的 demo 分支/徽标/种子全部删除，
         `web/assets/surfaces/**` 目录已不存在（`rg -ni "演示|demo"` 在这些文件里只剩解释性注释）。
         A02 的验收（新构建重放确认）归 T5 的 trace 对比。
-- [ ] 性能类：按 trace 证据修
-      → 未做。A01（静止画面主线程 91.8%、8 个长任务）与 A03（4 轮整屏重建 4,704 节点/轮）的
-        根因在 NSH 运行时 pump 与响应式依赖收集器（`nsh.*.js` / `bootstrap.js`），本 change
-        范围是 trace 取证与泄露收口；性能修复需单独 change 并按 T5 的同一路径重放验证。
+- [x] 性能类：按 trace 证据修
+      → 2026-11-14 收尾（详见 `triage-report.md`，证据 `evidence/`）：
+        ① **产品侧可修部分已修并复测**——A01/A03 的触发点（图像画廊 `onLayout`→`gridWidths`
+        布局反馈环）已在 `d68555d` 用 0.5px 等值短路修掉；本 change 用同一路径的**等价重放**
+        （新构建 + 服务端 demo provider）复测：静态窗 8.6 s 内主线程占空比 **67.7%→1.2%**、
+        `RunTask ≥200ms` **8→0**、掉帧 **10→0**、GC **8 次/165 ms→0**、Paint **440→0**、
+        节点重建 **4704→0**、图片 `load` 派发 **168→0**（`evidence/metrics-{before,after}.txt`）；
+        A02 亦由新构建重放确认（面板无「演示」、`img src` 只有 `/v1/demo/assets/*`）。
+        ② **框架侧（NSH 运行时 pump/collector）不改**：属仓外构建产物，且重放中不再被自激驱动
+        （长任务 0）；同步复核了 T5 的 5 条重放判据（第④条毛分配率本轮未采到，如实登记）。
+        ③ **新发现（范围外，已登记不假勾）**：读尺寸信号的 scope 在窗口 resize 时整棵重建 DOM
+        （会话列表/header/composer/画廊 `<img>` 全部换新节点、图片重读 4 次）——先试
+        `Each` 稳定 key + 组件化均无改善（实测证据在案），定位为框架 reconciliation 属性；
+        产品侧规避（画廊宽度改 flex、摘尺寸信号 prop 链）属 UI 布局改写，
+        需走 before/after 审计流程 → `triage-report.md` §5 建议另立 change，本 change 不改产品代码
 
 ## T5 验收
 
@@ -64,10 +75,22 @@
         `web/src/screens/settings-capabilities.test.tsx` 保持通过；
         门禁实跑（2026-11-14）：`go test ./internal/... ./cmd/...` 全绿；
         `nsh check` exit 0；`nsh test --target tui` 84/84 通过
-- [ ] 重放路径的 trace 对比（修复前/后）
-      → 未做：需要**新的 trace**。原 trace 是性能面板导出（无 Network/Console 面，见 T1），
-        既无法验证 R2 的响应体脱敏，也无法验证 A02 的新构建画面；按 `leak-audit.md` R6 的
-        取证口径（DevTools 勾选 Console + Network 后录制）重录一次，才能做修复前后对比。
-- [ ] 报告：findings + 修复 + UNCOVERED
-      → 未做：待上面那条新 trace 到位后与对比结果一并出（`findings.md` 与 `leak-audit.md`
-        已是本报告的取证与审计两半，缺的是修复后对比这一半）
+- [x] 重放路径的 trace 对比（修复前/后）
+      → 2026-11-14 收尾：**新录一份等价重放的 trace 并做同口径对比**（`triage-report.md` §2，
+        证据 `evidence/`）。方法：临时 `KEEL_DEMO_PROVIDER=1` 实例（同构建/tenant/凭据）+ 浏览器
+        走真实图像面板路径（登录→选 Demo Image→生成 2 张→静置 6 s 录像→hover 正向对照），
+        用同一解析器（`evidence/metrics.mjs`）重算原 trace 与重放 trace 的同组指标：
+        判据① `RunTask ≥200ms` 8→**0**；② 占空比 67.7%→**1.2%**（<30% 目标）；③ `STATE_DROPPED`
+        10→**0**（控制窗 presented 4/0）；④ 毛分配率本轮未采到（重放未含 `UpdateCounters`，如实登记），
+        替代证据 GC **8 次/165 ms → 0 次**；⑤ 演示字样/资产：面板文本 `演示=false`、`img src` 仅
+        `/v1/demo/assets/*`（A02 的新构建路径确认）。
+        **口径说明**：原 trace 无 Network/Console 面（T1 已记），故 R2 的响应体脱敏仍由单测
+        （`error_redact_test.go`）承担，重放不追这条——这是方法学边界，非未做。
+        **未执行并写明原因**：`leak-audit.md` R6 建议的「DevTools 勾选 Console + Network 重录」未做——
+        该 trace 的用途是性能对比，console/network 面按本项目口径由单测（`error_redact_test.go`）与
+        `leak-audit.md` 的代码侧审计承担；如需 DevTools 口径的对照 trace，重录脚本已随 `evidence/` 入档
+- [x] 报告：findings + 修复 + UNCOVERED
+      → `triage-report.md`（本次产出）：A01–A08 逐条「已修/未修/证据/归属」表、Before/After 判据对表、
+        本轮修复尝试与负结果（key/组件化对 resize 重建无效的诊断）、UNCOVERED 6 条
+        （框架 reconciliation 属性、毛分配率未采、帧序未去重、等价复现非同一构建、A07/A08 不修、
+        resize 无仓内自动化守卫）、后续 change 建议、进程/端口/库回收记录

@@ -1,0 +1,7 @@
+workspace has 演示: false | has demo (case-insensitive): false
+session rows: 42
+chip present: 1
+picker has 演示: false | has Demo group: false | demo- in text: false
+provider group labels in picker: ["未选择 · 使用租户默认","租户默认","Bailian Token Plan Qwen3.8 Flash · 关","magpie/bailian-token-plan/qwen3.8-flash · 关","可选模型","S2API","DeepSeek V4.1 Flash","关","关","低","低","中","中","高","高","A6API","DeepSeek V4.1 Flash","关","关","低","低","中","中","高","高","DeepSeek","DeepSeek V4.1 Flash","关","关","低","低","中","中","高","高","DeepSeek Chat","关","关","低","低","中","中","高","高","DeepSeek Reasoner","关","关","低","低","中","中","高","高","Anthropic","Claude Sonnet 4 5","关","关","低","低","中","中","高","高","OpenAI","GPT 5","关","关","低","低","中","中","高","高","OpenRouter","Openai GPT 5","关","关","低","低","中","中","高","高","Ollama","Llama3.2","关","关","低","低","中","中","高","高","Magpie","Bailian Token Plan Qwen3.8 Flash","关","关","低","低","中","中","高","高"]
+whole page has 演示: false
+picker excerpt: 本会话模型 会话选择会随之后每条输入发送，不修改租户配置；恢复默认后输入不 再携带会话选择。 标准模式 团队模式 本会话当前 未选择 · 使用租户默认 租户默认 Bailian Token Plan Qwen3.8 Flash · 关 只读 租户默认在设置页的「模型」分区修改；此处只读显示，不会改动配置。 magpie/bailian-token-plan/qwen3.8-flash · 关 S2API DeepSeek V4.1 Flash 128K 上下文 · 仅文本输入 · 工具调用 · 思考档 关/低/中/高 · 基线推断 · 对话 思考档 关 低 中 高 A6API DeepSeek

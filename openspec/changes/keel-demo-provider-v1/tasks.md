@@ -107,12 +107,28 @@
 - [x] `go test ./internal/... ./cmd/...` 全绿
       → 2026-11-14 实跑：全部包 `ok`（含 `internal/demo`、`internal/mediagw`、`internal/realtime`、
         `internal/modelcfg`、`internal/servicehost`、`internal/httpapi`）；`go build ./...` exit 0
-- [ ] 不设 env 的部署：界面无 demo 字样、无演示数据
-      → 待跑：浏览器端到端（**由截图子代理并行执行**，本规格收口不重复占用浏览器）
-- [ ] 设 env 的评审部署：四类 surface 端到端可用
-      → 待跑：浏览器端到端（**由截图子代理并行执行**）
-- [ ] 报告：before/after 与 UNCOVERED 登记
-      → 待跑：随上述浏览器端到端一并产出（**由截图子代理并行执行**）
+- [x] 不设 env 的部署：界面无 demo 字样、无演示数据
+      → 2026-11-14 实测（`acceptance.md` §条目1，证据 `evidence/`）：
+        ① 源码 `web/src` 词表逐命中分类（非测试/非 fixture 命中 = 解释性注释 + `wideMode` 子串假阳性；
+        `DEMO_*`/`previewSurface`/`assets/surfaces` 均 0 命中）；② 构建产物 `演示` 0 次、无 surfaces 演示资产残留；
+        ③ 13760（进程 env 无 `KEEL_DEMO_PROVIDER`）浏览器快照：工作区与选择器全文无 `演示`/`demo`，
+        Provider 分组只有真实厂商（`evidence/ui-noenv.txt` + `evidence/shots-noenv/*.png`）；
+        ④ API：`/v1/models` 0 demo、`/v1/demo/assets/*` 404、`demo-image` 400、audio 两路由 503、
+        `/v1/realtime/status` configured=false（`models-noenv.json`/`noenv-api-probes.txt`/`capabilities-noenv.json`/`demo-assets-noenv.txt`）
+- [x] 设 env 的评审部署：四类 surface 端到端可用
+      → 2026-11-14 实测（`acceptance.md` §条目2）：临时实例 `KEEL_DEMO_PROVIDER=1`（同 tenant/构建/凭据，
+        端口 13791）四类 surface 逐字命令与输出——llm 会话链路（user.message→assistant.message→run.finished，
+        文本逐字等于 `demo.ReplyText`，`provider=demo`）；image（`/v1/demo/assets/*?i=0|1` 200；
+        同端点不带 model 仍走 vendor）；tts+stt（25222 B 16 kHz WAV 带 RIFF/ICMT 原句 → 转写读回原句+字节数；
+        外来音频走固定兜底）；realtime WS（`session.created→session.updated→response.created→delta×6→
+        transcript.done→response.done`）；另有浏览器复核（Demo 分组是普通 Provider，LLM 回复进界面）。
+        **方法偏离**：same DB + `--no-worker` 实测不可行（13760 常驻 worker 抢走 run 并以
+        `unknown provider "demo"` 终态失败，证据见 `acceptance.md` §2.0），故临时实例改用同 Postgres
+        服务器上的独立库 `keel_verify_demo_v1`（收尾 drop）并保留唯一 worker
+- [x] 报告：before/after 与 UNCOVERED 登记
+      → `acceptance.md`（本次产出）：before/after 对照表（旧客户端演示面板 → 服务端 demo provider 的
+        截图与事件流对照）、UNCOVERED 6 条（真实麦克风上行 / 客户端 STT 未切服务端 / 会话选择不持久化 /
+        video 无 provider / decision 面未走浏览器 / 协议复跑用独立库的偏离说明）、进程与回收登记
 
 ## 并行推进纪律（Owner 2026-11-14「全速并行推进」）
 
