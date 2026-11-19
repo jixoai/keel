@@ -30,6 +30,7 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 		{ShellPluginID, NewShellPlugin(ShellOptions{})},
 		{ApprovalPluginID, NewApprovalPlugin(ApprovalOptions{})},
 		{NotifyPluginID, NewNotifyPlugin(NotifyOptions{})},
+		{FilePluginID, NewFilePlugin(FilePluginOptions{})},
 		{ModelPluginID, NewModelPlugin()},
 		{AgentPluginID, NewAgentPlugin()},
 		{TeamPluginID, NewTeamPlugin()},

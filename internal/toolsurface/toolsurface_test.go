@@ -138,29 +138,6 @@ func TestUnknownActionIsTypedAndSideEffectFree(t *testing.T) {
 	}
 }
 
-func TestReservedActionsReturnNotImplemented(t *testing.T) {
-	registry := builtinRegistry(t, toolsurface.Backends{})
-	cases := []struct {
-		tool   string
-		args   string
-		action string
-	}{
-		{toolsurface.Read, `{"path":"a.txt"}`, ""},
-		{toolsurface.Write, `{"path":"a.txt","content":"x"}`, ""},
-		{toolsurface.Edit, `{"path":"a.txt"}`, ""},
-	}
-	for _, test := range cases {
-		result := runAction(t, registry[test.tool], test.args)
-		problem := errorDocument(t, result)
-		if problem["code"] != toolsurface.CodeNotImplemented {
-			t.Fatalf("%s.%s code = %v, want not_implemented", test.tool, test.action, problem["code"])
-		}
-		if !strings.Contains(problem["message"].(string), test.tool) {
-			t.Fatalf("%s message = %v", test.tool, problem["message"])
-		}
-	}
-}
-
 func TestBashSchemaAndActionSetAreUnchanged(t *testing.T) {
 	registry := builtinRegistry(t, toolsurface.Backends{})
 	tool := registry[toolsurface.Bash]
@@ -250,6 +227,17 @@ func TestBashMapsPluginStateAndBackendErrors(t *testing.T) {
 	problem = errorDocument(t, runAction(t, registry[toolsurface.Bash], `{"action":"jobs","operation":"list"}`))
 	if problem["code"] != toolsurface.CodeBackendFailed {
 		t.Fatalf("backend error code = %v, want backend_error", problem["code"])
+	}
+}
+
+func TestFileToolsWithoutABackendAreTyped(t *testing.T) {
+	registry := builtinRegistry(t, toolsurface.Backends{})
+	for _, name := range []string{toolsurface.Read, toolsurface.Write, toolsurface.Edit} {
+		result := runAction(t, registry[name], `{"path":"a.txt"}`)
+		problem := errorDocument(t, result)
+		if problem["code"] != toolsurface.CodeNotWired {
+			t.Fatalf("%s without a backend = %v, want not_wired", name, problem)
+		}
 	}
 }
 

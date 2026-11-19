@@ -1,0 +1,14 @@
+$ go test ./internal/fileplugin -run TestWriteReadPagingAndPreconditions|TestEditExactUniqueAndReplaceAll|TestMaterializeFromManifestAndSnapshot|TestWriteThroughReachesBash -v -count=1
+
+=== RUN   TestWriteThroughReachesBash
+--- PASS: TestWriteThroughReachesBash (0.02s)
+=== RUN   TestWriteReadPagingAndPreconditions
+--- PASS: TestWriteReadPagingAndPreconditions (0.04s)
+=== RUN   TestEditExactUniqueAndReplaceAll
+--- PASS: TestEditExactUniqueAndReplaceAll (0.04s)
+=== RUN   TestMaterializeFromManifestAndSnapshot
+--- PASS: TestMaterializeFromManifestAndSnapshot (0.05s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	0.474s
+
+[exit 0]

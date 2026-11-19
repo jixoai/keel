@@ -20,6 +20,7 @@ type Backends struct {
 	Bash     BashBackend
 	Approve  ApproveBackend
 	Notify   NotifyBackend
+	Files    FileBackend
 }
 
 // BuiltinNames returns the eleven builtin tool names, sorted.
@@ -35,9 +36,9 @@ func BuiltinNames() []string {
 func BuiltinTools(discovered []skills.Skill, backends Backends) []agentcore.AgentTool {
 	tools := []agentcore.AgentTool{
 		newBashTool(backends.Bash),
-		newReadTool(),
-		newWriteTool(),
-		newEditTool(),
+		newReadTool(backends.Files),
+		newWriteTool(backends.Files),
+		newEditTool(backends.Files),
 		newMCPTool(backends.MCP),
 		newSkillsTool(discovered),
 		newTasksTool(backends.Tasks),

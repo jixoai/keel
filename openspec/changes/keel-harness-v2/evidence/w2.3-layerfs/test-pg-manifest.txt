@@ -1,0 +1,8 @@
+$ go test ./internal/fileplugin -run TestPostgresManifestProjection -v -count=1
+
+=== RUN   TestPostgresManifestProjection
+--- PASS: TestPostgresManifestProjection (0.31s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	0.673s
+
+[exit 0]

@@ -1,0 +1,4 @@
+$ go vet ./internal/layerfs/... ./internal/fileplugin ./internal/toolsurface ./internal/agentext ./cmd/keel
+
+
+[exit 0]

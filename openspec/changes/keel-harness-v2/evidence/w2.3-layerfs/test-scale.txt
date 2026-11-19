@@ -1,0 +1,8 @@
+$ go test ./internal/fileplugin -run TestCaptureOneHundredThousandFilesIsOneEvent -v -count=1
+
+=== RUN   TestCaptureOneHundredThousandFilesIsOneEvent
+--- PASS: TestCaptureOneHundredThousandFilesIsOneEvent (33.83s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	34.395s
+
+[exit 0]

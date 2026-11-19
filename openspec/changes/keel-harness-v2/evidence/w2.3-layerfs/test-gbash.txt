@@ -1,0 +1,8 @@
+$ go test ./internal/layerfs/gbashfs -run TestGBashUsesLayerfsAtANonRootMount -v -count=1
+
+=== RUN   TestGBashUsesLayerfsAtANonRootMount
+--- PASS: TestGBashUsesLayerfsAtANonRootMount (0.05s)
+PASS
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.347s
+
+[exit 0]

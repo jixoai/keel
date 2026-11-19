@@ -1,0 +1,12 @@
+$ go test ./internal/fileplugin -run TestFSWriteFollowsToolResultWithoutKeyCollision|TestCaptureCommitsExactlyOneBatchEvent|TestCaptureFailureIsOneSystemEvent -v -count=1
+
+=== RUN   TestFSWriteFollowsToolResultWithoutKeyCollision
+--- PASS: TestFSWriteFollowsToolResultWithoutKeyCollision (0.02s)
+=== RUN   TestCaptureCommitsExactlyOneBatchEvent
+--- PASS: TestCaptureCommitsExactlyOneBatchEvent (0.04s)
+=== RUN   TestCaptureFailureIsOneSystemEvent
+--- PASS: TestCaptureFailureIsOneSystemEvent (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	0.373s
+
+[exit 0]

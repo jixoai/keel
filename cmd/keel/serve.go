@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -24,10 +25,12 @@ import (
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/jobqueue"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/modelcfg"
@@ -80,6 +83,10 @@ type serveOptions struct {
 	// built before the service graph so restart recovery runs before the first
 	// run can start.
 	Bash *jobqueue.Manager
+	// FileService is the keel.file plugin's backend. It is built before the
+	// service graph so the constant read/write/edit tools have a backend at
+	// assembly time; nil keeps them present and answering not_wired.
+	FileService *fileplugin.Service
 }
 
 const (
@@ -272,6 +279,16 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	limits.Update(tenantCfg.Quota)
 
+	// The file plugin's byte layer is process-wide (one CAS root), while its
+	// manifest is session-scoped. It is built before the service graph so the
+	// constant read/write/edit tools have a backend at assembly time.
+	fileStore, fileService, err := newFileService(st, kern, opts, log)
+	if err != nil {
+		return err
+	}
+	defer fileStore.Close()
+	opts.FileService = fileService
+
 	// The constant tool surface needs the sub-agent runner and the plugin
 	// manager, both created after Boot. The getters are captured now and resolve
 	// at tool-call time; no run executes before newProductLayer returns.
@@ -353,6 +370,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 				},
 				Approve: agentext.ApproveBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Notify:  agentext.NotifyBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				Files:   agentext.FileBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 			},
 		},
 	})
@@ -760,7 +778,10 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				Interval: opts.ExampleInterval,
 			})
 		},
-		testkit.PluginID:       func() *agentext.Plugin { return agentext.NewTestkitPlugin() },
+		testkit.PluginID: func() *agentext.Plugin { return agentext.NewTestkitPlugin() },
+		agentext.FilePluginID: func() *agentext.Plugin {
+			return agentext.NewFilePlugin(agentext.FilePluginOptions{Service: opts.FileService})
+		},
 		agentext.ModelPluginID: func() *agentext.Plugin { return agentext.NewModelPlugin() },
 		agentext.AgentPluginID: func() *agentext.Plugin { return agentext.NewAgentPlugin() },
 		agentext.TeamPluginID:  func() *agentext.Plugin { return agentext.NewTeamPlugin() },
@@ -959,6 +980,42 @@ func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (agen
 func (m modelRuntimeSeam) ApplyModels(ctx context.Context, document json.RawMessage) error {
 	_, err := m.rt.ApplyModels(ctx, document)
 	return err
+}
+
+// newFileService builds the layerfs byte store and the file plugin service.
+// The CAS root is shared with the blob uploader's directory but isolated in a
+// layerfs/ subtree: layerfs GC must never delete an object the blob table still
+// references. Without KEEL_CAS_DIR the root is ephemeral (Phase A); the log
+// line makes that visible instead of silently losing files on restart.
+func newFileService(st *store.Store, kern *kernel.Kernel, opts serveOptions, log *slog.Logger) (*layerfs.Store, *fileplugin.Service, error) {
+	root := strings.TrimSpace(opts.CASDir)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "keel-layerfs")
+		log.Warn("KEEL_CAS_DIR is not set; layerfs uses an ephemeral temp root", "root", root)
+	} else {
+		root = filepath.Join(root, "layerfs")
+	}
+	store, err := layerfs.Open(root, layerfs.Options{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("open layerfs: %w", err)
+	}
+	manifest, err := fileplugin.NewPostgresManifest(st.Pool())
+	if err != nil {
+		_ = store.Close()
+		return nil, nil, fmt.Errorf("file manifest: %w", err)
+	}
+	service, err := fileplugin.New(fileplugin.Options{
+		Store:     store,
+		Manifest:  manifest,
+		Committer: kern,
+		Leases:    kern,
+		Logger:    log,
+	})
+	if err != nil {
+		_ = store.Close()
+		return nil, nil, fmt.Errorf("file plugin: %w", err)
+	}
+	return store, service, nil
 }
 
 // deploymentRoot is the directory an agent's prompt-file reference resolves

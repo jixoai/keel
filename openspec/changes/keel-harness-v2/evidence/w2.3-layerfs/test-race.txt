@@ -1,0 +1,9 @@
+$ go test -race ./internal/layerfs/... ./internal/fileplugin ./internal/toolsurface ./internal/agentext -count=1
+
+ok  	github.com/jixoai/keel/internal/layerfs	4.735s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	1.492s
+ok  	github.com/jixoai/keel/internal/fileplugin	49.005s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.407s
+ok  	github.com/jixoai/keel/internal/agentext	13.607s
+
+[exit 0]

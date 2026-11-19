@@ -1,0 +1,17 @@
+id: keel.file
+version: 1.0.0
+kind: in-process
+description: "Session-scoped file plugin: resolves file_manifest, drives layerfs for bytes, appends fs.write/fs.capture events and writes through to the execution space. The harness-owned read/write/edit tools supply the model-facing names; this plugin supplies the backend."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides: {}
+permissions:
+  fs:
+    - workspace-write
+  tools:
+    - keel.file.read
+    - keel.file.write
+    - keel.file.edit
+    - keel.file.capture
+source:
+  type: builtin
