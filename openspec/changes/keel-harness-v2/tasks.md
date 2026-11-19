@@ -145,6 +145,13 @@
       write/edit 写穿、Close 单次 capture。gbashfs 是内存路径索引而非宿主目录，故 seam 用
       scoped `SessionSurface`/`SnapshotSource` 表达同一契约（目录 `Surface`/`CaptureRoot` 保留给
       本地适配器）；装配级证明 `evidence/w2.seam/test-seam.txt`）
+- [ ] bash 删除对账：capture 目前只 upsert，`rm` 掉的路径仍留在 `file_manifest`
+      （A 轴增量复核裁定：spec「执行空间产生的变更 MUST 通过 fs.capture 进入 layerfs」字面覆盖删除；
+      需定义删除事件/对账语义并入 capture 批事件，不新造逐文件事件）
+- [ ] capture 策略覆写：`config.toml` 的 `fs.capture.mode=checkpoint|manual`
+      （layerfs spec 的 MUST；当前只实现 per-tool-call，覆写通道未接——依赖配置面切片，接线前不算满足）
+- [ ] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交，
+      `session_snapshot` 的最新 seq 树可能落后于 `file_manifest` 行；fork 接线前必须定序/版本化
 
 ## W4 task-log（plan-plugin）与面板
 
