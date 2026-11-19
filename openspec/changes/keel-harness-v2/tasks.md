@@ -91,11 +91,17 @@
 
 ## W1 layerfs 服务（Rust + gRPC）
 
-- [ ] file object：`Put/Get/Stat`，流式读写（分块，单请求内存上限固定）
-- [ ] tree object：目录树按内容寻址；相同子树共享哈希
-- [ ] 引用计数与 GC：无引用对象回收；并发安全的 refcount
-- [ ] 配额：按 group/租户的存储字节上限，超限返回明确错误
-- [ ] gRPC 契约：流式 Get/Put、取消传播、错误分类（not_found / quota / io）
+> **2026-11-19 现状**：ADR 0001 的 Phase A（进程内 Go CAS）已由 W2.3 交付
+> （`internal/layerfs`，见下方三项）；Rust + gRPC 仍是「同接口扩展实现」，未开工。
+
+- [x] file object：`Put/Get/Stat`，流式读写（分块，单请求内存上限固定）——Phase A Go 实现
+      （`internal/layerfs/store.go`：64KiB 分块、复用 `internal/blob.CASPath`；`-race` 绿）
+- [x] tree object：目录树按内容寻址；相同子树共享哈希——Phase A Go 实现
+      （`internal/layerfs/tree.go`：`keel-tree-v1` 规范化编码，排序后哈希）
+- [x] 引用计数与 GC：无引用对象回收；并发安全的 refcount——Phase A Go 实现
+      （`internal/layerfs/refs.go`：`(session,eventSeq)` append-only refs.log 可重建；`casMu` 串行）
+- [ ] 配额：按 group/租户的存储字节上限，超限返回明确错误（Phase A 仅 store 级 `QuotaBytes`）
+- [ ] gRPC 契约：流式 Get/Put、取消传播、错误分类（not_found / quota / io）——ADR 保留为扩展实现
 - [ ] 压测：单进程 1000 并发流的 RSS 曲线；不整文件进内存的断言
 
 ## W2 Harness 放置与内核契约
@@ -113,38 +119,63 @@
 
 ## W3 file-plugin 与 bash-plugin
 
-- [ ] file-plugin：`read`（offset/limit/流式）、`write`、`edit`（精确匹配 + 唯一性），
-      全部走 `file_manifest` + layerfs，不整文件进内存
-- [ ] 写路径：每次写追加 `fs.write` 事件；路径规范化；`.git/objects` 默认不进 capture
-- [ ] bash-plugin：gbash 适配（自定义命令、自定义文件系统、跨平台）
-- [ ] `bash` 工具参数：`timeout`（参数而非 bash 命令）、超时转后台、返回终端信息与 pid
-- [ ] JobManager：全局 + 每组上限；`nohup/jobs/ps` 视图；收养与孤儿回收
-- [ ] 输出落 layerfs：只回 head/tail + blob 引用 + 退出码
-- [ ] capture 默认 `per-tool-call`：stat 缓存 + 变更集，只对变了的文件算哈希
-- [ ] 执行面适配器契约：`materialize(manifest)` / `capture(handle, since)`，先做本地实现
+- [x] file-plugin：`read`（offset/limit/流式）、`write`、`edit`（精确匹配 + 唯一性），
+      全部走 `file_manifest` + layerfs，不整文件进内存（W2.3：`internal/fileplugin`，
+      分页默认 200 行/256KiB 上限 2000 行；edit 流式查找/替换）
+- [x] 写路径：每次写追加 `fs.write` 事件；路径规范化；`.git/objects` 默认不进 capture
+      （W2.3：唯一写路径 manifest→layerfs→`fs.write`→写穿；capture 默认忽略 `.git/objects`）
+- [x] bash-plugin：gbash 适配（自定义命令、自定义文件系统、跨平台）
+      （W2.2：`internal/bashbridge`，pin `ewhauser/gbash v0.0.41`；占用隔离；`third_party` 许可文本）
+- [x] `bash` 工具参数：`timeout`（参数而非 bash 命令）、超时转后台、返回终端信息与 pid
+      （W2.2：job id 即作业句柄；**禁用**上游 `ExecutionRequest.Timeout`；超时不 kill）
+- [x] JobManager：全局 + 每组上限；`nohup/jobs/ps` 视图；收养与孤儿回收
+      （W2.2：`bash_jobs` 表 + RLS；重启一律收敛终态 `interrupted`；15s sweeper 按归档会话回收）
+- [x] 输出落 layerfs：只回 head/tail + blob 引用 + 退出码
+      （W2.2：head 4KiB + tail 4KiB；全量流式写 blob store（layerfs 的字节层）；200MB 内存有界实证）
+- [x] capture 默认 `per-tool-call`：stat 缓存 + 变更集，只对变了的文件算哈希
+      （W2.3：`Capture` 递归建树 + stat 签名缓存；十万文件**一条** `fs.capture` 实证）
+- [x] 执行面适配器契约：`materialize(manifest)` / `capture(handle, since)`，先做本地实现
+      （W2.3：`Materialize`/`MaterializeSnapshot`/`CaptureWorkspace`；生产 seam（gbash Workspace ↔
+      layerfs Surface/CaptureRoot）由 W2.seam 接线，进行中）
 
 ## W4 task-log（plan-plugin）与面板
 
-- [ ] `task_cards` 行 + `task_events` **投影**（从账本重建，含重建一致性测试）；会话启动自动建初始卡
+- [x] `task_cards` 行 + `task_events` **投影**（从账本重建，含重建一致性测试）；会话启动自动建初始卡
+      （W2.4：`internal/tasklog`；DDL/RLS 随集成落 `schema.sql`/`rls.go`；重建幂等与「直写被重建擦除」有测试）
 - [ ] 强制 `taskId`：所有工具调用缺 `taskId` 直接拒绝（含内部子代理）
-- [ ] `tasks` 聚合工具：`create/update/attach/detach/close/list/show/note`
-- [ ] 任务树投影：父子关系、跨会话 `parentTaskId` 拼接
-- [ ] 资源关联：`task.attached{path, hash}` / `task.detached`；面板可打开对应 blob
+      **（实现偏离待复核：harness 先在 run 内归属（缺省挂会话初始卡），无法归属才返回
+      `task_id_required`；与 spec 字面「模型未带即拒绝」不同，由 B 轴复核裁决）**
+- [x] `tasks` 聚合工具：`create/update/attach/detach/close/list/show/note`
+      （W2.4：8 动作经 `keel.tasks` 后端；停用映射 `plugin_disabled`）
+- [x] 任务树投影：父子关系、跨会话 `parentTaskId` 拼接
+      （W2.4：`subagent.started` 钩子建/更新子卡，`parentTaskId` → 父卡，幂等）
+- [x] 资源关联：`task.attached{path, hash}` / `task.detached`；面板可打开对应 blob
+      （W2.4 事件与投影；面板打开 blob 属 W4 面板项，未做）
 - [ ] fork：`(eventSeq)` 原点；新会话 + 前缀引用 + 新卡（`parentTaskId`）
+      （W2.4 已交付 `Service.ForkCard` 投影；`agent.fork` 仍 not_implemented，待与 layerfs
+      文件视图前缀在生产装配中合并验证）
 - [ ] 面板：任务图、事件流、资源预览；纯投影，不写额外真值
 
 ## W5 approve 与 notification
 
-- [ ] `approve` 工具：`confirm/prompt/choice` 三模式 + 「其它」逃逸
-- [ ] 逃逸值带 `validated:false` provenance，下游可区分
+- [x] `approve` 工具：`confirm/prompt/choice` 三模式 + 「其它」逃逸
+      （W2.5：`internal/approval` + `keel.approval`；工具只 open/wait，不能自答）
+- [x] 逃逸值带 `validated:false` provenance，下游可区分
+      （W2.5：`approval_provenance` 记录 actor/channel/context/四时间点/validated/escape；
+      HTTP 作答路由与工具观测双路径收敛）
 - [x] 超时默认取安全侧；durable 决策（open/wait/answer/timeout）沿用 v1 decision 原语
       （对账：`internal/agentext/decisions.go:24-32,231-301,495-538`（四状态 + 持久 deadline +
       重启后 normalize/expire）、`decisions_store.go:13-20,152-200`（复用 tasks 行持久化）；
       安全侧：插件审批超时/未答走 refused 分支 `creation.go:845-860`；
-      测试 `agentext_test.go:72,126,179`）
-- [ ] `notify` 工具与通知面板：多消费器（img 埋点 / URL 访问 / 客户端 ack）
-- [ ] 消费是持久事实；有 ack 能力的消费者在场时即时消费；原生推送只做兜底
-- [ ] 通知 URL 单次有效、不可猜；重启不重推
+      测试 `agentext_test.go:72,126,179`；W2.5 又补 `status=timed_out + safeSide=no`）
+- [x] `notify` 工具与通知面板：多消费器（img 埋点 / URL 访问 / 客户端 ack）
+      （W2.5：多消费器 push/list/ack + open/pixel 路由；**通知面板未做**，留 client-shell 波）
+- [x] 消费是持久事实；有 ack 能力的消费者在场时即时消费；原生推送只做兜底
+      （W2.5：`notification.ack`/`notification.push_sent` 事件 + 三态窗口；原生 Pusher 为 seam，
+      生产未注入 → `pusher_unavailable` 具名降级，不假装已推送）
+- [x] 通知 URL 单次有效、不可猜；重启不重推
+      （W2.5：256-bit token 仅存 SHA-256、按 consumer 过期、单次消费 410/404；
+      `ClaimPush` CAS 先行，claimed-but-unrecorded 记 `push_result_unknown`）
 
 ## W6 MCP 聚合工具
 

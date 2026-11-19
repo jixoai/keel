@@ -20,7 +20,7 @@
 | keel-session-surfaces-v1 | 23/24 | 1 项=成员结果进 captain 时间线 | 随 W2.4 task-log 收口 |
 | provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
 | keel-ga | 31/43 | §2/§3 已交付；剩 §1 压缩文档、§5 blob-lifecycle 5、§6 验收 5 | tenancy/provider-files 已交付 |
-| keel-harness-v2 | 16/142 | 真缺口以 `RECONCILIATION.md` TOP10 为准；**W2.1 工具面骨架进行中** | 主战场 |
+| keel-harness-v2 | 42/143 | **W2.1–W2.5 已交付**（恒定工具面/bash+JobManager/task-log/layerfs+file/approve+notify）；余下 W2 放置与快照、W3 尾项、W5–W7、验收 | **主战场（Wave 2 已收口，A/B 联合复核中）** |
 | feat-mcp-apps-events | 1/50 | 设计 + T0.4 双 origin 域开通已完成；P1–P6 未开始 | 随 Wave 5 实现 |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
 | keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
