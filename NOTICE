@@ -4,3 +4,12 @@ Copyright 2026 JIXO AI
 This product includes software developed by smallnest (https://github.com/smallnest/pigo),
 licensed under the MIT License. The original license text is in third_party/pigo-LICENSE,
 and each copied file retains its upstream copyright header.
+
+This product includes github.com/ewhauser/gbash v0.0.41 (https://github.com/ewhauser/gbash),
+licensed under the Apache License 2.0 — Copyright 2026 Eric Hauser. The license text is in
+third_party/gbash-LICENSE. gbash's in-tree shell fork of mvdan.cc/sh is licensed under the
+BSD 3-Clause License — Copyright (c) 2016, Daniel Martí; the license text is in
+third_party/gbash-shell-UPSTREAM_LICENSE.
+
+Keel does not vendor or modify gbash; it is a normal Go module dependency (see
+docs/GBASH-CONTRACT.md §2).

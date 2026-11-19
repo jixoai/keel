@@ -27,6 +27,7 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 		{"keel.testkit", NewTestkitPlugin()},
 		{CreationPluginID, NewCreationPlugin(CreationOptions{})},
 		{TasksPluginID, NewTasksPlugin(TasksOptions{})},
+		{ShellPluginID, NewShellPlugin(ShellOptions{})},
 		{ModelPluginID, NewModelPlugin()},
 		{AgentPluginID, NewAgentPlugin()},
 		{TeamPluginID, NewTeamPlugin()},

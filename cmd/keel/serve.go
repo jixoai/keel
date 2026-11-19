@@ -21,9 +21,11 @@ import (
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/auth"
+	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/httpapi"
+	"github.com/jixoai/keel/internal/jobqueue"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
@@ -72,6 +74,10 @@ type serveOptions struct {
 	PluginsRoot     string
 	ExampleInterval time.Duration
 	Log             *slog.Logger
+	// Bash is the keel.shell job manager (timeout-to-background jobs). It is
+	// built before the service graph so restart recovery runs before the first
+	// run can start.
+	Bash *jobqueue.Manager
 }
 
 const (
@@ -125,6 +131,34 @@ func runServe(parent context.Context, opts serveOptions) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
+
+	// Bash background jobs: the manager is a process-level singleton. Recovery
+	// runs before the service graph, so no run can observe a stale "running"
+	// row from a previous process. Its output uploader is separate from the
+	// image uploader: bash output may be far larger than an image.
+	bashManager, err := jobqueue.New(jobqueue.Options{
+		Store:  st,
+		Bridge: bashbridge.New(bashbridge.Config{}),
+		Uploader: &blob.Uploader{
+			Store:       st,
+			CASDir:      opts.CASDir,
+			TempDir:     os.TempDir(),
+			PGThreshold: 1 << 20,
+			MaxBytes:    1 << 30,
+		},
+		TenantID:    opts.TenantID,
+		MaxGlobal:   envInt("KEEL_BASH_MAX_JOBS", 8),
+		MaxPerGroup: envInt("KEEL_BASH_MAX_JOBS_PER_SESSION", 4),
+		Logger:      log,
+	})
+	if err != nil {
+		return fmt.Errorf("bash job manager: %w", err)
+	}
+	if err := bashManager.Start(ctx); err != nil {
+		return fmt.Errorf("bash job recovery: %w", err)
+	}
+	defer bashManager.Close()
+	opts.Bash = bashManager
 
 	kernelLog, err := kernel.NewPG(ctx, st.Pool())
 	if err != nil {
@@ -308,6 +342,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 			},
 			RunControl: runControl,
 			ToolBackends: toolsurface.Backends{
+				Bash:     agentext.ShellBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Agents:   agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return toolSubagents }},
 				Creation: agentext.CreationBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Tasks: agentext.TasksBackend{
@@ -717,6 +752,12 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		},
 		agentext.TasksPluginID: func() *agentext.Plugin {
 			return agentext.NewTasksPlugin(agentext.TasksOptions{Service: tasks})
+		},
+		agentext.ShellPluginID: func() *agentext.Plugin {
+			return agentext.NewShellPlugin(agentext.ShellOptions{
+				Service:  func() *jobqueue.Manager { return opts.Bash },
+				TenantID: opts.TenantID,
+			})
 		},
 	}
 	builtins := make([]agentext.Builtin, 0, len(builtinManifests))

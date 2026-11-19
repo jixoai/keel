@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -144,8 +145,6 @@ func TestReservedActionsReturnNotImplemented(t *testing.T) {
 		args   string
 		action string
 	}{
-		{toolsurface.Bash, `{"action":"run","command":"ls"}`, "run"},
-		{toolsurface.Bash, `{"action":"jobs","operation":"list"}`, "jobs"},
 		{toolsurface.Approve, `{"action":"confirm","prompt":"x"}`, "confirm"},
 		{toolsurface.Notify, `{"action":"push","text":"x"}`, "push"},
 		{toolsurface.Read, `{"path":"a.txt"}`, ""},
@@ -161,6 +160,98 @@ func TestReservedActionsReturnNotImplemented(t *testing.T) {
 		if !strings.Contains(problem["message"].(string), test.tool) {
 			t.Fatalf("%s message = %v", test.tool, problem["message"])
 		}
+	}
+}
+
+func TestBashSchemaAndActionSetAreUnchanged(t *testing.T) {
+	registry := builtinRegistry(t, toolsurface.Backends{})
+	tool := registry[toolsurface.Bash]
+	var document struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if err := json.Unmarshal(tool.Schema(), &document); err != nil {
+		t.Fatalf("bash schema: %v", err)
+	}
+	var names []string
+	for name := range document.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	want := []string{"action", "command", "cwd", "env", "jobId", "operation", "timeoutMs"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("bash schema properties = %v, want the W2.1 closed set %v", names, want)
+	}
+	if !reflect.DeepEqual(document.Required, []string{"action"}) {
+		t.Fatalf("bash schema required = %v, want [action]", document.Required)
+	}
+	problem := errorDocument(t, runAction(t, tool, `{"action":"unknown"}`))
+	available, ok := problem["availableActions"].([]string)
+	if !ok || !reflect.DeepEqual(available, []string{"run", "jobs"}) {
+		t.Fatalf("bash actions = %#v, want [run jobs]", problem["availableActions"])
+	}
+}
+
+func TestBashActionsNeedBackend(t *testing.T) {
+	registry := builtinRegistry(t, toolsurface.Backends{})
+	for _, args := range []string{
+		`{"action":"run","command":"ls"}`,
+		`{"action":"jobs","operation":"list"}`,
+	} {
+		problem := errorDocument(t, runAction(t, registry[toolsurface.Bash], args))
+		if problem["code"] != toolsurface.CodeNotWired {
+			t.Fatalf("bash without a backend code = %v, want not_wired", problem["code"])
+		}
+	}
+	problem := errorDocument(t, runAction(t, registry[toolsurface.Bash], `{"action":"delete"}`))
+	if problem["code"] != toolsurface.CodeUnknownAction {
+		t.Fatalf("unknown bash action code = %v, want unknown_action", problem["code"])
+	}
+	available, ok := problem["availableActions"].([]string)
+	if !ok || !reflect.DeepEqual(available, []string{"run", "jobs"}) {
+		t.Fatalf("bash available actions = %#v, want the closed run/jobs set", problem["availableActions"])
+	}
+}
+
+type fakeBash struct {
+	calls  []string
+	result agentcore.AgentToolResult
+	err    error
+}
+
+func (f *fakeBash) Invoke(_ context.Context, action string, _ json.RawMessage) (agentcore.AgentToolResult, error) {
+	f.calls = append(f.calls, action)
+	return f.result, f.err
+}
+
+func TestBashDelegatesToBackend(t *testing.T) {
+	backend := &fakeBash{result: agentcore.AgentToolResult{
+		Content:           agentcore.ContentList{agentcore.NewTextContent("ran")},
+		StructuredContent: map[string]any{"status": "exited"},
+	}}
+	registry := builtinRegistry(t, toolsurface.Backends{Bash: backend})
+	result := runAction(t, registry[toolsurface.Bash], `{"action":"run","command":"echo hi"}`)
+	if got := agentcore.ContentToText(result.Content); got != "ran" {
+		t.Fatalf("bash result = %q", got)
+	}
+	if !reflect.DeepEqual(backend.calls, []string{"run"}) {
+		t.Fatalf("backend calls = %v", backend.calls)
+	}
+}
+
+func TestBashMapsPluginStateAndBackendErrors(t *testing.T) {
+	disabled := &fakeBash{err: agentext.ErrPluginState}
+	registry := builtinRegistry(t, toolsurface.Backends{Bash: disabled})
+	problem := errorDocument(t, runAction(t, registry[toolsurface.Bash], `{"action":"run","command":"ls"}`))
+	if problem["code"] != toolsurface.CodePluginDisabled {
+		t.Fatalf("disabled plugin code = %v, want plugin_disabled", problem["code"])
+	}
+
+	broken := &fakeBash{err: errors.New("bridge exploded")}
+	registry = builtinRegistry(t, toolsurface.Backends{Bash: broken})
+	problem = errorDocument(t, runAction(t, registry[toolsurface.Bash], `{"action":"jobs","operation":"list"}`))
+	if problem["code"] != toolsurface.CodeBackendFailed {
+		t.Fatalf("backend error code = %v, want backend_error", problem["code"])
 	}
 }
 

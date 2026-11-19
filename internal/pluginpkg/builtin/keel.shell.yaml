@@ -1,0 +1,13 @@
+id: keel.shell
+version: 1.0.0
+kind: in-process
+description: "Bash execution bridge: isolated gbash sessions, timeout-to-background jobs, bounded output with blob references. The harness-owned `bash` tool owns the model-facing name; this plugin supplies the action backend."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides: {}
+permissions:
+  tools:
+    - keel.shell.run
+    - keel.shell.jobs
+source:
+  type: builtin
