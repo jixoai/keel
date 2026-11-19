@@ -69,24 +69,31 @@
       （`sandbox="allow-scripts"`，无 `allow-same-origin`）+ 握手（initialize→initialized 时序）+
       `tool-input`（恰好一次）→ `tool-result` + 内联弹性尺寸 + 全屏（kit Dialog/Sheet）
       （验收：`nsh check`；`bridge.test.ts` 过；E2E 断言 sandbox 属性与 CSP 头）
-      （2026-11-20 前端切片：`bridge.test.ts` 17/17、`nsh check` exit 0；TUI 136/136。
-      **偏离**：NSH 0.4.0 nightly 的 WebView 无 sandbox prop，web 运行时固定加
-      `allow-forms/popups/popups-to-escape-sandbox/modals/downloads`（同源 src 仍无 `allow-same-origin`
-      → opaque origin）；精确 `allow-scripts` 无法从 app 代码做到，已登记在
-      `evidence/p2/frontend/gates.md` §偏离 1。浏览器 E2E 的 sandbox/CSP 断言归 P6.2/P6.3。）
+      （2026-11-20 复核修复批次：**真实 Chrome E2E `pass:true` 连续 3 次**
+      （`evidence/p2/frontend/e2e/report.json`）——绝对同源 URL（`keel.info` 取 origin）+
+      URL 形态 WebView；View→Host 走页面 `window.top` 监听 + `event.source`↔`instance` nonce，
+      Host→View 走 `WebViewRef.postMessage`；断言 initialize→tool-input→tool-result→size-changed
+      （360px）、sandbox 无 `allow-same-origin`、CSP 四个头、cookie/DOM/localStorage 隔离。
+      `bridge.test.ts` 18/18、TUI 141/141。**偏离**：NSH 0.4.0 的 WebView 无 sandbox prop，
+      web 运行时固定加 `allow-forms/popups/popups-to-escape-sandbox/modals/downloads`
+      （同源 src 仍无 `allow-same-origin` → opaque origin）；登记在
+      `evidence/p2/frontend/gates.md` §偏离 1。srcdoc wrapper 方案被文档
+      `frame-ancestors 'self'` 阻断（实测），故采用 URL 形态 + 页面监听。）
 - [x] P2.7 `messages.tsx` 的 `ToolRow` 挂载（`details.app` + 能力位）；保留文本兜底可展开；
       按 `toolCallId` 复用实例（防流式重渲染重建 iframe）
       （验收：组件测试或 E2E；流式期间 iframe 不重建）
       （2026-11-20：`McpAppSlot` 挂到 ToolRow 展开区；绑定读完整 `tool.result`（core 适配层按
-      `toolCallId` 索引 details/content）；示例/TUI `can("mcp.apps")` 为假时不挂 WebView。实例按
-      `toolCallId` 持有桥状态、`src` 只由目录 appId+hash 决定（流式期间不变）。「浏览器流式不重建」
-      的 E2E 归 P6.2。）
+      `toolCallId` 索引 details/content）；TUI `can("mcp.apps")` 为假时不挂 WebView，显示
+      app 标题 + 文档路径 + 文本结果。实例按 `toolCallId` 持有桥状态、`src` 由目录 appId+hash+
+      instance+reload 决定；E2E 证明自导航后 reload 并重新握手，流式重渲染不改变文档身份。
+      浏览器「流式期间不重建」的专项慢帧 E2E 仍归 P6.2。）
 - [ ] P2.8 降级面：无 apps 服务器/无能力客户端/取回失败/握手超时（5s）/协议违规 → 文本兜底 + 诊断 + 审计
       （验收：单测逐格 + E2E 一格）
       （2026-11-20 服务端部分已交付：无 apps 服务器=空目录、取回/校验/超限/缓存失败=诊断+审计+排除目录、
       重取失败保留旧版本、app 绑定按已发布目录门控（无半成品 app）；前端部分已交付：无能力/终端=
-      文本+提示、目录失败/握手超时/协议违规/加载失败=文本+原因+重试（`bridge.test.ts` 逐格、
-      TUI 用例一格）。剩余：浏览器 E2E 一格（P6.3）与审计表 `mcp_app_audit`（P3.7），故本项仍未勾）
+      文本+标题+链接、目录失败/握手超时/协议违规/加载失败=文本+原因+重试（`bridge.test.ts` 逐格、
+      TUI 用例一格、浏览器 E2E 含导航降级一格）。剩余：审计表 `mcp_app_audit`（P3.7）与
+      P6.3 的独立降级 E2E，故本项仍未勾）
 
 ## P3 — 桥与出站动作
 

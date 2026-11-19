@@ -31,6 +31,7 @@ import {
   type BridgePhase,
   type DisplayMode,
 } from "./bridge";
+import { registerWebFrame, webPageOrigin, webTransportAvailable } from "./web-transport";
 
 const INLINE_DEFAULT_HEIGHT = 220;
 const FULLSCREEN_HEIGHT_RATIO = 0.82;
@@ -50,10 +51,12 @@ interface SessionSignals {
   diagnostic: Getter<BridgeFailure | null>;
   height: Getter<number>;
   mode: Getter<DisplayMode>;
+  reload: Getter<number>;
   setPhase: (value: BridgePhase) => void;
   setDiagnostic: (value: BridgeFailure | null) => void;
   setHeight: (value: number) => void;
   setMode: (value: DisplayMode) => void;
+  setReload: (value: number) => void;
 }
 
 interface AppSession {
@@ -61,11 +64,58 @@ interface AppSession {
   ref: { current?: WebViewRef };
   signals: SessionSignals;
   bridge: AppBridge;
+  /** The per-View routing nonce (`&instance=`), matched against the iframe's
+   * `src` when a message arrives from the page window. */
+  instance: string;
+  /** A navigation reload is queued (coalesces a sibling load event). */
+  reloadScheduled: boolean;
   disposed: boolean;
   cleanupRegistered: boolean;
 }
 
 const sessions = new Map<string, AppSession>();
+
+let instanceSequence = 0;
+
+/** A routing nonce for one View instance: lowercase alphanumerics, 16–64, so
+ * the document URL's `instance` parameter validates. */
+function newInstance(): string {
+  const cryptoAny = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  const raw = cryptoAny?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  const clean = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const sequence = (++instanceSequence).toString(36);
+  return `${clean}${sequence}`.padEnd(16, "0").slice(0, 40);
+}
+
+interface WebOriginState {
+  status: "idle" | "loading" | "ready" | "error";
+  origin?: string;
+  error?: string;
+}
+
+/** The page's own origin (web target): `keel.info` answers it; the app has no
+ * `location` of its own. One probe per launch, retryable. */
+const webOrigin = signal<WebOriginState>({ status: "idle" });
+
+const messageOf = (error: unknown): string => {
+  if (error instanceof Error && error.message) return error.message;
+  const value = error as { message?: unknown } | null;
+  return typeof value?.message === "string" && value.message ? value.message : String(error);
+};
+
+function ensureWebOrigin(force = false): void {
+  if (platform.os !== "web") return;
+  const current = webOrigin();
+  if (!force && (current.status === "loading" || current.status === "ready" || current.status === "error")) return;
+  webOrigin.set({ status: "loading" });
+  void webPageOrigin()
+    .then((origin) => {
+      webOrigin.set({ status: "ready", origin });
+    })
+    .catch((error: unknown) => {
+      webOrigin.set({ status: "error", error: messageOf(error) });
+    });
+}
 
 const titleOf = (app: McpAppView): string => app.title?.trim() || app.server || "交互界面";
 
@@ -170,6 +220,7 @@ function createSession(callId: string, props: McpAppViewProps): AppSession {
   const diagnostic = signal<BridgeFailure | null>(null);
   const height = signal(INLINE_DEFAULT_HEIGHT);
   const mode = signal<DisplayMode>("inline");
+  const reload = signal(0);
   const session: AppSession = {
     live: props,
     ref: {},
@@ -178,12 +229,16 @@ function createSession(callId: string, props: McpAppViewProps): AppSession {
       diagnostic,
       height,
       mode,
+      reload,
       setPhase: (value) => phase.set(value),
       setDiagnostic: (value) => diagnostic.set(value),
       setHeight: (value) => height.set(value),
       setMode: (value) => mode.set(value),
+      setReload: (value) => reload.set(value),
     },
     bridge: undefined as unknown as AppBridge,
+    instance: newInstance(),
+    reloadScheduled: false,
     disposed: false,
     cleanupRegistered: false,
   };
@@ -201,15 +256,32 @@ function sessionFor(callId: string, props: McpAppViewProps): AppSession {
   return createSession(callId, props);
 }
 
-/** New View instance (retry or display-mode change): the old bridge is gone
- * and the iframe mounts again, so the next `ui/initialize` starts clean. */
-function restartSession(session: AppSession): void {
+/** New View instance: the old bridge is gone and the next `ui/initialize`
+ * starts clean. `reload` bumps the URL's generation so NSH loads the app
+ * document again (a navigation may have replaced it). */
+function resetBridge(session: AppSession, reason: string): void {
   const old = session.bridge;
-  old.destroy({ kind: "unmounted", message: "实例重建" });
+  old.destroy({ kind: "unmounted", message: reason });
   session.signals.setPhase("idle");
   session.signals.setDiagnostic(null);
   session.signals.setHeight(INLINE_DEFAULT_HEIGHT);
   session.bridge = buildBridge(session);
+}
+
+function restartSession(session: AppSession, reload = false): void {
+  session.reloadScheduled = false;
+  if (reload) session.signals.setReload(session.signals.reload() + 1);
+  resetBridge(session, reload ? "文档重新加载" : "实例重建");
+}
+
+/** Coalesce a navigation's load + URL events into one reload. */
+function scheduleReload(session: AppSession): void {
+  if (session.reloadScheduled || session.disposed) return;
+  session.reloadScheduled = true;
+  console.warn(`[mcp-app ${session.live.app.appId}] 文档导航/重载：丢弃旧实例并重新握手`);
+  setTimeout(() => {
+    if (!session.disposed) restartSession(session, true);
+  }, 0);
 }
 
 function disposeSession(callId: string, session: AppSession): void {
@@ -231,8 +303,11 @@ export function McpAppView(props: McpAppViewProps) {
   const destroyed = () => session.signals.phase() === "destroyed";
   const source = () =>
     appDocumentSource(props.app, {
-      sandboxOrigin: props.sandboxOrigin,
       web: platform.os === "web",
+      origin: webOrigin().origin,
+      sandboxOrigin: props.sandboxOrigin,
+      instance: session.instance,
+      reload: session.signals.reload(),
     });
   const url = () => {
     const resolution = source();
@@ -242,7 +317,30 @@ export function McpAppView(props: McpAppViewProps) {
     const resolution = source();
     return "error" in resolution ? resolution.error : null;
   };
+  /** The document's content identity (not the per-instance query): a catalogue
+   * reload with a new hash is a new View and restarts the bridge. */
+  const documentKey = () => `${props.app.appId}:${props.app.hash}`;
   const title = () => titleOf(props.app);
+
+  if (platform.os === "web") {
+    // The component body runs once; the probe is idempotent and sets the
+    // loading state synchronously, so the frame's branch never waits on an
+    // effect registration to start.
+    ensureWebOrigin();
+    // Route this View's frames from the page window by its `instance` nonce.
+    // The handler reads `session.bridge` when a frame arrives, so a rebuilt
+    // instance uses the current bridge.
+    const unregister = registerWebFrame(session.instance, (data, origin) => {
+      session.bridge.handleMessage(data, origin);
+    });
+    cleanup(unregister);
+    if (!webTransportAvailable() && session.signals.diagnostic() === null) {
+      session.signals.setDiagnostic({
+        kind: "transport",
+        message: "web 页面宿主不可用，交互界面无法接收消息",
+      });
+    }
+  }
 
   // The result arrives after the call row is already on screen; this is the
   // one path that hands it to the bridge (exactly once is the bridge's rule).
@@ -269,17 +367,17 @@ export function McpAppView(props: McpAppViewProps) {
     const mode = session.signals.mode();
     if (mode === lastMode) return;
     lastMode = mode;
-    restartSession(session);
+    resetBridge(session, "显示模式变化");
   });
 
   // A content change (catalogue reload with a new hash) is a new document and
   // therefore a new View instance: the next initialize must start a new bridge.
-  let lastSrc = url();
+  let lastDocument = documentKey();
   effect(() => {
-    const src = url();
-    if (src === lastSrc) return;
-    lastSrc = src;
-    restartSession(session);
+    const key = documentKey();
+    if (key === lastDocument) return;
+    lastDocument = key;
+    resetBridge(session, "文档版本变化");
   });
 
   const statusLabel = () => {
@@ -297,42 +395,120 @@ export function McpAppView(props: McpAppViewProps) {
     if (session.signals.mode() !== mode) session.signals.setMode(mode);
   };
 
-  const frame = () => {
-    const src = url();
-    if (!src) {
-      return (
-        <Text style={{ fontSize: typeScale.sm, color: color.warning, userSelect: "text" }}>
-          {sourceError() ?? "交互界面地址无效"}，已回退为文本结果。
-        </Text>
-      );
+  /** A load that is not the first one means the frame replaced the app
+   * document (in-frame navigation). The old instance is discarded and the
+   * host's own URL is loaded again: a third-party page must never inherit the
+   * already-authorized channel and its tool-input/tool-result. */
+  const onFrameLoad = () => {
+    const snapshot = session.bridge.snapshot();
+    if (snapshot.initialized || snapshot.phase === "handshaking") {
+      scheduleReload(session);
+      return;
     }
-    return (
-      <WebView
-        ref={(node) => {
-          session.ref.current = node;
-        }}
-        src={src}
-        testID={`mcp-app-frame-${props.callId}`}
-        style={{
-          width: "100%",
-          height: session.signals.height(),
-          minHeight: INLINE_MIN_HEIGHT,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: color.border,
-          backgroundColor: color.card,
-        }}
-        onLoad={() => session.bridge.start()}
-        onMessage={(event) => session.bridge.handleMessage(event.data)}
-        onError={(error) =>
-          session.bridge.destroy({
-            kind: "transport",
-            message: `交互界面加载失败${error.code ? `（${error.code}）` : ""}：${error.message}`,
-          })
-        }
-      />
-    );
+    session.bridge.start();
   };
+
+  const sameDocument = (actual: string, expected: string): boolean => {
+    try {
+      const a = new URL(actual);
+      const b = new URL(expected);
+      return a.origin === b.origin && a.pathname === b.pathname;
+    } catch {
+      return actual === expected;
+    }
+  };
+
+  const onFrameNavigation = (event: { url?: string }) => {
+    const expected = url();
+    const actual = typeof event?.url === "string" ? event.url : "";
+    if (!expected || !actual) return;
+    if (sameDocument(actual, expected)) return;
+    scheduleReload(session);
+  };
+
+  const webLoading = () =>
+    platform.os === "web" && (webOrigin().status === "idle" || webOrigin().status === "loading");
+  const webOriginError = () => platform.os === "web" && webOrigin().status === "error";
+
+  const loadingRow = () => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, padding: space.md }}>
+      <Icon name="clock" size={14} tint={color.mutedForeground} />
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>正在读取页面来源…</Text>
+    </View>
+  );
+
+  const originErrorRow = () => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, padding: space.md }}>
+      <Icon name="alert" size={14} tint={color.warning} />
+      <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>
+        无法读取页面来源：{webOrigin().error ?? "未知原因"}（文本结果仍可阅读）
+      </Text>
+      <Button
+        variant="outline"
+        size="sm"
+        icon="refresh"
+        label="重试"
+        accessibilityLabel="重试读取页面来源"
+        onPress={() => ensureWebOrigin(true)}
+      />
+    </View>
+  );
+
+  const sourceErrorRow = () => (
+    <Text style={{ fontSize: typeScale.sm, color: color.warning, userSelect: "text" }}>
+      {sourceError() ?? "交互界面地址无效"}，已回退为文本结果。
+    </Text>
+  );
+
+  const frameContent = (src: string) => (
+    <WebView
+      ref={(node) => {
+        session.ref.current = node;
+      }}
+      src={src}
+      testID={`mcp-app-frame-${props.callId}`}
+      style={{
+        width: "100%",
+        height: session.signals.height(),
+        minHeight: INLINE_MIN_HEIGHT,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: color.border,
+        backgroundColor: color.card,
+      }}
+      onLoad={onFrameLoad}
+      onNavigationStateChange={onFrameNavigation}
+      // The URL-form web view has no page→host channel (`onMessage` is only
+      // wired for the srcdoc form); the web target uses the page-window
+      // transport above. Native web views keep their per-view channel.
+      onMessage={(event) => {
+        if (platform.os !== "web") session.bridge.handleMessage(event.data);
+      }}
+      onError={(error) =>
+        session.bridge.destroy({
+          kind: "transport",
+          message: `交互界面加载失败${error.code ? `（${error.code}）` : ""}：${error.message}`,
+        })
+      }
+    />
+  );
+
+  /** Reactive branches: the page origin is probed asynchronously, so the frame
+   * must mount when its signal turns ready (a plain `if` here would freeze the
+   * first reading). */
+  const frame = () => (
+    <View style={{ flexDirection: "column" }}>
+      <If when={webLoading()}>{() => loadingRow()}</If>
+      <If when={webOriginError()}>{() => originErrorRow()}</If>
+      <If when={!webLoading() && !webOriginError()}>
+        {() => (
+          <If when={url()} else={sourceErrorRow()}>
+            {(src) => frameContent(src())}
+          </If>
+        )}
+      </If>
+    </View>
+  );
 
   const fallback = () => (
     <View
@@ -359,7 +535,7 @@ export function McpAppView(props: McpAppViewProps) {
         icon="refresh"
         label="重试"
         accessibilityLabel="重试交互界面"
-        onPress={() => restartSession(session)}
+        onPress={() => restartSession(session, true)}
       />
     </View>
   );
@@ -401,7 +577,7 @@ export function McpAppView(props: McpAppViewProps) {
         />
       </View>
       <If when={destroyed()} else={frame()}>
-        {fallback()}
+        {() => fallback()}
       </If>
       <Text
         style={{

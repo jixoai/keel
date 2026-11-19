@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>e2e app</title>
+<style>body{font:13px/1.4 system-ui;margin:12px;color:#111}</style></head>
+<body>
+<h1 id="title">e2e app booting</h1>
+<pre id="state">{}</pre>
+<script>
+(function () {
+  const state = window.__e2e = {
+    frames: [], host: null, isolation: null, cookieCheck: null, errors: [], bootedAt: Date.now()
+  };
+  const paint = () => { document.getElementById("state").textContent = JSON.stringify(state, null, 2); };
+  const send = (obj) => { parent.postMessage(JSON.stringify(obj), "*"); };
+
+  window.addEventListener("message", (event) => {
+    let frame;
+    try { frame = JSON.parse(String(event.data)); } catch (e) { state.errors.push("bad-json"); return; }
+    state.frames.push({ method: frame.method || "response", id: frame.id, at: Date.now() });
+    if (frame.id === 1 && frame.result) {
+      state.host = frame.result;
+      document.getElementById("title").textContent = "e2e app initialized";
+      send({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
+      setTimeout(() => {
+        send({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { width: 640, height: 360 } });
+      }, 120);
+    }
+    paint();
+  });
+
+  const checkIsolation = () => {
+    const result = { cookie: null, parentDom: null, localStorage: null };
+    try { result.cookie = document.cookie; } catch (e) { result.cookie = "error:" + e.name; }
+    try { result.parentDom = String(parent.document.body.innerText).slice(0, 40); } catch (e) { result.parentDom = "blocked:" + e.name; }
+    try { localStorage.getItem("x"); result.localStorage = "readable"; } catch (e) { result.localStorage = "blocked:" + e.name; }
+    state.isolation = result;
+    fetch("/cookie-check", { credentials: "include" })
+      .then((r) => r.json())
+      .then((body) => { state.cookieCheck = body; paint(); })
+      .catch((e) => { state.cookieCheck = { error: String(e) }; paint(); });
+    paint();
+  };
+
+  // Send initialize once the document is ready; the host answers (id 1) and
+  // the View completes the handshake.
+  const start = () => {
+    send({
+      jsonrpc: "2.0", id: 1, method: "ui/initialize",
+      params: {
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "e2e-app", version: "1.0.0" },
+        appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] }
+      }
+    });
+    setTimeout(checkIsolation, 800);
+    paint();
+  };
+  if (document.readyState === "complete") start(); else window.addEventListener("load", start);
+})();
+</script>
+</body></html>

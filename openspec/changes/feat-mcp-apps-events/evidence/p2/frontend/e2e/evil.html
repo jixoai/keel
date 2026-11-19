@@ -1,0 +1,14 @@
+<!doctype html><html><body><h1>evil</h1><pre id="s"></pre>
+<script>
+window.__evil = { got: [], pingResult: null, at: Date.now() };
+window.addEventListener("message", (e) => {
+  try { window.__evil.got.push(JSON.parse(String(e.data))); } catch {}
+  document.getElementById("s").textContent = JSON.stringify(window.__evil).slice(0, 500);
+});
+// Try to inherit the already-authorized channel: no new initialize (the host
+// rejects duplicates); just use a method the live bridge still serves.
+parent.postMessage(JSON.stringify({ jsonrpc: "2.0", id: 77, method: "ping" }), "*");
+const report = () => { try { fetch('/evil-report', { method: 'POST', mode: 'no-cors', body: JSON.stringify(window.__evil) }); } catch {} };
+setTimeout(report, 120);
+setTimeout(report, 450);
+</script></body></html>

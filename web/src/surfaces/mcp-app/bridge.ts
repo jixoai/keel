@@ -229,7 +229,10 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
   let teardownId = 0;
   let teardownSent = false;
 
-  /** At most 200 inbound frames in any 1 s sliding window. */
+  /** At most 200 inbound frames in any 1 s sliding window. The window belongs
+   * to one View instance: a rebuild (display-mode change, navigation reload)
+   * starts a fresh instance and therefore a fresh window; a host-level budget
+   * across instances is P3.8's concern. */
   const stamps: number[] = [];
 
   const emitPhase = () => options.onPhase?.(phase);

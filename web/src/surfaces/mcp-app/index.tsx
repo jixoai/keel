@@ -8,11 +8,11 @@
 // Nothing here can show a success the server did not produce.
 import { effect, Text, View } from "nsh";
 import type { McpAppBinding, ToolCallView } from "../../data/contract";
-import { can } from "../../data/capabilities";
+import { can, deploymentCan } from "../../data/capabilities";
 import { appBindingOf } from "../../data/mcp-apps";
 import { store } from "../../data/store";
 import { Icon } from "../../ui/icons";
-import { Badge, Button, color, radius, space, typeScale } from "../../ui/kit";
+import { Badge, Button, color, font, radius, space, typeScale, weight } from "../../ui/kit";
 import { appCatalogueEntry, appCatalogueState, ensureAppCatalogue } from "./catalogue";
 import { McpAppView } from "./view";
 
@@ -23,15 +23,16 @@ export function bindingOf(call: ToolCallView): McpAppBinding | null {
   return appBindingOf(raw) ?? appBindingOf(call.result);
 }
 
-function Unsupported(props: { binding: McpAppBinding }) {
+function Unsupported(props: { binding: McpAppBinding; title?: string; link?: string }) {
+  const label = props.title?.trim() || props.binding.resourceUri;
+  const link = props.link?.trim() || props.binding.resourceUri;
   return (
     <View
       testID={`mcp-app-unsupported-${props.binding.appId}`}
       accessibilityLabel="此结果带交互界面"
       style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.sm,
+        flexDirection: "column",
+        gap: space.xs,
         padding: space.md,
         borderRadius: radius.md,
         borderWidth: 1,
@@ -39,11 +40,19 @@ function Unsupported(props: { binding: McpAppBinding }) {
         backgroundColor: color.muted,
       }}
     >
-      <Icon name="panel" size={14} tint={color.mutedForeground} />
-      <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Icon name="panel" size={14} tint={color.mutedForeground} />
+        <Text style={{ flex: 1, fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+          {label}
+        </Text>
+        <Badge variant="secondary" label="文本" />
+      </View>
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
         此结果带交互界面；当前客户端以文本显示。
       </Text>
-      <Badge variant="secondary" label="文本" />
+      <Text style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground, userSelect: "text" }}>
+        {link}
+      </Text>
     </View>
   );
 }
@@ -104,7 +113,9 @@ export function McpAppSlot(props: { call: ToolCallView }) {
 
   effect(() => {
     const current = binding();
-    if (current && can("mcp.apps")) ensureAppCatalogue(current.appId);
+    // The catalogue is loaded even when this client cannot mount the View (the
+    // TUI): its title and document link are part of the spec's text fallback.
+    if (current && deploymentCan("mcp.apps")) ensureAppCatalogue(current.appId);
   });
 
   const retry = () => {
@@ -147,7 +158,16 @@ export function McpAppSlot(props: { call: ToolCallView }) {
       {() => (
         <View style={{ flexDirection: "column", gap: space.sm }}>
           <If when={!can("mcp.apps")} else={readyOrFallback()}>
-            {() => <Unsupported binding={binding() as McpAppBinding} />}
+            {() => {
+              const app = entry();
+              return (
+                <Unsupported
+                  binding={binding() as McpAppBinding}
+                  title={app?.title}
+                  link={app?.documentUrl}
+                />
+              );
+            }}
           </If>
         </View>
       )}

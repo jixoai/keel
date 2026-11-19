@@ -1,0 +1,1 @@
+warning: [mcp-app mcpapp_0123456789abcdef] 文档导航/重载：丢弃旧实例并重新握手

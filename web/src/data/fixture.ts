@@ -261,6 +261,11 @@ export class FixtureClient implements SettingsApi {
           permissions: {},
           hash,
           documentUrl: `/v1/mcp/apps/${appId}/view?v=${hash}`,
+          // The fixture is a client-only transport: this path exists only when
+          // the browser E2E server serves it. A plain dev server's real answer
+          // is a transport error (404), which the app slot reports verbatim —
+          // never a fabricated "no document" state.
+          diagnostics: ["fixture：文档路径由浏览器 E2E 服务器提供；普通 dev server 没有该路由"],
         },
       ],
       diagnostics: [],

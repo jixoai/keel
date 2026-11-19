@@ -166,35 +166,67 @@ export function appDocumentUrl(app: McpAppView): string | null {
   return app.documentUrl === `/v1/mcp/apps/${app.appId}/view?v=${app.hash}` ? app.documentUrl : null;
 }
 
-/** The URL a `WebView` actually loads. The web build resolves a relative path
- * against its own page (and keeps `frame-ancestors 'self'` satisfied); a
- * desktop/mobile NSH web view requires an absolute http(s) URL with a host, so
- * it uses the deployment's configured sandbox origin. Without one, the
- * platform has no address to load — the caller falls back to text instead of
- * mounting a frame that cannot work. */
+/** A per-View transport nonce: `&instance=<nonce>` on the document URL, used
+ * by the web transport to map an inbound `message`'s `source` back to the one
+ * instance that owns the frame. It is not a secret; it is a routing key. */
+export const INSTANCE_PATTERN = /^[a-z0-9]{16,64}$/;
+
+export interface AppDocumentSourceOptions {
+  web: boolean;
+  /** The page's origin (`keel.info`), required on the web target: NSH's web
+   * runtime refuses a relative `src` (`it names no host a grant could add`). */
+  origin?: string;
+  /** The deployment's second origin, required on desktop/mobile (a native
+   * WebView also needs an absolute URL with a host). */
+  sandboxOrigin?: string;
+  /** The per-instance routing nonce. */
+  instance?: string;
+  /** A reload generation: changing it makes NSH load the app document again
+   * (the server ignores the parameter; the hash URL stays the identity). */
+  reload?: number;
+}
+
+/** The URL a `WebView` actually loads: an absolute http(s) URL whose origin is
+ * the page (web) or the configured sandbox origin (desktop/mobile), and whose
+ * path is exactly the host-built hash-named app document. No caller-supplied
+ * URL ever reaches the frame. */
 export function appDocumentSource(
   app: McpAppView,
-  options: { sandboxOrigin?: string; web: boolean },
+  options: AppDocumentSourceOptions,
 ): { url: string } | { error: string } {
   const path = appDocumentUrl(app);
   if (!path) return { error: "目录中的文档地址无效" };
-  if (options.web) return { url: path };
-  const base = options.sandboxOrigin?.trim();
-  if (!base) return { error: "此部署未配置沙箱域，桌面客户端不挂载交互界面" };
+  const base = (options.web ? options.origin : options.sandboxOrigin)?.trim();
+  if (!base) {
+    return {
+      error: options.web
+        ? "无法读取页面来源，交互界面不能加载"
+        : "此部署未配置沙箱域，桌面客户端不挂载交互界面",
+    };
+  }
   let baseUrl: URL;
   try {
     baseUrl = new URL(base);
   } catch {
-    return { error: "沙箱域不是合法地址" };
+    return { error: options.web ? "页面来源不是合法地址" : "沙箱域不是合法地址" };
   }
   if (baseUrl.protocol !== "https:" && baseUrl.protocol !== "http:") {
-    return { error: "沙箱域只接受 http(s)" };
+    return { error: options.web ? "页面来源只接受 http(s)" : "沙箱域只接受 http(s)" };
   }
-  if (baseUrl.username || baseUrl.password) return { error: "沙箱域不得携带凭据" };
+  if (baseUrl.username || baseUrl.password) {
+    return { error: options.web ? "页面来源不得携带凭据" : "沙箱域不得携带凭据" };
+  }
   const url = new URL(path, baseUrl);
   // The path is fixed by `appDocumentUrl`; this guards the join itself.
   if (url.origin !== baseUrl.origin || url.pathname !== `/v1/mcp/apps/${app.appId}/view`) {
-    return { error: "文档地址越出沙箱域" };
+    return { error: "文档地址越出宿主来源" };
+  }
+  if (options.instance !== undefined) {
+    if (!INSTANCE_PATTERN.test(options.instance)) return { error: "实例标识形状非法" };
+    url.searchParams.set("instance", options.instance);
+  }
+  if (options.reload !== undefined && options.reload > 0) {
+    url.searchParams.set("reload", String(options.reload));
   }
   return { url: url.toString() };
 }

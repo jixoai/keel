@@ -1,0 +1,30 @@
+APP-DOC GET /v1/mcp/apps/mcpapp_0123456789abcdef/view?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&instance=b531b6a3e76f4711abcf086cd21dab142
+  Content-Type: text/html; charset=utf-8
+  X-MCP-App-Mime: text/html;profile=mcp-app
+  X-MCP-App-Hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cache-Control: public, max-age=31536000, immutable
+  Set-Cookie: keel_host_secret=1; Path=/; SameSite=Lax
+COOKIE-CHECK cookie=""
+EVIL GET /evil.html
+APP-DOC GET /v1/mcp/apps/mcpapp_0123456789abcdef/view?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&instance=b531b6a3e76f4711abcf086cd21dab142&reload=1
+  Content-Type: text/html; charset=utf-8
+  X-MCP-App-Mime: text/html;profile=mcp-app
+  X-MCP-App-Hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cache-Control: public, max-age=31536000, immutable
+  Set-Cookie: keel_host_secret=1; Path=/; SameSite=Lax
+COOKIE-CHECK cookie=""
+APP-DOC GET /v1/mcp/apps/mcpapp_0123456789abcdef/view?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&instance=b531b6a3e76f4711abcf086cd21dab142
+  Content-Type: text/html; charset=utf-8
+  X-MCP-App-Mime: text/html;profile=mcp-app
+  X-MCP-App-Hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cache-Control: public, max-age=31536000, immutable
+  Set-Cookie: keel_host_secret=1; Path=/; SameSite=Lax

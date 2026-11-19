@@ -1,0 +1,165 @@
+{
+  "url": "http://127.0.0.1:13679/?fixture=1",
+  "steps": [
+    {
+      "name": "session-list",
+      "detail": "loaded",
+      "at": "2026-11-19T22:08:08.476Z"
+    },
+    {
+      "name": "session-open",
+      "detail": "weather session rendered",
+      "at": "2026-11-19T22:08:08.648Z"
+    },
+    {
+      "name": "frame-attached",
+      "detail": "sandboxed frame mounted",
+      "at": "2026-11-19T22:08:11.749Z"
+    },
+    {
+      "name": "frame-mounted",
+      "detail": {
+        "src": "http://127.0.0.1:13679/v1/mcp/apps/mcpapp_0123456789abcdef/view?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&instance=b531b6a3e76f4711abcf086cd21dab142",
+        "sandbox": "allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-scripts"
+      },
+      "at": "2026-11-19T22:08:11.769Z"
+    },
+    {
+      "name": "app-state",
+      "detail": {
+        "frames": [
+          {
+            "method": "response",
+            "id": 1,
+            "at": 1795126091732
+          },
+          {
+            "method": "ui/notifications/tool-input",
+            "at": 1795126091735
+          },
+          {
+            "method": "ui/notifications/tool-result",
+            "at": 1795126091735
+          }
+        ],
+        "host": {
+          "protocolVersion": "2026-01-26",
+          "hostInfo": {
+            "name": "Keel",
+            "version": "0.1.0"
+          },
+          "hostCapabilities": {
+            "logging": {}
+          },
+          "hostContext": {
+            "theme": "dark",
+            "displayMode": "inline",
+            "availableDisplayModes": [
+              "inline",
+              "fullscreen"
+            ],
+            "containerDimensions": {
+              "maxHeight": 480
+            },
+            "platform": "web",
+            "deviceCapabilities": {
+              "touch": false
+            },
+            "locale": "en-US",
+            "timeZone": "Asia/Shanghai"
+          }
+        },
+        "isolation": null,
+        "cookieCheck": null,
+        "errors": [],
+        "bootedAt": 1795126091709
+      },
+      "at": "2026-11-19T22:08:11.791Z"
+    },
+    {
+      "name": "frame-box",
+      "detail": {
+        "x": 365,
+        "y": 130,
+        "width": 814,
+        "height": 360
+      },
+      "at": "2026-11-19T22:08:11.873Z"
+    },
+    {
+      "name": "host-badge",
+      "detail": {
+        "ready": true,
+        "snippet": "Keel\nAI 员工会话\n新会话 · 刚刚\n还没有消息\n发布审批\n等待确认\n是否在 22:00–23:00 窗口发布…\n3 分钟前\n发布准备周报\n帮我总结一下这周的发布准备情…\n8 分钟前\n部署卡在确认\n等待确认\n预发包已就绪：继续推生产，…\n10 分钟前\n天气面板\n用天气面板看看上海今…\n11 分钟前\n会议纪要整理\n运行中\n另外，把行动项按负责人分组。\n14 分钟前\n仅压缩记录\n运行中\n上一轮 68 条消息已压缩：只…\n20 分钟前\n并行工具检查\n检查 api、worker"
+      },
+      "at": "2026-11-19T22:08:11.877Z"
+    },
+    {
+      "name": "isolation",
+      "detail": {
+        "isolation": {
+          "cookie": "error:SecurityError",
+          "parentDom": "blocked:SecurityError",
+          "localStorage": "blocked:SecurityError"
+        },
+        "cookieCheck": {
+          "cookie": ""
+        }
+      },
+      "at": "2026-11-19T22:08:12.521Z"
+    },
+    {
+      "name": "navigation-defense",
+      "detail": {
+        "reloadedSrc": "http://127.0.0.1:13679/v1/mcp/apps/mcpapp_0123456789abcdef/view?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&instance=b531b6a3e76f4711abcf086cd21dab142&reload=1",
+        "evilReports": [],
+        "reloadedFrames": [
+          "response",
+          "ui/notifications/tool-input",
+          "ui/notifications/tool-result"
+        ],
+        "evilMethods": null
+      },
+      "at": "2026-11-19T22:08:43.340Z"
+    },
+    {
+      "name": "document-headers",
+      "detail": {
+        "status": 200,
+        "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+        "nosniff": "nosniff",
+        "referrer": "no-referrer",
+        "mime": "text/html;profile=mcp-app",
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "cache": "public, max-age=31536000, immutable"
+      },
+      "at": "2026-11-19T22:08:43.355Z"
+    }
+  ],
+  "console": [
+    "warning: [mcp-app mcpapp_0123456789abcdef] 文档导航/重载：丢弃旧实例并重新握手"
+  ],
+  "pageErrors": [],
+  "failedRequests": [],
+  "evil": null,
+  "navigation": {
+    "reloadedSrc": "http://127.0.0.1:13679/v1/mcp/apps/mcpapp_0123456789abcdef/view?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&instance=b531b6a3e76f4711abcf086cd21dab142&reload=1",
+    "evilReports": [],
+    "reloadedFrames": [
+      "response",
+      "ui/notifications/tool-input",
+      "ui/notifications/tool-result"
+    ],
+    "evilMethods": null
+  },
+  "documentHeaders": {
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+    "nosniff": "nosniff",
+    "referrer": "no-referrer",
+    "mime": "text/html;profile=mcp-app",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "cache": "public, max-age=31536000, immutable"
+  },
+  "pass": true
+}

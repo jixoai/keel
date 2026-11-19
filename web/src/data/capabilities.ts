@@ -86,10 +86,18 @@ export function setClientCapabilities(features: Record<string, boolean>): void {
 }
 
 /** The one capability question. Reactive: a screen that reads it re-renders
- * when the deployment is probed or the client's facts change. Both sides must
- * say `true`; an unknown feature is off. */
+ * when the deployment is probed or the client's facts change. A feature this
+ * client has not registered is off (undefined is not "trust the deployment"):
+ * both sides must say `true`, and an unknown feature is off. */
 export function can(feature: string): boolean {
-  if (client()[feature] === false) return false;
+  if (client()[feature] !== true) return false;
+  return deployment().features[feature] === true;
+}
+
+/** The deployment's half of the gate, for work the **server** can do even when
+ * this client cannot render it (the TUI reads the app catalogue so it can show
+ * the app's title and document link, then keeps the text result). */
+export function deploymentCan(feature: string): boolean {
   return deployment().features[feature] === true;
 }
 

@@ -374,6 +374,8 @@ test("TUI: MCP app 结果——不挂 iframe，文本兜底与能力提示", asy
   // and the app slot's degradation line.
   await app.press("label:工具 mcp");
   await app.waitFor("text:/此结果带交互界面；当前客户端以文本显示。/");
+  // The spec's TUI rule: the app's title and document link stay readable.
+  await app.waitFor("text:/\\/v1\\/mcp\\/apps\\/mcpapp_0123456789abcdef\\/view\\?v=/");
   expect(app.texts()).toContain("上海 24°C 多云，湿度 62%");
   expect(app.shows("id:mcp-app-frame-call-mcp-app")).toBe(false);
   expect(app.shows("id:mcp-app-fallback-call-mcp-app")).toBe(false);

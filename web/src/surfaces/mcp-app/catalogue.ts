@@ -11,7 +11,7 @@
 // fetch appears without polling.
 import { signal } from "nsh";
 import type { McpAppCatalogueView, McpAppView } from "../../data/contract";
-import { can } from "../../data/capabilities";
+import { deploymentCan } from "../../data/capabilities";
 import { store } from "../../data/store";
 
 export interface AppCatalogueState {
@@ -27,6 +27,8 @@ const EMPTY: AppCatalogueState = { status: "idle", generation: 0, apps: {} };
 
 const state = signal<AppCatalogueState>(EMPTY);
 let inflight: Promise<void> | null = null;
+/** The newest request generation; older answers are ignored. */
+let requestToken = 0;
 /** appIds already re-fetched once because the ready catalogue lacked them. */
 const refreshedFor = new Set<string>();
 
@@ -40,10 +42,16 @@ const messageOf = (error: unknown): string => {
  * missing app in a ready catalogue triggers one refresh (the app may have been
  * published after the first fetch). `force` is the UI's retry. */
 export function ensureAppCatalogue(appId?: string, force = false): void {
-  if (!can("mcp.apps")) return;
+  // The catalogue is a server fact, not a client capability: the TUI loads it
+  // to show the app's title and document link even though it will not mount a
+  // WebView.
+  if (!deploymentCan("mcp.apps")) return;
   const current = state();
   const missing = appId !== undefined && current.status === "ready" && !current.apps[appId];
-  if (inflight) return;
+  // A render-path ask never duplicates an in-flight fetch; the retry button
+  // (`force`) starts a new generation even while one is running, and the older
+  // answer is ignored by the token check below.
+  if (inflight && !force) return;
   if (!force) {
     if (current.status === "loading") return;
     // A failed fetch is not retried by the render path: the row's 重试 button
@@ -53,10 +61,12 @@ export function ensureAppCatalogue(appId?: string, force = false): void {
     if (missing && appId !== undefined && refreshedFor.has(appId)) return;
   }
   if (missing && appId !== undefined) refreshedFor.add(appId);
+  const token = ++requestToken;
   state.set({ ...current, status: "loading", error: undefined });
   const request: Promise<McpAppCatalogueView> = store.mcpApps();
   inflight = request
     .then((catalogue) => {
+      if (token !== requestToken) return;
       const apps: Record<string, McpAppView> = {};
       for (const app of catalogue.apps) apps[app.appId] = app;
       state.set({
@@ -68,6 +78,7 @@ export function ensureAppCatalogue(appId?: string, force = false): void {
       });
     })
     .catch((error: unknown) => {
+      if (token !== requestToken) return;
       state.set({
         status: "error",
         generation: current.generation,
@@ -78,7 +89,7 @@ export function ensureAppCatalogue(appId?: string, force = false): void {
       });
     })
     .finally(() => {
-      inflight = null;
+      if (token === requestToken) inflight = null;
     });
 }
 
@@ -101,6 +112,7 @@ export function catalogueSandboxOrigin(): string | undefined {
 /** Tests only. */
 export function resetAppCatalogueForTest(): void {
   inflight = null;
+  requestToken += 1;
   refreshedFor.clear();
   state.set(EMPTY);
 }

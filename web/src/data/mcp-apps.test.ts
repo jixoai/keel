@@ -97,9 +97,36 @@ test("CallToolResult：content 始终是数组，structuredContent 原样带出"
   });
 });
 
-test("加载地址：web 用同源相对路径；桌面需要配置的沙箱域", () => {
+test("加载地址：web 必须用页面来源的绝对 URL（NSH 拒绝相对 src）；桌面用沙箱域", () => {
   const app = parseMcpAppCatalogue({ apps: [row()] }).apps[0];
-  expect(appDocumentSource(app, { web: true })).toEqual({ url: DOCUMENT_URL });
+  expect(appDocumentSource(app, { web: true })).toEqual({
+    error: "无法读取页面来源，交互界面不能加载",
+  });
+  expect(appDocumentSource(app, { web: true, origin: "https://keel.example.com" })).toEqual({
+    url: `https://keel.example.com${DOCUMENT_URL}`,
+  });
+  expect(appDocumentSource(app, { web: true, origin: "https://keel.example.com/settings" })).toEqual({
+    url: `https://keel.example.com${DOCUMENT_URL}`,
+  });
+  expect(
+    appDocumentSource(app, {
+      web: true,
+      origin: "https://keel.example.com",
+      instance: "abcdef0123456789",
+      reload: 3,
+    }),
+  ).toEqual({
+    url: `https://keel.example.com${DOCUMENT_URL}&instance=abcdef0123456789&reload=3`,
+  });
+  expect(appDocumentSource(app, { web: true, origin: "https://keel.example.com", instance: "short" })).toEqual({
+    error: "实例标识形状非法",
+  });
+  expect(appDocumentSource(app, { web: true, origin: "javascript:alert(1)" })).toEqual({
+    error: "页面来源只接受 http(s)",
+  });
+  expect(appDocumentSource(app, { web: true, origin: "https://user:pass@keel.example.com" })).toEqual({
+    error: "页面来源不得携带凭据",
+  });
   expect(appDocumentSource(app, { web: false })).toEqual({
     error: "此部署未配置沙箱域，桌面客户端不挂载交互界面",
   });

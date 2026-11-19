@@ -342,3 +342,19 @@ test("字节长度：中文按 UTF-8 计", () => {
   expect(byteLength("中")).toBe(3);
   expect(byteLength("🙂")).toBe(4);
 });
+
+test("限速：单实例每秒最多 200 帧，超出即销毁", () => {
+  const h = harness();
+  h.bridge.start();
+  h.bridge.handleMessage(initialize());
+  h.bridge.handleMessage(INITIALIZED);
+  // Two frames are already in this second (initialize + initialized).
+  for (let i = 0; i < 198; i++) {
+    h.bridge.handleMessage(JSON.stringify({ jsonrpc: "2.0", id: 1000 + i, method: "ping" }));
+  }
+  expect(h.destroyed.length).toBe(0);
+  h.bridge.handleMessage(JSON.stringify({ jsonrpc: "2.0", id: 2000, method: "ping" }));
+  expect(h.destroyed.length).toBe(1);
+  expect(h.destroyed[0].kind).toBe("protocol");
+  expect(h.destroyed[0].message).toContain("200");
+});
