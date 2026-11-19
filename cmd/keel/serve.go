@@ -35,6 +35,7 @@ import (
 	"github.com/jixoai/keel/internal/servicehost"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
+	"github.com/jixoai/keel/internal/tasklog"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/testkit"
 	"github.com/jixoai/keel/internal/toolsurface"
@@ -136,6 +137,14 @@ func runServe(parent context.Context, opts serveOptions) error {
 	kern := kernel.New(kernelLog, kernel.Options{
 		Limits: limits,
 		Audit:  servicehost.NewAuditSink(log, servicehost.AuditOptions{}),
+	})
+	// The task log is a harness service, not a plugin: its attribution gate must
+	// keep working when keel.tasks is disabled. The plugin only supplies the
+	// `tasks` tool's action backend.
+	taskLog := tasklog.New(tasklog.Options{
+		Committer:  kern,
+		Reader:     kern,
+		Projection: tasklog.NewPGProjection(st),
 	})
 
 	// The SSE hub is started once the runtime is up (below): on a boot failure
@@ -301,6 +310,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 			ToolBackends: toolsurface.Backends{
 				Agents:   agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return toolSubagents }},
 				Creation: agentext.CreationBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				Tasks: agentext.TasksBackend{
+					Manager: func() *agentext.Manager { return toolPluginManager },
+					Service: taskLog,
+				},
 			},
 		},
 	})
@@ -334,7 +347,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// quota projection reports the same counters the stream and upload paths
 	// enforce, so "my usage" and "why was I refused" cannot disagree.
 	edge := newEdgeQuota(st)
-	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, opts, secretBox, secretReason,
+	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
 		loadHostTheme(static.root, log), edge, log)
 	if err != nil {
 		return err
@@ -523,7 +536,7 @@ func (p *productLayer) close() {
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, opts serveOptions, secretBox *store.SecretBox, secretReason string, theme json.RawMessage, edge *quota.Edge, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, theme json.RawMessage, edge *quota.Edge, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -546,7 +559,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Logger:  log,
 	})
 
-	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, subagents, partials, log)
+	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, subagents, partials, taskLog, log)
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +690,7 @@ type pluginSurface struct {
 // It is a constructor rather than inline code so the serving path and its tests
 // share exactly this wiring: the model-side proof that a plugin's prompt
 // section reaches the system prompt rides on these sinks.
-func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence agentext.PluginPersistence, opts serveOptions, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, log *slog.Logger) (*pluginSurface, error) {
+func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence agentext.PluginPersistence, opts serveOptions, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, tasks *tasklog.Service, log *slog.Logger) (*pluginSurface, error) {
 	builtinManifests, err := builtin.Manifests()
 	if err != nil {
 		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
@@ -701,6 +714,9 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				Manager:  func() *agentext.Manager { return pluginManager },
 				TenantID: opts.TenantID,
 			})
+		},
+		agentext.TasksPluginID: func() *agentext.Plugin {
+			return agentext.NewTasksPlugin(agentext.TasksOptions{Service: tasks})
 		},
 	}
 	builtins := make([]agentext.Builtin, 0, len(builtinManifests))

@@ -29,6 +29,8 @@ func TestOwedTurnIgnoresBookkeepingTails(t *testing.T) {
 	for _, kind := range []string{
 		store.EventRunStarted, store.EventRunFailed, store.EventRunFinished,
 		store.EventCompaction, store.EventExternalEvent,
+		store.EventTaskCreated, store.EventTaskUpdated, store.EventTaskAttached,
+		store.EventTaskDetached, store.EventTaskClosed, store.EventTaskNote,
 	} {
 		tail := store.Event{Seq: 2, Kind: kind, Payload: json.RawMessage(`{"status":"failed"}`)}
 		if !legacyOwedTurn([]store.Event{user, tail}, 1) {

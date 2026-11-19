@@ -146,7 +146,6 @@ func TestReservedActionsReturnNotImplemented(t *testing.T) {
 	}{
 		{toolsurface.Bash, `{"action":"run","command":"ls"}`, "run"},
 		{toolsurface.Bash, `{"action":"jobs","operation":"list"}`, "jobs"},
-		{toolsurface.Tasks, `{"action":"create","title":"x"}`, "create"},
 		{toolsurface.Approve, `{"action":"confirm","prompt":"x"}`, "confirm"},
 		{toolsurface.Notify, `{"action":"push","text":"x"}`, "push"},
 		{toolsurface.Read, `{"path":"a.txt"}`, ""},
@@ -532,6 +531,14 @@ func TestCreationBackendNilIsTyped(t *testing.T) {
 	}
 	if _, err := toolsurface.ManifestHash([]agentcore.AgentTool{brokenSchemaTool{}}); err == nil {
 		t.Fatal("a broken schema must fail the manifest hash")
+	}
+}
+
+func TestTasksBackendNilIsTyped(t *testing.T) {
+	registry := builtinRegistry(t, toolsurface.Backends{})
+	result := runAction(t, registry[toolsurface.Tasks], `{"action":"create","title":"x"}`)
+	if problem := errorDocument(t, result); problem["code"] != toolsurface.CodeNotWired {
+		t.Fatalf("nil tasks backend = %v", problem)
 	}
 }
 

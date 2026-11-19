@@ -1,0 +1,21 @@
+id: keel.tasks
+version: 1.0.0
+kind: in-process
+description: "Task log plugin: the event-sourced task cards behind the harness-owned `tasks` tool. Every tool call is attributed to a card; sub-agents are linked to the card that spawned them."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  hooks:
+    - subagent.started
+permissions:
+  tools:
+    - keel.tasks.create
+    - keel.tasks.update
+    - keel.tasks.attach
+    - keel.tasks.detach
+    - keel.tasks.close
+    - keel.tasks.list
+    - keel.tasks.show
+    - keel.tasks.note
+source:
+  type: builtin

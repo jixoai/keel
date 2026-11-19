@@ -625,3 +625,51 @@ CREATE INDEX IF NOT EXISTS tenant_usage_by_tenant_time
     ON tenant_usage (tenant_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS tenant_usage_by_kind
     ON tenant_usage (tenant_id, kind, recorded_at DESC);
+
+-- --- task-log (change keel-harness-v2, spec task-log) -----------------------
+--
+-- Two read models, one truth. task_cards is the current state of a card and
+-- task_events is the materialized projection of the six task.* ledger kinds;
+-- both are rebuilt from the session ledger by internal/tasklog and neither is a
+-- second source of truth (spec: 任务事件是账本投影). Writes go through the
+-- ledger first: the projection is repaired from the log, never edited by hand.
+--
+-- The dependency tables (tasks/submissions) above are the durable state machine
+-- of internal/durable and are unrelated: a "task card" is memory, a durable
+-- "task" is scheduling bookkeeping.
+CREATE TABLE IF NOT EXISTS task_cards (
+    tenant_id      uuid NOT NULL,
+    session_id     uuid NOT NULL,
+    task_id        uuid NOT NULL,
+    parent_task_id uuid,
+    title          text NOT NULL DEFAULT '',
+    status         text NOT NULL DEFAULT 'open',
+    origin         text NOT NULL DEFAULT 'session',
+    origin_seq     bigint NOT NULL DEFAULT 0,
+    created_seq    bigint NOT NULL DEFAULT 0,
+    updated_seq    bigint NOT NULL DEFAULT 0,
+    closed_seq     bigint NOT NULL DEFAULT 0,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, task_id)
+);
+
+-- A task id is a tenant-wide handle (parentTaskId resolves across sessions), so
+-- it is unique per tenant, not merely per session.
+CREATE UNIQUE INDEX IF NOT EXISTS task_cards_tenant_task ON task_cards (tenant_id, task_id);
+CREATE INDEX IF NOT EXISTS task_cards_parent ON task_cards (tenant_id, parent_task_id);
+CREATE INDEX IF NOT EXISTS task_cards_session
+    ON task_cards (tenant_id, session_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_events (
+    tenant_id  uuid NOT NULL,
+    session_id uuid NOT NULL,
+    seq        bigint NOT NULL,
+    task_id    uuid NOT NULL,
+    kind       text NOT NULL,
+    payload    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS task_events_task ON task_events (tenant_id, task_id, seq);

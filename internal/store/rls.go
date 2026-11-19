@@ -75,6 +75,8 @@ var rlsTenantTables = []string{
 	"tenant_secrets",
 	"agents",
 	"agent_teams",
+	"task_cards",
+	"task_events",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a

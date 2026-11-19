@@ -289,6 +289,250 @@ func (s *Store) ListSubmissions(ctx context.Context, tenantID, sessionID uuid.UU
 	return out, rows.Err()
 }
 
+// --- task-log read models (change keel-harness-v2, spec task-log) -----------
+//
+// task_cards and task_events are projections of the session ledger, owned by
+// internal/tasklog. The store deliberately exposes no "update the card title"
+// operation: a projection row is replaced from the log (Rebuild) or advanced by
+// the one event that just committed (Upsert/Insert). Nothing here is a second
+// source of truth, and a stray row written around the ledger is removed by the
+// next rebuild (the consistency test pins that).
+
+// TaskCardRow is one current-state task card.
+type TaskCardRow struct {
+	TenantID     uuid.UUID
+	SessionID    uuid.UUID
+	TaskID       uuid.UUID
+	ParentTaskID *uuid.UUID
+	Title        string
+	Status       string
+	Origin       string
+	OriginSeq    int64
+	CreatedSeq   int64
+	UpdatedSeq   int64
+	ClosedSeq    int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// TaskEventRow is one materialized task.* event. Seq is the ledger sequence.
+type TaskEventRow struct {
+	TenantID  uuid.UUID
+	SessionID uuid.UUID
+	Seq       int64
+	TaskID    uuid.UUID
+	Kind      string
+	Payload   json.RawMessage
+	CreatedAt time.Time
+}
+
+// ErrTaskCardNotFound means the card does not exist for the tenant scope.
+var ErrTaskCardNotFound = errors.New("store: task card not found")
+
+const taskCardColumns = `tenant_id, session_id, task_id, parent_task_id, title, status,
+	origin, origin_seq, created_seq, updated_seq, closed_seq, created_at, updated_at`
+
+func scanTaskCardRow(row pgx.Row) (TaskCardRow, error) {
+	var out TaskCardRow
+	err := row.Scan(&out.TenantID, &out.SessionID, &out.TaskID, &out.ParentTaskID, &out.Title,
+		&out.Status, &out.Origin, &out.OriginSeq, &out.CreatedSeq, &out.UpdatedSeq,
+		&out.ClosedSeq, &out.CreatedAt, &out.UpdatedAt)
+	if err != nil {
+		return TaskCardRow{}, err
+	}
+	return out, nil
+}
+
+// GetTaskCardRow reads one card inside a session.
+func (s *Store) GetTaskCardRow(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) (TaskCardRow, error) {
+	row, err := scanTaskCardRow(s.pool.QueryRow(ctx,
+		`SELECT `+taskCardColumns+` FROM task_cards
+		 WHERE tenant_id=$1 AND session_id=$2 AND task_id=$3`,
+		tenantID, sessionID, taskID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TaskCardRow{}, ErrTaskCardNotFound
+	}
+	if err != nil {
+		return TaskCardRow{}, fmt.Errorf("store: get task card: %w", err)
+	}
+	return row, nil
+}
+
+// GetTaskCardRowByID reads one card by its tenant-wide task id (a parent may
+// live in another session, so the parent lookup cannot assume the session).
+func (s *Store) GetTaskCardRowByID(ctx context.Context, tenantID, taskID uuid.UUID) (TaskCardRow, error) {
+	row, err := scanTaskCardRow(s.pool.QueryRow(ctx,
+		`SELECT `+taskCardColumns+` FROM task_cards WHERE tenant_id=$1 AND task_id=$2`,
+		tenantID, taskID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TaskCardRow{}, ErrTaskCardNotFound
+	}
+	if err != nil {
+		return TaskCardRow{}, fmt.Errorf("store: get task card by id: %w", err)
+	}
+	return row, nil
+}
+
+// ListTaskCardRows lists cards of one tenant. sessionID/parentTaskID nil mean
+// "any"; status "" means "any". The order is stable (updated_at, task_id).
+func (s *Store) ListTaskCardRows(ctx context.Context, tenantID uuid.UUID, sessionID, parentTaskID *uuid.UUID, status string) ([]TaskCardRow, error) {
+	q := `SELECT ` + taskCardColumns + ` FROM task_cards WHERE tenant_id=$1`
+	args := []any{tenantID}
+	if sessionID != nil {
+		args = append(args, *sessionID)
+		q += fmt.Sprintf(" AND session_id=$%d", len(args))
+	}
+	if parentTaskID != nil {
+		args = append(args, *parentTaskID)
+		q += fmt.Sprintf(" AND parent_task_id=$%d", len(args))
+	}
+	if status != "" {
+		args = append(args, status)
+		q += fmt.Sprintf(" AND status=$%d", len(args))
+	}
+	q += ` ORDER BY updated_at DESC, task_id`
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list task cards: %w", err)
+	}
+	defer rows.Close()
+	var out []TaskCardRow
+	for rows.Next() {
+		row, err := scanTaskCardRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan task card: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// ListTaskEventRows returns the events of one card in ledger order.
+func (s *Store) ListTaskEventRows(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) ([]TaskEventRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT tenant_id, session_id, seq, task_id, kind, payload, created_at
+		   FROM task_events WHERE tenant_id=$1 AND session_id=$2 AND task_id=$3
+		  ORDER BY seq`, tenantID, sessionID, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list task events: %w", err)
+	}
+	defer rows.Close()
+	var out []TaskEventRow
+	for rows.Next() {
+		var row TaskEventRow
+		var payload []byte
+		if err := rows.Scan(&row.TenantID, &row.SessionID, &row.Seq, &row.TaskID, &row.Kind,
+			&payload, &row.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan task event: %w", err)
+		}
+		row.Payload = payload
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// UpsertTaskCardRow advances one card. An event out of order (an older seq than
+// the row already carries) never rewrites newer state: the row is the
+// projection of the highest sequence applied so far.
+func (s *Store) UpsertTaskCardRow(ctx context.Context, row TaskCardRow) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO task_cards (tenant_id, session_id, task_id, parent_task_id, title, status,
+		                         origin, origin_seq, created_seq, updated_seq, closed_seq)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 ON CONFLICT (tenant_id, session_id, task_id) DO UPDATE SET
+		   parent_task_id = COALESCE(EXCLUDED.parent_task_id, task_cards.parent_task_id),
+		   title          = CASE WHEN EXCLUDED.updated_seq >= task_cards.updated_seq THEN EXCLUDED.title ELSE task_cards.title END,
+		   status         = CASE WHEN EXCLUDED.updated_seq >= task_cards.updated_seq THEN EXCLUDED.status ELSE task_cards.status END,
+		   origin_seq     = CASE WHEN EXCLUDED.updated_seq >= task_cards.updated_seq THEN EXCLUDED.origin_seq ELSE task_cards.origin_seq END,
+		   created_seq    = CASE WHEN EXCLUDED.created_seq > 0 AND task_cards.created_seq = 0 THEN EXCLUDED.created_seq ELSE task_cards.created_seq END,
+		   updated_seq    = GREATEST(task_cards.updated_seq, EXCLUDED.updated_seq),
+		   closed_seq     = GREATEST(task_cards.closed_seq, EXCLUDED.closed_seq),
+		   updated_at     = now()`,
+		row.TenantID, row.SessionID, row.TaskID, row.ParentTaskID, row.Title, row.Status,
+		row.Origin, row.OriginSeq, row.CreatedSeq, row.UpdatedSeq, row.ClosedSeq)
+	if err != nil {
+		return fmt.Errorf("store: upsert task card: %w", err)
+	}
+	return nil
+}
+
+// InsertTaskEventRow records the projection row of one already-committed
+// ledger event. Repeats are no-ops (the primary key is the ledger sequence).
+func (s *Store) InsertTaskEventRow(ctx context.Context, row TaskEventRow) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO task_events (tenant_id, session_id, seq, task_id, kind, payload)
+		 VALUES ($1,$2,$3,$4,$5,$6)
+		 ON CONFLICT (tenant_id, session_id, seq) DO NOTHING`,
+		row.TenantID, row.SessionID, row.Seq, row.TaskID, row.Kind, jsonOrNil(row.Payload))
+	if err != nil {
+		return fmt.Errorf("store: insert task event: %w", err)
+	}
+	return nil
+}
+
+// ReplaceTaskSessionProjection swaps one session's projection for a fresh one in
+// a single transaction: delete, then insert the rebuilt rows. Rebuilds are
+// therefore idempotent (running twice yields the same rows), and a crash can
+// leave either the old or the new projection, never a mixture.
+func (s *Store) ReplaceTaskSessionProjection(ctx context.Context, tenantID, sessionID uuid.UUID, cards []TaskCardRow, events []TaskEventRow) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin task projection tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM task_events WHERE tenant_id=$1 AND session_id=$2`, tenantID, sessionID); err != nil {
+		return fmt.Errorf("store: clear task events: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM task_cards WHERE tenant_id=$1 AND session_id=$2`, tenantID, sessionID); err != nil {
+		return fmt.Errorf("store: clear task cards: %w", err)
+	}
+	batch := &pgx.Batch{}
+	for _, card := range cards {
+		batch.Queue(
+			`INSERT INTO task_cards (tenant_id, session_id, task_id, parent_task_id, title, status,
+			                         origin, origin_seq, created_seq, updated_seq, closed_seq)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			card.TenantID, card.SessionID, card.TaskID, card.ParentTaskID, card.Title, card.Status,
+			card.Origin, card.OriginSeq, card.CreatedSeq, card.UpdatedSeq, card.ClosedSeq)
+	}
+	for _, event := range events {
+		batch.Queue(
+			`INSERT INTO task_events (tenant_id, session_id, seq, task_id, kind, payload)
+			 VALUES ($1,$2,$3,$4,$5,$6)`,
+			event.TenantID, event.SessionID, event.Seq, event.TaskID, event.Kind, jsonOrNil(event.Payload))
+	}
+	if batch.Len() > 0 {
+		results := tx.SendBatch(ctx, batch)
+		for i := 0; i < batch.Len(); i++ {
+			if _, err := results.Exec(); err != nil {
+				results.Close()
+				return fmt.Errorf("store: rewrite task projection: %w", err)
+			}
+		}
+		if err := results.Close(); err != nil {
+			return fmt.Errorf("store: close task projection batch: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("store: commit task projection: %w", err)
+	}
+	return nil
+}
+
+// CountTaskEvents returns how many task events the projection holds for a
+// session (the consistency test compares it with the ledger count).
+func (s *Store) CountTaskEvents(ctx context.Context, tenantID, sessionID uuid.UUID) (int, error) {
+	var count int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM task_events WHERE tenant_id=$1 AND session_id=$2`,
+		tenantID, sessionID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("store: count task events: %w", err)
+	}
+	return count, nil
+}
+
 func jsonOrNil(raw json.RawMessage) any {
 	if len(raw) == 0 {
 		return nil

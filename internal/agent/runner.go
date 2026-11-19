@@ -988,7 +988,9 @@ func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
 	for i := len(events) - 1; i >= 0; i-- {
 		switch events[i].Kind {
 		case store.EventRunStarted, store.EventRunFailed, store.EventRunFinished,
-			store.EventCompaction, store.EventExternalEvent:
+			store.EventCompaction, store.EventExternalEvent,
+			store.EventTaskCreated, store.EventTaskUpdated, store.EventTaskAttached,
+			store.EventTaskDetached, store.EventTaskClosed, store.EventTaskNote:
 			continue
 		case store.EventUserMessage:
 			return true

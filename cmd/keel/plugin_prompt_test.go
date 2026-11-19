@@ -49,7 +49,7 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 	surface, err := newPluginSurface(ctx, rt, nil, serveOptions{
 		TenantID:    uuid.New(),
 		PluginsRoot: t.TempDir(),
-	}, hooks, triggers, decisions, subagents, partials, log)
+	}, hooks, triggers, decisions, subagents, partials, nil, log)
 	if err != nil {
 		t.Fatalf("plugin surface: %v", err)
 	}
