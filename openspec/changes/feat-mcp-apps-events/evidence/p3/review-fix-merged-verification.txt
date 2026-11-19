@@ -1,0 +1,17 @@
+# P3 复核修复合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `13a287d`（cherry-pick `d025fa7`，`tasks.md` 自动合并）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：**首次运行**出现 Postgres 连接层错误
+  （`tls error: server refused TLS connection` + `invalid body length`，同一 DSN 的 conformance
+  并行通过；容器 `keel-pg` 正常，9/100 连接），判定环境抖动；**重跑 55 ok / 零 FAIL / exit 0**
+- `./scripts/conformance.sh`：1020 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 修复内容：拒绝路径审计按 `(app, action, 秒)` 采样 + `suppressed=N`；每会话 `mcp-app.*` open
+  decision 上限 16（超出 429/-32000）；attachments 严格形状/条数/字段校验 + 确认卡摘要；
+  协议违规三条分支落审计；破坏性词表扩展；ui/message content 单对象兼容；open-link 拒 userinfo/
+  非 ASCII host；scheme 拒绝行带 session 溯源
+- lane 证据：`evidence/p3/review-fix.md` 与 `*-review-fix.*`
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
