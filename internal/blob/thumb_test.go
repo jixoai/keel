@@ -183,3 +183,122 @@ func TestThumbnailerSurvivesMissingSource(t *testing.T) {
 		t.Fatalf("missing source error = %v, want ErrNoBlob", err)
 	}
 }
+
+// TestThumbnailerDedupeDoesNotTouchUserBlobExpiry covers P2-2: if the encoded
+// thumbnail is byte-identical to a user blob in the same tenant, PutDetailed
+// reports a dedupe hit. The generator must record the parent link but leave the
+// user's row (ref_count and expiry) untouched; only a freshly created
+// thumbnail row gets the 24h orphan safety net.
+func TestThumbnailerDedupeDoesNotTouchUserBlobExpiry(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenantA := newTenant(t, st)
+	tenantB := newTenant(t, st)
+	casDir := t.TempDir()
+	reader := NewReader(st, 4, 1)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Tenant A: produce the canonical thumbnail bytes for this source.
+	genA := NewThumbnailer(st, reader, &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20}, log)
+	upA := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20, Thumbnails: genA}
+	source := syntheticImage(t, 640, 480)
+	parentA, err := upA.Put(ctx, tenantA, "image/png", bytes.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := genA.processOne(ctx, store.ThumbJob{TenantID: tenantA, BlobID: parentA.BlobID, Mime: parentA.Mime, Size: parentA.Size}); err != nil {
+		t.Fatalf("generate A: %v", err)
+	}
+	readyA, err := st.BlobMetaOf(ctx, tenantA, parentA.BlobID)
+	if err != nil || readyA.ThumbBlobID == nil {
+		t.Fatalf("tenant A thumbnail: meta=%+v err=%v", readyA, err)
+	}
+	thumbMetaA, err := st.BlobMetaOf(ctx, tenantA, *readyA.ThumbBlobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thumbMetaA.ExpiresAt == nil {
+		t.Fatal("a newly created thumbnail row must carry the orphan TTL")
+	}
+	var thumbBytes bytes.Buffer
+	if _, err := reader.StreamRaw(ctx, tenantA, thumbMetaA.BlobID, thumbMetaA, &thumbBytes, 0, 0); err != nil {
+		t.Fatalf("read tenant A thumbnail: %v", err)
+	}
+
+	// Tenant B: pre-create a user blob with the exact thumbnail bytes, reference
+	// it, then generate a thumbnail for the same source in this tenant.
+	userUploader := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20}
+	userBlob, created, err := userUploader.PutDetailed(ctx, tenantB, "image/png", bytes.NewReader(thumbBytes.Bytes()))
+	if err != nil || !created {
+		t.Fatalf("pre-create user blob: created=%v err=%v", created, err)
+	}
+	if err := st.AddRef(ctx, tenantB, userBlob.BlobID, uuid.New(), 21); err != nil {
+		t.Fatalf("reference user blob: %v", err)
+	}
+	genB := NewThumbnailer(st, reader, &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20}, log)
+	upB := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20, Thumbnails: genB}
+	parentB, err := upB.Put(ctx, tenantB, "image/png", bytes.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := genB.processOne(ctx, store.ThumbJob{TenantID: tenantB, BlobID: parentB.BlobID, Mime: parentB.Mime, Size: parentB.Size}); err != nil {
+		t.Fatalf("generate B: %v", err)
+	}
+	readyB, err := st.BlobMetaOf(ctx, tenantB, parentB.BlobID)
+	if err != nil || readyB.ThumbStatus != store.ThumbReady || readyB.ThumbBlobID == nil {
+		t.Fatalf("tenant B parent: meta=%+v err=%v", readyB, err)
+	}
+	if *readyB.ThumbBlobID != userBlob.BlobID {
+		t.Fatalf("tenant B thumbnail id = %s, want deduped user blob %s", *readyB.ThumbBlobID, userBlob.BlobID)
+	}
+	userAfter, err := st.BlobMetaOf(ctx, tenantB, userBlob.BlobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userAfter.ExpiresAt != nil {
+		t.Fatalf("dedupe hit changed the user blob expiry to %v", userAfter.ExpiresAt)
+	}
+	if userAfter.RefCount != 1 {
+		t.Fatalf("dedupe hit changed the user blob ref_count to %d", userAfter.RefCount)
+	}
+}
+
+// TestQueueThumbnailSurvivesCanceledRequestContext covers P2-4: the upload has
+// already committed when the queue write runs, so a client disconnect must not
+// leave the row stuck at thumb_status=none. The helper uses
+// context.WithoutCancel plus its own short deadline.
+func TestQueueThumbnailSurvivesCanceledRequestContext(t *testing.T) {
+	st := testStore(t)
+	tenant := newTenant(t, st)
+	casDir := t.TempDir()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gen := NewThumbnailer(st, NewReader(st, 2, 1), &Uploader{Store: st, CASDir: casDir}, log)
+	up := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20, Thumbnails: gen}
+
+	// Upload with a healthy context, but without queueing (bare uploader).
+	bare := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20}
+	meta, err := bare.Put(context.Background(), tenant, "image/png", bytes.NewReader(randomBytes(t, 10_000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ThumbStatus != store.ThumbNone {
+		t.Fatalf("fixture status = %q, want none", meta.ThumbStatus)
+	}
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	up.queueThumbnail(requestCtx, tenant, meta.BlobID)
+
+	queued, err := st.BlobMetaOf(context.Background(), tenant, meta.BlobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.ThumbStatus != store.ThumbPending {
+		t.Fatalf("status after canceled-context queue = %q, want pending", queued.ThumbStatus)
+	}
+	select {
+	case <-gen.notify:
+	default:
+		t.Fatal("generator was not notified about the queued thumbnail")
+	}
+}

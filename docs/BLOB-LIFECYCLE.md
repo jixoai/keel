@@ -57,9 +57,13 @@ WHERE tenant_id = $1 AND blob_id IN (SELECT blob_id FROM ins)
   既有 payload 校验语义提交（客户端数据里多一个无效 id 不会毒化会话）。
 - 同一 `(blob, session, eventSeq)`：`ON CONFLICT DO NOTHING`，重放/重试只 +1。
 - 事件回滚 → 引用回滚；事件提交 → 引用同事务可见，不存在“事件已落账但引用丢失”的窗口。
-- `blob_refs` 对 `blobs (tenant_id, blob_id)` 有 `ON DELETE CASCADE` 外键：引用的 INSERT
-  会对 blob 行取 `KEY SHARE` 锁，与 sweeper 的 `FOR UPDATE` 互斥，因此“引用插入”和
-  “删除过期对象”不会交错成孤儿引用。
+- `blob_refs` 对 `blobs (tenant_id, blob_id)` 有 `ON DELETE CASCADE` 外键，只保证
+  **“先插入引用、后 sweep”** 方向：引用的 INSERT 对 blob 行取 `KEY SHARE` 锁，sweeper
+  的 `FOR UPDATE` 无法越过它删行。
+- 反方向（sweeper 已锁行并删除，引用 INSERT 的 FK 检查随后失败，SQLSTATE 23503）是
+  已容忍的竞态：`AddRefTx` 在 savepoint 中执行该引用写，23503 只回滚 savepoint、返回
+  nil，事件照常提交且零引用（与“未知 blobId 忽略”语义一致）；不会出现“引用插入失败
+  导致整条 user.message/tool.result 被拒”。
 - 确定性排序（UUID 字符串序）保证并发事件对同一组 blob 的行锁顺序一致。
 
 ## 3. TTL 回收
@@ -79,8 +83,10 @@ ORDER BY expires_at LIMIT n FOR UPDATE SKIP LOCKED
 
 - 仍被引用（`ref_count>0`）、上传未完成（`complete=false`）、没有 `expires_at`
   的对象永不入选。
-- 被父 blob 的 `thumb_blob_id` 指着的缩略图，即使自身 `expires_at` 已过也不入选；
-  父/缩略图在同一个事务里一起删除。
+- 被父 blob 的 `thumb_blob_id` 指着的缩略图，即使自身 `expires_at` 已过也不入选。
+  删除父行时缩略图可以同事务回收，但回收前还会复核：该缩略图 `ref_count=0`，且没有
+  本批之外的父指向它；否则只删父（保护两父共享的缩略图，以及缩略图去重命中用户已有
+  blob 的情况）。
 - `SKIP LOCKED` 允许多个进程同时 sweep，互不等待。
 
 ### 3.2 删除顺序（严格）
@@ -133,9 +139,12 @@ chunks 与 metadata 在同一事务内，实际上不会出现“metadata 已提
 
 - 原图行永不改写（mime/size/sha256 不变）；缩略图是**独立 blob 行**
   （`mime=image/png`，`complete=true`，`ref_count=0`），复用现有存储/读取/租户路径。
-- 缩略图行写入时带 `expires_at=now+24h` 作为泄漏兜底：父行存在时被
+- **新建**的缩略图行写入时带 `expires_at=now+24h` 作为泄漏兜底：父行存在时被
   `thumb_blob_id` 谓词保护；若父行在 ready 写入前被 GC（极窄窗口），24h 后作为
   普通过期孤儿被回收。
+- 若缩略图字节与同租户既有 blob 同 sha（`PutDetailed` 去重命中），生成器只记录
+  `thumb_blob_id`，**不修改**该既有行的 `expires_at`/`ref_count`：它可能正是用户上传的
+  原图，孤儿 TTL 只属于生成器真正新建的行。
 - `failed` 只由 `pending` 迁入，周期扫描只取 `pending`，所以坏图不会重复生成。
 - 生成失败只影响缩略图状态：上传响应、原图下载、对话事件提交都不经过生成器。
 
@@ -155,19 +164,22 @@ chunks 与 metadata 在同一事务内，实际上不会出现“metadata 已提
 |---|---|
 | `200 image/png` | ready，正常流式返回 |
 | `202` | pending（JSON `{"status":"pending"}`） |
-| `404` | 该租户没有此 blob，或此 blob 无缩略图（none） |
-| `409` | failed（终态），或 ready 但对象不可读 |
+| `404` | 该租户没有此 blob、此 blob 无缩略图（none），或 ready 但缩略图行已不存在 |
+| `409` | failed（终态），或 ready 但元数据没有 `thumb_blob_id`，或缩略图对象未完成 |
 
 上传响应与 `GET /v1/files/{id}/meta` 增加 `thumbStatus` / `thumbnailUrl` 字段。
 
 ## 5. 测试与证据
 
-- 引用：`internal/kernel/blobrefs_test.go`（重放只 +1、两个事件 +2、跨租户/未完成/未知零引用）。
+- 引用：`internal/kernel/blobrefs_test.go`（重放只 +1、两个事件 +2、跨租户/未完成/未知零引用、
+  23503 下事件仍提交，用 trigger 确定性模拟）、`internal/store/blob_refs_test.go`（真实
+  sweeper 锁行与 AddRef 交错：AddRef 返回 nil 且零引用）。
 - GC：`internal/blob/lifecycle_test.go`（metadata/chunks/CAS 全删、重复 sweep 幂等、
   ref_count>0 与 complete=false 保护、租户隔离 + 跨租户内容共享、缩略图随父删除、
-  orphan 扫描只碰 blob CAS）。
+  共享缩略图/被引用用户 blob 保护、orphan 扫描只碰 blob CAS）。
 - 缩略图：`internal/blob/thumb_test.go`（4000px → 320x240、原图字节不变、坏图 failed、
-  非图片 none）、`internal/httpapi/thumbnail_test.go`（200/202/404/409 与租户隔离）。
+  非图片 none、dedupe 命中不改用户行 expiry、取消请求 ctx 仍排队）、
+  `internal/httpapi/thumbnail_test.go`（200/202/404/409 与租户隔离）。
 - base64 续传：`internal/blob/base64_offsets_test.go`（0/3 倍数/chunk 边界/末尾 +
   1000 个随机 4 倍数 offset + fuzz 属性）。
 - 门禁输出：`openspec/changes/keel-ga/evidence/blob-lifecycle/`。

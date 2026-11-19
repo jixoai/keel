@@ -224,16 +224,21 @@ func (t *Thumbnailer) generate(parent context.Context, job store.ThumbJob) (uuid
 	if err := enc.Encode(&encoded, thumb); err != nil {
 		return uuid.Nil, fmt.Errorf("blob: encode thumbnail: %w", err)
 	}
-	thumbMeta, err := t.Uploader.Put(ctx, job.TenantID, "image/png", bytes.NewReader(encoded.Bytes()))
+	thumbMeta, created, err := t.Uploader.PutDetailed(ctx, job.TenantID, "image/png", bytes.NewReader(encoded.Bytes()))
 	if err != nil {
 		return uuid.Nil, err
 	}
-	expires := time.Now().Add(thumbTTL)
-	if _, err := t.Store.SetBlobExpiry(ctx, job.TenantID, thumbMeta.BlobID, &expires); err != nil {
-		// The thumbnail is already stored and ready to be recorded; the expiry
-		// is a safety net, so a failure here must not turn a good thumbnail into
-		// a failed one.
-		t.Logger.Warn("thumbnail expiry mark failed", "tenant", job.TenantID, "thumb", thumbMeta.BlobID, "err", err)
+	if created {
+		// The orphan TTL is metadata for a row this generator created. A dedupe
+		// hit may be a user's existing blob (same sha256): changing its expiry
+		// would silently schedule a user upload for deletion.
+		expires := time.Now().Add(thumbTTL)
+		if _, err := t.Store.SetBlobExpiry(ctx, job.TenantID, thumbMeta.BlobID, &expires); err != nil {
+			// The thumbnail is already stored and ready to be recorded; the expiry
+			// is a safety net, so a failure here must not turn a good thumbnail into
+			// a failed one.
+			t.Logger.Warn("thumbnail expiry mark failed", "tenant", job.TenantID, "thumb", thumbMeta.BlobID, "err", err)
+		}
 	}
 	return thumbMeta.BlobID, nil
 }

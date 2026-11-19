@@ -1,0 +1,2 @@
+POST /v1/chat/completions model=kite-e2e-model tools=['agent']
+POST /v1/chat/completions model=kite-member-model tools=['clock']

@@ -125,6 +125,20 @@ func (s *Store) ReleaseExpired(ctx context.Context, limit int) ([]ExpiredBlob, e
 		return nil, tx.Commit(ctx)
 	}
 
+	// The batch identifies rows this sweep is already deleting. A thumbnail is
+	// shared state: two parents may point at one row (content dedupe), and a
+	// thumbnail upload may dedupe onto a user's existing blob. Both must survive
+	// their parent's reap, so the thumb is deleted only when no parent outside
+	// this batch still points at it and it carries no event reference.
+	type blobKey struct {
+		tenant uuid.UUID
+		blob   uuid.UUID
+	}
+	batch := make(map[blobKey]struct{}, len(victims))
+	for _, v := range victims {
+		batch[blobKey{v.TenantID, v.BlobID}] = struct{}{}
+	}
+
 	// Resolve thumbnail metadata before deleting either row: the CAS unlink
 	// needs the digest and storage kind, and after the metadata delete they are
 	// gone.
@@ -134,15 +148,16 @@ func (s *Store) ReleaseExpired(ctx context.Context, limit int) ([]ExpiredBlob, e
 			continue
 		}
 		var (
-			tenant uuid.UUID
-			blobID uuid.UUID
-			sum    []byte
-			kind   int16
+			tenant   uuid.UUID
+			blobID   uuid.UUID
+			sum      []byte
+			kind     int16
+			refCount int32
 		)
 		err := tx.QueryRow(ctx,
-			`SELECT tenant_id, blob_id, sha256, storage_kind
+			`SELECT tenant_id, blob_id, sha256, storage_kind, ref_count
 			 FROM blobs WHERE tenant_id = $1 AND blob_id = $2`,
-			v.TenantID, *v.ThumbBlobID).Scan(&tenant, &blobID, &sum, &kind)
+			v.TenantID, *v.ThumbBlobID).Scan(&tenant, &blobID, &sum, &kind, &refCount)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The thumbnail row is already gone (a concurrent sweep or a failed
 			// generation cleanup). The parent can still be reaped.
@@ -152,6 +167,39 @@ func (s *Store) ReleaseExpired(ctx context.Context, limit int) ([]ExpiredBlob, e
 		if err != nil {
 			return nil, fmt.Errorf("store: release expired: thumbnail: %w", err)
 		}
+		if refCount > 0 {
+			// The dedupe hit an object events still reference (for example a
+			// user blob whose bytes happen to equal a thumbnail). Delete only the
+			// parent; the referenced row is not ours to reap.
+			v.ThumbBlobID = nil
+			continue
+		}
+		rows, err := tx.Query(ctx,
+			`SELECT blob_id FROM blobs WHERE tenant_id = $1 AND thumb_blob_id = $2`,
+			v.TenantID, *v.ThumbBlobID)
+		if err != nil {
+			return nil, fmt.Errorf("store: release expired: thumbnail parents: %w", err)
+		}
+		survivor := false
+		for rows.Next() {
+			var parentID uuid.UUID
+			if err := rows.Scan(&parentID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("store: release expired: thumbnail parents: %w", err)
+			}
+			if _, dying := batch[blobKey{v.TenantID, parentID}]; !dying {
+				survivor = true
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("store: release expired: thumbnail parents: %w", err)
+		}
+		if survivor {
+			// Another parent (not part of this batch) still owns the thumbnail.
+			v.ThumbBlobID = nil
+			continue
+		}
 		v.ThumbTenantID = tenant
 		v.ThumbSHA256 = sum
 		v.ThumbStorage = kind
@@ -159,10 +207,6 @@ func (s *Store) ReleaseExpired(ctx context.Context, limit int) ([]ExpiredBlob, e
 
 	// Deduplicate the (tenant, blob) delete list: a thumbnail may itself be a
 	// candidate in the same batch, or two parents may share one thumbnail id.
-	type blobKey struct {
-		tenant uuid.UUID
-		blob   uuid.UUID
-	}
 	keys := make(map[blobKey]struct{}, len(victims)*2)
 	for _, v := range victims {
 		keys[blobKey{v.TenantID, v.BlobID}] = struct{}{}

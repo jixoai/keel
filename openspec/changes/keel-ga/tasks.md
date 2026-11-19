@@ -106,6 +106,15 @@
 - [x] 文档：CAS 目录布局与 GC
       （`docs/BLOB-LIFECYCLE.md`）
 
+**限制（2026-11-20 复核后记账）**：
+
+- 当前无生产 retention 写入者；TTL 回收实际只作用于缩略图孤儿（24h 兜底），普通
+  blob 的 `expires_at` 仍为 NULL，等 retention 策略落地后才会被 sweep。
+- 历史 blob 不做 thumb 回填；只有同内容再次上传（dedupe 命中）时会补排队。
+- `evidence/blob-lifecycle/agent-runtime-e2e/` 是通用 captain/member 回归，**不含**
+  `/v1/files` 断言，不能作为本切片的 blob HTTP 证据。
+- `failed` 是缩略图终态，不自动重试（避免风暴）；瞬时故障需人工重置状态。
+
 ## 6. 验收
 
 - [ ] 1000 会话在线 + 64 并发 run，RSS < 2GB

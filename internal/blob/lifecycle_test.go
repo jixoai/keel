@@ -352,3 +352,112 @@ func TestLifecycleLoopsStopOnContext(t *testing.T) {
 		}
 	}
 }
+
+// TestSweeperKeepsSharedThumbnailForSurvivingParent covers P2-1a: two parents
+// may share one thumbnail row (content dedupe). Reaping one parent must not
+// delete a thumbnail the other parent still owns.
+func TestSweeperKeepsSharedThumbnailForSurvivingParent(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant := newTenant(t, st)
+	casDir := t.TempDir()
+	up := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20}
+	sw := &Sweeper{Store: st, CASDir: casDir, Batch: 50}
+
+	parentA, err := up.Put(ctx, tenant, "image/png", bytes.NewReader(randomBytes(t, 200_000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentB, err := up.Put(ctx, tenant, "image/png", bytes.NewReader(randomBytes(t, 200_001)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	thumbData := randomBytes(t, 20_000)
+	thumb, err := up.Put(ctx, tenant, "image/png", bytes.NewReader(thumbData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, parent := range []store.BlobMeta{parentA, parentB} {
+		if ok, err := st.MarkThumbPending(ctx, tenant, parent.BlobID); err != nil || !ok {
+			t.Fatalf("mark pending: ok=%v err=%v", ok, err)
+		}
+		if ok, err := st.SetThumbReady(ctx, tenant, parent.BlobID, thumb.BlobID); err != nil || !ok {
+			t.Fatalf("set ready: ok=%v err=%v", ok, err)
+		}
+	}
+	expire(t, st, tenant, parentA.BlobID)
+
+	if _, err := sw.Sweep(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if _, err := st.BlobMetaOf(ctx, tenant, parentA.BlobID); !errors.Is(err, store.ErrNoBlob) {
+		t.Fatalf("expired parent A after sweep: %v", err)
+	}
+	survivor, err := st.BlobMetaOf(ctx, tenant, parentB.BlobID)
+	if err != nil {
+		t.Fatalf("surviving parent B was reaped: %v", err)
+	}
+	if survivor.ThumbStatus != store.ThumbReady || survivor.ThumbBlobID == nil || *survivor.ThumbBlobID != thumb.BlobID {
+		t.Fatalf("parent B thumbnail link changed: %+v", survivor)
+	}
+	thumbMeta, err := st.BlobMetaOf(ctx, tenant, thumb.BlobID)
+	if err != nil {
+		t.Fatalf("shared thumbnail was deleted while parent B owns it: %v", err)
+	}
+	var thumbOut bytes.Buffer
+	if _, err := NewReader(st, 2, 1).StreamRaw(ctx, tenant, thumb.BlobID, thumbMeta, &thumbOut, 0, 0); err != nil {
+		t.Fatalf("surviving parent's thumbnail is not readable: %v", err)
+	}
+	if !bytes.Equal(thumbOut.Bytes(), thumbData) {
+		t.Fatal("surviving parent's thumbnail bytes changed")
+	}
+}
+
+// TestSweeperDoesNotReapReferencedBlobUsedAsThumbnail covers P2-1b: a thumbnail
+// upload can dedupe onto a user's existing blob (same tenant, same sha). That
+// row may carry event references and must never be reaped just because an
+// expired parent pointed at it.
+func TestSweeperDoesNotReapReferencedBlobUsedAsThumbnail(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant := newTenant(t, st)
+	casDir := t.TempDir()
+	up := &Uploader{Store: st, CASDir: casDir, PGThreshold: 8 << 20}
+	sw := &Sweeper{Store: st, CASDir: casDir, Batch: 50}
+
+	userBlob, err := up.Put(ctx, tenant, "image/png", bytes.NewReader(randomBytes(t, 30_000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddRef(ctx, tenant, userBlob.BlobID, uuid.New(), 11); err != nil {
+		t.Fatalf("reference user blob: %v", err)
+	}
+	parent, err := up.Put(ctx, tenant, "image/png", bytes.NewReader(randomBytes(t, 200_003)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.MarkThumbPending(ctx, tenant, parent.BlobID); err != nil || !ok {
+		t.Fatalf("mark pending: ok=%v err=%v", ok, err)
+	}
+	if ok, err := st.SetThumbReady(ctx, tenant, parent.BlobID, userBlob.BlobID); err != nil || !ok {
+		t.Fatalf("set ready: ok=%v err=%v", ok, err)
+	}
+	expire(t, st, tenant, parent.BlobID)
+
+	if _, err := sw.Sweep(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if _, err := st.BlobMetaOf(ctx, tenant, parent.BlobID); !errors.Is(err, store.ErrNoBlob) {
+		t.Fatalf("parent after sweep: %v", err)
+	}
+	user, err := st.BlobMetaOf(ctx, tenant, userBlob.BlobID)
+	if err != nil {
+		t.Fatalf("referenced user blob was reaped as a thumbnail: %v", err)
+	}
+	if user.RefCount != 1 {
+		t.Fatalf("user blob ref_count = %d, want 1", user.RefCount)
+	}
+	if user.ExpiresAt != nil {
+		t.Fatalf("user blob expiry changed to %v", user.ExpiresAt)
+	}
+}

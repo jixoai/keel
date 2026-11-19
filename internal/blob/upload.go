@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/store"
@@ -61,10 +62,20 @@ func (u *Uploader) applyDefaults() {
 // blob metadata. The digest is computed while spooling, so no second pass over
 // the data is needed.
 func (u *Uploader) Put(ctx context.Context, tenantID uuid.UUID, mime string, r io.Reader) (store.BlobMeta, error) {
+	meta, _, err := u.PutDetailed(ctx, tenantID, mime, r)
+	return meta, err
+}
+
+// PutDetailed is Put plus the created flag: true means this call wrote a new
+// blob row, false means content dedupe returned an existing row (same tenant,
+// same sha256). Callers that attach derived state to the object must not mutate
+// a deduped row that belongs to someone else; the thumbnailer uses this to set
+// its orphan-TTL only on a freshly created thumbnail row.
+func (u *Uploader) PutDetailed(ctx context.Context, tenantID uuid.UUID, mime string, r io.Reader) (store.BlobMeta, bool, error) {
 	u.applyDefaults()
 	tmp, err := os.CreateTemp(u.TempDir, "upload-*")
 	if err != nil {
-		return store.BlobMeta{}, fmt.Errorf("blob: temp: %w", err)
+		return store.BlobMeta{}, false, fmt.Errorf("blob: temp: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
@@ -74,14 +85,14 @@ func (u *Uploader) Put(ctx context.Context, tenantID uuid.UUID, mime string, r i
 	n, err := io.Copy(io.MultiWriter(tmp, h), limited)
 	if err != nil {
 		tmp.Close()
-		return store.BlobMeta{}, fmt.Errorf("blob: spool: %w", err)
+		return store.BlobMeta{}, false, fmt.Errorf("blob: spool: %w", err)
 	}
 	if n > u.MaxBytes {
 		tmp.Close()
-		return store.BlobMeta{}, ErrTooLarge
+		return store.BlobMeta{}, false, ErrTooLarge
 	}
 	if err := tmp.Close(); err != nil {
-		return store.BlobMeta{}, fmt.Errorf("blob: close temp: %w", err)
+		return store.BlobMeta{}, false, fmt.Errorf("blob: close temp: %w", err)
 	}
 	sum := h.Sum(nil)
 
@@ -92,41 +103,50 @@ func (u *Uploader) Put(ctx context.Context, tenantID uuid.UUID, mime string, r i
 	}
 	id, existing, err := u.Store.CreateBlob(ctx, tenantID, blobID, sum, n, mime, storage)
 	if err != nil {
-		return store.BlobMeta{}, err
+		return store.BlobMeta{}, false, err
 	}
 	if existing {
 		// A deduped upload still needs its thumbnail queued when the existing
 		// object predates the feature (or was uploaded as an attachment before
 		// this process had a generator).
 		u.queueThumbnail(ctx, tenantID, id)
-		return u.Store.BlobMetaOf(ctx, tenantID, id)
+		meta, err := u.Store.BlobMetaOf(ctx, tenantID, id)
+		return meta, false, err
 	}
 
 	switch storage {
 	case store.StorageLocalCAS:
 		if err := u.moveIntoCAS(tmpPath, sum); err != nil {
-			return store.BlobMeta{}, err
+			return store.BlobMeta{}, false, err
 		}
 	case store.StoragePGChunked:
 		if err := u.writeChunks(ctx, tenantID, id, tmpPath); err != nil {
-			return store.BlobMeta{}, err
+			return store.BlobMeta{}, false, err
 		}
 	}
 	if err := u.Store.CompleteBlob(ctx, tenantID, id, int32((n+store.ChunkSize-1)/store.ChunkSize)); err != nil {
-		return store.BlobMeta{}, err
+		return store.BlobMeta{}, false, err
 	}
 	u.queueThumbnail(ctx, tenantID, id)
-	return u.Store.BlobMetaOf(ctx, tenantID, id)
+	meta, err := u.Store.BlobMetaOf(ctx, tenantID, id)
+	return meta, true, err
 }
 
 // queueThumbnail marks a completed image pending and wakes the generator. It
 // never turns a thumbnail problem into an upload failure: the blob is already
 // durable and readable at this point.
+//
+// The queue write deliberately does not inherit the request context: the upload
+// has already committed, and a client that disconnected while reading the
+// response must not leave the row stuck at thumb_status=none forever. A short
+// independent timeout bounds the write (same shape as the capture path).
 func (u *Uploader) queueThumbnail(ctx context.Context, tenantID, blobID uuid.UUID) {
 	if u.Thumbnails == nil {
 		return
 	}
-	queued, err := u.Store.MarkThumbPending(ctx, tenantID, blobID)
+	qctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	queued, err := u.Store.MarkThumbPending(qctx, tenantID, blobID)
 	if err != nil {
 		if u.Thumbnails.Logger != nil {
 			u.Thumbnails.Logger.Warn("thumbnail queue failed", "tenant", tenantID, "blob", blobID, "err", err)

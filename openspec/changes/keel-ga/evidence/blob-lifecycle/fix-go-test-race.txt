@@ -1,0 +1,4 @@
+ok  	github.com/jixoai/keel/internal/blob	30.183s
+ok  	github.com/jixoai/keel/internal/store	11.958s
+ok  	github.com/jixoai/keel/internal/kernel	28.336s
+ok  	github.com/jixoai/keel/internal/httpapi	16.618s

@@ -229,12 +229,14 @@ CREATE TABLE IF NOT EXISTS blob_refs (
     PRIMARY KEY (tenant_id, blob_id, session_id, event_seq)
 );
 
--- The FK makes the projection crash-safe under a concurrent TTL sweep: the
--- reference INSERT takes a KEY SHARE lock on the blob row, so a sweeper's
--- FOR UPDATE cannot delete the row between the reference insert and the event
--- commit. ON DELETE CASCADE is the backstop for any delete path that forgets to
--- clear refs first (the sweeper still deletes refs explicitly, per the spec's
--- metadata-first order).
+-- The FK protects the "reference first, sweep later" direction: the reference
+-- INSERT takes a KEY SHARE lock on the blob row, so a sweeper's FOR UPDATE
+-- cannot delete the row between the reference insert and the event commit.
+-- The opposite interleaving (sweeper already holds the lock, reference INSERT
+-- waits on the FK check after the delete commits) is a tolerated race: the store
+-- treats SQLSTATE 23503 as "blob already gone" and the event commits with zero
+-- refs (see blob_refs.go). ON DELETE CASCADE is the backstop for any delete
+-- path that forgets to clear refs first.
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint

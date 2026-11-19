@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -150,5 +151,69 @@ func TestBlobRefsFollowCommittedEvents(t *testing.T) {
 	}
 	if unknownRefs != 0 {
 		t.Fatalf("unknown blob refs = %d, want 0", unknownRefs)
+	}
+}
+
+// TestEventCommitSurvivesBlobRefFKViolation pins the production consequence of
+// the FK race: SQLSTATE 23503 inside AddRefTx must not abort the caller's event
+// transaction. PostgreSQL aborts the whole transaction on any statement error,
+// so AddRefTx runs the reference insert in a savepoint; this test makes the
+// 23503 deterministic with a trigger instead of relying on thread timing
+// (internal/store/blob_refs_test.go covers the real sweeper-lock interleaving).
+func TestEventCommitSurvivesBlobRefFKViolation(t *testing.T) {
+	if os.Getenv("KEEL_TEST_DSN") == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	h := newPGHarness(t)
+	ctx := context.Background()
+	blobID := completeBlob(t, h, h.tenant, "image/png")
+
+	name := "test_blob_ref_fk_" + strings.ReplaceAll(uuid.NewString(), "-", "_")
+	fn := name + "_fn"
+	if _, err := h.st.Pool().Exec(ctx, fmt.Sprintf(`
+		CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $fn$
+		BEGIN
+			RAISE EXCEPTION 'simulated concurrent TTL sweep' USING ERRCODE = '23503';
+		END
+		$fn$`, fn)); err != nil {
+		t.Fatalf("create trigger function: %v", err)
+	}
+	if _, err := h.st.Pool().Exec(ctx, fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE INSERT ON blob_refs
+		FOR EACH ROW WHEN (NEW.tenant_id = '%s'::uuid AND NEW.blob_id = '%s'::uuid)
+		EXECUTE FUNCTION %s()`, name, h.tenant, blobID, fn)); err != nil {
+		_, _ = h.st.Pool().Exec(ctx, "DROP FUNCTION "+fn+"() CASCADE")
+		t.Fatalf("create trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = h.st.Pool().Exec(context.Background(), "DROP TRIGGER IF EXISTS "+name+" ON blob_refs")
+		_, _ = h.st.Pool().Exec(context.Background(), "DROP FUNCTION IF EXISTS "+fn+"() CASCADE")
+	})
+
+	payload := fmt.Sprintf(`{"text":"raced","attachments":[{"fileId":%q,"mime":"image/png"}]}`, blobID.String())
+	receipt, err := h.k.Commit(ctx, CommitRequest{
+		Scope: h.scope, Kind: KindUserMessage, RequestID: "fk-trigger-event", Payload: []byte(payload),
+	})
+	if err != nil {
+		t.Fatalf("event commit under FK violation = %v, want success", err)
+	}
+	if receipt.Seq <= 0 {
+		t.Fatalf("receipt seq = %d, want a committed event", receipt.Seq)
+	}
+	events := h.events(h.scope)
+	found := false
+	for _, ev := range events {
+		if ev.Kind == KindUserMessage {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("committed user.message is missing from the log")
+	}
+	if got := blobRefCount(t, h, h.tenant, blobID); got != 0 {
+		t.Fatalf("ref_count = %d, want 0", got)
+	}
+	if got := blobRefRows(t, h, h.tenant, blobID); got != 0 {
+		t.Fatalf("blob_refs rows = %d, want 0", got)
 	}
 }
