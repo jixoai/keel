@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -487,6 +488,94 @@ func TestWorkspaceFallbackWarnsOnce(t *testing.T) {
 	}
 	if got := strings.Count(out, "execution is not persisted"); got != 1 {
 		t.Fatalf("fallback warning emitted %d times, want once per process: %q", got, out)
+	}
+}
+
+// TestBackgroundJobCaptureFailureCarriesJobID pins the system failure path: a
+// job whose workspace cannot become a canonical tree records exactly one
+// fs.capture_failed with its jobId, and that fact stays separate from an
+// owner-lane failure for the same tool call.
+func TestBackgroundJobCaptureFailureCarriesJobID(t *testing.T) {
+	h := newSeamHarness(t)
+	if _, err := h.service.Write(h.fileCtx("call-fail"), mustArgs(t, map[string]any{
+		"path": "bad\nname", "content": "x",
+	})); err != nil {
+		t.Fatalf("write invalid-name file: %v", err)
+	}
+	scope := kernel.Scope{TenantID: h.scope.TenantID, SessionID: h.scope.SessionID}
+
+	// Owner-lane failure first: same call id, no job id.
+	ownerSession, err := h.bridge.NewSession(h.bashCtx("call-fail"))
+	if err != nil {
+		t.Fatalf("owner new session: %v", err)
+	}
+	if _, err := ownerSession.Run(h.bashCtx("call-fail"), bashbridge.RunSpec{Command: `true`}); err != nil {
+		t.Fatalf("owner run: %v", err)
+	}
+	if err := ownerSession.Close(); err == nil {
+		t.Fatal("owner close succeeded, want the capture failure")
+	}
+	ownerFailed := h.captures(t, kernel.KindFSCaptureFailed)
+	if len(ownerFailed) != 1 {
+		t.Fatalf("owner fs.capture_failed events = %d, want 1", len(ownerFailed))
+	}
+	var ownerPayload map[string]any
+	if err := json.Unmarshal(ownerFailed[0].Payload, &ownerPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasJob := ownerPayload["jobId"]; hasJob {
+		t.Fatalf("owner-lane failure carries jobId: %v", ownerPayload)
+	}
+
+	// System-lane failure: the same call id plus the job id is its own fact.
+	jobSession, err := h.bridge.NewSession(h.bashJobCtx("call-fail", "job-fail-1"))
+	if err != nil {
+		t.Fatalf("job new session: %v", err)
+	}
+	if _, err := jobSession.Run(h.bashJobCtx("call-fail", "job-fail-1"), bashbridge.RunSpec{Command: `true`}); err != nil {
+		t.Fatalf("job run: %v", err)
+	}
+	if err := jobSession.Close(); err == nil {
+		t.Fatal("job close succeeded, want the capture failure")
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 0 {
+		t.Fatalf("fs.capture events = %d, want 0", got)
+	}
+	failed := h.captures(t, kernel.KindFSCaptureFailed)
+	if len(failed) != len(ownerFailed)+1 {
+		t.Fatalf("fs.capture_failed events = %d, want exactly one more than the owner failure", len(failed))
+	}
+	jobEvent := failed[len(failed)-1]
+	var jobPayload map[string]any
+	if err := json.Unmarshal(jobEvent.Payload, &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+	if jobPayload["jobId"] != "job-fail-1" {
+		t.Fatalf("system failure jobId = %v", jobPayload["jobId"])
+	}
+	if jobPayload["toolCallId"] != "call-fail" {
+		t.Fatalf("system failure toolCallId = %v", jobPayload["toolCallId"])
+	}
+	if jobPayload["error"] == nil || !strings.Contains(jobPayload["error"].(string), "gbashfs") {
+		t.Fatalf("system failure error = %v", jobPayload["error"])
+	}
+
+	// The two failures occupy distinct idempotency keys, so neither hides the
+	// other (owner key vs job key).
+	ownerReceipt, found, err := h.kernel.Lookup(h.ctx, scope, kernel.KeyRef{
+		Kind: kernel.KeyFSCaptureFailed, Value: fmt.Sprintf("%s:call-fail:0", h.scope.SessionID),
+	})
+	if err != nil || !found || ownerReceipt.Seq != ownerFailed[0].Seq {
+		t.Fatalf("owner failure key = %+v/%v/%v, want seq %d", ownerReceipt, found, err, ownerFailed[0].Seq)
+	}
+	jobReceipt, found, err := h.kernel.Lookup(h.ctx, scope, kernel.KeyRef{
+		Kind: kernel.KeyFSCaptureFailed, Value: fmt.Sprintf("%s:job:job-fail-1:call-fail:0", h.scope.SessionID),
+	})
+	if err != nil || !found || jobReceipt.Seq != jobEvent.Seq {
+		t.Fatalf("job failure key = %+v/%v/%v, want seq %d", jobReceipt, found, err, jobEvent.Seq)
+	}
+	if ownerReceipt.Seq == jobReceipt.Seq {
+		t.Fatalf("owner and job failures merged at seq %d", ownerReceipt.Seq)
 	}
 }
 

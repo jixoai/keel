@@ -3,11 +3,11 @@
 === RUN   TestBackgroundJobSettlesCaptureAfterParentRunFinished
 --- PASS: TestBackgroundJobSettlesCaptureAfterParentRunFinished (0.18s)
 PASS
-ok  	github.com/jixoai/keel/internal/jobqueue	0.490s
+ok  	github.com/jixoai/keel/internal/jobqueue	0.507s
 jobqueue_exit=0
 
 === RUN   TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts
---- PASS: TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts (0.05s)
+--- PASS: TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts (0.06s)
 PASS
-ok  	github.com/jixoai/keel/cmd/keel	0.612s
+ok  	github.com/jixoai/keel/cmd/keel	0.437s
 cmd_keel_exit=0

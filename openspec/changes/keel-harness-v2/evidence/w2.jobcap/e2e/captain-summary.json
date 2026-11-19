@@ -15,7 +15,7 @@
   },
   "provider": "kite-e2e",
   "teamHash": "058a0c57605d0a18b55dc374141967a9d06755529315c919a386f117ff3affdb",
-  "durationMs": 36,
+  "durationMs": 18,
   "promptHash": "sha256:a5a29a1f13feeecd880836798e8efb676f07ae023540551b25ab8c298807d65d",
   "stopReason": "end_turn",
   "teamRevision": 1

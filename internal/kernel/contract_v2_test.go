@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -111,6 +112,55 @@ func TestFSCaptureSystemLane(t *testing.T) {
 				Payload:      json.RawMessage(`{"jobId":"job-1","count":1}`)})
 			if !replay.Deduped || replay.Seq != system.Seq {
 				t.Fatalf("system replay = %+v, want deduped seq %d", replay, system.Seq)
+			}
+		})
+	}
+}
+
+// TestFSCaptureSystemLaneRequiresJobID pins the attribution rule: the system
+// lane (a background job's settlement) MUST carry a non-empty string jobId, so
+// the fact stays traceable after the run lease is gone. The owner lane is
+// unaffected: it needs the fence, not a job id.
+func TestFSCaptureSystemLaneRequiresJobID(t *testing.T) {
+	for _, im := range implementations(t) {
+		im := im
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+
+			// The payload stays open: the other capture fields are not constrained.
+			ok := h.mustCommit(CommitRequest{Kind: KindFSCapture, System: true,
+				FSCaptureKey: "job:job-1:call-1:0",
+				Payload:      json.RawMessage(`{"sessionId":"s1","baseSeq":0,"count":2,"treeHash":"sha256:abc","jobId":"job-1"}`)})
+			if ok.Deduped || ok.Kind != KindFSCapture {
+				t.Fatalf("system fs.capture with jobId = %+v", ok)
+			}
+
+			cases := []struct {
+				name    string
+				payload json.RawMessage
+			}{
+				{"missing", json.RawMessage(`{"count":1}`)},
+				{"empty", json.RawMessage(`{"jobId":""}`)},
+				{"whitespace", json.RawMessage(`{"jobId":"  "}`)},
+				{"non-string", json.RawMessage(`{"jobId":7}`)},
+				{"null", json.RawMessage(`{"jobId":null}`)},
+				{"not-object", json.RawMessage(`["jobId"]`)},
+				{"empty-payload", nil},
+			}
+			for index, c := range cases {
+				err := h.commitErr(CommitRequest{Kind: KindFSCapture, System: true,
+					FSCaptureKey: fmt.Sprintf("job:job-bad-%d:call-1:0", index), Payload: c.payload})
+				if !iso(err, ErrInvalidRequest) {
+					t.Errorf("%s jobId = %v, want invalid-request", c.name, err)
+				}
+			}
+
+			// The owner lane is untouched: no jobId is required, the fence is.
+			lease := h.claimScope(h.scope, "runtime-a")
+			owner := h.mustCommit(CommitRequest{Kind: KindFSCapture, Token: lease.Token,
+				FSCaptureKey: "call-owner:0", Payload: json.RawMessage(`{"count":1}`)})
+			if owner.Deduped || owner.Seq == ok.Seq {
+				t.Fatalf("owner fs.capture = %+v", owner)
 			}
 		})
 	}

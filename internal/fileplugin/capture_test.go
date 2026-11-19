@@ -264,6 +264,21 @@ func TestSystemCaptureIsIndependentOfOwnerEvent(t *testing.T) {
 	}
 }
 
+// TestSystemCaptureRequiresJobID is the direct guard test for the system entry
+// (not through LayerWorkspaces): an empty or blank job id is a typed
+// invalid-arguments error and commits nothing.
+func TestSystemCaptureRequiresJobID(t *testing.T) {
+	h := newHarness(t)
+	for _, jobID := range []string{"", "   "} {
+		if _, err := h.service.CaptureWorkspaceSystem(h.ctx, h.scope, "call-nojob", 0, "", jobID); fileplugin.CodeOf(err) != fileplugin.CodeInvalid {
+			t.Fatalf("jobID %q error = %v, want invalid_arguments", jobID, err)
+		}
+	}
+	if got := len(h.events(t)); got != 0 {
+		t.Fatalf("rejected system captures appended %d events", got)
+	}
+}
+
 func TestCaptureFailureIsOneSystemEvent(t *testing.T) {
 	h := newHarness(t)
 	broken, err := fileplugin.New(fileplugin.Options{

@@ -88,7 +88,8 @@ Known items (not closed by this slice)
   **Superseded by W2.jobcap (8d12370):** a background job now settles on the
   system lane with `jobId` attribution (`CaptureWorkspaceSystem`), so its
   writes enter layerfs after the parent run ends. The owner lane still fails
-  loud when no fence is live.
+  loud when no fence is live. (8d12370 is the squash-前切片提交; the merged
+  branch carries it as 53f87d3.)
 - Workspaces live for the process lifetime (no eviction hook; session deletion
   is not observed by this provider).
 - The provider applies layerfs' default ignore list (.git/objects); a

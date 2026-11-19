@@ -1,0 +1,31 @@
+# System-capture P2 tests, verbose transcript (no DSN value recorded)
+
+=== RUN   TestFSCaptureSystemLane
+=== RUN   TestFSCaptureSystemLane/mem
+=== RUN   TestFSCaptureSystemLane/pg
+--- PASS: TestFSCaptureSystemLane (0.13s)
+    --- PASS: TestFSCaptureSystemLane/mem (0.00s)
+    --- PASS: TestFSCaptureSystemLane/pg (0.13s)
+=== RUN   TestFSCaptureSystemLaneRequiresJobID
+=== RUN   TestFSCaptureSystemLaneRequiresJobID/mem
+=== RUN   TestFSCaptureSystemLaneRequiresJobID/pg
+--- PASS: TestFSCaptureSystemLaneRequiresJobID (0.17s)
+    --- PASS: TestFSCaptureSystemLaneRequiresJobID/mem (0.00s)
+    --- PASS: TestFSCaptureSystemLaneRequiresJobID/pg (0.17s)
+PASS
+ok  	github.com/jixoai/keel/internal/kernel	0.526s
+kernel_exit=0
+
+=== RUN   TestBackgroundJobCaptureFailureCarriesJobID
+2026/11/20 01:14:00 WARN bash workspace capture failed tenant_id=b92f29a1-e5fc-46ff-8c80-4973fc2ff75d session_id=e2db8bb3-9848-480e-8b0a-a9c573d6e3e8 call_id=call-fail job_id="" err="invalid_arguments: gbashfs: capture: store tree \"\": layerfs: invalid: tree entry name \"bad\\nname\": gbashfs: capture: store tree \"\": layerfs: invalid: tree entry name \"bad\\nname\""
+2026/11/20 01:14:00 WARN bash workspace capture failed tenant_id=b92f29a1-e5fc-46ff-8c80-4973fc2ff75d session_id=e2db8bb3-9848-480e-8b0a-a9c573d6e3e8 call_id=call-fail job_id=job-fail-1 err="invalid_arguments: gbashfs: capture: store tree \"\": layerfs: invalid: tree entry name \"bad\\nname\": gbashfs: capture: store tree \"\": layerfs: invalid: tree entry name \"bad\\nname\""
+--- PASS: TestBackgroundJobCaptureFailureCarriesJobID (0.02s)
+PASS
+ok  	github.com/jixoai/keel/internal/bashbridge	0.293s
+bashbridge_exit=0
+
+=== RUN   TestSystemCaptureRequiresJobID
+--- PASS: TestSystemCaptureRequiresJobID (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	0.320s
+fileplugin_exit=0

@@ -578,6 +578,31 @@ func validateExternalEventPayload(raw json.RawMessage) error {
 	return nil
 }
 
+// validateSystemCapturePayload enforces the system-lane capture attribution:
+// a background job's fs.capture MUST carry a non-empty jobId so the fact stays
+// traceable after the run lease is gone (layerfs spec, "capture 默认实时、按批
+// 结算"). The document stays open; only the jobId member is required and
+// type-checked, so the existing sessionId/baseSeq/count/treeHash fields are not
+// constrained here.
+func validateSystemCapturePayload(payload json.RawMessage) error {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return fmt.Errorf("system-lane fs.capture payload is not a JSON object: %w", err)
+	}
+	raw, ok := doc["jobId"]
+	if !ok {
+		return errors.New("system-lane fs.capture payload is missing jobId")
+	}
+	var jobID string
+	if err := json.Unmarshal(raw, &jobID); err != nil {
+		return errors.New("system-lane fs.capture payload jobId is not a string")
+	}
+	if strings.TrimSpace(jobID) == "" {
+		return errors.New("system-lane fs.capture payload jobId is empty")
+	}
+	return nil
+}
+
 // samePayload compares two JSON payloads by content, not by formatting: the
 // same request retried with re-ordered keys or different whitespace is still
 // the same request.

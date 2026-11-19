@@ -784,6 +784,15 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 		if err := validateExternalEventPayload(req.Payload); err != nil {
 			return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, err.Error(), ErrInvalidRequest)
 		}
+	case KindFSCapture:
+		// The system lane is the background-job settlement, and the spec requires
+		// it to carry the jobId attribution. The owner lane is untouched: a run's
+		// capture needs the fence, not a job id.
+		if req.System {
+			if err := validateSystemCapturePayload(req.Payload); err != nil {
+				return Receipt{}, k.reject(ReasonInvalidRequest, OpCommit, req.Scope, req.Kind, req.Token, err.Error(), ErrInvalidRequest)
+			}
+		}
 	}
 
 	txn, err := k.log.BeginSession(ctx, req.Scope.TenantID, req.Scope.SessionID)
