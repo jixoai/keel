@@ -1,3 +1,0 @@
-== no-env deployment (13760) API probes ==
-POST /v1/media/audio/speech -> {"error":"audio provider is not configured"} [503]
-POST /v1/media/audio/transcriptions -> {"error":"audio provider is not configured"} [503]
