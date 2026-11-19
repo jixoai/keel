@@ -102,7 +102,7 @@ func main() {
 	// migration on the shared pool (same advisory lock as store.Migrate) and is
 	// injected into the runner, the worker and the HTTP edge; none of them gets
 	// a raw store write handle.
-	kernelLog, err := kernel.NewPG(ctx, st.Pool())
+	kernelLog, err := kernel.NewPG(ctx, st.Pool(), kernel.WithBlobRefs(st))
 	if err != nil {
 		log.Error("kernel migrate", "err", err)
 		os.Exit(1)
@@ -520,6 +520,19 @@ func main() {
 	if models := rt.Models(); models != nil {
 		validateSelection = models.ValidateSelection
 	}
+	// Blob lifecycle (keel-ga §5): async thumbnails for uploads and the TTL
+	// sweeper. Both loops stop with the runtime context; the generator's uploader
+	// is bare so thumbnails never queue themselves.
+	blobReader := blob.NewReader(st, *streamCap, *batch)
+	blobUploader := &blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()}
+	thumbnails := blob.NewThumbnailer(st, blob.NewReader(st, 4, 1), blobUploader, log)
+	thumbnails.Interval = envDuration("KEEL_BLOB_THUMB_INTERVAL", blob.ThumbDefaultInterval)
+	blobUploader.Thumbnails = thumbnails
+	go thumbnails.Run(ctx)
+	blobGC := blob.NewSweeper(st, *casDir, log)
+	blobGC.Interval = envDuration("KEEL_BLOB_GC_INTERVAL", blob.DefaultGCInterval)
+	blobGC.OrphanInterval = envDuration("KEEL_BLOB_ORPHAN_INTERVAL", blob.DefaultOrphanInterval)
+	go blobGC.Run(ctx)
 	srv := httpapi.New(httpapi.Config{
 		Store:             st,
 		Hub:               hub,
@@ -527,8 +540,8 @@ func main() {
 		Events:            rt.Projection(),
 		Loadouts:          kern,
 		ValidateSelection: validateSelection,
-		Blobs:             blob.NewReader(st, *streamCap, *batch),
-		Uploader:          &blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()},
+		Blobs:             blobReader,
+		Uploader:          blobUploader,
 		Scheduler:         stream.NewScheduler(*streamCap),
 		Admitter:          stream.NewAdmitter(*admitRate, *admitRate*2),
 		Limiter:           stream.NewLimiter(*budget),

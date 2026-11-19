@@ -173,7 +173,7 @@ func newPGHarness(t *testing.T) *harness {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(st.Close)
-	pg, err := NewPG(ctx, st.Pool())
+	pg, err := NewPG(ctx, st.Pool(), WithBlobRefs(st))
 	if err != nil {
 		t.Fatalf("open kernel pg store: %v", err)
 	}

@@ -182,6 +182,7 @@ func (s *Server) routes() {
 	s.registerDecisionRoutes()
 	s.mux.HandleFunc("POST /v1/files", s.upload)
 	s.mux.HandleFunc("GET /v1/files/{id}/meta", s.fileMeta)
+	s.mux.HandleFunc("GET /v1/files/{id}/thumbnail", s.fileThumbnail)
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
 	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
@@ -925,6 +926,10 @@ func (s *Server) writeFileMeta(w http.ResponseWriter, meta store.BlobMeta) {
 		"sha256":  hex.EncodeToString(meta.SHA256),
 		"storage": meta.Storage,
 		"chunks":  meta.Chunks,
+		// Thumbnail lifecycle (keel-ga §5): the upload answers immediately with
+		// status pending for a supported image; the client polls this URL.
+		"thumbStatus":  meta.ThumbStatus,
+		"thumbnailUrl": "/v1/files/" + meta.BlobID.String() + "/thumbnail",
 	})
 }
 
@@ -952,8 +957,111 @@ func (s *Server) fileMeta(w http.ResponseWriter, r *http.Request) {
 		"fileId": meta.BlobID, "size": meta.Size, "mime": meta.Mime,
 		"sha256": hex.EncodeToString(meta.SHA256), "storage": meta.Storage,
 		"chunks": meta.Chunks, "complete": meta.Complete,
-		"wireLength": blob.WireLen(meta.Size),
+		"wireLength":   blob.WireLen(meta.Size),
+		"thumbStatus":  meta.ThumbStatus,
+		"thumbnailUrl": "/v1/files/" + meta.BlobID.String() + "/thumbnail",
 	})
+}
+
+// fileThumbnail serves the generated 320px preview. Statuses are explicit so a
+// client can distinguish "not an image" from "still working" from "failed":
+//
+//	200 image/png   thumbnail ready (bytes stream through the normal blob path)
+//	202             generation pending; poll again
+//	404             no blob for this tenant, or no thumbnail is applicable
+//	409             generation failed permanently (or ready but not readable)
+//
+// It never answers 500 for a not-ready state, and it carries the same tenant
+// predicate as every other file route.
+func (s *Server) fileThumbnail(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFrom(r)
+	if !ok {
+		writeErr(w, 401, errors.New("X-Tenant-ID is required"))
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, 400, fmt.Errorf("bad file id: %w", err))
+		return
+	}
+	meta, err := s.cfg.Store.BlobMetaOf(r.Context(), tenantID, id)
+	if err != nil {
+		status := 500
+		if errors.Is(err, store.ErrNoBlob) {
+			status = 404
+		}
+		writeErr(w, status, err)
+		return
+	}
+	switch meta.ThumbStatus {
+	case store.ThumbPending:
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"status": store.ThumbPending, "fileId": meta.BlobID,
+		})
+		return
+	case store.ThumbFailed:
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"status": store.ThumbFailed, "fileId": meta.BlobID,
+			"error": "thumbnail generation failed",
+		})
+		return
+	case store.ThumbReady:
+		// fall through to the bytes
+	case store.ThumbNone:
+		writeErr(w, 404, errors.New("no thumbnail for this blob"))
+		return
+	default:
+		writeErr(w, 404, errors.New("no thumbnail for this blob"))
+		return
+	}
+	if meta.ThumbBlobID == nil {
+		writeErr(w, http.StatusConflict, errors.New("thumbnail is marked ready but has no object"))
+		return
+	}
+	thumb, err := s.cfg.Store.BlobMetaOf(r.Context(), tenantID, *meta.ThumbBlobID)
+	if err != nil {
+		status := 500
+		if errors.Is(err, store.ErrNoBlob) {
+			status = 404
+		}
+		writeErr(w, status, err)
+		return
+	}
+	if !thumb.Complete {
+		writeErr(w, http.StatusConflict, errors.New("thumbnail is not complete"))
+		return
+	}
+	if !s.cfg.Admitter.Allow() {
+		w.Header().Set("Retry-After", "1")
+		writeErr(w, http.StatusTooManyRequests, errors.New("too many new streams"))
+		return
+	}
+	class := stream.ClassOf(thumb.Size)
+	release, ok := s.cfg.Scheduler.Acquire(class)
+	if !ok {
+		s.cfg.Metrics.AdmissionReject.Add(1)
+		w.Header().Set("Retry-After", "1")
+		writeErr(w, http.StatusTooManyRequests, errors.New("stream capacity exhausted"))
+		return
+	}
+	defer release()
+	s.cfg.Metrics.StreamsActive.Add(1)
+	defer s.cfg.Metrics.StreamsActive.Add(-1)
+	s.cfg.Metrics.StreamsTotal.Add(1)
+
+	h := w.Header()
+	h.Set("Content-Type", thumb.Mime)
+	h.Set("Content-Length", strconv.FormatInt(thumb.Size, 10))
+	h.Set("Cache-Control", "private, max-age=3600")
+	w.WriteHeader(200)
+	guard := stream.NewGuard(w, stream.GuardConfig{Limiter: s.cfg.Limiter})
+	n, err := s.cfg.Blobs.StreamRaw(r.Context(), tenantID, thumb.BlobID, thumb, guard, 0, 0)
+	guard.Close()
+	s.cfg.Metrics.BytesSent.Add(n)
+	if err != nil {
+		s.cfg.Logger.Error("thumbnail stream failed", "file", id, "err", err)
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // file streams a blob as raw bytes or base64. Raw supports standard Range;

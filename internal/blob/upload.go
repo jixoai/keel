@@ -38,6 +38,11 @@ type Uploader struct {
 	CASDir      string
 	PGThreshold int64 // default 1MiB
 	MaxBytes    int64 // default 64MiB
+	// Thumbnails, when set, is notified after an image upload commits. The
+	// notification is best-effort: the row is already status=pending, so even a
+	// lost wakeup is recovered by the generator's periodic scan. The generator's
+	// own uploader must leave this nil (a thumbnail must not queue itself).
+	Thumbnails *Thumbnailer
 }
 
 func (u *Uploader) applyDefaults() {
@@ -90,6 +95,10 @@ func (u *Uploader) Put(ctx context.Context, tenantID uuid.UUID, mime string, r i
 		return store.BlobMeta{}, err
 	}
 	if existing {
+		// A deduped upload still needs its thumbnail queued when the existing
+		// object predates the feature (or was uploaded as an attachment before
+		// this process had a generator).
+		u.queueThumbnail(ctx, tenantID, id)
 		return u.Store.BlobMetaOf(ctx, tenantID, id)
 	}
 
@@ -106,7 +115,27 @@ func (u *Uploader) Put(ctx context.Context, tenantID uuid.UUID, mime string, r i
 	if err := u.Store.CompleteBlob(ctx, tenantID, id, int32((n+store.ChunkSize-1)/store.ChunkSize)); err != nil {
 		return store.BlobMeta{}, err
 	}
+	u.queueThumbnail(ctx, tenantID, id)
 	return u.Store.BlobMetaOf(ctx, tenantID, id)
+}
+
+// queueThumbnail marks a completed image pending and wakes the generator. It
+// never turns a thumbnail problem into an upload failure: the blob is already
+// durable and readable at this point.
+func (u *Uploader) queueThumbnail(ctx context.Context, tenantID, blobID uuid.UUID) {
+	if u.Thumbnails == nil {
+		return
+	}
+	queued, err := u.Store.MarkThumbPending(ctx, tenantID, blobID)
+	if err != nil {
+		if u.Thumbnails.Logger != nil {
+			u.Thumbnails.Logger.Warn("thumbnail queue failed", "tenant", tenantID, "blob", blobID, "err", err)
+		}
+		return
+	}
+	if queued {
+		u.Thumbnails.Notify()
+	}
 }
 
 func (u *Uploader) writeChunks(ctx context.Context, tenantID, blobID uuid.UUID, path string) error {

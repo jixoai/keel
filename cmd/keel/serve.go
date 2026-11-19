@@ -309,7 +309,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	defer bashManager.Close()
 	opts.Bash = bashManager
 
-	kernelLog, err := kernel.NewPG(ctx, st.Pool())
+	kernelLog, err := kernel.NewPG(ctx, st.Pool(), kernel.WithBlobRefs(st))
 	if err != nil {
 		return fmt.Errorf("kernel migrate: %w", err)
 	}
@@ -558,13 +558,28 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// claiming.
 	drainer := httpapi.NewDrainer(3000, 200)
 	streamMetrics := &stream.Metrics{}
+	// Blob lifecycle (keel-ga §5). The uploader queues supported images and
+	// wakes the generator; the generator's own uploader is bare so a thumbnail
+	// never queues itself. The sweeper reaps TTL-expired, unreferenced blobs
+	// (metadata -> chunks -> CAS) and retries a crashed unlink through its
+	// orphan scan. Both loops stop with the serve context.
+	blobReader := blob.NewReader(st, 256, 1)
+	blobUploader := &blob.Uploader{Store: st, CASDir: opts.CASDir, TempDir: os.TempDir()}
+	thumbnails := blob.NewThumbnailer(st, blob.NewReader(st, 4, 1), blobUploader, log)
+	thumbnails.Interval = envDuration("KEEL_BLOB_THUMB_INTERVAL", blob.ThumbDefaultInterval)
+	blobUploader.Thumbnails = thumbnails
+	go thumbnails.Run(ctx)
+	blobGC := blob.NewSweeper(st, opts.CASDir, log)
+	blobGC.Interval = envDuration("KEEL_BLOB_GC_INTERVAL", blob.DefaultGCInterval)
+	blobGC.OrphanInterval = envDuration("KEEL_BLOB_ORPHAN_INTERVAL", blob.DefaultOrphanInterval)
+	go blobGC.Run(ctx)
 	api := httpapi.New(httpapi.Config{
 		Store:     st,
 		Hub:       hub,
 		Edge:      kern,
 		Events:    rt.Projection(),
-		Blobs:     blob.NewReader(st, 256, 1),
-		Uploader:  &blob.Uploader{Store: st, CASDir: opts.CASDir, TempDir: os.TempDir()},
+		Blobs:     blobReader,
+		Uploader:  blobUploader,
 		Scheduler: stream.NewScheduler(256),
 		Admitter:  stream.NewAdmitter(200, 400),
 		Limiter:   stream.NewLimiter(0),

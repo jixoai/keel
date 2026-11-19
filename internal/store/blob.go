@@ -45,7 +45,21 @@ type BlobMeta struct {
 	RefCount  int32
 	CreatedAt time.Time
 	ExpiresAt *time.Time
+	// Thumbnail lifecycle (keel-ga §5): none | pending | ready | failed.
+	// ThumbBlobID is set only when ThumbStatus == ThumbReady.
+	ThumbStatus string
+	ThumbBlobID *uuid.UUID
 }
+
+// Thumbnail status values. `none` means "this blob is not an image the
+// thumbnailer handles" (or it predates the column), not "queued": only
+// `pending` is claimed by the generator.
+const (
+	ThumbNone    = "none"
+	ThumbPending = "pending"
+	ThumbReady   = "ready"
+	ThumbFailed  = "failed"
+)
 
 // ErrNoBlob is returned when a blob does not exist for the tenant.
 var ErrNoBlob = errors.New("store: blob not found")
@@ -161,12 +175,12 @@ func (s *Store) BlobMetaOf(ctx context.Context, tenantID, blobID uuid.UUID) (Blo
 	var m BlobMeta
 	err := s.pool.QueryRow(ctx,
 		`SELECT tenant_id, blob_id, sha256, size, mime, storage_kind, lane_class,
-		        complete, ref_count, created_at, expires_at,
+		        complete, ref_count, created_at, expires_at, thumb_status, thumb_blob_id,
 		        COALESCE((SELECT max(seq) + 1 FROM blob_chunks c
 		                  WHERE c.tenant_id = b.tenant_id AND c.blob_id = b.blob_id), 0)
 		 FROM blobs b WHERE tenant_id = $1 AND blob_id = $2`, tenantID, blobID).
 		Scan(&m.TenantID, &m.BlobID, &m.SHA256, &m.Size, &m.Mime, &m.Storage, &m.Lane,
-			&m.Complete, &m.RefCount, &m.CreatedAt, &m.ExpiresAt, &m.Chunks)
+			&m.Complete, &m.RefCount, &m.CreatedAt, &m.ExpiresAt, &m.ThumbStatus, &m.ThumbBlobID, &m.Chunks)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BlobMeta{}, ErrNoBlob
 	}
@@ -229,48 +243,6 @@ func (s *Store) ReadChunkAt(ctx context.Context, tenantID, blobID uuid.UUID, seq
 	out := make([]byte, len(b))
 	copy(out, b)
 	return out, nil
-}
-
-// AddRef records that one event references the blob and increments ref_count
-// exactly once per (blob, session, event_seq).
-func (s *Store) AddRef(ctx context.Context, tenantID, blobID, sessionID uuid.UUID, eventSeq int64) error {
-	tag, err := s.pool.Exec(ctx,
-		`INSERT INTO blob_refs (tenant_id, blob_id, session_id, event_seq)
-		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT DO NOTHING`, tenantID, blobID, sessionID, eventSeq)
-	if err != nil {
-		return fmt.Errorf("store: add blob ref: %w", err)
-	}
-	if tag.RowsAffected() == 1 {
-		if _, err := s.pool.Exec(ctx,
-			`UPDATE blobs SET ref_count = ref_count + 1 WHERE tenant_id = $1 AND blob_id = $2`,
-			tenantID, blobID); err != nil {
-			return fmt.Errorf("store: incr ref count: %w", err)
-		}
-	}
-	return nil
-}
-
-// ReleaseExpired deletes unreferenced, expired blobs. It is idempotent and is
-// meant to be called by a periodic sweeper.
-func (s *Store) ReleaseExpired(ctx context.Context, limit int) (int64, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	rows, err := s.Pool().Query(ctx,
-		`DELETE FROM blobs WHERE (tenant_id, blob_id) IN (
-		   SELECT tenant_id, blob_id FROM blobs
-		   WHERE ref_count = 0 AND expires_at IS NOT NULL AND expires_at < now()
-		   LIMIT $1)`, limit)
-	if err != nil {
-		return 0, fmt.Errorf("store: release expired: %w", err)
-	}
-	defer rows.Close()
-	var n int64
-	for rows.Next() {
-		n++
-	}
-	return n, rows.Err()
 }
 
 // HashReader wraps an io.Reader and computes sha256 as it is consumed. It is

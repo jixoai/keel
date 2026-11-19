@@ -58,15 +58,31 @@ var _ PGPool = (*pgxpool.Pool)(nil)
 type PGStore struct {
 	pool    PGPool
 	retries atomic.Int64 // transient failures replayed (evidence for tests)
+	// blobRefs is the reference projection sink (Store.AddRefTx). Nil means the
+	// deployment did not wire blob lifecycle; commits then record no refs.
+	blobRefs BlobRefSink
 }
 
 var _ LogStore = (*PGStore)(nil)
 
+// PGOption configures optional PGStore seams.
+type PGOption func(*PGStore)
+
+// WithBlobRefs attaches the blob reference projection. It is a construction
+// option (not mutable state) so a running store cannot silently switch sinks.
+// Wire it with the same *store.Store whose pool was passed to NewPG.
+func WithBlobRefs(sink BlobRefSink) PGOption {
+	return func(s *PGStore) { s.blobRefs = sink }
+}
+
 // NewPG wraps a pool and applies the kernel's additive migrations. Pass
 // store.Store.Pool() — the pool must already carry the base schema
 // (store.Open migrates it).
-func NewPG(ctx context.Context, pool PGPool) (*PGStore, error) {
+func NewPG(ctx context.Context, pool PGPool, opts ...PGOption) (*PGStore, error) {
 	s := &PGStore{pool: pool}
+	for _, opt := range opts {
+		opt(s)
+	}
 	if err := s.Migrate(ctx); err != nil {
 		return nil, err
 	}
@@ -205,7 +221,7 @@ func (s *PGStore) BeginSession(ctx context.Context, tenantID, sessionID uuid.UUI
 	}
 	return &pgTxn{
 		tx: tx, tenantID: tenantID, sessionID: sessionID, nextSeq: next,
-		stateOwner: stateOwner, externalStatus: extStatus,
+		stateOwner: stateOwner, externalStatus: extStatus, blobRefs: s.blobRefs,
 	}, nil
 }
 
@@ -220,6 +236,8 @@ type pgTxn struct {
 	// query.
 	stateOwner     string
 	externalStatus string
+	// blobRefs records the event's blob references inside this transaction.
+	blobRefs BlobRefSink
 }
 
 func (t *pgTxn) Lease(ctx context.Context) (LeaseState, error) {
@@ -341,6 +359,21 @@ func (t *pgTxn) Append(ctx context.Context, kind EventKind, payload json.RawMess
 	}
 	t.nextSeq++
 	return seq, nil
+}
+
+// AddBlobRefs projects the staged event's blob references through the sink,
+// inside the append transaction. A nil sink is a deployment without blob
+// lifecycle: the append still succeeds and no refs are recorded.
+func (t *pgTxn) AddBlobRefs(ctx context.Context, eventSeq int64, blobIDs []uuid.UUID) error {
+	if t.blobRefs == nil {
+		return nil
+	}
+	for _, blobID := range blobIDs {
+		if err := t.blobRefs.AddRefTx(ctx, t.tx, t.tenantID, blobID, t.sessionID, eventSeq); err != nil {
+			return fmt.Errorf("kernel: record blob ref: %w", pgFail(err))
+		}
+	}
+	return nil
 }
 
 func (t *pgTxn) Commit(ctx context.Context) error {

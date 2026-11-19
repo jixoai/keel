@@ -129,6 +129,13 @@ type SessionTxn interface {
 	// unavailable) with markRetryable so Kernel.Commit can replay them.
 	Append(ctx context.Context, kind EventKind, payload json.RawMessage, dedupeKey string) (int64, error)
 
+	// AddBlobRefs records the blob ids the staged event references, after
+	// Append allocated its sequence and before Commit. It runs inside the same
+	// transaction as the append, so an event and its ref_count contribution are
+	// one fact. The store ignores unknown, incomplete and cross-tenant blobs;
+	// MemStore is a no-op (it has no durable blob table).
+	AddBlobRefs(ctx context.Context, eventSeq int64, blobIDs []uuid.UUID) error
+
 	// Commit applies the staged append.
 	Commit(ctx context.Context) error
 

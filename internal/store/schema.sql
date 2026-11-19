@@ -181,6 +181,31 @@ CREATE TABLE IF NOT EXISTS blobs (
     UNIQUE (tenant_id, sha256)
 );
 
+-- Thumbnail lifecycle (change keel-ga §5 blob-lifecycle). thumb_status is
+-- none (not an image / not requested), pending (queued), ready (thumb_blob_id
+-- points at a blob row of its own) or failed (terminal; no retry storm). The
+-- thumbnail bytes are an ordinary blob, so they use the same storage/read path
+-- and sharing rules as every other object. thumb_updated_at is audit only.
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumb_status text NOT NULL DEFAULT 'none';
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumb_blob_id uuid;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumb_updated_at timestamptz;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'blobs_thumb_status_check'
+                     AND conrelid = 'blobs'::regclass) THEN
+        ALTER TABLE blobs ADD CONSTRAINT blobs_thumb_status_check
+            CHECK (thumb_status IN ('none', 'pending', 'ready', 'failed'));
+    END IF;
+END
+$$;
+
+-- The thumbnailer scans pending rows in creation order; the partial index keeps
+-- the scan proportional to the queue, not to the table.
+CREATE INDEX IF NOT EXISTS blobs_thumb_pending ON blobs (created_at)
+    WHERE thumb_status = 'pending';
+
 -- 64KiB chunks. STORAGE EXTERNAL keeps already-compressed image bytes out of
 -- pglz/TOAST compression (the CPU cost buys nothing for PNG/JPEG/WebP).
 CREATE TABLE IF NOT EXISTS blob_chunks (
@@ -203,6 +228,25 @@ CREATE TABLE IF NOT EXISTS blob_refs (
     created_at  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, blob_id, session_id, event_seq)
 );
+
+-- The FK makes the projection crash-safe under a concurrent TTL sweep: the
+-- reference INSERT takes a KEY SHARE lock on the blob row, so a sweeper's
+-- FOR UPDATE cannot delete the row between the reference insert and the event
+-- commit. ON DELETE CASCADE is the backstop for any delete path that forgets to
+-- clear refs first (the sweeper still deletes refs explicitly, per the spec's
+-- metadata-first order).
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'blob_refs_blob_fk'
+                     AND conrelid = 'blob_refs'::regclass) THEN
+        ALTER TABLE blob_refs ADD CONSTRAINT blob_refs_blob_fk
+            FOREIGN KEY (tenant_id, blob_id)
+            REFERENCES blobs (tenant_id, blob_id)
+            ON DELETE CASCADE;
+    END IF;
+END
+$$;
 
 -- Session listings and quota checks.
 CREATE INDEX IF NOT EXISTS sessions_by_tenant ON sessions (tenant_id, updated_at DESC);

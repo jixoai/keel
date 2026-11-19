@@ -94,11 +94,17 @@
 
 ## 5. blob-lifecycle
 
-- [ ] 缩略图异步生成（最长边 320），`thumb_status`
-- [ ] 引用计数由事件维护（`(blob, session, eventSeq)` 幂等）
-- [ ] TTL sweeper：metadata → chunks → CAS 文件，幂等
-- [ ] base64 offset fuzz（0/3 倍数/chunk 边界/末尾）
-- [ ] 文档：CAS 目录布局与 GC
+- [x] 缩略图异步生成（最长边 320），`thumb_status`
+      （`internal/blob/thumb.go`；store `blob_lifecycle.go` 状态机；路由
+      `GET /v1/files/{id}/thumbnail`；证据 `evidence/blob-lifecycle/`）
+- [x] 引用计数由事件维护（`(blob, session, eventSeq)` 幂等）
+      （`internal/kernel/blobrefs.go` + `internal/store/blob_refs.go`，在 append 事务内投影）
+- [x] TTL sweeper：metadata → chunks → CAS 文件，幂等
+      （`internal/store/blob_lifecycle.go` + `internal/blob/gc.go`；`keel serve`/runtime 周期接线）
+- [x] base64 offset fuzz（0/3 倍数/chunk 边界/末尾）
+      （`internal/blob/base64_offsets_test.go`：表驱动 + 1000 随机 4 倍数 offset + fuzz 属性）
+- [x] 文档：CAS 目录布局与 GC
+      （`docs/BLOB-LIFECYCLE.md`）
 
 ## 6. 验收
 

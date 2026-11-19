@@ -583,6 +583,10 @@ func (t *memTxn) Append(ctx context.Context, kind EventKind, payload json.RawMes
 	return seq, nil
 }
 
+// AddBlobRefs is a no-op: MemStore is a contract-test fake with no durable
+// blob table. Production projection lives in store.Store.AddRefTx.
+func (t *memTxn) AddBlobRefs(context.Context, int64, []uuid.UUID) error { return nil }
+
 func (t *memTxn) Commit(ctx context.Context) error {
 	if t.done {
 		return errors.New("memstore: transaction already settled")

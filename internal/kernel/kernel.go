@@ -878,6 +878,15 @@ func (k *Kernel) commitOnce(ctx context.Context, req CommitRequest) (Receipt, er
 	if err != nil {
 		return Receipt{}, k.classifyStoreError(OpCommit, req, err)
 	}
+	// Blob references commit with the event (keel-ga §5): the projection is
+	// derived from the authoritative log, so a replayed commit cannot double
+	// count (the dedupe branch above already returned) and a rolled-back append
+	// leaves no reference behind.
+	if ids := referencedBlobIDs(req.Kind, req.Payload); len(ids) > 0 {
+		if err := txn.AddBlobRefs(ctx, seq, ids); err != nil {
+			return Receipt{}, k.classifyStoreError(OpCommit, req, err)
+		}
+	}
 	if err := txn.Commit(ctx); err != nil {
 		return Receipt{}, k.classifyStoreError(OpCommit, req, err)
 	}
