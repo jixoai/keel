@@ -123,9 +123,14 @@ func (a toolAllowList) allows(name string) bool {
 	return false
 }
 
-// RefreshMCP replaces the MCP-provided tools and prompt section. The new
-// registry is built and validated before it is published; callers already
+// RefreshMCP replaces the MCP-provided tools and the mcp_servers section. The
+// new registry is built and validated before it is published; callers already
 // holding the old registry (an in-flight run) continue safely.
+//
+// Deprecated: RefreshMCP carries only mcp_servers. A refresh through it retires
+// a boot-time mcp_apps section without republishing it. Use RefreshSections and
+// pass both MCP sections (the mcp_servers content plus an mcp_apps Section);
+// the serving runtime already does so.
 func (h *Host) RefreshMCP(extra []agentcore.AgentTool, section string) error {
 	return h.RefreshSections(extra, section, nil)
 }

@@ -1,0 +1,33 @@
+P1 fix round (independent dual-axis review, frozen eb8d7ad) — gate index
+
+go-build-fix.txt          go build ./...                                  exit 0
+go-vet-fix.txt            go vet <changed packages>                        exit 0
+go-test-race-fix.txt      go test -race <changed packages>                 exit 0
+go-test-all-fix.txt       KEEL_TEST_DSN go test -p 1 -count=1 ./...        exit 0 (54 ok, 0 FAIL)
+conformance-fix.txt       scripts/conformance.sh                          exit 0 (1009 pass / 0 fail / 1 skip)
+openspec-validate-fix.txt pnpm exec openspec validate ... --strict          exit 0
+agent-runtime-e2e-fix.txt scripts/agent-runtime-e2e.sh --evidence ...       exit 0
+residue-fix.txt           ports 13610/13611 released; no keel process
+
+Fixes:
+- ui_meta.go: uiResourceURIProblem rejects C0/C1 controls, U+2028/U+2029, and
+  URIs over 256 bytes; invalid apps are diagnosed and never rendered, tools stay
+  model-visible (fail-open on tool, fail-closed on app).
+- apps.go: Apps() re-checks the URI at the catalogue boundary; AppBindingFor
+  rejects unsafe URIs; AppsPromptSection sanitizes server/tool/URI (strip
+  prompt-unsafe runes, rune-boundary truncation) before concatenation.
+- resources.go: AppResourceMaxBytes = 2 << 20 enforced in ValidateAppResource on
+  text bytes and decoded blob bytes; ReadAppResource inherits it. Documents with
+  neither text nor blob are rejected; both present remains rejected.
+- host.go: RefreshMCP marked Deprecated (must use RefreshSections with both
+  mcp_servers and mcp_apps); no behavior change.
+- Tests: unsafe URI parse/diagnostic + catalogue/prompt exclusion chain; prompt
+  field sanitization/truncation; flat-key fallback matrix; duplicate resource
+  cursor; 2 MiB boundary/over-limit text+blob; empty document; both content.
+- Backlog recorded in backlog.txt: marker forgeability (bool is authoritative)
+  and cross-page accumulation (PI-aligned, recorded only).
+
+No DSN, password, or bearer token appears in any evidence file.
+- Extra hardening in the same sanitizer: XML-significant characters are escaped
+  after truncation, so a server/tool name containing "</mcp_apps>" cannot close
+  the prompt section early (test: TestAppsPromptSectionEscapesSectionTagBreakout).

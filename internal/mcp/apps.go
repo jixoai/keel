@@ -100,7 +100,10 @@ func (m *Manager) Apps() []App {
 		}
 		for _, tool := range server.Tools {
 			uri := tool.AppResourceURI()
-			if uri == "" || !tool.VisibleToApp() {
+			// Re-check the URI at the catalogue boundary: parseToolUI only stores
+			// valid URIs, but a Tool built by another path must not smuggle an
+			// unsafe app (line breaks, overlong) into the catalogue either.
+			if uri == "" || !tool.VisibleToApp() || uiResourceURIProblem(uri) != "" {
 				continue
 			}
 			appID := AppIDFor(server.Entry.Name, uri)
@@ -156,6 +159,9 @@ func AppBindingFor(server *Server, tool Tool) (MCPAppBinding, bool) {
 	if server == nil || tool.AppResourceURI() == "" || !tool.VisibleToApp() {
 		return MCPAppBinding{}, false
 	}
+	if uiResourceURIProblem(tool.AppResourceURI()) != "" {
+		return MCPAppBinding{}, false
+	}
 	return MCPAppBinding{
 		AppID:       AppIDFor(server.Entry.Name, tool.AppResourceURI()),
 		ResourceURI: tool.AppResourceURI(),
@@ -163,9 +169,19 @@ func AppBindingFor(server *Server, tool Tool) (MCPAppBinding, bool) {
 	}, true
 }
 
+// maxPromptFieldBytes bounds one server/tool name rendered into the mcp_apps
+// section. Server and tool names are untrusted catalogue data, not prompt text.
+const maxPromptFieldBytes = 128
+
 // AppsPromptSection renders the mcp_apps section: one line per app-visible tool
 // that declares an interactive UI resource, so the model knows which results
 // have a rendered surface. Empty when no server declares one.
+//
+// Every field is sanitized before it is concatenated: server and tool names are
+// server-controlled JSON strings and must not be able to add prompt structure
+// through control characters, line separators, or unbounded length. This is
+// defense in depth on top of parseToolUI's resource-URI validation, because the
+// section is assembled on every boot and every refresh.
 func (m *Manager) AppsPromptSection() string {
 	apps := m.Apps()
 	if len(apps) == 0 {
@@ -173,8 +189,20 @@ func (m *Manager) AppsPromptSection() string {
 	}
 	var lines []string
 	for _, app := range apps {
+		uri := sanitizePromptField(app.ResourceURI, maxUIResourceURIBytes)
+		if uri == "" {
+			continue
+		}
 		for _, tool := range app.Tools {
-			lines = append(lines, fmt.Sprintf("- %s/%s: %s", tool.Server, tool.Tool, app.ResourceURI))
+			server := sanitizePromptField(tool.Server, maxPromptFieldBytes)
+			name := sanitizePromptField(tool.Tool, maxPromptFieldBytes)
+			if server == "" {
+				server = "?"
+			}
+			if name == "" {
+				name = "?"
+			}
+			lines = append(lines, fmt.Sprintf("- %s/%s: %s", server, name, uri))
 		}
 	}
 	if len(lines) == 0 {
@@ -182,3 +210,34 @@ func (m *Manager) AppsPromptSection() string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// sanitizePromptField removes prompt-unsafe runes (C0/C1 controls and the
+// Unicode line/paragraph separators), cuts the result at a rune boundary to at
+// most max bytes, and escapes the XML-significant characters: a server name
+// containing "</mcp_apps>" must not be able to close the section early.
+func sanitizePromptField(value string, max int) string {
+	var builder strings.Builder
+	for _, r := range value {
+		if isPromptUnsafeRune(r) {
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	out := strings.TrimSpace(builder.String())
+	if max > 0 && len(out) > max {
+		cut := 0
+		for index := range out {
+			if index > max {
+				break
+			}
+			cut = index
+		}
+		out = strings.TrimSpace(out[:cut])
+	}
+	return promptFieldEscaper.Replace(out)
+}
+
+// promptFieldEscaper neutralizes the characters BuildSystemPrompt's <section>
+// wrapper treats as markup. It is applied after truncation so an entity can
+// never be cut in half.
+var promptFieldEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")

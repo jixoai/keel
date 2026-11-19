@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Tool visibility values of `_meta.ui.visibility` (apps.mdx §Visibility).
@@ -28,6 +29,11 @@ const (
 // uiScheme is the only URI scheme a UI resource may use (apps.mdx §UI Resource
 // Format).
 const uiScheme = "ui://"
+
+// maxUIResourceURIBytes bounds a declared UI resource URI. The URI reaches the
+// system prompt and, from P2, cache paths and HTTP responses; a server must not
+// be able to grow those with an unbounded string.
+const maxUIResourceURIBytes = 256
 
 // AppMIMEType is the only media type an MCP app document may declare.
 const AppMIMEType = "text/html;profile=mcp-app"
@@ -100,6 +106,10 @@ const StructuredContentMaxBytes = 256 * 1024
 // marker document `{"_meta":{"truncated":true,"originalBytes":N}}` and
 // truncated is true: the JSON structure is never silently mangled into
 // something that still parses.
+//
+// The marker shape is NOT authoritative: it is ordinary JSON a server could
+// have produced itself. Consumers decide "truncated" from the boolean field
+// (MCPToolDetails.StructuredContentTruncated), never by inspecting the marker.
 func BoundStructuredContent(raw json.RawMessage, max int) (json.RawMessage, bool) {
 	if len(raw) == 0 || max <= 0 || len(raw) <= max {
 		return raw, false
@@ -190,7 +200,9 @@ func parseToolUI(meta json.RawMessage) (ToolUI, []string) {
 }
 
 // uiResourceURIProblem names why a declared resource URI is not usable, or ""
-// when it is.
+// when it is. A URI is untrusted server input that ends up in the system prompt:
+// control characters (C0/C1, line/paragraph separators) could forge prompt
+// structure, and an unbounded length could push every run's prompt around.
 func uiResourceURIProblem(uri string) string {
 	if !strings.HasPrefix(uri, uiScheme) {
 		return fmt.Sprintf("%q does not use the ui:// scheme", uri)
@@ -198,7 +210,23 @@ func uiResourceURIProblem(uri string) string {
 	if len(uri) == len(uiScheme) {
 		return "is empty after ui://"
 	}
+	if len(uri) > maxUIResourceURIBytes {
+		return fmt.Sprintf("is longer than %d bytes", maxUIResourceURIBytes)
+	}
+	for _, r := range uri {
+		if isPromptUnsafeRune(r) {
+			return "contains control characters"
+		}
+	}
 	return ""
+}
+
+// isPromptUnsafeRune reports runes that can break or forge prompt structure.
+// Beyond C0/C1 controls (unicode.IsControl) the Unicode line and paragraph
+// separators count: they are line breaks to many renderers even though they are
+// not Cc.
+func isPromptUnsafeRune(r rune) bool {
+	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
 }
 
 // parseVisibility validates `_meta.ui.visibility`. The whole value falls back

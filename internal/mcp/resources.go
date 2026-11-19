@@ -101,11 +101,19 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (ReadResourceResu
 	return validateReadResourceResult(raw)
 }
 
+// AppResourceMaxBytes bounds one MCP App document (spec requirement: default
+// 2 MiB). The transport's 16 MiB frame limit is not a document limit: a server
+// must not be able to push a multi-megabyte document through resources/read
+// just because the frame fits. The bound is measured on document bytes (text
+// length, or decoded blob length).
+const AppResourceMaxBytes = 2 << 20
+
 // ReadAppResource reads a ui:// resource and enforces the MCP Apps document
-// contract: the media type MUST be text/html;profile=mcp-app and the content
-// MUST be text or a base64 blob (never both). A failure is reported as
-// ErrNotAppResource with the concrete reason; the caller records a diagnostic
-// and keeps the text fallback.
+// contract: the media type MUST be text/html;profile=mcp-app, the content MUST
+// be text or a base64 blob (never both, never neither), and the document MUST
+// stay within AppResourceMaxBytes. A failure is reported as ErrNotAppResource
+// with the concrete reason; the caller records a diagnostic and keeps the text
+// fallback.
 func (c *Client) ReadAppResource(ctx context.Context, uri string) (AppResource, error) {
 	result, err := c.ReadResource(ctx, uri)
 	if err != nil {
@@ -124,6 +132,12 @@ func ValidateAppResource(result ReadResourceResult) (AppResource, error) {
 		return AppResource{}, fmt.Errorf("%w: resource %q declares mimeType %q, want %q",
 			ErrNotAppResource, content.URI, content.MimeType, AppMIMEType)
 	}
+	if content.Blob != "" && content.Text != "" {
+		return AppResource{}, fmt.Errorf("%w: resource %q carries both text and blob", ErrNotAppResource, content.URI)
+	}
+	if content.Blob == "" && content.Text == "" {
+		return AppResource{}, fmt.Errorf("%w: resource %q carries neither text nor blob", ErrNotAppResource, content.URI)
+	}
 	resource := AppResource{
 		URI:        content.URI,
 		MIMEType:   content.MimeType,
@@ -136,8 +150,16 @@ func ValidateAppResource(result ReadResourceResult) (AppResource, error) {
 		if err != nil {
 			return AppResource{}, fmt.Errorf("%w: resource %q has an invalid base64 blob: %v", ErrNotAppResource, content.URI, err)
 		}
+		if len(decoded) > AppResourceMaxBytes {
+			return AppResource{}, fmt.Errorf("%w: resource %q blob is %d bytes, over the %d-byte limit",
+				ErrNotAppResource, content.URI, len(decoded), AppResourceMaxBytes)
+		}
 		resource.Blob = decoded
 		return resource, nil
+	}
+	if len(content.Text) > AppResourceMaxBytes {
+		return AppResource{}, fmt.Errorf("%w: resource %q text is %d bytes, over the %d-byte limit",
+			ErrNotAppResource, content.URI, len(content.Text), AppResourceMaxBytes)
 	}
 	resource.Text = content.Text
 	return resource, nil
@@ -189,7 +211,10 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 }
 
 // paginate follows nextCursor through every page, with the same bound and
-// duplicate-cursor rule tools/list uses.
+// duplicate-cursor rule tools/list uses. Like pi's list helpers, the aggregate
+// grows with every page: the bound is maxListPages, not a byte budget. That
+// cross-page accumulation is a known PI-aligned semantics (not a P1 change);
+// per-page shapes are bounded by the transport frame limit.
 func paginate[T any](ctx context.Context, method string, page func(context.Context, string) ([]T, string, error)) ([]T, error) {
 	var out []T
 	seen := make(map[string]bool)

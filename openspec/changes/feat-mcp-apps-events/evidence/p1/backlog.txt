@@ -1,0 +1,12 @@
+P1 backlog (recorded, intentionally NOT changed in this fix round)
+
+1. Truncation marker shape is forgeable. BoundStructuredContent emits
+   {"_meta":{"truncated":true,"originalBytes":N}} when the payload is over
+   StructuredContentMaxBytes. A server can produce the same JSON itself. The
+   authoritative signal is the boolean MCPToolDetails.StructuredContentTruncated;
+   P2 consumers MUST read the boolean and MUST NOT parse the marker.
+
+2. Cross-page accumulation semantics. paginate() follows nextCursor up to
+   maxListPages (1,000), the same bound as tools/list and PI's list helpers. It
+   bounds page count, not aggregate bytes; the aggregate grows with every page.
+   This is PI-aligned semantics and is recorded here rather than changed in P1.

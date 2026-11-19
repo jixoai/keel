@@ -1,0 +1,7 @@
+ok  	github.com/jixoai/keel/internal/mcp	4.525s
+ok  	github.com/jixoai/keel/internal/host	1.636s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.628s
+ok  	github.com/jixoai/keel/internal/servicehost	9.229s
+ok  	github.com/jixoai/keel/internal/provider	1.734s
+ok  	github.com/jixoai/keel/internal/agent	24.092s
+ok  	github.com/jixoai/keel/cmd/keel	4.618s

@@ -1,0 +1,12 @@
+# residue check (P1 fix round, final) 2026-11-19T18:12:02Z
+
+## new e2e port-release
+# port release check
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## keel serve / keel-agent-e2e processes
+none
+
+## listeners on this task's e2e ports 13610/13611
+none

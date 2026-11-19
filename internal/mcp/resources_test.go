@@ -303,3 +303,88 @@ func TestClientGetPrompt(t *testing.T) {
 		t.Fatal("an empty prompt name was accepted")
 	}
 }
+
+func TestClientListResourcesRejectsDuplicateCursor(t *testing.T) {
+	clientTransport, server := newTestServer(t)
+	server.setHandler("resources/list", func(json.RawMessage) (any, *ErrorObject) {
+		return map[string]any{
+			"resources": []any{
+				map[string]any{"uri": "ui://weather/dashboard", "mimeType": AppMIMEType},
+			},
+			"nextCursor": "stuck",
+		}, nil
+	})
+	client := connectTestClient(t, clientTransport)
+
+	_, err := client.ListResources(testContext(t))
+	if err == nil || !strings.Contains(err.Error(), "duplicate cursor") {
+		t.Fatalf("ListResources error = %v, want a duplicate-cursor failure", err)
+	}
+	if pages := server.requests("resources/list"); len(pages) != 2 {
+		t.Fatalf("server saw %d pages, want 2 (the duplicate is detected before a third)", len(pages))
+	}
+}
+
+func TestValidateAppResourceSizeLimit(t *testing.T) {
+	within := strings.Repeat("x", AppResourceMaxBytes)
+	resource, err := ValidateAppResource(ReadResourceResult{Contents: []ResourceContents{{
+		URI: "ui://panel/view", MimeType: AppMIMEType, Text: within,
+	}}})
+	if err != nil {
+		t.Fatalf("exact-limit document rejected: %v", err)
+	}
+	if resource.Text != within {
+		t.Fatalf("text length = %d, want %d", len(resource.Text), len(within))
+	}
+
+	over := strings.Repeat("x", AppResourceMaxBytes+1)
+	_, err = ValidateAppResource(ReadResourceResult{Contents: []ResourceContents{{
+		URI: "ui://panel/view", MimeType: AppMIMEType, Text: over,
+	}}})
+	if !errors.Is(err, ErrNotAppResource) || !strings.Contains(err.Error(), "over the") {
+		t.Fatalf("over-limit text error = %v, want ErrNotAppResource naming the limit", err)
+	}
+
+	blob := base64.StdEncoding.EncodeToString([]byte(over))
+	_, err = ValidateAppResource(ReadResourceResult{Contents: []ResourceContents{{
+		URI: "ui://panel/view", MimeType: AppMIMEType, Blob: blob,
+	}}})
+	if !errors.Is(err, ErrNotAppResource) || !strings.Contains(err.Error(), "blob") {
+		t.Fatalf("over-limit blob error = %v, want ErrNotAppResource naming the blob", err)
+	}
+}
+
+func TestReadAppResourceInheritsSizeLimit(t *testing.T) {
+	clientTransport, server := newTestServer(t)
+	server.setHandler("resources/read", func(json.RawMessage) (any, *ErrorObject) {
+		return map[string]any{"contents": []any{map[string]any{
+			"uri":      "ui://panel/view",
+			"mimeType": AppMIMEType,
+			"text":     strings.Repeat("x", AppResourceMaxBytes+1),
+		}}}, nil
+	})
+	client := connectTestClient(t, clientTransport)
+
+	_, err := client.ReadAppResource(testContext(t), "ui://panel/view")
+	if !errors.Is(err, ErrNotAppResource) {
+		t.Fatalf("ReadAppResource error = %v, want ErrNotAppResource", err)
+	}
+}
+
+func TestValidateAppResourceRejectsEmptyDocument(t *testing.T) {
+	_, err := ValidateAppResource(ReadResourceResult{Contents: []ResourceContents{{
+		URI: "ui://panel/view", MimeType: AppMIMEType,
+	}}})
+	if !errors.Is(err, ErrNotAppResource) || !strings.Contains(err.Error(), "neither text nor blob") {
+		t.Fatalf("empty document error = %v, want ErrNotAppResource naming the missing content", err)
+	}
+}
+
+func TestValidateAppResourceRejectsTextAndBlobTogether(t *testing.T) {
+	_, err := ValidateAppResource(ReadResourceResult{Contents: []ResourceContents{{
+		URI: "ui://panel/view", MimeType: AppMIMEType, Text: "<html></html>", Blob: "aGk=",
+	}}})
+	if !errors.Is(err, ErrNotAppResource) || !strings.Contains(err.Error(), "both text and blob") {
+		t.Fatalf("both-content error = %v, want ErrNotAppResource", err)
+	}
+}
