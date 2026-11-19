@@ -1,0 +1,12 @@
+# blob-lifecycle 合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `61fd0d9`（cherry-pick `98150e5`，与 aclean/jobcap 自动合并）。
+
+- `go build ./...`：exit 0（`cmd/keel/serve.go`、`internal/kernel/kernel.go` 自动合并后双入口接线完整：
+  `WithBlobRefs`、Sweeper/Thumbnailer 启动、`ValidateSelection`、bash 身份盖章均在位）
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- lane 自身证据：`openspec/changes/keel-ga/evidence/blob-lifecycle/`（build/vet/race/full/openspec/E2E/residue）
+- 独立复核：功能+安全双轴由独立 reviewer 在冻结 `98150e5` 上进行（报告归档后补记）
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
