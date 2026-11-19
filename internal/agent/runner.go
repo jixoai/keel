@@ -104,6 +104,12 @@ type Runner struct {
 	// Empty with a non-nil Images is refused per image, not per run: the
 	// transcript still reaches the model.
 	ImageWorkspace string
+	// SessionContexts, when set, supplies extra context blocks for this attempt
+	// (the MCP app context written by ui/update-model-context). They are merged
+	// into the attempt's last user message, in memory only: nothing is committed
+	// to the ledger (an app context is not a session fact; spec「账本零新增
+	// kind」). Nil keeps the pre-P5 prompt byte-identical.
+	SessionContexts func(ctx context.Context, scope kernel.Scope) []agentcore.Content
 }
 
 // registry returns the tool registry for this run, preferring the host.
@@ -521,6 +527,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		// alone.
 		return lease.ReadWatermark > 0 && seq > lease.ReadWatermark
 	})
+
+	// Session context (MCP app context) is merged into the attempt's last user
+	// message, in memory only. It is context for this attempt, not a committed
+	// fact: no event kind is added and a later attempt re-reads the store.
+	if r.SessionContexts != nil {
+		msgs = prependSessionContext(msgs, r.SessionContexts(ctx, lease.Scope))
+	}
 
 	// The inputs this attempt actually presents to the model. The assistant
 	// message records them (payload.inputSeqs) so "unanswered input" is a fact
@@ -1097,6 +1110,39 @@ func presentUnreadInputLast(msgs agentcore.MessageList, seqs []int64, unread fun
 		return msgs
 	}
 	return append(kept, moved...)
+}
+
+// prependSessionContext merges this attempt's extra context blocks into the last
+// user message's content, in memory. The message is copied, never mutated, so
+// the transcript value read from the log stays untouched. A transcript with no
+// user message gets one trailing synthetic message: losing the context would be
+// worse than an extra turn of context.
+func prependSessionContext(msgs agentcore.MessageList, contents []agentcore.Content) agentcore.MessageList {
+	if len(contents) == 0 {
+		return msgs
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role() != agentcore.RoleUser {
+			continue
+		}
+		user, ok := msgs[i].(agentcore.UserMessage)
+		if !ok {
+			return msgs
+		}
+		merged := make(agentcore.ContentList, 0, len(contents)+len(user.Content))
+		merged = append(merged, contents...)
+		merged = append(merged, user.Content...)
+		user.Content = merged
+		out := append(agentcore.MessageList(nil), msgs...)
+		out[i] = user
+		return out
+	}
+	contextOnly := agentcore.UserMessage{
+		RoleField: agentcore.RoleUser,
+		Content:   append(agentcore.ContentList(nil), contents...),
+		Timestamp: time.Now().UnixMilli(),
+	}
+	return append(msgs, contextOnly)
 }
 
 // loadEvents reads the whole committed log, page by page. The kernel read seam

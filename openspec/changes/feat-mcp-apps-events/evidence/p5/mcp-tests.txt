@@ -1,0 +1,51 @@
+=== RUN   TestResultTypeThreeStates
+=== RUN   TestResultTypeThreeStates/missing_resultType_is_complete
+=== RUN   TestResultTypeThreeStates/explicit_complete
+=== RUN   TestResultTypeThreeStates/input_required_parses_requests_and_state
+=== RUN   TestResultTypeThreeStates/unknown_resultType_is_a_protocol_error
+=== RUN   TestResultTypeThreeStates/input_required_without_requests_or_state_is_invalid
+=== RUN   TestResultTypeThreeStates/input_required_with_only_an_empty_requestState_is_valid
+--- PASS: TestResultTypeThreeStates (0.00s)
+    --- PASS: TestResultTypeThreeStates/missing_resultType_is_complete (0.00s)
+    --- PASS: TestResultTypeThreeStates/explicit_complete (0.00s)
+    --- PASS: TestResultTypeThreeStates/input_required_parses_requests_and_state (0.00s)
+    --- PASS: TestResultTypeThreeStates/unknown_resultType_is_a_protocol_error (0.00s)
+    --- PASS: TestResultTypeThreeStates/input_required_without_requests_or_state_is_invalid (0.00s)
+    --- PASS: TestResultTypeThreeStates/input_required_with_only_an_empty_requestState_is_valid (0.00s)
+=== RUN   TestMRTRRoundTripEchoesStateAndUsesNewIDs
+--- PASS: TestMRTRRoundTripEchoesStateAndUsesNewIDs (0.00s)
+=== RUN   TestMRTRRoundBudget
+--- PASS: TestMRTRRoundBudget (0.00s)
+=== RUN   TestMRTRWithoutExecutorFailsClosed
+--- PASS: TestMRTRWithoutExecutorFailsClosed (0.00s)
+=== RUN   TestMRTRExecutorMustAnswerEveryKey
+--- PASS: TestMRTRExecutorMustAnswerEveryKey (0.00s)
+=== RUN   TestLegacyServerRequestUsesExecutingCallScope
+--- PASS: TestLegacyServerRequestUsesExecutingCallScope (0.01s)
+=== RUN   TestLegacyServerRequestOutsideCallIsRefused
+--- PASS: TestLegacyServerRequestOutsideCallIsRefused (0.01s)
+=== RUN   TestUntaggedRequestDomainFramesSurviveAnOpenListenStream
+--- PASS: TestUntaggedRequestDomainFramesSurviveAnOpenListenStream (0.02s)
+=== RUN   TestClientModernEraSkipsInitialize
+--- PASS: TestClientModernEraSkipsInitialize (0.00s)
+=== RUN   TestClientAutoProbeFallsBackToLegacy
+--- PASS: TestClientAutoProbeFallsBackToLegacy (0.00s)
+=== RUN   TestClientAutoProbeSelectsModern
+--- PASS: TestClientAutoProbeSelectsModern (0.00s)
+=== RUN   TestEraParsingAndInvalidEnvironmentFailsClosed
+--- PASS: TestEraParsingAndInvalidEnvironmentFailsClosed (0.00s)
+=== RUN   TestModernCallToolMetaMergesProgressToken
+--- PASS: TestModernCallToolMetaMergesProgressToken (0.00s)
+=== RUN   TestManagerCapabilitiesFollowTheExecutor
+2026/11/20 07:56:21 INFO mcp server connected server=caps tools=0 era=legacy protocolVersion=2025-11-25 source=""
+2026/11/20 07:56:21 INFO mcp server connected server=caps tools=0 era=legacy protocolVersion=2025-11-25 source=""
+--- PASS: TestManagerCapabilitiesFollowTheExecutor (0.00s)
+=== RUN   TestHTTPModernHeadersAndNoSession
+--- PASS: TestHTTPModernHeadersAndNoSession (0.00s)
+=== RUN   TestHTTPMcpNameEncodesNonASCII
+--- PASS: TestHTTPMcpNameEncodesNonASCII (0.00s)
+=== RUN   TestHTTPLegacyKeepsSessionAndGetBehaviour
+--- PASS: TestHTTPLegacyKeepsSessionAndGetBehaviour (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcp	0.161s
+EXIT:0

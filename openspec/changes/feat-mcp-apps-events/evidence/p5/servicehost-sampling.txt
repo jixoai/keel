@@ -1,0 +1,9 @@
+=== RUN   TestRuntimeSamplerUsesTheRuntimeStream
+--- PASS: TestRuntimeSamplerUsesTheRuntimeStream (0.00s)
+=== RUN   TestSamplingStopReasonMapping
+--- PASS: TestSamplingStopReasonMapping (0.00s)
+=== RUN   TestRuntimeSamplerWithoutAModelFailsClosed
+--- PASS: TestRuntimeSamplerWithoutAModelFailsClosed (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/servicehost	0.208s
+EXIT:0

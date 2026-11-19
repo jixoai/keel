@@ -574,6 +574,25 @@ CREATE TABLE IF NOT EXISTS mcp_app_audit (
 CREATE INDEX IF NOT EXISTS mcp_app_audit_tenant ON mcp_app_audit (tenant_id, audit_id);
 CREATE INDEX IF NOT EXISTS mcp_app_audit_app ON mcp_app_audit (app_id, audit_id);
 
+-- MCP app model context (change feat-mcp-apps-events, P5.5). One overwrite-only
+-- row per (tenant, session, app): ui/update-model-context replaces the previous
+-- value, and the next attempt merges it into the prompt as <mcp_app_context>.
+-- Deliberately NOT an event: app context is not a session fact, it has no
+-- replay semantics and no run may depend on a historical version (design §3.6.3,
+-- §7-R5 explicitly rejects the ledger approach).
+CREATE TABLE IF NOT EXISTS mcp_app_contexts (
+    tenant_id  uuid NOT NULL,
+    session_id uuid NOT NULL,
+    app_id     text NOT NULL,
+    content    jsonb,
+    structured jsonb,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, app_id)
+);
+
+CREATE INDEX IF NOT EXISTS mcp_app_contexts_session
+    ON mcp_app_contexts (tenant_id, session_id, updated_at);
+
 -- Agent registry (change keel-agent-team-v1, P2). One row per agent per tenant.
 -- The configuration is a single JSON document — the same "everything is a file"
 -- unit the CLI edits and a session freezes — because the agent schema is owned

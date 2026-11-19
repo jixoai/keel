@@ -1,0 +1,9 @@
+$ pgrep -fl "keel serve|keel-agent|agent-runtime-e2e"
+(none)
+$ docker ps --format "{{.Names}} {{.Image}}"
+keel-pg postgres:18
+
+# Notes
+- No keel serve / keel-agent / agent-runtime-e2e process remains after the final E2E.
+- Dedicated test DB keel_test_mcp_p5 remains on purpose (the env file names it for reruns); the E2E script dropped its own keel_agent_runtime_e2e_* database.
+- Other 136xx/137xx listeners on the host belong to other lanes/sessions; this worktree started none of them and did not reap them.

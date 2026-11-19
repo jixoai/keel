@@ -87,9 +87,26 @@ type ConnectOptions struct {
 	// Notifications, when set, receives every server notification (P4). Nil
 	// keeps the pre-P4 behaviour: notifications are dropped.
 	Notifications NotificationHandler
-	// ServerRequests, when set, answers server-initiated requests (legacy era,
-	// P4/P5). Nil answers -32601.
+	// ServerRequests, when set, answers server-initiated requests (legacy era)
+	// that arrive outside an executing tool call. Nil answers -32601.
 	ServerRequests ServerRequestHandler
+	// InputRequests, when set, executes MRTR input requests and legacy
+	// server-initiated requests during a tool call (P5). Nil leaves
+	// input_required results failing closed and server requests answering -32601.
+	InputRequests ServerInputRequestHandler
+	// Capabilities are the ClientCapabilities sent in initialize. Declare only
+	// what the executor can actually answer: Manager removes sampling/elicitation
+	// when InputRequests is nil.
+	Capabilities ClientCapabilities
+	// Era is the configured dialect (KEEL_MCP_PROTOCOL_ERA). Empty uses the
+	// deployment default (auto when the variable is unset; an invalid value fails
+	// closed to legacy).
+	Era ProtocolEra
+	// MRTRDiagnostics observes MRTR protocol outcomes (budget, missing executor)
+	// with the server name. Nil keeps the structured log only.
+	MRTRDiagnostics func(server, kind, detail string)
+	// OnMRTRDone reports a finished MRTR exchange's round count (metric seam).
+	OnMRTRDone func(server string, rounds int)
 	// StreamReconnect, when set, reports that a legacy GET stream was
 	// re-established after a drop. The host recomputes the whole catalogue: the
 	// stream has no replay, so changes during the gap are only recoverable that
@@ -101,6 +118,11 @@ type ConnectOptions struct {
 	// handshake).
 	ServerReconnected func(server string)
 }
+
+// ServerInputRequestHandler executes one MRTR round for a named server. The
+// manager binds the server name; the client hands it the attempt context (the
+// tenant/session scope is on it) and per-call state.
+type ServerInputRequestHandler func(ctx context.Context, server string, request InputRequiredResult, state *InputRequestState) (map[string]json.RawMessage, error)
 
 // Server is one connected (or failed) MCP server.
 type Server struct {
@@ -133,6 +155,19 @@ type Server struct {
 
 // Name is the configured server name.
 func (s *Server) Name() string { return s.Entry.Name }
+
+// Era is the negotiated dialect of a connected server (the configured one
+// before/without a connection). /v1/mcp/servers reports it so an operator can
+// tell which generation the peer speaks.
+func (s *Server) Era() ProtocolEra {
+	if s == nil {
+		return EraLegacy
+	}
+	if s.Client != nil {
+		return s.Client.Era()
+	}
+	return EraOfProtocolVersion("")
+}
 
 // AppReady reports whether the host may act on an app of this server. The host
 // registry owns the answer: an app whose document failed to fetch or validate
@@ -268,12 +303,38 @@ func connectOne(ctx context.Context, entry ServerEntry, options ConnectOptions) 
 	if seconds, ok := entry.Config["timeout"].(float64); ok && seconds > 0 {
 		timeout = time.Duration(seconds * float64(time.Second))
 	}
+	era := options.Era
+	if era == "" {
+		era = EraFromEnvironment(os.Getenv)
+	}
+	capabilities := options.Capabilities
+	if options.InputRequests == nil {
+		// Never declare a capability this host cannot answer: a server that sees
+		// sampling/elicitation would be entitled to send requests we would have
+		// to refuse with -32601 (spec「legacy 主动请求与能力声明一致」).
+		capabilities.Sampling = nil
+		capabilities.Elicitation = nil
+		capabilities.Roots = nil
+	}
 	client := NewClient(ClientOptions{
 		Name:           options.ClientName,
 		Version:        options.ClientVersion,
 		RequestTimeout: timeout,
+		Era:            era,
+		Capabilities:   capabilities,
 		Notifications:  clientNotifications(entry.Name, options.Notifications),
 		ServerRequests: clientServerRequests(entry.Name, options.ServerRequests),
+		InputRequests:  clientInputRequests(entry.Name, options.InputRequests),
+		OnMRTRDiagnostic: func(kind, detail string) {
+			if options.MRTRDiagnostics != nil {
+				options.MRTRDiagnostics(entry.Name, kind, detail)
+			}
+		},
+		OnMRTRDone: func(rounds int) {
+			if options.OnMRTRDone != nil {
+				options.OnMRTRDone(entry.Name, rounds)
+			}
+		},
 	})
 	if _, err := client.Connect(ctx, transport); err != nil {
 		_ = client.Close()
@@ -296,8 +357,19 @@ func connectOne(ctx context.Context, entry ServerEntry, options ConnectOptions) 
 			options.Logger.Warn("mcp tool metadata", "server", entry.Name, "diagnostic", message)
 		}
 	}
-	options.Logger.Info("mcp server connected", "server", entry.Name, "tools", len(tools), "source", entry.Source)
+	options.Logger.Info("mcp server connected", "server", entry.Name, "tools", len(tools),
+		"era", client.Era(), "protocolVersion", client.ProtocolVersion(), "source", entry.Source)
 	return server
+}
+
+// clientInputRequests binds the configured server name to the MRTR executor.
+func clientInputRequests(server string, handler ServerInputRequestHandler) ClientInputRequestHandler {
+	if handler == nil {
+		return nil
+	}
+	return func(ctx context.Context, request InputRequiredResult, state *InputRequestState) (map[string]json.RawMessage, error) {
+		return handler(ctx, server, request, state)
+	}
 }
 
 // clientNotifications adapts the host-facing handler to the client's callback:

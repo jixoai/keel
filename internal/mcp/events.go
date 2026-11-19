@@ -71,6 +71,11 @@ type CallOptions struct {
 	// tools/list_changed republish never removes a tool from under a running
 	// attempt. Empty means the live catalogue.
 	AttemptID string
+	// InputRequests overrides the connection-wide MRTR executor for this call.
+	// Nil falls back to ClientOptions.InputRequests.
+	InputRequests ClientInputRequestHandler
+	// MRTRMaxRounds bounds the input_required rounds of this call (default 5).
+	MRTRMaxRounds int
 }
 
 // ListenFilter is the `params.notifications` object of subscriptions/listen:

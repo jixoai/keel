@@ -15,6 +15,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -274,18 +275,21 @@ type HTTPTransport struct {
 	client   *http.Client
 	maxBytes int
 
-	mu               sync.Mutex
-	started          bool
-	closed           bool
-	terminal         error
-	queue            []Message
-	wake             chan struct{}
-	closedCh         chan struct{}
-	closeOnce        sync.Once
-	baseCtx          context.Context
-	cancel           context.CancelFunc
-	sessionID        string
-	protocolVersion  string
+	mu              sync.Mutex
+	started         bool
+	closed          bool
+	terminal        error
+	queue           []Message
+	wake            chan struct{}
+	closedCh        chan struct{}
+	closeOnce       sync.Once
+	baseCtx         context.Context
+	cancel          context.CancelFunc
+	sessionID       string
+	protocolVersion string
+	// era gates the 2026-07-28 wire shape: no session header, no GET stream, no
+	// Last-Event-ID resume, no DELETE, plus Mcp-Method/Mcp-Name.
+	era              ProtocolEra
 	lastToken        string
 	getStreamStarted bool
 	receiveErr       error
@@ -337,6 +341,24 @@ func (t *HTTPTransport) SetProtocolVersion(version string) {
 	t.mu.Unlock()
 }
 
+// SetProtocolEra switches the transport between the legacy and modern wire
+// shapes. It is called by the client before the handshake and never changes
+// after Connect (except during auto detection).
+func (t *HTTPTransport) SetProtocolEra(era ProtocolEra) {
+	t.mu.Lock()
+	t.era = era
+	if era == EraModern && t.protocolVersion == "" {
+		t.protocolVersion = ModernProtocolVersion
+	}
+	t.mu.Unlock()
+}
+
+func (t *HTTPTransport) isModern() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.era == EraModern
+}
+
 // SessionID is the Mcp-Session-Id the server assigned, if any.
 func (t *HTTPTransport) SessionID() string {
 	t.mu.Lock()
@@ -362,19 +384,37 @@ func (t *HTTPTransport) Send(ctx context.Context, message Message) error {
 		"accept":       "application/json, text/event-stream",
 		"content-type": "application/json",
 	}
+	if t.isModern() {
+		// The 2026-07-28 transport binds the POST to its method/name and requires
+		// the protocol version header on every request. The header value comes
+		// from the same field the client's `_meta` is built from, so the two can
+		// never disagree.
+		if request, ok := message.(*Request); ok {
+			headers["mcp-method"] = request.Method
+			if name := mcpNameFor(request.Method, request.Params); name != "" {
+				headers["mcp-name"] = encodeMCPName(name)
+			}
+		} else if notification, ok := message.(*Notification); ok {
+			headers["mcp-method"] = notification.Method
+		}
+	}
 	response, err := t.authorizedFetch(baseCtx, ctx, http.MethodPost, headers, body)
 	if err != nil {
 		return err
 	}
 	t.mu.Lock()
-	if sid := response.Header.Get("mcp-session-id"); sid != "" {
-		t.sessionID = sid
+	if t.era != EraModern {
+		if sid := response.Header.Get("mcp-session-id"); sid != "" {
+			t.sessionID = sid
+		}
 	}
 	protocol := t.protocolVersion
 	t.mu.Unlock()
-	if protocol != "" {
+	if protocol != "" && !t.isModern() {
 		// Nothing to do: buildHeaders already read the current version for the
 		// next request. The server may have set one on this response; capture it.
+		// Modern keeps its negotiated version: a response header must not change
+		// the version the next body's `_meta` carries.
 		if version := response.Header.Get("mcp-protocol-version"); version != "" {
 			t.SetProtocolVersion(version)
 		}
@@ -483,6 +523,11 @@ func (t *HTTPTransport) Close() error {
 	token := t.lastToken
 	sessionID := t.sessionID
 	started := t.started
+	modern := t.era == EraModern
+	if modern {
+		// No protocol session exists, so there is nothing to DELETE.
+		sessionID = ""
+	}
 	if t.cancel != nil {
 		t.cancel()
 	}
@@ -618,17 +663,72 @@ func (t *HTTPTransport) applyHeaders(req *http.Request, extra map[string]string,
 		req.Header.Set(name, value)
 	}
 	t.mu.Lock()
-	sessionID, protocol := t.sessionID, t.protocolVersion
+	sessionID, protocol, modern := t.sessionID, t.protocolVersion, t.era == EraModern
 	t.mu.Unlock()
+	if modern {
+		// 2026-07-28 has no protocol session: the header is never sent, even if a
+		// misbehaving server once set one.
+		sessionID = ""
+	}
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
 	if protocol != "" {
 		req.Header.Set("MCP-Protocol-Version", protocol)
+	} else if modern {
+		req.Header.Set("MCP-Protocol-Version", ModernProtocolVersion)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+}
+
+// mcpNameFor returns the Mcp-Name source value of a request: params.name for
+// tools/call and prompts/get, params.uri for resources/read. Other methods
+// carry no name header (the 2026-07-28 table defines exactly these three).
+func mcpNameFor(method string, params json.RawMessage) string {
+	var source string
+	switch method {
+	case "tools/call", "prompts/get":
+		source = "name"
+	case "resources/read":
+		source = "uri"
+	default:
+		return ""
+	}
+	if len(params) == 0 {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(params, &fields) != nil {
+		return ""
+	}
+	var value string
+	if json.Unmarshal(fields[source], &value) != nil {
+		return ""
+	}
+	return value
+}
+
+// encodeMCPName renders a value as an HTTP-header-safe Mcp-Name. A value that is
+// not printable ASCII, or that already looks like the base64 sentinel, is
+// carried as =?base64?<base64>?= (case-sensitive).
+func encodeMCPName(value string) string {
+	safe := value != ""
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if b < 0x21 || b > 0x7e {
+			safe = false
+			break
+		}
+	}
+	if strings.HasPrefix(value, "=?base64?") && strings.HasSuffix(value, "?=") {
+		safe = false
+	}
+	if safe {
+		return value
+	}
+	return "=?base64?" + base64.StdEncoding.EncodeToString([]byte(value)) + "?="
 }
 
 func (t *HTTPTransport) responseError(response *http.Response, body string) error {
@@ -693,6 +793,11 @@ func (t *HTTPTransport) consumeResponseStream(body io.Reader, requestID ID, maxB
 		if failure != nil && !isRetryable(failure) {
 			break
 		}
+		if t.isModern() {
+			// 2026-07-28 removed SSE resumability and Last-Event-ID: a dropped
+			// stream loses the request, and the caller must retry under a new id.
+			break
+		}
 		if cursor.lastEventID == "" || attempt >= t.maxRetries() {
 			break
 		}
@@ -740,7 +845,9 @@ type streamCursor struct {
 
 func (t *HTTPTransport) startGetStream() {
 	t.mu.Lock()
-	if t.options.DisableGetStream || t.getStreamStarted || t.closed {
+	if t.options.DisableGetStream || t.getStreamStarted || t.closed || t.era == EraModern {
+		// 2026-07-28 has no server-to-client GET stream: subscriptions/listen
+		// replaces it, so starting one would be a legacy-only artifact.
 		t.mu.Unlock()
 		return
 	}

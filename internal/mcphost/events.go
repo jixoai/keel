@@ -100,6 +100,9 @@ type EventsOptions struct {
 	Now func() time.Time
 	// ListenOptions is passed to every subscriptions/listen.
 	ListenOptions mcp.ListenOptions
+	// MRTR, when set, executes legacy server-initiated requests. Nil keeps the
+	// fail-closed -32601 answer.
+	MRTR *MRTR
 }
 
 // shortListenStream is the threshold below which an acknowledged listen stream
@@ -221,13 +224,18 @@ func (e *Events) Notification(ctx context.Context, server, method string, params
 	}
 }
 
-// ServerRequest answers a legacy server-initiated request. P4 wires the seam but
-// implements no handler: MRTR execution (sampling/elicitation/roots) is P5, and
-// an unimplemented request must fail closed with -32601 rather than be silently
-// dropped (spec「legacy 主动请求与能力声明一致」).
-func (e *Events) ServerRequest(_ context.Context, server string, request *mcp.Request) (mcp.Message, error) {
+// ServerRequest answers a legacy server-initiated request through the shared
+// MRTR executor (the same elicitation/sampling/roots rules as modern input
+// requests). The client only routes a request here when no tool call is
+// executing (or when several are, which makes the session ambiguous), so a
+// refusal is the honest answer; an unattended server request must never be
+// silently dropped (spec「legacy 主动请求与能力声明一致」).
+func (e *Events) ServerRequest(ctx context.Context, server string, request *mcp.Request) (mcp.Message, error) {
+	if e != nil && e.options.MRTR != nil {
+		return e.options.MRTR.HandleLegacyServerRequest(ctx, server, request)
+	}
 	if e != nil {
-		e.logger.Warn("mcp server request refused: not implemented",
+		e.logger.Warn("mcp server request refused: no MRTR executor",
 			"server", server, "method", bounded(request.Method, 128))
 	}
 	return nil, fmt.Errorf("mcp: server request %q is not implemented", request.Method)

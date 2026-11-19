@@ -202,6 +202,10 @@ type Config struct {
 	// working with a structured-log warning; the audit read route answers 503.
 	// Refusal audits are best-effort either way.
 	MCPAppAudit MCPAppAuditStore
+	// MCPAppContexts persists ui/update-model-context values (P5.5). Nil answers
+	// -32601 on the context route and reports mcp.apps.context=false: a
+	// deployment without the store must not pretend the context was recorded.
+	MCPAppContexts MCPAppContextStore
 	// MCPAppInputCommit writes a confirmed ui/message as a normal user.message
 	// through the runtime's shared input path (delivery=queue). Nil answers 501
 	// on ui/message: a deployment without the write path must not pretend the
@@ -428,6 +432,10 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// degraded experience, just the single-origin one.
 		"mcp.apps":               s.cfg.MCPApps != nil,
 		"mcp.apps.sandboxOrigin": s.cfg.MCPApps != nil && s.cfg.MCPAppsSandboxOrigin != "",
+		// mcp.apps.context is true only when ui/update-model-context is actually
+		// persisted: the View must keep hostCapabilities.updateModelContext off
+		// when this is false (spec「未接线能力不假装」).
+		"mcp.apps.context": s.cfg.MCPApps != nil && s.cfg.MCPAppContexts != nil,
 		// MCP events (P4): subscriptions/listen and notification routing. False
 		// until the dispatcher is wired; clients then keep the legacy behavior.
 		"mcp.events": s.cfg.MCPEvents,

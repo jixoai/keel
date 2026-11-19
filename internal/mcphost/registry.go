@@ -564,9 +564,14 @@ func (r *Registry) buildSurface(fleet Fleet, servers []*mcp.Server, specs []AppS
 		}
 		if server.Client != nil {
 			state.ProtocolVersion = server.Client.ProtocolVersion()
-			state.Era = eraOf(state.ProtocolVersion)
+			state.Era = string(server.Client.Era())
 			if capabilities, err := json.Marshal(server.Client.ServerCapabilities()); err == nil {
-				state.Capabilities = capabilities
+				if len(capabilities) > ServerStateCapabilitiesMaxBytes {
+					state.CapabilitiesTruncated = true
+					state.Capabilities = json.RawMessage(`{"truncated":true}`)
+				} else {
+					state.Capabilities = capabilities
+				}
 			}
 		} else {
 			state.Era = eraOf("")

@@ -25,12 +25,16 @@ const LatestProtocolVersion = "2025-11-25"
 
 // SupportedProtocolVersions are the revisions a server may select. Servers that
 // do not know the requested one answer with their own latest, so older versions
-// stay accepted for servers built on older SDKs (types.ts:5-9).
+// stay accepted for servers built on older SDKs (types.ts:5-9). The modern
+// 2026-07-28 revision is selected by a modern server's `server/discover`, never
+// requested through initialize, but a server that answers initialize with it is
+// still accepted (the era then follows the negotiated version).
 var SupportedProtocolVersions = []string{
 	LatestProtocolVersion,
 	"2025-06-18",
 	"2025-03-26",
 	"2024-11-05",
+	ModernProtocolVersion,
 }
 
 // JSON-RPC error codes (jsonrpc.ts:37-43).
@@ -345,6 +349,43 @@ type ClientCapabilities struct {
 	Elicitation  map[string]json.RawMessage `json:"elicitation,omitempty"`
 }
 
+// MarshalJSON keeps the "declared with no options" shape: an empty but non-nil
+// Sampling/Elicitation map marshals as `{}`, which is how a capability is
+// announced. Plain omitempty would drop it (len 0), turning a deliberate
+// declaration into silence.
+func (c ClientCapabilities) MarshalJSON() ([]byte, error) {
+	fields := map[string]json.RawMessage{}
+	if c.Experimental != nil {
+		encoded, err := json.Marshal(c.Experimental)
+		if err != nil {
+			return nil, err
+		}
+		fields["experimental"] = encoded
+	}
+	if c.Roots != nil {
+		encoded, err := json.Marshal(c.Roots)
+		if err != nil {
+			return nil, err
+		}
+		fields["roots"] = encoded
+	}
+	if c.Sampling != nil {
+		encoded, err := json.Marshal(c.Sampling)
+		if err != nil {
+			return nil, err
+		}
+		fields["sampling"] = encoded
+	}
+	if c.Elicitation != nil {
+		encoded, err := json.Marshal(c.Elicitation)
+		if err != nil {
+			return nil, err
+		}
+		fields["elicitation"] = encoded
+	}
+	return json.Marshal(fields)
+}
+
 // ListChangedCapability is the shape of a capability with only listChanged.
 type ListChangedCapability struct {
 	ListChanged bool `json:"listChanged,omitempty"`
@@ -356,8 +397,10 @@ type ResourcesCapability struct {
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
-// ServerCapabilities is the capabilities object of an initialize result
-// (types.ts:30-37). Unknown fields are ignored.
+// ServerCapabilities is the capabilities object of an initialize (or
+// server/discover) result (types.ts:30-37). Unknown fields are ignored.
+// Extensions is the 2026-07-28 addition; it is reported verbatim so
+// /v1/mcp/servers can show what the server speaks.
 type ServerCapabilities struct {
 	Experimental map[string]json.RawMessage `json:"experimental,omitempty"`
 	Logging      map[string]json.RawMessage `json:"logging,omitempty"`
@@ -365,6 +408,7 @@ type ServerCapabilities struct {
 	Resources    *ResourcesCapability       `json:"resources,omitempty"`
 	Tools        *ListChangedCapability     `json:"tools,omitempty"`
 	Completions  map[string]json.RawMessage `json:"completions,omitempty"`
+	Extensions   map[string]json.RawMessage `json:"extensions,omitempty"`
 }
 
 // Root is an entry of a roots/list result.
@@ -373,7 +417,9 @@ type Root struct {
 	Name string `json:"name,omitempty"`
 }
 
-// InitializeResult is a validated initialize result (types.ts:45-50).
+// InitializeResult is a validated initialize result (types.ts:45-50). A
+// modern `server/discover` result has the same required members and is decoded
+// into this shape.
 type InitializeResult struct {
 	ProtocolVersion string             `json:"protocolVersion"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
@@ -559,8 +605,14 @@ type GetPromptResult struct {
 	Meta        json.RawMessage `json:"_meta,omitempty"`
 }
 
-// isSupportedProtocolVersion reports whether a server may select version.
+// isSupportedProtocolVersion reports whether a server may select version. A
+// modern revision newer than the one this build knows is accepted: version
+// rejection with a `supported` list already told the client what to use, and
+// refusing it after a successful discovery would undo the compatibility path.
 func isSupportedProtocolVersion(version string) bool {
+	if IsModernProtocolVersion(version) {
+		return true
+	}
 	for _, supported := range SupportedProtocolVersions {
 		if version == supported {
 			return true

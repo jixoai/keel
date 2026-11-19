@@ -1,0 +1,47 @@
+=== RUN   TestRenderAppContextsEmptyIsNil
+--- PASS: TestRenderAppContextsEmptyIsNil (0.00s)
+=== RUN   TestRenderAppContextsIncludesTextAndStructured
+--- PASS: TestRenderAppContextsIncludesTextAndStructured (0.00s)
+=== RUN   TestRenderAppContextsBoundsThePrompt
+--- PASS: TestRenderAppContextsBoundsThePrompt (0.00s)
+=== RUN   TestMRTRElicitationProjectsSchemaOntoDecision
+2026/11/20 07:56:24 INFO mcp mrtr server=fixture action=mrtr.elicitation result=ok detail="mode=form fields=1"
+--- PASS: TestMRTRElicitationProjectsSchemaOntoDecision (0.00s)
+=== RUN   TestMRTRElicitationURLModeNeverOpensTheLink
+2026/11/20 07:56:24 INFO mcp mrtr server=fixture action=mrtr.elicitation result=ok detail="mode=url fields=0"
+--- PASS: TestMRTRElicitationURLModeNeverOpensTheLink (0.00s)
+=== RUN   TestMRTRElicitationWithoutScopeIsRefused
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.elicitation result=refused detail="no session scope"
+--- PASS: TestMRTRElicitationWithoutScopeIsRefused (0.00s)
+=== RUN   TestMRTRSamplingBudgetMaxTokensAndSessionGate
+2026/11/20 07:56:24 INFO mcp mrtr server=fixture action=mrtr.sampling result=ok detail="messages=1 maxTokens=4096"
+2026/11/20 07:56:24 INFO mcp mrtr server=fixture action=mrtr.sampling result=ok detail="messages=1 maxTokens=4096"
+2026/11/20 07:56:24 INFO mcp mrtr server=fixture action=mrtr.sampling result=ok detail="messages=1 maxTokens=4096"
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.sampling result=refused detail="per-call budget exhausted"
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.sampling result=refused detail="no session scope"
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.sampling result=refused detail="sampling is disabled"
+--- PASS: TestMRTRSamplingBudgetMaxTokensAndSessionGate (0.00s)
+=== RUN   TestMRTRRootsAndUnknownMethodsAreRefusedAndAudited
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.roots result=refused detail="roots/list is not supported"
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.method result=refused detail="unknown input method: custom/unknown"
+--- PASS: TestMRTRRootsAndUnknownMethodsAreRefusedAndAudited (0.00s)
+=== RUN   TestMRTRSamplingFailureIsReportedNotFabricated
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.sampling result=error detail="model call failed"
+--- PASS: TestMRTRSamplingFailureIsReportedNotFabricated (0.00s)
+=== RUN   TestMRTRLegacyServerRequestUsesTheSameExecutor
+2026/11/20 07:56:24 INFO mcp mrtr server=fixture action=mrtr.sampling result=ok detail="messages=1 maxTokens=64"
+2026/11/20 07:56:24 WARN mcp mrtr server=fixture action=mrtr.roots result=refused detail="roots/list is not supported"
+--- PASS: TestMRTRLegacyServerRequestUsesTheSameExecutor (0.00s)
+=== RUN   TestMRTRClientCapabilitiesMatchTheConfiguration
+--- PASS: TestMRTRClientCapabilitiesMatchTheConfiguration (0.00s)
+=== RUN   TestSamplingModeFromEnvironment
+--- PASS: TestSamplingModeFromEnvironment (0.00s)
+=== RUN   TestServerStateReportsEraVersionAndCapabilities
+--- PASS: TestServerStateReportsEraVersionAndCapabilities (0.00s)
+=== RUN   TestServerStateBoundsCapabilities
+--- PASS: TestServerStateBoundsCapabilities (0.00s)
+=== RUN   TestServerStateDisconnectedServerIsLegacy
+--- PASS: TestServerStateDisconnectedServerIsLegacy (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcphost	0.177s
+EXIT:0

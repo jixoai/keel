@@ -1,0 +1,136 @@
+# P5 evidence — MRTR / era / app context
+
+日期：2026-11-20
+分支：`task/keel-mcp-p5`（worktree `.worktrees/keel-task-mcp-p5`，基线 `cca9e52`）
+范围：P5.1–P5.6；不含 P6 浏览器 E2E/崩溃矩阵/验收报告，不含 P3.5/P3.6 前端 lane。
+
+## 交付摘要
+
+### P5.1 resultType 三态（`internal/mcp/input_required.go`）
+
+- 缺省 `resultType` → `complete`；`"complete"` → complete；`"input_required"` →
+  解析 `inputRequests`（map key → `{method, params}`）与 `requestState`（原始字节）。
+- 未知值 → `-32600` 协议错误（调用以失败结束）；`inputRequests`/`requestState`
+  同时缺失 → 同样拒绝。
+- `inputResponses` 按 2026-07-28 schema 只承载结果对象（ElicitResult /
+  CreateMessageResult / ListRootsResult），没有 per-key error 变体。
+
+### P5.2 MRTR 执行器（`internal/mcphost/mrtr.go` + `internal/mcp/client.go`）
+
+- `tools/call` 收到 `input_required`：逐条执行，组装 `inputResponses`，以**新
+  JSON-RPC id** 重试，`requestState` 逐字节原样回显（硬断言，测试比对原始 JSON）。
+- 轮次预算 5：第 6 次 `input_required` 在执行器调用前失败（`MRTRBudgetExceededError`）。
+- elicitation → `agentext.DecisionBroker`（kind `mcp.elicitation`）：枚举属性→选项，
+  首个非枚举属性→free text，URL 模式把 URL 放在选项描述里且**不自动打开**；
+  用户不答/超时 → `action:"cancel"`。
+- sampling → runtime 的 llm/`ModelService`（`Runtime.MCPSampler`，非新 provider 路径）：
+  `KEEL_MCP_SAMPLING=off|session|on`（默认 session），`maxTokens` 上限 4096，
+  每调用预算 3；只记录客观用量（messages/maxTokens/model），不写价格。
+- roots/list → `-32601` 拒绝并审计；未知 method → `-32601` 拒绝并审计（不静默省略）。
+- 拒绝没有 per-key error 表达：任一请求被拒 → 整轮失败（`-32601`/`-32603`），审计行。
+- `mcp_mrtr_rounds` 由 client 的 `OnMRTRDone` 记录完成轮数（固定基数）。
+
+### P5.3 legacy 主动请求与能力声明
+
+- legacy `sampling/createMessage` / `elicitation/create` / `roots/list`：当且仅当
+  恰好一个工具调用在途时，`Client.answerServerRequest` 把请求交给 MRTR 执行器，
+  使用该调用的 ctx（含 tenant/session scope）与 `InputRequestState`；零个/多个
+  在途调用回落 dispatcher（拒绝，避免猜会话）。
+- `Manager` 在 `InputRequests` 未接线时从 `initialize` 能力里剔除 sampling/elicitation；
+  roots 永不声明。测试断言未接线时服务端收到的 capabilities 不含这两项，接线后含。
+
+### P5.4 era 探测与门控（`internal/mcp/era.go`）
+
+- `KEEL_MCP_PROTOCOL_ERA=auto|legacy|modern`，缺省 auto；非法值 fail closed 到
+  legacy（不崩溃）。`ClientOptions.Era` 零值保持 legacy（PI 兼容），Manager 负责
+  应用部署默认值。
+- auto：先发 modern 形态 `server/discover`；成功 → modern；400 且是
+  `UnsupportedProtocolVersion`（`-32022`，含 `data.supported`）→ 按最高现代版本重试；
+  其余 JSON-RPC 错误 / 可回落 HTTP 状态 / 200 非 discover 结果 → 回落 initialize。
+- modern：不发 `initialize`/`notifications/initialized`、不发/不接收
+  `Mcp-Session-Id`、不发 `Last-Event-ID`、不 GET、不 DELETE；每个请求 body 注入
+  `_meta{protocolVersion, clientCapabilities, clientInfo}`；HTTP 增加
+  `MCP-Protocol-Version`（与 body `_meta` 同源）、`Mcp-Method`、适用的 `Mcp-Name`
+  （非 ASCII / 哨兵形态用 `=?base64?...?=`）；405 GET 属正常；SSE 断流不重连。
+- legacy 分支保持原样（Session、GET 流、Last-Event-ID 恢复），PI 测试未改断言，
+  conformance 1057/0 fail。
+- `ttlMs`/`cacheScope` 解析沿用 P1 实现（`resources_test.go` 已覆盖）。
+
+### P5.5 ui/update-model-context
+
+- 表 `mcp_app_contexts(tenant_id, session_id, app_id, content jsonb, structured jsonb,
+  updated_at)`，主键 `(tenant_id, session_id, app_id)`，加入 `rlsTenantTables`
+  （FORCE RLS + tenant_isolation）。覆盖式 upsert，每个 app 一行。
+- `POST /v1/mcp/apps/{appId}/context`：租户/目录/会话校验收口；每个文档 64 KiB 上限；
+  审计只记字节数，不记正文。未接线 → HTTP 501 + JSON-RPC `-32601`，
+  `/v1/capabilities` 的 `mcp.apps.context=false`。
+- runner seam `Runner.SessionContexts`：每次 attempt 读取（下一 attempt 生效），
+  `<mcp_app_context>` 段在内存内并入最后一条 user 消息；账本零新增 kind
+  （测试断言只有 user+assistant 两个事件且 user payload 原样）。
+- **显式否决“写账本”方案**：代码注释 + 设计 §3.6.3/§7-R5；context 不是会话事实、
+  无 replay 语义，写账本会让每次 UI 更新污染事件流。
+- app 桥的 `tools/call` 若带 sessionId，会注入 `ToolRunScope`，使 MRTR 决策能归属
+  同一会话；无 session 时执行器拒绝需要 scope 的请求（不猜）。
+
+### P5.6 /v1/mcp/servers
+
+- `ServerState.era` 取 client 实际协商的 era（不是从版本字符串二次推导）；
+  `protocolVersion`/`capabilities` 原样投影；capabilities 超过 8 KiB 时替换为
+  `{"truncated":true}` 并置 `capabilitiesTruncated`（有界，不产生非法 JSON）。
+
+### P4 复核协同（按 coordinator 指示）
+
+- `routeToListener`：listen 活跃时，未打标的 `notifications/progress` /
+  `notifications/cancelled` / `notifications/message` 放行到全局路径；仅目录类未打标帧
+  按协议违规诊断。P4 lane 拥有 canonical fix；本分支带最小修复 +
+  回归测试 `TestUntaggedRequestDomainFramesSurviveAnOpenListenStream`（progress 到
+  sink、message 到 dispatcher、cancelled 中止调用）。
+
+## 偏离与已知限制（诚实登记）
+
+1. **sampling 的模型选择**：`Runtime.MCPSampler` 用 `ModelService.Resolve(scope, nil)`
+   解析租户默认 selection；MRTR 上下文只有 tenant/session scope，没有输入级
+   selection fact，因此不读“该会话输入的模型选择”。session 模式通过要求
+   `ToolRunScope` 保证只在会话工具调用内执行；若后续要严格按会话 selection 采样，
+   需要在 tool ctx 上追加 selection 值（独立 change）。
+2. **inputResponses 无 per-key error**：2026-07-28 schema 只允许结果对象；roots/未知
+   method/关闭 sampling 一律令整轮失败并审计，不发送部分 map。
+3. **elicitation schema 投影**：枚举→选项、首个非枚举→free text；boolean-only schema
+   退化为 accept/decline/cancel（不生成 true/false 选项），布尔值由用户以文本/接受表达。
+4. **sampling 能力声明的前置判断**：`serve.go` 在无 models 文档且无 legacy 模型时把
+   mode 降为 off；决策桥在 product layer 装配时注入（首个工具调用之前），因此
+   initialize 声明与运行时能力一致。极窄的 Boot 窗口内若服务端主动发 elicitation，
+   执行器会以 `-32603` 拒绝（不是 `-32601` 假成功）。
+5. **auto 探测的 legacy 兼容**：某些 legacy fake server 对未知方法回 200 + 任意 JSON；
+   探测把“200 但不是 discover 结果”判为 legacy 并回落 initialize（真实 legacy 服务端
+   通常回 `-32601`）。
+6. **未来现代版本**：discover 成功或版本拒绝的 `supported` 列表给出 `>=2026-07-28`
+   的版本时接受（不再被本地白名单拒绝），但不启用未知字段语义。
+7. `mcp_app_contexts` 无 `server` 列（按 design §3.6.3 原样）；appId 已含派生身份。
+8. `ui/update-model-context` 的 HTTP 路由为 `/v1/mcp/apps/{appId}/context`（design
+   §3.6.3），成功返回 JSON-RPC `{}`；WebView 的 `hostCapabilities.updateModelContext`
+   属前端 lane，未在本分支改动。
+
+## 门禁
+
+| 门禁 | 命令 | 结果 | 证据 |
+|---|---|---|---|
+| build | `go build ./...` | EXIT 0 | `go-build.txt` |
+| vet | `go vet ./internal/mcp ./internal/mcphost ./internal/agent ./internal/agentapi ./internal/servicehost ./internal/store` | EXIT 0 | `go-vet.txt` |
+| race | `go test -race` 上述包 | EXIT 0（5/5 ok） | `go-test-race.txt` |
+| 全量 | `KEEL_TEST_DSN=… go test -p 1 ./...` | EXIT 0（55 ok，零 FAIL） | `go-test-all.txt` |
+| openspec | `pnpm exec openspec validate feat-mcp-apps-events --strict` | `Change ... is valid` | `openspec-validate.txt` |
+| conformance | `./scripts/conformance.sh` | 1057 tests / 0 fail / 1 skip（helper process） | `conformance.txt` |
+| runtime E2E | `./scripts/agent-runtime-e2e.sh --evidence …` | PASS | `agent-runtime-e2e.txt` + `agent-runtime-e2e/` |
+| residue | `pgrep` / `lsof` / `docker ps` | 无本 lane 遗留进程/端口；E2E DB 已清理 | `residue.txt` |
+
+聚焦测试：
+- `mcp-tests.txt`（三态、MRTR 轮次/预算/requestState/新 id、legacy 主动请求、
+  untagged listen 回归、era auto/modern/legacy、HTTP 头/Mcp-Name、capabilities 声明）
+- `mcphost-tests.txt`（elicitation 决策投影/URL 模式、sampling 预算与 maxTokens、
+  roots/未知方法审计、legacy 等价路径、capabilities、app context 渲染、ServerState）
+- `runner-session-context.txt`（下次 attempt 提示含 `<mcp_app_context>`、零账本新增）
+- `agentapi-tests.txt`（context 路由未接线 `-32601` + 能力位 false、覆盖写、租户 404、
+  servers era/version/capabilities）
+- `store-tests.txt`（schema/RLS、覆盖式 upsert、边界）
+- `servicehost-sampling.txt`（sampler 走 runtime stream、stopReason 映射、无模型 fail closed）

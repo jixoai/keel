@@ -42,13 +42,16 @@ type ServerState struct {
 	Name            string `json:"name"`
 	Transport       string `json:"transport"`
 	ProtocolVersion string `json:"protocolVersion,omitempty"`
-	// Era is "legacy" or "modern" for the negotiated protocol version. The
-	// era-gated transport behaviour itself is P5.4; this is the read-only
-	// projection clients use to understand which dialect the server speaks.
-	Era          string          `json:"era"`
-	Connected    bool            `json:"connected"`
-	Capabilities json.RawMessage `json:"capabilities,omitempty"`
-	Error        string          `json:"error,omitempty"`
+	// Era is the negotiated dialect ("legacy" or "modern"). It is the client's
+	// actual era, not a re-derivation from the version string: auto detection
+	// and a modern server that answered initialize must both read honestly.
+	Era       string `json:"era"`
+	Connected bool   `json:"connected"`
+	// Capabilities is the server's advertised capability object (bounded; see
+	// ServerStateCapabilitiesMaxBytes). Experimental/extensions ride inside it.
+	Capabilities          json.RawMessage `json:"capabilities,omitempty"`
+	CapabilitiesTruncated bool            `json:"capabilitiesTruncated,omitempty"`
+	Error                 string          `json:"error,omitempty"`
 	// CatalogueError is the last failed tools/list refresh of a connected
 	// server (P4.4): the previous tool list stays published, and the failure is
 	// visible here (spec「热更的 attempt 边界与失败保面」).
@@ -58,6 +61,12 @@ type ServerState struct {
 	Apps           int      `json:"apps"`
 	Diagnostics    []string `json:"diagnostics,omitempty"`
 }
+
+// ServerStateCapabilitiesMaxBytes bounds the advertised capability document
+// reported by /v1/mcp/servers. A server cannot grow the admin response without
+// limit; a document past the bound is replaced by an explicit marker and the
+// truncation flag rather than cut into invalid JSON.
+const ServerStateCapabilitiesMaxBytes = 8192
 
 // ToolRef is one tool that references an app resource.
 type ToolRef struct {
@@ -183,10 +192,10 @@ func documentURL(appID, hash string) string {
 }
 
 // eraOf maps a negotiated protocol version onto the dialect name. ISO dates
-// compare lexicographically. The era-gated behaviour is P5.4; until then every
-// server the client can negotiate with reports its honest dialect.
+// compare lexicographically. The client's actual era is authoritative when it is
+// connected; this is the fallback for a failed/never-connected server.
 func eraOf(protocolVersion string) string {
-	if protocolVersion >= "2026-07-28" {
+	if protocolVersion >= mcp.ModernProtocolVersion {
 		return "modern"
 	}
 	return "legacy"

@@ -58,6 +58,8 @@ func (s *Server) mcpAppRoutes() {
 	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/resources/read", s.mcpAppResourceRead)
 	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/ui/message", s.mcpAppMessage)
 	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/ui/open-link", s.mcpAppOpenLink)
+	// P5.5: the app context seam. Unwired deployments answer -32601.
+	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/context", s.mcpAppUpdateContext)
 }
 
 // mcpServersResponse is GET /v1/mcp/servers.

@@ -1,0 +1,9 @@
+=== RUN   TestMCPAppContextSchemaAndRLS
+--- PASS: TestMCPAppContextSchemaAndRLS (0.08s)
+=== RUN   TestMCPAppContextUpsertOverwrites
+--- PASS: TestMCPAppContextUpsertOverwrites (0.05s)
+=== RUN   TestMCPAppContextBoundsAndValidation
+--- PASS: TestMCPAppContextBoundsAndValidation (0.04s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	0.295s
+EXIT:0

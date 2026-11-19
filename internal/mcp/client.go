@@ -14,6 +14,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -52,6 +53,10 @@ type ClientOptions struct {
 	Capabilities ClientCapabilities
 	// ProtocolVersion defaults to LatestProtocolVersion.
 	ProtocolVersion string
+	// Era selects the wire dialect (P5.4). The zero value is legacy, which keeps
+	// every pre-P5 caller byte-identical; the manager applies the deployment
+	// default (KEEL_MCP_PROTOCOL_ERA, auto when unset).
+	Era ProtocolEra
 	// RequestTimeout bounds each request. Zero uses DefaultRequestTimeout; a
 	// negative value disables the timer (the context still applies).
 	RequestTimeout time.Duration
@@ -59,10 +64,25 @@ type ClientOptions struct {
 	// pre-P4 behaviour: notifications are dropped (fail closed; no events
 	// surface is wired).
 	Notifications ClientNotificationHandler
-	// ServerRequests, when set, answers server-initiated requests. Nil answers
-	// "method not found", exactly as before P4.
+	// ServerRequests, when set, answers server-initiated requests that arrive
+	// outside an executing tool call. Nil answers "method not found", exactly as
+	// before P4.
 	ServerRequests ClientServerRequestHandler
+	// InputRequests, when set, executes MRTR input requests and legacy
+	// server-initiated requests that arrive while a tool call is executing (the
+	// call's tenant/session scope is on its context). Nil makes an
+	// input_required result fail instead of fabricating input.
+	InputRequests ClientInputRequestHandler
+	// OnMRTRDiagnostic observes protocol-level MRTR outcomes (budget exceeded,
+	// no executor, executor failure). It must not block.
+	OnMRTRDiagnostic func(kind, detail string)
+	// OnMRTRDone reports the round count of a finished call that had at least
+	// one input_required round (the mcp_mrtr_rounds metric).
+	OnMRTRDone func(rounds int)
 }
+
+// defaultMRTRMaxRounds is the per-call input round budget (design §4.6(4)).
+const defaultMRTRMaxRounds = 5
 
 // pendingCall is one in-flight request. The channel has capacity one so the
 // receive loop never blocks delivering its response.
@@ -111,6 +131,26 @@ type Client struct {
 	diagWindow     time.Time
 	diagSuppressed int
 	now            func() time.Time
+
+	// era is the negotiated dialect. During auto detection it is switched to
+	// modern for the probe and back to legacy on a fallback.
+	era ProtocolEra
+	// activeInputs are the tool calls currently executing. A legacy
+	// server-initiated request (sampling/elicitation/roots) routed here uses the
+	// call's context and executor: the server asked while that call was open, so
+	// that call's tenant/session is the only honest scope. With zero or more
+	// than one call in flight the request falls back to ServerRequests (which
+	// fails closed): guessing a session would be worse than refusing.
+	activeInputSeq int64
+	activeInputs   map[int64]*activeInputCall
+}
+
+// activeInputCall is one executing tool call, as a legacy server request sees
+// it.
+type activeInputCall struct {
+	ctx     context.Context
+	handler ClientInputRequestHandler
+	state   *InputRequestState
 }
 
 // NewClient returns a client in the idle state.
@@ -121,15 +161,34 @@ func NewClient(options ClientOptions) *Client {
 	if options.RequestTimeout == 0 {
 		options.RequestTimeout = DefaultRequestTimeout
 	}
-	return &Client{
-		options:   options,
-		state:     ClientIdle,
-		pending:   make(map[string]*pendingCall),
-		closedCh:  make(chan struct{}),
-		listeners: make(map[string]*listener),
-		progress:  make(map[string]func(ProgressNotification)),
-		now:       time.Now,
+	// A zero era keeps the historical behaviour for direct users (the PI test
+	// suite and embedders). The manager fills the deployment default from
+	// KEEL_MCP_PROTOCOL_ERA; an explicitly invalid value fails closed to legacy.
+	if options.Era == "" {
+		options.Era = EraLegacy
+	} else if era, ok := ParseProtocolEra(string(options.Era)); ok {
+		options.Era = era
+	} else {
+		options.Era = EraLegacy
 	}
+	return &Client{
+		options:      options,
+		state:        ClientIdle,
+		pending:      make(map[string]*pendingCall),
+		closedCh:     make(chan struct{}),
+		listeners:    make(map[string]*listener),
+		progress:     make(map[string]func(ProgressNotification)),
+		now:          time.Now,
+		era:          options.Era,
+		activeInputs: make(map[int64]*activeInputCall),
+	}
+}
+
+// Era reports the negotiated (or configured, before Connect) dialect.
+func (c *Client) Era() ProtocolEra {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.era
 }
 
 // State reports the connection lifecycle.
@@ -167,8 +226,9 @@ func (c *Client) Instructions() string {
 	return c.instructions
 }
 
-// Connect starts transport, performs initialize and sends
-// notifications/initialized. On any failure the client is closed.
+// Connect starts transport and negotiates the dialect, then the handshake the
+// era requires: initialize for legacy, server/discover for modern, a probe and
+// a fallback for auto. On any failure the client is closed.
 func (c *Client) Connect(ctx context.Context, transport Transport) (*InitializeResult, error) {
 	if transport == nil {
 		return nil, fmt.Errorf("mcp: connect: nil transport")
@@ -181,6 +241,7 @@ func (c *Client) Connect(ctx context.Context, transport Transport) (*InitializeR
 	}
 	c.state = ClientConnecting
 	c.transport = transport
+	era := c.era
 	c.mu.Unlock()
 
 	if err := transport.Start(ctx); err != nil {
@@ -188,6 +249,32 @@ func (c *Client) Connect(ctx context.Context, transport Transport) (*InitializeR
 		return nil, err
 	}
 	go c.receiveLoop(transport)
+
+	switch era {
+	case EraModern:
+		return c.connectModern(ctx, transport)
+	case EraAuto:
+		modern, result, err := c.probeModern(ctx, transport)
+		if err != nil {
+			_ = c.Close()
+			return nil, err
+		}
+		if modern {
+			return c.finishModern(ctx, transport, result)
+		}
+		return c.connectLegacy(ctx, transport)
+	default:
+		return c.connectLegacy(ctx, transport)
+	}
+}
+
+// connectLegacy performs the pre-P5 initialize handshake. Its wire shape is
+// deliberately unchanged: no `_meta`, no extra headers, session and GET stream
+// behaviour exactly as before P5.
+func (c *Client) connectLegacy(ctx context.Context, transport Transport) (*InitializeResult, error) {
+	c.setEra(EraLegacy)
+	setTransportEra(transport, EraLegacy)
+	setTransportProtocolVersion(transport, "")
 
 	params, err := json.Marshal(struct {
 		ProtocolVersion string             `json:"protocolVersion"`
@@ -223,20 +310,28 @@ func (c *Client) Connect(ctx context.Context, transport Transport) (*InitializeR
 	// Transports that echo the version (Streamable HTTP's MCP-Protocol-Version
 	// header) learn it here, before the initialized notification opens the GET
 	// stream, like pi's transport.setProtocolVersion.
-	if setter, ok := transport.(interface{ SetProtocolVersion(string) }); ok {
-		setter.SetProtocolVersion(result.ProtocolVersion)
-	}
+	setTransportProtocolVersion(transport, result.ProtocolVersion)
 
 	c.mu.Lock()
 	c.protocolVersion = result.ProtocolVersion
 	c.serverInfo = result.ServerInfo
 	c.serverCapabilities = result.Capabilities
 	c.instructions = result.Instructions
+	// A server that answers initialize with the modern revision speaks the
+	// stateless dialect from here on: session headers and the GET stream stop.
+	if IsModernProtocolVersion(result.ProtocolVersion) {
+		c.era = EraModern
+	}
 	c.mu.Unlock()
+	setTransportEra(transport, c.Era())
 
-	if err := c.notify(ctx, "notifications/initialized", nil, true); err != nil {
-		_ = c.Close()
-		return nil, err
+	// A server that selected the modern revision has no initialized handshake:
+	// sending one would be a legacy artifact on a stateless connection.
+	if c.Era() == EraLegacy {
+		if err := c.notify(ctx, "notifications/initialized", nil, true); err != nil {
+			_ = c.Close()
+			return nil, err
+		}
 	}
 
 	c.mu.Lock()
@@ -247,6 +342,206 @@ func (c *Client) Connect(ctx context.Context, transport Transport) (*InitializeR
 	c.state = ClientConnected
 	c.mu.Unlock()
 	return &result, nil
+}
+
+// connectModern performs the stateless handshake: one server/discover request,
+// no notifications/initialized, no session.
+func (c *Client) connectModern(ctx context.Context, transport Transport) (*InitializeResult, error) {
+	c.setEra(EraModern)
+	setTransportEra(transport, EraModern)
+	setTransportProtocolVersion(transport, ModernProtocolVersion)
+	result, err := c.discover(ctx)
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return c.finishModern(ctx, transport, result)
+}
+
+// discover sends server/discover in the modern shape and validates the answer.
+func (c *Client) discover(ctx context.Context) (InitializeResult, error) {
+	raw, err := c.request(ctx, "server/discover", nil, true)
+	if err != nil {
+		return InitializeResult{}, err
+	}
+	return validateDiscoverResult(raw)
+}
+
+// finishModern installs the discovered server identity and flips the client to
+// connected. Modern has no initialized notification and no session.
+func (c *Client) finishModern(_ context.Context, transport Transport, result InitializeResult) (*InitializeResult, error) {
+	version := result.ProtocolVersion
+	if version == "" {
+		version = ModernProtocolVersion
+	}
+	if !isSupportedProtocolVersion(version) {
+		_ = c.Close()
+		return nil, fmt.Errorf("mcp: server selected unsupported protocol version %s", version)
+	}
+	c.mu.Lock()
+	c.era = EraModern
+	c.protocolVersion = version
+	c.serverInfo = result.ServerInfo
+	c.serverCapabilities = result.Capabilities
+	c.instructions = result.Instructions
+	c.mu.Unlock()
+	setTransportEra(transport, EraModern)
+	setTransportProtocolVersion(transport, version)
+
+	c.mu.Lock()
+	if c.state != ClientConnecting {
+		c.mu.Unlock()
+		return nil, &ConnectionClosedError{Message: "MCP client closed during discovery"}
+	}
+	c.state = ClientConnected
+	c.mu.Unlock()
+	result.ProtocolVersion = version
+	return &result, nil
+}
+
+// probeModern runs the auto compatibility algorithm: request server/discover in
+// the modern shape; a modern answer (or a recognizable modern error) selects the
+// modern era, anything a legacy server can answer falls back to initialize.
+func (c *Client) probeModern(ctx context.Context, transport Transport) (bool, InitializeResult, error) {
+	c.setEra(EraModern)
+	setTransportEra(transport, EraModern)
+	setTransportProtocolVersion(transport, ModernProtocolVersion)
+
+	raw, err := c.request(ctx, "server/discover", nil, true)
+	if err == nil {
+		result, validateErr := validateDiscoverResult(raw)
+		if validateErr != nil {
+			// A 200 answer that is not a discover result is a legacy server that
+			// answers unknown methods with some other payload. It cannot speak the
+			// modern dialect; fall back to initialize.
+			c.resetProbe(transport)
+			return false, InitializeResult{}, nil
+		}
+		return true, result, nil
+	}
+	if version, modernError := modernErrorVersion(err); modernError {
+		// A modern server rejected our version; retry with the version it
+		// advertised (or the revision we know).
+		if version == "" {
+			version = ModernProtocolVersion
+		}
+		c.mu.Lock()
+		c.protocolVersion = version
+		c.mu.Unlock()
+		setTransportProtocolVersion(transport, version)
+		raw, retryErr := c.request(ctx, "server/discover", nil, true)
+		if retryErr == nil {
+			result, validateErr := validateDiscoverResult(raw)
+			if validateErr != nil {
+				c.resetProbe(transport)
+				return false, InitializeResult{}, nil
+			}
+			return true, result, nil
+		}
+		c.resetProbe(transport)
+		return false, InitializeResult{}, retryErr
+	}
+	if probeFallsBackToLegacy(err) {
+		c.resetProbe(transport)
+		return false, InitializeResult{}, nil
+	}
+	c.resetProbe(transport)
+	return false, InitializeResult{}, err
+}
+
+// resetProbe returns the connection to the legacy dialect after a failed probe.
+// The transport forgets the probe-era version so initialize starts from the
+// pre-P5 header state.
+func (c *Client) resetProbe(transport Transport) {
+	c.setEra(EraLegacy)
+	setTransportEra(transport, EraLegacy)
+	setTransportProtocolVersion(transport, "")
+}
+
+func (c *Client) setEra(era ProtocolEra) {
+	c.mu.Lock()
+	c.era = era
+	c.mu.Unlock()
+}
+
+// setTransportEra tells transports that gate wire shape on the era.
+func setTransportEra(transport Transport, era ProtocolEra) {
+	if setter, ok := transport.(interface{ SetProtocolEra(ProtocolEra) }); ok {
+		setter.SetProtocolEra(era)
+	}
+}
+
+// setTransportProtocolVersion updates the version-echoing transports.
+func setTransportProtocolVersion(transport Transport, version string) {
+	if setter, ok := transport.(interface{ SetProtocolVersion(string) }); ok {
+		setter.SetProtocolVersion(version)
+	}
+}
+
+// probeFallsBackToLegacy reports whether a failed server/discover is a legacy
+// server's honest "I do not know that method" rather than a transport failure
+// that initialize would also hit.
+func probeFallsBackToLegacy(err error) bool {
+	var rpcErr *McpError
+	if errors.As(err, &rpcErr) {
+		return true
+	}
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		switch httpErr.Status {
+		case 400, 404, 405, 406, 415, 501:
+			return true
+		}
+	}
+	return false
+}
+
+// modernErrorVersion recognizes the modern dialect's version rejection (the
+// 400 + UnsupportedProtocolVersion body the compatibility algorithm names) and
+// returns the newest modern version the server advertised.
+func modernErrorVersion(err error) (string, bool) {
+	var rpcErr *McpError
+	if errors.As(err, &rpcErr) {
+		if rpcErr.Code != CodeUnsupportedProtocolVersion {
+			return "", false
+		}
+		return modernVersionFromData(rpcErr.Data), true
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Status != 400 {
+		return "", false
+	}
+	var body struct {
+		Error ErrorObject `json:"error"`
+	}
+	if json.Unmarshal([]byte(httpErr.Body), &body) != nil {
+		return "", false
+	}
+	if body.Error.Code != CodeUnsupportedProtocolVersion {
+		return "", false
+	}
+	return modernVersionFromData(body.Error.Data), true
+}
+
+// modernVersionFromData reads error.data.supported and returns its newest
+// version not older than the modern revision.
+func modernVersionFromData(data json.RawMessage) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Supported []string `json:"supported"`
+	}
+	if json.Unmarshal(data, &envelope) != nil {
+		return ""
+	}
+	newest := ""
+	for _, version := range envelope.Supported {
+		if IsModernProtocolVersion(version) && version > newest {
+			newest = version
+		}
+	}
+	return newest
 }
 
 // ListTools returns every tool, following nextCursor through all pages, like
@@ -300,43 +595,165 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 }
 
 // CallToolWithOptions invokes one tool with the per-call notification surface
-// (a progress token and its sink). The zero options produce exactly the wire
-// shape CallTool always produced.
+// (a progress token and its sink) and the MRTR executor. The zero options
+// produce exactly the wire shape CallTool always produced.
 func (c *Client) CallToolWithOptions(ctx context.Context, name string, args json.RawMessage, options CallOptions) (CallToolResult, error) {
 	token := ""
 	if options.ProgressToken != "" {
 		token = c.registerProgress(options.ProgressToken, options.OnProgress)
 		defer c.unregisterProgress(token)
 	}
-	params, err := encodeCallToolParams(name, args, token)
-	if err != nil {
-		return CallToolResult{}, fmt.Errorf("mcp: encode tools/call params: %w", err)
+	handler := options.InputRequests
+	if handler == nil {
+		handler = c.options.InputRequests
 	}
-	raw, err := c.request(ctx, "tools/call", params, false)
-	if err != nil {
-		return CallToolResult{}, err
+	state := &InputRequestState{
+		ToolCallID: options.ProgressToken,
+		// A stable per-call identity: retries of this call reuse it (the
+		// elicitation decision is found again), parallel calls never share it.
+		CallID: fmt.Sprintf("mrtr-%d", time.Now().UnixNano()),
 	}
-	return validateCallToolResult(raw)
+	activeID := c.registerActiveInput(ctx, handler, state)
+	defer c.unregisterActiveInput(activeID)
+
+	maxRounds := options.MRTRMaxRounds
+	if maxRounds <= 0 {
+		maxRounds = defaultMRTRMaxRounds
+	}
+	var responses map[string]json.RawMessage
+	var requestState json.RawMessage
+	hasRequestState := false
+	for {
+		params, err := encodeCallToolParams(name, args, token, responses, requestState, hasRequestState)
+		if err != nil {
+			return CallToolResult{}, fmt.Errorf("mcp: encode tools/call params: %w", err)
+		}
+		raw, err := c.request(ctx, "tools/call", params, false)
+		if err != nil {
+			c.finishMRTR(state)
+			return CallToolResult{}, err
+		}
+		result, err := validateCallToolResult(raw)
+		if err != nil {
+			c.finishMRTR(state)
+			return CallToolResult{}, err
+		}
+		if result.ResultType != ResultTypeInputRequired {
+			c.finishMRTR(state)
+			return result, nil
+		}
+		state.Round++
+		if state.Round > maxRounds {
+			c.mrtrDiagnostic("budget", fmt.Sprintf("rounds=%d limit=%d", state.Round, maxRounds))
+			c.finishMRTR(state)
+			return CallToolResult{}, &MRTRBudgetExceededError{Rounds: maxRounds}
+		}
+		if handler == nil {
+			c.mrtrDiagnostic("no-executor", fmt.Sprintf("round=%d", state.Round))
+			c.finishMRTR(state)
+			return CallToolResult{}, &MRTRUnsupportedError{}
+		}
+		responses, err = handler(ctx, *result.InputRequired, state)
+		if err != nil {
+			c.mrtrDiagnostic("executor-error", fmt.Sprintf("round=%d", state.Round))
+			c.finishMRTR(state)
+			return CallToolResult{}, err
+		}
+		for key := range result.InputRequired.InputRequests {
+			if _, ok := responses[key]; !ok {
+				// The wire contract requires one response per requested key. A
+				// missing key would make the server re-request (or misread the
+				// answer); fail the call instead of sending a partial map.
+				c.mrtrDiagnostic("missing-response", fmt.Sprintf("round=%d key=%s", state.Round, boundedKey(key)))
+				c.finishMRTR(state)
+				return CallToolResult{}, fmt.Errorf("mcp: MRTR executor returned no response for key %s", boundedKey(key))
+			}
+		}
+		requestState = result.InputRequired.RequestState
+		hasRequestState = result.InputRequired.HasRequestState
+	}
+}
+
+// finishMRTR reports a completed exchange once, for the round histogram.
+func (c *Client) finishMRTR(state *InputRequestState) {
+	if state == nil || state.Round == 0 || c.options.OnMRTRDone == nil {
+		return
+	}
+	c.options.OnMRTRDone(state.Round)
+}
+
+func (c *Client) mrtrDiagnostic(kind, detail string) {
+	if c.options.OnMRTRDiagnostic != nil {
+		c.options.OnMRTRDiagnostic(kind, detail)
+	}
+}
+
+// registerActiveInput publishes one executing call to legacy server requests.
+func (c *Client) registerActiveInput(ctx context.Context, handler ClientInputRequestHandler, state *InputRequestState) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.activeInputSeq++
+	id := c.activeInputSeq
+	c.activeInputs[id] = &activeInputCall{ctx: ctx, handler: handler, state: state}
+	return id
+}
+
+func (c *Client) unregisterActiveInput(id int64) {
+	c.mu.Lock()
+	delete(c.activeInputs, id)
+	c.mu.Unlock()
+}
+
+// singleActiveInput returns the only executing call, or nil when none or
+// several are in flight (ambiguous scope: fail closed).
+func (c *Client) singleActiveInput() *activeInputCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.activeInputs) != 1 {
+		return nil
+	}
+	for _, call := range c.activeInputs {
+		return call
+	}
+	return nil
 }
 
 // encodeCallToolParams builds the tools/call params object. `_meta` appears only
-// when a progress token was requested: the pre-P4 bytes stay identical.
-func encodeCallToolParams(name string, args json.RawMessage, progressToken string) (json.RawMessage, error) {
-	if progressToken == "" {
+// when a progress token was requested: the pre-P4 bytes stay identical. MRTR
+// retries add `inputResponses` and echo `requestState` verbatim.
+func encodeCallToolParams(name string, args json.RawMessage, progressToken string, responses map[string]json.RawMessage, requestState json.RawMessage, hasRequestState bool) (json.RawMessage, error) {
+	if progressToken == "" && len(responses) == 0 && !hasRequestState {
 		return json.Marshal(struct {
 			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments,omitempty"`
 		}{Name: name, Arguments: args})
 	}
-	return json.Marshal(struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments,omitempty"`
-		Meta      struct {
+	fields := map[string]json.RawMessage{}
+	if encoded, err := json.Marshal(name); err == nil {
+		fields["name"] = encoded
+	}
+	if len(args) > 0 {
+		fields["arguments"] = args
+	}
+	if progressToken != "" {
+		meta, _ := json.Marshal(struct {
 			ProgressToken string `json:"progressToken"`
-		} `json:"_meta"`
-	}{Name: name, Arguments: args, Meta: struct {
-		ProgressToken string `json:"progressToken"`
-	}{ProgressToken: progressToken}})
+		}{ProgressToken: progressToken})
+		fields["_meta"] = meta
+	}
+	if len(responses) > 0 {
+		encoded, err := json.Marshal(responses)
+		if err != nil {
+			return nil, err
+		}
+		fields["inputResponses"] = encoded
+	}
+	if hasRequestState {
+		// The raw bytes are echoed unchanged, including the quotes: the client
+		// must not parse, rewrite or reuse requestState.
+		fields["requestState"] = append(json.RawMessage(nil), requestState...)
+	}
+	return json.Marshal(fields)
 }
 
 // registerProgress installs the per-call sink and returns the unique token put
@@ -417,6 +834,16 @@ func (c *Client) Listen(ctx context.Context, params ListenParams, options Listen
 	if err != nil {
 		c.removeListener(id)
 		return nil, fmt.Errorf("mcp: encode subscriptions/listen params: %w", err)
+	}
+	c.mu.Lock()
+	modern := c.era == EraModern
+	c.mu.Unlock()
+	if modern {
+		encoded, err = c.injectModernMeta(encoded)
+		if err != nil {
+			c.removeListener(id)
+			return nil, err
+		}
 	}
 	if err := transport.Send(ctx, &Request{JSONRPC: JSONRPCVersion, ID: id, Method: "subscriptions/listen", Params: encoded}); err != nil {
 		c.removeListener(id)
@@ -654,8 +1081,17 @@ func (c *Client) request(ctx context.Context, method string, params json.RawMess
 	id := NumberID(c.nextID)
 	call := &pendingCall{ch: make(chan callResult, 1)}
 	c.pending[id.Key()] = call
+	modern := c.era == EraModern
 	c.mu.Unlock()
 
+	if modern {
+		withMeta, err := c.injectModernMeta(params)
+		if err != nil {
+			c.removePending(id)
+			return nil, err
+		}
+		params = withMeta
+	}
 	message := &Request{JSONRPC: JSONRPCVersion, ID: id, Method: method, Params: params}
 	if err := transport.Send(ctx, message); err != nil {
 		c.removePending(id)
@@ -699,11 +1135,73 @@ func (c *Client) notify(ctx context.Context, method string, params json.RawMessa
 		return &ConnectionClosedError{Message: "MCP client is " + string(state)}
 	}
 	transport := c.transport
+	modern := c.era == EraModern
 	c.mu.Unlock()
 	if transport == nil {
 		return &ConnectionClosedError{}
 	}
+	if modern {
+		withMeta, err := c.injectModernMeta(params)
+		if err != nil {
+			return err
+		}
+		params = withMeta
+	}
 	return transport.Send(ctx, &Notification{JSONRPC: JSONRPCVersion, Method: method, Params: params})
+}
+
+// injectModernMeta merges the 2026-07-28 per-request `_meta` into a params
+// object. The protocol version must equal the MCP-Protocol-Version header the
+// transport sends; both read the same negotiated version. Existing `_meta`
+// members (progressToken, subscription tags) are preserved.
+func (c *Client) injectModernMeta(params json.RawMessage) (json.RawMessage, error) {
+	c.mu.Lock()
+	version := c.protocolVersion
+	c.mu.Unlock()
+	if version == "" {
+		version = ModernProtocolVersion
+	}
+	versionRaw, err := json.Marshal(version)
+	if err != nil {
+		return nil, err
+	}
+	capabilities, err := json.Marshal(c.options.Capabilities)
+	if err != nil {
+		return nil, err
+	}
+	info, err := json.Marshal(Implementation{
+		Name:    c.options.Name,
+		Version: c.options.Version,
+		Title:   c.options.Title,
+	})
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &fields); err != nil {
+			return nil, fmt.Errorf("mcp: modern params must be an object: %w", err)
+		}
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+	}
+	meta := map[string]json.RawMessage{}
+	if raw, ok := fields["_meta"]; ok {
+		_ = json.Unmarshal(raw, &meta)
+		if meta == nil {
+			meta = map[string]json.RawMessage{}
+		}
+	}
+	meta[MetaProtocolVersionKey] = versionRaw
+	meta[MetaClientCapabilitiesKey] = capabilities
+	meta[MetaClientInfoKey] = info
+	encodedMeta, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	fields["_meta"] = encodedMeta
+	return json.Marshal(fields)
 }
 
 // receiveLoop dispatches server messages until the transport closes.
@@ -794,11 +1292,40 @@ func (c *Client) deliver(id ID, result callResult) {
 	call.ch <- result
 }
 
-// answerServerRequest replies with the injected handler's message, or "method
-// not found" when no handler is wired. This batch supports no server-initiated
-// requests by default (roots, sampling, elicitation, ping are P5 work), and the
-// spec requires a response rather than silence.
+// answerServerRequest replies with the executor's response. A legacy server
+// request that arrives while exactly one tool call is executing belongs to that
+// call: it is executed with the call's context and tenant/session scope and
+// answered with the same response shape the MRTR executor returns. Otherwise
+// the injected ServerRequests handler answers, and with no handler the reply is
+// "method not found" (fail closed; the spec requires an answer, never silence).
 func (c *Client) answerServerRequest(transport Transport, request *Request) {
+	if call := c.singleActiveInput(); call != nil && call.handler != nil {
+		ctx := call.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		var cancel context.CancelFunc
+		if c.options.RequestTimeout > 0 {
+			ctx, cancel = context.WithTimeout(ctx, c.options.RequestTimeout)
+			defer cancel()
+		}
+		round := InputRequiredResult{
+			InputRequests: map[string]InputRequest{
+				legacyServerRequestKey: {Method: request.Method, Params: copyOptionalRaw(request.Params)},
+			},
+		}
+		responses, err := call.handler(ctx, round, call.state)
+		if err == nil {
+			if result, ok := responses[legacyServerRequestKey]; ok && len(result) > 0 {
+				_ = transport.Send(ctx, &SuccessResponse{JSONRPC: JSONRPCVersion, ID: request.ID, Result: result})
+				return
+			}
+			err = &McpError{Code: CodeInternalError, Message: "MRTR executor returned no response for " + request.Method}
+		}
+		_ = transport.Send(ctx, rpcErrorResponse(request.ID, err))
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), serverRequestTimeout)
 	defer cancel()
 	if handler := c.options.ServerRequests; handler != nil {
@@ -819,6 +1346,24 @@ func (c *Client) answerServerRequest(transport Transport, request *Request) {
 			Message: "Method not found: " + request.Method,
 		},
 	})
+}
+
+// legacyServerRequestKey is the synthetic inputRequests key of a legacy
+// server-initiated request; it never goes on the wire (the answer is the
+// request's own response).
+const legacyServerRequestKey = "server-request"
+
+// rpcErrorResponse renders a handler failure as the JSON-RPC error response the
+// server receives. A typed McpError keeps its code (-32601 for a refused
+// method); anything else is an internal error.
+func rpcErrorResponse(id ID, err error) *ErrorResponse {
+	code, message := CodeInternalError, err.Error()
+	var rpcErr *McpError
+	if errors.As(err, &rpcErr) {
+		code = rpcErr.Code
+		message = rpcErr.Message
+	}
+	return &ErrorResponse{JSONRPC: JSONRPCVersion, ID: id, Error: ErrorObject{Code: code, Message: message}}
 }
 
 func (c *Client) removePending(id ID) {
@@ -950,16 +1495,43 @@ func validateListToolsResult(data json.RawMessage) (ListToolsResult, error) {
 	return result, nil
 }
 
+// validateDiscoverResult checks a modern server/discover result. It carries the
+// initialize members; a missing protocolVersion is a protocol error (a modern
+// server must advertise the revision it serves).
+func validateDiscoverResult(data json.RawMessage) (InitializeResult, error) {
+	result, err := validateInitializeResult(data)
+	if err != nil {
+		return InitializeResult{}, &McpError{Code: CodeInvalidRequest, Message: "Invalid MCP server/discover result"}
+	}
+	if result.ProtocolVersion == "" {
+		return InitializeResult{}, &McpError{Code: CodeInvalidRequest, Message: "Invalid MCP server/discover result: protocolVersion is required"}
+	}
+	return result, nil
+}
+
 // validateCallToolResult checks content is an array when present (missing
 // content defaults to an empty list, as the SDK does) and keeps any JSON value
-// as structuredContent. isError passes through.
+// as structuredContent. isError passes through. The 2026-07-28 resultType
+// envelope is applied first: missing means complete, an unknown value is a
+// protocol error.
 func validateCallToolResult(data json.RawMessage) (CallToolResult, error) {
+	resultType, inputRequired, err := parseResultType(data)
+	if err != nil {
+		return CallToolResult{}, err
+	}
 	invalid := &McpError{Code: CodeInvalidRequest, Message: "Invalid MCP tools/call result"}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
 		return CallToolResult{}, invalid
 	}
-	result := CallToolResult{Content: []ContentBlock{}}
+	result := CallToolResult{Content: []ContentBlock{}, ResultType: resultType}
+	if resultType == ResultTypeInputRequired {
+		if inputRequired == nil {
+			return CallToolResult{}, invalid
+		}
+		result.InputRequired = inputRequired
+		return result, nil
+	}
 	if raw, ok := fields["content"]; ok {
 		if isJSONNull(raw) {
 			return CallToolResult{}, invalid

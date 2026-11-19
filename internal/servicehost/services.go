@@ -378,6 +378,7 @@ func newMCPFactory(cfg Config) servicegraph.Factory {
 		if cfg.MCP.Events != nil {
 			eventOptions := *cfg.MCP.Events
 			eventOptions.Registry = cfg.MCP.Registry
+			eventOptions.MRTR = cfg.MCP.MRTR
 			if eventOptions.Logger == nil {
 				eventOptions.Logger = cfg.Seams.Logger
 			}
@@ -400,6 +401,16 @@ func newMCPFactory(cfg Config) servicegraph.Factory {
 			options.ServerReconnected = func(server string) {
 				events.ServerReconnected(server)
 			}
+		}
+		if cfg.MCP.MRTR != nil {
+			// MRTR (P5): the executor answers input_required rounds and legacy
+			// server requests during a call. The capability declaration is
+			// derived from the executor, so this host never advertises sampling
+			// or elicitation it cannot answer.
+			options.InputRequests = cfg.MCP.MRTR.HandleInputRequests
+			options.Capabilities = cfg.MCP.MRTR.ClientCapabilities()
+			options.MRTRDiagnostics = cfg.MCP.MRTR.RecordClientDiagnostic
+			options.OnMRTRDone = func(_ string, rounds int) { cfg.MCP.MRTR.RecordRounds(rounds) }
 		}
 		manager := mcp.Connect(ctx, cfg.MCP.Entries, options)
 		if events != nil {
@@ -534,6 +545,9 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 				log:    cfg.Seams.Logger,
 			}
 		}
+		// The MCP app context (P5.5) is read per attempt and merged into the last
+		// user message in memory. Without a source the prompt is untouched.
+		runner.SessionContexts = cfg.SessionContexts
 		if cfg.Tenant.Agent.MaxTurns > 0 {
 			runner.MaxTurns = cfg.Tenant.Agent.MaxTurns
 		}

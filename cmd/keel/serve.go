@@ -461,6 +461,24 @@ func runServe(parent context.Context, opts serveOptions) error {
 	var toolSubagents *agentext.SubagentRunner
 	var toolPluginManager *agentext.Manager
 
+	// MRTR / legacy server-request executor (P5). It is constructed before the
+	// MCP connections so initialize declares exactly what this host can answer:
+	// sampling is advertised only when the deployment has a model configuration,
+	// elicitation only while the decision capability is enabled. The decision
+	// bridge and sampler depend on services built later, so they are installed
+	// after Boot and after the product layer assembles (no tool call can run
+	// before then).
+	samplingMode := mcphost.SamplingModeFromEnvironment(os.Getenv)
+	if samplingMode != mcphost.SamplingOff && len(modelsDoc) == 0 && strings.TrimSpace(opts.Model) == "" {
+		samplingMode = mcphost.SamplingOff
+	}
+	mrtr := mcphost.NewMRTR(mcphost.MRTROptions{
+		Logger:       log,
+		Auditor:      mcpAppAuditor{store: st, log: log},
+		Metrics:      mcpMetrics,
+		SamplingMode: samplingMode,
+	})
+
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Seams: servicehost.Seams{
 			Committer: kern,
@@ -478,6 +496,24 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// read).
 		DeploymentModels: modelsDoc,
 		OverrideRevision: overrideRevision,
+		// The MCP app context (P5.5): read per attempt, merged into the last user
+		// message as <mcp_app_context>, never written to the ledger.
+		SessionContexts: func(ctx context.Context, scope kernel.Scope) []agentcore.Content {
+			rows, err := st.ListMCPAppContexts(ctx, scope.TenantID, scope.SessionID)
+			if err != nil {
+				log.Warn("load mcp app context", "session_id", scope.SessionID, "err", err)
+				return nil
+			}
+			contexts := make([]mcphost.AppContext, 0, len(rows))
+			for _, row := range rows {
+				contexts = append(contexts, mcphost.AppContext{
+					AppID:      row.AppID,
+					Content:    row.Content,
+					Structured: row.Structured,
+				})
+			}
+			return mcphost.RenderAppContexts(contexts)
+		},
 		Options: loadout.Options{
 			ID:             opts.LoadoutID,
 			Revision:       opts.LoadoutRevision,
@@ -488,9 +524,21 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Concurrency: opts.Runs,
 		Prompt:      servicehost.PromptOptions{Preamble: opts.SystemPrompt},
 		MCP: servicehost.MCPOptions{
-			Entries:        mcpEntries,
-			ConnectOptions: mcp.ConnectOptions{ClientName: "keel", ClientVersion: version, Logger: log},
-			Registry:       mcpApps,
+			Entries: mcpEntries,
+			ConnectOptions: mcp.ConnectOptions{
+				ClientName:    "keel",
+				ClientVersion: version,
+				Logger:        log,
+				// P5.4: the configured dialect gate. Empty means the deployment
+				// default (auto unless KEEL_MCP_PROTOCOL_ERA says otherwise; an
+				// invalid value fails closed to legacy).
+				Era: mcp.EraFromEnvironment(os.Getenv),
+			},
+			Registry: mcpApps,
+			// P5.2/P5.3: the shared MRTR executor. The mcp service derives the
+			// declared capabilities from it and uses it for legacy server
+			// requests.
+			MRTR: mrtr,
 			// P4: the notification surface. The dispatcher classifies every
 			// notification, coalesces catalogue changes into one republish and
 			// keeps one listen stream per modern server. The hook event makes a
@@ -587,6 +635,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 			log.Warn("close service loadout", "err", err)
 		}
 	}()
+	// The runtime is up: the sampling executor now points at this generation's
+	// model service (the same seam the runner uses, never a second provider
+	// path). A deployment without a model leaves it nil and sampling fails
+	// closed.
+	mrtr.SetSampler(rt.MCPSampler())
 	// The runtime is up: the SSE hub may hold its pool connection now.
 	go hub.Run(ctx)
 	// The MCP half was buffered while the graph activated (mcpService.Start
@@ -612,7 +665,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	edge := newEdgeQuota(st)
 	hostTheme := loadHostTheme(static.root, log)
 	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, log)
+		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr, log)
 	if err != nil {
 		return err
 	}
@@ -818,13 +871,17 @@ func (p *productLayer) close() {
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
 		Hooks:  hooks,
 		Logger: log,
 	})
+	// The MRTR executor opens elicitations through the same decision primitive
+	// the product UI answers. No tool call can run before this point, so the
+	// capability declared at initialize is honest by the time it is used.
+	mrtr.SetDecisions(decisions)
 	// Approval provenance and notifications are durable product facts. The
 	// provenance rows are the audit of who answered; the notification rows carry
 	// the consumer set, while notification.ack / notification.push_sent are the
@@ -930,6 +987,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		MCPAppRuntime:     mcpAppRuntimeOrNil(rt),
 		MCPAppAudit:       st,
 		MCPAppInputCommit: mcpAppInputCommit(st, kern),
+		// P5.5: ui/update-model-context persists into mcp_app_contexts (never the
+		// ledger); the runner reads the same table for the next attempt.
+		MCPAppContexts: st,
 		// P4: the dispatcher is wired by the MCP service (Events above), so the
 		// events capability is honest for clients that gate on it.
 		MCPEvents:     true,

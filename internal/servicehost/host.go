@@ -115,6 +115,10 @@ type MCPOptions struct {
 	// the per-server subscriptions/listen supervisor. Nil keeps the pre-P4
 	// behaviour (notifications dropped, server requests answer -32601).
 	Events *mcphost.EventsOptions
+	// MRTR, when set, is the shared MRTR/legacy-request executor (P5): the mcp
+	// service wires ConnectOptions.InputRequests and the capability declaration
+	// from it, and the dispatcher uses it for legacy server requests.
+	MRTR *mcphost.MRTR
 }
 
 // LLMOptions carries the resolved model selection inputs. The tenant document
@@ -230,6 +234,10 @@ type Config struct {
 	// Product is the keel-agent assembly hook (extra tools, telemetry and
 	// provider-stream decorators). All fields are optional.
 	Product ProductOptions
+	// SessionContexts supplies the runner's per-attempt context blocks (the MCP
+	// app context written by ui/update-model-context). The hosting process wires
+	// it to the store; nil keeps the pre-P5 prompt byte-identical.
+	SessionContexts func(ctx context.Context, scope kernel.Scope) []agentcore.Content
 
 	RetireTimeout   time.Duration
 	CollectInterval time.Duration

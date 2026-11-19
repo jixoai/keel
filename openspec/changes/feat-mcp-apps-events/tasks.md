@@ -169,20 +169,45 @@
 
 ## P5 — MRTR / 版本对齐 / app 上下文
 
-- [ ] P5.1 `InputRequiredResult`/`InputRequests`/`InputResponses`/`requestState` 类型与解析；
+- [x] P5.1 `InputRequiredResult`/`InputRequests`/`InputResponses`/`requestState` 类型与解析；
       `resultType` 三态（缺省=complete、complete、input_required；未知=协议错误）
       （验收：单测三态 + 未知值走失败路径）
-- [ ] P5.2 MRTR 执行器：elicitation→decision；sampling→当前会话模型服务（`KEEL_MCP_SAMPLING` 默认 session、
+      （2026-11-20：`internal/mcp/input_required.go` + `client.go`；三态与
+      `inputRequests`/`requestState` 形状校验；未知 resultType 回 `-32600`；
+      证据 `evidence/p5/mcp-tests.txt`）
+- [x] P5.2 MRTR 执行器：elicitation→decision；sampling→当前会话模型服务（`KEEL_MCP_SAMPLING` 默认 session、
       `maxTokens` 上限、每调用预算 3）；roots→拒绝；未知 method→拒绝并审计；轮次预算 5
       （验收：端到端 MRTR 测；`requestState` 原样回显与重试 id 不同为硬断言）
-- [ ] P5.3 legacy 主动请求等价路径 + 能力声明（只在真能答时声明 sampling/elicitation）
+      （2026-11-20：`internal/mcphost/mrtr.go` + `internal/mcp/client.go`；轮次 5、
+      sampling 3 次/调用、`maxTokens` 4096 上限、roots/未知方法 `-32601` 审计；
+      requestState 逐字节回显、重试新 id、缺 key 拒绝发送；决策走
+      `agentext.DecisionBroker`；sampling 走 runtime 的 llm/ModelService（非新 provider）；
+      证据 `evidence/p5/notes.txt` §P5.2）
+- [x] P5.3 legacy 主动请求等价路径 + 能力声明（只在真能答时声明 sampling/elicitation）
       （验收：fake server 发 `sampling/createMessage`（legacy）→ 得到结果；未声明能力时服务器不得发）
-- [ ] P5.4 era 探测与门控（`KEEL_MCP_PROTOCOL_ERA=auto|legacy|modern`）：modern 下不发
+      （2026-11-20：`Client.answerServerRequest` 在唯一在途调用内把 legacy request 交给
+      MRTR 执行器（调用 ctx 的 tenant/session）；无调用/多调用回落 dispatcher 拒绝；
+      Manager 在无执行器时剔除 sampling/elicitation，roots 永不声明；
+      证据 `evidence/p5/mcp-tests.txt` / `mrtr-executor-tests.txt`）
+- [x] P5.4 era 探测与门控（`KEEL_MCP_PROTOCOL_ERA=auto|legacy|modern`）：modern 下不发
       session/`Last-Event-ID`、补齐 `_meta` 与 `Mcp-Method`/`Mcp-Name` 头、`ttlMs`/`cacheScope`；
       legacy 行为不变（验收：两个 era 的 fake server 各一组；conformance 全绿）
-- [ ] P5.5 `ui/update-model-context`：`mcp_app_contexts` 表 + runner seam `<mcp_app_context>` 段；
+      （2026-11-20：`internal/mcp/era.go`；auto=先 modern `server/discover`，400 现代错误
+      按 supported 重试，其余回落 initialize；modern 无 session/GET/Last-Event-ID/DELETE，
+      `_meta` 与头同版本、`Mcp-Name` base64 哨兵；非法 env fail closed 到 legacy；
+      conformance 1056/0 fail；同时按 P4 复核结论放行 listen 活跃时的未打标
+      progress/cancelled/message（P4 lane 拥有 canonical fix，本分支带最小修复与回归测试）；
+      证据 `evidence/p5/mcp-tests.txt` / `conformance.txt`）
+- [x] P5.5 `ui/update-model-context`：`mcp_app_contexts` 表 + runner seam `<mcp_app_context>` 段；
       未接线时 `-32601` + 能力位 false（验收：迁移测试 + 下次 attempt 提示含上下文；显式否决「写账本」方案）
-- [ ] P5.6 `/v1/mcp/servers` 报 `era`/`protocolVersion`/`capabilities`（验收：单测）
+      （2026-11-20：`schema.sql` + `rlsTenantTables` + `store/mcp_app_context.go`（覆盖式、
+      RLS、64 KiB 两文档上限）；`POST /v1/mcp/apps/{appId}/context`（未接线 501/-32601，
+      `mcp.apps.context` false）；`Runner.SessionContexts` 在 attempt 内存内并入最后一条
+      user 消息，零账本新增；app 桥调用按 sessionId 注入 ToolRunScope；写账本方案
+      在代码注释/设计 §7-R5 明确否决；证据 `evidence/p5/store-tests.txt` / `notes.txt`）
+- [x] P5.6 `/v1/mcp/servers` 报 `era`/`protocolVersion`/`capabilities`（验收：单测）
+      （2026-11-20：ServerState 取 client 实际 era；capabilities 8 KiB 有界，
+      超限 `{"truncated":true}` + `capabilitiesTruncated`；证据 `evidence/p5/agentapi-tests.txt`）
 
 ## P6 — 验收与收口
 

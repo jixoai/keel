@@ -43,10 +43,16 @@ type EmbeddedResource struct {
 // and, optionally, any JSON value as structured content (MCP 2026-07-28; older
 // revisions allowed only objects). A nil StructuredContent means absent; a
 // present JSON null is kept as the four-byte literal and converts to "null".
+//
+// ResultType and InputRequired are the 2026-07-28 result envelope (P5.1). They
+// are parsed, never re-serialized: a legacy result has ResultType "complete"
+// and both InputRequired and the wire bytes stay untouched.
 type CallToolResult struct {
-	Content           []ContentBlock  `json:"content"`
-	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
-	IsError           bool            `json:"isError,omitempty"`
+	Content           []ContentBlock       `json:"content"`
+	StructuredContent json.RawMessage      `json:"structuredContent,omitempty"`
+	IsError           bool                 `json:"isError,omitempty"`
+	ResultType        string               `json:"-"`
+	InputRequired     *InputRequiredResult `json:"-"`
 }
 
 // ToLLMContent converts a tool result to text and image content for a model, in

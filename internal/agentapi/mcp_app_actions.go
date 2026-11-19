@@ -33,6 +33,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
@@ -504,7 +505,7 @@ func (s *Server) mcpAppToolCall(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.cfg.MCPAppRuntime.CallTool(r.Context(), app.Server, name, arguments)
+	result, err := s.cfg.MCPAppRuntime.CallTool(mcpAppCallContext(r.Context(), tenantID, sessionID, body.ToolCallID), app.Server, name, arguments)
 	if err != nil {
 		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "tools/call", "error",
 			fmt.Sprintf("server=%s tool=%s code=%s", app.Server, mcpAppBounded(name, 128), mcpAppErrorCode(err)))
@@ -1030,6 +1031,24 @@ func (s *Server) mcpAppAuditRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"entry": written})
+}
+
+// mcpAppCallContext stamps the View's session scope on an app-initiated tool
+// call, so an MRTR elicitation/sampling request that arrives during it can be
+// attributed to the same session the View belongs to. Without a session the
+// context is unchanged: the executor then refuses scope-requiring requests
+// instead of guessing.
+func mcpAppCallContext(ctx context.Context, tenantID, sessionID uuid.UUID, toolCallID string) context.Context {
+	if sessionID == uuid.Nil {
+		return ctx
+	}
+	ctx = agentcore.WithToolRunScope(ctx, agentcore.ToolRunScope{
+		TenantID: tenantID.String(), SessionID: sessionID.String(),
+	})
+	if toolCallID != "" {
+		ctx = agentcore.WithToolCallID(ctx, toolCallID)
+	}
+	return ctx
 }
 
 // writeMCPAppRPCErr writes a JSON-RPC-shaped refusal. The browser bridge turns
