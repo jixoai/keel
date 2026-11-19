@@ -149,6 +149,19 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
    refcount/capture），与 file-plugin、bash-plugin 同波交付；Rust+gRPC 保留为**同接口扩展实现**
    （spec 保留 gRPC 边界），等规模需要时再引入，不现在上第二运行时。
 
+## 5.x 复核 P2 backlog（2026-11-20，Wave 2 最终 A/B）
+
+- **kernel `fs.capture` 跨 lane dedupe**：`Lookup` 无 lane 参数，加 `sys:` 前缀属查询契约变更；当前靠
+  调用方键纪律（`job:` 前缀），仅本会话自伤的恶意 toolCallId 碰撞面，无跨租户/提权。
+- **notify 多实例窗口**：`ClaimPush` 后另一实例 ack 仍会推一条已消费通知（URL 已失效）；多实例部署前
+  在 store 层复查 status。
+- **`mcp.call` arguments 契约归属**：object 强制只在 toolsurface seam；`internal/mcp` 直连/externalgw
+  未来调用方需自带同等防线（接口注释声明）。
+- **通知表租户配额**；模型侧 `ack` 语义（tool-surface spec 明列 ack，注意力层非授权门，产品决策待定）。
+- **`Materialize` `O_NOFOLLOW`**（fork/materialize 生产接线前必补）；**`shellScope` 无 run scope
+  回落 boot 租户**（多租户 pack 前改类型化拒绝）。
+- **residue 脚本**补扫 `keel_agent_test_*` 遗留库（B P2-4）。
+
 ## 6. 今日已到账（证据锚点）
 
 - 三次推送：`9d023c1`（Agents/团队产品面 + 三插件 + 团队启动模式）、`59790cf`（插件/模型尾项 + 会话软删除）、`8783372`（demo/trace 收尾 + 运行注入方案）

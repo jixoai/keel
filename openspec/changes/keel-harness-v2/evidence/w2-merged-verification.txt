@@ -12,3 +12,15 @@
   （spawn selection 提交门、notify token 失效、MCP image/arguments、E2E）
 
 DSN 只经环境变量传入；本文件不含连接串或密钥。
+
+## 追加：jobcap 收尾补丁 `71424ed`（2026-11-20）
+
+对应最终 A/B 复核的 P2 处置（`wave2-final-review-disposition.md`）：
+
+- `go build ./...`：exit 0
+- `go test -race`（kernel / fileplugin / bashbridge）：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 新增断言：system-lane capture 失败路径带 `jobId` 且与 owner 失败键不合并；kernel 拒绝缺/空/非字符串
+  `jobId` 的 system `fs.capture`；空 `jobId` 卫门单测
+
