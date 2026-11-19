@@ -555,10 +555,26 @@ func TestSubagentRoutes(t *testing.T) {
 	}}
 	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate: gate, Edge: committer, Events: events, Runs: runs, Logger: testLogger(), Poll: time.Millisecond,
+		// The host binds the same submit-time gate the /input edge runs. This
+		// stand-in refuses one marker so the route test can prove the refusal
+		// happens before the commit; everything else is accepted.
+		ValidateSelection: func(raw json.RawMessage) error {
+			if bytes.Contains(raw, []byte("unexecutable")) {
+				return errors.New(`unknown model "unexecutable"`)
+			}
+			return nil
+		},
 	})
 	server := httptest.NewServer(New(Config{Subagents: runner, Logger: testLogger()}))
 	defer server.Close()
 	spawnURL := server.URL + "/v1/sessions/" + parent.String() + "/subagents"
+
+	// A selection the submit-time gate refuses answers 400 and never reaches the
+	// commit seam: the committer-count assertion below stays at one.
+	if code := doJSON(t, server.Client(), http.MethodPost, spawnURL, tenant,
+		map[string]any{"task": "delegate", "selection": map[string]any{"modelId": "unexecutable"}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("invalid selection spawn: %d, want 400", code)
+	}
 
 	var async struct {
 		Subagent agentext.SubagentRecord `json:"subagent"`
@@ -599,6 +615,12 @@ func TestSubagentRoutes(t *testing.T) {
 	}
 	if code := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/sessions/"+uuid.NewString()+"/subagents", tenant, map[string]any{"task": "x"}, nil); code != 404 {
 		t.Fatalf("unknown parent: %d", code)
+	}
+
+	// A selection the gate accepts spawns exactly like the selection-free form.
+	if code := doJSON(t, server.Client(), http.MethodPost, spawnURL, tenant,
+		map[string]any{"task": "delegate", "selection": map[string]any{"modelId": "executable"}}, nil); code != http.StatusAccepted {
+		t.Fatalf("valid selection spawn: %d, want 202", code)
 	}
 }
 

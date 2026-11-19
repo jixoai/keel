@@ -142,6 +142,13 @@ type SubagentOptions struct {
 	// (default 10 minutes).
 	DefaultTimeout time.Duration
 	Now            func() time.Time
+	// ValidateSelection is the same submit-time gate the session input edge
+	// runs (the host binds it to the current model generation's
+	// ValidateSelection). Spawn validates the child selection before the child
+	// session or its user.message exists, so a selection the next attempt would
+	// deny is refused at the spawn call instead of failing every attempt.
+	// Nil is fail-closed: a selection is refused when no validator is wired.
+	ValidateSelection func(json.RawMessage) error
 }
 
 const (
@@ -162,6 +169,9 @@ type SubagentRunner struct {
 	poll           time.Duration
 	defaultTimeout time.Duration
 	now            func() time.Time
+	// validateSelection is the input edge's submit-time selection gate (nil is
+	// fail-closed, see SubagentOptions.ValidateSelection).
+	validateSelection func(json.RawMessage) error
 
 	mu      sync.Mutex
 	records map[string]*SubagentRecord
@@ -183,16 +193,17 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
 	r := &SubagentRunner{
-		gate:           opts.Gate,
-		events:         opts.Events,
-		runs:           opts.Runs,
-		control:        opts.Control,
-		hooks:          opts.Hooks,
-		log:            opts.Logger,
-		poll:           opts.Poll,
-		defaultTimeout: opts.DefaultTimeout,
-		now:            opts.Now,
-		records:        make(map[string]*SubagentRecord),
+		gate:              opts.Gate,
+		events:            opts.Events,
+		runs:              opts.Runs,
+		control:           opts.Control,
+		hooks:             opts.Hooks,
+		log:               opts.Logger,
+		poll:              opts.Poll,
+		defaultTimeout:    opts.DefaultTimeout,
+		now:               opts.Now,
+		records:           make(map[string]*SubagentRecord),
+		validateSelection: opts.ValidateSelection,
 	}
 	if opts.Gate != nil && opts.Edge != nil {
 		r.starter = NewTurnStarter(opts.Gate, opts.Edge, opts.Hooks, opts.Logger)
@@ -219,6 +230,22 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 		return SubagentRecord{}, ErrParentSessionNotFound
 	}
 
+	// The child's execution binding travels as the input's own selection fact:
+	// the child attempt then resolves the member's prompt, tools and model,
+	// exactly like a session that picked that agent. The same submit-time gate
+	// the session input edge runs applies here, before the child session or the
+	// user.message exists: a selection the next attempt would deny is refused at
+	// the spawn call, never stored as a fact that fails every attempt.
+	selection := req.childSelection()
+	if len(selection) > 0 {
+		if r.validateSelection == nil {
+			return SubagentRecord{}, fmt.Errorf("%w: selection is not supported by this sub-agent runner", ErrInvalidSpawn)
+		}
+		if err := r.validateSelection(selection); err != nil {
+			return SubagentRecord{}, fmt.Errorf("%w: selection: %v", ErrInvalidSpawn, err)
+		}
+	}
+
 	childID := uuid.New()
 	key := strings.TrimSpace(req.IdempotencyKey)
 	requestID := uuid.NewString()
@@ -235,10 +262,8 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 			"budget":          req.Budget,
 		},
 	}
-	// The child's execution binding travels as the input's own selection fact:
-	// the child attempt then resolves the member's prompt, tools and model,
-	// exactly like a session that picked that agent.
-	if selection := req.childSelection(); len(selection) > 0 {
+	// The validated selection travels as the child input's own fact.
+	if len(selection) > 0 {
 		extras["selection"] = selection
 	}
 	start, err := r.starter.StartTurn(ctx, StartTurnRequest{

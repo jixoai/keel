@@ -1,0 +1,2 @@
+# go vet ./cmd/keel ./internal/agentapi ./internal/agentext ./internal/approval ./internal/mcp ./internal/notify ./internal/toolsurface
+# exit=0

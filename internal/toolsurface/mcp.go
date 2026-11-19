@@ -1,6 +1,7 @@
 package toolsurface
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -155,7 +156,14 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 	if input.Server == "" || input.Tool == "" {
 		return invalidArguments(MCP, "call requires server and tool")
 	}
-	result, err := backend.CallTool(ctx, input.Server, input.Tool, input.Arguments)
+	// The schema declares arguments as an object; enforce it here so a backend
+	// never receives an array/string/number in its place. Missing and null both
+	// mean "no arguments" and travel as the empty object.
+	arguments, err := mcpCallArguments(input.Arguments)
+	if err != nil {
+		return invalidArguments(MCP, err.Error())
+	}
+	result, err := backend.CallTool(ctx, input.Server, input.Tool, arguments)
 	if err != nil {
 		switch {
 		case errors.Is(err, mcp.ErrServerNotFound), errors.Is(err, mcp.ErrToolNotFound):
@@ -189,6 +197,25 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 		StructuredContent: result,
 		IsError:           &isError,
 	}, nil
+}
+
+// mcpCallArguments enforces the tool schema's object contract on the call
+// arguments. Absent and null are the empty object ("no arguments"); anything
+// else that is not a JSON object is refused with a readable message instead of
+// being forwarded to the backend.
+func mcpCallArguments(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return json.RawMessage("{}"), nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &object); err != nil {
+		return nil, fmt.Errorf("arguments must be a JSON object: %v", err)
+	}
+	if object == nil {
+		return json.RawMessage("{}"), nil
+	}
+	return trimmed, nil
 }
 
 func marshalDocument(document map[string]any) string {

@@ -291,6 +291,85 @@ func TestURLConsumptionIsSingleUse(t *testing.T) {
 	}
 }
 
+// Any successful ack consumes the notification, so it must kill every
+// consumer's capability URL, not only the one that answered, and drop the raw
+// tokens this process still holds.
+func TestAnyAckInvalidatesEveryCapabilityToken(t *testing.T) {
+	h := newNotifyHarness(t, Options{})
+	ctx := context.Background()
+	view := h.push(t,
+		clientConsumer("web", true),
+		ConsumerSpec{ID: "mail", Kind: ConsumerURL},
+		ConsumerSpec{ID: "pixel", Kind: ConsumerImage},
+	)
+	id := uuid.MustParse(view.NotificationID)
+	mailToken := tokenFromURL(t, view.URLs["mail"])
+	pixelToken := tokenFromURL(t, view.URLs["pixel"])
+	if h.service.tokenFor(view.NotificationID, "mail") == "" || h.service.tokenFor(view.NotificationID, "pixel") == "" {
+		t.Fatal("the push did not keep the raw tokens in this process")
+	}
+
+	acked, duplicate, err := h.service.Ack(ctx, h.scope.TenantID, id, "web", "owner@example.test", ChannelAPI)
+	if err != nil || duplicate {
+		t.Fatalf("ack = duplicate=%v err=%v", duplicate, err)
+	}
+	if acked.Status != StatusConsumed {
+		t.Fatalf("status = %s", acked.Status)
+	}
+	for _, consumer := range []string{"mail", "pixel"} {
+		if token := h.service.tokenFor(view.NotificationID, consumer); token != "" {
+			t.Fatalf("raw token of %q survived the ack", consumer)
+		}
+	}
+	// The other consumers' URLs were minted against this notification; a
+	// consumed notification invalidates them (410, never 404 for a real token).
+	if _, err := h.service.OpenURL(ctx, id, mailToken, uuid.Nil); !errors.Is(err, ErrConsumed) {
+		t.Fatalf("open with a non-acking token = %v, want ErrConsumed", err)
+	}
+	if _, err := h.service.TrackDelivery(ctx, id, pixelToken, uuid.Nil); !errors.Is(err, ErrConsumed) {
+		t.Fatalf("pixel with a non-acking token = %v, want ErrConsumed", err)
+	}
+	// The ack itself stays idempotent.
+	again, duplicate, err := h.service.Ack(ctx, h.scope.TenantID, id, "web", "owner@example.test", ChannelAPI)
+	if err != nil || !duplicate || again.Status != StatusConsumed {
+		t.Fatalf("duplicate ack = duplicate=%v status=%s err=%v", duplicate, again.Status, err)
+	}
+	if got := len(h.events(t, kernel.KindNotificationAck)); got != 1 {
+		t.Fatalf("ack events = %d, want 1 (the repeat is not a second fact)", got)
+	}
+}
+
+// A URL consumption is an ack too: opening one link closes every other link.
+func TestURLConsumptionInvalidatesOtherTokens(t *testing.T) {
+	h := newNotifyHarness(t, Options{})
+	ctx := context.Background()
+	view := h.push(t,
+		ConsumerSpec{ID: "mail", Kind: ConsumerURL},
+		ConsumerSpec{ID: "backup", Kind: ConsumerURL},
+		ConsumerSpec{ID: "pixel", Kind: ConsumerImage},
+	)
+	id := uuid.MustParse(view.NotificationID)
+	backupToken := tokenFromURL(t, view.URLs["backup"])
+	pixelToken := tokenFromURL(t, view.URLs["pixel"])
+	if _, err := h.service.OpenURL(ctx, id, tokenFromURL(t, view.URLs["mail"]), uuid.Nil); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := h.service.OpenURL(ctx, id, backupToken, uuid.Nil); !errors.Is(err, ErrConsumed) {
+		t.Fatalf("second link = %v, want ErrConsumed", err)
+	}
+	if _, err := h.service.TrackDelivery(ctx, id, pixelToken, uuid.Nil); !errors.Is(err, ErrConsumed) {
+		t.Fatalf("pixel = %v, want ErrConsumed", err)
+	}
+	for _, consumer := range []string{"mail", "backup", "pixel"} {
+		if token := h.service.tokenFor(view.NotificationID, consumer); token != "" {
+			t.Fatalf("raw token of %q survived the consumption", consumer)
+		}
+	}
+	if got := len(h.events(t, kernel.KindNotificationAck)); got != 1 {
+		t.Fatalf("ack events = %d, want 1", got)
+	}
+}
+
 func TestURLExpiry(t *testing.T) {
 	h := newNotifyHarness(t, Options{URLTTL: 30 * time.Minute})
 	view := h.push(t, ConsumerSpec{ID: "mail", Kind: ConsumerURL})

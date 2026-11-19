@@ -1,0 +1,9 @@
+# KEEL_TEST_DSN=... go test -race -count=1 <changed packages>
+# exit=0
+ok  	github.com/jixoai/keel/cmd/keel	5.036s
+ok  	github.com/jixoai/keel/internal/agentapi	5.333s
+ok  	github.com/jixoai/keel/internal/agentext	17.142s
+ok  	github.com/jixoai/keel/internal/approval	2.195s
+ok  	github.com/jixoai/keel/internal/mcp	3.574s
+ok  	github.com/jixoai/keel/internal/notify	2.230s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.768s

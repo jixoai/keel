@@ -25,13 +25,15 @@ import (
 type fakeMCP struct {
 	servers []*mcp.Server
 	calls   int
+	args    []json.RawMessage
 	result  mcp.CallToolResult
 	err     error
 }
 
 func (f *fakeMCP) Servers() []*mcp.Server { return f.servers }
-func (f *fakeMCP) CallTool(_ context.Context, server, tool string, _ json.RawMessage) (mcp.CallToolResult, error) {
+func (f *fakeMCP) CallTool(_ context.Context, server, tool string, args json.RawMessage) (mcp.CallToolResult, error) {
 	f.calls++
+	f.args = append(f.args, append(json.RawMessage(nil), args...))
 	for _, candidate := range f.servers {
 		if candidate.Entry.Name != server {
 			continue
@@ -273,10 +275,60 @@ func TestMCPActions(t *testing.T) {
 	if backend.calls != 1 {
 		t.Fatalf("mcp call count = %d", backend.calls)
 	}
+	if got := string(backend.args[0]); got != `{"q":"x"}` {
+		t.Fatalf("backend arguments = %s, want the object verbatim", got)
+	}
 
 	missing := runAction(t, tool, `{"action":"call","server":"docs","tool":"nope"}`)
 	if problem := errorDocument(t, missing); problem["code"] != toolsurface.CodeNotFound {
 		t.Fatalf("missing tool = %v", problem)
+	}
+}
+
+// TestMCPCallArgumentsMustBeAnObject pins the schema contract: arguments is an
+// object, so missing/null become the empty object and any other JSON type is a
+// typed client error the backend never sees.
+func TestMCPCallArgumentsMustBeAnObject(t *testing.T) {
+	fixture := func() (*fakeMCP, agentcore.AgentTool) {
+		backend := &fakeMCP{
+			servers: []*mcp.Server{mcpServer("docs", mcp.Tool{Name: "search"})},
+			result:  mcp.CallToolResult{Content: []mcp.ContentBlock{{Type: "text", Text: "ok"}}},
+		}
+		return backend, builtinRegistry(t, toolsurface.Backends{MCP: backend})[toolsurface.MCP]
+	}
+
+	backend, tool := fixture()
+	for _, raw := range []string{
+		`{"action":"call","server":"docs","tool":"search"}`,
+		`{"action":"call","server":"docs","tool":"search","arguments":null}`,
+	} {
+		result := runAction(t, tool, raw)
+		if result.IsError != nil && *result.IsError {
+			t.Fatalf("%s = %v, want the empty object to pass", raw, result)
+		}
+		if got := agentcore.ContentToText(result.Content); got != "ok" {
+			t.Fatalf("%s content = %q", raw, got)
+		}
+	}
+	if backend.calls != 2 {
+		t.Fatalf("calls = %d, want 2", backend.calls)
+	}
+	for index, got := range backend.args {
+		if string(got) != `{}` {
+			t.Fatalf("arguments[%d] = %s, want {}", index, got)
+		}
+	}
+
+	for _, raw := range []string{`[]`, `"text"`, `7`, `true`} {
+		backend, tool := fixture()
+		result := runAction(t, tool, `{"action":"call","server":"docs","tool":"search","arguments":`+raw+`}`)
+		problem := errorDocument(t, result)
+		if problem == nil || problem["code"] != toolsurface.CodeInvalidArguments {
+			t.Fatalf("arguments %s = %v, want invalid_arguments", raw, problem)
+		}
+		if backend.calls != 0 {
+			t.Fatalf("arguments %s reached the backend %d times", raw, backend.calls)
+		}
 	}
 }
 

@@ -762,6 +762,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Control: runControl,
 		Hooks:   hooks,
 		Logger:  log,
+		// A spawned child's input carries a selection fact exactly like a
+		// session input; the spawn must refuse an unexecutable one at the call,
+		// before the child session or its user.message exists. Bind the same
+		// per-generation gate the /input edge uses so the two cannot drift.
+		ValidateSelection: selectFromCurrentGeneration(rt),
 	})
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter,

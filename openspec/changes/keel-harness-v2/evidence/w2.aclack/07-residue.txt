@@ -1,0 +1,5 @@
+# residue check 2026-11-20
+pgrep '/tmp/keel-agent-e2e|keel serve': none
+ports 13610/13611 (the e2e serve): released (see agent-runtime-e2e/port-release.txt)
+e2e database: dropped by the script; only keel_test_w2_aclean remains (this worktree's dedicated test DB)
+/tmp/keel-agent-e2e binary: removed after the run

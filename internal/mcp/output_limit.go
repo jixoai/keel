@@ -18,6 +18,21 @@ import (
 // Codex does. Mirrors MCP_OUTPUT_MAX_BYTES (output-limit.ts:9).
 const MCPOutputMaxBytes = 20 * 1024
 
+// MCPImageMaxBytes bounds one image content block independently of the text
+// budget. A text limit cannot cover images: a useful image never fits in 20 KiB,
+// and a configured MCP server could otherwise put an arbitrarily large base64
+// payload straight into the run. The cap is measured on the encoded payload
+// that would enter the context (Data or a data:-URL), so 2 MiB of base64 is
+// about 1.5 MiB of image bytes — below the 5 MB per-image limit most providers
+// enforce — while keeping one MCP result to a few megabytes. An oversize image
+// is replaced by a bounded text placeholder that names its size; the original
+// bytes never enter the context.
+const MCPImageMaxBytes = 2 * 1024 * 1024
+
+// maxImageMimeLength bounds the mimeType copied into the placeholder: the
+// placeholder must stay bounded even when the server sends a hostile value.
+const maxImageMimeLength = 64
+
 // LimitedContent mirrors pi's limitMcpContent result: the model-facing content
 // and, when the full text was saved, the path the model can read.
 type LimitedContent struct {
@@ -25,10 +40,12 @@ type LimitedContent struct {
 	FullOutputPath string
 }
 
-// LimitContent keeps model-facing text within MCPOutputMaxBytes. Longer text
-// becomes one text block in Codex's truncation format, followed by the path of
-// the file with the full text when saveOutput is given; images follow it.
-// Content within the limit is returned as it is (same slice).
+// LimitContent keeps model-facing text within MCPOutputMaxBytes and every image
+// block within MCPImageMaxBytes. Longer text becomes one text block in Codex's
+// truncation format, followed by the path of the file with the full text when
+// saveOutput is given; images follow it. An image over MCPImageMaxBytes becomes
+// a bounded text placeholder naming its size, so it can never flood the run.
+// Content within every limit is returned as it is (same slice).
 //
 // saveOutput receives the full untruncated text (text blocks joined with
 // newlines) and a ".txt" extension, and returns a path the model can read. A
@@ -36,15 +53,44 @@ type LimitedContent struct {
 // model in the same text instead of failing.
 func LimitContent(content []agentcore.Content, saveOutput func(data, extension string) (string, error)) LimitedContent {
 	var texts []string
+	// imageBlocks holds every image position, in order, with an oversize image
+	// already replaced by its placeholder.
+	imageBlocks := make([]agentcore.Content, 0, len(content))
+	imagesDegraded := false
 	for _, block := range content {
 		if text, ok := contentText(block); ok {
 			texts = append(texts, text)
+			continue
 		}
+		image, ok := contentImage(block)
+		if !ok {
+			continue
+		}
+		if size := imagePayloadBytes(image); size > MCPImageMaxBytes {
+			imagesDegraded = true
+			imageBlocks = append(imageBlocks, agentcore.NewTextContent(degradedImagePlaceholder(image, size)))
+			continue
+		}
+		imageBlocks = append(imageBlocks, image)
 	}
 	combined := strings.Join(texts, "\n")
 	truncation, truncated := truncateMiddle(combined, MCPOutputMaxBytes)
 	if !truncated {
-		return LimitedContent{Content: content}
+		if !imagesDegraded {
+			return LimitedContent{Content: content}
+		}
+		// Only images changed: keep every other block exactly where it was.
+		out := make([]agentcore.Content, 0, len(content))
+		next := 0
+		for _, block := range content {
+			if _, ok := contentImage(block); ok {
+				out = append(out, imageBlocks[next])
+				next++
+				continue
+			}
+			out = append(out, block)
+		}
+		return LimitedContent{Content: out}
 	}
 	where := ""
 	fullPath := ""
@@ -62,14 +108,31 @@ func LimitContent(content []agentcore.Content, saveOutput func(data, extension s
 		"Warning: truncated output (original token count: %d)\nTotal output lines: %d\n\n%s%s",
 		tokens, truncation.totalLines, truncation.content, where,
 	)
-	out := make([]agentcore.Content, 0, 1+len(content))
+	out := make([]agentcore.Content, 0, 1+len(imageBlocks))
 	out = append(out, agentcore.NewTextContent(text))
-	for _, block := range content {
-		if image, ok := contentImage(block); ok {
-			out = append(out, image)
-		}
-	}
+	out = append(out, imageBlocks...)
 	return LimitedContent{Content: out, FullOutputPath: fullPath}
+}
+
+// imagePayloadBytes is the size of the payload that enters the context: the
+// base64 data, or a data:-URL's payload. A remote URL is just a reference and
+// costs the length of the URL itself.
+func imagePayloadBytes(image agentcore.ImageContent) int {
+	return len(image.Data) + len(image.URL)
+}
+
+// degradedImagePlaceholder is the visible, bounded stand-in for an oversize
+// image. It names the type and the byte count so the model knows content was
+// dropped and why, without reproducing any of the original bytes.
+func degradedImagePlaceholder(image agentcore.ImageContent, size int) string {
+	mime := strings.TrimSpace(image.MimeType)
+	if len(mime) > maxImageMimeLength {
+		mime = mime[:maxImageMimeLength]
+	}
+	if mime == "" {
+		mime = "unknown type"
+	}
+	return fmt.Sprintf("[image omitted: %s, %d bytes exceeds the %d-byte limit]", mime, size, MCPImageMaxBytes)
 }
 
 // middleTruncation is text cut in the middle, with the size of the whole text.

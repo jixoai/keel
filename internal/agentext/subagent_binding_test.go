@@ -8,12 +8,26 @@ package agentext_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/kernel"
 )
+
+// selectionValidator stands in for the input edge's submit-time gate: it records
+// every selection the runner submits and answers the configured verdict. A nil
+// err accepts.
+type selectionValidator struct {
+	seen []json.RawMessage
+	err  error
+}
+
+func (v *selectionValidator) validate(raw json.RawMessage) error {
+	v.seen = append(v.seen, append(json.RawMessage(nil), raw...))
+	return v.err
+}
 
 func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 	st := openTestStore(t)
@@ -31,12 +45,14 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	kern := kernel.New(klog, kernel.Options{})
+	validator := &selectionValidator{}
 	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
-		Gate:   st,
-		Edge:   kern,
-		Events: kern,
-		Runs:   storeSessions{st},
-		Logger: testLogger(),
+		Gate:              st,
+		Edge:              kern,
+		Events:            kern,
+		Runs:              storeSessions{st},
+		Logger:            testLogger(),
+		ValidateSelection: validator.validate,
 	})
 
 	record, err := runner.SpawnAsync(ctx, agentext.SpawnRequest{
@@ -110,5 +126,97 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 	}
 	if len(plainPayload.Selection) != 0 {
 		t.Fatalf("a bindingless spawn invented a selection: %s", plainPayload.Selection)
+	}
+
+	// The binding the spawn stored is exactly the selection the submit-time gate
+	// saw, and a bindingless spawn submits nothing to it.
+	if len(validator.seen) != 1 {
+		t.Fatalf("validator calls = %d, want 1 (only the bound spawn)", len(validator.seen))
+	}
+	var validated struct {
+		AgentID string `json:"agentId"`
+	}
+	if err := json.Unmarshal(validator.seen[0], &validated); err != nil {
+		t.Fatalf("validated selection %s: %v", validator.seen[0], err)
+	}
+	if validated.AgentID != "agent_member_7" {
+		t.Fatalf("validated selection = %+v, want agentId agent_member_7", validated)
+	}
+}
+
+// A selection the submit-time gate refuses must stop the spawn before any child
+// session, user.message or registry record exists (agent-team: MUST refuse at
+// submission, MUST NOT store history and fail every attempt later).
+func TestSubagentSpawnRefusesAnInvalidSelectionBeforeCommit(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	parent := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "subagent-refusal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, tenant, parent); err != nil {
+		t.Fatal(err)
+	}
+	klog, err := kernel.NewPG(ctx, st.Pool())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kern := kernel.New(klog, kernel.Options{})
+	validator := &selectionValidator{err: errors.New(`agent "agent_ghost" is archived`)}
+	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
+		Gate:              st,
+		Edge:              kern,
+		Events:            kern,
+		Runs:              storeSessions{st},
+		Logger:            testLogger(),
+		ValidateSelection: validator.validate,
+	})
+	const key = "refused-selection"
+	_, err = runner.SpawnAsync(ctx, agentext.SpawnRequest{
+		TenantID:        tenant,
+		ParentSessionID: parent,
+		Task:            "review the draft",
+		Selection:       json.RawMessage(`{"agentId":"agent_ghost"}`),
+		IdempotencyKey:  key,
+	})
+	if !errors.Is(err, agentext.ErrInvalidSpawn) {
+		t.Fatalf("invalid selection spawn = %v, want ErrInvalidSpawn", err)
+	}
+	if len(validator.seen) != 1 {
+		t.Fatalf("validator calls = %d, want 1", len(validator.seen))
+	}
+	childID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("keel.subagent.v1|"+
+		tenant.String()+"|"+parent.String()+"|"+key))
+	if _, exists, err := st.SessionOwner(ctx, tenant, childID); err != nil {
+		t.Fatal(err)
+	} else if exists {
+		t.Fatal("an invalid selection created the child session")
+	}
+	events, err := st.LoadEvents(ctx, tenant, childID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("an invalid selection wrote child events: %+v", events)
+	}
+	if records := runner.List(tenant, &parent); len(records) != 0 {
+		t.Fatalf("an invalid selection registered a sub-agent: %+v", records)
+	}
+
+	// The same request with a selection the gate accepts runs exactly as before.
+	validator.err = nil
+	record, err := runner.SpawnAsync(ctx, agentext.SpawnRequest{
+		TenantID:        tenant,
+		ParentSessionID: parent,
+		Task:            "review the draft",
+		Selection:       json.RawMessage(`{"agentId":"agent_ghost"}`),
+		IdempotencyKey:  key,
+	})
+	if err != nil {
+		t.Fatalf("accepted selection spawn: %v", err)
+	}
+	if record.SessionID != childID.String() {
+		t.Fatalf("child session = %s, want %s", record.SessionID, childID)
 	}
 }

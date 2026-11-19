@@ -8,7 +8,10 @@
 // second fact — the provenance — as its own durable row:
 //
 //   - who answered (the X-Keel-Actor credential context, or "unknown" when the
-//     client sent none — never invented);
+//     client sent none — never invented). X-Keel-Actor is tenant-asserted
+//     advisory attribution, not an authorization fact: any holder of the tenant
+//     credential can set it, so audit UIs and policy must never treat the
+//     recorded actor as a cryptographic identity;
 //   - from which channel (the HTTP decisions API, a URL consumption, or the
 //     tool noticing an answer that arrived through an older path);
 //   - whether the answer stayed inside the declared answer space

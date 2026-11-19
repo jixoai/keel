@@ -235,7 +235,8 @@ func tokenOf(t *testing.T, raw string) string {
 func TestNotificationRoutesAckListAndURL(t *testing.T) {
 	api := newNotifyAPI(t)
 	view := api.push(t, notify.ConsumerSpec{ID: "web", Kind: notify.ConsumerClient, Online: true},
-		notify.ConsumerSpec{ID: "mail", Kind: notify.ConsumerURL})
+		notify.ConsumerSpec{ID: "mail", Kind: notify.ConsumerURL},
+		notify.ConsumerSpec{ID: "backup", Kind: notify.ConsumerURL})
 
 	var list struct {
 		Count         int           `json:"count"`
@@ -254,12 +255,6 @@ func TestNotificationRoutesAckListAndURL(t *testing.T) {
 		Notification notify.View `json:"notification"`
 		Duplicate    bool        `json:"duplicate"`
 	}
-	code = doJSON(t, api.server.Client(), http.MethodPost,
-		api.server.URL+"/v1/notifications/"+view.NotificationID+"/ack", api.tenant,
-		map[string]any{"consumerId": "web"}, &acked)
-	if code != http.StatusOK || acked.Notification.Status != notify.StatusConsumed || acked.Duplicate {
-		t.Fatalf("ack = %d %+v", code, acked)
-	}
 
 	// The URL route needs no tenant header: the token is the capability.
 	open := api.server.URL + view.URLs["mail"]
@@ -271,6 +266,18 @@ func TestNotificationRoutesAckListAndURL(t *testing.T) {
 	}
 	if code := doJSON(t, api.server.Client(), http.MethodGet, open, uuid.Nil, nil, nil); code != http.StatusGone {
 		t.Fatalf("replayed url = %d, want 410", code)
+	}
+	// Any consumption consumes the notification: the other capability URL minted
+	// with it is dead too (the token is real, so 410 rather than 404).
+	if code := doJSON(t, api.server.Client(), http.MethodGet, api.server.URL+view.URLs["backup"], uuid.Nil, nil, nil); code != http.StatusGone {
+		t.Fatalf("sibling url after consumption = %d, want 410", code)
+	}
+
+	code = doJSON(t, api.server.Client(), http.MethodPost,
+		api.server.URL+"/v1/notifications/"+view.NotificationID+"/ack", api.tenant,
+		map[string]any{"consumerId": "web"}, &acked)
+	if code != http.StatusOK || acked.Notification.Status != notify.StatusConsumed || acked.Duplicate {
+		t.Fatalf("ack = %d %+v", code, acked)
 	}
 }
 

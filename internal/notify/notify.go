@@ -14,7 +14,8 @@
 // pushes the same notification twice. URL consumption is a bearer capability:
 // a 256-bit random token, stored only as a SHA-256 hash, single use, bounded by
 // its own expiry. A pixel (`img`) consumer is delivery tracking, not
-// consumption, and stays idempotent.
+// consumption, and stays idempotent; once any ack consumes the notification,
+// every capability URL (the pixel included) is refused.
 package notify
 
 import (
@@ -511,7 +512,9 @@ func (s *Service) Ack(ctx context.Context, tenantID, notificationID uuid.UUID, c
 	now := s.now()
 	if consumer.AckedAt != nil {
 		// The durable fact already exists; do not re-commit it with a new
-		// timestamp (the kernel's key dedupe is content-sensitive).
+		// timestamp (the kernel's key dedupe is content-sensitive). The
+		// notification is consumed, so no raw token may stay in this process.
+		s.forgetTokens(row.NotificationID)
 		return row.View(nil, false), true, nil
 	}
 	if err := s.commitAck(ctx, row, consumer, actor, channel, now); err != nil {
@@ -531,6 +534,11 @@ func (s *Service) Ack(ctx context.Context, tenantID, notificationID uuid.UUID, c
 	if err := s.store.Save(ctx, row); err != nil {
 		return View{}, false, err
 	}
+	// Any ack consumes the notification, so every consumer's capability URL is
+	// dead from here on: OpenURL/TrackDelivery refuse a consumed row, and the
+	// raw tokens (which only this process holds) are dropped now rather than
+	// lingering until a push finishes.
+	s.forgetTokens(row.NotificationID)
 	return row.View(nil, false), false, nil
 }
 
@@ -558,6 +566,12 @@ func (s *Service) OpenURL(ctx context.Context, notificationID uuid.UUID, token s
 	if consumer.TokenUsed || consumer.AckedAt != nil {
 		return View{}, ErrTokenUsed
 	}
+	// The token is real but another consumer already consumed the notification:
+	// any ack consumes it, so this capability is dead too (410, not 404 only
+	// after the token proved valid).
+	if row.Status == StatusConsumed {
+		return View{}, ErrConsumed
+	}
 	now := s.now()
 	if consumer.TokenExpiresAt == nil || !now.Before(*consumer.TokenExpiresAt) {
 		return View{}, ErrTokenExpired
@@ -581,6 +595,9 @@ func (s *Service) OpenURL(ctx context.Context, notificationID uuid.UUID, token s
 	if err := s.store.Save(ctx, row); err != nil {
 		return View{}, err
 	}
+	// This consumption also invalidates every other consumer's URL; the raw
+	// tokens live only in this process, so drop them with the row consumed.
+	s.forgetTokens(row.NotificationID)
 	return row.View(nil, false), nil
 }
 
@@ -607,6 +624,11 @@ func (s *Service) TrackDelivery(ctx context.Context, notificationID uuid.UUID, t
 	now := s.now()
 	if consumer.TokenExpiresAt == nil || !now.Before(*consumer.TokenExpiresAt) {
 		return View{}, ErrTokenExpired
+	}
+	// A pixel on a consumed notification is dead: any ack (including another
+	// consumer's) consumes the notification and invalidates every capability.
+	if row.Status == StatusConsumed {
+		return View{}, ErrConsumed
 	}
 	if consumer.DeliveredAt != nil {
 		return row.View(nil, false), nil

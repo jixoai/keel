@@ -26,9 +26,15 @@ func firstText(t *testing.T, content []agentcore.Content) string {
 	if len(content) == 0 {
 		t.Fatal("expected a text block first, got no content")
 	}
-	text, ok := content[0].(agentcore.TextContent)
+	return firstTextOf(t, content[0])
+}
+
+// firstTextOf returns the text of one block, failing when it is not text.
+func firstTextOf(t *testing.T, block agentcore.Content) string {
+	t.Helper()
+	text, ok := block.(agentcore.TextContent)
 	if !ok {
-		t.Fatalf("expected a text block first, got %T", content[0])
+		t.Fatalf("expected a text block, got %T", block)
 	}
 	return text.Text
 }
@@ -138,6 +144,70 @@ func TestLimitContent(t *testing.T) {
 		unsavedText := firstText(t, unsaved.Content)
 		if !regexp.MustCompile(`(?s)^Warning: truncated output .*…\d+ chars truncated…y+$`).MatchString(unsavedText) {
 			t.Errorf("unsaved text = %q, want the truncation format without a path", unsavedText)
+		}
+	})
+
+	t.Run("keeps a small image as it is", func(t *testing.T) {
+		content := []agentcore.Content{
+			agentcore.NewTextContent("short text"),
+			testImage(),
+		}
+		limited := LimitContent(content, nil)
+		if !reflect.DeepEqual(limited.Content, content) {
+			t.Errorf("LimitContent(small image) = %#v, want %#v", limited.Content, content)
+		}
+		if &limited.Content[0] != &content[0] {
+			t.Error("LimitContent(small image) returned a copy, want the same slice")
+		}
+	})
+
+	t.Run("replaces an oversize image with a bounded visible placeholder", func(t *testing.T) {
+		oversize := agentcore.NewImageContent(strings.Repeat("A", MCPImageMaxBytes+1), "image/png")
+		content := []agentcore.Content{
+			agentcore.NewTextContent("before"),
+			oversize,
+			agentcore.NewTextContent("after"),
+		}
+		limited := LimitContent(content, nil)
+		if len(limited.Content) != 3 {
+			t.Fatalf("len(LimitContent(oversize image)) = %d, want 3", len(limited.Content))
+		}
+		if _, ok := limited.Content[1].(agentcore.ImageContent); ok {
+			t.Fatalf("the oversize image reached the context: %#v", limited.Content[1])
+		}
+		placeholder := firstTextOf(t, limited.Content[1])
+		for _, want := range []string{"image omitted", "image/png", strconv.Itoa(MCPImageMaxBytes + 1)} {
+			if !strings.Contains(placeholder, want) {
+				t.Errorf("placeholder %q does not mention %q", placeholder, want)
+			}
+		}
+		if len(placeholder) > 256 {
+			t.Errorf("len(placeholder) = %d, want a bounded replacement", len(placeholder))
+		}
+		if got := firstTextOf(t, limited.Content[0]); got != "before" {
+			t.Errorf("content before the image = %q, want before", got)
+		}
+		if got := firstTextOf(t, limited.Content[2]); got != "after" {
+			t.Errorf("content after the image = %q, want after", got)
+		}
+	})
+
+	t.Run("degrades an oversize image in a truncated result too", func(t *testing.T) {
+		oversize := agentcore.NewImageContent(strings.Repeat("B", MCPImageMaxBytes+1), "image/jpeg")
+		content := []agentcore.Content{
+			agentcore.NewTextContent(strings.Repeat("z", MCPOutputMaxBytes+1)),
+			oversize,
+		}
+		limited := LimitContent(content, nil)
+		if len(limited.Content) != 2 {
+			t.Fatalf("len(truncated content) = %d, want 2", len(limited.Content))
+		}
+		if _, ok := limited.Content[1].(agentcore.ImageContent); ok {
+			t.Fatalf("the oversize image reached the truncated context: %#v", limited.Content[1])
+		}
+		placeholder := firstTextOf(t, limited.Content[1])
+		if !strings.Contains(placeholder, "image omitted") || len(placeholder) > 256 {
+			t.Errorf("placeholder = %q, want a bounded visible omission", placeholder)
 		}
 	})
 
