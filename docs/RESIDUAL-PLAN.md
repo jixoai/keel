@@ -161,6 +161,11 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 - **`Materialize` `O_NOFOLLOW`**（fork/materialize 生产接线前必补）；**`shellScope` 无 run scope
   回落 boot 租户**（多租户 pack 前改类型化拒绝）。
 - **residue 脚本**补扫 `keel_agent_test_*` 遗留库（B P2-4）。
+- **MCP Apps CSP 公共后缀判定**（P2 复核残项，2026-11-20）：`internal/mcphost` 已拒绝单标签
+  通配（`*.com`/`*.net`/`*.localhost`）与 loopback/私网/全数字主机；但完整 PSL 判定未做，
+  `https://*.co.uk` 这类「两级以上仍是公共后缀」的通配仍会被当作子域授予。当前成本高于收益
+  （需要内嵌 PSL 或网络依赖），登记待 P6 之后评估；其它替代 IP 编码（十六进制/八进制主机）
+  同理，仅全数字形式被拒。
 
 ## 6. 今日已到账（证据锚点）
 

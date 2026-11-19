@@ -1,0 +1,7 @@
+ok  	github.com/jixoai/keel/internal/mcphost	2.238s
+ok  	github.com/jixoai/keel/internal/mcp	5.735s
+ok  	github.com/jixoai/keel/internal/httpapi	4.587s
+ok  	github.com/jixoai/keel/internal/agentapi	3.300s
+ok  	github.com/jixoai/keel/cmd/keel	6.932s
+ok  	github.com/jixoai/keel/internal/servicehost	13.467s
+exit=0

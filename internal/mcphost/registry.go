@@ -62,6 +62,10 @@ type Options struct {
 	// fetch/validation/cache/refusal). The durable table is P3.7; P2 keeps the
 	// seam and the structured log.
 	Auditor Auditor
+	// AllowPrivateDomains admits loopback/private origins in an app's CSP. Off
+	// by default: a View is browser JavaScript, and a private origin gives it a
+	// path to the host's own network services. A dev fixture opts in.
+	AllowPrivateDomains bool
 	// ReadApp reads one app document. Nil uses server.Client.ReadAppResource.
 	ReadApp func(ctx context.Context, server *mcp.Server, uri string) (mcp.AppResource, error)
 	// Sinks receive the published surface. Every sink is optional.
@@ -381,15 +385,15 @@ func (r *Registry) resolve(ctx context.Context, app mcp.App, byName map[string]*
 	hash := contentHash(bytes)
 	docID := documentKey(app.AppID, hash)
 
-	meta, notes := parseResourceMeta(resource.Meta)
-	cspHeader, cspNotes := BuildCSP(meta.CSP)
-	notes = append(notes, cspNotes...)
-
-	// The previous version must stop shielding capacity before the new one is
-	// inserted; both cannot be current.
-	if hasPrevious && previous.docID != docID {
-		r.cache.protect(previous.docID, false)
+	meta, metaNotes := parseResourceMeta(resource.Meta)
+	cspHeader, cspNotes := BuildCSP(meta.CSP, CSPOptions{AllowPrivateDomains: r.options.AllowPrivateDomains})
+	// One diagnostic budget per app across metadata parsing and CSP building:
+	// a hostile block cannot amplify its notes into the catalogue.
+	notes := boundDiagnostics(append(metaNotes, cspNotes...), maxAppDiagnostics)
+	if len(resource.Diagnostics) > 0 {
+		notes = boundDiagnostics(append(notes, resource.Diagnostics...), maxAppDiagnostics)
 	}
+
 	doc := Document{
 		AppID:     app.AppID,
 		Server:    app.Server,
@@ -399,10 +403,18 @@ func (r *Registry) resolve(ctx context.Context, app mcp.App, byName map[string]*
 		Bytes:     bytes,
 		FetchedAt: now,
 	}
+	// Store the new version first: the previous one stays pinned until the new
+	// one is protected, so a failed put (cache full) can still serve the old
+	// version instead of leaving an unprotected document that a concurrent put
+	// may evict. Only after the new version is in the cache does the old one
+	// become evictable.
 	if !r.cache.put(docID, doc, true) {
 		message := fmt.Sprintf("the document cannot be cached within the %d-byte budget", r.options.CacheBytes)
 		r.diagnoseApp(ctx, app, "cache", message)
 		return r.keepPrevious(previous, hasPrevious, previousDoc, hasPreviousDoc, app)
+	}
+	if hasPrevious && previous.docID != docID {
+		r.cache.protect(previous.docID, false)
 	}
 
 	spec := AppSpec{

@@ -1,0 +1,63 @@
+=== RUN   TestBuildCSPStrictDefault
+--- PASS: TestBuildCSPStrictDefault (0.00s)
+=== RUN   TestBuildCSPDeclaredDomains
+--- PASS: TestBuildCSPDeclaredDomains (0.00s)
+=== RUN   TestBuildCSPTightensOnly
+--- PASS: TestBuildCSPTightensOnly (0.00s)
+=== RUN   TestBuildCSPWildcardRequiresTwoLabels
+--- PASS: TestBuildCSPWildcardRequiresTwoLabels (0.00s)
+=== RUN   TestBuildCSPPrivateDomains
+--- PASS: TestBuildCSPPrivateDomains (0.00s)
+=== RUN   TestBuildCSPPortRange
+--- PASS: TestBuildCSPPortRange (0.00s)
+=== RUN   TestBuildCSPDomainBounds
+--- PASS: TestBuildCSPDomainBounds (0.00s)
+=== RUN   TestBuildCSPDiagnosticsAreBounded
+--- PASS: TestBuildCSPDiagnosticsAreBounded (0.00s)
+=== RUN   TestDiagCollectorBoundsTwoMillionMessages
+--- PASS: TestDiagCollectorBoundsTwoMillionMessages (0.02s)
+=== RUN   TestBoundDiagnosticsTruncatesCombinedLists
+--- PASS: TestBoundDiagnosticsTruncatesCombinedLists (0.00s)
+=== RUN   TestParseResourceMetaFullBlock
+--- PASS: TestParseResourceMetaFullBlock (0.00s)
+=== RUN   TestParseResourceMetaDropsInvalidMembers
+--- PASS: TestParseResourceMetaDropsInvalidMembers (0.00s)
+=== RUN   TestParseResourceMetaAbsent
+--- PASS: TestParseResourceMetaAbsent (0.00s)
+=== RUN   TestParseResourceMetaDiagnosticsBounded
+--- PASS: TestParseResourceMetaDiagnosticsBounded (0.00s)
+=== RUN   TestParseResourceMetaHugeDomainList
+--- PASS: TestParseResourceMetaHugeDomainList (0.00s)
+=== RUN   TestRegistryKeepsPreviousVersionOnRefetchFailure
+--- PASS: TestRegistryKeepsPreviousVersionOnRefetchFailure (0.00s)
+=== RUN   TestRegistryContentChangeReclaimsCache
+--- PASS: TestRegistryContentChangeReclaimsCache (0.00s)
+=== RUN   TestRegistryKeepsPreviousVersionWhenCacheIsFull
+--- PASS: TestRegistryKeepsPreviousVersionWhenCacheIsFull (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcphost	0.217s
+=== RUN   TestValidateAppResourceIgnoresOversizedMeta
+--- PASS: TestValidateAppResourceIgnoresOversizedMeta (0.01s)
+=== RUN   TestValidateAppResourceMetaLimitIsSummed
+--- PASS: TestValidateAppResourceMetaLimitIsSummed (0.00s)
+=== RUN   TestValidateAppResourceKeepsBoundedMeta
+--- PASS: TestValidateAppResourceKeepsBoundedMeta (0.00s)
+=== RUN   TestValidateAppResourceMetaPreference
+--- PASS: TestValidateAppResourceMetaPreference (0.00s)
+=== RUN   TestValidateAppResourceSizeLimit
+--- PASS: TestValidateAppResourceSizeLimit (0.01s)
+=== RUN   TestValidateAppResourceRejectsEmptyDocument
+--- PASS: TestValidateAppResourceRejectsEmptyDocument (0.00s)
+=== RUN   TestValidateAppResourceRejectsTextAndBlobTogether
+--- PASS: TestValidateAppResourceRejectsTextAndBlobTogether (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcp	0.251s
+=== RUN   TestMCPAppViewSecurityHeaders
+--- PASS: TestMCPAppViewSecurityHeaders (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentapi	0.281s
+=== RUN   TestProductMCPAppRoutesThroughEdgeMux
+--- PASS: TestProductMCPAppRoutesThroughEdgeMux (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/httpapi	0.472s
+exit=0

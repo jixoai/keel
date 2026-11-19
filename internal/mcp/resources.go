@@ -32,7 +32,16 @@ type AppResource struct {
 	Meta       json.RawMessage
 	TTLMs      *int64
 	CacheScope string
+	// Diagnostics records optional metadata that was discarded (an oversized
+	// `_meta`). The document itself remains usable: metadata is advisory.
+	Diagnostics []string
 }
+
+// AppResourceMetaMaxBytes bounds the `_meta` an app document may carry. The
+// transport frame limit is 16 MiB; a `_meta` near that size would be parsed
+// into per-member diagnostics and published in the catalogue, so it is ignored
+// as a whole instead of being trusted or partially parsed.
+const AppResourceMetaMaxBytes = 64 << 10
 
 // ListResources returns every resource, following nextCursor through all pages.
 func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
@@ -138,12 +147,14 @@ func ValidateAppResource(result ReadResourceResult) (AppResource, error) {
 	if content.Blob == "" && content.Text == "" {
 		return AppResource{}, fmt.Errorf("%w: resource %q carries neither text nor blob", ErrNotAppResource, content.URI)
 	}
+	meta, metaDiagnostics := appResourceMeta(content.Meta, result.Meta)
 	resource := AppResource{
-		URI:        content.URI,
-		MIMEType:   content.MimeType,
-		Meta:       appResourceMeta(content.Meta, result.Meta),
-		TTLMs:      result.TTLMs,
-		CacheScope: result.CacheScope,
+		URI:         content.URI,
+		MIMEType:    content.MimeType,
+		Meta:        meta,
+		TTLMs:       result.TTLMs,
+		CacheScope:  result.CacheScope,
+		Diagnostics: metaDiagnostics,
 	}
 	if content.Blob != "" {
 		decoded, err := base64.StdEncoding.DecodeString(content.Blob)
@@ -169,14 +180,24 @@ func ValidateAppResource(result ReadResourceResult) (AppResource, error) {
 // the content item's own `_meta` when present, otherwise the result-level
 // `_meta`. MCP Apps puts `_meta.ui` on the resource item; a server that places
 // it on the result object is accepted as well (kept for the P1 fixture shape).
-func appResourceMeta(item, result json.RawMessage) json.RawMessage {
-	if len(item) > 0 && !isJSONNull(item) {
-		return append(json.RawMessage(nil), item...)
+//
+// The combined size is bounded before anything is copied or parsed: an
+// oversized `_meta` is ignored as a whole (the document stays usable) and
+// reported once, so a 16 MiB metadata block cannot become a huge diagnostic or
+// catalogue payload.
+func appResourceMeta(item, result json.RawMessage) (json.RawMessage, []string) {
+	itemSize, resultSize := len(item), len(result)
+	if itemSize+resultSize > AppResourceMetaMaxBytes {
+		return nil, []string{fmt.Sprintf("_meta ignored: %d bytes over the %d-byte limit",
+			itemSize+resultSize, AppResourceMetaMaxBytes)}
 	}
-	if len(result) > 0 && !isJSONNull(result) {
-		return append(json.RawMessage(nil), result...)
+	if itemSize > 0 && !isJSONNull(item) {
+		return append(json.RawMessage(nil), item...), nil
 	}
-	return nil
+	if resultSize > 0 && !isJSONNull(result) {
+		return append(json.RawMessage(nil), result...), nil
+	}
+	return nil, nil
 }
 
 // ListPrompts returns every prompt, following nextCursor through all pages.

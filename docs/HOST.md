@@ -90,6 +90,7 @@ quota:
   调用 loop。`Runner.Telemetry` 为 run 级 span + `keel.agent.runs` / `keel.agent.run.duration`。
 - MCP server 生命周期由 `mcp.Manager` 管理（并发连接/列工具/部分失败报告/关闭）；
   run 结束不关闭共享连接；`cmd/runtime` 在退出时 `Close()`。
+- MCP Apps 宿主（目录/文档托管/CSP/降级/租户语义）见 [`MCP-APPS.md`](MCP-APPS.md)。
 - 配置热更新：下一轮 run 生效；运行中的 run 用快照。
 
 ### 当前环境变量（`cmd/runtime`）
@@ -102,6 +103,7 @@ quota:
 | `KEEL_FILE_READ_TOOL` | skills 索引里的读文件工具名：`read`（默认）/`bash`/`indirect` |
 | `KEEL_MCP_CONFIG` | 全局 `mcp.json` 路径（空 = 不启用 MCP） |
 | `KEEL_MCP_PROJECT` | 项目 `mcp.json` 路径（仅可信项目） |
+| `KEEL_MCP_APP_ORIGIN` | 可选 View 第二 origin（`/v1/capabilities` 的 `mcp.apps.sandboxOrigin`）；非法值保持关闭 |
 | `KEEL_TELEMETRY` | `memory` 时启用内存 telemetry recorder |
 | `KEEL_ADMIN_KEY` | 管理员 Bearer key（租户 provisioning、租户配置/用量 API、MCP OAuth sign-in）；空 = 管理员 API 关闭（503） |
 | `KEEL_MODEL` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_PROVIDER` / `KEEL_API_KEY` | provider 选择（空 = fake provider） |

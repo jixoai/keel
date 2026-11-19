@@ -1,0 +1,43 @@
+# residue check (P2 review fix) 2026-11-19T19:55:07Z
+
+## this run's e2e ports
+# port release check
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## keel/e2e processes belonging to this worktree
+none
+
+## stub provider / keel serve / fixture children
+none
+
+## listeners in the project dev range 13600-13799 (may belong to other worktrees)
+COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+bun.nativ 14820  kzf    7u  IPv4  0xe99abd9f3bd5524      0t0  TCP 127.0.0.1:13622 (LISTEN)
+python3.1 15290  kzf    3u  IPv4 0xd19b03292c43617d      0t0  TCP 127.0.0.1:13787 (LISTEN)
+Python    39830  kzf    4u  IPv4 0x998a151dfc93692f      0t0  TCP 127.0.0.1:13670 (LISTEN)
+bun.nativ 41060  kzf    7u  IPv4 0x2701bfea582445e5      0t0  TCP 127.0.0.1:13748 (LISTEN)
+node      47719  kzf   12u  IPv4 0xab58aacd758667c0      0t0  TCP 127.0.0.1:13624 (LISTEN)
+python3.1 49103  kzf    3u  IPv4 0x92a021062291a9a9      0t0  TCP 127.0.0.1:13772 (LISTEN)
+python3.1 50241  kzf    3u  IPv4 0x5121da80f18c36a3      0t0  TCP 127.0.0.1:13779 (LISTEN)
+bun.nativ 61884  kzf    4u  IPv4 0xe378c8b9ef6d51fa      0t0  TCP 127.0.0.1:13645 (LISTEN)
+python3.1 62721  kzf    3u  IPv4 0x6c26242203772427      0t0  TCP 127.0.0.1:13603 (LISTEN)
+python3.1 63556  kzf    3u  IPv4 0xef3f84cf24e7788e      0t0  TCP 127.0.0.1:13788 (LISTEN)
+python3.1 63792  kzf    3u  IPv4 0xcaf26f8e05dd24f3      0t0  TCP 127.0.0.1:13795 (LISTEN)
+python3.1 63793  kzf    3u  IPv4 0x935a1686b4bb49d8      0t0  TCP 127.0.0.1:13796 (LISTEN)
+python3.1 63794  kzf    3u  IPv4 0x6f1fb1fead006640      0t0  TCP 127.0.0.1:13797 (LISTEN)
+node      65400  kzf   12u  IPv4 0xf797df830cf8acaf      0t0  TCP 127.0.0.1:13671 (LISTEN)
+python3.1 69561  kzf    3u  IPv4 0xfb5312216db1087b      0t0  TCP 127.0.0.1:13619 (LISTEN)
+python3.1 72907  kzf    3u  IPv4 0x6d5f44e03cab6ac3      0t0  TCP 127.0.0.1:13777 (LISTEN)
+python3.1 75077  kzf    3u  IPv4 0xfb9cda43e4226608      0t0  TCP 127.0.0.1:13798 (LISTEN)
+python3.1 83748  kzf    4u  IPv6 0x57234a696966eb94      0t0  TCP *:13698 (LISTEN)
+node      85929  kzf   12u  IPv4 0xa3f7fcc74e76e426      0t0  TCP 127.0.0.1:13675 (LISTEN)
+python3.1 86789  kzf    3u  IPv4 0x633b0074f846dd36      0t0  TCP 127.0.0.1:13778 (LISTEN)
+node      89103  kzf   58u  IPv4 0xac29ea3643ab0380      0t0  TCP 127.0.0.1:13623 (LISTEN)
+node      89103  kzf   61u  IPv4 0x9d1d6aefca4adcb9      0t0  TCP 127.0.0.1:13620 (LISTEN)
+node      89103  kzf   62u  IPv4 0x21f5c5fb71c43b38      0t0  TCP 127.0.0.1:13621 (LISTEN)
+python3.1 92210  kzf    3u  IPv4 0xa741aac2146d8b1c      0t0  TCP 127.0.0.1:13767 (LISTEN)
+com.docke 94165  kzf   74u  IPv6 0xb94d310158b8671a      0t0  TCP *:13741 (LISTEN)
+frpc      94887  kzf    4u  IPv4  0x1f1b7938b14b68e      0t0  TCP 127.0.0.1:13602 (LISTEN)
+imgproxy  95975  kzf    6u  IPv4 0x16ae824f9fb4637c      0t0  TCP 127.0.0.1:13630 (LISTEN)
+python3.1 96122  kzf    3u  IPv4 0xb677439fe0af1b68      0t0  TCP 127.0.0.1:13713 (LISTEN)

@@ -1,0 +1,87 @@
+P2 independent review fix evidence (branch task/keel-mcp-p2, base 0cb04e4)
+
+Gate files in this directory:
+fix-go-build.txt              go build ./...                                  exit 0
+fix-go-vet.txt                go vet <changed packages>                        exit 0
+fix-go-test-race.txt          go test -race -count=1 <changed packages>        exit 0
+fix-go-test-all.txt           KEEL_TEST_DSN go test -p 1 -count=1 ./...         exit 0 (55 ok, 0 FAIL)
+fix-openspec-validate.txt     pnpm exec openspec validate ... --strict          exit 0
+fix-conformance.txt/.json     scripts/conformance.sh                            exit 0 (1019 pass / 0 fail / 1 skip)
+fix-agent-runtime-e2e.txt     scripts/agent-runtime-e2e.sh --evidence ...      exit 0
+fix-security-tests.txt        focused verbose run of the fix tests              27 PASS
+fix-residue.txt               port/process residue check
+
+Notes:
+- fix-conformance and fix-agent-runtime-e2e ran on the final production code. The
+  only later change was a test-only file (internal/mcphost/diagnostics_test.go),
+  after which go-test-all and go-test-race were re-run on the final tree.
+- No DSN, password, bearer token or document body appears in any evidence file.
+
+Review items → fixes:
+
+P1-A CSP wildcard TLD (internal/mcphost/csp.go)
+- Host is validated by hostname; trailing dots are stripped first (so `*.com.`
+  cannot bypass the label rule); a wildcard must keep at least two labels and
+  may not name loopback (`*.localhost`) or an IP (`*.127.0.0.1`).
+  `https://*.example.com` stays accepted and is normalized to lower case.
+- Tests: TestBuildCSPWildcardRequiresTwoLabels (rejects *.com, *.net, *.localhost,
+  *.com., *.x, *, *.127.0.0.1; accepts *.example.com and normalizes *.Example.com.).
+
+P1-B unbounded `_meta` and diagnostics
+- internal/mcp/resources.go: AppResourceMetaMaxBytes = 64 KiB on
+  len(content.Meta)+len(result.Meta); over the bound the whole `_meta` is ignored
+  and AppResource.Diagnostics carries one "_meta ignored" note; the document
+  remains usable. Tests with a literal 16 MiB `_meta` and with two halves whose
+  sum crosses the bound (app_meta_test.go).
+- internal/mcphost/diagnostics.go (new): diagCollector (32 messages + "…N more
+  dropped", formatting skipped once full) and boundDiagnostics for combined lists.
+  parseResourceMeta / parseCSPBlock / parsePermissions / parseStringList /
+  sanitizeCSPDomains all use it; parseStringList also caps inspected entries at
+  64, and sanitizeCSPDomains stops scanning once the diagnostic budget is spent
+  (previously an all-invalid list never broke). The registry applies one final
+  per-app budget across metadata + CSP + reader diagnostics.
+- Tests: 16 MiB meta; 5000 unknown keys → ≤32+1; 1000-entry domain list capped;
+  5000 invalid CSP entries → ≤32+1; diagCollector with 2,000,000 messages → 33
+  outputs (counters only, no retained strings).
+
+P2-1 loopback/private CSP domains
+- Default policy rejects 127/8, ::1, 10/8, 172.16/12, 192.168/16, 169.254/16,
+  localhost/*.localhost and all-numeric IPv4 forms. `CSPOptions.AllowPrivateDomains`
+  (registry: Options.AllowPrivateDomains) opens it for dev fixtures; off by default.
+- Tests: TestBuildCSPPrivateDomains (negative default, positive with the option,
+  numeric host still refused, public origin accepted under both).
+
+P2-2 tenant-aware caching of the view response
+- `Vary: X-Tenant-ID` on the 200 document response (immutable cache semantics
+  kept).
+- Test: TestMCPAppViewSecurityHeaders asserts the header.
+
+P2-4 keepPrevious unprotect window
+- resolve() now stores and protects the new document first; only then unpins the
+  previous version. A failed put (cache full) leaves the previous version pinned
+  and served; a failed re-fetch keeps the previous version as before.
+- Tests: TestRegistryKeepsPreviousVersionWhenCacheIsFull (cache-full content
+  change keeps serving the old hash with a `cache` diagnostic) and
+  TestRegistryContentChangeReclaimsCache (superseded version becomes evictable
+  and is reclaimed by the next insert).
+
+P2-6 port range
+- normalizeCSPDomain rejects ports outside 1..65535 (url.Parse accepts them).
+  Test: TestBuildCSPPortRange.
+
+P2-3 zero-tenant ops semantics
+- docs/MCP-APPS.md (new): endpoints, identity/cache, CSP policy, tenant
+  semantics (TenantID=0 is a process-global catalogue; a multi-tenant deployment
+  must bind one tenant per process), degradation, limits, KEEL_MCP_APP_ORIGIN.
+  docs/HOST.md links it and lists the env var.
+
+P2-5 httpapi composition path
+- internal/httpapi/mcp_apps_route_test.go (external test package to avoid the
+  agentapi→httpapi import): GET /v1/mcp/apps and /apps/{id}/view reach the
+  product handler through the /v1/ catch-all with headers intact;
+  POST /v1/mcp/servers/{name}/signin keeps edge precedence and is never
+  forwarded; an anonymous catalogue request is 401 at the product edge.
+
+Backlog (recorded, not fixed): full PSL public-suffix judgment (`*.co.uk` is
+still accepted as a subdomain grant) and alternate IP encodings beyond the
+all-numeric form. Added to docs/RESIDUAL-PLAN.md §5.x.

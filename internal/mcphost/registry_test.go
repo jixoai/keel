@@ -493,12 +493,75 @@ func discardTestLogger() *slog.Logger {
 }
 
 // TestRegistryContentChangeReclaimsCache pins the byte accounting across a
-// content change: the superseded version becomes evictable and the cache total
-// returns to one document, not two (the cache owns the bytes, so eviction really
-// releases them).
+// content change: once the new version is published the old one is no longer
+// pinned, so the next insert evicts it and the cache total really drops (the
+// cache owns the bytes).
 func TestRegistryContentChangeReclaimsCache(t *testing.T) {
 	server, app := appFixture("weather", "dashboard")
-	fleet := &fakeFleet{servers: []*mcp.Server{server}, apps: []mcp.App{app}}
+	secondServer := &mcp.Server{Entry: mcp.ServerEntry{Name: "maps", Config: map[string]any{"url": "https://maps.example.com/mcp"}}}
+	secondURI := "ui://maps/panel"
+	secondApp := mcp.App{
+		AppID:       mcp.AppIDFor("maps", secondURI),
+		Server:      "maps",
+		ResourceURI: secondURI,
+		Tools:       []mcp.AppTool{{Server: "maps", Tool: "panel", Visibility: []string{"app"}}},
+	}
+	html := strings.Repeat("a", 80)
+	registry := newTestRegistry(t, Options{
+		CacheBytes:       160,
+		MaxDocumentBytes: 200,
+		ReadApp: func(_ context.Context, _ *mcp.Server, uri string) (mcp.AppResource, error) {
+			if uri == secondURI {
+				return mcp.AppResource{URI: uri, MIMEType: mcp.AppMIMEType, Text: strings.Repeat("c", 80)}, nil
+			}
+			return mcp.AppResource{URI: uri, MIMEType: mcp.AppMIMEType, Text: html}, nil
+		},
+	})
+	first, err := registry.Refresh(context.Background(), &fakeFleet{servers: []*mcp.Server{server}, apps: []mcp.App{app}})
+	if err != nil || len(first.Apps) != 1 {
+		t.Fatalf("first refresh: %v %+v", err, first.Apps)
+	}
+	firstHash := first.Apps[0].Hash
+	oldKey := documentKey(app.AppID, firstHash)
+	if got := registry.cache.totalBytes(); got != 80 {
+		t.Fatalf("cache total = %d, want 80", got)
+	}
+
+	html = strings.Repeat("b", 80)
+	second, err := registry.Refresh(context.Background(), &fakeFleet{servers: []*mcp.Server{server}, apps: []mcp.App{app}})
+	if err != nil || len(second.Apps) != 1 {
+		t.Fatalf("second refresh: %v %+v", err, second.Apps)
+	}
+	if second.Apps[0].Hash == firstHash {
+		t.Fatal("the content change did not produce a new hash")
+	}
+	if !registry.cache.cached(oldKey) {
+		t.Fatal("the superseded version was dropped before it was evicted")
+	}
+
+	// A third document that needs the superseded version's bytes: eviction
+	// reclaims it, and the total stays under the bound.
+	fleet := &fakeFleet{servers: []*mcp.Server{server, secondServer}, apps: []mcp.App{app, secondApp}}
+	if _, err := registry.Refresh(context.Background(), fleet); err != nil {
+		t.Fatal(err)
+	}
+	if registry.cache.cached(oldKey) {
+		t.Fatal("the superseded version survived eviction")
+	}
+	if got := registry.cache.evictionCount(); got != 1 {
+		t.Fatalf("evictions = %d, want 1", got)
+	}
+	if got := registry.cache.totalBytes(); got != 160 {
+		t.Fatalf("cache total = %d, want 160", got)
+	}
+}
+
+// TestRegistryKeepsPreviousVersionWhenCacheIsFull is the P2-4 regression: the
+// new version is stored before the old one is unpinned, so a full cache keeps
+// serving the previous document instead of leaving an unprotected version a
+// concurrent put could evict.
+func TestRegistryKeepsPreviousVersionWhenCacheIsFull(t *testing.T) {
+	server, app := appFixture("weather", "dashboard")
 	html := strings.Repeat("a", 80)
 	registry := newTestRegistry(t, Options{
 		CacheBytes:       100,
@@ -507,26 +570,30 @@ func TestRegistryContentChangeReclaimsCache(t *testing.T) {
 			return mcp.AppResource{URI: app.ResourceURI, MIMEType: mcp.AppMIMEType, Text: html}, nil
 		},
 	})
-	first, err := registry.Refresh(context.Background(), fleet)
+	first, err := registry.Refresh(context.Background(), &fakeFleet{servers: []*mcp.Server{server}, apps: []mcp.App{app}})
 	if err != nil || len(first.Apps) != 1 {
 		t.Fatalf("first refresh: %v %+v", err, first.Apps)
 	}
 	firstHash := first.Apps[0].Hash
-	if got := registry.cache.totalBytes(); got != 80 {
-		t.Fatalf("cache total = %d, want 80", got)
-	}
+
+	// A content change cannot fit next to the pinned version (80 + 80 > 100):
+	// the old version stays current and is still servable.
 	html = strings.Repeat("b", 80)
-	second, err := registry.Refresh(context.Background(), fleet)
-	if err != nil || len(second.Apps) != 1 {
-		t.Fatalf("second refresh: %v %+v", err, second.Apps)
+	second, err := registry.Refresh(context.Background(), &fakeFleet{servers: []*mcp.Server{server}, apps: []mcp.App{app}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if second.Apps[0].Hash == firstHash {
-		t.Fatal("the content change did not produce a new hash")
+	if len(second.Apps) != 1 || second.Apps[0].Hash != firstHash {
+		t.Fatalf("apps = %+v, want the previous version kept", second.Apps)
 	}
-	if got := registry.cache.totalBytes(); got != 80 {
-		t.Fatalf("cache total after the change = %d, want 80 (the old version reclaimed)", got)
+	if document, ok := registry.Document(app.AppID, firstHash); !ok || len(document.Bytes) == 0 {
+		t.Fatal("the previous version is not servable")
 	}
-	if got := registry.cache.evictionCount(); got != 1 {
-		t.Fatalf("evictions = %d, want 1", got)
+	if !registry.AppReady(app.AppID) {
+		t.Fatal("the app fell out of the catalogue on a cache-full refresh")
+	}
+	diagnostics := registry.Diagnostics()
+	if len(diagnostics) != 1 || diagnostics[0].Kind != "cache" {
+		t.Fatalf("diagnostics = %+v", diagnostics)
 	}
 }

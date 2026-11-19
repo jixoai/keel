@@ -175,6 +175,9 @@ func (s *Server) mcpAppView(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", document.CSP)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	// The document is tenant-scoped: a shared cache must key on the tenant
+	// header, or one tenant's catalogue could answer another's immutable URL.
+	w.Header().Set("Vary", "X-Tenant-ID")
 	// A hash-named URL is immutable; the bare URL is content that moves under
 	// the client's feet and must not be cached by any intermediary.
 	if hash != "" {

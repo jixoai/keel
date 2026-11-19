@@ -59,7 +59,7 @@ const (
 
 func testCSP(t *testing.T) string {
 	t.Helper()
-	header, _ := mcphost.BuildCSP(&mcphost.CSPMeta{ConnectDomains: []string{"https://api.example.com"}})
+	header, _ := mcphost.BuildCSP(&mcphost.CSPMeta{ConnectDomains: []string{"https://api.example.com"}}, mcphost.CSPOptions{})
 	return header
 }
 

@@ -2,6 +2,7 @@ package mcphost
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -97,5 +98,56 @@ func TestParseResourceMetaAbsent(t *testing.T) {
 		if meta.CSP != nil || meta.Domain != "" || meta.Permissions != nil || meta.PrefersBorder != nil {
 			t.Errorf("%s: meta = %+v, want zero", raw, meta)
 		}
+	}
+}
+
+// TestParseResourceMetaDiagnosticsBounded pins the amplification fix: a block
+// with thousands of unknown keys produces at most the per-app budget plus one
+// summary line, not one diagnostic per key.
+func TestParseResourceMetaDiagnosticsBounded(t *testing.T) {
+	var block strings.Builder
+	block.WriteString(`{"ui":{`)
+	for index := 0; index < 5000; index++ {
+		if index > 0 {
+			block.WriteByte(',')
+		}
+		fmt.Fprintf(&block, `"unknownKey%d":true`, index)
+	}
+	block.WriteString(`,"prefersBorder":true}}`)
+
+	meta, diagnostics := parseResourceMeta(json.RawMessage(block.String()))
+	if len(diagnostics) > maxAppDiagnostics+1 {
+		t.Fatalf("diagnostics = %d, want at most %d", len(diagnostics), maxAppDiagnostics+1)
+	}
+	if len(diagnostics) == 0 || !strings.Contains(diagnostics[len(diagnostics)-1], "more dropped") {
+		t.Fatalf("no drop summary: %v", diagnostics)
+	}
+	// The valid member of the same block still applies.
+	if meta.PrefersBorder == nil || !*meta.PrefersBorder {
+		t.Fatalf("prefersBorder = %v", meta.PrefersBorder)
+	}
+}
+
+// TestParseResourceMetaHugeDomainList pins the list-entry bound: the parser
+// inspects at most maxCSPListEntries entries and counts the rest as dropped.
+func TestParseResourceMetaHugeDomainList(t *testing.T) {
+	var block strings.Builder
+	block.WriteString(`{"ui":{"csp":{"connectDomains":[`)
+	for index := 0; index < 1000; index++ {
+		if index > 0 {
+			block.WriteByte(',')
+		}
+		fmt.Fprintf(&block, `"https://h%d.example.com"`, index)
+	}
+	block.WriteString(`]}}}`)
+	meta, diagnostics := parseResourceMeta(json.RawMessage(block.String()))
+	if meta.CSP == nil || len(meta.CSP.ConnectDomains) > maxCSPListEntries {
+		t.Fatalf("connectDomains = %d entries, want at most %d", len(meta.CSP.ConnectDomains), maxCSPListEntries)
+	}
+	if len(diagnostics) > maxAppDiagnostics+1 {
+		t.Fatalf("diagnostics = %d, want bounded", len(diagnostics))
+	}
+	if len(diagnostics) == 0 || !strings.Contains(diagnostics[len(diagnostics)-1], "more dropped") {
+		t.Fatalf("no drop summary for the truncated list: %v", diagnostics)
 	}
 }
