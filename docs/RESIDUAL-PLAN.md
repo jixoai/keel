@@ -21,7 +21,7 @@
 | provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
 | keel-ga | 36/43 | §2/§3/§5 已交付；剩 §1 压缩文档、§6 验收 5 | tenancy/provider-files/blob-lifecycle 已交付（blob 独立复核中） |
 | keel-harness-v2 | 43/146 | **W2.1–W2.5 + seam + jobcap + aclack 已交付**；余下 W2 放置与快照、W3 尾项（含新增的删除对账/capture 策略覆写/并发 capture 定序）、W5–W7、验收 | **主战场（A 轴 8.5 无 P0/P1；B 轴 8/10 两 P1 已关闭；blob-lifecycle lane 在跑）** |
-| feat-mcp-apps-events | 1/50 | 设计 + T0.4 双 origin 域开通已完成；P1–P6 未开始 | 随 Wave 5 实现 |
+| feat-mcp-apps-events | 10/50 | 设计 + T0.1–T0.4 + P1 已交付（合入 `2012f87`）；P2–P6 未开始 | Wave 5 进行中（P1 独立复核中） |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
 | keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
 | ~~fix-session-delete-soft-archive~~ | 11/11 | — | **已归档 2026-11-19** |

@@ -1,0 +1,13 @@
+# P1 合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `2012f87`（cherry-pick `eb8d7ad`，无冲突）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/conformance.sh`：984 pass / 0 fail / 1 skip，exit 0
+- `pnpm exec openspec validate feat-mcp-apps-events --strict`：valid
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- lane 自身证据：`openspec/changes/feat-mcp-apps-events/evidence/p1/`
+- 独立复核：P1 功能+安全双轴由独立 reviewer 在冻结 `eb8d7ad` 上进行（报告归档后补记）
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
