@@ -128,8 +128,11 @@
       （W2.2：`internal/bashbridge`，pin `ewhauser/gbash v0.0.41`；占用隔离；`third_party` 许可文本）
 - [x] `bash` 工具参数：`timeout`（参数而非 bash 命令）、超时转后台、返回终端信息与 pid
       （W2.2：job id 即作业句柄；**禁用**上游 `ExecutionRequest.Timeout`；超时不 kill）
-- [x] JobManager：全局 + 每组上限；`nohup/jobs/ps` 视图；收养与孤儿回收
-      （W2.2：`bash_jobs` 表 + RLS；重启一律收敛终态 `interrupted`；15s sweeper 按归档会话回收）
+- [ ] JobManager：全局 + 每组上限；`nohup/jobs/ps` 视图；收养与孤儿回收
+      （已交付：`bash_jobs` 表 + RLS、advisory-lock 原子上限、重启一律收敛终态 `interrupted`、
+      15s sweeper 按归档会话回收、工具面 `bash {action:"jobs"}`；
+      **未完成：沙箱内 `nohup`/`jobs`/`ps` 命令**（B 轴复核 P1-2，W2.seam 补齐中）——本条在
+      三命令落地并有装配级测试前不计完成）
 - [x] 输出落 layerfs：只回 head/tail + blob 引用 + 退出码
       （W2.2：head 4KiB + tail 4KiB；全量流式写 blob store（layerfs 的字节层）；200MB 内存有界实证）
 - [x] capture 默认 `per-tool-call`：stat 缓存 + 变更集，只对变了的文件算哈希
@@ -142,9 +145,10 @@
 
 - [x] `task_cards` 行 + `task_events` **投影**（从账本重建，含重建一致性测试）；会话启动自动建初始卡
       （W2.4：`internal/tasklog`；DDL/RLS 随集成落 `schema.sql`/`rls.go`；重建幂等与「直写被重建擦除」有测试）
-- [ ] 强制 `taskId`：所有工具调用缺 `taskId` 直接拒绝（含内部子代理）
-      **（实现偏离待复核：harness 先在 run 内归属（缺省挂会话初始卡），无法归属才返回
-      `task_id_required`；与 spec 字面「模型未带即拒绝」不同，由 B 轴复核裁决）**
+- [x] 强制 `taskId`：所有工具调用缺 `taskId` 直接拒绝（含内部子代理）
+      （B 轴复核裁决后已修订 spec 语义：Harness 先归属会话初始卡、无法归属才拒绝
+      `task_id_required`、未知卡 `task_not_found`；实现见 `internal/toolsurface/tasks.go`
+      + 全内建工具 task gate；拒绝事实以 tool.result 落账本。spec 文本已同步修订）
 - [x] `tasks` 聚合工具：`create/update/attach/detach/close/list/show/note`
       （W2.4：8 动作经 `keel.tasks` 后端；停用映射 `plugin_disabled`）
 - [x] 任务树投影：父子关系、跨会话 `parentTaskId` 拼接

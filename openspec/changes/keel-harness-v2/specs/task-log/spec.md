@@ -32,15 +32,28 @@ MUST NOT 就地覆盖历史。任务卡的当前状态 MUST 是事件投影。
 - **WHEN** 任何代码绕过账本直接写 `task_events`
 - **THEN** 被拒绝（或在一致性测试中被判失败）
 
-### Requirement: 每次工具调用必须带 taskId
+### Requirement: 每次工具调用必须归属任务卡
 
-Harness MUST 要求每一次工具调用携带 `taskId`；缺失 MUST 拒绝执行并返回类型化错误。
-会话启动时 MUST 自动创建初始任务卡。内部子代理 MUST 拥有自己的任务卡，并以
-`parentTaskId` 指向派生它的卡。
+Harness MUST 为每一次工具调用确定 `taskId`：调用显式携带则用之；未携带时 MUST 归属会话的
+初始任务卡（会话启动时自动创建）。无法归属 MUST 拒绝执行并返回类型化错误 `task_id_required`；
+指向不存在的卡 MUST 拒绝并返回 `task_not_found`。被拒事实 MUST 记入事件流（tool.result），
+模型可读到可解释的错误。内部子代理 MUST 拥有自己的任务卡，并以 `parentTaskId` 指向派生它的卡。
 
-#### Scenario: 无卡调用被拒
-- **WHEN** 一次工具调用没有 `taskId` 或指向不存在的卡
-- **THEN** 调用被拒绝，事件流中记录一次被拒的调用事实，模型看到可解释的错误
+（2026-11-19 B 轴复核裁决：本 requirement 由「模型未带即拒绝」修订为「Harness 先归属、无法归属才
+拒绝」。理由：各工具 schema 未把 taskId 声明为 required，字面拒绝会使模型每次调用被卡死；而「每次
+调用可归因 + 账本留痕」的保证完整成立，且与下方「会话起步即有卡」自洽。）
+
+#### Scenario: 缺省归属初始卡
+- **WHEN** 一次工具调用未携带 `taskId`，而会话已有初始任务卡
+- **THEN** Harness 把调用归属到该卡（事件携带 taskId），调用正常执行
+
+#### Scenario: 无可归属被拒
+- **WHEN** 一次工具调用既未携带 `taskId`、也无法归属到任何任务卡
+- **THEN** 调用被拒绝，事件流中记录一次被拒的调用事实，模型看到 `task_id_required`
+
+#### Scenario: 未知卡被拒
+- **WHEN** 一次工具调用携带的 `taskId` 在租户内不存在
+- **THEN** 调用被拒绝并返回 `task_not_found`，事件流记录被拒事实
 
 #### Scenario: 会话起步即有卡
 - **WHEN** 新建一个会话并提交第一条输入
