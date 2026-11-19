@@ -597,3 +597,32 @@ func TestRegistryKeepsPreviousVersionWhenCacheIsFull(t *testing.T) {
 		t.Fatalf("diagnostics = %+v", diagnostics)
 	}
 }
+
+// TestRegistryAppLookup pins the catalogue identity read the app bridge uses:
+// only a published app resolves, and the returned spec carries the derived
+// server (never a client-supplied one).
+func TestRegistryAppLookup(t *testing.T) {
+	server, app := appFixture("weather", "dashboard")
+	fleet := &fakeFleet{servers: []*mcp.Server{server}, apps: []mcp.App{app}}
+	registry := newTestRegistry(t, Options{
+		ReadApp: func(context.Context, *mcp.Server, string) (mcp.AppResource, error) {
+			return appDocument("<html></html>", ""), nil
+		},
+	})
+	if _, ok := registry.App(app.AppID); ok {
+		t.Fatal("an unpublished app resolved")
+	}
+	if _, err := registry.Refresh(context.Background(), fleet); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	spec, ok := registry.App(app.AppID)
+	if !ok {
+		t.Fatal("the published app did not resolve")
+	}
+	if spec.Server != "weather" || spec.AppID != app.AppID {
+		t.Fatalf("spec = %+v", spec)
+	}
+	if _, ok := registry.App("mcpapp_0000000000000000"); ok {
+		t.Fatal("an unknown app id resolved")
+	}
+}

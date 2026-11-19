@@ -90,23 +90,43 @@
 
 ## P3 — 桥与出站动作
 
-- [ ] P3.1 `POST /v1/mcp/apps/{id}/tools/call`：ownership 复核（只允许该服务器、只允许 `visibility` 含 `"app"`）
+- [x] P3.1 `POST /v1/mcp/apps/{id}/tools/call`：ownership 复核（只允许该服务器、只允许 `visibility` 含 `"app"`）
       + 审计（验收：越权 403 + 审计行；正常路径返回标准 `CallToolResult`）
-- [ ] P3.2 `POST /v1/mcp/apps/{id}/resources/read`：URI scheme 白名单 + 该服务器限定
+      （2026-11-20 P3 后端切片：`internal/agentapi/mcp_app_actions.go`——server 由 catalogue 派生、`AppTool` 复核
+      `visibility`；越权/别服务器/模型专用工具 403 + `tools/call=refused` 审计且上游零调用；破坏性工具
+      （`destructiveHint` 或变更族词名）逐次 decision 确认，拒绝无上游。httptest 断言 + 真 stdio fixture
+      `cmd/keel/mcp_app_bridge_test.go`）
+- [x] P3.2 `POST /v1/mcp/apps/{id}/resources/read`：URI scheme 白名单 + 该服务器限定
       （验收：`file:`/`data:` 等被拒并审计）
-- [ ] P3.3 `ui/message`：decision（send/edit/discard）→ 既有输入写路径（`requestId` 可归属、`delivery` 只能 queue）
+      （2026-11-20：只允许 `ui://`/`http(s)://`（缺 host/缺 scheme 也拒）；结果按 2 MiB 单条上限复核、不落盘；
+      拒绝写 `resources/read=refused` 且不带 URI query）
+- [x] P3.3 `ui/message`：decision（send/edit/discard）→ 既有输入写路径（`requestId` 可归属、`delivery` 只能 queue）
       （验收：三分支 E2E；`user.message` 落账本；`edit` 不落账本只预填；`role!="user"` 回 `-32602`）
-- [ ] P3.4 `ui/open-link`：http(s) 白名单 + 确认 + `openUrl`/`window.open`（noopener）
+      （2026-11-20：`mcp-app.message` decision 三选项；send 经 `httpapi.CommitClientInput`（与 `/input` 同一提交路径，
+      delivery=queue，requestId=`mcp-app:<appId>:<frame>`，重放幂等）；edit 只回预填、discard/非法 role/delivery
+      零账本；真库+MemKernel 断言 user.message 落账本与幂等）
+- [x] P3.4 `ui/open-link`：http(s) 白名单 + 确认 + `openUrl`/`window.open`（noopener）
       （验收：非法 scheme 拒绝并审计；不开宿主页导航）
+      （2026-11-20：后端只返回 `{opened,url}` 供前端以 noopener,noreferrer 打开；默认 decision `mcp-app.link`；
+      非法 scheme 400 + `ui/open-link=refused`；审计只记 host，不记 query；不写账本。前端 window.open 属前端 lane）
 - [ ] P3.5 `ui/request-display-mode`（inline/fullscreen；`pip` 拒绝回当前模式）、
       `ui/notifications/size-changed`、`ui/resource-teardown`（卸载前发，≤1s）
       （验收：桥单测 + E2E 全屏切换）
 - [ ] P3.6 权限确认（camera/mic/geolocation/clipboardWrite）+ 偏好记忆；破坏性工具逐次确认
       （验收：拒绝后不静默重给；确认门 E2E）
-- [ ] P3.7 审计表 `mcp_app_audit` + `GET /v1/mcp/apps/audit`；正文/凭据扫描断言
+      （2026-11-20 P3 后端切片：**部分**——破坏性工具逐次确认门与拒绝审计已在 P3.1 交付并测；
+      camera/mic/geolocation/clipboardWrite 的 iframe `allow` 授予 UI、偏好记忆与前端拒绝路径属前端 lane，故本项不勾）
+- [x] P3.7 审计表 `mcp_app_audit` + `GET /v1/mcp/apps/audit`；正文/凭据扫描断言
       （验收：单测断言审计不含 message 正文与 token）
-- [ ] P3.8 桥限速限长：单帧 64 KiB、200 帧/s、单 app 并发 4；超限断连 + 审计
+      （2026-11-20：`schema.sql` + `rlsTenantTables`（FORCE RLS + tenant_isolation）；`store/mcp_app_audit.go`
+      append/list（detail 有界 512B、去控制符）；`GET/POST /v1/mcp/apps/audit`（读分页；POST 仅
+      permission.granted/denied、protocol.violation 的宿主动作入口，租户鉴权、不能伪造桥动作）；
+      真库 RLS/跨租户写拒绝 + 全行扫描断言无消息正文/URL query）
+- [x] P3.8 桥限速限长：单帧 64 KiB、200 帧/s、单 app 并发 4；超限断连 + 审计
       （验收：单测用假计时源断言阈值）
+      （2026-11-20：HTTP 代理面同阈值——64 KiB body（413）、每 app 200/s 令牌桶（假时钟测试）、
+      单 app 并发 4（429）；三类超限都写 `bridge.size|rate|concurrency=refused`；浏览器桥帧实现同数
+      并在 `mcp_app_actions.go` 头注释写明映射）
 
 ## P4 — events 路由与订阅
 

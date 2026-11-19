@@ -52,6 +52,16 @@ func (f edgeMCPApps) Surface() (mcphost.Surface, bool) {
 	}, true
 }
 
+func (f edgeMCPApps) App(appID string) (mcphost.AppSpec, bool) {
+	surface, _ := f.Surface()
+	for _, app := range surface.Apps {
+		if app.AppID == appID {
+			return app, true
+		}
+	}
+	return mcphost.AppSpec{}, false
+}
+
 func (f edgeMCPApps) Document(appID, hash string) (mcphost.Document, bool) {
 	if appID != edgeAppID || (hash != "" && hash != edgeAppHash) {
 		return mcphost.Document{}, false

@@ -34,6 +34,9 @@ type MCPAppsSurface interface {
 	// Surface returns the published catalogue (ok=false before the first
 	// publish).
 	Surface() (mcphost.Surface, bool)
+	// App returns one published app by identity. The bridge derives the
+	// server and the tool policy from it, never from a client-supplied name.
+	App(appID string) (mcphost.AppSpec, bool)
 	// Document returns one published app document by app identity; an empty
 	// hash selects the current version and a non-empty one must match it.
 	Document(appID, hash string) (mcphost.Document, bool)
@@ -47,7 +50,14 @@ type MCPAppsSurface interface {
 func (s *Server) mcpAppRoutes() {
 	s.mux.HandleFunc("GET /v1/mcp/servers", s.listMCPServers)
 	s.mux.HandleFunc("GET /v1/mcp/apps", s.listMCPApps)
+	s.mux.HandleFunc("GET /v1/mcp/apps/audit", s.mcpAppAuditList)
+	s.mux.HandleFunc("POST /v1/mcp/apps/audit", s.mcpAppAuditRecord)
 	s.mux.HandleFunc("GET /v1/mcp/apps/{appId}/view", s.mcpAppView)
+	// P3 outbound actions: every View-initiated call goes through the host.
+	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/tools/call", s.mcpAppToolCall)
+	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/resources/read", s.mcpAppResourceRead)
+	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/ui/message", s.mcpAppMessage)
+	s.mux.HandleFunc("POST /v1/mcp/apps/{appId}/ui/open-link", s.mcpAppOpenLink)
 }
 
 // mcpServersResponse is GET /v1/mcp/servers.

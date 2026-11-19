@@ -686,6 +686,21 @@ func (r *Runtime) MCPEntries() []mcp.ServerEntry {
 	return nil
 }
 
+// MCPManager returns the live MCP manager (nil when the service is disabled).
+// The product API's MCP app bridge proxies tools/call and resources/read
+// through it, so an app call reaches exactly the connection the model uses.
+func (r *Runtime) MCPManager() *mcp.Manager {
+	if r == nil {
+		return nil
+	}
+	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
+		if mcpService, ok := svc.(*mcpService); ok {
+			return mcpService.manager
+		}
+	}
+	return nil
+}
+
 // ReconnectMCP reconnects one MCP server and republishes its tools and prompt
 // section on the live host, so a sign-in takes effect without a restart.
 func (r *Runtime) ReconnectMCP(ctx context.Context, name string) error {

@@ -213,6 +213,22 @@ func (r *Registry) Generation() int64 {
 	return r.generation
 }
 
+// App returns one published app's specification. The catalogue is the only
+// binding authority: the bridge derives the server from here, never from a
+// client-supplied name.
+func (r *Registry) App(appID string) (AppSpec, bool) {
+	if r == nil {
+		return AppSpec{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.apps[appID]
+	if !ok {
+		return AppSpec{}, false
+	}
+	return entry.spec, true
+}
+
 // Document returns the published document of one app. An empty hash selects the
 // current version; a non-empty hash must match it exactly (a stale hash is not
 // served as new content). The returned bytes are immutable.

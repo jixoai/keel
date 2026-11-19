@@ -370,6 +370,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 		TenantID: opts.TenantID,
 		Logger:   log,
 		Sinks:    mcpAppsPublication.sinks(),
+		// Document fetch/validation outcomes are durable audit rows (P3.7): the
+		// registry and the bridge share one table, one shape and one bound.
+		Auditor: mcpAppAuditor{store: st, log: log},
 	})
 	mcpAppsSandboxOrigin := configuredMCPAppOrigin(log)
 	// The tenant models document is the provider configuration source; an empty
@@ -871,9 +874,16 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		MCPApps:              mcpApps,
 		MCPAppsSandboxOrigin: mcpAppsSandboxOrigin,
 		MCPAppsTheme:         theme,
-		Triggers:             triggers,
-		Subagents:            subagents,
-		Hooks:                hooks,
+		// The app bridge (P3): tools/call and resources/read execute over the
+		// same MCP connections the model uses; a confirmed ui/message commits
+		// through the runtime's shared input path; every action reaches the
+		// durable audit table.
+		MCPAppRuntime:     mcpAppRuntimeOrNil(rt),
+		MCPAppAudit:       st,
+		MCPAppInputCommit: mcpAppInputCommit(st, kern),
+		Triggers:          triggers,
+		Subagents:         subagents,
+		Hooks:             hooks,
 		ModelsLive: func() agentapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil

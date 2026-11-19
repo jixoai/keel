@@ -190,6 +190,27 @@ type Config struct {
 	// notification routing). P4 wires it; until then it is false and clients
 	// use the legacy behavior.
 	MCPEvents bool
+	// MCPAppRuntime executes the app bridge's outbound calls (tools/call and
+	// resources/read) against the live MCP fleet. Nil answers 501 on the proxy
+	// routes: a deployment without MCP connections has nothing to proxy to.
+	MCPAppRuntime MCPAppRuntime
+	// MCPAppAudit is the durable app audit trail (P3.7). Nil keeps the actions
+	// working with a structured-log warning; the audit read route answers 503.
+	// Refusal audits are best-effort either way.
+	MCPAppAudit MCPAppAuditStore
+	// MCPAppInputCommit writes a confirmed ui/message as a normal user.message
+	// through the runtime's shared input path (delivery=queue). Nil answers 501
+	// on ui/message: a deployment without the write path must not pretend the
+	// message was sent.
+	MCPAppInputCommit func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (MCPAppInput, error)
+	// MCPAppConfirmTimeout bounds the wait of one app confirmation decision
+	// (default 120s, capped at 10 minutes). The app bridge holds the request
+	// while the user answers; a timeout answers 202 with the open decision id so
+	// the bridge can retry the same logical call.
+	MCPAppConfirmTimeout time.Duration
+	// MCPAppNow overrides the limiter clock (tests use a fake clock). Nil uses
+	// time.Now.
+	MCPAppNow func() time.Time
 	Logger    *slog.Logger
 	MaxBody   int64
 }
@@ -205,6 +226,9 @@ type Server struct {
 	// window is small (the store write and the apply are back to back) but the
 	// inconsistency is real, and one lock is cheaper than explaining it.
 	settingsMu sync.Mutex
+	// mcpAppLimits is the per-app bridge budget (P3.8): 200 requests/s and 4
+	// concurrent proxy requests per app.
+	mcpAppLimits *mcpAppLimiter
 }
 
 // New builds the API and its routes.
@@ -221,7 +245,16 @@ func New(cfg Config) *Server {
 	if cfg.Parents == nil && cfg.Subagents != nil {
 		cfg.Parents = cfg.Subagents
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	if cfg.MCPAppConfirmTimeout <= 0 {
+		cfg.MCPAppConfirmTimeout = mcpAppConfirmDefaultTimeout
+	}
+	if cfg.MCPAppConfirmTimeout > mcpAppConfirmMaxTimeout {
+		cfg.MCPAppConfirmTimeout = mcpAppConfirmMaxTimeout
+	}
+	if cfg.MCPAppNow == nil {
+		cfg.MCPAppNow = func() time.Time { return time.Now().UTC() }
+	}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), mcpAppLimits: newMCPAppLimiter(cfg.MCPAppNow)}
 	s.routes()
 	return s
 }

@@ -12,18 +12,22 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-// errInputExternalSession is the native input path's refusal of an external
+// ErrInputExternalSession is the native input path's refusal of an external
 // session: the session exists for this tenant, but its state is owned by an
 // external backend, so a native user.message would be committed and then never
 // picked up by a native run. The kernel enforces the same rule inside the
 // session transaction; this is the pre-check that keeps the refusal before any
 // write.
-var errInputExternalSession = errors.New("session is owned by an external backend; native input is not supported")
+//
+// Exported because the product API's MCP app bridge commits through the same
+// path (CommitClientInput) and must map the refusal onto its own wire.
+var ErrInputExternalSession = errors.New("session is owned by an external backend; native input is not supported")
 
-// userInput is one client input, validated by its caller and ready for the
+// ClientInput is one client input, validated by its caller and ready for the
 // shared commit path. POST /v1/sessions/{id}/input fills it from the request
-// body; POST /v1/sessions/{id}/retry fills it from a committed user.message.
-type userInput struct {
+// body; POST /v1/sessions/{id}/retry fills it from a committed user.message;
+// the MCP app bridge fills it from a confirmed ui/message.
+type ClientInput struct {
 	TenantID  uuid.UUID
 	SessionID uuid.UUID
 	RequestID string
@@ -42,11 +46,16 @@ type userInput struct {
 	RetryOf *int64
 }
 
-// inputCommit is the outcome of the shared commit path.
-type inputCommit struct {
+// ClientInputCommit is the outcome of the shared commit path.
+type ClientInputCommit struct {
 	Submission store.Submission
 	Created    bool
 }
+
+// userInput and inputCommit are the internal names of the exported shapes, kept
+// so the existing callers read unchanged.
+type userInput = ClientInput
+type inputCommit = ClientInputCommit
 
 // commitUserInput is the single write path of client input: the input endpoint
 // and the retry endpoint both commit through it, so the payload shape, the
@@ -56,6 +65,14 @@ type inputCommit struct {
 // It returns the store/kernel error verbatim; writeInputError owns the wire
 // mapping.
 func (s *Server) commitUserInput(ctx context.Context, in userInput) (inputCommit, error) {
+	return CommitClientInput(ctx, s.cfg.Store, s.cfg.Edge, in)
+}
+
+// CommitClientInput is the package-level form of the shared commit path. The
+// product API's MCP app bridge uses it so a confirmed ui/message becomes a
+// normal user.message through exactly the same validation, commit and
+// bookkeeping as POST /v1/sessions/{id}/input.
+func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committer, in ClientInput) (ClientInputCommit, error) {
 	fields := map[string]any{"text": in.Text, "requestId": in.RequestID}
 	if in.Delivery != "" {
 		fields["delivery"] = in.Delivery
@@ -74,10 +91,13 @@ func (s *Server) commitUserInput(ctx context.Context, in userInput) (inputCommit
 	}
 	payload, err := json.Marshal(fields)
 	if err != nil {
-		return inputCommit{}, err
+		return ClientInputCommit{}, err
 	}
-	if s.cfg.Edge == nil {
-		return inputCommit{}, errKernelUnwired
+	if edge == nil {
+		return ClientInputCommit{}, errKernelUnwired
+	}
+	if st == nil {
+		return ClientInputCommit{}, errors.New("store is not wired for the input commit path")
 	}
 	// Class pre-check before the commit: an external session has no native
 	// run/lease flow, so the write is refused instead of appending a message
@@ -85,20 +105,20 @@ func (s *Server) commitUserInput(ctx context.Context, in userInput) (inputCommit
 	// edge seam still records messages for external sessions (the external
 	// gateway's SSE replay depends on that contract), so the refusal belongs to
 	// the native client API, before anything is written.
-	owner, exists, err := s.cfg.Store.SessionOwner(ctx, in.TenantID, in.SessionID)
+	owner, exists, err := st.SessionOwner(ctx, in.TenantID, in.SessionID)
 	if err != nil {
-		return inputCommit{}, err
+		return ClientInputCommit{}, err
 	}
 	if !exists {
-		return inputCommit{}, store.ErrNoSession
+		return ClientInputCommit{}, store.ErrNoSession
 	}
 	if owner == store.StateOwnerExternal {
-		return inputCommit{}, errInputExternalSession
+		return ClientInputCommit{}, ErrInputExternalSession
 	}
 	// Edge-scoped commit: user.message carries the requestId as its idempotency
 	// key and never a fencing token (client input keeps landing during a drain;
 	// the next runtime picks it up).
-	receipt, err := s.cfg.Edge.Commit(ctx, kernel.CommitRequest{
+	receipt, err := edge.Commit(ctx, kernel.CommitRequest{
 		Scope:      kernel.Scope{TenantID: in.TenantID, SessionID: in.SessionID},
 		Kind:       kernel.KindUserMessage,
 		RequestID:  in.RequestID,
@@ -106,20 +126,20 @@ func (s *Server) commitUserInput(ctx context.Context, in userInput) (inputCommit
 		NativeEdge: true,
 	})
 	if err != nil {
-		return inputCommit{}, err
+		return ClientInputCommit{}, err
 	}
 	// The committed event is the truth; the submissions row is client-facing
 	// bookkeeping kept for the response contract. A row that predates a crash
 	// between commit and bookkeeping is repaired here. The commit itself already
 	// queued the run in its own transaction (kernel edge commit), so a failure
 	// in this bookkeeping can no longer strand the input.
-	sub, created, err := s.cfg.Store.Submit(ctx, in.TenantID, in.RequestID, in.SessionID, uuid.New())
+	sub, created, err := st.Submit(ctx, in.TenantID, in.RequestID, in.SessionID, uuid.New())
 	if err != nil {
-		return inputCommit{}, err
+		return ClientInputCommit{}, err
 	}
 	if sub.Seq == nil {
-		if err := s.cfg.Store.SetSubmissionStatus(ctx, in.TenantID, in.SessionID, in.RequestID, "committed", receipt.Seq); err != nil {
-			return inputCommit{}, err
+		if err := st.SetSubmissionStatus(ctx, in.TenantID, in.SessionID, in.RequestID, "committed", receipt.Seq); err != nil {
+			return ClientInputCommit{}, err
 		}
 		sub.Seq = &receipt.Seq
 		// The response reports the state the bookkeeping now holds, not the
@@ -128,10 +148,10 @@ func (s *Server) commitUserInput(ctx context.Context, in userInput) (inputCommit
 	}
 	// Enqueue on replays too: if the first enqueue failed after the event was
 	// committed, the client's retry repairs it without creating a second event.
-	if err := s.cfg.Store.EnqueueRun(ctx, in.TenantID, in.SessionID); err != nil {
-		return inputCommit{}, err
+	if err := st.EnqueueRun(ctx, in.TenantID, in.SessionID); err != nil {
+		return ClientInputCommit{}, err
 	}
-	return inputCommit{Submission: sub, Created: created}, nil
+	return ClientInputCommit{Submission: sub, Created: created}, nil
 }
 
 // presentRawJSON reports whether a raw JSON fragment carries a value: an absent
@@ -147,7 +167,7 @@ func presentRawJSON(raw json.RawMessage) bool {
 // the edge/enqueue mappings (unwired kernel 503, kernel rejections, 500).
 func writeInputError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, errInputExternalSession):
+	case errors.Is(err, ErrInputExternalSession):
 		writeErr(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrNoSession), errors.Is(err, store.ErrExternalSession):
 		writeEnqueueError(w, err)

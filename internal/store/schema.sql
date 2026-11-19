@@ -552,6 +552,28 @@ CREATE TABLE IF NOT EXISTS plugin_audit (
 CREATE INDEX IF NOT EXISTS plugin_audit_tenant ON plugin_audit (tenant_id, audit_id);
 CREATE INDEX IF NOT EXISTS plugin_audit_plugin ON plugin_audit (plugin_id, audit_id);
 
+-- MCP App audit (change feat-mcp-apps-events, P3.7): one row per bridged app
+-- action and per refusal (document fetch/validation, tools/call,
+-- resources/read, ui/message, ui/open-link, permission decisions, protocol
+-- violations). detail is a bounded, identifier-only summary: message bodies,
+-- credentials, tokens and full URL query strings MUST NOT enter this table
+-- (spec「安全、同意与审计」). audit_id is the keyset cursor of
+-- GET /v1/mcp/apps/audit.
+CREATE TABLE IF NOT EXISTS mcp_app_audit (
+    audit_id   bigserial PRIMARY KEY,
+    ts         timestamptz NOT NULL DEFAULT now(),
+    tenant_id  uuid,
+    session_id uuid,
+    server     text NOT NULL DEFAULT '',
+    app_id     text NOT NULL DEFAULT '',
+    action     text NOT NULL,
+    result     text NOT NULL,
+    detail     text NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS mcp_app_audit_tenant ON mcp_app_audit (tenant_id, audit_id);
+CREATE INDEX IF NOT EXISTS mcp_app_audit_app ON mcp_app_audit (app_id, audit_id);
+
 -- Agent registry (change keel-agent-team-v1, P2). One row per agent per tenant.
 -- The configuration is a single JSON document — the same "everything is a file"
 -- unit the CLI edits and a session freezes — because the agent schema is owned

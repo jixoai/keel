@@ -35,6 +35,15 @@ func (f *fakeMCPApps) Surface() (mcphost.Surface, bool) {
 	return f.surface, f.published
 }
 
+func (f *fakeMCPApps) App(appID string) (mcphost.AppSpec, bool) {
+	for _, app := range f.surface.Apps {
+		if app.AppID == appID {
+			return app, true
+		}
+	}
+	return mcphost.AppSpec{}, false
+}
+
 func (f *fakeMCPApps) Document(appID, hash string) (mcphost.Document, bool) {
 	for key, document := range f.documents {
 		if !strings.HasPrefix(key, appID+"\x00") {

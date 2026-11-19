@@ -286,3 +286,32 @@ func TestAppsPromptSectionEscapesSectionTagBreakout(t *testing.T) {
 		t.Fatalf("section has %d newlines, want one line", got)
 	}
 }
+
+// TestToolDestructiveHint pins the annotation parser: a true/false value is
+// reported as declared, and an absent or malformed annotation reports "not
+// declared" (the host's name-family fallback still applies).
+func TestToolDestructiveHint(t *testing.T) {
+	cases := []struct {
+		name        string
+		annotations string
+		wantValue   bool
+		wantPresent bool
+	}{
+		{"true", `{"destructiveHint":true}`, true, true},
+		{"false", `{"destructiveHint":false}`, false, true},
+		{"absent", `{"readOnlyHint":true}`, false, false},
+		{"malformed", `{"destructiveHint":"yes"}`, false, false},
+		{"not an object", `[]`, false, false},
+	}
+	for _, testCase := range cases {
+		tool := Tool{Name: "x", Annotations: json.RawMessage(testCase.annotations)}
+		value, present := tool.DestructiveHint()
+		if value != testCase.wantValue || present != testCase.wantPresent {
+			t.Errorf("%s: DestructiveHint() = (%v,%v), want (%v,%v)",
+				testCase.name, value, present, testCase.wantValue, testCase.wantPresent)
+		}
+	}
+	if value, present := (Tool{Name: "x"}).DestructiveHint(); value || present {
+		t.Fatalf("no annotations = (%v,%v), want (false,false)", value, present)
+	}
+}

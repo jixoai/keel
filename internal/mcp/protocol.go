@@ -421,6 +421,23 @@ func (t Tool) VisibleToApp() bool { return t.UI.Allows(VisibilityApp) }
 // AppResourceURI is the tool's declared UI resource, empty when it has none.
 func (t Tool) AppResourceURI() string { return t.UI.ResourceURI }
 
+// DestructiveHint reports the tool's annotations.destructiveHint when the
+// declarations carry it. The second result is false when the annotation is
+// absent or malformed: a server that sends a broken annotation has not declared
+// the tool destructive, and the host's name-family fallback still applies.
+func (t Tool) DestructiveHint() (bool, bool) {
+	if len(t.Annotations) == 0 {
+		return false, false
+	}
+	var annotations struct {
+		DestructiveHint *bool `json:"destructiveHint"`
+	}
+	if err := json.Unmarshal(t.Annotations, &annotations); err != nil || annotations.DestructiveHint == nil {
+		return false, false
+	}
+	return *annotations.DestructiveHint, true
+}
+
 // Resource is a resource entry from resources/list (types.ts:94-103). Name is
 // always present after conversion: servers that omit it get their URI.
 type Resource struct {
