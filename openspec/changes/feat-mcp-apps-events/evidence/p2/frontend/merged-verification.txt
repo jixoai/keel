@@ -1,0 +1,27 @@
+# P2 前端合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `130c74d`（cherry-pick `d46fd30`，无冲突）。
+
+- `cd web && nsh check`：exit 0
+- `nsh test --target tui`：136/136 passed，exit 0（2m48s）
+- `nsh test --target tui src/surfaces/mcp-app/bridge.test.ts`：17/17 passed
+- `nsh test --target tui src/data/mcp-apps.test.ts`：8/8 passed
+- `nsh build`：exit 0
+- lane 证据：`openspec/changes/feat-mcp-apps-events/evidence/p2/frontend/gates.md`
+
+## 安全口径（重要）
+
+NSH 0.4.0 nightly 的 WebView 运行时自动附加
+`allow-forms` / `allow-popups` / `allow-popups-to-escape-sandbox` / `allow-modals` / `allow-downloads`，
+app 代码无法收窄；同源文档确实**没有** `allow-same-origin`（opaque origin 成立）。后端为该 app 文档
+下发的 CSP 含 `sandbox allow-scripts`，两者同时生效时按 CSP 规范取**限制交集**，有效权限仍为
+allow-scripts。该行为需在 P6 浏览器 E2E 中逐项断言（P2.8 因此仍未勾）。
+
+## 未完成/偏离（与 lane 报告一致）
+
+- 第二 origin 双 iframe：web target 用同源相对文档（`frame-ancestors 'self'` 阻断跨源嵌入）；
+  桌面 target 用配置的 sandbox origin 作绝对地址基座。
+- 浏览器 E2E（sandbox 属性/CSP 头）归 P6.2/P6.3；出站帧 64KiB 双向限速归 P3.8。
+- TUI 不挂 iframe，文本兜底；`nsh test --target tui` 已覆盖。
+
+本文件不含 DSN 或密钥。
