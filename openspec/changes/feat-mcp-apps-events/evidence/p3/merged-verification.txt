@@ -1,0 +1,22 @@
+# P3 后端合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `472eaac`（cherry-pick `2e1810a`；`tasks.md` 自动合并）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：55 个 `ok`，零 FAIL，exit 0
+- `./scripts/conformance.sh`：1020 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 交付面：`internal/agentapi/mcp_app_actions.go`（tools/call、resources/read、ui/message 三决策、
+  open-link、64KiB/200req/s/4 并发限速）、`internal/store/mcp_app_audit.go` + `mcp_app_audit` 表/RLS、
+  `GET/POST /v1/mcp/apps/audit`、`cmd/keel/mcp_app_bridge.go`（runtime adapter/破坏性判定）
+- 未勾：P3.5（前端）、P3.6（前端权限授予；后端破坏性确认已交付）
+- lane 证据：`evidence/p3/`；P3 独立复核进行中
+
+## 已知前端 P0（独立复核发现，正在修）
+
+P2 前端复核在冻结 `130c74d` 上发现：NSH web 运行时的相对 `src` 被 grant 拒绝，且 URL 形态 WebView
+不转发 `parent.postMessage`（只有 srcdoc 形态有桥），因此 P2.6 的握手在 web 交付面上不可达。
+P2.6 的完成声明暂按「协议层单测交付、传输层待修」处理；修复 lane 以真实浏览器 E2E 验收后才可重新勾选。
+P2.8 维持未勾。
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
