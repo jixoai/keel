@@ -1,0 +1,5 @@
+=== RUN   TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts
+--- PASS: TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts (0.23s)
+PASS
+ok  	github.com/jixoai/keel/cmd/keel	0.586s
+exit=0

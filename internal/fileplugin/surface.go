@@ -1,11 +1,14 @@
 package fileplugin
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jixoai/keel/internal/layerfs"
 )
 
 // Surface is the materialized execution space's write-through seam. The
@@ -16,6 +19,24 @@ type Surface interface {
 	// WriteFile stores r at the session-relative path, creating parent
 	// directories as needed.
 	WriteFile(path string, mode uint32, r io.Reader) error
+}
+
+// SessionSurface is a Surface resolved per session. The bash bridge's
+// production execution space is one workspace per chat session, so a single
+// process-wide Surface cannot name the right one; this seam carries the ambient
+// scope. When both are configured, SessionSurface wins.
+type SessionSurface interface {
+	// WriteFileFor stores r at the session-relative path in scope's workspace.
+	WriteFileFor(ctx context.Context, scope Scope, path string, mode uint32, r io.Reader) error
+}
+
+// SnapshotSource is the execution space's capture seam. When attached, a
+// capture snapshots this source instead of walking CaptureRoot; the bash
+// bridge's workspace is an in-memory path index over layerfs, not a host
+// directory, so a directory walk cannot see it. The returned snapshot is
+// committed as exactly one fs.capture event.
+type SnapshotSource interface {
+	Snapshot(ctx context.Context, scope Scope) (layerfs.Snapshot, error)
 }
 
 // DirSurface is the local-directory execution space (tests and the local

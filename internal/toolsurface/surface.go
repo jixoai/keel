@@ -124,24 +124,6 @@ func (t *actionTool) Execute(ctx context.Context, _ string, args json.RawMessage
 	return unknownAction(t.name, input.Action, t.actions)
 }
 
-// singleTool is a tool with one implicit action (read/write/edit). This slice
-// routes it to not_implemented, but the name and contract are present now.
-type singleTool struct {
-	name        string
-	description string
-	schema      json.RawMessage
-}
-
-func (t *singleTool) Name() string            { return t.name }
-func (t *singleTool) Description() string     { return t.description }
-func (t *singleTool) Schema() json.RawMessage { return t.schema }
-func (t *singleTool) ExecutionMode() agentcore.ToolExecutionMode {
-	return agentcore.ToolExecutionParallel
-}
-func (t *singleTool) Execute(context.Context, string, json.RawMessage, agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
-	return NotImplemented(t.name, "")
-}
-
 // schema builds a small top-level schema. Action-specific fields stay
 // additionalProperties=true so the action router, not the generic validator,
 // owns the closed-set error.

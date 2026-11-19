@@ -1,0 +1,9 @@
+=== RUN   TestSandboxJobCommandsRenderKeelJobs
+--- PASS: TestSandboxJobCommandsRenderKeelJobs (0.01s)
+=== RUN   TestSandboxNohupStartsBackgroundJob
+--- PASS: TestSandboxNohupStartsBackgroundJob (0.00s)
+=== RUN   TestSandboxJobCommandsReportBackendFailure
+--- PASS: TestSandboxJobCommandsReportBackendFailure (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/bashbridge	0.295s
+exit=0

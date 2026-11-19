@@ -348,7 +348,7 @@ func (s *Service) Show(ctx context.Context, scope kernel.Scope, taskID uuid.UUID
 // ForkCard creates a new card in target (a new session) whose parentTaskId
 // points at the origin card. The file-view prefix of a fork belongs to
 // layerfs; this method records only the memory relation. It is the task-log
-// half of agent.fork, which itself stays reserved until layerfs lands.
+// half of agent.fork; the production seam is not wired yet.
 func (s *Service) ForkCard(ctx context.Context, origin kernel.Scope, originTaskID uuid.UUID, originSeq int64, target kernel.Scope, title, callID string) (Card, error) {
 	if err := s.ready(); err != nil {
 		return Card{}, err

@@ -1,0 +1,65 @@
+?   	github.com/jixoai/keel/cmd/chaos	[no test files]
+?   	github.com/jixoai/keel/cmd/e2e	[no test files]
+ok  	github.com/jixoai/keel/cmd/keel	5.677s
+?   	github.com/jixoai/keel/cmd/keel-dsh-ref	[no test files]
+?   	github.com/jixoai/keel/cmd/loadtest	[no test files]
+ok  	github.com/jixoai/keel/cmd/r1diff	(cached)
+ok  	github.com/jixoai/keel/cmd/runtime	(cached)
+ok  	github.com/jixoai/keel/internal/agent	(cached)
+ok  	github.com/jixoai/keel/internal/agentapi	11.672s
+?   	github.com/jixoai/keel/internal/agentcore	[no test files]
+ok  	github.com/jixoai/keel/internal/agentext	10.835s
+ok  	github.com/jixoai/keel/internal/agentloop	(cached)
+ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	(cached)
+?   	github.com/jixoai/keel/internal/agentloop/testloop	[no test files]
+ok  	github.com/jixoai/keel/internal/agentteam	(cached)
+ok  	github.com/jixoai/keel/internal/agenttool	(cached)
+ok  	github.com/jixoai/keel/internal/approval	(cached)
+ok  	github.com/jixoai/keel/internal/architecture	(cached)
+ok  	github.com/jixoai/keel/internal/auth	(cached)
+ok  	github.com/jixoai/keel/internal/bashbridge	1.591s
+ok  	github.com/jixoai/keel/internal/blob	(cached)
+ok  	github.com/jixoai/keel/internal/compaction	(cached)
+?   	github.com/jixoai/keel/internal/config	[no test files]
+ok  	github.com/jixoai/keel/internal/demo	(cached)
+ok  	github.com/jixoai/keel/internal/dshref	(cached)
+ok  	github.com/jixoai/keel/internal/durable	(cached)
+ok  	github.com/jixoai/keel/internal/externalgw	(cached)
+ok  	github.com/jixoai/keel/internal/fileplugin	55.426s
+ok  	github.com/jixoai/keel/internal/gateway	(cached)
+ok  	github.com/jixoai/keel/internal/handoff	(cached)
+ok  	github.com/jixoai/keel/internal/hooks	(cached)
+ok  	github.com/jixoai/keel/internal/host	0.703s
+ok  	github.com/jixoai/keel/internal/httpapi	(cached)
+ok  	github.com/jixoai/keel/internal/jobqueue	10.716s
+ok  	github.com/jixoai/keel/internal/kernel	(cached)
+ok  	github.com/jixoai/keel/internal/layerfs	(cached)
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	(cached)
+ok  	github.com/jixoai/keel/internal/loadout	(cached)
+ok  	github.com/jixoai/keel/internal/logsafe	(cached)
+ok  	github.com/jixoai/keel/internal/loop	(cached)
+ok  	github.com/jixoai/keel/internal/mcp	(cached)
+ok  	github.com/jixoai/keel/internal/mcp/oauth	(cached)
+ok  	github.com/jixoai/keel/internal/mediagw	(cached)
+ok  	github.com/jixoai/keel/internal/metrics	(cached)
+ok  	github.com/jixoai/keel/internal/modelcfg	(cached)
+ok  	github.com/jixoai/keel/internal/modelprovider	(cached)
+ok  	github.com/jixoai/keel/internal/notify	(cached)
+ok  	github.com/jixoai/keel/internal/pluginpkg	(cached)
+?   	github.com/jixoai/keel/internal/pluginpkg/builtin	[no test files]
+ok  	github.com/jixoai/keel/internal/provider	(cached)
+ok  	github.com/jixoai/keel/internal/quota	(cached)
+ok  	github.com/jixoai/keel/internal/r1diff	(cached)
+ok  	github.com/jixoai/keel/internal/realtime	(cached)
+ok  	github.com/jixoai/keel/internal/servicegraph	(cached)
+ok  	github.com/jixoai/keel/internal/servicehost	6.578s
+ok  	github.com/jixoai/keel/internal/skills	(cached)
+ok  	github.com/jixoai/keel/internal/store	(cached)
+ok  	github.com/jixoai/keel/internal/stream	(cached)
+ok  	github.com/jixoai/keel/internal/tasklog	(cached)
+ok  	github.com/jixoai/keel/internal/telemetry	(cached)
+?   	github.com/jixoai/keel/internal/testkit	[no test files]
+ok  	github.com/jixoai/keel/internal/toolsurface	0.438s
+ok  	github.com/jixoai/keel/plugins/templates	(cached)
+?   	github.com/jixoai/keel/plugins/tools/verifypkg	[no test files]
+exit=0

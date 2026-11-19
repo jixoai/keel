@@ -1,0 +1,7 @@
+ok  	github.com/jixoai/keel/internal/bashbridge	2.544s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	1.678s
+ok  	github.com/jixoai/keel/internal/fileplugin	44.695s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.530s
+ok  	github.com/jixoai/keel/internal/tasklog	1.420s
+ok  	github.com/jixoai/keel/cmd/keel	3.235s
+exit=0

@@ -37,10 +37,18 @@ type Options struct {
 	Leases LeaseReader
 	// Surface is the materialized execution space. Nil disables write-through.
 	Surface Surface
+	// SessionSurface is a per-session execution space. When set it takes
+	// precedence over Surface (the production bash workspace is per session).
+	SessionSurface SessionSurface
 	// CaptureRoot is the workspace directory Capture walks. Empty disables
-	// capture.
+	// directory capture.
 	CaptureRoot string
-	// Ignore is the capture ignore list. Nil uses layerfs.DefaultIgnore.
+	// SnapshotSource is the execution space's snapshot seam. When set it takes
+	// precedence over CaptureRoot (the bash workspace is not a host directory).
+	SnapshotSource SnapshotSource
+	// Ignore is the capture ignore list for the directory CaptureRoot path. Nil
+	// uses layerfs.DefaultIgnore. A SnapshotSource applies its own ignore policy
+	// (the gbash workspace skips .git/objects).
 	Ignore []string
 	// Cache is the capture stat cache. Nil creates one.
 	Cache *layerfs.StatCache
@@ -54,18 +62,20 @@ type Options struct {
 // Service is the file plugin's implementation. It is safe for concurrent use;
 // the manifest and layerfs store provide their own synchronization.
 type Service struct {
-	store       *layerfs.Store
-	manifest    Manifest
-	committer   kernel.Committer
-	leases      LeaseReader
-	surface     Surface
-	captureRoot string
-	ignore      []string
-	cache       *layerfs.StatCache
-	maxLines    int
-	maxBytes    int
-	logger      *slog.Logger
-	now         func() time.Time
+	store        *layerfs.Store
+	manifest     Manifest
+	committer    kernel.Committer
+	leases       LeaseReader
+	surface      Surface
+	sessionSpace SessionSurface
+	captureRoot  string
+	snapshots    SnapshotSource
+	ignore       []string
+	cache        *layerfs.StatCache
+	maxLines     int
+	maxBytes     int
+	logger       *slog.Logger
+	now          func() time.Time
 }
 
 // New builds the service.
@@ -90,18 +100,20 @@ func New(opts Options) (*Service, error) {
 		cache = layerfs.NewStatCache()
 	}
 	return &Service{
-		store:       opts.Store,
-		manifest:    manifest,
-		committer:   opts.Committer,
-		leases:      opts.Leases,
-		surface:     opts.Surface,
-		captureRoot: strings.TrimSpace(opts.CaptureRoot),
-		ignore:      opts.Ignore,
-		cache:       cache,
-		maxLines:    opts.MaxReadLines,
-		maxBytes:    opts.MaxReadBytes,
-		logger:      logger,
-		now:         now,
+		store:        opts.Store,
+		manifest:     manifest,
+		committer:    opts.Committer,
+		leases:       opts.Leases,
+		surface:      opts.Surface,
+		sessionSpace: opts.SessionSurface,
+		captureRoot:  strings.TrimSpace(opts.CaptureRoot),
+		snapshots:    opts.SnapshotSource,
+		ignore:       opts.Ignore,
+		cache:        cache,
+		maxLines:     opts.MaxReadLines,
+		maxBytes:     opts.MaxReadBytes,
+		logger:       logger,
+		now:          now,
 	}, nil
 }
 
@@ -287,7 +299,7 @@ func (s *Service) WriteStream(ctx context.Context, scope Scope, callID, rawPath 
 	if _, err := s.store.Retain(result.Hash, layerfs.Ref{Session: scope.SessionID.String(), Seq: receipt.Seq}); err != nil {
 		return WriteResult{}, Errorf(CodeIO, "write committed at seq %d but the reference was not recorded: %v", receipt.Seq, err)
 	}
-	if err := s.writeThrough(path, result.Hash, mode); err != nil {
+	if err := s.writeThrough(ctx, scope, path, result.Hash, mode); err != nil {
 		return WriteResult{}, Errorf(CodeIO, "write committed at seq %d but write-through failed: %v", receipt.Seq, err)
 	}
 	return WriteResult{
@@ -402,7 +414,7 @@ func (s *Service) Edit(ctx context.Context, args json.RawMessage) (EditResult, e
 	if _, err := s.store.Retain(result.Hash, layerfs.Ref{Session: scope.SessionID.String(), Seq: receipt.Seq}); err != nil {
 		return EditResult{}, Errorf(CodeIO, "edit committed at seq %d but the reference was not recorded: %v", receipt.Seq, err)
 	}
-	if err := s.writeThrough(path, result.Hash, current.Mode); err != nil {
+	if err := s.writeThrough(ctx, scope, path, result.Hash, current.Mode); err != nil {
 		return EditResult{}, Errorf(CodeIO, "edit committed at seq %d but write-through failed: %v", receipt.Seq, err)
 	}
 	return EditResult{
@@ -447,7 +459,7 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 	if !scope.Valid() {
 		return CaptureResult{}, Errorf(CodeRunScopeMissing, "capture needs the ambient session scope")
 	}
-	if s.captureRoot == "" {
+	if s.captureRoot == "" && s.snapshots == nil {
 		return CaptureResult{}, Errorf(CodeUnavailable, "no execution space is attached for capture")
 	}
 	if s.committer == nil {
@@ -460,7 +472,15 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 	} else if found {
 		return replay, nil
 	}
-	snapshot, err := s.store.Capture(s.captureRoot, layerfs.CaptureOptions{Ignore: s.ignore, Cache: s.cache})
+	var (
+		snapshot layerfs.Snapshot
+		err      error
+	)
+	if s.snapshots != nil {
+		snapshot, err = s.snapshots.Snapshot(ctx, scope)
+	} else {
+		snapshot, err = s.store.Capture(s.captureRoot, layerfs.CaptureOptions{Ignore: s.ignore, Cache: s.cache})
+	}
 	if err != nil {
 		s.commitCaptureFailed(ctx, scope, callID, baseSeq, taskID, err)
 		return CaptureResult{}, mapLayerfsError(err)
@@ -683,7 +703,7 @@ func (s *Service) lookupWrite(ctx context.Context, scope Scope, callID, path str
 	if _, err := s.store.Retain(entry.Hash, layerfs.Ref{Session: scope.SessionID.String(), Seq: receipt.Seq}); err != nil {
 		return WriteResult{}, false, Errorf(CodeIO, "write replay at seq %d could not record its reference: %v", receipt.Seq, err)
 	}
-	if err := s.writeThrough(path, entry.Hash, entry.Mode); err != nil {
+	if err := s.writeThrough(ctx, scope, path, entry.Hash, entry.Mode); err != nil {
 		return WriteResult{}, false, Errorf(CodeIO, "write replay at seq %d could not write through: %v", receipt.Seq, err)
 	}
 	return WriteResult{
@@ -713,7 +733,7 @@ func (s *Service) lookupEdit(ctx context.Context, scope Scope, callID, path stri
 	if _, err := s.store.Retain(entry.Hash, layerfs.Ref{Session: scope.SessionID.String(), Seq: receipt.Seq}); err != nil {
 		return EditResult{}, false, Errorf(CodeIO, "edit replay at seq %d could not record its reference: %v", receipt.Seq, err)
 	}
-	if err := s.writeThrough(path, entry.Hash, entry.Mode); err != nil {
+	if err := s.writeThrough(ctx, scope, path, entry.Hash, entry.Mode); err != nil {
 		return EditResult{}, false, Errorf(CodeIO, "edit replay at seq %d could not write through: %v", receipt.Seq, err)
 	}
 	return EditResult{Path: path, Hash: entry.Hash.Prefixed(), Size: entry.Size, Mode: entry.Mode, Seq: receipt.Seq, Replayed: true}, true, nil
@@ -770,7 +790,15 @@ func (s *Service) commitCaptureFailed(ctx context.Context, scope Scope, callID s
 	}
 }
 
-func (s *Service) writeThrough(path string, hash layerfs.Hash, mode uint32) error {
+func (s *Service) writeThrough(ctx context.Context, scope Scope, path string, hash layerfs.Hash, mode uint32) error {
+	if s.sessionSpace != nil {
+		object, err := s.store.Open(hash)
+		if err != nil {
+			return err
+		}
+		defer object.Close()
+		return s.sessionSpace.WriteFileFor(ctx, scope, path, mode, object)
+	}
 	if s.surface == nil {
 		return nil
 	}

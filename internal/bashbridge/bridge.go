@@ -126,6 +126,10 @@ type Session struct {
 	session *gbash.Session
 	mount   Mount
 	workDir string
+	// executed reports that Run was entered at least once, so Close knows the
+	// mount may hold the run's changes (a session that never ran has nothing to
+	// settle).
+	executed bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -253,6 +257,9 @@ func (s *Session) Run(ctx context.Context, spec RunSpec) (Result, error) {
 	if stderr == nil {
 		stderr = io.Discard
 	}
+	// Recorded before Exec: a canceled or failed execution may still have
+	// written files, so Close must settle them.
+	s.executed = true
 	res, err := s.session.Exec(ctx, &gbash.ExecutionRequest{
 		Name:         "keel-bash",
 		Script:       spec.Command,
@@ -276,14 +283,21 @@ func (s *Session) Run(ctx context.Context, spec RunSpec) (Result, error) {
 	}, nil
 }
 
-// Close releases the workspace mount. gbash sessions need no explicit close;
-// the mounted backend is the only resource with a lifetime.
+// Close settles the run's workspace changes (Mount.Finish) and releases the
+// mount resources. gbash sessions need no explicit close; the mounted backend
+// is the only resource with a lifetime.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() {
 		s.session = nil
-		if s.mount.Cleanup != nil {
-			s.closeErr = s.mount.Cleanup()
+		var finishErr error
+		if s.executed && s.mount.Finish != nil {
+			finishErr = s.mount.Finish()
 		}
+		var cleanupErr error
+		if s.mount.Cleanup != nil {
+			cleanupErr = s.mount.Cleanup()
+		}
+		s.closeErr = errors.Join(finishErr, cleanupErr)
 	})
 	return s.closeErr
 }

@@ -96,6 +96,117 @@ const (
 	serveShutdownTimeout = 10 * time.Second
 )
 
+// bashSessionBackend stamps the run identity on the bash tool's context before
+// the keel.shell plugin reaches the bridge. The task gate has already resolved
+// the attribution card and stamped it into the arguments; this wrapper forwards
+// that same fact (plus the tool-call id) so the workspace provider keys the
+// session workspace and the run's fs.capture is attributed without inventing a
+// second attribution path.
+type bashSessionBackend struct {
+	inner toolsurface.BashBackend
+}
+
+func (b bashSessionBackend) Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error) {
+	if scope, ok := agentext.RunScopeFromContext(ctx); ok && scope.TenantID != uuid.Nil && scope.SessionID != uuid.Nil {
+		var fields struct {
+			TaskID string `json:"taskId"`
+		}
+		_ = json.Unmarshal(args, &fields)
+		ctx = bashbridge.WithSessionIdentity(ctx, bashbridge.SessionIdentity{
+			TenantID:  scope.TenantID,
+			SessionID: scope.SessionID,
+			TaskID:    strings.TrimSpace(fields.TaskID),
+			CallID:    strings.TrimSpace(tasklog.CallIDFromContext(ctx)),
+		})
+	}
+	return b.inner.Invoke(ctx, action, args)
+}
+
+// bashJobManager is the slice of *jobqueue.Manager the sandbox job commands
+// need. It is an interface so the adapter's mapping stays testable without a
+// database.
+type bashJobManager interface {
+	List(ctx context.Context, tenantID uuid.UUID, limit int) ([]jobqueue.JobView, error)
+	Run(ctx context.Context, tenantID, sessionID uuid.UUID, req jobqueue.RunRequest) (jobqueue.RunResult, error)
+}
+
+// bashJobCommands adapts the JobManager to the sandbox's jobs/ps/nohup
+// commands. The view is the persisted job fact, not a host process: job ids are
+// keel job ids, and no numeric host pid is ever rendered.
+type bashJobCommands struct {
+	manager func() bashJobManager
+}
+
+func (b bashJobCommands) managerValue() bashJobManager {
+	if b.manager == nil {
+		return nil
+	}
+	return b.manager()
+}
+
+// ListJobs implements bashbridge.JobBackend.
+func (b bashJobCommands) ListJobs(ctx context.Context, tenantID uuid.UUID, limit int) ([]bashbridge.JobInfo, error) {
+	manager := b.managerValue()
+	if manager == nil {
+		return nil, errors.New("the bash job manager is not wired")
+	}
+	jobs, err := manager.List(ctx, tenantID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]bashbridge.JobInfo, 0, len(jobs))
+	for _, job := range jobs {
+		info := bashbridge.JobInfo{
+			ID:        job.JobID.String(),
+			Command:   job.Command,
+			Cwd:       job.Cwd,
+			Status:    job.Status,
+			Reason:    job.Reason,
+			ExitCode:  job.ExitCode,
+			CreatedAt: job.CreatedAt,
+			Live:      job.Live,
+		}
+		if job.SessionID != nil {
+			info.SessionID = job.SessionID.String()
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
+// StartJob implements bashbridge.JobBackend. A positive timeout is what makes
+// JobManager.Run register a background job and return instead of running
+// synchronously; one nanosecond keeps nohup's own wait negligible while the
+// command runs in its own session and settles its own fs.capture.
+func (b bashJobCommands) StartJob(ctx context.Context, tenantID, sessionID uuid.UUID, command string) (bashbridge.JobInfo, error) {
+	manager := b.managerValue()
+	if manager == nil {
+		return bashbridge.JobInfo{}, errors.New("the bash job manager is not wired")
+	}
+	result, err := manager.Run(ctx, tenantID, sessionID, jobqueue.RunRequest{
+		Command: command,
+		Timeout: time.Nanosecond,
+	})
+	if err != nil {
+		return bashbridge.JobInfo{}, err
+	}
+	info := bashbridge.JobInfo{
+		Command:  command,
+		Cwd:      result.Cwd,
+		Status:   result.Status,
+		Reason:   result.Reason,
+		ExitCode: result.ExitCode,
+		Live:     result.Status == store.BashJobRunning,
+	}
+	if result.JobID != nil {
+		info.ID = result.JobID.String()
+	}
+	if sessionID != uuid.Nil {
+		info.SessionID = sessionID.String()
+	}
+	return info, nil
+}
+
 // runServe assembles the product server and blocks until the process is
 // signalled. It is the only place that knows about every layer; the packages it
 // wires stay unaware of each other's policy.
@@ -141,13 +252,42 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	defer st.Close()
 
+	// The file plugin's byte layer and its per-session execution space are built
+	// before the bash manager: the bridge's workspace provider is the same object
+	// the file plugin writes through to and captures from, so read/write/edit and
+	// bash see one session view. The service itself is built after the kernel
+	// (it commits fs.write/fs.capture); the provider resolves it lazily.
+	fileStore, err := newFileStore(opts, log)
+	if err != nil {
+		return err
+	}
+	defer fileStore.Close()
+	var fileService *fileplugin.Service
+	sandbox, err := bashbridge.NewLayerWorkspaces(bashbridge.LayerWorkspaceOptions{
+		Store:   fileStore,
+		Service: func() *fileplugin.Service { return fileService },
+		Logger:  log,
+	})
+	if err != nil {
+		return fmt.Errorf("bash workspace provider: %w", err)
+	}
+
 	// Bash background jobs: the manager is a process-level singleton. Recovery
 	// runs before the service graph, so no run can observe a stale "running"
 	// row from a previous process. Its output uploader is separate from the
-	// image uploader: bash output may be far larger than an image.
-	bashManager, err := jobqueue.New(jobqueue.Options{
+	// image uploader: bash output may be far larger than an image. The manager is
+	// also the data source of the sandbox's jobs/ps/nohup commands; the bridge is
+	// built first, so the adapter resolves the manager lazily.
+	var bashManager *jobqueue.Manager
+	jobCommands := bashbridge.NewJobCommands(bashJobCommands{manager: func() bashJobManager {
+		if bashManager == nil {
+			return nil
+		}
+		return bashManager
+	}})
+	bashManager, err = jobqueue.New(jobqueue.Options{
 		Store:  st,
-		Bridge: bashbridge.New(bashbridge.Config{}),
+		Bridge: bashbridge.New(bashbridge.Config{Workspace: sandbox, Commands: jobCommands}),
 		Uploader: &blob.Uploader{
 			Store:       st,
 			CASDir:      opts.CASDir,
@@ -279,14 +419,13 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	limits.Update(tenantCfg.Quota)
 
-	// The file plugin's byte layer is process-wide (one CAS root), while its
-	// manifest is session-scoped. It is built before the service graph so the
-	// constant read/write/edit tools have a backend at assembly time.
-	fileStore, fileService, err := newFileService(st, kern, opts, log)
+	// The file plugin's manifest is session-scoped; its bytes are the process-wide
+	// store built above and its execution space is the same per-session workspace
+	// provider the bash bridge mounts.
+	fileService, err = newFileService(st, kern, fileStore, log, sandbox, sandbox)
 	if err != nil {
 		return err
 	}
-	defer fileStore.Close()
 	opts.FileService = fileService
 
 	// The constant tool surface needs the sub-agent runner and the plugin
@@ -361,7 +500,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 			},
 			RunControl: runControl,
 			ToolBackends: toolsurface.Backends{
-				Bash:     agentext.ShellBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				Bash:     bashSessionBackend{inner: agentext.ShellBackend{Manager: func() *agentext.Manager { return toolPluginManager }}},
 				Agents:   agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return toolSubagents }},
 				Creation: agentext.CreationBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Tasks: agentext.TasksBackend{
@@ -982,12 +1121,12 @@ func (m modelRuntimeSeam) ApplyModels(ctx context.Context, document json.RawMess
 	return err
 }
 
-// newFileService builds the layerfs byte store and the file plugin service.
-// The CAS root is shared with the blob uploader's directory but isolated in a
-// layerfs/ subtree: layerfs GC must never delete an object the blob table still
-// references. Without KEEL_CAS_DIR the root is ephemeral (Phase A); the log
-// line makes that visible instead of silently losing files on restart.
-func newFileService(st *store.Store, kern *kernel.Kernel, opts serveOptions, log *slog.Logger) (*layerfs.Store, *fileplugin.Service, error) {
+// newFileStore builds the process-wide layerfs byte store. The CAS root is
+// shared with the blob uploader's directory but isolated in a layerfs/ subtree:
+// layerfs GC must never delete an object the blob table still references.
+// Without KEEL_CAS_DIR the root is ephemeral (Phase A); the log line makes that
+// visible instead of silently losing files on restart.
+func newFileStore(opts serveOptions, log *slog.Logger) (*layerfs.Store, error) {
 	root := strings.TrimSpace(opts.CASDir)
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "keel-layerfs")
@@ -997,25 +1136,36 @@ func newFileService(st *store.Store, kern *kernel.Kernel, opts serveOptions, log
 	}
 	store, err := layerfs.Open(root, layerfs.Options{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("open layerfs: %w", err)
+		return nil, fmt.Errorf("open layerfs: %w", err)
 	}
+	return store, nil
+}
+
+// newFileService builds the file plugin service over the process-wide store.
+// The execution space is session-scoped (the bash bridge's workspace provider):
+// it is passed as both the write-through surface and the capture snapshot
+// source, so "write then bash read" and "bash write then capture" act on one
+// view. The directory Surface/CaptureRoot pair remains for the local/test
+// adapter and is deliberately left unset here.
+func newFileService(st *store.Store, kern *kernel.Kernel, fileStore *layerfs.Store, log *slog.Logger,
+	surface fileplugin.SessionSurface, snapshots fileplugin.SnapshotSource) (*fileplugin.Service, error) {
 	manifest, err := fileplugin.NewPostgresManifest(st.Pool())
 	if err != nil {
-		_ = store.Close()
-		return nil, nil, fmt.Errorf("file manifest: %w", err)
+		return nil, fmt.Errorf("file manifest: %w", err)
 	}
 	service, err := fileplugin.New(fileplugin.Options{
-		Store:     store,
-		Manifest:  manifest,
-		Committer: kern,
-		Leases:    kern,
-		Logger:    log,
+		Store:          fileStore,
+		Manifest:       manifest,
+		Committer:      kern,
+		Leases:         kern,
+		SessionSurface: surface,
+		SnapshotSource: snapshots,
+		Logger:         log,
 	})
 	if err != nil {
-		_ = store.Close()
-		return nil, nil, fmt.Errorf("file plugin: %w", err)
+		return nil, fmt.Errorf("file plugin: %w", err)
 	}
-	return store, service, nil
+	return service, nil
 }
 
 // deploymentRoot is the directory an agent's prompt-file reference resolves

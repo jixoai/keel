@@ -30,6 +30,10 @@ type Mount struct {
 	Point string
 	// FS implements gbash's fs.Factory or fs.FileSystem.
 	FS any
+	// Finish runs once after the session's last Run, before Cleanup (the
+	// production layerfs workspace uses it to settle the run's changes as one
+	// fs.capture). It is not called when no command ever executed.
+	Finish func() error
 	// Cleanup releases per-session resources (the default removes its temp dir).
 	Cleanup func() error
 }

@@ -1,0 +1,14 @@
+=== RUN   TestProductionWiringWriteThenBashRead
+--- PASS: TestProductionWiringWriteThenBashRead (0.04s)
+=== RUN   TestBashWriteCapturedIntoManifestAndTree
+--- PASS: TestBashWriteCapturedIntoManifestAndTree (0.03s)
+=== RUN   TestManifestSeedsSandboxView
+--- PASS: TestManifestSeedsSandboxView (0.01s)
+=== RUN   TestSessionsGetIndependentWorkspaces
+--- PASS: TestSessionsGetIndependentWorkspaces (0.02s)
+=== RUN   TestCaptureFailureIsOneSystemEvent
+2026/11/19 23:35:10 WARN bash workspace capture failed tenant_id=688d78b8-e3ff-41fa-9cae-70a80230553c session_id=c56aaa8d-c289-42ff-aa73-519944866be9 call_id=call-bbad err="invalid_arguments: gbashfs: capture: store tree \"\": layerfs: invalid: tree entry name \"bad\\nname\": gbashfs: capture: store tree \"\": layerfs: invalid: tree entry name \"bad\\nname\""
+--- PASS: TestCaptureFailureIsOneSystemEvent (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/bashbridge	0.398s
+exit=0

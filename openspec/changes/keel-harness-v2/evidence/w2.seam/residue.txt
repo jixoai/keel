@@ -1,0 +1,6 @@
+# residue check (2026-11-19T15:35:27Z)
+## keel/e2e processes
+none
+## listeners on e2e ports
+13610 none
+13611 none

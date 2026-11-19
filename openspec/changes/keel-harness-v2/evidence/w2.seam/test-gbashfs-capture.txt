@@ -1,0 +1,7 @@
+=== RUN   TestCaptureMatchesDirectoryCapture
+--- PASS: TestCaptureMatchesDirectoryCapture (0.06s)
+=== RUN   TestCaptureEmptyWorkspace
+--- PASS: TestCaptureEmptyWorkspace (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.535s
+exit=0
