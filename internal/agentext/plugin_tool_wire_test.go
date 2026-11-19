@@ -150,8 +150,8 @@ func TestInstallRefusesUnpublishableToolName(t *testing.T) {
 	}
 }
 
-// TestRuntimePublicationNormalizesOnlyNonCompliantNames pins the compatibility
-// red line at the assembly level: an already wire-safe plugin tool keeps its
+// TestRuntimePublicationNormalizesOnlyNonCompliantNames pins the publication
+// grammar at the assembly level: an already wire-safe plugin tool keeps its
 // exact name, and only a name carrying punctuation is rewritten.
 func TestRuntimePublicationNormalizesOnlyNonCompliantNames(t *testing.T) {
 	recorder := &toolRecorder{}
@@ -161,14 +161,14 @@ func TestRuntimePublicationNormalizesOnlyNonCompliantNames(t *testing.T) {
 		ID: "compat.probe",
 		Tools: []ToolSpec{
 			{Name: "example_status", Schema: json.RawMessage(`{"type":"object"}`)},
-			{Name: "spawn_subagent", Schema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "delegate_tool", Schema: json.RawMessage(`{"type":"object"}`)},
 			{Name: "demo.tool:v1", Schema: json.RawMessage(`{"type":"object"}`)},
 		},
 	}
 	if err := runtime.ApplyPlugins(context.Background(), []*Plugin{plugin}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	want := []string{"example_status", "spawn_subagent", "demo_tool_v1"}
+	want := []string{"example_status", "delegate_tool", "demo_tool_v1"}
 	got := recorder.list()
 	if len(got) != len(want) {
 		t.Fatalf("published tools = %v, want %v", got, want)

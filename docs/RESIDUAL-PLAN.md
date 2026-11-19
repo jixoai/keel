@@ -74,7 +74,8 @@
   - W2.0 `docs/GBASH-CONTRACT.md` 契约 pin（bash 开工硬前置；研究 spike 进行中）；
     OAR 契约随 W9 前另派
   - W2.1 工具面骨架**单线先行**：11 工具注册面 + action 闭集路由 + 清单哈希 + 迁移快照断言 +
-    `mcp__` 适配删除 + PI-PARITY 偏离登记（`spawn_subagent` 按 §5.1-1 保留至 W8，登记为过渡能力）
+    `mcp__` 适配删除 + PI-PARITY 偏离登记（`spawn_subagent` 按 harness-v2 迁移表并入
+    `agent.spawn`，不留过渡名；§5.1-1 已按此更新）
   - W2.2–W2.5 在 W2.1 合入后**并行分线（文件分区）**：bash+JobManager / layerfs+file /
     task-log / approve+notify
   - 顺序依赖：W2.2 待 W2.0；W2.3 复用 blob（Wave 1 线 B 之后）；W2.4/W2.5 的 store/agentapi
@@ -134,9 +135,9 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 
 对账 `RECONCILIATION.md §4` 提出 5 项归属/口径冲突，裁决如下：
 
-1. **`spawn_subagent` 去留**：**保留**。它是 agentext 子代理插件的注册工具，团队模式（R3）依赖它；
-   harness-v2 W8 负责设计「成员/子代理」的终局形态，迁移表把它登记为**过渡能力**，
-   在 W8 落地前不删除。
+1. **`spawn_subagent` 去留（2026-11-19 W2.1 更新）**：按 harness-v2 迁移表**删除**，
+   语义并入 `agent` 聚合工具的 `spawn` action（子输入 `selection.agentId` 的 binding 传播不变）；
+   团队模式 R3 的自动保留原语改为 `agent`。不再保留 `spawn_subagent` 过渡名。
 2. **`mcp__` 命名**：以 **harness-v2 W0 为准**——终局工具面 = 恒定聚合工具（`mcp.call`），
    `mcp__<server>__<tool>` 适配删除；与 PI 的差异按 W0 既有机制在 `PI-PARITY.md` 登记为
    **有意偏离**（理由：恒定工具面是 DI 注册与可替换性的前提）。

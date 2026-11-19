@@ -168,7 +168,7 @@ func TestBindingWithoutResolverKeepsDeploymentPromptAndTools(t *testing.T) {
 	rec := &captureStream{}
 	// The runner is built WITHOUT a binding resolver: the fact's binding keys
 	// are inert and the deployment surface applies untouched.
-	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "echo")}, nil, nil, rec.fn())
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read")}, nil, nil, rec.fn())
 	res := runAttemptOf(t, k, r, tenant, session)
 	prompts, tools := rec.snapshot()
 	if len(prompts) != 1 {
@@ -177,7 +177,7 @@ func TestBindingWithoutResolverKeepsDeploymentPromptAndTools(t *testing.T) {
 	if !strings.Contains(prompts[0], "deployment prompt") {
 		t.Fatalf("system prompt = %q, want the deployment prompt", prompts[0])
 	}
-	if got := strings.Join(tools[0], ","); got != "clock,echo" {
+	if got := strings.Join(tools[0], ","); got != "bash,read" {
 		t.Fatalf("tool surface = %v, want the whole registry", tools[0])
 	}
 	summary := res.Summary
@@ -198,7 +198,7 @@ func TestBindingPromptReachesProviderAndKeepsSections(t *testing.T) {
 	k := testKernel(t, st)
 	commitBindingInput(t, k, tenant, session, "binding-prompt", `{"modelId":"m","agentId":"agent_kite7"}`)
 	rec := &captureStream{}
-	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock")},
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash")},
 		&stubBindings{surface: RunSurface{
 			Prompt:     "KITE-RUNTIME-MARK-7 agent instructions",
 			PromptHash: "sha256:test",
@@ -239,27 +239,27 @@ func TestBindingToolGrantsFilterTheSurface(t *testing.T) {
 	k := testKernel(t, st)
 	commitBindingInput(t, k, tenant, session, "binding-grants", `{"modelId":"m","agentId":"agent_grant"}`)
 	rec := &captureStream{}
-	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "echo", "spawn_subagent")},
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read", "agent")},
 		&stubBindings{surface: RunSurface{
-			ToolIDs: map[string]bool{"clock": true, "echo": false, "gone": true},
+			ToolIDs: map[string]bool{"bash": true, "read": false, "gone": true},
 			AgentID: "agent_grant",
 		}}, nil, rec.fn())
 	runAttemptOf(t, k, r, tenant, session)
 	_, tools := rec.snapshot()
-	if got := strings.Join(tools[0], ","); got != "clock" {
-		t.Fatalf("tool surface = %v, want [clock] (echo disabled, gone unavailable)", tools[0])
+	if got := strings.Join(tools[0], ","); got != "bash" {
+		t.Fatalf("tool surface = %v, want [bash] (read disabled, gone unavailable)", tools[0])
 	}
 }
 
-func TestTeamModeKeepsSpawnToolUnlessExplicitlyDisabled(t *testing.T) {
+func TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled(t *testing.T) {
 	cases := []struct {
 		name   string
 		grants map[string]bool
 		want   string
 	}{
-		{name: "grants without the primitive", grants: map[string]bool{"clock": true}, want: "clock,spawn_subagent"},
-		{name: "grants with it enabled", grants: map[string]bool{"clock": true, "spawn_subagent": true}, want: "clock,spawn_subagent"},
-		{name: "grants with it disabled", grants: map[string]bool{"clock": true, "spawn_subagent": false}, want: "clock"},
+		{name: "grants without the primitive", grants: map[string]bool{"bash": true}, want: "agent,bash"},
+		{name: "grants with it enabled", grants: map[string]bool{"bash": true, "agent": true}, want: "agent,bash"},
+		{name: "grants with it disabled", grants: map[string]bool{"bash": true, "agent": false}, want: "bash"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -268,7 +268,7 @@ func TestTeamModeKeepsSpawnToolUnlessExplicitlyDisabled(t *testing.T) {
 			k := testKernel(t, st)
 			commitBindingInput(t, k, tenant, session, "binding-team", `{"modelId":"m","teamId":"team_kite"}`)
 			rec := &captureStream{}
-			r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "echo", "spawn_subagent")},
+			r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read", "agent")},
 				&stubBindings{surface: RunSurface{
 					ToolIDs:  test.grants,
 					TeamMode: true,
@@ -409,8 +409,8 @@ func TestBindingEmptyToolSurfaceUnblocksNoToolModels(t *testing.T) {
 	}}
 	// The agent declares grants and none is enabled: the filtered surface is
 	// empty, so the model's declared lack of tool support is satisfied.
-	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "echo")},
-		&stubBindings{surface: RunSurface{ToolIDs: map[string]bool{"clock": false}, AgentID: "agent_notools"}},
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read")},
+		&stubBindings{surface: RunSurface{ToolIDs: map[string]bool{"bash": false}, AgentID: "agent_notools"}},
 		resolver, FakeStream())
 	runAttemptOf(t, k, r, tenant, session)
 	_, tools := wire.snapshot()
@@ -428,7 +428,7 @@ func TestBindingEmptyToolSurfaceUnblocksNoToolModels(t *testing.T) {
 		ProviderID: "p", Model: "no-tools", Stream: wire.fn(),
 		Properties: &ModelProperties{SupportsToolCall: false},
 	}}
-	r2 := bindingRunner(k2, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock")}, nil, resolver2, FakeStream())
+	r2 := bindingRunner(k2, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash")}, nil, resolver2, FakeStream())
 	lease := claimScope(t, k2, tenant2, session2)
 	if _, err := r2.Run(context.Background(), lease); err == nil || !strings.Contains(err.Error(), "declares no tool-call support") {
 		t.Fatalf("run error = %v, want the no-tool refusal", err)
@@ -438,7 +438,7 @@ func TestBindingEmptyToolSurfaceUnblocksNoToolModels(t *testing.T) {
 // TestRecoveryDoesNotExecuteToolsOutsideTheGrant pins the crash-recovery
 // boundary: an assistant tool call left unresolved by a crashed process is
 // replayed through the attempt's filtered surface, not the host registry. A
-// binding that grants only clock must not gain echo just because the process
+// binding that grants only bash must not gain read just because the process
 // died mid-turn — otherwise removing a grant, or a captain explicitly disabling
 // delegation, would only hold until the next restart.
 func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
@@ -449,12 +449,12 @@ func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
 	scope := kernel.Scope{TenantID: tenant, SessionID: session}
 
 	commitBindingInput(t, k, tenant, session, "binding-recovery", `{"modelId":"m","agentId":"agent_grant"}`)
-	// A previous attempt committed an assistant tool call for "echo" and died
+	// A previous attempt committed an assistant tool call for "read" and died
 	// before committing its result.
 	lease := claimScope(t, k, tenant, session)
 	orphan := mustJSON(map[string]any{
 		"role":       "assistant",
-		"content":    []map[string]any{{"type": "toolCall", "id": "call_orphan", "name": "echo", "arguments": map[string]any{"text": "hi"}}},
+		"content":    []map[string]any{{"type": "toolCall", "id": "call_orphan", "name": "read", "arguments": map[string]any{"text": "hi"}}},
 		"stopReason": "tool_use",
 	})
 	if _, err := k.Commit(ctx, kernel.CommitRequest{Scope: scope, Kind: kernel.KindAssistantMessage,
@@ -466,8 +466,8 @@ func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
 	}
 
 	rec := &captureStream{}
-	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "echo")},
-		&stubBindings{surface: RunSurface{ToolIDs: map[string]bool{"clock": true}, AgentID: "agent_grant"}},
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read")},
+		&stubBindings{surface: RunSurface{ToolIDs: map[string]bool{"bash": true}, AgentID: "agent_grant"}},
 		nil, rec.fn())
 	runAttemptOf(t, k, r, tenant, session)
 
@@ -495,7 +495,7 @@ func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
 		}
 		found = true
 		if !payload.IsError {
-			t.Fatalf("recovery executed the ungranted tool echo: %s", ev.Payload)
+			t.Fatalf("recovery executed the ungranted tool read: %s", ev.Payload)
 		}
 	}
 	if !found {
@@ -504,15 +504,15 @@ func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
 }
 
 // TestCaptainSeesTheTeamRoster pins the delegation affordance: the captain's
-// prompt lists the team's members, so spawn_subagent can name one instead of
-// guessing an agentId (spawn_subagent's schema takes a free-text id).
+// prompt lists the team's members, so agent.spawn can name one instead of
+// guessing an agentId (the spawn action takes a free-text id).
 func TestCaptainSeesTheTeamRoster(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
 	commitBindingInput(t, k, tenant, session, "binding-roster", `{"modelId":"m","teamId":"team_kite"}`)
 	rec := &captureStream{}
-	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("clock", "spawn_subagent")},
+	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "agent")},
 		&stubBindings{surface: RunSurface{
 			Prompt:   "KITE-RUNTIME-MARK-7 captain instructions",
 			TeamMode: true,

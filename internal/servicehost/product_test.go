@@ -109,7 +109,7 @@ func TestRefreshProductToolsPublishesDynamicTools(t *testing.T) {
 	if _, ok := rt.Assembly().Tools().Get("plugin_tool"); !ok {
 		t.Fatal("dynamic plugin tool is not in the host registry")
 	}
-	if _, ok := rt.Assembly().Tools().Get("clock"); !ok {
+	if _, ok := rt.Assembly().Tools().Get("skills"); !ok {
 		t.Fatal("RefreshProductTools dropped the builtin tools")
 	}
 	if err := rt.RefreshProductTools(nil); err != nil {

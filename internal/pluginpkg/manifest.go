@@ -264,9 +264,8 @@ func isWireSafeRune(r rune) bool {
 // '_'. The host namespaces a sidecar's tools as `<plugin>.<tool>`, and a '.' on
 // the wire is a function name no OpenAI-compatible endpoint accepts, so
 // `demo.sidecar.greet` is published as `demo_sidecar_greet`. A name that is
-// already wire safe is returned verbatim: that compatibility rule is why
-// publication normalizes instead of rejecting (`example_status` and
-// `spawn_subagent` must never change).
+// already wire safe is returned verbatim: publication normalizes instead of
+// rejecting, and never rewrites a name that is already valid.
 func NormalizePublishedToolName(name string) string {
 	clean := true
 	for _, r := range name {

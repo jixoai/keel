@@ -21,7 +21,8 @@ import (
 //
 // Contract:
 //   - last message is a tool result → a final text answer quoting the result
-//   - last user text contains "echo" → a call to the echo tool
+//   - last user text contains "echo" → a call to a tool named "echo" (the
+//     caller supplies it; tests use keel.testkit's EchoTool)
 //   - otherwise → a short acknowledgement
 func FakeStream() provider.StreamFn {
 	return func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {

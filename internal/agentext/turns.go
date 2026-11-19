@@ -221,7 +221,7 @@ func NewRunControl(runs RunStatusReader, log *slog.Logger) *RunControl {
 // idempotent and reports the final outcome).
 func (c *RunControl) BeginRun(parent context.Context, scope kernel.Scope, runID string) (context.Context, func(outcome string)) {
 	// The run scope travels with the run context, so a model tool executing
-	// inside this attempt can attribute its work (spawn_subagent) without any
+	// inside this attempt can attribute its work (agent.spawn) without any
 	// extra worker plumbing.
 	ctx, cancel := context.WithCancel(WithRunScope(parent, RunScope{
 		TenantID: scope.TenantID, SessionID: scope.SessionID, RunID: runID,

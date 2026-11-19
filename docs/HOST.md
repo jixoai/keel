@@ -50,7 +50,7 @@ compaction:
 telemetry:
   adapter: "memory"         # memory | prometheus | otlp（后两者后续）
 tools:
-  allow: ["clock", "echo", "skill", "mcp__*"]
+  allow: ["bash", "read", "skills", "agent"]   # constant aggregate tools + approved provides.tools
 quota:
   runConcurrency: 8       # per-tenant concurrent runs in this runtime (0 = unlimited)
   eventsPerMinute: 600    # per-tenant admitted-event rate (0 = unlimited)
@@ -66,8 +66,11 @@ quota:
 
 1. **Skills**：`skills.Discover(roots)` → `skills.FormatForPrompt(skills, "read")`；
    作为 system prompt 的 `<skills>` section；`disable-model-invocation` 不进入索引。
-2. **Tools**：内置工具 + `skill` 工具（按需加载正文）+ MCP 工具（`mcp__server__tool`）。
-   工具集按 `tools.allow` 过滤；skill 的 `allowed-tools` 与实际集合取交集。
+2. **Tools**：恒定 11 个内建聚合工具（`bash`/`read`/`write`/`edit`/`mcp`/`skills`/`tasks`/
+   `agent`/`approve`/`notify`/`creation`）∪ 已审批插件的 `provides.tools`。MCP 只经
+   `mcp {action:"list"|"describe"|"call"}` 暴露，不生成 `mcp__server__tool`；skills 正文
+   经 `skills {action:"view"}` 按需加载。工具集按 `tools.allow` 过滤；skill 的
+   `allowed-tools` 与实际集合取交集。
 3. **Hooks**：把 `internal/hooks` 的事件接到 loop 的 `PrepareRequest` / `OnStop` /
    `ShouldStopAfterTurn` / tool executor 的 before/after；命令钩子按配置加载。
 4. **Compaction**：`loop.LoopConfig.Compaction` 使用 PI `DEFAULT_COMPACTION_POLICY`

@@ -37,7 +37,12 @@ type ToolSpec struct {
 	// Sequential forces the whole tool batch to run serially (tools with side
 	// effects on shared state).
 	Sequential bool
-	Execute    func(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error)
+	// Internal tools are executable but never published to the model. They are
+	// the backend of a harness-owned aggregate tool: keel.creation's
+	// scaffold/validate/... actions stay invocable through Manager.InvokeToolResult
+	// without adding creation_* names to the model-visible surface.
+	Internal bool
+	Execute  func(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error)
 }
 
 // HookSpec is one hook subscription a plugin declares.
@@ -251,8 +256,8 @@ func (r *Runtime) assemble(ctx context.Context, plugins []*Plugin) error {
 	// with '_' instead. A manifest that would publish an uncallable name is
 	// already refused at install (pluginpkg validation); this is the assembly's
 	// own guarantee, so a plugin registered from Go cannot bypass it either. An
-	// already compliant name is returned verbatim — `example_status` and
-	// `spawn_subagent` must never change.
+	// already compliant name is returned verbatim; publication never rewrites a
+	// valid name.
 	plugins = publishToolNames(plugins)
 
 	r.unload(ctx)
@@ -492,7 +497,12 @@ func (r *Runtime) publish() error {
 	r.mu.Lock()
 	tools := make([]agentcore.AgentTool, 0)
 	for _, entry := range r.active {
-		tools = append(tools, entry.tools...)
+		for _, tool := range entry.tools {
+			if internalTool(tool) {
+				continue
+			}
+			tools = append(tools, tool)
+		}
 	}
 	sections := r.activePromptSectionsLocked()
 	r.mu.Unlock()
@@ -592,6 +602,9 @@ func (r *Runtime) Snapshot() Snapshot {
 	tools := make([]string, 0)
 	for _, entry := range r.active {
 		for _, tool := range entry.tools {
+			if internalTool(tool) {
+				continue
+			}
 			tools = append(tools, tool.Name())
 		}
 	}
@@ -672,9 +685,20 @@ func hookNames(specs []HookSpec) []HookEvent {
 	return out
 }
 
+// internalTool reports whether a published adapter is a plugin's private action
+// backend (ToolSpec.Internal). Those stay invocable through
+// Manager.InvokeToolResult and never enter the model-facing set.
+func internalTool(tool agentcore.AgentTool) bool {
+	adapted, ok := tool.(*pluginTool)
+	return ok && adapted.spec.Internal
+}
+
 func toolNames(specs []ToolSpec) []string {
 	out := make([]string, 0, len(specs))
 	for _, spec := range specs {
+		if spec.Internal {
+			continue
+		}
 		out = append(out, spec.Name)
 	}
 	sort.Strings(out)

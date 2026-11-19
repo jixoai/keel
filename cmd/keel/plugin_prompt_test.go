@@ -74,12 +74,42 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 			}
 			return
 		}
-		if hasPlugin || strings.Contains(prompt, "creation_scaffold") {
+		if hasPlugin || strings.Contains(prompt, "creation {action:") {
 			t.Fatalf("%s: the plugin section survived the disable: %q", step, prompt)
 		}
 	}
 
 	assertPrompt("boot", true)
+
+	// The builtin `mcp` tool is the only MCP entry, and it drives the resolved
+	// manager: list finds the fixture server, describe returns its schema, and
+	// call reaches the server. No mcp__<server>__<tool> name exists on the host.
+	mcpTool, ok := rt.Assembly().Tools().Get("mcp")
+	if !ok {
+		t.Fatal("the builtin mcp tool is missing")
+	}
+	list, err := mcpTool.Execute(ctx, "mcp-list", json.RawMessage(`{"action":"list"}`), nil)
+	if err != nil {
+		t.Fatalf("mcp list: %v", err)
+	}
+	if text := string(mustJSON(t, list.Content)); !strings.Contains(text, "promptfixture") || !strings.Contains(text, "fixture_echo") {
+		t.Fatalf("mcp list = %s", text)
+	}
+	describe, err := mcpTool.Execute(ctx, "mcp-describe", json.RawMessage(`{"action":"describe","server":"promptfixture","tool":"fixture_echo"}`), nil)
+	if err != nil {
+		t.Fatalf("mcp describe: %v", err)
+	}
+	if text := string(mustJSON(t, describe.Content)); !strings.Contains(text, "inputSchema") || !strings.Contains(text, "object") {
+		t.Fatalf("mcp describe = %s", text)
+	}
+	call, err := mcpTool.Execute(ctx, "mcp-call", json.RawMessage(`{"action":"call","server":"promptfixture","tool":"fixture_echo","arguments":{}}`), nil)
+	if err != nil {
+		t.Fatalf("mcp call: %v", err)
+	}
+	if text := string(mustJSON(t, call.Content)); !strings.Contains(text, "fixture-called") {
+		t.Fatalf("mcp call = %s", text)
+	}
+
 	// The inventory the API serves carries the same effective contribution.
 	if snapshot := surface.manager.Snapshot(); len(snapshot.Prompt) == 0 ||
 		snapshot.Prompt[0].Name != agentext.CreationPromptSectionName {
@@ -93,7 +123,10 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 	}
 	assertPrompt("disable", false)
 	if _, ok := rt.Assembly().Tools().Get("creation_scaffold"); ok {
-		t.Fatal("the creation tool survived the disable")
+		t.Fatal("the retired creation_scaffold tool name is still registered")
+	}
+	if _, ok := rt.Assembly().Tools().Get("creation"); !ok {
+		t.Fatal("the constant creation tool disappeared when its backend was disabled")
 	}
 	if snapshot := surface.manager.Snapshot(); len(snapshot.Prompt) != 0 {
 		t.Fatalf("the inventory still reports a prompt after the disable: %+v", snapshot.Prompt)
@@ -121,8 +154,11 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 	assertPrompt("enable", true)
-	if _, ok := rt.Assembly().Tools().Get("creation_scaffold"); !ok {
-		t.Fatal("the creation tool is not in the host registry after the enable")
+	if _, ok := rt.Assembly().Tools().Get("creation_scaffold"); ok {
+		t.Fatal("the retired creation_scaffold tool name is registered after the enable")
+	}
+	if _, ok := rt.Assembly().Tools().Get("creation"); !ok {
+		t.Fatal("the constant creation tool is missing after the enable")
 	}
 }
 
@@ -234,6 +270,10 @@ func runPluginPromptMCPHelper() int {
 			respond(map[string]any{"tools": []any{
 				map[string]any{"name": "fixture_echo", "inputSchema": map[string]any{"type": "object"}},
 			}})
+		case "tools/call":
+			respond(map[string]any{"content": []any{
+				map[string]any{"type": "text", "text": "fixture-called"},
+			}})
 		default:
 			respond(map[string]any{"jsonrpc": mcp.JSONRPCVersion, "id": request.ID, "error": map[string]any{
 				"code": mcp.CodeMethodNotFound, "message": "Method not found: " + request.Method,
@@ -248,4 +288,14 @@ type pluginPromptMirror struct{}
 
 func (pluginPromptMirror) GetRun(context.Context, uuid.UUID, uuid.UUID) (store.Run, error) {
 	return store.Run{}, store.ErrNoRun
+}
+
+// mustJSON encodes a tool result slice for substring assertions.
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return encoded
 }

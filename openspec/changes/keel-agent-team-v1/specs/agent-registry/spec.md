@@ -113,6 +113,6 @@ sub-agent 生成 MUST 支持按 Agent 库条目启动：请求携带 `agentId` �
 MUST NOT 把成员 transcript 注入父会话上下文。
 
 #### Scenario: 队长委派成员
-- **WHEN** captain 以 `spawn_subagent {agentId}` 委派
+- **WHEN** captain 以 `agent {action:"spawn", agentId}` 委派
 - **THEN** 子会话输入带该 agentId；子 run 的 system prompt 是成员自己的提示词，工具面是
   成员自己的授权（不含团队模式自动追加的委派原语）

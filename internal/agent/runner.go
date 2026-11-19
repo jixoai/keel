@@ -196,8 +196,9 @@ func (r *Runner) toolsForRun(surface RunSurface) (*agenttool.ToolRegistry, error
 	return subset, nil
 }
 
-// SpawnToolName is the delegation primitive a team run always keeps.
-const SpawnToolName = "spawn_subagent"
+// SpawnToolName is the delegation primitive a team run always keeps. It is the
+// `agent` aggregate tool (action spawn), not a per-capability tool name.
+const SpawnToolName = "agent"
 
 // PreambleRenderer is the host capability the binding needs: render the loaded
 // assembly with a different preamble (the agent's system prompt) while keeping
@@ -206,19 +207,23 @@ type PreambleRenderer interface {
 	RenderSystemPrompt(preamble string) string
 }
 
-// NewRunner wires the production defaults: clock + echo tools and a turn cap.
-// committer and events are the contract kernel seams; the runner holds no
+// runnerToolFixture is a test-only seam. Production runners start with an empty
+// fallback registry: the model-visible surface is the host assembly (the 11
+// builtin aggregate tools plus approved plugin tools), and the old clock/echo
+// development tools live in the keel.testkit plugin. internal/agent's tests set
+// this hook to keep their deterministic tool round-trips.
+var runnerToolFixture func(*agenttool.ToolRegistry)
+
+// NewRunner wires the production defaults (an empty fallback registry and a turn
+// cap). committer and events are the contract kernel seams; the runner holds no
 // event-table handle of its own.
 func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider.StreamFn, providerName, model, apiKey string, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	reg := agenttool.NewToolRegistry()
-	if err := reg.Register(ClockTool{}); err != nil {
-		logger.Error("register clock tool", "err", err)
-	}
-	if err := reg.Register(EchoTool{}); err != nil {
-		logger.Error("register echo tool", "err", err)
+	if runnerToolFixture != nil {
+		runnerToolFixture(reg)
 	}
 	runner := &Runner{
 		Committer:    committer,

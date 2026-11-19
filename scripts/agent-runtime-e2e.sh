@@ -6,16 +6,18 @@
 #   Leg 1 — the run assembly consumes the Agent/Team binding:
 #     an input whose selection names a team resolves the captain; the captain's
 #     system prompt (KITE-RUNTIME-MARK-7) reaches the provider request; the
-#     captain's tool grants filter the tool surface (clock only, plus
-#     spawn_subagent because a team run always keeps the delegation primitive);
+#     captain's tool grants filter the tool surface to exactly the constant
+#     `agent` aggregate tool (the captain's non-nil grant set names only a
+#     disabled builtin, so the team run auto-keeps the delegation primitive);
 #     the run settles through the loop and its run.finished freezes
 #     agentId/teamId/teamRevision/teamHash/promptHash.
 #
 #   Leg 2 — a member runs as its own Agent:
-#     spawning a member (agentId) commits a child input whose selection carries
-#     agentId; the child attempt uses the member's own prompt
-#     (KITE-RUNTIME-MARK-8) and the member's own tool grants (echo, and NOT
-#     spawn_subagent — agent mode adds nothing).
+#     the disabled-by-default `keel.testkit` plugin is enabled through the
+#     durable plugin approval before the fixtures; spawning a member (agentId)
+#     commits a child input whose selection carries agentId; the child attempt
+#     uses the member's own prompt (KITE-RUNTIME-MARK-8) and its own grant
+#     (clock only; agent mode adds no delegation tool).
 #
 # The provider is a local recording stub: it captures every request body
 # (messages + tools) and answers with a valid OpenAI streaming response, so the
@@ -285,6 +287,34 @@ api() { # METHOD PATH [BODY]  → body on stdout, status in $EVIDENCE/last-statu
   fi
 }
 
+# --- enable keel.testkit (durable approval) -------------------------------
+# clock/echo are no longer builtin tools. The test plugin is disabled by
+# default; enabling it is a lifecycle write, so it asks a durable question and
+# only runs after that question is answered `allow` and the write is repeated
+# with the decision id.
+log "enabling keel.testkit through the plugin approval"
+code="$(api POST /v1/plugins/keel.testkit/enable '{"requestId":"kite-testkit-enable"}')"
+[[ "$code" == "202" ]] || die "testkit enable must ask for approval: HTTP $code $(cat "$EVIDENCE/last-body.json")"
+cp "$EVIDENCE/last-body.json" "$EVIDENCE/testkit-approval-asked.json"
+DECISION_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["decision"]["decisionId"])' "$EVIDENCE/testkit-approval-asked.json")"
+code="$(api POST "/v1/plugin-approvals/$DECISION_ID" '{"optionId":"allow"}')"
+[[ "$code" == "200" ]] || die "answer testkit approval: HTTP $code $(cat "$EVIDENCE/last-body.json")"
+code="$(api POST /v1/plugins/keel.testkit/enable "{\"requestId\":\"kite-testkit-enable\",\"decisionId\":\"$DECISION_ID\"}")"
+[[ "$code" == "200" ]] || die "testkit enable after approval: HTTP $code $(cat "$EVIDENCE/last-body.json")"
+cp "$EVIDENCE/last-body.json" "$EVIDENCE/testkit-enabled.json"
+
+api GET /v1/plugins >/dev/null
+python3 - "$EVIDENCE" <<'PY'
+import json, sys
+body = json.load(open(sys.argv[1] + "/last-body.json"))
+plugins = {p["id"]: p for p in body.get("plugins") or []}
+plugin = plugins.get("keel.testkit")
+assert plugin is not None, "keel.testkit is not in the inventory"
+assert plugin.get("state") == "enabled", plugin
+assert "clock" in (body.get("tools") or []), body.get("tools")
+print("testkit enabled; live tools:", body.get("tools"))
+PY
+
 # --- fixtures --------------------------------------------------------------
 log "creating captain agent (KITE-RUNTIME-MARK-7) and team"
 CAPTAIN_BODY="$(python3 - <<'PY'
@@ -294,7 +324,7 @@ print(json.dumps({
     "name": "Kite Captain",
     "defaultModel": {"providerId": "kite-e2e", "modelId": "kite-e2e-model"},
     "systemPrompt": {"kind": "inline", "text": "KITE-RUNTIME-MARK-7 captain instructions: coordinate the team."},
-    "tools": [{"toolId": "clock", "enabled": True}],
+    "tools": [{"toolId": "bash", "enabled": False}],
     "teamCli": {"enabled": True, "commands": ["member.add"]},
 }))
 PY
@@ -310,7 +340,7 @@ print(json.dumps({
     "name": "Kite Member",
     "defaultModel": {"providerId": "kite-e2e", "modelId": "kite-member-model"},
     "systemPrompt": {"kind": "inline", "text": "KITE-RUNTIME-MARK-8 member instructions: review the draft."},
-    "tools": [{"toolId": "echo", "enabled": True}],
+    "tools": [{"toolId": "clock", "enabled": True}],
 }))
 PY
 )"
@@ -457,8 +487,19 @@ captain_tools = captain[-1]["tools"]
 member_tools = member[-1]["tools"]
 print("captain wire tools:", captain_tools)
 print("member wire tools:", member_tools)
-assert captain_tools == ["clock", "spawn_subagent"], captain_tools
-assert member_tools == ["echo"], member_tools
+assert captain_tools == ["agent"], captain_tools
+assert member_tools == ["clock"], member_tools
+# The retired v1 names must not reach any provider request: exact names, and
+# the prefixes the migration deleted (creation_*, mcp__).
+member_rows = {id(r) for r in member}
+for row in rows:
+    for name in row.get("tools") or []:
+        assert name not in {"spawn_subagent", "skill", "echo"}, \
+            "retired tool %r reached the wire: %s" % (name, row.get("tools"))
+        assert name != "clock" or id(row) in member_rows, \
+            "clock reached a non-member request: %s" % (row.get("tools"),)
+        assert not name.startswith("creation_"), "creation_* reached the wire: %s" % name
+        assert not name.startswith("mcp__"), "mcp__* reached the wire: %s" % name
 # The deployment prompt must NOT be the base instruction of a bound run, while the
 # dynamic sections the host appends (plugin standard) must still be present: the
 # binding replaces the preamble, it does not drop everything around it.

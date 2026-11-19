@@ -21,11 +21,14 @@
       `internal/kernel/kernel_test.go:1481`；新 kind 尚无 emitter，R1 只登记 run.* bookkeeping）
 - [ ] **既有门承接**：扩展 `cmd/r1diff` 场景与 allowlist（每条附理由）、重新 pin 基线；
       `scripts/acceptance-all.sh` 必须全绿（E0）
-- [ ] **工具面迁移**：按 `tool-surface` 的破坏性迁移表删除旧工具名（无 shim），加「终局工具集」
-      快照断言；`agentcore.AgentTool` 缺的字段（幂等键/超时/取消/截断/错误码/内存档位）单列
-      接口扩展任务
-- [ ] **PI 偏离登记**：`docs/PI-PARITY.md` 写明 MCP 工具命名的偏离（理由/影响面/验收方式）；
-      删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测
+- [x] **工具面迁移**（W2.1）：按 `tool-surface` 的破坏性迁移表删除旧工具名（无 shim），
+      11 个内建聚合工具恒定注册，终局快照 + 清单哈希 + action 闭集路由落地
+      （`internal/toolsurface`；`spawn_subagent` 并入 `agent.spawn`，团队 R3 同步）
+- [ ] **AgentTool 接口扩展**：`agentcore.AgentTool` 缺的字段（幂等键/超时/取消/截断/错误码/
+      内存档位）单列实现任务（W2.1 只落地工具名/动作面，不伪造字段）
+- [x] **PI 偏离登记**（W2.1）：`docs/PI-PARITY.md` §4.2 写明 MCP 工具命名的偏离
+      （理由/影响面/验收方式）；`internal/mcp` 的 `mcp__<server>__<tool>` 适配、naming 与
+      对应单测已删除，`mcp` 聚合工具（list/describe/call）接管
 - [x] **契约冻结 spike**：`docs/GBASH-CONTRACT.md`（版本/协议帧/进程模型/许可证）与
       OAR 契约（record stream schema/typed 码表/进程组回收/与 `internal/externalgw` 的复用关系）；
       未冻结前 bash 与 `keel.oar` 的实现任务保持阻塞
@@ -145,19 +148,20 @@
 
 ## W6 MCP 聚合工具
 
-- [ ] `mcp` 聚合工具：`list/describe/call`，schema 发现与缓存
+- [x] `mcp` 聚合工具：`list/describe/call`（W2.1；schema 发现按需实时读取，缓存留给后续）
 - [x] 二进制内容走 content block，不走 stdout
       （对账：`internal/mcp/content.go:60-95`（image/resource → ImageContent，其它块给文本占位，
       structuredContent 回退 JSON）、`internal/mcp/output_limit.go` 20KB 上限；
       测试 `internal/mcp/content_test.go:14-40`、`output_limit_test.go`）
 - [ ] gbash 的 `mcp` CLI：与聚合工具共用同一个 registry（shim，不复制实现）
-- [ ] 删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测（PI-PARITY 已登记偏离）
-- [ ] MCP server 增删不改变工具清单（清单哈希断言）
+- [x] 删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测（PI-PARITY 已登记偏离）
+- [x] MCP server 增删不改变工具清单（清单哈希断言：100 server 哈希不变）
 
 ## W7 skills
 
 - [ ] skill 文件结构：`SKILL.md` + 资源；内容 hash 去重、版本不可变
-- [ ] `skills` 聚合工具：`ls`（带 6 位 hash）/ `view`（frontmatter + 精简正文）/ `manage`
+- [x] `skills` 聚合工具（W2.1 部分）：`ls` / `view` 已吸收旧 `skill` 工具；
+      `manage` / `sources` 动作保留为 `not_implemented`，待 W7 完整版
 - [ ] ChatInput `$` 补全：分组（技能/文件/任务），共享同一唤醒符
 - [ ] `/learn`：把经历沉淀为技能（走 `skills.manage`）
 - [ ] Settings `/settings/skills` + CLI `keel skills`（等价能力）

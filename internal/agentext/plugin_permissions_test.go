@@ -51,7 +51,7 @@ func TestPermissionPolicyToolWhitelist(t *testing.T) {
 			t.Fatalf("tool %s was refused: %s", name, reason)
 		}
 	}
-	for _, name := range []string{"host_shell", "keel.subagents.spawn_subagent", "demo.rules.exfiltrate"} {
+	for _, name := range []string{"host_shell", "keel.other.other_tool", "demo.rules.exfiltrate"} {
 		reason, allowed := policy.AllowTool(name)
 		if allowed {
 			t.Fatalf("tool %q was allowed", name)

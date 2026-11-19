@@ -30,7 +30,7 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 		}}},
 		Compaction: CompactionConfig{Enabled: boolPtr(true), Threshold: 0.8, KeepRecentTokens: 20000},
 		Telemetry:  TelemetryConfig{Adapter: "memory"},
-		Tools:      ToolsConfig{Allow: []string{"clock"}},
+		Tools:      ToolsConfig{Allow: []string{"bash"}},
 	}
 	tenant := TenantConfig{
 		Agent: AgentConfig{
@@ -47,7 +47,7 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 			Event: "tool_execution_end", Command: []string{"./log.sh"},
 		}}},
 		Compaction: CompactionConfig{Enabled: boolPtr(false)},
-		Tools:      ToolsConfig{Allow: []string{"echo", "mcp__*"}},
+		Tools:      ToolsConfig{Allow: []string{"read", "agent"}},
 	}
 
 	merged := Merge(defaults, tenant)
@@ -93,7 +93,7 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 	if merged.Telemetry.Adapter != "memory" {
 		t.Fatalf("telemetry = %+v", merged.Telemetry)
 	}
-	if len(merged.Tools.Allow) != 2 || merged.Tools.Allow[0] != "echo" || merged.Tools.Allow[1] != "mcp__*" {
+	if len(merged.Tools.Allow) != 2 || merged.Tools.Allow[0] != "read" || merged.Tools.Allow[1] != "agent" {
 		t.Fatalf("tools = %+v", merged.Tools)
 	}
 
@@ -109,13 +109,13 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 		defaults.Skills.Roots[0] != "/global/skills" ||
 		defaults.MCP.Servers["filesystem"].Args[1] != "fs" ||
 		defaults.Hooks.Commands[0].Command[0] != "./deny.sh" ||
-		defaults.Tools.Allow[0] != "clock" ||
+		defaults.Tools.Allow[0] != "bash" ||
 		*defaults.Compaction.Enabled != true {
 		t.Fatal("merge aliased a default value")
 	}
 	if tenant.Agent.Sections[0].Content != "tenant section" ||
 		tenant.MCP.Servers["filesystem"].Args[1] != "tenant-fs" ||
-		tenant.Tools.Allow[0] != "echo" ||
+		tenant.Tools.Allow[0] != "read" ||
 		*tenant.Compaction.Enabled != false {
 		t.Fatal("merge aliased a tenant value")
 	}
@@ -192,7 +192,7 @@ func TestValidateAcceptsDocumentedConfig(t *testing.T) {
 	  ]},
 	  "compaction": {"enabled": true, "threshold": 0.8, "keepRecentTokens": 20000},
 	  "telemetry": {"adapter": "memory"},
-	  "tools": {"allow": ["clock", "echo", "skill", "mcp__*"]}
+	  "tools": {"allow": ["bash", "read", "skills", "agent"]}
 	}`)
 	cfg, err := ParseTenantConfig(raw)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestValidateAcceptsDocumentedConfig(t *testing.T) {
 		cfg.Skills.FileReadTool != "read" || len(cfg.MCP.Servers) != 2 ||
 		len(cfg.Hooks.Commands) != 1 || cfg.Compaction.Threshold != 0.8 ||
 		cfg.Telemetry.Adapter != "memory" ||
-		len(cfg.Tools.Allow) != 4 || cfg.Tools.Allow[3] != "mcp__*" {
+		len(cfg.Tools.Allow) != 4 || cfg.Tools.Allow[3] != "agent" {
 		t.Fatalf("parsed config = %+v", cfg)
 	}
 }
@@ -348,7 +348,7 @@ func TestMarshalPreservesNilVersusEmptyCollections(t *testing.T) {
 		Agent:  AgentConfig{Sections: []PromptSection{{Name: "default"}}},
 		Skills: SkillsConfig{Roots: []string{"/default"}},
 		Hooks:  HooksConfig{Commands: []HookCommand{{Event: "e", Command: []string{"c"}}}},
-		Tools:  ToolsConfig{Allow: []string{"clock"}},
+		Tools:  ToolsConfig{Allow: []string{"bash"}},
 	}, reparsed)
 	if len(merged.Agent.Sections) != 0 || len(merged.Skills.Roots) != 0 ||
 		len(merged.Hooks.Commands) != 0 || len(merged.Tools.Allow) != 0 {

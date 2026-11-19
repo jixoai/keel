@@ -45,8 +45,8 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 
 - 传输：stdio、Streamable HTTP（明确拒绝 legacy SSE）、PipeTransport、内存测试传输；
 - 客户端职责：JSON-RPC 关联、初始化/能力协商、超时、取消、server 请求、OAuth 子集；
-- 工具适配：`mcp__<server>__<tool>` 命名、`normalizeMcpInputSchema`、`toLlmContent`、
-  20KB 输出裁剪、progress 透传；
+- 工具适配：PI 的 `mcp__<server>__<tool>` 命名、`normalizeMcpInputSchema`、`toLlmContent`、
+  20KB 输出裁剪、progress 透传；Keel **有意偏离命名**（见 §4.2），其余语义保留；
 - 宿主职责：`mcp.json` 配置、项目信任、exposure、`/mcp` 管理。
 
 这些是**线协议与生命周期**，无法用提示词表达；每个宿主都需要同一套客户端。所以它是
@@ -78,6 +78,9 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 **不允许的差异**：事件名与顺序、工具接口形状、SKILL.md 格式、MCP 配置/命名/传输语义、
 压缩 entry/checkpoint 语义、telemetry span/metric 形状。
 
+> 例外只有已登记的有意偏离（§4.2）。MCP 的**传输与配置语义**仍与 PI 对齐；偏离限于
+> 宿主如何把 MCP 工具暴露给模型。
+
 ## 4.1 官方测试对齐状态
 
 逐文件对照、已移植测试与未覆盖项见 [PI-CONFORMANCE.md](PI-CONFORMANCE.md)。
@@ -85,6 +88,17 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 配置、OAuth 授权与 sign-in）/ skills / telemetry / hooks / durable / host / runner。
 MCP OAuth 的运行时代理层（PostgreSQL 加密存储 / 独立锁池刷新锁 / HTTP sign-in /
 同进程重连）见 `internal/mcp/oauth` 与 `internal/store/mcp_oauth.go`。
+
+## 4.2 有意偏离：MCP 工具命名（keel-harness-v2）
+
+| 项 | 内容 |
+|---|---|
+| PI 契约 | 每个 MCP tool 适配为一个模型可见工具，名字 `mcp__<server>__<tool>`；server 增删会改变工具清单 |
+| Keel 实现 | 唯一模型可见入口是恒定内建工具 `mcp`；模型用 `mcp {action:"list"|"describe"|"call", server, tool, arguments}` 访问。**不生成**任何 `mcp__<server>__<tool>` 名字（无 shim/别名/双注册） |
+| 理由 | 恒定工具面是 DI 注册与可替换性的前提：工具清单只随**安装审批过的** `provides.tools` 变化，不随接入的 MCP server 数变化；`toolManifestHash` 因此可稳定回答「这次 run 有没有新工具」 |
+| 影响面 | 模型提示与工具搜索不再看到 per-server 工具名；需要 per-tool 声明（如 allow-list）的部署改按 `mcp` + server/tool 参数表达；MCP server 的 wire 协议、配置、传输、内容转换、20KB 裁剪全部不变 |
+| 验收方式 | ① 终局工具集快照断言：内建精确 11 个且 `mcp__` 精确名零出现（`internal/toolsurface`）；② 清单哈希：挂 100 个 MCP server 哈希不变、审批插件 `provides.tools` 变化/卸载恢复；③ E2E wire 断言：captain/member 请求的工具名精确等于 `agent` / `clock`，全量请求无 `mcp__`/`creation_`/`spawn_subagent`/`skill` |
+| 不成立的论据 | 不采用「旧适配从未生效」：v1 已实现并测试过 `mcp__<server>__<tool>`；本偏离是 Owner 2026-11-11 破坏性迁移裁决 |
 
 ## 5. 版本与升级
 

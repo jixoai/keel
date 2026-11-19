@@ -10,8 +10,7 @@ import (
 //
 //	normalization  a name the host derives (or an in-process plugin authored) is
 //	               rewritten character by character, and an already compliant
-//	               name is returned verbatim — that is the compatibility red line
-//	               for `example_status` / `spawn_subagent`.
+//	               name is returned verbatim.
 //	validation     a manifest whose published name cannot satisfy the wire
 //	               grammar (over 64 characters, or two declarations colliding
 //	               after normalization) is refused at install with a field error,
@@ -19,9 +18,9 @@ import (
 
 func TestNormalizePublishedToolName(t *testing.T) {
 	cases := map[string]string{
-		// The compatibility red line: compliant names are byte-identical.
+		// Compliant names are byte-identical.
 		"example_status": "example_status",
-		"spawn_subagent": "spawn_subagent",
+		"delegate_tool":  "delegate_tool",
 		"tool-1":         "tool-1",
 		"ABCdef123_-":    "ABCdef123_-",
 		"":               "",
@@ -69,9 +68,9 @@ func TestManifestPublishedToolsQualifyByKind(t *testing.T) {
 
 	// An in-process plugin names its tools directly: the declared name is the
 	// published name, with only the wire normalization applied.
-	inProcess := &Manifest{ID: "keel.creation", Kind: KindInProcess, Provides: Provides{Tools: []string{"creation_scaffold", "legacy.dotted"}}}
+	inProcess := &Manifest{ID: "keel.creation", Kind: KindInProcess, Provides: Provides{Tools: []string{"panel_refresh", "legacy.dotted"}}}
 	got = inProcess.PublishedTools()
-	if got[0].Published != "creation_scaffold" {
+	if got[0].Published != "panel_refresh" {
 		t.Fatalf("compliant in-process tool was renamed: %+v", got[0])
 	}
 	if got[1].Published != "legacy_dotted" {

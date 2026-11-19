@@ -1,22 +1,17 @@
 id: keel.creation
 version: 1.0.0
 kind: in-process
-description: "Creation mode: the agent scaffolds, validates, installs and removes real plugin packages, with the plugin standard contributed to the session."
+description: "Creation mode: the agent scaffolds, validates, installs and removes real plugin packages. The harness-owned `creation` tool owns the model-facing name; this plugin supplies the action backend and the plugin standard prompt section."
 engines:
   keel: ">=0.1.0 <1.0.0"
-provides:
-  tools:
-    - creation_scaffold
-    - creation_validate
-    - creation_install
-    - creation_list
-    - creation_remove
+provides: {}
 permissions:
   tools:
-    - creation_scaffold
-    - creation_validate
-    - creation_install
-    - creation_list
-    - creation_remove
+    - keel.creation.catalog
+    - keel.creation.scaffold
+    - keel.creation.validate
+    - keel.creation.install
+    - keel.creation.list
+    - keel.creation.remove
 source:
   type: builtin

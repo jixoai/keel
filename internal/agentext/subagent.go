@@ -628,13 +628,13 @@ func (r *SubagentRunner) emit(event HookEvent, record SubagentRecord, data map[s
 	r.hooks.Emit(payload)
 }
 
-// --- spawn_subagent tool -------------------------------------------------
+// --- run scope + shared spawn handler ------------------------------------
 
 type runScopeKey struct{}
 
-// RunScope is the ambient run identity a tool needs to attribute a sub-agent to
-// its parent. The kernel runner does not put it in the tool context yet, so the
-// tool answers with an actionable error until that one-line wiring exists.
+// RunScope is the ambient run identity the `agent` tool needs to attribute a
+// sub-agent to its parent. RunControl.BeginRun installs it on the attempt
+// context, so a model tool call inside a run always has it.
 type RunScope struct {
 	TenantID  uuid.UUID
 	SessionID uuid.UUID
@@ -652,72 +652,48 @@ func RunScopeFromContext(ctx context.Context) (RunScope, bool) {
 	return scope, ok
 }
 
-// SubagentTool is the model-facing `spawn_subagent` primitive. It is exported
-// rather than registered by default because it can only execute when the runner
-// supplies the ambient run scope (WithRunScope); registering a tool that always
-// fails would pollute every model prompt.
-type SubagentTool struct {
-	Runner *SubagentRunner
-}
+// ErrRunScopeMissing reports a spawn request outside a run (no ambient parent).
+var ErrRunScopeMissing = errors.New("agentext: the spawn action needs the ambient run scope")
 
-// Name implements agentcore.AgentTool.
-func (t *SubagentTool) Name() string { return "spawn_subagent" }
+// ErrInvalidSpawn reports a malformed spawn request (bad JSON, missing task).
+var ErrInvalidSpawn = errors.New("agentext: invalid spawn arguments")
 
-// Description implements agentcore.AgentTool.
-func (t *SubagentTool) Description() string {
-	return "Spawn a sub-agent in an independent session and return its structured result (status, summary, usage)."
-}
-
-// Schema implements agentcore.AgentTool.
-func (t *SubagentTool) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{` +
-		`"task":{"type":"string","description":"What the sub-agent must do."},` +
-		`"agent":{"type":"string","description":"Optional free-form label recorded on the sub-agent."},` +
-		`"agentId":{"type":"string","description":"Optional Agent library id the sub-agent runs as: it resolves that agent's system prompt, tool grants and default model."},` +
-		`"maxTurns":{"type":"integer","minimum":0},` +
-		`"maxTokens":{"type":"integer","minimum":0},` +
-		`"timeoutMs":{"type":"integer","minimum":0}` +
-		`},"required":["task"],"additionalProperties":false}`)
-}
-
-// ExecutionMode implements agentcore.AgentTool.
-func (t *SubagentTool) ExecutionMode() agentcore.ToolExecutionMode {
-	return agentcore.ToolExecutionParallel
-}
-
-// Execute implements agentcore.AgentTool.
-func (t *SubagentTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+// SpawnFromTool is the one parser/handler behind the `agent` aggregate tool's
+// spawn action. It carries the model's agentId into the child input's selection
+// fact (the child attempt then resolves that Agent's prompt, tool grants and
+// default model), exactly like the HTTP sub-agent endpoint.
+func SpawnFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMessage) (SubagentResult, error) {
 	scope, ok := RunScopeFromContext(ctx)
-	if !ok || t.Runner == nil {
-		return errorToolResult("spawn_subagent needs the ambient run scope: wire agentext.WithRunScope(ctx, agentext.RunScope{...}) in the run executor"), nil
+	if !ok {
+		return SubagentResult{}, ErrRunScopeMissing
+	}
+	if runner == nil {
+		return SubagentResult{}, errors.New("agentext: no sub-agent runner is wired")
 	}
 	var input struct {
-		Task      string `json:"task"`
-		Agent     string `json:"agent"`
-		AgentID   string `json:"agentId"`
-		MaxTurns  int    `json:"maxTurns"`
-		MaxTokens int    `json:"maxTokens"`
-		TimeoutMs int64  `json:"timeoutMs"`
+		Task           string `json:"task"`
+		Agent          string `json:"agent"`
+		AgentID        string `json:"agentId"`
+		IdempotencyKey string `json:"idempotencyKey"`
+		MaxTurns       int    `json:"maxTurns"`
+		MaxTokens      int    `json:"maxTokens"`
+		TimeoutMs      int64  `json:"timeoutMs"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
-		return errorToolResult("invalid arguments: " + err.Error()), nil
+		return SubagentResult{}, fmt.Errorf("%w: %v", ErrInvalidSpawn, err)
 	}
-	result, err := t.Runner.Spawn(ctx, SpawnRequest{
+	if strings.TrimSpace(input.Task) == "" {
+		return SubagentResult{}, fmt.Errorf("%w: task is required", ErrInvalidSpawn)
+	}
+	return runner.Spawn(ctx, SpawnRequest{
 		TenantID:        scope.TenantID,
 		ParentSessionID: scope.SessionID,
 		Task:            input.Task,
 		Agent:           input.Agent,
 		AgentID:         input.AgentID,
+		IdempotencyKey:  input.IdempotencyKey,
 		Budget:          Budget{MaxTurns: input.MaxTurns, MaxTokens: input.MaxTokens, TimeoutMs: input.TimeoutMs},
 	})
-	if err != nil {
-		return errorToolResult("spawn_subagent failed: " + err.Error()), nil
-	}
-	raw, _ := json.Marshal(result)
-	return agentcore.AgentToolResult{
-		Content:           agentcore.ContentList{agentcore.NewTextContent(string(raw))},
-		StructuredContent: result,
-	}, nil
 }
 
 // ErrorToolResult is exported for plugin authors: a tool failure is a result

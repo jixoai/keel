@@ -151,17 +151,6 @@ func readConfigFile(path, scope string, state *configState, options McpServerCon
 			state.errors = append(state.errors, fmt.Sprintf("%s: %s", path, validated.Error))
 			continue
 		}
-		clash := ""
-		for other := range state.servers {
-			if other != name && Namespace(other) == Namespace(name) {
-				clash = other
-				break
-			}
-		}
-		if clash != "" {
-			state.errors = append(state.errors, fmt.Sprintf("%s: server %q conflicts with %q", path, name, clash))
-			continue
-		}
 		state.servers[name] = &ServerEntry{Name: name, Config: validated.Config, Source: path, Scope: scope}
 	}
 }

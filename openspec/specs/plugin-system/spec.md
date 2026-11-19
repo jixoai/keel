@@ -50,7 +50,8 @@ MUST 支持从 `plugins-root` 发现插件；MUST 提供安装（本地目录/gi
 宿主发布的模型可见工具名 MUST 匹配 `^[A-Za-z0-9_-]{1,64}$`（OpenAI 兼容端点的 function name 文法）。
 发布 MUST 先把 `<plugin>` 与本地名以 `.` 连接、再把所有 `[^A-Za-z0-9_-]` 字符归一为 `_`
 （`demo.sidecar` 的 `greet` 发布为 `demo_sidecar_greet`）；**已经合规的名字 MUST 逐字不变**
-（`example_status`、`spawn_subagent` 是既有调用方兼容红线）。`kind: in-process` 的
+（v1 的 `spawn_subagent` / `creation_*` 兼容红线已由 `keel-harness-v2` 显式废止，
+内建面改为恒定 11 工具；`provides.tools` 仍是安装期显式扩展的唯一入口）。`kind: in-process` 的
 `provides.tools` 条目即发布名（同一归一规则）；`kind: sidecar|webview` 的条目是本地名或
 已限定名，发布时加上宿主命名空间。归一后的发布名 MUST 在安装时校验：不满足文法（含超长）
 或两个声明归一后同名 MUST 以字段级错误拒绝（fail-closed），不允许等到调用期才失败。

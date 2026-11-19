@@ -731,42 +731,55 @@ func (m *Manager) resolveActiveTool(pluginID, tool string) (activeTool, error) {
 // A refusal is a *PermissionDeniedError and leaves an audit row. A name nothing
 // provides is not a permission decision and is reported as an unknown tool.
 func (m *Manager) InvokePluginTool(ctx context.Context, pluginID, tool string, args json.RawMessage) (json.RawMessage, error) {
-	if strings.TrimSpace(pluginID) == "" || strings.TrimSpace(tool) == "" {
-		return nil, errors.New("agentext: InvokePluginTool requires a plugin id and a tool name")
-	}
-	m.mu.Lock()
-	entry := m.entries[pluginID]
-	switch {
-	case entry == nil:
-		m.mu.Unlock()
-		return nil, pluginErrf(ErrPluginNotFound, "call", pluginID, "plugin is not installed")
-	case entry.state != LifecycleEnabled:
-		state := entry.state
-		m.mu.Unlock()
-		return nil, pluginErrf(ErrPluginState, "call", pluginID, "plugin is %s", state)
-	}
-	gate := m.gateFor(entry)
-	m.mu.Unlock()
-
-	execution, err := m.resolveActiveTool(pluginID, tool)
+	result, err := m.InvokeToolResult(ctx, pluginID, tool, args)
 	if err != nil {
-		return nil, pluginErrf(ErrPluginState, "call", pluginID, "%v", err)
-	}
-	// The whitelist is checked here, at the dispatch point: the plugin's own
-	// tools are its own surface (always allowed); anything owned by someone else
-	// must be declared in permissions.tools.
-	if err := gate.CheckTool(ctx, execution.name); err != nil {
 		return nil, err
-	}
-	result, err := execution.tool.Execute(ctx, "plugin-call", args, nil)
-	if err != nil {
-		return nil, fmt.Errorf("plugin %s tool %s: %w", pluginID, execution.name, err)
 	}
 	raw, err := json.Marshal(toolResultDocument(result))
 	if err != nil {
 		return nil, fmt.Errorf("agentext: encode tool result: %w", err)
 	}
 	return raw, nil
+}
+
+// InvokeToolResult is InvokePluginTool without the JSON envelope: the dispatch
+// point returns the tool's result directly. The harness-owned `creation`
+// aggregate tool uses it to reach keel.creation's internal action handlers
+// (ToolSpec.Internal), which are never published to the model but remain
+// permission-checked exactly like any plugin tool.
+func (m *Manager) InvokeToolResult(ctx context.Context, pluginID, tool string, args json.RawMessage) (agentcore.AgentToolResult, error) {
+	if strings.TrimSpace(pluginID) == "" || strings.TrimSpace(tool) == "" {
+		return agentcore.AgentToolResult{}, errors.New("agentext: InvokeToolResult requires a plugin id and a tool name")
+	}
+	m.mu.Lock()
+	entry := m.entries[pluginID]
+	switch {
+	case entry == nil:
+		m.mu.Unlock()
+		return agentcore.AgentToolResult{}, pluginErrf(ErrPluginNotFound, "call", pluginID, "plugin is not installed")
+	case entry.state != LifecycleEnabled:
+		state := entry.state
+		m.mu.Unlock()
+		return agentcore.AgentToolResult{}, pluginErrf(ErrPluginState, "call", pluginID, "plugin is %s", state)
+	}
+	gate := m.gateFor(entry)
+	m.mu.Unlock()
+
+	execution, err := m.resolveActiveTool(pluginID, tool)
+	if err != nil {
+		return agentcore.AgentToolResult{}, pluginErrf(ErrPluginState, "call", pluginID, "%v", err)
+	}
+	// The whitelist is checked here, at the dispatch point: the plugin's own
+	// tools are its own surface (always allowed); anything owned by someone else
+	// must be declared in permissions.tools.
+	if err := gate.CheckTool(ctx, execution.name); err != nil {
+		return agentcore.AgentToolResult{}, err
+	}
+	result, err := execution.tool.Execute(ctx, "plugin-call", args, nil)
+	if err != nil {
+		return agentcore.AgentToolResult{}, fmt.Errorf("plugin %s tool %s: %w", pluginID, execution.name, err)
+	}
+	return result, nil
 }
 
 // toolResultDocument renders a tool result as the JSON document a bridge hands

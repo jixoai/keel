@@ -179,7 +179,7 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 }
 
 // spawnSubagentRequest is the additive HTTP form of the spawn primitive. The
-// model-facing tool (spawn_subagent) uses the same runner.
+// model-facing agent tool uses the same runner.
 type spawnSubagentRequest struct {
 	Task           string          `json:"task"`
 	Agent          string          `json:"agent"`

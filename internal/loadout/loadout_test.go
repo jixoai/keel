@@ -105,7 +105,7 @@ func TestDefaultAllServicesAssemble(t *testing.T) {
 		MCP:        host.MCPConfig{Servers: map[string]host.MCPServerConfig{"filesystem": {Command: "npx"}}},
 		Compaction: host.CompactionConfig{Enabled: boolPtr(true)},
 		Telemetry:  host.TelemetryConfig{Adapter: "memory"},
-		Tools:      host.ToolsConfig{Allow: []string{"clock"}},
+		Tools:      host.ToolsConfig{Allow: []string{"bash"}},
 	}
 	opts := Options{ID: "tenant-a", Revision: 7, Worker: true, RunConcurrency: 64}
 	lo, err := FromTenantConfig(cfg, opts, provideAll(allServiceNames()...))
@@ -277,7 +277,7 @@ func TestTenantConfigSummary(t *testing.T) {
 		Hooks:      host.HooksConfig{Commands: []host.HookCommand{{Event: "tool_execution_start", Command: []string{"./hook.sh"}}}},
 		Compaction: host.CompactionConfig{Enabled: boolPtr(true), KeepRecentTokens: 1000},
 		Telemetry:  host.TelemetryConfig{Adapter: "memory"},
-		Tools:      host.ToolsConfig{Allow: []string{"clock", "echo"}},
+		Tools:      host.ToolsConfig{Allow: []string{"bash", "read"}},
 		Quota:      host.QuotaConfig{RunConcurrency: 4, EventsPerMinute: 120},
 	}
 	opts := Options{Worker: true, RunConcurrency: 64}

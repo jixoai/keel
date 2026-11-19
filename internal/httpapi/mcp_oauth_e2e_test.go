@@ -209,15 +209,14 @@ func TestMCPOAuthEndToEndSignInReconnectAndToolCall(t *testing.T) {
 	if len(servers[0].Tools) != 1 {
 		t.Fatalf("tools = %#v", servers[0].Tools)
 	}
-	tool := servers[0].Tools[0]
-	if !strings.HasPrefix(tool.Name(), "mcp__") || !strings.HasSuffix(tool.Name(), "__echo") {
-		t.Errorf("tool name = %q", tool.Name())
+	if tool := servers[0].Tools[0]; tool.Name != "echo" {
+		t.Errorf("tool name = %q, want the raw server tool name", tool.Name)
 	}
-	result, err := tool.Execute(ctx, "call-1", json.RawMessage(`{"text":"hi"}`), nil)
+	result, err := manager.CallTool(ctx, servers[0].Name(), "echo", json.RawMessage(`{"text":"hi"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, _ := json.Marshal(result.Content)
+	encoded, _ := json.Marshal(mcp.ToLLMContent(result))
 	if !strings.Contains(string(encoded), "pong:hi") {
 		t.Errorf("tool result = %s", encoded)
 	}

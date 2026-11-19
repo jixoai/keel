@@ -112,7 +112,8 @@ agentext.Runtime
 
 出处：插件契约 `internal/agentext/plugin.go:67`；装配 `:209`；激活 `:317`；反序清理 `:387`；
 卸载 `:417`；快照 `:505`。`keel serve` 当前装配两个内置插件：`keel.example`
-（`internal/agentext/builtin.go:38`）与 `keel.subagents`（`internal/agentext/builtin.go:256`）。
+（`internal/agentext/builtin.go:38`）与 `keel.creation` / `keel.testkit` 等内置插件
+（`internal/pluginpkg/builtin/`）；子代理原语是 harness 内建的 `agent` 工具，不是插件工具。
 
 今天这个宿主给你的能力：按依赖顺序激活、对每个声明的副作用（hook 订阅、触发器注册、
 effects）做精确反序撤销、generation 计数、可观测状态与诊断，以及工具重名的 fail-closed

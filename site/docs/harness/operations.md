@@ -75,7 +75,7 @@ plugin UIs — plugin rows open a web URL instead
 
 | Aspect | Today | Planned |
 | --- | --- | --- |
-| Where plugins come from | compiled into the binary (two built-ins: `keel.example`, `keel.subagents` — `internal/agentext/builtin.go:38`, `:256`) | `<plugins-root>/<id>/` packages discovered at boot |
+| Where plugins come from | compiled into the binary (`keel.example`, `keel.creation`, `keel.testkit`, the registry plugins — `internal/pluginpkg/builtin/`) | `<plugins-root>/<id>/` packages discovered at boot |
 | Enable/disable | process assembly (`agentext.Runtime.Apply`) | lifecycle API + approval ([Lifecycle](/harness/plugins/lifecycle)) |
 | State | `active`/`pending`/`failed`/`stopped` per plugin, generation counter, diagnostics | plus `installed`/`disabled`, install/uninstall/update audit |
 | Visible at | `GET /v1/plugins` + web settings › Plugins (`internal/agentapi/ext.go:18`, `web/src/screens/settings.tsx:1148`) | same endpoints extended, not replaced |

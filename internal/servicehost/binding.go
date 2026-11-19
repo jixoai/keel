@@ -161,7 +161,7 @@ func (b RunBinding) ToolIDs() map[string]bool {
 // SpawnToolName is the delegation primitive the team mode always keeps
 // available (RUNTIME-PLAN R3: a captain that can never delegate is a silently
 // broken product).
-const SpawnToolName = "spawn_subagent"
+const SpawnToolName = "agent"
 
 // bindingFromSelection decodes the execution binding of a selection fact. An
 // empty fact, or one that names neither id, yields the zero binding.
@@ -421,7 +421,7 @@ func (r *bindingResolver) ResolveBinding(ctx context.Context, scope kernel.Scope
 }
 
 // memberRoster projects the team's member seats onto the runtime's plain-data
-// form. The captain needs it to delegate: spawn_subagent takes an agentId, and
+// form. The captain needs it to delegate: the agent tool's spawn action takes an agentId, and
 // without the roster the only way to learn one is to guess. The label and role
 // text travel with the id because they are what makes a choice informed.
 func memberRoster(members []agentteam.TeamMember) []agent.RosterMember {

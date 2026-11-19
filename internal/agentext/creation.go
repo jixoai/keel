@@ -10,16 +10,19 @@ package agentext
 // using the scaffold and the standard this plugin contributes — the tools are
 // the agent's hands on the filesystem and on the plugin manager:
 //
-//	creation_scaffold  render the template into `<plugins-root>/.creation/<id>`,
+// The model reaches them through the harness-owned `creation` aggregate tool:
+//
+//	creation.catalog   read-only aggregate of installed plugins and their surface.
+//	creation.scaffold  render the template into `<plugins-root>/.creation/<id>`,
 //	                   then validate the OUTPUT with the real package validator.
-//	creation_validate  field-level problems of a staged package (plus the
+//	creation.validate  field-level problems of a staged package (plus the
 //	                   structural and host-prerequisite warnings).
-//	creation_install   durable approval → manager Install → manager Enable →
+//	creation.install   durable approval → manager Install → manager Enable →
 //	                   deep link. The approval is the same primitive the API uses
 //	                   (/v1/plugin-approvals answers it), and it is two-phase
 //	                   because a human answer does not fit in one tool call.
-//	creation_list      what this session generated and where it stands.
-//	creation_remove    durable approval → disable → uninstall → delete the staged
+//	creation.list      what this session generated and where it stands.
+//	creation.remove    durable approval → disable → uninstall → delete the staged
 //	                   artifact.
 //
 // Failure discipline: a scaffold renders into a temporary directory and only
@@ -80,14 +83,17 @@ const (
 	creationApprovalNamespace = "keel.plugin.approval.v1"
 )
 
-// Creation tool names (they are also the manifest's provides.tools, and the
-// builtin contract test keeps the two lists identical).
+// Internal action handler names. They are namespaced and never published to the
+// model: the harness-owned `creation` tool owns the model-facing name, and
+// Manager.InvokeToolResult dispatches to these handlers. The v1 creation_*
+// names are deleted with no alias.
 const (
-	CreationToolScaffold = "creation_scaffold"
-	CreationToolValidate = "creation_validate"
-	CreationToolInstall  = "creation_install"
-	CreationToolList     = "creation_list"
-	CreationToolRemove   = "creation_remove"
+	CreationToolCatalog  = "keel.creation.catalog"
+	CreationToolScaffold = "keel.creation.scaffold"
+	CreationToolValidate = "keel.creation.validate"
+	CreationToolInstall  = "keel.creation.install"
+	CreationToolList     = "keel.creation.list"
+	CreationToolRemove   = "keel.creation.remove"
 )
 
 // CreationOptions wires the creation plugin.
@@ -148,7 +154,7 @@ func creationPromptSection() PromptSection {
 // kinds, where the template lives and how the flow goes. It names no upstream
 // project: the vocabulary is this product's.
 const creationStandardText = `Creation mode builds plugins by writing real plugin packages. You are the author;
-the creation_* tools are your hands. Never describe a plugin instead of building one.
+the creation tool's actions are your hands. Never describe a plugin instead of building one.
 
 A plugin is a directory <plugins-root>/<id>/ containing plugin.yaml:
 
@@ -185,18 +191,21 @@ The template (webview + React panel + host theme tokens + one backend tool):
   plugins/templates/webview-react-solidglass/
 
 Workflow, in order:
-1. creation_scaffold {id, purpose, title?, tool?, version?} writes a complete
-   package to the staging directory and validates it with the real validator.
+1. creation {action:"scaffold", id, purpose, title?, tool?, version?} writes a
+   complete package to the staging directory and validates it with the real
+   validator.
 2. Edit the staged package when the purpose needs more than the template:
    backend/server.mjs for the tool, ui/app.jsx (+ rebuild ui/app.js) for the panel.
-3. creation_validate {id} returns field-level problems. Fix them; do not ignore.
-4. creation_install {id} asks for a durable approval and answers
+3. creation {action:"validate", id} returns field-level problems. Fix them; do not ignore.
+4. creation {action:"install", id} asks for a durable approval and answers
    approval_required with a decisionId and an answerUrl. Have it answered, then
-   call creation_install again with the same decisionId. A refusal changes nothing.
+   call creation {action:"install", id, decisionId} again. A refusal changes nothing.
 5. The success document carries deepLink: /plugins/<id>/ — open that.
 
-creation_list shows the staged artifacts and their state; creation_remove (also
-approval-gated) uninstalls the plugin and deletes the staged package.
+creation {action:"catalog"} is the read-only aggregate of installed plugins.
+creation {action:"list"} shows the staged artifacts and their state;
+creation {action:"remove"} (also approval-gated) uninstalls the plugin and
+deletes the staged package.
 
 Rules:
 - Never claim an installation that answered approval_required, pending or refused.
@@ -253,6 +262,18 @@ func (c *creationPlugin) decisions() *DecisionBroker {
 func (c *creationPlugin) tools() []ToolSpec {
 	return []ToolSpec{
 		{
+			Name:        CreationToolCatalog,
+			Description: "Read-only catalog of installed plugins: id, version, state, declared surface and live model-facing tools.",
+			Schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}`),
+			Sequential: true,
+			Internal:   true,
+			Execute:    c.catalog,
+		},
+		{
 			Name:        CreationToolScaffold,
 			Description: "Render the plugin template into the staging directory (a complete, already validated package) and return its path, hash and published tool names.",
 			Schema: json.RawMessage(`{
@@ -269,6 +290,7 @@ func (c *creationPlugin) tools() []ToolSpec {
   "additionalProperties": false
 }`),
 			Sequential: true,
+			Internal:   true,
 			Execute:    c.scaffold,
 		},
 		{
@@ -284,6 +306,7 @@ func (c *creationPlugin) tools() []ToolSpec {
   "additionalProperties": false
 }`),
 			Sequential: true,
+			Internal:   true,
 			Execute:    c.validate,
 		},
 		{
@@ -300,6 +323,7 @@ func (c *creationPlugin) tools() []ToolSpec {
   "additionalProperties": false
 }`),
 			Sequential: true,
+			Internal:   true,
 			Execute:    c.install,
 		},
 		{
@@ -311,11 +335,12 @@ func (c *creationPlugin) tools() []ToolSpec {
   "additionalProperties": false
 }`),
 			Sequential: true,
+			Internal:   true,
 			Execute:    c.list,
 		},
 		{
 			Name:        CreationToolRemove,
-			Description: "Remove a generated plugin: uninstall it if installed, then delete the staged package. Requires a durable approval (two-phase, like creation_install).",
+			Description: "Remove a generated plugin: uninstall it if installed, then delete the staged package. Requires a durable approval (two-phase, like install).",
 			Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -327,6 +352,7 @@ func (c *creationPlugin) tools() []ToolSpec {
   "additionalProperties": false
 }`),
 			Sequential: true,
+			Internal:   true,
 			Execute:    c.remove,
 		},
 	}
@@ -352,6 +378,46 @@ type creationApprovalArgs struct {
 	ID         string `json:"id"`
 	RequestID  string `json:"requestId"`
 	DecisionID string `json:"decisionId"`
+}
+
+// --- catalog --------------------------------------------------------------
+
+// catalog is the read-only aggregate of the machine's installed plugins. It is
+// deliberately a projection of the manager's inventory (identity, lifecycle,
+// declared surface, live tools), not a second registry: a plugin's own
+// extensibility document can be added later without moving this contract.
+func (c *creationPlugin) catalog(_ context.Context, _ string, _ json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	manager := c.manager()
+	if manager == nil {
+		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	inventory := manager.Snapshot()
+	plugins := make([]map[string]any, 0, len(inventory.Plugins))
+	for _, plugin := range inventory.Plugins {
+		entry := map[string]any{
+			"id":       plugin.ID,
+			"version":  plugin.Version,
+			"kind":     plugin.Kind,
+			"state":    string(plugin.State),
+			"bundled":  plugin.Bundled,
+			"provides": plugin.Provides,
+		}
+		if plugin.Description != "" {
+			entry["description"] = plugin.Description
+		}
+		if len(plugin.Tools) > 0 {
+			entry["tools"] = plugin.Tools
+		}
+		plugins = append(plugins, entry)
+	}
+	document := map[string]any{
+		"plugins":    plugins,
+		"enabled":    inventory.Enabled,
+		"tools":      inventory.Tools,
+		"revision":   inventory.Revision,
+		"generation": inventory.Generation,
+	}
+	return creationResult(document, false), nil
 }
 
 // --- scaffold -------------------------------------------------------------
@@ -481,7 +547,7 @@ func (c *creationPlugin) scaffold(ctx context.Context, _ string, raw json.RawMes
 		"tool":          tool,
 		"publishedTool": pluginpkg.NamespacedPublishedToolName(id, tool),
 		"files":         templatePaths(files),
-		"next":          "creation_validate → edit if needed → creation_install",
+		"next":          "creation validate → edit if needed → creation install",
 	}
 	c.audit(ctx, manager, id, final.Version(), "creation.scaffold", store.PluginResultOK,
 		map[string]any{"dir": destination, "hash": final.Hash, "template": c.template, "files": templatePaths(files)})
@@ -943,7 +1009,7 @@ func (c *creationPlugin) resolveStaged(manager *Manager, id, explicit string) (s
 	}
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
-		document := failureDocument("no staged package at "+dir+": run creation_scaffold first", nil)
+		document := failureDocument("no staged package at "+dir+": run creation scaffold first", nil)
 		return "", &document
 	}
 	return dir, nil

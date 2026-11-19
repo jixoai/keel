@@ -24,7 +24,7 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 		plugin *Plugin
 	}{
 		{ExamplePluginID, NewExamplePlugin(ExamplePluginOptions{})},
-		{"keel.subagents", NewSubagentPlugin(nil)},
+		{"keel.testkit", NewTestkitPlugin()},
 		{CreationPluginID, NewCreationPlugin(CreationOptions{})},
 		{ModelPluginID, NewModelPlugin()},
 		{AgentPluginID, NewAgentPlugin()},

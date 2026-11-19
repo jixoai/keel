@@ -605,7 +605,7 @@ func (childLog) UnresolvedToolCalls(context.Context, kernel.Scope) ([]kernel.Too
 	return nil, nil
 }
 
-func TestSubagentToolRequiresRunScope(t *testing.T) {
+func TestSpawnFromToolRequiresRunScope(t *testing.T) {
 	tenant, parent := uuid.New(), uuid.New()
 	runner := NewSubagentRunner(SubagentOptions{
 		Gate:   toolGate{known: map[uuid.UUID]bool{parent: true}},
@@ -615,48 +615,24 @@ func TestSubagentToolRequiresRunScope(t *testing.T) {
 		Logger: testLogger(),
 		Poll:   time.Millisecond,
 	})
-	tool := &SubagentTool{Runner: runner}
-	// Without the ambient scope the tool must fail with an actionable message,
-	// never invent a parent session.
-	result, err := tool.Execute(context.Background(), "call-1", json.RawMessage(`{"task":"do"}`), nil)
-	if err != nil || result.IsError == nil || !*result.IsError {
-		t.Fatalf("missing scope result = %+v err=%v", result, err)
+	// Without the ambient scope the spawn action must fail with an actionable
+	// error, never invent a parent session.
+	if _, err := SpawnFromTool(context.Background(), runner, json.RawMessage(`{"task":"do"}`)); !errors.Is(err, ErrRunScopeMissing) {
+		t.Fatalf("missing scope err = %v, want ErrRunScopeMissing", err)
 	}
-	result, err = tool.Execute(WithRunScope(context.Background(), RunScope{TenantID: tenant, SessionID: parent}), "call-2",
-		json.RawMessage(`{"task":"do"}`), nil)
-	if err != nil || (result.IsError != nil && *result.IsError) {
-		t.Fatalf("scoped tool result = %+v err=%v", result, err)
+	scoped := WithRunScope(context.Background(), RunScope{TenantID: tenant, SessionID: parent})
+	if _, err := SpawnFromTool(scoped, runner, json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidSpawn) {
+		t.Fatalf("missing task err = %v, want ErrInvalidSpawn", err)
 	}
-	structured, ok := result.StructuredContent.(SubagentResult)
-	if !ok || structured.Status != "done" || structured.Summary != "child summary" {
-		t.Fatalf("structured result = %#v", result.StructuredContent)
+	structured, err := SpawnFromTool(scoped, runner, json.RawMessage(`{"task":"do"}`))
+	if err != nil {
+		t.Fatalf("scoped spawn: %v", err)
+	}
+	if structured.Status != "done" || structured.Summary != "child summary" {
+		t.Fatalf("structured result = %#v", structured)
 	}
 	if structured.ParentSessionID != parent.String() {
 		t.Fatalf("parent = %q", structured.ParentSessionID)
-	}
-
-	// The builtin plugin publishes the same tool to the model.
-	hooks := NewHookBus(HookBusOptions{Logger: testLogger()})
-	defer hooks.Close()
-	var published []string
-	plugins := NewRuntime(RuntimeOptions{
-		Plugins: []*Plugin{NewSubagentPlugin(runner)},
-		Hooks:   hooks,
-		Tools: func(tools []agentcore.AgentTool) error {
-			published = published[:0]
-			for _, tool := range tools {
-				published = append(published, tool.Name())
-			}
-			return nil
-		},
-		Logger: testLogger(),
-	})
-	if err := plugins.Apply(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	defer plugins.Close(context.Background())
-	if len(published) != 1 || published[0] != "spawn_subagent" {
-		t.Fatalf("published tools = %v", published)
 	}
 }
 

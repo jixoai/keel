@@ -9,7 +9,7 @@
 |---|---|---|
 | `packages/agent/test` | 5（agent-loop 2234 行、agent 1229 行、e2e 416 行、proxy、typebox） | **逐条移植核心行为**（本轮重点） |
 | `packages/durable/test` | 102（compaction 2547 行、tool-hooks 806 行等） | 先移植 compaction/task/checkpoint 核心；其余按能力推进 |
-| `packages/mcp/test` | 14 | **纯函数全量移植**（naming/schema/content/limit/config） |
+| `packages/mcp/test` | 14 | **纯函数移植**（schema/content/limit/config）；per-tool `mcp__` 命名按 PI-PARITY §4.2 有意偏离并删除，改由 `mcp` 聚合工具覆盖 |
 | `packages/telemetry/test` | 6 | 移植 conformance/metrics/store/propagation 核心 |
 | `packages/coding-agent/test` | 349 | 先移植 skills 核心；extensions/compaction 宿主用例后续 |
 
@@ -85,7 +85,7 @@ per-model overrides、background 实际触发（loop 仍只做 blocking）。
 
 | PI 测试（`packages/mcp/test`） | Go 测试（`internal/mcp`） | 状态 |
 |---|---|---|
-| naming: joins / 64-shorten / taken hash / namespace | `TestCreateToolName/*`、`TestNamespace/*` | ✅ PASS |
+| naming: joins / 64-shorten / taken hash / namespace | `internal/toolsurface` 终局快照 + 清单哈希（`TestBuiltinSurfaceIsExactlyEleven`、`TestManifestHash*`） | ⚠️ 有意偏离：Keel 用 `mcp` 聚合工具，不生成 `mcp__*`（PI-PARITY §4.2） |
 | input-schema: object + properties / keep keywords | `TestNormalizeInputSchema/*`（+ 非法 JSON 加固） | ✅ PASS |
 | content: text/image/audio/link/resource/structured | `TestToLLMContent/*` | ✅ PASS |
 | output-limit: 20KB middle cut / save / unicode | `TestLimitContent/*`（+ `.txt` extension + FullOutputPath） | ✅ PASS |

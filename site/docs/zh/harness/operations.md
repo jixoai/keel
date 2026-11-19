@@ -66,7 +66,7 @@ TUI 是同一个客户端（同一份 TSX、同一个 AgentAPI）在终端宿主
 
 | 方面 | 今天 | 规划 |
 | --- | --- | --- |
-| 插件从哪来 | 编译进二进制（两个内置：`keel.example`、`keel.subagents`——`internal/agentext/builtin.go:38`、`:256`） | 启动时发现 `<plugins-root>/<id>/` 包 |
+| 插件从哪来 | 编译进二进制（`keel.example`、`keel.creation`、`keel.testkit`、registry 插件——`internal/pluginpkg/builtin/`） | 启动时发现 `<plugins-root>/<id>/` 包 |
 | 启用/停用 | 进程装配（`agentext.Runtime.Apply`） | 生命周期 API + 审批（[生命周期](/zh/harness/plugins/lifecycle)） |
 | 状态 | 逐插件 `active`/`pending`/`failed`/`stopped`、generation 计数、诊断 | 加上 `installed`/`disabled`，以及安装/卸载/更新审计 |
 | 在哪可见 | `GET /v1/plugins` + web 设置 › 插件（`internal/agentapi/ext.go:18`、`web/src/screens/settings.tsx:1148`） | 同一端点扩展，而非替换 |

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/testkit"
 )
 
 // Built-in example plugin. It is a complete, non-trivial plugin: two tools, a
@@ -248,25 +249,33 @@ func (a *exampleAudit) seal() {
 	a.sealed = true
 }
 
-// NewSubagentPlugin exposes the spawn_subagent primitive to the model. The tool
-// needs the ambient run scope in its context; RunControl.BeginRun installs it,
-// so a `keel serve` deployment with the worker's run-control seam gets the tool
-// for free. Without that seam the tool answers with an actionable error instead
-// of guessing a parent session.
-func NewSubagentPlugin(runner *SubagentRunner) *Plugin {
+// NewTestkitPlugin builds the disabled-by-default test plugin. clock/echo used
+// to be builtin tools; they now enter the model surface only when this plugin is
+// installed/enabled (and, for a bound run, granted to the agent). E2E uses that
+// path to prove grant filtering still applies to plugin-provided tools.
+func NewTestkitPlugin() *Plugin {
 	return &Plugin{
-		ID:       "keel.subagents",
+		ID:       testkit.PluginID,
 		Version:  "1.0.0",
-		Provides: []string{"cap:subagent"},
-		Tools: []ToolSpec{{
-			Name:        "spawn_subagent",
-			Description: "Spawn a sub-agent in an independent session and return its structured result (status, summary, usage).",
-			Schema:      (&SubagentTool{}).Schema(),
-			Execute: func(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
-				tool := &SubagentTool{Runner: runner}
-				return tool.Execute(ctx, id, args, onUpdate)
+		Provides: []string{"cap:testkit"},
+		Tools: []ToolSpec{
+			{
+				Name:        "clock",
+				Description: "Return the current time as an ISO 8601 string.",
+				Schema:      (&testkit.ClockTool{}).Schema(),
+				Execute: func(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+					return (&testkit.ClockTool{}).Execute(ctx, id, args, onUpdate)
+				},
 			},
-		}},
+			{
+				Name:        "echo",
+				Description: "Echo the given text back.",
+				Schema:      (&testkit.EchoTool{}).Schema(),
+				Execute: func(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+					return (&testkit.EchoTool{}).Execute(ctx, id, args, onUpdate)
+				},
+			},
+		},
 	}
 }
 

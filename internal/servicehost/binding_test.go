@@ -89,7 +89,7 @@ func newBindingFixture(t *testing.T) bindingFixture {
 		Name:         "Plain",
 		DefaultModel: agentteam.ModelBinding{ProviderID: "tenant-gw", ModelID: "deepseek-v4.1-flash"},
 		SystemPrompt: agentteam.SystemPrompt{Kind: agentteam.SystemPromptInline, Text: "KITE-RUNTIME-MARK-7 plain agent instructions"},
-		Tools:        []agentteam.ToolGrant{{ToolID: "clock", Enabled: true}},
+		Tools:        []agentteam.ToolGrant{{ToolID: "bash", Enabled: true}},
 	}.Normalized()
 	captain := agentteam.Agent{
 		ID:   "agent_captain",
@@ -97,12 +97,12 @@ func newBindingFixture(t *testing.T) bindingFixture {
 		SystemPrompt: agentteam.SystemPrompt{
 			Kind: agentteam.SystemPromptFile, Ref: "AGENTS.md",
 		},
-		Tools:   []agentteam.ToolGrant{{ToolID: "clock", Enabled: true}, {ToolID: "echo", Enabled: false}},
+		Tools:   []agentteam.ToolGrant{{ToolID: "bash", Enabled: true}, {ToolID: "read", Enabled: false}},
 		TeamCLI: agentteam.TeamCLI{Enabled: true, Commands: []string{agentteam.TeamCLIMemberAdd}},
 	}.Normalized()
 	team := agentteam.NewTeam("team_kite", "Kite", agentteam.MemberFromAgent(captain))
 	team.Members = []agentteam.TeamMember{agentteam.MemberFromAgent(plain)}
-	team.Defaults = agentteam.TeamDefaults{Tools: []string{"echo", "spawn_subagent"}}
+	team.Defaults = agentteam.TeamDefaults{Tools: []string{"read", "agent"}}
 	team.Seal()
 
 	store := &fakeBindingStore{
@@ -128,8 +128,8 @@ func TestLoadBindingStandardMode(t *testing.T) {
 	if got := binding.PromptText(); !strings.Contains(got, "KITE-RUNTIME-MARK-7") {
 		t.Fatalf("prompt text = %q", got)
 	}
-	if got := binding.ToolIDs(); len(got) != 1 || !got["clock"] {
-		t.Fatalf("tool ids = %v, want only clock", got)
+	if got := binding.ToolIDs(); len(got) != 1 || !got["bash"] {
+		t.Fatalf("tool ids = %v, want only bash", got)
 	}
 }
 
@@ -154,13 +154,13 @@ func TestLoadBindingTeamModeUsesCaptain(t *testing.T) {
 		t.Fatalf("members = %+v", binding.Members)
 	}
 	// The team defaults are unioned with the captain's grants; the captain's
-	// explicit echo=false removes the team default.
+	// explicit read=false removes the team default.
 	grants := binding.ToolIDs()
-	if !grants["clock"] || !grants["spawn_subagent"] {
-		t.Fatalf("grants = %v, want clock and spawn_subagent", grants)
+	if !grants["bash"] || !grants["agent"] {
+		t.Fatalf("grants = %v, want bash and agent", grants)
 	}
-	if grants["echo"] {
-		t.Fatalf("grants = %v, want echo removed by the agent's explicit false", grants)
+	if grants["read"] {
+		t.Fatalf("grants = %v, want read removed by the agent's explicit false", grants)
 	}
 }
 

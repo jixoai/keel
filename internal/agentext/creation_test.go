@@ -165,6 +165,37 @@ func (c *creationHarness) status(t *testing.T, tool string, document map[string]
 }
 
 // TestCreationScaffoldValidateInstallListRemove drives the whole loop.
+func TestCreationCatalogListsInstalledPlugins(t *testing.T) {
+	c := newCreationHarness(t)
+	if _, err := c.harness.manager.Enable(context.Background(), CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	document, isError := c.call(t, CreationToolCatalog, map[string]any{})
+	if isError {
+		t.Fatalf("catalog failed: %+v", document)
+	}
+	plugins, ok := document["plugins"].([]any)
+	if !ok || len(plugins) == 0 {
+		t.Fatalf("catalog plugins = %#v", document["plugins"])
+	}
+	found := false
+	for _, raw := range plugins {
+		plugin, _ := raw.(map[string]any)
+		if plugin["id"] == CreationPluginID {
+			found = true
+			if plugin["state"] != "enabled" {
+				t.Fatalf("creation state = %v", plugin["state"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("catalog does not list the creation plugin: %+v", plugins)
+	}
+	if _, ok := document["tools"].([]any); !ok {
+		t.Fatalf("catalog tools = %#v", document["tools"])
+	}
+}
+
 func TestCreationScaffoldValidateInstallListRemove(t *testing.T) {
 	c := newCreationHarness(t)
 	ctx := context.Background()
@@ -388,7 +419,8 @@ func TestCreationPromptSectionIsTheStandard(t *testing.T) {
 		"plugin.yaml", "id:", "version:", "kind:", "provides:", "permissions:", "entry:",
 		"in-process", "sidecar", "webview",
 		"plugins/templates/webview-react-solidglass/",
-		"creation_scaffold", "creation_validate", "creation_install", "creation_remove",
+		`creation {action:"scaffold"`, `creation {action:"validate"`, `creation {action:"install"`,
+		`creation {action:"catalog"}`, `creation {action:"list"}`, `creation {action:"remove"}`,
 		"approval_required", "deepLink",
 	} {
 		if !strings.Contains(text, want) {

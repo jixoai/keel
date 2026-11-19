@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/mcp/oauth"
 )
 
@@ -83,8 +82,12 @@ type Server struct {
 	Entry     ServerEntry
 	Client    *Client
 	Transport Transport
-	Tools     []agentcore.AgentTool
-	Err       error
+	// Tools is the server's raw tools/list catalogue. The model never sees
+	// these names directly: the aggregate `mcp` tool lists, describes and calls
+	// through (server, tool), so adding or removing a server does not change the
+	// model-visible tool manifest.
+	Tools []Tool
+	Err   error
 }
 
 // Name is the configured server name.
@@ -200,7 +203,7 @@ func connectOne(ctx context.Context, entry ServerEntry, options ConnectOptions) 
 		server.Err = fmt.Errorf("mcp: server %q: %w", entry.Name, err)
 		return server
 	}
-	tools, err := client.AgentTools(entry.Name)
+	tools, err := client.ListTools(ctx)
 	if err != nil {
 		_ = client.Close()
 		server.Err = fmt.Errorf("mcp: server %q: %w", entry.Name, err)
@@ -409,28 +412,6 @@ func (m *Manager) Servers() []*Server {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]*Server(nil), m.servers...)
-}
-
-// Tools flattens the tools of every connected server.
-func (m *Manager) Tools() []agentcore.AgentTool {
-	if m == nil {
-		return nil
-	}
-	var tools []agentcore.AgentTool
-	for _, server := range m.Servers() {
-		tools = append(tools, server.Tools...)
-	}
-	return tools
-}
-
-// ToolNames lists the model-facing names of every connected tool.
-func (m *Manager) ToolNames() []string {
-	tools := m.Tools()
-	names := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		names = append(names, tool.Name())
-	}
-	return names
 }
 
 // Errors lists the connection failures as "name: error" strings.

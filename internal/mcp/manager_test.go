@@ -5,10 +5,13 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 func writeConfigFile(t *testing.T, path, content string) {
@@ -102,7 +105,9 @@ func TestLoadConfigFiles(t *testing.T) {
 			"a_b":{"command":"y"}
 		}}`)
 		loaded := LoadConfigFiles(path, "")
-		if len(loaded.Servers) != 1 || len(loaded.Errors) != 1 || !strings.Contains(loaded.Errors[0], "conflicts with") {
+		// Tool names are no longer generated from server names, so two servers
+		// that differ only in '-' vs '_' are both valid and both load.
+		if len(loaded.Servers) != 2 || len(loaded.Errors) != 0 {
 			t.Fatalf("servers = %#v errors = %#v", loaded.Servers, loaded.Errors)
 		}
 	})
@@ -147,16 +152,21 @@ func TestManagerConnect(t *testing.T) {
 	if len(helper.Tools) != 1 {
 		t.Fatalf("helper tools = %#v", helper.Tools)
 	}
-	tool := helper.Tools[0]
-	if tool.Name() != "mcp__helper__echo" {
-		t.Errorf("tool name = %q", tool.Name())
+	if tool := helper.Tools[0]; tool.Name != "echo" {
+		t.Errorf("tool name = %q, want the raw server tool name", tool.Name)
 	}
-	result, err := tool.Execute(context.Background(), "call-1", []byte(`{"text":"hi"}`), nil)
+	result, err := manager.CallTool(context.Background(), "helper", "echo", []byte(`{"text":"hi"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := joinedText(result.Content); text != "hi" {
+	if text := agentcore.ContentToText(ToLLMContent(result)); text != "hi" {
 		t.Errorf("tool result = %q", text)
+	}
+	if _, err := manager.CallTool(context.Background(), "helper", "missing", nil); !errors.Is(err, ErrToolNotFound) {
+		t.Errorf("missing tool err = %v, want ErrToolNotFound", err)
+	}
+	if _, err := manager.CallTool(context.Background(), "missing", "echo", nil); !errors.Is(err, ErrServerNotFound) {
+		t.Errorf("missing server err = %v, want ErrServerNotFound", err)
 	}
 	if broken == nil || broken.Err == nil {
 		t.Fatalf("broken = %#v, want a reported error", broken)

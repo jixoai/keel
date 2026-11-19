@@ -78,12 +78,15 @@ Guarantees the host provides, each with a test in
   the host registry through one sink (in `keel serve`:
   `rt.RefreshProductTools`, `cmd/keel/serve.go:464`).
 
-Out of the box, `keel serve` assembles two built-in plugins — `keel.example`
+Out of the box, `keel serve` assembles built-in plugins such as `keel.example`
 (a complete demo: two tools, three hook subscriptions, two triggers, two
-effects; `internal/agentext/builtin.go:38`) and `keel.subagents` (exposes the
-`spawn_subagent` tool; `internal/agentext/builtin.go:256`). The settings screen
-renders the assembled surface — generation, per-plugin state, provided tools,
-hooks, triggers, diagnostics (`web/src/screens/settings.tsx:1148`).
+effects; `internal/agentext/builtin.go:38`), `keel.creation` (the action backend
+of the harness-owned `creation` tool) and the disabled-by-default
+`keel.testkit` (`clock`/`echo`, used by E2E grant filtering). The sub-agent
+primitive is the harness-owned `agent` tool, not a plugin tool
+(`internal/toolsurface`). The settings screen renders the assembled surface —
+generation, per-plugin state, provided tools, hooks, triggers, diagnostics
+(`web/src/screens/settings.tsx:1148`).
 
 **What this is not:** there is no manifest file, no install step, no
 permission model and no UI hosting. A "plugin" today is code compiled into the

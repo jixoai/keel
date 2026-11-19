@@ -145,8 +145,8 @@ func digestPrompt(prompt string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// RosterMember is one teammate as the captain sees it: the id spawn_subagent
-// takes, plus the label and role text that make the choice informed.
+// RosterMember is one teammate as the captain sees it: the id the agent
+// tool's spawn action takes, plus the label and role text that make the choice informed.
 type RosterMember struct {
 	AgentID     string
 	Label       string

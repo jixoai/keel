@@ -103,8 +103,9 @@ MUST NOT 启动：启动门 MUST 要求已 Seal（`not_sealed`），否则 manif
 
 - 提交时 MUST 解析绑定（存在性/归档/团队已 Seal）：未知/归档/未封存 MUST 在提交处 400、
   字段路径点名，MUST NOT 先存历史后失败。
-- 团队模式 run 的工具面 MUST 自动包含委派原语（`spawn_subagent`）；唯一例外是 captain 的
-  `tools` 显式列出它且 `enabled=false`。
+- 团队模式 run 的工具面 MUST 自动包含委派原语（`agent` 聚合工具的 `spawn` action，
+  调用形态 `agent {action:"spawn", agentId}`）；唯一例外是 captain 的 `tools` 显式列出
+  `agent` 且 `enabled=false`。
 - 团队模式队长的系统提示词 MUST 按「输入 selection > Agent 默认模型 > 租户默认」解析。
 
 #### Scenario: 团队会话的输入

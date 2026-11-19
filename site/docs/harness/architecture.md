@@ -127,9 +127,10 @@ agentext.Runtime
 
 Citations: plugin contract `internal/agentext/plugin.go:67`; assembly
 `internal/agentext/plugin.go:209`; activation `:317`; reverse cleanup `:387`;
-unload `:417`; snapshot `:505`. The current plugin set in `keel serve` is two
-built-ins: `keel.example` (`internal/agentext/builtin.go:38`) and
-`keel.subagents` (`internal/agentext/builtin.go:256`).
+unload `:417`; snapshot `:505`. The current plugin set in `keel serve` is the
+built-in manifests under `internal/pluginpkg/builtin/` (`keel.example`,
+`keel.creation`, `keel.testkit`, the model/agent/team registry plugins); the
+sub-agent primitive is the harness-owned `agent` tool, not a plugin tool.
 
 What this host gives you today: dependency-ordered activation, reverse-order
 reversal of every declared side effect (hooks subscriptions, trigger

@@ -36,6 +36,8 @@ import (
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 	"github.com/jixoai/keel/internal/telemetry"
+	"github.com/jixoai/keel/internal/testkit"
+	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 // serveOptions is the resolved `keel serve` configuration (flags + environment).
@@ -225,6 +227,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	limits.Update(tenantCfg.Quota)
 
+	// The constant tool surface needs the sub-agent runner and the plugin
+	// manager, both created after Boot. The getters are captured now and resolve
+	// at tool-call time; no run executes before newProductLayer returns.
+	var toolSubagents *agentext.SubagentRunner
+	var toolPluginManager *agentext.Manager
+
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Seams: servicehost.Seams{
 			Committer: kern,
@@ -290,6 +298,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 				return agentext.StreamTee(base, partials)
 			},
 			RunControl: runControl,
+			ToolBackends: toolsurface.Backends{
+				Agents:   agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return toolSubagents }},
+				Creation: agentext.CreationBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+			},
 		},
 	})
 	if err != nil {
@@ -327,6 +339,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if err != nil {
 		return err
 	}
+	toolSubagents = product.subagents
+	toolPluginManager = product.pluginManager
 	defer product.close()
 
 	// Drain is the same edge contract the runtime uses: new requests get 503 +
@@ -678,7 +692,7 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				Interval: opts.ExampleInterval,
 			})
 		},
-		"keel.subagents":       func() *agentext.Plugin { return agentext.NewSubagentPlugin(subagents) },
+		testkit.PluginID:       func() *agentext.Plugin { return agentext.NewTestkitPlugin() },
 		agentext.ModelPluginID: func() *agentext.Plugin { return agentext.NewModelPlugin() },
 		agentext.AgentPluginID: func() *agentext.Plugin { return agentext.NewAgentPlugin() },
 		agentext.TeamPluginID:  func() *agentext.Plugin { return agentext.NewTeamPlugin() },
@@ -695,7 +709,8 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		if !ok {
 			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
 		}
-		builtins = append(builtins, agentext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: true})
+		defaultEnabled := manifest.ID != testkit.PluginID
+		builtins = append(builtins, agentext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: defaultEnabled})
 	}
 	// The tool index mirrors the dynamic tool set the plugin runtime publishes:
 	// the plugin UI bridge calls a plugin's own tools through it, so a bridge call

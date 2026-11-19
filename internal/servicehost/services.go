@@ -197,12 +197,16 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			sections = append(sections, host.Section{Name: section.Name, Content: section.Content})
 		}
 		var extra []agentcore.AgentTool
+		backends := cfg.Product.ToolBackends
 		if bound, ok := resolved.Bind(loadout.CapMCP); ok {
 			mcpService, ok := bound.(*mcpService)
 			if !ok {
 				return nil, fmt.Errorf("ctx.mcp is bound to %T, want *mcpService", bound)
 			}
-			extra = mcpService.manager.Tools()
+			// MCP capability enters through the builtin `mcp` tool only. The
+			// manager's per-server catalogue must not be flattened into tools:
+			// adding a server would change the model-visible manifest.
+			backends.MCP = mcpService.manager
 			if section := mcpService.manager.PromptSection(); section != "" {
 				sections = append(sections, host.Section{Name: "mcp_servers", Content: section})
 			}
@@ -236,6 +240,7 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			FileReadTool:    cfg.Tenant.Skills.FileReadTool,
 			ExtraTools:      extra,
 			IncludeBuiltins: true,
+			ToolBackends:    backends,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("assemble host: %w", err)
@@ -247,7 +252,7 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			"skills", len(asm.Skills()),
 			"visible", len(asm.VisibleSkills()),
 			"tools", len(asm.Tools().List()),
-			"mcp_tools", len(extra))
+			"extra_tools", len(extra))
 		return &promptService{host: asm}, nil
 	}
 }
@@ -293,9 +298,8 @@ type mcpService struct {
 	log     *slog.Logger
 }
 
-func (m *mcpService) Tools() []agentcore.AgentTool { return m.manager.Tools() }
-func (m *mcpService) PromptSection() string        { return m.manager.PromptSection() }
-func (m *mcpService) Entries() []mcp.ServerEntry   { return append([]mcp.ServerEntry(nil), m.entries...) }
+func (m *mcpService) PromptSection() string      { return m.manager.PromptSection() }
+func (m *mcpService) Entries() []mcp.ServerEntry { return append([]mcp.ServerEntry(nil), m.entries...) }
 func (m *mcpService) Reconnect(ctx context.Context, name string) error {
 	return m.manager.Reconnect(ctx, name)
 }

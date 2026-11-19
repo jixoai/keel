@@ -52,6 +52,7 @@ import (
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicegraph"
 	"github.com/jixoai/keel/internal/telemetry"
+	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 // Default collector timing. The retire timeout bounds how long an old
@@ -170,6 +171,11 @@ type ProductOptions struct {
 	// it (POST /v1/sessions/{id}/cancel). The worker consults it per claim; nil
 	// keeps cancellation outside the process (the endpoint answers 501).
 	RunControl agent.RunController
+	// ToolBackends supplies the services the constant tool surface drives.
+	// MCP is filled by the prompt factory from the resolved ctx.mcp service;
+	// Agents/Creation are supplied by the product layer (the sub-agent runner
+	// and plugin manager are created after Boot, so the getters are lazy).
+	ToolBackends toolsurface.Backends
 }
 
 // Config is the hosting-process input for Boot.
@@ -733,7 +739,8 @@ func (r *Runtime) refreshAssembly() error {
 	section := ""
 	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
 		if mcpService, ok := svc.(*mcpService); ok {
-			extra = append(extra, mcpService.Tools()...)
+			// The builtin `mcp` tool already carries the resolved manager; the
+			// per-server catalogue is not part of the published tool set.
 			section = mcpService.PromptSection()
 		}
 	}

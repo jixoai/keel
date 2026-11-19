@@ -63,11 +63,12 @@ type Plugin struct {
 - **工具发布**——每次装配后，激活的工具集经唯一 sink 推入宿主 registry（`keel serve` 中为
   `rt.RefreshProductTools`，`cmd/keel/serve.go:464`）。
 
-开箱即用，`keel serve` 装配两个内置插件——`keel.example`（完整示例：两个工具、三条 hook
-订阅、两个触发器、两个 effect；`internal/agentext/builtin.go:38`）与 `keel.subagents`（暴露
-`spawn_subagent` 工具；`internal/agentext/builtin.go:256`）。设置界面渲染装配结果——
-generation、逐插件状态、提供的工具、hooks、触发器、诊断
-（`web/src/screens/settings.tsx:1148`）。
+开箱即用，`keel serve` 装配若干内置插件——`keel.example`（完整示例：两个工具、三条 hook
+订阅、两个触发器、两个 effect；`internal/agentext/builtin.go:38`）、`keel.creation`
+（harness 内建 `creation` 工具的 action 后端）与默认关闭的 `keel.testkit`
+（`clock`/`echo`，供 E2E 验证 grant 过滤）。子代理原语是 harness 内建的 `agent` 工具，
+不再是插件工具（`internal/toolsurface`）。设置界面渲染装配结果——generation、逐插件状态、
+提供的工具、hooks、触发器、诊断（`web/src/screens/settings.tsx:1148`）。
 
 **它不是**：没有清单文件、没有安装步骤、没有权限模型、没有 UI 托管。今天的「插件」就是
 编译进二进制的代码，构造上即受信。下面的一切，是把这套运行时变成包体系的规划标准。

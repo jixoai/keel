@@ -62,7 +62,7 @@ type File struct {
 func Names() []string { return []string{WebviewReactSolidglass} }
 
 // Files lists a template's files (package-relative, sorted, `.tmpl` suffixes
-// kept). It is the structural inventory `creation_validate` self-checks against.
+// kept). It is the structural inventory the creation validate action self-checks against.
 func Files(name string) ([]string, error) {
 	root, err := templateRoot(name)
 	if err != nil {

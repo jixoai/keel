@@ -41,18 +41,23 @@ func TestHostAssemblesPromptAndTools(t *testing.T) {
 	if !strings.Contains(prompt, "<skills>") || !strings.Contains(prompt, "<name>pdf</name>") {
 		t.Fatalf("prompt = %q", prompt)
 	}
-	if _, ok := h.Tools().Get("clock"); !ok {
-		t.Fatal("clock tool missing")
+	// The builtin surface is the constant eleven-tool set; a skill is content
+	// reached through skills.view, never a tool name of its own.
+	wantBuiltins := []string{"agent", "approve", "bash", "creation", "edit", "mcp", "notify", "read", "skills", "tasks", "write"}
+	if got := strings.Join(h.Tools().Names(), ","); got != strings.Join(wantBuiltins, ",") {
+		t.Fatalf("builtin tools = %v, want %v", h.Tools().Names(), wantBuiltins)
 	}
-	if _, ok := h.Tools().Get("skill"); !ok {
-		t.Fatal("skill tool missing")
+	for _, removed := range []string{"skill", "clock", "echo", "spawn_subagent"} {
+		if _, ok := h.Tools().Get(removed); ok {
+			t.Fatalf("removed tool %q is still registered", removed)
+		}
 	}
 	if _, ok := h.Tools().Get("pdf"); ok {
 		t.Fatal("skill body should not be a tool")
 	}
-	// The skill tool loads the body on demand.
-	tool, _ := h.Tools().Get("skill")
-	result, err := tool.Execute(context.Background(), "call-1", json.RawMessage(`{"name":"pdf"}`), nil)
+	// skills.view loads the body on demand.
+	tool, _ := h.Tools().Get("skills")
+	result, err := tool.Execute(context.Background(), "call-1", json.RawMessage(`{"action":"view","name":"pdf"}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,15 +76,24 @@ func TestHostHidesDisabledSkillFromPrompt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, _, err := New(Config{Preamble: "base", SkillRoots: []string{root}})
+	h, _, err := New(Config{Preamble: "base", SkillRoots: []string{root}, IncludeBuiltins: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(h.SystemPrompt(), "hidden") {
 		t.Fatalf("disabled skill advertised: %q", h.SystemPrompt())
 	}
-	if _, ok := h.Tools().Get("skill"); ok {
-		t.Fatal("skill tool should not exist without visible skills")
+	// The skills tool is constant; a disabled skill is simply absent from ls/view.
+	tool, ok := h.Tools().Get("skills")
+	if !ok {
+		t.Fatal("the skills tool must exist even with no visible skills")
+	}
+	result, err := tool.Execute(context.Background(), "call-1", json.RawMessage(`{"action":"ls"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Content[0].(agentcore.TextContent).Text, "hidden") {
+		t.Fatalf("disabled skill leaked into ls: %#v", result.Content)
 	}
 }
 

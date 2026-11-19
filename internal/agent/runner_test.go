@@ -17,6 +17,7 @@ import (
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/telemetry"
+	"github.com/jixoai/keel/internal/testkit"
 )
 
 func testStore(t *testing.T) *store.Store {
@@ -473,7 +474,7 @@ func TestRunnerUsesHostAssembly(t *testing.T) {
 		return base(ctx, model, llm, cfg)
 	}
 	reg := agenttool.NewToolRegistry()
-	if err := reg.Register(EchoTool{}); err != nil {
+	if err := reg.Register(testkit.EchoTool{}); err != nil {
 		t.Fatal(err)
 	}
 	k := testKernel(t, st)

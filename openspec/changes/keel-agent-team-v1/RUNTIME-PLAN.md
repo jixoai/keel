@@ -391,18 +391,18 @@ func (r *ToolRegistry) Subset(names []string) (*ToolRegistry, error) // 复制 +
    「会话 > Agent 默认模型 > 租户默认」（`specs/agent-registry/spec.md:35-40`）。
    今天前端在做这件事（`web/src/screens/model-picker.tsx:118-130`），
    服务端接管后前端只保留展示用途。
-3. **成员**：`spawn_subagent` 已存在（`internal/agentext/builtin.go:251-265`，
-   工具体 `internal/agentext/subagent.go:619-682`），且请求有 `Agent` 字段
+3. **成员**：`agent` 聚合工具的 `spawn` action（W2.1 已把 `spawn_subagent` 并入
+   `internal/toolsurface/agent.go` + `internal/agentext/subagent.go`），且请求有 `Agent` 字段
    （`subagent.go:48`）。但子会话的 `user.message` 只写
    `subagent: {parentSessionId, agent, idempotencyKey, budget}`（`subagent.go:200-207`），
    **不带 selection**，所以子会话的 Agent 配置同样不生效。
    最小改法：`SpawnRequest` 增加 `Selection json.RawMessage`，写进
-   `extras["selection"]`；`spawn_subagent` 工具在 captain 上下文里从
+   `extras["selection"]`；`agent` 工具的 `spawn` action 在 captain 上下文里从
    `teamId` 解析成员 → 填成员的 `agentId` + `defaultModel`。
 
 ### c.4 成员结果进 captain 时间线（规则草案，不实现）
 
-- **载体**：`spawn_subagent` 的返回值已经是结构化 JSON
+- **载体**：`agent.spawn` 的返回值已经是结构化 JSON
   （`SubagentResult`，`subagent.go:63-76`：`status/summary/artifacts/usage/sessionId`），
   它作为 tool result 天然进 captain 的 transcript——**不需要新事件**。
 - **规则 R1（最小）**：captain 的时间线只出现「一次工具调用 + 一条工具结果」，
@@ -410,8 +410,8 @@ func (r *ToolRegistry) Subset(names []string) (*ToolRegistry, error) // 复制 +
   `internal/agenttool/tool_executor.go` 的 `toolResultMaxBytes`）；`artifacts` 只留
   `type/name/ref`，不带子会话正文（`subagent.go:56-61` 已这样设计）。
 - **规则 R2**：成员会话是**独立 session**（`subagent.go:191-211`），
-  captain 不可见其 transcript；要看细节必须再发一次 `spawn_subagent` 或由成员回传摘要。
-- **规则 R3**：团队模式下 captain 的工具面必须包含 `spawn_subagent`
+  captain 不可见其 transcript；要看细节必须再发一次 `agent.spawn` 或由成员回传摘要。
+- **规则 R3**：团队模式下 captain 的工具面必须包含 `agent` 聚合工具（`spawn` action）
   （即使 `agent.tools` 里没写），否则团队等于单 agent——这条要写进 c.2 的
   「始终保留」白名单（另一个候选是显式声明，更符合 fail-closed 气质）。
 - **规则 R4**：成员失败不 fail captain run（`subagent.go:19-21` 已如此），
@@ -554,7 +554,7 @@ team:   kt-runtime-probe-team-<ts>  captain = 上面的 agent
 
 - 改动：`internal/agenttool/registry.go` 新增 `Subset(names)`；
   `internal/agent/runner.go:339` → `toolsForRun`（规则见 c.2，含 team defaults 并集、
-  `enabled=false` 减集、未知名剔除 + warning、**始终保留 `spawn_subagent`** 的决策点）；
+  `enabled=false` 减集、未知名剔除 + warning、**始终保留 `agent`** 的决策点）；
   注意 `runner.go:344-349` 的 no-tool 模型守卫语义变化。
 - 测试：`registry` Subset 3 例 + `agent` 过滤矩阵 4 例 + no-tool 守卫 1 例。
 - 验收：`go test ./internal/agenttool/... ./internal/agent/...`；
@@ -566,10 +566,10 @@ team:   kt-runtime-probe-team-<ts>  captain = 上面的 agent
   `store.GetAgent`，`ValidateForStart` 门）；
   `internal/agentext/subagent.go:41-59`（`SpawnRequest.Selection`）、
   `:200-207`（写进 extras）；`internal/agentext/builtin.go:251-265`
-  （`spawn_subagent` schema 增 `agentId`，或由 captain 上下文注入成员解析）。
+  （`agent` 的 spawn action schema 增 `agentId`，或由 captain 上下文注入成员解析）。
 - 测试：`internal/servicehost` 团队解析 3 例（缺 captain / 未 Seal / 正常）；
   `internal/agentext` 子会话 extras 带 selection 的 1 例。
-- 验收：真库「团队会话 → spawn_subagent → 成员自己的 prompt 生效」
+- 验收：真库「团队会话 → agent.spawn → 成员自己的 prompt 生效」
   （成员 prompt 用第二个标记串 `KITE-RUNTIME-MARK-8` 区分）。
 
 ### P6（0.5d）run 快照落盘 + 前端 selection 携带 + 收口
@@ -593,7 +593,7 @@ P1 ──▶ P2 ──▶ P3 ──▶ P6（快照/前端收口）
 ```
 
 P3 与 P4 可并行（两者都依赖 P2 的 resolver 骨架，但改的文件不重叠）；
-P5 必须在 P4 之后，因为 `spawn_subagent` 的保留策略属于工具面规则。
+P5 必须在 P4 之后，因为委派原语（`agent`）的保留策略属于工具面规则。
 
 ### 明确不在本计划内
 
@@ -643,10 +643,11 @@ checkpoints / blob_refs / usage_ledger 本为 0
 
 方案**通过**，按 P1→P6 执行。以下四处为审查裁决，实现时照此落地：
 
-1. **R3 定案——团队模式自动保留 `spawn_subagent`**（不采用「仅显式声明」）：
-   - 规则：`selection.teamId` 生效的 run，工具面**自动包含** `spawn_subagent`，
-     即使 captain 的 `tools` grants 非空且未列出它；**唯一例外**：grants 显式列出
-     `spawn_subagent` 且 `enabled=false`（用户的显式决定优先）。
+1. **R3 定案——团队模式自动保留委派原语**（不采用「仅显式声明」）：
+   - 规则：`selection.teamId` 生效的 run，工具面**自动包含** `agent` 聚合工具
+     （W2.1 起 `spawn_subagent` 已并入其 `spawn` action），即使 captain 的 `tools`
+     grants 非空且未列出它；**唯一例外**：grants 显式列出 `agent` 且 `enabled=false`
+     （用户的显式决定优先）。
    - 理由：团队的定义性能力就是委派成员；「队长存在但永远不能 spawn」= 静默坏掉的产品
      （违反「不得把坏状态留给用户」）。写进 `specs/agent-team/spec.md` 的 MODIFIED 条目，
      并加一条 P4 矩阵测试。
@@ -731,13 +732,14 @@ E2E wire：captain 请求 system 以 `KITE-RUNTIME-MARK-7 …` 开头且含 `<pl
 - `internal/agenttool/registry.go`：新增 `Subset(names)`（复制 + 重新 Register，schema 重新编译；
   未知名跳过）与 `Names()`。
 - `internal/agent/runner.go`：`toolsForRun`（nil 授权=全量；声明授权=只留 enabled；
-  R3：team 模式自动并集 `spawn_subagent`，唯一例外是显式 `enabled=false`；未安装的 toolId
+  R3：team 模式自动并集 `agent`，唯一例外是显式 `enabled=false`；未安装的 toolId
   剔除 + warn）。
 - `internal/agenttool/agenttool_test.go`：`TestToolRegistrySubset`。
 - `internal/agent/binding_test.go`：过滤矩阵 4 例（含团队三态）。
 
 **命令与结果**：`go test ./internal/agenttool/ ./internal/agent/` → ok。
-E2E 断言：captain wire tools `["clock","spawn_subagent"]`；member `["echo"]`。
+E2E 断言（W2.1 起）：captain wire tools `["agent"]`；member `["clock"]`（先启用
+`keel.testkit` 并授予 clock）。
 
 **偏差**：no-tool 模型守卫（`runner.go` 的 `SupportsToolCall=false` 分支）行为随过滤改变——
 过滤后工具面可能为空，于是不再必然失败。未加专门测试（计划里提到「要有测试固定」），
@@ -747,7 +749,7 @@ E2E 断言：captain wire tools `["clock","spawn_subagent"]`；member `["echo"]`
 
 **改动**
 - `internal/agentext/subagent.go`：`SpawnRequest.AgentID` + `Selection`；`childSelection()`
-  写入子输入 `extras["selection"]`；`SubagentTool` schema/Execute 增 `agentId`。
+  写入子输入 `extras["selection"]`；`agent` 工具的 spawn action schema/handler 增 `agentId`。
 - `internal/agentapi/ext.go`：HTTP spawn 表单增 `agentId`/`selection`（与工具面保持一致）。
 - `internal/agentext/subagent_binding_test.go`（新）：子输入带 `selection.agentId`；无绑定不发明事实。
 

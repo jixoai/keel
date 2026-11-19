@@ -29,7 +29,7 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 // ${NAME}, env:NAME, or secret:NAME.
 var secretRefPattern = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]{0,63}\}|(?:env|secret):[A-Za-z_][A-Za-z0-9_]{0,63})$`)
 
-// toolPattern accepts registry names and trailing-* wildcards (mcp__*).
+// toolPattern accepts registry names and trailing-* wildcards.
 var toolPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+\*?$`)
 
 // TenantConfig is one tenant's agent configuration. Every field is optional:
@@ -140,7 +140,7 @@ type TelemetryConfig struct {
 }
 
 // ToolsConfig filters the assembled tool registry. Allow holds tool names and
-// trailing-* wildcards (for example "clock" or "mcp__*"); nil inherits the
+// trailing-* wildcards (for example "agent" or "keel_*"); nil inherits the
 // default allow-list and [] explicitly clears it.
 type ToolsConfig struct {
 	Allow []string `json:"allow"`

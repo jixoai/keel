@@ -29,6 +29,7 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/telemetry"
+	"github.com/jixoai/keel/internal/testkit"
 )
 
 func testLogger() *slog.Logger {
@@ -163,6 +164,13 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 	defer hooks.Close()
 	memTelemetry := telemetry.NewMemory()
 	runner := agent.NewRunner(kern, kern, agent.FakeStream(), "fake", "fake", "", log)
+	// This suite drives fake-provider turns through the deterministic echo tool.
+	// Production runners get the tool from the keel.testkit plugin; the test
+	// registers it directly because it exercises the extension runtime, not the
+	// product tool surface.
+	if err := runner.Tools.Register(testkit.EchoTool{}); err != nil {
+		t.Fatal(err)
+	}
 	runner.Telemetry = &agent.RunTelemetry{
 		Context: &agentext.TurnTelemetry{Base: memTelemetry, Hooks: hooks},
 		Metrics: memTelemetry,
@@ -223,7 +231,7 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 	}
 	example := agentext.NewExamplePlugin(agentext.ExamplePluginOptions{TenantID: tenantID.String()})
 	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
-		Plugins:   []*agentext.Plugin{probe, example, agentext.NewSubagentPlugin(subagents)},
+		Plugins:   []*agentext.Plugin{probe, example},
 		Hooks:     hooks,
 		Triggers:  triggers,
 		Decisions: decisions,
@@ -288,17 +296,8 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 	for _, plugin := range pluginsBody.Plugins {
 		states[plugin.ID] = plugin.State
 	}
-	if states[agentext.ExamplePluginID] != "active" || states["test.probe"] != "active" || states["keel.subagents"] != "active" {
+	if states[agentext.ExamplePluginID] != "active" || states["test.probe"] != "active" {
 		t.Fatalf("plugin states = %+v", states)
-	}
-	hasSubagentTool := false
-	for _, name := range pluginsBody.Tools {
-		if name == "spawn_subagent" {
-			hasSubagentTool = true
-		}
-	}
-	if !hasSubagentTool {
-		t.Fatalf("spawn_subagent is not published: %v", pluginsBody.Tools)
 	}
 
 	// --- 2. trigger → turn → hooooooks ---
