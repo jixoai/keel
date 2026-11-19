@@ -84,6 +84,7 @@ func TestGuideInputIsInjectedAfterToolResults(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -157,6 +158,7 @@ func TestGuideInputWithAttachmentsWaitsForTheNextRun(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -240,6 +242,7 @@ func TestSelectionGuideInputWaitsForTheNextRun(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -327,6 +330,7 @@ func TestQueueAndGuideMixAreEachAnsweredOnce(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -433,6 +437,7 @@ func TestTwoGuidesAreInjectedOneAtATime(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("run: %v", err)

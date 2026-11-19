@@ -20,6 +20,19 @@ import (
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// TestBackendsReportNotWiredTyped pins the wiring fact at the adapter: a lazy
+// getter with nothing to resolve is ErrNotWired, so the aggregate tools can
+// answer not_wired instead of backend_error (or plugin_disabled, for creation).
+func TestBackendsReportNotWiredTyped(t *testing.T) {
+	ctx := context.Background()
+	if _, err := (AgentBackend{}).Spawn(ctx, RunScope{}, json.RawMessage(`{"task":"x"}`)); !errors.Is(err, ErrNotWired) {
+		t.Fatalf("unwired agent spawn = %v, want ErrNotWired", err)
+	}
+	if _, err := (CreationBackend{}).Invoke(ctx, "list", nil); !errors.Is(err, ErrNotWired) {
+		t.Fatalf("unwired creation invoke = %v, want ErrNotWired", err)
+	}
+}
+
 func waitFor(t *testing.T, timeout time.Duration, condition func() bool, message string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

@@ -140,8 +140,10 @@ type TelemetryConfig struct {
 }
 
 // ToolsConfig filters the assembled tool registry. Allow holds tool names and
-// trailing-* wildcards (for example "agent" or "keel_*"); nil inherits the
-// default allow-list and [] explicitly clears it.
+// trailing-* wildcards (for example "agent" or "keel_*"). A nil list (the
+// default) does not filter; a non-nil list keeps only matching tools, so []
+// explicitly keeps none. The host assembly applies it to the builtin surface
+// and host-provided (plugin/external) tools alike (see host.Config.ToolsAllow).
 type ToolsConfig struct {
 	Allow []string `json:"allow"`
 }

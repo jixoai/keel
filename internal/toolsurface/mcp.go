@@ -109,7 +109,11 @@ func mcpDescribe(backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolRe
 			continue
 		}
 		if server.Err != nil {
-			return notFound(MCP, fmt.Sprintf("server %q is not connected: %v", input.Server, server.Err))
+			// The server exists but its connection failed: a backend failure, not
+			// a missing name. `call` answers the same fact with the same code.
+			return ErrorResult(CodeBackendFailed, MCP,
+				fmt.Sprintf("server %q is not connected: %v", input.Server, server.Err),
+				map[string]any{"server": input.Server, "tool": input.Tool})
 		}
 		for _, tool := range server.Tools {
 			if tool.Name != input.Tool {
@@ -155,8 +159,11 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 	if err != nil {
 		switch {
 		case errors.Is(err, mcp.ErrServerNotFound), errors.Is(err, mcp.ErrToolNotFound):
+			// The (server, tool) name pair does not exist: the caller can fix it.
 			return notFound(MCP, err.Error())
 		default:
+			// The name exists but the server is disconnected (or the call failed):
+			// the same fact describe reports, and the same code.
 			return ErrorResult(CodeBackendFailed, MCP, err.Error(), map[string]any{"server": input.Server, "tool": input.Tool})
 		}
 	}

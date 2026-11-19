@@ -61,7 +61,7 @@ host.TenantConfig ──resolve──▶ Loadout(revision, summary) ──Apply�
 | `mcp.servers` | 非空即启用 `mcp` 服务 |
 | `compaction.enabled/threshold/keepRecentTokens` | `enabled=true` 才启用 `compaction` |
 | `telemetry.adapter` | 非空即启用 `telemetry` |
-| `tools.allow` | 工具白名单（摘要计数；过滤由 host 装配消费） |
+| `tools.allow` | 工具白名单（摘要计数；过滤由 host 装配执行，见 `docs/HOST.md` §3） |
 | `hooks.commands` | 摘要计数（hook 装配仍走 host/loop 扩展点） |
 | `external.backends` | 非空即启用 `external-agent`（AgentBackend 连接、外部会话） |
 | `external.tools` | 非空即启用 `external-tools`（ToolProvider 工具进 prompt registry） |

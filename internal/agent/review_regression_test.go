@@ -201,6 +201,9 @@ func TestModelWithoutToolSupportRefusesTools(t *testing.T) {
 	commitInput(t, k, scope, "r1", "hello", "", nil)
 	rec := &recordingStream{}
 	runner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	// The gate only has something to refuse when the surface serves a tool; the
+	// deterministic testkit tools are exactly the surface these tests exercised.
+	registerTestkitTools(t, runner)
 	runner.Models = &stubResolver{resolved: ActiveModel{
 		ProviderID: "p", Model: "no-tools", APIKey: "k", Stream: rec.fn(),
 		ThinkingLevel: agentcore.ThinkingLow,
@@ -276,6 +279,7 @@ func TestSelectionGuideStopsTheScan(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("run: %v", err)

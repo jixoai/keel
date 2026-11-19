@@ -136,6 +136,77 @@ func TestRefreshMCPReplacesToolsAndPromptSection(t *testing.T) {
 	}
 }
 
+// TestToolsAllowFiltersBuiltinsAndPluginTools pins the tenant tools.allow
+// filter: it applies to the builtin surface and to host-provided (plugin)
+// tools alike, and a trailing "*" is a prefix wildcard. RefreshSections builds
+// through the same path, so a plugin installed after boot cannot bypass it.
+func TestToolsAllowFiltersBuiltinsAndPluginTools(t *testing.T) {
+	h, _, err := New(Config{
+		IncludeBuiltins: true,
+		ExtraTools: []agentcore.AgentTool{
+			namedTestTool{name: "vendor_panel_refresh"},
+			namedTestTool{name: "unlisted_tool"},
+		},
+		ToolsAllow: []string{"bash", "agent", "vendor_*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(h.Tools().Names(), ","), "agent,bash,vendor_panel_refresh"; got != want {
+		t.Fatalf("filtered tool surface = %s, want %s", got, want)
+	}
+	if err := h.RefreshSections([]agentcore.AgentTool{
+		namedTestTool{name: "vendor_catalog"},
+		namedTestTool{name: "unlisted_tool"},
+	}, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(h.Tools().Names(), ","), "agent,bash,vendor_catalog"; got != want {
+		t.Fatalf("refreshed tool surface = %s, want %s", got, want)
+	}
+}
+
+// TestToolsAllowExplicitEmptyKeepsNoTools pins the nil/non-nil distinction the
+// tenant document needs: an explicit [] clears the surface instead of meaning
+// "inherit everything".
+func TestToolsAllowExplicitEmptyKeepsNoTools(t *testing.T) {
+	h, _, err := New(Config{
+		IncludeBuiltins: true,
+		ExtraTools:      []agentcore.AgentTool{namedTestTool{name: "plugin_tool"}},
+		ToolsAllow:      []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := h.Tools().Names(); len(names) != 0 {
+		t.Fatalf("explicit empty tools.allow kept %v", names)
+	}
+}
+
+func TestToolAllowListMatching(t *testing.T) {
+	cases := []struct {
+		name     string
+		patterns []string
+		tool     string
+		allow    bool
+	}{
+		{name: "nil keeps everything", patterns: nil, tool: "anything", allow: true},
+		{name: "empty keeps nothing", patterns: []string{}, tool: "bash", allow: false},
+		{name: "exact match", patterns: []string{"bash"}, tool: "bash", allow: true},
+		{name: "exact miss", patterns: []string{"read"}, tool: "bash", allow: false},
+		{name: "prefix wildcard match", patterns: []string{"keel_*"}, tool: "keel_echo", allow: true},
+		{name: "prefix wildcard does not overreach", patterns: []string{"keel_*"}, tool: "other", allow: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			allow := newToolAllowList(test.patterns)
+			if got := allow.allows(test.tool); got != test.allow {
+				t.Fatalf("allows(%q) with %v = %v, want %v", test.tool, test.patterns, got, test.allow)
+			}
+		})
+	}
+}
+
 func TestRefreshMCPConcurrentReads(t *testing.T) {
 	h, _, err := New(Config{Preamble: "base", IncludeBuiltins: true})
 	if err != nil {

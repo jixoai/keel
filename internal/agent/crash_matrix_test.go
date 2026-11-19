@@ -226,6 +226,7 @@ func TestCrashDuringToolTurnFillsResults(t *testing.T) {
 
 	lease2 := claimScope(t, k, tenant, session)
 	runner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease2)
 	if err != nil {
 		t.Fatalf("successor: %v", err)
@@ -266,6 +267,7 @@ func TestProviderFailureAfterToolTurnIsRetried(t *testing.T) {
 		return fake(ctx, model, llm, cfg)
 	}
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	res, err := runner.RunAttempt(ctx, lease)
 	if err != nil {
 		t.Fatalf("attempt 1: %v (a provider failure is a terminal message)", err)
@@ -289,6 +291,7 @@ func TestProviderFailureAfterToolTurnIsRetried(t *testing.T) {
 	// terminal error message is not conversation), so the model is asked again.
 	lease2 := claimScope(t, k, tenant, session)
 	runner2 := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner2)
 	res2, err := runner2.RunAttempt(ctx, lease2)
 	if err != nil {
 		t.Fatalf("retry: %v", err)

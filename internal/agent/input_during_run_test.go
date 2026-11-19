@@ -382,6 +382,7 @@ func TestInFlightInputIsAnsweredWithItsToolCall(t *testing.T) {
 	// The tool-triggering input arrives while attempt 1 streams.
 	stream, inputErr := midRunInput(t, k, scope, "r2", "please echo this")
 	runner := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	cursor1, watermark1, err := runner.RunWithWatermark(ctx, lease1)
 	if err != nil {
 		t.Fatal(err)
@@ -406,6 +407,7 @@ func TestInFlightInputIsAnsweredWithItsToolCall(t *testing.T) {
 		t.Fatalf("successor watermark = %d, want 1 (the previous attempt's read point)", lease2.ReadWatermark)
 	}
 	runner2 := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner2)
 	cursor2, watermark2, err := runner2.RunWithWatermark(ctx, lease2)
 	if err != nil {
 		t.Fatalf("successor run: %v", err)

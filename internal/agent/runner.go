@@ -159,7 +159,8 @@ func (r *Runner) systemPromptFor(surface RunSurface) string {
 
 // toolsForRun returns the attempt's tool registry: the host registry filtered by
 // the binding's grants, or the whole registry when the binding declares none.
-func (r *Runner) toolsForRun(surface RunSurface) (*agenttool.ToolRegistry, error) {
+// sessionID is diagnostic context only (the team auto-keep warning names it).
+func (r *Runner) toolsForRun(surface RunSurface, sessionID string) (*agenttool.ToolRegistry, error) {
 	registry := r.registry()
 	if registry == nil || surface.ToolIDs == nil {
 		return registry, nil
@@ -186,6 +187,13 @@ func (r *Runner) toolsForRun(surface RunSurface) (*agenttool.ToolRegistry, error
 		if enabled, declared := surface.ToolIDs[SpawnToolName]; !declared || enabled {
 			if _, ok := registry.Get(SpawnToolName); ok {
 				names = append(names, SpawnToolName)
+			} else {
+				// The registry does not serve the primitive. Nothing can be added
+				// to the surface, but a captain silently unable to delegate is
+				// exactly the broken product R3 forbids: leave the diagnostic.
+				r.Logger.Warn("team mode cannot keep the delegation primitive: the registry does not serve it",
+					"tool", SpawnToolName, "agent", surface.AgentID, "team", surface.TeamID,
+					"session_id", sessionID)
 			}
 		}
 	}
@@ -207,23 +215,16 @@ type PreambleRenderer interface {
 	RenderSystemPrompt(preamble string) string
 }
 
-// runnerToolFixture is a test-only seam. Production runners start with an empty
-// fallback registry: the model-visible surface is the host assembly (the 11
-// builtin aggregate tools plus approved plugin tools), and the old clock/echo
-// development tools live in the keel.testkit plugin. internal/agent's tests set
-// this hook to keep their deterministic tool round-trips.
-var runnerToolFixture func(*agenttool.ToolRegistry)
-
 // NewRunner wires the production defaults (an empty fallback registry and a turn
-// cap). committer and events are the contract kernel seams; the runner holds no
-// event-table handle of its own.
+// cap). The fallback registry is empty on purpose: the model-visible surface is
+// the host assembly (the 11 builtin aggregate tools plus approved plugin tools),
+// and the old clock/echo development tools live in the keel.testkit plugin.
+// Tests that drive the deterministic echo round-trip register it on
+// runner.Tools themselves. committer and events are the contract kernel seams;
+// the runner holds no event-table handle of its own.
 func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider.StreamFn, providerName, model, apiKey string, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
-	}
-	reg := agenttool.NewToolRegistry()
-	if runnerToolFixture != nil {
-		runnerToolFixture(reg)
 	}
 	runner := &Runner{
 		Committer:    committer,
@@ -232,7 +233,7 @@ func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider
 		ProviderName: providerName,
 		Model:        model,
 		APIKey:       apiKey,
-		Tools:        reg,
+		Tools:        agenttool.NewToolRegistry(),
 		MaxTurns:     8,
 		Logger:       logger,
 	}
@@ -464,7 +465,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	res.Summary.TeamID = surface.TeamID
 	res.Summary.TeamRevision = surface.TeamRevision
 	res.Summary.TeamHash = surface.TeamHash
-	tools, err := r.toolsForRun(surface)
+	tools, err := r.toolsForRun(surface, lease.Scope.SessionID.String())
 	if err != nil {
 		return res, err
 	}

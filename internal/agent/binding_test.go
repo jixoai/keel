@@ -17,9 +17,11 @@ package agent
 //   - a resolver failure fails the attempt before any commit.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -281,6 +283,52 @@ func TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled(t *testing.T) {
 				t.Fatalf("tool surface = %v, want %v", tools[0], test.want)
 			}
 		})
+	}
+}
+
+// TestTeamModeWarnsWhenTheDelegationPrimitiveIsMissing pins the diagnostic the
+// review found missing: auto-keeping `agent` cannot work when the registry does
+// not serve it, and a silently un-delegatable captain is exactly what R3
+// forbids. The warning names the session and the agent so an operator can trace
+// the deployment wiring gap.
+func TestTeamModeWarnsWhenTheDelegationPrimitiveIsMissing(t *testing.T) {
+	var log bytes.Buffer
+	runner := &Runner{
+		Tools:  registryWith("bash"),
+		Logger: slog.New(slog.NewTextHandler(&log, nil)),
+	}
+	surface := RunSurface{
+		TeamMode: true,
+		AgentID:  "agent_captain",
+		TeamID:   "team_kite",
+		ToolIDs:  map[string]bool{"bash": true},
+	}
+	tools, err := runner.toolsForRun(surface, "session-42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(tools.Names(), ","); got != "bash" {
+		t.Fatalf("tool surface = %s, want bash (nothing invents the primitive)", got)
+	}
+	warning := log.String()
+	for _, want := range []string{"delegation primitive", "agent_captain", "team_kite", "session-42"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning is missing %q: %s", want, warning)
+		}
+	}
+
+	// A registry that serves the primitive keeps it and stays quiet.
+	log.Reset()
+	runner.Tools = registryWith("bash", SpawnToolName)
+	tools, err = runner.toolsForRun(surface, "session-42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(tools.Names(), ","); got != "agent,bash" {
+		t.Fatalf("tool surface = %s, want agent,bash", got)
+	}
+	if strings.Contains(log.String(), "delegation primitive") {
+		t.Fatalf("unexpected warning when the primitive is served: %s", log.String())
 	}
 }
 

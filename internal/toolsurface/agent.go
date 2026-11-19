@@ -64,12 +64,33 @@ func agentScopeMissing() (agentcore.AgentToolResult, error) {
 		"agent actions need the ambient run scope (WithRunScope); a model tool call inside a run always has it", nil)
 }
 
+// wiredBackend is the optional probe a backend uses to report that its lazy
+// service getter has nothing to resolve. A backend that does not implement it
+// is assumed wired (a nil backend is handled separately).
+type wiredBackend interface {
+	Wired() bool
+}
+
+// agentBackendWired reports whether the backend can actually serve actions.
+// The distinction matters: an injected but unresolved backend is a deployment
+// wiring gap (not_wired), not a backend failure (backend_error) and not an
+// empty result set.
+func agentBackendWired(backend AgentBackend) bool {
+	if backend == nil {
+		return false
+	}
+	if probe, ok := backend.(wiredBackend); ok {
+		return probe.Wired()
+	}
+	return true
+}
+
 func agentSpawn(ctx context.Context, backend AgentBackend, raw json.RawMessage) (agentcore.AgentToolResult, error) {
 	scope, ok := runScope(ctx)
 	if !ok {
 		return agentScopeMissing()
 	}
-	if backend == nil {
+	if !agentBackendWired(backend) {
 		return notWired(Agent, "no sub-agent runner is wired in this deployment")
 	}
 	result, err := backend.Spawn(ctx, scope, raw)
@@ -79,6 +100,8 @@ func agentSpawn(ctx context.Context, backend AgentBackend, raw json.RawMessage) 
 			return agentScopeMissing()
 		case errors.Is(err, agentext.ErrInvalidSpawn):
 			return invalidArguments(Agent, err.Error())
+		case errors.Is(err, agentext.ErrNotWired):
+			return notWired(Agent, err.Error())
 		default:
 			return ErrorResult(CodeBackendFailed, Agent, err.Error(), map[string]any{"action": ActionSpawn})
 		}
@@ -95,7 +118,7 @@ func agentList(ctx context.Context, backend AgentBackend) (agentcore.AgentToolRe
 	if !ok {
 		return agentScopeMissing()
 	}
-	if backend == nil {
+	if !agentBackendWired(backend) {
 		return notWired(Agent, "no sub-agent runner is wired in this deployment")
 	}
 	parent := scope.SessionID
@@ -112,7 +135,7 @@ func agentStatus(ctx context.Context, backend AgentBackend, raw json.RawMessage)
 	if !ok {
 		return agentScopeMissing()
 	}
-	if backend == nil {
+	if !agentBackendWired(backend) {
 		return notWired(Agent, "no sub-agent runner is wired in this deployment")
 	}
 	var input struct {

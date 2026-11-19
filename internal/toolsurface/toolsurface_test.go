@@ -3,6 +3,8 @@ package toolsurface_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -32,6 +34,11 @@ func (f *fakeMCP) CallTool(_ context.Context, server, tool string, _ json.RawMes
 	for _, candidate := range f.servers {
 		if candidate.Entry.Name != server {
 			continue
+		}
+		// Mirror the manager: a configured but disconnected server fails before
+		// name lookup, exactly like the production CallTool.
+		if candidate.Err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("mcp: server %q: %w", server, candidate.Err)
 		}
 		for _, entry := range candidate.Tools {
 			if entry.Name == tool {
@@ -210,6 +217,26 @@ func TestMCPNotFoundIsTyped(t *testing.T) {
 	}
 }
 
+// TestMCPDisconnectedServerSharesOneCode pins the rule the review found broken:
+// "the server is configured but not connected" is one fact, so describe and
+// call answer it with the same typed code (backend_error). A name that does not
+// exist stays not_found, because that is a different fact the caller can fix.
+func TestMCPDisconnectedServerSharesOneCode(t *testing.T) {
+	registry := builtinRegistry(t, toolsurface.Backends{MCP: &fakeMCP{servers: []*mcp.Server{{
+		Entry: mcp.ServerEntry{Name: "flaky"},
+		Tools: []mcp.Tool{{Name: "search"}},
+		Err:   errors.New("connection refused"),
+	}}}})
+	tool := registry[toolsurface.MCP]
+	describe := runAction(t, tool, `{"action":"describe","server":"flaky","tool":"search"}`)
+	call := runAction(t, tool, `{"action":"call","server":"flaky","tool":"search"}`)
+	describeCode := errorDocument(t, describe)["code"]
+	callCode := errorDocument(t, call)["code"]
+	if describeCode != toolsurface.CodeBackendFailed || callCode != toolsurface.CodeBackendFailed {
+		t.Fatalf("disconnected describe/call codes = %v/%v, want both %s", describeCode, callCode, toolsurface.CodeBackendFailed)
+	}
+}
+
 func TestSkillsActions(t *testing.T) {
 	visible := skills.Skill{Name: "pdf", Description: "Read PDFs", Path: "/skills/pdf/SKILL.md", Body: "Read the PDF body."}
 	hidden := skills.Skill{Name: "secret", Description: "hidden", DisableModelInvocation: true}
@@ -328,6 +355,60 @@ func TestAgentListAndStatusStayInTheParent(t *testing.T) {
 	}
 	if problem := errorDocument(t, missing); problem["code"] != toolsurface.CodeNotFound {
 		t.Fatalf("foreign child = %v", problem)
+	}
+}
+
+// TestAgentUnresolvedBackendIsNotWired pins the three-state distinction the
+// review found broken: a backend object was injected, but the service it
+// delegates to does not exist. That is a deployment wiring gap (not_wired) for
+// every action — never backend_error for spawn, and never a misleading empty
+// child list for list/status.
+func TestAgentUnresolvedBackendIsNotWired(t *testing.T) {
+	backend := agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return nil }}
+	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
+	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{
+		TenantID: uuid.New(), SessionID: uuid.New(), RunID: "run-1",
+	})
+	for _, args := range []string{
+		`{"action":"spawn","task":"x"}`,
+		`{"action":"list"}`,
+		`{"action":"status","sessionId":"` + uuid.NewString() + `"}`,
+	} {
+		result, err := registry[toolsurface.Agent].Execute(ctx, "call-1", json.RawMessage(args), nil)
+		if err != nil {
+			t.Fatalf("%s execute: %v", args, err)
+		}
+		if problem := errorDocument(t, result); problem["code"] != toolsurface.CodeNotWired {
+			t.Fatalf("%s = %v, want %s", args, problem, toolsurface.CodeNotWired)
+		}
+	}
+}
+
+// TestCreationWiringAndDisabledStayDistinct pins the two facts the review
+// conflated: a missing manager is not_wired (the deployment never wired the
+// backend), while an installed-but-disabled or uninstalled plugin is
+// plugin_disabled with wording that matches which one it is.
+func TestCreationWiringAndDisabledStayDistinct(t *testing.T) {
+	unwired := builtinRegistry(t, toolsurface.Backends{Creation: agentext.CreationBackend{
+		Manager: func() *agentext.Manager { return nil },
+	}})
+	result := runAction(t, unwired[toolsurface.Creation], `{"action":"list"}`)
+	if problem := errorDocument(t, result); problem["code"] != toolsurface.CodeNotWired {
+		t.Fatalf("nil manager = %v, want %s", problem, toolsurface.CodeNotWired)
+	}
+
+	missing := &fakeCreation{err: agentext.ErrPluginNotFound}
+	result = runAction(t, builtinRegistry(t, toolsurface.Backends{Creation: missing})[toolsurface.Creation], `{"action":"list"}`)
+	problem := errorDocument(t, result)
+	if problem["code"] != toolsurface.CodePluginDisabled || !strings.Contains(problem["message"].(string), "not installed") {
+		t.Fatalf("uninstalled plugin = %v, want plugin_disabled naming installation", problem)
+	}
+
+	disabled := &fakeCreation{err: agentext.ErrPluginState}
+	result = runAction(t, builtinRegistry(t, toolsurface.Backends{Creation: disabled})[toolsurface.Creation], `{"action":"list"}`)
+	problem = errorDocument(t, result)
+	if problem["code"] != toolsurface.CodePluginDisabled || !strings.Contains(problem["message"].(string), "not enabled") {
+		t.Fatalf("disabled plugin = %v, want plugin_disabled naming the disabled state", problem)
 	}
 }
 

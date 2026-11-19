@@ -41,6 +41,7 @@ func midRunInputThenFailAssistant(t *testing.T, k *kernel.Kernel, scope kernel.S
 	}
 	failing := &failingAssistantCommitter{Committer: k, failAt: 2, count: &assistant}
 	runner := NewRunner(failing, k, stream, "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
 	runner.Reads = k // the wrapper only intercepts commits
 	return runner, func() error { return inputErr }
 }

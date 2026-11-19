@@ -106,7 +106,9 @@ func discardLog() *slog.Logger {
 func newTestRunner(t *testing.T, st *store.Store) (*Runner, *kernel.Kernel) {
 	t.Helper()
 	k := testKernel(t, st)
-	return NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog()), k
+	runner := NewRunner(k, k, FakeStream(), "fake", "fake", "", discardLog())
+	registerTestkitTools(t, runner)
+	return runner, k
 }
 
 // claimScope claims the session's run for the test runner.

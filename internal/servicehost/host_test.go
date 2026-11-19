@@ -99,6 +99,19 @@ func TestDefaultAssemblyMatchesDirectHostAssembly(t *testing.T) {
 	}
 }
 
+// TestTenantToolsAllowFiltersTheAssembly pins the tenant document -> host
+// wiring for tools.allow: the dead knob now reaches the one registry (builtins
+// included), with trailing-* wildcards. (Prompt-service reassembly on reload is
+// a separate pre-existing behavior: unchanged service versions are shared.)
+func TestTenantToolsAllowFiltersTheAssembly(t *testing.T) {
+	rt := bootForTest(t, host.TenantConfig{
+		Tools: host.ToolsConfig{Allow: []string{"bash", "agent", "keel_*"}},
+	}, loadout.Options{})
+	if got := strings.Join(registryNames(rt.Assembly().Tools()), ","); got != "agent,bash" {
+		t.Fatalf("assembled tools = %s, want agent,bash (keel_* matches nothing yet)", got)
+	}
+}
+
 func toolNames(h *host.Host) []string { return registryNames(h.Tools()) }
 
 func registryNames(reg *agenttool.ToolRegistry) []string {

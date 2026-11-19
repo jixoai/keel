@@ -241,6 +241,9 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			ExtraTools:      extra,
 			IncludeBuiltins: true,
 			ToolBackends:    backends,
+			// The tenant document's tools.allow is the one filter over the
+			// assembled surface (builtins and plugin/external tools alike).
+			ToolsAllow: cfg.Tenant.Tools.Allow,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("assemble host: %w", err)

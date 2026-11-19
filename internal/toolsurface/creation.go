@@ -44,7 +44,14 @@ func newCreationTool(backend CreationBackend) *actionTool {
 			result, err := backend.Invoke(ctx, action, raw)
 			if err != nil {
 				switch {
-				case errors.Is(err, agentext.ErrPluginState), errors.Is(err, agentext.ErrPluginNotFound):
+				case errors.Is(err, agentext.ErrNotWired):
+					// The manager itself is absent: a deployment wiring gap, not a
+					// disabled plugin. Keep the two facts distinguishable.
+					return notWired(Creation, err.Error())
+				case errors.Is(err, agentext.ErrPluginNotFound):
+					return ErrorResult(CodePluginDisabled, Creation,
+						"keel.creation is not installed; install the plugin to use creation actions", nil)
+				case errors.Is(err, agentext.ErrPluginState):
 					return ErrorResult(CodePluginDisabled, Creation,
 						"keel.creation is not enabled; enable the plugin to use creation actions", nil)
 				default:

@@ -24,6 +24,12 @@ type Config struct {
 	ExtraTools []agentcore.AgentTool
 	// IncludeBuiltins adds the constant eleven-tool builtin surface.
 	IncludeBuiltins bool
+	// ToolsAllow is the tenant document's tools.allow filter. Nil keeps every
+	// assembled tool; a non-nil list keeps only names matching one of its
+	// entries, where a trailing "*" is a prefix wildcard ("keel_*"); an explicit
+	// empty list keeps none. It applies to the builtin surface and ExtraTools
+	// alike, so a plugin cannot bypass it by publishing a tool.
+	ToolsAllow []string
 	// ToolBackends wires the services the aggregate builtins drive (MCP, internal
 	// sub-agents, creation). Nil backends keep the tool present and answer
 	// not_wired.
@@ -60,22 +66,61 @@ func New(cfg Config) (*Host, []skills.Warning, error) {
 }
 
 // buildRegistry compiles the builtin, host-provided, and skill tools. It is
-// shared by boot and RefreshMCP so a refresh has exactly the same validation.
+// shared by boot and RefreshMCP so a refresh has exactly the same validation
+// and the same tools.allow filter.
 func buildRegistry(cfg Config, discovered []skills.Skill) (*agenttool.ToolRegistry, error) {
 	reg := agenttool.NewToolRegistry()
+	allow := newToolAllowList(cfg.ToolsAllow)
 	if cfg.IncludeBuiltins {
 		for _, tool := range toolsurface.BuiltinTools(visibleSkills(discovered), cfg.ToolBackends) {
+			if !allow.allows(tool.Name()) {
+				continue
+			}
 			if err := reg.Register(tool); err != nil {
 				return nil, fmt.Errorf("host: register %s: %w", tool.Name(), err)
 			}
 		}
 	}
 	for _, tool := range cfg.ExtraTools {
+		if !allow.allows(tool.Name()) {
+			continue
+		}
 		if err := reg.Register(tool); err != nil {
 			return nil, fmt.Errorf("host: register %s: %w", tool.Name(), err)
 		}
 	}
 	return reg, nil
+}
+
+// toolAllowList is the compiled tools.allow filter. A nil pattern list means
+// "no filter"; a non-nil empty list means "keep nothing" (the document
+// explicitly cleared the surface). Keeping the nil/non-nil distinction is what
+// lets the tenant document express both.
+type toolAllowList struct {
+	patterns []string
+	active   bool
+}
+
+func newToolAllowList(patterns []string) toolAllowList {
+	return toolAllowList{patterns: patterns, active: patterns != nil}
+}
+
+func (a toolAllowList) allows(name string) bool {
+	if !a.active {
+		return true
+	}
+	for _, pattern := range a.patterns {
+		if prefix, wildcard := strings.CutSuffix(pattern, "*"); wildcard {
+			if strings.HasPrefix(name, prefix) {
+				return true
+			}
+			continue
+		}
+		if pattern == name {
+			return true
+		}
+	}
+	return false
 }
 
 // RefreshMCP replaces the MCP-provided tools and prompt section. The new
