@@ -1,0 +1,15 @@
+# P1 复核修复合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `a98dad9`（cherry-pick `ce2d048`）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/conformance.sh`：1013 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 修复内容（复核 P1/P2）：`mcp_apps` 提示段字段净化（C0/C1/U+2028/U+2029、
+  128/256B 截断、XML 转义防段闭合）；app 资源 2 MiB 上限（text/解码 blob）；
+  text/blob 双缺拒绝；`_meta.ui` 结构块无效→平铺键回退与重复 cursor 测试；
+  `RefreshMCP` Deprecated 注释
+- lane 证据：`evidence/p1/*-fix.*`、`backlog.txt`
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
