@@ -5,6 +5,7 @@
 package agentext
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,31 @@ func TestPartialHubPublishesMCPProgressPerSession(t *testing.T) {
 	// published to every session.
 	if hub.PublishMCPProgress(tenant, sessionA, "", mcp.ProgressNotification{Progress: 1}) {
 		t.Fatal("a frame without a toolCallId was published")
+	}
+}
+
+func TestMCPProgressMessageIsBounded(t *testing.T) {
+	hub := NewPartialHub()
+	tenant, session := uuid.New(), uuid.New()
+	sub, cancel := hub.Subscribe(tenant, session)
+	defer cancel()
+	long := strings.Repeat("x", 4096) + "\x00\x01\x07" + strings.Repeat("y", 64)
+	hub.PublishMCPProgress(tenant, session, "call-1", mcp.ProgressNotification{Progress: 1, Message: long})
+	select {
+	case frame := <-sub:
+		if len(frame.Message) > 256+len("…") {
+			t.Fatalf("message is unbounded: %d bytes", len(frame.Message))
+		}
+		if !strings.HasSuffix(frame.Message, "…") {
+			t.Fatalf("message was not truncated: %q", frame.Message[:min(len(frame.Message), 40)])
+		}
+		for _, r := range frame.Message {
+			if r < 0x20 || r == 0x7f {
+				t.Fatalf("control character %U survived the bound", r)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no progress frame was published")
 	}
 }
 

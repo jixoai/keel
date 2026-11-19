@@ -145,11 +145,21 @@ func (t *MemoryTransport) close() {
 }
 
 // cloneMessage round-trips a message through JSON, which both copies it and
-// normalizes the identifier the way the wire does.
+// normalizes the identifier the way the wire does. Notification.Source is
+// transport metadata (not part of the wire), so it is copied out of band.
 func cloneMessage(message Message) (Message, error) {
 	data, err := json.Marshal(message)
 	if err != nil {
 		return nil, err
 	}
-	return ParseMessage(data)
+	parsed, err := ParseMessage(data)
+	if err != nil {
+		return nil, err
+	}
+	if original, ok := message.(*Notification); ok {
+		if notification, ok := parsed.(*Notification); ok {
+			notification.Source = original.Source
+		}
+	}
+	return parsed, nil
 }

@@ -1,7 +1,9 @@
 === RUN   TestPartialHubPublishesMCPProgressPerSession
 --- PASS: TestPartialHubPublishesMCPProgressPerSession (0.05s)
+=== RUN   TestMCPProgressMessageIsBounded
+--- PASS: TestMCPProgressMessageIsBounded (0.00s)
 === RUN   TestMCPSurfaceChangedHookEventIsInTheClosedSet
 --- PASS: TestMCPSurfaceChangedHookEventIsInTheClosedSet (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/agentext	0.567s
+ok  	github.com/jixoai/keel/internal/agentext	0.397s
 EXIT:0

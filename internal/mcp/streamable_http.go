@@ -670,6 +670,13 @@ func (t *HTTPTransport) consumeResponseStream(body io.Reader, requestID ID, maxB
 					if err != nil {
 						return
 					}
+					if notification, ok := message.(*Notification); ok {
+						// The frame came from this request's response stream, not
+						// from the connection stream: the client needs that fact to
+						// keep untagged progress/cancelled legal while a listen
+						// stream is open.
+						notification.Source = responseStreamSource(requestID)
+					}
 					if response, ok := message.(*SuccessResponse); ok && response.ID.Key() == requestID.Key() {
 						answered = true
 					}

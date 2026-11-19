@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -101,6 +102,15 @@ type Client struct {
 	// progressSeq disambiguates two concurrent calls that asked for the same
 	// token (the caller only names a preference; uniqueness is the client's).
 	progressSeq int64
+
+	// Diagnostic sampling: a hostile or broken server can flood protocol
+	// violations (untagged listens, a full notification queue). The client
+	// reports at most one such warning per second and folds the rest into
+	// "(suppressed=N)" (the P3 audit-sampling shape).
+	diagMu         sync.Mutex
+	diagWindow     time.Time
+	diagSuppressed int
+	now            func() time.Time
 }
 
 // NewClient returns a client in the idle state.
@@ -118,6 +128,7 @@ func NewClient(options ClientOptions) *Client {
 		closedCh:  make(chan struct{}),
 		listeners: make(map[string]*listener),
 		progress:  make(map[string]func(ProgressNotification)),
+		now:       time.Now,
 	}
 }
 
@@ -496,24 +507,45 @@ func (c *Client) routeToListener(notification *Notification) bool {
 	key, tagged := subscriptionIDOf(notification.Params)
 	c.mu.Lock()
 	var routed *listener
-	active := len(c.listeners)
 	if tagged {
 		routed = c.listeners[key]
 	}
+	active := len(c.listeners)
+	// Which stream carried this frame? The transport sets Source for frames read
+	// from a request's own response stream; a listen request's response stream is
+	// the one whose id is in the listeners table.
+	var listenSource *listener
+	if strings.HasPrefix(notification.Source, responseStreamSourcePrefix) {
+		listenSource = c.listeners[strings.TrimPrefix(notification.Source, responseStreamSourcePrefix)]
+	}
 	c.mu.Unlock()
 	if !tagged {
-		if active > 0 {
-			// Modern notifications MUST carry the subscription tag. An untagged
-			// frame while a listen stream is open is a protocol violation: it is
-			// diagnosed and never treated as a change of that subscription.
+		if listenSource != nil {
+			// Modern listen streams MUST tag every notification. An untagged frame
+			// on that stream is a protocol violation.
+			c.diagnoseSampled(listenSource.options.OnDiagnostic,
+				"mcp listen: untagged notification on a listen stream: "+notification.Method)
+			return true
+		}
+		if notification.Source == "" && active > 0 && isDirectoryNotification(notification.Method) {
+			// A source-less transport (stdio, memory) cannot distinguish the
+			// listen stream from the connection stream. Directory changes are
+			// listen-domain facts; while a listen subscription is active an
+			// untagged one is diagnosed. Request-domain frames (progress,
+			// cancelled, message) still pass to the dispatcher.
 			c.mu.Lock()
 			for _, candidate := range c.listeners {
-				c.diagnose(candidate.options.OnDiagnostic, "mcp listen: untagged notification on a modern stream: "+notification.Method)
+				c.diagnoseSampled(candidate.options.OnDiagnostic,
+					"mcp listen: untagged directory notification while a listen stream is active: "+notification.Method)
 				break
 			}
 			c.mu.Unlock()
 			return true
 		}
+		// Untagged frames on the connection stream (stdio, legacy GET) or on
+		// another request's response stream are request/connection-domain frames
+		// (progress, cancelled, message). They MUST reach the dispatcher even
+		// while a listen stream is open.
 		return false
 	}
 	if routed == nil {
@@ -537,11 +569,11 @@ func (c *Client) routeToListener(notification *Notification) bool {
 	if !routed.isAcked() {
 		// The spec forbids notifications before the ack; the subscription is not
 		// established yet, so the frame is a protocol violation, not a change.
-		c.diagnose(routed.options.OnDiagnostic, "mcp listen: notification before acknowledgement: "+notification.Method)
+		c.diagnoseSampled(routed.options.OnDiagnostic, "mcp listen: notification before acknowledgement: "+notification.Method)
 		return true
 	}
 	if !routed.allowed(notification.Method, notification.Params) {
-		c.diagnose(routed.options.OnDiagnostic, "mcp listen: notification outside the accepted subscription: "+notification.Method)
+		c.diagnoseSampled(routed.options.OnDiagnostic, "mcp listen: notification outside the accepted subscription: "+notification.Method)
 		return true
 	}
 	routed.deliver(ListenEvent{Method: notification.Method, Params: notification.Params}, c)
@@ -566,6 +598,28 @@ func (c *Client) diagnose(sink func(string), message string) {
 	if sink != nil {
 		sink(message)
 	}
+}
+
+// diagnoseSampled reports at most one warning per connection per second and
+// folds the suppressed count into the next message. Protocol violations are
+// server-controlled volume, so an unbounded log line per frame would let a
+// hostile server flood the host log.
+func (c *Client) diagnoseSampled(sink func(string), message string) {
+	if sink == nil {
+		return
+	}
+	now := c.now()
+	c.diagMu.Lock()
+	if c.diagWindow.IsZero() || now.Sub(c.diagWindow) >= time.Second {
+		suppressed := c.diagSuppressed
+		c.diagWindow = now
+		c.diagSuppressed = 0
+		c.diagMu.Unlock()
+		sink(fmt.Sprintf("%s (suppressed=%d)", message, suppressed))
+		return
+	}
+	c.diagSuppressed++
+	c.diagMu.Unlock()
 }
 
 // Close rejects in-flight requests, closes the transport, and marks the client

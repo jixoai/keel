@@ -1,0 +1,43 @@
+# P4 fix residue gate
+
+## processes
+none
+
+## e2e databases
+none
+
+## e2e port release
+# port release check
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## git status
+ M internal/agentext/mcp_events_test.go
+ M internal/agentext/turns.go
+ M internal/mcp/client.go
+ M internal/mcp/events.go
+ M internal/mcp/events_test.go
+ M internal/mcp/manager.go
+ M internal/mcp/memory_transport.go
+ M internal/mcp/protocol.go
+ M internal/mcp/streamable_http.go
+ M internal/mcphost/events.go
+ M internal/mcphost/listen_test.go
+ M internal/mcphost/metrics.go
+ M internal/servicehost/services.go
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/agentext-progress-hook-tests.txt
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/conformance.json
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/conformance.txt
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/go-test-all.txt
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/go-test-race.txt
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/mcp-events-tests.txt
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/mcphost-events-tests.txt
+ M openspec/changes/feat-mcp-apps-events/evidence/p4/notes.txt
+ M openspec/changes/feat-mcp-apps-events/tasks.md
+?? openspec/changes/feat-mcp-apps-events/evidence/p4/agent-runtime-e2e-fix.txt
+?? openspec/changes/feat-mcp-apps-events/evidence/p4/agent-runtime-e2e-fix/
+?? openspec/changes/feat-mcp-apps-events/evidence/p4/merged-verification.txt
+?? openspec/changes/feat-mcp-apps-events/evidence/p4/residue-fix.txt
+
+## ignored env file
+.gitignore:7:.env.local	.env.local

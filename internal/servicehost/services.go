@@ -394,6 +394,12 @@ func newMCPFactory(cfg Config) servicegraph.Factory {
 			options.StreamReconnect = func(server string) {
 				events.NoteReconnect(context.Background(), server)
 			}
+			// A reconnect may change the negotiated era: re-evaluate whether this
+			// server now earns a modern listen stream (and replace the old
+			// connection's supervisor if it had one).
+			options.ServerReconnected = func(server string) {
+				events.ServerReconnected(server)
+			}
 		}
 		manager := mcp.Connect(ctx, cfg.MCP.Entries, options)
 		if events != nil {

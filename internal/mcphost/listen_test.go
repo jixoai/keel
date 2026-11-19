@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -236,6 +237,127 @@ func TestEventsListenRejectedIsAuditedAndRetried(t *testing.T) {
 	// Tools remain usable: the dispatcher never touched the catalogue.
 	if fleet.calls() != 0 {
 		t.Fatalf("a refused subscription refreshed the catalogue %d times", fleet.calls())
+	}
+}
+
+// manualClock is a manually advanced clock for the short-lived-stream rule.
+type manualClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *manualClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+// TestEventsShortLivedListenStreamsBackOff: a server that acknowledges and
+// immediately completes every stream must not be reconnected at the 1s floor
+// forever. Three consecutive short-lived streams escalate 1s→2s→4s…
+func TestEventsShortLivedListenStreamsBackOff(t *testing.T) {
+	clientTransport, serverTransport := mcp.NewMemoryTransportPair()
+	if err := serverTransport.Start(context.Background()); err != nil {
+		t.Fatalf("start server transport: %v", err)
+	}
+	t.Cleanup(func() { _ = clientTransport.Close() })
+	fixture := &listenFixture{server: serverTransport}
+	go fixture.run(t)
+
+	fleet := &eventFleet{refreshErr: map[string]error{}, replacement: map[string][]mcp.Tool{}}
+	clock := &manualClock{now: time.Unix(1_700_000_000, 0)}
+	delays := make(chan time.Duration, 8)
+	sleeps := 0
+	events := NewEvents(EventsOptions{
+		Fleet:     fleet,
+		Logger:    slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelError})),
+		ListenFor: func(*mcp.Server) bool { return true },
+		Now:       clock.Now,
+		Sleep: func(_ context.Context, d time.Duration) bool {
+			sleeps++
+			delays <- d
+			return sleeps < 5
+		},
+	})
+	client := mcp.NewClient(mcp.ClientOptions{Name: "listen-client", Version: "1",
+		Notifications: func(ctx context.Context, method string, params json.RawMessage) {
+			events.Notification(ctx, "fixture", method, params)
+		},
+		ServerRequests: func(ctx context.Context, request *mcp.Request) (mcp.Message, error) {
+			return events.ServerRequest(ctx, "fixture", request)
+		}})
+	if _, err := client.Connect(context.Background(), clientTransport); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	fleet.mu.Lock()
+	fleet.servers = []*mcp.Server{{
+		Entry:  mcp.ServerEntry{Name: "fixture", Config: map[string]any{"url": "https://mcp.example/mcp"}},
+		Client: client,
+		Tools:  []mcp.Tool{{Name: "old"}},
+	}}
+	fleet.mu.Unlock()
+	events.Start(context.Background())
+	defer events.Stop()
+
+	want := []time.Duration{time.Second, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+	for index, expected := range want {
+		select {
+		case delay := <-delays:
+			if delay != expected {
+				t.Fatalf("delay %d = %v, want %v", index, delay, expected)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for delay %d", index)
+		}
+	}
+}
+
+// TestEventsServerReconnectedStartsListen is the P2 reconnect gap: a server
+// that only becomes listen-eligible after a reconnect (new era) must get its
+// supervisor without a process restart.
+func TestEventsServerReconnectedStartsListen(t *testing.T) {
+	clientTransport, serverTransport := mcp.NewMemoryTransportPair()
+	if err := serverTransport.Start(context.Background()); err != nil {
+		t.Fatalf("start server transport: %v", err)
+	}
+	t.Cleanup(func() { _ = clientTransport.Close() })
+	fixture := &listenFixture{server: serverTransport}
+	go fixture.run(t)
+
+	var modern atomic.Bool
+	fleet := &eventFleet{refreshErr: map[string]error{}, replacement: map[string][]mcp.Tool{}}
+	events := NewEvents(EventsOptions{
+		Fleet:     fleet,
+		Logger:    slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelError})),
+		ListenFor: func(*mcp.Server) bool { return modern.Load() },
+		Sleep:     func(context.Context, time.Duration) bool { return false },
+	})
+	client := mcp.NewClient(mcp.ClientOptions{Name: "listen-client", Version: "1",
+		Notifications: func(ctx context.Context, method string, params json.RawMessage) {
+			events.Notification(ctx, "fixture", method, params)
+		},
+		ServerRequests: func(ctx context.Context, request *mcp.Request) (mcp.Message, error) {
+			return events.ServerRequest(ctx, "fixture", request)
+		}})
+	if _, err := client.Connect(context.Background(), clientTransport); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	fleet.mu.Lock()
+	fleet.servers = []*mcp.Server{{
+		Entry:  mcp.ServerEntry{Name: "fixture", Config: map[string]any{"url": "https://mcp.example/mcp"}},
+		Client: client,
+		Tools:  []mcp.Tool{{Name: "old"}},
+	}}
+	fleet.mu.Unlock()
+	events.Start(context.Background())
+	defer events.Stop()
+	if got := fixture.count(); got != 0 {
+		t.Fatalf("listen started for an ineligible server: %d", got)
+	}
+	modern.Store(true)
+	events.ServerReconnected("fixture")
+	if !waitForCondition(t, 2*time.Second, func() bool { return fixture.count() >= 1 }) {
+		t.Fatal("reconnect re-evaluation did not start a listen supervisor")
 	}
 }
 

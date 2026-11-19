@@ -95,9 +95,18 @@ type EventsOptions struct {
 	ListenBackoff func(attempt int) time.Duration
 	// Sleep waits for d; false stops the listener (tests inject a fake clock).
 	Sleep func(ctx context.Context, d time.Duration) bool
+	// Now is the clock used to classify a listen stream as short-lived. Nil
+	// uses time.Now.
+	Now func() time.Time
 	// ListenOptions is passed to every subscriptions/listen.
 	ListenOptions mcp.ListenOptions
 }
+
+// shortListenStream is the threshold below which an acknowledged listen stream
+// counts as short-lived. Repeated short-lived streams back off instead of
+// reconnecting in a tight loop (a server that accepts and immediately
+// completes every subscription).
+const shortListenStream = 5 * time.Second
 
 // Events is the process-wide MCP dispatcher: one instance per host, one listen
 // stream per server (never per session; design §4.3).
@@ -119,6 +128,11 @@ type Events struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	closed bool
+
+	// listenCancels tracks the per-server supervisor (one per server), so a
+	// successful reconnect can replace the old connection's stream.
+	listenMu      sync.Mutex
+	listenCancels map[string]context.CancelFunc
 }
 
 // NewEvents builds a dispatcher. Nothing runs until Start.
@@ -137,6 +151,9 @@ func NewEvents(options EventsOptions) *Events {
 	}
 	if options.Sleep == nil {
 		options.Sleep = sleepContext
+	}
+	if options.Now == nil {
+		options.Now = time.Now
 	}
 	return &Events{
 		options: options,
@@ -582,15 +599,71 @@ func (e *Events) Start(ctx context.Context) {
 		e.options.Metrics.ServerStates(connected, disconnected)
 	}
 	for _, server := range fleet.Servers() {
-		if !e.listenFor(server) {
-			continue
+		e.startSupervisor(server)
+	}
+}
+
+// startSupervisor launches (or replaces) the listen supervisor of one server.
+// The old supervisor, if any, is cancelled first: after a reconnect the server
+// value points at a new client, and the old stream belongs to a closed
+// connection.
+func (e *Events) startSupervisor(server *mcp.Server) {
+	if server == nil || !e.listenFor(server) {
+		return
+	}
+	e.mu.Lock()
+	parent, closed := e.ctx, e.closed
+	if parent == nil || closed {
+		e.mu.Unlock()
+		return
+	}
+	// Add under the same lock Stop uses to set closed, so Wait never races an
+	// Add that started after shutdown.
+	e.wg.Add(1)
+	e.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(parent)
+	name := server.Name()
+	e.listenMu.Lock()
+	if e.listenCancels == nil {
+		e.listenCancels = make(map[string]context.CancelFunc)
+	}
+	if previous := e.listenCancels[name]; previous != nil {
+		previous()
+	}
+	e.listenCancels[name] = cancel
+	e.listenMu.Unlock()
+
+	go func() {
+		defer e.wg.Done()
+		e.supervise(ctx, server)
+	}()
+}
+
+// ServerReconnected re-evaluates one server after the manager replaced its
+// connection (OAuth sign-in or an operator reconnect). A modern server that
+// gained a listen only through the new connection gets its supervisor now; a
+// server that is no longer eligible loses the old one.
+func (e *Events) ServerReconnected(name string) {
+	if e == nil || name == "" {
+		return
+	}
+	e.listenMu.Lock()
+	cancel := e.listenCancels[name]
+	delete(e.listenCancels, name)
+	e.listenMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	fleet := e.currentFleet()
+	if fleet == nil {
+		return
+	}
+	for _, server := range fleet.Servers() {
+		if server.Name() == name {
+			e.startSupervisor(server)
+			return
 		}
-		server := server
-		e.wg.Add(1)
-		go func() {
-			defer e.wg.Done()
-			e.supervise(e.ctx, server)
-		}()
 	}
 }
 
@@ -629,6 +702,7 @@ func (e *Events) listenFor(server *mcp.Server) bool {
 func (e *Events) supervise(ctx context.Context, server *mcp.Server) {
 	attempt := 0
 	iterations := 0
+	rapid := 0
 	for ctx.Err() == nil {
 		// Every loop after the first is a reconnect: either the stream ended
 		// (the server keeps no state, so a new listen is the only recovery) or
@@ -668,13 +742,34 @@ func (e *Events) supervise(ctx context.Context, server *mcp.Server) {
 		// whole catalogue once so changes during the gap are picked up.
 		e.RefreshNow(ctx, []string{server.Name()})
 		attempt = 0
+		ackAt := e.now()
 		if e.consume(ctx, server, handle) {
 			return
 		}
-		if !e.options.Sleep(ctx, e.options.ListenBackoff(0)) {
+		// A stream the server completes immediately is not a healthy
+		// subscription: every reconnect would otherwise reset the backoff to 1s.
+		// Three consecutive short-lived streams escalate 1s→2s→4s→… (capped).
+		if e.now().Sub(ackAt) < shortListenStream {
+			rapid++
+		} else {
+			rapid = 0
+		}
+		delayAttempt := 0
+		if rapid >= 3 {
+			delayAttempt = rapid - 2
+		}
+		if !e.options.Sleep(ctx, e.options.ListenBackoff(delayAttempt)) {
 			return
 		}
 	}
+}
+
+// now is the Events clock (tests inject a fake one).
+func (e *Events) now() time.Time {
+	if e.options.Now != nil {
+		return e.options.Now()
+	}
+	return time.Now()
 }
 
 // consume forwards one established stream's frames until it ends or the

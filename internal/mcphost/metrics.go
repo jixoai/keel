@@ -12,7 +12,12 @@ package mcphost
 //	mcp_app_fetch_total{result}          4 series (ok|error|reused|other)
 //	mcp_app_bridge_frames_total{...}    15 series (5 methods × 3 directions)
 //	mcp_listen_reconnects_total          1 series
-//	mcp_mrtr_rounds                      1 histogram (6 buckets + sum/count)
+// mcp_mrtr_rounds                      1 histogram (6 buckets + sum/count)
+//
+// That is 24 logical samples, exported as 31 Prometheus wire series: the MRTR
+// histogram contributes 8 series on the wire (5 finite buckets + +Inf, _sum and
+// _count) in place of its one logical sample. The upper bound is asserted in
+// metrics_test.go.
 //
 // The `server` label is deliberately absent: one series per server would grow
 // with configuration, and the task's contract is `mcp_servers{state}`.

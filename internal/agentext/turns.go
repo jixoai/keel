@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -463,7 +464,31 @@ func (h *PartialHub) PublishMCPProgress(tenantID, sessionID uuid.UUID, toolCallI
 		MessageID: toolCallID,
 		Progress:  &progress.Progress,
 		Total:     progress.Total,
-		Message:   progress.Message,
+		// The message is server-controlled text on a transient channel: it is
+		// bounded and stripped of control characters like every other frame
+		// field (P2-c).
+		Message: boundedProgressMessage(progress.Message, 256),
 	}
 	return h.Publish(tenantID, sessionID, frame)
+}
+
+// boundedProgressMessage removes control characters and cuts at a rune boundary
+// with an ellipsis. It mirrors the registry's bounded detail rule so a server
+// cannot grow the transient frame without limit.
+func boundedProgressMessage(value string, max int) string {
+	var builder strings.Builder
+	count := 0
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f || r == '\u2028' || r == '\u2029' {
+			continue
+		}
+		size := len(string(r))
+		if count+size > max {
+			builder.WriteString("…")
+			break
+		}
+		builder.WriteRune(r)
+		count += size
+	}
+	return builder.String()
 }

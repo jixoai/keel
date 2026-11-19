@@ -32,7 +32,28 @@
 - **legacy 兼容**：`Client` 默认路径（无回调）逐字不变；legacy GET 流、`Last-Event-ID` 退避重连
   代码未改，只新增 `OnReconnect` 通知宿主做全量重算。
 
-## 3. 偏离 / 未决（诚实列出）
+## 3. 复核修复（2026-11-20，独立双轴复核）
+
+- **P1 请求域通知不被 listen 吞**：`Notification` 增加非序列化的 `Source` 传输元数据；HTTP
+  `consumeResponseStream` 给响应流帧标 `response:<request-id>`，内存传输保持该元数据。客户端的
+  路由只对「来源就是 listen 流」的未打标帧按违规诊断；tools/call 响应流、stdio、legacy GET 等
+  来源的未打标 progress/cancelled/message 走全局路径。`TestClientListenAckFilterAndTagging`
+  已改为显式设置流来源，并新增 `TestClientRequestDomainNotificationsNotSwallowedByListen`。
+- **P2-c progress 有界**：`PublishMCPProgress` 对 `Message` 去控制符并按 rune 截断 256B；
+  `TestMCPProgressMessageIsBounded`。
+- **P2-f 日志采样**：客户端对 untagged/队列满/ack 前/未 opt-in 四类协议告警每连接每秒最多 1 条，
+  合并为 `(suppressed=N)`（假时钟 `TestClientDiagnosticSampling`）。
+- **P2-g 短命流退避**：ack 后 <5s 即结束的连续流不重置退避；第 3 次起 1s→2s→4s…（上限 30s）
+  （`TestEventsShortLivedListenStreamsBackOff`）。
+- **Reconnect 后 listen 重评估**：`ConnectOptions.ServerReconnected` 在 `Manager.Reconnect` 成功后
+  通知 `Events.ServerReconnected`，取消旧 supervisor 并对新连接按 era 重新决定是否 listen
+  （`TestEventsServerReconnectedStartsListen`）。
+- **P2-b HTTP 关流即取消**：`TestHTTPListenCloseCancelsServerStream` 断言测试服务器观察到请求
+  上下文取消。
+- **文档**：metrics 头注释改为 31 Prometheus wire series（24 logical samples + MRTR 直方图
+  展开为 8）；tasks/notes 登记 prompts 当前无内容存储。
+
+## 4. 偏离 / 未决（诚实列出）
 
 1. **P4.3 生产启用等待 P5**：`Events.listenFor` 默认仅对 `protocolVersion >= 2026-07-28` 启动
    listen；P4 的客户端/监督器/测试全部就绪，但 `SupportedProtocolVersions` 加入 2026-07-28 与
@@ -43,6 +64,9 @@
    路径）；浏览器端 64 KiB/200 fps 的本地帧没有单独计数（P3.8 的浏览器桥实现不在服务端可观测
    范围内）。
 4. **目录快照缓存 256 个 attempt**：崩溃进程的 attempt 不会显式回收，靠 LRU 上限兜底（不随会话
-   数增长；单条只持有不可变 `*Server` 指针）。
-5. **未做**：P5 的 MRTR 执行器/era 探测/update-model-context、P6 浏览器 E2E 与验收报告（任务书
+   数增长；单条只持有不可变 `*Server` 指针）。复核指出快照可能持有已断连的旧 client；这是
+   attempt 冻结语义的既有代价，登记 backlog，本批不改。
+5. **prompts 内容刷新留 P5/P6**：仓库当前没有 prompts 内容存储/缓存，`prompts/list_changed`
+   只触发注册面重算与 generation；真正的 prompt 内容刷新在 P5/P6 补，不在 P4 假装完成。
+6. **未做**：P5 的 MRTR 执行器/era 探测/update-model-context、P6 浏览器 E2E 与验收报告（任务书
    明确不在本 lane）。

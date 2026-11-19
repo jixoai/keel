@@ -44,6 +44,10 @@
 --- PASS: TestEventsListenSupervisorResubscribesAndRecomputes (0.00s)
 === RUN   TestEventsListenRejectedIsAuditedAndRetried
 --- PASS: TestEventsListenRejectedIsAuditedAndRetried (0.00s)
+=== RUN   TestEventsShortLivedListenStreamsBackOff
+--- PASS: TestEventsShortLivedListenStreamsBackOff (0.00s)
+=== RUN   TestEventsServerReconnectedStartsListen
+--- PASS: TestEventsServerReconnectedStartsListen (0.00s)
 === RUN   TestParseResourceMetaFullBlock
 --- PASS: TestParseResourceMetaFullBlock (0.00s)
 === RUN   TestParseResourceMetaDropsInvalidMembers
@@ -91,5 +95,5 @@
 === RUN   TestThemePalettes
 --- PASS: TestThemePalettes (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/mcphost	0.196s
+ok  	github.com/jixoai/keel/internal/mcphost	0.227s
 EXIT:0

@@ -42,6 +42,16 @@ type ServerRequestHandler func(ctx context.Context, server string, request *Requ
 // that owns the notification (2026-07-28 subscriptions pattern).
 const SubscriptionIDMetaKey = "io.modelcontextprotocol/subscriptionId"
 
+// responseStreamSourcePrefix marks transport metadata on a notification carried
+// by a request's own response stream (as opposed to the connection stream).
+const responseStreamSourcePrefix = "response:"
+
+// responseStreamSource renders the Source of a frame read from id's response
+// stream.
+func responseStreamSource(id ID) string {
+	return responseStreamSourcePrefix + id.Key()
+}
+
 // ProgressTokenMetaKey is the `_meta` key of a tools/call request carrying the
 // progress token the server echoes in notifications/progress.
 const ProgressTokenMetaKey = "progressToken"
@@ -204,7 +214,7 @@ func (l *listener) deliver(event ListenEvent, client *Client) {
 	select {
 	case l.handle.events <- event:
 	default:
-		client.diagnose(l.options.OnDiagnostic, "mcp listen: notification queue full, frame dropped")
+		client.diagnoseSampled(l.options.OnDiagnostic, "mcp listen: notification queue full, frame dropped")
 	}
 }
 
@@ -268,6 +278,20 @@ func missingCategories(requested, accepted ListenFilter) []string {
 		missing = append(missing, "resourcesListChanged")
 	}
 	return missing
+}
+
+// isDirectoryNotification reports whether method is a catalogue-changed frame
+// (the notifications that belong to a listen subscription).
+func isDirectoryNotification(method string) bool {
+	switch method {
+	case "notifications/tools/list_changed",
+		"notifications/prompts/list_changed",
+		"notifications/resources/list_changed",
+		"notifications/resources/updated":
+		return true
+	default:
+		return false
+	}
 }
 
 // resourceUpdatedURI extracts the uri of notifications/resources/updated.

@@ -95,6 +95,11 @@ type ConnectOptions struct {
 	// stream has no replay, so changes during the gap are only recoverable that
 	// way.
 	StreamReconnect func(server string)
+	// ServerReconnected, when set, reports a successful Reconnect that replaced
+	// one server's connection. The host re-evaluates that server's listen
+	// subscription (a modern server may only be modern after the new
+	// handshake).
+	ServerReconnected func(server string)
 }
 
 // Server is one connected (or failed) MCP server.
@@ -246,6 +251,9 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 		_ = previous.Client.Close()
 	}
 	m.logger.Info("mcp server reconnected", "server", name, "tools", len(server.Tools))
+	if options.ServerReconnected != nil {
+		options.ServerReconnected(name)
+	}
 	return nil
 }
 

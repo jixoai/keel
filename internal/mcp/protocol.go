@@ -132,6 +132,12 @@ type Notification struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+	// Source is transport metadata, never serialized: empty for a connection
+	// stream (stdio, legacy GET), and "response:<request-id>" for a frame
+	// carried on a request's response stream. The client uses it to tell a
+	// listen stream (where every notification MUST be subscription-tagged) from
+	// a tools/call response stream (where progress/cancelled are untagged).
+	Source string `json:"-"`
 }
 
 func (*Notification) isMessage() {}

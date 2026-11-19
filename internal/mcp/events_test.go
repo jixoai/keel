@@ -22,6 +22,14 @@ import (
 // sendNotification writes one server notification to the client.
 func sendNotification(t *testing.T, transport *MemoryTransport, method string, params any) {
 	t.Helper()
+	sendNotificationFrom(t, transport, "", method, params)
+}
+
+// sendNotificationFrom writes one notification with transport source metadata
+// (empty = connection stream, responseStreamSource(id) = request response
+// stream). The in-memory transport preserves Source out of band.
+func sendNotificationFrom(t *testing.T, transport *MemoryTransport, source, method string, params any) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var raw json.RawMessage
@@ -32,7 +40,7 @@ func sendNotification(t *testing.T, transport *MemoryTransport, method string, p
 		}
 		raw = encoded
 	}
-	if err := transport.Send(ctx, &Notification{JSONRPC: JSONRPCVersion, Method: method, Params: raw}); err != nil {
+	if err := transport.Send(ctx, &Notification{JSONRPC: JSONRPCVersion, Method: method, Params: raw, Source: source}); err != nil {
 		t.Fatalf("send notification %s: %v", method, err)
 	}
 }
@@ -173,11 +181,38 @@ func TestClientCallbacksReceiveNotificationsAndAnswerRequests(t *testing.T) {
 	}
 }
 
+func TestMemoryTransportPreservesNotificationSource(t *testing.T) {
+	clientTransport, serverTransport := NewMemoryTransportPair()
+	if err := serverTransport.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := clientTransport.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = clientTransport.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := serverTransport.Send(ctx, &Notification{
+		JSONRPC: JSONRPCVersion, Method: "notifications/progress", Source: "response:n:7",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	message, err := clientTransport.Receive(ctx)
+	if err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	notification, ok := message.(*Notification)
+	if !ok || notification.Source != "response:n:7" {
+		t.Fatalf("message = %#v, want source response:n:7", message)
+	}
+}
+
 func TestClientListenAckFilterAndTagging(t *testing.T) {
 	clientTransport, server := newTestServer(t)
 	server.neverRespond("subscriptions/listen")
 	client := connectTestClient(t, clientTransport)
-
+	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
+	client.now = clock.Now
 	var diagnostics []string
 	var diagnosticsMu sync.Mutex
 	handleCh := make(chan *ListenHandle, 1)
@@ -250,16 +285,36 @@ func TestClientListenAckFilterAndTagging(t *testing.T) {
 	default:
 	}
 
-	// An untagged notification on a modern stream is a protocol violation.
+	// An untagged notification on the connection stream is not a listen change;
+	// the listener must not see it (the global dispatcher may). A source-less
+	// transport cannot tell it from a listen frame, so a directory change is
+	// diagnosed. Advance the sampling clock between warnings so each is emitted.
+	clock.Advance(1100 * time.Millisecond)
 	sendNotification(t, server.transport, "notifications/tools/list_changed", nil)
 	awaitDiagnostic(t, func() string {
 		diagnosticsMu.Lock()
 		defer diagnosticsMu.Unlock()
 		return strings.Join(diagnostics, "\n")
-	}, "untagged notification")
+	}, "untagged directory notification")
 	select {
 	case event := <-handle.Events:
-		t.Fatalf("untagged notification delivered: %q", event.Method)
+		t.Fatalf("untagged connection-stream notification delivered to the listener: %q", event.Method)
+	default:
+	}
+	// An untagged notification on the listen stream itself is a protocol
+	// violation: diagnosed, never delivered. Advance the sampling clock after the
+	// previous warning was emitted so this one cannot fold into it.
+	clock.Advance(1100 * time.Millisecond)
+	sendNotificationFrom(t, server.transport, responseStreamSource(request.ID),
+		"notifications/tools/list_changed", nil)
+	awaitDiagnostic(t, func() string {
+		diagnosticsMu.Lock()
+		defer diagnosticsMu.Unlock()
+		return strings.Join(diagnostics, "\n")
+	}, "untagged notification on a listen stream")
+	select {
+	case event := <-handle.Events:
+		t.Fatalf("untagged listen-stream notification delivered: %q", event.Method)
 	default:
 	}
 	handle.Close()
@@ -619,6 +674,200 @@ func TestClientProgressCorrelatesPerCall(t *testing.T) {
 	}
 }
 
+// TestClientRequestDomainNotificationsNotSwallowedByListen is the P1
+// regression: progress/cancelled/message are request/connection-domain frames
+// and are untagged by contract. An open listen stream must not swallow them.
+func TestClientRequestDomainNotificationsNotSwallowedByListen(t *testing.T) {
+	clientTransport, server := newTestServer(t)
+	server.neverRespond("subscriptions/listen")
+	server.neverRespond("tools/call")
+	notifications := make(chan Notification, 4)
+	client := NewClient(ClientOptions{
+		Name: "test-client", Version: "2.0.0",
+		Notifications: func(_ context.Context, method string, params json.RawMessage) {
+			notifications <- Notification{Method: method, Params: params}
+		},
+	})
+	if _, err := client.Connect(testContext(t), clientTransport); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	// An established listen stream is active for the whole test.
+	listenDone := make(chan *ListenHandle, 1)
+	go func() {
+		handle, err := client.Listen(testContext(t), ListenParams{Notifications: ListenFilter{ToolsListChanged: true}}, ListenOptions{})
+		if err == nil {
+			listenDone <- handle
+		}
+	}()
+	listenRequests := waitForRequests(t, server, "subscriptions/listen")
+	sendNotification(t, server.transport, "notifications/subscriptions/acknowledged",
+		ackParams(listenRequests[0].ID, `{"toolsListChanged":true}`))
+	var handle *ListenHandle
+	select {
+	case handle = <-listenDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("listen never acknowledged")
+	}
+	defer handle.Close()
+
+	// One in-flight tool call with a progress token.
+	var progressMu sync.Mutex
+	var progress []ProgressNotification
+	callErr := make(chan error, 1)
+	go func() {
+		_, err := client.CallToolWithOptions(testContext(t), "slow", nil, CallOptions{
+			ProgressToken: "call-progress",
+			OnProgress: func(notification ProgressNotification) {
+				progressMu.Lock()
+				progress = append(progress, notification)
+				progressMu.Unlock()
+			},
+		})
+		callErr <- err
+	}()
+	callRequests := waitForRequests(t, server, "tools/call")
+	callRequest := callRequests[0]
+	var callParams struct {
+		Meta struct {
+			ProgressToken string `json:"progressToken"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(callRequest.Params, &callParams); err != nil {
+		t.Fatalf("decode tools/call: %v", err)
+	}
+
+	// Untagged progress on the call's own response stream reaches the sink.
+	sendNotificationFrom(t, server.transport, responseStreamSource(callRequest.ID),
+		"notifications/progress", map[string]any{
+			"progressToken": callParams.Meta.ProgressToken, "progress": 1, "message": "step",
+		})
+	if !waitFor(t, 2*time.Second, func() bool {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		return len(progress) == 1
+	}) {
+		t.Fatal("untagged progress did not reach its sink while a listen stream was open")
+	}
+
+	// Untagged server log on the connection stream reaches the dispatcher.
+	sendNotification(t, server.transport, "notifications/message", map[string]any{"level": "info"})
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case notification := <-notifications:
+			if notification.Method == "notifications/message" {
+				deadline = nil
+				break
+			}
+			// The progress frame also reaches the global dispatcher (metrics/log
+			// classification); keep reading until the log frame arrives.
+		case <-deadline:
+			t.Fatal("untagged message did not reach the dispatcher")
+		}
+		if deadline == nil {
+			break
+		}
+	}
+
+	// Untagged cancellation still aborts the in-flight call.
+	sendNotification(t, server.transport, "notifications/cancelled", map[string]any{
+		"requestId": mustMarshalID(callRequest.ID), "reason": "stop",
+	})
+	select {
+	case err := <-callErr:
+		var abort *AbortError
+		if !errors.As(err, &abort) {
+			t.Fatalf("call error = %v, want AbortError", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("untagged cancellation did not abort the call")
+	}
+}
+
+// fakeClock is a manually advanced clock for the diagnostic sampler.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
+}
+
+// TestClientDiagnosticSampling: repeated protocol warnings are folded to one
+// per second with a suppressed count (P2-f).
+func TestClientDiagnosticSampling(t *testing.T) {
+	clientTransport, server := newTestServer(t)
+	server.neverRespond("subscriptions/listen")
+	client := connectTestClient(t, clientTransport)
+	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
+	client.now = clock.Now
+
+	diagnostics := make(chan string, 16)
+	handleCh := make(chan *ListenHandle, 1)
+	go func() {
+		handle, err := client.Listen(testContext(t), ListenParams{Notifications: ListenFilter{ToolsListChanged: true}},
+			ListenOptions{Buffer: 1, OnDiagnostic: func(message string) { diagnostics <- message }})
+		if err == nil {
+			handleCh <- handle
+		}
+	}()
+	requests := waitForRequests(t, server, "subscriptions/listen")
+	request := requests[0]
+	sendNotification(t, server.transport, "notifications/subscriptions/acknowledged",
+		ackParams(request.ID, `{"toolsListChanged":true}`))
+	var handle *ListenHandle
+	select {
+	case handle = <-handleCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("listen never acknowledged")
+	}
+	defer handle.Close()
+
+	// The first frame fills the buffer; the next three drops are one sampled
+	// warning with suppressed=0, then two folded.
+	for i := 0; i < 4; i++ {
+		sendNotification(t, server.transport, "notifications/tools/list_changed", subscriptionIDParams(request.ID, ""))
+	}
+	first := awaitMessage(t, diagnostics)
+	if !strings.Contains(first, "queue full") || !strings.Contains(first, "(suppressed=0)") {
+		t.Fatalf("first diagnostic = %q", first)
+	}
+	// The same second: no further warning.
+	select {
+	case message := <-diagnostics:
+		t.Fatalf("a second warning was emitted within the window: %q", message)
+	case <-time.After(50 * time.Millisecond):
+	}
+	clock.Advance(1100 * time.Millisecond)
+	sendNotification(t, server.transport, "notifications/tools/list_changed", subscriptionIDParams(request.ID, ""))
+	second := awaitMessage(t, diagnostics)
+	if !strings.Contains(second, "(suppressed=2)") {
+		t.Fatalf("second diagnostic = %q, want suppressed=2", second)
+	}
+}
+
+func awaitMessage(t *testing.T, ch <-chan string) string {
+	t.Helper()
+	select {
+	case message := <-ch:
+		return message
+	case <-time.After(2 * time.Second):
+		t.Fatal("no diagnostic was emitted")
+		return ""
+	}
+}
+
 func TestClientCancellationAbortsPendingCall(t *testing.T) {
 	clientTransport, server := newTestServer(t)
 	server.neverRespond("tools/call")
@@ -750,6 +999,70 @@ func awaitDiagnostic(t *testing.T, snapshot func() string, want string) {
 	t.Helper()
 	if !waitFor(t, 2*time.Second, func() bool { return strings.Contains(snapshot(), want) }) {
 		t.Fatalf("diagnostic %q missing; got %q", want, snapshot())
+	}
+}
+
+// TestHTTPListenCloseCancelsServerStream pins the server-visible half of the
+// HTTP cancellation form: closing the listen handle closes the response stream,
+// which the server observes as a cancelled request context. No cancelled
+// notification is needed (that is the stdio form).
+func TestHTTPListenCloseCancelsServerStream(t *testing.T) {
+	canceled := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var message struct {
+			Method string `json:"method"`
+			ID     ID     `json:"id"`
+		}
+		_ = json.Unmarshal(body, &message)
+		switch message.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q,"capabilities":{},"serverInfo":{"name":"close-fixture","version":"1"}}}`,
+				message.ID, LatestProtocolVersion)
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "subscriptions/listen":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","params":%s}`+"\n\n",
+				ackParams(message.ID, `{"toolsListChanged":true}`))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			select {
+			case canceled <- struct{}{}:
+			default:
+			}
+		default:
+			w.WriteHeader(http.StatusAccepted)
+		}
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(HTTPTransportOptions{URL: server.URL, DisableGetStream: true})
+	client := NewClient(ClientOptions{Name: "close-client", Version: "1", RequestTimeout: 2 * time.Second})
+	if _, err := client.Connect(context.Background(), transport); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+	handle, err := client.Listen(testContext(t), ListenParams{Notifications: ListenFilter{ToolsListChanged: true}}, ListenOptions{})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	if !handle.Ack.Accepted.ToolsListChanged {
+		t.Fatalf("ack = %+v", handle.Ack)
+	}
+	handle.Close()
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the server never observed the listen stream being closed")
 	}
 }
 

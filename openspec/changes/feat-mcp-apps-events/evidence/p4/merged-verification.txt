@@ -1,16 +1,46 @@
-# P4 合入后的合并树门禁（主代理复跑，2026-11-20）
+# P4 merged verification (复核修复后，2026-11-20)
 
-对象：集成分支 `task/keel-harness-v2` @ `3eb7c54`（cherry-pick `24ef093`，`tasks.md` 自动合并）。
+被复核冻结树：`3eb7c54`（内容等价于本分支 P4 提交 `24ef093`；复核分支另含 P2FE 前端改动）。
+本文件修正复核注记中的一处口径，并记录修复后的实际断言与门禁。
 
-- `go build ./...`：exit 0
-- `KEEL_TEST_DSN=... go test -p 1 ./...`：55 个 `ok`，零 FAIL，exit 0
-- `./scripts/conformance.sh`：1032 pass / 0 fail / 1 skip，exit 0
-- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
-- 交付面：`internal/mcp/events.go`（回调/listen/ack/过滤/cancel）、`internal/mcphost/events.go`
-  （通知分类、250ms 去抖全量 republish、generation、`mcp.surface.changed`、失败保面、attempt 快照）、
-  `internal/mcphost/metrics.go`（六族、闭集标签 ≤24 series）、progress→PartialHub 关联、
-  `internal/architecture/mcp_events_isolation_test.go`（mcphost 不 import kernel/store）
-- 严格口径：通知路径不写账本；`mcp.progress` 仅是 `Partial.Type`；未新增 kernel kind
-- lane 证据：`evidence/p4/`；独立复核进行中
+## 1. 结构断言（实际是什么）
 
-DSN 只经环境变量传入；本文件不含连接串或密钥。
+复核注记曾写「架构测试断言 mcphost 不 import kernel/store」。实际不是：
+
+- `internal/architecture/mcp_events_isolation_test.go`
+  - `TestMCPHostDoesNotImportProductSSE`：断言 `internal/mcphost` 的**传递 import 图**不含
+    `internal/httpapi`、`internal/agentapi`（MCP 订阅面与产品 SSE 不共用 handler/hub）。
+  - `TestMCPClientDoesNotImportHostDispatcher`：断言 `internal/mcp` 不 import
+    `internal/mcphost` 与 `internal/httpapi`（依赖只指向 host → client）。
+- 「账本零新增 kind」的实际断言在 `internal/mcphost/events_test.go` 的
+  `TestNotificationStormLeavesLedgerKindSetUnchanged`：对 `kernel.Kinds()` 做前后集合比较，
+  并拒绝任何含 `progress`/`mcp.` 的 kind。`internal/mcphost` 没有 kernel/store 写路径，但这是
+  代码结构事实，不由 architecture 测试断言。
+
+## 2. 复核项修复与测试
+
+| 项 | 修复 | 测试 |
+|---|---|---|
+| P1 请求域通知被 listen 吞 | `Notification.Source`（`json:"-"`）标记响应流来源；HTTP `consumeResponseStream` 标 `response:<id>`；仅 listen 流上的未打标帧按违规，其它响应流/连接流走全局；source-less 传输仅对未打标目录帧诊断 | `TestClientRequestDomainNotificationsNotSwallowedByListen`（progress sink / message dispatcher / cancelled abort 全在 listen 活跃时验证）、`TestClientListenAckFilterAndTagging`（已改为显式流来源） |
+| P2-c progress 有界 | `PublishMCPProgress` 的 `Message` 去控制符 + rune 边界 256B | `TestMCPProgressMessageIsBounded` |
+| P2-f 日志采样 | 每连接每秒最多 1 条，`(suppressed=N)` | `TestClientDiagnosticSampling`（假时钟） |
+| P2-g 短命流退避 | ack 后 <5s 连续的流：1s,1s,2s,4s,8s…（上限 30s） | `TestEventsShortLivedListenStreamsBackOff` |
+| reconnect 重评估 | `ConnectOptions.ServerReconnected` → `Events.ServerReconnected`：取消旧 supervisor，按新 era 重起 | `TestEventsServerReconnectedStartsListen` |
+| P2-b HTTP 关流取消 | `HTTPTransport.CancelRequest` 关闭响应流 | `TestHTTPListenCloseCancelsServerStream`（服务器观察到 `r.Context().Done()`） |
+
+## 3. 门禁（最终树）
+
+| 命令 | 结果 |
+|---|---|
+| `go build ./...` | EXIT 0 |
+| `go vet`（改动包 + 相关包） | EXIT 0 |
+| `go test -race`（mcp / mcphost / agentext / servicehost） | EXIT 0（4 包全 ok） |
+| `KEEL_TEST_DSN=... go test -p 1 ./...` | EXIT 0（55 个包 ok，零 FAIL） |
+| `pnpm exec openspec validate feat-mcp-apps-events --strict` | EXIT 0 |
+| `./scripts/conformance.sh` | EXIT 0（1036 pass / 0 fail / 1 skip） |
+| `./scripts/agent-runtime-e2e.sh` | EXIT 0（PASS，证据 `agent-runtime-e2e-fix/`） |
+| residue | 无 keel/stub 进程、无 e2e 数据库、端口释放、工作区仅预期改动 |
+
+证据文件：`go-build.txt`、`go-vet.txt`、`go-test-race.txt`、`go-test-all.txt`、
+`conformance.txt`/`conformance.json`、`agent-runtime-e2e-fix.txt`、`residue-fix.txt`、
+聚焦测试 `mcp-events-tests.txt` / `mcphost-events-tests.txt` / `agentext-progress-hook-tests.txt`。

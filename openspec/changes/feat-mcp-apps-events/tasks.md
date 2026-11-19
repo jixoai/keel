@@ -152,6 +152,10 @@
       cancelled → 中止调用；（验收：单测逐行；账本零新增 kind 断言）
 - [x] P4.3 `subscriptions/listen`：filter、ack 子集、`subscriptionId` 去复用、断线重发（modern）、
       legacy GET 流保持；多订阅并存（验收：HTTP fake server 断言首消息必为 ack、未 opt-in 的通知不投递）
+      （2026-11-20 复核修复：请求域未打标帧按来源流路由——listen 流上未打标仍按违规，
+      tools/call 响应流/连接流上的 progress/cancelled/message 不被吞；日志采样、短命流退避、
+      reconnect 后 listen 重评估已补。注：prompts 目录当前无内容存储，`prompts/list_changed`
+      只触发注册面重算与 generation，prompt 内容缓存/刷新留 P5/P6）
 - [x] P4.4 `tools/list_changed` → 去抖（250ms）→ 全量 republish → generation++ →
       hook 事件 `mcp.surface.changed`（闭集追加）；失败保留旧面
       （验收：run 边界测（design §4.4(7)）；失败面测试断言旧工具仍可用）
