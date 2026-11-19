@@ -773,3 +773,35 @@ CREATE INDEX IF NOT EXISTS notifications_by_session
 CREATE INDEX IF NOT EXISTS notifications_due
     ON notifications (deadline)
     WHERE status <> 'consumed' AND push_attempted_at IS NULL;
+
+-- --- file-plugin (change keel-harness-v2, W2.3) -----------------------------
+--
+-- The session's file view. file_manifest is the per-session path → content-hash
+-- projection (the bytes live in layerfs/blobs; this row is the mount and the
+-- cas precondition); session_snapshot records the tree hash captured at a seq,
+-- so a fork/rollback can materialize the prefix. internal/fileplugin owns the
+-- reads/writes; the DDL lives here because internal/store is the migration owner.
+CREATE TABLE IF NOT EXISTS file_manifest (
+    tenant_id    uuid NOT NULL,
+    session_id   uuid NOT NULL,
+    path         text NOT NULL,
+    hash         text NOT NULL,
+    mode         integer NOT NULL DEFAULT 420,
+    size         bigint NOT NULL DEFAULT 0,
+    updated_seq  bigint NOT NULL,
+    last_task_id text,
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, path)
+);
+
+CREATE INDEX IF NOT EXISTS file_manifest_by_hash
+    ON file_manifest (tenant_id, hash);
+
+CREATE TABLE IF NOT EXISTS session_snapshot (
+    tenant_id  uuid NOT NULL,
+    session_id uuid NOT NULL,
+    seq        bigint NOT NULL,
+    tree_hash  text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, seq)
+);

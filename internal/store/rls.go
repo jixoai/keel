@@ -80,6 +80,8 @@ var rlsTenantTables = []string{
 	"bash_jobs",
 	"approval_provenance",
 	"notifications",
+	"file_manifest",
+	"session_snapshot",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a
