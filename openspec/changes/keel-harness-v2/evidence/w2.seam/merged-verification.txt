@@ -1,0 +1,19 @@
+# W2.seam 合入前后独立门禁（主代理复跑，2026-11-19）
+
+## 合入前（seam 分支 cda260b，worktree keel-task-w2-seam）
+
+- `go build ./...`：exit 0
+- `go vet`（bashbridge / layerfs/gbashfs / fileplugin / toolsurface / tasklog / cmd/keel）：exit 0
+- `go test -race`（同上六包）：全 ok（bashbridge 3.0s / gbashfs 2.0s / fileplugin 42.0s /
+  toolsurface 1.9s / tasklog 3.1s / cmd/keel 4.5s）
+- `KEEL_TEST_DSN=... go test ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；端口 13610/13611 无监听
+
+## 合入后（集成分支 de680cf）
+
+- cherry-pick `cda260b` → `de680cf`：无冲突
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；端口释放
+
+DSN 只经环境变量传入，本文件不含任何连接串或密钥。

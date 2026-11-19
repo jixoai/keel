@@ -128,24 +128,29 @@
       （W2.2：`internal/bashbridge`，pin `ewhauser/gbash v0.0.41`；占用隔离；`third_party` 许可文本）
 - [x] `bash` 工具参数：`timeout`（参数而非 bash 命令）、超时转后台、返回终端信息与 pid
       （W2.2：job id 即作业句柄；**禁用**上游 `ExecutionRequest.Timeout`；超时不 kill）
-- [ ] JobManager：全局 + 每组上限；`nohup/jobs/ps` 视图；收养与孤儿回收
-      （已交付：`bash_jobs` 表 + RLS、advisory-lock 原子上限、重启一律收敛终态 `interrupted`、
-      15s sweeper 按归档会话回收、工具面 `bash {action:"jobs"}`；
-      **未完成：沙箱内 `nohup`/`jobs`/`ps` 命令**（B 轴复核 P1-2，W2.seam 补齐中）——本条在
-      三命令落地并有装配级测试前不计完成）
+- [x] JobManager：全局 + 每组上限；`nohup/jobs/ps` 视图；收养与孤儿回收
+      （W2.2：`bash_jobs` 表 + RLS、advisory-lock 原子上限、重启一律收敛终态 `interrupted`、
+      15s sweeper 按归档会话回收、工具面 `bash {action:"jobs"}`；W2.seam 补齐沙箱三命令
+      （B 轴复核 P1-2，de680cf）：`internal/bashbridge/jobcommands.go` 读 `jobqueue.Manager`——
+      `jobs` 当前会话视图、`ps` 同租户视图、`nohup` 转后台作业并返回 keel job id，`fg`/`bg`
+      按契约不注册；装配测试 `test-job-commands.txt`、真库一致性 `test-job-status-consistency.txt`，
+      断言无宿主 PID）
 - [x] 输出落 layerfs：只回 head/tail + blob 引用 + 退出码
       （W2.2：head 4KiB + tail 4KiB；全量流式写 blob store（layerfs 的字节层）；200MB 内存有界实证）
 - [x] capture 默认 `per-tool-call`：stat 缓存 + 变更集，只对变了的文件算哈希
       （W2.3：`Capture` 递归建树 + stat 签名缓存；十万文件**一条** `fs.capture` 实证）
 - [x] 执行面适配器契约：`materialize(manifest)` / `capture(handle, since)`，先做本地实现
-      （W2.3：`Materialize`/`MaterializeSnapshot`/`CaptureWorkspace`；生产 seam（gbash Workspace ↔
-      layerfs Surface/CaptureRoot）由 W2.seam 接线，进行中）
+      （W2.3：`Materialize`/`MaterializeSnapshot`/`CaptureWorkspace`；W2.seam 生产接线已合入
+      de680cf：`LayerWorkspaces` 按 `(tenant,session)` 持有 gbashfs workspace、manifest 播种、
+      write/edit 写穿、Close 单次 capture。gbashfs 是内存路径索引而非宿主目录，故 seam 用
+      scoped `SessionSurface`/`SnapshotSource` 表达同一契约（目录 `Surface`/`CaptureRoot` 保留给
+      本地适配器）；装配级证明 `evidence/w2.seam/test-seam.txt`）
 
 ## W4 task-log（plan-plugin）与面板
 
 - [x] `task_cards` 行 + `task_events` **投影**（从账本重建，含重建一致性测试）；会话启动自动建初始卡
       （W2.4：`internal/tasklog`；DDL/RLS 随集成落 `schema.sql`/`rls.go`；重建幂等与「直写被重建擦除」有测试）
-- [x] 强制 `taskId`：所有工具调用缺 `taskId` 直接拒绝（含内部子代理）
+- [x] 强制任务归属：每次工具调用必须归属任务卡（含内部子代理）
       （B 轴复核裁决后已修订 spec 语义：Harness 先归属会话初始卡、无法归属才拒绝
       `task_id_required`、未知卡 `task_not_found`；实现见 `internal/toolsurface/tasks.go`
       + 全内建工具 task gate；拒绝事实以 tool.result 落账本。spec 文本已同步修订）
