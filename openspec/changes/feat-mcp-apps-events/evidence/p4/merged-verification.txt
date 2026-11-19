@@ -44,3 +44,14 @@
 证据文件：`go-build.txt`、`go-vet.txt`、`go-test-race.txt`、`go-test-all.txt`、
 `conformance.txt`/`conformance.json`、`agent-runtime-e2e-fix.txt`、`residue-fix.txt`、
 聚焦测试 `mcp-events-tests.txt` / `mcphost-events-tests.txt` / `agentext-progress-hook-tests.txt`。
+
+## 4. 合入合并树后的主代理复跑（2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `8363ab8`（cherry-pick `f29ec2d`；本文件 add/add 冲突取
+修复版并保留本节）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：55 个 `ok`，零 FAIL，exit 0
+- `./scripts/conformance.sh`：1036 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+
