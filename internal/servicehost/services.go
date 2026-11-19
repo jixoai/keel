@@ -210,6 +210,12 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			if section := mcpService.manager.PromptSection(); section != "" {
 				sections = append(sections, host.Section{Name: "mcp_servers", Content: section})
 			}
+			// mcp_apps lists the tools that declare an interactive UI resource.
+			// It is an additional named section, not a second server list; the
+			// model still reaches MCP only through the aggregate `mcp` tool.
+			if section := mcpService.AppsPromptSection(); section != "" {
+				sections = append(sections, host.Section{Name: "mcp_apps", Content: section})
+			}
 		}
 		// External tool providers join the same registry (their names are
 		// namespaced ext__<provider>__<tool>). A duplicate name fails host
@@ -302,6 +308,7 @@ type mcpService struct {
 }
 
 func (m *mcpService) PromptSection() string      { return m.manager.PromptSection() }
+func (m *mcpService) AppsPromptSection() string  { return m.manager.AppsPromptSection() }
 func (m *mcpService) Entries() []mcp.ServerEntry { return append([]mcp.ServerEntry(nil), m.entries...) }
 func (m *mcpService) Reconnect(ctx context.Context, name string) error {
 	return m.manager.Reconnect(ctx, name)

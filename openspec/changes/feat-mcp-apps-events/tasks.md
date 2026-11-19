@@ -6,12 +6,13 @@
 
 ## 0. 契约与前置（本 change 交付的文档）
 
-- [ ] T0.1 冻结两份 spec（`specs/mcp-apps`、`specs/mcp-events`），实现不得偏离；
+- [x] T0.1 冻结两份 spec（`specs/mcp-apps`、`specs/mcp-events`），实现不得偏离；
       偏离走新 change 或本 change 的 MODIFIED delta（验收：`openspec validate feat-mcp-apps-events --strict` 通过）
-- [ ] T0.2 设计中的标准出处逐条复核（`design.md` 附录 A 的 11 项），标注抓取日与版本；
+- [x] T0.2 设计中的标准出处逐条复核（`design.md` 附录 A 的 11 项），标注抓取日与版本；
       任何方法名/字段名以 SDK `schema.json` 与 2026-01-26 spec 正文为准
       （验收：附录 A 每行可点开、结论与 `design.md` §0 一致）
-- [ ] T0.3 `docs/PI-PARITY.md` 登记偏离：MCP Apps 与 events 是 PI 没有的面；
+      （复核 2026-11-20：11 项均可达；schema 的 17 个 `ui/*` 方法名逐一核对；SDK exports 行已按实测修正）
+- [x] T0.3 `docs/PI-PARITY.md` 登记偏离：MCP Apps 与 events 是 PI 没有的面；
       legacy 的 MCP 行为逐条不变（验收：偏离表含「理由/影响面/验收方式」三列）
 - [x] T0.4 双 origin 沙箱域开通（2026-11-14）：`mcp-app.fde2e.com` + `*.mcp-app.fde2e.com` ——
       DNS 泛解析已覆盖（二级通配实测）、acme.sh DNS-01 证书（两域一体，LE ec-256）、
@@ -21,17 +22,25 @@
 
 ## P1 — 元数据、资源与 visibility（无 UI）
 
-- [ ] P1.1 `Tool._meta.ui` 解析（`resourceUri` + 废案平铺键 `_meta["ui/resourceUri"]`；
+> **P1.2 裁决（2026-11-20，与 v2 工具面契约对齐）**：本任务原文的「`mcp__<server>__<tool>` 命名不变」
+> 与已冻结的 `keel-harness-v2` 工具面冲突（v2 模型面只有聚合 `mcp` 工具，硬编码名已删除并登记为
+> PI 偏离，`docs/PI-PARITY.md` §4.2）。裁决：P1.2 的「app 表」是 **MCP manager 内部的工具目录/绑定表**
+> （`internal/mcp` 的 `Server.ModelTools`/`AppTools`/`Apps`，供 app 目录使用），不是模型面工具名；
+> `mcp__<server>__<tool>` MUST NOT 被重新引入。模型面过滤的验收改为「聚合 `mcp` 的 list/describe/call
+> 不暴露 `visibility` 不含 `model` 的工具，且内建工具清单仍为 11 个」。
+
+- [x] P1.1 `Tool._meta.ui` 解析（`resourceUri` + 废案平铺键 `_meta["ui/resourceUri"]`；
       `visibility` 缺省 `["model","app"]`）
       （验收：单测覆盖新键/废案键/缺省/非法形状；非法形状记诊断不崩）
-- [ ] P1.2 `AgentTools` 过滤 `visibility` 不含 `"model"` 的工具；app-only 工具单独成表（app 目录用）
-      （验收：单测断言模型面工具数减少、app 表含该工具；`mcp__<server>__<tool>` 命名不变）
-- [ ] P1.3 客户端方法 `ListResources` / `ListResourceTemplates` / `ReadResource` / `ListPrompts` / `GetPrompt`
+- [x] P1.2 模型面过滤 `visibility` 不含 `"model"` 的工具（聚合 `mcp` 的 list/describe/call）；
+      app 工具单独进 manager 内部 app 目录（绑定表，不生成模型面工具名）
+      （验收：单测断言模型面不变（11 内建 + 聚合 `mcp` 输出）、app 表含 app-only 工具）
+- [x] P1.3 客户端方法 `ListResources` / `ListResourceTemplates` / `ReadResource` / `ListPrompts` / `GetPrompt`
       （验收：fake server 单测覆盖分页、`ttlMs`/`cacheScope` 解析、非 `text/html;profile=mcp-app` 拒绝）
-- [ ] P1.4 `MCPToolDetails` 增 `App{AppID,ResourceURI,Visibility}` 与 `StructuredContent`（截断有界）
+- [x] P1.4 `MCPToolDetails` 增 `App{AppID,ResourceURI,Visibility}` 与 `StructuredContent`（截断有界）
       （验收：`tool.result` 的 details 里两字段随账本落库并可读回；模型上下文不含它们）
-- [ ] P1.5 `mcp_apps` 提示段（哪些工具带交互界面）（验收：装配测试断言系统提示含该段且 `mcp_servers` 仍在）
-- [ ] P1.6 回归：`go test ./internal/mcp/... ./internal/host/...` + `scripts/conformance.sh` 全绿
+- [x] P1.5 `mcp_apps` 提示段（哪些工具带交互界面）（验收：装配测试断言系统提示含该段且 `mcp_servers` 仍在）
+- [x] P1.6 回归：`go test ./internal/mcp/... ./internal/host/...` + `scripts/conformance.sh` 全绿
       （验收：命令输出；PI 移植测试未改断言）
 
 ## P2 — apps 宿主骨架与内联渲染

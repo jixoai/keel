@@ -229,3 +229,40 @@ func TestRefreshMCPConcurrentReads(t *testing.T) {
 		<-done
 	}
 }
+
+// TestRefreshSectionsKeepsBothMCPSectionsWithoutDuplicates pins the mcp_apps
+// handling: a boot-time mcp_apps section is retired by the refresh and the
+// republished one appears exactly once, next to mcp_servers.
+func TestRefreshSectionsKeepsBothMCPSectionsWithoutDuplicates(t *testing.T) {
+	h, _, err := New(Config{
+		Preamble: "base",
+		Sections: []Section{
+			{Name: "base", Content: "BASE"},
+			{Name: "mcp_servers", Content: "- boot server"},
+			{Name: "mcp_apps", Content: "- boot/tool: ui://boot/panel"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.RefreshSections(nil, "- live server", []Section{
+		{Name: "mcp_apps", Content: "- live/tool: ui://live/panel"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := h.SystemPrompt()
+	if strings.Contains(prompt, "boot server") || strings.Contains(prompt, "ui://boot/panel") {
+		t.Fatalf("a retired MCP section survived the refresh: %q", prompt)
+	}
+	for _, want := range []string{"<mcp_servers>", "- live server", "<mcp_apps>", "- live/tool: ui://live/panel", "BASE"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt = %q, want %q", prompt, want)
+		}
+	}
+	if got := strings.Count(prompt, "<mcp_apps>"); got != 1 {
+		t.Fatalf("mcp_apps appears %d times, want 1: %q", got, prompt)
+	}
+	if got := strings.Count(prompt, "<mcp_servers>"); got != 1 {
+		t.Fatalf("mcp_servers appears %d times, want 1: %q", got, prompt)
+	}
+}

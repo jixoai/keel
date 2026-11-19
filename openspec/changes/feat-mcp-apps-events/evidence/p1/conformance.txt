@@ -1,0 +1,16 @@
+package                                              pass   fail   skip
+github.com/jixoai/keel/internal/agent                 105      0      0
+github.com/jixoai/keel/internal/agenttool               3      0      0
+github.com/jixoai/keel/internal/blob                   28      0      0
+github.com/jixoai/keel/internal/compaction             44      0      0
+github.com/jixoai/keel/internal/durable               100      0      0
+github.com/jixoai/keel/internal/hooks                  81      0      0
+github.com/jixoai/keel/internal/host                   66      0      0
+github.com/jixoai/keel/internal/httpapi               272      0      0
+github.com/jixoai/keel/internal/loop                   71      0      0
+github.com/jixoai/keel/internal/mcp                   120      0      1
+github.com/jixoai/keel/internal/skills                 49      0      0
+github.com/jixoai/keel/internal/stream                  7      0      0
+github.com/jixoai/keel/internal/telemetry              38      0      0
+------------------------------------------------------------------------
+TOTAL                                                 984      0      1

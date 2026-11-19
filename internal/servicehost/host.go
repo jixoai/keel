@@ -737,11 +737,17 @@ func (r *Runtime) refreshAssembly() error {
 	r.publishMu.Unlock()
 	var extra []agentcore.AgentTool
 	section := ""
+	var mcpSections []host.Section
 	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
 		if mcpService, ok := svc.(*mcpService); ok {
 			// The builtin `mcp` tool already carries the resolved manager; the
 			// per-server catalogue is not part of the published tool set.
 			section = mcpService.PromptSection()
+			// mcp_apps is republished alongside mcp_servers on every refresh, so
+			// a plugin refresh never drops the app summary (and vice versa).
+			if apps := mcpService.AppsPromptSection(); apps != "" {
+				mcpSections = append(mcpSections, host.Section{Name: "mcp_apps", Content: apps})
+			}
 		}
 	}
 	if svc, ok := r.engine.Lookup(loadout.ServiceExternalTools); ok {
@@ -751,7 +757,8 @@ func (r *Runtime) refreshAssembly() error {
 	}
 	extra = append(extra, r.cfg.Product.ExtraTools...)
 	extra = append(extra, pluginTools...)
-	return assembly.RefreshSections(extra, section, pluginSections)
+	// MCP's extra sections come first, then the product/plugin contributions.
+	return assembly.RefreshSections(extra, section, append(mcpSections, pluginSections...))
 }
 
 // StopWorker stops claiming new runs (SIGTERM drain) without unloading the

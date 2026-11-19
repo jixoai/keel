@@ -526,6 +526,9 @@ func validateListToolsResult(data json.RawMessage) (ListToolsResult, error) {
 		if err := json.Unmarshal(entry, &tool); err != nil {
 			return ListToolsResult{}, invalidEntry
 		}
+		// MCP Apps metadata is optional. A malformed block stays a diagnostic on
+		// the tool; it never invalidates the catalogue entry.
+		tool.UI, tool.UIDiagnostics = parseToolUI(tool.Meta)
 		tools = append(tools, tool)
 	}
 	result := ListToolsResult{Tools: tools}
@@ -537,6 +540,7 @@ func validateListToolsResult(data json.RawMessage) (ListToolsResult, error) {
 		// Some servers end pagination with "" instead of omitting the cursor.
 		result.NextCursor = cursor
 	}
+	result.TTLMs, result.CacheScope = parseCacheHints(fields)
 	return result, nil
 }
 

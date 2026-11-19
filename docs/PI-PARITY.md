@@ -100,6 +100,16 @@ MCP OAuth 的运行时代理层（PostgreSQL 加密存储 / 独立锁池刷新�
 | 验收方式 | ① 终局工具集快照断言：内建精确 11 个且 `mcp__` 精确名零出现（`internal/toolsurface`）；② 清单哈希：挂 100 个 MCP server 哈希不变、审批插件 `provides.tools` 变化/卸载恢复；③ E2E wire 断言：captain/member 请求的工具名精确等于 `agent` / `clock`，全量请求无 `mcp__`/`creation_`/`spawn_subagent`/`skill` |
 | 不成立的论据 | 不采用「旧适配从未生效」：v1 已实现并测试过 `mcp__<server>__<tool>`；本偏离是 Owner 2026-11-11 破坏性迁移裁决 |
 
+## 4.3 有意偏离：MCP Apps 与 events（keel extension，PI 没有的面）
+
+MCP Apps（SEP-1865，`io.modelcontextprotocol/ui`）与 events 面（`subscriptions/listen`、
+`resultType`、MRTR 等 2026-07-28 修订）是 **PI 没有的能力**。keel 以扩展方式接入，
+不冒充 PI 标准；legacy MCP 的工具适配、传输、配置、内容转换与 20KB 裁剪逐条不变。
+
+| 理由 | 影响面 | 验收方式 |
+|---|---|---|
+| PI 的 MCP 客户端只有工具面（tools/list、tools/call、20KB 裁剪、OAuth），既没有 `_meta.ui`/UI 资源宿主，也没有通知订阅与现代修订的 MRTR；本 change 的 `feat-mcp-apps-events` 是 PI 之外的新增能力，必须显式登记以免被误读为「PI 移植」 | ① 新增 `internal/mcp` 的 apps 元数据与 `resources/*`、`prompts/*` 客户端方法（旧方法签名与行为不变）；② 模型面仍只有聚合 `mcp` 工具，app-only 工具不进入模型面（§4.2 不变）；③ 工具结果 `details` 新增 `app`/`structuredContent`（有界 256 KiB），模型请求不携带；④ system prompt 新增 `mcp_apps` 段，`mcp_servers` 段不变；⑤ 未接线能力（events、第二 origin、MRTR）保持 fail-closed，不假装成功 | ① `go test ./internal/mcp/... ./internal/host/... ./internal/toolsurface/...` 与 `scripts/conformance.sh` 全绿，PI 移植测试断言未改；② `docs/PI-CONFORMANCE.md` 的 MCP 覆盖项不变（新增能力单列）；③ `internal/agent/mcp_details_test.go` 断言 tool.result 落库可读回且模型请求文本不含 details；④ `cmd/keel/plugin_prompt_test.go` 断言 `mcp_apps` 与 `mcp_servers` 同在；⑤ `openspec validate feat-mcp-apps-events --strict` 通过 |
+
 ## 5. 版本与升级
 
 - `PI_PIN` 写入本文件与 `docs/UPSTREAM.md`；升级前先跑 conformance suite。

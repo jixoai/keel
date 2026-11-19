@@ -87,7 +87,10 @@ type Server struct {
 	// through (server, tool), so adding or removing a server does not change the
 	// model-visible tool manifest.
 	Tools []Tool
-	Err   error
+	// Diagnostics records malformed optional metadata (MCP Apps declarations)
+	// found while reading the catalogue. They are reported, never fatal.
+	Diagnostics []string
+	Err         error
 }
 
 // Name is the configured server name.
@@ -212,6 +215,13 @@ func connectOne(ctx context.Context, entry ServerEntry, options ConnectOptions) 
 	server.Client = client
 	server.Transport = transport
 	server.Tools = tools
+	for _, tool := range tools {
+		for _, diagnostic := range tool.UIDiagnostics {
+			message := fmt.Sprintf("tool %q: %s", tool.Name, diagnostic)
+			server.Diagnostics = append(server.Diagnostics, message)
+			options.Logger.Warn("mcp tool metadata", "server", entry.Name, "diagnostic", message)
+		}
+	}
 	options.Logger.Info("mcp server connected", "server", entry.Name, "tools", len(tools), "source", entry.Source)
 	return server
 }

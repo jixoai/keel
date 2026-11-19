@@ -71,7 +71,10 @@ func mcpList(backend MCPBackend) (agentcore.AgentToolResult, error) {
 			entry["error"] = server.Err.Error()
 		}
 		tools := make([]map[string]string, 0, len(server.Tools))
-		for _, tool := range server.Tools {
+		// Only model-visible tools are listed. An app-only tool (visibility
+		// without "model") is part of the app catalogue, not of the model's
+		// surface.
+		for _, tool := range server.ModelTools() {
 			item := map[string]string{"name": tool.Name}
 			if tool.Title != "" {
 				item["title"] = tool.Title
@@ -116,7 +119,7 @@ func mcpDescribe(backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolRe
 				fmt.Sprintf("server %q is not connected: %v", input.Server, server.Err),
 				map[string]any{"server": input.Server, "tool": input.Tool})
 		}
-		for _, tool := range server.Tools {
+		for _, tool := range server.ModelTools() {
 			if tool.Name != input.Tool {
 				continue
 			}
@@ -163,17 +166,15 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 	if err != nil {
 		return invalidArguments(MCP, err.Error())
 	}
+	// Visibility is enforced before the backend sees the name: an app-only tool
+	// must not be reachable through the model's aggregate tool.
+	tool, server, err := lookupModelTool(backend, input.Server, input.Tool)
+	if err != nil {
+		return mcpCallFailure(err, input.Server, input.Tool)
+	}
 	result, err := backend.CallTool(ctx, input.Server, input.Tool, arguments)
 	if err != nil {
-		switch {
-		case errors.Is(err, mcp.ErrServerNotFound), errors.Is(err, mcp.ErrToolNotFound):
-			// The (server, tool) name pair does not exist: the caller can fix it.
-			return notFound(MCP, err.Error())
-		default:
-			// The name exists but the server is disconnected (or the call failed):
-			// the same fact describe reports, and the same code.
-			return ErrorResult(CodeBackendFailed, MCP, err.Error(), map[string]any{"server": input.Server, "tool": input.Tool})
-		}
+		return mcpCallFailure(err, input.Server, input.Tool)
 	}
 	content := mcp.ToLLMContent(result)
 	if result.IsError && len(content) == 0 {
@@ -183,13 +184,20 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 	}
 	limited := mcp.LimitContent(content, nil)
 	isError := result.IsError
-	details := map[string]any{
-		"server":  input.Server,
-		"tool":    input.Tool,
-		"isError": result.IsError,
+	details := mcp.MCPToolDetails{
+		Server:         input.Server,
+		Tool:           input.Tool,
+		IsError:        result.IsError,
+		FullOutputPath: limited.FullOutputPath,
 	}
-	if limited.FullOutputPath != "" {
-		details["fullOutputPath"] = limited.FullOutputPath
+	// The app binding and the bounded structured content ride in Details: they
+	// are durable (tool.result) but never enter the model context.
+	if binding, ok := mcp.AppBindingFor(server, tool); ok {
+		details.App = &binding
+	}
+	if structured, truncated := mcp.BoundStructuredContent(result.StructuredContent, mcp.StructuredContentMaxBytes); len(structured) > 0 {
+		details.StructuredContent = structured
+		details.StructuredContentTruncated = truncated
 	}
 	return agentcore.AgentToolResult{
 		Content:           limited.Content,
@@ -197,6 +205,38 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 		StructuredContent: result,
 		IsError:           &isError,
 	}, nil
+}
+
+// lookupModelTool resolves a model-visible tool. It distinguishes the three
+// facts the call path reports: no such server, the server is configured but not
+// connected, and no such model-visible tool (which also covers an app-only tool
+// the model must not reach).
+func lookupModelTool(backend MCPBackend, serverName, toolName string) (mcp.Tool, *mcp.Server, error) {
+	for _, server := range backend.Servers() {
+		if server.Entry.Name != serverName {
+			continue
+		}
+		if server.Err != nil {
+			return mcp.Tool{}, server, fmt.Errorf("mcp: server %q: %w", serverName, server.Err)
+		}
+		tool, ok := server.ModelTool(toolName)
+		if !ok {
+			return mcp.Tool{}, server, fmt.Errorf("%w: %s/%s", mcp.ErrToolNotFound, serverName, toolName)
+		}
+		return tool, server, nil
+	}
+	return mcp.Tool{}, nil, fmt.Errorf("%w: %q", mcp.ErrServerNotFound, serverName)
+}
+
+// mcpCallFailure maps a call/lookup failure onto the aggregate tool's typed
+// codes: a missing name pair is not_found, anything else is backend_error.
+func mcpCallFailure(err error, server, tool string) (agentcore.AgentToolResult, error) {
+	switch {
+	case errors.Is(err, mcp.ErrServerNotFound), errors.Is(err, mcp.ErrToolNotFound):
+		return notFound(MCP, err.Error())
+	default:
+		return ErrorResult(CodeBackendFailed, MCP, err.Error(), map[string]any{"server": server, "tool": tool})
+	}
 }
 
 // mcpCallArguments enforces the tool schema's object contract on the call

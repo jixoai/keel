@@ -1,0 +1,22 @@
+P1 gate evidence index (branch task/keel-mcp-p1, base 4c5553c)
+
+go-build.txt              go build ./...                                      exit 0
+go-vet.txt                go vet <changed packages>                            exit 0
+go-test-race.txt          go test -race <changed packages>                     exit 0
+go-test-all.txt           KEEL_TEST_DSN go test -p 1 -count=1 ./...              exit 0 (54 ok, 0 FAIL)
+conformance.txt           scripts/conformance.sh                               exit 0 (984 pass / 0 fail / 1 skip)
+openspec-validate.txt     pnpm exec openspec validate ... --strict               exit 0
+agent-runtime-e2e.txt     scripts/agent-runtime-e2e.sh --evidence ...            exit 0
+residue.txt               port/process residue check
+
+Notes:
+- The listener list in residue.txt is pre-existing report servers from other tasks/dates
+  (ps start times Nov 3 / Nov 11 / Nov 19; cwd outside this worktree). This task's
+  e2e ports 13610/13611 are released (port-release.txt); no keel serve/e2e process remains.
+- T0.2 recheck 2026-11-20: all 11 appendix-A sources reachable; ext-apps schema has the 17
+  ui/* methods (including ui/download-file and ui/notifications/request-teardown); the SDK
+  exports row in design §0 was corrected to the measured list (no ./schema-with-deps).
+- P1.2 adjudication is recorded in tasks.md: the app table is the manager-internal binding
+  catalogue; the model surface stays the constant 11 builtin tools with the aggregate mcp
+  tool. mcp__<server>__<tool> is not reintroduced.
+- No DSN, password, or bearer token appears in any evidence file.

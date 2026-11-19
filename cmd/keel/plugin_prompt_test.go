@@ -64,6 +64,12 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 		if !strings.Contains(prompt, "<mcp_servers>") || !strings.Contains(prompt, "- promptfixture:") {
 			t.Fatalf("%s: the MCP section is not in the prompt: %q", step, prompt)
 		}
+		// P1.5: the app summary rides next to the server list and names the one
+		// fixture tool that declares a UI resource.
+		if !strings.Contains(prompt, "<mcp_apps>") ||
+			!strings.Contains(prompt, "- promptfixture/fixture_echo: ui://fixture/panel") {
+			t.Fatalf("%s: the mcp_apps section is not in the prompt: %q", step, prompt)
+		}
 		if !strings.Contains(prompt, "You are the prompt-seam test agent.") || !strings.Contains(prompt, "Tenant rule text.") {
 			t.Fatalf("%s: a configured section was dropped: %q", step, prompt)
 		}
@@ -139,6 +145,7 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 		Sections: []host.Section{
 			{Name: "tenant_rules", Content: "Tenant rule text."},
 			{Name: "mcp_servers", Content: "- promptfixture: prompt fixture"},
+			{Name: "mcp_apps", Content: "- promptfixture/fixture_echo: ui://fixture/panel"},
 		},
 		IncludeBuiltins: true,
 	})
@@ -268,7 +275,13 @@ func runPluginPromptMCPHelper() int {
 			})
 		case "tools/list":
 			respond(map[string]any{"tools": []any{
-				map[string]any{"name": "fixture_echo", "inputSchema": map[string]any{"type": "object"}},
+				map[string]any{
+					"name":        "fixture_echo",
+					"inputSchema": map[string]any{"type": "object"},
+					"_meta": map[string]any{
+						"ui": map[string]any{"resourceUri": "ui://fixture/panel"},
+					},
+				},
 			}})
 		case "tools/call":
 			respond(map[string]any{"content": []any{

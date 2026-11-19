@@ -682,3 +682,130 @@ func (brokenSchemaTool) ExecutionMode() agentcore.ToolExecutionMode {
 func (brokenSchemaTool) Execute(context.Context, string, json.RawMessage, agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
 	return agentcore.AgentToolResult{}, nil
 }
+
+// TestMCPVisibilityKeepsAppOnlyToolsOffTheModelSurface pins the v2 rule: the
+// aggregate `mcp` tool lists, describes and calls only tools whose visibility
+// includes "model". An app-only tool belongs to the internal app catalogue and
+// must not be reachable through the model's surface (and no mcp__ name exists).
+func TestMCPVisibilityKeepsAppOnlyToolsOffTheModelSurface(t *testing.T) {
+	appOnly := mcp.Tool{
+		Name:        "refresh",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		UI: mcp.ToolUI{
+			ResourceURI: "ui://docs/panel",
+			Visibility:  []string{mcp.VisibilityApp},
+		},
+	}
+	backend := &fakeMCP{
+		servers: []*mcp.Server{mcpServer("docs",
+			mcp.Tool{Name: "search", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			appOnly,
+		)},
+		result: mcp.CallToolResult{Content: []mcp.ContentBlock{{Type: "text", Text: "ok"}}},
+	}
+	tool := builtinRegistry(t, toolsurface.Backends{MCP: backend})[toolsurface.MCP]
+
+	list := runAction(t, tool, `{"action":"list"}`)
+	listText := agentcore.ContentToText(list.Content)
+	if !strings.Contains(listText, `"name":"search"`) {
+		t.Fatalf("mcp list = %s, want the model-visible tool", listText)
+	}
+	if strings.Contains(listText, "refresh") {
+		t.Fatalf("mcp list leaked an app-only tool: %s", listText)
+	}
+	if strings.Contains(listText, "mcp__") {
+		t.Fatalf("mcp list carries a per-server tool name: %s", listText)
+	}
+
+	describe := runAction(t, tool, `{"action":"describe","server":"docs","tool":"refresh"}`)
+	if problem := errorDocument(t, describe); problem["code"] != toolsurface.CodeNotFound {
+		t.Fatalf("describe app-only = %v, want not_found", problem)
+	}
+	call := runAction(t, tool, `{"action":"call","server":"docs","tool":"refresh"}`)
+	if problem := errorDocument(t, call); problem["code"] != toolsurface.CodeNotFound {
+		t.Fatalf("call app-only = %v, want not_found", problem)
+	}
+	if backend.calls != 0 {
+		t.Fatalf("the backend saw %d app-only calls, want 0", backend.calls)
+	}
+
+	// The model-facing surface is still the constant eleven tools.
+	if got := len(toolsurface.BuiltinNames()); got != 11 {
+		t.Fatalf("builtin surface = %d tools, want 11", got)
+	}
+}
+
+// TestMCPCallDetailsCarryAppAndStructuredContent pins the P1.4 contract: the
+// aggregate call action's Details carry the app binding and a bounded
+// structuredContent copy; the full CallToolResult stays the in-process
+// StructuredContent.
+func TestMCPCallDetailsCarryAppAndStructuredContent(t *testing.T) {
+	appTool := mcp.Tool{
+		Name:        "render",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		UI:          mcp.ToolUI{ResourceURI: "ui://docs/panel"},
+	}
+	backend := &fakeMCP{
+		servers: []*mcp.Server{mcpServer("docs", appTool, mcp.Tool{Name: "plain", InputSchema: json.RawMessage(`{"type":"object"}`)})},
+		result: mcp.CallToolResult{
+			Content:           []mcp.ContentBlock{{Type: "text", Text: "rendered"}},
+			StructuredContent: json.RawMessage(`{"count":3}`),
+		},
+	}
+	tool := builtinRegistry(t, toolsurface.Backends{MCP: backend})[toolsurface.MCP]
+
+	result := runAction(t, tool, `{"action":"call","server":"docs","tool":"render"}`)
+	details, ok := result.Details.(mcp.MCPToolDetails)
+	if !ok {
+		t.Fatalf("details = %#v, want mcp.MCPToolDetails", result.Details)
+	}
+	if details.Server != "docs" || details.Tool != "render" {
+		t.Fatalf("details identity = %+v", details)
+	}
+	if details.App == nil {
+		t.Fatal("details.app is missing")
+	}
+	wantID := mcp.AppIDFor("docs", "ui://docs/panel")
+	if details.App.AppID != wantID || details.App.ResourceURI != "ui://docs/panel" {
+		t.Fatalf("details.app = %+v, want appId %q", details.App, wantID)
+	}
+	if got := strings.Join(details.App.Visibility, ","); got != "model,app" {
+		t.Fatalf("details.app.visibility = %s", got)
+	}
+	if string(details.StructuredContent) != `{"count":3}` || details.StructuredContentTruncated {
+		t.Fatalf("details.structuredContent = %s truncated=%v", details.StructuredContent, details.StructuredContentTruncated)
+	}
+	if callResult, ok := result.StructuredContent.(mcp.CallToolResult); !ok || string(callResult.StructuredContent) != `{"count":3}` {
+		t.Fatalf("result.StructuredContent = %#v, want the full CallToolResult", result.StructuredContent)
+	}
+
+	// A tool without a UI resource carries no app binding.
+	plain := runAction(t, tool, `{"action":"call","server":"docs","tool":"plain"}`)
+	plainDetails, ok := plain.Details.(mcp.MCPToolDetails)
+	if !ok || plainDetails.App != nil {
+		t.Fatalf("plain details = %#v, want no app", plain.Details)
+	}
+}
+
+func TestMCPCallDetailsBoundStructuredContent(t *testing.T) {
+	backend := &fakeMCP{
+		servers: []*mcp.Server{mcpServer("docs", mcp.Tool{Name: "big", InputSchema: json.RawMessage(`{"type":"object"}`)})},
+		result: mcp.CallToolResult{
+			Content:           []mcp.ContentBlock{{Type: "text", Text: "ok"}},
+			StructuredContent: json.RawMessage(`"` + strings.Repeat("x", mcp.StructuredContentMaxBytes+16) + `"`),
+		},
+	}
+	tool := builtinRegistry(t, toolsurface.Backends{MCP: backend})[toolsurface.MCP]
+
+	result := runAction(t, tool, `{"action":"call","server":"docs","tool":"big"}`)
+	details, ok := result.Details.(mcp.MCPToolDetails)
+	if !ok {
+		t.Fatalf("details = %#v", result.Details)
+	}
+	if !details.StructuredContentTruncated {
+		t.Fatal("an oversize structuredContent was not marked truncated")
+	}
+	if len(details.StructuredContent) > 256 {
+		t.Fatalf("details.structuredContent = %d bytes, want a bounded marker", len(details.StructuredContent))
+	}
+}

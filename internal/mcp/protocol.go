@@ -400,7 +400,26 @@ type Tool struct {
 	Annotations  json.RawMessage `json:"annotations,omitempty"`
 	Execution    json.RawMessage `json:"execution,omitempty"`
 	Meta         json.RawMessage `json:"_meta,omitempty"`
+	// UI is the parsed `_meta.ui` block (MCP Apps). validateListToolsResult
+	// fills it; it is never serialized back onto the wire.
+	UI ToolUI `json:"-"`
+	// UIDiagnostics records malformed `_meta.ui` shapes. A broken declaration
+	// is a diagnostic, never a connection failure.
+	UIDiagnostics []string `json:"-"`
 }
+
+// VisibilityList is the effective visibility of the tool.
+func (t Tool) VisibilityList() []string { return t.UI.VisibilityList() }
+
+// VisibleToModel reports whether the tool may appear on the model-facing
+// surface (the aggregate `mcp` tool's list/describe/call).
+func (t Tool) VisibleToModel() bool { return t.UI.Allows(VisibilityModel) }
+
+// VisibleToApp reports whether an app may call the tool through the host.
+func (t Tool) VisibleToApp() bool { return t.UI.Allows(VisibilityApp) }
+
+// AppResourceURI is the tool's declared UI resource, empty when it has none.
+func (t Tool) AppResourceURI() string { return t.UI.ResourceURI }
 
 // Resource is a resource entry from resources/list (types.ts:94-103). Name is
 // always present after conversion: servers that omit it get their URI.
@@ -428,8 +447,12 @@ type ResourceTemplate struct {
 
 // ListToolsResult is a page of tools/list.
 type ListToolsResult struct {
-	Tools      []Tool          `json:"tools"`
-	NextCursor string          `json:"nextCursor,omitempty"`
+	Tools      []Tool `json:"tools"`
+	NextCursor string `json:"nextCursor,omitempty"`
+	// TTLMs and CacheScope are the 2026-07-28 cache hints. Nil TTLMs means the
+	// server declared none (legacy servers).
+	TTLMs      *int64          `json:"ttlMs,omitempty"`
+	CacheScope string          `json:"cacheScope,omitempty"`
 	Meta       json.RawMessage `json:"_meta,omitempty"`
 }
 
@@ -437,6 +460,8 @@ type ListToolsResult struct {
 type ListResourcesResult struct {
 	Resources  []Resource      `json:"resources"`
 	NextCursor string          `json:"nextCursor,omitempty"`
+	TTLMs      *int64          `json:"ttlMs,omitempty"`
+	CacheScope string          `json:"cacheScope,omitempty"`
 	Meta       json.RawMessage `json:"_meta,omitempty"`
 }
 
@@ -444,6 +469,8 @@ type ListResourcesResult struct {
 type ListResourceTemplatesResult struct {
 	ResourceTemplates []ResourceTemplate `json:"resourceTemplates"`
 	NextCursor        string             `json:"nextCursor,omitempty"`
+	TTLMs             *int64             `json:"ttlMs,omitempty"`
+	CacheScope        string             `json:"cacheScope,omitempty"`
 	Meta              json.RawMessage    `json:"_meta,omitempty"`
 }
 
@@ -458,8 +485,50 @@ type ResourceContents struct {
 
 // ReadResourceResult is a validated resources/read result.
 type ReadResourceResult struct {
-	Contents []ResourceContents `json:"contents"`
-	Meta     json.RawMessage    `json:"_meta,omitempty"`
+	Contents   []ResourceContents `json:"contents"`
+	TTLMs      *int64             `json:"ttlMs,omitempty"`
+	CacheScope string             `json:"cacheScope,omitempty"`
+	Meta       json.RawMessage    `json:"_meta,omitempty"`
+}
+
+// PromptArgument is one declared argument of a prompt (types.ts prompts).
+type PromptArgument struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// Prompt is a prompt definition from prompts/list.
+type Prompt struct {
+	Name        string           `json:"name"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
+	Meta        json.RawMessage  `json:"_meta,omitempty"`
+}
+
+// ListPromptsResult is a page of prompts/list.
+type ListPromptsResult struct {
+	Prompts    []Prompt        `json:"prompts"`
+	NextCursor string          `json:"nextCursor,omitempty"`
+	TTLMs      *int64          `json:"ttlMs,omitempty"`
+	CacheScope string          `json:"cacheScope,omitempty"`
+	Meta       json.RawMessage `json:"_meta,omitempty"`
+}
+
+// PromptMessage is one message of a prompts/get result. Content reuses the
+// CallToolResult block shape, which covers text, image, audio, resource and
+// resource_link blocks.
+type PromptMessage struct {
+	Role    string       `json:"role"`
+	Content ContentBlock `json:"content"`
+}
+
+// GetPromptResult is a validated prompts/get result.
+type GetPromptResult struct {
+	Description string          `json:"description,omitempty"`
+	Messages    []PromptMessage `json:"messages"`
+	Meta        json.RawMessage `json:"_meta,omitempty"`
 }
 
 // isSupportedProtocolVersion reports whether a server may select version.

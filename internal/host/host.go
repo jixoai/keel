@@ -132,35 +132,37 @@ func (h *Host) RefreshMCP(extra []agentcore.AgentTool, section string) error {
 
 // RefreshSections replaces the host's dynamic surface: the extra tools, the
 // mcp_servers section and any additional named sections the serving process
-// publishes (plugin prompt contributions). It is RefreshMCP generalized to more
-// than one dynamic section, so a caller republishing because of a change in one
-// of them (a plugin enable/disable) never drops the others (the MCP section).
-// The caller passes the complete dynamic set — exactly like the tool registry
-// is republished — so a refresh replaces that set wholesale and never leaves a
-// retired section behind. The new registry is built and validated before it is
-// published; callers already holding the old registry (an in-flight run)
-// continue safely.
-func (h *Host) RefreshSections(extra []agentcore.AgentTool, mcpSection string, pluginSections []Section) error {
+// publishes (the MCP mcp_apps summary and plugin prompt contributions). It is
+// RefreshMCP generalized to more than one dynamic section, so a caller
+// republishing because of a change in one of them (a plugin enable/disable)
+// never drops the others (the MCP sections). The caller passes the complete
+// dynamic set — exactly like the tool registry is republished — so a refresh
+// replaces that set wholesale and never leaves a retired section behind. The
+// new registry is built and validated before it is published; callers already
+// holding the old registry (an in-flight run) continue safely.
+func (h *Host) RefreshSections(extra []agentcore.AgentTool, mcpSection string, extraSections []Section) error {
 	h.mu.RLock()
 	cfg := h.cfg
 	discovered := h.skills
 	h.mu.RUnlock()
 
 	cfg.ExtraTools = append([]agentcore.AgentTool(nil), extra...)
-	// The construction-time mcp section (when the assembly was built with one) is
-	// retired here: the dynamic set owns it from now on.
+	// The construction-time MCP sections (when the assembly was built with
+	// them) are retired here: the dynamic set owns them from now on. Filtering
+	// both names keeps a boot-time mcp_apps section from surviving next to the
+	// republished one.
 	static := make([]Section, 0, len(cfg.Sections))
 	for _, s := range cfg.Sections {
-		if s.Name != "mcp_servers" {
+		if s.Name != "mcp_servers" && s.Name != "mcp_apps" {
 			static = append(static, s)
 		}
 	}
 	cfg.Sections = static
-	dynamic := make([]Section, 0, len(pluginSections)+1)
+	dynamic := make([]Section, 0, len(extraSections)+1)
 	if mcpSection != "" {
 		dynamic = append(dynamic, Section{Name: "mcp_servers", Content: mcpSection})
 	}
-	dynamic = append(dynamic, pluginSections...)
+	dynamic = append(dynamic, extraSections...)
 
 	reg, err := buildRegistry(cfg, discovered)
 	if err != nil {
