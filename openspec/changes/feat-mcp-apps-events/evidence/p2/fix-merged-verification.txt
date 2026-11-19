@@ -1,0 +1,15 @@
+# P2 安全修复合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `3848d4b`（cherry-pick `06ed464`，`docs/RESIDUAL-PLAN.md` 自动合并）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：55 个 `ok`，零 FAIL，exit 0
+- `./scripts/conformance.sh`：1019 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 修复内容（复核 P1/P2）：CSP 通配要求 ≥2 标签、拒绝 localhost/IP/尾点；loopback/私网默认拒绝
+  （`AllowPrivateDomains` 显式 opt-in）；`_meta` 64KiB 上限；诊断 32 条硬预算（只计数不建字符串）；
+  view 响应 `Vary: X-Tenant-ID`；缓存新版本先保护再释放旧版本；端口 1–65535；`docs/MCP-APPS.md`
+  记录租户语义/限额/降级
+- lane 证据：`evidence/p2/fix-*`；backlog：完整 PSL 公共后缀判定（已记 `docs/RESIDUAL-PLAN.md` §5.x）
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
