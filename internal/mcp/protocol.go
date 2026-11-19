@@ -481,6 +481,11 @@ type ResourceContents struct {
 	MimeType string `json:"mimeType,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Blob     string `json:"blob,omitempty"`
+	// Meta is the item-level `_meta`. MCP Apps declares the UI resource
+	// metadata (`_meta.ui`: csp/permissions/prefersBorder) on the resource
+	// item; a server that puts it on the result object instead is accepted by
+	// ValidateAppResource.
+	Meta json.RawMessage `json:"_meta,omitempty"`
 }
 
 // ReadResourceResult is a validated resources/read result.

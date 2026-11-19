@@ -47,6 +47,7 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/mcphost"
 	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
@@ -102,6 +103,13 @@ type PromptOptions struct {
 type MCPOptions struct {
 	Entries        []mcp.ServerEntry
 	ConnectOptions mcp.ConnectOptions
+	// Registry, when set, is the host's MCP Apps registry: the mcp service
+	// refreshes it after the fleet connects, so app documents are fetched and
+	// validated before the surface is published. Its AppReady predicate gates
+	// which apps may bind to tool results. Nil means this deployment serves no
+	// apps (MCP stays the text-only surface) and the prompt sections are read
+	// from the live manager on every republish (the pre-P2 path).
+	Registry *mcphost.Registry
 }
 
 // LLMOptions carries the resolved model selection inputs. The tenant document
@@ -234,12 +242,19 @@ type Runtime struct {
 	snapshot *servicegraph.Snapshot
 	closed   bool
 
-	// publishMu guards the product layer's republish state: the dynamic tools
-	// and the plugin prompt sections are the two halves of the assembly the
-	// product publishes, and either sink may fire first (see refreshAssembly).
+	// publishMu guards the product layer's republish state: the MCP half (tools
+	// and prompt sections published by the MCP registry) and the plugin half
+	// (tools and prompt sections published by agentext.Runtime) are composed on
+	// every republish, and either sink may fire first (see refreshAssembly).
+	// Publishing one half never drops the other: mcp_published records that the
+	// MCP half was published at least once, so the assembly switches from the
+	// boot-time live read to the published surface exactly once.
 	publishMu      sync.Mutex
 	pluginTools    []agentcore.AgentTool
 	pluginSections []host.Section
+	mcpTools       []agentcore.AgentTool
+	mcpSections    []host.Section
+	mcpPublished   bool
 
 	// rejectedOverride is the stored model settings override this boot refused
 	// to serve (its credentials no longer resolve). Nil when what is stored is
@@ -359,6 +374,20 @@ func Boot(ctx context.Context, cfg Config) (*Runtime, error) {
 		rejectedOverride: rejected,
 	}
 	rt.startCollector(ctx)
+	// The MCP half's first publication: the mcp service refreshed the registry
+	// while activating, so the app catalogue and the mcp_servers/mcp_apps
+	// sections are published onto the assembly before anything can serve. A
+	// host without a registry keeps the live read in refreshAssembly (the P1
+	// path), so this is a no-op there.
+	if err := rt.publishRegistrySurface(); err != nil {
+		cfg.Seams.Logger.Warn("publish the MCP surface at boot", "err", err)
+	}
+	// Even without a registry (the P1 path), the first assembly publication
+	// retires the boot-time section read: the live manager is read here once,
+	// and every later republish is driven by the published halves.
+	if err := rt.refreshAssembly(); err != nil {
+		cfg.Seams.Logger.Warn("publish the dynamic surface at boot", "err", err)
+	}
 	cfg.Seams.Logger.Info("service loadout active",
 		"loadout", snap.LoadoutID,
 		"revision", snap.Revision,
@@ -677,10 +706,50 @@ func (r *Runtime) ReconnectMCP(ctx context.Context, name string) error {
 	// The republish is the product form, not an MCP-only refresh: the plugin
 	// tools and prompt sections the product published stay live across a
 	// reconnect, exactly as the MCP surface survives a plugin change.
-	if err := r.refreshAssembly(); err != nil {
+	if err := r.publishRegistrySurface(); err != nil {
 		return fmt.Errorf("refresh host after MCP reconnect: %w", err)
 	}
 	return nil
+}
+
+// PublishMCPSurface republishes the MCP half of the dynamic assembly: the MCP
+// tool set (empty in the v2 exposure, where the builtin `mcp` tool is the only
+// model-facing entry) and the MCP prompt sections (mcp_servers and mcp_apps).
+//
+// The MCP surface is published whole, once per registry refresh, and composed
+// with the plugin half on every republish. This is what replaces the
+// assembly-time read of the MCP manager: a plugin refresh keeps the MCP sections
+// and an MCP refresh keeps the plugin tools/sections, because neither half is
+// read from the other's sink.
+func (r *Runtime) PublishMCPSurface(tools []agentcore.AgentTool, sections []host.Section) error {
+	if r == nil {
+		return fmt.Errorf("servicehost: runtime closed")
+	}
+	r.publishMu.Lock()
+	r.mcpTools = append([]agentcore.AgentTool(nil), tools...)
+	r.mcpSections = append([]host.Section(nil), sections...)
+	r.mcpPublished = true
+	r.publishMu.Unlock()
+	return r.refreshAssembly()
+}
+
+// publishRegistrySurface republishes from the registry's current surface. It is
+// the boot publication and the post-reconnect publication; the registry itself
+// stays the source of truth, so calling it twice is harmless.
+func (r *Runtime) publishRegistrySurface() error {
+	if r == nil {
+		return fmt.Errorf("servicehost: runtime closed")
+	}
+	registry := r.cfg.MCP.Registry
+	if registry == nil {
+		return nil
+	}
+	surface, ok := registry.Surface()
+	if !ok {
+		return nil
+	}
+	_, sections := projectMCPSurface(surface.Tools, surface.Prompt)
+	return r.PublishMCPSurface(surface.Tools, sections)
 }
 
 // RefreshProductTools republishes the host tool registry with the product
@@ -721,9 +790,9 @@ func (r *Runtime) RefreshProductPrompt(sections []host.Section) error {
 
 // refreshAssembly republishes the host assembly's dynamic surface: every tool
 // (MCP, external providers, static product tools, plugin tools) and every
-// dynamic prompt section (mcp_servers, plugin contributions). The product layer
-// publishes tools and prompt sections through separate sinks; both halves are
-// composed here from the same live state, so a refresh on one sink never drops
+// dynamic prompt section (mcp_servers, mcp_apps, plugin contributions). The MCP
+// and plugin halves are published through separate sinks; both are composed
+// here from their last published state, so a refresh on one sink never drops
 // what the other published — the rule is the one the tool registry already
 // follows: the published set is replaced wholesale, never merged into.
 func (r *Runtime) refreshAssembly() error {
@@ -734,22 +803,15 @@ func (r *Runtime) refreshAssembly() error {
 	r.publishMu.Lock()
 	pluginTools := append([]agentcore.AgentTool(nil), r.pluginTools...)
 	pluginSections := append([]host.Section(nil), r.pluginSections...)
+	mcpPublished := r.mcpPublished
+	mcpTools := append([]agentcore.AgentTool(nil), r.mcpTools...)
+	mcpSections := append([]host.Section(nil), r.mcpSections...)
 	r.publishMu.Unlock()
+
+	mcpTools, mcpSection, mcpExtra := r.mcpHalf(mcpPublished, mcpTools, mcpSections)
+
 	var extra []agentcore.AgentTool
-	section := ""
-	var mcpSections []host.Section
-	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
-		if mcpService, ok := svc.(*mcpService); ok {
-			// The builtin `mcp` tool already carries the resolved manager; the
-			// per-server catalogue is not part of the published tool set.
-			section = mcpService.PromptSection()
-			// mcp_apps is republished alongside mcp_servers on every refresh, so
-			// a plugin refresh never drops the app summary (and vice versa).
-			if apps := mcpService.AppsPromptSection(); apps != "" {
-				mcpSections = append(mcpSections, host.Section{Name: "mcp_apps", Content: apps})
-			}
-		}
-	}
+	extra = append(extra, mcpTools...)
 	if svc, ok := r.engine.Lookup(loadout.ServiceExternalTools); ok {
 		if toolsService, ok := svc.(*externalgw.ToolService); ok {
 			extra = append(extra, toolsService.Tools()...)
@@ -758,7 +820,67 @@ func (r *Runtime) refreshAssembly() error {
 	extra = append(extra, r.cfg.Product.ExtraTools...)
 	extra = append(extra, pluginTools...)
 	// MCP's extra sections come first, then the product/plugin contributions.
-	return assembly.RefreshSections(extra, section, append(mcpSections, pluginSections...))
+	extraSections := append(mcpExtra, pluginSections...)
+	return assembly.RefreshSections(extra, mcpSection, extraSections)
+}
+
+// mcpHalf resolves the MCP half of the dynamic surface. The registry's
+// published surface is authoritative when one is wired and has published; the
+// explicitly published half covers a host without a registry; the live read is
+// the boot/legacy path (the manager has connected but nothing has been
+// published yet). The three are mutually exclusive, so no section can appear
+// twice.
+func (r *Runtime) mcpHalf(published bool, publishedTools []agentcore.AgentTool, publishedSections []host.Section) ([]agentcore.AgentTool, string, []host.Section) {
+	if registry := r.cfg.MCP.Registry; registry != nil {
+		if surface, ok := registry.Surface(); ok {
+			tools, sections := projectMCPSurface(surface.Tools, surface.Prompt)
+			section, extra := splitMCPSections(sections)
+			return tools, section, extra
+		}
+	}
+	if published {
+		section, extra := splitMCPSections(publishedSections)
+		return publishedTools, section, extra
+	}
+	var sections []host.Section
+	if svc, ok := r.engine.Lookup(loadout.ServiceMCP); ok {
+		if mcpService, ok := svc.(*mcpService); ok {
+			if content := mcpService.PromptSection(); content != "" {
+				sections = append(sections, host.Section{Name: "mcp_servers", Content: content})
+			}
+			if content := mcpService.AppsPromptSection(); content != "" {
+				sections = append(sections, host.Section{Name: "mcp_apps", Content: content})
+			}
+		}
+	}
+	section, extra := splitMCPSections(sections)
+	return nil, section, extra
+}
+
+// splitMCPSections splits the MCP sections into the mcp_servers argument of
+// RefreshSections and the remaining named sections (mcp_apps). RefreshSections
+// renders mcp_servers itself, so passing it twice would duplicate the section.
+func splitMCPSections(sections []host.Section) (string, []host.Section) {
+	section := ""
+	var extra []host.Section
+	for _, candidate := range sections {
+		if candidate.Name == "mcp_servers" && section == "" {
+			section = candidate.Content
+			continue
+		}
+		extra = append(extra, candidate)
+	}
+	return section, extra
+}
+
+// projectMCPSurface maps the registry's surface types onto the assembly types.
+// It is called with the registry's published value, which never mutates.
+func projectMCPSurface(tools []agentcore.AgentTool, sections []mcphost.Section) ([]agentcore.AgentTool, []host.Section) {
+	out := make([]host.Section, 0, len(sections))
+	for _, section := range sections {
+		out = append(out, host.Section{Name: section.Name, Content: section.Content})
+	}
+	return tools, out
 }
 
 // StopWorker stops claiming new runs (SIGTERM drain) without unloading the

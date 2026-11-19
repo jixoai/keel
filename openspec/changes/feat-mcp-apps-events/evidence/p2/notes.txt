@@ -1,0 +1,127 @@
+P2 backend gate evidence index (branch task/keel-mcp-p2, base a132b4d)
+Slice: P2.1–P2.5 + P2.8 server-side only (P2.6/P2.7 frontend is another lane).
+
+go-build.txt              go build ./...                                      exit 0
+go-vet.txt                go vet <changed packages>                            exit 0
+go-test-race.txt          go test -race -count=1 <changed packages>             exit 0
+go-test-all.txt           KEEL_TEST_DSN go test -p 1 -count=1 ./...              exit 0 (55 ok, 0 FAIL)
+conformance.txt/.json     scripts/conformance.sh                                exit 0 (1015 pass / 0 fail / 1 skip)
+openspec-validate.txt     pnpm exec openspec validate ... --strict              exit 0
+agent-runtime-e2e.txt     scripts/agent-runtime-e2e.sh --evidence ...            exit 0
+mcphost-tests.txt         go test -v ./internal/mcphost/                        23 PASS
+http-contract-tests.txt   go test -v agentapi/cmd-keel/mcp (HTTP + assembly)     12 PASS
+residue.txt               port/process residue check
+
+Notes:
+- No DSN, password, bearer token or document-content body appears in any evidence file.
+  The test DSN is derived into .env.local (gitignored) and only read via
+  `grep '^KEY=' .env.local | cut -d= -f2-`.
+- residue.txt: this run's e2e ports 13610/13611 are released (the script's
+  port-release.txt is included). The remaining listeners in 13600-13799 are
+  pre-existing servers from other worktrees (same PIDs as the P1 residue); no
+  keel serve / e2e / fixture child process from this run remains.
+- The agent-runtime-e2e leg does not configure MCP; it proves the serving
+  runtime boots unchanged with the new registry wiring in `keel serve`.
+
+Design decisions (P2.3 publishing path and CSP are the load-bearing ones):
+
+1. Registry is the single source of the app surface. `internal/mcphost.Registry`
+   owns app identity (derived `mcp.AppIDFor(server, resourceUri)` — a caller's
+   appId is never trusted), the document cache, the catalogue, the diagnostics
+   and one monotonic generation. `mcp.Manager` exposes `DeclaredApps()` (the raw
+   declaration) for fetching and `Apps()` (gated by the registry's
+   `AppReady`) for every client-facing projection.
+
+2. Publishing path (R2). The assembly is composed of two independently
+   published halves, and `servicehost.Runtime.refreshAssembly` merges them on
+   every republish:
+   - MCP half: `mcpService.Start` refreshes the registry (fetch + validate
+     before the surface exists); `Runtime.PublishMCPSurface(tools, sections)`
+     stores the whole half; `refreshAssembly` uses the registry's published
+     surface when wired, then the explicitly published half, then the live
+     manager read only for a host with no registry (boot/legacy).
+   - Plugin half: unchanged `RefreshProductTools` / `RefreshProductPrompt`.
+   `newPromptFactory` no longer reads the MCP sections (the one-shot seam is
+   gone); `servicehost.Boot` publishes the MCP half before returning; a
+   reconnect refreshes the registry and republishes. `cmd/keel/dynamic_surface.go`
+   is the sink bridge: the registry publishes while the service graph is still
+   activating (before the `Runtime` value exists), so the bridge buffers the
+   slice and replays it in `attach(rt)` right after Boot. Tests assert both
+   directions (`TestMCPHalfSurvivesPluginRefresh`,
+   `TestPluginHalfSurvivesMCPRepublish`).
+
+3. Documents and cache. `ReadAppResource` → registry re-validates (media type,
+   text|blob, non-empty, ≤2 MiB) → sha256 content hash → immutable document
+   identity. The cache owns the bytes (a superseded version is reclaimed by LRU
+   eviction, not orphaned in a side map), the bound is bytes (64 MiB), and the
+   current version of every published app is protected from eviction. A
+   document that does not fit is refused: its app is dropped with a `cache`
+   diagnostic rather than published unservable. Content change ⇒ new hash ⇒ new
+   URL; a stale hash answers 404, never stale bytes.
+
+4. CSP. Built only from the validated `_meta.ui.csp` domain lists:
+   default-src 'none'; script/style 'self' 'unsafe-inline' + resourceDomains;
+   img/media 'self' data: + resourceDomains; font 'self' + resourceDomains;
+   connect 'self' + connectDomains; frame-src only frameDomains (default
+   'none'); object-src 'none'; base-uri only baseUriDomains (default 'self');
+   frame-ancestors 'self'. Domains are normalized to http(s) origins
+   (wildcard subdomain allowed, `*`, `data:`, `'unsafe-*'`, paths, query
+   strings and injected `;` are dropped with diagnostics), deduped and bounded
+   (16 per directive / 256 B each). The server cannot introduce a directive:
+   unknown `_meta.ui.csp` keys are diagnosed and ignored.
+   Deliberate tightening beyond the design list: `sandbox allow-scripts` is a
+   CSP directive of every document. The iframe already uses
+   `sandbox="allow-scripts"`; the CSP directive covers direct navigation of the
+   document URL, which would otherwise run a server's scripts on the host
+   origin with the user's cookies. It only adds restrictions (no forms, popups,
+   top navigation or storage) and does not widen any source list.
+
+5. HTTP contract. `GET /v1/mcp/servers`, `GET /v1/mcp/apps`,
+   `GET /v1/mcp/apps/{appId}/view` live in `internal/agentapi` (mounted under
+   `/v1/`; the more specific sign-in/callback routes stay in httpapi). Tenant
+   header is checked before any catalogue/document byte; the registry is scoped
+   to the serve tenant and a foreign tenant sees an empty catalogue and 404 on
+   the view. Unknown id, malformed id, stale hash and foreign tenant all answer
+   the same 404 with a generic body (no server list). The view sets
+   Content-Type: text/html; charset=utf-8, X-MCP-App-Mime,
+   X-MCP-App-Hash, Content-Security-Policy (with frame-ancestors 'self'),
+   X-Content-Type-Options: nosniff, Referrer-Policy: no-referrer;
+   Cache-Control is `public, max-age=31536000, immutable` only when the URL
+   carries the content hash, and `no-store` on the bare URL. A document without
+   CSP/media type/body is never shipped. Nil registry ⇒ 501 on all three
+   routes.
+
+6. Capability bits (P2.5). Features: `mcp.apps` (registry wired),
+   `mcp.apps.sandboxOrigin` (configured second origin, from
+   `KEEL_MCP_APP_ORIGIN`; no production domain in code — an invalid value
+   turns the bit off), `mcp.events` (false; P4 owns the dispatcher). The
+   `mcpApps` block carries sandboxOrigin + generation + app count.
+
+7. Degradation (P2.8 server side). No apps server ⇒ empty catalogue and the
+   prompt keeps only mcp_servers. Fetch/validate/oversize/cache failure ⇒
+   diagnostic (bounded list) + audit event (structured log + Auditor seam;
+   no durable table until P3.7) + the app is absent from the catalogue; a
+   re-fetch failure keeps the last valid version (no blank). Every tool
+   binding is gated: `ConnectOptions.AppReadiness` points at the registry, so
+   an app that is not published produces no `details.app` and no mcp_apps line
+   — a half-built app is never mountable.
+
+Deviations / open items (honest list):
+- P2.8 is NOT ticked: its acceptance includes the 5 s handshake timeout and
+  protocol-violation destruction, which are frontend (P2.6). The server-side
+  half is delivered and tested.
+- `mcp.events` is false by construction (P4).
+- There is no dedicated retry endpoint in P2 (the spec's route list has none):
+  a failed app is retried on the next registry refresh (MCP reconnect/sign-in,
+  next service start). The UI retry affordance belongs to P2.6 and will trigger
+  a refresh through the reconnect path.
+- The theme mapping (design §3.4) is delivered as `mcphost.ThemeVariables` /
+  `ThemePalettes` and served additively as `theme` in `GET /v1/mcp/apps` (both
+  palettes; the host process does not know the client's mode). Composing
+  `hostContext` is P2.6's job.
+- The registry publishes `mcp_apps` from the gated catalogue; P4's
+  `tools/list_changed` / `resources/updated` refresh hooks are not wired yet
+  (they will call the same `Registry.Refresh`).
+- AppSpec carries the tool union visibility plus per-tool refs; the design's
+  single `Visibility` field is the union (the exact value per tool is in
+  `tools`, so the directory stays machine-readable).

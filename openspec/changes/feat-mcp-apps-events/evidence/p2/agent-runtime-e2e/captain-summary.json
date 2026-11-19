@@ -1,0 +1,22 @@
+{
+  "model": "kite-e2e-model",
+  "turns": 1,
+  "status": "done",
+  "teamId": "team_kite",
+  "tokens": {
+    "input": 0,
+    "total": 20,
+    "output": 20
+  },
+  "agentId": "agent_kite_captain",
+  "context": {
+    "tokens": 0,
+    "messages": 3
+  },
+  "provider": "kite-e2e",
+  "teamHash": "058a0c57605d0a18b55dc374141967a9d06755529315c919a386f117ff3affdb",
+  "durationMs": 21,
+  "promptHash": "sha256:a5a29a1f13feeecd880836798e8efb676f07ae023540551b25ab8c298807d65d",
+  "stopReason": "end_turn",
+  "teamRevision": 1
+}

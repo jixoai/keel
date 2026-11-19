@@ -84,12 +84,31 @@ func (s *Server) Tool(name string) (Tool, bool) {
 	return Tool{}, false
 }
 
-// Apps returns the deduplicated app catalogue of every connected server. An app
-// is keyed by appId = AppIDFor(server, resourceUri); a resource referenced by
-// several tools (or declared through both the structured and the deprecated
-// flat key) appears exactly once. The order is deterministic: apps by appId,
-// tools by (server, tool).
+// Apps returns the publishable app catalogue of every connected server: the
+// declared apps whose document the host registry has fetched, validated and
+// published. An app whose document failed to fetch or validate is excluded
+// here, so it reaches neither the mcp_apps prompt section nor a client's
+// renderable catalogue (spec「降级路径与能力协商」: the text result is always
+// usable, a half-built app is never shown).
+//
+// An app is keyed by appId = AppIDFor(server, resourceUri); a resource
+// referenced by several tools (or declared through both the structured and the
+// deprecated flat key) appears exactly once. The order is deterministic: apps
+// by appId, tools by (server, tool).
 func (m *Manager) Apps() []App {
+	return m.appCatalogue(true)
+}
+
+// DeclaredApps returns the declared app catalogue without the host registry's
+// readiness gate: the deduplicated (server, resourceUri) set the servers
+// declare right now. The registry fetches documents from this set and is the
+// component that decides, after validation, what becomes publishable; every
+// other reader uses Apps.
+func (m *Manager) DeclaredApps() []App {
+	return m.appCatalogue(false)
+}
+
+func (m *Manager) appCatalogue(requireReady bool) []App {
 	if m == nil {
 		return nil
 	}
@@ -107,6 +126,9 @@ func (m *Manager) Apps() []App {
 				continue
 			}
 			appID := AppIDFor(server.Entry.Name, uri)
+			if requireReady && !server.AppReady(appID) {
+				continue
+			}
 			app := byID[appID]
 			if app == nil {
 				app = &App{AppID: appID, Server: server.Entry.Name, ResourceURI: uri}
@@ -153,8 +175,8 @@ func (m *Manager) AppForTool(server, tool string) (MCPAppBinding, bool) {
 }
 
 // AppBindingFor returns the app binding of one tool of one server. A tool that
-// declares no UI resource (or whose declaration was unusable), or that is not
-// visible to apps, has none.
+// declares no UI resource (or whose declaration was unusable), that is not
+// visible to apps, or whose app the host registry has not published, has none.
 func AppBindingFor(server *Server, tool Tool) (MCPAppBinding, bool) {
 	if server == nil || tool.AppResourceURI() == "" || !tool.VisibleToApp() {
 		return MCPAppBinding{}, false
@@ -162,8 +184,12 @@ func AppBindingFor(server *Server, tool Tool) (MCPAppBinding, bool) {
 	if uiResourceURIProblem(tool.AppResourceURI()) != "" {
 		return MCPAppBinding{}, false
 	}
+	appID := AppIDFor(server.Entry.Name, tool.AppResourceURI())
+	if !server.AppReady(appID) {
+		return MCPAppBinding{}, false
+	}
 	return MCPAppBinding{
-		AppID:       AppIDFor(server.Entry.Name, tool.AppResourceURI()),
+		AppID:       appID,
 		ResourceURI: tool.AppResourceURI(),
 		Visibility:  tool.VisibilityList(),
 	}, true

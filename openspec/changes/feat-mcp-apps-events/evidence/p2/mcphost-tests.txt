@@ -1,0 +1,49 @@
+=== RUN   TestDocCacheByteBoundAndLRUEviction
+--- PASS: TestDocCacheByteBoundAndLRUEviction (0.00s)
+=== RUN   TestDocCacheProtectsCurrentVersion
+--- PASS: TestDocCacheProtectsCurrentVersion (0.00s)
+=== RUN   TestDocCacheRetainReleasesSupersededVersions
+--- PASS: TestDocCacheRetainReleasesSupersededVersions (0.00s)
+=== RUN   TestContentIdentity
+--- PASS: TestContentIdentity (0.00s)
+=== RUN   TestBuildCSPStrictDefault
+--- PASS: TestBuildCSPStrictDefault (0.00s)
+=== RUN   TestBuildCSPDeclaredDomains
+--- PASS: TestBuildCSPDeclaredDomains (0.00s)
+=== RUN   TestBuildCSPTightensOnly
+--- PASS: TestBuildCSPTightensOnly (0.00s)
+=== RUN   TestBuildCSPDomainBounds
+--- PASS: TestBuildCSPDomainBounds (0.00s)
+=== RUN   TestParseResourceMetaFullBlock
+--- PASS: TestParseResourceMetaFullBlock (0.00s)
+=== RUN   TestParseResourceMetaDropsInvalidMembers
+--- PASS: TestParseResourceMetaDropsInvalidMembers (0.00s)
+=== RUN   TestParseResourceMetaAbsent
+--- PASS: TestParseResourceMetaAbsent (0.00s)
+=== RUN   TestRegistryPublishesValidatedApps
+--- PASS: TestRegistryPublishesValidatedApps (0.00s)
+=== RUN   TestRegistryExcludesFailedApps
+--- PASS: TestRegistryExcludesFailedApps (0.00s)
+=== RUN   TestRegistryKeepsPreviousVersionOnRefetchFailure
+--- PASS: TestRegistryKeepsPreviousVersionOnRefetchFailure (0.00s)
+=== RUN   TestRegistryHonoursTTL
+--- PASS: TestRegistryHonoursTTL (0.00s)
+=== RUN   TestRegistryCacheBudgetDropsApps
+--- PASS: TestRegistryCacheBudgetDropsApps (0.00s)
+=== RUN   TestRegistryMaxDocumentBytes
+--- PASS: TestRegistryMaxDocumentBytes (0.00s)
+=== RUN   TestRegistryTenantVisibility
+--- PASS: TestRegistryTenantVisibility (0.00s)
+=== RUN   TestRegistryUnconnectedServer
+--- PASS: TestRegistryUnconnectedServer (0.00s)
+=== RUN   TestRegistryContentChangeReclaimsCache
+--- PASS: TestRegistryContentChangeReclaimsCache (0.00s)
+=== RUN   TestThemeVariablesMapping
+--- PASS: TestThemeVariablesMapping (0.00s)
+=== RUN   TestThemeVariablesUnusableDocument
+--- PASS: TestThemeVariablesUnusableDocument (0.00s)
+=== RUN   TestThemePalettes
+--- PASS: TestThemePalettes (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcphost	0.191s
+exit=0

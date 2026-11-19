@@ -16,6 +16,7 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/mcphost"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/servicegraph"
 	"github.com/jixoai/keel/internal/store"
@@ -207,15 +208,11 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 			// manager's per-server catalogue must not be flattened into tools:
 			// adding a server would change the model-visible manifest.
 			backends.MCP = mcpService.manager
-			if section := mcpService.manager.PromptSection(); section != "" {
-				sections = append(sections, host.Section{Name: "mcp_servers", Content: section})
-			}
-			// mcp_apps lists the tools that declare an interactive UI resource.
-			// It is an additional named section, not a second server list; the
-			// model still reaches MCP only through the aggregate `mcp` tool.
-			if section := mcpService.AppsPromptSection(); section != "" {
-				sections = append(sections, host.Section{Name: "mcp_apps", Content: section})
-			}
+			// mcp_servers and mcp_apps are NOT read here: the assembly-time read
+			// was the one-shot seam that made an MCP refresh invisible. They are
+			// published by the MCP registry through PublishMCPSurface (mcpService
+			// refreshes the registry when it starts) and republished on every
+			// change, composed with the plugin half.
 		}
 		// External tool providers join the same registry (their names are
 		// namespaced ext__<provider>__<tool>). A duplicate name fails host
@@ -302,21 +299,50 @@ func newToolsFactory(Config) servicegraph.Factory {
 // constructed and closed by Stop, so a reassembly that replaces the service
 // releases every subprocess and HTTP connection with it.
 type mcpService struct {
-	manager *mcp.Manager
-	entries []mcp.ServerEntry
-	log     *slog.Logger
+	manager  *mcp.Manager
+	entries  []mcp.ServerEntry
+	registry *mcphost.Registry
+	log      *slog.Logger
 }
 
 func (m *mcpService) PromptSection() string      { return m.manager.PromptSection() }
 func (m *mcpService) AppsPromptSection() string  { return m.manager.AppsPromptSection() }
 func (m *mcpService) Entries() []mcp.ServerEntry { return append([]mcp.ServerEntry(nil), m.entries...) }
+
+// Reconnect rebuilds one connection and re-publishes the app surface: a
+// reconnected server may serve different tools and resources, and a stale
+// catalogue must not survive it. A registry failure is reported but does not
+// fail the reconnect itself (the connection is already live).
 func (m *mcpService) Reconnect(ctx context.Context, name string) error {
-	return m.manager.Reconnect(ctx, name)
+	if err := m.manager.Reconnect(ctx, name); err != nil {
+		return err
+	}
+	return m.refreshRegistry(ctx)
 }
 
-func (m *mcpService) Start(context.Context, *servicegraph.EffectScope) error {
+// refreshRegistry re-reads the app documents of the connected fleet. It runs
+// before the first publication (Start) and after a reconnect; plugin changes do
+// not re-fetch documents (the published surface is reused).
+func (m *mcpService) refreshRegistry(ctx context.Context) error {
+	if m.registry == nil {
+		return nil
+	}
+	if _, err := m.registry.Refresh(ctx, m.manager); err != nil {
+		m.log.Error("mcp apps refresh", "err", err)
+		return err
+	}
+	return nil
+}
+
+func (m *mcpService) Start(ctx context.Context, _ *servicegraph.EffectScope) error {
 	for _, message := range m.manager.Errors() {
 		m.log.Error("mcp server", "err", message)
+	}
+	// The first app publication: fetch and validate every declared document
+	// before the surface is assembled. A failed fetch is a diagnostic (the app
+	// stays out, its tools keep their text results), never a start failure.
+	if err := m.refreshRegistry(ctx); err != nil {
+		m.log.Warn("mcp apps registry refresh at start", "err", err)
 	}
 	return nil
 }
@@ -330,8 +356,15 @@ func newMCPFactory(cfg Config) servicegraph.Factory {
 		return nil
 	}
 	return func(ctx context.Context, _ servicegraph.Resolved) (servicegraph.Instance, error) {
-		manager := mcp.Connect(ctx, cfg.MCP.Entries, cfg.MCP.ConnectOptions)
-		return &mcpService{manager: manager, entries: cfg.MCP.Entries, log: cfg.Seams.Logger}, nil
+		options := cfg.MCP.ConnectOptions
+		if cfg.MCP.Registry != nil {
+			// The host registry owns "which app has a validated document": while
+			// an app is absent from the published catalogue, its tools carry no
+			// app binding and no mcp_apps line.
+			options.AppReadiness = cfg.MCP.Registry.AppReady
+		}
+		manager := mcp.Connect(ctx, cfg.MCP.Entries, options)
+		return &mcpService{manager: manager, entries: cfg.MCP.Entries, registry: cfg.MCP.Registry, log: cfg.Seams.Logger}, nil
 	}
 }
 

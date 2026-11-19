@@ -75,6 +75,13 @@ type ConnectOptions struct {
 	Logger *slog.Logger
 	// Concurrency bounds simultaneous connection attempts. Zero uses 8.
 	Concurrency int
+	// AppReadiness is the host registry's "this app's document has been
+	// fetched, validated and published" predicate. While an app is not ready
+	// its tools carry no app binding and no mcp_apps line: the text result is
+	// the whole surface (MCP Apps degradation, spec「降级路径与能力协商」).
+	// Nil means every declared app is publishable (the P1 behaviour: no host
+	// registry is wired).
+	AppReadiness func(appID string) bool
 }
 
 // Server is one connected (or failed) MCP server.
@@ -91,10 +98,37 @@ type Server struct {
 	// found while reading the catalogue. They are reported, never fatal.
 	Diagnostics []string
 	Err         error
+	// Reconnects counts successful reconnects of this server. A reconnect
+	// replaces the Server value, so the count travels with the replacement.
+	Reconnects int
+
+	// appReadiness is the host registry's app-publication predicate (see
+	// ConnectOptions.AppReadiness). The zero value (nil) publishes every
+	// declared app.
+	appReadiness func(appID string) bool
 }
 
 // Name is the configured server name.
 func (s *Server) Name() string { return s.Entry.Name }
+
+// AppReady reports whether the host may act on an app of this server. The host
+// registry owns the answer: an app whose document failed to fetch or validate
+// must not reach a client as a mountable surface.
+func (s *Server) AppReady(appID string) bool {
+	if s == nil || s.appReadiness == nil {
+		return true
+	}
+	return s.appReadiness(appID)
+}
+
+// SetAppReadiness installs the host's app-publication predicate. It is set by
+// Manager.Connect/Reconnect from ConnectOptions.AppReadiness.
+func (s *Server) SetAppReadiness(fn func(appID string) bool) {
+	if s == nil {
+		return
+	}
+	s.appReadiness = fn
+}
 
 // Manager owns every MCP connection of one host.
 type Manager struct {
@@ -136,6 +170,7 @@ func Connect(ctx context.Context, entries []ServerEntry, options ConnectOptions)
 			defer wg.Done()
 			defer func() { <-semaphore }()
 			server := connectOne(ctx, entry, options)
+			server.SetAppReadiness(options.AppReadiness)
 			mu.Lock()
 			manager.servers = append(manager.servers, server)
 			mu.Unlock()
@@ -163,12 +198,17 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	if server.Err != nil {
 		return server.Err
 	}
+	server.SetAppReadiness(options.AppReadiness)
 	m.mu.Lock()
 	replaced := false
 	var previous *Server
 	for index, existing := range m.servers {
 		if existing.Name() == name {
 			previous = existing
+			// Reconnects are a host-visible fact (/v1/mcp/servers), and the
+			// replacement is a fresh object: carry the count forward before
+			// dropping the old connection.
+			server.Reconnects = existing.Reconnects + 1
 			m.servers[index] = server
 			replaced = true
 			break

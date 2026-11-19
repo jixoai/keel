@@ -45,19 +45,26 @@
 
 ## P2 — apps 宿主骨架与内联渲染
 
-- [ ] P2.1 新包 `internal/mcphost`：`Surface`/`Sinks`/`AppSpec`/`ResourceSpec` + `Registry`
+- [x] P2.1 新包 `internal/mcphost`：`Surface`/`Sinks`/`AppSpec`/`ResourceSpec` + `Registry`
       （appId 规则、目录、generation）（验收：单测；同资源多工具引用去重）
-- [ ] P2.2 文档取回/缓存/CSP 构造/主题映射：`ReadResource` → 校验 → hash → LRU（64 MiB）
+      （2026-11-20 P2 后端切片：`registry_test.go`——派生 appId、双工具引用去重、generation、租户 scope）
+- [x] P2.2 文档取回/缓存/CSP 构造/主题映射：`ReadResource` → 校验 → hash → LRU（64 MiB）
       （验收：单测覆盖上限、LRU 淘汰、缺 `csp` 的严格缺省、只收紧不放宽）
-- [ ] P2.3 发布通路改造：`cmd/keel/dynamic_surface.go`（聚合 MCP 半面 + 插件半面，合并后
+      （2026-11-20：`cache_test.go` 字节上限/淘汰/保护；`csp_test.go` 逐指令 + 负向；
+      `meta_test.go`/`theme_test.go`。CSP 额外加 `sandbox allow-scripts`（只收紧：直开文档也不落入宿主 origin））
+- [x] P2.3 发布通路改造：`cmd/keel/dynamic_surface.go`（聚合 MCP 半面 + 插件半面，合并后
       `RefreshProductTools`/`RefreshProductPrompt`）；MCP 面经 sinks 首次发布
       （替换 `newPromptFactory` 的一次性读取）
       （验收：装配测试「插件刷新后 MCP 工具/段仍在」与反向各一条，治 R2）
-- [ ] P2.4 HTTP 面：`GET /v1/mcp/servers`、`GET /v1/mcp/apps`、
+      （2026-11-20：`cmd/keel/mcp_surface_test.go` 双向两条；Boot 首次发布 + Reconnect 重发）
+- [x] P2.4 HTTP 面：`GET /v1/mcp/servers`、`GET /v1/mcp/apps`、
       `GET /v1/mcp/apps/{appId}/view`（CSP/`nosniff`/`Referrer-Policy`/immutable 缓存/`frame-ancestors`）
       （验收：`curl -I` 断言头；越权 appId 404；租户边界先于 SSE/正文）
-- [ ] P2.5 `/v1/capabilities` 能力位：`mcp.apps`、`mcp.apps.sandboxOrigin`、`mcp.events`
+      （2026-11-20：`agentapi/mcp_apps_test.go` httptest 级断言；跨租户/未知 appId 404 不泄露清单；
+      hash URL immutable、裸 URL no-store）
+- [x] P2.5 `/v1/capabilities` 能力位：`mcp.apps`、`mcp.apps.sandboxOrigin`、`mcp.events`
       （验收：capabilities 测试；未接线时为 false 且 501/404 路径明确）
+      （2026-11-20：未接线 501；sandboxOrigin 来自 `KEEL_MCP_APP_ORIGIN`（无硬编码生产域）；mcp.events 默认 false）
 - [ ] P2.6 前端 `web/src/surfaces/mcp-app/{index,view,bridge}.*`：iframe
       （`sandbox="allow-scripts"`，无 `allow-same-origin`）+ 握手（initialize→initialized 时序）+
       `tool-input`（恰好一次）→ `tool-result` + 内联弹性尺寸 + 全屏（kit Dialog/Sheet）
@@ -67,6 +74,9 @@
       （验收：组件测试或 E2E；流式期间 iframe 不重建）
 - [ ] P2.8 降级面：无 apps 服务器/无能力客户端/取回失败/握手超时（5s）/协议违规 → 文本兜底 + 诊断 + 审计
       （验收：单测逐格 + E2E 一格）
+      （2026-11-20 服务端部分已交付：无 apps 服务器=空目录、取回/校验/超限/缓存失败=诊断+审计+排除目录、
+      重取失败保留旧版本、app 绑定按已发布目录门控（无半成品 app）；剩余「握手超时 5s/协议违规」
+      属前端 P2.6，故本项未勾）
 
 ## P3 — 桥与出站动作
 

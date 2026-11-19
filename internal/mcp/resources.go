@@ -141,7 +141,7 @@ func ValidateAppResource(result ReadResourceResult) (AppResource, error) {
 	resource := AppResource{
 		URI:        content.URI,
 		MIMEType:   content.MimeType,
-		Meta:       result.Meta,
+		Meta:       appResourceMeta(content.Meta, result.Meta),
 		TTLMs:      result.TTLMs,
 		CacheScope: result.CacheScope,
 	}
@@ -163,6 +163,20 @@ func ValidateAppResource(result ReadResourceResult) (AppResource, error) {
 	}
 	resource.Text = content.Text
 	return resource, nil
+}
+
+// appResourceMeta picks the `_meta` an app document's metadata is read from:
+// the content item's own `_meta` when present, otherwise the result-level
+// `_meta`. MCP Apps puts `_meta.ui` on the resource item; a server that places
+// it on the result object is accepted as well (kept for the P1 fixture shape).
+func appResourceMeta(item, result json.RawMessage) json.RawMessage {
+	if len(item) > 0 && !isJSONNull(item) {
+		return append(json.RawMessage(nil), item...)
+	}
+	if len(result) > 0 && !isJSONNull(result) {
+		return append(json.RawMessage(nil), result...)
+	}
+	return nil
 }
 
 // ListPrompts returns every prompt, following nextCursor through all pages.

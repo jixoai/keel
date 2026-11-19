@@ -174,8 +174,24 @@ type Config struct {
 	// SubagentWaitDefault bounds the synchronous wait of a sub-agent spawn over
 	// HTTP when the request does not set a budget (default 60s).
 	SubagentWaitDefault time.Duration
-	Logger              *slog.Logger
-	MaxBody             int64
+	// MCPApps is the host's MCP Apps read model (the app catalogue and the
+	// document store). Nil answers 501 on the /v1/mcp/apps* routes and reports
+	// mcp.apps=false: a deployment without the registry does not serve apps.
+	MCPApps MCPAppsSurface
+	// MCPAppsSandboxOrigin is the configured second origin of the View sandbox
+	// (KEEL_MCP_APP_ORIGIN). Empty means the capability bit is false and the
+	// client stays on the opaque-origin form (spec「View 沙箱与跨端承载」).
+	MCPAppsSandboxOrigin string
+	// MCPAppsTheme is the host theme token document (web/theme.json). The app
+	// catalogue serves its cssVars mapped onto the apps standard variables, so
+	// the View inherits the host's palettes.
+	MCPAppsTheme json.RawMessage
+	// MCPEvents reports the MCP events capability (subscriptions/listen,
+	// notification routing). P4 wires it; until then it is false and clients
+	// use the legacy behavior.
+	MCPEvents bool
+	Logger    *slog.Logger
+	MaxBody   int64
 }
 
 // Server is the AgentAPI HTTP handler. Mount it on the runtime's mux under
@@ -228,6 +244,10 @@ func (s *Server) routes() {
 	s.approvalRoutes()
 	s.notificationRoutes()
 	s.pluginRoutes()
+	// MCP Apps (P2.4): the fleet projection, the app catalogue and the
+	// document host. The httpapi edge keeps the more specific /v1/mcp routes
+	// (sign-in, callback) and forwards the rest here.
+	s.mcpAppRoutes()
 	s.mux.HandleFunc("GET /v1/triggers", s.listTriggers)
 	s.mux.HandleFunc("POST /v1/triggers/{id}/fire", s.fireTrigger)
 	s.mux.HandleFunc("GET /v1/subagents", s.listSubagents)
@@ -315,6 +335,20 @@ type Capabilities struct {
 	// so a client can see hot plugin changes without polling the full inventory.
 	Plugins        []string `json:"plugins,omitempty"`
 	PluginRevision int64    `json:"pluginRevision,omitempty"`
+	// MCPApps is the MCP Apps block (P2.5): the deployed sandbox-origin
+	// enhancement, the catalogue generation and the app count. It is present
+	// only when the app surface is wired; the feature flags below are the
+	// stable booleans clients gate on.
+	MCPApps *MCPAppsCapabilities `json:"mcpApps,omitempty"`
+}
+
+// MCPAppsCapabilities is the MCP Apps discovery block.
+type MCPAppsCapabilities struct {
+	// SandboxOrigin is the configured second origin of the View sandbox
+	// (empty when the deployment serves the single-origin opaque-origin form).
+	SandboxOrigin string `json:"sandboxOrigin,omitempty"`
+	Generation    int64  `json:"generation"`
+	Apps          int    `json:"apps"`
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
@@ -340,6 +374,16 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// deployment does not serve.
 		"settings.models":  s.modelSettingsWired(),
 		"settings.secrets": s.cfg.SecretStore != nil,
+		// MCP Apps (change feat-mcp-apps-events): the app catalogue and the
+		// document host exist only when the host registry is wired. The sandbox
+		// origin is a separate capability because it is a deployment choice:
+		// false means the client uses the opaque-origin form, which is not a
+		// degraded experience, just the single-origin one.
+		"mcp.apps":               s.cfg.MCPApps != nil,
+		"mcp.apps.sandboxOrigin": s.cfg.MCPApps != nil && s.cfg.MCPAppsSandboxOrigin != "",
+		// MCP events (P4): subscriptions/listen and notification routing. False
+		// until the dispatcher is wired; clients then keep the legacy behavior.
+		"mcp.events": s.cfg.MCPEvents,
 	}
 	hooks := make([]string, 0, len(agentext.HookEvents()))
 	for _, event := range agentext.HookEvents() {
@@ -363,6 +407,14 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		if capabilities.Plugins == nil {
 			capabilities.Plugins = []string{}
 		}
+	}
+	if s.cfg.MCPApps != nil {
+		block := &MCPAppsCapabilities{SandboxOrigin: s.cfg.MCPAppsSandboxOrigin}
+		if surface, published := s.cfg.MCPApps.Surface(); published {
+			block.Generation = surface.Generation
+			block.Apps = len(surface.Apps)
+		}
+		capabilities.MCPApps = block
 	}
 	writeJSON(w, http.StatusOK, capabilities)
 }

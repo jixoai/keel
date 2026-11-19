@@ -1,0 +1,31 @@
+=== RUN   TestMCPAppsRoutesRequireTenant
+--- PASS: TestMCPAppsRoutesRequireTenant (0.00s)
+=== RUN   TestMCPAppsCatalogIsTenantScoped
+--- PASS: TestMCPAppsCatalogIsTenantScoped (0.00s)
+=== RUN   TestMCPAppViewSecurityHeaders
+--- PASS: TestMCPAppViewSecurityHeaders (0.00s)
+=== RUN   TestMCPAppViewUnknownIdentity
+--- PASS: TestMCPAppViewUnknownIdentity (0.00s)
+=== RUN   TestMCPAppsUnwired
+--- PASS: TestMCPAppsUnwired (0.00s)
+=== RUN   TestCapabilitiesMCPBits
+--- PASS: TestCapabilitiesMCPBits (0.00s)
+=== RUN   TestMCPAppViewRefusesIncompleteDocument
+--- PASS: TestMCPAppViewRefusesIncompleteDocument (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentapi	0.307s
+=== RUN   TestMCPHalfSurvivesPluginRefresh
+--- PASS: TestMCPHalfSurvivesPluginRefresh (0.04s)
+=== RUN   TestPluginHalfSurvivesMCPRepublish
+--- PASS: TestPluginHalfSurvivesMCPRepublish (0.05s)
+=== RUN   TestMCPAppsHTTPEndToEnd
+--- PASS: TestMCPAppsHTTPEndToEnd (0.03s)
+PASS
+ok  	github.com/jixoai/keel/cmd/keel	0.492s
+=== RUN   TestAppReadinessGatesThePublishedCatalogue
+--- PASS: TestAppReadinessGatesThePublishedCatalogue (0.00s)
+=== RUN   TestValidateAppResourceMetaPreference
+--- PASS: TestValidateAppResourceMetaPreference (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcp	0.210s
+exit=0

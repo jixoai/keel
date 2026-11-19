@@ -287,6 +287,21 @@ func runPluginPromptMCPHelper() int {
 			respond(map[string]any{"content": []any{
 				map[string]any{"type": "text", "text": "fixture-called"},
 			}})
+		case "resources/read":
+			// The app document the P2 surface fetches. `_meta.ui` is on the
+			// content item, the shape MCP Apps declares.
+			respond(map[string]any{"contents": []any{
+				map[string]any{
+					"uri":      "ui://fixture/panel",
+					"mimeType": mcp.AppMIMEType,
+					"text":     mcpSurfaceFixtureHTML,
+					"_meta": map[string]any{"ui": map[string]any{
+						"csp":           map[string]any{"connectDomains": []any{"https://api.fixture.test"}},
+						"permissions":   map[string]any{"clipboardWrite": true},
+						"prefersBorder": true,
+					}},
+				},
+			}})
 		default:
 			respond(map[string]any{"jsonrpc": mcp.JSONRPCVersion, "id": request.ID, "error": map[string]any{
 				"code": mcp.CodeMethodNotFound, "message": "Method not found: " + request.Method,

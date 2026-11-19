@@ -33,6 +33,7 @@ import (
 	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/mcphost"
 	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/notify"
 	"github.com/jixoai/keel/internal/pluginpkg"
@@ -359,6 +360,18 @@ func runServe(parent context.Context, opts serveOptions) error {
 			log.Warn("mcp config", "err", message)
 		}
 	}
+	// The MCP Apps host (P2): the registry the mcp service refreshes when the
+	// fleet connects, the publication bridge that republishes the MCP half of
+	// the assembly, and the API surface's read model. It is created even when
+	// no server is configured: an empty catalogue is a valid answer, and the
+	// capability bits then honestly report an unwired-app surface.
+	mcpAppsPublication := newDynamicSurface(log)
+	mcpApps := mcphost.New(mcphost.Options{
+		TenantID: opts.TenantID,
+		Logger:   log,
+		Sinks:    mcpAppsPublication.sinks(),
+	})
+	mcpAppsSandboxOrigin := configuredMCPAppOrigin(log)
 	// The tenant models document is the provider configuration source; an empty
 	// path leaves provider configuration off (the legacy flat agent config
 	// still normalizes to one provider + selection).
@@ -463,6 +476,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		MCP: servicehost.MCPOptions{
 			Entries:        mcpEntries,
 			ConnectOptions: mcp.ConnectOptions{ClientName: "keel", ClientVersion: version, Logger: log},
+			Registry:       mcpApps,
 		},
 		LLM: servicehost.LLMOptions{
 			APIKey:       opts.APIKey,
@@ -526,6 +540,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}()
 	// The runtime is up: the SSE hub may hold its pool connection now.
 	go hub.Run(ctx)
+	// The MCP half was buffered while the graph activated (mcpService.Start
+	// publishes before the runtime value exists): replay it now, so the first
+	// assembly the plugin layer builds already composes both halves.
+	mcpAppsPublication.attach(rt)
 	if rejected, ok := rt.RejectedModelsOverride(); ok {
 		log.Warn("the stored model settings override was rejected at boot; serving the deployment document",
 			"revision", rejected.Revision, "reason", rejected.Reason)
@@ -543,8 +561,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// quota projection reports the same counters the stream and upload paths
 	// enforce, so "my usage" and "why was I refused" cannot disagree.
 	edge := newEdgeQuota(st)
+	hostTheme := loadHostTheme(static.root, log)
 	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		loadHostTheme(static.root, log), edge, log)
+		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, log)
 	if err != nil {
 		return err
 	}
@@ -747,7 +766,7 @@ func (p *productLayer) close() {
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, theme json.RawMessage, edge *quota.Edge, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -845,9 +864,16 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		PluginAuditWriter: pluginAuditStore{store: st},
 		PluginTools:       &pluginToolBridge{index: toolIndex, manager: manager},
 		Theme:             theme,
-		Triggers:          triggers,
-		Subagents:         subagents,
-		Hooks:             hooks,
+		// MCP Apps (P2): the catalogue/document surface and the two capability
+		// inputs (the configured sandbox origin and the host theme palettes the
+		// View maps onto the apps standard variables). Nil registry answers 501
+		// on the MCP app routes and reports mcp.apps=false.
+		MCPApps:              mcpApps,
+		MCPAppsSandboxOrigin: mcpAppsSandboxOrigin,
+		MCPAppsTheme:         theme,
+		Triggers:             triggers,
+		Subagents:            subagents,
+		Hooks:                hooks,
 		ModelsLive: func() agentapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil
