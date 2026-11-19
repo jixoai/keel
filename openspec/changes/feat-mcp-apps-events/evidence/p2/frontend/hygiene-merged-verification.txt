@@ -1,0 +1,23 @@
+# P2FE 卫生收尾合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `37e3b51`（cherry-pick `bfb792a`；
+`merged-verification.txt` add/add 冲突按「保留历史 + 顶部 Superseded 指针」裁决）。
+
+- `cd web && nsh check`：exit 0
+- `nsh test --target tui`：145/145 passed
+- `nsh test --target tui src/surfaces/mcp-app/reload-budget.test.ts`：4/4
+- `nsh build` / `nsh package --target web`：exit 0
+- **真实 Chrome 浏览器 E2E（PLAYWRIGHT_CORE 显式注入）**：`pass=true`，10 步全过；
+  文档 CSP 含 `sandbox allow-scripts`，app 内 `window.open` 被阻断（`popupBlocked` 证据）
+- 收尾内容：web `onNavigationStateChange` 空转标注（web 真正防线是 load 事件）、每实例
+  reload 预算 10 次 + 耗尽审计（`protocol.violation`，detail 不含 URL query）、
+  会话 cookie `SameSite=Lax/Strict` invariant 注释、旧 merged-verification 加 Superseded 指针、
+  E2E 脚本改为 `PLAYWRIGHT_CORE` 环境变量可复跑
+
+## 安全口径
+
+有效 sandbox 权限仍由 NSH 固定 flags 与文档 CSP `sandbox allow-scripts` 取限制交集 = allow-scripts；
+浏览器 E2E 的 cookie/DOM/localStorage 隔离与 popup 阻断均为实测。残余 pre-load 导航窗口
+（无权限边界跨越）与 reload 预算已按复审定为 P2 并收口。
+
+本文件不含 DSN 或密钥。
