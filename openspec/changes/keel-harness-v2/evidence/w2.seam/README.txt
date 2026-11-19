@@ -90,3 +90,10 @@ Known items (not closed by this slice)
   config.toml ignore override would need a SeamOptions plumb-through.
 - nohup joins argv back into one script with minimal quoting; the parent shell
   has already performed expansions/redirections.
+- nohup starts the background job in the default workspace cwd (/workspace), not
+  in the caller's inv.Cwd: the start seam (JobBackend.StartJob) carries no cwd.
+- `nohup cmd > out.txt` does not put the child's output in out.txt: the parent
+  shell consumes the redirection (the job-id line lands there), while the child
+  runs in its own sandbox session and its stdout/stderr go to the JobManager's
+  bounded head/tail and blob. This is a deliberate simplification of keel's own
+  nohup command, not a shell-compatible redirection contract.

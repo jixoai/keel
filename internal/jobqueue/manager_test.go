@@ -1,9 +1,11 @@
 package jobqueue
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
@@ -103,6 +105,74 @@ func waitTerminal(t *testing.T, manager *Manager, tenant, jobID uuid.UUID, timeo
 	}
 	t.Fatalf("job %s did not settle within %s", jobID, timeout)
 	return JobView{}
+}
+
+// failingFinishWorkspace is the default scratch workspace with a settle hook
+// that always fails: the command runs and the job finishes, but Session.Close
+// reports an error. It is the service-nil / double-failure shape whose log the
+// manager must keep instead of discarding `session.Close()`.
+type failingFinishWorkspace struct{}
+
+func (failingFinishWorkspace) Mount(ctx context.Context) (bashbridge.Mount, error) {
+	mount, err := bashbridge.TempDirWorkspace{}.Mount(ctx)
+	if err != nil {
+		return mount, err
+	}
+	mount.Finish = func() error { return errors.New("test: workspace settle failed") }
+	return mount, nil
+}
+
+// TestSyncRunLogsSessionCloseFailure covers the synchronous path: a failed
+// settlement is logged and never changes the command's terminal fact.
+func TestSyncRunLogsSessionCloseFailure(t *testing.T) {
+	st := testStore(t)
+	tenant := uuid.New()
+	var logs bytes.Buffer
+	manager := newTestManager(t, st, tenant, func(opts *Options) {
+		opts.Bridge = bashbridge.New(bashbridge.Config{Workspace: failingFinishWorkspace{}})
+		opts.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	})
+	result, err := manager.Run(context.Background(), tenant, uuid.Nil, RunRequest{Command: `true`})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Status != store.BashJobExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("settle failure changed the terminal fact: %#v", result)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "settle bash session") || !strings.Contains(out, "workspace settle failed") {
+		t.Fatalf("close failure not logged: %q", out)
+	}
+}
+
+// TestBackgroundJobLogsSessionCloseFailure covers the job path: the settle
+// failure is logged with the job id and the job still settles as exited.
+func TestBackgroundJobLogsSessionCloseFailure(t *testing.T) {
+	st := testStore(t)
+	tenant := uuid.New()
+	var logs bytes.Buffer
+	manager := newTestManager(t, st, tenant, func(opts *Options) {
+		opts.Bridge = bashbridge.New(bashbridge.Config{Workspace: failingFinishWorkspace{}})
+		opts.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	})
+	result, err := manager.Run(context.Background(), tenant, uuid.Nil, RunRequest{
+		Command: `true`,
+		Timeout: time.Nanosecond,
+	})
+	if err != nil || result.JobID == nil {
+		t.Fatalf("run: %v %#v", err, result)
+	}
+	view := waitTerminal(t, manager, tenant, *result.JobID, 5*time.Second)
+	if view.Status != store.BashJobExited {
+		t.Fatalf("terminal status = %q reason=%q", view.Status, view.Reason)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "settle bash session") || !strings.Contains(out, "workspace settle failed") {
+		t.Fatalf("close failure not logged: %q", out)
+	}
+	if !strings.Contains(out, result.JobID.String()) {
+		t.Fatalf("close log does not name the job %s: %q", result.JobID, out)
+	}
 }
 
 func TestSyncRunStoresFullOutputAndBlob(t *testing.T) {

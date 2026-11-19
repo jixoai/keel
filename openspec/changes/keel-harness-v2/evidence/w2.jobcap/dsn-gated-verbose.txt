@@ -1,0 +1,13 @@
+# DSN-gated tests, verbose transcript (KEEL_TEST_DSN set; no DSN value recorded)
+
+=== RUN   TestBackgroundJobSettlesCaptureAfterParentRunFinished
+--- PASS: TestBackgroundJobSettlesCaptureAfterParentRunFinished (0.18s)
+PASS
+ok  	github.com/jixoai/keel/internal/jobqueue	0.490s
+jobqueue_exit=0
+
+=== RUN   TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts
+--- PASS: TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts (0.05s)
+PASS
+ok  	github.com/jixoai/keel/cmd/keel	0.612s
+cmd_keel_exit=0

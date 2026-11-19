@@ -100,6 +100,11 @@ type LayerWorkspaces struct {
 	logger         *slog.Logger
 	fallback       Workspace
 
+	// fallbackWarn keeps the no-session-identity warning to once per process:
+	// the fallback is a property of the deployment (UI bridge / direct bridge
+	// use), not of each command, so a per-mount warn would be a log storm.
+	fallbackWarn sync.Once
+
 	mu       sync.Mutex
 	sessions map[sessionKey]*gbashfs.Workspace
 }
@@ -144,12 +149,19 @@ func NewLayerWorkspaces(opts LayerWorkspaceOptions) (*LayerWorkspaces, error) {
 }
 
 // Mount implements Workspace. A context without a session identity (the plugin
-// UI bridge, direct bridge use in tests) keeps the previous behavior: a
-// throwaway temp directory with no capture. The model tool path always carries
-// the identity.
+// UI bridge, direct bridge use in tests) is an explicit degradation, not a
+// silent one: the execution gets a throwaway temp directory, nothing it writes
+// is captured or persisted, and a Warn is emitted once per process naming the
+// reason. The model tool path always carries the identity; this fallback only
+// covers callers with no run scope.
 func (l *LayerWorkspaces) Mount(ctx context.Context) (Mount, error) {
 	identity, ok := SessionIdentityFromContext(ctx)
 	if !ok {
+		l.fallbackWarn.Do(func() {
+			l.logger.Warn("bash workspace fallback: execution is not persisted",
+				"reason", "the context carries no keel session identity (plugin UI bridge or direct bridge use)",
+				"workspace", "throwaway temp dir, no capture")
+		})
 		return l.fallback.Mount(ctx)
 	}
 	workspace, err := l.workspace(ctx, identity.TenantID, identity.SessionID)

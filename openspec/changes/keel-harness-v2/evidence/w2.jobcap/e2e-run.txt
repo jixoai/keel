@@ -1,7 +1,7 @@
 [agent-runtime-e2e] postgres container: keel-pg (port 13741)
 [agent-runtime-e2e] evidence: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-w2-jobcap/openspec/changes/keel-harness-v2/evidence/w2.jobcap/e2e
-[agent-runtime-e2e] creating database keel_agent_runtime_e2e_20261120_002502
-NOTICE:  database "keel_agent_runtime_e2e_20261120_002502" does not exist, skipping
+[agent-runtime-e2e] creating database keel_agent_runtime_e2e_20261120_003512
+NOTICE:  database "keel_agent_runtime_e2e_20261120_003512" does not exist, skipping
 [agent-runtime-e2e] building /tmp/keel-agent-e2e
 [agent-runtime-e2e] enabling keel.testkit through the plugin approval
 testkit enabled; live tools: ['clock', 'echo', 'example_audit_tail', 'example_status']
@@ -10,7 +10,7 @@ testkit enabled; live tools: ['clock', 'echo', 'example_audit_tail', 'example_st
 [agent-runtime-e2e] waiting for the captain run to settle
 captain run.finished frozen binding: {'agentId': 'agent_kite_captain', 'teamId': 'team_kite', 'teamRevision': 1, 'teamHash': '058a0c57605d0a18b55dc374141967a9d06755529315c919a386f117ff3affdb', 'promptHash': 'sha256:a5a29a1f13feeecd880836798e8efb676f07ae023540551b25ab8c298807d65d'}
 [agent-runtime-e2e] spawning the member through the sub-agent API
-[agent-runtime-e2e] waiting for the member run to settle (06abc8dc-be88-5451-baad-7ca03aa05bd2)
+[agent-runtime-e2e] waiting for the member run to settle (a3669652-f507-5d4b-a89b-ad1d70ab8775)
 member input selection: {'agentId': 'agent_kite_member'}
 [agent-runtime-e2e] asserting the wire requests
 captain wire tools: ['agent']

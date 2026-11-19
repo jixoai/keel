@@ -1,8 +1,10 @@
 package bashbridge_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -441,6 +443,50 @@ func TestBackgroundJobCaptureSettlesWithoutRunLease(t *testing.T) {
 	}
 	if read.Content != "job-wrote-this\n" {
 		t.Fatalf("captured content = %q", read.Content)
+	}
+}
+
+// TestWorkspaceFallbackWarnsOnce pins the explicit degradation: a context with
+// no session identity mounts the throwaway temp workspace and warns once per
+// process (not per command), so "this execution is not persisted" is visible.
+func TestWorkspaceFallbackWarnsOnce(t *testing.T) {
+	store, err := layerfs.Open(t.TempDir(), layerfs.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	provider, err := bashbridge.NewLayerWorkspaces(bashbridge.LayerWorkspaceOptions{Store: store, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := provider.Mount(context.Background())
+	if err != nil {
+		t.Fatalf("fallback mount: %v", err)
+	}
+	if first.Finish != nil {
+		t.Error("fallback mount carries a Finish hook; it must not settle anything")
+	}
+	if first.Cleanup == nil {
+		t.Fatal("fallback mount has no cleanup (not the temp dir workspace)")
+	}
+	if err := first.Cleanup(); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	second, err := provider.Mount(context.Background())
+	if err != nil {
+		t.Fatalf("second fallback mount: %v", err)
+	}
+	if err := second.Cleanup(); err != nil {
+		t.Fatalf("second cleanup: %v", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "execution is not persisted") || !strings.Contains(out, "no keel session identity") {
+		t.Fatalf("fallback warning missing: %q", out)
+	}
+	if got := strings.Count(out, "execution is not persisted"); got != 1 {
+		t.Fatalf("fallback warning emitted %d times, want once per process: %q", got, out)
 	}
 }
 

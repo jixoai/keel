@@ -71,7 +71,9 @@ func NewJobCommands(backend JobBackend) []Command {
 }
 
 // runJobList renders the JobManager view. `jobs` narrows to the ambient
-// session (a shell's own jobs); `ps` shows the tenant's jobs. Both render the
+// session (a shell's own jobs); `ps` is a tenant-wide view of every session's
+// jobs, deliberately not a session view (use `jobs` for this sandbox's own
+// jobs; the tool-surface spec allows the tenant-wide view). Both render the
 // same persisted facts the `bash {action:"jobs"}` tool returns.
 func runJobList(ctx context.Context, inv Invocation, backend JobBackend, sessionOnly bool) error {
 	name := "jobs"

@@ -385,7 +385,13 @@ func (m *Manager) runSync(ctx context.Context, tenantID uuid.UUID, req RunReques
 		Stdout:  stdout,
 		Stderr:  stderr,
 	})
-	_ = session.Close()
+	// A settle failure (service not wired, commit rejected) must not be silent:
+	// the ledger already records fs.capture_failed when the service could commit
+	// one, but the service-nil / double-failure path would otherwise leave only
+	// the provider's internal warn. The command's terminal fact is unchanged.
+	if closeErr := session.Close(); closeErr != nil {
+		m.logger.Warn("settle bash session", "mode", "sync", "tenant_id", tenantID, "err", closeErr)
+	}
 	stdoutOut := stdout.Close()
 	stderrOut := stderr.Close()
 	out := RunResult{
@@ -534,7 +540,12 @@ func (m *Manager) runJob(ctx context.Context, job *liveJob, req RunRequest) {
 			Stdout:  job.stdout,
 			Stderr:  job.stderr,
 		})
-		_ = session.Close()
+		// See runSync: a failed settlement is an operational signal, not a
+		// terminal-status change for the job.
+		if closeErr := session.Close(); closeErr != nil {
+			m.logger.Warn("settle bash session", "mode", "job",
+				"job", job.id.String(), "tenant_id", job.tenantID, "session_id", job.sessionID, "err", closeErr)
+		}
 	}
 	stdoutOut := job.stdout.Close()
 	stderrOut := job.stderr.Close()
