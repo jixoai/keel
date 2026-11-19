@@ -1,0 +1,9 @@
+== final cleanup (2026-11-14) ==
+$ for p in 13792 13793 13794: lsof ... => 0 listeners each (recorded above)
+$ go run ./tmp-verify-db drop keel_verify_trace_v1
+drop keel_verify_trace_v1: ok
+$ go run ./tmp-verify-db create-list-verify-check (grep verify_demo|verify_trace)
+0
+0 = none left
+$ rm -rf tmp-verify-db && ls tmp-verify-db
+ls: tmp-verify-db: No such file or directory

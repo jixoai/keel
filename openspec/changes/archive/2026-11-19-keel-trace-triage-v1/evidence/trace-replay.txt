@@ -1,0 +1,8 @@
+Demo Image row box: {"x":444,"y":534,"width":99,"height":24}
+apply box: {"x":716,"y":460,"width":114,"height":24}
+image surface mounted; picker count: 2
+prompt typed, generate disabled? false
+gallery assets: 2
+img srcs: ["http://127.0.0.1:13792/v1/demo/assets/square.png?i=0","http://127.0.0.1:13792/v1/demo/assets/square.png?i=1"]
+surface text checks: 演示= false | demo data url= false | panel badge 已完成= true
+trace events: 6519 -> /tmp/keel-verify/evidence/trace-after.json

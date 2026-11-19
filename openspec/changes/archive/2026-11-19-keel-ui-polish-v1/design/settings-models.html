@@ -1,0 +1,1698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Keel Harness · 设置 · 模型接入</title>
+<style>
+/* OD-LAYOUT-PRIMITIVES v1 — structure only: display, flex/grid, overflow, wrapping, ratio, geometry.
+   Put this @layer first; product CSS outside the layer wins ordinary layout rules.
+   Native hidden and closed-dialog states take precedence over component display rules. */
+@layer od-layout {
+  [hidden]:not([hidden="until-found" i]) { display: none !important; }
+  dialog:not([open]) { display: none !important; }
+
+  :where(.od-stack,.od-row,.od-row-top,.od-cluster,.od-grid,.od-field,.od-stat,.od-cell,.od-tile) > :where(*) { min-width: 0; }
+
+  .od-stack   { display: flex; flex-direction: column; gap: var(--od-gap, 8px); }
+  .od-row     { display: flex; align-items: center; gap: var(--od-gap, 8px); }
+  .od-row-top { display: flex; align-items: flex-start; gap: var(--od-gap, 8px); }
+  .od-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--od-gap, 8px); }
+  .od-fill    { flex: 1 1 0; min-width: 0; }
+  .od-fixed   { flex: none; }
+  .od-grid    { display: grid; gap: var(--od-gap, 12px); grid-template-columns: repeat(var(--od-cols, 3), minmax(0, 1fr)); }
+
+  .od-stat, .od-field, .od-cell { display: grid; gap: var(--od-gap, 2px); }
+  :where(.od-stat,.od-field,.od-cell) > :where(*) { display: block; }
+  .od-tile { display: grid; grid-template-rows: auto 1fr; }
+  :where(.od-tile) > :where(*) { display: block; }
+
+  .od-media { display: block; width: 100%; height: auto; aspect-ratio: var(--od-ratio, auto); }
+  .od-media-cover { object-fit: cover; }
+
+  .od-icon { display: inline-block; inline-size: var(--od-icon-size, 1em); block-size: var(--od-icon-size, 1em); flex: none; }
+
+  .od-truncate { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .od-clamp-2, .od-clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .od-clamp-2 { -webkit-line-clamp: 2; }
+  .od-clamp-3 { -webkit-line-clamp: 3; }
+  .od-lines-2 { min-height: calc(2 * 1.4em); }
+  .od-nowrap  { white-space: nowrap; }
+  .od-keep    { word-break: keep-all; overflow-wrap: anywhere; }
+
+  .od-screen { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  .od-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+
+  .od-rail { display: flex; gap: var(--od-gap, 8px); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none;
+             padding-inline: var(--od-rail-pad, 16px); scroll-padding-inline: var(--od-rail-pad, 16px); }
+  .od-rail::-webkit-scrollbar { display: none; }
+  :where(.od-rail) > :where(*) { flex: none; scroll-snap-align: start; }
+  :where(.od-rail) > :where(:last-child) { margin-inline-end: var(--od-rail-pad, 16px); }
+
+  .od-spacer { flex: none; visibility: hidden; pointer-events: none; }
+  .od-touch  { min-width: 44px; min-height: 44px; }
+}
+:root [hidden]:where(:not([hidden="until-found" i])) { display: none; }
+/* /OD-LAYOUT-PRIMITIVES v1 */
+
+:root {
+  --bg: #0A0A0B;
+  --surface: #101012;
+  --surface-2: #141418;
+  --surface-3: #0C0C0E;
+  --raised: #191920;
+  --raised-2: #232329;
+  --line: #232329;
+  --line-strong: #34343C;
+  --line-control: #62626C;
+  --ink-1: #EDE9E1;
+  --ink-2: #B4AFA5;
+  --ink-3: #8C887F;
+  --accent: #F5F1E8;
+  --accent-ink: #101012;
+  --accent-soft: rgba(245,241,232,.08);
+  --accent-line: rgba(245,241,232,.24);
+  --danger: #F08C7C;
+  --danger-ink: #1A0F0D;
+  --warn: #E6B76A;
+  --ok: #8ED3AC;
+
+  --font-sans: "Avenir Next", "Avenir", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
+
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+  --dur-1: 160ms; --dur-2: 220ms;
+  --ease-out: cubic-bezier(.2,.8,.2,1);
+  --shadow-card: 0 2px 8px rgba(0,0,0,.25);
+  --shadow-dialog: 0 32px 80px rgba(0,0,0,.55), 0 8px 24px rgba(0,0,0,.35);
+  --shadow-menu: 0 16px 40px rgba(0,0,0,.5);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button { cursor: pointer; }
+h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+::selection { background: rgba(245,241,232,.22); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.od-icon { color: currentColor; }
+
+/* ---------- topbar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  height: 60px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5);
+  padding: 0 var(--sp-7);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand__mark {
+  display: grid; place-items: center; width: 24px; height: 24px; flex: none;
+  border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink-2);
+}
+.brand__name { font-size: 12px; font-weight: 600; letter-spacing: .18em; white-space: nowrap; }
+.brand__rule { width: 1px; height: 16px; background: var(--line-strong); flex: none; }
+.brand__doc { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.crumb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.crumb strong { color: var(--ink-2); font-weight: 500; }
+.topbar__suffix { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: var(--ink-3); white-space: nowrap; }
+
+/* ---------- page shell ---------- */
+.shell { width: 100%; max-width: 1080px; margin: 0 auto; padding: 32px 32px 64px; }
+
+.review {
+  display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
+  padding: 0 0 14px; margin-bottom: var(--sp-6);
+  border-bottom: 1px solid var(--line);
+}
+.review__label { font-size: 11px; font-weight: 600; letter-spacing: .12em; color: var(--ink-3); flex: none; }
+.review__chips { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.rev-chip {
+  height: 30px; padding: 0 var(--sp-3);
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--line); border-radius: var(--r-pill);
+  background: transparent; color: var(--ink-2);
+  font-size: 12px; font-weight: 500; letter-spacing: .02em;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.rev-chip:hover { color: var(--ink-1); border-color: var(--line-strong); }
+.rev-chip.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.review__hint { margin-left: auto; max-width: 560px; font-size: 12px; line-height: 1.55; color: var(--ink-3); text-align: right; }
+
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-5); margin-bottom: var(--sp-5); }
+.eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: var(--ink-3); text-transform: uppercase; }
+.page-head h1 { margin-top: 6px; font-size: 26px; line-height: 1.35; font-weight: 600; letter-spacing: 0; }
+.page-lead { margin-top: 6px; max-width: 52ch; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.page-meta { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 36px; padding: 0 14px;
+  border: 1px solid transparent; border-radius: 8px;
+  font-size: 13px; font-weight: 500; letter-spacing: .02em; line-height: 1;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.btn--primary { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn--primary:hover { background: #FFFDF6; }
+.btn--ghost { background: transparent; border-color: var(--line); color: var(--ink-2); }
+.btn--ghost:hover { border-color: var(--line-strong); background: var(--surface-2); color: var(--ink-1); }
+.btn--danger { background: var(--danger); color: var(--danger-ink); font-weight: 600; }
+.btn--danger:hover { background: #F6A192; }
+.btn:disabled { background: var(--surface-2); border-color: var(--line); color: var(--ink-3); cursor: not-allowed; }
+.btn:disabled:hover { background: var(--surface-2); border-color: var(--line); color: var(--ink-3); }
+.icon-btn {
+  display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink-3);
+  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.icon-btn:hover { color: var(--ink-1); background: var(--surface-2); border-color: var(--line); }
+.text-btn {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 8px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  font-size: 12px; font-weight: 500; color: var(--ink-2);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.text-btn:hover { color: var(--ink-1); background: var(--surface-2); border-color: var(--line); }
+.section-add {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  font-size: 12px; font-weight: 500; color: var(--ink-2);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.section-add:hover { color: var(--ink-1); background: var(--surface-2); border-color: var(--line); }
+.section-add:disabled { color: var(--ink-3); cursor: not-allowed; }
+
+/* ---------- default model ---------- */
+.default-card {
+  position: relative;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start;
+  gap: var(--sp-4) var(--sp-6);
+  padding: var(--sp-5);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+}
+.default-card.is-empty {
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface);
+  border-color: var(--line);
+}
+.default-main { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.p-mark {
+  display: grid; place-items: center; width: 32px; height: 32px; flex: none;
+  border: 1px solid var(--line-strong); border-radius: 50%;
+  background: var(--surface-3); color: var(--ink-2);
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+}
+.default-copy { min-width: 0; }
+.default-provider { margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+.default-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-top: 2px; }
+.default-title h2 { font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: 0; }
+.think-pill {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: var(--surface-3); color: var(--ink-2);
+  font-size: 10px; font-weight: 500; letter-spacing: .04em; white-space: nowrap;
+}
+.default-meta { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
+.default-empty { margin-top: 4px; font-size: 13px; line-height: 1.7; color: var(--ink-2); max-width: 52ch; }
+
+.default-actions { position: relative; display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.default-actions .btn { min-width: 72px; }
+
+/* model menu */
+.model-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 30;
+  width: min(340px, calc(100vw - 48px)); max-height: 340px; overflow-y: auto;
+  padding: 6px;
+  background: #121214;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  box-shadow: var(--shadow-menu);
+}
+.menu-group-label { padding: 8px 8px 4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; color: var(--ink-3); }
+.menu-item {
+  width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 6px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--ink-2); text-align: left;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.menu-item:hover { background: var(--surface-2); color: var(--ink-1); }
+.menu-item.is-current { color: var(--ink-1); }
+.menu-item__name { font-size: 13px; line-height: 1.4; }
+.menu-item__meta { margin-top: 2px; font-size: 10px; color: var(--ink-3); }
+.menu-item .check { color: var(--accent); }
+.menu-foot { margin-top: 4px; padding: 8px; border-top: 1px solid var(--line); font-size: 10px; line-height: 1.55; color: var(--ink-3); }
+
+/* ---------- provider list ---------- */
+.section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); margin: 32px 0 12px; }
+.section-head h2 { font-size: 15px; line-height: 1.4; font-weight: 600; }
+.section-head p { margin-top: 2px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.section-head__count { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.section-tools { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
+.provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.provider {
+  display: grid; grid-template-rows: auto 1fr auto; gap: var(--sp-3);
+  min-height: 176px; padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+.provider:hover { border-color: var(--line-strong); background: #111114; }
+.provider__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-2); }
+.provider__id { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.provider__mark {
+  display: grid; place-items: center; width: 28px; height: 28px; flex: none;
+  border: 1px solid var(--line-strong); border-radius: 50%;
+  background: var(--raised); color: var(--ink-2);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+}
+.provider__name { font-size: 14px; line-height: 1.4; font-weight: 600; color: var(--ink-1); }
+.provider__endpoint { margin-top: 2px; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5; color: var(--ink-3); overflow-wrap: anywhere; }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  height: 24px; padding: 0 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  font-size: 11px; font-weight: 500; letter-spacing: .02em; white-space: nowrap;
+}
+.badge__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.badge--ok { color: var(--ok); border-color: rgba(142,211,172,.34); background: rgba(142,211,172,.06); }
+.badge--warn { color: var(--warn); border-color: rgba(230,183,106,.34); background: rgba(230,183,106,.06); }
+.badge--muted { color: var(--ink-3); background: transparent; }
+.badge--muted .badge__dot { background: transparent; border: 1px solid currentColor; }
+.model-chips { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.model-chip {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: var(--r-pill);
+  background: #0F0F12; color: var(--ink-2);
+  font-size: 11px; line-height: 1; white-space: nowrap;
+}
+.provider--unavailable .model-chip { border-style: dashed; color: var(--ink-3); }
+.provider__foot {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-2);
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+.provider__meta { min-width: 0; font-size: 10.5px; line-height: 1.6; color: var(--ink-3); overflow-wrap: anywhere; }
+.provider__meta code { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
+.config-btn {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  min-height: 32px; padding: 0 8px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--ink-1); font-size: 12px; font-weight: 500;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.config-btn:hover { background: var(--surface-2); border-color: var(--line); }
+
+/* ---------- advanced ---------- */
+.advanced { margin-top: 32px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.advanced summary {
+  display: flex; align-items: center; gap: var(--sp-2);
+  min-height: 48px; padding: 0 var(--sp-4);
+  font-size: 12px; color: var(--ink-2);
+  list-style: none; cursor: pointer;
+}
+.advanced summary::-webkit-details-marker { display: none; }
+.advanced summary .tag {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 6px;
+  border: 1px solid var(--line); border-radius: 4px;
+  font-size: 10px; color: var(--ink-3);
+}
+.advanced summary .chevron { margin-left: auto; color: var(--ink-3); transition: transform var(--dur-1) var(--ease-out); }
+.advanced[open] summary .chevron { transform: rotate(180deg); }
+.advanced__body { padding: 0 var(--sp-4) var(--sp-4); }
+.raw-config {
+  max-height: 280px; overflow: auto;
+  padding: var(--sp-3);
+  background: var(--surface-3); border: 1px solid var(--line); border-radius: 8px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--ink-2);
+  white-space: pre; tab-size: 2;
+}
+.advanced__note { margin-top: 8px; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
+
+/* ---------- empty / loading ---------- */
+.empty-card {
+  display: grid; justify-items: center; gap: var(--sp-3);
+  padding: 40px var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  text-align: center;
+}
+.empty-card__icon {
+  display: grid; place-items: center; width: 44px; height: 44px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  background: var(--raised); color: var(--ink-2);
+}
+.empty-card h3 { font-size: 16px; line-height: 1.45; font-weight: 600; }
+.empty-card p { max-width: 46ch; font-size: 13px; line-height: 1.75; color: var(--ink-2); }
+.empty-facts {
+  width: min(100%, 440px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2); margin-top: var(--sp-1); text-align: left;
+}
+.empty-fact {
+  display: grid; gap: 2px; padding: 10px var(--sp-3);
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-3);
+}
+.empty-fact span { font-size: 10px; letter-spacing: .04em; color: var(--ink-3); }
+.empty-fact code { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); overflow-wrap: anywhere; }
+.empty-card .btn { margin-top: var(--sp-1); }
+
+.sk { background: #191920; border-radius: 4px; animation: sk-pulse 1.5s var(--ease-out) infinite; }
+.sk-default { display: flex; gap: var(--sp-3); align-items: center; padding: var(--sp-5); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); }
+.sk-default .sk-block { flex: 1; display: grid; gap: 8px; }
+.sk-card { min-height: 176px; padding: var(--sp-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); display: grid; align-content: start; gap: 12px; }
+.sk-row { display: flex; gap: 10px; align-items: center; }
+@keyframes sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .52; } }
+
+/* ---------- dialog ---------- */
+dialog.editor {
+  width: 560px; max-width: calc(100vw - 32px);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+  background: #121214; color: var(--ink-1);
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+}
+dialog.editor::backdrop { background: rgba(0,0,0,.62); }
+dialog.editor[open] { animation: dialog-in var(--dur-2) var(--ease-out) both; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(.995); } to { opacity: 1; transform: none; } }
+.editor__surface { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: inherit; }
+.editor__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-5) var(--sp-5) var(--sp-3); }
+.editor__head h2 { font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: 0; }
+.editor__sub { margin-top: 4px; max-width: 44ch; font-size: 11px; line-height: 1.65; color: var(--ink-3); }
+.editor__head .icon-btn { margin-top: -4px; margin-right: -6px; }
+.editor__body { display: grid; gap: var(--sp-5); padding: 0 var(--sp-5) var(--sp-5); overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.form-section { display: grid; gap: var(--sp-3); }
+.form-section + .form-section { padding-top: var(--sp-4); border-top: 1px solid var(--line); }
+.section-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--ink-3); }
+.field { display: grid; gap: 6px; }
+.field__label { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--ink-2); }
+.req { font-size: 10px; font-weight: 400; letter-spacing: .04em; color: var(--ink-3); }
+.field__hint { font-size: 11px; line-height: 1.65; color: var(--ink-3); overflow-wrap: anywhere; }
+.control {
+  width: 100%; height: 40px; padding: 0 12px;
+  background: var(--surface-3); color: var(--ink-1);
+  border: 1px solid var(--line-control); border-radius: 8px;
+  font-size: 14px; line-height: 1.4;
+  transition: border-color var(--dur-1) var(--ease-out), outline-color var(--dur-1) var(--ease-out);
+}
+.control::placeholder { color: var(--ink-3); opacity: 1; }
+.control:hover { border-color: var(--ink-3); }
+.control:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--line-control); }
+.control[aria-invalid="true"] { border-color: var(--danger); }
+select.control { appearance: none; padding-right: 36px; cursor: pointer; }
+.select-wrap { position: relative; }
+.select-wrap__icon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+.control:disabled { background: #0F0F12; color: var(--ink-3); border-color: var(--line); cursor: not-allowed; }
+.field-error { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; line-height: 1.55; color: var(--danger); }
+.field-error .od-icon { margin-top: 2px; }
+.ref-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ref-item { display: grid; gap: 2px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: #0E0E10; }
+.ref-item code { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+.ref-item span { font-size: 10px; line-height: 1.5; color: var(--ink-3); }
+.model-chips-edit { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-edit-chip {
+  display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 2px 0 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+  background: #0F0F12; color: var(--ink-1); font-size: 12px; line-height: 1;
+}
+.model-edit-chip.is-editing { border-color: var(--accent-line); background: var(--accent-soft); }
+.model-edit-chip__name {
+  min-height: 24px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent;
+  color: inherit; font-size: 12px; line-height: 1;
+}
+.model-edit-chip__name:hover { color: var(--accent); }
+.model-edit-chip__remove {
+  display: grid; place-items: center; width: 24px; height: 24px;
+  border: 0; border-radius: 50%; background: transparent; color: var(--ink-3);
+  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+.model-edit-chip__remove:hover { color: var(--danger); background: rgba(240,140,124,.1); }
+.model-edit-chip__remove:disabled { opacity: .35; cursor: not-allowed; background: transparent; }
+.model-empty {
+  padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: 8px;
+  font-size: 11px; line-height: 1.6; color: var(--ink-3);
+}
+.model-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.model-add-row .btn { min-height: 40px; padding: 0 14px; }
+.model-edit-cancel {
+  justify-self: start;
+  display: inline-flex; align-items: center; min-height: 28px; padding: 0 4px;
+  border: 0; background: transparent; color: var(--ink-3); font-size: 11px;
+}
+.model-edit-cancel:hover { color: var(--ink-1); }
+.alert {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px;
+  padding: 12px; border: 1px solid rgba(240,140,124,.35); border-radius: 8px;
+  background: rgba(240,140,124,.06);
+}
+.alert > .od-icon { margin-top: 2px; color: var(--danger); }
+.alert strong { display: block; font-size: 12px; font-weight: 600; color: var(--danger); }
+.alert p { margin-top: 2px; font-size: 12px; line-height: 1.65; color: var(--ink-2); }
+.saving-note { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #0F0F12; font-size: 12px; color: var(--ink-2); }
+.spinner { width: 14px; height: 14px; flex: none; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.editor__foot {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 12px var(--sp-5);
+  border-top: 1px solid var(--line); background: #0F0F12;
+}
+.foot-spacer { flex: 1 1 auto; }
+.foot-right { display: flex; align-items: center; gap: var(--sp-2); }
+.text-danger {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--danger);
+  font-size: 12px; font-weight: 500;
+}
+.text-danger:hover { background: rgba(240,140,124,.08); }
+.text-danger:disabled { color: var(--ink-3); cursor: not-allowed; background: transparent; }
+.confirm-copy { flex: 1; min-width: 0; }
+.confirm-copy strong { display: block; font-size: 12px; font-weight: 600; color: var(--ink-1); }
+.confirm-copy p { margin-top: 2px; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 60;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 40px; max-width: calc(100vw - 32px); padding: 0 14px;
+  background: var(--raised); border: 1px solid var(--line-strong); border-radius: 8px;
+  box-shadow: var(--shadow-menu); color: var(--ink-1); font-size: 12px;
+  opacity: 0; transform: translate(-50%, 4px); pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.toast .od-icon { color: var(--ok); }
+.toast span { overflow-wrap: anywhere; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  .shell { padding: 28px 24px 56px; }
+  .provider-grid { grid-template-columns: minmax(0, 1fr); }
+  .review__hint { margin-left: 0; flex-basis: 100%; max-width: none; text-align: left; }
+}
+@media (max-width: 760px) {
+  .topbar { height: 56px; padding: 0 var(--sp-4); }
+  .brand__doc, .brand__rule, .topbar__suffix { display: none; }
+}
+@media (max-width: 640px) {
+  .shell { padding: 20px var(--sp-4) 48px; }
+  .review { gap: var(--sp-2) var(--sp-3); padding-bottom: 12px; margin-bottom: var(--sp-5); }
+  .review__chips { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 2px; scrollbar-width: none; }
+  .review__chips::-webkit-scrollbar { display: none; }
+  .rev-chip { height: 44px; padding: 0 var(--sp-4); flex: none; }
+  .review__hint { font-size: 11px; }
+  .page-head { flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+  .page-head h1 { font-size: 24px; }
+  .page-lead { font-size: 13px; }
+  .page-meta { margin-top: 2px; }
+  .default-card { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-4); }
+  .default-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .default-actions .btn { min-height: 44px; width: 100%; }
+  .model-menu { left: 0; right: auto; width: 100%; max-height: 300px; }
+  .section-head { align-items: flex-start; margin-top: var(--sp-6); }
+  .section-head__count { padding-top: 2px; }
+  .provider { min-height: 0; padding: var(--sp-4); }
+  .config-btn { min-height: 44px; padding: 0 10px; }
+  .provider__foot { align-items: center; }
+  .empty-card { padding: 32px var(--sp-4); }
+  .empty-facts { grid-template-columns: minmax(0, 1fr); }
+  .empty-card .btn { min-height: 44px; width: 100%; }
+  .section-add { min-height: 44px; }
+  .advanced summary { min-height: 48px; }
+  .raw-config { max-height: 220px; font-size: 10.5px; }
+  dialog.editor { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .editor__head { padding: var(--sp-4) var(--sp-4) var(--sp-3); }
+  .editor__head .icon-btn { width: 44px; height: 44px; margin: -8px -8px 0 0; }
+  .editor__body { padding: 0 var(--sp-4) var(--sp-4); gap: var(--sp-4); }
+  .ref-grid { grid-template-columns: minmax(0, 1fr); }
+  .editor__foot { flex-wrap: wrap; padding: 10px var(--sp-4); }
+  .text-danger { width: 100%; min-height: 40px; justify-content: flex-start; }
+  .editor__foot .confirm-copy { flex-basis: 100%; }
+  .editor__foot > .btn { flex: 1 1 auto; min-height: 44px; }
+  .foot-spacer { display: none; }
+  .foot-right { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .foot-right .btn { min-height: 44px; width: 100%; }
+  .model-add-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .model-add-row .btn { min-height: 44px; }
+  .model-edit-chip { height: 36px; padding-left: 12px; }
+  .model-edit-chip__name { min-height: 32px; }
+  .model-edit-chip__remove { width: 32px; height: 32px; }
+  .model-edit-cancel { min-height: 36px; }
+  .toast { bottom: 16px; width: calc(100vw - 32px); justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand__mark" aria-hidden="true">
+      <svg class="od-icon" style="--od-icon-size:14px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12.5V3.5L12 8l-8 4.5Z"/>
+        <path d="M4 12.5h8"/>
+      </svg>
+    </span>
+    <span class="brand__name">KEEL HARNESS</span>
+    <span class="brand__rule" aria-hidden="true"></span>
+    <span class="brand__doc">设置</span>
+  </div>
+  <div class="crumb" aria-label="当前位置">
+    <span>设置</span><span aria-hidden="true">/</span><strong>模型接入</strong>
+  </div>
+  <div class="topbar__suffix">MODELS · PROVIDERS</div>
+</header>
+
+<main class="shell">
+  <div class="review" aria-label="状态预览">
+    <span class="review__label">状态</span>
+    <div class="review__chips" id="reviewChips" role="group" aria-label="模型接入状态"></div>
+    <p class="review__hint" id="reviewHint" aria-live="polite"></p>
+  </div>
+
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">设置 · 02</p>
+      <h1 id="pageTitle" tabindex="-1">模型接入</h1>
+      <p class="page-lead">把部署默认和 Provider 分开：默认模型只决定新会话，Provider 各自维护协议、地址与凭据。</p>
+    </div>
+    <p class="page-meta" id="pageMeta"></p>
+  </header>
+
+  <div id="pageBody"></div>
+</main>
+
+<dialog class="editor" id="editorDialog" aria-labelledby="editorTitle" aria-describedby="editorSub"></dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span class="toast__icon" aria-hidden="true"></span><span></span>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  function $(selector, root) { return (root || document).querySelector(selector); }
+  function $$(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
+
+  var ICONS = {
+    play: '<path d="M4 12.5V3.5L12 8l-8 4.5Z"/><path d="M4 12.5h8"/>',
+    plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+    refresh: '<path d="M13 8a5 5 0 1 1-1.4-3.5"/><path d="M13 3v3.2H9.8"/>',
+    chevron: '<path d="M4 6l4 4 4-4"/>',
+    close: '<path d="M4 4l8 8M12 4l-8 8"/>',
+    trash: '<path d="M3.5 5h9M6.5 5V3.5h3V5M5 5l.6 8h4.8L11 5"/><path d="M7 7.5v3M9 7.5v3"/>',
+    check: '<path d="M3.5 8.5l3 3 6-7"/>',
+    alert: '<path d="M8 3l5.5 10h-11L8 3Z"/><path d="M8 6.5v3M8 11.2v.3"/>',
+    lock: '<rect x="4" y="7" width="8" height="6" rx="1"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>',
+    plug: '<path d="M6 3v3M10 3v3M5 6h6v2.5A3.5 3.5 0 0 1 7.5 12h-1A3.5 3.5 0 0 1 3 8.5V6h2Z"/><path d="M7.5 12v1.5M4 13h7"/>',
+    arrow: '<path d="M3 8h10M9 4l4 4-4 4"/>',
+    info: '<circle cx="8" cy="8" r="5.5"/><path d="M8 7v4M8 5.2v.3"/>'
+  };
+
+  function icon(name, size) {
+    return '<svg class="od-icon" style="--od-icon-size:' + (size || 14) + 'px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
+  }
+
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function clone(value) { return JSON.parse(JSON.stringify(value)); }
+
+  var SEED_PROVIDERS = [
+    {
+      id: "magpie", name: "Magpie", protocol: "openai",
+      endpoint: "https://api.magpie.ai/v1", credential: "env:MAGPIE_API_KEY",
+      models: ["Magpie 2 Pro"], status: "configured"
+    },
+    {
+      id: "deepseek", name: "DeepSeek", protocol: "openai",
+      endpoint: "https://api.deepseek.com/v1", credential: "env:DEEPSEEK_API_KEY",
+      models: ["DeepSeek V3.2", "DeepSeek R1", "DeepSeek Coder"], status: "configured"
+    },
+    {
+      id: "anthropic", name: "Anthropic", protocol: "anthropic",
+      endpoint: "https://api.anthropic.com/v1", credential: "",
+      models: ["Claude Sonnet 4.5", "Claude Opus 4.1"], status: "unconfigured"
+    },
+    {
+      id: "ollama", name: "Ollama", protocol: "openai",
+      endpoint: "http://127.0.0.1:11434/v1", credential: "",
+      models: ["Qwen3 8B", "Llama 3.3 70B"], status: "unavailable"
+    }
+  ];
+
+  var PROTOCOLS = [
+    { value: "openai", label: "OpenAI 兼容" },
+    { value: "anthropic", label: "Anthropic Messages" },
+    { value: "responses", label: "OpenAI Responses" }
+  ];
+
+  var REVIEW_STATES = [
+    { id: "loading", label: "加载中", hint: "读取 Provider 目录与部署默认；骨架按最终卡片高度预留，不闪空白。" },
+    { id: "configured", label: "已配置", hint: "默认模型置顶，Provider 卡片按接入状态呈现；原始配置收进底部折叠区。" },
+    { id: "unconfigured", label: "未配置", hint: "没有可用 Provider 时只给一条接入口径：接口地址 + 凭据引用。" },
+    { id: "saving", label: "保存中", hint: "保存时锁定字段并给出确定进度；Dialog 不关闭，避免误以为已生效。" },
+    { id: "failed", label: "保存失败", hint: "失败原因贴近服务地址，全部输入保留；重试不需要重新填写。" }
+  ];
+
+  var state = {
+    review: "configured",
+    base: "configured",
+    providers: clone(SEED_PROVIDERS),
+    default: { providerId: "deepseek", model: "DeepSeek V3.2", think: "中" },
+    menuOpen: false,
+    snapshot: null,
+    lastRefresh: "2 分钟前",
+    toastTimer: 0,
+    refreshTimer: 0,
+    saveTimer: 0,
+    dialog: {
+      open: false,
+      mode: "edit",
+      providerId: null,
+      draft: null,
+      errors: {},
+      errorSummary: "",
+      saving: false,
+      saveError: "",
+      confirmDelete: false,
+      preview: null,
+      returnFocus: "",
+      focusTarget: "",
+      suppressClose: false,
+      dirty: false
+    }
+  };
+
+  var dialog = $("#editorDialog");
+  var toastEl = $("#toast");
+  var toastTimer = 0;
+
+  /* ---------- helpers ---------- */
+
+  function providerById(id) {
+    return state.providers.filter(function (p) { return p.id === id; })[0] || null;
+  }
+
+  function protocolLabel(value) {
+    var found = PROTOCOLS.filter(function (p) { return p.value === value; })[0];
+    return found ? found.label : value;
+  }
+
+  function statusLabel(status) {
+    if (status === "configured") return "已配置";
+    if (status === "unavailable") return "不可用";
+    return "未配置";
+  }
+
+  function configuredProviders() {
+    return state.providers.filter(function (p) { return p.status === "configured" && p.models.length; });
+  }
+
+  function defaultModelExists() {
+    if (!state.default) return false;
+    var p = providerById(state.default.providerId);
+    return !!(p && p.status === "configured" && p.models.indexOf(state.default.model) !== -1);
+  }
+
+  function ensureDefault() {
+    if (defaultModelExists()) return;
+    var candidates = configuredProviders();
+    state.default = candidates.length
+      ? { providerId: candidates[0].id, model: candidates[0].models[0], think: "中" }
+      : null;
+  }
+
+  function slugify(name) {
+    var base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "provider";
+    var id = base;
+    var n = 2;
+    while (providerById(id)) { id = base + "-" + n; n += 1; }
+    return id;
+  }
+
+  function badgeHTML(status) {
+    var cls = status === "configured" ? "badge--ok" : status === "unavailable" ? "badge--warn" : "badge--muted";
+    return '<span class="badge ' + cls + '"><span class="badge__dot" aria-hidden="true"></span>' + statusLabel(status) + "</span>";
+  }
+
+  function toast(message) {
+    toastEl.querySelector("span:last-child").textContent = message;
+    toastEl.hidden = false;
+    toastEl.classList.remove("is-visible");
+    window.requestAnimationFrame(function () { toastEl.classList.add("is-visible"); });
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () {
+      toastEl.classList.remove("is-visible");
+      toastTimer = window.setTimeout(function () { toastEl.hidden = true; }, 180);
+    }, 2600);
+  }
+
+  /* ---------- review chrome ---------- */
+
+  function renderReview() {
+    var host = $("#reviewChips");
+    host.innerHTML = REVIEW_STATES.map(function (s) {
+      var on = s.id === state.review;
+      return '<button type="button" class="rev-chip' + (on ? " is-active" : "") + '" data-review="' + s.id +
+        '" aria-pressed="' + (on ? "true" : "false") + '">' + s.label + "</button>";
+    }).join("");
+    var current = REVIEW_STATES.filter(function (s) { return s.id === state.review; })[0];
+    $("#reviewHint").textContent = current ? current.hint : "";
+  }
+
+  function focusReviewChip(id) {
+    var chip = $('#reviewChips [data-review="' + id + '"]');
+    if (chip) chip.focus();
+  }
+
+  /* ---------- page rendering ---------- */
+
+  function menuHTML() {
+    if (!state.menuOpen) return "";
+    var groups = configuredProviders();
+    if (!groups.length) return "";
+    var body = groups.map(function (p) {
+      return '<p class="menu-group-label">' + esc(p.name) + "</p>" +
+        p.models.map(function (model) {
+          var current = state.default && state.default.providerId === p.id && state.default.model === model;
+          return '<button type="button" class="menu-item' + (current ? " is-current" : "") +
+            '" data-action="pick-default" data-provider="' + esc(p.id) + '" data-model="' + esc(model) +
+            '" aria-pressed="' + (current ? "true" : "false") + '">' +
+              "<span><span class=\"menu-item__name\">" + esc(model) + "</span>" +
+              '<span class="menu-item__meta">' + esc(p.name) + " · 思考档位随会话</span></span>" +
+              (current ? '<span class="check">' + icon("check", 13) + "</span>" : "") +
+            "</button>";
+        }).join("");
+    }).join("");
+    return '<div class="model-menu" id="modelMenu" role="group" aria-label="选择默认模型">' + body +
+      '<p class="menu-foot">只列出已配置 Provider 的模型。选择后对新会话生效。</p></div>';
+  }
+
+  function defaultHTML() {
+    if (state.review === "unconfigured" || !state.providers.length) {
+      return '<section class="default-card is-empty" aria-label="当前默认模型">' +
+        '<p class="eyebrow">当前默认模型</p>' +
+        '<p class="default-empty">还没有默认模型。先接入一个 Provider，再从它的模型中选择。</p>' +
+      "</section>";
+    }
+    if (state.review === "loading") {
+      return '<div class="sk-default" aria-hidden="true">' +
+        '<span class="sk" style="width:32px;height:32px;border-radius:8px"></span>' +
+        '<span class="sk-block"><span class="sk" style="width:120px;height:10px"></span>' +
+        '<span class="sk" style="width:220px;height:18px;margin-top:2px"></span>' +
+        '<span class="sk" style="width:280px;height:9px;margin-top:2px"></span></span>' +
+      "</div>";
+    }
+    var p = state.default ? providerById(state.default.providerId) : null;
+    if (!p || !state.default) {
+      return '<section class="default-card is-empty" aria-label="当前默认模型">' +
+        '<p class="eyebrow">当前默认模型</p>' +
+        '<p class="default-empty">默认模型未设置。选择一个已配置 Provider 的模型作为新会话默认。</p>' +
+      "</section>";
+    }
+    var canChange = configuredProviders().length > 0;
+    return '<section class="default-card" aria-labelledby="defaultTitle">' +
+      '<div class="default-main">' +
+        '<span class="p-mark" aria-hidden="true">' + esc(p.name.slice(0, 1).toUpperCase()) + "</span>" +
+        '<div class="default-copy">' +
+          '<p class="eyebrow">当前默认模型</p>' +
+          '<p class="default-provider">' + esc(p.name) + "</p>" +
+          '<div class="default-title"><h2 id="defaultTitle">' + esc(state.default.model) + "</h2>" +
+            '<span class="think-pill">思考 ' + esc(state.default.think) + "</span></div>" +
+          '<p class="default-meta">部署默认 · 新会话自动使用 · 上次刷新 ' + esc(state.lastRefresh) + "</p>" +
+        "</div>" +
+      "</div>" +
+      '<div class="default-actions">' +
+        '<button type="button" class="btn btn--primary" data-action="change-default"' + (canChange ? "" : " disabled") + ">更换</button>" +
+        '<button type="button" class="btn btn--ghost" data-action="refresh">' + icon("refresh", 14) + "刷新</button>" +
+        menuHTML() +
+      "</div>" +
+    "</section>";
+  }
+
+  function providerCardHTML(p) {
+    var local = /^https?:\/\/(127\.0\.0\.1|localhost)([:\/]|$)/.test(p.endpoint);
+    var credential = p.credential ? "<code>" + esc(p.credential) + "</code>" : (local ? "无需凭据" : "凭据未设置");
+    var note = p.status === "unavailable" ? " · 本地服务未启动" : "";
+    return '<article class="provider' + (p.status === "unavailable" ? " provider--unavailable" : "") +
+      '" id="provider-card-' + esc(p.id) + '" aria-labelledby="provider-title-' + esc(p.id) + '">' +
+      '<div class="provider__head">' +
+        '<div class="provider__id">' +
+          '<span class="provider__mark" aria-hidden="true">' + esc(p.name.slice(0, 1).toUpperCase()) + "</span>" +
+          "<div>" +
+            '<h3 class="provider__name" id="provider-title-' + esc(p.id) + '">' + esc(p.name) + "</h3>" +
+            '<p class="provider__endpoint">' + esc(p.endpoint) + "</p>" +
+          "</div>" +
+        "</div>" +
+        badgeHTML(p.status) +
+      "</div>" +
+      '<ul class="model-chips" aria-label="' + esc(p.name) + ' 的模型">' +
+        p.models.map(function (m) { return '<li class="model-chip">' + esc(m) + "</li>"; }).join("") +
+      "</ul>" +
+      '<div class="provider__foot">' +
+        '<p class="provider__meta">' + esc(protocolLabel(p.protocol)) + " · " + credential + esc(note) + "</p>" +
+        '<button type="button" class="config-btn" data-config="' + esc(p.id) + '">配置' + icon("arrow", 12) + "</button>" +
+      "</div>" +
+    "</article>";
+  }
+
+  function rawConfig() {
+    var payload = {
+      version: 1,
+      default: state.default ? {
+        provider: (providerById(state.default.providerId) || {}).name || state.default.providerId,
+        model: state.default.model,
+        think: state.default.think
+      } : null,
+      providers: state.providers.map(function (p) {
+        return {
+          id: p.id, name: p.name, protocol: p.protocol, endpoint: p.endpoint,
+          credential: p.credential, models: p.models, status: p.status
+        };
+      })
+    };
+    return esc(JSON.stringify(payload, null, 2));
+  }
+
+  function advancedHTML() {
+    if (state.review === "loading") return "";
+    return '<details class="advanced">' +
+      "<summary><span>高级：原始配置</span><span class=\"tag\">只读</span>" +
+        '<span class="chevron">' + icon("chevron", 14) + "</span></summary>" +
+      '<div class="advanced__body"><pre class="raw-config" id="rawConfig">' + rawConfig() + "</pre>" +
+        '<p class="advanced__note">只读导出，修改请回到上方 Provider 卡片。凭据仅以引用形式出现，不包含明文密钥。</p>' +
+      "</div>" +
+    "</details>";
+  }
+
+  function configuredPageHTML() {
+    var count = state.providers.length;
+    var configured = state.providers.filter(function (p) { return p.status === "configured"; }).length;
+    return defaultHTML() +
+      '<section aria-labelledby="providersTitle">' +
+        '<div class="section-head">' +
+          "<div>" +
+            '<h2 id="providersTitle">Provider</h2>' +
+            "<p>每家独立维护协议、地址、凭据与模型；配置只影响这一家。</p>" +
+          "</div>" +
+          '<div class="section-tools">' +
+            '<span class="section-head__count">' + count + " 家 · " + configured + " 已配置</span>" +
+            '<button type="button" class="section-add" data-action="add-provider">' + icon("plus", 13) + "添加 Provider</button>" +
+          "</div>" +
+        "</div>" +
+        '<div class="provider-grid">' + state.providers.map(providerCardHTML).join("") + "</div>" +
+      "</section>" +
+      advancedHTML();
+  }
+
+  function emptyPageHTML() {
+    return '<section class="default-card is-empty" aria-label="当前默认模型">' +
+        '<p class="eyebrow">当前默认模型</p>' +
+        '<p class="default-empty">还没有默认模型。先接入一个 Provider，再从它的模型中选择。</p>' +
+      "</section>" +
+      '<section aria-labelledby="emptyProvidersTitle" style="margin-top:24px">' +
+        '<div class="section-head" style="margin-top:0">' +
+          '<div><h2 id="emptyProvidersTitle">Provider</h2><p>还没有配置任何 Provider。</p></div>' +
+          '<span class="section-head__count">0 家</span>' +
+        "</div>" +
+        '<div class="empty-card">' +
+          '<span class="empty-card__icon" aria-hidden="true">' + icon("plug", 20) + "</span>" +
+          "<h3>添加第一个 Provider</h3>" +
+          "<p>接入需要两项：接口地址与凭据引用。保存后即可在模型列表中选择它，并设为部署默认。</p>" +
+          '<div class="empty-facts">' +
+            '<div class="empty-fact"><span>接口地址</span><code>https://…/v1</code></div>' +
+            '<div class="empty-fact"><span>凭据引用</span><code>env:NAME</code></div>' +
+          "</div>" +
+          '<button type="button" class="btn btn--primary" data-action="add-provider">' + icon("plus", 14) + "添加 Provider</button>" +
+        "</div>" +
+      "</section>" +
+      advancedHTML();
+  }
+
+  function loadingPageHTML() {
+    var cards = "";
+    for (var i = 0; i < 4; i++) {
+      cards += '<div class="sk-card" aria-hidden="true">' +
+        '<div class="sk-row"><span class="sk" style="width:28px;height:28px;border-radius:7px"></span>' +
+        '<span class="sk" style="width:104px;height:12px"></span></div>' +
+        '<span class="sk" style="width:100%;height:9px"></span>' +
+        '<span class="sk" style="width:72%;height:22px;border-radius:12px"></span>' +
+        '<span class="sk" style="width:56%;height:8px;margin-top:18px"></span>' +
+      "</div>";
+    }
+    return '<div class="sk-default" aria-hidden="true">' +
+        '<span class="sk" style="width:32px;height:32px;border-radius:8px"></span>' +
+        '<span class="sk-block"><span class="sk" style="width:120px;height:10px"></span>' +
+        '<span class="sk" style="width:220px;height:18px;margin-top:2px"></span>' +
+        '<span class="sk" style="width:280px;height:9px;margin-top:2px"></span></span>' +
+      "</div>" +
+      '<div class="section-head"><div><h2>Provider</h2><p>正在读取接入状态…</p></div>' +
+        '<span class="section-head__count">读取中</span></div>' +
+      '<div class="provider-grid" aria-hidden="true">' + cards + "</div>";
+  }
+
+  function renderPage() {
+    var body = $("#pageBody");
+    if (state.review === "loading") body.innerHTML = loadingPageHTML();
+    else if (state.review === "unconfigured") body.innerHTML = emptyPageHTML();
+    else body.innerHTML = configuredPageHTML();
+
+    var configured = state.providers.filter(function (p) { return p.status === "configured"; }).length;
+    if (state.review === "loading") $("#pageMeta").textContent = "读取中…";
+    else if (state.review === "unconfigured" || !state.providers.length) $("#pageMeta").textContent = "0 家 Provider";
+    else $("#pageMeta").textContent = state.providers.length + " 家 Provider · " + configured + " 已配置";
+  }
+
+  /* ---------- dialog ---------- */
+
+  function draftFromProvider(p) {
+    return {
+      name: p.name,
+      protocol: p.protocol,
+      endpoint: p.endpoint,
+      credential: p.credential,
+      models: p.models.slice()
+    };
+  }
+
+  function openEditor(id, options) {
+    options = options || {};
+    var p = id ? providerById(id) : null;
+    var draft = p ? draftFromProvider(p) : {
+      name: "", protocol: "openai", endpoint: "", credential: "", models: []
+    };
+    var preview = options.preview || null;
+    var errors = {};
+    var saveError = "";
+    if (preview === "failed") {
+      if (!draft.endpoint) draft.endpoint = "https://api.deepseek.com/v2";
+      errors.endpoint = "无法访问该地址；请检查域名、端口或网络代理。";
+      saveError = "配置未生效，已保留你的修改。检查域名、端口或网络代理后重试。";
+    }
+    var pendingClose = state.dialog.suppressClose;
+    state.dialog = {
+      open: true,
+      mode: p ? "edit" : "new",
+      providerId: p ? p.id : null,
+      draft: draft,
+      errors: errors,
+      errorSummary: preview === "failed" ? "服务地址无法访问（连接超时）" : "",
+      saving: preview === "saving",
+      saveError: saveError,
+      confirmDelete: false,
+      preview: preview,
+      modelInput: "",
+      editingModel: -1,
+      returnFocus: p ? '[data-config="' + p.id + '"]' : '[data-action="add-provider"]',
+      focusTarget: preview === "failed" ? "endpoint" : (p ? "endpoint" : "name"),
+      suppressClose: pendingClose,
+      dirty: false
+    };
+    state.review = preview === "saving" ? "saving" : (preview === "failed" ? "failed" : state.review);
+    if (preview === "saving" || preview === "failed") state.base = "configured";
+    if (preview === "saving") state.dialog.focusTarget = "";
+    renderReview();
+    renderDialog();
+    if (!dialog.open) dialog.showModal();
+    applyEditorFocus();
+    if (preview === "saving") {
+      clearTimeout(state.saveTimer);
+      state.saveTimer = window.setTimeout(commitSave, 1400);
+    }
+  }
+
+  function closeEditor(options) {
+    options = options || {};
+    var returnFocus = options.returnFocus || state.dialog.returnFocus;
+    var discarded = state.dialog.dirty;
+    state.dialog.open = false;
+    state.dialog.saving = false;
+    state.dialog.confirmDelete = false;
+    clearTimeout(state.saveTimer);
+    if (dialog.open) dialog.close();
+    if (state.base === "unconfigured") {
+      state.review = "unconfigured";
+    } else {
+      state.review = "configured";
+      state.base = "configured";
+    }
+    renderReview();
+    renderPage();
+    if (options.message) toast(options.message);
+    else if (discarded) toast("已放弃未保存的修改");
+    window.setTimeout(function () {
+      var target = returnFocus ? $(returnFocus) : null;
+      if (!target) target = $('[data-action="add-provider"]');
+      if (!target) target = $("#pageTitle");
+      if (target) target.focus();
+    }, 0);
+  }
+
+  function errorHTML(field) {
+    if (!state.dialog.errors[field]) return "";
+    return '<p class="field-error" id="error-' + field + '">' + icon("alert", 12) + "<span>" + esc(state.dialog.errors[field]) + "</span></p>";
+  }
+
+  function modelEditorHTML() {
+    var d = state.dialog;
+    var draft = d.draft;
+    var saving = d.saving;
+    var editing = d.editingModel >= 0 && d.editingModel < draft.models.length;
+    var atLimit = draft.models.length >= 12;
+    var chips = draft.models.map(function (model, index) {
+      return '<li class="model-edit-chip' + (d.editingModel === index ? " is-editing" : "") + '">' +
+        '<button type="button" class="model-edit-chip__name" data-edit-model="' + index + '" aria-label="编辑模型 ' + esc(model) + '"' + (saving ? " disabled" : "") + ">" + esc(model) + "</button>" +
+        '<button type="button" class="model-edit-chip__remove" data-remove-model="' + index + '" aria-label="删除模型 ' + esc(model) + '"' + (saving ? " disabled" : "") + ">" + icon("close", 12) + "</button>" +
+      "</li>";
+    }).join("");
+    return (draft.models.length
+        ? '<ul class="model-chips-edit" aria-label="已添加的模型">' + chips + "</ul>"
+        : '<p class="model-empty">还没有模型。在下方输入名称后点「添加」。</p>') +
+      '<div class="model-add-row">' +
+        '<input class="control" id="fieldModel" data-model-input type="text" value="' + esc(d.modelInput) + '" placeholder="输入模型名称" maxlength="40" spellcheck="false" autocomplete="off" aria-label="新模型名称"' +
+          (d.errors.models ? ' aria-invalid="true" aria-describedby="error-models"' : "") + (saving ? " disabled" : "") + ">" +
+        '<button type="button" class="btn btn--ghost" data-action="commit-model"' + (saving || (atLimit && !editing) ? " disabled" : "") + ">" + (editing ? "更新" : "添加") + "</button>" +
+      "</div>" +
+      (editing ? '<button type="button" class="model-edit-cancel" data-action="cancel-model-edit">取消修改</button>' : "") +
+      (atLimit && !editing ? '<p class="field__hint">最多 12 个模型。</p>' : "");
+  }
+
+  function startEditModel(index) {
+    var d = state.dialog;
+    if (!d.draft || d.saving || index < 0 || index >= d.draft.models.length) return;
+    d.modelInput = d.draft.models[index];
+    d.editingModel = index;
+    d.focusTarget = "model-input";
+    renderDialog();
+  }
+
+  function removeModel(index) {
+    var d = state.dialog;
+    if (!d.draft || d.saving || index < 0 || index >= d.draft.models.length) return;
+    d.draft.models.splice(index, 1);
+    if (d.editingModel === index) { d.editingModel = -1; d.modelInput = ""; }
+    else if (d.editingModel > index) d.editingModel -= 1;
+    d.dirty = true;
+    clearFieldError("models");
+    d.focusTarget = "model-input";
+    renderDialog();
+  }
+
+  function commitModelInput() {
+    var d = state.dialog;
+    if (!d.draft || d.saving) return;
+    var value = d.modelInput.trim();
+    if (!value) { d.focusTarget = "model-input"; renderDialog(); return; }
+    var editing = d.editingModel >= 0 && d.editingModel < d.draft.models.length;
+    if (!editing && d.draft.models.length >= 12) return;
+    if (editing) d.draft.models[d.editingModel] = value;
+    else d.draft.models.push(value);
+    d.modelInput = "";
+    d.editingModel = -1;
+    d.dirty = true;
+    clearFieldError("models");
+    d.focusTarget = "model-input";
+    renderDialog();
+  }
+
+  function renderDialog() {
+    if (!state.dialog.draft) return;
+    var d = state.dialog;
+    var draft = d.draft;
+    var title = d.mode === "new" ? "添加 Provider" : "配置 " + draft.name;
+    var sub = d.mode === "new"
+      ? "填写接入信息；保存后立即出现在 Provider 列表。"
+      : "只修改 " + draft.name + "；其它 Provider 不受影响。";
+    if (d.preview === "saving") sub = "正在写入配置并测试连接，请稍候。";
+    if (d.preview === "failed") sub = "保存未完成；本次修改已保留。";
+
+    var invalid = d.errors;
+    var errorSummary = "";
+    if (d.errorSummary) {
+      errorSummary = '<div class="alert" role="alert">' + icon("alert", 16) +
+        "<div><strong>" + esc(d.errorSummary) + "</strong>" + (d.saveError ? "<p>" + esc(d.saveError) + "</p>" : "") + "</div></div>";
+    } else if (d.preview === "failed" && d.saveError) {
+      errorSummary = '<div class="alert" role="alert">' + icon("alert", 16) +
+        "<div><strong>保存失败：服务地址不可达</strong><p>" + esc(d.saveError) + "</p></div></div>";
+    }
+
+    var nameField = d.mode === "new"
+      ? '<div class="field"><label class="field__label" for="fieldName">显示名称<span class="req">必填</span></label>' +
+        '<input class="control" id="fieldName" data-field="name" type="text" value="' + esc(draft.name) + '" placeholder="例如 Groq" maxlength="40" spellcheck="false"' +
+          (invalid.name ? ' aria-invalid="true" aria-describedby="error-name"' : "") + ">" +
+        errorHTML("name") + "</div>"
+      : "";
+
+    var protocolOptions = PROTOCOLS.map(function (p) {
+      return '<option value="' + p.value + '"' + (draft.protocol === p.value ? " selected" : "") + ">" + p.label + "</option>";
+    }).join("");
+
+    var savingNote = d.preview === "saving"
+      ? '<div class="saving-note" role="status"><span class="spinner" aria-hidden="true"></span>正在写入配置并测试连接，通常不超过 1 秒。</div>'
+      : "";
+
+    var disabled = d.saving ? " disabled" : "";
+
+    var footer;
+    if (d.confirmDelete) {
+      footer = '<div class="confirm-copy"><strong>删除 ' + esc(draft.name) + "？</strong>" +
+        "<p>该 Provider 的 " + draft.models.filter(function (m) { return m.trim(); }).length + " 个模型将从默认选择中移除。此操作不可撤销。</p></div>" +
+        '<button type="button" class="btn btn--ghost" data-action="cancel-delete">保留</button>' +
+        '<button type="button" class="btn btn--danger" data-action="confirm-delete">确认删除</button>';
+    } else {
+      footer = (d.mode === "edit"
+          ? '<button type="button" class="text-danger" data-action="delete"' + disabled + ">删除该 Provider</button>"
+          : "") +
+        '<span class="foot-spacer"></span>' +
+        '<div class="foot-right">' +
+          '<button type="button" class="btn btn--ghost" data-action="close-editor"' + disabled + ">取消</button>" +
+          '<button type="button" class="btn btn--primary" data-action="save"' + (d.saving ? " disabled" : "") + ">" +
+            (d.saving ? '<span class="spinner" aria-hidden="true"></span>保存中…' : "保存并生效") +
+          "</button>" +
+        "</div>";
+    }
+
+    dialog.innerHTML = '<div class="editor__surface"' + (d.saving ? ' aria-busy="true"' : "") + ">" +
+      '<div class="editor__head">' +
+        "<div><h2 id=\"editorTitle\">" + esc(title) + "</h2>" +
+        '<p class="editor__sub" id="editorSub">' + esc(sub) + "</p></div>" +
+        '<button type="button" class="icon-btn" data-action="close-editor" aria-label="关闭配置"' + disabled + ">" + icon("close", 16) + "</button>" +
+      "</div>" +
+      '<div class="editor__body">' +
+        errorSummary + savingNote +
+        '<section class="form-section" aria-labelledby="accessLabel">' +
+          '<h3 class="section-label" id="accessLabel">接入</h3>' +
+          nameField +
+          '<div class="field"><label class="field__label" for="fieldProtocol">接口协议</label>' +
+            '<div class="select-wrap"><select class="control" id="fieldProtocol" data-field="protocol"' + disabled + ">" + protocolOptions + "</select>" +
+            '<span class="select-wrap__icon" aria-hidden="true">' + icon("chevron", 14) + "</span></div>" +
+          "</div>" +
+          '<div class="field"><label class="field__label" for="fieldEndpoint">服务地址<span class="req">必填</span></label>' +
+            '<input class="control" id="fieldEndpoint" data-field="endpoint" type="url" inputmode="url" value="' + esc(draft.endpoint) + '" placeholder="https://api.example.com/v1" spellcheck="false"' +
+              (invalid.endpoint ? ' aria-invalid="true" aria-describedby="error-endpoint"' : "") + disabled + ">" +
+            '<p class="field__hint">填写包含版本路径的完整地址，例如 https://api.deepseek.com/v1。</p>' + errorHTML("endpoint") +
+          "</div>" +
+          '<div class="field"><label class="field__label" for="fieldCredential">凭据引用</label>' +
+            '<input class="control" id="fieldCredential" data-field="credential" type="text" value="' + esc(draft.credential) + '" placeholder="env:PROVIDER_API_KEY" spellcheck="false" autocomplete="off"' +
+              (invalid.credential ? ' aria-invalid="true" aria-describedby="error-credential"' : "") + disabled + ">" +
+            '<div class="ref-grid" aria-label="凭据引用写法">' +
+              '<div class="ref-item"><code>${NAME}</code><span>环境变量插值</span></div>' +
+              '<div class="ref-item"><code>env:NAME</code><span>读取进程环境</span></div>' +
+              '<div class="ref-item"><code>secret:NAME</code><span>读取本机密钥库</span></div>' +
+            "</div>" +
+            '<p class="field__hint">只填引用，不要粘贴明文密钥。本地服务可留空，保存后状态为「未配置」。</p>' + errorHTML("credential") +
+          "</div>" +
+        "</section>" +
+        '<section class="form-section" aria-labelledby="modelsLabel">' +
+          '<div class="section-head" style="margin:0"><div><h3 class="section-label" id="modelsLabel">模型</h3>' +
+            '<p class="field__hint">模型名会出现在会话的模型选择器中。</p></div>' +
+            '<span class="section-head__count">' + draft.models.length + " / 12</span></div>" +
+          '<div class="model-editor" role="group" aria-labelledby="modelsLabel">' + modelEditorHTML() + "</div>" +
+          errorHTML("models") +
+        "</section>" +
+      "</div>" +
+      '<div class="editor__foot"' + (d.confirmDelete ? ' role="group" aria-label="确认删除"' : "") + ">" + footer + "</div>" +
+    "</div>";
+    if (dialog.open) applyEditorFocus();
+  }
+
+  function applyEditorFocus() {
+    var target = state.dialog.focusTarget;
+    if (!target) return;
+    state.dialog.focusTarget = "";
+    var el = null;
+    if (target === "first-error") el = dialog.querySelector('[aria-invalid="true"]');
+    else if (target === "confirm-delete") el = dialog.querySelector('[data-action="confirm-delete"]');
+    else if (target === "delete") el = dialog.querySelector('[data-action="delete"]');
+    else if (target === "model-input") el = dialog.querySelector("[data-model-input]");
+    else el = dialog.querySelector('[data-field="' + target + '"]');
+    if (el) {
+      el.focus();
+      if (el.tagName === "INPUT" && typeof el.setSelectionRange === "function") {
+        try { el.setSelectionRange(el.value.length, el.value.length); } catch (err) {}
+      }
+    }
+  }
+
+  function clearFieldError(field) {
+    delete state.dialog.errors[field];
+    var input = dialog.querySelector('[data-field="' + field + '"]');
+    if (input) {
+      input.removeAttribute("aria-invalid");
+      input.removeAttribute("aria-describedby");
+    }
+    var err = dialog.querySelector("#error-" + field);
+    if (err) err.remove();
+    var alertEl = dialog.querySelector(".alert");
+    if (alertEl) alertEl.remove();
+    state.dialog.errorSummary = "";
+    state.dialog.saveError = "";
+  }
+
+  /* ---------- validation & save ---------- */
+
+  function validateDraft() {
+    var d = state.dialog;
+    var draft = d.draft;
+    var errors = {};
+    var messages = [];
+    var name = draft.name.trim();
+    if (d.mode === "new") {
+      if (!name) { errors.name = "请填写 Provider 显示名称。"; messages.push("显示名称"); }
+      else if (state.providers.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) {
+        errors.name = "已有同名 Provider，请换一个名称。"; messages.push("显示名称");
+      }
+    }
+    var endpoint = draft.endpoint.trim();
+    if (!endpoint) { errors.endpoint = "请填写服务地址。"; messages.push("服务地址"); }
+    else if (!/^https?:\/\/[^\s]+$/i.test(endpoint)) { errors.endpoint = "地址需以 http:// 或 https:// 开头，且不能包含空格。"; messages.push("服务地址"); }
+    var credential = draft.credential.trim();
+    if (credential && !/^(\$\{[A-Za-z_][A-Za-z0-9_]*\}|env:[A-Za-z_][A-Za-z0-9_]*|secret:[A-Za-z_][A-Za-z0-9_]*)$/.test(credential)) {
+      errors.credential = "引用格式应为 ${NAME}、env:NAME 或 secret:NAME；不要粘贴明文密钥。";
+      messages.push("凭据引用");
+    }
+    var models = draft.models.map(function (m) { return m.trim(); }).filter(Boolean);
+    if (!models.length) { errors.models = "至少添加一个模型名称。"; messages.push("模型"); }
+    else if (models.some(function (m) { return m.length > 40; })) { errors.models = "单个模型名不超过 40 个字符。"; messages.push("模型"); }
+    d.errors = errors;
+    d.errorSummary = messages.length ? "有 " + messages.length + " 处需要修正：" + messages.join("、") + "。" : "";
+    return Object.keys(errors).length === 0;
+  }
+
+  function nextStatus(draft, existing) {
+    if (draft.credential.trim()) return "configured";
+    if (existing && existing.status === "unavailable" && existing.endpoint === draft.endpoint.trim()) return "unavailable";
+    return "unconfigured";
+  }
+
+  function commitSave() {
+    var d = state.dialog;
+    if (!d.draft) return;
+    var draft = d.draft;
+    var models = draft.models.map(function (m) { return m.trim(); }).filter(Boolean);
+    var existing = d.providerId ? providerById(d.providerId) : null;
+    if (existing) {
+      existing.name = draft.name.trim() || existing.name;
+      existing.protocol = draft.protocol;
+      existing.endpoint = draft.endpoint.trim();
+      existing.credential = draft.credential.trim();
+      existing.models = models;
+      existing.status = nextStatus(draft, existing);
+    } else {
+      var created = {
+        id: slugify(draft.name),
+        name: draft.name.trim(),
+        protocol: draft.protocol,
+        endpoint: draft.endpoint.trim(),
+        credential: draft.credential.trim(),
+        models: models,
+        status: nextStatus(draft, null)
+      };
+      state.providers.push(created);
+    }
+    ensureDefault();
+    state.snapshot = null;
+    state.base = "configured";
+    state.review = "configured";
+    var provider = d.providerId ? providerById(d.providerId) : providerByNewName(draft.name);
+    var focusSelector = null;
+    if (provider) focusSelector = '[data-config="' + provider.id + '"]';
+    state.dialog.open = false;
+    state.dialog.saving = false;
+    clearTimeout(state.saveTimer);
+    if (dialog.open) dialog.close();
+    renderReview();
+    renderPage();
+    toast("已保存并生效");
+    window.setTimeout(function () {
+      var target = focusSelector ? $(focusSelector) : $('[data-action="add-provider"]');
+      if (!target) target = $("#pageTitle");
+      if (target) target.focus();
+    }, 0);
+  }
+
+  function providerByNewName(name) {
+    var wanted = String(name).trim().toLowerCase();
+    return state.providers.filter(function (p) { return p.name.toLowerCase() === wanted; })[0] || null;
+  }
+
+  function attemptSave() {
+    var d = state.dialog;
+    if (!d.open || d.saving || d.confirmDelete) return;
+    if (!validateDraft()) {
+      d.focusTarget = "first-error";
+      renderDialog();
+      return;
+    }
+    d.errors = {};
+    d.errorSummary = "";
+    d.saveError = "";
+    d.saving = true;
+    d.preview = null;
+    d.focusTarget = "";
+    state.review = "saving";
+    renderReview();
+    renderDialog();
+    clearTimeout(state.saveTimer);
+    state.saveTimer = window.setTimeout(commitSave, 900);
+  }
+
+  function requestDelete() {
+    var d = state.dialog;
+    if (!d.open || d.mode !== "edit" || d.saving) return;
+    d.confirmDelete = true;
+    d.focusTarget = "confirm-delete";
+    renderDialog();
+  }
+
+  function confirmDelete() {
+    var d = state.dialog;
+    if (!d.providerId) return;
+    var target = providerById(d.providerId);
+    if (!target) return;
+    var name = target.name;
+    state.providers = state.providers.filter(function (p) { return p.id !== target.id; });
+    ensureDefault();
+    state.dialog.open = false;
+    state.dialog.confirmDelete = false;
+    if (dialog.open) dialog.close();
+    state.base = state.providers.length ? "configured" : "unconfigured";
+    state.review = state.base;
+    renderReview();
+    renderPage();
+    toast("已删除 " + name);
+    window.setTimeout(function () {
+      var fallback = $('[data-action="add-provider"]') || $("#pageTitle");
+      if (fallback) fallback.focus();
+    }, 0);
+  }
+
+  function focusMenuItem() {
+    var item = $(".menu-item", $("#modelMenu") || document);
+    if (item) item.focus();
+  }
+
+  function closeMenu(restoreFocus) {
+    if (!state.menuOpen) return;
+    state.menuOpen = false;
+    renderPage();
+    if (restoreFocus) {
+      window.setTimeout(function () {
+        var btn = $('[data-action="change-default"]');
+        if (btn) btn.focus();
+      }, 0);
+    }
+  }
+
+  function restoreSnapshot() {
+    if (!state.snapshot) return;
+    state.providers = state.snapshot.providers;
+    state.default = state.snapshot.default;
+    state.snapshot = null;
+  }
+
+  function enterUnconfigured() {
+    if (state.review !== "unconfigured") {
+      state.snapshot = {
+        providers: clone(state.providers),
+        default: clone(state.default)
+      };
+      state.providers = [];
+      state.default = null;
+    }
+    state.base = "unconfigured";
+    state.review = "unconfigured";
+  }
+
+  function setReview(kind) {
+    clearTimeout(state.refreshTimer);
+    clearTimeout(state.saveTimer);
+    if (state.dialog.open) {
+      if (dialog.open) state.dialog.suppressClose = true;
+      state.dialog.open = false;
+      state.dialog.saving = false;
+      state.dialog.confirmDelete = false;
+      if (dialog.open) dialog.close();
+    }
+    state.menuOpen = false;
+
+    if (kind === "unconfigured") {
+      enterUnconfigured();
+      renderPage();
+      renderReview();
+      focusReviewChip(kind);
+      return;
+    }
+
+    restoreSnapshot();
+
+    if (kind === "loading") {
+      state.base = "loading";
+      state.review = "loading";
+      renderPage();
+      renderReview();
+      focusReviewChip(kind);
+      return;
+    }
+    if (kind === "configured" || !state.providers.length) {
+      state.base = state.providers.length ? "configured" : "unconfigured";
+      state.review = state.providers.length ? "configured" : "unconfigured";
+      renderPage();
+      renderReview();
+      focusReviewChip(state.review);
+      return;
+    }
+    state.base = "configured";
+    state.review = kind;
+    renderPage();
+    renderReview();
+    var previewProvider = providerById("deepseek") || (state.default && providerById(state.default.providerId)) || state.providers[0] || null;
+    openEditor(previewProvider ? previewProvider.id : null, { preview: kind });
+  }
+
+  function refreshProviders() {
+    clearTimeout(state.refreshTimer);
+    state.menuOpen = false;
+    state.base = "loading";
+    state.review = "loading";
+    renderReview();
+    renderPage();
+    state.refreshTimer = window.setTimeout(function () {
+      state.base = "configured";
+      state.review = "configured";
+      state.lastRefresh = "刚刚";
+      renderReview();
+      renderPage();
+      toast("已刷新 Provider 状态");
+      window.setTimeout(function () {
+        var btn = $('[data-action="refresh"]');
+        if (btn) btn.focus();
+      }, 0);
+    }, 900);
+  }
+
+  /* ---------- events ---------- */
+
+  document.addEventListener("click", function (event) {
+    if (state.menuOpen && !event.target.closest(".default-actions")) closeMenu(false);
+
+    var reviewChip = event.target.closest("[data-review]");
+    if (reviewChip) { setReview(reviewChip.dataset.review); return; }
+
+    var configBtn = event.target.closest("[data-config]");
+    if (configBtn) { openEditor(configBtn.dataset.config); return; }
+
+    var editChip = event.target.closest("[data-edit-model]");
+    if (editChip) { startEditModel(Number(editChip.dataset.editModel)); return; }
+
+    var removeChip = event.target.closest("[data-remove-model]");
+    if (removeChip) { removeModel(Number(removeChip.dataset.removeModel)); return; }
+
+    var actionBtn = event.target.closest("[data-action]");
+    if (!actionBtn || actionBtn.disabled) return;
+    var action = actionBtn.dataset.action;
+
+    if (action === "change-default") {
+      state.menuOpen = !state.menuOpen;
+      renderPage();
+      if (state.menuOpen) window.setTimeout(focusMenuItem, 0);
+      else window.setTimeout(function () {
+        var btn = $('[data-action="change-default"]');
+        if (btn) btn.focus();
+      }, 0);
+      return;
+    }
+    if (action === "pick-default") {
+      state.default = { providerId: actionBtn.dataset.provider, model: actionBtn.dataset.model, think: "中" };
+      state.menuOpen = false;
+      renderPage();
+      toast("默认模型已切换为 " + actionBtn.dataset.model);
+      window.setTimeout(function () {
+        var btn = $('[data-action="change-default"]');
+        if (btn) btn.focus();
+      }, 0);
+      return;
+    }
+    if (action === "refresh") { refreshProviders(); return; }
+    if (action === "add-provider") { openEditor(null); return; }
+    if (action === "close-editor") { closeEditor(); return; }
+    if (action === "save") { attemptSave(); return; }
+    if (action === "delete") { requestDelete(); return; }
+    if (action === "cancel-delete") {
+      state.dialog.confirmDelete = false;
+      state.dialog.focusTarget = "delete";
+      renderDialog();
+      return;
+    }
+    if (action === "confirm-delete") { confirmDelete(); return; }
+    if (action === "commit-model") { commitModelInput(); return; }
+    if (action === "cancel-model-edit") {
+      var dd = state.dialog;
+      dd.modelInput = "";
+      dd.editingModel = -1;
+      dd.focusTarget = "model-input";
+      renderDialog();
+      return;
+    }
+  });
+
+  $("#editorDialog").addEventListener("input", function (event) {
+    var d = state.dialog;
+    if (!d.draft) return;
+    var field = event.target.dataset.field;
+    if (field) {
+      d.draft[field] = event.target.value;
+      d.dirty = true;
+      if (d.errors[field]) clearFieldError(field);
+      return;
+    }
+    if (event.target.hasAttribute("data-model-input")) {
+      d.modelInput = event.target.value;
+      if (d.errors.models) {
+        clearFieldError("models");
+        event.target.removeAttribute("aria-invalid");
+        event.target.removeAttribute("aria-describedby");
+      }
+    }
+  });
+
+  $("#editorDialog").addEventListener("change", function (event) {
+    var d = state.dialog;
+    if (!d.draft) return;
+    var field = event.target.dataset.field;
+    if (field === "protocol") { d.draft.protocol = event.target.value; d.dirty = true; }
+  });
+
+  $("#editorDialog").addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (state.dialog.saving) return;
+      if (state.dialog.confirmDelete) {
+        state.dialog.confirmDelete = false;
+        state.dialog.focusTarget = "delete";
+        renderDialog();
+        return;
+      }
+      closeEditor();
+      return;
+    }
+    if (event.key === "Tab") {
+      var nodes = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])', dialog)
+        .filter(function (el) { return el.offsetWidth || el.offsetHeight || el.getClientRects().length; });
+      if (!nodes.length) return;
+      var first = nodes[0];
+      var last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+    if (event.key !== "Enter" || event.isComposing) return;
+    if (event.target.hasAttribute("data-model-input")) {
+      event.preventDefault();
+      commitModelInput();
+      return;
+    }
+    if (event.target.tagName === "INPUT" && event.target.type !== "checkbox" && event.target.type !== "radio") {
+      event.preventDefault();
+      attemptSave();
+    }
+  });
+
+  $("#editorDialog").addEventListener("cancel", function (event) {
+    if (state.dialog.saving) { event.preventDefault(); return; }
+    if (state.dialog.confirmDelete) {
+      event.preventDefault();
+      state.dialog.confirmDelete = false;
+      state.dialog.focusTarget = "delete";
+      renderDialog();
+      return;
+    }
+    event.preventDefault();
+    closeEditor();
+  });
+
+  $("#editorDialog").addEventListener("close", function () {
+    if (state.dialog.suppressClose) { state.dialog.suppressClose = false; return; }
+    if (!state.dialog.open) return;
+    state.dialog.open = false;
+    state.review = state.base === "unconfigured" ? "unconfigured" : "configured";
+    renderReview();
+    renderPage();
+    window.setTimeout(function () {
+      var target = state.dialog.returnFocus ? $(state.dialog.returnFocus) : null;
+      if (!target) target = $('[data-action="add-provider"]');
+      if (!target) target = $("#pageTitle");
+      if (target) target.focus();
+    }, 0);
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && state.menuOpen && !dialog.open) {
+      event.preventDefault();
+      closeMenu(true);
+    }
+  });
+
+  window.addEventListener("resize", function () {
+    if (state.menuOpen) closeMenu(false);
+  });
+
+  /* ---------- boot ---------- */
+  $(".toast__icon").innerHTML = icon("check", 14);
+  renderReview();
+  renderPage();
+})();
+</script>
+</body>
+</html>

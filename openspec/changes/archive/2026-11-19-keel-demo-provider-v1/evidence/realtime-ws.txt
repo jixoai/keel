@@ -1,0 +1,35 @@
+url: ws://127.0.0.1:13791/v1/realtime?session_id=a3086502-4b06-454d-bdfa-d0683f109194&model=demo-realtime&provider_id=demo
+sent: session.update=true response.create=true
+received sequence:
+  20ms (open) 
+  21ms session.created
+  22ms session.updated
+  124ms response.created
+  125ms response.audio_transcript.delta delta="已收到。这是 keel "
+  125ms response.audio_transcript.delta delta="服务端直接生成的回复：内"
+  125ms response.audio_transcript.delta delta="容固定、可复现，不来自任"
+  125ms response.audio_transcript.delta delta="何外部模型调用。你可以用"
+  125ms response.audio_transcript.delta delta="它验证会话、流式增量与渲"
+  125ms response.audio_transcript.delta delta="染链路。"
+  125ms response.audio_transcript.done transcript="已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染链路。"
+  125ms response.done
+streamed transcript == "已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染链路。"
+transcript.done    == "已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染链路。"
+url: ws://127.0.0.1:13791/v1/realtime?session_id=a3086502-4b06-454d-bdfa-d0683f109194&model=demo-realtime&provider_id=demo
+sent: session.update=true response.create=true
+received sequence:
+  20ms (open) 
+  21ms session.created
+  22ms session.updated
+  124ms response.created
+  125ms response.audio_transcript.delta delta="已收到。这是 keel "
+  125ms response.audio_transcript.delta delta="服务端直接生成的回复：内"
+  125ms response.audio_transcript.delta delta="容固定、可复现，不来自任"
+  125ms response.audio_transcript.delta delta="何外部模型调用。你可以用"
+  125ms response.audio_transcript.delta delta="它验证会话、流式增量与渲"
+  125ms response.audio_transcript.delta delta="染链路。"
+  125ms response.audio_transcript.done transcript="已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染链路。"
+  125ms response.done
+  undefinedms (close) 1005 
+streamed transcript == "已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染链路。"
+transcript.done    == "已收到。这是 keel 服务端直接生成的回复：内容固定、可复现，不来自任何外部模型调用。你可以用它验证会话、流式增量与渲染链路。"

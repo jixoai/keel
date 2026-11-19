@@ -1,0 +1,15 @@
+$ lsof -nP -iTCP:13792,13793,13794 -sTCP:LISTEN -t
+38666
+42341
+42587
+$ kill 38666
+42341
+42587
+$ lsof -nP -iTCP:13792,13793,13794 -sTCP:LISTEN | wc -l
+       4
+$ ps -p 38666
+42341
+42587
+ps: Invalid process id: 38666
+42341
+42587

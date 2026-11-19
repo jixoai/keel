@@ -1,0 +1,27 @@
+## A. web/src 全量 demo 词表扫描（不含测试/fixture 分类）
+$ rg -n --no-heading -i 'demo' web/src | wc -l
+      86
+
+$ rg -n --no-heading '演示' web/src
+web/src/surfaces/speech/speech.test.tsx:57:  expect(all).not.toContain("演示回复");
+
+$ rg -n --no-heading 'DEMO_MODELS|DEMO_PROVIDER_ID|isDemoSelection|surfacePreview|panel-demo' web/src
+(exit=1 -> 1 means 0 hits)
+
+$ rg -n --no-heading 'assets/surfaces' web/src web/*.js web/*.json
+(exit=1 -> 1 means 0 hits)
+
+$ ls web/assets/surfaces
+ls: web/assets/surfaces: No such file or directory
+
+## B. 命中文件分类（demo- 前缀）
+web/src/data/fixture.ts
+web/src/data/media.ts
+web/src/data/store.ts
+web/src/screens/settings-capabilities.test.tsx
+web/src/surfaces/image/image.test.tsx
+web/src/surfaces/image/index.tsx
+web/src/surfaces/speech/App.tsx
+web/src/surfaces/speech/components/transcript-row.tsx
+web/src/surfaces/speech/index.tsx
+web/src/surfaces/speech/speech.test.tsx

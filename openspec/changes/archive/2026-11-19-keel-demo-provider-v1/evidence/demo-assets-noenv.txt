@@ -1,0 +1,5 @@
+== demo-asset endpoint on the no-demo deployment (13760) ==
+GET /v1/demo/assets/square.png -> 404
+GET /v1/demo/assets/landscape.png -> 404
+GET /v1/demo/assets/portrait.png -> 404
+== same endpoint on the demo deployment (13791, recorded earlier) -> 200 image/png 249B ==

@@ -1,0 +1,20 @@
+
+== whole trace ==
+window: 0ms .. 4840.687ms (4841ms)
+RunTask: 3206 | >=200ms: 8 458.5,243.2,304.6,266.8,546.6,242.2,247.3,305.5
+main-thread busy: 3274.8ms = 67.7%
+frames: presented 10 | dropped 10 | no-update-desired 11 (of 31 reported)
+GC: 8 (total 165.0ms) | MinorGC 7 / MajorGC 1
+Paint: 440
+UpdateLayoutTree: 4
+Layout: 4
+ScheduleStyleRecalculation: 4
+InvalidateLayout: 28
+AddedModifiedNodeInAnimationFrame: 0
+RecalcStyle: 0
+ParseHTML: 0
+TimerFire: 11
+Commit: 17
+EventDispatch: 168
+EventDispatch(load): 168
+top: SoftNavigationContext::AddedModifiedNodeInAnimationFrame=4704 RunTask=3239 UpdateCounters=912 v8.callFunction=903 FunctionCall=903 ProfileChunk=642 Paint=440 V8.HandleInterrupts=221 V8.StackGuard=220 EventDispatch=168 V8.GC_SCAVENGER_BACKGROUND_SCAVENGE_PARALLEL=141 Major concurrent marking rescheduled=135

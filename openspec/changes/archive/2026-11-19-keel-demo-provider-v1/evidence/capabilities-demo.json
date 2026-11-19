@@ -1,0 +1,1 @@
+{"configured":true,"llm":true,"image":true,"decision":true,"video":false,"tts":true,"stt":true,"realtime":false,"models":{"llm":"bailian-token-plan/qwen3.8-flash","image":"bailian-token-plan/wan2.7-image","decision":"bailian-token-plan/decision-model-preview"}}
