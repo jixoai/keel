@@ -27,9 +27,11 @@
       `TestCredentialEnvMissWithoutSecretNamesBothSources`（双通道具名）、
       `TestCredentialSecretReferenceStillWinsOverEnv`（显式 ref 不被新回退干扰）、
       且 provider view 不含密钥值）
-- [ ] 真库 E2E：内置形状 provider（`env: S2API_KEY`）+ 密钥库存 `S2API_KEY` + 本地假上游
-      → 会话成功、假上游断言 Bearer 命中；清理并按纪律回收
-      （未做：本线禁止真实上游/常驻进程；单测已覆盖判定，E2E 需协调者排期）
+- [x] 真库 E2E：内置形状 provider（`env: SAME_NAME_E2E_KEY`，与 `env: S2API_KEY` 同形状）
+      + 密钥库存同名 secret + 本地假上游 → 会话成功、假上游断言 Bearer 精确命中库中值；
+      清理并按纪律回收
+      （2026-11-19 主代理执行：`providersExecutable=1`、`provider test executable=true`、
+      `run.finished=done`、假上游 `auth_match=true`；转录 `evidence/same-name-e2e.md`）
 - [x] 设置页 Provider 对话框 hint 补一句（内置 provider 的 env/same-name-secret 关系）
       （对账：`web/src/screens/settings.tsx` 凭据引用 Field 的 hint 追加「内置 Provider 的
       env:NAME 在环境变量未设置时，会自动改用「密钥」里同名的密钥（环境变量优先）…」）
