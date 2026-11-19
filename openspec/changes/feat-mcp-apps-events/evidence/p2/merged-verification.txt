@@ -1,0 +1,16 @@
+# P2 后端合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `8b3ef43`（cherry-pick `0cb04e4`，无冲突）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：55 个 `ok`，零 FAIL，exit 0（新增 `internal/mcphost`）
+- `./scripts/conformance.sh`：1015 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 交付面：`internal/mcphost`（Registry/LRU 64MiB/CSP/主题/_meta 成员校验）、
+  `cmd/keel/dynamic_surface.go` + servicehost 双半面发布、`/v1/mcp/servers|apps|apps/{id}/view`
+  与安全头/租户边界、`/v1/capabilities` 能力位、服务端降级
+- lane 证据：`openspec/changes/feat-mcp-apps-events/evidence/p2/`
+- 独立复核：P2 功能+安全双轴由独立 reviewer 在冻结 `0cb04e4` 上进行（报告归档后补记）
+- 未勾：P2.8（其验收含前端 5s 握手超时/协议违规销毁，服务端部分已在条目下注明交付）
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
