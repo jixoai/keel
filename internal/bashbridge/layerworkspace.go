@@ -35,6 +35,13 @@ type SessionIdentity struct {
 	// CallID is the model tool-call id; it is the idempotency key of the
 	// fs.capture event the run's close commits.
 	CallID string
+	// JobID is the harness background-job id this execution belongs to (the
+	// JobManager stamps it before the job's session is created). Empty means the
+	// execution is a run's tool call: its close settles on the owner lane with
+	// the live run fence. Non-empty means a background job that may outlive the
+	// run, so its close settles on the system lane with jobId attribution and no
+	// owner token.
+	JobID string
 }
 
 // Valid reports whether the identity names a session.
@@ -79,7 +86,8 @@ type LayerWorkspaceOptions struct {
 // later bash call reads the same bytes, and a bash write lands in the same
 // workspace index the next capture reads. Writes from bash enter the CAS when
 // the file handle closes; capture turns the index into tree objects and one
-// fs.capture event (fileplugin.CaptureWorkspace).
+// fs.capture event (fileplugin.CaptureWorkspace for a run's tool call,
+// fileplugin.CaptureWorkspaceSystem for a background job with a jobId).
 //
 // Sessions are independent: their workspaces (and therefore their path views)
 // are keyed by (tenant, session). The map lives for the process lifetime; a
@@ -240,10 +248,15 @@ func (l *LayerWorkspaces) manifestEntries(ctx context.Context, tenantID, session
 	return files, nil
 }
 
-// capture settles the run's workspace changes as exactly one fs.capture (or
-// one fs.capture_failed on the failure path, committed by the service). It uses
-// a fresh deadline because the run context may already be canceled (timeout,
-// kill) while the workspace still holds the run's writes.
+// capture settles the execution's workspace changes as exactly one fs.capture
+// (or one fs.capture_failed on the failure path, committed by the service). It
+// uses a fresh deadline because the run context may already be canceled
+// (timeout, kill) while the workspace still holds the run's writes.
+//
+// The settlement lane follows the identity: a run's tool call is fenced by the
+// live run lease (owner lane), while a harness background job outlives the run
+// and settles as a system fact with jobId attribution (the lease may already be
+// gone, so requiring it would lose the job's writes forever).
 func (l *LayerWorkspaces) capture(ctx context.Context, identity SessionIdentity) error {
 	service := l.serviceValue()
 	if service == nil {
@@ -255,6 +268,7 @@ func (l *LayerWorkspaces) capture(ctx context.Context, identity SessionIdentity)
 		// keeps the event unique without inventing a replay identity.
 		callID = "bash:" + uuid.NewString()
 	}
+	jobID := strings.TrimSpace(identity.JobID)
 	captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), l.captureTimeout)
 	defer cancel()
 	scope := fileplugin.Scope{
@@ -262,16 +276,24 @@ func (l *LayerWorkspaces) capture(ctx context.Context, identity SessionIdentity)
 		SessionID: identity.SessionID,
 		TaskID:    strings.TrimSpace(identity.TaskID),
 	}
-	result, err := service.CaptureWorkspace(captureCtx, scope, callID, 0, scope.TaskID)
+	var (
+		result fileplugin.CaptureResult
+		err    error
+	)
+	if jobID != "" {
+		result, err = service.CaptureWorkspaceSystem(captureCtx, scope, callID, 0, scope.TaskID, jobID)
+	} else {
+		result, err = service.CaptureWorkspace(captureCtx, scope, callID, 0, scope.TaskID)
+	}
 	if err != nil {
 		l.logger.Warn("bash workspace capture failed",
 			"tenant_id", identity.TenantID, "session_id", identity.SessionID,
-			"call_id", callID, "err", err)
+			"call_id", callID, "job_id", jobID, "err", err)
 		return err
 	}
 	l.logger.Debug("bash workspace captured",
 		"tenant_id", identity.TenantID, "session_id", identity.SessionID,
-		"call_id", callID, "tree", result.Tree, "count", result.Count, "seq", result.Seq)
+		"call_id", callID, "job_id", jobID, "tree", result.Tree, "count", result.Count, "seq", result.Seq)
 	return nil
 }
 

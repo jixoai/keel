@@ -19,8 +19,10 @@ type kindSpec struct {
 	// key is the idempotency space the kind carries ("" = none).
 	key KeyKind
 	// system marks an owner-scoped kind that may also be committed through the
-	// system lane without a lease (task events for the initial card). It is
-	// irrelevant for pure ClassSystem kinds, which always require that lane.
+	// system lane without a lease: task events for the initial card, and
+	// fs.capture for a harness-owned background job that outlives the run
+	// attempt that started it (payload carries jobId). It is irrelevant for pure
+	// ClassSystem kinds, which always require that lane.
 	system bool
 }
 
@@ -60,8 +62,13 @@ var kindRegistry = map[EventKind]kindSpec{
 	KindTaskClosed:   {class: ClassOwner, key: KeyTask, system: true},
 	KindTaskNote:     {class: ClassOwner, key: KeyTask, system: true},
 
+	// fs.capture is dual-lane like the task kinds. A run's per-tool-call
+	// settlement is owner-scoped and carries the run fence; a harness-owned
+	// background job outlives the run attempt that started it, so its settlement
+	// is a system fact (System: true, payload jobId) and must not present a
+	// fabricated owner token.
 	KindFSWrite:         {class: ClassOwner, key: KeyFSWrite},
-	KindFSCapture:       {class: ClassOwner, key: KeyFSCapture},
+	KindFSCapture:       {class: ClassOwner, key: KeyFSCapture, system: true},
 	KindFSCaptureFailed: {class: ClassSystem, key: KeyFSCaptureFailed},
 
 	KindConfigRotated: {class: ClassSystem, key: KeyConfig},

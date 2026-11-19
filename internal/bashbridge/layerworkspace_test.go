@@ -93,6 +93,34 @@ func (h *seamHarness) bashCtx(callID string) context.Context {
 	})
 }
 
+// bashJobCtx is a background job's execution identity: the job id makes the
+// workspace settlement a system fact.
+func (h *seamHarness) bashJobCtx(callID, jobID string) context.Context {
+	return bashbridge.WithSessionIdentity(h.ctx, bashbridge.SessionIdentity{
+		TenantID:  h.scope.TenantID,
+		SessionID: h.scope.SessionID,
+		TaskID:    "task-seam",
+		CallID:    callID,
+		JobID:     jobID,
+	})
+}
+
+// releaseRunLease settles the parent run attempt, exactly as the runtime does
+// when a timeout turns a tool call into a background job.
+func (h *seamHarness) releaseRunLease(t *testing.T) {
+	t.Helper()
+	if err := h.kernel.Release(h.ctx, h.lease); err != nil {
+		t.Fatalf("release the run lease: %v", err)
+	}
+	state, err := h.kernel.LeaseState(h.ctx, kernel.Scope{TenantID: h.scope.TenantID, SessionID: h.scope.SessionID})
+	if err != nil {
+		t.Fatalf("read lease state: %v", err)
+	}
+	if state.Live {
+		t.Fatal("the run lease is still live; the test cannot prove the system lane")
+	}
+}
+
 func (h *seamHarness) events(t *testing.T) []kernel.Event {
 	t.Helper()
 	events, err := h.kernel.LoadEvents(h.ctx, kernel.Scope{TenantID: h.scope.TenantID, SessionID: h.scope.SessionID}, 0, 1000)
@@ -355,6 +383,102 @@ func TestCaptureFailureIsOneSystemEvent(t *testing.T) {
 		t.Fatalf("capture_failed toolCallId = %v", payload["toolCallId"])
 	}
 	if payload["error"] == nil || !strings.Contains(payload["error"].(string), "gbashfs") {
+		t.Fatalf("capture_failed error = %v", payload["error"])
+	}
+}
+
+// TestBackgroundJobCaptureSettlesWithoutRunLease is the job bridge: a timeout
+// turn (or a nohup child) outlives the run attempt, so the run lease is already
+// released when the job's session closes. Its workspace changes MUST still enter
+// layerfs as one fs.capture with jobId attribution, not as a capture_failed.
+func TestBackgroundJobCaptureSettlesWithoutRunLease(t *testing.T) {
+	h := newSeamHarness(t)
+	h.releaseRunLease(t)
+
+	session, err := h.bridge.NewSession(h.bashJobCtx("call-bg-1", "job-bg-1"))
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	result, err := session.Run(h.bashJobCtx("call-bg-1", "job-bg-1"), bashbridge.RunSpec{
+		Command: `mkdir -p /workspace/job && printf 'job-wrote-this\n' > /workspace/job/out.txt`,
+	})
+	if err != nil {
+		session.Close()
+		t.Fatalf("job run: %v", err)
+	}
+	if result.ExitCode != 0 {
+		session.Close()
+		t.Fatalf("job exit = %d", result.ExitCode)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close (system capture): %v", err)
+	}
+
+	captures := h.captures(t, kernel.KindFSCapture)
+	if len(captures) != 1 {
+		t.Fatalf("fs.capture events = %d, want exactly 1", len(captures))
+	}
+	if failed := h.captures(t, kernel.KindFSCaptureFailed); len(failed) != 0 {
+		t.Fatalf("fs.capture_failed events = %d, want 0", len(failed))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(captures[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["jobId"] != "job-bg-1" {
+		t.Fatalf("capture jobId = %v", payload["jobId"])
+	}
+	if payload["taskId"] != "task-seam" {
+		t.Fatalf("capture taskId = %v", payload["taskId"])
+	}
+	if payload["count"].(float64) != 1 {
+		t.Fatalf("capture payload = %v, want the one job-written file", payload)
+	}
+
+	read, err := h.service.Read(h.fileCtx("call-r-bg"), mustArgs(t, map[string]any{"path": "job/out.txt"}))
+	if err != nil {
+		t.Fatalf("read the job's captured file: %v", err)
+	}
+	if read.Content != "job-wrote-this\n" {
+		t.Fatalf("captured content = %q", read.Content)
+	}
+}
+
+// TestRunCaptureStillRequiresTheLease is the negative control: an identity
+// without a job id stays on the owner lane, so a released run lease still yields
+// exactly one fs.capture_failed. The system lane is not a generic bypass.
+func TestRunCaptureStillRequiresTheLease(t *testing.T) {
+	h := newSeamHarness(t)
+	h.releaseRunLease(t)
+
+	session, err := h.bridge.NewSession(h.bashCtx("call-nolease"))
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if _, err := session.Run(h.bashCtx("call-nolease"), bashbridge.RunSpec{Command: `true`}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if err := session.Close(); err == nil {
+		t.Fatal("close succeeded without a live lease, want the owner-lane capture failure")
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 0 {
+		t.Fatalf("fs.capture events = %d, want 0 (the owner lane has no fence)", got)
+	}
+	failed := h.captures(t, kernel.KindFSCaptureFailed)
+	if len(failed) != 1 {
+		t.Fatalf("fs.capture_failed events = %d, want exactly 1", len(failed))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(failed[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["toolCallId"] != "call-nolease" {
+		t.Fatalf("capture_failed toolCallId = %v", payload["toolCallId"])
+	}
+	if _, hasJob := payload["jobId"]; hasJob {
+		t.Fatalf("owner-lane failure carries jobId: %v", payload)
+	}
+	if payload["error"] == nil || !strings.Contains(payload["error"].(string), "lease") {
 		t.Fatalf("capture_failed error = %v", payload["error"])
 	}
 }

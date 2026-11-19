@@ -1,0 +1,18 @@
+# w2.jobcap residue check
+
+## e2e run: PASS — evidence
+
+## port release (from the script)
+# port release check
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## processes matching keel/e2e/stub (expect none)
+none
+
+## listeners on the e2e ports (expect none)
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## e2e database left behind (keel_agent_runtime_e2e_20261120_002502; expect empty)
+(end)

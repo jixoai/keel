@@ -454,8 +454,54 @@ func (s *Service) Capture(ctx context.Context, args json.RawMessage) (CaptureRes
 }
 
 // CaptureWorkspace snapshots the execution space and commits exactly one
-// fs.capture event (or one fs.capture_failed on the failure path).
+// fs.capture event (or one fs.capture_failed on the failure path). It is the
+// run settlement path: the event is fenced by the session's live run lease.
 func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID string, baseSeq int64, taskID string) (CaptureResult, error) {
+	return s.captureWorkspace(ctx, captureSettlement{scope: scope, callID: callID, baseSeq: baseSeq, taskID: taskID})
+}
+
+// CaptureWorkspaceSystem settles the workspace changes of a harness-owned
+// background job. The job is not a run attempt and may outlive it, so its
+// settlement cannot be fenced by the run lease: it commits as a system fact
+// (CommitRequest.System) with the job id as attribution, and never presents a
+// fabricated owner token. The same snapshot → commit → manifest → retain →
+// snapshot path runs as the owner lane; only the commit lane and the key
+// namespace differ, so a job settlement can never dedupe against (and hide
+// behind) the owner event of the same tool call.
+func (s *Service) CaptureWorkspaceSystem(ctx context.Context, scope Scope, callID string, baseSeq int64, taskID, jobID string) (CaptureResult, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return CaptureResult{}, Errorf(CodeInvalid, "the system capture lane needs the background job id")
+	}
+	return s.captureWorkspace(ctx, captureSettlement{
+		scope: scope, callID: callID, baseSeq: baseSeq, taskID: taskID, jobID: jobID,
+	})
+}
+
+// captureSettlement is one workspace settlement. An empty JobID selects the
+// owner lane (a run's tool call, fenced by the live run lease); a non-empty
+// JobID selects the system lane for a harness-owned background job.
+type captureSettlement struct {
+	scope   Scope
+	callID  string
+	baseSeq int64
+	taskID  string
+	jobID   string
+}
+
+// key is the idempotency key of the settlement. The job namespace is embedded
+// in the value (not invented by the caller), so the owner and system lanes for
+// the same tool call are two independent facts.
+func (c captureSettlement) key() string {
+	base := c.callID + ":" + strconv.FormatInt(c.baseSeq, 10)
+	if c.jobID == "" {
+		return base
+	}
+	return "job:" + c.jobID + ":" + base
+}
+
+func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettlement) (CaptureResult, error) {
+	scope := settlement.scope
 	if !scope.Valid() {
 		return CaptureResult{}, Errorf(CodeRunScopeMissing, "capture needs the ambient session scope")
 	}
@@ -465,9 +511,10 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 	if s.committer == nil {
 		return CaptureResult{}, Errorf(CodeUnavailable, "no kernel committer is wired")
 	}
-	taskID = s.taskID(scope, taskID)
-	key := callID + ":" + strconv.FormatInt(baseSeq, 10)
-	if replay, found, err := s.lookupCapture(ctx, scope, key, baseSeq); err != nil {
+	settlement.taskID = s.taskID(scope, settlement.taskID)
+	system := settlement.jobID != ""
+	key := settlement.key()
+	if replay, found, err := s.lookupCapture(ctx, scope, key, settlement.baseSeq); err != nil {
 		return CaptureResult{}, err
 	} else if found {
 		return replay, nil
@@ -482,25 +529,33 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 		snapshot, err = s.store.Capture(s.captureRoot, layerfs.CaptureOptions{Ignore: s.ignore, Cache: s.cache})
 	}
 	if err != nil {
-		s.commitCaptureFailed(ctx, scope, callID, baseSeq, taskID, err)
+		s.commitCaptureFailed(ctx, settlement, err)
 		return CaptureResult{}, mapLayerfsError(err)
 	}
-	token, err := s.liveToken(ctx, scope)
-	if err != nil {
-		s.commitCaptureFailed(ctx, scope, callID, baseSeq, taskID, err)
-		return CaptureResult{}, err
+	// The owner lane needs the run fence; the system lane deliberately skips it
+	// (the run may already be settled) and commits with System: true instead.
+	var token kernel.OwnerToken
+	if !system {
+		token, err = s.liveToken(ctx, scope)
+		if err != nil {
+			s.commitCaptureFailed(ctx, settlement, err)
+			return CaptureResult{}, err
+		}
 	}
 	payload := map[string]any{
 		"sessionId":     scope.SessionID.String(),
-		"baseSeq":       baseSeq,
+		"baseSeq":       settlement.baseSeq,
 		"count":         snapshot.Count,
 		"treeHash":      snapshot.Tree.Prefixed(),
 		"newObjects":    snapshot.NewObjects,
 		"reusedObjects": snapshot.ReusedObjects,
 		"bytes":         snapshot.Bytes,
 	}
-	if taskID != "" {
-		payload["taskId"] = taskID
+	if settlement.taskID != "" {
+		payload["taskId"] = settlement.taskID
+	}
+	if system {
+		payload["jobId"] = settlement.jobID
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -510,11 +565,12 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 		Scope:        kernelScope(scope),
 		Kind:         kernel.KindFSCapture,
 		Token:        token,
+		System:       system,
 		FSCaptureKey: key,
 		Payload:      raw,
 	})
 	if err != nil {
-		s.commitCaptureFailed(ctx, scope, callID, baseSeq, taskID, err)
+		s.commitCaptureFailed(ctx, settlement, err)
 		return CaptureResult{}, mapKernelError(err)
 	}
 	entries := make([]Entry, len(snapshot.Files))
@@ -523,7 +579,7 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 	for index, file := range snapshot.Files {
 		entries[index] = Entry{
 			Path: file.Path, Hash: file.Hash, Mode: file.Mode, Size: file.Size,
-			UpdatedSeq: receipt.Seq, LastTaskID: taskID,
+			UpdatedSeq: receipt.Seq, LastTaskID: settlement.taskID,
 		}
 		refs = append(refs, layerfs.RefEntry{Hash: file.Hash, Ref: ref})
 	}
@@ -538,7 +594,7 @@ func (s *Service) CaptureWorkspace(ctx context.Context, scope Scope, callID stri
 		return CaptureResult{}, Errorf(CodeIO, "capture committed at seq %d but the snapshot was not recorded: %v", receipt.Seq, err)
 	}
 	return CaptureResult{
-		Tree: snapshot.Tree.Prefixed(), Count: snapshot.Count, Seq: receipt.Seq, BaseSeq: baseSeq,
+		Tree: snapshot.Tree.Prefixed(), Count: snapshot.Count, Seq: receipt.Seq, BaseSeq: settlement.baseSeq,
 		NewObjects: snapshot.NewObjects, ReusedObjects: snapshot.ReusedObjects, Bytes: snapshot.Bytes,
 	}, nil
 }
@@ -761,18 +817,26 @@ func (s *Service) lookupCapture(ctx context.Context, scope Scope, key string, ba
 	return CaptureResult{Tree: tree.Prefixed(), Count: len(entries), Seq: receipt.Seq, BaseSeq: baseSeq, Replayed: true}, true, nil
 }
 
-func (s *Service) commitCaptureFailed(ctx context.Context, scope Scope, callID string, baseSeq int64, taskID string, cause error) {
+func (s *Service) commitCaptureFailed(ctx context.Context, settlement captureSettlement, cause error) {
 	if s.committer == nil {
 		return
 	}
+	scope := settlement.scope
 	payload := map[string]any{
 		"sessionId":  scope.SessionID.String(),
-		"toolCallId": callID,
-		"baseSeq":    baseSeq,
+		"toolCallId": settlement.callID,
+		"baseSeq":    settlement.baseSeq,
 		"error":      cause.Error(),
 	}
-	if taskID != "" {
-		payload["taskId"] = taskID
+	if settlement.taskID != "" {
+		payload["taskId"] = settlement.taskID
+	}
+	key := fmt.Sprintf("%s:%s:%d", scope.SessionID, settlement.callID, settlement.baseSeq)
+	if settlement.jobID != "" {
+		// Job settlements are their own fact: attribute the failure to the job
+		// and keep its failure key out of the owner lane's namespace.
+		payload["jobId"] = settlement.jobID
+		key = fmt.Sprintf("%s:job:%s:%s:%d", scope.SessionID, settlement.jobID, settlement.callID, settlement.baseSeq)
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -783,7 +847,7 @@ func (s *Service) commitCaptureFailed(ctx context.Context, scope Scope, callID s
 		Scope:              kernelScope(scope),
 		Kind:               kernel.KindFSCaptureFailed,
 		System:             true,
-		FSCaptureFailedKey: fmt.Sprintf("%s:%s:%d", scope.SessionID, callID, baseSeq),
+		FSCaptureFailedKey: key,
 		Payload:            raw,
 	}); err != nil {
 		s.logger.Warn("commit fs.capture_failed", "session_id", scope.SessionID, "err", err)

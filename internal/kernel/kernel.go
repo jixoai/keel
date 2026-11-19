@@ -303,8 +303,11 @@ const (
 	// ClassSystem marks harness-driven durable facts that carry no lease
 	// (capture failures, placement, supervision, notifications). They are not
 	// client-writable and are accepted only through the explicit system lane
-	// (CommitRequest.System). Task kinds are owner-scoped during a run and may
-	// also use this lane for the initial card created before any run exists.
+	// (CommitRequest.System). Dual-lane kinds stay owner-scoped during a run and
+	// may also use this lane when no run owns the fact: task kinds for the
+	// initial card created before any run exists, and fs.capture for a
+	// harness-owned background job that outlives the run attempt that started
+	// it.
 	ClassSystem CommitClass = "system-scoped"
 )
 
@@ -312,11 +315,15 @@ const (
 //
 // Scope and Kind are required. Token is required for owner-scoped kinds
 // (assistant.message, tool.result, compaction, run lifecycle events, task
-// events created during a run, fs.write/capture) and carries the fencing token
-// returned by Claim; edge-scoped, external-scoped and system-scoped kinds must
-// not present one. Exactly one idempotency key is required per kind: requestId
-// for user.message, generationId for assistant.message, toolCallId for
-// tool.result, requestId again for external.event, and the matching v2
+// events created during a run, fs.write, and fs.capture settled by the run) and
+// carries the fencing token returned by Claim; edge-scoped, external-scoped and
+// system-scoped kinds must not present one. fs.capture has two committers: the
+// run settle path uses the owner lane with the fence, while a harness-owned
+// background job (which outlives the run attempt) uses the system lane with its
+// jobId in the payload and no token. Exactly one idempotency key is required
+// per kind: requestId for user.message, generationId for assistant.message,
+// toolCallId for tool.result, requestId again for external.event, and the
+// matching v2
 // namespace for task/fs/capture/config/placement/supervision/resume/notify/run
 // kinds. Payload is the JSON document to store; for tool.result it must contain
 // the same toolCallId as the request, and for assistant.message every toolCall
@@ -341,8 +348,10 @@ type CommitRequest struct {
 
 	// System selects the harness-driven system lane: no lease, no client
 	// write path. It is required for ClassSystem kinds and allowed on the
-	// dual-lane task kinds (initial card before a run exists). It is rejected
-	// on every other kind, so a caller cannot silently bypass the fence.
+	// dual-lane kinds: the task kinds (initial card before a run exists) and
+	// fs.capture (a background job's settlement after the run lease is gone; the
+	// payload carries jobId as attribution). It is rejected on every other kind,
+	// so a caller cannot silently bypass the fence.
 	System bool
 
 	// Idempotency keys. See KeyKind for which kind requires which key. Values

@@ -78,6 +78,8 @@ MUST NOT 回收仍被任一 manifest、snapshot 或账本前缀引用的对象�
 重扫。**一次结算 MUST 只产生一条批事件**（`baseSeq` / `count` / `treeHash`），manifest MUST
 批量 upsert 并以该事件 seq 作为 `updated_seq`，MUST NOT 为每个文件单独追加事件。忽略清单默认
 MUST 只包含 `.git/objects`。策略 MUST 可由 `config.toml` 覆写为 `checkpoint` 或 `manual`。
+run 内结算 MUST 携带 run fence。后台作业（无 run lease）产生的变更 MUST 由 Harness 以**系统事实**
+结算 `fs.capture`：payload 携带 `jobId` 归因，MUST NOT 伪造 owner token。
 
 #### Scenario: 安装依赖只产生一条事件
 - **GIVEN** 一个任务执行 `npm install` 写入十万个文件
@@ -88,6 +90,12 @@ MUST 只包含 `.git/objects`。策略 MUST 可由 `config.toml` 覆写为 `chec
 - **GIVEN** 子代理的 `config.toml` 设置 `fs.capture.mode=checkpoint`
 - **WHEN** 它连续执行多条命令
 - **THEN** 只有任务完成/子代理返回/显式 checkpoint 时才结算变更
+
+#### Scenario: 后台作业逃出 run 后仍结算
+- **GIVEN** 一次 bash 调用超时转入后台作业，原 run 已结束并释放租约
+- **WHEN** 作业写完文件后退出
+- **THEN** 账本新增一条 `fs.capture{sessionId, taskId, jobId, baseSeq, count, treeHash}`，
+  manifest 含该文件，不产生 `fs.capture_failed`，也不出现伪造的 owner token
 
 ### Requirement: 执行空间是物化视图，显式写必须写穿
 

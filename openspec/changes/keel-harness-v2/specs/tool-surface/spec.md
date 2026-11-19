@@ -188,3 +188,8 @@ MUST NOT 声称「重新挂上仍在运行的作业」。
 #### Scenario: 孤儿回收
 - **WHEN** 一个会话被删除而其后台作业仍存活
 - **THEN** 作业的 session context 被取消并按策略终止，作业被标记终态，进程内不留孤儿 goroutine
+
+#### Scenario: 作业结束结算执行空间变更
+- **WHEN** 一个后台作业写完文件后退出（其父 run 可能已结束）
+- **THEN** 它以一条 `fs.capture`（payload 携带 `jobId`，不依赖 run lease）结算变更，
+  见 layerfs「capture 默认实时、按批结算」

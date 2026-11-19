@@ -56,6 +56,66 @@ func TestSystemLaneAndTaskInitialCard(t *testing.T) {
 	}
 }
 
+// TestFSCaptureSystemLane pins the two committers of fs.capture. A run's
+// settlement uses the owner lane with the run fence; a harness-owned background
+// job outlives the run attempt, so its settlement is a system fact carrying the
+// jobId and never a token. The system lane must stay closed to pure owner kinds,
+// and the two lanes must stay independent idempotency facts.
+func TestFSCaptureSystemLane(t *testing.T) {
+	for _, im := range implementations(t) {
+		im := im
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+
+			// A background job settles after the run lease is gone: the system lane
+			// commits fs.capture with no lease at all.
+			system := h.mustCommit(CommitRequest{Kind: KindFSCapture, System: true,
+				FSCaptureKey: "job:job-1:call-1:0",
+				Payload:      json.RawMessage(`{"jobId":"job-1","count":1}`)})
+			if system.Kind != KindFSCapture || system.Deduped {
+				t.Fatalf("system fs.capture = %+v", system)
+			}
+
+			// The owner lane still refuses a capture without the fence.
+			if err := h.commitErr(CommitRequest{Kind: KindFSCapture,
+				FSCaptureKey: "call-2:0", Payload: json.RawMessage(`{}`)}); !iso(err, ErrMissingToken) {
+				t.Fatalf("owner fs.capture without token = %v, want missing-token", err)
+			}
+
+			lease := h.claimScope(h.scope, "runtime-a")
+
+			// The system lane never takes the fence.
+			if err := h.commitErr(CommitRequest{Kind: KindFSCapture, System: true, Token: lease.Token,
+				FSCaptureKey: "job:job-2:call-2:0", Payload: json.RawMessage(`{}`)}); !iso(err, ErrInvalidRequest) {
+				t.Fatalf("system fs.capture with token = %v, want invalid-request", err)
+			}
+
+			// A pure owner-scoped kind still refuses the system lane, so the new
+			// exception cannot be used as a generic fence bypass.
+			if err := h.commitErr(CommitRequest{Kind: KindFSWrite, System: true,
+				FSWriteKey: "call-3:a", Payload: json.RawMessage(`{}`)}); !iso(err, ErrInvalidRequest) {
+				t.Fatalf("fs.write on the system lane = %v, want invalid-request", err)
+			}
+
+			// A run's own settlement keeps the owner lane and is a distinct fact from
+			// the system event above.
+			owner := h.mustCommit(CommitRequest{Kind: KindFSCapture, Token: lease.Token,
+				FSCaptureKey: "call-4:0", Payload: json.RawMessage(`{}`)})
+			if owner.Deduped || owner.Seq == system.Seq {
+				t.Fatalf("owner fs.capture = %+v (system seq %d)", owner, system.Seq)
+			}
+
+			// Each lane replays against its own key, not the other's.
+			replay := h.mustCommit(CommitRequest{Kind: KindFSCapture, System: true,
+				FSCaptureKey: "job:job-1:call-1:0",
+				Payload:      json.RawMessage(`{"jobId":"job-1","count":1}`)})
+			if !replay.Deduped || replay.Seq != system.Seq {
+				t.Fatalf("system replay = %+v, want deduped seq %d", replay, system.Seq)
+			}
+		})
+	}
+}
+
 // TestFSWriteDoesNotDedupeAgainstToolResult is the negative control the v2
 // contract requires: fs.write for tool call "call-1" and the tool.result of
 // that same call must occupy different idempotency spaces.

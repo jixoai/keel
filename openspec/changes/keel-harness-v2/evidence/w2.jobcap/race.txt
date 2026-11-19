@@ -1,0 +1,4 @@
+ok  	github.com/jixoai/keel/internal/kernel	32.653s
+ok  	github.com/jixoai/keel/internal/fileplugin	56.180s
+ok  	github.com/jixoai/keel/internal/bashbridge	3.168s
+ok  	github.com/jixoai/keel/internal/jobqueue	31.360s

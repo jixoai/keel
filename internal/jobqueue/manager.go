@@ -510,6 +510,17 @@ func (m *Manager) progressLoop(ctx context.Context, job *liveJob) {
 }
 
 func (m *Manager) runJob(ctx context.Context, job *liveJob, req RunRequest) {
+	// A background job is a harness-owned execution unit that may outlive the
+	// run attempt that started it. Stamp its id on the ambient session identity
+	// before the session is created, so the workspace close settles fs.capture
+	// on the system lane with jobId attribution instead of requiring the parent
+	// run's lease (which is gone by then). The identity itself comes from the
+	// caller (bash tool / nohup); a job started without one (direct manager use)
+	// keeps the no-capture fallback workspace.
+	if identity, ok := bashbridge.SessionIdentityFromContext(ctx); ok {
+		identity.JobID = job.id.String()
+		ctx = bashbridge.WithSessionIdentity(ctx, identity)
+	}
 	session, err := m.bridge.NewSession(ctx)
 	var result bashbridge.Result
 	var runErr error
