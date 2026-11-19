@@ -1,0 +1,28 @@
+# P2 前端传输修复合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `f55d290`（cherry-pick `4caaf80`，`tasks.md` 自动合并）。
+
+- `cd web && nsh check`：exit 0
+- `nsh test --target tui`：141/141 passed（修复前 136，新增 5）
+- `nsh test --target tui src/surfaces/mcp-app/bridge.test.ts`：18/18（含 200 帧/s 限速）
+- `nsh package --target web -o dist/web/keel`：exit 0
+- **真实 Chrome 浏览器 E2E（主代理独立复跑，合并树产物）**：`pass=true`，10 步全过
+  （`session-list → session-open → frame-attached → frame-mounted → app-state → frame-box →
+  host-badge → isolation → navigation-defense → document-headers`）
+  - iframe sandbox：`allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals
+    allow-downloads allow-scripts`（无 `allow-same-origin`）
+  - app 内 `document.cookie` / `parent.document` / `localStorage` 均 SecurityError；
+    `fetch(..., credentials:"include")` 到达服务器时 `cookie=""`
+  - 自导航 `/evil.html` 后宿主销毁旧实例并 `reload=1` 重载，新实例重新完成 tool-input/tool-result；
+    第三方页未收到任何 tool 帧
+  - 文档响应头：CSP（含 `frame-ancestors 'self'`）、nosniff、no-referrer、X-MCP-App-Mime、hash、immutable
+- 传输方案：web 分支绝对同源 URL；View→Host 走页面 `window.top` message 监听
+  （`origin==="null"` + `event.source` 匹配带 `instance` nonce 的 iframe）；Host→View 走
+  `WebViewRef.postMessage`。srcdoc wrapper 经实测被 `frame-ancestors 'self'` 阻断，未采用。
+- 安全口径：NSH 固定附加的 sandbox flags 与后端 CSP `sandbox allow-scripts` 同时生效时取限制交集，
+  有效权限仍为 allow-scripts；同源文档 opaque origin 已由 E2E 实证。
+- 残余：导航后到 `onLoad` 重载前的理论窗口（P2，已由 E2E 的 navigation-defense 覆盖常规路径）；
+  第二 origin 双 iframe 仍为 design 暂缓项；P2.8 仍未勾（P6 浏览器全量验收）。
+- lane 证据：`evidence/p2/frontend/e2e/`（可复跑脚本 + report.json + 截图/控制台/响应头）
+
+本文件不含 DSN 或密钥。
