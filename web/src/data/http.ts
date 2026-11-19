@@ -19,6 +19,7 @@ import type {
   Delivery,
   EventSource,
   FireResultView,
+  McpAppCatalogueView,
   MediaCapabilitiesView,
   MediaCapabilityStatus,
   MediaCapabilityView,
@@ -41,6 +42,7 @@ import type {
   UiCommands,
   WireEvent,
 } from "./contract";
+import { parseMcpAppCatalogue } from "./mcp-apps";
 
 export class KeelApiError extends Error {
   readonly status: number;
@@ -551,6 +553,14 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
   async capabilities(): Promise<Record<string, unknown>> {
     const response = await this.request("/v1/capabilities");
     return (await response.json()) as Record<string, unknown>;
+  }
+
+  /** `GET /v1/mcp/apps`: the app catalogue (plus the theme palettes and the
+   * optional second origin). A deployment without the surface answers 501; the
+   * caller reports the server's reason and falls back to text. */
+  async mcpApps(): Promise<McpAppCatalogueView> {
+    const response = await this.request("/v1/mcp/apps");
+    return parseMcpAppCatalogue(await response.json());
   }
 
   // ---- sessions ---------------------------------------------------------

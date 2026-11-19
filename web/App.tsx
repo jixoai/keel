@@ -27,6 +27,7 @@
 import { effect, mount, platform, signal, Storage, Text, View, windowSize } from "nsh";
 
 import type { SessionSummary } from "./src/data/contract";
+import { setClientCapabilities } from "./src/data/capabilities";
 import { store, type Notice } from "./src/data/store";
 import { KitGallery } from "./kit/KitGallery";
 import { CommandPalette } from "./src/screens/command-palette";
@@ -62,6 +63,11 @@ import {
 } from "./src/ui/kit";
 import { conversationState, runStateLabel, runStateTone, type RunTone } from "./src/ui/run-state";
 import { sessionTitle } from "./src/ui/session-title";
+
+// This build's own capability facts (not the deployment's): the terminal host
+// has no WebView, so it does not support MCP Apps even when the server does.
+// The app's tool result then stays text (the spec's TUI rule).
+setClientCapabilities({ "mcp.apps": platform.idiom !== "terminal" });
 
 // ---- the route ------------------------------------------------------------
 

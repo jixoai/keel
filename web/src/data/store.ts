@@ -21,6 +21,8 @@ import type {
   Delivery,
   EventSource,
   FireResultView,
+  McpAppCatalogueView,
+  McpAppToolResult,
   ModelsSettingsView,
   ModelSelection,
   ModelView,
@@ -38,6 +40,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
+import { setDeploymentCapabilities } from "./capabilities";
 
 /** The connection state: probing, a live service, or nothing to talk to. There
  * is no demo state — the fixture is a development transport, not a mode the
@@ -79,6 +82,11 @@ export interface PendingAttachment {
 interface Client extends SettingsApi {
   probe(): Promise<"ok" | "auth" | "down">;
   capabilities(): Promise<Record<string, unknown>>;
+  /** `GET /v1/mcp/apps`: the app catalogue. Optional because a transport that
+   * predates the surface (or a fixture with no app documents) answers nothing;
+   * the app host then shows its readable fallback instead of rows it did not
+   * read. */
+  mcpApps?(): Promise<McpAppCatalogueView>;
   listSessions(limit?: number): Promise<SessionSummary[]>;
   createSession(): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
@@ -375,18 +383,23 @@ class KeelStore {
       this.client = this.fixture;
       this.auth.set("ok");
       this.mode.set("http");
+      // The fixture answers the same discovery document shape a live server
+      // does, so capability-gated UI is exercised (and can honestly say what
+      // this development transport can do).
+      setDeploymentCapabilities(await this.fixture.capabilities().catch(() => null));
       await this.refreshSessions();
       return;
     }
     const http = new KeelHttp("");
     let status: "ok" | "auth" | "down" = "down";
     let reason = "服务没有返回有效响应";
+    let capabilities: Record<string, unknown> | null = null;
     try {
       status = await http.probe();
       if (status === "ok") {
         // A static server may answer every path with index.html; the API's
         // capabilities endpoint must be JSON to count as a live service.
-        const capabilities = await http.capabilities().catch(() => null);
+        capabilities = await http.capabilities().catch(() => null);
         if (!capabilities) {
           status = "down";
           reason = "服务在线，但返回的不是 Keel 服务的响应";
@@ -403,10 +416,12 @@ class KeelStore {
       this.client = http;
       this.mode.set("offline");
       this.auth.set("unknown");
+      setDeploymentCapabilities(null);
       this.sessionsError.set(`无法连接 Keel 服务：${reason}。确认服务已启动后重试。`);
       this.sessionsLoading.set(false);
       return;
     }
+    setDeploymentCapabilities(capabilities);
     // A live server: authenticated, or waiting for the login gate.
     this.http = http;
     this.client = http;
@@ -1176,6 +1191,26 @@ class KeelStore {
 
   attachmentsFor(requestId: string): AttachmentRef[] | undefined {
     return this.engine?.attachmentsFor(requestId);
+  }
+
+  /** The complete `tool.result` payload one call produced. Reading
+   * `conversation()` first makes the caller track the projection: the result
+   * arrives after the call row is on screen, so the app slot must re-render
+   * when it lands. */
+  toolResultFor(toolCallId: string): McpAppToolResult | undefined {
+    this.conversation();
+    return this.engine?.toolResultFor(toolCallId);
+  }
+
+  /** `GET /v1/mcp/apps`: the app catalogue, read through the active transport
+   * (live or fixture). A transport without the surface rejects with a readable
+   * reason; the caller shows that reason, never an invented catalogue. */
+  async mcpApps(): Promise<McpAppCatalogueView> {
+    const client = this.client;
+    if (!client?.mcpApps) {
+      throw new Error("此传输不提供 MCP Apps 目录");
+    }
+    return client.mcpApps();
   }
 
   decisionTimeout(decisionId: string): number | undefined {

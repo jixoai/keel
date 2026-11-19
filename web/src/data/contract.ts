@@ -423,6 +423,76 @@ export interface DeploymentCapabilitiesApi {
   realtimeStatus(): Promise<RealtimeStatusView>;
 }
 
+// ---- MCP Apps (change feat-mcp-apps-events, P2) ---------------------------
+
+/** One tool that references an app resource (the catalogue's per-tool
+ * visibility). The catalogue is the binding's single source: a client reads
+ * this, never recomputes it from tool results. */
+export interface McpAppToolRef {
+  tool: string;
+  visibility: string[];
+}
+
+/** One renderable app from `GET /v1/mcp/apps` (the server's `AppSpec`). The
+ * document URL is immutable and hash-named. `csp` is the response header the
+ * server will send; `cspDomains` is what the resource declared (for the
+ * bridge's `hostCapabilities.sandbox`). */
+export interface McpAppView {
+  appId: string;
+  server: string;
+  title?: string;
+  resourceUri: string;
+  mimeType: string;
+  visibility: string[];
+  tools: McpAppToolRef[];
+  csp: string;
+  cspDomains?: {
+    connectDomains?: string[];
+    resourceDomains?: string[];
+    frameDomains?: string[];
+    baseUriDomains?: string[];
+  };
+  permissions: Record<string, boolean>;
+  prefersBorder?: boolean;
+  hash: string;
+  fetchedAt?: string;
+  ttlMs?: number;
+  diagnostics?: string[];
+  documentUrl: string;
+}
+
+/** `GET /v1/mcp/apps`: the catalogue plus the two deployment inputs a View
+ * needs (the optional second origin and the host theme palettes mapped onto
+ * the apps standard variables). */
+export interface McpAppCatalogueView {
+  generation: number;
+  apps: McpAppView[];
+  diagnostics?: unknown[];
+  sandboxOrigin?: string;
+  theme?: Record<string, Record<string, string>>;
+  limits?: Record<string, number>;
+}
+
+/** The `details.app` binding a `tool.result` carries (P1.4): the ledger alone
+ * says which app a call belongs to, without the catalogue. */
+export interface McpAppBinding {
+  appId: string;
+  resourceUri: string;
+  visibility: string[];
+}
+
+/** The raw `tool.result` facts the app host needs. The frozen
+ * `ToolCallView` keeps only one `result` value, so the core adapter indexes the
+ * complete payload per call id: the View gets a real `CallToolResult`, and the
+ * binding is read from `details.app` even when `result` is something else. */
+export interface McpAppToolResult {
+  content?: unknown;
+  structuredContent?: unknown;
+  isError?: boolean;
+  /** The server's own `details` object (untrusted; only `app` is read). */
+  details?: unknown;
+}
+
 /** The settings face of a transport. Both `KeelHttp` and the fixture client
  * implement it, so the settings screens and the session picker work against
  * the same store in live and fixture mode. */
@@ -611,6 +681,10 @@ export interface UiEngine {
   setConnection(status: import("../../../packages/chat-surface/src/types").ConnectionState["status"], lastSeq: number): void;
   setSessionId(sessionId: string): void;
   attachmentsFor(requestId: string): AttachmentRef[] | undefined;
+  /** The complete `tool.result` payload a call produced (content/details/
+   * structuredContent), indexed by the adapter because the frozen
+   * `ToolCallView` keeps only one `result` value. `undefined` until it lands. */
+  toolResultFor(toolCallId: string): McpAppToolResult | undefined;
   /** A decision's deadline (ms since epoch), when the event carried one. */
   decisionTimeout(decisionId: string): number | undefined;
   removeOptimistic(requestId: string): void;

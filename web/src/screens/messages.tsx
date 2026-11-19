@@ -27,6 +27,7 @@ import type {
   TurnView,
   WorkSegment,
 } from "../data/contract";
+import { contentTextOf } from "../data/mcp-apps";
 import { displayNameOf, formatDuration, formatTime, formatTokens, preview } from "../data/wire";
 import { store } from "../data/store";
 import { Icon, type IconName } from "../ui/icons";
@@ -60,6 +61,7 @@ import {
   weight,
   type BadgeVariant,
 } from "../ui/kit";
+import { McpAppSlot } from "../surfaces/mcp-app";
 import {
   FAMILY_ICON,
   FAMILY_LABEL,
@@ -402,8 +404,16 @@ function ToolRow(props: { call: ToolCallView; waiting?: boolean }) {
     props.call.finishedAt && props.call.startedAt
       ? formatDuration(props.call.finishedAt - props.call.startedAt)
       : "";
-  const resultText = () =>
-    props.call.error ?? (props.call.result === undefined ? "" : preview(props.call.result, 1400));
+  const resultText = () => {
+    if (props.call.error) return props.call.error;
+    // The MCP tool's `details` object is the app binding, not its prose: when
+    // the complete payload is indexed, the human text blocks win. The details
+    // JSON stays the fallback for transports that do not index it.
+    const raw = store.toolResultFor(props.call.toolCallId);
+    const text = raw ? contentTextOf(raw.content) : "";
+    if (text) return preview(text, 1400);
+    return props.call.result === undefined ? "" : preview(props.call.result, 1400);
+  };
   const toneFace = () =>
     tone === "failed" ? color.dangerTint : tone === "done" ? color.successTint : color.muted;
   return (
@@ -422,6 +432,9 @@ function ToolRow(props: { call: ToolCallView; waiting?: boolean }) {
             borderColor: color.border,
           }}
         >
+          {/* An MCP App renders above the text result; the text stays the
+              fallback for every failure and for the terminal host (P2.7/P2.8). */}
+          <McpAppSlot call={props.call} />
           {/* Result first: what a call did matters more than what it was asked. */}
           <If
             when={props.call.result !== undefined || !!props.call.error}

@@ -11,6 +11,7 @@ import type {
   ConnectionState,
   Delivery,
   EventSource,
+  McpAppToolResult,
   UiEngine,
   WireEvent,
 } from "./contract";
@@ -31,14 +32,37 @@ export interface CoreEngine extends UiEngine {
 export function createCoreEngine(sessionId: string): CoreEngine {
   const core = createSurfaceEngine({ sessionId });
   const attachmentsByRequest = new Map<string, AttachmentRef[]>();
+  /** The complete tool.result payload per call: the core's frozen
+   * `ToolCallView` keeps one `result` value, and the MCP Apps host needs the
+   * whole `CallToolResult` plus the server's `details` object. */
+  const toolResultsByCall = new Map<string, McpAppToolResult>();
   let detach: (() => void) | null = null;
 
+  const asRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
   const index = (event: WireEvent) => {
-    if (event.kind !== "user.message") return;
     const payload = payloadOf(event);
-    const requestId = asString(payload.requestId);
-    const attachments = attachmentsOf(payload);
-    if (requestId && attachments.length) attachmentsByRequest.set(requestId, attachments);
+    if (event.kind === "user.message") {
+      const requestId = asString(payload.requestId);
+      const attachments = attachmentsOf(payload);
+      if (requestId && attachments.length) attachmentsByRequest.set(requestId, attachments);
+      return;
+    }
+    if (event.kind !== "tool.result") return;
+    const toolCallId =
+      asString(payload.toolCallId) ?? asString(payload.tool_call_id) ?? asString(payload.id);
+    if (!toolCallId) return;
+    const details = payload.details;
+    const structured = payload.structuredContent;
+    toolResultsByCall.set(toolCallId, {
+      content: payload.content,
+      // A ledger written by the MCP tool carries structuredContent inside
+      // `details`; a server-shaped payload may carry it at the top level.
+      structuredContent: structured !== undefined ? structured : asRecord(details).structuredContent,
+      isError: payload.isError === true || payload.error !== undefined,
+      details,
+    });
   };
 
   const tapped = (source: EventSource, onEvent?: (event: WireEvent) => void): EventSource => ({
@@ -99,6 +123,9 @@ export function createCoreEngine(sessionId: string): CoreEngine {
     },
     attachmentsFor(requestId) {
       return attachmentsByRequest.get(requestId);
+    },
+    toolResultFor(toolCallId) {
+      return toolResultsByCall.get(toolCallId);
     },
     decisionTimeout(_decisionId) {
       /* timeouts are indexed by the store from the raw decision events */

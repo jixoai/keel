@@ -1,0 +1,110 @@
+// The capability gate (`can(x)`): every conditional render that depends on
+// which capabilities this deployment or this client has asks here, never the
+// account/identity shape. Two sources, deliberately separate:
+//
+//   1. the deployment's `GET /v1/capabilities` (server facts: which features
+//      this keel serve wires — `mcp.apps`, `mcp.events`, ...);
+//   2. the client's own capabilities (this build's facts: the terminal host
+//      has no WebView, so it does not support MCP Apps even when the server
+//      does).
+//
+// A feature is on only when both sides say yes. A missing feature is off (fail
+// closed): the UI never guesses a capability from a server version.
+import { signal } from "nsh";
+
+/** The MCP Apps block of `/v1/capabilities` (`mcpApps`). `sandboxOrigin` is
+ * the deployment's optional second origin; empty in the single-origin form. */
+export interface McpAppsCapability {
+  sandboxOrigin: string;
+  generation: number;
+  apps: number;
+}
+
+export interface DeploymentCapabilities {
+  features: Record<string, boolean>;
+  mcpApps: McpAppsCapability;
+}
+
+const EMPTY: DeploymentCapabilities = {
+  features: {},
+  mcpApps: { sandboxOrigin: "", generation: 0, apps: 0 },
+};
+
+const deployment = signal<DeploymentCapabilities>(EMPTY);
+/** What this build can do, independent of the deployment (`"mcp.apps"` is off
+ * on the terminal host: no WebView, and the spec's TUI rule says text only). */
+const client = signal<Record<string, boolean>>({});
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+
+const count = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+
+/** The boolean feature map: only literal `true` counts. The flat
+ * `capabilities` object is tolerated because the scripted fixture used it
+ * before the real discovery document was wired; the served document's key is
+ * `features`. */
+function parseFeatures(raw: Record<string, unknown>): Record<string, boolean> {
+  const source = asRecord(raw.features);
+  const fallback = Object.keys(source).length ? {} : asRecord(raw.capabilities);
+  const features: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === "boolean") features[key] = value;
+  }
+  for (const [key, value] of Object.entries(fallback)) {
+    if (typeof value === "boolean") features[key] = value;
+  }
+  return features;
+}
+
+/** A deployment discovery document → the facts the gate reads. Unknown fields
+ * are dropped; a malformed block leaves the capability off. */
+export function parseDeploymentCapabilities(raw: unknown): DeploymentCapabilities {
+  const body = asRecord(raw);
+  const mcpApps = asRecord(body.mcpApps);
+  return {
+    features: parseFeatures(body),
+    mcpApps: {
+      sandboxOrigin: text(mcpApps.sandboxOrigin),
+      generation: count(mcpApps.generation),
+      apps: count(mcpApps.apps),
+    },
+  };
+}
+
+/** Record the answer of `GET /v1/capabilities` (or the fixture's). */
+export function setDeploymentCapabilities(raw: unknown): void {
+  deployment.set(parseDeploymentCapabilities(raw));
+}
+
+/** Record what this client build supports. Called once at boot. */
+export function setClientCapabilities(features: Record<string, boolean>): void {
+  client.set({ ...features });
+}
+
+/** The one capability question. Reactive: a screen that reads it re-renders
+ * when the deployment is probed or the client's facts change. Both sides must
+ * say `true`; an unknown feature is off. */
+export function can(feature: string): boolean {
+  if (client()[feature] === false) return false;
+  return deployment().features[feature] === true;
+}
+
+/** The MCP Apps deployment block (`sandboxOrigin` included). */
+export function mcpAppsCapability(): McpAppsCapability {
+  return deployment().mcpApps;
+}
+
+/** The whole deployment snapshot, for diagnostics. */
+export function deploymentCapabilities(): DeploymentCapabilities {
+  return deployment();
+}
+
+/** Tests only: forget both sides so a case starts from "everything off". */
+export function resetCapabilitiesForTest(): void {
+  deployment.set(EMPTY);
+  client.set({});
+}

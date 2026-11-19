@@ -21,6 +21,7 @@ import type {
   Delivery,
   EventSource,
   FireResultView,
+  McpAppCatalogueView,
   ModelOptionSpecsView,
   ModelsResponse,
   ModelsSettingsReset,
@@ -223,8 +224,47 @@ export class FixtureClient implements SettingsApi {
 
   async capabilities(): Promise<Record<string, unknown>> {
     return {
-      version: "fixture",
-      capabilities: { "sessions.list": true, decisions: true, partials: true },
+      apiVersion: "v1",
+      serviceVersion: "fixture",
+      features: {
+        "sessions.list": true,
+        decisions: true,
+        partials: true,
+        "mcp.apps": true,
+        "mcp.apps.sandboxOrigin": false,
+        "mcp.events": false,
+      },
+      limits: {},
+      hooks: [],
+    };
+  }
+
+  /** The scripted catalogue: one app, matching the binding the fixture's tool
+   * result carries. `documentUrl` is a host-built path; the development server
+   * has no document behind it, so a browser fixture run exercises exactly the
+   * load-failure fallback (never a fabricated success). */
+  async mcpApps(): Promise<McpAppCatalogueView> {
+    const appId = "mcpapp_0123456789abcdef";
+    const hash = "a".repeat(64);
+    return {
+      generation: 1,
+      apps: [
+        {
+          appId,
+          server: "weather",
+          title: "天气面板",
+          resourceUri: "ui://weather/dashboard",
+          mimeType: "text/html;profile=mcp-app",
+          visibility: ["model", "app"],
+          tools: [{ tool: "dashboard", visibility: ["model", "app"] }],
+          csp: "default-src 'none'",
+          permissions: {},
+          hash,
+          documentUrl: `/v1/mcp/apps/${appId}/view?v=${hash}`,
+        },
+      ],
+      diagnostics: [],
+      limits: { documentBytes: 2097152, cacheBytes: 67108864 },
     };
   }
 
@@ -893,6 +933,59 @@ export class FixtureClient implements SettingsApi {
       {
         kind: "run.finished",
         payload: { turns: 1, tokensIn: 2210, tokensOut: 268, stopReason: "done", durationMs: 5100, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: base - 1_488_000 },
+      },
+    ]);
+
+    this.add("demo-mcp-app", "天气面板", [
+      { kind: "user.message", payload: { text: "用天气面板看看上海今天的天气。", requestId: "seed-mcp-app-1", delivery: "queue", timestamp: base - 700_000 } },
+      {
+        kind: "assistant.message",
+        payload: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "天气工具带交互面板，先调用再让面板展示。" },
+            {
+              type: "toolCall",
+              id: "call-mcp-app",
+              name: "mcp",
+              arguments: { action: "call", server: "weather", tool: "dashboard", arguments: { city: "上海" } },
+            },
+          ],
+          inputSeqs: [1],
+          stopReason: "tool_use",
+          timestamp: base - 696_000,
+        },
+      },
+      {
+        kind: "tool.result",
+        payload: {
+          toolCallId: "call-mcp-app",
+          toolName: "mcp",
+          content: [{ type: "text", text: "上海 24°C 多云，湿度 62%" }],
+          details: {
+            server: "weather",
+            tool: "dashboard",
+            app: { appId: "mcpapp_0123456789abcdef", resourceUri: "ui://weather/dashboard", visibility: ["model", "app"] },
+            structuredContent: { city: "上海", tempC: 24 },
+          },
+          isError: false,
+          durationMs: 420,
+          timestamp: base - 694_000,
+        },
+      },
+      {
+        kind: "assistant.message",
+        payload: {
+          role: "assistant",
+          content: [{ type: "text", text: "上海现在 24°C、多云，湿度 62%。面板里可以按小时看变化。" }],
+          inputSeqs: [1],
+          stopReason: "end_turn",
+          timestamp: base - 692_000,
+        },
+      },
+      {
+        kind: "run.finished",
+        payload: { turns: 1, tokensIn: 1640, tokensOut: 220, stopReason: "done", durationMs: 3800, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: base - 690_000 },
       },
     ]);
 

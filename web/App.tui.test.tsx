@@ -361,3 +361,20 @@ test("TUI: 命令面板——Esc 关闭", async () => {
   await app.wait(150);
   expect(app.shows("id:command-palette")).toBe(false);
 });
+
+// change feat-mcp-apps-events P2.8: the terminal host must not mount a
+// WebView for a tool result that carries an app binding. The text result and
+// one readable capability line stay; the app's own frame has no view at all.
+test("TUI: MCP app 结果——不挂 iframe，文本兜底与能力提示", async () => {
+  const app = await openApp();
+  await app.press(TITLE("天气面板"));
+  await app.waitFor("text:/24°C/");
+
+  // The call row is a lone tool (family「工具」): expand it to read the result
+  // and the app slot's degradation line.
+  await app.press("label:工具 mcp");
+  await app.waitFor("text:/此结果带交互界面；当前客户端以文本显示。/");
+  expect(app.texts()).toContain("上海 24°C 多云，湿度 62%");
+  expect(app.shows("id:mcp-app-frame-call-mcp-app")).toBe(false);
+  expect(app.shows("id:mcp-app-fallback-call-mcp-app")).toBe(false);
+});
