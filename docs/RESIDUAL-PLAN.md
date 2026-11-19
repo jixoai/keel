@@ -12,23 +12,24 @@
 因此 **Wave 1 的第一步是「任务 ↔ 代码对账」**：逐项标注 已做/未做/被替代，更新勾选，避免重复实现。
 对账之前的任何「完成度百分比」都不可信。
 
-## 1. 现状总览（10 个未归档 change）
+## 1. 现状总览（2026-11-19 更新：4 个 change 已归档）
 
 | change | 勾选/总数 | 残留性质 | 状态 |
 |---|---|---|---|
-| keel-agent-team-v1 | 38/61 | 9 项=运行注入（实施中）· CLI start/stop/save 3 · UI 打磨 4 · 媒体适配器 4 · 验收 3 | **进行中（A 线）** |
-| keel-session-surfaces-v1 | 29/30 | 1 项=成员结果进 captain 时间线（规则草案已随 RUNTIME-PLAN c.4 交付） | 随运行注入收口 |
-| keel-demo-provider-v1 | 24/24* | *1 项 `[~]`：真实麦克风桥接（已知设计缺口，非阻塞） | **已完成**（可归档） |
-| keel-trace-triage-v1 | 15/15 | 负结果 1：NSH resize 整树重建 DOM（仓外运行时属性，另立 change） | **已完成**（可归档） |
-| keel-ui-polish-v1 | 13/13 | — | **已完成**（可归档） |
-| fix-session-delete-soft-archive | 全部 | — | **已完成**（可归档） |
-| provider-secret-direct-config | 部署侧完成 | 同名密钥回退待实现（等 A 线收口，同文件不并发写） | 待落码 |
+| keel-agent-team-v1 | 46/61 | 15 项：CLI start/stop、team save/start、文件引用编辑器、五态/390 复核、媒体适配器 4、验收 3 | 运行注入已收口（复核 B1–B4 修复完毕）；尾项入 Wave 3 |
+| keel-session-surfaces-v1 | 23/24 | 1 项=成员结果进 captain 时间线 | 随 W2.4 task-log 收口 |
+| provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
+| keel-ga | 31/43 | §2/§3 已交付；剩 §1 压缩文档、§5 blob-lifecycle 5、§6 验收 5 | tenancy/provider-files 已交付 |
+| keel-harness-v2 | 16/142 | 真缺口以 `RECONCILIATION.md` TOP10 为准；**W2.1 工具面骨架进行中** | 主战场 |
+| feat-mcp-apps-events | 1/50 | 设计 + T0.4 双 origin 域开通已完成；P1–P6 未开始 | 随 Wave 5 实现 |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
-| keel-service-graph（已归档） | 89/91 | 归档时留 2 个**已知缺口**：DSH sidecar 参考适配器 pin、gateway 故障 scenario（crash-loop/大帧取消/stderr 洪泛） | 缺口并入 Wave 3/4 |
-| keel-tenancy-usage（已归档） | 29/29 | tenant-config / usage-ledger / provider-telemetry 全交付；**不含** api_keys/auth/RLS/配额 | 完成 |
-| keel-ga | 17/43 | 26 项，其中 tenancy 实为 5 真项（api_keys/auth/provisioning/RLS/带宽·存储配额）+ 2 核验项（用量字节、跨租户测试；token 用量账本已有）· provider-files 7 · blob-lifecycle 5 · agent-execution 2 · 验收 5 | **下一主战场** |
 | keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
-| keel-harness-v2 | 15/142（已勾） | **对账完成**：已实现 14 / 部分实现 42 / 未实现 85 / 废弃 1；真缺口以 `RECONCILIATION.md` TOP10 为准 | **已对账** |
+| ~~fix-session-delete-soft-archive~~ | 11/11 | — | **已归档 2026-11-19** |
+| ~~keel-demo-provider-v1~~ | 23/23 | 真实麦克风桥接为已知设计缺口（非阻塞） | **已归档 2026-11-19** |
+| ~~keel-trace-triage-v1~~ | 15/15 | NSH resize 整树重建 DOM 为仓外负结果（backlog） | **已归档 2026-11-19** |
+| ~~keel-ui-polish-v1~~ | 11/11 | — | **已归档 2026-11-19** |
+| keel-service-graph（已归档） | 89/91 | 2 个已知缺口：DSH sidecar 参考适配器 pin、gateway 故障 scenario | 缺口并入 Wave 3/4 |
+| keel-tenancy-usage（已归档） | 29/29 | tenant-config / usage-ledger / provider-telemetry；**不含** api_keys/auth/RLS/配额 | 完成 |
 
 ## 2. 去重归并（多 change 重复项只算一次）
 
@@ -157,3 +158,6 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 - **MCP Apps 双 origin 沙箱域开通**（2026-11-14）：`https://mcp-app.fde2e.com/` +
   `https://<app>.mcp-app.fde2e.com`（证书/路由/frpc/浏览器渲染全链验收；证据
   `openspec/changes/feat-mcp-apps-events/evidence/domain-provision.md`）
+- **2026-11-19**：4 个 change 归档（`1daa977`）；复核修复 `09399f1` + 修复后 E2E 证据
+  `2b1c1e7` 已推送；**W2.1 工具面骨架开工**（slow-agent 后台，11 恒定工具 / action 闭集 /
+  清单哈希 / 旧名快照断言 / `mcp__` 方言删除 / PI-PARITY 偏离登记）
