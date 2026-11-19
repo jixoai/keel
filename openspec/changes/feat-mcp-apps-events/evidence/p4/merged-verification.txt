@@ -1,0 +1,16 @@
+# P4 合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `3eb7c54`（cherry-pick `24ef093`，`tasks.md` 自动合并）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：55 个 `ok`，零 FAIL，exit 0
+- `./scripts/conformance.sh`：1032 pass / 0 fail / 1 skip，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 交付面：`internal/mcp/events.go`（回调/listen/ack/过滤/cancel）、`internal/mcphost/events.go`
+  （通知分类、250ms 去抖全量 republish、generation、`mcp.surface.changed`、失败保面、attempt 快照）、
+  `internal/mcphost/metrics.go`（六族、闭集标签 ≤24 series）、progress→PartialHub 关联、
+  `internal/architecture/mcp_events_isolation_test.go`（mcphost 不 import kernel/store）
+- 严格口径：通知路径不写账本；`mcp.progress` 仅是 `Partial.Type`；未新增 kernel kind
+- lane 证据：`evidence/p4/`；独立复核进行中
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
