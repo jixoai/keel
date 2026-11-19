@@ -1,0 +1,13 @@
+# blob-lifecycle 复核修复合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `0e7e6d1`（cherry-pick `a64fcc3`，与 MCP P1 无冲突）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：54 个 `ok`，零 FAIL，exit 0
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 无监听
+- 修复内容：FK 23503 savepoint 容忍（事件照常提交、零引用）、共享缩略图保护（存活父/有引用
+  用户 blob 不被误删）、缩略图 TTL 只在新建行上设置、排队写脱离请求取消、记账限制段
+- lane 证据：`openspec/changes/keel-ga/evidence/blob-lifecycle/fix-*`
+- 独立复核：初版双轴复核的 1 P1 + 3 P2 已由本修复关闭；修复门禁由主代理独立复跑
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。
