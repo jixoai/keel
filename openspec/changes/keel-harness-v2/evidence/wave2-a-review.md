@@ -18,14 +18,14 @@
 
 | # | 建议（reviewer 原话摘要） | 处置 |
 |---|---|---|
-| 1 | spawn 子代理的 `selection` 未过与 `/input`、`/events` 相同的 `ValidateSelection` 提交门；同租户可存入永远无法执行的 selection，每轮 attempt 提交前失败（违反「MUST 在提交处拒绝」不变量，限本租户自伤） | **本轮修复**（A 轴清理切片）：spawn 处用同一 seam 校验，或仅接受 `agentId` |
-| 2 | 模型可用 `notify {action:"ack"}` 压制自己的 fallback push（actor 可识别为 `agent:<runID>`） | 本轮裁决：先查 spec 的 ack 语义；若 ack 是消费器动作，则模型侧排除、API 保留 |
-| 3 | `Service.tokens` 仅在 `finishPush` 清理，API/tool ack 路径不清；notifications 表无租户配额 | **本轮修复 token 清理**；配额记 backlog（需配额模型） |
-| 4 | MCP image 内容无字节上限（只截文本 20KiB） | **本轮修复**：image 块加字节上限 |
+| 1 | spawn 子代理的 `selection` 未过与 `/input`、`/events` 相同的 `ValidateSelection` 提交门；同租户可存入永远无法执行的 selection，每轮 attempt 提交前失败（违反「MUST 在提交处拒绝」不变量，限本租户自伤） | **已修复（W2.aclack fcbce3a）**：`SubagentOptions.ValidateSelection` 由 serve 绑定 `selectFromCurrentGeneration` 同一 seam；非法 selection 在子会话/user.message 之前拒绝（`ErrInvalidSpawn`），nil 校验器 fail-closed；测试断言零 session/事件/记录 |
+| 2 | 模型可用 `notify {action:"ack"}` 压制自己的 fallback push（actor 可识别为 `agent:<runID>`） | 维持现状：tool-surface spec 明确把 `ack` 列为 notify 动作，属注意力层语义；记产品语义 backlog（是否限制模型侧 ack 需产品决策，不在安全修复范围） |
+| 3 | `Service.tokens` 仅在 `finishPush` 清理，API/tool ack 路径不清；notifications 表无租户配额 | **token 清理已修复（W2.aclack fcbce3a）**：Ack（含幂等路径）与 OpenURL 成功后 `forgetTokens`，任一消费使全部 capability URL 失效（ErrConsumed/410）；配额仍记 backlog |
+| 4 | MCP image 内容无字节上限（只截文本 20KiB） | **已修复（W2.aclack fcbce3a）**：`MCPImageMaxBytes=2MiB`（编码 payload 计），超限替换为有界可见占位，原图不入上下文 |
 | 5 | `Materialize` 无 `O_NOFOLLOW`/`EvalSymlinks` 守卫（当前生产未启用 CaptureRoot） | backlog：fork/materialize 生产接线前必须补 |
 | 6 | `shellScope` 无 run scope 时回落 boot 租户（当前不可达，多租户下未来调用方会错记租户） | backlog：多租户 pack 前改为类型化拒绝 |
-| 7 | `mcp.call` 的 `arguments` 非对象也透传（schema 声明 object） | **本轮修复**：工具层类型校验，非对象返回 `invalid_arguments` |
-| 8 | `X-Keel-Actor` 可被同租户凭证伪造（属信任模型内） | backlog：文档/audit UI 标注「租户自证」，不作授权依据 |
+| 7 | `mcp.call` 的 `arguments` 非对象也透传（schema 声明 object） | **已修复（W2.aclack fcbce3a）**：缺失/null→`{}`；非 object→`invalid_arguments`，不调用 backend |
+| 8 | `X-Keel-Actor` 可被同租户凭证伪造（属信任模型内） | **已补文档（W2.aclack fcbce3a）**：approval 包注释明示租户自证、不作授权依据；audit UI 标注留 backlog |
 
 ## 复核证据
 

@@ -1,0 +1,14 @@
+# jobcap + aclack 合入后的合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `fcbce3a`（含 `53f87d3`/`cd73a31` jobcap、`fcbce3a` aclack）。
+
+- `go build ./...`：exit 0
+- `KEEL_TEST_DSN=... go test -p 1 ./...`：54 个 `ok`，零 FAIL，exit 0
+  （串行 `-p 1` 是为了避开并行套件打满 Postgres 连接池；此前两条 lane 并行跑全量时出现的
+  `SQLSTATE 53300 too many clients` 已复现为环境争用，隔离复跑失败用例均 PASS）
+- `pnpm exec openspec validate keel-harness-v2 --strict`：valid
+- `./scripts/agent-runtime-e2e.sh`：PASS，exit 0；13610/13611 运行后无监听
+- 子代理 lane 证据：`w2.jobcap/`（含 DSN 门控 verbose 转录、真库作业结算）、`w2.aclack/`
+  （spawn selection 提交门、notify token 失效、MCP image/arguments、E2E）
+
+DSN 只经环境变量传入；本文件不含连接串或密钥。

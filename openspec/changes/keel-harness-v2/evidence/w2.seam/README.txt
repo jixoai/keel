@@ -80,10 +80,15 @@ Rerun
 
 Known items (not closed by this slice)
 - Capture is upsert-only (inherited): a bash delete removes the file from the
-  workspace index but the manifest row is not reconciled away.
-- A background job (tool timeout or nohup) that outlives the run may capture
+  workspace index but the manifest row is not reconciled away. (Now tracked on
+  the task board as "bash 删除对账"; not a silent backlog item.)
+- ~~A background job (tool timeout or nohup) that outlives the run may capture
   after the run lease is no longer live; the commit then fails loud as one
-  fs.capture_failed event instead of forging an owner token.
+  fs.capture_failed event instead of forging an owner token.~~
+  **Superseded by W2.jobcap (8d12370):** a background job now settles on the
+  system lane with `jobId` attribution (`CaptureWorkspaceSystem`), so its
+  writes enter layerfs after the parent run ends. The owner lane still fails
+  loud when no fence is live.
 - Workspaces live for the process lifetime (no eviction hook; session deletion
   is not observed by this provider).
 - The provider applies layerfs' default ignore list (.git/objects); a

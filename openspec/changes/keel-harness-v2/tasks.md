@@ -138,7 +138,9 @@
 - [x] 输出落 layerfs：只回 head/tail + blob 引用 + 退出码
       （W2.2：head 4KiB + tail 4KiB；全量流式写 blob store（layerfs 的字节层）；200MB 内存有界实证）
 - [x] capture 默认 `per-tool-call`：stat 缓存 + 变更集，只对变了的文件算哈希
-      （W2.3：`Capture` 递归建树 + stat 签名缓存；十万文件**一条** `fs.capture` 实证）
+      （W2.3：`Capture` 递归建树 + stat 签名缓存；十万文件**一条** `fs.capture` 实证；
+      W2.jobcap：后台作业以系统事实结算 `fs.capture`——payload 带 `jobId`、不伪造 owner token，
+      真库证明作业逃出 run lease 后 manifest 仍可见；证据 `evidence/w2.jobcap/`）
 - [x] 执行面适配器契约：`materialize(manifest)` / `capture(handle, since)`，先做本地实现
       （W2.3：`Materialize`/`MaterializeSnapshot`/`CaptureWorkspace`；W2.seam 生产接线已合入
       de680cf：`LayerWorkspaces` 按 `(tenant,session)` 持有 gbashfs workspace、manifest 播种、
