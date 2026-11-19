@@ -18,6 +18,7 @@ package agentapi
 // 200 frames/s; this is the server half of the same contract (P3.8).
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -52,11 +53,38 @@ const (
 	// while the user answers a decision.
 	mcpAppConfirmDefaultTimeout = 120 * time.Second
 	mcpAppConfirmMaxTimeout     = 10 * time.Minute
+	// mcpAppMaxOpenConfirmations bounds the unanswered app confirmations one
+	// session may hold. An app that opens a confirmation and disconnects would
+	// otherwise leave decisions open until their 10-minute cap; the bound keeps
+	// that from becoming a durable-queue amplification.
+	mcpAppMaxOpenConfirmations = 16
 	// mcpAppAuditTimeout bounds one best-effort audit write.
 	mcpAppAuditTimeout = 2 * time.Second
+	// mcpAppAuditSampleWindow is the sampling window of a zero-cost refusal
+	// audit (rate/concurrency/size/overflow): at most one row per app, action
+	// and window.
+	mcpAppAuditSampleWindow = time.Second
 	// mcpAppAuditMaxDetail mirrors store.MCPAppAuditMaxDetail.
 	mcpAppAuditMaxDetail = store.MCPAppAuditMaxDetail
+	// Attachment bounds of a ui/message. They are stricter than the generic
+	// input path: an app references already-uploaded blobs by id and never
+	// supplies a URL of its own.
+	mcpAppMaxAttachments        = 16
+	mcpAppAttachmentNameMax     = 256
+	mcpAppAttachmentMIMETypeMax = 128
+	mcpAppAttachmentSizeMax     = 1 << 30
 )
+
+// mcpAuditSample buffers one sampled refusal row until its window closes.
+type mcpAuditSample struct {
+	windowStart time.Time
+	entry       store.MCPAppAuditEntry
+	suppressed  int
+	timer       *time.Timer
+	// flushed is set under Server.mcpAuditMu so the timer and an explicit flush
+	// never write the same sample twice.
+	flushed bool
+}
 
 // MCPAppTool is the proxy's view of one server tool.
 type MCPAppTool struct {
@@ -115,13 +143,17 @@ type mcpAppResourceReadRequest struct {
 
 // mcpAppMessageRequest is POST /v1/mcp/apps/{appId}/ui/message.
 type mcpAppMessageRequest struct {
-	SessionID   string                 `json:"sessionId"`
-	RequestID   string                 `json:"requestId,omitempty"`
-	Role        string                 `json:"role"`
-	Content     []mcpAppMessageContent `json:"content"`
-	Attachments json.RawMessage        `json:"attachments,omitempty"`
-	Delivery    string                 `json:"delivery,omitempty"`
-	WaitMs      int64                  `json:"waitMs,omitempty"`
+	SessionID string `json:"sessionId"`
+	RequestID string `json:"requestId,omitempty"`
+	Role      string `json:"role"`
+	// Content is parsed in the handler, not by encoding/json: the spec accepts
+	// an array of blocks or (design §0.1 R8 tolerance) one block object, and a
+	// shape error must answer JSON-RPC -32602 with a protocol-violation audit,
+	// not the decoder's generic 400.
+	Content     json.RawMessage `json:"content"`
+	Attachments json.RawMessage `json:"attachments,omitempty"`
+	Delivery    string          `json:"delivery,omitempty"`
+	WaitMs      int64           `json:"waitMs,omitempty"`
 }
 
 // mcpAppMessageContent is one content block of a ui/message.
@@ -187,14 +219,14 @@ func (s *Server) mcpAppFrom(w http.ResponseWriter, r *http.Request) (uuid.UUID, 
 // function; a refusal has already written the response and audit row.
 func (s *Server) mcpAppGate(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, sessionID uuid.UUID, app mcphost.AppSpec, action string) (func(), bool) {
 	if !s.mcpAppLimits.allow(app.AppID) {
-		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "bridge.rate", "refused",
+		s.recordSampledRejection(r.Context(), tenantID, sessionID, app, "bridge.rate", "refused",
 			fmt.Sprintf("limit=%d/s app=%s", mcpAppRatePerSecond, app.AppID))
 		writeErr(w, http.StatusTooManyRequests,
 			fmt.Errorf("mcp app request rate exceeded (%d/s)", mcpAppRatePerSecond))
 		return nil, false
 	}
 	if !s.mcpAppLimits.acquire(app.AppID) {
-		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "bridge.concurrency", "refused",
+		s.recordSampledRejection(r.Context(), tenantID, sessionID, app, "bridge.concurrency", "refused",
 			fmt.Sprintf("limit=%d app=%s", mcpAppConcurrency, app.AppID))
 		writeErr(w, http.StatusTooManyRequests,
 			fmt.Errorf("mcp app has %d requests in flight", mcpAppConcurrency))
@@ -212,7 +244,7 @@ func (s *Server) decodeMCPAppBody(w http.ResponseWriter, r *http.Request, tenant
 	if err := dec.Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "bridge.size", "refused",
+			s.recordSampledRejection(r.Context(), tenantID, sessionID, app, "bridge.size", "refused",
 				fmt.Sprintf("limit=%d", mcpAppRequestMaxBytes))
 			writeErr(w, http.StatusRequestEntityTooLarge,
 				fmt.Errorf("request body exceeds %d bytes", mcpAppRequestMaxBytes))
@@ -224,42 +256,59 @@ func (s *Server) decodeMCPAppBody(w http.ResponseWriter, r *http.Request, tenant
 	return true
 }
 
+// mcpAppSessionValue resolves an optional session id without writing a
+// response. The problem code is a fixed identifier: "" (valid), "missing",
+// "invalid" or "not_found". An infrastructure error is returned separately.
+func (s *Server) mcpAppSessionValue(ctx context.Context, tenantID uuid.UUID, raw string) (uuid.UUID, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, "missing", nil
+	}
+	sessionID, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, "invalid", nil
+	}
+	if s.cfg.SessionExists != nil {
+		exists, err := s.cfg.SessionExists(ctx, tenantID, sessionID)
+		if err != nil {
+			return uuid.Nil, "error", err
+		}
+		if !exists {
+			return uuid.Nil, "not_found", nil
+		}
+	}
+	return sessionID, "", nil
+}
+
 // mcpAppSession parses the optional or required session id and verifies it
 // belongs to the tenant when the deployment has a session seam. An absent
 // optional session is uuid.Nil.
 func (s *Server) mcpAppSession(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, raw string, required bool) (uuid.UUID, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	sessionID, problem, err := s.mcpAppSessionValue(r.Context(), tenantID, raw)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return uuid.Nil, false
+	}
+	switch problem {
+	case "":
+		return sessionID, true
+	case "missing":
 		if required {
 			writeErr(w, http.StatusBadRequest, errors.New("sessionId is required"))
 			return uuid.Nil, false
 		}
 		return uuid.Nil, true
-	}
-	sessionID, err := uuid.Parse(raw)
-	if err != nil {
+	case "not_found":
+		writeErr(w, http.StatusNotFound, ErrSessionNotFound)
+		return uuid.Nil, false
+	default:
 		writeErr(w, http.StatusBadRequest, errors.New("sessionId must be a UUID"))
 		return uuid.Nil, false
 	}
-	if s.cfg.SessionExists != nil {
-		exists, err := s.cfg.SessionExists(r.Context(), tenantID, sessionID)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return uuid.Nil, false
-		}
-		if !exists {
-			writeErr(w, http.StatusNotFound, ErrSessionNotFound)
-			return uuid.Nil, false
-		}
-	}
-	return sessionID, true
 }
 
-// recordMCPAppAudit writes one audit row best-effort: the primary action never
-// fails because the audit store did, but the failure is logged loudly. A
-// refusal audit uses the same path (it is attempted even when the request
-// context is already cancelled).
-func (s *Server) recordMCPAppAudit(ctx context.Context, tenantID, sessionID uuid.UUID, app mcphost.AppSpec, action, result, detail string) {
+// mcpAppAuditEntry builds one audit row from identifiers only.
+func (s *Server) mcpAppAuditEntry(tenantID, sessionID uuid.UUID, app mcphost.AppSpec, action, result, detail string) store.MCPAppAuditEntry {
 	entry := store.MCPAppAuditEntry{
 		TS:     s.cfg.MCPAppNow(),
 		Server: app.Server,
@@ -274,16 +323,93 @@ func (s *Server) recordMCPAppAudit(ctx context.Context, tenantID, sessionID uuid
 	if sessionID != uuid.Nil {
 		entry.SessionID = &sessionID
 	}
+	return entry
+}
+
+// appendMCPAppAudit writes one audit row best-effort: the primary action never
+// fails because the audit store did, but the failure is logged loudly.
+func (s *Server) appendMCPAppAudit(ctx context.Context, entry store.MCPAppAuditEntry) {
 	if s.cfg.MCPAppAudit == nil {
 		s.cfg.Logger.Warn("mcp app audit is not durable: no audit store is wired",
-			"action", action, "result", result, "server", app.Server, "app", app.AppID)
+			"action", entry.Action, "result", entry.Result, "server", entry.Server, "app", entry.AppID)
 		return
 	}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mcpAppAuditTimeout)
 	defer cancel()
 	if _, err := s.cfg.MCPAppAudit.AppendMCPAppAudit(auditCtx, entry); err != nil {
 		s.cfg.Logger.Error("mcp app audit write failed",
-			"action", action, "result", result, "server", app.Server, "app", app.AppID, "err", err)
+			"action", entry.Action, "result", entry.Result, "server", entry.Server, "app", entry.AppID, "err", err)
+	}
+}
+
+// recordMCPAppAudit writes one audit row immediately (the normal path).
+func (s *Server) recordMCPAppAudit(ctx context.Context, tenantID, sessionID uuid.UUID, app mcphost.AppSpec, action, result, detail string) {
+	s.appendMCPAppAudit(ctx, s.mcpAppAuditEntry(tenantID, sessionID, app, action, result, detail))
+}
+
+// recordSampledRejection writes at most one refusal row per (app, action,
+// second). A rate/concurrency/size rejection is zero-cost to produce, so
+// writing one row per attempt would let an attacker flood the audit table at
+// line speed. The first refusal of a window is buffered and written when the
+// window closes with the accumulated suppressed count; later refusals only
+// increment the counter. The primary response is never delayed.
+func (s *Server) recordSampledRejection(ctx context.Context, tenantID, sessionID uuid.UUID, app mcphost.AppSpec, action, result, detail string) {
+	key := app.AppID + "\x00" + action
+	windowStart := s.cfg.MCPAppNow().Truncate(mcpAppAuditSampleWindow)
+	s.mcpAuditMu.Lock()
+	sample := s.mcpAuditSamples[key]
+	if sample != nil && sample.windowStart.Equal(windowStart) {
+		sample.suppressed++
+		s.mcpAuditMu.Unlock()
+		return
+	}
+	entry := s.mcpAppAuditEntry(tenantID, sessionID, app, action, result, detail)
+	sample = &mcpAuditSample{windowStart: windowStart, entry: entry}
+	s.mcpAuditSamples[key] = sample
+	// A real timer makes the row durable even if the rejection burst stops. It
+	// waits slightly past the window so a scheduled callback never fires before
+	// the next second's first rejection and re-samples the same window. In tests
+	// the clock is fake and the window is flushed explicitly.
+	sample.timer = time.AfterFunc(mcpAppAuditSampleWindow+100*time.Millisecond, func() {
+		s.flushMCPAppAuditSample(key, sample)
+	})
+	s.mcpAuditMu.Unlock()
+}
+
+// flushMCPAppAuditSample writes one buffered rejection row exactly once. A
+// sample replaced by a newer window is still written by its own timer: a map
+// entry moving on must not lose the previous window's row.
+func (s *Server) flushMCPAppAuditSample(key string, sample *mcpAuditSample) {
+	s.mcpAuditMu.Lock()
+	if sample.flushed {
+		s.mcpAuditMu.Unlock()
+		return
+	}
+	sample.flushed = true
+	if s.mcpAuditSamples[key] == sample {
+		delete(s.mcpAuditSamples, key)
+	}
+	entry := sample.entry
+	entry.Detail = mcpAppBounded(entry.Detail+fmt.Sprintf(" suppressed=%d", sample.suppressed), mcpAppAuditMaxDetail)
+	timer := sample.timer
+	s.mcpAuditMu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
+	s.appendMCPAppAudit(context.Background(), entry)
+}
+
+// flushMCPAppAuditSamples flushes every buffered rejection row. Tests use it
+// with a fake clock; a future shutdown path can use it for a clean stop.
+func (s *Server) flushMCPAppAuditSamples() {
+	s.mcpAuditMu.Lock()
+	samples := make(map[string]*mcpAuditSample, len(s.mcpAuditSamples))
+	for key, sample := range s.mcpAuditSamples {
+		samples[key] = sample
+	}
+	s.mcpAuditMu.Unlock()
+	for key, sample := range samples {
+		s.flushMCPAppAuditSample(key, sample)
 	}
 }
 
@@ -441,15 +567,23 @@ func (s *Server) mcpAppMessage(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeMCPAppBody(w, r, tenantID, uuid.Nil, app, &body) {
 		return
 	}
+	// A lenient session parse gives the protocol-violation rows an attribution
+	// when the body carries a valid id, without changing the error precedence
+	// (the role gate must answer -32602 even when the session is missing).
+	auditSession := mcpAppParseSessionID(body.SessionID)
 	// The role gate runs before any session, store or decision work: an app can
 	// only speak as the user, never as the assistant or a tool.
 	if body.Role != "user" {
+		s.recordMCPAppAudit(r.Context(), tenantID, auditSession, app, "protocol.violation", "refused",
+			"field=role reason=not_user")
 		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, `role must be "user"`)
 		return
 	}
 	// A View must not pick "guide": steering a running turn is the user's
 	// choice, and the queue is the only delivery mode this path offers.
 	if body.Delivery != "" && body.Delivery != "queue" {
+		s.recordMCPAppAudit(r.Context(), tenantID, auditSession, app, "protocol.violation", "refused",
+			"field=delivery reason=not_queue")
 		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, `delivery must be "queue"`)
 		return
 	}
@@ -465,21 +599,42 @@ func (s *Server) mcpAppMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	text, err := mcpAppMessageText(body.Content)
+	blocks, err := parseMCPAppMessageContent(body.Content)
 	if err != nil {
+		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "protocol.violation", "refused",
+			"field=content reason="+mcpAppFieldErrorCode(err))
+		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, err.Error())
+		return
+	}
+	text, err := mcpAppMessageText(blocks)
+	if err != nil {
+		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "protocol.violation", "refused",
+			"field=content reason="+mcpAppFieldErrorCode(err))
+		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, err.Error())
+		return
+	}
+	attachments, attachmentCount, err := mcpAppValidateAttachments(body.Attachments)
+	if err != nil {
+		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "protocol.violation", "refused",
+			"field=attachments reason="+mcpAppFieldErrorCode(err))
 		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, err.Error())
 		return
 	}
 	preview := mcpAppBounded(strings.TrimSpace(text), 120)
+	prompt := fmt.Sprintf("App「%s」请求发送一条消息：%s", mcpAppBounded(app.Title, 128), preview)
+	if attachmentCount > 0 {
+		prompt = fmt.Sprintf("App「%s」请求发送一条消息（含 %d 个附件）：%s",
+			mcpAppBounded(app.Title, 128), attachmentCount, preview)
+	}
 	decision, ok := s.confirmMCPApp(w, r, tenantID, sessionID, app,
 		"mcp-app.message",
-		fmt.Sprintf("App「%s」请求发送一条消息：%s", mcpAppBounded(app.Title, 128), preview),
+		prompt,
 		[]agentext.DecisionOption{
 			{ID: "send", Label: "发送"},
 			{ID: "edit", Label: "编辑后发送"},
 			{ID: "discard", Label: "丢弃"},
 		}, body.WaitMs, "ui/message",
-		fmt.Sprintf("session=%s blocks=%d", sessionID, len(body.Content)))
+		fmt.Sprintf("session=%s blocks=%d attachments=%d", sessionID, len(blocks), attachmentCount))
 	if !ok {
 		return
 	}
@@ -501,7 +656,7 @@ func (s *Server) mcpAppMessage(w http.ResponseWriter, r *http.Request) {
 		// Attributable and idempotent: the same View frame replayed commits the
 		// same user.message (the kernel's requestId is the idempotency key).
 		requestID := "mcp-app:" + app.AppID + ":" + frameID
-		commit, err := s.cfg.MCPAppInputCommit(r.Context(), tenantID, sessionID, requestID, text, body.Attachments)
+		commit, err := s.cfg.MCPAppInputCommit(r.Context(), tenantID, sessionID, requestID, text, attachments)
 		if err != nil {
 			s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "ui/message", "error",
 				fmt.Sprintf("branch=send reason=commit_failed code=%s", mcpAppErrorCode(err)))
@@ -509,7 +664,7 @@ func (s *Server) mcpAppMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "ui/message", "ok",
-			fmt.Sprintf("branch=send blocks=%d created=%t", len(body.Content), commit.Created))
+			fmt.Sprintf("branch=send blocks=%d attachments=%d created=%t", len(blocks), attachmentCount, commit.Created))
 		writeJSON(w, http.StatusOK, map[string]any{
 			"result": "send",
 			"message": map[string]any{
@@ -524,14 +679,14 @@ func (s *Server) mcpAppMessage(w http.ResponseWriter, r *http.Request) {
 		// Edit prefills the composer and writes nothing: the user decides
 		// whether to send the edited text.
 		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "ui/message", "ok",
-			fmt.Sprintf("branch=edit blocks=%d", len(body.Content)))
+			fmt.Sprintf("branch=edit blocks=%d attachments=%d", len(blocks), attachmentCount))
 		writeJSON(w, http.StatusOK, map[string]any{
 			"result":    "edit",
 			"prefilled": map[string]any{"text": text},
 		})
 	default:
 		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "ui/message", "ok",
-			fmt.Sprintf("branch=discard blocks=%d", len(body.Content)))
+			fmt.Sprintf("branch=discard blocks=%d attachments=%d", len(blocks), attachmentCount))
 		writeJSON(w, http.StatusOK, map[string]any{"result": "discard"})
 	}
 }
@@ -554,23 +709,58 @@ func (s *Server) mcpAppOpenLink(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeMCPAppBody(w, r, tenantID, uuid.Nil, app, &body) {
 		return
 	}
+	// The optional session is parsed (and looked up) before the scheme check so
+	// a refusal row can be attributed to a session; the confirmation below still
+	// decides whether a valid session is required.
+	sessionID, sessionProblem, sessionErr := s.mcpAppSessionValue(r.Context(), tenantID, body.SessionID)
+	if sessionErr != nil {
+		writeErr(w, http.StatusInternalServerError, sessionErr)
+		return
+	}
 	parsed, err := url.Parse(strings.TrimSpace(body.URL))
 	scheme := ""
 	if parsed != nil {
 		scheme = strings.ToLower(parsed.Scheme)
 	}
-	if err != nil || parsed == nil || parsed.Host == "" || (scheme != "http" && scheme != "https") {
-		s.recordMCPAppAudit(r.Context(), tenantID, uuid.Nil, app, "ui/open-link", "refused",
-			fmt.Sprintf("reason=unsupported_scheme scheme=%s", mcpAppBounded(scheme, 32)))
-		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, "url must be an absolute http(s) URL")
+	reason := ""
+	switch {
+	case err != nil || parsed == nil:
+		reason = "malformed_url"
+	case scheme != "http" && scheme != "https":
+		reason = "unsupported_scheme"
+	case parsed.Host == "":
+		reason = "missing_host"
+	case parsed.User != nil:
+		reason = "userinfo"
+	case !mcpAppASCIIHost(parsed.Hostname()):
+		reason = "non_ascii_host"
+	}
+	if reason != "" {
+		detail := fmt.Sprintf("reason=%s scheme=%s", reason, mcpAppBounded(scheme, 32))
+		if sessionID != uuid.Nil {
+			detail += " session=" + sessionID.String()
+		}
+		if sessionProblem != "" {
+			detail += " session_problem=" + sessionProblem
+		}
+		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "ui/open-link", "refused", detail)
+		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, "url must be an absolute http(s) URL without credentials")
 		return
 	}
 	if s.cfg.Decisions == nil {
 		writeErr(w, http.StatusServiceUnavailable, errors.New("decisions are not wired"))
 		return
 	}
-	sessionID, ok := s.mcpAppSession(w, r, tenantID, body.SessionID, false)
-	if !ok {
+	// The scheme is acceptable; now a malformed or foreign session is a real
+	// error (the confirmation needs it). A missing one is left to
+	// confirmMCPApp, which answers the explicit "sessionId is required".
+	switch sessionProblem {
+	case "", "missing":
+	case "not_found":
+		writeErr(w, http.StatusNotFound, ErrSessionNotFound)
+		return
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New("sessionId must be a UUID"))
 		return
 	}
 	display := scheme + "://" + parsed.Host + parsed.EscapedPath()
@@ -607,6 +797,22 @@ func (s *Server) confirmMCPApp(w http.ResponseWriter, r *http.Request, tenantID,
 		s.recordMCPAppAudit(r.Context(), tenantID, uuid.Nil, app, action, "refused",
 			detail+" reason=session_required_for_confirmation")
 		writeErr(w, http.StatusBadRequest, errors.New("sessionId is required for a confirmation"))
+		return agentext.Decision{}, false
+	}
+	// Bound the unanswered confirmations one session may hold. An app that
+	// opens a confirmation and disconnects leaves the decision open until its
+	// timeout; without this bound a 200 req/s client could stack thousands of
+	// durable rows. The check is a read, not a write: normal confirmations are
+	// never blocked by it.
+	open, err := s.mcpAppOpenConfirmations(r.Context(), tenantID, sessionID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return agentext.Decision{}, false
+	}
+	if open >= mcpAppMaxOpenConfirmations {
+		s.recordSampledRejection(r.Context(), tenantID, sessionID, app, "confirmation_overflow", "refused",
+			fmt.Sprintf("open=%d limit=%d", open, mcpAppMaxOpenConfirmations))
+		writeMCPAppRPCErr(w, http.StatusTooManyRequests, -32000, "too many pending app confirmations")
 		return agentext.Decision{}, false
 	}
 	wait := s.cfg.MCPAppConfirmTimeout
@@ -671,6 +877,23 @@ func (s *Server) confirmMCPApp(w http.ResponseWriter, r *http.Request, tenantID,
 		return agentext.Decision{}, false
 	}
 	return decision, true
+}
+
+// mcpAppOpenConfirmations counts the session's unanswered app confirmations
+// (kind "mcp-app.*"). The broker's List expires timed-out rows before counting,
+// so a decision that reached its deadline no longer blocks new ones.
+func (s *Server) mcpAppOpenConfirmations(ctx context.Context, tenantID, sessionID uuid.UUID) (int, error) {
+	decisions, err := s.cfg.Decisions.List(ctx, tenantID, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	open := 0
+	for _, decision := range decisions {
+		if decision.Status == agentext.DecisionOpen && strings.HasPrefix(decision.Kind, "mcp-app.") {
+			open++
+		}
+	}
+	return open, nil
 }
 
 // mcpAppAuditList implements GET /v1/mcp/apps/audit: the tenant's app audit
@@ -813,28 +1036,190 @@ func writeMCPAppInputError(w http.ResponseWriter, err error) {
 	}
 }
 
+// mcpAppFieldError is a fixed-code validation failure: the code goes to the
+// audit row, the message goes to the View. Neither ever carries the offending
+// value.
+type mcpAppFieldError struct {
+	code    string
+	message string
+}
+
+func (e *mcpAppFieldError) Error() string { return e.message }
+
+func mcpAppFieldErrorCode(err error) string {
+	var fieldErr *mcpAppFieldError
+	if errors.As(err, &fieldErr) {
+		return fieldErr.code
+	}
+	return "invalid"
+}
+
+// parseMCPAppMessageContent accepts the two tolerated shapes (design §0.1 R8):
+// an array of blocks, or one block object. Every block is an object with only
+// "type" and "text"; any other shape is a protocol violation.
+func parseMCPAppMessageContent(raw json.RawMessage) ([]mcpAppMessageContent, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, &mcpAppFieldError{code: "shape", message: "content must be an array of blocks or one block object"}
+	}
+	switch trimmed[0] {
+	case '[':
+		var items []json.RawMessage
+		if err := json.Unmarshal(trimmed, &items); err != nil || items == nil {
+			return nil, &mcpAppFieldError{code: "shape", message: "content must be an array of blocks"}
+		}
+		blocks := make([]mcpAppMessageContent, 0, len(items))
+		for _, item := range items {
+			block, err := decodeMCPAppContentBlock(item)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+		}
+		return blocks, nil
+	case '{':
+		block, err := decodeMCPAppContentBlock(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		return []mcpAppMessageContent{block}, nil
+	default:
+		return nil, &mcpAppFieldError{code: "shape", message: "content must be an array of blocks or one block object"}
+	}
+}
+
+// decodeMCPAppContentBlock decodes one block strictly: an object with only the
+// type and text members.
+func decodeMCPAppContentBlock(raw json.RawMessage) (mcpAppMessageContent, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return mcpAppMessageContent{}, &mcpAppFieldError{code: "block", message: "each content block must be an object"}
+	}
+	for key := range fields {
+		if key != "type" && key != "text" {
+			return mcpAppMessageContent{}, &mcpAppFieldError{code: "block", message: "content blocks carry only type and text"}
+		}
+	}
+	var block mcpAppMessageContent
+	if rawType, ok := fields["type"]; ok {
+		if err := json.Unmarshal(rawType, &block.Type); err != nil {
+			return mcpAppMessageContent{}, &mcpAppFieldError{code: "type", message: "content block type must be a string"}
+		}
+	}
+	if rawText, ok := fields["text"]; ok {
+		if err := json.Unmarshal(rawText, &block.Text); err != nil {
+			return mcpAppMessageContent{}, &mcpAppFieldError{code: "text", message: "content block text must be a string"}
+		}
+	}
+	return block, nil
+}
+
 // mcpAppMessageText joins the text blocks of a ui/message and refuses every
 // other block type: silently dropping a non-text block would send a message the
 // app did not ask for.
 func mcpAppMessageText(content []mcpAppMessageContent) (string, error) {
 	if len(content) == 0 {
-		return "", errors.New("content must contain at least one text block")
+		return "", &mcpAppFieldError{code: "empty", message: "content must contain at least one text block"}
 	}
 	parts := make([]string, 0, len(content))
 	for _, block := range content {
 		if block.Type != "text" {
-			return "", fmt.Errorf("unsupported content type %q (only text is accepted)", mcpAppBounded(block.Type, 32))
+			return "", &mcpAppFieldError{code: "type", message: "only text content is accepted"}
 		}
 		if strings.TrimSpace(block.Text) == "" {
-			return "", errors.New("text content must not be empty")
+			return "", &mcpAppFieldError{code: "empty", message: "text content must not be empty"}
 		}
 		parts = append(parts, block.Text)
 	}
 	text := strings.Join(parts, "\n")
 	if strings.TrimSpace(text) == "" {
-		return "", errors.New("content must not be empty")
+		return "", &mcpAppFieldError{code: "empty", message: "content must not be empty"}
 	}
 	return text, nil
+}
+
+// mcpAppValidateAttachments applies the /input attachment shape strictly: an
+// array of at most 16 entries, each {fileId (UUID), mime, name, size} and
+// nothing else. An app references already-uploaded blobs; a URL or an unknown
+// field is refused rather than forwarded. The raw value is returned unchanged
+// so the shared input path sees exactly what the app sent.
+func mcpAppValidateAttachments(raw json.RawMessage) (json.RawMessage, int, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, 0, nil
+	}
+	if trimmed[0] != '[' {
+		return nil, 0, &mcpAppFieldError{code: "shape", message: "attachments must be an array"}
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		return nil, 0, &mcpAppFieldError{code: "shape", message: "attachments must be an array"}
+	}
+	if len(items) > mcpAppMaxAttachments {
+		return nil, 0, &mcpAppFieldError{code: "count", message: fmt.Sprintf("at most %d attachments are accepted", mcpAppMaxAttachments)}
+	}
+	for _, item := range items {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil || fields == nil {
+			return nil, 0, &mcpAppFieldError{code: "entry", message: "each attachment must be an object"}
+		}
+		for key := range fields {
+			switch key {
+			case "fileId", "mime", "name", "size":
+			default:
+				return nil, 0, &mcpAppFieldError{code: "entry", message: "attachments carry only fileId, mime, name and size"}
+			}
+		}
+		var fileID string
+		rawFileID, ok := fields["fileId"]
+		if !ok || json.Unmarshal(rawFileID, &fileID) != nil {
+			return nil, 0, &mcpAppFieldError{code: "file_id", message: "each attachment needs a fileId"}
+		}
+		id, err := uuid.Parse(fileID)
+		if err != nil || id == uuid.Nil {
+			return nil, 0, &mcpAppFieldError{code: "file_id", message: "attachment fileId must be a UUID"}
+		}
+		var name string
+		if rawName, ok := fields["name"]; ok {
+			if err := json.Unmarshal(rawName, &name); err != nil {
+				return nil, 0, &mcpAppFieldError{code: "name", message: "attachment name must be a string"}
+			}
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || len(name) > mcpAppAttachmentNameMax {
+			return nil, 0, &mcpAppFieldError{code: "name", message: fmt.Sprintf("attachment name must be 1..%d bytes", mcpAppAttachmentNameMax)}
+		}
+		var mime string
+		if rawMIME, ok := fields["mime"]; ok {
+			if err := json.Unmarshal(rawMIME, &mime); err != nil {
+				return nil, 0, &mcpAppFieldError{code: "mime", message: "attachment mime must be a string"}
+			}
+		}
+		if len(mime) > mcpAppAttachmentMIMETypeMax {
+			return nil, 0, &mcpAppFieldError{code: "mime", message: fmt.Sprintf("attachment mime must be at most %d bytes", mcpAppAttachmentMIMETypeMax)}
+		}
+		var size int64
+		if rawSize, ok := fields["size"]; ok {
+			if err := json.Unmarshal(rawSize, &size); err != nil {
+				return nil, 0, &mcpAppFieldError{code: "size", message: "attachment size must be an integer"}
+			}
+		}
+		if size < 0 || size > mcpAppAttachmentSizeMax {
+			return nil, 0, &mcpAppFieldError{code: "size", message: "attachment size is out of range"}
+		}
+	}
+	return append(json.RawMessage(nil), trimmed...), len(items), nil
+}
+
+// mcpAppParseSessionID parses a session id leniently for audit attribution: a
+// malformed value yields uuid.Nil rather than an error. Validation still runs
+// through mcpAppSession at the point the endpoint requires one.
+func mcpAppParseSessionID(raw string) uuid.UUID {
+	id, err := uuid.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return uuid.Nil
+	}
+	return id
 }
 
 // mcpAppURIProblem applies the resources/read scheme whitelist: only ui:// and
@@ -859,6 +1244,17 @@ func mcpAppURIProblem(uri string) string {
 	default:
 		return "unsupported_scheme"
 	}
+}
+
+// mcpAppASCIIHost rejects a host carrying non-ASCII runes: a Unicode host is a
+// homograph vector and the bridge contract only accepts ASCII/DNS hosts.
+func mcpAppASCIIHost(host string) bool {
+	for _, r := range host {
+		if r > 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // mcpAppURIScheme reports the URI's scheme for an audit detail (never the full
@@ -920,14 +1316,24 @@ func mcpAppErrorCode(err error) string {
 }
 
 // mcpAppDestructiveWords is the change-family vocabulary from
-// web/src/screens/tool-families.ts (FAMILY_WORDS.changes). A tool without a
-// destructiveHint whose name carries one of these words is treated as
-// destructive and confirmed per call.
+// web/src/screens/tool-families.ts (FAMILY_WORDS.changes) plus a backend-only
+// destructive set (drop/truncate/rm/reset/clear/flush/wipe/nuke/erase/purge/
+// destroy/revoke/unlink/format/overwrite). The frontend list is frozen for the
+// display side; the host is deliberately stricter here, because a false
+// positive costs one confirmation while a false negative lets an app mutate
+// data without asking. A tool without a destructiveHint whose name carries one
+// of these words is confirmed per call.
 var mcpAppDestructiveWords = map[string]bool{
+	// web/src/screens/tool-families.ts FAMILY_WORDS.changes (verbatim).
 	"edit": true, "write": true, "patch": true, "apply": true, "replace": true,
 	"create": true, "delete": true, "remove": true, "mkdir": true, "move": true,
 	"rename": true, "git": true, "commit": true, "diff": true, "build": true,
 	"test": true, "install": true, "deploy": true, "publish": true,
+	// Backend-only destructive extension (strictly more severe than the frontend
+	// display vocabulary).
+	"drop": true, "truncate": true, "rm": true, "reset": true, "clear": true,
+	"flush": true, "wipe": true, "nuke": true, "erase": true, "purge": true,
+	"destroy": true, "revoke": true, "unlink": true, "format": true, "overwrite": true,
 }
 
 // mcpAppNameDestructive applies the name-family fallback.

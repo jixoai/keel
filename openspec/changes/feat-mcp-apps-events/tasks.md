@@ -95,7 +95,8 @@
       （2026-11-20 P3 后端切片：`internal/agentapi/mcp_app_actions.go`——server 由 catalogue 派生、`AppTool` 复核
       `visibility`；越权/别服务器/模型专用工具 403 + `tools/call=refused` 审计且上游零调用；破坏性工具
       （`destructiveHint` 或变更族词名）逐次 decision 确认，拒绝无上游。httptest 断言 + 真 stdio fixture
-      `cmd/keel/mcp_app_bridge_test.go`）
+      `cmd/keel/mcp_app_bridge_test.go`。复核修复：同会话未答 `mcp-app.*` decision 上限 16，超限 429
+      `-32000` 且不新建行）
 - [x] P3.2 `POST /v1/mcp/apps/{id}/resources/read`：URI scheme 白名单 + 该服务器限定
       （验收：`file:`/`data:` 等被拒并审计）
       （2026-11-20：只允许 `ui://`/`http(s)://`（缺 host/缺 scheme 也拒）；结果按 2 MiB 单条上限复核、不落盘；
@@ -121,11 +122,13 @@
       （2026-11-20：`schema.sql` + `rlsTenantTables`（FORCE RLS + tenant_isolation）；`store/mcp_app_audit.go`
       append/list（detail 有界 512B、去控制符）；`GET/POST /v1/mcp/apps/audit`（读分页；POST 仅
       permission.granted/denied、protocol.violation 的宿主动作入口，租户鉴权、不能伪造桥动作）；
-      真库 RLS/跨租户写拒绝 + 全行扫描断言无消息正文/URL query）
+      真库 RLS/跨租户写拒绝 + 全行扫描断言无消息正文/URL query。复核修复：role/delivery/content/attachments
+      违规写 `protocol.violation=refused`（只记字段/固定原因码）；拒绝路径审计按 app/动作/秒采样）
 - [x] P3.8 桥限速限长：单帧 64 KiB、200 帧/s、单 app 并发 4；超限断连 + 审计
       （验收：单测用假计时源断言阈值）
       （2026-11-20：HTTP 代理面同阈值——64 KiB body（413）、每 app 200/s 令牌桶（假时钟测试）、
-      单 app 并发 4（429）；三类超限都写 `bridge.size|rate|concurrency=refused`；浏览器桥帧实现同数
+      单 app 并发 4（429）；三类超限都写 `bridge.size|rate|concurrency=refused`（复核修复：每
+      app/动作/秒采样 1 行 + `suppressed=N`，防止零成本拒绝以线速灌审计表）；浏览器桥帧实现同数
       并在 `mcp_app_actions.go` 头注释写明映射）
 
 ## P4 — events 路由与订阅

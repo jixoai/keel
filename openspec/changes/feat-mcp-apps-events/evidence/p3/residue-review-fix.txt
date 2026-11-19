@@ -1,0 +1,17 @@
+# residue check (P3 review fix) 2026-11-19T21:41:24Z
+
+## E2E ports (from agent-runtime-e2e-review-fix/port-release.txt)
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## keel/e2e processes belonging to this worktree
+none
+
+## go test child fixtures
+none
+
+## leftover E2E database
+rows: 0
+
+## listeners on the E2E ports
+(no output above = both ports free)

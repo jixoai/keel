@@ -229,6 +229,11 @@ type Server struct {
 	// mcpAppLimits is the per-app bridge budget (P3.8): 200 requests/s and 4
 	// concurrent proxy requests per app.
 	mcpAppLimits *mcpAppLimiter
+	// mcpAuditMu guards the rejection-audit sampler. A rate/concurrency/size
+	// refusal is zero-cost to produce, so its audit row is sampled to at most
+	// one per (app, action, second); the row carries the suppressed count.
+	mcpAuditMu      sync.Mutex
+	mcpAuditSamples map[string]*mcpAuditSample
 }
 
 // New builds the API and its routes.
@@ -254,7 +259,12 @@ func New(cfg Config) *Server {
 	if cfg.MCPAppNow == nil {
 		cfg.MCPAppNow = func() time.Time { return time.Now().UTC() }
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), mcpAppLimits: newMCPAppLimiter(cfg.MCPAppNow)}
+	s := &Server{
+		cfg:             cfg,
+		mux:             http.NewServeMux(),
+		mcpAppLimits:    newMCPAppLimiter(cfg.MCPAppNow),
+		mcpAuditSamples: make(map[string]*mcpAuditSample),
+	}
 	s.routes()
 	return s
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -162,8 +163,16 @@ func (f *fakeAppCommit) snapshot() []fakeAppInput {
 // newBridgeAPI builds an AgentAPI over the standard fixture surface.
 func newBridgeAPI(t *testing.T, tenant uuid.UUID, runtime MCPAppRuntime, audit MCPAppAuditStore, commit func(context.Context, uuid.UUID, uuid.UUID, string, string, json.RawMessage) (MCPAppInput, error), decisions *agentext.DecisionBroker, now func() time.Time) *httptest.Server {
 	t.Helper()
+	server, _ := newBridgeAPIServer(t, tenant, runtime, audit, commit, decisions, now)
+	return server
+}
+
+// newBridgeAPIServer also returns the API value, so tests that use the fake
+// clock can flush the buffered rejection-audit samples explicitly.
+func newBridgeAPIServer(t *testing.T, tenant uuid.UUID, runtime MCPAppRuntime, audit MCPAppAuditStore, commit func(context.Context, uuid.UUID, uuid.UUID, string, string, json.RawMessage) (MCPAppInput, error), decisions *agentext.DecisionBroker, now func() time.Time) (*httptest.Server, *Server) {
+	t.Helper()
 	apps := &fakeMCPApps{tenant: tenant, published: true, surface: testSurface(t)}
-	server := httptest.NewServer(New(Config{
+	api := New(Config{
 		MCPApps:              apps,
 		MCPAppRuntime:        runtime,
 		MCPAppAudit:          audit,
@@ -172,9 +181,10 @@ func newBridgeAPI(t *testing.T, tenant uuid.UUID, runtime MCPAppRuntime, audit M
 		MCPAppConfirmTimeout: 2 * time.Second,
 		MCPAppNow:            now,
 		Logger:               testLogger(),
-	}))
+	})
+	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)
-	return server
+	return server, api
 }
 
 // postBridge issues a bridge request and returns status + raw body.
@@ -232,6 +242,14 @@ func postBridgeAsync(client *http.Client, url string, tenant uuid.UUID, body any
 // answerOpenDecision polls the session's open decision and answers it.
 func answerOpenDecision(t *testing.T, broker *agentext.DecisionBroker, tenant, session uuid.UUID, option string) agentext.Decision {
 	t.Helper()
+	return answerOpenDecisionOfKind(t, broker, tenant, session, "", option)
+}
+
+// answerOpenDecisionOfKind answers the newest open decision, optionally
+// narrowed to one kind. The kind filter keeps a test from racing a pre-opened
+// decision of another kind.
+func answerOpenDecisionOfKind(t *testing.T, broker *agentext.DecisionBroker, tenant, session uuid.UUID, kind, option string) agentext.Decision {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		decisions, err := broker.List(context.Background(), tenant, session)
@@ -240,6 +258,9 @@ func answerOpenDecision(t *testing.T, broker *agentext.DecisionBroker, tenant, s
 		}
 		for _, decision := range decisions {
 			if decision.Status != agentext.DecisionOpen {
+				continue
+			}
+			if kind != "" && decision.Kind != kind {
 				continue
 			}
 			answered, _, err := broker.Answer(context.Background(), agentext.AnswerDecisionRequest{
@@ -348,6 +369,7 @@ func TestMCPAppDestructiveConfirmation(t *testing.T) {
 	runtime := &fakeAppRuntime{tools: map[string]MCPAppTool{
 		"weather/destroy":      {Name: "destroy", Destructive: true},
 		"weather/delete_thing": {Name: "delete_thing"},
+		"weather/db_drop":      {Name: "db_drop"},
 	}, callOK: mcp.CallToolResult{Content: []mcp.ContentBlock{{Type: "text", Text: "done"}}}}
 	audit := &fakeAppAudit{}
 	server := newBridgeAPI(t, tenant, runtime, audit, nil, broker, nil)
@@ -379,7 +401,8 @@ func TestMCPAppDestructiveConfirmation(t *testing.T) {
 		t.Fatalf("a denied destructive call reached the server: %d calls", runtime.callCount())
 	}
 
-	// Name-family fallback (no annotation).
+	// Name-family fallback (no annotation). The backend list is stricter than
+	// the frozen display list: db_drop carries no hint but still confirms.
 	sessionName := uuid.New()
 	done = postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/tools/call", tenant, map[string]any{
 		"sessionId": sessionName.String(), "name": "delete_thing",
@@ -388,6 +411,15 @@ func TestMCPAppDestructiveConfirmation(t *testing.T) {
 	result = <-done
 	if result.status != http.StatusOK {
 		t.Fatalf("name-family allow = %d: %s", result.status, result.body)
+	}
+	sessionDrop := uuid.New()
+	done = postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/tools/call", tenant, map[string]any{
+		"sessionId": sessionDrop.String(), "name": "db_drop",
+	})
+	answerOpenDecision(t, broker, tenant, sessionDrop, "allow")
+	result = <-done
+	if result.status != http.StatusOK {
+		t.Fatalf("db_drop without annotation = %d: %s", result.status, result.body)
 	}
 
 	// Each call opens its own decision: the same frame id cannot reuse an
@@ -640,7 +672,7 @@ func TestMCPAppRateLimit(t *testing.T) {
 	}
 	runtime := &fakeAppRuntime{tools: map[string]MCPAppTool{"weather/dashboard": {Name: "dashboard"}}}
 	audit := &fakeAppAudit{}
-	server := newBridgeAPI(t, tenant, runtime, audit, nil, nil, now)
+	server, api := newBridgeAPIServer(t, tenant, runtime, audit, nil, nil, now)
 	url := server.URL + "/v1/mcp/apps/" + testAppID + "/tools/call"
 
 	for index := 0; index < mcpAppRatePerSecond; index++ {
@@ -655,6 +687,7 @@ func TestMCPAppRateLimit(t *testing.T) {
 	if runtime.callCount() != mcpAppRatePerSecond {
 		t.Fatalf("upstream calls = %d, want %d", runtime.callCount(), mcpAppRatePerSecond)
 	}
+	api.flushMCPAppAuditSamples()
 	rateAudited := false
 	for _, entry := range audit.snapshot() {
 		if entry.Action == "bridge.rate" && entry.Result == "refused" {
@@ -682,7 +715,7 @@ func TestMCPAppConcurrencyLimit(t *testing.T) {
 		started: make(chan struct{}, mcpAppConcurrency),
 	}
 	audit := &fakeAppAudit{}
-	server := newBridgeAPI(t, tenant, runtime, audit, nil, nil, nil)
+	server, api := newBridgeAPIServer(t, tenant, runtime, audit, nil, nil, nil)
 	url := server.URL + "/v1/mcp/apps/" + testAppID + "/tools/call"
 
 	results := make([]<-chan bridgeResult, 0, mcpAppConcurrency)
@@ -706,6 +739,7 @@ func TestMCPAppConcurrencyLimit(t *testing.T) {
 			t.Fatalf("in-flight request = %d: %s", result.status, result.body)
 		}
 	}
+	api.flushMCPAppAuditSamples()
 	concurrencyAudited := false
 	for _, entry := range audit.snapshot() {
 		if entry.Action == "bridge.concurrency" && entry.Result == "refused" {
@@ -722,7 +756,7 @@ func TestMCPAppBodyLimit(t *testing.T) {
 	tenant := uuid.New()
 	runtime := &fakeAppRuntime{tools: map[string]MCPAppTool{"weather/dashboard": {Name: "dashboard"}}}
 	audit := &fakeAppAudit{}
-	server := newBridgeAPI(t, tenant, runtime, audit, nil, nil, nil)
+	server, api := newBridgeAPIServer(t, tenant, runtime, audit, nil, nil, nil)
 
 	// The JSON body is padded past the bound with a string argument.
 	padding := strings.Repeat("x", mcpAppRequestMaxBytes)
@@ -747,6 +781,7 @@ func TestMCPAppBodyLimit(t *testing.T) {
 	if runtime.callCount() != 0 {
 		t.Fatal("an oversized body reached the server")
 	}
+	api.flushMCPAppAuditSamples()
 	sizeAudited := false
 	for _, entry := range audit.snapshot() {
 		if entry.Action == "bridge.size" && entry.Result == "refused" {
@@ -905,6 +940,12 @@ func TestMCPAppNameDestructive(t *testing.T) {
 		"git.commit":            true,
 		"apply_patch":           true,
 		"publish_release":       true,
+		"db_drop":               true,
+		"truncate_table":        true,
+		"rm_rf":                 true,
+		"reset_state":           true,
+		"flush_cache":           true,
+		"purge_records":         true,
 		"refresh":               false,
 		"show_dashboard":        false,
 		"get_weather":           false,
@@ -947,3 +988,428 @@ var (
 )
 
 var _ = mcphost.AppSpec{}
+
+// auditCount counts audit rows by action and result.
+func auditCount(entries []store.MCPAppAuditEntry, action, result string) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.Action == action && entry.Result == result {
+			count++
+		}
+	}
+	return count
+}
+
+// TestMCPAppRejectionAuditSampling pins P1-1: 1000 zero-cost rate refusals in
+// one second produce exactly one row, with suppressed=999; the next second
+// starts a new row.
+func TestMCPAppRejectionAuditSampling(t *testing.T) {
+	tenant := uuid.New()
+	clock := time.Unix(1_700_000_000, 0)
+	var clockMu sync.Mutex
+	now := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return clock
+	}
+	advance := func(d time.Duration) {
+		clockMu.Lock()
+		clock = clock.Add(d)
+		clockMu.Unlock()
+	}
+	runtime := &fakeAppRuntime{tools: map[string]MCPAppTool{"weather/dashboard": {Name: "dashboard"}}}
+	audit := &fakeAppAudit{}
+	server, api := newBridgeAPIServer(t, tenant, runtime, audit, nil, nil, now)
+	url := server.URL + "/v1/mcp/apps/" + testAppID + "/tools/call"
+
+	exhaustAndOverflow := func() {
+		for index := 0; index < mcpAppRateBurst; index++ {
+			if status, body := postBridge(t, server.Client(), url, tenant, map[string]any{"name": "dashboard"}); status != http.StatusOK {
+				t.Fatalf("allowed request %d = %d: %s", index, status, body)
+			}
+		}
+		for index := 0; index < 1000; index++ {
+			if status, body := postBridge(t, server.Client(), url, tenant, map[string]any{"name": "dashboard"}); status != http.StatusTooManyRequests {
+				t.Fatalf("refused request %d = %d: %s", index, status, body)
+			}
+		}
+	}
+
+	exhaustAndOverflow()
+	api.flushMCPAppAuditSamples()
+	rateRows := make([]store.MCPAppAuditEntry, 0)
+	for _, entry := range audit.snapshot() {
+		if entry.Action == "bridge.rate" {
+			rateRows = append(rateRows, entry)
+		}
+	}
+	if len(rateRows) != 1 {
+		t.Fatalf("rate audit rows = %d, want 1 for one window: %+v", len(rateRows), rateRows)
+	}
+	if !strings.Contains(rateRows[0].Detail, "suppressed=999") {
+		t.Fatalf("suppressed count missing: %q", rateRows[0].Detail)
+	}
+	if runtime.callCount() != mcpAppRateBurst {
+		t.Fatalf("upstream calls = %d, want %d", runtime.callCount(), mcpAppRateBurst)
+	}
+
+	// The next second starts a fresh window.
+	advance(time.Second)
+	exhaustAndOverflow()
+	api.flushMCPAppAuditSamples()
+	rateRows = rateRows[:0]
+	for _, entry := range audit.snapshot() {
+		if entry.Action == "bridge.rate" {
+			rateRows = append(rateRows, entry)
+		}
+	}
+	if len(rateRows) != 2 {
+		t.Fatalf("rate audit rows after two windows = %d, want 2", len(rateRows))
+	}
+	if !strings.Contains(rateRows[1].Detail, "suppressed=999") {
+		t.Fatalf("second window suppressed count missing: %q", rateRows[1].Detail)
+	}
+	if runtime.callCount() != 2*mcpAppRateBurst {
+		t.Fatalf("upstream calls = %d, want %d", runtime.callCount(), 2*mcpAppRateBurst)
+	}
+}
+
+// TestMCPAppConfirmationOverflow pins P1-2: a session may hold at most 16
+// unanswered app confirmations; the next one is refused before a decision row
+// is created, audited once (sampled), and allowed again after one is answered.
+func TestMCPAppConfirmationOverflow(t *testing.T) {
+	tenant, session := uuid.New(), uuid.New()
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Store: agentext.NewMemoryDecisionStore(), Logger: testLogger()})
+	audit := &fakeAppAudit{}
+	commit := &fakeAppCommit{}
+	server, api := newBridgeAPIServer(t, tenant, &fakeAppRuntime{}, audit, commit.commit, broker, nil)
+	ctx := context.Background()
+
+	for index := 0; index < mcpAppMaxOpenConfirmations; index++ {
+		if _, _, err := broker.Open(ctx, agentext.OpenDecisionRequest{
+			TenantID: tenant, SessionID: session,
+			RequestID: fmt.Sprintf("pre-open-%d", index),
+			Kind:      "mcp-app.tool", Prompt: "pre-opened",
+			Options: []agentext.DecisionOption{{ID: "allow", Label: "allow"}},
+			Timeout: time.Minute,
+		}); err != nil {
+			t.Fatalf("pre-open %d: %v", index, err)
+		}
+	}
+
+	message := map[string]any{
+		"sessionId": session.String(),
+		"role":      "user",
+		"content":   []map[string]any{{"type": "text", "text": "hello"}},
+	}
+	status, body := postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, message)
+	if status != http.StatusTooManyRequests || !strings.Contains(string(body), `"code":-32000`) {
+		t.Fatalf("overflow = %d: %s", status, body)
+	}
+	decisions, err := broker.List(ctx, tenant, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := 0
+	for _, decision := range decisions {
+		if decision.Status == agentext.DecisionOpen {
+			open++
+		}
+	}
+	if open != mcpAppMaxOpenConfirmations {
+		t.Fatalf("open decisions = %d, want %d (the refusal must not create a row)", open, mcpAppMaxOpenConfirmations)
+	}
+	api.flushMCPAppAuditSamples()
+	if count := auditCount(audit.snapshot(), "confirmation_overflow", "refused"); count != 1 {
+		t.Fatalf("confirmation_overflow rows = %d, want 1", count)
+	}
+	if len(commit.snapshot()) != 0 {
+		t.Fatal("the refused confirmation committed a message")
+	}
+
+	// Answer one pre-opened decision: the count drops and the next confirmation
+	// is accepted again.
+	var target agentext.Decision
+	for _, decision := range decisions {
+		if decision.Status == agentext.DecisionOpen {
+			target = decision
+			break
+		}
+	}
+	if _, _, err := broker.Answer(ctx, agentext.AnswerDecisionRequest{
+		TenantID: tenant, SessionID: session, DecisionID: mustDecisionID(t, target.DecisionID), OptionID: "allow",
+	}); err != nil {
+		t.Fatalf("answer pre-opened: %v", err)
+	}
+	done := postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, message)
+	answerOpenDecisionOfKind(t, broker, tenant, session, "mcp-app.message", "discard")
+	result := <-done
+	if result.status != http.StatusOK {
+		t.Fatalf("after freeing a slot = %d: %s", result.status, result.body)
+	}
+}
+
+// TestMCPAppMessageAttachments pins P2-1: the /input attachment shape is
+// validated strictly, the decision prompt carries only a count, and invalid
+// attachments never reach a decision or the ledger.
+func TestMCPAppMessageAttachments(t *testing.T) {
+	tenant := uuid.New()
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Store: agentext.NewMemoryDecisionStore(), Logger: testLogger()})
+	commit := &fakeAppCommit{}
+	audit := &fakeAppAudit{}
+	server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, audit, commit.commit, broker, nil)
+
+	valid := []map[string]any{
+		{"fileId": uuid.NewString(), "mime": "image/png", "name": "a.png", "size": 12},
+		{"fileId": uuid.NewString(), "name": "b.txt", "size": 3},
+	}
+	session := uuid.New()
+	done := postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, map[string]any{
+		"sessionId": session.String(), "role": "user",
+		"content":     []map[string]any{{"type": "text", "text": "see attachments"}},
+		"attachments": valid,
+	})
+	decision := answerOpenDecision(t, broker, tenant, session, "send")
+	result := <-done
+	if result.status != http.StatusOK {
+		t.Fatalf("valid attachments = %d: %s", result.status, result.body)
+	}
+	if !strings.Contains(decision.Prompt, "含 2 个附件") {
+		t.Fatalf("decision prompt = %q, want an attachment count", decision.Prompt)
+	}
+	inputs := commit.snapshot()
+	if len(inputs) != 1 {
+		t.Fatalf("committed inputs = %d, want 1", len(inputs))
+	}
+	var forwarded []map[string]any
+	if err := json.Unmarshal(inputs[0].Attachments, &forwarded); err != nil || len(forwarded) != 2 {
+		t.Fatalf("forwarded attachments = %s (%v)", inputs[0].Attachments, err)
+	}
+
+	tooMany := make([]map[string]any, mcpAppMaxAttachments+1)
+	for index := range tooMany {
+		tooMany[index] = map[string]any{"fileId": uuid.NewString(), "name": "f"}
+	}
+	invalid := map[string]any{
+		"not an array":  map[string]any{"fileId": uuid.NewString(), "name": "x"},
+		"too many":      tooMany,
+		"bad file id":   []map[string]any{{"fileId": "not-a-uuid", "name": "x"}},
+		"unknown field": []map[string]any{{"fileId": uuid.NewString(), "name": "x", "url": "https://evil.example"}},
+		"empty name":    []map[string]any{{"fileId": uuid.NewString(), "name": ""}},
+		"long mime":     []map[string]any{{"fileId": uuid.NewString(), "name": "x", "mime": strings.Repeat("m", mcpAppAttachmentMIMETypeMax+1)}},
+		"negative size": []map[string]any{{"fileId": uuid.NewString(), "name": "x", "size": -1}},
+	}
+	before := len(commit.snapshot())
+	for name, attachments := range invalid {
+		session := uuid.New()
+		status, body := postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, map[string]any{
+			"sessionId": session.String(), "role": "user",
+			"content":     []map[string]any{{"type": "text", "text": "x"}},
+			"attachments": attachments,
+		})
+		if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":-32602`) {
+			t.Errorf("%s = %d: %s", name, status, body)
+		}
+		if decisions, _ := broker.List(context.Background(), tenant, session); len(decisions) != 0 {
+			t.Errorf("%s opened %d decisions", name, len(decisions))
+		}
+	}
+	if len(commit.snapshot()) != before {
+		t.Fatal("an invalid attachment was committed")
+	}
+	protocolRows := 0
+	for _, entry := range audit.snapshot() {
+		if entry.Action == "protocol.violation" && strings.Contains(entry.Detail, "field=attachments") {
+			protocolRows++
+		}
+	}
+	if protocolRows < len(invalid) {
+		t.Fatalf("attachment protocol rows = %d, want %d", protocolRows, len(invalid))
+	}
+}
+
+// TestMCPAppMessageProtocolAudits pins P2-2: the role, delivery and content
+// gates all leave a protocol.violation row with a field/reason only.
+func TestMCPAppMessageProtocolAudits(t *testing.T) {
+	tenant := uuid.New()
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Store: agentext.NewMemoryDecisionStore(), Logger: testLogger()})
+	commit := &fakeAppCommit{}
+	audit := &fakeAppAudit{}
+	server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, audit, commit.commit, broker, nil)
+
+	cases := []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"role", map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "x"}}}, "field=role reason=not_user"},
+		{"delivery", map[string]any{"role": "user", "delivery": "guide", "content": []map[string]any{{"type": "text", "text": "x"}}}, "field=delivery reason=not_queue"},
+		{"content type", map[string]any{"role": "user", "content": []map[string]any{{"type": "image", "text": "x"}}}, "field=content reason=type"},
+		{"content shape", map[string]any{"role": "user", "content": "not-a-block"}, "field=content reason=shape"},
+	}
+	for _, testCase := range cases {
+		session := uuid.New()
+		testCase.body["sessionId"] = session.String()
+		status, body := postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, testCase.body)
+		if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":-32602`) {
+			t.Errorf("%s = %d: %s", testCase.name, status, body)
+		}
+		if decisions, _ := broker.List(context.Background(), tenant, session); len(decisions) != 0 {
+			t.Errorf("%s opened %d decisions", testCase.name, len(decisions))
+		}
+		found := false
+		for _, entry := range audit.snapshot() {
+			if entry.Action == "protocol.violation" && entry.Result == "refused" &&
+				strings.Contains(entry.Detail, testCase.field) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s did not leave %q", testCase.name, testCase.field)
+		}
+	}
+	if len(commit.snapshot()) != 0 {
+		t.Fatal("a protocol violation committed a message")
+	}
+}
+
+// TestMCPAppMessageSingleContentObject pins P2-4: one {type:"text"} object is
+// accepted like a one-element array.
+func TestMCPAppMessageSingleContentObject(t *testing.T) {
+	tenant := uuid.New()
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Store: agentext.NewMemoryDecisionStore(), Logger: testLogger()})
+	commit := &fakeAppCommit{}
+	server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, &fakeAppAudit{}, commit.commit, broker, nil)
+
+	session := uuid.New()
+	done := postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, map[string]any{
+		"sessionId": session.String(), "role": "user",
+		"content": map[string]any{"type": "text", "text": "single block"},
+	})
+	answerOpenDecision(t, broker, tenant, session, "send")
+	result := <-done
+	if result.status != http.StatusOK {
+		t.Fatalf("single content object = %d: %s", result.status, result.body)
+	}
+	inputs := commit.snapshot()
+	if len(inputs) != 1 || inputs[0].Text != "single block" {
+		t.Fatalf("committed inputs = %+v", inputs)
+	}
+
+	// Unknown members are still a protocol violation.
+	session = uuid.New()
+	status, body := postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, map[string]any{
+		"sessionId": session.String(), "role": "user",
+		"content": map[string]any{"type": "text", "text": "x", "extra": "nope"},
+	})
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":-32602`) {
+		t.Fatalf("unknown content member = %d: %s", status, body)
+	}
+}
+
+// TestMCPAppOpenLinkRejectsUserinfoAndNonASCII pins P2-5: a URL with userinfo
+// or a non-ASCII host is refused and audited, with no decision opened.
+func TestMCPAppOpenLinkRejectsUserinfoAndNonASCII(t *testing.T) {
+	tenant := uuid.New()
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Store: agentext.NewMemoryDecisionStore(), Logger: testLogger()})
+	audit := &fakeAppAudit{}
+	server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, audit, nil, broker, nil)
+
+	for url, reason := range map[string]string{
+		"https://user:pass@example.com/x": "userinfo",
+		"https://例子.测试/x":                 "non_ascii_host",
+	} {
+		session := uuid.New()
+		status, body := postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/open-link", tenant, map[string]any{
+			"sessionId": session.String(), "url": url,
+		})
+		if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":-32602`) {
+			t.Errorf("%s = %d: %s", url, status, body)
+		}
+		if decisions, _ := broker.List(context.Background(), tenant, session); len(decisions) != 0 {
+			t.Errorf("%s opened %d decisions", url, len(decisions))
+		}
+		found := false
+		for _, entry := range audit.snapshot() {
+			if entry.Action == "ui/open-link" && entry.Result == "refused" &&
+				strings.Contains(entry.Detail, "reason="+reason) &&
+				strings.Contains(entry.Detail, "session="+session.String()) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s did not leave a %s refusal attributed to the session", url, reason)
+		}
+	}
+}
+
+// TestMCPAppOpenLinkSchemeAuditCarriesSession pins P2-6: the scheme refusal is
+// attributed to the session when the id is valid, and records the problem when
+// it is not.
+func TestMCPAppOpenLinkSchemeAuditCarriesSession(t *testing.T) {
+	tenant := uuid.New()
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Store: agentext.NewMemoryDecisionStore(), Logger: testLogger()})
+	audit := &fakeAppAudit{}
+	server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, audit, nil, broker, nil)
+
+	session := uuid.New()
+	postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/open-link", tenant, map[string]any{
+		"sessionId": session.String(), "url": "javascript:alert(1)",
+	})
+	found := false
+	for _, entry := range audit.snapshot() {
+		if entry.Action == "ui/open-link" && entry.Result == "refused" &&
+			strings.Contains(entry.Detail, "reason=unsupported_scheme") &&
+			strings.Contains(entry.Detail, "session="+session.String()) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the scheme refusal was not attributed to the session")
+	}
+
+	postBridge(t, server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/open-link", tenant, map[string]any{
+		"sessionId": "not-a-uuid", "url": "javascript:alert(1)",
+	})
+	found = false
+	for _, entry := range audit.snapshot() {
+		if entry.Action == "ui/open-link" && strings.Contains(entry.Detail, "session_problem=invalid") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a malformed session was not recorded on the refusal row")
+	}
+}
+
+// TestMCPAppAuditSampleWindowRollover pins the sampler's no-loss bookkeeping:
+// when a newer window replaces the map entry, the previous sample is still
+// written by its own flush, and a sample flushes exactly once.
+func TestMCPAppAuditSampleWindowRollover(t *testing.T) {
+	tenant := uuid.New()
+	audit := &fakeAppAudit{}
+	_, api := newBridgeAPIServer(t, tenant, &fakeAppRuntime{}, audit, nil, nil, nil)
+	app := mcphost.AppSpec{AppID: testAppID, Server: "weather"}
+	key := testAppID + "\x00bridge.rate"
+
+	first := &mcpAuditSample{windowStart: time.Unix(0, 0), entry: api.mcpAppAuditEntry(tenant, uuid.Nil, app, "bridge.rate", "refused", "first")}
+	second := &mcpAuditSample{windowStart: time.Unix(1, 0), entry: api.mcpAppAuditEntry(tenant, uuid.Nil, app, "bridge.rate", "refused", "second")}
+	api.mcpAuditSamples[key] = second // a newer window replaced the entry
+
+	api.flushMCPAppAuditSample(key, first)
+	api.flushMCPAppAuditSample(key, second)
+	api.flushMCPAppAuditSample(key, second) // exactly once
+
+	entries := audit.snapshot()
+	if len(entries) != 2 {
+		t.Fatalf("sampled rows = %d, want 2: %+v", len(entries), entries)
+	}
+	if !strings.Contains(entries[0].Detail, "first") || !strings.Contains(entries[1].Detail, "second") {
+		t.Fatalf("rows = %+v", entries)
+	}
+	for _, entry := range entries {
+		if !strings.Contains(entry.Detail, "suppressed=0") {
+			t.Fatalf("detail = %q, want suppressed=0", entry.Detail)
+		}
+	}
+}
