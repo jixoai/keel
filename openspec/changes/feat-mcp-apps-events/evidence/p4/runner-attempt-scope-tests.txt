@@ -1,0 +1,5 @@
+=== RUN   TestRunnerStampsAttemptScopeAndCallID
+--- PASS: TestRunnerStampsAttemptScopeAndCallID (0.21s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	0.519s
+EXIT:0

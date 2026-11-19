@@ -1,0 +1,25 @@
+=== RUN   TestClientWithoutCallbacksKeepsPreP4Behaviour
+--- PASS: TestClientWithoutCallbacksKeepsPreP4Behaviour (0.01s)
+=== RUN   TestClientCallbacksReceiveNotificationsAndAnswerRequests
+--- PASS: TestClientCallbacksReceiveNotificationsAndAnswerRequests (0.01s)
+=== RUN   TestClientListenAckFilterAndTagging
+--- PASS: TestClientListenAckFilterAndTagging (0.02s)
+=== RUN   TestClientListenIgnoresFramesBeforeAck
+--- PASS: TestClientListenIgnoresFramesBeforeAck (0.01s)
+=== RUN   TestClientListenRoutesMultipleSubscriptionsByID
+--- PASS: TestClientListenRoutesMultipleSubscriptionsByID (0.01s)
+=== RUN   TestClientListenCloseCancelsSubscription
+--- PASS: TestClientListenCloseCancelsSubscription (0.01s)
+=== RUN   TestClientListenOverHTTP
+--- PASS: TestClientListenOverHTTP (0.00s)
+=== RUN   TestClientProgressCorrelatesPerCall
+--- PASS: TestClientProgressCorrelatesPerCall (0.01s)
+=== RUN   TestClientCancellationAbortsPendingCall
+--- PASS: TestClientCancellationAbortsPendingCall (0.01s)
+=== RUN   TestClientCallWithoutTokenKeepsWireShape
+--- PASS: TestClientCallWithoutTokenKeepsWireShape (0.00s)
+=== RUN   TestHTTPTransportSignalsLegacyStreamReconnect
+--- PASS: TestHTTPTransportSignalsLegacyStreamReconnect (0.05s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcp	0.333s
+EXIT:0

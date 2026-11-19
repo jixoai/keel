@@ -34,6 +34,7 @@ import (
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
+	keelmetrics "github.com/jixoai/keel/internal/metrics"
 	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/notify"
 	"github.com/jixoai/keel/internal/pluginpkg"
@@ -366,15 +367,25 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// no server is configured: an empty catalogue is a valid answer, and the
 	// capability bits then honestly report an unwired-app surface.
 	mcpAppsPublication := newDynamicSurface(log)
+	// The MCP metric set (P4.7) is registered once at boot: /metrics exports
+	// the fixed series, and the registry/bridge report into the same set.
+	metricsReg := keelmetrics.NewRegistry()
+	keelmetrics.BindGoRuntime(metricsReg)
+	mcpMetrics := mcphost.NewMetrics(metricsReg)
 	mcpApps := mcphost.New(mcphost.Options{
 		TenantID: opts.TenantID,
 		Logger:   log,
 		Sinks:    mcpAppsPublication.sinks(),
+		Metrics:  mcpMetrics,
 		// Document fetch/validation outcomes are durable audit rows (P3.7): the
 		// registry and the bridge share one table, one shape and one bound.
 		Auditor: mcpAppAuditor{store: st, log: log},
 	})
 	mcpAppsSandboxOrigin := configuredMCPAppOrigin(log)
+	// Establish the fixed series before the first server connects or a change
+	// publishes, so a scrape always sees the same set.
+	mcpMetrics.ServerStates(0, 0)
+	mcpMetrics.SurfaceGeneration(mcpApps.Generation())
 	// The tenant models document is the provider configuration source; an empty
 	// path leaves provider configuration off (the legacy flat agent config
 	// still normalizes to one provider + selection).
@@ -480,6 +491,30 @@ func runServe(parent context.Context, opts serveOptions) error {
 			Entries:        mcpEntries,
 			ConnectOptions: mcp.ConnectOptions{ClientName: "keel", ClientVersion: version, Logger: log},
 			Registry:       mcpApps,
+			// P4: the notification surface. The dispatcher classifies every
+			// notification, coalesces catalogue changes into one republish and
+			// keeps one listen stream per modern server. The hook event makes a
+			// republish observable without changing a running run's tool set.
+			Events: &mcphost.EventsOptions{
+				Logger:  log,
+				Auditor: mcpAppAuditor{store: st, log: log},
+				Metrics: mcpMetrics,
+				OnSurfaceChanged: func(change mcphost.SurfaceChange) {
+					payload := agentext.HookPayload{
+						Event:    agentext.HookMCPSurfaceChanged,
+						TenantID: opts.TenantID.String(),
+					}
+					payload.SetData("generation", fmt.Sprintf("%d", change.Generation))
+					payload.SetData("servers", strings.Join(change.Servers, ","))
+					payload.SetData("kinds", strings.Join(change.Kinds, ","))
+					payload.SetData("added", strings.Join(change.Added, ","))
+					payload.SetData("removed", strings.Join(change.Removed, ","))
+					hooks.Emit(payload)
+				},
+				ListenOptions: mcp.ListenOptions{OnDiagnostic: func(message string) {
+					log.Warn("mcp listen", "detail", message)
+				}},
+			},
 		},
 		LLM: servicehost.LLMOptions{
 			APIKey:       opts.APIKey,
@@ -527,6 +562,17 @@ func runServe(parent context.Context, opts serveOptions) error {
 				Approve: agentext.ApproveBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Notify:  agentext.NotifyBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Files:   agentext.FileBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				// MCP notifications/progress reach the tool row through the same
+				// transient bus as token deltas (P4.5). The frame is advisory and
+				// never enters the ledger.
+				MCPProgress: func(scope agentcore.ToolRunScope, toolCallID string, progress mcp.ProgressNotification) {
+					tenantID, tenantErr := uuid.Parse(scope.TenantID)
+					sessionID, sessionErr := uuid.Parse(scope.SessionID)
+					if tenantErr != nil || sessionErr != nil {
+						return
+					}
+					partials.PublishMCPProgress(tenantID, sessionID, toolCallID, progress)
+				},
 			},
 		},
 	})
@@ -566,7 +612,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	edge := newEdgeQuota(st)
 	hostTheme := loadHostTheme(static.root, log)
 	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, log)
+		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, log)
 	if err != nil {
 		return err
 	}
@@ -606,12 +652,15 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Admitter:  stream.NewAdmitter(200, 400),
 		Limiter:   stream.NewLimiter(0),
 		Metrics:   streamMetrics,
-		Ready:     st,
-		Drain:     drainer,
-		Logger:    log,
-		CASDir:    opts.CASDir,
-		Product:   product.api,
-		Partials:  agentapi.PartialSource(product.partials),
+		// Prometheus text at /metrics: the fixed runtime/MCP set registered at
+		// boot (P4.7).
+		MetricsExporter: metricsReg,
+		Ready:           st,
+		Drain:           drainer,
+		Logger:          log,
+		CASDir:          opts.CASDir,
+		Product:         product.api,
+		Partials:        agentapi.PartialSource(product.partials),
 		// Agent registry and agent teams: the store owns the documents, the HTTP
 		// surface owns the rules (change keel-agent-team-v1, P2/P3).
 		AgentTeams: st,
@@ -769,7 +818,7 @@ func (p *productLayer) close() {
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -881,9 +930,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		MCPAppRuntime:     mcpAppRuntimeOrNil(rt),
 		MCPAppAudit:       st,
 		MCPAppInputCommit: mcpAppInputCommit(st, kern),
-		Triggers:          triggers,
-		Subagents:         subagents,
-		Hooks:             hooks,
+		// P4: the dispatcher is wired by the MCP service (Events above), so the
+		// events capability is honest for clients that gate on it.
+		MCPEvents:     true,
+		MCPAppMetrics: mcpMetrics,
+		Triggers:      triggers,
+		Subagents:     subagents,
+		Hooks:         hooks,
 		ModelsLive: func() agentapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil

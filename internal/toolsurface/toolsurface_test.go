@@ -23,18 +23,37 @@ import (
 // touches a transport: the aggregate tool's contract is server/tool dispatch,
 // not connection handling.
 type fakeMCP struct {
-	servers []*mcp.Server
-	calls   int
-	args    []json.RawMessage
-	result  mcp.CallToolResult
-	err     error
+	servers   []*mcp.Server
+	snapshots map[string][]*mcp.Server
+	calls     int
+	args      []json.RawMessage
+	options   []mcp.CallOptions
+	result    mcp.CallToolResult
+	err       error
 }
 
 func (f *fakeMCP) Servers() []*mcp.Server { return f.servers }
-func (f *fakeMCP) CallTool(_ context.Context, server, tool string, args json.RawMessage) (mcp.CallToolResult, error) {
+func (f *fakeMCP) CatalogueSnapshot(attemptID string) []*mcp.Server {
+	if attemptID == "" {
+		return f.servers
+	}
+	if f.snapshots == nil {
+		f.snapshots = make(map[string][]*mcp.Server)
+	}
+	if servers, ok := f.snapshots[attemptID]; ok {
+		return servers
+	}
+	f.snapshots[attemptID] = f.servers
+	return f.servers
+}
+func (f *fakeMCP) CallTool(ctx context.Context, server, tool string, args json.RawMessage) (mcp.CallToolResult, error) {
+	return f.CallToolWithOptions(ctx, server, tool, args, mcp.CallOptions{})
+}
+func (f *fakeMCP) CallToolWithOptions(_ context.Context, server, tool string, args json.RawMessage, options mcp.CallOptions) (mcp.CallToolResult, error) {
 	f.calls++
 	f.args = append(f.args, append(json.RawMessage(nil), args...))
-	for _, candidate := range f.servers {
+	f.options = append(f.options, options)
+	for _, candidate := range f.CatalogueSnapshot(options.AttemptID) {
 		if candidate.Entry.Name != server {
 			continue
 		}

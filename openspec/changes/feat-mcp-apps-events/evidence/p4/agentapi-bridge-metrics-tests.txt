@@ -1,0 +1,5 @@
+=== RUN   TestMCPAppGateCountsBridgeFrames
+--- PASS: TestMCPAppGateCountsBridgeFrames (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentapi	0.277s
+EXIT:0

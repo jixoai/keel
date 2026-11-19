@@ -236,6 +236,10 @@ func runTool(ctx context.Context, tool agentcore.AgentTool, call agentcore.Agent
 	defer stopUpdates()
 
 	startedAt := time.Now()
+	// The call id is the correlation key a tool may echo out of band (MCP
+	// notifications/progress, P4.5). Stamping it here covers every tool, not
+	// only the aggregate tools that pass it explicitly.
+	ctx = agentcore.WithToolCallID(ctx, call.ID)
 	res, err := tool.Execute(ctx, call.ID, args, sink)
 	elapsed := time.Since(startedAt).Milliseconds()
 	stopUpdates()

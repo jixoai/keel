@@ -13,14 +13,17 @@ import (
 // is present, every builtin call is stamped/resolved to a task card before it
 // executes (spec task-log: 每次工具调用必须带 taskId).
 type Backends struct {
-	MCP      MCPBackend
-	Agents   AgentBackend
-	Creation CreationBackend
-	Tasks    TasksBackend
-	Bash     BashBackend
-	Approve  ApproveBackend
-	Notify   NotifyBackend
-	Files    FileBackend
+	MCP MCPBackend
+	// MCPProgress publishes a tool call's notifications/progress frames on the
+	// host's transient channel (P4.5). Nil means progress is not shown.
+	MCPProgress MCPProgressPublisher
+	Agents      AgentBackend
+	Creation    CreationBackend
+	Tasks       TasksBackend
+	Bash        BashBackend
+	Approve     ApproveBackend
+	Notify      NotifyBackend
+	Files       FileBackend
 }
 
 // BuiltinNames returns the eleven builtin tool names, sorted.
@@ -39,7 +42,7 @@ func BuiltinTools(discovered []skills.Skill, backends Backends) []agentcore.Agen
 		newReadTool(backends.Files),
 		newWriteTool(backends.Files),
 		newEditTool(backends.Files),
-		newMCPTool(backends.MCP),
+		newMCPTool(backends.MCP, backends.MCPProgress),
 		newSkillsTool(discovered),
 		newTasksTool(backends.Tasks),
 		newAgentTool(backends.Agents),

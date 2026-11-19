@@ -1,0 +1,7 @@
+=== RUN   TestMCPToolInjectsProgressTokenAndAttempt
+--- PASS: TestMCPToolInjectsProgressTokenAndAttempt (0.00s)
+=== RUN   TestMCPToolFreezesCataloguePerAttempt
+--- PASS: TestMCPToolFreezesCataloguePerAttempt (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/toolsurface	0.248s
+EXIT:0

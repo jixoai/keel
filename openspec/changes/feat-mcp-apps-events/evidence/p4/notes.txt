@@ -1,0 +1,48 @@
+# P4 — events 路由与订阅（证据与口径）
+
+分支 `task/keel-mcp-p4`（worktree `keel-task-mcp-p4`），基线 `a5d1026`。
+证据目录 `openspec/changes/feat-mcp-apps-events/evidence/p4/`。所有命令输出带 `EXIT:<n>`，
+最终树门禁全绿。
+
+## 1. 交付内容与落点
+
+| 任务 | 实现 | 测试/证据 |
+|---|---|---|
+| P4.1 Dispatcher 与回调 | `internal/mcp/events.go`（`ClientNotificationHandler`/`ClientServerRequestHandler`/`CallOptions`）；`ClientOptions.Notifications`/`ServerRequests`；`internal/mcp/manager.go` 注入带服务器名的 `NotificationHandler`/`ServerRequestHandler`；`internal/mcphost/events.go` 的 `Dispatcher`（编译期断言）。未注入时 receiveLoop 丢弃通知、服务端请求仍回 `-32601` | `mcp-events-tests.txt`（`TestClientWithoutCallbacksKeepsPreP4Behaviour` 等） |
+| P4.2 通知分类 | design §4.1 表逐行：progress（client 按 token 关联，Events 只做瞬态）；message→结构化日志；tools/prompts/resources list_changed→MarkDirty；resources/updated→Registry 缓存失效+MarkDirty；cancelled→client 中止在途请求（结果经 `tool.result` 落账）；ack→Listen 状态；未知→诊断。**没有 kernel/store 依赖，不新增 kind** | `mcphost-events-tests.txt`（`TestEventsTransientNotificationsNeverPublish`、`TestNotificationStormLeavesLedgerKindSetUnchanged`）；`mcp-events-tests.txt`（`TestClientCancellationAbortsPendingCall`） |
+| P4.3 subscriptions/listen | `Client.Listen`：首消息 ack 前不投递；ack 子集成为实际订阅，缺项返回 `Ack.Missing`；`io.modelcontextprotocol/subscriptionId` 去复用/多订阅按 id 路由；Close 对 HTTP 关流、对 stdio/memory 发 `notifications/cancelled`；HTTP 不发送 `Last-Event-ID`。`mcphost.Events` 每服务器一个 supervisor：断流后重发 listen + 成功后全量重算；legacy GET 流保持（新增 `OnReconnect` 信号，重连后同样全量重算）。生产默认 `ListenFor` 仅在 modern era（协议版本 ≥2026-07-28）启用，era 协商属 P5 | `mcp-events-tests.txt`（`TestClientListenAckFilterAndTagging`、`...IgnoresFramesBeforeAck`、`...RoutesMultipleSubscriptionsByID`、`...CloseCancelsSubscription`、`...OverHTTP`、`TestHTTPTransportSignalsLegacyStreamReconnect`）；`mcphost-events-tests.txt`（`TestEventsListenSupervisorResubscribesAndRecomputes`、`...RejectedIsAuditedAndRetried`） |
+| P4.4 list_changed → republish | 250ms 去抖（可注入 `After`，测试用假时钟）；失败保面（`Manager.RefreshServer` 失败保留旧工具 + `CatalogueError`；Registry 保留旧 app；审计 error）；成功后 generation++（Registry）、`ChangeEvent{Server,Kinds,Added,Removed,Generation}` 审计 + `mcp.surface.changed` hook（agentext 闭集追加）。run 边界：runner 每次 attempt 盖新 attempt id；`Manager.CatalogueSnapshot` 冻结该 attempt 的目录，`toolsurface` 的 list/describe/call 都读快照（缓存上限 256） | `mcphost-events-tests.txt`（`TestEventsToolsListChangedDebouncesAndRepublishes`、`...RefreshFailureKeepsOldSurface`、`...PromptsAndResourcesDoNotRelistTools`）；`runner-attempt-scope-tests.txt`；`toolsurface-progress-snapshot-tests.txt`；`architecture-isolation.txt` |
+| P4.5 progress 关联 | executor 在 context 上盖 `toolCallId`，runner 盖 `(tenant,session)` 与 attempt；`mcp` 聚合工具把 toolCallId 作为 progress token（client 对同名 token 去重为唯一 wire token）并把回调绑定到该 scope；`PartialHub.PublishMCPProgress` 以 `type=mcp.progress`、`messageId=toolCallId` 发布（建议性、可丢、不进账本/时间线） | `toolsurface-progress-snapshot-tests.txt`；`agentext-progress-hook-tests.txt`；`mcp-events-tests.txt`（`TestClientProgressCorrelatesPerCall`） |
+| P4.6 notifications/message | level 闭集 debug/info/warning/error（未知→info）；logger≤64B、data≤256B（截断 + 去控制符）；只进结构化日志，不进账本/时间线 | `mcphost-events-tests.txt`（`TestEventsServerLogLevelWhitelistAndBounds`） |
+| P4.7 指标 | `mcp_servers{state}`（connected/disconnected 计数）、`mcp_surface_generation`、`mcp_app_fetch_total{result}`、`mcp_app_bridge_frames_total{method,direction}`、`mcp_listen_reconnects_total`、`mcp_mrtr_rounds`（histogram）。labels 只用闭集词表；上限写进 `internal/mcphost/metrics.go` 头注释（总 ≤24 series）；`keel serve` 的 `/metrics` 由同一 registry 导出 | `mcphost-events-tests.txt`（`TestMCPMetrics*`，含 1000 会话后 series 数不变的断言）；`agentapi-bridge-metrics-tests.txt` |
+
+## 2. 关键设计说明
+
+- **账本零新增 kind**：`internal/mcphost` 不 import `kernel`/`store`；`mcp.progress` 只是
+  `agentext.Partial.Type`（瞬态通道），不是 `kernel.EventKind`。`TestNotificationStorm...`
+  对 `kernel.Kinds()` 前后集合做断言。
+- **与产品 SSE 隔离**：`internal/architecture/mcp_events_isolation_test.go` 用真实 import 图断言
+  `mcphost` 不 import `httpapi`/`agentapi`，`mcp` 不 import `mcphost`/`httpapi`。
+- **run 边界**：v2 模型面工具清单恒定（11 内建 + 聚合 `mcp`），目录变化体现在聚合工具的
+  list/describe/call 上；因此边界由 attempt 级目录快照实现。当前 attempt 冻结、下一 attempt
+  看到新目录；被删除的工具名在下一 attempt 返回 `not_found`。
+- **失败保面**：`Manager.RefreshServer` 只替换 `*Server` 指针（旧值不可变），失败时复制旧值并只
+  写 `CatalogueError`；Registry.Refresh 继续使用旧 `server.Tools`，app 走既有 keepPrevious 规则。
+  `/v1/mcp/servers` 的 `catalogueError` 与 `catalogue.list`/`catalogue.refresh` 审计行可见。
+- **legacy 兼容**：`Client` 默认路径（无回调）逐字不变；legacy GET 流、`Last-Event-ID` 退避重连
+  代码未改，只新增 `OnReconnect` 通知宿主做全量重算。
+
+## 3. 偏离 / 未决（诚实列出）
+
+1. **P4.3 生产启用等待 P5**：`Events.listenFor` 默认仅对 `protocolVersion >= 2026-07-28` 启动
+   listen；P4 的客户端/监督器/测试全部就绪，但 `SupportedProtocolVersions` 加入 2026-07-28 与
+   era 探测在 P5.4。legacy 服务器维持 GET 流（符合 spec「legacy 重连兼容」）。
+2. **`mcp_mrtr_rounds` 只有注册与单测**：MRTR 执行器是 P5.2，P4 只固定 series（histogram 存在，
+   计数为 0）。
+3. **bridge 帧指标按 HTTP 代理面计数**：`mcpAppGate` 每请求记 `in`，release 记 `out`（含拒绝
+   路径）；浏览器端 64 KiB/200 fps 的本地帧没有单独计数（P3.8 的浏览器桥实现不在服务端可观测
+   范围内）。
+4. **目录快照缓存 256 个 attempt**：崩溃进程的 attempt 不会显式回收，靠 LRU 上限兜底（不随会话
+   数增长；单条只持有不可变 `*Server` 指针）。
+5. **未做**：P5 的 MRTR 执行器/era 探测/update-model-context、P6 浏览器 E2E 与验收报告（任务书
+   明确不在本 lane）。

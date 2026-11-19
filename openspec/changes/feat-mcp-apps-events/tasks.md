@@ -146,20 +146,20 @@
 
 ## P4 — events 路由与订阅
 
-- [ ] P4.1 `Dispatcher` 接口与 `ClientOptions` 回调（通知/服务端请求），默认实现保持
+- [x] P4.1 `Dispatcher` 接口与 `ClientOptions` 回调（通知/服务端请求），默认实现保持
       「method not found」（fail closed 不变）（验收：未注入时行为与今天逐字一致）
-- [ ] P4.2 通知分类落点实现（design §4.1 表逐行）：progress/message 瞬态；目录类 → Registry；
+- [x] P4.2 通知分类落点实现（design §4.1 表逐行）：progress/message 瞬态；目录类 → Registry；
       cancelled → 中止调用；（验收：单测逐行；账本零新增 kind 断言）
-- [ ] P4.3 `subscriptions/listen`：filter、ack 子集、`subscriptionId` 去复用、断线重发（modern）、
+- [x] P4.3 `subscriptions/listen`：filter、ack 子集、`subscriptionId` 去复用、断线重发（modern）、
       legacy GET 流保持；多订阅并存（验收：HTTP fake server 断言首消息必为 ack、未 opt-in 的通知不投递）
-- [ ] P4.4 `tools/list_changed` → 去抖（250ms）→ 全量 republish → generation++ →
+- [x] P4.4 `tools/list_changed` → 去抖（250ms）→ 全量 republish → generation++ →
       hook 事件 `mcp.surface.changed`（闭集追加）；失败保留旧面
       （验收：run 边界测（design §4.4(7)）；失败面测试断言旧工具仍可用）
-- [ ] P4.5 `progress` → `(session, toolCallId)` 关联 → PartialHub（新 kind `mcp.progress`）；
+- [x] P4.5 `progress` → `(session, toolCallId)` 关联 → PartialHub（新 kind `mcp.progress`）；
       runner 注入 `ProgressToken`（验收：单测断言不串会话；丢帧无害）
-- [ ] P4.6 `notifications/message` → 结构化日志（level 白名单、字段截断）；
+- [x] P4.6 `notifications/message` → 结构化日志（level 白名单、字段截断）；
       **不**进时间线与账本（验收：单测 + 日志字段断言）
-- [ ] P4.7 指标：`mcp_servers{state}`、`mcp_surface_generation`、`mcp_app_fetch_total{result}`、
+- [x] P4.7 指标：`mcp_servers{state}`、`mcp_surface_generation`、`mcp_app_fetch_total{result}`、
       `mcp_app_bridge_frames_total{method,direction}`、`mcp_listen_reconnects_total`、`mcp_mrtr_rounds`
       （验收：基数上界写进 design/代码注释；series 数与会话数无关的断言）
 

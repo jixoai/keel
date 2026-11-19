@@ -1,0 +1,95 @@
+=== RUN   TestDocCacheByteBoundAndLRUEviction
+--- PASS: TestDocCacheByteBoundAndLRUEviction (0.00s)
+=== RUN   TestDocCacheProtectsCurrentVersion
+--- PASS: TestDocCacheProtectsCurrentVersion (0.00s)
+=== RUN   TestDocCacheRetainReleasesSupersededVersions
+--- PASS: TestDocCacheRetainReleasesSupersededVersions (0.00s)
+=== RUN   TestContentIdentity
+--- PASS: TestContentIdentity (0.00s)
+=== RUN   TestBuildCSPStrictDefault
+--- PASS: TestBuildCSPStrictDefault (0.00s)
+=== RUN   TestBuildCSPDeclaredDomains
+--- PASS: TestBuildCSPDeclaredDomains (0.00s)
+=== RUN   TestBuildCSPTightensOnly
+--- PASS: TestBuildCSPTightensOnly (0.00s)
+=== RUN   TestBuildCSPWildcardRequiresTwoLabels
+--- PASS: TestBuildCSPWildcardRequiresTwoLabels (0.00s)
+=== RUN   TestBuildCSPPrivateDomains
+--- PASS: TestBuildCSPPrivateDomains (0.00s)
+=== RUN   TestBuildCSPPortRange
+--- PASS: TestBuildCSPPortRange (0.00s)
+=== RUN   TestBuildCSPDomainBounds
+--- PASS: TestBuildCSPDomainBounds (0.00s)
+=== RUN   TestBuildCSPDiagnosticsAreBounded
+--- PASS: TestBuildCSPDiagnosticsAreBounded (0.00s)
+=== RUN   TestDiagCollectorBoundsTwoMillionMessages
+--- PASS: TestDiagCollectorBoundsTwoMillionMessages (0.02s)
+=== RUN   TestBoundDiagnosticsTruncatesCombinedLists
+--- PASS: TestBoundDiagnosticsTruncatesCombinedLists (0.00s)
+=== RUN   TestEventsTransientNotificationsNeverPublish
+--- PASS: TestEventsTransientNotificationsNeverPublish (0.00s)
+=== RUN   TestEventsToolsListChangedDebouncesAndRepublishes
+--- PASS: TestEventsToolsListChangedDebouncesAndRepublishes (0.00s)
+=== RUN   TestEventsPromptsAndResourcesDoNotRelistTools
+--- PASS: TestEventsPromptsAndResourcesDoNotRelistTools (0.00s)
+=== RUN   TestEventsRefreshFailureKeepsOldSurface
+--- PASS: TestEventsRefreshFailureKeepsOldSurface (0.00s)
+=== RUN   TestEventsResourcesUpdatedInvalidatesTTLCache
+--- PASS: TestEventsResourcesUpdatedInvalidatesTTLCache (0.00s)
+=== RUN   TestNotificationStormLeavesLedgerKindSetUnchanged
+--- PASS: TestNotificationStormLeavesLedgerKindSetUnchanged (0.00s)
+=== RUN   TestEventsServerLogLevelWhitelistAndBounds
+--- PASS: TestEventsServerLogLevelWhitelistAndBounds (0.00s)
+=== RUN   TestEventsListenSupervisorResubscribesAndRecomputes
+--- PASS: TestEventsListenSupervisorResubscribesAndRecomputes (0.00s)
+=== RUN   TestEventsListenRejectedIsAuditedAndRetried
+--- PASS: TestEventsListenRejectedIsAuditedAndRetried (0.00s)
+=== RUN   TestParseResourceMetaFullBlock
+--- PASS: TestParseResourceMetaFullBlock (0.00s)
+=== RUN   TestParseResourceMetaDropsInvalidMembers
+--- PASS: TestParseResourceMetaDropsInvalidMembers (0.00s)
+=== RUN   TestParseResourceMetaAbsent
+--- PASS: TestParseResourceMetaAbsent (0.00s)
+=== RUN   TestParseResourceMetaDiagnosticsBounded
+--- PASS: TestParseResourceMetaDiagnosticsBounded (0.00s)
+=== RUN   TestParseResourceMetaHugeDomainList
+--- PASS: TestParseResourceMetaHugeDomainList (0.00s)
+=== RUN   TestMCPMetricsRegisterTheFixedSet
+--- PASS: TestMCPMetricsRegisterTheFixedSet (0.00s)
+=== RUN   TestMCPMetricsSeriesDoNotGrowWithSessions
+--- PASS: TestMCPMetricsSeriesDoNotGrowWithSessions (0.00s)
+=== RUN   TestMCPMetricsVocabularyFoldsUnknownValues
+--- PASS: TestMCPMetricsVocabularyFoldsUnknownValues (0.00s)
+=== RUN   TestMCPMetricsNilIsNoOp
+--- PASS: TestMCPMetricsNilIsNoOp (0.00s)
+=== RUN   TestRegistryPublishesValidatedApps
+--- PASS: TestRegistryPublishesValidatedApps (0.00s)
+=== RUN   TestRegistryExcludesFailedApps
+--- PASS: TestRegistryExcludesFailedApps (0.00s)
+=== RUN   TestRegistryKeepsPreviousVersionOnRefetchFailure
+--- PASS: TestRegistryKeepsPreviousVersionOnRefetchFailure (0.00s)
+=== RUN   TestRegistryHonoursTTL
+--- PASS: TestRegistryHonoursTTL (0.00s)
+=== RUN   TestRegistryCacheBudgetDropsApps
+--- PASS: TestRegistryCacheBudgetDropsApps (0.00s)
+=== RUN   TestRegistryMaxDocumentBytes
+--- PASS: TestRegistryMaxDocumentBytes (0.00s)
+=== RUN   TestRegistryTenantVisibility
+--- PASS: TestRegistryTenantVisibility (0.00s)
+=== RUN   TestRegistryUnconnectedServer
+--- PASS: TestRegistryUnconnectedServer (0.00s)
+=== RUN   TestRegistryContentChangeReclaimsCache
+--- PASS: TestRegistryContentChangeReclaimsCache (0.00s)
+=== RUN   TestRegistryKeepsPreviousVersionWhenCacheIsFull
+--- PASS: TestRegistryKeepsPreviousVersionWhenCacheIsFull (0.00s)
+=== RUN   TestRegistryAppLookup
+--- PASS: TestRegistryAppLookup (0.00s)
+=== RUN   TestThemeVariablesMapping
+--- PASS: TestThemeVariablesMapping (0.00s)
+=== RUN   TestThemeVariablesUnusableDocument
+--- PASS: TestThemeVariablesUnusableDocument (0.00s)
+=== RUN   TestThemePalettes
+--- PASS: TestThemePalettes (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcphost	0.196s
+EXIT:0

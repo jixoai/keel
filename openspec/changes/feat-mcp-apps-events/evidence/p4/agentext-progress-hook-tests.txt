@@ -1,0 +1,7 @@
+=== RUN   TestPartialHubPublishesMCPProgressPerSession
+--- PASS: TestPartialHubPublishesMCPProgressPerSession (0.05s)
+=== RUN   TestMCPSurfaceChangedHookEventIsInTheClosedSet
+--- PASS: TestMCPSurfaceChangedHookEventIsInTheClosedSet (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentext	0.567s
+EXIT:0

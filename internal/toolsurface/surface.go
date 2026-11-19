@@ -108,7 +108,10 @@ func (t *actionTool) ExecutionMode() agentcore.ToolExecutionMode {
 	return agentcore.ToolExecutionParallel
 }
 
-func (t *actionTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+func (t *actionTool) Execute(ctx context.Context, callID string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	// The call id is the correlation key a progress frame echoes (P4.5): tools
+	// that can receive out-of-band frames read it from the context.
+	ctx = agentcore.WithToolCallID(ctx, callID)
 	var input actionInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		return ErrorResult(CodeInvalidArguments, t.name, " arguments are not valid JSON: "+err.Error(), nil)

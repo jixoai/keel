@@ -31,6 +31,7 @@ import (
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcp/oauth"
+	"github.com/jixoai/keel/internal/mcphost"
 	keelmetrics "github.com/jixoai/keel/internal/metrics"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
@@ -119,6 +120,10 @@ func main() {
 	keelmetrics.BindQueueDepth(reg, st)
 	keelmetrics.BindStreams(reg, func() int64 { return streamMetrics.StreamsActive.Load() })
 	keelmetrics.BindPoolStats(reg, func() keelmetrics.PoolStats { return st.Pool().Stat() })
+	// The MCP metric families are fixed at boot whether or not servers are
+	// configured (P4.7): a scrape always sees the same series set.
+	mcpMetrics := mcphost.NewMetrics(reg)
+	mcpMetrics.ServerStates(0, 0)
 	reg.SetErrorHandler(func(name string, err error) {
 		log.Warn("metrics collect", "metric", name, "err", err)
 	})
@@ -318,7 +323,17 @@ func main() {
 				OnChallenge: logMCPChallenge(log),
 			}
 		}
-		mcpOptions = servicehost.MCPOptions{Entries: mcpEntries, ConnectOptions: connectOptions}
+		// P4: the notification surface, with the fixed MCP metric set. This
+		// runtime has no app catalogue, so the dispatcher owns the generation and
+		// the app metrics stay at their zero series.
+		mcpOptions = servicehost.MCPOptions{
+			Entries:        mcpEntries,
+			ConnectOptions: connectOptions,
+			Events: &mcphost.EventsOptions{
+				Logger:  log,
+				Metrics: mcpMetrics,
+			},
+		}
 	}
 
 	// External provider declarations are part of the same tenant document. The

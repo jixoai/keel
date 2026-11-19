@@ -24,6 +24,11 @@ const (
 	HookTurnFinished     HookEvent = "turn.finished"
 	HookDecisionOpened   HookEvent = "decision.opened"
 	HookDecisionAnswered HookEvent = "decision.answered"
+	// HookMCPSurfaceChanged is the MCP registration surface republish (P4.4).
+	// It is informational: a running attempt keeps the tool set it started
+	// with, the event only makes the change observable (closed set: append
+	// only).
+	HookMCPSurfaceChanged HookEvent = "mcp.surface.changed"
 )
 
 // HookEvents returns the closed set in declaration order.
@@ -37,6 +42,7 @@ func HookEvents() []HookEvent {
 		HookTurnFinished,
 		HookDecisionOpened,
 		HookDecisionAnswered,
+		HookMCPSurfaceChanged,
 	}
 }
 

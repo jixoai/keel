@@ -36,15 +36,19 @@ const (
 // AllowedLabelNames is the fixed label vocabulary. It intentionally contains no
 // identity dimensions: no tenant/session/run/request/stream IDs.
 var AllowedLabelNames = map[string]bool{
-	"status":  true, // bounded outcome (ok/error/done/failed/...)
-	"outcome": true, // alias kept for symmetry with telemetry attributes
-	"reason":  true, // bounded cause (drain, timeout, ...)
-	"kind":    true, // bounded event/tool class
-	"tool":    true, // configured tool name (bounded by the tool loadout)
-	"class":   true, // small/medium/large
-	"method":  true, // HTTP method
-	"route":   true, // matched route pattern (bounded by the mux)
-	"code":    true, // HTTP status code class
+	"status":    true, // bounded outcome (ok/error/done/failed/...)
+	"outcome":   true, // alias kept for symmetry with telemetry attributes
+	"reason":    true, // bounded cause (drain, timeout, ...)
+	"kind":      true, // bounded event/tool class
+	"tool":      true, // configured tool name (bounded by the tool loadout)
+	"class":     true, // small/medium/large
+	"method":    true, // HTTP method / MCP method of a bridge frame
+	"route":     true, // matched route pattern (bounded by the mux)
+	"code":      true, // HTTP status code class
+	"server":    true, // configured MCP server name (bounded by mcp.json)
+	"state":     true, // bounded connection state (connected/disconnected)
+	"result":    true, // bounded result vocabulary (ok/error/reused/refused)
+	"direction": true, // bounded direction (in/out)
 }
 
 // forbiddenLabelFragments rejects high-cardinality identity labels even when a
@@ -215,6 +219,24 @@ func (v *CounterVec) With(values ...string) *Counter {
 	return &Counter{sample: v.family.sampleFor(values)}
 }
 
+// GaugeVec is a gauge with a fixed set of label names allowed. It exists for
+// bounded multi-series gauges (for example one series per connection state);
+// the same cardinality rule as CounterVec applies: label values come from a
+// closed vocabulary, never from an identity.
+type GaugeVec struct {
+	family *family
+	labels []string
+}
+
+// With returns the gauge series for the given label values.
+func (v *GaugeVec) With(values ...string) *Gauge {
+	if len(values) != len(v.labels) {
+		panic(fmt.Sprintf("metrics: %s wants %d label values, got %d",
+			v.family.name, len(v.labels), len(values)))
+	}
+	return &Gauge{sample: v.family.sampleFor(values)}
+}
+
 // Histogram is a fixed-bucket histogram without labels.
 type Histogram struct {
 	data *histogramData
@@ -257,6 +279,16 @@ func (r *Registry) NewGauge(name, help string) *Gauge {
 	f := newFamily(name, help, TypeGauge, nil)
 	r.register(name, f)
 	return &Gauge{sample: f.sampleFor(nil)}
+}
+
+// NewGaugeVec registers a gauge with fixed label names.
+func (r *Registry) NewGaugeVec(name, help string, labelNames ...string) *GaugeVec {
+	if err := ValidateLabelNames(labelNames); err != nil {
+		panic(err)
+	}
+	f := newFamily(name, help, TypeGauge, labelNames)
+	r.register(name, f)
+	return &GaugeVec{family: f, labels: append([]string(nil), labelNames...)}
 }
 
 // NewCounterVec registers a counter with fixed label names.

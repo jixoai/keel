@@ -16,8 +16,19 @@ import (
 // lists, describes and calls through this one tool.
 type MCPBackend interface {
 	Servers() []*mcp.Server
+	// CatalogueSnapshot returns the catalogue frozen for one attempt (empty id =
+	// live). The aggregate tool reads it so a republish never changes a running
+	// attempt's tools.
+	CatalogueSnapshot(attemptID string) []*mcp.Server
 	CallTool(ctx context.Context, server, tool string, args json.RawMessage) (mcp.CallToolResult, error)
+	CallToolWithOptions(ctx context.Context, server, tool string, args json.RawMessage, options mcp.CallOptions) (mcp.CallToolResult, error)
 }
+
+// MCPProgressPublisher publishes one notifications/progress frame of a tool
+// call. It is the host's transient channel (the PartialHub); nil means this
+// deployment shows no progress. Implementations must not block: progress is
+// advisory and dropping a frame is always safe.
+type MCPProgressPublisher func(scope agentcore.ToolRunScope, toolCallID string, progress mcp.ProgressNotification)
 
 var mcpToolActions = []string{ActionList, ActionDesc, ActionCall}
 
@@ -29,7 +40,7 @@ func mcpSchema() json.RawMessage {
 	return schema(`, "server":{"type":"string"}, "tool":{"type":"string"}, "arguments":{"type":"object","description":"Arguments passed to the MCP tool."}`)
 }
 
-func newMCPTool(backend MCPBackend) *actionTool {
+func newMCPTool(backend MCPBackend, progress MCPProgressPublisher) *actionTool {
 	return &actionTool{
 		name:        MCP,
 		description: mcpToolDescription,
@@ -38,11 +49,11 @@ func newMCPTool(backend MCPBackend) *actionTool {
 		run: func(ctx context.Context, action string, raw json.RawMessage) (agentcore.AgentToolResult, error) {
 			switch action {
 			case ActionList:
-				return mcpList(backend)
+				return mcpList(ctx, backend)
 			case ActionDesc:
-				return mcpDescribe(backend, raw)
+				return mcpDescribe(ctx, backend, raw)
 			case ActionCall:
-				return mcpCall(ctx, backend, raw)
+				return mcpCall(ctx, backend, progress, raw)
 			default:
 				return unknownAction(MCP, action, mcpToolActions)
 			}
@@ -50,12 +61,21 @@ func newMCPTool(backend MCPBackend) *actionTool {
 	}
 }
 
-func mcpList(backend MCPBackend) (agentcore.AgentToolResult, error) {
+// mcpServers reads the attempt's frozen catalogue (live outside a run).
+func mcpServers(ctx context.Context, backend MCPBackend) []*mcp.Server {
+	if backend == nil {
+		return nil
+	}
+	return backend.CatalogueSnapshot(agentcore.MCPAttemptFromContext(ctx))
+}
+
+func mcpList(ctx context.Context, backend MCPBackend) (agentcore.AgentToolResult, error) {
 	if backend == nil {
 		return notWired(MCP, "no MCP service is configured in this deployment")
 	}
-	servers := make([]map[string]any, 0)
-	for _, server := range backend.Servers() {
+	servers := mcpServers(ctx, backend)
+	catalogue := make([]map[string]any, 0, len(servers))
+	for _, server := range servers {
 		description := ""
 		if server.Entry.Config != nil {
 			description = mcp.ServerField(server.Entry.Config, "description")
@@ -85,16 +105,16 @@ func mcpList(backend MCPBackend) (agentcore.AgentToolResult, error) {
 			tools = append(tools, item)
 		}
 		entry["tools"] = tools
-		servers = append(servers, entry)
+		catalogue = append(catalogue, entry)
 	}
-	document := map[string]any{"servers": servers}
+	document := map[string]any{"servers": catalogue}
 	return agentcore.AgentToolResult{
 		Content:           agentcore.ContentList{agentcore.NewTextContent(marshalDocument(document))},
 		StructuredContent: document,
 	}, nil
 }
 
-func mcpDescribe(backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolResult, error) {
+func mcpDescribe(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolResult, error) {
 	if backend == nil {
 		return notWired(MCP, "no MCP service is configured in this deployment")
 	}
@@ -108,7 +128,7 @@ func mcpDescribe(backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolRe
 	if input.Server == "" || input.Tool == "" {
 		return invalidArguments(MCP, "describe requires server and tool")
 	}
-	for _, server := range backend.Servers() {
+	for _, server := range mcpServers(ctx, backend) {
 		if server.Entry.Name != input.Server {
 			continue
 		}
@@ -144,7 +164,7 @@ func mcpDescribe(backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolRe
 	return notFound(MCP, fmt.Sprintf("no MCP server named %q", input.Server))
 }
 
-func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agentcore.AgentToolResult, error) {
+func mcpCall(ctx context.Context, backend MCPBackend, progress MCPProgressPublisher, raw json.RawMessage) (agentcore.AgentToolResult, error) {
 	if backend == nil {
 		return notWired(MCP, "no MCP service is configured in this deployment")
 	}
@@ -168,11 +188,11 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 	}
 	// Visibility is enforced before the backend sees the name: an app-only tool
 	// must not be reachable through the model's aggregate tool.
-	tool, server, err := lookupModelTool(backend, input.Server, input.Tool)
+	tool, server, err := lookupModelTool(mcpServers(ctx, backend), input.Server, input.Tool)
 	if err != nil {
 		return mcpCallFailure(err, input.Server, input.Tool)
 	}
-	result, err := backend.CallTool(ctx, input.Server, input.Tool, arguments)
+	result, err := backend.CallToolWithOptions(ctx, input.Server, input.Tool, arguments, mcpCallOptions(ctx, progress))
 	if err != nil {
 		return mcpCallFailure(err, input.Server, input.Tool)
 	}
@@ -207,12 +227,39 @@ func mcpCall(ctx context.Context, backend MCPBackend, raw json.RawMessage) (agen
 	}, nil
 }
 
+// mcpCallOptions binds the call's progress surface. The token is the toolCallId
+// the executor placed on the context: it is already unique per call, and the
+// client further disambiguates two concurrent calls that name the same id. The
+// publisher is bound to this call's (tenant, session) scope, so a frame can
+// only reach the session that issued the call.
+func mcpCallOptions(ctx context.Context, publisher MCPProgressPublisher) mcp.CallOptions {
+	callID := agentcore.ToolCallIDFromContext(ctx)
+	attemptID := agentcore.MCPAttemptFromContext(ctx)
+	if callID == "" && attemptID == "" {
+		return mcp.CallOptions{}
+	}
+	options := mcp.CallOptions{AttemptID: attemptID}
+	if callID == "" {
+		return options
+	}
+	options.ProgressToken = callID
+	if publisher == nil {
+		return options
+	}
+	if scope, ok := agentcore.ToolRunScopeFromContext(ctx); ok {
+		options.OnProgress = func(progress mcp.ProgressNotification) {
+			publisher(scope, callID, progress)
+		}
+	}
+	return options
+}
+
 // lookupModelTool resolves a model-visible tool. It distinguishes the three
 // facts the call path reports: no such server, the server is configured but not
 // connected, and no such model-visible tool (which also covers an app-only tool
 // the model must not reach).
-func lookupModelTool(backend MCPBackend, serverName, toolName string) (mcp.Tool, *mcp.Server, error) {
-	for _, server := range backend.Servers() {
+func lookupModelTool(servers []*mcp.Server, serverName, toolName string) (mcp.Tool, *mcp.Server, error) {
+	for _, server := range servers {
 		if server.Entry.Name != serverName {
 			continue
 		}

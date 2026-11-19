@@ -54,6 +54,13 @@ type ClientOptions struct {
 	// RequestTimeout bounds each request. Zero uses DefaultRequestTimeout; a
 	// negative value disables the timer (the context still applies).
 	RequestTimeout time.Duration
+	// Notifications, when set, receives every server notification. Nil keeps the
+	// pre-P4 behaviour: notifications are dropped (fail closed; no events
+	// surface is wired).
+	Notifications ClientNotificationHandler
+	// ServerRequests, when set, answers server-initiated requests. Nil answers
+	// "method not found", exactly as before P4.
+	ServerRequests ClientServerRequestHandler
 }
 
 // pendingCall is one in-flight request. The channel has capacity one so the
@@ -84,6 +91,16 @@ type Client struct {
 	serverInfo         Implementation
 	serverCapabilities ServerCapabilities
 	instructions       string
+
+	// listeners are the open subscriptions/listen streams keyed by the listen
+	// request id. Progress sinks are keyed by the token sent on the wire; at
+	// most one in-flight call owns a token, so a frame cannot reach a second
+	// session.
+	listeners map[string]*listener
+	progress  map[string]func(ProgressNotification)
+	// progressSeq disambiguates two concurrent calls that asked for the same
+	// token (the caller only names a preference; uniqueness is the client's).
+	progressSeq int64
 }
 
 // NewClient returns a client in the idle state.
@@ -95,10 +112,12 @@ func NewClient(options ClientOptions) *Client {
 		options.RequestTimeout = DefaultRequestTimeout
 	}
 	return &Client{
-		options:  options,
-		state:    ClientIdle,
-		pending:  make(map[string]*pendingCall),
-		closedCh: make(chan struct{}),
+		options:   options,
+		state:     ClientIdle,
+		pending:   make(map[string]*pendingCall),
+		closedCh:  make(chan struct{}),
+		listeners: make(map[string]*listener),
+		progress:  make(map[string]func(ProgressNotification)),
 	}
 }
 
@@ -266,10 +285,19 @@ func (c *Client) ListToolsPage(ctx context.Context, cursor string) (ListToolsRes
 // CallTool invokes one tool. A nil or empty args is sent without an arguments
 // field, like pi's callTool(name, undefined).
 func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (CallToolResult, error) {
-	params, err := json.Marshal(struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments,omitempty"`
-	}{Name: name, Arguments: args})
+	return c.CallToolWithOptions(ctx, name, args, CallOptions{})
+}
+
+// CallToolWithOptions invokes one tool with the per-call notification surface
+// (a progress token and its sink). The zero options produce exactly the wire
+// shape CallTool always produced.
+func (c *Client) CallToolWithOptions(ctx context.Context, name string, args json.RawMessage, options CallOptions) (CallToolResult, error) {
+	token := ""
+	if options.ProgressToken != "" {
+		token = c.registerProgress(options.ProgressToken, options.OnProgress)
+		defer c.unregisterProgress(token)
+	}
+	params, err := encodeCallToolParams(name, args, token)
 	if err != nil {
 		return CallToolResult{}, fmt.Errorf("mcp: encode tools/call params: %w", err)
 	}
@@ -278,6 +306,266 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 		return CallToolResult{}, err
 	}
 	return validateCallToolResult(raw)
+}
+
+// encodeCallToolParams builds the tools/call params object. `_meta` appears only
+// when a progress token was requested: the pre-P4 bytes stay identical.
+func encodeCallToolParams(name string, args json.RawMessage, progressToken string) (json.RawMessage, error) {
+	if progressToken == "" {
+		return json.Marshal(struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments,omitempty"`
+		}{Name: name, Arguments: args})
+	}
+	return json.Marshal(struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments,omitempty"`
+		Meta      struct {
+			ProgressToken string `json:"progressToken"`
+		} `json:"_meta"`
+	}{Name: name, Arguments: args, Meta: struct {
+		ProgressToken string `json:"progressToken"`
+	}{ProgressToken: progressToken}})
+}
+
+// registerProgress installs the per-call sink and returns the unique token put
+// on the wire. Two concurrent calls that ask for the same token get distinct
+// tokens: a progress frame belongs to exactly one call (no cross-session leak).
+func (c *Client) registerProgress(token string, sink func(ProgressNotification)) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	unique := token
+	for {
+		if _, taken := c.progress["s:"+unique]; !taken {
+			break
+		}
+		c.progressSeq++
+		unique = fmt.Sprintf("%s#%d", token, c.progressSeq)
+	}
+	if sink != nil {
+		c.progress["s:"+unique] = sink
+	}
+	return unique
+}
+
+func (c *Client) unregisterProgress(token string) {
+	if token == "" {
+		return
+	}
+	c.mu.Lock()
+	delete(c.progress, "s:"+token)
+	c.mu.Unlock()
+}
+
+// deliverProgress routes one notifications/progress frame to the call that owns
+// its token. An unknown token is a late/foreign frame and is dropped: progress
+// is advisory and dropping it is always safe.
+func (c *Client) deliverProgress(params json.RawMessage) {
+	var notification ProgressNotification
+	if len(params) == 0 || json.Unmarshal(params, &notification) != nil {
+		return
+	}
+	key := "n:" + string(notification.ProgressToken)
+	var token string
+	if json.Unmarshal(notification.ProgressToken, &token) == nil {
+		key = "s:" + token
+	}
+	c.mu.Lock()
+	sink := c.progress[key]
+	c.mu.Unlock()
+	if sink != nil {
+		sink(notification)
+	}
+}
+
+// Listen opens a modern subscriptions/listen stream. It returns once the
+// server's first message acknowledged the subscription (or fails when the ack
+// is missing); subsequent notifications arrive on the handle's Events channel,
+// filtered to the server's accepted subset and tagged with this subscription.
+func (c *Client) Listen(ctx context.Context, params ListenParams, options ListenOptions) (*ListenHandle, error) {
+	c.mu.Lock()
+	if c.state != ClientConnected {
+		state := c.state
+		c.mu.Unlock()
+		return nil, &ConnectionClosedError{Message: "MCP client is " + string(state)}
+	}
+	transport := c.transport
+	if transport == nil {
+		c.mu.Unlock()
+		return nil, &ConnectionClosedError{}
+	}
+	c.nextID++
+	id := NumberID(c.nextID)
+	listener := newListener(params, options)
+	listener.handle.client = c
+	listener.handle.id = id
+	c.listeners[id.Key()] = listener
+	c.mu.Unlock()
+
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		c.removeListener(id)
+		return nil, fmt.Errorf("mcp: encode subscriptions/listen params: %w", err)
+	}
+	if err := transport.Send(ctx, &Request{JSONRPC: JSONRPCVersion, ID: id, Method: "subscriptions/listen", Params: encoded}); err != nil {
+		c.removeListener(id)
+		return nil, err
+	}
+
+	var timer *time.Timer
+	var timeoutCh <-chan time.Time
+	if c.options.RequestTimeout > 0 {
+		timer = time.NewTimer(c.options.RequestTimeout)
+		timeoutCh = timer.C
+		defer timer.Stop()
+	}
+	for {
+		select {
+		case <-listener.ackCh:
+			return listener.handle, nil
+		case err := <-listener.handle.done:
+			// The stream ended. If the ack was already processed the subscription
+			// existed: return the handle and let the caller read the terminal
+			// state from Done (a server may answer complete immediately).
+			if listener.isAcked() {
+				return listener.handle, nil
+			}
+			c.removeListener(id)
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("mcp: subscriptions/listen ended before the acknowledgement")
+		case <-ctx.Done():
+			c.removeListener(id)
+			c.cancelListen(id)
+			return nil, ctx.Err()
+		case <-timeoutCh:
+			c.removeListener(id)
+			c.cancelListen(id)
+			return nil, &TimeoutError{Timeout: c.options.RequestTimeout}
+		case <-c.closedCh:
+			c.removeListener(id)
+			return nil, &ConnectionClosedError{}
+		}
+	}
+}
+
+// removeListener drops one stream from the routing table.
+func (c *Client) removeListener(id ID) {
+	c.mu.Lock()
+	delete(c.listeners, id.Key())
+	c.mu.Unlock()
+}
+
+// cancelListen ends the server-side subscription. Streamable HTTP closes the
+// response stream (the HTTP form); other transports send notifications/cancelled
+// (the stdio form).
+func (c *Client) cancelListen(id ID) {
+	c.mu.Lock()
+	transport := c.transport
+	c.mu.Unlock()
+	if transport == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), serverRequestTimeout)
+	defer cancel()
+	if closer, ok := transport.(interface{ CancelRequest(ID) }); ok {
+		closer.CancelRequest(id)
+		return
+	}
+	params, err := json.Marshal(CancelledNotification{RequestID: mustMarshalID(id), Reason: "client closed the subscription"})
+	if err != nil {
+		return
+	}
+	_ = transport.Send(ctx, &Notification{JSONRPC: JSONRPCVersion, Method: "notifications/cancelled", Params: params})
+}
+
+// mustMarshalID renders an identifier for a cancellation payload.
+func mustMarshalID(id ID) json.RawMessage {
+	raw, err := json.Marshal(id)
+	if err != nil {
+		return json.RawMessage(`null`)
+	}
+	return raw
+}
+
+// routeToListener handles one notification that belongs to an open listen
+// stream. It reports whether the notification was consumed here (the global
+// dispatcher must not see it twice).
+func (c *Client) routeToListener(notification *Notification) bool {
+	key, tagged := subscriptionIDOf(notification.Params)
+	c.mu.Lock()
+	var routed *listener
+	active := len(c.listeners)
+	if tagged {
+		routed = c.listeners[key]
+	}
+	c.mu.Unlock()
+	if !tagged {
+		if active > 0 {
+			// Modern notifications MUST carry the subscription tag. An untagged
+			// frame while a listen stream is open is a protocol violation: it is
+			// diagnosed and never treated as a change of that subscription.
+			c.mu.Lock()
+			for _, candidate := range c.listeners {
+				c.diagnose(candidate.options.OnDiagnostic, "mcp listen: untagged notification on a modern stream: "+notification.Method)
+				break
+			}
+			c.mu.Unlock()
+			return true
+		}
+		return false
+	}
+	if routed == nil {
+		// A frame tagged with a subscription this connection no longer has
+		// (closed or superseded). It is not a global event: dropping it is the
+		// dedupe contract, and it must never reach another subscription or the
+		// dispatcher as a change.
+		return true
+	}
+	if notification.Method == "notifications/subscriptions/acknowledged" {
+		filter, err := ackFilterOf(notification.Params)
+		if err != nil {
+			c.diagnose(routed.options.OnDiagnostic, err.Error())
+			return true
+		}
+		if !routed.ack(filter, key) {
+			c.diagnose(routed.options.OnDiagnostic, "mcp listen: duplicate acknowledgement")
+		}
+		return true
+	}
+	if !routed.isAcked() {
+		// The spec forbids notifications before the ack; the subscription is not
+		// established yet, so the frame is a protocol violation, not a change.
+		c.diagnose(routed.options.OnDiagnostic, "mcp listen: notification before acknowledgement: "+notification.Method)
+		return true
+	}
+	if !routed.allowed(notification.Method, notification.Params) {
+		c.diagnose(routed.options.OnDiagnostic, "mcp listen: notification outside the accepted subscription: "+notification.Method)
+		return true
+	}
+	routed.deliver(ListenEvent{Method: notification.Method, Params: notification.Params}, c)
+	return true
+}
+
+// finishListener resolves a terminal response for a listen request id.
+func (c *Client) finishListener(id ID, err error) bool {
+	c.mu.Lock()
+	listener := c.listeners[id.Key()]
+	if listener == nil {
+		c.mu.Unlock()
+		return false
+	}
+	delete(c.listeners, id.Key())
+	c.mu.Unlock()
+	listener.end(err, c)
+	return true
+}
+
+func (c *Client) diagnose(sink func(string), message string) {
+	if sink != nil {
+		sink(message)
+	}
 }
 
 // Close rejects in-flight requests, closes the transport, and marks the client
@@ -374,19 +662,66 @@ func (c *Client) receiveLoop(transport Transport) {
 		}
 		switch typed := message.(type) {
 		case *SuccessResponse:
+			if c.finishListener(typed.ID, nil) {
+				continue
+			}
 			c.deliver(typed.ID, callResult{result: typed.Result})
 		case *ErrorResponse:
-			c.deliver(typed.ID, callResult{err: &McpError{
+			serverErr := &McpError{
 				Code:    typed.Error.Code,
 				Message: typed.Error.Message,
 				Data:    typed.Error.Data,
-			}})
+			}
+			if c.finishListener(typed.ID, serverErr) {
+				continue
+			}
+			c.deliver(typed.ID, callResult{err: serverErr})
 		case *Request:
 			c.answerServerRequest(transport, typed)
+		case *Notification:
+			c.handleNotification(typed)
 		}
-		// Notifications are not consumed by this batch; unknown message kinds
-		// cannot come out of ParseMessage.
+		// Unknown message kinds cannot come out of ParseMessage.
 	}
+}
+
+// handleNotification routes one server notification. Listen frames are consumed
+// by their subscription; everything else reaches the injected dispatcher. With
+// no dispatcher injected the pre-P4 behaviour is kept: notifications are
+// dropped and no state changes.
+func (c *Client) handleNotification(notification *Notification) {
+	if c.routeToListener(notification) {
+		return
+	}
+	if c.options.Notifications == nil {
+		return
+	}
+	switch notification.Method {
+	case "notifications/progress":
+		c.deliverProgress(notification.Params)
+	case "notifications/cancelled":
+		c.abortCancelled(notification.Params)
+	}
+	c.options.Notifications(context.Background(), notification.Method, notification.Params)
+}
+
+// abortCancelled aborts the pending request a notifications/cancelled names.
+// The call's result path then records the failure (the eventual tool.result),
+// which is the only durable fact a cancellation produces.
+func (c *Client) abortCancelled(params json.RawMessage) {
+	var notification CancelledNotification
+	if len(params) == 0 || json.Unmarshal(params, &notification) != nil {
+		return
+	}
+	var id ID
+	if json.Unmarshal(notification.RequestID, &id) != nil {
+		return
+	}
+	reason := "the server cancelled the request"
+	if notification.Reason != "" {
+		reason += ": " + notification.Reason
+	}
+	c.deliver(id, callResult{err: &AbortError{Reason: reason}})
 }
 
 // deliver resolves a pending call. A response whose id this client never
@@ -405,12 +740,23 @@ func (c *Client) deliver(id ID, result callResult) {
 	call.ch <- result
 }
 
-// answerServerRequest replies "method not found": this batch supports no
-// server-initiated requests (roots, sampling, elicitation, ping are future
-// work), and the spec requires a response rather than silence.
+// answerServerRequest replies with the injected handler's message, or "method
+// not found" when no handler is wired. This batch supports no server-initiated
+// requests by default (roots, sampling, elicitation, ping are P5 work), and the
+// spec requires a response rather than silence.
 func (c *Client) answerServerRequest(transport Transport, request *Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), serverRequestTimeout)
 	defer cancel()
+	if handler := c.options.ServerRequests; handler != nil {
+		response, err := handler(ctx, request)
+		if err == nil && response != nil {
+			_ = transport.Send(ctx, response)
+			return
+		}
+		// An unhandled or failed server request is answered, never dropped: an
+		// unanswered request blocks the server. -32601 is the honest answer for
+		// "this host does not implement it".
+	}
 	_ = transport.Send(ctx, &ErrorResponse{
 		JSONRPC: JSONRPCVersion,
 		ID:      request.ID,
@@ -437,8 +783,14 @@ func (c *Client) markClosed(err error) {
 	c.state = ClientClosed
 	pending := c.pending
 	c.pending = make(map[string]*pendingCall)
+	listeners := c.listeners
+	c.listeners = make(map[string]*listener)
+	c.progress = make(map[string]func(ProgressNotification))
 	c.closeOnce.Do(func() { close(c.closedCh) })
 	c.mu.Unlock()
+	for _, listener := range listeners {
+		listener.end(&ConnectionClosedError{}, c)
+	}
 	for _, call := range pending {
 		call.ch <- callResult{err: err}
 	}

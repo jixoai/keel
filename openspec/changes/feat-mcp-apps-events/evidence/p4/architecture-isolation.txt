@@ -1,0 +1,7 @@
+=== RUN   TestMCPHostDoesNotImportProductSSE
+--- PASS: TestMCPHostDoesNotImportProductSSE (0.15s)
+=== RUN   TestMCPClientDoesNotImportHostDispatcher
+--- PASS: TestMCPClientDoesNotImportHostDispatcher (0.14s)
+PASS
+ok  	github.com/jixoai/keel/internal/architecture	0.714s
+EXIT:0

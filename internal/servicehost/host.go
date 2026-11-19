@@ -110,6 +110,11 @@ type MCPOptions struct {
 	// apps (MCP stays the text-only surface) and the prompt sections are read
 	// from the live manager on every republish (the pre-P2 path).
 	Registry *mcphost.Registry
+	// Events, when set, wires the MCP notification surface (P4): the dispatcher
+	// callbacks the connections inject, the debounced catalogue republish and
+	// the per-server subscriptions/listen supervisor. Nil keeps the pre-P4
+	// behaviour (notifications dropped, server requests answer -32601).
+	Events *mcphost.EventsOptions
 }
 
 // LLMOptions carries the resolved model selection inputs. The tenant document

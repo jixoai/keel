@@ -1,0 +1,56 @@
+# P4 residue gate
+
+## processes
+none
+
+## e2e databases
+none
+
+## e2e port release
+# port release check
+port 13610 released (no listener)
+port 13611 released (no listener)
+
+## git status (evidence excluded)
+ M cmd/keel/serve.go
+ M cmd/runtime/main.go
+ M internal/agent/runner.go
+ M internal/agentapi/api.go
+ M internal/agentapi/mcp_app_actions.go
+ M internal/agentext/hooks.go
+ M internal/agentext/turns.go
+ M internal/agenttool/tool_executor.go
+ M internal/mcp/aggregate.go
+ M internal/mcp/client.go
+ M internal/mcp/manager.go
+ M internal/mcp/streamable_http.go
+ M internal/mcphost/registry.go
+ M internal/mcphost/surface.go
+ M internal/metrics/metrics.go
+ M internal/servicehost/host.go
+ M internal/servicehost/services.go
+ M internal/toolsurface/builtins.go
+ M internal/toolsurface/mcp.go
+ M internal/toolsurface/surface.go
+ M internal/toolsurface/toolsurface_test.go
+?? internal/agent/mcp_attempt_test.go
+?? internal/agentapi/mcp_metrics_test.go
+?? internal/agentcore/tool_scope_ctx.go
+?? internal/agentext/mcp_events_test.go
+?? internal/architecture/mcp_events_isolation_test.go
+?? internal/mcp/events.go
+?? internal/mcp/events_test.go
+?? internal/mcphost/events.go
+?? internal/mcphost/events_test.go
+?? internal/mcphost/listen_test.go
+?? internal/mcphost/metrics.go
+?? internal/mcphost/metrics_test.go
+?? internal/toolsurface/mcp_events_test.go
+
+## ignored env file
+.gitignore:7:.env.local	.env.local
+
+## stray build artifacts
+./keel
+
+# note: ./keel is tracked at HEAD (git ls-files keel), not a build artifact of this run.

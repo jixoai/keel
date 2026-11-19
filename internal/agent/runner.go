@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/compaction"
@@ -480,6 +482,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		}
 	}
 
+	// The tool-execution context carries the attempt's (tenant, session) scope:
+	// a tool that receives out-of-band frames (MCP notifications/progress) keys
+	// them on this scope plus the call id. The attempt id freezes the MCP
+	// catalogue for the whole attempt (the next attempt gets a new id and sees
+	// the republished catalogue). Both are transient, never persisted.
+	runCtx := agentcore.WithToolRunScope(ctx, agentcore.ToolRunScope{
+		TenantID:  lease.Scope.TenantID.String(),
+		SessionID: lease.Scope.SessionID.String(),
+	})
+	runCtx = agentcore.WithMCPAttempt(runCtx, uuid.NewString())
 	// A previous process may have died after committing an assistant tool call
 	// but before committing its results. Execute the missing calls now (at least
 	// once) so the model sees a complete turn — through THIS attempt's filtered
@@ -487,7 +499,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// tool the binding does not grant (a removed grant, or a captain that
 	// explicitly disabled delegation, would otherwise only hold until the next
 	// restart).
-	msgs, seqs, cursor, err = r.fillMissingToolResults(ctx, lease, msgs, seqs, cursor, tools)
+	msgs, seqs, cursor, err = r.fillMissingToolResults(runCtx, lease, msgs, seqs, cursor, tools)
 	res.Cursor = cursor
 	if err != nil {
 		return res, err
@@ -684,7 +696,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		Messages:     msgs,
 		Tools:        tools.List(),
 	}
-	stream := loop.StartRun(ctx, agentCtx, cfg)
+	stream := loop.StartRun(runCtx, agentCtx, cfg)
 	for ev := range stream.Events() {
 		if ctx.Err() != nil {
 			res.Cursor = cursor

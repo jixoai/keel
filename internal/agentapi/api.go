@@ -190,6 +190,10 @@ type Config struct {
 	// notification routing). P4 wires it; until then it is false and clients
 	// use the legacy behavior.
 	MCPEvents bool
+	// MCPAppMetrics records app bridge frames and document fetches (P4.7). Nil
+	// is a no-op; the labels are bounded by the metric set, never by session or
+	// app instance.
+	MCPAppMetrics MCPAppMetrics
 	// MCPAppRuntime executes the app bridge's outbound calls (tools/call and
 	// resources/read) against the live MCP fleet. Nil answers 501 on the proxy
 	// routes: a deployment without MCP connections has nothing to proxy to.

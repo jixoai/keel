@@ -94,6 +94,13 @@ type MCPAppTool struct {
 	Destructive bool
 }
 
+// MCPAppMetrics is the fixed-cardinality metric seam of the app bridge (P4.7).
+// *mcphost.Metrics implements it; the interface keeps the HTTP layer free of
+// the collector implementation.
+type MCPAppMetrics interface {
+	BridgeFrame(method, direction string)
+}
+
 // MCPAppRuntime is the outbound execution seam of the app bridge. The host
 // process implements it over the live MCP manager; tests substitute a fake.
 type MCPAppRuntime interface {
@@ -218,11 +225,15 @@ func (s *Server) mcpAppFrom(w http.ResponseWriter, r *http.Request) (uuid.UUID, 
 // mcpAppGate applies the per-app bridge budget. It returns the release
 // function; a refusal has already written the response and audit row.
 func (s *Server) mcpAppGate(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, sessionID uuid.UUID, app mcphost.AppSpec, action string) (func(), bool) {
+	// Every bridge exchange is one inbound frame and one outbound frame; the
+	// method labels are the four fixed actions, so the series count is bounded.
+	s.mcpBridgeFrame(action, "in")
 	if !s.mcpAppLimits.allow(app.AppID) {
 		s.recordSampledRejection(r.Context(), tenantID, sessionID, app, "bridge.rate", "refused",
 			fmt.Sprintf("limit=%d/s app=%s", mcpAppRatePerSecond, app.AppID))
 		writeErr(w, http.StatusTooManyRequests,
 			fmt.Errorf("mcp app request rate exceeded (%d/s)", mcpAppRatePerSecond))
+		s.mcpBridgeFrame(action, "out")
 		return nil, false
 	}
 	if !s.mcpAppLimits.acquire(app.AppID) {
@@ -230,9 +241,20 @@ func (s *Server) mcpAppGate(w http.ResponseWriter, r *http.Request, tenantID uui
 			fmt.Sprintf("limit=%d app=%s", mcpAppConcurrency, app.AppID))
 		writeErr(w, http.StatusTooManyRequests,
 			fmt.Errorf("mcp app has %d requests in flight", mcpAppConcurrency))
+		s.mcpBridgeFrame(action, "out")
 		return nil, false
 	}
-	return func() { s.mcpAppLimits.release(app.AppID) }, true
+	return func() {
+		s.mcpAppLimits.release(app.AppID)
+		s.mcpBridgeFrame(action, "out")
+	}, true
+}
+
+// mcpBridgeFrame records one app bridge frame.
+func (s *Server) mcpBridgeFrame(method, direction string) {
+	if s.cfg.MCPAppMetrics != nil {
+		s.cfg.MCPAppMetrics.BridgeFrame(method, direction)
+	}
 }
 
 // decodeMCPAppBody decodes one bridge request with the 64 KiB bound. A body

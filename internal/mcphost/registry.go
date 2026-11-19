@@ -66,6 +66,8 @@ type Options struct {
 	// by default: a View is browser JavaScript, and a private origin gives it a
 	// path to the host's own network services. A dev fixture opts in.
 	AllowPrivateDomains bool
+	// Metrics records document fetch outcomes (P4.7). Nil is a no-op.
+	Metrics *Metrics
 	// ReadApp reads one app document. Nil uses server.Client.ReadAppResource.
 	ReadApp func(ctx context.Context, server *mcp.Server, uri string) (mcp.AppResource, error)
 	// Sinks receive the published surface. Every sink is optional.
@@ -123,8 +125,12 @@ type Registry struct {
 	surface    Surface
 	apps       map[string]appEntry
 	ready      map[string]bool
-	cache      *docCache
-	diagnose   []Diagnostic
+	// stale marks appIds whose document a notifications/resources/updated
+	// invalidated: their TTL reuse is bypassed on the next Refresh (a content
+	// change is not a cache hit).
+	stale    map[string]bool
+	cache    *docCache
+	diagnose []Diagnostic
 }
 
 // New builds a registry. It publishes nothing until Refresh runs; until then
@@ -154,6 +160,7 @@ func New(options Options) *Registry {
 		logger:  options.Logger,
 		apps:    make(map[string]appEntry),
 		ready:   make(map[string]bool),
+		stale:   make(map[string]bool),
 		cache:   newDocCache(options.CacheBytes),
 	}
 }
@@ -254,6 +261,37 @@ func (r *Registry) Diagnostics() []Diagnostic {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return append([]Diagnostic(nil), r.diagnose...)
+}
+
+// InvalidateResource marks the app documents of one (server, uri) stale so the
+// next Refresh re-reads them even when their TTL would have allowed a reuse.
+// This is the notifications/resources/updated landing point (design §4.1); an
+// unknown URI is a no-op.
+func (r *Registry) InvalidateResource(server, uri string) {
+	if r == nil || uri == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for appID, entry := range r.apps {
+		if entry.spec.Server == server && entry.spec.ResourceURI == uri {
+			r.stale[appID] = true
+		}
+	}
+}
+
+// isStale reports whether an app's cached document was invalidated.
+func (r *Registry) isStale(appID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.stale[appID]
+}
+
+// clearStale drops the invalidation mark of a successfully re-read app.
+func (r *Registry) clearStale(appID string) {
+	r.mu.Lock()
+	delete(r.stale, appID)
+	r.mu.Unlock()
 }
 
 // Limits reports the byte bounds this registry enforces: one document, and the
@@ -364,6 +402,7 @@ type resolveResult struct {
 func (r *Registry) resolve(ctx context.Context, app mcp.App, byName map[string]*mcp.Server, now time.Time) resolveResult {
 	server := byName[app.Server]
 	if server == nil || server.Err != nil {
+		r.options.Metrics.AppFetch("error")
 		message := "the server is not connected"
 		if server != nil && server.Err != nil {
 			message = server.Err.Error()
@@ -383,18 +422,21 @@ func (r *Registry) resolve(ctx context.Context, app mcp.App, byName map[string]*
 		previousDoc, hasPreviousDoc = r.cache.get(previous.docID)
 	}
 	if hasPrevious && hasPreviousDoc {
-		if previous.spec.TTLMs != nil && now.Before(previous.spec.FetchedAt.Add(time.Duration(*previous.spec.TTLMs)*time.Millisecond)) {
+		if !r.isStale(app.AppID) && previous.spec.TTLMs != nil && now.Before(previous.spec.FetchedAt.Add(time.Duration(*previous.spec.TTLMs)*time.Millisecond)) {
+			r.options.Metrics.AppFetch("reused")
 			return resolveResult{spec: withTools(previous.spec, app), doc: previousDoc, keepDoc: true}
 		}
 	}
 
 	resource, err := r.read(ctx, server, app.ResourceURI)
 	if err != nil {
+		r.options.Metrics.AppFetch("error")
 		r.diagnoseApp(ctx, app, "fetch", "resources/read failed: "+err.Error())
 		return r.keepPrevious(previous, hasPrevious, previousDoc, hasPreviousDoc, app)
 	}
 	bytes, err := documentBytes(resource, r.options.MaxDocumentBytes)
 	if err != nil {
+		r.options.Metrics.AppFetch("error")
 		r.diagnoseApp(ctx, app, "validate", err.Error())
 		return r.keepPrevious(previous, hasPrevious, previousDoc, hasPreviousDoc, app)
 	}
@@ -425,10 +467,13 @@ func (r *Registry) resolve(ctx context.Context, app mcp.App, byName map[string]*
 	// may evict. Only after the new version is in the cache does the old one
 	// become evictable.
 	if !r.cache.put(docID, doc, true) {
+		r.options.Metrics.AppFetch("error")
 		message := fmt.Sprintf("the document cannot be cached within the %d-byte budget", r.options.CacheBytes)
 		r.diagnoseApp(ctx, app, "cache", message)
 		return r.keepPrevious(previous, hasPrevious, previousDoc, hasPreviousDoc, app)
 	}
+	r.clearStale(app.AppID)
+	r.options.Metrics.AppFetch("ok")
 	if hasPrevious && previous.docID != docID {
 		r.cache.protect(previous.docID, false)
 	}
@@ -505,13 +550,14 @@ func (r *Registry) buildSurface(fleet Fleet, servers []*mcp.Server, specs []AppS
 	states := make([]ServerState, 0, len(servers))
 	for _, server := range servers {
 		state := ServerState{
-			Name:        server.Entry.Name,
-			Transport:   transportName(server.Entry),
-			Connected:   server.Err == nil && server.Client != nil,
-			Reconnects:  server.Reconnects,
-			Tools:       len(server.Tools),
-			Apps:        appCounts[server.Entry.Name],
-			Diagnostics: append([]string(nil), server.Diagnostics...),
+			Name:           server.Entry.Name,
+			Transport:      transportName(server.Entry),
+			Connected:      server.Err == nil && server.Client != nil,
+			Reconnects:     server.Reconnects,
+			Tools:          len(server.Tools),
+			Apps:           appCounts[server.Entry.Name],
+			Diagnostics:    append([]string(nil), server.Diagnostics...),
+			CatalogueError: server.CatalogueError,
 		}
 		if server.Err != nil {
 			state.Error = server.Err.Error()

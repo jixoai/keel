@@ -10,12 +10,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +84,17 @@ type ConnectOptions struct {
 	// Nil means every declared app is publishable (the P1 behaviour: no host
 	// registry is wired).
 	AppReadiness func(appID string) bool
+	// Notifications, when set, receives every server notification (P4). Nil
+	// keeps the pre-P4 behaviour: notifications are dropped.
+	Notifications NotificationHandler
+	// ServerRequests, when set, answers server-initiated requests (legacy era,
+	// P4/P5). Nil answers -32601.
+	ServerRequests ServerRequestHandler
+	// StreamReconnect, when set, reports that a legacy GET stream was
+	// re-established after a drop. The host recomputes the whole catalogue: the
+	// stream has no replay, so changes during the gap are only recoverable that
+	// way.
+	StreamReconnect func(server string)
 }
 
 // Server is one connected (or failed) MCP server.
@@ -98,6 +111,11 @@ type Server struct {
 	// found while reading the catalogue. They are reported, never fatal.
 	Diagnostics []string
 	Err         error
+	// CatalogueError is the last failed tools/list refresh of a still-connected
+	// server (P4). It never replaces Err: a failed catalogue refresh keeps the
+	// previous tool list usable, and the error stays visible on
+	// /v1/mcp/servers.
+	CatalogueError string
 	// Reconnects counts successful reconnects of this server. A reconnect
 	// replaces the Server value, so the count travels with the replacement.
 	Reconnects int
@@ -132,11 +150,17 @@ func (s *Server) SetAppReadiness(fn func(appID string) bool) {
 
 // Manager owns every MCP connection of one host.
 type Manager struct {
-	mu      sync.Mutex
-	servers []*Server
-	entries map[string]ServerEntry
-	options ConnectOptions
-	logger  *slog.Logger
+	mu        sync.Mutex
+	refreshMu sync.Mutex
+	servers   []*Server
+	entries   map[string]ServerEntry
+	options   ConnectOptions
+	logger    *slog.Logger
+
+	// snapshots freezes the catalogue per attempt (CatalogueSnapshot).
+	snapshotMu    sync.Mutex
+	snapshots     map[string][]*Server
+	snapshotOrder []string
 }
 
 // Connect connects the enabled entries. It always returns a manager so callers
@@ -240,6 +264,8 @@ func connectOne(ctx context.Context, entry ServerEntry, options ConnectOptions) 
 		Name:           options.ClientName,
 		Version:        options.ClientVersion,
 		RequestTimeout: timeout,
+		Notifications:  clientNotifications(entry.Name, options.Notifications),
+		ServerRequests: clientServerRequests(entry.Name, options.ServerRequests),
 	})
 	if _, err := client.Connect(ctx, transport); err != nil {
 		_ = client.Close()
@@ -266,12 +292,151 @@ func connectOne(ctx context.Context, entry ServerEntry, options ConnectOptions) 
 	return server
 }
 
+// clientNotifications adapts the host-facing handler to the client's callback:
+// the client never learns the configured server name, the manager adds it.
+func clientNotifications(server string, handler NotificationHandler) ClientNotificationHandler {
+	if handler == nil {
+		return nil
+	}
+	return func(ctx context.Context, method string, params json.RawMessage) {
+		handler(ctx, server, method, params)
+	}
+}
+
+// clientServerRequests adapts the host-facing server-request handler.
+func clientServerRequests(server string, handler ServerRequestHandler) ClientServerRequestHandler {
+	if handler == nil {
+		return nil
+	}
+	return func(ctx context.Context, request *Request) (Message, error) {
+		return handler(ctx, server, request)
+	}
+}
+
+// ToolDiff is one server's catalogue change, as the events surface reports it
+// (hook event mcp.surface.changed and the audit detail).
+type ToolDiff struct {
+	Added   []string
+	Removed []string
+}
+
+// RefreshServer re-reads one server's tools/list and installs the new
+// catalogue. The old *Server value is never mutated: a copy with the new tools
+// replaces it, so a reader already holding the old value keeps a consistent
+// snapshot (the run-boundary rule, design §4.4(6)).
+//
+// A failed refresh keeps the previous tool list and records CatalogueError on a
+// replacement copy: the surface stays usable and /v1/mcp/servers reports the
+// error. It never publishes an empty catalogue.
+func (m *Manager) RefreshServer(ctx context.Context, name string) (ToolDiff, error) {
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+	current := m.findServer(name)
+	if current == nil {
+		return ToolDiff{}, fmt.Errorf("%w: %q", ErrServerNotFound, name)
+	}
+	if current.Client == nil || current.Err != nil {
+		return ToolDiff{}, fmt.Errorf("mcp: server %q is not connected", name)
+	}
+	tools, err := current.Client.ListTools(ctx)
+	if err != nil {
+		// Keep the old catalogue; only the diagnostic field moves.
+		failed := *current
+		failed.CatalogueError = boundedMessage(err.Error())
+		m.replaceServer(current, &failed)
+		m.logger.Warn("mcp catalogue refresh failed", "server", name, "err", err)
+		return ToolDiff{}, err
+	}
+	next := *current
+	next.Tools = tools
+	next.CatalogueError = ""
+	next.Diagnostics = nil
+	for _, tool := range tools {
+		for _, diagnostic := range tool.UIDiagnostics {
+			next.Diagnostics = append(next.Diagnostics, fmt.Sprintf("tool %q: %s", tool.Name, diagnostic))
+		}
+	}
+	diff := diffTools(current.Tools, tools)
+	if m.replaceServer(current, &next) {
+		m.logger.Info("mcp catalogue refreshed", "server", name, "tools", len(tools),
+			"added", len(diff.Added), "removed", len(diff.Removed))
+	}
+	return diff, nil
+}
+
+// findServer returns the current server value by name.
+func (m *Manager) findServer(name string) *Server {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, candidate := range m.servers {
+		if candidate.Entry.Name == name {
+			return candidate
+		}
+	}
+	return nil
+}
+
+// replaceServer swaps old for next when old is still the live value. It reports
+// whether the swap happened (a concurrent reconnect wins otherwise).
+func (m *Manager) replaceServer(old, next *Server) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index, candidate := range m.servers {
+		if candidate == old {
+			m.servers[index] = next
+			return true
+		}
+	}
+	return false
+}
+
+// diffTools reports the names added and removed between two catalogues.
+func diffTools(previous, next []Tool) ToolDiff {
+	before := make(map[string]bool, len(previous))
+	for _, tool := range previous {
+		before[tool.Name] = true
+	}
+	after := make(map[string]bool, len(next))
+	for _, tool := range next {
+		after[tool.Name] = true
+	}
+	diff := ToolDiff{}
+	for _, tool := range next {
+		if !before[tool.Name] {
+			diff.Added = append(diff.Added, tool.Name)
+		}
+	}
+	for _, tool := range previous {
+		if !after[tool.Name] {
+			diff.Removed = append(diff.Removed, tool.Name)
+		}
+	}
+	sort.Strings(diff.Added)
+	sort.Strings(diff.Removed)
+	return diff
+}
+
+// boundedMessage bounds an error message kept on the public server projection.
+func boundedMessage(message string) string {
+	if len(message) > 512 {
+		return message[:512] + "…"
+	}
+	return message
+}
+
 func transportFor(entry ServerEntry, options ConnectOptions) (Transport, error) {
 	if url := ServerField(entry.Config, "url"); url != "" {
 		httpOptions := HTTPTransportOptions{
 			URL:              url,
 			Headers:          stringMap(entry.Config["headers"]),
 			DisableGetStream: options.DisableGetStream,
+		}
+		if options.StreamReconnect != nil {
+			server := entry.Name
+			httpOptions.OnReconnect = func() { options.StreamReconnect(server) }
 		}
 		if options.AuthProvider != nil {
 			httpOptions.AuthProvider = options.AuthProvider(entry, entry.Config)

@@ -302,6 +302,7 @@ type mcpService struct {
 	manager  *mcp.Manager
 	entries  []mcp.ServerEntry
 	registry *mcphost.Registry
+	events   *mcphost.Events
 	log      *slog.Logger
 }
 
@@ -344,10 +345,20 @@ func (m *mcpService) Start(ctx context.Context, _ *servicegraph.EffectScope) err
 	if err := m.refreshRegistry(ctx); err != nil {
 		m.log.Warn("mcp apps registry refresh at start", "err", err)
 	}
+	// The notification surface (P4): legacy GET-stream notifications already
+	// reach the dispatcher through the injected callbacks; modern servers get
+	// their per-server listen stream here (the predicate is inert until era
+	// negotiation ships in P5).
+	if m.events != nil {
+		m.events.Start(ctx)
+	}
 	return nil
 }
 
 func (m *mcpService) Stop(context.Context) error {
+	if m.events != nil {
+		m.events.Stop()
+	}
 	return m.manager.Close()
 }
 
@@ -363,8 +374,32 @@ func newMCPFactory(cfg Config) servicegraph.Factory {
 			// app binding and no mcp_apps line.
 			options.AppReadiness = cfg.MCP.Registry.AppReady
 		}
+		var events *mcphost.Events
+		if cfg.MCP.Events != nil {
+			eventOptions := *cfg.MCP.Events
+			eventOptions.Registry = cfg.MCP.Registry
+			if eventOptions.Logger == nil {
+				eventOptions.Logger = cfg.Seams.Logger
+			}
+			events = mcphost.NewEvents(eventOptions)
+			// The dispatcher is injected before the connections open: a
+			// notification that arrives during initialize is classified, not
+			// dropped. The fleet is installed after Connect (the manager is what
+			// the dispatcher reads).
+			options.Notifications = events.Notification
+			options.ServerRequests = events.ServerRequest
+			// Legacy GET-stream reconnects have no replay: recompute the whole
+			// catalogue once the stream is back (the modern listen supervisor
+			// does the same after its ack).
+			options.StreamReconnect = func(server string) {
+				events.NoteReconnect(context.Background(), server)
+			}
+		}
 		manager := mcp.Connect(ctx, cfg.MCP.Entries, options)
-		return &mcpService{manager: manager, entries: cfg.MCP.Entries, registry: cfg.MCP.Registry, log: cfg.Seams.Logger}, nil
+		if events != nil {
+			events.SetFleet(manager)
+		}
+		return &mcpService{manager: manager, entries: cfg.MCP.Entries, registry: cfg.MCP.Registry, events: events, log: cfg.Seams.Logger}, nil
 	}
 }
 

@@ -260,6 +260,11 @@ type HTTPTransportOptions struct {
 	MaxMessageBytes int
 	AuthProvider    AuthProvider
 	Reconnect       ReconnectOptions
+	// OnReconnect is called when the server-to-client GET stream is
+	// re-established after a drop. The modern listen path uses its own
+	// supervisor; this is the legacy equivalent, so the host can do the
+	// mandatory full catalogue recompute (no replay exists).
+	OnReconnect func()
 }
 
 // HTTPTransport is the Streamable HTTP MCP transport.
@@ -284,6 +289,10 @@ type HTTPTransport struct {
 	lastToken        string
 	getStreamStarted bool
 	receiveErr       error
+	// requestStreams are the open per-request SSE response bodies (a modern
+	// subscriptions/listen lives here). CancelRequest closes one, which is the
+	// HTTP form of cancelling a subscription.
+	requestStreams map[string]io.Closer
 }
 
 // NewHTTPTransport creates the transport; Start begins use.
@@ -297,12 +306,13 @@ func NewHTTPTransport(options HTTPTransportOptions) *HTTPTransport {
 		maxBytes = DefaultMaxMessageBytes
 	}
 	return &HTTPTransport{
-		options:  options,
-		url:      options.URL,
-		client:   client,
-		maxBytes: maxBytes,
-		wake:     make(chan struct{}, 1),
-		closedCh: make(chan struct{}),
+		options:        options,
+		url:            options.URL,
+		client:         client,
+		maxBytes:       maxBytes,
+		wake:           make(chan struct{}, 1),
+		closedCh:       make(chan struct{}),
+		requestStreams: make(map[string]io.Closer),
 	}
 }
 
@@ -423,8 +433,10 @@ func (t *HTTPTransport) Send(ctx context.Context, message Message) error {
 	case "text/event-stream":
 		// The stream may stay open after the response: consume it in the
 		// background so Send returns and the client can receive the message.
+		t.trackRequestStream(request.ID, response.Body)
 		go func() {
 			defer response.Body.Close()
+			defer t.untrackRequestStream(request.ID)
 			t.consumeResponseStream(response.Body, request.ID, t.maxBytes)
 		}()
 		return nil
@@ -432,6 +444,31 @@ func (t *HTTPTransport) Send(ctx context.Context, message Message) error {
 		response.Body.Close()
 		return &HTTPError{Status: response.StatusCode, Body: fmt.Sprintf("Unsupported MCP response content type: %s", orMissing(mediaType))}
 	}
+}
+
+// CancelRequest closes the SSE response stream of one request, if the server
+// answered it with a stream (the HTTP cancellation form for
+// subscriptions/listen). A request answered with plain JSON has no stream and
+// nothing is closed.
+func (t *HTTPTransport) CancelRequest(id ID) {
+	t.mu.Lock()
+	stream := t.requestStreams[id.Key()]
+	t.mu.Unlock()
+	if stream != nil {
+		_ = stream.Close()
+	}
+}
+
+func (t *HTTPTransport) trackRequestStream(id ID, stream io.Closer) {
+	t.mu.Lock()
+	t.requestStreams[id.Key()] = stream
+	t.mu.Unlock()
+}
+
+func (t *HTTPTransport) untrackRequestStream(id ID) {
+	t.mu.Lock()
+	delete(t.requestStreams, id.Key())
+	t.mu.Unlock()
 }
 
 // Close aborts streams and best-effort deletes the server session. It is
@@ -450,8 +487,16 @@ func (t *HTTPTransport) Close() error {
 		t.cancel()
 	}
 	t.terminal = &ConnectionClosedError{}
+	streams := make([]io.Closer, 0, len(t.requestStreams))
+	for _, stream := range t.requestStreams {
+		streams = append(streams, stream)
+	}
+	t.requestStreams = make(map[string]io.Closer)
 	t.closeOnce.Do(func() { close(t.closedCh) })
 	t.mu.Unlock()
+	for _, stream := range streams {
+		_ = stream.Close()
+	}
 	t.signalWake()
 
 	if started && sessionID != "" {
@@ -701,6 +746,7 @@ func (t *HTTPTransport) startGetStream() {
 // backoff when it drops.
 func (t *HTTPTransport) runGetStream() {
 	cursor := &streamCursor{}
+	opened := false
 	for attempt := 0; !t.isClosed(); {
 		openedAt := time.Now()
 		stream, err := t.openSSEStream(cursor.lastEventID)
@@ -714,6 +760,10 @@ func (t *HTTPTransport) runGetStream() {
 		} else if stream == nil {
 			return // the server offers no GET stream (405)
 		} else {
+			if opened && t.options.OnReconnect != nil {
+				t.options.OnReconnect()
+			}
+			opened = true
 			err = ConsumeSSEStream(stream, SSEOptions{
 				MaxEventBytes: t.maxBytes,
 				OnID:          func(id string) { cursor.lastEventID = id },

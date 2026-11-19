@@ -49,10 +49,14 @@ type ServerState struct {
 	Connected    bool            `json:"connected"`
 	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 	Error        string          `json:"error,omitempty"`
-	Reconnects   int             `json:"reconnectCount"`
-	Tools        int             `json:"tools"`
-	Apps         int             `json:"apps"`
-	Diagnostics  []string        `json:"diagnostics,omitempty"`
+	// CatalogueError is the last failed tools/list refresh of a connected
+	// server (P4.4): the previous tool list stays published, and the failure is
+	// visible here (spec「热更的 attempt 边界与失败保面」).
+	CatalogueError string   `json:"catalogueError,omitempty"`
+	Reconnects     int      `json:"reconnectCount"`
+	Tools          int      `json:"tools"`
+	Apps           int      `json:"apps"`
+	Diagnostics    []string `json:"diagnostics,omitempty"`
 }
 
 // ToolRef is one tool that references an app resource.

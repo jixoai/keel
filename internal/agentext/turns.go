@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/mcp"
 )
 
 // SessionGate is the narrow session seam the product layer needs: create an
@@ -346,12 +347,20 @@ func (c *RunControl) setOverlayLocked(scope kernel.Scope, status string) {
 // Partial is one token-level frame. It is a transport fact only: it is never
 // stored, never replayed and never carries an SSE id, so it cannot move a
 // client's Last-Event-ID cursor.
+//
+// MCP progress frames reuse the same channel (type "mcp.progress"): the
+// advisory fields below are only set for those frames, MessageID is the
+// toolCallId they belong to, and they are still never durable.
 type Partial struct {
 	Type      string    `json:"type"`
 	MessageID string    `json:"messageId,omitempty"`
 	Delta     string    `json:"delta,omitempty"`
 	Seq       int64     `json:"seq,omitempty"`
 	At        time.Time `json:"at"`
+	// Progress and Total are the MCP notifications/progress counters (P4.5).
+	Progress *float64 `json:"progress,omitempty"`
+	Total    *float64 `json:"total,omitempty"`
+	Message  string   `json:"message,omitempty"`
 }
 
 // PartialHub is the in-process broadcast bus of partial frames. Subscribers get
@@ -435,4 +444,26 @@ func (h *PartialHub) Stats() (published, dropped int64, subscribers int) {
 	}
 	h.mu.Unlock()
 	return h.published.Load(), h.dropped.Load(), subs
+}
+
+// PartialMCPProgress is the Partial.Type of a server progress frame. It is a
+// transient channel kind, not an event-ledger kind: nothing about it is stored
+// or replayed (spec mcp-events「账本零新增 kind」).
+const PartialMCPProgress = "mcp.progress"
+
+// PublishMCPProgress broadcasts one MCP notifications/progress frame for a tool
+// call. Progress is advisory: a slow subscriber drops it, a dropped frame has
+// no effect on the call, and an unknown session simply receives nothing.
+func (h *PartialHub) PublishMCPProgress(tenantID, sessionID uuid.UUID, toolCallID string, progress mcp.ProgressNotification) bool {
+	if h == nil || toolCallID == "" {
+		return false
+	}
+	frame := Partial{
+		Type:      PartialMCPProgress,
+		MessageID: toolCallID,
+		Progress:  &progress.Progress,
+		Total:     progress.Total,
+		Message:   progress.Message,
+	}
+	return h.Publish(tenantID, sessionID, frame)
 }
