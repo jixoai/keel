@@ -1,0 +1,24 @@
+W2.5 approve + notify — final gate run (2026-11-19)
+
+Commands (run from the task worktree; the test DSN came from
+KEEL_TEST_DSN_W2_APPROVE in .env.local and was never printed):
+
+1. go build ./...
+   exit=0                             (go-build.txt)
+2. go vet ./internal/approval ./internal/notify ./internal/agentext \
+        ./internal/agentapi ./internal/toolsurface ./cmd/keel
+   exit=0                             (go-vet.txt)
+3. KEEL_TEST_DSN=... go test ./...
+   exit=0, 0 FAIL                     (test-full-dsn.txt)
+4. KEEL_TEST_DSN=... go test -race ./internal/approval ./internal/notify \
+        ./internal/agentext ./internal/agentapi ./internal/toolsurface ./cmd/keel
+   exit=0, 0 DATA RACE                (test-race.txt)
+5. ./scripts/agent-runtime-e2e.sh
+   exit=0, PASS                       (agent-runtime-e2e.txt)
+   The script's own evidence directory was removed after the run; its log is
+   kept here.
+6. Orphan check: ps for keel serve / keel-agent-e2e after the e2e teardown
+   0 processes                        (orphans.txt)
+
+Residuals: no daemon or server from this slice remains running; the e2e script
+creates and drops its own database and ports.

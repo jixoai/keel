@@ -1,0 +1,14 @@
+id: keel.notify
+version: 1.0.0
+kind: in-process
+description: "Durable notifications with declared consumers (live client, native target, single-use URL, delivery pixel), per-consumer state, event-ized acks, the one-push fallback window, and explicit degradation gaps instead of pretending a push happened. The harness-owned `notify` tool owns the model-facing name; this plugin supplies the action backend and the sweep loop."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides: {}
+permissions:
+  tools:
+    - keel.notify.push
+    - keel.notify.list
+    - keel.notify.ack
+source:
+  type: builtin

@@ -39,7 +39,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/approval"
 	"github.com/jixoai/keel/internal/logsafe"
+	"github.com/jixoai/keel/internal/notify"
 )
 
 // Version is the AgentAPI service version reported by /v1/capabilities.
@@ -77,6 +79,13 @@ type Config struct {
 	Cancel CancelFunc
 	// Decisions is the approval primitive. Nil answers 503.
 	Decisions *agentext.DecisionBroker
+	// Approvals records and reads approval provenance (who answered, over which
+	// channel, validated/escape). Nil keeps the decision routes as they are and
+	// omits provenance from their answers.
+	Approvals *approval.Service
+	// Notifications is the durable notification primitive behind the notify
+	// tool and the /v1/notifications routes. Nil answers 503 there.
+	Notifications *notify.Service
 	// Partials is the in-process partial hub (non-persistent bypass). Nil makes
 	// ?partials=1 a no-op (the flag is then reported false by capabilities).
 	Partials *agentext.PartialHub
@@ -216,6 +225,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions", s.openDecision)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions/{decisionId}", s.getDecision)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions/{decisionId}", s.answerDecision)
+	s.approvalRoutes()
+	s.notificationRoutes()
 	s.pluginRoutes()
 	s.mux.HandleFunc("GET /v1/triggers", s.listTriggers)
 	s.mux.HandleFunc("POST /v1/triggers/{id}/fire", s.fireTrigger)

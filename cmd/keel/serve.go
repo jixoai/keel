@@ -20,6 +20,7 @@ import (
 	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/approval"
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
@@ -30,6 +31,7 @@ import (
 	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/modelcfg"
+	"github.com/jixoai/keel/internal/notify"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/pluginpkg/builtin"
 	"github.com/jixoai/keel/internal/provider"
@@ -349,6 +351,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 					Manager: func() *agentext.Manager { return toolPluginManager },
 					Service: taskLog,
 				},
+				Approve: agentext.ApproveBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				Notify:  agentext.NotifyBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 			},
 		},
 	})
@@ -578,6 +582,20 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Hooks:  hooks,
 		Logger: log,
 	})
+	// Approval provenance and notifications are durable product facts. The
+	// provenance rows are the audit of who answered; the notification rows carry
+	// the consumer set, while notification.ack / notification.push_sent are the
+	// event-ized truth (the kernel is the committer).
+	approvals := approval.NewService(approval.Options{
+		Store:  approval.NewPostgresStore(st),
+		Logger: log,
+	})
+	notifications := notify.NewService(notify.Options{
+		Store:     notify.NewPostgresStore(st),
+		Committer: kern,
+		Logger:    log,
+		BaseURL:   os.Getenv("KEEL_PUBLIC_BASE_URL"),
+	})
 	starter := agentext.NewTurnStarter(sessions, kern, hooks, log)
 	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate:    sessions,
@@ -594,7 +612,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Logger:  log,
 	})
 
-	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, subagents, partials, taskLog, log)
+	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, log)
 	if err != nil {
 		return nil, err
 	}
@@ -638,6 +656,8 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			return exists, err
 		},
 		Decisions:     decisions,
+		Approvals:     approvals,
+		Notifications: notifications,
 		Partials:      partials,
 		Plugins:       plugins,
 		PluginManager: manager,
@@ -725,7 +745,7 @@ type pluginSurface struct {
 // It is a constructor rather than inline code so the serving path and its tests
 // share exactly this wiring: the model-side proof that a plugin's prompt
 // section reaches the system prompt rides on these sinks.
-func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence agentext.PluginPersistence, opts serveOptions, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, tasks *tasklog.Service, log *slog.Logger) (*pluginSurface, error) {
+func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence agentext.PluginPersistence, opts serveOptions, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, approvals *approval.Service, notifications *notify.Service, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, tasks *tasklog.Service, log *slog.Logger) (*pluginSurface, error) {
 	builtinManifests, err := builtin.Manifests()
 	if err != nil {
 		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
@@ -757,6 +777,19 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 			return agentext.NewShellPlugin(agentext.ShellOptions{
 				Service:  func() *jobqueue.Manager { return opts.Bash },
 				TenantID: opts.TenantID,
+			})
+		},
+		agentext.ApprovalPluginID: func() *agentext.Plugin {
+			return agentext.NewApprovalPlugin(agentext.ApprovalOptions{
+				Decisions:  decisions,
+				Provenance: approvals,
+				Logger:     log,
+			})
+		},
+		agentext.NotifyPluginID: func() *agentext.Plugin {
+			return agentext.NewNotifyPlugin(agentext.NotifyOptions{
+				Service: notifications,
+				Logger:  log,
 			})
 		},
 	}

@@ -1,0 +1,6 @@
+ok  	github.com/jixoai/keel/internal/approval	(cached)
+ok  	github.com/jixoai/keel/internal/notify	(cached)
+ok  	github.com/jixoai/keel/internal/agentext	20.251s
+ok  	github.com/jixoai/keel/internal/agentapi	5.935s
+ok  	github.com/jixoai/keel/internal/toolsurface	2.066s
+ok  	github.com/jixoai/keel/cmd/keel	5.221s

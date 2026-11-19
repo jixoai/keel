@@ -3,6 +3,7 @@ package agentapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,9 @@ func (s *Server) getDecision(w http.ResponseWriter, r *http.Request) {
 type answerDecisionRequest struct {
 	OptionID string `json:"optionId"`
 	Text     string `json:"text"`
+	// Actor optionally names the human answering (the web app sends no actor;
+	// an authenticated operator UI may). X-Keel-Actor wins when both are set.
+	Actor string `json:"actor,omitempty"`
 }
 
 func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +156,8 @@ func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	bodyActor := body.Actor
+	recordedText := body.Text
 	decision, duplicate, err := s.cfg.Decisions.Answer(r.Context(), agentext.AnswerDecisionRequest{
 		TenantID:   tenantID,
 		SessionID:  sessionID,
@@ -173,11 +179,26 @@ func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"decision":  decision,
 		"duplicate": duplicate,
 		"status":    decision.Status,
-	})
+	}
+	if s.cfg.Approvals != nil && isApprovalDecision(decision) {
+		actor := strings.TrimSpace(r.Header.Get("X-Keel-Actor"))
+		if actor == "" {
+			actor = bodyActor
+		}
+		record, err := s.recordApprovalAnswer(r, decision, actor, recordedText)
+		if err != nil {
+			// The decision is answered durably; the audit is not. Retrying the
+			// same answer is idempotent and writes the missing record.
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		response["provenance"] = record
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func decisionFrom(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {

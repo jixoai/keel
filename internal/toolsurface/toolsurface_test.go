@@ -145,8 +145,6 @@ func TestReservedActionsReturnNotImplemented(t *testing.T) {
 		args   string
 		action string
 	}{
-		{toolsurface.Approve, `{"action":"confirm","prompt":"x"}`, "confirm"},
-		{toolsurface.Notify, `{"action":"push","text":"x"}`, "push"},
 		{toolsurface.Read, `{"path":"a.txt"}`, ""},
 		{toolsurface.Write, `{"path":"a.txt","content":"x"}`, ""},
 		{toolsurface.Edit, `{"path":"a.txt"}`, ""},

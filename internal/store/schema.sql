@@ -711,3 +711,65 @@ CREATE TABLE IF NOT EXISTS task_events (
 );
 
 CREATE INDEX IF NOT EXISTS task_events_task ON task_events (tenant_id, task_id, seq);
+
+-- Approval provenance (change keel-harness-v2, W2.5): who answered an approval
+-- question, from which channel, and whether the answer stayed inside the
+-- declared answer space. The decision lifecycle itself lives in the decision
+-- primitive (tasks rows); this table is the audit projection the HTTP answer
+-- route and the approve tool write, so "who approved this, and how" is a
+-- queryable fact instead of log archaeology.
+CREATE TABLE IF NOT EXISTS approval_provenance (
+    tenant_id    uuid NOT NULL,
+    session_id   uuid NOT NULL,
+    decision_id  uuid NOT NULL,
+    kind         text NOT NULL,
+    mode         text NOT NULL,
+    status       text NOT NULL,
+    option_id    text NOT NULL DEFAULT '',
+    answer_text  text NOT NULL DEFAULT '',
+    validated    boolean NOT NULL DEFAULT false,
+    escape       boolean NOT NULL DEFAULT false,
+    actor        text NOT NULL DEFAULT '',
+    channel      text NOT NULL DEFAULT '',
+    context      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    opened_at    timestamptz,
+    delivered_at timestamptz,
+    answered_at  timestamptz,
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, decision_id),
+    CONSTRAINT approval_provenance_status_check
+        CHECK (status IN ('open', 'answered', 'timed_out', 'cancelled'))
+);
+
+CREATE INDEX IF NOT EXISTS approval_provenance_by_session
+    ON approval_provenance (tenant_id, session_id, updated_at DESC);
+
+-- Notifications (change keel-harness-v2, W2.5): the durable row behind the
+-- `notify` aggregate tool. `notification.ack` and `notification.push_sent` are
+-- the event-ized facts; this row carries the consumer set and the one fallback
+-- push. Consumption tokens are stored only as SHA-256 hashes (the raw token is
+-- returned once, by the push that minted it), and push_attempted_at is the
+-- compare-and-set that makes "push once" survive restarts.
+CREATE TABLE IF NOT EXISTS notifications (
+    tenant_id         uuid NOT NULL,
+    notification_id   uuid NOT NULL,
+    session_id        uuid NOT NULL,
+    title             text NOT NULL DEFAULT '',
+    body              text NOT NULL,
+    status            text NOT NULL DEFAULT 'created',
+    created_at        timestamptz NOT NULL,
+    deadline          timestamptz NOT NULL,
+    consumers         jsonb NOT NULL DEFAULT '[]'::jsonb,
+    push_attempted_at timestamptz,
+    push              jsonb,
+    updated_at        timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, notification_id),
+    CONSTRAINT notifications_status_check
+        CHECK (status IN ('created', 'delivered', 'consumed'))
+);
+
+CREATE INDEX IF NOT EXISTS notifications_by_session
+    ON notifications (tenant_id, session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS notifications_due
+    ON notifications (deadline)
+    WHERE status <> 'consumed' AND push_attempted_at IS NULL;

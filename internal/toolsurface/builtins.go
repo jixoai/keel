@@ -18,6 +18,8 @@ type Backends struct {
 	Creation CreationBackend
 	Tasks    TasksBackend
 	Bash     BashBackend
+	Approve  ApproveBackend
+	Notify   NotifyBackend
 }
 
 // BuiltinNames returns the eleven builtin tool names, sorted.
@@ -40,8 +42,8 @@ func BuiltinTools(discovered []skills.Skill, backends Backends) []agentcore.Agen
 		newSkillsTool(discovered),
 		newTasksTool(backends.Tasks),
 		newAgentTool(backends.Agents),
-		newApproveTool(),
-		newNotifyTool(),
+		newApproveTool(backends.Approve),
+		newNotifyTool(backends.Notify),
 		newCreationTool(backends.Creation),
 	}
 	return wrapWithTaskGate(tools, backends.Tasks)
