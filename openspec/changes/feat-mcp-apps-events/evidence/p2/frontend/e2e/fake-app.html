@@ -28,10 +28,11 @@
   });
 
   const checkIsolation = () => {
-    const result = { cookie: null, parentDom: null, localStorage: null };
+    const result = { cookie: null, parentDom: null, localStorage: null, popupBlocked: null };
     try { result.cookie = document.cookie; } catch (e) { result.cookie = "error:" + e.name; }
     try { result.parentDom = String(parent.document.body.innerText).slice(0, 40); } catch (e) { result.parentDom = "blocked:" + e.name; }
     try { localStorage.getItem("x"); result.localStorage = "readable"; } catch (e) { result.localStorage = "blocked:" + e.name; }
+    try { result.popupBlocked = window.open("/evil.html", "_blank") === null; } catch (e) { result.popupBlocked = "error:" + e.name; }
     state.isolation = result;
     fetch("/cookie-check", { credentials: "include" })
       .then((r) => r.json())

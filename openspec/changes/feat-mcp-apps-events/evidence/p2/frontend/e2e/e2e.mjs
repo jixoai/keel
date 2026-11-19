@@ -1,5 +1,9 @@
-import { chromium } from '/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs';
 import fs from 'node:fs';
+
+const playwright = await import(
+  process.env.PLAYWRIGHT_CORE || '/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs',
+);
+const { chromium } = playwright;
 
 const REPORT = '/tmp/p2fe-e2e/report.json';
 const CONSOLE = '/tmp/p2fe-e2e/console.log';
@@ -143,8 +147,10 @@ try {
     state2.isolation && !String(state2.isolation.cookie).includes('keel_host_secret') &&
     String(state2.isolation.parentDom).startsWith('blocked') &&
     String(state2.isolation.localStorage).startsWith('blocked') &&
+    state2.isolation.popupBlocked === true &&
     !String(state2.cookieCheck?.cookie ?? '').includes('keel_host_secret') &&
     report.documentHeaders.csp?.includes("frame-ancestors 'self'") &&
+    report.documentHeaders.csp?.includes('sandbox allow-scripts') &&
     report.documentHeaders.nosniff === 'nosniff' &&
     report.documentHeaders.referrer === 'no-referrer' &&
     report.navigation && /[?&]reload=\d+/.test(report.navigation.reloadedSrc) &&

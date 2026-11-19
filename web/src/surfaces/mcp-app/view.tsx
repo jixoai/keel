@@ -31,6 +31,12 @@ import {
   type BridgePhase,
   type DisplayMode,
 } from "./bridge";
+import {
+  createReloadBudget,
+  MAX_NAVIGATION_RELOADS,
+  reloadBudgetAuditEntry,
+  type ReloadBudget,
+} from "./reload-budget";
 import { registerWebFrame, webPageOrigin, webTransportAvailable } from "./web-transport";
 
 const INLINE_DEFAULT_HEIGHT = 220;
@@ -69,6 +75,8 @@ interface AppSession {
   instance: string;
   /** A navigation reload is queued (coalesces a sibling load event). */
   reloadScheduled: boolean;
+  /** Automatic navigation reloads allowed for this instance. */
+  budget: ReloadBudget;
   disposed: boolean;
   cleanupRegistered: boolean;
 }
@@ -239,6 +247,7 @@ function createSession(callId: string, props: McpAppViewProps): AppSession {
     bridge: undefined as unknown as AppBridge,
     instance: newInstance(),
     reloadScheduled: false,
+    budget: createReloadBudget(),
     disposed: false,
     cleanupRegistered: false,
   };
@@ -274,13 +283,40 @@ function restartSession(session: AppSession, reload = false): void {
   resetBridge(session, reload ? "文档重新加载" : "实例重建");
 }
 
-/** Coalesce a navigation's load + URL events into one reload. */
+/** Stop a self-navigating app: no new instance, the text fallback stays, and
+ * the host records a query-free `protocol.violation` audit entry. */
+function stopForReloadBudget(session: AppSession): void {
+  const failure: BridgeFailure = {
+    kind: "protocol",
+    message: `交互界面反复重载（超过 ${MAX_NAVIGATION_RELOADS} 次），已停止`,
+  };
+  session.bridge.destroy(failure);
+  session.signals.setPhase("destroyed");
+  session.signals.setDiagnostic(failure);
+  const sessionId = store.activeId();
+  void store.reportMcpAppViolation(
+    reloadBudgetAuditEntry(
+      session.live.app.appId,
+      session.live.app.server,
+      sessionId ?? undefined,
+    ),
+  );
+}
+
+/** Coalesce a navigation's load + URL events into one reload, within the
+ * instance's budget. */
 function scheduleReload(session: AppSession): void {
   if (session.reloadScheduled || session.disposed) return;
   session.reloadScheduled = true;
-  console.warn(`[mcp-app ${session.live.app.appId}] 文档导航/重载：丢弃旧实例并重新握手`);
   setTimeout(() => {
-    if (!session.disposed) restartSession(session, true);
+    if (session.disposed) return;
+    session.reloadScheduled = false;
+    if (session.budget.consume() === "exhausted") {
+      stopForReloadBudget(session);
+      return;
+    }
+    console.warn(`[mcp-app ${session.live.app.appId}] 文档导航/重载：丢弃旧实例并重新握手`);
+    restartSession(session, true);
   }, 0);
 }
 
@@ -418,7 +454,15 @@ export function McpAppView(props: McpAppViewProps) {
     }
   };
 
+  /** URL-level navigation defense for **native** targets (macOS/Windows/Linux/
+   * iOS/Android): those WebViews report the real navigation URL, so a mismatch
+   * against the app document is a second line behind the load restart. On the
+   * **web** target this handler is inert by design: NSH's `webNavigation`
+   * always reports the URL the view was given (the browser hides in-frame
+   * navigations), so a self-navigation still reports the original URL here.
+   * The load-event restart above is the defense that actually works on web. */
   const onFrameNavigation = (event: { url?: string }) => {
+    if (platform.os === "web") return;
     const expected = url();
     const actual = typeof event?.url === "string" ? event.url : "";
     if (!expected || !actual) return;
@@ -535,7 +579,10 @@ export function McpAppView(props: McpAppViewProps) {
         icon="refresh"
         label="重试"
         accessibilityLabel="重试交互界面"
-        onPress={() => restartSession(session, true)}
+        onPress={() => {
+          session.budget = createReloadBudget();
+          restartSession(session, true);
+        }}
       />
     </View>
   );

@@ -493,6 +493,18 @@ export interface McpAppToolResult {
   details?: unknown;
 }
 
+/** One best-effort audit write for an app protocol violation. `detail` is a
+ * bounded summary: no URL query, no message body, no credential (the server's
+ * audit table shape is `mcp_app_audit`; P3.7 wires the durable store). */
+export interface McpAppAuditEntry {
+  appId: string;
+  server?: string;
+  sessionId?: string;
+  action: "protocol.violation";
+  result: "refused";
+  detail: string;
+}
+
 /** The settings face of a transport. Both `KeelHttp` and the fixture client
  * implement it, so the settings screens and the session picker work against
  * the same store in live and fixture mode. */

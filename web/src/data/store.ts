@@ -21,6 +21,7 @@ import type {
   Delivery,
   EventSource,
   FireResultView,
+  McpAppAuditEntry,
   McpAppCatalogueView,
   McpAppToolResult,
   ModelsSettingsView,
@@ -87,6 +88,9 @@ interface Client extends SettingsApi {
    * the app host then shows its readable fallback instead of rows it did not
    * read. */
   mcpApps?(): Promise<McpAppCatalogueView>;
+  /** Best-effort audit write for an app protocol violation (P3.7 wires the
+   * durable store; a transport without it returns false). */
+  auditMcpApp?(entry: McpAppAuditEntry): Promise<boolean>;
   listSessions(limit?: number): Promise<SessionSummary[]>;
   createSession(): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
@@ -1211,6 +1215,18 @@ class KeelStore {
       throw new Error("此传输不提供 MCP Apps 目录");
     }
     return client.mcpApps();
+  }
+
+  /** Best effort: a deployment without `/v1/mcp/apps/audit` (P3.7) answers a
+   * refusal; the caller's UI must not change because of it. */
+  async reportMcpAppViolation(entry: McpAppAuditEntry): Promise<boolean> {
+    const client = this.client;
+    if (!client?.auditMcpApp) return false;
+    try {
+      return await client.auditMcpApp(entry);
+    } catch {
+      return false;
+    }
   }
 
   decisionTimeout(decisionId: string): number | undefined {

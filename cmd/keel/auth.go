@@ -240,6 +240,10 @@ func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Invariant: the session cookie is SameSite=Lax or Strict, never None.
+	// A sandboxed MCP App frame's credentialed fetch is cross-site; a
+	// SameSite=None cookie would be attached to it (the sandbox does not
+	// filter network-layer cookies), while Lax keeps the session off it.
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
 		Value:    h.issueCookie(h.cfg.TenantID),

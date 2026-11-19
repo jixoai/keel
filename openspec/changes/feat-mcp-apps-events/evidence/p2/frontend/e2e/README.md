@@ -28,16 +28,15 @@ nsh package --target web -o dist/web/keel
 #    换机器/换 worktree 时改 ROOT 这一个常量。
 cd ../openspec/changes/feat-mcp-apps-events/evidence/p2/frontend/e2e
 node server.mjs &                       # 127.0.0.1:13679
-node e2e.mjs                            # exit 0 = pass；playwright-core 路径在文件首行
+PLAYWRIGHT_CORE=/path/to/playwright-core/index.mjs node e2e.mjs   # exit 0 = pass
 
 # 3) 清理
 kill %1
 ```
 
-`e2e.mjs` 顶部用绝对路径引用 npx 缓存里的 `playwright-core`（本机
-`/Users/kzf/.npm/_npx/e41f203b7505b1fb/node_modules/playwright-core`）；换成
-`NODE_PATH` 或 `npm i playwright-core` 亦可。浏览器用系统 Chrome
-（`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`）。
+`e2e.mjs` 用 `PLAYWRIGHT_CORE` 指定 `playwright-core` 的入口
+（`.../playwright-core/index.mjs`）；未设置时回落到本机 npx 缓存路径。浏览器用系统
+Chrome（`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`）。
 
 ## 关键实测结论
 
@@ -48,7 +47,8 @@ kill %1
   `instance` nonce 的 iframe）。
 - srcdoc wrapper 方案被 `frame-ancestors 'self'` 阻断（不透明 wrapper 祖先）；见
   `../gates.md` 的实测记录。
-- iframe sandbox 现状：`allow-forms allow-popups allow-popups-to-escape-sandbox
+- 文档 CSP 含 `sandbox allow-scripts`（与后端 `internal/mcphost/csp.go` 一致），与 iframe
+  sandbox 属性取交集；`window.open` 返回 null（popup 被阻断）。iframe sandbox 属性现状：`allow-forms allow-popups allow-popups-to-escape-sandbox
   allow-modals allow-downloads allow-scripts`，**无** `allow-same-origin`；
   `document.cookie`/`parent.document`/`localStorage` 均 `SecurityError`，
   `cookie-check` 到达服务器时 `cookie=""`。

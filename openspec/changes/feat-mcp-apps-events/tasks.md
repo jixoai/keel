@@ -74,10 +74,15 @@
       URL 形态 WebView；View→Host 走页面 `window.top` 监听 + `event.source`↔`instance` nonce，
       Host→View 走 `WebViewRef.postMessage`；断言 initialize→tool-input→tool-result→size-changed
       （360px）、sandbox 无 `allow-same-origin`、CSP 四个头、cookie/DOM/localStorage 隔离。
-      `bridge.test.ts` 18/18、TUI 141/141。**偏离**：NSH 0.4.0 的 WebView 无 sandbox prop，
-      web 运行时固定加 `allow-forms/popups/popups-to-escape-sandbox/modals/downloads`
-      （同源 src 仍无 `allow-same-origin` → opaque origin）；登记在
-      `evidence/p2/frontend/gates.md` §偏离 1。srcdoc wrapper 方案被文档
+      **卫生项**：web 的 `onNavigationStateChange` 空转已显式标注（web 只靠 load 防线；原生两条
+      都真实）；每实例 10 次导航重载预算，超出销毁+文本兜底+诊断并尽力 POST
+      `/v1/mcp/apps/audit`（`protocol.violation`，detail 无 query；P3.7 前 404 被吞）；文档 CSP
+      的 `sandbox allow-scripts` 与 iframe 属性取交集，E2E 断言 `window.open` 被阻断。
+      `bridge.test.ts` 18/18、`reload-budget.test.ts` 4/4、TUI 145/145。**偏离**：NSH 0.4.0 无
+      sandbox prop，web 运行时属性固定加
+      `allow-forms/popups/popups-to-escape-sandbox/modals/downloads`（同源 src 仍无
+      `allow-same-origin` → opaque origin）；CSP `sandbox allow-scripts` 已把有效权限收紧，
+      字面值偏离登记在 `evidence/p2/frontend/gates.md` §偏离 1。srcdoc wrapper 方案被文档
       `frame-ancestors 'self'` 阻断（实测），故采用 URL 形态 + 页面监听。）
 - [x] P2.7 `messages.tsx` 的 `ToolRow` 挂载（`details.app` + 能力位）；保留文本兜底可展开；
       按 `toolCallId` 复用实例（防流式重渲染重建 iframe）
@@ -92,7 +97,8 @@
       （2026-11-20 服务端部分已交付：无 apps 服务器=空目录、取回/校验/超限/缓存失败=诊断+审计+排除目录、
       重取失败保留旧版本、app 绑定按已发布目录门控（无半成品 app）；前端部分已交付：无能力/终端=
       文本+标题+链接、目录失败/握手超时/协议违规/加载失败=文本+原因+重试（`bridge.test.ts` 逐格、
-      TUI 用例一格、浏览器 E2E 含导航降级一格）。剩余：审计表 `mcp_app_audit`（P3.7）与
+      TUI 用例一格、浏览器 E2E 含导航降级一格；重载预算耗尽会尽力写
+      `protocol.violation` 审计）。剩余：审计表 `mcp_app_audit` 的 durable 落库（P3.7）与
       P6.3 的独立降级 E2E，故本项仍未勾）
 
 ## P3 — 桥与出站动作

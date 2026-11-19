@@ -20,7 +20,10 @@
 | Host → View | `WebViewRef.postMessage(string)` → NSH URL 形态的 `frame.contentWindow.postMessage` |
 | View → Host | app 文档 `parent.postMessage` 到页面 window；app 的 JS realm 与页面同源，在 `window.top` 上注册一个监听器，用 `event.source` 匹配 `top.document.querySelectorAll("iframe")` 中 `src` 带同一 `instance` nonce 的那一帧，再交给该实例的桥 |
 | origin 校验 | 只接受 `event.origin === "null"`（sandbox 的不透明来源）；具体 origin 的帧一律不路由 |
-| 导航防线 | `onLoad` 在 bridge 已 `initialized`（或已开始握手）后再次触发 → 销毁实例、`reload` 计数 +1、重新加载**宿主自己的**文档 URL；`onNavigationStateChange` 的 URL 与期望文档（origin+pathname）不一致 → 同样销毁重载；重复 `ui/initialize` → `-32602` + 协议销毁 |
+| 导航防线（web） | **只有 load 事件防线真实生效**：`onLoad` 在 bridge 已 `initialized`（或已开始握手）后再次触发 → 销毁实例、`reload` 计数 +1、重新加载**宿主自己的**文档 URL。NSH web 的 `onNavigationStateChange` 恒报挂载 URL（自导航后仍报原 URL），`onFrameNavigation` 在 web 上显式 `return`，注释写明它是原生防线。|
+| 导航防线（原生） | `onLoad` 重载 + `onNavigationStateChange` 的 URL（origin+pathname）与期望文档不一致 → 销毁重载；两条都真实。重复 `ui/initialize` → `-32602` + 协议销毁。|
+| 重载预算 | 每实例 10 次自动导航重载；第 11 次拒绝：销毁实例、定格文本兜底、诊断 `protocol`，并尽力 `POST /v1/mcp/apps/audit` 写 `protocol.violation/refused`（detail 无 URL query；路由 P3.7 前 404 被吞）。手动重试重置预算。|
+| cookie invariant | `cmd/keel/auth.go`：会话 cookie 恒 `SameSite=Lax`（注释写明绝不 None——opaque 帧的带凭据 fetch 是跨站，sandbox 不过滤网络层 cookie）。 |
 
 **为什么不用 srcdoc wrapper**（复核建议的形态）：NSH 的 `html` 形态强制 sandbox 无
 `allow-same-origin`，wrapper 是不透明来源；内层 iframe 指向宿主的 app 文档时，文档响应的
@@ -56,9 +59,12 @@ initialized，而重复 initialize 会被销毁）。E2E 的 `/evil.html` 尝试
      `cookie=""`（网络日志实证，不发送宿主 cookie）；
   6. 自导航到 `/evil.html` 后：宿主加载 `…&reload=1` 的 app 文档并重新握手
      （`tool-input`/`tool-result` 再次到达），`/evil.html` 未获得任何 `ui/notifications/tool-*`；
-  7. 文档响应头逐项断言（CSP 含 `frame-ancestors 'self'`、`nosniff`、`no-referrer`、
+  7. 文档 CSP 含 `sandbox allow-scripts`（与后端 `internal/mcphost/csp.go` 一致），与 iframe
+     sandbox 属性取交集：app 内 `window.open` 返回 null（popup 被阻断）；
+  8. 文档响应头逐项断言（CSP 含 `frame-ancestors 'self'` / `sandbox allow-scripts`、`nosniff`、`no-referrer`、
      `text/html;profile=mcp-app`、hash、immutable）。
-- 证据文件：`e2e/report.json`、`e2e/console.txt`（只有一条导航重载的 `warning` = 预期）、
+- 证据文件：`e2e/report.json`、`e2e/console.txt`（导航重载的 `warning` 与 popup 被 CSP sandbox
+  阻断的浏览器告警 = 预期）、
   `e2e/server-headers.txt`、`e2e/after.png`、`e2e/fake-app.html`、`e2e/evil.html`、
   `e2e/server.mjs`、`e2e/e2e.mjs`。
 - 复跑：
@@ -75,13 +81,14 @@ initialized，而重复 initialize 会被销毁）。E2E 的 `/evil.html` 尝试
 | # | 命令（cwd `web/`） | exit | 结果 |
 |---|---|---|---|
 | G1 | `nsh check` | **0** | 类型检查通过 |
-| G2 | `nsh test --target tui` | **0** | **141 tests: 141 passed, 0 failed** |
+| G2 | `nsh test --target tui` | **0** | **145 tests: 145 passed, 0 failed** |
 | G3 | `nsh test --target tui src/surfaces/mcp-app/bridge.test.ts` | **0** | **18 tests**（含 200 帧/s 限速） |
 | G4 | `nsh test --target tui src/data/mcp-apps.test.ts` | **0** | **8 tests**（绝对 URL/instance/reload/凭据拒绝） |
 | G5 | `nsh test --target tui src/data/capabilities.test.ts` | **0** | **4 tests**（未注册特性 = false、部署半门） |
-| G6 | `nsh build` | **0** | `App.tsx → .nsh/out`（942.3 KB js / 3.1 MB bytecode） |
+| G5b | `nsh test --target tui src/surfaces/mcp-app/reload-budget.test.ts` | **0** | **4 tests**（10 次允许/第 11 次拒绝、上限可配、循环停止、审计 detail 无 query） |
+| G6 | `nsh build` | **0** | `App.tsx → .nsh/out`（945.2 KB js / 3.1 MB bytecode） |
 | G7 | `nsh package --target web -o dist/web/keel` | **0** | 10.3 MB |
-| G8 | 真实浏览器 E2E `node e2e/e2e.mjs` | **0** | `pass: true`（连续 3 次） |
+| G8 | `PLAYWRIGHT_CORE=<.../playwright-core/index.mjs> node e2e/e2e.mjs` | **0** | `pass: true`（显式 env；含 popup 阻断与 CSP sandbox） |
 | G9 | `node scripts/kit-imports.mjs --web web` | **1** | 仅 `web/src/ui/kit/components/styles.tsx:30` 的基线已有 raw-color；本切片无新增 |
 | G10 | `openspec validate feat-mcp-apps-events --strict` | **0** | valid |
 
@@ -89,7 +96,7 @@ initialized，而重复 initialize 会被销毁）。E2E 的 `/evil.html` 尝试
 
 仓库文档的跑法是 `nsh test --target tui`。headless 引擎是桌面 idiom，会走 WebView/目录路径；
 5 条既有失败在基线 `1f2418c` 上同样存在（本会话已逐一复跑确认），新增的 TUI 用例在 headless
-下的差异是「没有 terminal idiom」的必然结果，不改变 `--target tui` 的 141/141。
+下的差异是「没有 terminal idiom」的必然结果，不改变 `--target tui` 的 145/145。
 
 ## NSH API 选择（复核后）
 
@@ -113,14 +120,33 @@ initialized，而重复 initialize 会被销毁）。E2E 的 `/evil.html` 尝试
 - fixture：app 条目带诊断「文档路径由浏览器 E2E 服务器提供；普通 dev server 没有该路由」，
   浏览器回退按真实加载/授权/超时原因呈现，不伪造「没有文档」。
 
+## 复核 P2 卫生项（本批）
+
+1. **web 导航空转已标注**：`view.tsx` 的 `onFrameNavigation` 在 `platform.os === "web"` 时
+   直接返回并写明原因（NSH web 恒报挂载 URL；web 真正生效的是 load 事件防线）。原生 target
+   两条防线都真实。E2E 的 `/evil.html` 重载由 load 防线触发（服务器日志实证）。
+2. **重载预算 + 审计**：`reload-budget.ts`（默认 10 次，单测 2 条）；第 11 次销毁实例、定格
+   文本兜底、诊断 `protocol`，并 `POST /v1/mcp/apps/audit` 写
+   `{action:"protocol.violation", result:"refused", detail:"reload budget exhausted (10)"}`
+   （detail 无 URL query；P3.7 前路由 404，失败被吞、不影响 UI）。手动重试重置预算。
+3. **cookie invariant**：`cmd/keel/auth.go` 注释写明会话 cookie 恒 `SameSite=Lax`/`Strict`，
+   绝不 `None`；行为未改。
+4. **陈旧证据**：`merged-verification.txt` 头部加
+   `Superseded by fix-merged-verification.txt（web 传输 P0 修复，f55d290）`，原文保留作历史。
+5. **E2E 可复跑**：`e2e.mjs` 改为
+   `PLAYWRIGHT_CORE=/path/to/playwright-core/index.mjs node e2e.mjs`（未设置时回落本机 npx
+   路径）；本批用显式 env 重跑，`pass:true`。
+
 ## 已知偏离 / 未决（诚实清单）
 
-1. **sandbox 属性无法精确为 `allow-scripts`**：NSH 0.4.0（bba76ef nightly）的 web 运行时固定加
-   `allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads`
-   （`html` 再加 `allow-scripts`），没有 `sandbox` prop；同源 `src` 确实**不加**
-   `allow-same-origin`（E2E 断言 opaque origin：cookie/DOM/localStorage 全部 SecurityError）。
-   `allow-popups-to-escape-sandbox` 比 spec MUST NOT 列表更危险，建议向 NSH 提交「sandbox 可配置
-   / 去掉 escape token」。
+1. **sandbox 属性的字面值无法精确为 `allow-scripts`（但有效权限已被 CSP 收紧）**：
+   NSH 0.4.0（bba76ef nightly）的 web 运行时固定加 `allow-forms allow-popups
+   allow-popups-to-escape-sandbox allow-modals allow-downloads`（`html` 再加 `allow-scripts`），
+   没有 `sandbox` prop；同源 `src` 确实**不加** `allow-same-origin`（E2E 断言 opaque origin：
+   cookie/DOM/localStorage 全部 SecurityError）。后端文档 CSP 自带 `sandbox allow-scripts`
+   （`internal/mcphost/csp.go`），与 iframe 属性取**限制交集**，E2E 断言 `window.open` 返回
+   null。因此有效权限 = allow-scripts；仍建议 NSH 上游提供 `sandbox` prop（属性字面值可审计、
+   直接打开文档也一致），这是 defense-in-depth 而非当前越权。
 2. **第二 origin 双 iframe 未做**（design 暂缓 c）：web 始终用同源文档（跨源直接 `src` 会被
    `frame-ancestors 'self'` 阻断；srcdoc wrapper 实测同样被阻断）。`sandboxOrigin` 只在桌面/
    移动作为绝对地址基座。

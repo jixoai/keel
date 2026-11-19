@@ -1,3 +1,5 @@
+Superseded by fix-merged-verification.txt（web 传输 P0 修复，f55d290）
+
 # P2 前端合入后的合并树门禁（主代理复跑，2026-11-20）
 
 对象：集成分支 `task/keel-harness-v2` @ `130c74d`（cherry-pick `d46fd30`，无冲突）。

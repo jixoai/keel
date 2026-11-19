@@ -1,1 +1,5 @@
+error: Blocked opening 'http://127.0.0.1:13679/evil.html' in a new window because the request was made in a sandboxed frame whose 'allow-popups' permission is not set.
+error: Blocked opening 'http://127.0.0.1:13679/evil.html' in a new window because the request was made in a sandboxed frame whose 'allow-popups' permission is not set.
 warning: [mcp-app mcpapp_0123456789abcdef] 文档导航/重载：丢弃旧实例并重新握手
+error: Blocked opening 'http://127.0.0.1:13679/evil.html' in a new window because the request was made in a sandboxed frame whose 'allow-popups' permission is not set.
+error: Blocked opening 'http://127.0.0.1:13679/evil.html' in a new window because the request was made in a sandboxed frame whose 'allow-popups' permission is not set.

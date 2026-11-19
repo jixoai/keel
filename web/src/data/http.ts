@@ -19,6 +19,7 @@ import type {
   Delivery,
   EventSource,
   FireResultView,
+  McpAppAuditEntry,
   McpAppCatalogueView,
   MediaCapabilitiesView,
   MediaCapabilityStatus,
@@ -561,6 +562,23 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
   async mcpApps(): Promise<McpAppCatalogueView> {
     const response = await this.request("/v1/mcp/apps");
     return parseMcpAppCatalogue(await response.json());
+  }
+
+  /** Best-effort audit write (P3.7's durable store is not wired yet): a
+   * deployment without the route answers 404/405, which is reported as `false`
+   * and never blocks the UI. `detail` comes from the caller and carries no URL
+   * query. */
+  async auditMcpApp(entry: McpAppAuditEntry): Promise<boolean> {
+    try {
+      await this.request("/v1/mcp/apps/audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry),
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ---- sessions ---------------------------------------------------------
