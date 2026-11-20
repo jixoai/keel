@@ -37,6 +37,7 @@ import { LoginScreen } from "./src/screens/login";
 import { SessionModelChip, SessionModelPicker } from "./src/screens/model-picker";
 import { PluginsScreen } from "./src/screens/plugins";
 import { SessionList } from "./src/screens/session-list";
+import { SessionModelFacts, SessionTeamChip, SessionTeamFacts, SessionTeamRosterDialog } from "./src/screens/session-team";
 import { SessionStatusPane } from "./src/screens/session-status-pane";
 import { SettingsScreen } from "./src/screens/settings";
 import { restoreAppearance } from "./src/ui/appearance";
@@ -259,7 +260,7 @@ function WorkspaceHeader() {
           so it keeps at least this much and the row's other occupants give way
           (the state word drops at the single column, the model chip becomes an
           icon there) instead of the title collapsing into "…". */}
-      <View style={{ flex: 1, minWidth: 120 }}>
+      <View style={{ flex: 1, minWidth: 120, flexDirection: "column", gap: space.xxs }}>
         <Text
           testID="workspace-header-title"
           style={{
@@ -272,6 +273,13 @@ function WorkspaceHeader() {
         >
           {headerTitle()}
         </Text>
+        {/* A team session's team name, captain and running model, or a
+            standard session's running model at the single column (where its
+            chip is icon-only): one quiet line under the title, so the header's
+            horizontal room is spent on the controls, not on more pills. At the
+            wide column a standard session's model is the chip itself. */}
+        <SessionTeamFacts compact={singleColumn()} />
+        <SessionModelFacts compact={singleColumn()} />
       </View>
       {/* The state word is the row's first concession: at the single column it
           goes (the run state still rides the pane and each row), so the title
@@ -283,17 +291,26 @@ function WorkspaceHeader() {
           label={runStateLabel[conversationState(store.conversation())]}
         />
       </If>
-      {/* The model chip: its full label at the wide column; an icon-only button
-          at the single column (the zcode mobile form), with the model's name in
-          its accessibility label. A terminal keeps the text form — an icon-only
-          view has no characters there — and the TUI acceptance reads the same
-          label it always did. */}
+      {/* The model/team chip: a standard session shows the model its next
+          input runs; a team session shows the team (the team's captain and
+          model are the title's second line) and the roster entry. The single
+          column uses the compact form so back + title + two entries still fit
+          one row: icons on a drawn platform, short text on a terminal (an
+          icon-only view has no characters there, and the TUI acceptance reads
+          the same labels). */}
       <If when={!!store.activeId()}>
-        <If
-          when={singleColumn() && platform.idiom !== "terminal"}
-          else={<SessionModelChip />}
-        >
-          <SessionModelChip iconOnly />
+        <If when={!!store.sessionTeam()} else={
+          <If
+            when={singleColumn() && platform.idiom !== "terminal"}
+            else={<SessionModelChip />}
+          >
+            <SessionModelChip iconOnly />
+          </If>
+        }>
+          <SessionTeamChip
+            compact={singleColumn()}
+            iconOnly={singleColumn() && platform.idiom !== "terminal"}
+          />
         </If>
       </If>
       <If when={sidePaneFits()}>
@@ -478,6 +495,7 @@ function App() {
       <NoticeToasts />
       <DeleteConfirm />
       <SessionModelPicker />
+      <SessionTeamRosterDialog />
       {/* The global palette: mounted at the root so Mod+K opens it over every
           route, and a choice can leave the settings/plugin page for the
           workspace. It opens a session through the same `selectSession` the

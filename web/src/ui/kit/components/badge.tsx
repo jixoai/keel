@@ -12,6 +12,8 @@
 // | disabled | boolean? | false | only meaningful with `onPress` |
 // | accessibilityLabel | string? | label | what screen readers say |
 // | testID | string? | – | `id:` selector for tests |
+// | truncate | boolean? | false | one line, ellipsis: a badge wider than its
+// |          |          |       | column shrinks instead of overflowing it |
 //
 // States: default · hover (when pressable) · disabled (dimmed, unfocusable) ·
 // empty (`label`/`children` absent renders the outline only). TUI: one short
@@ -71,6 +73,7 @@ export function Badge(props: {
   disabled?: boolean;
   accessibilityLabel?: string;
   testID?: string;
+  truncate?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const variant = () => props.variant ?? "default";
@@ -98,6 +101,7 @@ export function Badge(props: {
           backgroundColor: tint().face,
           borderWidth: 1,
           borderColor: tint().border,
+          ...(props.truncate === true ? { flexShrink: 1, minWidth: 0 } : null),
         },
         props.disabled ? { opacity: 0.5 } : null,
         props.style ?? null,
@@ -105,7 +109,18 @@ export function Badge(props: {
     >
       {props.icon ? <Icon name={props.icon} size={11} tint={tint().ink} /> : null}
       {props.label ? (
-        <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: tint().ink }}>{props.label}</Text>
+        <Text
+          style={{
+            fontSize: typeScale.sm,
+            fontWeight: weight.medium,
+            color: tint().ink,
+            ...(props.truncate === true
+              ? { numberOfLines: 1, textOverflow: "ellipsis", flexShrink: 1, minWidth: 0 }
+              : null),
+          }}
+        >
+          {props.label}
+        </Text>
       ) : null}
       {props.children}
     </View>

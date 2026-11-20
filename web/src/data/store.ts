@@ -283,6 +283,10 @@ class KeelStore {
   readonly agents = signal<AgentView[]>([]);
   readonly agentsLoading = signal(false);
   readonly agentsError = signal<string | null>(null);
+  /** The transport's status behind `agentsError` (null for a lost network).
+   * 403 has its own face on the section (`permission`), so it must not be
+   * guessed from a localized message. */
+  readonly agentsErrorStatus = signal<number | null>(null);
   readonly agentsSaving = signal(false);
   /** A create/update/delete refusal (the server's reason, kept next to the
    * form so the reader's input is still there). */
@@ -292,6 +296,9 @@ class KeelStore {
   readonly teams = signal<AgentTeamView[]>([]);
   readonly teamsLoading = signal(false);
   readonly teamsError = signal<string | null>(null);
+  /** As `agentsErrorStatus`: the 403 face is driven by the status, not a
+   * message match. */
+  readonly teamsErrorStatus = signal<number | null>(null);
   readonly teamsSaving = signal(false);
   readonly teamsActionError = signal<string | null>(null);
 
@@ -832,11 +839,13 @@ class KeelStore {
     if (this.agentsLoading()) return;
     this.agentsLoading.set(true);
     this.agentsError.set(null);
+    this.agentsErrorStatus.set(null);
     try {
       const view = await this.teamTransport().listAgents();
       this.agents.set(view.agents ?? []);
     } catch (error) {
       this.agentsError.set(messageOf(error));
+      this.agentsErrorStatus.set(error instanceof KeelApiError ? error.status : null);
     } finally {
       this.agentsLoading.set(false);
     }
@@ -892,11 +901,13 @@ class KeelStore {
     if (this.teamsLoading()) return;
     this.teamsLoading.set(true);
     this.teamsError.set(null);
+    this.teamsErrorStatus.set(null);
     try {
       const view: AgentTeamsResponse = await this.teamTransport().listTeams();
       this.teams.set(view.teams ?? []);
     } catch (error) {
       this.teamsError.set(messageOf(error));
+      this.teamsErrorStatus.set(error instanceof KeelApiError ? error.status : null);
     } finally {
       this.teamsLoading.set(false);
     }
@@ -1003,9 +1014,11 @@ class KeelStore {
     this.fireOutcome.set(null);
     this.agents.set([]);
     this.agentsError.set(null);
+    this.agentsErrorStatus.set(null);
     this.agentsActionError.set(null);
     this.teams.set([]);
     this.teamsError.set(null);
+    this.teamsErrorStatus.set(null);
     this.teamsActionError.set(null);
   }
 

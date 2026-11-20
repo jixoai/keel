@@ -1,0 +1,2 @@
+✓ built App.tsx (503.7 KB js, 630.7 KB bytecode, 189ms)
+✓ packaged .nsh/out/Keel, 10.3 MB (23.4s)

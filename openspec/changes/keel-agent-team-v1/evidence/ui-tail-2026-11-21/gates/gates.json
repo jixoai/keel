@@ -1,0 +1,21 @@
+{
+  "change": "keel-agent-team-v1",
+  "lane": "H2C2",
+  "date": "2026-11-21",
+  "commands": [
+    { "cmd": "cd web && nsh check", "exit": 0, "log": "gates/check.txt" },
+    { "cmd": "cd web && nsh test --target tui", "exit": 0, "result": "198 passed, 0 failed", "log": "gates/tui-full.txt" },
+    { "cmd": "cd web && nsh test --target tui src/screens/settings-agents.test.tsx", "exit": 0, "result": "12 passed, 0 failed", "log": "gates/settings-agents.txt" },
+    { "cmd": "cd web && nsh test --target tui src/screens/settings-teams.test.tsx", "exit": 0, "result": "11 passed, 0 failed", "log": "gates/settings-teams.txt" },
+    { "cmd": "cd web && nsh test --target tui src/screens/session-team.test.tsx", "exit": 0, "result": "5 passed, 0 failed", "log": "gates/session-team.txt" },
+    { "cmd": "cd web && nsh build", "exit": 0, "log": "gates/build.txt" },
+    { "cmd": "cd web && nsh package --target web", "exit": 0, "log": "gates/package-web.txt" }
+  ],
+  "browser": {
+    "cmd": "nsh run --target web --port 13680; node .../browser-check.mjs",
+    "viewport": ["390x844", "1280x900"],
+    "pass": true,
+    "checks": "checks.json",
+    "screenshots": "screenshots/"
+  }
+}

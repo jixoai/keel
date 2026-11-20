@@ -1,0 +1,392 @@
+{
+  "base": "http://127.0.0.1:13680/?fixture=1",
+  "generatedAt": "2026-11-20T14:10:44.395Z",
+  "states": {
+    "agents.loading": "TUI gate: settings-agents.test.tsx › 加载态（骨架 + 主操作禁用）",
+    "agents.empty": "TUI gate: settings-agents.test.tsx › 空态",
+    "agents.error": "TUI gate: settings-agents.test.tsx › 错误态（500，原因逐字）",
+    "agents.permission": "TUI gate: settings-agents.test.tsx › 权限不足（403 独立面）",
+    "agents.success": "browser: 05-settings-agents-390.png / 12-settings-agents-1280.png",
+    "agents.editor.file": "browser: 07-agent-editor-file-390.png / 13-agent-editor-file-1280.png",
+    "agents.editor.validation": "browser: 08-agent-editor-file-error-390.png",
+    "agents.saving": "TUI gate: settings-agents.test.tsx › 保存中（字段锁定）",
+    "agents.save-failed": "TUI gate: settings-agents.test.tsx › 保存失败（输入保留）",
+    "teams.loading": "TUI gate: settings-teams.test.tsx › 加载态",
+    "teams.empty": "TUI gate: settings-teams.test.tsx › 空态",
+    "teams.error": "TUI gate: settings-teams.test.tsx › 错误态（500）",
+    "teams.permission": "TUI gate: settings-teams.test.tsx › 权限不足（403）",
+    "teams.success": "browser: 09-settings-teams-390.png",
+    "teams.saving": "TUI gate: settings-teams.test.tsx › 保存中",
+    "teams.save-failed": "TUI gate: settings-teams.test.tsx › 保存失败",
+    "header.standard": "browser: 01-session-standard-390.png / 10-session-standard-1280.png",
+    "header.team": "browser: 03-session-team-390.png / 11-session-team-1280.png",
+    "header.roster.loading": "TUI gate: session-team.test.tsx › 加载态",
+    "header.roster.empty": "TUI gate: session-team.test.tsx › 只有队长",
+    "header.roster.error": "TUI gate: session-team.test.tsx › 错误态",
+    "header.roster.permission": "TUI gate: session-team.test.tsx › 403",
+    "header.roster.success": "browser: 04-team-roster-390.png"
+  },
+  "viewports": {
+    "390x844·standard header": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": {
+        "left": 12,
+        "right": 378,
+        "top": 7,
+        "bottom": 41,
+        "width": 366,
+        "height": 34
+      },
+      "title": {
+        "left": 48,
+        "right": 342,
+        "top": 7,
+        "bottom": 24,
+        "width": 294,
+        "height": 17
+      },
+      "modelChip": {
+        "left": 350,
+        "right": 378,
+        "top": 10,
+        "bottom": 38,
+        "width": 28,
+        "height": 28
+      },
+      "members": null,
+      "facts": null,
+      "modelFacts": {
+        "left": 48,
+        "right": 342,
+        "top": 26,
+        "bottom": 41,
+        "width": 294,
+        "height": 15
+      },
+      "agentCard": null,
+      "teamCard": null
+    },
+    "390x844·team header": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": {
+        "left": 12,
+        "right": 378,
+        "top": 7,
+        "bottom": 41,
+        "width": 366,
+        "height": 34
+      },
+      "title": {
+        "left": 48,
+        "right": 308,
+        "top": 7,
+        "bottom": 24,
+        "width": 260,
+        "height": 17
+      },
+      "modelChip": {
+        "left": 316,
+        "right": 344,
+        "top": 10,
+        "bottom": 38,
+        "width": 28,
+        "height": 28
+      },
+      "members": {
+        "left": 350,
+        "right": 378,
+        "top": 10,
+        "bottom": 38,
+        "width": 28,
+        "height": 28
+      },
+      "facts": {
+        "left": 48,
+        "right": 308,
+        "top": 26,
+        "bottom": 41,
+        "width": 260,
+        "height": 15
+      },
+      "modelFacts": null,
+      "agentCard": null,
+      "teamCard": null
+    },
+    "390x844·team roster": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": {
+        "left": 12,
+        "right": 378,
+        "top": 7,
+        "bottom": 41,
+        "width": 366,
+        "height": 34
+      },
+      "title": {
+        "left": 48,
+        "right": 308,
+        "top": 7,
+        "bottom": 24,
+        "width": 260,
+        "height": 17
+      },
+      "modelChip": {
+        "left": 316,
+        "right": 344,
+        "top": 10,
+        "bottom": 38,
+        "width": 28,
+        "height": 28
+      },
+      "members": {
+        "left": 350,
+        "right": 378,
+        "top": 10,
+        "bottom": 38,
+        "width": 28,
+        "height": 28
+      },
+      "facts": {
+        "left": 48,
+        "right": 308,
+        "top": 26,
+        "bottom": 41,
+        "width": 260,
+        "height": 15
+      },
+      "modelFacts": null,
+      "agentCard": null,
+      "teamCard": null
+    },
+    "390x844·settings agents": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": {
+        "left": 102,
+        "right": 356,
+        "top": 207,
+        "bottom": 347,
+        "width": 254,
+        "height": 140
+      },
+      "teamCard": null
+    },
+    "390x844·agent editor inline": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": {
+        "left": 102,
+        "right": 356,
+        "top": 207,
+        "bottom": 347,
+        "width": 254,
+        "height": 140
+      },
+      "teamCard": null
+    },
+    "390x844·agent editor file": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": {
+        "left": 102,
+        "right": 356,
+        "top": 207,
+        "bottom": 347,
+        "width": 254,
+        "height": 140
+      },
+      "teamCard": null
+    },
+    "390x844·agent editor validation": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": {
+        "left": 102,
+        "right": 356,
+        "top": 207,
+        "bottom": 347,
+        "width": 254,
+        "height": 140
+      },
+      "teamCard": null
+    },
+    "390x844·settings teams": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": null,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 339,
+        "width": 254,
+        "height": 150
+      }
+    },
+    "1280x900·standard header": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "header": {
+        "left": 276,
+        "right": 1268,
+        "top": 10,
+        "bottom": 38,
+        "width": 992,
+        "height": 28
+      },
+      "title": {
+        "left": 276,
+        "right": 964,
+        "top": 15,
+        "bottom": 32,
+        "width": 688,
+        "height": 17
+      },
+      "modelChip": {
+        "left": 1018,
+        "right": 1232,
+        "top": 12,
+        "bottom": 36,
+        "width": 214,
+        "height": 24
+      },
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": null,
+      "teamCard": null
+    },
+    "1280x900·team header": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "header": {
+        "left": 276,
+        "right": 1268,
+        "top": 7,
+        "bottom": 41,
+        "width": 992,
+        "height": 34
+      },
+      "title": {
+        "left": 276,
+        "right": 925,
+        "top": 7,
+        "bottom": 24,
+        "width": 649,
+        "height": 17
+      },
+      "modelChip": {
+        "left": 979,
+        "right": 1153,
+        "top": 12,
+        "bottom": 36,
+        "width": 174,
+        "height": 24
+      },
+      "members": {
+        "left": 1159,
+        "right": 1232,
+        "top": 12,
+        "bottom": 36,
+        "width": 73,
+        "height": 24
+      },
+      "facts": {
+        "left": 276,
+        "right": 925,
+        "top": 26,
+        "bottom": 41,
+        "width": 649,
+        "height": 15
+      },
+      "modelFacts": null,
+      "agentCard": null,
+      "teamCard": null
+    },
+    "1280x900·settings agents": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": {
+        "left": 375,
+        "right": 1173,
+        "top": 135,
+        "bottom": 231,
+        "width": 798,
+        "height": 96
+      },
+      "teamCard": null
+    },
+    "1280x900·agent editor file": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "header": null,
+      "title": null,
+      "modelChip": null,
+      "members": null,
+      "facts": null,
+      "modelFacts": null,
+      "agentCard": {
+        "left": 375,
+        "right": 1173,
+        "top": 135,
+        "bottom": 231,
+        "width": 798,
+        "height": 96
+      },
+      "teamCard": null
+    }
+  },
+  "pass": true,
+  "findings": []
+}

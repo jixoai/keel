@@ -1,0 +1,1 @@
+✓ built App.tsx into .nsh/out (992.7 KB js, 3.2 MB bytecode, 1 asset, 181ms)

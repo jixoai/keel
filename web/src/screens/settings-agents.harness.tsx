@@ -7,8 +7,9 @@
 // `KeelHttp` whose fetch is the stub below. What is under test is still the
 // real transport parsing and the section's rendering, not a second fake
 // client. The scenario comes from the launch parameters
-// (`host.params.scenario`), keeping one harness for every state the gate
-// covers.
+// (`host.params.scenario`): `list`, `empty`, `loading` (the read never
+// settles), `error` (500), `permission` (403), `refuse` (a write is refused)
+// and `slow` (a write takes long enough to observe the saving state).
 import { host, mount, View } from "nsh";
 import type { AgentView, AgentWriteRequest } from "../data/contract";
 import { KeelHttp, type FetchLike } from "../data/http";
@@ -21,6 +22,12 @@ const respond = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 const empty = (): Response => new Response(null, { status: 204 });
+
+/** A response that never arrives: the section stays in its first read. */
+const pending = (): Promise<Response> => new Promise<Response>(() => {});
+
+const settleSlowly = (response: Response): Promise<Response> =>
+  new Promise((resolve) => setTimeout(() => resolve(response), 350));
 
 const seedAgents = (): AgentView[] => [
   {
@@ -42,6 +49,7 @@ const seedAgents = (): AgentView[] => [
     avatar: { kind: "identicon", seed: "agent_research" },
     defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
     tools: [{ toolId: "web.fetch", enabled: true }],
+    systemPrompt: { kind: "file", ref: "AGENTS.md" },
   },
 ];
 
@@ -51,7 +59,12 @@ let sequence = 0;
 const stub: FetchLike = async (input, init) => {
   const method = (init?.method ?? "GET").toUpperCase();
   const bodyText = typeof init?.body === "string" ? init.body : "{}";
-  if (method === "GET" && input === "/v1/agents") return respond(200, { agents });
+  if (method === "GET" && input === "/v1/agents") {
+    if (scenario() === "loading") return pending();
+    if (scenario() === "error") return respond(500, { error: "Agent 注册表暂时不可用" });
+    if (scenario() === "permission") return respond(403, { error: "当前账号没有 agent.read 权限" });
+    return respond(200, { agents });
+  }
 
   if (method === "POST" && input === "/v1/agents") {
     if (scenario() === "refuse") {
@@ -68,7 +81,7 @@ const stub: FetchLike = async (input, init) => {
       systemPrompt: request.systemPrompt,
     };
     agents = [...agents, created];
-    return respond(201, created);
+    return scenario() === "slow" ? settleSlowly(respond(201, created)) : respond(201, created);
   }
 
   if (method === "PUT" && input.startsWith("/v1/agents/")) {
@@ -76,10 +89,19 @@ const stub: FetchLike = async (input, init) => {
     const request = JSON.parse(bodyText) as AgentWriteRequest;
     agents = agents.map((agent) =>
       agent.id === id
-        ? { ...agent, name: request.name, description: request.description, tools: request.tools }
+        ? {
+            ...agent,
+            name: request.name,
+            description: request.description,
+            avatar: request.avatar,
+            defaultModel: request.defaultModel,
+            tools: request.tools,
+            systemPrompt: request.systemPrompt,
+          }
         : agent,
     );
-    return respond(200, agents.find((agent) => agent.id === id) ?? { id, name: request.name });
+    const updated = agents.find((agent) => agent.id === id) ?? { id, name: request.name };
+    return scenario() === "slow" ? settleSlowly(respond(200, updated)) : respond(200, updated);
   }
 
   if (method === "DELETE" && input.startsWith("/v1/agents/")) {

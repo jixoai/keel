@@ -11,6 +11,8 @@ const HARNESS = "./settings-teams.harness.tsx";
 
 const joined = (app: { texts(): string[] }): string => app.texts().join("\n");
 
+const openSection = (scenario: string) => open(HARNESS, { host: { params: { scenario } } });
+
 test("TUI: 团队——卡片明确队长、成员数与成员头像", async () => {
   const app = await open(HARNESS, { host: { params: { scenario: "list" } } });
 
@@ -86,4 +88,81 @@ test("TUI: 团队——编辑时队长在成员列表里标为不可移除", asy
   await app.waitFor("text:/设计师（队长，不可移除）/");
   expect(joined(app)).toContain("设计师（队长，不可移除）");
   expect(joined(app)).toContain("队长始终在队内，不能当作普通成员移除");
+});
+
+test("TUI: 团队——加载态：骨架与说明在场，主操作禁用", async () => {
+  const app = await openSection("loading");
+
+  await app.waitFor("id:teams-loading");
+  expect(joined(app)).toContain("正在读取团队清单");
+  expect(app.shows("label:新建团队")).toBe(true);
+  expect(app.enabled("id:team-create")).toBe(false);
+  expect(app.shows("id:team-card-team_brand")).toBe(false);
+});
+
+test("TUI: 团队——错误态：服务端原因逐字呈现，可重试", async () => {
+  const app = await openSection("error");
+
+  await app.waitFor("id:teams-error");
+  expect(joined(app)).toContain("团队注册表暂时不可用");
+  expect(app.shows("label:加载失败")).toBe(true);
+  expect(app.shows("label:重试")).toBe(true);
+  expect(app.shows("text:/还没有团队，创建一个/")).toBe(false);
+});
+
+test("TUI: 团队——权限不足（403）有自己的面，不冒充加载失败", async () => {
+  const app = await openSection("permission");
+
+  await app.waitFor("id:settings-permission");
+  expect(joined(app)).toContain("没有查看团队注册表的权限");
+  expect(joined(app)).toContain("当前账号没有 team.read 权限");
+  expect(app.shows("id:teams-error")).toBe(false);
+  expect(app.shows("label:加载失败")).toBe(false);
+  expect(app.shows("label:重试")).toBe(true);
+});
+
+test("TUI: 团队——保存中：字段与按钮锁定，保存按钮带进行中文案", async () => {
+  const app = await openSection("slow");
+  await app.waitFor("id:team-card-team_brand");
+
+  await app.press("id:team-create");
+  await app.waitFor("id:team-dialog");
+  await app.type("id:team-name", "慢速小组");
+  await app.press("text:选择队长（必选）");
+  await app.waitFor("text:设计师");
+  await app.press("text:设计师");
+  await app.press("id:team-save");
+
+  await app.waitFor("text:/保存中…/");
+  expect(app.enabled("id:team-save")).toBe(false);
+  expect(app.enabled("id:team-name")).toBe(false);
+  expect(app.shows("id:team-dialog")).toBe(true);
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_new_1");
+});
+
+test("TUI: 团队——Agent 注册表不可读时队长显示可读占位，不泄漏裸 id", async () => {
+  const app = await openSection("agents-permission");
+
+  await app.waitFor("id:team-card-team_brand");
+  expect(joined(app)).toContain("队长：未载入的 Agent");
+  expect(joined(app)).not.toContain("agent_design");
+});
+
+test("TUI: 团队——保存失败：原因可读，名字与队长保留", async () => {
+  const app = await openSection("refuse");
+  await app.waitFor("id:team-card-team_brand");
+
+  await app.press("id:team-create");
+  await app.waitFor("id:team-dialog");
+  await app.type("id:team-name", "新小组");
+  await app.press("text:选择队长（必选）");
+  await app.waitFor("text:设计师");
+  await app.press("text:设计师");
+  await app.press("id:team-save");
+
+  await app.waitFor("id:team-save-error");
+  expect(joined(app)).toContain("队长 agent_design 当前不可用");
+  expect(app.shows("id:team-dialog")).toBe(true);
+  expect(app.value("id:team-name")).toBe("新小组");
 });

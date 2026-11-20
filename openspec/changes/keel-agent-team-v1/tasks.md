@@ -87,18 +87,31 @@
 - [x] run manifest 冻结 agent/team/prompt hash：`run.finished` 摘要携带 agentId/teamId/teamRevision/teamHash/promptHash（`internal/agent/runner.go`，形状由 `internal/kernel/validate.go` 校验）；证据 `evidence/runtime-20261114-211425/captain-events.json`
 - [x] 运行中切换模式/团队只影响下一次 run：绑定随输入事实（selection）携带、resolver 每 attempt 各解析一次；`internal/agent/binding_test.go`（resolver 每次 attempt 调用）+ E2E 成员 run 用成员自己的提示词
 - [x] 成员复用既有 Agent/run 机制：`agentext.SpawnRequest.AgentID` → 子输入 `selection.agentId`，子 run 走同一 runner/装配（`internal/agentext/subagent.go`）；证据 `evidence/runtime-20261114-211425/member-events.json`（子输入 selection.agentId=agent_kite_member，子 run 的 wire system 是 KITE-RUNTIME-MARK-8）
-- [ ] 会话 header：Standard 显示模型；Team 显示团队名+captain+成员入口（团队名已显示）
+- [x] 会话 header：Standard 显示模型；Team 显示团队名+captain+成员入口（团队名已显示）
+      （`web/src/screens/session-team.tsx`：标题第二行 Standard=当前模型 / Team=团队名+队长+模型；
+      宽屏 chip 显示完整团队名，单列 chip 收为 icon/短文字；成员入口打开只读名单，
+      含加载/空/错误/403 四态。证据 `evidence/ui-tail-2026-11-21/`：浏览器 390/1280 截图 +
+      `session-team.test.tsx`、`App.tui.test.tsx` 的 390/宽屏用例）
 
 ## P5 设置与 UI
 
 - [x] 完整设置页：模型 / Agents / AgentTeam / 工具 / 能力 / 客户端 / 插件 / 高级
-- [ ] Agent 卡片、Agent 编辑器、头像生成、工具注册源选择器、AGENTS.md 编辑器（AGENTS.md 文件引用编辑未做）
+- [x] Agent 卡片、Agent 编辑器、头像生成、工具注册源选择器、AGENTS.md 编辑器
+      （AGENTS.md 文件引用编辑已补：`settings-agents.tsx` 用「内联文本 / 文件引用」两个显式来源页签，
+      写既有 `systemPrompt: {kind:"file", ref}` 字段；本地校验空值/绝对路径/越界，服务端拒绝原样显示；
+      编辑回填、保存后卡片事实同步。证据 `settings-agents.test.tsx` 与
+      `evidence/ui-tail-2026-11-21/screenshots/07-agent-editor-file-390.png`、
+      `08-agent-editor-file-error-390.png`、`13-agent-editor-file-1280.png`）
 - [ ] 团队卡片、团队画布、captain 槽、成员库/新建 Agent、Team CLI 能力面板
 - [x] 会话启动模式选择（Standard/Team）、团队选择器、缺 captain 阻塞态
 - [x] 插件能力树 UI（命令/子命令/描述/权限/danger/callable_by/复制）
       （权限列表与复制动作已补：plugins.tsx 的 CliCapabilityRow 渲染 manifest 的 permissions 原样，
       复制走 Clipboard.writeText 并把平台结果回显在行内；TUI 断言含真剪贴板回读）
-- [ ] 五态（空/加载/错误/权限不足/成功）、390px 单列、键盘可达
+- [x] 五态（空/加载/错误/权限不足/成功）、390px 单列、键盘可达
+      （Agents、团队、团队名单逐页覆盖空/加载/错误/403/成功，写路径另测保存中/保存失败；
+      390px 由真实 Chrome 在 fixture 构建上量 `scrollWidth == innerWidth`，见
+      `evidence/ui-tail-2026-11-21/checks.json`；键盘沿用 kit Dialog/Tabs/Input/Button 的
+      既有组件用例 `src/ui/kit/components/overlay.test.tsx`、`form.test.tsx`）
 - [x] shadcn 官方组件 + solid-glass；禁止手写仿制
 - [x] 组件画廊先行；组合页面后验收
 

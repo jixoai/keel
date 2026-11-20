@@ -3,7 +3,9 @@
 // `KeelHttp` parsing runs; only `fetch` is stubbed).
 //
 // The scenario comes from the launch parameters (`host.params.scenario`):
-// `list` (two teams), `empty`, `refuse` (the member/team write is refused) and
+// `list` (two teams), `empty`, `loading` (the team read never settles),
+// `error` (500), `permission` (403), `refuse` (the member/team write is
+// refused), `slow` (a write takes long enough to observe the saving state) and
 // `referenced` (a team delete is refused).
 import { host, mount, View } from "nsh";
 import type {
@@ -22,6 +24,12 @@ const respond = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 const empty = (): Response => new Response(null, { status: 204 });
+
+/** A response that never arrives: the section stays in its first read. */
+const pending = (): Promise<Response> => new Promise<Response>(() => {});
+
+const settleSlowly = (response: Response): Promise<Response> =>
+  new Promise((resolve) => setTimeout(() => resolve(response), 350));
 
 const seedAgents = (): AgentView[] => [
   { id: "agent_design", name: "设计师", description: "负责界面与品牌视觉", avatar: { kind: "identicon", seed: "agent_design" } },
@@ -74,8 +82,16 @@ const stub: FetchLike = async (input, init) => {
   const method = (init?.method ?? "GET").toUpperCase();
   const bodyText = typeof init?.body === "string" ? init.body : "{}";
 
-  if (method === "GET" && input === "/v1/agents") return respond(200, { agents });
-  if (method === "GET" && input === "/v1/teams") return respond(200, { teams });
+  if (method === "GET" && input === "/v1/agents") {
+    if (scenario() === "agents-permission") return respond(403, { error: "当前账号没有 agent.read 权限" });
+    return respond(200, { agents });
+  }
+  if (method === "GET" && input === "/v1/teams") {
+    if (scenario() === "loading") return pending();
+    if (scenario() === "error") return respond(500, { error: "团队注册表暂时不可用" });
+    if (scenario() === "permission") return respond(403, { error: "当前账号没有 team.read 权限" });
+    return respond(200, { teams });
+  }
 
   if (method === "POST" && input === "/v1/teams") {
     if (scenario() === "refuse") {
@@ -84,7 +100,7 @@ const stub: FetchLike = async (input, init) => {
     const request = JSON.parse(bodyText) as AgentTeamWriteRequest;
     const created = teamFrom(`team_new_${++sequence}`, request);
     teams = [...teams, created];
-    return respond(201, created);
+    return scenario() === "slow" ? settleSlowly(respond(201, created)) : respond(201, created);
   }
 
   if (method === "PUT" && input.startsWith("/v1/teams/")) {

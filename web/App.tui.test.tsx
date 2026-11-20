@@ -244,12 +244,31 @@ test("TUI: 团队模式——以队长的默认模型开始，手动选模型退
   expect(app.texts()).toContain("成员 1");
   expect(app.texts()).toContain("将以 DeepSeek V4.1 Flash 开始对话");
 
-  // 以此团队开始：chip 变成团队标记，启动模式记录在「本会话当前」里。
+  // 以此团队开始：chip 变成团队标记（窄栏是短文字「团队」，团队名在标题下），
+  // 标题下给出队长与运行模型，成员入口在侧。
   await app.press("id:picker-team-start-team_demo_brand");
-  await app.waitFor("text:团队 · 品牌发布小组");
+  await app.waitFor("id:workspace-header-team-facts");
+  const teamHeader = app.texts().join("\n");
+  expect(teamHeader).toContain("品牌发布小组 · 队长 设计师");
+  expect(teamHeader).toContain("DeepSeek V4.1 Flash");
+  expect(app.shows("label:本会话团队：品牌发布小组（团队模式）")).toBe(true);
+  expect(app.shows("label:查看团队成员（1 人）")).toBe(true);
   await app.press("id:session-model-chip");
   await app.waitFor("text:启动模式");
   await app.press("label:关闭");
+
+  // 成员入口打开只读名单：队长、运行模型、成员都在，且有「只有队长」之外的成员。
+  await app.press("id:session-team-members");
+  await app.waitFor("id:team-roster-dialog");
+  const roster = app.texts().join("\n");
+  expect(roster).toContain("队长");
+  expect(roster).toContain("设计师");
+  expect(roster).toContain("运行模型 DeepSeek V4.1 Flash");
+  expect(roster).toContain("成员");
+  expect(roster).toContain("研究员");
+  expect(roster).toContain("这里只读");
+  await app.press("text:关闭");
+  await app.waitFor("id:team-roster-dialog", { state: "gone" });
 
   // 团队会话照常输入（selection 是队长的默认模型）。
   await app.type("id:composer-input", "以团队模式回一句话");
@@ -262,7 +281,68 @@ test("TUI: 团队模式——以队长的默认模型开始，手动选模型退
   await app.press("label:选择模型 DeepSeek V4.1 Flash >> nth=0");
   await app.press("label:关闭");
   await app.waitFor("text:/DeepSeek V4\\.1 Flash · 高/");
-  expect(app.texts()).not.toContain("团队 · 品牌发布小组");
+  expect(app.shows("id:workspace-header-team-facts")).toBe(false);
+  expect(app.shows("label:本会话团队：品牌发布小组（团队模式）")).toBe(false);
+});
+
+test("TUI: 宽屏 header——团队 chip 显示完整团队名，标题下是队长与模型", async () => {
+  const app = await open("./App.tsx", { width: 1200, host: { params: { fixture: true } } });
+  await app.press(TITLE("发布准备周报"));
+  await app.waitFor("text:/本周发布准备已基本就绪/");
+
+  // Wide standard: the chip's own text carries the model; no second line.
+  expect(app.shows("id:workspace-header-model-facts")).toBe(false);
+  expect(app.texts().join("\n")).toContain("DeepSeek V4.1 Flash · 高");
+
+  await app.press("id:session-model-chip");
+  await app.waitFor("text:本会话当前");
+  await app.press("id:picker-mode-team");
+  await app.waitFor("text:品牌发布小组");
+  await app.press("id:picker-team-start-team_demo_brand");
+  await app.waitFor("text:团队 · 品牌发布小组");
+
+  const screen = app.texts().join("\n");
+  // Wide: the chip carries the team name; the second line does not repeat it.
+  expect(screen).toContain("队长 设计师 · DeepSeek V4.1 Flash");
+  expect(screen).not.toContain("品牌发布小组 · 队长");
+  expect(app.shows("id:session-team-members")).toBe(true);
+  expect(app.shows("id:workspace-header-state")).toBe(true);
+});
+
+test("TUI: 390px 单列——Standard 显示模型；Team 读得全团队、队长、模型与成员入口", async () => {
+  const app = await open("./App.tsx", { width: 390, host: { params: { fixture: true } } });
+  await app.press(TITLE("发布准备周报"));
+  await app.waitFor("text:/本周发布准备已基本就绪/");
+
+  // Standard：模型 chip 仍在 header 上，名字可读（终端保留文字形态）；单列下
+  // 标题的第二行也写出当前模型，绘图宿主（web）的 icon-only chip 不靠 tooltip。
+  expect(app.shows("id:session-model-chip")).toBe(true);
+  expect(app.shows("id:workspace-header-model-facts")).toBe(true);
+  expect(app.texts().join("\n")).toContain("DeepSeek V4.1 Flash · 高");
+  // 单列：状态词让位，返回入口在场。
+  expect(app.shows("id:workspace-header-state")).toBe(false);
+  expect(app.shows("label:返回会话列表")).toBe(true);
+
+  // Team：chip 收成短文字，团队名/队长/模型移到标题下，成员入口仍在。
+  await app.press("id:session-model-chip");
+  await app.waitFor("text:本会话当前");
+  await app.press("id:picker-mode-team");
+  await app.waitFor("text:品牌发布小组");
+  await app.press("id:picker-team-start-team_demo_brand");
+  await app.waitFor("id:workspace-header-team-facts");
+  const screen = app.texts().join("\n");
+  expect(screen).toContain("品牌发布小组 · 队长 设计师 · DeepSeek V4.1 Flash");
+  expect(app.shows("id:workspace-header-model-facts")).toBe(false);
+  expect(app.shows("id:session-team-members")).toBe(true);
+  expect(app.shows("label:查看团队成员（1 人）")).toBe(true);
+  expect(app.shows("id:workspace-header-title")).toBe(true);
+
+  // 窄栏里成员抽屉仍可打开并读到成员。
+  await app.press("id:session-team-members");
+  await app.waitFor("id:team-roster-dialog");
+  expect(app.texts().join("\n")).toContain("研究员");
+  await app.press("text:关闭");
+  await app.waitFor("id:team-roster-dialog", { state: "gone" });
 });
 
 // The workspace-polish change (keel-workspace-polish) on the same fixture:
