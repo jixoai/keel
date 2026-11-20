@@ -16,10 +16,10 @@
 
 | change | 勾选/总数 | 残留性质 | 状态 |
 |---|---|---|---|
-| keel-agent-team-v1 | 46/61 | 15 项：CLI start/stop、team save/start、文件引用编辑器、五态/390 复核、媒体适配器 4、验收 3 | 运行注入已收口（复核 B1–B4 修复完毕）；尾项入 Wave 3 |
+| keel-agent-team-v1 | 48/61 | 13 项：UI 卡/编辑器/画布、五态/390、媒体适配器 4、验收 3；CLI start/stop 与 team save/start 已交付（会话引用保护依赖 W2 placement） | 运行注入已收口；CLI 尾项已收口（A/B 复核 9/10） |
 | keel-session-surfaces-v1 | 23/24 | 1 项=成员结果进 captain 时间线 | 随 W2.4 task-log 收口 |
-| provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
-| keel-ga | 36/43 | §2/§3/§5 已交付；剩 §1 压缩文档、§6 验收 5 | tenancy/provider-files/blob-lifecycle 已交付（blob 独立复核中） |
+| ~~provider-secret-direct-config~~ | — | 已归档，无未勾项（旧 7/8 为历史口径） | **已归档 2026-11-19** |
+| keel-ga | 38/43 | §1 压缩/checkpoint/回放 + 文档已交付；剩 §6 验收 5（1000 会话/64 run、SIGKILL、2GB cgroup、交叉复核、报告/归档） | tenancy/provider-files/blob-lifecycle 已交付；G5 验收待开 |
 | keel-harness-v2 | 48/146 | **W2.1–W2.5 + seam/jobcap/aclack、W3 file/bash 主体、W4 task-log 主体、W5 approve/notify、W6 MCP 聚合已交付**；余下 W0 客户端/多用户/清单扩展、W0.5 插件全景、W1 配额/gRPC/压测、W2 放置与 run 快照、W3 删除对账/capture 策略/并发定序、W4 fork/面板、W6 gbash mcp CLI、W7 skills 产品面、W8 fork/resume、W9 OAR、W10 HMAC/补偿、W11 验收门、W12 恢复/槽位/产品件（98 未勾：45 部分 / 2 被替代或延后 / 51 未开始） | **主战场（A 轴 8.5 无 P0/P1；B 轴两 P1 已关闭；2026-11-20 对账 43→48，证据 `openspec/changes/keel-harness-v2/evidence/reconciliation-2026-11-20.md`）** |
 | ~~feat-mcp-apps-events~~（已归档 2026-11-20） | 44/50 | 设计 + T0.1–T0.4 + P1 + P2.1–P2.8 + P3.1–P3.5/P3.7/P3.8 + P4 + P5 + P6.1–P6.3/P6.5 已交付（P5 复核修复合入 `b8ca79b`，A/B P0/P1 清零；G0–G5 证据 `evidence/p6/ACCEPTANCE.md`）；P6.4 已通过（reviewer 9/10 + vision）；剩余 P3.6（NSH per-permission allow 上游依赖）与 5 个已登记 Non-Goal | **已归档**（`2026-11-20-feat-mcp-apps-events`）；剩余 P3.6 上游依赖与 5 个 Non-Goal 留后续 change |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
