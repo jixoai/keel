@@ -1,0 +1,54 @@
+P6E 门禁记录（2026-11-20，worktree keel-mcp-p6-fix，基线 b8ca79b）
+====================================================================
+
+$ gofmt -l internal/mcp/protocol.go internal/mcp/ui_meta.go internal/mcp/apps_capability_test.go \
+    internal/mcphost/surface.go internal/mcphost/registry.go internal/mcphost/registry_test.go \
+    internal/servicehost/services.go internal/servicehost/mcp_capabilities_test.go internal/agentapi/mcp_apps_test.go
+（无输出）
+
+$ go build ./...
+BUILD_OK（exit 0）
+
+$ go vet ./internal/mcp ./internal/mcphost ./internal/servicehost ./internal/agentapi
+VET_OK（exit 0）
+
+$ export KEEL_TEST_DSN=...（取自 .env.local，不回显）
+$ go test -p 1 -count=1 ./...
+STATUS=0
+ok packages: 55
+no test files: 10
+FAIL: 0
+
+  说明：首次全量运行曾把整个 .env.local source 进环境，导出的 KEEL_SERVE_PASSWORD 使
+  cmd/keel TestAgentCLIRendersFieldValidation 收到 401（测试要求该变量为空）。改为仅导出
+  KEEL_TEST_DSN 后全绿；与本 lane 改动无关。
+
+$ ./scripts/conformance.sh
+package                                              pass   fail   skip
+github.com/jixoai/keel/internal/agent                 109      0      0
+github.com/jixoai/keel/internal/agenttool               3      0      0
+github.com/jixoai/keel/internal/blob                   32      0      0
+github.com/jixoai/keel/internal/compaction             44      0      0
+github.com/jixoai/keel/internal/durable               100      0      0
+github.com/jixoai/keel/internal/hooks                  81      0      0
+github.com/jixoai/keel/internal/host                   66      0      0
+github.com/jixoai/keel/internal/httpapi               273      0      0
+github.com/jixoai/keel/internal/loop                   71      0      0
+github.com/jixoai/keel/internal/mcp                   203      0      1
+github.com/jixoai/keel/internal/skills                 49      0      0
+github.com/jixoai/keel/internal/stream                  7      0      0
+github.com/jixoai/keel/internal/telemetry              38      0      0
+------------------------------------------------------------------------
+TOTAL                                                1076      0      1
+
+$ cd web && nsh check
+（无诊断，exit 0）
+
+$ nsh test --target tui src/data/capabilities.test.ts
+6 tests: 6 passed, 0 failed
+
+$ nsh test --target tui src/data/mcp-apps.test.ts
+15 tests: 15 passed, 0 failed
+
+$ nsh build
+✓ built App.tsx into .nsh/out (963.9 KB js, 3.1 MB bytecode, 1 asset, 125ms)
