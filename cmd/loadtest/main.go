@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,17 @@ type config struct {
 	images     int
 	clientRate int // bytes/sec per download stream, 0 = unlimited
 	out        string
+	// textSessions limits which sessions post input: -1 means every session
+	// (the historical profile). The G5 acceptance profile keeps 1000 SSE
+	// sessions online while only a bounded set of sessions drives runs.
+	textSessions int
+	// prefillRuns posts one input immediately from the first N text sessions,
+	// so the worker can reach its concurrency ceiling without waiting for the
+	// normal text period.
+	prefillRuns int
+	// waitDrain makes the load wait for the durable run queue to settle; the
+	// G5 memory profile asserts both concurrency and convergence.
+	waitDrain time.Duration
 }
 
 func main() {
@@ -51,7 +63,19 @@ func main() {
 	flag.IntVar(&c.images, "images", 20, "distinct seeded images")
 	flag.IntVar(&c.clientRate, "client-rate", 50<<10, "per-stream client read rate (bytes/sec, 0=unlimited)")
 	flag.StringVar(&c.out, "out", "", "write JSON results here")
+	flag.IntVar(&c.textSessions, "text-sessions", -1, "sessions that post text input (-1 = all)")
+	flag.IntVar(&c.prefillRuns, "prefill-runs", 0, "post one input immediately from the first N text sessions")
+	flag.DurationVar(&c.waitDrain, "wait-drain", 0, "after the load, wait up to this long for the run queue to settle (0 = do not wait)")
 	flag.Parse()
+	if c.textSessions < -1 {
+		log.Fatalf("-text-sessions must be -1 or >= 0")
+	}
+	if c.prefillRuns < 0 {
+		log.Fatalf("-prefill-runs must be >= 0")
+	}
+	if c.textSessions >= 0 && c.prefillRuns > c.textSessions {
+		log.Fatalf("-prefill-runs (%d) cannot exceed -text-sessions (%d)", c.prefillRuns, c.textSessions)
+	}
 
 	client := &http.Client{
 		Timeout: 0,
@@ -90,13 +114,14 @@ func main() {
 	defer stop()
 
 	var (
-		texts    atomic.Int64
-		imageOK  atomic.Int64
-		imageErr atomic.Int64
-		sseErr   atomic.Int64
-		bytesIn  atomic.Int64
-		statuses sync.Map // string -> *atomic.Int64
-		errTexts sync.Map // string -> *atomic.Int64
+		texts      atomic.Int64
+		imageOK    atomic.Int64
+		imageErr   atomic.Int64
+		sseErr     atomic.Int64
+		sseSession atomic.Int32
+		bytesIn    atomic.Int64
+		statuses   sync.Map // string -> *atomic.Int64
+		errTexts   sync.Map // string -> *atomic.Int64
 	)
 	count := func(k int) {
 		v, _ := statuses.LoadOrStore(k, &atomic.Int64{})
@@ -123,10 +148,13 @@ func main() {
 	var wg sync.WaitGroup
 	for i, sid := range sessions {
 		wg.Add(1)
-		go func(i int, sid string) {
+		textEnabled := c.textSessions < 0 || i < c.textSessions
+		prefill := i < c.prefillRuns
+		go func(i int, sid string, textEnabled, prefill bool) {
 			defer wg.Done()
-			worker(runCtx, client, c, tenant, sid, images, i, &texts, &imageOK, &imageErr, &sseErr, &bytesIn, &latMu, &latencies, count, countErr)
-		}(i, sid)
+			worker(runCtx, client, c, tenant, sid, images, i, textEnabled, prefill,
+				&texts, &imageOK, &imageErr, &sseErr, &sseSession, &bytesIn, &latMu, &latencies, count, countErr)
+		}(i, sid, textEnabled, prefill)
 	}
 
 	// RSS sampler: on macOS/Linux read the server's resident set if the pid is
@@ -135,9 +163,53 @@ func main() {
 	sampleStop := make(chan struct{})
 	samplerDone := make(chan struct{})
 	go sampleRSS(sampleStop, rssSamples, samplerDone, c.base)
+	// Run/stream sampler: the G5 profile has to prove the runtime actually
+	// reached 64 concurrent runs while 1000 streams were open, not just accept
+	// the requests. The gauge is sampled every 250ms and the max is reported.
+	metricSamples := make(chan metricSnapshot, 8192)
+	metricsStop := make(chan struct{})
+	metricsDone := make(chan struct{})
+	go sampleMetrics(metricsStop, metricSamples, metricsDone, c.base)
 
 	wg.Wait()
 	duration := time.Since(start)
+	drainWait := time.Duration(0)
+	if c.waitDrain > 0 {
+		_, drainWait = waitForDrain(ctx, c.base, c.waitDrain)
+	}
+	close(metricsStop)
+	<-metricsDone
+	close(metricSamples)
+	finalMetrics, metricErr := fetchMetrics(c.base)
+	if metricErr != nil {
+		finalMetrics = metricSnapshot{}
+	}
+	var runsActiveMax, runsPendingMax, streamsActiveMax int
+	for sample := range metricSamples {
+		if sample.RunsActive > runsActiveMax {
+			runsActiveMax = sample.RunsActive
+		}
+		if sample.RunsPending > runsPendingMax {
+			runsPendingMax = sample.RunsPending
+		}
+		if sample.StreamsActive > streamsActiveMax {
+			streamsActiveMax = sample.StreamsActive
+		}
+	}
+	if finalMetrics.RunsActive > runsActiveMax {
+		runsActiveMax = finalMetrics.RunsActive
+	}
+	if finalMetrics.StreamsActive > streamsActiveMax {
+		streamsActiveMax = finalMetrics.StreamsActive
+	}
+	if finalMetrics.RunsPending > runsPendingMax {
+		runsPendingMax = finalMetrics.RunsPending
+	}
+	var runStatusCounts map[string]int
+	if c.prefillRuns > 0 {
+		runStatusCounts = verifyRunStatuses(ctx, client, c, tenant, sessions, c.prefillRuns)
+	}
+
 	close(sampleStop)
 	<-samplerDone
 	close(rssSamples)
@@ -168,6 +240,7 @@ func main() {
 		"errorCounts":       errCounts,
 		"tenant":            tenant,
 		"sessions":          len(sessions),
+		"sseSessions":       sseSession.Load(),
 		"durationSec":       duration.Seconds(),
 		"texts":             texts.Load(),
 		"imagesOK":          imageOK.Load(),
@@ -181,6 +254,23 @@ func main() {
 		"rssMinMB":          mb(rssMin(rss)),
 		"rssP50MB":          mb(rssPercentile(rss, 0.50)),
 		"rssMaxMB":          mb(rssMax(rss)),
+		"textSessions":      c.textSessions,
+		"prefillRuns":       c.prefillRuns,
+		"runsActiveMax":     runsActiveMax,
+		"runsPendingMax":    runsPendingMax,
+		"streamsActiveMax":  streamsActiveMax,
+		"runsStartedFinal":  finalMetrics.RunsStarted,
+		"runsFinishedDone":  finalMetrics.RunsFinishedDone,
+		"runsFinishedFail":  finalMetrics.RunsFinishedFailed,
+		"runsFailedFinal":   finalMetrics.RunsFailed,
+		"runsActiveFinal":   finalMetrics.RunsActive,
+		"runsPendingFinal":  finalMetrics.RunsPending,
+		"drainWaitSec":      drainWait.Seconds(),
+		"metricsError":      errString(metricErr),
+	}
+	if runStatusCounts != nil {
+		res["runStatusCounts"] = runStatusCounts
+		res["runsVerified"] = c.prefillRuns
 	}
 	raw, _ := json.MarshalIndent(res, "", "  ")
 	fmt.Println(string(raw))
@@ -190,15 +280,22 @@ func main() {
 }
 
 func worker(ctx context.Context, client *http.Client, c config, tenant, sid string, images []string, i int,
-	texts, imageOK, imageErr, sseErr, bytesIn *atomic.Int64, latMu *sync.Mutex, latencies *[]time.Duration, count func(int), countErr func(error)) {
+	textEnabled, prefill bool,
+	texts, imageOK, imageErr, sseErr *atomic.Int64, sseSession *atomic.Int32, bytesIn *atomic.Int64, latMu *sync.Mutex, latencies *[]time.Duration, count func(int), countErr func(error)) {
 	rng := rand.New(rand.NewSource(int64(i)*7919 + 1))
-	go textLoop(ctx, client, c, tenant, sid, rng, texts)
+	if textEnabled {
+		go textLoop(ctx, client, c, tenant, sid, rng, texts, prefill)
+	}
 	go imageLoop(ctx, client, c, tenant, sid, images, rng, imageOK, imageErr, bytesIn, latMu, latencies, count)
-	sseLoop(ctx, client, c, tenant, sid, sseErr, count, countErr, time.Now().Add(c.duration-time.Second))
+	sseLoop(ctx, client, c, tenant, sid, sseErr, sseSession, count, countErr, time.Now().Add(c.duration-time.Second))
 }
 
-func textLoop(ctx context.Context, client *http.Client, c config, tenant, sid string, rng *rand.Rand, texts *atomic.Int64) {
-	t := time.NewTimer(jitter(c.textEvery, rng))
+func textLoop(ctx context.Context, client *http.Client, c config, tenant, sid string, rng *rand.Rand, texts *atomic.Int64, prefill bool) {
+	first := jitter(c.textEvery, rng)
+	if prefill {
+		first = 0
+	}
+	t := time.NewTimer(first)
 	defer t.Stop()
 	for {
 		select {
@@ -287,9 +384,10 @@ func imageLoop(ctx context.Context, client *http.Client, c config, tenant, sid s
 	}
 }
 
-func sseLoop(ctx context.Context, client *http.Client, c config, tenant, sid string, errs *atomic.Int64, count func(int), countErr func(error), quietAfter time.Time) {
+func sseLoop(ctx context.Context, client *http.Client, c config, tenant, sid string, errs *atomic.Int64, sessions *atomic.Int32, count func(int), countErr func(error), quietAfter time.Time) {
 	lastID := ""
 	backoff := 200 * time.Millisecond
+	established := false
 	for ctx.Err() == nil {
 		url := c.base + "/v1/sessions/" + sid + "/events/stream"
 		if lastID != "" {
@@ -318,6 +416,10 @@ func sseLoop(ctx context.Context, client *http.Client, c config, tenant, sid str
 			continue
 		}
 		backoff = 200 * time.Millisecond
+		if !established {
+			established = true
+			sessions.Add(1)
+		}
 		sc := bufio.NewScanner(res.Body)
 		sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
 		for sc.Scan() {
@@ -511,6 +613,184 @@ func readRSS(pid int) int64 {
 	var kb int64
 	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &kb)
 	return kb * 1024
+}
+
+// metricSnapshot is the subset of the runtime's Prometheus text that the G5
+// profile asserts on. Gauges are process-local, so they answer "how many runs
+// were executing at the same time" directly.
+type metricSnapshot struct {
+	RunsActive         int
+	RunsPending        int
+	StreamsActive      int
+	RunsStarted        int64
+	RunsFinishedDone   int64
+	RunsFinishedFailed int64
+	RunsFailed         int64
+}
+
+func fetchMetrics(base string) (metricSnapshot, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", base+"/metrics", nil)
+	if err != nil {
+		return metricSnapshot{}, err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return metricSnapshot{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, res.Body)
+		return metricSnapshot{}, fmt.Errorf("/metrics status %d", res.StatusCode)
+	}
+	var snap metricSnapshot
+	sc := bufio.NewScanner(res.Body)
+	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
+		key := fields[0]
+		switch {
+		case key == "keel_runs_active":
+			snap.RunsActive = int(value)
+		case key == "keel_runs_pending":
+			snap.RunsPending = int(value)
+		case key == "keel_streams_active":
+			snap.StreamsActive = int(value)
+		case key == "keel_runs_started_total":
+			snap.RunsStarted = int64(value)
+		case key == "keel_runs_failed_total":
+			snap.RunsFailed = int64(value)
+		case strings.HasPrefix(key, "keel_runs_finished_total{"):
+			switch {
+			case strings.Contains(key, `status="done"`):
+				snap.RunsFinishedDone = int64(value)
+			case strings.Contains(key, `status="failed"`):
+				snap.RunsFinishedFailed = int64(value)
+			}
+		}
+	}
+	return snap, sc.Err()
+}
+
+func sampleMetrics(stop <-chan struct{}, out chan<- metricSnapshot, done chan<- struct{}, base string) {
+	defer close(done)
+	emit := func() {
+		snap, err := fetchMetrics(base)
+		if err != nil {
+			return
+		}
+		select {
+		case out <- snap:
+		default:
+		}
+	}
+	emit()
+	t := time.NewTicker(250 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			emit()
+		}
+	}
+}
+
+// waitForDrain polls the durable queue after the writers stop. A run profile is
+// only passed when every accepted run reached a terminal state; a pending or
+// active run at the end is a convergence failure, not a timing artifact.
+func waitForDrain(ctx context.Context, base string, max time.Duration) (metricSnapshot, time.Duration) {
+	start := time.Now()
+	deadline := start.Add(max)
+	var last metricSnapshot
+	for {
+		snap, err := fetchMetrics(base)
+		if err == nil {
+			last = snap
+			if snap.RunsPending == 0 && snap.RunsActive == 0 {
+				return snap, time.Since(start)
+			}
+		}
+		if time.Now().After(deadline) {
+			return last, time.Since(start)
+		}
+		select {
+		case <-ctx.Done():
+			return last, time.Since(start)
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// verifyRunStatuses reads the durable run row for the prefill sessions. The
+// metrics prove concurrency; this proves the same runs actually converged.
+func verifyRunStatuses(ctx context.Context, client *http.Client, c config, tenant string, sessions []string, n int) map[string]int {
+	if n > len(sessions) {
+		n = len(sessions)
+	}
+	counts := map[string]int{}
+	var mu sync.Mutex
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(sid string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/v1/sessions/"+sid+"/run", nil)
+			if err != nil {
+				mu.Lock()
+				counts["request_error"]++
+				mu.Unlock()
+				return
+			}
+			req.Header.Set("X-Tenant-ID", tenant)
+			res, err := client.Do(req)
+			if err != nil {
+				mu.Lock()
+				counts["request_error"]++
+				mu.Unlock()
+				return
+			}
+			defer res.Body.Close()
+			var body struct {
+				Status string `json:"status"`
+			}
+			_ = json.NewDecoder(res.Body).Decode(&body)
+			mu.Lock()
+			if res.StatusCode != http.StatusOK {
+				counts[fmt.Sprintf("http_%d", res.StatusCode)]++
+			} else if body.Status == "" {
+				counts["empty_status"]++
+			} else {
+				counts[body.Status]++
+			}
+			mu.Unlock()
+		}(sessions[i])
+	}
+	wg.Wait()
+	return counts
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func jitter(base time.Duration, rng *rand.Rand) time.Duration {

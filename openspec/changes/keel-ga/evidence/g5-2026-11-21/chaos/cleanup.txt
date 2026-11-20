@@ -1,0 +1,9 @@
+exit=0
+orphans_killed=none
+database_dropped=keel_test_ga_g5_chaos
+port_13760=free
+port_13761=free
+runtime_processes=none
+runtime_log_compressed=8231060 bytes
+runtime_log=runtime.log.gz
+runtime_log_tail=runtime-tail.log

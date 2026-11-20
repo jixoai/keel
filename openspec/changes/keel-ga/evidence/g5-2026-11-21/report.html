@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keel G5 验收报告 — 1000 会话 / 64 run / 2GB / SIGKILL</title>
+<style>
+  :root {
+    --bg:#0b1220; --panel:#111c2e; --panel2:#152238; --text:#e6edf7; --muted:#93a4bd;
+    --line:#24344d; --pass:#2ecc71; --fail:#ff5d5d; --warn:#f5b041; --good:#2ecc71; --bad:#ff5d5d;
+    --accent:#5dade2;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:30px; margin:0 0 6px; letter-spacing:.2px; }
+  h2 { font-size:21px; margin:36px 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  h3 { font-size:16px; margin:22px 0 8px; color:#c9d8ee; }
+  p { margin:8px 0; }
+  .sub { color:var(--muted); margin:0 0 18px; }
+  .banner { display:flex; align-items:center; gap:16px; padding:18px 22px; border-radius:14px; background:linear-gradient(135deg,#12233a,#0e1a2b); border:1px solid var(--line); }
+  .banner .verdict { font-size:28px; font-weight:800; letter-spacing:1px; }
+  .pass { color:var(--pass); } .fail { color:var(--fail); } .warn { color:var(--warn); }
+  .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:700; border:1px solid; }
+  .badge.pass { border-color:var(--pass); background:rgba(46,204,113,.12); }
+  .badge.fail { border-color:var(--fail); background:rgba(255,93,93,.12); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:18px 0 6px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .card.good { border-color:rgba(46,204,113,.5); }
+  .card.bad { border-color:rgba(255,93,93,.6); }
+  .card.warn { border-color:rgba(245,176,65,.6); }
+  .card-label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.6px; }
+  .card-value { font-size:26px; font-weight:750; margin:6px 0 2px; }
+  .card-note { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:#c9d8ee; font-weight:650; background:var(--panel2); }
+  tr:last-child td { border-bottom:none; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:12.5px; }
+  pre { background:#0a1322; border:1px solid var(--line); border-radius:10px; padding:12px 14px; overflow:auto; max-height:420px; font-size:12px; line-height:1.5; }
+  details { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:10px 0; }
+  summary { cursor:pointer; font-weight:600; }
+  .muted { color:var(--muted); font-size:12px; }
+  .fail-text { color:#ffb3b3; }
+  .pass-text { color:#9fe8bb; }
+  .meter { margin:14px 0; }
+  .meter-head { display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; }
+  .meter-track { height:12px; background:#0a1322; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+  .meter-fill { height:100%; border-radius:999px; }
+  .meter-fill.good { background:linear-gradient(90deg,#27ae60,#2ecc71); }
+  .meter-fill.warn { background:linear-gradient(90deg,#d68910,#f5b041); }
+  .meter-fill.bad { background:linear-gradient(90deg,#c0392b,#ff5d5d); }
+  .meter-foot { color:var(--muted); font-size:11px; margin-top:4px; }
+  .kill-dot { fill:var(--fail); opacity:.9; }
+  .axis-line { stroke:#3a4d68; stroke-width:2; }
+  .axis { fill:var(--muted); font-size:12px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:820px) { .grid2 { grid-template-columns:1fr; } }
+  footer { margin-top:40px; color:var(--muted); font-size:12px; border-top:1px solid var(--line); padding-top:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Keel G5 规模与混沌验收</h1>
+  <p class="sub">keel-ga §6 · 1000 会话在线 + 64 并发 run · 2GB cgroup · 10 分钟 SIGKILL 混沌</p>
+
+  <div class="banner">
+    <div class="verdict pass">PASS</div>
+    <div>
+      <div><strong>Commit</strong> <code>5a3f5c36a60f2a598e5a3f7c68aac8997a8eb2d5</code> <span class="warn">(dirty worktree)</span></div>
+      <div class="muted">Generated 2026-11-21 02:57:25 CST · evidence <code>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-ga-g5/openspec/changes/keel-ga/evidence/g5-2026-11-21</code></div>
+      <div class="muted">Public report: <a href="https://local-gaubee-reports.fde2e.com/keel/keel-ga-g5/report.html" style="color:var(--accent)">https://local-gaubee-reports.fde2e.com/keel/keel-ga-g5/report.html</a></div>
+    </div>
+  </div>
+
+  <h2>门槛与实测</h2>
+  <table>
+    <thead><tr><th>门槛</th><th>判定</th><th>实测</th></tr></thead>
+    <tbody><tr><td>1000 会话在线 + 64 并发 run</td><td><span class="badge pass">PASS</span></td><td>sessions=1000/1000, SSE established=1000, streamsActiveMax=1800, runsActiveMax=64/64, runStatus.done=64, failed=0, pending=0</td></tr><tr><td>cgroup 内存峰值 < 2GB（GA 目标 < 1.8GB）</td><td><span class="badge pass">PASS</span></td><td>memory.peak=676.6 MB (31.51% of 2048 MB); GA ceiling 1800.0 MB</td></tr><tr><td>2GB cgroup 复跑（与 1000/64 合并，写清口径）</td><td><span class="badge pass">PASS</span></td><td>memory.max=2147483648 bytes; memory.peak=676614144 bytes; 单次运行同时承载 1000 SSE + 64 run + 1MiB 图片</td></tr><tr><td>10 分钟随机 SIGKILL（每 30s）</td><td><span class="badge pass">PASS</span></td><td>faults=20/20, restarts=20, mean interval=30.00s, events audited=27463</td></tr><tr><td>0 丢事件 / 0 重复最终回复</td><td><span class="badge pass">PASS</span></td><td>seqGaps=0, duplicateFinalReplies=0, duplicateRequestIDs=0, unansweredNewest=0, orphanToolResults=0, stuckRuns=0</td></tr></tbody>
+  </table>
+
+  <h2>规模与 2GB cgroup（同一次运行）</h2>
+  <div class="cards">
+    <div class="card ">
+      <div class="card-label">1000 会话 SSE</div>
+      <div class="card-value">1000 established</div>
+      <div class="card-note">1000 created, streamsMax=1800</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">并发 run</div>
+      <div class="card-value">64 / 64</div>
+      <div class="card-note">done=64, failed=0, pending=0</div>
+    </div>
+    <div class="card good">
+      <div class="card-label">cgroup 峰值</div>
+      <div class="card-value">676.6 MB</div>
+      <div class="card-note">31.51% of 2GB</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">SSE 硬错误</div>
+      <div class="card-value">0</div>
+      <div class="card-note">429 retried=2065</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">图片通道</div>
+      <div class="card-value">999</div>
+      <div class="card-note">errors=347</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">吞吐</div>
+      <div class="card-value">23.26 MB/s</div>
+      <div class="card-note">duration=60.0s</div>
+    </div></div>
+  
+    <div class="meter">
+      <div class="meter-head"><span>cgroup memory.peak / 2048 MB hard limit</span><strong>677MB / 2,048MB</strong></div>
+      <div class="meter-track"><div class="meter-fill good" style="width:33.04%"></div></div>
+      <div class="meter-foot">33.0% of the limit</div>
+    </div>
+  
+    <div class="meter">
+      <div class="meter-head"><span>cgroup memory.peak / 1800 MB GA ceiling</span><strong>677MB / 1,800MB</strong></div>
+      <div class="meter-track"><div class="meter-fill good" style="width:37.59%"></div></div>
+      <div class="meter-foot">37.6% of the limit</div>
+    </div>
+  <p class="muted">口径：单个 real runtime 容器（<code>--memory=2g --memory-swap=2g</code>）同时承载 1000 条 SSE、64 个并发 run（fake provider 固定 30s 延迟）与 1MiB 图片下载；loadtest 客户端在独立容器、共享 netns，不计入 runtime cgroup。峰值取 cgroup v2 <code>memory.peak</code>，不是事后 RSS 采样。</p>
+
+  <div class="grid2">
+    <div>
+      <h3>Run 收敛</h3>
+      <table><tbody><tr><th>runsActiveMax</th><td>64 / 64</td></tr><tr><th>runsStartedFinal</th><td>64</td></tr><tr><th>runsFinishedDone</th><td>64</td></tr><tr><th>runsFailedFinal</th><td>0</td></tr><tr><th>runsPendingFinal</th><td>0</td></tr><tr><th>runStatusCounts</th><td>{&quot;done&quot;: 64}</td></tr></tbody></table>
+    </div>
+    <div>
+      <h3>SSE / 图片</h3>
+      <table><tbody><tr><th>sessions</th><td>1000</td></tr><tr><th>streamsActiveMax</th><td>1800</td></tr><tr><th>durationSec</th><td>60.0s</td></tr><tr><th>texts</th><td>64</td></tr><tr><th>imagesOK / imagesErr</th><td>999 / 347</td></tr><tr><th>sseErrors / 429</th><td>2065 / 2065</td></tr><tr><th>imageLatency p50/p95/p99</th><td>28,230.7ms / 30,289.7ms / 30,643.2ms</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <h2>混沌：SIGKILL 每 30s × 10min</h2>
+  <div class="cards">
+    <div class="card good">
+      <div class="card-label">SIGKILL 次数</div>
+      <div class="card-value">20</div>
+      <div class="card-note">expected 20</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">重启次数</div>
+      <div class="card-value">20</div>
+      <div class="card-note">one relaunch per fault</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">kill 平均间隔</div>
+      <div class="card-value">30.00s</div>
+      <div class="card-note">min=30.00s max=30.01s</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">审计事件</div>
+      <div class="card-value">27463</div>
+      <div class="card-note">sessions=16</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">丢事件</div>
+      <div class="card-value">0</div>
+      <div class="card-note">seq contiguous from 1</div>
+    </div>
+    <div class="card ">
+      <div class="card-label">重复最终回复</div>
+      <div class="card-value">0</div>
+      <div class="card-note">newest input answered once</div>
+    </div></div>
+  
+    <svg viewBox="0 0 940 120" role="img" aria-label="SIGKILL timeline">
+      <line x1="40" y1="60.0" x2="900" y2="60.0" class="axis-line"/>
+      <circle cx="40.0" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:45:01.857674</title></circle><circle cx="85.3" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:45:31.855805</title></circle><circle cx="130.5" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:46:01.858545</title></circle><circle cx="175.8" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:46:31.858812</title></circle><circle cx="221.1" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:47:01.859184</title></circle><circle cx="266.3" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:47:31.859225</title></circle><circle cx="311.6" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:48:01.859928</title></circle><circle cx="356.8" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:48:31.859847</title></circle><circle cx="402.1" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:49:01.860257</title></circle><circle cx="447.4" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:49:31.868604</title></circle><circle cx="492.6" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:50:01.866655</title></circle><circle cx="537.9" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:50:31.865649</title></circle><circle cx="583.2" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:51:01.864390</title></circle><circle cx="628.4" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:51:31.863882</title></circle><circle cx="673.7" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:52:01.868959</title></circle><circle cx="718.9" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:52:31.867037</title></circle><circle cx="764.2" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:53:01.866710</title></circle><circle cx="809.5" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:53:31.868570</title></circle><circle cx="854.7" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:54:01.870766</title></circle><circle cx="900.0" cy="60.0" r="5" class="kill-dot"><title>2026-11-21T02:54:31.869797</title></circle>
+      <text x="40" y="108" class="axis">02:45:01</text><text x="900" y="108" text-anchor="end" class="axis">02:54:31</text>
+    </svg>
+    <p class="muted">Each dot is a SIGKILL; the axis spans the measured run (570s).</p>
+  <table>
+    <thead><tr><th>#</th><th>时间 (UTC)</th><th>runtime</th><th>pid</th><th>距上次</th></tr></thead>
+    <tbody><tr><td>1</td><td>2026-11-20T18:45:01.857674Z</td><td>runtime-a</td><td>40201</td><td></td></tr><tr><td>2</td><td>2026-11-20T18:45:31.855805Z</td><td>runtime-2</td><td>40480</td><td>30.00s</td></tr><tr><td>3</td><td>2026-11-20T18:46:01.858545Z</td><td>runtime-3</td><td>40645</td><td>30.00s</td></tr><tr><td>4</td><td>2026-11-20T18:46:31.858812Z</td><td>runtime-4</td><td>40998</td><td>30.00s</td></tr><tr><td>5</td><td>2026-11-20T18:47:01.859184Z</td><td>runtime-5</td><td>41625</td><td>30.00s</td></tr><tr><td>6</td><td>2026-11-20T18:47:31.859225Z</td><td>runtime-6</td><td>41830</td><td>30.00s</td></tr><tr><td>7</td><td>2026-11-20T18:48:01.859928Z</td><td>runtime-7</td><td>42070</td><td>30.00s</td></tr><tr><td>8</td><td>2026-11-20T18:48:31.859847Z</td><td>runtime-8</td><td>42242</td><td>30.00s</td></tr><tr><td>9</td><td>2026-11-20T18:49:01.860257Z</td><td>runtime-9</td><td>42380</td><td>30.00s</td></tr><tr><td>10</td><td>2026-11-20T18:49:31.868604Z</td><td>runtime-10</td><td>42723</td><td>30.01s</td></tr><tr><td>11</td><td>2026-11-20T18:50:01.866655Z</td><td>runtime-11</td><td>42973</td><td>30.00s</td></tr><tr><td>12</td><td>2026-11-20T18:50:31.865649Z</td><td>runtime-12</td><td>43180</td><td>30.00s</td></tr><tr><td>13</td><td>2026-11-20T18:51:01.86439Z</td><td>runtime-13</td><td>43388</td><td>30.00s</td></tr><tr><td>14</td><td>2026-11-20T18:51:31.863882Z</td><td>runtime-14</td><td>43541</td><td>30.00s</td></tr><tr><td>15</td><td>2026-11-20T18:52:01.868959Z</td><td>runtime-15</td><td>43702</td><td>30.01s</td></tr><tr><td>16</td><td>2026-11-20T18:52:31.867037Z</td><td>runtime-16</td><td>43923</td><td>30.00s</td></tr><tr><td>17</td><td>2026-11-20T18:53:01.86671Z</td><td>runtime-17</td><td>44166</td><td>30.00s</td></tr><tr><td>18</td><td>2026-11-20T18:53:31.86857Z</td><td>runtime-18</td><td>44338</td><td>30.00s</td></tr><tr><td>19</td><td>2026-11-20T18:54:01.870766Z</td><td>runtime-19</td><td>44490</td><td>30.00s</td></tr><tr><td>20</td><td>2026-11-20T18:54:31.869797Z</td><td>runtime-20</td><td>44993</td><td>30.00s</td></tr></tbody>
+  </table>
+
+  <h3>不变量计数器</h3>
+  <table><tbody><tr><th>eventCount</th><td>27463</td></tr><tr><th>sessionsChecked</th><td>16</td></tr><tr><th>seqGaps（丢事件）</th><td>0</td></tr><tr><th>duplicateRequestIDs</th><td>0</td></tr><tr><th>duplicateFinalReplies（重复最终回复）</th><td>0</td></tr><tr><th>unansweredNewest</th><td>0</td></tr><tr><th>orphanToolResults</th><td>0</td></tr><tr><th>unreadAfterSettle</th><td>0</td></tr><tr><th>stuckRuns</th><td>0</td></tr><tr><th>runStatusErrors</th><td>0</td></tr><tr><th>eventLoadErrors</th><td>0</td></tr></tbody></table>
+
+  <h3>Harness 自检项</h3>
+  <ul><li>seq contiguous from 1 on every session</li><li>every posted requestId committed exactly once</li><li>newest input answered; no input answered twice</li><li>read watermark covers every committed input</li><li>no unread-input flag left behind</li><li>no orphan tool results</li><li>every run converged (done/pending/failed)</li><li>every SIGKILL was followed by a counted runtime relaunch (restarts == faults)</li></ul>
+
+  <h2>断言失败</h2>
+  <ul><li class="pass-text">No assertion failures.</li></ul>
+
+  <h2>方法与口径</h2>
+  <ul>
+    <li><strong>规模与 2GB 合并</strong>：同一次运行同时覆盖 1000 SSE、64 并发 run、周期 1MiB 图片；2GB cgroup 复跑不再独立跑第二遍，避免“分开都能过、一起过不了”的假阳性。</li>
+    <li><strong>64 并发如何保证</strong>：64 个会话在 t=0 预填一条 input；runtime <code>-runs 64</code>，fake provider 每次固定 30s 延迟，保证 64 个 run 同时在执行。metrics <code>keel_runs_active</code> 每 250ms 采样，最大值必须恰为 64；随后队列排空、64 个 run 行全部 done。</li>
+    <li><strong>1000 会话在线</strong>：loadtest 创建 1000 个会话并保持 SSE；<code>keel_streams_active</code> 峰值必须 ≥1000。其余 936 个会话不发文本，避免把 1000 会话压测变成无界 run 洪泛。</li>
+    <li><strong>SIGKILL 频率</strong>：<code>cmd/chaos -mode kill -kill-every 30s -duration 600s</code>，每次 SIGKILL 后立即重启并计数；结果 JSON 记录每个 kill 的时间戳/pid，平均值、最小值、最大值都写入报告。</li>
+    <li><strong>0 丢事件 / 0 重复回复</strong>：chaos 在静默期后读取每个会话的完整事件日志，校验 seq 从 1 连续、requestId 恰好出现一次、每个 input 至多一条最终回复、最新 input 必有一条最终回复、无孤儿 tool result、read watermark 覆盖最新输入、run 状态收敛。</li>
+    <li><strong>环境</strong>：macOS macOS-27.2-arm64-arm-64bit-Mach-O；Go go version go1.27.3 darwin/arm64；Docker 29.8.0；PostgreSQL PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit。混沌 runtime 跑在宿主进程（不包 cgroup），规模 runtime 跑在 2GB 容器；两者都不使用真实 provider 凭据。</li>
+    <li><strong>清理</strong>：专用数据库 <code>keel_test_ga_g5</code> 与 <code>keel_test_ga_g5_chaos</code> 在退出时删除，容器/端口/孤儿进程回收结果见下方 cleanup 证据。</li>
+  </ul>
+
+  <h2>证据文件</h2>
+  <table>
+    <thead><tr><th>文件</th><th>字节</th><th>sha256[:16]</th></tr></thead>
+    <tbody><tr><td>chaos/chaos-kill.json</td><td>3,021</td><td><code>94ce6e6e98ec34b9</code></td></tr><tr><td>chaos/chaos.log</td><td>4,033</td><td><code>670f119c18b210a0</code></td></tr><tr><td>chaos/cleanup.txt</td><td>219</td><td><code>1e65c7e263f422cd</code></td></tr><tr><td>chaos/result.json</td><td>3,429</td><td><code>7b8ff407967661d0</code></td></tr><tr><td>chaos/runtime-tail.log</td><td>663,190</td><td><code>0ac915f5a29e61f9</code></td></tr><tr><td>chaos/runtime.log.gz</td><td>908,799</td><td><code>90d2433933f97afd</code></td></tr><tr><td>meta.json</td><td>842</td><td><code>9191f3ff3aec1c3e</code></td></tr><tr><td>perf/bench.json</td><td>893</td><td><code>16914be4cc01b927</code></td></tr><tr><td>perf/cgroup-memory-current.txt</td><td>10</td><td><code>0234972a0e971dd1</code></td></tr><tr><td>perf/cgroup-memory-max.txt</td><td>11</td><td><code>604fec38960d7c5b</code></td></tr><tr><td>perf/cgroup-memory-peak.txt</td><td>10</td><td><code>8f311be5c69f2c12</code></td></tr><tr><td>perf/cleanup.txt</td><td>101</td><td><code>e6ee23d112172d5e</code></td></tr><tr><td>perf/loadtest.log</td><td>133</td><td><code>56fbc7c33fc363a4</code></td></tr><tr><td>perf/result.json</td><td>1,204</td><td><code>92a78d7a6a43740c</code></td></tr><tr><td>perf/runtime.log</td><td>2,704,319</td><td><code>e53b69b34bae38b6</code></td></tr></tbody>
+  </table>
+
+  <h2>日志摘要</h2>
+  
+        <details>
+          <summary>perf / loadtest.log <span class="muted">(tail 40)</span></summary>
+          <pre>2026/11/20 18:56:10 tenant 30f9bcc5-2d94-4b5d-977e-a63a1edbdc57
+2026/11/20 18:56:11 seeded 1000 sessions, 20 images of 1048576 bytes</pre>
+        </details>
+        <details>
+          <summary>perf / runtime.log <span class="muted">(tail 40)</span></summary>
+          <pre>{&quot;time&quot;:&quot;2026-11-20T18:57:11.780503217Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;aeeaf2c5-1181-42be-b6bb-2c5b79e7be42&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:3,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;f6de17c2-8af7-4ace-80a8-166ad51d277b&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.780505342Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;59c36e7e-8414-4ba9-9572-b197ded3481e&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;9e9c189c-83b2-4794-a95b-543a0107a66a&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.780569884Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;3f0996fa-80a8-4d25-a3ca-58532de1d259&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;3f7dd116-18ea-4c40-871e-a59e3da0f85a&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.780832592Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;3e6838c6-d8d8-477d-bf2c-5ad5e59fb335&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;4741c126-403c-49c4-952d-05b1e066fd75&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.780876134Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;b82fe80a-a819-4f9e-96a5-37485d4aeb79&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:9,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;488b25e6-6d50-42e5-8219-a660f23f9ae2&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.780978217Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;c3d68074-2671-415a-badc-81c81626b894&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:9,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;e387b0e2-1364-4fd2-be70-31105f5fb33b&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.781083717Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;25f72a73-7640-4b71-a0c1-e370c13729aa&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:9,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;4775e250-9d70-4b93-89da-8a90c5fe38bd&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.781143592Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;63176254-56c0-4f69-89b9-60d8cf219d9e&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;4460abba-34d6-4724-9378-3391ecc8270e&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.782192217Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d8e6f737-0d00-46c3-800b-58abbb55bc0b&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;c6d943fb-2644-4c1c-b15d-062c601d98ca&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.782546759Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;88bb878b-5767-44f7-a135-e6ab25284242&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;cf2812b0-53a8-4554-9af3-2e73acb4a7fd&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.783538967Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;531c368b-232a-459d-9790-4dc6144f6aae&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;71bd6973-746a-4a04-b584-f5bf0b26b52b&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.783573467Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;ea9525fa-2f14-4d1a-8fd5-b71dbab9331e&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;e2183826-d0ee-4737-a31a-1571cd4a950f&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.7836293Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e34be645-3c2a-40a9-bf4c-d6be4eb4a052&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;ed9d28c0-981f-4450-924f-2c346a15432a&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.7836413Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;a0d633f6-f45c-4940-a031-bba53fb71744&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;9da14ec5-a2d9-45ad-8ea2-9375cc80c5c1&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.78369555Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;27beb7c7-212f-45e2-8494-4c24908eda8c&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;2ab120af-b6aa-4a4c-8992-485ede5e7891&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.783891467Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;efdd9427-898a-4ada-a29c-9267780a91db&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;ecf061de-d703-4e08-b414-ed2d89b62dc0&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.785191384Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;256ddb22-1c6a-4829-9ef8-d73f953d17f1&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;1fc15923-99e4-4098-91a7-29c3001413cc&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.785277509Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d333511c-a7ae-4c6d-af04-94521b5769e5&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:3,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;4d30d9b4-d909-47ba-832d-8064e013b982&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.785215717Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;b9bdee58-7a4a-4448-adcb-d005bc6ce149&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:3,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;7bcb005f-65cb-40fe-82a3-db78902d964a&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.785622842Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;b45743d2-3fe1-4f59-85fb-7cc0a9f811a7&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;fbaffd02-0f9a-4f35-945b-db99c7d2683c&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.7860993Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;38642495-80ae-4774-bee0-ef9712db77ee&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;835c74c6-412c-4651-888a-a6c2491a7383&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786184467Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;6de0ef74-ff43-4273-956b-a8fbf1db71ca&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:5,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;703a83b4-43fc-4b08-ae17-c1aa504f1a52&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.7861933Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d10ba4a9-a401-4b75-9153-68956b06cfa6&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;0e896b17-2da4-4f05-9eba-07a6c13de0f5&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786266175Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;a6dd1a86-5721-446f-ab71-96d3fb52b3dc&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;177240de-c2a2-4d8d-bc45-1ca10bbe8d11&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786265425Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;c76d1b7f-203b-4a42-b854-2a6f0c20b302&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;f5f39678-8c8a-4003-95a4-e6b121d66fe6&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786320259Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;3ed654a5-2e25-4a57-8dbc-955528b2adea&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;db2dc364-1c23-4f60-a58b-0f063ea68df7&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786373009Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;1b9b303e-6346-4756-94f4-6891d356e0aa&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;11aa1d9e-e533-4f0e-910d-07d825ddb562&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.7863863Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;339dd14b-b4cc-40eb-b0a2-f3a69f40f6be&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:5,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;91c09393-0b06-41d9-a5b5-1fc263af91e1&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786447467Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e406dc1f-075d-4fdc-978f-3bd9d088f661&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;88dd48c0-0723-4ea2-bbe1-cb3dfcb49d43&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786474217Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;28d3a8ca-ebae-4cf9-b739-1925b37fdda0&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;31621118-e864-4b41-88c9-51d0ec80bd36&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.786522634Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;6d2d98f9-e8b7-4458-9687-7faccb7253c3&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;eb729add-d11e-4cc0-9faa-a871fa9203fa&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.78658705Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;f61210b1-124c-4800-bd49-7c6f6e3f5ca8&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;84ad5450-33da-4b72-ab4b-95301c17061c&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.787525217Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;9cf1e036-7061-41da-8bd1-9cf6169a2780&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:3,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;339639f4-f441-42e0-b257-823d1bd69a37&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.787612634Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;ed78b74d-5494-40e4-9741-3c38d3e2b629&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:3,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;0889da37-3cdc-4199-9067-8c81b52d528a&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.788156592Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;ad81f4cc-c4a1-418b-a7f6-f77ebb7b0f75&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;3395b816-3e3b-415f-8b9e-326be5d7c395&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.788596592Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;a3cd0b1a-9cce-444b-9952-998ff5333b2b&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;90a9c7d8-266f-47a2-87cc-d1e4c3420a1d&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.788607967Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;76d5ed53-ddf5-4a0d-8c79-a51ef409c781&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;5dd3f4cd-22db-4583-bc3c-cfeb40adad2d&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.788616634Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;80cc06d3-b396-4cf8-b41e-8513b44c1246&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;31941771-24a5-4457-a082-7673bf23b7fa&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.788663759Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;00680100-2e2a-43b2-bbd0-042af6ae6338&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;c0c4a710-bc1d-46ca-98de-b27a39183e33&quot;}
+{&quot;time&quot;:&quot;2026-11-20T18:57:11.788837759Z&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d887767f-d2f6-4e0b-9f40-043f3ff25596&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:77,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;30f9bcc5-2d94-4b5d-977e-a63a1edbdc57&quot;,&quot;session_id&quot;:&quot;cec82e7b-1a7b-4c0a-b33b-c4aa931c9dbf&quot;}</pre>
+        </details>
+        <details>
+          <summary>chaos / chaos.log <span class="muted">(tail 40)</span></summary>
+          <pre>      &quot;pid&quot;: 43388
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:51:31.863882Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-14&quot;,
+      &quot;pid&quot;: 43541
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:52:01.868959Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-15&quot;,
+      &quot;pid&quot;: 43702
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:52:31.867037Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-16&quot;,
+      &quot;pid&quot;: 43923
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:53:01.86671Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-17&quot;,
+      &quot;pid&quot;: 44166
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:53:31.86857Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-18&quot;,
+      &quot;pid&quot;: 44338
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:54:01.870766Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-19&quot;,
+      &quot;pid&quot;: 44490
+    },
+    {
+      &quot;at&quot;: &quot;2026-11-20T18:54:31.869797Z&quot;,
+      &quot;runtime&quot;: &quot;runtime-20&quot;,
+      &quot;pid&quot;: 44993
+    }
+  ],
+  &quot;successions&quot;: 0
+}</pre>
+        </details>
+        <details>
+          <summary>chaos / runtime-tail.log <span class="muted">(tail 40)</span></summary>
+          <pre>{&quot;time&quot;:&quot;2026-11-21T02:55:16.622931+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;3140f1a4-10c4-4ba2-8d96-997b9ffb1e2a&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:120271,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;42349ed8-2f39-4f5b-868c-9f1f8b972e3f&quot;,&quot;session_id&quot;:&quot;08bece7a-4128-4cb5-8c99-bf73d365fc74&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:16.653854+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;0f87d0d5-2d3f-49ae-aafc-c856d7fc5886&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:219282,&quot;duration_ms&quot;:29,&quot;tenant_id&quot;:&quot;42349ed8-2f39-4f5b-868c-9f1f8b972e3f&quot;,&quot;session_id&quot;:&quot;08bece7a-4128-4cb5-8c99-bf73d365fc74&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:16.674454+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;b35b1f35-5d5b-4ca2-bb0f-99a03e673518&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:258392,&quot;duration_ms&quot;:19,&quot;tenant_id&quot;:&quot;42349ed8-2f39-4f5b-868c-9f1f8b972e3f&quot;,&quot;session_id&quot;:&quot;08bece7a-4128-4cb5-8c99-bf73d365fc74&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:16.691237+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;bbff5d8a-147b-471c-90c2-9e4cd74473a3&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:156046,&quot;duration_ms&quot;:15,&quot;tenant_id&quot;:&quot;42349ed8-2f39-4f5b-868c-9f1f8b972e3f&quot;,&quot;session_id&quot;:&quot;08bece7a-4128-4cb5-8c99-bf73d365fc74&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:18.761731+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;5d87763b-e733-4f34-972c-d8e3ed9b20b7&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;42349ed8-2f39-4f5b-868c-9f1f8b972e3f&quot;,&quot;session_id&quot;:&quot;08bece7a-4128-4cb5-8c99-bf73d365fc74&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:18.770266+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;bf4a6f72-fe6c-49f9-9b02-93ddcece4de6&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:129763,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;94f7d96c-02f1-421a-82cc-9ef3ba9b0ae9&quot;,&quot;session_id&quot;:&quot;b33b4ad1-4b6f-42cb-9e9c-2a7a6cfcad7c&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:18.800701+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;81ffc663-8ca2-4fe1-8cff-ee6654fe86f0&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:199786,&quot;duration_ms&quot;:29,&quot;tenant_id&quot;:&quot;94f7d96c-02f1-421a-82cc-9ef3ba9b0ae9&quot;,&quot;session_id&quot;:&quot;b33b4ad1-4b6f-42cb-9e9c-2a7a6cfcad7c&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:18.822167+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;03c7cc1d-2b90-4eb6-80c3-b4c07e29573b&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:305041,&quot;duration_ms&quot;:19,&quot;tenant_id&quot;:&quot;94f7d96c-02f1-421a-82cc-9ef3ba9b0ae9&quot;,&quot;session_id&quot;:&quot;b33b4ad1-4b6f-42cb-9e9c-2a7a6cfcad7c&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:18.853407+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e9937c4d-8b99-49f6-8b49-df0cd13a533e&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:171443,&quot;duration_ms&quot;:27,&quot;tenant_id&quot;:&quot;94f7d96c-02f1-421a-82cc-9ef3ba9b0ae9&quot;,&quot;session_id&quot;:&quot;b33b4ad1-4b6f-42cb-9e9c-2a7a6cfcad7c&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:21.303233+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;6524559b-a807-49a3-925c-a4e3b0377b32&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;94f7d96c-02f1-421a-82cc-9ef3ba9b0ae9&quot;,&quot;session_id&quot;:&quot;b33b4ad1-4b6f-42cb-9e9c-2a7a6cfcad7c&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:21.309097+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;cd176bf9-38ae-4a31-92b0-ba2bd81e4bc0&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:102562,&quot;duration_ms&quot;:5,&quot;tenant_id&quot;:&quot;0e20f326-6c4a-48d0-aee7-afa061ef5840&quot;,&quot;session_id&quot;:&quot;986bde8b-8711-4510-8e40-ced2d3a54513&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:21.338021+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;f3734dfd-775a-4214-8593-df17c8aa51ae&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:205549,&quot;duration_ms&quot;:27,&quot;tenant_id&quot;:&quot;0e20f326-6c4a-48d0-aee7-afa061ef5840&quot;,&quot;session_id&quot;:&quot;986bde8b-8711-4510-8e40-ced2d3a54513&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:21.359357+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;bad80985-a5b3-45b8-b85e-1794b39ba0fd&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:305215,&quot;duration_ms&quot;:20,&quot;tenant_id&quot;:&quot;0e20f326-6c4a-48d0-aee7-afa061ef5840&quot;,&quot;session_id&quot;:&quot;986bde8b-8711-4510-8e40-ced2d3a54513&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:21.372859+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d85bb316-158c-4426-b490-87565f034e6f&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:166004,&quot;duration_ms&quot;:12,&quot;tenant_id&quot;:&quot;0e20f326-6c4a-48d0-aee7-afa061ef5840&quot;,&quot;session_id&quot;:&quot;986bde8b-8711-4510-8e40-ced2d3a54513&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:24.392962+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;77fe7ffa-4576-498f-a4b2-003bff61702f&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;0e20f326-6c4a-48d0-aee7-afa061ef5840&quot;,&quot;session_id&quot;:&quot;986bde8b-8711-4510-8e40-ced2d3a54513&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:24.4024+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;cfdc5dab-9344-4d35-9f60-82949a63ba44&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:118208,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;f9b31d45-ea7e-43da-a1fc-608107ae59d2&quot;,&quot;session_id&quot;:&quot;90738f31-bada-4204-8a44-d00e7dea07ad&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:24.42299+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;58e1f11f-6b93-4293-a43c-28807ea912f2&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:201922,&quot;duration_ms&quot;:19,&quot;tenant_id&quot;:&quot;f9b31d45-ea7e-43da-a1fc-608107ae59d2&quot;,&quot;session_id&quot;:&quot;90738f31-bada-4204-8a44-d00e7dea07ad&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:24.435564+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e301c9bc-7076-413b-9091-a060603f5bff&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:313398,&quot;duration_ms&quot;:11,&quot;tenant_id&quot;:&quot;f9b31d45-ea7e-43da-a1fc-608107ae59d2&quot;,&quot;session_id&quot;:&quot;90738f31-bada-4204-8a44-d00e7dea07ad&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:24.441978+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;9534f978-e158-464d-a33f-02d45ee1a76b&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:162288,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;f9b31d45-ea7e-43da-a1fc-608107ae59d2&quot;,&quot;session_id&quot;:&quot;90738f31-bada-4204-8a44-d00e7dea07ad&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:26.84353+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;7035dc65-a3e8-414d-b69a-71074bfe0f51&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;f9b31d45-ea7e-43da-a1fc-608107ae59d2&quot;,&quot;session_id&quot;:&quot;90738f31-bada-4204-8a44-d00e7dea07ad&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:26.850628+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;acc6b67f-43ee-4f65-ba68-57bb172ba124&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:123632,&quot;duration_ms&quot;:6,&quot;tenant_id&quot;:&quot;4348d415-5111-4529-9e90-d45bedd1c6d3&quot;,&quot;session_id&quot;:&quot;8c851a87-9629-46f5-88a0-f0e6f3a318d6&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:26.858381+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;1df167e0-43a7-429e-853d-20f677dac173&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:208942,&quot;duration_ms&quot;:6,&quot;tenant_id&quot;:&quot;4348d415-5111-4529-9e90-d45bedd1c6d3&quot;,&quot;session_id&quot;:&quot;8c851a87-9629-46f5-88a0-f0e6f3a318d6&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:26.878742+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;251c6170-5f54-49a7-bba5-8be3c32ec277&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:302855,&quot;duration_ms&quot;:19,&quot;tenant_id&quot;:&quot;4348d415-5111-4529-9e90-d45bedd1c6d3&quot;,&quot;session_id&quot;:&quot;8c851a87-9629-46f5-88a0-f0e6f3a318d6&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:26.894814+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;a4fdd5c7-f590-4c04-9c3a-9dc1193fb202&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:156994,&quot;duration_ms&quot;:13,&quot;tenant_id&quot;:&quot;4348d415-5111-4529-9e90-d45bedd1c6d3&quot;,&quot;session_id&quot;:&quot;8c851a87-9629-46f5-88a0-f0e6f3a318d6&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:29.12745+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;a7846407-b6e8-45e7-97a8-21814b120f24&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;4348d415-5111-4529-9e90-d45bedd1c6d3&quot;,&quot;session_id&quot;:&quot;8c851a87-9629-46f5-88a0-f0e6f3a318d6&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:29.13621+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;94321965-0ad8-413f-be2e-c7d8283d2d06&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:132799,&quot;duration_ms&quot;:8,&quot;tenant_id&quot;:&quot;1928bcf9-578e-448e-a786-96efeb4499c5&quot;,&quot;session_id&quot;:&quot;7aaafc47-fa46-4669-9165-c28fb0effc59&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:29.164161+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e5b62f16-3327-4ad7-a739-1515953aeb72&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:214638,&quot;duration_ms&quot;:26,&quot;tenant_id&quot;:&quot;1928bcf9-578e-448e-a786-96efeb4499c5&quot;,&quot;session_id&quot;:&quot;7aaafc47-fa46-4669-9165-c28fb0effc59&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:29.180906+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;822ca597-7dad-4ee8-9e0e-c2b6f306f386&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:261440,&quot;duration_ms&quot;:14,&quot;tenant_id&quot;:&quot;1928bcf9-578e-448e-a786-96efeb4499c5&quot;,&quot;session_id&quot;:&quot;7aaafc47-fa46-4669-9165-c28fb0effc59&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:29.196885+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;c24932c2-b503-4dac-a20e-93aba7b14f37&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:169176,&quot;duration_ms&quot;:14,&quot;tenant_id&quot;:&quot;1928bcf9-578e-448e-a786-96efeb4499c5&quot;,&quot;session_id&quot;:&quot;7aaafc47-fa46-4669-9165-c28fb0effc59&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:31.290003+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;71e9e81e-ce14-4f54-b9ba-76cacc0fab29&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;1928bcf9-578e-448e-a786-96efeb4499c5&quot;,&quot;session_id&quot;:&quot;7aaafc47-fa46-4669-9165-c28fb0effc59&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:31.295314+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e6cbea8c-e40a-4a73-81b3-e1e11d03eba4&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:119203,&quot;duration_ms&quot;:4,&quot;tenant_id&quot;:&quot;dbecc95b-78a0-4999-afbf-cf5c34841959&quot;,&quot;session_id&quot;:&quot;0b20374b-fa7d-49ea-98a5-5ab60afa9114&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:31.323295+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;43618f99-f071-4125-83af-67db3a500527&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:203395,&quot;duration_ms&quot;:26,&quot;tenant_id&quot;:&quot;dbecc95b-78a0-4999-afbf-cf5c34841959&quot;,&quot;session_id&quot;:&quot;0b20374b-fa7d-49ea-98a5-5ab60afa9114&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:31.346036+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;9704f893-54ce-4e99-9305-6f20bc763a01&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:293792,&quot;duration_ms&quot;:21,&quot;tenant_id&quot;:&quot;dbecc95b-78a0-4999-afbf-cf5c34841959&quot;,&quot;session_id&quot;:&quot;0b20374b-fa7d-49ea-98a5-5ab60afa9114&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:31.359967+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;c16a849b-681f-476d-b538-f9078e90f114&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:129768,&quot;duration_ms&quot;:10,&quot;tenant_id&quot;:&quot;dbecc95b-78a0-4999-afbf-cf5c34841959&quot;,&quot;session_id&quot;:&quot;0b20374b-fa7d-49ea-98a5-5ab60afa9114&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:33.296973+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d9246853-b142-4f2e-8308-e673218e1615&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:0,&quot;tenant_id&quot;:&quot;dbecc95b-78a0-4999-afbf-cf5c34841959&quot;,&quot;session_id&quot;:&quot;0b20374b-fa7d-49ea-98a5-5ab60afa9114&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:33.299329+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;2d595c41-ecd3-4ded-a3e1-9f1a1ab6ccce&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:108673,&quot;duration_ms&quot;:2,&quot;tenant_id&quot;:&quot;10af2745-cf97-4caf-b09d-729efb9f9d5a&quot;,&quot;session_id&quot;:&quot;dba37771-482b-48fa-b8bd-658dc0d69cfb&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:33.314539+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;684007f1-d9e3-47a6-a9c3-f229ed5c2990&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:204017,&quot;duration_ms&quot;:14,&quot;tenant_id&quot;:&quot;10af2745-cf97-4caf-b09d-729efb9f9d5a&quot;,&quot;session_id&quot;:&quot;dba37771-482b-48fa-b8bd-658dc0d69cfb&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:33.335378+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;20b996c3-7061-490d-9517-507bc073b97d&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:304873,&quot;duration_ms&quot;:19,&quot;tenant_id&quot;:&quot;10af2745-cf97-4caf-b09d-729efb9f9d5a&quot;,&quot;session_id&quot;:&quot;dba37771-482b-48fa-b8bd-658dc0d69cfb&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:33.350385+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;e4df4f29-77b9-4675-85e1-856f5474d6ff&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/events&quot;,&quot;status&quot;:200,&quot;bytes&quot;:160420,&quot;duration_ms&quot;:13,&quot;tenant_id&quot;:&quot;10af2745-cf97-4caf-b09d-729efb9f9d5a&quot;,&quot;session_id&quot;:&quot;dba37771-482b-48fa-b8bd-658dc0d69cfb&quot;}
+{&quot;time&quot;:&quot;2026-11-21T02:55:35.451493+08:00&quot;,&quot;level&quot;:&quot;INFO&quot;,&quot;msg&quot;:&quot;http request&quot;,&quot;request_id&quot;:&quot;d0d8106c-6e08-4e2d-909c-9253618beb2f&quot;,&quot;method&quot;:&quot;GET&quot;,&quot;route&quot;:&quot;GET /v1/sessions/{id}/run&quot;,&quot;status&quot;:200,&quot;bytes&quot;:82,&quot;duration_ms&quot;:1,&quot;tenant_id&quot;:&quot;10af2745-cf97-4caf-b09d-729efb9f9d5a&quot;,&quot;session_id&quot;:&quot;dba37771-482b-48fa-b8bd-658dc0d69cfb&quot;}</pre>
+        </details>
+
+  <h2>清理证据</h2>
+  <h3>perf cleanup</h3><pre>exit=0
+database_dropped=keel_test_ga_g5
+port_13750=free
+port_13751=free
+container=removed:keel-g5-2g</pre><h3>chaos cleanup</h3><pre>exit=0
+orphans_killed=none
+database_dropped=keel_test_ga_g5_chaos
+port_13760=free
+port_13761=free
+runtime_processes=none
+runtime_log_compressed=8231060 bytes
+runtime_log=runtime.log.gz
+runtime_log_tail=runtime-tail.log</pre>
+
+  <footer>
+    keel-ga G5 · generated by <code>scripts/g5-report.py</code> · 本文件自包含（无外部脚本/图片/字体）。
+  </footer>
+</main>
+</body>
+</html>

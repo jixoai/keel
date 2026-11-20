@@ -1,0 +1,5 @@
+exit=0
+database_dropped=keel_test_ga_g5
+port_13750=free
+port_13751=free
+container=removed:keel-g5-2g

@@ -1,0 +1,4 @@
+url=https://local-gaubee-reports.fde2e.com/keel/keel-ga-g5/report.html
+http_code=200
+checked_at=2026-11-20T18:57:26Z
+published_file=/Users/kzf/Development/GitHub/jixoai/fde2e/.agents/reports/manager/keel/keel-ga-g5/report.html

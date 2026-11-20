@@ -124,8 +124,13 @@
 
 ## 6. 验收
 
-- [ ] 1000 会话在线 + 64 并发 run，RSS < 2GB
-- [ ] 随机 SIGKILL（每 30s，持续 10min）0 丢事件、0 重复最终回复
-- [ ] 2GB cgroup 复跑
+- [x] 1000 会话在线 + 64 并发 run，RSS < 2GB
+      （`evidence/g5-2026-11-21/perf/result.json`：sseSessions=1000、runsActiveMax=64、
+      done=64/failed=0/pending=0、cgroup peak 676.6MB / 2048MB）
+- [x] 随机 SIGKILL（每 30s，持续 10min）0 丢事件、0 重复最终回复
+      （`evidence/g5-2026-11-21/chaos/result.json`：20 kills / 20 restarts、mean interval 30.00s、
+      seqGaps=0、duplicateFinalReplies=0，27463 事件审计）
+- [x] 2GB cgroup 复跑
+      （与 1000/64 合并：`memory.max=2147483648`、`memory.peak=676614144` bytes，口径见报告）
 - [ ] 子代理交叉复核（本项目不使用 Codex）
 - [ ] 报告 + 公网链接 + 归档本 change

@@ -1,0 +1,40 @@
+{
+  "bytesIn": 1396705896,
+  "drainWaitSec": 0.09020125,
+  "durationSec": 60.03710911,
+  "errorCounts": {},
+  "imageLatencyP50MS": 28230.70993,
+  "imageLatencyP95MS": 30289.708222,
+  "imageLatencyP99MS": 30643.152723,
+  "imagesErr": 347,
+  "imagesOK": 999,
+  "metricsError": "",
+  "prefillRuns": 64,
+  "rssMaxMB": 0,
+  "rssMinMB": 0,
+  "rssP50MB": 0,
+  "runStatusCounts": {
+    "done": 64
+  },
+  "runsActiveFinal": 0,
+  "runsActiveMax": 64,
+  "runsFailedFinal": 0,
+  "runsFinishedDone": 64,
+  "runsFinishedFail": 0,
+  "runsPendingFinal": 0,
+  "runsPendingMax": 62,
+  "runsStartedFinal": 64,
+  "runsVerified": 64,
+  "sessions": 1000,
+  "sseErrors": 2065,
+  "sseSessions": 1000,
+  "statusCounts": {
+    "-429": 3928,
+    "429": 2065
+  },
+  "streamsActiveMax": 1800,
+  "tenant": "30f9bcc5-2d94-4b5d-977e-a63a1edbdc57",
+  "textSessions": 64,
+  "texts": 64,
+  "throughputMBs": 23.264043134404677
+}

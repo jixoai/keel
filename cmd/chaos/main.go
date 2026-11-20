@@ -68,6 +68,8 @@ type config struct {
 	mode      string
 	settleFor time.Duration
 	jsonOut   string
+	logPath   string
+	casDir    string
 }
 
 type runtimeProc struct {
@@ -105,6 +107,7 @@ type harness struct {
 	handoffCycles int
 	successions   int
 	successionLog []successionEvidence
+	killLog       []killRecord
 	pool          *pgxpool.Pool
 }
 
@@ -147,6 +150,8 @@ func main() {
 	flag.StringVar(&c.mode, "mode", "kill", "kill | handoff")
 	flag.DurationVar(&c.settleFor, "settle", 20*time.Second, "quiet period after the last fault (must exceed the lease TTL)")
 	flag.StringVar(&c.jsonOut, "out", "", "write the result JSON here")
+	flag.StringVar(&c.logPath, "log", "/tmp/keel-chaos-runtime.log", "runtime process log path")
+	flag.StringVar(&c.casDir, "cas", "/tmp/keel-chaos-cas", "content-addressed store directory for the runtime processes")
 	flag.Parse()
 	if c.dsn == "" {
 		log.Fatal("KEEL_DSN (or -dsn) is required")
@@ -168,8 +173,9 @@ func main() {
 		log.Fatalf("open dsn: %v", err)
 	}
 	h := &harness{cfg: c, pool: pool}
+	startedAt := time.Now()
 	defer pool.Close()
-	f, err := os.OpenFile("/tmp/keel-chaos-runtime.log", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(c.logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -242,6 +248,8 @@ loop:
 	time.Sleep(c.settleFor)
 
 	result := h.verify(ctx, sessions)
+	result.StartedAt = startedAt.UTC()
+	result.DurationSec = time.Since(startedAt).Seconds()
 	raw, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(raw))
 	if c.jsonOut != "" {
@@ -255,6 +263,12 @@ loop:
 	}
 }
 
+type killRecord struct {
+	At      time.Time `json:"at"`
+	Runtime string    `json:"runtime"`
+	PID     int       `json:"pid"`
+}
+
 type result struct {
 	Mode       string   `json:"mode"`
 	Faults     int64    `json:"faults"`
@@ -264,6 +278,23 @@ type result struct {
 	Failures   []string `json:"failures"`
 	Pass       bool     `json:"pass"`
 	LastErrors []string `json:"lastErrors,omitempty"`
+	// Structured invariant counters. The Check/Failure strings already carry
+	// the verdict; these numbers make the G5 report state "0 lost events, 0
+	// duplicated final replies" as a measurement rather than a claim.
+	StartedAt             time.Time    `json:"startedAt"`
+	DurationSec           float64      `json:"durationSec"`
+	EventCount            int64        `json:"eventCount"`
+	SessionsChecked       int          `json:"sessionsChecked"`
+	SeqGaps               int          `json:"seqGaps"`
+	DuplicateRequestIDs   int          `json:"duplicateRequestIDs"`
+	DuplicateFinalReplies int          `json:"duplicateFinalReplies"`
+	UnansweredNewest      int          `json:"unansweredNewest"`
+	OrphanToolResults     int          `json:"orphanToolResults"`
+	UnreadAfterSettle     int          `json:"unreadAfterSettle"`
+	StuckRuns             int          `json:"stuckRuns"`
+	RunStatusErrors       int          `json:"runStatusErrors"`
+	EventLoadErrors       int          `json:"eventLoadErrors"`
+	Kills                 []killRecord `json:"kills,omitempty"`
 	// Handoff-only fields: how many handoff cycles ran, how many proved a real
 	// shift change, and the per-cycle evidence (epochs, runtime rows, drain
 	// audit). A drain that answers 200/409 but changes nothing leaves
@@ -309,7 +340,7 @@ func (h *harness) setEndpoint(port int) {
 
 func (h *harness) start(ctx context.Context, id string, port int) error {
 	cmd := exec.Command(h.cfg.bin, "-addr", fmt.Sprintf("127.0.0.1:%d", port),
-		"-cas", "/tmp/keel-chaos-cas", "-streams", "64", "-runs", "16")
+		"-cas", h.cfg.casDir, "-streams", "64", "-runs", "16")
 	env := []string{}
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "KEEL_") {
@@ -376,10 +407,14 @@ func (h *harness) sigkillNewest() {
 	h.mu.Lock()
 	proc := h.procs[len(h.procs)-1]
 	h.mu.Unlock()
-	_ = syscall.Kill(-proc.cmd.Process.Pid, syscall.SIGKILL)
+	pid := proc.cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = proc.cmd.Wait()
 	h.killed.Add(1)
-	log.Printf("SIGKILL %s (pid %d)", proc.id, proc.cmd.Process.Pid)
+	h.mu.Lock()
+	h.killLog = append(h.killLog, killRecord{At: time.Now().UTC(), Runtime: proc.id, PID: pid})
+	h.mu.Unlock()
+	log.Printf("SIGKILL %s (pid %d)", proc.id, pid)
 	time.Sleep(200 * time.Millisecond)
 }
 
@@ -597,7 +632,13 @@ func (h *harness) writeLoop(ctx context.Context, s *sessionState) {
 		}
 		n++
 		requestID := fmt.Sprintf("%s-%d", s.session[:8], n)
-		body := map[string]any{"text": fmt.Sprintf("chaos %d please echo this", n), "requestId": requestID}
+		// Do not put "echo" in the text: the deterministic provider would try to
+		// call the echo tool. That tool is a testkit fixture, not part of this
+		// runtime's production registry, so the tool call fails and the final
+		// answer no longer quotes the input — which breaks the per-input
+		// duplicate/convergence assertions below. The plain-text branch quotes
+		// the input verbatim and keeps every input independently observable.
+		body := map[string]any{"text": fmt.Sprintf("chaos %d please reply", n), "requestId": requestID}
 		code, err := h.post(ctx, "/v1/sessions/"+s.session+"/input", s.tenant, body, nil)
 		if err == nil && code == 201 {
 			s.mu.Lock()
@@ -674,12 +715,16 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 	for _, s := range sessions {
 		events, err := h.loadEvents(ctx, s)
 		if err != nil {
+			res.EventLoadErrors++
 			fail("session %s: load events: %v", s.session, err)
 			continue
 		}
+		res.SessionsChecked++
+		res.EventCount += int64(len(events))
 		// Contiguous seq from 1.
 		for i, ev := range events {
 			if ev.Seq != int64(i+1) {
+				res.SeqGaps++
 				fail("session %s: seq gap at index %d: got %d", s.session, i, ev.Seq)
 				break
 			}
@@ -701,6 +746,7 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 		s.mu.Unlock()
 		for _, rid := range want {
 			if seen[rid] != 1 {
+				res.DuplicateRequestIDs++
 				fail("session %s: requestId %s appears %d times (want exactly 1)", s.session, rid, seen[rid])
 			}
 		}
@@ -741,9 +787,11 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 			}
 		}
 		if finals > users {
+			res.DuplicateFinalReplies += finals - users
 			fail("session %s: %d final replies for %d user messages (duplicated answer)", s.session, finals, users)
 		}
 		if results > calls {
+			res.OrphanToolResults += results - calls
 			fail("session %s: %d tool results for %d tool calls (orphan result)", s.session, results, calls)
 		}
 		// Per-input answer accounting. The fake provider quotes the input text in
@@ -808,12 +856,14 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 		}
 		for _, in := range inputs {
 			if got := finalsWithText(in.text, in.seq); got > 1 {
+				res.DuplicateFinalReplies += got - 1
 				fail("session %s: input %q (seq %d) has %d final answers (duplicated reply)", s.session, in.text, in.seq, got)
 			}
 		}
 		if len(inputs) > 0 {
 			last := inputs[len(inputs)-1]
 			if finalsWithText(last.text, last.seq) != 1 {
+				res.UnansweredNewest++
 				fail("session %s: the newest input %q (seq %d) has no final answer (conversation did not converge)", s.session, last.text, last.seq)
 			}
 		}
@@ -823,6 +873,7 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 			fail("session %s: read state: %v", s.session, err)
 		} else {
 			if pending {
+				res.UnreadAfterSettle++
 				fail("session %s: run still carries unread input after the quiet period", s.session)
 			}
 			var newestUser int64
@@ -832,6 +883,7 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 				}
 			}
 			if maxSeq < newestUser {
+				res.UnreadAfterSettle++
 				fail("session %s: read watermark %d does not cover the newest input %d", s.session, maxSeq, newestUser)
 			}
 		}
@@ -840,12 +892,14 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 			Status string `json:"status"`
 		}
 		if code, err := h.get(ctx, "/v1/sessions/"+s.session+"/run", s.tenant, &run); err != nil || code != 200 {
+			res.RunStatusErrors++
 			fail("session %s: run status: %d %v", s.session, code, err)
 			continue
 		}
 		switch run.Status {
 		case "done", "pending", "failed":
 		default:
+			res.StuckRuns++
 			fail("session %s: run stuck in status %q after the quiet period", s.session, run.Status)
 		}
 	}
@@ -868,6 +922,9 @@ func (h *harness) verify(ctx context.Context, sessions []*sessionState) result {
 			fail("kill: %d SIGKILLs but %d counted runtime relaunches (want one per fault)", faults, h.restarts.Load())
 		}
 	}
+	h.mu.Lock()
+	res.Kills = append([]killRecord(nil), h.killLog...)
+	h.mu.Unlock()
 	if len(res.Failures) == 0 {
 		res.Pass = true
 		res.Checks = []string{
