@@ -76,17 +76,17 @@
           "messages": 3
         },
         "provider": "fake",
-        "durationMs": 186,
+        "durationMs": 17,
         "promptHash": "sha256:948767bc18f4cfd3393ee73ecde2ac2f1662dd9b4e2ed61aa7be240d200d2aa7",
         "stopReason": "end_turn"
       }
     }
   ],
-  "fakeServerPID": 82738,
+  "fakeServerPID": 49883,
   "markers": [
     {
       "event": "start",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "",
       "n": 0,
@@ -95,7 +95,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "",
       "n": 0,
@@ -104,7 +104,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -113,7 +113,7 @@
     },
     {
       "event": "listen_begin",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "",
       "n": 1,
@@ -122,7 +122,7 @@
     },
     {
       "event": "listen_ack",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "",
       "n": 1,
@@ -131,7 +131,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "",
       "n": 0,
@@ -140,7 +140,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82738,
+      "pid": 49883,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,

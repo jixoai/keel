@@ -421,18 +421,12 @@ curl -sS -H "X-Tenant-ID: $TENANT" 'https://<host>/v1/mcp/apps/audit?limit=50' |
 
 **当前缺口（与 spec 的差异，不要当成已完成）：**
 
-1. **客户端能力声明未实现**：`initialize` 的 `ClientCapabilities` 没有
-   `extensions`/`experimental` 里的 `io.modelcontextprotocol/ui`，也没有
-   `mimeTypes:["text/html;profile=mcp-app"]`。服务器不能据能力协商判断宿主是否支持 apps；
-   目录发现依赖服务器无条件声明 `_meta.ui`。对应 spec「降级路径与能力协商」的
-   「双位置能力声明」。
-2. **`_meta.ui.domain` 未随目录下发**：解析/校验了，但 `AppSpec` 没有 `domain` 字段；
-   目录消费方拿不到它。对应 spec「UI 资源的声明与读取」中的 domain 目录要求。
-3. **第二 origin 双 iframe 未实现**：见 §5.7；`KEEL_MCP_APP_ORIGIN` 只服务原生基址。
-4. **permissions 未授予**：见 §5.7；P3.6 依赖 NSH allow 面。
-5. **teardown 等待不阻塞**：web 卸载路径发送 `resource-teardown` 后立即销毁；1 s 有界
-   等待只有桥单测，未在真实卸载路径生效。
-6. **SDK 2.x 独有面**：`ui/download-file` 回 `-32601`；`ui/notifications/request-teardown`
+1. **第二 origin 双 iframe 未实现**：见 §5.7；`KEEL_MCP_APP_ORIGIN` 只服务原生基址。
+2. **permissions 未授予**：见 §5.7；P3.6 依赖 NSH allow 面。
+3. **teardown 等待不阻塞**：web 卸载路径发送 `resource-teardown` 后立即销毁；1 s 有界
+   等待只有桥单测，未在真实卸载路径生效；NSH 0.4 组件卸载模型不允许延迟移除，
+   已作为接受的偏离记录（`evidence/p6/fix/notes.md` §3），无数据/安全影响。
+4. **SDK 2.x 独有面**：`ui/download-file` 回 `-32601`；`ui/notifications/request-teardown`
    按未知通知销毁；`ui/notifications/tool-input-partial` 不发；`pip` 不支持。
 
 ## 6. 验收

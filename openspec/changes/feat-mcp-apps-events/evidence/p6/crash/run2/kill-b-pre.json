@@ -43,18 +43,18 @@
           "messages": 3
         },
         "provider": "fake",
-        "durationMs": 186,
+        "durationMs": 17,
         "promptHash": "sha256:948767bc18f4cfd3393ee73ecde2ac2f1662dd9b4e2ed61aa7be240d200d2aa7",
         "stopReason": "end_turn"
       }
     }
   ],
-  "fakeServerPID": 82669,
+  "fakeServerPID": 49839,
   "generationAfterAck": 2,
   "markers": [
     {
       "event": "start",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 0,
@@ -63,7 +63,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 0,
@@ -72,7 +72,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -81,7 +81,7 @@
     },
     {
       "event": "listen_begin",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 1,
@@ -90,7 +90,7 @@
     },
     {
       "event": "listen_ack",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 1,
@@ -99,7 +99,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 0,
@@ -108,7 +108,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -117,7 +117,7 @@
     },
     {
       "event": "listen_closed",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 1,
@@ -126,7 +126,7 @@
     },
     {
       "event": "listen_begin",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 2,
@@ -135,7 +135,7 @@
     },
     {
       "event": "listen_stall",
-      "pid": 82669,
+      "pid": 49839,
       "name": "",
       "uri": "",
       "n": 2,

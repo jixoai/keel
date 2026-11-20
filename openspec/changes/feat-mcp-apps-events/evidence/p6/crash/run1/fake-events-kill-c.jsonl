@@ -1,9 +1,9 @@
-{"event":"start","pid":82525,"scenario":"static","toolDelay":0,"ts":"2026-11-20T02:18:52.607164Z"}
-{"event":"tools_list","pid":82525,"ts":"2026-11-20T02:18:52.641877Z","version":1}
-{"event":"resource_read","pid":82525,"ts":"2026-11-20T02:18:52.653509Z","uri":"ui://scenario/dashboard"}
-{"event":"listen_begin","id":4,"n":1,"pid":82525,"ts":"2026-11-20T02:18:52.666179Z"}
-{"event":"listen_ack","n":1,"pid":82525,"ts":"2026-11-20T02:18:52.67235Z"}
-{"event":"tools_list","pid":82525,"ts":"2026-11-20T02:18:52.678323Z","version":1}
-{"event":"resource_read","pid":82525,"ts":"2026-11-20T02:18:52.690666Z","uri":"ui://scenario/dashboard"}
-{"event":"tools_call_begin","name":"show_dashboard","pid":82525,"ts":"2026-11-20T02:18:53.204424Z"}
-{"event":"tools_call_end","name":"show_dashboard","pid":82525,"text":"dashboard-ok v1","ts":"2026-11-20T02:18:53.210326Z"}
+{"event":"start","pid":49773,"scenario":"static","toolDelay":0,"ts":"2026-11-20T04:09:20.107112Z"}
+{"event":"tools_list","pid":49773,"ts":"2026-11-20T04:09:20.11685Z","version":1}
+{"event":"resource_read","pid":49773,"ts":"2026-11-20T04:09:20.121757Z","uri":"ui://scenario/dashboard"}
+{"event":"listen_begin","id":4,"n":1,"pid":49773,"ts":"2026-11-20T04:09:20.130021Z"}
+{"event":"listen_ack","n":1,"pid":49773,"ts":"2026-11-20T04:09:20.13488Z"}
+{"event":"tools_list","pid":49773,"ts":"2026-11-20T04:09:20.139801Z","version":1}
+{"event":"resource_read","pid":49773,"ts":"2026-11-20T04:09:20.145182Z","uri":"ui://scenario/dashboard"}
+{"event":"tools_call_begin","name":"show_dashboard","pid":49773,"ts":"2026-11-20T04:09:20.764397Z"}
+{"event":"tools_call_end","name":"show_dashboard","pid":49773,"text":"dashboard-ok v1","ts":"2026-11-20T04:09:20.773181Z"}

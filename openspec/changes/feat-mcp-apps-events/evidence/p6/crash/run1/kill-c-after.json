@@ -1,10 +1,10 @@
 {
   "auditRows": [
     {
-      "auditId": 1142,
-      "ts": "2026-11-20T10:18:51.773093+08:00",
-      "tenantId": "32f991c1-66bc-4908-8cc6-27f9936c5fb8",
-      "sessionId": "c95da83b-0050-4dad-9fb1-636d0478bee2",
+      "auditId": 1319,
+      "ts": "2026-11-20T12:09:19.652387+08:00",
+      "tenantId": "76ac6f12-defb-4f07-b6bb-f3c48c479891",
+      "sessionId": "87f9d61b-9f61-481f-af23-e833b090bca6",
       "server": "fixture",
       "appId": "mcpapp_9695970d06976122",
       "action": "tools/call",
@@ -63,7 +63,7 @@
         "title": "mcp-call:fixture/show_dashboard",
         "origin": "session",
         "status": "open",
-        "taskId": "a7e78893-4adf-5871-86fc-9e2d45327189"
+        "taskId": "6e9b7f9c-7c42-5210-93ad-0f8af456c00c"
       }
     },
     {
@@ -96,7 +96,7 @@
         "isError": false,
         "toolName": "mcp",
         "timestamp": 0,
-        "durationMs": 16,
+        "durationMs": 12,
         "toolCallId": "fake-553b99e3bedc10ed"
       }
     },
@@ -135,7 +135,7 @@
           "messages": 5
         },
         "provider": "fake",
-        "durationMs": 127,
+        "durationMs": 35,
         "promptHash": "sha256:948767bc18f4cfd3393ee73ecde2ac2f1662dd9b4e2ed61aa7be240d200d2aa7",
         "stopReason": "end_turn"
       }
@@ -144,7 +144,7 @@
   "markers": [
     {
       "event": "start",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "",
       "n": 0,
@@ -153,7 +153,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "",
       "n": 0,
@@ -162,7 +162,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -171,7 +171,7 @@
     },
     {
       "event": "listen_begin",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "",
       "n": 1,
@@ -180,7 +180,7 @@
     },
     {
       "event": "listen_ack",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "",
       "n": 1,
@@ -189,7 +189,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "",
       "n": 0,
@@ -198,7 +198,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82525,
+      "pid": 49773,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -207,7 +207,7 @@
     },
     {
       "event": "tools_call_begin",
-      "pid": 82525,
+      "pid": 49773,
       "name": "show_dashboard",
       "uri": "",
       "n": 0,
@@ -216,7 +216,7 @@
     },
     {
       "event": "tools_call_end",
-      "pid": 82525,
+      "pid": 49773,
       "name": "show_dashboard",
       "uri": "",
       "n": 0,

@@ -92,14 +92,15 @@
       app 标题 + 文档路径 + 文本结果。实例按 `toolCallId` 持有桥状态、`src` 由目录 appId+hash+
       instance+reload 决定；E2E 证明自导航后 reload 并重新握手，流式重渲染不改变文档身份。
       浏览器「流式期间不重建」的专项慢帧 E2E 仍归 P6.2。）
-- [ ] P2.8 降级面：无 apps 服务器/无能力客户端/取回失败/握手超时（5s）/协议违规 → 文本兜底 + 诊断 + 审计
+- [x] P2.8 降级面：无 apps 服务器/无能力客户端/取回失败/握手超时（5s）/协议违规 → 文本兜底 + 诊断 + 审计
       （验收：单测逐格 + E2E 一格）
       （2026-11-20 服务端部分已交付：无 apps 服务器=空目录、取回/校验/超限/缓存失败=诊断+审计+排除目录、
       重取失败保留旧版本、app 绑定按已发布目录门控（无半成品 app）；前端部分已交付：无能力/终端=
       文本+标题+链接、目录失败/握手超时/协议违规/加载失败=文本+原因+重试（`bridge.test.ts` 逐格、
       TUI 用例一格、浏览器 E2E 含导航降级一格；重载预算耗尽会尽力写
-      `protocol.violation` 审计）。剩余：审计表 `mcp_app_audit` 的 durable 落库（P3.7）与
-      P6.3 的独立降级 E2E，故本项仍未勾）
+      `protocol.violation` 审计）。2026-11-20 收口：审计 durable 落库 P3.7 已交付；P6A2a 浏览器
+      降级 E2E 覆盖握手超时 5011ms 文本兜底/重试、CSP 真实阻断未声明域名；P6G 修复 pre-load
+      initialize 首载误判。证据 `evidence/p6/degrade/final/`、`evidence/p6/browser/final/`）
 
 ## P3 — 桥与出站动作
 
@@ -123,11 +124,12 @@
       （验收：非法 scheme 拒绝并审计；不开宿主页导航）
       （2026-11-20：后端只返回 `{opened,url}` 供前端以 noopener,noreferrer 打开；默认 decision `mcp-app.link`；
       非法 scheme 400 + `ui/open-link=refused`；审计只记 host，不记 query；不写账本。前端 window.open 属前端 lane）
-- [ ] P3.5 `ui/request-display-mode`（inline/fullscreen；`pip` 拒绝回当前模式）、
+- [x] P3.5 `ui/request-display-mode`（inline/fullscreen；`pip` 拒绝回当前模式）、
       `ui/notifications/size-changed`、`ui/resource-teardown`（卸载前发，≤1s）
       （验收：桥单测 + E2E 全屏切换）
       （2026-11-20：桥/视图实现已在 P2 前端落地（`bridge.ts` 三方法 + `view.tsx`
-      全屏 Dialog/尺寸/teardown 测试）；未勾仅因浏览器全屏切换 E2E 归 P6.2）
+      全屏 Dialog/尺寸/teardown 测试）；2026-11-20 P6A1 真实浏览器 E2E 覆盖全屏切换/新实例
+      握手/退出全屏（`evidence/p6/browser/final/`））
 - [ ] P3.6 权限确认（camera/mic/geolocation/clipboardWrite）+ 偏好记忆；破坏性工具逐次确认
       （验收：拒绝后不静默重给；确认门 E2E）
       （2026-11-20 P3 后端切片：**部分**——破坏性工具逐次确认门与拒绝审计已在 P3.1 交付并测；
@@ -221,11 +223,17 @@
 
 ## P6 — 验收与收口
 
-- [ ] P6.1 G0–G5 证据逐条落盘（design §5.2 表），含崩溃矩阵（`cmd/e2e` 新 scenario `mcp-apps`）
+- [x] P6.1 G0–G5 证据逐条落盘（design §5.2 表），含崩溃矩阵（`cmd/e2e` 新 scenario `mcp-apps`）
       与规模/混沌（`scripts/acceptance-perf.sh` 扩展）
-- [ ] P6.2 浏览器 E2E：`scripts/mcp-apps-e2e.sh` → 每步截图 + 步骤解说 → `report.html`
+      （2026-11-20：G0 parity 28/28；G1/G2/G3 `scripts/mcp-apps-crash.sh` 2/2、每轮 3 次 SIGKILL；
+      G4 conformance 1077/0/1；G5 `scripts/mcp-apps-perf.sh` PASS；见 `evidence/p6/ACCEPTANCE.md`）
+- [x] P6.2 浏览器 E2E：`scripts/mcp-apps-e2e.sh` → 每步截图 + 步骤解说 → `report.html`
       （before/after 或 after+断言），落 `.agents/reports/keel/mcp-apps-events/` 并挂公网链接
-- [ ] P6.3 降级面 E2E：TUI 不渲染 app（URL+文本兜底）、CSP 拒绝域名、握手超时各一格
+      （2026-11-20：`scripts/mcp-apps-e2e.sh` 真实 serve+MCP+Chrome 2 轮 PASS，最终合并树 1 轮
+      PASS；13 步截图 + 自包含 `report.html` 在 `evidence/p6/browser/final/`；公网发布见 §P6.6）
+- [x] P6.3 降级面 E2E：TUI 不渲染 app（URL+文本兜底）、CSP 拒绝域名、握手超时各一格
+      （2026-11-20：`scripts/mcp-apps-degrade-e2e.sh` 两场景 PASS；TUI 164/174 测试见 web 门禁；
+      证据 `evidence/p6/degrade/final/`）
 - [ ] P6.4 子代理交叉复核（reviewer + vision 组合，本项目不使用 Codex），逐条闭合阻塞项
 - [x] P6.5 文档：`docs/HOST.md`（MCP 段：apps/events/era、HTTP/鉴权、安全、运维）、
       `docs/PI-PARITY.md`（偏离与未实现登记）、`site/docs/zh/harness/mcp-apps.md`（使用页；

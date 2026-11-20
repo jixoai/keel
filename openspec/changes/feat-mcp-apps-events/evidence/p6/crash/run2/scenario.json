@@ -1,9 +1,9 @@
 {
   "database": "keel_test_p6_crash",
-  "finishedAt": "2026-11-20T02:19:13Z",
-  "keelBin": "/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T//keel-mcp-apps-crash.ZvkEvX/keel",
+  "finishedAt": "2026-11-20T04:09:43Z",
+  "keelBin": "/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T//keel-mcp-apps-crash.U0zC7G/keel",
   "port": 13686,
   "results": 5,
   "scenario": "mcp-apps",
-  "startedAt": "2026-11-20T02:18:54Z"
+  "startedAt": "2026-11-20T04:09:21Z"
 }

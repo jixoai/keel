@@ -41,15 +41,15 @@
         "title": "mcp-call:fixture/show_dashboard",
         "origin": "session",
         "status": "open",
-        "taskId": "a7e78893-4adf-5871-86fc-9e2d45327189"
+        "taskId": "6e9b7f9c-7c42-5210-93ad-0f8af456c00c"
       }
     }
   ],
-  "fakeServerPID": 82389,
+  "fakeServerPID": 49751,
   "markers": [
     {
       "event": "start",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "",
       "n": 0,
@@ -58,7 +58,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "",
       "n": 0,
@@ -67,7 +67,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -76,7 +76,7 @@
     },
     {
       "event": "listen_begin",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "",
       "n": 1,
@@ -85,7 +85,7 @@
     },
     {
       "event": "listen_ack",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "",
       "n": 1,
@@ -94,7 +94,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "",
       "n": 0,
@@ -103,7 +103,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82389,
+      "pid": 49751,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -112,7 +112,7 @@
     },
     {
       "event": "tools_call_begin",
-      "pid": 82389,
+      "pid": 49751,
       "name": "refresh",
       "uri": "",
       "n": 0,
@@ -121,7 +121,7 @@
     },
     {
       "event": "tools_call_end",
-      "pid": 82389,
+      "pid": 49751,
       "name": "refresh",
       "uri": "",
       "n": 0,
@@ -130,7 +130,7 @@
     },
     {
       "event": "tools_call_begin",
-      "pid": 82389,
+      "pid": 49751,
       "name": "show_dashboard",
       "uri": "",
       "n": 0,

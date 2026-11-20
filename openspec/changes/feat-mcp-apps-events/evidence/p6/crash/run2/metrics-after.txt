@@ -3,10 +3,55 @@
 go_goroutines 24
 # HELP go_memstats_heap_alloc_bytes Bytes of allocated heap objects.
 # TYPE go_memstats_heap_alloc_bytes gauge
-go_memstats_heap_alloc_bytes 4.772072e+06
+go_memstats_heap_alloc_bytes 5.053288e+06
 # HELP go_memstats_heap_sys_bytes Bytes of heap memory obtained from the OS.
 # TYPE go_memstats_heap_sys_bytes gauge
-go_memstats_heap_sys_bytes 1.5958016e+07
+go_memstats_heap_sys_bytes 1.1730944e+07
+# HELP keel_runs_started_total Agent run attempts claimed by this process.
+# TYPE keel_runs_started_total counter
+keel_runs_started_total 2
+# HELP keel_runs_finished_total Agent runs whose terminal state was committed (status=done|failed).
+# TYPE keel_runs_finished_total counter
+keel_runs_finished_total{status="done"} 2
+# HELP keel_runs_failed_total Agent runs whose terminal state is failed.
+# TYPE keel_runs_failed_total counter
+keel_runs_failed_total 0
+# HELP keel_run_attempts_total Agent run attempts settled by this process, by outcome (done|failed|pending|finish_error|abandoned|other).
+# TYPE keel_run_attempts_total counter
+keel_run_attempts_total{outcome="done"} 2
+# HELP keel_run_attempt_duration_seconds Wall-clock duration of one agent run attempt.
+# TYPE keel_run_attempt_duration_seconds histogram
+keel_run_attempt_duration_seconds_bucket{le="0.01"} 0
+keel_run_attempt_duration_seconds_bucket{le="0.05"} 2
+keel_run_attempt_duration_seconds_bucket{le="0.1"} 2
+keel_run_attempt_duration_seconds_bucket{le="0.25"} 2
+keel_run_attempt_duration_seconds_bucket{le="0.5"} 2
+keel_run_attempt_duration_seconds_bucket{le="1"} 2
+keel_run_attempt_duration_seconds_bucket{le="2.5"} 2
+keel_run_attempt_duration_seconds_bucket{le="5"} 2
+keel_run_attempt_duration_seconds_bucket{le="10"} 2
+keel_run_attempt_duration_seconds_bucket{le="30"} 2
+keel_run_attempt_duration_seconds_bucket{le="60"} 2
+keel_run_attempt_duration_seconds_bucket{le="120"} 2
+keel_run_attempt_duration_seconds_bucket{le="300"} 2
+keel_run_attempt_duration_seconds_bucket{le="+Inf"} 2
+keel_run_attempt_duration_seconds_sum 0.084389041
+keel_run_attempt_duration_seconds_count 2
+# HELP keel_runs_active Agent run attempts currently executing in this process.
+# TYPE keel_runs_active gauge
+keel_runs_active 0
+# HELP keel_leases_expired_total Runs reclaimed after their lease expired.
+# TYPE keel_leases_expired_total counter
+keel_leases_expired_total 0
+# HELP keel_run_finish_errors_total Run attempts whose terminal state could not be persisted.
+# TYPE keel_run_finish_errors_total counter
+keel_run_finish_errors_total 0
+# HELP keel_compactions_total Compaction events committed to the event log.
+# TYPE keel_compactions_total counter
+keel_compactions_total 0
+# HELP keel_draining 1 while the process is draining, else 0.
+# TYPE keel_draining gauge
+keel_draining 0
 # HELP mcp_servers MCP servers in each connection state (connected|disconnected).
 # TYPE mcp_servers gauge
 mcp_servers{state="connected"} 1
@@ -38,3 +83,9 @@ mcp_mrtr_rounds_bucket{le="5"} 0
 mcp_mrtr_rounds_bucket{le="+Inf"} 0
 mcp_mrtr_rounds_sum 0
 mcp_mrtr_rounds_count 0
+# HELP keel_runs_pending Durable runs waiting to be claimed.
+# TYPE keel_runs_pending gauge
+keel_runs_pending 0
+# HELP keel_streams_active SSE and file streams currently open.
+# TYPE keel_streams_active gauge
+keel_streams_active 0

@@ -1,7 +1,7 @@
-{"event":"start","pid":82738,"scenario":"static","toolDelay":0,"ts":"2026-11-20T02:19:06.515472Z"}
-{"event":"tools_list","pid":82738,"ts":"2026-11-20T02:19:06.523191Z","version":1}
-{"event":"resource_read","pid":82738,"ts":"2026-11-20T02:19:06.53357Z","uri":"ui://scenario/dashboard"}
-{"event":"listen_begin","id":4,"n":1,"pid":82738,"ts":"2026-11-20T02:19:06.583131Z"}
-{"event":"listen_ack","n":1,"pid":82738,"ts":"2026-11-20T02:19:06.5884Z"}
-{"event":"tools_list","pid":82738,"ts":"2026-11-20T02:19:06.62413Z","version":1}
-{"event":"resource_read","pid":82738,"ts":"2026-11-20T02:19:06.629856Z","uri":"ui://scenario/dashboard"}
+{"event":"start","pid":49883,"scenario":"static","toolDelay":0,"ts":"2026-11-20T04:09:31.609603Z"}
+{"event":"tools_list","pid":49883,"ts":"2026-11-20T04:09:31.615131Z","version":1}
+{"event":"resource_read","pid":49883,"ts":"2026-11-20T04:09:31.620034Z","uri":"ui://scenario/dashboard"}
+{"event":"listen_begin","id":4,"n":1,"pid":49883,"ts":"2026-11-20T04:09:31.62895Z"}
+{"event":"listen_ack","n":1,"pid":49883,"ts":"2026-11-20T04:09:31.633821Z"}
+{"event":"tools_list","pid":49883,"ts":"2026-11-20T04:09:31.638758Z","version":1}
+{"event":"resource_read","pid":49883,"ts":"2026-11-20T04:09:31.64327Z","uri":"ui://scenario/dashboard"}

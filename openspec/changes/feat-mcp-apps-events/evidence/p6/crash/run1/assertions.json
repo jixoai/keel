@@ -31,7 +31,7 @@
     "checks": [
       "app document fetched (fake server resource_read marker)",
       "kill landed after the document fetch and before any tool execution",
-      "restart ran in a new process (fake server pid 82171→82176)",
+      "restart ran in a new process (fake server pid 49623→49625)",
       "exactly one tool.result with details.app after restart",
       "app remains mountable from tool.result details"
     ]
@@ -43,7 +43,7 @@
     "checks": [
       "listen ack triggered a catalogue recompute (1→2)",
       "the host is provably inside a reconnect (listen #2 sent, unacknowledged, metric \u003e= 1)",
-      "restart re-established listen in a new process (pid 82202→82386)",
+      "restart re-established listen in a new process (pid 49634→49749)",
       "catalogue recomputed to the same app identity/hash",
       "ledger unchanged (one user message, one assistant message, contiguous seq)"
     ]
@@ -55,7 +55,7 @@
     "checks": [
       "kill landed after tools/call dispatch and before the MCP result (begin marker, no end marker)",
       "global audit table has no half line and no orphan app",
-      "restart ran in a new process (fake server pid 82389→82525)",
+      "restart ran in a new process (fake server pid 49751→49773)",
       "exactly one tool.result with details.app; the tool was at-least-once, the ledger exactly-once",
       "audit rows are complete and reference only the published app"
     ]

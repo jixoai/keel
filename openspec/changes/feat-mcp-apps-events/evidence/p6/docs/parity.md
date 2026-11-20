@@ -4,7 +4,8 @@
 - 冻结基线：`3ab7996`（`docs(mcp-p5): 复核修复处置 + 修复后合并树门禁`）
 - 范围：`openspec/changes/feat-mcp-apps-events/specs/mcp-apps/spec.md`（13 条 requirement）
   与 `specs/mcp-events/spec.md`（15 条 requirement），共 **28 条**。
-- 结论：**28/28 条已映射**；其中已实现 **23** 条、偏离 **5** 条（均在 mcp-apps 面）。
+- 结论：**28/28 条已映射**；其中已实现 **25** 条、偏离 **3** 条（A5 第二 origin/NSH flags、
+  A7 teardown 等待已接受、A12 permissions 上游依赖）。A1/A13 已由 P6E 收口。
   G0 通过（规格/接口/线格式可对表；偏离显式登记）。G4 通过（PI conformance
   1071 pass / 0 fail / 1 skip；legacy 断言未改），但 G4 的「真实 ext-apps example
   server」证据有边界，见 §3。
@@ -20,19 +21,19 @@
 
 | # | Spec requirement | 结论 | 实现（文件/符号） | 测试 / 证据 |
 |---|---|---|---|---|
-| A1 | UI 资源的声明与读取 | **偏离（部分）**：声明/读取/类型/大小已实现；`_meta.ui.domain` 解析后**未随目录下发**（`AppSpec` 无 `Domain`） | `internal/mcp/ui_meta.go` `parseToolUI`；`internal/mcp/resources.go` `ReadAppResource`/`ValidateAppResource`；`internal/mcphost/meta.go` `parseResourceMeta`；`internal/mcphost/registry.go` `resolve`/`AppSpec` 构造 | `internal/mcp/ui_meta_test.go`、`resources_test.go`、`app_meta_test.go`；`internal/mcphost/meta_test.go`、`registry_test.go`；P1/P2 evidence |
+| A1 | UI 资源的声明与读取 | **已实现**：声明/读取/类型/大小/`_meta.ui.domain` 均解析并随目录下发（P6E 收口） | `internal/mcp/ui_meta.go` `parseToolUI`；`internal/mcp/resources.go` `ReadAppResource`/`ValidateAppResource`；`internal/mcphost/meta.go` `parseResourceMeta`；`internal/mcphost/registry.go` `resolve`/`AppSpec.Domain`；`web/src/data/mcp-apps.ts` `domainOf` | `internal/mcp/ui_meta_test.go`、`resources_test.go`；`TestRegistryPublishesValidatedApps`（catalogue JSON 含 domain）、`TestMCPAppsCatalogIsTenantScoped`；`web/src/data/mcp-apps.test.ts` domain 三态 |
 | A2 | app 身份、缓存身份与目录 | 已实现 | `internal/mcp/ui_meta.go` `AppIDFor`；`internal/mcphost/registry.go` `contentHash`/`documentURL`/`dedupeApps`；`internal/mcphost/surface.go` `AppSpec` | `TestAppIDForIsDeterministicAndOpaque`；`TestRegistryPublishesValidatedApps`、`TestRegistryContentChangeReclaimsCache`；`internal/agentapi/mcp_apps_test.go` |
 | A3 | app 文档托管路由与安全头 | 已实现 | `internal/agentapi/mcp_apps.go` `mcpAppView`/`validAppID`/`validContentHash` | `TestMCPAppViewSecurityHeaders`、`TestMCPAppViewUnknownIdentity`、`TestMCPAppViewRefusesIncompleteDocument`；P2 `http-contract-tests.txt` |
 | A4 | CSP 构造：只收紧不放宽 | 已实现 | `internal/mcphost/csp.go` `BuildCSP`/`sanitizeCSPDomains`；`internal/mcphost/registry.go` 调用点 | `internal/mcphost/csp_test.go`（严格缺省/逐指令/负向/通配/私网/端口/上限）；P2 浏览器 E2E 的 CSP 头与 `window.open` 阻断 |
 | A5 | View 沙箱与跨端承载 | **偏离**：web 有效 opaque origin 已实现，但 NSH 0.4 固定附加 `allow-forms/popups/popups-to-escape-sandbox/modals/downloads`，字面值不是 `allow-scripts`；spec 的第二 origin 双 iframe 未实现，`KEEL_MCP_APP_ORIGIN` 只作原生 WebView 基址 | `web/src/surfaces/mcp-app/view.tsx`（WebView/全屏/TUI 分支）；`web/src/data/mcp-apps.ts` `appDocumentSource`；`web/src/surfaces/mcp-app/bridge.ts` `handleMessage` | `bridge.test.ts`（sandbox origin/opaque/限速）；P2 `gates.md` §偏离 1/2；`e2e/report.json`（sandbox 无 `allow-same-origin`、cookie/DOM/localStorage 隔离） |
 | A6 | 握手与 hostContext | 已实现 | `web/src/surfaces/mcp-app/bridge.ts` `handleInitialize`/`handleInitialized`/`armHandshake`；`view.tsx` `hostContextFor` | `bridge.test.ts`「握手/初始化前不发通知/hostContext 全开/全关」；P2 E2E 断言 `protocolVersion`/`hostInfo`/`hostContext` |
-| A7 | 数据流与生命周期通知 | **偏离（部分）**：`tool-input`/`tool-result`/`tool-cancelled`/`size-changed`/`host-context-changed` 已实现；`ui/resource-teardown` 在 web 卸载路径发送后**立即销毁**，1 s 有界等待只在桥单测 | `bridge.ts` `sendInput`/`sendResult`/`cancel`/`teardown`；`view.tsx` `disposeSession` | `bridge.test.ts`「数据流/取消/teardown 1s」；P2 `gates.md` §偏离 6 |
+| A7 | 数据流与生命周期通知 | **已接受偏离（部分）**：`tool-input`/`tool-result`/`tool-cancelled`/`size-changed`/`host-context-changed` 已实现；`ui/resource-teardown` 在 web 卸载路径发送后立即销毁（NSH 0.4 组件卸载模型不允许延迟移除；无数据/安全影响） | `bridge.ts` `sendInput`/`sendResult`/`cancel`/`teardown`；`view.tsx` `disposeSession`；`frame-load.ts` | `bridge.test.ts`「数据流/取消/teardown 1s」；P6E `evidence/p6/fix/notes.md` §3 |
 | A8 | 协议违规、超时与实例销毁 | 已实现 | `bridge.ts` `parseFrame`/`finish`/`armHandshake`/限速；`view.tsx` 回退 UI | `bridge.test.ts`「超时/未知方法/64 KiB/200 帧/s/非沙箱来源」；P2 E2E 导航重载与文本兜底 |
 | A9 | tools/call 与 resources/read 由宿主代理 | 已实现 | `internal/agentapi/mcp_app_actions.go` `mcpAppToolCall`/`mcpAppResourceRead`；`MCPAppRuntime`；`cmd/keel/mcp_app_bridge_test.go` 真 stdio | `internal/agentapi/mcp_app_actions_test.go` `TestMCPAppToolCallOwnership`、`TestMCPAppResourceSchemeWhitelist`；`TestMCPAppRuntimeAdapterOverLiveManager` |
 | A10 | ui/message 落点与确认 | 已实现 | `internal/agentapi/mcp_app_actions.go` `mcpAppMessage`/`confirmMCPApp`；`MCPAppInputCommit` | `TestMCPAppMessageBranches`、`TestMCPAppMessageAttachments`、`TestMCPAppMessageProtocolAudits`；`TestMCPAppInputCommitWritesUserMessage` |
 | A11 | 链接、模型上下文与显示模式 | 已实现（SDK-only 面见备注） | `mcpAppOpenLink`；`internal/agentapi/mcp_app_context.go` `mcpAppUpdateContext`；`bridge.ts` `handleDisplayMode`/`ui/download-file` 分支 | `TestMCPAppOpenLink`、`TestMCPAppOpenLinkRejectsUserinfoAndNonASCII`、`mcp_app_context_test.go`；`bridge.test.ts` 显示模式/错误路径 |
 | A12 | 安全、同意与审计 | **偏离（部分）**：破坏性调用逐次确认、审计表与无正文扫描已实现；camera/microphone/geolocation/clipboardWrite **不授予**（NSH 0.4 无 per-permission allow，P3.6 上游依赖） | `mcp_app_actions.go`（确认/审计/限速）；`internal/store/mcp_app_audit.go`；`web/src/surfaces/mcp-app/view.tsx` `hostCapabilitiesFor`（不声明 permissions） | `TestMCPAppDestructiveConfirmation`、`TestMCPAppAuditNoBodyAgainstStore`、`TestMCPAppRejectionAuditSampling`；P5 `review-disposition.md` §5；P2 `gates.md` §偏离 5 |
-| A13 | 降级路径与能力协商 | **偏离（部分）**：文本/目录/握手/缓存降级已实现；**客户端 capability 未声明** `io.modelcontextprotocol/ui`（`extensions`/`experimental` 双位置与 `mimeTypes` 均缺席） | `internal/mcp/protocol.go` `ClientCapabilities`（只有 `experimental`，无 `extensions`）；`internal/mcp/client.go` `connectLegacy` 直传 `options.Capabilities`；`internal/agentapi/api.go` 仅暴露部署侧 `mcp.apps` 位 | 部署位/降级测试 `TestCapabilitiesMCPBits`、`TestMCPAppContextRouteUnwiredAnswersMethodNotFound`；缺口无正向测试（需后续 change 补双位置声明与抓取断言） |
+| A13 | 降级路径与能力协商 | **已实现**：文本/目录/握手/缓存降级；`initialize` 的 `extensions` 与 `experimental` 双位置声明 `io.modelcontextprotocol/ui` + `mimeTypes`（P6E 收口）；另修复 pre-load initialize 首载误判 | `internal/mcp/protocol.go` `DeclareMCPApps`；`internal/servicehost/services.go` `mcpClientCapabilities`；`web/src/surfaces/mcp-app/frame-load.ts` | `TestInitializeDeclaresMCPAppsInBothPositions`、`TestInitializeOmitsMCPAppsWithoutDeclaration`、`TestMCPClientCapabilitiesDeclareAppsOnlyWhenRegistryWired`；`frame-load.test.ts` 5/5 |
 
 > A11 备注：`ui/download-file` 明确回 `-32601`；`ui/notifications/request-teardown` 是通知、
 > 无 id，走未知通知 → 协议违规销毁；`ui/notifications/tool-input-partial` 不发；`pip`
@@ -95,8 +96,8 @@
 | 2 | `docs/HOST.md`（基线 `3ab7996` 第 104–106 行） | MCP 环境变量表只有 CONFIG/PROJECT/APP_ORIGIN，缺 `KEEL_MCP_PROTOCOL_ERA`/`KEEL_MCP_SAMPLING`；APP_ORIGIN 被写得像已启用第二 origin | 本 lane 新增 §5.2/§5.7，明确 era/sampling 与实际 origin 行为 |
 | 3 | `docs/PI-PARITY.md`（基线 `3ab7996` 第 111 行） | 写「未接线能力（events、第二 origin、MRTR）保持 fail-closed」，实际 events/MRTR 已交付 | 本 lane 重写 §4.3 偏离表与「已知未实现」清单 |
 | 4 | `docs/RESIDUAL-PLAN.md`（基线 `3ab7996` 第 24 行） | 行仍写「P6 验收下一波」，未反映 P6 进行中/P6.5 已交付 | 本 lane 更新 37/50 与 Wave 3.5 状态；未完成项不勾 |
-| 5 | `internal/mcp/protocol.go` `ClientCapabilities` | 缺 `extensions`，也没有代码写 `io.modelcontextprotocol/ui`/`mimeTypes` | 文档标为偏离/未实现（§1 A13）；产品代码需后续 change 补 |
-| 6 | `internal/mcphost/surface.go` `AppSpec` / `registry.go` `resourceMetaFor` | `_meta.ui.domain` 解析后未投影到目录 | 文档标为部分实现（§1 A1）；产品代码需后续 change 补 |
+| 5 | `internal/mcp/protocol.go` `ClientCapabilities` | 缺 `extensions`，也没有代码写 `io.modelcontextprotocol/ui`/`mimeTypes` | **已由 P6E 修复**（双位置声明 + 条件注入 + 测试） |
+| 6 | `internal/mcphost/surface.go` `AppSpec` / `registry.go` `resourceMetaFor` | `_meta.ui.domain` 解析后未投影到目录 | **已由 P6E 修复**（AppSpec.Domain + 前端透传 + 测试） |
 | 7 | `design.md` §4.6 | 提到 `KEEL_MCP_MRTR_MAX_ROUNDS`，代码固定 5 轮且无该 env | 文档写明不可配（§3 与 `docs/PI-PARITY.md` §4.3）；不把设计稿当已实现 |
 
 ## 5. 复跑命令（不依赖网络/真模型）

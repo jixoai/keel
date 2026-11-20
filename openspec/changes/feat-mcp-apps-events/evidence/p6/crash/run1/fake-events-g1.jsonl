@@ -1,12 +1,12 @@
-{"event":"start","pid":82160,"scenario":"evolve","toolDelay":0,"ts":"2026-11-20T02:18:35.850216Z"}
-{"event":"tools_list","pid":82160,"ts":"2026-11-20T02:18:35.862613Z","version":1}
-{"event":"resource_read","pid":82160,"ts":"2026-11-20T02:18:35.868777Z","uri":"ui://scenario/dashboard"}
-{"event":"listen_begin","id":4,"n":1,"pid":82160,"ts":"2026-11-20T02:18:35.881338Z"}
-{"event":"listen_ack","n":1,"pid":82160,"ts":"2026-11-20T02:18:35.886159Z"}
-{"event":"tools_list","pid":82160,"ts":"2026-11-20T02:18:35.895178Z","version":1}
-{"event":"resource_read","pid":82160,"ts":"2026-11-20T02:18:35.900804Z","uri":"ui://scenario/dashboard"}
-{"event":"tools_call_begin","name":"refresh","pid":82160,"ts":"2026-11-20T02:18:36.329737Z"}
-{"event":"tools_call_end","name":"refresh","pid":82160,"text":"refresh-ok v1","ts":"2026-11-20T02:18:36.341994Z"}
-{"event":"tools_list_changed_sent","n":1,"pid":82160,"ts":"2026-11-20T02:18:36.592539Z","version":2}
-{"event":"tools_list","pid":82160,"ts":"2026-11-20T02:18:36.843906Z","version":2}
-{"event":"resource_read","pid":82160,"ts":"2026-11-20T02:18:36.849227Z","uri":"ui://scenario/dashboard_v2"}
+{"event":"start","pid":49620,"scenario":"evolve","toolDelay":0,"ts":"2026-11-20T04:09:03.888225Z"}
+{"event":"tools_list","pid":49620,"ts":"2026-11-20T04:09:03.904342Z","version":1}
+{"event":"resource_read","pid":49620,"ts":"2026-11-20T04:09:03.909397Z","uri":"ui://scenario/dashboard"}
+{"event":"listen_begin","id":4,"n":1,"pid":49620,"ts":"2026-11-20T04:09:03.91685Z"}
+{"event":"listen_ack","n":1,"pid":49620,"ts":"2026-11-20T04:09:03.924153Z"}
+{"event":"tools_list","pid":49620,"ts":"2026-11-20T04:09:03.928434Z","version":1}
+{"event":"resource_read","pid":49620,"ts":"2026-11-20T04:09:03.936291Z","uri":"ui://scenario/dashboard"}
+{"event":"tools_call_begin","name":"refresh","pid":49620,"ts":"2026-11-20T04:09:04.18739Z"}
+{"event":"tools_call_end","name":"refresh","pid":49620,"text":"refresh-ok v1","ts":"2026-11-20T04:09:04.192789Z"}
+{"event":"tools_list_changed_sent","n":1,"pid":49620,"ts":"2026-11-20T04:09:04.630873Z","version":2}
+{"event":"tools_list","pid":49620,"ts":"2026-11-20T04:09:04.883684Z","version":2}
+{"event":"resource_read","pid":49620,"ts":"2026-11-20T04:09:04.893529Z","uri":"ui://scenario/dashboard_v2"}

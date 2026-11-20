@@ -51,7 +51,7 @@
         "title": "mcp-call:fixture/show_dashboard",
         "origin": "session",
         "status": "open",
-        "taskId": "5bf4c0ad-1293-5606-aea6-29c96539af42"
+        "taskId": "714192bf-ce4d-52ec-bcfc-cbd320ed1580"
       }
     },
     {
@@ -122,13 +122,13 @@
           "messages": 5
         },
         "provider": "fake",
-        "durationMs": 98,
+        "durationMs": 40,
         "promptHash": "sha256:948767bc18f4cfd3393ee73ecde2ac2f1662dd9b4e2ed61aa7be240d200d2aa7",
         "stopReason": "end_turn",
         "toolTimings": [
           {
             "tool": "mcp",
-            "durationMs": 37
+            "durationMs": 23
           }
         ]
       }
@@ -137,7 +137,7 @@
   "markers": [
     {
       "event": "start",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "",
       "n": 0,
@@ -146,7 +146,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "",
       "n": 0,
@@ -155,7 +155,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -164,7 +164,7 @@
     },
     {
       "event": "listen_begin",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "",
       "n": 1,
@@ -173,7 +173,7 @@
     },
     {
       "event": "listen_ack",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "",
       "n": 1,
@@ -182,7 +182,7 @@
     },
     {
       "event": "tools_list",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "",
       "n": 0,
@@ -191,7 +191,7 @@
     },
     {
       "event": "resource_read",
-      "pid": 82176,
+      "pid": 49625,
       "name": "",
       "uri": "ui://scenario/dashboard",
       "n": 0,
@@ -200,7 +200,7 @@
     },
     {
       "event": "tools_call_begin",
-      "pid": 82176,
+      "pid": 49625,
       "name": "show_dashboard",
       "uri": "",
       "n": 0,
@@ -209,7 +209,7 @@
     },
     {
       "event": "tools_call_end",
-      "pid": 82176,
+      "pid": 49625,
       "name": "show_dashboard",
       "uri": "",
       "n": 0,

@@ -1,7 +1,7 @@
 [
   {
-    "auditId": 1095,
-    "ts": "2026-11-20 02:18:35.873363+00",
+    "auditId": 1272,
+    "ts": "2026-11-20 04:09:03.913152+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -9,23 +9,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1096,
-    "ts": "2026-11-20 02:18:35.878966+00",
+    "auditId": 1273,
+    "ts": "2026-11-20 04:09:03.915289+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1097,
-    "ts": "2026-11-20 02:18:35.892112+00",
+    "auditId": 1274,
+    "ts": "2026-11-20 04:09:03.924442+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1098,
-    "ts": "2026-11-20 02:18:35.905883+00",
+    "auditId": 1275,
+    "ts": "2026-11-20 04:09:03.941063+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -33,24 +33,24 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1099,
-    "ts": "2026-11-20 02:18:35.91175+00",
+    "auditId": 1276,
+    "ts": "2026-11-20 04:09:03.94437+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1100,
-    "ts": "2026-11-20 02:18:35.921961+00",
+    "auditId": 1277,
+    "ts": "2026-11-20 04:09:03.94739+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1101,
-    "ts": "2026-11-20 02:18:36.342578+00",
-    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
-    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "auditId": 1278,
+    "ts": "2026-11-20 04:09:04.192882+00",
+    "tenantId": "2ce570e9-706a-4ec6-b6cb-723f49a13ccb",
+    "sessionId": "f4154440-6a9f-41fd-93ef-add6b8437680",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "tools/call",
@@ -58,8 +58,8 @@
     "detail": "server=fixture tool=refresh isError=false"
   },
   {
-    "auditId": 1102,
-    "ts": "2026-11-20 02:18:36.867048+00",
+    "auditId": 1279,
+    "ts": "2026-11-20 04:09:04.900114+00",
     "server": "fixture",
     "appId": "mcpapp_afe2cb547d98dbfc",
     "action": "document.fetch",
@@ -67,24 +67,24 @@
     "detail": "hash=2494e5af3238aaafd46305334f247f15167307186f0f63ed85f6578d37e6b59c bytes=264"
   },
   {
-    "auditId": 1103,
-    "ts": "2026-11-20 02:18:36.869557+00",
+    "auditId": 1280,
+    "ts": "2026-11-20 04:09:04.903684+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=3 apps=1 declared=1"
   },
   {
-    "auditId": 1104,
-    "ts": "2026-11-20 02:18:36.873262+00",
+    "auditId": 1281,
+    "ts": "2026-11-20 04:09:04.907611+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=3 servers=[fixture] kinds=[tools] added=1 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1105,
-    "ts": "2026-11-20 02:18:37.154986+00",
-    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
-    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "auditId": 1282,
+    "ts": "2026-11-20 04:09:05.200424+00",
+    "tenantId": "2ce570e9-706a-4ec6-b6cb-723f49a13ccb",
+    "sessionId": "f4154440-6a9f-41fd-93ef-add6b8437680",
     "server": "fixture",
     "appId": "mcpapp_afe2cb547d98dbfc",
     "action": "resources/read",
@@ -92,21 +92,21 @@
     "detail": "server=fixture scheme=https code=-32602"
   },
   {
-    "auditId": 1106,
-    "ts": "2026-11-20 02:18:37.468334+00",
-    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
-    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "auditId": 1283,
+    "ts": "2026-11-20 04:09:05.512409+00",
+    "tenantId": "2ce570e9-706a-4ec6-b6cb-723f49a13ccb",
+    "sessionId": "f4154440-6a9f-41fd-93ef-add6b8437680",
     "server": "fixture",
     "appId": "mcpapp_afe2cb547d98dbfc",
     "action": "ui/message",
     "result": "refused",
-    "detail": "session=d245a9de-cedb-4e88-acfa-ad3926b17a78 blocks=1 attachments=0 reason=confirmation_timeout decision=87fccdfc-74ab-59fe-bcac-90e18f7d5870"
+    "detail": "session=f4154440-6a9f-41fd-93ef-add6b8437680 blocks=1 attachments=0 reason=confirmation_timeout decision=870ba475-33be-5d99-8d3d-7f12b5ed3f5f"
   },
   {
-    "auditId": 1107,
-    "ts": "2026-11-20 02:18:37.479723+00",
-    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
-    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "auditId": 1284,
+    "ts": "2026-11-20 04:09:05.523776+00",
+    "tenantId": "2ce570e9-706a-4ec6-b6cb-723f49a13ccb",
+    "sessionId": "f4154440-6a9f-41fd-93ef-add6b8437680",
     "server": "fixture",
     "appId": "mcpapp_afe2cb547d98dbfc",
     "action": "tools/call",
@@ -114,16 +114,16 @@
     "detail": "server=fixture tool=refresh isError=false"
   },
   {
-    "auditId": 1108,
-    "ts": "2026-11-20 02:18:37.924981+00",
+    "auditId": 1285,
+    "ts": "2026-11-20 04:09:05.985344+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "closed",
     "detail": "MCP connection closed"
   },
   {
-    "auditId": 1109,
-    "ts": "2026-11-20 02:18:38.126714+00",
+    "auditId": 1286,
+    "ts": "2026-11-20 04:09:06.163691+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -131,23 +131,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1110,
-    "ts": "2026-11-20 02:18:38.150944+00",
+    "auditId": 1287,
+    "ts": "2026-11-20 04:09:06.16677+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1111,
-    "ts": "2026-11-20 02:18:38.162033+00",
+    "auditId": 1288,
+    "ts": "2026-11-20 04:09:06.174671+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1112,
-    "ts": "2026-11-20 02:18:38.175459+00",
+    "auditId": 1289,
+    "ts": "2026-11-20 04:09:06.188031+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -155,22 +155,22 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1113,
-    "ts": "2026-11-20 02:18:38.188472+00",
+    "auditId": 1290,
+    "ts": "2026-11-20 04:09:06.205116+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1114,
-    "ts": "2026-11-20 02:18:38.191823+00",
+    "auditId": 1291,
+    "ts": "2026-11-20 04:09:06.208274+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1115,
-    "ts": "2026-11-20 02:18:39.656353+00",
+    "auditId": 1292,
+    "ts": "2026-11-20 04:09:07.562246+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -178,23 +178,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1116,
-    "ts": "2026-11-20 02:18:39.664862+00",
+    "auditId": 1293,
+    "ts": "2026-11-20 04:09:07.563955+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1117,
-    "ts": "2026-11-20 02:18:39.671877+00",
+    "auditId": 1294,
+    "ts": "2026-11-20 04:09:07.57051+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1118,
-    "ts": "2026-11-20 02:18:39.689519+00",
+    "auditId": 1295,
+    "ts": "2026-11-20 04:09:07.58438+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -202,30 +202,30 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1119,
-    "ts": "2026-11-20 02:18:39.692382+00",
+    "auditId": 1296,
+    "ts": "2026-11-20 04:09:07.586997+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1120,
-    "ts": "2026-11-20 02:18:39.697003+00",
+    "auditId": 1297,
+    "ts": "2026-11-20 04:09:07.60673+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1121,
-    "ts": "2026-11-20 02:18:40.26525+00",
+    "auditId": 1298,
+    "ts": "2026-11-20 04:09:08.285115+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "closed",
     "detail": "MCP connection closed"
   },
   {
-    "auditId": 1122,
-    "ts": "2026-11-20 02:18:40.520769+00",
+    "auditId": 1299,
+    "ts": "2026-11-20 04:09:08.436662+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -233,23 +233,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1123,
-    "ts": "2026-11-20 02:18:40.547599+00",
+    "auditId": 1300,
+    "ts": "2026-11-20 04:09:08.440947+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1124,
-    "ts": "2026-11-20 02:18:44.567338+00",
+    "auditId": 1301,
+    "ts": "2026-11-20 04:09:12.455398+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1125,
-    "ts": "2026-11-20 02:18:44.596275+00",
+    "auditId": 1302,
+    "ts": "2026-11-20 04:09:12.486518+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -257,30 +257,30 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1126,
-    "ts": "2026-11-20 02:18:44.597691+00",
+    "auditId": 1303,
+    "ts": "2026-11-20 04:09:12.493647+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1127,
-    "ts": "2026-11-20 02:18:44.605839+00",
+    "auditId": 1304,
+    "ts": "2026-11-20 04:09:12.506034+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1128,
-    "ts": "2026-11-20 02:18:44.984055+00",
+    "auditId": 1305,
+    "ts": "2026-11-20 04:09:12.864312+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "closed",
     "detail": "\u003cnil\u003e"
   },
   {
-    "auditId": 1129,
-    "ts": "2026-11-20 02:18:46.365675+00",
+    "auditId": 1306,
+    "ts": "2026-11-20 04:09:14.278989+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -288,23 +288,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1130,
-    "ts": "2026-11-20 02:18:46.367222+00",
+    "auditId": 1307,
+    "ts": "2026-11-20 04:09:14.280517+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1131,
-    "ts": "2026-11-20 02:18:46.373804+00",
+    "auditId": 1308,
+    "ts": "2026-11-20 04:09:14.290172+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1132,
-    "ts": "2026-11-20 02:18:46.387297+00",
+    "auditId": 1309,
+    "ts": "2026-11-20 04:09:14.302068+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -312,30 +312,30 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1133,
-    "ts": "2026-11-20 02:18:46.389772+00",
+    "auditId": 1310,
+    "ts": "2026-11-20 04:09:14.305492+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1134,
-    "ts": "2026-11-20 02:18:46.392179+00",
+    "auditId": 1311,
+    "ts": "2026-11-20 04:09:14.308527+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1135,
-    "ts": "2026-11-20 02:18:46.48887+00",
+    "auditId": 1312,
+    "ts": "2026-11-20 04:09:14.371233+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "closed",
     "detail": "MCP connection closed"
   },
   {
-    "auditId": 1136,
-    "ts": "2026-11-20 02:18:46.636301+00",
+    "auditId": 1313,
+    "ts": "2026-11-20 04:09:14.524247+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -343,23 +343,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1137,
-    "ts": "2026-11-20 02:18:46.638299+00",
+    "auditId": 1314,
+    "ts": "2026-11-20 04:09:14.525661+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1138,
-    "ts": "2026-11-20 02:18:46.644548+00",
+    "auditId": 1315,
+    "ts": "2026-11-20 04:09:14.531275+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1139,
-    "ts": "2026-11-20 02:18:46.657913+00",
+    "auditId": 1316,
+    "ts": "2026-11-20 04:09:14.544678+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -367,24 +367,24 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1140,
-    "ts": "2026-11-20 02:18:46.67051+00",
+    "auditId": 1317,
+    "ts": "2026-11-20 04:09:14.557515+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1141,
-    "ts": "2026-11-20 02:18:46.672889+00",
+    "auditId": 1318,
+    "ts": "2026-11-20 04:09:14.560206+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
   },
   {
-    "auditId": 1142,
-    "ts": "2026-11-20 02:18:51.773093+00",
-    "tenantId": "32f991c1-66bc-4908-8cc6-27f9936c5fb8",
-    "sessionId": "c95da83b-0050-4dad-9fb1-636d0478bee2",
+    "auditId": 1319,
+    "ts": "2026-11-20 04:09:19.652387+00",
+    "tenantId": "76ac6f12-defb-4f07-b6bb-f3c48c479891",
+    "sessionId": "87f9d61b-9f61-481f-af23-e833b090bca6",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "tools/call",
@@ -392,8 +392,8 @@
     "detail": "server=fixture tool=refresh isError=false"
   },
   {
-    "auditId": 1143,
-    "ts": "2026-11-20 02:18:52.660905+00",
+    "auditId": 1320,
+    "ts": "2026-11-20 04:09:20.12753+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -401,23 +401,23 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1144,
-    "ts": "2026-11-20 02:18:52.664897+00",
+    "auditId": 1321,
+    "ts": "2026-11-20 04:09:20.129304+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=1 apps=1 declared=1"
   },
   {
-    "auditId": 1145,
-    "ts": "2026-11-20 02:18:52.674638+00",
+    "auditId": 1322,
+    "ts": "2026-11-20 04:09:20.135168+00",
     "server": "fixture",
     "action": "subscription.listen",
     "result": "ok",
     "detail": "subscription=n:4"
   },
   {
-    "auditId": 1146,
-    "ts": "2026-11-20 02:18:52.69703+00",
+    "auditId": 1323,
+    "ts": "2026-11-20 04:09:20.151354+00",
     "server": "fixture",
     "appId": "mcpapp_9695970d06976122",
     "action": "document.fetch",
@@ -425,15 +425,15 @@
     "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
   },
   {
-    "auditId": 1147,
-    "ts": "2026-11-20 02:18:52.711653+00",
+    "auditId": 1324,
+    "ts": "2026-11-20 04:09:20.163166+00",
     "action": "catalogue.publish",
     "result": "ok",
     "detail": "generation=2 apps=1 declared=1"
   },
   {
-    "auditId": 1148,
-    "ts": "2026-11-20 02:18:52.719987+00",
+    "auditId": 1325,
+    "ts": "2026-11-20 04:09:20.165654+00",
     "action": "catalogue.refresh",
     "result": "ok",
     "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"

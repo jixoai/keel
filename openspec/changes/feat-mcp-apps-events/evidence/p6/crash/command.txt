@@ -3,4 +3,4 @@ $ go build -o <work>/e2e ./cmd/e2e
 $ <work>/e2e -scenario mcp-apps -keel-bin <work>/keel -dsn $KEEL_TEST_DSN -reset -reset-confirm keel_test_p6_crash -mcp-apps-port 13686 -out <runN>
 database: keel_test_p6_crash
 port: 13686
-started: 2026-11-20T02:18:29Z
+started: 2026-11-20T04:08:59Z

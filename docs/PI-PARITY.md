@@ -117,20 +117,24 @@ MCP Apps（SEP-1865，`io.modelcontextprotocol/ui`）与 events 面（`subscript
 | **P3.6 权限依赖 NSH allow** | camera/microphone/geolocation/clipboardWrite 的授予需要 iframe `allow` 属性与 per-permission 偏好；NSH 0.4 WebView 没有该控制面，单 origin 沙箱也无 `allow-same-origin` | `_meta.ui.permissions` 会解析并随目录发布，但 `hostCapabilities` 不声明 `sandbox.permissions`、iframe 无 `allow`；当前**不授予**任何浏览器权限，拒绝记忆也无从生效 | 应用必须特性检测（无权限时降级）；这是上游依赖，不声明即不假装。若必须授予，需升级 NSH 或落第二 origin 方案 |
 | **`ui/notifications/tool-input-partial` / `pip` 不实现** | design §3.5 Non-Goal：keel 没有 provider 级工具参数增量投影；宿主只声明 inline + fullscreen | 不发 partial；`pip` 请求回当前实际模式（inline/fullscreen）；View 按 spec MAY 忽略 | 无；不影响 tool-input/tool-result 主路径 |
 
-**已知未实现（不是有意偏离，P6 对表时暴露，需后续 change 收口）：**
+**P6 已收口（2026-11-20）：**
 
-- **MCP Apps 客户端能力声明缺席**：`initialize` 的 `ClientCapabilities` 没有
-  `extensions`/`experimental` 下的 `io.modelcontextprotocol/ui`，也没有
-  `mimeTypes:["text/html;profile=mcp-app"]`（`internal/mcp/protocol.go` 的客户端结构只有
-  `experimental`，没有 `extensions`；没有代码写该键）。服务器无法据能力协商判断宿主支持
-  apps；目录发现依赖服务器无条件声明 `_meta.ui`。对应 `specs/mcp-apps`「降级路径与能力
-  协商」的双位置声明，当前标为**偏离/未实现**。
-- **`_meta.ui.domain` 未随目录下发**：`internal/mcphost/meta.go` 解析并校验 `domain`，
-  但 `mcphost.AppSpec` 没有 `Domain` 字段，`resourceMetaFor` 也未投影它；目录消费方拿不到
-  该字段。对应 `specs/mcp-apps`「UI 资源的声明与读取」，当前标为**部分实现**。
-- **`ui/resource-teardown` 等待不阻塞**：`web/src/surfaces/mcp-app/view.tsx` 的卸载路径
-  调用 `bridge.teardown()` 后立即 `destroy()`；1 s 有界等待只在桥单测覆盖，真实卸载路径
-  没有等待。对应「数据流与生命周期通知」，当前标为**部分实现**。
+- **MCP Apps 客户端能力声明**：`ClientCapabilities.Extensions` + `DeclareMCPApps()` 在
+  `extensions`/`experimental` 双位置写入相同 `{"mimeTypes":["text/html;profile=mcp-app"]}`，
+  仅在 Registry 接线时声明（`internal/mcp/protocol.go`、`internal/servicehost/services.go`；
+  测试 `TestInitializeDeclaresMCPAppsInBothPositions`）。
+- **`_meta.ui.domain`**：`AppSpec.Domain` 投影到目录，前端 `McpAppView.domain` 透传
+  （`internal/mcphost/registry.go`、`web/src/data/mcp-apps.ts`；测试
+  `TestRegistryPublishesValidatedApps`、`web/src/data/mcp-apps.test.ts`）。
+- **`tool-input` 实参**：聚合 `mcp` 信封在前端解包为底层工具实参（`mcpAppToolInput`）。
+- **pre-load `ui/initialize`**：首载不再被误判为自导航（`frame-load.ts`）。
+
+**已知未实现（不是有意偏离，需后续 change 收口）：**
+
+- **`ui/resource-teardown` 等待不阻塞（已接受）**：`web/src/surfaces/mcp-app/view.tsx`
+  的卸载路径调用 `bridge.teardown()` 后立即 `destroy()`；1 s 有界等待只在桥单测覆盖。
+  NSH 0.4 的组件卸载在同一同步批内移除 iframe，无法延迟卸载而不冻结界面；记录为已接受
+  偏离（`evidence/p6/fix/notes.md` §3），无数据/安全/账本影响。
 - **MRTR 轮次不可配置**：`internal/mcp/client.go` 固定 `defaultMRTRMaxRounds = 5`；
   `design.md` §4.6 提到的 `KEEL_MCP_MRTR_MAX_ROUNDS` **没有实现**（`CallOptions` 可按调用
   覆盖，但没有环境变量）。冻结 spec 只要求默认预算，不算 spec 偏离；文档不得把它写成可配。
