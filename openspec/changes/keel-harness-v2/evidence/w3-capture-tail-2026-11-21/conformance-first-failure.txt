@@ -1,0 +1,7 @@
+First conformance run (scripts/conformance.sh) failure detail:
+
+=== RUN   TestCheckpointCutInMovedUnreadInputFailSafe
+    compaction_checkpoint_test.go:316: checkpoint = (found=false, err=<nil>), want found
+--- FAIL: TestCheckpointCutInMovedUnreadInputFailSafe (2.08s)
+
+The same test passes in isolation and in the full rerun (conformance-summary-rerun.txt).

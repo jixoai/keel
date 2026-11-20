@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +39,14 @@ type seamHarness struct {
 
 func newSeamHarness(t *testing.T) *seamHarness {
 	t.Helper()
+	return newSeamHarnessWithSnapshotSource(t, nil)
+}
+
+// newSeamHarnessWithSnapshotSource builds the same production seam with the
+// service's capture snapshot source optionally wrapped (ordering tests gate the
+// snapshot phase; nil keeps the provider).
+func newSeamHarnessWithSnapshotSource(t *testing.T, wrap func(fileplugin.SnapshotSource) fileplugin.SnapshotSource) *seamHarness {
+	t.Helper()
 	store, err := layerfs.Open(t.TempDir(), layerfs.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -63,13 +73,17 @@ func newSeamHarness(t *testing.T) *seamHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var snapshots fileplugin.SnapshotSource = provider
+	if wrap != nil {
+		snapshots = wrap(provider)
+	}
 	service, err = fileplugin.New(fileplugin.Options{
 		Store:          store,
 		Manifest:       manifest,
 		Committer:      kern,
 		Leases:         kern,
 		SessionSurface: provider,
-		SnapshotSource: provider,
+		SnapshotSource: snapshots,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -615,5 +629,242 @@ func TestRunCaptureStillRequiresTheLease(t *testing.T) {
 	}
 	if payload["error"] == nil || !strings.Contains(payload["error"].(string), "lease") {
 		t.Fatalf("capture_failed error = %v", payload["error"])
+	}
+}
+
+// TestBashRmIsReconciledByCapture is the end-to-end deletion proof: a file a
+// previous capture established, removed by `rm` in a later bash call, no longer
+// appears in the manifest. The settlement is still exactly one fs.capture, its
+// payload names the removal, and the older snapshot still replays the file.
+func TestBashRmIsReconciledByCapture(t *testing.T) {
+	h := newSeamHarness(t)
+	write, err := h.bridge.NewSession(h.bashCtx("call-rm-write"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := write.Run(h.bashCtx("call-rm-write"), bashbridge.RunSpec{
+		Command: `mkdir -p /workspace/out && printf 'gone\n' > /workspace/out/b.txt`,
+	}); err != nil {
+		write.Close()
+		t.Fatal(err)
+	}
+	if err := write.Close(); err != nil {
+		t.Fatalf("first close (capture): %v", err)
+	}
+	entries, err := h.service.List(h.ctx, h.scope)
+	if err != nil || len(entries) != 1 || entries[0].Path != "out/b.txt" {
+		t.Fatalf("manifest after write capture = %+v/%v", entries, err)
+	}
+	firstSeq := h.captures(t, kernel.KindFSCapture)[0].Seq
+
+	remove, err := h.bridge.NewSession(h.bashCtx("call-rm-delete"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := remove.Run(h.bashCtx("call-rm-delete"), bashbridge.RunSpec{Command: `rm -rf /workspace/out`})
+	if err != nil {
+		remove.Close()
+		t.Fatalf("rm run: %v", err)
+	}
+	if result.ExitCode != 0 {
+		remove.Close()
+		t.Fatalf("rm exit = %d", result.ExitCode)
+	}
+	if err := remove.Close(); err != nil {
+		t.Fatalf("second close (capture): %v", err)
+	}
+
+	entries, err = h.service.List(h.ctx, h.scope)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("manifest after rm capture = %+v/%v", entries, err)
+	}
+	if _, err := h.service.Read(h.fileCtx("call-r-gone"), mustArgs(t, map[string]any{"path": "out/b.txt"})); fileplugin.CodeOf(err) != fileplugin.CodeNotFound {
+		t.Fatalf("read removed file = %v", err)
+	}
+	captures := h.captures(t, kernel.KindFSCapture)
+	if len(captures) != 2 {
+		t.Fatalf("fs.capture events = %d, want 2", len(captures))
+	}
+	var payload struct {
+		Count        int      `json:"count"`
+		Deleted      []string `json:"deleted"`
+		DeletedCount int      `json:"deletedCount"`
+	}
+	if err := json.Unmarshal(captures[1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Count != 0 || payload.DeletedCount != 1 || len(payload.Deleted) != 1 || payload.Deleted[0] != "out/b.txt" {
+		t.Fatalf("rm capture payload = %+v", payload)
+	}
+	// The historical snapshot at the first capture still materializes the file.
+	replay := t.TempDir()
+	if err := h.service.MaterializeSnapshot(h.ctx, h.scope, firstSeq, replay); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(replay + "/out/b.txt")
+	if err != nil || string(got) != "gone\n" {
+		t.Fatalf("historical replay = %q/%v", got, err)
+	}
+}
+
+// gatedCaptureSource blocks the first capture after its snapshot is taken, so a
+// test can start a second settlement (a job's Close) while the first (the
+// parent run's Close) is between snapshot and commit.
+type gatedCaptureSource struct {
+	inner            fileplugin.SnapshotSource
+	calls            atomic.Int32
+	firstSnapshotted chan struct{}
+	releaseFirst     chan struct{}
+	secondStarted    chan struct{}
+}
+
+func (g *gatedCaptureSource) Snapshot(ctx context.Context, scope fileplugin.Scope) (layerfs.Snapshot, error) {
+	switch g.calls.Add(1) {
+	case 1:
+		snapshot, err := g.inner.Snapshot(ctx, scope)
+		close(g.firstSnapshotted)
+		<-g.releaseFirst
+		return snapshot, err
+	case 2:
+		close(g.secondStarted)
+	}
+	return g.inner.Snapshot(ctx, scope)
+}
+
+// TestParentCloseAndJobCloseOrderingKeepsJobWrites is the interleaving the W3
+// task names: a parent run Close and a nohup job Close both snapshot the same
+// session. The parent snapshots first (without the job's file) and is held
+// between snapshot and commit; the job writes and closes. Its settlement MUST
+// wait for the parent's whole settlement, so the parent commits first (its
+// snapshot is the older view, not the last word) and the job's later snapshot
+// includes its file. Without the ordering lock the job could commit first and
+// the parent's stale full snapshot would delete the job's row.
+func TestParentCloseAndJobCloseOrderingKeepsJobWrites(t *testing.T) {
+	gate := &gatedCaptureSource{
+		firstSnapshotted: make(chan struct{}),
+		releaseFirst:     make(chan struct{}),
+		secondStarted:    make(chan struct{}),
+	}
+	h := newSeamHarnessWithSnapshotSource(t, func(inner fileplugin.SnapshotSource) fileplugin.SnapshotSource {
+		gate.inner = inner
+		return gate
+	})
+
+	type captureOutcome struct {
+		capture fileplugin.CaptureResult
+		err     error
+	}
+	parent := make(chan captureOutcome, 1)
+	go func() {
+		capture, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-parent-close", 0, "task-parent")
+		parent <- captureOutcome{capture: capture, err: err}
+	}()
+	select {
+	case <-gate.firstSnapshotted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parent capture never took its snapshot")
+	}
+
+	// The background job writes after the parent's snapshot and then closes.
+	jobCtx := h.bashJobCtx("call-job-close", "job-order-1")
+	session, err := h.bridge.NewSession(jobCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.Run(jobCtx, bashbridge.RunSpec{
+		Command: `mkdir -p /workspace/job && printf 'job-wrote-this\n' > /workspace/job/out.txt`,
+	})
+	if err != nil || result.ExitCode != 0 {
+		session.Close()
+		t.Fatalf("job run = %+v/%v", result, err)
+	}
+	jobClosed := make(chan error, 1)
+	go func() { jobClosed <- session.Close() }()
+
+	// The job's settlement must be blocked: the parent still holds the session's
+	// settlement critical section between its snapshot and commit.
+	select {
+	case <-gate.secondStarted:
+		t.Fatal("the job capture started before the parent settlement committed")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(gate.releaseFirst)
+	parentResult := <-parent
+	if parentResult.err != nil {
+		t.Fatalf("parent capture: %v", parentResult.err)
+	}
+	if err := <-jobClosed; err != nil {
+		t.Fatalf("job close (capture): %v", err)
+	}
+	if parentResult.capture.Count != 0 || parentResult.capture.SnapshotVersion != 1 {
+		t.Fatalf("parent capture = %+v, want an empty first snapshot", parentResult.capture)
+	}
+	captures := h.captures(t, kernel.KindFSCapture)
+	if len(captures) != 2 {
+		t.Fatalf("fs.capture events = %d, want 2", len(captures))
+	}
+	if captures[0].Seq != parentResult.capture.Seq || captures[1].Seq <= captures[0].Seq {
+		t.Fatalf("capture seqs = %d/%d, parent = %d", captures[0].Seq, captures[1].Seq, parentResult.capture.Seq)
+	}
+	// The job's file survives the parent's later full snapshot and the newest
+	// capture tree carries it.
+	entries, err := h.service.List(h.ctx, h.scope)
+	if err != nil || len(entries) != 1 || entries[0].Path != "job/out.txt" {
+		t.Fatalf("manifest after both settlements = %+v/%v", entries, err)
+	}
+	var payload struct {
+		Count           int    `json:"count"`
+		DeletedCount    int    `json:"deletedCount"`
+		SnapshotVersion int64  `json:"snapshotVersion"`
+		JobID           string `json:"jobId"`
+	}
+	if err := json.Unmarshal(captures[1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Count != 1 || payload.DeletedCount != 0 || payload.SnapshotVersion != 2 || payload.JobID != "job-order-1" {
+		t.Fatalf("job capture payload = %+v", payload)
+	}
+	read, err := h.service.Read(h.fileCtx("call-r-job"), mustArgs(t, map[string]any{"path": "job/out.txt"}))
+	if err != nil || read.Content != "job-wrote-this\n" {
+		t.Fatalf("read job file after ordering = %q/%v", read.Content, err)
+	}
+}
+
+// TestJobSettlesBeforeParentKeepsJobWrites is the stated order in the other
+// direction: the nohup child's Close commits first, then the parent run's Close
+// settles later. The parent's snapshot is taken inside the same per-session
+// critical section, so it includes the child's file and its later full snapshot
+// does not delete it.
+func TestJobSettlesBeforeParentKeepsJobWrites(t *testing.T) {
+	h := newSeamHarness(t)
+	jobCtx := h.bashJobCtx("call-job-first", "job-first-1")
+	session, err := h.bridge.NewSession(jobCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.Run(jobCtx, bashbridge.RunSpec{
+		Command: `mkdir -p /workspace/job && printf 'job-first\n' > /workspace/job/out.txt`,
+	})
+	if err != nil || result.ExitCode != 0 {
+		session.Close()
+		t.Fatalf("job run = %+v/%v", result, err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("job close (capture): %v", err)
+	}
+	parent, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-parent-later", 0, "task-parent")
+	if err != nil {
+		t.Fatalf("parent capture: %v", err)
+	}
+	if parent.Count != 1 || parent.Deleted != 0 || parent.SnapshotVersion != 2 {
+		t.Fatalf("parent capture = %+v", parent)
+	}
+	entries, err := h.service.List(h.ctx, h.scope)
+	if err != nil || len(entries) != 1 || entries[0].Path != "job/out.txt" {
+		t.Fatalf("manifest after job-first ordering = %+v/%v", entries, err)
+	}
+	captures := h.captures(t, kernel.KindFSCapture)
+	if len(captures) != 2 || captures[0].Seq >= captures[1].Seq {
+		t.Fatalf("capture seqs = %+v, want the job first", captures)
 	}
 }

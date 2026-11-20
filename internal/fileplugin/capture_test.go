@@ -1,11 +1,15 @@
 package fileplugin_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/kernel"
@@ -371,5 +375,401 @@ func TestCaptureOneHundredThousandFilesIsOneEvent(t *testing.T) {
 	}
 	if refs := h.store.RefCount(entries[0].Hash); refs != 1 {
 		t.Fatalf("refcount = %d, want 1", refs)
+	}
+}
+
+// TestCaptureReconcilesDeletions pins the deletion half of a settlement: a path
+// a previous capture established and the workspace no longer has is removed
+// from the manifest, the event stays one fs.capture, and the historical
+// snapshot at the older seq still materializes the deleted file.
+func TestCaptureReconcilesDeletions(t *testing.T) {
+	h := newHarness(t)
+	h.write(t, "call-w1", "a.txt", "alpha")
+	h.write(t, "call-w2", "dir/b.txt", "beta")
+	h.write(t, "call-w3", "dir/sub/c.txt", "gamma")
+
+	first, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-c1", 0, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Count != 3 || first.Deleted != 0 {
+		t.Fatalf("first capture = %+v", first)
+	}
+	if err := os.Remove(filepath.Join(h.surface.Root, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(h.surface.Root, "dir", "sub")); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-c2", 0, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Count != 1 || second.Deleted != 2 || second.DeletedTruncated {
+		t.Fatalf("second capture = %+v", second)
+	}
+	captures := captureEvents(t, h)
+	if len(captures) != 2 {
+		t.Fatalf("fs.capture events = %d, want exactly 2", len(captures))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(captures[1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	deleted, ok := payload["deleted"].([]any)
+	if !ok || len(deleted) != 2 || deleted[0] != "a.txt" || deleted[1] != "dir/sub/c.txt" {
+		t.Fatalf("payload deleted = %v", payload["deleted"])
+	}
+	if payload["deletedCount"].(float64) != 2 {
+		t.Fatalf("payload deletedCount = %v", payload["deletedCount"])
+	}
+	if _, truncated := payload["deletedTruncated"]; truncated {
+		t.Fatalf("payload marked truncated: %v", payload)
+	}
+	// The first event is untouched: the settlement fact is append-only.
+	var firstPayload map[string]any
+	if err := json.Unmarshal(captures[0].Payload, &firstPayload); err != nil {
+		t.Fatal(err)
+	}
+	if firstPayload["count"].(float64) != 3 {
+		t.Fatalf("first event payload = %v", firstPayload)
+	}
+
+	entries, err := h.manifest.List(h.ctx, h.scope.TenantID, h.scope.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Path != "dir/b.txt" {
+		t.Fatalf("manifest after deletion = %+v", entries)
+	}
+	if rows := h.manifestRows(t); len(rows) != 1 || rows[0] != "dir/b.txt" {
+		t.Fatalf("manifest paths = %v", rows)
+	}
+	if _, err := h.service.Read(h.call("call-r-gone"), mustJSON(t, map[string]any{"path": "a.txt"})); fileplugin.CodeOf(err) != fileplugin.CodeNotFound {
+		t.Fatalf("read deleted file = %v", err)
+	}
+
+	// Historical replay: the snapshot at the first seq still has every file,
+	// including the two the later capture removed.
+	before := t.TempDir()
+	if err := h.service.MaterializeSnapshot(h.ctx, h.scope, first.Seq, before); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{"a.txt": "alpha", "dir/b.txt": "beta", "dir/sub/c.txt": "gamma"} {
+		got, err := os.ReadFile(filepath.Join(before, filepath.FromSlash(path)))
+		if err != nil || string(got) != want {
+			t.Fatalf("replay %s = %q/%v", path, got, err)
+		}
+	}
+	after := t.TempDir()
+	if err := h.service.MaterializeSnapshot(h.ctx, h.scope, second.Seq, after); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(after, "a.txt")); !os.IsNotExist(err) {
+		t.Fatalf("latest snapshot still has the deleted file: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(after, "dir", "b.txt"))
+	if err != nil || string(got) != "beta" {
+		t.Fatalf("latest snapshot content = %q/%v", got, err)
+	}
+}
+
+// TestCaptureDeletedPayloadIsBounded pins the event-document bound: the
+// manifest reconciliation removes every path, the payload carries the count and
+// at most CaptureDeletedPayloadLimit paths.
+func TestCaptureDeletedPayloadIsBounded(t *testing.T) {
+	h := newHarness(t)
+	const files = fileplugin.CaptureDeletedPayloadLimit + 44
+	root := h.surface.Root
+	for index := 0; index < files; index++ {
+		path := filepath.Join(root, fmt.Sprintf("bulk/f%03d", index))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-bulk-1", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Count != files {
+		t.Fatalf("capture count = %d, want %d", first.Count, files)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "bulk")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-bulk-2", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Deleted != files || !second.DeletedTruncated {
+		t.Fatalf("second capture = %+v", second)
+	}
+	captures := captureEvents(t, h)
+	if len(captures) != 2 {
+		t.Fatalf("fs.capture events = %d, want 2", len(captures))
+	}
+	var payload struct {
+		Deleted          []string `json:"deleted"`
+		DeletedCount     int      `json:"deletedCount"`
+		DeletedTruncated bool     `json:"deletedTruncated"`
+	}
+	if err := json.Unmarshal(captures[1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Deleted) != fileplugin.CaptureDeletedPayloadLimit {
+		t.Fatalf("payload deleted paths = %d, want %d", len(payload.Deleted), fileplugin.CaptureDeletedPayloadLimit)
+	}
+	if payload.DeletedCount != files || !payload.DeletedTruncated {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if rows := h.manifestRows(t); len(rows) != 0 {
+		t.Fatalf("manifest rows after bulk rm = %d", len(rows))
+	}
+}
+
+// TestCaptureDeletesWrittenThenRemoved pins the workspace-as-truth rule: a file
+// the write tool created, then removed from the execution space, is removed
+// from the session view by the next capture. The fs.write event and its blob
+// reference stay in the ledger; only the current manifest projection follows
+// the workspace.
+func TestCaptureDeletesWrittenThenRemoved(t *testing.T) {
+	h := newHarness(t)
+	h.write(t, "call-w1", "a.txt", "alpha")
+	if err := os.Remove(filepath.Join(h.surface.Root, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	capture, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-c1", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capture.Deleted != 1 || capture.Count != 0 {
+		t.Fatalf("capture = %+v", capture)
+	}
+	if rows := h.manifestRows(t); len(rows) != 0 {
+		t.Fatalf("manifest rows after removal = %v", rows)
+	}
+	if _, err := h.service.Read(h.call("call-r-gone"), mustJSON(t, map[string]any{"path": "a.txt"})); fileplugin.CodeOf(err) != fileplugin.CodeNotFound {
+		t.Fatalf("read removed file = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(captureEvents(t, h)[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["deletedCount"].(float64) != 1 {
+		t.Fatalf("payload deletedCount = %v", payload["deletedCount"])
+	}
+	if deleted := payload["deleted"].([]any); len(deleted) != 1 || deleted[0] != "a.txt" {
+		t.Fatalf("payload deleted = %v", payload["deleted"])
+	}
+}
+
+// manifestRows is a sorted convenience view of the manifest's paths.
+func (h *harness) manifestRows(t *testing.T) []string {
+	t.Helper()
+	entries, err := h.manifest.List(h.ctx, h.scope.TenantID, h.scope.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make([]string, len(entries))
+	for index, entry := range entries {
+		paths[index] = entry.Path
+	}
+	return paths
+}
+
+// snapshotFunc adapts a function to SnapshotSource.
+type snapshotFunc func(context.Context, fileplugin.Scope) (layerfs.Snapshot, error)
+
+func (f snapshotFunc) Snapshot(ctx context.Context, scope fileplugin.Scope) (layerfs.Snapshot, error) {
+	return f(ctx, scope)
+}
+
+// gatedSnapshot blocks the first capture after its snapshot has been taken, so
+// a test can start a second settlement while the first is between snapshot and
+// commit.
+type gatedSnapshot struct {
+	inner            fileplugin.SnapshotSource
+	calls            atomic.Int32
+	firstSnapshotted chan struct{}
+	releaseFirst     chan struct{}
+	secondStarted    chan struct{}
+}
+
+func (g *gatedSnapshot) Snapshot(ctx context.Context, scope fileplugin.Scope) (layerfs.Snapshot, error) {
+	switch g.calls.Add(1) {
+	case 1:
+		snapshot, err := g.inner.Snapshot(ctx, scope)
+		close(g.firstSnapshotted)
+		<-g.releaseFirst
+		return snapshot, err
+	case 2:
+		close(g.secondStarted)
+	}
+	return g.inner.Snapshot(ctx, scope)
+}
+
+// TestCaptureSettlementsAreSerialized is the ordering proof for two full
+// snapshots of one session. The first settlement snapshots the workspace and is
+// held between snapshot and commit; the second settlement MUST wait for the
+// whole first settlement, so its snapshot cannot begin (and its commit cannot
+// land) before the first fact exists. The second, later settlement therefore
+// carries the union of both views: no last-writer stale snapshot.
+func TestCaptureSettlementsAreSerialized(t *testing.T) {
+	h := newHarness(t)
+	gate := &gatedSnapshot{
+		inner: snapshotFunc(func(_ context.Context, _ fileplugin.Scope) (layerfs.Snapshot, error) {
+			return h.store.Capture(h.surface.Root, layerfs.CaptureOptions{})
+		}),
+		firstSnapshotted: make(chan struct{}),
+		releaseFirst:     make(chan struct{}),
+		secondStarted:    make(chan struct{}),
+	}
+	service, err := fileplugin.New(fileplugin.Options{
+		Store:          h.store,
+		Manifest:       h.manifest,
+		Committer:      h.kernel,
+		Leases:         h.kernel,
+		Surface:        h.surface,
+		SnapshotSource: gate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Write(h.call("call-w-child"), mustJSON(t, map[string]any{
+		"path": "child.txt", "content": "child-wrote-this",
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		capture fileplugin.CaptureResult
+		err     error
+	}
+	first := make(chan result, 1)
+	go func() {
+		capture, err := service.CaptureWorkspace(h.ctx, h.scope, "call-child-close", 0, "task-child")
+		first <- result{capture: capture, err: err}
+	}()
+	select {
+	case <-gate.firstSnapshotted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first capture never took its snapshot")
+	}
+
+	second := make(chan result, 1)
+	go func() {
+		capture, err := service.CaptureWorkspace(h.ctx, h.scope, "call-parent-close", 0, "task-parent")
+		second <- result{capture: capture, err: err}
+	}()
+	// The second settlement must be blocked on the session's settlement lock:
+	// its snapshot may not start while the first is between snapshot and commit.
+	select {
+	case <-gate.secondStarted:
+		t.Fatal("the second capture snapshotted before the first settlement committed")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(gate.releaseFirst)
+
+	child := <-first
+	parent := <-second
+	if child.err != nil || parent.err != nil {
+		t.Fatalf("captures: child=%v parent=%v", child.err, parent.err)
+	}
+	if child.capture.Seq >= parent.capture.Seq {
+		t.Fatalf("child seq %d, parent seq %d: the later settlement must commit later", child.capture.Seq, parent.capture.Seq)
+	}
+	if child.capture.SnapshotVersion != 1 || parent.capture.SnapshotVersion != 2 {
+		t.Fatalf("snapshot versions = %d/%d, want 1/2", child.capture.SnapshotVersion, parent.capture.SnapshotVersion)
+	}
+	if child.capture.Count != 1 || parent.capture.Count != 1 {
+		t.Fatalf("capture counts = %d/%d, want 1/1 (the parent's snapshot must include the child file)", child.capture.Count, parent.capture.Count)
+	}
+	// The child committed first, the parent committed later; the child's file
+	// survives the parent's full snapshot and the latest tree still has it.
+	entry, ok, err := h.manifest.Get(h.ctx, h.scope.TenantID, h.scope.SessionID, "child.txt")
+	if err != nil || !ok {
+		t.Fatalf("child file after the later parent settlement = %+v/%v/%v", entry, ok, err)
+	}
+	tree, ok, err := h.manifest.Snapshot(h.ctx, h.scope.TenantID, h.scope.SessionID, parent.capture.Seq)
+	if err != nil || !ok || tree.Prefixed() != parent.capture.Tree {
+		t.Fatalf("latest snapshot = %s/%v/%v", tree, ok, err)
+	}
+	if _, err := h.store.Tree(tree); err != nil {
+		t.Fatalf("latest tree object: %v", err)
+	}
+	var payload map[string]any
+	events := captureEvents(t, h)
+	if len(events) != 2 {
+		t.Fatalf("fs.capture events = %d, want 2", len(events))
+	}
+	if err := json.Unmarshal(events[1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["count"].(float64) != 1 || payload["deletedCount"].(float64) != 0 {
+		t.Fatalf("parent payload = %v", payload)
+	}
+	if payload["snapshotVersion"].(float64) != 2 {
+		t.Fatalf("parent payload snapshotVersion = %v", payload["snapshotVersion"])
+	}
+}
+
+// TestCaptureDeletedPayloadByteBound pins the second payload bound: a deleted
+// list of long paths stops at the byte budget even when the count limit has not
+// been reached. The manifest reconciliation still removes every path and
+// deletedCount reports the full number.
+func TestCaptureDeletedPayloadByteBound(t *testing.T) {
+	h := newHarness(t)
+	const files = 200
+	root := h.surface.Root
+	long := strings.Repeat("a", 180)
+	for index := 0; index < files; index++ {
+		path := filepath.Join(root, "bulk", fmt.Sprintf("%s-%03d", long, index))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-long-1", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "bulk")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.service.CaptureWorkspace(h.ctx, h.scope, "call-long-2", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Deleted != files || !second.DeletedTruncated {
+		t.Fatalf("second capture = %+v", second)
+	}
+	var payload struct {
+		Deleted          []string `json:"deleted"`
+		DeletedCount     int      `json:"deletedCount"`
+		DeletedTruncated bool     `json:"deletedTruncated"`
+	}
+	if err := json.Unmarshal(captureEvents(t, h)[1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.DeletedCount != files || !payload.DeletedTruncated {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if len(payload.Deleted) >= files {
+		t.Fatalf("byte bound did not truncate: %d paths", len(payload.Deleted))
+	}
+	used := 0
+	for _, path := range payload.Deleted {
+		used += len(path) + 1
+	}
+	if used > fileplugin.CaptureDeletedPayloadBytes {
+		t.Fatalf("deleted payload = %d bytes, budget %d", used, fileplugin.CaptureDeletedPayloadBytes)
+	}
+	if rows := h.manifestRows(t); len(rows) != 0 {
+		t.Fatalf("manifest rows after long-path rm = %d", len(rows))
 	}
 }

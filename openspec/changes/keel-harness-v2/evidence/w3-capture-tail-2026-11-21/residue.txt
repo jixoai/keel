@@ -1,0 +1,19 @@
+$ git status --short
+?? openspec/changes/keel-harness-v2/evidence/w3-capture-tail-2026-11-21/residue.txt
+status_exit=0
+
+$ git diff --check
+diff_check_exit=0
+
+$ git log --oneline 0f22064..HEAD
+8a6415b docs(fileplugin): snapshotVersion is zero on replay
+a8c1181 docs(keel-harness-v2): W3.H3B capture delete/ordering evidence + mode blocker
+c96051d refactor(fileplugin): make the execution space the deletion truth
+1b88784 feat(fileplugin): order capture settlements per session
+b0d4998 feat(fileplugin): reconcile deleted paths in capture settlements
+
+$ pgrep -fl 'keel (serve|runtime)'
+no keel serve/runtime process
+
+$ gofmt -l internal/fileplugin internal/bashbridge
+gofmt_exit=0

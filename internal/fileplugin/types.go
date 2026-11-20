@@ -141,7 +141,18 @@ type CaptureResult struct {
 	NewObjects    int    `json:"newObjects"`
 	ReusedObjects int    `json:"reusedObjects"`
 	Bytes         int64  `json:"bytes"`
-	Replayed      bool   `json:"replayed,omitempty"`
+	// Deleted is how many paths the settlement removed from the manifest (paths
+	// a previous capture established, absent from this snapshot).
+	Deleted int `json:"deleted"`
+	// DeletedTruncated reports that the event payload carries only the first
+	// CaptureDeletedPayloadLimit of Deleted paths.
+	DeletedTruncated bool `json:"deletedTruncated,omitempty"`
+	// SnapshotVersion is the per-session settlement version assigned by this
+	// process. Capture settlements are serialized per session, so a larger
+	// version is a strictly later view. A replay is not a new settlement and
+	// reports 0; the original event carries its version in the payload.
+	SnapshotVersion int64 `json:"snapshotVersion"`
+	Replayed        bool  `json:"replayed,omitempty"`
 }
 
 // --- ambient operation identity -------------------------------------------

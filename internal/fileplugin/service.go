@@ -9,9 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/layerfs"
@@ -76,6 +80,30 @@ type Service struct {
 	maxBytes     int
 	logger       *slog.Logger
 	now          func() time.Time
+
+	// settlements serializes every manifest mutation of one session (explicit
+	// writes and captures). A capture's snapshot, event commit and manifest
+	// reconciliation are one critical section, so a later-committing capture can
+	// never carry an older snapshot: settlement order == snapshot order. This is
+	// the fix for a parent run's Close and a nohup child's Close snapshotting the
+	// same session concurrently ("child commits first, parent commits later"
+	// must not lose the child's writes). The state also carries the explicit
+	// per-session snapshot version recorded in the event.
+	settlementsMu sync.Mutex
+	settlements   map[settlementKey]*settlementState
+}
+
+type settlementKey struct {
+	tenantID  uuid.UUID
+	sessionID uuid.UUID
+}
+
+type settlementState struct {
+	// mu is the session's settlement lock (explicit writes and captures).
+	mu sync.Mutex
+	// version is the last snapshot version issued for the session. It is only
+	// read/written while mu is held.
+	version int64
 }
 
 // New builds the service.
@@ -114,6 +142,7 @@ func New(opts Options) (*Service, error) {
 		maxBytes:     opts.MaxReadBytes,
 		logger:       logger,
 		now:          now,
+		settlements:  make(map[settlementKey]*settlementState),
 	}, nil
 }
 
@@ -253,6 +282,10 @@ func (s *Service) WriteStream(ctx context.Context, scope Scope, callID, rawPath 
 		return WriteResult{}, err
 	}
 	taskID := s.taskID(scope, opts.TaskID)
+	// Preconditions, commit, projection and write-through are one settlement:
+	// a capture cannot snapshot between the manifest check and the write-through.
+	_, unlock := s.lockSettlement(scope)
+	defer unlock()
 	if replay, found, err := s.lookupWrite(ctx, scope, callID, path); err != nil {
 		return WriteResult{}, err
 	} else if found {
@@ -341,6 +374,8 @@ func (s *Service) Edit(ctx context.Context, args json.RawMessage) (EditResult, e
 	if err != nil {
 		return EditResult{}, err
 	}
+	_, unlock := s.lockSettlement(scope)
+	defer unlock()
 	if replay, found, err := s.lookupEdit(ctx, scope, callID, path); err != nil {
 		return EditResult{}, err
 	} else if found {
@@ -500,6 +535,38 @@ func (c captureSettlement) key() string {
 	return "job:" + c.jobID + ":" + base
 }
 
+const (
+	// CaptureDeletedPayloadLimit bounds the `deleted` list in one fs.capture
+	// payload. The manifest reconciliation itself is not bounded (a bulk rm may
+	// remove any number of rows); only the event document is, so one event stays
+	// a reasonable size. deletedCount always reports the full number.
+	CaptureDeletedPayloadLimit = 256
+	// CaptureDeletedPayloadBytes is the byte budget of the `deleted` list (path
+	// lengths are also attacker-controlled through the workspace). Paths are
+	// added until either bound is reached; the event stays bounded even with
+	// very long names.
+	CaptureDeletedPayloadBytes = 32 << 10
+)
+
+// boundedDeletedPaths returns the prefix of paths that fits both payload
+// bounds. Paths are sorted by the caller, so the prefix is deterministic.
+func boundedDeletedPaths(paths []string) []string {
+	bounded := make([]string, 0, len(paths))
+	used := 0
+	for _, path := range paths {
+		if len(bounded) >= CaptureDeletedPayloadLimit {
+			break
+		}
+		cost := len(path) + 1 // comma separator
+		if used+cost > CaptureDeletedPayloadBytes {
+			break
+		}
+		bounded = append(bounded, path)
+		used += cost
+	}
+	return bounded
+}
+
 func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettlement) (CaptureResult, error) {
 	scope := settlement.scope
 	if !scope.Valid() {
@@ -514,11 +581,21 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 	settlement.taskID = s.taskID(scope, settlement.taskID)
 	system := settlement.jobID != ""
 	key := settlement.key()
+	// The whole settlement (replay lookup, snapshot, commit, manifest
+	// reconciliation, reference retain, snapshot row) is one per-session critical
+	// section. This is what orders a parent Close and a nohup child Close: a
+	// child settlement that commits first makes the parent snapshot after it, so
+	// the parent's later commit carries the child's writes instead of an older
+	// full-snapshot view.
+	state, unlock := s.lockSettlement(scope)
+	defer unlock()
 	if replay, found, err := s.lookupCapture(ctx, scope, key, settlement.baseSeq); err != nil {
 		return CaptureResult{}, err
 	} else if found {
 		return replay, nil
 	}
+	state.version++
+	snapshotVersion := state.version
 	var (
 		snapshot layerfs.Snapshot
 		err      error
@@ -532,6 +609,18 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 		s.commitCaptureFailed(ctx, settlement, err)
 		return CaptureResult{}, mapLayerfsError(err)
 	}
+	// Deletion reconciliation. A manifest path the current execution space no
+	// longer has was removed by the workspace (bash `rm`, a build clean, ...).
+	// The diff is computed before the commit so the one fs.capture event can
+	// carry it; the manifest delete runs after the commit and is guarded to rows
+	// established by an earlier event.
+	existing, err := s.manifest.List(ctx, scope.TenantID, scope.SessionID)
+	if err != nil {
+		s.commitCaptureFailed(ctx, settlement, err)
+		return CaptureResult{}, mapStoreError(err)
+	}
+	deleted := deletedManifestPaths(existing, snapshot.Files)
+	boundedDeleted := boundedDeletedPaths(deleted)
 	// The owner lane needs the run fence; the system lane deliberately skips it
 	// (the run may already be settled) and commits with System: true instead.
 	var token kernel.OwnerToken
@@ -543,13 +632,19 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 		}
 	}
 	payload := map[string]any{
-		"sessionId":     scope.SessionID.String(),
-		"baseSeq":       settlement.baseSeq,
-		"count":         snapshot.Count,
-		"treeHash":      snapshot.Tree.Prefixed(),
-		"newObjects":    snapshot.NewObjects,
-		"reusedObjects": snapshot.ReusedObjects,
-		"bytes":         snapshot.Bytes,
+		"sessionId":       scope.SessionID.String(),
+		"baseSeq":         settlement.baseSeq,
+		"count":           snapshot.Count,
+		"treeHash":        snapshot.Tree.Prefixed(),
+		"newObjects":      snapshot.NewObjects,
+		"reusedObjects":   snapshot.ReusedObjects,
+		"bytes":           snapshot.Bytes,
+		"deleted":         boundedDeleted,
+		"deletedCount":    len(deleted),
+		"snapshotVersion": snapshotVersion,
+	}
+	if len(deleted) > len(boundedDeleted) {
+		payload["deletedTruncated"] = true
 	}
 	if settlement.taskID != "" {
 		payload["taskId"] = settlement.taskID
@@ -587,6 +682,9 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 	if err := s.manifest.Upsert(ctx, scope.TenantID, scope.SessionID, entries); err != nil {
 		return CaptureResult{}, Errorf(CodeIO, "capture committed at seq %d but the manifest update failed: %v", receipt.Seq, err)
 	}
+	if err := s.manifest.DeleteStale(ctx, scope.TenantID, scope.SessionID, deleted, receipt.Seq); err != nil {
+		return CaptureResult{}, Errorf(CodeIO, "capture committed at seq %d but the deletion reconciliation failed: %v", receipt.Seq, err)
+	}
 	if _, err := s.store.RetainBatch(refs); err != nil {
 		return CaptureResult{}, Errorf(CodeIO, "capture committed at seq %d but references were not recorded: %v", receipt.Seq, err)
 	}
@@ -596,7 +694,30 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 	return CaptureResult{
 		Tree: snapshot.Tree.Prefixed(), Count: snapshot.Count, Seq: receipt.Seq, BaseSeq: settlement.baseSeq,
 		NewObjects: snapshot.NewObjects, ReusedObjects: snapshot.ReusedObjects, Bytes: snapshot.Bytes,
+		Deleted: len(deleted), DeletedTruncated: len(deleted) > len(boundedDeleted),
+		SnapshotVersion: snapshotVersion,
 	}, nil
+}
+
+// deletedManifestPaths is the deletion half of capture reconciliation: every
+// manifest path the current snapshot no longer has. The execution space is the
+// capture truth, so a file written by the write tool and then removed by bash
+// is removed from the session view too; its fs.write event and blob reference
+// stay in the ledger.
+func deletedManifestPaths(entries []Entry, files []layerfs.FileEntry) []string {
+	present := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		present[file.Path] = struct{}{}
+	}
+	deleted := make([]string, 0)
+	for _, entry := range entries {
+		if _, ok := present[entry.Path]; ok {
+			continue
+		}
+		deleted = append(deleted, entry.Path)
+	}
+	sort.Strings(deleted)
+	return deleted
 }
 
 // Materialize writes the session's current manifest view under dir.
@@ -671,6 +792,34 @@ func (s *Service) taskID(scope Scope, explicit string) string {
 		return explicit
 	}
 	return scope.TaskID
+}
+
+// lockSettlement enters one session's settlement critical section. Every
+// manifest mutation (explicit write/edit and every capture) holds it, so:
+//
+//   - a capture snapshots the workspace only after every earlier write's
+//     write-through and manifest update have finished;
+//   - no write/capture can commit between a capture's snapshot and its manifest
+//     reconciliation;
+//   - two concurrent captures are applied in snapshot order, which is also
+//     commit order. A parent run's Close and a nohup child's Close therefore
+//     cannot leave the newest capture holding an older full snapshot (the last
+//     writer is always the newest view, never a stale one).
+//
+// The lock is per Service, which is the process that owns the in-memory
+// execution space; a session's workspace is never shared with another process.
+// updated_seq remains the event-seq attribution and replay guard.
+func (s *Service) lockSettlement(scope Scope) (*settlementState, func()) {
+	key := settlementKey{tenantID: scope.TenantID, sessionID: scope.SessionID}
+	s.settlementsMu.Lock()
+	state := s.settlements[key]
+	if state == nil {
+		state = &settlementState{}
+		s.settlements[key] = state
+	}
+	s.settlementsMu.Unlock()
+	state.mu.Lock()
+	return state, state.mu.Unlock
 }
 
 func parseExpectedHash(raw string) (layerfs.Hash, error) {

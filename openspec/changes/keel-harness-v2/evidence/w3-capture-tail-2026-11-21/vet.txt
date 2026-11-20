@@ -1,0 +1,2 @@
+$ go vet ./internal/fileplugin/... ./internal/bashbridge/... ./internal/store/... ./cmd/keel
+vet_exit=0

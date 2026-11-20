@@ -1,0 +1,12 @@
+$ go test -p 1 -count=1 ./internal/fileplugin/... ./internal/bashbridge/... ./internal/layerfs/... ./internal/kernel/... ./internal/store/... ./internal/agentext/... ./internal/toolsurface/... ./internal/servicehost/...
+# only KEEL_TEST_DSN exported from .env.local (the serve password vars would change cmd tests)
+ok  	github.com/jixoai/keel/internal/fileplugin	58.615s
+ok  	github.com/jixoai/keel/internal/bashbridge	1.462s
+ok  	github.com/jixoai/keel/internal/layerfs	3.874s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.678s
+ok  	github.com/jixoai/keel/internal/kernel	30.846s
+ok  	github.com/jixoai/keel/internal/store	9.757s
+ok  	github.com/jixoai/keel/internal/agentext	7.579s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.383s
+ok  	github.com/jixoai/keel/internal/servicehost	2.138s
+exit=0

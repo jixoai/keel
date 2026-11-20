@@ -1,0 +1,15 @@
+$ go test -p 1 -count=1 -v ./internal/bashbridge -run 'TestBashRmIsReconciledByCapture|TestParentCloseAndJobCloseOrderingKeepsJobWrites|TestJobSettlesBeforeParentKeepsJobWrites|TestBashWriteCapturedIntoManifestAndTree|TestBackgroundJobCaptureSettlesWithoutRunLease'
+# KEEL_TEST_DSN is set
+=== RUN   TestBashWriteCapturedIntoManifestAndTree
+--- PASS: TestBashWriteCapturedIntoManifestAndTree (0.05s)
+=== RUN   TestBackgroundJobCaptureSettlesWithoutRunLease
+--- PASS: TestBackgroundJobCaptureSettlesWithoutRunLease (0.02s)
+=== RUN   TestBashRmIsReconciledByCapture
+--- PASS: TestBashRmIsReconciledByCapture (0.03s)
+=== RUN   TestParentCloseAndJobCloseOrderingKeepsJobWrites
+--- PASS: TestParentCloseAndJobCloseOrderingKeepsJobWrites (0.23s)
+=== RUN   TestJobSettlesBeforeParentKeepsJobWrites
+--- PASS: TestJobSettlesBeforeParentKeepsJobWrites (0.02s)
+PASS
+ok  	github.com/jixoai/keel/internal/bashbridge	0.875s
+exit=0

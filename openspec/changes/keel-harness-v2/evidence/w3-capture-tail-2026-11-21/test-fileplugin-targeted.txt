@@ -1,0 +1,17 @@
+$ go test -p 1 -count=1 -v ./internal/fileplugin -run 'TestCaptureReconcilesDeletions|TestCaptureDeletesWrittenThenRemoved|TestCaptureDeletedPayloadIsBounded|TestCaptureDeletedPayloadByteBound|TestCaptureSettlementsAreSerialized|TestPostgresManifestDeleteStaleGuard'
+# KEEL_TEST_DSN is set
+=== RUN   TestCaptureReconcilesDeletions
+--- PASS: TestCaptureReconcilesDeletions (0.21s)
+=== RUN   TestCaptureDeletedPayloadIsBounded
+--- PASS: TestCaptureDeletedPayloadIsBounded (0.10s)
+=== RUN   TestCaptureDeletesWrittenThenRemoved
+--- PASS: TestCaptureDeletesWrittenThenRemoved (0.03s)
+=== RUN   TestCaptureSettlementsAreSerialized
+--- PASS: TestCaptureSettlementsAreSerialized (0.23s)
+=== RUN   TestCaptureDeletedPayloadByteBound
+--- PASS: TestCaptureDeletedPayloadByteBound (0.11s)
+=== RUN   TestPostgresManifestDeleteStaleGuard
+--- PASS: TestPostgresManifestDeleteStaleGuard (0.05s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	1.378s
+exit=0

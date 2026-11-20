@@ -1,0 +1,2 @@
+$ go build ./internal/fileplugin/... ./internal/bashbridge/... ./internal/store/... ./cmd/keel
+build_exit=0

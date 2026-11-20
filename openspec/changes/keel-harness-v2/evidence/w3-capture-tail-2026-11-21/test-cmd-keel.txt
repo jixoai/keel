@@ -1,0 +1,4 @@
+$ go test -p 1 -count=1 ./cmd/keel/...
+# no KEEL_* env exported (cmd/keel starts its own test servers)
+ok  	github.com/jixoai/keel/cmd/keel	1.148s
+exit=0

@@ -1,0 +1,2 @@
+$ scripts/conformance.sh /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-w3-capture/openspec/changes/keel-harness-v2/evidence/w3-capture-tail-2026-11-21/conformance.json
+exit=1

@@ -21,6 +21,10 @@ type Manifest interface {
 	List(ctx context.Context, tenantID, sessionID uuid.UUID) ([]Entry, error)
 	Upsert(ctx context.Context, tenantID, sessionID uuid.UUID, entries []Entry) error
 	Delete(ctx context.Context, tenantID, sessionID uuid.UUID, path string) error
+	// DeleteStale removes manifest rows that a capture no longer sees in the
+	// execution space. maxSeq is the settling event's seq: only rows established
+	// by an earlier event are eligible, so a concurrent newer mutation survives.
+	DeleteStale(ctx context.Context, tenantID, sessionID uuid.UUID, paths []string, maxSeq int64) error
 	// PutSnapshot records the tree hash at an event sequence (fork O(1)).
 	PutSnapshot(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64, tree layerfs.Hash) error
 	Snapshot(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64) (layerfs.Hash, bool, error)
@@ -89,6 +93,21 @@ func (m *MemoryManifest) Delete(_ context.Context, tenantID, sessionID uuid.UUID
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.entries, memoryKey(tenantID, sessionID, path))
+	return nil
+}
+
+// DeleteStale implements Manifest.
+func (m *MemoryManifest) DeleteStale(_ context.Context, tenantID, sessionID uuid.UUID, paths []string, maxSeq int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, path := range paths {
+		key := memoryKey(tenantID, sessionID, path)
+		entry, ok := m.entries[key]
+		if !ok || entry.UpdatedSeq >= maxSeq {
+			continue
+		}
+		delete(m.entries, key)
+	}
 	return nil
 }
 
@@ -205,7 +224,8 @@ func (p *PostgresManifest) Upsert(ctx context.Context, tenantID, sessionID uuid.
 		if entry.Path == "" || !entry.Hash.Valid() {
 			return Errorf(CodeInvalid, "manifest entry %q is malformed", entry.Path)
 		}
-		batch.Queue(statement, tenantID, sessionID, entry.Path, entry.Hash.String(), entry.Mode, entry.Size, entry.UpdatedSeq, entry.LastTaskID)
+		batch.Queue(statement, tenantID, sessionID, entry.Path, entry.Hash.String(), entry.Mode, entry.Size,
+			entry.UpdatedSeq, entry.LastTaskID)
 		if batch.Len() >= 500 {
 			if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 				return fmt.Errorf("fileplugin: manifest upsert: %w", err)
@@ -229,6 +249,31 @@ func (p *PostgresManifest) Delete(ctx context.Context, tenantID, sessionID uuid.
 	if _, err := p.pool.Exec(ctx, `DELETE FROM file_manifest WHERE tenant_id = $1 AND session_id = $2 AND path = $3`,
 		tenantID, sessionID, path); err != nil {
 		return fmt.Errorf("fileplugin: delete manifest: %w", err)
+	}
+	return nil
+}
+
+// DeleteStale implements Manifest. One statement per batch: only rows written
+// before maxSeq are eligible, so a row a concurrent, later settlement refreshed
+// survives.
+func (p *PostgresManifest) DeleteStale(ctx context.Context, tenantID, sessionID uuid.UUID, paths []string, maxSeq int64) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	const chunk = 1000
+	for start := 0; start < len(paths); start += chunk {
+		end := start + chunk
+		if end > len(paths) {
+			end = len(paths)
+		}
+		if _, err := p.pool.Exec(ctx, `
+			DELETE FROM file_manifest
+			WHERE tenant_id = $1 AND session_id = $2
+			  AND path = ANY($3)
+			  AND updated_seq < $4`,
+			tenantID, sessionID, paths[start:end], maxSeq); err != nil {
+			return fmt.Errorf("fileplugin: delete stale manifest rows: %w", err)
+		}
 	}
 	return nil
 }

@@ -1,0 +1,3 @@
+$ openspec validate keel-harness-v2 --strict
+Change 'keel-harness-v2' is valid
+exit=0

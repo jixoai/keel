@@ -172,13 +172,39 @@
       write/edit 写穿、Close 单次 capture。gbashfs 是内存路径索引而非宿主目录，故 seam 用
       scoped `SessionSurface`/`SnapshotSource` 表达同一契约（目录 `Surface`/`CaptureRoot` 保留给
       本地适配器）；装配级证明 `evidence/w2.seam/test-seam.txt`）
-- [ ] bash 删除对账：capture 目前只 upsert，`rm` 掉的路径仍留在 `file_manifest` （对账 2026-11-20：未接线——Manifest.Delete 存在但 capture 路径只 Upsert；fs.capture payload 无 deleted 列表；internal/fileplugin/service.go:503-620、manifest.go:222-247）
+- [x] bash 删除对账：capture 目前只 upsert，`rm` 掉的路径仍留在 `file_manifest` （对账 2026-11-20：未接线——Manifest.Delete 存在但 capture 路径只 Upsert；fs.capture payload 无 deleted 列表；internal/fileplugin/service.go:503-620、manifest.go:222-247）
       （A 轴增量复核裁定：spec「执行空间产生的变更 MUST 通过 fs.capture 进入 layerfs」字面覆盖删除；
       需定义删除事件/对账语义并入 capture 批事件，不新造逐文件事件）
+      （W3.H3B 2026-11-21：capture 先 diff manifest 与快照，删除快照中已消失的路径，仍只追加一条
+      `fs.capture`；payload 增加 `deleted`（有界：256 条 / 32KiB，`CaptureDeletedPayloadLimit`/
+      `CaptureDeletedPayloadBytes`）、`deletedCount`、可选 `deletedTruncated`；`DeleteStale` 以事件 seq 做
+      `< maxSeq` 护栏；`count/treeHash` 取快照。
+      实现 `internal/fileplugin/service.go:588-664`、`internal/fileplugin/manifest.go:24-27,259`；
+      测试 `TestCaptureReconcilesDeletions`/`TestCaptureDeletesWrittenThenRemoved`/
+      `TestCaptureDeletedPayloadIsBounded`（fileplugin）、`TestBashRmIsReconciledByCapture`（bash seam）；
+      证据 `evidence/w3-capture-tail-2026-11-21/`）
 - [ ] capture 策略覆写：`config.toml` 的 `fs.capture.mode=checkpoint|manual` （对账 2026-11-20：未开始——无 config.toml，CaptureMode/checkpoint/manual 覆写通道未接）
       （layerfs spec 的 MUST；当前只实现 per-tool-call，覆写通道未接——依赖配置面切片，接线前不算满足）
-- [ ] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交， （对账 2026-11-20：部分——缺口：Upsert 有 updated_seq guard（manifest.go:180-196），snapshot 按 seq 精确存；但无跨 lane 定序/版本化，且 fork 未接线（W4））
+      （W3.H3B 2026-11-21 阻塞：仓库仍无 `config.toml` 加载器；`tenants.config` 只在 admin PUT
+      (`internal/httpapi/admin.go:98,122`) 与 `internal/quota/limits.go:250` 的 quota 片段被读，
+      `cmd/keel/serve.go:422` 的 host 配置只来自 env，stored document 不进入 runtime。
+      所需字段：tenant document `fs.capture.mode=per-tool-call|checkpoint|manual`（`internal/host/config.go:37`
+      TenantConfig 需新增段并过 Merge/Validate）。所需接入点：capture 决策在
+      `internal/bashbridge/layerworkspace.go:272`（`Mount.Finish` :175）；显式 checkpoint 无调用者
+      （`Service.CaptureWorkspace` 已是原语，但只有 `LayerWorkspaces.capture` 调用它）；任务完成
+      `internal/tasklog/service.go:268` 无回调、子代理返回 `internal/agentext/subagent.go:418-455`
+      只有命令 hook、`manual` 所需显式 attach/checkpoint 面不存在。缺触发器时落地 mode 只会吞掉 capture，
+      故未接线，保留未勾）
+- [x] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交， （对账 2026-11-20：部分——缺口：Upsert 有 updated_seq guard（manifest.go:180-196），snapshot 按 seq 精确存；但无跨 lane 定序/版本化，且 fork 未接线（W4））
       `session_snapshot` 的最新 seq 树可能落后于 `file_manifest` 行；fork 接线前必须定序/版本化
+      （W3.H3B 2026-11-21：每个 (tenant,session) 的显式写与 capture 共用 settlement 临界区
+      （`internal/fileplugin/service.go:791`），capture 的 snapshot→event commit→manifest 对账→
+      `session_snapshot` 是一个原子结算，并记录单调 `snapshotVersion`（payload + `CaptureResult`）。
+      后提交的 capture 不可能携带更旧的快照：父 Close 与 nohup 子 Close 无论谁先提交，后者的
+      全量快照都包含前者已结算的内容，删除对账不会抹掉子更新。测试
+      `TestCaptureSettlementsAreSerialized`（gated 快照证明串行）、
+      `TestParentCloseAndJobCloseOrderingKeepsJobWrites`/`TestJobSettlesBeforeParentKeepsJobWrites`
+      （真 gbash workspace 的父/子交错两种次序）；`-race` 通过）
 
 ## W4 task-log（plan-plugin）与面板
 
