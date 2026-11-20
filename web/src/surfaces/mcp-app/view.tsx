@@ -35,13 +35,13 @@ import { Badge, Button, color, Dialog, font, radius, space, typeScale, weight } 
 import {
   createAppBridge,
   INLINE_MAX_HEIGHT,
-  INLINE_MIN_HEIGHT,
   type AppBridge,
   type BridgeFailure,
   type BridgePhase,
   type DisplayMode,
 } from "./bridge";
 import { frameLoadVerdict } from "./frame-load";
+import { frameStyle, frameWrapperStyle, fullscreenDialogStyle } from "./layout";
 import {
   createReloadBudget,
   MAX_NAVIGATION_RELOADS,
@@ -594,7 +594,7 @@ export function McpAppView(props: McpAppViewProps) {
     </Text>
   );
 
-  const frameContent = (src: string) => (
+  const frameContent = (src: string, fullscreen: boolean) => (
     <WebView
       ref={(node) => {
         session.ref.current = node;
@@ -602,9 +602,7 @@ export function McpAppView(props: McpAppViewProps) {
       src={src}
       testID={`mcp-app-frame-${props.callId}`}
       style={{
-        width: "100%",
-        height: session.signals.height(),
-        minHeight: INLINE_MIN_HEIGHT,
+        ...frameStyle(fullscreen, session.signals.height()),
         borderRadius: radius.md,
         borderWidth: 1,
         borderColor: color.border,
@@ -630,14 +628,14 @@ export function McpAppView(props: McpAppViewProps) {
   /** Reactive branches: the page origin is probed asynchronously, so the frame
    * must mount when its signal turns ready (a plain `if` here would freeze the
    * first reading). */
-  const frame = () => (
-    <View style={{ flexDirection: "column" }}>
+  const frame = (fullscreen: boolean) => (
+    <View style={frameWrapperStyle(fullscreen)}>
       <If when={webLoading()}>{() => loadingRow()}</If>
       <If when={webOriginError()}>{() => originErrorRow()}</If>
       <If when={!webLoading() && !webOriginError()}>
         {() => (
           <If when={url()} else={sourceErrorRow()}>
-            {(src) => frameContent(src())}
+            {(src) => frameContent(src(), fullscreen)}
           </If>
         )}
       </If>
@@ -688,6 +686,7 @@ export function McpAppView(props: McpAppViewProps) {
         borderColor: color.border,
         backgroundColor: color.card,
         flex: fullscreen ? 1 : undefined,
+        minHeight: fullscreen ? 0 : undefined,
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
@@ -704,16 +703,20 @@ export function McpAppView(props: McpAppViewProps) {
           {title()}
         </Text>
         <Badge variant={statusVariant()} label={statusLabel()} />
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={fullscreen ? "chevron-down" : "external"}
-          label={fullscreen ? "退出全屏" : "全屏"}
-          accessibilityLabel={fullscreen ? "退出全屏" : "全屏显示交互界面"}
-          onPress={() => requestMode(fullscreen ? "inline" : "fullscreen")}
-        />
+        {/* A destroyed View has no frame to expand: the fallback keeps only
+            its retry, and the dialog's own close returns to inline. */}
+        <If when={!destroyed()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={fullscreen ? "chevron-down" : "external"}
+            label={fullscreen ? "退出全屏" : "全屏"}
+            accessibilityLabel={fullscreen ? "退出全屏" : "全屏显示交互界面"}
+            onPress={() => requestMode(fullscreen ? "inline" : "fullscreen")}
+          />
+        </If>
       </View>
-      <If when={destroyed()} else={frame()}>
+      <If when={destroyed()} else={frame(fullscreen)}>
         {() => fallback()}
       </If>
       <Text
@@ -738,16 +741,12 @@ export function McpAppView(props: McpAppViewProps) {
           description="交互界面正在全屏显示。"
           testID={`mcp-app-fullscreen-${props.callId}`}
           accessibilityLabel={`${title()} 全屏`}
+          fill
           closeOnBackdropPress
           onOpenChange={(event) => {
             if (!event.open) requestMode("inline");
           }}
-          style={{
-            width: "92%",
-            maxWidth: "92%",
-            height: "88%",
-            maxHeight: "88%",
-          }}
+          style={fullscreenDialogStyle()}
         >
           <View style={{ flex: 1, minHeight: 0 }}>{panel(true)}</View>
         </Dialog>

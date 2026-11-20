@@ -14,6 +14,7 @@
 // | size | "sm" \| "default" \| "lg" | "default" | 360 / 440 / 560 px (capped at 90%) |
 // | showClose | boolean? | true | an × in the corner (closes via `onOpenChange`) |
 // | closeOnEscape / closeOnBackdropPress | boolean? | true | native close policy |
+// | fill | boolean? | false | the body takes the dialog's remaining height |
 // | accessibilityLabel | string? | title | what screen readers call the modal |
 // | testID | string? | – | `id:` selector for tests |
 //
@@ -43,11 +44,15 @@ export function Dialog(props: {
   showClose?: boolean;
   closeOnEscape?: boolean;
   closeOnBackdropPress?: boolean;
+  /** The body takes the dialog's remaining height (a fullscreen surface): the
+   * region and body wrappers grow, so a `flex: 1` child can fill them. */
+  fill?: boolean;
   maxHeight?: number;
   accessibilityLabel?: string;
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const fill = props.fill === true ? { flex: 1, minHeight: 0 } : null;
   return (
     <NativeDialog
       open={props.open ?? true}
@@ -81,7 +86,7 @@ export function Dialog(props: {
       <View
         role="region"
         accessibilityLabel={props.accessibilityLabel ?? props.title}
-        style={{ flexDirection: "column", gap: space.xl }}
+        style={[{ flexDirection: "column", gap: space.xl }, fill]}
       >
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.md }}>
         <View style={{ flex: 1, flexDirection: "column", gap: space.xs }}>
@@ -113,7 +118,7 @@ export function Dialog(props: {
           </NativeButton>
         ) : null}
       </View>
-      <View style={{ flexDirection: "column", gap: space.md }}>{props.children}</View>
+      <View style={[{ flexDirection: "column", gap: space.md }, fill]}>{props.children}</View>
       {props.footer !== undefined ? (
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>{props.footer}</View>
       ) : null}

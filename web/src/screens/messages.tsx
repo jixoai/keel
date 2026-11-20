@@ -1026,6 +1026,8 @@ const actionsAlwaysVisible = () =>
  * nothing on screen jumps when it appears (C3). */
 function ActionLine(props: { turnId: string; time?: number; children: JSX.Element | JSX.Element[] }) {
   const revealed = () => actionsAlwaysVisible() || hoveredTurn() === props.turnId;
+  // `formatTime` answers "" for a missing/epoch stamp: no empty Text either.
+  const stamp = () => formatTime(props.time);
   return (
     <View
       style={[
@@ -1042,11 +1044,11 @@ function ActionLine(props: { turnId: string; time?: number; children: JSX.Elemen
     >
       {props.children}
       <View style={{ flex: 1 }} />
-      <If when={!!props.time}>
+      <If when={stamp() !== ""}>
         <Text
           style={{ fontSize: typeScale.xs, color: color.mutedForeground, fontVariant: ["tabular-nums"] }}
         >
-          {formatTime(props.time ?? 0)}
+          {stamp()}
         </Text>
       </If>
     </View>

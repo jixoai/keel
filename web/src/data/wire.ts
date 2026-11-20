@@ -223,11 +223,14 @@ export function formatTokens(n: number): string {
 }
 
 /** One stamp format per recency: "刚刚 / N 分钟前" for the last hour, an
- * absolute date-time for anything older. Never a bare clock time. */
+ * absolute date-time for anything older. Never a bare clock time, and never a
+ * 1970 stamp: a missing/epoch timestamp (0 or before 2000-01-01) is empty. */
+export const EARLIEST_PLAUSIBLE_MS = Date.UTC(2000, 0, 1);
+
 export function formatTime(value: string | number | undefined, now = Date.now()): string {
   if (value === undefined || value === "") return "";
   const ms = typeof value === "number" ? value : Date.parse(value);
-  if (!Number.isFinite(ms)) return "";
+  if (!Number.isFinite(ms) || ms <= 0 || ms < EARLIEST_PLAUSIBLE_MS) return "";
   const diff = now - ms;
   if (diff >= 0 && diff < 60_000) return "刚刚";
   if (diff >= 0 && diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
