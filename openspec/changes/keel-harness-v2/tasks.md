@@ -412,3 +412,10 @@
       （对账：已废弃——proposal Non-Goals 与 plugin-inventory §0/§1.1 已固化；
       注：`keel-agent-team-v1` 新增的是 Agent/Team 产品面而非 agent-team 协调插件，
       口径待 Owner 确认，见 RECONCILIATION 冲突登记）
+
+**Phase 3 复核 P2 收口（2026-11-21，P2F）**
+
+- [x] placement env 非法值启动报错（`internal/placement/wiring/fromenv.go`）；纯重放先 `Lookup`
+      再决定是否准入（组满不 429、不占槽）；`*Conflict → 409` 有真库 HTTP 线级测试
+- [ ] fileplugin settlement 锁 map 无在途回收（P2 暂缓：回收会重置进程内 `snapshotVersion`
+      单调计数，需先有持久版本源；定序语义不受影响）

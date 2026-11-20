@@ -48,9 +48,21 @@ func FromEnv(getenv func(string) string, cfg Config) (*Runtime, error) {
 		}
 		cfg.PinGroupID = &parsed
 	}
-	cfg.DefaultMaxConcurrentRuns = envInt(getenv, EnvGroupMaxRuns, 0)
-	cfg.DefaultMemoryLimitBytes = envInt64(getenv, EnvGroupMemoryBytes, 0)
-	cfg.LeaseTTL = time.Duration(envInt(getenv, EnvLeaseMS, 0)) * time.Millisecond
+	defaultMaxRuns, err := envInt(getenv, EnvGroupMaxRuns, 0)
+	if err != nil {
+		return nil, err
+	}
+	cfg.DefaultMaxConcurrentRuns = defaultMaxRuns
+	defaultMemory, err := envInt64(getenv, EnvGroupMemoryBytes, 0)
+	if err != nil {
+		return nil, err
+	}
+	cfg.DefaultMemoryLimitBytes = defaultMemory
+	leaseMS, err := envInt(getenv, EnvLeaseMS, 0)
+	if err != nil {
+		return nil, err
+	}
+	cfg.LeaseTTL = time.Duration(leaseMS) * time.Millisecond
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -69,20 +81,37 @@ func FromEnv(getenv func(string) string, cfg Config) (*Runtime, error) {
 	return rt, nil
 }
 
-func envInt(getenv func(string) string, name string, def int) int {
-	if raw := getenv(name); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			return parsed
-		}
+// envInt parses an optional integer setting. An absent or empty value keeps the
+// default; a value that does not parse is a boot-time configuration error. The
+// error names the variable and the offending value: silently falling back would
+// make a typo (for example "10m") turn a bounded group into an unlimited one.
+func envInt(getenv func(string) string, name string, def int) (int, error) {
+	raw := strings.TrimSpace(getenv(name))
+	if raw == "" {
+		return def, nil
 	}
-	return def
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not an integer: %w", name, raw, err)
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("%s=%q must be >= 0", name, raw)
+	}
+	return parsed, nil
 }
 
-func envInt64(getenv func(string) string, name string, def int64) int64 {
-	if raw := getenv(name); raw != "" {
-		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			return parsed
-		}
+// envInt64 is envInt for byte counts.
+func envInt64(getenv func(string) string, name string, def int64) (int64, error) {
+	raw := strings.TrimSpace(getenv(name))
+	if raw == "" {
+		return def, nil
 	}
-	return def
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not an integer: %w", name, raw, err)
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("%s=%q must be >= 0", name, raw)
+	}
+	return parsed, nil
 }

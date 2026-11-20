@@ -62,6 +62,19 @@ func (c *GatedCommitter) Commit(ctx context.Context, req kernel.CommitRequest) (
 	if req.Kind != kernel.KindUserMessage || !req.NativeEdge || req.Scope.IsZero() {
 		return c.edge.Commit(ctx, req)
 	}
+	// A replay of an already-committed requestId must not buy (or be refused)
+	// a new slot: the event is durable and the run it woke was settled by the
+	// first commit. Lookup only decides whether admission is needed; the commit
+	// seam stays the dedupe authority, so a same-key/different-payload retry
+	// still returns its key-conflict instead of silently reusing the receipt.
+	if req.RequestID != "" {
+		if _, found, err := c.edge.Lookup(ctx, req.Scope,
+			kernel.KeyRef{Kind: kernel.KeyRequest, Value: req.RequestID}); err != nil {
+			return kernel.Receipt{}, err
+		} else if found {
+			return c.edge.Commit(ctx, req)
+		}
+	}
 	admission, err := c.gate.Admit(ctx, req.Scope.TenantID, req.Scope.SessionID)
 	if err != nil {
 		return kernel.Receipt{}, mapGateError(err)

@@ -467,6 +467,45 @@ func TestPlacementHTTPCrashPendingConverges(t *testing.T) {
 	}
 }
 
+// TestPlacementHTTPDrainingGroup409 is the line-level check for
+// writePlacementError's *Conflict branch: a draining group is a placement
+// decision, not a capacity refusal, and the edge must answer 409 with the
+// reason and group id while still storing nothing. The service-level tests
+// already pin the typed error; this one drives it through the real HTTP
+// handler, the production wiring and PostgreSQL.
+func TestPlacementHTTPDrainingGroup409(t *testing.T) {
+	f := newPlacementFixture(t, placementFixtureOptions{})
+	group := f.group(t, "draining", 2)
+	session := f.session(t)
+	f.join(t, session, group.GroupID)
+	if _, err := f.runtime.Service.SetGroupStatus(context.Background(), f.tenant, group.GroupID, placement.StatusDraining); err != nil {
+		t.Fatalf("drain group: %v", err)
+	}
+
+	res := f.input(t, session, "draining-1", "hello")
+	if res.code != http.StatusConflict {
+		t.Fatalf("input into a draining group = %d %v, want 409", res.code, res.body)
+	}
+	if reason, _ := res.body["reason"].(string); reason != string(placement.ReasonGroupDraining) {
+		t.Fatalf("reason = %v, want %s", res.body["reason"], placement.ReasonGroupDraining)
+	}
+	if got, _ := res.body["groupId"].(string); got != group.GroupID.String() {
+		t.Fatalf("groupId = %q, want %s", got, group.GroupID)
+	}
+	if res.header.Get("Retry-After") != "" {
+		t.Fatalf("conflict carried Retry-After %q; only a capacity refusal does", res.header.Get("Retry-After"))
+	}
+	var seq int64
+	if err := f.st.Pool().QueryRow(context.Background(),
+		`SELECT COALESCE(max(seq), 0) FROM events WHERE tenant_id = $1 AND session_id = $2 AND kind = 'user.message'`,
+		f.tenant, session).Scan(&seq); err != nil {
+		t.Fatal(err)
+	}
+	if seq != 0 || f.runRows(t, session) != 0 {
+		t.Fatalf("refused input wrote user.message seq %d / %d run rows; a conflict stores nothing", seq, f.runRows(t, session))
+	}
+}
+
 // TestPlacementHTTPTriggerRunGated covers the second enqueue door: POST /run
 // has no user.message, so it admits through the same gate explicitly.
 func TestPlacementHTTPTriggerRunGated(t *testing.T) {
