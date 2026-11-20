@@ -1,7 +1,12 @@
 # mcp-apps Specification
 
 ## Purpose
-TBD - created by archiving change feat-mcp-apps-events. Update Purpose after archive.
+
+Keel 作为 MCP host 渲染第三方服务器声明的交互界面（MCP Apps，SEP-1865，
+扩展标识 `io.modelcontextprotocol/ui`）。本规范约束 UI 资源的声明/取回、app 身份与缓存、
+文档托管与 CSP、View 沙箱与握手、宿主代理的 tools/resources/message/link/context 动作、
+安全审计、权限协商与所有失败路径的文本降级，保证 View 永远不是绕过宿主凭据、
+授权与审计的第二条通道。
 
 ## Requirements
 

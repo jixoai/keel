@@ -1,7 +1,11 @@
 # mcp-events Specification
 
 ## Purpose
-TBD - created by archiving change feat-mcp-apps-events. Update Purpose after archive.
+
+Keel 对 MCP 服务器通知与 modern `subscriptions/listen` 的处置契约：瞬态 progress/log
+不进账本、目录变更驱动固定基数的工具面 republish、断线按退避重连并全量重算、
+listen 与产品 SSE 隔离，以及 MRTR（`input_required`）、legacy 主动请求、era 探测与
+降级诊断。目标是热更新可预期、失败保留旧面、账本零新增 kind。
 
 ## Requirements
 
