@@ -10,10 +10,12 @@
 //     client-side authority. The input that queues the run is also the run's
 //     identity: its server-minted submissionId is printed as runId (the runtime
 //     keys one run row per session, so there is no second id to fetch).
-//   - stop = find the live sessions whose newest binding names the Agent (or a
-//     team whose captain it is), then POST /v1/sessions/{id}/cancel. No active
-//     run and a settled race are clear refusals (exit 1); exit 0 means the
-//     server reported at least one real cancellation.
+//   - stop = find the live sessions whose newest selection fact names the Agent
+//     (or a team whose captain it is), then POST /v1/sessions/{id}/cancel. The
+//     newest fact is authoritative: a model-only fact means the attempt is
+//     unbound, so no older binding is cancelled. No active run and a settled
+//     race are clear refusals (exit 1); exit 0 means the server reported at
+//     least one real cancellation. The scan is bounded (see maxSessionPages).
 //   - save = decode a YAML or JSON team document (which must carry its id),
 //     then create (POST) or update (PUT) it. revision and hash are server-owned:
 //     the file may carry the values `keel team show` exported, and they are
@@ -36,6 +38,7 @@ import (
 
 	"github.com/jixoai/keel/internal/agentteam"
 	"github.com/jixoai/keel/internal/httpapi"
+	"github.com/jixoai/keel/internal/kernel"
 )
 
 // defaultStartText is the first user message a bare `keel agent start <id>`
@@ -312,9 +315,15 @@ func runAgentStop(args []string, stdout, stderr io.Writer) int {
 	if err := client.do(http.MethodGet, "/v1/agents/"+url.PathEscape(positional[0]), "", nil, &agent); err != nil {
 		return reportError(stderr, err)
 	}
-	sessions, err := activeSessionsForAgent(client, agent.ID)
+	sessions, truncated, err := activeSessionsForAgent(client, agent.ID)
 	if err != nil {
 		return reportError(stderr, err)
+	}
+	if truncated {
+		// The scan is bounded by design; say so instead of reporting a possibly
+		// false "no active run" for an older session.
+		fmt.Fprintf(stderr, "keel: warning: scanned at most the %d most recently active sessions; an older active run for agent %s may have been missed\n",
+			maxSessionPages*sessionPageLimit, agent.ID)
 	}
 	if len(sessions) == 0 {
 		fmt.Fprintf(stderr, "keel: no active run for agent %s; nothing to stop\n", agent.ID)
@@ -370,13 +379,17 @@ func printStopOutcome(w io.Writer, outcome stopOutcome) {
 	}
 }
 
-// activeSessionsForAgent returns the live sessions whose newest execution
-// binding names agentID: a standard selection.agentId, or a team selection whose
-// captain is agentID. Only non-terminal run rows are scanned; a session with no
-// live run cannot be stopped.
-func activeSessionsForAgent(client *cliClient, agentID string) ([]string, error) {
-	captains := make(map[string]string)
+// activeSessionsForAgent returns the live sessions whose newest selection fact
+// names agentID: a standard selection.agentId, or a team selection whose captain
+// is agentID. The newest fact is authoritative (the runner's runSelection): a
+// model-only fact means the attempt has no execution binding, so an older
+// agent/team binding is not resurrected and the session belongs to no agent.
+// Only non-terminal run rows are scanned; a session with no live run cannot be
+// stopped. truncated reports that the bounded scan stopped while the server
+// still had more sessions.
+func activeSessionsForAgent(client *cliClient, agentID string) ([]string, bool, error) {
 	var found []string
+	captains := make(map[string]string)
 	cursor := ""
 	for page := 0; page < maxSessionPages; page++ {
 		path := fmt.Sprintf("/v1/sessions?limit=%d", sessionPageLimit)
@@ -385,7 +398,7 @@ func activeSessionsForAgent(client *cliClient, agentID string) ([]string, error)
 		}
 		var pageData runtimeSessionPage
 		if err := client.do(http.MethodGet, path, "", nil, &pageData); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		for _, session := range pageData.Sessions {
 			if !liveRunStatus(session.RunStatus) {
@@ -393,47 +406,59 @@ func activeSessionsForAgent(client *cliClient, agentID string) ([]string, error)
 			}
 			selection, err := newestSelection(client, session.SessionID)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if selection == nil {
+				continue
+			}
+			selectedAgent, selectedTeam := strings.TrimSpace(selection.AgentID), strings.TrimSpace(selection.TeamID)
+			if selectedAgent == "" && selectedTeam == "" {
+				// The newest fact is model-only: this attempt runs the default
+				// surface with zero binding. An older agent/team binding is a
+				// different, already-superseded fact — never cancel it here.
 				continue
 			}
 			// teamId wins over agentId (the selection contract: a team selection
 			// decides the captain). Only an agent-only selection is the agent's
 			// own run; a team session belongs to its captain even if the payload
 			// also names an agent.
-			if teamID := strings.TrimSpace(selection.TeamID); teamID != "" {
-				captainID, ok := captains[teamID]
+			if selectedTeam != "" {
+				captainID, ok := captains[selectedTeam]
 				if !ok {
-					team, err := fetchTeam(client, teamID)
+					team, err := fetchTeam(client, selectedTeam)
 					if err != nil {
 						// A team deleted while its session still runs is not a
 						// reason to abort the whole stop: its captain can no
 						// longer be resolved, so it is not this agent's run.
 						if isNotFound(err) {
-							captains[teamID] = ""
+							captains[selectedTeam] = ""
 							continue
 						}
-						return nil, err
+						return nil, false, err
 					}
 					captainID = strings.TrimSpace(team.Captain.AgentID)
-					captains[teamID] = captainID
+					captains[selectedTeam] = captainID
 				}
 				if captainID != "" && captainID == agentID {
 					found = append(found, session.SessionID)
 				}
 				continue
 			}
-			if strings.TrimSpace(selection.AgentID) == agentID {
+			if selectedAgent == agentID {
 				found = append(found, session.SessionID)
 			}
 		}
-		if !pageData.HasMore || pageData.NextCursor == "" {
-			break
+		if !pageData.HasMore {
+			return found, false, nil
+		}
+		if pageData.NextCursor == "" {
+			// A page claiming more without a cursor cannot be followed: report
+			// the scan as truncated instead of silently stopping.
+			return found, true, nil
 		}
 		cursor = pageData.NextCursor
 	}
-	return found, nil
+	return found, true, nil
 }
 
 // liveRunStatus reports the run states with an attempt that could be stopped.
@@ -448,14 +473,34 @@ func liveRunStatus(status string) bool {
 	}
 }
 
-// newestSelection reads the newest user.message carrying an execution binding.
-// A later model-only input does not erase the binding: the run keeps using the
-// last identity the session named until a newer input changes it.
+// maxEventPages bounds the newest-selection scan. A session longer than this is
+// not attributed at all (fail closed): cancelling on a stale binding would be
+// worse than refusing to stop.
+const maxEventPages = 50
+
+// errSelectionScanTruncated reports that the newest-selection scan hit its page
+// bound, so the session's current binding is unknown.
+var errSelectionScanTruncated = errors.New("newest selection scan hit its page bound; refusing to attribute the session")
+
+// newestSelection reads the newest user.message carrying a selection fact — the
+// same fact the runner's runSelection uses for the next attempt. The newest
+// selection is authoritative even when it names only a model: that attempt has
+// no execution binding (zero/default surface), and an older agent/team binding
+// is a superseded fact, never a fallback.
 func newestSelection(client *cliClient, sessionID string) (*selectionFact, error) {
+	return newestSelectionPage(client, sessionID, kernel.MaxEventPage)
+}
+
+// newestSelectionPage is newestSelection with an explicit page size. The page
+// size is the server's max (kernel.MaxEventPage) in production; a test shrinks
+// it to exercise the continuation predicate. The loop continues while a page is
+// full, so it cannot stop at a server-side page cap by assuming "fewer than 1000
+// means the end".
+func newestSelectionPage(client *cliClient, sessionID string, pageLimit int) (*selectionFact, error) {
 	after := int64(0)
 	var latest *selectionFact
-	for page := 0; page < 50; page++ {
-		path := fmt.Sprintf("/v1/sessions/%s/events?limit=1000", url.PathEscape(sessionID))
+	for page := 0; page < maxEventPages; page++ {
+		path := fmt.Sprintf("/v1/sessions/%s/events?limit=%d", url.PathEscape(sessionID), pageLimit)
 		if after > 0 {
 			path += fmt.Sprintf("&after=%d", after)
 		}
@@ -473,17 +518,14 @@ func newestSelection(client *cliClient, sessionID string) (*selectionFact, error
 			if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Selection == nil {
 				continue
 			}
-			if strings.TrimSpace(payload.Selection.AgentID) == "" && strings.TrimSpace(payload.Selection.TeamID) == "" {
-				continue
-			}
 			latest = payload.Selection
 		}
-		if len(pageData.Events) < 1000 {
-			break
+		if len(pageData.Events) < pageLimit {
+			return latest, nil
 		}
 		after = pageData.Events[len(pageData.Events)-1].Seq
 	}
-	return latest, nil
+	return nil, fmt.Errorf("%w (scanned %d events)", errSelectionScanTruncated, maxEventPages*pageLimit)
 }
 
 func fetchTeam(client *cliClient, teamID string) (httpapi.AgentTeamView, error) {

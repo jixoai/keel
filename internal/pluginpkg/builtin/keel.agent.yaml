@@ -155,7 +155,7 @@ provides:
       examples: ["keel agent start agent_3f1c… --text \"Review the draft\""]
     - path: [agent, stop]
       summary: "Stop the Agent's active run (a clear refusal when nothing is active)."
-      description: "Scans the live sessions (running/pending) whose newest selection names this Agent, or a team whose captain it is (teamId wins over agentId), then POSTs /v1/sessions/{id}/cancel. A settled run is reported as settled; a queued input with no attempt is reported as queued; exit 0 only when at least one session was actually cancelled. It never reports a cancellation the server did not perform."
+      description: "Scans the live sessions (running/pending) whose newest selection names this Agent, or a team whose captain it is (teamId wins over agentId), then POSTs /v1/sessions/{id}/cancel. The newest selection is authoritative: a model-only selection leaves the session unbound and is never attributed to an older binding. The scan covers at most the 1000 most recently active sessions and warns on stderr when the tenant has more. A settled run is reported as settled; a queued input with no attempt is reported as queued; exit 0 only when at least one session was actually cancelled. It never reports a cancellation the server did not perform."
       args_schema:
         type: object
         properties:

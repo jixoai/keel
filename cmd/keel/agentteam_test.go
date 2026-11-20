@@ -10,11 +10,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +31,7 @@ import (
 type recordedRequest struct {
 	Method string
 	Path   string
+	Query  string
 	Actor  string
 	Body   []byte
 }
@@ -72,6 +75,10 @@ type fakeTeamAPI struct {
 	// cancelAnswer, when set, is answered verbatim by POST /cancel and the
 	// session is left untouched, so a settlement race can be modelled.
 	cancelAnswer map[string]any
+	// sessionsHasMore/sessionsNextCursor model a tenant whose session list
+	// outlives the stop scan's bounded window.
+	sessionsHasMore    bool
+	sessionsNextCursor string
 }
 
 func newFakeTeamAPI(password string) *fakeTeamAPI {
@@ -87,7 +94,8 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
 	f.requests = append(f.requests, recordedRequest{
-		Method: r.Method, Path: r.URL.Path, Actor: r.Header.Get(actorAgentHeader), Body: raw,
+		Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery,
+		Actor: r.Header.Get(actorAgentHeader), Body: raw,
 	})
 	f.mu.Unlock()
 
@@ -130,7 +138,7 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		writeFakeJSON(w, http.StatusOK, map[string]any{
-			"sessions": page, "nextCursor": "", "hasMore": false,
+			"sessions": page, "nextCursor": f.sessionsNextCursor, "hasMore": f.sessionsHasMore,
 		})
 	case r.URL.Path == "/v1/sessions" && r.Method == http.MethodPost:
 		var body struct {
@@ -183,8 +191,19 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"created":      true,
 			})
 		case len(parts) == 2 && parts[1] == "events" && r.Method == http.MethodGet:
+			after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			if limit <= 0 {
+				limit = 1000
+			}
 			events := make([]map[string]any, 0, len(session.Events))
 			for _, event := range session.Events {
+				if event.Seq <= after {
+					continue
+				}
+				if len(events) >= limit {
+					break
+				}
 				events = append(events, map[string]any{
 					"seq": event.Seq, "kind": event.Kind, "payload": event.Payload,
 				})
@@ -1181,6 +1200,164 @@ func TestTeamSaveRequiresAStableID(t *testing.T) {
 	}
 	if len(api.requests) != 0 {
 		t.Fatalf("an id-less document still sent requests: %+v", api.requests)
+	}
+}
+
+func TestAgentStopDoesNotResurrectAnOlderBindingAfterAModelOnlySelection(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "旧绑定")
+	const sessionID = "00000000-0000-0000-0000-0000000000d1"
+	api.mu.Lock()
+	api.sessions[sessionID] = &fakeSession{
+		ID:        sessionID,
+		RunStatus: "running",
+		Events: []fakeEvent{
+			{Seq: 1, Kind: "user.message", Payload: map[string]any{
+				"selection": map[string]any{"agentId": agentID},
+			}},
+			// The newest selection names only a model: the runner's
+			// runSelection makes this attempt unbound, so the earlier agent
+			// binding is superseded and must not be stopped.
+			{Seq: 2, Kind: "user.message", Payload: map[string]any{
+				"selection": map[string]any{"modelId": "model_only"},
+			}},
+		},
+	}
+	api.mu.Unlock()
+
+	code, stdout, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "no active run") {
+		t.Fatalf("stderr = %q, want the no-active refusal", stderr)
+	}
+	if strings.Contains(stdout, "stopped session") {
+		t.Fatalf("stdout claims a cancellation: %q", stdout)
+	}
+	if api.hasRequest(http.MethodPost, "/v1/sessions/"+sessionID+"/cancel") {
+		t.Fatal("a model-only selection was attributed to an older agent binding")
+	}
+}
+
+func TestAgentStopWarnsWhenTheSessionWindowIsTruncated(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "窗口外")
+	api.mu.Lock()
+	api.sessionsHasMore = true
+	api.sessionsNextCursor = "next-page"
+	api.mu.Unlock()
+
+	code, _, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "scanned at most the 1000 most recently active sessions") {
+		t.Fatalf("stderr = %q, want the bounded-window warning", stderr)
+	}
+	api.mu.Lock()
+	pages := 0
+	for _, request := range api.requests {
+		if request.Method == http.MethodGet && request.Path == "/v1/sessions" {
+			pages++
+		}
+	}
+	api.mu.Unlock()
+	if pages != maxSessionPages {
+		t.Fatalf("session-list requests = %d, want the bounded %d", pages, maxSessionPages)
+	}
+}
+
+func TestAgentStopNewestSelectionPagesUntilAShortPage(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+
+	client, err := newCLIClient(hs.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "00000000-0000-0000-0000-0000000000d2"
+	api.mu.Lock()
+	api.sessions[sessionID] = &fakeSession{
+		ID:        sessionID,
+		RunStatus: "running",
+		Events: []fakeEvent{
+			{Seq: 1, Kind: "user.message", Payload: map[string]any{
+				"selection": map[string]any{"agentId": "agent_old"},
+			}},
+			{Seq: 2, Kind: "user.message", Payload: map[string]any{
+				"selection": map[string]any{"modelId": "model_only"},
+			}},
+			{Seq: 3, Kind: "user.message", Payload: map[string]any{
+				"selection": map[string]any{"agentId": "agent_new"},
+			}},
+		},
+	}
+	api.mu.Unlock()
+
+	// A two-event page forces a second request; the newest fact is on page 2.
+	selection, err := newestSelectionPage(client, sessionID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection == nil || selection.AgentID != "agent_new" {
+		t.Fatalf("selection = %+v, want the newest page's agent_new", selection)
+	}
+
+	api.mu.Lock()
+	var eventPages []recordedRequest
+	for _, request := range api.requests {
+		if request.Method == http.MethodGet && strings.HasSuffix(request.Path, "/events") {
+			eventPages = append(eventPages, request)
+		}
+	}
+	api.mu.Unlock()
+	if len(eventPages) != 2 {
+		t.Fatalf("event requests = %d, want 2 (a full page must continue)", len(eventPages))
+	}
+	if !strings.Contains(eventPages[0].Query, "limit=2") {
+		t.Fatalf("first event request query = %q, want limit=2", eventPages[0].Query)
+	}
+	if !strings.Contains(eventPages[1].Query, "after=2") {
+		t.Fatalf("second event request query = %q, want after=2", eventPages[1].Query)
+	}
+}
+
+func TestAgentStopNewestSelectionFailsClosedAtThePageBound(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+
+	client, err := newCLIClient(hs.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "00000000-0000-0000-0000-0000000000d3"
+	events := make([]fakeEvent, 0, maxEventPages*2+1)
+	for seq := 1; seq <= maxEventPages*2+1; seq++ {
+		events = append(events, fakeEvent{
+			Seq: int64(seq), Kind: "user.message",
+			Payload: map[string]any{"selection": map[string]any{"agentId": "agent_x"}},
+		})
+	}
+	api.mu.Lock()
+	api.sessions[sessionID] = &fakeSession{ID: sessionID, RunStatus: "running", Events: events}
+	api.mu.Unlock()
+
+	// Two events per page: after maxEventPages full pages the scan cannot know
+	// whether a newer selection exists, so it must refuse to attribute.
+	_, err = newestSelectionPage(client, sessionID, 2)
+	if !errors.Is(err, errSelectionScanTruncated) {
+		t.Fatalf("err = %v, want errSelectionScanTruncated", err)
 	}
 }
 

@@ -133,9 +133,13 @@ Start flags:
 Stop semantics:
   The live session(s) whose newest selection names this Agent (or the team
   whose captain it is) are cancelled through POST /v1/sessions/{id}/cancel.
+  The newest selection is authoritative: one that names only a model leaves the
+  session unbound, so no older Agent/team binding is cancelled.
   A queued input with no active attempt is reported as queued, never as a
   cancellation. Exit 0 only when at least one session was actually cancelled;
   no active run and an already-settled run both exit nonzero with the reason.
+  The scan covers at most the 1000 most recently active sessions; if the tenant
+  has more, a warning is printed and an older active run may be missed.
 
 Common flags:
   --server <addr>           keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)

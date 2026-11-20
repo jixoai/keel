@@ -10,6 +10,10 @@ import (
 const (
 	defaultEventPage = 200
 	maxEventPage     = 1000
+	// MaxEventPage is the largest page LoadEvents serves. A caller that pages
+	// the log requests exactly this limit, so a full page reliably means "there
+	// may be more" even if the default or the cap changes.
+	MaxEventPage = maxEventPage
 	// scanChunk is the page size used by full-log projections.
 	scanChunk = 500
 )
