@@ -134,4 +134,6 @@
       （与 1000/64 合并：`memory.max=2147483648`、`memory.peak=676614144` bytes，口径见报告）
 - [x] 子代理交叉复核（本项目不使用 Codex）
       （2026-11-21 独立 reviewer：P0=0，数字与报告一致；P1 证据日志被 .gitignore 排除已 `git add -f` 补齐并复验哈希；verdict pass）
-- [ ] 报告 + 公网链接 + 归档本 change
+- [x] 报告 + 公网链接 + 归档本 change
+      （2026-11-21：G5 报告 `https://local-gaubee-reports.fde2e.com/keel/keel-ga-g5/report.html`
+      HTTP 200；归档为 `openspec/changes/archive/2026-11-21-keel-ga`）
