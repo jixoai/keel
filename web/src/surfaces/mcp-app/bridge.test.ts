@@ -17,6 +17,7 @@ import {
   type BridgeFailure,
   type DisplayMode,
 } from "./bridge";
+import { frameLoadVerdict } from "./frame-load";
 
 const APP: McpAppView = {
   appId: "mcpapp_0123456789abcdef",
@@ -209,6 +210,24 @@ test("超时：5 秒内没有 initialized → 销毁并给出一条 timeout 诊�
   expect(h.bridge.snapshot().phase).toBe("destroyed");
   // The response is the only frame; no notification leaked before the deadline.
   expect(notifications(h.posted).length).toBe(0);
+});
+
+test("首载：initialize 早于 load 时 start() 幂等，不重置 5 秒期限", () => {
+  const h = harness();
+  // A conforming app may initialize while the document is still parsing.
+  h.bridge.handleMessage(initialize());
+  expect(h.bridge.snapshot().phase).toBe("handshaking");
+  const postedBefore = h.posted.length;
+  h.clock.advance(3000);
+  // The first load event arrives afterwards: the View maps this to start().
+  expect(frameLoadVerdict(0, h.bridge.snapshot().phase, h.bridge.snapshot().initialized)).toBe("start");
+  h.bridge.start();
+  expect(h.bridge.snapshot().phase).toBe("handshaking");
+  expect(h.posted.length).toBe(postedBefore);
+  // The deadline still belongs to the original initialize, not to the load.
+  h.clock.advance(HANDSHAKE_TIMEOUT_MS - 3000);
+  expect(h.destroyed.length).toBe(1);
+  expect(h.destroyed[0].kind).toBe("timeout");
 });
 
 test("协议违规：未知方法回 -32601 且实例销毁", () => {

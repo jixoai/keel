@@ -41,6 +41,7 @@ import {
   type BridgePhase,
   type DisplayMode,
 } from "./bridge";
+import { frameLoadVerdict } from "./frame-load";
 import {
   createReloadBudget,
   MAX_NAVIGATION_RELOADS,
@@ -83,6 +84,10 @@ interface AppSession {
   /** The per-View routing nonce (`&instance=`), matched against the iframe's
    * `src` when a message arrives from the page window. */
   instance: string;
+  /** `load` events already handled for the current WebView element. A
+   * pre-load `ui/initialize` moves the bridge to `handshaking`/`ready`, so
+   * only the count (not the phase) tells a first load from a later one. */
+  frameLoads: number;
   /** A navigation reload is queued (coalesces a sibling load event). */
   reloadScheduled: boolean;
   /** Automatic navigation reloads allowed for this instance. */
@@ -324,6 +329,7 @@ function createSession(callId: string, props: McpAppViewProps): AppSession {
     },
     bridge: undefined as unknown as AppBridge,
     instance: newInstance(),
+    frameLoads: 0,
     reloadScheduled: false,
     budget: createReloadBudget(),
     disposed: false,
@@ -352,6 +358,9 @@ function resetBridge(session: AppSession, reason: string): void {
   session.signals.setPhase("idle");
   session.signals.setDiagnostic(null);
   session.signals.setHeight(INLINE_DEFAULT_HEIGHT);
+  // A rebuilt bridge belongs to a new WebView element (display-mode change,
+  // document change, navigation reload): its next load is a first load again.
+  session.frameLoads = 0;
   session.bridge = buildBridge(session);
 }
 
@@ -509,17 +518,20 @@ export function McpAppView(props: McpAppViewProps) {
     if (session.signals.mode() !== mode) session.signals.setMode(mode);
   };
 
-  /** A load that is not the first one means the frame replaced the app
-   * document (in-frame navigation). The old instance is discarded and the
-   * host's own URL is loaded again: a third-party page must never inherit the
-   * already-authorized channel and its tool-input/tool-result. */
+  /** The first load of a WebView element starts the bridge, even when the app
+   * already sent `ui/initialize` while parsing. Only a later load means the
+   * frame replaced the app document (in-frame navigation): the old instance is
+   * discarded and the host's own URL is loaded again, so a third-party page
+   * never inherits the already-authorized channel and its tool data. */
   const onFrameLoad = () => {
     const snapshot = session.bridge.snapshot();
-    if (snapshot.initialized || snapshot.phase === "handshaking") {
+    const verdict = frameLoadVerdict(session.frameLoads, snapshot.phase, snapshot.initialized);
+    session.frameLoads += 1;
+    if (verdict === "reload") {
       scheduleReload(session);
       return;
     }
-    session.bridge.start();
+    if (verdict === "start") session.bridge.start();
   };
 
   const sameDocument = (actual: string, expected: string): boolean => {
