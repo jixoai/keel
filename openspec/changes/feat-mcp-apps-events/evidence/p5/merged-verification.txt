@@ -37,7 +37,7 @@ E2E 首次调用误用 `--evidence` 无目录（脚本要求 `--evidence DIR`）
 
 ## 5. 复核修复后的合并树（2026-11-20）
 
-对象：`task/keel-harness-v2` @ `4a0d6d3`（F1 后端 4 提交 + F2 前端 2 提交合入后；
+对象：`task/keel-harness-v2` @ `7004b11`（F1 后端 4 提交 + F2 前端 2 提交 + P2 收口 3 提交；
 修复明细见 `review-disposition.md`）。
 
 | 命令 | 结果 |
@@ -45,7 +45,7 @@ E2E 首次调用误用 `--evidence` 无目录（脚本要求 `--evidence DIR`）
 | `go build ./...` | EXIT 0 |
 | `go vet`（mcp/mcphost/agent/agentcore/agentapi/servicehost/store） | EXIT 0 |
 | `KEEL_TEST_DSN=... go test -p 1 -count=1 ./...` | EXIT 0（55 个包 ok，零 FAIL） |
-| `./scripts/conformance.sh` | EXIT 0（1071 pass / 0 fail / 1 skip） |
+| `./scripts/conformance.sh` | EXIT 0（1073 pass / 0 fail / 1 skip） |
 | `pnpm exec openspec validate feat-mcp-apps-events --strict` | valid |
 | `cd web && nsh check` | EXIT 0 |
 | `nsh test --target tui` | 164/164 passed |
@@ -61,3 +61,14 @@ B-P1-2（elicitation 关闭回 -32601）、P2 上界/legacy 异步/cancel 语义
 版本严格日期/证据；前端 View→Host 五条链路与能力门接线。
 
 本文件不含 DSN 或密钥。
+
+## 6. P2 收口（2026-11-20，最终快照 7004b11）
+
+A 轴修复后复审残余的 P2-1（溢出拒绝仍在 receive loop 内联 Send，最多 5s）已改为
+容量 32 的后台队列 + 单 worker；仅队列满的极端洪泛才内联且不丢帧。P2-2 能力注释
+按显式 per-action 位更新；B 轴指出的 typed `McpError → rpcErrorResponse → wire`
+组合测试缝已补（`TestLegacyServerRequestTypedExecutorErrorReachesTheWire`）。
+
+最终门禁复跑：Go 55 ok、conformance 1073/0/1、TUI bridge 30/30 + capabilities 5/5、
+`nsh check`/`nsh build` 0；E2E 证据 `merged-agent-runtime-e2e-fix/`。
+A/B 修复后复审均 0 P0/P1（A 9/10、B 9/10）。

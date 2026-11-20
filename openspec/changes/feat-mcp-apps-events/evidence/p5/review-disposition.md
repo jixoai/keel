@@ -52,7 +52,9 @@
 
 ## 6. 修复后门禁
 
-见 `merged-verification.txt` §5（Go 55 ok、conformance 1071/0/1、TUI 164/164、
-E2E PASS）；独立复审以修复后 commit 为冻结对象。
+见 `merged-verification.txt` §5/§6（Go 55 ok、conformance 1073/0/1、TUI 164/164、
+E2E PASS）。修复后 A/B 复审均 0 P0/P1（各 9/10）；A 残余的溢出内联 Send 与
+能力注释漂移已在最终快照 `7004b11` 收口（后台队列 32 + 单 worker），B 指出的
+typed McpError→wire 测试缝已补。
 
 本文件不含 DSN 或密钥。
