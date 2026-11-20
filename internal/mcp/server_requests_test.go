@@ -8,10 +8,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jixoai/keel/internal/agentcore"
 )
 
 func TestLegacyServerRequestDoesNotBlockTheReceiveLoop(t *testing.T) {
@@ -268,5 +272,75 @@ func TestServerRequestOverflowSendDoesNotBlockTheReceiveLoop(t *testing.T) {
 		return answered == maxConcurrentServerRequests
 	}) {
 		t.Fatalf("in-flight server requests were not answered; messages=%#v", server.Messages())
+	}
+}
+
+// TestLegacyServerRequestTypedExecutorErrorReachesTheWire pins the wired
+// executor's rejection path end to end: a typed *McpError returned by the
+// handler becomes the peer's JSON-RPC error code and its bounded message. The
+// unbounded wrapper text of the returned error must not leak onto the wire.
+func TestLegacyServerRequestTypedExecutorErrorReachesTheWire(t *testing.T) {
+	clientTransport, server := newTestServer(t)
+	const typedMessage = "elicitation params are invalid"
+	outerNoise := strings.Repeat("unbounded-internal-detail ", 256)
+	server.setHandler("tools/call", func(json.RawMessage) (any, *ErrorObject) {
+		sendServerRequest(t, server.transport, NumberID(901), "sampling/createMessage", map[string]any{})
+		return map[string]any{"content": []any{map[string]any{"type": "text", "text": "call done"}}}, nil
+	})
+	handlerCalls := atomic.Int32{}
+	client := NewClient(ClientOptions{
+		Name: "p5-typed-error", Version: "1.0.0",
+		InputRequests: func(_ context.Context, request InputRequiredResult, _ *InputRequestState) (map[string]json.RawMessage, error) {
+			if request.InputRequests["server-request"].Method != "sampling/createMessage" {
+				return nil, &McpError{Code: CodeMethodNotFound, Message: "unexpected method"}
+			}
+			handlerCalls.Add(1)
+			// A typed error wrapped in unbounded noise: rpcErrorResponse must
+			// select the typed code/message, not the wrapper's Error() text.
+			return nil, fmt.Errorf("%s: %w", outerNoise, &McpError{
+				Code:    CodeInvalidParams,
+				Message: typedMessage,
+			})
+		},
+	})
+	if _, err := client.Connect(testContext(t), clientTransport); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := agentcore.WithToolRunScope(context.Background(), agentcore.ToolRunScope{
+		TenantID: "tenant-1", SessionID: "session-1",
+	})
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := client.CallTool(ctx, "ask", nil); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+
+	var response *ErrorResponse
+	if !waitFor(t, 2*time.Second, func() bool {
+		for _, message := range server.Messages() {
+			if candidate, ok := message.(*ErrorResponse); ok && candidate.ID == NumberID(901) {
+				response = candidate
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("the executor's refusal never reached the server; messages=%#v", server.Messages())
+	}
+	if handlerCalls.Load() != 1 {
+		t.Fatalf("executor calls = %d, want 1", handlerCalls.Load())
+	}
+	if response.Error.Code != CodeInvalidParams {
+		t.Fatalf("error code = %d, want the handler's %d", response.Error.Code, CodeInvalidParams)
+	}
+	if response.Error.Message != typedMessage {
+		t.Fatalf("error message = %q, want the typed %q", response.Error.Message, typedMessage)
+	}
+	if len(response.Error.Message) > 256 {
+		t.Fatalf("error message is %d bytes, want a bounded message", len(response.Error.Message))
+	}
+	if strings.Contains(response.Error.Message, "unbounded-internal-detail") {
+		t.Fatalf("the wrapper's unbounded error text leaked onto the wire: %q", response.Error.Message)
 	}
 }
