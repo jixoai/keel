@@ -4,7 +4,7 @@
 // assertions, not hopes.
 import { expect, test } from "nsh/test";
 import type { McpAppView } from "../../data/contract";
-import { mcpAppHostCapabilities } from "../../data/mcp-apps";
+import { mcpAppHostCapabilities, mcpAppToolInput } from "../../data/mcp-apps";
 import {
   byteLength,
   createAppBridge,
@@ -136,6 +136,34 @@ test("握手：initialize 应答后 initialized 才发 tool-input，且恰好一
   h.bridge.handleMessage(INITIALIZED);
   expect(h.posted.filter((frame) => frame.method === "ui/notifications/tool-input").length).toBe(1);
   expect(h.bridge.snapshot().initialized).toBe(true);
+});
+
+test("tool-input：聚合 mcp 信封发出内层实参；直传对象原样", () => {
+  const city = { city: "上海" };
+  const envelope = { action: "call", server: "weather", tool: "dashboard", arguments: city };
+  // The View's bridge hands `session.live.args` through `mcpAppToolInput`, so
+  // the wire frame carries the called tool's own arguments, not the envelope.
+  const h = harness({ toolInput: () => mcpAppToolInput(envelope) });
+  h.bridge.start();
+  h.bridge.handleMessage(initialize());
+  h.bridge.handleMessage(INITIALIZED);
+  const input = h.posted.find((frame) => frame.method === "ui/notifications/tool-input") as {
+    params: { arguments: unknown };
+  };
+  expect(input.params.arguments).toBe(city);
+  expect(input.params.arguments).toEqual({ city: "上海" });
+  expect(Object.keys(input.params.arguments as Record<string, unknown>).sort()).toEqual(["city"]);
+
+  // A call row that already carries the tool's arguments is not re-shaped.
+  const direct = { city: "北京" };
+  const d = harness({ toolInput: () => mcpAppToolInput(direct) });
+  d.bridge.start();
+  d.bridge.handleMessage(initialize());
+  d.bridge.handleMessage(INITIALIZED);
+  const directInput = d.posted.find((frame) => frame.method === "ui/notifications/tool-input") as {
+    params: { arguments: unknown };
+  };
+  expect(directInput.params.arguments).toBe(direct);
 });
 
 test("数据流：结果在手 → initialized 后 input 再 result；之后的结果不再重发", () => {

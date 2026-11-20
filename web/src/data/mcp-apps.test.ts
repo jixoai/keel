@@ -21,6 +21,7 @@ import {
   mcpAppRpcErrorOf,
   mcpAppRpcErrorOfResponse,
   mcpAppToolCallBody,
+  mcpAppToolInput,
   parseMcpAppCatalogue,
   themeVariablesFor,
 } from "./mcp-apps";
@@ -91,6 +92,40 @@ test("绑定：details.app 的派生身份被读取；无 app/错形状返回 nu
   expect(appBindingOf({ details: { server: "weather" } })).toBe(null);
   expect(appBindingOf({ app: { appId: "not-derived", resourceUri: "ui://x/y" } })).toBe(null);
   expect(appBindingOf({ app: { appId: APP_ID, resourceUri: "file:///etc/passwd" } })).toBe(null);
+});
+
+test("tool-input：聚合 mcp 信封解包为内层实参；其它形状原样透传", () => {
+  const city = { city: "上海" };
+  const envelope = { action: "call", server: "weather", tool: "dashboard", arguments: city };
+  // The inner object is the tool's real arguments, by reference (no copy).
+  expect(mcpAppToolInput(envelope)).toBe(city);
+  expect(mcpAppToolInput(envelope)).toEqual({ city: "上海" });
+
+  // A direct argument object is already the app's tool input.
+  expect(mcpAppToolInput(city)).toBe(city);
+
+  // Non-envelopes and unsafe shapes are returned verbatim.
+  expect(mcpAppToolInput(null)).toBe(null);
+  expect(mcpAppToolInput(undefined)).toBe(undefined);
+  expect(mcpAppToolInput("上海")).toBe("上海");
+  const list = [city];
+  expect(mcpAppToolInput(list)).toBe(list);
+  const listing = { action: "list" };
+  expect(mcpAppToolInput(listing)).toBe(listing);
+  const describing = { action: "describe", server: "weather", tool: "dashboard" };
+  expect(mcpAppToolInput(describing)).toBe(describing);
+  const missing = { action: "call", server: "weather", tool: "dashboard" };
+  expect(mcpAppToolInput(missing)).toBe(missing);
+  const nullArguments = { action: "call", server: "weather", tool: "dashboard", arguments: null };
+  expect(mcpAppToolInput(nullArguments)).toBe(nullArguments);
+  const arrayArguments = { action: "call", server: "weather", tool: "dashboard", arguments: [city] };
+  expect(mcpAppToolInput(arrayArguments)).toBe(arrayArguments);
+
+  // Empty and nested argument objects are real arguments: pass the inner one.
+  const empty = {};
+  expect(mcpAppToolInput({ action: "call", arguments: empty })).toBe(empty);
+  const nested = { filter: { city: "上海" }, tags: ["a"] };
+  expect(mcpAppToolInput({ action: "call", arguments: nested })).toBe(nested);
 });
 
 test("文档地址：只接受目录自己生成的同源 hash URL", () => {

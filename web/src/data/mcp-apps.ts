@@ -149,6 +149,23 @@ export function parseMcpAppCatalogue(raw: unknown): McpAppCatalogueView {
   };
 }
 
+/** The arguments a View receives in `ui/notifications/tool-input` (spec
+ * 「数据流与生命周期通知」: 本次调用实参). The model calls MCP tools through
+ * the aggregate `mcp` tool, so a call row's `args` can be the envelope
+ * `{action:"call", server, tool, arguments}`; the apps notification carries
+ * the called tool's own arguments, not that envelope. The inner object is
+ * returned by reference (no copy); every other shape — `list`/`describe`
+ * envelopes, a direct argument object, null, arrays, a missing/non-object
+ * `arguments` — is returned verbatim. */
+export function mcpAppToolInput(args: unknown): unknown {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+  const envelope = args as Record<string, unknown>;
+  if (envelope.action !== "call") return args;
+  const inner = envelope.arguments;
+  if (!inner || typeof inner !== "object" || Array.isArray(inner)) return args;
+  return inner;
+}
+
 /** The app binding a `tool.result` carries (`details.app`). It is read from
  * the server's details object only; a top-level `app` is accepted for a
  * server-shaped payload. The appId must have the derived shape. */

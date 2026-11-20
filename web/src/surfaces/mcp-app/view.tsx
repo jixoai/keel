@@ -25,6 +25,7 @@ import {
   mcpAppHostCapabilities,
   mcpAppMessagePrefill,
   mcpAppOpenLinkTarget,
+  mcpAppToolInput,
   themeVariablesFor,
 } from "../../data/mcp-apps";
 import { store } from "../../data/store";
@@ -237,7 +238,11 @@ function buildBridge(session: AppSession): AppBridge {
   };
   return createAppBridge({
     post,
-    toolInput: () => session.live.args,
+    // `session.live.args` are the model-call arguments; for the aggregate `mcp`
+    // tool that is `{action:"call", server, tool, arguments}`. The apps
+    // notification carries the called tool's own arguments, so this is the one
+    // place the envelope is unwrapped.
+    toolInput: () => mcpAppToolInput(session.live.args),
     toolResult: () => callToolResultFor(store.toolResultFor(session.live.callId)),
     hostCapabilities: () => hostCapabilitiesFor(session.live.app),
     hostContext: () => hostContextFor(session.live, session.signals.mode()),
