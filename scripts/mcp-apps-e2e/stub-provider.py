@@ -1,37 +1,48 @@
 #!/usr/bin/env python3
-"""Recording OpenAI-compatible stub for the P6A1 browser E2E.
+"""Recording OpenAI-compatible stub for the MCP Apps browser E2E.
 
-First model request (no role:"tool" message yet) streams one aggregate `mcp`
-tool call:
+The model streams one aggregate `mcp` tool call per request until every tool in
+MCP_E2E_TOOL_SEQUENCE has been called; the request that follows the last tool
+result streams a short final answer. The default sequence is
+`render_weather`, which is exactly the P6A1 behavior:
 
     {"action":"call","server":"e2e","tool":"render_weather",
      "arguments":{"city":"Shanghai"}}
 
-That is the shape internal/toolsurface/mcp.go expects. The second request (the
-wire carries the tool result) streams a short final answer, so the real run
-settles without any upstream credential.
+That is the shape internal/toolsurface/mcp.go expects. P6A2a sets
+`MCP_E2E_TOOL_SEQUENCE=render_weather,render_broken` (handshake degradation) or
+`MCP_E2E_TOOL_SEQUENCE=render_leaky` (CSP degradation).
 
 The log is a compact JSONL summary only: model, tool names, whether the request
 carried a tool result. No message bodies, no Authorization value.
 """
 
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1])
 LOG = sys.argv[2]
 
-TOOL_CALL_ARGS = json.dumps(
-    {
-        "action": "call",
-        "server": "e2e",
-        "tool": "render_weather",
-        "arguments": {"city": "Shanghai"},
-    },
-    ensure_ascii=False,
-)
+TOOL_SEQUENCE = [
+    name.strip()
+    for name in (os.environ.get("MCP_E2E_TOOL_SEQUENCE") or "render_weather").split(",")
+    if name.strip()
+]
 FINAL_TEXT = "已完成天气面板渲染。"
+
+
+def tool_call_arguments(name):
+    return json.dumps(
+        {
+            "action": "call",
+            "server": "e2e",
+            "tool": name,
+            "arguments": {"city": "Shanghai"},
+        },
+        ensure_ascii=False,
+    )
 
 
 def record(doc):
@@ -52,9 +63,10 @@ def chunk(model, delta, finish=None, usage=None):
     return out
 
 
-def stream_body(model, has_tool_result):
+def stream_body(model, tool_messages):
     events = []
-    if not has_tool_result:
+    if tool_messages < len(TOOL_SEQUENCE):
+        name = TOOL_SEQUENCE[tool_messages]
         events.append(chunk(model, {"role": "assistant"}))
         events.append(
             chunk(
@@ -63,9 +75,9 @@ def stream_body(model, has_tool_result):
                     "tool_calls": [
                         {
                             "index": 0,
-                            "id": "call_mcp_apps_e2e_1",
+                            "id": "call_mcp_apps_e2e_%d" % (tool_messages + 1),
                             "type": "function",
-                            "function": {"name": "mcp", "arguments": TOOL_CALL_ARGS},
+                            "function": {"name": "mcp", "arguments": tool_call_arguments(name)},
                         }
                     ]
                 },
@@ -112,7 +124,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             doc = {}
         messages = doc.get("messages") or []
-        has_tool_result = any(message.get("role") == "tool" for message in messages)
+        tool_messages = sum(1 for message in messages if message.get("role") == "tool")
+        has_tool_result = tool_messages > 0
         tools = [tool.get("function", {}).get("name") for tool in (doc.get("tools") or [])]
         record(
             {
@@ -121,11 +134,12 @@ class Handler(BaseHTTPRequestHandler):
                 "model": doc.get("model"),
                 "tools": tools,
                 "hasToolResult": has_tool_result,
+                "toolMessages": tool_messages,
                 "roles": [message.get("role") for message in messages],
                 "authPresent": bool(self.headers.get("Authorization")),
             }
         )
-        body = stream_body(doc.get("model") or "kite-e2e-model", has_tool_result)
+        body = stream_body(doc.get("model") or "kite-e2e-model", tool_messages)
         encoded = body.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

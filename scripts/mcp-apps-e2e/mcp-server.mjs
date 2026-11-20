@@ -14,6 +14,16 @@
 //   resources/read       → the app document (text/html;profile=mcp-app)
 //   prompts/list         → empty
 //
+// With MCP_E2E_DEGRADE=1 the same server also publishes the two degradation
+// fixtures used by P6A2a (scripts/mcp-apps-degrade-e2e.sh):
+//
+//   ui://weather/broken  render_broken  an app that never answers ui/initialize
+//   ui://weather/leaky   render_leaky   declares only https://api.fixture.test in
+//                                       _meta.ui.csp.connectDomains and fetches
+//                                       https://evil.fixture.test/leak
+//
+// The flag keeps the P6A1 happy-path fixture exactly as it was (one app).
+//
 // Every request is appended to MCP_E2E_LOG as one JSON line
 // ({method, params, id}) so the browser runner can assert that the host's
 // app-bridge tools/call really reached this process (View → Host → MCP).
@@ -24,8 +34,13 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOG = process.env.MCP_E2E_LOG || '';
+const DEGRADE = process.env.MCP_E2E_DEGRADE === '1';
 const APP_HTML = fs.readFileSync(path.join(HERE, 'app.html'), 'utf8');
+const BROKEN_HTML = DEGRADE ? fs.readFileSync(path.join(HERE, 'app-broken.html'), 'utf8') : '';
+const LEAKY_HTML = DEGRADE ? fs.readFileSync(path.join(HERE, 'app-leaky.html'), 'utf8') : '';
 const APP_URI = 'ui://weather/dashboard';
+const BROKEN_URI = 'ui://weather/broken';
+const LEAKY_URI = 'ui://weather/leaky';
 
 function log(entry) {
   if (!LOG) return;
@@ -74,6 +89,32 @@ const TOOLS = [
     // app bridge may call it.
     _meta: { ui: { visibility: ['app'] } },
   },
+  ...(DEGRADE
+    ? [
+        {
+          name: 'render_broken',
+          title: '坏面板（握手超时）',
+          description: 'Render the app that never answers ui/initialize.',
+          inputSchema: {
+            type: 'object',
+            properties: { city: { type: 'string' } },
+            required: ['city'],
+          },
+          _meta: { ui: { resourceUri: BROKEN_URI, visibility: ['model', 'app'] } },
+        },
+        {
+          name: 'render_leaky',
+          title: '泄漏面板（CSP）',
+          description: 'Render the app that fetches an undeclared domain.',
+          inputSchema: {
+            type: 'object',
+            properties: { city: { type: 'string' } },
+            required: ['city'],
+          },
+          _meta: { ui: { resourceUri: LEAKY_URI, visibility: ['model', 'app'] } },
+        },
+      ]
+    : []),
 ];
 
 const RESOURCES = [
@@ -83,9 +124,59 @@ const RESOURCES = [
     description: 'Interactive weather panel.',
     mimeType: 'text/html;profile=mcp-app',
   },
+  ...(DEGRADE
+    ? [
+        {
+          uri: BROKEN_URI,
+          name: 'Broken weather panel',
+          description: 'Never completes the app handshake.',
+          mimeType: 'text/html;profile=mcp-app',
+        },
+        {
+          uri: LEAKY_URI,
+          name: 'Leaky weather panel',
+          description: 'Declares connectDomains and fetches an undeclared host.',
+          mimeType: 'text/html;profile=mcp-app',
+        },
+      ]
+    : []),
 ];
 
-function toolResult(city) {
+/** The app documents keyed by resource URI. Only apps that resources/list
+ * published are readable: a URI that is not in RESOURCES is not found. */
+const DOCUMENTS = new Map([
+  [APP_URI, { bytes: APP_HTML }],
+  ...(DEGRADE
+    ? [
+        [BROKEN_URI, { bytes: BROKEN_HTML }],
+        // The CSP declaration lives on the content item's `_meta.ui`, the
+        // level apps.mdx defines; the host header is derived from it.
+        [
+          LEAKY_URI,
+          {
+            bytes: LEAKY_HTML,
+            meta: { ui: { csp: { connectDomains: ['https://api.fixture.test'] } } },
+          },
+        ],
+      ]
+    : []),
+]);
+
+function toolResult(name, city) {
+  if (name === 'render_broken') {
+    return {
+      content: [{ type: 'text', text: '坏面板的文本结果仍然可读（交互界面预期握手超时）。' }],
+      structuredContent: { city, fixture: 'broken' },
+      isError: false,
+    };
+  }
+  if (name === 'render_leaky') {
+    return {
+      content: [{ type: 'text', text: '泄漏夹具的文本结果仍然可读（外部请求应被 CSP 阻断）。' }],
+      structuredContent: { city, fixture: 'leaky' },
+      isError: false,
+    };
+  }
   return {
     content: [{ type: 'text', text: `上海现在 24°C，湿度 61%（${city}）。` }],
     structuredContent: { city, temperatureC: 24, humidity: 61 },
@@ -131,11 +222,11 @@ function handle(message) {
       const params = message.params ?? {};
       const name = params.name;
       const args = params.arguments ?? {};
-      if (name !== 'render_weather' && name !== 'refresh_weather') {
+      if (!TOOLS.some((tool) => tool.name === name)) {
         fail(id, -32602, `unknown tool: ${String(name)}`);
         return;
       }
-      ok(id, toolResult(typeof args.city === 'string' && args.city ? args.city : 'Shanghai'));
+      ok(id, toolResult(name, typeof args.city === 'string' && args.city ? args.city : 'Shanghai'));
       return;
     }
     case 'resources/list':
@@ -146,11 +237,14 @@ function handle(message) {
       return;
     case 'resources/read': {
       const uri = (message.params ?? {}).uri;
-      if (uri !== APP_URI) {
+      const document = DOCUMENTS.get(uri);
+      if (!document) {
         fail(id, -32002, `resource not found: ${String(uri)}`);
         return;
       }
-      ok(id, { contents: [{ uri: APP_URI, mimeType: 'text/html;profile=mcp-app', text: APP_HTML }] });
+      const contents = { uri, mimeType: 'text/html;profile=mcp-app', text: document.bytes };
+      if (document.meta) contents._meta = document.meta;
+      ok(id, { contents: [contents] });
       return;
     }
     case 'prompts/list':

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>坏面板 · 握手超时 E2E fixture</title>
+<style>
+  body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 14px; color: #111; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  p { margin: 6px 0; color: #444; }
+  pre { margin: 8px 0 0; padding: 10px; background: #f4f4f5; border-radius: 8px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<h1 id="title">坏面板 · 已发送 ui/initialize</h1>
+<p>本夹具故意<b>不回复</b> <code>ui/initialize</code>：宿主应在 5 秒握手期限后销毁本实例并回退为文本。</p>
+<pre id="state">{}</pre>
+<script>
+(function () {
+  // The degradation fixture: it sends ui/initialize exactly once and then never
+  // sends ui/notifications/initialized, so the real host's 5 s handshake
+  // deadline is what ends this instance. It records every inbound frame so the
+  // browser runner can prove the host answered initialize and waited.
+  const state = window.__brokenE2E = {
+    loadedAt: Date.now(),
+    frames: [],
+    errors: [],
+  };
+
+  const paint = () => {
+    const node = document.getElementById("state");
+    if (node) node.textContent = JSON.stringify(state, null, 2);
+  };
+
+  window.addEventListener("message", (event) => {
+    let frame;
+    try { frame = JSON.parse(String(event.data)); }
+    catch (e) { state.errors.push("bad-json"); return; }
+    state.frames.push({
+      method: frame.method || "response",
+      id: frame.id === undefined ? null : frame.id,
+      at: Date.now(),
+    });
+    // Deliberately no reply. In particular: no ui/notifications/initialized.
+    paint();
+  });
+
+  // Send ui/initialize at the document's load, exactly like a normal MCP App
+  // (app.html): the host arms its bridge from the iframe's load event, and a
+  // frame sent before that event looks like a navigation to the host. The
+  // defect this fixture exercises is the missing `initialized` reply, not an
+  // early frame.
+  const start = () => {
+    try {
+      window.top.postMessage(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "ui/initialize",
+        params: {
+          protocolVersion: "2026-01-26",
+          appInfo: { name: "e2e-broken", version: "1.0.0" },
+          appCapabilities: { availableDisplayModes: ["inline"] },
+        },
+      }), "*");
+    } catch (e) {
+      state.errors.push("post:" + String(e));
+    }
+    paint();
+  };
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start);
+})();
+</script>
+</body>
+</html>

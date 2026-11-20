@@ -1,0 +1,207 @@
+{
+  "lane": "P6A2a",
+  "generatedAt": "2026-11-20T03:41:03.768Z",
+  "scenarios": [
+    {
+      "name": "handshake",
+      "run": "handshake",
+      "pass": true,
+      "error": null,
+      "assertions": {
+        "catalogue-apps": true,
+        "catalogue-dashboard": true,
+        "catalogue-broken": true,
+        "mcp-resource-read-ui-weather-dashboard": true,
+        "mcp-resource-read-ui-weather-broken": true,
+        "good-handshake": true,
+        "good-tool-result": true,
+        "good-tools-call": true,
+        "good-phase-visible": true,
+        "broken-iframe-mounted": true,
+        "broken-load-observed": true,
+        "broken-fallback-observed": true,
+        "broken-timeout-within-deadline": true,
+        "broken-fallback-row": true,
+        "broken-fallback-reason": true,
+        "broken-fallback-readable": true,
+        "broken-fallback-retry": true,
+        "broken-text-result-still-visible": true,
+        "good-still-mounted": true,
+        "good-same-instance": true,
+        "good-tools-call-survives": true,
+        "good-row-has-no-fallback": true,
+        "retry-refalls-back": true,
+        "retry-within-deadline": true,
+        "good-survives-retry": true,
+        "host-no-navigation": true,
+        "host-no-main-frame-navigation": true,
+        "no-page-errors": true,
+        "no-failed-requests": true
+      },
+      "passedAssertions": 29,
+      "failedAssertions": [],
+      "timing": {
+        "probeInstalledAt": 1056.7999999523163,
+        "iframeSeen": {
+          "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad&instance=16c7bc511fbc4934ae9da9002746694e1": 1508.8999998569489,
+          "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=c0b2cd2aa7f34c7288d4dfd21ec7ecc82": 1705.0999999046326
+        },
+        "iframeLoaded": {
+          "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad&instance=16c7bc511fbc4934ae9da9002746694e1": 1545.3999998569489,
+          "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=c0b2cd2aa7f34c7288d4dfd21ec7ecc82": 1716.7999999523163
+        },
+        "brokenFallbackAt": 6728.199999809265,
+        "brokenSrc": "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=c0b2cd2aa7f34c7288d4dfd21ec7ecc82",
+        "elapsedMs": 5011,
+        "retryElapsedMs": 5357
+      },
+      "csp": null,
+      "findings": [
+        {
+          "id": "login-capability-stale",
+          "summary": "登录后能力位未刷新：首屏 can(\"mcp.apps\") 仍为 false（P6A1 已记录）；本次降级用例在登录后 reload 一次再验证。",
+          "impact": "P2/P6 前端 store 已知缺陷；本 lane 不改产品代码，也不把该缺陷算作降级场景失败。"
+        }
+      ],
+      "screenshots": [
+        "screenshots/01-login-gate.png",
+        "screenshots/02-login-submitted.png",
+        "screenshots/03-post-login-reload.png",
+        "screenshots/04-session-open.png",
+        "screenshots/05-tool-rows-expanded.png",
+        "screenshots/06-good-app-ready.png",
+        "screenshots/07-handshake-timeout-fallback.png",
+        "screenshots/08-good-app-unaffected.png",
+        "screenshots/09-handshake-retry-fallback.png"
+      ],
+      "startedAt": "2026-11-20T03:40:37.474Z",
+      "finishedAt": "2026-11-20T03:40:52.209Z"
+    },
+    {
+      "name": "csp",
+      "run": "csp",
+      "pass": true,
+      "error": null,
+      "assertions": {
+        "catalogue-apps": true,
+        "catalogue-dashboard": true,
+        "catalogue-leaky": true,
+        "mcp-resource-read-ui-weather-leaky": true,
+        "leaky-handshake": true,
+        "leaky-tool-result": true,
+        "leak-attempted": true,
+        "leak-rejected": true,
+        "csp-in-frame-violation": true,
+        "csp-console-or-requestfailed": true,
+        "csp-document-status": true,
+        "csp-declared-domain-allowed": true,
+        "csp-undeclared-domain-absent": true,
+        "csp-strict-default": true,
+        "leak-server-not-hit": true,
+        "leak-trap-control": true,
+        "leak-app-attempt-blocked": true,
+        "host-no-navigation": true,
+        "host-no-main-frame-navigation": true,
+        "leaky-row-has-no-fallback": true,
+        "leaky-iframe-still-mounted": true,
+        "leaky-status-connected": true,
+        "leaky-text-result-visible": true,
+        "no-page-errors": true,
+        "no-unrelated-failed-requests": true
+      },
+      "passedAssertions": 25,
+      "failedAssertions": [],
+      "timing": null,
+      "csp": {
+        "violations": [
+          {
+            "directive": "connect-src",
+            "effective": "connect-src",
+            "blockedURI": "https://evil.fixture.test/leak",
+            "disposition": "enforce",
+            "at": 1795146060206
+          }
+        ],
+        "console": [
+          "error: Connecting to 'https://evil.fixture.test/leak' violates the following Content Security Policy directive: \"connect-src 'self' https://api.fixture.test\". The action has been blocked.",
+          "error: Fetch API cannot load https://evil.fixture.test/leak. Refused to connect because it violates the document's Content Security Policy."
+        ],
+        "document": {
+          "status": 200,
+          "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+          "appMime": "text/html;profile=mcp-app"
+        },
+        "trap": {
+          "log": "leak-trap.jsonl",
+          "connectionsDuringApp": []
+        },
+        "control": {
+          "connections": [
+            {
+              "at": 1795146060.794749,
+              "peer": [
+                "127.0.0.1",
+                52949
+              ],
+              "bytes": 1989,
+              "firstHex": "16030107c0010007bc03037353e629e7",
+              "printable": "...........sS.).",
+              "firstByte": 22
+            },
+            {
+              "at": 1795146060.795866,
+              "peer": [
+                "127.0.0.1",
+                52950
+              ],
+              "bytes": 2021,
+              "firstHex": "16030107e0010007dc0303c241f9de22",
+              "printable": "............A..\"",
+              "firstByte": 22
+            },
+            {
+              "at": 1795146060.797191,
+              "peer": [
+                "127.0.0.1",
+                52951
+              ],
+              "bytes": 1925,
+              "firstHex": "16030107800100077c03033ed974f62c",
+              "printable": "........|..>.t.,",
+              "firstByte": 22
+            },
+            {
+              "at": 1795146060.797676,
+              "peer": [
+                "127.0.0.1",
+                52952
+              ],
+              "bytes": 2021,
+              "firstHex": "16030107e0010007dc0303dec1135988",
+              "printable": "..............Y.",
+              "firstByte": 22
+            }
+          ]
+        }
+      },
+      "findings": [
+        {
+          "id": "login-capability-stale",
+          "summary": "登录后能力位未刷新：首屏 can(\"mcp.apps\") 仍为 false（P6A1 已记录）；本次降级用例在登录后 reload 一次再验证。",
+          "impact": "P2/P6 前端 store 已知缺陷；本 lane 不改产品代码，也不把该缺陷算作降级场景失败。"
+        }
+      ],
+      "screenshots": [
+        "screenshots/01-login-gate.png",
+        "screenshots/02-login-submitted.png",
+        "screenshots/03-post-login-reload.png",
+        "screenshots/04-session-open.png",
+        "screenshots/05-tool-rows-expanded.png",
+        "screenshots/06-csp-leak-blocked.png"
+      ],
+      "startedAt": "2026-11-20T03:40:57.772Z",
+      "finishedAt": "2026-11-20T03:41:01.250Z"
+    }
+  ],
+  "pass": true
+}
