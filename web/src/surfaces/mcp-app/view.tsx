@@ -15,11 +15,20 @@
 // allow-downloads` to every frame (the runtime's fixed list). It cannot be
 // narrowed from app code in 0.4 nightly; the bridge treats the frame as
 // untrusted regardless, and the deviation is recorded in the P2 evidence.
-import { cleanup, colorScheme, effect, locale as deviceLocale, platform, signal, Text, View, WebView, windowSize } from "nsh";
+import { cleanup, colorScheme, effect, locale as deviceLocale, openUrl, platform, signal, Text, View, WebView, windowSize } from "nsh";
 import type { WebViewRef } from "nsh";
+import { can } from "../../data/capabilities";
 import type { McpAppView } from "../../data/contract";
-import { appDocumentSource, callToolResultFor, themeVariablesFor } from "../../data/mcp-apps";
+import {
+  appDocumentSource,
+  callToolResultFor,
+  mcpAppHostCapabilities,
+  mcpAppMessagePrefill,
+  mcpAppOpenLinkTarget,
+  themeVariablesFor,
+} from "../../data/mcp-apps";
 import { store } from "../../data/store";
+import { prefillComposer } from "../../screens/composer";
 import { Icon } from "../../ui/icons";
 import { Badge, Button, color, Dialog, font, radius, space, typeScale, weight } from "../../ui/kit";
 import {
@@ -111,6 +120,36 @@ const messageOf = (error: unknown): string => {
   return typeof value?.message === "string" && value.message ? value.message : String(error);
 };
 
+/** Open an already-confirmed http(s) URL outside the app. The host page is
+ * never navigated: the web target opens a new page with `noopener,noreferrer`
+ * (a blocked popup is an honest `false`), native targets hand it to `openUrl`.
+ * The URL came from the server and passed the proxy's scheme whitelist; this
+ * function still refuses anything but http(s) as its own line. */
+async function openExternalUrl(url: string): Promise<boolean> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  if (platform.os === "web") {
+    const opener = (globalThis as { open?: (target: string, name?: string, features?: string) => unknown }).open;
+    if (!opener) return false;
+    try {
+      return opener.call(globalThis, url, "_blank", "noopener,noreferrer") !== null;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const result = await openUrl(url);
+    return result.opened === true;
+  } catch {
+    return false;
+  }
+}
+
 function ensureWebOrigin(force = false): void {
   if (platform.os !== "web") return;
   const current = webOrigin();
@@ -164,17 +203,23 @@ function hostContextFor(props: McpAppViewProps, mode: DisplayMode): Record<strin
   return context;
 }
 
-/** Only what this host actually wires is advertised. `tools/call`,
- * `resources/read`, links and model context are P3/P5; permissions are granted
- * only after the user's confirmation (P3.6), so nothing is claimed here. */
+/** Only what this deployment actually wires is advertised. Each proxy entry is
+ * the `can()` gate over the deployment's fact and this build's fact; the model
+ * context gate additionally requires the server's explicit
+ * `mcp.apps.context` bit. `logging` is always real (one-way
+ * `notifications/message`); permissions are not claimed (P3.6 grants them only
+ * after confirmation). */
 function hostCapabilitiesFor(app: McpAppView): Record<string, unknown> {
-  const capabilities: Record<string, unknown> = {
-    // `notifications/message` is accepted (one-way host log), so `logging` is
-    // a real capability, not a promise.
-    logging: {},
-  };
-  if (app.cspDomains) capabilities.sandbox = { csp: app.cspDomains };
-  return capabilities;
+  return mcpAppHostCapabilities(
+    {
+      serverTools: can("mcp.apps.tools"),
+      serverResources: can("mcp.apps.resources"),
+      message: can("mcp.apps.message"),
+      openLinks: can("mcp.apps.links"),
+      updateModelContext: can("mcp.apps.context"),
+    },
+    app,
+  );
 }
 
 function buildBridge(session: AppSession): AppBridge {
@@ -201,6 +246,34 @@ function buildBridge(session: AppSession): AppBridge {
     setDisplayMode: (mode) => {
       session.signals.setMode(mode);
       return mode;
+    },
+    // The five host requests go through the store, which keeps the same-origin
+    // cookie session, the open session id and the proxy's audit/budget. The
+    // bridge only calls one when `hostCapabilities` declared it.
+    callTool: (name, args) => store.mcpAppToolCall(session.live.app.appId, name, args),
+    readResource: (uri) => store.mcpAppReadResource(session.live.app.appId, uri),
+    sendMessage: async (content, requestId) => {
+      const outcome = await store.mcpAppMessage(session.live.app.appId, content, requestId);
+      // The edit branch only prefills; send/discard write through the server
+      // path and leave the composer alone.
+      const prefill = mcpAppMessagePrefill(outcome);
+      if (prefill && !session.disposed) prefillComposer(prefill);
+      return {};
+    },
+    openLink: async (url) => {
+      const outcome = await store.mcpAppOpenLink(session.live.app.appId, url);
+      const target = mcpAppOpenLinkTarget(outcome);
+      if (!target.opened || !target.url) return { isError: true };
+      return (await openExternalUrl(target.url)) ? {} : { isError: true };
+    },
+    updateModelContext: async (content, structuredContent, requestId) => {
+      await store.mcpAppUpdateModelContext(
+        session.live.app.appId,
+        content,
+        structuredContent,
+        requestId,
+      );
+      return {};
     },
     onSize: (size) => {
       if (!session.disposed && size.height !== undefined) session.signals.setHeight(size.height);

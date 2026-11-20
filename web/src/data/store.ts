@@ -22,7 +22,11 @@ import type {
   EventSource,
   FireResultView,
   McpAppAuditEntry,
+  McpAppCallToolResult,
   McpAppCatalogueView,
+  McpAppMessageOutcome,
+  McpAppOpenLinkOutcome,
+  McpAppResourceReadResult,
   McpAppToolResult,
   ModelsSettingsView,
   ModelSelection,
@@ -42,6 +46,18 @@ import type {
 } from "./contract";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
 import { setDeploymentCapabilities } from "./capabilities";
+import {
+  mcpAppContextBody,
+  mcpAppMessageBody,
+  mcpAppOpenLinkBody,
+  mcpAppResourceReadBody,
+  mcpAppToolCallBody,
+  type McpAppContextBody,
+  type McpAppMessageBody,
+  type McpAppOpenLinkBody,
+  type McpAppResourceReadBody,
+  type McpAppToolCallBody,
+} from "./mcp-apps";
 
 /** The connection state: probing, a live service, or nothing to talk to. There
  * is no demo state — the fixture is a development transport, not a mode the
@@ -91,6 +107,13 @@ interface Client extends SettingsApi {
   /** Best-effort audit write for an app protocol violation (P3.7 wires the
    * durable store; a transport without it returns false). */
   auditMcpApp?(entry: McpAppAuditEntry): Promise<boolean>;
+  /** The View's outbound proxies (P3/P5). Optional: a transport without the
+   * surface answers a readable refusal instead of a fake result. */
+  mcpAppToolCall?(appId: string, body: McpAppToolCallBody): Promise<McpAppCallToolResult>;
+  mcpAppReadResource?(appId: string, body: McpAppResourceReadBody): Promise<McpAppResourceReadResult>;
+  mcpAppMessage?(appId: string, body: McpAppMessageBody): Promise<McpAppMessageOutcome>;
+  mcpAppOpenLink?(appId: string, body: McpAppOpenLinkBody): Promise<McpAppOpenLinkOutcome>;
+  mcpAppUpdateContext?(appId: string, body: McpAppContextBody): Promise<unknown>;
   listSessions(limit?: number): Promise<SessionSummary[]>;
   createSession(): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
@@ -1227,6 +1250,58 @@ class KeelStore {
     } catch {
       return false;
     }
+  }
+
+  /** A View's `tools/call`, through the host proxy. The open session is the
+   * call's scope (MRTR attribution and audit); no request bypasses the proxy's
+   * ownership check or budget. A transport without the surface refuses; it
+   * never returns an invented result. */
+  async mcpAppToolCall(appId: string, name: string, args: unknown): Promise<McpAppCallToolResult> {
+    const client = this.client;
+    if (!client?.mcpAppToolCall) throw new Error("此传输不提供 MCP App 工具代理");
+    return client.mcpAppToolCall(appId, mcpAppToolCallBody(this.activeId(), name, args));
+  }
+
+  /** A View's `resources/read`, scoped to the same server by the proxy. */
+  async mcpAppReadResource(appId: string, uri: string): Promise<McpAppResourceReadResult> {
+    const client = this.client;
+    if (!client?.mcpAppReadResource) throw new Error("此传输不提供 MCP App 资源代理");
+    return client.mcpAppReadResource(appId, mcpAppResourceReadBody(this.activeId(), uri));
+  }
+
+  /** A View's `ui/message`. The server confirms it and decides the branch;
+   * this method returns the outcome so the caller can prefill on `edit`. */
+  async mcpAppMessage(
+    appId: string,
+    content: unknown,
+    requestId: string,
+  ): Promise<McpAppMessageOutcome> {
+    const client = this.client;
+    if (!client?.mcpAppMessage) throw new Error("此传输不提供 MCP App 消息通路");
+    return client.mcpAppMessage(appId, mcpAppMessageBody(this.activeId(), content, requestId));
+  }
+
+  /** A View's `ui/open-link`. Opening the returned URL is the platform layer's
+   * job (the store never navigates the host page). */
+  async mcpAppOpenLink(appId: string, url: string): Promise<McpAppOpenLinkOutcome> {
+    const client = this.client;
+    if (!client?.mcpAppOpenLink) throw new Error("此传输不提供 MCP App 链接通路");
+    return client.mcpAppOpenLink(appId, mcpAppOpenLinkBody(this.activeId(), url));
+  }
+
+  /** A View's `ui/update-model-context`: overwrite-only, next-attempt scope. */
+  async mcpAppUpdateModelContext(
+    appId: string,
+    content: unknown,
+    structuredContent: unknown,
+    requestId: string,
+  ): Promise<void> {
+    const client = this.client;
+    if (!client?.mcpAppUpdateContext) throw new Error("此传输不提供 MCP App 上下文通路");
+    await client.mcpAppUpdateContext(
+      appId,
+      mcpAppContextBody(this.activeId(), content, structuredContent, requestId),
+    );
   }
 
   decisionTimeout(decisionId: string): number | undefined {

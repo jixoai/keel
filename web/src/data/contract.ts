@@ -505,6 +505,37 @@ export interface McpAppAuditEntry {
   detail: string;
 }
 
+/** A standard `CallToolResult` from the host's `tools/call` proxy. The View
+ * receives exactly this object: content, structuredContent and isError, never
+ * a server response header. */
+export interface McpAppCallToolResult {
+  content?: unknown;
+  structuredContent?: unknown;
+  isError?: boolean;
+}
+
+/** A `resources/read` result from the host's proxy (`{contents:[...]}` plus
+ * the modern cache hints). */
+export interface McpAppResourceReadResult {
+  contents: unknown[];
+  ttlMs?: number;
+  cacheScope?: string;
+}
+
+/** One successful `ui/message` outcome. `send` reached the ledger, `edit`
+ * only prefills the composer, `discard` wrote nothing. */
+export interface McpAppMessageOutcome {
+  result: "send" | "edit" | "discard";
+  prefilled?: { text?: string };
+}
+
+/** One `ui/open-link` outcome: the host only opens an approved URL. */
+export interface McpAppOpenLinkOutcome {
+  opened: boolean;
+  url?: string;
+  reason?: string;
+}
+
 /** The settings face of a transport. Both `KeelHttp` and the fixture client
  * implement it, so the settings screens and the session picker work against
  * the same store in live and fixture mode. */

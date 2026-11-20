@@ -247,6 +247,215 @@ export function themeVariablesFor(
   return Object.keys(variables).length ? variables : undefined;
 }
 
+// ---- host bridge helpers (change feat-mcp-apps-events, F2) ----------------
+//
+// The bridge's outbound requests (tools/call, resources/read, ui/message,
+// ui/open-link, ui/update-model-context) all share one wire discipline: build
+// the exact proxy body, and turn any refusal into a JSON-RPC error without
+// inventing success. These are pure so the bridge tests and the HTTP client
+// exercise the same code.
+
+/** The JSON-RPC error code for a host failure that carries none. */
+export const MCP_APP_RPC_INTERNAL_ERROR = -32603;
+/** The error code for an action still waiting on the user's confirmation. */
+export const MCP_APP_RPC_PENDING = -32000;
+/** One error message is bounded before it reaches the View. */
+export const MCP_APP_RPC_MESSAGE_MAX = 500;
+
+const integerOr = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isInteger(value) ? value : undefined;
+
+/** One bounded, control-free error line. An upstream error must not be able to
+ * push an unbounded payload (or a newline-log forgery) through the bridge. */
+function boundedRpcMessage(value: string): string {
+  const clean = value.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").trim();
+  if (!clean) return "MCP app request failed";
+  return clean.length > MCP_APP_RPC_MESSAGE_MAX
+    ? `${clean.slice(0, MCP_APP_RPC_MESSAGE_MAX - 1)}…`
+    : clean;
+}
+
+export interface McpAppRpcError {
+  code: number;
+  message: string;
+}
+
+/** Normalize one rejected host request. The host's own `code` wins (a proxy's
+ * -32602 stays -32602); anything else is -32603 with a bounded message. Both a
+ * thrown `{code,message}` and an `Error` with a `code` work. */
+export function mcpAppRpcErrorOf(error: unknown): McpAppRpcError {
+  const row = asRecord(error);
+  const nested = asRecord(row.error);
+  const direct = typeof error === "string" ? error : "";
+  const code = integerOr(row.code) ?? integerOr(nested.code) ?? MCP_APP_RPC_INTERNAL_ERROR;
+  const message =
+    text(row.message) || text(nested.message) || text(row.error) || direct || `MCP app request failed (${code})`;
+  return { code, message: boundedRpcMessage(message) };
+}
+
+/** Map a non-2xx proxy response body. A JSON-RPC-shaped refusal keeps its code
+ * (`{jsonrpc:"2.0",error:{code,message}}`); a plain `{error:string}` becomes
+ * -32603. A 202 means the confirmation is still pending, which is not success:
+ * the View must not be told a message was sent. */
+export function mcpAppRpcErrorOfResponse(status: number, payload: unknown): McpAppRpcError {
+  const row = asRecord(payload);
+  const nested = asRecord(row.error);
+  const nestedCode = integerOr(nested.code);
+  if (nestedCode !== undefined && text(nested.message)) {
+    return { code: nestedCode, message: boundedRpcMessage(text(nested.message)) };
+  }
+  if (status === 202) {
+    return { code: MCP_APP_RPC_PENDING, message: "交互操作仍在等待用户确认" };
+  }
+  const message = text(row.error) || text(row.message) || `HTTP ${status}`;
+  return { code: MCP_APP_RPC_INTERNAL_ERROR, message: boundedRpcMessage(message) };
+}
+
+/** One host-request failure that keeps the proxy's JSON-RPC code. The bridge
+ * reads `code`/`message`; the HTTP status stays for diagnostics. */
+export class McpAppRequestError extends Error {
+  readonly status: number;
+  readonly code: number;
+
+  constructor(status: number, payload: unknown) {
+    const mapped = mcpAppRpcErrorOfResponse(status, payload);
+    super(mapped.message);
+    this.name = "McpAppRequestError";
+    this.status = status;
+    this.code = mapped.code;
+  }
+}
+
+/** `sessionId` is omitted when no session is open: the proxy answers its own
+ * readable "sessionId is required", rather than receiving an empty string. */
+const sessionField = (sessionId: string | null | undefined): { sessionId?: string } => {
+  const value = typeof sessionId === "string" ? sessionId.trim() : "";
+  return value ? { sessionId: value } : {};
+};
+
+export interface McpAppToolCallBody {
+  sessionId?: string;
+  name: string;
+  arguments: unknown;
+}
+
+export function mcpAppToolCallBody(
+  sessionId: string | null | undefined,
+  name: string,
+  args: unknown,
+): McpAppToolCallBody {
+  return {
+    ...sessionField(sessionId),
+    name,
+    arguments: args === undefined || args === null ? {} : args,
+  };
+}
+
+export interface McpAppResourceReadBody {
+  sessionId?: string;
+  uri: string;
+}
+
+export function mcpAppResourceReadBody(
+  sessionId: string | null | undefined,
+  uri: string,
+): McpAppResourceReadBody {
+  return { ...sessionField(sessionId), uri };
+}
+
+export interface McpAppMessageBody {
+  sessionId?: string;
+  role: "user";
+  content: unknown;
+  delivery: "queue";
+  requestId: string;
+}
+
+/** The View never chooses the delivery mode; the host always queues. */
+export function mcpAppMessageBody(
+  sessionId: string | null | undefined,
+  content: unknown,
+  requestId: string,
+): McpAppMessageBody {
+  return { ...sessionField(sessionId), role: "user", content, delivery: "queue", requestId };
+}
+
+export interface McpAppOpenLinkBody {
+  sessionId?: string;
+  url: string;
+}
+
+export function mcpAppOpenLinkBody(
+  sessionId: string | null | undefined,
+  url: string,
+): McpAppOpenLinkBody {
+  return { ...sessionField(sessionId), url };
+}
+
+export interface McpAppContextBody {
+  sessionId?: string;
+  content?: unknown;
+  structuredContent?: unknown;
+  requestId: string;
+}
+
+export function mcpAppContextBody(
+  sessionId: string | null | undefined,
+  content: unknown,
+  structuredContent: unknown,
+  requestId: string,
+): McpAppContextBody {
+  const body: McpAppContextBody = { ...sessionField(sessionId), requestId };
+  if (content !== undefined) body.content = content;
+  if (structuredContent !== undefined) body.structuredContent = structuredContent;
+  return body;
+}
+
+/** The text an `edit` branch places into the composer. `send` and `discard`
+ * carry no prefill (the ledger alone records a send). */
+export function mcpAppMessagePrefill(outcome: unknown): string | undefined {
+  const row = asRecord(outcome);
+  if (row.result !== "edit") return undefined;
+  const prefill = asRecord(row.prefilled).text;
+  return typeof prefill === "string" && prefill.trim() !== "" ? prefill : undefined;
+}
+
+/** The URL the host may open: only `opened:true` with a non-empty target. A
+ * denial or a missing URL is not an open (the View gets `isError`). */
+export function mcpAppOpenLinkTarget(outcome: unknown): { opened: boolean; url?: string } {
+  const row = asRecord(outcome);
+  const url = text(row.url).trim();
+  return row.opened === true && url ? { opened: true, url } : { opened: false };
+}
+
+/** Which app capabilities this deployment actually serves. In the frozen
+ * server surface the four proxy routes ship with `mcp.apps`; only the model
+ * context route has its own deployment bit (`mcp.apps.context`). */
+export interface McpAppHostCapabilityFlags {
+  serverTools: boolean;
+  serverResources: boolean;
+  message: boolean;
+  openLinks: boolean;
+  updateModelContext: boolean;
+}
+
+/** `McpUiInitializeResult.hostCapabilities`, built only from declared facts.
+ * `logging` is always real (one-way notifications/message); `sandbox.csp` is
+ * the resource's declared domains. Nothing else is advertised speculatively. */
+export function mcpAppHostCapabilities(
+  flags: McpAppHostCapabilityFlags,
+  app: Pick<McpAppView, "cspDomains">,
+): Record<string, unknown> {
+  const capabilities: Record<string, unknown> = { logging: {} };
+  if (flags.serverTools) capabilities.serverTools = {};
+  if (flags.serverResources) capabilities.serverResources = {};
+  if (flags.message) capabilities.message = {};
+  if (flags.openLinks) capabilities.openLinks = {};
+  if (flags.updateModelContext) capabilities.updateModelContext = {};
+  if (app.cspDomains) capabilities.sandbox = { csp: app.cspDomains };
+  return capabilities;
+}
+
 export interface CallToolResultView {
   content: unknown[];
   structuredContent?: unknown;

@@ -20,7 +20,11 @@ import type {
   EventSource,
   FireResultView,
   McpAppAuditEntry,
+  McpAppCallToolResult,
   McpAppCatalogueView,
+  McpAppMessageOutcome,
+  McpAppOpenLinkOutcome,
+  McpAppResourceReadResult,
   MediaCapabilitiesView,
   MediaCapabilityStatus,
   MediaCapabilityView,
@@ -43,7 +47,16 @@ import type {
   UiCommands,
   WireEvent,
 } from "./contract";
-import { parseMcpAppCatalogue } from "./mcp-apps";
+import {
+  APP_ID_PATTERN,
+  McpAppRequestError,
+  parseMcpAppCatalogue,
+  type McpAppContextBody,
+  type McpAppMessageBody,
+  type McpAppOpenLinkBody,
+  type McpAppResourceReadBody,
+  type McpAppToolCallBody,
+} from "./mcp-apps";
 
 export class KeelApiError extends Error {
   readonly status: number;
@@ -579,6 +592,66 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
     } catch {
       return false;
     }
+  }
+
+  /** One View-initiated app request. The proxy is the only path: no app ever
+   * reaches an MCP server or the product API directly. A non-2xx body is kept
+   * whole (`{jsonrpc,error:{code,message}}` or `{error:string}`) so the bridge
+   * can answer the View with the server's own code. Cookie/session auth is the
+   * ordinary same-origin one. */
+  private async mcpAppProxy<T>(appId: string, action: string, body: unknown): Promise<T> {
+    if (!APP_ID_PATTERN.test(appId)) throw new Error("invalid app id");
+    const response = await this.fetchImpl(
+      this.url(`/v1/mcp/apps/${encodeURIComponent(appId)}/${action}`),
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    // 202 is a confirmation still waiting on the user: never a success frame.
+    if (!response.ok || response.status === 202) {
+      throw new McpAppRequestError(response.status, payload);
+    }
+    return payload as T;
+  }
+
+  /** `POST /v1/mcp/apps/{appId}/tools/call`: a standard `CallToolResult`. */
+  async mcpAppToolCall(appId: string, body: McpAppToolCallBody): Promise<McpAppCallToolResult> {
+    return this.mcpAppProxy<McpAppCallToolResult>(appId, "tools/call", body);
+  }
+
+  /** `POST /v1/mcp/apps/{appId}/resources/read`: `{contents:[...]}`. */
+  async mcpAppReadResource(
+    appId: string,
+    body: McpAppResourceReadBody,
+  ): Promise<McpAppResourceReadResult> {
+    return this.mcpAppProxy<McpAppResourceReadResult>(appId, "resources/read", body);
+  }
+
+  /** `POST /v1/mcp/apps/{appId}/ui/message`: the confirmed send/edit/discard
+   * branch. The decision wait happens on the server, bounded by its timeout. */
+  async mcpAppMessage(appId: string, body: McpAppMessageBody): Promise<McpAppMessageOutcome> {
+    return this.mcpAppProxy<McpAppMessageOutcome>(appId, "ui/message", body);
+  }
+
+  /** `POST /v1/mcp/apps/{appId}/ui/open-link`: `{opened,url}` after the
+   * confirmation; the caller opens it with `noopener,noreferrer`. */
+  async mcpAppOpenLink(appId: string, body: McpAppOpenLinkBody): Promise<McpAppOpenLinkOutcome> {
+    return this.mcpAppProxy<McpAppOpenLinkOutcome>(appId, "ui/open-link", body);
+  }
+
+  /** `POST /v1/mcp/apps/{appId}/context`: `ui/update-model-context`. The route
+   * answers a JSON-RPC envelope; the bridge answers the View with `{}`. */
+  async mcpAppUpdateContext(appId: string, body: McpAppContextBody): Promise<unknown> {
+    return this.mcpAppProxy<unknown>(appId, "context", body);
   }
 
   // ---- sessions ---------------------------------------------------------

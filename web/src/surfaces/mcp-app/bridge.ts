@@ -19,6 +19,7 @@
 // away and the tool row falls back to text. One app's failure never touches
 // another tool or the session.
 import type { McpAppView } from "../../data/contract";
+import { mcpAppRpcErrorOf } from "../../data/mcp-apps";
 
 /** The extension's protocol version the host speaks. */
 export const MCP_APP_PROTOCOL_VERSION = "2026-01-26";
@@ -69,6 +70,22 @@ export interface AppBridgeOptions {
   sandboxOrigin?: () => string | undefined;
   /** Switch the host's display mode; returns the mode actually in effect. */
   setDisplayMode?: (mode: DisplayMode) => DisplayMode;
+  /** `tools/call` → the host's proxy. A rejection becomes a JSON-RPC error;
+   * the host's own `code` is preserved when present. */
+  callTool?: (name: string, args: unknown) => Promise<unknown>;
+  /** `resources/read` → the host's proxy. */
+  readResource?: (uri: string) => Promise<unknown>;
+  /** `ui/message` → the host's confirmed input path. `requestId` is the
+   * idempotency identity the host attributes to this View request. */
+  sendMessage?: (content: unknown, requestId: string) => Promise<unknown>;
+  /** `ui/open-link` → the host's confirmed link path. */
+  openLink?: (url: string) => Promise<unknown>;
+  /** `ui/update-model-context` → the host's session context store. */
+  updateModelContext?: (
+    content: unknown,
+    structuredContent: unknown,
+    requestId: string,
+  ) => Promise<unknown>;
   onSize?: (size: { width: number; height: number }) => void;
   onDisplayMode?: (mode: DisplayMode) => void;
   onPhase?: (phase: BridgePhase) => void;
@@ -197,6 +214,16 @@ export function parseFrame(data: string): { frame: InboundFrame } | { reason: st
   };
 }
 
+/** A per-instance request prefix. The proxy attributes a message to
+ * `mcp-app:<appId>:<requestId>`; the View's numeric id alone repeats across
+ * instances, so the prefix keeps two instances' ids from collapsing into one
+ * idempotency key. It is a routing key, not a secret. */
+function newRequestPrefix(): string {
+  const cryptoAny = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  const raw = cryptoAny?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "view";
+}
+
 export function createAppBridge(options: AppBridgeOptions): AppBridge {
   const now = options.now ?? (() => Date.now());
   const schedule =
@@ -228,6 +255,11 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
   let resultOnHandshake: AppToolResult | null = null;
   let teardownId = 0;
   let teardownSent = false;
+  let requestPrefix = "";
+  /** The capabilities sent in this instance's `ui/initialize` result. A host
+   * request is accepted only when it was advertised there, so a later
+   * capability probe cannot widen what this View was told. */
+  let advertisedCapabilities: Record<string, unknown> = {};
 
   /** At most 200 inbound frames in any 1 s sliding window. The window belongs
    * to one View instance: a rebuild (display-mode change, navigation reload)
@@ -247,6 +279,35 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
 
   const respondError = (id: string | number, code: number, message: string) =>
     send({ jsonrpc: "2.0", id, error: { code, message } });
+
+  /** The capability the host advertised in this instance's `initialize`
+   * result. A request for an undeclared capability is refused before any
+   * callback runs: the deployment's `can()` gate and the wire declaration
+   * cannot disagree. */
+  const declared = (capability: string): boolean =>
+    Object.prototype.hasOwnProperty.call(advertisedCapabilities, capability);
+
+  /** One host request whose answer arrives later. Handling is synchronous up
+   * to `post`; a pending promise never blocks the next frame. A rejection is
+   * mapped to the host's own JSON-RPC code, else -32603. */
+  const respondAsync = (id: string | number, run: () => Promise<unknown>) => {
+    void Promise.resolve()
+      .then(run)
+      .then(
+        (result) => respond(id, result === undefined ? {} : result),
+        (error) => {
+          const mapped = mcpAppRpcErrorOf(error);
+          respondError(id, mapped.code, mapped.message);
+        },
+      );
+  };
+
+  /** A stable idempotency key for one View request inside this instance. A
+   * retry of the same JSON-RPC id reuses it; a different instance never does. */
+  const requestIdFor = (id: string | number): string => {
+    if (!requestPrefix) requestPrefix = newRequestPrefix();
+    return `${requestPrefix}:${String(id)}`.slice(0, 128);
+  };
 
   const notify = (method: string, params?: JsonObject) => {
     // The spec's hard rule: no `ui/notifications/*` before `initialized`.
@@ -322,17 +383,18 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
       return;
     }
     appInfo = { name, version: asString(info.version) };
-    const declared = asRecord(params.appCapabilities).availableDisplayModes;
-    if (Array.isArray(declared)) {
-      const modes = declared.filter((mode): mode is DisplayMode => mode === "inline" || mode === "fullscreen");
+    const declaredModes = asRecord(params.appCapabilities).availableDisplayModes;
+    if (Array.isArray(declaredModes)) {
+      const modes = declaredModes.filter((mode): mode is DisplayMode => mode === "inline" || mode === "fullscreen");
       // An app that declares nothing is inline-only; `pip` is not a host mode.
       availableDisplayModes = modes.length ? modes : ["inline"];
     }
     if (handshakeTimer === undefined) armHandshake();
+    advertisedCapabilities = options.hostCapabilities();
     respond(id, {
       protocolVersion: MCP_APP_PROTOCOL_VERSION,
       hostInfo: { name: MCP_APP_HOST_NAME, version: MCP_APP_HOST_VERSION },
-      hostCapabilities: options.hostCapabilities(),
+      hostCapabilities: advertisedCapabilities,
       hostContext: options.hostContext(),
     });
     initializeDone = true;
@@ -395,14 +457,97 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
       case "ping":
         respond(id, {});
         return;
-      // Wired in P3. Until then the host does not advertise these in
-      // `hostCapabilities`, so a compliant View never sends them; a View that
-      // does gets an explicit refusal, never a fake success.
-      case "tools/call":
-      case "resources/read":
-      case "ui/message":
-      case "ui/open-link":
-      case "ui/update-model-context":
+      // The host proxies (change feat-mcp-apps-events, P3/P5). A callback is
+      // wired only when the deployment's `can()` gate is true; the bridge also
+      // checks the capability it advertised at initialize, so a View that asks
+      // for an undeclared capability gets -32601 and no host request.
+      case "tools/call": {
+        const call = options.callTool;
+        if (!call || !declared("serverTools")) {
+          respondError(id, -32601, `${method} is not supported by this host`);
+          return;
+        }
+        const name = asString(params.name);
+        if (!name) {
+          respondError(id, -32602, "tools/call requires a tool name");
+          return;
+        }
+        const args = params.arguments;
+        if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
+          respondError(id, -32602, "tools/call arguments must be an object");
+          return;
+        }
+        respondAsync(id, () => call(name, args ?? {}));
+        return;
+      }
+      case "resources/read": {
+        const read = options.readResource;
+        if (!read || !declared("serverResources")) {
+          respondError(id, -32601, `${method} is not supported by this host`);
+          return;
+        }
+        const uri = asString(params.uri);
+        if (!uri) {
+          respondError(id, -32602, "resources/read requires a uri");
+          return;
+        }
+        respondAsync(id, () => read(uri));
+        return;
+      }
+      case "ui/message": {
+        const send = options.sendMessage;
+        if (!send || !declared("message")) {
+          respondError(id, -32601, `${method} is not supported by this host`);
+          return;
+        }
+        // The app speaks as the user only; the host never injects assistant or
+        // tool content on its behalf.
+        if (params.role !== "user") {
+          respondError(id, -32602, `role must be "user"`);
+          return;
+        }
+        if (params.content === undefined || params.content === null) {
+          respondError(id, -32602, "content is required");
+          return;
+        }
+        if (params.delivery !== undefined && params.delivery !== "queue") {
+          respondError(id, -32602, `delivery must be "queue"`);
+          return;
+        }
+        respondAsync(id, () => send(params.content, requestIdFor(id)));
+        return;
+      }
+      case "ui/open-link": {
+        const open = options.openLink;
+        if (!open || !declared("openLinks")) {
+          respondError(id, -32601, `${method} is not supported by this host`);
+          return;
+        }
+        const url = asString(params.url);
+        if (!url) {
+          respondError(id, -32602, "ui/open-link requires a url");
+          return;
+        }
+        respondAsync(id, () => open(url));
+        return;
+      }
+      case "ui/update-model-context": {
+        const update = options.updateModelContext;
+        if (!update || !declared("updateModelContext")) {
+          respondError(id, -32601, `${method} is not supported by this host`);
+          return;
+        }
+        if (params.content === undefined && params.structuredContent === undefined) {
+          respondError(id, -32602, "content or structuredContent is required");
+          return;
+        }
+        respondAsync(id, () =>
+          update(params.content, params.structuredContent, requestIdFor(id)),
+        );
+        return;
+      }
+      // SDK 2.x only (design §3.5 Non-Goals): refused explicitly, never
+      // silently swallowed and never advertised in hostCapabilities.
       case "ui/download-file":
         respondError(id, -32601, `${method} is not supported by this host`);
         return;

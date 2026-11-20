@@ -65,9 +65,20 @@ import { conversationState, runStateLabel, runStateTone, type RunTone } from "./
 import { sessionTitle } from "./src/ui/session-title";
 
 // This build's own capability facts (not the deployment's): the terminal host
-// has no WebView, so it does not support MCP Apps even when the server does.
-// The app's tool result then stays text (the spec's TUI rule).
-setClientCapabilities({ "mcp.apps": platform.idiom !== "terminal" });
+// has no WebView, so it supports none of the app surface even when the server
+// does. The app's tool result then stays text (the spec's TUI rule). The five
+// sub-capabilities are registered separately because `can()` requires both
+// halves; the deployment half of tools/resources/message/links is derived from
+// its `mcp.apps` bit (see capabilities.ts).
+const appSurface = platform.idiom !== "terminal";
+setClientCapabilities({
+  "mcp.apps": appSurface,
+  "mcp.apps.tools": appSurface,
+  "mcp.apps.resources": appSurface,
+  "mcp.apps.message": appSurface,
+  "mcp.apps.links": appSurface,
+  "mcp.apps.context": appSurface,
+});
 
 // ---- the route ------------------------------------------------------------
 

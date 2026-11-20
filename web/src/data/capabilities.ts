@@ -85,20 +85,41 @@ export function setClientCapabilities(features: Record<string, boolean>): void {
   client.set({ ...features });
 }
 
+/** The four app proxy routes ship with the app surface. The frozen server
+ * reports one `mcp.apps` bit (there is no separate `mcp.apps.tools` feature in
+ * `/v1/capabilities`), so the gate derives them from the parent. `context` is
+ * deliberately NOT here: its route has a real deployment bit
+ * (`mcp.apps.context`) and an unwired store must stay false. An explicit
+ * `false` for a child key always wins over the parent. */
+const APP_PROXY_FEATURES = new Set([
+  "mcp.apps.tools",
+  "mcp.apps.resources",
+  "mcp.apps.message",
+  "mcp.apps.links",
+]);
+
+const deploymentFeature = (feature: string): boolean => {
+  const features = deployment().features;
+  if (features[feature] === true) return true;
+  if (features[feature] === false) return false;
+  if (APP_PROXY_FEATURES.has(feature)) return features["mcp.apps"] === true;
+  return false;
+};
+
 /** The one capability question. Reactive: a screen that reads it re-renders
  * when the deployment is probed or the client's facts change. A feature this
  * client has not registered is off (undefined is not "trust the deployment"):
  * both sides must say `true`, and an unknown feature is off. */
 export function can(feature: string): boolean {
   if (client()[feature] !== true) return false;
-  return deployment().features[feature] === true;
+  return deploymentFeature(feature);
 }
 
 /** The deployment's half of the gate, for work the **server** can do even when
  * this client cannot render it (the TUI reads the app catalogue so it can show
  * the app's title and document link, then keeps the text result). */
 export function deploymentCan(feature: string): boolean {
-  return deployment().features[feature] === true;
+  return deploymentFeature(feature);
 }
 
 /** The MCP Apps deployment block (`sandboxOrigin` included). */
