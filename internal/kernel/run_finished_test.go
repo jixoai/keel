@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -117,7 +118,9 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				"context":{"messages":6,"tokens":120},
 				"stopReason":"end_turn","durationMs":900,
 				"agentId":"agent_captain","teamId":"team_kite","teamRevision":3,
-				"teamHash":"sha256:abc","promptHash":"sha256:def"}`)
+				"teamHash":"sha256:abc","promptHash":"sha256:def",
+				"configHashBefore":"sha256:config","configHashAfter":"sha256:config",
+				"anchorEventSeq":42,"toolManifestHash":"sha256:manifest"}`)
 			first := h.mustCommit(CommitRequest{Kind: KindRunFinished, Token: lease.Token, RunID: "run-1", Payload: valid})
 			if first.Kind != KindRunFinished || first.Deduped {
 				t.Fatalf("run.finished = %+v", first)
@@ -156,6 +159,13 @@ func TestRunFinishedPayloadIsValidated(t *testing.T) {
 				json.RawMessage(`{"status":"done","model":["gpt"]}`),
 				json.RawMessage(`{"status":"done","configHashBefore":7}`),
 				json.RawMessage(`{"status":"done","configHashAfter":[]}`),
+				json.RawMessage(`{"status":"done","configHashBefore":""}`),
+				json.RawMessage(`{"status":"done","anchorEventSeq":"1"}`),
+				json.RawMessage(`{"status":"done","anchorEventSeq":-1}`),
+				json.RawMessage(`{"status":"done","anchorEventSeq":1.5}`),
+				json.RawMessage(`{"status":"done","toolManifestHash":7}`),
+				json.RawMessage(`{"status":"done","toolManifestHash":""}`),
+				json.RawMessage(`{"status":"done","toolManifestHash":"` + strings.Repeat("a", maxRunSnapshotHashLen+1) + `"}`),
 				json.RawMessage(`{"status":"done","agentId":7}`),
 				json.RawMessage(`{"status":"done","teamId":["t"]}`),
 				json.RawMessage(`{"status":"done","teamHash":7}`),

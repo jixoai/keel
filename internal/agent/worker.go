@@ -43,6 +43,10 @@ type LoadoutRef struct {
 	ID         string
 	Revision   int64
 	Generation int64
+	// ConfigHash is the configuration identity derived from (ID, Revision). It
+	// is written into run.finished as the attempt's configHash, so the ledger
+	// itself answers which configuration the run executed under.
+	ConfigHash string
 }
 
 // BoundRun is one run's pinned service generation: the loop/coordinator
@@ -349,6 +353,14 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 
 	result, runErr := runner.RunAttempt(runCtx, lease)
 	cursor, readThrough := result.Cursor, result.ReadThrough
+	// The run snapshot's configHash comes from the loadout this attempt pinned,
+	// not from process memory: the configuration revision is immutable for the
+	// generation, so before and after are the same value by construction. This
+	// overwrites the runner's static fallback with the authoritative identity.
+	if pinned.ConfigHash != "" {
+		result.Summary.ConfigHashBefore = pinned.ConfigHash
+		result.Summary.ConfigHashAfter = pinned.ConfigHash
+	}
 	// A cancel from the product seam reaches the attempt as a cancelled runCtx
 	// (the parent ctx is untouched). It is a deliberate stop, not a failure: the
 	// attempt settles through the same policy (unread input re-queues) and the

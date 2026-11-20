@@ -20,6 +20,7 @@ import (
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/telemetry"
+	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 // CompactionOptions enables automatic context compaction for a runner. It is
@@ -78,6 +79,13 @@ type Runner struct {
 	// ThinkingLevel is the static reasoning level of a runner without a
 	// resolver; empty means ThinkingLow (the historical default).
 	ThinkingLevel agentcore.ThinkingLevel
+	// ConfigHash is the static configuration identity of this runner's
+	// generation, recorded in the run snapshot (configHashBefore/After). The
+	// worker overwrites it from the loadout the attempt pinned, so a production
+	// run records the configuration revision it actually executed under; this
+	// field is the fallback for hosts (and tests) that drive a Runner without a
+	// binding. Empty means the deployment supplies no configuration identity.
+	ConfigHash string
 	// Models, when set, resolves the execution identity per attempt from the
 	// run's selection fact (the product-layer provider configuration). It is
 	// consulted per attempt, so a configuration change applies to runs that
@@ -295,11 +303,25 @@ type RunSummary struct {
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 	// ConfigHashBefore/After pin the harness configuration identity around the
-	// attempt. They let a retry distinguish "same config, transient failure"
-	// from "configuration changed between attempts" without re-reading the
-	// whole run manifest. Empty is allowed for logs predating the field.
+	// attempt. They are the run snapshot's configHash: the attempt runs under
+	// one pinned generation, so a configuration rotation can never change the
+	// value mid-attempt and both fields stay equal. The worker fills them from
+	// the loadout the attempt pinned; Runner.ConfigHash is the fallback for
+	// hosts that drive the runner without a binding. Empty is allowed for logs
+	// predating the field.
 	ConfigHashBefore string `json:"configHashBefore,omitempty"`
 	ConfigHashAfter  string `json:"configHashAfter,omitempty"`
+	// AnchorEventSeq pins where the attempt's configuration snapshot starts. A
+	// committed config.rotated event is the anchor (the configuration became
+	// active there); without one the load high-water mark is used — the newest
+	// committed sequence the transcript was built from, i.e. the log position
+	// at which this run begins. Always emitted: zero means the log was empty.
+	AnchorEventSeq int64 `json:"anchorEventSeq"`
+	// ToolManifestHash pins the model-visible tool manifest injected into this
+	// attempt, hashed at attempt start from the exact tool slice handed to the
+	// loop (the frozen surface). A later MCP/plugin refresh cannot move it. An
+	// attempt that injected no tools records the empty-manifest digest.
+	ToolManifestHash string `json:"toolManifestHash,omitempty"`
 	// AgentID, TeamID, TeamRevision, TeamHash and PromptHash are the execution
 	// binding the attempt froze (RUNTIME-PLAN §b): which Agent answered, which
 	// AgentTeam it came from, that team's stored revision and content hash, and
@@ -393,6 +415,24 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 	})
 	res.Cursor = cursor
 	res.Summary.DurationMs = time.Since(started).Milliseconds()
+	// The runner's static identity is the fallback for hosts without a loadout
+	// binding. In production the worker replaces both fields with the pinned
+	// loadout's ConfigHash before committing run.finished, so this can never
+	// upgrade a stale value into a fresh one.
+	if res.Summary.ConfigHashBefore == "" {
+		res.Summary.ConfigHashBefore = r.ConfigHash
+	}
+	if res.Summary.ConfigHashAfter == "" {
+		res.Summary.ConfigHashAfter = r.ConfigHash
+	}
+	// Every run.finished carries a tool manifest hash. An attempt that returned
+	// before resolving a surface (empty log, nothing owed) injected no tools,
+	// and the empty-manifest digest is the honest value for that.
+	if res.Summary.ToolManifestHash == "" {
+		if emptyManifest, err := toolsurface.ManifestHash(nil); err == nil {
+			res.Summary.ToolManifestHash = emptyManifest
+		}
+	}
 	switch {
 	case err != nil:
 		res.Summary.Status = kernel.RunSummaryFailed
@@ -425,6 +465,19 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// Input committed after it was not seen and must re-queue the run.
 	res.ReadThrough = cursor
 	res.Cursor = cursor
+	// The run snapshot's configuration anchor is taken from the loaded log
+	// before anything is committed. A config.rotated event is the authoritative
+	// anchor; without one the run-start read-through is used (see
+	// runSnapshotAnchor).
+	anchor, rotatedConfigHash := runSnapshotAnchor(events, cursor)
+	res.Summary.AnchorEventSeq = anchor
+	if hash := firstNonEmpty(r.ConfigHash, rotatedConfigHash); hash != "" {
+		// The attempt pins one generation, so the configuration observed at the
+		// end is the one observed at the start. The worker replaces these with
+		// the pinned loadout's hash when one is available.
+		res.Summary.ConfigHashBefore = hash
+		res.Summary.ConfigHashAfter = hash
+	}
 	if err != nil {
 		return res, err
 	}
@@ -503,14 +556,28 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if err != nil {
 		return res, err
 	}
+	// The attempt's injected tool surface, materialized once. This exact slice
+	// goes to the loop and is hashed for the run snapshot: a host refresh that
+	// adds an MCP server or a plugin tool after this point changes the next
+	// attempt's manifest, never this one's. Nil tools means an empty surface
+	// (the manifest hash of no tools), not "unknown".
+	var injectedTools []agentcore.AgentTool
+	if tools != nil {
+		injectedTools = tools.List()
+	}
+	manifestHash, err := toolsurface.ManifestHash(injectedTools)
+	if err != nil {
+		return res, fmt.Errorf("agent: tool manifest hash: %w", err)
+	}
+	res.Summary.ToolManifestHash = manifestHash
 	// A model that cannot run the request must be refused before anything is
 	// committed (the same rule the identity resolution follows): the tool list is
 	// part of the request, so a model whose configuration denies tool calls may not
 	// be handed any.
 	if props := model.Properties; props != nil && !props.SupportsToolCall {
-		if listed := tools.List(); len(listed) > 0 {
+		if len(injectedTools) > 0 {
 			return res, fmt.Errorf("agent: model %s/%s declares no tool-call support but %d tools are available",
-				model.ProviderID, model.Model, len(listed))
+				model.ProviderID, model.Model, len(injectedTools))
 		}
 	}
 
@@ -723,7 +790,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	agentCtx := &agentcore.AgentContext{
 		SystemPrompt: systemPrompt,
 		Messages:     msgs,
-		Tools:        tools.List(),
+		Tools:        injectedTools,
 	}
 	stream := loop.StartRun(runCtx, agentCtx, cfg)
 	for ev := range stream.Events() {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
@@ -221,12 +222,21 @@ func TestReloadSharesUnchangedServicesAndPinsRevision(t *testing.T) {
 	if first.Loadout().Revision != 1 {
 		t.Fatalf("in-flight pin changed: %+v", first.Loadout())
 	}
+	if first.Loadout().ConfigHash == "" {
+		t.Fatal("the pinned loadout has no config hash")
+	}
 	second, err := rt.Binding().Acquire(context.Background())
 	if err != nil {
 		t.Fatalf("acquire new: %v", err)
 	}
 	if second.Loadout().Revision != 2 || second.Loadout().Generation != 2 {
 		t.Fatalf("new pin: %+v", second.Loadout())
+	}
+	if second.Loadout().ConfigHash == first.Loadout().ConfigHash {
+		t.Fatalf("a new configuration revision kept config hash %q", second.Loadout().ConfigHash)
+	}
+	if second.Loadout().ConfigHash != agent.ConfigHashForLoadout("default", 2) {
+		t.Fatalf("config hash = %q, want the revision-2 digest", second.Loadout().ConfigHash)
 	}
 	if second.Runner() != first.Runner() {
 		t.Fatal("an unchanged pi-loop instance must be shared across generations")

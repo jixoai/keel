@@ -1086,9 +1086,14 @@ func (b *graphBinding) Acquire(ctx context.Context) (agent.BoundRun, error) {
 		return nil, fmt.Errorf("servicehost: %s instance has unexpected type %T", loadout.ServicePiLoop, instance)
 	}
 	return &boundRun{
-		lease:   lease,
-		runner:  loop.Runner(),
-		loadout: agent.LoadoutRef{ID: lease.LoadoutID(), Revision: lease.Revision(), Generation: lease.Generation()},
+		lease:  lease,
+		runner: loop.Runner(),
+		loadout: agent.LoadoutRef{
+			ID:         lease.LoadoutID(),
+			Revision:   lease.Revision(),
+			Generation: lease.Generation(),
+			ConfigHash: agent.ConfigHashForLoadout(lease.LoadoutID(), lease.Revision()),
+		},
 	}, nil
 }
 

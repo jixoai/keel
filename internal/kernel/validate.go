@@ -404,6 +404,11 @@ func validateUserMessagePayload(raw json.RawMessage) error {
 	return nil
 }
 
+// maxRunSnapshotHashLen bounds the digest strings a run.finished snapshot may
+// carry. A hash is a fixed-size digest (a sha256 label is 71 bytes); anything
+// larger is not a hash and would only inflate the ledger.
+const maxRunSnapshotHashLen = 128
+
 // validateRunFinishedPayload pins the shape of the attempt summary. The event is
 // the durable answer to "what did this attempt do?" — the run row only carries
 // the session-level status — so the status must be one of the three terminal
@@ -447,6 +452,29 @@ func validateRunFinishedPayload(raw json.RawMessage) error {
 		if v, ok := payload[field]; ok && !isJSONString(v) {
 			return fmt.Errorf(`run.finished payload %q must be a string`, field)
 		}
+	}
+	// The run snapshot's digest fields are bounded: they answer "which config /
+	// tool manifest did this run see", not free-form metadata.
+	for _, field := range []string{"configHashBefore", "configHashAfter", "toolManifestHash"} {
+		v, ok := payload[field]
+		if !ok {
+			continue
+		}
+		var hash string
+		if !isJSONString(v) || json.Unmarshal(v, &hash) != nil {
+			return fmt.Errorf(`run.finished payload %q must be a string`, field)
+		}
+		if hash == "" {
+			return fmt.Errorf(`run.finished payload %q must not be empty`, field)
+		}
+		if len(hash) > maxRunSnapshotHashLen {
+			return fmt.Errorf(`run.finished payload %q exceeds %d bytes`, field, maxRunSnapshotHashLen)
+		}
+	}
+	// anchorEventSeq pins where this attempt's configuration snapshot starts: a
+	// non-negative event sequence (zero means the log was empty).
+	if v, ok := payload["anchorEventSeq"]; ok && !isJSONCount(v) {
+		return errors.New(`run.finished payload "anchorEventSeq" must be a non-negative integer`)
 	}
 	// The execution binding the attempt froze (change keel-agent-team-v1): the
 	// Agent/AgentTeam identity, the team's revision and content hash, and the
