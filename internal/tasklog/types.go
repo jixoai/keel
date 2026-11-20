@@ -146,6 +146,8 @@ var (
 	ErrInvalidStatus = errors.New("tasklog: invalid task status")
 	// ErrTaskCycle: a parentTaskId would make the tree cyclic.
 	ErrTaskCycle = errors.New("tasklog: parentTaskId would create a cycle")
+	// ErrInvalidCursor: the child-card page cursor is malformed.
+	ErrInvalidCursor = errors.New("tasklog: malformed task card cursor")
 	// ErrNoBackend: the service was built without a ledger or projection.
 	ErrNoBackend = errors.New("tasklog: ledger or projection backend is not wired")
 )

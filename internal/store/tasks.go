@@ -407,6 +407,71 @@ func (s *Store) ListTaskCardRows(ctx context.Context, tenantID uuid.UUID, sessio
 	return out, rows.Err()
 }
 
+const childTaskCardColumns = `c.tenant_id, c.session_id, c.task_id, c.parent_task_id, c.title, c.status,
+	c.origin, c.origin_seq, c.created_seq, c.updated_seq, c.closed_seq, c.created_at, c.updated_at`
+
+// taskCardQuerier is the query seam both the operator pool and a tenant
+// transaction satisfy.
+type taskCardQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// ListChildTaskCardRows lists the cards whose parentTaskId points at a card of
+// parentSessionID. The child row keeps living in the child session; the join is
+// the projection relation, not a copy. Ordering is newest activity first, with
+// a keyset cursor on (updated_at, task_id).
+//
+// When the deployment carries the RLS tenant pool the read runs inside a
+// tenant-scoped transaction: the tenant predicate and the policy both apply.
+func (s *Store) ListChildTaskCardRows(ctx context.Context, tenantID, parentSessionID uuid.UUID, limit int, afterUpdatedAt *time.Time, afterTaskID *uuid.UUID) ([]TaskCardRow, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	q := `SELECT ` + childTaskCardColumns + `
+	      FROM task_cards c
+	      JOIN task_cards p ON p.tenant_id = c.tenant_id AND p.task_id = c.parent_task_id
+	     WHERE c.tenant_id = $1 AND p.session_id = $2`
+	args := []any{tenantID, parentSessionID}
+	if afterUpdatedAt != nil && afterTaskID != nil {
+		args = append(args, *afterUpdatedAt, *afterTaskID)
+		q += fmt.Sprintf(" AND (c.updated_at, c.task_id) < ($%d::timestamptz, $%d::uuid)", len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	q += fmt.Sprintf(" ORDER BY c.updated_at DESC, c.task_id DESC LIMIT $%d", len(args))
+	collect := func(db taskCardQuerier) ([]TaskCardRow, error) {
+		rows, err := db.Query(ctx, q, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []TaskCardRow
+		for rows.Next() {
+			row, err := scanTaskCardRow(rows)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, row)
+		}
+		return out, rows.Err()
+	}
+	if s.RLSEnabled() {
+		var out []TaskCardRow
+		if err := s.TenantScoped(ctx, tenantID, func(tx TenantTx) error {
+			var err error
+			out, err = collect(tx)
+			return err
+		}); err != nil {
+			return nil, fmt.Errorf("store: list child task cards: %w", err)
+		}
+		return out, nil
+	}
+	out, err := collect(s.pool)
+	if err != nil {
+		return nil, fmt.Errorf("store: list child task cards: %w", err)
+	}
+	return out, nil
+}
+
 // ListTaskEventRows returns the events of one card in ledger order.
 func (s *Store) ListTaskEventRows(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) ([]TaskEventRow, error) {
 	rows, err := s.pool.Query(ctx,

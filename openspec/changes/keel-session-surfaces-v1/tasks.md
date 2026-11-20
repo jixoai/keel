@@ -1,8 +1,8 @@
 # Tasks: keel-session-surfaces-v1
 
 > 每个任务都必须有可执行验收；surface 面板可并行开发，但共享 registry/contract 先冻结。
-> 状态截至 2026-11-13（第二轮规格同步）：S0/S2/S3/S5/S6 已交付；S1 保留原 LLM 实现未物理搬迁；
-> S4 标准模式与跨 surface 门禁完成，captain 判定接缝已就绪、web 团队界面未实现；三项暂缓见文末。
+> 状态截至 2026-11-21：S0/S2/S3/S5/S6 已交付；S1 保留原 LLM 实现未物理搬迁；
+> S4 标准模式与跨 surface 门禁、web 团队界面与成员任务投影完成；未完成的暂缓项见文末。
 > 实现说明：会话 `surfaceKind` 由客户端按模型/captain 的 descriptor 解析（`/v1/models` 已投影
 > `providerType`/`surfaceKind`）；本 change 未新增 session 数据库列，选型随输入携带。
 
@@ -72,11 +72,15 @@
 - [x] 跨 surface 换模型弹「新建会话」确认，不能直接替换
   - 演示模型（demo-realtime/image/stt/tts）同样走该门禁；空会话可直接预览。
 - [~] AgentTeam：captain 默认模型决定主 surface；成员卡显示各自 surface 标记
-  - 已实现 `resolveCaptainSurface`（`web/src/surfaces/registry.ts`）并由 registry 单测 pin；
-    缺 web 团队界面与 captain chip 接线，依赖 `keel-agent-team-v1` 的 Team/Agent HTTP API，
-    即暂缓项 (c)。成员卡 surface 标记随团队界面一并实现。
-- [ ] 成员结果进入 captain 时间线的规则固定，不与 captain transcript 混用
-  - 未实现，依赖团队消息/任务卡数据结构与 captain 时间线接线（`keel-agent-team-v1`）。
+  - `resolveCaptainSurface` 已实现并由 registry 单测 pin；web 团队 header/名单
+    （`web/src/screens/session-team.tsx`）与成员任务投影已接线。成员卡的 surface 标记仍未实现
+    （名单目前显示名字/描述，未解析每个成员模型的 surface）。
+- [x] 成员结果进入 captain 时间线的规则固定，不与 captain transcript 混用
+  - 只读投影端点 `GET /v1/sessions/{id}/team-tasks`（租户/会话 404、RLS tenant scope、
+    keyset 分页上限 200）只读 `task_cards.parent_task_id`，不复制卡片；`web/src/screens/team-activity.tsx`
+    以任务卡渲染 title/status/updatedAt，只显示「成员任务状态」，不伪造结果文本；该区域是
+    `conversation-list` 的兄弟节点，不进 `rowsOf` 或 tool 行。
+  - 证据：`evidence/member-timeline-2026-11-21/`（真库 HTTP + TUI 五态/隔离 + 门禁日志）。
 - **验收**：标准模式选 realtime 进入语音；跨 surface 切换被阻止（已验）；
   captain 判定接缝单测通过（已验）；captain realtime 的团队界面（未验，未实现）
 
@@ -112,9 +116,9 @@
      STT 走宿主 `Speech` 能力，不是厂商 STT Provider。
    - 前置条件：可用的 realtime/TTS/STT 厂商凭据与配额；`KEEL_REALTIME_*` 接线；TTS/STT Provider
      网关（`internal/mediagw` 当前只有 image/decision/chat）。
-3. **AgentTeam captain 的 web 团队界面**（仅推导接缝已就绪）
-   - 现状：`resolveCaptainSurface` + `surfaceFact` 已实现并由 `web/src/surfaces/registry.test.ts`
-     pin；web 无团队界面，picker 只在标准模式工作；成员卡 surface 标记与「成员结果进入 captain
-     时间线」规则未接线。
-   - 前置条件：`keel-agent-team-v1` 的 Team/Agent HTTP API 与会话拓扑；web 团队视图；captain chip
-     调用 `resolveCaptainSurface`；成员任务卡/团队消息数据结构。
+3. **AgentTeam captain 的非 LLM surface 团队界面与成员 surface 标记**
+   - 现状：LLM captain 的 web 团队界面已交付（`session-team.tsx` header/名单 +
+     `team-activity.tsx` 成员任务投影，见 S4）；picker 目前拒绝非对话模型的团队启动
+     （`captainSelectionOf`），因此 realtime/image captain 的团队视图、成员卡 surface 标记与
+     `resolveCaptainSurface` 的 UI 接线仍未实现。
+   - 前置条件：非 LLM surface 的团队消息/任务卡区域；成员模型 surface 解析进入名单。

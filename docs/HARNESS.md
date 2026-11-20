@@ -50,6 +50,7 @@ keel version
 | --- | --- | --- |
 | GET | `/v1/capabilities` | 能力集 + 闭集 hooks + 分页上限（前端能力门的数据源） |
 | GET | `/v1/sessions?limit=&after=` | 会话列表（keyset 分页，`runStatus` overlay） |
+| GET | `/v1/sessions/{id}/team-tasks?limit=&after=` | captain 会话的成员任务卡只读投影（`parentTaskId`，租户/会话边界，keyset 分页） |
 | POST | `/v1/sessions/{id}/cancel` | 停止当前 attempt（幂等；202=cancelling，501=跨进程无 seam） |
 | GET/POST | `/v1/sessions/{id}/decisions` | 审批开/列；`POST .../{decisionId}` 作答（幂等，409 冲突） |
 | GET | `/v1/plugins` | 插件/generation/hooks/工具 |

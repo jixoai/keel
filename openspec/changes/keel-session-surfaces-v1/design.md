@@ -157,8 +157,11 @@ interface SurfaceDescriptor {
   团队消息/任务卡进入 captain 时间线。
 - 跨 surface 换 captain 模型：要求新会话。
 - **交付现状**：`resolveCaptainSurface` 已实现并由 `registry.test.ts` pin（captain 模型 → surface；
-  无 captain / 无法解析 → `llm`）。web 团队界面、成员卡 surface 标记与“成员结果进 captain 时间线”
-  尚未实现，依赖 `keel-agent-team-v1`（tasks 暂缓项 (c)）。
+  无 captain / 无法解析 → `llm`）。LLM captain 的 web 团队界面已交付（`session-team.tsx` 的
+  header/名单 + `team-activity.tsx` 的成员任务投影）；成员任务来自只读投影
+  `GET /v1/sessions/{id}/team-tasks`（`task_cards.parent_task_id`，租户/会话边界 + RLS + keyset
+  分页），卡片只显示 title/status/updatedAt，区域是 transcript 的兄弟节点。realtime/image captain
+  的团队视图、成员卡 surface 标记仍未实现（picker 目前只允许对话模型的团队启动，tasks 暂缓项 (c)）。
 
 ## 7. 客户端结构
 

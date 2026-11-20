@@ -39,6 +39,8 @@ import type {
   SessionSummary,
   SettingsApi,
   SettingsIssue,
+  TeamTaskView,
+  TeamTasksView,
   TriggerStatusView,
   TurnErrorState,
   UiCommands,
@@ -115,6 +117,9 @@ interface Client extends SettingsApi {
   mcpAppOpenLink?(appId: string, body: McpAppOpenLinkBody): Promise<McpAppOpenLinkOutcome>;
   mcpAppUpdateContext?(appId: string, body: McpAppContextBody): Promise<unknown>;
   listSessions(limit?: number): Promise<SessionSummary[]>;
+  /** The captain session's member task cards. Optional: a transport without
+   * the projection answers a readable refusal instead of an empty list. */
+  teamTasks?(sessionId: string, limit?: number, after?: string): Promise<TeamTasksView>;
   createSession(): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
   source(sessionId: string): EventSource;
@@ -134,6 +139,11 @@ interface Client extends SettingsApi {
   addTeamMember?: AgentTeamApi["addTeamMember"];
   removeTeamMember?: AgentTeamApi["removeTeamMember"];
 }
+
+/** The member-task projection seam (`GET /v1/sessions/{id}/team-tasks`). */
+type TeamTaskTransport = {
+  teamTasks(sessionId: string, limit?: number, after?: string): Promise<TeamTasksView>;
+};
 
 const newRequestId = () => {
   const cryptoAny = globalThis.crypto as { randomUUID?: () => string } | undefined;
@@ -311,6 +321,17 @@ class KeelStore {
    * and the marker names the team. In-memory, like the session selection. */
   readonly sessionTeam = signal<AgentTeamView | null>(null);
 
+  /** The open team session's member task cards: the read-only projection the
+   * captain timeline renders beside (never inside) the captain's transcript. */
+  readonly teamTasks = signal<TeamTaskView[]>([]);
+  readonly teamTasksLoading = signal(false);
+  readonly teamTasksError = signal<string | null>(null);
+  /** The transport status behind the error (403 has its own face). */
+  readonly teamTasksErrorStatus = signal<number | null>(null);
+  /** The first page did not exhaust the projection (the count is a lower
+   * bound, and the panel says so instead of pretending it is the total). */
+  readonly teamTasksHasMore = signal(false);
+
   /** The development-only transport; constructed only when a dev launch asked
    * for it, so a product run never seeds any demo state. */
   private fixture: FixtureClient | null = null;
@@ -319,6 +340,11 @@ class KeelStore {
    * it in memory so the real `KeelHttp` parsing runs without a network).
    * `null` = the app's own transport. */
   private agentTeamClient: AgentTeamApi | null = null;
+  /** Test/host seam for the member-task projection, same pattern. */
+  private teamTaskClient: TeamTaskTransport | null = null;
+  /** Bumped per read so a slow answer for a closed session cannot land. */
+  private teamTasksToken = 0;
+  private teamTasksRefreshTimer: number | undefined;
   /** The transport every call goes through. A real HTTP client from the start:
    * before (and without) a live service its calls fail with the network's own
    * reason — the store never swaps in a fabricated one. */
@@ -717,6 +743,10 @@ class KeelStore {
     if (team) this.sessionTeams.set(sessionId, team);
     else this.sessionTeams.delete(sessionId);
     this.sessionTeam.set(team);
+    // The member projection belongs to the marker: a standard session has no
+    // team task page, and a new team starts its own read.
+    this.resetTeamTasks();
+    if (team) void this.loadTeamTasks(sessionId);
   }
 
   // ---- secrets ------------------------------------------------------------
@@ -827,12 +857,84 @@ class KeelStore {
     this.agentTeamClient = client;
   }
 
+  /** Test/host seam: answer the member-task projection without a network.
+   * `null` restores the app's own transport. */
+  setTeamTaskTransport(client: TeamTaskTransport | null): void {
+    this.teamTaskClient = client;
+  }
+
   private teamTransport(): AgentTeamApi {
     const client = this.agentTeamClient ?? this.client;
     if (typeof client.listAgents !== "function") {
       throw new Error("当前服务端不支持 Agent 与团队管理。");
     }
     return client as AgentTeamApi;
+  }
+
+  // ---- member task cards (change keel-session-surfaces-v1, S4) ------------
+  //
+  // The captain timeline's team face is a separate read model, not transcript
+  // rows: member cards live in their own sessions' ledgers and are linked by
+  // parentTaskId. The store keeps them in their own signals, so a card can
+  // never be folded into a turn/tool row by the engine.
+
+  /** Read the open team session's member cards. A read belongs to the session
+   * that opened it: switching sessions bumps the token, so a slow answer cannot
+   * land on another session's panel. */
+  async loadTeamTasks(sessionId = this.activeId()): Promise<void> {
+    if (!sessionId || !this.sessionTeam()) {
+      this.resetTeamTasks();
+      return;
+    }
+    if (sessionId !== this.activeId()) return;
+    const token = ++this.teamTasksToken;
+    this.teamTasksLoading.set(true);
+    this.teamTasksError.set(null);
+    this.teamTasksErrorStatus.set(null);
+    try {
+      const client = this.teamTaskClient ?? this.client;
+      if (typeof client.teamTasks !== "function") {
+        throw new Error("当前服务端不支持团队成员任务投影。");
+      }
+      const page = await client.teamTasks(sessionId);
+      if (token !== this.teamTasksToken) return;
+      this.teamTasks.set(page.tasks ?? []);
+      this.teamTasksHasMore.set(page.hasMore === true);
+    } catch (error) {
+      if (token !== this.teamTasksToken) return;
+      this.teamTasksError.set(messageOf(error));
+      this.teamTasksErrorStatus.set(error instanceof KeelApiError ? error.status : null);
+    } finally {
+      if (token === this.teamTasksToken) this.teamTasksLoading.set(false);
+    }
+  }
+
+  /** Clear the projection. It is called on a session switch and when a session
+   * stops being a team session, so the panel never shows another session's
+   * members. */
+  resetTeamTasks(): void {
+    this.teamTasksToken += 1;
+    this.teamTasks.set([]);
+    this.teamTasksLoading.set(false);
+    this.teamTasksError.set(null);
+    this.teamTasksErrorStatus.set(null);
+    this.teamTasksHasMore.set(false);
+    if (this.teamTasksRefreshTimer !== undefined) {
+      clearTimeout(this.teamTasksRefreshTimer);
+      this.teamTasksRefreshTimer = undefined;
+    }
+  }
+
+  /** A captain event may be the one that settles a member card (the spawn tool
+   * result), so refresh shortly after it. Debounced: one tool result can emit
+   * several events. */
+  private scheduleTeamTasksRefresh(): void {
+    if (!this.sessionTeam() || !this.activeId()) return;
+    if (this.teamTasksRefreshTimer !== undefined) clearTimeout(this.teamTasksRefreshTimer);
+    this.teamTasksRefreshTimer = setTimeout(() => {
+      this.teamTasksRefreshTimer = undefined;
+      void this.loadTeamTasks();
+    }, 600) as unknown as number;
   }
 
   async loadAgents() {
@@ -1020,6 +1122,7 @@ class KeelStore {
     this.teamsError.set(null);
     this.teamsErrorStatus.set(null);
     this.teamsActionError.set(null);
+    this.resetTeamTasks();
   }
 
   async refreshSessions() {
@@ -1122,6 +1225,8 @@ class KeelStore {
     // The session's own model selection (kept in memory while the app runs).
     this.sessionSelection.set(this.sessionSelections.get(sessionId) ?? null);
     this.sessionTeam.set(this.sessionTeams.get(sessionId) ?? null);
+    this.resetTeamTasks();
+    if (this.sessionTeam()) void this.loadTeamTasks(sessionId);
     // The header's model chip shows the session's choice against the tenant
     // default: read the effective document once.
     if (!this.settings()) void this.loadModelsSettings();
@@ -1208,7 +1313,13 @@ class KeelStore {
     } else if (event.kind === "user.message" || event.kind === "assistant.message") {
       this.patchSession(sessionId, { runStatus: "running", lastSeq: event.seq });
     }
-    if (event.kind !== "partial") this.scheduleRefresh();
+    if (event.kind !== "partial") {
+      this.scheduleRefresh();
+      // A captain run can settle a member card (the spawn tool result); the
+      // panel re-reads its projection shortly after instead of waiting for a
+      // manual refresh.
+      this.scheduleTeamTasksRefresh();
+    }
   }
 
   private scheduleRefresh() {
@@ -1235,6 +1346,7 @@ class KeelStore {
     this.stopping.set(false);
     this.sessionSelection.set(null);
     this.sessionTeam.set(null);
+    this.resetTeamTasks();
     this.connection.set({ status: "closed", lastSeq: 0 });
     this.decisionDeadlines.set({});
   }

@@ -3,6 +3,7 @@ package tasklog
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/store"
@@ -91,6 +92,19 @@ func (p *PgProjection) GetCardByID(ctx context.Context, tenantID, taskID uuid.UU
 // ListCards lists cards with the optional filters.
 func (p *PgProjection) ListCards(ctx context.Context, tenantID uuid.UUID, sessionID, parentTaskID *uuid.UUID, status string) ([]Card, error) {
 	rows, err := p.store.ListTaskCardRows(ctx, tenantID, sessionID, parentTaskID, status)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Card, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, cardFromRow(row))
+	}
+	return out, nil
+}
+
+// ListChildCards reads the cards linked to any card of the named session.
+func (p *PgProjection) ListChildCards(ctx context.Context, tenantID, parentSessionID uuid.UUID, limit int, afterUpdatedAt *time.Time, afterTaskID *uuid.UUID) ([]Card, error) {
+	rows, err := p.store.ListChildTaskCardRows(ctx, tenantID, parentSessionID, limit, afterUpdatedAt, afterTaskID)
 	if err != nil {
 		return nil, err
 	}

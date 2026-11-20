@@ -1,0 +1,4 @@
+ok  	github.com/jixoai/keel/internal/tasklog	2.392s
+ok  	github.com/jixoai/keel/internal/agentapi	4.534s
+ok  	github.com/jixoai/keel/internal/store	6.951s
+EXIT=0

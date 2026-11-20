@@ -43,6 +43,8 @@ import type {
   SettingsApi,
   SettingsIssue,
   TeamMemberView,
+  TeamTaskView,
+  TeamTasksView,
   TriggersView,
   UiCommands,
   WireEvent,
@@ -696,6 +698,45 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
 
   async deleteSession(sessionId: string): Promise<void> {
     await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  }
+
+  /** The member task cards linked to a captain session. A card is read as the
+   * projection's own fields; `result`/`summary` do not exist on this wire, so a
+   * missing one stays missing instead of becoming an invented sentence. */
+  async teamTasks(sessionId: string, limit = 50, after?: string): Promise<TeamTasksView> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (after) query.set("after", after);
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/team-tasks?${query.toString()}`,
+    );
+    const body = (await response.json()) as {
+      tasks?: unknown[];
+      nextCursor?: unknown;
+      hasMore?: unknown;
+    };
+    const rows = Array.isArray(body.tasks) ? body.tasks : [];
+    const tasks = rows.flatMap((row): TeamTaskView[] => {
+      const record = asRecord(row);
+      if (typeof record.taskId !== "string" || !record.taskId) return [];
+      return [
+        {
+          taskId: record.taskId,
+          parentTaskId: typeof record.parentTaskId === "string" ? record.parentTaskId : undefined,
+          sessionId: typeof record.sessionId === "string" ? record.sessionId : "",
+          title: typeof record.title === "string" ? record.title : "",
+          status: typeof record.status === "string" ? record.status : "open",
+          origin: typeof record.origin === "string" ? record.origin : undefined,
+          createdAt: typeof record.createdAt === "string" ? record.createdAt : undefined,
+          updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : undefined,
+          closedSeq: typeof record.closedSeq === "number" ? record.closedSeq : undefined,
+        },
+      ];
+    });
+    return {
+      tasks,
+      nextCursor: typeof body.nextCursor === "string" && body.nextCursor ? body.nextCursor : undefined,
+      hasMore: body.hasMore === true,
+    };
   }
 
   /** Load the last few events of a session for the list's summary/title. */

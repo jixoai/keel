@@ -972,6 +972,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 	api := agentapi.New(agentapi.Config{
 		Sessions: agentapi.NewPGSessionLister(st),
+		// The member-task projection of a captain session: the child cards stay
+		// in their own ledgers and are read through parentTaskId. Read-only.
+		TeamTasks: taskLog,
 		// DELETE /v1/sessions/{id} is the soft delete: the session leaves the
 		// list, its ledger stays (see store.ArchiveSession).
 		ArchiveSession: st.ArchiveSession,

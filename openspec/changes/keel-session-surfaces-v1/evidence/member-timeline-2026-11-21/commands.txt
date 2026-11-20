@@ -1,0 +1,31 @@
+S1 member timeline — evidence (2026-11-21)
+worktree: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-session-timeline
+base: 4096a73
+
+Gate results (all logs in this directory):
+- nsh check                       -> EXIT=0 (nsh-check.txt)
+- nsh test --target tui           -> 204/204 passed, EXIT=0 (tui-full.txt)
+- nsh build                       -> EXIT=0 (nsh-build.txt)
+- nsh package --target web        -> 10.3 MB, EXIT=0 (nsh-package-web.txt)
+- go test -p 1 ./...              -> EXIT=0 (go-full.txt)
+- go test tasklog/agentapi/store  -> EXIT=0 (go-team-tasks.txt)
+- scripts/conformance.sh          -> 1096 pass / 0 fail / 1 skip, EXIT=0
+                                     (conformance-summary.txt, conformance.json)
+- openspec validate --strict      -> valid, EXIT=0 (openspec-validate.txt)
+
+Backend evidence in go-team-tasks.txt:
+- TestTeamTasksProjectionAndBoundaries (internal/agentapi/team_tasks_pg_test.go)
+  * captain card -> child cards through parentTaskId; child rows stay in the
+    child session (direct store assertion)
+  * empty session -> 200 with tasks=[]
+  * keyset pagination limit=1, no duplicate, newest first
+  * tenant-scoped projection (foreign tenant -> no cards) plus HTTP 404 for
+    foreign/missing sessions and 401 without X-Tenant-ID
+  * malformed cursor -> 400
+
+Frontend evidence in tui-full.txt:
+- src/screens/team-activity.test.tsx (6 tests)
+  * success: title/status/updatedAt per card, "成员任务状态", no fabricated result
+  * empty / loading / error / 403 states
+  * transcript isolation: card region is a sibling of conversation-list; the
+    card title occurs once (not inserted as a transcript/tool row)

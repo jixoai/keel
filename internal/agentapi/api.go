@@ -42,6 +42,7 @@ import (
 	"github.com/jixoai/keel/internal/approval"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/notify"
+	"github.com/jixoai/keel/internal/tasklog"
 )
 
 // Version is the AgentAPI service version reported by /v1/capabilities.
@@ -69,11 +70,22 @@ type ParentResolver interface {
 	ParentOf(sessionID uuid.UUID) (string, bool)
 }
 
+// TeamTaskLister reads the member task cards linked to a captain session. It
+// is a read-only projection over task_cards: the cards themselves live in the
+// child sessions' ledgers, linked by parentTaskId. Nil answers 503.
+type TeamTaskLister interface {
+	ListTeamTasks(ctx context.Context, tenantID, sessionID uuid.UUID, limit int, after string) (tasklog.CardPage, error)
+}
+
 // Config wires the product API.
 type Config struct {
 	// Sessions lists sessions (PG-backed in production, a fake in tests). Nil
 	// answers 503 on the list endpoint.
 	Sessions SessionLister
+	// TeamTasks reads the member task cards linked to a captain session
+	// (GET /v1/sessions/{id}/team-tasks). It is a read-only projection; nil
+	// answers 503 and the capability is reported false.
+	TeamTasks TeamTaskLister
 	// Cancel stops a session's active run. Nil answers 501 (the endpoint exists
 	// but the deployment has no cancel seam).
 	Cancel CancelFunc
@@ -286,6 +298,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/models", s.listModels)
 	s.settingsRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/team-tasks", s.listTeamTasks)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)
@@ -419,6 +432,7 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		"plugins.bridge":    s.cfg.PluginManager != nil,
 		"triggers":          s.cfg.Triggers != nil,
 		"subagents":         s.cfg.Subagents != nil,
+		"team.tasks":        s.cfg.TeamTasks != nil,
 		"hooks":             s.cfg.Plugins != nil,
 		// Settings is its own surface: the model write path and secret storage
 		// are separately discoverable, so a client can hide a section this
@@ -458,9 +472,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		ServiceVersion: Version,
 		Features:       features,
 		Limits: map[string]int{
-			"sessionsPageDefault": defaultSessionsLimit,
-			"sessionsPageMax":     maxSessionsLimit,
-			"subagentsPageMax":    200,
+			"sessionsPageDefault":  defaultSessionsLimit,
+			"sessionsPageMax":      maxSessionsLimit,
+			"subagentsPageMax":     200,
+			"teamTasksPageDefault": tasklog.DefaultTeamTaskLimit,
+			"teamTasksPageMax":     tasklog.MaxTeamTaskLimit,
 		},
 		Hooks: hooks,
 	}

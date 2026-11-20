@@ -712,6 +712,29 @@ export interface AgentTeamApi {
   removeTeamMember(id: string, agentId: string): Promise<AgentTeamView>;
 }
 
+/** One member task card (`GET /v1/sessions/{id}/team-tasks`). The card is the
+ * tasklog projection: title/status/time only. There is deliberately no result
+ * or summary field — the UI must say "member task status", not invent a
+ * member's result text. */
+export interface TeamTaskView {
+  taskId: string;
+  parentTaskId?: string;
+  sessionId: string;
+  title: string;
+  status: string;
+  origin?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  closedSeq?: number;
+}
+
+/** One keyset page of a captain session's member task cards. */
+export interface TeamTasksView {
+  tasks: TeamTaskView[];
+  nextCursor?: string;
+  hasMore?: boolean;
+}
+
 /** The engine the UI runs against. `setConnection` is a client-side seam: the
  * headless core owns the view's connection state, but the transport learns
  * about it first. The local projection uses it; a future `@keel/chat-surface`
