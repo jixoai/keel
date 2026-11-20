@@ -89,6 +89,12 @@ type ConnOptions struct {
 	// AcceptProviders restricts which provider kinds may activate. Empty
 	// accepts both.
 	AcceptProviders []ProviderType
+	// RequiredCapabilities is the agent capability matrix this caller needs.
+	// Empty keeps the legacy behavior (declare, never require). An unknown name
+	// fails the handshake as invalid_capability; a known bit the provider did
+	// not declare fails it as unsupported_capability — both before any session
+	// or model call, never as a silent degradation.
+	RequiredCapabilities []AgentCapabilityName
 	// EventsBuffer is the AgentBackend event channel capacity.
 	EventsBuffer int
 	// MaxBadFrames bounds tolerated malformed frames before the provider is
@@ -208,6 +214,14 @@ func (c *Conn) Connect(ctx context.Context, transport Transport) (Handshake, err
 	c.mu.Unlock()
 	transport.SetDiagnosticHandler(c.transportDiagnostic)
 
+	// A capability name outside the vocabulary is a caller bug and is refused
+	// before the transport starts: no process is spawned and no request is sent
+	// on its behalf.
+	if err := validateAgentCapabilityNames(c.opts.RequiredCapabilities); err != nil {
+		c.fail(err, false)
+		return Handshake{}, err
+	}
+
 	if err := transport.Start(ctx); err != nil {
 		c.fail(&HandshakeError{Code: HandshakeTransportStart, Detail: err.Error()}, false)
 		return Handshake{}, err
@@ -235,6 +249,13 @@ func (c *Conn) Connect(ctx context.Context, transport Transport) (Handshake, err
 	}
 	handshake, err := validateInitializeResult(raw, c.opts.AcceptProviders)
 	if err != nil {
+		c.fail(err, true)
+		return Handshake{}, err
+	}
+	// The caller's required capability matrix is enforced against the
+	// negotiated declaration before the connection becomes ready: an incapable
+	// backend is rejected, not used with a missing feature.
+	if err := handshake.RequireAgentCapabilities(c.opts.RequiredCapabilities); err != nil {
 		c.fail(err, true)
 		return Handshake{}, err
 	}

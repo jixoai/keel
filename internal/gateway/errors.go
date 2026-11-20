@@ -142,6 +142,15 @@ const (
 	// HandshakeMissingCapability is a provider whose kind's mandatory capability
 	// object is absent.
 	HandshakeMissingCapability = "missing_capability"
+	// HandshakeUnsupportedCapability is a provider that activated but did not
+	// declare a capability the caller requires. The rejection happens before any
+	// session/model call, so an incapable backend is never used in a degraded
+	// mode.
+	HandshakeUnsupportedCapability = "unsupported_capability"
+	// HandshakeInvalidCapability is a capability name outside the protocol
+	// vocabulary. It is a caller bug, distinct from a provider that merely does
+	// not support a known capability.
+	HandshakeInvalidCapability = "invalid_capability"
 	// HandshakeInvalidProvider is an unknown provider kind or state owner.
 	HandshakeInvalidProvider = "invalid_provider"
 	// HandshakeTransportStart is a transport that failed to start.

@@ -9,6 +9,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ProviderType is the kind of external provider behind a connection.
@@ -88,6 +89,154 @@ type AgentCapability struct {
 	Events bool `json:"events,omitempty"`
 }
 
+// AgentCapabilityName names one bit of the external agent-backend capability
+// matrix. The vocabulary is closed: a caller that requires a name outside it is
+// rejected as invalid_capability, never silently ignored (an unknown
+// requirement must not become a silent degradation).
+type AgentCapabilityName string
+
+const (
+	// AgentCapabilityEvents is the provider's event stream (the gateway's
+	// egress notification channel).
+	AgentCapabilityEvents AgentCapabilityName = "events"
+	// AgentCapabilityCancel is turn-level cancellation.
+	AgentCapabilityCancel AgentCapabilityName = "cancel"
+	// AgentCapabilityUsage is token-usage reporting on the provider's events.
+	AgentCapabilityUsage AgentCapabilityName = "usage"
+	// AgentCapabilityStreaming is incremental assistant output on the event
+	// stream (delta events, not only terminal messages).
+	AgentCapabilityStreaming AgentCapabilityName = "streaming"
+	// AgentCapabilityTools is native tool execution inside the backend.
+	AgentCapabilityTools AgentCapabilityName = "tools"
+	// AgentCapabilityApproval is a backend that can ask the host for approval
+	// before executing a tool.
+	AgentCapabilityApproval AgentCapabilityName = "approval"
+	// AgentCapabilityFork is forking a backend session at an event sequence
+	// without copying state.
+	AgentCapabilityFork AgentCapabilityName = "fork"
+	// AgentCapabilityResume is resuming a session from the backend's own log.
+	AgentCapabilityResume AgentCapabilityName = "resume"
+	// AgentCapabilityCompaction is backend-side context compaction.
+	AgentCapabilityCompaction AgentCapabilityName = "compaction"
+)
+
+// agentCapabilityNames is the closed vocabulary in stable order.
+var agentCapabilityNames = []AgentCapabilityName{
+	AgentCapabilityEvents,
+	AgentCapabilityCancel,
+	AgentCapabilityUsage,
+	AgentCapabilityStreaming,
+	AgentCapabilityTools,
+	AgentCapabilityApproval,
+	AgentCapabilityFork,
+	AgentCapabilityResume,
+	AgentCapabilityCompaction,
+}
+
+// parseAgentCapability validates a capability name against the vocabulary.
+func parseAgentCapability(name string) (AgentCapabilityName, error) {
+	for _, known := range agentCapabilityNames {
+		if string(known) == name {
+			return known, nil
+		}
+	}
+	return "", &HandshakeError{
+		Code:   HandshakeInvalidCapability,
+		Detail: fmt.Sprintf("unknown agent capability %q", name),
+	}
+}
+
+// Supports reports whether the provider declared one capability bit. Unknown
+// names report false; callers that need the typed rejection use
+// validateAgentCapabilityNames first.
+func (c ServerAgentCapability) Supports(name AgentCapabilityName) bool {
+	switch name {
+	case AgentCapabilityEvents:
+		return c.Events
+	case AgentCapabilityCancel:
+		return c.Cancel
+	case AgentCapabilityUsage:
+		return c.Usage
+	case AgentCapabilityStreaming:
+		return c.Streaming
+	case AgentCapabilityTools:
+		return c.Tools
+	case AgentCapabilityApproval:
+		return c.Approval
+	case AgentCapabilityFork:
+		return c.Fork
+	case AgentCapabilityResume:
+		return c.Resume
+	case AgentCapabilityCompaction:
+		return c.Compaction
+	default:
+		return false
+	}
+}
+
+// Matrix returns the full declared capability set. Absent bits read as false,
+// which is exactly what a legacy provider that predates the bit promised.
+func (c ServerAgentCapability) Matrix() map[AgentCapabilityName]bool {
+	out := make(map[AgentCapabilityName]bool, len(agentCapabilityNames))
+	for _, name := range agentCapabilityNames {
+		out[name] = c.Supports(name)
+	}
+	return out
+}
+
+// validateAgentCapabilityNames rejects a requirement outside the protocol
+// vocabulary before any transport work starts.
+func validateAgentCapabilityNames(required []AgentCapabilityName) error {
+	for _, name := range required {
+		if _, err := parseAgentCapability(string(name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SupportsAgentCapability reports whether a negotiated agent backend declared a
+// capability. A non-agent handshake never supports an agent capability bit.
+func (h Handshake) SupportsAgentCapability(name AgentCapabilityName) bool {
+	if h.Provider.Type != ProviderTypeAgentBackend || h.Capabilities.Agent == nil {
+		return false
+	}
+	return h.Capabilities.Agent.Supports(name)
+}
+
+// RequireAgentCapabilities enforces the caller's required capability set against
+// the negotiated handshake. An unknown name is invalid_capability; a known bit
+// the provider did not declare is unsupported_capability. Both are typed
+// *HandshakeError values returned before any session or model call is made, so
+// an incapable backend is never silently degraded into one that drops work.
+func (h Handshake) RequireAgentCapabilities(required []AgentCapabilityName) error {
+	if len(required) == 0 {
+		return nil
+	}
+	if err := validateAgentCapabilityNames(required); err != nil {
+		return err
+	}
+	if h.Provider.Type != ProviderTypeAgentBackend || h.Capabilities.Agent == nil {
+		return &HandshakeError{
+			Code:   HandshakeUnsupportedCapability,
+			Detail: fmt.Sprintf("provider type %q advertises no agent capability matrix", h.Provider.Type),
+		}
+	}
+	var missing []string
+	for _, name := range required {
+		if !h.Capabilities.Agent.Supports(name) {
+			missing = append(missing, string(name))
+		}
+	}
+	if len(missing) > 0 {
+		return &HandshakeError{
+			Code:   HandshakeUnsupportedCapability,
+			Detail: fmt.Sprintf("provider did not declare: %s", strings.Join(missing, ", ")),
+		}
+	}
+	return nil
+}
+
 // ClientCapabilities is what the gateway offers a provider.
 type ClientCapabilities struct {
 	Tools        *ToolsCapability           `json:"tools,omitempty"`
@@ -101,13 +250,30 @@ type ServerToolsCapability struct {
 }
 
 // ServerAgentCapability is a provider's agent capability: whether it pushes
-// events, supports cancellation, and reports token usage.
+// events, supports cancellation, and reports token usage, plus the capability
+// matrix the external-kernel contract requires (streaming, tools, approval,
+// fork, resume, compaction). Every new bit is optional on the wire: a legacy
+// provider that declares only events/cancel keeps activating unchanged, and a
+// caller that requires a missing bit gets unsupported_capability before any
+// session is opened.
 type ServerAgentCapability struct {
 	Events bool `json:"events,omitempty"`
 	Cancel bool `json:"cancel,omitempty"`
 	// Usage reports whether the backend emits token usage on its events. When
 	// it is absent the sessions default to metering=none.
 	Usage bool `json:"usage,omitempty"`
+	// Streaming reports incremental assistant output on the event stream.
+	Streaming bool `json:"streaming,omitempty"`
+	// Tools reports native tool execution inside the backend.
+	Tools bool `json:"tools,omitempty"`
+	// Approval reports that the backend can ask the host for tool approval.
+	Approval bool `json:"approval,omitempty"`
+	// Fork reports that a session can be forked at an event sequence.
+	Fork bool `json:"fork,omitempty"`
+	// Resume reports that the backend can resume a session from its own log.
+	Resume bool `json:"resume,omitempty"`
+	// Compaction reports backend-side context compaction.
+	Compaction bool `json:"compaction,omitempty"`
 }
 
 // ServerCapabilities is what a provider declares it supports.
