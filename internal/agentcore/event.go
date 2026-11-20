@@ -154,6 +154,21 @@ type CompactionEvent struct {
 	SummarizedCount int
 	// KeptCount is the number of recent messages retained verbatim.
 	KeptCount int
+	// FirstKeptIndex is the index of the first retained message in the
+	// pre-compaction context. The host persists it so a checkpoint can name the
+	// event where the retained tail begins (see Checkpoint.KeptFromSeq). It is
+	// zero when compaction left nothing to summarize or failed.
+	FirstKeptIndex int
+	// FirstKeptTranscriptIndex is FirstKeptIndex with in-memory system
+	// declarations (the tool-loadout message the loop inserts before a prompt)
+	// removed. The committed transcript view has no such messages, so a
+	// checkpoint anchor must use this index. Zero means no retained transcript
+	// message (or the loop did not compute it).
+	FirstKeptTranscriptIndex int
+	// Summary is the checkpoint text that stands in for the collapsed prefix.
+	// The host commits it as the compaction event's payload; a front-end may
+	// display it. Empty on failure or when there was nothing to summarize.
+	Summary string
 	// ErrorMessage is non-empty when compaction failed; the original context is
 	// preserved in that case.
 	ErrorMessage string

@@ -39,6 +39,15 @@ type LogStore interface {
 	// (tenant, session) pair does not exist.
 	LoadEvents(ctx context.Context, tenantID, sessionID uuid.UUID, afterSeq int64, limit int) ([]Event, error)
 
+	// SaveCheckpoint stores a compaction projection keyed by the compaction
+	// event's seq. A replay of the same compaction updates the row instead of
+	// inserting a second one.
+	SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error
+
+	// LoadCheckpoint returns the newest checkpoint projection of the session.
+	// found=false means the event log is the only projection available.
+	LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error)
+
 	// FindDedupe looks up one committed event by its namespaced dedupe key
 	// without taking the session write lock (the Lookup path is read-only).
 	FindDedupe(ctx context.Context, tenantID, sessionID uuid.UUID, key string) (Event, bool, error)

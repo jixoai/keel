@@ -76,8 +76,11 @@ quota:
 3. **Hooks**：把 `internal/hooks` 的事件接到 loop 的 `PrepareRequest` / `OnStop` /
    `ShouldStopAfterTurn` / tool executor 的 before/after；命令钩子按配置加载。
 4. **Compaction**：`loop.LoopConfig.Compaction` 使用 PI `DEFAULT_COMPACTION_POLICY`
-   （threshold/keepRecentTokens/backgroundTokens）；`OnCompaction` 追加 `compaction` 事件 +
-   写 `checkpoints`（投影，不覆盖事件）。
+   （threshold/keepRecentTokens/backgroundTokens）。`agent.Runner` 在有序事件消费者里
+   提交 `compaction` 事件（摘要/保留段/token 数），随后写 `checkpoints`
+   （`upto_seq`=事件 seq、`kept_from_seq`=保留段首个事件 seq；投影，不覆盖事件）。
+   保存失败只记日志、不回滚事件；新 run 以最新 checkpoint 的摘要 + `seq >= kept_from_seq`
+   重建，未锚定或无 checkpoint 时回退全量事件。
 5. **Telemetry**：run = span，turn/tool = 子 span；`run.finished` 作为业务汇总事件追加。
 6. **System prompt**：按 PI 的 section 形态拼装（`<preamble>`、`<skills>`、`<tenant>`），
    不再用单一字符串硬编码。

@@ -453,6 +453,57 @@ func (s *PGStore) LoadEvents(ctx context.Context, tenantID, sessionID uuid.UUID,
 	return out, nil
 }
 
+// SaveCheckpoint upserts a compaction projection. The event log is untouched;
+// a retry of the same compaction (same event seq) updates rather than
+// duplicates, and a later tail anchor fills kept_from_seq without clearing a
+// value already recorded. A missing (or foreign) session answers ErrNotFound:
+// the guarded INSERT cannot create a projection for a session that does not
+// exist, matching the in-memory implementation and every other write path.
+func (s *PGStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error {
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, kept_from_seq, summary)
+		 SELECT $1, $2, $3, NULLIF($4, 0), $5
+		 WHERE EXISTS (SELECT 1 FROM sessions WHERE tenant_id = $1 AND session_id = $2)
+		 ON CONFLICT (tenant_id, session_id, upto_seq) DO UPDATE
+		 SET summary = EXCLUDED.summary,
+		     kept_from_seq = COALESCE(EXCLUDED.kept_from_seq, checkpoints.kept_from_seq)`,
+		tenantID, sessionID, uptoSeq, keptFromSeq, summary)
+	if err != nil {
+		return fmt.Errorf("kernel: save checkpoint: %w", pgFail(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+	}
+	return nil
+}
+
+// LoadCheckpoint returns the newest checkpoint of the session. A missing row
+// answers found=false; a missing session answers ErrNotFound, mirroring
+// LoadEvents.
+func (s *PGStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error) {
+	var cp Checkpoint
+	err := s.pool.QueryRow(ctx,
+		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary
+		 FROM checkpoints
+		 WHERE tenant_id = $1 AND session_id = $2
+		 ORDER BY upto_seq DESC LIMIT 1`, tenantID, sessionID).
+		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary)
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return Checkpoint{}, false, existsErr
+		}
+		if !exists {
+			return Checkpoint{}, false, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
+		return Checkpoint{}, false, nil
+	}
+	if err != nil {
+		return Checkpoint{}, false, fmt.Errorf("kernel: load checkpoint: %w", pgFail(err))
+	}
+	return cp, true, nil
+}
+
 // FindDedupe looks up one committed event by its namespaced dedupe key.
 func (s *PGStore) FindDedupe(ctx context.Context, tenantID, sessionID uuid.UUID, key string) (Event, bool, error) {
 	if key == "" {

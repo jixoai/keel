@@ -1,0 +1,14 @@
+=== RUN   TestCheckpointProjection
+=== RUN   TestCheckpointProjection/mem
+=== RUN   TestCheckpointProjection/pg
+--- PASS: TestCheckpointProjection (0.14s)
+    --- PASS: TestCheckpointProjection/mem (0.00s)
+    --- PASS: TestCheckpointProjection/pg (0.14s)
+=== RUN   TestCheckpointTenantIsolation
+=== RUN   TestCheckpointTenantIsolation/mem
+=== RUN   TestCheckpointTenantIsolation/pg
+--- PASS: TestCheckpointTenantIsolation (0.09s)
+    --- PASS: TestCheckpointTenantIsolation/mem (0.00s)
+    --- PASS: TestCheckpointTenantIsolation/pg (0.09s)
+PASS
+ok  	github.com/jixoai/keel/internal/kernel	0.405s

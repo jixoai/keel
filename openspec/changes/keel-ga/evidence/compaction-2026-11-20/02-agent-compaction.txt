@@ -1,0 +1,14 @@
+=== RUN   TestCompactionPersistsEventAndCheckpoint
+--- PASS: TestCompactionPersistsEventAndCheckpoint (0.26s)
+=== RUN   TestCompactionCheckpointFailureKeepsEvent
+--- PASS: TestCompactionCheckpointFailureKeepsEvent (0.16s)
+=== RUN   TestSecondCompactionAnchorsFromCheckpoint
+--- PASS: TestSecondCompactionAnchorsFromCheckpoint (0.37s)
+=== RUN   TestNewRunReplaysFromCheckpoint
+--- PASS: TestNewRunReplaysFromCheckpoint (0.22s)
+=== RUN   TestReplayFallsBackWithoutCheckpoint
+--- PASS: TestReplayFallsBackWithoutCheckpoint (0.22s)
+=== RUN   TestReplayFallsBackWithoutAnchor
+--- PASS: TestReplayFallsBackWithoutAnchor (0.22s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	1.672s

@@ -242,8 +242,11 @@ type RunConfig struct {
 	// OnCompaction, when set, is called after a successful auto-compaction with
 	// the summary that replaced the collapsed prefix. The host persists it as a
 	// checkpoint (PG, not a file) so a later run can reload the summary instead
-	// of replaying the whole transcript. A persistence failure is the host's to
-	// log; the loop continues on the compacted context either way.
+	// of replaying the whole transcript. A host that owns the ordered event
+	// consumer can persist from CompactionEvent instead (same facts, and then the
+	// event can never precede the messages it summarizes). A persistence failure
+	// is the host's to log; the loop continues on the compacted context either
+	// way.
 	OnCompaction func(ctx context.Context, summary string, firstKeptIndex, summarizedCount int)
 }
 
@@ -746,21 +749,35 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 	now := nowMillis()
 	rebuilt := res.RebuildContext(agentCtx.Messages, now)
 	summarized := len(agentCtx.Messages) - (len(rebuilt) - 1)
+	// The cut index counts the in-memory tool-loadout declaration too, but that
+	// message is never an event: a host anchoring a checkpoint needs the index
+	// into the committed transcript (which has no system declarations).
+	firstKeptTranscript := res.FirstKeptIndex
+	for i := 0; i < res.FirstKeptIndex && i < len(agentCtx.Messages); i++ {
+		if agentCtx.Messages[i].Role() == agentcore.RoleSystem {
+			firstKeptTranscript--
+		}
+	}
 	// Hand the summary to the host so it can persist a checkpoint (PG row, not a
 	// file). It reuses the summary compaction just produced — no extra LLM call —
 	// and is best-effort: a persistence failure is the host's to log and the run
-	// continues on the compacted context.
+	// continues on the compacted context. The same facts travel on the emitted
+	// event so an ordered consumer can commit the event and its checkpoint after
+	// every message the compaction covers has been committed.
 	if cfg.OnCompaction != nil {
 		cfg.OnCompaction(ctx, res.Summary, res.FirstKeptIndex, summarized)
 	}
 	agentCtx.Messages = rebuilt
 	after := compaction.EstimateContextTokens(rebuilt).Tokens
 	_ = emit(agentcore.CompactionEvent{
-		Reason:          "threshold",
-		TokensBefore:    before,
-		TokensAfter:     after,
-		SummarizedCount: summarized,
-		KeptCount:       len(rebuilt) - 1,
+		Reason:                   "threshold",
+		TokensBefore:             before,
+		TokensAfter:              after,
+		SummarizedCount:          summarized,
+		KeptCount:                len(rebuilt) - 1,
+		FirstKeptIndex:           res.FirstKeptIndex,
+		FirstKeptTranscriptIndex: firstKeptTranscript,
+		Summary:                  res.Summary,
 	})
 }
 

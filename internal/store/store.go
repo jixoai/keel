@@ -503,17 +503,52 @@ func (s *Store) LoadEvents(ctx context.Context, tenantID, sessionID uuid.UUID, a
 	return out, rows.Err()
 }
 
+// Checkpoint is one compaction projection row. UptoSeq is the seq of the
+// compaction event that produced it; KeptFromSeq is the seq of the first event
+// the compaction retained (0 when the row cannot be anchored to events yet);
+// Summary is the event's summary. The event log itself is never modified.
+type Checkpoint struct {
+	UptoSeq     int64
+	KeptFromSeq int64
+	Summary     string
+}
+
 // SaveCheckpoint stores a compaction projection. Events are never deleted.
-func (s *Store) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq int64, summary string) error {
+// A replay of the same compaction (same upto_seq) updates the row instead of
+// inserting a second one, and a later refinement that knows the retained tail
+// fills kept_from_seq without clearing an already-known value.
+func (s *Store) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, summary)
-		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT (tenant_id, session_id, upto_seq) DO UPDATE SET summary = EXCLUDED.summary`,
-		tenantID, sessionID, uptoSeq, summary)
+		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, kept_from_seq, summary)
+		 VALUES ($1, $2, $3, NULLIF($4, 0), $5)
+		 ON CONFLICT (tenant_id, session_id, upto_seq) DO UPDATE
+		 SET summary = EXCLUDED.summary,
+		     kept_from_seq = COALESCE(EXCLUDED.kept_from_seq, checkpoints.kept_from_seq)`,
+		tenantID, sessionID, uptoSeq, keptFromSeq, summary)
 	if err != nil {
 		return fmt.Errorf("store: save checkpoint: %w", err)
 	}
 	return nil
+}
+
+// LoadCheckpoint returns the session's newest checkpoint (the largest
+// upto_seq). found=false means the session has no checkpoint; the event log is
+// then the only projection.
+func (s *Store) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error) {
+	var cp Checkpoint
+	err := s.pool.QueryRow(ctx,
+		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary
+		 FROM checkpoints
+		 WHERE tenant_id = $1 AND session_id = $2
+		 ORDER BY upto_seq DESC LIMIT 1`, tenantID, sessionID).
+		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Checkpoint{}, false, nil
+	}
+	if err != nil {
+		return Checkpoint{}, false, fmt.Errorf("store: load checkpoint: %w", err)
+	}
+	return cp, true, nil
 }
 
 // Submission is the idempotent result of a client request.

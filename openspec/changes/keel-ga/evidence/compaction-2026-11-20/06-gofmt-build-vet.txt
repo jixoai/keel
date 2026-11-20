@@ -1,0 +1,8 @@
+$ gofmt -l <changed go files>
+gofmt exit=0
+
+$ go build ./...
+build exit=0
+
+$ go vet ./internal/kernel ./internal/agent ./internal/store ./internal/agentcore ./internal/loop
+vet exit=0

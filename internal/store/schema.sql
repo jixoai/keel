@@ -75,14 +75,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_dedupe
     ON events (tenant_id, session_id, dedupe_key)
     WHERE dedupe_key IS NOT NULL;
 
+-- checkpoints are compaction projections, never a source of truth: the event
+-- log stays complete and readable. upto_seq is the seq of the compaction event
+-- that produced the row (the checkpoint is aligned with that fact); summary is
+-- that event's summary. kept_from_seq is the seq of the first event the
+-- compaction retained (the tail that must follow the summary on replay), NULL
+-- until the host anchors it to committed events.
 CREATE TABLE IF NOT EXISTS checkpoints (
-    tenant_id   uuid NOT NULL,
-    session_id  uuid NOT NULL,
-    upto_seq    bigint NOT NULL,
-    summary     text NOT NULL,
-    created_at  timestamptz NOT NULL DEFAULT now(),
+    tenant_id     uuid NOT NULL,
+    session_id    uuid NOT NULL,
+    upto_seq      bigint NOT NULL,
+    kept_from_seq bigint,
+    summary       text NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, session_id, upto_seq)
 );
+
+ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS kept_from_seq bigint;
 
 CREATE TABLE IF NOT EXISTS submissions (
     tenant_id     uuid NOT NULL,

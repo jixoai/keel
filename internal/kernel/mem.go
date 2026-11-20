@@ -42,6 +42,9 @@ type memSession struct {
 	nextSeq int64
 	lease   memLease // the authority
 	run     *memRun  // queue state; nil = no run row
+	// checkpoints is the compaction projection, newest last (the PG PK is
+	// (tenant, session, upto_seq); the slice mirrors it with upsert semantics).
+	checkpoints []Checkpoint
 	// external, when set, marks the session as owned by an external backend.
 	// Such a session never gets a run row, so it is never claimable.
 	external *memExternal
@@ -226,6 +229,53 @@ func (m *MemStore) SessionExists(ctx context.Context, tenantID, sessionID uuid.U
 	defer m.mu.Unlock()
 	_, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
 	return ok, nil
+}
+
+// SaveCheckpoint upserts a compaction projection (PG parity: keyed by the
+// compaction event's seq; a known tail anchor is never cleared).
+func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	for i := range s.checkpoints {
+		if s.checkpoints[i].UptoSeq != uptoSeq {
+			continue
+		}
+		s.checkpoints[i].Summary = summary
+		if keptFromSeq > 0 {
+			s.checkpoints[i].KeptFromSeq = keptFromSeq
+		}
+		return nil
+	}
+	s.checkpoints = append(s.checkpoints, Checkpoint{UptoSeq: uptoSeq, KeptFromSeq: keptFromSeq, Summary: summary})
+	return nil
+}
+
+// LoadCheckpoint returns the session's newest checkpoint projection.
+func (m *MemStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Checkpoint{}, false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return Checkpoint{}, false, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	var newest Checkpoint
+	found := false
+	for _, cp := range s.checkpoints {
+		if !found || cp.UptoSeq > newest.UptoSeq {
+			newest, found = cp, true
+		}
+	}
+	return newest, found, nil
 }
 
 // ClaimLease claims the first runnable run.

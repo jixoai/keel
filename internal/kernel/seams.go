@@ -32,6 +32,30 @@ type Reader interface {
 	UnresolvedToolCalls(ctx context.Context, scope Scope) ([]ToolCallRef, error)
 }
 
+// Checkpoint is one compaction projection: the summary of a successful
+// compaction (keyed by the compaction event's seq) plus the seq of the first
+// event the compaction retained. It is derived state; the event log stays the
+// only truth and is never shortened.
+type Checkpoint struct {
+	// UptoSeq is the seq of the compaction event that produced this checkpoint.
+	UptoSeq int64
+	// KeptFromSeq is the seq of the first event retained by the compaction
+	// (the tail that must be replayed after Summary). Zero means the host has
+	// not anchored the tail yet; a replay then falls back to the event log
+	// rather than guessing.
+	KeptFromSeq int64
+	Summary     string
+}
+
+// CheckpointStore is the compaction-projection seam. Saving is best-effort by
+// contract: a failure must never roll back or hide the committed compaction
+// event, and the caller logs it instead of pretending the checkpoint exists.
+// Loading is tenant-bound and returns found=false when no checkpoint exists.
+type CheckpointStore interface {
+	SaveCheckpoint(ctx context.Context, scope Scope, uptoSeq, keptFromSeq int64, summary string) error
+	LoadCheckpoint(ctx context.Context, scope Scope) (Checkpoint, bool, error)
+}
+
 // ReadMarker is the durable read-point seam. A run records where its transcript
 // ended immediately after loading the log, before the first model call: a
 // process killed between then and Finish must still leave the fact behind, or
@@ -67,6 +91,7 @@ type ExternalSessions interface {
 var (
 	_ Committer        = (*Kernel)(nil)
 	_ Reader           = (*Kernel)(nil)
+	_ CheckpointStore  = (*Kernel)(nil)
 	_ ReadMarker       = (*Kernel)(nil)
 	_ LeaseManager     = (*Kernel)(nil)
 	_ ExternalSessions = (*Kernel)(nil)

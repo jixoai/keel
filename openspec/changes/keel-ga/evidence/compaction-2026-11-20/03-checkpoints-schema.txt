@@ -1,0 +1,19 @@
+$ grep -n -A14 "CREATE TABLE IF NOT EXISTS checkpoints" internal/store/schema.sql
+84:CREATE TABLE IF NOT EXISTS checkpoints (
+85-    tenant_id     uuid NOT NULL,
+86-    session_id    uuid NOT NULL,
+87-    upto_seq      bigint NOT NULL,
+88-    kept_from_seq bigint,
+89-    summary       text NOT NULL,
+90-    created_at    timestamptz NOT NULL DEFAULT now(),
+91-    PRIMARY KEY (tenant_id, session_id, upto_seq)
+92-);
+93-
+94-ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS kept_from_seq bigint;
+95-
+96-CREATE TABLE IF NOT EXISTS submissions (
+97-    tenant_id     uuid NOT NULL,
+98-    request_id    text NOT NULL,
+
+$ grep -n "ALTER TABLE checkpoints" internal/store/schema.sql
+94:ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS kept_from_seq bigint;

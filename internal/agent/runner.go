@@ -60,8 +60,14 @@ type Runner struct {
 	// fact behind, or the successor cannot tell which input this attempt never
 	// saw (adversarial review N1/N2). NewRunner wires it from the committer when
 	// that value is the kernel; a test double sets it explicitly.
-	Reads  kernel.ReadMarker
-	Stream provider.StreamFn
+	Reads kernel.ReadMarker
+	// Checkpoints is the compaction-projection seam. When set, the runner saves
+	// the checkpoint after committing a compaction event and replays a new run
+	// from the newest anchored checkpoint (summary + retained tail) instead of
+	// the whole log. It is optional: a test double or a deployment without the
+	// seam falls back to the full committed log.
+	Checkpoints kernel.CheckpointStore
+	Stream      provider.StreamFn
 	// ProviderName and Model describe the static model the runner calls; they
 	// are captured into telemetry and logs and stay the identity of a runner
 	// without a Models resolver (the fakestream path and the legacy flat
@@ -246,9 +252,14 @@ func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider
 		Logger:       logger,
 	}
 	// The kernel satisfies all three seams; deriving the read marker from the
-	// committer keeps the constructor honest without a fourth argument.
+	// committer keeps the constructor honest without a fourth argument. The
+	// checkpoint seam is optional (it is a projection, not a write authority),
+	// so only a committer that implements it enables checkpoint replay.
 	if marker, ok := committer.(kernel.ReadMarker); ok {
 		runner.Reads = marker
+	}
+	if checkpoints, ok := committer.(kernel.CheckpointStore); ok {
+		runner.Checkpoints = checkpoints
 	}
 	return runner
 }
@@ -428,10 +439,21 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// A payload the kernel would not accept today (legacy or foreign data) is
 	// skipped with a diagnostic instead of failing the run: the session must
 	// keep moving, and the skipped sequence is visible in the log line.
-	msgs, seqs := DecodeMessages(events, func(seq int64, kind string, err error) {
+	//
+	// The model transcript is built from the newest anchored checkpoint when
+	// one exists: its summary stands in for the compacted prefix and only the
+	// retained tail is decoded. The full log still drives every fact decision
+	// (owedTurn, generation identity, unread inputs) and remains readable by
+	// seq; the checkpoint is a projection, never a replacement for the log.
+	view, checkpoint, checkpointSeq := r.modelView(ctx, lease.Scope, events)
+	msgs, seqs := DecodeMessages(view, func(seq int64, kind string, err error) {
 		r.Logger.Warn("skipping unreadable event", "session_id", lease.Scope.SessionID,
 			"seq", seq, "kind", kind, "err", err)
 	})
+	if checkpoint != nil {
+		msgs = append(agentcore.MessageList{*checkpoint}, msgs...)
+		seqs = append([]int64{checkpointSeq}, seqs...)
+	}
 	if len(msgs) == 0 {
 		return res, nil
 	}
@@ -628,7 +650,8 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				return out
 			},
 			// Compaction is off unless the loadout's compaction service
-			// supplies settings; the loop supports it via OnCompaction.
+			// supplies settings; the loop reports a successful compaction on
+			// CompactionEvent, which the consumer persists below.
 		},
 		Batch: agenttool.BatchConfig{
 			ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: tools},
@@ -658,27 +681,6 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				return true
 			}
 			return false
-		},
-		OnCompaction: func(ctx context.Context, summary string, firstKeptIndex, summarizedCount int) {
-			raw, err := marshalPayload(map[string]any{
-				"summary":    summary,
-				"firstKept":  firstKeptIndex,
-				"summarized": summarizedCount,
-				"timestamp":  time.Now().UnixMilli(),
-			})
-			if err != nil {
-				r.Logger.Warn("persist compaction", "err", err)
-				return
-			}
-			seq, err := r.commitEvent(ctx, lease, kernel.CommitRequest{
-				Kind:    kernel.KindCompaction,
-				Payload: raw,
-			})
-			if err != nil {
-				r.Logger.Warn("persist compaction", "err", err)
-				return
-			}
-			cursor = seq
 		},
 	}
 	if r.Compaction != nil && r.Compaction.Settings.Enabled {
@@ -727,6 +729,52 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		switch e := ev.(type) {
 		case agentcore.TurnEndEvent:
 			summary.Turns++
+		case agentcore.CompactionEvent:
+			// The loop compacted its in-memory context. The compaction event is
+			// the durable fact (the summary and the kept boundary), and it is
+			// committed here, in the ordered consumer, so it can never precede
+			// the messages it summarizes: every MessageEnd/ToolExecutionEnd
+			// emitted before it was committed above.
+			if e.ErrorMessage != "" || strings.TrimSpace(e.Summary) == "" {
+				// A failed compaction is observable on the event stream only; it
+				// has no fact to persist (the context was left unchanged).
+				continue
+			}
+			raw, err := marshalPayload(map[string]any{
+				"summary":             e.Summary,
+				"tokensBefore":        e.TokensBefore,
+				"firstKept":           e.FirstKeptIndex,
+				"firstKeptTranscript": e.FirstKeptTranscriptIndex,
+				"summarized":          e.SummarizedCount,
+				"kept":                e.KeptCount,
+				"timestamp":           time.Now().UnixMilli(),
+			})
+			if err != nil {
+				r.Logger.Warn("persist compaction", "err", err)
+				continue
+			}
+			seq, err := r.commitEvent(ctx, lease, kernel.CommitRequest{
+				Kind:    kernel.KindCompaction,
+				Payload: raw,
+			})
+			if err != nil {
+				// The loop already compacted its in-memory context; failing the
+				// attempt would replay the turn from the uncompacted log. Keep
+				// the run moving and let the next turn try again.
+				r.Logger.Warn("persist compaction", "err", err)
+				continue
+			}
+			cursor = seq
+			if r.Checkpoints == nil {
+				continue
+			}
+			// The checkpoint is a projection of the event just committed. Its
+			// save is best-effort by contract: a failure is logged and never
+			// rolls the event back, and replay falls back to the full log.
+			anchor := r.checkpointAnchor(ctx, lease.Scope, e.FirstKeptTranscriptIndex, seq)
+			if err := r.Checkpoints.SaveCheckpoint(ctx, lease.Scope, seq, anchor, e.Summary); err != nil {
+				r.Logger.Warn("save checkpoint", "session_id", lease.Scope.SessionID, "seq", seq, "err", err)
+			}
 		case agentcore.MessageEndEvent:
 			// User prompts and tool results are persisted by their own paths
 			// (input submission / tool_execution_end); only assistant answers
@@ -1175,6 +1223,115 @@ func (r *Runner) loadEvents(ctx context.Context, scope kernel.Scope) ([]store.Ev
 		}
 	}
 	return all, after, nil
+}
+
+// modelView returns the events that build the model transcript. With an
+// anchored checkpoint it is the checkpoint summary (reconstructed below)
+// followed by the events from kept_from_seq; without one it is the whole log.
+// The full log remains the only source of truth for fact decisions and stays
+// readable by seq.
+//
+// An anchored checkpoint is required: kept_from_seq == 0 means the host has not
+// tied the retained tail to committed events, and truncating on a guessed
+// boundary could drop context. The fallback is the full log, which is always
+// correct.
+func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []store.Event) ([]store.Event, *agentcore.CompactionMessage, int64) {
+	if r.Checkpoints == nil {
+		return events, nil, 0
+	}
+	cp, found, err := r.Checkpoints.LoadCheckpoint(ctx, scope)
+	if err != nil {
+		// The checkpoint is a projection: a read failure must not stop the run.
+		r.Logger.Warn("load checkpoint", "session_id", scope.SessionID, "err", err)
+		return events, nil, 0
+	}
+	if !found || cp.KeptFromSeq <= 0 {
+		return events, nil, 0
+	}
+	trimmed := make([]store.Event, 0, len(events))
+	for _, ev := range events {
+		if ev.Seq < cp.KeptFromSeq {
+			continue
+		}
+		// The checkpoint stands in for its own compaction event; replaying the
+		// event too would duplicate the summary. Older compaction events inside
+		// the retained range are covered by the same summary (the newest
+		// summary folds them in), so they are skipped as well.
+		if ev.Kind == store.EventCompaction && ev.Seq <= cp.UptoSeq {
+			continue
+		}
+		trimmed = append(trimmed, ev)
+	}
+	msg := checkpointMessage(cp, events)
+	return trimmed, &msg, cp.UptoSeq
+}
+
+// checkpointMessage rebuilds the CompactionMessage a checkpoint stands for,
+// reading the fields the checkpoint row does not store (tokens-before and
+// timestamp) from the committed compaction event. The summary is the
+// checkpoint's own text: it is the projection the row was saved from.
+func checkpointMessage(cp kernel.Checkpoint, events []store.Event) agentcore.CompactionMessage {
+	msg := agentcore.CompactionMessage{
+		RoleField: agentcore.RoleCompaction,
+		Summary:   cp.Summary,
+	}
+	for _, ev := range events {
+		if ev.Seq != cp.UptoSeq || ev.Kind != store.EventCompaction {
+			continue
+		}
+		var p struct {
+			TokensBefore int   `json:"tokensBefore"`
+			Timestamp    int64 `json:"timestamp"`
+		}
+		if err := json.Unmarshal(ev.Payload, &p); err == nil {
+			msg.TokensBefore = p.TokensBefore
+			msg.Timestamp = p.Timestamp
+		}
+		break
+	}
+	return msg
+}
+
+// checkpointAnchor resolves the seq of the first event retained by a
+// compaction. It indexes the pre-compaction model view (the newest previous
+// checkpoint plus committed events before uptoSeq), which both the checkpoint
+// row and the compaction event's firstKept index refer to. The event-derived
+// view can only be shorter than the loop's in-memory list (uncommitted
+// messages), and extra unpolled inputs sit later in the log; indexing it
+// therefore resolves to an earlier-or-equal boundary, never a later one that
+// would drop retained messages. Zero means "not anchored": the checkpoint is
+// still written, and replay falls back to the full log.
+func (r *Runner) checkpointAnchor(ctx context.Context, scope kernel.Scope, firstKeptIndex int, uptoSeq int64) int64 {
+	if firstKeptIndex <= 0 || uptoSeq <= 0 {
+		return 0
+	}
+	events, _, err := r.loadEvents(ctx, scope)
+	if err != nil {
+		r.Logger.Warn("resolve checkpoint anchor", "session_id", scope.SessionID, "err", err)
+		return 0
+	}
+	before := make([]store.Event, 0, len(events))
+	for _, ev := range events {
+		if ev.Seq >= uptoSeq {
+			continue
+		}
+		before = append(before, ev)
+	}
+	view, checkpoint, checkpointSeq := r.modelView(ctx, scope, before)
+	_, seqs := DecodeMessages(view, nil)
+	if checkpoint != nil {
+		// The loop's pre-compaction view starts with the previous checkpoint
+		// message; keep the index mapping aligned with it.
+		seqs = append([]int64{checkpointSeq}, seqs...)
+	}
+	if firstKeptIndex >= len(seqs) {
+		return 0
+	}
+	anchor := seqs[firstKeptIndex]
+	if anchor <= 0 || anchor >= uptoSeq {
+		return 0
+	}
+	return anchor
 }
 
 // appendToolResult commits a tool result through the kernel with its

@@ -23,8 +23,15 @@
 - [x] `/v1/sessions/{id}/input` 提交后自动入队 run
 - [x] E2E：输入 → 回复事件；kill 在模型流中 → 重启后恰好一条最终回复
 - [x] E2E：kill 在工具执行中 → 恢复后一条 tool.result（at-least-once）
-- [ ] 压缩：超阈值追加 `compaction` 事件 + checkpoint，历史可回放
-- [ ] 文档：at-least-once 工具契约、单会话串行、partial 非持久
+- [x] 压缩：超阈值追加 `compaction` 事件 + checkpoint，历史可回放
+      （`internal/agent/runner.go` 在有序事件消费者提交事件并写 `checkpoints`；
+      `internal/kernel/checkpoint.go` 与 runner `modelView` 回放；测试
+      `TestCompactionPersistsEventAndCheckpoint` / `TestSecondCompactionAnchorsFromCheckpoint` /
+      `TestNewRunReplaysFromCheckpoint` / `TestReplayFallsBackWithoutCheckpoint` /
+      `TestReplayFallsBackWithoutAnchor`；证据
+      `openspec/changes/keel-ga/evidence/compaction-2026-11-20/`）
+- [x] 文档：at-least-once 工具契约、单会话串行、partial 非持久
+      （`docs/ARCHITECTURE.md` §3；压缩/checkpoint 回放同时写入 `docs/HOST.md` §3.4）
 
 ## 2. tenancy-quotas
 

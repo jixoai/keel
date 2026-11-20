@@ -43,9 +43,26 @@ TS spike（pi-durable）已用 7 个 E2E 场景证明以下语义可行（报告
 - **提交即可见**：未提交的部分不展示；事件日志是唯一真值，checkpoint 是投影。
 - **每个 await 点可重入**：工具执行、模型流、生成任务都是持久任务；进程死了由 `resume()` 重放。
 - **模型请求 = 已提交消息的纯函数**：重试不依赖进程内计数器。
-- **幂等效果**：工具需自带幂等键（replay-safe ≠ exactly-once，框架不假装保证）。
+- **工具执行 at-least-once**：工具结果的执行层可重放，账本层按 `toolCallId` 只落一条
+  `tool.result`；框架不承诺 exactly-once，有副作用的工具必须幂等或自带幂等键。
+  进程在工具执行中死亡时，恢复后同一调用重新执行（见 `docs/HANDOFF.md` §5）。
+- **同一会话串行**：`runs(tenant_id, session_id)` + 租约/fencing 保证同时最多一个活跃
+  run；run 进行中到达的 `user.message` 排队，下一次 claim 按 seq 顺序处理。
+- **token 级 partial 非持久**：partial 只经进程内 hub 广播到 SSE（无 `id:`，不进事件表，
+  不重放）；客户端可见的正文只有已提交的完整 `assistant.message`。
 - **请求幂等**：`requestId` 唯一约束，跨进程重投返回同一 submission。
 - **断线续传**：SSE `Last-Event-ID` + 事件 offset；客户端缺口用 `before` 边界 + 分页补齐。
+
+**压缩与 checkpoint 回放**（`keel-ga` §1）：
+
+- 上下文超阈值时追加 `compaction` 事件（摘要、保留段边界、token 数），并由有序消费者
+  在同一路径写 `checkpoints` 行：`upto_seq` = compaction 事件 seq，`kept_from_seq` =
+  保留段第一个事件的 seq。事件先提交，checkpoint 后写；checkpoint 保存失败只记日志，
+  **不回滚事件**。
+- 新 run 读取最新 checkpoint：模型上下文 = 摘要 + `seq >= kept_from_seq` 的后续事件。
+  无 checkpoint 或 `kept_from_seq` 未锚定（NULL/0）时回退全量事件，绝不猜截断点。
+- 原始事件永不删除、不覆盖，仍可按 seq 读回；`owedTurn`、generation 去重、未读输入等
+  事实判定始终基于全量日志，checkpoint 只影响送模的上下文投影。
 
 ## 4. 存储：PostgreSQL 单库 + 分块大对象
 
