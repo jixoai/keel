@@ -2,7 +2,8 @@
 
 > 每个任务都必须有可执行验收；surface 面板可并行开发，但共享 registry/contract 先冻结。
 > 状态截至 2026-11-21：S0/S2/S3/S5/S6 已交付；S1 保留原 LLM 实现未物理搬迁；
-> S4 标准模式与跨 surface 门禁、web 团队界面与成员任务投影完成；未完成的暂缓项见文末。
+> S4 标准模式与跨 surface 门禁、LLM captain 的 web 团队界面与成员任务投影完成；
+> 非 LLM captain 团队界面见暂缓项 (c)。
 > 实现说明：会话 `surfaceKind` 由客户端按模型/captain 的 descriptor 解析（`/v1/models` 已投影
 > `providerType`/`surfaceKind`）；本 change 未新增 session 数据库列，选型随输入携带。
 
@@ -81,6 +82,8 @@
     以任务卡渲染 title/status/updatedAt，只显示「成员任务状态」，不伪造结果文本；该区域是
     `conversation-list` 的兄弟节点，不进 `rowsOf` 或 tool 行。
   - 证据：`evidence/member-timeline-2026-11-21/`（真库 HTTP + TUI 五态/隔离 + 门禁日志）。
+  - Backlog (P2)：团队动态首屏只读 50 项（更多时 badge 显示 `N+`）；后端 keyset 分页已就绪，
+    UI 的「加载更多」入口待补。
 - **验收**：标准模式选 realtime 进入语音；跨 surface 切换被阻止（已验）；
   captain 判定接缝单测通过（已验）；captain realtime 的团队界面（未验，未实现）
 
@@ -116,9 +119,10 @@
      STT 走宿主 `Speech` 能力，不是厂商 STT Provider。
    - 前置条件：可用的 realtime/TTS/STT 厂商凭据与配额；`KEEL_REALTIME_*` 接线；TTS/STT Provider
      网关（`internal/mediagw` 当前只有 image/decision/chat）。
-3. **AgentTeam captain 的非 LLM surface 团队界面与成员 surface 标记**
+3. **(c) AgentTeam captain 的非 LLM surface 团队界面与成员 surface 标记**
    - 现状：LLM captain 的 web 团队界面已交付（`session-team.tsx` header/名单 +
-     `team-activity.tsx` 成员任务投影，见 S4）；picker 目前拒绝非对话模型的团队启动
+     `team-activity.tsx` 成员任务投影，见 S4），成员任务来自只读投影
+     `GET /v1/sessions/{id}/team-tasks`；picker 目前拒绝非对话模型的团队启动
      （`captainSelectionOf`），因此 realtime/image captain 的团队视图、成员卡 surface 标记与
      `resolveCaptainSurface` 的 UI 接线仍未实现。
    - 前置条件：非 LLM surface 的团队消息/任务卡区域；成员模型 surface 解析进入名单。

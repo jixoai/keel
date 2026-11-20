@@ -67,18 +67,50 @@ MUST NOT 直连内核。
 ### Requirement: AgentTeam captain surface
 
 AgentTeam 模式下，captain 的默认模型 MUST 决定主会话 `surfaceKind`。成员 MAY 有不同
-surface；团队界面交付后，成员结果 MUST 通过团队消息/任务卡进入 captain 时间线，
-MUST NOT 混入 captain 的转写历史。
+surface；成员结果 MUST 通过团队消息/任务卡进入 captain 时间线，MUST NOT 混入 captain 的
+转写历史或 tool 行。
 
-本 change 只交付判定接缝 `resolveCaptainSurface`（captain 模型 → surface；无 captain 或无法解析
-→ `llm`）；web 团队界面不在本 change 范围（见 tasks 暂缓项 (c)），下列成员规则是团队界面
-交付时的验收口径。
+本 change 交付 LLM captain 的 web 团队界面（header/名单 + captain 时间线的团队动态）与
+`GET /v1/sessions/{id}/team-tasks` 只读投影。非 LLM（realtime/image）captain 的团队界面与
+成员卡 surface 标记仍为暂缓项 (c)：`resolveCaptainSurface` 判定接缝已实现并由单测 pin，
+成员 surface 标记在该团队界面交付后验收。
 
 #### Scenario: realtime captain（判定接缝）
 - **WHEN** captain 默认模型是 realtime
 - **THEN** `resolveCaptainSurface` 返回 realtime surface，主会话按该 surface 装载；
-  团队抽屉的成员 surface 标记在团队界面交付后验收
+  非 LLM 团队界面与成员 surface 标记仍为暂缓项 (c)
 
 #### Scenario: 无 captain 回退
 - **WHEN** 团队没有 captain，或 captain 的模型无法在 registry 解析
 - **THEN** 主会话使用 `llm` 基线 surface，不猜测 realtime/generic
+
+#### Scenario: LLM captain 的团队动态
+- **WHEN** LLM captain 的团队会话有成员任务卡
+- **THEN** captain 时间线显示独立的「团队动态」区域，按任务卡渲染 title/status/updatedAt；
+  卡片 MUST NOT 进入 captain 的 user/assistant 转写或 tool 行，且没有结果正文时不伪造结果文本
+
+### Requirement: 成员任务只读投影
+
+`GET /v1/sessions/{id}/team-tasks?limit=&after=` MUST 是 `task_cards` 的只读投影：
+MUST NOT 复制卡片、MUST NOT 写账本或 captain transcript。响应里的卡 MUST 是
+`parentTaskId` 指向该会话内任一卡片的子卡；子卡仍属于其子会话账本。
+
+端点 MUST 校验会话属于请求租户：缺少 `X-Tenant-ID` 为 401；外租户或不存在的会话为 404。
+`limit` MUST 在 1..200（默认 50），`after` MUST 是不透明 keyset cursor；坏 cursor MUST 400；
+没有成员卡 MUST 返回 200 + `tasks: []`。响应 MUST NOT 包含结果正文（无 result/summary 字段）。
+
+#### Scenario: 父卡关联子卡
+- **WHEN** 子会话的卡以 `parentTaskId` 指向 captain 会话中的卡
+- **THEN** 端点返回该子卡，携带其 `sessionId`/`parentTaskId`，且不返回 captain 自身的卡
+
+#### Scenario: 租户/会话边界
+- **WHEN** 请求外租户或不存在的会话
+- **THEN** 404；缺少 `X-Tenant-ID` 时 401，且不返回任何卡片
+
+#### Scenario: keyset 分页
+- **WHEN** 成员卡数量超过 `limit`，调用方用 `nextCursor` 请求下一页
+- **THEN** 页间无重复/遗漏；`limit` 超出 1..200 或 `after` 损坏为 400
+
+#### Scenario: 空态与隔离
+- **WHEN** 会话没有成员任务卡
+- **THEN** 返回 200 + `tasks: []`，不回退到 captain 转写/tool 行，也不伪造卡片或结果文本

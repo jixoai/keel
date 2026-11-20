@@ -219,7 +219,9 @@ web/src/surfaces/
    聆听→转写→assistant 回复；打断停止播放；重连不重复 final transcript，且明确标注新 Provider
    会话；无麦克风降级文本。账本持久化是暂缓项（tasks (a)），本轮验收只到客户端投影不重复。
 5. **AgentTeam**：captain 判定接缝（`resolveCaptainSurface`）单测通过；无 captain 回退 llm；
-   web 团队界面不在本 change（tasks 暂缓项 (c)）。
+   LLM captain 的 web 团队界面、`GET /v1/sessions/{id}/team-tasks` 只读投影与 captain 时间线
+   团队动态通过（五态 TUI + 真库 HTTP）；非 LLM（realtime/image）团队界面与成员 surface 标记
+   仍为 tasks 暂缓项 (c)。
 6. **移动端**：390px 单列；麦克风权限/录音指示可见；image 画廊可滚动；无横向溢出。
 7. **运行**：web 构建通过，`keel serve` 启动，local 域名可访问；登录后能看到对应 surface。
 8. **安全**：音频/麦克风无后台常听；无原始音频日志；媒体请求走租户边界；错误不伪造消息。
@@ -227,3 +229,6 @@ web/src/surfaces/
 > 本轮修订（2026-11-13）：按已交付代码事实同步——unsupported 占位面（video/generic）、
 > `resolveCaptainSurface` / `previewSwitchReason`、realtime 预检未配置态、媒体编辑 URL-only，
 > 并显式登记三项暂缓（转写账本、真实厂商凭据、AgentTeam web 团队界面）。
+>
+> 本轮修订（2026-11-21）：LLM captain 的 web 团队界面与 `GET /v1/sessions/{id}/team-tasks`
+> 只读投影已交付；非 LLM（realtime/image）captain 团队界面与成员 surface 标记保留暂缓项 (c)。
