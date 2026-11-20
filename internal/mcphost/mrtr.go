@@ -54,8 +54,10 @@ const (
 	// is running: the call's (tenant, session) scope must be on the context.
 	SamplingSession SamplingMode = "session"
 	// SamplingOn executes sampling from any executor context (still audited and
-	// budgeted). It exists for hosts that deliberately allow it; the keel
-	// deployment default is session.
+	// subject to the per-call request budget). It has NO per-server window
+	// budget: an operator enabling it accepts that a connected server may call
+	// the model while no session run is active. The keel deployment default is
+	// session; on exists only for hosts that deliberately accept that cost.
 	SamplingOn SamplingMode = "on"
 )
 
