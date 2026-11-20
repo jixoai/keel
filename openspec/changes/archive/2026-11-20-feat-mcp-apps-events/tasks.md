@@ -246,7 +246,9 @@
       （2026-11-20 P6C docs lane：G0/G4 逐条对表
       `evidence/p6/docs/parity.md`；站点检查 VitePress build + 双语 parity + 链接门禁通过，
       citation gate 在基线页面有 24 条既有 stale anchor（非本 lane 页面引入，见 parity.md §4））
-- [ ] P6.6 交付即归档：`openspec/changes/archive/` + 提交推送（含主仓指针，若在子仓工作）
+- [x] P6.6 交付即归档：`openspec/changes/archive/` + 提交推送（含主仓指针，若在子仓工作）
+      （2026-11-20：`openspec archive feat-mcp-apps-events` → `2026-11-20-feat-mcp-apps-events`；
+      specs 合入 `openspec/specs/mcp-apps|mcp-events`；G0–G5 证据见归档 `evidence/p6/ACCEPTANCE.md`）
 
 ## 已知暂缓项（登记，不装作已完成）
 

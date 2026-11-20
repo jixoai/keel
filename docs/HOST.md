@@ -133,9 +133,9 @@ compaction summary）也不会丢账；provider 已计费但进程崩溃导致 u
 
 > 本节描述 **`keel serve`（Harness 产品宿主）**。`cmd/runtime` 只装配 MCP 工具与通知，
 > 没有 app 目录、MRTR 执行器或 `/v1/mcp/*` 路由；那些内容不适用于它。
-> 设计基线：`openspec/changes/feat-mcp-apps-events/` 的 `design.md` 与两份 spec；
+> 设计基线：`openspec/changes/archive/2026-11-20-feat-mcp-apps-events/` 的 `design.md` 与两份 spec；
 > G0/G4 逐条对表见
-> `openspec/changes/feat-mcp-apps-events/evidence/p6/docs/parity.md`。
+> `openspec/changes/archive/2026-11-20-feat-mcp-apps-events/evidence/p6/docs/parity.md`。
 
 Keel 在 MCP 里是 **host/client**，不实现 server 侧。MCP 面在宿主侧投影为：工具、提示段、
 app 目录与 events；资源面当前只投影已发布 app 的文档（不是完整的 `resources/list` 目录）。

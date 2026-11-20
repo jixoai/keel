@@ -21,7 +21,7 @@
 | provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
 | keel-ga | 36/43 | §2/§3/§5 已交付；剩 §1 压缩文档、§6 验收 5 | tenancy/provider-files/blob-lifecycle 已交付（blob 独立复核中） |
 | keel-harness-v2 | 43/146 | **W2.1–W2.5 + seam + jobcap + aclack 已交付**；余下 W2 放置与快照、W3 尾项（含新增的删除对账/capture 策略覆写/并发 capture 定序）、W5–W7、验收 | **主战场（A 轴 8.5 无 P0/P1；B 轴 8/10 两 P1 已关闭；blob-lifecycle lane 在跑）** |
-| feat-mcp-apps-events | 42/50 | 设计 + T0.1–T0.4 + P1 + P2.1–P2.8 + P3.1–P3.5/P3.7/P3.8 + P4 + P5 + P6.1–P6.3/P6.5 已交付（P5 复核修复合入 `b8ca79b`，A/B P0/P1 清零；G0–G5 证据 `evidence/p6/ACCEPTANCE.md`）；剩余 P3.6（NSH per-permission allow 上游依赖）、P6.4 最终交叉复核、P6.6 归档与 5 个已登记 Non-Goal | Wave 5 P6 验收完成，待交叉复核/归档 |
+| ~~feat-mcp-apps-events~~（已归档 2026-11-20） | 44/50 | 设计 + T0.1–T0.4 + P1 + P2.1–P2.8 + P3.1–P3.5/P3.7/P3.8 + P4 + P5 + P6.1–P6.3/P6.5 已交付（P5 复核修复合入 `b8ca79b`，A/B P0/P1 清零；G0–G5 证据 `evidence/p6/ACCEPTANCE.md`）；P6.4 已通过（reviewer 9/10 + vision）；剩余 P3.6（NSH per-permission allow 上游依赖）与 5 个已登记 Non-Goal | **已归档**（`2026-11-20-feat-mcp-apps-events`）；剩余 P3.6 上游依赖与 5 个 Non-Goal 留后续 change |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
 | keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
 | ~~fix-session-delete-soft-archive~~ | 11/11 | — | **已归档 2026-11-19** |
@@ -98,7 +98,7 @@
   P6.3 降级面 E2E、P6.4 独立子代理交叉复核、P6.6 archive/提交推送。
   P6.5 文档（`docs/HOST.md` MCP 段、`docs/PI-PARITY.md`、`site/docs/zh/harness/mcp-apps.md`
   与站点双语门禁要求的 `site/docs/harness/mcp-apps.md`、本计划）已交付；G0/G4 逐条对表见
-  `openspec/changes/feat-mcp-apps-events/evidence/p6/docs/parity.md`。
+  `openspec/changes/archive/2026-11-20-feat-mcp-apps-events/evidence/p6/docs/parity.md`。
 - **未完成/上游依赖**：P2.8 的独立降级 E2E、P3.5 的浏览器全屏切换 E2E 归 P6；P3.6
   camera/microphone/geolocation/clipboardWrite 的授予依赖 **NSH per-permission allow**
   （0.4 无该控制面），当前诚实不授予、不假装声明；`KEEL_MCP_APP_ORIGIN` 的第二 origin
@@ -199,7 +199,7 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 - 正在跑：运行注入实现（线 A，P1→P6）
 - **MCP Apps 双 origin 沙箱域开通**（2026-11-14）：`https://mcp-app.fde2e.com/` +
   `https://<app>.mcp-app.fde2e.com`（证书/路由/frpc/浏览器渲染全链验收；证据
-  `openspec/changes/feat-mcp-apps-events/evidence/domain-provision.md`）
+  `openspec/changes/archive/2026-11-20-feat-mcp-apps-events/evidence/domain-provision.md`）
 - **2026-11-19**：4 个 change 归档（`1daa977`）；复核修复 `09399f1` + 修复后 E2E 证据
   `2b1c1e7` 已推送；**W2.1 工具面骨架开工**（slow-agent 后台，11 恒定工具 / action 闭集 /
   清单哈希 / 旧名快照断言 / `mcp__` 方言删除 / PI-PARITY 偏离登记）

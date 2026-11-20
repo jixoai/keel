@@ -3,8 +3,8 @@
 > 状态：P2 后端 + 前端 View；P3 桥与出站动作；P4 events；P5 MRTR/era/app context
 > 均已交付（P6 验收进行中）。当前运行时/HTTP 面的完整说明以
 > [`HOST.md`](HOST.md) §5 为准；本文保留 P2 建立的服务端细节。
-> 设计依据：`openspec/changes/feat-mcp-apps-events/design.md` §2/§3；
-> 验收证据：`openspec/changes/feat-mcp-apps-events/evidence/`（p2–p5）。
+> 设计依据：`openspec/changes/archive/2026-11-20-feat-mcp-apps-events/design.md` §2/§3；
+> 验收证据：`openspec/changes/archive/2026-11-20-feat-mcp-apps-events/evidence/`（p2–p5）。
 
 ## 端点
 

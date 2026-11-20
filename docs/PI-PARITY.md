@@ -105,7 +105,7 @@ MCP OAuth 的运行时代理层（PostgreSQL 加密存储 / 独立锁池刷新�
 MCP Apps（SEP-1865，`io.modelcontextprotocol/ui`）与 events 面（`subscriptions/listen`、
 `resultType`、MRTR 等 2026-07-28 修订）是 **PI 没有的能力**。keel 以扩展方式接入，
 不冒充 PI 标准；legacy MCP 的工具适配、传输、配置、内容转换与 20KB 裁剪逐条不变。
-逐条对表见 `openspec/changes/feat-mcp-apps-events/evidence/p6/docs/parity.md`。
+逐条对表见 `openspec/changes/archive/2026-11-20-feat-mcp-apps-events/evidence/p6/docs/parity.md`。
 
 | 偏离/扩展 | 依据 | 影响面 | 替代/回退 |
 |---|---|---|---|
