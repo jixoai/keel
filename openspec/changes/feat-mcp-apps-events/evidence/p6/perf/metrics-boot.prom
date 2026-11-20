@@ -1,0 +1,83 @@
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 30
+# HELP go_memstats_heap_alloc_bytes Bytes of allocated heap objects.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 7.0918984e+07
+# HELP go_memstats_heap_sys_bytes Bytes of heap memory obtained from the OS.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 1.37560064e+08
+# HELP keel_runs_started_total Agent run attempts claimed by this process.
+# TYPE keel_runs_started_total counter
+keel_runs_started_total 0
+# HELP keel_runs_finished_total Agent runs whose terminal state was committed (status=done|failed).
+# TYPE keel_runs_finished_total counter
+# HELP keel_runs_failed_total Agent runs whose terminal state is failed.
+# TYPE keel_runs_failed_total counter
+keel_runs_failed_total 0
+# HELP keel_run_attempts_total Agent run attempts settled by this process, by outcome (done|failed|pending|finish_error|abandoned|other).
+# TYPE keel_run_attempts_total counter
+# HELP keel_run_attempt_duration_seconds Wall-clock duration of one agent run attempt.
+# TYPE keel_run_attempt_duration_seconds histogram
+keel_run_attempt_duration_seconds_bucket{le="0.01"} 0
+keel_run_attempt_duration_seconds_bucket{le="0.05"} 0
+keel_run_attempt_duration_seconds_bucket{le="0.1"} 0
+keel_run_attempt_duration_seconds_bucket{le="0.25"} 0
+keel_run_attempt_duration_seconds_bucket{le="0.5"} 0
+keel_run_attempt_duration_seconds_bucket{le="1"} 0
+keel_run_attempt_duration_seconds_bucket{le="2.5"} 0
+keel_run_attempt_duration_seconds_bucket{le="5"} 0
+keel_run_attempt_duration_seconds_bucket{le="10"} 0
+keel_run_attempt_duration_seconds_bucket{le="30"} 0
+keel_run_attempt_duration_seconds_bucket{le="60"} 0
+keel_run_attempt_duration_seconds_bucket{le="120"} 0
+keel_run_attempt_duration_seconds_bucket{le="300"} 0
+keel_run_attempt_duration_seconds_bucket{le="+Inf"} 0
+keel_run_attempt_duration_seconds_sum 0
+keel_run_attempt_duration_seconds_count 0
+# HELP keel_runs_active Agent run attempts currently executing in this process.
+# TYPE keel_runs_active gauge
+keel_runs_active 0
+# HELP keel_leases_expired_total Runs reclaimed after their lease expired.
+# TYPE keel_leases_expired_total counter
+keel_leases_expired_total 0
+# HELP keel_run_finish_errors_total Run attempts whose terminal state could not be persisted.
+# TYPE keel_run_finish_errors_total counter
+keel_run_finish_errors_total 0
+# HELP keel_compactions_total Compaction events committed to the event log.
+# TYPE keel_compactions_total counter
+keel_compactions_total 0
+# HELP keel_draining 1 while the process is draining, else 0.
+# TYPE keel_draining gauge
+keel_draining 0
+# HELP mcp_servers MCP servers in each connection state (connected|disconnected).
+# TYPE mcp_servers gauge
+mcp_servers{state="connected"} 1
+mcp_servers{state="disconnected"} 0
+# HELP mcp_surface_generation Monotonic generation of the published MCP surface.
+# TYPE mcp_surface_generation gauge
+mcp_surface_generation 2
+# HELP mcp_app_fetch_total App document resolutions by result (ok|error|reused|other).
+# TYPE mcp_app_fetch_total counter
+mcp_app_fetch_total{result="ok"} 40
+# HELP mcp_app_bridge_frames_total App bridge frames by method (tools/call, resources/read, ui/message, ui/open-link, other) and direction (in|out).
+# TYPE mcp_app_bridge_frames_total counter
+# HELP mcp_listen_reconnects_total subscriptions/listen reconnect attempts.
+# TYPE mcp_listen_reconnects_total counter
+mcp_listen_reconnects_total 0
+# HELP mcp_mrtr_rounds MRTR input-required rounds per tool call.
+# TYPE mcp_mrtr_rounds histogram
+mcp_mrtr_rounds_bucket{le="1"} 0
+mcp_mrtr_rounds_bucket{le="2"} 0
+mcp_mrtr_rounds_bucket{le="3"} 0
+mcp_mrtr_rounds_bucket{le="4"} 0
+mcp_mrtr_rounds_bucket{le="5"} 0
+mcp_mrtr_rounds_bucket{le="+Inf"} 0
+mcp_mrtr_rounds_sum 0
+mcp_mrtr_rounds_count 0
+# HELP keel_runs_pending Durable runs waiting to be claimed.
+# TYPE keel_runs_pending gauge
+keel_runs_pending 0
+# HELP keel_streams_active SSE and file streams currently open.
+# TYPE keel_streams_active gauge
+keel_streams_active 0

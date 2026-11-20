@@ -1,0 +1,45 @@
+File: keel
+Build ID: e8a2ace0228e73d9ea15b078a5588c00641fd4fd
+Type: inuse_space
+Time: 2026-11-20 11:36:11 CST
+Active filters:
+   focus=jixoai/keel/internal/mcphost
+Showing nodes accounting for 31232.59kB, 83.20% of 37539.22kB total
+      flat  flat%   sum%        cum   cum%
+29096.64kB 77.51% 77.51% 29096.64kB 77.51%  github.com/jixoai/keel/internal/mcphost.documentBytes
+ 1623.58kB  4.33% 81.83%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcp.ParseMessage
+  512.38kB  1.36% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.newSchema (inline)
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/agenttool.(*ToolRegistry).Register
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/agenttool.compileSchema
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/host.(*Host).RefreshSections
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/host.buildRegistry
+         0     0% 83.20%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcp.(*Client).ReadAppResource
+         0     0% 83.20%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcp.(*Client).ReadResource
+         0     0% 83.20%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcp.(*Client).request
+         0     0% 83.20%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcp.(*HTTPTransport).Send
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Events).RefreshNow
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Events).publish
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Events).refresh
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Events).startSupervisor.func1
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Events).supervise
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Registry).Refresh
+         0     0% 83.20% 30720.22kB 81.83%  github.com/jixoai/keel/internal/mcphost.(*Registry).Refresh.func1
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/mcphost.(*Registry).emit
+         0     0% 83.20%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcphost.(*Registry).read
+         0     0% 83.20%  1623.58kB  4.33%  github.com/jixoai/keel/internal/mcphost.(*Registry).read.func1
+         0     0% 83.20% 30720.22kB 81.83%  github.com/jixoai/keel/internal/mcphost.(*Registry).resolve
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/servicehost.(*Runtime).PublishMCPSurface
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/servicehost.(*Runtime).refreshAssembly
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/servicehost.(*promptService).RefreshSections (inline)
+         0     0% 83.20%   512.38kB  1.36%  github.com/jixoai/keel/internal/servicehost.(*toolsService).RefreshSections
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*Compiler).Compile
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*Compiler).compileObject
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*Compiler).compileValue
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*Compiler).doCompile
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*Compiler).enqueue
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*objCompiler).compile
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*objCompiler).compileDraft4
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*objCompiler).enqueueMap
+         0     0% 83.20%   512.38kB  1.36%  github.com/santhosh-tekuri/jsonschema/v6.(*objCompiler).enqueuePtr (inline)
+         0     0% 83.20%   512.38kB  1.36%  main.(*dynamicSurface).publish
+         0     0% 83.20%   512.38kB  1.36%  main.(*dynamicSurface).republish

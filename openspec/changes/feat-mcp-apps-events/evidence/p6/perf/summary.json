@@ -1,0 +1,109 @@
+{
+  "mode": "mcp-apps-perf",
+  "lane": "P6D",
+  "verdict": "PASS",
+  "sessions": 1000,
+  "sseStreams": 256,
+  "runs": {
+    "slots": 64,
+    "maxActive": 64,
+    "maxPending": 995,
+    "inputsSent": 1000,
+    "inputErrors": 0,
+    "started": 1000,
+    "finishedDone": 1000,
+    "finishedFailed": 0
+  },
+  "apps": 20,
+  "catalog": {
+    "identical": true,
+    "bytesAt100": 4281,
+    "bytesAt1000": 4281,
+    "hashAt100": "d717551a58d39eafe284cf1b1be4bd39023926146cac1cb7a239daf102625a7a",
+    "hashAt1000": "d717551a58d39eafe284cf1b1be4bd39023926146cac1cb7a239daf102625a7a",
+    "responseBytesAt100": 15372,
+    "responseBytesAt1000": 15372
+  },
+  "heap": {
+    "mcphostAt100MB": 31.233,
+    "mcphostAt1000MB": 31.233,
+    "mcphostDeltaMB": 0.0,
+    "mcphostAtRunsMB": 31.233,
+    "mcphostAfterGenerationsMB": 67.91,
+    "cacheBoundMiB": 64
+  },
+  "bridge": {
+    "rate": 200,
+    "durationSec": 60.001892152,
+    "requests": 12001,
+    "ok": 12001,
+    "status429": 0,
+    "other": 0,
+    "errors": 0,
+    "p50Ms": 1.592416,
+    "p95Ms": 9.814375,
+    "p99Ms": 56.056625,
+    "maxMs": 273.232834
+  },
+  "overLimit": {
+    "rateRequests": 500,
+    "rate429": 257,
+    "rateOther": 0,
+    "concurrencyRequests": 5,
+    "concurrency429": 1,
+    "concurrencyOK": 4,
+    "rateAuditRows": 1,
+    "concurrencyAuditRows": 1
+  },
+  "preLimit": {
+    "bridgeRateRefusals": 0,
+    "concurrencyRefusals": 0
+  },
+  "chaos": {
+    "durationSec": 600.014397273,
+    "kills": 15,
+    "drops": 14,
+    "backoffProbes": 1,
+    "reconnectsDelta": 38,
+    "maxRecoveryMs": 951,
+    "maxDropRecoveryMs": 1064,
+    "maxListenAttemptGapMs": 30014,
+    "probeRecoveryMs": 21788,
+    "healthFailures": 0,
+    "pidChanges": 0,
+    "catalogBadSamples": 0,
+    "catalogSamples": 507,
+    "catalogHashChanges": 15,
+    "revisionChanges": 15,
+    "bridgeOk": 11871,
+    "bridgeErrors": 129,
+    "bridgeStatus429": 0,
+    "finalRevision": 26,
+    "finalApps": 20,
+    "finalListeners": 1,
+    "auditSubscriptionRows": 69
+  },
+  "metrics": {
+    "seriesAt100": 13,
+    "seriesAt1000": 13,
+    "seriesStable": true,
+    "familyCounts": {
+      "mcp_app_bridge_frames_total": 2,
+      "mcp_app_fetch_total": 1,
+      "mcp_listen_reconnects_total": 1,
+      "mcp_mrtr_rounds": 8,
+      "mcp_servers": 2,
+      "mcp_surface_generation": 1
+    },
+    "finalHeapAllocMB": 173.906112
+  },
+  "memory": {
+    "cgroupPeakBytes": 436682752,
+    "cgroupPeakMB": 436.7,
+    "cgroupPeakMiB": 416.5,
+    "ceilingBytes": 1932735283,
+    "ceilingMiB": 1843.2
+  },
+  "failures": [],
+  "loadExitCode": 0
+}

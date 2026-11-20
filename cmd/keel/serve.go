@@ -371,6 +371,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// the fixed series, and the registry/bridge report into the same set.
 	metricsReg := keelmetrics.NewRegistry()
 	keelmetrics.BindGoRuntime(metricsReg)
+	// The runtime metric set (G3/G5): the worker's run-concurrency gauge and
+	// completion counters are the scale evidence. `cmd/runtime` has wired the
+	// same set since its W6 acceptance; `keel serve` owns a worker too, so the
+	// same facts must be visible here.
+	runMetrics := keelmetrics.NewSet(metricsReg)
 	mcpMetrics := mcphost.NewMetrics(metricsReg)
 	mcpApps := mcphost.New(mcphost.Options{
 		TenantID: opts.TenantID,
@@ -480,6 +485,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	})
 
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
+		Metrics: runMetrics,
 		Seams: servicehost.Seams{
 			Committer: kern,
 			Reader:    kern,
@@ -679,6 +685,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// claiming.
 	drainer := httpapi.NewDrainer(3000, 200)
 	streamMetrics := &stream.Metrics{}
+	keelmetrics.BindQueueDepth(metricsReg, st)
+	keelmetrics.BindStreams(metricsReg, func() int64 { return streamMetrics.StreamsActive.Load() })
 	// Blob lifecycle (keel-ga §5). The uploader queues supported images and
 	// wakes the generator; the generator's own uploader is bare so a thumbnail
 	// never queues itself. The sweeper reaps TTL-expired, unreferenced blobs

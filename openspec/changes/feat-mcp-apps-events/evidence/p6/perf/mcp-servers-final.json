@@ -1,0 +1,1 @@
+{"generation":42,"servers":[{"name":"perf-fleet","transport":"streamable-http","protocolVersion":"2026-07-28","era":"modern","connected":true,"capabilities":{"prompts":{"listChanged":true},"resources":{"subscribe":true,"listChanged":true},"tools":{"listChanged":true}},"reconnectCount":0,"tools":20,"apps":20}]}

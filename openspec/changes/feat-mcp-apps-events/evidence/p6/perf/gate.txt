@@ -1,0 +1,11 @@
+## go build ./...
+## go vet ./cmd/mcpappload
+## go test ./internal/mcphost -run TestRegistryCacheBoundAtG5Scale
+=== RUN   TestRegistryCacheBoundAtG5Scale
+--- PASS: TestRegistryCacheBoundAtG5Scale (0.25s)
+PASS
+ok  	github.com/jixoai/keel/internal/mcphost	0.480s
+## builds: linux/arm64 keel (tags keelperf), mcpappload; host keel
+-rwxr-xr-x@ 1 kzf  staff  41770311 Nov 20 11:35 /tmp/keel-p6d-perf/keel
+-rwxr-xr-x@ 1 kzf  staff  42627938 Nov 20 11:35 /tmp/keel-p6d-perf/keel-host
+-rwxr-xr-x@ 1 kzf  staff  10117177 Nov 20 11:35 /tmp/keel-p6d-perf/mcpappload

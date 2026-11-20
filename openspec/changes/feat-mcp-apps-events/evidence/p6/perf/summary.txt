@@ -1,0 +1,12 @@
+MCP Apps G5 acceptance (P6D) — scale / 2GB / chaos
+==============================================================
+verdict: PASS
+sessions: 1000 (SSE streams: 256)
+runs: maxActive=64 finished=1000 failed=0 (slots 64)
+apps: 20  catalogue bytes 4281 vs 4281  identical=True
+mcphost heap: 31.233 MB @100 / 31.233 MB @1000 / 31.233 MB @64 runs / 67.91 MB after generations
+bridge: 12001 req in 60.001892152s, ok=12001 429=0 errors=0 p99=56.056625ms
+over-limit: rate429=257 concurrency429=1 audit=1/1
+chaos: kills=15 drops=14 reconnects=38 maxGap=30014ms maxRecovery=951ms
+memory: cgroup peak 416.5 MiB / 1843.2 MiB ceiling
+metrics: series 13 vs 13 stable=True families={'mcp_app_bridge_frames_total': 2, 'mcp_app_fetch_total': 1, 'mcp_listen_reconnects_total': 1, 'mcp_mrtr_rounds': 8, 'mcp_servers': 2, 'mcp_surface_generation': 1}

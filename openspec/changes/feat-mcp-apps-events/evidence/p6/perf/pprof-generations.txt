@@ -1,0 +1,31 @@
+File: keel
+Build ID: e8a2ace0228e73d9ea15b078a5588c00641fd4fd
+Type: inuse_space
+Time: 2026-11-20 11:40:52 CST
+Active filters:
+   focus=jixoai/keel/internal/mcphost
+Showing nodes accounting for 67.91MB, 88.11% of 77.07MB total
+      flat  flat%   sum%        cum   cum%
+   61.57MB 79.88% 79.88%    61.57MB 79.88%  github.com/jixoai/keel/internal/mcphost.documentBytes
+    4.76MB  6.17% 86.05%     4.76MB  6.17%  slices.Grow[go.shape.[]uint8,go.shape.uint8] (inline)
+    1.59MB  2.06% 88.11%     1.59MB  2.06%  github.com/jixoai/keel/internal/mcp.ParseMessage
+         0     0% 88.11%     4.76MB  6.17%  encoding/json.Marshal (inline)
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/internal/jsonwire.AppendQuote
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/jsontext.(*Encoder).WriteToken (inline)
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/jsontext.(*encoderState).WriteToken
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/jsontext.Token.appendString
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.Marshal
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.makeInterfaceArshaler.func1
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.makeMapArshaler.func2
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.marshalArrayAny
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.marshalEncode
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.marshalObjectAny
+         0     0% 88.11%     4.76MB  6.17%  encoding/json/v2.marshalValueAny
+         0     0% 88.11%     6.34MB  8.23%  github.com/jixoai/keel/internal/mcp.(*Client).ReadAppResource
+         0     0% 88.11%     6.34MB  8.23%  github.com/jixoai/keel/internal/mcp.(*Client).ReadResource
+         0     0% 88.11%     6.34MB  8.23%  github.com/jixoai/keel/internal/mcp.(*Client).request
+         0     0% 88.11%     6.34MB  8.23%  github.com/jixoai/keel/internal/mcp.(*HTTPTransport).Send
+         0     0% 88.11%    67.91MB 88.11%  github.com/jixoai/keel/internal/mcphost.(*Registry).Refresh.func1
+         0     0% 88.11%     6.34MB  8.23%  github.com/jixoai/keel/internal/mcphost.(*Registry).read
+         0     0% 88.11%     6.34MB  8.23%  github.com/jixoai/keel/internal/mcphost.(*Registry).read.func1
+         0     0% 88.11%    67.91MB 88.11%  github.com/jixoai/keel/internal/mcphost.(*Registry).resolve

@@ -1,0 +1,6 @@
+# port release check (host; the fixture ports live in the removed container netns)
+port 13688 released (no host listener)
+port 13689 released (no host listener)
+port 13750 released (no host listener)
+port 13751 released (no host listener)
+# containers: 0 remaining
