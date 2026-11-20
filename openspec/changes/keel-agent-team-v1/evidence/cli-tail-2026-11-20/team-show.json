@@ -1,0 +1,27 @@
+{
+  "tenantId": "af8b8069-d393-435f-94b6-05ae2b24f0ee",
+  "id": "team_cli_probe",
+  "name": "CLI 小队",
+  "description": "second save",
+  "captain": {
+    "agentId": "agent_cli_probe"
+  },
+  "members": [
+    {
+      "agentId": "agent_cli_member",
+      "label": "评审"
+    }
+  ],
+  "defaults": {},
+  "capabilities": {
+    "teamCli": {
+      "enabled": true,
+      "commands": [
+        "member.add"
+      ]
+    }
+  },
+  "status": "valid",
+  "revision": 2,
+  "hash": "91bf8aa26f53ac1d773460d30530f7f7dc623166bd61e2e58198eaa893da72d9"
+}

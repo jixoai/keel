@@ -64,8 +64,8 @@ func usage(w io.Writer) {
 Usage:
   keel serve [flags]     Host the AgentAPI (/v1), the web UI and SSE on one origin
   keel tui [flags]       Run the NSH TUI client against a running keel serve
-  keel agent <cmd>       Manage the Agent library (list|show|create|update|delete)
-  keel team <cmd>        Manage agent teams (list|show|create|update|delete|member add|remove)
+  keel agent <cmd>       Manage the Agent library (list|show|create|update|delete|start|stop)
+  keel team <cmd>        Manage agent teams (list|show|create|update|delete|save|start|member add|remove)
   keel model <cmd>       Read the model registry (providers|list|show)
   keel admin <cmd>       Provision tenants, API keys and quotas (operator)
   keel doctor [flags]    Diagnose configuration and build artifacts

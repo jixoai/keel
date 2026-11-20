@@ -103,6 +103,8 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 			"agent create",
 			"agent update",
 			"agent delete",
+			"agent start",
+			"agent stop",
 		},
 		TeamPluginID: {
 			"team list",
@@ -112,6 +114,8 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 			"team delete",
 			"team member add",
 			"team member remove",
+			"team save",
+			"team start",
 		},
 	}
 	for id, paths := range want {

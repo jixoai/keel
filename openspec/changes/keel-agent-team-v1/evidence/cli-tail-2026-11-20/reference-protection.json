@@ -1,0 +1,51 @@
+{
+  "checkedAt": "2026-11-20",
+  "agentDeleteProtection": {
+    "implemented": true,
+    "scope": "teams referencing the agent as captain or member",
+    "status": 409,
+    "code": "agent_in_use",
+    "source": [
+      "internal/httpapi/agents.go:deleteAgent (TeamsReferencingAgent -> 409)",
+      "internal/store/agents.go:TeamsReferencingAgent"
+    ],
+    "evidence": [
+      "evidence/cli-tail-2026-11-20/agent-delete-blocked.txt"
+    ]
+  },
+  "sessionBinding": {
+    "hasAgentOrTeamColumn": false,
+    "sessionsTableColumns": [
+      "tenant_id",
+      "session_id",
+      "next_seq",
+      "state",
+      "created_at",
+      "updated_at",
+      "state_owner",
+      "external_backend",
+      "external_ref",
+      "external_status",
+      "metering",
+      "external_recovery",
+      "external_updated_at"
+    ],
+    "bindingCarrier": "user.message.payload.selection (agentId|teamId); not a queryable column",
+    "source": "internal/store/schema.sql:19-40"
+  },
+  "teamDeleteProtection": {
+    "implemented": false,
+    "blocked": true,
+    "reason": "no durable session->team binding exists; the deletion guard needs keel-harness-v2 W2-1 groups/session_placement (unimplemented) or candidate B from RUNTIME-PLAN section b",
+    "source": [
+      "openspec/changes/keel-harness-v2/RECONCILIATION.md:158 (W2-1 unimplemented: no groups/session_placement)",
+      "openspec/changes/keel-agent-team-v1/RUNTIME-PLAN.md (candidate B explicitly out of that plan)",
+      "internal/httpapi/agents.go:deleteTeam (no reference query)"
+    ]
+  },
+  "agentSessionReferenceProtection": {
+    "implemented": false,
+    "blocked": true,
+    "reason": "same missing session binding; agent deletion only checks team references today"
+  }
+}

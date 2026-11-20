@@ -6,6 +6,9 @@
 > **状态（2026-11-14）**：P0 冻结、P2/P3 的产品面（HTTP/CLI/UI/插件实体）、P4 的两种启动模式
 > 已交付并有线上 E2E 证据（见文末「交付记录」）；P1 的写命令、P4 的 run 快照/内核注入、
 > P5 的剩余打磨项为未完成项（未勾选即未完成——不得在报告里称"已就绪"）。
+>
+> **状态（2026-11-20）**：P2/P3 的 CLI 尾项（`agent start|stop`、`team save|start`）已交付，
+> 真库 E2E 证据 `evidence/cli-tail-2026-11-20/`；Team 删除的会话引用保护仍阻塞（见 P3）。
 
 ## P0 契约与设计冻结
 
@@ -46,7 +49,9 @@
 - [x] 系统提示词：inline / AGENTS.md 文件引用进入 run：`internal/agent/binding.go`（per-attempt 解析）+ `internal/host/host.go`（`RenderSystemPrompt` 保留动态段）+ `internal/servicehost/binding.go`（文件引用按部署根解析、越界拒绝、读取失败降级）；证据 `go test ./internal/agent/ ./internal/host/ ./internal/servicehost/` + `evidence/runtime-20261114-211425/wire-requests.jsonl`（captain 请求的 system 以 agent 文本开头，插件段 `<plugin_standard>` 仍在）
 - [x] 头像：确定性 identicon（seed）、上传/URL 覆盖、失败回退
 - [x] 名字/描述/标签可编辑；默认值只是建议
-- [ ] CLI：`keel agent list|show|create|update|delete|start|stop`（start/stop 未做）
+- [x] CLI：`keel agent list|show|create|update|delete|start|stop`（start/stop：`cmd/keel/agentteam_runtime.go`；
+      start = session + 带 `selection.agentId` 的 input，stop = 按最新 selection/captain 扫活会话后 cancel；
+      证据 `cmd/keel/agentteam_test.go` 运行时用例 + `evidence/cli-tail-2026-11-20/agent-start.txt`/`agent-stop-live.txt`）
 - [x] 能力树声明 agent CLI；删除/归档引用保护
 - [x] Agent 库 UI 组件与编辑器
 
@@ -56,10 +61,20 @@
       不建 `agent_team_members` 表，避免文档与行两套真值；见 store 注释）
 - [x] Team 配置是 DB-backed 文件；revision/hash；执行绑定在 attempt 启动时冻结（实现为 per-attempt 冻结：`internal/servicehost/binding.go` 每次 attempt 读文档，`RunSummary` 记录 agentId/teamId/teamRevision/teamHash/promptHash；证据 `evidence/runtime-20261114-211425/captain-summary.json`：teamRevision=1、teamHash=058a0c57…、promptHash=sha256:2db85c81…）
 - [x] 成员 0..N；成员是 Agent 引用/inline 定义；成员 label/description 可编辑
-- [ ] Team CLI：`keel team list|show|create|update|delete|member add|remove|save|start`（save/start 未做）
+- [x] Team CLI：`keel team list|show|create|update|delete|member add|remove|save|start`（save/start：
+      `cmd/keel/agentteam_runtime.go`；save = YAML/JSON 文档（必须带 id）POST/PUT 并剥离服务器字段，
+      start = session + 带 `selection.teamId` 的 input；证据 `evidence/cli-tail-2026-11-20/team-save-*.txt`、
+      `team-show-export.json`、`team-start.txt`、`team-stop-live.txt`）
+      > 遗留（2026-11-20）：`internal/agentteam/cli_specs.go` 另声明 `team member list|save`（本 task 行未列），
+      > 当前 CLI 未实现；属既有能力树与实现差异，未在本轮尾项内扩散。
 - [x] Team CLI 能力开关：关闭后拒绝并返回 typed permission error（线上 403 team_cli_disabled 实证）
 - [x] 队长自组装：成员增删只改 team 配置，不污染 model/agent provider
 - [ ] Team 删除/归档引用保护（未做：需要候选 B 的 sessions 绑定列，见 RUNTIME-PLAN §b）；运行中修改不影响当前 run [x]（per-attempt 解析：编辑只影响下一次 attempt，`internal/agent/runner.go` 的 Bindings seam）
+      > **阻塞（2026-11-20 核查）**：`sessions` 无 agent/team 绑定列（`internal/store/schema.sql:19-27`，
+      > 只有外部会话 6 列 `:34-40`），绑定仅存在于 `user.message.payload.selection`；删除保护依赖
+      > `keel-harness-v2` W2-1 的 `groups`/`session_placement`（未实现：`openspec/changes/keel-harness-v2/RECONCILIATION.md:158`）
+      > 或候选 B 的独立 change。本轮不抢建；Agent 侧被 team 引用的 409 保护已在 E2E 第 6 段实证，
+      > Agent/Team 的**会话**引用保护同此阻塞。
 - [x] 能力树声明 team CLI 子命令与 callable_by
 - [x] Team 卡片/成员管理 UI（settings › 团队）
 

@@ -168,5 +168,53 @@ provides:
       idempotent: true
       callable_by: [ui, team_captain]
       examples: ["keel team member remove team_9a02… agent_77bd… --as agent_3f1c…"]
+    - path: [team, save]
+      summary: "Upsert a team from a YAML or JSON configuration file."
+      description: "Decodes one YAML/JSON team document, then POSTs /v1/teams (unknown id) or PUTs /v1/teams/{id} (existing id). The document must carry its stable id: save is an upsert, and an id-less document is refused (use team create for a name-only team). revision and hash are server-owned: values a `keel team show` export carries are ignored, never forwarded. The file is the configuration space, so member add/remove and capability switches can be prepared offline."
+      args_schema:
+        type: object
+        properties:
+          file: { type: string, description: "YAML or JSON document; - reads stdin" }
+          json: { type: boolean }
+        required: [file]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          revision: { type: integer }
+          hash: { type: string }
+        required: [id, revision]
+      permissions: [team.write]
+      danger: write
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel team save ./team.yaml"]
+    - path: [team, start]
+      summary: "Start a team session; the captain answers and members run as their own Agents."
+      description: "POSTs /v1/sessions, then POSTs /v1/sessions/{id}/input with selection.teamId. The server resolves the captain, its prompt, its default model and its tool grants per attempt (and keeps the delegation primitive), so the CLI sends no model identity. An archived or invalid team is refused before a session is created."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          text: { type: string, description: "first user message of the run (default \"Start.\")" }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          kind: { type: string }
+          id: { type: string }
+          name: { type: string }
+          sessionId: { type: string }
+          runId: { type: string }
+          requestId: { type: string }
+          status: { type: string }
+        required: [id, sessionId, runId]
+      permissions: [team.run]
+      danger: write
+      idempotent: false
+      callable_by: [ui, team_captain]
+      examples: ["keel team start team_9a02… --text \"Plan the release\""]
 source:
   type: builtin

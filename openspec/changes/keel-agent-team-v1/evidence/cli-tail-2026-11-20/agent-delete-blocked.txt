@@ -1,0 +1,2 @@
+keel: server refused (409 agent_in_use) at http://127.0.0.1:13610: agent "agent_cli_member" is a captain or member of team_cli_probe; remove it from those teams before deleting it
+  referencing team: team_cli_probe CLI 小队

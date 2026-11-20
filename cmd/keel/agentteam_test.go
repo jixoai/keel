@@ -13,6 +13,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -31,17 +33,45 @@ type recordedRequest struct {
 	Body   []byte
 }
 
+// fakeEvent is one committed session event.
+type fakeEvent struct {
+	Seq     int64
+	Kind    string
+	Payload map[string]any
+}
+
+// fakeSession is the session/run state the runtime commands read back.
+type fakeSession struct {
+	ID        string
+	RunStatus string
+	Selection map[string]string
+	Text      string
+	RequestID string
+	Cancelled bool
+	Events    []fakeEvent
+}
+
 // fakeTeamAPI is a minimal server: cookie login, agent CRUD, team CRUD and
-// member add/remove. It keeps the state the CLI reads back.
+// member add/remove, plus the session/run surface `agent start|stop` and
+// `team start` use (create session, commit input, list sessions/events,
+// cancel).
 type fakeTeamAPI struct {
 	mu       sync.Mutex
 	password string
 	agents   map[string]httpapi.AgentView
 	teams    map[string]httpapi.AgentTeamView
+	sessions map[string]*fakeSession
 	requests []recordedRequest
 	// refuse, when set, answers every write with this status and body.
 	refuseStatus int
 	refuseBody   map[string]any
+	// inputRefuse, when set, answers POST /input with this status and body
+	// after the session exists (the start's cleanup path).
+	inputRefuseStatus int
+	inputRefuseBody   map[string]any
+	// cancelAnswer, when set, is answered verbatim by POST /cancel and the
+	// session is left untouched, so a settlement race can be modelled.
+	cancelAnswer map[string]any
 }
 
 func newFakeTeamAPI(password string) *fakeTeamAPI {
@@ -49,6 +79,7 @@ func newFakeTeamAPI(password string) *fakeTeamAPI {
 		password: password,
 		agents:   make(map[string]httpapi.AgentView),
 		teams:    make(map[string]httpapi.AgentTeamView),
+		sessions: make(map[string]*fakeSession),
 	}
 }
 
@@ -89,6 +120,97 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch {
+	case r.URL.Path == "/v1/sessions" && r.Method == http.MethodGet:
+		page := make([]map[string]any, 0, len(f.sessions))
+		for _, session := range f.sessions {
+			page = append(page, map[string]any{
+				"sessionId": session.ID,
+				"runStatus": session.RunStatus,
+				"updatedAt": "2026-11-20T00:00:00Z",
+			})
+		}
+		writeFakeJSON(w, http.StatusOK, map[string]any{
+			"sessions": page, "nextCursor": "", "hasMore": false,
+		})
+	case r.URL.Path == "/v1/sessions" && r.Method == http.MethodPost:
+		var body struct {
+			SessionID string `json:"sessionId"`
+		}
+		_ = json.Unmarshal(raw, &body)
+		id := body.SessionID
+		if id == "" {
+			id = uuid.NewString()
+		}
+		if f.sessions[id] == nil {
+			f.sessions[id] = &fakeSession{ID: id}
+		}
+		writeFakeJSON(w, http.StatusCreated, map[string]any{"sessionId": id})
+	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v1/sessions/"), "/")
+		session := f.sessions[parts[0]]
+		if session == nil {
+			writeFakeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+			return
+		}
+		switch {
+		case len(parts) == 2 && parts[1] == "input" && r.Method == http.MethodPost:
+			if f.inputRefuseStatus != 0 {
+				writeFakeJSON(w, f.inputRefuseStatus, f.inputRefuseBody)
+				return
+			}
+			var body struct {
+				Text      string            `json:"text"`
+				RequestID string            `json:"requestId"`
+				Selection map[string]string `json:"selection"`
+			}
+			_ = json.Unmarshal(raw, &body)
+			session.Text = body.Text
+			session.RequestID = body.RequestID
+			session.Selection = body.Selection
+			session.RunStatus = "pending"
+			session.Events = append(session.Events, fakeEvent{
+				Seq:  int64(len(session.Events) + 1),
+				Kind: "user.message",
+				Payload: map[string]any{
+					"text": body.Text, "requestId": body.RequestID, "selection": body.Selection,
+				},
+			})
+			writeFakeJSON(w, http.StatusCreated, map[string]any{
+				"submissionId": uuid.NewString(),
+				"requestId":    body.RequestID,
+				"status":       "pending",
+				"seq":          len(session.Events),
+				"created":      true,
+			})
+		case len(parts) == 2 && parts[1] == "events" && r.Method == http.MethodGet:
+			events := make([]map[string]any, 0, len(session.Events))
+			for _, event := range session.Events {
+				events = append(events, map[string]any{
+					"seq": event.Seq, "kind": event.Kind, "payload": event.Payload,
+				})
+			}
+			writeFakeJSON(w, http.StatusOK, map[string]any{"events": events})
+		case len(parts) == 2 && parts[1] == "cancel" && r.Method == http.MethodPost:
+			if f.cancelAnswer != nil {
+				writeFakeJSON(w, http.StatusOK, f.cancelAnswer)
+				return
+			}
+			session.Cancelled = true
+			session.RunStatus = "cancelled"
+			writeFakeJSON(w, http.StatusOK, map[string]any{
+				"sessionId": session.ID, "status": "cancelled", "runStatus": "cancelled",
+				"cancelled": true, "detail": "the in-process attempt was cancelled",
+			})
+		case len(parts) == 1 && r.Method == http.MethodDelete:
+			delete(f.sessions, session.ID)
+			writeFakeJSON(w, http.StatusOK, map[string]any{"sessionId": session.ID, "archived": true})
+		case len(parts) == 2 && parts[1] == "run" && r.Method == http.MethodGet:
+			writeFakeJSON(w, http.StatusOK, map[string]any{
+				"status": session.RunStatus, "attempts": 1, "cursorSeq": len(session.Events),
+			})
+		default:
+			writeFakeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		}
 	case r.URL.Path == "/v1/agents" && r.Method == http.MethodGet:
 		list := make([]httpapi.AgentView, 0, len(f.agents))
 		for _, view := range f.agents {
@@ -510,5 +632,593 @@ func TestAgentCLIUnknownCommandAndHelp(t *testing.T) {
 	}
 	if code, stdout, _ := runCLI(t, "team", "--help"); code != 0 || !strings.Contains(stdout, "keel team member add") {
 		t.Fatalf("team help: exit %d output %q", code, stdout)
+	}
+}
+
+// --- runtime faces: agent start|stop, team save|start ---------------------
+
+// createCLIAgent creates an agent through the CLI and returns its id.
+func createCLIAgent(t *testing.T, api *fakeTeamAPI, server, name string) string {
+	t.Helper()
+	if code, _, stderr := runCLI(t, "agent", "create", "--server", server, "--name", name); code != 0 {
+		t.Fatalf("create agent %q: exit %d stderr %s", name, code, stderr)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	for id, view := range api.agents {
+		if view.Name == name {
+			return id
+		}
+	}
+	t.Fatalf("agent %q was not stored", name)
+	return ""
+}
+
+func TestAgentStartCreatesSessionAndQueuesRun(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+
+	agentID := createCLIAgent(t, api, hs.URL, "运行主理人")
+	code, stdout, stderr := runCLI(t, "agent", "start", agentID, "--server", hs.URL, "--text", "请开始工作")
+	if code != 0 {
+		t.Fatalf("agent start: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "started agent "+agentID) {
+		t.Fatalf("start output = %q", stdout)
+	}
+	if !strings.Contains(stdout, "sessionId:") || !strings.Contains(stdout, "runId:") {
+		t.Fatalf("start output lacks sessionId/runId: %q", stdout)
+	}
+
+	created := api.lastRequest(t, http.MethodPost, "/v1/sessions")
+	if len(created.Body) != 0 && string(created.Body) != "{}" {
+		t.Fatalf("session create body = %s", created.Body)
+	}
+	var sessions int
+	api.mu.Lock()
+	sessions = len(api.sessions)
+	api.mu.Unlock()
+	if sessions != 1 {
+		t.Fatalf("sessions = %d, want 1", sessions)
+	}
+	var sessionID string
+	api.mu.Lock()
+	for id := range api.sessions {
+		sessionID = id
+	}
+	api.mu.Unlock()
+
+	input := api.lastRequest(t, http.MethodPost, "/v1/sessions/"+sessionID+"/input")
+	var body struct {
+		Text      string            `json:"text"`
+		RequestID string            `json:"requestId"`
+		Selection map[string]string `json:"selection"`
+	}
+	if err := json.Unmarshal(input.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Text != "请开始工作" {
+		t.Fatalf("text = %q", body.Text)
+	}
+	if body.Selection["agentId"] != agentID || len(body.Selection) != 1 {
+		t.Fatalf("selection = %+v, want agentId only (the server merges the default model)", body.Selection)
+	}
+	if !strings.HasPrefix(body.RequestID, "keel-start-") {
+		t.Fatalf("requestId = %q", body.RequestID)
+	}
+}
+
+func TestAgentStopCancelsTheRunningSession(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+
+	agentID := createCLIAgent(t, api, hs.URL, "被停止者")
+	if code, _, stderr := runCLI(t, "agent", "start", agentID, "--server", hs.URL, "--text", "开始"); code != 0 {
+		t.Fatalf("agent start: exit %d stderr %s", code, stderr)
+	}
+
+	api.mu.Lock()
+	var sessionID string
+	for id, session := range api.sessions {
+		sessionID = id
+		session.RunStatus = "running"
+	}
+	api.mu.Unlock()
+	if sessionID == "" {
+		t.Fatal("no session was created")
+	}
+
+	code, stdout, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("agent stop: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "stopped session "+sessionID) {
+		t.Fatalf("stop output = %q", stdout)
+	}
+	cancelled := api.lastRequest(t, http.MethodPost, "/v1/sessions/"+sessionID+"/cancel")
+	if cancelled.Method != http.MethodPost {
+		t.Fatalf("cancel request = %+v", cancelled)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if !api.sessions[sessionID].Cancelled || api.sessions[sessionID].RunStatus != "cancelled" {
+		t.Fatalf("session after stop = %+v", api.sessions[sessionID])
+	}
+}
+
+func TestAgentStopWithoutActiveRunIsARefusal(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "空闲者")
+	code, stdout, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "no active run for agent "+agentID) {
+		t.Fatalf("stderr = %q, want the explicit no-active message", stderr)
+	}
+	if strings.Contains(stdout, "stopped") {
+		t.Fatalf("stdout pretends a cancellation: %q", stdout)
+	}
+}
+
+func TestTeamSaveUpsertsYAMLAndIgnoresServerOwnedFields(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	captainID := createCLIAgent(t, api, hs.URL, "队长")
+	memberID := createCLIAgent(t, api, hs.URL, "成员")
+	document := `id: team_file
+name: 文件小队
+description: 第一次保存
+tenantId: 9f6c4c1e-2b7a-4f7a-9a6e-2f0f4b3d5a11
+status: valid
+revision: 7
+hash: stale-hash
+archived: false
+captain:
+  agentId: ` + captainID + `
+members:
+  - agentId: ` + memberID + `
+    label: 设计
+defaults:
+  tools: [bash, read]
+capabilities:
+  teamCli:
+    enabled: true
+    commands: [member.add]
+`
+	path := filepath.Join(t.TempDir(), "team.yaml")
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI(t, "team", "save", path, "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("first save: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "saved team team_file") || !strings.Contains(stdout, "created") {
+		t.Fatalf("first save output = %q", stdout)
+	}
+	created := api.lastRequest(t, http.MethodPost, "/v1/teams")
+	var write httpapi.AgentTeamWriteRequest
+	if err := json.Unmarshal(created.Body, &write); err != nil {
+		t.Fatal(err)
+	}
+	if write.ID != "team_file" || write.Name != "文件小队" || write.Captain.AgentID != captainID {
+		t.Fatalf("team write body = %s", created.Body)
+	}
+	if len(write.Members) != 1 || write.Members[0].Label != "设计" {
+		t.Fatalf("members = %+v", write.Members)
+	}
+	if len(write.Defaults.Tools) != 2 || !write.Capabilities.TeamCLI.Enabled {
+		t.Fatalf("defaults/capabilities = %+v %+v", write.Defaults, write.Capabilities)
+	}
+	// The server-owned fields are ignored, never forwarded: a client cannot pin
+	// a revision or a hash.
+	if strings.Contains(string(created.Body), "revision") || strings.Contains(string(created.Body), "tenantId") {
+		t.Fatalf("server-owned fields reached the wire: %s", created.Body)
+	}
+
+	code, stdout, stderr = runCLI(t, "team", "save", path, "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("second save: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "updated") || !strings.Contains(stdout, "revision=2") {
+		t.Fatalf("second save output = %q", stdout)
+	}
+	updated := api.lastRequest(t, http.MethodPut, "/v1/teams/team_file")
+	if !strings.Contains(string(updated.Body), `"id":"team_file"`) {
+		t.Fatalf("update body = %s", updated.Body)
+	}
+}
+
+func TestTeamSaveRejectsUnknownFields(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	path := filepath.Join(t.TempDir(), "team.yaml")
+	if err := os.WriteFile(path, []byte("id: team_bad\nname: 坏队\nbogus: true\ncaptain:\n  agentId: agent_x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runCLI(t, "team", "save", path, "--server", hs.URL)
+	if code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "bogus") {
+		t.Fatalf("stderr = %q, want the unknown field named", stderr)
+	}
+	if len(api.requests) != 0 {
+		t.Fatalf("an invalid file still sent requests: %+v", api.requests)
+	}
+}
+
+func TestTeamStartUsesTheTeamBinding(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+
+	captainID := createCLIAgent(t, api, hs.URL, "团队队长")
+	if code, _, stderr := runCLI(t, "team", "create", "--server", hs.URL,
+		"--id", "team_run", "--name", "启动小队", "--captain", captainID); code != 0 {
+		t.Fatalf("team create: exit %d stderr %s", code, stderr)
+	}
+
+	code, stdout, stderr := runCLI(t, "team", "start", "team_run", "--server", hs.URL, "--text", "团队开始")
+	if code != 0 {
+		t.Fatalf("team start: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "started team team_run") || !strings.Contains(stdout, "runId:") {
+		t.Fatalf("team start output = %q", stdout)
+	}
+	var sessionID string
+	api.mu.Lock()
+	for id := range api.sessions {
+		sessionID = id
+	}
+	api.mu.Unlock()
+	input := api.lastRequest(t, http.MethodPost, "/v1/sessions/"+sessionID+"/input")
+	var body struct {
+		Selection map[string]string `json:"selection"`
+	}
+	if err := json.Unmarshal(input.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Selection["teamId"] != "team_run" || len(body.Selection) != 1 {
+		t.Fatalf("selection = %+v, want teamId only", body.Selection)
+	}
+}
+
+func TestAgentDeleteRendersReferenceRefusal(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	api.mu.Lock()
+	api.refuseStatus = http.StatusConflict
+	api.refuseBody = map[string]any{
+		"error": `agent "agent_x" is a captain or member of team_1; remove it from those teams before deleting it`,
+		"code":  "agent_in_use",
+		"references": []map[string]any{
+			{"id": "team_1", "name": "产品小队"},
+		},
+	}
+	api.mu.Unlock()
+
+	code, _, stderr := runCLI(t, "agent", "delete", "agent_x", "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	for _, want := range []string{"agent_in_use", "referencing team: team_1 产品小队"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
+// seedSession stores one live session whose newest user.message carries a
+// selection, which is what the stop scan reads.
+func seedSession(api *fakeTeamAPI, sessionID, runStatus string, selection map[string]string) {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	api.sessions[sessionID] = &fakeSession{
+		ID:        sessionID,
+		RunStatus: runStatus,
+		Selection: selection,
+		Events: []fakeEvent{{
+			Seq:     1,
+			Kind:    "user.message",
+			Payload: map[string]any{"text": "seed", "selection": selection},
+		}},
+	}
+}
+
+// hasRequest reports whether the CLI sent method+path (the stop scan must not
+// cancel a session another agent owns).
+func (f *fakeTeamAPI) hasRequest(method, path string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, request := range f.requests {
+		if request.Method == method && request.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAgentStartRefusesAnArchivedAgent(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "已归档")
+	api.mu.Lock()
+	view := api.agents[agentID]
+	view.Archived = true
+	api.agents[agentID] = view
+	api.mu.Unlock()
+
+	code, stdout, stderr := runCLI(t, "agent", "start", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "is archived") {
+		t.Fatalf("stderr = %q, want the archived refusal", stderr)
+	}
+	if strings.Contains(stdout, "started") {
+		t.Fatalf("stdout pretends a start: %q", stdout)
+	}
+	api.mu.Lock()
+	sessions := len(api.sessions)
+	api.mu.Unlock()
+	if sessions != 0 {
+		t.Fatalf("an archived agent still created %d session(s)", sessions)
+	}
+}
+
+func TestTeamStartRefusesAnInvalidTeam(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	api.mu.Lock()
+	api.teams["team_bad"] = httpapi.AgentTeamView{
+		ID: "team_bad", Name: "无队长", Status: agentteam.StatusInvalid,
+	}
+	api.mu.Unlock()
+
+	code, stdout, stderr := runCLI(t, "team", "start", "team_bad", "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "not startable") {
+		t.Fatalf("stderr = %q, want the invalid-team refusal", stderr)
+	}
+	if strings.Contains(stdout, "started") {
+		t.Fatalf("stdout pretends a start: %q", stdout)
+	}
+	api.mu.Lock()
+	sessions := len(api.sessions)
+	api.mu.Unlock()
+	if sessions != 0 {
+		t.Fatalf("an invalid team still created %d session(s)", sessions)
+	}
+}
+
+func TestAgentStopMatchesTheCaptainOfATeamSession(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "团队队长")
+	api.mu.Lock()
+	api.teams["team_cap"] = httpapi.NewAgentTeamView(fakeTenant, agentteam.AgentTeam{
+		ID: "team_cap", Name: "队长队",
+		Captain: agentteam.TeamMember{AgentID: agentID},
+	})
+	api.mu.Unlock()
+	const sessionID = "00000000-0000-0000-0000-0000000000c1"
+	seedSession(api, sessionID, "running", map[string]string{"teamId": "team_cap"})
+
+	code, stdout, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "stopped session "+sessionID) {
+		t.Fatalf("stdout = %q, want the captain's session stopped", stdout)
+	}
+	if !api.hasRequest(http.MethodPost, "/v1/sessions/"+sessionID+"/cancel") {
+		t.Fatal("the captain's team session was not cancelled")
+	}
+}
+
+func TestAgentStopGivesTeamBindingPriorityOverAgentBinding(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	targetID := createCLIAgent(t, api, hs.URL, "被误认的成员")
+	otherCaptainID := createCLIAgent(t, api, hs.URL, "真正的队长")
+	api.mu.Lock()
+	api.teams["team_other"] = httpapi.NewAgentTeamView(fakeTenant, agentteam.AgentTeam{
+		ID: "team_other", Name: "别人的队",
+		Captain: agentteam.TeamMember{AgentID: otherCaptainID},
+	})
+	api.mu.Unlock()
+	const sessionID = "00000000-0000-0000-0000-0000000000c2"
+	// The selection contract says teamId wins: this is the other captain's run,
+	// even though the payload also names the target agent.
+	seedSession(api, sessionID, "running", map[string]string{
+		"teamId": "team_other", "agentId": targetID,
+	})
+
+	code, _, stderr := runCLI(t, "agent", "stop", targetID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "no active run") {
+		t.Fatalf("stderr = %q, want the no-active refusal", stderr)
+	}
+	if api.hasRequest(http.MethodPost, "/v1/sessions/"+sessionID+"/cancel") {
+		t.Fatal("a team session was cancelled for a non-captain agentId")
+	}
+}
+
+func TestAgentStopSettlementRaceIsNotReportedAsSuccess(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "刚好跑完")
+	const sessionID = "00000000-0000-0000-0000-0000000000c3"
+	seedSession(api, sessionID, "running", map[string]string{"agentId": agentID})
+	api.mu.Lock()
+	api.cancelAnswer = map[string]any{
+		"sessionId": sessionID, "status": "settled", "runStatus": "done",
+		"cancelled": false, "detail": "the run already reached a terminal state",
+	}
+	api.mu.Unlock()
+
+	code, stdout, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1: a settled race must not be a fake success (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "already settled") {
+		t.Fatalf("stdout = %q, want the settled state reported", stdout)
+	}
+	if strings.Contains(stdout, "stopped session") {
+		t.Fatalf("stdout claims a cancellation: %q", stdout)
+	}
+}
+
+func TestAgentStopJSONIsTheOutcomeArray(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "JSON 停止")
+	const sessionID = "00000000-0000-0000-0000-0000000000c4"
+	seedSession(api, sessionID, "running", map[string]string{"agentId": agentID})
+
+	code, stdout, stderr := runCLI(t, "agent", "stop", agentID, "--server", hs.URL, "--json")
+	if code != 0 {
+		t.Fatalf("exit %d, want 0 (stderr %s)", code, stderr)
+	}
+	var outcomes []stopOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcomes); err != nil {
+		t.Fatalf("--json output is not the outcome array: %v (%q)", err, stdout)
+	}
+	if len(outcomes) != 1 || outcomes[0].SessionID != sessionID || !outcomes[0].Cancelled {
+		t.Fatalf("outcomes = %+v", outcomes)
+	}
+}
+
+func TestAgentStartDiscardsTheSessionWhenInputIsRefused(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "拒绝输入")
+	api.mu.Lock()
+	api.inputRefuseStatus = http.StatusBadRequest
+	api.inputRefuseBody = map[string]any{
+		"error": `selection binding is not available: agent "` + agentID + `" has no usable default model`,
+		"code":  "selection_unavailable",
+	}
+	api.mu.Unlock()
+
+	code, stdout, stderr := runCLI(t, "agent", "start", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "selection_unavailable") {
+		t.Fatalf("stderr = %q, want the typed refusal", stderr)
+	}
+	if strings.Contains(stdout, "started") {
+		t.Fatalf("stdout pretends a start: %q", stdout)
+	}
+	api.mu.Lock()
+	var deleted string
+	for _, request := range api.requests {
+		if request.Method == http.MethodDelete && strings.HasPrefix(request.Path, "/v1/sessions/") {
+			deleted = strings.TrimPrefix(request.Path, "/v1/sessions/")
+		}
+	}
+	sessions := len(api.sessions)
+	api.mu.Unlock()
+	if deleted == "" {
+		t.Fatal("a refused input left the empty session behind (no DELETE was sent)")
+	}
+	if sessions != 0 {
+		t.Fatalf("the empty session still exists after the cleanup (%d sessions)", sessions)
+	}
+}
+
+func TestTeamSaveRequiresAStableID(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	path := filepath.Join(t.TempDir(), "team.yaml")
+	if err := os.WriteFile(path, []byte("name: 无 id 队\ncaptain:\n  agentId: agent_x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runCLI(t, "team", "save", path, "--server", hs.URL)
+	if code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "must carry id") {
+		t.Fatalf("stderr = %q, want the id requirement", stderr)
+	}
+	if len(api.requests) != 0 {
+		t.Fatalf("an id-less document still sent requests: %+v", api.requests)
+	}
+}
+
+func TestTeamSaveRoundTripsTheShowExport(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	captainID := createCLIAgent(t, api, hs.URL, "往返队长")
+	if code, _, stderr := runCLI(t, "team", "create", "--server", hs.URL,
+		"--id", "team_roundtrip", "--name", "往返小队", "--captain", captainID); code != 0 {
+		t.Fatalf("team create: exit %d stderr %s", code, stderr)
+	}
+	code, exported, stderr := runCLI(t, "team", "show", "team_roundtrip", "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("team show: exit %d stderr %s", code, stderr)
+	}
+	for _, serverOwned := range []string{`"revision"`, `"hash"`, `"status"`, `"tenantId"`} {
+		if !strings.Contains(exported, serverOwned) {
+			t.Fatalf("show export lacks %s: %s", serverOwned, exported)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "team.json")
+	if err := os.WriteFile(path, []byte(exported), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "team", "save", path, "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("save of the show export: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "updated") || !strings.Contains(stdout, "revision=2") {
+		t.Fatalf("save output = %q", stdout)
+	}
+	updated := api.lastRequest(t, http.MethodPut, "/v1/teams/team_roundtrip")
+	for _, serverOwned := range []string{"revision", "hash", "status", "tenantId", "archived"} {
+		if strings.Contains(string(updated.Body), `"`+serverOwned+`"`) {
+			t.Fatalf("server-owned field %q reached the wire: %s", serverOwned, updated.Body)
+		}
 	}
 }

@@ -1,0 +1,14 @@
+id: team_cli_probe
+name: CLI 小队
+description: second save
+captain:
+  agentId: agent_cli_probe
+members:
+  - agentId: agent_cli_member
+    label: 评审
+defaults:
+  tools: []
+capabilities:
+  teamCli:
+    enabled: true
+    commands: [member.add]

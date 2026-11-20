@@ -1,0 +1,76 @@
+{
+  "change": "keel-agent-team-v1",
+  "lane": "P1A2",
+  "checkedAt": "2026-11-20",
+  "head": "0c696e8",
+  "base": "6e53bff",
+  "commits": [
+    "7b8cc27",
+    "329cc15",
+    "8cab07d",
+    "0c696e8"
+  ],
+  "gofmt": {
+    "command": "gofmt -l cmd/keel internal/pluginpkg internal/agentext",
+    "output": "",
+    "clean": true
+  },
+  "build": {
+    "command": "go build ./...",
+    "exit": 0
+  },
+  "vet": {
+    "command": "go vet ./cmd/keel ./internal/pluginpkg ./internal/agentext",
+    "exit": 0
+  },
+  "tests": {
+    "command": "KEEL_TEST_DSN=<.env.local> go test -p 1 -count=1 ./...",
+    "exit": 0,
+    "okPackages": 55,
+    "failedPackages": 0,
+    "noTestFilesPackages": 11
+  },
+  "conformance": {
+    "command": "KEEL_TEST_DSN=<.env.local> bash scripts/conformance.sh",
+    "exit": 0,
+    "pass": 1077,
+    "fail": 0,
+    "skip": 1
+  },
+  "cliTests": {
+    "command": "go test -p 1 -count=1 ./cmd/keel/ -run 'TestAgent|TestTeam'",
+    "exit": 0,
+    "pass": 23,
+    "fail": 0
+  },
+  "e2e": {
+    "command": "bash scripts/agent-team-cli-e2e.sh",
+    "exit": 0,
+    "result": "PASS",
+    "agentStart": "run.finished status=done, agentId=agent_cli_probe",
+    "idleStop": "nonzero, no active run (no fake cancellation)",
+    "liveStop": "POST /v1/sessions/{id}/cancel, run.finished status=cancelled",
+    "teamSave": "create revision=1, update revision=2, show-export round-trip revision=3, id-less save exit 2",
+    "teamStart": "selection.teamId, run.finished teamId=team_cli_probe teamRevision=3",
+    "captainStop": "team run stopped through its captain, run.finished status=cancelled",
+    "referenceProtection": "agent delete of a seated member is 409 agent_in_use with the team listed",
+    "isolation": {
+      "database": "dedicated DROP/CREATE database, dropped on exit",
+      "ports": ["13610", "13611"],
+      "portRelease": "both released (no listener)",
+      "cookieFile": "removed"
+    }
+  },
+  "openspec": {
+    "command": "openspec validate keel-agent-team-v1 --strict",
+    "result": "valid"
+  },
+  "scriptSyntax": {
+    "command": "bash -n scripts/agent-team-cli-e2e.sh",
+    "exit": 0
+  },
+  "blocked": {
+    "teamDeleteSessionReferenceProtection": "blocked: no sessions.agent/team binding column; needs keel-harness-v2 W2-1 groups/session_placement (unimplemented) or RUNTIME-PLAN candidate B",
+    "agentDeleteSessionReferenceProtection": "blocked: same missing session binding"
+  }
+}

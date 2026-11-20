@@ -127,5 +127,57 @@ provides:
       idempotent: true
       callable_by: [ui, agent]
       examples: ["keel agent delete agent_3f1c…"]
+    - path: [agent, start]
+      summary: "Start an Agent session and queue one run from its default configuration."
+      description: "POSTs /v1/sessions, then POSTs /v1/sessions/{id}/input with selection.agentId. The server resolves the Agent's default model, system prompt and tool grants per attempt; the command returns the sessionId and the input submission id (runId) that queued the run. It sends no model identity: the binding is the server's authority."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          text: { type: string, description: "first user message of the run (default \"Start.\")" }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          kind: { type: string }
+          id: { type: string }
+          name: { type: string }
+          sessionId: { type: string }
+          runId: { type: string }
+          requestId: { type: string }
+          status: { type: string }
+        required: [id, sessionId, runId]
+      permissions: [agent.run]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel agent start agent_3f1c… --text \"Review the draft\""]
+    - path: [agent, stop]
+      summary: "Stop the Agent's active run (a clear refusal when nothing is active)."
+      description: "Scans the live sessions (running/pending) whose newest selection names this Agent, or a team whose captain it is (teamId wins over agentId), then POSTs /v1/sessions/{id}/cancel. A settled run is reported as settled; a queued input with no attempt is reported as queued; exit 0 only when at least one session was actually cancelled. It never reports a cancellation the server did not perform."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: array
+        description: "one entry per live session acted on (--json prints this array)"
+        items:
+          type: object
+          properties:
+            sessionId: { type: string }
+            status: { type: string }
+            runStatus: { type: string }
+            cancelled: { type: boolean }
+            detail: { type: string }
+          required: [sessionId, cancelled]
+      permissions: [agent.run]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel agent stop agent_3f1c…"]
 source:
   type: builtin

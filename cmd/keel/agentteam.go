@@ -56,6 +56,10 @@ func runAgentCmd(args []string, stdout, stderr io.Writer) int {
 		return runAgentUpdate(args[1:], stdout, stderr)
 	case "delete":
 		return runAgentDelete(args[1:], stdout, stderr)
+	case "start":
+		return runAgentStart(args[1:], stdout, stderr)
+	case "stop":
+		return runAgentStop(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		agentUsage(stdout)
 		return 0
@@ -82,6 +86,10 @@ func runTeamCmd(args []string, stdout, stderr io.Writer) int {
 		return runTeamUpdate(args[1:], stdout, stderr)
 	case "delete":
 		return runTeamDelete(args[1:], stdout, stderr)
+	case "save":
+		return runTeamSave(args[1:], stdout, stderr)
+	case "start":
+		return runTeamStart(args[1:], stdout, stderr)
 	case "member":
 		return runTeamMember(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
@@ -103,6 +111,8 @@ Usage:
   keel agent create --name <name> [flags]
   keel agent update <id> [flags]
   keel agent delete <id>
+  keel agent start <id> [--text <message>]
+  keel agent stop <id>
 
 Flags (create/update):
   --id <id>                 stable id (create only; minted when omitted)
@@ -116,6 +126,16 @@ Flags (create/update):
   --skills <a,b>
   --team-cli                enable the captain's team CLI for this agent
   --team-cli-commands <a,b> allowlisted team subcommands (member.add, ...)
+
+Start flags:
+  --text <message>          first user message of the run (default "Start.")
+
+Stop semantics:
+  The live session(s) whose newest selection names this Agent (or the team
+  whose captain it is) are cancelled through POST /v1/sessions/{id}/cancel.
+  A queued input with no active attempt is reported as queued, never as a
+  cancellation. Exit 0 only when at least one session was actually cancelled;
+  no active run and an already-settled run both exit nonzero with the reason.
 
 Common flags:
   --server <addr>           keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
@@ -135,6 +155,8 @@ Usage:
   keel team create --captain <agentId> --name <name> [flags]
   keel team update <id> [flags]
   keel team delete <id>
+  keel team save <file>     upsert a YAML/JSON team document (- reads stdin)
+  keel team start <id> [--text <message>]
   keel team member add <teamId> <agentId> [--label <l>] [--description <d>] [--as <captainAgentId>]
   keel team member remove <teamId> <agentId> [--as <captainAgentId>]
 
@@ -153,6 +175,12 @@ Member flags:
                             the captain's effective team CLI and answers 403
                             team_cli_disabled / team_cli_not_allowed when off.
                             Omitted means the operator face (settings UI/local CLI).
+
+Save/start flags:
+  <file>                    YAML or JSON team document; it must carry id (save
+                            is an upsert) and server-owned fields
+                            (tenantId/status/revision/hash/archived) are ignored
+  --text <message>          first user message of the run (default "Start.")
 
 Common flags:
   --server <addr>           keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
