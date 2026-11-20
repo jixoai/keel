@@ -39,6 +39,13 @@ const serverRequestTimeout = 5 * time.Second
 // unbounded number of handlers.
 const maxConcurrentServerRequests = 4
 
+// maxQueuedServerRequestRejects bounds the pending overflow answers. A refusal
+// is queued and written by one background worker, so the receive loop never
+// waits on the transport. Only a full queue falls back to an inline send (the
+// last resort under an extreme flood), and that send is itself bounded by
+// serverRequestTimeout.
+const maxQueuedServerRequestRejects = 32
+
 // ClientState is the connection lifecycle, named as in pi.
 type ClientState string
 
@@ -153,6 +160,18 @@ type Client struct {
 	// serverRequestSlots bounds the concurrently answered server-initiated
 	// requests; the receive loop never blocks on a handler.
 	serverRequestSlots chan struct{}
+	// serverRequestRejects holds overflow answers waiting for the single
+	// background sender. The queue is bounded; the worker is started lazily on
+	// the first overflow so a client that never overflows carries no goroutine.
+	serverRequestRejects    chan serverRequestReject
+	serverRequestRejectOnce sync.Once
+}
+
+// serverRequestReject is one overflow answer waiting to be written by the
+// background worker.
+type serverRequestReject struct {
+	transport Transport
+	request   *Request
 }
 
 // activeInputCall is one executing tool call, as a legacy server request sees
@@ -193,16 +212,17 @@ func NewClient(options ClientOptions) *Client {
 		options.Era = EraLegacy
 	}
 	return &Client{
-		options:            options,
-		state:              ClientIdle,
-		pending:            make(map[string]*pendingCall),
-		closedCh:           make(chan struct{}),
-		listeners:          make(map[string]*listener),
-		progress:           make(map[string]func(ProgressNotification)),
-		now:                time.Now,
-		era:                options.Era,
-		activeInputs:       make(map[int64]*activeInputCall),
-		serverRequestSlots: make(chan struct{}, maxConcurrentServerRequests),
+		options:              options,
+		state:                ClientIdle,
+		pending:              make(map[string]*pendingCall),
+		closedCh:             make(chan struct{}),
+		listeners:            make(map[string]*listener),
+		progress:             make(map[string]func(ProgressNotification)),
+		now:                  time.Now,
+		era:                  options.Era,
+		activeInputs:         make(map[int64]*activeInputCall),
+		serverRequestSlots:   make(chan struct{}, maxConcurrentServerRequests),
+		serverRequestRejects: make(chan serverRequestReject, maxQueuedServerRequestRejects),
 	}
 }
 
@@ -1322,8 +1342,9 @@ func (c *Client) deliver(id ID, result callResult) {
 // loop. A handler may wait for a user decision, so running it inline would let a
 // malicious (or merely interactive) server freeze every notification and
 // response on the connection. The bounded slot set keeps the concurrency and
-// the goroutine count finite; an overflow is answered immediately with -32603
-// instead of being queued or silently dropped.
+// the goroutine count finite; an overflow is answered through the bounded
+// background reject queue instead of being queued on the receive loop or
+// silently dropped.
 func (c *Client) dispatchServerRequest(transport Transport, request *Request) {
 	// Resolve the executing call now, on the receive loop: the association
 	// belongs to the moment the request arrived, not to the moment the handler
@@ -1338,17 +1359,50 @@ func (c *Client) dispatchServerRequest(transport Transport, request *Request) {
 			c.answerServerRequest(transport, request, call)
 		}()
 	default:
-		ctx, cancel := context.WithTimeout(context.Background(), serverRequestTimeout)
-		defer cancel()
-		_ = transport.Send(ctx, &ErrorResponse{
-			JSONRPC: JSONRPCVersion,
-			ID:      request.ID,
-			Error: ErrorObject{
-				Code:    CodeInternalError,
-				Message: "too many concurrent server requests",
-			},
-		})
+		c.enqueueServerRequestReject(transport, request)
 	}
+}
+
+// enqueueServerRequestReject hands one overflow answer to the bounded
+// background sender. A full queue is the extreme-flood last resort: answer
+// inline, bounded by serverRequestTimeout, rather than dropping the request
+// (an unanswered request would block the server).
+func (c *Client) enqueueServerRequestReject(transport Transport, request *Request) {
+	c.serverRequestRejectOnce.Do(func() { go c.runServerRequestRejects() })
+	select {
+	case c.serverRequestRejects <- serverRequestReject{transport: transport, request: request}:
+		return
+	default:
+	}
+	c.sendServerRequestReject(transport, request)
+}
+
+// runServerRequestRejects is the single background sender of the overflow
+// queue. It stops with the connection: a closed transport cannot accept an
+// answer anyway.
+func (c *Client) runServerRequestRejects() {
+	for {
+		select {
+		case reject := <-c.serverRequestRejects:
+			c.sendServerRequestReject(reject.transport, reject.request)
+		case <-c.closedCh:
+			return
+		}
+	}
+}
+
+// sendServerRequestReject writes the explicit -32603 refusal for one request.
+func (c *Client) sendServerRequestReject(transport Transport, request *Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), serverRequestTimeout)
+	defer cancel()
+	_ = transport.Send(ctx, &ErrorResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Error: ErrorObject{
+			Code:    CodeInternalError,
+			Message: "too many concurrent server requests",
+		},
+	})
 }
 
 // answerServerRequest replies with the executor's response. A legacy server
