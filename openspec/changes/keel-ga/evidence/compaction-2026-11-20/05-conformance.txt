@@ -1,5 +1,5 @@
 package                                              pass   fail   skip
-github.com/jixoai/keel/internal/agent                 116      0      0
+github.com/jixoai/keel/internal/agent                 117      0      0
 github.com/jixoai/keel/internal/agenttool               3      0      0
 github.com/jixoai/keel/internal/blob                   32      0      0
 github.com/jixoai/keel/internal/compaction             44      0      0
@@ -13,4 +13,4 @@ github.com/jixoai/keel/internal/skills                 49      0      0
 github.com/jixoai/keel/internal/stream                  7      0      0
 github.com/jixoai/keel/internal/telemetry              38      0      0
 ------------------------------------------------------------------------
-TOTAL                                                1083      0      1
+TOTAL                                                1084      0      1

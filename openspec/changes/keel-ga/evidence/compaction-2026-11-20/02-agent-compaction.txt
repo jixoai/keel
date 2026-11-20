@@ -1,14 +1,16 @@
 === RUN   TestCompactionPersistsEventAndCheckpoint
---- PASS: TestCompactionPersistsEventAndCheckpoint (0.26s)
+--- PASS: TestCompactionPersistsEventAndCheckpoint (0.24s)
 === RUN   TestCompactionCheckpointFailureKeepsEvent
---- PASS: TestCompactionCheckpointFailureKeepsEvent (0.16s)
+--- PASS: TestCompactionCheckpointFailureKeepsEvent (0.17s)
+=== RUN   TestCheckpointCutInMovedUnreadInputFailSafe
+--- PASS: TestCheckpointCutInMovedUnreadInputFailSafe (0.34s)
 === RUN   TestSecondCompactionAnchorsFromCheckpoint
---- PASS: TestSecondCompactionAnchorsFromCheckpoint (0.37s)
+--- PASS: TestSecondCompactionAnchorsFromCheckpoint (0.41s)
 === RUN   TestNewRunReplaysFromCheckpoint
---- PASS: TestNewRunReplaysFromCheckpoint (0.22s)
+--- PASS: TestNewRunReplaysFromCheckpoint (0.23s)
 === RUN   TestReplayFallsBackWithoutCheckpoint
---- PASS: TestReplayFallsBackWithoutCheckpoint (0.22s)
+--- PASS: TestReplayFallsBackWithoutCheckpoint (0.26s)
 === RUN   TestReplayFallsBackWithoutAnchor
---- PASS: TestReplayFallsBackWithoutAnchor (0.22s)
+--- PASS: TestReplayFallsBackWithoutAnchor (0.23s)
 PASS
-ok  	github.com/jixoai/keel/internal/agent	1.672s
+ok  	github.com/jixoai/keel/internal/agent	2.270s

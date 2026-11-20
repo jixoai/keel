@@ -145,6 +145,18 @@ func (f *guideFeed) takeRequestSeqs() []int64 {
 	return snapshot
 }
 
+// handedAny reports whether this attempt injected at least one guide message.
+// The loop appends those messages after the transcript it loaded, in injection
+// order, while the log orders them by commit seq; a checkpoint cut may therefore
+// sit at an index whose log-order seq is not the message's seq. The runner uses
+// this as a fail-safe signal for checkpoint anchoring (write kept_from_seq=NULL
+// and replay the full log instead of guessing).
+func (f *guideFeed) handedAny() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.seqs) > 0
+}
+
 // load reads the committed events above the attempt's load watermark.
 func (f *guideFeed) load(ctx context.Context) ([]store.Event, error) {
 	var (

@@ -548,7 +548,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// carries it: a guide input answered in an earlier attempt must NOT be
 	// presented as a new prompt (that would answer it twice).
 	unread, consumptionKnown := unreadInputs(events, lease.ReadWatermark)
-	msgs = presentUnreadInputLast(msgs, seqs, func(seq int64) bool {
+	msgs, seqs, movedStart := presentUnreadInputLast(msgs, seqs, func(seq int64) bool {
 		if consumptionKnown {
 			return unread[seq]
 		}
@@ -557,6 +557,12 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		// alone.
 		return lease.ReadWatermark > 0 && seq > lease.ReadWatermark
 	})
+	// The transcript length the loop starts from, before it appends produced
+	// messages (and before it inserts an in-memory system declaration). A
+	// checkpoint cut at or above movedStart and below this length lands in the
+	// moved block, where the in-memory index can no longer be resolved against
+	// log-order seqs.
+	initialLen := len(msgs)
 
 	// Session context (MCP app context) is merged into the attempt's last user
 	// message, in memory only. It is context for this attempt, not a committed
@@ -771,7 +777,26 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			// The checkpoint is a projection of the event just committed. Its
 			// save is best-effort by contract: a failure is logged and never
 			// rolls the event back, and replay falls back to the full log.
-			anchor := r.checkpointAnchor(ctx, lease.Scope, e.FirstKeptTranscriptIndex, seq)
+			//
+			// The cut index is in in-memory order, but checkpointAnchor resolves
+			// it against log-order seqs. Two situations make that mapping
+			// unusable: presentUnreadInputLast moved unread inputs to the tail
+			// (a cut in the moved block would resolve to a later seq and drop the
+			// input), and the loop injected guide messages at a turn boundary
+			// (their log seq order can differ from injection order). In both
+			// cases the sample is "replay the full log" (kept_from_seq NULL)
+			// instead of guessing a boundary: duplication is recoverable, a lost
+			// input is not.
+			anchor := int64(0)
+			switch {
+			case feed.handedAny():
+				r.Logger.Debug("checkpoint left unanchored: guide input injected", "session_id", lease.Scope.SessionID, "seq", seq)
+			case movedStart < initialLen && e.FirstKeptTranscriptIndex >= movedStart && e.FirstKeptTranscriptIndex < initialLen:
+				r.Logger.Debug("checkpoint left unanchored: cut in moved unread inputs", "session_id", lease.Scope.SessionID,
+					"seq", seq, "first_kept", e.FirstKeptTranscriptIndex, "moved_start", movedStart, "initial_len", initialLen)
+			default:
+				anchor = r.checkpointAnchor(ctx, lease.Scope, e.FirstKeptTranscriptIndex, seq)
+			}
 			if err := r.Checkpoints.SaveCheckpoint(ctx, lease.Scope, seq, anchor, e.Summary); err != nil {
 				r.Logger.Warn("save checkpoint", "session_id", lease.Scope.SessionID, "seq", seq, "err", err)
 			}
@@ -1145,27 +1170,42 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease,
 // tool call it triggers executes) instead of being swallowed by an answer to
 // older input.
 //
+// The seq slice moves in lockstep with the messages: the assistant message's
+// inputSeqs consumption fact and a checkpoint anchor both pair the two by index,
+// and a reorder that left seqs behind would attribute the wrong committed input
+// to the reordered message.
+//
+// The returned movedStart is the index where the moved block begins (== len of
+// the transcript when nothing moved). A checkpoint index that lands in that
+// block cannot be resolved against the log-order seqs (the moved message's seq
+// is older than the message occupying its in-memory position), so the caller
+// must treat it as unanchorable rather than guess.
+//
 // unread is the caller's rule: the inputSeqs consumption fact for new logs, the
 // read watermark for legacy ones.
-func presentUnreadInputLast(msgs agentcore.MessageList, seqs []int64, unread func(seq int64) bool) agentcore.MessageList {
+func presentUnreadInputLast(msgs agentcore.MessageList, seqs []int64, unread func(seq int64) bool) (agentcore.MessageList, []int64, int) {
 	if len(msgs) == 0 || len(seqs) != len(msgs) {
-		return msgs
+		return msgs, seqs, len(msgs)
 	}
 	kept := make(agentcore.MessageList, 0, len(msgs))
+	keptSeqs := make([]int64, 0, len(seqs))
 	moved := make(agentcore.MessageList, 0, len(msgs))
+	movedSeqs := make([]int64, 0, len(seqs))
 	for i, m := range msgs {
 		// seq 0 marks a message rebuilt in-process (a re-executed tool result),
 		// never a committed user input.
 		if m.Role() == agentcore.RoleUser && seqs[i] > 0 && unread(seqs[i]) {
 			moved = append(moved, m)
+			movedSeqs = append(movedSeqs, seqs[i])
 			continue
 		}
 		kept = append(kept, m)
+		keptSeqs = append(keptSeqs, seqs[i])
 	}
 	if len(moved) == 0 {
-		return msgs
+		return msgs, seqs, len(msgs)
 	}
-	return append(kept, moved...)
+	return append(kept, moved...), append(keptSeqs, movedSeqs...), len(kept)
 }
 
 // prependSessionContext merges this attempt's extra context blocks into the last

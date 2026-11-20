@@ -27,8 +27,8 @@
       （`internal/agent/runner.go` 在有序事件消费者提交事件并写 `checkpoints`；
       `internal/kernel/checkpoint.go` 与 runner `modelView` 回放；测试
       `TestCompactionPersistsEventAndCheckpoint` / `TestSecondCompactionAnchorsFromCheckpoint` /
-      `TestNewRunReplaysFromCheckpoint` / `TestReplayFallsBackWithoutCheckpoint` /
-      `TestReplayFallsBackWithoutAnchor`；证据
+      `TestCheckpointCutInMovedUnreadInputFailSafe` / `TestNewRunReplaysFromCheckpoint` /
+      `TestReplayFallsBackWithoutCheckpoint` / `TestReplayFallsBackWithoutAnchor`；证据
       `openspec/changes/keel-ga/evidence/compaction-2026-11-20/`）
 - [x] 文档：at-least-once 工具契约、单会话串行、partial 非持久
       （`docs/ARCHITECTURE.md` §3；压缩/checkpoint 回放同时写入 `docs/HOST.md` §3.4）

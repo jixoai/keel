@@ -217,6 +217,136 @@ func TestCompactionCheckpointFailureKeepsEvent(t *testing.T) {
 	}
 }
 
+// TestCheckpointCutInMovedUnreadInputFailSafe reproduces the P1 shape: an input
+// committed while the previous attempt was running sits before that attempt's
+// answer in the log and is moved to the tail in memory. A compaction cut inside
+// that moved block must not resolve the in-memory index against log-order seqs
+// (that would anchor past the input and drop it); the checkpoint is left
+// unanchored, so replay uses the full log and the input survives.
+func TestCheckpointCutInMovedUnreadInputFailSafe(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session := newSession(t, st)
+	k := testKernel(t, st)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+
+	u1 := strings.Repeat("first input ALPHA. ", 300)
+	commitInput(t, k, scope, "r1", u1, "queue", nil)
+	// Run 0 answers u1; its inputSeqs fact is the upgrade boundary that keeps a
+	// later unread input above it (see unreadInputs).
+	run0, _ := newTestRunner(t, st)
+	if _, err := execRun(t, k, run0, tenant, session); err != nil {
+		t.Fatalf("run 0: %v", err)
+	}
+
+	// Run 1 starts with u2 unread and blocks in the model call so u3 arrives
+	// while it is running: the answer's inputSeqs consumes u2, leaving u3
+	// unread and positioned before that answer in the log.
+	u2 := strings.Repeat("second input. ", 200)
+	u2Seq := commitInput(t, k, scope, "r2", u2, "queue", nil)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blocking := func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		close(started)
+		<-release
+		return FakeStream()(ctx, model, llm, cfg)
+	}
+	run1, _ := newTestRunner(t, st)
+	run1.Stream = blocking
+	lease := claimScope(t, k, tenant, session)
+	type runResult struct {
+		cursor int64
+		err    error
+	}
+	done := make(chan runResult, 1)
+	go func() {
+		cursor, err := run1.Run(ctx, lease)
+		done <- runResult{cursor: cursor, err: err}
+	}()
+	<-started
+	u3 := strings.Repeat("unread BLUE. ", 300)
+	u3Seq := commitInput(t, k, scope, "r3", u3, "queue", nil)
+	close(release)
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("run 1: %v", res.err)
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: lease, Cursor: res.cursor, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish run 1: %v", err)
+	}
+	assistants := assistantEvents(eventsOf(t, st, tenant, session))
+	if len(assistants) != 2 {
+		t.Fatalf("assistants after run 1 = %d, want 2", len(assistants))
+	}
+	got := inputSeqsOf(t, assistants[1])
+	hasU2, hasU3 := false, false
+	for _, seq := range got {
+		switch seq {
+		case u2Seq:
+			hasU2 = true
+		case u3Seq:
+			hasU3 = true
+		}
+	}
+	if !hasU2 || hasU3 {
+		t.Fatalf("run 1 inputSeqs = %v, want u2 (%d) and not u3 (%d)", got, u2Seq, u3Seq)
+	}
+
+	// Run 2 compacts. The retained budget sits between the newest answer's size
+	// and answer+u3, so the cut lands exactly on u3 — the moved block.
+	u3Tokens := compaction.EstimateTokens(agentcore.UserMessage{
+		RoleField: agentcore.RoleUser,
+		Content:   agentcore.ContentList{agentcore.NewTextContent(u3)},
+	})
+	run2, _ := newTestRunner(t, st)
+	run2.Compaction = &CompactionOptions{
+		ContextWindow: 1000,
+		Settings: compaction.CompactionSettings{
+			Enabled:          true,
+			ReserveTokens:    0,
+			KeepRecentTokens: u3Tokens + 200,
+		},
+	}
+	requeue(t, st, tenant, session)
+	if _, err := execRun(t, k, run2, tenant, session); err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+	cp, found, err := k.LoadCheckpoint(ctx, scope)
+	if err != nil || !found {
+		t.Fatalf("checkpoint = (found=%v, err=%v), want found", found, err)
+	}
+	if cp.KeptFromSeq > u3Seq {
+		t.Fatalf("checkpoint kept_from_seq = %d, want <= u3 seq %d (a later anchor drops u3)", cp.KeptFromSeq, u3Seq)
+	}
+
+	// No owed turn remains: run 2's answer consumed u3. A successor must not
+	// spin on the unread input.
+	before := countKind(eventsOf(t, st, tenant, session), store.EventAssistantMessage)
+	requeue(t, st, tenant, session)
+	successor, _ := newTestRunner(t, st)
+	if _, err := execRun(t, k, successor, tenant, session); err != nil {
+		t.Fatalf("successor run: %v", err)
+	}
+	after := countKind(eventsOf(t, st, tenant, session), store.EventAssistantMessage)
+	if after != before {
+		t.Fatalf("successor appended %d assistant message(s), want 0 (owedTurn spin)", after-before)
+	}
+
+	// Replay must still contain u3: the fail-safe kept the checkpoint
+	// unanchored, so the whole log is the model's source.
+	commitInput(t, k, scope, "r4", "replay check", "queue", nil)
+	requeue(t, st, tenant, session)
+	recorder := &checkpointRecordingStream{}
+	replay, _ := newTestRunner(t, st)
+	replay.Stream = recorder.stream
+	if _, err := execRun(t, k, replay, tenant, session); err != nil {
+		t.Fatalf("replay run: %v", err)
+	}
+	if _, ok := firstUserMessageWith(recorder.last(t), "unread BLUE"); !ok {
+		t.Fatal("replay dropped the unread input that the cut moved to the tail")
+	}
+}
+
 // TestSecondCompactionAnchorsFromCheckpoint covers an iterative compaction: the
 // run starts from checkpoint #1's summary + tail, compacts again, and must
 // anchor checkpoint #2 against the same transcript view (the previous summary
