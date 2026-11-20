@@ -44,6 +44,29 @@ test("can: 未探测/离线时全部关闭", () => {
   expect(can("mcp.apps")).toBe(false);
 });
 
+test("can: app 代理子能力随部署的 mcp.apps 派生；context 仍需显式部署位", () => {
+  resetCapabilitiesForTest();
+  setDeploymentCapabilities({ features: { "mcp.apps": true } });
+  setClientCapabilities({
+    "mcp.apps.tools": true,
+    "mcp.apps.resources": true,
+    "mcp.apps.message": true,
+    "mcp.apps.links": true,
+    "mcp.apps.context": true,
+  });
+  expect(can("mcp.apps.tools")).toBe(true);
+  expect(can("mcp.apps.resources")).toBe(true);
+  expect(can("mcp.apps.message")).toBe(true);
+  expect(can("mcp.apps.links")).toBe(true);
+  // The context route has its own deployment bit; an unwired store stays off.
+  expect(can("mcp.apps.context")).toBe(false);
+  setDeploymentCapabilities({ features: { "mcp.apps": true, "mcp.apps.context": true } });
+  expect(can("mcp.apps.context")).toBe(true);
+  // An explicit false child never falls back to the parent.
+  setDeploymentCapabilities({ features: { "mcp.apps": true, "mcp.apps.tools": false } });
+  expect(can("mcp.apps.tools")).toBe(false);
+});
+
 test("发现文档：解析 features 与 mcpApps；非布尔/非字符串被丢弃", () => {
   resetCapabilitiesForTest();
   const parsed = parseDeploymentCapabilities({

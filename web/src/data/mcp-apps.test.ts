@@ -8,6 +8,19 @@ import {
   appDocumentUrl,
   callToolResultFor,
   contentTextOf,
+  MCP_APP_RPC_INTERNAL_ERROR,
+  MCP_APP_RPC_MESSAGE_MAX,
+  MCP_APP_RPC_PENDING,
+  mcpAppContextBody,
+  mcpAppHostCapabilities,
+  mcpAppMessageBody,
+  mcpAppMessagePrefill,
+  mcpAppOpenLinkBody,
+  mcpAppOpenLinkTarget,
+  mcpAppResourceReadBody,
+  mcpAppRpcErrorOf,
+  mcpAppRpcErrorOfResponse,
+  mcpAppToolCallBody,
   parseMcpAppCatalogue,
   themeVariablesFor,
 } from "./mcp-apps";
@@ -150,4 +163,123 @@ test("文本：CallToolResult.content 的 text 块按段落拼接", () => {
     ]),
   ).toBe("第一段\n\n第二段");
   expect(contentTextOf(undefined)).toBe("");
+});
+
+// ---- host bridge helpers (F2) --------------------------------------------
+
+test("代理 body：sessionId 有值才发；message 固定 role=user/delivery=queue", () => {
+  expect(mcpAppToolCallBody("s-1", "refresh", { q: 1 })).toEqual({
+    sessionId: "s-1",
+    name: "refresh",
+    arguments: { q: 1 },
+  });
+  expect(mcpAppToolCallBody(null, "refresh", undefined)).toEqual({ name: "refresh", arguments: {} });
+  expect(mcpAppResourceReadBody("s-1", "ui://weather/dashboard")).toEqual({
+    sessionId: "s-1",
+    uri: "ui://weather/dashboard",
+  });
+  expect(mcpAppMessageBody("s-1", [{ type: "text", text: "hi" }], "r-1")).toEqual({
+    sessionId: "s-1",
+    role: "user",
+    content: [{ type: "text", text: "hi" }],
+    delivery: "queue",
+    requestId: "r-1",
+  });
+  expect(mcpAppOpenLinkBody(undefined, "https://example.com/a")).toEqual({
+    url: "https://example.com/a",
+  });
+  expect(mcpAppContextBody("s-1", { a: 1 }, undefined, "r-2")).toEqual({
+    sessionId: "s-1",
+    requestId: "r-2",
+    content: { a: 1 },
+  });
+});
+
+test("错误映射：优先透传 host 的 JSON-RPC code；无 code 用 -32603 且有界", () => {
+  expect(mcpAppRpcErrorOf({ error: { code: -32602, message: "bad params" } })).toEqual({
+    code: -32602,
+    message: "bad params",
+  });
+  expect(mcpAppRpcErrorOf(Object.assign(new Error("no tool"), { code: -32000 }))).toEqual({
+    code: -32000,
+    message: "no tool",
+  });
+  expect(mcpAppRpcErrorOf(new Error("boom"))).toEqual({
+    code: MCP_APP_RPC_INTERNAL_ERROR,
+    message: "boom",
+  });
+  expect(mcpAppRpcErrorOf("plain").code).toBe(MCP_APP_RPC_INTERNAL_ERROR);
+  const long = mcpAppRpcErrorOf(new Error("x".repeat(MCP_APP_RPC_MESSAGE_MAX * 4)));
+  expect(long.message.length).toBeLessThanOrEqual(MCP_APP_RPC_MESSAGE_MAX);
+  expect(mcpAppRpcErrorOf(new Error("line\nbreak")).message).toBe("line break");
+});
+
+test("HTTP 错误映射：JSON-RPC 形状同 code；202 不是成功；普通 error 用 -32603", () => {
+  expect(
+    mcpAppRpcErrorOfResponse(400, { jsonrpc: "2.0", error: { code: -32602, message: "role must be user" } }),
+  ).toEqual({ code: -32602, message: "role must be user" });
+  expect(mcpAppRpcErrorOfResponse(403, { error: "tool is not callable" })).toEqual({
+    code: MCP_APP_RPC_INTERNAL_ERROR,
+    message: "tool is not callable",
+  });
+  expect(mcpAppRpcErrorOfResponse(202, { decisionId: "d-1", pending: true })).toEqual({
+    code: MCP_APP_RPC_PENDING,
+    message: "交互操作仍在等待用户确认",
+  });
+  expect(mcpAppRpcErrorOfResponse(502, null)).toEqual({
+    code: MCP_APP_RPC_INTERNAL_ERROR,
+    message: "HTTP 502",
+  });
+});
+
+test("ui/message：只有 edit 分支给出预填文本；send/discard 不预填", () => {
+  expect(mcpAppMessagePrefill({ result: "edit", prefilled: { text: "改好的话" } })).toBe("改好的话");
+  expect(mcpAppMessagePrefill({ result: "send" })).toBe(undefined);
+  expect(mcpAppMessagePrefill({ result: "discard" })).toBe(undefined);
+  expect(mcpAppMessagePrefill({ result: "edit", prefilled: { text: "   " } })).toBe(undefined);
+});
+
+test("ui/open-link：只有 opened=true 且带目标 URL 才算打开", () => {
+  expect(mcpAppOpenLinkTarget({ opened: true, url: "https://example.com/a" })).toEqual({
+    opened: true,
+    url: "https://example.com/a",
+  });
+  expect(mcpAppOpenLinkTarget({ opened: false, reason: "denied" })).toEqual({ opened: false });
+  expect(mcpAppOpenLinkTarget({ opened: true })).toEqual({ opened: false });
+});
+
+test("hostCapabilities：全开声明五项 + logging + sandbox，全关只留 logging", () => {
+  const app = parseMcpAppCatalogue({
+    apps: [row({ cspDomains: { connectDomains: ["https://api.example.com"] } })],
+  }).apps[0];
+  const all = mcpAppHostCapabilities(
+    {
+      serverTools: true,
+      serverResources: true,
+      message: true,
+      openLinks: true,
+      updateModelContext: true,
+    },
+    app,
+  );
+  expect(all).toEqual({
+    logging: {},
+    serverTools: {},
+    serverResources: {},
+    message: {},
+    openLinks: {},
+    updateModelContext: {},
+    sandbox: { csp: { connectDomains: ["https://api.example.com"] } },
+  });
+  const none = mcpAppHostCapabilities(
+    {
+      serverTools: false,
+      serverResources: false,
+      message: false,
+      openLinks: false,
+      updateModelContext: false,
+    },
+    { cspDomains: undefined },
+  );
+  expect(none).toEqual({ logging: {} });
 });

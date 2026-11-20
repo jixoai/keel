@@ -4,6 +4,7 @@
 // assertions, not hopes.
 import { expect, test } from "nsh/test";
 import type { McpAppView } from "../../data/contract";
+import { mcpAppHostCapabilities } from "../../data/mcp-apps";
 import {
   byteLength,
   createAppBridge,
@@ -26,6 +27,7 @@ const APP: McpAppView = {
   visibility: ["model", "app"],
   tools: [],
   csp: "default-src 'none'",
+  cspDomains: { connectDomains: ["https://api.example.com"] },
   permissions: {},
   hash: "a".repeat(64),
   documentUrl: `/v1/mcp/apps/mcpapp_0123456789abcdef/view?v=${"a".repeat(64)}`,
@@ -357,4 +359,360 @@ test("限速：单实例每秒最多 200 帧，超出即销毁", () => {
   expect(h.destroyed.length).toBe(1);
   expect(h.destroyed[0].kind).toBe("protocol");
   expect(h.destroyed[0].message).toContain("200");
+});
+
+// ---- host requests (change feat-mcp-apps-events, F2) ----------------------
+//
+// A View request that reaches a host proxy is answered asynchronously: the
+// response is a JSON-RPC result on success and the host's own code on failure.
+// The capability the host advertised at initialize is the gate; an undeclared
+// method is refused with -32601 before any callback runs.
+
+const ALL_CAPS = {
+  serverTools: true,
+  serverResources: true,
+  message: true,
+  openLinks: true,
+  updateModelContext: true,
+};
+
+const allCapabilities = () => mcpAppHostCapabilities(ALL_CAPS, APP);
+const noCapabilities = () =>
+  mcpAppHostCapabilities(
+    {
+      serverTools: false,
+      serverResources: false,
+      message: false,
+      openLinks: false,
+      updateModelContext: false,
+    },
+    APP,
+  );
+
+const ready = (h: Harness) => {
+  h.bridge.start();
+  h.bridge.handleMessage(initialize());
+  h.bridge.handleMessage(INITIALIZED);
+};
+
+const request = (id: number, method: string, params?: Record<string, unknown>) =>
+  JSON.stringify({ jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) });
+
+const responseFor = (h: Harness, id: number) =>
+  h.posted.find((frame) => frame.id === id) as
+    | { result?: unknown; error?: { code: number; message: string } }
+    | undefined;
+
+/** Let every resolved promise chain run (the bridge does not await callbacks). */
+const flush = async () => {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+};
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+test("tools/call：声明 serverTools 时回调被调用，结果原样回填", async () => {
+  const calls: { name: string; args: unknown }[] = [];
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    callTool: async (name, args) => {
+      calls.push({ name, args });
+      return { content: [{ type: "text", text: "24°C" }], structuredContent: { tempC: 24 }, isError: false };
+    },
+  });
+  ready(h);
+  h.bridge.handleMessage(request(41, "tools/call", { name: "refresh", arguments: { city: "上海" } }));
+  await flush();
+
+  expect(calls).toEqual([{ name: "refresh", args: { city: "上海" } }]);
+  expect(responseFor(h, 41)?.result).toEqual({
+    content: [{ type: "text", text: "24°C" }],
+    structuredContent: { tempC: 24 },
+    isError: false,
+  });
+  expect(h.bridge.snapshot().phase).toBe("ready");
+});
+
+test("tools/call：回调 reject 时透传 host 的 code；无 code 用 -32603", async () => {
+  const mapped = harness({
+    hostCapabilities: allCapabilities,
+    callTool: async () => {
+      throw { code: -32602, message: "bad arguments" };
+    },
+  });
+  ready(mapped);
+  mapped.bridge.handleMessage(request(42, "tools/call", { name: "refresh" }));
+  await flush();
+  expect(responseFor(mapped, 42)?.error).toEqual({ code: -32602, message: "bad arguments" });
+
+  const generic = harness({
+    hostCapabilities: allCapabilities,
+    callTool: async () => {
+      throw new Error("upstream is down");
+    },
+  });
+  ready(generic);
+  generic.bridge.handleMessage(request(43, "tools/call", { name: "refresh" }));
+  await flush();
+  expect(responseFor(generic, 43)?.error?.code).toBe(-32603);
+  expect(responseFor(generic, 43)?.error?.message).toBe("upstream is down");
+  // A failed host request is not a protocol violation: the View stays alive.
+  expect(generic.destroyed.length).toBe(0);
+});
+
+test("resources/read：成功回 {contents}；失败同 code", async () => {
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    readResource: async (uri) => ({ contents: [{ uri, text: "<html></html>" }] }),
+  });
+  ready(h);
+  h.bridge.handleMessage(request(44, "resources/read", { uri: "ui://weather/dashboard" }));
+  await flush();
+  expect(responseFor(h, 44)?.result).toEqual({
+    contents: [{ uri: "ui://weather/dashboard", text: "<html></html>" }],
+  });
+
+  const rejected = harness({
+    hostCapabilities: allCapabilities,
+    readResource: async () => {
+      throw { code: -32602, message: "resource URI rejected" };
+    },
+  });
+  ready(rejected);
+  rejected.bridge.handleMessage(request(45, "resources/read", { uri: "file:///etc/passwd" }));
+  await flush();
+  expect(responseFor(rejected, 45)?.error).toEqual({ code: -32602, message: "resource URI rejected" });
+});
+
+test("ui/message：固定 user/queue，回 {}；同一帧 id 的重放复用 requestId", async () => {
+  const seen: { content: unknown; requestId: string }[] = [];
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    sendMessage: async (content, requestId) => {
+      seen.push({ content, requestId });
+      return {};
+    },
+  });
+  ready(h);
+  const params = { role: "user", content: [{ type: "text", text: "看看天气" }], delivery: "queue" };
+  h.bridge.handleMessage(request(46, "ui/message", params));
+  await flush();
+  h.bridge.handleMessage(request(46, "ui/message", params));
+  await flush();
+
+  expect(seen.length).toBe(2);
+  expect(seen[0].requestId).toBe(seen[1].requestId);
+  expect(seen[0].requestId).toContain("46");
+  expect(responseFor(h, 46)?.result).toEqual({});
+});
+
+test("ui/message：非 user 角色回 -32602，不调用回调", async () => {
+  let calls = 0;
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    sendMessage: async () => {
+      calls++;
+      return {};
+    },
+  });
+  ready(h);
+  h.bridge.handleMessage(request(47, "ui/message", { role: "assistant", content: [{ type: "text", text: "x" }] }));
+  await flush();
+  expect(calls).toBe(0);
+  expect(responseFor(h, 47)?.error?.code).toBe(-32602);
+});
+
+test("ui/open-link：确认后的 URL 交给回调，回 {}；拒绝由回调给 isError", async () => {
+  const urls: string[] = [];
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    openLink: async (url) => {
+      urls.push(url);
+      return {};
+    },
+  });
+  ready(h);
+  h.bridge.handleMessage(request(48, "ui/open-link", { url: "https://example.com/a" }));
+  await flush();
+  expect(urls).toEqual(["https://example.com/a"]);
+  expect(responseFor(h, 48)?.result).toEqual({});
+
+  const denied = harness({
+    hostCapabilities: allCapabilities,
+    openLink: async () => ({ isError: true }),
+  });
+  ready(denied);
+  denied.bridge.handleMessage(request(49, "ui/open-link", { url: "https://example.com/b" }));
+  await flush();
+  expect(responseFor(denied, 49)?.result).toEqual({ isError: true });
+});
+
+test("ui/update-model-context：content/structuredContent 交给回调，回 {}", async () => {
+  const seen: { content: unknown; structured: unknown; requestId: string }[] = [];
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    updateModelContext: async (content, structuredContent, requestId) => {
+      seen.push({ content, structured: structuredContent, requestId });
+      return {};
+    },
+  });
+  ready(h);
+  h.bridge.handleMessage(
+    request(50, "ui/update-model-context", {
+      content: [{ type: "text", text: "当前城市：上海" }],
+      structuredContent: { city: "上海" },
+    }),
+  );
+  await flush();
+  expect(seen.length).toBe(1);
+  expect(seen[0].content).toEqual([{ type: "text", text: "当前城市：上海" }]);
+  expect(seen[0].structured).toEqual({ city: "上海" });
+  expect(seen[0].requestId).toContain("50");
+  expect(responseFor(h, 50)?.result).toEqual({});
+
+  const empty = harness({ hostCapabilities: allCapabilities, updateModelContext: async () => ({}) });
+  ready(empty);
+  empty.bridge.handleMessage(request(51, "ui/update-model-context", {}));
+  await flush();
+  expect(responseFor(empty, 51)?.error?.code).toBe(-32602);
+});
+
+test("错误路径：message/open-link/context 的拒绝同样回 JSON-RPC error", async () => {
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    sendMessage: async () => {
+      throw { code: -32602, message: "content must contain at least one text block" };
+    },
+    openLink: async () => {
+      throw new Error("link denied");
+    },
+    updateModelContext: async () => {
+      throw { code: -32602, message: "sessionId is required" };
+    },
+  });
+  ready(h);
+  h.bridge.handleMessage(request(81, "ui/message", { role: "user", content: [{ type: "image" }] }));
+  h.bridge.handleMessage(request(82, "ui/open-link", { url: "https://example.com" }));
+  h.bridge.handleMessage(request(83, "ui/update-model-context", { content: [{ type: "text", text: "x" }] }));
+  await flush();
+
+  expect(responseFor(h, 81)?.error).toEqual({
+    code: -32602,
+    message: "content must contain at least one text block",
+  });
+  expect(responseFor(h, 82)?.error?.code).toBe(-32603);
+  expect(responseFor(h, 82)?.error?.message).toBe("link denied");
+  expect(responseFor(h, 83)?.error?.code).toBe(-32602);
+  expect(h.destroyed.length).toBe(0);
+});
+
+test("未声明能力：五个 host 方法都回 -32601，回调不执行，实例不销毁", async () => {
+  let calls = 0;
+  const h = harness({
+    hostCapabilities: noCapabilities,
+    callTool: async () => {
+      calls++;
+      return {};
+    },
+    readResource: async () => {
+      calls++;
+      return {};
+    },
+    sendMessage: async () => {
+      calls++;
+      return {};
+    },
+    openLink: async () => {
+      calls++;
+      return {};
+    },
+    updateModelContext: async () => {
+      calls++;
+      return {};
+    },
+  });
+  ready(h);
+  h.bridge.handleMessage(request(61, "tools/call", { name: "x" }));
+  h.bridge.handleMessage(request(62, "resources/read", { uri: "ui://x/y" }));
+  h.bridge.handleMessage(request(63, "ui/message", { role: "user", content: [{ type: "text", text: "x" }] }));
+  h.bridge.handleMessage(request(64, "ui/open-link", { url: "https://example.com" }));
+  h.bridge.handleMessage(request(65, "ui/update-model-context", { content: [{ type: "text", text: "x" }] }));
+  await flush();
+
+  expect(calls).toBe(0);
+  for (const id of [61, 62, 63, 64, 65]) {
+    expect(responseFor(h, id)?.error?.code).toBe(-32601);
+  }
+  expect(h.destroyed.length).toBe(0);
+  expect(h.bridge.snapshot().phase).toBe("ready");
+});
+
+test("能力快照在 initialize 冻结：之后能力变真也不会接受未声明的请求", async () => {
+  let caps: Record<string, unknown> = { logging: {} };
+  let calls = 0;
+  const h = harness({
+    hostCapabilities: () => caps,
+    callTool: async () => {
+      calls++;
+      return {};
+    },
+  });
+  ready(h);
+  caps = { logging: {}, serverTools: {} };
+  h.bridge.handleMessage(request(66, "tools/call", { name: "refresh" }));
+  await flush();
+  expect(calls).toBe(0);
+  expect(responseFor(h, 66)?.error?.code).toBe(-32601);
+});
+
+test("异步不阻塞：一个 pending host 请求期间仍处理 ping 与 size-changed", async () => {
+  const pending = deferred<unknown>();
+  const h = harness({
+    hostCapabilities: allCapabilities,
+    callTool: () => pending.promise,
+  });
+  ready(h);
+  h.bridge.handleMessage(request(71, "tools/call", { name: "slow" }));
+  await flush();
+  expect(responseFor(h, 71)).toBe(undefined);
+
+  // A second request and a notification are handled while the first is open.
+  h.bridge.handleMessage(request(72, "ping"));
+  h.bridge.handleMessage(
+    JSON.stringify({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { width: 600, height: 300 } }),
+  );
+  await flush();
+  expect(responseFor(h, 72)?.result).toEqual({});
+  expect(h.sizes[h.sizes.length - 1]).toEqual({ width: 600, height: 300 });
+  expect(responseFor(h, 71)).toBe(undefined);
+
+  pending.resolve({ content: [{ type: "text", text: "done" }] });
+  await flush();
+  expect(responseFor(h, 71)?.result).toEqual({ content: [{ type: "text", text: "done" }] });
+});
+
+test("能力快照：initialize 的 hostCapabilities 全开声明五项，全关只留 logging/sandbox", () => {
+  const all = harness({ hostCapabilities: allCapabilities });
+  all.bridge.start();
+  all.bridge.handleMessage(initialize());
+  const opened = all.posted[0] as { result: { hostCapabilities: Record<string, unknown> } };
+  expect(Object.keys(opened.result.hostCapabilities).sort()).toEqual(
+    ["logging", "message", "openLinks", "sandbox", "serverResources", "serverTools", "updateModelContext"].sort(),
+  );
+
+  const none = harness({ hostCapabilities: noCapabilities });
+  none.bridge.start();
+  none.bridge.handleMessage(initialize());
+  const closed = none.posted[0] as { result: { hostCapabilities: Record<string, unknown> } };
+  expect(closed.result.hostCapabilities).toEqual({
+    logging: {},
+    sandbox: { csp: APP.cspDomains },
+  });
 });
