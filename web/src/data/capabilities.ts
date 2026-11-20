@@ -85,11 +85,13 @@ export function setClientCapabilities(features: Record<string, boolean>): void {
   client.set({ ...features });
 }
 
-/** The four app proxy routes ship with the app surface. The frozen server
- * reports one `mcp.apps` bit (there is no separate `mcp.apps.tools` feature in
- * `/v1/capabilities`), so the gate derives them from the parent. `context` is
- * deliberately NOT here: its route has a real deployment bit
- * (`mcp.apps.context`) and an unwired store must stay false. An explicit
+/** The four app proxy routes ship with the app surface. `/v1/capabilities`
+ * reports each one explicitly (`mcp.apps.tools`, `.resources`, `.message`,
+ * `.links`); an explicit bit always wins when the deployment sends it. An older
+ * deployment that predates the per-action bits reports only `mcp.apps`, so the
+ * gate derives the four from the parent when a child key is absent (`context`
+ * is deliberately NOT derived: its route has a real deployment bit
+ * `mcp.apps.context`, and an unwired store must stay false). An explicit
  * `false` for a child key always wins over the parent. */
 const APP_PROXY_FEATURES = new Set([
   "mcp.apps.tools",
