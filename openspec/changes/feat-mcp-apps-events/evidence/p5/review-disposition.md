@@ -58,3 +58,15 @@ E2E PASS）。修复后 A/B 复审均 0 P0/P1（各 9/10）；A 残余的溢出�
 typed McpError→wire 测试缝已补。
 
 本文件不含 DSN 或密钥。
+
+## 7. 最终收敛（2026-11-20）
+
+- A 轴最终确认（快照 `dba527b`）：P2-1 溢出拒绝已走容量 32 有界队列 + 单 worker，
+  receive loop 常规溢出不再等待 Send；队列满退化路径有界且必答不丢；
+  `TestServerRequestOverflowSendDoesNotBlockTheReceiveLoop` 为真判别测试。
+  P2-2 注释已更新；typed `McpError → wire` 测试有意义且无泄漏。
+  结论：**0 P0 / 0 P1 / 0 P2，9.5/10，pass**。
+- B 轴修复后复审：**0 P0 / 0 P1，9/10，pass**（残余为测试缝与两条已登记设计项）。
+- 最终门禁：Go 55 ok、conformance 1073/0/1、TUI 164/164、E2E PASS。
+
+P5 复核闭环完成；剩余 P2.8/P3.5 E2E、P3.6（NSH allow 上游依赖）与 P6 验收。
