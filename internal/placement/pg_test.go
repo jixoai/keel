@@ -11,20 +11,30 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/kernel"
 	keelstore "github.com/jixoai/keel/internal/store"
 )
 
 // pgPlacementStore opens the integration database. Every test uses fresh
 // tenant/group/session ids, so tests do not clean up and cannot collide.
+//
+// The kernel migration runs too: production boots kernel.NewPG before the
+// placement gate, and the runs table's pending_input/read_watermark columns
+// (kernel 0004) are part of the accounting ReleaseRun reads.
 func pgPlacementStore(t *testing.T) *keelstore.Store {
 	t.Helper()
 	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("KEEL_TEST_DSN not set")
 	}
-	st, err := keelstore.Open(context.Background(), keelstore.Config{DSN: dsn})
+	ctx := context.Background()
+	st, err := keelstore.Open(ctx, keelstore.Config{DSN: dsn})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
+	}
+	if _, err := kernel.NewPG(ctx, st.Pool()); err != nil {
+		st.Close()
+		t.Fatalf("kernel migrate: %v", err)
 	}
 	t.Cleanup(st.Close)
 	return st

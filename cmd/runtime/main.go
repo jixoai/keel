@@ -139,25 +139,31 @@ func main() {
 		EventsPerMinute: envInt("KEEL_QUOTA_EVENTS_PER_MINUTE", 0),
 	}
 	limits := quota.New(bootQuota).WithSource(tenantDocumentSource{store: st})
-	kern := kernel.New(kernelLog, kernel.Options{
-		OnCommit: func(kind kernel.EventKind) { runtimeMetrics.EventCommitted(string(kind)) },
-		Limits:   limits,
-		Audit:    servicehost.NewAuditSink(log, servicehost.AuditOptions{}),
-	})
-
-	// --- keel-service-graph W4: runtime identity, drain modes, handoff audit ---
-	//
 	// The runtime id is persistent: it names this process in runtime_instances,
 	// is written into every claim as the owner and appears in the handoff
-	// audit, so a drained runtime can never be mistaken for its successor. The
-	// coordinator owns the drain state machine (claim gate, mode, deadline,
-	// in-flight runs) that the HTTP gate and the worker consult, and it is the
-	// single entry point for both drain triggers: SIGTERM (shutdown) and the
-	// admin route (handoff or shutdown).
+	// audit, so a drained runtime can never be mistaken for its successor.
 	runtimeID := os.Getenv("KEEL_RUNTIME_ID")
 	if runtimeID == "" {
 		hostname, _ := os.Hostname()
 		runtimeID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
+	}
+	// Run concurrency is admitted durably by the placement gate below (group
+	// slots + the cross-group tenant quota in one DB transaction); the kernel
+	// keeps the event-rate dimension. Wiring both would let a second replica or
+	// a lowered configuration reject a run the DB gate already admitted.
+	kern := kernel.New(kernelLog, kernel.Options{
+		OnCommit: func(kind kernel.EventKind) { runtimeMetrics.EventCommitted(string(kind)) },
+		Limits:   limits.EventsOnly(),
+		Audit:    servicehost.NewAuditSink(log, servicehost.AuditOptions{}),
+	})
+	// The harness admission gate is part of the boot contract, not an optional
+	// extra: without it a run would only consume the process-local worker
+	// semaphore, and a group's max_concurrent_runs / the tenant's durable quota
+	// would not exist. A misconfigured gate fails the boot.
+	placementRT, err := newPlacementRuntime(st, limits, kern, runtimeID, log)
+	if err != nil {
+		log.Error("placement admission gate", "err", err)
+		os.Exit(1)
 	}
 	handoffRegistry, err := handoff.NewPGRegistry(ctx, st.Pool())
 	if err != nil {
@@ -408,6 +414,9 @@ func main() {
 	// stay in this file.
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Seams: servicehost.Seams{
+			// The run loop keeps the raw kernel: its read-marker/checkpoint
+			// capabilities are derived from the concrete committer, and the
+			// placement gate only owns native input, not run.finished commits.
 			Committer: kern,
 			Reader:    kern,
 			Leases:    kern,
@@ -551,7 +560,8 @@ func main() {
 	srv := httpapi.New(httpapi.Config{
 		Store:             st,
 		Hub:               hub,
-		Edge:              kern,
+		Edge:              placementRT.Edge,
+		Placement:         placementRT.Gate,
 		Events:            rt.Projection(),
 		Loadouts:          kern,
 		ValidateSelection: validateSelection,

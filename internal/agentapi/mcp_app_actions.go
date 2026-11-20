@@ -27,6 +27,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
+	"github.com/jixoai/keel/internal/placement"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -1065,12 +1067,29 @@ func writeMCPAppRPCErr(w http.ResponseWriter, status, code int, message string) 
 }
 
 // writeMCPAppInputError maps the shared input commit path's refusals onto the
-// bridge's wire.
+// bridge's wire. The placement decisions keep their edge meaning here too: a
+// capacity refusal is 429 with Retry-After (the View can explain the retry
+// instead of seeing a 502), and a placement conflict is 409.
 func writeMCPAppInputError(w http.ResponseWriter, err error) {
+	var capacity *placement.CapacityError
+	if errors.As(err, &capacity) {
+		seconds := int(math.Ceil(capacity.RetryAfter.Seconds()))
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeErr(w, http.StatusTooManyRequests, err)
+		return
+	}
+	var conflict *placement.Conflict
+	if errors.As(err, &conflict) {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
 	switch {
 	case errors.Is(err, ErrExternalSession):
 		writeErr(w, http.StatusConflict, err)
-	case errors.Is(err, store.ErrNoSession):
+	case errors.Is(err, store.ErrNoSession), errors.Is(err, placement.ErrSessionNotFound):
 		writeErr(w, http.StatusNotFound, ErrSessionNotFound)
 	default:
 		writeErr(w, http.StatusBadGateway, err)

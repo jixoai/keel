@@ -352,3 +352,39 @@ func TestMalformedStoredDocumentIsFailClosed(t *testing.T) {
 		t.Fatalf("invalid stored quota must fail closed: %v", err)
 	}
 }
+
+// TestEventsOnlyDelegatesRunConcurrency pins the deployment view wired after
+// placement admission: the kernel keeps event-rate enforcement, but a claim is
+// never refused by the process-local run counter (the database gate already
+// admitted it). Quota resolution still reports runConcurrency, because that is
+// the number the placement gate enforces.
+func TestEventsOnlyDelegatesRunConcurrency(t *testing.T) {
+	l := New(host.QuotaConfig{RunConcurrency: 1, EventsPerMinute: 2})
+	limits := l.EventsOnly()
+	tenant := uuid.New()
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if err := limits.AdmitRun(ctx, kernel.Scope{TenantID: tenant, SessionID: uuid.New()}); err != nil {
+			t.Fatalf("run admission %d through the events-only view: %v", i, err)
+		}
+	}
+	if got := l.Active(tenant); got != 0 {
+		t.Fatalf("events-only run admission touched the process counter: %d", got)
+	}
+	cfg, err := l.Quota(ctx, tenant)
+	if err != nil {
+		t.Fatalf("quota: %v", err)
+	}
+	if cfg.RunConcurrency != 1 {
+		t.Fatalf("configured run concurrency = %d, want 1 (for the placement gate)", cfg.RunConcurrency)
+	}
+	if err := limits.AdmitEvent(ctx, kernel.Scope{TenantID: tenant}, kernel.KindUserMessage); err != nil {
+		t.Fatalf("first event: %v", err)
+	}
+	if err := limits.AdmitEvent(ctx, kernel.Scope{TenantID: tenant}, kernel.KindUserMessage); err != nil {
+		t.Fatalf("second event: %v", err)
+	}
+	if err := limits.AdmitEvent(ctx, kernel.Scope{TenantID: tenant}, kernel.KindUserMessage); !errors.Is(err, ErrEventRate) {
+		t.Fatalf("third event = %v, want the event-rate refusal", err)
+	}
+}

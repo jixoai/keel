@@ -319,10 +319,20 @@ func runServe(parent context.Context, opts serveOptions) error {
 		RunConcurrency:  envInt("KEEL_QUOTA_RUNS", 0),
 		EventsPerMinute: envInt("KEEL_QUOTA_EVENTS_PER_MINUTE", 0),
 	})
+	// Run concurrency is admitted durably by the placement gate below; the
+	// kernel keeps the event-rate dimension so a run is never counted twice.
 	kern := kernel.New(kernelLog, kernel.Options{
-		Limits: limits,
+		Limits: limits.EventsOnly(),
 		Audit:  servicehost.NewAuditSink(log, servicehost.AuditOptions{}),
 	})
+	// The harness admission gate is part of the boot contract: without it a run
+	// would only consume the process-local worker semaphore and the group /
+	// tenant durable quota would not exist. A misconfigured gate fails the boot.
+	placementRT, err := newPlacementRuntime(st, limits, kern, runtimeID(), log)
+	if err != nil {
+		return fmt.Errorf("placement admission gate: %w", err)
+	}
+
 	// The task log is a harness service, not a plugin: its attribution gate must
 	// keep working when keel.tasks is disabled. The plugin only supplies the
 	// `tasks` tool's action backend.
@@ -487,6 +497,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
 		Seams: servicehost.Seams{
+			// The run loop keeps the raw kernel: its read-marker/checkpoint
+			// capabilities are derived from the concrete committer, and the
+			// placement gate only owns native input, not run.finished commits.
 			Committer: kern,
 			Reader:    kern,
 			Leases:    kern,
@@ -670,7 +683,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// enforce, so "my usage" and "why was I refused" cannot disagree.
 	edge := newEdgeQuota(st)
 	hostTheme := loadHostTheme(static.root, log)
-	product, err := newProductLayer(ctx, st, kern, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
+	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
 		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr, log)
 	if err != nil {
 		return err
@@ -705,7 +718,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 	api := httpapi.New(httpapi.Config{
 		Store:     st,
 		Hub:       hub,
-		Edge:      kern,
+		Edge:      placementRT.Edge,
+		Placement: placementRT.Gate,
 		Events:    rt.Projection(),
 		Blobs:     blobReader,
 		Uploader:  blobUploader,
@@ -879,7 +893,7 @@ func (p *productLayer) close() {
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -904,10 +918,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Logger:    log,
 		BaseURL:   os.Getenv("KEEL_PUBLIC_BASE_URL"),
 	})
-	starter := agentext.NewTurnStarter(sessions, kern, hooks, log)
+	starter := agentext.NewTurnStarter(sessions, admission, hooks, log)
 	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate:    sessions,
-		Edge:    kern,
+		Edge:    admission,
 		Events:  kern,
 		Runs:    sessions,
 		Control: runControl,
@@ -994,7 +1008,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// durable audit table.
 		MCPAppRuntime:     mcpAppRuntimeOrNil(rt),
 		MCPAppAudit:       st,
-		MCPAppInputCommit: mcpAppInputCommit(st, kern),
+		MCPAppInputCommit: mcpAppInputCommit(st, admission),
 		// P5.5: ui/update-model-context persists into mcp_app_contexts (never the
 		// ledger); the runner reads the same table for the next attempt.
 		MCPAppContexts: st,

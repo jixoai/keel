@@ -16,7 +16,12 @@
 // The package owns no kernel state: it reads and writes the `groups` /
 // `session_placement` rows and the existing `runs` table (which is the only
 // active-run account; no second ledger). The kernel never imports this package;
-// the runtime wires it in as a lease gate.
+// the runtime wires it in as the admission gate (Gate + GatedCommitter in
+// gate.go / committer.go), and the kernel's process-local run-concurrency
+// counter is delegated to the database gate (quota.Limits.EventsOnly) so one
+// run is never counted twice. The events-per-minute bucket stays in process:
+// it is a rate limit of the process that executes the work, not an accounting
+// fact.
 package placement
 
 import (

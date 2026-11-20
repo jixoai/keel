@@ -529,17 +529,38 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 				Detail: "group is draining and takes no new runs"}
 		}
 
-		var selfStatus string
+		// A run row may already exist for the session. "Already active" alone is
+		// not the admission fact: the row's group_id is. A pending row written by
+		// the kernel's edge wake (or a pre-placement queue path) has a NULL
+		// group_id; treating it as admitted would let it bypass every group slot.
+		// The row is read under the session lock, so the accounting below sees
+		// one consistent state.
+		var (
+			selfStatus   string
+			selfGroup    uuid.UUID
+			selfAdmitted bool
+		)
 		err = tx.QueryRow(ctx,
-			`SELECT status FROM runs
+			`SELECT status, COALESCE(group_id, '00000000-0000-0000-0000-000000000000'::uuid)
+			   FROM runs
 			  WHERE tenant_id = $1 AND session_id = $2 FOR UPDATE`,
-			req.tenantID, req.sessionID).Scan(&selfStatus)
+			req.tenantID, req.sessionID).Scan(&selfStatus, &selfGroup)
 		selfActive := false
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("placement: read self run: %w", err)
 		}
 		if err == nil {
 			selfActive = selfStatus == RunStatusPending || selfStatus == RunStatusRunning
+			selfAdmitted = selfActive && selfGroup == group.GroupID
+		}
+		if selfActive && !selfAdmitted && selfStatus == RunStatusRunning {
+			// A running attempt cannot be re-homed: the placement move requires
+			// the old work to drain first. Refusing is safer than moving a live
+			// run's slot behind its back.
+			return &Conflict{
+				Reason: ReasonAlreadyPlaced, TenantID: req.tenantID, SessionID: req.sessionID,
+				GroupID: selfGroup, Detail: "the session is already running in another group",
+			}
 		}
 
 		var activeGroup, activeTenant int
@@ -556,12 +577,16 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			return fmt.Errorf("placement: count tenant runs: %w", err)
 		}
 
-		if !selfActive {
+		// A new run consumes a group slot and a tenant slot. An existing pending
+		// run that admission had not stamped yet keeps its tenant slot (it is
+		// already counted) but still must fit the target group. An admitted run
+		// consumes no extra slot at all.
+		if !selfAdmitted {
 			if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
 				return s.capacityErrorTx(ctx, tx, req, group.GroupID, CapacityGroup,
 					group.MaxConcurrentRuns, activeGroup, true)
 			}
-			if req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
+			if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
 				return s.capacityErrorTx(ctx, tx, req, group.GroupID, CapacityTenant,
 					req.tenantLimit, activeTenant, false)
 			}
@@ -577,9 +602,14 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			req.tenantID, req.sessionID, group.GroupID); err != nil {
 			return fmt.Errorf("placement: reserve run slot: %w", err)
 		}
-		if !selfActive {
+		switch {
+		case !selfActive:
 			activeGroup++
 			activeTenant++
+		case selfGroup != group.GroupID:
+			// A pending run moved with the session's placement: the target group
+			// gains the slot, the tenant slot is unchanged.
+			activeGroup++
 		}
 		out = Admission{
 			TenantID:      req.tenantID,
@@ -632,9 +662,14 @@ func (s *PGStore) capacityErrorTx(ctx context.Context, tx pgx.Tx, req admitWrite
 
 func (s *PGStore) ReleaseRun(ctx context.Context, tenantID, sessionID uuid.UUID) error {
 	return s.inTx(ctx, func(tx pgx.Tx) error {
+		// Only an unstarted reservation with no unread input is ours to drop. A
+		// racing successful commit sets pending_input in the same transaction it
+		// appends the message, so it wins over this release; a claimed run is
+		// already running and is settled by the kernel's finish path.
 		if _, err := tx.Exec(ctx,
 			`UPDATE runs SET status = 'done', lease_until = NULL, updated_at = now()
-			  WHERE tenant_id = $1 AND session_id = $2 AND status = 'pending'`,
+			  WHERE tenant_id = $1 AND session_id = $2 AND status = 'pending'
+			    AND NOT pending_input`,
 			tenantID, sessionID); err != nil {
 			return fmt.Errorf("placement: release run: %w", err)
 		}

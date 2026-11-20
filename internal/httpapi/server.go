@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/logsafe"
+	"github.com/jixoai/keel/internal/placement"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 )
@@ -99,6 +101,11 @@ type Config struct {
 	// Partials is the token-level bypass seam for the SSE handler. Nil keeps
 	// ?partials=1 a no-op.
 	Partials PartialSource
+	// Placement is the harness admission gate for a run the server starts
+	// without a user.message (POST /v1/sessions/{id}/run). The input paths are
+	// gated inside the Edge committer (placement.GatedCommitter), so they do not
+	// consult this field directly. Nil keeps the legacy queue-only behavior.
+	Placement *placement.Gate
 	// MaxBody caps JSON request bodies (uploads use MaxUpload).
 	MaxBody   int64
 	MaxUpload int64
@@ -138,6 +145,19 @@ func New(cfg Config) *Server {
 	if cfg.Edge == nil || cfg.Events == nil {
 		cfg.Logger.Warn("httpapi: contract kernel is not wired",
 			"detail", "POST /v1/sessions/{id}/events and /input answer 503; GET /v1/sessions/{id}/events answers 503")
+	}
+	// A configured placement gate must cover the input edge: wrapping here keeps
+	// a server from accepting `Placement` while its Edge still commits without
+	// admission (the exact bypass this wiring exists to close). A caller that
+	// already passed the gated committer is left alone.
+	if cfg.Placement != nil && cfg.Edge != nil {
+		if _, gated := cfg.Edge.(*placement.GatedCommitter); !gated {
+			if gatedEdge, err := placement.NewGatedCommitter(cfg.Edge, cfg.Placement, cfg.Logger); err != nil {
+				cfg.Logger.Error("httpapi: placement gate is wired without a gated edge", "err", err)
+			} else {
+				cfg.Edge = gatedEdge
+			}
+		}
 	}
 	if cfg.CASDir != "" && cfg.Blobs != nil {
 		cfg.Blobs.CASDir = cfg.CASDir
@@ -433,7 +453,26 @@ func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
 		return
 	}
+	// This endpoint starts a run without a user.message, so it is outside the
+	// gated committer: admit through the same placement gate the input paths
+	// use, then enqueue. A refusal writes no run row and surfaces the typed
+	// 409/429 instead of a silent 500.
+	admitted := false
+	if s.cfg.Placement != nil {
+		admission, err := s.cfg.Placement.Admit(r.Context(), tenantID, sessionID)
+		if err != nil {
+			writeEnqueueError(w, err)
+			return
+		}
+		admitted = !admission.AlreadyActive
+	}
 	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
+		if admitted {
+			if relErr := s.cfg.Placement.Release(r.Context(), tenantID, sessionID); relErr != nil {
+				s.cfg.Logger.Warn("release placement admission after failed trigger",
+					"tenant_id", tenantID, "session_id", sessionID, "err", relErr)
+			}
+		}
 		writeEnqueueError(w, err)
 		return
 	}
@@ -618,6 +657,9 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 // 400; a native edge write to an external session is 409; quota is 429;
 // everything else is a 500.
 func writeEdgeError(w http.ResponseWriter, err error) {
+	if writePlacementError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, errKernelUnwired):
 		writeErr(w, http.StatusServiceUnavailable, err)
@@ -640,10 +682,69 @@ func writeEdgeError(w http.ResponseWriter, err error) {
 	}
 }
 
+// writePlacementError maps the harness admission decisions onto the wire:
+//
+//   - a full group / spent tenant quota is 429 with a Retry-After header (the
+//     typed CapacityError carries the explainable wait), never a silent drop;
+//   - a placement conflict (draining/retired group, epoch/live-lease race,
+//     already placed elsewhere) is 409 with the reason;
+//   - a missing session is 404 without leaking existence, and an external
+//     session is 409.
+//
+// It reports whether it wrote the response, so the generic writers can fall
+// through for non-placement errors.
+func writePlacementError(w http.ResponseWriter, err error) bool {
+	var capacity *placement.CapacityError
+	if errors.As(err, &capacity) {
+		seconds := int(math.Ceil(capacity.RetryAfter.Seconds()))
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		body := map[string]any{
+			"error":             logsafe.Redact(err.Error()),
+			"reason":            string(capacity.Reason),
+			"resource":          capacity.Resource,
+			"limit":             capacity.Limit,
+			"active":            capacity.Active,
+			"retryAfterSeconds": seconds,
+		}
+		if capacity.GroupID != uuid.Nil {
+			body["groupId"] = capacity.GroupID.String()
+		}
+		writeJSON(w, http.StatusTooManyRequests, body)
+		return true
+	}
+	var conflict *placement.Conflict
+	if errors.As(err, &conflict) {
+		body := map[string]any{
+			"error":  logsafe.Redact(err.Error()),
+			"reason": string(conflict.Reason),
+		}
+		if conflict.GroupID != uuid.Nil {
+			body["groupId"] = conflict.GroupID.String()
+		}
+		writeJSON(w, http.StatusConflict, body)
+		return true
+	}
+	switch {
+	case errors.Is(err, placement.ErrSessionNotFound):
+		writeErr(w, http.StatusNotFound, errors.New("session not found"))
+		return true
+	case errors.Is(err, placement.ErrExternalSession):
+		writeErr(w, http.StatusConflict, errors.New("session is owned by an external backend; native runs are not supported"))
+		return true
+	}
+	return false
+}
+
 // writeEnqueueError maps the native queue seam's refusals: a missing (or
 // foreign) session is 404; an external session is 409 because the session
 // exists but must never enter the native run/lease flow.
 func writeEnqueueError(w http.ResponseWriter, err error) {
+	if writePlacementError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, store.ErrNoSession):
 		writeErr(w, http.StatusNotFound, errors.New("session not found"))

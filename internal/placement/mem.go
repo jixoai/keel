@@ -28,6 +28,9 @@ type memRun struct {
 	status     string
 	groupID    uuid.UUID
 	leaseUntil time.Time
+	// pendingInput mirrors the runs.pending_input column: a successful commit
+	// sets it, and a release must not drop a run whose input already landed.
+	pendingInput bool
 }
 
 // MemStore is a mutex-guarded Store. One instance must not be shared across
@@ -364,22 +367,40 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 	}
 	selfRun, hasRun := m.runs[key]
 	selfActive := hasRun && (selfRun.status == RunStatusPending || selfRun.status == RunStatusRunning)
+	selfAdmitted := selfActive && selfRun.groupID == placement.GroupID
+	if selfActive && !selfAdmitted && selfRun.status == RunStatusRunning {
+		return Admission{}, &Conflict{
+			Reason: ReasonAlreadyPlaced, TenantID: req.tenantID, SessionID: req.sessionID,
+			GroupID: selfRun.groupID, Detail: "the session is already running in another group",
+		}
+	}
 
-	if !selfActive {
+	if !selfAdmitted {
 		if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
 			return Admission{}, m.capacityError(req, placement, CapacityGroup,
 				group.MaxConcurrentRuns, activeGroup, now)
 		}
-		if req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
+		if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
 			return Admission{}, m.capacityError(req, placement, CapacityTenant,
 				req.tenantLimit, activeTenant, now)
 		}
 	}
 
-	m.runs[key] = memRun{status: RunStatusPending, groupID: placement.GroupID}
-	if !selfActive {
+	if selfAdmitted {
+		// Keep the live attempt's status/lease: an admission for a guide input
+		// must not demote a running run back to pending.
+		selfRun.groupID = placement.GroupID
+		m.runs[key] = selfRun
+	} else {
+		m.runs[key] = memRun{status: RunStatusPending, groupID: placement.GroupID,
+			pendingInput: selfRun.pendingInput}
+	}
+	switch {
+	case !selfActive:
 		activeGroup++
 		activeTenant++
+	case selfRun.groupID != placement.GroupID:
+		activeGroup++
 	}
 	return Admission{
 		TenantID:      req.tenantID,
@@ -398,8 +419,9 @@ func (m *MemStore) ReleaseRun(_ context.Context, tenantID, sessionID uuid.UUID) 
 	defer m.mu.Unlock()
 	key := memSessionKey{tenantID, sessionID}
 	run, ok := m.runs[key]
-	if !ok || run.status != RunStatusPending {
-		// A running run is released by the kernel's finish path, never here.
+	if !ok || run.status != RunStatusPending || run.pendingInput {
+		// A running run is released by the kernel's finish path, never here; a
+		// pending run whose input already committed is real queued work.
 		return nil
 	}
 	run.status = RunStatusDone

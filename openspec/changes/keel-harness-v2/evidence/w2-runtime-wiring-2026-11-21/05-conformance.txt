@@ -1,0 +1,2 @@
+# scripts/conformance.sh (commit 23d790b)
+exit=1

@@ -281,6 +281,14 @@ func (s *Service) Seek(ctx context.Context, req SeekRequest) (MigrationPlan, err
 // concurrent workers (even in different groups) cannot oversell either limit.
 // A full group or spent tenant quota is a typed CapacityError (HTTP 429 with
 // Retry-After), never a silently dropped run.
+//
+// The pending run row this writes is the durable queue entry. A process that
+// crashes between admission and the input commit leaves a claimable row; the
+// next worker claims it, finds no owed input and settles it as done, so no
+// separate sweeper is needed (there is no second ledger to reconcile). When the
+// commit itself fails in-process, GatedCommitter releases the reservation
+// immediately; ReleaseRun is the guarded form of that (pending, no unread
+// input).
 func (s *Service) AdmitRun(ctx context.Context, req AdmitRequest) (Admission, error) {
 	if err := validatePlacementIDs(req.TenantID, req.SessionID); err != nil {
 		return Admission{}, err

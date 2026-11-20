@@ -1,0 +1,2 @@
+$ go vet <changed packages>
+exit=0

@@ -213,6 +213,29 @@ func (l *Limits) Active(tenantID uuid.UUID) int {
 	return 0
 }
 
+// EventsOnly returns a kernel.Limits view that enforces only the event-rate
+// dimension. It is the seam a runtime wires when run concurrency is enforced by
+// durable placement admission instead: the database counts pending+running runs
+// across every group and process, while this process-local counter can only see
+// its own claims. Keeping both would let a configuration change or a second
+// replica reject a run the durable gate already admitted, which is the
+// double-penalty the placement wiring exists to remove.
+//
+// Quota resolution is unchanged: Quota/Active still report the configured run
+// concurrency, so the placement gate (whose TenantRunLimit reads Quota) sees the
+// same number the kernel used to enforce.
+func (l *Limits) EventsOnly() kernel.Limits {
+	return eventsOnlyLimits{Limits: l}
+}
+
+type eventsOnlyLimits struct {
+	*Limits
+}
+
+func (eventsOnlyLimits) AdmitRun(context.Context, kernel.Scope) error { return nil }
+
+func (eventsOnlyLimits) ReleaseRun(context.Context, kernel.Scope) {}
+
 // Quota returns the quota currently resolved for a tenant (diagnostics/tests).
 func (l *Limits) Quota(ctx context.Context, tenantID uuid.UUID) (host.QuotaConfig, error) {
 	return l.configFor(ctx, tenantID)
