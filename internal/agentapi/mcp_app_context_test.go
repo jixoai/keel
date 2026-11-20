@@ -8,9 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -22,9 +24,19 @@ type fakeContextStore struct {
 	mu      sync.Mutex
 	entries []store.MCPAppContext
 	err     error
+	// started/block let a test hold writes in flight and exercise the shared
+	// bridge concurrency gate.
+	started chan struct{}
+	block   chan struct{}
 }
 
 func (f *fakeContextStore) UpsertMCPAppContext(_ context.Context, entry store.MCPAppContext) error {
+	if f.started != nil {
+		f.started <- struct{}{}
+	}
+	if f.block != nil {
+		<-f.block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -72,6 +84,66 @@ func TestMCPAppContextRouteUnwiredAnswersMethodNotFound(t *testing.T) {
 	}
 	if document.Features["mcp.apps.context"] {
 		t.Fatal("mcp.apps.context is true without a context store")
+	}
+}
+
+func TestMCPAppContextRouteUsesTheBridgeGate(t *testing.T) {
+	tenant := uuid.New()
+	block := make(chan struct{})
+	started := make(chan struct{}, mcpAppConcurrency)
+	contexts := &fakeContextStore{started: started, block: block}
+	audit := &fakeAppAudit{}
+	api := New(Config{
+		MCPApps:        &fakeMCPApps{tenant: tenant, published: true, surface: testSurface(t)},
+		MCPAppContexts: contexts,
+		MCPAppAudit:    audit,
+	})
+	server := httptest.NewServer(api)
+	t.Cleanup(server.Close)
+	url := server.URL + "/v1/mcp/apps/" + testAppID + "/context"
+	body := map[string]any{
+		"sessionId": uuid.NewString(),
+		"content":   []any{map[string]any{"type": "text", "text": "viewing"}},
+	}
+
+	// Fill every in-flight slot with a write the store holds open.
+	results := make([]<-chan bridgeResult, 0, mcpAppConcurrency)
+	for index := 0; index < mcpAppConcurrency; index++ {
+		results = append(results, postBridgeAsync(server.Client(), url, tenant, body))
+	}
+	for index := 0; index < mcpAppConcurrency; index++ {
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("only %d context writes started", index)
+		}
+	}
+
+	// The context route is a bridge action: the fifth request must be refused
+	// by the shared gate instead of reaching the store.
+	status, response := postBridge(t, server.Client(), url, tenant, body)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("fifth context request = %d, want 429: %s", status, response)
+	}
+	if entries := contexts.snapshot(); len(entries) != 0 {
+		t.Fatalf("a gated request reached the store: %d rows", len(entries))
+	}
+
+	close(block)
+	for _, done := range results {
+		if result := <-done; result.status != http.StatusOK {
+			t.Fatalf("in-flight context request = %d: %s", result.status, result.body)
+		}
+	}
+	api.flushMCPAppAuditSamples()
+	refused := false
+	for _, entry := range audit.snapshot() {
+		if entry.Action == "bridge.concurrency" && entry.Result == "refused" {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Fatal("the context gate refusal was not audited")
 	}
 }
 

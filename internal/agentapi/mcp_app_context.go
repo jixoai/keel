@@ -67,6 +67,14 @@ func (s *Server) mcpAppUpdateContext(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errAppNotFound)
 		return
 	}
+	// The context route is a bridge action like any other: it consumes the same
+	// per-app rate/concurrency budget, so a View cannot bypass the gate through
+	// this endpoint.
+	release, ok := s.mcpAppGate(w, r, tenantID, uuid.Nil, app, "ui/update-model-context")
+	if !ok {
+		return
+	}
+	defer release()
 	// The body carries the session id; decode before the session gate so a body
 	// size violation keeps its 413 path.
 	var body mcpAppContextRequest

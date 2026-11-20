@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/mcphost"
 )
 
@@ -358,6 +359,61 @@ func TestCapabilitiesMCPBits(t *testing.T) {
 	}
 	if !capabilities.Features["mcp.events"] {
 		t.Fatal("mcp.events did not follow the wired flag")
+	}
+}
+
+// TestCapabilitiesMCPBridgeBits pins the per-action bridge bits the front end
+// gates can() on: each follows the seam its action actually needs, so a
+// deployment never advertises a bridge method it would answer 501/503 for.
+func TestCapabilitiesMCPBridgeBits(t *testing.T) {
+	tenant := uuid.New()
+	apps := &fakeMCPApps{tenant: tenant, published: true, surface: testSurface(t)}
+	bits := []string{"mcp.apps.tools", "mcp.apps.resources", "mcp.apps.message", "mcp.apps.links"}
+
+	read := func(server *httptest.Server) map[string]bool {
+		t.Helper()
+		var capabilities Capabilities
+		if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/capabilities", tenant, nil, &capabilities); code != 200 {
+			t.Fatalf("capabilities = %d", code)
+		}
+		return capabilities.Features
+	}
+
+	// Only the catalogue: no outbound runtime, no write path, no decisions.
+	base := read(testAgentAPI(t, Config{MCPApps: apps}))
+	for _, bit := range bits {
+		if base[bit] {
+			t.Fatalf("%s is true without its seam: %+v", bit, base)
+		}
+	}
+
+	// The runtime alone enables tools/resources, never message/links.
+	runtimeOnly := read(testAgentAPI(t, Config{MCPApps: apps, MCPAppRuntime: &fakeAppRuntime{}}))
+	if !runtimeOnly["mcp.apps.tools"] || !runtimeOnly["mcp.apps.resources"] {
+		t.Fatalf("tools/resources did not follow the runtime: %+v", runtimeOnly)
+	}
+	if runtimeOnly["mcp.apps.message"] || runtimeOnly["mcp.apps.links"] {
+		t.Fatalf("message/links are true without decisions: %+v", runtimeOnly)
+	}
+
+	// A message needs both the input write path and the decision gate.
+	commit := (&fakeAppCommit{}).commit
+	commitOnly := read(testAgentAPI(t, Config{MCPApps: apps, MCPAppInputCommit: commit}))
+	if commitOnly["mcp.apps.message"] {
+		t.Fatalf("message is true without decisions: %+v", commitOnly)
+	}
+
+	broker := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
+		Store: agentext.NewMemoryDecisionStore(), Logger: testLogger(),
+	})
+	wired := read(testAgentAPI(t, Config{
+		MCPApps: apps, MCPAppRuntime: &fakeAppRuntime{},
+		MCPAppInputCommit: commit, Decisions: broker,
+	}))
+	for _, bit := range bits {
+		if !wired[bit] {
+			t.Fatalf("%s is false with its seam wired: %+v", bit, wired)
+		}
 	}
 }
 

@@ -436,6 +436,15 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// persisted: the View must keep hostCapabilities.updateModelContext off
 		// when this is false (spec「未接线能力不假装」).
 		"mcp.apps.context": s.cfg.MCPApps != nil && s.cfg.MCPAppContexts != nil,
+		// Per-action bridge capabilities. They follow the seam each action
+		// actually needs, so the View offers only methods this deployment can
+		// execute: tools/resources need the outbound runtime, a message needs
+		// both the input write path and the decision gate, and a link needs the
+		// decision gate (the host front end opens the confirmed URL itself).
+		"mcp.apps.tools":     s.cfg.MCPAppRuntime != nil,
+		"mcp.apps.resources": s.cfg.MCPAppRuntime != nil,
+		"mcp.apps.message":   s.cfg.MCPAppInputCommit != nil && s.cfg.Decisions != nil,
+		"mcp.apps.links":     s.cfg.Decisions != nil,
 		// MCP events (P4): subscriptions/listen and notification routing. False
 		// until the dispatcher is wired; clients then keep the legacy behavior.
 		"mcp.events": s.cfg.MCPEvents,

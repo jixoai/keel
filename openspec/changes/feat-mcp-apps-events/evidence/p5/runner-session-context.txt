@@ -1,8 +1,7 @@
 === RUN   TestSessionContextReachesPromptWithoutLedgerGain
-    session_context_test.go:19: KEEL_TEST_DSN not set
---- SKIP: TestSessionContextReachesPromptWithoutLedgerGain (0.00s)
+--- PASS: TestSessionContextReachesPromptWithoutLedgerGain (0.11s)
 === RUN   TestPrependSessionContextCopiesTheMessage
 --- PASS: TestPrependSessionContextCopiesTheMessage (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/agent	0.178s
+ok  	github.com/jixoai/keel/internal/agent	0.366s
 EXIT:0

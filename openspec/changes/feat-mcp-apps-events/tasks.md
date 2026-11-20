@@ -195,7 +195,7 @@
       （2026-11-20：`internal/mcp/era.go`；auto=先 modern `server/discover`，400 现代错误
       按 supported 重试，其余回落 initialize；modern 无 session/GET/Last-Event-ID/DELETE，
       `_meta` 与头同版本、`Mcp-Name` base64 哨兵；非法 env fail closed 到 legacy；
-      conformance 1056/0 fail；同时按 P4 复核结论放行 listen 活跃时的未打标
+      conformance 1057/0 fail；同时按 P4 复核结论放行 listen 活跃时的未打标
       progress/cancelled/message（P4 lane 拥有 canonical fix，本分支带最小修复与回归测试）；
       证据 `evidence/p5/mcp-tests.txt` / `conformance.txt`）
 - [x] P5.5 `ui/update-model-context`：`mcp_app_contexts` 表 + runner seam `<mcp_app_context>` 段；
