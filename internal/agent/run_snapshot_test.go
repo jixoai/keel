@@ -13,7 +13,6 @@ import (
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
-	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 // TestRunSnapshotPinsTheInjectedSurface proves the three run snapshot values
@@ -46,7 +45,7 @@ func TestRunSnapshotPinsTheInjectedSurface(t *testing.T) {
 	if res.Summary.AnchorEventSeq != inputSeq {
 		t.Fatalf("anchorEventSeq = %d, want the run-start input seq %d", res.Summary.AnchorEventSeq, inputSeq)
 	}
-	wantManifest, err := toolsurface.ManifestHash(r.Tools.List())
+	wantManifest, err := agenttool.ManifestHash(r.Tools.List())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,14 +99,14 @@ func TestRunSnapshotIgnoresAMidRunToolSurfaceChange(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	wantManifest, err := toolsurface.ManifestHash([]agentcore.AgentTool{stubTool{name: "read"}, stubTool{name: "write"}})
+	wantManifest, err := agenttool.ManifestHash([]agentcore.AgentTool{stubTool{name: "read"}, stubTool{name: "write"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Summary.ToolManifestHash != wantManifest {
 		t.Fatalf("toolManifestHash = %q, want the pre-injection manifest %q", res.Summary.ToolManifestHash, wantManifest)
 	}
-	afterManifest, err := toolsurface.RegistryHash(registry)
+	afterManifest, err := agenttool.RegistryHash(registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +244,7 @@ func TestWorkerRunFinishedCarriesThePinnedSnapshot(t *testing.T) {
 	if got := int64(anchor); got != input.Seq {
 		t.Fatalf("anchorEventSeq = %d, want %d", got, input.Seq)
 	}
-	wantManifest, err := toolsurface.ManifestHash(runner.Tools.List())
+	wantManifest, err := agenttool.ManifestHash(runner.Tools.List())
 	if err != nil {
 		t.Fatal(err)
 	}

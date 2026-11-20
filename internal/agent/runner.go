@@ -20,7 +20,6 @@ import (
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/telemetry"
-	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 // CompactionOptions enables automatic context compaction for a runner. It is
@@ -429,7 +428,7 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 	// before resolving a surface (empty log, nothing owed) injected no tools,
 	// and the empty-manifest digest is the honest value for that.
 	if res.Summary.ToolManifestHash == "" {
-		if emptyManifest, err := toolsurface.ManifestHash(nil); err == nil {
+		if emptyManifest, err := agenttool.ManifestHash(nil); err == nil {
 			res.Summary.ToolManifestHash = emptyManifest
 		}
 	}
@@ -565,7 +564,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if tools != nil {
 		injectedTools = tools.List()
 	}
-	manifestHash, err := toolsurface.ManifestHash(injectedTools)
+	manifestHash, err := agenttool.ManifestHash(injectedTools)
 	if err != nil {
 		return res, fmt.Errorf("agent: tool manifest hash: %w", err)
 	}
