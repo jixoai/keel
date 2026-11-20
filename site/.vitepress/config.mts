@@ -73,6 +73,12 @@ const harnessSidebarEn = [
     ]
   },
   {
+    text: 'Harness · Integrations',
+    items: [
+      { text: 'MCP Apps', link: '/harness/mcp-apps' }
+    ]
+  },
+  {
     text: 'Harness · Operating',
     items: [
       { text: 'Creation mode', link: '/harness/creation-mode' },
@@ -127,6 +133,12 @@ const harnessSidebarZh = [
       { text: '权限与审计', link: '/zh/harness/plugins/permissions' },
       { text: 'UI 界面', link: '/zh/harness/plugins/ui' },
       { text: '测试与一致性', link: '/zh/harness/plugins/testing' }
+    ]
+  },
+  {
+    text: 'Harness · 集成',
+    items: [
+      { text: 'MCP Apps（交互界面）', link: '/zh/harness/mcp-apps' }
     ]
   },
   {

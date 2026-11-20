@@ -94,7 +94,7 @@ MCP OAuth 的运行时代理层（PostgreSQL 加密存储 / 独立锁池刷新�
 | 项 | 内容 |
 |---|---|
 | PI 契约 | 每个 MCP tool 适配为一个模型可见工具，名字 `mcp__<server>__<tool>`；server 增删会改变工具清单 |
-| Keel 实现 | 唯一模型可见入口是恒定内建工具 `mcp`；模型用 `mcp {action:"list"|"describe"|"call", server, tool, arguments}` 访问。**不生成**任何 `mcp__<server>__<tool>` 名字（无 shim/别名/双注册） |
+| Keel 实现 | 唯一模型可见入口是恒定内建工具 `mcp`；模型用 `mcp {action:"list" / "describe" / "call", server, tool, arguments}` 访问。**不生成**任何 `mcp__<server>__<tool>` 名字（无 shim/别名/双注册） |
 | 理由 | 恒定工具面是 DI 注册与可替换性的前提：工具清单只随**安装审批过的** `provides.tools` 变化，不随接入的 MCP server 数变化；`toolManifestHash` 因此可稳定回答「这次 run 有没有新工具」 |
 | 影响面 | 模型提示与工具搜索不再看到 per-server 工具名；需要 per-tool 声明（如 allow-list）的部署改按 `mcp` + server/tool 参数表达；MCP server 的 wire 协议、配置、传输、内容转换、20KB 裁剪全部不变 |
 | 验收方式 | ① 终局工具集快照断言：内建精确 11 个且 `mcp__` 精确名零出现（`internal/toolsurface`）；② 清单哈希：挂 100 个 MCP server 哈希不变、审批插件 `provides.tools` 变化/卸载恢复；③ E2E wire 断言：captain/member 请求的工具名精确等于 `agent` / `clock`，全量请求无 `mcp__`/`creation_`/`spawn_subagent`/`skill` |
@@ -105,10 +105,35 @@ MCP OAuth 的运行时代理层（PostgreSQL 加密存储 / 独立锁池刷新�
 MCP Apps（SEP-1865，`io.modelcontextprotocol/ui`）与 events 面（`subscriptions/listen`、
 `resultType`、MRTR 等 2026-07-28 修订）是 **PI 没有的能力**。keel 以扩展方式接入，
 不冒充 PI 标准；legacy MCP 的工具适配、传输、配置、内容转换与 20KB 裁剪逐条不变。
+逐条对表见 `openspec/changes/feat-mcp-apps-events/evidence/p6/docs/parity.md`。
 
-| 理由 | 影响面 | 验收方式 |
-|---|---|---|
-| PI 的 MCP 客户端只有工具面（tools/list、tools/call、20KB 裁剪、OAuth），既没有 `_meta.ui`/UI 资源宿主，也没有通知订阅与现代修订的 MRTR；本 change 的 `feat-mcp-apps-events` 是 PI 之外的新增能力，必须显式登记以免被误读为「PI 移植」 | ① 新增 `internal/mcp` 的 apps 元数据与 `resources/*`、`prompts/*` 客户端方法（旧方法签名与行为不变）；② 模型面仍只有聚合 `mcp` 工具，app-only 工具不进入模型面（§4.2 不变）；③ 工具结果 `details` 新增 `app`/`structuredContent`（有界 256 KiB），模型请求不携带；④ system prompt 新增 `mcp_apps` 段，`mcp_servers` 段不变；⑤ 未接线能力（events、第二 origin、MRTR）保持 fail-closed，不假装成功 | ① `go test ./internal/mcp/... ./internal/host/... ./internal/toolsurface/...` 与 `scripts/conformance.sh` 全绿，PI 移植测试断言未改；② `docs/PI-CONFORMANCE.md` 的 MCP 覆盖项不变（新增能力单列）；③ `internal/agent/mcp_details_test.go` 断言 tool.result 落库可读回且模型请求文本不含 details；④ `cmd/keel/plugin_prompt_test.go` 断言 `mcp_apps` 与 `mcp_servers` 同在；⑤ `openspec validate feat-mcp-apps-events --strict` 通过 |
+| 偏离/扩展 | 依据 | 影响面 | 替代/回退 |
+|---|---|---|---|
+| **恒定 `mcp` 聚合工具**（本 change 的前置契约） | §4.2：PI 的 `mcp__<server>__<tool>` 命名会让工具清单随接入服务器数变化，破坏 DI 注册与 `toolManifestHash` 的稳定性；Owner 2026-11-11 裁决 | 模型面只有 11 个内建工具；MCP 工具经 `mcp {action:"list" / "describe" / "call"}` 访问；app-only 工具不进模型面 | 无回退开关；需要 per-server 工具名的部署改按 `mcp` + server/tool 参数表达（§4.2 的验收方式不变） |
+| **现代 era + MRTR**（2026-07-28） | PI 基线是 2025-11-25；现代修订移除 `initialize`/session/GET 恢复，引入 `server/discover`、`resultType`、`subscriptions/listen` 与 MRTR。keel 在同一客户端内做双形态，默认 `auto` | legacy 行为逐字不变（PI conformance 1071/0/1）；modern 下无 session/`Last-Event-ID`，每请求 `_meta` + `Mcp-Method`/`Mcp-Name`；`input_required` 走 decision/sampling/roots 拒绝 | `KEEL_MCP_PROTOCOL_ERA=legacy` 强制旧线协议；不追求与 PI 同版本（PI pin 升级留给独立 change） |
+| **Apps host proxy**（View 不直连服务器） | Apps 的安全叙事要求可审计通信 + 用户同意；服务器凭据只在宿主；View 是第三方 HTML。PI 没有 apps 面可复用 | `tools/call`/`resources/read`/`ui/message`/`ui/open-link`/`context` 全走 `/v1/mcp/apps/{id}/*`；服务器由目录派生；破坏性工具与消息/链接有 confirmation；审计落 `mcp_app_audit` | 不支持 apps 的客户端/TUI 自动走文本（标题 + 链接 + 结果）；没有「页面直连 MCP」的回退路径（那会绕过审计与授权） |
+| **Sandbox 第二 origin 暂缓**（spec 的可选增强未落地） | spec 允许 `mcp.apps.sandboxOrigin`；实现受 NSH 0.4 无 `sandbox` prop、单 origin 部署限制。当前 `KEEL_MCP_APP_ORIGIN` 只作为桌面/移动 WebView 的绝对文档基址；web 始终同源 opaque frame；**没有 sandbox 代理页 + 内层 View 的双 iframe** | `mcp.apps.sandboxOrigin` 只表示「配置了原生宿主基址」，不表示双 iframe；未配置时 web 仍可用，原生显示「未配置沙箱域」文本 | 单 origin 等价约束：iframe 无 `allow-same-origin`（opaque origin）+ 文档 CSP `sandbox allow-scripts` + `frame-ancestors 'self'` + 无凭据跨源 fetch 失败；增强留 P6 之后独立项（tasks 已知暂缓 c） |
+| **`ui/download-file` / `ui/notifications/request-teardown` 不实现** | 两者是 ext-apps SDK 2.x 新面，不在 stable 2026-01-26 正文；keel 不引入 SDK，避免零新前端依赖 | `ui/download-file` 回 `-32601`；`request-teardown` 是通知（无 id），按未知通知 → 协议违规销毁实例；不静默吞掉、不假装支持 | 无；View 应按 spec 做特性检测并忽略未声明能力 |
+| **P3.6 权限依赖 NSH allow** | camera/microphone/geolocation/clipboardWrite 的授予需要 iframe `allow` 属性与 per-permission 偏好；NSH 0.4 WebView 没有该控制面，单 origin 沙箱也无 `allow-same-origin` | `_meta.ui.permissions` 会解析并随目录发布，但 `hostCapabilities` 不声明 `sandbox.permissions`、iframe 无 `allow`；当前**不授予**任何浏览器权限，拒绝记忆也无从生效 | 应用必须特性检测（无权限时降级）；这是上游依赖，不声明即不假装。若必须授予，需升级 NSH 或落第二 origin 方案 |
+| **`ui/notifications/tool-input-partial` / `pip` 不实现** | design §3.5 Non-Goal：keel 没有 provider 级工具参数增量投影；宿主只声明 inline + fullscreen | 不发 partial；`pip` 请求回当前实际模式（inline/fullscreen）；View 按 spec MAY 忽略 | 无；不影响 tool-input/tool-result 主路径 |
+
+**已知未实现（不是有意偏离，P6 对表时暴露，需后续 change 收口）：**
+
+- **MCP Apps 客户端能力声明缺席**：`initialize` 的 `ClientCapabilities` 没有
+  `extensions`/`experimental` 下的 `io.modelcontextprotocol/ui`，也没有
+  `mimeTypes:["text/html;profile=mcp-app"]`（`internal/mcp/protocol.go` 的客户端结构只有
+  `experimental`，没有 `extensions`；没有代码写该键）。服务器无法据能力协商判断宿主支持
+  apps；目录发现依赖服务器无条件声明 `_meta.ui`。对应 `specs/mcp-apps`「降级路径与能力
+  协商」的双位置声明，当前标为**偏离/未实现**。
+- **`_meta.ui.domain` 未随目录下发**：`internal/mcphost/meta.go` 解析并校验 `domain`，
+  但 `mcphost.AppSpec` 没有 `Domain` 字段，`resourceMetaFor` 也未投影它；目录消费方拿不到
+  该字段。对应 `specs/mcp-apps`「UI 资源的声明与读取」，当前标为**部分实现**。
+- **`ui/resource-teardown` 等待不阻塞**：`web/src/surfaces/mcp-app/view.tsx` 的卸载路径
+  调用 `bridge.teardown()` 后立即 `destroy()`；1 s 有界等待只在桥单测覆盖，真实卸载路径
+  没有等待。对应「数据流与生命周期通知」，当前标为**部分实现**。
+- **MRTR 轮次不可配置**：`internal/mcp/client.go` 固定 `defaultMRTRMaxRounds = 5`；
+  `design.md` §4.6 提到的 `KEEL_MCP_MRTR_MAX_ROUNDS` **没有实现**（`CallOptions` 可按调用
+  覆盖，但没有环境变量）。冻结 spec 只要求默认预算，不算 spec 偏离；文档不得把它写成可配。
 
 ## 5. 版本与升级
 

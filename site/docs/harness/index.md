@@ -148,6 +148,7 @@ description of shipped code.
 | Streaming, partials, drain frame | Implemented | [Streaming and partials](/harness/streaming-and-partial) |
 | Decisions (approvals/questions) | Implemented | [Approvals and questions](/harness/approvals-and-questions) |
 | In-process declarative plugins (`agentext.Plugin`) | Implemented | [Plugin host](/harness/plugins/) |
+| MCP Apps host (catalogue, sandbox, bridge, events/era) | Implemented (P1–P5; P6 acceptance in progress) | [MCP Apps](/harness/mcp-apps) |
 | `plugin.yaml` packages, install, sidecar/webview kinds | Planned (`keel-plugin-core` W1) | [Manifest](/harness/plugins/manifest), [Kinds](/harness/plugins/kinds) |
 | Plugin permissions, sandbox boundary, audit endpoint | Planned (`keel-plugin-core` W1) | [Permissions](/harness/plugins/permissions) |
 | Plugin UI bridge (`keel.plugin.*`), plugin hosting | Planned (`keel-plugin-core` W1) | [Plugin UI](/harness/plugins/ui) |
@@ -174,6 +175,8 @@ description of shipped code.
   leases, handoff, context compaction.
 - [Plugins](/harness/plugins/) — the plugin host, the standard, and the
   DSH comparison.
+- [MCP Apps](/harness/mcp-apps) — interactive tool results: app declaration,
+  sandboxing, bridge actions and degradation.
 - [Creation mode](/harness/creation-mode) — natural language to a running
   plugin (planned).
 - [Operations](/harness/operations) — serve, TUI, diagnostics, upgrades.

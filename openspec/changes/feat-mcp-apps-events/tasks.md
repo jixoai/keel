@@ -227,8 +227,13 @@
       （before/after 或 after+断言），落 `.agents/reports/keel/mcp-apps-events/` 并挂公网链接
 - [ ] P6.3 降级面 E2E：TUI 不渲染 app（URL+文本兜底）、CSP 拒绝域名、握手超时各一格
 - [ ] P6.4 子代理交叉复核（reviewer + vision 组合，本项目不使用 Codex），逐条闭合阻塞项
-- [ ] P6.5 文档：`docs/HOST.md`（MCP 段）、`docs/PI-PARITY.md`、`site/docs/zh/harness/mcp-apps.md`、
-      `docs/RESIDUAL-PLAN.md` Wave 3.5 勾销
+- [x] P6.5 文档：`docs/HOST.md`（MCP 段：apps/events/era、HTTP/鉴权、安全、运维）、
+      `docs/PI-PARITY.md`（偏离与未实现登记）、`site/docs/zh/harness/mcp-apps.md`（使用页；
+      站点双语门禁要求同路径英文页 `site/docs/harness/mcp-apps.md`）、`docs/RESIDUAL-PLAN.md`
+      Wave 3.5 状态更新（P5 已交付 / P6 进行中，不勾销未完成项）
+      （2026-11-20 P6C docs lane：G0/G4 逐条对表
+      `evidence/p6/docs/parity.md`；站点检查 VitePress build + 双语 parity + 链接门禁通过，
+      citation gate 在基线页面有 24 条既有 stale anchor（非本 lane 页面引入，见 parity.md §4））
 - [ ] P6.6 交付即归档：`openspec/changes/archive/` + 提交推送（含主仓指针，若在子仓工作）
 
 ## 已知暂缓项（登记，不装作已完成）

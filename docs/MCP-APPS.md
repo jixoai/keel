@@ -1,9 +1,10 @@
-# MCP Apps 宿主（服务端 / P2）
+# MCP Apps 宿主（服务端）
 
-> 状态：P2 后端已交付（骨架、文档托管、CSP、目录、能力位、服务端降级）。
-> 前端 View（P2.6/P2.7）、桥与出站动作（P3）、events（P4）不在本阶段。
+> 状态：P2 后端 + 前端 View；P3 桥与出站动作；P4 events；P5 MRTR/era/app context
+> 均已交付（P6 验收进行中）。当前运行时/HTTP 面的完整说明以
+> [`HOST.md`](HOST.md) §5 为准；本文保留 P2 建立的服务端细节。
 > 设计依据：`openspec/changes/feat-mcp-apps-events/design.md` §2/§3；
-> 验收证据：`openspec/changes/feat-mcp-apps-events/evidence/p2/`。
+> 验收证据：`openspec/changes/feat-mcp-apps-events/evidence/`（p2–p5）。
 
 ## 端点
 
@@ -12,9 +13,16 @@
 | `GET /v1/mcp/servers` | MCP 机群投影：`generation`、连接状态、`protocolVersion`/`era`、能力、工具/应用计数、诊断 |
 | `GET /v1/mcp/apps` | app 目录（`AppSpec` 投影：appId/server/tools/resourceUri/visibility/csp/permissions/prefersBorder/hash/documentUrl），以及 `theme` 调色板与 `limits` |
 | `GET /v1/mcp/apps/{appId}/view` | app 文档本体；`?v=<hash>` 为内容身份 |
+| `POST /v1/mcp/apps/{appId}/tools/call` | 宿主代理工具调用（只允许该服务器、`visibility` 含 `app` 的工具） |
+| `POST /v1/mcp/apps/{appId}/resources/read` | 宿主代理资源读取（只允许该服务器与 `ui://`/`http(s)://`） |
+| `POST /v1/mcp/apps/{appId}/ui/message` | `ui/message` → decision（send/edit/discard） |
+| `POST /v1/mcp/apps/{appId}/ui/open-link` | `ui/open-link` → 确认后返回目标 URL |
+| `POST /v1/mcp/apps/{appId}/context` | `ui/update-model-context` 覆盖式落库 |
+| `GET/POST /v1/mcp/apps/audit` | 审计读 / 宿主侧动作审计（闭集） |
 
-三个端点都要求 `X-Tenant-ID`（浏览器会话由 `keel serve` 的鉴权中间件注入），
-租户判定先于任何目录/文档字节。未接线 registry 时全部 501。
+全部路由都要求 `X-Tenant-ID`（浏览器会话由 `keel serve` 的鉴权中间件注入），
+租户判定先于任何目录/文档字节。未接线 registry 时读路径 501；桥动作按各自 seam
+回 501/503，不用假成功。
 
 ## 身份与缓存
 
@@ -74,8 +82,10 @@ base-uri <baseUriDomains|'self'>; frame-ancestors 'self'
 | app 未发布 | 工具结果无 `details.app`，`mcp_apps` 无该行（半成品 app 不可挂载） |
 
 诊断条数每 app 上限 32 + 一条 `…N more dropped`；`_meta` 总量上限 64 KiB（超界整块忽略，
-文档仍可用）。审计当前是结构化日志（`mcp app audit`）与 `mcphost.Auditor` seam；
-持久审计表在 P3.7。
+文档仍可用）。审计已落持久表 `mcp_app_audit`（P3.7；FORCE RLS + tenant_isolation）：
+文档取回/校验/缓存、`tools/call`、`resources/read`、`ui/message`、`ui/open-link`、
+`ui/update-model-context`、权限决定与协议违规都写标识/动作/结果/≤512 B 摘要，
+不含消息正文、凭据、token 或完整 URL query。
 
 ## 限额与配置
 
@@ -90,4 +100,9 @@ base-uri <baseUriDomains|'self'>; frame-ancestors 'self'
 
 | 变量 | 作用 |
 |---|---|
-| `KEEL_MCP_APP_ORIGIN` | 可选第二 origin（如 `https://mcp-app.example.com`）。设置且形如 http(s) origin 时 `/v1/capabilities` 的 `mcp.apps.sandboxOrigin` 为 true；非法值只告警并保持 false。生产域名不写进代码。 |
+| `KEEL_MCP_APP_ORIGIN` | 可选绝对 http(s) origin（如 `https://mcp-app.example.com`）。设置且合法时 `/v1/capabilities` 的 `mcp.apps.sandboxOrigin` 为 true。**它只作为桌面/移动 WebView 的文档基址，不启用 spec 的双 iframe 沙箱代理页；web 始终用页面自身 origin。** 非法值只告警并保持 false。生产域名不写进代码。 |
+| `KEEL_MCP_PROTOCOL_ERA` | `auto`（默认）/`legacy`/`modern`；控制 §5.5 的两代线协议。非法值 fail-closed 到 legacy。 |
+| `KEEL_MCP_SAMPLING` | `off`/`session`（默认）/`on`；MRTR `sampling/createMessage` 的开关。部署没有可用模型时自动降为 off。 |
+
+其余限额（2 MiB 单文档、64 MiB 缓存、64 KiB `_meta`、32 条/app 诊断）当前是包内默认值，
+不是环境变量；`KEEL_MCP_MRTR_MAX_ROUNDS` 只出现在设计稿，代码固定为 5 轮。

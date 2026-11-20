@@ -128,6 +128,7 @@ change）。这个区分是刻意的：下面的插件标准是规格，不是�
 | 流式、partials、drain 帧 | 已实现 | [流式与 partial](/zh/harness/streaming-and-partial) |
 | 审批/问句（decision 原语） | 已实现 | [审批与问句](/zh/harness/approvals-and-questions) |
 | 进程内声明式插件（`agentext.Plugin`） | 已实现 | [插件宿主](/zh/harness/plugins/) |
+| MCP Apps 宿主（目录/沙箱/桥/events/era） | 已实现（P1–P5；P6 验收进行中） | [MCP Apps](/zh/harness/mcp-apps) |
 | `plugin.yaml` 包、安装、sidecar/webview kind | 规划（`keel-plugin-core` W1） | [清单](/zh/harness/plugins/manifest)、[三种 kind](/zh/harness/plugins/kinds) |
 | 插件权限、沙箱边界、审计端点 | 规划（`keel-plugin-core` W1） | [权限](/zh/harness/plugins/permissions) |
 | 插件 UI 桥（`keel.plugin.*`）、插件托管 | 规划（`keel-plugin-core` W1） | [插件 UI](/zh/harness/plugins/ui) |
@@ -147,5 +148,6 @@ change）。这个区分是刻意的：下面的插件标准是规格，不是�
 - [审批与问句](/zh/harness/approvals-and-questions)——decision 原语。
 - [恢复与压缩](/zh/harness/recovery-and-compaction)——崩溃、租约、handoff、上下文压缩。
 - [插件](/zh/harness/plugins/)——插件宿主、标准，以及与 DSH 的对照。
+- [MCP Apps（交互界面）](/zh/harness/mcp-apps)——交互式工具结果：声明、沙箱、桥动作与降级。
 - [创造模式](/zh/harness/creation-mode)——从自然语言到运行中的插件（规划）。
 - [运维](/zh/harness/operations)——serve、TUI、诊断、升级。
