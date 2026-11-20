@@ -39,3 +39,9 @@ No unimplemented part of the two checked tasks remains:
   - W2-7 external-kernel capability matrix + typed rejection: done.
 Still out of scope / unchanged (not claimed): groups/session_placement, pack/user/pin
 strategies, group slots/ETA, group OOM isolation (other W2 items remain unchecked).
+
+Provenance note (2026-11-21): 8941c76 is the lane commit before the branch was
+squashed onto main. It is content-equivalent to the merged snapshot for the
+touched packages; the independent B review reproduced `go test -p 1` (56 ok),
+conformance 1089/0/1, TUI 198/198 and openspec strict on the merged snapshot.
+Raw command logs keep the hash they actually ran on and are not rewritten.
