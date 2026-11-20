@@ -1,0 +1,1104 @@
+{
+  "lane": "P6A1",
+  "run": "run-2",
+  "startedAt": "2026-11-20T02:25:35.803Z",
+  "baseUrl": "http://127.0.0.1:13682",
+  "steps": [
+    {
+      "name": "login-gate",
+      "ok": true,
+      "at": "2026-11-20T02:25:36.182Z",
+      "detail": {
+        "url": "http://127.0.0.1:13682/"
+      },
+      "screenshot": "screenshots/01-login-gate.png"
+    },
+    {
+      "name": "login-submitted",
+      "ok": true,
+      "at": "2026-11-20T02:25:36.692Z",
+      "detail": {
+        "authenticated": true
+      },
+      "screenshot": "screenshots/02-login-submitted.png"
+    },
+    {
+      "name": "session-open",
+      "ok": true,
+      "at": "2026-11-20T02:25:37.152Z",
+      "detail": {
+        "toolRow": "工具 mcp"
+      },
+      "screenshot": "screenshots/03-session-open.png"
+    },
+    {
+      "name": "login-capability-stale",
+      "ok": true,
+      "at": "2026-11-20T02:25:37.543Z",
+      "detail": {
+        "id": "login-capability-stale",
+        "summary": "登录后能力位未刷新：首屏 can(\"mcp.apps\") 仍为 false，带 app 的 tool.result 以「当前客户端以文本显示」兜底；刷新页面才挂载 View。",
+        "repro": "fresh browser → 登录 → 打开含 app 工具的会话 → 展开工具行 → 文本兜底；page.reload() 后同一操作挂载 iframe。",
+        "impact": "P2/P6 产品缺陷（前端 store 登录路径）；本 lane 不改产品代码。"
+      },
+      "screenshot": "screenshots/04-login-capability-stale.png"
+    },
+    {
+      "name": "post-reload-session",
+      "ok": true,
+      "at": "2026-11-20T02:25:38.302Z",
+      "detail": {
+        "reloaded": true,
+        "iframeMounted": true
+      },
+      "screenshot": "screenshots/05-post-reload-session.png"
+    },
+    {
+      "name": "tool-row-expanded",
+      "ok": true,
+      "at": "2026-11-20T02:25:38.661Z",
+      "detail": {
+        "iframeMounted": true
+      },
+      "screenshot": "screenshots/06-tool-row-expanded.png"
+    },
+    {
+      "name": "iframe-mounted",
+      "ok": true,
+      "at": "2026-11-20T02:25:39.008Z",
+      "detail": {
+        "src": "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad&instance=54fbab81345549eaa80a7c5ce70daaa51",
+        "sandbox": "allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-scripts",
+        "box": {
+          "x": 365,
+          "y": 130,
+          "width": 814,
+          "height": 360
+        }
+      },
+      "screenshot": "screenshots/07-iframe-mounted.png"
+    },
+    {
+      "name": "document-headers",
+      "ok": true,
+      "at": "2026-11-20T02:25:39.360Z",
+      "detail": {
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "nosniff": "nosniff",
+        "referrer": "no-referrer",
+        "appMime": "text/html;profile=mcp-app",
+        "appHash": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+        "cacheControl": "public, max-age=31536000, immutable"
+      },
+      "screenshot": "screenshots/08-document-headers.png"
+    },
+    {
+      "name": "app-handshake",
+      "ok": true,
+      "at": "2026-11-20T02:25:39.735Z",
+      "detail": {
+        "bootedAt": 1795141538294,
+        "host": {
+          "protocolVersion": "2026-01-26",
+          "hostInfo": {
+            "name": "Keel",
+            "version": "0.1.0"
+          },
+          "hostCapabilities": {
+            "logging": {},
+            "serverTools": {},
+            "serverResources": {},
+            "message": {},
+            "openLinks": {},
+            "updateModelContext": {}
+          },
+          "hostContext": {
+            "theme": "dark",
+            "displayMode": "inline",
+            "availableDisplayModes": [
+              "inline",
+              "fullscreen"
+            ],
+            "containerDimensions": {
+              "maxHeight": 480
+            },
+            "platform": "web",
+            "deviceCapabilities": {
+              "touch": false
+            },
+            "locale": "en-US",
+            "timeZone": "Asia/Shanghai"
+          }
+        },
+        "methods": [
+          "response",
+          "ui/notifications/tool-input",
+          "ui/notifications/tool-result",
+          "response"
+        ],
+        "toolInput": {
+          "arguments": {
+            "tool": "render_weather",
+            "action": "call",
+            "server": "e2e",
+            "arguments": {
+              "city": "Shanghai"
+            }
+          }
+        },
+        "toolResult": {
+          "content": [
+            {
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。",
+              "type": "text"
+            }
+          ],
+          "isError": false,
+          "structuredContent": {
+            "city": "Shanghai",
+            "humidity": 61,
+            "temperatureC": 24
+          }
+        },
+        "toolsCall": {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+              }
+            ],
+            "structuredContent": {
+              "city": "Shanghai",
+              "temperatureC": 24,
+              "humidity": 61
+            }
+          }
+        },
+        "origin": "null",
+        "locationOrigin": "http://127.0.0.1:13682",
+        "isolation": {
+          "cookie": "error:SecurityError",
+          "parentDom": "blocked:SecurityError",
+          "localStorage": "blocked:SecurityError"
+        },
+        "errors": []
+      },
+      "screenshot": "screenshots/09-app-handshake.png"
+    },
+    {
+      "name": "app-tools-call",
+      "ok": true,
+      "at": "2026-11-20T02:25:40.094Z",
+      "detail": {
+        "app": {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+              }
+            ],
+            "structuredContent": {
+              "city": "Shanghai",
+              "temperatureC": 24,
+              "humidity": 61
+            }
+          }
+        },
+        "mcp": {
+          "methods": {
+            "server/discover": 1,
+            "initialize": 1,
+            "notifications/initialized": 1,
+            "tools/list": 1,
+            "resources/read": 1,
+            "tools/call": 2
+          },
+          "toolCalls": [
+            {
+              "name": "render_weather",
+              "arguments": {
+                "city": "Shanghai"
+              }
+            },
+            {
+              "name": "refresh_weather",
+              "arguments": {
+                "city": "Shanghai"
+              }
+            }
+          ],
+          "resourcesRead": [
+            "ui://weather/dashboard"
+          ]
+        }
+      },
+      "screenshot": "screenshots/10-app-tools-call.png"
+    },
+    {
+      "name": "wire-request",
+      "ok": true,
+      "at": "2026-11-20T02:25:40.428Z",
+      "detail": {
+        "requests": 2,
+        "tools": [
+          "agent",
+          "approve",
+          "bash",
+          "creation",
+          "edit",
+          "example_audit_tail",
+          "example_status",
+          "mcp",
+          "notify",
+          "read",
+          "skills",
+          "tasks",
+          "write",
+          "agent",
+          "approve",
+          "bash",
+          "creation",
+          "edit",
+          "example_audit_tail",
+          "example_status",
+          "mcp",
+          "notify",
+          "read",
+          "skills",
+          "tasks",
+          "write"
+        ],
+        "hasToolResult": [
+          false,
+          true
+        ]
+      },
+      "screenshot": "screenshots/11-wire-request.png"
+    },
+    {
+      "name": "fullscreen",
+      "ok": true,
+      "at": "2026-11-20T02:25:40.869Z",
+      "detail": {
+        "bootedAt": 1795141540820,
+        "newInstance": true,
+        "methods": [
+          "response",
+          "ui/notifications/tool-input",
+          "ui/notifications/tool-result",
+          "response"
+        ],
+        "dialogVisible": true,
+        "hostContext": {
+          "theme": "dark",
+          "displayMode": "fullscreen",
+          "availableDisplayModes": [
+            "inline",
+            "fullscreen"
+          ],
+          "containerDimensions": {
+            "maxHeight": 738
+          },
+          "platform": "web",
+          "deviceCapabilities": {
+            "touch": false
+          },
+          "locale": "en-US",
+          "timeZone": "Asia/Shanghai"
+        },
+        "toolsCall": {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+              }
+            ],
+            "structuredContent": {
+              "city": "Shanghai",
+              "temperatureC": 24,
+              "humidity": 61
+            }
+          }
+        },
+        "exitBootedAt": 1795141541255,
+        "exitHostContext": {
+          "theme": "dark",
+          "displayMode": "inline",
+          "availableDisplayModes": [
+            "inline",
+            "fullscreen"
+          ],
+          "containerDimensions": {
+            "maxHeight": 480
+          },
+          "platform": "web",
+          "deviceCapabilities": {
+            "touch": false
+          },
+          "locale": "en-US",
+          "timeZone": "Asia/Shanghai"
+        }
+      },
+      "screenshot": "screenshots/12-fullscreen.png"
+    },
+    {
+      "name": "fullscreen-exit",
+      "ok": true,
+      "at": "2026-11-20T02:25:42.100Z",
+      "detail": {
+        "bootedAt": 1795141541255,
+        "methods": [
+          "response",
+          "ui/notifications/tool-input",
+          "ui/notifications/tool-result",
+          "response"
+        ],
+        "toolsCall": {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+              }
+            ],
+            "structuredContent": {
+              "city": "Shanghai",
+              "temperatureC": 24,
+              "humidity": 61
+            }
+          }
+        }
+      },
+      "screenshot": "screenshots/13-fullscreen-exit.png"
+    }
+  ],
+  "assertions": {
+    "iframe-path": {
+      "ok": true,
+      "detail": {
+        "pathname": "/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view"
+      }
+    },
+    "iframe-hash": {
+      "ok": true,
+      "detail": {
+        "v": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad"
+      }
+    },
+    "iframe-instance": {
+      "ok": true,
+      "detail": {
+        "instance": "54fbab81345549eaa80a7c5ce70daaa51"
+      }
+    },
+    "sandbox-allow-scripts": {
+      "ok": true,
+      "detail": {
+        "sandbox": "allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-scripts"
+      }
+    },
+    "sandbox-no-same-origin": {
+      "ok": true,
+      "detail": {
+        "sandbox": "allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-scripts"
+      }
+    },
+    "document-status": {
+      "ok": true,
+      "detail": 200
+    },
+    "document-csp-sandbox": {
+      "ok": true,
+      "detail": {
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+      }
+    },
+    "document-csp-default-none": {
+      "ok": true,
+      "detail": {
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+      }
+    },
+    "document-csp-frame-ancestors": {
+      "ok": true,
+      "detail": {
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+      }
+    },
+    "document-nosniff": {
+      "ok": true,
+      "detail": "nosniff"
+    },
+    "document-no-referrer": {
+      "ok": true,
+      "detail": "no-referrer"
+    },
+    "document-app-mime": {
+      "ok": true,
+      "detail": "text/html;profile=mcp-app"
+    },
+    "document-app-hash": {
+      "ok": true,
+      "detail": {
+        "header": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+        "url": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad"
+      }
+    },
+    "document-immutable": {
+      "ok": true,
+      "detail": {
+        "cacheControl": "public, max-age=31536000, immutable"
+      }
+    },
+    "host-protocol": {
+      "ok": true,
+      "detail": "2026-01-26"
+    },
+    "host-name": {
+      "ok": true,
+      "detail": "Keel"
+    },
+    "tool-input-once": {
+      "ok": true,
+      "detail": [
+        {
+          "method": "response",
+          "id": 1,
+          "at": 1795141538321
+        },
+        {
+          "method": "ui/notifications/tool-input",
+          "id": null,
+          "at": 1795141538325
+        },
+        {
+          "method": "ui/notifications/tool-result",
+          "id": null,
+          "at": 1795141538325
+        },
+        {
+          "method": "response",
+          "id": 100,
+          "at": 1795141538337
+        }
+      ]
+    },
+    "tool-result-once": {
+      "ok": true,
+      "detail": [
+        {
+          "method": "response",
+          "id": 1,
+          "at": 1795141538321
+        },
+        {
+          "method": "ui/notifications/tool-input",
+          "id": null,
+          "at": 1795141538325
+        },
+        {
+          "method": "ui/notifications/tool-result",
+          "id": null,
+          "at": 1795141538325
+        },
+        {
+          "method": "response",
+          "id": 100,
+          "at": 1795141538337
+        }
+      ]
+    },
+    "tool-result-text": {
+      "ok": true,
+      "detail": {
+        "content": [
+          {
+            "text": "上海现在 24°C，湿度 61%（Shanghai）。",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "city": "Shanghai",
+          "humidity": 61,
+          "temperatureC": 24
+        }
+      }
+    },
+    "tool-result-structured": {
+      "ok": true,
+      "detail": {
+        "city": "Shanghai",
+        "humidity": 61,
+        "temperatureC": 24
+      }
+    },
+    "app-opaque-origin": {
+      "ok": true,
+      "detail": {
+        "origin": "null",
+        "locationOrigin": "http://127.0.0.1:13682"
+      }
+    },
+    "app-parent-dom-blocked": {
+      "ok": true,
+      "detail": {
+        "cookie": "error:SecurityError",
+        "parentDom": "blocked:SecurityError",
+        "localStorage": "blocked:SecurityError"
+      }
+    },
+    "app-storage-blocked": {
+      "ok": true,
+      "detail": {
+        "cookie": "error:SecurityError",
+        "parentDom": "blocked:SecurityError",
+        "localStorage": "blocked:SecurityError"
+      }
+    },
+    "host-status-connected": {
+      "ok": true,
+      "detail": {
+        "sample": "Keel\nAI 员工会话\n请展示上海天气面板\n已完成天气面板渲染。\n刚刚\n已连接\n请展示上海天气面板\n就绪\nKite E2e Model\n请展示上海天气面板\n复制\n1970年1月1日 08:00\nKeel\n#1\n1 个工具，全部完成\nmcp\ntool=render_weather · action=call · server=e2e · arguments={\"city\":\"Sha…\n天气面板\n已"
+      }
+    },
+    "host-resource-uri": {
+      "ok": true,
+      "detail": {
+        "sample": "#1\n1 个工具，全部完成\nmcp\ntool=render_weather · action=call · server=e2e · arguments={\"city\":\"Sha…\n天气面板\n已连接\n全屏\nui://weather/dashboard\n结果\n上海现在 24°C，湿度 61%（Shanghai）。\n参数\ntool=render_weather\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}\n已完成天气面板渲染。\n复制回答\n重试\n完成 · 35ms · ↑0 ↓11\nKite E2e Model\n队列\n引导\n空闲发送直接开始"
+      }
+    },
+    "app-tools-call-ok": {
+      "ok": true,
+      "detail": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+            }
+          ],
+          "structuredContent": {
+            "city": "Shanghai",
+            "temperatureC": 24,
+            "humidity": 61
+          }
+        }
+      }
+    },
+    "mcp-initialize": {
+      "ok": true,
+      "detail": {
+        "server/discover": 1,
+        "initialize": 1,
+        "notifications/initialized": 1,
+        "tools/list": 1,
+        "resources/read": 1,
+        "tools/call": 2
+      }
+    },
+    "mcp-tools-list": {
+      "ok": true,
+      "detail": {
+        "server/discover": 1,
+        "initialize": 1,
+        "notifications/initialized": 1,
+        "tools/list": 1,
+        "resources/read": 1,
+        "tools/call": 2
+      }
+    },
+    "mcp-resources-read": {
+      "ok": true,
+      "detail": {
+        "server/discover": 1,
+        "initialize": 1,
+        "notifications/initialized": 1,
+        "tools/list": 1,
+        "resources/read": 1,
+        "tools/call": 2
+      }
+    },
+    "mcp-model-tool-call": {
+      "ok": true,
+      "detail": [
+        {
+          "name": "render_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        },
+        {
+          "name": "refresh_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        }
+      ]
+    },
+    "mcp-app-tool-call": {
+      "ok": true,
+      "detail": [
+        {
+          "name": "render_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        },
+        {
+          "name": "refresh_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        }
+      ]
+    },
+    "wire-mcp-tool-present": {
+      "ok": true,
+      "detail": {
+        "tools": [
+          "agent",
+          "approve",
+          "bash",
+          "creation",
+          "edit",
+          "example_audit_tail",
+          "example_status",
+          "mcp",
+          "notify",
+          "read",
+          "skills",
+          "tasks",
+          "write",
+          "agent",
+          "approve",
+          "bash",
+          "creation",
+          "edit",
+          "example_audit_tail",
+          "example_status",
+          "mcp",
+          "notify",
+          "read",
+          "skills",
+          "tasks",
+          "write"
+        ]
+      }
+    },
+    "wire-tool-result-round": {
+      "ok": true,
+      "detail": {
+        "requests": 2,
+        "hasToolResult": [
+          false,
+          true
+        ]
+      }
+    },
+    "fullscreen-new-instance": {
+      "ok": true,
+      "detail": {
+        "inline": 1795141538294,
+        "fullscreen": 1795141540820
+      }
+    },
+    "fullscreen-host-context": {
+      "ok": true,
+      "detail": {
+        "displayMode": "fullscreen",
+        "availableDisplayModes": [
+          "inline",
+          "fullscreen"
+        ]
+      }
+    },
+    "fullscreen-handshake": {
+      "ok": true,
+      "detail": [
+        "response",
+        "ui/notifications/tool-input",
+        "ui/notifications/tool-result",
+        "response"
+      ]
+    },
+    "fullscreen-tool-result": {
+      "ok": true,
+      "detail": [
+        "response",
+        "ui/notifications/tool-input",
+        "ui/notifications/tool-result",
+        "response"
+      ]
+    },
+    "fullscreen-tools-call-ok": {
+      "ok": true,
+      "detail": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+            }
+          ],
+          "structuredContent": {
+            "city": "Shanghai",
+            "temperatureC": 24,
+            "humidity": 61
+          }
+        }
+      }
+    },
+    "inline-remount": {
+      "ok": true,
+      "detail": {
+        "fullscreen": 1795141540820,
+        "inline": 1795141541255
+      }
+    },
+    "inline-host-context": {
+      "ok": true,
+      "detail": {
+        "displayMode": "inline"
+      }
+    },
+    "inline-handshake": {
+      "ok": true,
+      "detail": [
+        {
+          "method": "response",
+          "id": 1,
+          "at": 1795141541269
+        },
+        {
+          "method": "ui/notifications/tool-input",
+          "id": null,
+          "at": 1795141541279
+        },
+        {
+          "method": "ui/notifications/tool-result",
+          "id": null,
+          "at": 1795141541279
+        },
+        {
+          "method": "response",
+          "id": 100,
+          "at": 1795141541305
+        }
+      ]
+    },
+    "inline-tools-call-ok": {
+      "ok": true,
+      "detail": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+            }
+          ],
+          "structuredContent": {
+            "city": "Shanghai",
+            "temperatureC": 24,
+            "humidity": 61
+          }
+        }
+      }
+    },
+    "mcp-app-tool-calls-all-instances": {
+      "ok": true,
+      "detail": [
+        {
+          "name": "render_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        },
+        {
+          "name": "refresh_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        },
+        {
+          "name": "refresh_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        },
+        {
+          "name": "refresh_weather",
+          "arguments": {
+            "city": "Shanghai"
+          }
+        }
+      ]
+    },
+    "no-page-errors": {
+      "ok": true,
+      "detail": []
+    },
+    "no-failed-requests": {
+      "ok": true,
+      "detail": {
+        "unexpected": [],
+        "aborted": [
+          "http://127.0.0.1:13682/v1/capabilities",
+          "http://127.0.0.1:13682/v1/auth/login",
+          "http://127.0.0.1:13682/v1/sessions/04be5dcb-174c-446d-afeb-048c8000f314/events/stream?after=6&partials=1"
+        ]
+      }
+    }
+  },
+  "mcp": {
+    "methods": {
+      "server/discover": 1,
+      "initialize": 1,
+      "notifications/initialized": 1,
+      "tools/list": 1,
+      "resources/read": 1,
+      "tools/call": 4
+    },
+    "toolCalls": [
+      {
+        "name": "render_weather",
+        "arguments": {
+          "city": "Shanghai"
+        }
+      },
+      {
+        "name": "refresh_weather",
+        "arguments": {
+          "city": "Shanghai"
+        }
+      },
+      {
+        "name": "refresh_weather",
+        "arguments": {
+          "city": "Shanghai"
+        }
+      },
+      {
+        "name": "refresh_weather",
+        "arguments": {
+          "city": "Shanghai"
+        }
+      }
+    ],
+    "resourcesRead": [
+      "ui://weather/dashboard"
+    ]
+  },
+  "app": {
+    "bootedAt": 1795141538294,
+    "host": {
+      "protocolVersion": "2026-01-26",
+      "hostInfo": {
+        "name": "Keel",
+        "version": "0.1.0"
+      },
+      "hostCapabilities": {
+        "logging": {},
+        "serverTools": {},
+        "serverResources": {},
+        "message": {},
+        "openLinks": {},
+        "updateModelContext": {}
+      },
+      "hostContext": {
+        "theme": "dark",
+        "displayMode": "inline",
+        "availableDisplayModes": [
+          "inline",
+          "fullscreen"
+        ],
+        "containerDimensions": {
+          "maxHeight": 480
+        },
+        "platform": "web",
+        "deviceCapabilities": {
+          "touch": false
+        },
+        "locale": "en-US",
+        "timeZone": "Asia/Shanghai"
+      }
+    },
+    "methods": [
+      "response",
+      "ui/notifications/tool-input",
+      "ui/notifications/tool-result",
+      "response"
+    ],
+    "toolInput": {
+      "arguments": {
+        "tool": "render_weather",
+        "action": "call",
+        "server": "e2e",
+        "arguments": {
+          "city": "Shanghai"
+        }
+      }
+    },
+    "toolResult": {
+      "content": [
+        {
+          "text": "上海现在 24°C，湿度 61%（Shanghai）。",
+          "type": "text"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "city": "Shanghai",
+        "humidity": 61,
+        "temperatureC": 24
+      }
+    },
+    "toolsCall": {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+          }
+        ],
+        "structuredContent": {
+          "city": "Shanghai",
+          "temperatureC": 24,
+          "humidity": 61
+        }
+      }
+    },
+    "origin": "null",
+    "locationOrigin": "http://127.0.0.1:13682",
+    "isolation": {
+      "cookie": "error:SecurityError",
+      "parentDom": "blocked:SecurityError",
+      "localStorage": "blocked:SecurityError"
+    },
+    "errors": []
+  },
+  "fullscreen": {
+    "bootedAt": 1795141540820,
+    "newInstance": true,
+    "methods": [
+      "response",
+      "ui/notifications/tool-input",
+      "ui/notifications/tool-result",
+      "response"
+    ],
+    "dialogVisible": true,
+    "hostContext": {
+      "theme": "dark",
+      "displayMode": "fullscreen",
+      "availableDisplayModes": [
+        "inline",
+        "fullscreen"
+      ],
+      "containerDimensions": {
+        "maxHeight": 738
+      },
+      "platform": "web",
+      "deviceCapabilities": {
+        "touch": false
+      },
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai"
+    },
+    "toolsCall": {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+          }
+        ],
+        "structuredContent": {
+          "city": "Shanghai",
+          "temperatureC": 24,
+          "humidity": 61
+        }
+      }
+    },
+    "exitBootedAt": 1795141541255,
+    "exitHostContext": {
+      "theme": "dark",
+      "displayMode": "inline",
+      "availableDisplayModes": [
+        "inline",
+        "fullscreen"
+      ],
+      "containerDimensions": {
+        "maxHeight": 480
+      },
+      "platform": "web",
+      "deviceCapabilities": {
+        "touch": false
+      },
+      "locale": "en-US",
+      "timeZone": "Asia/Shanghai"
+    }
+  },
+  "documentHeaders": {
+    "status": 200,
+    "contentType": "text/html; charset=utf-8",
+    "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    "nosniff": "nosniff",
+    "referrer": "no-referrer",
+    "appMime": "text/html;profile=mcp-app",
+    "appHash": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+    "cacheControl": "public, max-age=31536000, immutable"
+  },
+  "console": [
+    "error: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "verbose: [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o"
+  ],
+  "pageErrors": [],
+  "failedRequests": [
+    {
+      "url": "http://127.0.0.1:13682/v1/capabilities",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:13682/v1/auth/login",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:13682/v1/sessions/04be5dcb-174c-446d-afeb-048c8000f314/events/stream?after=6&partials=1",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "findings": [
+    {
+      "id": "login-capability-stale",
+      "summary": "登录后能力位未刷新：首屏 can(\"mcp.apps\") 仍为 false，带 app 的 tool.result 以「当前客户端以文本显示」兜底；刷新页面才挂载 View。",
+      "repro": "fresh browser → 登录 → 打开含 app 工具的会话 → 展开工具行 → 文本兜底；page.reload() 后同一操作挂载 iframe。",
+      "impact": "P2/P6 产品缺陷（前端 store 登录路径）；本 lane 不改产品代码。"
+    },
+    {
+      "id": "app-tool-input-aggregate-envelope",
+      "summary": "View 的 ui/notifications/tool-input.params.arguments 是聚合 mcp 工具的参数信封（action/server/tool/arguments），不是所属 MCP 工具自身的实参；真实 app 按 params.arguments.city 读取会拿不到。",
+      "repro": "模型经聚合 mcp 调用 render_weather → 展开工具行 → View 收到 {\"arguments\":{\"action\":\"call\",\"server\":\"e2e\",\"tool\":\"render_weather\",\"arguments\":{\"city\":\"Shanghai\"}}}。",
+      "spec": "specs/mcp-apps/spec.md「tool-input 参数为本次调用实参」；design §3.5 表写「从 store 的 assistant tool_call args 取」——聚合工具下二者不同。",
+      "impact": "前端 McpAppSlot 把 props.call.args 原样传给 View；本 lane 不改产品代码，fixture 兼容两种形状。",
+      "evidence": {
+        "toolInput": {
+          "arguments": {
+            "tool": "render_weather",
+            "action": "call",
+            "server": "e2e",
+            "arguments": {
+              "city": "Shanghai"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "pass": true,
+  "finishedAt": "2026-11-20T02:25:42.451Z"
+}

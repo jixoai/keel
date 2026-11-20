@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>天气面板 · E2E fixture</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 14px; color: #111; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .kv { display: flex; gap: 8px; align-items: baseline; margin: 4px 0; }
+  .label { width: 86px; color: #666; font-size: 12px; }
+  pre { margin: 8px 0 0; padding: 10px; background: #f4f4f5; border-radius: 8px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<h1 id="title">天气面板 · booting</h1>
+<div class="kv"><span class="label">城市</span><strong id="city">—</strong></div>
+<div class="kv"><span class="label">温度</span><strong id="temperature">—</strong></div>
+<div class="kv"><span class="label">刷新</span><strong id="refresh">等待 tool-result</strong></div>
+<pre id="state">{}</pre>
+<script>
+(function () {
+  // The fixture is deliberately small: it proves the real host bridge carried
+  // initialize → initialized → tool-input → tool-result, and that the View's
+  // own tools/call reached the real MCP server through the host proxy.
+  const state = window.__e2e = {
+    bootedAt: Date.now(),
+    frames: [],
+    host: null,
+    toolInput: null,
+    toolResult: null,
+    toolsCall: null,
+    errors: [],
+    origin: null,
+    locationOrigin: null,
+    isolation: null,
+  };
+  // `window.origin` is the document's origin ("null" for an opaque sandbox);
+  // `location.origin` reflects the URL's origin and is not the isolation test.
+  try { state.origin = window.origin; } catch (e) { state.errors.push("origin:" + String(e)); }
+  try { state.locationOrigin = location.origin; } catch (e) { state.errors.push("location:" + String(e)); }
+  (function probeIsolation() {
+    const result = { cookie: null, parentDom: null, localStorage: null };
+    try { result.cookie = document.cookie; } catch (e) { result.cookie = "error:" + e.name; }
+    try { result.parentDom = String(parent.document.body && parent.document.body.textContent).slice(0, 20); }
+    catch (e) { result.parentDom = "blocked:" + e.name; }
+    try { localStorage.getItem("e2e"); result.localStorage = "readable"; }
+    catch (e) { result.localStorage = "blocked:" + e.name; }
+    state.isolation = result;
+  })();
+
+  const paint = () => {
+    const node = document.getElementById("state");
+    if (node) node.textContent = JSON.stringify(state, null, 2);
+  };
+  // An opaque-origin frame: window.top is the host page, and postMessage is the
+  // one channel. The host's web transport maps event.source back to the iframe
+  // that carries this instance's URL nonce.
+  const send = (frame) => {
+    try { window.top.postMessage(JSON.stringify(frame), "*"); }
+    catch (e) { state.errors.push("post:" + String(e)); }
+  };
+
+  window.addEventListener("message", (event) => {
+    let frame;
+    try { frame = JSON.parse(String(event.data)); }
+    catch (e) { state.errors.push("bad-json"); return; }
+    state.frames.push({ method: frame.method || "response", id: frame.id ?? null, at: Date.now() });
+
+    if (frame.id === 1 && frame.result) {
+      state.host = frame.result;
+      document.getElementById("title").textContent = "天气面板 · 已初始化";
+      send({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
+      setTimeout(() => {
+        send({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { width: 640, height: 360 } });
+      }, 80);
+    }
+    if (frame.method === "ui/notifications/tool-input") {
+      state.toolInput = frame.params ?? null;
+      const args = frame.params && frame.params.arguments ? frame.params.arguments : {};
+      const city = args && args.arguments && typeof args.arguments.city === "string" ? args.arguments.city : null;
+      if (city) document.getElementById("city").textContent = city;
+    }
+    if (frame.method === "ui/notifications/tool-result") {
+      state.toolResult = frame.params ?? null;
+      document.getElementById("title").textContent = "天气面板 · 已连接";
+      const structured = frame.params && frame.params.structuredContent ? frame.params.structuredContent : {};
+      if (typeof structured.temperatureC === "number") {
+        document.getElementById("temperature").textContent = structured.temperatureC + "°C";
+      }
+      // View → Host → MCP: an app-only tool (refresh_weather) that the model
+      // surface must not list. The host's proxy enforces visibility.
+      send({
+        jsonrpc: "2.0",
+        id: 100,
+        method: "tools/call",
+        params: { name: "refresh_weather", arguments: { city: "Shanghai" } },
+      });
+    }
+    if (frame.id === 100) {
+      state.toolsCall = frame.error ? { error: frame.error } : { result: frame.result ?? null };
+      document.getElementById("refresh").textContent = frame.error ? "刷新失败" : "刷新成功";
+    }
+    paint();
+  });
+
+  const start = () => {
+    send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "ui/initialize",
+      params: {
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "e2e-weather", version: "1.0.0" },
+        appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+      },
+    });
+    paint();
+  };
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start);
+})();
+</script>
+</body>
+</html>
