@@ -32,6 +32,13 @@ const maxListPages = 1_000
 // serverRequestTimeout bounds the reply to a server-initiated request.
 const serverRequestTimeout = 5 * time.Second
 
+// maxConcurrentServerRequests bounds the server-initiated requests one
+// connection answers at once. A handler may wait on a user decision (which can
+// take minutes); the receive loop must keep processing notifications and
+// responses meanwhile, and a hostile server must not be able to spawn an
+// unbounded number of handlers.
+const maxConcurrentServerRequests = 4
+
 // ClientState is the connection lifecycle, named as in pi.
 type ClientState string
 
@@ -143,14 +150,28 @@ type Client struct {
 	// fails closed): guessing a session would be worse than refusing.
 	activeInputSeq int64
 	activeInputs   map[int64]*activeInputCall
+	// serverRequestSlots bounds the concurrently answered server-initiated
+	// requests; the receive loop never blocks on a handler.
+	serverRequestSlots chan struct{}
 }
 
 // activeInputCall is one executing tool call, as a legacy server request sees
-// it.
+// it. mu serializes the input executor for this call: after the receive loop
+// went asynchronous, a legacy request and an MRTR round could otherwise touch
+// the shared InputRequestState (the sampling budget) concurrently.
 type activeInputCall struct {
+	id      int64
 	ctx     context.Context
 	handler ClientInputRequestHandler
 	state   *InputRequestState
+	mu      sync.Mutex
+}
+
+// invoke runs the call's input executor under its per-call lock.
+func (call *activeInputCall) invoke(ctx context.Context, round InputRequiredResult) (map[string]json.RawMessage, error) {
+	call.mu.Lock()
+	defer call.mu.Unlock()
+	return call.handler(ctx, round, call.state)
 }
 
 // NewClient returns a client in the idle state.
@@ -172,15 +193,16 @@ func NewClient(options ClientOptions) *Client {
 		options.Era = EraLegacy
 	}
 	return &Client{
-		options:      options,
-		state:        ClientIdle,
-		pending:      make(map[string]*pendingCall),
-		closedCh:     make(chan struct{}),
-		listeners:    make(map[string]*listener),
-		progress:     make(map[string]func(ProgressNotification)),
-		now:          time.Now,
-		era:          options.Era,
-		activeInputs: make(map[int64]*activeInputCall),
+		options:            options,
+		state:              ClientIdle,
+		pending:            make(map[string]*pendingCall),
+		closedCh:           make(chan struct{}),
+		listeners:          make(map[string]*listener),
+		progress:           make(map[string]func(ProgressNotification)),
+		now:                time.Now,
+		era:                options.Era,
+		activeInputs:       make(map[int64]*activeInputCall),
+		serverRequestSlots: make(chan struct{}, maxConcurrentServerRequests),
 	}
 }
 
@@ -613,8 +635,8 @@ func (c *Client) CallToolWithOptions(ctx context.Context, name string, args json
 		// elicitation decision is found again), parallel calls never share it.
 		CallID: fmt.Sprintf("mrtr-%d", time.Now().UnixNano()),
 	}
-	activeID := c.registerActiveInput(ctx, handler, state)
-	defer c.unregisterActiveInput(activeID)
+	active := c.registerActiveInput(ctx, handler, state)
+	defer c.unregisterActiveInput(active)
 
 	maxRounds := options.MRTRMaxRounds
 	if maxRounds <= 0 {
@@ -653,7 +675,7 @@ func (c *Client) CallToolWithOptions(ctx context.Context, name string, args json
 			c.finishMRTR(state)
 			return CallToolResult{}, &MRTRUnsupportedError{}
 		}
-		responses, err = handler(ctx, *result.InputRequired, state)
+		responses, err = active.invoke(ctx, *result.InputRequired)
 		if err != nil {
 			c.mrtrDiagnostic("executor-error", fmt.Sprintf("round=%d", state.Round))
 			c.finishMRTR(state)
@@ -689,18 +711,22 @@ func (c *Client) mrtrDiagnostic(kind, detail string) {
 }
 
 // registerActiveInput publishes one executing call to legacy server requests.
-func (c *Client) registerActiveInput(ctx context.Context, handler ClientInputRequestHandler, state *InputRequestState) int64 {
+func (c *Client) registerActiveInput(ctx context.Context, handler ClientInputRequestHandler, state *InputRequestState) *activeInputCall {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.activeInputSeq++
 	id := c.activeInputSeq
-	c.activeInputs[id] = &activeInputCall{ctx: ctx, handler: handler, state: state}
-	return id
+	call := &activeInputCall{id: id, ctx: ctx, handler: handler, state: state}
+	c.activeInputs[id] = call
+	return call
 }
 
-func (c *Client) unregisterActiveInput(id int64) {
+func (c *Client) unregisterActiveInput(call *activeInputCall) {
+	if call == nil {
+		return
+	}
 	c.mu.Lock()
-	delete(c.activeInputs, id)
+	delete(c.activeInputs, call.id)
 	c.mu.Unlock()
 }
 
@@ -1229,7 +1255,7 @@ func (c *Client) receiveLoop(transport Transport) {
 			}
 			c.deliver(typed.ID, callResult{err: serverErr})
 		case *Request:
-			c.answerServerRequest(transport, typed)
+			c.dispatchServerRequest(transport, typed)
 		case *Notification:
 			c.handleNotification(typed)
 		}
@@ -1292,14 +1318,47 @@ func (c *Client) deliver(id ID, result callResult) {
 	call.ch <- result
 }
 
+// dispatchServerRequest answers one server-initiated request off the receive
+// loop. A handler may wait for a user decision, so running it inline would let a
+// malicious (or merely interactive) server freeze every notification and
+// response on the connection. The bounded slot set keeps the concurrency and
+// the goroutine count finite; an overflow is answered immediately with -32603
+// instead of being queued or silently dropped.
+func (c *Client) dispatchServerRequest(transport Transport, request *Request) {
+	// Resolve the executing call now, on the receive loop: the association
+	// belongs to the moment the request arrived, not to the moment the handler
+	// goroutine happens to start. Without this snapshot a fast tools/call
+	// response could retire the call before the handler runs and the request
+	// would lose its session scope.
+	call := c.singleActiveInput()
+	select {
+	case c.serverRequestSlots <- struct{}{}:
+		go func() {
+			defer func() { <-c.serverRequestSlots }()
+			c.answerServerRequest(transport, request, call)
+		}()
+	default:
+		ctx, cancel := context.WithTimeout(context.Background(), serverRequestTimeout)
+		defer cancel()
+		_ = transport.Send(ctx, &ErrorResponse{
+			JSONRPC: JSONRPCVersion,
+			ID:      request.ID,
+			Error: ErrorObject{
+				Code:    CodeInternalError,
+				Message: "too many concurrent server requests",
+			},
+		})
+	}
+}
+
 // answerServerRequest replies with the executor's response. A legacy server
 // request that arrives while exactly one tool call is executing belongs to that
 // call: it is executed with the call's context and tenant/session scope and
 // answered with the same response shape the MRTR executor returns. Otherwise
 // the injected ServerRequests handler answers, and with no handler the reply is
 // "method not found" (fail closed; the spec requires an answer, never silence).
-func (c *Client) answerServerRequest(transport Transport, request *Request) {
-	if call := c.singleActiveInput(); call != nil && call.handler != nil {
+func (c *Client) answerServerRequest(transport Transport, request *Request, call *activeInputCall) {
+	if call != nil && call.handler != nil {
 		ctx := call.ctx
 		if ctx == nil {
 			ctx = context.Background()
@@ -1314,7 +1373,7 @@ func (c *Client) answerServerRequest(transport Transport, request *Request) {
 				legacyServerRequestKey: {Method: request.Method, Params: copyOptionalRaw(request.Params)},
 			},
 		}
-		responses, err := call.handler(ctx, round, call.state)
+		responses, err := call.invoke(ctx, round)
 		if err == nil {
 			if result, ok := responses[legacyServerRequestKey]; ok && len(result) > 0 {
 				_ = transport.Send(ctx, &SuccessResponse{JSONRPC: JSONRPCVersion, ID: request.ID, Result: result})

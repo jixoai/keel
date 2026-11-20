@@ -457,7 +457,11 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if err != nil {
 		return res, fmt.Errorf("agent: resolve agent binding: %w", err)
 	}
-	model, err := r.activeModelFor(ctx, lease, events, MergeSelectionDefaultModel(selection, surface.DefaultModel))
+	// The fact that resolved the attempt is also the fact tools see: an
+	// out-of-band model call during this attempt (MCP sampling) must run on the
+	// same model as the attempt itself.
+	selectionForModel := MergeSelectionDefaultModel(selection, surface.DefaultModel)
+	model, err := r.activeModelFor(ctx, lease, events, selectionForModel)
 	if err != nil {
 		return res, fmt.Errorf("agent: resolve model: %w", err)
 	}
@@ -498,6 +502,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		SessionID: lease.Scope.SessionID.String(),
 	})
 	runCtx = agentcore.WithMCPAttempt(runCtx, uuid.NewString())
+	// Sampling executed by a tool of this attempt must resolve the same session
+	// selection the attempt resolved. An app-initiated tool call (no runner
+	// attempt) has no such key and keeps the deployment default.
+	runCtx = agentcore.WithToolModelSelection(runCtx, selectionForModel)
 	// A previous process may have died after committing an assistant tool call
 	// but before committing its results. Execute the missing calls now (at least
 	// once) so the model sees a complete turn — through THIS attempt's filtered
