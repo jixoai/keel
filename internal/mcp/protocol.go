@@ -347,6 +347,27 @@ type ClientCapabilities struct {
 	Roots        *RootsCapability           `json:"roots,omitempty"`
 	Sampling     map[string]json.RawMessage `json:"sampling,omitempty"`
 	Elicitation  map[string]json.RawMessage `json:"elicitation,omitempty"`
+	// Extensions is the 2026-07-28 addition (the same extension payloads the
+	// older `experimental` field carried). A non-nil empty map is still
+	// emitted, like Sampling/Elicitation: declaring "none" is not silence.
+	Extensions map[string]json.RawMessage `json:"extensions,omitempty"`
+}
+
+// DeclareMCPApps declares MCP Apps support in both capability positions with
+// the same payload. `extensions` is the 2026-07-28 field; `experimental`
+// carries the identical declaration for peers built before that revision
+// (ext-apps issue #231, design §0.1). Callers declare it only when the
+// deployment actually serves apps.
+func (c *ClientCapabilities) DeclareMCPApps() {
+	payload := []byte(`{"mimeTypes":["` + AppMIMEType + `"]}`)
+	if c.Extensions == nil {
+		c.Extensions = make(map[string]json.RawMessage, 1)
+	}
+	if c.Experimental == nil {
+		c.Experimental = make(map[string]json.RawMessage, 1)
+	}
+	c.Extensions[AppExtensionID] = json.RawMessage(append([]byte(nil), payload...))
+	c.Experimental[AppExtensionID] = json.RawMessage(append([]byte(nil), payload...))
 }
 
 // MarshalJSON keeps the "declared with no options" shape: an empty but non-nil
@@ -382,6 +403,13 @@ func (c ClientCapabilities) MarshalJSON() ([]byte, error) {
 			return nil, err
 		}
 		fields["elicitation"] = encoded
+	}
+	if c.Extensions != nil {
+		encoded, err := json.Marshal(c.Extensions)
+		if err != nil {
+			return nil, err
+		}
+		fields["extensions"] = encoded
 	}
 	return json.Marshal(fields)
 }

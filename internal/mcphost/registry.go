@@ -488,6 +488,7 @@ func (r *Registry) resolve(ctx context.Context, app mcp.App, byName map[string]*
 		CSPDomains:    meta.CSP,
 		Permissions:   meta.Permissions,
 		PrefersBorder: meta.PrefersBorder,
+		Domain:        meta.Domain,
 		Hash:          hash,
 		FetchedAt:     now,
 		TTLMs:         resource.TTLMs,

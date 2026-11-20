@@ -38,6 +38,12 @@ const maxUIResourceURIBytes = 256
 // AppMIMEType is the only media type an MCP app document may declare.
 const AppMIMEType = "text/html;profile=mcp-app"
 
+// AppExtensionID is the MCP Apps extension identifier (apps.mdx §Extension
+// Identifier). The 2026-07-28 revision made `extensions` a legal
+// ClientCapabilities field; earlier peers expect the same declaration under
+// `experimental`, so the host declares both (see ClientCapabilities.DeclareMCPApps).
+const AppExtensionID = "io.modelcontextprotocol/ui"
+
 // DefaultToolVisibility applies when a tool declares no `_meta.ui.visibility`:
 // the tool is both a model tool and an app tool.
 var DefaultToolVisibility = []string{VisibilityModel, VisibilityApp}

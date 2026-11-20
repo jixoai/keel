@@ -68,6 +68,16 @@ function cspDomainsOf(value: unknown): McpAppView["cspDomains"] | undefined {
   return any ? out : undefined;
 }
 
+/** `_meta.ui.domain` is a bare hostname the host has already validated
+ * (charset, length, lower-casing). The client keeps only a bounded string: it
+ * is display metadata, never a URL the frame loads. */
+const DOMAIN_MAX_LENGTH = 253;
+
+function domainOf(value: unknown): string | undefined {
+  const domain = text(value).trim();
+  return domain && domain.length <= DOMAIN_MAX_LENGTH ? domain : undefined;
+}
+
 /** One catalogue row, or null when a security-bearing field is malformed. A
  * malformed app is not renderable; the caller degrades to text. */
 export function parseMcpApp(raw: unknown): McpAppView | null {
@@ -96,6 +106,7 @@ export function parseMcpApp(raw: unknown): McpAppView | null {
     cspDomains: cspDomainsOf(row.cspDomains),
     permissions: permissionsOf(row.permissions),
     prefersBorder: typeof row.prefersBorder === "boolean" ? row.prefersBorder : undefined,
+    domain: domainOf(row.domain),
     hash,
     fetchedAt: text(row.fetchedAt) || undefined,
     ttlMs: numberOr(row.ttlMs),

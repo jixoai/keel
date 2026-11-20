@@ -92,6 +92,7 @@ func testSurface(t *testing.T) mcphost.Surface {
 			Tools:       []mcphost.ToolRef{{Tool: "dashboard", Visibility: []string{"model", "app"}}},
 			CSP:         csp,
 			Permissions: map[string]bool{"clipboardWrite": true},
+			Domain:      "weather.example",
 			Hash:        hash,
 			FetchedAt:   time.Unix(1_700_000_000, 0),
 			DocumentURL: "/v1/mcp/apps/" + testAppID + "/view?v=" + hash,
@@ -191,6 +192,9 @@ func TestMCPAppsCatalogIsTenantScoped(t *testing.T) {
 	}
 	if body.Apps[0].DocumentURL != "/v1/mcp/apps/"+testAppID+"/view?v="+hashFor(testHTML) {
 		t.Fatalf("documentUrl = %q", body.Apps[0].DocumentURL)
+	}
+	if body.Apps[0].Domain != "weather.example" {
+		t.Fatalf("domain = %q, want the catalogue to carry _meta.ui.domain", body.Apps[0].Domain)
 	}
 	if body.SandboxOrigin != "https://sandbox.example.com" {
 		t.Fatalf("sandboxOrigin = %q", body.SandboxOrigin)

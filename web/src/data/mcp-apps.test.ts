@@ -60,6 +60,15 @@ test("目录：合法 app 被解析，主题只保留字符串变量", () => {
   expect(catalogue.sandboxOrigin).toBe("https://mcp-app.example.com");
 });
 
+test("目录：domain 有则透传，缺省/超长不发明", () => {
+  const withDomain = parseMcpAppCatalogue({ apps: [row({ domain: "weather.example" })] }).apps[0];
+  expect(withDomain.domain).toBe("weather.example");
+  const withoutDomain = parseMcpAppCatalogue({ apps: [row()] }).apps[0];
+  expect(withoutDomain.domain).toBe(undefined);
+  const overlong = parseMcpAppCatalogue({ apps: [row({ domain: "a".repeat(254) })] }).apps[0];
+  expect(overlong.domain).toBe(undefined);
+});
+
 test("目录：错误 mime/跨源 URL/错 appId/错 hash 的行一律丢弃", () => {
   const catalogue = parseMcpAppCatalogue({
     apps: [

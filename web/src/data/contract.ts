@@ -454,6 +454,9 @@ export interface McpAppView {
   };
   permissions: Record<string, boolean>;
   prefersBorder?: boolean;
+  /** The resource's `_meta.ui.domain` (a bare hostname the server declared).
+   * Validated by the host; the client passes it through for display. */
+  domain?: string;
   hash: string;
   fetchedAt?: string;
   ttlMs?: number;

@@ -112,9 +112,13 @@ type AppSpec struct {
 	CSPDomains    *CSPMeta        `json:"cspDomains,omitempty"`
 	Permissions   map[string]bool `json:"permissions"`
 	PrefersBorder *bool           `json:"prefersBorder,omitempty"`
-	Hash          string          `json:"hash"`
-	FetchedAt     time.Time       `json:"fetchedAt"`
-	TTLMs         *int64          `json:"ttlMs,omitempty"`
+	// Domain is the resource's declared `_meta.ui.domain` (a bare hostname,
+	// validated and lower-cased by parseResourceMeta). Catalogue clients get it
+	// from here; they never re-read the resource metadata themselves.
+	Domain    string    `json:"domain,omitempty"`
+	Hash      string    `json:"hash"`
+	FetchedAt time.Time `json:"fetchedAt"`
+	TTLMs     *int64    `json:"ttlMs,omitempty"`
 	// Diagnostics are the non-fatal notes of this app's metadata (dropped CSP
 	// domains, unknown permissions, deprecated keys).
 	Diagnostics []string `json:"diagnostics,omitempty"`

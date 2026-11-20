@@ -408,16 +408,32 @@ func newMCPFactory(cfg Config) servicegraph.Factory {
 			// derived from the executor, so this host never advertises sampling
 			// or elicitation it cannot answer.
 			options.InputRequests = cfg.MCP.MRTR.HandleInputRequests
-			options.Capabilities = cfg.MCP.MRTR.ClientCapabilities()
 			options.MRTRDiagnostics = cfg.MCP.MRTR.RecordClientDiagnostic
 			options.OnMRTRDone = func(_ string, rounds int) { cfg.MCP.MRTR.RecordRounds(rounds) }
 		}
+		options.Capabilities = mcpClientCapabilities(cfg)
 		manager := mcp.Connect(ctx, cfg.MCP.Entries, options)
 		if events != nil {
 			events.SetFleet(manager)
 		}
 		return &mcpService{manager: manager, entries: cfg.MCP.Entries, registry: cfg.MCP.Registry, events: events, log: cfg.Seams.Logger}, nil
 	}
+}
+
+// mcpClientCapabilities is what the MCP connections declare in initialize: the
+// MRTR-derived capabilities, plus the MCP Apps extension only when this host
+// actually serves apps. The registry is the apps wiring: without it there is no
+// catalogue, no document route and no proxy, so declaring UI support would be a
+// promise this deployment cannot keep (spec「降级路径与能力协商」).
+func mcpClientCapabilities(cfg Config) mcp.ClientCapabilities {
+	capabilities := cfg.MCP.ConnectOptions.Capabilities
+	if cfg.MCP.MRTR != nil {
+		capabilities = cfg.MCP.MRTR.ClientCapabilities()
+	}
+	if cfg.MCP.Registry != nil {
+		capabilities.DeclareMCPApps()
+	}
+	return capabilities
 }
 
 // --- compaction ----------------------------------------------------------

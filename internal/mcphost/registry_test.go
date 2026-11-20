@@ -110,7 +110,7 @@ func TestRegistryPublishesValidatedApps(t *testing.T) {
 		Auditor: auditor,
 		ReadApp: func(context.Context, *mcp.Server, string) (mcp.AppResource, error) {
 			calls++
-			return appDocument(html, `{"ui":{"csp":{"connectDomains":["https://api.example.com"]},"permissions":{"clipboardWrite":true},"prefersBorder":true}}`), nil
+			return appDocument(html, `{"ui":{"csp":{"connectDomains":["https://api.example.com"]},"permissions":{"clipboardWrite":true},"domain":"Weather.Example","prefersBorder":true}}`), nil
 		},
 		Sinks: Sinks{Apps: func(apps []AppSpec) error { sinkApps = apps; return nil }},
 	})
@@ -157,6 +157,22 @@ func TestRegistryPublishesValidatedApps(t *testing.T) {
 	}
 	if spec.Permissions["clipboardWrite"] != true || spec.PrefersBorder == nil || !*spec.PrefersBorder {
 		t.Fatalf("permissions/prefersBorder = %+v / %v", spec.Permissions, spec.PrefersBorder)
+	}
+	// `_meta.ui.domain` is parsed AND published: the catalogue is the single
+	// machine-readable source, so a client never re-reads resource metadata.
+	if spec.Domain != "weather.example" {
+		t.Fatalf("domain = %q, want the lower-cased declared hostname", spec.Domain)
+	}
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal catalogue app: %v", err)
+	}
+	var catalogueFields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &catalogueFields); err != nil {
+		t.Fatalf("decode catalogue app: %v", err)
+	}
+	if string(catalogueFields["domain"]) != `"weather.example"` {
+		t.Fatalf("catalogue JSON domain = %s", catalogueFields["domain"])
 	}
 	if spec.CSPDomains == nil || len(spec.CSPDomains.ConnectDomains) != 1 {
 		t.Fatalf("cspDomains = %+v", spec.CSPDomains)
