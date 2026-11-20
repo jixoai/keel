@@ -33,6 +33,15 @@ const (
 	ResultTypeInputRequired = "input_required"
 )
 
+// Bounds on one input_required round. Every member is server-controlled, and
+// the round is executed (and possibly rendered as decisions) before the tool
+// call returns, so an unbounded map would be a denial-of-service surface.
+const (
+	maxInputRequests           = 16
+	maxInputRequestKeyBytes    = 128
+	maxInputRequestParamsBytes = 64 << 10
+)
+
 // InputRequest is one entry of an InputRequiredResult. It is a method plus
 // params, without a JSON-RPC id (the exchange is owned by the original call).
 type InputRequest struct {
@@ -145,10 +154,16 @@ func parseInputRequiredResult(fields map[string]json.RawMessage) (*InputRequired
 		if err := json.Unmarshal(raw, &entries); err != nil {
 			return nil, invalid("inputRequests must be an object")
 		}
+		if len(entries) > maxInputRequests {
+			return nil, invalid(fmt.Sprintf("inputRequests has more than %d entries", maxInputRequests))
+		}
 		result.InputRequests = make(map[string]InputRequest, len(entries))
 		for key, entry := range entries {
 			if key == "" {
 				return nil, invalid("an input request key is empty")
+			}
+			if len(key) > maxInputRequestKeyBytes {
+				return nil, invalid(fmt.Sprintf("an input request key exceeds %d bytes", maxInputRequestKeyBytes))
 			}
 			var requestFields map[string]json.RawMessage
 			if err := json.Unmarshal(entry, &requestFields); err != nil || requestFields == nil {
@@ -160,6 +175,9 @@ func parseInputRequiredResult(fields map[string]json.RawMessage) (*InputRequired
 			}
 			params := requestFields["params"]
 			if len(params) > 0 && !isJSONNull(params) {
+				if len(params) > maxInputRequestParamsBytes {
+					return nil, invalid(fmt.Sprintf("input request %s params exceed %d bytes", boundedKey(key), maxInputRequestParamsBytes))
+				}
 				var object map[string]json.RawMessage
 				if err := json.Unmarshal(params, &object); err != nil || object == nil {
 					return nil, invalid("input request " + boundedKey(key) + " params must be an object")

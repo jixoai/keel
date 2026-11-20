@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +80,117 @@ func TestResultTypeThreeStates(t *testing.T) {
 			t.Fatalf("requestState = %s, want the empty string preserved", result.InputRequired.RequestState)
 		}
 	})
+}
+
+// TestInputRequiredRequestsAreBounded pins the P2 bound on the server-supplied
+// inputRequests map: entry count, key length and params size are all finite.
+func TestInputRequiredRequestsAreBounded(t *testing.T) {
+	request := func(key string, params any) (string, any) {
+		entry := map[string]any{"method": "elicitation/create"}
+		if params != nil {
+			entry["params"] = params
+		}
+		return key, entry
+	}
+	build := func(entries map[string]any) json.RawMessage {
+		raw, err := json.Marshal(map[string]any{
+			"resultType":    "input_required",
+			"inputRequests": entries,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	exactly := func(count int) map[string]any {
+		entries := make(map[string]any, count)
+		for index := 0; index < count; index++ {
+			key, entry := request(fmt.Sprintf("key_%02d", index), map[string]any{"message": "m"})
+			entries[key] = entry
+		}
+		return entries
+	}
+
+	t.Run("16 entries accepted", func(t *testing.T) {
+		if _, err := validateCallToolResult(build(exactly(maxInputRequests))); err != nil {
+			t.Fatalf("16 entries rejected: %v", err)
+		}
+	})
+	t.Run("17 entries rejected", func(t *testing.T) {
+		_, err := validateCallToolResult(build(exactly(maxInputRequests + 1)))
+		var rpcErr *McpError
+		if !errors.As(err, &rpcErr) || rpcErr.Code != CodeInvalidRequest {
+			t.Fatalf("err = %v, want -32600", err)
+		}
+	})
+	t.Run("128-byte key accepted", func(t *testing.T) {
+		if _, err := validateCallToolResult(build(map[string]any{
+			strings.Repeat("k", maxInputRequestKeyBytes): map[string]any{"method": "elicitation/create"},
+		})); err != nil {
+			t.Fatalf("128-byte key rejected: %v", err)
+		}
+	})
+	t.Run("129-byte key rejected", func(t *testing.T) {
+		_, err := validateCallToolResult(build(map[string]any{
+			strings.Repeat("k", maxInputRequestKeyBytes+1): map[string]any{"method": "elicitation/create"},
+		}))
+		var rpcErr *McpError
+		if !errors.As(err, &rpcErr) || rpcErr.Code != CodeInvalidRequest {
+			t.Fatalf("err = %v, want -32600", err)
+		}
+	})
+	t.Run("oversized params rejected", func(t *testing.T) {
+		_, err := validateCallToolResult(build(map[string]any{
+			"login": map[string]any{
+				"method": "elicitation/create",
+				"params": map[string]any{"pad": strings.Repeat("x", maxInputRequestParamsBytes)},
+			},
+		}))
+		var rpcErr *McpError
+		if !errors.As(err, &rpcErr) || rpcErr.Code != CodeInvalidRequest {
+			t.Fatalf("err = %v, want -32600", err)
+		}
+	})
+	t.Run("small params accepted", func(t *testing.T) {
+		if _, err := validateCallToolResult(build(map[string]any{
+			"login": map[string]any{
+				"method": "elicitation/create",
+				"params": map[string]any{"message": "m"},
+			},
+		})); err != nil {
+			t.Fatalf("small params rejected: %v", err)
+		}
+	})
+}
+
+// TestSupportedProtocolVersionIsStrict pins the version acceptance surface: only
+// a strict YYYY-MM-DD date may name a protocol revision, and only a date at or
+// after the modern revision is accepted as a future one.
+func TestSupportedProtocolVersionIsStrict(t *testing.T) {
+	cases := []struct {
+		version string
+		want    bool
+	}{
+		{"2026-07-28", true},
+		{"2026-07-29", true},
+		{"2031-01-15", true},
+		{LatestProtocolVersion, true},
+		{"2025-06-18", true},
+		{"2024-11-05", true},
+		{"zzz", false},
+		{"2999", false},
+		{"2026-7-28", false},
+		{"2026-07-28x", false},
+		{"2026-13-01", false},
+		{"2026-02-30", false},
+		{"", false},
+		{"null", false},
+	}
+	for _, test := range cases {
+		if got := isSupportedProtocolVersion(test.version); got != test.want {
+			t.Errorf("isSupportedProtocolVersion(%q) = %v, want %v", test.version, got, test.want)
+		}
+	}
 }
 
 // --- P5.2 MRTR end to end ------------------------------------------------
@@ -271,7 +383,7 @@ func TestLegacyServerRequestUsesExecutingCallScope(t *testing.T) {
 		}
 		return map[string]any{"content": []any{map[string]any{"type": "text", "text": "call done"}}}, nil
 	})
-	var scopeSeen string
+	scopeCh := make(chan string, 1)
 	client := NewClient(ClientOptions{
 		Name: "p5-legacy", Version: "1.0.0",
 		InputRequests: func(ctx context.Context, request InputRequiredResult, _ *InputRequestState) (map[string]json.RawMessage, error) {
@@ -279,7 +391,7 @@ func TestLegacyServerRequestUsesExecutingCallScope(t *testing.T) {
 			if sampling.Method != "sampling/createMessage" {
 				return nil, &McpError{Code: CodeMethodNotFound, Message: "unexpected method"}
 			}
-			scopeSeen = toolScopeText(ctx)
+			scopeCh <- toolScopeText(ctx)
 			return map[string]json.RawMessage{
 				"server-request": json.RawMessage(`{"role":"assistant","content":{"type":"text","text":"sampled"},"model":"m","stopReason":"endTurn"}`),
 			}, nil
@@ -295,9 +407,6 @@ func TestLegacyServerRequestUsesExecutingCallScope(t *testing.T) {
 	if _, err := client.CallTool(ctx, "ask", nil); err != nil {
 		t.Fatalf("call: %v", err)
 	}
-	if scopeSeen != "tenant-1/session-1" {
-		t.Fatalf("sampling scope = %q, want tenant-1/session-1", scopeSeen)
-	}
 	var response *SuccessResponse
 	ok := waitFor(t, 2*time.Second, func() bool {
 		for _, message := range server.Messages() {
@@ -310,6 +419,16 @@ func TestLegacyServerRequestUsesExecutingCallScope(t *testing.T) {
 	})
 	if !ok || response == nil {
 		t.Fatalf("server never received the sampling response; messages=%#v", server.Messages())
+	}
+	// The handler runs off the receive loop; receiving its answer first makes
+	// the scope observation deterministic.
+	select {
+	case scopeSeen := <-scopeCh:
+		if scopeSeen != "tenant-1/session-1" {
+			t.Fatalf("sampling scope = %q, want tenant-1/session-1", scopeSeen)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the sampling handler never observed its call scope")
 	}
 	if !strings.Contains(string(response.Result), `"text":"sampled"`) {
 		t.Fatalf("sampling response = %s", response.Result)

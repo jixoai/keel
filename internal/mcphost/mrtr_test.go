@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -239,6 +241,160 @@ func TestMRTRElicitationWithoutScopeIsRefused(t *testing.T) {
 	var rpcErr *mcp.McpError
 	if !errors.As(err, &rpcErr) || rpcErr.Code != mcp.CodeInternalError {
 		t.Fatalf("err = %v, want an internal-error refusal", err)
+	}
+}
+
+// TestMRTRElicitationDisabledIsMethodNotFound pins the frozen spec: a request
+// type this deployment does not implement is -32601, not an internal failure.
+// The no-scope case above stays -32603 (the method exists; the context is bad).
+func TestMRTRElicitationDisabledIsMethodNotFound(t *testing.T) {
+	ctx, _, _ := mcpTestScopeContext(t)
+	round := mcp.InputRequiredResult{InputRequests: map[string]mcp.InputRequest{
+		"login": {Method: "elicitation/create", Params: json.RawMessage(`{"message":"hi"}`)},
+	}}
+	for name, executor := range map[string]*MRTR{
+		"disabled":           NewMRTR(MRTROptions{SamplingMode: SamplingOff, DisableElicitation: true}),
+		"no decision bridge": NewMRTR(MRTROptions{SamplingMode: SamplingOff}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := executor.HandleInputRequests(ctx, "fixture", round, &mcp.InputRequestState{})
+			var rpcErr *mcp.McpError
+			if !errors.As(err, &rpcErr) || rpcErr.Code != mcp.CodeMethodNotFound {
+				t.Fatalf("err = %v, want -32601", err)
+			}
+		})
+	}
+}
+
+// elicitationSchemaParams renders one requestedSchema fixture.
+func elicitationSchemaParams(t *testing.T, properties map[string]any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"message":         "pick one",
+		"requestedSchema": map[string]any{"type": "object", "properties": properties},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// TestMRTRElicitationSchemaBounds pins the P2 bound: an oversized schema is
+// invalid params and never opens a decision.
+func TestMRTRElicitationSchemaBounds(t *testing.T) {
+	manyProperties := map[string]any{}
+	for index := 0; index < maxElicitationProperties+1; index++ {
+		manyProperties[fmt.Sprintf("field_%02d", index)] = map[string]any{"type": "string"}
+	}
+	tooManyOptions := map[string]any{"choice": map[string]any{
+		"type": "string",
+		"enum": func() []string {
+			values := make([]string, 0, maxElicitationEnumOptions+1)
+			for index := 0; index < maxElicitationEnumOptions+1; index++ {
+				values = append(values, fmt.Sprintf("v%d", index))
+			}
+			return values
+		}(),
+	}}
+	oversizedLiteral := map[string]any{"choice": map[string]any{
+		"type": "string",
+		"enum": []string{strings.Repeat("x", maxElicitationEnumLiteralBytes+1)},
+	}}
+
+	cases := []struct {
+		name       string
+		properties map[string]any
+	}{
+		{"too many properties", manyProperties},
+		{"too many enum options", tooManyOptions},
+		{"enum literal too long", oversizedLiteral},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			decisions := newFakeDecisions()
+			executor := NewMRTR(MRTROptions{SamplingMode: SamplingOff})
+			executor.SetDecisions(decisions)
+			ctx, _, _ := mcpTestScopeContext(t)
+			round := mcp.InputRequiredResult{InputRequests: map[string]mcp.InputRequest{
+				"login": {Method: "elicitation/create", Params: elicitationSchemaParams(t, test.properties)},
+			}}
+			_, err := executor.HandleInputRequests(ctx, "fixture", round, &mcp.InputRequestState{})
+			var rpcErr *mcp.McpError
+			if !errors.As(err, &rpcErr) || rpcErr.Code != mcp.CodeInvalidParams {
+				t.Fatalf("err = %v, want -32602", err)
+			}
+			if opened := decisions.openedRequests(); len(opened) != 0 {
+				t.Fatalf("an oversized schema opened %d decisions", len(opened))
+			}
+		})
+	}
+
+	// The exact bounds are accepted: 32 properties and 64 enum options together.
+	atBounds := map[string]any{}
+	enumValues := make([]string, 0, maxElicitationEnumOptions)
+	for index := 0; index < maxElicitationEnumOptions; index++ {
+		enumValues = append(enumValues, fmt.Sprintf("v%d", index))
+	}
+	atBounds["choice"] = map[string]any{"type": "string", "enum": enumValues}
+	for index := 1; index < maxElicitationProperties; index++ {
+		atBounds[fmt.Sprintf("field_%02d", index)] = map[string]any{"type": "string"}
+	}
+	decisions := newFakeDecisions()
+	executor := NewMRTR(MRTROptions{SamplingMode: SamplingOff})
+	executor.SetDecisions(decisions)
+	ctx, _, _ := mcpTestScopeContext(t)
+	round := mcp.InputRequiredResult{InputRequests: map[string]mcp.InputRequest{
+		"login": {Method: "elicitation/create", Params: elicitationSchemaParams(t, atBounds)},
+	}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := executor.HandleInputRequests(ctx, "fixture", round, &mcp.InputRequestState{})
+		done <- err
+	}()
+	if !waitForCondition(t, 2*time.Second, func() bool { return len(decisions.openedRequests()) == 1 }) {
+		t.Fatal("the at-bounds schema did not open a decision")
+	}
+	decisions.answerWith("cancel", "")
+	if err := <-done; err != nil {
+		t.Fatalf("at-bounds schema: %v", err)
+	}
+}
+
+// TestElicitationAnswerTerminalOptionBeatsText pins the cancel+text fix: a
+// terminal option is the answer even when the UI left typed text behind.
+func TestElicitationAnswerTerminalOptionBeatsText(t *testing.T) {
+	plan := elicitationPlan{
+		freeTextField: "note",
+		values: map[string]elicitationValue{
+			"v0_0": {field: "choice", value: "alice"},
+		},
+	}
+	cases := []struct {
+		name       string
+		optionID   string
+		text       string
+		wantAction string
+		want       map[string]any
+	}{
+		{"decline ignores text", "decline", "stale text", "decline", nil},
+		{"cancel ignores text", "cancel", "stale text", "cancel", nil},
+		{"projected option ignores text", "v0_0", "stale text", "accept", map[string]any{"choice": "alice"}},
+		{"empty option with text is free text", "", "typed", "accept", map[string]any{"note": "typed"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			decision := agentext.Decision{
+				Status: agentext.DecisionAnswered,
+				Answer: &agentext.DecisionAnswer{OptionID: test.optionID, Text: test.text},
+			}
+			action, content := plan.answer(decision)
+			if action != test.wantAction {
+				t.Fatalf("action = %q, want %q", action, test.wantAction)
+			}
+			if !reflect.DeepEqual(content, test.want) {
+				t.Fatalf("content = %#v, want %#v", content, test.want)
+			}
+		})
 	}
 }
 

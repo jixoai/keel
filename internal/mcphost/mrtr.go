@@ -87,6 +87,15 @@ const (
 	// maxElicitationPromptBytes bounds the server-supplied prompt text shown to
 	// the user.
 	maxElicitationPromptBytes = 4096
+	// maxElicitationProperties bounds one requestedSchema. A server that wants
+	// more than this is not asking a form question; rendering it as a decision
+	// would be a denial-of-service surface.
+	maxElicitationProperties = 32
+	// maxElicitationEnumOptions bounds the projected options of one schema (all
+	// properties together), so the decision stays renderable.
+	maxElicitationEnumOptions = 64
+	// maxElicitationEnumLiteralBytes bounds one enum literal (raw JSON bytes).
+	maxElicitationEnumLiteralBytes = 4 << 10
 )
 
 // SamplingMessage is one text message of a sampling request.
@@ -313,14 +322,49 @@ type elicitParams struct {
 	} `json:"requestedSchema"`
 }
 
+// validateElicitationSchema bounds the requestedSchema before the host projects
+// it onto a decision. Everything rejected here is invalid params (-32602).
+func validateElicitationSchema(params elicitParams) error {
+	if len(params.RequestedSchema.Properties) > maxElicitationProperties {
+		return &mcp.McpError{
+			Code:    mcp.CodeInvalidParams,
+			Message: fmt.Sprintf("elicitation schema has more than %d properties", maxElicitationProperties),
+		}
+	}
+	options := 0
+	for _, property := range params.RequestedSchema.Properties {
+		for _, literal := range property.Enum {
+			options++
+			if len(literal) > maxElicitationEnumLiteralBytes {
+				return &mcp.McpError{
+					Code:    mcp.CodeInvalidParams,
+					Message: fmt.Sprintf("elicitation enum literal exceeds %d bytes", maxElicitationEnumLiteralBytes),
+				}
+			}
+		}
+	}
+	if options > maxElicitationEnumOptions {
+		return &mcp.McpError{
+			Code:    mcp.CodeInvalidParams,
+			Message: fmt.Sprintf("elicitation schema has more than %d enum options", maxElicitationEnumOptions),
+		}
+	}
+	return nil
+}
+
 // elicit executes one elicitation/create as a decision.
 func (m *MRTR) elicit(ctx context.Context, server, key string, input mcp.InputRequest, round mcp.InputRequiredResult, state *mcp.InputRequestState) (json.RawMessage, error) {
 	m.mu.RLock()
 	decisions := m.decisions
 	m.mu.RUnlock()
 	if m.options.DisableElicitation || decisions == nil {
+		// A capability this deployment does not serve is "method not found",
+		// not an internal failure: the server asked for a method we never
+		// declared (the spec allows a client to answer -32601 for an
+		// undeclared/unsupported request). The no-scope case below stays an
+		// internal error: the method is supported, the caller context is not.
 		m.audit(ctx, server, "mrtr.elicitation", "refused", "the decision primitive is not wired")
-		return nil, &mcp.McpError{Code: mcp.CodeInternalError, Message: "elicitation is not wired in this deployment"}
+		return nil, &mcp.McpError{Code: mcp.CodeMethodNotFound, Message: "elicitation is not supported in this deployment"}
 	}
 	scope, ok := agentcore.ToolRunScopeFromContext(ctx)
 	if !ok {
@@ -340,6 +384,11 @@ func (m *MRTR) elicit(ctx context.Context, server, key string, input mcp.InputRe
 		if err := json.Unmarshal(input.Params, &params); err != nil {
 			return nil, &mcp.McpError{Code: mcp.CodeInvalidParams, Message: "elicitation params are invalid"}
 		}
+	}
+	// The schema is attacker-controlled: bound it before any decision is opened
+	// or any option is projected.
+	if err := validateElicitationSchema(params); err != nil {
+		return nil, err
 	}
 	mode := strings.ToLower(strings.TrimSpace(params.Mode))
 	if mode == "" {
@@ -465,6 +514,9 @@ func elicitationPlanFor(params elicitParams, mode string) elicitationPlan {
 }
 
 // answer maps a terminal decision onto an ElicitResult action and content.
+// An explicit decline/cancel option always wins over free text: the decision
+// UI may leave typed text in the box when the user picks a terminal option,
+// and forwarding that text as an accept would turn a refusal into consent.
 func (p elicitationPlan) answer(decision agentext.Decision) (string, map[string]any) {
 	if decision.Status != agentext.DecisionAnswered || decision.Answer == nil {
 		return "cancel", nil
@@ -473,19 +525,23 @@ func (p elicitationPlan) answer(decision agentext.Decision) (string, map[string]
 	switch answer.OptionID {
 	case "decline":
 		return "decline", nil
-	case "cancel", "":
+	case "cancel":
+		return "cancel", nil
+	case "":
 		if answer.Text == "" {
 			return "cancel", nil
 		}
+	}
+	// An explicit projected option wins over leftover free text for the same
+	// reason: a chosen option is the answer, not an input method.
+	if projected, ok := p.values[answer.OptionID]; ok {
+		return "accept", map[string]any{projected.field: projected.value}
 	}
 	if answer.Text != "" {
 		if p.freeTextField == "" {
 			return "accept", nil
 		}
 		return "accept", map[string]any{p.freeTextField: answer.Text}
-	}
-	if projected, ok := p.values[answer.OptionID]; ok {
-		return "accept", map[string]any{projected.field: projected.value}
 	}
 	// "accept" (URL mode or a schema-free request) records consent only; a link
 	// is opened through ui/open-link, never from here.

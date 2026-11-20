@@ -609,8 +609,15 @@ type GetPromptResult struct {
 // modern revision newer than the one this build knows is accepted: version
 // rejection with a `supported` list already told the client what to use, and
 // refusing it after a successful discovery would undo the compatibility path.
+//
+// The "newer" comparison is only meaningful for real protocol dates: an
+// arbitrary string that happens to sort after "2026-07-28" (for example "zzz")
+// is not a future revision, it is a malformed version and is refused.
 func isSupportedProtocolVersion(version string) bool {
-	if IsModernProtocolVersion(version) {
+	if !isProtocolVersionDate(version) {
+		return false
+	}
+	if version >= ModernProtocolVersion {
 		return true
 	}
 	for _, supported := range SupportedProtocolVersions {
@@ -619,4 +626,25 @@ func isSupportedProtocolVersion(version string) bool {
 		}
 	}
 	return false
+}
+
+// isProtocolVersionDate reports whether version is a strict YYYY-MM-DD
+// calendar date. Protocol revisions are dated; anything else is malformed.
+func isProtocolVersionDate(version string) bool {
+	if len(version) != len("2006-01-02") {
+		return false
+	}
+	if version[4] != '-' || version[7] != '-' {
+		return false
+	}
+	for index := 0; index < len(version); index++ {
+		if index == 4 || index == 7 {
+			continue
+		}
+		if version[index] < '0' || version[index] > '9' {
+			return false
+		}
+	}
+	_, err := time.Parse("2006-01-02", version)
+	return err == nil
 }
