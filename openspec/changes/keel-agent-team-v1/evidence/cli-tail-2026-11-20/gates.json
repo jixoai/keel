@@ -2,13 +2,15 @@
   "change": "keel-agent-team-v1",
   "lane": "P1A2",
   "checkedAt": "2026-11-20",
-  "head": "0c696e8",
+  "head": "3b6cd03",
   "base": "6e53bff",
   "commits": [
     "7b8cc27",
     "329cc15",
     "8cab07d",
-    "0c696e8"
+    "0c696e8",
+    "7d341a5",
+    "3b6cd03"
   ],
   "gofmt": {
     "command": "gofmt -l cmd/keel internal/pluginpkg internal/agentext",
@@ -20,7 +22,7 @@
     "exit": 0
   },
   "vet": {
-    "command": "go vet ./cmd/keel ./internal/pluginpkg ./internal/agentext",
+    "command": "go vet ./cmd/keel ./internal/kernel ./internal/pluginpkg ./internal/agentext",
     "exit": 0
   },
   "tests": {
@@ -40,8 +42,19 @@
   "cliTests": {
     "command": "go test -p 1 -count=1 ./cmd/keel/ -run 'TestAgent|TestTeam'",
     "exit": 0,
-    "pass": 23,
+    "pass": 26,
     "fail": 0
+  },
+  "aAxisReview": {
+    "stopAttribution": "the newest user.message carrying a selection fact is authoritative (same as runner runSelection); a model-only selection leaves the session unbound and is never attributed to an older agent/team binding",
+    "sessionWindow": "bounded at 5x200=1000 most recently active sessions; when the server still has more the command warns on stderr and the help/manifest disclose the boundary",
+    "eventPaging": "requests kernel.MaxEventPage and continues while a page is full; a page-bound hit fails closed instead of attributing a stale binding",
+    "tests": [
+      "TestAgentStopDoesNotResurrectAnOlderBindingAfterAModelOnlySelection",
+      "TestAgentStopWarnsWhenTheSessionWindowIsTruncated",
+      "TestAgentStopNewestSelectionPagesUntilAShortPage",
+      "TestAgentStopNewestSelectionFailsClosedAtThePageBound"
+    ]
   },
   "e2e": {
     "command": "bash scripts/agent-team-cli-e2e.sh",
