@@ -56,6 +56,36 @@ func fakeReply(model string, msgs agentcore.MessageList) agentcore.AssistantMess
 		return fakeText(fmt.Sprintf("tool %s returned: %s", m.ToolName, ContentText(m.Content)))
 	case agentcore.UserMessage:
 		text := ContentText(m.Content)
+		// The MCP app crash/e2e harness drives the aggregate `mcp` tool through
+		// the deterministic provider: "mcp-list" asks for the catalogue and
+		// "mcp-call:<server>/<tool>" calls one tool. This is test-harness surface
+		// only (FakeStream is used only when no credentials are configured), and
+		// it does not change the production provider path.
+		if server, tool, ok := fakeMCPCallDirective(text); ok {
+			args, _ := json.Marshal(map[string]any{
+				"action":    "call",
+				"server":    server,
+				"tool":      tool,
+				"arguments": map[string]any{},
+			})
+			return agentcore.AssistantMessage{
+				RoleField: agentcore.RoleAssistant,
+				Content: agentcore.ContentList{
+					agentcore.NewToolCallContent(fakeToolCallID(model, msgs, 0), "mcp", args),
+				},
+				StopReason: agentcore.StopReasonToolUse,
+			}
+		}
+		if strings.Contains(text, "mcp-list") {
+			args, _ := json.Marshal(map[string]any{"action": "list"})
+			return agentcore.AssistantMessage{
+				RoleField: agentcore.RoleAssistant,
+				Content: agentcore.ContentList{
+					agentcore.NewToolCallContent(fakeToolCallID(model, msgs, 0), "mcp", args),
+				},
+				StopReason: agentcore.StopReasonToolUse,
+			}
+		}
 		if strings.Contains(text, "echo") {
 			args, _ := json.Marshal(map[string]string{"x": text})
 			return agentcore.AssistantMessage{
@@ -134,4 +164,27 @@ func fakeText(text string) agentcore.AssistantMessage {
 		Content:    agentcore.ContentList{agentcore.NewTextContent(text)},
 		StopReason: agentcore.StopReasonEndTurn,
 	}
+}
+
+// fakeMCPCallDirective parses "mcp-call:<server>/<tool>" out of the last user
+// text. The token ends at whitespace, newline or punctuation; an empty server or
+// tool is not a directive (the text falls through to the ordinary reply).
+func fakeMCPCallDirective(text string) (server, tool string, ok bool) {
+	const marker = "mcp-call:"
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return "", "", false
+	}
+	rest := text[index+len(marker):]
+	if end := strings.IndexAny(rest, " \t\r\n,.;!?。，；！？"); end >= 0 {
+		rest = rest[:end]
+	}
+	server, tool, found := strings.Cut(rest, "/")
+	if !found || server == "" || tool == "" {
+		return "", "", false
+	}
+	if strings.ContainsAny(server+tool, "/:") {
+		return "", "", false
+	}
+	return server, tool, true
 }

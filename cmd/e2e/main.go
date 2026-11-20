@@ -38,12 +38,22 @@ type env struct {
 }
 
 func main() {
+	// The fake MCP server is a subcommand of this binary so the scenario can
+	// point mcp.json at a stable executable without shipping a second tool: the
+	// child speaks newline-delimited JSON-RPC on stdio and exits with the host.
+	if len(os.Args) > 1 && os.Args[1] == "fake-mcp-server" {
+		os.Exit(runFakeMCPServer(os.Args[2:]))
+	}
 	var (
 		bin          = flag.String("bin", "/tmp/keel-runtime", "runtime binary")
 		dsn          = flag.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
 		port         = flag.Int("port", 13745, "listen port")
 		reset        = flag.Bool("reset", true, "truncate the runtime tables before the run (dedicated test DSN required)")
 		resetConfirm = flag.String("reset-confirm", "", "the database name the -reset truncate is allowed to wipe")
+		scenario     = flag.String("scenario", "core", "acceptance scenario: core | mcp-apps")
+		keelBin      = flag.String("keel-bin", "", "keel serve binary for the mcp-apps scenario (built on demand when empty)")
+		outDir       = flag.String("out", "", "evidence directory for the mcp-apps scenario")
+		mcpAppsPort  = flag.Int("mcp-apps-port", 13686, "listen port for the mcp-apps scenario")
 	)
 	flag.Parse()
 	if *dsn == "" {
@@ -62,23 +72,37 @@ func main() {
 		}
 	}
 
-	results := []result{}
-	results = append(results, e.caseIdempotentAcrossRestart())
-	results = append(results, e.caseSSECursorAcrossRestart())
-	results = append(results, e.caseBlobResumeAcrossRestart())
-	results = append(results, e.caseAgentReply())
-	results = append(results, e.caseRetryAppends())
-	results = append(results, e.caseRunResumeAfterKill())
-	results = append(results, e.caseToolReplayAfterKill())
-	results = append(results, e.caseConcurrentKillNoLoss())
+	switch *scenario {
+	case "core":
+		results := []result{}
+		results = append(results, e.caseIdempotentAcrossRestart())
+		results = append(results, e.caseSSECursorAcrossRestart())
+		results = append(results, e.caseBlobResumeAcrossRestart())
+		results = append(results, e.caseAgentReply())
+		results = append(results, e.caseRetryAppends())
+		results = append(results, e.caseRunResumeAfterKill())
+		results = append(results, e.caseToolReplayAfterKill())
+		results = append(results, e.caseConcurrentKillNoLoss())
 
-	e.stop()
-	raw, _ := json.MarshalIndent(results, "", "  ")
-	fmt.Println(string(raw))
-	for _, r := range results {
-		if !r.Pass {
-			os.Exit(1)
+		e.stop()
+		raw, _ := json.MarshalIndent(results, "", "  ")
+		fmt.Println(string(raw))
+		for _, r := range results {
+			if !r.Pass {
+				os.Exit(1)
+			}
 		}
+	case "mcp-apps":
+		results := runMCPAppsScenario(*keelBin, *outDir, *dsn, *mcpAppsPort)
+		raw, _ := json.MarshalIndent(results, "", "  ")
+		fmt.Println(string(raw))
+		for _, r := range results {
+			if !r.Pass {
+				os.Exit(1)
+			}
+		}
+	default:
+		log.Fatalf("unknown -scenario %q (want core or mcp-apps)", *scenario)
 	}
 }
 
@@ -119,7 +143,24 @@ func resetRuntimeTables(ctx context.Context, dsn, confirm string) error {
 		log.Printf("database %s is empty (42P01): the runtime will migrate on boot", name)
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// Product-layer tables the MCP app evidence scans. They are truncated one by
+	// one so a database migrated by an older revision (missing one table) still
+	// gets the rest cleaned instead of failing the whole reset.
+	for _, table := range []string{
+		"bash_jobs", "model_settings", "model_settings_history", "tenant_secrets",
+		"mcp_oauth_credentials", "plugins", "plugin_audit", "mcp_app_audit",
+		"mcp_app_contexts", "agents", "agent_teams", "api_keys", "tenant_usage",
+		"task_cards", "task_events", "approval_provenance", "notifications",
+		"file_manifest", "session_snapshot",
+	} {
+		if _, err := pool.Exec(ctx, "TRUNCATE "+table); err != nil && !strings.Contains(err.Error(), "42P01") {
+			return fmt.Errorf("truncate %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 type result struct {
@@ -653,6 +694,13 @@ func hasFinal(evs []event) bool {
 		}
 	}
 	return false
+}
+
+// hasFinalRun waits for the terminal answer AND the run row's terminal event,
+// so a before/after ledger snapshot is deterministic (run.finished is committed
+// just after the assistant message by a different writer).
+func hasFinalRun(evs []event) bool {
+	return hasFinal(evs) && countKind(evs, "run.finished") >= 1
 }
 
 func hasToolCall(evs []event) bool {

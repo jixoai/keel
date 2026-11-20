@@ -1,0 +1,36 @@
+P6B: existing default `core` scenario — pre-existing failure, not introduced here
+
+$ go build -o /tmp/keel-runtime ./cmd/runtime
+$ go run ./cmd/e2e -scenario core -bin /tmp/keel-runtime -port 13687 \
+    -reset -reset-confirm keel_test_p6_crash
+exit 1
+
+7 of 8 cases pass:
+  requestId idempotency across SIGKILL           pass
+  SSE Last-Event-ID across SIGKILL              pass
+  blob base64 resume across SIGKILL             pass
+  agent worker: input -> fake reply             pass
+  retry: re-ask appends a new input             pass
+  run resumes after SIGKILL during model call   pass
+  tool result survives SIGKILL mid-execution    FAIL
+  final = "tool echo returned: Tool echo not found"
+  100 sessions survive SIGKILL without loss     pass
+
+Cause (pre-existing at the frozen snapshot 3ab7996):
+  The v2 tool surface deleted the builtin `echo` tool (internal/host/host_test.go
+  pins exactly this removal) and the `keel.testkit` plugin that owns it is
+  disabled by default. cmd/e2e's caseToolReplayAfterKill still asks the fake
+  model for `echo`, so the run ends with "Tool not found" instead of the
+  expected tool round-trip.
+
+Baseline proof: this lane changed none of the code that decides the tool
+surface:
+  $ git diff --stat 3ab7996 HEAD -- cmd/runtime internal/host internal/toolsurface internal/testkit
+  (empty)
+
+P6B changes to cmd/e2e are additive: a `-scenario` flag (default "core"), the
+mcp-apps scenario, the fake MCP server subcommand, the extra product-table
+truncation for a clean audit scan, and a deterministic final-event predicate.
+The failing core case and its expectations are unchanged. Not fixed here
+(product semantics / default acceptance scope are outside this lane); recorded
+as a P1 test-infrastructure finding for the owning lane.

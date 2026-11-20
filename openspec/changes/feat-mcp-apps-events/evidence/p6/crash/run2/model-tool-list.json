@@ -1,0 +1,12 @@
+{
+  "toolCallId": "fake-0bdb5e6373f5da62",
+  "toolName": "mcp",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"servers\":[{\"connected\":true,\"name\":\"fixture\",\"tools\":[{\"description\":\"Render the fixture dashboard.\",\"name\":\"show_dashboard\",\"title\":\"Show dashboard\"},{\"description\":\"A tool without a UI.\",\"name\":\"plain\"}]}]}"
+    }
+  ],
+  "details": null,
+  "isError": false
+}

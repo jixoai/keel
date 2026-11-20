@@ -1,0 +1,116 @@
+[
+  {
+    "auditId": 1095,
+    "ts": "2026-11-20T10:18:35.873363+08:00",
+    "server": "fixture",
+    "appId": "mcpapp_9695970d06976122",
+    "action": "document.fetch",
+    "result": "ok",
+    "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
+  },
+  {
+    "auditId": 1096,
+    "ts": "2026-11-20T10:18:35.878966+08:00",
+    "action": "catalogue.publish",
+    "result": "ok",
+    "detail": "generation=1 apps=1 declared=1"
+  },
+  {
+    "auditId": 1097,
+    "ts": "2026-11-20T10:18:35.892112+08:00",
+    "server": "fixture",
+    "action": "subscription.listen",
+    "result": "ok",
+    "detail": "subscription=n:4"
+  },
+  {
+    "auditId": 1098,
+    "ts": "2026-11-20T10:18:35.905883+08:00",
+    "server": "fixture",
+    "appId": "mcpapp_9695970d06976122",
+    "action": "document.fetch",
+    "result": "ok",
+    "detail": "hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264"
+  },
+  {
+    "auditId": 1099,
+    "ts": "2026-11-20T10:18:35.91175+08:00",
+    "action": "catalogue.publish",
+    "result": "ok",
+    "detail": "generation=2 apps=1 declared=1"
+  },
+  {
+    "auditId": 1100,
+    "ts": "2026-11-20T10:18:35.921961+08:00",
+    "action": "catalogue.refresh",
+    "result": "ok",
+    "detail": "generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e"
+  },
+  {
+    "auditId": 1101,
+    "ts": "2026-11-20T10:18:36.342578+08:00",
+    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
+    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "server": "fixture",
+    "appId": "mcpapp_9695970d06976122",
+    "action": "tools/call",
+    "result": "ok",
+    "detail": "server=fixture tool=refresh isError=false"
+  },
+  {
+    "auditId": 1102,
+    "ts": "2026-11-20T10:18:36.867048+08:00",
+    "server": "fixture",
+    "appId": "mcpapp_afe2cb547d98dbfc",
+    "action": "document.fetch",
+    "result": "ok",
+    "detail": "hash=2494e5af3238aaafd46305334f247f15167307186f0f63ed85f6578d37e6b59c bytes=264"
+  },
+  {
+    "auditId": 1103,
+    "ts": "2026-11-20T10:18:36.869557+08:00",
+    "action": "catalogue.publish",
+    "result": "ok",
+    "detail": "generation=3 apps=1 declared=1"
+  },
+  {
+    "auditId": 1104,
+    "ts": "2026-11-20T10:18:36.873262+08:00",
+    "action": "catalogue.refresh",
+    "result": "ok",
+    "detail": "generation=3 servers=[fixture] kinds=[tools] added=1 removed=0 err=\u003cnil\u003e"
+  },
+  {
+    "auditId": 1105,
+    "ts": "2026-11-20T10:18:37.154986+08:00",
+    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
+    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "server": "fixture",
+    "appId": "mcpapp_afe2cb547d98dbfc",
+    "action": "resources/read",
+    "result": "error",
+    "detail": "server=fixture scheme=https code=-32602"
+  },
+  {
+    "auditId": 1106,
+    "ts": "2026-11-20T10:18:37.468334+08:00",
+    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
+    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "server": "fixture",
+    "appId": "mcpapp_afe2cb547d98dbfc",
+    "action": "ui/message",
+    "result": "refused",
+    "detail": "session=d245a9de-cedb-4e88-acfa-ad3926b17a78 blocks=1 attachments=0 reason=confirmation_timeout decision=87fccdfc-74ab-59fe-bcac-90e18f7d5870"
+  },
+  {
+    "auditId": 1107,
+    "ts": "2026-11-20T10:18:37.479723+08:00",
+    "tenantId": "57273948-d19e-497e-8769-b2921cbbede8",
+    "sessionId": "d245a9de-cedb-4e88-acfa-ad3926b17a78",
+    "server": "fixture",
+    "appId": "mcpapp_afe2cb547d98dbfc",
+    "action": "tools/call",
+    "result": "ok",
+    "detail": "server=fixture tool=refresh isError=false"
+  }
+]

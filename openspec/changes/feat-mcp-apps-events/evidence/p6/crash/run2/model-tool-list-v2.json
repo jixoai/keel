@@ -1,0 +1,28 @@
+{
+  "result": {
+    "toolCallId": "fake-4d2e1070fc83dec4",
+    "toolName": "mcp",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"servers\":[{\"connected\":true,\"name\":\"fixture\",\"tools\":[{\"description\":\"Render the fixture dashboard.\",\"name\":\"show_dashboard\",\"title\":\"Show dashboard\"},{\"description\":\"A tool without a UI.\",\"name\":\"plain\"},{\"description\":\"A v2 model-only tool added by tools/list_changed.\",\"name\":\"show_audit\"}]}]}"
+      }
+    ],
+    "details": null,
+    "isError": false
+  },
+  "servers": {
+    "generation": 3,
+    "servers": [
+      {
+        "name": "fixture",
+        "transport": "stdio",
+        "protocolVersion": "2026-07-28",
+        "era": "modern",
+        "connected": true,
+        "tools": 4,
+        "apps": 1
+      }
+    ]
+  }
+}

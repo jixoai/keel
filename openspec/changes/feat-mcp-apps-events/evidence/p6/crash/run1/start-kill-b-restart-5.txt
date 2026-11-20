@@ -1,0 +1,7 @@
+pid=82385
+tenant=e4a70b70-003f-4c9d-b40b-adcd951c67f3
+phase=kill-b-restart
+scenario=static
+toolDelayMs=0
+fakeEvents=/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-3099505822/fake-events-kill-b-restart-5.jsonl
+log=openspec/changes/feat-mcp-apps-events/evidence/p6/crash/run1/keel-kill-b-restart-5.log.txt

@@ -1,0 +1,7 @@
+pid=82556
+tenant=3bfdd318-ff11-43eb-9e30-5d3df23b9a2c
+phase=g1
+scenario=evolve
+toolDelayMs=0
+fakeEvents=/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/fake-events-g1-1.jsonl
+log=openspec/changes/feat-mcp-apps-events/evidence/p6/crash/run2/keel-g1-1.log.txt

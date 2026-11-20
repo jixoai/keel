@@ -1,0 +1,63 @@
+[
+  {
+    "at": "2026-11-20T02:18:58.899677Z",
+    "killError": null,
+    "logTail": "{\"time\":\"2026-11-20T10:18:57.574727+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue audit\",\"server\":\"\",\"action\":\"catalogue.refresh\",\"result\":\"ok\",\"detail\":\"generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e\"}\n{\"time\":\"2026-11-20T10:18:57.723284+08:00\",\"level\":\"INFO\",\"msg\":\"creation plugin started\",\"tools\":5,\"template\":\"webview-react-solidglass\"}\n{\"time\":\"2026-11-20T10:18:57.723454+08:00\",\"level\":\"INFO\",\"msg\":\"example plugin started\",\"plugin\":\"keel.example\",\"tools\":2,\"hooks\":3,\"triggers\":1}\n{\"time\":\"2026-11-20T10:18:57.727941+08:00\",\"level\":\"INFO\",\"msg\":\"plugin assembly\",\"generation\":1,\"plugins\":10,\"active\":10,\"pending\":0}\n{\"time\":\"2026-11-20T10:18:57.728+08:00\",\"level\":\"INFO\",\"msg\":\"plugin manager boot\",\"root\":\"/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/plugins\",\"plugins\":11,\"enabled\":10,\"revision\":1}\n{\"time\":\"2026-11-20T10:18:57.728952+08:00\",\"level\":\"WARN\",\"msg\":\"keel serve authentication is disabled: set KEEL_SERVE_PASSWORD before exposing the port\"}\n{\"time\":\"2026-11-20T10:18:57.729484+08:00\",\"level\":\"INFO\",\"msg\":\"keel serve listening\",\"addr\":\"127.0.0.1:13686\",\"tenant\":\"00000000-0000-0000-0000-000000000000\",\"auth\":\"disabled\",\"web\":\"missing: /var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/web-missing\",\"web_ready\":false,\"worker\":true,\"provider\":\"fake\",\"model\":\"fake\",\"plugins\":11,\"plugins_enabled\":10,\"plugins_root\":\"/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/plugins\",\"triggers\":1}\n{\"time\":\"2026-11-20T10:18:57.814221+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"36d1cab8-25c3-4608-a5e1-9eea2783080f\",\"method\":\"POST\",\"route\":\"POST /v1/tenants\",\"status\":201,\"bytes\":73,\"duration_ms\":7,\"tenant_id\":\"c9c16f2c-1c71-4112-97a7-9fa5cce5da77\"}\n{\"time\":\"2026-11-20T10:18:57.815469+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"a62a7196-0432-47f3-b2e9-5cf127560f41\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"c9c16f2c-1c71-4112-97a7-9fa5cce5da77\"}\n{\"time\":\"2026-11-20T10:18:57.83749+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"3f832342-30d7-485b-94a8-1d682785048f\",\"method\":\"POST\",\"route\":\"POST /v1/sessions\",\"status\":201,\"bytes\":52,\"duration_ms\":20,\"tenant_id\":\"c9c16f2c-1c71-4112-97a7-9fa5cce5da77\"}\n{\"time\":\"2026-11-20T10:18:57.996769+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"d95792b2-514a-4abf-908c-8c07b9d4535c\",\"method\":\"POST\",\"route\":\"POST /v1/sessions/{id}/input\",\"status\":201,\"bytes\":120,\"duration_ms\":158,\"tenant_id\":\"c9c16f2c-1c71-4112-97a7-9fa5cce5da77\",\"session_id\":\"fc183a7f-0822-4fbb-9432-583929c6dfe9\"}\n{\"time\":\"2026-11-20T10:18:58.899202+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"479371ba-4df0-43f9-87e2-672437a18e65\",\"method\":\"GET\",\"route\":\"GET /v1/sessions/{id}/events\",\"status\":200,\"bytes\":118,\"duration_ms\":1,\"tenant_id\":\"c9c16f2c-1c71-4112-97a7-9fa5cce5da77\",\"session_id\":\"fc183a7f-0822-4fbb-9432-583929c6dfe9\"}",
+    "pid": 82596,
+    "point": "G2a",
+    "processGroup": true,
+    "proof": {
+      "appDocumentFetched": true,
+      "fakeServerPID": 82598,
+      "ledgerSeqs": [
+        1
+      ],
+      "toolExecutionStarted": false,
+      "toolResults": 0,
+      "userMessages": 1
+    },
+    "signal": "SIGKILL"
+  },
+  {
+    "at": "2026-11-20T02:19:06.089735Z",
+    "killError": null,
+    "logTail": "{\"time\":\"2026-11-20T10:19:02.641085+08:00\",\"level\":\"WARN\",\"msg\":\"kernel audit: rejection\",\"reason\":\"lease-lost\",\"op\":\"renew\",\"tenant\":\"fdea5951-feb2-439a-a894-1791481d1cf4\",\"session\":\"96fa6b44-3fa0-4ade-abc3-8a694afc3a26\",\"owner\":\"bngjdeMac-mini-7.local-82667\",\"epoch\":1}\n{\"time\":\"2026-11-20T10:19:02.641257+08:00\",\"level\":\"INFO\",\"msg\":\"lease lost, abandoning run\",\"run_id\":\"89676639-ea02-4969-8bc6-9526cbe39a02\",\"tenant_id\":\"fdea5951-feb2-439a-a894-1791481d1cf4\",\"session_id\":\"96fa6b44-3fa0-4ade-abc3-8a694afc3a26\",\"token\":\"[REDACTED]\",\"err\":\"kernel: renew (fdea5951-feb2-439a-a894-1791481d1cf4/96fa6b44-3fa0-4ade-abc3-8a694afc3a26): lease-lost [token bngjdeMac-mini-7.local-82667@1]\"}\n{\"time\":\"2026-11-20T10:19:02.650015+08:00\",\"level\":\"INFO\",\"msg\":\"run attempt settled\",\"run_id\":\"89676639-ea02-4969-8bc6-9526cbe39a02\",\"tenant_id\":\"fdea5951-feb2-439a-a894-1791481d1cf4\",\"session_id\":\"96fa6b44-3fa0-4ade-abc3-8a694afc3a26\",\"cursor\":3,\"attempt\":1,\"duration_ms\":255,\"run_status\":\"done\",\"token\":\"[REDACTED]\",\"err\":null}\n{\"time\":\"2026-11-20T10:19:04.622786+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue audit\",\"server\":\"fixture\",\"action\":\"subscription.listen\",\"result\":\"ok\",\"detail\":\"subscription=n:4\"}\n{\"time\":\"2026-11-20T10:19:04.645914+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue refreshed\",\"server\":\"fixture\",\"tools\":3,\"added\":0,\"removed\":0}\n{\"time\":\"2026-11-20T10:19:04.655006+08:00\",\"level\":\"INFO\",\"msg\":\"mcp app audit\",\"tenant\":\"00000000-0000-0000-0000-000000000000\",\"server\":\"fixture\",\"app\":\"mcpapp_9695970d06976122\",\"resource\":\"ui://scenario/dashboard\",\"action\":\"document.fetch\",\"result\":\"ok\",\"detail\":\"hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264\"}\n{\"time\":\"2026-11-20T10:19:04.658652+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"695603ad-28ed-45ed-a7a3-ded65a82d87e\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"fdea5951-feb2-439a-a894-1791481d1cf4\"}\n{\"time\":\"2026-11-20T10:19:04.664843+08:00\",\"level\":\"INFO\",\"msg\":\"mcp app audit\",\"tenant\":\"00000000-0000-0000-0000-000000000000\",\"server\":\"\",\"app\":\"\",\"resource\":\"\",\"action\":\"catalogue.publish\",\"result\":\"ok\",\"detail\":\"generation=2 apps=1 declared=1\"}\n{\"time\":\"2026-11-20T10:19:04.687765+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue audit\",\"server\":\"\",\"action\":\"catalogue.refresh\",\"result\":\"ok\",\"detail\":\"generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e\"}\n{\"time\":\"2026-11-20T10:19:04.765709+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"18954472-fd65-4ee5-ba1a-967cca44e4e3\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"fdea5951-feb2-439a-a894-1791481d1cf4\"}\n{\"time\":\"2026-11-20T10:19:05.028969+08:00\",\"level\":\"WARN\",\"msg\":\"mcp listen\",\"detail\":\"mcp listen: subscription closed\"}\n{\"time\":\"2026-11-20T10:19:05.035428+08:00\",\"level\":\"WARN\",\"msg\":\"mcp catalogue audit\",\"server\":\"fixture\",\"action\":\"subscription.listen\",\"result\":\"closed\",\"detail\":\"\u003cnil\u003e\"}",
+    "pid": 82667,
+    "point": "G2b",
+    "processGroup": true,
+    "proof": {
+      "fakeServerPID": 82669,
+      "generationAfterAck": 2,
+      "ledgerSeqs": [
+        1,
+        2,
+        3
+      ],
+      "listenReconnects": 1,
+      "listenStream": "n=2 sent, ack not received",
+      "stream1Closed": true
+    },
+    "signal": "SIGKILL"
+  },
+  {
+    "at": "2026-11-20T02:19:12.648818Z",
+    "killError": null,
+    "logTail": "{\"time\":\"2026-11-20T10:19:07.282204+08:00\",\"level\":\"INFO\",\"msg\":\"creation plugin started\",\"tools\":5,\"template\":\"webview-react-solidglass\"}\n{\"time\":\"2026-11-20T10:19:07.28228+08:00\",\"level\":\"INFO\",\"msg\":\"example plugin started\",\"plugin\":\"keel.example\",\"tools\":2,\"hooks\":3,\"triggers\":1}\n{\"time\":\"2026-11-20T10:19:07.286302+08:00\",\"level\":\"INFO\",\"msg\":\"plugin assembly\",\"generation\":1,\"plugins\":10,\"active\":10,\"pending\":0}\n{\"time\":\"2026-11-20T10:19:07.286376+08:00\",\"level\":\"INFO\",\"msg\":\"plugin manager boot\",\"root\":\"/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/plugins\",\"plugins\":11,\"enabled\":10,\"revision\":1}\n{\"time\":\"2026-11-20T10:19:07.286739+08:00\",\"level\":\"WARN\",\"msg\":\"keel serve authentication is disabled: set KEEL_SERVE_PASSWORD before exposing the port\"}\n{\"time\":\"2026-11-20T10:19:07.286915+08:00\",\"level\":\"INFO\",\"msg\":\"keel serve listening\",\"addr\":\"127.0.0.1:13686\",\"tenant\":\"00000000-0000-0000-0000-000000000000\",\"auth\":\"disabled\",\"web\":\"missing: /var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/web-missing\",\"web_ready\":false,\"worker\":true,\"provider\":\"fake\",\"model\":\"fake\",\"plugins\":11,\"plugins_enabled\":10,\"plugins_root\":\"/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/plugins\",\"triggers\":1}\n{\"time\":\"2026-11-20T10:19:07.387474+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"30688eda-482d-4ab5-9c75-9e2668dd45f8\",\"method\":\"POST\",\"route\":\"POST /v1/tenants\",\"status\":201,\"bytes\":73,\"duration_ms\":4,\"tenant_id\":\"f8e7fe9c-7d87-4a3c-ae55-e66cfb99746c\"}\n{\"time\":\"2026-11-20T10:19:07.388299+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"e3fc3dcc-c14b-400b-b68f-214c6fe85077\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"f8e7fe9c-7d87-4a3c-ae55-e66cfb99746c\"}\n{\"time\":\"2026-11-20T10:19:07.39116+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"a5ec000b-9bad-4dfe-beb5-21f0dc841a0b\",\"method\":\"POST\",\"route\":\"POST /v1/sessions\",\"status\":201,\"bytes\":52,\"duration_ms\":2,\"tenant_id\":\"f8e7fe9c-7d87-4a3c-ae55-e66cfb99746c\"}\n{\"time\":\"2026-11-20T10:19:12.404956+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"7ac53770-8e4a-478d-b4e3-9e318d95b1be\",\"method\":\"POST\",\"route\":\"POST /v1/mcp/apps/{appId}/tools/call\",\"status\":200,\"bytes\":106,\"duration_ms\":5013,\"tenant_id\":\"f8e7fe9c-7d87-4a3c-ae55-e66cfb99746c\"}\n{\"time\":\"2026-11-20T10:19:12.43834+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"a7df5133-6959-4cb7-84fa-2a610479255d\",\"method\":\"POST\",\"route\":\"POST /v1/sessions/{id}/input\",\"status\":201,\"bytes\":120,\"duration_ms\":32,\"tenant_id\":\"f8e7fe9c-7d87-4a3c-ae55-e66cfb99746c\",\"session_id\":\"872cbb0f-d44c-4cfd-846d-b30dce56b513\"}\n{\"time\":\"2026-11-20T10:19:12.647631+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"934258a2-3f37-41ae-b643-fc109595c385\",\"method\":\"GET\",\"route\":\"GET /v1/sessions/{id}/events\",\"status\":200,\"bytes\":571,\"duration_ms\":0,\"tenant_id\":\"f8e7fe9c-7d87-4a3c-ae55-e66cfb99746c\",\"session_id\":\"872cbb0f-d44c-4cfd-846d-b30dce56b513\"}",
+    "pid": 82743,
+    "point": "G2c",
+    "processGroup": true,
+    "proof": {
+      "assistantToolCalls": 1,
+      "fakeServerPID": 82745,
+      "ledgerSeqs": [
+        1,
+        2,
+        3
+      ],
+      "mcpResultReceived": false,
+      "toolCallDispatched": true,
+      "toolResults": 0
+    },
+    "signal": "SIGKILL"
+  }
+]

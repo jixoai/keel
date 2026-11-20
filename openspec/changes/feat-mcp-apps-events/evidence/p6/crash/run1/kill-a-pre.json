@@ -1,0 +1,79 @@
+{
+  "appId": "mcpapp_9695970d06976122",
+  "events": [
+    {
+      "seq": 1,
+      "kind": "user.message",
+      "payload": {
+        "text": "mcp-call:fixture/show_dashboard",
+        "requestId": "kill-a"
+      }
+    }
+  ],
+  "fakeServerPID": 82171,
+  "markers": [
+    {
+      "event": "start",
+      "pid": 82171,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82171,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82171,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_begin",
+      "pid": 82171,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_ack",
+      "pid": 82171,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82171,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82171,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    }
+  ]
+}

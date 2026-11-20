@@ -1,0 +1,8 @@
+{
+  "database": "keel_test_p6_crash",
+  "port": 13686,
+  "portFree": true,
+  "processAlive": false,
+  "resetGuard": true,
+  "workDirRemoved": true
+}

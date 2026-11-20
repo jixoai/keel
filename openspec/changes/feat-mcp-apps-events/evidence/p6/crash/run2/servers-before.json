@@ -1,0 +1,14 @@
+{
+  "generation": 2,
+  "servers": [
+    {
+      "name": "fixture",
+      "transport": "stdio",
+      "protocolVersion": "2026-07-28",
+      "era": "modern",
+      "connected": true,
+      "tools": 3,
+      "apps": 1
+    }
+  ]
+}

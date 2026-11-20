@@ -1,0 +1,7 @@
+pid=82667
+tenant=fdea5951-feb2-439a-a894-1791481d1cf4
+phase=kill-b
+scenario=reconnect
+toolDelayMs=0
+fakeEvents=/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1869053561/fake-events-kill-b-4.jsonl
+log=openspec/changes/feat-mcp-apps-events/evidence/p6/crash/run2/keel-kill-b-4.log.txt

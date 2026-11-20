@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
@@ -144,4 +146,63 @@ func drainFakeToolCallID(t *testing.T, msgs agentcore.MessageList) string {
 		t.Fatal("FakeStream emitted no done event")
 	}
 	return toolCallIDFrom(t, done)
+}
+
+// TestFakeMCPDirectives pins the deterministic MCP app harness surface: the
+// fake provider is the only caller of the aggregate `mcp` tool in cmd/e2e, and
+// a directive must never leak into an ordinary reply or the echo path.
+func TestFakeMCPDirectives(t *testing.T) {
+	tests := []struct {
+		text string
+		args map[string]any
+	}{
+		{
+			text: "please mcp-list now",
+			args: map[string]any{"action": "list"},
+		},
+		{
+			text: "run mcp-call:fixture/show_dashboard",
+			args: map[string]any{
+				"action": "call", "server": "fixture", "tool": "show_dashboard",
+				"arguments": map[string]any{},
+			},
+		},
+		{
+			text: "mcp-call:fixture/refresh.",
+			args: map[string]any{
+				"action": "call", "server": "fixture", "tool": "refresh",
+				"arguments": map[string]any{},
+			},
+		},
+	}
+	for _, test := range tests {
+		reply := fakeReply("fake", agentcore.MessageList{fakeUserMsg(test.text)})
+		calls := reply.ToolCalls()
+		if len(calls) != 1 {
+			t.Fatalf("%q: tool calls = %d, want 1", test.text, len(calls))
+		}
+		if calls[0].Name != "mcp" {
+			t.Fatalf("%q: tool = %q, want mcp", test.text, calls[0].Name)
+		}
+		var args map[string]any
+		if err := json.Unmarshal(calls[0].Arguments, &args); err != nil {
+			t.Fatalf("%q: arguments are not JSON: %v", test.text, err)
+		}
+		if !reflect.DeepEqual(args, test.args) {
+			t.Fatalf("%q: arguments = %v, want %v", test.text, args, test.args)
+		}
+	}
+
+	// A malformed directive is not an MCP call: it stays an ordinary reply.
+	for _, text := range []string{"mcp-call:no-slash", "mcp-call:/tool", "mcp-call:server/"} {
+		reply := fakeReply("fake", agentcore.MessageList{fakeUserMsg(text)})
+		if calls := reply.ToolCalls(); len(calls) != 0 {
+			t.Fatalf("%q: produced a tool call %+v", text, calls)
+		}
+	}
+	// The pre-existing echo behaviour is unchanged.
+	reply := fakeReply("fake", agentcore.MessageList{fakeUserMsg("please echo this")})
+	if calls := reply.ToolCalls(); len(calls) != 1 || calls[0].Name != "echo" {
+		t.Fatalf("echo directive = %+v", calls)
+	}
 }

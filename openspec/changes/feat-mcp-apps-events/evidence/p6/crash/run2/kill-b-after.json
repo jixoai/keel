@@ -1,0 +1,151 @@
+{
+  "catalog": {
+    "generation": 2,
+    "apps": [
+      {
+        "appId": "mcpapp_9695970d06976122",
+        "server": "fixture",
+        "title": "Refresh dashboard",
+        "resourceUri": "ui://scenario/dashboard",
+        "mimeType": "text/html;profile=mcp-app",
+        "visibility": [
+          "model",
+          "app"
+        ],
+        "tools": [
+          {
+            "tool": "refresh",
+            "visibility": [
+              "app"
+            ]
+          },
+          {
+            "tool": "show_dashboard",
+            "visibility": [
+              "model",
+              "app"
+            ]
+          }
+        ],
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf"
+      }
+    ]
+  },
+  "events": [
+    {
+      "seq": 1,
+      "kind": "user.message",
+      "payload": {
+        "text": "hello during listen",
+        "requestId": "kill-b"
+      }
+    },
+    {
+      "seq": 2,
+      "kind": "assistant.message",
+      "payload": {
+        "role": "assistant",
+        "content": [
+          {
+            "text": "fake provider received: hello during listen",
+            "type": "text"
+          }
+        ],
+        "inputSeqs": [
+          1
+        ],
+        "timestamp": 0,
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "seq": 3,
+      "kind": "run.finished",
+      "payload": {
+        "model": "fake",
+        "turns": 1,
+        "status": "done",
+        "tokens": {
+          "input": 0,
+          "total": 0,
+          "output": 0
+        },
+        "context": {
+          "tokens": 0,
+          "messages": 3
+        },
+        "provider": "fake",
+        "durationMs": 186,
+        "promptHash": "sha256:948767bc18f4cfd3393ee73ecde2ac2f1662dd9b4e2ed61aa7be240d200d2aa7",
+        "stopReason": "end_turn"
+      }
+    }
+  ],
+  "fakeServerPID": 82738,
+  "markers": [
+    {
+      "event": "start",
+      "pid": 82738,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82738,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82738,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_begin",
+      "pid": 82738,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_ack",
+      "pid": 82738,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82738,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82738,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    }
+  ]
+}

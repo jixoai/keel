@@ -1,0 +1,40 @@
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 24
+# HELP go_memstats_heap_alloc_bytes Bytes of allocated heap objects.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 4.351928e+06
+# HELP go_memstats_heap_sys_bytes Bytes of heap memory obtained from the OS.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 1.1730944e+07
+# HELP mcp_servers MCP servers in each connection state (connected|disconnected).
+# TYPE mcp_servers gauge
+mcp_servers{state="connected"} 1
+mcp_servers{state="disconnected"} 0
+# HELP mcp_surface_generation Monotonic generation of the published MCP surface.
+# TYPE mcp_surface_generation gauge
+mcp_surface_generation 3
+# HELP mcp_app_fetch_total App document resolutions by result (ok|error|reused|other).
+# TYPE mcp_app_fetch_total counter
+mcp_app_fetch_total{result="ok"} 3
+# HELP mcp_app_bridge_frames_total App bridge frames by method (tools/call, resources/read, ui/message, ui/open-link, other) and direction (in|out).
+# TYPE mcp_app_bridge_frames_total counter
+mcp_app_bridge_frames_total{method="tools/call",direction="in"} 2
+mcp_app_bridge_frames_total{method="tools/call",direction="out"} 2
+mcp_app_bridge_frames_total{method="resources/read",direction="in"} 1
+mcp_app_bridge_frames_total{method="resources/read",direction="out"} 1
+mcp_app_bridge_frames_total{method="ui/message",direction="in"} 1
+mcp_app_bridge_frames_total{method="ui/message",direction="out"} 1
+# HELP mcp_listen_reconnects_total subscriptions/listen reconnect attempts.
+# TYPE mcp_listen_reconnects_total counter
+mcp_listen_reconnects_total 0
+# HELP mcp_mrtr_rounds MRTR input-required rounds per tool call.
+# TYPE mcp_mrtr_rounds histogram
+mcp_mrtr_rounds_bucket{le="1"} 0
+mcp_mrtr_rounds_bucket{le="2"} 0
+mcp_mrtr_rounds_bucket{le="3"} 0
+mcp_mrtr_rounds_bucket{le="4"} 0
+mcp_mrtr_rounds_bucket{le="5"} 0
+mcp_mrtr_rounds_bucket{le="+Inf"} 0
+mcp_mrtr_rounds_sum 0
+mcp_mrtr_rounds_count 0

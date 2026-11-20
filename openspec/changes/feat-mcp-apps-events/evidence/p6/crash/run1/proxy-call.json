@@ -1,0 +1,98 @@
+{
+  "markers": [
+    {
+      "event": "start",
+      "pid": 82160,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82160,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82160,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_begin",
+      "pid": 82160,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_ack",
+      "pid": 82160,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82160,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82160,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_call_begin",
+      "pid": 82160,
+      "name": "refresh",
+      "uri": "",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_call_end",
+      "pid": 82160,
+      "name": "refresh",
+      "uri": "",
+      "n": 0,
+      "version": 0,
+      "text": "refresh-ok v1"
+    }
+  ],
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "refresh-ok v1"
+      }
+    ],
+    "structuredContent": {
+      "tool": "refresh",
+      "version": "v1"
+    },
+    "isError": false
+  }
+}

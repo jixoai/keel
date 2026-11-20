@@ -1,0 +1,7 @@
+pid=82388
+tenant=32f991c1-66bc-4908-8cc6-27f9936c5fb8
+phase=kill-c
+scenario=static
+toolDelayMs=5000
+fakeEvents=/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-3099505822/fake-events-kill-c-6.jsonl
+log=openspec/changes/feat-mcp-apps-events/evidence/p6/crash/run1/keel-kill-c-6.log.txt

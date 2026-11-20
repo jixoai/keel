@@ -1,0 +1,5 @@
+$ go test ./internal/agent ./internal/mcp ./internal/mcphost ./internal/toolsurface -count=1
+ok  	github.com/jixoai/keel/internal/agent	0.655s
+ok  	github.com/jixoai/keel/internal/mcp	1.223s
+ok  	github.com/jixoai/keel/internal/mcphost	0.540s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.512s

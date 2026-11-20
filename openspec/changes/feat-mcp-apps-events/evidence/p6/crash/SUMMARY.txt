@@ -1,0 +1,5 @@
+run 1: PASS
+run 1: kills=3 (SIGKILL)
+run 2: PASS
+run 2: kills=3 (SIGKILL)
+run1 and run2 assertions are identical

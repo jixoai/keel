@@ -1,0 +1,33 @@
+{
+  "generation": 3,
+  "apps": [
+    {
+      "appId": "mcpapp_afe2cb547d98dbfc",
+      "server": "fixture",
+      "title": "Refresh dashboard",
+      "resourceUri": "ui://scenario/dashboard_v2",
+      "mimeType": "text/html;profile=mcp-app",
+      "visibility": [
+        "model",
+        "app"
+      ],
+      "tools": [
+        {
+          "tool": "refresh",
+          "visibility": [
+            "app"
+          ]
+        },
+        {
+          "tool": "show_dashboard",
+          "visibility": [
+            "model",
+            "app"
+          ]
+        }
+      ],
+      "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+      "hash": "2494e5af3238aaafd46305334f247f15167307186f0f63ed85f6578d37e6b59c"
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+[
+  {
+    "labels": {
+      "state": "connected"
+    },
+    "name": "mcp_servers",
+    "value": 1
+  },
+  {
+    "labels": {
+      "state": "disconnected"
+    },
+    "name": "mcp_servers",
+    "value": 0
+  },
+  {
+    "labels": {},
+    "name": "mcp_surface_generation",
+    "value": 3
+  },
+  {
+    "labels": {
+      "result": "ok"
+    },
+    "name": "mcp_app_fetch_total",
+    "value": 3
+  },
+  {
+    "labels": {
+      "direction": "in",
+      "method": "tools/call"
+    },
+    "name": "mcp_app_bridge_frames_total",
+    "value": 2
+  },
+  {
+    "labels": {
+      "direction": "out",
+      "method": "tools/call"
+    },
+    "name": "mcp_app_bridge_frames_total",
+    "value": 2
+  },
+  {
+    "labels": {
+      "direction": "in",
+      "method": "resources/read"
+    },
+    "name": "mcp_app_bridge_frames_total",
+    "value": 1
+  },
+  {
+    "labels": {
+      "direction": "out",
+      "method": "resources/read"
+    },
+    "name": "mcp_app_bridge_frames_total",
+    "value": 1
+  },
+  {
+    "labels": {
+      "direction": "in",
+      "method": "ui/message"
+    },
+    "name": "mcp_app_bridge_frames_total",
+    "value": 1
+  },
+  {
+    "labels": {
+      "direction": "out",
+      "method": "ui/message"
+    },
+    "name": "mcp_app_bridge_frames_total",
+    "value": 1
+  },
+  {
+    "labels": {},
+    "name": "mcp_listen_reconnects_total",
+    "value": 0
+  },
+  {
+    "labels": {
+      "le": "1"
+    },
+    "name": "mcp_mrtr_rounds_bucket",
+    "value": 0
+  },
+  {
+    "labels": {
+      "le": "2"
+    },
+    "name": "mcp_mrtr_rounds_bucket",
+    "value": 0
+  },
+  {
+    "labels": {
+      "le": "3"
+    },
+    "name": "mcp_mrtr_rounds_bucket",
+    "value": 0
+  },
+  {
+    "labels": {
+      "le": "4"
+    },
+    "name": "mcp_mrtr_rounds_bucket",
+    "value": 0
+  },
+  {
+    "labels": {
+      "le": "5"
+    },
+    "name": "mcp_mrtr_rounds_bucket",
+    "value": 0
+  },
+  {
+    "labels": {
+      "le": "+Inf"
+    },
+    "name": "mcp_mrtr_rounds_bucket",
+    "value": 0
+  },
+  {
+    "labels": {},
+    "name": "mcp_mrtr_rounds_sum",
+    "value": 0
+  },
+  {
+    "labels": {},
+    "name": "mcp_mrtr_rounds_count",
+    "value": 0
+  }
+]

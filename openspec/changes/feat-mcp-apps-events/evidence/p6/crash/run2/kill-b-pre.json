@@ -1,0 +1,147 @@
+{
+  "events": [
+    {
+      "seq": 1,
+      "kind": "user.message",
+      "payload": {
+        "text": "hello during listen",
+        "requestId": "kill-b"
+      }
+    },
+    {
+      "seq": 2,
+      "kind": "assistant.message",
+      "payload": {
+        "role": "assistant",
+        "content": [
+          {
+            "text": "fake provider received: hello during listen",
+            "type": "text"
+          }
+        ],
+        "inputSeqs": [
+          1
+        ],
+        "timestamp": 0,
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "seq": 3,
+      "kind": "run.finished",
+      "payload": {
+        "model": "fake",
+        "turns": 1,
+        "status": "done",
+        "tokens": {
+          "input": 0,
+          "total": 0,
+          "output": 0
+        },
+        "context": {
+          "tokens": 0,
+          "messages": 3
+        },
+        "provider": "fake",
+        "durationMs": 186,
+        "promptHash": "sha256:948767bc18f4cfd3393ee73ecde2ac2f1662dd9b4e2ed61aa7be240d200d2aa7",
+        "stopReason": "end_turn"
+      }
+    }
+  ],
+  "fakeServerPID": 82669,
+  "generationAfterAck": 2,
+  "markers": [
+    {
+      "event": "start",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82669,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_begin",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_ack",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "tools_list",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 0,
+      "version": 1,
+      "text": ""
+    },
+    {
+      "event": "resource_read",
+      "pid": 82669,
+      "name": "",
+      "uri": "ui://scenario/dashboard",
+      "n": 0,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_closed",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 1,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_begin",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 2,
+      "version": 0,
+      "text": ""
+    },
+    {
+      "event": "listen_stall",
+      "pid": 82669,
+      "name": "",
+      "uri": "",
+      "n": 2,
+      "version": 0,
+      "text": ""
+    }
+  ],
+  "metricsReconnects": 1
+}

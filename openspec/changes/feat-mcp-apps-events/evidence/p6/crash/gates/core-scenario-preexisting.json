@@ -1,0 +1,91 @@
+[
+  {
+    "name": "requestId idempotency across SIGKILL",
+    "pass": true,
+    "detail": "one requestId → one submission → one event across a SIGKILL; different content is refused",
+    "checks": [
+      "first submit created",
+      "replay before kill reused submission",
+      "conflicting replay refused with 409",
+      "SIGKILL",
+      "replay after kill reused submission",
+      "exactly one user event"
+    ]
+  },
+  {
+    "name": "SSE Last-Event-ID across SIGKILL",
+    "pass": true,
+    "detail": "resumed at 3 and delivered [4]",
+    "checks": [
+      "seeded 3 events",
+      "stream delivered 1..3",
+      "SIGKILL",
+      "resumed with Last-Event-ID",
+      "received the post-restart event"
+    ]
+  },
+  {
+    "name": "blob base64 resume across SIGKILL",
+    "pass": true,
+    "detail": "resumed at wire offset 49380 after restart (1348728 bytes)",
+    "checks": [
+      "uploaded 1MiB+3 bytes",
+      "full base64 matched",
+      "SIGKILL",
+      "resume at wire offset matched"
+    ]
+  },
+  {
+    "name": "agent worker: input → fake reply",
+    "pass": true,
+    "detail": "input → exactly one user event and one assistant reply",
+    "checks": [
+      "input committed",
+      "worker produced one assistant message",
+      "reply is the deterministic fake",
+      "idle re-run is a no-op"
+    ]
+  },
+  {
+    "name": "retry: re-ask appends a new input, history is not rewritten",
+    "pass": true,
+    "detail": "turn t_1 re-asked at seq 4; 3 original events untouched",
+    "checks": [
+      "a malformed turn id is refused with 400 (nothing written)",
+      "retry appends one new user.message carrying retryOf",
+      "the re-ask runs to its own terminal answer",
+      "every original event is still at its own seq"
+    ]
+  },
+  {
+    "name": "run resumes after SIGKILL during the model call",
+    "pass": true,
+    "detail": "the interrupted run was reclaimed and produced exactly one reply",
+    "checks": [
+      "input committed",
+      "SIGKILL during the model call",
+      "lease expired and the run was reclaimed",
+      "exactly one user event",
+      "exactly one final reply",
+      "run status done"
+    ]
+  },
+  {
+    "name": "tool result survives SIGKILL mid-execution",
+    "pass": false,
+    "detail": "final = \"tool echo returned: Tool echo not found\"",
+    "checks": null
+  },
+  {
+    "name": "100 sessions survive SIGKILL without event loss",
+    "pass": true,
+    "detail": "2000 events across 100 sessions; contiguous after a SIGKILL",
+    "checks": [
+      "100 sessions created",
+      "SIGKILL after 10 rounds",
+      "server restarted",
+      "2000 events committed",
+      "every session has a contiguous sequence"
+    ]
+  }
+]
