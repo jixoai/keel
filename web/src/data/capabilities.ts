@@ -80,6 +80,39 @@ export function setDeploymentCapabilities(raw: unknown): void {
   deployment.set(parseDeploymentCapabilities(raw));
 }
 
+/** Read the deployment document after an auth transition and record it.
+ *
+ * The boot probe stops at the login gate (401), so the first capability read a
+ * deployment can answer happens after `login()`. Without this refresh the gate
+ * keeps the pre-login (off) snapshot until a full page reload, and an app-bearing
+ * tool result already on screen stays on the text fallback.
+ *
+ * On failure the previous snapshot is kept (the gate stays fail-closed: it
+ * never invents capabilities) and the reason is returned for the caller to
+ * record. The read is bounded so a stalled endpoint cannot hold the login. */
+export const CAPABILITIES_REFRESH_TIMEOUT_MS = 3000;
+
+export async function refreshDeploymentCapabilities(
+  source: { capabilities(): Promise<Record<string, unknown>> },
+  timeoutMs = CAPABILITIES_REFRESH_TIMEOUT_MS,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`capabilities request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    setDeploymentCapabilities(await Promise.race([source.capabilities(), timeout]));
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error && error.message ? error.message : String(error);
+    return { ok: false, error: message };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /** Record what this client build supports. Called once at boot. */
 export function setClientCapabilities(features: Record<string, boolean>): void {
   client.set({ ...features });

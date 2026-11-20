@@ -8,6 +8,7 @@ import {
   deploymentCapabilities,
   mcpAppsCapability,
   parseDeploymentCapabilities,
+  refreshDeploymentCapabilities,
   resetCapabilitiesForTest,
   setClientCapabilities,
   setDeploymentCapabilities,
@@ -83,4 +84,34 @@ test("发现文档：解析 features 与 mcpApps；非布尔/非字符串被丢�
     apps: 2,
   });
   expect(deploymentCapabilities().features["mcp.apps.sandboxOrigin"]).toBe(true);
+});
+
+test("登录后刷新：成功即记录部署能力；失败/超时保留旧快照并报告", async () => {
+  resetCapabilitiesForTest();
+  setClientCapabilities({ "mcp.apps": true });
+  // Before login the gate is off: the boot probe saw 401, not the document.
+  expect(can("mcp.apps")).toBe(false);
+  const refreshed = await refreshDeploymentCapabilities({
+    capabilities: async () => discovery,
+  });
+  expect(refreshed).toEqual({ ok: true });
+  // The app-bearing result already on screen can mount its View now, with no
+  // full page reload.
+  expect(can("mcp.apps")).toBe(true);
+
+  const failed = await refreshDeploymentCapabilities({
+    capabilities: async () => {
+      throw new Error("capabilities unavailable");
+    },
+  });
+  expect(failed).toEqual({ ok: false, error: "capabilities unavailable" });
+  // The previous snapshot is kept: a failed refresh never clears the gate.
+  expect(can("mcp.apps")).toBe(true);
+
+  const timedOut = await refreshDeploymentCapabilities(
+    { capabilities: () => new Promise<Record<string, unknown>>(() => {}) },
+    5,
+  );
+  expect(timedOut.ok).toBe(false);
+  expect(can("mcp.apps")).toBe(true);
 });

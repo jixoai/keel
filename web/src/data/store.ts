@@ -45,7 +45,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
-import { setDeploymentCapabilities } from "./capabilities";
+import { refreshDeploymentCapabilities, setDeploymentCapabilities } from "./capabilities";
 import {
   mcpAppContextBody,
   mcpAppMessageBody,
@@ -479,6 +479,16 @@ class KeelStore {
     }
     this.http = http;
     this.client = http;
+    // The boot probe stopped at the login gate, so it never read
+    // /v1/capabilities (401). Read it now, before the auth gate succeeds and
+    // re-renders: an app-bearing tool result already in a session must mount
+    // its View without a full page reload. A failed read keeps the previous
+    // (fail-closed) snapshot and is recorded — it never pretends.
+    const capabilities = await refreshDeploymentCapabilities(http);
+    if (!capabilities.ok) {
+      console.warn(`[keel] deployment capabilities unavailable after login: ${capabilities.error}`);
+      this.flash({ tone: "warn", text: "登录成功，但未能读取服务能力，交互界面暂以文本显示。" });
+    }
     this.auth.set("ok");
     this.sessionsLoading.set(true);
     await this.refreshSessions();
