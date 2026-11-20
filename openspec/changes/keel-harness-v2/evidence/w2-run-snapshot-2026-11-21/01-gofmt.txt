@@ -1,0 +1,3 @@
+# gofmt -l <changed files> (no output = formatted)
+# commit 8941c76
+exit=0

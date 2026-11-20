@@ -1,0 +1,50 @@
+# targeted tests (KEEL_TEST_DSN set; value redacted)
+# commit 8941c76
+
+## internal/agent run snapshot
+=== RUN   TestRunSnapshotPinsTheInjectedSurface
+--- PASS: TestRunSnapshotPinsTheInjectedSurface (0.14s)
+=== RUN   TestRunSnapshotIgnoresAMidRunToolSurfaceChange
+--- PASS: TestRunSnapshotIgnoresAMidRunToolSurfaceChange (0.10s)
+=== RUN   TestRunSnapshotAnchorFollowsConfigRotation
+--- PASS: TestRunSnapshotAnchorFollowsConfigRotation (0.21s)
+=== RUN   TestWorkerRunFinishedCarriesThePinnedSnapshot
+--- PASS: TestWorkerRunFinishedCarriesThePinnedSnapshot (0.00s)
+=== RUN   TestConfigHashForLoadoutIsRevisionScoped
+--- PASS: TestConfigHashForLoadoutIsRevisionScoped (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	1.311s
+exit=0
+
+## internal/gateway capability matrix
+=== RUN   TestAgentCapabilityMatrixIsNegotiated
+--- PASS: TestAgentCapabilityMatrixIsNegotiated (0.00s)
+=== RUN   TestLegacyAgentCapabilitiesStillActivate
+--- PASS: TestLegacyAgentCapabilitiesStillActivate (0.00s)
+=== RUN   TestUnsupportedRequiredCapabilityIsTyped
+--- PASS: TestUnsupportedRequiredCapabilityIsTyped (0.00s)
+=== RUN   TestUnknownRequiredCapabilityIsTyped
+--- PASS: TestUnknownRequiredCapabilityIsTyped (0.00s)
+=== RUN   TestMalformedCapabilityBitIsInvalidResult
+--- PASS: TestMalformedCapabilityBitIsInvalidResult (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/gateway	0.352s
+exit=0
+
+## internal/kernel run.finished validation
+=== RUN   TestRunFinishedPayloadIsValidated
+=== RUN   TestRunFinishedPayloadIsValidated/mem
+=== RUN   TestRunFinishedPayloadIsValidated/pg
+--- PASS: TestRunFinishedPayloadIsValidated (0.18s)
+    --- PASS: TestRunFinishedPayloadIsValidated/mem (0.00s)
+    --- PASS: TestRunFinishedPayloadIsValidated/pg (0.18s)
+PASS
+ok  	github.com/jixoai/keel/internal/kernel	0.556s
+exit=0
+
+## internal/servicehost reload config hash
+=== RUN   TestReloadSharesUnchangedServicesAndPinsRevision
+--- PASS: TestReloadSharesUnchangedServicesAndPinsRevision (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/servicehost	0.424s
+exit=0

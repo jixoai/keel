@@ -123,8 +123,24 @@
       （对账：`internal/agentloop/loop.go:96-140`（Input：SystemPrompt/Messages/Tools/Batch）、
       `agentloop/pi.go:70-110`；loop 不持账本/不触 store；单测 `agentloop/contract_test.go:110`、
       `equivalence_test.go:108-143`；「invoke 回调」由注入的 AgentTool 对象承担）
-- [ ] run 快照：`configHash` + `anchorEventSeq` + `toolManifestHash` 写入 run 事件 （对账 2026-11-20：部分——缺口：run.finished 已有 configHashBefore/After（internal/agent/runner.go:290-291）；无 anchorEventSeq/toolManifestHash 写入 run 事件）
-- [ ] 外部内核能力矩阵与 typed rejection（沿用 v1 external 通道） （对账 2026-11-20：部分——缺口：gateway 能力只有 Tools/Agent{Events,Cancel,Usage}（internal/gateway/initialize.go:81-115）；无 fork/approval/compaction 能力位）
+- [x] run 快照：`configHash` + `anchorEventSeq` + `toolManifestHash` 写入 run 事件
+      （W2-6：三值字段 `internal/agent/runner.go:313-323`；attempt 起始取 log 锚点/配置快照
+      `runner.go:471-472`，从实际注入的工具切片取清单哈希 `runner.go:556-571`；
+      `configHash` 由 pinned loadout (id, revision) 派生 `internal/agent/snapshot.go:26`，
+      rotation 锚点取最新 `config.rotated` seq、无则取 run 起始读水位 `snapshot.go:42`；
+      worker 用 pinned loadout 覆盖 `internal/agent/worker.go:356-363`；kernel 校验
+      `anchorEventSeq` 非负整数与 hash 字符串有界 `internal/kernel/validate.go:407-477`；
+      测试 `internal/agent/run_snapshot_test.go:22,64,121,183`（真实 run 三值、中途工具面变化、
+      轮转后新 hash/anchor、worker 落盘）；证据 `evidence/w2-run-snapshot-2026-11-21/`）
+- [x] 外部内核能力矩阵与 typed rejection（沿用 v1 external 通道）
+      （W2-7：能力名闭集 + `Supports`/`Matrix`/`RequireAgentCapabilities`
+      `internal/gateway/initialize.go:92-235`；`ServerAgentCapability` 增
+      streaming/tools/approval/fork/resume/compaction `initialize.go:259-286`；
+      `ConnOptions.RequiredCapabilities` 在 transport 启动前拒绝未知名、握手后拒绝未声明位
+      `internal/gateway/conn.go:92-97,220,258`；错误码
+      `unsupported_capability`/`invalid_capability` `internal/gateway/errors.go:145-153`；
+      legacy 缺省位读 false、不要求时照常激活；测试 `internal/gateway/capabilities_test.go:29,75,95,124,144`；
+      证据 `evidence/w2-run-snapshot-2026-11-21/`）
 
 ## W3 file-plugin 与 bash-plugin
 

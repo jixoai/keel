@@ -1,0 +1,4 @@
+# openspec validate keel-harness-v2 --strict (after tasks.md update)
+# commit 8941c76 + working tree
+Change 'keel-harness-v2' is valid
+exit=0

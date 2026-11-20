@@ -1,0 +1,41 @@
+W2 run snapshot + capability matrix — gate roll-up
+
+Commit under test : 8941c76 (8557c9f + 421b5dd + boundary fix)
+Date              : 2026-11-20/21 (Asia/Shanghai)
+
+Gate                        Result
+gofmt -l changed files      exit 0, no files listed
+go build changed packages   exit 0
+go vet changed packages     exit 0
+go test -p 1 ./...          exit 0; 55 packages ok, 11 packages without tests, 0 FAIL
+PI conformance              exit 0; TOTAL 1089 pass / 0 fail / 1 skip
+openspec strict             exit 0; "Change 'keel-harness-v2' is valid"
+
+Targeted tests (07-targeted-tests.txt): 12 PASS, 0 FAIL
+  internal/agent
+    TestRunSnapshotPinsTheInjectedSurface
+    TestRunSnapshotIgnoresAMidRunToolSurfaceChange
+    TestRunSnapshotAnchorFollowsConfigRotation
+    TestWorkerRunFinishedCarriesThePinnedSnapshot
+    TestConfigHashForLoadoutIsRevisionScoped
+  internal/gateway
+    TestAgentCapabilityMatrixIsNegotiated
+    TestLegacyAgentCapabilitiesStillActivate
+    TestUnsupportedRequiredCapabilityIsTyped
+    TestUnknownRequiredCapabilityIsTyped
+    TestMalformedCapabilityBitIsInvalidResult
+  internal/kernel
+    TestRunFinishedPayloadIsValidated (mem + pg implementations; new negative cases for
+      anchorEventSeq/toolManifestHash/configHash bounds)
+  internal/servicehost
+    TestReloadSharesUnchangedServicesAndPinsRevision (config hash moves with revision)
+
+Conformance per-package highlights (full table in 05-conformance.txt):
+  internal/agent 122 pass; internal/agenttool 3 pass; internal/host 66 pass;
+  internal/httpapi 273 pass; internal/loop 71 pass; internal/mcp 203 pass / 1 skip.
+
+No unimplemented part of the two checked tasks remains:
+  - W2-6 run snapshot three values: done.
+  - W2-7 external-kernel capability matrix + typed rejection: done.
+Still out of scope / unchanged (not claimed): groups/session_placement, pack/user/pin
+strategies, group slots/ETA, group OOM isolation (other W2 items remain unchecked).
