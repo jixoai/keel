@@ -25,6 +25,7 @@ var kernelPackages = []string{
 var productPackages = []string{
 	"github.com/jixoai/keel/internal/agentapi",
 	"github.com/jixoai/keel/internal/agentext",
+	"github.com/jixoai/keel/internal/placement",
 	"github.com/jixoai/keel/internal/servicehost",
 	"github.com/jixoai/keel/cmd/keel",
 }

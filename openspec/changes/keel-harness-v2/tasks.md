@@ -106,10 +106,19 @@
 
 ## W2 Harness 放置与内核契约
 
-- [ ] `groups` / `session_placement` 表与 lease 语义（join/leave/迁移）
-- [ ] 三种策略：`pack`（默认）/ `user` / `pin`；策略在 Harness，不进内核
-- [ ] 组内并发槽位（`max_concurrent_runs`）：满时排队 + ETA；用户配额在 DB 侧聚合 （对账 2026-11-20：部分——缺口：只有进程内全局 worker 信号量与 per-tenant 配额（internal/agent/worker.go:169、internal/quota）；无组槽位/排队 ETA/DB 聚合）
-- [ ] 进程生命周期：启动、drain、接管、SIGTERM 排水；组 OOM 不扩散 （对账 2026-11-20：部分——缺口：drain/handoff/SIGTERM 在（internal/httpapi/drain.go、internal/handoff）；无 group 实体与组 OOM 隔离）
+- [x] `groups` / `session_placement` 表与 lease 语义（join/leave/迁移）
+      （W2H2A2：DDL `internal/store/schema.sql`（groups/session_placement/runs.group_id）；
+      lease 与 join/leave/seek 在 `internal/placement/`；迁移+RLS+FORCE 测试
+      `internal/store/placement_schema_test.go`；双组并发 claim 单赢家
+      `internal/placement/pg_test.go:TestPGConcurrentClaimsSingleWinner`；证据
+      `evidence/w2-placement-2026-11-21/`）
+- [x] 三种策略：`pack`（默认）/ `user` / `pin`；策略在 Harness，不进内核
+      （W2H2A2：`internal/placement/service.go` resolveStrategyGroup——pack 落单组
+      `pack-default`、user 落 `user`、pin 必须显式 group；单测
+      `internal/placement/service_test.go:TestStrategyResolution`；架构测试把
+      placement 钉为产品层，内核不得 import）
+- [ ] 组内并发槽位（`max_concurrent_runs`）：满时排队 + ETA；用户配额在 DB 侧聚合 （对账 2026-11-20：部分——缺口：只有进程内全局 worker 信号量与 per-tenant 配额（internal/agent/worker.go:169、internal/quota）；无组槽位/排队 ETA/DB 聚合）（W2H2A2：组槽位+跨组租户配额已按 `runs(status ∈ pending,running)` 在 DB 聚合，满时**选拒绝式 429 + Retry-After**（不排队，故无 ETA）；`internal/placement/pg.go` AdmitRun；并发不超卖证据 `TestPGConcurrentAdmissionsNoOversell`（30 并发/配额 5 → 恰 5 准入）；缺口：agent worker 与 `quota.Limits` 尚未接线到 `placement.AdmitRun`、父/子仍占进程内全局信号量、pack 按内存预算多组装箱未做）
+- [ ] 进程生命周期：启动、drain、接管、SIGTERM 排水；组 OOM 不扩散 （对账 2026-11-20：部分——缺口：drain/handoff/SIGTERM 在（internal/httpapi/drain.go、internal/handoff）；无 group 实体与组 OOM 隔离）（W2H2A2：group 实体与 active/draining/retired 状态已落；draining 组内既有 placement 可续租，新 placement/新 run 拒绝（`TestPGDrainingGroup`）；组 OOM/进程隔离不在本 lane，如实未做）
 - [x] 注入式 run 契约：工具清单 + system sections + message-parts + invoke 回调
       （对账：`internal/agentloop/loop.go:96-140`（Input：SystemPrompt/Messages/Tools/Batch）、
       `agentloop/pi.go:70-110`；loop 不持账本/不触 store；单测 `agentloop/contract_test.go:110`、

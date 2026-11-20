@@ -1,0 +1,82 @@
+?   	github.com/jixoai/keel/cmd/chaos	[no test files]
+?   	github.com/jixoai/keel/cmd/e2e	[no test files]
+ok  	github.com/jixoai/keel/cmd/keel	10.547s
+?   	github.com/jixoai/keel/cmd/keel-dsh-ref	[no test files]
+?   	github.com/jixoai/keel/cmd/loadtest	[no test files]
+?   	github.com/jixoai/keel/cmd/mcpappload	[no test files]
+ok  	github.com/jixoai/keel/cmd/r1diff	0.331s
+ok  	github.com/jixoai/keel/cmd/runtime	0.229s
+--- FAIL: TestSecondCompactionAnchorsFromCheckpoint (2.69s)
+    compaction_checkpoint_test.go:371: second checkpoint upto_seq = 5, want > 5
+FAIL
+FAIL	github.com/jixoai/keel/internal/agent	89.676s
+--- FAIL: TestMCPAppRejectionAuditSampling (2.45s)
+    mcp_app_actions_test.go:1067: rate audit rows after two windows = 3, want 2
+2026/11/20 21:37:34 WARN mcp app audit is not durable: no audit store is wired action=ui/update-model-context result=ok server=weather app=mcpapp_0123456789abcdef
+2026/11/20 21:37:34 WARN mcp app audit is not durable: no audit store is wired action=ui/update-model-context result=refused server=weather app=mcpapp_0123456789abcdef
+2026/11/20 21:37:34 WARN mcp app audit is not durable: no audit store is wired action=ui/update-model-context result=error server=weather app=mcpapp_0123456789abcdef
+FAIL
+FAIL	github.com/jixoai/keel/internal/agentapi	25.508s
+?   	github.com/jixoai/keel/internal/agentcore	[no test files]
+ok  	github.com/jixoai/keel/internal/agentext	22.961s
+ok  	github.com/jixoai/keel/internal/agentloop	0.810s
+ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	0.212s
+?   	github.com/jixoai/keel/internal/agentloop/testloop	[no test files]
+ok  	github.com/jixoai/keel/internal/agentteam	0.210s
+ok  	github.com/jixoai/keel/internal/agenttool	0.162s
+ok  	github.com/jixoai/keel/internal/approval	0.774s
+ok  	github.com/jixoai/keel/internal/architecture	4.351s
+ok  	github.com/jixoai/keel/internal/auth	0.206s
+ok  	github.com/jixoai/keel/internal/bashbridge	1.365s
+ok  	github.com/jixoai/keel/internal/blob	26.082s
+ok  	github.com/jixoai/keel/internal/compaction	0.189s
+?   	github.com/jixoai/keel/internal/config	[no test files]
+ok  	github.com/jixoai/keel/internal/demo	0.122s
+ok  	github.com/jixoai/keel/internal/dshref	0.149s
+ok  	github.com/jixoai/keel/internal/durable	0.742s
+ok  	github.com/jixoai/keel/internal/externalgw	6.365s
+ok  	github.com/jixoai/keel/internal/fileplugin	82.905s
+ok  	github.com/jixoai/keel/internal/gateway	1.581s
+ok  	github.com/jixoai/keel/internal/handoff	52.578s
+ok  	github.com/jixoai/keel/internal/hooks	0.665s
+ok  	github.com/jixoai/keel/internal/host	0.403s
+ok  	github.com/jixoai/keel/internal/httpapi	54.246s
+ok  	github.com/jixoai/keel/internal/jobqueue	19.066s
+--- FAIL: TestClaimDoesNotResurrectSettledRun (6.30s)
+    --- FAIL: TestClaimDoesNotResurrectSettledRun/ClaimScope (6.30s)
+        kernel_test.go:1414: claim never blocked on the contended run row
+FAIL
+FAIL	github.com/jixoai/keel/internal/kernel	62.985s
+ok  	github.com/jixoai/keel/internal/layerfs	5.847s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.783s
+ok  	github.com/jixoai/keel/internal/loadout	0.199s
+ok  	github.com/jixoai/keel/internal/logsafe	0.127s
+ok  	github.com/jixoai/keel/internal/loop	0.671s
+ok  	github.com/jixoai/keel/internal/mcp	1.113s
+ok  	github.com/jixoai/keel/internal/mcp/oauth	0.531s
+ok  	github.com/jixoai/keel/internal/mcphost	0.803s
+ok  	github.com/jixoai/keel/internal/mediagw	0.232s
+ok  	github.com/jixoai/keel/internal/metrics	0.162s
+ok  	github.com/jixoai/keel/internal/modelcfg	0.300s
+ok  	github.com/jixoai/keel/internal/modelprovider	0.167s
+ok  	github.com/jixoai/keel/internal/notify	1.002s
+ok  	github.com/jixoai/keel/internal/placement	12.548s
+ok  	github.com/jixoai/keel/internal/pluginpkg	0.233s
+?   	github.com/jixoai/keel/internal/pluginpkg/builtin	[no test files]
+ok  	github.com/jixoai/keel/internal/provider	0.300s
+ok  	github.com/jixoai/keel/internal/quota	1.696s
+ok  	github.com/jixoai/keel/internal/r1diff	0.118s
+ok  	github.com/jixoai/keel/internal/realtime	1.439s
+ok  	github.com/jixoai/keel/internal/servicegraph	0.163s
+ok  	github.com/jixoai/keel/internal/servicehost	3.872s
+ok  	github.com/jixoai/keel/internal/skills	0.165s
+ok  	github.com/jixoai/keel/internal/store	28.762s
+ok  	github.com/jixoai/keel/internal/stream	0.341s
+ok  	github.com/jixoai/keel/internal/tasklog	13.520s
+ok  	github.com/jixoai/keel/internal/telemetry	0.168s
+?   	github.com/jixoai/keel/internal/testkit	[no test files]
+ok  	github.com/jixoai/keel/internal/toolsurface	0.323s
+ok  	github.com/jixoai/keel/plugins/templates	0.280s
+?   	github.com/jixoai/keel/plugins/tools/verifypkg	[no test files]
+FAIL
+exit=1

@@ -1,0 +1,7 @@
+=== RUN   TestPlacementSchemaMigratesWithRLS
+--- PASS: TestPlacementSchemaMigratesWithRLS (0.09s)
+=== RUN   TestPlacementRLSIsolatesTenants
+--- PASS: TestPlacementRLSIsolatesTenants (0.09s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	0.554s
+exit=0

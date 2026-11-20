@@ -901,3 +901,115 @@ CREATE TABLE IF NOT EXISTS session_snapshot (
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, session_id, seq)
 );
+
+-- --- placement (change keel-harness-v2, W2.1) -------------------------------
+--
+-- A Group is the harness's placement and collaboration unit: one worker process
+-- holds it (one group per worker in this change), it carries its own run
+-- concurrency slots and memory ceiling, and it may hold sessions of more than
+-- one user (project team). Groups are tenant-scoped here because the runtime's
+-- tenancy model still equates "user" with tenant; a cross-tenant project group
+-- needs a deployment-scoped group row plus a membership table and is deferred.
+--
+-- max_concurrent_runs = 0 means "no group-level limit" (the deployment's worker
+-- concurrency and the tenant quota still apply); memory_limit_bytes = 0 means
+-- "unbounded". The memory number is the packing budget used by the pack
+-- strategy, not cgroup enforcement: the group worker's cgroup belongs to the
+-- process-isolation lane.
+CREATE TABLE IF NOT EXISTS groups (
+    tenant_id           uuid NOT NULL,
+    group_id            uuid NOT NULL,
+    name                text NOT NULL,
+    max_concurrent_runs int  NOT NULL DEFAULT 0,
+    memory_limit_bytes  bigint NOT NULL DEFAULT 0,
+    status              text NOT NULL DEFAULT 'active',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, group_id),
+    CONSTRAINT groups_max_runs_check CHECK (max_concurrent_runs >= 0),
+    CONSTRAINT groups_memory_check CHECK (memory_limit_bytes >= 0),
+    CONSTRAINT groups_status_check CHECK (status IN ('active', 'draining', 'retired'))
+);
+
+-- A group always belongs to a provisioned tenant.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'groups_tenant_fk'
+                     AND conrelid = 'groups'::regclass) THEN
+        ALTER TABLE groups ADD CONSTRAINT groups_tenant_fk
+            FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id);
+    END IF;
+END
+$$;
+
+-- Names are per tenant so "pack-default" and "user" are stable handles the
+-- placement strategies can upsert by.
+CREATE UNIQUE INDEX IF NOT EXISTS groups_name ON groups (tenant_id, name);
+CREATE INDEX IF NOT EXISTS groups_by_status ON groups (tenant_id, status);
+
+-- One row per session: the session's current placement fact. The row is not a
+-- static binding: epoch is monotonic and lease_until bounds how long the named
+-- worker may act for the session. An expired lease is adoptable by any worker;
+-- a live one can only be renewed by its holder. A move to another group
+-- requires the old lease to be expired (drained), so two groups cannot both
+-- hold a live placement for the same session.
+--
+-- lease_until is NOT NULL: "no lease" is expressed as an already-expired
+-- timestamp, which keeps the adoption predicate a single comparison.
+CREATE TABLE IF NOT EXISTS session_placement (
+    tenant_id   uuid NOT NULL,
+    session_id  uuid NOT NULL,
+    group_id    uuid NOT NULL,
+    worker_id   text NOT NULL DEFAULT '',
+    epoch       bigint NOT NULL DEFAULT 1,
+    lease_until timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id),
+    CONSTRAINT session_placement_epoch_check CHECK (epoch > 0),
+    CONSTRAINT session_placement_group_fk
+        FOREIGN KEY (tenant_id, group_id)
+        REFERENCES groups (tenant_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS session_placement_group
+    ON session_placement (tenant_id, group_id);
+CREATE INDEX IF NOT EXISTS session_placement_lease
+    ON session_placement (lease_until);
+
+-- A run belongs to the group it was admitted into. The runs table stays the one
+-- active-run account (there is no second slot ledger): placement admission
+-- counts pending+running rows here, and this column is what makes the group
+-- count correct across a later placement move. NULL marks a row enqueued
+-- before placement admission existed (or by the legacy queue path); it still
+-- counts against the tenant quota, never against a group's slots.
+-- The column add is guarded by a catalog probe rather than ADD COLUMN IF NOT
+-- EXISTS: schema.sql re-runs on every boot and in every test process, and an
+-- ALTER TABLE would take ACCESS EXCLUSIVE on the hot runs table even when the
+-- column is already there.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema()
+                     AND table_name = 'runs' AND column_name = 'group_id') THEN
+        ALTER TABLE runs ADD COLUMN group_id uuid;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'runs_group_fk'
+                     AND conrelid = 'runs'::regclass) THEN
+        ALTER TABLE runs ADD CONSTRAINT runs_group_fk
+            FOREIGN KEY (tenant_id, group_id)
+            REFERENCES groups (tenant_id, group_id);
+    END IF;
+END
+$$;
+
+-- Group slot counts and the tenant-wide quota sum are both predicates over the
+-- same runs table; the partial indexes keep them proportional to active work,
+-- not to the historical run count.
+CREATE INDEX IF NOT EXISTS runs_active_group
+    ON runs (tenant_id, group_id)
+    WHERE group_id IS NOT NULL AND status IN ('pending', 'running');
+CREATE INDEX IF NOT EXISTS runs_active_tenant
+    ON runs (tenant_id)
+    WHERE status IN ('pending', 'running');

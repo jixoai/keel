@@ -1,0 +1,37 @@
+=== RUN   TestPGClaimEpochAndLiveLease
+--- PASS: TestPGClaimEpochAndLiveLease (0.57s)
+=== RUN   TestPGConcurrentClaimsSingleWinner
+--- PASS: TestPGConcurrentClaimsSingleWinner (0.46s)
+=== RUN   TestPGRunSlotGroupLimit
+--- PASS: TestPGRunSlotGroupLimit (0.34s)
+=== RUN   TestPGTenantQuotaAcrossGroupsNoOversell
+--- PASS: TestPGTenantQuotaAcrossGroupsNoOversell (0.31s)
+=== RUN   TestPGConcurrentAdmissionsNoOversell
+--- PASS: TestPGConcurrentAdmissionsNoOversell (1.07s)
+=== RUN   TestPGDrainingGroup
+--- PASS: TestPGDrainingGroup (0.15s)
+=== RUN   TestStrategyResolution
+--- PASS: TestStrategyResolution (0.00s)
+=== RUN   TestClaimEpochCASAndLiveLease
+--- PASS: TestClaimEpochCASAndLiveLease (0.00s)
+=== RUN   TestConcurrentClaimsHaveOneWinner
+--- PASS: TestConcurrentClaimsHaveOneWinner (0.00s)
+=== RUN   TestJoinIdempotentAndMoveNeedsExpiry
+--- PASS: TestJoinIdempotentAndMoveNeedsExpiry (0.00s)
+=== RUN   TestLeaveEpochGuard
+--- PASS: TestLeaveEpochGuard (0.00s)
+=== RUN   TestAdoptFollowsKernelEpoch
+--- PASS: TestAdoptFollowsKernelEpoch (0.00s)
+=== RUN   TestSeekPlan
+--- PASS: TestSeekPlan (0.00s)
+=== RUN   TestDrainingGroupRenewsButTakesNoNewWork
+--- PASS: TestDrainingGroupRenewsButTakesNoNewWork (0.00s)
+=== RUN   TestGroupSlotsRefuseWithRetryAfter
+--- PASS: TestGroupSlotsRefuseWithRetryAfter (0.00s)
+=== RUN   TestTenantQuotaAggregatesAcrossGroups
+--- PASS: TestTenantQuotaAggregatesAcrossGroups (0.00s)
+=== RUN   TestConcurrentAdmissionsDoNotOversell
+--- PASS: TestConcurrentAdmissionsDoNotOversell (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/placement	3.052s
+exit=0
