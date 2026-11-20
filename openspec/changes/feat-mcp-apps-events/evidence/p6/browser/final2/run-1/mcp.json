@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "e2e": {
+      "command": "node",
+      "args": ["/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/scripts/mcp-apps-e2e/mcp-server.mjs"],
+      "env": {"MCP_E2E_LOG": "/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/browser/final2/run-1/mcp-calls.jsonl"},
+      "description": "P6A1 browser fixture (weather panel)"
+    }
+  }
+}

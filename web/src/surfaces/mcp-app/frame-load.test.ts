@@ -19,7 +19,7 @@ test("首载判定：loads=1 + handshaking/initialized → reload", () => {
   expect(frameLoadVerdict(1, "ready", true)).toBe("reload");
 });
 
-test("首载判定：loads=1 + idle → start（display-mode 重建后的首个 load）", () => {
+test("load 判定：loads=1 + idle → start（同一元素第二次 load 且尚无 initialize）", () => {
   expect(frameLoadVerdict(1, "idle", false)).toBe("start");
 });
 

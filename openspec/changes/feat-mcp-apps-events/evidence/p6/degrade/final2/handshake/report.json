@@ -1,0 +1,642 @@
+{
+  "lane": "P6A2a",
+  "scenario": "handshake",
+  "run": "handshake",
+  "startedAt": "2026-11-20T04:51:07.836Z",
+  "baseUrl": "http://127.0.0.1:13682",
+  "steps": [
+    {
+      "name": "login-gate",
+      "ok": true,
+      "at": "2026-11-20T04:51:08.327Z",
+      "detail": {
+        "url": "http://127.0.0.1:13682/"
+      },
+      "screenshot": "screenshots/01-login-gate.png"
+    },
+    {
+      "name": "login-submitted",
+      "ok": true,
+      "at": "2026-11-20T04:51:08.862Z",
+      "detail": {
+        "authenticated": true
+      },
+      "screenshot": "screenshots/02-login-submitted.png"
+    },
+    {
+      "name": "post-login-reload",
+      "ok": true,
+      "at": "2026-11-20T04:51:09.557Z",
+      "detail": {
+        "reloaded": true
+      },
+      "screenshot": "screenshots/03-post-login-reload.png"
+    },
+    {
+      "name": "session-open",
+      "ok": true,
+      "at": "2026-11-20T04:51:10.061Z",
+      "detail": {
+        "toolRow": "工具 mcp"
+      },
+      "screenshot": "screenshots/04-session-open.png"
+    },
+    {
+      "name": "tool-rows-expanded",
+      "ok": true,
+      "at": "2026-11-20T04:51:12.093Z",
+      "detail": {
+        "expectedURIs": [
+          "ui://weather/dashboard",
+          "ui://weather/broken"
+        ]
+      },
+      "screenshot": "screenshots/05-tool-rows-expanded.png"
+    },
+    {
+      "name": "catalogue",
+      "ok": true,
+      "at": "2026-11-20T04:51:12.461Z",
+      "detail": {
+        "status": 200,
+        "apps": [
+          {
+            "appId": "mcpapp_59e4dd1e7aa4c2f0",
+            "server": "e2e",
+            "title": "天气面板",
+            "resourceUri": "ui://weather/dashboard",
+            "mimeType": "text/html;profile=mcp-app",
+            "visibility": [
+              "model",
+              "app"
+            ],
+            "tools": [
+              {
+                "tool": "render_weather",
+                "visibility": [
+                  "model",
+                  "app"
+                ]
+              }
+            ],
+            "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+            "permissions": null,
+            "hash": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+            "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+            "documentUrl": "/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad"
+          },
+          {
+            "appId": "mcpapp_a926dc7673fdc230",
+            "server": "e2e",
+            "title": "泄漏面板（CSP）",
+            "resourceUri": "ui://weather/leaky",
+            "mimeType": "text/html;profile=mcp-app",
+            "visibility": [
+              "model",
+              "app"
+            ],
+            "tools": [
+              {
+                "tool": "render_leaky",
+                "visibility": [
+                  "model",
+                  "app"
+                ]
+              }
+            ],
+            "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+            "cspDomains": {
+              "connectDomains": [
+                "https://api.fixture.test"
+              ]
+            },
+            "permissions": null,
+            "hash": "100786d32b76884f389568659a7e303640e87e9fc72574b665bfb75fcecc2bde",
+            "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+            "documentUrl": "/v1/mcp/apps/mcpapp_a926dc7673fdc230/view?v=100786d32b76884f389568659a7e303640e87e9fc72574b665bfb75fcecc2bde"
+          },
+          {
+            "appId": "mcpapp_c4cb0003a008f98e",
+            "server": "e2e",
+            "title": "坏面板（握手超时）",
+            "resourceUri": "ui://weather/broken",
+            "mimeType": "text/html;profile=mcp-app",
+            "visibility": [
+              "model",
+              "app"
+            ],
+            "tools": [
+              {
+                "tool": "render_broken",
+                "visibility": [
+                  "model",
+                  "app"
+                ]
+              }
+            ],
+            "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+            "permissions": null,
+            "hash": "02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3",
+            "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+            "documentUrl": "/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3"
+          }
+        ],
+        "documentUrls": [
+          {
+            "resourceUri": "ui://weather/dashboard",
+            "documentUrl": "/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+            "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+          },
+          {
+            "resourceUri": "ui://weather/leaky",
+            "documentUrl": "/v1/mcp/apps/mcpapp_a926dc7673fdc230/view?v=100786d32b76884f389568659a7e303640e87e9fc72574b665bfb75fcecc2bde",
+            "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+          },
+          {
+            "resourceUri": "ui://weather/broken",
+            "documentUrl": "/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3",
+            "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+          }
+        ]
+      }
+    },
+    {
+      "name": "good-app-ready",
+      "ok": true,
+      "at": "2026-11-20T04:51:12.512Z",
+      "detail": {
+        "bootedAt": 1795150271588,
+        "toolsCall": {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+              }
+            ],
+            "structuredContent": {
+              "city": "Shanghai",
+              "temperatureC": 24,
+              "humidity": 61
+            }
+          }
+        }
+      },
+      "screenshot": "screenshots/06-good-app-ready.png"
+    },
+    {
+      "name": "handshake-timeout-fallback",
+      "ok": true,
+      "at": "2026-11-20T04:51:17.195Z",
+      "detail": {
+        "rowText": "mcp\ntool=render_broken · action=call · server=e2e · arguments={\"city\":\"Shan…\n坏面板（握手超时）\n已回退\n交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试\nui://weather/broken\n结果\n坏面板的文本结果仍然可读（交互界面预期握手超时）。\n参数\ntool=render_broken\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}",
+        "retryLabel": "重试交互界面",
+        "retryDisabled": false,
+        "fallbackText": "交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试"
+      },
+      "screenshot": "screenshots/07-handshake-timeout-fallback.png"
+    },
+    {
+      "name": "good-app-unaffected",
+      "ok": true,
+      "at": "2026-11-20T04:51:17.562Z",
+      "detail": {
+        "bootedAt": 1795150271588,
+        "toolsCall": {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+              }
+            ],
+            "structuredContent": {
+              "city": "Shanghai",
+              "temperatureC": 24,
+              "humidity": 61
+            }
+          }
+        }
+      },
+      "screenshot": "screenshots/08-good-app-unaffected.png"
+    },
+    {
+      "name": "handshake-retry-fallback",
+      "ok": true,
+      "at": "2026-11-20T04:51:23.297Z",
+      "detail": {
+        "retryElapsedMs": 5332
+      },
+      "screenshot": "screenshots/09-handshake-retry-fallback.png"
+    }
+  ],
+  "assertions": {
+    "catalogue-apps": {
+      "ok": true,
+      "detail": [
+        "ui://weather/dashboard",
+        "ui://weather/leaky",
+        "ui://weather/broken"
+      ]
+    },
+    "catalogue-dashboard": {
+      "ok": true,
+      "detail": {
+        "appId": "mcpapp_59e4dd1e7aa4c2f0",
+        "server": "e2e",
+        "title": "天气面板",
+        "resourceUri": "ui://weather/dashboard",
+        "mimeType": "text/html;profile=mcp-app",
+        "visibility": [
+          "model",
+          "app"
+        ],
+        "tools": [
+          {
+            "tool": "render_weather",
+            "visibility": [
+              "model",
+              "app"
+            ]
+          }
+        ],
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "permissions": null,
+        "hash": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+        "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+        "documentUrl": "/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad"
+      }
+    },
+    "catalogue-broken": {
+      "ok": true,
+      "detail": {
+        "appId": "mcpapp_c4cb0003a008f98e",
+        "server": "e2e",
+        "title": "坏面板（握手超时）",
+        "resourceUri": "ui://weather/broken",
+        "mimeType": "text/html;profile=mcp-app",
+        "visibility": [
+          "model",
+          "app"
+        ],
+        "tools": [
+          {
+            "tool": "render_broken",
+            "visibility": [
+              "model",
+              "app"
+            ]
+          }
+        ],
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "permissions": null,
+        "hash": "02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3",
+        "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+        "documentUrl": "/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3"
+      }
+    },
+    "mcp-resource-read-ui-weather-dashboard": {
+      "ok": true,
+      "detail": [
+        "ui://weather/broken",
+        "ui://weather/dashboard",
+        "ui://weather/leaky"
+      ]
+    },
+    "mcp-resource-read-ui-weather-broken": {
+      "ok": true,
+      "detail": [
+        "ui://weather/broken",
+        "ui://weather/dashboard",
+        "ui://weather/leaky"
+      ]
+    },
+    "good-handshake": {
+      "ok": true,
+      "detail": "2026-01-26"
+    },
+    "good-tool-result": {
+      "ok": true,
+      "detail": {
+        "city": "Shanghai",
+        "humidity": 61,
+        "temperatureC": 24
+      }
+    },
+    "good-tools-call": {
+      "ok": true,
+      "detail": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+            }
+          ],
+          "structuredContent": {
+            "city": "Shanghai",
+            "temperatureC": 24,
+            "humidity": 61
+          }
+        }
+      }
+    },
+    "good-phase-visible": {
+      "ok": true,
+      "detail": "the good iframe is visible"
+    },
+    "broken-iframe-mounted": {
+      "ok": true,
+      "detail": "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=d7cc809546c640588efb3aeeba2b92d42"
+    },
+    "broken-load-observed": {
+      "ok": true,
+      "detail": {
+        "brokenSrc": "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=d7cc809546c640588efb3aeeba2b92d42",
+        "seen": [
+          2588.4000000953674
+        ],
+        "loaded": [
+          2680.2999999523163
+        ]
+      }
+    },
+    "broken-fallback-observed": {
+      "ok": true,
+      "detail": 7686
+    },
+    "broken-timeout-within-deadline": {
+      "ok": true,
+      "detail": {
+        "elapsedMs": 5006,
+        "deadlineMs": 5000
+      }
+    },
+    "broken-fallback-row": {
+      "ok": true,
+      "detail": {
+        "rowText": "mcp\ntool=render_broken · action=call · server=e2e · arguments={\"city\":\"Shan…\n坏面板（握手超时）\n已回退\n交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试\nui://weather/broken\n结果\n坏面板的文本结果仍然可读（交互界面预期握手超时）。\n参数\ntool=render_broken\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}",
+        "retryLabel": "重试交互界面",
+        "retryDisabled": false,
+        "fallbackText": "交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试"
+      }
+    },
+    "broken-fallback-reason": {
+      "ok": true,
+      "detail": "交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试"
+    },
+    "broken-fallback-readable": {
+      "ok": true,
+      "detail": "交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试"
+    },
+    "broken-fallback-retry": {
+      "ok": true,
+      "detail": {
+        "rowText": "mcp\ntool=render_broken · action=call · server=e2e · arguments={\"city\":\"Shan…\n坏面板（握手超时）\n已回退\n交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试\nui://weather/broken\n结果\n坏面板的文本结果仍然可读（交互界面预期握手超时）。\n参数\ntool=render_broken\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}",
+        "retryLabel": "重试交互界面",
+        "retryDisabled": false,
+        "fallbackText": "交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试"
+      }
+    },
+    "broken-text-result-still-visible": {
+      "ok": true,
+      "detail": "mcp\ntool=render_broken · action=call · server=e2e · arguments={\"city\":\"Shan…\n坏面板（握手超时）\n已回退\n交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试\nui://weather/broken\n结果\n坏面板的文本结果仍然可读（交互界面预期握手超时）。\n参数\ntool=render_broken\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}"
+    },
+    "good-still-mounted": {
+      "ok": true,
+      "detail": "the good iframe is still mounted"
+    },
+    "good-same-instance": {
+      "ok": true,
+      "detail": {
+        "before": 1795150271588,
+        "after": 1795150271588
+      }
+    },
+    "good-tools-call-survives": {
+      "ok": true,
+      "detail": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+            }
+          ],
+          "structuredContent": {
+            "city": "Shanghai",
+            "temperatureC": 24,
+            "humidity": 61
+          }
+        }
+      }
+    },
+    "good-row-has-no-fallback": {
+      "ok": true,
+      "detail": false
+    },
+    "retry-refalls-back": {
+      "ok": true,
+      "detail": "mcp\ntool=render_broken · action=call · server=e2e · arguments={\"city\":\"Shan…\n坏面板（握手超时）\n已回退\n交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试\nui://weather/broken\n结果\n坏面板的文本结果仍然可读（交互界面预期握手超时）。\n参数\ntool=render_broken\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}"
+    },
+    "retry-within-deadline": {
+      "ok": true,
+      "detail": 5332
+    },
+    "good-survives-retry": {
+      "ok": true,
+      "detail": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "上海现在 24°C，湿度 61%（Shanghai）。"
+            }
+          ],
+          "structuredContent": {
+            "city": "Shanghai",
+            "temperatureC": 24,
+            "humidity": 61
+          }
+        }
+      }
+    },
+    "host-no-navigation": {
+      "ok": true,
+      "detail": {
+        "before": "http://127.0.0.1:13682/",
+        "after": "http://127.0.0.1:13682/"
+      }
+    },
+    "host-no-main-frame-navigation": {
+      "ok": true,
+      "detail": {
+        "navigations": []
+      }
+    },
+    "no-page-errors": {
+      "ok": true,
+      "detail": []
+    },
+    "no-failed-requests": {
+      "ok": true,
+      "detail": []
+    }
+  },
+  "catalogue": {
+    "status": 200,
+    "apps": [
+      {
+        "appId": "mcpapp_59e4dd1e7aa4c2f0",
+        "server": "e2e",
+        "title": "天气面板",
+        "resourceUri": "ui://weather/dashboard",
+        "mimeType": "text/html;profile=mcp-app",
+        "visibility": [
+          "model",
+          "app"
+        ],
+        "tools": [
+          {
+            "tool": "render_weather",
+            "visibility": [
+              "model",
+              "app"
+            ]
+          }
+        ],
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "permissions": null,
+        "hash": "0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+        "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+        "documentUrl": "/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad"
+      },
+      {
+        "appId": "mcpapp_a926dc7673fdc230",
+        "server": "e2e",
+        "title": "泄漏面板（CSP）",
+        "resourceUri": "ui://weather/leaky",
+        "mimeType": "text/html;profile=mcp-app",
+        "visibility": [
+          "model",
+          "app"
+        ],
+        "tools": [
+          {
+            "tool": "render_leaky",
+            "visibility": [
+              "model",
+              "app"
+            ]
+          }
+        ],
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "cspDomains": {
+          "connectDomains": [
+            "https://api.fixture.test"
+          ]
+        },
+        "permissions": null,
+        "hash": "100786d32b76884f389568659a7e303640e87e9fc72574b665bfb75fcecc2bde",
+        "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+        "documentUrl": "/v1/mcp/apps/mcpapp_a926dc7673fdc230/view?v=100786d32b76884f389568659a7e303640e87e9fc72574b665bfb75fcecc2bde"
+      },
+      {
+        "appId": "mcpapp_c4cb0003a008f98e",
+        "server": "e2e",
+        "title": "坏面板（握手超时）",
+        "resourceUri": "ui://weather/broken",
+        "mimeType": "text/html;profile=mcp-app",
+        "visibility": [
+          "model",
+          "app"
+        ],
+        "tools": [
+          {
+            "tool": "render_broken",
+            "visibility": [
+              "model",
+              "app"
+            ]
+          }
+        ],
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        "permissions": null,
+        "hash": "02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3",
+        "fetchedAt": "2026-11-20T12:51:05.849326+08:00",
+        "documentUrl": "/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3"
+      }
+    ],
+    "documentUrls": [
+      {
+        "resourceUri": "ui://weather/dashboard",
+        "documentUrl": "/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad",
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+      },
+      {
+        "resourceUri": "ui://weather/leaky",
+        "documentUrl": "/v1/mcp/apps/mcpapp_a926dc7673fdc230/view?v=100786d32b76884f389568659a7e303640e87e9fc72574b665bfb75fcecc2bde",
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self' https://api.fixture.test; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+      },
+      {
+        "resourceUri": "ui://weather/broken",
+        "documentUrl": "/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3",
+        "csp": "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+      }
+    ]
+  },
+  "app": {
+    "fallback": {
+      "rowText": "mcp\ntool=render_broken · action=call · server=e2e · arguments={\"city\":\"Shan…\n坏面板（握手超时）\n已回退\n交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试\nui://weather/broken\n结果\n坏面板的文本结果仍然可读（交互界面预期握手超时）。\n参数\ntool=render_broken\naction=call\nserver=e2e\narguments={\"city\":\"Shanghai\"}",
+      "retryLabel": "重试交互界面",
+      "retryDisabled": false,
+      "fallbackText": "交互界面在 5 秒内未完成握手（文本结果仍可阅读）\n重试"
+    }
+  },
+  "timing": {
+    "probeInstalledAt": 1837.4000000953674,
+    "iframeSeen": {
+      "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad&instance=62d3aebc8acf49e9992bbf2e52526b281": 2278.9000000953674,
+      "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=d7cc809546c640588efb3aeeba2b92d42": 2588.4000000953674
+    },
+    "iframeLoaded": {
+      "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad&instance=62d3aebc8acf49e9992bbf2e52526b281": 2379.9000000953674,
+      "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=d7cc809546c640588efb3aeeba2b92d42": 2680.2999999523163
+    },
+    "brokenFallbackAt": 7686,
+    "brokenSrc": "http://127.0.0.1:13682/v1/mcp/apps/mcpapp_c4cb0003a008f98e/view?v=02f8ccaf0575248a4280f8019f0ad7f16ca4ce602c32b76cb50f5b6b096148d3&instance=d7cc809546c640588efb3aeeba2b92d42",
+    "elapsedMs": 5006,
+    "retryElapsedMs": 5332
+  },
+  "csp": null,
+  "console": [
+    "error: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "verbose: [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o"
+  ],
+  "pageErrors": [],
+  "failedRequests": [
+    {
+      "url": "http://127.0.0.1:13682/v1/capabilities",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:13682/v1/auth/login",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "mainFrameNavigations": [
+    "http://127.0.0.1:13682/",
+    "http://127.0.0.1:13682/",
+    "http://127.0.0.1:13682/",
+    "http://127.0.0.1:13682/"
+  ],
+  "findings": [
+    {
+      "id": "login-capability-stale",
+      "summary": "登录后能力位未刷新：首屏 can(\"mcp.apps\") 仍为 false（P6A1 已记录）；本次降级用例在登录后 reload 一次再验证。",
+      "impact": "P2/P6 前端 store 已知缺陷；本 lane 不改产品代码，也不把该缺陷算作降级场景失败。"
+    }
+  ],
+  "pass": true,
+  "finishedAt": "2026-11-20T04:51:23.677Z"
+}

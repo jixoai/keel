@@ -1,0 +1,10 @@
+{"method":"server/discover","id":1,"params":{"_meta":{"io.modelcontextprotocol/clientCapabilities":{"elicitation":{},"experimental":{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}},"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}},"sampling":{}},"io.modelcontextprotocol/clientInfo":{"name":"keel","version":"0.1.0"},"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}
+{"method":"initialize","id":2,"params":{"protocolVersion":"2025-11-25","capabilities":{"elicitation":{},"experimental":{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}},"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}},"sampling":{}},"clientInfo":{"name":"keel","version":"0.1.0"}}}
+{"method":"notifications/initialized","id":null,"params":null}
+{"method":"tools/list","id":3,"params":null}
+{"method":"resources/read","id":4,"params":{"uri":"ui://weather/broken"}}
+{"method":"resources/read","id":6,"params":{"uri":"ui://weather/dashboard"}}
+{"method":"resources/read","id":5,"params":{"uri":"ui://weather/leaky"}}
+{"method":"tools/call","id":7,"params":{"_meta":{"progressToken":"call_mcp_apps_e2e_1"},"arguments":{"city":"Shanghai"},"name":"render_weather"}}
+{"method":"tools/call","id":8,"params":{"_meta":{"progressToken":"call_mcp_apps_e2e_2"},"arguments":{"city":"Shanghai"},"name":"render_broken"}}
+{"method":"tools/call","id":9,"params":{"name":"refresh_weather","arguments":{"city":"Shanghai"}}}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "e2e": {
+      "command": "node",
+      "args": ["/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/scripts/mcp-apps-e2e/mcp-server.mjs"],
+      "env": {"MCP_E2E_LOG": "/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/degrade/final2/csp/mcp-calls.jsonl", "MCP_E2E_DEGRADE": "1"},
+      "description": "P6A2a degradation fixture (broken + leaky apps)"
+    }
+  }
+}

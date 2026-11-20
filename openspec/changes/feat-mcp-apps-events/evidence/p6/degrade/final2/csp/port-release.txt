@@ -1,0 +1,7 @@
+# cleanup check
+database keel_degrade_e2e_20261120_125100_csp dropped (absent from pg_database)
+mcp fixture process: none
+# port release check
+port 13682 released (no listener)
+port 13683 released (no listener)
+port 13685 released (no listener)

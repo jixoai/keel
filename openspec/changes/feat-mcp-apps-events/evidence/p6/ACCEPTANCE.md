@@ -18,9 +18,9 @@
 | 项 | 证据 |
 |---|---|
 | 真实 `keel serve` + 真实 stdio MCP server：app 目录/`/view` CSP/代理 `tools/call`/`tools/list_changed` 换代 | `cmd/e2e -scenario mcp-apps`；`evidence/p6/crash/run1/`、`run2/` |
-| 真实浏览器：登录→会话→工具行→iframe 挂载→握手→tool-input/result→View→Host `tools/call`→全屏/退出 | `scripts/mcp-apps-e2e.sh`；`evidence/p6/browser/final/`（report.html + 13 步截图） |
-| 降级面：握手超时 5011ms 文本兜底/重试、CSP 真实阻断未声明域名 | `scripts/mcp-apps-degrade-e2e.sh`；`evidence/p6/degrade/final/` |
-| TUI 文本兜底 | `nsh test --target tui` 174/174（含 mcp-app/TUI 用例） |
+| 真实浏览器：登录→会话→工具行→iframe 挂载→握手→tool-input/result→View→Host `tools/call`→全屏/退出 | `scripts/mcp-apps-e2e.sh`；`evidence/p6/browser/final2/`（P6V 视觉修复后，report.html + 11 步截图；历史 final/）；公网 `https://local-gaubee-reports.fde2e.com/keel/mcp-apps-events/browser/report.html` |
+| 降级面：握手超时 final 5009ms 文本兜底/重试（早 lane 5011ms，同一断言）、CSP 真实阻断未声明域名 | `scripts/mcp-apps-degrade-e2e.sh`；`evidence/p6/degrade/final2/`（P6V 后）；公网 `https://local-gaubee-reports.fde2e.com/keel/mcp-apps-events/degrade/report.html` |
+| TUI 文本兜底 | `nsh test --target tui` 179/179（含 mcp-app/TUI 用例） |
 
 ## G2 — 崩溃一致
 
@@ -39,7 +39,7 @@
 - 六族齐全：`mcp_servers{state}`、`mcp_surface_generation`、`mcp_app_fetch_total{result}`、
   `mcp_app_bridge_frames_total{method,direction}`、`mcp_listen_reconnects_total`、`mcp_mrtr_rounds`。
 - 100 vs 1000 会话的 mcp_* series 均为 13 且完全一致（不随会话增长）。
-- 审计扫描：G3 13 行、崩溃矩阵 54 行，无消息正文/token/URL query/CR-LF/坏 UTF-8。
+- 审计扫描：G3 13 行；崩溃矩阵 run1 54 行、run2 57 行，均无消息正文/token/URL query/CR-LF/坏 UTF-8。
 - `keel serve` 现导出 run/queue/stream 指标（`cmd/keel/serve.go` +8 行，G5 需要）。
 - 证据：`evidence/p6/crash/run*/audit-*.json`、`metrics-*.txt`；`evidence/p6/perf/metrics-*.prom`。
 
@@ -75,11 +75,14 @@
 | `KEEL_TEST_DSN=... go test -p 1 -count=1 ./...` | EXIT 0（55 包 ok） |
 | `./scripts/conformance.sh` | 1077 / 0 fail / 1 skip |
 | `cd web && nsh check` | EXIT 0 |
-| `nsh test --target tui` | 174/174 |
+| `nsh test --target tui` | 179/179 |
 | `nsh build` / `nsh package --target web` | EXIT 0 |
-| `scripts/mcp-apps-e2e.sh`（最终树） | PASS（真实 Chrome，13 步） |
-| `scripts/mcp-apps-degrade-e2e.sh`（最终树） | PASS（handshake + CSP） |
+| `scripts/mcp-apps-e2e.sh`（最终树） | PASS（真实 Chrome，11 步；P6V 视觉修复后 final2） |
+| `scripts/mcp-apps-degrade-e2e.sh`（最终树） | PASS（handshake + CSP；final2） |
 | `scripts/mcp-apps-crash.sh`（最终树） | PASS 2/2（每轮 3 kill） |
+
+最终运行原始输出：`evidence/p6/gates-final/`（go-test-all / conformance / tui / browser-e2e /
+degrade-e2e / crash）。
 
 ## 7. 已接受偏离 / 未完成项（不冒充）
 
@@ -91,6 +94,8 @@
 - **A7 teardown 1s 等待**：NSH 组件卸载同批移除 iframe，无法真实等待；发送后立即销毁，
   已被 P6E 记录为接受偏离（无数据/安全影响）。
 - **A12 permissions**：同 P3.6。
+- **P6V 视觉修复**：全屏 Dialog 100%/fill、iframe flex 增高、epoch 时间隐藏、降级态隐藏全屏按钮
+  （P6A1/P6A2a final2 已复跑；vision 复审见 P6.4）。
 - **MRTR 轮次环境变量**：固定 5，`KEEL_MCP_MRTR_MAX_ROUNDS` 未实现（冻结 spec 只要求默认预算）。
 - 其余 Non-Goal 见 tasks.md 末尾 (a)–(e)。
 

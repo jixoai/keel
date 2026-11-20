@@ -1,0 +1,10 @@
+[mcp-apps-e2e] postgres container: keel-pg (port 13741)
+[mcp-apps-e2e] building /tmp/keel-mcp-apps-e2e-20261120-125040
+[mcp-apps-e2e] run 1: database keel_mcp_apps_e2e_20261120_125040_r1, evidence /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/browser/final2/run-1
+NOTICE:  database "keel_mcp_apps_e2e_20261120_125040_r1" does not exist, skipping
+capabilities: {'mcp.apps': True, 'mcp.apps.tools': True, 'mcp.apps.resources': True}
+tool.result app binding: {'appId': 'mcpapp_59e4dd1e7aa4c2f0', 'visibility': ['model', 'app'], 'resourceUri': 'ui://weather/dashboard'}
+catalogue: {'appId': 'mcpapp_59e4dd1e7aa4c2f0', 'hash': '0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad', 'documentUrl': '/v1/mcp/apps/mcpapp_59e4dd1e7aa4c2f0/view?v=0f0ebe0c6ab332e572d964e4b9a32ba7f138b56bc1e230eb730d41bc9a9705ad'}
+[mcp-apps-e2e] run 1: PASS
+{"allPass": true, "consistent": true, "runs": [{"run": 1, "pass": true}]}
+[mcp-apps-e2e] PASS — evidence in /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/browser/final2 (report.html is the latest run; summary.json compares both)

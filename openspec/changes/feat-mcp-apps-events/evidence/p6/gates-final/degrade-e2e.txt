@@ -1,0 +1,16 @@
+[mcp-apps-degrade-e2e] postgres container: keel-pg (port 13741)
+[mcp-apps-degrade-e2e] building /tmp/keel-mcp-degrade-e2e-20261120-125100
+[mcp-apps-degrade-e2e] scenario handshake: database keel_degrade_e2e_20261120_125100_handshake, evidence /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/degrade/final2/handshake
+NOTICE:  database "keel_degrade_e2e_20261120_125100_handshake" does not exist, skipping
+capabilities ok
+tool.result bindings: ['ui://weather/dashboard', 'ui://weather/broken']
+catalogue apps: ['ui://weather/broken', 'ui://weather/dashboard', 'ui://weather/leaky']
+[mcp-apps-degrade-e2e] scenario handshake: PASS
+[mcp-apps-degrade-e2e] scenario csp: database keel_degrade_e2e_20261120_125100_csp, evidence /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/degrade/final2/csp
+NOTICE:  database "keel_degrade_e2e_20261120_125100_csp" does not exist, skipping
+capabilities ok
+tool.result bindings: ['ui://weather/leaky']
+catalogue apps: ['ui://weather/broken', 'ui://weather/dashboard', 'ui://weather/leaky']
+[mcp-apps-degrade-e2e] scenario csp: PASS
+{"pass":true,"scenarios":[{"name":"handshake","pass":true},{"name":"csp","pass":true}]}
+[mcp-apps-degrade-e2e] PASS — evidence in /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-task-harness-v2/openspec/changes/feat-mcp-apps-events/evidence/p6/degrade/final2 (report.html is the combined report)
