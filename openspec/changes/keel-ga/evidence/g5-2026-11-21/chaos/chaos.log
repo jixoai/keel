@@ -1,0 +1,154 @@
+2026/11/21 02:45:01 SIGKILL runtime-a (pid 40201)
+2026/11/21 02:45:31 SIGKILL runtime-2 (pid 40480)
+2026/11/21 02:46:01 SIGKILL runtime-3 (pid 40645)
+2026/11/21 02:46:31 SIGKILL runtime-4 (pid 40998)
+2026/11/21 02:47:01 SIGKILL runtime-5 (pid 41625)
+2026/11/21 02:47:31 SIGKILL runtime-6 (pid 41830)
+2026/11/21 02:48:01 SIGKILL runtime-7 (pid 42070)
+2026/11/21 02:48:31 SIGKILL runtime-8 (pid 42242)
+2026/11/21 02:49:01 SIGKILL runtime-9 (pid 42380)
+2026/11/21 02:49:31 SIGKILL runtime-10 (pid 42723)
+2026/11/21 02:50:01 SIGKILL runtime-11 (pid 42973)
+2026/11/21 02:50:31 SIGKILL runtime-12 (pid 43180)
+2026/11/21 02:51:01 SIGKILL runtime-13 (pid 43388)
+2026/11/21 02:51:31 SIGKILL runtime-14 (pid 43541)
+2026/11/21 02:52:01 SIGKILL runtime-15 (pid 43702)
+2026/11/21 02:52:31 SIGKILL runtime-16 (pid 43923)
+2026/11/21 02:53:01 SIGKILL runtime-17 (pid 44166)
+2026/11/21 02:53:31 SIGKILL runtime-18 (pid 44338)
+2026/11/21 02:54:01 SIGKILL runtime-19 (pid 44490)
+2026/11/21 02:54:31 SIGKILL runtime-20 (pid 44993)
+{
+  "mode": "kill",
+  "faults": 20,
+  "restarts": 20,
+  "sessions": 16,
+  "checks": [
+    "seq contiguous from 1 on every session",
+    "every posted requestId committed exactly once",
+    "newest input answered; no input answered twice",
+    "read watermark covers every committed input",
+    "no unread-input flag left behind",
+    "no orphan tool results",
+    "every run converged (done/pending/failed)",
+    "every SIGKILL was followed by a counted runtime relaunch (restarts == faults)"
+  ],
+  "failures": null,
+  "pass": true,
+  "startedAt": "2026-11-20T18:44:31.11421Z",
+  "durationSec": 664.322129541,
+  "eventCount": 27463,
+  "sessionsChecked": 16,
+  "seqGaps": 0,
+  "duplicateRequestIDs": 0,
+  "duplicateFinalReplies": 0,
+  "unansweredNewest": 0,
+  "orphanToolResults": 0,
+  "unreadAfterSettle": 0,
+  "stuckRuns": 0,
+  "runStatusErrors": 0,
+  "eventLoadErrors": 0,
+  "kills": [
+    {
+      "at": "2026-11-20T18:45:01.857674Z",
+      "runtime": "runtime-a",
+      "pid": 40201
+    },
+    {
+      "at": "2026-11-20T18:45:31.855805Z",
+      "runtime": "runtime-2",
+      "pid": 40480
+    },
+    {
+      "at": "2026-11-20T18:46:01.858545Z",
+      "runtime": "runtime-3",
+      "pid": 40645
+    },
+    {
+      "at": "2026-11-20T18:46:31.858812Z",
+      "runtime": "runtime-4",
+      "pid": 40998
+    },
+    {
+      "at": "2026-11-20T18:47:01.859184Z",
+      "runtime": "runtime-5",
+      "pid": 41625
+    },
+    {
+      "at": "2026-11-20T18:47:31.859225Z",
+      "runtime": "runtime-6",
+      "pid": 41830
+    },
+    {
+      "at": "2026-11-20T18:48:01.859928Z",
+      "runtime": "runtime-7",
+      "pid": 42070
+    },
+    {
+      "at": "2026-11-20T18:48:31.859847Z",
+      "runtime": "runtime-8",
+      "pid": 42242
+    },
+    {
+      "at": "2026-11-20T18:49:01.860257Z",
+      "runtime": "runtime-9",
+      "pid": 42380
+    },
+    {
+      "at": "2026-11-20T18:49:31.868604Z",
+      "runtime": "runtime-10",
+      "pid": 42723
+    },
+    {
+      "at": "2026-11-20T18:50:01.866655Z",
+      "runtime": "runtime-11",
+      "pid": 42973
+    },
+    {
+      "at": "2026-11-20T18:50:31.865649Z",
+      "runtime": "runtime-12",
+      "pid": 43180
+    },
+    {
+      "at": "2026-11-20T18:51:01.86439Z",
+      "runtime": "runtime-13",
+      "pid": 43388
+    },
+    {
+      "at": "2026-11-20T18:51:31.863882Z",
+      "runtime": "runtime-14",
+      "pid": 43541
+    },
+    {
+      "at": "2026-11-20T18:52:01.868959Z",
+      "runtime": "runtime-15",
+      "pid": 43702
+    },
+    {
+      "at": "2026-11-20T18:52:31.867037Z",
+      "runtime": "runtime-16",
+      "pid": 43923
+    },
+    {
+      "at": "2026-11-20T18:53:01.86671Z",
+      "runtime": "runtime-17",
+      "pid": 44166
+    },
+    {
+      "at": "2026-11-20T18:53:31.86857Z",
+      "runtime": "runtime-18",
+      "pid": 44338
+    },
+    {
+      "at": "2026-11-20T18:54:01.870766Z",
+      "runtime": "runtime-19",
+      "pid": 44490
+    },
+    {
+      "at": "2026-11-20T18:54:31.869797Z",
+      "runtime": "runtime-20",
+      "pid": 44993
+    }
+  ],
+  "successions": 0
+}

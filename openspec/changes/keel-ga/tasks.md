@@ -126,11 +126,12 @@
 
 - [x] 1000 会话在线 + 64 并发 run，RSS < 2GB
       （`evidence/g5-2026-11-21/perf/result.json`：sseSessions=1000、runsActiveMax=64、
-      done=64/failed=0/pending=0、cgroup peak 676.6MB / 2048MB）
+      done=64/failed=0/pending=0、cgroup peak 676.6MB / 2048MB；RSS 字段因 loadtest 与 runtime 跨 PID namespace 采样失效记为 N/A，权威口径为 cgroup peak）
 - [x] 随机 SIGKILL（每 30s，持续 10min）0 丢事件、0 重复最终回复
       （`evidence/g5-2026-11-21/chaos/result.json`：20 kills / 20 restarts、mean interval 30.00s、
       seqGaps=0、duplicateFinalReplies=0，27463 事件审计）
 - [x] 2GB cgroup 复跑
       （与 1000/64 合并：`memory.max=2147483648`、`memory.peak=676614144` bytes，口径见报告）
-- [ ] 子代理交叉复核（本项目不使用 Codex）
+- [x] 子代理交叉复核（本项目不使用 Codex）
+      （2026-11-21 独立 reviewer：P0=0，数字与报告一致；P1 证据日志被 .gitignore 排除已 `git add -f` 补齐并复验哈希；verdict pass）
 - [ ] 报告 + 公网链接 + 归档本 change
