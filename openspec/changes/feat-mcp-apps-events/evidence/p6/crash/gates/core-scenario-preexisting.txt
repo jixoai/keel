@@ -1,36 +1,45 @@
-P6B: existing default `core` scenario — pre-existing failure, not introduced here
+P6B follow-up: core scenario after the tool-replay fix — 8/8 PASS twice
 
-$ go build -o /tmp/keel-runtime ./cmd/runtime
-$ go run ./cmd/e2e -scenario core -bin /tmp/keel-runtime -port 13687 \
-    -reset -reset-confirm keel_test_p6_crash
-exit 1
+The default `core` scenario's `caseToolReplayAfterKill` no longer depends on the
+deleted `echo` tool. It now drives the aggregate `mcp` tool, which is part of
+the constant v2 surface, against the same real stdio MCP server the mcp-apps
+scenario uses. No `echo` shim was added.
 
-7 of 8 cases pass:
-  requestId idempotency across SIGKILL           pass
-  SSE Last-Event-ID across SIGKILL              pass
-  blob base64 resume across SIGKILL             pass
-  agent worker: input -> fake reply             pass
-  retry: re-ask appends a new input             pass
-  run resumes after SIGKILL during model call   pass
-  tool result survives SIGKILL mid-execution    FAIL
-  final = "tool echo returned: Tool echo not found"
-  100 sessions survive SIGKILL without loss     pass
+What the case does:
+  - writes an mcp.json whose server is this binary's `fake-mcp-server`
+    (tool `plain`, `-tool-delay-ms 5000`);
+  - starts a fresh runtime with `-mcp <config>` (core cases share one process,
+    so the case kills the previous one first);
+  - the fake model emits an aggregate `mcp` call for fixture/plain;
+  - waits for the assistant tool call AND the MCP server's `tools_call_begin`
+    marker, then SIGKILLs the process group;
+  - restarts with the same mcp.json rewritten to delay 0 and a fresh marker
+    file, then asserts exactly one tool.result and the final text
+    "tool mcp returned: plain-ok";
+  - waits for the new process's `tools_call_end`.
 
-Cause (pre-existing at the frozen snapshot 3ab7996):
-  The v2 tool surface deleted the builtin `echo` tool (internal/host/host_test.go
-  pins exactly this removal) and the `keel.testkit` plugin that owns it is
-  disabled by default. cmd/e2e's caseToolReplayAfterKill still asks the fake
-  model for `echo`, so the run ends with "Tool not found" instead of the
-  expected tool round-trip.
+Commands:
+  $ go build -o /tmp/keel-runtime-p6 ./cmd/runtime
+  $ go run ./cmd/e2e -scenario core -bin /tmp/keel-runtime-p6 -port 13687 \
+      -reset -reset-confirm keel_test_p6_crash
 
-Baseline proof: this lane changed none of the code that decides the tool
-surface:
-  $ git diff --stat 3ab7996 HEAD -- cmd/runtime internal/host internal/toolsurface internal/testkit
-  (empty)
+Run 1: exit 0, 8/8 cases PASS
+  requestId idempotency across SIGKILL              pass
+  SSE Last-Event-ID across SIGKILL                 pass
+  blob base64 resume across SIGKILL                pass
+  agent worker: input -> fake reply                pass
+  retry: re-ask appends a new input                pass
+  run resumes after SIGKILL during the model call  pass
+  tool result survives SIGKILL mid-execution       pass
+    detail: the unresolved aggregate mcp call was re-executed and committed
+            exactly once
+  100 sessions survive SIGKILL without event loss  pass
 
-P6B changes to cmd/e2e are additive: a `-scenario` flag (default "core"), the
-mcp-apps scenario, the fake MCP server subcommand, the extra product-table
-truncation for a clean audit scan, and a deterministic final-event predicate.
-The failing core case and its expectations are unchanged. Not fixed here
-(product semantics / default acceptance scope are outside this lane); recorded
-as a P1 test-infrastructure finding for the owning lane.
+Run 2: exit 0, 8/8 cases PASS; assertions byte-identical to run 1
+  (core-scenario-run1.json / core-scenario-run2.json).
+
+$ go test ./cmd/e2e/
+  ?   github.com/jixoai/keel/cmd/e2e  [no test files]
+
+Historical failing run (before the fix) is preserved in
+core-scenario-preexisting-history.txt / .json.

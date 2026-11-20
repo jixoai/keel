@@ -29,6 +29,52 @@ import (
 
 const fakeMCPSubscriptionIDKey = "io.modelcontextprotocol/subscriptionId"
 
+// writeFakeMCPConfig writes an mcp.json whose single server is this binary's
+// fake server. It is shared by the mcp-apps scenario and the core tool-replay
+// crash case so both drive a real MCP tool instead of a deleted synthetic one.
+func writeFakeMCPConfig(path, scenario string, toolDelayMS int, eventsPath string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	config := map[string]any{
+		"mcpServers": map[string]any{
+			"fixture": map[string]any{
+				"command": exe,
+				"args": []string{
+					"fake-mcp-server", "-scenario", scenario,
+					"-events", eventsPath, "-tool-delay-ms", fmt.Sprint(toolDelayMS),
+				},
+				"timeout": 30,
+			},
+		},
+	}
+	raw, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o644)
+}
+
+// waitFakeMarkerFile polls one fake-server marker file until pred matches.
+func waitFakeMarkerFile(path string, pred func(fakeMarker) bool, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var last int
+	for time.Now().Before(deadline) {
+		markers, err := readFakeMarkers(path)
+		if err == nil {
+			last = len(markers)
+			for _, marker := range markers {
+				if pred(marker) {
+					return nil
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for a fake MCP marker (%d seen)", last)
+}
+
 func runFakeMCPServer(args []string) int {
 	fs := flag.NewFlagSet("fake-mcp-server", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

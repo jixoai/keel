@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -28,13 +29,14 @@ import (
 )
 
 type env struct {
-	bin      string
-	dsn      string
-	base     string
-	cmd      *exec.Cmd
-	log      *os.File
-	extraEnv []string
-	adminKey string
+	bin       string
+	dsn       string
+	base      string
+	cmd       *exec.Cmd
+	log       *os.File
+	extraEnv  []string
+	extraArgs []string
+	adminKey  string
 }
 
 func main() {
@@ -178,7 +180,9 @@ func (e *env) start() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(e.bin, "-addr", "127.0.0.1:"+portOf(e.base), "-cas", "/tmp/keel-e2e-cas", "-streams", "600", "-admit-rate", "2000")
+	args := []string{"-addr", "127.0.0.1:" + portOf(e.base), "-cas", "/tmp/keel-e2e-cas", "-streams", "600", "-admit-rate", "2000"}
+	args = append(args, e.extraArgs...)
+	cmd := exec.Command(e.bin, args...)
 	cmd.Env = append(os.Environ(), "KEEL_DSN="+e.dsn, "GOMEMLIMIT=805306368", "KEEL_ADMIN_KEY="+e.adminKey)
 	cmd.Env = append(cmd.Env, e.extraEnv...)
 	cmd.Stdout = f
@@ -916,7 +920,30 @@ func (e *env) caseToolReplayAfterKill() result {
 		r.Detail = fmt.Sprintf(format, args...)
 		return r
 	}
-	e.extraEnv = []string{"KEEL_TOOL_DELAY_MS=5000", "KEEL_LEASE_MS=1000"}
+	// The v2 constant surface no longer has an `echo` tool. The aggregate `mcp`
+	// tool is part of that surface, so this case drives a real MCP server
+	// through it: the fake server delays its `plain` result, which gives the
+	// SIGKILL a provable mid-execution window (tools_call_begin, no end).
+	workDir, err := os.MkdirTemp("", "keel-core-mcp-")
+	if err != nil {
+		return fail("temp dir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+	configPath := filepath.Join(workDir, "mcp.json")
+	eventsBefore := filepath.Join(workDir, "events-before.jsonl")
+	eventsAfter := filepath.Join(workDir, "events-after.jsonl")
+	if err := writeFakeMCPConfig(configPath, "static", 5000, eventsBefore); err != nil {
+		return fail("write mcp.json: %v", err)
+	}
+	e.extraArgs = []string{"-mcp", configPath}
+	e.extraEnv = []string{"KEEL_LEASE_MS=1000"}
+	defer func() {
+		e.extraArgs = nil
+		e.extraEnv = nil
+	}()
+	// Earlier core cases share one long-lived process; the mcp.json flag only
+	// takes effect on a fresh boot, so this case starts its own.
+	e.kill9()
 	if err := e.start(); err != nil {
 		return fail("start: %v", err)
 	}
@@ -925,14 +952,23 @@ func (e *env) caseToolReplayAfterKill() result {
 		return fail("%v", err)
 	}
 	if code, err := postJSON(ctx, e.base+"/v1/sessions/"+session+"/input", tenant,
-		map[string]string{"text": "echo crash test", "requestId": "tool-1"}, nil); err != nil || code != 201 {
+		map[string]string{"text": "mcp-call:fixture/plain", "requestId": "tool-1"}, nil); err != nil || code != 201 {
 		return fail("input: %d %v", code, err)
 	}
 	if _, err := waitEvents(ctx, e.base, tenant, session, hasToolCall, 8*time.Second); err != nil {
 		return fail("wait tool call: %v", err)
 	}
-	e.kill9() // the tool is sleeping; its result was never committed
-	e.extraEnv = []string{"KEEL_LEASE_MS=1000"}
+	if err := waitFakeMarkerFile(eventsBefore, func(marker fakeMarker) bool {
+		return marker.Event == "tools_call_begin" && marker.Name == "plain"
+	}, 8*time.Second); err != nil {
+		return fail("wait MCP tools/call: %v", err)
+	}
+	e.kill9() // the MCP tool is sleeping; its result was never committed
+	// The retry must not inherit the 5s delay; a fresh marker file proves the
+	// post-restart assertions run against a new MCP server process.
+	if err := writeFakeMCPConfig(configPath, "static", 0, eventsAfter); err != nil {
+		return fail("rewrite mcp.json: %v", err)
+	}
 	if err := e.start(); err != nil {
 		return fail("restart: %v", err)
 	}
@@ -949,11 +985,24 @@ func (e *env) caseToolReplayAfterKill() result {
 			final = assistantReply(ev)
 		}
 	}
-	if final != "tool echo returned: echo crash test" {
+	if final != "tool mcp returned: plain-ok" {
 		return fail("final = %q", final)
 	}
-	r.Checks = []string{"assistant tool call committed", "SIGKILL during tool execution", "lease reclaimed after restart", "tool re-executed (at-least-once)", "exactly one tool result", "final answer present"}
+	if err := waitFakeMarkerFile(eventsAfter, func(marker fakeMarker) bool {
+		return marker.Event == "tools_call_end" && marker.Name == "plain"
+	}, 8*time.Second); err != nil {
+		return fail("the recovered MCP call never completed: %v", err)
+	}
+	r.Checks = []string{
+		"assistant aggregate mcp tool call committed",
+		"real MCP server dispatched plain before the SIGKILL",
+		"SIGKILL during tool execution",
+		"lease reclaimed after restart",
+		"tool re-executed on a new MCP server process (at-least-once)",
+		"exactly one tool result",
+		"final answer present",
+	}
 	r.Pass = true
-	r.Detail = "the unresolved tool call was re-executed and committed exactly once"
+	r.Detail = "the unresolved aggregate mcp call was re-executed and committed exactly once"
 	return r
 }
