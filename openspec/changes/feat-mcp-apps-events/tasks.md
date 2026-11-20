@@ -126,10 +126,15 @@
 - [ ] P3.5 `ui/request-display-mode`（inline/fullscreen；`pip` 拒绝回当前模式）、
       `ui/notifications/size-changed`、`ui/resource-teardown`（卸载前发，≤1s）
       （验收：桥单测 + E2E 全屏切换）
+      （2026-11-20：桥/视图实现已在 P2 前端落地（`bridge.ts` 三方法 + `view.tsx`
+      全屏 Dialog/尺寸/teardown 测试）；未勾仅因浏览器全屏切换 E2E 归 P6.2）
 - [ ] P3.6 权限确认（camera/mic/geolocation/clipboardWrite）+ 偏好记忆；破坏性工具逐次确认
       （验收：拒绝后不静默重给；确认门 E2E）
       （2026-11-20 P3 后端切片：**部分**——破坏性工具逐次确认门与拒绝审计已在 P3.1 交付并测；
-      camera/mic/geolocation/clipboardWrite 的 iframe `allow` 授予 UI、偏好记忆与前端拒绝路径属前端 lane，故本项不勾）
+      camera/mic/geolocation/clipboardWrite 的 iframe `allow` 授予 UI、偏好记忆与前端拒绝路径属前端 lane，故本项不勾。
+      2026-11-20 复核：NSH 0.4 WebView 无 per-permission `allow` 控制、单 origin 沙箱无
+      `allow-same-origin`，权限无法真实生效；本机不假装声明，登记为上游/第二 origin 依赖，
+      证据 `evidence/p5/review-disposition.md` §5）
 - [x] P3.7 审计表 `mcp_app_audit` + `GET /v1/mcp/apps/audit`；正文/凭据扫描断言
       （验收：单测断言审计不含 message 正文与 token）
       （2026-11-20：`schema.sql` + `rlsTenantTables`（FORCE RLS + tenant_isolation）；`store/mcp_app_audit.go`
@@ -208,6 +213,11 @@
 - [x] P5.6 `/v1/mcp/servers` 报 `era`/`protocolVersion`/`capabilities`（验收：单测）
       （2026-11-20：ServerState 取 client 实际 era；capabilities 8 KiB 有界，
       超限 `{"truncated":true}` + `capabilitiesTruncated`；证据 `evidence/p5/agentapi-tests.txt`）
+- P5 复核修复（2026-11-20）：A 0P0/1P1、B 0P0/2P1 已清零——`/context` 桥限流、
+  sampling `maxTokens` 真正下发、elicitation 关闭回 `-32601`；另收口 inputRequests/
+  elicitation schema 上界、legacy 请求有界异步、cancel 语义、attempt 模型 selection、
+  严格版本日期；前端 View→Host 五条代理链路接线（tools/resources/message/open-link/
+  context）。明细 `evidence/p5/review-disposition.md`，门禁 `evidence/p5/merged-verification.txt` §5。
 
 ## P6 — 验收与收口
 

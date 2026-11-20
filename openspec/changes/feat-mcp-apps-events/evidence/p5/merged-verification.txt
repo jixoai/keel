@@ -1,0 +1,63 @@
+# P5 合并树门禁（主代理复跑，2026-11-20）
+
+对象：集成分支 `task/keel-harness-v2` @ `7fe4eea`（cherry-pick P5 lane `d189118` 到 `e7b7d7b`）。
+P5 原始分支自身门禁：全量 55 ok、conformance 1057 pass / 0 fail / 1 skip、E2E PASS。
+
+## 1. 冲突裁决
+
+`internal/mcp/client.go` 三处冲突：
+
+1. `Client` 字段：保留 P4 诊断采样（`diagMu/diagWindow/diagSuppressed/now`）并加入 P5 的
+   `era/activeInputs`，两者无重叠。
+2. `NewClient`：保留 P5 的 era 默认值与 fail-closed 解析，同时保留 P4 的 `now: time.Now`。
+3. `routeToListener`：**保留 P4 canonical 的 `Notification.Source` 路由，丢弃 P5 lane 的
+   未打标方法白名单重复实现**。P4 语义更精确：只有 listen 响应流上的未打标帧是违规；
+   source-less 传输（stdio/memory）只拦目录类帧，progress/cancelled/message 仍到全局。
+   P5 的回归测试 `TestUntaggedRequestDomainFramesSurviveAnOpenListenStream` 保留并在合并树通过
+   （memory 传输、listen 活跃时 message/progress/cancelled 均达全局）。
+
+其余文件自动合并；无冲突残留标记，`gofmt` 无差异。
+
+## 2. 合并树门禁
+
+| 命令 | 结果 |
+|---|---|
+| `go build ./...` | EXIT 0 |
+| `go vet`（mcp/mcphost/agent/agentapi/servicehost/store） | EXIT 0 |
+| `KEEL_TEST_DSN=... go test -p 1 -count=1 ./...` | EXIT 0（55 个包 ok，零 FAIL） |
+| `pnpm exec openspec validate feat-mcp-apps-events --strict` | valid |
+| `./scripts/conformance.sh` | EXIT 0（1061 pass / 0 fail / 1 skip；合并树比 P5 单分支 1057 多 4 条，来自 P4 修复与 P5 的合流） |
+| `./scripts/agent-runtime-e2e.sh --evidence .../evidence/p5/merged-agent-runtime-e2e` | PASS（captain/member 两腿，wire 断言 OK） |
+| residue | 13610/13611 无监听；E2E 专用库已清理；工作区仅预期改动 |
+
+E2E 首次调用误用 `--evidence` 无目录（脚本要求 `--evidence DIR`）导致参数错误，修正后重跑 PASS；
+不是产品失败。
+
+本文件不含 DSN 或密钥。
+
+## 5. 复核修复后的合并树（2026-11-20）
+
+对象：`task/keel-harness-v2` @ `4a0d6d3`（F1 后端 4 提交 + F2 前端 2 提交合入后；
+修复明细见 `review-disposition.md`）。
+
+| 命令 | 结果 |
+|---|---|
+| `go build ./...` | EXIT 0 |
+| `go vet`（mcp/mcphost/agent/agentcore/agentapi/servicehost/store） | EXIT 0 |
+| `KEEL_TEST_DSN=... go test -p 1 -count=1 ./...` | EXIT 0（55 个包 ok，零 FAIL） |
+| `./scripts/conformance.sh` | EXIT 0（1071 pass / 0 fail / 1 skip） |
+| `pnpm exec openspec validate feat-mcp-apps-events --strict` | valid |
+| `cd web && nsh check` | EXIT 0 |
+| `nsh test --target tui` | 164/164 passed |
+| `nsh test --target tui src/surfaces/mcp-app/bridge.test.ts` | 30/30 |
+| `nsh test --target tui src/data/mcp-apps.test.ts` | 14/14 |
+| `nsh test --target tui src/data/capabilities.test.ts` | 5/5 |
+| `nsh build` | EXIT 0 |
+| `./scripts/agent-runtime-e2e.sh --evidence .../merged-agent-runtime-e2e-fix` | PASS |
+| residue | 13610/13611 无监听；E2E 专用库已清理 |
+
+修复项：A-P1-1（/context 桥限流）、B-P1-1（sampling maxTokens 下发）、
+B-P1-2（elicitation 关闭回 -32601）、P2 上界/legacy 异步/cancel 语义/会话模型/
+版本严格日期/证据；前端 View→Host 五条链路与能力门接线。
+
+本文件不含 DSN 或密钥。

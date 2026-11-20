@@ -21,7 +21,7 @@
 | provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
 | keel-ga | 36/43 | §2/§3/§5 已交付；剩 §1 压缩文档、§6 验收 5 | tenancy/provider-files/blob-lifecycle 已交付（blob 独立复核中） |
 | keel-harness-v2 | 43/146 | **W2.1–W2.5 + seam + jobcap + aclack 已交付**；余下 W2 放置与快照、W3 尾项（含新增的删除对账/capture 策略覆写/并发 capture 定序）、W5–W7、验收 | **主战场（A 轴 8.5 无 P0/P1；B 轴 8/10 两 P1 已关闭；blob-lifecycle lane 在跑）** |
-| feat-mcp-apps-events | 30/50 | 设计 + T0.1–T0.4 + P1 + P2.1–P2.7 + P3.1–P3.4/P3.7/P3.8 + P4 已交付（合入 `3eb7c54`）；P2.8、P3.5、P3.6 与 P5–P6 未完成 | Wave 5 进行中（P4 合入；P4 复核中） |
+| feat-mcp-apps-events | 36/50 | 设计 + T0.1–T0.4 + P1 + P2.1–P2.7 + P3.1–P3.4/P3.7/P3.8 + P4 + P5 已交付（P5 复核修复合入 `4a0d6d3`，A/B P0/P1 清零）；剩余 P2.8、P3.5 E2E、P3.6（NSH allow 上游依赖）与 P6 验收 | Wave 5 进行中（P5 已收口；P6 验收下一波） |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
 | keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
 | ~~fix-session-delete-soft-archive~~ | 11/11 | — | **已归档 2026-11-19** |
