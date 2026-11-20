@@ -19,7 +19,7 @@
       （对账：`internal/kernel/kernel.go:99-135`、`internal/kernel/validate.go:44-77`、
       `internal/store/events.go:24-47`、`internal/agent/runner.go:248-253`、pin 测试
       `internal/kernel/kernel_test.go:1481`；新 kind 尚无 emitter，R1 只登记 run.* bookkeeping）
-- [ ] **既有门承接**：扩展 `cmd/r1diff` 场景与 allowlist（每条附理由）、重新 pin 基线；
+- [ ] **既有门承接**：扩展 `cmd/r1diff` 场景与 allowlist（每条附理由）、重新 pin 基线； （对账 2026-11-20：部分——缺口：acceptance-all 仍在冻结基线 e7361f8 的旧 R1 场景；v2 新 kind（task/fs/config/placement/supervision/guardrail/resume/notify）未进 cmd/r1diff 场景/allowlist，未重新 pin；scripts/acceptance-all.sh:122-141、cmd/r1diff/bookkeeping.go:8-12）
       `scripts/acceptance-all.sh` 必须全绿（E0）
 - [x] **工具面迁移**（W2.1）：按 `tool-surface` 的破坏性迁移表删除旧工具名（无 shim），
       11 个内建聚合工具恒定注册，终局快照 + 清单哈希 + action 闭集路由落地
@@ -38,9 +38,9 @@
       重启一律收敛终态（原「重启后收养」物理不可行）②禁用上游 `ExecutionRequest.Timeout`
       （语义是取消+杀）③layerfs 只挂非根挂载点（根 FS 会被 263 次命令桩污染）。
       **OAR 契约仍未冻结**，`keel.oar` 阻塞保持）
-- [ ] **ADR 0001**：layerfs Rust+gRPC 的推翻记录与证据门；CI 工具链、Dockerfile/compose、
+- [ ] **ADR 0001**：layerfs Rust+gRPC 的推翻记录与证据门；CI 工具链、Dockerfile/compose、 （对账 2026-11-20：被替代/延后——ADR 0001 已交付；当前实现走 Phase A Go CAS（internal/layerfs），Rust+gRPC 专属 CI/Docker/健康检查/端口/SIGKILL sweep 随 W1 gRPC 延后，未实施；adr/0001-layerfs-rust-grpc.md、RESIDUAL-PLAN §5.1-5）
       健康检查、端口登记（13610–13799）、SIGKILL sweep
-- [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离；
+- [ ] **多用户进程**：租户解析、`/v1/plugins`/triggers/工具面/设置面按租户过滤、装配隔离； （对账 2026-11-20：部分——缺口：triggers/设置面已按租户；/v1/plugins 仍是无租户的部署级 Snapshot，schema 无 plugin_state(tenant_id,...)，keel serve 仍是单配置租户进程；internal/agentapi/plugins.go:97、internal/store/schema.sql、internal/agentext/triggers.go:328-341）
       `plugin_state(tenant_id, plugin_id, status, config_version, reason)` 与 `/v1/plugins` 过滤；
       `AGENTS.md` 修订为「默认单进程多租户；`user` 放置是显式 SKU」
 - [x] **内核键命名空间**：扩展 `KeyKind` 与 `CommitRequest`（`fs:`/`capture:`/`task:`/`config:`/
@@ -49,33 +49,33 @@
       （对账：`internal/kernel/kernel.go:217-243`、`CommitRequest` `:325-370`、
       `internal/kernel/validate.go:181-205`；负控 `internal/kernel/contract_v2_test.go:62`、
       键齐全性 `:95`、前缀隔离 `internal/kernel/kernel_test.go:1527-1555`）
-- [ ] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、
+- [ ] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、 （对账 2026-11-20：部分——缺口：KnownFields(true) 在；通用 layer 仍只允许 provider，Provides 无 slots/contributes，webview 仍强制 ui.entry，plugin_state 无租户字段；internal/pluginpkg/manifest.go:113-156,411,599）
       纯 chunk 包（无 `ui.entry`）、`plugin_state` 租户字段；`KnownFields(true)` 同步
-- [ ] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status
+- [ ] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status （对账 2026-11-20：部分——缺口：catalog.json 有 id/status/keelPluginId，但无 wave/dshGroups；无生成/比对脚本与 CI step，COVERAGE.md 手工维护；plugins/keel.plugin-market/catalog.json、plugins/COVERAGE.md）
       枚举（含 `partial`）；生成/比对 `COVERAGE.md`（对照 catalog）；比对脚本进 CI
-- [ ] **RSS 采样器**：`scripts/acceptance-rss.sh` 采样后端进程 `VmRSS` 求和，接 `acceptance-all.sh`，
+- [ ] **RSS 采样器**：`scripts/acceptance-rss.sh` 采样后端进程 `VmRSS` 求和，接 `acceptance-all.sh`， （对账 2026-11-20：部分——缺口：无 scripts/acceptance-rss.sh；现有内存门是 cgroup memory.peak（scripts/acceptance-perf.sh:98-101）与 handoff RSS，不是 VmRSS 求和/≤500MB 协议）
       断言 ≤500MB（目标 ≤300MB）；cgroup peak 单列
-- [ ] **原生 target 可执行**：`web` 与 `macos`（`nsh package --target macos`）构建产物 + 截图；
+- [ ] **原生 target 可执行**：`web` 与 `macos`（`nsh package --target macos`）构建产物 + 截图； （对账 2026-11-20：部分——缺口：web 产物与 TUI 真终端在（web/README.md:28-31），macos target 产物/截图未做）
       TUI 用 `nsh run --target tui` 真终端（0.5.0 ratatui 后端），测试用 `nsh test --target tui`
 - [ ] **NSH 0.5.0 升级**：pin 0.5.0；Port Window API（`WindowRef`/`<Window>`/window kinds）；
       媒体加载 `fs.read`/`${pluginDir}` grant；`focus-visible:` 仅键盘；macOS `activationPolicy`
 - [ ] **客户端壳**：单实例、托盘、全局快捷键、URL Scheme 深链、文件关联、启动隐藏/菜单栏模式；
       任务板/交付物可开独立窗口
-- [ ] **系统集成**：系统通知（含 silent）＋ badge；通知点击深链；WebView `evaluate` 返回值、
+- [ ] **系统集成**：系统通知（含 silent）＋ badge；通知点击深链；WebView `evaluate` 返回值、 （对账 2026-11-20：部分——缺口：web/host.js:68-72 只有 keel.notify {title,body,tag}；badge/silent/点击深链/evaluate 返回值/自有 scheme/incognito/摄像头麦克风降级未接）
       自有 URL scheme、请求头、incognito、摄像头/麦克风（不支持时显式降级）
 - [ ] **更新与分发**：`nsh/updater` 自更新（check/download/install/restart）＋签名 OTA 包；
       试验期失败回滚；运行时变化走完整应用更新
 - [ ] **长会话性能**：1000 条消息滚动保真、离屏增量创建、大表格避免重复布局、视图树消失释放内存
 - [ ] **编辑器**：Composer RichEditor（HTML 导入/导出）；消息流式 Markdown；代码/Diff/终端独立字号；
       用 NSH `Terminal` 组件渲染后台输出
-- [ ] 废止代码里的旧工具名注释与兼容红线：`internal/agentext/plugin.go`、`creation.go`、
+- [x] 废止代码里的旧工具名注释与兼容红线：`internal/agentext/plugin.go`、`creation.go`、 （对账 2026-11-20：已废止——旧工具名无注册点（TestBuiltinSurfaceIsExactlyEleven，internal/toolsurface/toolsurface_test.go:110）；toolsurface/surface.go:8-12 明示无别名；agentext/creation.go:88-90 明示 v1 creation_* 已删；manifest.go 无「example_status/spawn_subagent 兼容红线」）
       `subagent.go`、`internal/pluginpkg/manifest.go:227`
-- [ ] `docs/HARNESS.md` 增补 Harness/内核边界、放置模型与多用户升级
-- [ ] 架构测试：内核包不得 import placement/task/fs（沿用 `internal/architecture` 断言模式）
+- [ ] `docs/HARNESS.md` 增补 Harness/内核边界、放置模型与多用户升级 （对账 2026-11-20：部分——缺口：docs/HARNESS.md:75-81 已有内核接缝；缺放置模型与多用户升级章节）
+- [ ] 架构测试：内核包不得 import placement/task/fs（沿用 `internal/architecture` 断言模式） （对账 2026-11-20：部分——缺口：internal/architecture/boundary_test.go:11-45 只断言 kernel↔product/modelcfg；未针对 layerfs/tasklog/fileplugin 增加 import 断言（当前 go list 实际无 import））
 
 ## W0.5 插件全景（对表 DSH）
 
-- [ ] 冻结 `catalog.json` 的 id/status/wave；`plugin-inventory.md` 仅作设计期附录，不作为波次真值
+- [ ] 冻结 `catalog.json` 的 id/status/wave；`plugin-inventory.md` 仅作设计期附录，不作为波次真值 （对账 2026-11-20：部分——缺口：catalog.json 无 wave/dshGroups；inventory 已降为附录，但 catalog 未冻结）
 - [ ] 五种 **layer**（kernel/harness/provider/ui/service）的装载边界与架构测试；
       承载 `kind` 仍是三种（in-process/sidecar/webview），两者正交
 - [ ] 四层装配（base/mode/preset/config.toml）与 row id overlay 语义
@@ -83,7 +83,7 @@
 - [ ] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
 - [ ] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
       `EXTENSIBILITY.md`（创造模式的聚合输入）
-- [ ] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` §A/§B/§C 逐行映射到
+- [ ] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` §A/§B/§C 逐行映射到 （对账 2026-11-20：部分——缺口：COVERAGE.md §A/B/C 有映射，但 goal/todo/plan/team/workspace/guard 仍独立；无 absent+理由逐行处置）
       `keelPluginId`；`goal`/`todo`/`plan` 并入 `keel.tasks`、
       `team` absent、`workspace` 并入 Group、`guard` 并入 `keel.supervisor`，逐行给出处置
 - [ ] 为 v1 已交付的官方插件补 `extensibility.json` + `EXTENSIBILITY.md`（否则创造模式无法利用，
@@ -100,22 +100,22 @@
       （`internal/layerfs/tree.go`：`keel-tree-v1` 规范化编码，排序后哈希）
 - [x] 引用计数与 GC：无引用对象回收；并发安全的 refcount——Phase A Go 实现
       （`internal/layerfs/refs.go`：`(session,eventSeq)` append-only refs.log 可重建；`casMu` 串行）
-- [ ] 配额：按 group/租户的存储字节上限，超限返回明确错误（Phase A 仅 store 级 `QuotaBytes`）
-- [ ] gRPC 契约：流式 Get/Put、取消传播、错误分类（not_found / quota / io）——ADR 保留为扩展实现
+- [ ] 配额：按 group/租户的存储字节上限，超限返回明确错误（Phase A 仅 store 级 `QuotaBytes`） （对账 2026-11-20：部分——缺口：只有 store 级 QuotaBytes（internal/layerfs/store.go:35-38），无 group/租户存储字节配额）
+- [ ] gRPC 契约：流式 Get/Put、取消传播、错误分类（not_found / quota / io）——ADR 保留为扩展实现 （对账 2026-11-20：被替代/延后——ADR 保留为同接口扩展实现；当前 Phase A Go CAS 已交付，无 proto/gRPC 代码）
 - [ ] 压测：单进程 1000 并发流的 RSS 曲线；不整文件进内存的断言
 
 ## W2 Harness 放置与内核契约
 
 - [ ] `groups` / `session_placement` 表与 lease 语义（join/leave/迁移）
 - [ ] 三种策略：`pack`（默认）/ `user` / `pin`；策略在 Harness，不进内核
-- [ ] 组内并发槽位（`max_concurrent_runs`）：满时排队 + ETA；用户配额在 DB 侧聚合
-- [ ] 进程生命周期：启动、drain、接管、SIGTERM 排水；组 OOM 不扩散
+- [ ] 组内并发槽位（`max_concurrent_runs`）：满时排队 + ETA；用户配额在 DB 侧聚合 （对账 2026-11-20：部分——缺口：只有进程内全局 worker 信号量与 per-tenant 配额（internal/agent/worker.go:169、internal/quota）；无组槽位/排队 ETA/DB 聚合）
+- [ ] 进程生命周期：启动、drain、接管、SIGTERM 排水；组 OOM 不扩散 （对账 2026-11-20：部分——缺口：drain/handoff/SIGTERM 在（internal/httpapi/drain.go、internal/handoff）；无 group 实体与组 OOM 隔离）
 - [x] 注入式 run 契约：工具清单 + system sections + message-parts + invoke 回调
       （对账：`internal/agentloop/loop.go:96-140`（Input：SystemPrompt/Messages/Tools/Batch）、
       `agentloop/pi.go:70-110`；loop 不持账本/不触 store；单测 `agentloop/contract_test.go:110`、
       `equivalence_test.go:108-143`；「invoke 回调」由注入的 AgentTool 对象承担）
-- [ ] run 快照：`configHash` + `anchorEventSeq` + `toolManifestHash` 写入 run 事件
-- [ ] 外部内核能力矩阵与 typed rejection（沿用 v1 external 通道）
+- [ ] run 快照：`configHash` + `anchorEventSeq` + `toolManifestHash` 写入 run 事件 （对账 2026-11-20：部分——缺口：run.finished 已有 configHashBefore/After（internal/agent/runner.go:290-291）；无 anchorEventSeq/toolManifestHash 写入 run 事件）
+- [ ] 外部内核能力矩阵与 typed rejection（沿用 v1 external 通道） （对账 2026-11-20：部分——缺口：gateway 能力只有 Tools/Agent{Events,Cancel,Usage}（internal/gateway/initialize.go:81-115）；无 fork/approval/compaction 能力位）
 
 ## W3 file-plugin 与 bash-plugin
 
@@ -147,12 +147,12 @@
       write/edit 写穿、Close 单次 capture。gbashfs 是内存路径索引而非宿主目录，故 seam 用
       scoped `SessionSurface`/`SnapshotSource` 表达同一契约（目录 `Surface`/`CaptureRoot` 保留给
       本地适配器）；装配级证明 `evidence/w2.seam/test-seam.txt`）
-- [ ] bash 删除对账：capture 目前只 upsert，`rm` 掉的路径仍留在 `file_manifest`
+- [ ] bash 删除对账：capture 目前只 upsert，`rm` 掉的路径仍留在 `file_manifest` （对账 2026-11-20：未接线——Manifest.Delete 存在但 capture 路径只 Upsert；fs.capture payload 无 deleted 列表；internal/fileplugin/service.go:503-620、manifest.go:222-247）
       （A 轴增量复核裁定：spec「执行空间产生的变更 MUST 通过 fs.capture 进入 layerfs」字面覆盖删除；
       需定义删除事件/对账语义并入 capture 批事件，不新造逐文件事件）
-- [ ] capture 策略覆写：`config.toml` 的 `fs.capture.mode=checkpoint|manual`
+- [ ] capture 策略覆写：`config.toml` 的 `fs.capture.mode=checkpoint|manual` （对账 2026-11-20：未开始——无 config.toml，CaptureMode/checkpoint/manual 覆写通道未接）
       （layerfs spec 的 MUST；当前只实现 per-tool-call，覆写通道未接——依赖配置面切片，接线前不算满足）
-- [ ] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交，
+- [ ] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交， （对账 2026-11-20：部分——缺口：Upsert 有 updated_seq guard（manifest.go:180-196），snapshot 按 seq 精确存；但无跨 lane 定序/版本化，且 fork 未接线（W4））
       `session_snapshot` 的最新 seq 树可能落后于 `file_manifest` 行；fork 接线前必须定序/版本化
 
 ## W4 task-log（plan-plugin）与面板
@@ -169,7 +169,7 @@
       （W2.4：`subagent.started` 钩子建/更新子卡，`parentTaskId` → 父卡，幂等）
 - [x] 资源关联：`task.attached{path, hash}` / `task.detached`；面板可打开对应 blob
       （W2.4 事件与投影；面板打开 blob 属 W4 面板项，未做）
-- [ ] fork：`(eventSeq)` 原点；新会话 + 前缀引用 + 新卡（`parentTaskId`）
+- [ ] fork：`(eventSeq)` 原点；新会话 + 前缀引用 + 新卡（`parentTaskId`） （对账 2026-11-20：部分——缺口：tasklog.ForkCard 已交付（internal/tasklog/service.go:348-380），agent.fork 仍 not_implemented（internal/toolsurface/agent.go:49-50）；无新会话/文件前缀引用）
       （W2.4 已交付 `Service.ForkCard` 投影；`agent.fork` 仍 not_implemented，待与 layerfs
       文件视图前缀在生产装配中合并验证）
 - [ ] 面板：任务图、事件流、资源预览；纯投影，不写额外真值
@@ -202,13 +202,13 @@
       （对账：`internal/mcp/content.go:60-95`（image/resource → ImageContent，其它块给文本占位，
       structuredContent 回退 JSON）、`internal/mcp/output_limit.go` 20KB 上限；
       测试 `internal/mcp/content_test.go:14-40`、`output_limit_test.go`）
-- [ ] gbash 的 `mcp` CLI：与聚合工具共用同一个 registry（shim，不复制实现）
+- [ ] gbash 的 `mcp` CLI：与聚合工具共用同一个 registry（shim，不复制实现） （对账 2026-11-20：未开始——bashbridge 只注册 jobs/ps/nohup（internal/bashbridge/jobcommands.go），无 mcp CLI/共享 registry）
 - [x] 删除 `internal/mcp` 的 `mcp__<server>__<tool>` 适配与单测（PI-PARITY 已登记偏离）
 - [x] MCP server 增删不改变工具清单（清单哈希断言：100 server 哈希不变）
 
 ## W7 skills
 
-- [ ] skill 文件结构：`SKILL.md` + 资源；内容 hash 去重、版本不可变
+- [ ] skill 文件结构：`SKILL.md` + 资源；内容 hash 去重、版本不可变 （对账 2026-11-20：部分——缺口：SKILL.md 解析与 ContentHash 在（internal/skills/skills.go:46,138,338）；无内容 hash 去重/版本不可变注册表）
 - [x] `skills` 聚合工具（W2.1 部分）：`ls` / `view` 已吸收旧 `skill` 工具；
       `manage` / `sources` 动作保留为 `not_implemented`，待 W7 完整版
 - [ ] ChatInput `$` 补全：分组（技能/文件/任务），共享同一唤醒符
@@ -219,11 +219,11 @@
 
 ## W8 agent-plugin 与 fork
 
-- [ ] 内部子代理：同进程协程，独立会话 + 独立任务卡（`parentTaskId`）
-- [ ] `agent` 工具：`spawn/fork/resume/cancel/list/status`；fork 原点 `eventSeq`
+- [x] 内部子代理：同进程协程，独立会话 + 独立任务卡（`parentTaskId`） （对账 2026-11-20：已实现——SpawnAsync 建独立子会话（internal/agentext/subagent.go:216-292）；HookSubagentStarted → tasklog.LinkSubagent 建独立卡并写 parentTaskId（internal/agentext/tasks.go:267-293、internal/tasklog/service.go:390）；测试 TestSubagentCardLinksToParentActiveCard、TestTasksPluginLinksSubagentCards）
+- [ ] `agent` 工具：`spawn/fork/resume/cancel/list/status`；fork 原点 `eventSeq` （对账 2026-11-20：部分——缺口：agent 聚合工具已有 spawn/list/status（internal/toolsurface/agent.go:22-55）；fork/resume/cancel 返回 not_implemented，无 eventSeq 原点）
 - [ ] 子代理继承父的 `config.toml` 版本，随后可写自己的配置
-- [ ] 并发槽位记账：父与子都占组槽位，超限排队
-- [ ] 子代理返回：结构化结果 + 产物 blob 引用；父卡追加 `task.note`
+- [ ] 并发槽位记账：父与子都占组槽位，超限排队 （对账 2026-11-20：部分——缺口：父与子都占进程全局 worker 信号量；无组槽位/排队 ETA（同 W2-3））
+- [ ] 子代理返回：结构化结果 + 产物 blob 引用；父卡追加 `task.note` （对账 2026-11-20：部分——缺口：SubagentResult 结构化结果在（subagent.go:103-113），Artifacts 是工具调用 trail（:520-545）；无产物 blob 引用/父卡 task.note）
 
 ## W9 oar-plugin（外部工具）
 
@@ -241,8 +241,8 @@
 
 ## W10 triggers 对齐
 
-- [ ] 沿用 v1 的 `cron/interval/webhook`；补 HMAC、去重键、漏跑补偿
-- [ ] 每触发器并发上限；触发产生的会话自动建初始任务卡
+- [ ] 沿用 v1 的 `cron/interval/webhook`；补 HMAC、去重键、漏跑补偿 （对账 2026-11-20：部分——缺口：cron/interval/webhook+幂等键+审计+重试在（internal/agentext/triggers.go:303-460）；无 HMAC 签名校验/漏跑补偿）
+- [ ] 每触发器并发上限；触发产生的会话自动建初始任务卡 （对账 2026-11-20：部分——缺口：同一幂等键串行化（triggers.go:345-348）；无 per-trigger 并发上限；初始任务卡由会话启动路径覆盖，未按触发器单独验证）
 - [x] webhook 端口只绑回环或受控入口；记录审计
       （对账：默认监听 `127.0.0.1:13750`——`cmd/keel/serve.go:73` `defaultServeAddr`，
       `KEEL_SERVE_ADDR` 可指向受控入口；每次 fire 落审计 `internal/agentext/triggers.go:85-110`+`:424`，
@@ -254,24 +254,24 @@
 
 - [ ] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
-- [ ] 工具清单稳定性：增删 MCP server / 技能后清单哈希不变（除非 config 轮转）
+- [x] 工具清单稳定性：增删 MCP server / 技能后清单哈希不变（除非 config 轮转） （对账 2026-11-20：已实现——ManifestHash（internal/toolsurface/hash.go:31）；TestManifestHashStableAcrossMCPServers 断言 100 个 server 哈希不变（toolsurface_test.go:593）；TestApprovedPluginToolsChangeAndRestoreTheManifestHash 断言仅 provides.tools 变更/卸载恢复）
 - [x] 真实模型 E2E：至少一条真 provider 链路（无凭据时用 fake provider），不得只测 happy path
       （对账：`scripts/real-model-e2e.sh`（成功 + `--with-failure`/`--failure-auth` 失败路径 +
       `--models` 配置到 wire 断言）、`docs/REAL-MODEL-E2E.md`、`acceptance-all.sh` 的 opt-in 门）
 
 **门（按 `acceptance.md` 的依赖顺序；W12 的护栏/创造/槽位项 MUST 先于本门完成）**
 
-- [ ] **E0 既有门零回归**：`scripts/acceptance-all.sh` 全绿、R1 `unexpected=0`、allowlist 每条
+- [ ] **E0 既有门零回归**：`scripts/acceptance-all.sh` 全绿、R1 `unexpected=0`、allowlist 每条 （对账 2026-11-20：部分——缺口：scripts/acceptance-all.sh 有 R1 + 负控，但仍用冻结基线 e7361f8 的旧场景；v2 kind 未进 r1diff/allowlist/重 pin）
       有理由、事件基线已重新 pin
-- [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 +
+- [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据
-- [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务
-- [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用）
-- [ ] G4 内存门：后端 RSS ≤500MB（目标 ≤300MB），组 OOM 不扩散，前端 VM 配额独立断言
-- [ ] G6 插件门 · G7 UI 门 · G9 有界门
-- [ ] G8 创造模式门：AI 现场写 Native 插件端到端（装→渲染→卸载无残留）
-- [ ] G10 资源回收门：零孤儿进程/端口/VM + 回收证据
+- [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务 （对账 2026-11-20：部分——缺口：非终态 run 自动续跑/lease/chaos 在（internal/durable/recovery.go、internal/agent/crash_matrix_test.go）；子代理继续原任务（W8-2/3）未实现）
+- [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用） （对账 2026-11-20：部分——缺口：G3 幂等/409 在；G5 taskId 强制/资源引用已交付，fork 精确（W4-6）未实现）
+- [ ] G4 内存门：后端 RSS ≤500MB（目标 ≤300MB），组 OOM 不扩散，前端 VM 配额独立断言 （对账 2026-11-20：部分——缺口：cgroup peak 门在（scripts/acceptance-perf.sh），无 VmRSS 采样门（W0-12）、组 OOM 隔离、前端 surface VM 配额断言）
+- [ ] G6 插件门 · G7 UI 门 · G9 有界门 （对账 2026-11-20：部分——缺口：G6 生命周期/依赖/回滚测试在；G7 槽位机制未实现（W12-16/17）；G9 bash 输出有界/作业上限在）
+- [ ] G8 创造模式门：AI 现场写 Native 插件端到端（装→渲染→卸载无残留） （对账 2026-11-20：部分——缺口：创造模式已有 webview E2E（creation_test.go）；缺 Native chunk 形态/macos target/卸载 diff）
+- [ ] G10 资源回收门：零孤儿进程/端口/VM + 回收证据 （对账 2026-11-20：部分——缺口：sidecar/gateway 进程组回收、drain、chaos 孤儿断言在；无 layerfs VM/sweep 与端口台账核对）
 - [ ] G11 交付面门：HTML 图文 E2E 报告 + 改动文件 before/after 审计（UNCOVERED=0）+ 子代理交叉复核
 
 ## W12 插件补全（DSH 对表 + Owner 裁决，可与 W3–W9 并行）
@@ -279,26 +279,26 @@
 **记忆卫生（W1–W2）**
 
 - [ ] `keel.spill`：长文本溢出到存储，上下文只留引用
-- [ ] `keel.compaction` 扩展：tool-result-pruner + image-offload
-- [ ] `keel.checkpoint`：checkpoint 策略（何时落、保留多少）
+- [ ] `keel.compaction` 扩展：tool-result-pruner + image-offload （对账 2026-11-20：部分——缺口：压缩核心/自动压缩在（internal/compaction、internal/agent/runner.go）；无 tool-result-pruner/image-offload）
+- [ ] `keel.checkpoint`：checkpoint 策略（何时落、保留多少） （对账 2026-11-20：部分——缺口：checkpoint 语义在压缩内；无独立何时落/保留量策略插件）
 - [ ] `keel.prompt-cache`：稳定前缀与缓存边界
 
 **护栏与自动恢复（W1，延伸 `supervision` spec）**
 
-- [ ] `keel.supervisor`：启动即扫描非终态 run 并**自动恢复**（崩溃 / Docker 重启 / 换代）
+- [ ] `keel.supervisor`：启动即扫描非终态 run 并**自动恢复**（崩溃 / Docker 重启 / 换代） （对账 2026-11-20：部分——缺口：worker claim/lease/durable recovery 在；无 keel.supervisor 插件实体/换代编排/升级账本）
 - [ ] `config.toml` 策略：`resume.mode=auto|manual|never`、`maxAttempts`、`backoff`、
       `onExhausted`、`providerFallback`；轮转后只影响下一次尝试
 - [ ] 显式接口 `POST /v1/sessions/{id}/resume`（幂等，可带配置轮转）
 - [ ] 子代理**可续跑**（中断后继续原任务，不重开）；父代理可改配置后恢复子代理
-- [ ] 护栏项：重复调用提醒、单次超时、连续失败、额度/成本、内存压力
+- [ ] 护栏项：重复调用提醒、单次超时、连续失败、额度/成本、内存压力 （对账 2026-11-20：部分——缺口：租户并发/事件速率/worker 租约/命令超时在；无重复调用提醒/连续失败/额度成本/内存压力护栏）
 - [ ] 升级阶梯：supervisor → 父/主代理 → owner（`keel.notify`）→ `keel.super-agent`（若装）
 - [ ] `keel.super-agent`（插件）：恢复 main-agent、并行多个 main-agent、结果收敛
-- [ ] 每一次恢复/升级/护栏触发都是账本事实（谁、何时、为什么、结果）
+- [ ] 每一次恢复/升级/护栏触发都是账本事实（谁、何时、为什么、结果） （对账 2026-11-20：部分——缺口：supervision.escalated/guardrail.tripped/resume.attempt kind 与 KeyKind 已注册（internal/kernel/kernel.go:118-120）；无 emitter）
 
 **创造模式与槽位（W1，延伸 `plugin-ui-extension` spec）**
 
-- [ ] `keel.creation`（内置）：聚合本机所有插件的 `extensibility.json` / `EXTENSIBILITY.md`
-- [ ] 只读发现工具：AI 可查「本机装了什么、能怎么扩展」；目录与装配事实同源
+- [ ] `keel.creation`（内置）：聚合本机所有插件的 `extensibility.json` / `EXTENSIBILITY.md` （对账 2026-11-20：部分——缺口：creation.catalog 聚合 manager.Snapshot 的插件/provides/live tools；未聚合 extensibility.json/EXTENSIBILITY.md（格式本身未冻结，W0.5-6））
+- [x] 只读发现工具：AI 可查「本机装了什么、能怎么扩展」；目录与装配事实同源 （对账 2026-11-20：已实现——creation.catalog 是 manager.Snapshot 的只读投影（internal/agentext/creation.go:383-420），含已装插件/state/provides/live tools；测试 TestCreationCatalogListsInstalledPlugins（creation_test.go:168））
 - [x] 脚手架 / 校验 / 审批安装 / 列举 / 删除；校验 fail-closed 且给字段级原因
       （对账：`internal/agentext/creation.go:86-90`（5 工具）、`:254-330`（scaffold/validate/install/
       list/remove）、`:375-460`（字段级 fieldFailure）；审批 `:791-860`；
@@ -310,17 +310,17 @@
       第一方面板改为贡献物
 - [ ] 四形态落地：`chunk`（NSH 动态导入，同 VM）、`package`（签名包，独立 VM + HostLimits，
       远小于默认 256MB）、`iframe`（兜底，显式标注）、`data`（导航项/动作 JSON，按槽位 schema）
-- [ ] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误
+- [ ] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误 （对账 2026-11-20：部分——缺口：服务端 plugin bridge/权限/审计在（internal/agentapi/plugin_bridge.go）；web/host.js 无 keel.plugin.* ↔ NSH host.call/host.on 分派）
 - [ ] **验收：AI 现场写一个 Native 插件**（chunk 贡献），装→渲染→卸载无残留（web + `macos`）
-- [ ] `creation` 工具始终存在；`keel.creation` 停用时 actions 返回 `plugin_disabled`，工具名不消失
+- [x] `creation` 工具始终存在；`keel.creation` 停用时 actions 返回 `plugin_disabled`，工具名不消失 （对账 2026-11-20：已实现——creation 聚合工具恒定注册（internal/toolsurface/creation.go:37-65），keel.creation 停用/未装时 action 返回 plugin_disabled；测试 TestCreationWiringAndDisabledStayDistinct、TestCreationRoutesAndMapsDisabledPlugin（toolsurface_test.go:538,573））
 - [ ] TUI 降级：`package`/`iframe` 槽位在终端显式不可用，`chunk` 可用
 
 **产品完整度（W2）**
 
-- [ ] `keel.session-title`、`keel.session-query`（检索/导出）
+- [ ] `keel.session-title`、`keel.session-query`（检索/导出） （对账 2026-11-20：部分——缺口：标题派生在（internal/agentapi/sessions.go:52、web/src/ui/session-title.ts）；无 session-query 检索/导出，也无插件实体）
 - [ ] `keel.deliverables`（交付物 + workspace changes）
-- [ ] `keel.attachment`
-- [ ] `keel.commands`、`keel.permission`、`keel.feedback`
+- [ ] `keel.attachment` （对账 2026-11-20：部分——缺口：上传/输入 attachments 在（internal/httpapi、internal/agent/images.go）；无 keel.attachment 插件实体）
+- [ ] `keel.commands`、`keel.permission`、`keel.feedback` （对账 2026-11-20：部分——缺口：permission 派发/hooks 决策在（internal/agentext/plugin_permissions.go、internal/hooks/decision.go）；commands/feedback 无插件实体）
 - [ ] `keel.subprocess`、`keel.terminal`（provider）
 
 **装配与运维（W2）**
@@ -332,9 +332,9 @@
       `plugin_manager_test.go:564`；在飞 run 不被打断 `internal/servicegraph/lifecycle.go:12-25`、
       `engine.go:647-669` + run 工具面快照 `internal/agenttool/registry.go:93-108`；
       无同名插件实体，按能力口径勾选）
-- [ ] `keel.telemetry`（指标 + OTel）
-- [ ] `keel.testkit`（无密钥测试台 / mock-replay）
-- [ ] `keel.credentials`、`keel.storage`、`keel.identity`
+- [ ] `keel.telemetry`（指标 + OTel） （对账 2026-11-20：部分——缺口：telemetry 契约/noop/memory/Prometheus 在；无 OTLP adapter（docs/PI-CONFORMANCE.md:267、docs/HOST.md:51））
+- [ ] `keel.testkit`（无密钥测试台 / mock-replay） （对账 2026-11-20：部分——缺口：keel.testkit 内置插件已有（clock/echo，默认停用，internal/testkit）；无 mock-replay/无密钥测试台完整面）
+- [ ] `keel.credentials`、`keel.storage`、`keel.identity` （对账 2026-11-20：部分——缺口：核心能力在（租户密钥库/PG store/tenancy）；三者仍不是可注册插件实体）
 
 **能力接入**
 

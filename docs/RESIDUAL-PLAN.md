@@ -20,7 +20,7 @@
 | keel-session-surfaces-v1 | 23/24 | 1 项=成员结果进 captain 时间线 | 随 W2.4 task-log 收口 |
 | provider-secret-direct-config | 7/8 | 1 项=真库 E2E（同名 secret 命中，需假上游） | 待排期 |
 | keel-ga | 36/43 | §2/§3/§5 已交付；剩 §1 压缩文档、§6 验收 5 | tenancy/provider-files/blob-lifecycle 已交付（blob 独立复核中） |
-| keel-harness-v2 | 43/146 | **W2.1–W2.5 + seam + jobcap + aclack 已交付**；余下 W2 放置与快照、W3 尾项（含新增的删除对账/capture 策略覆写/并发 capture 定序）、W5–W7、验收 | **主战场（A 轴 8.5 无 P0/P1；B 轴 8/10 两 P1 已关闭；blob-lifecycle lane 在跑）** |
+| keel-harness-v2 | 48/146 | **W2.1–W2.5 + seam/jobcap/aclack、W3 file/bash 主体、W4 task-log 主体、W5 approve/notify、W6 MCP 聚合已交付**；余下 W0 客户端/多用户/清单扩展、W0.5 插件全景、W1 配额/gRPC/压测、W2 放置与 run 快照、W3 删除对账/capture 策略/并发定序、W4 fork/面板、W6 gbash mcp CLI、W7 skills 产品面、W8 fork/resume、W9 OAR、W10 HMAC/补偿、W11 验收门、W12 恢复/槽位/产品件（98 未勾：45 部分 / 2 被替代或延后 / 51 未开始） | **主战场（A 轴 8.5 无 P0/P1；B 轴两 P1 已关闭；2026-11-20 对账 43→48，证据 `openspec/changes/keel-harness-v2/evidence/reconciliation-2026-11-20.md`）** |
 | ~~feat-mcp-apps-events~~（已归档 2026-11-20） | 44/50 | 设计 + T0.1–T0.4 + P1 + P2.1–P2.8 + P3.1–P3.5/P3.7/P3.8 + P4 + P5 + P6.1–P6.3/P6.5 已交付（P5 复核修复合入 `b8ca79b`，A/B P0/P1 清零；G0–G5 证据 `evidence/p6/ACCEPTANCE.md`）；P6.4 已通过（reviewer 9/10 + vision）；剩余 P3.6（NSH per-permission allow 上游依赖）与 5 个已登记 Non-Goal | **已归档**（`2026-11-20-feat-mcp-apps-events`）；剩余 P3.6 上游依赖与 5 个 Non-Goal 留后续 change |
 | runtime-foundation | 40/47 | **冻结历史板**（文首明示勿再勾选）：残留已并入 `keel-service-graph` | 只作历史对照 |
 | keel-ecosystem | 冻结历史板 | **去向已清**（对账）：已承接 41 / 孤儿 16 / 废弃 8 / 转 keel-ga 3 | 孤儿项已并入下列 Wave |
@@ -30,6 +30,10 @@
 | ~~keel-ui-polish-v1~~ | 11/11 | — | **已归档 2026-11-19** |
 | keel-service-graph（已归档） | 89/91 | 2 个已知缺口：DSH sidecar 参考适配器 pin、gateway 故障 scenario | 缺口并入 Wave 3/4 |
 | keel-tenancy-usage（已归档） | 29/29 | tenant-config / usage-ledger / provider-telemetry；**不含** api_keys/auth/RLS/配额 | 完成 |
+
+> **主仓指针（未完成）**：`fde2e/keel` 子模块仍是他会话 WIP（`git -C keel status` 有未提交的
+> `internal/store/schema.sql`、`internal/store/agentteam*.go`），主仓指针更新未执行；本 change 的
+> 提交只在 keel 仓，待该 WIP 收口后单独更新主仓指针，**不要写成已完成**。
 
 ## 2. 去重归并（多 change 重复项只算一次）
 
@@ -86,27 +90,22 @@
 9. **agent-team 尾项**：CLI `agent start/stop`、`team save/start`、AGENTS.md 文件引用编辑器、五态/390、组合页视觉复核
 10. **媒体适配器**：图 → 决策 → 音 → 视（provider 崩溃隔离 + usage 计量不写价格）
 
-### Wave 3.5 — MCP Apps + MCP events（P1–P5 已交付；P6 验收进行中）
+### Wave 3.5 — MCP Apps + MCP events（已归档 2026-11-20）
 
-- **已交付**：`internal/mcp` 的 `_meta.ui`/visibility、`resources/*`/`prompts/*` 客户端方法
-  （P1）；`internal/mcphost` 的 app 目录/文档缓存/CSP/租户语义与前端 View（P2）；
-  宿主代理 `tools/call`、`resources/read`、`ui/message`、`ui/open-link` 与持久审计（P3）；
-  通知分类、`subscriptions/listen`、去抖 republish、generation 与 `mcp.surface.changed`
-  （P4）；现代 era/`server/discover`、`resultType`/MRTR、legacy 服务端请求等价路径、
-  `ui/update-model-context` 与 `/v1/mcp/servers` 的 era 可观测（P5，合入 `4a0d6d3`）。
-- **P6 进行中**：P6.1 G0–G5 证据与崩溃/规模矩阵、P6.2 浏览器 E2E（每步截图 + HTML 报告）、
-  P6.3 降级面 E2E、P6.4 独立子代理交叉复核、P6.6 archive/提交推送。
-  P6.5 文档（`docs/HOST.md` MCP 段、`docs/PI-PARITY.md`、`site/docs/zh/harness/mcp-apps.md`
-  与站点双语门禁要求的 `site/docs/harness/mcp-apps.md`、本计划）已交付；G0/G4 逐条对表见
-  `openspec/changes/archive/2026-11-20-feat-mcp-apps-events/evidence/p6/docs/parity.md`。
-- **未完成/上游依赖**：P2.8 的独立降级 E2E、P3.5 的浏览器全屏切换 E2E 归 P6；P3.6
-  camera/microphone/geolocation/clipboardWrite 的授予依赖 **NSH per-permission allow**
-  （0.4 无该控制面），当前诚实不授予、不假装声明；`KEEL_MCP_APP_ORIGIN` 的第二 origin
-  双 iframe 形态仍暂缓（当前只作为桌面/移动 WebView 的绝对文档基址）。
-- **本轮文档对表暴露的代码缺口（不得勾销）**：MCP Apps 客户端能力声明未实现
-  （`io.modelcontextprotocol/ui` 未进 `ClientCapabilities.extensions`/`experimental`）；
-  `_meta.ui.domain` 解析后未随 `AppSpec` 目录下发；`ui/resource-teardown` 在 web 卸载路径
-  未真正等待。详见 `evidence/p6/docs/parity.md` 的偏离/未实现行。
+- **状态**：`feat-mcp-apps-events` 已归档（`openspec/changes/archive/2026-11-20-feat-mcp-apps-events`）；
+  G0–G5 全绿、P0/P1 清零，P6.4 reviewer 9/10 + vision pass；证据
+  `evidence/p6/ACCEPTANCE.md`、`evidence/p6/docs/parity.md`。
+- **已交付**：P1–P5 全部（`internal/mcp` 的 `_meta.ui`/visibility、`resources/*`/`prompts/*`；
+  `internal/mcphost` 的 app 目录/缓存/CSP/租户语义与前端 View；宿主代理 `tools/call`/
+  `resources/read`/`ui/message`/`ui/open-link` 与持久审计；通知分类/`subscriptions/listen`/
+  generation；现代 era/`server/discover`、`resultType`/MRTR、legacy 等价路径）＋ P6.1–P6.5
+  （G0–G5 证据、浏览器/降级 E2E、文档、交叉复核）。A1（`_meta.ui.domain` 随目录下发）与
+  A13（`io.modelcontextprotocol/ui` 在 `extensions`/`experimental` 双位置声明）已由 P6E 修复。
+- **已接受偏离/上游依赖**：P3.6/A12 的 camera/microphone/geolocation/clipboardWrite 授予依赖
+  **NSH per-permission allow**（0.4 无该控制面），当前诚实不授予、不假装声明；A5 第二 origin
+  双 iframe 暂缓（`KEEL_MCP_APP_ORIGIN` 仅作原生 WebView 绝对基址）；A7 `ui/resource-teardown`
+  在 web 卸载路径发送后立即销毁，已接受（无数据/安全影响）；MRTR 轮次环境变量固定 5
+  （spec 只要求默认预算）。以上均不构成本 change 的 P0/P1。
 
 ### Wave 4 — 可观测/恢复/压缩（ecosystem P1 + 孤儿项）
 observability（指标/spans 接入、OTLP adapter 默认关）→ recoverability（generation 幂等/task 状态机/checkpoint
@@ -115,7 +114,7 @@ observability（指标/spans 接入、OTLP adapter 默认关）→ recoverabilit
 ### Wave 5 — 生态产品面 + MCP 标准（含 16 孤儿项）
 skills 产品面（`/skill:name`、租户注册表 hash 不可变、allowed-tools 执行期交集、热更新）·
 hooks 补缺口（已基本实现）· MCP 产品面（per-tenant manager、env/headers 加密、健康检查/退避、破坏性默认审批、
-真实 server G4）· **MCP Apps + MCP events（Wave 3.5：P1–P5 已交付，P6 验收进行中）** ·
+真实 server G4）· **MCP Apps + MCP events（Wave 3.5：已归档 2026-11-20）** ·
 SG-1 DSH sidecar 适配器
 
 ### Wave 6 — 插件 UI 槽位与放置模型（W12 剩余 + W2 放置）
@@ -203,3 +202,7 @@ groups/session_placement/lease、pack/user/pin、max_concurrent_runs+ETA
 - **2026-11-19**：4 个 change 归档（`1daa977`）；复核修复 `09399f1` + 修复后 E2E 证据
   `2b1c1e7` 已推送；**W2.1 工具面骨架开工**（slow-agent 后台，11 恒定工具 / action 闭集 /
   清单哈希 / 旧名快照断言 / `mcp__` 方言删除 / PI-PARITY 偏离登记）
+- **2026-11-20**：`feat-mcp-apps-events` P6 归档（G0–G5 全绿、P0/P1 清零）；`keel-harness-v2`
+  任务板完成一轮 43→48 对账（98 未勾：45 部分 / 2 被替代或延后 / 51 未开始），证据
+  `openspec/changes/keel-harness-v2/evidence/reconciliation-2026-11-20.md`。**主仓 `keel`
+  指针仍未更新**：他会话 WIP（`internal/store/schema.sql`/`agentteam*.go`）未收口。
