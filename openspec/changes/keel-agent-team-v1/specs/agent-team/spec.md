@@ -80,15 +80,11 @@ AgentTeam 插件 MUST 提供 CLI：
 ### Requirement: 团队快照与引用保护
 
 启动 run MUST 冻结 team/agent/tool/prompt 快照，并把 captain、成员 id、团队版本/hash 写入
-run manifest。运行中编辑 Agent/Team MUST NOT 影响当前 run。未封存（无 revision/hash）的团队
-MUST NOT 启动：启动门 MUST 要求已 Seal（`not_sealed`），否则 manifest 会冻结空 hash。
+run manifest。运行中编辑 Agent/Team MUST NOT 影响当前 run。未封存团队 MUST NOT 启动
+（`not_sealed`），否则 manifest 会冻结空 hash。
 
 - Agent 被团队引用时 MUST NOT 被硬删除；只能归档/禁用，并列出引用团队。
 - 团队被会话引用时 MUST NOT 被硬删除；只能归档，历史会话保留快照可读。
-- 会话引用 MUST 以最新 selection 的派生绑定判定：未归档会话一律算引用；已归档会话不算，
-  但仍有 pending/running run 时算；409 MUST 列出会话 references（细节见 session-binding spec）。
-- 归档操作 MUST 复用同一引用检查（活跃会话时 409 `team_in_use`）；解绑 = 归档会话或发送
-  只选模型的新输入。
 - 团队切换只影响下一次 run，不改写历史。
 
 #### Scenario: 运行中修改团队
@@ -98,6 +94,23 @@ MUST NOT 启动：启动门 MUST 要求已 Seal（`not_sealed`），否则 manif
 #### Scenario: 删除被引用的 Agent
 - **WHEN** 用户删除团队中的成员 Agent
 - **THEN** 删除被拒绝并列出团队；提供从团队移除或归档的修复动作
+
+### Requirement: 团队的会话引用保护
+
+团队被活跃会话引用时 MUST NOT 被硬删除。会话引用 MUST 以最新 selection 的派生绑定判定：
+未归档会话一律算引用；已归档会话不算，但仍有 pending/running run 时算。409 MUST 返回
+`team_in_use` 并列出会话 references（细节见 session-binding spec）。
+
+- 归档操作 MUST 复用同一引用检查。
+- 解绑 MUST 明确：归档会话或发送只选模型的新输入；删除 MUST NOT 改写历史 selection。
+
+#### Scenario: 删除被会话绑定
+- **WHEN** 活跃会话的最新 selection 为 `teamId=team_a`，用户删除 team_a
+- **THEN** 409 `team_in_use` 列出该会话；归档会话后重试成功
+
+#### Scenario: 归档被会话绑定
+- **WHEN** 活跃会话绑定 team_a，用户归档 team_a
+- **THEN** 409 `team_in_use`；归档会话后归档成功
 
 ### Requirement: 会话绑定随输入携带（selection.teamId / agentId）
 
