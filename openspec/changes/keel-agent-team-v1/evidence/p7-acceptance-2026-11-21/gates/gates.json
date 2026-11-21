@@ -1,0 +1,67 @@
+{
+  "generatedAt": "2026-11-21T03:26:50.168587+00:00",
+  "commands": {
+    "webCheck": {
+      "cmd": "cd web && nsh check",
+      "exit": 0,
+      "log": "web-check.txt"
+    },
+    "webBuild": {
+      "cmd": "cd web && nsh build",
+      "exit": 0,
+      "log": "web-build.txt"
+    },
+    "kitCheck": {
+      "cmd": "cd web/kit && nsh check",
+      "exit": 0,
+      "log": "kit-check.txt"
+    },
+    "kitImports": {
+      "cmd": "node scripts/kit-imports.mjs --web web",
+      "exit": 1,
+      "log": "kit-imports.txt",
+      "note": "false positive: raw colour in a comment at web/src/ui/kit/components/styles.tsx:30"
+    },
+    "kitImportsNoColors": {
+      "cmd": "node scripts/kit-imports.mjs --no-colors --web web",
+      "exit": 0,
+      "log": "kit-imports-nocolors.txt"
+    }
+  },
+  "tui": {
+    "settings-models.test.tsx": "6/6 pass",
+    "settings-agents.test.tsx": "12/12 pass",
+    "settings-teams.test.tsx": "27/27 pass",
+    "session-team.test.tsx": "5/5 pass",
+    "settings-capabilities.test.tsx": "6/6 pass",
+    "App.tui.test.tsx": "13/13 pass",
+    "total": "69/69 pass"
+  },
+  "browser": {
+    "pass": true,
+    "pages": 62,
+    "overflow": 0,
+    "gallery": {
+      "manifest": 42,
+      "rendered": 41,
+      "missing": [
+        "Progress"
+      ]
+    }
+  },
+  "e2e": {
+    "startSelection": {
+      "exit": 0,
+      "evidence": "start-selection-20261121-105043",
+      "legs": [
+        "standard",
+        "team",
+        "switch"
+      ]
+    },
+    "runtimeTeamMember": {
+      "exit": 0,
+      "evidence": "runtime-p7-2026-11-21"
+    }
+  }
+}
