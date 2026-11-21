@@ -99,11 +99,18 @@ func TestTriggerWebhookHMACVerification(t *testing.T) {
 	if _, err := engine.Fire(context.Background(), "secure.hook", tenant, future); !errors.Is(err, ErrTriggerWebhookUnauthorized) {
 		t.Fatalf("future timestamp: %v", err)
 	}
+	// A malformed extreme timestamp must not overflow into a fresh window.
+	extreme := webhookFire(tenant, "secure.hook", "k5", body, now, testWebhookSecret)
+	extreme.WebhookTimestamp = "-9223372036854775808"
+	extreme.WebhookSignature = "sha256=" + strings.Repeat("0", 64)
+	if _, err := engine.Fire(context.Background(), "secure.hook", tenant, extreme); !errors.Is(err, ErrTriggerWebhookUnauthorized) {
+		t.Fatalf("extreme timestamp: %v", err)
+	}
 	if starter.count() != 1 {
 		t.Fatalf("rejected deliveries started turns: %d", starter.count())
 	}
 	status, _ = engine.Get("secure.hook")
-	if status.Rejected != 3 || status.Failures != 0 {
+	if status.Rejected != 4 || status.Failures != 0 {
 		t.Fatalf("rejection audit: rejected=%d failures=%d audit=%+v", status.Rejected, status.Failures, status.Audit)
 	}
 
@@ -479,6 +486,8 @@ func TestTriggerRejectsUnsafeConfiguration(t *testing.T) {
 		{ID: "negative", Kind: TriggerWebhook, Prompt: "p", Enabled: true, MaxConcurrent: -1},
 		{ID: "bad-window", Kind: TriggerWebhook, Prompt: "p", Enabled: true, WebhookToleranceSec: 86401},
 		{ID: "bad-catchup", Kind: TriggerWebhook, Prompt: "p", Enabled: true, CatchUpLimit: -1},
+		{ID: "huge-concurrency", Kind: TriggerWebhook, Prompt: "p", Enabled: true, MaxConcurrent: maxTriggerConcurrency + 1},
+		{ID: "huge-catchup", Kind: TriggerWebhook, Prompt: "p", Enabled: true, CatchUpLimit: maxTriggerCatchUpLimit + 1},
 	}
 	for _, spec := range cases {
 		if _, err := engine.Register(spec); !errors.Is(err, ErrInvalidTrigger) {

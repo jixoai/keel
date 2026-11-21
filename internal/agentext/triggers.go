@@ -250,6 +250,8 @@ const (
 	maxWebhookTolerance       = 24 * time.Hour
 	minWebhookSecretBytes     = 16
 	maxIdempotencyKeyBytes    = 256
+	maxTriggerConcurrency     = 1024
+	maxTriggerCatchUpLimit    = 100
 	maxFireHistory            = 4096
 	maxAuditPerTrigger        = 20
 )
@@ -413,14 +415,16 @@ func (e *TriggerEngine) Register(spec TriggerSpec) (func(), error) {
 	if spec.RetryBackoffMs <= 0 {
 		spec.RetryBackoffMs = e.defaultBackoff.Milliseconds()
 	}
-	if spec.MaxConcurrent < 0 {
-		return nil, fmt.Errorf("%w: maxConcurrent must not be negative", ErrInvalidTrigger)
+	if spec.MaxConcurrent < 0 || spec.MaxConcurrent > maxTriggerConcurrency {
+		return nil, fmt.Errorf("%w: maxConcurrent must be between 0 and %d",
+			ErrInvalidTrigger, maxTriggerConcurrency)
 	}
 	if spec.MaxConcurrent == 0 {
 		spec.MaxConcurrent = e.defaultConcurrency
 	}
-	if spec.CatchUpLimit < 0 {
-		return nil, fmt.Errorf("%w: catchUpLimit must not be negative", ErrInvalidTrigger)
+	if spec.CatchUpLimit < 0 || spec.CatchUpLimit > maxTriggerCatchUpLimit {
+		return nil, fmt.Errorf("%w: catchUpLimit must be between 0 and %d",
+			ErrInvalidTrigger, maxTriggerCatchUpLimit)
 	}
 	if spec.CatchUpLimit == 0 {
 		spec.CatchUpLimit = e.catchUpLimit
@@ -1132,7 +1136,14 @@ func (e *TriggerEngine) verifyWebhook(rt *triggerRuntime, tenantID uuid.UUID, re
 	if err != nil {
 		return fmt.Errorf("%w: malformed_timestamp", ErrTriggerWebhookUnauthorized)
 	}
-	skew := e.now().Unix() - timestamp
+	now := e.now().Unix()
+	// Bound the value before subtracting: ParseInt accepts MinInt64 and the
+	// subtraction would overflow into a bogus "fresh" window.
+	horizon := int64(maxWebhookTolerance / time.Second)
+	if timestamp < now-horizon || timestamp > now+horizon {
+		return fmt.Errorf("%w: stale_timestamp", ErrTriggerWebhookUnauthorized)
+	}
+	skew := now - timestamp
 	if skew < 0 {
 		skew = -skew
 	}

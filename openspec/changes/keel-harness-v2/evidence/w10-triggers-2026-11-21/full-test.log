@@ -1,121 +1,121 @@
 ?   	github.com/jixoai/keel/cmd/chaos	[no test files]
 ?   	github.com/jixoai/keel/cmd/e2e	[no test files]
 --- FAIL: TestAgentCLIRendersFieldValidation (0.00s)
-    agentteam_test.go:512: stderr = "keel: login to http://127.0.0.1:58749 failed: server refused (401): invalid passphrase\n", want the field path and code
+    agentteam_test.go:512: stderr = "keel: login to http://127.0.0.1:58699 failed: server refused (401): invalid passphrase\n", want the field path and code
 --- FAIL: TestAgentStopWithoutActiveRunIsARefusal (0.00s)
-    agentteam_test.go:792: create agent "空闲者": exit 1 stderr keel: login to http://127.0.0.1:58768 failed: server refused (401): invalid passphrase
+    agentteam_test.go:792: create agent "空闲者": exit 1 stderr keel: login to http://127.0.0.1:58710 failed: server refused (401): invalid passphrase
 --- FAIL: TestTeamSaveUpsertsYAMLAndIgnoresServerOwnedFields (0.00s)
-    agentteam_test.go:810: create agent "队长": exit 1 stderr keel: login to http://127.0.0.1:58770 failed: server refused (401): invalid passphrase
+    agentteam_test.go:810: create agent "队长": exit 1 stderr keel: login to http://127.0.0.1:58712 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentDeleteRendersReferenceRefusal (0.00s)
-    agentteam_test.go:957: stderr = "keel: login to http://127.0.0.1:58775 failed: server refused (401): invalid passphrase\n", want "agent_in_use"
+    agentteam_test.go:957: stderr = "keel: login to http://127.0.0.1:58717 failed: server refused (401): invalid passphrase\n", want "agent_in_use"
 --- FAIL: TestAgentDeleteRendersSessionReference (0.00s)
-    agentteam_test.go:993: stderr = "keel: login to http://127.0.0.1:58777 failed: server refused (401): invalid passphrase\n", want "agent_in_use"
+    agentteam_test.go:993: stderr = "keel: login to http://127.0.0.1:58719 failed: server refused (401): invalid passphrase\n", want "agent_in_use"
 --- FAIL: TestTeamDeleteRendersSessionReference (0.00s)
-    agentteam_test.go:1028: stderr = "keel: login to http://127.0.0.1:58779 failed: server refused (401): invalid passphrase\n", want "team_in_use"
+    agentteam_test.go:1028: stderr = "keel: login to http://127.0.0.1:58721 failed: server refused (401): invalid passphrase\n", want "team_in_use"
 --- FAIL: TestArchiveCommands (0.00s)
-    agentteam_test.go:1041: create agent "待归档": exit 1 stderr keel: login to http://127.0.0.1:58781 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1041: create agent "待归档": exit 1 stderr keel: login to http://127.0.0.1:58723 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStartRefusesAnArchivedAgent (0.00s)
-    agentteam_test.go:1130: create agent "已归档": exit 1 stderr keel: login to http://127.0.0.1:58783 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1130: create agent "已归档": exit 1 stderr keel: login to http://127.0.0.1:58725 failed: server refused (401): invalid passphrase
 --- FAIL: TestTeamStartRefusesAnInvalidTeam (0.00s)
-    agentteam_test.go:1171: stderr = "keel: login to http://127.0.0.1:58785 failed: server refused (401): invalid passphrase\n", want the invalid-team refusal
+    agentteam_test.go:1171: stderr = "keel: login to http://127.0.0.1:58727 failed: server refused (401): invalid passphrase\n", want the invalid-team refusal
 --- FAIL: TestAgentStopMatchesTheCaptainOfATeamSession (0.00s)
-    agentteam_test.go:1189: create agent "团队队长": exit 1 stderr keel: login to http://127.0.0.1:58787 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1189: create agent "团队队长": exit 1 stderr keel: login to http://127.0.0.1:58729 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStopGivesTeamBindingPriorityOverAgentBinding (0.00s)
-    agentteam_test.go:1216: create agent "被误认的成员": exit 1 stderr keel: login to http://127.0.0.1:58789 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1216: create agent "被误认的成员": exit 1 stderr keel: login to http://127.0.0.1:58731 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStopSettlementRaceIsNotReportedAsSuccess (0.00s)
-    agentteam_test.go:1248: create agent "刚好跑完": exit 1 stderr keel: login to http://127.0.0.1:58791 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1248: create agent "刚好跑完": exit 1 stderr keel: login to http://127.0.0.1:58733 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStopJSONIsTheOutcomeArray (0.00s)
-    agentteam_test.go:1275: create agent "JSON 停止": exit 1 stderr keel: login to http://127.0.0.1:58793 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1275: create agent "JSON 停止": exit 1 stderr keel: login to http://127.0.0.1:58735 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStartDiscardsTheSessionWhenInputIsRefused (0.00s)
-    agentteam_test.go:1297: create agent "拒绝输入": exit 1 stderr keel: login to http://127.0.0.1:58795 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1297: create agent "拒绝输入": exit 1 stderr keel: login to http://127.0.0.1:58737 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStopDoesNotResurrectAnOlderBindingAfterAModelOnlySelection (0.00s)
-    agentteam_test.go:1359: create agent "旧绑定": exit 1 stderr keel: login to http://127.0.0.1:58798 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1359: create agent "旧绑定": exit 1 stderr keel: login to http://127.0.0.1:58740 failed: server refused (401): invalid passphrase
 --- FAIL: TestAgentStopWarnsWhenTheSessionWindowIsTruncated (0.00s)
-    agentteam_test.go:1399: create agent "窗口外": exit 1 stderr keel: login to http://127.0.0.1:58800 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1399: create agent "窗口外": exit 1 stderr keel: login to http://127.0.0.1:58742 failed: server refused (401): invalid passphrase
 --- FAIL: TestTeamSaveRoundTripsTheShowExport (0.00s)
-    agentteam_test.go:1517: create agent "往返队长": exit 1 stderr keel: login to http://127.0.0.1:58808 failed: server refused (401): invalid passphrase
+    agentteam_test.go:1517: create agent "往返队长": exit 1 stderr keel: login to http://127.0.0.1:58748 failed: server refused (401): invalid passphrase
 --- FAIL: TestSkillsCLIListShowAndSources (0.00s)
     skills_test.go:97: stub: no route for POST /v1/auth/login
-    skills_test.go:117: list = 1: keel: login to http://127.0.0.1:59049 failed: server refused (404): no route
---- FAIL: TestSkillsCLIInstallReadsADirectory (0.01s)
+    skills_test.go:117: list = 1: keel: login to http://127.0.0.1:58805 failed: server refused (404): no route
+--- FAIL: TestSkillsCLIInstallReadsADirectory (0.00s)
     skills_test.go:97: stub: no route for POST /v1/auth/login
-    skills_test.go:168: install = 1: keel: login to http://127.0.0.1:59051 failed: server refused (404): no route
+    skills_test.go:168: install = 1: keel: login to http://127.0.0.1:58807 failed: server refused (404): no route
 --- FAIL: TestSkillsCLIInstallFromSourceNeedsNoDescription (0.00s)
     skills_test.go:97: stub: no route for POST /v1/auth/login
-    skills_test.go:204: install from source = 1: keel: login to http://127.0.0.1:59053 failed: server refused (404): no route
+    skills_test.go:204: install from source = 1: keel: login to http://127.0.0.1:58809 failed: server refused (404): no route
 --- FAIL: TestSkillsCLIUpdatePinUnpinRemove (0.00s)
     skills_test.go:97: stub: no route for POST /v1/auth/login
-    skills_test.go:223: update = 1: keel: login to http://127.0.0.1:59055 failed: server refused (404): no route
+    skills_test.go:223: update = 1: keel: login to http://127.0.0.1:58811 failed: server refused (404): no route
 FAIL
-FAIL	github.com/jixoai/keel/cmd/keel	4.942s
+FAIL	github.com/jixoai/keel/cmd/keel	2.936s
 ?   	github.com/jixoai/keel/cmd/keel-dsh-ref	[no test files]
 ?   	github.com/jixoai/keel/cmd/loadtest	[no test files]
 ?   	github.com/jixoai/keel/cmd/mcpappload	[no test files]
-ok  	github.com/jixoai/keel/cmd/r1diff	0.125s
-ok  	github.com/jixoai/keel/cmd/runtime	0.435s
-ok  	github.com/jixoai/keel/internal/agent	54.733s
-ok  	github.com/jixoai/keel/internal/agentapi	10.134s
+ok  	github.com/jixoai/keel/cmd/r1diff	0.332s
+ok  	github.com/jixoai/keel/cmd/runtime	0.357s
+ok  	github.com/jixoai/keel/internal/agent	23.354s
+ok  	github.com/jixoai/keel/internal/agentapi	4.142s
 ?   	github.com/jixoai/keel/internal/agentcore	[no test files]
-ok  	github.com/jixoai/keel/internal/agentext	25.570s
-ok  	github.com/jixoai/keel/internal/agentloop	0.882s
-ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	0.126s
+ok  	github.com/jixoai/keel/internal/agentext	17.540s
+ok  	github.com/jixoai/keel/internal/agentloop	0.837s
+ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	0.387s
 ?   	github.com/jixoai/keel/internal/agentloop/testloop	[no test files]
-ok  	github.com/jixoai/keel/internal/agentteam	0.136s
-ok  	github.com/jixoai/keel/internal/agenttool	0.099s
-ok  	github.com/jixoai/keel/internal/approval	0.241s
-ok  	github.com/jixoai/keel/internal/architecture	2.524s
-ok  	github.com/jixoai/keel/internal/auth	0.134s
-ok  	github.com/jixoai/keel/internal/bashbridge	1.794s
-ok  	github.com/jixoai/keel/internal/blob	9.834s
-ok  	github.com/jixoai/keel/internal/compaction	0.132s
+ok  	github.com/jixoai/keel/internal/agentteam	0.370s
+ok  	github.com/jixoai/keel/internal/agenttool	0.358s
+ok  	github.com/jixoai/keel/internal/approval	0.466s
+ok  	github.com/jixoai/keel/internal/architecture	3.508s
+ok  	github.com/jixoai/keel/internal/auth	0.354s
+ok  	github.com/jixoai/keel/internal/bashbridge	1.517s
+ok  	github.com/jixoai/keel/internal/blob	6.051s
+ok  	github.com/jixoai/keel/internal/compaction	0.404s
 ?   	github.com/jixoai/keel/internal/config	[no test files]
-ok  	github.com/jixoai/keel/internal/demo	0.082s
-ok  	github.com/jixoai/keel/internal/dshref	0.100s
-ok  	github.com/jixoai/keel/internal/durable	0.494s
-ok  	github.com/jixoai/keel/internal/externalgw	5.000s
-ok  	github.com/jixoai/keel/internal/fileplugin	47.943s
-ok  	github.com/jixoai/keel/internal/gateway	1.154s
-ok  	github.com/jixoai/keel/internal/handoff	35.705s
-ok  	github.com/jixoai/keel/internal/hooks	0.349s
-ok  	github.com/jixoai/keel/internal/host	0.412s
-ok  	github.com/jixoai/keel/internal/httpapi	42.935s
-ok  	github.com/jixoai/keel/internal/jobqueue	10.071s
-ok  	github.com/jixoai/keel/internal/kernel	48.214s
-ok  	github.com/jixoai/keel/internal/layerfs	5.160s
-ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.601s
-ok  	github.com/jixoai/keel/internal/loadout	0.443s
-ok  	github.com/jixoai/keel/internal/logsafe	0.104s
-ok  	github.com/jixoai/keel/internal/loop	0.621s
-ok  	github.com/jixoai/keel/internal/mcp	0.916s
-ok  	github.com/jixoai/keel/internal/mcp/oauth	0.448s
-ok  	github.com/jixoai/keel/internal/mcphost	0.648s
-ok  	github.com/jixoai/keel/internal/mediaadapter	0.581s
-ok  	github.com/jixoai/keel/internal/mediagw	0.174s
-ok  	github.com/jixoai/keel/internal/mediawiring	0.267s
-ok  	github.com/jixoai/keel/internal/metrics	0.095s
-ok  	github.com/jixoai/keel/internal/modelcfg	0.481s
-ok  	github.com/jixoai/keel/internal/modelprovider	0.131s
-ok  	github.com/jixoai/keel/internal/notify	0.516s
-ok  	github.com/jixoai/keel/internal/placement	22.162s
-ok  	github.com/jixoai/keel/internal/placement/wiring	0.394s
-ok  	github.com/jixoai/keel/internal/pluginpkg	0.237s
+ok  	github.com/jixoai/keel/internal/demo	0.307s
+ok  	github.com/jixoai/keel/internal/dshref	0.350s
+ok  	github.com/jixoai/keel/internal/durable	0.745s
+ok  	github.com/jixoai/keel/internal/externalgw	4.558s
+ok  	github.com/jixoai/keel/internal/fileplugin	33.916s
+ok  	github.com/jixoai/keel/internal/gateway	1.370s
+ok  	github.com/jixoai/keel/internal/handoff	10.127s
+ok  	github.com/jixoai/keel/internal/hooks	0.484s
+ok  	github.com/jixoai/keel/internal/host	0.409s
+ok  	github.com/jixoai/keel/internal/httpapi	9.706s
+ok  	github.com/jixoai/keel/internal/jobqueue	3.914s
+ok  	github.com/jixoai/keel/internal/kernel	24.252s
+ok  	github.com/jixoai/keel/internal/layerfs	4.129s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.669s
+ok  	github.com/jixoai/keel/internal/loadout	0.353s
+ok  	github.com/jixoai/keel/internal/logsafe	0.365s
+ok  	github.com/jixoai/keel/internal/loop	0.910s
+ok  	github.com/jixoai/keel/internal/mcp	1.096s
+ok  	github.com/jixoai/keel/internal/mcp/oauth	0.711s
+ok  	github.com/jixoai/keel/internal/mcphost	0.503s
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.615s
+ok  	github.com/jixoai/keel/internal/mediagw	0.368s
+ok  	github.com/jixoai/keel/internal/mediawiring	0.451s
+ok  	github.com/jixoai/keel/internal/metrics	0.313s
+ok  	github.com/jixoai/keel/internal/modelcfg	0.464s
+ok  	github.com/jixoai/keel/internal/modelprovider	0.366s
+ok  	github.com/jixoai/keel/internal/notify	0.460s
+ok  	github.com/jixoai/keel/internal/placement	2.474s
+ok  	github.com/jixoai/keel/internal/placement/wiring	0.410s
+ok  	github.com/jixoai/keel/internal/pluginpkg	0.424s
 ?   	github.com/jixoai/keel/internal/pluginpkg/builtin	[no test files]
-ok  	github.com/jixoai/keel/internal/provider	0.214s
-ok  	github.com/jixoai/keel/internal/quota	1.876s
-ok  	github.com/jixoai/keel/internal/r1diff	0.089s
-ok  	github.com/jixoai/keel/internal/realtime	1.370s
-ok  	github.com/jixoai/keel/internal/servicegraph	0.085s
-ok  	github.com/jixoai/keel/internal/servicehost	5.777s
+ok  	github.com/jixoai/keel/internal/provider	0.412s
+ok  	github.com/jixoai/keel/internal/quota	1.946s
+ok  	github.com/jixoai/keel/internal/r1diff	0.349s
+ok  	github.com/jixoai/keel/internal/realtime	1.575s
+ok  	github.com/jixoai/keel/internal/servicegraph	0.339s
+ok  	github.com/jixoai/keel/internal/servicehost	4.603s
 ?   	github.com/jixoai/keel/internal/sessionbinding	[no test files]
 ?   	github.com/jixoai/keel/internal/sessionfork	[no test files]
-ok  	github.com/jixoai/keel/internal/skilllib	0.157s
-ok  	github.com/jixoai/keel/internal/skills	0.123s
-ok  	github.com/jixoai/keel/internal/store	23.538s
-ok  	github.com/jixoai/keel/internal/stream	0.163s
-ok  	github.com/jixoai/keel/internal/tasklog	10.155s
-ok  	github.com/jixoai/keel/internal/telemetry	0.104s
+ok  	github.com/jixoai/keel/internal/skilllib	0.426s
+ok  	github.com/jixoai/keel/internal/skills	0.383s
+ok  	github.com/jixoai/keel/internal/store	6.676s
+ok  	github.com/jixoai/keel/internal/stream	0.398s
+ok  	github.com/jixoai/keel/internal/tasklog	1.386s
+ok  	github.com/jixoai/keel/internal/telemetry	0.294s
 ?   	github.com/jixoai/keel/internal/testkit	[no test files]
-ok  	github.com/jixoai/keel/internal/toolsurface	0.376s
-ok  	github.com/jixoai/keel/plugins/templates	0.114s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.420s
+ok  	github.com/jixoai/keel/plugins/templates	0.355s
 ?   	github.com/jixoai/keel/plugins/tools/verifypkg	[no test files]
 FAIL

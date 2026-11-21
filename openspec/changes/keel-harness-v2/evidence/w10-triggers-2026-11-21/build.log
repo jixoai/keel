@@ -1,2 +1,2 @@
 go build ./...
-exit=0 (no output)
+exit=0

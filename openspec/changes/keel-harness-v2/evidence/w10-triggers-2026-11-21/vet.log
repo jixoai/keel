@@ -1,2 +1,2 @@
 go vet ./...
-exit=0 (no output)
+exit=0

@@ -347,20 +347,20 @@
 
 - [x] 沿用 v1 的 `cron/interval/webhook`；补 HMAC、去重键、漏跑补偿
       （W10 2026-11-21：HMAC-SHA256 + 重放窗口 + 常量时间比较 + 未配置 fail-closed 与
-      rejected 审计在 `internal/agentext/triggers.go:1120`（`verifyWebhook`），secret 以
+      rejected 审计在 `internal/agentext/triggers.go:1124`（`verifyWebhook`），secret 以
       `json:"-"` 隔离（`:87`），HTTP 原始 body/签名头 `internal/agentapi/ext.go:121`；
       去重保留同 key 串行化并新增 deduped 审计；漏跑补偿用 durable
       `trigger_state`（`internal/store/triggers.go:19,29,53`、`schema.sql:1078`、`rls.go:89`）
-      与有界追赶（`triggers.go:846,929,998`：最近 `catchUpLimit` 窗口、24h 回看、
+      与有界追赶（`triggers.go:850,933,1002`：最近 `catchUpLimit` 窗口、24h 回看、
       超限合并为 skipped 审计）；测试 `TestTriggerWebhookHMACVerification`、
       `TestTriggerWebhookWithoutSecretFailsClosed`、`TestTriggerCatchUpPlanIsBounded`、
       `TestTriggerCatchUpAfterRestartAndCursor`、
       `TestTriggerWebhookHMACAndInitialCardE2E`、`TestTriggerCatchUpUsesDurableCursorE2E`）
 - [x] 每触发器并发上限；触发产生的会话自动建初始任务卡
       （W10 2026-11-21：`maxConcurrent`（默认 1）非阻塞占槽，超限 `ErrTriggerBusy` →
-      HTTP 429 + `Retry-After` + throttled 审计（`triggers.go:1089`、
+      HTTP 429 + `Retry-After` + throttled 审计（`triggers.go:1093`、
       `internal/agentapi/ext.go:141`）；同 key 重试先等待再去重。fire 成功即调
-      `tasklog.EnsureCard` 建初始卡（`triggers.go:663`），响应带 `taskCardId`，
+      `tasklog.EnsureCard` 建初始卡（`triggers.go:667`），响应带 `taskCardId`，
       失败可见但不回滚；测试 `TestTriggerConcurrencyCapRefusesInsteadOfQueueing`、
       `TestTriggerCreatesInitialTaskCard`、`TestTriggerConcurrencyLimitOverHTTP`、
       `TestTriggerWebhookHMACAndInitialCardE2E`）

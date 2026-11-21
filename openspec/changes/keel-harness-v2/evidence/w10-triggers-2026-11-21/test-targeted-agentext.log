@@ -3,7 +3,7 @@
 === RUN   TestTriggerRetriesAndFailure
 --- PASS: TestTriggerRetriesAndFailure (0.01s)
 === RUN   TestTriggerWebhookHMACVerification
---- PASS: TestTriggerWebhookHMACVerification (0.00s)
+--- PASS: TestTriggerWebhookHMACVerification (0.01s)
 === RUN   TestTriggerWebhookWithoutSecretFailsClosed
 --- PASS: TestTriggerWebhookWithoutSecretFailsClosed (0.00s)
 === RUN   TestTriggerConcurrencyCapRefusesInsteadOfQueueing
@@ -17,10 +17,10 @@
 === RUN   TestTriggerRejectsUnsafeConfiguration
 --- PASS: TestTriggerRejectsUnsafeConfiguration (0.00s)
 === RUN   TestTriggerWebhookHMACAndInitialCardE2E
---- PASS: TestTriggerWebhookHMACAndInitialCardE2E (0.48s)
+--- PASS: TestTriggerWebhookHMACAndInitialCardE2E (0.71s)
 === RUN   TestTriggerConcurrencyLimitOverHTTP
---- PASS: TestTriggerConcurrencyLimitOverHTTP (0.39s)
+--- PASS: TestTriggerConcurrencyLimitOverHTTP (0.75s)
 === RUN   TestTriggerCatchUpUsesDurableCursorE2E
---- PASS: TestTriggerCatchUpUsesDurableCursorE2E (0.65s)
+--- PASS: TestTriggerCatchUpUsesDurableCursorE2E (0.72s)
 PASS
-ok  	github.com/jixoai/keel/internal/agentext	2.217s
+ok  	github.com/jixoai/keel/internal/agentext	2.890s

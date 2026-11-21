@@ -14,7 +14,7 @@ Scope delivered
   <idempotencyKey>\n<rawBody>; headers X-Keel-Timestamp (unix seconds) and
   X-Keel-Signature: sha256=<hex>. Constant-time compare via hmac.Equal; the
   timestamp must be inside webhookToleranceSec (default 300s, max 86400s):
-  internal/agentext/triggers.go:1120 (verifyWebhook).
+  internal/agentext/triggers.go:1124 (verifyWebhook).
 - Fail-closed: unconfigured trigger -> ErrTriggerWebhookUnconfigured (HTTP 403);
   missing/bad/stale signature -> ErrTriggerWebhookUnauthorized (HTTP 401); no
   turn is started and every refusal is audited status:"rejected" with a
@@ -36,8 +36,8 @@ Scope delivered
   internal/store/schema.sql:1078, internal/store/rls.go:89,
   internal/store/triggers.go:19-79 (Load/Save; monotonic last_scheduled_at).
 - On registration/restart the engine loads the cursor and replays missed
-  windows: internal/agentext/triggers.go:846 (resume), :929 (catchUpPlan),
-  :998 (saveCursor). Bounds: only the newest catchUpLimit windows (default 3),
+  windows: internal/agentext/triggers.go:850 (resume), :933 (catchUpPlan),
+  :1002 (saveCursor). Bounds: only the newest catchUpLimit windows (default 3),
   lookback catchUpWindow (default 24h); older windows are coalesced into one
   status:"skipped" audit entry. Catch-up fires use the same stable idempotency
   key sched:<id>:<unix> as normal schedule fires and reason:"catchup".
@@ -46,13 +46,13 @@ Scope delivered
 
 3. Per-trigger concurrency + initial task card
 - MaxConcurrent (default 1) is a non-blocking per-trigger slot:
-  internal/agentext/triggers.go:1089 (tryAcquire). Above the cap the fire is
+  internal/agentext/triggers.go:1093 (tryAcquire). Above the cap the fire is
   refused with ErrTriggerBusy -> HTTP 429 + Retry-After: 1 and a
   status:"throttled" audit (internal/agentapi/ext.go:141). No unbounded queue.
   Idempotent retries of the in-flight key wait for the key's first fire and
   then hit the dedupe branch instead of being throttled.
 - A successful fire immediately creates the session's initial task card via
-  tasklog.EnsureCard: internal/agentext/triggers.go:663. The response carries
+  tasklog.EnsureCard: internal/agentext/triggers.go:667. The response carries
   taskCardId; a card failure is visible as taskCardError but does not roll back
   the committed turn (the first tool call still has the lazy path).
 
@@ -104,9 +104,9 @@ Gates (logs in this directory)
 | targeted | go test -count=1 -v ./internal/agentext -run TestTrigger | 12 pass | test-targeted-agentext.log |
 | targeted | go test -count=1 -v ./internal/store -run TestTriggerState | 2 pass | test-targeted-store.log |
 | targeted | go test -count=1 -v ./internal/agentapi -run TestExtensionRoutes | 1 pass | test-targeted-agentapi.log |
-| full (all) | go test -count=1 ./... | only cmd/keel fails, pre-existing | full-test.log |
-| full (green) | go test -count=1 <all packages except cmd/keel> | 59 ok, 0 fail | full-test-except-cmd-keel.log |
-| race | go test -race -count=1 -p 4 <all except cmd/keel> | 59 ok, 0 DATA RACE | race-full.log |
+| full (all) | go test -count=1 -p 1 ./... | only cmd/keel fails, pre-existing | full-test.log |
+| full (green) | go test -count=1 -p 1 <all packages except cmd/keel> | 59 ok, 0 fail | full-test-except-cmd-keel.log |
+| race | go test -race -count=1 -p 1 <all except cmd/keel> | 59 ok, 0 DATA RACE | race-full.log |
 | conformance | scripts/conformance.sh | 1115 pass / 0 fail / 1 skip | conformance.txt, conformance.json |
 | openspec | openspec validate keel-harness-v2 --strict | valid | openspec.txt |
 
@@ -114,7 +114,9 @@ Pre-existing failure note: cmd/keel's CLI tests fail at base 6fc1b2c without any
 W10 change ("stub: no route for POST /v1/auth/login" / "invalid passphrase");
 see baseline-cmd-keel-preexisting.txt captured in the clean
 .worktrees/keel-task-harness-v2 at the same commit. No W10 code path is
-involved (auth stub vs CLI login).
+involved (auth stub vs CLI login). The full suites are run with -p 1 because
+parallel packages race the shared test cluster's schema/RLS migration and hit
+statement timeouts (pre-existing).
 
 Known limits / not done
 - HMAC keys are resolved from a direct spec value or a named environment
