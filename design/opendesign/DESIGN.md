@@ -76,7 +76,7 @@ Owner 反馈旧界面不满意，要求「用 OpenDesign 好好做」，不是�
 
 - 页边：客服一号（唯一 H1 30–32）、文本 · qwen3.8-flash、归属李娜、人设客服专员、最近活动、状态可用；干净状态「试跑」主，脏状态「保存」主、试跑描边。
 - 纸面：单一五列表（能力 / 风险 / 账号范围 / Bot 授权 / 有效能力），10 行；Bot 授权是带 chevron 的 select；账号范围只读；收窄用灰+锁；本次变更只做 diff。
-- 规则：Bot 只能做账号能做且 Bot 授权允许的事；人设不授予能力；一屏一个实心主按钮，脏状态给保存；能力中文名统一（查看会话/继续会话/删除会话/共享会话/查看 Bot/管理 Bot/绑定 Bot 密钥/调用 Bot/查看团队/读取密钥列表/读取密钥值）。
+- 规则：Bot 只能做账号范围允许且 Bot 授权允许的事；人设不授予能力；一屏一个实心主按钮，脏状态给「检查并保存」；高危保存必须先过账本 Sheet（默认未勾选、未勾选禁用「确认并登记」）；能力中文名统一（查看会话/继续会话/删除会话/共享会话/查看 Bot/管理 Bot/绑定 Bot 密钥/调用 Bot/查看团队/读取密钥列表/读取密钥值）。
 
 ### 4.3 团队 / 运行
 
@@ -124,4 +124,4 @@ Owner 反馈旧界面不满意，要求「用 OpenDesign 好好做」，不是�
 4. 索引形态：drill-in + 页边切换，还是常驻索引列。
 5. 是否吸收 C 的「待我处理」为顶部窄带。
 
-> 独立 fresh-context 视觉评审三轮完成：`VISUAL-REVIEW.md` 7.5 → `VISUAL-REVIEW-2.md` 8.2 → `VISUAL-REVIEW-3.md` **8.6/10，YES WITH FIXES，P0 0 条**；第三轮 5 项 P1 已修，修复与仍存问题见 `design/REVIEW.md` §0。仓库副本：`design/opendesign/index.html`。
+> 独立 fresh-context 视觉评审四轮完成：`VISUAL-REVIEW.md` 7.5 → `VISUAL-REVIEW-2.md` 8.2 → `VISUAL-REVIEW-3.md` 8.6 → `VISUAL-REVIEW-4.md` **9.0/10，YES WITH FIXES，P0 0 条**；第四轮 5 项小修已修，按评审结论可进 L5。修复与仍存问题见 `design/REVIEW.md` §0。仓库副本：`design/opendesign/index.html`。

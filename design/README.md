@@ -1,6 +1,6 @@
 # Design artifacts: keel-bot-identity-access
 
-> 状态：**方向已定（B 账簿 + A 索引/DAG + C 待办）；三轮视觉评审 7.5 → 8.2 → 8.6/10，P0 0 条；第三轮 5 项 P1 已修；待 Owner 确认与第四轮复评**。旧 UI 不是基线。
+> 状态：**方向已定（B 账簿 + A 索引/DAG + C 待办）；四轮视觉评审 7.5 → 8.2 → 8.6 → 9.0/10，P0 0 条；第四轮 5 项小修已修；可进 L5，待 Owner 确认**。旧 UI 不是基线。
 
 ## 内容
 
@@ -12,6 +12,7 @@
 | `VISUAL-REVIEW.md` | 第一轮独立视觉评审（7.5/10，YES WITH FIXES） |
 | `VISUAL-REVIEW-2.md` | 第二轮独立视觉评审（8.2/10，P0 0 条，6 项硬门） |
 | `VISUAL-REVIEW-3.md` | 第三轮独立视觉评审（8.6/10，P0 0 条，5 项 P1） |
+| `VISUAL-REVIEW-4.md` | 第四轮独立视觉评审（9.0/10，P0 0 条，5 项小修） |
 | `DECISION-2026-11-22.md` | MainAgent 在 Owner 授权下的方向决定 |
 | `opendesign/` | OpenDesign 设计板（`index.html`）、`DESIGN.md`、artifact 元数据；仓库内副本，外部工作区为 `.../Open Design/.../projects/keel-bot-identity-access/` |
 
