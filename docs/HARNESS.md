@@ -111,6 +111,30 @@ keel version
 - **观测**。`GET /v1/triggers` 的每个条目带 `fires/failures/dedupes/throttled/rejected/skipped`、
   `inFlight`、`webhookConfigured`、`lastScheduledAt` 与最近 20 条审计（fired/failed/deduped/
   throttled/rejected/skipped）。
+### 3.2 工具面授权（A4.2b1）
+
+模型能看到的每一个工具调用都在执行前经过同一套 access 授权，HTTP 面的授权不是工具面的替代品：
+
+- **主体**：从 Session 归属读取——Bot 所属 Account、Bot handle 与 Bot Harness 的
+  `context.permissions`；有效权限 = Account grants ∩ Harness permissions。Role/Instruction
+  不产生授权。没有可解析主体（无主 Session、禁用账号、归档 Bot）一律拒绝。
+- **key**：每个工具/action 在代码内唯一 registry 声明 required key（`internal/toolsurface`）。
+  read/write/edit → `file.*`；bash → `shell.exec`；tasks → `task.read|write`；
+  mcp → `mcp.use`；skills 读 → `skill.read`、库写 → `skill.manage`；agent → 目标 Bot 的
+  `bot.invoke`；approve → `approval.read|write`；notify → `notification.read|write`；
+  creation → `plugin.invoke`；媒体 → `media.invoke`；decision → `decision.ask`。
+  插件发布的工具按 `plugin.invoke` 授权。未知工具/未声明 action/未登记 key 是装配错误。
+- **资源**：Session 级工具以当前 Session 为资源；`agent` 的 spawn/fork/resume 以目标
+  Bot（`agentId`/子 Session 所属 Bot，未命名时为本 Session 的 Bot）为资源；带 `sessionId`
+  的参数以该 Session 为资源（跨 Session 通知读取另需 `session.read`）。文件目前没有
+  per-file 关系元组（见 tasks A4.2b 登记），以所属 Session 为资源边界。
+- **captain → member**：父级必须对目标持有 `bot.invoke`；撤销后下一次调用即 403。HTTP 的
+  `agentId`/`selection` 子代理路由走同一检查，旧路径不是旁路。子 Session 继承父 Bot 归属，
+  但每次调用按**自己**的 Account ∩ Harness 判定，不做调用链交集。
+- **失败语义**：无 access seam、无 principal、授权源读取失败、invoke 审计写失败均 fail
+  closed；工具错误只告诉模型缺哪个 key/reason，不透露资源是否存在。
+- **审计**：拒绝写 `permission.denied`（含 key、reason、资源类型）；接受的 `bot.invoke`
+  写 `bot.invoked`（调用者、被调用 Bot、Session、结果）。
 
 ## 4. 与内核的接缝
 
