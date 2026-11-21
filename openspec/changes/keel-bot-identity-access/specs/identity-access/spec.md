@@ -44,6 +44,39 @@ Open Decisions（见 `design.md`）未冻结前，本 spec 不覆盖对应实现
 - **WHEN** 客户端用 `Authorization: Bearer <旧 KEEL_SERVE_PASSWORD>` 请求 `/v1`
 - **THEN** 返回 401，不建立会话
 
+### Requirement: Bot 账号使用绑定到 Bot 的 API key
+
+Bot 账号 MUST 使用 API key 认证，MUST NOT 登录浏览器 UI。每个 key MUST 绑定到
+`(account_id, bot_id)`；认证后系统 MUST 以该 Bot 的身份行动，有效权限 = 该 Account 权限
+∩ Bot Harness permissions。key 明文 MUST 只在签发时返回一次，MUST NOT 落库、落日志或回读；
+key MUST 可轮换、可吊销，吊销 MUST 即时生效。触发器、Webhook 与后台任务 MUST 使用 Bot key。
+
+#### Scenario: Bot key 只能以绑定 Bot 身份行动
+- **GIVEN** key K 绑定到 Account A 的 Bot X
+- **WHEN** 用 K 调用 `/v1/bots/{id}/invoke` 且 id 是 Bot Y
+- **THEN** 返回 403，K 不能冒充 Y
+
+#### Scenario: 吊销即时生效
+- **WHEN** 管理员吊销 K
+- **THEN** K 的下一个请求返回 401
+
+### Requirement: 首个超级管理员通过一次性 token 创建
+
+系统 MUST 在没有任何超级管理员时要求 bootstrap。bootstrap MUST 通过本机 CLI
+`keel admin bootstrap` 生成一次性 setup token（容器可由 `KEEL_BOOTSTRAP_TOKEN` 传入），
+token MUST 有短 TTL、一次性使用。浏览器 MUST 用 token 设置用户名与密码，首次登录 MUST
+强制改密。忘记密码 MUST 只能通过本机 CLI 恢复，MUST NOT 提供公网重置端点。
+
+#### Scenario: 无超管时拒绝匿名进入
+- **GIVEN** 数据库没有超级管理员
+- **WHEN** 客户端访问 `/v1`
+- **THEN** 返回 503/401 并提示执行 bootstrap
+- **AND** 不存在“第一个访问者自动成为超管”的路径
+
+#### Scenario: setup token 一次性
+- **WHEN** setup token 已被使用
+- **THEN** 再次使用返回 401
+
 ### Requirement: 超级管理员是部署级全权主体
 
 系统 MUST 支持部署级超级管理员。超级管理员 MUST 拥有全部 permission-key 与全部 scope，

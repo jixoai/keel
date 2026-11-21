@@ -9,9 +9,9 @@
 - [x] D2：TeamBot 不是 Bot、不做权限主体；它是 Mission + Roster（已冻结，L12）
 - [x] D3：ModelKind + Bot 默认模型；运行时可覆盖；快照记录实际模型（L15）
 - [x] D4：产品面 + 产品域包重命名；PI 技术包保留（L16）
-- [ ] D5：bootstrap / auth-off / 超管恢复流程
+- [x] D5：CLI bootstrap + local-only 隐式超管 + CLI 恢复（L17）
 - [ ] D6：旧 sessions/agents/teams 数据清空还是接管
-- [ ] D7：Bot 账号登录方式（密码 vs API key）与 API key 归属
+- [x] D7：Bot 用绑定到具体 Bot 的 API key；人类用密码（L18）
 - [ ] D8：TeamBot 跨 Account 组装/共享规则
 - [x] D9：调用 Bot 是能力授权——`bot.invoke` 边界；Bot 以自身权限执行，不做调用链交集（L2/L13）
 - [ ] 冻结 `specs/identity-access/spec.md` 与权限 key 初始目录；偏离走新 change
@@ -40,7 +40,8 @@
 - [ ] `auth_sessions` 持久化；登出/改密/禁用即时吊销
 - [ ] 删除 `KEEL_SERVE_PASSWORD` 单口令路径、旧 cookie、旧 Bearer 口令
 - [ ] auth 模式 `required|local-only|off`；公网 + off 拒绝启动
-- [ ] bootstrap/token/首次改密/超管不可删除/CLI 恢复（按 D5）
+- [ ] bootstrap/token/首次改密/超管不可删除/CLI 恢复（L17）
+- [ ] Bot API key：`(account_id, bot_id)` 绑定、一次性明文、轮换/吊销、认证后以 Bot 身份行动（L18）
 - [ ] 旧入口负控：旧 cookie 401、旧 API key 401、旧口令 401
 
 ## A3 权限引擎

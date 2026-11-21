@@ -57,7 +57,7 @@ Session → 属于一个 Bot → 属于一个 Account
 - **Auth 可选**：关闭认证只允许 loopback，并映射为内置本机超管；公网绑定拒绝无认证启动。
 - **超级管理员**：部署级账号，拥有全部 permission-key 与全部 scope；可跨租户；所有操作审计。
 - **首个超管**：CLI bootstrap，一次性 setup token，首次登录强制改密；超管不可删除；
-  忘记密码只能在本机用 CLI 恢复。细节见 Open Decision D5。
+  忘记密码只能在本机用 CLI 恢复。形态见 L17。
 
 ### 4. 权限系统
 
@@ -118,6 +118,8 @@ Session → 属于一个 Bot → 属于一个 Account
 | L14 | 权限对称 | 人类账号能做的事，Bot 账号在拥有相同 permission-key 时也能做；没有 Bot 专属权限，也没有人类专属权限（登录方式除外） |
 | L15 | ModelKind 与默认模型 | ModelKind 必填；Bot 有默认 provider/model；运行时可带参数覆盖；Session/Run 快照记录实际解析出的模型 |
 | L16 | 重命名边界 | 产品面（表/API/CLI/UI/文档）与产品域包改为 Bot；PI 技术包 `agentcore`/`agentloop`/`agenttool`/`internal/agent` 保留，例外清单入 design |
+| L17 | 首个超管与恢复 | CLI `keel admin bootstrap` 一次性 setup token；`local-only` 映射内置 local-admin 超管；忘记密码只能本机 CLI 重置；超管不可删除/禁用；全部审计 |
+| L18 | Bot 凭据 | Bot 用绑定到具体 Bot 的 API key（`account_id + bot_id`）；不能登录浏览器；人类用密码；key 可轮换/吊销 |
 
 ## Open Decisions（阻塞 spec 冻结）
 
@@ -126,9 +128,9 @@ Session → 属于一个 Bot → 属于一个 Account
 - **D3（已冻结）**：ModelKind 必填 + Bot 默认模型；运行时可带参数覆盖默认模型；
   Session/Run 快照记录实际解析出的模型（L15）。
 - **D4（已冻结）**：产品面 + 产品域包重命名；PI 技术包保留（L16）。
-- **D5**：首个超管 bootstrap / auth-off / 恢复流程的具体形态。
+- **D5（已冻结）**：CLI bootstrap + local-only 隐式超管 + CLI 恢复（L17）。
 - **D6**：旧 sessions/agents/teams 数据是清空重建，还是由 bootstrap 超管接管为初始 Bot？
-- **D7**：Bot 账号是否可登录（密码）还是只发 API key；API key 是否绑定 Account。
+- **D7（已冻结）**：Bot 用绑定到具体 Bot 的 API key，人类用密码（L18）。
 - **D8**：TeamBot 跨 Account 组装与共享的规则。
 - **D9（已冻结）**：调用 Bot 是能力授权——`bot.invoke` 是边界；Bot 以自己的权限执行，
   不做调用链交集（L2/L13）。

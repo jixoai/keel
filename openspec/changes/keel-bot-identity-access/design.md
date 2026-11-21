@@ -79,7 +79,7 @@ accounts (
 ```
 
 - `is_super_admin` 只允许部署 bootstrap 创建；普通 API 不能设置。
-- Bot 账号 `kind=bot`，默认无密码，凭据是 API key 或内部委托；是否允许登录见 D7。
+- Bot 账号 `kind=bot`，默认无密码；凭据是绑定到具体 Bot 的 API key（L18）。
 - 删除账号为软删除/禁用；已有 Session/Bot 的归属保留，审计保留。
 
 ### 2.2 登录
@@ -106,9 +106,8 @@ accounts (
   `KEEL_BOOTSTRAP_TOKEN`。
 - 旧 cookie 因签名密钥/格式变化全部失效；旧 `Authorization: Bearer <passphrase>` 不再接受。
 
-### 2.4 首个超管与恢复（D5）
+### 2.4 首个超管与恢复（L17）
 
-建议（待确认）：
 - 首次启动且无 `is_super_admin` 时，`keel admin bootstrap` 生成一次性 setup token
   （打印到 stderr/写入受限文件；容器可由 `KEEL_BOOTSTRAP_TOKEN` 传入）。
 - 浏览器用 setup token 设置用户名/密码；token 一次性、短 TTL。
@@ -116,6 +115,33 @@ accounts (
 - 忘记密码：本机 `keel admin reset --username ...`（要求文件系统权限/本地 socket），
   不能走公网 API。
 - 所有恢复操作写审计。
+
+### 2.5 Bot 凭据（L18）
+
+Bot 账号不登录浏览器，只使用 API key：
+
+```sql
+api_keys (
+  tenant_id uuid NOT NULL,
+  key_id uuid NOT NULL,
+  key_hash bytea NOT NULL,        -- sha256(plaintext)
+  key_prefix text NOT NULL,
+  account_id uuid NOT NULL,       -- 权限主体
+  bot_id uuid NOT NULL,           -- 该 key 只能以这个 Bot 身份行动
+  label text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  last_used_at timestamptz,
+  PRIMARY KEY (tenant_id, key_id),
+  UNIQUE (key_hash)
+)
+```
+
+- 明文 key 只在签发时返回一次；不落库、不落日志、不可回读。
+- 认证后得到 `(account_id, bot_id)`；Bot 的有效权限 = 该 Account 的权限 ∩ Bot Harness。
+- key 可轮换/吊销；吊销即时生效。
+- 触发器、Webhook、后台任务使用 Bot key；审计记录 `bot_id + account_id`。
+- 人类账号的密码登录与 Bot key 是两种登录方式，但权限模型完全相同（L14 的例外）。
 
 ## 3. 权限系统
 
