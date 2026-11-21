@@ -30,7 +30,7 @@ test("TUI: 技能——卡片给出信任/当前版本/固定/更新与冲突，
   expect(app.shows("id:skill-update-team-review")).toBe(true);
   expect(app.shows("id:skill-unpin-team-review")).toBe(true);
   expect(app.shows("id:skill-source-team")).toBe(true);
-  expect(text).toContain("/srv/skills");
+  expect(text).toContain("local · team");
 });
 
 test("TUI: 技能——查看打开 SKILL.md 正文与资源清单", async () => {
@@ -122,11 +122,11 @@ test("TUI: 技能——订阅一个本地目录后源列表出现它", async () 
   const app = await openSection("empty");
   await app.waitFor("id:settings-skills");
   await app.type("id:skill-source-id", "ops");
-  await app.type("id:skill-source-url", "/srv/ops-skills");
+  await app.type("id:skill-source-url", "ops-skills");
   await app.press("id:skill-source-subscribe");
 
   await app.waitFor("id:skill-source-ops");
-  expect(joined(app)).toContain("/srv/ops-skills");
+  expect(joined(app)).toContain("ops-skills");
 });
 
 test("TUI: 技能——移除要二次确认，第二张卡同样可操作", async () => {

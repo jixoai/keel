@@ -634,7 +634,7 @@ export function SkillsSection() {
       <Card testID="settings-skill-sources">
         <CardHeader
           title="订阅源"
-          description="订阅源决定更新从哪里来，并带一个信任等级：未信任源每次安装/更新都需要显式确认，安装后也不会被升级为受信任。当前构建只同步本地目录。"
+          description="订阅源只能指向受管源根内的本地目录，并带一个信任等级：未信任源每次安装/更新都需要显式确认，安装后也不会被升级为受信任。这里的信任选择是管理员操作；Agent 的工具面只能创建未信任源。当前构建只同步本地目录。"
         />
         <CardContent>
           <If when={sources().length === 0}>
@@ -661,13 +661,13 @@ export function SkillsSection() {
                   disabled={store.skillsBusy()}
                 />
               </Field>
-              <Field label="目录" hint="服务端可读的本地目录；目录本身是技能或包含 <name>/SKILL.md。">
+              <Field label="目录" hint="受管源根内的相对目录（如 team）；绝对路径也必须在该根内。目录本身是技能或包含 <name>/SKILL.md。">
                 <Input
                   testID="skill-source-url"
                   accessibilityLabel="订阅源目录"
                   value={newSourceURL()}
                   onChange={(value) => newSourceURL.set(value)}
-                  placeholder="/srv/keel-skills"
+                  placeholder="team"
                   maxLength={512}
                   disabled={store.skillsBusy()}
                 />

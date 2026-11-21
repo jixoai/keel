@@ -313,7 +313,7 @@ export class FixtureClient implements SettingsApi {
       ],
       fileCount: 2,
       bytes: 512,
-      path: "/demo/skills/deploy-flow",
+      path: "active/deploy-flow",
       updateAvailable: false,
     },
   ];
@@ -321,7 +321,7 @@ export class FixtureClient implements SettingsApi {
     {
       id: "team",
       kind: "local",
-      url: "/srv/keel-skills",
+      url: "team",
       trust: "trusted",
       createdAt: new Date(Date.now() - 604_800_000).toISOString(),
     },
@@ -603,7 +603,7 @@ export class FixtureClient implements SettingsApi {
   async skillsSettings(check = true): Promise<SkillsSettingsView> {
     return {
       revision: this.skillRevision,
-      root: "/demo/skills",
+      root: "managed",
       checked: check,
       skills: this.skillState.map((item) => cloneSkill(item)),
       sources: this.skillSourceState.map((item) => ({ ...item })),
@@ -662,7 +662,7 @@ export class FixtureClient implements SettingsApi {
       versions: [{ hash, createdAt: at, files: 1, bytes: 256 }],
       fileCount: 1,
       bytes: 256,
-      path: `/demo/skills/${name}`,
+      path: `active/${name}`,
       updateAvailable: false,
     };
     this.skillState = [...this.skillState, record];

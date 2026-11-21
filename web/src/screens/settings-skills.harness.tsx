@@ -39,7 +39,7 @@ const seedSkills = (): SkillRecordView[] => [
     versions: [{ hash: hash("a"), createdAt: "2026-11-20T10:00:00Z", files: 2, bytes: 512 }],
     fileCount: 2,
     bytes: 512,
-    path: "/skills/deploy-flow",
+    path: "active/deploy-flow",
     updateAvailable: false,
   },
   {
@@ -48,7 +48,7 @@ const seedSkills = (): SkillRecordView[] => [
     trust: "trusted",
     sourceId: "team",
     sourceKind: "local",
-    sourceUrl: "/srv/skills",
+    sourceUrl: "team",
     currentHash: hash("b"),
     pinnedHash: hash("b"),
     installedAt: "2026-11-19T10:00:00Z",
@@ -59,7 +59,7 @@ const seedSkills = (): SkillRecordView[] => [
     ],
     fileCount: 1,
     bytes: 256,
-    path: "/skills/team-review",
+    path: "active/team-review",
     updateAvailable: true,
     availableHash: hash("c"),
     conflict: "pinned",
@@ -68,7 +68,7 @@ const seedSkills = (): SkillRecordView[] => [
 ];
 
 const seedSources = (): SkillSourceView[] => [
-  { id: "team", kind: "local", url: "/srv/skills", trust: "trusted", createdAt: "2026-11-18T10:00:00Z" },
+  { id: "team", kind: "local", url: "team", trust: "trusted", createdAt: "2026-11-18T10:00:00Z" },
 ];
 
 let skills: SkillRecordView[] = scenario() === "empty" ? [] : seedSkills();
@@ -129,7 +129,7 @@ const stub: FetchLike = async (input, init) => {
       versions: [{ hash: hash(`new-${created}`), files: 1, bytes: 128 }],
       fileCount: 1,
       bytes: 128,
-      path: `/skills/${name}`,
+      path: `active/${name}`,
     };
     skills = [...skills, record];
     revision += 1;

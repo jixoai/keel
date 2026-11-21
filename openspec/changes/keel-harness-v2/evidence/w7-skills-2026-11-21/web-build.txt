@@ -1,3 +1,3 @@
 $ nsh build
-✓ built App.tsx into .nsh/out (1.1 MB js, 3.7 MB bytecode, 1 asset, 149ms)
+✓ built App.tsx into .nsh/out (1.1 MB js, 3.7 MB bytecode, 1 asset, 161ms)
 exit=0
