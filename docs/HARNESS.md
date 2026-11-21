@@ -153,6 +153,44 @@ keel version
 - **模型**：`Bot.DefaultModel` 只在输入未指定模型时生效；Run 快照记录实际模型。
 - **TeamBot**：Mission + Roster；roster 的 `captain` 是有效 Bot，成员列表注入 captain
   prompt；TeamBot 不拥有 Session、不授予权限。
+### 3.3 触发器交付语义（W10）
+
+- **HMAC（webhook）**。`TriggerSpec.WebhookSecret` 是每个触发器的 HMAC-SHA256 密钥
+  （至少 16 字节），`json:"-"`，绝不进入 `GET /v1/triggers`、插件快照或日志；生产用
+  `WebhookSecretEnv` 指向环境变量（内置示例：`KEEL_EXAMPLE_WEBHOOK_SECRET`），注册时解析一次。
+  签名覆盖**原始 body 字节**，canonical 为：
+
+  ```
+  v1\n<tenantId>\n<triggerId>\n<timestamp>\n<idempotencyKey>\n<rawBody>
+  ```
+
+  请求头：`X-Keel-Timestamp: <unix 秒>`、`X-Keel-Signature: sha256=<hex>`；
+  另有 `X-Keel-Webhook: 1`（可省略，出现签名头即按 webhook 处理）。
+  时间戳必须在 `webhookToleranceSec`（默认 300s，上限 86400s）内，签名用
+  `hmac.Equal` 常量时间比较。
+- **fail-closed**。未配置 secret 的 webhook 触发拒绝一切签名投递（403）；缺失/错误/过期签名
+  返回 401。两者都写审计 `status:"rejected"`，错误只带类别（`missing_timestamp` /
+  `stale_timestamp` / `bad_signature` 等），不带 secret 或收到的签名。手动 fire 是已认证的
+  运维动作，不需要签名。
+- **去重**。幂等键仍是唯一身份：同键并发按 key 串行化，进程内重复投递返回
+  `deduped:true` 并审计 `status:"deduped"`；跨重启由 kernel 的 requestId 去重，返回
+  `fired + deduped:true`。重复投递不会产生第二条 `user.message`。
+- **漏跑补偿**。`trigger_state(tenant_id, trigger_id, last_scheduled_at, ...)` 持久化
+  “已处理的最新计划窗口”。重启/注册时按该游标计算 `(last, now]` 内错过的窗口：
+  只补 `catchUpLimit`（默认 3）个**最近的**窗口，且不早于 `catchUpWindow`（默认 24h）；
+  更老的窗口合并跳过，审计 `status:"skipped"` 并记录 coalesced 数量。补跑使用与正常计划相同
+  的稳定幂等键 `sched:<id>:<unix>`，所以即使补偿重复也不会二次提交。停机会话恢复不会
+  产生风暴；上限内仍失败的窗口由审计可见。
+- **并发上限**。`maxConcurrent`（默认 1）限制同一触发器同时在飞的 fire。超限返回
+  `ErrTriggerBusy` → HTTP 429 + `Retry-After: 1`，审计 `status:"throttled"`；不排队，
+  因为无界队列会把过载隐藏成延迟。同幂等键的重试先等待该键的首次 fire，再走去重分支，
+  不会被当作超限。
+- **初始任务卡**。一次成功 fire 在提交 `user.message` 后立即调用
+  `tasklog.EnsureCard`，返回 `taskCardId` 并写审计；失败不回滚已提交的回合，而是返回
+  `taskCardError`/审计字段（首次工具调用仍会懒创建）。满足 task-log「会话起步即有卡」。
+- **观测**。`GET /v1/triggers` 的每个条目带 `fires/failures/dedupes/throttled/rejected/skipped`、
+  `inFlight`、`webhookConfigured`、`lastScheduledAt` 与最近 20 条审计（fired/failed/deduped/
+  throttled/rejected/skipped）。
 
 ## 4. 与内核的接缝
 
