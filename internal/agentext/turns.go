@@ -145,7 +145,7 @@ func (s *TurnStarter) StartTurn(ctx context.Context, req StartTurnRequest) (Star
 		return StartTurnResult{}, err
 	}
 	// The committed event is the truth; the projection is what makes a live
-	// child session block an Agent/Team delete or archive. StartTurn is the one
+	// child session block a Bot/TeamBot delete or archive. StartTurn is the one
 	// choke point triggers, sub-agent spawn and manual fire share, so every
 	// product-initiated input gets the same treatment as POST /input.
 	if s.Bindings != nil {

@@ -914,7 +914,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// must accept exactly what that generation can run. A runtime without
 		// provider configuration still refuses every selection.
 		//
-		// The execution binding (agentId/teamId) is part of that same gate: the
+		// The execution binding (botId/teamBotId) is part of that same gate: the
 		// submit path resolves it exactly as an attempt would (existence, archive,
 		// seal) and merges the agent's default model into a fact that named none,
 		// so "what the edge accepts" stays "what the next attempt runs".
@@ -1359,7 +1359,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// Tenancy surface (change keel-ga §2): the operator provisioning path and
 		// the tenant's own quota projection. Both read the same store the request
 		// path uses; neither is reachable with a tenant credential alone.
-		Provisioner: apiKeyStore{store: st},
+		Provisioner: tenantProvisioner{store: st},
 		Quota:       quotaReporter{store: st, edge: edge},
 		AdminKey:    adminKeyFromEnv,
 		RunStatus: func(tenantID, sessionID uuid.UUID) (string, bool) {
@@ -1757,26 +1757,14 @@ func newFileService(st *store.Store, kern *kernel.Kernel, fileStore *layerfs.Sto
 	return service, nil
 }
 
-// deploymentRoot is the directory an agent's prompt-file reference resolves
-// against: the process working directory, which is the deployment root the CLI
-// and the web app share. An unresolvable cwd yields "" (file prompts are then
-// refused with a diagnostic instead of guessing).
-func deploymentRoot() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return dir
-}
-
 // selectFromCurrentGeneration is the input edge's selection validator: it
 // validates against the model service the runtime is serving right now, so a
 // settings write changes what the next input may ask for without a restart. A
 // runtime without provider configuration refuses every selection, exactly like
 // a boot without a models document always did.
 //
-// It delegates to the runtime's own gate so the execution binding (agentId/
-// teamId) travels the same path: resolving it here as well would be a second
+// It delegates to the runtime's own gate so the execution binding (botId/
+// teamBotId) travels the same path: resolving it here as well would be a second
 // rule that could drift from what the attempt runs.
 func selectFromCurrentGeneration(rt *servicehost.Runtime) func(json.RawMessage) error {
 	return func(selection json.RawMessage) error {

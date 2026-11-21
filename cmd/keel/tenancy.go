@@ -15,16 +15,16 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-// apiKeyStore adapts *store.Store to agentapi.Provisioner (tenant create and
-// existence).
-type apiKeyStore struct {
+// tenantProvisioner adapts *store.Store to agentapi.Provisioner (tenant create
+// and existence).
+type tenantProvisioner struct {
 	store *store.Store
 }
 
 // CreateTenant implements agentapi.Provisioner. A new tenant is born with the
 // built-in permission-group presets; the seed is idempotent, so a repeated
 // create converges instead of duplicating.
-func (a apiKeyStore) CreateTenant(ctx context.Context, tenantID uuid.UUID, name string) (bool, error) {
+func (a tenantProvisioner) CreateTenant(ctx context.Context, tenantID uuid.UUID, name string) (bool, error) {
 	created, err := a.store.CreateTenantReport(ctx, tenantID, name)
 	if err != nil {
 		return false, err
@@ -36,7 +36,7 @@ func (a apiKeyStore) CreateTenant(ctx context.Context, tenantID uuid.UUID, name 
 }
 
 // TenantExists implements agentapi.Provisioner.
-func (a apiKeyStore) TenantExists(ctx context.Context, tenantID uuid.UUID) (bool, error) {
+func (a tenantProvisioner) TenantExists(ctx context.Context, tenantID uuid.UUID) (bool, error) {
 	return a.store.TenantExists(ctx, tenantID)
 }
 

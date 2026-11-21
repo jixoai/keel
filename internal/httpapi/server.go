@@ -681,7 +681,7 @@ func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	// The edge event is a second door into the event log, so it must apply the
 	// same selection gate as POST /input. Without it a selection the server
-	// cannot honour (unknown/archived/unsealed teamId, unknown agentId) would be
+	// cannot honour (unknown/archived/unsealed TeamBot, unknown Bot) would be
 	// persisted verbatim; the runner resolves the newest user.message carrying a
 	// selection, so every later attempt of that session would then fail before
 	// any commit — unrecoverable from the client side (spec agent-team:
