@@ -1,0 +1,12 @@
+$ go test ./internal/skilllib -run 'TestManagedSourceRootRejectsHostPathsAndSymlinkEscapes|TestModelFaceCannotChooseTrustOrReadHostTrees' -v
+=== RUN   TestManagedSourceRootRejectsHostPathsAndSymlinkEscapes
+--- PASS: TestManagedSourceRootRejectsHostPathsAndSymlinkEscapes (0.01s)
+=== RUN   TestModelFaceCannotChooseTrustOrReadHostTrees
+--- PASS: TestModelFaceCannotChooseTrustOrReadHostTrees (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/skilllib	0.178s
+$ go test ./internal/toolsurface -run TestSkillsSchemaDoesNotExposeTrustArguments -v
+=== RUN   TestSkillsSchemaDoesNotExposeTrustArguments
+--- PASS: TestSkillsSchemaDoesNotExposeTrustArguments (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/toolsurface	0.162s

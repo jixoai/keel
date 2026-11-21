@@ -51,8 +51,8 @@ func skillsSchema() json.RawMessage {
 	return schema(`, "op":{"type":"string"}, "name":{"type":"string"}, "path":{"type":"string"}, ` +
 		`"source":{"type":"string"}, "description":{"type":"string"}, "body":{"type":"string"}, ` +
 		`"content":{"type":"string"}, "files":{"type":"array"}, "id":{"type":"string"}, ` +
-		`"kind":{"type":"string"}, "url":{"type":"string"}, "trust":{"type":"string"}, ` +
-		`"hash":{"type":"string"}, "allowUntrusted":{"type":"boolean"}, "pin":{"type":"boolean"}`)
+		`"kind":{"type":"string"}, "url":{"type":"string"}, "hash":{"type":"string"}, ` +
+		`"pin":{"type":"boolean"}`)
 }
 
 func newSkillsTool(discovered []skills.Skill, backend SkillsBackend) *actionTool {

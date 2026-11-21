@@ -85,6 +85,7 @@ Environment (serve):
   KEEL_MODELS_CONFIG       tenant models document (providers/rules/selection)
   KEEL_SKILLS_ROOTS        OS path list of skill roots (PI-compatible)
   KEEL_SKILLS_ROOT         managed skill library root (default $KEEL_HOME/skills)
+  KEEL_SKILLS_SOURCE_ROOT  managed subscription root (default $KEEL_SKILLS_ROOT/sources)
 
 Environment (tui, agent, team):
   KEEL_TUI_BIN             path to the NSH TUI binary
@@ -120,27 +121,28 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("keel serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		addr       = fs.String("addr", envOr("KEEL_SERVE_ADDR", defaultServeAddr), "listen address")
-		dsn        = fs.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
-		webDir     = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "static web build directory")
-		casDir     = fs.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
-		tenantRaw  = fs.String("tenant", os.Getenv("KEEL_SERVE_TENANT"), "tenant UUID the server acts as")
-		password   = fs.String("password", os.Getenv("KEEL_SERVE_PASSWORD"), "local passphrase (empty disables auth)")
-		secure     = fs.Bool("cookie-secure", envBool("KEEL_SERVE_COOKIE_SECURE"), "mark the auth cookie Secure (TLS deployments)")
-		runs       = fs.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
-		noWorker   = fs.Bool("no-worker", false, "do not start the agent worker (API-only process)")
-		model      = fs.String("model", os.Getenv("KEEL_MODEL"), "model id")
-		provider   = fs.String("provider", os.Getenv("KEEL_PROVIDER"), "provider name")
-		baseURL    = fs.String("base-url", os.Getenv("KEEL_BASE_URL"), "provider base URL")
-		protocol   = fs.String("protocol", os.Getenv("KEEL_PROTOCOL"), "provider protocol")
-		apiKey     = fs.String("api-key", os.Getenv("KEEL_API_KEY"), "provider API key")
-		prompt     = fs.String("system-prompt", envOr("KEEL_SYSTEM_PROMPT", ""), "system prompt override")
-		skills     = fs.String("skills-roots", os.Getenv("KEEL_SKILLS_ROOTS"), "OS path list of skill roots")
-		skillsRoot = fs.String("skills-root", defaultSkillsRoot(), "managed skill library root ($KEEL_HOME/skills)")
-		loadoutID  = fs.String("loadout-id", envOr("KEEL_LOADOUT_ID", ""), "loadout id")
-		loadoutRev = fs.Int64("loadout-revision", envInt64("KEEL_LOADOUT_REVISION", 1), "loadout revision")
-		mcpConfig  = fs.String("mcp", os.Getenv("KEEL_MCP_CONFIG"), "global mcp.json path (empty disables MCP)")
-		mcpProject = fs.String("mcp-project", os.Getenv("KEEL_MCP_PROJECT"), "project mcp.json path")
+		addr             = fs.String("addr", envOr("KEEL_SERVE_ADDR", defaultServeAddr), "listen address")
+		dsn              = fs.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
+		webDir           = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "static web build directory")
+		casDir           = fs.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
+		tenantRaw        = fs.String("tenant", os.Getenv("KEEL_SERVE_TENANT"), "tenant UUID the server acts as")
+		password         = fs.String("password", os.Getenv("KEEL_SERVE_PASSWORD"), "local passphrase (empty disables auth)")
+		secure           = fs.Bool("cookie-secure", envBool("KEEL_SERVE_COOKIE_SECURE"), "mark the auth cookie Secure (TLS deployments)")
+		runs             = fs.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
+		noWorker         = fs.Bool("no-worker", false, "do not start the agent worker (API-only process)")
+		model            = fs.String("model", os.Getenv("KEEL_MODEL"), "model id")
+		provider         = fs.String("provider", os.Getenv("KEEL_PROVIDER"), "provider name")
+		baseURL          = fs.String("base-url", os.Getenv("KEEL_BASE_URL"), "provider base URL")
+		protocol         = fs.String("protocol", os.Getenv("KEEL_PROTOCOL"), "provider protocol")
+		apiKey           = fs.String("api-key", os.Getenv("KEEL_API_KEY"), "provider API key")
+		prompt           = fs.String("system-prompt", envOr("KEEL_SYSTEM_PROMPT", ""), "system prompt override")
+		skills           = fs.String("skills-roots", os.Getenv("KEEL_SKILLS_ROOTS"), "OS path list of skill roots")
+		skillsRoot       = fs.String("skills-root", defaultSkillsRoot(), "managed skill library root ($KEEL_HOME/skills)")
+		skillsSourceRoot = fs.String("skills-source-root", os.Getenv("KEEL_SKILLS_SOURCE_ROOT"), "managed subscription root (default <skills-root>/sources)")
+		loadoutID        = fs.String("loadout-id", envOr("KEEL_LOADOUT_ID", ""), "loadout id")
+		loadoutRev       = fs.Int64("loadout-revision", envInt64("KEEL_LOADOUT_REVISION", 1), "loadout revision")
+		mcpConfig        = fs.String("mcp", os.Getenv("KEEL_MCP_CONFIG"), "global mcp.json path (empty disables MCP)")
+		mcpProject       = fs.String("mcp-project", os.Getenv("KEEL_MCP_PROJECT"), "project mcp.json path")
 		// modelsConfig carries the tenant models document (providers/rules/selection).
 		modelsConfig = fs.String("models-config", os.Getenv("KEEL_MODELS_CONFIG"), "tenant models document (providers/rules/selection; empty disables provider configuration)")
 		exampleInt   = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
@@ -156,31 +158,32 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	log := slog.New(logsafe.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	opts := serveOptions{
-		Addr:            *addr,
-		DSN:             *dsn,
-		WebDir:          *webDir,
-		CASDir:          *casDir,
-		TenantID:        tenantID,
-		Password:        *password,
-		SecureCookies:   *secure,
-		Runs:            *runs,
-		NoWorker:        *noWorker,
-		Model:           *model,
-		Provider:        *provider,
-		BaseURL:         *baseURL,
-		Protocol:        *protocol,
-		APIKey:          *apiKey,
-		SystemPrompt:    *prompt,
-		SkillsRoots:     splitPaths(*skills),
-		SkillsRoot:      *skillsRoot,
-		LoadoutID:       *loadoutID,
-		LoadoutRevision: *loadoutRev,
-		MCPConfig:       *mcpConfig,
-		MCPProject:      *mcpProject,
-		ModelsConfig:    *modelsConfig,
-		PluginsRoot:     *pluginsRoot,
-		ExampleInterval: *exampleInt,
-		Log:             log,
+		Addr:             *addr,
+		DSN:              *dsn,
+		WebDir:           *webDir,
+		CASDir:           *casDir,
+		TenantID:         tenantID,
+		Password:         *password,
+		SecureCookies:    *secure,
+		Runs:             *runs,
+		NoWorker:         *noWorker,
+		Model:            *model,
+		Provider:         *provider,
+		BaseURL:          *baseURL,
+		Protocol:         *protocol,
+		APIKey:           *apiKey,
+		SystemPrompt:     *prompt,
+		SkillsRoots:      splitPaths(*skills),
+		SkillsRoot:       *skillsRoot,
+		SkillsSourceRoot: *skillsSourceRoot,
+		LoadoutID:        *loadoutID,
+		LoadoutRevision:  *loadoutRev,
+		MCPConfig:        *mcpConfig,
+		MCPProject:       *mcpProject,
+		ModelsConfig:     *modelsConfig,
+		PluginsRoot:      *pluginsRoot,
+		ExampleInterval:  *exampleInt,
+		Log:              log,
 	}
 	if err := runServe(context.Background(), opts); err != nil {
 		log.Error("keel serve failed", "err", err)

@@ -78,6 +78,9 @@ type serveOptions struct {
 	// tenant's active/ directory below it is part of skill discovery, so an
 	// installed skill reaches the next run without restarting the process.
 	SkillsRoot string
+	// SkillsSourceRoot is the only directory a skill subscription may point at
+	// (default <SkillsRoot>/sources).
+	SkillsSourceRoot string
 	// Skills is the built library (set by runServe before the product layer).
 	Skills          *skilllib.Library
 	LoadoutID       string
@@ -446,7 +449,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// actions. Its active/ directory joins skill discovery, so an install reaches
 	// the next run's prompt; the OnChange callback (installed after boot, when the
 	// runtime exists) republishes the registry.
-	skillLibrary := skilllib.New(skilllib.Options{Root: opts.SkillsRoot, Logger: log})
+	skillLibrary := skilllib.New(skilllib.Options{
+		Root:       opts.SkillsRoot,
+		SourceRoot: opts.SkillsSourceRoot,
+		Logger:     log,
+	})
 	opts.Skills = skillLibrary
 	skillsRoots := append([]string(nil), opts.SkillsRoots...)
 	if managed := skillLibrary.ActiveRoot(opts.TenantID); managed != "" {

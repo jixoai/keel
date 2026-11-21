@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -86,6 +87,7 @@ const (
 	CodeSourceInUse      = "source_in_use"
 	CodeUnsupported      = "unsupported_source"
 	CodeSourceMissing    = "source_missing"
+	CodeSourceOutside    = "source_outside_root"
 	CodeVersionMissing   = "version_not_found"
 	CodeLibraryNotWired  = "not_wired"
 	CodeBundleMismatch   = "bundle_mismatch"
@@ -114,6 +116,12 @@ type Options struct {
 	// Root is the managed root ($KEEL_HOME/skills by default). Each tenant gets
 	// its own subtree.
 	Root string
+	// SourceRoot is the only directory a subscription may point at. It defaults
+	// to <Root>/sources. A source URL is resolved inside it and stored as a
+	// logical relative path; an absolute path outside it (including a symlink
+	// that resolves outside) is refused. This is what keeps the model-facing
+	// `skills sources subscribe` action from reading arbitrary host trees.
+	SourceRoot string
 	// Now overrides the clock (version timestamps, tests).
 	Now func() time.Time
 	// Logger receives non-fatal diagnostics (a source that cannot be read while
@@ -130,11 +138,12 @@ type Options struct {
 // crash, not against a second process (a deployment serving the same root from
 // two processes is out of scope, like the plugin manager's root).
 type Library struct {
-	root     string
-	now      func() time.Time
-	logger   *slog.Logger
-	onChange func()
-	mu       sync.Mutex
+	root       string
+	sourceRoot string
+	now        func() time.Time
+	logger     *slog.Logger
+	onChange   func()
+	mu         sync.Mutex
 }
 
 // New builds a library rooted at opts.Root. The root is created lazily on the
@@ -148,7 +157,20 @@ func New(opts Options) *Library {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	}
-	return &Library{root: strings.TrimSpace(opts.Root), now: now, logger: logger, onChange: opts.OnChange}
+	root := strings.TrimSpace(opts.Root)
+	sourceRoot := strings.TrimSpace(opts.SourceRoot)
+	if sourceRoot == "" && root != "" {
+		sourceRoot = filepath.Join(root, "sources")
+	}
+	return &Library{root: root, sourceRoot: sourceRoot, now: now, logger: logger, onChange: opts.OnChange}
+}
+
+// SourceRoot is the managed subscription root (empty when not configured).
+func (l *Library) SourceRoot() string {
+	if l == nil {
+		return ""
+	}
+	return l.sourceRoot
 }
 
 // Root is the managed root (empty when the library is not configured).
@@ -214,17 +236,20 @@ type Record struct {
 	Trust       string `json:"trust"`
 	SourceID    string `json:"sourceId,omitempty"`
 	SourceKind  string `json:"sourceKind,omitempty"`
-	// SourceURL is the origin update reads (a local directory today). It is
-	// informational for the operator; no credential ever lives in it.
+	// SourceURL is the origin update reads, relative to the managed source root
+	// (for example "team"). It is logical, never a host absolute path.
 	SourceURL   string    `json:"sourceUrl,omitempty"`
 	CurrentHash string    `json:"currentHash"`
 	PinnedHash  string    `json:"pinnedHash,omitempty"`
 	InstalledAt time.Time `json:"installedAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 	Versions    []Version `json:"versions"`
-	Path        string    `json:"path"`
-	FileCount   int       `json:"fileCount"`
-	Bytes       int64     `json:"bytes"`
+	// Path is the logical active path ("active/<name>"); ActivePath is the
+	// host path the library itself reads. Only Path crosses the wire.
+	Path       string `json:"path"`
+	ActivePath string `json:"-"`
+	FileCount  int    `json:"fileCount"`
+	Bytes      int64  `json:"bytes"`
 	// UpdateAvailable is true when the recorded origin holds a bundle whose
 	// hash differs from CurrentHash. AvailableHash names it.
 	UpdateAvailable bool   `json:"updateAvailable"`
@@ -236,10 +261,12 @@ type Record struct {
 	Diagnostics []string `json:"diagnostics,omitempty"`
 }
 
-// Snapshot is the whole tenant library as one read.
+// Snapshot is the whole tenant library as one read. Root is the host path used
+// by the library's own diagnostics; it is deliberately not serialized (the
+// settings/CLI wire must not leak absolute paths).
 type Snapshot struct {
 	Revision int64    `json:"revision"`
-	Root     string   `json:"root"`
+	Root     string   `json:"-"`
 	Skills   []Record `json:"skills"`
 	Sources  []Source `json:"sources"`
 }
@@ -277,6 +304,10 @@ type InstallRequest struct {
 	// AllowUntrusted acknowledges a bundle from an untrusted source. It is an
 	// explicit operator act, never a default.
 	AllowUntrusted bool
+	// ForceUntrusted is the model-face guard: the record is untrusted even when
+	// the source is trusted (or the caller supplied another trust label). Only
+	// the in-process tool backend sets it; operator routes never do.
+	ForceUntrusted bool
 	// Pin activates and pins the installed version in one step.
 	Pin bool
 }
@@ -470,7 +501,8 @@ func (l *Library) record(item entry, tenantRoot string, check bool) Record {
 		InstalledAt: item.InstalledAt,
 		UpdatedAt:   item.UpdatedAt,
 		Versions:    append([]Version(nil), item.Versions...),
-		Path:        filepath.Join(tenantRoot, "active", item.Name),
+		Path:        filepath.ToSlash(filepath.Join("active", item.Name)),
+		ActivePath:  filepath.Join(tenantRoot, "active", item.Name),
 	}
 	sort.Slice(record.Versions, func(i, j int) bool { return record.Versions[i].CreatedAt.After(record.Versions[j].CreatedAt) })
 	for _, version := range item.Versions {
@@ -482,9 +514,9 @@ func (l *Library) record(item entry, tenantRoot string, check bool) Record {
 	}
 	// The active copy must still be the version the index names. A hand edit or
 	// a half-copied tree is a conflict, never silently served.
-	if active, err := skills.LoadBundle(record.Path); err != nil {
+	if active, err := skills.LoadBundle(record.ActivePath); err != nil {
 		record.Conflict = ConflictMissing
-		record.Diagnostics = append(record.Diagnostics, fmt.Sprintf("active copy is unreadable: %v", err))
+		record.Diagnostics = append(record.Diagnostics, "active copy is unreadable; reinstall or inspect the library")
 	} else if active.Hash != item.Current {
 		record.Conflict = ConflictModified
 		record.Diagnostics = append(record.Diagnostics, "the active copy no longer matches its immutable version")
@@ -502,7 +534,7 @@ func (l *Library) checkOrigin(record *Record, item entry) {
 		record.Diagnostics = append(record.Diagnostics, "no source is recorded; updates are manual")
 		return
 	}
-	bundle, err := loadOriginBundle(item.Origin, item.Name)
+	bundle, err := l.loadOriginBundle(item.Origin, item.Name)
 	if err != nil {
 		record.Conflict = ConflictSourceMiss
 		record.Diagnostics = append(record.Diagnostics, "the recorded source is unavailable: "+err.Error())
@@ -540,7 +572,7 @@ func (l *Library) Show(tenantID uuid.UUID, name string) (Detail, error) {
 		record := l.record(*item, tenantRoot, false)
 		record.UpdateAvailable = false
 		var bundle *skills.Bundle
-		if active, loadErr := skills.LoadBundle(record.Path); loadErr == nil {
+		if active, loadErr := skills.LoadBundle(record.ActivePath); loadErr == nil {
 			bundle = active
 		} else {
 			// A missing active copy falls back to the immutable version: the
@@ -549,7 +581,8 @@ func (l *Library) Show(tenantID uuid.UUID, name string) (Detail, error) {
 			versionDir := filepath.Join(tenantRoot, ".versions", item.Current)
 			version, versionErr := skills.LoadBundle(versionDir)
 			if versionErr != nil {
-				return false, errorf(CodeNotFound, "skill %q has no readable content: %v", name, loadErr)
+				l.logger.Warn("skilllib: unreadable skill content", "skill", name, "active", loadErr, "version", versionErr)
+				return false, errorf(CodeNotFound, "skill %q has no readable content", name)
 			}
 			bundle = version
 		}
@@ -590,7 +623,9 @@ func (l *Library) Install(tenantID uuid.UUID, req InstallRequest) (Record, error
 			}
 		}
 		trust := req.Trust
-		if source != nil {
+		if req.ForceUntrusted {
+			trust = TrustUntrusted
+		} else if source != nil {
 			trust = source.Trust
 		}
 		if trust == "" {
@@ -619,7 +654,8 @@ func (l *Library) Install(tenantID uuid.UUID, req InstallRequest) (Record, error
 			return false, err
 		}
 		if err := skills.ReplaceBundle(filepath.Join(tenantRoot, "active", name), bundle); err != nil {
-			return false, err
+			l.logger.Warn("skilllib: materialise active copy", "tenant", tenantID, "skill", name, "error", err)
+			return false, errorf(CodeInvalid, "materialise the active copy failed")
 		}
 		now := l.now()
 		if item == nil {
@@ -710,7 +746,8 @@ func (l *Library) Update(tenantID uuid.UUID, name string, req UpdateRequest) (Up
 			return false, err
 		}
 		if err := skills.ReplaceBundle(filepath.Join(tenantRoot, "active", name), bundle); err != nil {
-			return false, err
+			l.logger.Warn("skilllib: materialise active copy", "tenant", tenantID, "skill", name, "error", err)
+			return false, errorf(CodeInvalid, "materialise the active copy failed")
 		}
 		now := l.now()
 		item.Current = bundle.Hash
@@ -757,10 +794,12 @@ func (l *Library) Pin(tenantID uuid.UUID, name, hash string) (Record, error) {
 		versionDir := filepath.Join(tenantRoot, ".versions", hash)
 		bundle, err := skills.LoadBundle(versionDir)
 		if err != nil {
-			return false, errorf(CodeBundleMismatch, "version %s is unreadable: %v", short(hash), err)
+			l.logger.Warn("skilllib: unreadable version", "skill", name, "version", hash, "error", err)
+			return false, errorf(CodeBundleMismatch, "version %s is unreadable", short(hash))
 		}
 		if err := skills.ReplaceBundle(filepath.Join(tenantRoot, "active", name), bundle); err != nil {
-			return false, err
+			l.logger.Warn("skilllib: materialise active copy", "tenant", tenantID, "skill", name, "error", err)
+			return false, errorf(CodeInvalid, "materialise the active copy failed")
 		}
 		item.Current = hash
 		item.Pinned = hash
@@ -806,7 +845,8 @@ func (l *Library) Remove(tenantID uuid.UUID, name string) (bool, error) {
 			return false, errorf(CodeNotFound, "no skill named %q", name)
 		}
 		if err := os.RemoveAll(filepath.Join(tenantRoot, "active", name)); err != nil {
-			return false, err
+			l.logger.Warn("skilllib: remove active copy", "tenant", tenantID, "skill", name, "error", err)
+			return false, errorf(CodeInvalid, "remove the active copy failed")
 		}
 		idx.removeEntry(name)
 		l.collectVersions(tenantRoot, idx)
@@ -835,23 +875,25 @@ func (l *Library) Sources(tenantID uuid.UUID) ([]Source, error) {
 // unsupported_source: accepting a source this build cannot sync would make
 // "check for updates" a lie.
 func (l *Library) Subscribe(tenantID uuid.UUID, source Source) (Source, error) {
-	if source.Trust == "" {
-		source.Trust = TrustUntrusted
+	if l == nil || l.root == "" {
+		return Source{}, errorf(CodeLibraryNotWired, "the skill library is not configured")
 	}
-	if err := validateSource(source); err != nil {
+	if tenantID == uuid.Nil {
+		return Source{}, errorf(CodeInvalid, "a tenant is required")
+	}
+	normalized, err := l.normalizeSource(source)
+	if err != nil {
 		return Source{}, err
 	}
+	source = normalized
 	var stored Source
-	err := l.withIndex(tenantID, func(idx *index, _ string) (bool, error) {
+	err = l.withIndex(tenantID, func(idx *index, _ string) (bool, error) {
 		if existing := idx.source(source.ID); existing != nil {
 			if existing.Kind == source.Kind && existing.URL == source.URL && existing.Trust == source.Trust {
 				stored = *existing
 				return false, nil
 			}
 			return false, errorf(CodeAlreadyExists, "source %q already exists", source.ID)
-		}
-		if absolute, absErr := filepath.Abs(source.URL); absErr == nil {
-			source.URL = absolute
 		}
 		source.CreatedAt = l.now()
 		idx.Sources = append(idx.Sources, source)
@@ -912,7 +954,7 @@ func (l *Library) resolveInstallBundle(idx *index, req InstallRequest) (*skills.
 		if req.Name == "" {
 			return nil, errorf(CodeInvalid, "installing from source %q needs the skill name", req.SourceID)
 		}
-		return loadOriginBundle(originFor(source), req.Name)
+		return l.loadOriginBundle(originFor(source), req.Name)
 	}
 	if req.Name == "" {
 		return nil, errorf(CodeInvalid, "an install needs files, a directory, a source, or a name with a description and body")
@@ -954,14 +996,14 @@ func (l *Library) resolveUpdateBundle(item entry, idx *index, req UpdateRequest)
 		return bundle, nil
 	}
 	if item.Origin.Kind != "" && item.Origin.URL != "" {
-		return loadOriginBundle(item.Origin, item.Name)
+		return l.loadOriginBundle(item.Origin, item.Name)
 	}
 	if req.SourceID != "" {
 		source := idx.source(req.SourceID)
 		if source == nil {
 			return nil, errorf(CodeNotFound, "no source named %q", req.SourceID)
 		}
-		return loadOriginBundle(originFor(source), item.Name)
+		return l.loadOriginBundle(originFor(source), item.Name)
 	}
 	return nil, errorf(CodeNoSourceRecorded,
 		"skill %q has no source to update from; pass files or a directory", item.Name)
@@ -999,29 +1041,34 @@ func loadDirBundle(dir, name string) (*skills.Bundle, error) {
 		dir, skills.SkillFileName, name)
 }
 
-func loadOriginBundle(source origin, name string) (*skills.Bundle, error) {
+func (l *Library) loadOriginBundle(source origin, name string) (*skills.Bundle, error) {
 	if source.Kind != SourceLocal {
 		return nil, errorf(CodeUnsupported, "source kind %q is not supported", source.Kind)
 	}
 	if source.URL == "" {
 		return nil, errorf(CodeNoSourceRecorded, "the source has no URL")
 	}
-	abs, err := filepath.Abs(source.URL)
+	dirRel, dirAbs, err := l.resolveSourceDir(source.URL)
 	if err != nil {
-		return nil, errorf(CodeSourceMissing, "resolve %q: %v", source.URL, err)
+		return nil, err
 	}
-	if fileExists(filepath.Join(abs, skills.SkillFileName)) {
-		bundle, err := skills.LoadBundle(abs)
+	if fileExists(filepath.Join(dirAbs, skills.SkillFileName)) {
+		bundle, err := skills.LoadBundle(dirAbs)
 		if err != nil {
-			return nil, bundleError(err)
+			l.logger.Warn("skilllib: invalid source bundle", "source", source.URL, "error", err)
+			return nil, errorf(CodeInvalid, "source %s holds an invalid bundle", source.URL)
 		}
 		return bundle, nil
 	}
-	candidate := filepath.Join(abs, name)
-	if fileExists(filepath.Join(candidate, skills.SkillFileName)) {
-		bundle, err := skills.LoadBundle(candidate)
+	_, skillAbs, err := l.resolveSourceDir(path.Join(dirRel, name))
+	if err != nil {
+		return nil, err
+	}
+	if fileExists(filepath.Join(skillAbs, skills.SkillFileName)) {
+		bundle, err := skills.LoadBundle(skillAbs)
 		if err != nil {
-			return nil, bundleError(err)
+			l.logger.Warn("skilllib: invalid source bundle", "source", source.URL, "skill", name, "error", err)
+			return nil, errorf(CodeInvalid, "source %s holds an invalid bundle for %q", source.URL, name)
 		}
 		return bundle, nil
 	}
@@ -1034,9 +1081,10 @@ func (l *Library) writeVersion(tenantRoot string, bundle *skills.Bundle) error {
 	dir := filepath.Join(tenantRoot, ".versions", bundle.Hash)
 	if err := skills.WriteBundle(dir, bundle); err != nil {
 		if errors.Is(err, skills.ErrBundleMismatch) {
-			return errorf(CodeBundleMismatch, "%v", err)
+			return errorf(CodeBundleMismatch, "the immutable version already exists with different content")
 		}
-		return bundleError(err)
+		l.logger.Warn("skilllib: write immutable version", "version", bundle.Hash, "error", err)
+		return errorf(CodeInvalid, "write the immutable version failed")
 	}
 	return nil
 }
@@ -1127,35 +1175,88 @@ func validateName(name string) error {
 	return nil
 }
 
-func validateSource(source Source) error {
+func (l *Library) normalizeSource(source Source) (Source, error) {
 	if !sourceIDPattern.MatchString(source.ID) {
-		return errorf(CodeInvalid, "source id must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+		return Source{}, errorf(CodeInvalid, "source id must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 	}
 	if source.Kind != SourceLocal {
-		return errorf(CodeUnsupported,
+		return Source{}, errorf(CodeUnsupported,
 			"source kind %q is not supported by this build (only %q)", source.Kind, SourceLocal)
-	}
-	if strings.TrimSpace(source.URL) == "" {
-		return errorf(CodeInvalid, "a source URL is required")
-	}
-	abs, err := filepath.Abs(source.URL)
-	if err != nil {
-		return errorf(CodeInvalid, "resolve source %q: %v", source.URL, err)
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return errorf(CodeSourceMissing, "source directory %q is unavailable: %v", source.URL, err)
-	}
-	if !info.IsDir() {
-		return errorf(CodeInvalid, "source %q is not a directory", source.URL)
 	}
 	if source.Trust == "" {
 		source.Trust = TrustUntrusted
 	}
 	if source.Trust != TrustTrusted && source.Trust != TrustUntrusted {
-		return errorf(CodeInvalid, "source trust must be %q or %q", TrustTrusted, TrustUntrusted)
+		return Source{}, errorf(CodeInvalid, "source trust must be %q or %q", TrustTrusted, TrustUntrusted)
 	}
-	return nil
+	logical, _, err := l.resolveSourceDir(source.URL)
+	if err != nil {
+		return Source{}, err
+	}
+	source.URL = logical
+	return source, nil
+}
+
+// resolveSourceDir resolves a subscription path inside the managed source root
+// and returns its logical (slash) path relative to that root plus its real host
+// path. The symlink-resolved candidate must stay inside the symlink-resolved
+// root: "/etc", "../x" and a symlink pointing outside are all refused. This is
+// the seam that keeps the model-facing subscribe action from reading arbitrary
+// host trees.
+func (l *Library) resolveSourceDir(input string) (string, string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", "", errorf(CodeInvalid, "a source URL is required")
+	}
+	if l == nil || l.sourceRoot == "" {
+		return "", "", errorf(CodeLibraryNotWired, "the skill library has no managed source root")
+	}
+	if err := os.MkdirAll(l.sourceRoot, 0o755); err != nil {
+		l.logger.Warn("skilllib: create source root", "error", err)
+		return "", "", errorf(CodeSourceMissing, "the managed source root is unavailable")
+	}
+	rootAbs, err := filepath.Abs(l.sourceRoot)
+	if err != nil {
+		l.logger.Warn("skilllib: resolve source root", "error", err)
+		return "", "", errorf(CodeSourceMissing, "the managed source root is unavailable")
+	}
+	realRoot, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		l.logger.Warn("skilllib: resolve source root symlinks", "error", err)
+		return "", "", errorf(CodeSourceMissing, "the managed source root is unavailable")
+	}
+	candidate := input
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(realRoot, candidate)
+	}
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		l.logger.Warn("skilllib: resolve source", "source", input, "error", err)
+		return "", "", errorf(CodeInvalid, "source %q is not a valid path", input)
+	}
+	realCandidate, err := filepath.EvalSymlinks(candidateAbs)
+	if err != nil {
+		l.logger.Warn("skilllib: resolve source symlinks", "source", input, "error", err)
+		return "", "", errorf(CodeSourceMissing, "source %q is unavailable", input)
+	}
+	info, err := os.Stat(realCandidate)
+	if err != nil {
+		l.logger.Warn("skilllib: stat source", "source", input, "error", err)
+		return "", "", errorf(CodeSourceMissing, "source %q is unavailable", input)
+	}
+	if !info.IsDir() {
+		return "", "", errorf(CodeInvalid, "source %q is not a directory", input)
+	}
+	rel, err := filepath.Rel(realRoot, realCandidate)
+	if err != nil {
+		l.logger.Warn("skilllib: relativize source", "source", input, "error", err)
+		return "", "", errorf(CodeInvalid, "source %q is not a valid path", input)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", "", errorf(CodeSourceOutside,
+			"source %q must stay inside the managed source root", input)
+	}
+	return filepath.ToSlash(rel), realCandidate, nil
 }
 
 func trustedLabel(source *Source, id string) string {
@@ -1192,7 +1293,8 @@ func (l *Library) Bundle(tenantID uuid.UUID, name string) (*skills.Bundle, error
 		}
 		version, versionErr := skills.LoadBundle(filepath.Join(tenantRoot, ".versions", item.Current))
 		if versionErr != nil {
-			return false, errorf(CodeNotFound, "skill %q has no readable content: %v", name, err)
+			l.logger.Warn("skilllib: unreadable skill content", "skill", name, "active", err, "version", versionErr)
+			return false, errorf(CodeNotFound, "skill %q has no readable content", name)
 		}
 		bundle = version
 		return false, nil
@@ -1214,12 +1316,12 @@ func (l *Library) SkillsForDiscovery(ctx context.Context, tenantID uuid.UUID) ([
 	}
 	out := make([]skills.Skill, 0, len(snapshot.Skills))
 	for _, record := range snapshot.Skills {
-		bundle, err := skills.LoadBundle(record.Path)
+		bundle, err := skills.LoadBundle(record.ActivePath)
 		if err != nil {
 			l.logger.Warn("skilllib: skip unreadable active skill", "skill", record.Name, "error", err)
 			continue
 		}
-		out = append(out, *bundle.WithPath(record.Path).Skill)
+		out = append(out, *bundle.WithPath(record.ActivePath).Skill)
 	}
 	return out, nil
 }

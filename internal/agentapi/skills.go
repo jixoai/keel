@@ -18,6 +18,11 @@ package agentapi
 //     update is visible, and it is not silently applied.
 //   - An untrusted source needs `allowUntrusted:true`; the refusal is a 403 and
 //     the record keeps `trust:"untrusted"` forever.
+//   - Trust and acknowledgement are operator inputs on this route: it is behind
+//     the serve session (or the loopback-only no-password deployment). The
+//     model tool face (`skills sources subscribe` / `skills manage create`)
+//     cannot set either; its subscriptions and authored skills are always
+//     untrusted and must stay inside the managed source root.
 
 import (
 	"bytes"
@@ -79,13 +84,15 @@ func (s *Server) skillsRoutes() {
 // sources were read (the update/conflict fields are only meaningful when it is
 // true).
 type skillsResponse struct {
-	Revision int64              `json:"revision"`
-	Root     string             `json:"root"`
-	Checked  bool               `json:"checked"`
-	Skills   []skilllib.Record  `json:"skills"`
-	Sources  []skilllib.Source  `json:"sources"`
-	Limits   map[string]int     `json:"limits"`
-	Policy   skillsPolicyOnWire `json:"policy"`
+	Revision int64 `json:"revision"`
+	// Root is intentionally absent: the settings wire carries logical paths
+	// only. The library's host root is diagnostics, not a client fact.
+	Root    string             `json:"root,omitempty"`
+	Checked bool               `json:"checked"`
+	Skills  []skilllib.Record  `json:"skills"`
+	Sources []skilllib.Source  `json:"sources"`
+	Limits  map[string]int     `json:"limits"`
+	Policy  skillsPolicyOnWire `json:"policy"`
 }
 
 type skillsPolicyOnWire struct {
@@ -128,7 +135,6 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, skillsResponse{
 		Revision: snapshot.Revision,
-		Root:     snapshot.Root,
 		Checked:  check,
 		Skills:   snapshot.Skills,
 		Sources:  snapshot.Sources,
@@ -469,7 +475,12 @@ func decodeSkillBody(w http.ResponseWriter, r *http.Request, dst any) error {
 func (s *Server) writeSkillError(w http.ResponseWriter, err error) {
 	var typed *skilllib.Error
 	if !errors.As(err, &typed) {
-		writeErr(w, http.StatusInternalServerError, err)
+		// A non-typed failure is an internal one; its text may carry a host
+		// path, so it is logged and the wire gets a stable sentence.
+		s.cfg.Logger.Error("skill settings request failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "the skill library request failed",
+		})
 		return
 	}
 	status := http.StatusBadRequest

@@ -446,6 +446,16 @@ func (f *fakeSkills) SkillsSources(_ context.Context, op string, args json.RawMe
 	return map[string]any{"sources": []any{}}, nil
 }
 
+func TestSkillsSchemaDoesNotExposeTrustArguments(t *testing.T) {
+	registry := builtinRegistry(t, toolsurface.Backends{})
+	schema := string(registry[toolsurface.Skills].Schema())
+	for _, forbidden := range []string{"trust", "allowUntrusted"} {
+		if strings.Contains(schema, forbidden) {
+			t.Fatalf("skills schema exposes %q: %s", forbidden, schema)
+		}
+	}
+}
+
 func TestSkillsManageAndSourcesRouteToTheLibrary(t *testing.T) {
 	discovered := skills.Skill{Name: "pdf", Description: "Read PDFs", Path: "/skills/pdf/SKILL.md", Body: "body"}
 	installed := skills.Skill{Name: "deploy-flow", Description: "Ship it", Path: "/library/deploy-flow/SKILL.md", Body: "steps"}

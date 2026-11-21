@@ -80,6 +80,34 @@ Notes on the full run:
 - The app TUI file passed in isolation and in the final full TUI run; one
   earlier parallel run hit its 30s timeout under load.
 
+## P1 fix — subscription sources are confined to the managed root
+
+A-axis finding: the model could call `skills sources subscribe` with any host
+directory (for example `/etc`) and then install from it, reading a whole tree.
+
+- `internal/skilllib/library.go:resolveSourceDir` resolves a subscription inside
+  the managed source root (default `<skills root>/sources`, configurable with
+  `KEEL_SKILLS_SOURCE_ROOT` / `--skills-source-root`), symlink-resolves both the
+  root and the candidate, and refuses a path whose real location is outside the
+  root. `/etc`, `..` and a symlink pointing outside are typed
+  `source_outside_root`; a legitimate `team` directory is accepted.
+- The model tool face (`skills sources subscribe`, `skills manage create`) forces
+  `untrusted` and ignores `trust`/`allowUntrusted`; `skills manage create` and
+  every edit also set `ForceUntrusted`, so naming a trusted source cannot
+  inherit its label. The `skills` tool schema no longer exposes either argument.
+  Trusted subscriptions / `allowUntrusted` remain operator inputs on the
+  authenticated HTTP/CLI face (documented in `internal/agentapi/skills.go` and
+  `keel skills --help`).
+- P2: wire responses carry logical paths only — `Record.Path` is
+  `active/<name>`, sources are `team` not an absolute directory, `Snapshot.Root`
+  is not serialized and `GET /v1/settings/skills` omits `root`. Host paths in
+  internal failures are logged, not returned (`writeSkillError` fallback and
+  the library's sanitized messages).
+- Regression: `source-confinement.txt` (managed-root accept, `/etc`/`..`/
+  symlink reject, model trust ignored, schema has no trust arguments) and
+  `w7fix-live.txt` (real server: `/etc` and `..` → 400, managed `team` install
+  succeeds, raw settings response contains no `/tmp`).
+
 ## Live smoke
 
 The server ran with a fresh tenant against the test DSN, a temporary skills root

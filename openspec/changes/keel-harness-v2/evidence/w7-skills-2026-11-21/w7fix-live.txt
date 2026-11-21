@@ -1,0 +1,35 @@
+$ live server 127.0.0.1:13772, managed source root /tmp/keel-w7fix-skills/sources
+
+== subscribe /etc (must be refused) ==
+keel: server refused (400 source_outside_root) at http://127.0.0.1:13772: source "/etc" must stay inside the managed source root
+exit=1
+
+== subscribe .. (must be refused) ==
+keel: server refused (400 source_outside_root) at http://127.0.0.1:13772: source ".." must stay inside the managed source root
+exit=1
+
+== subscribe managed relative team ==
+已订阅 team（local，trust=trusted）
+
+== install from managed source ==
+已安装 team-review（9977a16a6cdf，trust=trusted，1 个版本）
+
+== show (logical path/source) ==
+name:        team-review
+description: 团队评审清单 v1
+trust:       trusted
+current:     9977a16a6cdfad0fd69283c54917203f3616df8ca0c57cd90a0682e6cd230560
+source:      team (local) team
+path:        active/team-review
+versions:    1
+  - 9977a16a6cdf  1 files  77 bytes  2026-11-21T10:31:00Z
+
+resources:
+  SKILL.md  77 bytes
+
+--- SKILL.md ---
+1. 对照清单
+
+== raw settings (must not contain /tmp) ==
+{"revision":2,"checked":false,"skills":[{"name":"team-review","description":"团队评审清单 v1","trust":"trusted","sourceId":"team","sourceKind":"local","sourceUrl":"team","currentHash":"9977a16a6cdfad0fd69283c54917203f3616df8ca0c57cd90a0682e6cd230560","installedAt":"2026-11-21T10:31:00.623825Z","updatedAt":"2026-11-21T10:31:00.623825Z","versions":[{"hash":"9977a16a6cdfad0fd69283c54917203f3616df8ca0c57cd90a0682e6cd230560","createdAt":"2026-11-21T10:31:00.623825Z","files":1,"bytes":77}],"path":"active/team-review","fileCount":1,"bytes":77,"updateAvailable":false}],"sources":[{"id":"team","kind":"local","url":"team","trust":"trusted","createdAt":"2026-11-21T10:31:00.606518Z"}],"limits":{"maxBytes":8388608,"maxFileBytes":2097152,"maxFiles":256},"policy":{"trustValues":["trusted","untrusted","local"],"sourceKinds":["local"],"maxFiles":256,"maxBytes":8388608,"maxFileBytes":2097152,"scriptExecution":"bash"}}
+NO_LEAK

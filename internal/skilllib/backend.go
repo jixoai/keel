@@ -82,11 +82,14 @@ func (l *Library) SkillsSources(ctx context.Context, op string, raw json.RawMess
 		return map[string]any{"sources": sources}, nil
 	case "subscribe":
 		id := args.string("id", "source", "sourceId")
+		// The model face cannot choose trust: a subscription it creates is
+		// always untrusted, and an `allowUntrusted` argument has no effect. The
+		// managed source root (not the host) is the only place it can point at.
 		source := Source{
 			ID:    id,
 			Kind:  args.string("kind"),
 			URL:   args.string("url", "path"),
-			Trust: args.string("trust"),
+			Trust: TrustUntrusted,
 		}
 		if source.Kind == "" {
 			source.Kind = SourceLocal
@@ -138,11 +141,16 @@ func (l *Library) manageCreate(tenantID uuid.UUID, args args) (any, error) {
 		files = append(files, skills.FileInput{Path: skills.SkillFileName, Content: document})
 	}
 	record, err := l.Install(tenantID, InstallRequest{
-		Name:           name,
-		Files:          files,
-		SourceID:       args.string("source", "sourceId"),
-		Trust:          TrustLocal,
-		AllowUntrusted: args.bool("allowUntrusted"),
+		Name:     name,
+		Files:    files,
+		SourceID: args.string("source", "sourceId"),
+		// A skill authored by the model is recorded as untrusted: the model
+		// cannot label its own bytes trusted, and any `trust`/`allowUntrusted`
+		// argument is ignored. The internal acknowledgement covers the bytes it
+		// authored; it does not upgrade the provenance.
+		Trust:          TrustUntrusted,
+		AllowUntrusted: true,
+		ForceUntrusted: true,
 		Pin:            args.bool("pin"),
 	})
 	if err != nil {
@@ -293,6 +301,9 @@ func (l *Library) installEdited(tenantID uuid.UUID, name string, files []skills.
 		SourceID:       detail.SourceID,
 		Trust:          detail.Trust,
 		AllowUntrusted: true,
+		// An edit through the model face is authored by the model: the new
+		// version is untrusted even when the skill's source was trusted.
+		ForceUntrusted: true,
 	})
 	if err != nil {
 		return nil, err

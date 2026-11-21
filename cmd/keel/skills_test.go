@@ -42,7 +42,8 @@ func newSkillsStub(t *testing.T) (*skillsStub, *httptest.Server) {
 		},
 		detail: skilllib.Detail{
 			Record: skilllib.Record{Name: "deploy-flow", Description: "Ship a release", Trust: skilllib.TrustLocal,
-				CurrentHash: strings.Repeat("a", 64)},
+				CurrentHash: strings.Repeat("a", 64), SourceID: "team", SourceKind: "local", SourceURL: "team",
+				Path: "active/deploy-flow"},
 			Body:  "1. Build.\n",
 			Files: []skills.BundleFile{{Path: "SKILL.md", Size: 42, Hash: strings.Repeat("b", 64), Mode: 0o644}},
 		},
@@ -130,10 +131,13 @@ func TestSkillsCLIListShowAndSources(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("show = %d: %s", code, stderr)
 	}
-	for _, want := range []string{"description:", "Ship a release", "1. Build.", "SKILL.md"} {
+	for _, want := range []string{"description:", "Ship a release", "1. Build.", "SKILL.md", "path:        active/deploy-flow", "source:      team"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("show output missing %q:\n%s", want, stdout)
 		}
+	}
+	if strings.Contains(stdout, "/tmp/") {
+		t.Fatalf("show leaked a host path:\n%s", stdout)
 	}
 
 	stdout, stderr, code = runSkillsCLI(t, server, "sources", "list")

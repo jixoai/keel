@@ -104,6 +104,7 @@ quota:
 | `KEEL_SYSTEM_SECTIONS` | 额外 section，JSON 数组 `[{"name":"tenant","content":"..."}]` |
 | `KEEL_SKILLS_ROOTS` | 技能根目录，OS path list（如 `~/.agents/skills:/srv/skills`） |
 | `KEEL_SKILLS_ROOT` | **仅 `keel serve`**：租户技能库根（默认 `$KEEL_HOME/skills`）。`<root>/<tenant>/active` 自动加入发现；安装/更新/固定经 `/v1/settings/skills`，版本不可变、按内容哈希去重 |
+| `KEEL_SKILLS_SOURCE_ROOT` | **仅 `keel serve`**：技能订阅源根（默认 `<KEEL_SKILLS_ROOT>/sources`）。订阅源 URL 只能解析到这棵根内；`/etc`、`..`、指向根外的 symlink 一律拒绝。模型工具面只能建 untrusted 源 |
 | `KEEL_FILE_READ_TOOL` | skills 索引里的读文件工具名：`read`（默认）/`bash`/`indirect` |
 | `KEEL_MCP_CONFIG` | 全局 `mcp.json` 路径（空 = 不启用 MCP） |
 | `KEEL_MCP_PROJECT` | 项目 `mcp.json` 路径（仅可信项目） |

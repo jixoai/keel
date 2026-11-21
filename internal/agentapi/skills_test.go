@@ -65,6 +65,10 @@ func TestSkillSettingsInstallShowPinAndRemove(t *testing.T) {
 	if installed.Name != "deploy-flow" || installed.Trust != skilllib.TrustLocal || installed.CurrentHash == "" {
 		t.Fatalf("installed = %+v", installed)
 	}
+	// P2: the wire carries logical paths, not the host root.
+	if strings.HasPrefix(installed.Path, "/") || installed.Path != "active/deploy-flow" {
+		t.Fatalf("installed path = %q, want the logical active path", installed.Path)
+	}
 
 	var listed skillsResponse
 	if code := doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/skills", tenant, nil, &listed); code != 200 {
@@ -72,6 +76,9 @@ func TestSkillSettingsInstallShowPinAndRemove(t *testing.T) {
 	}
 	if len(listed.Skills) != 1 || listed.Skills[0].Name != "deploy-flow" {
 		t.Fatalf("list = %+v", listed.Skills)
+	}
+	if listed.Root != "" {
+		t.Fatalf("list leaked the host root: %q", listed.Root)
 	}
 	if listed.Revision == 0 {
 		t.Fatal("revision did not advance on install")
@@ -110,18 +117,18 @@ func TestSkillSettingsInstallShowPinAndRemove(t *testing.T) {
 }
 
 func TestSkillSettingsTrustPinAndUpdateConflicts(t *testing.T) {
-	_, mutate := newSkillServer(t)
+	library, mutate := newSkillServer(t)
 	server := settingsServer(t, mutate)
 	client := server.Client()
 	tenant := uuid.New()
-	sourceDir := t.TempDir()
+	sourceDir := filepath.Join(library.SourceRoot(), "team")
 	writeSkillSource(t, sourceDir, "alpha", "alpha v1", "body v1")
 
 	// Subscribe an untrusted source; installing without the acknowledgement is
 	// a 403 with the library's code.
 	var source skilllib.Source
 	if code := doSettingsJSON(t, client, http.MethodPost, server.URL+"/v1/settings/skills/sources", tenant, map[string]any{
-		"id": "team", "kind": "local", "url": sourceDir, "trust": "untrusted",
+		"id": "team", "kind": "local", "url": "team", "trust": "untrusted",
 	}, &source); code != 201 {
 		t.Fatalf("POST source = %d", code)
 	}
@@ -140,6 +147,9 @@ func TestSkillSettingsTrustPinAndUpdateConflicts(t *testing.T) {
 	}
 	if installed.Trust != skilllib.TrustUntrusted {
 		t.Fatalf("trust = %q", installed.Trust)
+	}
+	if installed.SourceURL != "team" {
+		t.Fatalf("sourceUrl = %q, want the logical source name", installed.SourceURL)
 	}
 
 	// The source moves: the list shows the update; update needs the
@@ -230,6 +240,15 @@ func TestSkillSettingsValidationAndTenantScope(t *testing.T) {
 	code = doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/skills/missing", tenant, nil, &refusal)
 	if code != 404 || refusal["code"] != skilllib.CodeNotFound {
 		t.Fatalf("missing skill = %d %+v", code, refusal)
+	}
+	// A source outside the managed root is refused even for the operator route.
+	for _, url := range []string{"/etc", ".."} {
+		code = doSettingsJSON(t, client, http.MethodPost, server.URL+"/v1/settings/skills/sources", tenant, map[string]any{
+			"id": "escape", "kind": "local", "url": url, "trust": "trusted",
+		}, &refusal)
+		if code != 400 || refusal["code"] != skilllib.CodeSourceOutside {
+			t.Fatalf("source %q = %d %+v", url, code, refusal)
+		}
 	}
 }
 

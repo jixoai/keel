@@ -76,7 +76,7 @@ Usage:
   keel skills unpin <name>
   keel skills remove <name>
   keel skills sources list [--json]
-  keel skills sources subscribe --id <id> --url <directory> [--kind local] [--trust trusted|untrusted]
+  keel skills sources subscribe --id <id> --url <relative-dir> [--kind local] [--trust trusted|untrusted]
   keel skills sources unsubscribe <id>
 
 Commands:
@@ -97,7 +97,10 @@ Common flags:
   --server <addr>   keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
   --json            print the raw response instead of a table
 
-The library is tenant-scoped by the server session. A skill's scripts are never
+The library is tenant-scoped by the server session. A trusted source and
+--allow-untrusted are operator acts: the CLI authenticates with the serve
+passphrase (POST /v1/auth/login), and the model-facing skills tool cannot set
+either or subscribe outside the managed source root. A skill's scripts are never
 executed by this CLI (or by the library): run them through the bash tool so the
 sandbox, job accounting and output bounds apply.
 Authentication: KEEL_SERVE_PASSWORD is exchanged for the session cookie
@@ -448,7 +451,7 @@ func runSkillsSourcesCmd(args []string, stdout, stderr io.Writer) int {
 
 Usage:
   keel skills sources list [--json]
-  keel skills sources subscribe --id <id> --url <directory> [--kind local] [--trust trusted|untrusted]
+  keel skills sources subscribe --id <id> --url <relative-dir> [--kind local] [--trust trusted|untrusted]
   keel skills sources unsubscribe <id>
 `)
 		return 2
@@ -508,7 +511,7 @@ func runSkillsSourcesSubscribe(args []string, stdout, stderr io.Writer) int {
 	server, asJSON := commonFlags(fs)
 	id := fs.String("id", "", "source id")
 	kind := fs.String("kind", skilllib.SourceLocal, "source kind (local)")
-	sourceURL := fs.String("url", "", "source directory")
+	sourceURL := fs.String("url", "", "source directory relative to the managed source root (absolute only inside it)")
 	trust := fs.String("trust", skilllib.TrustUntrusted, "trusted|untrusted")
 	if _, err := parseInterleaved(fs, args); err != nil {
 		return 2
