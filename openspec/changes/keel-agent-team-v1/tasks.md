@@ -68,8 +68,9 @@
 - [x] 系统提示词：inline / AGENTS.md 文件引用进入 run：`internal/agent/binding.go`（per-attempt 解析）+ `internal/host/host.go`（`RenderSystemPrompt` 保留动态段）+ `internal/servicehost/binding.go`（文件引用按部署根解析、越界拒绝、读取失败降级）；证据 `go test ./internal/agent/ ./internal/host/ ./internal/servicehost/` + `evidence/runtime-20261114-211425/wire-requests.jsonl`（captain 请求的 system 以 agent 文本开头，插件段 `<plugin_standard>` 仍在）
 - [x] 头像：确定性 identicon（seed）、上传/URL 覆盖、失败回退
 - [x] 名字/描述/标签可编辑；默认值只是建议
-- [x] CLI：`keel agent list|show|create|update|delete|start|stop`（start/stop：`cmd/keel/agentteam_runtime.go`；
+- [x] CLI：`keel agent list|show|create|update|delete|archive|start|stop`（start/stop：`cmd/keel/agentteam_runtime.go`；
       start = session + 带 `selection.agentId` 的 input，stop = 按最新 selection/captain 扫活会话后 cancel；
+      archive = `cmd/keel/agentteam.go` 的 `runAgentArchive`；
       证据 `cmd/keel/agentteam_test.go` 运行时用例 + `evidence/cli-tail-2026-11-20/agent-start.txt`/`agent-stop-live.txt`）
 - [x] 能力树声明 agent CLI；删除/归档引用保护
 - [x] Agent 库 UI 组件与编辑器
@@ -80,8 +81,9 @@
       不建 `agent_team_members` 表，避免文档与行两套真值；见 store 注释）
 - [x] Team 配置是 DB-backed 文件；revision/hash；执行绑定在 attempt 启动时冻结（实现为 per-attempt 冻结：`internal/servicehost/binding.go` 每次 attempt 读文档，`RunSummary` 记录 agentId/teamId/teamRevision/teamHash/promptHash；证据 `evidence/runtime-20261114-211425/captain-summary.json`：teamRevision=1、teamHash=058a0c57…、promptHash=sha256:2db85c81…）
 - [x] 成员 0..N；成员是 Agent 引用/inline 定义；成员 label/description 可编辑
-- [x] Team CLI：`keel team list|show|create|update|delete|member add|remove|save|start`（save/start：
+- [x] Team CLI：`keel team list|show|create|update|delete|archive|member add|remove|save|start`（save/start：
       `cmd/keel/agentteam_runtime.go`；save = YAML/JSON 文档（必须带 id）POST/PUT 并剥离服务器字段，
+      archive = `cmd/keel/agentteam.go` 的 `runTeamArchive`；
       start = session + 带 `selection.teamId` 的 input；证据 `evidence/cli-tail-2026-11-20/team-save-*.txt`、
       `team-show-export.json`、`team-start.txt`、`team-stop-live.txt`）
       > 遗留（2026-11-20）：`internal/agentteam/cli_specs.go` 另声明 `team member list|save`（本 task 行未列），

@@ -40,7 +40,7 @@ model-plugin MUST 提供 CLI 管理模型，而不仅是模型调用：
 
 ### Requirement: Agent 插件 CLI
 
-agent-plugin MUST 提供 `keel agent list|show|create|update|delete|start|stop`。
+agent-plugin MUST 提供 `keel agent list|show|create|update|delete|archive|start|stop`。
 CLI MUST 能管理 Agent 配置（名字/头像/默认模型/工具/AGENTS.md），不得只支持启动。
 
 #### Scenario: CLI 查看 Agent
@@ -50,7 +50,7 @@ CLI MUST 能管理 Agent 配置（名字/头像/默认模型/工具/AGENTS.md）
 
 ### Requirement: AgentTeam 插件 CLI
 
-agent-team-plugin MUST 提供 `keel team list|show|create|update|delete|member add|remove|list|save|start`。
+agent-team-plugin MUST 提供 `keel team list|show|create|update|delete|archive|member add|remove|list|save|start`。
 每个子命令 MUST 在能力树中声明；队长可调用的子命令由团队能力开关控制，且能力树与
 `teamCli.commands` 白名单 MUST 双向覆盖（不得出现可授权但不存在的死命令）。
 
