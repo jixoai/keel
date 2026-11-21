@@ -489,7 +489,11 @@ function App() {
   });
   return (
     <View style={{ flex: 1, backgroundColor: color.background }}>
-      <If when={store.auth() === "required"} else={<Routed />}>
+      {/* The auth gate is the app's outer wall: only an authenticated session
+          renders the product. `required` (login), `bootstrap` (the deployment
+          has no super admin), `must-change` (the forced password change) and
+          `unknown` (the boot probe, or a dead service) all render the gate. */}
+      <If when={store.auth() !== "ok"} else={<Routed />}>
         <LoginScreen />
       </If>
       <NoticeToasts />

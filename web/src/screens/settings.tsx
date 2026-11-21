@@ -520,21 +520,76 @@ function AboutRow(props: { name: string; value?: string; children?: JSX.Element 
 
 function GeneralSection() {
   return (
-    <Card testID="settings-general">
-      <CardHeader title="通用" description="会话的阅读偏好；只影响这台设备的界面，不进模型配置。" />
+    <View style={{ flexDirection: "column", gap: space.xl }}>
+      <Card testID="settings-general">
+        <CardHeader title="通用" description="会话的阅读偏好；只影响这台设备的界面，不进模型配置。" />
+        <CardContent>
+          <Field
+            orientation="horizontal"
+            hint="回答生成时逐字显示；关闭后整段回复完成才出现。运行中的任务不受影响，下一次生成按新设置进行。"
+          >
+            <Switch
+              checked={store.showPartials()}
+              onChange={(checked) => void store.setPartials(checked)}
+              label={`逐字预览 ${store.showPartials() ? "开" : "关"}`}
+              accessibilityLabel="切换逐字预览"
+              testID="settings-partials"
+            />
+          </Field>
+        </CardContent>
+      </Card>
+      <AccountSessionCard />
+    </View>
+  );
+}
+
+/** The signed-in account and the one session action: logout (change
+ * keel-bot-identity-access, A4.3). The identity is the server's whoami answer,
+ * never a locally remembered name. */
+function AccountSessionCard() {
+  const name = () => {
+    const me = store.identity();
+    if (!me) return "账号信息待读取";
+    return me.displayName || me.username || "当前账号";
+  };
+  const handle = () => {
+    const me = store.identity();
+    return me?.username ? `@${me.username}` : "";
+  };
+  const role = () => {
+    const me = store.identity();
+    if (!me) return "";
+    return me.isSuperAdmin ? "超级管理员" : "普通账号";
+  };
+  return (
+    <Card testID="settings-account">
+      <CardHeader
+        title="当前账号"
+        description="这个浏览器登录的账号。退出后服务端会话立即失效，需要重新输入用户名和密码。"
+      />
       <CardContent>
-        <Field
-          orientation="horizontal"
-          hint="回答生成时逐字显示；关闭后整段回复完成才出现。运行中的任务不受影响，下一次生成按新设置进行。"
-        >
-          <Switch
-            checked={store.showPartials()}
-            onChange={(checked) => void store.setPartials(checked)}
-            label={`逐字预览 ${store.showPartials() ? "开" : "关"}`}
-            accessibilityLabel="切换逐字预览"
-            testID="settings-partials"
-          />
-        </Field>
+        <View style={{ flexDirection: "column", gap: space.md }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+              {name()}
+            </Text>
+            <If when={role() !== ""}>
+              <Badge variant={store.identity()?.isSuperAdmin ? "info" : "secondary"} label={role()} />
+            </If>
+          </View>
+          <If when={handle() !== ""}>
+            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{handle()}</Text>
+          </If>
+          <View style={{ flexDirection: "row" }}>
+            <Button
+              testID="settings-logout"
+              variant="outline"
+              label="退出登录"
+              accessibilityLabel="退出登录"
+              onPress={() => void store.logout()}
+            />
+          </View>
+        </View>
       </CardContent>
     </Card>
   );
