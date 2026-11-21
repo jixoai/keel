@@ -398,9 +398,11 @@ const seatMetadataEdited = (editing: AgentTeamView | undefined): boolean => {
       // label/description, an inline seat carries its definition).
       return Boolean(draft.label?.trim() || draft.description?.trim() || draft.inline);
     }
+    // Compare the values the editor writes (trimmed): opening a seat and
+    // pressing 保存席位 without changing empty text is not a document edit.
     return (
-      (draft.label ?? "") !== (stored.label ?? "") ||
-      (draft.description ?? "") !== (stored.description ?? "") ||
+      (draft.label?.trim() ?? "") !== (stored.label?.trim() ?? "") ||
+      (draft.description?.trim() ?? "") !== (stored.description?.trim() ?? "") ||
       (draft.inline ? JSON.stringify(draft.inline) : "") !== (stored.inline ? JSON.stringify(stored.inline) : "")
     );
   });
