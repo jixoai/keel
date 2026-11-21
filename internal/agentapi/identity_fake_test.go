@@ -66,18 +66,24 @@ func (f *fakeAccess) BotOwnerAccount(context.Context, uuid.UUID, string) (uuid.U
 	return f.owner, f.archived, nil
 }
 
-func (f *fakeAccess) AuditGrant(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, string, string, map[string]any) {
+func (f *fakeAccess) AuditGrant(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, string, string, map[string]any) error {
+	return nil
 }
 
-func (f *fakeAccess) AuditRelation(context.Context, uuid.UUID, uuid.UUID, string, string, string, string, string, string) {
+func (f *fakeAccess) AuditRelation(context.Context, uuid.UUID, uuid.UUID, string, string, string, string, string, string) error {
+	return nil
 }
 
-func (f *fakeAccess) AuditSuperAdmin(context.Context, access.Principal, string, map[string]any) {}
-
-func (f *fakeAccess) AuditInvoke(context.Context, uuid.UUID, access.Principal, string, uuid.UUID, string) {
+func (f *fakeAccess) AuditSuperAdmin(context.Context, access.Principal, string, map[string]any) error {
+	return nil
 }
 
-func (f *fakeAccess) AuditBotKey(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, string, string) {
+func (f *fakeAccess) AuditInvoke(context.Context, uuid.UUID, access.Principal, string, uuid.UUID, string) error {
+	return nil
+}
+
+func (f *fakeAccess) AuditBotKey(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, string, string) error {
+	return nil
 }
 
 func (f *fakeAccess) Denied(_ context.Context, _ access.Principal, decision access.Decision, _ access.Resource) {

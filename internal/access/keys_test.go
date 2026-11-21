@@ -63,13 +63,16 @@ func TestRegistryCoversAcceptanceSurface(t *testing.T) {
 		KeyBotRead, KeyBotCreate, KeyBotManage, KeyBotBind, KeyBotInvoke,
 		KeyTeamBotRead, KeyTeamBotManage,
 		KeyTriggerRead, KeyTriggerManage,
-		KeyPluginRead, KeyPluginLifecycleInstall, KeyPluginLifecycleEnable,
+		KeyPluginRead, KeyPluginInvoke, KeyPluginLifecycleInstall, KeyPluginLifecycleEnable,
 		KeyPluginLifecycleDisable, KeyPluginLifecycleUninstall,
-		KeyModelRead, KeyModelConfigure,
+		KeyModelRead, KeyModelConfigure, KeyModelInvoke,
 		KeySecretReadMetadata, KeySecretReadValue, KeySecretWrite,
 		KeyAccountRead, KeyAccountManage, KeyAccountCredentialReset, KeyAccountPermissionGrant,
 		KeyPermissionRead, KeyPermissionManage,
 		KeyAuditRead,
+		KeyAppRead, KeyFileRead, KeyFileWrite, KeyMediaRead, KeyMediaInvoke,
+		KeyMCPRead, KeyMCPUse, KeySkillRead, KeySkillManage,
+		KeyNotificationRead, KeyNotificationWrite,
 	}
 	for _, key := range required {
 		if err := ValidateKey(key); err != nil {

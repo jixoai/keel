@@ -204,7 +204,7 @@ func newNotifyAPI(t *testing.T) *notifyAPI {
 		Now:       clock.Now,
 		URLTTL:    30 * time.Minute,
 	})
-	server := httptest.NewServer(New(Config{Notifications: service, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Notifications: service, Access: permitAllAccess(), Logger: testLogger()}))
 	t.Cleanup(server.Close)
 	return &notifyAPI{server: server, service: service, clock: clock, tenant: tenant, session: session}
 }

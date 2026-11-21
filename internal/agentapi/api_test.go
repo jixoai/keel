@@ -395,6 +395,7 @@ func TestExtensionRoutes(t *testing.T) {
 	defer hooks.Close()
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Starter: starter, Hooks: hooks, Logger: testLogger()})
 	defer triggers.Close()
+	tenant := uuid.New()
 	plugin := &agentext.Plugin{
 		ID:       "test.plugin",
 		Version:  "1.0.0",
@@ -403,8 +404,10 @@ func TestExtensionRoutes(t *testing.T) {
 			Name:   "test_tool",
 			Schema: json.RawMessage(`{"type":"object"}`),
 		}},
-		Hooks:    []agentext.HookSpec{{Event: agentext.HookTurnStarted, Handler: func(context.Context, agentext.HookPayload) error { return nil }}},
-		Triggers: []agentext.TriggerSpec{{ID: "test.webhook", Kind: agentext.TriggerWebhook, Prompt: "go", Enabled: true}},
+		Hooks: []agentext.HookSpec{{Event: agentext.HookTurnStarted, Handler: func(context.Context, agentext.HookPayload) error { return nil }}},
+		// A webhook trigger registered for a tenant is listed to that tenant;
+		// an unowned trigger is not listable (cross-tenant prompt leak).
+		Triggers: []agentext.TriggerSpec{{ID: "test.webhook", Kind: agentext.TriggerWebhook, TenantID: tenant.String(), Prompt: "go", Enabled: true}},
 	}
 	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
 		Plugins: []*agentext.Plugin{plugin}, Hooks: hooks, Triggers: triggers, Logger: testLogger(),
@@ -414,10 +417,9 @@ func TestExtensionRoutes(t *testing.T) {
 	}
 	defer plugins.Close(context.Background())
 	server := httptest.NewServer(New(Config{
-		Plugins: plugins, Triggers: triggers, Hooks: hooks, Logger: testLogger(),
+		Plugins: plugins, Triggers: triggers, Hooks: hooks, Access: permitAllAccess(), Logger: testLogger(),
 	}))
 	defer server.Close()
-	tenant := uuid.New()
 
 	var pluginsBody struct {
 		Generation int64 `json:"generation"`
@@ -567,7 +569,7 @@ func TestSubagentRoutes(t *testing.T) {
 			return nil
 		},
 	})
-	server := httptest.NewServer(New(Config{Subagents: runner, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Subagents: runner, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 	spawnURL := server.URL + "/v1/sessions/" + parent.String() + "/subagents"
 
@@ -655,7 +657,7 @@ func TestSubagentCapacityIs429(t *testing.T) {
 		Gate: newFakeGate(parent), Edge: committer, Events: &fakeEvents{},
 		Runs: &fakeRuns{state: agentext.RunState{Status: "done"}}, Logger: testLogger(),
 	})
-	server := httptest.NewServer(New(Config{Subagents: runner, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Subagents: runner, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 	req, err := http.NewRequest(http.MethodPost,
 		server.URL+"/v1/sessions/"+parent.String()+"/subagents",
@@ -691,7 +693,7 @@ func TestResumeRouteAnswersTerminalExplicitly(t *testing.T) {
 		Gate: newFakeGate(parent), Edge: &fakeCommitter{}, Events: events,
 		Runs: &fakeRuns{state: agentext.RunState{Status: "done"}}, Logger: testLogger(),
 	})
-	server := httptest.NewServer(New(Config{Subagents: runner, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Subagents: runner, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 	var body struct {
 		Resume agentext.ResumeResult `json:"resume"`
