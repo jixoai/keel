@@ -91,13 +91,39 @@
 - [ ] 管理员重置密码与 CLI reset 对齐：强制下次改密
 - [ ] `bot.invoke` 关系阈值（viewer vs editor/owner）产品裁决
 
-### A4.2 重命名与旧入口删除
+### A4.2 全路由权限收口与重命名
+
+#### A4.2a 全路由权限收口（P1，先做）
+
+- [ ] **路由矩阵**：为每一条 `/v1` 路由声明 required key（+ 资源 relation）；未登记路由默认拒绝；
+      mux 注册集与矩阵做测试对表（防“加路由不加清单”）
+- [ ] **单资源 Session 路由**：events/input/run/retry/decisions/approvals/notifications/
+      team-tasks/subagents/fork/resume/SSE/cancel/archive 统一 `session.read|write|delete` + relation；
+      负控：零 grant 账号读/写他人 session 403，不能经 input 驱动高权限 Bot 绕过 `bot.invoke`
+- [ ] **旧产品面**：`/v1/agents`、`/v1/teams` CRUD 在 A4.2b 删除前先加 `account.manage`/`bot.manage`
+      门，禁止零权限裸奔；`/v1/admin/tenants*` 旧 operator 面同步退役
+- [ ] **Trigger**：`/v1/triggers` 读/火/管理接 `trigger.read|manage` + relation；租户过滤
+- [ ] **设置面**：providers/models/secrets/skills 读写接 `model.read|configure`、`secret.*`、`skill.*`
+      （A3 registry 缺 skill key 时补）；零 grant 账号不能写密钥/模型
+- [ ] **决策/审批/通知/团队任务**：接对应 `session.read|write` 或 `decision.*`/`approval.*` key
+- [ ] **Bot 创建/Profile 改绑同事务**：create+owner relation、rebind+旧关系迁移原子化；
+      部分失败不留下无 owner Bot / stale owner
+- [ ] **直授读取拒绝截断**：>500 直授报错，不静默丢 grant
+- [ ] **审计同事务**：grant/invoke/relation 与业务写同事务落 `auth_events`，失败不静默
+- [ ] **`requireKey` 资源型 key 禁止静默降级**：误用直接 500/panic，强制显式 requireResource
+- [ ] **bot.invoke 运行时**：captain→member 的工具调用/子 Bot 启动也检查 `bot.invoke`；
+      撤销后 roster 下一次启动失效（L20）
+- [ ] 测试：路由矩阵快照、全端点 200/403/404、跨租户、零 grant、旧路由门、rebind 部分失败、
+      >500 直授、roster archived 语义
+
+#### A4.2b 重命名与旧入口删除
 
 - [ ] 删除产品词汇 `Agent`：API/CLI/UI/文档/表名统一为 Bot
 - [ ] `TeamAgent` → `TeamBot`；TeamBot = Mission + Roster，不是权限主体（L12）
 - [ ] 旧 `/v1/agents` `/v1/teams` 404；旧 `keel agent/team` 删除
 - [ ] 旧 `api_keys`/`agents`/`agent_teams` 表退役；旧 `keel admin tenant/key` 删除
 - [ ] 产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、`agentext`→`harnessext`
+- [ ] Profile/Role HTTP CRUD；管理端重置密码强制下次改密
 
 ### A4.3 Web 登录与数据层（L5 前置）
 
