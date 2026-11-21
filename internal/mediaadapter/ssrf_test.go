@@ -30,7 +30,7 @@ func TestHTTPFetcherRefusesLoopback(t *testing.T) {
 	if hits.Load() != 0 {
 		t.Fatal("the loopback fixture was reached")
 	}
-	if fetcher.Client.Transport.(*http.Transport).Proxy != nil {
+	if fetcher.client.Transport.(*http.Transport).Proxy != nil {
 		t.Fatal("the asset transport must not use an environment proxy: it would bypass the address guard")
 	}
 }

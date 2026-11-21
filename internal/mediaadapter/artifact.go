@@ -184,7 +184,7 @@ type AssetFetcher interface {
 // boundary. AllowPrivateHosts is the explicit opt-out for tests and a trusted
 // local deployment.
 type HTTPFetcher struct {
-	Client   *http.Client
+	client   *http.Client
 	MaxBytes int64
 	// AllowPrivateHosts disables the address guard. Never enable it for a
 	// deployment whose providers are not fully trusted.
@@ -241,7 +241,7 @@ func NewHTTPFetcherWithOptions(opts HTTPFetcherOptions) *HTTPFetcher {
 		MaxIdleConnsPerHost:   8,
 		IdleConnTimeout:       90 * time.Second,
 	}
-	fetcher.Client = &http.Client{
+	fetcher.client = &http.Client{
 		Timeout:   2 * time.Minute,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -434,7 +434,7 @@ func publicAssetIP(ip net.IP) bool {
 
 // Fetch implements AssetFetcher.
 func (f *HTTPFetcher) Fetch(ctx context.Context, rawURL string) (FetchedAsset, error) {
-	if f == nil || f.Client == nil {
+	if f == nil || f.client == nil {
 		return FetchedAsset{}, configError("artifact", "fetch", "asset fetcher is not configured")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
@@ -447,7 +447,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, rawURL string) (FetchedAsset, e
 	if err != nil {
 		return FetchedAsset{}, artifactError("artifact", "fetch", err)
 	}
-	resp, err := f.Client.Do(req)
+	resp, err := f.client.Do(req)
 	if err != nil {
 		return FetchedAsset{}, providerError("artifact", "fetch", err)
 	}
