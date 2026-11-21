@@ -28,21 +28,95 @@ import (
 
 // --- registry fake -------------------------------------------------------
 
+// fakeSessionBinding is the map-backed mirror of one sessions row's binding
+// projection plus the lifecycle facts the reference query reads.
+type fakeSessionBinding struct {
+	AgentID   string
+	TeamID    string
+	State     string
+	Archived  bool
+	RunStatus string
+}
+
 // memoryRegistry is the AgentTeamRegistry seam over maps. It mirrors the SQL
 // behaviour the handlers rely on: per-tenant keys, create-never-overwrites,
 // revision-guarded team updates and reference lookup by parsing the documents
 // (the same information the store's jsonb query reads).
 type memoryRegistry struct {
-	mu     sync.Mutex
-	agents map[string]map[string]store.AgentRecord
-	teams  map[string]map[string]store.TeamRecord
+	mu       sync.Mutex
+	agents   map[string]map[string]store.AgentRecord
+	teams    map[string]map[string]store.TeamRecord
+	sessions map[string]map[string]fakeSessionBinding
 }
 
 func newMemoryRegistry() *memoryRegistry {
 	return &memoryRegistry{
-		agents: make(map[string]map[string]store.AgentRecord),
-		teams:  make(map[string]map[string]store.TeamRecord),
+		agents:   make(map[string]map[string]store.AgentRecord),
+		teams:    make(map[string]map[string]store.TeamRecord),
+		sessions: make(map[string]map[string]fakeSessionBinding),
 	}
+}
+
+// bindSession records one session binding in the fake (the store's SetSessionBinding
+// equivalent for handler tests).
+func (m *memoryRegistry) bindSession(tenantID uuid.UUID, sessionID, agentID, teamID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	scope := m.sessions[tenantID.String()]
+	if scope == nil {
+		scope = make(map[string]fakeSessionBinding)
+		m.sessions[tenantID.String()] = scope
+	}
+	scope[sessionID] = fakeSessionBinding{AgentID: agentID, TeamID: teamID, State: "active"}
+}
+
+// archiveSession marks one fake session archived; a live run still counts.
+func (m *memoryRegistry) archiveSession(tenantID uuid.UUID, sessionID, runStatus string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	scope := m.sessions[tenantID.String()]
+	if scope == nil {
+		return
+	}
+	binding := scope[sessionID]
+	binding.Archived = true
+	binding.RunStatus = runStatus
+	scope[sessionID] = binding
+}
+
+func (m *memoryRegistry) sessionsReferencing(tenantID uuid.UUID, match func(fakeSessionBinding) bool) []store.SessionReference {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]store.SessionReference, 0)
+	for id, binding := range m.sessions[tenantID.String()] {
+		if !match(binding) {
+			continue
+		}
+		if binding.Archived && binding.RunStatus != "pending" && binding.RunStatus != "running" {
+			continue
+		}
+		state := binding.State
+		if state == "" {
+			state = "active"
+		}
+		out = append(out, store.SessionReference{
+			ID: id, State: state, Archived: binding.Archived, RunStatus: binding.RunStatus,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (m *memoryRegistry) SessionsReferencingAgent(_ context.Context, tenantID uuid.UUID, agentID string) ([]store.SessionReference, error) {
+	return m.sessionsReferencing(tenantID, func(binding fakeSessionBinding) bool {
+		return binding.AgentID == agentID
+	}), nil
+}
+
+func (m *memoryRegistry) SessionsReferencingTeam(_ context.Context, tenantID uuid.UUID, teamID string) ([]store.SessionReference, error) {
+	return m.sessionsReferencing(tenantID, func(binding fakeSessionBinding) bool {
+		return binding.TeamID == teamID
+	}), nil
 }
 
 func (m *memoryRegistry) CreateAgent(_ context.Context, record store.AgentRecord) (bool, error) {
@@ -575,6 +649,186 @@ func TestAgentDeletionIsRefusedWhileTeamed(t *testing.T) {
 	}
 	if status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/agents/"+member.ID, tenant, nil, nil, nil); status != http.StatusOK {
 		t.Fatalf("delete unseated agent: status %d", status)
+	}
+}
+
+// sessionRefusal is the wire shape of a registry refusal carrying references.
+type sessionRefusal struct {
+	Code       string           `json:"code"`
+	References []map[string]any `json:"references"`
+}
+
+// TestTeamDeletionAndArchiveRefuseSessionBindings pins the team half of the
+// session reference guard: an active binding blocks both delete and archive with
+// 409 team_in_use, archive the session then both succeed, and an archived
+// session that still owns a live run keeps blocking.
+func TestTeamDeletionAndArchiveRefuseSessionBindings(t *testing.T) {
+	hs, registry := newRegistryServer(t)
+	tenant := uuid.NewString()
+	tenantID := uuid.MustParse(tenant)
+	captain := createAgentFixture(t, hs.URL, tenant, "队长", nil)
+
+	var team AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams", tenant, nil,
+		AgentTeamWriteRequest{Name: "被会话绑定的队", Captain: agentteam.TeamMember{AgentID: captain.ID}}, &team); status != http.StatusCreated {
+		t.Fatalf("create team: status %d", status)
+	}
+	session := uuid.NewString()
+	registry.bindSession(tenantID, session, "", team.ID)
+
+	var refusal sessionRefusal
+	for _, request := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"delete", http.MethodDelete, "/v1/teams/" + team.ID},
+		{"archive", http.MethodPost, "/v1/teams/" + team.ID + "/archive"},
+	} {
+		status := call(t, http.DefaultClient, request.method, hs.URL+request.path, tenant, nil, nil, &refusal)
+		if status != http.StatusConflict || refusal.Code != "team_in_use" {
+			t.Fatalf("%s: status %d code %q, want 409 team_in_use", request.name, status, refusal.Code)
+		}
+		if len(refusal.References) != 1 {
+			t.Fatalf("%s references = %+v, want one session", request.name, refusal.References)
+		}
+		reference := refusal.References[0]
+		if reference["kind"] != "session" || reference["id"] != session || reference["state"] != "active" {
+			t.Fatalf("%s reference = %+v, want kind=session id=%s state=active", request.name, reference, session)
+		}
+	}
+
+	// An archived session with a live run still blocks: archive does not cancel.
+	registry.archiveSession(tenantID, session, "running")
+	status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/teams/"+team.ID, tenant, nil, nil, &refusal)
+	if status != http.StatusConflict || refusal.Code != "team_in_use" {
+		t.Fatalf("archived-live delete: status %d code %q, want 409", status, refusal.Code)
+	}
+	if len(refusal.References) != 1 || refusal.References[0]["archived"] != true ||
+		refusal.References[0]["runStatus"] != "running" {
+		t.Fatalf("archived-live reference = %+v", refusal.References)
+	}
+
+	// Settle the run: the archived session stops blocking and archive succeeds,
+	// advancing the revision and marking the view archived.
+	registry.archiveSession(tenantID, session, "done")
+	var archived AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams/"+team.ID+"/archive", tenant, nil, nil, &archived); status != http.StatusOK {
+		t.Fatalf("archive retired team: status %d", status)
+	}
+	if !archived.Archived || archived.Revision != team.Revision+1 {
+		t.Fatalf("archived view = %+v, want archived revision %d", archived, team.Revision+1)
+	}
+	// Idempotent: the second archive answers the same view.
+	var again AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams/"+team.ID+"/archive", tenant, nil, nil, &again); status != http.StatusOK || !again.Archived {
+		t.Fatalf("repeat archive: status %d view %+v", status, again)
+	}
+	// An archived team with no live binding is deletable.
+	if status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/teams/"+team.ID, tenant, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("delete archived team: status %d", status)
+	}
+}
+
+// TestAgentDeletionAndArchiveRefuseSessionBindings pins the agent half: delete
+// lists both the team seat and the session binding; archive is the remedy for a
+// team seat, so only the session binding blocks it; once the session is archived
+// and the team seat removed, the agent is deletable.
+func TestAgentDeletionAndArchiveRefuseSessionBindings(t *testing.T) {
+	hs, registry := newRegistryServer(t)
+	tenant := uuid.NewString()
+	tenantID := uuid.MustParse(tenant)
+	captain := createAgentFixture(t, hs.URL, tenant, "队长", nil)
+	member := createAgentFixture(t, hs.URL, tenant, "成员", nil)
+
+	var team AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams", tenant, nil,
+		AgentTeamWriteRequest{Name: "座位队", Captain: agentteam.TeamMember{AgentID: captain.ID},
+			Members: []agentteam.TeamMember{{AgentID: member.ID}}}, &team); status != http.StatusCreated {
+		t.Fatalf("create team: status %d", status)
+	}
+	session := uuid.NewString()
+	registry.bindSession(tenantID, session, member.ID, "")
+
+	var refusal sessionRefusal
+	status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/agents/"+member.ID, tenant, nil, nil, &refusal)
+	if status != http.StatusConflict || refusal.Code != "agent_in_use" {
+		t.Fatalf("delete member: status %d code %q, want 409 agent_in_use", status, refusal.Code)
+	}
+	if len(refusal.References) != 2 {
+		t.Fatalf("delete references = %+v, want the team and the session", refusal.References)
+	}
+	var sawTeam, sawSession bool
+	for _, reference := range refusal.References {
+		if reference["kind"] == "session" {
+			sawSession = reference["id"] == session
+			continue
+		}
+		sawTeam = reference["id"] == team.ID
+	}
+	if !sawTeam || !sawSession {
+		t.Fatalf("delete references = %+v, want team %s and session %s", refusal.References, team.ID, session)
+	}
+
+	// Archive: the team seat does not block, the live session does.
+	status = call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/agents/"+member.ID+"/archive", tenant, nil, nil, &refusal)
+	if status != http.StatusConflict || refusal.Code != "agent_in_use" {
+		t.Fatalf("archive member: status %d code %q, want 409 agent_in_use", status, refusal.Code)
+	}
+	if len(refusal.References) != 1 || refusal.References[0]["kind"] != "session" {
+		t.Fatalf("archive references = %+v, want only the session", refusal.References)
+	}
+
+	// Archive the session and the agent archives (its team seat is ignored).
+	registry.archiveSession(tenantID, session, "")
+	var archived AgentView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/agents/"+member.ID+"/archive", tenant, nil, nil, &archived); status != http.StatusOK {
+		t.Fatalf("archive agent: status %d", status)
+	}
+	if !archived.Archived {
+		t.Fatalf("archived view = %+v, want archived", archived)
+	}
+	// Delete still refuses while the team seats the agent (the archive did not
+	// silently remove the seat).
+	status = call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/agents/"+member.ID, tenant, nil, nil, &refusal)
+	if status != http.StatusConflict || refusal.Code != "agent_in_use" || len(refusal.References) != 1 {
+		t.Fatalf("post-archive delete: status %d code %q refs %+v, want team-only 409", status, refusal.Code, refusal.References)
+	}
+	if status := call(t, http.DefaultClient, http.MethodDelete,
+		hs.URL+"/v1/teams/"+team.ID+"/members/"+member.ID, tenant, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("remove archived member seat: status %d", status)
+	}
+	if status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/agents/"+member.ID, tenant, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("delete unseated archived agent: status %d", status)
+	}
+}
+
+// TestSessionReferencesAreTenantScopedAndDoNotBlockUnrelatedDeletes pins the two
+// negative cases: another tenant's binding is invisible, and a team/agent with
+// no binding is never blocked by an unrelated one.
+func TestSessionReferencesAreTenantScopedAndDoNotBlockUnrelatedDeletes(t *testing.T) {
+	hs, registry := newRegistryServer(t)
+	tenantA, tenantB := uuid.NewString(), uuid.NewString()
+	captain := createAgentFixture(t, hs.URL, tenantA, "队长", nil)
+	var teamA AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams", tenantA, nil,
+		AgentTeamWriteRequest{Name: "A 队", Captain: agentteam.TeamMember{AgentID: captain.ID}}, &teamA); status != http.StatusCreated {
+		t.Fatalf("create team A: status %d", status)
+	}
+	// A session in tenant B naming the same team id must not block tenant A.
+	registry.bindSession(uuid.MustParse(tenantB), uuid.NewString(), "", teamA.ID)
+	if status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/teams/"+teamA.ID, tenantA, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("foreign binding blocked tenant A delete: status %d", status)
+	}
+
+	// An unrelated team with no binding is always deletable.
+	var teamQuiet AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams", tenantA, nil,
+		AgentTeamWriteRequest{Name: "安静队", Captain: agentteam.TeamMember{AgentID: captain.ID}}, &teamQuiet); status != http.StatusCreated {
+		t.Fatalf("create quiet team: status %d", status)
+	}
+	if status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/teams/"+teamQuiet.ID, tenantA, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("unrelated team delete: status %d", status)
 	}
 }
 

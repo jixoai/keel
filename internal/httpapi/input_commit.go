@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -128,6 +130,15 @@ func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committ
 	if err != nil {
 		return ClientInputCommit{}, err
 	}
+	// The event is the truth; this projection is what the registry's delete/
+	// archive guard reads. Writing it after the commit means a crash in between
+	// loses only the projection (a retry repairs it; an operator can rebuild it
+	// from the ledger), never the selection fact. A failure here fails the
+	// request too — the client's idempotent retry re-runs the same write — so a
+	// committed binding never silently goes unindexed.
+	if err := recordSessionBinding(ctx, st, in.TenantID, in.SessionID, in.Selection, receipt.Seq, receipt.Deduped); err != nil {
+		return ClientInputCommit{}, err
+	}
 	// The committed event is the truth; the submissions row is client-facing
 	// bookkeeping kept for the response contract. A row that predates a crash
 	// between commit and bookkeeping is repaired here. The commit itself already
@@ -160,6 +171,63 @@ func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committ
 func presentRawJSON(raw json.RawMessage) bool {
 	trimmed := strings.TrimSpace(string(raw))
 	return trimmed != "" && trimmed != "null"
+}
+
+// recordSessionBinding projects one committed input's execution binding onto the
+// session row. The selection fact stays the only truth (the runner still reads
+// it from the ledger per attempt); this write exists so the registry can refuse
+// a delete/archive that would strand a live session.
+//
+//   - an absent or null selection changes nothing (the newest selection-bearing
+//     input remains authoritative, exactly like the runner's runSelection);
+//   - an object that names neither agentId nor teamId clears an older binding
+//     (choosing a model is an explicit "no execution identity" decision);
+//   - teamId wins when both are sent, mirroring servicehost.bindingFromSelection.
+//
+// The store's conditional write keeps the newest event seq authoritative even
+// when two post-commit writes land out of order.
+func recordSessionBinding(ctx context.Context, st *store.Store, tenantID, sessionID uuid.UUID,
+	selection json.RawMessage, seq int64, deduped bool) error {
+	if st == nil {
+		return nil
+	}
+	// A deduped request did not write this event: the ledger's payload is the
+	// truth, and the request body may differ (a retry after a crash normally
+	// carries the same selection, but nothing enforces it). Reading the committed
+	// event keeps the projection a function of the ledger, not of the request.
+	if deduped {
+		events, err := st.LoadEvents(ctx, tenantID, sessionID, seq-1, 1)
+		if err != nil {
+			return fmt.Errorf("project session binding: read committed event: %w", err)
+		}
+		if len(events) == 0 {
+			// The edge that deduped this request keeps its ledger somewhere this
+			// store cannot read (the conformance seam uses an in-memory kernel
+			// over a real submissions store). The first commit already projected
+			// the fact; guessing from the request body would be worse than
+			// leaving the projection alone.
+			return nil
+		}
+		if events[0].Seq != seq {
+			return fmt.Errorf("project session binding: committed event seq %d is not the deduped seq %d", events[0].Seq, seq)
+		}
+		selection, _ = eventSelection(events[0].Payload)
+	}
+	if !presentRawJSON(selection) {
+		return nil
+	}
+	parsed, err := modelcfg.ParseSelection(selection)
+	if err != nil {
+		return fmt.Errorf("project session binding: %w", err)
+	}
+	agentID, teamID := parsed.AgentID, parsed.TeamID
+	if teamID != "" {
+		agentID = ""
+	}
+	if _, err := st.SetSessionBinding(ctx, tenantID, sessionID, agentID, teamID, seq); err != nil {
+		return fmt.Errorf("project session binding: %w", err)
+	}
+	return nil
 }
 
 // writeInputError maps the shared input commit path's refusals onto the wire: a

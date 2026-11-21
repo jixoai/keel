@@ -54,12 +54,14 @@ type AgentTeamRegistry interface {
 	ListAgents(ctx context.Context, tenantID uuid.UUID) ([]store.AgentRecord, error)
 	DeleteAgent(ctx context.Context, tenantID uuid.UUID, agentID string) (bool, error)
 	TeamsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.TeamReference, error)
+	SessionsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.SessionReference, error)
 
 	CreateTeam(ctx context.Context, record store.TeamRecord) (bool, error)
 	UpdateTeam(ctx context.Context, record store.TeamRecord, expectedRevision int64) (bool, error)
 	GetTeam(ctx context.Context, tenantID uuid.UUID, teamID string) (store.TeamRecord, bool, error)
 	ListTeams(ctx context.Context, tenantID uuid.UUID) ([]store.TeamRecord, error)
 	DeleteTeam(ctx context.Context, tenantID uuid.UUID, teamID string) (bool, error)
+	SessionsReferencingTeam(ctx context.Context, tenantID uuid.UUID, teamID string) ([]store.SessionReference, error)
 }
 
 // actorAgentHeader names the agent a member mutation acts as. A captain's own
@@ -72,12 +74,14 @@ func (s *Server) registerAgentTeamRoutes() {
 	s.mux.HandleFunc("GET /v1/agents/{id}", s.getAgent)
 	s.mux.HandleFunc("PUT /v1/agents/{id}", s.updateAgent)
 	s.mux.HandleFunc("DELETE /v1/agents/{id}", s.deleteAgent)
+	s.mux.HandleFunc("POST /v1/agents/{id}/archive", s.archiveAgent)
 
 	s.mux.HandleFunc("GET /v1/teams", s.listTeams)
 	s.mux.HandleFunc("POST /v1/teams", s.createTeam)
 	s.mux.HandleFunc("GET /v1/teams/{id}", s.getTeam)
 	s.mux.HandleFunc("PUT /v1/teams/{id}", s.updateTeam)
 	s.mux.HandleFunc("DELETE /v1/teams/{id}", s.deleteTeam)
+	s.mux.HandleFunc("POST /v1/teams/{id}/archive", s.archiveTeam)
 	s.mux.HandleFunc("POST /v1/teams/{id}/members", s.addTeamMember)
 	s.mux.HandleFunc("DELETE /v1/teams/{id}/members/{agentId}", s.removeTeamMember)
 }
@@ -216,23 +220,16 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reference protection (spec: Agent 引用与删除保护): an agent seated in a team
-	// is not hard-deleted; the refusal lists the teams so the caller can offer
-	// "remove it from the team first".
-	references, err := s.cfg.AgentTeams.TeamsReferencingAgent(r.Context(), tenantID, record.ID)
+	// or bound by a live session is not hard-deleted. The refusal lists both
+	// kinds so the caller can offer the exact repair actions (remove it from the
+	// team; archive or rebind the session).
+	teams, sessions, err := s.agentReferences(r.Context(), tenantID, record.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(references) > 0 {
-		teams := make([]map[string]any, 0, len(references))
-		names := make([]string, 0, len(references))
-		for _, reference := range references {
-			teams = append(teams, map[string]any{"id": reference.ID, "name": reference.Name})
-			names = append(names, reference.ID)
-		}
-		writeRegistryError(w, http.StatusConflict, "agent_in_use", fmt.Errorf(
-			"agent %q is a captain or member of %s; remove it from those teams before deleting it",
-			record.ID, strings.Join(names, ", ")), map[string]any{"references": teams})
+	if len(teams) > 0 || len(sessions) > 0 {
+		s.writeAgentInUse(w, record.ID, teams, sessions, "deleting")
 		return
 	}
 	deleted, err := s.cfg.AgentTeams.DeleteAgent(r.Context(), tenantID, record.ID)
@@ -245,6 +242,105 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": record.ID})
+}
+
+// archiveAgent retires an agent without deleting it. Archive is the documented
+// remedy for an agent that is seated in a team, so team seats do not block it;
+// a live session binding does, because the next attempt of that session would
+// resolve an archived agent and fail. The repair is the same as for delete:
+// archive the session or send an input that selects a model only.
+//
+// Idempotent: archiving an already-archived agent answers the current view.
+func (s *Server) archiveAgent(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := s.requireTenant(w, r)
+	if !ok || !s.registryReady(w) {
+		return
+	}
+	agent, record, found, ok := s.lookupAgent(w, r, tenantID)
+	if !ok {
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
+		return
+	}
+	_, sessions, err := s.agentReferences(r.Context(), tenantID, record.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(sessions) > 0 {
+		s.writeAgentInUse(w, record.ID, nil, sessions, "archiving")
+		return
+	}
+	if agent.Archived {
+		writeJSON(w, http.StatusOK, NewAgentView(tenantID, agent))
+		return
+	}
+	agent.Archived = true
+	next, err := agentRecord(tenantID, agent)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	updated, err := s.cfg.AgentTeams.UpdateAgent(r.Context(), next)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !updated {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
+		return
+	}
+	writeJSON(w, http.StatusOK, NewAgentView(tenantID, agent))
+}
+
+// agentReferences reads both reference kinds in one place so delete and archive
+// cannot drift. Teams are read even for archive (the caller ignores them there)
+// because the two guards share this seam and a future archive rule may use them.
+func (s *Server) agentReferences(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.TeamReference, []store.SessionReference, error) {
+	teams, err := s.cfg.AgentTeams.TeamsReferencingAgent(ctx, tenantID, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessions, err := s.cfg.AgentTeams.SessionsReferencingAgent(ctx, tenantID, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return teams, sessions, nil
+}
+
+// writeAgentInUse is the 409 agent_in_use refusal shared by delete and archive.
+// verb names the refused operation ("deleting"/"archiving"); the references
+// carry the legacy team shape plus session rows tagged kind=session, so the CLI
+// and UI can render both without a second envelope.
+func (s *Server) writeAgentInUse(w http.ResponseWriter, agentID string, teams []store.TeamReference,
+	sessions []store.SessionReference, verb string) {
+	references := make([]map[string]any, 0, len(teams)+len(sessions))
+	parts := make([]string, 0, 2)
+	actions := make([]string, 0, 2)
+	if len(teams) > 0 {
+		names := make([]string, 0, len(teams))
+		for _, team := range teams {
+			references = append(references, map[string]any{"id": team.ID, "name": team.Name})
+			names = append(names, team.ID)
+		}
+		parts = append(parts, "is a captain or member of "+strings.Join(names, ", "))
+		actions = append(actions, "remove it from those teams")
+	}
+	if len(sessions) > 0 {
+		names := make([]string, 0, len(sessions))
+		for _, session := range sessions {
+			references = append(references, sessionReferencePayload(session))
+			names = append(names, session.ID)
+		}
+		parts = append(parts, fmt.Sprintf("is the current binding of %d live session(s): %s",
+			len(sessions), strings.Join(names, ", ")))
+		actions = append(actions, "archive or rebind those sessions")
+	}
+	writeRegistryError(w, http.StatusConflict, "agent_in_use", fmt.Errorf(
+		"agent %q %s; %s before %s it",
+		agentID, strings.Join(parts, "; it "), strings.Join(actions, " and "), verb), map[string]any{"references": references})
 }
 
 // --- teams ---------------------------------------------------------------
@@ -369,6 +465,15 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("team %q does not exist", r.PathValue("id")))
 		return
 	}
+	sessions, err := s.cfg.AgentTeams.SessionsReferencingTeam(r.Context(), tenantID, record.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(sessions) > 0 {
+		s.writeTeamInUse(w, record.ID, sessions, "deleting")
+		return
+	}
 	deleted, err := s.cfg.AgentTeams.DeleteTeam(r.Context(), tenantID, record.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -379,6 +484,96 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": record.ID})
+}
+
+// archiveTeam retires a team without deleting it. A live session binding blocks
+// the archive for the same reason it blocks a delete: the next attempt of that
+// session would resolve an archived team and fail. Archived sessions do not
+// block (the store's reference query excludes them unless they still own a live
+// run). The team's revision advances so a run manifest can tell the retired
+// configuration from the active one; content is not re-validated, because
+// archiving is the remedy for a team that is already invalid.
+func (s *Server) archiveTeam(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := s.requireTenant(w, r)
+	if !ok || !s.registryReady(w) {
+		return
+	}
+	team, record, found, ok := s.lookupTeam(w, r, tenantID)
+	if !ok {
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("team %q does not exist", record.ID))
+		return
+	}
+	sessions, err := s.cfg.AgentTeams.SessionsReferencingTeam(r.Context(), tenantID, record.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(sessions) > 0 {
+		s.writeTeamInUse(w, record.ID, sessions, "archiving")
+		return
+	}
+	if team.Archived {
+		writeJSON(w, http.StatusOK, NewAgentTeamView(tenantID, *team))
+		return
+	}
+	retired := *team
+	retired.Archived = true
+	retired.Seal()
+	next, err := teamRecord(tenantID, &retired)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	updated, err := s.cfg.AgentTeams.UpdateTeam(r.Context(), next, record.Revision)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !updated {
+		// Another writer moved the revision or the team is gone. Re-read to tell
+		// the two apart, exactly like an ordinary team edit.
+		if _, stillThere, readErr := s.cfg.AgentTeams.GetTeam(r.Context(), tenantID, record.ID); readErr == nil && stillThere {
+			writeRegistryError(w, http.StatusConflict, "team_revision_conflict", fmt.Errorf(
+				"team %q changed while it was being archived (read revision %d); read it again and retry",
+				record.ID, record.Revision), nil)
+		} else {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("team %q does not exist", record.ID))
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, NewAgentTeamView(tenantID, retired))
+}
+
+// writeTeamInUse is the 409 team_in_use refusal shared by delete and archive.
+func (s *Server) writeTeamInUse(w http.ResponseWriter, teamID string, sessions []store.SessionReference, verb string) {
+	references := make([]map[string]any, 0, len(sessions))
+	names := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		references = append(references, sessionReferencePayload(session))
+		names = append(names, session.ID)
+	}
+	writeRegistryError(w, http.StatusConflict, "team_in_use", fmt.Errorf(
+		"team %q is the current binding of %d live session(s): %s; archive or rebind those sessions before %s it",
+		teamID, len(sessions), strings.Join(names, ", "), verb),
+		map[string]any{"references": references})
+}
+
+// sessionReferencePayload is the wire shape of one session reference. kind
+// distinguishes it from the legacy team reference (which carries no kind and is
+// read as a team by the CLI); state/runStatus explain why an archived session
+// still blocks (a live run).
+func sessionReferencePayload(reference store.SessionReference) map[string]any {
+	return map[string]any{
+		"kind":      "session",
+		"id":        reference.ID,
+		"name":      "",
+		"state":     reference.State,
+		"archived":  reference.Archived,
+		"runStatus": reference.RunStatus,
+	}
 }
 
 // addTeamMember seats one agent on an existing team. It edits the team

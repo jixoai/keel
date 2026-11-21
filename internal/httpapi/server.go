@@ -409,16 +409,28 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 // user.message), so the check is a targeted extraction rather than a second
 // schema: a payload without a selection passes untouched and byte-identical.
 func (s *Server) vetEventPayload(payload json.RawMessage) error {
+	selection, present := eventSelection(payload)
+	if !present {
+		return nil
+	}
+	return s.vetSelection(selection)
+}
+
+// eventSelection extracts the selection field of an edge event payload.
+// present=false covers an absent field, the literal null and a payload that is
+// not an object; the kernel owns payload shape, so a malformed payload is not
+// this helper's refusal.
+func eventSelection(payload json.RawMessage) (json.RawMessage, bool) {
 	var probe struct {
 		Selection json.RawMessage `json:"selection"`
 	}
 	if err := json.Unmarshal(payload, &probe); err != nil {
-		return nil // the kernel owns payload shape; not this gate's business
+		return nil, false
 	}
-	if len(probe.Selection) == 0 || string(probe.Selection) == "null" {
-		return nil
+	if !presentRawJSON(probe.Selection) {
+		return nil, false
 	}
-	return s.vetSelection(probe.Selection)
+	return probe.Selection, true
 }
 
 // vetSelection checks a client-supplied selection before the input is
@@ -620,6 +632,18 @@ func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeEdgeError(w, err)
 		return
+	}
+	// The edge event is a second door into the input log, so it is a second door
+	// into the binding projection. The store guard is shared with /input, /retry
+	// and the MCP bridge; a failure returns 500 after the commit, and the
+	// requestId dedupe makes the client's retry repair the projection.
+	if s.cfg.Store != nil {
+		if selection, present := eventSelection(body.Payload); present {
+			if err := recordSessionBinding(r.Context(), s.cfg.Store, tenantID, sessionID, selection, receipt.Seq, receipt.Deduped); err != nil {
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
+		}
 	}
 	writeJSON(w, 201, map[string]any{"seq": receipt.Seq, "deduped": receipt.Deduped})
 }
