@@ -1,71 +1,71 @@
 ?   	github.com/jixoai/keel/cmd/chaos	[no test files]
 ?   	github.com/jixoai/keel/cmd/e2e	[no test files]
-ok  	github.com/jixoai/keel/cmd/keel	2.150s
+ok  	github.com/jixoai/keel/cmd/keel	2.522s
 ?   	github.com/jixoai/keel/cmd/keel-dsh-ref	[no test files]
 ?   	github.com/jixoai/keel/cmd/loadtest	[no test files]
 ?   	github.com/jixoai/keel/cmd/mcpappload	[no test files]
-ok  	github.com/jixoai/keel/cmd/r1diff	0.312s
+ok  	github.com/jixoai/keel/cmd/r1diff	0.334s
 ok  	github.com/jixoai/keel/cmd/runtime	0.378s
-ok  	github.com/jixoai/keel/internal/agent	20.954s
-ok  	github.com/jixoai/keel/internal/agentapi	4.154s
+ok  	github.com/jixoai/keel/internal/agent	21.322s
+ok  	github.com/jixoai/keel/internal/agentapi	3.793s
 ?   	github.com/jixoai/keel/internal/agentcore	[no test files]
-ok  	github.com/jixoai/keel/internal/agentext	6.233s
-ok  	github.com/jixoai/keel/internal/agentloop	0.837s
-ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	0.351s
+ok  	github.com/jixoai/keel/internal/agentext	6.248s
+ok  	github.com/jixoai/keel/internal/agentloop	0.858s
+ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	0.357s
 ?   	github.com/jixoai/keel/internal/agentloop/testloop	[no test files]
-ok  	github.com/jixoai/keel/internal/agentteam	0.315s
-ok  	github.com/jixoai/keel/internal/agenttool	0.311s
-ok  	github.com/jixoai/keel/internal/approval	0.452s
-ok  	github.com/jixoai/keel/internal/architecture	1.771s
-ok  	github.com/jixoai/keel/internal/auth	0.366s
-ok  	github.com/jixoai/keel/internal/bashbridge	1.639s
-ok  	github.com/jixoai/keel/internal/blob	4.808s
-ok  	github.com/jixoai/keel/internal/compaction	0.352s
+ok  	github.com/jixoai/keel/internal/agentteam	0.349s
+ok  	github.com/jixoai/keel/internal/agenttool	0.309s
+ok  	github.com/jixoai/keel/internal/approval	0.440s
+ok  	github.com/jixoai/keel/internal/architecture	1.596s
+ok  	github.com/jixoai/keel/internal/auth	0.349s
+ok  	github.com/jixoai/keel/internal/bashbridge	1.552s
+ok  	github.com/jixoai/keel/internal/blob	4.341s
+ok  	github.com/jixoai/keel/internal/compaction	0.350s
 ?   	github.com/jixoai/keel/internal/config	[no test files]
-ok  	github.com/jixoai/keel/internal/demo	0.301s
-ok  	github.com/jixoai/keel/internal/dshref	0.317s
-ok  	github.com/jixoai/keel/internal/durable	0.594s
-ok  	github.com/jixoai/keel/internal/externalgw	4.716s
-ok  	github.com/jixoai/keel/internal/fileplugin	34.106s
-ok  	github.com/jixoai/keel/internal/gateway	1.329s
-ok  	github.com/jixoai/keel/internal/handoff	9.381s
-ok  	github.com/jixoai/keel/internal/hooks	0.487s
-ok  	github.com/jixoai/keel/internal/host	0.400s
-ok  	github.com/jixoai/keel/internal/httpapi	7.924s
-ok  	github.com/jixoai/keel/internal/jobqueue	3.697s
-ok  	github.com/jixoai/keel/internal/kernel	20.325s
-ok  	github.com/jixoai/keel/internal/layerfs	3.151s
-ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.569s
-ok  	github.com/jixoai/keel/internal/loadout	0.366s
-ok  	github.com/jixoai/keel/internal/logsafe	0.314s
-ok  	github.com/jixoai/keel/internal/loop	0.827s
-ok  	github.com/jixoai/keel/internal/mcp	1.074s
-ok  	github.com/jixoai/keel/internal/mcp/oauth	0.599s
-ok  	github.com/jixoai/keel/internal/mcphost	0.629s
-ok  	github.com/jixoai/keel/internal/mediaadapter	0.607s
-ok  	github.com/jixoai/keel/internal/mediagw	0.362s
-ok  	github.com/jixoai/keel/internal/mediawiring	0.472s
-ok  	github.com/jixoai/keel/internal/metrics	0.406s
-ok  	github.com/jixoai/keel/internal/modelcfg	0.410s
-ok  	github.com/jixoai/keel/internal/modelprovider	0.338s
-ok  	github.com/jixoai/keel/internal/notify	0.480s
-ok  	github.com/jixoai/keel/internal/placement	2.391s
-ok  	github.com/jixoai/keel/internal/placement/wiring	0.379s
-ok  	github.com/jixoai/keel/internal/pluginpkg	0.379s
+ok  	github.com/jixoai/keel/internal/demo	0.310s
+ok  	github.com/jixoai/keel/internal/dshref	0.324s
+ok  	github.com/jixoai/keel/internal/durable	0.613s
+ok  	github.com/jixoai/keel/internal/externalgw	4.465s
+ok  	github.com/jixoai/keel/internal/fileplugin	35.861s
+ok  	github.com/jixoai/keel/internal/gateway	1.283s
+ok  	github.com/jixoai/keel/internal/handoff	14.209s
+ok  	github.com/jixoai/keel/internal/hooks	0.736s
+ok  	github.com/jixoai/keel/internal/host	0.589s
+ok  	github.com/jixoai/keel/internal/httpapi	13.639s
+ok  	github.com/jixoai/keel/internal/jobqueue	4.522s
+ok  	github.com/jixoai/keel/internal/kernel	23.340s
+ok  	github.com/jixoai/keel/internal/layerfs	3.570s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	0.724s
+ok  	github.com/jixoai/keel/internal/loadout	0.350s
+ok  	github.com/jixoai/keel/internal/logsafe	0.292s
+ok  	github.com/jixoai/keel/internal/loop	0.782s
+ok  	github.com/jixoai/keel/internal/mcp	1.094s
+ok  	github.com/jixoai/keel/internal/mcp/oauth	0.572s
+ok  	github.com/jixoai/keel/internal/mcphost	0.489s
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.572s
+ok  	github.com/jixoai/keel/internal/mediagw	0.364s
+ok  	github.com/jixoai/keel/internal/mediawiring	0.407s
+ok  	github.com/jixoai/keel/internal/metrics	0.338s
+ok  	github.com/jixoai/keel/internal/modelcfg	0.371s
+ok  	github.com/jixoai/keel/internal/modelprovider	0.307s
+ok  	github.com/jixoai/keel/internal/notify	0.472s
+ok  	github.com/jixoai/keel/internal/placement	3.378s
+ok  	github.com/jixoai/keel/internal/placement/wiring	0.373s
+ok  	github.com/jixoai/keel/internal/pluginpkg	0.356s
 ?   	github.com/jixoai/keel/internal/pluginpkg/builtin	[no test files]
-ok  	github.com/jixoai/keel/internal/provider	0.369s
-ok  	github.com/jixoai/keel/internal/quota	1.858s
-ok  	github.com/jixoai/keel/internal/r1diff	0.314s
-ok  	github.com/jixoai/keel/internal/realtime	1.539s
-ok  	github.com/jixoai/keel/internal/servicegraph	0.318s
-ok  	github.com/jixoai/keel/internal/servicehost	3.113s
+ok  	github.com/jixoai/keel/internal/provider	0.389s
+ok  	github.com/jixoai/keel/internal/quota	1.960s
+ok  	github.com/jixoai/keel/internal/r1diff	0.315s
+ok  	github.com/jixoai/keel/internal/realtime	1.570s
+ok  	github.com/jixoai/keel/internal/servicegraph	0.455s
+ok  	github.com/jixoai/keel/internal/servicehost	4.244s
 ?   	github.com/jixoai/keel/internal/sessionbinding	[no test files]
-ok  	github.com/jixoai/keel/internal/skills	0.312s
-ok  	github.com/jixoai/keel/internal/store	6.360s
-ok  	github.com/jixoai/keel/internal/stream	0.356s
-ok  	github.com/jixoai/keel/internal/tasklog	1.037s
-ok  	github.com/jixoai/keel/internal/telemetry	0.307s
+ok  	github.com/jixoai/keel/internal/skills	0.386s
+ok  	github.com/jixoai/keel/internal/store	14.016s
+ok  	github.com/jixoai/keel/internal/stream	0.442s
+ok  	github.com/jixoai/keel/internal/tasklog	1.412s
+ok  	github.com/jixoai/keel/internal/telemetry	0.305s
 ?   	github.com/jixoai/keel/internal/testkit	[no test files]
-ok  	github.com/jixoai/keel/internal/toolsurface	0.373s
-ok  	github.com/jixoai/keel/plugins/templates	0.323s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.416s
+ok  	github.com/jixoai/keel/plugins/templates	0.430s
 ?   	github.com/jixoai/keel/plugins/tools/verifypkg	[no test files]
