@@ -19,6 +19,13 @@
 > `editing.members`，续写 CLI 写的 label/description/inline；空 agentId + inline 席位不再落成
 > `{agentId:""}`。P2 同修：Team CLI 面板 403 用专用权限面。`settings-teams.test.tsx` 27 例、
 > 全量 TUI 220 例全绿（`evidence/team-canvas-2026-11-21/gates/`）。
+>
+> **状态（2026-11-21 · AC1/P7 验收）**：启动选择三段 E2E 通过（Standard 选模型、Team-only 选团队
+> → captain 默认模型、运行中队列切换只影响下一次 run；`evidence/start-selection-20261121-105043/`），
+> Team/member 运行时 E2E 在当前 schema 复跑通过（`evidence/runtime-p7-2026-11-21/`）。视觉复核 62 张
+> 真实 Chrome 截图（390/1280）零溢出，定向 TUI 69/69；报告 `evidence/p7-acceptance-2026-11-21/report.html`。
+> P0/P1 为 0；P2 三项：画廊 `Progress` 缺件（manifest 注明等裁决）、390 缺队长卡片拥挤、fixture 无
+> team-tasks 回退。未做项不变：P3 团队会话引用保护、P5 画布 defaults/成员 label 编辑、P6 speech/decision 运行时。
 
 ## P0 契约与设计冻结
 
@@ -172,11 +179,18 @@
 - [x] 创建团队：只配 captain 可启动；captain 必选唯一；缺 captain 阻止启动
 - [x] 队长 CLI 开启时可 `keel team member add`；关闭后命令消失并返回权限错误
 - [x] 队长增删成员只改 team 配置；model/agent provider 配置无变化
-- [ ] Standard 选模型启动；Team 选团队启动；运行中切换只影响下一次 run（前两半已验收）
+- [x] Standard 选模型启动；Team 选团队启动；运行中切换只影响下一次 run
+      （三段 E2E `evidence/start-selection-20261121-105043/`：Standard `kite-standard-b`；
+      Team-only `{teamId}` → captain 默认模型 + revision/hash；switch 三段 run.finished 依次
+      standard→team→standard，run 2 的 inputSeqs=[1,2] 不含 run 1 在飞时排队的第三条 input）
 - [x] 工具列表来自注册源；引用已不可用的 toolId 只剔除并留诊断、不阻断 run（`internal/agent/runner.go` toolsForRun + `internal/agenttool/registry.go` Subset；UI/CLI 面的卸载同步仍未验）
 - [x] 旧模型预设已删除，旧 preset 不能启动新 run；旧会话历史仍可读
 - [x] 凭据零泄漏（API/日志/事件/CLI 输出/UI DOM/team 配置）
-- [ ] 组件画廊与组合页面视觉复核通过；390px 无溢出（390px 已验，组合页视觉复核未做）
+- [x] 组件画廊与组合页面视觉复核通过；390px 无溢出
+      （62 张真实 Chrome 截图 390/1280，document scrollWidth == innerWidth，0 越界元素；
+      定向 TUI 69/69；报告 `evidence/p7-acceptance-2026-11-21/report.html`。画廊 42 件中 41 件渲染；
+      `Progress` 是 manifest 自注「proposal 列了、tasks C1–C5 没列、等裁决」的缺件、无产品路径
+      import，按 P2 记；另记 390 缺队长卡片拥挤与 fixture team-tasks 回退两项 P2，均无 P0/P1）
 
 ---
 
