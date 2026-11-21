@@ -147,7 +147,8 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
 
   await app.press("id:settings-section-plugins");
   await app.waitFor("text:插件清单");
-  expect(app.texts()).toContain("3 个工具 · 2 个插件");
+  expect(app.texts()).toContain("3 个工具 · 3 个插件");
+  expect(app.texts()).toContain("keel.team");
   expect(app.texts()).toContain("demo.workflow");
   expect(app.texts()).toContain("start failed: listen tcp 127.0.0.1:0: permission denied");
   // 装载语义必须写清：插件在启动时装载，这里只看状态与控制触发。

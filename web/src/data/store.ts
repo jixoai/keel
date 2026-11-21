@@ -380,6 +380,9 @@ class KeelStore {
   /** A development launch (`?fixture=1` / `host.params.fixture`): the one way
    * the fixture transport is used. */
   private dev = false;
+  /** The web page's query as read for the dev launch: the fixture's own
+   * switches (`?teamNoCaptain=1`) come from the same string. */
+  private devSearch = "";
   private devRequest: Promise<boolean> | null = null;
 
   constructor() {
@@ -429,7 +432,8 @@ class KeelStore {
       return true;
     }
     const page = await this.pageRoute();
-    this.dev = new URLSearchParams(page?.search ?? "").get("fixture") === "1";
+    this.devSearch = page?.search ?? "";
+    this.dev = new URLSearchParams(this.devSearch).get("fixture") === "1";
     return this.dev;
   }
 
@@ -438,7 +442,7 @@ class KeelStore {
     // Development only: the scripted transport stands in for a live service.
     // The product never reaches this branch — it is asked for at launch.
     if (await this.devLaunch()) {
-      if (!this.fixture) this.fixture = new FixtureClient();
+      if (!this.fixture) this.fixture = new FixtureClient(undefined, this.devSearch);
       this.http = null;
       this.client = this.fixture;
       this.auth.set("ok");
@@ -954,9 +958,12 @@ class KeelStore {
   }
 
   /** Create (no `id`) or update (with `id`). The list reloads on success, so a
-   * card always shows what the server stored, not what was typed. */
-  async saveAgent(agent: AgentWriteRequest, id?: string): Promise<boolean> {
-    if (this.agentsSaving()) return false;
+   * card always shows what the server stored, not what was typed. The saved
+   * document is returned so a caller that just created a member (the team
+   * canvas) can seat that exact id without guessing it from the refreshed
+   * list; `null` means the write was refused or skipped. */
+  async saveAgent(agent: AgentWriteRequest, id?: string): Promise<AgentView | null> {
+    if (this.agentsSaving()) return null;
     this.agentsSaving.set(true);
     this.agentsActionError.set(null);
     try {
@@ -967,10 +974,10 @@ class KeelStore {
         tone: "success",
         text: id ? `Agent 已保存：${saved.name || agent.name}` : `Agent 已创建：${saved.name || agent.name}`,
       });
-      return true;
+      return saved;
     } catch (error) {
       this.agentsActionError.set(messageOf(error));
-      return false;
+      return null;
     } finally {
       this.agentsSaving.set(false);
     }

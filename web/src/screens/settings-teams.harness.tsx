@@ -5,13 +5,18 @@
 // The scenario comes from the launch parameters (`host.params.scenario`):
 // `list` (two teams), `empty`, `loading` (the team read never settles),
 // `error` (500), `permission` (403), `refuse` (the member/team write is
-// refused), `slow` (a write takes long enough to observe the saving state) and
-// `referenced` (a team delete is refused).
+// refused), `slow` (a write takes long enough to observe the saving state),
+// `referenced` (a team delete is refused), `no-captain` (a team document whose
+// captain seat is empty), `agents-loading` / `agents-error` / `agents-empty`
+// (the canvas member library's own states) and `no-manifest` (no keel.team CLI
+// declaration to render).
 import { host, mount, View } from "nsh";
 import type {
   AgentTeamView,
   AgentTeamWriteRequest,
   AgentView,
+  CliCapabilityView,
+  PluginsView,
   TeamMemberView,
 } from "../data/contract";
 import { KeelHttp, type FetchLike } from "../data/http";
@@ -37,27 +42,76 @@ const seedAgents = (): AgentView[] => [
   { id: "agent_ops", name: "运营", description: "负责发布与沟通", avatar: { kind: "identicon", seed: "agent_ops" } },
 ];
 
-const seedTeams = (): AgentTeamView[] => [
+const seedTeams = (): AgentTeamView[] => {
+  const rows: AgentTeamView[] = [
+    {
+      id: "team_brand",
+      name: "品牌发布小组",
+      description: "负责新品发布的全链路交付",
+      captain: { agentId: "agent_design" },
+      members: [{ agentId: "agent_research" }, { agentId: "agent_ops" }],
+      capabilities: { teamCli: { enabled: true, commands: ["member.add", "member.remove"] } },
+      status: "valid",
+      revision: 3,
+      hash: "h-brand",
+    },
+    {
+      id: "team_research",
+      name: "资料组",
+      description: "只做检索与整理",
+      captain: { agentId: "agent_research" },
+      members: [],
+      status: "valid",
+      revision: 1,
+    },
+  ];
+  if (scenario() === "no-captain") {
+    rows[0] = { ...rows[0], captain: { agentId: "" }, status: "invalid" };
+  }
+  return rows;
+};
+
+/** The keel.team manifest's declared tree, trimmed to the rows this section's
+ * gate asserts on. The panel must render exactly these — no invented command,
+ * no hidden declaration. */
+const seedTeamCli = (): CliCapabilityView[] => [
   {
-    id: "team_brand",
-    name: "品牌发布小组",
-    description: "负责新品发布的全链路交付",
-    captain: { agentId: "agent_design" },
-    members: [{ agentId: "agent_research" }, { agentId: "agent_ops" }],
-    status: "valid",
-    revision: 3,
-    hash: "h-brand",
+    path: ["team", "list"],
+    summary: "List teams: id, name, captain, member count.",
+    permissions: ["team.read"],
+    danger: "read",
+    idempotent: true,
+    callable_by: ["ui", "agent", "team_captain"],
   },
   {
-    id: "team_research",
-    name: "资料组",
-    description: "只做检索与整理",
-    captain: { agentId: "agent_research" },
-    members: [],
-    status: "valid",
-    revision: 1,
+    path: ["team", "member", "remove"],
+    summary: "Unseat an agent from a team.",
+    permissions: ["team.write"],
+    danger: "destructive",
+    idempotent: true,
+    callable_by: ["ui", "team_captain"],
   },
 ];
+
+const seedPlugins = (): PluginsView =>
+  scenario() === "no-manifest"
+    ? { generation: 1, plugins: [], tools: [] }
+    : {
+        generation: 1,
+        plugins: [
+          {
+            id: "keel.team",
+            version: "1.0.0",
+            state: "enabled",
+            provides: { cli: seedTeamCli() },
+            tools: [],
+            hooks: [],
+            triggers: [],
+            diagnostics: [],
+          },
+        ],
+        tools: [],
+      };
 
 let agents: AgentView[] = seedAgents();
 let teams: AgentTeamView[] = scenario() === "empty" ? [] : seedTeams();
@@ -83,8 +137,26 @@ const stub: FetchLike = async (input, init) => {
   const bodyText = typeof init?.body === "string" ? init.body : "{}";
 
   if (method === "GET" && input === "/v1/agents") {
+    if (scenario() === "agents-loading") return pending();
+    if (scenario() === "agents-error") return respond(500, { error: "Agent 注册表暂时不可用" });
+    if (scenario() === "agents-empty") return respond(200, { agents: [] });
     if (scenario() === "agents-permission") return respond(403, { error: "当前账号没有 agent.read 权限" });
     return respond(200, { agents });
+  }
+  if (method === "POST" && input === "/v1/agents") {
+    const request = JSON.parse(bodyText) as AgentView;
+    const id = `agent_new_${++sequence}`;
+    const created: AgentView = {
+      id,
+      name: request.name,
+      description: request.description,
+      avatar: request.avatar ?? { kind: "identicon", seed: id },
+      defaultModel: request.defaultModel,
+      tools: request.tools,
+      systemPrompt: request.systemPrompt,
+    };
+    agents = [...agents, created];
+    return respond(201, created);
   }
   if (method === "GET" && input === "/v1/teams") {
     if (scenario() === "loading") return pending();
@@ -162,7 +234,7 @@ const stub: FetchLike = async (input, init) => {
 store.registryLoaded.set(true);
 store.providers.set([{ providerId: "s2api", name: "S2API" }]);
 store.models.set([{ providerId: "s2api", modelId: "deepseek-v4.1-flash", selectable: true, executable: true }]);
-store.plugins.set({ tools: [] });
+store.plugins.set(seedPlugins());
 store.setAgentTeamTransport(new KeelHttp("", stub));
 
 function Harness() {

@@ -9,6 +9,11 @@
 >
 > **状态（2026-11-20）**：P2/P3 的 CLI 尾项（`agent start|stop`、`team save|start`）已交付，
 > 真库 E2E 证据 `evidence/cli-tail-2026-11-20/`；Team 删除的会话引用保护仍阻塞（见 P3）。
+>
+> **状态（2026-11-21）**：C2 团队画布 lane 收口——团队卡片、captain 槽、成员库/新建 Agent、
+> Team CLI 能力面板已完成（`settings-teams.test.tsx` 25 例 + `evidence/team-canvas-2026-11-21/`
+> 浏览器 390/1280/缺队长 9 张、8 视口 pass、manifest 9/9）；画布仍缺 design A6 的「默认工具/模型」
+> 与成员 label/description 编辑，故 P5 该行不勾（画布按 partial 计）。
 
 ## P0 契约与设计冻结
 

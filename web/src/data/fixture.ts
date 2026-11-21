@@ -9,6 +9,7 @@
 // compaction, decision, run.finished) and the queue/guide rules: a guide sent
 // to an idle session is queued; a guide sent while running joins the turn and
 // is consumed by the next assistant message; stop leaves queued input alone.
+import { host } from "nsh";
 import type {
   AgentTeamsResponse,
   AgentTeamView,
@@ -17,6 +18,7 @@ import type {
   AgentView,
   AgentWriteRequest,
   AttachmentRef,
+  CliCapabilityView,
   ConnectionState,
   Delivery,
   EventSource,
@@ -155,12 +157,102 @@ interface DemoModelResolution {
 
 const nowISO = () => new Date().toISOString();
 
+/** A development-only switch carried in the launch: the embedding host's
+ * launch parameters (the TUI host and the tests) or the web page's query
+ * (`?fixture=1&teamNoCaptain=1`, passed in from the store's route read). The
+ * evidence run uses it to render a defensive state without changing the
+ * demo's normal data. */
+const fixtureFlag = (name: string, search: string): boolean => {
+  const launch = host.params?.[name];
+  if (launch === true || launch === 1 || launch === "1") return true;
+  return new URLSearchParams(search).get(name) === "1";
+};
+
 function textPreview(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const row = payload as { text?: string; summary?: string; question?: string };
   const text = row.text ?? row.summary ?? row.question ?? "";
   return text.replace(/\s+/g, " ").slice(0, 90);
 }
+
+/** The builtin keel.team manifest's declared CLI tree, mirrored here so the
+ * demo's Team CLI panel renders the same declaration the server serves
+ * (`internal/pluginpkg/builtin/keel.team.yaml`). The fixture adds no command:
+ * these are exactly the manifest's nine paths. */
+const demoTeamCli = (): CliCapabilityView[] => [
+  {
+    path: ["team", "list"],
+    summary: "List teams: id, name, captain, member count.",
+    permissions: ["team.read"],
+    danger: "read",
+    idempotent: true,
+    callable_by: ["ui", "agent", "team_captain"],
+  },
+  {
+    path: ["team", "show"],
+    summary: "Show one team's full document as JSON, captain first.",
+    permissions: ["team.read"],
+    danger: "read",
+    idempotent: true,
+    callable_by: ["ui", "agent", "team_captain"],
+  },
+  {
+    path: ["team", "create"],
+    summary: "Create a team; --captain is mandatory (a team without a captain is invalid).",
+    permissions: ["team.write"],
+    danger: "write",
+    idempotent: false,
+    callable_by: ["ui"],
+  },
+  {
+    path: ["team", "update"],
+    summary: "Update a team; fields not passed are preserved.",
+    permissions: ["team.write"],
+    danger: "write",
+    idempotent: true,
+    callable_by: ["ui"],
+  },
+  {
+    path: ["team", "delete"],
+    summary: "Delete a team (the agents it seated are untouched).",
+    permissions: ["team.write"],
+    danger: "destructive",
+    idempotent: true,
+    callable_by: ["ui"],
+  },
+  {
+    path: ["team", "member", "add"],
+    summary: "Seat an agent on a team (a captain may seat members through its own team CLI).",
+    permissions: ["team.write"],
+    danger: "write",
+    idempotent: false,
+    callable_by: ["ui", "team_captain"],
+  },
+  {
+    path: ["team", "member", "remove"],
+    summary: "Unseat an agent from a team (a captain may unseat members through its own team CLI).",
+    permissions: ["team.write"],
+    danger: "destructive",
+    idempotent: true,
+    callable_by: ["ui", "team_captain"],
+  },
+  {
+    path: ["team", "save"],
+    summary: "Upsert a team from a YAML or JSON configuration file.",
+    permissions: ["team.write"],
+    danger: "write",
+    idempotent: true,
+    callable_by: ["ui"],
+  },
+  {
+    path: ["team", "start"],
+    summary: "Start a team session; the captain answers and members run as their own Agents.",
+    permissions: ["team.run"],
+    danger: "write",
+    idempotent: false,
+    callable_by: ["ui", "team_captain"],
+  },
+];
 
 export class FixtureClient implements SettingsApi {
   private sessions = new Map<string, Peer>();
@@ -206,6 +298,7 @@ export class FixtureClient implements SettingsApi {
       description: "负责新品发布的全链路交付",
       captain: { agentId: "agent_demo_design" },
       members: [{ agentId: "agent_demo_research" }],
+      capabilities: { teamCli: { enabled: true, commands: ["member.add", "member.remove", "save", "start"] } },
       status: "valid",
       revision: 1,
       hash: "demo-brand",
@@ -214,8 +307,28 @@ export class FixtureClient implements SettingsApi {
   private agentSequence = 0;
   private teamSequence = 0;
 
-  constructor(private readonly imageURL: string = demoShot.url) {
+  constructor(
+    private readonly imageURL: string = demoShot.url,
+    private readonly search: string = "",
+  ) {
     this.seed();
+    // `?teamNoCaptain=1`: a defensive card for a document whose captain seat
+    // is empty. The API refuses to create one, so the state exists only to
+    // prove the UI blocks it instead of pretending it can start.
+    if (fixtureFlag("teamNoCaptain", this.search)) {
+      this.teamState = [
+        ...this.teamState,
+        {
+          id: "team_demo_pending",
+          name: "待定小组",
+          description: "新渠道试投，队长还没定",
+          captain: { agentId: "" },
+          members: [{ agentId: "agent_demo_research" }],
+          status: "invalid",
+          revision: 1,
+        },
+      ];
+    }
   }
 
   async probe(): Promise<"ok" | "auth" | "down"> {
@@ -421,6 +534,18 @@ export class FixtureClient implements SettingsApi {
     return {
       generation: 3,
       plugins: [
+        {
+          id: "keel.team",
+          version: "1.0.0",
+          state: "enabled",
+          provides: { cli: demoTeamCli() },
+          requires: [],
+          tools: [],
+          hooks: [],
+          triggers: [],
+          diagnostics: [],
+          startedAt: started,
+        },
         {
           id: "demo.workflow",
           version: "0.4.1",

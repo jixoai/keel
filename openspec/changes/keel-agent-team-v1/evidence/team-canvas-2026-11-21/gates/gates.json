@@ -1,0 +1,54 @@
+{
+  "change": "keel-agent-team-v1",
+  "lane": "C2",
+  "date": "2026-11-21",
+  "head": "8a9a0fe",
+  "base": "21d3b26",
+  "commands": [
+    {
+      "cmd": "cd web && nsh check",
+      "exit": 0,
+      "log": "gates/check.txt"
+    },
+    {
+      "cmd": "cd web && nsh test --target tui",
+      "exit": 0,
+      "result": "218 passed, 0 failed",
+      "log": "gates/tui-full.txt"
+    },
+    {
+      "cmd": "cd web && nsh test --target tui src/screens/settings-teams.test.tsx",
+      "exit": 0,
+      "result": "25 passed, 0 failed",
+      "log": "gates/settings-teams.txt"
+    },
+    {
+      "cmd": "cd web && nsh build",
+      "exit": 0,
+      "log": "gates/build.txt"
+    },
+    {
+      "cmd": "cd web && nsh package --target web",
+      "exit": 0,
+      "log": "gates/package-web.txt"
+    }
+  ],
+  "browser": {
+    "cmd": "nsh run --target web --port 13680; node openspec/changes/keel-agent-team-v1/evidence/team-canvas-2026-11-21/browser-check.mjs",
+    "viewport": [
+      "390x844",
+      "390x844·no-captain",
+      "1280x900"
+    ],
+    "pass": true,
+    "manifestCommands": "9/9 rendered, 0 extras",
+    "screenshots": "screenshots/（9 张）",
+    "checks": "checks.json"
+  },
+  "processes": {
+    "port": 13680,
+    "release": "port-release.txt",
+    "freeAtCheck": true
+  },
+  "headNote": "gates 在 8a9a0fe 的代码树上实测；其后仅证据/tasks 注释提交（8af007b 之前已含 218 例全绿与 25 例团队用例）"
+}

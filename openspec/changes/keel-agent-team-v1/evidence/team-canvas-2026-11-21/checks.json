@@ -1,0 +1,758 @@
+{
+  "base": "http://127.0.0.1:13680/?fixture=1",
+  "generatedAt": "2026-11-21T00:27:26.306Z",
+  "states": {
+    "teams.card": "browser: 01-settings-teams-390.png / 08-settings-teams-1280.png",
+    "teams.captain-slot": "measurement: captainSlot in checks.json",
+    "teams.team-cli-facts": "measurement: teamCliFacts in checks.json",
+    "teams.cli-panel": "browser: 02-team-cli-panel-390.png",
+    "teams.no-captain": "browser: 06-settings-teams-no-captain-390.png",
+    "canvas.top": "browser: 03-team-canvas-390.png / 09-team-canvas-1280.png",
+    "canvas.no-captain": "browser: 07-team-canvas-no-captain-390.png",
+    "canvas.library": "browser: 04-team-canvas-library-390.png",
+    "canvas.new-agent": "browser: 05-team-canvas-new-agent-390.png",
+    "canvas.five-states": "TUI gate: settings-teams.test.tsx（空/加载/错误/403/成功 + 保存中/失败）"
+  },
+  "manifest": {
+    "expected": [
+      "keel team list",
+      "keel team show",
+      "keel team create",
+      "keel team update",
+      "keel team delete",
+      "keel team member add",
+      "keel team member remove",
+      "keel team save",
+      "keel team start"
+    ],
+    "rendered": [
+      "keel team list",
+      "keel team show",
+      "keel team create",
+      "keel team update",
+      "keel team delete",
+      "keel team member add",
+      "keel team member remove",
+      "keel team save",
+      "keel team start"
+    ],
+    "extras": []
+  },
+  "viewports": {
+    "390x844·settings teams": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 450,
+        "width": 254,
+        "height": 261
+      },
+      "captainSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 282,
+        "bottom": 353,
+        "width": 180,
+        "height": 71
+      },
+      "memberFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 359,
+        "bottom": 383,
+        "width": 180,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 389,
+        "bottom": 437,
+        "width": 180,
+        "height": 48
+      },
+      "blockedCard": null,
+      "blockedSlot": null,
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 85,
+        "right": 373,
+        "top": 499,
+        "bottom": 1542,
+        "width": 288,
+        "height": 1043
+      },
+      "cliRow": {
+        "left": 102,
+        "right": 356,
+        "top": 657,
+        "bottom": 745,
+        "width": 254,
+        "height": 88
+      },
+      "dialog": null,
+      "canvasCaptain": null,
+      "canvasMembers": null,
+      "canvasLibrary": null,
+      "newAgent": null,
+      "save": null
+    },
+    "390x844·team canvas": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 450,
+        "width": 254,
+        "height": 261
+      },
+      "captainSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 282,
+        "bottom": 353,
+        "width": 180,
+        "height": 71
+      },
+      "memberFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 359,
+        "bottom": 383,
+        "width": 180,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 389,
+        "bottom": 437,
+        "width": 180,
+        "height": 48
+      },
+      "blockedCard": null,
+      "blockedSlot": null,
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 85,
+        "right": 373,
+        "top": 499,
+        "bottom": 1542,
+        "width": 288,
+        "height": 1043
+      },
+      "cliRow": {
+        "left": 102,
+        "right": 356,
+        "top": 657,
+        "bottom": 745,
+        "width": 254,
+        "height": 88
+      },
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasCaptain": {
+        "left": 17,
+        "right": 342,
+        "top": 289,
+        "bottom": 347,
+        "width": 325,
+        "height": 58
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 487,
+        "bottom": 543,
+        "width": 325,
+        "height": 56
+      },
+      "canvasLibrary": {
+        "left": 17,
+        "right": 342,
+        "top": 606,
+        "bottom": 652,
+        "width": 325,
+        "height": 46
+      },
+      "newAgent": null,
+      "save": {
+        "left": 298,
+        "right": 342,
+        "top": 621,
+        "bottom": 649,
+        "width": 44,
+        "height": 28
+      }
+    },
+    "390x844·team canvas library": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 450,
+        "width": 254,
+        "height": 261
+      },
+      "captainSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 282,
+        "bottom": 353,
+        "width": 180,
+        "height": 71
+      },
+      "memberFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 359,
+        "bottom": 383,
+        "width": 180,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 389,
+        "bottom": 437,
+        "width": 180,
+        "height": 48
+      },
+      "blockedCard": null,
+      "blockedSlot": null,
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 85,
+        "right": 373,
+        "top": 499,
+        "bottom": 1542,
+        "width": 288,
+        "height": 1043
+      },
+      "cliRow": {
+        "left": 102,
+        "right": 356,
+        "top": 657,
+        "bottom": 745,
+        "width": 254,
+        "height": 88
+      },
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasCaptain": {
+        "left": 17,
+        "right": 342,
+        "top": 242,
+        "bottom": 300,
+        "width": 325,
+        "height": 58
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 440,
+        "bottom": 496,
+        "width": 325,
+        "height": 56
+      },
+      "canvasLibrary": {
+        "left": 17,
+        "right": 342,
+        "top": 559,
+        "bottom": 605,
+        "width": 325,
+        "height": 46
+      },
+      "newAgent": null,
+      "save": {
+        "left": 298,
+        "right": 342,
+        "top": 621,
+        "bottom": 649,
+        "width": 44,
+        "height": 28
+      }
+    },
+    "390x844·team canvas new-agent": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 450,
+        "width": 254,
+        "height": 261
+      },
+      "captainSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 282,
+        "bottom": 353,
+        "width": 180,
+        "height": 71
+      },
+      "memberFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 359,
+        "bottom": 383,
+        "width": 180,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 389,
+        "bottom": 437,
+        "width": 180,
+        "height": 48
+      },
+      "blockedCard": null,
+      "blockedSlot": null,
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 85,
+        "right": 373,
+        "top": 499,
+        "bottom": 1542,
+        "width": 288,
+        "height": 1043
+      },
+      "cliRow": {
+        "left": 102,
+        "right": 356,
+        "top": 657,
+        "bottom": 745,
+        "width": 254,
+        "height": 88
+      },
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasCaptain": {
+        "left": 17,
+        "right": 342,
+        "top": 35,
+        "bottom": 93,
+        "width": 325,
+        "height": 58
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 233,
+        "bottom": 289,
+        "width": 325,
+        "height": 56
+      },
+      "canvasLibrary": {
+        "left": 17,
+        "right": 342,
+        "top": 352,
+        "bottom": 398,
+        "width": 325,
+        "height": 46
+      },
+      "newAgent": {
+        "left": 17,
+        "right": 342,
+        "top": 422,
+        "bottom": 605,
+        "width": 325,
+        "height": 183
+      },
+      "save": {
+        "left": 298,
+        "right": 342,
+        "top": 621,
+        "bottom": 649,
+        "width": 44,
+        "height": 28
+      }
+    },
+    "390x844·no-captain": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 450,
+        "width": 254,
+        "height": 261
+      },
+      "captainSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 282,
+        "bottom": 353,
+        "width": 180,
+        "height": 71
+      },
+      "memberFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 359,
+        "bottom": 383,
+        "width": 180,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 389,
+        "bottom": 437,
+        "width": 180,
+        "height": 48
+      },
+      "blockedCard": {
+        "left": 102,
+        "right": 356,
+        "top": 458,
+        "bottom": 734,
+        "width": 254,
+        "height": 276
+      },
+      "blockedSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 578,
+        "bottom": 649,
+        "width": 180,
+        "height": 71
+      },
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 85,
+        "right": 373,
+        "top": 783,
+        "bottom": 1826,
+        "width": 288,
+        "height": 1043
+      },
+      "cliRow": {
+        "left": 102,
+        "right": 356,
+        "top": 941,
+        "bottom": 1029,
+        "width": 254,
+        "height": 88
+      },
+      "dialog": null,
+      "canvasCaptain": null,
+      "canvasMembers": null,
+      "canvasLibrary": null,
+      "newAgent": null,
+      "save": null
+    },
+    "390x844·no-captain·canvas": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "teamCard": {
+        "left": 102,
+        "right": 356,
+        "top": 189,
+        "bottom": 450,
+        "width": 254,
+        "height": 261
+      },
+      "captainSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 282,
+        "bottom": 353,
+        "width": 180,
+        "height": 71
+      },
+      "memberFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 359,
+        "bottom": 383,
+        "width": 180,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 163,
+        "right": 343,
+        "top": 389,
+        "bottom": 437,
+        "width": 180,
+        "height": 48
+      },
+      "blockedCard": {
+        "left": 102,
+        "right": 356,
+        "top": 458,
+        "bottom": 734,
+        "width": 254,
+        "height": 276
+      },
+      "blockedSlot": {
+        "left": 163,
+        "right": 343,
+        "top": 578,
+        "bottom": 649,
+        "width": 180,
+        "height": 71
+      },
+      "captainBlocker": {
+        "left": 17,
+        "right": 342,
+        "top": 613,
+        "bottom": 645,
+        "width": 325,
+        "height": 32
+      },
+      "cliPanel": {
+        "left": 85,
+        "right": 373,
+        "top": 783,
+        "bottom": 1826,
+        "width": 288,
+        "height": 1043
+      },
+      "cliRow": {
+        "left": 102,
+        "right": 356,
+        "top": 941,
+        "bottom": 1029,
+        "width": 254,
+        "height": 88
+      },
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasCaptain": {
+        "left": 17,
+        "right": 342,
+        "top": 289,
+        "bottom": 353,
+        "width": 325,
+        "height": 64
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 493,
+        "bottom": 549,
+        "width": 325,
+        "height": 56
+      },
+      "canvasLibrary": {
+        "left": 17,
+        "right": 342,
+        "top": 612,
+        "bottom": 680,
+        "width": 325,
+        "height": 68
+      },
+      "newAgent": null,
+      "save": {
+        "left": 298,
+        "right": 342,
+        "top": 661,
+        "bottom": 689,
+        "width": 44,
+        "height": 28
+      }
+    },
+    "1280x900·settings teams": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "teamCard": {
+        "left": 375,
+        "right": 1173,
+        "top": 135,
+        "bottom": 329,
+        "width": 798,
+        "height": 194
+      },
+      "captainSlot": {
+        "left": 436,
+        "right": 1160,
+        "top": 202,
+        "bottom": 260,
+        "width": 724,
+        "height": 58
+      },
+      "memberFacts": {
+        "left": 436,
+        "right": 1160,
+        "top": 266,
+        "bottom": 290,
+        "width": 724,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 436,
+        "right": 1160,
+        "top": 296,
+        "bottom": 316,
+        "width": 724,
+        "height": 20
+      },
+      "blockedCard": null,
+      "blockedSlot": null,
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 358,
+        "right": 1190,
+        "top": 378,
+        "bottom": 1103,
+        "width": 832,
+        "height": 725
+      },
+      "cliRow": {
+        "left": 375,
+        "right": 1173,
+        "top": 464,
+        "bottom": 526,
+        "width": 798,
+        "height": 62
+      },
+      "dialog": null,
+      "canvasCaptain": null,
+      "canvasMembers": null,
+      "canvasLibrary": null,
+      "newAgent": null,
+      "save": null
+    },
+    "1280x900·team canvas": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "teamCard": {
+        "left": 375,
+        "right": 1173,
+        "top": 135,
+        "bottom": 329,
+        "width": 798,
+        "height": 194
+      },
+      "captainSlot": {
+        "left": 436,
+        "right": 1160,
+        "top": 202,
+        "bottom": 260,
+        "width": 724,
+        "height": 58
+      },
+      "memberFacts": {
+        "left": 436,
+        "right": 1160,
+        "top": 266,
+        "bottom": 290,
+        "width": 724,
+        "height": 24
+      },
+      "teamCliFacts": {
+        "left": 436,
+        "right": 1160,
+        "top": 296,
+        "bottom": 316,
+        "width": 724,
+        "height": 20
+      },
+      "blockedCard": null,
+      "blockedSlot": null,
+      "captainBlocker": null,
+      "cliPanel": {
+        "left": 358,
+        "right": 1190,
+        "top": 378,
+        "bottom": 1103,
+        "width": 832,
+        "height": 725
+      },
+      "cliRow": {
+        "left": 375,
+        "right": 1173,
+        "top": 464,
+        "bottom": 526,
+        "width": 798,
+        "height": 62
+      },
+      "dialog": {
+        "left": 0,
+        "right": 1280,
+        "top": 0,
+        "bottom": 900,
+        "width": 1280,
+        "height": 900
+      },
+      "canvasCaptain": {
+        "left": 17,
+        "right": 543,
+        "top": 274,
+        "bottom": 332,
+        "width": 526,
+        "height": 58
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 543,
+        "top": 472,
+        "bottom": 528,
+        "width": 526,
+        "height": 56
+      },
+      "canvasLibrary": {
+        "left": 17,
+        "right": 543,
+        "top": 591,
+        "bottom": 637,
+        "width": 526,
+        "height": 46
+      },
+      "newAgent": null,
+      "save": {
+        "left": 499,
+        "right": 543,
+        "top": 606,
+        "bottom": 634,
+        "width": 44,
+        "height": 28
+      }
+    }
+  },
+  "pass": true,
+  "findings": []
+}

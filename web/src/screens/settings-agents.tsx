@@ -20,7 +20,7 @@
 // and disabled fields) and failed (the server's reason, verbatim, next to the
 // form). Keyboard: the kit Dialog closes on Escape, every control is a kit
 // control (Tab reaches it), and Enter in a single-line field submits.
-import { cleanup, effect, Scroll, signal, Text, View, windowSize } from "nsh";
+import { cleanup, effect, platform, Scroll, signal, Text, View, windowSize } from "nsh";
 import type {
   AgentTeamView,
   AgentTeamWriteRequest,
@@ -51,6 +51,7 @@ import {
   FieldGroup,
   Input,
   Select,
+  Separator,
   Skeleton,
   Tab,
   Tabs,
@@ -58,11 +59,13 @@ import {
   color,
   iconSize,
   lineHeight,
+  radius,
   space,
   typeScale,
   weight,
   type SelectItem,
 } from "../ui/kit";
+import { CliCapabilityRow } from "./cli-capability";
 
 // ---- shared reads ---------------------------------------------------------
 
@@ -271,8 +274,8 @@ const submitAgent = () => {
     tools: toolGrantsOf(agentTools(), editing?.tools),
     systemPrompt: prompt.value,
   };
-  void store.saveAgent(request, editingId ?? undefined).then((ok) => {
-    if (ok) closeAgentEditor();
+  void store.saveAgent(request, editingId ?? undefined).then((saved) => {
+    if (saved) closeAgentEditor();
   });
 };
 
@@ -282,6 +285,12 @@ const submitAgent = () => {
 // the seats are signals (a pick is a deliberate, one-step change), and the
 // uncontrolled inputs restore from the record on any re-render.
 let teamText = { name: "", description: "" };
+/** Web mirrors of the two uncontrolled text fields. The web native input
+ * ignores `defaultValue` when it mounts inside a dialog (nsh 0.4.0), so the
+ * web host controls these two values; the terminal keeps the uncontrolled
+ * path, whose IME composition does not survive a re-render per keystroke. */
+const teamNameValue = signal("");
+const teamDescriptionValue = signal("");
 const teamOpen = signal(false);
 const teamEditingId = signal<string | null>(null);
 const teamCaptain = signal("");
@@ -289,6 +298,59 @@ const teamMembers = signal<string[]>([]);
 const teamNameError = signal<string | null>(null);
 const teamCaptainError = signal<string | null>(null);
 const confirmingTeam = signal<AgentTeamView | null>(null);
+
+/** One seat's display name: a stored agent, an inline member's own name, the
+ * seat's label, else a readable "not loaded" word. A raw id is never a display
+ * name — the agents registry can be forbidden while teams are readable. */
+const memberNameOf = (member: TeamMemberView): string =>
+  agentNameOf(member.agentId, member.label) === "未载入的 Agent"
+    ? (member.inline?.name || member.label || "未载入的 Agent")
+    : agentNameOf(member.agentId, member.label);
+
+// ---- team canvas: the inline new-Agent form -------------------------------
+
+const canvasNewAgentOpen = signal(false);
+const canvasAgentNameError = signal<string | null>(null);
+let canvasAgentText = { name: "", description: "" };
+
+const openCanvasAgentForm = () => {
+  canvasAgentText = { name: "", description: "" };
+  canvasAgentNameError.set(null);
+  store.clearAgentActionError();
+  canvasNewAgentOpen.set(true);
+};
+
+const closeCanvasAgentForm = () => {
+  store.clearAgentActionError();
+  canvasNewAgentOpen.set(false);
+};
+
+/** Create a minimal Agent from inside the canvas (name + description), then
+ * seat it as captain when the slot is still empty. The full editor stays one
+ * press away on the Agents section; this form exists so "no Agents yet" never
+ * dead-ends the team flow. */
+const submitCanvasAgent = () => {
+  const name = canvasAgentText.name.trim();
+  if (!name) {
+    canvasAgentNameError.set("Agent 名字不能为空");
+    return;
+  }
+  canvasAgentNameError.set(null);
+  const request: AgentWriteRequest = {
+    name,
+    description: canvasAgentText.description.trim(),
+    avatar: {},
+    defaultModel: {},
+    tools: [],
+    systemPrompt: {},
+  };
+  void store.saveAgent(request).then((saved) => {
+    if (!saved) return;
+    canvasAgentText = { name: "", description: "" };
+    canvasNewAgentOpen.set(false);
+    if (!teamCaptain()) setTeamCaptain(saved.id);
+  });
+};
 
 const setTeamCaptain = (agentId: string | null) => {
   const captain = agentId ?? "";
@@ -304,6 +366,8 @@ const editTeam = (team?: AgentTeamView) => {
   teamCaptainError.set(null);
   store.clearTeamActionError();
   teamText = { name: team?.name ?? "", description: team?.description ?? "" };
+  teamNameValue.set(teamText.name);
+  teamDescriptionValue.set(teamText.description);
   teamCaptain.set(team?.captain.agentId ?? "");
   teamMembers.set((team?.members ?? []).map((member) => member.agentId));
   teamEditingId.set(team?.id ?? null);
@@ -411,10 +475,10 @@ function SectionError(props: { text: string; onRetry?: () => void; testID?: stri
  * network — it is the server saying this reader may not see the registry. It
  * gets its own face (warning, a key, the server's reason verbatim, retry), so
  * "加载失败" never mislabels a permission decision. */
-function SectionPermission(props: { scope: string; reason: string; onRetry?: () => void }) {
+function SectionPermission(props: { scope: string; reason: string; onRetry?: () => void; testID?: string }) {
   return (
     <Card
-      testID="settings-permission"
+      testID={props.testID ?? "settings-permission"}
       accessibilityLabel={`没有查看${props.scope}的权限`}
       style={{ gap: space.sm, padding: space.md, backgroundColor: color.warningTint, borderColor: color.warning }}
     >
@@ -918,22 +982,104 @@ export function AgentsSection() {
 
 // ---- 团队 -----------------------------------------------------------------
 
+/** The captain is the mandatory seat: a slot of its own (never a line hidden
+ * among members), with the seat's portrait, name and what it would run. A team
+ * whose captain is missing is blocked, not quietly rendered as a normal card —
+ * a session cannot start from it. */
+function TeamCaptainSlot(props: { team: AgentTeamView; onEdit: () => void }) {
+  const missing = () => !props.team.captain?.agentId;
+  const captain = () => store.agents().find((agent) => agent.id === props.team.captain?.agentId);
+  const name = () => (missing() ? "未指定队长" : agentNameOf(props.team.captain.agentId, props.team.captain.label));
+  const fact = () => {
+    if (missing()) return "这支团队不能启动：先在团队画布里指定队长。";
+    const found = captain();
+    return found?.description || (found ? modelLabelOf(found) : "Agent 注册表未载入，队长名字稍后可见。");
+  };
+  return (
+    <View
+      testID={`team-captain-slot-${props.team.id}`}
+      accessibilityLabel={missing() ? `团队 ${props.team.name} 缺少队长` : `队长 ${name()}`}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.md,
+        padding: space.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: missing() ? color.destructive : color.brand,
+        backgroundColor: missing() ? color.dangerTint : color.brandTint,
+      }}
+    >
+      <Avatar
+        src={captain()?.avatar?.url ?? null}
+        name={missing() ? null : name()}
+        size="lg"
+      />
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs, flexWrap: "wrap" }}>
+          <Badge
+            variant={missing() ? "destructive" : "default"}
+            icon={missing() ? "alert" : "users"}
+            label={missing() ? "缺少队长" : "队长"}
+          />
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              fontWeight: weight.semibold,
+              color: color.foreground,
+              maxWidth: "100%",
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
+            }}
+          >
+            {name()}
+          </Text>
+        </View>
+        <Text
+          style={{
+            ...factText,
+            maxWidth: "100%",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {fact()}
+        </Text>
+      </View>
+      <Button
+        variant={missing() ? "default" : "outline"}
+        size="sm"
+        label={missing() ? "指定队长" : "更换"}
+        testID={`team-captain-action-${props.team.id}`}
+        accessibilityLabel={`在画布中${missing() ? "指定" : "更换"}队长 ${props.team.name}`}
+        onPress={props.onEdit}
+      />
+    </View>
+  );
+}
+
 function TeamCard(props: { team: () => AgentTeamView }) {
   const members = () => props.team().members ?? [];
-  const captainName = () => agentNameOf(props.team().captain.agentId, props.team().captain.label);
+  const missingCaptain = () => !props.team().captain?.agentId;
+  const teamCli = () => props.team().capabilities?.teamCli;
+  const teamCliOn = () => teamCli()?.enabled === true;
+  const teamCliCommands = () => teamCli()?.commands ?? [];
   return (
     <Card size="sm" testID={`team-card-${props.team().id}`} accessibilityLabel={`团队 ${props.team().name}`}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.md }}>
         <Avatar name={props.team().name} size="lg" />
-        <View style={{ flex: 1, flexDirection: "column", gap: space.xs }}>
+        <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.sm }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
             <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
               {props.team().name}
             </Text>
-            <If when={props.team().status === "valid"}>
+            <If when={missingCaptain()}>
+              <Badge variant="destructive" icon="alert" label="缺队长 · 不能启动" />
+            </If>
+            <If when={!missingCaptain() && props.team().status === "valid"}>
               <Badge variant="success" icon="check" label="可用" />
             </If>
-            <If when={props.team().status === "invalid"}>
+            <If when={!missingCaptain() && props.team().status === "invalid"}>
               <Badge variant="destructive" icon="alert" label="不可用" />
             </If>
             <View style={{ flex: 1 }} />
@@ -957,57 +1103,196 @@ function TeamCard(props: { team: () => AgentTeamView }) {
             />
           </View>
           <Text style={mutedProse}>{props.team().description || "还没有描述——编辑里补一句这支团队负责什么。"}</Text>
-          {/* The captain is the mandatory seat: own line, never implied. */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
-            <Badge
-              variant="default"
-              truncate
-              style={{ maxWidth: "100%" }}
-              label={`队长：${captainName()}`}
-            />
+
+          <TeamCaptainSlot team={props.team()} onEdit={() => editTeam(props.team())} />
+
+          <View
+            testID={`team-members-${props.team().id}`}
+            style={{ flexDirection: "row", alignItems: "center", gap: space.xs, flexWrap: "wrap" }}
+          >
             <Text style={factText}>{`成员 ${members().length} 人`}</Text>
             <If when={members().length === 0}>
               <Text style={factText}>只有队长</Text>
             </If>
-          </View>
-          <If when={members().length > 0}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs, flexWrap: "wrap" }}>
-              <Text style={factText}>成员</Text>
-              <Each of={members().slice(0, 8)} key={(member) => member.agentId}>
-                {(member) => (
+            <Each of={members().slice(0, 6)} key={(member) => member.agentId}>
+              {(member) => (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: space.xxs, maxWidth: 150 }}>
                   <Avatar
-                    name={agentNameOf(member().agentId, member().label)}
+                    name={memberNameOf(member())}
                     size="sm"
-                    accessibilityLabel={agentNameOf(member().agentId, member().label)}
+                    accessibilityLabel={memberNameOf(member())}
                   />
-                )}
-              </Each>
-              <If when={members().length > 8}>
-                <Text style={factText}>{`+${members().length - 8}`}</Text>
-              </If>
-            </View>
-          </If>
+                  <Text
+                    style={{
+                      fontSize: typeScale.xs,
+                      color: color.mutedForeground,
+                      numberOfLines: 1,
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {memberNameOf(member())}
+                  </Text>
+                </View>
+              )}
+            </Each>
+            <If when={members().length > 6}>
+              <Text style={factText}>{`+${members().length - 6}`}</Text>
+            </If>
+          </View>
+
+          <View
+            testID={`team-cli-facts-${props.team().id}`}
+            style={{
+              flexDirection: narrowCards() ? "column" : "row",
+              alignItems: narrowCards() ? "flex-start" : "center",
+              gap: space.xs,
+            }}
+          >
+            <Badge
+              variant={teamCliOn() ? "success" : "secondary"}
+              icon="terminal"
+              label={teamCliOn() ? "Team CLI 已开" : "Team CLI 已关"}
+            />
+            <Text
+              style={{
+                ...factText,
+                flex: narrowCards() ? undefined : 1,
+                maxWidth: "100%",
+                numberOfLines: 2,
+                textOverflow: "ellipsis",
+              }}
+            >
+              {teamCliOn()
+                ? teamCliCommands().length > 0
+                  ? `允许：${teamCliCommands().join(" · ")}`
+                  : "已开启，但未授予子命令"
+                : "队长不能通过 CLI 改团队"}
+            </Text>
+          </View>
         </View>
       </View>
     </Card>
   );
 }
 
-function TeamEditor() {
+/** One row in the canvas's member list: portrait, name, description and the
+ * one action that seat has (remove). The captain is never in this list — it
+ * has its own slot and cannot be removed here. */
+function CanvasMemberRow(props: { member: () => TeamMemberView }) {
+  const agent = () => store.agents().find((item) => item.id === props.member().agentId);
+  const name = () => memberNameOf(props.member());
+  return (
+    <View
+      testID={`canvas-member-${props.member().agentId}`}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.md,
+        paddingVertical: space.xs,
+      }}
+    >
+      <Avatar src={agent()?.avatar?.url ?? null} name={name()} size="default" />
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
+        <Text
+          style={{
+            fontSize: typeScale.sm,
+            fontWeight: weight.medium,
+            color: color.foreground,
+            maxWidth: "100%",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {name()}
+        </Text>
+        <Text
+          style={{
+            ...factText,
+            maxWidth: "100%",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {agent()?.description || "已加入团队"}
+        </Text>
+      </View>
+      <Button
+        variant="ghost"
+        size="sm"
+        icon="x"
+        label="移出"
+        testID={`canvas-remove-${props.member().agentId}`}
+        accessibilityLabel={`移出成员 ${name()}`}
+        disabled={store.teamsSaving()}
+        onPress={() => teamMembers.set(teamMembers().filter((id) => id !== props.member().agentId))}
+      />
+    </View>
+  );
+}
+
+/** One row in the member library: a stored Agent not yet seated. Pressing
+ * 加入 only edits the canvas draft; the team document is written by 保存. */
+function CanvasLibraryRow(props: { agent: () => AgentView }) {
+  return (
+    <View
+      testID={`canvas-library-${props.agent().id}`}
+      style={{ flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.xs }}
+    >
+      <Avatar src={props.agent().avatar?.url ?? null} name={props.agent().name} size="default" />
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
+        <Text
+          style={{
+            fontSize: typeScale.sm,
+            fontWeight: weight.medium,
+            color: color.foreground,
+            maxWidth: "100%",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {props.agent().name}
+        </Text>
+        <Text
+          style={{
+            ...factText,
+            maxWidth: "100%",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {props.agent().description || "还没有描述"}
+        </Text>
+      </View>
+      <Button
+        variant="outline"
+        size="sm"
+        icon="plus"
+        label="加入"
+        testID={`canvas-add-${props.agent().id}`}
+        accessibilityLabel={`加入成员 ${props.agent().name}`}
+        disabled={store.teamsSaving()}
+        onPress={() => teamMembers.set([...teamMembers(), props.agent().id])}
+      />
+    </View>
+  );
+}
+
+/** The team canvas's content: captain slot (mandatory), roster, member library,
+ * inline Agent creation. Edits stay a draft until 保存, which writes through
+ * the existing `/v1/teams` document or the member routes — the canvas adds no
+ * API of its own. Mounted by `TeamEditor`, which keys it per open/edit target. */
+function TeamCanvasDialog() {
   const agents = () => store.agents().filter((agent) => agent.archived !== true);
   const captainItems = (): SelectItem[] =>
     agents().map((agent) => ({ value: agent.id, title: agent.name || agent.id }));
-  // The captain stays in the list, disabled, so a reader who looks for that
-  // person here is told why the seat cannot be removed instead of silently
-  // finding no such row.
-  const memberItems = (): SelectItem[] =>
-    agents().map((agent) => ({
-      value: agent.id,
-      title: agent.id === teamCaptain() ? `${agent.name || agent.id}（队长，不可移除）` : agent.name || agent.id,
-      disabled: agent.id === teamCaptain(),
-    }));
   const noAgents = () => agents().length === 0;
   const saving = () => store.teamsSaving();
+  const captain = () => agents().find((agent) => agent.id === teamCaptain());
+  const captainName = () =>
+    captain()?.name || (teamCaptain() ? "未载入的 Agent" : "未指定队长");
+  const members = () => teamMembers();
+  const library = () =>
+    agents().filter((agent) => agent.id !== teamCaptain() && !teamMembers().includes(agent.id));
   // A team cannot be saved without a captain; the name is validated on submit
   // (so the field can explain itself) and does not gate the button.
   const canSave = () => !saving() && teamCaptain() !== "";
@@ -1016,14 +1301,26 @@ function TeamEditor() {
       testID="team-dialog"
       open={teamOpen()}
       size="lg"
-      title={teamEditingId() === null ? "新建团队" : "编辑团队"}
+      title={teamEditingId() === null ? "团队画布 · 新建" : "团队画布 · 编辑"}
       description="团队必须有一位队长；成员是除队长之外的席位，可以稍后再加。"
+      // A write in flight owns the dialog: the same lock as the fields and the
+      // save button, so Escape / the backdrop / the close control cannot
+      // discard the request that is already on the wire.
+      showClose={!saving()}
+      closeOnEscape={!saving()}
+      closeOnBackdropPress={!saving()}
       onOpenChange={(event) => {
-        if (!event.open) closeTeamEditor();
+        if (!event.open && !saving()) closeTeamEditor();
       }}
       footer={
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
-          <Button variant="ghost" label="取消" onPress={closeTeamEditor} />
+          <Button
+            testID="team-cancel"
+            variant="ghost"
+            label="取消"
+            disabled={saving()}
+            onPress={closeTeamEditor}
+          />
           <Button
             testID="team-save"
             label={saving() ? "保存中…" : teamEditingId() === null ? "创建" : "保存"}
@@ -1035,77 +1332,314 @@ function TeamEditor() {
       }
     >
       <Scroll testID="team-form" style={{ maxHeight: editorScrollHeight() }}>
-        <FieldGroup>
-          <Field label="名字" required error={teamNameError() ?? ""} hint="团队名会出现在会话的启动模式里。">
-            <Input
-              testID="team-name"
-              accessibilityLabel="团队名字"
-              defaultValue={teamText.name}
-              placeholder="例如 品牌发布小组"
-              maxLength={64}
-              disabled={saving()}
-              onChange={(value) => {
-                teamText.name = value;
-                if (teamNameError()) teamNameError.set(null);
+        <View style={{ flexDirection: "column", gap: space["2xl"] }}>
+          <FieldGroup>
+            <Field label="名字" required error={teamNameError() ?? ""} hint="团队名会出现在会话的启动模式里。">
+              <Input
+                testID="team-name"
+                accessibilityLabel="团队名字"
+                value={platform.idiom === "terminal" ? undefined : teamNameValue()}
+                defaultValue={teamText.name}
+                placeholder="例如 品牌发布小组"
+                maxLength={64}
+                disabled={saving()}
+                onChange={(value) => {
+                  teamText.name = value;
+                  if (platform.idiom !== "terminal") teamNameValue.set(value);
+                  if (teamNameError()) teamNameError.set(null);
+                }}
+                onSubmit={submitTeam}
+              />
+            </Field>
+            <Field label="描述" hint="一句话说明这支团队负责什么。">
+              <Input
+                testID="team-description"
+                accessibilityLabel="团队描述"
+                value={platform.idiom === "terminal" ? undefined : teamDescriptionValue()}
+                defaultValue={teamText.description}
+                placeholder="例如 负责新品发布的全链路交付"
+                maxLength={240}
+                disabled={saving()}
+                onChange={(value) => {
+                  teamText.description = value;
+                  if (platform.idiom !== "terminal") teamDescriptionValue.set(value);
+                }}
+                onSubmit={submitTeam}
+              />
+            </Field>
+          </FieldGroup>
+
+          <View testID="canvas-captain" style={{ flexDirection: "column", gap: space.sm }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+                队长槽
+              </Text>
+              <Badge variant="outline" icon="users" label="必选、唯一" />
+            </View>
+            <View
+              testID="canvas-captain-seat"
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: space.md,
+                padding: space.md,
+                borderRadius: radius.md,
+                borderWidth: 1,
+                borderColor: teamCaptain() ? color.brand : color.destructive,
+                backgroundColor: teamCaptain() ? color.brandTint : color.dangerTint,
               }}
-              onSubmit={submitTeam}
-            />
-          </Field>
-          <Field label="描述" hint="一句话说明这支团队负责什么。">
-            <Input
-              testID="team-description"
-              accessibilityLabel="团队描述"
-              defaultValue={teamText.description}
-              placeholder="例如 负责新品发布的全链路交付"
-              maxLength={240}
-              disabled={saving()}
-              onChange={(value) => {
-                teamText.description = value;
+            >
+              <Avatar
+                src={captain()?.avatar?.url ?? null}
+                name={teamCaptain() ? captainName() : null}
+                size="lg"
+              />
+              <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs, flexWrap: "wrap" }}>
+                  <Badge
+                    variant={teamCaptain() ? "default" : "destructive"}
+                    icon={teamCaptain() ? "users" : "alert"}
+                    label={teamCaptain() ? "队长" : "缺少队长"}
+                  />
+                  <Text
+                    style={{
+                      fontSize: typeScale.sm,
+                      fontWeight: weight.semibold,
+                      color: color.foreground,
+                      maxWidth: "100%",
+                      numberOfLines: 1,
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {captainName()}
+                  </Text>
+                </View>
+                <Text style={factText}>
+                  {teamCaptain()
+                    ? captain()?.description || (captain() ? modelLabelOf(captain()!) : "Agent 注册表未载入")
+                    : "从成员库或下方列表选择一位 Agent 担任队长；没有队长不能保存。"}
+                </Text>
+              </View>
+              <If when={!!teamCaptain()}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  label="清除"
+                  testID="canvas-captain-clear"
+                  accessibilityLabel="清除队长"
+                  disabled={saving()}
+                  onPress={() => setTeamCaptain(null)}
+                />
+              </If>
+            </View>
+            <Field
+              label="选择队长"
+              required
+              error={teamCaptainError() ?? ""}
+              hint={
+                noAgents()
+                  ? "还没有 Agent：先在下方成员库里新建一位，再回来组队。"
+                  : "团队必须有队长；队长始终在队内，不能当作普通成员移除。"
+              }
+            >
+              <Select
+                testID="team-captain"
+                accessibilityLabel="选择队长"
+                items={captainItems()}
+                value={teamCaptain()}
+                placeholder="选择队长（必选）"
+                searchable
+                invalid={!!teamCaptainError()}
+                disabled={saving() || noAgents()}
+                onChange={(value) => setTeamCaptain(value)}
+              />
+            </Field>
+          </View>
+
+          <Separator label="队内成员" />
+          <View testID="canvas-members" style={{ flexDirection: "column", gap: space.xs }}>
+            <Text style={factText}>{`${members().length} 位协作者（队长之外）`}</Text>
+            <If when={members().length === 0}>
+              <Text style={mutedProse}>只有队长；从下方成员库添加协作者。</Text>
+            </If>
+            <Each of={members()} key={(agentId) => agentId}>
+              {(agentId) => <CanvasMemberRow member={() => ({ agentId: agentId() })} />}
+            </Each>
+          </View>
+
+          <Separator label="成员库" />
+          <View testID="canvas-library" style={{ flexDirection: "column", gap: space.xs }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+              <Text style={factText}>
+                {store.agentsLoading() && agents().length === 0
+                  ? "正在读取 Agent 成员库…"
+                  : `${library().length} 位可加入 · 来自 Agent 库`}
+              </Text>
+              <View style={{ flex: 1 }} />
+              <Button
+                variant="outline"
+                size="sm"
+                icon="plus"
+                label="新建 Agent"
+                testID="canvas-create-agent"
+                accessibilityLabel="在团队画布里新建 Agent"
+                disabled={saving() || store.agentsSaving()}
+                onPress={openCanvasAgentForm}
+              />
+            </View>
+            <If when={store.agentsLoading() && agents().length === 0}>
+              <SectionLoading testID="canvas-agents-loading" text="正在读取 Agent 成员库…" />
+            </If>
+            <If when={store.agentsErrorStatus() === 403}>
+              <SectionPermission
+                testID="canvas-agents-permission"
+                scope=" Agent 成员库"
+                reason={store.agentsError() ?? ""}
+                onRetry={() => void store.loadAgents()}
+              />
+            </If>
+            <If when={!!store.agentsError() && store.agentsErrorStatus() !== 403}>
+              <SectionError
+                testID="canvas-agents-error"
+                text={store.agentsError() ?? ""}
+                onRetry={() => void store.loadAgents()}
+              />
+            </If>
+            <If when={!store.agentsLoading() && !store.agentsError() && noAgents()}>
+              <Empty
+                testID="canvas-agents-empty"
+                accessibilityLabel="还没有 Agent"
+                style={{ padding: space.lg }}
+              >
+                <EmptyMedia icon="brain" tone="brand" />
+                <EmptyTitle label="还没有 Agent" />
+                <EmptyDescription label="先建一位成员；只填名字也可以，建好后就能坐进队长槽或成员库。" />
+                <EmptyContent>
+                  <Button
+                    icon="plus"
+                    label="新建 Agent"
+                    testID="canvas-create-agent-empty"
+                    accessibilityLabel="空态新建 Agent"
+                    onPress={openCanvasAgentForm}
+                  />
+                </EmptyContent>
+              </Empty>
+            </If>
+            <If when={!store.agentsError() && library().length > 0}>
+              <Each of={library()} key={(agent) => agent.id}>
+                {(agent) => <CanvasLibraryRow agent={agent} />}
+              </Each>
+            </If>
+            <If when={!store.agentsLoading() && !store.agentsError() && !noAgents() && library().length === 0}>
+              <Text style={mutedProse}>成员库里的 Agent 都已在队内。</Text>
+            </If>
+          </View>
+
+          <If when={canvasNewAgentOpen()}>
+            <View
+              testID="canvas-new-agent"
+              style={{
+                flexDirection: "column",
+                gap: space.md,
+                padding: space.md,
+                borderRadius: radius.md,
+                borderWidth: 1,
+                borderColor: color.border,
+                backgroundColor: color.muted,
               }}
-              onSubmit={submitTeam}
-            />
-          </Field>
-          <Field
-            label="队长"
-            required
-            error={teamCaptainError() ?? ""}
-            hint={noAgents() ? "还没有 Agent：先到「Agents」创建一位，再回来组队。" : "团队必须有队长；队长始终在队内，不能当作普通成员移除。"}
-          >
-            <Select
-              testID="team-captain"
-              accessibilityLabel="选择队长"
-              items={captainItems()}
-              value={teamCaptain()}
-              placeholder="选择队长（必选）"
-              searchable
-              invalid={!!teamCaptainError()}
-              disabled={saving() || noAgents()}
-              onChange={(value) => setTeamCaptain(value)}
-            />
-          </Field>
-          <Field
-            label="成员"
-            hint={
-              noAgents()
-                ? "先在「Agents」里创建成员。"
-                : "可多选；队长不会出现在可添加列表里（列表中标为「不可移除」）。"
-            }
-          >
-            <Combobox
-              testID="team-members"
-              accessibilityLabel="选择团队成员"
-              items={memberItems()}
-              multiple
-              value={teamMembers()}
-              placeholder="搜索并添加成员"
-              disabled={saving() || noAgents()}
-              onChange={(values) => teamMembers.set(values)}
-            />
-          </Field>
-        </FieldGroup>
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+                <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+                  新建 Agent
+                </Text>
+                <Text style={factText}>只填名字即可；建好后自动坐进空着的队长槽。</Text>
+              </View>
+              <Field label="名字" required error={canvasAgentNameError() ?? ""}>
+                <Input
+                  testID="canvas-new-agent-name"
+                  accessibilityLabel="新 Agent 名字"
+                  defaultValue={canvasAgentText.name}
+                  placeholder="例如 发布助手"
+                  maxLength={64}
+                  disabled={store.agentsSaving()}
+                  onChange={(value) => {
+                    canvasAgentText.name = value;
+                    if (canvasAgentNameError()) canvasAgentNameError.set(null);
+                  }}
+                  onSubmit={submitCanvasAgent}
+                />
+              </Field>
+              <Field label="描述">
+                <Input
+                  testID="canvas-new-agent-description"
+                  accessibilityLabel="新 Agent 描述"
+                  defaultValue={canvasAgentText.description}
+                  placeholder="例如 负责发布物料与渠道沟通"
+                  maxLength={240}
+                  disabled={store.agentsSaving()}
+                  onChange={(value) => {
+                    canvasAgentText.description = value;
+                  }}
+                  onSubmit={submitCanvasAgent}
+                />
+              </Field>
+              <If when={!!store.agentsActionError()}>
+                <Text
+                  testID="canvas-new-agent-error"
+                  style={{
+                    fontSize: typeScale.sm,
+                    lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                    color: color.danger,
+                  }}
+                >
+                  创建失败：{store.agentsActionError() ?? ""}
+                </Text>
+              </If>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+                <Button variant="ghost" label="取消" onPress={closeCanvasAgentForm} />
+                <Button
+                  testID="canvas-new-agent-save"
+                  label={store.agentsSaving() ? "创建中…" : "创建"}
+                  loading={store.agentsSaving()}
+                  disabled={store.agentsSaving()}
+                  onPress={submitCanvasAgent}
+                />
+              </View>
+            </View>
+          </If>
+        </View>
       </Scroll>
-      {/* As the Agent editor: the refusal stays outside the form's scroll, so
-          it is visible on a 390px screen without scrolling. */}
+      {/* The blocker and the refusal stay outside the form's scroll: a 390px
+          dialog ends its viewport at the last field, so a reason printed below
+          it would be invisible exactly when the reader needs it. */}
+      <If when={teamCaptain() === ""}>
+        <View
+          testID="canvas-captain-blocker"
+          role="alert"
+          style={{
+            flexDirection: "row",
+            alignItems: "flex-start",
+            gap: space.sm,
+            padding: space.sm,
+            borderRadius: radius.sm,
+            backgroundColor: color.dangerTint,
+            borderWidth: 1,
+            borderColor: color.destructive,
+          }}
+        >
+          <Icon name="alert" size={iconSize.sm} tint={color.danger} />
+          <Text
+            style={{
+              flex: 1,
+              fontSize: typeScale.sm,
+              lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+              color: color.foreground,
+            }}
+          >
+            缺队长：团队不能保存，也不能用于会话启动。
+          </Text>
+        </View>
+      </If>
       <If when={!!store.teamsActionError()}>
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.sm }}>
           <Icon name="alert" size={iconSize.sm} tint={color.danger} />
@@ -1126,6 +1660,78 @@ function TeamEditor() {
   );
 }
 
+/** The team canvas mount point. The native dialog can keep its body mounted
+ * while closed, and an uncontrolled input takes `defaultValue` only at mount;
+ * `Each` is NSH's keyed-list primitive (component props reject React's `key`),
+ * so the canvas remounts on the open transition and on the edit target. A
+ * reopened canvas then starts from the stored team instead of the previous
+ * mount's empty text. */
+function TeamEditor() {
+  return (
+    <Each
+      of={[`${teamOpen() ? "open" : "closed"}-${teamEditingId() ?? "new"}`]}
+      key={(mount) => mount}
+    >
+      {() => <TeamCanvasDialog />}
+    </Each>
+  );
+}
+
+/** The Team CLI panel: the `keel.team` plugin's declared capability tree,
+ * rendered exactly as the manifest carries it. The per-team switch and its
+ * allowlist live on each card; this panel is the command vocabulary both the
+ * operator surface and the captain's CLI read. */
+function TeamCliPanel() {
+  const plugin = () => store.plugins()?.plugins?.find((item) => item.id === "keel.team");
+  const capabilities = () => plugin()?.provides?.cli ?? [];
+  return (
+    <Card testID="team-cli-panel">
+      <CardHeader
+        title="Team CLI 能力"
+        description="来自 keel.team 插件 manifest 的命令声明：路径、权限、可调用方与风险逐条原样展示；面板不新增任何未声明的命令。"
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            icon="refresh"
+            label="重新读取"
+            accessibilityLabel="重新读取 Team CLI 能力"
+            disabled={store.pluginsLoading()}
+            onPress={() => void store.loadPlugins()}
+          />
+        }
+      />
+      <CardContent>
+        <If when={store.pluginsLoading() && store.plugins() === null}>
+          <SectionLoading testID="team-cli-loading" text="正在读取插件能力清单…" />
+        </If>
+        <If when={!!store.pluginsError()}>
+          <SectionError
+            testID="team-cli-error"
+            text={store.pluginsError() ?? ""}
+            onRetry={() => void store.loadPlugins()}
+          />
+        </If>
+        <If when={!store.pluginsLoading() && !store.pluginsError() && capabilities().length === 0}>
+          <Empty testID="team-cli-empty" accessibilityLabel="没有 Team CLI 声明" style={{ padding: space.lg }}>
+            <EmptyMedia icon="terminal" tone="neutral" />
+            <EmptyTitle label="没有 keel.team 的 CLI 声明" />
+            <EmptyDescription label="插件清单里没有可展示的 Team CLI 能力；面板不展示任何未声明的命令。" />
+          </Empty>
+        </If>
+        <If when={capabilities().length > 0}>
+          <Text style={factText}>
+            {`${capabilities().length} 条命令 · 声明即所见；每支团队的开关在卡片上。`}
+          </Text>
+          <Each of={capabilities()} key={(capability) => capability.path.join(" ")}>
+            {(capability) => <CliCapabilityRow capability={capability()} />}
+          </Each>
+        </If>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function TeamsSection() {
   effect(() => {
     const timer = setTimeout(() => {
@@ -1133,6 +1739,9 @@ export function TeamsSection() {
       // The captain/member pickers need names: agents are read here too, so a
       // reader who opens 团队 first still sees who can be chosen.
       if (store.agents().length === 0 && !store.agentsLoading()) void store.loadAgents();
+      // The Team CLI panel renders the plugin manifest; a section switch does
+      // not re-read a list that is already on screen.
+      if (store.plugins() === null) void store.loadPlugins();
     }, 0);
     cleanup(() => clearTimeout(timer));
   });
@@ -1196,6 +1805,8 @@ export function TeamsSection() {
           </Each>
         </CardContent>
       </Card>
+
+      <TeamCliPanel />
 
       <TeamEditor />
 
