@@ -749,15 +749,14 @@ func clearSessionCookies(w http.ResponseWriter) {
 
 // --- request helpers ---------------------------------------------------------
 
-type principalContextKey struct{}
-
+// withPrincipal uses the shared auth carrier so product handlers above the edge
+// read the same identity the middleware resolved.
 func withPrincipal(ctx context.Context, principal auth.Principal) context.Context {
-	return context.WithValue(ctx, principalContextKey{}, principal)
+	return auth.WithPrincipal(ctx, principal)
 }
 
 func principalFrom(ctx context.Context) (auth.Principal, bool) {
-	principal, ok := ctx.Value(principalContextKey{}).(auth.Principal)
-	return principal, ok
+	return auth.PrincipalFromContext(ctx)
 }
 
 func setIdentityHeaders(r *http.Request, principal auth.Principal) {

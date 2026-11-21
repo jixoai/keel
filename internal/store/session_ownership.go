@@ -1,0 +1,192 @@
+// Session ownership (change keel-bot-identity-access, A4.1).
+//
+// A session belongs to exactly one Bot and, through that Bot's Profile, to one
+// Account (L10). created_by_account_id records the initiator (the human or
+// trigger that asked), which is not necessarily the owner. The owner relation
+// is written in the same transaction so "default private" is true from the
+// first row: no other account has a relation until it is explicitly shared.
+//
+// The columns already exist (A1 added them nullable); this file closes the
+// write contract without changing the schema.
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// SessionOwnership is the ownership tuple of one session.
+type SessionOwnership struct {
+	TenantID uuid.UUID
+	// SessionID is the session row identity.
+	SessionID uuid.UUID
+	// BotID is the owning Bot handle.
+	BotID string
+	// AccountID is the Bot's owner account (derived from its Profile).
+	AccountID uuid.UUID
+	// CreatedByAccountID is the initiator. It may equal AccountID.
+	CreatedByAccountID uuid.UUID
+	// TeamBotID is the optional mission snapshot (a TeamBot start).
+	TeamBotID string
+}
+
+// CreateOwnedSession creates a session with its ownership and owner relation.
+//
+// The Bot's archived state and owner account are re-checked here rather than
+// trusted from the caller: a Bot archived between the request check and this
+// write must refuse the new session, and a Bot may never be attributed to an
+// account other than the one named by its Profile. Repeating the same ownership
+// is idempotent; changing it for a live session is ErrConflict.
+func (s *Store) CreateOwnedSession(ctx context.Context, ownership SessionOwnership) error {
+	ownership.BotID = strings.TrimSpace(ownership.BotID)
+	ownership.TeamBotID = strings.TrimSpace(ownership.TeamBotID)
+	switch {
+	case ownership.TenantID == uuid.Nil || ownership.SessionID == uuid.Nil:
+		return invalidIdentity("create owned session", "tenant and session ids are required")
+	case ownership.BotID == "":
+		return invalidIdentity("create owned session", "bot id is required (every session belongs to a bot)")
+	case ownership.AccountID == uuid.Nil:
+		return invalidIdentity("create owned session", "account id is required")
+	case ownership.CreatedByAccountID == uuid.Nil:
+		return invalidIdentity("create owned session", "created-by account id is required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return identityWriteError("create owned session", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := verifySessionOwnerTargets(ctx, tx, ownership); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO sessions
+		    (tenant_id, session_id, bot_id, account_id, created_by_account_id, team_bot_id)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
+		 ON CONFLICT (tenant_id, session_id) DO NOTHING`,
+		ownership.TenantID, ownership.SessionID, ownership.BotID, ownership.AccountID,
+		ownership.CreatedByAccountID, ownership.TeamBotID)
+	if err != nil {
+		return identityWriteError("create owned session", err)
+	}
+	if tag.RowsAffected() == 0 {
+		existing, err := readSessionOwnership(ctx, tx, ownership.TenantID, ownership.SessionID)
+		if err != nil {
+			return err
+		}
+		if existing.BotID != ownership.BotID || existing.AccountID != ownership.AccountID {
+			return conflictIdentity("create owned session",
+				"session %s is already owned by bot %q account %s", ownership.SessionID, existing.BotID, existing.AccountID)
+		}
+	}
+	// Default private: the owner relation grants the Bot's account alone.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO resource_relations
+		    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+		 VALUES ($1, 'session', $2, $3, $4, $5, $6)
+		 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+		 DO NOTHING`,
+		ownership.TenantID, ownership.SessionID.String(), RelationOwner,
+		RelationSubjectAccount, ownership.AccountID.String(), ownership.CreatedByAccountID); err != nil {
+		return identityWriteError("create owned session", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return identityWriteError("create owned session", err)
+	}
+	return nil
+}
+
+// GetSessionOwnership reads a session's ownership. A missing or foreign session
+// is ErrNotFound.
+func (s *Store) GetSessionOwnership(ctx context.Context, tenantID, sessionID uuid.UUID) (SessionOwnership, error) {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return SessionOwnership{}, invalidIdentity("get session ownership", "tenant and session ids are required")
+	}
+	return readSessionOwnership(ctx, s.pool, tenantID, sessionID)
+}
+
+type ownershipQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func readSessionOwnership(ctx context.Context, q ownershipQuerier, tenantID, sessionID uuid.UUID) (SessionOwnership, error) {
+	var (
+		ownership SessionOwnership
+		botID     *string
+		accountID *uuid.UUID
+		createdBy *uuid.UUID
+		teamBotID *string
+	)
+	err := q.QueryRow(ctx,
+		`SELECT tenant_id, session_id, bot_id, account_id, created_by_account_id, team_bot_id
+		   FROM sessions WHERE tenant_id = $1 AND session_id = $2`,
+		tenantID, sessionID).Scan(&ownership.TenantID, &ownership.SessionID,
+		&botID, &accountID, &createdBy, &teamBotID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SessionOwnership{}, identityWriteError("get session ownership", err)
+	}
+	if err != nil {
+		return SessionOwnership{}, identityWriteError("get session ownership", err)
+	}
+	if botID != nil {
+		ownership.BotID = *botID
+	}
+	if accountID != nil {
+		ownership.AccountID = *accountID
+	}
+	if createdBy != nil {
+		ownership.CreatedByAccountID = *createdBy
+	}
+	if teamBotID != nil {
+		ownership.TeamBotID = *teamBotID
+	}
+	return ownership, nil
+}
+
+// verifySessionOwnerTargets checks the referenced Bot (and optional TeamBot) in
+// the same transaction as the write.
+func verifySessionOwnerTargets(ctx context.Context, tx pgx.Tx, ownership SessionOwnership) error {
+	var (
+		archived  bool
+		ownerAcct uuid.UUID
+	)
+	err := tx.QueryRow(ctx,
+		`SELECT b.archived, p.account_id
+		   FROM bots b
+		   JOIN profiles p ON p.tenant_id = b.tenant_id AND p.profile_id = b.profile_id
+		  WHERE b.tenant_id = $1 AND b.bot_id = $2`,
+		ownership.TenantID, ownership.BotID).Scan(&archived, &ownerAcct)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identityWriteError("create owned session", err)
+	}
+	if err != nil {
+		return identityWriteError("create owned session", err)
+	}
+	if archived {
+		return fmt.Errorf("%w: bot %q is archived and refuses new sessions", ErrConflict, ownership.BotID)
+	}
+	if ownerAcct != ownership.AccountID {
+		return conflictIdentity("create owned session",
+			"bot %q belongs to account %s, not %s", ownership.BotID, ownerAcct, ownership.AccountID)
+	}
+	if ownership.TeamBotID != "" {
+		var teamArchived bool
+		err := tx.QueryRow(ctx,
+			`SELECT archived FROM team_bots WHERE tenant_id = $1 AND team_bot_id = $2`,
+			ownership.TenantID, ownership.TeamBotID).Scan(&teamArchived)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return identityWriteError("create owned session", err)
+		}
+		if err != nil {
+			return identityWriteError("create owned session", err)
+		}
+		if teamArchived {
+			return fmt.Errorf("%w: team bot %q is archived and refuses new sessions", ErrConflict, ownership.TeamBotID)
+		}
+	}
+	return nil
+}
