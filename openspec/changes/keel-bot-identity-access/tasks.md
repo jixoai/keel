@@ -47,15 +47,15 @@
 
 ## A3 权限引擎
 
-- [ ] `internal/access`：key registry、scope、grant 并集、`grant ⊆ own`、超管短路
-- [ ] ReBAC-lite：`resource_relations` 四关系 + 判定函数；禁止 handler 手写 owner 判断
-- [ ] HTTP middleware：路由 → required key；资源关系解析
-- [ ] 工具调用：manifest required key + Bot Harness permissions 收窄
-- [ ] Bot spawn / session start：`bot.invoke`（高危、审计）+ Bot 自身权限
-- [ ] CLI 与 HTTP 同一套 key；UI `can()` 接 registry
-- [ ] 初始 permission key 目录（粗粒度 + 高危细化）与内置权限组
-- [ ] CI 覆盖率门：路由/工具/CLI/UI 动作清单快照，缺 key/未知 key 失败
-- [ ] 审计：grant/revoke/deny/超管操作/关系变更；敏感值不落日志
+- [x] `internal/access`：key registry、scope、grant 并集、`grant ⊆ own`、超管短路
+- [x] ReBAC-lite：`resource_relations` 四关系 + 判定函数；无关系拒绝、无解析 subject fail closed
+- [ ] HTTP middleware：路由 → required key；资源关系解析（A4）
+- [ ] 工具调用：manifest required key + Bot Harness permissions 收窄（A4）
+- [ ] Bot spawn / session start：`bot.invoke`（高危、审计）+ Bot 自身权限（A4）
+- [ ] CLI 与 HTTP 同一套 key；UI `can()` 接 registry（A4/L5）
+- [ ] 初始 permission key 目录（34 个，已落地）与内置权限组（A4/A5 种子）
+- [x] CI 覆盖率门辅助：endpoint 描述 → 缺失/未知 key 报告
+- [ ] 审计：grant/revoke/deny/超管操作/关系变更；敏感值不落日志（A4）
 
 ## A4 Bot / TeamBot 产品面
 
