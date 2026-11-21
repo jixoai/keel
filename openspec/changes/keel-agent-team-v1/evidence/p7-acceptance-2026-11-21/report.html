@@ -67,7 +67,7 @@
     <div class="verdict pass">PASS</div>
     <div>
       <div><strong>Base main</strong> <code>3e3eb67</code> · <strong>验收切片</strong> <code>8492197</code> · <span class="warn">P2 3 项（无 P0/P1）</span></div>
-      <div class="muted">生成 2026-11-21T03:21:38.570Z · 证据 <code>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-agentteam-accept/openspec/changes/keel-agent-team-v1/evidence/p7-acceptance-2026-11-21</code></div>
+      <div class="muted">生成 2026-11-21T03:27:18.101Z · 证据 <code>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-agentteam-accept/openspec/changes/keel-agent-team-v1/evidence/p7-acceptance-2026-11-21</code></div>
       <div class="muted">报告：<a href="https://local-gaubee-reports.fde2e.com/keel/agent-team-p7/report.html" style="color:var(--accent)">https://local-gaubee-reports.fde2e.com/keel/agent-team-p7/report.html</a></div>
     </div>
   </div>
@@ -157,7 +157,7 @@
     <li class="p2"><strong>P2 · 画廊缺件 Progress</strong>：画廊头部红字 <code>缺件名单（1）：Progress</code>，卡片写明 proposal 列了但 tasks C1–C5 没列、等裁决。最小复现：<code>/kit?fixture=1</code>。证据：<code>27-kit-gallery-form-390.png</code>。</li>
     <li class="p2"><strong>P2 · 390 缺队长卡片拥挤</strong>：<code>?fixture=1&amp;teamNoCaptain=1</code> → 设置 › 团队；缺队长席位 180px 宽，占位文案被截断，<code>指定队长</code> 按钮与文案竞争空间；画布内的 blocker 正常且保存禁用。截图：<code>32-settings-teams-no-captain-390.png</code> / <code>33-team-canvas-no-captain-390.png</code>。</li>
     <li class="p2"><strong>P2 · fixture 团队动态回退态</strong>：fixture 未实现 <code>teamTasks</code>，团队工作区显示"当前服务端不支持团队成员任务投影"的红色回退；真实服务端有 <code>GET /v1/sessions/{id}/team-tasks</code>（<code>internal/agentapi/team_tasks.go</code>），所以这是 fixture 缺口而非产品缺陷。截图：<code>04-workspace-team-390.png</code> / <code>37-workspace-team-1280.png</code>。</li>
-    <li class="p2"><strong>P2 · kit-imports 颜色规则注释误报</strong>：<code>styles.tsx:30</code> 的注释文本命中 raw-colour 正则；<code>--no-colors</code> 全绿。属门禁精度问题，未改产品。</li>
+    <li><strong>工具项 · kit-imports 颜色规则注释误报</strong>：<code>styles.tsx:30</code> 的注释文本命中 raw-colour 正则；<code>--no-colors</code> 全绿。属门禁精度问题，未改产品。</li>
   </ul>
 
   <h2>6. 未勾项（本轮明确不做）</h2>
