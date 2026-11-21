@@ -1,0 +1,1 @@
+{"tenantId":"87a9e3e9-809d-46a4-b0a5-b1d77190c203","id":"team_start","name":"Start Team","captain":{"agentId":"agent_start_captain"},"defaults":{},"capabilities":{"teamCli":{"enabled":false}},"status":"valid","revision":1,"hash":"0514acfbf136608c150205748a88e0e6a4353596152aedf2899a0fd0a9732a2b"}

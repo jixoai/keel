@@ -36,6 +36,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 EVIDENCE="${KEEL_AGENT_E2E_EVIDENCE:-$ROOT/openspec/changes/keel-agent-team-v1/evidence/runtime-$STAMP}"
 DB="keel_agent_runtime_e2e_$STAMP"
 DB="${DB//-/_}"
+TENANT="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 PORT_RANGE_START=13610
 PORT_RANGE_END=13799
 
@@ -261,7 +262,7 @@ log "building $KEEL_BIN"
 
 # The server reads KEEL_DSN; the dedicated database travels through it.
 KEEL_DSN="$TEST_DSN" KEEL_TEST_DSN="$TEST_DSN" KEEL_MODELS_CONFIG="$EVIDENCE/models-config.json" \
-  "$KEEL_BIN" serve --addr "127.0.0.1:$SERVE_PORT" --tenant "$(uuidgen | tr '[:upper:]' '[:lower:]')" \
+  "$KEEL_BIN" serve --addr "127.0.0.1:$SERVE_PORT" --tenant "$TENANT" \
   --web-dir "$ROOT/web/dist" > "$EVIDENCE/serve.log" 2>&1 &
 SERVE_PID=$!
 for _ in $(seq 1 100); do
@@ -270,6 +271,11 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 curl -sf -m 2 "http://127.0.0.1:$SERVE_PORT/v1/health" >/dev/null || die "keel serve did not become healthy"
+
+# The deployment provisions tenants out of band; the harness seeds the one row
+# the placement gate's groups FK requires (fixture setup, not a product write).
+docker exec "$PG_CTR" psql -U postgres -d "$DB" -c \
+  "INSERT INTO tenants (tenant_id, name) VALUES ('$TENANT', 'agent runtime e2e') ON CONFLICT DO NOTHING" >/dev/null
 
 BASE="http://127.0.0.1:$SERVE_PORT"
 JAR="$EVIDENCE/cookies.txt"

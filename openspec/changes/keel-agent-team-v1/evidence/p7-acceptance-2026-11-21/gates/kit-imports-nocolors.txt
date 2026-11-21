@@ -1,0 +1,1 @@
+kit-imports: clean — web/src/screens and web/App.tsx import only the kit, write no shell widths and no raw colours; the kit itself writes no raw colour either

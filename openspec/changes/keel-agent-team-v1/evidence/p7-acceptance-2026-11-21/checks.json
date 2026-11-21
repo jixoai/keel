@@ -1,0 +1,2660 @@
+{
+  "base": "http://127.0.0.1:13680",
+  "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "generatedAt": "2026-11-21T03:12:32.763Z",
+  "gallery": {
+    "manifest": 42,
+    "rendered": 41,
+    "objects": 0,
+    "missing": 1,
+    "exports": 167,
+    "missingNames": [
+      "Progress"
+    ],
+    "title": true,
+    "viewport": "1280"
+  },
+  "pages": {
+    "390x844·workspace standard": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=workspace-header]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 48,
+          "width": 390,
+          "height": 48
+        },
+        "[data-testid=conversation-column]": {
+          "left": 0,
+          "right": 390,
+          "top": 48,
+          "bottom": 731,
+          "width": 390,
+          "height": 683
+        },
+        "[data-testid=composer-dock]": {
+          "left": 0,
+          "right": 390,
+          "top": 731,
+          "bottom": 844,
+          "width": 390,
+          "height": 113
+        },
+        "[data-testid=session-model-chip]": {
+          "left": 350,
+          "right": 378,
+          "top": 10,
+          "bottom": 38,
+          "width": 28,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "390x844·model picker standard": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=session-model-picker]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=picker-mode-standard]": {
+          "left": 33,
+          "right": 105,
+          "top": 269,
+          "bottom": 293,
+          "width": 72,
+          "height": 24
+        },
+        "[data-testid=picker-mode-team]": {
+          "left": 111,
+          "right": 185,
+          "top": 269,
+          "bottom": 293,
+          "width": 74,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "390x844·model picker team": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=session-model-picker]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=picker-team-team_demo_brand]": {
+          "left": 33,
+          "right": 352,
+          "top": 422,
+          "bottom": 557,
+          "width": 319,
+          "height": 135
+        },
+        "[data-testid=picker-team-start-team_demo_brand]": {
+          "left": 239,
+          "right": 339,
+          "top": 520,
+          "bottom": 544,
+          "width": 100,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "390x844·workspace team": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=workspace-header]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 48,
+          "width": 390,
+          "height": 48
+        },
+        "[data-testid=workspace-header-team-facts]": {
+          "left": 48,
+          "right": 308,
+          "top": 26,
+          "bottom": 41,
+          "width": 260,
+          "height": 15
+        },
+        "[data-testid=session-team-members]": {
+          "left": 350,
+          "right": 378,
+          "top": 10,
+          "bottom": 38,
+          "width": 28,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "390x844·team roster": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=team-roster-dialog]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·settings general": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 226,
+          "width": 288,
+          "height": 177
+        }
+      },
+      "offenders": []
+    },
+    "390·settings appearance": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 256,
+          "width": 288,
+          "height": 207
+        }
+      },
+      "offenders": []
+    },
+    "390·settings models": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 1028,
+          "width": 288,
+          "height": 979
+        },
+        "[data-testid=settings-current]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 258,
+          "width": 288,
+          "height": 209
+        },
+        "[data-testid=provider-card-s2api]": {
+          "left": 85,
+          "right": 373,
+          "top": 389,
+          "bottom": 528,
+          "width": 288,
+          "height": 139
+        },
+        "[data-testid=provider-add]": {
+          "left": 85,
+          "right": 206,
+          "top": 353,
+          "bottom": 377,
+          "width": 121,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "390·provider config": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=provider-config-dialog]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=provider-config-name]": {
+          "left": 33,
+          "right": 358,
+          "top": 269,
+          "bottom": 297,
+          "width": 325,
+          "height": 28
+        },
+        "[data-testid=provider-config-endpoint]": {
+          "left": 33,
+          "right": 358,
+          "top": 435,
+          "bottom": 463,
+          "width": 325,
+          "height": 28
+        },
+        "[data-testid=provider-config-credential]": {
+          "left": 33,
+          "right": 358,
+          "top": 518,
+          "bottom": 546,
+          "width": 325,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "390·settings agents": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 512,
+          "width": 288,
+          "height": 463
+        },
+        "[data-testid=agent-card-agent_demo_design]": {
+          "left": 102,
+          "right": 356,
+          "top": 207,
+          "bottom": 347,
+          "width": 254,
+          "height": 140
+        },
+        "[data-testid=agent-create]": {
+          "left": 253,
+          "right": 356,
+          "top": 66,
+          "bottom": 90,
+          "width": 103,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "390·agent editor inline": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=agent-dialog]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=agent-name]": {
+          "left": 17,
+          "right": 342,
+          "top": 106,
+          "bottom": 134,
+          "width": 325,
+          "height": 28
+        },
+        "[data-testid=agent-model]": {
+          "left": 17,
+          "right": 342,
+          "top": 272,
+          "bottom": 300,
+          "width": 325,
+          "height": 28
+        },
+        "[data-testid=agent-tools]": {
+          "left": 17,
+          "right": 342,
+          "top": 355,
+          "bottom": 385,
+          "width": 325,
+          "height": 30
+        }
+      },
+      "offenders": []
+    },
+    "390·agent editor file validation": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=agent-dialog]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=agent-prompt-file]": {
+          "left": 17,
+          "right": 342,
+          "top": 502,
+          "bottom": 530,
+          "width": 325,
+          "height": 28
+        },
+        "[data-testid=agent-prompt-error]": {
+          "left": 17,
+          "right": 342,
+          "top": 480,
+          "bottom": 498,
+          "width": 325,
+          "height": 18
+        }
+      },
+      "offenders": []
+    },
+    "390·settings teams": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 1542,
+          "width": 288,
+          "height": 1493
+        },
+        "[data-testid=team-card-team_demo_brand]": {
+          "left": 102,
+          "right": 356,
+          "top": 189,
+          "bottom": 450,
+          "width": 254,
+          "height": 261
+        },
+        "[data-testid=team-cli-panel]": {
+          "left": 85,
+          "right": 373,
+          "top": 499,
+          "bottom": 1542,
+          "width": 288,
+          "height": 1043
+        }
+      },
+      "offenders": []
+    },
+    "390·team CLI panel": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=team-cli-panel]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 1092,
+          "width": 288,
+          "height": 1043
+        },
+        "[data-testid=cli-capability-team-list]": {
+          "left": 102,
+          "right": 356,
+          "top": 207,
+          "bottom": 295,
+          "width": 254,
+          "height": 88
+        },
+        "[data-testid=cli-capability-team-start]": {
+          "left": 102,
+          "right": 356,
+          "top": 998,
+          "bottom": 1075,
+          "width": 254,
+          "height": 77
+        }
+      },
+      "offenders": []
+    },
+    "390·team canvas": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=team-dialog]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=canvas-captain-seat]": {
+          "left": 17,
+          "right": 342,
+          "top": 289,
+          "bottom": 347,
+          "width": 325,
+          "height": 58
+        },
+        "[data-testid=canvas-members]": {
+          "left": 17,
+          "right": 342,
+          "top": 487,
+          "bottom": 543,
+          "width": 325,
+          "height": 56
+        },
+        "[data-testid=canvas-library]": {
+          "left": 17,
+          "right": 342,
+          "top": 606,
+          "bottom": 652,
+          "width": 325,
+          "height": 46
+        },
+        "[data-testid=team-save]": {
+          "left": 298,
+          "right": 342,
+          "top": 621,
+          "bottom": 649,
+          "width": 44,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "390·settings capabilities": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 1031,
+          "width": 288,
+          "height": 982
+        },
+        "[data-testid=settings-capabilities]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 1031,
+          "width": 288,
+          "height": 982
+        },
+        "[data-testid=capability-row-chat]": {
+          "left": 102,
+          "right": 356,
+          "top": 278,
+          "bottom": 342,
+          "width": 254,
+          "height": 64
+        }
+      },
+      "offenders": []
+    },
+    "390·settings secrets": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 640,
+          "width": 288,
+          "height": 591
+        }
+      },
+      "offenders": []
+    },
+    "390·settings plugins": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 1069,
+          "width": 288,
+          "height": 1020
+        },
+        "[data-testid=settings-plugins]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 676,
+          "width": 288,
+          "height": 627
+        },
+        "[data-testid=settings-triggers]": {
+          "left": 85,
+          "right": 373,
+          "top": 708,
+          "bottom": 1069,
+          "width": 288,
+          "height": 361
+        }
+      },
+      "offenders": []
+    },
+    "390·settings shortcuts": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 284,
+          "width": 288,
+          "height": 235
+        }
+      },
+      "offenders": []
+    },
+    "390·settings about": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 68,
+          "top": 0,
+          "bottom": 844,
+          "width": 68,
+          "height": 844
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 68,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 322,
+          "height": 844
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 85,
+          "right": 373,
+          "top": 49,
+          "bottom": 387,
+          "width": 288,
+          "height": 338
+        }
+      },
+      "offenders": []
+    },
+    "390·plugins inventory": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=plugins-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=plugins-inventory]": {
+          "left": 16,
+          "right": 374,
+          "top": 64,
+          "bottom": 2385,
+          "width": 358,
+          "height": 2321
+        },
+        "[data-testid=\"plugin-keel.team\"]": {
+          "left": 33,
+          "right": 357,
+          "top": 168,
+          "bottom": 1182,
+          "width": 324,
+          "height": 1014
+        }
+      },
+      "offenders": []
+    },
+    "390·plugin CLI tree": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=plugins-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=cli-capability-workflow-plan]": {
+          "left": 46,
+          "right": 344,
+          "top": 415,
+          "bottom": 477,
+          "width": 298,
+          "height": 62
+        },
+        "[data-testid=cli-capability-workflow-status]": {
+          "left": 46,
+          "right": 344,
+          "top": 479,
+          "bottom": 541,
+          "width": 298,
+          "height": 62
+        }
+      },
+      "offenders": []
+    },
+    "390·plugin failed state": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=plugins-page]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=\"plugin-demo.webhook\"]": {
+          "left": 33,
+          "right": 357,
+          "top": 337,
+          "bottom": 844,
+          "width": 324,
+          "height": 507
+        }
+      },
+      "offenders": []
+    },
+    "390x844·command palette": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=command-palette]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery header": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery C1 · 基础件": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery C2 · 表单件": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery C3 · 容器件": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery C4 · 浮层与导航": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery C5 · 布局原语": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390·kit gallery L · 布局块（zcode 参数）": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        }
+      },
+      "offenders": []
+    },
+    "390x844·no-captain·settings teams": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=team-card-team_demo_pending]": {
+          "left": 102,
+          "right": 356,
+          "top": 458,
+          "bottom": 734,
+          "width": 254,
+          "height": 276
+        },
+        "[data-testid=team-captain-slot-team_demo_pending]": {
+          "left": 163,
+          "right": 343,
+          "top": 578,
+          "bottom": 649,
+          "width": 180,
+          "height": 71
+        }
+      },
+      "offenders": []
+    },
+    "390x844·no-captain·team canvas": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "scrollHeight": 844,
+      "selected": {
+        "[data-testid=team-dialog]": {
+          "left": 0,
+          "right": 390,
+          "top": 0,
+          "bottom": 844,
+          "width": 390,
+          "height": 844
+        },
+        "[data-testid=canvas-captain-blocker]": {
+          "left": 17,
+          "right": 342,
+          "top": 613,
+          "bottom": 645,
+          "width": 325,
+          "height": 32
+        },
+        "[data-testid=team-save]": {
+          "left": 298,
+          "right": 342,
+          "top": 661,
+          "bottom": 689,
+          "width": 44,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "1280x900·workspace standard": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=workspace-header]": {
+          "left": 264,
+          "right": 1280,
+          "top": 0,
+          "bottom": 48,
+          "width": 1016,
+          "height": 48
+        },
+        "[data-testid=conversation-column]": {
+          "left": 264,
+          "right": 1280,
+          "top": 48,
+          "bottom": 787,
+          "width": 1016,
+          "height": 739
+        },
+        "[data-testid=composer-dock]": {
+          "left": 264,
+          "right": 1280,
+          "top": 787,
+          "bottom": 900,
+          "width": 1016,
+          "height": 113
+        },
+        "[data-testid=session-model-chip]": {
+          "left": 1018,
+          "right": 1232,
+          "top": 12,
+          "bottom": 36,
+          "width": 214,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "1280x900·workspace status pane": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=workspace-shell]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=session-status-pane]": {
+          "left": 705,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 575,
+          "height": 900
+        },
+        "[data-testid=session-status-state]": {
+          "left": 1226,
+          "right": 1264,
+          "top": 12,
+          "bottom": 32,
+          "width": 38,
+          "height": 20
+        }
+      },
+      "offenders": []
+    },
+    "1280x900·command palette": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=command-palette]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280x900·workspace team": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=workspace-header]": {
+          "left": 264,
+          "right": 1280,
+          "top": 0,
+          "bottom": 48,
+          "width": 1016,
+          "height": 48
+        },
+        "[data-testid=workspace-header-team-facts]": {
+          "left": 276,
+          "right": 925,
+          "top": 26,
+          "bottom": 41,
+          "width": 649,
+          "height": 15
+        },
+        "[data-testid=session-team-members]": {
+          "left": 1159,
+          "right": 1232,
+          "top": 12,
+          "bottom": 36,
+          "width": 73,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings general": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 172,
+          "width": 832,
+          "height": 123
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings appearance": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 238,
+          "width": 832,
+          "height": 189
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings models": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 888,
+          "width": 832,
+          "height": 839
+        },
+        "[data-testid=settings-current]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 222,
+          "width": 832,
+          "height": 173
+        },
+        "[data-testid=provider-card-s2api]": {
+          "left": 358,
+          "right": 1190,
+          "top": 303,
+          "bottom": 442,
+          "width": 832,
+          "height": 139
+        },
+        "[data-testid=provider-add]": {
+          "left": 1069,
+          "right": 1190,
+          "top": 267,
+          "bottom": 291,
+          "width": 121,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "1280·provider config": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=provider-config-dialog]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=provider-config-name]": {
+          "left": 437,
+          "right": 843,
+          "top": 277,
+          "bottom": 305,
+          "width": 406,
+          "height": 28
+        },
+        "[data-testid=provider-config-endpoint]": {
+          "left": 437,
+          "right": 843,
+          "top": 443,
+          "bottom": 471,
+          "width": 406,
+          "height": 28
+        },
+        "[data-testid=provider-config-credential]": {
+          "left": 437,
+          "right": 843,
+          "top": 526,
+          "bottom": 554,
+          "width": 406,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings agents": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 352,
+          "width": 832,
+          "height": 303
+        },
+        "[data-testid=agent-card-agent_demo_design]": {
+          "left": 375,
+          "right": 1173,
+          "top": 135,
+          "bottom": 231,
+          "width": 798,
+          "height": 96
+        },
+        "[data-testid=agent-create]": {
+          "left": 1070,
+          "right": 1173,
+          "top": 66,
+          "bottom": 90,
+          "width": 103,
+          "height": 24
+        }
+      },
+      "offenders": []
+    },
+    "1280·agent editor inline": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=agent-dialog]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=agent-name]": {
+          "left": 17,
+          "right": 543,
+          "top": 91,
+          "bottom": 119,
+          "width": 526,
+          "height": 28
+        },
+        "[data-testid=agent-model]": {
+          "left": 17,
+          "right": 543,
+          "top": 257,
+          "bottom": 285,
+          "width": 526,
+          "height": 28
+        },
+        "[data-testid=agent-tools]": {
+          "left": 17,
+          "right": 543,
+          "top": 340,
+          "bottom": 370,
+          "width": 526,
+          "height": 30
+        }
+      },
+      "offenders": []
+    },
+    "1280·agent editor file validation": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=agent-dialog]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=agent-prompt-file]": {
+          "left": 17,
+          "right": 543,
+          "top": 487,
+          "bottom": 515,
+          "width": 526,
+          "height": 28
+        },
+        "[data-testid=agent-prompt-error]": {
+          "left": 17,
+          "right": 543,
+          "top": 465,
+          "bottom": 483,
+          "width": 526,
+          "height": 18
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings teams": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 1103,
+          "width": 832,
+          "height": 1054
+        },
+        "[data-testid=team-card-team_demo_brand]": {
+          "left": 375,
+          "right": 1173,
+          "top": 135,
+          "bottom": 329,
+          "width": 798,
+          "height": 194
+        },
+        "[data-testid=team-cli-panel]": {
+          "left": 358,
+          "right": 1190,
+          "top": 378,
+          "bottom": 1103,
+          "width": 832,
+          "height": 725
+        }
+      },
+      "offenders": []
+    },
+    "1280·team CLI panel": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=team-cli-panel]": {
+          "left": 358,
+          "right": 1190,
+          "top": 174,
+          "bottom": 899,
+          "width": 832,
+          "height": 725
+        },
+        "[data-testid=cli-capability-team-list]": {
+          "left": 375,
+          "right": 1173,
+          "top": 260,
+          "bottom": 322,
+          "width": 798,
+          "height": 62
+        },
+        "[data-testid=cli-capability-team-start]": {
+          "left": 375,
+          "right": 1173,
+          "top": 820,
+          "bottom": 882,
+          "width": 798,
+          "height": 62
+        }
+      },
+      "offenders": []
+    },
+    "1280·team canvas": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=team-dialog]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=canvas-captain-seat]": {
+          "left": 17,
+          "right": 543,
+          "top": 274,
+          "bottom": 332,
+          "width": 526,
+          "height": 58
+        },
+        "[data-testid=canvas-members]": {
+          "left": 17,
+          "right": 543,
+          "top": 472,
+          "bottom": 528,
+          "width": 526,
+          "height": 56
+        },
+        "[data-testid=canvas-library]": {
+          "left": 17,
+          "right": 543,
+          "top": 591,
+          "bottom": 637,
+          "width": 526,
+          "height": 46
+        },
+        "[data-testid=team-save]": {
+          "left": 499,
+          "right": 543,
+          "top": 606,
+          "bottom": 634,
+          "width": 44,
+          "height": 28
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings capabilities": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 754,
+          "width": 832,
+          "height": 705
+        },
+        "[data-testid=settings-capabilities]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 754,
+          "width": 832,
+          "height": 705
+        },
+        "[data-testid=capability-row-chat]": {
+          "left": 375,
+          "right": 1173,
+          "top": 209,
+          "bottom": 247,
+          "width": 798,
+          "height": 38
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings secrets": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 456,
+          "width": 832,
+          "height": 407
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings plugins": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 802,
+          "width": 832,
+          "height": 753
+        },
+        "[data-testid=settings-plugins]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 553,
+          "width": 832,
+          "height": 504
+        },
+        "[data-testid=settings-triggers]": {
+          "left": 358,
+          "right": 1190,
+          "top": 585,
+          "bottom": 802,
+          "width": 832,
+          "height": 217
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings shortcuts": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 284,
+          "width": 832,
+          "height": 235
+        }
+      },
+      "offenders": []
+    },
+    "1280·settings about": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=settings-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=settings-rail]": {
+          "left": 0,
+          "right": 268,
+          "top": 0,
+          "bottom": 900,
+          "width": 268,
+          "height": 900
+        },
+        "[data-testid=settings-content-card]": {
+          "left": 268,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1012,
+          "height": 900
+        },
+        "[data-testid=settings-section-body]": {
+          "left": 358,
+          "right": 1190,
+          "top": 49,
+          "bottom": 333,
+          "width": 832,
+          "height": 284
+        }
+      },
+      "offenders": []
+    },
+    "1280·plugins inventory": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=plugins-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=plugins-inventory]": {
+          "left": 208,
+          "right": 1072,
+          "top": 64,
+          "bottom": 1885,
+          "width": 864,
+          "height": 1821
+        },
+        "[data-testid=\"plugin-keel.team\"]": {
+          "left": 225,
+          "right": 1055,
+          "top": 150,
+          "bottom": 960,
+          "width": 830,
+          "height": 810
+        }
+      },
+      "offenders": []
+    },
+    "1280·plugin CLI tree": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=plugins-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=cli-capability-workflow-plan]": {
+          "left": 238,
+          "right": 1042,
+          "top": 756,
+          "bottom": 818,
+          "width": 804,
+          "height": 62
+        },
+        "[data-testid=cli-capability-workflow-status]": {
+          "left": 238,
+          "right": 1042,
+          "top": 820,
+          "bottom": 882,
+          "width": 804,
+          "height": 62
+        }
+      },
+      "offenders": []
+    },
+    "1280·plugin failed state": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "[data-testid=plugins-page]": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        },
+        "[data-testid=\"plugin-demo.webhook\"]": {
+          "left": 225,
+          "right": 1055,
+          "top": 290,
+          "bottom": 658,
+          "width": 830,
+          "height": 368
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery header": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery C1 · 基础件": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery C2 · 表单件": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery C3 · 容器件": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery C4 · 浮层与导航": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery C5 · 布局原语": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    },
+    "1280·kit gallery L · 布局块（zcode 参数）": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "scrollHeight": 900,
+      "selected": {
+        "body": {
+          "left": 0,
+          "right": 1280,
+          "top": 0,
+          "bottom": 900,
+          "width": 1280,
+          "height": 900
+        }
+      },
+      "offenders": []
+    }
+  },
+  "shots": [
+    {
+      "number": 1,
+      "name": "workspace-standard-390",
+      "label": "390x844·workspace standard",
+      "file": "screenshots/01-workspace-standard-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 2,
+      "name": "model-picker-standard-390",
+      "label": "390x844·model picker standard",
+      "file": "screenshots/02-model-picker-standard-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 3,
+      "name": "model-picker-team-390",
+      "label": "390x844·model picker team",
+      "file": "screenshots/03-model-picker-team-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 4,
+      "name": "workspace-team-390",
+      "label": "390x844·workspace team",
+      "file": "screenshots/04-workspace-team-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 5,
+      "name": "team-roster-390",
+      "label": "390x844·team roster",
+      "file": "screenshots/05-team-roster-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 6,
+      "name": "settings-general-390",
+      "label": "390·settings general",
+      "file": "screenshots/06-settings-general-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 7,
+      "name": "settings-appearance-390",
+      "label": "390·settings appearance",
+      "file": "screenshots/07-settings-appearance-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 8,
+      "name": "settings-models-390",
+      "label": "390·settings models",
+      "file": "screenshots/08-settings-models-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 9,
+      "name": "provider-config-390",
+      "label": "390·provider config",
+      "file": "screenshots/09-provider-config-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 10,
+      "name": "settings-agents-390",
+      "label": "390·settings agents",
+      "file": "screenshots/10-settings-agents-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 11,
+      "name": "agent-editor-inline-390",
+      "label": "390·agent editor inline",
+      "file": "screenshots/11-agent-editor-inline-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 12,
+      "name": "agent-editor-validation-390",
+      "label": "390·agent editor file validation",
+      "file": "screenshots/12-agent-editor-validation-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 13,
+      "name": "settings-teams-390",
+      "label": "390·settings teams",
+      "file": "screenshots/13-settings-teams-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 14,
+      "name": "team-cli-panel-390",
+      "label": "390·team CLI panel",
+      "file": "screenshots/14-team-cli-panel-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 15,
+      "name": "team-canvas-390",
+      "label": "390·team canvas",
+      "file": "screenshots/15-team-canvas-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 16,
+      "name": "settings-capabilities-390",
+      "label": "390·settings capabilities",
+      "file": "screenshots/16-settings-capabilities-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 17,
+      "name": "settings-secrets-390",
+      "label": "390·settings secrets",
+      "file": "screenshots/17-settings-secrets-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 18,
+      "name": "settings-plugins-390",
+      "label": "390·settings plugins",
+      "file": "screenshots/18-settings-plugins-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 19,
+      "name": "settings-shortcuts-390",
+      "label": "390·settings shortcuts",
+      "file": "screenshots/19-settings-shortcuts-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 20,
+      "name": "settings-about-390",
+      "label": "390·settings about",
+      "file": "screenshots/20-settings-about-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 21,
+      "name": "plugins-page-390",
+      "label": "390·plugins inventory",
+      "file": "screenshots/21-plugins-page-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 22,
+      "name": "plugin-cli-tree-390",
+      "label": "390·plugin CLI tree",
+      "file": "screenshots/22-plugin-cli-tree-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 23,
+      "name": "plugin-failed-390",
+      "label": "390·plugin failed state",
+      "file": "screenshots/23-plugin-failed-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 24,
+      "name": "command-palette-390",
+      "label": "390x844·command palette",
+      "file": "screenshots/24-command-palette-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 25,
+      "name": "kit-gallery-390",
+      "label": "390·kit gallery header",
+      "file": "screenshots/25-kit-gallery-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 26,
+      "name": "kit-gallery-base-390",
+      "label": "390·kit gallery C1 · 基础件",
+      "file": "screenshots/26-kit-gallery-base-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 27,
+      "name": "kit-gallery-form-390",
+      "label": "390·kit gallery C2 · 表单件",
+      "file": "screenshots/27-kit-gallery-form-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 28,
+      "name": "kit-gallery-container-390",
+      "label": "390·kit gallery C3 · 容器件",
+      "file": "screenshots/28-kit-gallery-container-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 29,
+      "name": "kit-gallery-overlay-390",
+      "label": "390·kit gallery C4 · 浮层与导航",
+      "file": "screenshots/29-kit-gallery-overlay-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 30,
+      "name": "kit-gallery-layout-390",
+      "label": "390·kit gallery C5 · 布局原语",
+      "file": "screenshots/30-kit-gallery-layout-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 31,
+      "name": "kit-gallery-blocks-390",
+      "label": "390·kit gallery L · 布局块（zcode 参数）",
+      "file": "screenshots/31-kit-gallery-blocks-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 32,
+      "name": "settings-teams-no-captain-390",
+      "label": "390x844·no-captain·settings teams",
+      "file": "screenshots/32-settings-teams-no-captain-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 33,
+      "name": "team-canvas-no-captain-390",
+      "label": "390x844·no-captain·team canvas",
+      "file": "screenshots/33-team-canvas-no-captain-390.png",
+      "viewport": "390x844"
+    },
+    {
+      "number": 34,
+      "name": "workspace-standard-1280",
+      "label": "1280x900·workspace standard",
+      "file": "screenshots/34-workspace-standard-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 35,
+      "name": "workspace-status-pane-1280",
+      "label": "1280x900·workspace status pane",
+      "file": "screenshots/35-workspace-status-pane-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 36,
+      "name": "command-palette-1280",
+      "label": "1280x900·command palette",
+      "file": "screenshots/36-command-palette-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 37,
+      "name": "workspace-team-1280",
+      "label": "1280x900·workspace team",
+      "file": "screenshots/37-workspace-team-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 38,
+      "name": "settings-general-1280",
+      "label": "1280·settings general",
+      "file": "screenshots/38-settings-general-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 39,
+      "name": "settings-appearance-1280",
+      "label": "1280·settings appearance",
+      "file": "screenshots/39-settings-appearance-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 40,
+      "name": "settings-models-1280",
+      "label": "1280·settings models",
+      "file": "screenshots/40-settings-models-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 41,
+      "name": "provider-config-1280",
+      "label": "1280·provider config",
+      "file": "screenshots/41-provider-config-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 42,
+      "name": "settings-agents-1280",
+      "label": "1280·settings agents",
+      "file": "screenshots/42-settings-agents-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 43,
+      "name": "agent-editor-inline-1280",
+      "label": "1280·agent editor inline",
+      "file": "screenshots/43-agent-editor-inline-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 44,
+      "name": "agent-editor-validation-1280",
+      "label": "1280·agent editor file validation",
+      "file": "screenshots/44-agent-editor-validation-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 45,
+      "name": "settings-teams-1280",
+      "label": "1280·settings teams",
+      "file": "screenshots/45-settings-teams-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 46,
+      "name": "team-cli-panel-1280",
+      "label": "1280·team CLI panel",
+      "file": "screenshots/46-team-cli-panel-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 47,
+      "name": "team-canvas-1280",
+      "label": "1280·team canvas",
+      "file": "screenshots/47-team-canvas-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 48,
+      "name": "settings-capabilities-1280",
+      "label": "1280·settings capabilities",
+      "file": "screenshots/48-settings-capabilities-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 49,
+      "name": "settings-secrets-1280",
+      "label": "1280·settings secrets",
+      "file": "screenshots/49-settings-secrets-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 50,
+      "name": "settings-plugins-1280",
+      "label": "1280·settings plugins",
+      "file": "screenshots/50-settings-plugins-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 51,
+      "name": "settings-shortcuts-1280",
+      "label": "1280·settings shortcuts",
+      "file": "screenshots/51-settings-shortcuts-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 52,
+      "name": "settings-about-1280",
+      "label": "1280·settings about",
+      "file": "screenshots/52-settings-about-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 53,
+      "name": "plugins-page-1280",
+      "label": "1280·plugins inventory",
+      "file": "screenshots/53-plugins-page-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 54,
+      "name": "plugin-cli-tree-1280",
+      "label": "1280·plugin CLI tree",
+      "file": "screenshots/54-plugin-cli-tree-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 55,
+      "name": "plugin-failed-1280",
+      "label": "1280·plugin failed state",
+      "file": "screenshots/55-plugin-failed-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 56,
+      "name": "kit-gallery-1280",
+      "label": "1280·kit gallery header",
+      "file": "screenshots/56-kit-gallery-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 57,
+      "name": "kit-gallery-base-1280",
+      "label": "1280·kit gallery C1 · 基础件",
+      "file": "screenshots/57-kit-gallery-base-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 58,
+      "name": "kit-gallery-form-1280",
+      "label": "1280·kit gallery C2 · 表单件",
+      "file": "screenshots/58-kit-gallery-form-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 59,
+      "name": "kit-gallery-container-1280",
+      "label": "1280·kit gallery C3 · 容器件",
+      "file": "screenshots/59-kit-gallery-container-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 60,
+      "name": "kit-gallery-overlay-1280",
+      "label": "1280·kit gallery C4 · 浮层与导航",
+      "file": "screenshots/60-kit-gallery-overlay-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 61,
+      "name": "kit-gallery-layout-1280",
+      "label": "1280·kit gallery C5 · 布局原语",
+      "file": "screenshots/61-kit-gallery-layout-1280.png",
+      "viewport": "1280x900"
+    },
+    {
+      "number": 62,
+      "name": "kit-gallery-blocks-1280",
+      "label": "1280·kit gallery L · 布局块（zcode 参数）",
+      "file": "screenshots/62-kit-gallery-blocks-1280.png",
+      "viewport": "1280x900"
+    }
+  ],
+  "states": {
+    "agents.loading": "TUI gate: settings-agents.test.tsx › 加载态（骨架 + 主操作禁用）",
+    "agents.empty": "TUI gate: settings-agents.test.tsx › 空态",
+    "agents.error": "TUI gate: settings-agents.test.tsx › 错误态（500，原因逐字）",
+    "agents.permission": "TUI gate: settings-agents.test.tsx › 权限不足（403 独立面）",
+    "agents.success": "browser: settings-agents-*.png",
+    "agents.editor.file": "browser: agent-editor-file-*.png",
+    "agents.editor.validation": "browser: agent-editor-validation-*.png",
+    "agents.saving": "TUI gate: settings-agents.test.tsx › 保存中（字段锁定）",
+    "agents.save-failed": "TUI gate: settings-agents.test.tsx › 保存失败（输入保留）",
+    "teams.loading": "TUI gate: settings-teams.test.tsx › 加载态",
+    "teams.empty": "TUI gate: settings-teams.test.tsx › 空态",
+    "teams.error": "TUI gate: settings-teams.test.tsx › 错误态（500）",
+    "teams.permission": "TUI gate: settings-teams.test.tsx › 权限不足（403）",
+    "teams.success": "browser: settings-teams-*.png",
+    "teams.no-captain": "browser: settings-teams-no-captain-390.png / team-canvas-no-captain-390.png",
+    "teams.saving": "TUI gate: settings-teams.test.tsx › 保存中",
+    "teams.save-failed": "TUI gate: settings-teams.test.tsx › 保存失败",
+    "teams.canvas": "browser: team-canvas-*.png",
+    "teams.team-cli": "browser: team-cli-panel-390.png",
+    "header.standard": "browser: workspace-standard-*.png",
+    "header.team": "browser: workspace-team-*.png",
+    "header.roster.loading": "TUI gate: session-team.test.tsx › 加载态",
+    "header.roster.empty": "TUI gate: session-team.test.tsx › 只有队长",
+    "header.roster.error": "TUI gate: session-team.test.tsx › 错误态",
+    "header.roster.permission": "TUI gate: session-team.test.tsx › 403",
+    "header.roster.success": "browser: team-roster-390.png",
+    "plugins.success": "browser: plugins-page-*.png",
+    "plugins.error": "browser: plugin-failed-390.png（demo.webhook 失败态）",
+    "plugins.cli-tree": "browser: plugin-cli-tree-390.png",
+    "gallery.page": "browser: kit-gallery-*.png",
+    "gallery.missing": "read from the gallery header (see checks.gallery)",
+    "gallery.five-states": "manifest renders default/disabled/error (or empty) per component; missing names listed"
+  },
+  "pass": true,
+  "findings": [
+    "390: gallery missing components: Progress",
+    "1280: gallery missing components: Progress"
+  ]
+}

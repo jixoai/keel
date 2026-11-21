@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "id": "kite-e2e",
+      "name": "Kite Start E2E (recording stub)",
+      "api": {"type": "openai-chat-completions", "baseUrl": "http://127.0.0.1:13612/v1"},
+      "access": {"type": "api-key", "env": "KITE_START_E2E_KEY"},
+      "modelIds": ["kite-standard-a", "kite-standard-b", "kite-slow", "kite-team-slow"],
+      "visibility": "visible"
+    }
+  ],
+  "selection": {"providerId": "kite-e2e", "modelId": "kite-standard-a"}
+}

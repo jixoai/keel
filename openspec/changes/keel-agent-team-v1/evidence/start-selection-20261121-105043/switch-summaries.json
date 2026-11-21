@@ -1,0 +1,32 @@
+{
+  "run1": {
+    "status": "done",
+    "provider": "kite-e2e",
+    "model": "kite-slow",
+    "agentId": "",
+    "teamId": "",
+    "teamRevision": 0,
+    "teamHash": "",
+    "promptHash": "sha256:c784bcf25ad07f4de93a87150dd985988783667556e390aad11b023f4cf46af0"
+  },
+  "run2": {
+    "status": "done",
+    "provider": "kite-e2e",
+    "model": "kite-team-slow",
+    "agentId": "agent_start_captain",
+    "teamId": "team_start",
+    "teamRevision": 1,
+    "teamHash": "0514acfbf136608c150205748a88e0e6a4353596152aedf2899a0fd0a9732a2b",
+    "promptHash": "sha256:dbd34a870cc39b9cb3cc2b6b0cbe8be29fac2f90eb2c17e8fa95b68a350e1273"
+  },
+  "run3": {
+    "status": "done",
+    "provider": "kite-e2e",
+    "model": "kite-standard-b",
+    "agentId": "",
+    "teamId": "",
+    "teamRevision": 0,
+    "teamHash": "",
+    "promptHash": "sha256:c784bcf25ad07f4de93a87150dd985988783667556e390aad11b023f4cf46af0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "status": "done",
+  "provider": "kite-e2e",
+  "model": "kite-standard-b",
+  "agentId": "",
+  "teamId": "",
+  "teamRevision": 0,
+  "teamHash": "",
+  "promptHash": "sha256:c784bcf25ad07f4de93a87150dd985988783667556e390aad11b023f4cf46af0"
+}

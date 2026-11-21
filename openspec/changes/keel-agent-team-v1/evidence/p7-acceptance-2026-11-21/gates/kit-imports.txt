@@ -1,0 +1,2 @@
+web/src/ui/kit/components/styles.tsx:30 writes a raw colour — colours come from web/theme.json through the kit tokens
+kit-imports: 1 violation(s) in web/src/screens, web/App.tsx and web/src/ui/kit

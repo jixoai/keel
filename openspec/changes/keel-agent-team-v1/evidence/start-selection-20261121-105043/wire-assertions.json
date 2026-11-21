@@ -1,0 +1,22 @@
+{
+  "models": [
+    "kite-standard-b",
+    "kite-team-slow",
+    "kite-slow",
+    "kite-team-slow",
+    "kite-standard-b"
+  ],
+  "switchModels": [
+    "kite-slow",
+    "kite-team-slow",
+    "kite-standard-b"
+  ],
+  "captainPrompt": [
+    false,
+    true,
+    false,
+    true,
+    false
+  ],
+  "requests": 5
+}
