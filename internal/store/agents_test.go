@@ -121,7 +121,7 @@ func TestAgentRecordsCRUDAndTenantIsolation(t *testing.T) {
 
 	updated := testAgentRecord(owner, "agent_a", "A updated")
 	updated.Archived = true
-	if found, err := st.UpdateAgent(ctx, updated); err != nil || !found {
+	if found, err := st.UpdateAgent(ctx, updated, false); err != nil || !found {
 		t.Fatalf("update: found=%v err=%v", found, err)
 	}
 	record, _, err = st.GetAgent(ctx, owner, "agent_a")
@@ -130,6 +130,26 @@ func TestAgentRecordsCRUDAndTenantIsolation(t *testing.T) {
 	}
 	if !record.Archived {
 		t.Fatal("archived column was not updated")
+	}
+
+	// The archived bit is write-once through this path: even a caller that
+	// supplies the right expected flag cannot turn it back off (a concurrent PUT
+	// must not resurrect a retired agent).
+	unarchive := testAgentRecord(owner, "agent_a", "resurrect")
+	unarchive.Archived = false
+	if found, err := st.UpdateAgent(ctx, unarchive, true); err != nil || found {
+		t.Fatalf("unarchive: found=%v err=%v, want false/nil", found, err)
+	}
+	record, _, err = st.GetAgent(ctx, owner, "agent_a")
+	if err != nil || !record.Archived {
+		t.Fatalf("record after unarchive attempt = %+v err=%v, want still archived", record, err)
+	}
+	// A stale PUT (read archived=false, archive landed in between) carries the
+	// old expected flag and must be refused, not overwrite the archive.
+	stale := testAgentRecord(owner, "agent_a", "stale put")
+	stale.Archived = false
+	if found, err := st.UpdateAgent(ctx, stale, false); err != nil || found {
+		t.Fatalf("stale put: found=%v err=%v, want false/nil", found, err)
 	}
 
 	if _, err := st.CreateAgent(ctx, testAgentRecord(owner, "agent_b", "B")); err != nil {
@@ -148,7 +168,7 @@ func TestAgentRecordsCRUDAndTenantIsolation(t *testing.T) {
 	if list, err := st.ListAgents(ctx, other); err != nil || len(list) != 0 {
 		t.Fatalf("foreign list = %+v err=%v", list, err)
 	}
-	if found, err := st.UpdateAgent(ctx, testAgentRecord(other, "agent_a", "hijack")); err != nil || found {
+	if found, err := st.UpdateAgent(ctx, testAgentRecord(other, "agent_a", "hijack"), false); err != nil || found {
 		t.Fatalf("foreign update: found=%v err=%v", found, err)
 	}
 	if deleted, err := st.DeleteAgent(ctx, other, "agent_a"); err != nil || deleted {

@@ -223,7 +223,12 @@ type apiError struct {
 	Fields     []agentteam.FieldError
 	Issues     []modelcfg.Issue
 	References []map[string]any
-	Revision   int64
+	// Total is the server's real reference count; References may be bounded by
+	// the server (the session list is capped). Truncated marks that gap so the
+	// CLI can say "and N more" instead of pretending the list is complete.
+	Total     int
+	Truncated bool
+	Revision  int64
 }
 
 func (e *apiError) Error() string {
@@ -363,6 +368,8 @@ func readAPIError(response *http.Response) error {
 		Fields     []agentteam.FieldError `json:"fields"`
 		Issues     []modelcfg.Issue       `json:"issues"`
 		References []map[string]any       `json:"references"`
+		Total      int                    `json:"total"`
+		Truncated  bool                   `json:"truncated"`
 		Revision   int64                  `json:"revision"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err == nil {
@@ -371,6 +378,8 @@ func readAPIError(response *http.Response) error {
 		out.Fields = envelope.Fields
 		out.Issues = envelope.Issues
 		out.References = envelope.References
+		out.Total = envelope.Total
+		out.Truncated = envelope.Truncated
 		out.Revision = envelope.Revision
 	}
 	if out.Message == "" {
@@ -433,6 +442,12 @@ func reportError(stderr io.Writer, err error) int {
 				continue
 			}
 			fmt.Fprintf(stderr, "  referencing %s: %s %s\n", kind, id, name)
+		}
+		if refusal.Truncated || refusal.Total > len(refusal.References) {
+			more := refusal.Total - len(refusal.References)
+			if more > 0 {
+				fmt.Fprintf(stderr, "  ... and %d more reference(s)\n", more)
+			}
 		}
 	}
 	return 1

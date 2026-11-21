@@ -49,19 +49,19 @@ import (
 // document and a domain value happens here.
 type AgentTeamRegistry interface {
 	CreateAgent(ctx context.Context, record store.AgentRecord) (bool, error)
-	UpdateAgent(ctx context.Context, record store.AgentRecord) (bool, error)
+	UpdateAgent(ctx context.Context, record store.AgentRecord, expectedArchived bool) (bool, error)
 	GetAgent(ctx context.Context, tenantID uuid.UUID, agentID string) (store.AgentRecord, bool, error)
 	ListAgents(ctx context.Context, tenantID uuid.UUID) ([]store.AgentRecord, error)
 	DeleteAgent(ctx context.Context, tenantID uuid.UUID, agentID string) (bool, error)
 	TeamsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.TeamReference, error)
-	SessionsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.SessionReference, error)
+	SessionsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.SessionReference, int, error)
 
 	CreateTeam(ctx context.Context, record store.TeamRecord) (bool, error)
 	UpdateTeam(ctx context.Context, record store.TeamRecord, expectedRevision int64) (bool, error)
 	GetTeam(ctx context.Context, tenantID uuid.UUID, teamID string) (store.TeamRecord, bool, error)
 	ListTeams(ctx context.Context, tenantID uuid.UUID) ([]store.TeamRecord, error)
 	DeleteTeam(ctx context.Context, tenantID uuid.UUID, teamID string) (bool, error)
-	SessionsReferencingTeam(ctx context.Context, tenantID uuid.UUID, teamID string) ([]store.SessionReference, error)
+	SessionsReferencingTeam(ctx context.Context, tenantID uuid.UUID, teamID string) ([]store.SessionReference, int, error)
 }
 
 // actorAgentHeader names the agent a member mutation acts as. A captain's own
@@ -194,13 +194,23 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	found, err = s.cfg.AgentTeams.UpdateAgent(r.Context(), updated)
+	found, err = s.cfg.AgentTeams.UpdateAgent(r.Context(), updated, existing.Archived)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	if !found {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
+		// Either the agent is gone or a concurrent archive moved the lifecycle
+		// flag after this read. Re-read to tell the two apart: the former is a
+		// 404, the latter is a retryable conflict (and must not resurrect the
+		// archived agent).
+		if _, stillThere, readErr := s.cfg.AgentTeams.GetAgent(r.Context(), tenantID, record.ID); readErr == nil && stillThere {
+			writeRegistryError(w, http.StatusConflict, "agent_changed", fmt.Errorf(
+				"agent %q changed while this edit was being prepared (archived flag moved); read it again and retry",
+				record.ID), nil)
+		} else {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, NewAgentView(tenantID, agent))
@@ -223,13 +233,13 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	// or bound by a live session is not hard-deleted. The refusal lists both
 	// kinds so the caller can offer the exact repair actions (remove it from the
 	// team; archive or rebind the session).
-	teams, sessions, err := s.agentReferences(r.Context(), tenantID, record.ID)
+	teams, sessions, sessionTotal, err := s.agentReferences(r.Context(), tenantID, record.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(teams) > 0 || len(sessions) > 0 {
-		s.writeAgentInUse(w, record.ID, teams, sessions, "deleting")
+	if len(teams) > 0 || sessionTotal > 0 {
+		s.writeAgentInUse(w, record.ID, teams, sessions, sessionTotal, "deleting")
 		return
 	}
 	deleted, err := s.cfg.AgentTeams.DeleteAgent(r.Context(), tenantID, record.ID)
@@ -264,13 +274,13 @@ func (s *Server) archiveAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
 		return
 	}
-	_, sessions, err := s.agentReferences(r.Context(), tenantID, record.ID)
+	_, sessions, sessionTotal, err := s.agentReferences(r.Context(), tenantID, record.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(sessions) > 0 {
-		s.writeAgentInUse(w, record.ID, nil, sessions, "archiving")
+	if sessionTotal > 0 {
+		s.writeAgentInUse(w, record.ID, nil, sessions, sessionTotal, "archiving")
 		return
 	}
 	if agent.Archived {
@@ -283,13 +293,26 @@ func (s *Server) archiveAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	updated, err := s.cfg.AgentTeams.UpdateAgent(r.Context(), next)
+	updated, err := s.cfg.AgentTeams.UpdateAgent(r.Context(), next, false)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	if !updated {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
+		// Either another archive won the race or the agent changed/vanished. A
+		// concurrent archive is the idempotent outcome (answer its view); any
+		// other lifecycle move is a retryable conflict.
+		current, stillThere, readErr := s.cfg.AgentTeams.GetAgent(r.Context(), tenantID, record.ID)
+		if readErr == nil && stillThere {
+			if currentAgent, parseErr := agentFromRecord(current); parseErr == nil && currentAgent.Archived {
+				writeJSON(w, http.StatusOK, NewAgentView(tenantID, currentAgent))
+				return
+			}
+			writeRegistryError(w, http.StatusConflict, "agent_changed", fmt.Errorf(
+				"agent %q changed while it was being archived; read it again and retry", record.ID), nil)
+		} else {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("agent %q does not exist", record.ID))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, NewAgentView(tenantID, agent))
@@ -298,24 +321,26 @@ func (s *Server) archiveAgent(w http.ResponseWriter, r *http.Request) {
 // agentReferences reads both reference kinds in one place so delete and archive
 // cannot drift. Teams are read even for archive (the caller ignores them there)
 // because the two guards share this seam and a future archive rule may use them.
-func (s *Server) agentReferences(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.TeamReference, []store.SessionReference, error) {
+func (s *Server) agentReferences(ctx context.Context, tenantID uuid.UUID, agentID string) ([]store.TeamReference, []store.SessionReference, int, error) {
 	teams, err := s.cfg.AgentTeams.TeamsReferencingAgent(ctx, tenantID, agentID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	sessions, err := s.cfg.AgentTeams.SessionsReferencingAgent(ctx, tenantID, agentID)
+	sessions, sessionTotal, err := s.cfg.AgentTeams.SessionsReferencingAgent(ctx, tenantID, agentID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	return teams, sessions, nil
+	return teams, sessions, sessionTotal, nil
 }
 
 // writeAgentInUse is the 409 agent_in_use refusal shared by delete and archive.
 // verb names the refused operation ("deleting"/"archiving"); the references
 // carry the legacy team shape plus session rows tagged kind=session, so the CLI
-// and UI can render both without a second envelope.
+// and UI can render both without a second envelope. sessionTotal is the real
+// matching count: the session references list is bounded by the store, and the
+// body reports total/truncated instead of shipping an unbounded list.
 func (s *Server) writeAgentInUse(w http.ResponseWriter, agentID string, teams []store.TeamReference,
-	sessions []store.SessionReference, verb string) {
+	sessions []store.SessionReference, sessionTotal int, verb string) {
 	references := make([]map[string]any, 0, len(teams)+len(sessions))
 	parts := make([]string, 0, 2)
 	actions := make([]string, 0, 2)
@@ -328,19 +353,28 @@ func (s *Server) writeAgentInUse(w http.ResponseWriter, agentID string, teams []
 		parts = append(parts, "is a captain or member of "+strings.Join(names, ", "))
 		actions = append(actions, "remove it from those teams")
 	}
-	if len(sessions) > 0 {
+	if sessionTotal > 0 {
 		names := make([]string, 0, len(sessions))
 		for _, session := range sessions {
 			references = append(references, sessionReferencePayload(session))
 			names = append(names, session.ID)
 		}
-		parts = append(parts, fmt.Sprintf("is the current binding of %d live session(s): %s",
-			len(sessions), strings.Join(names, ", ")))
+		description := fmt.Sprintf("is the current binding of %d live session(s): %s",
+			sessionTotal, strings.Join(names, ", "))
+		if sessionTotal > len(sessions) {
+			description += fmt.Sprintf(" (+%d more)", sessionTotal-len(sessions))
+		}
+		parts = append(parts, description)
 		actions = append(actions, "archive or rebind those sessions")
+	}
+	extra := map[string]any{
+		"references": references,
+		"total":      len(teams) + sessionTotal,
+		"truncated":  sessionTotal > len(sessions),
 	}
 	writeRegistryError(w, http.StatusConflict, "agent_in_use", fmt.Errorf(
 		"agent %q %s; %s before %s it",
-		agentID, strings.Join(parts, "; it "), strings.Join(actions, " and "), verb), map[string]any{"references": references})
+		agentID, strings.Join(parts, "; it "), strings.Join(actions, " and "), verb), extra)
 }
 
 // --- teams ---------------------------------------------------------------
@@ -465,13 +499,13 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("team %q does not exist", r.PathValue("id")))
 		return
 	}
-	sessions, err := s.cfg.AgentTeams.SessionsReferencingTeam(r.Context(), tenantID, record.ID)
+	sessions, sessionTotal, err := s.cfg.AgentTeams.SessionsReferencingTeam(r.Context(), tenantID, record.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(sessions) > 0 {
-		s.writeTeamInUse(w, record.ID, sessions, "deleting")
+	if sessionTotal > 0 {
+		s.writeTeamInUse(w, record.ID, sessions, sessionTotal, "deleting")
 		return
 	}
 	deleted, err := s.cfg.AgentTeams.DeleteTeam(r.Context(), tenantID, record.ID)
@@ -506,13 +540,13 @@ func (s *Server) archiveTeam(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("team %q does not exist", record.ID))
 		return
 	}
-	sessions, err := s.cfg.AgentTeams.SessionsReferencingTeam(r.Context(), tenantID, record.ID)
+	sessions, sessionTotal, err := s.cfg.AgentTeams.SessionsReferencingTeam(r.Context(), tenantID, record.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(sessions) > 0 {
-		s.writeTeamInUse(w, record.ID, sessions, "archiving")
+	if sessionTotal > 0 {
+		s.writeTeamInUse(w, record.ID, sessions, sessionTotal, "archiving")
 		return
 	}
 	if team.Archived {
@@ -548,17 +582,28 @@ func (s *Server) archiveTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeTeamInUse is the 409 team_in_use refusal shared by delete and archive.
-func (s *Server) writeTeamInUse(w http.ResponseWriter, teamID string, sessions []store.SessionReference, verb string) {
+// sessionTotal is the real matching count; sessions is the store's bounded list,
+// so the body reports total/truncated instead of an unbounded id dump.
+func (s *Server) writeTeamInUse(w http.ResponseWriter, teamID string, sessions []store.SessionReference, sessionTotal int, verb string) {
 	references := make([]map[string]any, 0, len(sessions))
 	names := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		references = append(references, sessionReferencePayload(session))
 		names = append(names, session.ID)
 	}
+	description := fmt.Sprintf("is the current binding of %d live session(s): %s",
+		sessionTotal, strings.Join(names, ", "))
+	if sessionTotal > len(sessions) {
+		description += fmt.Sprintf(" (+%d more)", sessionTotal-len(sessions))
+	}
 	writeRegistryError(w, http.StatusConflict, "team_in_use", fmt.Errorf(
-		"team %q is the current binding of %d live session(s): %s; archive or rebind those sessions before %s it",
-		teamID, len(sessions), strings.Join(names, ", "), verb),
-		map[string]any{"references": references})
+		"team %q %s; archive or rebind those sessions before %s it",
+		teamID, description, verb),
+		map[string]any{
+			"references": references,
+			"total":      sessionTotal,
+			"truncated":  sessionTotal > len(sessions),
+		})
 }
 
 // sessionReferencePayload is the wire shape of one session reference. kind

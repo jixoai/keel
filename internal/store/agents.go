@@ -179,17 +179,21 @@ func (s *Store) CreateAgent(ctx context.Context, record AgentRecord) (bool, erro
 	return tag.RowsAffected() == 1, nil
 }
 
-// UpdateAgent replaces an existing agent document. found=false means the agent
-// does not exist for this tenant (the caller answers 404, never an implicit
-// create from a PUT).
-func (s *Store) UpdateAgent(ctx context.Context, record AgentRecord) (bool, error) {
+// UpdateAgent replaces an existing agent document, but only when the stored
+// lifecycle flag still equals expectedArchived. found=false means the agent does
+// not exist for this tenant or its archived flag moved first; the caller
+// distinguishes the two by reading the row again. The flag CAS is what prevents
+// a concurrent PUT from resurrecting an agent archived after the PUT's read
+// (agents have no revision; the lifecycle bit is the one fact the write owns).
+func (s *Store) UpdateAgent(ctx context.Context, record AgentRecord, expectedArchived bool) (bool, error) {
 	if err := validateAgentRecord(record); err != nil {
 		return false, err
 	}
 	tag, err := s.execRetry(ctx,
 		`UPDATE agents SET document = $3::jsonb, archived = $4, updated_at = now()
-		 WHERE tenant_id = $1 AND agent_id = $2`,
-		record.TenantID, record.ID, string(record.Document), record.Archived)
+		 WHERE tenant_id = $1 AND agent_id = $2 AND archived = $5
+		   AND ($4 OR NOT archived)`,
+		record.TenantID, record.ID, string(record.Document), record.Archived, expectedArchived)
 	if err != nil {
 		return false, fmt.Errorf("store: update agent: %w", err)
 	}
@@ -289,57 +293,70 @@ func (s *Store) TeamsReferencingAgent(ctx context.Context, tenantID uuid.UUID, a
 //   - an archived session is not a reference, except while it still owns a
 //     pending/running run — archive does not cancel the run, so deleting the
 //     agent/team would break its next attempt.
-func (s *Store) sessionsReferencing(ctx context.Context, tenantID uuid.UUID, column, id string) ([]SessionReference, error) {
+//
+// maxSessionReferences bounds the session references returned to a caller. A
+// tenant can bind thousands of sessions to one Agent/Team; the guard only needs
+// to prove the row is in use, and an unbounded error body is a memory/latency
+// hazard. The total count is returned separately so the refusal can say "and N
+// more" without shipping every id.
+const maxSessionReferences = 20
+
+func (s *Store) sessionsReferencing(ctx context.Context, tenantID uuid.UUID, column, id string) ([]SessionReference, int, error) {
 	var statement string
 	switch column {
 	case "bound_agent_id":
 		statement = `SELECT s.session_id::text, s.state, (s.archived_at IS NOT NULL),
-		                    COALESCE(r.status, '')
+		                    COALESCE(r.status, ''), COUNT(*) OVER()
 		               FROM sessions s
 		               LEFT JOIN runs r
 		                 ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
 		              WHERE s.tenant_id = $1 AND s.bound_agent_id = $2
 		                AND (s.archived_at IS NULL OR r.status IN ('pending', 'running'))
-		              ORDER BY s.updated_at DESC, s.session_id`
+		              ORDER BY s.updated_at DESC, s.session_id
+		              LIMIT $3`
 	case "bound_team_id":
 		statement = `SELECT s.session_id::text, s.state, (s.archived_at IS NOT NULL),
-		                    COALESCE(r.status, '')
+		                    COALESCE(r.status, ''), COUNT(*) OVER()
 		               FROM sessions s
 		               LEFT JOIN runs r
 		                 ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
 		              WHERE s.tenant_id = $1 AND s.bound_team_id = $2
 		                AND (s.archived_at IS NULL OR r.status IN ('pending', 'running'))
-		              ORDER BY s.updated_at DESC, s.session_id`
+		              ORDER BY s.updated_at DESC, s.session_id
+		              LIMIT $3`
 	default:
-		return nil, fmt.Errorf("store: unknown session reference column %q", column)
+		return nil, 0, fmt.Errorf("store: unknown session reference column %q", column)
 	}
-	rows, err := s.pool.Query(ctx, statement, tenantID, id)
+	rows, err := s.pool.Query(ctx, statement, tenantID, id, maxSessionReferences)
 	if err != nil {
-		return nil, fmt.Errorf("store: sessions referencing %s: %w", column, err)
+		return nil, 0, fmt.Errorf("store: sessions referencing %s: %w", column, err)
 	}
 	defer rows.Close()
 	out := make([]SessionReference, 0)
+	total := 0
 	for rows.Next() {
 		var reference SessionReference
-		if err := rows.Scan(&reference.ID, &reference.State, &reference.Archived, &reference.RunStatus); err != nil {
-			return nil, fmt.Errorf("store: scan session reference: %w", err)
+		if err := rows.Scan(&reference.ID, &reference.State, &reference.Archived, &reference.RunStatus, &total); err != nil {
+			return nil, 0, fmt.Errorf("store: scan session reference: %w", err)
 		}
 		out = append(out, reference)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
-// SessionsReferencingAgent lists the tenant's live sessions whose newest
-// selection fact names agentID. It is the session half of the agent delete/
-// archive guard (TeamsReferencingAgent is the other half).
-func (s *Store) SessionsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]SessionReference, error) {
+// SessionsReferencingAgent lists up to 20 of the tenant's live sessions whose
+// newest selection fact names agentID, plus the total matching count. It is the
+// session half of the agent delete/archive guard (TeamsReferencingAgent is the
+// other half).
+func (s *Store) SessionsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]SessionReference, int, error) {
 	return s.sessionsReferencing(ctx, tenantID, "bound_agent_id", agentID)
 }
 
-// SessionsReferencingTeam lists the tenant's live sessions whose newest
-// selection fact names teamID. Team selection is authoritative: a fact that
-// named both ids is recorded as a team binding and appears here only.
-func (s *Store) SessionsReferencingTeam(ctx context.Context, tenantID uuid.UUID, teamID string) ([]SessionReference, error) {
+// SessionsReferencingTeam lists up to 20 of the tenant's live sessions whose
+// newest selection fact names teamID, plus the total matching count. Team
+// selection is authoritative: a fact that named both ids is recorded as a team
+// binding and appears here only.
+func (s *Store) SessionsReferencingTeam(ctx context.Context, tenantID uuid.UUID, teamID string) ([]SessionReference, int, error) {
 	return s.sessionsReferencing(ctx, tenantID, "bound_team_id", teamID)
 }
 

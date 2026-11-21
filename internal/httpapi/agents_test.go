@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func (m *memoryRegistry) archiveSession(tenantID uuid.UUID, sessionID, runStatus
 	scope[sessionID] = binding
 }
 
-func (m *memoryRegistry) sessionsReferencing(tenantID uuid.UUID, match func(fakeSessionBinding) bool) []store.SessionReference {
+func (m *memoryRegistry) sessionsReferencing(tenantID uuid.UUID, match func(fakeSessionBinding) bool) ([]store.SessionReference, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]store.SessionReference, 0)
@@ -104,19 +105,25 @@ func (m *memoryRegistry) sessionsReferencing(tenantID uuid.UUID, match func(fake
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	total := len(out)
+	if len(out) > 20 {
+		out = out[:20]
+	}
+	return out, total
 }
 
-func (m *memoryRegistry) SessionsReferencingAgent(_ context.Context, tenantID uuid.UUID, agentID string) ([]store.SessionReference, error) {
-	return m.sessionsReferencing(tenantID, func(binding fakeSessionBinding) bool {
+func (m *memoryRegistry) SessionsReferencingAgent(_ context.Context, tenantID uuid.UUID, agentID string) ([]store.SessionReference, int, error) {
+	refs, total := m.sessionsReferencing(tenantID, func(binding fakeSessionBinding) bool {
 		return binding.AgentID == agentID
-	}), nil
+	})
+	return refs, total, nil
 }
 
-func (m *memoryRegistry) SessionsReferencingTeam(_ context.Context, tenantID uuid.UUID, teamID string) ([]store.SessionReference, error) {
-	return m.sessionsReferencing(tenantID, func(binding fakeSessionBinding) bool {
+func (m *memoryRegistry) SessionsReferencingTeam(_ context.Context, tenantID uuid.UUID, teamID string) ([]store.SessionReference, int, error) {
+	refs, total := m.sessionsReferencing(tenantID, func(binding fakeSessionBinding) bool {
 		return binding.TeamID == teamID
-	}), nil
+	})
+	return refs, total, nil
 }
 
 func (m *memoryRegistry) CreateAgent(_ context.Context, record store.AgentRecord) (bool, error) {
@@ -135,12 +142,12 @@ func (m *memoryRegistry) CreateAgent(_ context.Context, record store.AgentRecord
 	return true, nil
 }
 
-func (m *memoryRegistry) UpdateAgent(_ context.Context, record store.AgentRecord) (bool, error) {
+func (m *memoryRegistry) UpdateAgent(_ context.Context, record store.AgentRecord, expectedArchived bool) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	scope := m.agents[record.TenantID.String()]
 	existing, exists := scope[record.ID]
-	if !exists {
+	if !exists || existing.Archived != expectedArchived {
 		return false, nil
 	}
 	record.CreatedAt = existing.CreatedAt
@@ -655,7 +662,10 @@ func TestAgentDeletionIsRefusedWhileTeamed(t *testing.T) {
 // sessionRefusal is the wire shape of a registry refusal carrying references.
 type sessionRefusal struct {
 	Code       string           `json:"code"`
+	Message    string           `json:"error"`
 	References []map[string]any `json:"references"`
+	Total      int              `json:"total"`
+	Truncated  bool             `json:"truncated"`
 }
 
 // TestTeamDeletionAndArchiveRefuseSessionBindings pins the team half of the
@@ -1055,5 +1065,68 @@ func TestAgentTeamRouteMatrix(t *testing.T) {
 		if status >= 500 {
 			t.Fatalf("%s %s: status %d", tc.method, tc.path, status)
 		}
+	}
+}
+
+// TestSessionReferenceRefusalIsBounded pins the 409 envelope's size bound: the
+// server returns at most 20 session references plus the real total/truncated
+// flag, so a tenant with many bound sessions cannot turn the error body into an
+// unbounded id dump.
+func TestSessionReferenceRefusalIsBounded(t *testing.T) {
+	hs, registry := newRegistryServer(t)
+	tenant := uuid.NewString()
+	tenantID := uuid.MustParse(tenant)
+	captain := createAgentFixture(t, hs.URL, tenant, "队长", nil)
+	var team AgentTeamView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/teams", tenant, nil,
+		AgentTeamWriteRequest{Name: "多会话队", Captain: agentteam.TeamMember{AgentID: captain.ID}}, &team); status != http.StatusCreated {
+		t.Fatalf("create team: status %d", status)
+	}
+	const bound = 25
+	for i := 0; i < bound; i++ {
+		registry.bindSession(tenantID, uuid.NewString(), "", team.ID)
+	}
+	var refusal sessionRefusal
+	status := call(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/teams/"+team.ID, tenant, nil, nil, &refusal)
+	if status != http.StatusConflict || refusal.Code != "team_in_use" {
+		t.Fatalf("delete team: status %d code %q, want 409 team_in_use", status, refusal.Code)
+	}
+	if refusal.Total != bound || !refusal.Truncated {
+		t.Fatalf("refusal total=%d truncated=%v, want %d/true", refusal.Total, refusal.Truncated, bound)
+	}
+	if len(refusal.References) != 20 {
+		t.Fatalf("references = %d, want the 20-session bound", len(refusal.References))
+	}
+	if !strings.Contains(refusal.Message, "(+5 more)") {
+		t.Fatalf("message = %q, want the (+5 more) marker", refusal.Message)
+	}
+}
+
+// TestArchivedAgentCannotBeResurrectedByUpdate pins the lifecycle CAS on the
+// update path: a PUT after archive keeps the archived flag (the handler carries
+// the stored lifecycle value; the store refuses a stale write), so a retired
+// agent cannot be silently brought back by an edit prepared before the archive.
+func TestArchivedAgentCannotBeResurrectedByUpdate(t *testing.T) {
+	hs, _ := newRegistryServer(t)
+	tenant := uuid.NewString()
+	agent := createAgentFixture(t, hs.URL, tenant, "待归档", nil)
+
+	var archived AgentView
+	if status := call(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/agents/"+agent.ID+"/archive", tenant, nil, nil, &archived); status != http.StatusOK || !archived.Archived {
+		t.Fatalf("archive: status %d view %+v", status, archived)
+	}
+
+	var updated AgentView
+	status := call(t, http.DefaultClient, http.MethodPut, hs.URL+"/v1/agents/"+agent.ID, tenant, nil,
+		AgentWriteRequest{ID: agent.ID, Name: "改名后仍归档"}, &updated)
+	if status != http.StatusOK {
+		t.Fatalf("update archived agent: status %d", status)
+	}
+	if !updated.Archived {
+		t.Fatalf("update resurrected the archived agent: %+v", updated)
+	}
+	var stored AgentView
+	if status := call(t, http.DefaultClient, http.MethodGet, hs.URL+"/v1/agents/"+agent.ID, tenant, nil, nil, &stored); status != http.StatusOK || !stored.Archived {
+		t.Fatalf("stored agent = %+v status %d, want archived", stored, status)
 	}
 }

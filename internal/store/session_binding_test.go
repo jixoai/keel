@@ -215,9 +215,12 @@ func TestSessionReferencesBoundary(t *testing.T) {
 		}
 		return out
 	}
-	refs, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy")
+	refs, total, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy")
 	if err != nil {
 		t.Fatalf("team references: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("team reference total = %d, want 3", total)
 	}
 	got := byID(refs)
 	if len(got) != 3 {
@@ -243,15 +246,15 @@ func TestSessionReferencesBoundary(t *testing.T) {
 		t.Fatalf("foreign tenant session leaked into references: %+v", refs)
 	}
 
-	agentRefs, err := st.SessionsReferencingAgent(ctx, tenant, "agent_busy")
+	agentRefs, agentTotal, err := st.SessionsReferencingAgent(ctx, tenant, "agent_busy")
 	if err != nil {
 		t.Fatalf("agent references: %v", err)
 	}
-	if len(agentRefs) != 1 || agentRefs[0].ID != agentBound.String() {
+	if agentTotal != 1 || len(agentRefs) != 1 || agentRefs[0].ID != agentBound.String() {
 		t.Fatalf("agent references = %+v, want the agent-bound session", agentRefs)
 	}
 	// The team-bound sessions are not agent references.
-	if refs, err := st.SessionsReferencingAgent(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
+	if refs, _, err := st.SessionsReferencingAgent(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
 		t.Fatalf("team id leaked into agent references: %+v err=%v", refs, err)
 	}
 
@@ -261,8 +264,8 @@ func TestSessionReferencesBoundary(t *testing.T) {
 		tenant, archivedLive); err != nil {
 		t.Fatalf("settle run: %v", err)
 	}
-	refs, err = st.SessionsReferencingTeam(ctx, tenant, "team_busy")
-	if err != nil || len(refs) != 2 {
+	refs, total, err = st.SessionsReferencingTeam(ctx, tenant, "team_busy")
+	if err != nil || len(refs) != 2 || total != 2 {
 		t.Fatalf("after settle refs = %+v err=%v, want active + paused", refs, err)
 	}
 	left := byID(refs)
@@ -280,13 +283,13 @@ func TestSessionReferencesBoundary(t *testing.T) {
 			t.Fatalf("archive %s: found=%v err=%v", session, found, err)
 		}
 	}
-	if refs, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
+	if refs, _, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
 		t.Fatalf("archived sessions still block team: %+v err=%v", refs, err)
 	}
 	if _, err := st.SetSessionBinding(ctx, tenant, agentBound, "", "", 2); err != nil {
 		t.Fatalf("model-only clear: %v", err)
 	}
-	if refs, err := st.SessionsReferencingAgent(ctx, tenant, "agent_busy"); err != nil || len(refs) != 0 {
+	if refs, _, err := st.SessionsReferencingAgent(ctx, tenant, "agent_busy"); err != nil || len(refs) != 0 {
 		t.Fatalf("cleared agent binding still blocks: %+v err=%v", refs, err)
 	}
 }
@@ -327,5 +330,38 @@ func TestSessionBindingConcurrentNewestWins(t *testing.T) {
 	}
 	if binding.Seq != writers || binding.AgentID != fmt.Sprintf("agent_%02d", writers-1) {
 		t.Fatalf("binding = %+v, want seq %d from agent_%02d", binding, writers, writers-1)
+	}
+}
+
+// TestSessionReferencesAreBounded pins the error-body bound: a tenant with many
+// live sessions gets the newest 20 references plus the real total, so the
+// refusal stays O(1) in size while still telling the caller how many exist.
+func TestSessionReferencesAreBounded(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	cleanupSessionBindingTenant(t, st, tenant)
+	if err := st.CreateTenant(ctx, tenant, "session-ref-bound"); err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	const bound = 25
+	for i := 0; i < bound; i++ {
+		session := uuid.New()
+		if err := st.CreateSession(ctx, tenant, session); err != nil {
+			t.Fatalf("create session %d: %v", i, err)
+		}
+		if _, err := st.SetSessionBinding(ctx, tenant, session, "", "team_many", 1); err != nil {
+			t.Fatalf("bind session %d: %v", i, err)
+		}
+	}
+	refs, total, err := st.SessionsReferencingTeam(ctx, tenant, "team_many")
+	if err != nil {
+		t.Fatalf("team references: %v", err)
+	}
+	if total != bound {
+		t.Fatalf("total = %d, want %d", total, bound)
+	}
+	if len(refs) != maxSessionReferences {
+		t.Fatalf("returned references = %d, want the bound %d", len(refs), maxSessionReferences)
 	}
 }

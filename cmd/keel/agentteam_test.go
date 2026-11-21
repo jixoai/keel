@@ -1010,6 +1010,8 @@ func TestTeamDeleteRendersSessionReference(t *testing.T) {
 			{"kind": "session", "id": "sess_1", "name": "", "state": "active",
 				"archived": true, "runStatus": "pending"},
 		},
+		"total":     3,
+		"truncated": true,
 	}
 	api.mu.Unlock()
 
@@ -1020,6 +1022,7 @@ func TestTeamDeleteRendersSessionReference(t *testing.T) {
 	for _, want := range []string{
 		"team_in_use",
 		"referencing session: sess_1 (state active, run pending, archived)",
+		"... and 2 more reference(s)",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr = %q, want %q", stderr, want)
