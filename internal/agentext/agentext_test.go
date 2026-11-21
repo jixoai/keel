@@ -547,8 +547,11 @@ func TestTriggerFireRefusesWithoutUsableBot(t *testing.T) {
 			if owner, ok := tc.owner.(*recordingTriggerOwner); ok && owner.count() != 0 {
 				t.Fatalf("a refused fire wrote %d sessions", owner.count())
 			}
+			// A pre-turn ownership refusal is its own audit status; it is not a
+			// failed turn (W10 keeps Fires/Failures for started turns).
 			status, ok := engine.Get("guarded")
-			if !ok || status.Failures != 1 || status.LastStatus != "refused" || len(status.Audit) != 1 {
+			if !ok || status.LastStatus != "refused" || len(status.Audit) != 1 ||
+				status.Audit[0].Status != "refused" {
 				t.Fatalf("refusal audit = %+v", status)
 			}
 			if status.Audit[0].Error == "" {

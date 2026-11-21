@@ -21,6 +21,14 @@ import (
 
 const testWebhookSecret = "0123456789abcdef0123456789abcdef"
 
+// testTriggerOwnership is the unit-test fixture of the two ownership seams.
+// Every trigger must declare a Bot and every fire resolves/writes ownership;
+// these tests exercise the trigger policy itself, so a deterministic fake is
+// enough (the real-PG suites cover the store transaction).
+func testTriggerOwnership() (TriggerBotResolver, TriggerSessionOwner) {
+	return &fakeTriggerBot{botID: "test-bot", account: uuid.New()}, &recordingTriggerOwner{}
+}
+
 func signWebhook(secret string, tenantID uuid.UUID, triggerID, timestamp, key string, body []byte) string {
 	canonical := "v1\n" + tenantID.String() + "\n" + triggerID + "\n" + timestamp + "\n" + key + "\n"
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -43,16 +51,19 @@ func webhookFire(tenantID uuid.UUID, triggerID, key, body string, now time.Time,
 func TestTriggerWebhookHMACVerification(t *testing.T) {
 	now := time.Now().UTC()
 	starter := &countingStarter{}
+	bots, owner := testTriggerOwnership()
 	engine := NewTriggerEngine(TriggerEngineOptions{
 		Starter:          starter,
 		Logger:           testLogger(),
 		Now:              func() time.Time { return now },
 		WebhookTolerance: time.Minute,
+		Bots:             bots,
+		Ownership:        owner,
 	})
 	defer engine.Close()
 	tenant := uuid.New()
 	if _, err := engine.Register(TriggerSpec{
-		ID: "secure.hook", Kind: TriggerWebhook, Prompt: "ping", Enabled: true,
+		ID: "secure.hook", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "ping", Enabled: true,
 		WebhookSecret: testWebhookSecret,
 	}); err != nil {
 		t.Fatal(err)
@@ -137,11 +148,14 @@ func TestTriggerWebhookHMACVerification(t *testing.T) {
 func TestTriggerWebhookWithoutSecretFailsClosed(t *testing.T) {
 	now := time.Now().UTC()
 	starter := &countingStarter{}
-	engine := NewTriggerEngine(TriggerEngineOptions{Starter: starter, Logger: testLogger()})
+	bots, owner := testTriggerOwnership()
+	engine := NewTriggerEngine(TriggerEngineOptions{
+		Starter: starter, Logger: testLogger(), Bots: bots, Ownership: owner,
+	})
 	defer engine.Close()
 	tenant := uuid.New()
 	if _, err := engine.Register(TriggerSpec{
-		ID: "open.hook", Kind: TriggerWebhook, Prompt: "p", Enabled: true,
+		ID: "open.hook", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,11 +203,14 @@ func (s *blockingStarter) StartTurn(ctx context.Context, req StartTurnRequest) (
 
 func TestTriggerConcurrencyCapRefusesInsteadOfQueueing(t *testing.T) {
 	starter := newBlockingStarter()
-	engine := NewTriggerEngine(TriggerEngineOptions{Starter: starter, Logger: testLogger()})
+	bots, owner := testTriggerOwnership()
+	engine := NewTriggerEngine(TriggerEngineOptions{
+		Starter: starter, Logger: testLogger(), Bots: bots, Ownership: owner,
+	})
 	defer engine.Close()
 	tenant := uuid.New()
 	if _, err := engine.Register(TriggerSpec{
-		ID: "busy.hook", Kind: TriggerWebhook, Prompt: "p", Enabled: true,
+		ID: "busy.hook", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true,
 		MaxConcurrent: 1,
 	}); err != nil {
 		t.Fatal(err)
@@ -342,16 +359,19 @@ func TestTriggerCatchUpAfterRestartAndCursor(t *testing.T) {
 			LastStatus:      "fired",
 		},
 	}
+	bots, owner := testTriggerOwnership()
 	engine := NewTriggerEngine(TriggerEngineOptions{
 		Starter:      starter,
 		Logger:       testLogger(),
 		State:        state,
 		CatchUpLimit: 2,
+		Bots:         bots,
+		Ownership:    owner,
 	})
 	defer engine.Close()
 	if _, err := engine.Register(TriggerSpec{
 		ID: "catchup.tick", Kind: TriggerInterval, Schedule: "1s",
-		Prompt: "tick", TenantID: tenant.String(), Enabled: true,
+		BotID: "test-bot", Prompt: "tick", TenantID: tenant.String(), Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -401,11 +421,13 @@ func TestTriggerCatchUpAfterRestartAndCursor(t *testing.T) {
 		Logger:       testLogger(),
 		State:        state,
 		CatchUpLimit: 2,
+		Bots:         bots,
+		Ownership:    owner,
 	})
 	defer restarted.Close()
 	if _, err := restarted.Register(TriggerSpec{
 		ID: "catchup.tick", Kind: TriggerInterval, Schedule: "1s",
-		Prompt: "tick", TenantID: tenant.String(), Enabled: true,
+		BotID: "test-bot", Prompt: "tick", TenantID: tenant.String(), Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -440,13 +462,15 @@ func (f *fakeTaskCards) EnsureCard(_ context.Context, scope kernel.Scope) (taskl
 func TestTriggerCreatesInitialTaskCard(t *testing.T) {
 	taskID := uuid.New()
 	tasks := &fakeTaskCards{card: tasklog.Card{TaskID: taskID, Status: tasklog.StatusOpen, Origin: tasklog.OriginSession}}
+	bots, owner := testTriggerOwnership()
 	engine := NewTriggerEngine(TriggerEngineOptions{
 		Starter: &countingStarter{}, Logger: testLogger(), Tasks: tasks,
+		Bots: bots, Ownership: owner,
 	})
 	defer engine.Close()
 	tenant := uuid.New()
 	if _, err := engine.Register(TriggerSpec{
-		ID: "card.hook", Kind: TriggerWebhook, Prompt: "p", Enabled: true,
+		ID: "card.hook", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -482,12 +506,12 @@ func TestTriggerRejectsUnsafeConfiguration(t *testing.T) {
 	engine := NewTriggerEngine(TriggerEngineOptions{Starter: &countingStarter{}, Logger: testLogger()})
 	defer engine.Close()
 	cases := []TriggerSpec{
-		{ID: "short", Kind: TriggerWebhook, Prompt: "p", Enabled: true, WebhookSecret: "short"},
-		{ID: "negative", Kind: TriggerWebhook, Prompt: "p", Enabled: true, MaxConcurrent: -1},
-		{ID: "bad-window", Kind: TriggerWebhook, Prompt: "p", Enabled: true, WebhookToleranceSec: 86401},
-		{ID: "bad-catchup", Kind: TriggerWebhook, Prompt: "p", Enabled: true, CatchUpLimit: -1},
-		{ID: "huge-concurrency", Kind: TriggerWebhook, Prompt: "p", Enabled: true, MaxConcurrent: maxTriggerConcurrency + 1},
-		{ID: "huge-catchup", Kind: TriggerWebhook, Prompt: "p", Enabled: true, CatchUpLimit: maxTriggerCatchUpLimit + 1},
+		{ID: "short", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true, WebhookSecret: "short"},
+		{ID: "negative", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true, MaxConcurrent: -1},
+		{ID: "bad-window", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true, WebhookToleranceSec: 86401},
+		{ID: "bad-catchup", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true, CatchUpLimit: -1},
+		{ID: "huge-concurrency", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true, MaxConcurrent: maxTriggerConcurrency + 1},
+		{ID: "huge-catchup", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true, CatchUpLimit: maxTriggerCatchUpLimit + 1},
 	}
 	for _, spec := range cases {
 		if _, err := engine.Register(spec); !errors.Is(err, ErrInvalidTrigger) {

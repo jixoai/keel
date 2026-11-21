@@ -13,7 +13,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -192,6 +195,7 @@ func TestTriggerFireCreatesBotOwnedSession(t *testing.T) {
 	env.register(t, agentext.TriggerSpec{
 		ID: triggerID, Kind: agentext.TriggerWebhook, TenantID: env.tenant.String(),
 		BotID: env.bot.ID, Prompt: "trigger work", Enabled: true,
+		WebhookSecret: e2eWebhookSecret,
 	})
 
 	// --- manual fire: created_by is the caller ---
@@ -268,16 +272,21 @@ func TestTriggerFireCreatesBotOwnedSession(t *testing.T) {
 	}
 	env.assertOneUserMessage(t, sessionID)
 
-	// --- webhook fire: created_by is the Bot's service account ---
-	status, body = env.fire(map[string]any{"idempotencyKey": "webhook-1", "reason": "webhook"})
-	if status != http.StatusOK {
-		t.Fatalf("webhook fire = %d %v", status, body)
-	}
+	// --- webhook fire: created_by is the Bot's service account, and the
+	// delivery must carry a valid HMAC signature (W10), not a body-claimed
+	// reason ---
+	webhookBody := []byte(`{"idempotencyKey":"webhook-1"}`)
+	webhookTimestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	webhookSignature := e2eSign(e2eWebhookSecret, env.tenant, triggerID, webhookTimestamp, "webhook-1", webhookBody)
 	var webhook struct {
 		Result agentext.FireResult `json:"result"`
 	}
-	raw, _ = json.Marshal(body)
-	_ = json.Unmarshal(raw, &webhook)
+	webhookStatus, _ := doSignedPost(t, env.server.Client(),
+		env.server.URL+"/v1/triggers/"+triggerID+"/fire", env.tenant,
+		webhookBody, webhookTimestamp, webhookSignature, &webhook)
+	if webhookStatus != http.StatusOK {
+		t.Fatalf("webhook fire = %d %+v", webhookStatus, webhook)
+	}
 	if webhook.Result.CreatedBy != env.botAcct.ID.String() {
 		t.Fatalf("webhook created_by = %q, want bot account %s", webhook.Result.CreatedBy, env.botAcct.ID)
 	}
@@ -343,9 +352,14 @@ func TestTriggerFireCreatesBotOwnedSession(t *testing.T) {
 	if _, err := env.st.GetSessionOwnership(context.Background(), env.tenant, refusedID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("archived Bot wrote a session row: %v", err)
 	}
+	// A refusal is its own audit status; it is not counted as a failed turn.
 	statusTrigger, _ := env.triggers.Get(triggerID)
-	if statusTrigger.LastStatus != "refused" || statusTrigger.Failures == 0 {
-		t.Fatalf("archived refusal audit = %+v", statusTrigger)
+	if statusTrigger.LastStatus != "refused" {
+		t.Fatalf("archived refusal status = %+v", statusTrigger)
+	}
+	if len(statusTrigger.Audit) == 0 || statusTrigger.Audit[0].Status != "refused" ||
+		!strings.Contains(statusTrigger.Audit[0].Error, "archived") {
+		t.Fatalf("archived refusal audit = %+v", statusTrigger.Audit)
 	}
 }
 

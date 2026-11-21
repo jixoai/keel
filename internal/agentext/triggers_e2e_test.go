@@ -165,6 +165,10 @@ func TestTriggerWebhookHMACAndInitialCardE2E(t *testing.T) {
 	if err := st.CreateTenant(ctx, tenantID, "w10-triggers"); err != nil {
 		t.Fatal(err)
 	}
+	// Every trigger fires as one Bot (A4.2b3a follow-up): the fixture owns a
+	// real Bot so registration validates and the fired session is attributable.
+	bot, _ := createE2EBot(t, st, ctx, tenantID, "w10-trigger-bot")
+	owner := storeTriggerOwner{store: st}
 	hooks := agentext.NewHookBus(agentext.HookBusOptions{Logger: log})
 	defer hooks.Close()
 	starter := agentext.NewTurnStarter(storeSessions{Store: st}, kern, hooks, log)
@@ -175,21 +179,27 @@ func TestTriggerWebhookHMACAndInitialCardE2E(t *testing.T) {
 	})
 	const prompt = "hmac ping from the webhook"
 	engine := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
-		Starter: starter,
-		Hooks:   hooks,
-		Logger:  log,
-		State:   st,
-		Tasks:   tasks,
+		Starter:   starter,
+		Hooks:     hooks,
+		Logger:    log,
+		State:     st,
+		Tasks:     tasks,
+		Bots:      owner,
+		Ownership: owner,
 	})
 	defer engine.Close()
+	// The webhooks are tenant-bound: GET /v1/triggers is a tenant slice, and a
+	// tenantless trigger is intentionally not listable to any tenant.
 	if _, err := engine.Register(agentext.TriggerSpec{
-		ID: "web.test.hmac", Kind: agentext.TriggerWebhook, Prompt: prompt, Enabled: true,
+		ID: "web.test.hmac", Kind: agentext.TriggerWebhook, BotID: bot.ID,
+		TenantID: tenantID.String(), Prompt: prompt, Enabled: true,
 		WebhookSecret: e2eWebhookSecret, MaxConcurrent: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := engine.Register(agentext.TriggerSpec{
-		ID: "web.test.unconfigured", Kind: agentext.TriggerWebhook, Prompt: "p", Enabled: true,
+		ID: "web.test.unconfigured", Kind: agentext.TriggerWebhook, BotID: bot.ID,
+		TenantID: tenantID.String(), Prompt: "p", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -331,6 +341,8 @@ func TestTriggerConcurrencyLimitOverHTTP(t *testing.T) {
 	if err := st.CreateTenant(ctx, tenantID, "w10-concurrency"); err != nil {
 		t.Fatal(err)
 	}
+	bot, _ := createE2EBot(t, st, ctx, tenantID, "w10-concurrency-bot")
+	owner := storeTriggerOwner{store: st}
 	starter := agentext.NewTurnStarter(storeSessions{Store: st}, kern, nil, log)
 	gated := &gatedStarter{
 		inner:     starter,
@@ -341,11 +353,12 @@ func TestTriggerConcurrencyLimitOverHTTP(t *testing.T) {
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(gated.release) }) })
 	engine := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
-		Starter: gated, Logger: log, State: st,
+		Starter: gated, Logger: log, State: st, Bots: owner, Ownership: owner,
 	})
 	defer engine.Close()
 	if _, err := engine.Register(agentext.TriggerSpec{
-		ID: "web.test.busy", Kind: agentext.TriggerWebhook, Prompt: "busy", Enabled: true,
+		ID: "web.test.busy", Kind: agentext.TriggerWebhook, BotID: bot.ID,
+		TenantID: tenantID.String(), Prompt: "busy", Enabled: true,
 		WebhookSecret: e2eWebhookSecret, MaxConcurrent: 1,
 	}); err != nil {
 		t.Fatal(err)
@@ -444,6 +457,8 @@ func TestTriggerCatchUpUsesDurableCursorE2E(t *testing.T) {
 	if err := st.CreateTenant(ctx, tenantID, "w10-catchup"); err != nil {
 		t.Fatal(err)
 	}
+	bot, _ := createE2EBot(t, st, ctx, tenantID, "w10-catchup-bot")
+	owner := storeTriggerOwner{store: st}
 	seed := time.Now().UTC().Add(-3500 * time.Millisecond)
 	if err := st.SaveTriggerState(ctx, store.TriggerState{
 		TenantID:        tenantID,
@@ -457,11 +472,12 @@ func TestTriggerCatchUpUsesDurableCursorE2E(t *testing.T) {
 	starter := &recordingStarter{}
 	engine := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter, Logger: testLogger(), State: st, CatchUpLimit: 2,
+		Bots: owner, Ownership: owner,
 	})
 	defer engine.Close()
 	if _, err := engine.Register(agentext.TriggerSpec{
 		ID: "e2e.tick", Kind: agentext.TriggerInterval, Schedule: "1s",
-		Prompt: "tick", TenantID: tenantID.String(), Enabled: true,
+		BotID: bot.ID, Prompt: "tick", TenantID: tenantID.String(), Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -504,11 +520,12 @@ func TestTriggerCatchUpUsesDurableCursorE2E(t *testing.T) {
 	}
 	restarted := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter, Logger: testLogger(), State: st, CatchUpLimit: 2,
+		Bots: owner, Ownership: owner,
 	})
 	defer restarted.Close()
 	if _, err := restarted.Register(agentext.TriggerSpec{
 		ID: "e2e.tick", Kind: agentext.TriggerInterval, Schedule: "1s",
-		Prompt: "tick", TenantID: tenantID.String(), Enabled: true,
+		BotID: bot.ID, Prompt: "tick", TenantID: tenantID.String(), Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
