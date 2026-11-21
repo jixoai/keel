@@ -38,18 +38,16 @@ const (
 // Service errors. HTTP maps each to one status; the response body never says
 // which credential component was wrong.
 var (
-	ErrInvalidCredentials     = errors.New("auth: invalid credentials")
-	ErrSessionInvalid         = errors.New("auth: session is invalid")
-	ErrBootstrapRequired      = errors.New("auth: bootstrap is required")
-	ErrBootstrapTokenInvalid  = errors.New("auth: setup token is invalid")
-	ErrBootstrapComplete      = errors.New("auth: bootstrap is already complete")
-	ErrUsernameTaken          = errors.New("auth: username is already taken")
-	ErrPasswordChangeRequired = errors.New("auth: password change is required")
-	ErrPasswordReused         = errors.New("auth: new password must differ from the current one")
-	ErrForbidden              = errors.New("auth: operation is not permitted")
-	ErrTenantNotConfigured    = errors.New("auth: tenant is not configured")
-	ErrInvalidBotKey          = errors.New("auth: invalid bot key")
-	ErrInvalidAccount         = errors.New("auth: invalid account input")
+	ErrInvalidCredentials    = errors.New("auth: invalid credentials")
+	ErrSessionInvalid        = errors.New("auth: session is invalid")
+	ErrBootstrapTokenInvalid = errors.New("auth: setup token is invalid")
+	ErrBootstrapComplete     = errors.New("auth: bootstrap is already complete")
+	ErrUsernameTaken         = errors.New("auth: username is already taken")
+	ErrPasswordReused        = errors.New("auth: new password must differ from the current one")
+	ErrForbidden             = errors.New("auth: operation is not permitted")
+	ErrTenantNotConfigured   = errors.New("auth: tenant is not configured")
+	ErrInvalidBotKey         = errors.New("auth: invalid bot key")
+	ErrInvalidAccount        = errors.New("auth: invalid account input")
 )
 
 // RateLimitedError carries the wait the caller must observe. It is returned
@@ -543,22 +541,6 @@ func (s *Service) ListBotKeys(ctx context.Context, actor Principal, botID string
 		return nil, err
 	}
 	return s.Store.ListBotAPIKeys(ctx, actor.TenantID, botID, 0)
-}
-
-// LocalAdmin returns the built-in local-only principal. The account row is
-// ensured at boot by the serving process; this method only loads it.
-func (s *Service) LocalAdmin(ctx context.Context, tenantID uuid.UUID) (Principal, error) {
-	account, err := s.Store.GetAccountByUsername(ctx, tenantID, "local-admin")
-	if err != nil {
-		return Principal{}, err
-	}
-	if !account.IsSuperAdmin || account.DisabledAt != nil {
-		return Principal{}, ErrForbidden
-	}
-	return Principal{
-		Kind: PrincipalLocal, TenantID: tenantID, AccountID: account.ID,
-		Username: account.Username, DisplayName: account.DisplayName, IsSuperAdmin: true,
-	}, nil
 }
 
 // requireSuperAdmin re-reads the actor's account: a session that was issued

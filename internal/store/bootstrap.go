@@ -502,14 +502,3 @@ func (s *Store) DisableAccountAudited(ctx context.Context, tenantID, accountID, 
 	}
 	return record, nil
 }
-
-// IsSuperAdmin reports whether one account is an enabled super admin. The
-// policy layer (A3) will replace this with the full permission evaluator; A2
-// uses it only for the bootstrap endpoints' fail-closed checks.
-func (s *Store) IsSuperAdmin(ctx context.Context, tenantID, accountID uuid.UUID) (bool, error) {
-	record, err := s.GetAccount(ctx, tenantID, accountID)
-	if err != nil {
-		return false, err
-	}
-	return record.IsSuperAdmin && record.DisabledAt == nil, nil
-}

@@ -433,8 +433,6 @@ func (a *authController) writeLoginError(w http.ResponseWriter, err error) {
 		writeAuthError(w, http.StatusServiceUnavailable, "tenant_not_configured", "the deployment tenant is not configured")
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeAuthError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
-	case errors.Is(err, auth.ErrBootstrapRequired):
-		writeAuthError(w, http.StatusUnauthorized, "bootstrap_required", "bootstrap is required")
 	default:
 		a.logger.Error("login", "err", err)
 		writeAuthError(w, http.StatusInternalServerError, "internal_error", "login failed")
