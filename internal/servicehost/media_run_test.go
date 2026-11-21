@@ -36,7 +36,10 @@ type runFixture struct {
 	// toolName/toolArgs are the media tool the scripted model asks for.
 	toolName string
 	toolArgs string
-	server   *httptest.Server
+	// decisionStatus, when non-zero, makes the decision endpoint fail with
+	// that status. It is set before a run starts, never while one is in flight.
+	decisionStatus int
+	server         *httptest.Server
 }
 
 func newRunFixture(t *testing.T, toolName, toolArgs string) *runFixture {
@@ -48,6 +51,7 @@ func newRunFixture(t *testing.T, toolName, toolArgs string) *runFixture {
 		fixture.requests = append(fixture.requests, mediaWireRequest{
 			Path: r.URL.Path, Auth: r.Header.Get("Authorization"), Body: string(body),
 		})
+		decisionStatus := fixture.decisionStatus
 		fixture.mu.Unlock()
 
 		switch r.URL.Path {
@@ -78,12 +82,36 @@ func newRunFixture(t *testing.T, toolName, toolArgs string) *runFixture {
 		case "/asset.mp4":
 			w.Header().Set("Content-Type", "video/mp4")
 			_, _ = w.Write([]byte("run-mp4"))
+		case "/audio/speech":
+			w.Header().Set("Content-Type", "audio/wav")
+			w.Header().Set("X-Audio-Duration-Ms", "1200")
+			_, _ = w.Write([]byte("run-wav"))
+		case "/audio/transcriptions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"text":"transcribed run","language":"en","duration":1.2,`+
+				`"segments":[{"start":0,"end":0.6,"text":"transcribed"},{"start":0.6,"end":1.2,"text":"run"}],`+
+				`"usage":{"input_tokens":2,"output_tokens":1,"cost":0.3}}`)
+		case "/v1/systemone":
+			if decisionStatus != 0 {
+				w.WriteHeader(decisionStatus)
+				_, _ = io.WriteString(w, `{"error":{"message":"decision upstream down"}}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"run-decision-1","model":"judge-1","answers":{"urgent":{"type":"noul","noul":0.93}},`+
+				`"usage":{"input_tokens":7,"output_tokens":1,"cost":2.5}}`)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(fixture.server.Close)
 	return fixture
+}
+
+func (f *runFixture) failDecision(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.decisionStatus = status
 }
 
 func (f *runFixture) paths() []mediaWireRequest {
@@ -172,6 +200,7 @@ func TestWorkerRunCallsImageGenerateAndCommitsReferences(t *testing.T) {
 		ToolName string                  `json:"toolName"`
 		IsError  bool                    `json:"isError"`
 		Content  []struct{ Text string } `json:"content"`
+		Details  map[string]any          `json:"details"`
 	}
 	if err := json.Unmarshal(toolResult.Payload, &payload); err != nil {
 		t.Fatal(err)
@@ -217,6 +246,17 @@ func TestWorkerRunCallsImageGenerateAndCommitsReferences(t *testing.T) {
 	object.Close()
 	if string(data) != "run-png" {
 		t.Fatalf("layerfs bytes = %q", data)
+	}
+	rawDetails, _ := json.Marshal(payload.Details)
+	for _, want := range []string{`"media"`, `"family":"image"`, `"blobId":"` + output.Images[0].BlobID + `"`} {
+		if !strings.Contains(string(rawDetails), want) {
+			t.Fatalf("tool.result details missing %s: %s", want, rawDetails)
+		}
+	}
+	for _, forbidden := range []string{"cost", "price", "run-png"} {
+		if strings.Contains(string(rawDetails), forbidden) {
+			t.Fatalf("tool.result details leaked %q: %s", forbidden, rawDetails)
+		}
 	}
 
 	// One credential per family: the chat call carried CHAT_KEY, the image

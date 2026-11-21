@@ -112,19 +112,6 @@ func Build(opts Options) Result {
 	// save path's preflight and the boot-time diagnostic.
 	decisionIssues := validateDecision(resolved)
 	result.Issues = append(result.Issues, decisionIssues...)
-	if candidate, ok := chooseModel(resolved, FamilyDecision); ok {
-		state := result.Families[FamilyDecision]
-		state.Configured = true
-		state.ProviderID, state.ModelID = candidate.provider.ProviderID, candidate.model.ModelID
-		state.Reason = "decision providers are validated at settings save; no agent tool calls them yet"
-		for _, issue := range decisionIssues {
-			if strings.HasPrefix(issue.Field, providerField(candidate.provider.ProviderID)) {
-				state.Reason = issue.Message
-				break
-			}
-		}
-		result.Families[FamilyDecision] = state
-	}
 
 	imageTool, imageState, imageIssues := buildImageTool(resolved, opts)
 	result.Issues = append(result.Issues, imageIssues...)
@@ -140,19 +127,23 @@ func Build(opts Options) Result {
 		result.Tools = append(result.Tools, videoTool)
 	}
 
-	// Speech is deliberately library-only for now: detect it so the state says
-	// "configured, not wired" instead of pretending the capability exists.
 	for _, family := range []string{FamilyTTS, FamilySTT} {
-		if candidate, ok := chooseModel(resolved, family); ok {
-			state := result.Families[family]
-			state.Configured = true
-			state.ProviderID, state.ModelID = candidate.provider.ProviderID, candidate.model.ModelID
-			state.Reason = "speech adapter is library-only: no host tool or /v1/media surface is wired yet"
-			result.Families[family] = state
+		tool, state, speechIssues := buildSpeechTool(resolved, opts, family)
+		result.Issues = append(result.Issues, speechIssues...)
+		result.Families[family] = state
+		if tool != nil {
+			result.Tools = append(result.Tools, tool)
 		}
 	}
 
-	sortIssues(result.Issues)
+	decisionTool, decisionState, runtimeIssues := buildDecisionTool(resolved, opts)
+	result.Issues = append(result.Issues, runtimeIssues...)
+	result.Families[FamilyDecision] = decisionState
+	if decisionTool != nil {
+		result.Tools = append(result.Tools, decisionTool)
+	}
+
+	result.Issues = sortIssues(result.Issues)
 	return result
 }
 
@@ -231,13 +222,24 @@ func providerField(providerID string) string {
 	return "providers[" + providerID + "]"
 }
 
-func sortIssues(issues []modelcfg.Issue) {
+func sortIssues(issues []modelcfg.Issue) []modelcfg.Issue {
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Field == issues[j].Field {
 			return issues[i].Message < issues[j].Message
 		}
 		return issues[i].Field < issues[j].Field
 	})
+	if len(issues) < 2 {
+		return issues
+	}
+	out := issues[:1]
+	for _, item := range issues[1:] {
+		if item == out[len(out)-1] {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func issue(providerID, field, message string) modelcfg.Issue {
@@ -271,7 +273,7 @@ type failingImageProvider struct {
 }
 
 func (p *failingImageProvider) GenerateImage(context.Context, mediaadapter.ImageRequest) (mediaadapter.ImageBatch, error) {
-	return mediaadapter.ImageBatch{}, missingCredential(FamilyImage, p.reason)
+	return mediaadapter.ImageBatch{}, missingCredential(FamilyImage, "generate", p.reason)
 }
 
 type failingVideoProvider struct {
@@ -279,16 +281,16 @@ type failingVideoProvider struct {
 }
 
 func (p *failingVideoProvider) GenerateVideo(context.Context, mediaadapter.VideoRequest) (mediaadapter.VideoBatch, error) {
-	return mediaadapter.VideoBatch{}, missingCredential(FamilyVideo, p.reason)
+	return mediaadapter.VideoBatch{}, missingCredential(FamilyVideo, "generate", p.reason)
 }
 
-func missingCredential(family, reason string) *mediaadapter.Error {
+func missingCredential(family, op, reason string) *mediaadapter.Error {
 	if strings.TrimSpace(reason) == "" {
 		reason = "provider has no credential; refusing an unauthenticated request"
 	}
 	return &mediaadapter.Error{
 		Family:  family,
-		Op:      "generate",
+		Op:      op,
 		Kind:    mediaadapter.KindMissingCredentials,
 		Message: reason,
 	}

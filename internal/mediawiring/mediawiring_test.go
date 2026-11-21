@@ -59,6 +59,19 @@ func newMediaServer(t *testing.T) *mediaServer {
 		case "/asset.mp4":
 			w.Header().Set("Content-Type", "video/mp4")
 			_, _ = w.Write([]byte("mp4-bytes"))
+		case "/audio/speech":
+			w.Header().Set("Content-Type", "audio/wav")
+			w.Header().Set("X-Audio-Duration-Ms", "1500")
+			_, _ = w.Write([]byte("wav-bytes"))
+		case "/audio/transcriptions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"text":"hello world","language":"en","model":"whisper-1","duration":1.2,`+
+				`"segments":[{"start":0,"end":0.5,"text":"hello"},{"start":0.5,"end":1.2,"text":"world"}],`+
+				`"usage":{"input_tokens":2,"output_tokens":1,"cost":0.1}}`)
+		case "/v1/systemone":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"decision-req-1","model":"judge-1","answers":{"urgent":{"type":"noul","noul":0.91}},`+
+				`"usage":{"input_tokens":5,"output_tokens":1,"cost":1.25}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -126,6 +139,60 @@ const mediaDocumentTemplate = `{
 
 func mediaDocument(serverURL string) json.RawMessage {
 	return json.RawMessage(strings.ReplaceAll(mediaDocumentTemplate, "SERVER", serverURL))
+}
+
+const speechDocumentTemplate = `{
+  "providers": [
+    {"id": "speech", "type": "tts",
+     "api": {"type": "openai-chat-completions", "baseUrl": "SERVER"},
+     "access": {"type": "api-key", "env": "SPEECH_KEY"},
+     "modelIds": ["tts-1"]},
+    {"id": "ears", "type": "stt",
+     "api": {"type": "openai-chat-completions", "baseUrl": "SERVER"},
+     "access": {"type": "api-key", "env": "SPEECH_KEY"},
+     "modelIds": ["whisper-1"]}
+  ]
+}`
+
+func speechDocument(serverURL string) json.RawMessage {
+	return json.RawMessage(strings.ReplaceAll(speechDocumentTemplate, "SERVER", serverURL))
+}
+
+const decisionDocumentTemplate = `{
+  "providers": [
+    {"id": "judge", "type": "decision",
+     "api": {"type": "openai-chat-completions", "baseUrl": "SERVER"},
+     "access": {"type": "api-key", "env": "DECISION_KEY"},
+     "modelIds": ["judge-1"],
+     "decision": {"adapter": "typesafe", "binding": {
+       "state": {"ticket": "customer is angry"},
+       "questions": {"urgent": {"type": "noul", "instructions": "is this urgent?"}},
+       "mode": "MODE"}}}
+  ]
+}`
+
+func decisionDocument(serverURL, mode string) json.RawMessage {
+	document := strings.ReplaceAll(decisionDocumentTemplate, "SERVER", serverURL)
+	return json.RawMessage(strings.ReplaceAll(document, "MODE", mode))
+}
+
+func speechAndDecisionDocument(serverURL string) json.RawMessage {
+	combined := `{"providers": [` +
+		`{"id": "speech", "type": "tts", "api": {"type": "openai-chat-completions", "baseUrl": "` + serverURL + `"}, "access": {"type": "api-key", "env": "SPEECH_KEY"}, "modelIds": ["tts-1"]},` +
+		`{"id": "ears", "type": "stt", "api": {"type": "openai-chat-completions", "baseUrl": "` + serverURL + `"}, "access": {"type": "api-key", "env": "SPEECH_KEY"}, "modelIds": ["whisper-1"]},` +
+		`{"id": "judge", "type": "decision", "api": {"type": "openai-chat-completions", "baseUrl": "` + serverURL + `"}, "access": {"type": "api-key", "env": "DECISION_KEY"}, "modelIds": ["judge-1"], "decision": {"adapter": "typesafe", "binding": {"state": {"ticket": "customer is angry"}, "questions": {"urgent": {"type": "noul", "instructions": "is this urgent?"}}, "mode": "enforce"}}}` +
+		`]}`
+	return json.RawMessage(combined)
+}
+
+func findTool(t *testing.T, tools []agentcore.AgentTool, name string) agentcore.AgentTool {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return tool
+		}
+	}
+	return nil
 }
 
 func buildForTest(t *testing.T, serverURL string, values map[string]string) (Result, *layerfs.Store) {
@@ -311,28 +378,168 @@ func TestBuildOmitsAbsentFamilies(t *testing.T) {
 	}
 }
 
-func TestSpeechFamiliesAreReportedAsLibraryOnly(t *testing.T) {
-	document := json.RawMessage(`{
-	  "providers": [
-	    {"id": "speech", "type": "tts",
-	     "api": {"type": "openai-chat-completions", "baseUrl": "https://speech.example/v1"},
-	     "access": {"type": "api-key", "env": "SPEECH_KEY"},
-	     "modelIds": ["tts-1"]},
-	    {"id": "ears", "type": "stt",
-	     "api": {"type": "openai-chat-completions", "baseUrl": "https://speech.example/v1"},
-	     "access": {"type": "api-key", "env": "SPEECH_KEY"},
-	     "modelIds": ["whisper-1"]}
-	  ]
-	}`)
-	result := Build(Options{Models: document, Credential: credentialLookup(map[string]string{"SPEECH_KEY": "k"})})
+func TestBuildWiresSpeechToolsAndLayerFSReferences(t *testing.T) {
+	server := newMediaServer(t)
+	store := openArtifactStore(t)
+	result := Build(Options{
+		Models:     speechDocument(server.server.URL),
+		Credential: credentialLookup(map[string]string{"SPEECH_KEY": "speech-key"}),
+		Artifacts:  store,
+		HTTPClient: server.server.Client(),
+	})
 	for _, family := range []string{FamilyTTS, FamilySTT} {
-		state := result.Families[family]
-		if !state.Configured || state.Wired {
-			t.Fatalf("%s state = %+v, want configured/not wired", family, state)
+		if state := result.Families[family]; !state.Configured || !state.Wired {
+			t.Fatalf("%s state = %+v, want configured/wired", family, state)
 		}
-		if !strings.Contains(state.Reason, "library-only") {
-			t.Fatalf("%s reason = %q", family, state.Reason)
+	}
+	if len(result.Tools) != 2 {
+		t.Fatalf("tools = %d, want speech_tts and speech_stt", len(result.Tools))
+	}
+
+	ttsOutcome := runTool(t, result.Tools, "speech_tts",
+		`{"text":"hello world","voice":"alloy","language":"en","format":"wav"}`, "session-tts")
+	if ttsOutcome.IsError {
+		t.Fatalf("speech_tts failed: %s", contentText(t, ttsOutcome.Result))
+	}
+	var tts mediaadapter.SpeechTTSToolOutput
+	if err := json.Unmarshal([]byte(contentText(t, ttsOutcome.Result)), &tts); err != nil {
+		t.Fatal(err)
+	}
+	if !tts.Success || tts.Audio.BlobID == "" || tts.Audio.Mime != "audio/wav" {
+		t.Fatalf("speech_tts output = %+v", tts)
+	}
+	if tts.Usage.InputCharacters != 11 || tts.Usage.AudioBytes != int64(len("wav-bytes")) || tts.Usage.AudioMillis != 1500 {
+		t.Fatalf("speech_tts usage = %+v", tts.Usage)
+	}
+	if got := string(readArtifact(t, store, tts.Audio.BlobID)); got != "wav-bytes" {
+		t.Fatalf("tts artifact = %q", got)
+	}
+
+	ttsRequest := findRequest(t, server.snapshot(), "/audio/speech")
+	if ttsRequest.Auth != "Bearer speech-key" {
+		t.Fatalf("tts auth = %q", ttsRequest.Auth)
+	}
+	for _, want := range []string{`"model":"tts-1"`, `"input":"hello world"`, `"voice":"alloy"`, `"language":"en"`, `"response_format":"wav"`} {
+		if !strings.Contains(ttsRequest.Body, want) {
+			t.Fatalf("tts wire body missing %s: %s", want, ttsRequest.Body)
 		}
+	}
+
+	sttOutcome := runTool(t, result.Tools, "speech_stt",
+		`{"blob_id":"`+tts.Audio.BlobID+`","mime":"audio/wav","language":"en"}`, "session-stt")
+	if sttOutcome.IsError {
+		t.Fatalf("speech_stt failed: %s", contentText(t, sttOutcome.Result))
+	}
+	var stt mediaadapter.SpeechSTTToolOutput
+	if err := json.Unmarshal([]byte(contentText(t, sttOutcome.Result)), &stt); err != nil {
+		t.Fatal(err)
+	}
+	if !stt.Success || stt.Transcript.Text != "hello world" || len(stt.Transcript.Segments) != 2 {
+		t.Fatalf("speech_stt output = %+v", stt)
+	}
+	if stt.Transcript.Segments[1].StartMillis != 500 || stt.Transcript.Segments[1].EndMillis != 1200 {
+		t.Fatalf("segments = %+v", stt.Transcript.Segments)
+	}
+	if stt.Audio == nil || stt.Audio.BlobID != tts.Audio.BlobID {
+		t.Fatalf("transcript input reference = %+v", stt.Audio)
+	}
+	if stt.Transcript.Usage.TranscriptCharacters != 11 || stt.Transcript.Usage.AudioBytes != int64(len("wav-bytes")) {
+		t.Fatalf("stt usage = %+v", stt.Transcript.Usage)
+	}
+	sttRequest := findRequest(t, server.snapshot(), "/audio/transcriptions")
+	if sttRequest.Auth != "Bearer speech-key" {
+		t.Fatalf("stt auth = %q", sttRequest.Auth)
+	}
+	if !strings.Contains(sttRequest.Body, `name="file"`) || !strings.Contains(sttRequest.Body, "wav-bytes") {
+		t.Fatalf("stt multipart body missing the audio: %s", sttRequest.Body)
+	}
+	for _, raw := range []string{contentText(t, ttsOutcome.Result), contentText(t, sttOutcome.Result)} {
+		for _, forbidden := range []string{"cost", "0.1", "1.25", "speech-key", server.server.URL} {
+			if strings.Contains(raw, forbidden) {
+				t.Fatalf("speech result leaked %q: %s", forbidden, raw)
+			}
+		}
+	}
+}
+
+func TestBuildWiresDecisionToolWithSavedBindingAndPolicy(t *testing.T) {
+	server := newMediaServer(t)
+	result := Build(Options{
+		Models:     decisionDocument(server.server.URL, "enforce"),
+		Credential: credentialLookup(map[string]string{"DECISION_KEY": "decision-key"}),
+		HTTPClient: server.server.Client(),
+	})
+	if state := result.Families[FamilyDecision]; !state.Configured || !state.Wired {
+		t.Fatalf("decision state = %+v", state)
+	}
+	tool := findTool(t, result.Tools, "decision_ask")
+	if tool == nil {
+		t.Fatalf("decision_ask is not in the tool registry: %v", result.Tools)
+	}
+
+	// No arguments: the saved binding supplies state and questions.
+	outcome := runTool(t, result.Tools, "decision_ask", `{}`, "session-decision")
+	if outcome.IsError {
+		t.Fatalf("decision_ask failed: %s", contentText(t, outcome.Result))
+	}
+	var output mediaadapter.DecisionToolOutput
+	if err := json.Unmarshal([]byte(contentText(t, outcome.Result)), &output); err != nil {
+		t.Fatal(err)
+	}
+	if !output.Success || !output.Answered || output.Mode != "enforce" || output.Shadow {
+		t.Fatalf("decision output = %+v", output)
+	}
+	if len(output.Answers) != 1 || !strings.Contains(string(output.Answers["urgent"]), `"noul":0.91`) {
+		t.Fatalf("answers = %+v", output.Answers)
+	}
+	if strings.Contains(string(output.Answers["urgent"]), "confidence") {
+		t.Fatalf("the adapter added confidence to a noul answer: %s", output.Answers["urgent"])
+	}
+	if output.Usage.InputTokens != 5 || output.Usage.OutputTokens != 1 || output.Usage.Questions != 1 {
+		t.Fatalf("usage = %+v", output.Usage)
+	}
+
+	request := findRequest(t, server.snapshot(), "/v1/systemone")
+	if request.Auth != "Bearer decision-key" {
+		t.Fatalf("decision auth = %q", request.Auth)
+	}
+	for _, want := range []string{`"state":{"ticket":"customer is angry"}`, `"questions":{"urgent"`, `"model":"judge-1"`} {
+		if !strings.Contains(request.Body, want) {
+			t.Fatalf("decision wire body missing %s: %s", want, request.Body)
+		}
+	}
+	raw, _ := json.Marshal(output)
+	for _, forbidden := range []string{"cost", "1.25", "decision-key", server.server.URL} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("decision output leaked %q: %s", forbidden, raw)
+		}
+	}
+}
+
+func TestBuildSpeechAndDecisionKeepMissingCredentialFailClosed(t *testing.T) {
+	server := newMediaServer(t)
+	result := Build(Options{
+		Models:     speechAndDecisionDocument(server.server.URL),
+		Credential: credentialLookup(map[string]string{}),
+		Artifacts:  openArtifactStore(t),
+		HTTPClient: server.server.Client(),
+	})
+	for _, family := range []string{FamilyTTS, FamilySTT, FamilyDecision} {
+		if state := result.Families[family]; !state.Wired {
+			t.Fatalf("%s state = %+v, want a wired fail-closed tool", family, state)
+		}
+	}
+
+	tts := runTool(t, result.Tools, "speech_tts", `{"text":"hello"}`, "session-tts")
+	if !tts.IsError || !strings.Contains(contentText(t, tts.Result), "missing_credentials") {
+		t.Fatalf("speech_tts missing credential = %s", contentText(t, tts.Result))
+	}
+	decision := runTool(t, result.Tools, "decision_ask", `{}`, "session-decision")
+	if !decision.IsError || !strings.Contains(contentText(t, decision.Result), "missing_credentials") {
+		t.Fatalf("decision_ask missing credential = %s", contentText(t, decision.Result))
+	}
+	if got := server.count("/audio/speech") + server.count("/audio/transcriptions") + server.count("/v1/systemone"); got != 0 {
+		t.Fatalf("a provider without a credential was called %d times", got)
 	}
 }
 

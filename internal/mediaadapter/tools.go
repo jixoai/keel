@@ -3,6 +3,7 @@ package mediaadapter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/jixoai/keel/internal/agentcore"
@@ -95,6 +96,38 @@ func toolFailureFromError(family string, err error, request any) agentcore.Agent
 	return toolFailure("media adapter failed", string(KindProviderUnavailable), true, nil, request)
 }
 
+// recoverToolPanic is the tool-level crash boundary. Adapter calls already
+// recover provider panics, but a panic in the adapter itself (for example a nil
+// seam) must also become a typed tool failure rather than escape into the
+// executor. It is deferred directly so recover observes the panic.
+func recoverToolPanic(family string, result *agentcore.AgentToolResult, err *error) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	*result = toolFailure(
+		family+" tool panicked: "+sanitize(fmt.Sprintf("%v", recovered), ""),
+		string(KindProviderUnavailable), true, nil, nil,
+	)
+	*err = nil
+}
+
+// mediaDetails is the durable artifact reference carried by a successful media
+// tool result. It reuses the existing tool.result details field instead of
+// introducing a kernel event kind: the payload names layerfs references only
+// and the usage record has no price. Kernel blob_refs counts platform blob ids
+// (UUIDs); a layerfs sha256 reference is retained by layerfs itself and is
+// intentionally skipped by that projection.
+func mediaDetails(family string, usage Usage, artifacts ...Artifact) map[string]any {
+	return map[string]any{
+		"media": map[string]any{
+			"family":    family,
+			"artifacts": artifacts,
+			"usage":     usage,
+		},
+	}
+}
+
 // ImageToolArgs is the model-facing image_generate input.
 //
 // Prompt and aspect_ratio are the Hermes static surface. NegativePrompt, Size,
@@ -163,7 +196,8 @@ func (t *ImageTool) ExecutionMode() agentcore.ToolExecutionMode {
 }
 
 // Execute implements agentcore.AgentTool.
-func (t *ImageTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+func (t *ImageTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (toolResult agentcore.AgentToolResult, err error) {
+	defer recoverToolPanic(FamilyImage, &toolResult, &err)
 	var input ImageToolArgs
 	if err := json.Unmarshal(args, &input); err != nil {
 		return toolFailure("arguments are not valid JSON: "+err.Error(), ToolCodeInvalidArguments, false, nil, nil), nil
@@ -194,6 +228,7 @@ func (t *ImageTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 	return agentcore.AgentToolResult{
 		Content:           agentcore.ContentList{agentcore.NewTextContent(string(raw))},
 		StructuredContent: output,
+		Details:           mediaDetails(FamilyImage, output.Usage, output.Images...),
 	}, nil
 }
 
@@ -284,7 +319,8 @@ func (t *VideoTool) ExecutionMode() agentcore.ToolExecutionMode {
 }
 
 // Execute implements agentcore.AgentTool.
-func (t *VideoTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+func (t *VideoTool) Execute(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (toolResult agentcore.AgentToolResult, err error) {
+	defer recoverToolPanic(FamilyVideo, &toolResult, &err)
 	var input VideoToolArgs
 	if err := json.Unmarshal(args, &input); err != nil {
 		return toolFailure("arguments are not valid JSON: "+err.Error(), ToolCodeInvalidArguments, false, nil, nil), nil
@@ -317,6 +353,7 @@ func (t *VideoTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 	return agentcore.AgentToolResult{
 		Content:           agentcore.ContentList{agentcore.NewTextContent(string(raw))},
 		StructuredContent: output,
+		Details:           mediaDetails(FamilyVideo, output.Usage, output.Videos...),
 	}, nil
 }
 
