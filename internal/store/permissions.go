@@ -65,11 +65,10 @@ const (
 	PermissionScopeAll    = "all"
 )
 
-// Permission subject types.
-const (
-	PermissionSubjectAccount = "account"
-	PermissionSubjectGroup   = "group"
-)
+// Permission subject type for direct grants. Group authorization is stored
+// exclusively in permission_group_grants; a group subject on a direct grant is
+// rejected so there is only one group-authorization truth (L5 / A1 decision 5).
+const PermissionSubjectAccount = "account"
 
 // ValidPermissionScope reports whether scope is in the closed scope set.
 func ValidPermissionScope(scope string) bool {
@@ -80,9 +79,10 @@ func ValidPermissionScope(scope string) bool {
 	return false
 }
 
-// ValidPermissionSubject reports whether subjectType is account or group.
+// ValidPermissionSubject reports whether subjectType is the account (direct
+// grants only).
 func ValidPermissionSubject(subjectType string) bool {
-	return subjectType == PermissionSubjectAccount || subjectType == PermissionSubjectGroup
+	return subjectType == PermissionSubjectAccount
 }
 
 // CreatePermissionGroup inserts a group. A duplicate id or name (case folded)
@@ -316,7 +316,7 @@ func (s *Store) CreatePermissionGrant(ctx context.Context, record PermissionGran
 	case record.ID == uuid.Nil:
 		return PermissionGrantRecord{}, invalidIdentity("permission grant", "grant id is required")
 	case !ValidPermissionSubject(record.SubjectType):
-		return PermissionGrantRecord{}, invalidIdentity("permission grant", "unknown subject type %q (want account or group)", record.SubjectType)
+		return PermissionGrantRecord{}, invalidIdentity("permission grant", "unknown subject type %q (direct grants are account-only; use permission_group_grants for groups)", record.SubjectType)
 	case record.SubjectID == uuid.Nil:
 		return PermissionGrantRecord{}, invalidIdentity("permission grant", "subject id is required")
 	case record.GrantedBy == uuid.Nil:

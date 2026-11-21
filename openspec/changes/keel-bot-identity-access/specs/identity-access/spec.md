@@ -160,11 +160,20 @@ MAY 使用更细的 key。
 有效权限 MUST 是账号直接 grant 与所有权限组 grant 的并集；同一 key 的多个 scope MUST 取
 最大 scope（`own < team < tenant < all`）。系统 MUST NOT 支持显式 deny，MUST NOT 支持权限组
 嵌套。授予者 MUST 只能授出自己持有的 `(key, scope)`；超级管理员除外。
+**scope 是授权/委托的广度，不是资源可见性的替代品**：任何资源级 key 的单资源判定 MUST
+同时满足 key 与关系元组；scope 为 `tenant`/`all` 也不能替代 relation。列表/聚合端点 MUST
+使用引擎提供的可见性过滤器，MUST NOT 在 handler 里用 scope 跳过关系。
 
-#### Scenario: 多组取并集
-- **GIVEN** 账号 A 属于组 G1（`session.read` + own）与 G2（`session.read` + tenant）
-- **WHEN** A 读取同租户另一个账号的会话
-- **THEN** 允许，因为并集取 `tenant` scope
+#### Scenario: 多组取并集（tenant 级 key）
+- **GIVEN** 账号 A 属于组 G1（`account.read` + tenant）与 G2（`account.read` + all）
+- **WHEN** A 读取账号目录
+- **THEN** 允许，且有效 scope 为并集最大者 `all`
+
+#### Scenario: 资源 key 的 tenant scope 不替代关系
+- **GIVEN** 账号 A 持有 `session.read` + tenant
+- **AND** 会话 S 属于账号 B，A 与 S 没有 viewer/editor/owner 关系
+- **WHEN** A 读取 S
+- **THEN** 返回 403；scope 不替代 relation
 
 #### Scenario: 授予不得超过自己
 - **GIVEN** 账号 A 只有 `session.read` + own

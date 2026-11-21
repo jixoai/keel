@@ -431,6 +431,12 @@ func TestPermissionGroupsAndGrantsStore(t *testing.T) {
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("team_bot direct grant err = %v, want ErrInvalid", err)
 	}
+	if _, err := st.CreatePermissionGrant(ctx, PermissionGrantRecord{
+		TenantID: tenant, ID: uuid.New(), SubjectType: "group", SubjectID: group.ID,
+		PermissionKey: "session.read", Scope: PermissionScopeOwn, GrantedBy: account.ID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("group direct grant err = %v, want ErrInvalid (groups use permission_group_grants)", err)
+	}
 
 	// Deleting a group cascades its memberships and grants.
 	if _, err := st.AddPermissionGroupMember(ctx, tenant, second.ID, account.ID, account.ID); err != nil {
@@ -553,6 +559,17 @@ func TestBotAPIKeysStore(t *testing.T) {
 	}
 	if _, err := st.CreateBotAPIKey(ctx, tenant, uuid.New(), BotAPIKeyHash("other"), "prefix", account.ID, "", ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("missing bot err = %v, want ErrInvalid", err)
+	}
+	mismatchAccount, err := st.CreateAccount(ctx, AccountRecord{
+		TenantID: tenant, ID: uuid.New(), Username: "other-" + tenant.String()[:8],
+		DisplayName: "Other", Kind: "human", PasswordHash: "argon2id-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateBotAPIKey(ctx, tenant, uuid.New(),
+		BotAPIKeyHash("mismatch-"+uuid.NewString()), "prefix", mismatchAccount.ID, bot.ID, ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("account/bot mismatch err = %v, want ErrInvalid", err)
 	}
 
 	lookedUp, err := st.LookupBotAPIKey(ctx, hash)

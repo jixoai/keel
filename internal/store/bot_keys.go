@@ -11,10 +11,12 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // BotAPIKey is one credential's metadata. The hash never leaves the database
@@ -61,10 +63,21 @@ func (s *Store) CreateBotAPIKey(ctx context.Context, tenantID, keyID uuid.UUID, 
 	created, err := scanBotAPIKeyRow(s.pool.QueryRow(ctx,
 		`INSERT INTO bot_api_keys
 		    (tenant_id, key_id, key_hash, key_prefix, account_id, bot_id, label)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 SELECT $1, $2, $3, $4, $5, $6, $7
+		  WHERE EXISTS (
+		      SELECT 1
+		        FROM bots b
+		        JOIN profiles p
+		          ON p.tenant_id = b.tenant_id AND p.profile_id = b.profile_id
+		       WHERE b.tenant_id = $1 AND b.bot_id = $6 AND p.account_id = $5
+		  )
 		 RETURNING tenant_id, key_id, key_prefix, account_id, bot_id, label,
 		           created_at, updated_at, revoked_at, last_used_at`,
 		tenantID, keyID, hash, prefix, accountID, botID, label))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return BotAPIKey{}, invalidIdentity("create bot api key",
+			"account %s does not own bot %s", accountID, botID)
+	}
 	if err != nil {
 		return BotAPIKey{}, identityWriteError("create bot api key", err)
 	}

@@ -188,6 +188,10 @@ permission_grants (
 
 - Account 可直接持有 grant；也可通过 `permission_group_members` 加入多个组。
 - 有效 `(key, scope)` 集合 = 直接 grant ∪ 组 grant；同 key 取最大 scope（own < team < tenant < all）。
+- **scope 不替代 relation**：资源级 key 的单资源判定始终要求 key + 关系元组；`tenant`/`all`
+  不能让无关系的账号读到别人的会话。scope 的差异体现在委派/聚合/列表过滤，不体现在单资源放行。
+- 列表/聚合端点 MUST 走引擎级 `VisibleResources` 过滤器（按 principal 的关系集计算可见集合），
+  MUST NOT 在 handler 里用 `scope >= tenant` 跳过关系。
 - 权限组：
 
 ```sql
@@ -225,6 +229,7 @@ resource_relations (
 - 团队共享：给 `team_bot` 或 `group` 授 `viewer/editor`；成员资格由
   `permission_group_members` 或 TeamBot 成员关系提供，不另造表。
 - 禁止在 handler 里写 `if owner == account`；全部走统一 evaluator。
+- 列表端点禁止用 scope 短路关系；用 `VisibleResources` 返回可见 id 集合，再按正常分页查询。
 
 ### 3.4 判定点
 

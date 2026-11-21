@@ -65,6 +65,8 @@
 - [ ] access 适配器：`GrantSource` 只取 account 直授；`GroupGrants` 走
       `permission_group_members` join `permission_group_grants`；`RelationSource` 解析 store；
       `ResolveSubject` 无法解析时 fail closed
+- [ ] 引擎级可见性过滤器 `VisibleResources`：列表/聚合端点只准用它，禁止 handler 用
+      `scope >= tenant` 跳过 relation；补跨租户/无关系负控
 - [ ] 内置权限组种子：super-admin（全部 key + all）、tenant-admin、bot-operator、viewer、auditor
 - [ ] 审计落盘：grant/revoke/deny/超管操作/relation 变更；敏感值不落日志
 - [ ] HTTP `/v1/accounts`（列表/创建/详情/禁用/启用/重置密码/授权组）接 access

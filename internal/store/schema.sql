@@ -1245,8 +1245,11 @@ CREATE TABLE IF NOT EXISTS permission_group_grants (
         CHECK (scope IN ('own', 'team', 'tenant', 'all'))
 );
 
--- Direct grants (subject account or group). The effective set is the union of
--- these and every group's grants; the highest scope per key wins (L5).
+-- Direct account grants only. Group authorization lives exclusively in
+-- permission_group_grants; allowing a group subject here would create a second
+-- truth and a silent no-op write (L5 / A1 decision 5). The effective set is the
+-- union of account direct grants and every group's grants; the highest scope per
+-- key wins.
 CREATE TABLE IF NOT EXISTS permission_grants (
     tenant_id      uuid NOT NULL,
     grant_id       uuid NOT NULL,
@@ -1258,10 +1261,16 @@ CREATE TABLE IF NOT EXISTS permission_grants (
     created_at     timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, grant_id),
     CONSTRAINT permission_grants_subject_check
-        CHECK (subject_type IN ('account', 'group')),
+        CHECK (subject_type = 'account'),
     CONSTRAINT permission_grants_scope_check
         CHECK (scope IN ('own', 'team', 'tenant', 'all'))
 );
+
+-- Existing alpha databases may carry the earlier two-value CHECK. Tighten it
+-- (no compatibility shim: group rows, if any, make startup fail loudly).
+ALTER TABLE permission_grants DROP CONSTRAINT IF EXISTS permission_grants_subject_check;
+ALTER TABLE permission_grants ADD CONSTRAINT permission_grants_subject_check
+    CHECK (subject_type = 'account');
 
 CREATE UNIQUE INDEX IF NOT EXISTS permission_grants_unique
     ON permission_grants (tenant_id, subject_type, subject_id, permission_key, scope);
