@@ -182,7 +182,7 @@
 - [x] Standard 选模型启动；Team 选团队启动；运行中切换只影响下一次 run
       （三段 E2E `evidence/start-selection-20261121-105043/`：Standard `kite-standard-b`；
       Team-only `{teamId}` → captain 默认模型 + revision/hash；switch 三段 run.finished 依次
-      standard→team→standard，run 2 的 inputSeqs=[1,2] 不含 run 1 在飞时排队的第三条 input）
+      standard→team→standard，run 2 的 inputSeqs=[1,2] 不含 run 2 在飞时排队的第三条 input（seq5），该输入由 run 3 以 standard 消费）
 - [x] 工具列表来自注册源；引用已不可用的 toolId 只剔除并留诊断、不阻断 run（`internal/agent/runner.go` toolsForRun + `internal/agenttool/registry.go` Subset；UI/CLI 面的卸载同步仍未验）
 - [x] 旧模型预设已删除，旧 preset 不能启动新 run；旧会话历史仍可读
 - [x] 凭据零泄漏（API/日志/事件/CLI 输出/UI DOM/team 配置）
