@@ -68,6 +68,9 @@
 - [ ] 引擎级可见性过滤器 `VisibleResources`：列表/聚合端点只准用它，禁止 handler 用
       `scope >= tenant` 跳过 relation；补跨租户/无关系负控
 - [ ] 内置权限组种子：super-admin（全部 key + all）、tenant-admin、bot-operator、viewer、auditor
+- [ ] 超管写入白名单：只有 bootstrap 可创建 `is_super_admin`；普通 API 拒绝提升；始终保留至少一个
+- [ ] 覆盖率门非空断言：CI 要求 `Checked >= 已知路由总数下限`，空快照失败
+- [ ] store/access 的 scope/subject 词表交叉一致性测试（漂移 fail closed）
 - [ ] 审计落盘：grant/revoke/deny/超管操作/relation 变更；敏感值不落日志
 - [ ] HTTP `/v1/accounts`（列表/创建/详情/禁用/启用/重置密码/授权组）接 access
 - [ ] HTTP `/v1/bots`（CRUD/归档/Profile/Harness/试跑）接 access
