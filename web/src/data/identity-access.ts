@@ -760,8 +760,10 @@ class IdentityAccessStore {
     void this.loadRecords();
   }
 
-  /** Test only: forget every read so a case starts clean. */
-  resetForTest(): void {
+  /** Drop everything read for the previous session (logout, a new login, a
+   * failed probe): the next account must never see the last one's accounts,
+   * groups or records from memory. Also used by tests for a clean start. */
+  clearSession(): void {
     this.accountsToken += 1;
     this.groupsToken += 1;
     this.accountToken += 1;
@@ -799,6 +801,23 @@ class IdentityAccessStore {
     this.recordsUnavailable.set(false);
     this.recordsHasMore.set(false);
     this.recordsAttempted = false;
+    // The view state is part of the session's memory too: the next account must
+    // not open on the previous one's search/filter.
+    this.accountsQuery.set("");
+    this.accountsKind.set("all");
+    this.accountsStatus.set("all");
+    this.accountsLimit.set(100);
+    this.groupsQuery.set("");
+    this.groupSearch.set("");
+    this.recordsQuery.set("");
+    this.recordsRange.set("7d");
+    this.recordsKind.set("all");
+    this.recordsResult.set("all");
+  }
+
+  /** Test alias (the same reset). */
+  resetForTest(): void {
+    this.clearSession();
   }
 }
 

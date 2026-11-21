@@ -32,6 +32,7 @@ import { store, type Notice, type Route } from "./src/data/store";
 import { KitGallery } from "./kit/KitGallery";
 import { BooksChapterRoute } from "./src/screens/books/chapters";
 import { BooksChrome } from "./src/screens/books/shell";
+import { identityAccess } from "./src/data/identity-access";
 import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
@@ -488,6 +489,15 @@ function DeleteConfirm() {
 // and its reactive reads live in the vnode getters, so a body-level `if` would
 // freeze the decision made before the async probe finished.
 function App() {
+  // A session change drops the identity chapter's reads: the next account must
+  // not see the previous one's accounts, groups or records from memory.
+  let authWas = store.auth();
+  effect(() => {
+    const auth = store.auth();
+    if (auth === authWas) return;
+    authWas = auth;
+    identityAccess.clearSession();
+  });
   // Boot: the appearance the last session chose (the settings page's 外观
   // section writes it through the same source) …
   effect(() => {

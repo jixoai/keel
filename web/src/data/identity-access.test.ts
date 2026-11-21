@@ -37,6 +37,36 @@ test("范围上限：超过自己持有的范围禁用并给原因", () => {
   expect(scopeDisabledReason("session.read", "all", "all")).toBeUndefined();
 });
 
+test("退出/换号：不把上一个会话的账号与筛选留在内存里", async () => {
+  round.start();
+  store.setIdentityTransport({
+    async listAccounts() {
+      return {
+        items: [
+          {
+            accountId: "acc-1",
+            username: "lina",
+            displayName: "李娜",
+            kind: "human",
+            isSuperAdmin: false,
+          },
+        ],
+        limit: 100,
+        hasMore: false,
+      };
+    },
+    async listPermissionGroups() {
+      return { items: [], limit: 100, hasMore: false };
+    },
+  });
+  await identityAccess.loadAccounts();
+  identityAccess.accountsQuery.set("李娜");
+  expect(identityAccess.accounts().length).toBe(1);
+  identityAccess.clearSession();
+  expect(identityAccess.accounts().length).toBe(0);
+  expect(identityAccess.accountsQuery()).toBe("");
+});
+
 test("变更集：新增 / 提升 / 收窄 / 撤销，高危只在放宽时要求确认", async () => {
   round.start();
   const detail: PermissionGroupDetail = {
