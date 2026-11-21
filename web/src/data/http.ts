@@ -69,6 +69,40 @@ import {
   type McpAppResourceReadBody,
   type McpAppToolCallBody,
 } from "./mcp-apps";
+import {
+  identityPage,
+  parseAccount,
+  parseAuthSession,
+  parseBot,
+  parseBotKey,
+  parsePermissionGroup,
+  parsePermissionGroupDetail,
+  parseTeamBot,
+  parseWhoAmI,
+  type AccountView,
+  type AuthSessionView,
+  type BotKeyView,
+  type BotView,
+  type CreateAccountInput,
+  type CreateBotInput,
+  type CreateTeamBotInput,
+  type IdentityPage,
+  type PermissionGroupDetail,
+  type PermissionGroupSummary,
+  type TeamBotView,
+  type UpdateBotInput,
+  type UpdateTeamBotInput,
+  type WhoAmI,
+} from "./identity";
+
+/** The structured detail of a refusal: the permission engine's 403 names the
+ * key and reason; a 429 names the wait. */
+export interface KeelErrorDetail {
+  reason?: string;
+  requiredKey?: string;
+  scope?: string;
+  retryAfterSeconds?: number;
+}
 
 export class KeelApiError extends Error {
   readonly status: number;
@@ -79,12 +113,30 @@ export class KeelApiError extends Error {
   /** The server's stable failure code (`pinned`, `untrusted_source`, ...).
    * A page renders it as the specific state, not a generic error. */
   readonly code: string | undefined;
-  constructor(status: number, message: string, issues: SettingsIssue[] = [], revision?: number, code?: string) {
+  /** A 403 reason (`missing_grant`, `missing_relation`, ...) and the key that
+   * was required. Kept so a permission page can say what is missing. */
+  readonly reason: string | undefined;
+  readonly requiredKey: string | undefined;
+  readonly scope: string | undefined;
+  /** A 429's Retry-After, in whole seconds. */
+  readonly retryAfterSeconds: number | undefined;
+  constructor(
+    status: number,
+    message: string,
+    issues: SettingsIssue[] = [],
+    revision?: number,
+    code?: string,
+    detail: KeelErrorDetail = {},
+  ) {
     super(message);
     this.status = status;
     this.issues = issues;
     this.revision = revision;
     this.code = code;
+    this.reason = detail.reason;
+    this.requiredKey = detail.requiredKey;
+    this.scope = detail.scope;
+    this.retryAfterSeconds = detail.retryAfterSeconds;
   }
 }
 
@@ -164,14 +216,24 @@ function parseSkillSource(value: unknown): SkillSourceView {
   };
 }
 
-/** The error body's message, field issues, conflict revision and code. */
+/** The error body's message, field issues, conflict revision, code and the
+ * permission detail (reason/requiredKey/scope). */
 async function readErrorBody(
   response: Response,
-): Promise<{ message: string; issues: SettingsIssue[]; revision: number | undefined; code: string | undefined }> {
+): Promise<{
+  message: string;
+  issues: SettingsIssue[];
+  revision: number | undefined;
+  code: string | undefined;
+  detail: KeelErrorDetail;
+}> {
   const issues: SettingsIssue[] = [];
   let revision: number | undefined;
   let code: string | undefined;
   let message = "";
+  let reason: string | undefined;
+  let requiredKey: string | undefined;
+  let scope: string | undefined;
   try {
     const text = await response.text();
     try {
@@ -181,6 +243,10 @@ async function readErrorBody(
       issues.push(...issueList(body.issues));
       if (typeof body.revision === "number" && Number.isFinite(body.revision)) revision = body.revision;
       if (typeof body.code === "string" && body.code) code = body.code;
+      if (typeof body.reason === "string" && body.reason) reason = body.reason;
+      if (typeof body.requiredKey === "string" && body.requiredKey) requiredKey = body.requiredKey;
+      if (typeof body.key === "string" && body.key) requiredKey = requiredKey ?? body.key;
+      if (typeof body.scope === "string" && body.scope) scope = body.scope;
       if (!message && issues.length) message = issues[0]?.message ?? "";
     } catch {
       message = text;
@@ -189,7 +255,63 @@ async function readErrorBody(
   } catch {
     message = `HTTP ${response.status}`;
   }
-  return { message, issues, revision, code };
+  return {
+    message,
+    issues,
+    revision,
+    code,
+    detail: {
+      reason,
+      requiredKey,
+      scope,
+      retryAfterSeconds: parseRetryAfter(response.headers.get("Retry-After")),
+    },
+  };
+}
+
+/** Retry-After is either seconds or an HTTP date; the UI shows whole seconds. */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  }
+  const at = Date.parse(trimmed);
+  if (!Number.isFinite(at)) return undefined;
+  return Math.max(0, Math.ceil((at - Date.now()) / 1000));
+}
+
+/** One sentence per refusal status, with the server's own message appended when
+ * it adds information (a 403's reason, a 400's field). Never replaces the
+ * server's code: the caller still holds the KeelApiError. */
+export function errorMessageOf(error: unknown): string {
+  if (!(error instanceof KeelApiError)) {
+    return error instanceof Error && error.message ? error.message : String(error);
+  }
+  const detail = error.message && error.message !== "HTTP " + error.status ? `：${error.message}` : "";
+  switch (error.status) {
+    case 400:
+      return `提交的内容无效${detail}`;
+    case 401:
+      return "登录已失效，请重新登录。";
+    case 403:
+      return error.requiredKey
+        ? `权限不足：需要 ${error.requiredKey}${detail}`
+        : `权限不足${detail}`;
+    case 404:
+      return "没有找到这条记录，它可能已被删除。";
+    case 409:
+      return `操作冲突${detail}`;
+    case 429:
+      return error.retryAfterSeconds !== undefined
+        ? `操作太频繁，请在 ${error.retryAfterSeconds} 秒后重试。`
+        : "操作太频繁，请稍后重试。";
+    case 503:
+      return `服务暂不可用${detail}`;
+    default:
+      return error.message || `请求失败（HTTP ${error.status}）`;
+  }
 }
 
 async function readError(response: Response): Promise<string> {
@@ -565,9 +687,36 @@ const teamBodyOf = (team: AgentTeamWriteRequest): Record<string, unknown> => {
   return body;
 };
 
+/** The CSRF token of the app's live session. KeelHttp keeps it current; the
+ * media module (which writes through its own fetch) reads it so every non-GET
+ * `/v1` request carries the header, whichever code path sends it. */
+let activeCSRFToken: string | null = null;
+
+export const currentCSRFToken = (): string | null => activeCSRFToken;
+
+/** Attach the session's CSRF token to a non-GET request's headers. */
+export function withCSRF(
+  headers: Record<string, string> | undefined,
+  method: string,
+): Record<string, string> {
+  const merged = headers ? { ...headers } : {};
+  const upper = method.toUpperCase();
+  if (activeCSRFToken && upper !== "GET" && upper !== "HEAD" && upper !== "OPTIONS") {
+    merged["X-Keel-CSRF"] = activeCSRFToken;
+  }
+  return merged;
+}
+
 export class KeelHttp implements SettingsApi, AgentTeamApi {
   readonly base: string;
   private readonly fetchImpl: FetchLike;
+  /** The double-submit CSRF token (`/v1/auth/session` and every login/password
+   * answer carry it). Writes attach it as X-Keel-CSRF. */
+  private csrfToken: string | null = null;
+  /** Called on a 401 that means "the session is no longer valid" (an expired,
+   * revoked or disabled session). The store turns that into the login gate; a
+   * failed login attempt is not routed here. */
+  private unauthorizedHandler: ((error: KeelApiError, path: string) => void) | null = null;
 
   constructor(base = "", fetchImpl?: FetchLike) {
     this.base = base.replace(/\/$/, "");
@@ -586,14 +735,78 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
     return this.fetchImpl;
   }
 
+  /** Install the session-expiry callback (the store's login gate). */
+  onUnauthorized(handler: ((error: KeelApiError, path: string) => void) | null): void {
+    this.unauthorizedHandler = handler;
+  }
+
+  /** The CSRF token in force, if any (a test can assert the header). */
+  csrf(): string | null {
+    return this.csrfToken;
+  }
+
+  /** Forget the session's CSRF token (logout, or a rejected session). */
+  clearAuth(): void {
+    this.csrfToken = null;
+    activeCSRFToken = null;
+  }
+
+  /** Parse a session document and remember its CSRF token. */
+  private captureSession(value: unknown): AuthSessionView {
+    const session = parseAuthSession(value);
+    if (session.csrfToken) {
+      this.csrfToken = session.csrfToken;
+      activeCSRFToken = session.csrfToken;
+    }
+    return session;
+  }
+
+  /** The headers a request runs with: the caller's own plus the CSRF token for
+   * every non-GET write. A write without a token is still sent (the server's
+   * 403 is the test of the browser's session); it does not silently succeed.
+   * Plain objects keep this working on a host with no `Headers` global. */
+  private headersFor(init: RequestInit | undefined, method: string): Record<string, string> {
+    const headers: Record<string, string> = {};
+    const raw = init?.headers;
+    if (raw && typeof Headers !== "undefined" && raw instanceof Headers) {
+      raw.forEach((value, key) => {
+        headers[key] = value;
+      });
+    } else if (Array.isArray(raw)) {
+      for (const [key, value] of raw) headers[key] = value;
+    } else if (raw) {
+      Object.assign(headers, raw as Record<string, string>);
+    }
+    const token = this.csrfToken ?? activeCSRFToken;
+    if (token && method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+      headers["X-Keel-CSRF"] = token;
+    }
+    return headers;
+  }
+
   async request(path: string, init?: RequestInit): Promise<Response> {
+    const method = (init?.method ?? "GET").toUpperCase();
     const response = await this.fetchImpl(this.url(path), {
       credentials: "same-origin",
       ...init,
+      headers: this.headersFor(init, method),
     });
     if (!response.ok) {
-      const { message, issues, revision, code } = await readErrorBody(response);
-      throw new KeelApiError(response.status, message, issues, revision, code);
+      const { message, issues, revision, code, detail } = await readErrorBody(response);
+      const error = new KeelApiError(response.status, message, issues, revision, code, detail);
+      // A 401 from a real endpoint is the session ending. Login/bootstrap 401s
+      // are credential answers for the form, and a password change's 401 is the
+      // current password being wrong: neither may throw the reader out.
+      if (
+        response.status === 401 &&
+        this.unauthorizedHandler &&
+        path !== "/v1/auth/login" &&
+        path !== "/v1/auth/bootstrap" &&
+        !(path === "/v1/auth/password" && code === "invalid_credentials")
+      ) {
+        this.unauthorizedHandler(error, path);
+      }
+      throw error;
     }
     return response;
   }
@@ -621,17 +834,66 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
     }
   }
 
-  /** Exchange the local passphrase for the server's session cookie. */
-  async login(password: string): Promise<void> {
-    await this.request("/v1/auth/login", {
+  /**
+   * The session document. It is also the anonymous CSRF source: a browser that
+   * has never logged in needs the token this answer issues before it can POST
+   * the login form (the server checks CSRF on every auth write).
+   */
+  async authSession(): Promise<AuthSessionView> {
+    const response = await this.request("/v1/auth/session");
+    return this.captureSession(await response.json());
+  }
+
+  /** Exchange username+password for the server session. The answer carries
+   * `mustChangePassword`; a 401 is the same shape for a missing account and a
+   * wrong password (the server does not say which). */
+  async login(username: string, password: string): Promise<AuthSessionView> {
+    if (!this.csrfToken) await this.authSession();
+    const response = await this.request("/v1/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     });
+    return this.captureSession(await response.json());
+  }
+
+  /** Redeem the one-time setup token. The server does not log the browser in:
+   * the account starts in the must-change state, so the caller logs in next. */
+  async bootstrap(token: string, username: string, password: string, displayName?: string): Promise<void> {
+    if (!this.csrfToken) await this.authSession();
+    await this.request("/v1/auth/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token,
+        username,
+        password,
+        ...(displayName && displayName.trim() ? { displayName: displayName.trim() } : {}),
+      }),
+    });
+  }
+
+  /** Change the password; the server revokes every old session and answers the
+   * fresh one (its CSRF token included). */
+  async changePassword(currentPassword: string, newPassword: string): Promise<AuthSessionView> {
+    const response = await this.request("/v1/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    return this.captureSession(await response.json());
   }
 
   async logout(): Promise<void> {
     await this.request("/v1/auth/logout", { method: "POST" });
+    this.clearAuth();
+  }
+
+  /** The caller's identity and effective permissions. The UI's `can()` reads
+   * this answer; the server remains the authority for every request. */
+  async whoami(): Promise<WhoAmI> {
+    const response = await this.request("/v1/auth/whoami");
+    return parseWhoAmI(await response.json());
   }
 
   async capabilities(): Promise<Record<string, unknown>> {
@@ -676,7 +938,7 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
       {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: this.headersFor({ headers: { "Content-Type": "application/json" } }, "POST"),
         body: JSON.stringify(body),
       },
     );
@@ -1272,7 +1534,352 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
     );
     return readTeam(response);
   }
+
+  // ---- identity & access (A4.3) -----------------------------------------
+  //
+  // The server's authority, exposed one method per route. Every listing is
+  // bounded (`limit`, 1..500); `hasMore` says a full page came back, not that
+  // another page exists. A refusal keeps its status, code and — for a 403 —
+  // the required key and reason (KeelApiError).
+
+  private async readAccountList(path: string, limit: number): Promise<IdentityPage<AccountView>> {
+    const response = await this.request(path);
+    const body = asRecord(await response.json());
+    return identityPage<AccountView>(listOf(body.accounts).map(parseAccount), identityLimitOf(limit));
+  }
+
+  async listAccounts(limit = 100): Promise<IdentityPage<AccountView>> {
+    const bounded = identityLimitOf(limit);
+    return this.readAccountList(`/v1/accounts?limit=${bounded}`, bounded);
+  }
+
+  async createAccount(input: CreateAccountInput): Promise<AccountView> {
+    const response = await this.request("/v1/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: input.username,
+        ...(input.displayName ? { displayName: input.displayName } : {}),
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.password ? { password: input.password } : {}),
+      }),
+    });
+    return parseAccount(asRecord(await response.json()).account);
+  }
+
+  async getAccount(accountId: string): Promise<{ account: AccountView; groups: PermissionGroupSummary[] }> {
+    const response = await this.request(`/v1/accounts/${encodeURIComponent(accountId)}`);
+    const body = asRecord(await response.json());
+    return {
+      account: parseAccount(body.account),
+      groups: listOf(body.groups).map(parsePermissionGroup),
+    };
+  }
+
+  async setAccountDisabled(accountId: string, disabled: boolean, reason?: string): Promise<AccountView> {
+    const response = await this.request(`/v1/accounts/${encodeURIComponent(accountId)}/disable`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ disabled, ...(reason ? { reason } : {}) }),
+    });
+    return parseAccount(asRecord(await response.json()).account);
+  }
+
+  async resetAccountPassword(accountId: string, password: string): Promise<void> {
+    await this.request(`/v1/accounts/${encodeURIComponent(accountId)}/password-reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  async listAccountGroups(accountId: string): Promise<PermissionGroupSummary[]> {
+    const response = await this.request(`/v1/accounts/${encodeURIComponent(accountId)}/groups`);
+    return listOf(asRecord(await response.json()).groups).map(parsePermissionGroup);
+  }
+
+  async addAccountGroup(accountId: string, groupId: string): Promise<void> {
+    await this.request(`/v1/accounts/${encodeURIComponent(accountId)}/groups`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupId }),
+    });
+  }
+
+  async removeAccountGroup(accountId: string, groupId: string): Promise<void> {
+    await this.request(
+      `/v1/accounts/${encodeURIComponent(accountId)}/groups/${encodeURIComponent(groupId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listPermissionGroups(limit = 100): Promise<IdentityPage<PermissionGroupSummary>> {
+    const bounded = identityLimitOf(limit);
+    const response = await this.request(`/v1/permission-groups?limit=${bounded}`);
+    const body = asRecord(await response.json());
+    return identityPage<PermissionGroupSummary>(listOf(body.groups).map(parsePermissionGroup), bounded);
+  }
+
+  async getPermissionGroup(groupId: string): Promise<PermissionGroupDetail> {
+    const response = await this.request(`/v1/permission-groups/${encodeURIComponent(groupId)}`);
+    return parsePermissionGroupDetail(await response.json());
+  }
+
+  async createPermissionGroup(name: string): Promise<PermissionGroupSummary> {
+    const response = await this.request("/v1/permission-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    return parsePermissionGroup(asRecord(await response.json()).group);
+  }
+
+  async renamePermissionGroup(groupId: string, name: string): Promise<PermissionGroupSummary> {
+    const response = await this.request(`/v1/permission-groups/${encodeURIComponent(groupId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    return parsePermissionGroup(asRecord(await response.json()).group);
+  }
+
+  async deletePermissionGroup(groupId: string): Promise<void> {
+    await this.request(`/v1/permission-groups/${encodeURIComponent(groupId)}`, { method: "DELETE" });
+  }
+
+  async addPermissionGroupMember(groupId: string, accountId: string): Promise<void> {
+    await this.request(`/v1/permission-groups/${encodeURIComponent(groupId)}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId }),
+    });
+  }
+
+  async removePermissionGroupMember(groupId: string, accountId: string): Promise<void> {
+    await this.request(
+      `/v1/permission-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(accountId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async addPermissionGroupGrant(groupId: string, key: string, scope: string): Promise<void> {
+    await this.request(`/v1/permission-groups/${encodeURIComponent(groupId)}/grants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, scope }),
+    });
+  }
+
+  async removePermissionGroupGrant(groupId: string, key: string, scope: string): Promise<void> {
+    const query = new URLSearchParams({ scope });
+    await this.request(
+      `/v1/permission-groups/${encodeURIComponent(groupId)}/grants/${encodeURIComponent(key)}?${query.toString()}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listBots(limit = 100, includeArchived = false): Promise<IdentityPage<BotView>> {
+    const bounded = identityLimitOf(limit);
+    const query = new URLSearchParams({ limit: String(bounded) });
+    if (includeArchived) query.set("includeArchived", "1");
+    const response = await this.request(`/v1/bots?${query.toString()}`);
+    const body = asRecord(await response.json());
+    return identityPage<BotView>(listOf(body.bots).map(parseBot), bounded);
+  }
+
+  async getBot(botId: string): Promise<BotView> {
+    const response = await this.request(`/v1/bots/${encodeURIComponent(botId)}`);
+    return parseBot(asRecord(await response.json()).bot);
+  }
+
+  async createBot(input: CreateBotInput): Promise<BotView> {
+    const response = await this.request("/v1/bots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(input.botId ? { botId: input.botId } : {}),
+        name: input.name,
+        profileId: input.profileId,
+        modelKind: input.modelKind,
+        ...(input.defaultModel ? { defaultModel: input.defaultModel } : {}),
+        ...(input.harness ? { harness: input.harness } : {}),
+      }),
+    });
+    return parseBot(asRecord(await response.json()).bot);
+  }
+
+  async updateBot(botId: string, input: UpdateBotInput): Promise<BotView> {
+    const response = await this.request(`/v1/bots/${encodeURIComponent(botId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.profileId !== undefined ? { profileId: input.profileId } : {}),
+        ...(input.modelKind !== undefined ? { modelKind: input.modelKind } : {}),
+        ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),
+        ...(input.harness !== undefined ? { harness: input.harness } : {}),
+        ...(input.expectedArchived !== undefined ? { expectedArchived: input.expectedArchived } : {}),
+      }),
+    });
+    return parseBot(asRecord(await response.json()).bot);
+  }
+
+  async archiveBot(botId: string): Promise<void> {
+    await this.request(`/v1/bots/${encodeURIComponent(botId)}/archive`, { method: "POST" });
+  }
+
+  /** Invoke a Bot: the server checks `bot.invoke` on that Bot; the Bot then
+   * runs with its own Account ∩ Harness permissions (not the caller's). */
+  async invokeBot(
+    botId: string,
+    text: string,
+    sessionId?: string,
+    requestId?: string,
+  ): Promise<{ botId: string; sessionId: string; seq?: number; requestId?: string; deduped?: boolean }> {
+    const response = await this.request(`/v1/bots/${encodeURIComponent(botId)}/invoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        ...(sessionId ? { sessionId } : {}),
+        ...(requestId ? { requestId } : {}),
+      }),
+    });
+    const body = asRecord(await response.json());
+    return {
+      botId: String(body.botId ?? botId),
+      sessionId: String(body.sessionId ?? ""),
+      seq: typeof body.seq === "number" ? body.seq : undefined,
+      requestId: typeof body.requestId === "string" ? body.requestId : undefined,
+      deduped: body.deduped === true,
+    };
+  }
+
+  async listBotKeys(botId: string): Promise<BotKeyView[]> {
+    const response = await this.request(`/v1/bots/${encodeURIComponent(botId)}/keys`);
+    return listOf(asRecord(await response.json()).keys).map(parseBotKey);
+  }
+
+  /** Issue a bot credential. The plaintext appears in this answer only; the
+   * caller must show it once and never keep it. */
+  async issueBotKey(
+    botId: string,
+    label = "",
+    accountId?: string,
+  ): Promise<{ key: BotKeyView; plaintext: string; notice: string }> {
+    const response = await this.request(`/v1/bots/${encodeURIComponent(botId)}/keys`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, ...(accountId ? { accountId } : {}) }),
+    });
+    const body = asRecord(await response.json());
+    return {
+      key: parseBotKey(body.key),
+      plaintext: String(body.plaintext ?? ""),
+      notice: String(body.notice ?? ""),
+    };
+  }
+
+  async revokeBotKey(botId: string, keyId: string): Promise<void> {
+    await this.request(
+      `/v1/bots/${encodeURIComponent(botId)}/keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listTeamBots(limit = 100, includeArchived = false): Promise<IdentityPage<TeamBotView>> {
+    const bounded = identityLimitOf(limit);
+    const query = new URLSearchParams({ limit: String(bounded) });
+    if (includeArchived) query.set("includeArchived", "1");
+    const response = await this.request(`/v1/team-bots?${query.toString()}`);
+    const body = asRecord(await response.json());
+    return identityPage<TeamBotView>(listOf(body.teamBots).map(parseTeamBot), bounded);
+  }
+
+  async getTeamBot(teamBotId: string): Promise<TeamBotView> {
+    const response = await this.request(`/v1/team-bots/${encodeURIComponent(teamBotId)}`);
+    return parseTeamBot(asRecord(await response.json()).teamBot);
+  }
+
+  async createTeamBot(input: CreateTeamBotInput): Promise<TeamBotView> {
+    const response = await this.request("/v1/team-bots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(input.teamBotId ? { teamBotId: input.teamBotId } : {}),
+        name: input.name,
+        mission: input.mission,
+        ...(input.roster ? { roster: input.roster } : {}),
+      }),
+    });
+    return parseTeamBot(asRecord(await response.json()).teamBot);
+  }
+
+  async updateTeamBot(teamBotId: string, input: UpdateTeamBotInput): Promise<TeamBotView> {
+    const response = await this.request(`/v1/team-bots/${encodeURIComponent(teamBotId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.mission !== undefined ? { mission: input.mission } : {}),
+        ...(input.roster !== undefined ? { roster: input.roster } : {}),
+        expectedRevision: input.expectedRevision,
+      }),
+    });
+    return parseTeamBot(asRecord(await response.json()).teamBot);
+  }
+
+  /** Replace the roster (CAS on `expectedRevision`); every seat re-checks the
+   * caller's `bot.invoke` server-side. */
+  async updateTeamBotRoster(
+    teamBotId: string,
+    roster: UpdateTeamBotInput["roster"],
+    expectedRevision: number,
+  ): Promise<TeamBotView> {
+    const response = await this.request(`/v1/team-bots/${encodeURIComponent(teamBotId)}/roster`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roster: roster ?? [], expectedRevision }),
+    });
+    return parseTeamBot(asRecord(await response.json()).teamBot);
+  }
+
+  async archiveTeamBot(teamBotId: string): Promise<void> {
+    await this.request(`/v1/team-bots/${encodeURIComponent(teamBotId)}/archive`, { method: "POST" });
+  }
+
+  async startTeamBot(
+    teamBotId: string,
+    text?: string,
+    sessionId?: string,
+    requestId?: string,
+  ): Promise<{ teamBotId: string; captainBotId: string; sessionId: string; seq?: number; requestId?: string; deduped?: boolean }> {
+    const response = await this.request(`/v1/team-bots/${encodeURIComponent(teamBotId)}/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(text ? { text } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(requestId ? { requestId } : {}),
+      }),
+    });
+    const body = asRecord(await response.json());
+    return {
+      teamBotId: String(body.teamBotId ?? teamBotId),
+      captainBotId: String(body.captainBotId ?? ""),
+      sessionId: String(body.sessionId ?? ""),
+      seq: typeof body.seq === "number" ? body.seq : undefined,
+      requestId: typeof body.requestId === "string" ? body.requestId : undefined,
+      deduped: body.deduped === true,
+    };
+  }
 }
+
+/** The API's listing bound: 1..500, default 100 (server defaults agree). */
+const identityLimitOf = (limit: number): number => {
+  if (!Number.isFinite(limit)) return 100;
+  return Math.min(500, Math.max(1, Math.floor(limit)));
+};
 
 export class HttpEventSource implements EventSource {
   private readonly http: KeelHttp;

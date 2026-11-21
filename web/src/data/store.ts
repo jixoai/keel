@@ -6,7 +6,9 @@
 import { host, signal } from "nsh";
 import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
-import { KeelApiError, KeelHttp } from "./http";
+import { KeelApiError, KeelHttp, errorMessageOf } from "./http";
+import { setEffectivePermissions, resetPermissions } from "./permissions";
+import type { AuthSessionView, WhoAmI } from "./identity";
 import { selectionForSend } from "./selection";
 import type {
   AgentTeamApi,
@@ -188,6 +190,74 @@ const messageOf = (error: unknown): string => {
   return String(error);
 };
 
+/** A 429 says how long to wait; every other return is the shared sentence. */
+const retrySentenceOf = (error: KeelApiError, fallback: string): string =>
+  error.status === 429
+    ? error.retryAfterSeconds !== undefined
+      ? `尝试次数过多，请在 ${error.retryAfterSeconds} 秒后重试。`
+      : fallback
+    : fallback;
+
+/** The login gate's error. A 401 is deliberately the *same* sentence for an
+ * unknown account and a wrong password: the server does not distinguish them
+ * and the UI must not either. */
+const loginErrorOf = (error: unknown): string => {
+  if (!(error instanceof KeelApiError)) return errorMessageOf(error);
+  switch (error.code) {
+    case "invalid_credentials":
+      return "用户名或密码不正确。请检查后重试。";
+    case "csrf_failed":
+      return "登录表单的安全令牌已失效，请刷新页面后重试。";
+    case "bootstrap_required":
+      return "这个部署还没有管理员，请先完成初始化。";
+    case "tenant_not_configured":
+    case "auth_unavailable":
+      return "服务还没有配置好账号登录，请联系部署管理员。";
+    case "rate_limited":
+      return retrySentenceOf(error, "尝试次数过多，请稍后重试。");
+    default:
+      return errorMessageOf(error);
+  }
+};
+
+const bootstrapErrorOf = (error: unknown): string => {
+  if (!(error instanceof KeelApiError)) return errorMessageOf(error);
+  switch (error.code) {
+    case "invalid_setup_token":
+      return "设置令牌无效、已过期或已经用过。请在服务器上重新运行 keel admin bootstrap。";
+    case "bootstrap_complete":
+      return "这个部署已经有管理员了，请直接登录。";
+    case "username_taken":
+      return "这个用户名已被占用，请换一个。";
+    case "weak_password":
+      return "密码不符合要求：至少 12 个字节（中文约 4 个字），最多 1024 字节。";
+    case "tenant_not_configured":
+      return "服务还没有配置租户，请联系部署管理员。";
+    case "csrf_failed":
+      return "设置表单的安全令牌已失效，请刷新页面后重试。";
+    default:
+      return errorMessageOf(error);
+  }
+};
+
+const passwordChangeErrorOf = (error: unknown): string => {
+  if (!(error instanceof KeelApiError)) return errorMessageOf(error);
+  switch (error.code) {
+    case "invalid_credentials":
+      return "当前密码不正确。";
+    case "weak_password":
+      return "新密码不符合要求：至少 12 个字节（中文约 4 个字），最多 1024 字节。";
+    case "password_reused":
+      return "新密码不能和当前密码相同。";
+    case "invalid_session":
+      return "登录已失效，请重新登录后再改密码。";
+    case "rate_limited":
+      return retrySentenceOf(error, "尝试次数过多，请稍后重试。");
+    default:
+      return errorMessageOf(error);
+  }
+};
+
 /** The 12-character hash a skill row shows; the full hash stays available in
  * the detail dialog (a bundle identity is 64 hex characters). */
 const shortHash = (hash: string): string => (hash.length > 12 ? hash.slice(0, 12) : hash);
@@ -254,9 +324,27 @@ const waitingIn = (view: ConversationView | null): boolean =>
 
 class KeelStore {
   readonly mode = signal<Mode>("checking");
-  /** Live API auth gate: the server wants a session (login) before /v1 works. */
-  readonly auth = signal<"unknown" | "ok" | "required">("unknown");
+  /** The login gate's stage (change keel-bot-identity-access, A4.3):
+   *   unknown      the boot probe has not answered yet
+   *   ok           an authenticated session; the app renders
+   *   required     username+password login
+   *   bootstrap    no super admin: the one-time setup form
+   *   must-change  logged in, but the server requires a new password first
+   * A 401 anywhere turns this back to `required`; nothing renders the app
+   * behind a dead session. */
+  readonly auth = signal<"unknown" | "ok" | "required" | "bootstrap" | "must-change">("unknown");
   readonly authError = signal<string | null>(null);
+  /** A sentence for the gate that is not an error (session expired, setup
+   * finished, password changed). */
+  readonly authNotice = signal<string | null>(null);
+  /** A 429's Retry-After, so the gate can count the wait down. */
+  readonly authRetryAfter = signal<number | null>(null);
+  /** The last gate failure was a permission refusal (403, not CSRF): the
+   * account is known but may not use this surface. */
+  readonly authDenied = signal(false);
+  /** The caller's identity and effective permissions (whoami); `null` until
+   * the first successful read, and on the login gate. */
+  readonly identity = signal<WhoAmI | null>(null);
   readonly sessions = signal<SessionSummary[]>([]);
   readonly sessionsLoading = signal(true);
   readonly sessionsError = signal<string | null>(null);
@@ -408,6 +496,12 @@ class KeelStore {
   /** Bumped per read so a slow answer for a closed session cannot land. */
   private teamTasksToken = 0;
   private teamTasksRefreshTimer: number | undefined;
+  /** Bumped per boot probe; a probe that loses the race must not overwrite a
+   * stage a caller (a harness, a reconnect) has since decided. */
+  private detectToken = 0;
+  /** Test/host seam: the transport the boot probe reads. `null` builds the
+   * real one, exactly as the product does. */
+  private probeClient: KeelHttp | null = null;
   /** The transport every call goes through. A real HTTP client from the start:
    * before (and without) a live service its calls fail with the network's own
    * reason — the store never swaps in a fabricated one. */
@@ -501,13 +595,21 @@ class KeelStore {
   }
 
   private async detect() {
+    const token = ++this.detectToken;
     this.sessionsLoading.set(true);
+    this.authError.set(null);
+    this.authDenied.set(false);
+    this.authNotice.set(null);
+    this.authRetryAfter.set(null);
     // Development only: the scripted transport stands in for a live service.
     // The product never reaches this branch — it is asked for at launch.
     if (await this.devLaunch()) {
+      if (token !== this.detectToken) return;
       if (!this.fixture) this.fixture = new FixtureClient(undefined, this.devSearch);
       this.http = null;
       this.client = this.fixture;
+      this.identity.set(null);
+      resetPermissions();
       this.auth.set("ok");
       this.mode.set("http");
       // The fixture answers the same discovery document shape a live server
@@ -517,82 +619,260 @@ class KeelStore {
       await this.refreshSessions();
       return;
     }
-    const http = new KeelHttp("");
-    let status: "ok" | "auth" | "down" = "down";
-    let reason = "服务没有返回有效响应";
-    let capabilities: Record<string, unknown> | null = null;
+    const http = this.probeClient ?? new KeelHttp("");
+    this.installUnauthorized(http);
+    this.http = http;
+    this.client = http;
+    let session: AuthSessionView;
     try {
-      status = await http.probe();
-      if (status === "ok") {
-        // A static server may answer every path with index.html; the API's
-        // capabilities endpoint must be JSON to count as a live service.
-        capabilities = await http.capabilities().catch(() => null);
-        if (!capabilities) {
-          status = "down";
-          reason = "服务在线，但返回的不是 Keel 服务的响应";
-        }
-      }
+      // The session document is the one public read that says both "is there a
+      // live service?" and "is this browser logged in / does the deployment
+      // still need bootstrap?". A 401 from /v1/capabilities could not tell the
+      // third state apart from an outage.
+      session = await http.authSession();
     } catch (error) {
-      status = "down";
-      reason = messageOf(error);
-    }
-    if (status === "down") {
+      if (token !== this.detectToken) return;
+      // A stale/invalid cookie is not an outage: the server answered, and the
+      // login form is the way forward (the server already cleared its cookies).
+      if (error instanceof KeelApiError && error.status === 401) {
+        this.mode.set("http");
+        this.auth.set("required");
+        this.authNotice.set("会话已过期，请重新登录。");
+        this.sessionsLoading.set(false);
+        setDeploymentCapabilities(null);
+        return;
+      }
       // An honest offline face: the transport stays a real one (its calls fail
       // with the network's own reason) and the reason stands with a retry.
-      this.http = null;
-      this.client = http;
       this.mode.set("offline");
       this.auth.set("unknown");
+      this.identity.set(null);
+      resetPermissions();
       setDeploymentCapabilities(null);
-      this.sessionsError.set(`无法连接 Keel 服务：${reason}。确认服务已启动后重试。`);
+      this.sessionsError.set(`无法连接 Keel 服务：${errorMessageOf(error)}。确认服务已启动后重试。`);
       this.sessionsLoading.set(false);
       return;
     }
-    setDeploymentCapabilities(capabilities);
-    // A live server: authenticated, or waiting for the login gate.
+    this.mode.set("http");
+    this.sessionsError.set(null);
+    if (session.authenticated) {
+      await this.finishSignIn(http, session, token);
+      return;
+    }
+    if (token !== this.detectToken) return;
+    this.sessionsLoading.set(false);
+    setDeploymentCapabilities(null);
+    this.identity.set(null);
+    resetPermissions();
+    if (session.bootstrapRequired) {
+      this.auth.set("bootstrap");
+      return;
+    }
+    this.auth.set("required");
+  }
+
+  /** Record the session as the app's identity while whoami is still loading
+   * (and behind the must-change gate). Permissions stay empty until whoami
+   * answers; the gate is fail-closed. */
+  private setSessionIdentity(session: AuthSessionView) {
+    this.identity.set({
+      tenantId: session.tenantId ?? "",
+      accountId: session.accountId ?? "",
+      username: session.username,
+      displayName: session.displayName,
+      kind: "human",
+      disabled: false,
+      isSuperAdmin: session.isSuperAdmin,
+      botId: session.botId,
+      permissions: {},
+    });
+  }
+
+  /** A successful login/password answer: route the must-change gate, or load
+   * the app (capabilities, whoami, the first session list). */
+  private async finishSignIn(http: KeelHttp, session: AuthSessionView, token?: number) {
+    if (token !== undefined && token !== this.detectToken) return;
     this.http = http;
     this.client = http;
     this.mode.set("http");
-    this.auth.set(status === "ok" ? "ok" : "required");
-    // The server answered: any earlier offline reason is history.
     this.sessionsError.set(null);
-    if (status === "auth") {
+    this.authError.set(null);
+    this.authDenied.set(false);
+    this.authRetryAfter.set(null);
+    this.setSessionIdentity(session);
+    if (session.mustChangePassword) {
+      this.auth.set("must-change");
       this.sessionsLoading.set(false);
+      resetPermissions();
       return;
     }
-    await this.refreshSessions();
-  }
-
-  /** Exchange the local passphrase for the server session (login gate). */
-  async login(password: string): Promise<boolean> {
-    const http = this.http ?? new KeelHttp("");
-    this.authError.set(null);
-    try {
-      await http.login(password);
-    } catch (error) {
-      // The server's 401 body is terse English; the gate speaks the app's
-      // language. Anything else (network, 5xx) is surfaced verbatim.
-      this.authError.set(
-        error instanceof KeelApiError && error.status === 401 ? "口令不正确" : messageOf(error),
-      );
-      return false;
-    }
-    this.http = http;
-    this.client = http;
+    this.authNotice.set(null);
+    this.auth.set("ok");
+    this.sessionsLoading.set(true);
     // The boot probe stopped at the login gate, so it never read
     // /v1/capabilities (401). Read it now, before the auth gate succeeds and
     // re-renders: an app-bearing tool result already in a session must mount
     // its View without a full page reload. A failed read keeps the previous
     // (fail-closed) snapshot and is recorded — it never pretends.
     const capabilities = await refreshDeploymentCapabilities(http);
+    if (token !== undefined && token !== this.detectToken) return;
     if (!capabilities.ok) {
       console.warn(`[keel] deployment capabilities unavailable after login: ${capabilities.error}`);
       this.flash({ tone: "warn", text: "登录成功，但未能读取服务能力，交互界面暂以文本显示。" });
     }
-    this.auth.set("ok");
-    this.sessionsLoading.set(true);
+    await this.loadIdentity();
+    if (this.auth() !== "ok") return; // whoami said the session had ended
+    if (token !== undefined && token !== this.detectToken) return;
     await this.refreshSessions();
+  }
+
+  /** Read whoami and record the effective permissions `can()` reads. A failed
+   * read clears them (fail closed: no action is offered from a guess). */
+  async loadIdentity(): Promise<void> {
+    const http = this.http;
+    if (!http) return;
+    try {
+      const me = await http.whoami();
+      this.identity.set(me);
+      setEffectivePermissions(me.permissions, me.isSuperAdmin);
+    } catch (error) {
+      this.identity.set(null);
+      resetPermissions();
+      if (!(error instanceof KeelApiError && error.status === 401)) {
+        console.warn(`[keel] whoami unavailable: ${errorMessageOf(error)}`);
+      }
+    }
+  }
+
+  /** Exchange username+password for the server session (login gate). */
+  async login(username: string, password: string): Promise<boolean> {
+    const http = this.http ?? new KeelHttp("");
+    this.installUnauthorized(http);
+    this.http = http;
+    this.client = http;
+    this.authError.set(null);
+    this.authDenied.set(false);
+    this.authNotice.set(null);
+    this.authRetryAfter.set(null);
+    try {
+      const session = await http.login(username.trim(), password);
+      await this.finishSignIn(http, session);
+      return true;
+    } catch (error) {
+      this.authError.set(loginErrorOf(error));
+      this.authDenied.set(error instanceof KeelApiError && error.status === 403 && error.code !== "csrf_failed");
+      if (error instanceof KeelApiError) {
+        if (error.status === 429) this.authRetryAfter.set(error.retryAfterSeconds ?? null);
+        if (error.code === "bootstrap_required") this.auth.set("bootstrap");
+      }
+      return false;
+    }
+  }
+
+  /** Redeem the one-time setup token and open the first super admin. The
+   * server creates the account in the must-change state but does not log in
+   * here, so the same credentials are exchanged immediately; the forced
+   * password change is the next screen. */
+  async bootstrap(token: string, username: string, password: string, displayName?: string): Promise<boolean> {
+    const http = this.http ?? new KeelHttp("");
+    this.installUnauthorized(http);
+    this.http = http;
+    this.client = http;
+    this.authError.set(null);
+    this.authDenied.set(false);
+    this.authNotice.set(null);
+    this.authRetryAfter.set(null);
+    try {
+      await http.bootstrap(token.trim(), username.trim(), password, displayName);
+    } catch (error) {
+      this.authError.set(bootstrapErrorOf(error));
+      this.authDenied.set(error instanceof KeelApiError && error.status === 403 && error.code !== "csrf_failed");
+      if (error instanceof KeelApiError && error.code === "bootstrap_complete") this.auth.set("required");
+      return false;
+    }
+    const signedIn = await this.login(username, password);
+    if (!signedIn) {
+      this.auth.set("required");
+      this.authNotice.set("管理员已创建，但自动登录没有成功。请用刚设置的密码登录。");
+      return true;
+    }
     return true;
+  }
+
+  /** The must-change gate's one write. The server revokes the old session and
+   * answers a fresh one, so the gate opens on the same response. A failure
+   * leaves the stage at must-change: the way forward is a new password. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
+    const http = this.http;
+    if (!http) {
+      this.authError.set("还没有连接到 Keel 服务，请刷新页面后重试。");
+      return false;
+    }
+    this.authError.set(null);
+    this.authDenied.set(false);
+    this.authRetryAfter.set(null);
+    try {
+      const session = await http.changePassword(currentPassword, newPassword);
+      await this.finishSignIn(http, session);
+      this.flash({ tone: "success", text: "密码已更新。" });
+      return true;
+    } catch (error) {
+      this.authError.set(passwordChangeErrorOf(error));
+      this.authDenied.set(error instanceof KeelApiError && error.status === 403 && error.code !== "csrf_failed");
+      if (error instanceof KeelApiError && error.status === 429) {
+        this.authRetryAfter.set(error.retryAfterSeconds ?? null);
+      }
+      return false;
+    }
+  }
+
+  /** Clear the server session and every local trace of it. The server owns the
+   * cookies; the local state is cleared even if the request fails. */
+  async logout(): Promise<void> {
+    const http = this.http;
+    try {
+      await http?.logout();
+    } catch {
+      /* the local gate still closes: cookies are the server's, not ours */
+    }
+    this.clearSessionState();
+    this.auth.set("required");
+    this.authNotice.set("已安全退出登录。");
+    // The logout response cleared the CSRF cookie with the session; a fresh
+    // anonymous token is what the next login POST needs.
+    try {
+      await http?.authSession();
+    } catch {
+      /* the login form will read it again */
+    }
+  }
+
+  /** Drop everything scoped to the signed-in account, so a login page never
+   * shows the previous account's rows behind it. */
+  private clearSessionState() {
+    this.closeStream();
+    this.sessions.set([]);
+    this.activeId.set(null);
+    this.conversation.set(null);
+    this.identity.set(null);
+    resetPermissions();
+    this.sessionsError.set(null);
+    this.sessionsLoading.set(false);
+    this.resetSettingsState();
+    this.http?.clearAuth();
+  }
+
+  /** Any 401 from a real endpoint is the session ending (expired, revoked,
+   * disabled). The app returns to the login gate with a reason instead of
+   * leaving a blank list behind. */
+  private installUnauthorized(http: KeelHttp) {
+    http.onUnauthorized((error) => {
+      if (error.status !== 401) return;
+      if (this.auth() === "unknown") return; // the boot probe owns that answer
+      this.clearSessionState();
+      this.auth.set("required");
+      this.authNotice.set("会话已过期，请重新登录。");
+    });
   }
 
   /**
@@ -1148,6 +1428,30 @@ class KeelStore {
 
   /** Test/host seam: answer the agent/team registry without a network. `null`
    * restores the app's own transport. */
+  /** Test/host seam: install the transport a harness answers in memory. The
+   * real `KeelHttp` parsing runs (headers, CSRF, error mapping); only `fetch`
+   * is stubbed. `null` restores a plain live client. */
+  useHTTPForTest(http: KeelHttp | null): void {
+    this.detectToken += 1; // the boot probe must not overwrite the harness state
+    this.probeClient = http;
+    this.http = http;
+    this.client = http ?? new KeelHttp("");
+    this.mode.set("http");
+    if (http) this.installUnauthorized(http);
+  }
+
+  /** Test only: forget the auth/identity state so a case starts at the gate. */
+  resetAuthForTest(): void {
+    this.detectToken += 1;
+    this.clearSessionState();
+    this.auth.set("unknown");
+    this.authError.set(null);
+    this.authDenied.set(false);
+    this.authNotice.set(null);
+    this.authRetryAfter.set(null);
+    this.mode.set("http");
+  }
+
   setAgentTeamTransport(client: AgentTeamApi | null): void {
     this.agentTeamClient = client;
   }

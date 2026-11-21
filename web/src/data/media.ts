@@ -15,6 +15,8 @@
 // Nothing here invents a capability: a response that does not say `image: true`
 // leaves the surface in its labelled demo mode, and video/tts stay out of this
 // client entirely.
+import { withCSRF } from "./http";
+
 export type MediaErrorKind = "notConfigured" | "aborted" | "http" | "network" | "invalidResponse";
 
 export class MediaGatewayError extends Error {
@@ -156,6 +158,7 @@ async function requestJson(
     response = await fetch(mediaUrl(path), {
       credentials: "same-origin",
       ...init,
+      headers: withCSRF(init.headers as Record<string, string> | undefined, init.method ?? "GET"),
       ...(signal ? { signal } : {}),
     });
   } catch (error) {
@@ -286,7 +289,7 @@ export async function synthesizeSpeech(
     response = await fetch(mediaUrl(SPEECH_PATH), {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: withCSRF({ "Content-Type": "application/json" }, "POST"),
       body: JSON.stringify({
         text: request.text,
         ...(request.voice ? { voice: request.voice } : {}),
@@ -325,6 +328,7 @@ export async function transcribeAudio(
     response = await fetch(mediaUrl(TRANSCRIBE_PATH), {
       method: "POST",
       credentials: "same-origin",
+      headers: withCSRF(undefined, "POST"),
       body: form,
       ...(options?.signal ? { signal: options.signal } : {}),
     });
