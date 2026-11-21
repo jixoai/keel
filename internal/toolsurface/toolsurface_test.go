@@ -554,7 +554,7 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
 	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{TenantID: tenant, SessionID: parent, RunID: "run-1"})
 	result, err := registry[toolsurface.Agent].Execute(ctx, "call-1",
-		json.RawMessage(`{"action":"spawn","task":"review","agentId":"agent_member","idempotencyKey":"k1"}`), nil)
+		json.RawMessage(`{"action":"spawn","task":"review","botId":"agent_member","idempotencyKey":"k1"}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,14 +566,14 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 	}
 	var spawned struct {
 		Task           string `json:"task"`
-		AgentID        string `json:"agentId"`
+		BotID          string `json:"botId"`
 		IdempotencyKey string `json:"idempotencyKey"`
 	}
 	if err := json.Unmarshal(backend.args, &spawned); err != nil {
 		t.Fatal(err)
 	}
-	if spawned.AgentID != "agent_member" {
-		t.Fatalf("agentId = %q, want the member binding", spawned.AgentID)
+	if spawned.BotID != "agent_member" {
+		t.Fatalf("botId = %q, want the member binding", spawned.BotID)
 	}
 	if spawned.IdempotencyKey != "k1" || spawned.Task != "review" {
 		t.Fatalf("spawn request = %+v", spawned)

@@ -720,13 +720,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 			// the provider cannot reach.
 			PublicBaseURL: os.Getenv("KEEL_PUBLIC_BASE_URL"),
 		},
-		// The execution binding reads the tenant's Agent/AgentTeam documents.
-		// Prompt-file references resolve against the process working directory
-		// (the deployment root the CLI and the web app share).
+		// The execution binding reads the tenant's Bot/TeamBot/Profile/Role graph.
+		// A run is always owned by a Bot; there is no deployment-prompt fallback
+		// for an unowned session (fail closed).
 		Bindings: servicehost.BindingsOptions{
 			Reader:   st,
 			TenantID: opts.TenantID,
-			Root:     deploymentRoot(),
 		},
 		External: servicehost.ExternalOptions{
 			LookupEnv: os.LookupEnv,
@@ -910,17 +909,6 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Access:        product.access,
 		AuditRelation: product.access.AuditRelation,
 		Partials:      agentapi.PartialSource(product.partials),
-		// Agent registry and agent teams: the store owns the documents, the HTTP
-		// surface owns the rules (change keel-agent-team-v1, P2/P3).
-		AgentTeams: st,
-		// A saved agent may only grant tools the current assembled surface
-		// actually serves. The lookup is resolved per request, so a plugin
-		// install/uninstall moves what a new save may reference without a restart
-		// (spec: 保存 Agent 时校验 toolId 存在且当前租户可用).
-		ToolExists: func(toolID string) bool {
-			_, ok := rt.Assembly().Tools().Get(toolID)
-			return ok
-		},
 		// The selection vocabulary is read from the CURRENT generation at call
 		// time: a settings write installs a new model service, and the input edge
 		// must accept exactly what that generation can run. A runtime without
@@ -1290,6 +1278,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Identity:        st,
 		Access:          accessBridge,
 		StartBotSession: newBotSessionStarter(st, starter),
+		// A Bot's Harness tool list is a whitelist of tools the deployment
+		// actually serves. The lookup is resolved per request, so a plugin
+		// install/uninstall moves what a new save may name without a restart.
+		ToolExists: func(toolID string) bool {
+			_, ok := rt.Assembly().Tools().Get(toolID)
+			return ok
+		},
 		// The member-task projection of a captain session: the child cards stay
 		// in their own ledgers and are read through parentTaskId. Read-only.
 		TeamTasks: taskLog,
@@ -1428,9 +1423,21 @@ func newBotSessionStarter(st *store.Store, starter *agentext.TurnStarter) func(c
 		}
 		var extras map[string]any
 		if request.TeamBotID != "" {
-			extras = map[string]any{"teamBotId": request.TeamBotID}
+			// A team start names the TeamBot in the input's selection fact: the
+			// attempt resolves the captain/mission/roster from it, and the session
+			// ownership below records the same team as the mission snapshot.
+			extras = map[string]any{
+				"selection": map[string]string{"teamBotId": request.TeamBotID},
+				"teamBotId": request.TeamBotID,
+			}
 			if request.Mission != "" {
 				extras["teamMission"] = request.Mission
+			}
+		} else {
+			// A bot invoke names the Bot in the selection fact so the attempt uses
+			// that Bot's Role/Harness prompt, tool whitelist and default model.
+			extras = map[string]any{
+				"selection": map[string]string{"botId": request.BotID},
 			}
 		}
 		result, err := starter.StartTurn(ctx, agentext.StartTurnRequest{
@@ -1493,9 +1500,9 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		agentext.FilePluginID: func() *agentext.Plugin {
 			return agentext.NewFilePlugin(agentext.FilePluginOptions{Service: opts.FileService})
 		},
-		agentext.ModelPluginID: func() *agentext.Plugin { return agentext.NewModelPlugin() },
-		agentext.AgentPluginID: func() *agentext.Plugin { return agentext.NewAgentPlugin() },
-		agentext.TeamPluginID:  func() *agentext.Plugin { return agentext.NewTeamPlugin() },
+		agentext.ModelPluginID:   func() *agentext.Plugin { return agentext.NewModelPlugin() },
+		agentext.BotPluginID:     func() *agentext.Plugin { return agentext.NewBotPlugin() },
+		agentext.TeamBotPluginID: func() *agentext.Plugin { return agentext.NewTeamBotPlugin() },
 		agentext.CreationPluginID: func() *agentext.Plugin {
 			return agentext.NewCreationPlugin(agentext.CreationOptions{
 				Manager:  func() *agentext.Manager { return pluginManager },

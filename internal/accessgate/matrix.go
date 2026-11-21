@@ -152,9 +152,6 @@ var rules = []Rule{
 	// The legacy tenant provisioning API accepts KEEL_ADMIN_KEY or a
 	// super-admin principal; the handler enforces it (A4.2b deletes the route).
 	route(http.MethodPost, "/v1/admin/tenants", ModeOperator, ""),
-	route(http.MethodGet, "/v1/admin/tenants/{id}/keys", ModeOperator, ""),
-	route(http.MethodPost, "/v1/admin/tenants/{id}/keys", ModeOperator, ""),
-	route(http.MethodDelete, "/v1/admin/tenants/{id}/keys/{keyId}", ModeOperator, ""),
 
 	// --- sessions ----------------------------------------------------------
 	route(http.MethodGet, "/v1/sessions", ModeHeldKey, access.KeySessionRead),
@@ -343,23 +340,6 @@ var rules = []Rule{
 	// --- application discovery and quota ------------------------------------
 	route(http.MethodGet, "/v1/capabilities", ModeKey, access.KeyAppRead),
 	route(http.MethodGet, "/v1/quota", ModeKey, access.KeyAppRead),
-
-	// --- legacy agent/team product surface (A4.2b deletes it) --------------
-	// It is kept working behind a held key so it is never zero-permission.
-	route(http.MethodGet, "/v1/agents", ModeHeldKey, access.KeyBotRead),
-	route(http.MethodPost, "/v1/agents", ModeHeldKey, access.KeyBotManage),
-	route(http.MethodGet, "/v1/agents/{id}", ModeHeldKey, access.KeyBotRead),
-	route(http.MethodPut, "/v1/agents/{id}", ModeHeldKey, access.KeyBotManage),
-	route(http.MethodDelete, "/v1/agents/{id}", ModeHeldKey, access.KeyBotManage),
-	route(http.MethodPost, "/v1/agents/{id}/archive", ModeHeldKey, access.KeyBotManage),
-	route(http.MethodGet, "/v1/teams", ModeHeldKey, access.KeyTeamBotRead),
-	route(http.MethodPost, "/v1/teams", ModeHeldKey, access.KeyTeamBotManage),
-	route(http.MethodGet, "/v1/teams/{id}", ModeHeldKey, access.KeyTeamBotRead),
-	route(http.MethodPut, "/v1/teams/{id}", ModeHeldKey, access.KeyTeamBotManage),
-	route(http.MethodDelete, "/v1/teams/{id}", ModeHeldKey, access.KeyTeamBotManage),
-	route(http.MethodPost, "/v1/teams/{id}/archive", ModeHeldKey, access.KeyTeamBotManage),
-	route(http.MethodPost, "/v1/teams/{id}/members", ModeHeldKey, access.KeyTeamBotManage),
-	route(http.MethodDelete, "/v1/teams/{id}/members/{agentId}", ModeHeldKey, access.KeyTeamBotManage),
 }
 
 // AuthRoutes returns the A2 auth patterns the host mounts outside the runtime

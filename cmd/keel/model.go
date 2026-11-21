@@ -2,8 +2,8 @@
 // declared command surface (provides.cli in
 // internal/pluginpkg/builtin/keel.model.yaml).
 //
-// It is a thin HTTP client of a running `keel serve`, exactly like `keel agent`
-// and `keel team`: GET /v1/providers and GET /v1/models are the same resolved
+// It is a thin HTTP client of a running `keel serve`, exactly like `keel bot`
+// and `keel team-bot`: GET /v1/providers and GET /v1/models are the same resolved
 // projections the settings page and the session picker read, so the three
 // surfaces cannot drift apart. Nothing here opens the database or re-implements
 // a resolution rule.
@@ -157,7 +157,7 @@ func runModelProviders(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body providerListBody
-	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/providers", nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -186,7 +186,7 @@ func runModelProviderList(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body providerListBody
-	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/providers", nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if wanted := strings.TrimSpace(*family); wanted != "" {
@@ -228,7 +228,7 @@ func runModelProviderShow(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body providerListBody
-	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/providers", nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	for _, view := range body.Providers {
@@ -256,7 +256,7 @@ func runModelList(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body modelListBody
-	if err := client.do(http.MethodGet, "/v1/models", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/models", nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -285,7 +285,7 @@ func runModelShow(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body modelListBody
-	if err := client.do(http.MethodGet, "/v1/models", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/models", nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	matches := matchModels(body.Models, positional[0])
@@ -384,7 +384,7 @@ func runModelCatalog(args []string, stdout, stderr io.Writer) int {
 	}
 	if *refresh {
 		var probe modelcfg.ProviderProbe
-		if err := client.do(http.MethodPost, "/v1/providers/"+url.PathEscape(providerID)+"/test", "", nil, &probe); err != nil {
+		if err := client.do(http.MethodPost, "/v1/providers/"+url.PathEscape(providerID)+"/test", nil, &probe); err != nil {
 			return reportError(stderr, err)
 		}
 		if !probe.OK {
@@ -413,7 +413,7 @@ func runModelCatalog(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var providers providerListBody
-	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &providers); err != nil {
+	if err := client.do(http.MethodGet, "/v1/providers", nil, &providers); err != nil {
 		return reportError(stderr, err)
 	}
 	answer := catalogBody{ProviderID: providerID, Source: "resolved", Models: make([]modelcfg.ModelView, 0)}
@@ -942,7 +942,7 @@ func runModelProviderRemove(args []string, stdout, stderr io.Writer) int {
 // provider id (the built-in catalog case).
 func providerStillServed(client *cliClient, providerID string) (bool, error) {
 	var body providerListBody
-	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/providers", nil, &body); err != nil {
 		return false, err
 	}
 	for _, view := range body.Providers {
@@ -977,7 +977,7 @@ func runModelProviderTest(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var probe modelcfg.ProviderProbe
-	if err := client.do(http.MethodPost, "/v1/providers/"+url.PathEscape(providerID)+"/test", "", nil, &probe); err != nil {
+	if err := client.do(http.MethodPost, "/v1/providers/"+url.PathEscape(providerID)+"/test", nil, &probe); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -1043,7 +1043,7 @@ func printProviderProbe(w io.Writer, probe modelcfg.ProviderProbe) {
 // of a read-modify-write.
 func readSettingsDocument(client *cliClient) (*settingsDocument, int64, error) {
 	var body settingsModelsResponse
-	if err := client.do(http.MethodGet, "/v1/settings/models", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/settings/models", nil, &body); err != nil {
 		return nil, 0, err
 	}
 	document, err := parseSettingsDocument(body.Document)
@@ -1075,7 +1075,7 @@ func writeSettingsDocument(client *cliClient, document *settingsDocument, revisi
 		return settingsModelsWriteResponse{}, err
 	}
 	var write settingsModelsWriteResponse
-	if err := client.do(http.MethodPut, "/v1/settings/models", "", json.RawMessage(body), &write); err != nil {
+	if err := client.do(http.MethodPut, "/v1/settings/models", json.RawMessage(body), &write); err != nil {
 		return settingsModelsWriteResponse{}, err
 	}
 	return write, nil

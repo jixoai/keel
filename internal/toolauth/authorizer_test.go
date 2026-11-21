@@ -235,7 +235,7 @@ func TestAgentSpawnTargetsTheNamedOrOwnBot(t *testing.T) {
 		fake := &fakeAccess{principal: access.Principal{TenantID: testTenant, AccountID: testAccount, BotID: "captain-1"}}
 		auth := newTestAuthorizer(t, fake)
 		if err := auth.AuthorizeToolCall(context.Background(), testScope,
-			call("agent", `{"action":"spawn","task":"x","agentId":"member-1"}`)); err != nil {
+			call("agent", `{"action":"spawn","task":"x","botId":"member-1"}`)); err != nil {
 			t.Fatal(err)
 		}
 		if len(fake.authorized) != 1 || fake.authorized[0].Key != access.KeyBotInvoke ||
@@ -289,31 +289,31 @@ func TestAgentSelectionAgentIDIsATarget(t *testing.T) {
 	}{
 		{
 			name:       "spawn selection",
-			call:       call("agent", `{"action":"spawn","task":"x","selection":{"agentId":"member-1"}}`),
+			call:       call("agent", `{"action":"spawn","task":"x","selection":{"botId":"member-1"}}`),
 			wantBots:   []string{"member-1"},
 			wantAudits: []string{"member-1"},
 		},
 		{
 			name:       "fork selection",
-			call:       call("agent", `{"action":"fork","eventSeq":1,"task":"x","selection":{"agentId":"member-1"}}`),
+			call:       call("agent", `{"action":"fork","eventSeq":1,"task":"x","selection":{"botId":"member-1"}}`),
 			wantBots:   []string{"member-1"},
 			wantAudits: []string{"member-1"},
 		},
 		{
 			name:       "resume selection plus child owner",
-			call:       call("agent", `{"action":"resume","sessionId":"`+child.String()+`","selection":{"agentId":"member-1"}}`),
+			call:       call("agent", `{"action":"resume","sessionId":"`+child.String()+`","selection":{"botId":"member-1"}}`),
 			wantBots:   []string{"member-1", "captain-1"},
 			wantAudits: []string{"member-1", "captain-1"},
 		},
 		{
 			name:       "top level and selection union",
-			call:       call("agent", `{"action":"spawn","task":"x","agentId":"other-1","selection":{"agentId":"member-1"}}`),
+			call:       call("agent", `{"action":"spawn","task":"x","botId":"other-1","selection":{"botId":"member-1"}}`),
 			wantBots:   []string{"other-1", "member-1"},
 			wantAudits: []string{"other-1", "member-1"},
 		},
 		{
 			name:       "team selection decides its own captain",
-			call:       call("agent", `{"action":"spawn","task":"x","selection":{"teamId":"team-1","agentId":"member-1"}}`),
+			call:       call("agent", `{"action":"spawn","task":"x","selection":{"teamBotId":"team-1","botId":"member-1"}}`),
 			wantBots:   []string{"captain-1"},
 			wantAudits: []string{"captain-1"},
 		},
@@ -361,7 +361,7 @@ func TestAgentSelectionTargetDenialStopsBeforeAudit(t *testing.T) {
 	}
 	auth := newTestAuthorizer(t, fake)
 	refusal := wantAccessError(t, auth.AuthorizeToolCall(context.Background(), testScope,
-		call("agent", `{"action":"fork","eventSeq":1,"task":"x","selection":{"agentId":"member-1"}}`)), agent.ToolAccessPermissionDenied)
+		call("agent", `{"action":"fork","eventSeq":1,"task":"x","selection":{"botId":"member-1"}}`)), agent.ToolAccessPermissionDenied)
 	if refusal.Key != access.KeyBotInvoke || refusal.Reason != string(access.ReasonMissingRelation) {
 		t.Fatalf("refusal = %+v", refusal)
 	}
@@ -420,7 +420,7 @@ func TestAgentSpawnEngineDenialStopsBeforeAudit(t *testing.T) {
 	}
 	auth := newTestAuthorizer(t, fake)
 	refusal := wantAccessError(t, auth.AuthorizeToolCall(context.Background(), testScope,
-		call("agent", `{"action":"spawn","task":"x","agentId":"member-1"}`)), agent.ToolAccessPermissionDenied)
+		call("agent", `{"action":"spawn","task":"x","botId":"member-1"}`)), agent.ToolAccessPermissionDenied)
 	if refusal.Key != access.KeyBotInvoke || refusal.Reason != string(access.ReasonMissingRelation) {
 		t.Fatalf("refusal = %+v", refusal)
 	}
@@ -436,7 +436,7 @@ func TestInvokeAuditFailureFailsClosed(t *testing.T) {
 	}
 	auth := newTestAuthorizer(t, fake)
 	refusal := wantAccessError(t, auth.AuthorizeToolCall(context.Background(), testScope,
-		call("agent", `{"action":"spawn","task":"x","agentId":"member-1"}`)), agent.ToolAccessUnavailable)
+		call("agent", `{"action":"spawn","task":"x","botId":"member-1"}`)), agent.ToolAccessUnavailable)
 	if refusal.Reason != "invoke_audit_failed" {
 		t.Fatalf("reason = %q", refusal.Reason)
 	}
@@ -446,7 +446,7 @@ func TestUnknownAgentActionStillChecksItsTarget(t *testing.T) {
 	fake := &fakeAccess{principal: access.Principal{TenantID: testTenant, AccountID: testAccount, BotID: "captain-1"}}
 	auth := newTestAuthorizer(t, fake)
 	if err := auth.AuthorizeToolCall(context.Background(), testScope,
-		call("agent", `{"action":"bogus","agentId":"member-1"}`)); err != nil {
+		call("agent", `{"action":"bogus","botId":"member-1"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.authorized) != 1 || fake.authorized[0].Key != access.KeyBotInvoke || fake.authorized[0].Resource.ID != "member-1" {

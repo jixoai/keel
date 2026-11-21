@@ -69,6 +69,33 @@ func validateHarnessPermissions(permissions []string) error {
 	return nil
 }
 
+// validateHarnessTools refuses a tool id the deployment does not serve. The
+// Harness is an effective whitelist (registry ∩ whitelist), so an entry the
+// registry cannot honour would silently disappear at run time; the save is the
+// honest place to name it. A deployment without the seam keeps shape-only
+// validation (the run path still logs the unavailable entry).
+func (s *Server) validateHarnessTools(tools []string) error {
+	if s.cfg.ToolExists == nil {
+		return nil
+	}
+	fields := make([]botteam.FieldError, 0)
+	for index, raw := range tools {
+		id := strings.TrimSpace(raw)
+		if id == "" || s.cfg.ToolExists(id) {
+			continue
+		}
+		fields = append(fields, botteam.FieldError{
+			Field:   fmt.Sprintf("harness.tools[%d]", index),
+			Code:    botteam.CodeMissingTool,
+			Message: fmt.Sprintf("tool %q is not served by this deployment", id),
+		})
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return &botteam.ValidationError{Errors: fields}
+}
+
 func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
 	if !s.identityReady(w) {
 		return
@@ -226,6 +253,10 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, err)
 		return
 	}
+	if err := s.validateHarnessTools(domain.Harness.Tools); err != nil {
+		writeValidationError(w, err)
+		return
+	}
 	if err := validateHarnessPermissions(domain.Harness.Context.Permissions); err != nil {
 		writeIdentityError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -337,6 +368,10 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(record.DefaultModel, &domain.DefaultModel)
 	_ = json.Unmarshal(record.Harness, &domain.Harness)
 	if err := domain.Validate(); err != nil {
+		writeValidationError(w, err)
+		return
+	}
+	if err := s.validateHarnessTools(domain.Harness.Tools); err != nil {
 		writeValidationError(w, err)
 		return
 	}

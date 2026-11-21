@@ -67,14 +67,11 @@ var rlsTenantTables = []string{
 	"runs",
 	"usage_ledger",
 	"tenant_usage",
-	"api_keys", // the auth lookup runs with app.bypass_rls='on' (see LookupAPIKey)
 	"mcp_oauth_pending",
 	"mcp_oauth_credentials",
 	"model_settings",
 	"model_settings_history",
 	"tenant_secrets",
-	"agents",
-	"agent_teams",
 	"task_cards",
 	"task_events",
 	"bash_jobs",
@@ -89,8 +86,7 @@ var rlsTenantTables = []string{
 	"trigger_state",
 	// bot-identity-access (A1). Every new identity table is tenant-scoped.
 	// bot_api_keys and auth_sessions also carry a global lookup index (key_hash /
-	// session_id); their pre-tenant reads use the operator bypass marker, the
-	// same contract api_keys already follows.
+	// session_id); their pre-tenant reads use the operator bypass marker.
 	"accounts",
 	"roles",
 	"profiles",

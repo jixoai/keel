@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -36,134 +34,6 @@ func testStore(t *testing.T) *store.Store {
 	return st
 }
 
-// TestAdminTenantCreatePrintsKeyOnce pins the CLI contract: the plaintext key
-// appears exactly once on stdout, only its hash reaches the database, and the
-// printed key actually resolves back to the tenant.
-func TestAdminTenantCreatePrintsKeyOnce(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("KEEL_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("KEEL_TEST_DSN not set")
-	}
-	// adminStore reads KEEL_DSN; point it at the test database for the duration.
-	t.Setenv("KEEL_DSN", dsn)
-	var stdout, stderr strings.Builder
-	code := runAdminCmd([]string{"tenant", "create", "--name", "cli-tenant", "--label", "cli"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit %d: %s", code, stderr.String())
-	}
-	out := stdout.String()
-	// The key line is labelled and in the documented format.
-	const marker = "API KEY (shown once, store it now):\n"
-	index := strings.Index(out, marker)
-	if index < 0 {
-		t.Fatalf("no key section in output:\n%s", out)
-	}
-	rest := out[index+len(marker):]
-	keyLine, _, found := strings.Cut(rest, "\n")
-	if !found {
-		t.Fatalf("key line is not terminated:\n%s", out)
-	}
-	key := strings.TrimSpace(keyLine)
-	if !auth.LooksLikeKey(key) {
-		t.Fatalf("printed credential %q is not a key", key)
-	}
-	// The plaintext appears exactly once in the whole output.
-	if strings.Count(out, key) != 1 {
-		t.Fatalf("the key appears %d times in the output", strings.Count(out, key))
-	}
-	// Nothing key-shaped beyond the one credential (the prefix is also printed).
-	if strings.Count(out, "keel_tenant_") != 2 {
-		t.Fatalf("unexpected key-shaped output:\n%s", out)
-	}
-	// The DSN is never echoed.
-	if strings.Contains(out, dsn) || strings.Contains(stderr.String(), dsn) {
-		t.Fatal("the command printed the DSN")
-	}
-
-	// The key resolves to the printed tenant.
-	st, err := store.Open(context.Background(), store.Config{DSN: dsn})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	tenantID := uuid.MustParse(strings.TrimSpace(strings.SplitN(out, "\n", 2)[0][len("tenant:  "):]))
-	resolved, err := st.LookupAPIKey(context.Background(), auth.HashKey(key))
-	if err != nil {
-		t.Fatalf("the printed key does not resolve: %v", err)
-	}
-	if resolved.TenantID != tenantID {
-		t.Fatalf("key resolves to %s, want %s", resolved.TenantID, tenantID)
-	}
-	// The database holds the hash, never the plaintext.
-	var stored []byte
-	if err := st.Pool().QueryRow(context.Background(),
-		`SELECT key_hash FROM api_keys WHERE tenant_id = $1`, tenantID).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256([]byte(key))
-	if string(stored) != string(sum[:]) {
-		t.Fatal("the stored hash is not the hash of the printed key")
-	}
-}
-
-func TestAdminKeyCreateAndRevoke(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("KEEL_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("KEEL_TEST_DSN not set")
-	}
-	t.Setenv("KEEL_DSN", dsn)
-	var stdout, stderr strings.Builder
-	if code := runAdminCmd([]string{"tenant", "create", "--name", "cli-keys", "--no-key"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("create tenant: %d %s", code, stderr.String())
-	}
-	tenantID := strings.TrimSpace(strings.SplitN(stdout.String(), "\n", 2)[0][len("tenant:  "):])
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runAdminCmd([]string{"key", "create", "--tenant", tenantID, "--role", "admin"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("create key: %d %s", code, stderr.String())
-	}
-	out := stdout.String()
-	keyIndex := strings.Index(out, "API KEY (shown once, store it now):\n")
-	if keyIndex < 0 {
-		t.Fatalf("no key in output:\n%s", out)
-	}
-	key := strings.TrimSpace(strings.SplitN(out[keyIndex+len("API KEY (shown once, store it now):\n"):], "\n", 2)[0])
-	if !strings.HasPrefix(key, auth.KeyScheme+auth.RoleAdmin+"_") {
-		t.Fatalf("admin key %q has the wrong role prefix", key)
-	}
-	keyIDIndex := strings.Index(out, "key id:  ")
-	if keyIDIndex < 0 {
-		t.Fatalf("no key id in output:\n%s", out)
-	}
-	keyID := strings.TrimSpace(strings.SplitN(out[keyIDIndex+len("key id:  "):], "\n", 2)[0])
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runAdminCmd([]string{"key", "revoke", "--tenant", tenantID, "--key", keyID}, &stdout, &stderr); code != 0 {
-		t.Fatalf("revoke: %d %s", code, stderr.String())
-	}
-	st, err := store.Open(context.Background(), store.Config{DSN: dsn})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if _, err := st.LookupAPIKey(context.Background(), auth.HashKey(key)); err == nil {
-		t.Fatal("a revoked key still resolves")
-	}
-	// Revoking a key the tenant does not own is a non-zero exit, not a silent OK.
-	stderr.Reset()
-	if code := runAdminCmd([]string{"key", "revoke", "--tenant", uuid.NewString(), "--key", keyID}, io_discard{}, &stderr); code == 0 {
-		t.Fatal("revoking under the wrong tenant succeeded")
-	}
-}
-
-// io_discard is an io.Writer that drops everything (the CLI must not need a
-// buffer to be exercised).
-type io_discard struct{}
-
-func (io_discard) Write(p []byte) (int, error) { return len(p), nil }
-
 func TestAdminUsageAndQuotaCommands(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("KEEL_TEST_DSN"))
 	if dsn == "" {
@@ -171,7 +41,7 @@ func TestAdminUsageAndQuotaCommands(t *testing.T) {
 	}
 	t.Setenv("KEEL_DSN", dsn)
 	var stdout, stderr strings.Builder
-	if code := runAdminCmd([]string{"tenant", "create", "--name", "cli-usage", "--no-key"}, &stdout, &stderr); code != 0 {
+	if code := runAdminCmd([]string{"tenant", "create", "--name", "cli-usage"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("create: %d %s", code, stderr.String())
 	}
 	tenantID := strings.TrimSpace(strings.SplitN(stdout.String(), "\n", 2)[0][len("tenant:  "):])

@@ -154,27 +154,35 @@ func (r *Runner) systemPrompt() string {
 	return ""
 }
 
-// systemPromptFor returns the prompt of this attempt: the binding's system
-// prompt when it contributes one, otherwise the host-assembled deployment
-// prompt. The host keeps rendering its dynamic surface (MCP section, plugin
-// sections, skills index) around the preamble, so selecting an Agent never
-// silently drops those.
+// systemPromptFor returns the prompt of this attempt: the Bot's system prompt
+// when it contributes one, otherwise the host-assembled deployment prompt. The
+// host keeps rendering its dynamic surface (MCP section, plugin sections, skills
+// index) around the preamble, so selecting a Bot never silently drops those.
 func (r *Runner) systemPromptFor(surface RunSurface) string {
 	prompt := strings.TrimSpace(surface.Prompt)
+	// The team context (mission + roster) travels with the binding: a captain
+	// with no declared prompt still needs both, and a captain with a prompt
+	// needs them appended.
+	sections := make([]string, 0, 2)
+	if mission := renderTeamMission(surface.Mission); mission != "" {
+		sections = append(sections, mission)
+	}
+	if roster := renderTeamMembers(surface.Members); roster != "" {
+		sections = append(sections, roster)
+	}
+	teamContext := strings.Join(sections, "\n\n")
 	if prompt == "" {
-		// A team captain with no declared prompt still needs the roster: it is
-		// the only way delegation can name a member.
-		if roster := renderTeamMembers(surface.Members); roster != "" {
-			prompt = roster
+		if teamContext != "" {
+			prompt = teamContext
 			if renderer, ok := r.Assembly.(PreambleRenderer); ok {
 				return renderer.RenderSystemPrompt(prompt)
 			}
-			return r.systemPrompt() + "\n\n" + roster
+			return r.systemPrompt() + "\n\n" + teamContext
 		}
 		return r.systemPrompt()
 	}
-	if roster := renderTeamMembers(surface.Members); roster != "" {
-		prompt += "\n\n" + roster
+	if teamContext != "" {
+		prompt += "\n\n" + teamContext
 	}
 	if renderer, ok := r.Assembly.(PreambleRenderer); ok {
 		return renderer.RenderSystemPrompt(prompt)
@@ -185,12 +193,14 @@ func (r *Runner) systemPromptFor(surface RunSurface) string {
 	// sections is bad, but refusing the attempt is worse — so the degradation is
 	// recorded instead of being silent.
 	r.Logger.Warn("host cannot render dynamic prompt sections; the bound prompt is sent alone",
-		"agent", surface.AgentID)
+		"bot", surface.AgentID)
 	return prompt
 }
 
 // toolsForRun returns the attempt's tool registry: the host registry filtered by
-// the binding's grants, or the whole registry when the binding declares none.
+// the binding's Harness whitelist, or the whole registry for a run with no
+// binding (the operator/manager case). A non-nil empty map means the Harness
+// grants no tool and yields an empty registry.
 // sessionID is diagnostic context only (the team auto-keep warning names it).
 func (r *Runner) toolsForRun(surface RunSurface, sessionID string) (*agenttool.ToolRegistry, error) {
 	registry := r.registry()
@@ -209,7 +219,7 @@ func (r *Runner) toolsForRun(surface RunSurface, sessionID string) (*agenttool.T
 	// unavailable, it never blocks the run.
 	for _, name := range names {
 		if _, ok := registry.Get(name); !ok {
-			r.Logger.Warn("agent binding grants an unavailable tool", "tool", name, "agent", surface.AgentID)
+			r.Logger.Warn("bot harness names an unavailable tool", "tool", name, "bot", surface.AgentID)
 		}
 	}
 	if surface.TeamMode {
@@ -333,10 +343,11 @@ type RunSummary struct {
 	// attempt that injected no tools records the empty-manifest digest.
 	ToolManifestHash string `json:"toolManifestHash,omitempty"`
 	// AgentID, TeamID, TeamRevision, TeamHash and PromptHash are the execution
-	// binding the attempt froze (RUNTIME-PLAN §b): which Agent answered, which
-	// AgentTeam it came from, that team's stored revision and content hash, and
-	// the digest of the system prompt the attempt used. Empty means "the
-	// deployment default answered" (the pre-binding behaviour).
+	// binding the attempt froze: which Bot answered, which TeamBot it came from,
+	// that TeamBot's stored revision and content hash, and the digest of the
+	// system prompt the attempt used. The JSON names keep their historical
+	// spelling; the values are Bot/TeamBot ids (A4.2b3a). Empty means "no Bot
+	// answered" (a manager/operator run).
 	AgentID      string `json:"agentId,omitempty"`
 	TeamID       string `json:"teamId,omitempty"`
 	TeamRevision uint64 `json:"teamRevision,omitempty"`

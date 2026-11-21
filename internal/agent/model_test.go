@@ -291,14 +291,14 @@ func TestRunSelectionReadsOnlyTheSelectionField(t *testing.T) {
 // binding without a second user message, while a later input still wins.
 func TestResumeSelectionOverridesTheChildBinding(t *testing.T) {
 	events := []store.Event{
-		{Seq: 1, Kind: store.EventUserMessage, Payload: json.RawMessage(`{"text":"a","selection":{"agentId":"parent_agent"}}`)},
-		{Seq: 2, Kind: store.EventResumeAttempt, Payload: json.RawMessage(`{"sessionId":"s","selection":{"agentId":"child_override"}}`)},
+		{Seq: 1, Kind: store.EventUserMessage, Payload: json.RawMessage(`{"text":"a","selection":{"botId":"parent_agent"}}`)},
+		{Seq: 2, Kind: store.EventResumeAttempt, Payload: json.RawMessage(`{"sessionId":"s","selection":{"botId":"child_override"}}`)},
 	}
 	if got := string(runSelection(events)); !strings.Contains(got, "child_override") {
 		t.Fatalf("resume selection = %q", got)
 	}
 	events = append(events, store.Event{Seq: 3, Kind: store.EventUserMessage,
-		Payload: json.RawMessage(`{"text":"b","selection":{"agentId":"later_input"}}`)})
+		Payload: json.RawMessage(`{"text":"b","selection":{"botId":"later_input"}}`)})
 	if got := string(runSelection(events)); !strings.Contains(got, "later_input") {
 		t.Fatalf("later input selection = %q", got)
 	}

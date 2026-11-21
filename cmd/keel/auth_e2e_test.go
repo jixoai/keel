@@ -458,19 +458,15 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 			t.Fatalf("%s: %d", request.name, status)
 		}
 	}
-	minted, err := auth.MintKey(auth.RoleTenant)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := env.st.CreateAPIKey(context.Background(), env.tenantID, uuid.New(), minted.Hash, minted.Prefix, minted.Role, "legacy"); err != nil {
-		t.Fatal(err)
-	}
+	// The retired tenant key shape is refused by format alone: no api_keys row
+	// exists anymore, and the middleware rejects the prefix before a lookup.
+	legacyKey := auth.KeyScheme + auth.RoleTenant + "_retired_key_material"
 	if status, _, _ := env.do(env.newClient(), http.MethodGet, "/v1/sessions", nil,
-		map[string]string{"Authorization": "Bearer " + minted.Plaintext}); status != http.StatusUnauthorized {
+		map[string]string{"Authorization": "Bearer " + legacyKey}); status != http.StatusUnauthorized {
 		t.Fatalf("legacy api key bearer: %d", status)
 	}
 	if status, _, _ := env.do(env.newClient(), http.MethodGet, "/v1/sessions", nil,
-		map[string]string{"X-API-Key": minted.Plaintext}); status != http.StatusUnauthorized {
+		map[string]string{"X-API-Key": legacyKey}); status != http.StatusUnauthorized {
 		t.Fatalf("legacy api key header: %d", status)
 	}
 

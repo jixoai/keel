@@ -189,16 +189,15 @@ type Config struct {
 	// settles as failed in the kernel policy table; the product snapshot
 	// remembers the cancellation).
 	RunStatus func(tenantID, sessionID uuid.UUID) (string, bool)
-	// Provisioner is the tenant provisioning surface (POST /v1/admin/tenants
-	// and the per-tenant key routes). Nil answers 501: a deployment without it
-	// has no operator path, which is a configuration choice, not a bug.
+	// Provisioner is the tenant provisioning surface (POST /v1/admin/tenants).
+	// Nil answers 501: a deployment without it has no operator path, which is a
+	// configuration choice, not a bug.
 	Provisioner Provisioner
 	// Quota reports the tenant's limits and current usage (GET /v1/quota). Nil
 	// answers 501.
 	Quota QuotaReporter
 	// AdminKey decides whether a request carries the deployment's operator key.
-	// The provisioner routes accept it in addition to an api_keys admin
-	// credential. Nil means "KEEL_ADMIN_KEY only".
+	// Nil means "KEEL_ADMIN_KEY only".
 	AdminKey func(r *http.Request) bool
 	// SubagentWaitDefault bounds the synchronous wait of a sub-agent spawn over
 	// HTTP when the request does not set a budget (default 60s).
@@ -260,8 +259,14 @@ type Config struct {
 	// The serve layer owns the turn starter and the ownership write. Nil answers
 	// 501 on the invoke/start routes.
 	StartBotSession func(ctx context.Context, request BotSessionRequest) (BotSessionResult, error)
-	Logger          *slog.Logger
-	MaxBody         int64
+	// ToolExists answers whether a tool id is available to this tenant, at the
+	// moment a Bot's Harness is saved. Nil skips the existence check and keeps
+	// the shape rules (a deployment without a live tool surface must not refuse
+	// every save). The host binds it to the assembled plugin/tool surface, so an
+	// uninstalled plugin stops validating new saves without a restart.
+	ToolExists func(toolID string) bool
+	Logger     *slog.Logger
+	MaxBody    int64
 }
 
 // Server is the AgentAPI HTTP handler. Mount it on the runtime's mux under

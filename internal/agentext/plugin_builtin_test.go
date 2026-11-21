@@ -32,8 +32,8 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 		{NotifyPluginID, NewNotifyPlugin(NotifyOptions{})},
 		{FilePluginID, NewFilePlugin(FilePluginOptions{})},
 		{ModelPluginID, NewModelPlugin()},
-		{AgentPluginID, NewAgentPlugin()},
-		{TeamPluginID, NewTeamPlugin()},
+		{BotPluginID, NewBotPlugin()},
+		{TeamBotPluginID, NewTeamBotPlugin()},
 	}
 	if len(manifests) != len(pairs) {
 		t.Fatalf("embedded manifests = %d, registered builtins = %d", len(manifests), len(pairs))
@@ -78,14 +78,13 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 	}
 }
 
-// TestCapabilityPluginsDeclareTheirCLI is the declaration side of the
-// agent-team plugin contract (change keel-agent-team-v1, plugin-capabilities):
-// the three management surfaces are plugins, and each one declares its full
-// CLI capability tree. The expected paths below are the commands that really
-// exist (`cmd/keel/model.go`, `cmd/keel/agentteam.go`); a manifest that loses,
-// renames or invents a command fails here, and the command-side tests
-// (cmd/keel/model_test.go, cmd/keel/agentteam_test.go) exercise each declared
-// path against a stub server, so neither side can drift alone.
+// TestCapabilityPluginsDeclareTheirCLI is the declaration side of the plugin
+// contract: the three management surfaces are plugins, and each one declares
+// its full CLI capability tree. The expected paths below are the commands that
+// really exist (`cmd/keel/model.go`, `cmd/keel/bot.go`, `cmd/keel/team_bot.go`);
+// a manifest that loses, renames or invents a command fails here, and the
+// command-side tests exercise each declared path against a stub server, so
+// neither side can drift alone.
 func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 	want := map[string][]string{
 		ModelPluginID: {
@@ -100,27 +99,25 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 			"model provider test",
 			"model catalog",
 		},
-		AgentPluginID: {
-			"agent list",
-			"agent show",
-			"agent create",
-			"agent update",
-			"agent delete",
-			"agent archive",
-			"agent start",
-			"agent stop",
+		BotPluginID: {
+			"bot list",
+			"bot show",
+			"bot create",
+			"bot update",
+			"bot archive",
+			"bot start",
+			"bot keys",
+			"bot key-create",
+			"bot key-revoke",
 		},
-		TeamPluginID: {
-			"team list",
-			"team show",
-			"team create",
-			"team update",
-			"team delete",
-			"team archive",
-			"team member add",
-			"team member remove",
-			"team save",
-			"team start",
+		TeamBotPluginID: {
+			"team-bot list",
+			"team-bot show",
+			"team-bot create",
+			"team-bot update",
+			"team-bot archive",
+			"team-bot roster",
+			"team-bot start",
 		},
 	}
 	for id, paths := range want {
@@ -143,32 +140,6 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 		}
 		if !equalStrings(sortedStrings(got), sortedStrings(paths)) {
 			t.Fatalf("%s declares %v, want %v", id, got, paths)
-		}
-	}
-
-	// The captain's team CLI is the one caller the server enforces (403 when the
-	// team switch is off): the declaration must carry it exactly where the
-	// enforcement lives.
-	team, _ := builtin.Manifest(TeamPluginID)
-	byKey := map[string]pluginpkg.CLICapability{}
-	for _, capability := range team.Provides.CLI {
-		byKey[capability.Key()] = capability
-	}
-	for _, key := range []string{"team member add", "team member remove"} {
-		capability := byKey[key]
-		if !capability.CallableByCaller(pluginpkg.CallerTeamCaptain) {
-			t.Fatalf("%s must be callable by team_captain", key)
-		}
-	}
-	if byKey["team member remove"].Danger != pluginpkg.DangerDestructive {
-		t.Fatalf("team member remove danger = %s, want destructive", byKey["team member remove"].Danger)
-	}
-	if byKey["team create"].Danger != pluginpkg.DangerWrite || byKey["team delete"].Danger != pluginpkg.DangerDestructive {
-		t.Fatalf("team create/delete danger classes are wrong")
-	}
-	for _, key := range []string{"team list", "team show"} {
-		if !byKey[key].Idempotent {
-			t.Fatalf("%s must be declared idempotent", key)
 		}
 	}
 

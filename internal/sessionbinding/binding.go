@@ -1,17 +1,18 @@
 // Package sessionbinding projects the execution binding of a committed
-// user.message onto sessions.bound_agent_id / bound_team_id (change
-// keel-agent-team-v1, P3 session reference protection).
+// user.message onto the session's ownership columns (sessions.bot_id /
+// team_bot_id; change keel-bot-identity-access, A4.2b3a).
 //
-// The event ledger is the only truth: the projection exists so the registry's
-// delete/archive guard can answer "is a live session bound to this row?"
-// without scanning every session's events. It is never read to run an attempt.
+// A Session belongs to exactly one Bot: ownership is written at creation and a
+// selection fact can never move it. The projection therefore verifies the
+// selection against the ownership (a child session may name a member Bot for
+// its prompt/tools, which is a surface-only binding) instead of overwriting it.
+// The event ledger stays the truth; the columns are the durable fact every
+// route and the runtime principal read.
 //
 // The projection is a single choke point on purpose. Every product path that
 // commits a user.message — POST /input, /retry, the edge event door, the MCP
 // app bridge, triggers, sub-agent spawn and manual fire — calls Record with the
-// payload it just committed and the receipt seq. A path that bypasses this
-// package would leave a live child session invisible to the guard, which is
-// exactly the defect this package prevents.
+// payload it just committed and the receipt seq.
 package sessionbinding
 
 import (
@@ -36,8 +37,9 @@ type Recorder struct {
 func New(st *store.Store) *Recorder { return &Recorder{Store: st} }
 
 // Record projects the selection fact of one committed user.message payload.
-// seq is the committed event seq; deduped marks a replay whose payload must be
-// read back from the ledger instead of trusted from the caller.
+// seq is the committed event seq (diagnostic: the projection is not a
+// newest-wins index anymore); deduped marks a replay whose payload must be read
+// back from the ledger instead of trusted from the caller.
 func (r *Recorder) Record(ctx context.Context, tenantID, sessionID uuid.UUID,
 	payload json.RawMessage, seq int64, deduped bool) error {
 	if r == nil || r.Store == nil {
@@ -72,12 +74,12 @@ func (r *Recorder) Record(ctx context.Context, tenantID, sessionID uuid.UUID,
 	if err != nil {
 		return fmt.Errorf("project session binding: %w", err)
 	}
-	agentID, teamID := parsed.AgentID, parsed.TeamID
+	botID, teamBotID := strings.TrimSpace(parsed.BotID), strings.TrimSpace(parsed.TeamBotID)
 	// The resolver's ruling mirrored: a fact naming both is a team fact.
-	if teamID != "" {
-		agentID = ""
+	if teamBotID != "" {
+		botID = ""
 	}
-	if _, err := r.Store.SetSessionBinding(ctx, tenantID, sessionID, agentID, teamID, seq); err != nil {
+	if _, err := r.Store.SetSessionBinding(ctx, tenantID, sessionID, botID, teamBotID); err != nil {
 		return fmt.Errorf("project session binding: %w", err)
 	}
 	return nil

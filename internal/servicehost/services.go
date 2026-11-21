@@ -564,15 +564,13 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		// (Bot Account ∩ Harness). A nil seam stays fail-closed in the runner;
 		// the product layer's absence is a deployment gap, never an open surface.
 		runner.ToolAccess = cfg.ToolAccess
-		// The execution binding (Agent/AgentTeam the input selected) resolves per
-		// attempt through this seam: the runner reads the binding the selection
-		// fact names and freezes its identity into the run summary. A zero
+		// The execution binding (the Bot/TeamBot the session belongs to or the
+		// input selected) resolves per attempt through this seam: the runner reads
+		// the binding and freezes its identity into the run summary. A zero
 		// BindingsOptions keeps the pre-binding behaviour.
 		if cfg.Bindings.Reader != nil {
 			runner.Bindings = &bindingResolver{
 				reader: cfg.Bindings.Reader,
-				root:   cfg.Bindings.Root,
-				log:    cfg.Seams.Logger,
 			}
 		}
 		// The MCP app context (P5.5) is read per attempt and merged into the last

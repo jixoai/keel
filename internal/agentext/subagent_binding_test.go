@@ -31,17 +31,56 @@ func (v *selectionValidator) validate(raw json.RawMessage) error {
 	return v.err
 }
 
+// ownedParentSession seeds the identity graph and creates a session owned by a
+// Bot. A pre-A4 unowned session is not a valid parent for a delegated child
+// (the child would have no Bot to inherit and its run would be refused).
+func ownedParentSession(t *testing.T, st *store.Store, tenant uuid.UUID) (uuid.UUID, string) {
+	t.Helper()
+	ctx := context.Background()
+	account, err := st.CreateAccount(ctx, store.AccountRecord{
+		TenantID: tenant, ID: uuid.New(), Username: "owner-" + tenant.String()[:8],
+		DisplayName: "Owner", Kind: "human",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, err := st.CreateRole(ctx, store.RoleRecord{TenantID: tenant, ID: uuid.New(), Name: "Reviewer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := st.CreateProfile(ctx, store.ProfileRecord{
+		TenantID: tenant, ID: uuid.New(), AccountID: account.ID, RoleID: role.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot, err := st.CreateBot(ctx, store.BotRecord{
+		TenantID: tenant, ID: "bot-" + tenant.String()[:8], Name: "Parent",
+		ProfileID: profile.ID, ModelKind: "text",
+		DefaultModel: json.RawMessage(`{"providerId":"magpie","modelId":"qwen"}`),
+		Harness:      json.RawMessage(`{"tools":["bash"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := uuid.New()
+	if err := st.CreateOwnedSession(ctx, store.SessionOwnership{
+		TenantID: tenant, SessionID: session, BotID: bot.ID,
+		AccountID: account.ID, CreatedByAccountID: account.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return session, bot.ID
+}
+
 func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
 	tenant := uuid.New()
-	parent := uuid.New()
 	if err := st.CreateTenant(ctx, tenant, "subagent-binding"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateSession(ctx, tenant, parent); err != nil {
-		t.Fatal(err)
-	}
+	parent, parentBotID := ownedParentSession(t, st, tenant)
 	klog, err := kernel.NewPG(ctx, st.Pool())
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +95,7 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 		Logger:            testLogger(),
 		ValidateSelection: validator.validate,
 		Bindings:          sessionbinding.New(st),
+		InheritOwnership:  st.CreateSessionLikeParent,
 	})
 
 	record, err := runner.SpawnAsync(ctx, agentext.SpawnRequest{
@@ -63,7 +103,7 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 		ParentSessionID: parent,
 		Task:            "review the draft",
 		Agent:           "draft reviewer",
-		AgentID:         "agent_member_7",
+		BotID:           "agent_member_7",
 	})
 	if err != nil {
 		t.Fatalf("SpawnAsync: %v", err)
@@ -93,32 +133,24 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 		t.Fatalf("child payload = %+v", payload)
 	}
 	var selection struct {
-		AgentID string `json:"agentId"`
-		TeamID  string `json:"teamId"`
+		BotID     string `json:"botId"`
+		TeamBotID string `json:"teamBotId"`
 	}
 	if err := json.Unmarshal(payload.Selection, &selection); err != nil {
 		t.Fatalf("child selection %s: %v", payload.Selection, err)
 	}
-	if selection.AgentID != "agent_member_7" || selection.TeamID != "" {
+	if selection.BotID != "agent_member_7" || selection.TeamBotID != "" {
 		t.Fatalf("child selection = %+v, want agent_member_7", selection)
 	}
-	// The spawn is not only a ledger fact: it must also project onto the child
-	// session's binding index, which is what the registry's delete/archive guard
-	// reads. A child invisible here would let its Agent be deleted while the
-	// child is still live.
+	// The spawn is not only a ledger fact. The child session keeps its parent's
+	// ownership (A4.2a): a member selection changes the attempt's prompt/tools,
+	// never the owning Bot. The projection therefore still names the parent Bot.
 	binding, found, err := st.GetSessionBinding(ctx, tenant, child)
 	if err != nil || !found {
 		t.Fatalf("child binding: found=%v err=%v", found, err)
 	}
-	if binding.AgentID != "agent_member_7" || binding.TeamID != "" || binding.Seq != events[0].Seq {
-		t.Fatalf("child binding = %+v, want agent_member_7 seq %d", binding, events[0].Seq)
-	}
-	refs, total, err := st.SessionsReferencingAgent(ctx, tenant, "agent_member_7")
-	if err != nil {
-		t.Fatalf("session references: %v", err)
-	}
-	if total != 1 || len(refs) != 1 || refs[0].ID != child.String() {
-		t.Fatalf("agent references = %+v, want the child session %s", refs, child)
+	if binding.BotID != parentBotID {
+		t.Fatalf("child binding = %+v, want the inherited parent bot %s", binding, parentBotID)
 	}
 
 	// A spawn without a binding keeps the child input free of a selection fact
@@ -152,8 +184,10 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 	if err != nil || !plainFound {
 		t.Fatalf("plain child binding: found=%v err=%v", plainFound, err)
 	}
-	if plainBinding != (store.SessionBinding{}) {
-		t.Fatalf("a bindingless spawn wrote a projection: %+v", plainBinding)
+	// A bindingless spawn writes no selection fact; the child still inherits the
+	// parent's Bot ownership, which is the projection the route gate reads.
+	if plainBinding.BotID != parentBotID {
+		t.Fatalf("plain child binding = %+v, want the inherited parent bot %s", plainBinding, parentBotID)
 	}
 
 	// The binding the spawn stored is exactly the selection the submit-time gate
@@ -162,13 +196,13 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 		t.Fatalf("validator calls = %d, want 1 (only the bound spawn)", len(validator.seen))
 	}
 	var validated struct {
-		AgentID string `json:"agentId"`
+		BotID string `json:"botId"`
 	}
 	if err := json.Unmarshal(validator.seen[0], &validated); err != nil {
 		t.Fatalf("validated selection %s: %v", validator.seen[0], err)
 	}
-	if validated.AgentID != "agent_member_7" {
-		t.Fatalf("validated selection = %+v, want agentId agent_member_7", validated)
+	if validated.BotID != "agent_member_7" {
+		t.Fatalf("validated selection = %+v, want botId agent_member_7", validated)
 	}
 }
 
@@ -206,7 +240,7 @@ func TestSubagentSpawnRefusesAnInvalidSelectionBeforeCommit(t *testing.T) {
 		TenantID:        tenant,
 		ParentSessionID: parent,
 		Task:            "review the draft",
-		Selection:       json.RawMessage(`{"agentId":"agent_ghost"}`),
+		Selection:       json.RawMessage(`{"botId":"agent_ghost"}`),
 		IdempotencyKey:  key,
 	})
 	if !errors.Is(err, agentext.ErrInvalidSpawn) {
@@ -239,7 +273,7 @@ func TestSubagentSpawnRefusesAnInvalidSelectionBeforeCommit(t *testing.T) {
 		TenantID:        tenant,
 		ParentSessionID: parent,
 		Task:            "review the draft",
-		Selection:       json.RawMessage(`{"agentId":"agent_ghost"}`),
+		Selection:       json.RawMessage(`{"botId":"agent_ghost"}`),
 		IdempotencyKey:  key,
 	})
 	if err != nil {

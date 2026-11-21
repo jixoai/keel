@@ -233,15 +233,15 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"subagent": record})
 }
 
-// requireSubagentBotInvoke closes the legacy agentId bypass on the HTTP
-// sub-agent routes (A4.2b1): a caller naming an Agent/Bot target needs
+// requireSubagentBotInvoke closes the botId bypass on the HTTP sub-agent
+// routes (A4.2b1): a caller naming a Bot target needs
 // bot.invoke on it, exactly like the model-facing `agent` tool. A call naming
 // no target spawns the parent's own Bot and needs no extra capability (the
 // route's session.write/relation gate already authorized the parent).
-func (s *Server) requireSubagentBotInvoke(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, agentID string, selection json.RawMessage) bool {
-	target := strings.TrimSpace(agentID)
+func (s *Server) requireSubagentBotInvoke(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, botID string, selection json.RawMessage) bool {
+	target := strings.TrimSpace(botID)
 	if target == "" {
-		target = selectionAgentID(selection)
+		target = selectionBotID(selection)
 	}
 	if target == "" {
 		return true
@@ -275,24 +275,24 @@ func (s *Server) requireSubagentBotInvoke(w http.ResponseWriter, r *http.Request
 	return true
 }
 
-// selectionAgentID extracts a legacy agentId from a selection fact. A fact that
-// names a team is not a bot target (the team decides its captain); it is left
-// to the existing team validation.
-func selectionAgentID(selection json.RawMessage) string {
+// selectionBotID extracts a botId from a selection fact. A fact that names a
+// team is not a bot target (the team decides its captain); it is left to the
+// existing team validation.
+func selectionBotID(selection json.RawMessage) string {
 	if len(strings.TrimSpace(string(selection))) == 0 {
 		return ""
 	}
 	var fact struct {
-		AgentID string `json:"agentId"`
-		TeamID  string `json:"teamId"`
+		BotID     string `json:"botId"`
+		TeamBotID string `json:"teamBotId"`
 	}
 	if err := json.Unmarshal(selection, &fact); err != nil {
 		return ""
 	}
-	if strings.TrimSpace(fact.TeamID) != "" {
+	if strings.TrimSpace(fact.TeamBotID) != "" {
 		return ""
 	}
-	return strings.TrimSpace(fact.AgentID)
+	return strings.TrimSpace(fact.BotID)
 }
 
 // spawnSubagentRequest is the additive HTTP form of the spawn primitive. The
@@ -300,7 +300,7 @@ func selectionAgentID(selection json.RawMessage) string {
 type spawnSubagentRequest struct {
 	Task           string          `json:"task"`
 	Agent          string          `json:"agent"`
-	AgentID        string          `json:"agentId"`
+	BotID          string          `json:"botId"`
 	Selection      json.RawMessage `json:"selection"`
 	IdempotencyKey string          `json:"idempotencyKey"`
 	Budget         agentext.Budget `json:"budget"`
@@ -325,7 +325,7 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if !s.requireSubagentBotInvoke(w, r, tenantID, body.AgentID, body.Selection) {
+	if !s.requireSubagentBotInvoke(w, r, tenantID, body.BotID, body.Selection) {
 		return
 	}
 	record, err := s.cfg.Subagents.SpawnAsync(r.Context(), agentext.SpawnRequest{
@@ -333,7 +333,7 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		ParentSessionID: parentID,
 		Task:            body.Task,
 		Agent:           body.Agent,
-		AgentID:         body.AgentID,
+		BotID:           body.BotID,
 		Selection:       body.Selection,
 		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
@@ -411,7 +411,7 @@ type forkSubagentRequest struct {
 	Title          string          `json:"title"`
 	TaskID         string          `json:"taskId"`
 	Agent          string          `json:"agent"`
-	AgentID        string          `json:"agentId"`
+	BotID          string          `json:"botId"`
 	Selection      json.RawMessage `json:"selection"`
 	IdempotencyKey string          `json:"idempotencyKey"`
 	Budget         agentext.Budget `json:"budget"`
@@ -436,7 +436,7 @@ func (s *Server) forkSubagent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if !s.requireSubagentBotInvoke(w, r, tenantID, body.AgentID, body.Selection) {
+	if !s.requireSubagentBotInvoke(w, r, tenantID, body.BotID, body.Selection) {
 		return
 	}
 	record, err := s.cfg.Subagents.ForkAsync(r.Context(), agentext.ForkRequest{
@@ -447,7 +447,7 @@ func (s *Server) forkSubagent(w http.ResponseWriter, r *http.Request) {
 		Title:           body.Title,
 		TaskID:          body.TaskID,
 		Agent:           body.Agent,
-		AgentID:         body.AgentID,
+		BotID:           body.BotID,
 		Selection:       body.Selection,
 		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
@@ -488,7 +488,7 @@ type resumeSubagentRequest struct {
 	RequestID string          `json:"requestId"`
 	Reason    string          `json:"reason"`
 	Selection json.RawMessage `json:"selection"`
-	AgentID   string          `json:"agentId"`
+	BotID     string          `json:"botId"`
 }
 
 // resumeSubagent implements POST /v1/sessions/{id}/resume (supervision spec):
@@ -517,9 +517,9 @@ func (s *Server) resumeSubagent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("sessionId must be a UUID"))
 		return
 	}
-	// A legacy agentId/selection changes the binding the resumed child runs as;
+	// A botId/selection changes the binding the resumed child runs as;
 	// the caller needs bot.invoke on that target exactly like a fresh spawn.
-	if !s.requireSubagentBotInvoke(w, r, tenantID, body.AgentID, body.Selection) {
+	if !s.requireSubagentBotInvoke(w, r, tenantID, body.BotID, body.Selection) {
 		return
 	}
 	result, err := s.cfg.Subagents.Resume(r.Context(), agentext.ResumeRequest{
@@ -529,7 +529,7 @@ func (s *Server) resumeSubagent(w http.ResponseWriter, r *http.Request) {
 		RequestID:       body.RequestID,
 		Reason:          body.Reason,
 		Selection:       body.Selection,
-		AgentID:         body.AgentID,
+		BotID:           body.BotID,
 	})
 	if err != nil {
 		writeSubagentError(w, err)

@@ -24,7 +24,8 @@ type doctorCheck struct {
 	detail string
 }
 
-func runDoctorCmd(args []string, stdout, stderr io.Writer) int {	fs := flag.NewFlagSet("keel doctor", flag.ContinueOnError)
+func runDoctorCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("keel doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
 		dsn      = fs.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN to test")
@@ -150,7 +151,7 @@ func runDoctorCmd(args []string, stdout, stderr io.Writer) int {	fs := flag.NewF
 	return 0
 }
 
-// clientCredentialCheck reports which credential `keel agent|team|model|skills`
+// clientCredentialCheck reports which credential `keel bot|team-bot|model|skills`
 // will use. Values are never printed: only which variable is configured. The
 // retired passphrase is a warning, not a failure — a shell that still exports it
 // is not a broken deployment, but it must be told the variable no longer logs
@@ -169,7 +170,7 @@ func clientCredentialCheck() doctorCheck {
 			"bot key configured (KEEL_AGENT_TOKEN); machine clients present it as a Bearer credential"}
 	case username != "" && password != "":
 		return doctorCheck{"client credential", "ok",
-			"account credentials configured for keel agent/team/model/skills (POST /v1/auth/login)"}
+			"account credentials configured for keel bot/team-bot/model/skills (POST /v1/auth/login)"}
 	case username != "" || password != "":
 		return doctorCheck{"client credential", "fail",
 			"KEEL_ACCOUNT_USERNAME and KEEL_ACCOUNT_PASSWORD must be set together (or use KEEL_AGENT_TOKEN)"}

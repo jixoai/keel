@@ -400,7 +400,7 @@ func TestBotInvokeChecksTheTargetRelationAndAudits(t *testing.T) {
 	e := newEnv(t)
 	e.grant(e.owner.ID, access.KeyBotInvoke, access.ScopeOwn)
 
-	spawnMember := rawCall("agent", `{"action":"spawn","task":"delegate","agentId":"member-1"}`)
+	spawnMember := rawCall("agent", `{"action":"spawn","task":"delegate","botId":"member-1"}`)
 	refusal := wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), spawnMember))
 	if refusal.Reason != string(access.ReasonMissingRelation) {
 		t.Fatalf("denied spawn reason = %q, want missing_relation", refusal.Reason)
@@ -427,7 +427,7 @@ func TestBotInvokeChecksTheTargetRelationAndAudits(t *testing.T) {
 	e.removeViewer(e.owner.ID, e.memberBot.ID)
 	refusalMember := wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), spawnMember))
 	refusalGhost := wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession),
-		rawCall("agent", `{"action":"spawn","task":"delegate","agentId":"ghost-1"}`)))
+		rawCall("agent", `{"action":"spawn","task":"delegate","botId":"ghost-1"}`)))
 	if refusalMember.Reason != refusalGhost.Reason || refusalMember.Detail != refusalGhost.Detail {
 		t.Fatalf("existence leak: member=(%q,%q) ghost=(%q,%q)",
 			refusalMember.Reason, refusalMember.Detail, refusalGhost.Reason, refusalGhost.Detail)
@@ -656,7 +656,7 @@ func TestForkAndResumeSelectionAgentIDRequiresBotInvoke(t *testing.T) {
 	e := newEnv(t)
 	e.grant(e.owner.ID, access.KeyBotInvoke, access.ScopeOwn)
 
-	forkCall := rawCall("agent", `{"action":"fork","eventSeq":1,"task":"fork","selection":{"agentId":"member-1"}}`)
+	forkCall := rawCall("agent", `{"action":"fork","eventSeq":1,"task":"fork","selection":{"botId":"member-1"}}`)
 	refusal := wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), forkCall))
 	if refusal.Key != access.KeyBotInvoke || refusal.Reason != string(access.ReasonMissingRelation) {
 		t.Fatalf("fork selection refusal = %+v", refusal)
@@ -680,7 +680,7 @@ func TestForkAndResumeSelectionAgentIDRequiresBotInvoke(t *testing.T) {
 	}
 
 	child := e.newOwnedSession(e.captain.ID, e.owner.ID, e.owner.ID)
-	resumeCall := rawCall("agent", `{"action":"resume","sessionId":"`+child.String()+`","selection":{"agentId":"member-1"}}`)
+	resumeCall := rawCall("agent", `{"action":"resume","sessionId":"`+child.String()+`","selection":{"botId":"member-1"}}`)
 	refusal = wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), resumeCall))
 	if refusal.Reason != string(access.ReasonMissingRelation) {
 		t.Fatalf("resume selection refusal = %+v", refusal)

@@ -137,7 +137,10 @@ func resetRuntimeTables(ctx context.Context, dsn, confirm string) error {
 	log.Printf("resetting runtime tables in database %s", name)
 	_, err = pool.Exec(ctx, `TRUNCATE tenants, sessions, events, checkpoints, submissions,
 		tasks, blobs, blob_chunks, blob_refs, runs, usage_ledger,
-		mcp_oauth_pending, mcp_oauth_credentials`)
+		mcp_oauth_pending, mcp_oauth_credentials,
+		accounts, roles, profiles, bots, team_bots,
+		permission_groups, permission_group_members, permission_group_grants,
+		permission_grants, resource_relations, auth_sessions, auth_events, bot_api_keys`)
 	if err != nil && strings.Contains(err.Error(), "42P01") {
 		// A brand-new database has no tables yet; the runtime migrates on boot,
 		// so there is nothing to truncate. This keeps `-reset` (the default)
@@ -154,7 +157,7 @@ func resetRuntimeTables(ctx context.Context, dsn, confirm string) error {
 	for _, table := range []string{
 		"bash_jobs", "model_settings", "model_settings_history", "tenant_secrets",
 		"mcp_oauth_credentials", "plugins", "plugin_audit", "mcp_app_audit",
-		"mcp_app_contexts", "agents", "agent_teams", "api_keys", "tenant_usage",
+		"mcp_app_contexts", "tenant_usage",
 		"task_cards", "task_events", "approval_provenance", "notifications",
 		"file_manifest", "session_snapshot",
 	} {

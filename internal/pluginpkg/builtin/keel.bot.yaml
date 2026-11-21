@@ -1,0 +1,173 @@
+id: keel.bot
+version: 1.0.0
+kind: in-process
+description: "Bot plugin: manages the Bot library (Profile, model kind, default model, Harness tools/context) behind /v1/bots and the keel bot CLI."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  cli:
+    - path: [bot, list]
+      summary: "List Bots: id, name, profile, default model, tool count."
+      description: "Reads GET /v1/bots. Archived Bots are listed with their archived mark unless --include-archived filters them out."
+      args_schema:
+        type: object
+        properties:
+          include_archived: { type: boolean }
+          json: { type: boolean }
+      output_schema:
+        type: object
+        properties:
+          bots: { type: array }
+      permissions: [bot.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel bot list", "keel bot list --include-archived --json"]
+    - path: [bot, show]
+      summary: "Show one Bot: Profile, model, Harness tools and permission narrowing."
+      description: "Reads GET /v1/bots/{id}. The response carries the runtime surface the next attempt will use."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [bot.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel bot show bot_3f1c"]
+    - path: [bot, create]
+      summary: "Create a Bot from its Profile, model kind, default model and Harness."
+      description: "POSTs /v1/bots. A Bot always has a default model (provider+model). The Harness tool list is a whitelist validated against the deployment's live tool surface; an empty list grants nothing."
+      args_schema:
+        type: object
+        properties:
+          name: { type: string }
+          bot_id: { type: string }
+          profile: { type: string }
+          model_kind: { type: string }
+          provider: { type: string }
+          model: { type: string }
+          tools: { type: string }
+          permissions: { type: string }
+          instruction: { type: string }
+          json: { type: boolean }
+        required: [name, profile, model_kind, provider, model]
+      output_schema: { type: object }
+      permissions: [bot.create]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel bot create --name 客服一号 --profile <uuid> --model-kind text --provider magpie --model qwen"]
+    - path: [bot, update]
+      summary: "Update a Bot; fields not passed are preserved."
+      description: "PATCHes /v1/bots/{id} with the expected archived state. A Profile change is a rebind and moves the owner relation in the same transaction."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          profile: { type: string }
+          model_kind: { type: string }
+          provider: { type: string }
+          model: { type: string }
+          tools: { type: string }
+          permissions: { type: string }
+          instruction: { type: string }
+          archived: { type: boolean }
+          expected_archived: { type: boolean }
+          json: { type: boolean }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [bot.manage]
+      danger: write
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel bot update bot_3f1c --tools bash,read"]
+    - path: [bot, archive]
+      summary: "Archive a Bot; new Sessions are refused, history stays."
+      description: "POSTs /v1/bots/{id}/archive. Archived Bots refuse new Sessions; existing Sessions and their ledgers stay readable. Repeating the call is idempotent."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [bot.manage]
+      danger: write
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel bot archive bot_3f1c"]
+    - path: [bot, start]
+      summary: "Start a Bot-owned Session and queue one run."
+      description: "POSTs /v1/bots/{id}/invoke. The session is owned by the Bot and its Profile Account, records the caller as created_by, and the committed input names the Bot in its selection fact so the attempt uses the Bot's Role/Harness prompt, tool whitelist and default model."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          text: { type: string }
+          session: { type: string }
+          request_id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          botId: { type: string }
+          sessionId: { type: string }
+          seq: { type: integer }
+      permissions: [bot.invoke]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel bot start bot_3f1c --text \"Review the draft\""]
+    - path: [bot, keys]
+      summary: "List a Bot's API keys (prefix and lifecycle only)."
+      description: "Reads GET /v1/bots/{id}/keys. The plaintext of a key is never returned again."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [bot.manage]
+      danger: read
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel bot keys bot_3f1c"]
+    - path: [bot, key-create]
+      summary: "Issue a Bot key; the plaintext is shown exactly once."
+      description: "POSTs /v1/bots/{id}/keys. The key is bound to the Bot and its Account; it cannot be shown again. Revocation is immediate."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          label: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [bot.manage]
+      danger: write
+      idempotent: false
+      callable_by: [ui]
+      examples: ["keel bot key-create bot_3f1c --label ci"]
+    - path: [bot, key-revoke]
+      summary: "Revoke one Bot key."
+      description: "DELETEs /v1/bots/{id}/keys/{keyId}. Revocation is immediate and idempotent."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          key_id: { type: string }
+        required: [id, key_id]
+      output_schema: { type: object }
+      permissions: [bot.manage]
+      danger: destructive
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel bot key-revoke bot_3f1c <keyId>"]
+source:
+  type: builtin

@@ -154,6 +154,10 @@ CREATE TABLE blob_chunks (
 
 不搬：CLI/TUI/REPL、JSONL session、trust、plugin/pkgmgr、selfupdate、内置 coding 工具。
 
+> 命名边界：`agentcore` / `agentloop` / `agenttool` / `internal/agent` 是 PI 的 loop、
+> 工具执行与 runner 技术包，保留原名；产品面对外统一 **Bot / TeamBot / Account / Role /
+> Profile**，不存在产品概念 `Agent`。
+
 ## 8. 实测结果（2026-11-05）
 
 | 指标 | 结果 |

@@ -260,7 +260,7 @@ func (b Bot) Normalized() Bot {
 }
 
 // idPattern is the legal handle shape for text identities (bot/team_bot ids):
-// a stable, URL- and CLI-safe token, the same grammar the agent registry used.
+// a stable, URL- and CLI-safe token, the same grammar the retired registry used.
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
 
 // permissionKeyPattern is the permission-key shape: lowercase

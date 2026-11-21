@@ -2,8 +2,8 @@
 // API exposes and the edge quota enforcer.
 //
 // Credential authentication lives in cmd/keel/auth.go (account sessions and bot
-// keys). The legacy tenant api_keys are minted by `keel admin` for pre-A2
-// tooling but are not accepted by the serving path.
+// keys). There is no tenant-wide API key: accounts log in with passwords and
+// Bots use bot-bound keys (L18).
 package main
 
 import (
@@ -11,13 +11,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/accesswire"
-	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
 )
 
-// apiKeyStore adapts *store.Store to agentapi.Provisioner (create/mint/list/
-// revoke).
+// apiKeyStore adapts *store.Store to agentapi.Provisioner (tenant create and
+// existence).
 type apiKeyStore struct {
 	store *store.Store
 }
@@ -36,40 +35,9 @@ func (a apiKeyStore) CreateTenant(ctx context.Context, tenantID uuid.UUID, name 
 	return created, nil
 }
 
-// MintAPIKey implements agentapi.Provisioner.
-func (a apiKeyStore) MintAPIKey(ctx context.Context, tenantID, keyID uuid.UUID, hash []byte, prefix, role, label string) error {
-	_, err := a.store.CreateAPIKey(ctx, tenantID, keyID, hash, prefix, role, label)
-	return err
-}
-
 // TenantExists implements agentapi.Provisioner.
 func (a apiKeyStore) TenantExists(ctx context.Context, tenantID uuid.UUID) (bool, error) {
 	return a.store.TenantExists(ctx, tenantID)
-}
-
-// ListAPIKeys implements agentapi.Provisioner.
-func (a apiKeyStore) ListAPIKeys(ctx context.Context, tenantID uuid.UUID) ([]agentapi.APIKeyView, error) {
-	keys, err := a.store.ListAPIKeys(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]agentapi.APIKeyView, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, agentapi.APIKeyView{
-			KeyID:     key.KeyID.String(),
-			Prefix:    key.Prefix,
-			Role:      key.Role,
-			Label:     key.Label,
-			CreatedAt: key.CreatedAt.UTC(),
-			RevokedAt: key.RevokedAt,
-		})
-	}
-	return out, nil
-}
-
-// RevokeAPIKey implements agentapi.Provisioner.
-func (a apiKeyStore) RevokeAPIKey(ctx context.Context, tenantID, keyID uuid.UUID) (bool, error) {
-	return a.store.RevokeAPIKey(ctx, tenantID, keyID)
 }
 
 // quotaReporter adapts the store and the edge enforcer to agentapi.QuotaReporter.

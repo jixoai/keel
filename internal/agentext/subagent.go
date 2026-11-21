@@ -48,15 +48,14 @@ type SpawnRequest struct {
 	ParentSessionID uuid.UUID `json:"-"`
 	Task            string    `json:"task"`
 	Agent           string    `json:"agent,omitempty"`
-	// AgentID is the Agent library entry the child session runs as. It travels
-	// into the child's input as selection.agentId, so the child attempt resolves
-	// that agent's prompt, tool grants and default model exactly like any other
-	// bound run (change keel-agent-team-v1: 成员以自己的 Agent 配置启动独立
-	// session/run). Agent stays the free-form label the record and hooks carry.
-	AgentID string `json:"agentId,omitempty"`
+	// BotID is the Bot the child session runs as. It travels into the child's
+	// input as selection.botId, so the child attempt resolves that Bot's prompt,
+	// tool grants and default model exactly like any other bound run. Agent
+	// stays the free-form label the record and hooks carry.
+	BotID string `json:"botId,omitempty"`
 	// Selection, when set, is a complete selection fact for the child input
 	// (model identity and/or execution binding). It takes precedence over
-	// AgentID, which the runner folds into it.
+	// BotID, which the runner folds into it.
 	Selection json.RawMessage `json:"selection,omitempty"`
 	// IdempotencyKey makes the derived child session deterministic: the same
 	// key in the same parent always targets the same child session, so a retry
@@ -73,11 +72,11 @@ func (r SpawnRequest) childSelection() json.RawMessage {
 	if raw := bytes.TrimSpace(r.Selection); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
 		return append(json.RawMessage(nil), raw...)
 	}
-	agentID := strings.TrimSpace(r.AgentID)
-	if agentID == "" {
+	botID := strings.TrimSpace(r.BotID)
+	if botID == "" {
 		return nil
 	}
-	encoded, err := json.Marshal(map[string]string{"agentId": agentID})
+	encoded, err := json.Marshal(map[string]string{"botId": botID})
 	if err != nil {
 		return nil
 	}
@@ -242,12 +241,12 @@ type SubagentRunner struct {
 	// fail-closed, see SubagentOptions.ValidateSelection).
 	validateSelection func(json.RawMessage) error
 
-	forks         sessionfork.Store
-	snapshots     ForkSnapshotReader
-	cards         ForkCardStore
-	admission     ForkAdmission
-	cleanup       ForkSessionCleanup
-	requeue       RunRequeuer
+	forks            sessionfork.Store
+	snapshots        ForkSnapshotReader
+	cards            ForkCardStore
+	admission        ForkAdmission
+	cleanup          ForkSessionCleanup
+	requeue          RunRequeuer
 	notes            SubagentNoteWriter
 	configVersion    func() (string, int64)
 	inheritOwnership func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error
@@ -848,7 +847,7 @@ var ErrRunScopeMissing = errors.New("agentext: the spawn action needs the ambien
 var ErrInvalidSpawn = errors.New("agentext: invalid spawn arguments")
 
 // SpawnFromTool is the one parser/handler behind the `agent` aggregate tool's
-// spawn action. It carries the model's agentId into the child input's selection
+// spawn action. It carries the model's botId into the child input's selection
 // fact (the child attempt then resolves that Agent's prompt, tool grants and
 // default model), exactly like the HTTP sub-agent endpoint.
 func SpawnFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMessage) (SubagentResult, error) {
@@ -862,7 +861,7 @@ func SpawnFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMes
 	var input struct {
 		Task           string `json:"task"`
 		Agent          string `json:"agent"`
-		AgentID        string `json:"agentId"`
+		BotID          string `json:"botId"`
 		IdempotencyKey string `json:"idempotencyKey"`
 		MaxTurns       int    `json:"maxTurns"`
 		MaxTokens      int    `json:"maxTokens"`
@@ -879,7 +878,7 @@ func SpawnFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMes
 		ParentSessionID: scope.SessionID,
 		Task:            input.Task,
 		Agent:           input.Agent,
-		AgentID:         input.AgentID,
+		BotID:           input.BotID,
 		IdempotencyKey:  input.IdempotencyKey,
 		Budget:          Budget{MaxTurns: input.MaxTurns, MaxTokens: input.MaxTokens, TimeoutMs: input.TimeoutMs},
 	})

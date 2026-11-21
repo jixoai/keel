@@ -11,11 +11,11 @@ import (
 	"github.com/jixoai/keel/internal/agentext"
 )
 
-// TestSpawnAgentIDRequiresBotInvoke pins the HTTP half of A4.2b1's legacy
-// agentId rule: the sub-agent routes accept an agentId/selection target only
+// TestSpawnBotIDRequiresBotInvoke pins the HTTP half of A4.2b1's botId rule:
+// the sub-agent routes accept a botId/selection target only
 // when the caller holds bot.invoke on it. A call naming no target spawns the
 // parent's own Bot and stays available under the route's session.write gate.
-func TestSpawnAgentIDRequiresBotInvoke(t *testing.T) {
+func TestSpawnBotIDRequiresBotInvoke(t *testing.T) {
 	tenant, parent := uuid.New(), uuid.New()
 	committer := &fakeCommitter{}
 	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
@@ -37,8 +37,8 @@ func TestSpawnAgentIDRequiresBotInvoke(t *testing.T) {
 		name string
 		body map[string]any
 	}{
-		{"agentId", map[string]any{"task": "delegate", "agentId": "member-1"}},
-		{"selection agentId", map[string]any{"task": "delegate", "selection": map[string]any{"agentId": "member-1"}}},
+		{"botId", map[string]any{"task": "delegate", "botId": "member-1"}},
+		{"selection botId", map[string]any{"task": "delegate", "selection": map[string]any{"botId": "member-1"}}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -77,8 +77,8 @@ func TestSpawnAgentIDRequiresBotInvoke(t *testing.T) {
 	}
 }
 
-// TestForkAgentIDRequiresBotInvoke mirrors the spawn check on the fork route.
-func TestForkAgentIDRequiresBotInvoke(t *testing.T) {
+// TestForkBotIDRequiresBotInvoke mirrors the spawn check on the fork route.
+func TestForkBotIDRequiresBotInvoke(t *testing.T) {
 	tenant, parent := uuid.New(), uuid.New()
 	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate: newFakeGate(parent), Edge: &fakeCommitter{}, Events: &fakeEvents{},
@@ -93,8 +93,8 @@ func TestForkAgentIDRequiresBotInvoke(t *testing.T) {
 	var body map[string]any
 	code := doJSON(t, server.Client(), http.MethodPost,
 		server.URL+"/v1/sessions/"+parent.String()+"/fork", tenant,
-		map[string]any{"eventSeq": 1, "task": "fork", "agentId": "member-1"}, &body)
+		map[string]any{"eventSeq": 1, "task": "fork", "botId": "member-1"}, &body)
 	if code != http.StatusForbidden {
-		t.Fatalf("fork with agentId = %d, want 403; body=%v", code, body)
+		t.Fatalf("fork with botId = %d, want 403; body=%v", code, body)
 	}
 }

@@ -114,12 +114,12 @@ type ForkRequest struct {
 	// TaskID optionally names the origin card explicitly. Empty resolves the
 	// card of the newest task event at or before EventSeq.
 	TaskID string `json:"taskId,omitempty"`
-	// Agent is the free-form label the record/hooks carry; AgentID/Selection is
+	// Agent is the free-form label the record/hooks carry; BotID/Selection is
 	// the execution binding. Empty inherits the parent's selection at the origin
 	// (the child starts on the same configuration), then the child may carry its
 	// own selection on later inputs.
 	Agent          string          `json:"agent,omitempty"`
-	AgentID        string          `json:"agentId,omitempty"`
+	BotID          string          `json:"botId,omitempty"`
 	Selection      json.RawMessage `json:"selection,omitempty"`
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
 	Budget         Budget          `json:"budget,omitempty"`
@@ -131,11 +131,11 @@ func (r ForkRequest) childSelection() json.RawMessage {
 	if raw := strings.TrimSpace(string(r.Selection)); raw != "" && raw != "null" {
 		return append(json.RawMessage(nil), r.Selection...)
 	}
-	agentID := strings.TrimSpace(r.AgentID)
-	if agentID == "" {
+	botID := strings.TrimSpace(r.BotID)
+	if botID == "" {
 		return nil
 	}
-	encoded, err := json.Marshal(map[string]string{"agentId": agentID})
+	encoded, err := json.Marshal(map[string]string{"botId": botID})
 	if err != nil {
 		return nil
 	}
@@ -151,12 +151,12 @@ type ResumeRequest struct {
 	// session and its current attempt count, so two immediate calls converge.
 	RequestID string `json:"requestId,omitempty"`
 	Reason    string `json:"reason,omitempty"`
-	// Selection / AgentID optionally change the child's execution binding for
+	// Selection / BotID optionally change the child's execution binding for
 	// the resumed attempt (the "parent changes the child's config, then resumes"
 	// scenario). The override travels in the resume.attempt fact, never as a new
 	// user message, so the child's input history is not duplicated.
 	Selection json.RawMessage `json:"selection,omitempty"`
-	AgentID   string          `json:"agentId,omitempty"`
+	BotID     string          `json:"botId,omitempty"`
 }
 
 // resumeSelection derives the optional binding override.
@@ -164,11 +164,11 @@ func (r ResumeRequest) resumeSelection() json.RawMessage {
 	if raw := strings.TrimSpace(string(r.Selection)); raw != "" && raw != "null" {
 		return append(json.RawMessage(nil), r.Selection...)
 	}
-	agentID := strings.TrimSpace(r.AgentID)
-	if agentID == "" {
+	botID := strings.TrimSpace(r.BotID)
+	if botID == "" {
 		return nil
 	}
-	encoded, err := json.Marshal(map[string]string{"agentId": agentID})
+	encoded, err := json.Marshal(map[string]string{"botId": botID})
 	if err != nil {
 		return nil
 	}
@@ -855,7 +855,7 @@ func ForkFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMess
 		Title          string          `json:"title"`
 		TaskID         string          `json:"taskId"`
 		Agent          string          `json:"agent"`
-		AgentID        string          `json:"agentId"`
+		BotID          string          `json:"botId"`
 		Selection      json.RawMessage `json:"selection"`
 		IdempotencyKey string          `json:"idempotencyKey"`
 		MaxTurns       int             `json:"maxTurns"`
@@ -876,7 +876,7 @@ func ForkFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMess
 		Title:           input.Title,
 		TaskID:          input.TaskID,
 		Agent:           input.Agent,
-		AgentID:         input.AgentID,
+		BotID:           input.BotID,
 		Selection:       input.Selection,
 		IdempotencyKey:  input.IdempotencyKey,
 		Budget:          Budget{MaxTurns: input.MaxTurns, MaxTokens: input.MaxTokens, TimeoutMs: input.TimeoutMs},
@@ -898,7 +898,7 @@ func ResumeFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMe
 		RequestID string          `json:"requestId"`
 		Reason    string          `json:"reason"`
 		Selection json.RawMessage `json:"selection"`
-		AgentID   string          `json:"agentId"`
+		BotID     string          `json:"botId"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return ResumeResult{}, fmt.Errorf("%w: %v", ErrInvalidSpawn, err)
@@ -914,7 +914,7 @@ func ResumeFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMe
 		RequestID:       input.RequestID,
 		Reason:          input.Reason,
 		Selection:       input.Selection,
-		AgentID:         input.AgentID,
+		BotID:           input.BotID,
 	})
 }
 

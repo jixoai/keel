@@ -170,7 +170,7 @@ func TestBindingWithoutResolverKeepsDeploymentPromptAndTools(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
-	commitBindingInput(t, k, tenant, session, "binding-none", `{"modelId":"m","agentId":"agent_ignored"}`)
+	commitBindingInput(t, k, tenant, session, "binding-none", `{"modelId":"m","botId":"agent_ignored"}`)
 	rec := &captureStream{}
 	// The runner is built WITHOUT a binding resolver: the fact's binding keys
 	// are inert and the deployment surface applies untouched.
@@ -202,7 +202,7 @@ func TestBindingPromptReachesProviderAndKeepsSections(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
-	commitBindingInput(t, k, tenant, session, "binding-prompt", `{"modelId":"m","agentId":"agent_kite7"}`)
+	commitBindingInput(t, k, tenant, session, "binding-prompt", `{"modelId":"m","botId":"agent_kite7"}`)
 	rec := &captureStream{}
 	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash")},
 		&stubBindings{surface: RunSurface{
@@ -243,7 +243,7 @@ func TestBindingToolGrantsFilterTheSurface(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
-	commitBindingInput(t, k, tenant, session, "binding-grants", `{"modelId":"m","agentId":"agent_grant"}`)
+	commitBindingInput(t, k, tenant, session, "binding-grants", `{"modelId":"m","botId":"agent_grant"}`)
 	rec := &captureStream{}
 	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read", "agent")},
 		&stubBindings{surface: RunSurface{
@@ -272,7 +272,7 @@ func TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled(t *testing.T) {
 			st := testStore(t)
 			tenant, session := newSession(t, st)
 			k := testKernel(t, st)
-			commitBindingInput(t, k, tenant, session, "binding-team", `{"modelId":"m","teamId":"team_kite"}`)
+			commitBindingInput(t, k, tenant, session, "binding-team", `{"modelId":"m","teamBotId":"team_kite"}`)
 			rec := &captureStream{}
 			r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "read", "agent")},
 				&stubBindings{surface: RunSurface{
@@ -342,8 +342,8 @@ func TestBindingDefaultModelAppliesOnlyWithoutAChoice(t *testing.T) {
 		selection string
 		wantModel string
 	}{
-		{name: "fact names a model", selection: `{"providerId":"p-user","modelId":"m-user","agentId":"a"}`, wantModel: "m-user"},
-		{name: "fact names only the binding", selection: `{"agentId":"a"}`, wantModel: "m-agent"},
+		{name: "fact names a model", selection: `{"providerId":"p-user","modelId":"m-user","botId":"a"}`, wantModel: "m-user"},
+		{name: "fact names only the binding", selection: `{"botId":"a"}`, wantModel: "m-agent"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -379,7 +379,7 @@ func TestBindingResolverFailureFailsBeforeAnyCommit(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
-	commitBindingInput(t, k, tenant, session, "binding-fail", `{"agentId":"agent_gone"}`)
+	commitBindingInput(t, k, tenant, session, "binding-fail", `{"botId":"agent_gone"}`)
 	before := len(eventsOf(t, st, tenant, session))
 	r := bindingRunner(k, nil, &stubBindings{err: errors.New(`agentId "agent_gone" does not exist`)}, nil, FakeStream())
 	lease := claimScope(t, k, tenant, session)
@@ -401,7 +401,7 @@ func TestMergeSelectionDefaultModel(t *testing.T) {
 		want      string
 	}{
 		{name: "empty fact gains the default", selection: "{}", want: `{"modelId":"m","providerId":"p"}`},
-		{name: "binding-only fact gains the default", selection: `{"agentId":"a"}`, want: `{"agentId":"a","modelId":"m","providerId":"p"}`},
+		{name: "binding-only fact gains the default", selection: `{"botId":"a"}`, want: `{"botId":"a","modelId":"m","providerId":"p"}`},
 		{name: "chosen model wins", selection: `{"modelId":"chosen"}`, want: `{"modelId":"chosen"}`},
 		{name: "half binding is left to the resolver", selection: `{"providerId":"p2"}`, want: `{"providerId":"p2"}`},
 		{name: "reasoning level survives the merge", selection: `{"reasoningLevel":"high"}`, want: `{"modelId":"m","providerId":"p","reasoningLevel":"high"}`},
@@ -425,10 +425,10 @@ func TestMergeSelectionDefaultModel(t *testing.T) {
 		t.Fatalf("nil fact without a binding = %s, want nil", got)
 	}
 	// A nil or incomplete binding changes nothing.
-	if got := MergeSelectionDefaultModel(json.RawMessage(`{"agentId":"a"}`), nil); string(got) != `{"agentId":"a"}` {
+	if got := MergeSelectionDefaultModel(json.RawMessage(`{"botId":"a"}`), nil); string(got) != `{"botId":"a"}` {
 		t.Fatalf("nil binding changed the fact: %s", got)
 	}
-	if got := MergeSelectionDefaultModel(json.RawMessage(`{"agentId":"a"}`), &SurfaceModelBinding{ProviderID: "p"}); string(got) != `{"agentId":"a"}` {
+	if got := MergeSelectionDefaultModel(json.RawMessage(`{"botId":"a"}`), &SurfaceModelBinding{ProviderID: "p"}); string(got) != `{"botId":"a"}` {
 		t.Fatalf("half binding changed the fact: %s", got)
 	}
 }
@@ -453,7 +453,7 @@ func TestBindingEmptyToolSurfaceUnblocksNoToolModels(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
-	commitBindingInput(t, k, tenant, session, "binding-notools", `{"modelId":"m","agentId":"agent_notools"}`)
+	commitBindingInput(t, k, tenant, session, "binding-notools", `{"modelId":"m","botId":"agent_notools"}`)
 	wire := &captureStream{}
 	resolver := &stubResolver{resolved: ActiveModel{
 		ProviderID: "p", Model: "no-tools", Stream: wire.fn(),
@@ -500,7 +500,7 @@ func TestRecoveryDoesNotExecuteToolsOutsideTheGrant(t *testing.T) {
 	k := testKernel(t, st)
 	scope := kernel.Scope{TenantID: tenant, SessionID: session}
 
-	commitBindingInput(t, k, tenant, session, "binding-recovery", `{"modelId":"m","agentId":"agent_grant"}`)
+	commitBindingInput(t, k, tenant, session, "binding-recovery", `{"modelId":"m","botId":"agent_grant"}`)
 	// A previous attempt committed an assistant tool call for "read" and died
 	// before committing its result.
 	lease := claimScope(t, k, tenant, session)
@@ -562,7 +562,7 @@ func TestCaptainSeesTheTeamRoster(t *testing.T) {
 	st := testStore(t)
 	tenant, session := newSession(t, st)
 	k := testKernel(t, st)
-	commitBindingInput(t, k, tenant, session, "binding-roster", `{"modelId":"m","teamId":"team_kite"}`)
+	commitBindingInput(t, k, tenant, session, "binding-roster", `{"modelId":"m","teamBotId":"team_kite"}`)
 	rec := &captureStream{}
 	r := bindingRunner(k, renderingAssembly{prompt: "deployment prompt", tools: registryWith("bash", "agent")},
 		&stubBindings{surface: RunSurface{
@@ -571,8 +571,8 @@ func TestCaptainSeesTheTeamRoster(t *testing.T) {
 			AgentID:  "agent_captain",
 			TeamID:   "team_kite",
 			Members: []RosterMember{
-				{AgentID: "agent_reviewer", Label: "Reviewer", Description: "reviews the draft"},
-				{AgentID: "agent_writer", Label: "Writer"},
+				{BotID: "agent_reviewer", Label: "Reviewer", Description: "reviews the draft"},
+				{BotID: "agent_writer", Label: "Writer"},
 			},
 		}}, nil, rec.fn())
 	runAttemptOf(t, k, r, tenant, session)

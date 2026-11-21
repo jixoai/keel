@@ -267,7 +267,7 @@ func newAccessPGEnv(t *testing.T) *accessPGEnv {
 	})
 	api := httpapi.New(httpapi.Config{
 		Store: st, Events: emptyEvents{}, Product: product, Access: bridge,
-		AgentTeams: st, Logger: accessTestLogger(),
+		Logger: accessTestLogger(),
 	})
 	env.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rawAccount := r.Header.Get("X-Test-Account")
@@ -581,8 +581,6 @@ func TestEndpointFamilyStatuses(t *testing.T) {
 		{http.MethodGet, "/v1/team-bots"},
 		{http.MethodGet, "/v1/team-bots/family-team"},
 		{http.MethodGet, "/v1/triggers"},
-		{http.MethodGet, "/v1/agents"},
-		{http.MethodGet, "/v1/teams"},
 		{http.MethodGet, "/v1/capabilities"},
 	}
 	for _, probe := range allowed {
@@ -602,19 +600,32 @@ func TestEndpointFamilyStatuses(t *testing.T) {
 	wantStatus(t, status, body, http.StatusNotFound, "owner missing trigger")
 }
 
-// TestLegacyAgentTeamRoutesAreNeverZeroPermission pins the A4.2b-deferred
-// surface: the old routes stay mounted but are gated (bot/team_bot held keys),
-// so removing them later is not a security prerequisite.
-func TestLegacyAgentTeamRoutesAreNeverZeroPermission(t *testing.T) {
+// TestRetiredAgentTeamRoutesAre404 pins the A4.2b deletion: the old product
+// routes are gone, with no redirect and no alias. A zero-grant caller gets the
+// same 404 as an owner — the route does not exist, so there is nothing to leak
+// and nothing to authorize.
+func TestRetiredAgentTeamRoutesAre404(t *testing.T) {
 	env := newAccessPGEnv(t)
 	for _, probe := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/agents"},
 		{http.MethodPost, "/v1/agents"},
+		{http.MethodGet, "/v1/agents/anything"},
+		{http.MethodPut, "/v1/agents/anything"},
+		{http.MethodDelete, "/v1/agents/anything"},
+		{http.MethodPost, "/v1/agents/anything/archive"},
 		{http.MethodGet, "/v1/teams"},
 		{http.MethodPost, "/v1/teams"},
+		{http.MethodGet, "/v1/teams/anything"},
+		{http.MethodPut, "/v1/teams/anything"},
+		{http.MethodDelete, "/v1/teams/anything"},
+		{http.MethodPost, "/v1/teams/anything/archive"},
+		{http.MethodPost, "/v1/teams/anything/members"},
+		{http.MethodDelete, "/v1/teams/anything/members/agent"},
 	} {
-		status, body := env.do(probe.method, probe.path, env.zero, nil)
-		wantStatus(t, status, body, http.StatusForbidden, "zero "+probe.method+" "+probe.path)
+		for _, principal := range []store.AccountRecord{env.owner, env.zero} {
+			status, body := env.do(probe.method, probe.path, principal, nil)
+			wantStatus(t, status, body, http.StatusNotFound, "retired "+probe.method+" "+probe.path)
+		}
 	}
 }
 

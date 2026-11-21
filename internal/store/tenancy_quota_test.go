@@ -1,5 +1,7 @@
-// Tenancy storage tests: API keys, byte usage, the RLS boundary and the edge
-// quota row (change keel-ga §2).
+// Tenancy storage tests: byte usage, the RLS boundary and the edge quota row
+// (change keel-ga §2). The tenant-wide api_keys credential is retired
+// (A4.2b3a): Bot keys are the only machine credential and are covered by
+// bot_keys/identity tests.
 //
 // The RLS tests are the load-bearing ones: they prove that a query on the
 // tenant pool without app.tenant_id sees nothing, and that setting it to one
@@ -31,81 +33,6 @@ func tenancyStore(t *testing.T) *Store {
 	}
 	t.Cleanup(st.Close)
 	return st
-}
-
-// TestAPIKeyLifecycle pins mint → lookup → revoke: the hash is the identity, a
-// revoked key is indistinguishable from an unknown one, and a key for a tenant
-// that does not exist never resolves.
-func TestAPIKeyLifecycle(t *testing.T) {
-	st := tenancyStore(t)
-	ctx := context.Background()
-	tenant := uuid.New()
-	if err := st.CreateTenant(ctx, tenant, "keys"); err != nil {
-		t.Fatal(err)
-	}
-	// The test database is shared across runs, so the key material carries a
-	// fresh nonce: the unique hash index would otherwise reject a re-run.
-	hash := APIKeyHash("keel_tenant_abcdefgh_" + uuid.NewString())
-	keyID := uuid.New()
-	created, err := st.CreateAPIKey(ctx, tenant, keyID, hash, "keel_tenant_abcdefgh", APIKeyRoleTenant, "test")
-	if err != nil {
-		t.Fatalf("create key: %v", err)
-	}
-	if created.KeyID != keyID || created.TenantID != tenant || created.Role != APIKeyRoleTenant {
-		t.Fatalf("created = %+v", created)
-	}
-
-	found, err := st.LookupAPIKey(ctx, hash)
-	if err != nil {
-		t.Fatalf("lookup: %v", err)
-	}
-	if found.TenantID != tenant || found.KeyID != keyID || found.Prefix != "keel_tenant_abcdefgh" {
-		t.Fatalf("lookup = %+v", found)
-	}
-
-	// An unknown key is ErrNoAPIKey, never a zero tenant.
-	if _, err := st.LookupAPIKey(ctx, APIKeyHash("keel_tenant_zzzzzzzz_"+uuid.NewString())); !errors.Is(err, ErrNoAPIKey) {
-		t.Fatalf("unknown key: %v", err)
-	}
-
-	if revoked, err := st.RevokeAPIKey(ctx, tenant, keyID); err != nil || !revoked {
-		t.Fatalf("revoke = %v %v", revoked, err)
-	}
-	if _, err := st.LookupAPIKey(ctx, hash); !errors.Is(err, ErrNoAPIKey) {
-		t.Fatalf("revoked key still resolved: %v", err)
-	}
-	// Revocation is idempotent.
-	if revoked, err := st.RevokeAPIKey(ctx, tenant, keyID); err != nil || !revoked {
-		t.Fatalf("second revoke = %v %v", revoked, err)
-	}
-	// A key of a missing tenant does not resolve even before revocation logic:
-	// the tenant join fails.
-	orphanTenant := uuid.New()
-	orphanHash := APIKeyHash("keel_tenant_orphan000_" + uuid.NewString())
-	if _, err := st.CreateAPIKey(ctx, orphanTenant, uuid.New(), orphanHash, "keel_tenant_orphan000", APIKeyRoleTenant, ""); err != nil {
-		t.Fatalf("create orphan key: %v", err)
-	}
-	if _, err := st.LookupAPIKey(ctx, orphanHash); !errors.Is(err, ErrNoAPIKey) {
-		t.Fatalf("orphan key resolved: %v", err)
-	}
-}
-
-// TestAPIKeyRejectsUnknownRoleAndBadHash pins the validation at the storage
-// boundary: a caller that skips auth.ValidRole still cannot write a role the
-// policies do not understand.
-func TestAPIKeyRejectsUnknownRoleAndBadHash(t *testing.T) {
-	st := tenancyStore(t)
-	ctx := context.Background()
-	tenant := uuid.New()
-	if err := st.CreateTenant(ctx, tenant, "keys-invalid"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.CreateAPIKey(ctx, tenant, uuid.New(), make([]byte, 32), "p", "superuser", ""); err == nil {
-		t.Fatal("unknown role was accepted")
-	}
-	if _, err := st.CreateAPIKey(ctx, tenant, uuid.New(), []byte("short"), "p", APIKeyRoleTenant, ""); err == nil {
-		t.Fatal("short hash was accepted")
-	}
 }
 
 // TestRLSCrossTenantReadsReturnNoRows is the spec's requirement: a session

@@ -495,10 +495,13 @@ func TestValidateSelectionFact(t *testing.T) {
 		{name: "not an object", raw: `["modelId"]`, wantErr: "must be a JSON object"},
 		{name: "trailing content", raw: `{"modelId":"m"} {}`, wantErr: "selection:"},
 		// The execution binding is part of the input fact's vocabulary: an input
-		// that names the Agent or AgentTeam answering it is a legal fact.
-		{name: "agent binding", raw: `{"modelId":"m","agentId":"agent_a"}`},
-		{name: "team binding", raw: `{"providerId":"p","modelId":"m","teamId":"team_a"}`},
-		{name: "binding without model", raw: `{"teamId":"team_a"}`},
+		// that names the Bot or TeamBot answering it is a legal fact.
+		{name: "bot binding", raw: `{"modelId":"m","botId":"bot_a"}`},
+		{name: "team bot binding", raw: `{"providerId":"p","modelId":"m","teamBotId":"team_a"}`},
+		{name: "binding without model", raw: `{"teamBotId":"team_a"}`},
+		// The retired Agent spellings are unknown keys, not aliases.
+		{name: "retired agent binding", raw: `{"modelId":"m","agentId":"agent_a"}`, wantErr: `unknown key "agentId"`},
+		{name: "retired team binding", raw: `{"modelId":"m","teamId":"team_a"}`, wantErr: `unknown key "teamId"`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -521,13 +524,13 @@ func TestValidateSelectionFact(t *testing.T) {
 
 // TestSelectionScopeDocumentRefusesBinding pins R2 of the runtime plan: the
 // tenant document's default selection is a MODEL identity, so the input fact's
-// execution binding (agentId/teamId) must be refused there. A document that
-// pinned an agent would silently make every session of that tenant the agent,
-// with no session saying so.
+// execution binding (botId/teamBotId) must be refused there. A document that
+// pinned a Bot would silently make every session of that tenant that Bot, with
+// no session saying so.
 func TestSelectionScopeDocumentRefusesBinding(t *testing.T) {
 	for _, raw := range []string{
-		`{"modelId":"m","agentId":"agent_a"}`,
-		`{"modelId":"m","teamId":"team_a"}`,
+		`{"modelId":"m","botId":"bot_a"}`,
+		`{"modelId":"m","teamBotId":"team_a"}`,
 	} {
 		if err := ValidateSelectionFactIn([]byte(raw), SelectionScopeDocument); err == nil {
 			t.Fatalf("ValidateSelectionFactIn(%q, document) = nil, want an unknown-key refusal", raw)
@@ -538,20 +541,20 @@ func TestSelectionScopeDocumentRefusesBinding(t *testing.T) {
 		t.Fatalf("the model vocabulary must stay legal on the document scope: %v", err)
 	}
 	// And the document overlay path refuses it too, end to end.
-	if _, err := OverlayFromDocument([]byte(`{"selection":{"modelId":"m","teamId":"t"}}`), LegacyAgent{}); err == nil {
-		t.Fatal("a tenant document selection carrying teamId must be refused")
+	if _, err := OverlayFromDocument([]byte(`{"selection":{"modelId":"m","teamBotId":"t"}}`), LegacyAgent{}); err == nil {
+		t.Fatal("a tenant document selection carrying teamBotId must be refused")
 	}
-	if _, err := OverlayFromDocument([]byte(`{"selection":{"modelId":"m","agentId":"a"}}`), LegacyAgent{}); err == nil {
-		t.Fatal("a tenant document selection carrying agentId must be refused")
+	if _, err := OverlayFromDocument([]byte(`{"selection":{"modelId":"m","botId":"b"}}`), LegacyAgent{}); err == nil {
+		t.Fatal("a tenant document selection carrying botId must be refused")
 	}
 	// ParseSelection still decodes the binding on the input path (the resolver
 	// needs the values, not just the shape).
-	parsed, err := ParseSelection([]byte(`{"modelId":"m","agentId":"a","teamId":"t"}`))
+	parsed, err := ParseSelection([]byte(`{"modelId":"m","botId":"b","teamBotId":"t"}`))
 	if err != nil {
 		t.Fatalf("ParseSelection with binding: %v", err)
 	}
-	if parsed.AgentID != "a" || parsed.TeamID != "t" {
-		t.Fatalf("decoded binding = %q/%q, want a/t", parsed.AgentID, parsed.TeamID)
+	if parsed.BotID != "b" || parsed.TeamBotID != "t" {
+		t.Fatalf("decoded binding = %q/%q, want b/t", parsed.BotID, parsed.TeamBotID)
 	}
 }
 

@@ -175,7 +175,7 @@ func (a *Authorizer) AuthorizeToolCall(ctx context.Context, scope kernel.Scope, 
 //
 // The ambient session is the default resource for every session-scoped tool.
 // The agent tool is different: its resource is the TARGET Bot, resolved from
-// agentId/selection.agentId/sessionId (or the run's own Bot when the call
+// botId/selection.botId/sessionId (or the run's own Bot when the call
 // delegates to itself). An unresolvable target denies with the same
 // missing_relation shape as a real unauthorized target, so the model cannot
 // use the error to probe existence.
@@ -209,7 +209,7 @@ func (a *Authorizer) requirements(ctx context.Context, scope kernel.Scope, princ
 
 // agentRequirements resolves every bot.invoke target of the `agent` tool.
 //
-// The call may name a target twice (top-level agentId AND selection.agentId).
+// The call may name a target twice (top-level botId AND selection.botId).
 // The backend prefers a non-empty selection over the top-level field, so the
 // union is deliberate: a caller cannot have the authorization check look at one
 // target while the actual child binding uses another.
@@ -302,24 +302,24 @@ func (a *Authorizer) agentRequirements(ctx context.Context, scope kernel.Scope, 
 	}
 }
 
-// agentTargets returns every Bot the call itself names: the top-level agentId
-// and selection.agentId (when the selection does not name a team). A team
+// agentTargets returns every Bot the call itself names: the top-level botId
+// and selection.botId (when the selection does not name a team). A team
 // selection decides its own captain, so it is not a bot target here.
 func agentTargets(args json.RawMessage) []string {
 	out := make([]string, 0, 2)
-	if explicit, ok := stringArgument(args, "agentId"); ok && explicit != "" {
+	if explicit, ok := stringArgument(args, "botId"); ok && explicit != "" {
 		out = append(out, explicit)
 	}
-	if selected, ok := selectionAgentID(args); ok && selected != "" {
+	if selected, ok := selectionBotID(args); ok && selected != "" {
 		out = append(out, selected)
 	}
 	return uniqueTargets(out)
 }
 
-// selectionAgentID reads a selection fact's agentId. A fact that names a team
+// selectionBotID reads a selection fact's botId. A fact that names a team
 // has no bot target: the team decides its captain, and the team binding keeps
 // its existing validation.
-func selectionAgentID(args json.RawMessage) (string, bool) {
+func selectionBotID(args json.RawMessage) (string, bool) {
 	raw, ok := rawArgument(args, "selection")
 	if !ok {
 		return "", false
@@ -329,16 +329,16 @@ func selectionAgentID(args json.RawMessage) (string, bool) {
 		return "", false
 	}
 	var fact struct {
-		AgentID string `json:"agentId"`
-		TeamID  string `json:"teamId"`
+		BotID     string `json:"botId"`
+		TeamBotID string `json:"teamBotId"`
 	}
 	if err := json.Unmarshal(raw, &fact); err != nil {
 		return "", false
 	}
-	if strings.TrimSpace(fact.TeamID) != "" {
+	if strings.TrimSpace(fact.TeamBotID) != "" {
 		return "", false
 	}
-	return strings.TrimSpace(fact.AgentID), true
+	return strings.TrimSpace(fact.BotID), true
 }
 
 // uniqueTargets trims, drops empty and deduplicates targets in order.

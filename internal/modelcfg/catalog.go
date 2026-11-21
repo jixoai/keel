@@ -263,7 +263,7 @@ func decodeRule(obj map[string]any) (ruleDoc, error) {
 // payload yields the zero selection, which callers read as "no choice made".
 // The fact and the document share one model vocabulary, so the two cannot drift
 // apart; the input fact additionally carries the execution binding
-// (agentId/teamId), which is normalized here and never routes a model.
+// (botId/teamBotId), which is normalized here and never routes a model.
 func ParseSelection(raw []byte) (Selection, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
@@ -284,13 +284,16 @@ func ParseSelection(raw []byte) (Selection, error) {
 var selectionKeys = []string{"providerId", "modelId", "reasoningLevel", "providerType", "surfaceKind", "options"}
 
 // selectionBindingKeys is the input-fact vocabulary: the model keys plus the
-// execution binding. agentId/teamId say *which configured agent or team* answers
-// this input; they never name a model, so the resolver reads them for the
-// prompt/tool surface and nothing else. A tenant document MUST NOT carry them
-// (ValidateDocumentSelectionFact uses selectionKeys alone): the deployment
-// default is a model identity, and a document that pinned an agent would make
-// every session of the tenant that agent without any session saying so.
-var selectionBindingKeys = append(append([]string{}, selectionKeys...), "agentId", "teamId")
+// execution binding. botId/teamBotId say *which configured Bot or TeamBot*
+// answers this input; they never name a model, so the resolver reads them for
+// the prompt/tool surface and nothing else. A tenant document MUST NOT carry
+// them (ValidateDocumentSelectionFact uses selectionKeys alone): the deployment
+// default is a model identity, and a document that pinned a Bot would make every
+// session of the tenant that Bot without any session saying so.
+//
+// The retired agentId/teamId spellings are deliberately absent: a stored fact
+// carrying them is rejected as an unknown key, never aliased.
+var selectionBindingKeys = append(append([]string{}, selectionKeys...), "botId", "teamBotId")
 
 var selectionOptionKeys = []string{"reasoningLevel"}
 
@@ -301,7 +304,7 @@ type SelectionScope string
 
 const (
 	// SelectionScopeInput is the vocabulary of a user.message selection fact:
-	// model identity plus the execution binding (agentId/teamId).
+	// model identity plus the execution binding (botId/teamBotId).
 	SelectionScopeInput SelectionScope = "input"
 	// SelectionScopeDocument is the vocabulary of a tenant document's default
 	// selection: model identity only.
@@ -410,8 +413,8 @@ func decodeSelection(raw any) (Selection, error) {
 		ReasoningLevel string `json:"reasoningLevel"`
 		ProviderType   string `json:"providerType"`
 		SurfaceKind    string `json:"surfaceKind"`
-		AgentID        string `json:"agentId"`
-		TeamID         string `json:"teamId"`
+		BotID          string `json:"botId"`
+		TeamBotID      string `json:"teamBotId"`
 		Options        *struct {
 			ReasoningLevel string `json:"reasoningLevel"`
 		} `json:"options"`
@@ -433,8 +436,8 @@ func decodeSelection(raw any) (Selection, error) {
 		ReasoningLevel: strings.TrimSpace(decoded.ReasoningLevel),
 		ProviderType:   providerType,
 		SurfaceKind:    surfaceKind,
-		AgentID:        strings.TrimSpace(decoded.AgentID),
-		TeamID:         strings.TrimSpace(decoded.TeamID),
+		BotID:          strings.TrimSpace(decoded.BotID),
+		TeamBotID:      strings.TrimSpace(decoded.TeamBotID),
 	}
 	if selection.ReasoningLevel == "" && decoded.Options != nil {
 		selection.ReasoningLevel = strings.TrimSpace(decoded.Options.ReasoningLevel)

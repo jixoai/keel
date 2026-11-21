@@ -45,8 +45,6 @@ func runAdminCmd(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "tenant":
 		return runAdminTenant(args[1:], stdout, stderr)
-	case "key":
-		return runAdminKey(args[1:], stdout, stderr)
 	case "quota":
 		return runAdminQuota(args[1:], stdout, stderr)
 	case "usage":
@@ -71,12 +69,9 @@ func adminUsage(w io.Writer) {
 Usage:
   keel admin bootstrap [--tenant <uuid>] [--name <text>] [--ttl 30m] [--token-file <path>]
   keel admin reset --username <name> [--tenant <uuid>]
-  keel admin tenant create --name <name> [--tenant <uuid>] [--role tenant|admin] [--no-key]
+  keel admin tenant create --name <name> [--tenant <uuid>]
   keel admin tenant list
   keel admin tenant show <uuid>
-  keel admin key list --tenant <uuid>
-  keel admin key create --tenant <uuid> [--role tenant|admin] [--label <text>]
-  keel admin key revoke --tenant <uuid> --key <uuid>
   keel admin quota set --tenant <uuid> [--streams n] [--bytes-per-sec n] [--storage-bytes n]
   keel admin quota show --tenant <uuid>
 
@@ -279,9 +274,6 @@ func runAdminTenantCreate(args []string, stdout, stderr io.Writer) int {
 	var (
 		name   = fs.String("name", "", "tenant display name (required)")
 		tenant = fs.String("tenant", "", "tenant UUID (minted when omitted)")
-		role   = fs.String("role", auth.RoleTenant, "role of the minted key: tenant|admin")
-		label  = fs.String("label", "provisioned", "label of the minted key")
-		noKey  = fs.Bool("no-key", false, "create the tenant without an API key")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -299,10 +291,6 @@ func runAdminTenantCreate(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		tenantID = parsed
-	}
-	if !auth.ValidRole(*role) {
-		fmt.Fprintf(stderr, "keel admin tenant create: --role %q (want tenant|admin)\n", *role)
-		return 2
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -329,35 +317,6 @@ func runAdminTenantCreate(args []string, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintln(stdout, "created: no (tenant already existed; name unchanged)")
 	}
-	if *noKey {
-		return 0
-	}
-	if code := mintAndPrintKey(ctx, st, tenantID, *role, *label, stdout, stderr); code != 0 {
-		return code
-	}
-	return 0
-}
-
-// mintAndPrintKey mints a key, persists its hash and prints the plaintext once.
-// The plaintext never touches the store, a log or an error path.
-func mintAndPrintKey(ctx context.Context, st *store.Store, tenantID uuid.UUID, role, label string, stdout, stderr io.Writer) int {
-	minted, err := auth.MintKey(role)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	keyID := uuid.New()
-	if _, err := st.CreateAPIKey(ctx, tenantID, keyID, minted.Hash, minted.Prefix, minted.Role, strings.TrimSpace(label)); err != nil {
-		fmt.Fprintf(stderr, "keel admin: mint api key: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "key id:  %s\n", keyID)
-	fmt.Fprintf(stdout, "prefix:  %s\n", minted.Prefix)
-	fmt.Fprintf(stdout, "role:    %s\n", minted.Role)
-	// The one and only appearance of the secret. Everything around it is
-	// deliberate: it is on its own line, labelled, and the notice follows.
-	fmt.Fprintf(stdout, "\nAPI KEY (shown once, store it now):\n%s\n\n", minted.Plaintext)
-	fmt.Fprintln(stdout, "This key cannot be shown again. Mint a new one if it is lost.")
 	return 0
 }
 
@@ -427,164 +386,6 @@ func runAdminTenantShow(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "created: %s\n", tenant.CreatedAt.UTC().Format(time.RFC3339))
 	fmt.Fprintf(stdout, "quota:   streams=%d bytes/sec=%d storage=%d\n",
 		tenant.Quota.Streams, tenant.Quota.BytesPerSec, tenant.Quota.StorageBytes)
-	keys, err := st.ListAPIKeys(ctx, tenantID)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	if len(keys) == 0 {
-		fmt.Fprintln(stdout, "keys:    none")
-		return 0
-	}
-	fmt.Fprintln(stdout, "keys:")
-	tw := tabwriter.NewWriter(stdout, 2, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  KEY\tPREFIX\tROLE\tLABEL\tCREATED\tREVOKED")
-	for _, key := range keys {
-		revoked := "-"
-		if key.RevokedAt != nil {
-			revoked = key.RevokedAt.UTC().Format(time.RFC3339)
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", key.KeyID, key.Prefix, key.Role,
-			key.Label, key.CreatedAt.UTC().Format(time.RFC3339), revoked)
-	}
-	_ = tw.Flush()
-	return 0
-}
-
-func runAdminKey(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		adminUsage(stderr)
-		return 2
-	}
-	switch args[0] {
-	case "list":
-		return runAdminKeyList(args[1:], stdout, stderr)
-	case "create":
-		return runAdminKeyCreate(args[1:], stdout, stderr)
-	case "revoke":
-		return runAdminKeyRevoke(args[1:], stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "keel admin key: unknown command %q\n", args[0])
-		return 2
-	}
-}
-
-func runAdminKeyList(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("keel admin key list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	tenant := fs.String("tenant", "", "tenant UUID (required)")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	tenantID, ok := parseAdminTenant(*tenant, "keel admin key list", stderr)
-	if !ok {
-		return 2
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	st, err := adminStore(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	defer st.Close()
-	keys, err := st.ListAPIKeys(ctx, tenantID)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	if len(keys) == 0 {
-		fmt.Fprintln(stdout, "no keys")
-		return 0
-	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "KEY\tPREFIX\tROLE\tLABEL\tCREATED\tREVOKED")
-	for _, key := range keys {
-		revoked := "-"
-		if key.RevokedAt != nil {
-			revoked = key.RevokedAt.UTC().Format(time.RFC3339)
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", key.KeyID, key.Prefix, key.Role,
-			key.Label, key.CreatedAt.UTC().Format(time.RFC3339), revoked)
-	}
-	_ = tw.Flush()
-	return 0
-}
-
-func runAdminKeyCreate(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("keel admin key create", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	var (
-		tenant = fs.String("tenant", "", "tenant UUID (required)")
-		role   = fs.String("role", auth.RoleTenant, "role: tenant|admin")
-		label  = fs.String("label", "", "label for the key")
-	)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	tenantID, ok := parseAdminTenant(*tenant, "keel admin key create", stderr)
-	if !ok {
-		return 2
-	}
-	if !auth.ValidRole(*role) {
-		fmt.Fprintf(stderr, "keel admin key create: --role %q (want tenant|admin)\n", *role)
-		return 2
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	st, err := adminStore(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	defer st.Close()
-	if exists, err := st.TenantExists(ctx, tenantID); err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	} else if !exists {
-		fmt.Fprintf(stderr, "keel admin: tenant %s not found\n", tenantID)
-		return 1
-	}
-	return mintAndPrintKey(ctx, st, tenantID, *role, *label, stdout, stderr)
-}
-
-func runAdminKeyRevoke(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("keel admin key revoke", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	var (
-		tenant = fs.String("tenant", "", "tenant UUID (required)")
-		key    = fs.String("key", "", "key UUID (required)")
-	)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	tenantID, ok := parseAdminTenant(*tenant, "keel admin key revoke", stderr)
-	if !ok {
-		return 2
-	}
-	keyID, err := uuid.Parse(strings.TrimSpace(*key))
-	if err != nil {
-		fmt.Fprintln(stderr, "keel admin key revoke: --key must be a UUID")
-		return 2
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	st, err := adminStore(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	defer st.Close()
-	found, err := st.RevokeAPIKey(ctx, tenantID, keyID)
-	if err != nil {
-		fmt.Fprintf(stderr, "keel admin: %v\n", err)
-		return 1
-	}
-	if !found {
-		fmt.Fprintf(stderr, "keel admin: key %s not found for tenant %s\n", keyID, tenantID)
-		return 1
-	}
-	fmt.Fprintf(stdout, "revoked: %s\n", keyID)
 	return 0
 }
 

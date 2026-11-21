@@ -116,17 +116,6 @@ type Config struct {
 	// A non-nil error means the relation is committed but unaudited, and the
 	// route reports 500 rather than pretending success.
 	AuditRelation func(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string) error
-	// AgentTeams is the persistence seam of the agent registry and agent-team
-	// surfaces (GET/POST/PUT/DELETE /v1/agents and /v1/teams plus the member
-	// routes). Nil answers 503 on all of them: an unwired deployment serves no
-	// empty library that would look like "nothing exists".
-	AgentTeams AgentTeamRegistry
-	// ToolExists answers whether a tool id is available to this tenant, at the
-	// moment an agent is saved (spec: 保存 Agent 时校验 toolId 存在). Nil skips the
-	// existence check and keeps the shape/duplicate checks the domain owns. The
-	// host binds it to the live plugin tool surface, so an uninstalled plugin
-	// stops validating new saves without a restart.
-	ToolExists func(toolID string) bool
 	// Partials is the token-level bypass seam for the SSE handler. Nil keeps
 	// ?partials=1 a no-op.
 	Partials PartialSource
@@ -249,9 +238,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
 	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
-	// Agent registry and agent teams (change keel-agent-team-v1, P2/P3). They
-	// answer 503 when no registry seam is wired.
-	s.registerAgentTeamRoutes()
 	// Product-layer AgentAPI (keel-agent): its own mux owns the remaining /v1
 	// patterns. The more specific patterns above win, so the existing edge
 	// contract is unchanged.

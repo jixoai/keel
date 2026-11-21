@@ -281,13 +281,15 @@ type Selection struct {
 	ReasoningLevel string `json:"reasoningLevel,omitempty"`
 	ProviderType   string `json:"providerType,omitempty"`
 	SurfaceKind    string `json:"surfaceKind,omitempty"`
-	// AgentID and TeamID are the input fact's execution binding: they name the
-	// configured Agent (standard mode) or AgentTeam (team mode) that answers
-	// this input. They never select a model — the resolver reads them for the
-	// prompt and tool surface — and a tenant document must not carry them (see
-	// SelectionScopeDocument).
-	AgentID string `json:"agentId,omitempty"`
-	TeamID  string `json:"teamId,omitempty"`
+	// BotID and TeamBotID are the input fact's execution binding (change
+	// keel-bot-identity-access, A4.2b3a): they name the configured Bot
+	// (standard mode) or TeamBot (team mode) that answers this input. They never
+	// select a model — the resolver reads them for the prompt and tool surface —
+	// and a tenant document must not carry them (see SelectionScopeDocument).
+	// The retired agentId/teamId spellings are unknown keys, so an old client is
+	// refused at the edge instead of silently selecting nothing.
+	BotID     string `json:"botId,omitempty"`
+	TeamBotID string `json:"teamBotId,omitempty"`
 }
 
 // Issue is one configuration problem tied to a dotted field path.

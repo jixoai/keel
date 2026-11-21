@@ -1,14 +1,13 @@
 package store
 
-// Session binding projection (change keel-agent-team-v1, P3 session reference
-// protection). These tests run against the real test database (KEEL_TEST_DSN):
-// the schema migration, the seq-guarded write, the reference queries' archived/
-// live-run boundary, and tenant isolation are all SQL behaviour.
+// Session binding projection (change keel-bot-identity-access, A4.2b3a). These
+// tests run against the real test database (KEEL_TEST_DSN): the schema no
+// longer carries the pre-A4 bound_* columns, sessions.bot_id/team_bot_id are
+// the ownership truth, and a selection can never move that ownership.
 
 import (
 	"context"
-	"fmt"
-	"sync"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,349 +18,203 @@ func cleanupSessionBindingTenant(t *testing.T, st *Store, tenants ...uuid.UUID) 
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, tenant := range tenants {
-			_, _ = st.Pool().Exec(ctx, `DELETE FROM runs WHERE tenant_id = $1`, tenant)
 			_, _ = st.Pool().Exec(ctx, `DELETE FROM events WHERE tenant_id = $1`, tenant)
 			_, _ = st.Pool().Exec(ctx, `DELETE FROM sessions WHERE tenant_id = $1`, tenant)
-			_, _ = st.Pool().Exec(ctx, `DELETE FROM agents WHERE tenant_id = $1`, tenant)
-			_, _ = st.Pool().Exec(ctx, `DELETE FROM agent_teams WHERE tenant_id = $1`, tenant)
+			_, _ = st.Pool().Exec(ctx, `DELETE FROM team_bots WHERE tenant_id = $1`, tenant)
+			_, _ = st.Pool().Exec(ctx, `DELETE FROM bots WHERE tenant_id = $1`, tenant)
+			_, _ = st.Pool().Exec(ctx, `DELETE FROM profiles WHERE tenant_id = $1`, tenant)
+			_, _ = st.Pool().Exec(ctx, `DELETE FROM roles WHERE tenant_id = $1`, tenant)
+			_, _ = st.Pool().Exec(ctx, `DELETE FROM accounts WHERE tenant_id = $1`, tenant)
 			_, _ = st.Pool().Exec(ctx, `DELETE FROM tenants WHERE tenant_id = $1`, tenant)
 		}
 	})
 }
 
-// TestSessionBindingSchemaMigrates pins the additive DDL: the projection columns
-// exist with the types the store scans, and the two reference indexes exist so
-// the guard is not a table scan.
-func TestSessionBindingSchemaMigrates(t *testing.T) {
+// TestSessionBindingSchemaDropsLegacyColumns pins the retirement: the old
+// newest-selection columns and indexes are gone, and the ownership columns the
+// projection reads exist.
+func TestSessionBindingSchemaDropsLegacyColumns(t *testing.T) {
 	st := readyTestStore(t)
 	ctx := context.Background()
 
-	wantColumns := map[string]string{
-		"bound_agent_id": "text",
-		"bound_team_id":  "text",
-		"bound_seq":      "bigint",
-		"bound_at":       "timestamp with time zone",
-	}
-	for column, wantType := range wantColumns {
-		var dataType string
+	for _, column := range []string{"bound_agent_id", "bound_team_id", "bound_seq", "bound_at"} {
+		var exists bool
 		if err := st.Pool().QueryRow(ctx,
-			`SELECT data_type FROM information_schema.columns
-			  WHERE table_schema = current_schema() AND table_name = 'sessions' AND column_name = $1`,
-			column).Scan(&dataType); err != nil {
-			t.Fatalf("sessions.%s missing: %v", column, err)
+			`SELECT EXISTS (
+			    SELECT 1 FROM information_schema.columns
+			     WHERE table_schema = current_schema() AND table_name = 'sessions' AND column_name = $1
+			 )`, column).Scan(&exists); err != nil {
+			t.Fatal(err)
 		}
-		if dataType != wantType {
-			t.Fatalf("sessions.%s type = %q, want %q", column, dataType, wantType)
+		if exists {
+			t.Fatalf("sessions.%s still exists; the legacy binding projection was not dropped", column)
 		}
 	}
 	for _, index := range []string{"sessions_bound_agent", "sessions_bound_team"} {
 		var exists bool
 		if err := st.Pool().QueryRow(ctx,
 			`SELECT to_regclass($1) IS NOT NULL`, index).Scan(&exists); err != nil {
-			t.Fatalf("probe index %s: %v", index, err)
+			t.Fatal(err)
+		}
+		if exists {
+			t.Fatalf("index %s still exists", index)
+		}
+	}
+	for _, column := range []string{"bot_id", "team_bot_id"} {
+		var exists bool
+		if err := st.Pool().QueryRow(ctx,
+			`SELECT EXISTS (
+			    SELECT 1 FROM information_schema.columns
+			     WHERE table_schema = current_schema() AND table_name = 'sessions' AND column_name = $1
+			 )`, column).Scan(&exists); err != nil {
+			t.Fatal(err)
 		}
 		if !exists {
-			t.Fatalf("index %s missing after migrate", index)
+			t.Fatalf("sessions.%s is missing", column)
 		}
 	}
 }
 
-// TestSessionBindingSeqGuard pins the newest-input-wins rule: an older seq can
-// never replace a newer binding, a model-only selection clears both ids, and the
-// tenant boundary makes another tenant's session invisible.
-func TestSessionBindingSeqGuard(t *testing.T) {
+// TestSessionBindingIsOwnership pins the projection: a selection naming the
+// session's own Bot/TeamBot applies; Get reads the ownership columns.
+func TestSessionBindingIsOwnership(t *testing.T) {
 	st := readyTestStore(t)
 	ctx := context.Background()
-	tenant, foreign := uuid.New(), uuid.New()
-	session := uuid.New()
-	cleanupSessionBindingTenant(t, st, tenant, foreign)
-	if err := st.CreateSession(ctx, tenant, session); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	// A fresh session has a readable zero projection (bound_at is NULL), not a
-	// scan error: the read is diagnostic and must survive "nothing bound yet".
-	fresh, found, err := st.GetSessionBinding(ctx, tenant, session)
-	if err != nil || !found {
-		t.Fatalf("fresh binding: found=%v err=%v", found, err)
-	}
-	if fresh != (SessionBinding{}) {
-		t.Fatalf("fresh binding = %+v, want zero", fresh)
-	}
+	account, _, _, bot := identityFixture(t, st)
+	cleanupSessionBindingTenant(t, st, account.TenantID)
 
-	applied, err := st.SetSessionBinding(ctx, tenant, session, "agent_a", "", 1)
-	if err != nil || !applied {
-		t.Fatalf("set agent binding: applied=%v err=%v", applied, err)
+	team, err := st.CreateTeamBot(ctx, TeamBotRecord{
+		TenantID: account.TenantID, ID: "team-" + account.Username, Name: "Team",
+		Mission: "ship", Roster: []byte(`[{"botId":"` + bot.ID + `","role":"captain"}]`),
+		Revision: 1, ContentHash: "hash",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	binding, found, err := st.GetSessionBinding(ctx, tenant, session)
+	sessionID := uuid.New()
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: account.TenantID, SessionID: sessionID, BotID: bot.ID,
+		AccountID: account.ID, CreatedByAccountID: account.ID, TeamBotID: team.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := st.SetSessionBinding(ctx, account.TenantID, sessionID, bot.ID, team.ID)
+	if err != nil || !applied {
+		t.Fatalf("matching binding applied=%v err=%v", applied, err)
+	}
+	binding, found, err := st.GetSessionBinding(ctx, account.TenantID, sessionID)
 	if err != nil || !found {
 		t.Fatalf("get binding: found=%v err=%v", found, err)
 	}
-	if binding.AgentID != "agent_a" || binding.TeamID != "" || binding.Seq != 1 {
-		t.Fatalf("binding = %+v, want agent_a seq 1", binding)
+	if binding.BotID != bot.ID || binding.TeamBotID != team.ID {
+		t.Fatalf("binding = %+v, want %s/%s", binding, bot.ID, team.ID)
 	}
-
-	// Team wins a fact that names both, and the projection follows the team.
-	applied, err = st.SetSessionBinding(ctx, tenant, session, "agent_b", "team_t", 2)
+	// A team selection carries no bot id; the projection is still the ownership.
+	applied, err = st.SetSessionBinding(ctx, account.TenantID, sessionID, "", team.ID)
 	if err != nil || !applied {
-		t.Fatalf("set team binding: applied=%v err=%v", applied, err)
+		t.Fatalf("team-only binding applied=%v err=%v", applied, err)
 	}
-	binding, _, _ = st.GetSessionBinding(ctx, tenant, session)
-	if binding.AgentID != "" || binding.TeamID != "team_t" || binding.Seq != 2 {
-		t.Fatalf("binding = %+v, want team_t seq 2", binding)
-	}
+}
 
-	// A delayed write carrying an older seq is a no-op (applied=false, no error).
-	applied, err = st.SetSessionBinding(ctx, tenant, session, "agent_stale", "", 1)
+// TestSessionBindingNeverMovesOwnership pins the delegation rule: a child
+// session may name a member Bot for its prompt/tools, but the ownership columns
+// keep the parent Bot.
+func TestSessionBindingNeverMovesOwnership(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	account, _, profile, bot := identityFixture(t, st)
+	cleanupSessionBindingTenant(t, st, account.TenantID)
+	member, err := st.CreateBot(ctx, BotRecord{
+		TenantID: account.TenantID, ID: bot.ID + "-member", Name: "Member",
+		ProfileID: profile.ID, ModelKind: "text",
+		DefaultModel: []byte(`{"providerId":"magpie","modelId":"qwen"}`),
+		Harness:      []byte(`{"tools":["bash"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := uuid.New()
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: account.TenantID, SessionID: sessionID, BotID: bot.ID,
+		AccountID: account.ID, CreatedByAccountID: account.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := st.SetSessionBinding(ctx, account.TenantID, sessionID, member.ID, "")
+	if err != nil {
+		t.Fatalf("surface-only binding: %v", err)
+	}
+	if applied {
+		t.Fatal("a selection naming another bot must not be applied to ownership")
+	}
+	binding, _, err := st.GetSessionBinding(ctx, account.TenantID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.BotID != bot.ID {
+		t.Fatalf("ownership moved to %q, want %q", binding.BotID, bot.ID)
+	}
+}
+
+// TestSessionBindingRefusesUnownedSession pins the fail-closed rule: a pre-A4
+// session with no Bot owner is not runnable and cannot be claimed by a
+// selection.
+func TestSessionBindingRefusesUnownedSession(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	account, _, _, bot := identityFixture(t, st)
+	cleanupSessionBindingTenant(t, st, account.TenantID)
+	sessionID := uuid.New()
+	if err := st.CreateSession(ctx, account.TenantID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := st.SetSessionBinding(ctx, account.TenantID, sessionID, bot.ID, ""); err != nil || applied {
+		t.Fatalf("unowned session binding applied=%v err=%v, want a no-op", applied, err)
+	}
+	if _, err := st.SetSessionBinding(ctx, account.TenantID, uuid.New(), bot.ID, ""); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("missing session binding err = %v, want ErrNoSession", err)
+	}
+	if _, err := st.SetSessionBinding(ctx, uuid.New(), sessionID, bot.ID, ""); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("foreign session binding err = %v, want ErrNoSession", err)
+	}
+}
+
+// TestSessionBindingTeamSnapshotIsExact pins the team projection: a team id that
+// differs from the session's mission snapshot is surface-only, not applied.
+func TestSessionBindingTeamSnapshotIsExact(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	account, _, _, bot := identityFixture(t, st)
+	cleanupSessionBindingTenant(t, st, account.TenantID)
+	first, err := st.CreateTeamBot(ctx, TeamBotRecord{
+		TenantID: account.TenantID, ID: "team-first-" + account.Username, Name: "First",
+		Mission: "ship", Roster: []byte(`[{"botId":"` + bot.ID + `","role":"captain"}]`),
+		Revision: 1, ContentHash: "hash-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateTeamBot(ctx, TeamBotRecord{
+		TenantID: account.TenantID, ID: "team-second-" + account.Username, Name: "Second",
+		Mission: "ship", Roster: []byte(`[{"botId":"` + bot.ID + `","role":"captain"}]`),
+		Revision: 1, ContentHash: "hash-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := uuid.New()
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: account.TenantID, SessionID: sessionID, BotID: bot.ID,
+		AccountID: account.ID, CreatedByAccountID: account.ID, TeamBotID: first.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := st.SetSessionBinding(ctx, account.TenantID, sessionID, "", second.ID)
 	if err != nil || applied {
-		t.Fatalf("stale write: applied=%v err=%v, want false/nil", applied, err)
+		t.Fatalf("foreign team projection applied=%v err=%v", applied, err)
 	}
-	binding, _, _ = st.GetSessionBinding(ctx, tenant, session)
-	if binding.TeamID != "team_t" || binding.Seq != 2 {
-		t.Fatalf("stale write replaced the binding: %+v", binding)
-	}
-
-	// A model-only selection (both ids empty) clears the projection.
-	applied, err = st.SetSessionBinding(ctx, tenant, session, "", "", 3)
-	if err != nil || !applied {
-		t.Fatalf("clear binding: applied=%v err=%v", applied, err)
-	}
-	binding, _, _ = st.GetSessionBinding(ctx, tenant, session)
-	if binding.AgentID != "" || binding.TeamID != "" || binding.Seq != 3 {
-		t.Fatalf("binding after clear = %+v, want empty seq 3", binding)
-	}
-
-	// Cross-tenant: the session exists, but not for this tenant.
-	if _, err := st.SetSessionBinding(ctx, foreign, session, "agent_x", "", 4); err != ErrNoSession {
-		t.Fatalf("foreign set error = %v, want ErrNoSession", err)
-	}
-	if _, found, err := st.GetSessionBinding(ctx, foreign, session); err != nil || found {
-		t.Fatalf("foreign get: found=%v err=%v, want false/nil", found, err)
-	}
-	// A missing session is the same typed refusal.
-	if _, err := st.SetSessionBinding(ctx, tenant, uuid.New(), "agent_x", "", 5); err != ErrNoSession {
-		t.Fatalf("missing set error = %v, want ErrNoSession", err)
-	}
-	// A non-positive seq is a programming error, never a silent write.
-	if _, err := st.SetSessionBinding(ctx, tenant, session, "agent_x", "", 0); err == nil {
-		t.Fatal("seq 0 was accepted")
-	}
-}
-
-// TestSessionReferencesBoundary pins the reference lifecycle:
-//   - an unarchived session blocks regardless of run state;
-//   - an archived session does not block;
-//   - an archived session with a live (pending/running) run still blocks, because
-//     archiving does not cancel the run;
-//   - the two id columns are separate (agent vs team), and other tenants never
-//     appear.
-func TestSessionReferencesBoundary(t *testing.T) {
-	st := readyTestStore(t)
-	ctx := context.Background()
-	tenant, foreign := uuid.New(), uuid.New()
-	cleanupSessionBindingTenant(t, st, tenant, foreign)
-	for _, id := range []uuid.UUID{tenant, foreign} {
-		if err := st.CreateTenant(ctx, id, "session-ref-"+id.String()[:8]); err != nil {
-			t.Fatalf("create tenant: %v", err)
-		}
-	}
-	active := uuid.New()
-	paused := uuid.New()
-	archived := uuid.New()
-	archivedLive := uuid.New()
-	agentBound := uuid.New()
-	foreignBound := uuid.New()
-	for _, session := range []uuid.UUID{active, paused, archived, archivedLive, agentBound} {
-		if err := st.CreateSession(ctx, tenant, session); err != nil {
-			t.Fatalf("create session %s: %v", session, err)
-		}
-	}
-	if err := st.CreateSession(ctx, foreign, foreignBound); err != nil {
-		t.Fatalf("create foreign session: %v", err)
-	}
-	for _, session := range []uuid.UUID{active, paused, archived, archivedLive} {
-		if _, err := st.SetSessionBinding(ctx, tenant, session, "", "team_busy", 1); err != nil {
-			t.Fatalf("bind team %s: %v", session, err)
-		}
-	}
-	// A paused (unarchived) session is still a reference: the user can resume it
-	// and its newest selection still names the team.
-	if _, err := st.Pool().Exec(ctx,
-		`UPDATE sessions SET state = 'paused' WHERE tenant_id = $1 AND session_id = $2`,
-		tenant, paused); err != nil {
-		t.Fatalf("mark paused: %v", err)
-	}
-	if _, err := st.SetSessionBinding(ctx, tenant, agentBound, "agent_busy", "", 1); err != nil {
-		t.Fatalf("bind agent: %v", err)
-	}
-	if _, err := st.SetSessionBinding(ctx, foreign, foreignBound, "", "team_busy", 1); err != nil {
-		t.Fatalf("bind foreign: %v", err)
-	}
-
-	// archivedLive owns a pending run; archiving the session does not cancel it.
-	if err := st.EnqueueRun(ctx, tenant, archivedLive); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-	for _, session := range []uuid.UUID{archived, archivedLive} {
-		found, err := st.ArchiveSession(ctx, tenant, session)
-		if err != nil || !found {
-			t.Fatalf("archive %s: found=%v err=%v", session, found, err)
-		}
-	}
-
-	byID := func(refs []SessionReference) map[string]SessionReference {
-		out := make(map[string]SessionReference, len(refs))
-		for _, ref := range refs {
-			out[ref.ID] = ref
-		}
-		return out
-	}
-	refs, total, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy")
-	if err != nil {
-		t.Fatalf("team references: %v", err)
-	}
-	if total != 3 {
-		t.Fatalf("team reference total = %d, want 3", total)
-	}
-	got := byID(refs)
-	if len(got) != 3 {
-		t.Fatalf("team references = %+v, want active + paused + archived-live", refs)
-	}
-	if _, ok := got[active.String()]; !ok {
-		t.Fatalf("active session missing from %+v", refs)
-	}
-	if pausedRef, ok := got[paused.String()]; !ok || pausedRef.State != "paused" {
-		t.Fatalf("paused session missing or mislabelled in %+v", refs)
-	}
-	live, ok := got[archivedLive.String()]
-	if !ok {
-		t.Fatalf("archived session with a live run missing from %+v", refs)
-	}
-	if !live.Archived || live.RunStatus != "pending" {
-		t.Fatalf("archived live reference = %+v, want archived pending", live)
-	}
-	if _, ok := got[archived.String()]; ok {
-		t.Fatalf("archived session without a live run still blocks: %+v", refs)
-	}
-	if _, ok := got[foreignBound.String()]; ok {
-		t.Fatalf("foreign tenant session leaked into references: %+v", refs)
-	}
-
-	agentRefs, agentTotal, err := st.SessionsReferencingAgent(ctx, tenant, "agent_busy")
-	if err != nil {
-		t.Fatalf("agent references: %v", err)
-	}
-	if agentTotal != 1 || len(agentRefs) != 1 || agentRefs[0].ID != agentBound.String() {
-		t.Fatalf("agent references = %+v, want the agent-bound session", agentRefs)
-	}
-	// The team-bound sessions are not agent references.
-	if refs, _, err := st.SessionsReferencingAgent(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
-		t.Fatalf("team id leaked into agent references: %+v err=%v", refs, err)
-	}
-
-	// A settled run stops blocking an archived session.
-	if _, err := st.Pool().Exec(ctx,
-		`UPDATE runs SET status = 'done' WHERE tenant_id = $1 AND session_id = $2`,
-		tenant, archivedLive); err != nil {
-		t.Fatalf("settle run: %v", err)
-	}
-	refs, total, err = st.SessionsReferencingTeam(ctx, tenant, "team_busy")
-	if err != nil || len(refs) != 2 || total != 2 {
-		t.Fatalf("after settle refs = %+v err=%v, want active + paused", refs, err)
-	}
-	left := byID(refs)
-	if _, ok := left[active.String()]; !ok {
-		t.Fatalf("active session missing after settle: %+v", refs)
-	}
-	if _, ok := left[paused.String()]; !ok {
-		t.Fatalf("paused session missing after settle: %+v", refs)
-	}
-
-	// Unbind paths: archive the remaining unarchived sessions, then a model-only
-	// input clears the agent binding. Both leave the projection row readable.
-	for _, session := range []uuid.UUID{active, paused} {
-		if found, err := st.ArchiveSession(ctx, tenant, session); err != nil || !found {
-			t.Fatalf("archive %s: found=%v err=%v", session, found, err)
-		}
-	}
-	if refs, _, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
-		t.Fatalf("archived sessions still block team: %+v err=%v", refs, err)
-	}
-	if _, err := st.SetSessionBinding(ctx, tenant, agentBound, "", "", 2); err != nil {
-		t.Fatalf("model-only clear: %v", err)
-	}
-	if refs, _, err := st.SessionsReferencingAgent(ctx, tenant, "agent_busy"); err != nil || len(refs) != 0 {
-		t.Fatalf("cleared agent binding still blocks: %+v err=%v", refs, err)
-	}
-}
-
-// TestSessionBindingConcurrentNewestWins pins the concurrency rule: N writers
-// racing on one session leave the highest seq as the binding, never whichever
-// goroutine happened to write last.
-func TestSessionBindingConcurrentNewestWins(t *testing.T) {
-	st := readyTestStore(t)
-	ctx := context.Background()
-	tenant, session := uuid.New(), uuid.New()
-	cleanupSessionBindingTenant(t, st, tenant)
-	if err := st.CreateSession(ctx, tenant, session); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	const writers = 32
-	var wg sync.WaitGroup
-	errs := make(chan error, writers)
-	for i := 0; i < writers; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			agentID := fmt.Sprintf("agent_%02d", i)
-			if _, err := st.SetSessionBinding(ctx, tenant, session, agentID, "", int64(i+1)); err != nil {
-				errs <- err
-			}
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Fatalf("concurrent binding write: %v", err)
-	}
-	binding, found, err := st.GetSessionBinding(ctx, tenant, session)
-	if err != nil || !found {
-		t.Fatalf("get binding: found=%v err=%v", found, err)
-	}
-	if binding.Seq != writers || binding.AgentID != fmt.Sprintf("agent_%02d", writers-1) {
-		t.Fatalf("binding = %+v, want seq %d from agent_%02d", binding, writers, writers-1)
-	}
-}
-
-// TestSessionReferencesAreBounded pins the error-body bound: a tenant with many
-// live sessions gets the newest 20 references plus the real total, so the
-// refusal stays O(1) in size while still telling the caller how many exist.
-func TestSessionReferencesAreBounded(t *testing.T) {
-	st := readyTestStore(t)
-	ctx := context.Background()
-	tenant := uuid.New()
-	cleanupSessionBindingTenant(t, st, tenant)
-	if err := st.CreateTenant(ctx, tenant, "session-ref-bound"); err != nil {
-		t.Fatalf("create tenant: %v", err)
-	}
-	const bound = 25
-	for i := 0; i < bound; i++ {
-		session := uuid.New()
-		if err := st.CreateSession(ctx, tenant, session); err != nil {
-			t.Fatalf("create session %d: %v", i, err)
-		}
-		if _, err := st.SetSessionBinding(ctx, tenant, session, "", "team_many", 1); err != nil {
-			t.Fatalf("bind session %d: %v", i, err)
-		}
-	}
-	refs, total, err := st.SessionsReferencingTeam(ctx, tenant, "team_many")
-	if err != nil {
-		t.Fatalf("team references: %v", err)
-	}
-	if total != bound {
-		t.Fatalf("total = %d, want %d", total, bound)
-	}
-	if len(refs) != maxSessionReferences {
-		t.Fatalf("returned references = %d, want the bound %d", len(refs), maxSessionReferences)
+	binding, _, err := st.GetSessionBinding(ctx, account.TenantID, sessionID)
+	if err != nil || binding.TeamBotID != first.ID {
+		t.Fatalf("binding = %+v err=%v, want the first team snapshot", binding, err)
 	}
 }

@@ -128,7 +128,7 @@ func TestForkCreatesAPrefixSessionCardAndInheritedBinding(t *testing.T) {
 	kern := kernel.New(klog, kernel.Options{})
 	parentScope := kernel.Scope{TenantID: tenant, SessionID: parent}
 	originSeq := commitMessage(t, kern, parentScope, "parent-r1", "parent question", map[string]any{
-		"selection": map[string]any{"agentId": "agent_parent"},
+		"selection": map[string]any{"botId": "agent_parent"},
 	})
 	// A parent run snapshot at the origin: the fork must freeze it.
 	lease, err := kern.ClaimScope(ctx, parentScope, "fork-test", time.Hour)
@@ -233,12 +233,12 @@ func TestForkCreatesAPrefixSessionCardAndInheritedBinding(t *testing.T) {
 		t.Fatalf("child fork extras = %+v", payload.Fork)
 	}
 	var selection struct {
-		AgentID string `json:"agentId"`
+		BotID string `json:"botId"`
 	}
 	if err := json.Unmarshal(payload.Selection, &selection); err != nil {
 		t.Fatalf("child selection %s: %v", payload.Selection, err)
 	}
-	if selection.AgentID != "agent_parent" {
+	if selection.BotID != "agent_parent" {
 		t.Fatalf("child inherited selection = %+v", selection)
 	}
 	if len(validator.seen) != 1 {
@@ -413,7 +413,7 @@ func TestResumeContinuesTheSameSession(t *testing.T) {
 		 WHERE tenant_id = $1 AND session_id = $2`, tenant, child); err != nil {
 		t.Fatal(err)
 	}
-	override := json.RawMessage(`{"agentId":"agent_override"}`)
+	override := json.RawMessage(`{"botId":"agent_override"}`)
 	first, err := runner.Resume(ctx, agentext.ResumeRequest{
 		TenantID: tenant, ParentSessionID: parent, SessionID: child, RequestID: "resume-1", Reason: "process crash",
 		Selection: override,

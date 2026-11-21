@@ -4,8 +4,10 @@
 扩展面（插件/触发器/subagent/hooks/审批），供 AI UI（`web/` 的 NSH 客户端、TUI）对接。
 内核不知道它存在；依赖方向只有 `cmd/keel → agentapi/agentext → kernel`。
 
-> 命名：产品层对外统一 **Harness**（原 Agent）；协议名 `AgentAPI` / `AgentBackend` 是契约，
-> 予以保留。术语与别名说明见官网术语表（`site/docs/glossary.md`）。
+> 命名：产品面统一 **Bot / TeamBot / Account / Role / Profile**；`Harness` 是 Bot 的运行环境
+> （工具白名单 + 上下文）。旧产品词 `Agent`/`TeamAgent` 已删除，只有 PI 技术包
+> （`agentcore`/`agentloop`/`agenttool`/`internal/agent`）与协议名 `AgentAPI`/`AgentBackend`
+> 作为技术名词保留。术语与别名说明见官网术语表（`site/docs/glossary.md`）。
 
 ## 1. 启动
 
@@ -125,17 +127,32 @@ keel version
   creation → `plugin.invoke`；媒体 → `media.invoke`；decision → `decision.ask`。
   插件发布的工具按 `plugin.invoke` 授权。未知工具/未声明 action/未登记 key 是装配错误。
 - **资源**：Session 级工具以当前 Session 为资源；`agent` 的 spawn/fork/resume 以目标
-  Bot（顶层 `agentId`、`selection.agentId`、子 Session 所属 Bot 的并集；未命名时为本
+  Bot（顶层 `botId`、`selection.botId`、子 Session 所属 Bot 的并集；未命名时为本
   Session 的 Bot）为资源，每个目标都要 `bot.invoke` 并各自写 `bot.invoked`；带
   `sessionId` 的参数以该 Session 为资源（跨 Session 通知读取另需 `session.read`）。
   文件目前没有 per-file 关系元组（见 tasks A4.2b 登记），以所属 Session 为资源边界。
 - **captain → member**：父级必须对目标持有 `bot.invoke`；撤销后下一次调用即 403。HTTP 的
-  `agentId`/`selection` 子代理路由走同一检查，旧路径不是旁路。子 Session 继承父 Bot 归属，
+  `botId`/`selection` 子代理路由走同一检查，旧路径不是旁路。子 Session 继承父 Bot 归属，
   但每次调用按**自己**的 Account ∩ Harness 判定，不做调用链交集。
 - **失败语义**：无 access seam、无 principal、授权源读取失败、invoke 审计写失败均 fail
   closed；工具错误只告诉模型缺哪个 key/reason，不透露资源是否存在。
 - **审计**：拒绝写 `permission.denied`（含 key、reason、资源类型）；接受的 `bot.invoke`
   写 `bot.invoked`（调用者、被调用 Bot、Session、结果）。
+
+### 3.2 Session 执行绑定（A4.2b3a）
+
+- **归属**：`sessions.bot_id` / `team_bot_id` 是归属事实；`account_id` 由 Bot 的 Profile
+  派生，`created_by_account_id` 记录发起人。Session 创建后归属不可被输入改变；旧 `bound_*`
+  投影列已删除。无 Bot 归属的旧 Session 不进入运行（fail closed）。
+- **选择事实**：输入的 `selection` 只接受 `botId` / `teamBotId`；旧 `agentId`/`teamId`
+  是未知 key（400），不静默回退。未带选择时按 Session 归属的 Bot 解析；带其他 Bot 的选择
+  只改变该尝试的 prompt/tools（委派子 Session 保留父 Bot 归属）。
+- **Prompt**：`Role.Instruction` + `Harness.Context.Instruction`（去重、Role 在前）。
+- **工具**：`Harness.Tools` 是白名单；实际工具面 = 部署 registry ∩ 白名单，空列表不授予
+  任何工具（不是“继承全部”）。
+- **模型**：`Bot.DefaultModel` 只在输入未指定模型时生效；Run 快照记录实际模型。
+- **TeamBot**：Mission + Roster；roster 的 `captain` 是有效 Bot，成员列表注入 captain
+  prompt；TeamBot 不拥有 Session、不授予权限。
 
 ## 4. 与内核的接缝
 

@@ -2,7 +2,7 @@
 // behind settings /settings/skills and the agent's `skills manage` action.
 //
 // It is a thin HTTP client of a running `keel serve`, exactly like `keel model`
-// and `keel team`: GET/POST /v1/settings/skills* are the only write path, so the
+// and `keel team-bot`: GET/POST /v1/settings/skills* are the only write path, so the
 // CLI cannot drift from the page and never opens the database or the managed
 // directory itself (an install from a local directory reads the files and sends
 // them; the server validates and versions them).
@@ -139,7 +139,7 @@ func runSkillsList(args []string, stdout, stderr io.Writer) int {
 	if !*check {
 		path += "?check=0"
 	}
-	if err := client.do(http.MethodGet, path, "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, path, nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -199,7 +199,7 @@ func runSkillsShow(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var detail skilllib.Detail
-	if err := client.do(http.MethodGet, "/v1/settings/skills/"+url.PathEscape(name), "", nil, &detail); err != nil {
+	if err := client.do(http.MethodGet, "/v1/settings/skills/"+url.PathEscape(name), nil, &detail); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -295,7 +295,7 @@ func runSkillsInstall(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var record skilllib.Record
-	if err := client.do(http.MethodPost, "/v1/settings/skills", "", request, &record); err != nil {
+	if err := client.do(http.MethodPost, "/v1/settings/skills", request, &record); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -337,7 +337,7 @@ func runSkillsUpdate(args []string, stdout, stderr io.Writer) int {
 	}
 	var result skilllib.UpdateResult
 	path := "/v1/settings/skills/" + url.PathEscape(name) + "/update"
-	if err := client.do(http.MethodPost, path, "", request, &result); err != nil {
+	if err := client.do(http.MethodPost, path, request, &result); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -377,7 +377,7 @@ func runSkillsPin(args []string, stdout, stderr io.Writer) int {
 	}
 	var record skilllib.Record
 	path := "/v1/settings/skills/" + url.PathEscape(name) + "/pin"
-	if err := client.do(http.MethodPost, path, "", map[string]any{"hash": *hash}, &record); err != nil {
+	if err := client.do(http.MethodPost, path, map[string]any{"hash": *hash}, &record); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -408,7 +408,7 @@ func runSkillsUnpin(args []string, stdout, stderr io.Writer) int {
 	}
 	var record skilllib.Record
 	path := "/v1/settings/skills/" + url.PathEscape(name) + "/unpin"
-	if err := client.do(http.MethodPost, path, "", nil, &record); err != nil {
+	if err := client.do(http.MethodPost, path, nil, &record); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -438,7 +438,7 @@ func runSkillsRemove(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body map[string]any
-	if err := client.do(http.MethodDelete, "/v1/settings/skills/"+url.PathEscape(name), "", nil, &body); err != nil {
+	if err := client.do(http.MethodDelete, "/v1/settings/skills/"+url.PathEscape(name), nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -488,7 +488,7 @@ func runSkillsSourcesList(args []string, stdout, stderr io.Writer) int {
 	var body struct {
 		Sources []skilllib.Source `json:"sources"`
 	}
-	if err := client.do(http.MethodGet, "/v1/settings/skills/sources", "", nil, &body); err != nil {
+	if err := client.do(http.MethodGet, "/v1/settings/skills/sources", nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {
@@ -531,7 +531,7 @@ func runSkillsSourcesSubscribe(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var source skilllib.Source
-	if err := client.do(http.MethodPost, "/v1/settings/skills/sources", "", map[string]any{
+	if err := client.do(http.MethodPost, "/v1/settings/skills/sources", map[string]any{
 		"id": *id, "kind": *kind, "url": *sourceURL, "trust": *trust,
 	}, &source); err != nil {
 		return reportError(stderr, err)
@@ -563,7 +563,7 @@ func runSkillsSourcesUnsubscribe(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	var body map[string]any
-	if err := client.do(http.MethodDelete, "/v1/settings/skills/sources/"+url.PathEscape(id), "", nil, &body); err != nil {
+	if err := client.do(http.MethodDelete, "/v1/settings/skills/sources/"+url.PathEscape(id), nil, &body); err != nil {
 		return reportError(stderr, err)
 	}
 	if *asJSON {

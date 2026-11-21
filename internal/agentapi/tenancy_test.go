@@ -1,5 +1,5 @@
-// Tenancy surface tests: who-am-I, provisioning (plaintext key shown once), the
-// quota projection, and the 403/401 operator boundary (change keel-ga §2).
+// Tenancy surface tests: who-am-I, tenant provisioning (no tenant-wide key
+// anymore), the quota projection, and the 401 operator boundary.
 
 package agentapi
 
@@ -19,24 +19,15 @@ import (
 	"github.com/jixoai/keel/internal/quota"
 )
 
-// fakeProvisioner is the Provisioner seam with the store's semantics (idempotent
-// tenant create, hashes never echoed).
+// fakeProvisioner is the Provisioner seam with the store's semantics
+// (idempotent tenant create).
 type fakeProvisioner struct {
-	mu       sync.Mutex
-	tenants  map[uuid.UUID]string
-	keys     map[uuid.UUID][]APIKeyView
-	minted   map[uuid.UUID][]byte
-	revoked  map[uuid.UUID]bool
-	keyOrder []uuid.UUID
+	mu      sync.Mutex
+	tenants map[uuid.UUID]string
 }
 
 func newFakeProvisioner() *fakeProvisioner {
-	return &fakeProvisioner{
-		tenants: map[uuid.UUID]string{},
-		keys:    map[uuid.UUID][]APIKeyView{},
-		minted:  map[uuid.UUID][]byte{},
-		revoked: map[uuid.UUID]bool{},
-	}
+	return &fakeProvisioner{tenants: map[uuid.UUID]string{}}
 }
 
 func (f *fakeProvisioner) CreateTenant(_ context.Context, tenantID uuid.UUID, name string) (bool, error) {
@@ -49,40 +40,11 @@ func (f *fakeProvisioner) CreateTenant(_ context.Context, tenantID uuid.UUID, na
 	return true, nil
 }
 
-func (f *fakeProvisioner) MintAPIKey(_ context.Context, tenantID, keyID uuid.UUID, hash []byte, prefix, role, label string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.minted[keyID] = append([]byte(nil), hash...)
-	f.keyOrder = append(f.keyOrder, keyID)
-	f.keys[tenantID] = append(f.keys[tenantID], APIKeyView{
-		KeyID: keyID.String(), Prefix: prefix, Role: role, Label: label, CreatedAt: time.Now().UTC(),
-	})
-	return nil
-}
-
 func (f *fakeProvisioner) TenantExists(_ context.Context, tenantID uuid.UUID) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	_, ok := f.tenants[tenantID]
 	return ok, nil
-}
-
-func (f *fakeProvisioner) ListAPIKeys(_ context.Context, tenantID uuid.UUID) ([]APIKeyView, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]APIKeyView(nil), f.keys[tenantID]...), nil
-}
-
-func (f *fakeProvisioner) RevokeAPIKey(_ context.Context, tenantID, keyID uuid.UUID) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := range f.keys[tenantID] {
-		if f.keys[tenantID][i].KeyID == keyID.String() {
-			f.revoked[keyID] = true
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // fakeQuota is the QuotaReporter seam.
@@ -99,16 +61,6 @@ func (f fakeQuota) TenantQuota(context.Context, uuid.UUID) (quota.TenantQuota, e
 func (f fakeQuota) StoredBytes(context.Context, uuid.UUID) (int64, error) { return f.stored, nil }
 
 func (f fakeQuota) ActiveStreams(tenantID uuid.UUID) int { return f.streams[tenantID] }
-
-// identityServer wraps a handler the way the auth middleware does on the
-// SERVER side. The identity must be attached there: a request context is
-// client-side state and never crosses the wire, so a test that set it on the
-// outgoing request would prove nothing.
-func identityServer(next http.Handler, identity auth.Identity) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r.WithContext(auth.WithIdentity(r.Context(), identity)))
-	}))
-}
 
 // principalServer attaches the edge-resolved auth principal the way cmd/keel's
 // middleware does.
@@ -217,7 +169,7 @@ func TestWhoAmIFailsClosedWithoutAccess(t *testing.T) {
 	}
 }
 
-func TestProvisionTenantReturnsKeyOnce(t *testing.T) {
+func TestProvisionTenantCreatesWithoutKey(t *testing.T) {
 	provisioner := newFakeProvisioner()
 	server := httptest.NewServer(New(Config{
 		Provisioner: provisioner,
@@ -229,57 +181,30 @@ func TestProvisionTenantReturnsKeyOnce(t *testing.T) {
 	var created struct {
 		TenantID string `json:"tenantId"`
 		Created  bool   `json:"created"`
-		APIKey   struct {
-			KeyID  string `json:"keyId"`
-			Prefix string `json:"prefix"`
-			Role   string `json:"role"`
-			Key    string `json:"key"`
-			Notice string `json:"notice"`
-		} `json:"apiKey"`
+		APIKey   any    `json:"apiKey"`
 	}
 	if code := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/admin/tenants", uuid.Nil,
 		map[string]any{"name": "acme"}, &created); code != http.StatusCreated {
 		t.Fatalf("provision: %d", code)
 	}
-	if !created.Created || created.APIKey.Key == "" {
+	if !created.Created || created.TenantID == "" {
 		t.Fatalf("body = %+v", created)
 	}
-	if !strings.HasPrefix(created.APIKey.Key, auth.KeyScheme+auth.RoleTenant+"_") {
-		t.Fatalf("key %q is not in the tenant key format", created.APIKey.Key)
+	if created.APIKey != nil {
+		t.Fatalf("a tenant-wide key was returned: %+v", created.APIKey)
 	}
-	if created.APIKey.Notice == "" {
-		t.Fatal("the answer does not warn that the key is shown once")
-	}
-	// The minted hash is the hash of the returned plaintext, and the plaintext
-	// itself is nowhere in the provisioner's state. The snapshot is taken under
-	// the lock and inspected after it is released: holding a fake's mutex across
-	// an HTTP call deadlocks the server goroutine that needs the same mutex.
-	provisioner.mu.Lock()
-	hash := append([]byte(nil), provisioner.minted[uuid.MustParse(created.APIKey.KeyID)]...)
-	views := append([]APIKeyView(nil), provisioner.keys[uuid.MustParse(created.TenantID)]...)
-	provisioner.mu.Unlock()
-	if string(hash) != string(auth.HashKey(created.APIKey.Key)) {
-		t.Fatal("the stored hash does not match the returned key")
-	}
-	for _, view := range views {
-		if strings.Contains(view.Prefix, strings.TrimPrefix(created.APIKey.Key, created.APIKey.Prefix)) {
-			t.Fatal("the store kept part of the secret beyond the prefix")
+	// The retired key routes are gone.
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/admin/tenants/" + created.TenantID + "/keys"},
+		{http.MethodPost, "/v1/admin/tenants/" + created.TenantID + "/keys"},
+		{http.MethodDelete, "/v1/admin/tenants/" + created.TenantID + "/keys/" + uuid.NewString()},
+	} {
+		if code := doJSON(t, server.Client(), route.method, server.URL+route.path, uuid.Nil, nil, nil); code != http.StatusNotFound {
+			t.Fatalf("%s %s = %d, want 404", route.method, route.path, code)
 		}
-	}
-
-	// Listing shows the prefix only: no route can reproduce the key.
-	var listed struct {
-		Keys []map[string]any `json:"keys"`
-	}
-	if code := doJSON(t, server.Client(), http.MethodGet,
-		server.URL+"/v1/admin/tenants/"+created.TenantID+"/keys", uuid.Nil, nil, &listed); code != 200 {
-		t.Fatalf("list keys: %d", code)
-	}
-	if len(listed.Keys) != 1 {
-		t.Fatalf("keys = %v", listed.Keys)
-	}
-	if _, present := listed.Keys[0]["key"]; present {
-		t.Fatal("the key list carries the plaintext")
 	}
 
 	// A re-provision of the same id reports created=false and does not rewrite
@@ -288,7 +213,7 @@ func TestProvisionTenantReturnsKeyOnce(t *testing.T) {
 		Created bool `json:"created"`
 	}
 	if code := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/admin/tenants", uuid.Nil,
-		map[string]any{"name": "renamed", "tenantId": created.TenantID, "noApiKey": true}, &again); code != 201 {
+		map[string]any{"name": "renamed", "tenantId": created.TenantID}, &again); code != 201 {
 		t.Fatalf("re-provision: %d", code)
 	}
 	if again.Created {
@@ -297,11 +222,12 @@ func TestProvisionTenantReturnsKeyOnce(t *testing.T) {
 }
 
 func TestProvisioningRequiresAdminCredential(t *testing.T) {
+	t.Setenv("KEEL_ADMIN_KEY", "")
 	provisioner := newFakeProvisioner()
 	server := httptest.NewServer(New(Config{
 		Provisioner: provisioner,
-		// No AdminKey seam and (in this process) no KEEL_ADMIN_KEY: the route
-		// must answer 401, never 200.
+		// No AdminKey seam and no KEEL_ADMIN_KEY: the route must answer 401,
+		// never 200.
 		Logger: testLogger(),
 	}))
 	defer server.Close()
@@ -309,25 +235,19 @@ func TestProvisioningRequiresAdminCredential(t *testing.T) {
 		map[string]any{"name": "nope"}, nil); code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated provision: %d, want 401", code)
 	}
-
-	// A valid tenant key is authenticated but not authorized: 403, not 401.
-	tenantServer := identityServer(New(Config{Provisioner: provisioner, Logger: testLogger()}),
-		auth.Identity{TenantID: uuid.New(), KeyID: uuid.New(), Role: auth.RoleTenant})
-	defer tenantServer.Close()
-	if code := doJSON(t, tenantServer.Client(), http.MethodPost, tenantServer.URL+"/v1/admin/tenants",
-		uuid.Nil, map[string]any{"name": "nope"}, nil); code != http.StatusForbidden {
-		t.Fatalf("tenant credential on provisioning: %d, want 403", code)
-	}
 	if len(provisioner.tenants) != 0 {
 		t.Fatalf("a refused call created %d tenants", len(provisioner.tenants))
 	}
 
-	// An admin key identity passes.
-	adminServer := identityServer(New(Config{Provisioner: provisioner, Logger: testLogger()}),
-		auth.Identity{TenantID: uuid.New(), KeyID: uuid.New(), Role: auth.RoleAdmin})
+	// The deployment operator key passes.
+	adminServer := httptest.NewServer(New(Config{
+		Provisioner: provisioner,
+		AdminKey:    func(*http.Request) bool { return true },
+		Logger:      testLogger(),
+	}))
 	defer adminServer.Close()
 	if code := doJSON(t, adminServer.Client(), http.MethodPost, adminServer.URL+"/v1/admin/tenants",
-		uuid.Nil, map[string]any{"name": "ok", "noApiKey": true}, nil); code != http.StatusCreated {
+		uuid.Nil, map[string]any{"name": "ok"}, nil); code != http.StatusCreated {
 		t.Fatalf("admin credential: %d", code)
 	}
 }

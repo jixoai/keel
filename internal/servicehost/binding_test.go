@@ -1,521 +1,400 @@
 package servicehost
 
-// The execution-binding tests (change keel-agent-team-v1, RUNTIME-PLAN §b/c):
-// the submit-time gate and the per-attempt resolution of an input's
-// agentId/teamId, over the real domain validation (internal/agentteam) and a
-// map-backed document store.
+// The execution binding over the Bot/TeamBot identity graph (A4.2b3a): a
+// selection names a Bot or TeamBot, the resolver reads Bot + Profile + Role +
+// TeamBot, and the surface is the Role/Harness prompt, the Harness tool
+// whitelist and the Bot's default model. A session must be owned by a Bot;
+// an unowned pre-A4 session is refused (fail closed).
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/keel/internal/agent"
-	"github.com/jixoai/keel/internal/agentteam"
-	"github.com/jixoai/keel/internal/host"
+	"github.com/jixoai/keel/internal/botteam"
 	"github.com/jixoai/keel/internal/kernel"
-	"github.com/jixoai/keel/internal/loadout"
 	"github.com/jixoai/keel/internal/store"
 )
 
-// fakeBindingStore is the BindingReader over in-memory documents.
-type fakeBindingStore struct {
-	agents map[string]store.AgentRecord
-	teams  map[string]store.TeamRecord
-	fail   error
+type fakeBindingReader struct {
+	bots      map[string]store.BotRecord
+	teams     map[string]store.TeamBotRecord
+	profiles  map[uuid.UUID]store.ProfileRecord
+	roles     map[uuid.UUID]store.RoleRecord
+	ownership map[uuid.UUID]store.SessionOwnership
 }
 
-func (f *fakeBindingStore) GetAgent(_ context.Context, _ uuid.UUID, agentID string) (store.AgentRecord, bool, error) {
-	if f.fail != nil {
-		return store.AgentRecord{}, false, f.fail
+func (f *fakeBindingReader) GetBot(_ context.Context, tenantID uuid.UUID, botID string) (store.BotRecord, error) {
+	record, ok := f.bots[botID]
+	if !ok || record.TenantID != tenantID {
+		return store.BotRecord{}, store.ErrNotFound
 	}
-	record, ok := f.agents[agentID]
-	return record, ok, nil
+	return record, nil
 }
 
-func (f *fakeBindingStore) GetTeam(_ context.Context, _ uuid.UUID, teamID string) (store.TeamRecord, bool, error) {
-	if f.fail != nil {
-		return store.TeamRecord{}, false, f.fail
+func (f *fakeBindingReader) GetTeamBot(_ context.Context, tenantID uuid.UUID, teamBotID string) (store.TeamBotRecord, error) {
+	record, ok := f.teams[teamBotID]
+	if !ok || record.TenantID != tenantID {
+		return store.TeamBotRecord{}, store.ErrNotFound
 	}
-	record, ok := f.teams[teamID]
-	return record, ok, nil
+	return record, nil
 }
 
-func agentRecord(t *testing.T, agent agentteam.Agent, archived bool) store.AgentRecord {
+func (f *fakeBindingReader) GetProfile(_ context.Context, tenantID, profileID uuid.UUID) (store.ProfileRecord, error) {
+	record, ok := f.profiles[profileID]
+	if !ok || record.TenantID != tenantID {
+		return store.ProfileRecord{}, store.ErrNotFound
+	}
+	return record, nil
+}
+
+func (f *fakeBindingReader) GetRole(_ context.Context, tenantID, roleID uuid.UUID) (store.RoleRecord, error) {
+	record, ok := f.roles[roleID]
+	if !ok || record.TenantID != tenantID {
+		return store.RoleRecord{}, store.ErrNotFound
+	}
+	return record, nil
+}
+
+func (f *fakeBindingReader) GetSessionOwnership(_ context.Context, tenantID, sessionID uuid.UUID) (store.SessionOwnership, error) {
+	record, ok := f.ownership[sessionID]
+	if !ok || record.TenantID != tenantID {
+		return store.SessionOwnership{}, store.ErrNotFound
+	}
+	return record, nil
+}
+
+type bindingFixture struct {
+	tenant  uuid.UUID
+	account uuid.UUID
+	role    store.RoleRecord
+	profile store.ProfileRecord
+	reader  *fakeBindingReader
+}
+
+func newBindingFixture(t *testing.T) *bindingFixture {
 	t.Helper()
-	raw, err := json.Marshal(agent)
-	if err != nil {
-		t.Fatal(err)
+	tenant, account, roleID, profileID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	role := store.RoleRecord{TenantID: tenant, ID: roleID, Name: "Reviewer", Instruction: "You review drafts."}
+	profile := store.ProfileRecord{TenantID: tenant, ID: profileID, AccountID: account, RoleID: roleID}
+	reader := &fakeBindingReader{
+		bots:      map[string]store.BotRecord{},
+		teams:     map[string]store.TeamBotRecord{},
+		profiles:  map[uuid.UUID]store.ProfileRecord{profileID: profile},
+		roles:     map[uuid.UUID]store.RoleRecord{roleID: role},
+		ownership: map[uuid.UUID]store.SessionOwnership{},
 	}
-	return store.AgentRecord{TenantID: uuid.Nil, ID: agent.ID, Document: raw, Archived: archived}
+	return &bindingFixture{tenant: tenant, account: account, role: role, profile: profile, reader: reader}
 }
 
-func teamRecord(t *testing.T, team *agentteam.AgentTeam, archived bool) store.TeamRecord {
+func (f *bindingFixture) addBot(t *testing.T, id, name string, archived bool, tools []string, instruction string) store.BotRecord {
 	t.Helper()
+	model, _ := json.Marshal(botteam.ModelRef{ProviderID: "magpie", ModelID: "bailian-token-plan/qwen3.8-flash"})
+	harness, _ := json.Marshal(botteam.Harness{
+		Tools: tools,
+		Context: botteam.HarnessContext{
+			Instruction: instruction,
+			Permissions: []string{"session.read"},
+		},
+	})
+	record := store.BotRecord{
+		TenantID: f.tenant, ID: id, Name: name, ProfileID: f.profile.ID,
+		ModelKind: "text", DefaultModel: model, Harness: harness, Archived: archived,
+	}
+	f.reader.bots[id] = record
+	return record
+}
+
+func (f *bindingFixture) addTeam(t *testing.T, id, mission string, archived bool, roster ...botteam.RosterEntry) store.TeamBotRecord {
+	t.Helper()
+	team := botteam.NewTeamBot(id, "Team "+id, mission)
+	team.Roster = roster
+	team.Archived = archived
+	team.Seal()
 	raw, err := json.Marshal(team)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.TeamRecord{
-		TenantID:    uuid.Nil,
-		ID:          team.ID,
-		Revision:    int64(team.Revision()),
-		ContentHash: team.Hash(),
-		Document:    raw,
-		Archived:    archived,
+	var wire struct {
+		Revision uint64 `json:"revision"`
+		Hash     string `json:"hash"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	rosterRaw, _ := json.Marshal(team.Roster)
+	record := store.TeamBotRecord{
+		TenantID: f.tenant, ID: id, Name: team.Name, Mission: mission,
+		Roster: rosterRaw, Revision: int64(wire.Revision), ContentHash: wire.Hash, Archived: archived,
+	}
+	f.reader.teams[id] = record
+	return record
+}
+
+func (f *bindingFixture) ownSession(sessionID uuid.UUID, botID, teamBotID string) {
+	f.reader.ownership[sessionID] = store.SessionOwnership{
+		TenantID: f.tenant, SessionID: sessionID, BotID: botID,
+		AccountID: f.account, CreatedByAccountID: f.account, TeamBotID: teamBotID,
 	}
 }
 
-// bindingFixture builds a store with one plain agent, one captain and one sealed
-// team led by it.
-type bindingFixture struct {
-	store   *fakeBindingStore
-	plain   agentteam.Agent
-	captain agentteam.Agent
-	team    *agentteam.AgentTeam
-}
-
-func newBindingFixture(t *testing.T) bindingFixture {
-	t.Helper()
-	plain := agentteam.Agent{
-		ID:           "agent_plain",
-		Name:         "Plain",
-		DefaultModel: agentteam.ModelBinding{ProviderID: "tenant-gw", ModelID: "deepseek-v4.1-flash"},
-		SystemPrompt: agentteam.SystemPrompt{Kind: agentteam.SystemPromptInline, Text: "KITE-RUNTIME-MARK-7 plain agent instructions"},
-		Tools:        []agentteam.ToolGrant{{ToolID: "bash", Enabled: true}},
-	}.Normalized()
-	captain := agentteam.Agent{
-		ID:   "agent_captain",
-		Name: "Captain",
-		SystemPrompt: agentteam.SystemPrompt{
-			Kind: agentteam.SystemPromptFile, Ref: "AGENTS.md",
-		},
-		Tools:   []agentteam.ToolGrant{{ToolID: "bash", Enabled: true}, {ToolID: "read", Enabled: false}},
-		TeamCLI: agentteam.TeamCLI{Enabled: true, Commands: []string{agentteam.TeamCLIMemberAdd}},
-	}.Normalized()
-	team := agentteam.NewTeam("team_kite", "Kite", agentteam.MemberFromAgent(captain))
-	team.Members = []agentteam.TeamMember{agentteam.MemberFromAgent(plain)}
-	team.Defaults = agentteam.TeamDefaults{Tools: []string{"read", "agent"}}
-	team.Seal()
-
-	store := &fakeBindingStore{
-		agents: map[string]store.AgentRecord{
-			plain.ID:   agentRecord(t, plain, false),
-			captain.ID: agentRecord(t, captain, false),
-		},
-		teams: map[string]store.TeamRecord{team.ID: teamRecord(t, team, false)},
-	}
-	return bindingFixture{store: store, plain: plain, captain: captain, team: team}
-}
-
-func TestLoadBindingStandardMode(t *testing.T) {
+func TestLoadBotBindingPromptToolsAndModel(t *testing.T) {
 	fixture := newBindingFixture(t)
-	binding, err := LoadBinding(context.Background(), fixture.store, uuid.Nil,
-		json.RawMessage(`{"providerId":"p","modelId":"m","agentId":"agent_plain"}`))
+	fixture.addBot(t, "support-1", "Support One", false, []string{"bash", "read"}, "Answer support tickets.")
+	binding, err := LoadBinding(context.Background(), fixture.reader, fixture.tenant,
+		json.RawMessage(`{"botId":"support-1"}`))
 	if err != nil {
 		t.Fatalf("LoadBinding: %v", err)
 	}
-	if !binding.Bound() || binding.Agent.ID != "agent_plain" || binding.Team != nil {
+	if !binding.Bound() || binding.Bot.ID != "support-1" {
 		t.Fatalf("binding = %+v", binding)
 	}
-	if got := binding.PromptText(); !strings.Contains(got, "KITE-RUNTIME-MARK-7") {
-		t.Fatalf("prompt text = %q", got)
+	wantPrompt := "You review drafts.\n\nAnswer support tickets."
+	if got := binding.PromptText(); got != wantPrompt {
+		t.Fatalf("prompt = %q, want %q", got, wantPrompt)
 	}
-	if got := binding.ToolIDs(); len(got) != 1 || !got["bash"] {
-		t.Fatalf("tool ids = %v, want only bash", got)
+	tools := binding.ToolIDs()
+	if tools == nil || !tools["bash"] || !tools["read"] || len(tools) != 2 {
+		t.Fatalf("tools = %+v, want bash+read", tools)
+	}
+	model := binding.effectiveDefaultModel()
+	if model.ProviderID != "magpie" || model.ModelID != "bailian-token-plan/qwen3.8-flash" {
+		t.Fatalf("model = %+v", model)
 	}
 }
 
-func TestLoadBindingTeamModeUsesCaptain(t *testing.T) {
+func TestLoadBotBindingPromptDeduplicatesAndEmptyToolsGrantNothing(t *testing.T) {
 	fixture := newBindingFixture(t)
-	binding, err := LoadBinding(context.Background(), fixture.store, uuid.Nil,
-		json.RawMessage(`{"modelId":"m","teamId":"team_kite"}`))
+	fixture.addBot(t, "same", "Same", false, nil, "You review drafts.")
+	binding, err := LoadBinding(context.Background(), fixture.reader, fixture.tenant,
+		json.RawMessage(`{"botId":"same"}`))
 	if err != nil {
-		t.Fatalf("LoadBinding: %v", err)
+		t.Fatal(err)
 	}
-	if binding.Team == nil || binding.Team.ID != "team_kite" {
-		t.Fatalf("team binding = %+v", binding)
+	if got := binding.PromptText(); got != "You review drafts." {
+		t.Fatalf("duplicate prompt = %q", got)
 	}
-	if binding.Agent.ID != "agent_captain" {
-		t.Fatalf("effective agent = %q, want the captain", binding.Agent.ID)
+	tools := binding.ToolIDs()
+	if tools == nil {
+		t.Fatal("an empty Harness must yield an empty non-nil map (grant nothing, not everything)")
 	}
-	if binding.TeamRevision != fixture.team.Revision() || binding.TeamHash != fixture.team.Hash() {
-		t.Fatalf("frozen team identity = %d/%q, want %d/%q",
-			binding.TeamRevision, binding.TeamHash, fixture.team.Revision(), fixture.team.Hash())
-	}
-	if len(binding.Members) != 1 || binding.Members[0].AgentID != "agent_plain" {
-		t.Fatalf("members = %+v", binding.Members)
-	}
-	// The team defaults are unioned with the captain's grants; the captain's
-	// explicit read=false removes the team default.
-	grants := binding.ToolIDs()
-	if !grants["bash"] || !grants["agent"] {
-		t.Fatalf("grants = %v, want bash and agent", grants)
-	}
-	if grants["read"] {
-		t.Fatalf("grants = %v, want read removed by the agent's explicit false", grants)
+	if len(tools) != 0 {
+		t.Fatalf("tools = %+v, want empty", tools)
 	}
 }
 
-func TestLoadBindingTeamWinsOverLooseAgent(t *testing.T) {
+func TestLoadBindingRefusesMissingArchivedAndBrokenBots(t *testing.T) {
 	fixture := newBindingFixture(t)
-	// RUNTIME-PLAN ruling: a fact naming both is a team fact.
-	binding, err := LoadBinding(context.Background(), fixture.store, uuid.Nil,
-		json.RawMessage(`{"modelId":"m","agentId":"agent_plain","teamId":"team_kite"}`))
-	if err != nil {
-		t.Fatalf("LoadBinding: %v", err)
-	}
-	if binding.Agent.ID != "agent_captain" {
-		t.Fatalf("effective agent = %q, want the captain (team wins)", binding.Agent.ID)
-	}
-}
-
-func TestLoadBindingRefusals(t *testing.T) {
-	fixture := newBindingFixture(t)
-	// An archived agent is not startable.
-	archived := agentRecord(t, fixture.plain, true)
-	fixture.store.agents[archived.ID] = archived
-	// An unsealed team is a draft, not a startable configuration.
-	unsealed := agentteam.NewTeam("team_draft", "Draft", agentteam.MemberFromAgent(fixture.captain))
-	fixture.store.teams[unsealed.ID] = teamRecord(t, unsealed, false)
-	// A team whose captain cannot be found.
-	orphan := agentteam.NewTeam("team_orphan", "Orphan", agentteam.MemberFromAgent(agentteam.Agent{ID: "agent_missing", Name: "Gone"}))
-	orphan.Seal()
-	fixture.store.teams[orphan.ID] = teamRecord(t, orphan, false)
-	// An archived team.
-	archivedTeam := agentteam.NewTeam("team_archived", "Archived", agentteam.MemberFromAgent(fixture.captain))
-	archivedTeam.Seal()
-	fixture.store.teams[archivedTeam.ID] = teamRecord(t, archivedTeam, true)
-
-	cases := []struct {
+	fixture.addBot(t, "archived", "Archived", true, []string{"bash"}, "")
+	for _, tc := range []struct {
 		name      string
 		selection string
 		want      string
 	}{
-		{name: "unknown agent", selection: `{"agentId":"agent_nope"}`, want: "does not exist"},
-		{name: "archived agent", selection: `{"agentId":"agent_plain"}`, want: "archived"},
-		{name: "unknown team", selection: `{"teamId":"team_nope"}`, want: "does not exist"},
-		{name: "archived team", selection: `{"teamId":"team_archived"}`, want: "archived"},
-		{name: "unsealed team", selection: `{"teamId":"team_draft"}`, want: "not sealed"},
-		{name: "team with a missing captain", selection: `{"teamId":"team_orphan"}`, want: "agent_missing"},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := LoadBinding(context.Background(), fixture.store, uuid.Nil, json.RawMessage(test.selection))
-			if err == nil {
-				t.Fatalf("LoadBinding(%s) = nil, want a refusal", test.selection)
-			}
-			if !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("LoadBinding(%s) = %v, want it to name %q", test.selection, err, test.want)
+		{"missing", `{"botId":"ghost"}`, "does not exist"},
+		{"archived", `{"botId":"archived"}`, "is archived"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadBinding(context.Background(), fixture.reader, fixture.tenant, json.RawMessage(tc.selection))
+			if !errors.Is(err, ErrBindingMissing) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
 		})
 	}
 }
 
-func TestLoadBindingWithoutSelectionIsZero(t *testing.T) {
+func TestLoadTeamBotBindingCaptainAndMembers(t *testing.T) {
 	fixture := newBindingFixture(t)
-	for _, raw := range []string{"", "null", `{"modelId":"m"}`, `{"modelId":"m","providerId":"p"}`} {
-		binding, err := LoadBinding(context.Background(), fixture.store, uuid.Nil, json.RawMessage(raw))
-		if err != nil {
-			t.Fatalf("LoadBinding(%q): %v", raw, err)
-		}
-		if binding.Bound() {
-			t.Fatalf("LoadBinding(%q) bounds an agent", raw)
-		}
-		if binding.ToolIDs() != nil {
-			t.Fatalf("zero binding declares grants: %v", binding.ToolIDs())
+	fixture.addBot(t, "captain", "Captain", false, []string{"bash"}, "Lead the team.")
+	fixture.addBot(t, "member", "Member", false, []string{"read"}, "Do the work.")
+	fixture.addTeam(t, "support-team", "Resolve tickets within 24h.", false,
+		botteam.RosterEntry{BotID: "captain", Role: botteam.RosterRoleCaptain},
+		botteam.RosterEntry{BotID: "member", Role: botteam.RosterRoleMember},
+	)
+	binding, err := LoadBinding(context.Background(), fixture.reader, fixture.tenant,
+		json.RawMessage(`{"teamBotId":"support-team"}`))
+	if err != nil {
+		t.Fatalf("LoadBinding: %v", err)
+	}
+	if binding.Bot.ID != "captain" || binding.TeamBot == nil || binding.TeamBot.ID != "support-team" {
+		t.Fatalf("binding = %+v", binding)
+	}
+	if binding.Mission() != "Resolve tickets within 24h." {
+		t.Fatalf("mission = %q", binding.Mission())
+	}
+	if binding.TeamBotRevision == 0 || binding.TeamBotHash == "" {
+		t.Fatalf("team seal not frozen: %d/%q", binding.TeamBotRevision, binding.TeamBotHash)
+	}
+	if len(binding.Members) != 1 || binding.Members[0].BotID != "member" {
+		t.Fatalf("members = %+v, want member only", binding.Members)
+	}
+	// The captain seat is the effective Bot, not a roster member.
+	for _, member := range binding.Members {
+		if member.BotID == "captain" {
+			t.Fatal("captain appears in the member roster")
 		}
 	}
 }
 
-func TestBindingResolverPromptAndHash(t *testing.T) {
+func TestLoadTeamBotRefusesBrokenRosters(t *testing.T) {
 	fixture := newBindingFixture(t)
-	root := t.TempDir()
-	const fileBody = "KITE-RUNTIME-MARK-8 file prompt body"
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(fileBody+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	fixture.addBot(t, "captain", "Captain", false, []string{"bash"}, "")
+	fixture.addBot(t, "archived", "Archived", true, []string{"bash"}, "")
+	fixture.addTeam(t, "missing-member", "mission", false,
+		botteam.RosterEntry{BotID: "captain", Role: botteam.RosterRoleCaptain},
+		botteam.RosterEntry{BotID: "ghost", Role: botteam.RosterRoleMember},
+	)
+	fixture.addTeam(t, "archived-member", "mission", false,
+		botteam.RosterEntry{BotID: "captain", Role: botteam.RosterRoleCaptain},
+		botteam.RosterEntry{BotID: "archived", Role: botteam.RosterRoleMember},
+	)
+	archivedTeam := fixture.addTeam(t, "archived-team", "mission", true,
+		botteam.RosterEntry{BotID: "captain", Role: botteam.RosterRoleCaptain},
+	)
+	if archivedTeam.Archived != true {
+		t.Fatal("fixture team not archived")
 	}
-	resolver := &bindingResolver{reader: fixture.store, root: root, log: discardLogger()}
+	for _, tc := range []struct {
+		selection string
+		want      string
+	}{
+		{`{"teamBotId":"missing-member"}`, "does not exist"},
+		{`{"teamBotId":"archived-member"}`, "is archived"},
+		{`{"teamBotId":"archived-team"}`, "is archived"},
+	} {
+		_, err := LoadBinding(context.Background(), fixture.reader, fixture.tenant, json.RawMessage(tc.selection))
+		if !errors.Is(err, ErrBindingMissing) || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: err = %v, want %q", tc.selection, err, tc.want)
+		}
+	}
+}
 
-	surface, err := resolver.ResolveBinding(context.Background(), kernel.Scope{}, json.RawMessage(`{"modelId":"m","agentId":"agent_plain"}`))
+func TestLoadSessionBindingUsesOwnershipAndFallsBack(t *testing.T) {
+	fixture := newBindingFixture(t)
+	fixture.addBot(t, "owner", "Owner", false, []string{"bash"}, "own")
+	fixture.addBot(t, "member", "Member", false, []string{"read"}, "member")
+	sessionID := uuid.New()
+	fixture.ownSession(sessionID, "owner", "")
+	ctx := context.Background()
+
+	// No selection: the session's Bot answers.
+	binding, err := LoadSessionBinding(ctx, fixture.reader, fixture.tenant, sessionID, nil)
+	if err != nil || binding.Bot.ID != "owner" {
+		t.Fatalf("fallback binding = %+v err=%v", binding, err)
+	}
+	// A member selection changes the surface, never the ownership.
+	binding, err = LoadSessionBinding(ctx, fixture.reader, fixture.tenant, sessionID, json.RawMessage(`{"botId":"member"}`))
+	if err != nil || binding.Bot.ID != "member" {
+		t.Fatalf("member binding = %+v err=%v", binding, err)
+	}
+	ownership, err := fixture.reader.GetSessionOwnership(ctx, fixture.tenant, sessionID)
+	if err != nil || ownership.BotID != "owner" {
+		t.Fatalf("ownership moved: %+v err=%v", ownership, err)
+	}
+}
+
+func TestLoadSessionBindingRefusesUnownedAndMissingSessions(t *testing.T) {
+	fixture := newBindingFixture(t)
+	fixture.addBot(t, "owner", "Owner", false, nil, "")
+	unowned := uuid.New()
+	fixture.reader.ownership[unowned] = store.SessionOwnership{TenantID: fixture.tenant, SessionID: unowned, AccountID: fixture.account}
+	if _, err := LoadSessionBinding(context.Background(), fixture.reader, fixture.tenant, unowned,
+		json.RawMessage(`{"botId":"owner"}`)); !errors.Is(err, ErrBindingMissing) || !strings.Contains(err.Error(), "not owned by a bot") {
+		t.Fatalf("unowned session err = %v", err)
+	}
+	if _, err := LoadSessionBinding(context.Background(), fixture.reader, fixture.tenant, uuid.New(), nil); !errors.Is(err, ErrBindingMissing) {
+		t.Fatalf("missing session err = %v", err)
+	}
+}
+
+func TestBindingResolverBuildsTheRunSurface(t *testing.T) {
+	fixture := newBindingFixture(t)
+	fixture.addBot(t, "captain", "Captain", false, []string{"bash"}, "Lead.")
+	fixture.addBot(t, "member", "Member", false, []string{"read"}, "Work.")
+	fixture.addTeam(t, "team", "Ship it.", false,
+		botteam.RosterEntry{BotID: "captain", Role: botteam.RosterRoleCaptain},
+		botteam.RosterEntry{BotID: "member", Role: botteam.RosterRoleMember},
+	)
+	sessionID := uuid.New()
+	fixture.ownSession(sessionID, "captain", "team")
+	resolver := &bindingResolver{reader: fixture.reader, tenantID: fixture.tenant}
+	surface, err := resolver.ResolveBinding(context.Background(),
+		kernel.Scope{TenantID: fixture.tenant, SessionID: sessionID}, nil)
 	if err != nil {
 		t.Fatalf("ResolveBinding: %v", err)
 	}
-	if !strings.Contains(surface.Prompt, "KITE-RUNTIME-MARK-7") {
-		t.Fatalf("inline prompt = %q", surface.Prompt)
+	if surface.AgentID != "captain" || surface.TeamID != "team" || !surface.TeamMode {
+		t.Fatalf("surface = %+v", surface)
 	}
-	sum := sha256.Sum256([]byte(surface.Prompt))
-	if surface.PromptHash != "sha256:"+hex.EncodeToString(sum[:]) {
-		t.Fatalf("prompt hash = %q", surface.PromptHash)
+	if surface.Mission != "Ship it." {
+		t.Fatalf("mission = %q", surface.Mission)
 	}
-	if surface.TeamMode || surface.TeamID != "" {
-		t.Fatalf("standard mode surface = %+v", surface)
+	if surface.Prompt != "You review drafts.\n\nLead." {
+		t.Fatalf("prompt = %q", surface.Prompt)
 	}
-	if surface.DefaultModel == nil || surface.DefaultModel.ModelID != "deepseek-v4.1-flash" {
+	if surface.ToolIDs == nil || !surface.ToolIDs["bash"] {
+		t.Fatalf("tools = %+v", surface.ToolIDs)
+	}
+	if len(surface.Members) != 1 || surface.Members[0].BotID != "member" || surface.Members[0].Label != "Member" {
+		t.Fatalf("members = %+v", surface.Members)
+	}
+	if surface.DefaultModel == nil || surface.DefaultModel.ProviderID != "magpie" {
 		t.Fatalf("default model = %+v", surface.DefaultModel)
 	}
+}
 
-	teamSurface, err := resolver.ResolveBinding(context.Background(), kernel.Scope{}, json.RawMessage(`{"modelId":"m","teamId":"team_kite"}`))
-	if err != nil {
-		t.Fatalf("ResolveBinding(team): %v", err)
-	}
-	if !teamSurface.TeamMode || teamSurface.TeamID != "team_kite" {
-		t.Fatalf("team surface = %+v", teamSurface)
-	}
-	if strings.TrimSpace(teamSurface.Prompt) != fileBody {
-		t.Fatalf("file prompt = %q, want %q", teamSurface.Prompt, fileBody)
-	}
-	if teamSurface.PromptHash == "" {
-		t.Fatal("the file prompt must carry a hash")
+func TestBindingResolverRefusesAnUnownedSession(t *testing.T) {
+	fixture := newBindingFixture(t)
+	fixture.addBot(t, "owner", "Owner", false, nil, "")
+	sessionID := uuid.New()
+	resolver := &bindingResolver{reader: fixture.reader, tenantID: fixture.tenant}
+	if _, err := resolver.ResolveBinding(context.Background(),
+		kernel.Scope{TenantID: fixture.tenant, SessionID: sessionID}, json.RawMessage(`{"botId":"owner"}`)); !errors.Is(err, ErrBindingMissing) {
+		t.Fatalf("unowned session resolved: %v", err)
 	}
 }
 
-func TestBindingResolverRefusesEscapingPromptRef(t *testing.T) {
+// TestBindingRereadsTheCurrentDocuments pins the "edit applies to the next run"
+// rule: the resolver reads Bot/Profile/Role per attempt, so a Harness or Role
+// edit is visible on the next load without a restart (an attempt in flight keeps
+// what it resolved).
+func TestBindingRereadsTheCurrentDocuments(t *testing.T) {
 	fixture := newBindingFixture(t)
-	root := t.TempDir()
-	escape := agentteam.Agent{
-		ID:           "agent_escape",
-		Name:         "Escape",
-		SystemPrompt: agentteam.SystemPrompt{Kind: agentteam.SystemPromptFile, Ref: "AGENTS.md"},
-	}.Normalized()
-	// The stored document carries a ref the save path would refuse; the resolver
-	// re-checks because the root is a runtime value.
-	raw, err := json.Marshal(map[string]any{
-		"id":           escape.ID,
-		"name":         escape.Name,
-		"avatar":       escape.Avatar,
-		"systemPrompt": map[string]any{"kind": "file", "ref": "../../etc/hosts"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.store.agents[escape.ID] = store.AgentRecord{ID: escape.ID, Document: raw}
-	resolver := &bindingResolver{reader: fixture.store, root: root, log: discardLogger()}
-	if _, err := resolver.ResolveBinding(context.Background(), kernel.Scope{}, json.RawMessage(`{"agentId":"agent_escape"}`)); err == nil {
-		t.Fatal("an escaping prompt ref must be refused")
-	}
-}
-
-func TestBindingResolverFilePromptWithoutRootIsDiagnosticNonFatal(t *testing.T) {
-	fixture := newBindingFixture(t)
-	resolver := &bindingResolver{reader: fixture.store, root: "", log: discardLogger()}
-	surface, err := resolver.ResolveBinding(context.Background(), kernel.Scope{}, json.RawMessage(`{"teamId":"team_kite"}`))
-	if err != nil {
-		t.Fatalf("ResolveBinding: %v", err)
-	}
-	if surface.Prompt != "" || surface.PromptHash != "" {
-		t.Fatalf("surface = %+v, want no prompt", surface)
-	}
-	if !surface.TeamMode {
-		t.Fatalf("surface = %+v, want the team binding to survive", surface)
-	}
-}
-
-// TestRuntimeValidateSelectionBinding is the submit-time gate end to end: the
-// binding resolves against the real domain rules (existence, archive, seal), an
-// unknown agent is a refusal, and a fact that named no model is merged with the
-// agent's default model before the model gate runs.
-func TestRuntimeValidateSelectionBinding(t *testing.T) {
-	fixture := newBindingFixture(t)
-	mem := kernel.NewMemStore()
-	kern := kernel.New(mem, kernel.Options{})
-	tenant := host.TenantConfig{Models: json.RawMessage(modelsDocument)}
-	llmOptions := testLLM(map[string]string{"TENANT_GW_KEY": "env-key"}, "flat-key")
-	cfg := Config{
-		Seams:     Seams{Committer: kern, Reader: kern, Leases: kern, External: kern, Runs: fakeMirror{}, Logger: discardLogger()},
-		Tenant:    tenant,
-		Options:   loadout.Options{},
-		RuntimeID: "binding-test-zzz",
-		LLM:       llmOptions,
-		Bindings:  BindingsOptions{Reader: fixture.store, TenantID: uuid.New()},
-	}
-	rt, err := Boot(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("Boot: %v", err)
-	}
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-
+	fixture.addBot(t, "support-1", "Support One", false, []string{"bash"}, "old instruction")
 	ctx := context.Background()
-	// A binding with no model of its own resolves through the agent's default.
-	if err := rt.ValidateSelection(ctx, json.RawMessage(`{"agentId":"agent_plain"}`)); err != nil {
-		t.Fatalf("ValidateSelection(agent default): %v", err)
-	}
-	// An explicit model still wins (nothing to validate differently here, but the
-	// fact must keep resolving).
-	if err := rt.ValidateSelection(ctx, json.RawMessage(`{"providerId":"tenant-gw","modelId":"deepseek-v4.1-flash","agentId":"agent_plain"}`)); err != nil {
-		t.Fatalf("ValidateSelection(explicit model): %v", err)
-	}
-	// Unknown / archived bindings are refused before anything is stored.
-	if err := rt.ValidateSelection(ctx, json.RawMessage(`{"agentId":"agent_nope"}`)); err == nil {
-		t.Fatal("an unknown agentId must be refused")
-	}
-	archived := agentRecord(t, fixture.plain, true)
-	fixture.store.agents[archived.ID] = archived
-	if err := rt.ValidateSelection(ctx, json.RawMessage(`{"agentId":"agent_plain"}`)); err == nil {
-		t.Fatal("an archived agentId must be refused")
-	}
-	// A fact with no binding at all keeps the pre-binding behaviour.
-	if err := rt.ValidateSelection(ctx, json.RawMessage(`{"providerId":"tenant-gw","modelId":"deepseek-v4.1-flash"}`)); err != nil {
-		t.Fatalf("ValidateSelection(model only): %v", err)
-	}
-	// A runtime without the binding seam refuses a fact that names one: the fact
-	// cannot be honoured here, and accepting it would silently run the deployment
-	// prompt with the full tool surface (the degradation spec agent-team forbids).
-	noBindings, err := Boot(context.Background(), Config{
-		Seams:     Seams{Committer: kern, Reader: kern, Leases: kern, External: kern, Runs: fakeMirror{}, Logger: discardLogger()},
-		Tenant:    tenant,
-		Options:   loadout.Options{},
-		RuntimeID: "binding-test-none",
-		LLM:       llmOptions,
-	})
-	if err != nil {
-		t.Fatalf("Boot (no bindings): %v", err)
-	}
-	t.Cleanup(func() { _ = noBindings.Close(context.Background()) })
-	if err := noBindings.ValidateSelection(ctx, json.RawMessage(`{"agentId":"agent_nope"}`)); !errors.Is(err, ErrBindingUnavailable) {
-		t.Fatalf("a runtime without the binding seam must refuse a binding fact, got %v", err)
-	}
-	// A model-only fact still passes: the model gate alone decides, exactly as
-	// before the binding existed.
-	if err := noBindings.ValidateSelection(ctx, json.RawMessage(`{"providerId":"tenant-gw","modelId":"deepseek-v4.1-flash"}`)); err != nil {
-		t.Fatalf("ValidateSelection(model only, no bindings): %v", err)
-	}
-	_ = agent.SurfaceModelBinding{}
-}
-
-// TestBindingResolverRefusesCredentialPromptFiles pins the credential boundary
-// on file-kind system prompts. The deployment root is the process working
-// directory — where .env.local / .env.personal / .admin-key-note live — so a
-// prompt ref that resolves to one of them would ship the whole file to the
-// provider as a system prompt (a credential leak that leaves the process, not
-// just the machine).
-func TestBindingResolverRefusesCredentialPromptFiles(t *testing.T) {
-	cases := []struct {
-		name string
-		ref  string
-	}{
-		{"dotenv local", ".env.local"},
-		{"dotenv personal", ".env.personal"},
-		{"dotenv team", ".env.team"},
-		{"admin key note", ".admin-key-note"},
-		{"private key", "deploy/server.pem"},
-		{"key extension", "certs/service.key"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fixture := newBindingFixture(t)
-			root := t.TempDir()
-			// Every candidate file really exists: the refusal must come from the
-			// credential rule, not from a read failure.
-			path := filepath.Join(root, filepath.FromSlash(tc.ref))
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte("KEEL_DSN=postgres://secret\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			agentDoc := agentteam.Agent{
-				ID:   "agent_creds",
-				Name: "Creds",
-			}.Normalized()
-			raw, err := json.Marshal(map[string]any{
-				"id":           agentDoc.ID,
-				"name":         agentDoc.Name,
-				"avatar":       agentDoc.Avatar,
-				"systemPrompt": map[string]any{"kind": "file", "ref": tc.ref},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			fixture.store.agents[agentDoc.ID] = store.AgentRecord{ID: agentDoc.ID, Document: raw}
-			resolver := &bindingResolver{reader: fixture.store, root: root, log: discardLogger()}
-			_, err = resolver.ResolveBinding(context.Background(), kernel.Scope{},
-				json.RawMessage(`{"agentId":"agent_creds"}`))
-			if !errors.Is(err, ErrPromptIsCredential) {
-				t.Fatalf("prompt ref %q resolved without the credential refusal: %v", tc.ref, err)
-			}
-		})
-	}
-}
-
-// TestBindingResolverRefusesSymlinkEscapingRoot pins the resolved-path half of
-// the containment check: a symlink inside the root that points outside it passes
-// a purely lexical Rel, and only the EvalSymlinks comparison catches it.
-func TestBindingResolverRefusesSymlinkEscapingRoot(t *testing.T) {
-	fixture := newBindingFixture(t)
-	root := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.txt")
-	if err := os.WriteFile(outside, []byte("outside the deployment root\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(root, "prompt.md")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	agentDoc := agentteam.Agent{ID: "agent_link", Name: "Link"}.Normalized()
-	raw, err := json.Marshal(map[string]any{
-		"id":           agentDoc.ID,
-		"name":         agentDoc.Name,
-		"avatar":       agentDoc.Avatar,
-		"systemPrompt": map[string]any{"kind": "file", "ref": "prompt.md"},
-	})
+	first, err := LoadBinding(ctx, fixture.reader, fixture.tenant, json.RawMessage(`{"botId":"support-1"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.store.agents[agentDoc.ID] = store.AgentRecord{ID: agentDoc.ID, Document: raw}
-	resolver := &bindingResolver{reader: fixture.store, root: root, log: discardLogger()}
-	_, err = resolver.ResolveBinding(context.Background(), kernel.Scope{},
-		json.RawMessage(`{"agentId":"agent_link"}`))
-	if !errors.Is(err, ErrPromptEscapesRoot) {
-		t.Fatalf("a symlink leaving the root must be refused, got %v", err)
+	if !strings.Contains(first.PromptText(), "old instruction") || !first.ToolIDs()["bash"] {
+		t.Fatalf("first binding = %+v", first)
 	}
-}
 
-// TestTeamModelOverrideIsTheSingleArbiter pins the team-level default model. The
-// field exists so a team can pin one model without editing every Agent document,
-// and it must actually take effect: a stored-but-unread override is a settings
-// control that lies. Precedence stays 输入 selection > 团队 override > Agent 默认.
-func TestTeamModelOverrideIsTheSingleArbiter(t *testing.T) {
-	cases := []struct {
-		name     string
-		override *agentteam.ModelBinding
-		agent    agentteam.ModelBinding
-		want     agentteam.ModelBinding
-	}{
-		{
-			name:     "override wins over the agent default",
-			override: &agentteam.ModelBinding{ProviderID: "team-gw", ModelID: "team-model"},
-			agent:    agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
-			want:     agentteam.ModelBinding{ProviderID: "team-gw", ModelID: "team-model"},
-		},
-		{
-			name:     "incomplete override falls back to the agent default",
-			override: &agentteam.ModelBinding{ProviderID: "team-gw"},
-			agent:    agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
-			want:     agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
-		},
-		{
-			name:  "no override keeps the agent default",
-			agent: agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
-			want:  agentteam.ModelBinding{ProviderID: "agent-gw", ModelID: "agent-model"},
-		},
+	// Edit the Role instruction and the Bot Harness/default model.
+	role := fixture.reader.roles[fixture.role.ID]
+	role.Instruction = "new role instruction"
+	fixture.reader.roles[role.ID] = role
+	model, _ := json.Marshal(botteam.ModelRef{ProviderID: "other", ModelID: "m2"})
+	harness, _ := json.Marshal(botteam.Harness{Tools: []string{"read"}})
+	record := fixture.reader.bots["support-1"]
+	record.DefaultModel = model
+	record.Harness = harness
+	fixture.reader.bots["support-1"] = record
+
+	second, err := LoadBinding(ctx, fixture.reader, fixture.tenant, json.RawMessage(`{"botId":"support-1"}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			team := &agentteam.AgentTeam{Defaults: agentteam.TeamDefaults{ModelOverride: tc.override}}
-			binding := RunBinding{
-				Agent: agentteam.Agent{ID: "agent_captain", DefaultModel: tc.agent},
-				Team:  team,
-			}
-			if got := binding.effectiveDefaultModel(); got.ProviderID != tc.want.ProviderID || got.ModelID != tc.want.ModelID {
-				t.Fatalf("effective default = %+v, want %+v", got, tc.want)
-			}
-		})
+	if !strings.Contains(second.PromptText(), "new role instruction") || strings.Contains(second.PromptText(), "old instruction") {
+		t.Fatalf("second prompt = %q", second.PromptText())
+	}
+	if second.ToolIDs()["bash"] || !second.ToolIDs()["read"] || len(second.ToolIDs()) != 1 {
+		t.Fatalf("second tools = %+v", second.ToolIDs())
+	}
+	if got := second.effectiveDefaultModel(); got.ModelID != "m2" {
+		t.Fatalf("second model = %+v", got)
 	}
 }

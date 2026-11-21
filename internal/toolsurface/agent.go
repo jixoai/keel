@@ -27,16 +27,16 @@ type AgentBackend interface {
 var agentActions = []string{ActionSpawn, ActionFork, ActionResume, ActionCancel, ActionList, ActionStatus}
 
 const agentToolDescription = "Internal sub-agents (independent session + task card). Actions: " +
-	"spawn {task, agentId?, agent?, idempotencyKey?, maxTurns?, maxTokens?, timeoutMs?} (returns the child's structured result); " +
-	"fork {eventSeq, task?, title?, taskId?, agentId?, idempotencyKey?, budget fields} (a new session inherits the parent ledger " +
+	"spawn {task, botId?, agent?, idempotencyKey?, maxTurns?, maxTokens?, timeoutMs?} (returns the child's structured result); " +
+	"fork {eventSeq, task?, title?, taskId?, botId?, idempotencyKey?, budget fields} (a new session inherits the parent ledger " +
 	"and file view at eventSeq; the new card's parentTaskId points at the origin card); " +
-	"resume {sessionId, requestId?, reason?, selection?, agentId?} (continue the same child after an interruption; " +
+	"resume {sessionId, requestId?, reason?, selection?, botId?} (continue the same child after an interruption; " +
 	"an optional selection changes its binding for the resumed attempt; never reopens a completed task); " +
 	"cancel {sessionId, reason?}; list (this session's children); status {sessionId}. " +
 	"External runtimes (Codex/Claude/DSH) are tools, not internal agents."
 
 func agentSchema() json.RawMessage {
-	return schema(`, "task":{"type":"string"}, "agent":{"type":"string"}, "agentId":{"type":"string"}, ` +
+	return schema(`, "task":{"type":"string"}, "agent":{"type":"string"}, "botId":{"type":"string"}, ` +
 		`"idempotencyKey":{"type":"string"}, "sessionId":{"type":"string"}, "requestId":{"type":"string"}, ` +
 		`"reason":{"type":"string"}, "title":{"type":"string"}, "taskId":{"type":"string"}, ` +
 		`"eventSeq":{"type":"integer","minimum":0}, "selection":{"type":"object"}, ` +

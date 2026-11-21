@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -337,4 +338,44 @@ func scanBotRow(row rowScanner) (BotRecord, error) {
 	record.DefaultModel = json.RawMessage(defaultModel)
 	record.Harness = json.RawMessage(harness)
 	return record, err
+}
+
+// ProviderReference names one Bot that references a model provider instance.
+// It is what a refused provider removal reports so the caller can offer
+// "repoint that Bot first, or disable the provider instead".
+type ProviderReference struct {
+	// Kind is the referencing document's domain (always "bot" now; the field
+	// stays for the settings API's stable wire shape).
+	Kind string
+	// ID is the Bot handle.
+	ID string
+	// Name is the Bot's display name.
+	Name string
+	// Field is the document field carrying the reference: "defaultModel".
+	Field string
+}
+
+// ProvidersReferencingProvider lists the tenant's Bots whose default model
+// names providerID. It is the read behind the provider registry's deletion
+// protection. An archived Bot still counts: it is restorable and its next
+// session would resolve the missing provider.
+func (s *Store) ProvidersReferencingProvider(ctx context.Context, tenantID uuid.UUID, providerID string) ([]ProviderReference, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT 'bot', bot_id, name, 'defaultModel'
+		   FROM bots
+		  WHERE tenant_id = $1 AND (default_model->>'providerId') = $2
+		  ORDER BY 1, 2`, tenantID, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("store: providers referencing provider: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ProviderReference, 0)
+	for rows.Next() {
+		var reference ProviderReference
+		if err := rows.Scan(&reference.Kind, &reference.ID, &reference.Name, &reference.Field); err != nil {
+			return nil, fmt.Errorf("store: scan provider reference: %w", err)
+		}
+		out = append(out, reference)
+	}
+	return out, rows.Err()
 }

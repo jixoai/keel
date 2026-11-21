@@ -56,36 +56,18 @@ CREATE INDEX IF NOT EXISTS sessions_external_backend
 -- once and never cleared by the delete route (idempotent).
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 
--- Session execution binding index (change keel-agent-team-v1, P3 session
--- reference protection). The selection fact in a committed user.message is the
--- only truth: these columns are a derived "current binding" projection of the
--- newest input that carried a selection, used by the registry's delete/archive
--- reference guard (and readable as a hint). They are never read to run an
--- attempt — the runner still resolves the selection from the ledger per attempt.
---
--- bound_seq is the user.message seq the projection came from. The write is a
--- conditional update (bound_seq <= incoming seq), so two concurrent commits on
--- one session cannot leave an older selection as the binding when their
--- post-commit writes land out of order. A model-only selection clears both ids
--- (the newest selection is authoritative); an input without a selection leaves
--- the projection untouched. bound_at is write time for diagnosis only.
---
--- RLS: the columns live on sessions, which already carries FORCE ROW LEVEL
--- SECURITY and the tenant_isolation policy (internal/store/rls.go). No new
--- table and no new policy are introduced; adding columns inherits the policy.
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_agent_id text;
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_team_id  text;
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_seq      bigint;
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_at       timestamptz;
-
--- Reference checks filter by bound id and join runs for the archived boundary;
--- the partial indexes keep them proportional to bound sessions, not the table.
-CREATE INDEX IF NOT EXISTS sessions_bound_agent
-    ON sessions (tenant_id, bound_agent_id)
-    WHERE bound_agent_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS sessions_bound_team
-    ON sessions (tenant_id, bound_team_id)
-    WHERE bound_team_id IS NOT NULL;
+-- Session execution binding (change keel-bot-identity-access, A4.2b3a).
+-- The pre-A4 newest-selection projection (bound_agent_id / bound_team_id /
+-- bound_seq / bound_at) is retired: a Session belongs to exactly one Bot
+-- (sessions.bot_id, added with the A1 identity columns) and an input cannot
+-- move that ownership. The columns and their partial indexes are dropped
+-- outright — alpha zero compatibility: no shim, no dual read, no backfill.
+ALTER TABLE sessions DROP COLUMN IF EXISTS bound_agent_id;
+ALTER TABLE sessions DROP COLUMN IF EXISTS bound_team_id;
+ALTER TABLE sessions DROP COLUMN IF EXISTS bound_seq;
+ALTER TABLE sessions DROP COLUMN IF EXISTS bound_at;
+DROP INDEX IF EXISTS sessions_bound_agent;
+DROP INDEX IF EXISTS sessions_bound_team;
 
 -- Fork origin (change keel-harness-v2, W8). A forked session inherits the
 -- parent's ledger prefix up to fork_origin_seq and its file view from
@@ -654,121 +636,42 @@ CREATE TABLE IF NOT EXISTS mcp_app_contexts (
 CREATE INDEX IF NOT EXISTS mcp_app_contexts_session
     ON mcp_app_contexts (tenant_id, session_id, updated_at);
 
--- Agent registry (change keel-agent-team-v1, P2). One row per agent per tenant.
--- The configuration is a single JSON document — the same "everything is a file"
--- unit the CLI edits and a session freezes — because the agent schema is owned
--- by internal/agentteam and this layer must not keep a second dialect of it.
--- `archived` is lifted out: it is a lifecycle column the list filters on, and
--- keeping it inside the document would make "list active agents" a JSON scan.
--- No foreign key to tenants: the registry belongs to the tenant the caller
--- names, exactly like model_settings (a deployment that never created a tenants
--- row still has agents).
--- Reconciliation with the unreleased earlier shape (same discipline as the
--- submissions and usage_ledger migrations above): a database that already holds
--- an `agents` table without the document column turns the CREATE below into a
--- silent no-op, and every query then fails at request time with "column
--- document does not exist" (observed on a dev database that carried an
--- abandoned prototype table). Resolve it at startup, where the outcome is
--- either a fix or a loud refusal:
---   * empty leftover -> drop it (no data is lost) and create the canonical row;
---   * rows present   -> refuse the migration naming the conflict, so keel serve
---                       does not start and serve 500s.
+-- --- retired product tables (change keel-bot-identity-access, A4.2b) --------
+--
+-- The Agent registry, its team document and the tenant api_keys credential are
+-- retired. Alpha zero compatibility (L19): the product only reads bots /
+-- team_bots / bot_api_keys, so the old tables are removed instead of being kept
+-- as a second truth.
+--
+-- Policy at startup (this migration IS the startup path):
+--   * an empty leftover table is dropped (no data is lost);
+--   * a table that still holds rows refuses the migration with a rebuild
+--     instruction, so a process can never start half-migrated and silently
+--     ignore the operator's data. Deployments were told the upgrade is a
+--     rebuild; a backup is the operator's responsibility.
+-- No compatibility view, no dual read and no data backfill is written.
 DO $$
 BEGIN
-    IF to_regclass('public.agents') IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = 'agents' AND column_name = 'document'
-       )
-    THEN
+    IF to_regclass('public.agents') IS NOT NULL THEN
         IF EXISTS (SELECT 1 FROM public.agents) THEN
-            RAISE EXCEPTION 'agents: an incompatible agents table exists (no document column) and holds rows; migrate or drop it before starting keel';
+            RAISE EXCEPTION 'agents: the legacy agent registry still holds rows; this build has no migration path. Back up the database, drop the agents/agent_teams/api_keys tables (or recreate the database) and re-create Bots/TeamBots through /v1/bots and /v1/team-bots';
         END IF;
         DROP TABLE public.agents CASCADE;
     END IF;
-END
-$$;
-
-CREATE TABLE IF NOT EXISTS agents (
-    tenant_id  uuid NOT NULL,
-    agent_id   text NOT NULL,
-    document   jsonb NOT NULL,
-    archived   boolean NOT NULL DEFAULT false,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, agent_id)
-);
-
-CREATE INDEX IF NOT EXISTS agents_by_tenant ON agents (tenant_id, updated_at DESC);
-
--- Agent teams (P3). The team configuration is one DB-backed file: the document
--- is exactly what the captain CLI edits and the session start path freezes, so
--- members and the captain live inside it and nowhere else (a member table would
--- be a second truth to keep in sync). revision and content_hash are lifted out
--- because they are the change identity clients compare and the optimistic guard
--- for writes; they are always derived from the document by agentteam.Seal, never
--- written by a client.
--- The same reconciliation for teams: an earlier agent_teams table carried
--- captain_id/config/config_revision/config_hash and no document, which the
--- CREATE below would skip. Empty leftovers are dropped; a table with rows is a
--- loud startup refusal instead of a silent runtime 500.
-DO $$
-BEGIN
-    IF to_regclass('public.agent_teams') IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = 'agent_teams' AND column_name = 'document'
-       )
-    THEN
+    IF to_regclass('public.agent_teams') IS NOT NULL THEN
         IF EXISTS (SELECT 1 FROM public.agent_teams) THEN
-            RAISE EXCEPTION 'agent_teams: an incompatible agent_teams table exists (no document column) and holds rows; migrate or drop it before starting keel';
+            RAISE EXCEPTION 'agent_teams: the legacy agent-team table still holds rows; this build has no migration path. Back up the database, drop the agents/agent_teams/api_keys tables (or recreate the database) and re-create Bots/TeamBots through /v1/bots and /v1/team-bots';
         END IF;
         DROP TABLE public.agent_teams CASCADE;
     END IF;
+    IF to_regclass('public.api_keys') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM public.api_keys) THEN
+            RAISE EXCEPTION 'api_keys: the legacy tenant key table still holds rows; this build has no migration path. Back up the database, drop the agents/agent_teams/api_keys tables (or recreate the database) and authenticate with account passwords or Bot keys (bot_api_keys) instead';
+        END IF;
+        DROP TABLE public.api_keys CASCADE;
+    END IF;
 END
 $$;
-
-CREATE TABLE IF NOT EXISTS agent_teams (
-    tenant_id    uuid NOT NULL,
-    team_id      text NOT NULL,
-    revision     bigint NOT NULL DEFAULT 0,
-    content_hash text NOT NULL DEFAULT '',
-    document     jsonb NOT NULL,
-    archived     boolean NOT NULL DEFAULT false,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    updated_at   timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, team_id)
-);
-
-CREATE INDEX IF NOT EXISTS agent_teams_by_tenant ON agent_teams (tenant_id, updated_at DESC);
-
--- --- tenancy-quotas (change keel-ga §2) -------------------------------------
---
--- API keys (spec: tenancy-quotas / API key 鉴权). Only the SHA-256 hash of the
--- plaintext key and a display prefix ever reach the database; the plaintext is
--- returned exactly once, by the provisioning command, and is never stored,
--- logged or echoed again. role is the key's authority ('tenant' or 'admin');
--- it is a property of the credential, not a second account model.
---
--- The unique index on key_hash is the lookup path: a request presents a key,
--- the hash is computed, one index probe resolves (tenant, role). It is not
--- tenant-scoped because the tenant is the answer, not the question.
-CREATE TABLE IF NOT EXISTS api_keys (
-    tenant_id  uuid NOT NULL,
-    key_id     uuid NOT NULL,
-    key_hash   bytea NOT NULL,
-    key_prefix text NOT NULL,
-    role       text NOT NULL DEFAULT 'tenant',
-    label      text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    revoked_at timestamptz,
-    PRIMARY KEY (tenant_id, key_id),
-    CONSTRAINT api_keys_role_check CHECK (role IN ('tenant', 'admin')),
-    CONSTRAINT api_keys_hash_len_check CHECK (octet_length(key_hash) = 32)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS api_keys_hash ON api_keys (key_hash);
-CREATE INDEX IF NOT EXISTS api_keys_by_tenant ON api_keys (tenant_id, created_at DESC);
 
 -- Per-tenant quota row. The run-concurrency and admitted-event budgets live in
 -- the tenant configuration document (host.QuotaConfig, one vocabulary the admin

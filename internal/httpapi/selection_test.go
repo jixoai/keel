@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -314,5 +315,37 @@ func TestEdgeEventSelectionIsVetted(t *testing.T) {
 		"payload": map[string]any{"text": "plain", "requestId": "evt-plain"}}
 	if code := doJSON(t, hc, "POST", url, tenant, ok, nil); code != 201 {
 		t.Fatalf("selection-free edge event = %d, want 201", code)
+	}
+}
+
+// TestInputSelectionRefusesRetiredAgentKeys pins A4.2b3a's dead-key rule at the
+// HTTP edge: a selection fact that still says agentId/teamId is an unknown-key
+// 400 (never a silent no-op), while the botId/teamBotId spellings are accepted.
+func TestInputSelectionRefusesRetiredAgentKeys(t *testing.T) {
+	hs, _ := newTestServer(t, func(c *Config) {
+		c.ValidateSelection = func(raw json.RawMessage) error {
+			return modelcfg.ValidateSelectionFact(raw)
+		}
+	})
+	hc := hs.Client()
+	tenant := uuid.NewString()
+	session := inputSetup(t, hs, tenant)
+	url := hs.URL + "/v1/sessions/" + session.String() + "/input"
+	for _, retired := range []map[string]any{
+		{"agentId": "agent_legacy"},
+		{"teamId": "team_legacy"},
+	} {
+		code := doJSON(t, hc, "POST", url, tenant, map[string]any{
+			"text": "hello", "requestId": uuid.NewString(), "selection": retired,
+		}, nil)
+		if code != 400 {
+			t.Fatalf("retired selection %v = %d, want 400", retired, code)
+		}
+	}
+	if code := doJSON(t, hc, "POST", url, tenant, map[string]any{
+		"text": "hello", "requestId": uuid.NewString(),
+		"selection": map[string]any{"botId": "bot_1", "modelId": "m", "providerId": "p"},
+	}, nil); code != 201 {
+		t.Fatalf("botId selection = %d, want 201", code)
 	}
 }

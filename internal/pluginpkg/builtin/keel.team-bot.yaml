@@ -1,0 +1,133 @@
+id: keel.team-bot
+version: 1.0.0
+kind: in-process
+description: "TeamBot plugin: manages Mission + Roster (a captain plus members) behind /v1/team-bots and the keel team-bot CLI."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  cli:
+    - path: [team-bot, list]
+      summary: "List TeamBots: id, name, captain, member count."
+      description: "Reads GET /v1/team-bots. Archived TeamBots carry their archived mark unless --include-archived filters them out."
+      args_schema:
+        type: object
+        properties:
+          include_archived: { type: boolean }
+          json: { type: boolean }
+      output_schema:
+        type: object
+        properties:
+          teamBots: { type: array }
+      permissions: [team_bot.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel team-bot list", "keel team-bot list --json"]
+    - path: [team-bot, show]
+      summary: "Show one TeamBot: mission, roster, revision and content hash."
+      description: "Reads GET /v1/team-bots/{id}. A TeamBot has no Account/Profile and grants no permission."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [team_bot.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel team-bot show support-team"]
+    - path: [team-bot, create]
+      summary: "Create a TeamBot from its mission and roster (at least one captain)."
+      description: "POSTs /v1/team-bots. Every roster seat must reference a Bot the caller may invoke; the server checks bot.invoke for the whole roster before writing."
+      args_schema:
+        type: object
+        properties:
+          name: { type: string }
+          mission: { type: string }
+          team_bot_id: { type: string }
+          roster: { type: string }
+          json: { type: boolean }
+        required: [name, mission]
+      output_schema: { type: object }
+      permissions: [team_bot.manage]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel team-bot create --name 客服团队 --mission \"24 小时内解决\" --roster captain:captain,member:member"]
+    - path: [team-bot, update]
+      summary: "Update a TeamBot's name/mission under the revision CAS."
+      description: "PATCHes /v1/team-bots/{id} with expectedRevision. A concurrent writer is refused with 409."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          mission: { type: string }
+          expected_revision: { type: integer }
+          json: { type: boolean }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [team_bot.manage]
+      danger: write
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel team-bot update support-team --mission \"新的使命\""]
+    - path: [team-bot, archive]
+      summary: "Archive a TeamBot; it cannot start a new run."
+      description: "POSTs /v1/team-bots/{id}/archive. The team revision and content hash do not move (archiving is lifecycle, not content). Repeating the call is idempotent."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema: { type: object }
+      permissions: [team_bot.manage]
+      danger: write
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel team-bot archive support-team"]
+    - path: [team-bot, roster]
+      summary: "Add or update one roster seat."
+      description: "Reads the current roster, merges the seat and POSTs /v1/team-bots/{id}/roster under the current revision. The server refuses a roster with no captain and re-checks bot.invoke for every seat."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          bot: { type: string }
+          role: { type: string }
+          json: { type: boolean }
+        required: [id, bot]
+      output_schema: { type: object }
+      permissions: [team_bot.manage]
+      danger: write
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel team-bot roster support-team --bot bot_3f1c --role member"]
+    - path: [team-bot, start]
+      summary: "Start a team run: the captain gets a Session; members stay Bots."
+      description: "POSTs /v1/team-bots/{id}/start. The captain's Bot owns the Session; the TeamBot is recorded as the mission snapshot and its selection fact. Every seated Bot is re-checked for bot.invoke and archived state at start."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+          text: { type: string }
+          session: { type: string }
+          request_id: { type: string }
+          json: { type: boolean }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          teamBotId: { type: string }
+          captainBotId: { type: string }
+          sessionId: { type: string }
+          seq: { type: integer }
+      permissions: [team_bot.manage]
+      danger: write
+      idempotent: false
+      callable_by: [ui, agent]
+      examples: ["keel team-bot start support-team --text \"Plan the release\""]
+source:
+  type: builtin

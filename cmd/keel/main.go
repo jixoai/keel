@@ -34,7 +34,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// subcommand flag parsing; the values live for this invocation only (a
 	// second run in the same process, as tests do, starts clean).
 	switch args[0] {
-	case "agent", "team", "model", "skills":
+	case "bot", "team-bot", "model", "skills":
 		cliAuthUsername, cliAuthPasswordFile = "", ""
 		rest, err := extractAuthFlags(args[1:])
 		if err != nil {
@@ -48,10 +48,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runServeCmd(args[1:], stdout, stderr)
 	case "tui":
 		return runTUICmd(args[1:], stdout, stderr)
-	case "agent":
-		return runAgentCmd(args[1:], stdout, stderr)
-	case "team":
-		return runTeamCmd(args[1:], stdout, stderr)
+	case "bot":
+		return runBotCmd(args[1:], stdout, stderr)
+	case "team-bot":
+		return runTeamBotCmd(args[1:], stdout, stderr)
 	case "model":
 		return runModelCmd(args[1:], stdout, stderr)
 	case "skills":
@@ -79,8 +79,8 @@ func usage(w io.Writer) {
 Usage:
   keel serve [flags]     Host the AgentAPI (/v1), the web UI and SSE on one origin
   keel tui [flags]       Run the NSH TUI client against a running keel serve
-  keel agent <cmd>       Manage the Agent library (list|show|create|update|delete|start|stop)
-  keel team <cmd>        Manage agent teams (list|show|create|update|delete|save|start|member add|remove)
+  keel bot <cmd>         Manage Bots (list|show|create|update|archive|start|keys|key-create|key-revoke)
+  keel team-bot <cmd>    Manage TeamBots (list|show|create|update|archive|roster|start)
   keel model <cmd>       Read/manage the model registry (providers|list|show|catalog|provider ...)
   keel skills <cmd>      Manage the tenant skill library (list|show|install|update|pin|unpin|remove|sources)
   keel admin <cmd>       Provision tenants, API keys and quotas (operator)
@@ -103,15 +103,15 @@ Environment (serve):
   KEEL_SKILLS_ROOT         managed skill library root (default $KEEL_HOME/skills)
   KEEL_SKILLS_SOURCE_ROOT  managed subscription root (default $KEEL_SKILLS_ROOT/sources)
 
-Environment (tui, agent, team, model, skills):
+Environment (tui, bot, team-bot, model, skills):
   KEEL_TUI_BIN             path to the NSH TUI binary
   KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13750)
-  KEEL_ACCOUNT_USERNAME    human account login name (keel agent/team/model/skills)
+  KEEL_ACCOUNT_USERNAME    human account login name (keel bot/team-bot/model/skills)
   KEEL_ACCOUNT_PASSWORD    human account password (or pass --password-file)
   KEEL_AGENT_TOKEN         bot API key (keel_bot_...) for machine clients
-  KEEL_SERVE_ADDR          server address for keel agent / keel team
+  KEEL_SERVE_ADDR          server address for keel bot / keel team-bot
 
-Run "keel agent --help" or "keel team --help" for the full command surface.
+Run "keel bot --help" or "keel team-bot --help" for the full command surface.
 `)
 }
 
