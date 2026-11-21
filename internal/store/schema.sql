@@ -1084,3 +1084,298 @@ CREATE TABLE IF NOT EXISTS trigger_state (
     updated_at        timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, trigger_id)
 );
+-- --- bot-identity-access (change keel-bot-identity-access, A1) --------------
+--
+-- Account / Role / Profile / Bot / TeamBot domain, permission grants,
+-- ReBAC-lite relations and the credential/audit tables. Alpha zero-compat:
+-- these are new tables. The old agents/agent_teams/api_keys rows are neither
+-- read nor migrated here; their retirement is A4/A5.
+--
+-- Every table below is tenant-scoped and listed in rlsTenantTables
+-- (internal/store/rls.go). bot_api_keys and auth_sessions are looked up by a
+-- credential before the tenant is known, so those reads use the operator
+-- bypass path exactly like api_keys (see store.LookupAPIKey and
+-- store.OperatorScoped); their normal request path stays tenant-scoped.
+--
+-- Identity types are deliberately mixed:
+--   * account/role/profile/group/grant ids are uuid;
+--   * bot/team_bot ids are text handles ("support-1"), the same stable,
+--     URL-safe identity grammar the agent registry used and the presentation
+--     the design's Bot/TeamBot examples use;
+--   * resource_relations ids are text so one generic relation table can name a
+--     uuid resource (session, task) and a text resource (bot, team_bot) without
+--     a second column or a widening cast. The design's relation snippet shows
+--     uuid; the entity examples and the existing agent-id grammar are text.
+
+CREATE TABLE IF NOT EXISTS accounts (
+    tenant_id      uuid NOT NULL,
+    account_id     uuid NOT NULL,
+    username       text NOT NULL,
+    display_name   text NOT NULL,
+    kind           text NOT NULL DEFAULT 'human',
+    password_hash  text,
+    is_super_admin boolean NOT NULL DEFAULT false,
+    disabled_at    timestamptz,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, account_id),
+    CONSTRAINT accounts_kind_check CHECK (kind IN ('human', 'bot', 'service'))
+);
+
+-- Usernames are unique per tenant under case folding; the original spelling is
+-- kept for display.
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_username
+    ON accounts (tenant_id, lower(username));
+
+-- Role is identity and soul only: it never grants a permission (L11/L12).
+CREATE TABLE IF NOT EXISTS roles (
+    tenant_id   uuid NOT NULL,
+    role_id     uuid NOT NULL,
+    name        text NOT NULL,
+    instruction text NOT NULL DEFAULT '',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS roles_by_tenant ON roles (tenant_id, updated_at DESC);
+
+-- A profile is the Account + Role binding; it carries no runtime state.
+CREATE TABLE IF NOT EXISTS profiles (
+    tenant_id  uuid NOT NULL,
+    profile_id uuid NOT NULL,
+    account_id uuid NOT NULL,
+    role_id    uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, profile_id),
+    CONSTRAINT profiles_account_fk FOREIGN KEY (tenant_id, account_id)
+        REFERENCES accounts (tenant_id, account_id),
+    CONSTRAINT profiles_role_fk FOREIGN KEY (tenant_id, role_id)
+        REFERENCES roles (tenant_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS profiles_by_account ON profiles (tenant_id, account_id);
+CREATE INDEX IF NOT EXISTS profiles_by_role ON profiles (tenant_id, role_id);
+
+-- A Bot is Profile + ModelKind + Harness. The document-shaped columns
+-- (default_model, harness) are validated by internal/botteam, not by a second
+-- SQL dialect: model kinds are extensible, so no CHECK fixes the vocabulary in
+-- a migration.
+CREATE TABLE IF NOT EXISTS bots (
+    tenant_id     uuid NOT NULL,
+    bot_id        text NOT NULL,
+    name          text NOT NULL,
+    profile_id    uuid NOT NULL,
+    model_kind    text NOT NULL,
+    default_model jsonb NOT NULL,
+    harness       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    archived      boolean NOT NULL DEFAULT false,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, bot_id),
+    CONSTRAINT bots_profile_fk FOREIGN KEY (tenant_id, profile_id)
+        REFERENCES profiles (tenant_id, profile_id)
+);
+
+CREATE INDEX IF NOT EXISTS bots_by_tenant ON bots (tenant_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS bots_by_profile ON bots (tenant_id, profile_id);
+
+-- A TeamBot is Mission + Roster. It is a resource, not a permission subject:
+-- no account_id, no profile_id, no model_kind, no session ownership (L12).
+-- revision/content_hash are the optimistic guard and change identity derived by
+-- botteam.Seal; the store never invents them.
+CREATE TABLE IF NOT EXISTS team_bots (
+    tenant_id    uuid NOT NULL,
+    team_bot_id  text NOT NULL,
+    name         text NOT NULL,
+    mission      text NOT NULL,
+    roster       jsonb NOT NULL DEFAULT '[]'::jsonb,
+    revision     bigint NOT NULL DEFAULT 0,
+    content_hash text NOT NULL DEFAULT '',
+    archived     boolean NOT NULL DEFAULT false,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, team_bot_id),
+    CONSTRAINT team_bots_revision_check CHECK (revision >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS team_bots_by_tenant ON team_bots (tenant_id, updated_at DESC);
+
+-- Permission groups are presets of (key, scope) grants. Membership and grants
+-- are additive only: there is no deny row and no nested group (L5).
+CREATE TABLE IF NOT EXISTS permission_groups (
+    tenant_id  uuid NOT NULL,
+    group_id   uuid NOT NULL,
+    name       text NOT NULL,
+    builtin    boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, group_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS permission_groups_name
+    ON permission_groups (tenant_id, lower(name));
+
+CREATE TABLE IF NOT EXISTS permission_group_members (
+    tenant_id  uuid NOT NULL,
+    group_id   uuid NOT NULL,
+    account_id uuid NOT NULL,
+    added_by   uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, group_id, account_id),
+    CONSTRAINT permission_group_members_group_fk FOREIGN KEY (tenant_id, group_id)
+        REFERENCES permission_groups (tenant_id, group_id) ON DELETE CASCADE,
+    CONSTRAINT permission_group_members_account_fk FOREIGN KEY (tenant_id, account_id)
+        REFERENCES accounts (tenant_id, account_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS permission_group_members_by_account
+    ON permission_group_members (tenant_id, account_id);
+
+CREATE TABLE IF NOT EXISTS permission_group_grants (
+    tenant_id      uuid NOT NULL,
+    group_id       uuid NOT NULL,
+    permission_key text NOT NULL,
+    scope          text NOT NULL,
+    PRIMARY KEY (tenant_id, group_id, permission_key, scope),
+    CONSTRAINT permission_group_grants_group_fk FOREIGN KEY (tenant_id, group_id)
+        REFERENCES permission_groups (tenant_id, group_id) ON DELETE CASCADE,
+    CONSTRAINT permission_group_grants_scope_check
+        CHECK (scope IN ('own', 'team', 'tenant', 'all'))
+);
+
+-- Direct grants (subject account or group). The effective set is the union of
+-- these and every group's grants; the highest scope per key wins (L5).
+CREATE TABLE IF NOT EXISTS permission_grants (
+    tenant_id      uuid NOT NULL,
+    grant_id       uuid NOT NULL,
+    subject_type   text NOT NULL,
+    subject_id     uuid NOT NULL,
+    permission_key text NOT NULL,
+    scope          text NOT NULL,
+    granted_by     uuid NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, grant_id),
+    CONSTRAINT permission_grants_subject_check
+        CHECK (subject_type IN ('account', 'group')),
+    CONSTRAINT permission_grants_scope_check
+        CHECK (scope IN ('own', 'team', 'tenant', 'all'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS permission_grants_unique
+    ON permission_grants (tenant_id, subject_type, subject_id, permission_key, scope);
+CREATE INDEX IF NOT EXISTS permission_grants_by_subject
+    ON permission_grants (tenant_id, subject_type, subject_id);
+
+-- ReBAC-lite. Relation vocabulary is closed (owner/team_member/viewer/editor)
+-- and is checked here; resource_type stays open so new resource kinds need no
+-- migration. The primary key covers the five-tuple under the tenant.
+CREATE TABLE IF NOT EXISTS resource_relations (
+    tenant_id     uuid NOT NULL,
+    resource_type text NOT NULL,
+    resource_id   text NOT NULL,
+    relation      text NOT NULL,
+    subject_type  text NOT NULL,
+    subject_id    text NOT NULL,
+    created_by    uuid NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, resource_type, resource_id, relation, subject_type, subject_id),
+    CONSTRAINT resource_relations_relation_check
+        CHECK (relation IN ('owner', 'team_member', 'viewer', 'editor')),
+    CONSTRAINT resource_relations_subject_check
+        CHECK (subject_type IN ('account', 'group', 'team_bot'))
+);
+
+-- The evaluator asks "which relations does this subject have?"; the primary key
+-- already serves "which subjects relate to this resource?".
+CREATE INDEX IF NOT EXISTS resource_relations_by_subject
+    ON resource_relations (tenant_id, subject_type, subject_id);
+
+-- Browser auth sessions (A2 owns the cookie/Argon2id path). The unique
+-- session_id index is the pre-tenant lookup path; a cookie names its session,
+-- not its tenant.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    tenant_id      uuid NOT NULL,
+    session_id     uuid NOT NULL,
+    account_id     uuid NOT NULL,
+    issued_at      timestamptz NOT NULL DEFAULT now(),
+    expires_at     timestamptz NOT NULL,
+    revoked_at     timestamptz,
+    user_agent_hash bytea,
+    ip_hash         bytea,
+    PRIMARY KEY (tenant_id, session_id),
+    CONSTRAINT auth_sessions_account_fk FOREIGN KEY (tenant_id, account_id)
+        REFERENCES accounts (tenant_id, account_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS auth_sessions_id ON auth_sessions (session_id);
+CREATE INDEX IF NOT EXISTS auth_sessions_by_account
+    ON auth_sessions (tenant_id, account_id, expires_at DESC);
+
+-- Append-only auth audit. account_id is nullable because a failed login may
+-- name no existing account; actor_account_id is the operator for super-admin
+-- actions. No FK: an audit row must outlive a disabled/renamed account.
+CREATE TABLE IF NOT EXISTS auth_events (
+    tenant_id        uuid NOT NULL,
+    event_id         bigserial NOT NULL,
+    account_id       uuid,
+    actor_account_id uuid,
+    kind             text NOT NULL,
+    result           text NOT NULL DEFAULT 'ok',
+    detail           jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS auth_events_by_account
+    ON auth_events (tenant_id, account_id, event_id);
+CREATE INDEX IF NOT EXISTS auth_events_by_created
+    ON auth_events (tenant_id, created_at DESC);
+
+-- Bot credentials (L18). A key binds to one (account, bot) pair; the plaintext
+-- is returned once and only its SHA-256 hash plus a display prefix are stored.
+-- key_hash is unique globally because the lookup happens before the tenant is
+-- known; the tenant is the answer, not the question (same shape as api_keys).
+CREATE TABLE IF NOT EXISTS bot_api_keys (
+    tenant_id   uuid NOT NULL,
+    key_id      uuid NOT NULL,
+    key_hash    bytea NOT NULL,
+    key_prefix  text NOT NULL,
+    account_id  uuid NOT NULL,
+    bot_id      text NOT NULL,
+    label       text NOT NULL DEFAULT '',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    revoked_at  timestamptz,
+    last_used_at timestamptz,
+    PRIMARY KEY (tenant_id, key_id),
+    CONSTRAINT bot_api_keys_hash_len_check CHECK (octet_length(key_hash) = 32),
+    CONSTRAINT bot_api_keys_account_fk FOREIGN KEY (tenant_id, account_id)
+        REFERENCES accounts (tenant_id, account_id) ON DELETE CASCADE,
+    CONSTRAINT bot_api_keys_bot_fk FOREIGN KEY (tenant_id, bot_id)
+        REFERENCES bots (tenant_id, bot_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS bot_api_keys_hash ON bot_api_keys (key_hash);
+CREATE INDEX IF NOT EXISTS bot_api_keys_by_bot
+    ON bot_api_keys (tenant_id, bot_id, created_at DESC);
+
+-- Session ownership projections (A4 closes the non-null contract; A1 only adds
+-- the nullable columns so new code can start writing them without touching the
+-- old run path). account_id is derived from the Bot's profile; created_by
+-- records the initiator (human or trigger); team_bot_id is an optional mission
+-- snapshot, never a permission subject.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bot_id text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS account_id uuid;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_by_account_id uuid;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS team_bot_id text;
+
+CREATE INDEX IF NOT EXISTS sessions_by_bot
+    ON sessions (tenant_id, bot_id) WHERE bot_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sessions_by_account
+    ON sessions (tenant_id, account_id) WHERE account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sessions_by_created_by
+    ON sessions (tenant_id, created_by_account_id) WHERE created_by_account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sessions_by_team_bot
+    ON sessions (tenant_id, team_bot_id) WHERE team_bot_id IS NOT NULL;

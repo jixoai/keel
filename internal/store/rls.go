@@ -87,6 +87,23 @@ var rlsTenantTables = []string{
 	"groups",
 	"session_placement",
 	"trigger_state",
+	// bot-identity-access (A1). Every new identity table is tenant-scoped.
+	// bot_api_keys and auth_sessions also carry a global lookup index (key_hash /
+	// session_id); their pre-tenant reads use the operator bypass marker, the
+	// same contract api_keys already follows.
+	"accounts",
+	"roles",
+	"profiles",
+	"bots",
+	"team_bots",
+	"permission_groups",
+	"permission_group_members",
+	"permission_group_grants",
+	"permission_grants",
+	"resource_relations",
+	"auth_sessions",
+	"auth_events",
+	"bot_api_keys",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a
