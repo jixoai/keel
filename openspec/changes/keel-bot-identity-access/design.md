@@ -147,23 +147,24 @@ api_keys (
 
 ### 3.1 permission-key
 
-- 命名：`domain.action`，例如：
-  `session.read`, `session.write`, `session.delete`,
-  `bot.read`, `bot.manage`, `bot.bind`,
-  `team_bot.read`, `team_bot.manage`,
-  `trigger.read`, `trigger.manage`,
-  `plugin.read`, `plugin.install`, `plugin.uninstall`,
-  `model.read`, `model.configure`,
-  `secret.read`, `secret.write`,
-  `account.read`, `account.manage`,
-  `permission.read`, `permission.manage`,
-  `audit.read`.
-- 高危细化（仅这三类）：
-  `secret.read.metadata` / `secret.read.value`,
-  `plugin.lifecycle.install` / `.enable` / `.disable` / `.uninstall`,
-  `account.credential.reset` / `account.permission.grant`.
-- 唯一 registry：`internal/access/keys.go`（或等价）导出 key 常量与元数据
-  （domain、display name、risk、default groups）。
+- 命名：`domain.action`。当前 registry（`internal/access/keys.go`，34 个）：
+  - session：`session.read` / `.write` / `.delete` / `.share`
+  - role/profile：`role.read` / `.manage`；`profile.read` / `.manage`
+  - bot：`bot.read` / `.create` / `.manage` / `.bind` / `.invoke`
+  - team_bot：`team_bot.read` / `.manage`
+  - trigger：`trigger.read` / `.manage`
+  - plugin：`plugin.read`；`plugin.lifecycle.install` / `.enable` / `.disable` / `.uninstall`
+  - model：`model.read` / `.configure`
+  - secret：`secret.read.metadata` / `secret.read.value`；`secret.write`
+  - account：`account.read` / `.manage`；`account.credential.reset` / `account.permission.grant`
+  - permission：`permission.read` / `.manage`
+  - audit：`audit.read`
+- 高危 key 已经是细化形态（`secret.read.metadata/value`、`plugin.lifecycle.*`、
+  `account.credential.reset`、`account.permission.grant`、`bot.invoke`），不存在会误授强动作的粗粒度 key。
+- 资源型 key（session/bot/team_bot/trigger）允许 `own|team|tenant|all`；租户型 key
+  （role/profile/plugin/model/secret/account/permission/audit）只允许 `tenant|all`。
+- 唯一 registry：`internal/access/keys.go` 导出 key 常量与元数据
+  （domain、display name、risk、required relation、allowed scopes、default groups）。
 - CI 覆盖率门：
   - 枚举 HTTP 路由表、工具 manifest、CLI 子命令、UI 动作；
   - 每个入口必须声明 required key；缺失/未知 key 失败；
@@ -175,7 +176,7 @@ api_keys (
 permission_grants (
   tenant_id uuid NOT NULL,
   grant_id uuid NOT NULL,
-  subject_type text NOT NULL,        -- account | group
+  subject_type text NOT NULL,        -- account（直授）；组授权走 permission_group_grants
   subject_id uuid NOT NULL,
   permission_key text NOT NULL,
   scope text NOT NULL,               -- own | team | tenant | all
@@ -206,10 +207,10 @@ permission_group_grants (tenant_id, group_id, permission_key, scope)
 resource_relations (
   tenant_id uuid NOT NULL,
   resource_type text NOT NULL,       -- session | bot | team_bot | task | ...
-  resource_id uuid NOT NULL,
+  resource_id text NOT NULL,         -- uuid 资源（session/task）或 text handle（bot/team_bot）
   relation text NOT NULL,            -- owner | team_member | viewer | editor
   subject_type text NOT NULL,        -- account | group | team_bot
-  subject_id uuid NOT NULL,
+  subject_id text NOT NULL,
   created_by uuid NOT NULL,
   created_at timestamptz NOT NULL,
   PRIMARY KEY (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
