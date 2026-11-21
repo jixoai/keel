@@ -2,7 +2,7 @@
   "change": "keel-agent-team-v1",
   "lane": "C2+C3",
   "date": "2026-11-21",
-  "head": "df21116",
+  "head": "a3ed980",
   "base": "21d3b26",
   "commands": [
     {
@@ -50,7 +50,7 @@
     "release": "port-release.txt",
     "freeAtCheck": true
   },
-  "headNote": "C3（df21116）在 C2 代码树上修复席位数据丢失与 Team CLI 403；全量 TUI/build/package 已在新树上复跑。浏览器截图与 checks.json 仍是 C2 的视觉证据（C3 无视觉改动）。",
+  "headNote": "C3 最终树 a3ed980：修复席位数据丢失（含团队卡片 key 兜底）与 Team CLI 403；全量 TUI 220、团队 27、check/build/package 均 exit 0。浏览器截图与 checks.json 仍是 C2 的视觉证据（C3 无视觉改动）。",
   "c3": {
     "fixes": [
       "PUT 按 agentId/inline id 合并 editing.members，续写 label/description/inline（改名/混合保存不静默清空）",
