@@ -28,8 +28,10 @@ import { effect, mount, platform, signal, Storage, Text, View, windowSize } from
 
 import type { SessionSummary } from "./src/data/contract";
 import { setClientCapabilities } from "./src/data/capabilities";
-import { store, type Notice } from "./src/data/store";
+import { store, type Notice, type Route } from "./src/data/store";
 import { KitGallery } from "./kit/KitGallery";
+import { BooksChapterRoute } from "./src/screens/books/chapters";
+import { BooksChrome } from "./src/screens/books/shell";
 import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
@@ -83,17 +85,10 @@ setClientCapabilities({
 
 // ---- the route ------------------------------------------------------------
 
-/** The routes the root knows how to render. The store's own `Route` gains
- * `plugins` and `kit` in its own entry; until that lands this file narrows the
- * store's value here (`as unknown as AppRoute`, at the one boundary between the
- * two) and every other value falls back to the workspace, so the two agree the
- * moment the store's union grows — same value space, no cross-file edit. */
-type AppRoute = "workspace" | "settings" | "plugins" | "kit";
-
-const appRoute = (): AppRoute => {
-  const route = store.route() as unknown as AppRoute;
-  return route === "settings" || route === "plugins" || route === "kit" ? route : "workspace";
-};
+/** The top-level route. `store.route` gained the books chapters in
+ * keel-bot-identity-access (A4.4a); this file only reads it, so the two cannot
+ * drift. */
+const appRoute = (): Route => store.route();
 
 // ---- the single column (≤767) ---------------------------------------------
 
@@ -371,11 +366,16 @@ function Workspace() {
 
 // ---- the other routes ------------------------------------------------------
 
-/** `/settings`, `/plugins` and `/kit` — the workspace's else. */
+/** `/settings`, `/plugins`, `/kit` and the books chapters — the workspace's
+ * else. The books chapters share the 账簿 shell (chapter band + paper); the
+ * workspace keeps its own three-column shell inside the same band, so the chat
+ * surface is untouched and the navigation is one structure across chapters. */
 function Routed() {
   return (
     <If when={appRoute() === "workspace"} else={<NotWorkspace />}>
-      <Workspace />
+      <BooksChrome>
+        <Workspace />
+      </BooksChrome>
     </If>
   );
 }
@@ -390,9 +390,26 @@ function NotWorkspace() {
 
 function NotSettings() {
   return (
-    <If when={appRoute() === "plugins"} else={<KitGallery />}>
+    <If when={appRoute() === "plugins"} else={<NotPlugins />}>
       <PluginsRoute />
     </If>
+  );
+}
+
+function NotPlugins() {
+  return (
+    <If when={appRoute() === "kit"} else={<BooksRoute />}>
+      <KitGallery />
+    </If>
+  );
+}
+
+/** The four books chapters (员工 / 团队 / 身份 / 记录) inside the band. */
+function BooksRoute() {
+  return (
+    <BooksChrome>
+      <BooksChapterRoute />
+    </BooksChrome>
   );
 }
 
