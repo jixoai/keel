@@ -78,6 +78,15 @@ func TestSessionBindingSeqGuard(t *testing.T) {
 	if err := st.CreateSession(ctx, tenant, session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	// A fresh session has a readable zero projection (bound_at is NULL), not a
+	// scan error: the read is diagnostic and must survive "nothing bound yet".
+	fresh, found, err := st.GetSessionBinding(ctx, tenant, session)
+	if err != nil || !found {
+		t.Fatalf("fresh binding: found=%v err=%v", found, err)
+	}
+	if fresh != (SessionBinding{}) {
+		t.Fatalf("fresh binding = %+v, want zero", fresh)
+	}
 
 	applied, err := st.SetSessionBinding(ctx, tenant, session, "agent_a", "", 1)
 	if err != nil || !applied {

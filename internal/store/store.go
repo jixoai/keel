@@ -449,17 +449,23 @@ func (s *Store) SetSessionBinding(ctx context.Context, tenantID, sessionID uuid.
 // returns the zero value (Seq 0). It is a diagnostic/test read: run execution
 // still resolves the newest selection from the event ledger.
 func (s *Store) GetSessionBinding(ctx context.Context, tenantID, sessionID uuid.UUID) (SessionBinding, bool, error) {
-	var binding SessionBinding
+	var (
+		binding SessionBinding
+		at      *time.Time
+	)
 	err := s.pool.QueryRow(ctx,
 		`SELECT COALESCE(bound_agent_id, ''), COALESCE(bound_team_id, ''),
 		        COALESCE(bound_seq, 0), bound_at
 		   FROM sessions WHERE tenant_id = $1 AND session_id = $2`,
-		tenantID, sessionID).Scan(&binding.AgentID, &binding.TeamID, &binding.Seq, &binding.At)
+		tenantID, sessionID).Scan(&binding.AgentID, &binding.TeamID, &binding.Seq, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionBinding{}, false, nil
 	}
 	if err != nil {
 		return SessionBinding{}, false, fmt.Errorf("store: get session binding: %w", err)
+	}
+	if at != nil {
+		binding.At = *at
 	}
 	return binding, true, nil
 }
