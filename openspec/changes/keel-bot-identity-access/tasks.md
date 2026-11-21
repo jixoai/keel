@@ -52,13 +52,13 @@
 
 - [x] `internal/access`：key registry、scope、grant 并集、`grant ⊆ own`、超管短路
 - [x] ReBAC-lite：`resource_relations` 四关系 + 判定函数；无关系拒绝、无解析 subject fail closed
-- [ ] HTTP middleware：路由 → required key；资源关系解析（A4）
-- [ ] 工具调用：manifest required key + Bot Harness permissions 收窄（A4）
-- [ ] Bot spawn / session start：`bot.invoke`（高危、审计）+ Bot 自身权限（A4）
+- [x] HTTP middleware：路由 → required key；资源关系解析（A4.2a；见 `evidence/A4.2a-route-matrix.md`）
+- [ ] 工具调用：manifest required key + Bot Harness permissions 收窄（A4.2b/A6：运行时工具面尚未接，见 A4.2b 登记）
+- [ ] Bot spawn / session start：`bot.invoke`（高危、审计）+ Bot 自身权限（HTTP 已接；运行时工具面留 A4.2b）
 - [ ] CLI 与 HTTP 同一套 key；UI `can()` 接 registry（A4/L5）
-- [ ] 初始 permission key 目录（34 个，已落地）与内置权限组（A4/A5 种子）
+- [x] 初始 permission key 目录（A4.2a 后 47 个，已落地）与内置权限组（已 seed）
 - [x] CI 覆盖率门辅助：endpoint 描述 → 缺失/未知 key 报告
-- [ ] 审计：grant/revoke/deny/超管操作/关系变更；敏感值不落日志（A4）
+- [x] 审计：grant/revoke/deny/超管操作/关系变更；敏感值不落日志（A4.2a：追加失败返回 500，非同事务；崩溃窗口 P2 见 A4.2b）
 
 ## A4 Bot / TeamBot 产品面
 
@@ -82,39 +82,37 @@
 - [x] Bot 级 Profile 绑定；Role 变更 hook 注入提示（HTTP Profile/Role CRUD 留 A4.2）
 - [x] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
 - [x] 旧无主 session 原子认领；Bot invoke/TeamBot start/generic session 归属
-- [ ] **单资源 Session 路由接关系**：`/v1/sessions/{id}/events|input|run|decisions`、SSE、
-      cancel/archive 仍只有租户边界；A4.2 必须统一走 `session.read/write` + relation
+- [x] **单资源 Session 路由接关系**：`/v1/sessions/{id}/events|input|run|decisions`、SSE、
+      cancel/archive 统一走 `session.read/write|delete` + relation（A4.2a）
 - [ ] Profile/Role HTTP CRUD（A4.2/L5）
 - [ ] 分页：accounts/groups 有界 limit；bots/teams 候选窗口 500；keyset 留后续
 - [ ] 多租户内置组 seed（新建租户时）
-- [ ] Bot 创建与 owner 关系同事务（当前关系写失败会留下无 owner Bot）
+- [x] Bot/TeamBot 创建与 owner 关系同事务；Profile rebind 与旧 owner 关系迁移同事务（A4.2a）
 - [ ] 管理员重置密码与 CLI reset 对齐：强制下次改密
 - [ ] `bot.invoke` 关系阈值（viewer vs editor/owner）产品裁决
 
-### A4.2 全路由权限收口与重命名
+### A4.2a 全路由权限收口（已完成，复评 8.5/10 PASS WITH P2）
 
-#### A4.2a 全路由权限收口（P1，先做）
-
-- [ ] **路由矩阵**：为每一条 `/v1` 路由声明 required key（+ 资源 relation）；未登记路由默认拒绝；
-      mux 注册集与矩阵做测试对表（防“加路由不加清单”）
-- [ ] **单资源 Session 路由**：events/input/run/retry/decisions/approvals/notifications/
-      team-tasks/subagents/fork/resume/SSE/cancel/archive 统一 `session.read|write|delete` + relation；
-      负控：零 grant 账号读/写他人 session 403，不能经 input 驱动高权限 Bot 绕过 `bot.invoke`
-- [ ] **旧产品面**：`/v1/agents`、`/v1/teams` CRUD 在 A4.2b 删除前先加 `account.manage`/`bot.manage`
-      门，禁止零权限裸奔；`/v1/admin/tenants*` 旧 operator 面同步退役
-- [ ] **Trigger**：`/v1/triggers` 读/火/管理接 `trigger.read|manage` + relation；租户过滤
-- [ ] **设置面**：providers/models/secrets/skills 读写接 `model.read|configure`、`secret.*`、`skill.*`
-      （A3 registry 缺 skill key 时补）；零 grant 账号不能写密钥/模型
-- [ ] **决策/审批/通知/团队任务**：接对应 `session.read|write` 或 `decision.*`/`approval.*` key
-- [ ] **Bot 创建/Profile 改绑同事务**：create+owner relation、rebind+旧关系迁移原子化；
-      部分失败不留下无 owner Bot / stale owner
-- [ ] **直授读取拒绝截断**：>500 直授报错，不静默丢 grant
-- [ ] **审计同事务**：grant/invoke/relation 与业务写同事务落 `auth_events`，失败不静默
-- [ ] **`requireKey` 资源型 key 禁止静默降级**：误用直接 500/panic，强制显式 requireResource
-- [ ] **bot.invoke 运行时**：captain→member 的工具调用/子 Bot 启动也检查 `bot.invoke`；
-      撤销后 roster 下一次启动失效（L20）
-- [ ] 测试：路由矩阵快照、全端点 200/403/404、跨租户、零 grant、旧路由门、rebind 部分失败、
-      >500 直授、roster archived 语义
+- [x] 代码内唯一路由矩阵：method+pattern → public/operator/key/held/tenant/resource；
+      resource 型 key 强制声明 relation 来源（path/query）
+- [x] 启动与测试枚举双 mux + A2 auth surface；缺项拒绝启动（172 declarations / 172 routes）
+- [x] 默认拒绝：未声明 `/v1` 路径 404；`Access` 未接线时非 public 路由 503
+- [x] 单资源 Session 全链（events/SSE/input/retry/run/cancel/archive/decisions/approvals/
+      team-tasks/files/tasks/subagents/fork/resume）接 key + relation
+- [x] `POST /v1/sessions` 无 botId 时创建即写当前账号 owner relation；带 botId 仍走 `bot.invoke`
+- [x] 旧 `/v1/agents|teams` 加 bot/team_bot held-key 门（A4.2b 删除前不再零权限）
+- [x] `GET /v1/triggers` 按租户过滤；fire/read 走 tenant scope key；bot-operator 预设同步改 tenant
+- [x] providers/models/secrets/skills/plugins/MCP/media/files/notifications/app 均声明 key
+- [x] Bot/TeamBot create + owner relation、Profile rebind + relation 迁移同事务
+- [x] 审计 grant/invoke/relation/super-admin 写失败返回 500（业务先提交，非同事务；崩溃窗口登记 P2）
+- [x] 直授 >500 报错不截断；`requireKey` 遇资源型/未知 key 直接 500
+- [x] team start 重验整份 roster 的 `bot.invoke`；archived 成员下一次 start 409/403
+- [x] sub-agent spawn/fork 子 Session 继承父 owner relation
+- [x] `GET /v1/metrics` handler 增加 `requireAdmin`；`GET /metrics` 改为 public + 运维契约说明
+- [x] 测试：矩阵/mux 对表、每类端点 200/403/404、跨租户、零 grant、旧路由、Session/trigger/
+      secrets 负控、rebind 部分失败、>500 直授、roster archived/revoke
+- [x] 证据：`evidence/A4.2a-route-matrix.md`
+- [ ] captain→member 运行时工具调用 `bot.invoke`（A4.2b；当前无 Bot tool surface）
 
 #### A4.2b 重命名与旧入口删除
 
@@ -124,6 +122,17 @@
 - [ ] 旧 `api_keys`/`agents`/`agent_teams` 表退役；旧 `keel admin tenant/key` 删除
 - [ ] 产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、`agentext`→`harnessext`
 - [ ] Profile/Role HTTP CRUD；管理端重置密码强制下次改密
+
+### A4.2b 剩余安全开口（A4.2a 复评登记，勿在 A4.2a 做）
+
+- [ ] **运行时工具面授权（最大开口）**：工具 manifest 声明 required key + Bot Harness 收窄；
+      captain→member 的工具调用/子 Bot 启动检查 `bot.invoke`；撤销后下一次调用失效（A4.2b/A6 前必须收）
+- [ ] 旧 `/v1/agents|teams` 租户全量披露：随重命名删除（当前仅 held-key 门，无资源关系）
+- [ ] notification token 路由（`/v1/notifications/{id}/open|pixel`）：`required` 模式下被 auth edge
+      401，与矩阵 public 声明矛盾；需在 edge 放行或改为签名 URL 专用端点
+- [ ] `GET /v1/files/{id}`：仅租户 `file.read`，无 per-file relation；补文件关系或明确租户级契约
+- [ ] P2 审计崩溃窗口：业务写已提交、审计行未追加时进程崩溃会留下无审计操作；用 outbox/
+      同事务写入收敛（当前选择“写失败返回 500”；`bot.invoke` 关系阈值仍按 A4.1 待裁决项）
 
 ### A4.3 Web 登录与数据层（L5 前置）
 

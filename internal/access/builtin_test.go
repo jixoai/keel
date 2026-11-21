@@ -50,6 +50,30 @@ func TestBuiltinSuperAdminHasEveryKeyAndNeverTheFlag(t *testing.T) {
 	}
 }
 
+// TestBotOperatorTriggerGrantsReachTheRoute pins the preset against the route
+// matrix: GET /v1/triggers and POST /v1/triggers/{id}/fire use tenant-scoped
+// keys (triggers are tenant-global and have no relation tuples). A team-scoped
+// preset grant would pass the key check and then be refused by the route.
+func TestBotOperatorTriggerGrantsReachTheRoute(t *testing.T) {
+	preset, ok := LookupBuiltinGroup("bot-operator")
+	if !ok {
+		t.Fatal("bot-operator preset missing")
+	}
+	held := make(map[string]Scope, len(preset.Grants))
+	for _, grant := range preset.Grants {
+		held[grant.Key] = grant.Scope
+	}
+	for _, key := range []string{KeyTriggerRead, KeyTriggerManage} {
+		scope, ok := held[key]
+		if !ok {
+			t.Fatalf("bot-operator does not grant %q", key)
+		}
+		if !scope.Covers(ScopeTenant) {
+			t.Fatalf("bot-operator %q scope = %q, want tenant or wider", key, scope)
+		}
+	}
+}
+
 func TestBuiltinTenantAdminIsTenantScoped(t *testing.T) {
 	preset, ok := LookupBuiltinGroup("tenant-admin")
 	if !ok {

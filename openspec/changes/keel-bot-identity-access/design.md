@@ -242,6 +242,11 @@ resource_relations (
 - UI：`can(key, resource)` 只做展示；后端仍是权威。无权限动作隐藏；直接访问返回 403。
 - Kernel：只记录 `actor_account_id` 与 `bot_id`，不 import `internal/access`。
 
+**审计写入语义（A4.2a 实测，修正措辞）**：业务写先提交，grant/invoke/relation/super-admin
+审计行随后追加；追加失败时接口返回 500，不静默 warn。二者**不是同一事务**：业务提交与审计
+追加之间存在崩溃窗口（操作已发生但无审计行），登记为 P2（见 `tasks.md` A4.2b）。Bot/TeamBot
+创建与 owner relation、Profile rebind 与 relation 迁移仍要求同事务，这条不受影响。
+
 ## 4. Bot 与 TeamBot
 
 ### 4.1 Bot

@@ -29,6 +29,7 @@ func TestEveryV1RouteHasPermissionDeclaration(t *testing.T) {
 	if accessgate.RuleCount() < len(routes) {
 		t.Fatalf("matrix has %d rules for %d routes", accessgate.RuleCount(), len(routes))
 	}
+	t.Logf("route permission matrix: %d declarations, %d registered routes", accessgate.RuleCount(), len(routes))
 }
 
 // TestAdminAndOperatorSurfacesAreExplicit pins the routes that must never be

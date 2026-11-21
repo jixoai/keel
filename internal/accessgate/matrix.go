@@ -111,8 +111,13 @@ var rules = []Rule{
 	// --- probes, A2 auth surface and explicit token/public exceptions -------
 	route(http.MethodGet, "/v1/health", ModePublic, ""),
 	route(http.MethodGet, "/v1/ready", ModePublic, ""),
-	route(http.MethodGet, "/metrics", ModeOperator, ""),
-	route(http.MethodGet, "/v1/metrics", ModeOperator, ""),
+	// The Prometheus scrape endpoint is not a tenant route and the A2 auth edge
+	// deliberately exempts it (operator network placement is the boundary). It is
+	// public by contract, not a fake operator route.
+	{Method: http.MethodGet, Pattern: "/metrics", Mode: ModePublic,
+		Note: "operator/Prometheus scrape contract; the auth edge exempts /metrics"},
+	{Method: http.MethodGet, Pattern: "/v1/metrics", Mode: ModeOperator,
+		Note: "handler enforces the KEEL_ADMIN_KEY Bearer credential (requireAdmin)"},
 	route(http.MethodPost, "/v1/auth/login", ModePublic, ""),
 	route(http.MethodPost, "/v1/auth/logout", ModePublic, ""),
 	route(http.MethodGet, "/v1/auth/session", ModePublic, ""),
@@ -363,4 +368,3 @@ func AllRules() []Rule {
 	})
 	return out
 }
-

@@ -248,3 +248,24 @@ func TestCheckRoutesRefusesUndeclaredRoute(t *testing.T) {
 		t.Fatalf("delegated mount: %v", err)
 	}
 }
+
+// TestBotOperatorPresetSatisfiesTriggerRoute joins the preset and the route:
+// bot-operator's trigger grants must reach tenant scope, because GET
+// /v1/triggers is a tenant-global route (no relation tuples to authorize).
+func TestBotOperatorPresetSatisfiesTriggerRoute(t *testing.T) {
+	preset, ok := access.LookupBuiltinGroup("bot-operator")
+	if !ok {
+		t.Fatal("bot-operator preset missing")
+	}
+	grants := access.Grants{}
+	for _, grant := range preset.Grants {
+		if grant.Key == access.KeyTriggerRead || grant.Key == access.KeyTriggerManage {
+			grants[grant.Key] = grant.Scope
+		}
+	}
+	tenant, principal := tenantPrincipal()
+	seam := &fakeSeam{principal: principal, grants: grants}
+	if rec := do(t, newGate(seam), http.MethodGet, "/v1/triggers", tenant, nil); rec.Code != http.StatusOK {
+		t.Fatalf("bot-operator GET /v1/triggers: %d, want 200", rec.Code)
+	}
+}

@@ -64,8 +64,11 @@ var builtinGroups = []BuiltinGroup{
 		{Key: KeyBotInvoke, Scope: ScopeTeam},
 		{Key: KeyTeamBotRead, Scope: ScopeTeam},
 		{Key: KeyTeamBotManage, Scope: ScopeTeam},
-		{Key: KeyTriggerRead, Scope: ScopeTeam},
-		{Key: KeyTriggerManage, Scope: ScopeTeam},
+		// Trigger listings are tenant-global (the engine has no trigger relation
+		// tuples), so the route requires tenant scope for both keys. A team-scoped
+		// preset grant would pass the key check and then be refused by the route.
+		{Key: KeyTriggerRead, Scope: ScopeTenant},
+		{Key: KeyTriggerManage, Scope: ScopeTenant},
 		{Key: KeyRoleRead, Scope: ScopeTenant},
 		{Key: KeyProfileRead, Scope: ScopeTenant},
 		{Key: KeyModelRead, Scope: ScopeTenant},

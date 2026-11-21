@@ -395,3 +395,55 @@ func TestMetricsSeriesStableAcrossSessions(t *testing.T) {
 type fixedPendingZero struct{}
 
 func (fixedPendingZero) CountPendingRuns(context.Context) (int64, error) { return 0, nil }
+
+// TestV1MetricsRequiresOperatorCredential pins the route matrix declaration:
+// /v1/metrics is an operator route and the handler enforces the same Bearer
+// contract as the admin API. The auth edge keeps it behind a session, so a
+// browser account without KEEL_ADMIN_KEY must not read process internals.
+func TestV1MetricsRequiresOperatorCredential(t *testing.T) {
+	t.Setenv("KEEL_ADMIN_KEY", "")
+	newServer := func(adminKey string) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(New(Config{
+			AdminKey:  adminKey,
+			Scheduler: stream.NewScheduler(4),
+			Metrics:   &stream.Metrics{},
+			Logger:    discardLogger(),
+		}))
+	}
+	status := func(t *testing.T, serverURL, authorization string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, serverURL+"/v1/metrics", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		return res.StatusCode
+	}
+
+	secured := newServer("ops-secret")
+	defer secured.Close()
+	if code := status(t, secured.URL, ""); code != http.StatusUnauthorized {
+		t.Fatalf("missing credential: %d, want 401", code)
+	}
+	if code := status(t, secured.URL, "Bearer wrong"); code != http.StatusUnauthorized {
+		t.Fatalf("wrong credential: %d, want 401", code)
+	}
+	if code := status(t, secured.URL, "Bearer ops-secret"); code != http.StatusOK {
+		t.Fatalf("operator credential: %d, want 200", code)
+	}
+
+	// No operator credential configured: the endpoint is disabled, never open.
+	disabled := newServer("")
+	defer disabled.Close()
+	if code := status(t, disabled.URL, "Bearer anything"); code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled admin api: %d, want 503", code)
+	}
+}

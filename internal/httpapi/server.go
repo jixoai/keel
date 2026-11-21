@@ -269,6 +269,13 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	// The route matrix declares this endpoint operator-only. The auth edge keeps
+	// /v1/metrics behind a session (unlike /metrics), so a browser session that
+	// lacks the deployment operator credential must not read process internals.
+	// The check is the same Bearer contract the admin API uses.
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	inflight, control, classes, rejected := s.cfg.Scheduler.Snapshot()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
