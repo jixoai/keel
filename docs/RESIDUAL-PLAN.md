@@ -16,7 +16,7 @@
 
 | change | 勾选/总数 | 残留性质 | 状态 |
 |---|---|---|---|
-| keel-agent-team-v1 | 51/61 | 10 项：团队画布/captain 槽、媒体适配器 4、验收 3；CLI start/stop、team save/start、header、AGENTS.md 编辑、五态/390 已交付（会话引用保护依赖 W2 placement） | CLI/UI 尾项已收口；画布/媒体待续 |
+| keel-agent-team-v1 | 52/61 | 9 项：画布 defaults、speech/decision 运行时面、media 事件、团队会话引用保护（W2 placement 依赖）、P7 验收/视觉；image/video 工具、团队卡片/成员库/CLI 面板已交付 | 媒体 image/video 已接线；speech/decision partial；画布 partial |
 | ~~keel-session-surfaces-v1~~（已归档 2026-11-21） | 24/24（6 个 [~] 部分项保留） | 成员任务投影/团队动态已交付；非 LLM captain 团队界面、分页入口等留后续 | **已归档**（`2026-11-21-keel-session-surfaces-v1`） |
 | ~~provider-secret-direct-config~~ | — | 已归档，无未勾项（旧 7/8 为历史口径） | **已归档 2026-11-19** |
 | ~~keel-ga~~（已归档 2026-11-21） | 43/43 | — | **已归档**（`2026-11-21-keel-ga`）；G5 1000/64、20 SIGKILL、2GB cgroup 全 PASS |
