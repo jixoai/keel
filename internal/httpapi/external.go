@@ -149,7 +149,8 @@ func (s *Server) externalOpen(w http.ResponseWriter, r *http.Request) {
 	// caller so the single-resource routes have a relation to authorize. The
 	// gate already required session.write; the relation is what later GET/send/
 	// cancel/close checks use.
-	if principal, ok := auth.PrincipalFromContext(r.Context()); ok && principal.AccountID != uuid.Nil {
+	if principal, ok := auth.PrincipalFromContext(r.Context()); ok && principal.AccountID != uuid.Nil &&
+		s.cfg.Store != nil {
 		if _, err := s.cfg.Store.PutResourceRelation(r.Context(), store.ResourceRelation{
 			TenantID: tenantID, ResourceType: "session", ResourceID: sessionID.String(),
 			Relation: store.RelationOwner, SubjectType: store.RelationSubjectAccount,

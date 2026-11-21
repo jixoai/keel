@@ -42,8 +42,8 @@ func Match(method, path string) (MatchResult, bool) {
 			continue
 		}
 		// A method-specific rule beats a method-less one; then the pattern with
-		// more literal segments wins; then the longer pattern. The matrix
-		// validation rejects ties.
+		// more literal segments wins; then the longer pattern. A tie keeps the
+		// first declaration (the matrix is reviewed in order).
 		if rule.Method != "" {
 			value += 1000
 		}

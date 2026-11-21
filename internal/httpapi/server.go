@@ -94,7 +94,7 @@ type Config struct {
 	// (POST /v1/sessions {"botId": ...}). The serve layer authorizes bot.invoke
 	// and persists (bot_id, account_id, created_by_account_id) plus the owner
 	// relation. Nil answers 501 for a bot-scoped create; a create without botId
-	// keeps the pre-A4 behavior (a tenant session row with no owner columns).
+	// goes through SessionCreator below.
 	SessionOwner SessionOwnerFunc
 	// SessionCreator creates a session with no Bot (the pre-A4 create shape) and
 	// writes the owner relation to the caller's account in the same transaction.
