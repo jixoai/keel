@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -55,6 +56,27 @@ type ForkSnapshotReader interface {
 type ForkCardStore interface {
 	OriginCard(ctx context.Context, scope kernel.Scope, seq int64) (uuid.UUID, error)
 	ForkCard(ctx context.Context, origin kernel.Scope, originTaskID uuid.UUID, originSeq int64, target kernel.Scope, title, callID string) (uuid.UUID, error)
+	// CloseForkCard closes the child card a rolled-back fork created, so a
+	// failed attempt leaves a converged card instead of an open orphan.
+	CloseForkCard(ctx context.Context, scope kernel.Scope, childSessionID uuid.UUID, reason, callID string) error
+}
+
+// ForkAdmission is the placement compensation seam. A fork that fails after the
+// admission gate may have created a placement (and, if the failure was later
+// than admission, a run reservation); the rollback releases both.
+type ForkAdmission interface {
+	Release(ctx context.Context, tenantID, sessionID uuid.UUID) error
+	Leave(ctx context.Context, tenantID, sessionID uuid.UUID) error
+}
+
+// ForkSessionCleanup is the session compensation seam of a fork that never
+// started. The store implements it: an empty child is deleted, a child with
+// ledger facts (the closed card) is archived, and a deterministic retry revives
+// the archived child before reusing it.
+type ForkSessionCleanup interface {
+	EnsureSessionActive(ctx context.Context, tenantID, sessionID uuid.UUID) error
+	ArchiveSession(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error)
+	DeleteSessionIfEmpty(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error)
 }
 
 // RunRequeuer re-enqueues an existing session's run. The store implements it:
@@ -257,6 +279,14 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 	if err := r.gate.CreateSession(ctx, req.TenantID, childID); err != nil {
 		return SubagentRecord{}, err
 	}
+	// A deterministic child id makes a retry reuse the same session. A previous
+	// attempt that failed after the card was created archived that child; revive
+	// it here so the retry converges instead of writing into a hidden session.
+	if r.cleanup != nil {
+		if err := r.cleanup.EnsureSessionActive(ctx, req.TenantID, childID); err != nil {
+			return SubagentRecord{}, err
+		}
+	}
 	fact := sessionfork.Fact{
 		ParentSessionID:  req.ParentSessionID,
 		OriginSeq:        origin,
@@ -266,6 +296,7 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 		AnchorSeq:        anchorSeq,
 	}
 	if err := r.forks.RecordSessionFork(ctx, req.TenantID, childID, fact); err != nil {
+		r.rollbackFork(ctx, req.TenantID, childID, false)
 		return SubagentRecord{}, err
 	}
 	childScope := kernel.Scope{TenantID: req.TenantID, SessionID: childID}
@@ -275,6 +306,7 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 	}
 	callID := "fork:" + childID.String()
 	if _, err := r.cards.ForkCard(ctx, parentScope, originTaskID, origin, childScope, title, callID); err != nil {
+		r.rollbackFork(ctx, req.TenantID, childID, true)
 		return SubagentRecord{}, fmt.Errorf("agentext: create forked card: %w", err)
 	}
 
@@ -312,6 +344,27 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 		Extras:    extras,
 	})
 	if err != nil {
+		// A failure after the input commit (for example the binding projection)
+		// must NOT be rolled back: the child run is durable and would otherwise
+		// execute without its fork fact or card. Only a fork whose input never
+		// landed is compensated.
+		if r.Edge() != nil {
+			if _, found, lookupErr := r.Edge().Lookup(ctx, childScope,
+				kernel.KeyRef{Kind: kernel.KeyRequest, Value: requestID}); lookupErr != nil {
+				r.log.Warn("fork failed and the commit state is unknown; not rolling back",
+					"session_id", childID, "err", err, "lookup_err", lookupErr)
+				return SubagentRecord{}, err
+			} else if found {
+				r.log.Warn("fork input committed but the turn returned an error; keeping the fork",
+					"session_id", childID, "err", err)
+				return SubagentRecord{}, err
+			}
+		}
+		// The admission gate refused the first input (group full / tenant quota)
+		// or the commit failed before appending. Compensate every side effect
+		// this fork created: the slot reservation, the fork fact, the card and
+		// the child session.
+		r.rollbackFork(ctx, req.TenantID, childID, true)
 		return SubagentRecord{}, err
 	}
 	record := SubagentRecord{
@@ -724,6 +777,55 @@ func (r *SubagentRunner) noteParent(ctx context.Context, tenantID, parentID, chi
 	if err := r.notes.NoteSubagentFinished(context.WithoutCancel(ctx),
 		kernel.Scope{TenantID: tenantID, SessionID: parentID}, childID, status, summary); err != nil {
 		r.log.Warn("append sub-agent note to the parent card", "session_id", childID, "err", err)
+	}
+}
+
+// rollbackFork compensates a fork that never started. Every step is
+// best-effort and runs on a fresh bounded context: the first input's failure
+// may be a cancelled request, and a cancelled context must not strand the
+// reservation. The order is deliberate: release the run slot and the placement
+// before deleting the session, close the card before archiving the child (so
+// the task tree sees a converged card, not an open orphan), and clear the fork
+// fact before the archive.
+func (r *SubagentRunner) rollbackFork(ctx context.Context, tenantID, childID uuid.UUID, cardAttempted bool) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if r.admission != nil {
+		if err := r.admission.Release(cleanupCtx, tenantID, childID); err != nil {
+			r.log.Warn("fork rollback: release run slot", "session_id", childID, "err", err)
+		}
+		if err := r.admission.Leave(cleanupCtx, tenantID, childID); err != nil {
+			r.log.Warn("fork rollback: leave placement", "session_id", childID, "err", err)
+		}
+	}
+	if cardAttempted && r.cards != nil {
+		scope := kernel.Scope{TenantID: tenantID, SessionID: childID}
+		// The close is a state transition, not the fork's create fact: a fresh
+		// suffix lets a retry cycle close the reopened card (the projection's
+		// updated_seq guard would otherwise ignore an older deduped event). The
+		// card count still converges to one.
+		if err := r.cards.CloseForkCard(cleanupCtx, scope, childID, "fork did not start",
+			"fork-rollback:"+childID.String()+":"+uuid.NewString()); err != nil {
+			r.log.Warn("fork rollback: close card", "session_id", childID, "err", err)
+		}
+	}
+	if r.forks != nil {
+		if err := r.forks.ClearSessionFork(cleanupCtx, tenantID, childID); err != nil {
+			r.log.Warn("fork rollback: clear fork fact", "session_id", childID, "err", err)
+		}
+	}
+	if r.cleanup != nil {
+		deleted, err := r.cleanup.DeleteSessionIfEmpty(cleanupCtx, tenantID, childID)
+		if err != nil {
+			r.log.Warn("fork rollback: delete empty session", "session_id", childID, "err", err)
+			return
+		}
+		if deleted {
+			return
+		}
+		if _, err := r.cleanup.ArchiveSession(cleanupCtx, tenantID, childID); err != nil {
+			r.log.Warn("fork rollback: archive session", "session_id", childID, "err", err)
+		}
 	}
 }
 

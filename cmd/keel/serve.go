@@ -40,6 +40,7 @@ import (
 	keelmetrics "github.com/jixoai/keel/internal/metrics"
 	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/notify"
+	"github.com/jixoai/keel/internal/placement"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/pluginpkg/builtin"
 	"github.com/jixoai/keel/internal/provider"
@@ -777,7 +778,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// enforce, so "my usage" and "why was I refused" cannot disagree.
 	edge := newEdgeQuota(st)
 	hostTheme := loadHostTheme(static.root, log)
-	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
+	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, placementRT.Gate, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
 		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr, log)
 	if err != nil {
 		return err
@@ -1015,6 +1016,46 @@ func (f forkCards) ForkCard(ctx context.Context, origin kernel.Scope, originTask
 	return card.TaskID, nil
 }
 
+func (f forkCards) CloseForkCard(ctx context.Context, scope kernel.Scope, childSessionID uuid.UUID, reason, callID string) error {
+	taskID := tasklog.InitialTaskID(scope.TenantID, childSessionID)
+	_, err := f.service.Close(ctx, scope, taskID, reason, callID)
+	if errors.Is(err, tasklog.ErrTaskNotFound) {
+		return nil
+	}
+	return err
+}
+
+// forkAdmission compensates a failed fork's placement reservation. Release
+// drops the pending run slot; Leave removes the placement EnsurePlacement may
+// have created before admission failed.
+type forkAdmission struct{ gate *placement.Gate }
+
+func (f forkAdmission) Release(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+	if f.gate == nil {
+		return nil
+	}
+	return f.gate.Release(ctx, tenantID, sessionID)
+}
+
+func (f forkAdmission) Leave(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+	if f.gate == nil {
+		return nil
+	}
+	service := f.gate.Service()
+	current, err := service.Store().GetPlacement(ctx, tenantID, sessionID)
+	if errors.Is(err, placement.ErrPlacementNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = service.Leave(ctx, placement.LeaveRequest{
+		TenantID: tenantID, SessionID: sessionID,
+		WorkerID: current.WorkerID, ExpectedEpoch: current.Epoch,
+	})
+	return err
+}
+
 // runRequeuer adapts the store's run requeue to the sub-agent resume seam.
 type runRequeuer struct{ store *store.Store }
 
@@ -1028,7 +1069,7 @@ func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UU
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -1064,6 +1105,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if opts.FileService != nil {
 		forkSnapshotReader = forkSnapshots{manifest: opts.FileService.Manifest()}
 	}
+	var forkAdmissionOpt agentext.ForkAdmission
+	if admissionGate != nil {
+		forkAdmissionOpt = forkAdmission{gate: admissionGate}
+	}
 	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate:    sessions,
 		Edge:    admission,
@@ -1086,6 +1131,8 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Forks:     st,
 		Snapshots: forkSnapshotReader,
 		Cards:     forkCards{service: taskLog},
+		Admission: forkAdmissionOpt,
+		Cleanup:   st,
 		Requeue:   runRequeuer{store: st},
 		Notes:     taskLog,
 		ConfigVersion: func() (string, int64) {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,8 +16,10 @@ import (
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/placement"
 	"github.com/jixoai/keel/internal/sessionfork"
 	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/tasklog"
 )
 
 type forkSnapshots struct {
@@ -31,11 +35,13 @@ func (f *forkSnapshots) SnapshotAtOrBefore(context.Context, uuid.UUID, uuid.UUID
 }
 
 type forkCards struct {
-	origin    uuid.UUID
-	forked    uuid.UUID
-	originSeq int64
-	target    kernel.Scope
-	called    bool
+	origin      uuid.UUID
+	forked      uuid.UUID
+	originSeq   int64
+	target      kernel.Scope
+	called      bool
+	closeCalls  int
+	closedChild uuid.UUID
 }
 
 func (f *forkCards) OriginCard(context.Context, kernel.Scope, int64) (uuid.UUID, error) {
@@ -48,6 +54,12 @@ func (f *forkCards) ForkCard(_ context.Context, _ kernel.Scope, originTaskID uui
 	f.originSeq = originSeq
 	f.target = target
 	return uuid.New(), nil
+}
+
+func (f *forkCards) CloseForkCard(_ context.Context, _ kernel.Scope, childSessionID uuid.UUID, _, _ string) error {
+	f.closeCalls++
+	f.closedChild = childSessionID
+	return nil
 }
 
 type forkNotes struct {
@@ -682,5 +694,200 @@ func TestSubagentReturnCarriesArtifactRefsAndParentNote(t *testing.T) {
 	}
 	if notes.calls != 1 || notes.parent != parent || notes.child != child || notes.status != "done" || notes.summary != "all done" {
 		t.Fatalf("parent note = %+v", notes)
+	}
+}
+
+type fakeAdmission struct {
+	releases int
+	leaves   int
+}
+
+func (f *fakeAdmission) Release(context.Context, uuid.UUID, uuid.UUID) error {
+	f.releases++
+	return nil
+}
+
+func (f *fakeAdmission) Leave(context.Context, uuid.UUID, uuid.UUID) error {
+	f.leaves++
+	return nil
+}
+
+type flakyEdge struct {
+	inner    kernel.Committer
+	mu       sync.Mutex
+	failures int
+}
+
+func (e *flakyEdge) Commit(ctx context.Context, req kernel.CommitRequest) (kernel.Receipt, error) {
+	if req.Kind == kernel.KindUserMessage {
+		e.mu.Lock()
+		if e.failures > 0 {
+			e.failures--
+			e.mu.Unlock()
+			return kernel.Receipt{}, &placement.CapacityError{
+				Reason: placement.CapacityGroup, Resource: "group",
+				TenantID: req.Scope.TenantID, SessionID: req.Scope.SessionID,
+				Limit: 1, Active: 1, RetryAfter: time.Second,
+			}
+		}
+		e.mu.Unlock()
+	}
+	return e.inner.Commit(ctx, req)
+}
+
+func (e *flakyEdge) Lookup(ctx context.Context, scope kernel.Scope, key kernel.KeyRef) (kernel.Receipt, bool, error) {
+	return e.inner.Lookup(ctx, scope, key)
+}
+
+type realForkCards struct{ service *tasklog.Service }
+
+func (r realForkCards) OriginCard(ctx context.Context, scope kernel.Scope, seq int64) (uuid.UUID, error) {
+	card, err := r.service.OriginCard(ctx, scope, seq)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return card.TaskID, nil
+}
+
+func (r realForkCards) ForkCard(ctx context.Context, origin kernel.Scope, originTaskID uuid.UUID, originSeq int64, target kernel.Scope, title, callID string) (uuid.UUID, error) {
+	card, err := r.service.ForkCard(ctx, origin, originTaskID, originSeq, target, title, callID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return card.TaskID, nil
+}
+
+func (r realForkCards) CloseForkCard(ctx context.Context, scope kernel.Scope, childSessionID uuid.UUID, reason, callID string) error {
+	taskID := tasklog.InitialTaskID(scope.TenantID, childSessionID)
+	_, err := r.service.Close(ctx, scope, taskID, reason, callID)
+	if errors.Is(err, tasklog.ErrTaskNotFound) {
+		return nil
+	}
+	return err
+}
+
+// TestForkCapacityRetryConvergesToOneCard is the P1 regression: a fork refused
+// by the group slot must leave no open child/fact/card, and the same
+// idempotency key retried N times must converge on exactly one child card when
+// the slot finally opens.
+func TestForkCapacityRetryConvergesToOneCard(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	tenant, parent := uuid.New(), uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "fork-retry"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, tenant, parent); err != nil {
+		t.Fatal(err)
+	}
+	klog, err := kernel.NewPG(ctx, st.Pool())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kern := kernel.New(klog, kernel.Options{})
+	parentScope := kernel.Scope{TenantID: tenant, SessionID: parent}
+	origin := commitMessage(t, kern, parentScope, "parent-r1", "parent question", nil)
+
+	taskLog := tasklog.New(tasklog.Options{
+		Committer: kern, Reader: kern, Projection: tasklog.NewPGProjection(st),
+	})
+	edge := &flakyEdge{inner: kern, failures: 2}
+	admission := &fakeAdmission{}
+	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
+		Gate: storeSessions{st}, Edge: edge, Events: kern, Runs: storeSessions{st},
+		Logger: testLogger(), Forks: st, Cards: realForkCards{service: taskLog},
+		Admission: admission, Cleanup: st,
+	})
+	req := agentext.ForkRequest{
+		TenantID: tenant, ParentSessionID: parent, EventSeq: origin,
+		Task: "branch task", IdempotencyKey: "retry-1",
+	}
+	child := uuid.NewSHA1(uuid.NameSpaceOID, []byte("keel.subagent.fork.v1|"+
+		tenant.String()+"|"+parent.String()+"|"+fmt.Sprintf("%d", origin)+"|retry-1"))
+
+	checkRolledBack := func(attempt int) {
+		t.Helper()
+		if _, found, err := st.SessionFork(ctx, tenant, child); err != nil || found {
+			t.Fatalf("attempt %d left a fork fact: found=%v err=%v", attempt, found, err)
+		}
+		var archivedAt *time.Time
+		if err := st.Pool().QueryRow(ctx,
+			`SELECT archived_at FROM sessions WHERE tenant_id = $1 AND session_id = $2`,
+			tenant, child).Scan(&archivedAt); err != nil {
+			t.Fatalf("attempt %d read session: %v", attempt, err)
+		}
+		if archivedAt == nil {
+			t.Fatalf("attempt %d left the child session visible", attempt)
+		}
+		var cards, open int
+		if err := st.Pool().QueryRow(ctx,
+			`SELECT count(*), count(*) FILTER (WHERE status <> 'closed')
+			   FROM task_cards WHERE tenant_id = $1 AND session_id = $2`,
+			tenant, child).Scan(&cards, &open); err != nil {
+			t.Fatalf("attempt %d read cards: %v", attempt, err)
+		}
+		if cards != 1 || open != 0 {
+			t.Fatalf("attempt %d cards = %d (open %d), want one closed card", attempt, cards, open)
+		}
+		var inputs int
+		if err := st.Pool().QueryRow(ctx,
+			`SELECT count(*) FROM events WHERE tenant_id = $1 AND session_id = $2 AND kind = 'user.message'`,
+			tenant, child).Scan(&inputs); err != nil {
+			t.Fatalf("attempt %d read inputs: %v", attempt, err)
+		}
+		if inputs != 0 {
+			t.Fatalf("attempt %d committed %d child inputs", attempt, inputs)
+		}
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := runner.ForkAsync(ctx, req); !placement.IsCapacity(err) {
+			t.Fatalf("attempt %d error = %v, want a capacity refusal", attempt, err)
+		}
+		checkRolledBack(attempt)
+	}
+	if admission.releases < 2 || admission.leaves < 2 {
+		t.Fatalf("admission compensation = releases %d leaves %d", admission.releases, admission.leaves)
+	}
+
+	record, err := runner.ForkAsync(ctx, req)
+	if err != nil {
+		t.Fatalf("retry after capacity: %v", err)
+	}
+	if record.SessionID != child.String() || record.OriginSeq != origin {
+		t.Fatalf("fork record = %+v", record)
+	}
+	fact, found, err := st.SessionFork(ctx, tenant, child)
+	if err != nil || !found || fact.ParentSessionID != parent || fact.OriginSeq != origin {
+		t.Fatalf("fork fact = %+v found=%v err=%v", fact, found, err)
+	}
+	var archivedAt *time.Time
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT archived_at FROM sessions WHERE tenant_id = $1 AND session_id = $2`,
+		tenant, child).Scan(&archivedAt); err != nil {
+		t.Fatal(err)
+	}
+	if archivedAt != nil {
+		t.Fatalf("successful retry left the child archived at %v", archivedAt)
+	}
+	var cards, open int
+	var parentTaskID *uuid.UUID
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT count(*), count(*) FILTER (WHERE status <> 'closed'), (array_agg(parent_task_id))[1]
+		   FROM task_cards WHERE tenant_id = $1 AND session_id = $2`,
+		tenant, child).Scan(&cards, &open, &parentTaskID); err != nil {
+		t.Fatal(err)
+	}
+	if cards != 1 || open != 1 || parentTaskID == nil || parentTaskID.String() != record.ParentTaskID {
+		t.Fatalf("final cards = %d (open %d) parent=%v, want one open card under %s", cards, open, parentTaskID, record.ParentTaskID)
+	}
+	var inputs int
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE tenant_id = $1 AND session_id = $2 AND kind = 'user.message'`,
+		tenant, child).Scan(&inputs); err != nil {
+		t.Fatal(err)
+	}
+	if inputs != 1 {
+		t.Fatalf("final child inputs = %d, want one", inputs)
 	}
 }

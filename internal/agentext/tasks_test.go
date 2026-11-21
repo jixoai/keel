@@ -230,3 +230,36 @@ func TestTasksPluginMissingServiceIsTyped(t *testing.T) {
 		t.Fatalf("nil service code = %v", problem)
 	}
 }
+
+// TestTasksPluginDoesNotRelinkForkedCards pins the fork origin: a forked child
+// already has its card with parentTaskId = origin card; the started hook must
+// not reparent it to the parent's active card.
+func TestTasksPluginDoesNotRelinkForkedCards(t *testing.T) {
+	tenant, parentSession, childSession := uuid.New(), uuid.New(), uuid.New()
+	linked := 0
+	api := &fakeTaskAPI{link: func(context.Context, kernel.Scope, uuid.UUID) (tasklog.Card, error) {
+		linked++
+		return tasklog.Card{}, nil
+	}}
+	plugin := NewTasksPlugin(TasksOptions{Service: api})
+	payload := HookPayload{
+		Event:             HookSubagentStarted,
+		TenantID:          tenant.String(),
+		ParentSessionID:   parentSession.String(),
+		SubagentSessionID: childSession.String(),
+		Data:              map[string]string{"origin": "fork"},
+	}
+	if err := plugin.Hooks[0].Handler(context.Background(), payload); err != nil {
+		t.Fatal(err)
+	}
+	if linked != 0 {
+		t.Fatal("a forked child was relinked to the parent's active card")
+	}
+	payload.Data = nil
+	if err := plugin.Hooks[0].Handler(context.Background(), payload); err != nil {
+		t.Fatal(err)
+	}
+	if linked != 1 {
+		t.Fatalf("a spawned child was not linked (calls=%d)", linked)
+	}
+}

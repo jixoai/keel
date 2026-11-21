@@ -190,11 +190,17 @@ type SubagentOptions struct {
 	// Forks records the durable fork origin (the store implements it). Fork
 	// refuses without it: a fork whose file/ledger prefix is not durable is a
 	// broken session, not a best-effort one.
-	Forks sessionfork.Writer
+	Forks sessionfork.Store
 	// Snapshots resolves the parent's file-view tree at a fork origin.
 	Snapshots ForkSnapshotReader
 	// Cards resolves the origin card and creates the forked card (parentTaskId).
 	Cards ForkCardStore
+	// Admission releases/leaves a slot reservation left by a failed first
+	// input. Nil skips the compensation (a deployment without placement).
+	Admission ForkAdmission
+	// Cleanup archives/deletes the child session of a fork that never started.
+	// Nil skips the compensation; the card is still closed and the fact cleared.
+	Cleanup ForkSessionCleanup
 	// Requeue re-enqueues an existing run for resume (the store implements it).
 	// Resume refuses without it.
 	Requeue RunRequeuer
@@ -229,9 +235,11 @@ type SubagentRunner struct {
 	// fail-closed, see SubagentOptions.ValidateSelection).
 	validateSelection func(json.RawMessage) error
 
-	forks         sessionfork.Writer
+	forks         sessionfork.Store
 	snapshots     ForkSnapshotReader
 	cards         ForkCardStore
+	admission     ForkAdmission
+	cleanup       ForkSessionCleanup
 	requeue       RunRequeuer
 	notes         SubagentNoteWriter
 	configVersion func() (string, int64)
@@ -270,6 +278,8 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 		forks:             opts.Forks,
 		snapshots:         opts.Snapshots,
 		cards:             opts.Cards,
+		admission:         opts.Admission,
+		cleanup:           opts.Cleanup,
 		requeue:           opts.Requeue,
 		notes:             opts.Notes,
 		configVersion:     opts.ConfigVersion,

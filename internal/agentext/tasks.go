@@ -271,6 +271,12 @@ func (p *tasksPlugin) hooks() []HookSpec {
 		// heuristic skips them), so the card never hides the input.
 		Event: HookSubagentStarted,
 		Handler: func(ctx context.Context, payload HookPayload) error {
+			// A forked child already has its card (ForkCard set parentTaskId to
+			// the origin card). Linking it again would reparent it to the
+			// parent's *active* card and destroy the fork origin.
+			if payload.Data != nil && payload.Data["origin"] == "fork" {
+				return nil
+			}
 			tenantID, err := uuid.Parse(payload.TenantID)
 			if err != nil {
 				return nil
