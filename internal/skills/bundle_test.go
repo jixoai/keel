@@ -133,7 +133,7 @@ func TestBundleFromFilesRejectsUnsafePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ComposeSkillDocument: %v", err)
 	}
-	for _, bad := range []string{"../escape.md", "/etc/passwd", `references\win.md`, "a//b.md", "./SKILL.md"} {
+	for _, bad := range []string{"../escape.md", "/etc/passwd", `references\win.md`, "a//b.md", "./SKILL.md", ".hidden/x.md", "node_modules/x.md"} {
 		_, err := BundleFromFiles([]FileInput{
 			{Path: SkillFileName, Content: doc},
 			{Path: bad, Content: []byte("x")},

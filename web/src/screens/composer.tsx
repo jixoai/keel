@@ -288,7 +288,11 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
         </View>
       </If>
       <If when={!!completionTrigger(draft())}>
-        <CompletionMenu query={completionTrigger(draft())?.query ?? ""} onPick={pickCompletion} />
+        <CompletionMenu
+          query={completionTrigger(draft())?.query ?? ""}
+          sessionId={store.activeId()}
+          onPick={pickCompletion}
+        />
       </If>
       <ComposerSurface testID="composer-surface">
         <Input

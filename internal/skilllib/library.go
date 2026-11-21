@@ -473,9 +473,12 @@ func (l *Library) record(item entry, tenantRoot string, check bool) Record {
 		Path:        filepath.Join(tenantRoot, "active", item.Name),
 	}
 	sort.Slice(record.Versions, func(i, j int) bool { return record.Versions[i].CreatedAt.After(record.Versions[j].CreatedAt) })
-	if len(record.Versions) > 0 {
-		record.FileCount = record.Versions[0].Files
-		record.Bytes = record.Versions[0].Bytes
+	for _, version := range item.Versions {
+		if version.Hash == item.Current {
+			record.FileCount = version.Files
+			record.Bytes = version.Bytes
+			break
+		}
 	}
 	// The active copy must still be the version the index names. A hand edit or
 	// a half-copied tree is a conflict, never silently served.
@@ -748,10 +751,9 @@ func (l *Library) Pin(tenantID uuid.UUID, name, hash string) (Record, error) {
 		if !hasVersion(item.Versions, hash) {
 			return false, errorf(CodeVersionMissing, "skill %q has no version %s", name, short(hash))
 		}
-		if item.Pinned == hash && item.Current == hash {
-			record = l.record(*item, tenantRoot, false)
-			return false, nil
-		}
+		// Even when the same hash is already pinned, materialise the version
+		// again: an active copy that drifted must be repaired by the pin, not
+		// left as a conflict.
 		versionDir := filepath.Join(tenantRoot, ".versions", hash)
 		bundle, err := skills.LoadBundle(versionDir)
 		if err != nil {
@@ -847,6 +849,9 @@ func (l *Library) Subscribe(tenantID uuid.UUID, source Source) (Source, error) {
 				return false, nil
 			}
 			return false, errorf(CodeAlreadyExists, "source %q already exists", source.ID)
+		}
+		if absolute, absErr := filepath.Abs(source.URL); absErr == nil {
+			source.URL = absolute
 		}
 		source.CreatedAt = l.now()
 		idx.Sources = append(idx.Sources, source)

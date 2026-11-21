@@ -881,6 +881,9 @@ class KeelStore {
     try {
       this.skills.set(await this.skillsApi().skillsSettings(check));
     } catch (error) {
+      // A failed read is not a stale list: clear it so the error face is the
+      // whole answer.
+      this.skills.set(null);
       this.skillsError.set(messageOf(error));
       if (error instanceof KeelApiError) this.skillsErrorCode.set(error.code ?? null);
     } finally {

@@ -151,9 +151,18 @@ export function buildLearnInstruction(prompt: string): string {
 }
 
 /** The menu's rows, drawn only while a `$` token is active. */
-export function CompletionMenu(props: { query: string; onPick: (insert: string) => void }) {
+export function CompletionMenu(props: {
+  query: string;
+  sessionId: string | null;
+  onPick: (insert: string) => void;
+}) {
+  // The file/task groups belong to one session: a late answer from a session
+  // the reader left must not appear under the new one.
+  const current = () => !!props.sessionId && store.completionSession() === props.sessionId;
   const groups = () =>
-    completionGroups(props.query, store.completionSkills(), store.completionFiles(), store.completionTasks());
+    current()
+      ? completionGroups(props.query, store.completionSkills(), store.completionFiles(), store.completionTasks())
+      : [];
   const total = () => groups().reduce((count, group) => count + group.items.length, 0);
   return (
     <Card size="sm" testID="composer-completion" accessibilityLabel="$ 补全">
@@ -170,7 +179,7 @@ export function CompletionMenu(props: { query: string; onPick: (insert: string) 
             {store.completionError() ?? ""}
           </Text>
         </If>
-        <If when={!store.completionLoading() && total() === 0 && !store.completionError()}>
+        <If when={!store.completionLoading() && current() && total() === 0 && !store.completionError()}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
             没有匹配的技能、文件或任务。
           </Text>

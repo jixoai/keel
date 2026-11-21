@@ -500,6 +500,12 @@ func validateBundlePath(rel string) error {
 		if segment == "" || segment == "." || segment == ".." {
 			return fmt.Errorf("%w: path %q contains %q", ErrBundleInvalid, rel, segment)
 		}
+		// LoadBundle skips hidden entries and node_modules; an uploaded path
+		// carrying them would hash differently after materialisation. Refuse it
+		// here so a bundle's identity is the same on both sides.
+		if strings.HasPrefix(segment, ".") || segment == "node_modules" {
+			return fmt.Errorf("%w: path %q is not skill content (hidden or node_modules)", ErrBundleInvalid, rel)
+		}
 	}
 	return nil
 }
