@@ -932,6 +932,30 @@ class KeelStore {
     }
   }
 
+  /** Install a skill that already exists in a subscribed source. It is the
+   * settings face of `keel skills install <name> --source <id>`; an untrusted
+   * source still needs the explicit acknowledgement. */
+  async installSkillFromSource(name: string, sourceId: string, allowUntrusted: boolean): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      const record = await this.skillsApi().installSkill({
+        name: name.trim(),
+        sourceId,
+        allowUntrusted,
+      });
+      this.flash({ tone: "success", text: `已从 ${sourceId} 安装 ${record.name}` });
+      await this.loadSkillsPanel(true);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
   /** Advance a skill to its source's current bundle. A pinned skill answers
    * 409 `pinned`: the page shows that code instead of a generic failure. */
   async updateSkill(name: string): Promise<boolean> {

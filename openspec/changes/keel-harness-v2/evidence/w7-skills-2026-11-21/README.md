@@ -34,7 +34,8 @@ and `/learn`, and the rule that skill scripts never execute inside the library.
      thin HTTP client (`cmd/keel/skills.go`), never a second DB path.
    - Settings `/settings/skills` (`web/src/screens/settings-skills.tsx`):
      trust/pin/update/conflict badges, detail dialog (body, resources,
-     immutable versions), create, sources with in-use refusal, five states.
+     immutable versions), create, install from a subscribed source, sources
+     with in-use refusal, five states.
    - `Host.RefreshSkills` rediscovery makes an install visible to the next run
      without a restart; `active/` is one of the discovery roots.
 4. **`$` completion** — `web/src/screens/composer-completion.tsx`
@@ -62,7 +63,7 @@ and `/learn`, and the rule that skill scripts never execute inside the library.
 | openspec | `openspec validate keel-harness-v2 --strict` | valid | `openspec-validate.txt` |
 | web check | `nsh check` | pass | `web-check.txt` |
 | web build | `nsh build` | pass | `web-build.txt` |
-| TUI | `nsh test --target tui` | 245 pass / 0 fail | `tui-tests.txt` |
+| TUI | `nsh test --target tui` | 246 pass / 0 fail | `tui-tests.txt` |
 | script policy | `go test ./internal/architecture -run TestSkillPackagesDoNotExecuteScripts -v` | pass | `architecture.txt` |
 | live CLI | real `keel serve` + `keel skills` | pass | `cli-live.txt`, `cli-source-conflicts.txt` |
 | settings wire | real server, curl | pass | `settings-http.txt` |

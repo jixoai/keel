@@ -137,3 +137,14 @@ test("TUI: 技能——移除要二次确认，第二张卡同样可操作", asy
   await app.waitFor("id:skill-remove-confirm");
   expect(joined(app)).toContain("移除技能 team-review");
 });
+
+test("TUI: 技能——从订阅源安装（与 CLI --source 同一条路径）", async () => {
+  const app = await openSection("list");
+  await app.waitFor("id:skill-card-team-review");
+  await app.scroll("id:skills-scroll", 60);
+  await app.press("label:选择订阅源");
+  await app.press("text:team（受信任）");
+  await app.type("id:skills-install-name", "ops-runbook");
+  await app.press("id:skills-install-from-source");
+  await app.waitFor("id:skill-card-ops-runbook");
+});

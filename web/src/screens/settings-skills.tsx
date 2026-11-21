@@ -44,6 +44,7 @@ import {
   Select,
   Separator,
   Skeleton,
+  Switch,
   Textarea,
   color,
   font,
@@ -59,6 +60,9 @@ import {
 const newSkillName = signal("");
 const newSkillDescription = signal("");
 const newSkillBody = signal("");
+const installSkillName = signal("");
+const installSourceId = signal("");
+const installAllowUntrusted = signal(false);
 const newSourceId = signal("");
 const newSourceURL = signal("");
 const newSourceTrust = signal("trusted");
@@ -422,6 +426,24 @@ export function SkillsSection() {
       newSkillBody.set("");
     });
   };
+  const sourceItems = (): SelectItem[] =>
+    sources().map((source) => ({
+      value: source.id,
+      title: `${source.id}（${trustLabel(source.trust)}）`,
+    }));
+  const installFromSource = () => {
+    const name = installSkillName().trim();
+    const sourceId = installSourceId();
+    if (!name || !sourceId) {
+      store.flash({ tone: "warn", text: "选择订阅源并填写技能名字" });
+      return;
+    }
+    void store.installSkillFromSource(name, sourceId, installAllowUntrusted()).then((ok) => {
+      if (!ok) return;
+      installSkillName.set("");
+      installAllowUntrusted.set(false);
+    });
+  };
   const subscribe = () => {
     const id = newSourceId().trim();
     const url = newSourceURL().trim();
@@ -499,6 +521,59 @@ export function SkillsSection() {
               </If>
             </View>
           </If>
+          <Separator />
+          <View style={{ gap: space.md }}>
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+              从订阅源安装
+            </Text>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+              订阅源目录里已有 &lt;name&gt;/SKILL.md 时，用这里把它装进租户库；与 keel skills install
+              &lt;name&gt; --source &lt;id&gt; 是同一条路径。
+            </Text>
+            <FieldGroup>
+              <Field label="订阅源">
+                <Select
+                  testID="skills-install-source"
+                  accessibilityLabel="选择订阅源"
+                  items={sourceItems()}
+                  value={installSourceId()}
+                  placeholder={sources().length === 0 ? "先添加订阅源" : "选择订阅源"}
+                  disabled={store.skillsBusy() || sources().length === 0}
+                  onChange={(value) => installSourceId.set(value ?? "")}
+                />
+              </Field>
+              <Field label="技能名字" hint="源目录下的子目录名，也是 SKILL.md 里的 name。">
+                <Input
+                  testID="skills-install-name"
+                  accessibilityLabel="要安装的技能名字"
+                  value={installSkillName()}
+                  onChange={(value) => installSkillName.set(value)}
+                  placeholder="team-review"
+                  maxLength={64}
+                  disabled={store.skillsBusy()}
+                />
+              </Field>
+              <Field label="未信任源">
+                <Switch
+                  testID="skills-install-untrusted"
+                  checked={installAllowUntrusted()}
+                  onChange={(checked) => installAllowUntrusted.set(checked)}
+                  label={`允许未信任源 ${installAllowUntrusted() ? "是" : "否"}`}
+                  accessibilityLabel="允许从未信任源安装"
+                />
+              </Field>
+            </FieldGroup>
+            <View style={{ flexDirection: "row", gap: space.sm }}>
+              <Button
+                testID="skills-install-from-source"
+                icon="plus"
+                label="从订阅源安装"
+                loading={store.skillsBusy()}
+                disabled={store.skillsBusy() || !installSourceId() || !installSkillName().trim()}
+                onPress={installFromSource}
+              />
+            </View>
+          </View>
           <Separator />
           <View style={{ gap: space.md }}>
             <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
