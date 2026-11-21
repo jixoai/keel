@@ -12,6 +12,7 @@ import (
 
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/sessionfork"
+	"github.com/jixoai/keel/internal/tasklog"
 )
 
 // Fork/resume/cancel of internal sub-agents (change keel-harness-v2, W8).
@@ -804,7 +805,7 @@ func (r *SubagentRunner) rollbackFork(ctx context.Context, tenantID, childID uui
 		// suffix lets a retry cycle close the reopened card (the projection's
 		// updated_seq guard would otherwise ignore an older deduped event). The
 		// card count still converges to one.
-		if err := r.cards.CloseForkCard(cleanupCtx, scope, childID, "fork did not start",
+		if err := r.cards.CloseForkCard(cleanupCtx, scope, childID, tasklog.ForkRollbackReason,
 			"fork-rollback:"+childID.String()+":"+uuid.NewString()); err != nil {
 			r.log.Warn("fork rollback: close card", "session_id", childID, "err", err)
 		}

@@ -422,6 +422,11 @@ func (s *Service) reopenForkCard(ctx context.Context, scope kernel.Scope, card C
 	if card.Status != StatusClosed {
 		return card, nil
 	}
+	if !s.closedByForkRollback(ctx, scope, card.TaskID) {
+		// A card closed for a real reason (the child finished, an operator
+		// closed it) is not reopened by a fork retry.
+		return card, nil
+	}
 	payload := taskEventPayload{Status: StatusOpen}
 	reopenSeq := card.ClosedSeq
 	if reopenSeq <= 0 {
@@ -433,6 +438,31 @@ func (s *Service) reopenForkCard(ctx context.Context, scope kernel.Scope, card C
 		return Card{}, err
 	}
 	return s.project(ctx, scope, event, payload)
+}
+
+// ForkRollbackReason is the close reason a rolled-back fork writes. Only a card
+// closed for this reason is reopened by a retry; a completed/operator-closed
+// child card stays closed.
+const ForkRollbackReason = "fork did not start"
+
+// closedByForkRollback reports whether the card's newest close is the fork
+// rollback transition.
+func (s *Service) closedByForkRollback(ctx context.Context, scope kernel.Scope, taskID uuid.UUID) bool {
+	events, err := s.projection.ListEvents(ctx, scope.TenantID, scope.SessionID, taskID)
+	if err != nil {
+		return false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != string(kernel.KindTaskClosed) {
+			continue
+		}
+		var payload taskEventPayload
+		if err := json.Unmarshal(events[i].Payload, &payload); err != nil {
+			return false
+		}
+		return payload.Reason == ForkRollbackReason
+	}
+	return false
 }
 
 // forkCallSuffix keeps a fork's event key deterministic even when the caller

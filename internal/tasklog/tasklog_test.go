@@ -569,7 +569,7 @@ func TestForkCardIsIdempotentAndReopens(t *testing.T) {
 	}
 
 	// A rollback closes the card; the next fork retry reopens the same card.
-	if _, err := service.Close(ctx, childScope, first.TaskID, "fork did not start", "close-1"); err != nil {
+	if _, err := service.Close(ctx, childScope, first.TaskID, tasklog.ForkRollbackReason, "close-1"); err != nil {
 		t.Fatal(err)
 	}
 	reopened := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, 7, childScope, "branch", "fork-1"))
@@ -594,6 +594,16 @@ func TestForkCardIsIdempotentAndReopens(t *testing.T) {
 	children := mustView(t)(service.Show(ctx, scope, origin.TaskID)).Children
 	if len(children) != 1 || children[0].TaskID != first.TaskID {
 		t.Fatalf("origin children = %+v", children)
+	}
+
+	// A card closed for a real reason (the child finished) is not reopened by a
+	// fork retry; only the rollback close is reversible.
+	if _, err := service.Close(ctx, childScope, first.TaskID, "done", "close-done"); err != nil {
+		t.Fatal(err)
+	}
+	afterDone := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, 7, childScope, "branch", "fork-1"))
+	if afterDone.TaskID != first.TaskID || afterDone.Status != tasklog.StatusClosed {
+		t.Fatalf("completed card was reopened: %+v", afterDone)
 	}
 }
 

@@ -290,6 +290,13 @@
       不再有 `not_implemented`。测试 `TestForkCreatesAPrefixSessionCardAndInheritedBinding`、
       `TestForkRefusesAnInexactOrigin`、`TestAgentSpawnCarriesTheBinding`（含 fork/resume/cancel）；
       证据 `evidence/w8-fork-2026-11-21/`）
+      （P1 修复 2026-11-21：fork 的持久副作用与首个输入同生命周期——输入未提交时回滚：
+      释放槽位/placement、清 fork fact、关闭/收敛子卡、删除空 session 或归档有账本事实的
+      session（`internal/agentext/fork.go:rollbackFork`、`internal/store/session_fork.go`）；
+      已提交输入后的失败不回滚，避免活 run 失去 fact/card。`ForkCard` 卡 id 改为子会话确定性
+      initial card，create key 由 callID 派生；关闭后的重试 reopen 同一张卡，不再每次 newID
+      多一张。测试 `TestForkCapacityRetryConvergesToOneCard`、
+      `TestForkCardIsIdempotentAndReopens`、`TestTasksPluginDoesNotRelinkForkedCards`）
 - [ ] 子代理继承父的 `config.toml` 版本，随后可写自己的配置 （W8 2026-11-21：部分——已交付「继承父配置事实 + 可覆盖」：fork 冻结父 attempt 的
       `configHash/toolManifestHash/anchorEventSeq` 到 fork fact 与子输入 `fork` 事实，默认继承父
       selection（prompt/tool/model 绑定）；子代理后续输入可带自己的 selection，resume 可用
