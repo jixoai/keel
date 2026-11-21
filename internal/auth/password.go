@@ -106,6 +106,16 @@ func (p PasswordParams) validate() error {
 	return nil
 }
 
+// argon2Slots bounds concurrent Argon2 work per process. Each hash is 64MiB;
+// without a bound, N concurrent login/bootstrap requests turn into N×64MiB
+// regardless of the per-username failure limiter. This is process-local (a
+// multi-replica deployment still needs a shared edge limiter); it exists to
+// make a single instance's memory ceiling predictable.
+var argon2Slots = make(chan struct{}, 4)
+
+func acquireArgon2Slot() { argon2Slots <- struct{}{} }
+func releaseArgon2Slot() { <-argon2Slots }
+
 // HashPassword hashes one password with the current deployment parameters.
 // Callers must run it on a password that passed CheckPasswordPolicy; the CLI,
 // setup and password-change paths all call that first.
@@ -127,7 +137,9 @@ func HashPasswordWithParams(password string, params PasswordParams) (string, err
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("auth: generate password salt: %w", err)
 	}
+	acquireArgon2Slot()
 	key := argon2.IDKey([]byte(password), salt, params.Iterations, params.Memory, params.Parallelism, params.KeyLength)
+	releaseArgon2Slot()
 	return encodePasswordHash(params, salt, key), nil
 }
 
@@ -151,7 +163,9 @@ func VerifyPassword(encoded, password string) error {
 	if err != nil {
 		return err
 	}
+	acquireArgon2Slot()
 	got := argon2.IDKey([]byte(password), salt, params.Iterations, params.Memory, params.Parallelism, uint32(len(want)))
+	releaseArgon2Slot()
 	if subtle.ConstantTimeCompare(got, want) != 1 {
 		return ErrPasswordMismatch
 	}

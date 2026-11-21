@@ -335,12 +335,35 @@ func (s *Service) Bootstrap(ctx context.Context, token, username, password, disp
 	if token == "" {
 		return store.AccountRecord{}, ErrBootstrapTokenInvalid
 	}
+	tokenHash := HashToken(token)
+	// Validate the setup token before hashing the password: an invalid token
+	// must not cost a 64MiB Argon2 attempt. The authoritative redemption below
+	// remains atomic.
+	state, err := s.Store.BootstrapTokenState(ctx, s.TenantID, tokenHash, s.now())
+	if err != nil {
+		return store.AccountRecord{}, err
+	}
+	switch state {
+	case store.BootstrapTokenValid:
+		// proceed
+	case store.BootstrapTokenUsed, store.BootstrapTokenExpired:
+		return store.AccountRecord{}, ErrBootstrapTokenInvalid
+	default:
+		has, err := s.Store.HasSuperAdmin(ctx)
+		if err != nil {
+			return store.AccountRecord{}, err
+		}
+		if has {
+			return store.AccountRecord{}, ErrBootstrapComplete
+		}
+		return store.AccountRecord{}, ErrBootstrapTokenInvalid
+	}
 	hash, err := HashPassword(password)
 	if err != nil {
 		return store.AccountRecord{}, err
 	}
 	account, err := s.Store.BootstrapSuperAdmin(ctx, store.BootstrapParams{
-		TenantID: s.TenantID, TokenHash: HashToken(token),
+		TenantID: s.TenantID, TokenHash: tokenHash,
 		Username: username, DisplayName: displayName, PasswordHash: hash, Now: s.now(),
 	})
 	if err != nil {

@@ -183,11 +183,11 @@ func (s *Store) AccountMustChangePassword(ctx context.Context, tenantID, account
 		       AND NOT EXISTS (
 		           SELECT 1 FROM auth_events c
 		            WHERE c.tenant_id = b.tenant_id AND c.account_id = b.account_id
-		              AND c.kind = $5 AND c.event_id > b.event_id
+		              AND c.kind = $5 AND c.result = $6 AND c.event_id > b.event_id
 		       )
 		 )`,
 		tenantID, accountID, AuthEventAccountBoot, AuthEventPasswordReset,
-		AuthEventPasswordChange).Scan(&must); err != nil {
+		AuthEventPasswordChange, AuthResultOK).Scan(&must); err != nil {
 		return false, identityWriteError("account must change password", err)
 	}
 	return must, nil

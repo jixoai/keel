@@ -147,6 +147,76 @@ func (s *Store) LiveBootstrapToken(ctx context.Context, tenantID uuid.UUID, now 
 	return false, rows.Err()
 }
 
+// BootstrapTokenState is the read-only state of a presented setup token.
+type BootstrapTokenState string
+
+const (
+	// BootstrapTokenUnknown means no stored token matches the hash.
+	BootstrapTokenUnknown BootstrapTokenState = "unknown"
+	// BootstrapTokenValid means the token matches, is unexpired and unconsumed.
+	BootstrapTokenValid BootstrapTokenState = "valid"
+	// BootstrapTokenUsed means the token was already redeemed.
+	BootstrapTokenUsed BootstrapTokenState = "used"
+	// BootstrapTokenExpired means the token matched but its TTL passed.
+	BootstrapTokenExpired BootstrapTokenState = "expired"
+)
+
+// BootstrapTokenState checks the presented token before any password hashing:
+// an invalid token must not buy a 64MiB Argon2 attempt. The authoritative
+// redemption still happens atomically in BootstrapSuperAdmin; this is only an
+// early, read-only gate. State is distinguished so a replayed used token still
+// answers 401 rather than "already complete" (409).
+func (s *Store) BootstrapTokenState(ctx context.Context, tenantID uuid.UUID, tokenHash []byte, now time.Time) (BootstrapTokenState, error) {
+	if tenantID == uuid.Nil || len(tokenHash) != 32 {
+		return "", invalidIdentity("bootstrap token state", "tenant and a 32-byte token hash are required")
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT t.event_id, t.detail,
+		        EXISTS (
+		            SELECT 1 FROM auth_events u
+		             WHERE u.tenant_id = t.tenant_id AND u.kind = $3
+		               AND u.detail->>'token_event_id' = t.event_id::text
+		        )
+		   FROM auth_events t
+		  WHERE t.tenant_id = $1 AND t.kind = $2
+		  ORDER BY t.event_id DESC LIMIT 20`,
+		tenantID, AuthEventBootstrapToken, AuthEventBootstrapUsed)
+	if err != nil {
+		return "", identityWriteError("bootstrap token state", err)
+	}
+	defer rows.Close()
+	want := []byte(hex.EncodeToString(tokenHash))
+	for rows.Next() {
+		var (
+			id     int64
+			raw    []byte
+			used   bool
+			detail scaffoldTokenDetail
+		)
+		if err := rows.Scan(&id, &raw, &used); err != nil {
+			return "", identityWriteError("bootstrap token state", err)
+		}
+		if err := json.Unmarshal(raw, &detail); err != nil {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(detail.TokenHash), want) != 1 {
+			continue
+		}
+		if used {
+			return BootstrapTokenUsed, nil
+		}
+		expires, err := time.Parse(time.RFC3339Nano, detail.ExpiresAt)
+		if err != nil || !now.Before(expires) {
+			return BootstrapTokenExpired, nil
+		}
+		return BootstrapTokenValid, nil
+	}
+	if err := rows.Err(); err != nil {
+		return "", identityWriteError("bootstrap token state", err)
+	}
+	return BootstrapTokenUnknown, nil
+}
+
 // BootstrapSuperAdmin redeems one setup token and creates the first super
 // admin atomically. The transaction locks the tenant's bootstrap events, so two
 // concurrent redemptions cannot both consume one token or both create the

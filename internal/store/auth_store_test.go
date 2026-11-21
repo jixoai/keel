@@ -199,6 +199,9 @@ func TestBootstrapTokenExpiry(t *testing.T) {
 	if has, err := st.HasSuperAdmin(ctx); err != nil || has {
 		t.Fatalf("expired attempt created a super admin: %v err=%v", has, err)
 	}
+	if state, err := st.BootstrapTokenState(ctx, tenantID, hash, now.Add(2*time.Minute)); err != nil || state != BootstrapTokenExpired {
+		t.Fatalf("expired token state = %q err=%v", state, err)
+	}
 }
 
 func TestBootstrapTokenOnceAndAtomicSuperAdmin(t *testing.T) {
@@ -225,6 +228,12 @@ func TestBootstrapTokenOnceAndAtomicSuperAdmin(t *testing.T) {
 	}
 	if live, err := st.LiveBootstrapToken(ctx, tenantID, now); err != nil || !live {
 		t.Fatalf("live token = %v err=%v", live, err)
+	}
+	if state, err := st.BootstrapTokenState(ctx, tenantID, hash, now); err != nil || state != BootstrapTokenValid {
+		t.Fatalf("valid token state = %q err=%v", state, err)
+	}
+	if state, err := st.BootstrapTokenState(ctx, tenantID, digest("unknown-token"), now); err != nil || state != BootstrapTokenUnknown {
+		t.Fatalf("unknown token state = %q err=%v", state, err)
 	}
 
 	passwordHash := "$argon2id$v=19$m=65536,t=3,p=2$c2FsdHNhbHRzYWx0c2FsdA$a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2V5a2V5MzI"
@@ -259,6 +268,9 @@ func TestBootstrapTokenOnceAndAtomicSuperAdmin(t *testing.T) {
 	}
 	if live, err := st.LiveBootstrapToken(ctx, tenantID, now); err != nil || live {
 		t.Fatalf("used token still live = %v err=%v", live, err)
+	}
+	if state, err := st.BootstrapTokenState(ctx, tenantID, hash, now); err != nil || state != BootstrapTokenUsed {
+		t.Fatalf("used token state = %q err=%v", state, err)
 	}
 	used, err := st.ListAuthEvents(ctx, tenantID, AuthEventFilter{Kind: AuthEventBootstrapUsed}, 0)
 	if err != nil || len(used) != 1 {
@@ -316,6 +328,17 @@ func TestAuthEventsAuditAndDerivedFacts(t *testing.T) {
 	}
 	if must, err := st.AccountMustChangePassword(ctx, tenantID, account.ID); err != nil || !must {
 		t.Fatalf("after bootstrap must-change = %v err=%v", must, err)
+	}
+	// A failed password-change attempt must not lift the gate: only an
+	// ok password.changed event counts as the rotation.
+	if _, err := st.RecordAuthEvent(ctx, AuthEvent{
+		TenantID: tenantID, AccountID: &account.ID, Kind: AuthEventPasswordChange,
+		Result: AuthResultFailed, Detail: map[string]any{"reason": "current_password_mismatch"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if must, err := st.AccountMustChangePassword(ctx, tenantID, account.ID); err != nil || !must {
+		t.Fatalf("after failed change must-change = %v err=%v", must, err)
 	}
 	if _, err := st.RecordAuthEvent(ctx, AuthEvent{
 		TenantID: tenantID, AccountID: &account.ID, Kind: AuthEventPasswordChange,

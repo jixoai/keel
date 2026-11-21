@@ -327,6 +327,14 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	if status, body, _ := env.do(env.client, http.MethodGet, "/v1/sessions", nil, nil); status != http.StatusForbidden || body["code"] != "password_change_required" {
 		t.Fatalf("must-change restriction: %d %v", status, body)
 	}
+	// A failed change attempt must not lift the gate: only a successful
+	// rotation does. Regression for the failed password.changed row.
+	if status, body := env.changePassword(env.client, "wrong-current-123", "admin-password-456"); status != http.StatusUnauthorized {
+		t.Fatalf("failed password change: %d %v", status, body)
+	}
+	if status, sessionBody := env.getSession(env.client); status != http.StatusOK || sessionBody["mustChangePassword"] != true {
+		t.Fatalf("failed change lifted must-change: %d %v", status, sessionBody)
+	}
 	if status, body := env.changePassword(env.client, "admin-password-123", "admin-password-456"); status != http.StatusOK || body["mustChangePassword"] != false {
 		t.Fatalf("password change: %d %v", status, body)
 	}
