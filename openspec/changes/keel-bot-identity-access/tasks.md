@@ -79,16 +79,19 @@
 - [x] HTTP `/v1/team-bots`（CRUD/归档/Mission/Roster/启动）接 access
 - [x] Bot key 端点迁到 `/v1/bots/{id}/keys`；删 A2 临时 `/v1/auth/bot-keys`
 - [x] `/v1/auth/whoami` 返回 Account/Bot 身份，不再返回旧 tenant role
-- [x] Bot 级 Profile 绑定；Role 变更 hook 注入提示（HTTP Profile/Role CRUD 留 A4.2）
+- [x] Bot 级 Profile 绑定；Role 变更 hook 注入提示（HTTP Profile/Role CRUD 见 A4.2b2）
 - [x] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
 - [x] 旧无主 session 原子认领；Bot invoke/TeamBot start/generic session 归属
 - [x] **单资源 Session 路由接关系**：`/v1/sessions/{id}/events|input|run|decisions`、SSE、
       cancel/archive 统一走 `session.read/write|delete` + relation（A4.2a）
-- [ ] Profile/Role HTTP CRUD（A4.2/L5）
-- [ ] 分页：accounts/groups 有界 limit；bots/teams 候选窗口 500；keyset 留后续
-- [ ] 多租户内置组 seed（新建租户时）
+- [x] Profile/Role HTTP CRUD（A4.2b2）：`/v1/roles`、`/v1/profiles` 的列表/创建/详情/PATCH/删除；
+      account/role 同租户存在性校验，Profile account rebind 与 Bot owner 关系迁移同事务，
+      被引用删除 409，分页有界
+- [x] 分页：accounts/groups/roles/profiles 有界 limit；bots/teams 候选窗口 500；keyset 留后续
+- [x] 多租户内置组 seed（A4.2b2）：`POST /v1/tenants`、`/v1/admin/tenants`、`keel admin tenant create`
+      均播种 5 个内置组（幂等）；旧 operator 面随 A4.2b 删除时，其 seed 调用一并移除
 - [x] Bot/TeamBot 创建与 owner 关系同事务；Profile rebind 与旧 owner 关系迁移同事务（A4.2a）
-- [ ] 管理员重置密码与 CLI reset 对齐：强制下次改密
+- [x] 管理员重置密码与 CLI reset 对齐（A4.2b2）：`password.reset`、吊销全部会话、下次登录 must-change
 - [ ] `bot.invoke` 关系阈值（viewer vs editor/owner）产品裁决
 
 ### A4.2a 全路由权限收口（已完成，复评 8.5/10 PASS WITH P2）
@@ -121,16 +124,20 @@
 - [ ] 旧 `/v1/agents` `/v1/teams` 404；旧 `keel agent/team` 删除
 - [ ] 旧 `api_keys`/`agents`/`agent_teams` 表退役；旧 `keel admin tenant/key` 删除
 - [ ] 产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、`agentext`→`harnessext`
-- [ ] Profile/Role HTTP CRUD；管理端重置密码强制下次改密
+- [x] Profile/Role HTTP CRUD（A4.2b2 已完成）；管理端重置密码强制下次改密（A4.2b2 已完成）
 
 ### A4.2b 剩余安全开口（A4.2a 复评登记，勿在 A4.2a 做）
 
 - [ ] **运行时工具面授权（最大开口）**：工具 manifest 声明 required key + Bot Harness 收窄；
       captain→member 的工具调用/子 Bot 启动检查 `bot.invoke`；撤销后下一次调用失效（A4.2b/A6 前必须收）
 - [ ] 旧 `/v1/agents|teams` 租户全量披露：随重命名删除（当前仅 held-key 门，无资源关系）
-- [ ] notification token 路由（`/v1/notifications/{id}/open|pixel`）：`required` 模式下被 auth edge
-      401，与矩阵 public 声明矛盾；需在 edge 放行或改为签名 URL 专用端点
-- [ ] `GET /v1/files/{id}`：仅租户 `file.read`，无 per-file relation；补文件关系或明确租户级契约
+- [x] notification token 路由（`/v1/notifications/{id}/open|pixel`，A4.2b2）：auth edge 在
+      session/CSRF/must-change 之前放行这两条路径；token 校验留在 handler，无/错 token 401、
+      不泄漏通知存在性；矩阵 public + “token 是权威”注释；E2E 覆盖无会话有效 token 与无效 token
+- [x] `GET /v1/files/{id}`：**裁决为租户级文件契约**（2026-11-22）。上传在 httpapi 边缘只有
+      tenant 上下文且没有 access seam；blob 可被多个 session 重复引用，per-file owner relation
+      需要新的文件账本与引用迁移，成本不属于本切片。现契约 = 租户 `file.read`/`file.write`，
+      不假装 per-file 隔离；共享/隔离需求另立 change。设计记录见 `design.md` §3.4
 - [ ] P2 审计崩溃窗口：业务写已提交、审计行未追加时进程崩溃会留下无审计操作；用 outbox/
       同事务写入收敛（当前选择“写失败返回 500”；`bot.invoke` 关系阈值仍按 A4.1 待裁决项）
 - [ ] **P2（A4.2b1 复核登记，勿在本片做）Bot / legacy Agent id-space 双轨**：运行时仍可

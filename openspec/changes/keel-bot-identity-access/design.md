@@ -242,6 +242,13 @@ resource_relations (
 - UI：`can(key, resource)` 只做展示；后端仍是权威。无权限动作隐藏；直接访问返回 403。
 - Kernel：只记录 `actor_account_id` 与 `bot_id`，不 import `internal/access`。
 
+**文件契约（A4.2b2 裁决，2026-11-22）**：`/v1/files/*` 维持**租户级契约**，不写 per-file
+owner relation。原因是上传路径在 httpapi 边缘只有 tenant 上下文、没有 access seam；blob 是
+内容寻址且可被多个 session 重复引用，per-file 关系需要独立的文件账本与引用迁移，成本不属于本
+切片。因此 `file.read`/`file.write` 的 scope 是租户边界，**不声称文件级隔离**；需要“只给某个
+账号/会话看某个附件”的产品需求必须另立 change（建文件账本 + 关系元组），不得在 handler 里用
+隐藏规则补洞。
+
 **审计写入语义（A4.2a 实测，修正措辞）**：业务写先提交，grant/invoke/relation/super-admin
 审计行随后追加；追加失败时接口返回 500，不静默 warn。二者**不是同一事务**：业务提交与审计
 追加之间存在崩溃窗口（操作已发生但无审计行），登记为 P2（见 `tasks.md` A4.2b）。Bot/TeamBot
