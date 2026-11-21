@@ -43,6 +43,7 @@ var (
 	ErrBootstrapRequired      = errors.New("auth: bootstrap is required")
 	ErrBootstrapTokenInvalid  = errors.New("auth: setup token is invalid")
 	ErrBootstrapComplete      = errors.New("auth: bootstrap is already complete")
+	ErrUsernameTaken          = errors.New("auth: username is already taken")
 	ErrPasswordChangeRequired = errors.New("auth: password change is required")
 	ErrPasswordReused         = errors.New("auth: new password must differ from the current one")
 	ErrForbidden              = errors.New("auth: operation is not permitted")
@@ -346,8 +347,10 @@ func (s *Service) Bootstrap(ctx context.Context, token, username, password, disp
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, store.ErrConflict):
+		case errors.Is(err, store.ErrBootstrapAlreadyComplete):
 			return store.AccountRecord{}, ErrBootstrapComplete
+		case errors.Is(err, store.ErrConflict):
+			return store.AccountRecord{}, ErrUsernameTaken
 		case errors.Is(err, store.ErrInvalid):
 			return store.AccountRecord{}, ErrBootstrapTokenInvalid
 		default:

@@ -26,17 +26,19 @@ import (
 // expiry; this constant is the default the caller uses.
 const BootstrapTokenTTL = 30 * time.Minute
 
+// ErrBootstrapAlreadyComplete distinguishes "a real super admin already exists"
+// from other conflicts (a duplicate username) during setup.
+var ErrBootstrapAlreadyComplete = errors.New("store: bootstrap already complete")
+
 // BootstrapParams is one atomic setup-token redemption. The token hash must be
 // 32 bytes (SHA-256 of the plaintext token).
 type BootstrapParams struct {
-	TenantID      uuid.UUID
-	TokenHash     []byte
-	Username      string
-	DisplayName   string
-	PasswordHash  string
-	Now           time.Time
-	UserAgentHash []byte
-	IPHash        []byte
+	TenantID     uuid.UUID
+	TokenHash    []byte
+	Username     string
+	DisplayName  string
+	PasswordHash string
+	Now          time.Time
 }
 
 // scaffoldTokenDetail is the JSON stored in a bootstrap.token event.
@@ -189,11 +191,13 @@ func (s *Store) BootstrapSuperAdmin(ctx context.Context, params BootstrapParams)
 		if errors.Is(err, ErrInvalid) {
 			var hasSuper bool
 			if scanErr := tx.QueryRow(ctx,
-				`SELECT EXISTS (SELECT 1 FROM accounts WHERE is_super_admin AND disabled_at IS NULL)`).Scan(&hasSuper); scanErr != nil {
+				`SELECT EXISTS (SELECT 1 FROM accounts
+				                 WHERE is_super_admin AND disabled_at IS NULL
+				                   AND password_hash IS NOT NULL)`).Scan(&hasSuper); scanErr != nil {
 				return AccountRecord{}, identityWriteError("bootstrap super admin check", scanErr)
 			}
 			if hasSuper {
-				return AccountRecord{}, conflictIdentity("bootstrap", "a super admin already exists")
+				return AccountRecord{}, fmt.Errorf("%w: %w", ErrConflict, ErrBootstrapAlreadyComplete)
 			}
 		}
 		return AccountRecord{}, err
@@ -214,11 +218,13 @@ func (s *Store) BootstrapSuperAdmin(ctx context.Context, params BootstrapParams)
 	}
 	var hasSuper bool
 	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM accounts WHERE is_super_admin AND disabled_at IS NULL)`).Scan(&hasSuper); err != nil {
+		`SELECT EXISTS (SELECT 1 FROM accounts
+		                 WHERE is_super_admin AND disabled_at IS NULL
+		                   AND password_hash IS NOT NULL)`).Scan(&hasSuper); err != nil {
 		return AccountRecord{}, identityWriteError("bootstrap super admin check", err)
 	}
 	if hasSuper {
-		return AccountRecord{}, conflictIdentity("bootstrap", "a super admin already exists")
+		return AccountRecord{}, fmt.Errorf("%w: %w", ErrConflict, ErrBootstrapAlreadyComplete)
 	}
 
 	accountID := uuid.New()

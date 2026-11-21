@@ -153,13 +153,16 @@ func (s *Store) ListAuthEvents(ctx context.Context, tenantID uuid.UUID, filter A
 }
 
 // HasSuperAdmin reports whether the deployment has at least one enabled super
-// admin. It is the "bootstrap required" predicate, and the account lifecycle
-// writes use the same predicate to protect the last one.
+// admin with a login credential. A password-less built-in local-admin (created
+// by auth=local-only/off) does not satisfy the predicate: switching such a
+// deployment to auth=required must still be able to bootstrap a real
+// administrator instead of locking the operator out.
 func (s *Store) HasSuperAdmin(ctx context.Context) (bool, error) {
 	var exists bool
 	if err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM accounts
-		                 WHERE is_super_admin AND disabled_at IS NULL)`).Scan(&exists); err != nil {
+		                 WHERE is_super_admin AND disabled_at IS NULL
+		                   AND password_hash IS NOT NULL)`).Scan(&exists); err != nil {
 		return false, identityWriteError("has super admin", err)
 	}
 	return exists, nil

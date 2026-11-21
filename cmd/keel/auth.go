@@ -554,6 +554,8 @@ func (a *authController) bootstrap(w http.ResponseWriter, r *http.Request) {
 		})
 	case errors.Is(err, auth.ErrBootstrapComplete):
 		writeAuthError(w, http.StatusConflict, "bootstrap_complete", "a super admin already exists")
+	case errors.Is(err, auth.ErrUsernameTaken):
+		writeAuthError(w, http.StatusConflict, "username_taken", "the username is already taken")
 	case errors.Is(err, auth.ErrBootstrapTokenInvalid):
 		writeAuthError(w, http.StatusUnauthorized, "invalid_setup_token", "the setup token is invalid, expired or already used")
 	case errors.Is(err, auth.ErrPasswordPolicy):
@@ -610,16 +612,9 @@ func (a *authController) listBotKeys(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "authentication_required", "authentication required")
 		return
 	}
-	// The store listing is not the privilege check; IssueBotKey/Revoke do that
-	// too. A non-super-admin gets the same 403 shape as any other admin action.
-	if !principal.IsSuperAdmin {
-		writeAuthError(w, http.StatusForbidden, "forbidden", "a super admin is required")
-		return
-	}
 	keys, err := a.service.ListBotKeys(r.Context(), principal, r.URL.Query().Get("botId"))
 	if err != nil {
-		a.logger.Error("list bot keys", "err", err)
-		writeAuthError(w, http.StatusInternalServerError, "internal_error", "could not list bot keys")
+		a.writeBotKeyError(w, err)
 		return
 	}
 	out := make([]map[string]any, 0, len(keys))
