@@ -7,7 +7,9 @@
 // name, the default model, how many tools it holds and what it is for; a team
 // card says the name, **who captains it** (the mandatory seat is printed as a
 // line of its own, not left to a dropdown), the roster size and the member
-// avatars.
+// avatars. The team canvas edits the team document: name/description, the
+// captain slot, the roster (label/description per seat, replace/remove), the
+// team-level default tools/model override, and the inline member library.
 //
 // Data comes from the store's agent/team face (`GET /v1/agents`,
 // `GET/POST/PUT/DELETE /v1/teams`, member writes under
@@ -22,11 +24,13 @@
 // control (Tab reaches it), and Enter in a single-line field submits.
 import { cleanup, effect, platform, Scroll, signal, Text, View, windowSize } from "nsh";
 import type {
+  AgentModelBindingView,
   AgentTeamView,
   AgentTeamWriteRequest,
   AgentToolGrantView,
   AgentView,
   AgentWriteRequest,
+  TeamDefaultsView,
   TeamMemberView,
 } from "../data/contract";
 import { store } from "../data/store";
@@ -298,6 +302,12 @@ const teamMembers = signal<TeamMemberView[]>([]);
 const teamNameError = signal<string | null>(null);
 const teamCaptainError = signal<string | null>(null);
 const confirmingTeam = signal<AgentTeamView | null>(null);
+/** Team-level defaults are a draft until 保存, like every other canvas edit.
+ * The tools are a set; the model override is `provider/model`, or the
+ * sentinel `NO_MODEL_OVERRIDE` for "no override". */
+const teamDefaultTools = signal<string[]>([]);
+const teamDefaultModel = signal("");
+const NO_MODEL_OVERRIDE = "__none__";
 
 /** One seat's identity for the canvas list: the stored agent, the inline
  * definition's id, else its label. A blank id never becomes a duplicate key. */
@@ -326,6 +336,141 @@ const memberNameOf = (member: TeamMemberView): string =>
   member.label?.trim() ||
   member.inline?.name?.trim() ||
   agentNameOf(member.agentId, undefined);
+
+/** A model binding's draft value: `provider/model`, or empty for "no
+ * override". The first slash is the binding's own separator (the wire ids are
+ * plain tokens). */
+const modelBindingValue = (binding: AgentModelBindingView | undefined): string =>
+  binding?.modelId ? `${binding.providerId ?? ""}/${binding.modelId}` : "";
+
+/** The defaults a save should write. The stored object is the base, so a
+ * field this form does not edit (or a future one) survives; only the two
+ * fields this canvas owns are replaced. An empty tools set and an empty model
+ * override are removed, which is how the canvas clears a stored default. */
+const teamDefaultsOf = (editing: AgentTeamView | undefined): TeamDefaultsView | undefined => {
+  const defaults: TeamDefaultsView = { ...(editing?.defaults ?? {}) };
+  const tools = [...new Set(teamDefaultTools().map((tool) => tool.trim()).filter(Boolean))].sort();
+  if (tools.length > 0) defaults.tools = tools;
+  else delete defaults.tools;
+  const value = teamDefaultModel();
+  if (value) {
+    const picked = splitModelValue(value);
+    if (picked.providerId && picked.modelId) {
+      const previous = editing?.defaults?.modelOverride;
+      // Picking the same model keeps its tuning; picking another drops the
+      // tuning that belonged to the old model.
+      defaults.modelOverride =
+        previous && previous.providerId === picked.providerId && previous.modelId === picked.modelId
+          ? { ...previous, providerId: picked.providerId, modelId: picked.modelId }
+          : { providerId: picked.providerId, modelId: picked.modelId };
+    } else {
+      delete defaults.modelOverride;
+    }
+  } else {
+    delete defaults.modelOverride;
+  }
+  return Object.keys(defaults).length > 0 ? defaults : undefined;
+};
+
+/** Whether the defaults draft differs from the stored document. A pure
+ * roster add/remove can keep using the member routes only when this is false:
+ * those routes do not carry defaults. */
+const teamDefaultsEdited = (editing: AgentTeamView | undefined): boolean => {
+  const desired = teamDefaultsOf(editing);
+  const stored = editing?.defaults;
+  const storedTools = [...new Set(stored?.tools ?? [])].sort().join("\u0000");
+  const desiredTools = [...new Set(desired?.tools ?? [])].sort().join("\u0000");
+  return storedTools !== desiredTools || modelBindingValue(stored?.modelOverride) !== modelBindingValue(desired?.modelOverride);
+};
+
+/** Whether any kept/new seat carries seat-level text or an inline definition
+ * that only the document PUT can persist. The member routes add/remove by
+ * agent id and would drop a label/description (and cannot express an inline
+ * seat), so such an edit must take the PUT path. */
+const seatMetadataEdited = (editing: AgentTeamView | undefined): boolean => {
+  const storedSeats = editing?.members ?? [];
+  const storedByIdentity = new Map(storedSeats.map((member) => [memberIdentityOf(member), member]));
+  return teamMembers().some((draft) => {
+    const identity = memberIdentityOf(draft);
+    const stored = identity ? storedByIdentity.get(identity) : undefined;
+    if (!stored) {
+      // A seat that is new to this document (a replacement keeps the old
+      // label/description, an inline seat carries its definition).
+      return Boolean(draft.label?.trim() || draft.description?.trim() || draft.inline);
+    }
+    return (
+      (draft.label ?? "") !== (stored.label ?? "") ||
+      (draft.description ?? "") !== (stored.description ?? "") ||
+      (draft.inline ? JSON.stringify(draft.inline) : "") !== (stored.inline ? JSON.stringify(stored.inline) : "")
+    );
+  });
+};
+
+// ---- team canvas: the seat editor -----------------------------------------
+//
+// One seat panel is open at a time, and it edits the draft only. The typed
+// text lives in a plain record (the TUI host's CJK composition survives when
+// typing does not re-render) with a web mirror (the web native input ignores
+// `defaultValue` inside a dialog).
+type SeatPanel = { index: number; mode: "text" | "replace" };
+const seatPanel = signal<SeatPanel | null>(null);
+let seatText = { label: "", description: "" };
+const seatLabelValue = signal("");
+const seatDescriptionValue = signal("");
+const seatReplaceValue = signal("");
+
+const closeSeatPanel = () => seatPanel.set(null);
+
+const openSeatPanel = (index: number, mode: "text" | "replace") => {
+  const member = teamMembers()[index];
+  if (!member) return;
+  seatText = { label: member.label ?? "", description: member.description ?? "" };
+  seatLabelValue.set(seatText.label);
+  seatDescriptionValue.set(seatText.description);
+  seatReplaceValue.set("");
+  seatPanel.set({ index, mode });
+};
+
+/** Apply the typed label/description to the draft seat. An empty value is a
+ * deliberate clear, written as an empty string so the identity merge in
+ * `submitTeam` does not resurrect the stored text. */
+const applySeatText = () => {
+  const panel = seatPanel();
+  if (!panel || panel.mode !== "text") return;
+  const seats = [...teamMembers()];
+  const member = seats[panel.index];
+  if (!member) {
+    closeSeatPanel();
+    return;
+  }
+  seats[panel.index] = {
+    ...member,
+    label: seatText.label.trim(),
+    description: seatText.description.trim(),
+  };
+  teamMembers.set(seats);
+  closeSeatPanel();
+};
+
+/** Swap the agent behind a seat, keeping the seat's own label/description.
+ * The inline definition belonged to the replaced agent, so it is dropped; the
+ * document PUT then writes the new agent id and the kept seat metadata. */
+const applySeatReplacement = () => {
+  const panel = seatPanel();
+  const agentId = seatReplaceValue();
+  if (!panel || panel.mode !== "replace" || !agentId) return;
+  const seats = [...teamMembers()];
+  const member = seats[panel.index];
+  if (!member) {
+    closeSeatPanel();
+    return;
+  }
+  const seat: TeamMemberView = { ...member };
+  delete seat.inline;
+  seats[panel.index] = { ...seat, agentId };
+  teamMembers.set(seats);
+  closeSeatPanel();
+};
 
 // ---- team canvas: the inline new-Agent form -------------------------------
 
@@ -376,6 +521,7 @@ const setTeamCaptain = (agentId: string | null) => {
   const captain = agentId ?? "";
   teamCaptain.set(captain);
   if (teamCaptainError()) teamCaptainError.set(null);
+  closeSeatPanel();
   // The captain is a seat, not a member: picking one removes it from the
   // additional roster, so the same person can never sit twice.
   teamMembers.set(teamMembers().filter((member) => member.agentId !== captain));
@@ -385,6 +531,7 @@ const editTeam = (team?: AgentTeamView) => {
   teamNameError.set(null);
   teamCaptainError.set(null);
   store.clearTeamActionError();
+  closeSeatPanel();
   teamText = { name: team?.name ?? "", description: team?.description ?? "" };
   teamNameValue.set(teamText.name);
   teamDescriptionValue.set(teamText.description);
@@ -397,6 +544,10 @@ const editTeam = (team?: AgentTeamView) => {
       inline: member.inline ? { ...member.inline } : undefined,
     })),
   );
+  // The defaults draft starts from the stored document; an absent override is
+  // the sentinel, not a model id.
+  teamDefaultTools.set([...(team?.defaults?.tools ?? [])]);
+  teamDefaultModel.set(team?.defaults?.modelOverride?.modelId ? modelBindingValue(team.defaults.modelOverride) : NO_MODEL_OVERRIDE);
   teamEditingId.set(team?.id ?? null);
   teamOpen.set(true);
 };
@@ -425,10 +576,11 @@ const submitTeam = () => {
   const editing = editingId ? store.teams().find((team) => team.id === editingId) : undefined;
   const storedSeats = editing?.members ?? [];
   const storedSeatByIdentity = new Map(storedSeats.map((member) => [memberIdentityOf(member), member]));
-  // The form edits membership, not the seat's own text or inline definition:
-  // every draft seat merges back onto the stored seat with the same identity.
-  // A re-added seat keeps its CLI-written label; a blank agentId falls back to
-  // the inline id the server requires it to match.
+  // Every draft seat merges back onto the stored seat with the same identity,
+  // so an untouched seat keeps its CLI-written label/description/inline while
+  // an edited one carries the new text. A re-added seat keeps its stored
+  // metadata; a blank agentId falls back to the inline id the server requires
+  // it to match.
   const draftSeats = teamMembers().map((draft) => {
     const identity = memberIdentityOf(draft);
     const stored = identity ? storedSeatByIdentity.get(identity) : undefined;
@@ -448,6 +600,7 @@ const submitTeam = () => {
     storedCaptain && storedCaptain.agentId === captain
       ? memberSeatOf(storedCaptain)
       : { agentId: captain };
+  const desiredDefaults = teamDefaultsOf(editing);
   const request: AgentTeamWriteRequest = {
     name,
     description: teamText.description.trim(),
@@ -456,21 +609,29 @@ const submitTeam = () => {
   };
   if (editing) {
     // PUT replaces the team document: carry the parts this form does not edit
-    // so a rename never wipes defaults, capabilities or feature bindings.
+    // so a rename never wipes defaults, capabilities or feature bindings. The
+    // defaults are always sent (an empty object when nothing is set) because
+    // omitting them would keep the stored defaults instead of clearing them.
     request.id = editing.id;
-    if (editing.defaults) request.defaults = editing.defaults;
+    request.defaults = desiredDefaults ?? {};
     if (editing.capabilities) request.capabilities = editing.capabilities;
     if (editing.featureBindings) request.featureBindings = editing.featureBindings;
+  } else if (desiredDefaults) {
+    request.defaults = desiredDefaults;
   }
 
   // A blank seat (an inline member with no agentId) cannot be addressed by the
-  // member routes; a PUT carries it whole instead. Otherwise a seats-only edit
-  // still takes the one-seat-at-a-time routes.
+  // member routes; a PUT carries it whole instead. The same is true when the
+  // reader edited a seat's own text/defaults or replaced an agent while
+  // keeping its seat metadata: the member routes only add/remove by agent id.
+  // Otherwise a pure roster edit still takes the one-seat-at-a-time routes.
   const blankSeat =
     storedSeats.some((member) => !member.agentId) || draftSeats.some((member) => !member.agentId);
   const rosterOnly =
     editing !== undefined &&
     !blankSeat &&
+    !teamDefaultsEdited(editing) &&
+    !seatMetadataEdited(editing) &&
     editing.name === name &&
     (editing.description ?? "") === request.description &&
     editing.captain.agentId === captain;
@@ -1230,10 +1391,140 @@ function TeamCard(props: { team: () => AgentTeamView }) {
   );
 }
 
+/** The seat editor panel: the draft-only label/description inputs or the
+ * agent replacement picker. Only one panel is open at a time; the row that
+ * owns it renders it under the header. */
+function CanvasSeatPanel(props: { member: () => TeamMemberView }) {
+  const panel = () => seatPanel();
+  const saving = () => store.teamsSaving();
+  const candidates = () =>
+    store
+      .agents()
+      .filter((agent) => agent.archived !== true)
+      .filter((agent) => agent.id !== teamCaptain())
+      .filter((agent) => agent.id !== props.member().agentId)
+      .filter((agent) => !teamMembers().some((member) => member.agentId === agent.id))
+      .map((agent) => ({ value: agent.id, title: agent.name || agent.id }));
+  const panelStyle = {
+    flexDirection: "column" as const,
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.muted,
+  };
+  return (
+    <View
+      testID={panel()?.mode === "replace" ? "canvas-seat-replace" : "canvas-seat-editor"}
+      style={{ flexDirection: "column" }}
+    >
+      <If
+        when={panel()?.mode === "replace"}
+        else={
+          <View style={panelStyle}>
+            <Field label="席位名称" hint="只改这位成员在团队里的标签；Agent 本身的名字不变。">
+              <Input
+                testID="canvas-seat-label"
+                accessibilityLabel="席位名称"
+                value={platform.idiom === "terminal" ? undefined : seatLabelValue()}
+                defaultValue={seatText.label}
+                placeholder="例如 初稿评审"
+                maxLength={64}
+                disabled={saving()}
+                onChange={(value) => {
+                  seatText.label = value;
+                  if (platform.idiom !== "terminal") seatLabelValue.set(value);
+                }}
+                onSubmit={applySeatText}
+              />
+            </Field>
+            <Field label="席位描述" hint="一句话说明这位成员在团队里负责什么。">
+              <Input
+                testID="canvas-seat-description"
+                accessibilityLabel="席位描述"
+                value={platform.idiom === "terminal" ? undefined : seatDescriptionValue()}
+                defaultValue={seatText.description}
+                placeholder="例如 只审初稿"
+                maxLength={240}
+                disabled={saving()}
+                onChange={(value) => {
+                  seatText.description = value;
+                  if (platform.idiom !== "terminal") seatDescriptionValue.set(value);
+                }}
+                onSubmit={applySeatText}
+              />
+            </Field>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                label="取消"
+                testID="canvas-seat-cancel"
+                disabled={saving()}
+                onPress={closeSeatPanel}
+              />
+              <Button
+                size="sm"
+                label="保存席位"
+                testID="canvas-seat-apply"
+                disabled={saving()}
+                onPress={applySeatText}
+              />
+            </View>
+          </View>
+        }
+      >
+        <View style={panelStyle}>
+          <Text style={factText}>替换只换成员本人；席位名称与描述保留。</Text>
+          <Field
+            label="替换为"
+            hint={
+              candidates().length > 0
+                ? "候选来自 Agent 成员库；队长与已在队内的成员不在列。"
+                : "没有可替换的 Agent：先把其他 Agent 加入成员库。"
+            }
+          >
+            <Select
+              testID="canvas-seat-replace-agent"
+              accessibilityLabel="替换成员"
+              items={candidates()}
+              value={seatReplaceValue() || null}
+              placeholder="选择一位 Agent"
+              searchable
+              disabled={saving() || candidates().length === 0}
+              onChange={(value) => seatReplaceValue.set(value ?? "")}
+            />
+          </Field>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              label="取消"
+              testID="canvas-seat-replace-cancel"
+              disabled={saving()}
+              onPress={closeSeatPanel}
+            />
+            <Button
+              size="sm"
+              label="确认替换"
+              testID="canvas-seat-replace-apply"
+              disabled={saving() || !seatReplaceValue()}
+              onPress={applySeatReplacement}
+            />
+          </View>
+        </View>
+      </If>
+    </View>
+  );
+}
+
 /** One row in the canvas's member list: portrait, name, description and the
- * one action that seat has (remove). The captain is never in this list — it
- * has its own slot and cannot be removed here. */
-function CanvasMemberRow(props: { member: () => TeamMemberView; onRemove: () => void }) {
+ * actions that seat owns (edit label/description, replace the agent, remove).
+ * The captain is never in this list — it has its own slot and cannot be
+ * removed here. At the single column the actions move below the header so the
+ * name keeps its width. */
+function CanvasMemberRow(props: { index: number; member: () => TeamMemberView; onRemove: () => void }) {
   const agent = () => store.agents().find((item) => item.id === props.member().agentId);
   const name = () => memberNameOf(props.member());
   const key = () => memberKeyOf(props.member());
@@ -1241,51 +1532,97 @@ function CanvasMemberRow(props: { member: () => TeamMemberView; onRemove: () => 
     props.member().description ||
     agent()?.description ||
     (props.member().inline ? "内联定义 · 随团队保存" : "已加入团队");
+  const open = () => seatPanel()?.index === props.index;
+  const narrow = () => narrowCards();
   return (
     <View
       testID={`canvas-member-${key()}`}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.md,
-        paddingVertical: space.xs,
-      }}
+      style={{ flexDirection: "column", gap: space.sm, paddingVertical: space.xs }}
     >
-      <Avatar src={agent()?.avatar?.url ?? props.member().inline?.avatar?.url ?? null} name={name()} size="default" />
-      <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
-        <Text
+      <View
+        style={{
+          flexDirection: narrow() ? "column" : "row",
+          alignItems: narrow() ? "stretch" : "center",
+          gap: space.md,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: space.md }}>
+          <Avatar
+            src={agent()?.avatar?.url ?? props.member().inline?.avatar?.url ?? null}
+            name={name()}
+            size="default"
+          />
+          <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
+            <Text
+              style={{
+                fontSize: typeScale.sm,
+                fontWeight: weight.medium,
+                color: color.foreground,
+                maxWidth: "100%",
+                numberOfLines: 1,
+                textOverflow: "ellipsis",
+              }}
+            >
+              {name()}
+            </Text>
+            <Text
+              style={{
+                ...factText,
+                maxWidth: "100%",
+                numberOfLines: 1,
+                textOverflow: "ellipsis",
+              }}
+            >
+              {fact()}
+            </Text>
+          </View>
+        </View>
+        <View
           style={{
-            fontSize: typeScale.sm,
-            fontWeight: weight.medium,
-            color: color.foreground,
-            maxWidth: "100%",
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.xxs,
+            flexWrap: "wrap",
+            justifyContent: narrow() ? "flex-end" : "flex-start",
           }}
         >
-          {name()}
-        </Text>
-        <Text
-          style={{
-            ...factText,
-            maxWidth: "100%",
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
-          }}
-        >
-          {fact()}
-        </Text>
+          <Button
+            variant="ghost"
+            size="sm"
+            label={open() && seatPanel()?.mode === "text" ? "收起" : "编辑"}
+            testID={`canvas-member-edit-${key()}`}
+            accessibilityLabel={`编辑成员 ${name()} 的席位文本`}
+            disabled={store.teamsSaving()}
+            onPress={() => (open() && seatPanel()?.mode === "text" ? closeSeatPanel() : openSeatPanel(props.index, "text"))}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            label="替换"
+            testID={`canvas-member-replace-${key()}`}
+            accessibilityLabel={`替换成员 ${name()}`}
+            disabled={store.teamsSaving()}
+            onPress={() =>
+              open() && seatPanel()?.mode === "replace"
+                ? closeSeatPanel()
+                : openSeatPanel(props.index, "replace")
+            }
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="x"
+            label="移出"
+            testID={`canvas-remove-${key()}`}
+            accessibilityLabel={`移出成员 ${name()}`}
+            disabled={store.teamsSaving()}
+            onPress={props.onRemove}
+          />
+        </View>
       </View>
-      <Button
-        variant="ghost"
-        size="sm"
-        icon="x"
-        label="移出"
-        testID={`canvas-remove-${key()}`}
-        accessibilityLabel={`移出成员 ${name()}`}
-        disabled={store.teamsSaving()}
-        onPress={props.onRemove}
-      />
+      <If when={open()}>
+        <CanvasSeatPanel member={props.member} />
+      </If>
     </View>
   );
 }
@@ -1331,7 +1668,10 @@ function CanvasLibraryRow(props: { agent: () => AgentView }) {
         testID={`canvas-add-${props.agent().id}`}
         accessibilityLabel={`加入成员 ${props.agent().name}`}
         disabled={store.teamsSaving()}
-        onPress={() => teamMembers.set([...teamMembers(), { agentId: props.agent().id }])}
+        onPress={() => {
+          closeSeatPanel();
+          teamMembers.set([...teamMembers(), { agentId: props.agent().id }]);
+        }}
       />
     </View>
   );
@@ -1345,6 +1685,19 @@ function TeamCanvasDialog() {
   const agents = () => store.agents().filter((agent) => agent.archived !== true);
   const captainItems = (): SelectItem[] =>
     agents().map((agent) => ({ value: agent.id, title: agent.name || agent.id }));
+  const defaultModelItems = (): SelectItem[] => {
+    const options = modelOptions();
+    const items: SelectItem[] = [{ value: NO_MODEL_OVERRIDE, title: "跟随部署默认（不覆盖）" }, ...options];
+    const current = teamDefaultModel();
+    // A stored override stays visible/selected even when the model registry is
+    // unavailable; otherwise the trigger would read as "no override" while
+    // the document still carries one.
+    if (current && current !== NO_MODEL_OVERRIDE && !options.some((item) => item.value === current)) {
+      const picked = splitModelValue(current);
+      items.push({ value: current, title: optionModelLabel(picked.providerId, picked.modelId) });
+    }
+    return items;
+  };
   const noAgents = () => agents().length === 0;
   const saving = () => store.teamsSaving();
   const captain = () => agents().find((agent) => agent.id === teamCaptain());
@@ -1356,6 +1709,7 @@ function TeamCanvasDialog() {
       (agent) => agent.id !== teamCaptain() && !teamMembers().some((member) => member.agentId === agent.id),
     );
   const removeMemberAt = (index: number) => {
+    closeSeatPanel();
     teamMembers.set(teamMembers().filter((_, seat) => seat !== index));
   };
   // A team cannot be saved without a captain; the name is validated on submit
@@ -1529,9 +1883,65 @@ function TeamCanvasDialog() {
             </If>
             <Each of={members()} key={(member, index) => memberKeyOf(member, index)}>
               {(member, index) => (
-                <CanvasMemberRow member={member} onRemove={() => removeMemberAt(index())} />
+                <CanvasMemberRow
+                  index={index()}
+                  member={member}
+                  onRemove={() => removeMemberAt(index())}
+                />
               )}
             </Each>
+          </View>
+
+          <Separator label="团队默认" />
+          <View testID="canvas-defaults" style={{ flexDirection: "column", gap: space.md }}>
+            <Text style={mutedProse}>
+              团队默认只是起点：成员自己的配置和会话仍可覆盖；清空即不设默认。
+            </Text>
+            <Field
+              label="默认工具"
+              hint={
+                toolOptions(teamDefaultTools()).length > 0
+                  ? "来自已安装的工具注册源；选中的工具授予每位成员，不是安全权限上限。"
+                  : "工具注册源尚未载入；已有的默认工具仍可保留或移除。"
+              }
+            >
+              <View style={{ flexDirection: "column", gap: space.xs }}>
+                <Combobox
+                  testID="team-defaults-tools"
+                  accessibilityLabel="选择团队默认工具"
+                  items={toolOptions(teamDefaultTools())}
+                  multiple
+                  value={teamDefaultTools()}
+                  placeholder="搜索并选择工具"
+                  disabled={saving()}
+                  onChange={(values) => teamDefaultTools.set(values)}
+                />
+                <Text testID="team-defaults-tools-fact" style={factText}>
+                  {teamDefaultTools().length > 0
+                    ? `已选 ${teamDefaultTools().length} 个：${teamDefaultTools().join(" · ")}`
+                    : "未设置默认工具（跟随成员配置）"}
+                </Text>
+              </View>
+            </Field>
+            <Field
+              label="模型覆盖"
+              hint={
+                modelOptions().length > 0
+                  ? "为空表示跟随成员/部署默认；选中后替换每位成员的默认模型。"
+                  : "还没有可选模型；先到「模型接入」配置，或保持不覆盖。"
+              }
+            >
+              <Select
+                testID="team-defaults-model"
+                accessibilityLabel="选择团队模型覆盖"
+                items={defaultModelItems()}
+                value={teamDefaultModel()}
+                placeholder="跟随部署默认（不覆盖）"
+                searchable
+                disabled={saving()}
+                onChange={(value) => teamDefaultModel.set(!value || value === NO_MODEL_OVERRIDE ? NO_MODEL_OVERRIDE : value)}
+              />
+            </Field>
           </View>
 
           <Separator label="成员库" />
@@ -1815,8 +2225,10 @@ export function TeamsSection() {
       // reader who opens 团队 first still sees who can be chosen.
       if (store.agents().length === 0 && !store.agentsLoading()) void store.loadAgents();
       // The Team CLI panel renders the plugin manifest; a section switch does
-      // not re-read a list that is already on screen.
+      // not re-read a list that is already on screen. The canvas's model
+      // override needs the same resolved registry the Agent editor uses.
       if (store.plugins() === null) void store.loadPlugins();
+      if (!store.registryLoaded()) void store.loadRegistry();
     }, 0);
     cleanup(() => clearTimeout(timer));
   });

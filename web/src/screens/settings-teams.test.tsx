@@ -151,12 +151,24 @@ test("TUI: 团队——保存中：字段与按钮锁定，保存按钮带进行
   await app.press("text:选择队长（必选）");
   await app.waitFor("text:设计师");
   await app.press("text:设计师");
+  // The new controls take part in the same lock: defaults pickers and the
+  // member actions cannot be edited while the write is on the wire.
+  await app.press("id:canvas-add-agent_research");
+  await app.waitFor("id:canvas-member-agent_research");
   await app.press("id:team-save");
 
   await app.waitFor("text:/保存中…/");
   expect(app.enabled("id:team-save")).toBe(false);
   expect(app.enabled("id:team-name")).toBe(false);
   expect(app.enabled("id:team-cancel")).toBe(false);
+  // The native choice controls dim their inner field and expose no pressable
+  // view while disabled; the refused press is what proves the lock (an
+  // enabled control would resolve the step).
+  await expect(app.press("id:team-defaults-tools")).rejects.toMatchObject({ code: "ERR_NSH_TEST_NOT_FOUND" });
+  await expect(app.press("id:team-defaults-model")).rejects.toMatchObject({ code: "ERR_NSH_TEST_NOT_FOUND" });
+  expect(app.enabled("id:canvas-member-edit-agent_research")).toBe(false);
+  expect(app.enabled("id:canvas-member-replace-agent_research")).toBe(false);
+  expect(app.enabled("id:canvas-remove-agent_research")).toBe(false);
   // The close control is the fourth way to discard a write in flight; it is
   // gone while the request owns the dialog.
   expect(app.shows("label:关闭")).toBe(false);
@@ -413,6 +425,157 @@ test("TUI: 团队——删除被会话引用时 Dialog 留场并逐字给出原�
   expect(joined(app)).toContain("删除失败：团队「品牌发布小组」正在运行任务，暂不能删除。");
   expect(app.shows("id:team-delete-dialog")).toBe(true);
   expect(app.shows("id:team-card-team_brand")).toBe(true);
+});
+
+test("TUI: 团队画布——默认工具/模型覆盖：预填、只改名字保留、保存后回读", async () => {
+  const app = await openSection("defaults");
+  await app.waitFor("id:team-card-team_defaults");
+
+  await app.press("label:编辑团队 默认组");
+  await app.waitFor("id:team-dialog");
+  await app.waitFor("id:canvas-defaults");
+  // The stored defaults are the draft's starting point, not an empty form.
+  expect(joined(app)).toContain("workspace.read");
+  expect(joined(app)).toContain("Qwen3.8 Flash · S2API");
+
+  // A name-only edit must not wipe the defaults the form did not touch.
+  await app.clear("id:team-name");
+  await app.type("id:team-name", "默认组·改");
+  await app.press("id:team-save");
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_defaults");
+  expect(joined(app)).toContain("默认组·改");
+
+  await app.press("label:编辑团队 默认组·改");
+  await app.waitFor("id:team-dialog");
+  expect(joined(app)).toContain("workspace.read");
+  expect(joined(app)).toContain("Qwen3.8 Flash · S2API");
+
+  // Add a tool and replace the model override; both are canvas drafts until
+  // 保存.
+  await app.type("id:team-defaults-tools", "workspace.write");
+  await app.press("text:workspace.write");
+  await app.press("text:Qwen3.8 Flash · S2API");
+  await app.waitFor("text:DeepSeek V4.1 Flash · S2API");
+  await app.press("text:DeepSeek V4.1 Flash · S2API");
+  await app.press("id:team-save");
+
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_defaults");
+  await app.press("label:编辑团队 默认组·改");
+  await app.waitFor("id:team-dialog");
+  // Read back from the saved document: both tools and the new override.
+  expect(joined(app)).toContain("workspace.read");
+  expect(joined(app)).toContain("workspace.write");
+  expect(joined(app)).toContain("DeepSeek V4.1 Flash · S2API");
+  expect(joined(app)).not.toContain("Qwen3.8 Flash · S2API");
+});
+
+test("TUI: 团队画布——成员 label/description 可编辑（含 inline 席位）并保存回读", async () => {
+  const app = await openSection("seats-edit");
+  await app.waitFor("id:team-card-team_seats");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  await app.press("id:canvas-member-edit-agent_research");
+  await app.waitFor("id:canvas-seat-editor");
+  expect(app.value("id:canvas-seat-label")).toBe("初稿评审");
+  expect(app.value("id:canvas-seat-description")).toBe("只审初稿");
+
+  await app.clear("id:canvas-seat-label");
+  await app.type("id:canvas-seat-label", "终稿评审");
+  await app.clear("id:canvas-seat-description");
+  await app.type("id:canvas-seat-description", "复核终稿");
+  await app.press("id:canvas-seat-apply");
+  await app.waitFor("id:canvas-seat-editor", { state: "gone" });
+  expect(joined(app)).toContain("终稿评审");
+
+  // The inline seat's own text is editable too; its definition stays with it.
+  await app.press("id:canvas-member-edit-agent_inline");
+  await app.waitFor("id:canvas-seat-editor");
+  expect(app.value("id:canvas-seat-label")).toBe("内联席位");
+  await app.clear("id:canvas-seat-label");
+  await app.type("id:canvas-seat-label", "内联合伙人");
+  await app.press("id:canvas-seat-apply");
+  await app.waitFor("id:canvas-seat-editor", { state: "gone" });
+  expect(joined(app)).toContain("内联合伙人");
+
+  await app.press("id:team-save");
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_seats");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  expect(joined(app)).toContain("终稿评审");
+  expect(joined(app)).toContain("复核终稿");
+  expect(joined(app)).toContain("内联合伙人");
+  // The inline definition was carried through the text edit, not dropped.
+  expect(joined(app)).toContain("团队内定义");
+  expect(app.shows("id:team-save-error")).toBe(false);
+});
+
+test("TUI: 团队画布——替换成员保留席位 label/description，保存回读新 Agent", async () => {
+  const app = await openSection("seats-edit");
+  await app.waitFor("id:team-card-team_seats");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  await app.press("id:canvas-member-replace-agent_research");
+  await app.waitFor("id:canvas-seat-replace");
+  expect(joined(app)).toContain("替换只换成员本人；席位名称与描述保留。");
+  // 运营 is the only stored agent not captain and not already seated.
+  await app.press("text:选择一位 Agent");
+  await app.waitFor("text:运营");
+  await app.press("text:运营");
+  await app.press("id:canvas-seat-replace-apply");
+  await app.waitFor("id:canvas-seat-replace", { state: "gone" });
+
+  // The underlying agent changed, the seat's own text did not.
+  expect(app.shows("id:canvas-member-agent_ops")).toBe(true);
+  expect(app.shows("id:canvas-library-agent_ops")).toBe(false);
+  expect(joined(app)).toContain("初稿评审");
+  expect(joined(app)).toContain("只审初稿");
+
+  await app.press("id:team-save");
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_seats");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  expect(app.shows("id:canvas-member-agent_ops")).toBe(true);
+  expect(joined(app)).toContain("初稿评审");
+  expect(joined(app)).toContain("只审初稿");
+});
+
+test("TUI: 团队画布——保存失败保留 defaults 与席位编辑草稿", async () => {
+  const app = await openSection("refuse");
+  await app.waitFor("id:team-card-team_brand");
+
+  await app.press("label:编辑团队 品牌发布小组");
+  await app.waitFor("id:team-dialog");
+  await app.type("id:team-defaults-tools", "workspace.write");
+  await app.press("text:workspace.write");
+  await app.press("text:跟随部署默认（不覆盖）");
+  await app.waitFor("text:DeepSeek V4.1 Flash · S2API");
+  await app.press("text:DeepSeek V4.1 Flash · S2API");
+  await app.press("id:canvas-member-edit-agent_research");
+  await app.waitFor("id:canvas-seat-editor");
+  await app.type("id:canvas-seat-label", "失败保留");
+  await app.press("id:canvas-seat-apply");
+
+  await app.press("id:team-save");
+  await app.waitFor("id:team-save-error");
+  expect(joined(app)).toContain("队长 agent_design 当前不可用");
+  expect(app.shows("id:team-dialog")).toBe(true);
+  // The refused write did not discard the draft: default tool, model override
+  // and the edited seat label are still on screen.
+  expect(joined(app)).toContain("workspace.write");
+  expect(joined(app)).toContain("DeepSeek V4.1 Flash · S2API");
+  expect(joined(app)).toContain("失败保留");
+
+  await app.press("id:canvas-member-edit-agent_research");
+  await app.waitFor("id:canvas-seat-editor");
+  expect(app.value("id:canvas-seat-label")).toBe("失败保留");
 });
 
 test("TUI: Team CLI 能力面板——403 是权限面，不冒充加载失败", async () => {

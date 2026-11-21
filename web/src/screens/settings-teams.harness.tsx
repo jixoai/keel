@@ -12,7 +12,10 @@
 // (the canvas member library's own states), `no-manifest` (no keel.team CLI
 // declaration to render) and `plugins-permission` (the plugin read is 403).
 // `seats` adds a team whose members keep a CLI-written label/description and
-// an inline definition, so a rename must not erase them.
+// an inline definition, so a rename must not erase them; `seats-edit` serves
+// the same document while the test intentionally edits those fields (the PUT
+// guard below is skipped there). `defaults` adds a team with stored team-level
+// tools and a model override, so prefill and read-back are observable.
 import { host, mount, View } from "nsh";
 import type {
   AgentTeamView,
@@ -82,7 +85,7 @@ const seedTeams = (): AgentTeamView[] => {
   if (scenario() === "no-captain") {
     rows[0] = { ...rows[0], captain: { agentId: "" }, status: "invalid" };
   }
-  if (scenario() === "seats") {
+  if (scenario() === "seats" || scenario() === "seats-edit") {
     rows.push({
       id: "team_seats",
       name: "席位组",
@@ -106,6 +109,22 @@ const seedTeams = (): AgentTeamView[] => {
       ],
       status: "valid",
       revision: 1,
+    });
+  }
+  if (scenario() === "defaults") {
+    rows.push({
+      id: "team_defaults",
+      name: "默认组",
+      description: "团队级默认工具与模型覆盖",
+      captain: { agentId: "agent_design" },
+      members: [{ agentId: "agent_research", label: "资料", description: "检索与整理" }],
+      defaults: {
+        tools: ["workspace.read"],
+        modelOverride: { providerId: "s2api", modelId: "qwen3.8-flash" },
+      },
+      status: "valid",
+      revision: 2,
+      hash: "h-defaults",
     });
   }
   return rows;
@@ -150,7 +169,9 @@ const seedPlugins = (): PluginsView =>
             diagnostics: [],
           },
         ],
-        tools: [],
+        // The defaults picker reads the installed registry; these are the tool
+        // ids it can offer (a team's stored ids stay visible too).
+        tools: ["workspace.read", "workspace.write", "web.fetch"],
       };
 
 let agents: AgentView[] = seedAgents();
@@ -234,8 +255,10 @@ const stub: FetchLike = async (input, init) => {
     }
     // A kept seat must keep the fields the canvas does not edit. This makes a
     // silent label/description/inline loss fail the write instead of passing.
+    // `seats-edit` is the scenario where the reader edits those fields on
+    // purpose; the regression guard belongs to the untouched `seats` case.
     const stored = teams.find((team) => team.id === id);
-    for (const old of stored?.members ?? []) {
+    for (const old of scenario() === "seats-edit" ? [] : stored?.members ?? []) {
       const identity = seatIdentityOf(old);
       const kept = seats.find((member) => seatIdentityOf(member) === identity);
       if (!kept) continue; // removed by the form, not lost
@@ -301,7 +324,10 @@ const stub: FetchLike = async (input, init) => {
  * are set here. */
 store.registryLoaded.set(true);
 store.providers.set([{ providerId: "s2api", name: "S2API" }]);
-store.models.set([{ providerId: "s2api", modelId: "deepseek-v4.1-flash", selectable: true, executable: true }]);
+store.models.set([
+  { providerId: "s2api", modelId: "deepseek-v4.1-flash", selectable: true, executable: true },
+  { providerId: "s2api", modelId: "qwen3.8-flash", selectable: true, executable: true },
+]);
 if (scenario() === "plugins-permission") {
   // Let the section's own read run, against a transport that answers 403: the
   // panel must show the permission face, not a generic load failure.

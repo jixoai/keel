@@ -290,6 +290,14 @@ export class FixtureClient implements SettingsApi {
       defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
       tools: [{ toolId: "web.fetch", enabled: true }],
     },
+    {
+      id: "agent_demo_ops",
+      name: "运营",
+      description: "负责发布与渠道沟通",
+      avatar: { kind: "identicon", seed: "agent_demo_ops" },
+      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
+      tools: [{ toolId: "workflow.status", enabled: true }],
+    },
   ];
   private teamState: AgentTeamView[] = [
     {
@@ -298,6 +306,10 @@ export class FixtureClient implements SettingsApi {
       description: "负责新品发布的全链路交付",
       captain: { agentId: "agent_demo_design" },
       members: [{ agentId: "agent_demo_research" }],
+      defaults: {
+        tools: ["workflow.plan", "clock.now"],
+        modelOverride: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
+      },
       capabilities: { teamCli: { enabled: true, commands: ["member.add", "member.remove", "save", "start"] } },
       status: "valid",
       revision: 1,
