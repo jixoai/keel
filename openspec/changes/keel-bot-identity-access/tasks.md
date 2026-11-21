@@ -60,13 +60,40 @@
 
 ## A4 Bot / TeamBot 产品面
 
-- [ ] 删除产品词汇 `Agent`：API/CLI/UI/文档/表名统一为 Bot
-- [ ] `TeamAgent` → `TeamBot`；TeamBot = Mission + Roster，不是权限主体（L12）
+### A4.1 后端接线（先做，阻塞 L5）
+
+- [ ] access 适配器：`GrantSource` 只取 account 直授；`GroupGrants` 走
+      `permission_group_members` join `permission_group_grants`；`RelationSource` 解析 store；
+      `ResolveSubject` 无法解析时 fail closed
+- [ ] 内置权限组种子：super-admin（全部 key + all）、tenant-admin、bot-operator、viewer、auditor
+- [ ] 审计落盘：grant/revoke/deny/超管操作/relation 变更；敏感值不落日志
+- [ ] HTTP `/v1/accounts`（列表/创建/详情/禁用/启用/重置密码/授权组）接 access
+- [ ] HTTP `/v1/bots`（CRUD/归档/Profile/Harness/试跑）接 access
+- [ ] HTTP `/v1/team-bots`（CRUD/归档/Mission/Roster/启动）接 access
+- [ ] Bot key 端点迁到 `/v1/bots/{id}/keys`；删 A2 临时 `/v1/auth/bot-keys`
+- [ ] `/v1/auth/whoami` 返回 Account/Bot 身份，不再返回旧 tenant role
 - [ ] Bot 级 Profile 绑定；权限实时判定；Role 变更 hook 注入提示
 - [ ] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
-- [ ] TeamBot 组装/启动/成员/共享（L20：无专属跨账号规则，由 `bot.invoke` 决定）
+
+### A4.2 重命名与旧入口删除
+
+- [ ] 删除产品词汇 `Agent`：API/CLI/UI/文档/表名统一为 Bot
+- [ ] `TeamAgent` → `TeamBot`；TeamBot = Mission + Roster，不是权限主体（L12）
 - [ ] 旧 `/v1/agents` `/v1/teams` 404；旧 `keel agent/team` 删除
-- [ ] 设置页：账号 / 权限组 / Bot / TeamBot；五态齐全，无权限隐藏 + 403
+- [ ] 旧 `api_keys`/`agents`/`agent_teams` 表退役；旧 `keel admin tenant/key` 删除
+- [ ] 产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、`agentext`→`harnessext`
+
+### A4.3 Web 登录与数据层（L5 前置）
+
+- [ ] 登录页改 username+password + bootstrap/setup token + 强制改密
+- [ ] CSRF token 注入所有写请求；旧 passphrase 表单删除
+- [ ] CLI `agentteam.go`/`model.go`/`skills.go` 改账号登录或 Bot key，不再读 `KEEL_SERVE_PASSWORD`
+- [ ] 账号/Bot/TeamBot/权限组数据层与 `can()` 接 registry
+
+### A4.4 产品面（L5，等设计方向修订）
+
+- [ ] 账号 / 权限组 / Bot / TeamBot / TeamRun DAG / 记录（审计）页面
+- [ ] 五态齐全、无权限隐藏 + 403、四档 viewport、shadcn+solid-glass
 
 ## A5 迁移与词汇对表
 
