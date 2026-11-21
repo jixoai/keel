@@ -469,6 +469,8 @@ test("TUI: 团队画布——默认工具/模型覆盖：预填、只改名字�
   expect(joined(app)).toContain("workspace.write");
   expect(joined(app)).toContain("DeepSeek V4.1 Flash · S2API");
   expect(joined(app)).not.toContain("Qwen3.8 Flash · S2API");
+  // The same PUT kept the seat metadata this form did not edit.
+  expect(joined(app)).toContain("检索与整理");
 });
 
 test("TUI: 团队画布——成员 label/description 可编辑（含 inline 席位）并保存回读", async () => {
@@ -511,6 +513,8 @@ test("TUI: 团队画布——成员 label/description 可编辑（含 inline 席
   expect(joined(app)).toContain("内联合伙人");
   // The inline definition was carried through the text edit, not dropped.
   expect(joined(app)).toContain("团队内定义");
+  // The seat-text PUT also carried the defaults this form did not edit.
+  expect(joined(app)).toContain("workspace.read");
   expect(app.shows("id:team-save-error")).toBe(false);
 });
 
@@ -545,6 +549,40 @@ test("TUI: 团队画布——替换成员保留席位 label/description，保存
   expect(app.shows("id:canvas-member-agent_ops")).toBe(true);
   expect(joined(app)).toContain("初稿评审");
   expect(joined(app)).toContain("只审初稿");
+  expect(joined(app)).toContain("workspace.read");
+});
+
+test("TUI: 团队画布——替换空 agentId 的 inline 席位：落成真实 agentId 并保留席位文本", async () => {
+  const app = await openSection("seats-edit");
+  await app.waitFor("id:team-card-team_seats");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  // The seat's stored identity is its inline id; replacing it must write a
+  // real agentId (never `{agentId:""}`) while keeping label/description.
+  expect(app.shows("id:canvas-member-agent_inline")).toBe(true);
+  await app.press("id:canvas-member-replace-agent_inline");
+  await app.waitFor("id:canvas-seat-replace");
+  await app.press("text:选择一位 Agent");
+  await app.waitFor("text:运营");
+  await app.press("text:运营");
+  await app.press("id:canvas-seat-replace-apply");
+  await app.waitFor("id:canvas-seat-replace", { state: "gone" });
+  expect(app.shows("id:canvas-member-agent_ops")).toBe(true);
+  expect(joined(app)).toContain("内联席位");
+  expect(joined(app)).toContain("团队内定义");
+
+  await app.press("id:team-save");
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_seats");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  // Read back the replaced seat: real id, kept seat text, no empty-id seat.
+  expect(app.shows("id:canvas-member-agent_ops")).toBe(true);
+  expect(app.shows("id:canvas-member-agent_inline")).toBe(false);
+  expect(joined(app)).toContain("内联席位");
+  expect(app.shows("id:team-save-error")).toBe(false);
 });
 
 test("TUI: 团队画布——保存失败保留 defaults 与席位编辑草稿", async () => {

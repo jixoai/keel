@@ -107,6 +107,9 @@ const seedTeams = (): AgentTeamView[] => {
           },
         },
       ],
+      // Seat-text edits must not wipe the team defaults either: the PUT path
+      // carries this object through.
+      defaults: { tools: ["workspace.read"] },
       status: "valid",
       revision: 1,
     });
