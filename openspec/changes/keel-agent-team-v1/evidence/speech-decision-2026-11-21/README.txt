@@ -1,7 +1,8 @@
 # speech/decision runtime + media artifact event evidence (2026-11-21, lane S2)
 
 Worktree: .worktrees/keel-speech-decision (main 4a68729)
-Code commit: 5d0aae3 feat(media): wire speech and decision runtime tools
+Code commits: 5d0aae3 feat(media): wire speech and decision runtime tools;
+              54aabd5 fix(media): reject empty decision outcomes
 DSN: read from .env.local as KEEL_TEST_DSN; the value is never printed.
 
 ## What is wired
