@@ -2,7 +2,7 @@
   "change": "keel-agent-team-v1",
   "lane": "C4",
   "date": "2026-11-21",
-  "head": "035b36f",
+  "head": "ea89688",
   "base": "4a68729",
   "commands": [
     {
@@ -73,5 +73,5 @@
     "freeAtCheck": true,
     "orphanCheck": "pgrep -fl 'nsh run --target web' empty; lsof port 13680 empty"
   },
-  "headNote": "可执行树（含演示 fixture）在 c83d488；3f0055d/035b36f 只补 harness/test 用例与断言，bundle 不变，因此浏览器证据对三棵树同样有效。本目录的 tasks/证据文档在最后提交，不改变可执行树。"
+  "headNote": "最终可执行树 ea89688（feature c83d488 + tests 3f0055d/035b36f + 空文本不写入修正 ea89688；check/team/full/build/package 均在此树复跑）。浏览器截图在 ea89688 之前采集；该修正只跳过未改动的空席位文本产生的 no-op PUT，不改变渲染，视觉证据仍对最终树有效。"
 }
