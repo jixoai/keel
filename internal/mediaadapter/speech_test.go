@@ -251,3 +251,163 @@ func TestSpeechSynthesizeRejectsOversizedAudio(t *testing.T) {
 		t.Fatalf("kind = %q", typed.Kind)
 	}
 }
+
+// TestSpeechTranscribeRejectsMultipartHeaderInjection pins the STT boundary:
+// filename and mime are model-controlled and both become multipart headers. A
+// CR/LF or control character must be refused before a request is built, and
+// mime must be a bare type/subtype token (no parameters, no separators).
+func TestSpeechTranscribeRejectsMultipartHeaderInjection(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":"should not be reached"}`)
+	}))
+	defer server.Close()
+	provider, err := NewHTTPSpeechProvider(HTTPSpeechConfig{BaseURL: server.URL, APIKey: "k", Model: "stt-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name     string
+		filename string
+		mime     string
+		field    string
+	}{
+		{name: "filename CRLF", filename: "memo.wav\r\nX-Evil: 1", mime: "audio/wav", field: "filename"},
+		{name: "filename LF", filename: "memo.wav\nX-Evil: 1", mime: "audio/wav", field: "filename"},
+		{name: "filename NUL", filename: "memo\x00.wav", mime: "audio/wav", field: "filename"},
+		{name: "filename tab", filename: "memo\t.wav", mime: "audio/wav", field: "filename"},
+		{name: "mime CRLF", filename: "memo.wav", mime: "audio/wav\r\nX-Evil: 1", field: "mime"},
+		{name: "mime control", filename: "memo.wav", mime: "audio/wav\x01", field: "mime"},
+		{name: "mime parameters", filename: "memo.wav", mime: "audio/wav; charset=binary", field: "mime"},
+		{name: "mime whitespace", filename: "memo.wav", mime: "audio /wav", field: "mime"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := provider.Transcribe(context.Background(), TranscribeRequest{
+				Filename: tc.filename,
+				Mime:     tc.mime,
+				Audio:    []byte("clip"),
+			})
+			var typed *Error
+			if !asAdapterError(err, &typed) {
+				t.Fatalf("error = %v, want a typed adapter error", err)
+			}
+			if typed.Kind != KindRequest {
+				t.Fatalf("kind = %q, want invalid_request", typed.Kind)
+			}
+			if !hasField(typed.Fields, tc.field, "") {
+				t.Fatalf("fields = %+v, want %s", typed.Fields, tc.field)
+			}
+			if strings.ContainsAny(err.Error(), "\r\n\x00\t") {
+				t.Fatalf("error carried a control character: %q", err.Error())
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("an invalid filename/mime reached the wire %d times", calls)
+	}
+}
+
+// TestSpeechTranscribeEscapesQuotedFilename keeps quotes and backslashes legal
+// while proving the resulting part has exactly one Content-Disposition and no
+// injected header.
+func TestSpeechTranscribeEscapesQuotedFilename(t *testing.T) {
+	type observation struct {
+		filename string
+		partType string
+		evil     string
+		data     string
+		err      error
+	}
+	observed := make(chan observation, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var out observation
+		reader, err := r.MultipartReader()
+		if err != nil {
+			out.err = err
+			observed <- out
+			return
+		}
+		part, err := reader.NextPart()
+		if err != nil {
+			out.err = err
+			observed <- out
+			return
+		}
+		out.filename = part.FileName()
+		out.partType = part.Header.Get("Content-Type")
+		out.evil = part.Header.Get("X-Evil")
+		data, readErr := io.ReadAll(part)
+		out.data = string(data)
+		out.err = readErr
+		observed <- out
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":"ok"}`)
+	}))
+	defer server.Close()
+	provider, err := NewHTTPSpeechProvider(HTTPSpeechConfig{BaseURL: server.URL, APIKey: "k", Model: "stt-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename := `memo"quote\name.wav`
+	result, err := provider.Transcribe(context.Background(), TranscribeRequest{
+		Filename: filename,
+		Mime:     "audio/wav",
+		Audio:    []byte("clip"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "ok" {
+		t.Fatalf("transcript = %q", result.Text)
+	}
+	out := <-observed
+	if out.err != nil {
+		t.Fatalf("multipart parse: %v", out.err)
+	}
+	if out.filename != filename {
+		t.Fatalf("filename = %q, want %q", out.filename, filename)
+	}
+	if out.partType != "audio/wav" {
+		t.Fatalf("part content-type = %q", out.partType)
+	}
+	if out.evil != "" {
+		t.Fatalf("injected header reached the part: X-Evil=%q", out.evil)
+	}
+	if out.data != "clip" {
+		t.Fatalf("part data = %q", out.data)
+	}
+}
+
+func TestSpeechTranscribeDefaultsSafeMetadata(t *testing.T) {
+	var filename, partType string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reader, err := r.MultipartReader()
+		if err != nil {
+			t.Errorf("multipart reader: %v", err)
+			return
+		}
+		part, err := reader.NextPart()
+		if err != nil {
+			t.Errorf("next part: %v", err)
+			return
+		}
+		filename, partType = part.FileName(), part.Header.Get("Content-Type")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":"ok"}`)
+	}))
+	defer server.Close()
+	provider, err := NewHTTPSpeechProvider(HTTPSpeechConfig{BaseURL: server.URL, APIKey: "k", Model: "stt-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Transcribe(context.Background(), TranscribeRequest{Audio: []byte("clip")}); err != nil {
+		t.Fatal(err)
+	}
+	if filename != "audio" || partType != "application/octet-stream" {
+		t.Fatalf("defaults = filename %q type %q", filename, partType)
+	}
+}

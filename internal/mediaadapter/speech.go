@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -182,6 +183,11 @@ func (a *SpeechAdapter) Transcribe(ctx context.Context, session string, req Tran
 				Field: "audio", Message: fmt.Sprintf("at most %d bytes", limit),
 			}})
 	}
+	normalized, metaErr := normalizeTranscribeMetadata(req)
+	if metaErr != nil {
+		return TranscriptResult{}, metaErr
+	}
+	req = normalized
 	transcript, err := guard(FamilySTT, "transcribe", func() (SpeechTranscript, error) {
 		return a.Provider.Transcribe(ctx, req)
 	})
@@ -355,22 +361,16 @@ func (p *HTTPSpeechProvider) Transcribe(ctx context.Context, req TranscribeReque
 	if p == nil || p.wire == nil {
 		return SpeechTranscript{}, configError(FamilySTT, "transcribe", "speech wire is not configured")
 	}
-	filename := strings.TrimSpace(req.Filename)
-	if filename == "" {
-		filename = "audio"
-		if ext := extensionForMime(req.Mime); ext != "" {
-			filename += ext
-		}
+	normalized, err := normalizeTranscribeMetadata(req)
+	if err != nil {
+		return SpeechTranscript{}, err
 	}
+	req = normalized
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapeQuotes(filename)))
-	partMime := strings.TrimSpace(req.Mime)
-	if partMime == "" {
-		partMime = "application/octet-stream"
-	}
-	header.Set("Content-Type", partMime)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapeQuotes(req.Filename)))
+	header.Set("Content-Type", req.Mime)
 	part, err := writer.CreatePart(header)
 	if err != nil {
 		return SpeechTranscript{}, &Error{Family: FamilySTT, Op: "transcribe", Kind: KindRequest, Message: "multipart request could not be built", Err: err}
@@ -468,6 +468,86 @@ func parseTranscript(raw []byte, model string) (SpeechTranscript, error) {
 		})
 	}
 	return transcript, nil
+}
+
+// defaultTranscribeMime is the part type when the caller gives no MIME. The
+// provider sees a neutral binary part instead of an empty Content-Type.
+const defaultTranscribeMime = "application/octet-stream"
+
+// normalizeTranscribeMetadata makes the two model-controlled multipart header
+// values safe before any wire call.
+//
+// filename is a quoted Content-Disposition parameter and mime is a header
+// value. A CR/LF (or any other control character) in either would inject a
+// header or a part; quotes and backslashes are escaped separately. Invalid
+// metadata is rejected instead of stripped so a caller learns the input was
+// refused rather than silently sending a different filename/type.
+func normalizeTranscribeMetadata(req TranscribeRequest) (TranscribeRequest, error) {
+	if containsHeaderControl(req.Filename) {
+		return req, requestError(FamilySTT, "transcribe", "filename contains CR, LF or a control character", []FieldError{{
+			Field: "filename", Message: "filename must not contain CR, LF or control characters",
+		}})
+	}
+	if containsHeaderControl(req.Mime) {
+		return req, requestError(FamilySTT, "transcribe", "mime contains CR, LF or a control character", []FieldError{{
+			Field: "mime", Message: "mime must not contain CR, LF or control characters",
+		}})
+	}
+	req.Filename = strings.TrimSpace(req.Filename)
+	req.Mime = strings.ToLower(strings.TrimSpace(req.Mime))
+	if req.Mime == "" {
+		req.Mime = defaultTranscribeMime
+	} else if !safeMediaType(req.Mime) {
+		return req, requestError(FamilySTT, "transcribe", "mime must be a bare type/subtype token", []FieldError{{
+			Field: "mime", Message: "mime must be a bare type/subtype token such as audio/wav",
+		}})
+	}
+	if req.Filename == "" {
+		req.Filename = "audio"
+		if ext := extensionForMime(req.Mime); ext != "" {
+			req.Filename += ext
+		}
+	}
+	return req, nil
+}
+
+func containsHeaderControl(value string) bool {
+	for _, r := range value {
+		if r == '\r' || r == '\n' || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// safeMediaType accepts exactly type/subtype using RFC 7230 token characters.
+// Parameters, whitespace, separators and control characters are refused: the
+// multipart part type is one header value, not a media-type grammar exercise.
+func safeMediaType(value string) bool {
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, part := range parts {
+		for _, r := range part {
+			if !isMediaTokenRune(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isMediaTokenRune(r rune) bool {
+	if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+		return true
+	}
+	switch r {
+	case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+		return true
+	default:
+		return false
+	}
 }
 
 func extensionForMime(mime string) string {

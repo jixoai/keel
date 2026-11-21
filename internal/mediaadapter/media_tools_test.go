@@ -3,12 +3,15 @@ package mediaadapter
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agenttool"
+	"github.com/jixoai/keel/internal/layerfs"
 )
 
 type fakeDecisionExecutor struct {
@@ -263,5 +266,56 @@ func TestDecisionToolRejectsAnEmptyOutcome(t *testing.T) {
 	text := contentText(t, result.Content)
 	if !strings.Contains(text, "no answers and no failure") || strings.Contains(text, "answers\":") {
 		t.Fatalf("empty outcome failure = %s", text)
+	}
+}
+
+func TestSpeechSTTToolRejectsHeaderInjectionBeforeTheWire(t *testing.T) {
+	store, err := layerfs.Open(t.TempDir(), layerfs.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hash, _, err := store.PutBytes([]byte("clip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"should not be reached"}`))
+	}))
+	defer server.Close()
+	provider, err := NewHTTPSpeechProvider(HTTPSpeechConfig{BaseURL: server.URL, APIKey: "k", Model: "stt-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := NewSpeechSTTTool(&SpeechAdapter{
+		Provider: provider,
+		Store:    &LayerFSStore{Store: store},
+	}, store, 0)
+	runCtx := agentcore.WithToolRunScope(context.Background(), agentcore.ToolRunScope{
+		TenantID: "tenant-1", SessionID: "session-stt",
+	})
+	result, err := tool.Execute(runCtx, "call-1", json.RawMessage(`{
+	  "blob_id": "`+hash.Prefixed()+`",
+	  "filename": "memo.wav\r\nX-Evil: 1",
+	  "mime": "audio/wav"
+	}`), nil)
+	if err != nil {
+		t.Fatalf("tool returned a Go error: %v", err)
+	}
+	if result.IsError == nil || !*result.IsError {
+		t.Fatalf("injection was accepted: %+v", result)
+	}
+	text := contentText(t, result.Content)
+	if !strings.Contains(text, "invalid_request") || !strings.Contains(text, "filename") {
+		t.Fatalf("failure = %s", text)
+	}
+	if strings.ContainsAny(text, "\r\n\x00\t") {
+		t.Fatalf("tool result carried a control character: %q", text)
+	}
+	if calls != 0 {
+		t.Fatalf("an injected filename reached the wire %d times", calls)
 	}
 }
