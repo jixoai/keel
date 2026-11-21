@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentext"
@@ -38,6 +39,67 @@ func testLogger() *slog.Logger {
 	}
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
+
+// e2eAccess is the minimal permissive Access seam for this fixture. The test
+// creates one tenant and its sessions directly, so there is no account or
+// relation row to resolve; a request is that tenant's single synthetic actor
+// and every candidate is visible. Production uses accesswire.Bridge and the
+// same handlers answer 403/404 by relation — this double only proves the
+// permission-aware code path is wired, not the policy itself (which the
+// identity/edge suites cover against real PG).
+type e2eAccess struct{}
+
+func (e2eAccess) Principal(_ context.Context, tenantID uuid.UUID) (access.Principal, error) {
+	return access.Principal{
+		TenantID: tenantID,
+		AccountID: uuid.NewSHA1(uuid.NameSpaceOID,
+			[]byte("agentext-e2e:"+tenantID.String())),
+	}, nil
+}
+
+func (e2eAccess) Authorize(_ context.Context, _ access.Principal, key string, _ access.Resource) (access.Decision, error) {
+	return access.Decision{Allow: true, Reason: access.ReasonAllow, Key: key, Scope: access.ScopeAll}, nil
+}
+
+func (e2eAccess) Visible(_ context.Context, _ access.Principal, key, _ string, candidates []string) (access.VisibleResult, error) {
+	return access.VisibleResult{
+		IDs:      append([]string(nil), candidates...),
+		Scope:    access.ScopeAll,
+		Decision: access.Decision{Allow: true, Reason: access.ReasonAllow, Key: key, Scope: access.ScopeAll},
+	}, nil
+}
+
+func (e2eAccess) Effective(context.Context, access.Principal) (access.Grants, error) {
+	return access.Grants{}, nil
+}
+
+func (e2eAccess) CanGrant(context.Context, access.Principal, []access.Grant) error { return nil }
+
+func (e2eAccess) BotOwnerAccount(context.Context, uuid.UUID, string) (uuid.UUID, bool, error) {
+	return uuid.Nil, false, nil
+}
+
+func (e2eAccess) AuditGrant(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, string, string, map[string]any) error {
+	return nil
+}
+
+func (e2eAccess) AuditRelation(context.Context, uuid.UUID, uuid.UUID, string, string, string, string, string, string) error {
+	return nil
+}
+
+func (e2eAccess) AuditSuperAdmin(context.Context, access.Principal, string, map[string]any) error {
+	return nil
+}
+
+func (e2eAccess) AuditInvoke(context.Context, uuid.UUID, access.Principal, string, uuid.UUID, string) error {
+	return nil
+}
+
+func (e2eAccess) AuditBotKey(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, string, string) error {
+	return nil
+}
+
+func (e2eAccess) Denied(context.Context, access.Principal, access.Decision, access.Resource) {}
 
 // openTestStore creates a dedicated database for one test so parallel packages
 // sharing KEEL_TEST_DSN can never claim each other's runs. It skips without a
@@ -258,7 +320,12 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 		return runControl.Cancel(cancelCtx, kernel.Scope{TenantID: tenant, SessionID: session})
 	}
 	api := agentapi.New(agentapi.Config{
-		Sessions:  agentapi.NewPGSessionLister(st),
+		Sessions: agentapi.NewPGSessionLister(st),
+		// The A4.2a handlers authorize list/get sub-agents and sessions through
+		// the Access seam; without it those routes fail closed (503). This fixture
+		// has no account/relation rows, so the double above makes the tenant's
+		// synthetic actor visible to everything it owns.
+		Access:    e2eAccess{},
 		Cancel:    cancelRun,
 		Decisions: decisions,
 		Partials:  partials,
