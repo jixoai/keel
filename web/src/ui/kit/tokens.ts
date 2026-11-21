@@ -313,11 +313,17 @@ export const radius = {
 export const typeScale = {
   "2xs": 9,
   xs: 10,
+  /** 11px — mono keys and stamp labels (the books shell's data line). It never
+   * carries Chinese prose: the 11px floor is for `domain.action` tokens and
+   * numbers only. */
+  key: 11,
   sm: 12,
   caption: 13,
   base: 14,
   lg: 16,
   xl: 18,
+  /** 20px — the books shell's band/section title (design 18–20). */
+  section: 20,
   "2xl": 24,
   "3xl": 30,
 } as const;

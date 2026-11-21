@@ -9,6 +9,7 @@ import { FixtureClient } from "./fixture";
 import { KeelApiError, KeelHttp, errorMessageOf } from "./http";
 import { setEffectivePermissions, resetPermissions } from "./permissions";
 import type { AuthSessionView, WhoAmI } from "./identity";
+import type { IdentityApi } from "./identity-api";
 import { selectionForSend } from "./selection";
 import type {
   AgentTeamApi,
@@ -76,23 +77,11 @@ import {
  * product can present. */
 export type Mode = "checking" | "http" | "offline";
 
-/** The top-level route. The app shell renders the workspace (session list +
- * conversation), the standalone settings page (change keel-model-settings), the
- * plugin page, or the kit gallery (change keel-harness-shell, task S3). */
-export type Route = "workspace" | "settings" | "plugins" | "kit";
-
-/** The route a page path names: the web host's `keel.route` answer and its
- * back/forward events both arrive as paths, so a deep link (`/settings`,
- * `/plugins`) and the address bar agree with the shell. `/kit` is the kit
- * gallery — a developer route, mapped only for a dev launch (`?fixture=1` /
- * `host.params.fixture`); no product link enters it and a product URL falls
- * back to the workspace. */
-const routeOf = (path: string, dev: boolean): Route => {
-  if (path.startsWith("/settings")) return "settings";
-  if (path.startsWith("/plugins")) return "plugins";
-  if (dev && path.startsWith("/kit")) return "kit";
-  return "workspace";
-};
+// The route model lives in `route.ts` (pure, no transport); the store holds its
+// signals and re-exports the words the shell compares.
+export type { IdentitySection, Route, RouteState } from "./route";
+export { resolveRoute } from "./route";
+import { resolveRoute, routeState, routePath, type IdentitySection, type Route, type RouteState } from "./route";
 
 export interface Notice {
   tone: "info" | "warn" | "danger" | "success";
@@ -108,7 +97,11 @@ export interface PendingAttachment {
   file?: Blob;
 }
 
-interface Client extends SettingsApi {
+/** Everything the store's transport must answer. The identity/access surface
+ * (A4.3/A4.4a) is optional: a transport that predates it answers nothing, and
+ * the identity pages say so instead of inventing rows. */
+type Client = SettingsApi &
+  Partial<IdentityApi> & {
   probe(): Promise<"ok" | "auth" | "down">;
   capabilities(): Promise<Record<string, unknown>>;
   /** `GET /v1/mcp/apps`: the app catalogue. Optional because a transport that
@@ -152,7 +145,7 @@ interface Client extends SettingsApi {
   deleteTeam?: AgentTeamApi["deleteTeam"];
   addTeamMember?: AgentTeamApi["addTeamMember"];
   removeTeamMember?: AgentTeamApi["removeTeamMember"];
-}
+};
 
 /** The member-task projection seam (`GET /v1/sessions/{id}/team-tasks`). */
 type TeamTaskTransport = {
@@ -365,8 +358,13 @@ class KeelStore {
 
   /** The top-level route: `/settings`, `/plugins` and the dev-only `/kit`
    * deep-link straight into their screens; the workspace stays otherwise
-   * untouched. */
+   * untouched. The books chapters (`/identity`, `/records`, `/bots`, `/teams`)
+   * arrive in A4.4a. */
   readonly route = signal<Route>("workspace");
+  /** The route's own parameters (the identity sub-page and the open object).
+   * Kept apart from `route` so the chapter comparisons above stay one word. */
+  readonly routeSection = signal<IdentitySection>("accounts");
+  readonly routeObjectId = signal<string | null>(null);
 
   // ---- settings face (change keel-model-settings) ------------------------
 
@@ -506,6 +504,10 @@ class KeelStore {
    * before (and without) a live service its calls fail with the network's own
    * reason — the store never swaps in a fabricated one. */
   private client: Client = new KeelHttp("");
+  /** Test/host seam for the identity/access surface (the identity harness
+   * answers it in memory so the real parsing runs without a network). `null`
+   * uses the app's own transport. */
+  private identityClient: IdentityApi | null = null;
   private engine: CoreEngine | null = null;
   private unsubscribeEngine: (() => void) | null = null;
   private unsubscribeStream: (() => void) | null = null;
@@ -608,8 +610,18 @@ class KeelStore {
       if (!this.fixture) this.fixture = new FixtureClient(undefined, this.devSearch);
       this.http = null;
       this.client = this.fixture;
-      this.identity.set(null);
       resetPermissions();
+      // The fixture also answers whoami, so the identity chapters, `can()` and
+      // the ledger's signatory line are exercised on the development transport
+      // exactly as they are against a live deployment. Nothing here is product
+      // state: a product launch never reaches this branch.
+      const me = await this.fixture.whoami().catch(() => null);
+      if (me) {
+        this.identity.set(me);
+        setEffectivePermissions(me.permissions, me.isSuperAdmin);
+      } else {
+        this.identity.set(null);
+      }
       this.auth.set("ok");
       this.mode.set("http");
       // The fixture answers the same discovery document shape a live server
@@ -903,16 +915,36 @@ class KeelStore {
     const [page] = await Promise.all([this.pageRoute(), this.devLaunch()]);
     if (!page) return;
     this.routePlumbed = true;
-    if (!this.routeTouched) this.route.set(routeOf(page.path, this.dev));
+    if (!this.routeTouched) this.applyRoute(page.path);
     try {
       // Browser back/forward: the URL is authoritative again.
       host.on<{ path?: string; search?: string }>("keel.route", (payload) => {
         const next = typeof payload?.path === "string" ? payload.path : "";
-        this.route.set(routeOf(next, this.dev));
+        this.applyRoute(next);
       });
     } catch {
       /* a host without events is fine: routes stay in-app */
     }
+  }
+
+  /** Land on a path: the chapter and its parameters move together, so a deep
+   * link and the back button cannot leave a chapter showing another object. */
+  private applyRoute(path: string) {
+    const state = resolveRoute(path, this.dev);
+    this.route.set(state.route);
+    this.routeSection.set(state.section);
+    this.routeObjectId.set(state.objectId);
+  }
+
+  /** Move to a route in-app and keep the page URL in step. The state is set
+   * before the host call: a host without a URL (TUI, desktop, tests) still
+   * navigates, it just does not change an address bar. */
+  private go(state: RouteState) {
+    this.routeTouched = true;
+    this.route.set(state.route);
+    this.routeSection.set(state.section);
+    this.routeObjectId.set(state.objectId);
+    this.navigate(routePath(state));
   }
 
   /** Keep the page URL in step with the shell (`/settings`, `/plugins` and the
@@ -931,8 +963,7 @@ class KeelStore {
   openSettings() {
     this.routeTouched = true;
     if (this.route() === "settings") return;
-    this.route.set("settings");
-    this.navigate("/settings");
+    this.go(routeState("settings"));
   }
 
   /** The plugin page (`/plugins`), the same route the settings page's
@@ -941,8 +972,7 @@ class KeelStore {
   openPlugins() {
     this.routeTouched = true;
     if (this.route() === "plugins") return;
-    this.route.set("plugins");
-    this.navigate("/plugins");
+    this.go(routeState("plugins"));
   }
 
   /** Back to the workspace; the open session is preserved (the store keeps it
@@ -950,8 +980,37 @@ class KeelStore {
   closeSettings() {
     this.routeTouched = true;
     if (this.route() === "workspace") return;
-    this.route.set("workspace");
-    this.navigate("/");
+    this.go(routeState("workspace"));
+  }
+
+  // ---- the books chapters (change keel-bot-identity-access, A4.4a) ---------
+
+  /** Enter a chapter. Identity keeps whichever sub-page the reader was on; the
+   * others have one page in this slice. */
+  openChapter(route: "workspace" | "bots" | "teams" | "identity" | "records") {
+    const section: IdentitySection = route === "identity" ? this.routeSection() : "accounts";
+    this.go(routeState(route, section, null));
+  }
+
+  /** 账号 / 权限组 — the identity index column's segmented control. */
+  openIdentitySection(section: IdentitySection) {
+    if (this.route() === "identity" && this.routeSection() === section && this.routeObjectId() === null) return;
+    this.go(routeState("identity", section, null));
+  }
+
+  /** One account/group page (`/identity/<section>/<id>`). */
+  openIdentityObject(section: IdentitySection, objectId: string) {
+    this.go(routeState("identity", section, objectId));
+  }
+
+  /** Back from an object page to its index (the chapter stays). */
+  closeIdentityObject() {
+    this.go(routeState("identity", this.routeSection(), null));
+  }
+
+  /** One record (`/records/<id>`). */
+  openRecord(objectId: string | null) {
+    this.go(routeState("records", "accounts", objectId));
   }
 
   // ---- model settings -----------------------------------------------------
@@ -1452,8 +1511,30 @@ class KeelStore {
     this.mode.set("http");
   }
 
+  /** Test only: cancel the boot probe and settle as a live service. A harness
+   * owns its own transport and permissions; a late probe answer must not reset
+   * them (the probe checks its token after every await). */
+  skipBootForTest(): void {
+    this.detectToken += 1;
+    this.mode.set("http");
+    this.sessionsLoading.set(false);
+  }
+
   setAgentTeamTransport(client: AgentTeamApi | null): void {
     this.agentTeamClient = client;
+  }
+
+  /** Test/host seam: answer the identity/access surface without a network.
+   * `null` restores the app's own transport. */
+  setIdentityTransport(client: IdentityApi | null): void {
+    this.identityClient = client;
+  }
+
+  /** The identity/access transport in force, or null when the transport does
+   * not serve that surface (the pages then say so instead of inventing rows). */
+  identityApi(): IdentityApi | null {
+    const client = this.identityClient ?? this.client;
+    return typeof client.listAccounts === "function" ? (client as IdentityApi) : null;
   }
 
   /** Test/host seam: answer the skill library without a network. `null`

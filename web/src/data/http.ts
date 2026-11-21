@@ -72,6 +72,7 @@ import {
 import {
   identityPage,
   parseAccount,
+  parseAuditEvent,
   parseAuthSession,
   parseBot,
   parseBotKey,
@@ -80,6 +81,8 @@ import {
   parseTeamBot,
   parseWhoAmI,
   type AccountView,
+  type AuditEventView,
+  type AuditQuery,
   type AuthSessionView,
   type BotKeyView,
   type BotView,
@@ -1872,6 +1875,29 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
       requestId: typeof body.requestId === "string" ? body.requestId : undefined,
       deduped: body.deduped === true,
     };
+  }
+
+  /** `GET /v1/audit/events` — the audit ledger's read projection. The route is
+   * the intended contract (A4.4a draws the page; the server slice lands with
+   * it); until a deployment serves it the request answers the default-deny 404
+   * and the caller renders its 待接入 state. No row is ever synthesized here.
+   * `since`/`kind`/`result` narrow the ledger; `limit` is bounded like every
+   * other identity listing. */
+  async listAuditEvents(query: AuditQuery = {}): Promise<IdentityPage<AuditEventView>> {
+    const bounded = identityLimitOf(query.limit ?? 100);
+    const params = new URLSearchParams({ limit: String(bounded) });
+    if (query.since) params.set("since", query.since);
+    if (query.kind) params.set("kind", query.kind);
+    if (query.result) params.set("result", query.result);
+    const response = await this.request(`/v1/audit/events?${params.toString()}`);
+    const body = asRecord(await response.json());
+    return identityPage<AuditEventView>(
+      listOf(body.events).flatMap((item) => {
+        const event = parseAuditEvent(item);
+        return event ? [event] : [];
+      }),
+      bounded,
+    );
   }
 }
 

@@ -56,6 +56,18 @@ import type {
   WireEvent,
 } from "./contract";
 import { KeelApiError } from "./http";
+import { FixtureIdentity } from "./fixture-identity";
+import type {
+  AccountView,
+  AuditEventView,
+  AuditQuery,
+  BotView,
+  CreateAccountInput,
+  IdentityPage,
+  PermissionGroupDetail,
+  PermissionGroupSummary,
+  WhoAmI,
+} from "./identity";
 import demoShot from "../../assets/demo-shot.png";
 
 type Subscriber = {
@@ -1068,6 +1080,83 @@ export class FixtureClient implements SettingsApi {
       }
       return { ...team, members: (team.members ?? []).filter((member) => member.agentId !== agentId) };
     });
+  }
+
+  // ---- identity & access (change keel-bot-identity-access, A4.4a) ---------
+  //
+  // The development fixture's sample deployment. Every method delegates to
+  // `FixtureIdentity`, whose in-memory transitions are the same writes a live
+  // deployment performs, so the books shell renders real state (and its five
+  // states) without a server. A product launch never reaches this class.
+
+  private readonly identity = new FixtureIdentity();
+
+  whoami(): Promise<WhoAmI> {
+    return this.identity.whoami();
+  }
+
+  listAccounts(limit = 100): Promise<IdentityPage<AccountView>> {
+    return this.identity.listAccounts(limit);
+  }
+
+  createAccount(input: CreateAccountInput): Promise<AccountView> {
+    return this.identity.createAccount(input);
+  }
+
+  getAccount(accountId: string): Promise<{ account: AccountView; groups: PermissionGroupSummary[] }> {
+    return this.identity.getAccount(accountId);
+  }
+
+  setAccountDisabled(accountId: string, disabled: boolean, reason?: string): Promise<AccountView> {
+    return this.identity.setAccountDisabled(accountId, disabled, reason);
+  }
+
+  resetAccountPassword(accountId: string, password: string): Promise<void> {
+    return this.identity.resetAccountPassword(accountId, password);
+  }
+
+  addAccountGroup(accountId: string, groupId: string): Promise<void> {
+    return this.identity.addAccountGroup(accountId, groupId);
+  }
+
+  removeAccountGroup(accountId: string, groupId: string): Promise<void> {
+    return this.identity.removeAccountGroup(accountId, groupId);
+  }
+
+  listPermissionGroups(limit = 100): Promise<IdentityPage<PermissionGroupSummary>> {
+    return this.identity.listPermissionGroups(limit);
+  }
+
+  getPermissionGroup(groupId: string): Promise<PermissionGroupDetail> {
+    return this.identity.getPermissionGroup(groupId);
+  }
+
+  createPermissionGroup(name: string): Promise<PermissionGroupSummary> {
+    return this.identity.createPermissionGroup(name);
+  }
+
+  addPermissionGroupMember(groupId: string, accountId: string): Promise<void> {
+    return this.identity.addPermissionGroupMember(groupId, accountId);
+  }
+
+  removePermissionGroupMember(groupId: string, accountId: string): Promise<void> {
+    return this.identity.removePermissionGroupMember(groupId, accountId);
+  }
+
+  addPermissionGroupGrant(groupId: string, key: string, scope: string): Promise<void> {
+    return this.identity.addPermissionGroupGrant(groupId, key, scope);
+  }
+
+  removePermissionGroupGrant(groupId: string, key: string, scope: string): Promise<void> {
+    return this.identity.removePermissionGroupGrant(groupId, key, scope);
+  }
+
+  listBots(limit = 100, includeArchived = false): Promise<IdentityPage<BotView>> {
+    return this.identity.listBots(limit, includeArchived);
+  }
+
+  listAuditEvents(query?: AuditQuery): Promise<IdentityPage<AuditEventView>> {
+    return this.identity.listAuditEvents(query);
   }
 
   private guardRevision(expectedRevision: number | undefined) {

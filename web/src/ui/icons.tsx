@@ -41,7 +41,13 @@ export type IconName =
   | "keyboard"
   | "info"
   | "play"
-  | "copy";
+  | "copy"
+  | "shield"
+  | "bot"
+  | "activity"
+  | "download"
+  | "lock"
+  | "user-plus";
 
 const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   plus: ["M5 12h14", "M12 5v14"],
@@ -107,6 +113,25 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   play: ["M6 3l14 9-14 9V3z"],
   // lucide's `copy`: the sheet copied from (behind) and the copy (in front).
   copy: ["M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", "M8 8h14v14H8z"],
+  // lucide's `shield` (the books shell's 身份 chapter).
+  shield: [
+    "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z",
+  ],
+  // lucide's `bot` (the 员工 chapter): a head, two antennae, two eyes.
+  bot: ["M4 8h16v12H4z", "M12 8V4h-3", "M2 14h2", "M20 14h2", "M9 13v2", "M15 13v2"],
+  // lucide's `activity` (the 记录 chapter).
+  activity: ["M22 12h-4l-3 9L9 3l-3 9H2"],
+  // lucide's `download` (export).
+  download: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"],
+  // lucide's `lock` (a narrowed/omitted capability).
+  lock: ["M5 11h14v10H5z", "M8 11V7a4 4 0 0 1 8 0v4"],
+  // lucide's `user-plus` (加入权限组).
+  "user-plus": [
+    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
+    "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+    "M19 8v6",
+    "M22 11h-6",
+  ],
 };
 
 export function Icon(props: { name: IconName; size?: number; tint: string }) {

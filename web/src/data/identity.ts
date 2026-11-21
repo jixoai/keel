@@ -172,6 +172,77 @@ export interface IdentityPage<T> {
   hasMore: boolean;
 }
 
+// ---- the audit trail (the 记录 chapter's read) -----------------------------
+//
+// The deployment's audit ledger is one table (`auth_events`), written by the
+// server on every grant/deny/login/relation change. A4.4a draws its projection;
+// the read route itself has not landed yet, so `KeelHttp.listAuditEvents`
+// answers the server's own 404 and the page renders its 待接入 face — it never
+// fabricates rows. The shape below is the intended contract: the server names
+// the event's own action token and, when it can, a human sentence; the UI maps
+// the token through a small display vocabulary and prints the sentence it was
+// given.
+
+/** How a record's kind reads in the filter. The wire's `kind` token travels
+ * verbatim; a token outside this set is kept as `other` with `action` intact. */
+export type AuditKind = "login" | "grant" | "deny" | "super-admin" | "relation" | "invoke" | "account" | "team" | "other";
+
+export interface AuditEventView {
+  eventId: string;
+  occurredAt?: string;
+  kind: AuditKind;
+  /** The server's stable action token (`login`, `grant`, `deny`, …). */
+  action: string;
+  /** The human sentence when the server sent one; absent otherwise. */
+  summary?: string;
+  actorName?: string;
+  actorKind?: string;
+  objectType?: string;
+  objectName?: string;
+  result: "ok" | "denied" | "error";
+  requestId?: string;
+  /** A masked source (IP), already masked by the server. */
+  source?: string;
+}
+
+export interface AuditQuery {
+  limit?: number;
+  /** ISO timestamp: the oldest event to include. */
+  since?: string;
+  /** Comma-separated kind tokens. */
+  kind?: string;
+  result?: "ok" | "denied" | "error";
+}
+
+const AUDIT_KINDS: AuditKind[] = ["login", "grant", "deny", "super-admin", "relation", "invoke", "account", "team"];
+
+export function parseAuditKind(value: unknown): AuditKind {
+  const token = text(value);
+  return (AUDIT_KINDS as string[]).includes(token) ? (token as AuditKind) : "other";
+}
+
+export function parseAuditEvent(value: unknown): AuditEventView | undefined {
+  const row = asRecord(value);
+  const eventId = text(row.eventId ?? row.id);
+  if (!eventId) return undefined;
+  const resultToken = text(row.result);
+  return {
+    eventId,
+    occurredAt: textOrUndefined(row.occurredAt ?? row.createdAt),
+    kind: parseAuditKind(row.kind ?? row.eventKind),
+    action: text(row.action ?? row.event),
+    summary: textOrUndefined(row.summary),
+    actorName: textOrUndefined(row.actorName),
+    actorKind: textOrUndefined(row.actorKind),
+    objectType: textOrUndefined(row.objectType),
+    objectName: textOrUndefined(row.objectName),
+    result: resultToken === "denied" || resultToken === "error" ? resultToken : "ok",
+    requestId: textOrUndefined(row.requestId),
+    source: textOrUndefined(row.source),
+  };
+}
+
+
 export interface CreateAccountInput {
   username: string;
   displayName?: string;
