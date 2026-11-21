@@ -197,3 +197,42 @@ func TestRetiredAgentAndTeamCommandsAreUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestBotCLIUpdatePreservesUnchangedHarnessAndModel(t *testing.T) {
+	fake := newFakeProductAPI(t)
+	fake.bots["support-1"] = map[string]any{
+		"botId": "support-1", "name": "Support One", "profileId": "p-1",
+		"modelKind": "text", "defaultModel": map[string]any{"providerId": "magpie", "modelId": "qwen"},
+		"harness": map[string]any{
+			"tools":   []any{"bash", "read"},
+			"context": map[string]any{"instruction": "old", "permissions": []any{"session.read"}},
+		},
+	}
+	setAccountEnv(t, "owner", "correct horse")
+	code, _, stderr := runCLI(t, "bot", "update", "support-1", "--instruction", "new",
+		"--server", fake.server.URL)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	request := fake.lastRequest(t, "PATCH", "/v1/bots/support-1")
+	var body struct {
+		Harness struct {
+			Tools   []string `json:"tools"`
+			Context struct {
+				Instruction string   `json:"instruction"`
+				Permissions []string `json:"permissions"`
+			} `json:"context"`
+		} `json:"harness"`
+		DefaultModel map[string]string `json:"defaultModel"`
+	}
+	if err := json.Unmarshal(request.Body, &body); err != nil {
+		t.Fatalf("body %s: %v", request.Body, err)
+	}
+	if len(body.Harness.Tools) != 2 || body.Harness.Context.Instruction != "new" ||
+		len(body.Harness.Context.Permissions) != 1 {
+		t.Fatalf("merged harness = %+v", body.Harness)
+	}
+	if _, present := body.DefaultModel["providerId"]; present {
+		t.Fatalf("an untouched default model was rewritten: %+v", body.DefaultModel)
+	}
+}

@@ -339,18 +339,45 @@ func runBotUpdate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "keel bot update: exactly one botId is required")
 		return 2
 	}
+	set := visitSet(fs)
 	client, err := newCLIClient(*server)
 	if err != nil {
 		return reportError(stderr, err)
 	}
-	// The CAS flag is what the caller read; default false is the normal case.
 	var current botAnswer
 	if err := client.do(http.MethodGet, "/v1/bots/"+positional[0], nil, &current); err != nil {
 		return reportError(stderr, err)
 	}
-	body := flags.body(visitSet(fs))
-	body["expectedArchived"] = *expectedArchived
-	if _, ok := body["expectedArchived"]; ok && !visitSet(fs)["expected-archived"] {
+	body := flags.body(set)
+	// The API replaces the default model and the whole Harness. A partial flag
+	// set is a partial edit, so the missing halves are carried over from the
+	// current document instead of being erased.
+	if model, touched := body["defaultModel"].(map[string]string); touched {
+		if model["providerId"] == "" {
+			model["providerId"] = current.Bot.DefaultModel.ProviderID
+		}
+		if model["modelId"] == "" {
+			model["modelId"] = current.Bot.DefaultModel.ModelID
+		}
+	}
+	if harness, touched := body["harness"].(map[string]any); touched {
+		merged := current.Bot.Harness
+		if tools, ok := harness["tools"].([]string); ok {
+			merged.Tools = tools
+		}
+		if context, ok := harness["context"].(map[string]any); ok {
+			if permissions, ok := context["permissions"].([]string); ok {
+				merged.Context.Permissions = permissions
+			}
+			if instruction, ok := context["instruction"].(string); ok {
+				merged.Context.Instruction = instruction
+			}
+		}
+		body["harness"] = merged
+	}
+	if set["expected-archived"] {
+		body["expectedArchived"] = *expectedArchived
+	} else {
 		body["expectedArchived"] = current.Bot.Archived
 	}
 	var answer botAnswer

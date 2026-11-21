@@ -5,7 +5,7 @@
 内核不知道它存在；依赖方向只有 `cmd/keel → agentapi/agentext → kernel`。
 
 > 命名：产品面统一 **Bot / TeamBot / Account / Role / Profile**；`Harness` 是 Bot 的运行环境
-> （工具白名单 + 上下文）。旧产品词 `Agent`/`TeamAgent` 已删除，只有 PI 技术包
+> （工具白名单 + 上下文）。旧称 `Agent`/`TeamAgent`（已删除），只有 PI 技术包
 > （`agentcore`/`agentloop`/`agenttool`/`internal/agent`）与协议名 `AgentAPI`/`AgentBackend`
 > 作为技术名词保留。术语与别名说明见官网术语表（`site/docs/glossary.md`）。
 
