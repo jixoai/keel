@@ -14,6 +14,11 @@
 > Team CLI 能力面板已完成（`settings-teams.test.tsx` 25 例 + `evidence/team-canvas-2026-11-21/`
 > 浏览器 390/1280/缺队长 9 张、8 视口 pass、manifest 9/9）；画布仍缺 design A6 的「默认工具/模型」
 > 与成员 label/description 编辑，故 P5 该行不勾（画布按 partial 计）。
+>
+> **状态（2026-11-21 · C3）**：B 轴复核的 P1 数据丢失已修——PUT 按 agentId/inline id 合并
+> `editing.members`，续写 CLI 写的 label/description/inline；空 agentId + inline 席位不再落成
+> `{agentId:""}`。P2 同修：Team CLI 面板 403 用专用权限面。`settings-teams.test.tsx` 27 例、
+> 全量 TUI 220 例全绿（`evidence/team-canvas-2026-11-21/gates/`）。
 
 ## P0 契约与设计冻结
 
