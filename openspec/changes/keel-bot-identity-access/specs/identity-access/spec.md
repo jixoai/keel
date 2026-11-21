@@ -234,6 +234,37 @@ Session；Bot 归档后 MUST 拒绝新 Session。
 - **WHEN** A 调用 X
 - **THEN** 返回 403，X 不启动
 
+### Requirement: 触发器注册必须绑定 Bot
+
+每个 Trigger MUST 声明 `botId`。注册 MUST 校验 Bot 存在、未归档且属于 trigger 的 tenant；
+tenantless 的 manual/webhook trigger 在 fire 时按调用者 tenant 解析 `botId`，MUST NOT 存在
+部署级或跨租户的全局 Bot。Bot 缺失、归档或与 trigger tenant 不一致时注册 MUST 拒绝；
+没有 Bot 归属 seam 的部署 MUST fail closed，MUST NOT 允许触发器注册一个无主目标。
+
+#### Scenario: 归档 Bot 不能注册
+- **GIVEN** 一个已归档的 Bot
+- **WHEN** 插件装配一个 `botId` 指向该 Bot 的 trigger
+- **THEN** 注册被拒绝并给出 Bot 归档的诊断，trigger 不出现在运行面
+
+### Requirement: 触发器 fire 以 Bot 身份运行
+
+fire MUST 在同一事务创建 Session 的 `bot_id/account_id/created_by_account_id` 归属与
+owner 关系，并在提交的 `user.message` 中写 `selection.botId`。手动 fire 的
+`created_by_account_id` MUST 是调用者 Account；`schedule` 与 `webhook` fire MUST 记录
+Bot 自己的 Account 作为无人值守发起人。Bot 缺失、归档或 Session 归属冲突时 fire MUST
+返回 403/409，MUST NOT 写入 Session 或 turn，且拒绝 MUST 进入触发器审计。
+
+#### Scenario: fire 以 Bot 身份创建 Session
+- **GIVEN** 一个声明了 `botId` 的 webhook trigger
+- **WHEN** 调用者手动 fire 它
+- **THEN** 新 Session 的 `bot_id/account_id` 来自该 Bot 的 Profile，`created_by_account_id`
+  是调用者，且 owner 关系与输入 `selection.botId` 一致
+
+#### Scenario: 归档 Bot 拒绝 fire
+- **GIVEN** 一个 trigger 的 Bot 在注册后被归档
+- **WHEN** 再次 fire
+- **THEN** 返回 409，不创建 Session，不写 `user.message`，审计记录 `refused`
+
 ### Requirement: Alpha 零兼容
 
 本 change MUST NOT 为旧口令登录、旧 cookie、旧 API key 角色、旧 `agents`/`agent_teams`

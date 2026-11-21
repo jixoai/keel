@@ -56,7 +56,7 @@ keel version
 | POST | `/v1/sessions/{id}/cancel` | 停止当前 attempt（幂等；202=cancelling，501=跨进程无 seam） |
 | GET/POST | `/v1/sessions/{id}/decisions` | 审批开/列；`POST .../{decisionId}` 作答（幂等，409 冲突） |
 | GET | `/v1/plugins` | 插件/generation/hooks/工具 |
-| GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.1） |
+| GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
 
@@ -69,7 +69,7 @@ keel version
 | 能力 | 契约 |
 | --- | --- |
 | 插件 | **进程内声明式契约**（`agentext.Plugin`，`internal/agentext/plugin.go:67`）：`ID/Version/Provides/Requires/Tools/Hooks/Triggers/Effects/Start/Stop`；依赖拓扑激活（缺依赖 `PENDING` 可见）、反序卸载（hook 订阅/触发器/effects 精确撤销，无残留）、`generation+1`、工具重名 fail-closed（第二个插件 `FAILED`）；装配结果经唯一 sink 发布给模型工具集（`cmd/keel/serve.go` 用 `rt.RefreshProductTools`）。web 设置 › 插件（`web/src/screens/settings.tsx:1148`）渲染该装配面。**规划中**（`keel-plugin-core`，勿当作已实现）：`plugin.yaml` 包与安装/启用/禁用 API、三种 kind（in-process/sidecar/webview）、运维权限与审计、webview UI 托管与 `keel.plugin.*` 桥、创造模式 |
-| 触发器 | `cron` / `interval` / `webhook`；幂等键（确定性 session + kernel requestId 双保险）；有界重试；HMAC 签名与重放窗口；按 last-run 有界追赶；每触发器并发上限；fire 即建初始任务卡；审计在 `/v1/triggers`（语义见 §3.1） |
+| GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | Sub-agent | `agent` 聚合工具的 `spawn` action：独立子会话 + 结构化结果 `{status,summary,artifacts,usage}` + 预算（turns/tokens/timeout）；父会话经 `parentSessionId` 可查 |
 | Hooks | 闭集：`subagent.started\|finished`、`trigger.before\|after`、`turn.started\|finished`、`decision.opened\|answered`；有界异步队列，不阻塞账本，失败可见 |
 | 审批 | decision 原语：open/wait/timeout/cancel + 答案 journal；durable 在 tasks 行 |
@@ -191,6 +191,25 @@ keel version
 - **观测**。`GET /v1/triggers` 的每个条目带 `fires/failures/dedupes/throttled/rejected/skipped`、
   `inFlight`、`webhookConfigured`、`lastScheduledAt` 与最近 20 条审计（fired/failed/deduped/
   throttled/rejected/skipped）。
+
+### 3.3 触发器归属（A4.2b3a 补片）
+
+- **归属**：每个 `TriggerSpec` MUST 带 `botId`；注册（插件装配）时校验 Bot 存在、未归档且
+  属于 trigger 的 tenant。没有 `botId` 的 trigger 不注册；部署没有 Bot 归属 seam 时 fire
+  fail closed（503），绝不创建无主 Session。
+- **fire**：`TriggerEngine.Fire` 先解析 Bot → 用 `store.CreateOwnedSession` 在同一事务写
+  Session、`bot_id/account_id/created_by_account_id` 与 owner 关系 → 再提交 `user.message`。
+  输入的 `selection` 事实写 `{"botId": ...}`，与 Session 归属一致；attempt 因此按该 Bot 的
+  Account ∩ Harness 解析 prompt/tools/model。`team_bot_id` 为空（Bot 触发器不是 TeamBot 启动）。
+- **created_by**：手动 fire 记调用者 Account；`schedule` / `webhook` 记 Bot 自己的 Account
+  （无人值守的 service actor）。审计条目同时记录 `botId` 与 `createdByAccountId`。
+- **tenantless trigger**：manual/webhook 注册可以不带 tenant；它的 `botId` 在 fire 时按调用者
+  tenant 解析，不存在跨租户或部署级全局 Bot。`interval`/`cron` 必须有 tenant，注册时即校验。
+- **拒绝语义**：Bot 缺失/跨租户 → 403；Bot 已归档或 pinned Session 归属冲突 → 409；不落
+  Session、不写 turn，审计记 `refused`。修复 Bot 后同一幂等键可重试。
+- **示例插件**：`keel.example` 只在配置了 `--example-bot-id`（或 `KEEL_EXAMPLE_BOT_ID`）时声明
+  trigger；先创建 Bot，再以该 Bot 启动 `keel serve`，`POST /v1/triggers/keel.example.ping/fire`
+  才会以该 Bot 身份起 turn。未配置时示例插件只加载工具/hook，不注册 trigger。
 
 ## 4. 与内核的接缝
 
