@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:13680/?fixture=1",
-  "generatedAt": "2026-11-21T06:06:52.232Z",
+  "generatedAt": "2026-11-21T06:44:00.167Z",
   "states": {
     "canvas.defaults": "browser: 01-team-canvas-defaults-390.png / 05-team-canvas-defaults-1280.png",
     "canvas.member-edit": "browser: 02-team-canvas-seat-edit-390.png / 06-team-canvas-seat-edit-1280.png",

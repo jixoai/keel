@@ -1,1 +1,2 @@
-port 13680 free at 2026-11-21T06:15:03Z (browser evidence done; nsh run pid 75094 stopped; no listener)
+port 13680 free at 2026-11-21T06:44:51Z (final browser evidence done; nsh run pid 9279 stopped; no listener)
+previous run released at 2026-11-21T06:15:03Z (pid 75094 stopped)

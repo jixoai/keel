@@ -41,7 +41,7 @@
     ],
     "pass": true,
     "findings": 0,
-    "screenshots": "screenshots/（7 张：defaults / seat edit / seat replace / replace options × 390/1280）",
+    "screenshots": "screenshots/（7 张：defaults / seat edit / seat replace / replace options × 390/1280；在最终可执行树 ea89688 复跑）",
     "checks": "checks.json",
     "storedDefaultsReadBack": {
       "tools": "已选 2 个：workflow.plan · clock.now",
@@ -73,5 +73,5 @@
     "freeAtCheck": true,
     "orphanCheck": "pgrep -fl 'nsh run --target web' empty; lsof port 13680 empty"
   },
-  "headNote": "最终可执行树 ea89688（feature c83d488 + tests 3f0055d/035b36f + 空文本不写入修正 ea89688；check/team/full/build/package 均在此树复跑）。浏览器截图在 ea89688 之前采集；该修正只跳过未改动的空席位文本产生的 no-op PUT，不改变渲染，视觉证据仍对最终树有效。"
+  "headNote": "最终可执行树 ea89688（feature c83d488 + tests 3f0055d/035b36f + 空文本不写入修正 ea89688）；check/team/full/build/package 与浏览器截图/测量均在 ea89688 上复跑。HEAD 之后只有 tasks/gates/evidence 文档提交，不改变可执行树。"
 }
