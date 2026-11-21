@@ -86,6 +86,7 @@ var rlsTenantTables = []string{
 	"mcp_app_contexts",
 	"groups",
 	"session_placement",
+	"trigger_state",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a

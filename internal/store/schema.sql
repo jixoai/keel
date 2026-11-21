@@ -1065,3 +1065,22 @@ CREATE INDEX IF NOT EXISTS runs_active_group
 CREATE INDEX IF NOT EXISTS runs_active_tenant
     ON runs (tenant_id)
     WHERE status IN ('pending', 'running');
+
+-- Scheduled-trigger catch-up cursor (change keel-harness-v2, W10). One row per
+-- (tenant, trigger): the newest scheduled window the engine processed. It is
+-- the durable "last-run" a restart compares against, so an interval/cron
+-- trigger can replay the windows that elapsed while the process was down
+-- (bounded by the engine's catch-up limit/window). A trigger without a row has
+-- never fired and MUST NOT catch up from zero.
+--
+-- No secret material is stored here: webhook HMAC keys are configuration, not
+-- runtime state.
+CREATE TABLE IF NOT EXISTS trigger_state (
+    tenant_id         uuid NOT NULL,
+    trigger_id        text NOT NULL,
+    last_scheduled_at timestamptz NOT NULL,
+    last_fired_at     timestamptz NOT NULL DEFAULT now(),
+    last_status       text NOT NULL DEFAULT '',
+    updated_at        timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, trigger_id)
+);
