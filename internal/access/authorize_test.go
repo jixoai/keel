@@ -128,6 +128,35 @@ func TestAuthorizeTenantLevelKey(t *testing.T) {
 	}
 }
 
+func TestAuthorizeTenantLevelKeyRespectsResourceTenant(t *testing.T) {
+	target := Resource{TenantID: tenantTwo, Type: "account", ID: accountBob.String()}
+	principal := Principal{TenantID: tenantOne, AccountID: accountAlice}
+
+	tenantGrants := &fakeGrantSource{direct: map[uuid.UUID][]Grant{
+		accountAlice: {grantOf(KeyAccountManage, ScopeTenant)},
+	}}
+	authorizer := newTestAuthorizer(t, tenantGrants, newFakeRelationSource())
+	decision, err := authorizer.Authorize(context.Background(), principal, KeyAccountManage, target)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if decision.Allow || decision.Reason != ReasonMissingGrant {
+		t.Fatalf("tenant-scoped decision = %s, want missing_grant across tenants", decision)
+	}
+
+	allGrants := &fakeGrantSource{direct: map[uuid.UUID][]Grant{
+		accountAlice: {grantOf(KeyAccountManage, ScopeAll)},
+	}}
+	authorizer = newTestAuthorizer(t, allGrants, newFakeRelationSource())
+	decision, err = authorizer.Authorize(context.Background(), principal, KeyAccountManage, target)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if !decision.Allow || decision.Scope != ScopeAll {
+		t.Fatalf("all-scoped decision = %s, want allow", decision)
+	}
+}
+
 func TestAuthorizeMissingGrant(t *testing.T) {
 	authorizer := newTestAuthorizer(t, &fakeGrantSource{}, newFakeRelationSource())
 	decision, err := authorizer.Authorize(context.Background(),

@@ -173,11 +173,11 @@ func key(name, displayName string, risk Risk, relation Relation, scopes ...Scope
 // keyCatalog is the initial permission catalog. It is ordered by domain for
 // reviewability; All() sorts defensively.
 //
-// The catalog covers the acceptance surface: sessions, bots, team bots,
-// triggers, plugins, models, secrets, accounts, permission groups and audit.
-// It deliberately has no coarse secret.read or plugin.install/uninstall: the
-// refined keys are the enforcement point, so a UI cannot grant a weaker key
-// and then reach the stronger action.
+// The catalog covers the acceptance surface: sessions, roles, profiles, bots,
+// team bots, triggers, plugins, models, secrets, accounts, permission groups
+// and audit. It deliberately has no coarse secret.read or
+// plugin.install/uninstall: the refined keys are the enforcement point, so a
+// UI cannot grant a weaker key and then reach the stronger action.
 var keyCatalog = []KeySpec{
 	// Sessions.
 	key(KeySessionRead, "Read sessions", RiskNormal, RelationForAction(ActionRead), resourceScopes...),

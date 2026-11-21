@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 // Decision is one authorization result. Allow is the only granted outcome;
@@ -105,6 +107,14 @@ func (a *Authorizer) Authorize(ctx context.Context, principal Principal, actionK
 			fmt.Sprintf("bot %q harness does not include %q", principal.BotID, actionKey)), nil
 	}
 	if !spec.RequiresRelation() {
+		// A tenant-level key has no per-resource relation, but a caller may still
+		// pass the target tenant (an account, group or bot being managed). L1
+		// keeps ordinary accounts inside their tenant; only scope all (normally
+		// only a super admin) crosses the boundary.
+		if resource.TenantID != uuid.Nil && resource.TenantID != principal.TenantID && scope != ScopeAll {
+			return denyDecision(actionKey, scope, ReasonMissingGrant,
+				fmt.Sprintf("scope %q does not reach another tenant", scope)), nil
+		}
 		return allowDecision(actionKey, scope), nil
 	}
 
