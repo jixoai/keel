@@ -112,6 +112,9 @@ Provider flags:
 
 Common flags:
   --server <addr>           keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
+  --username <name>         account login name (default $KEEL_ACCOUNT_USERNAME)
+  --password-file <path>    read the account password from a file (default
+                            $KEEL_ACCOUNT_PASSWORD); never pass a password flag
   --json                    print raw JSON instead of a table
 
 The write subset edits the tenant models document (PUT /v1/settings/models,
@@ -120,8 +123,10 @@ serves. Credentials are only ever references (env names, secret refs); the CLI
 neither accepts nor prints a value. `+"`provider test`"+` and `+"`catalog --refresh`"+`
 ask the server to make one minimal upstream request, so the credential is
 resolved on the server and never travels through the CLI.
-Authentication: KEEL_SERVE_PASSWORD is exchanged for the session cookie
-(POST /v1/auth/login); it is never taken from a flag and never printed.
+Authentication: KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD log in with
+username+password (POST /v1/auth/login); KEEL_AGENT_TOKEN presents a bot key as
+a Bearer credential. KEEL_SERVE_PASSWORD is retired and refused. Passwords are
+never taken from a flag and never printed.
 `)
 }
 

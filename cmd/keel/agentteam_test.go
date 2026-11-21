@@ -34,6 +34,8 @@ type recordedRequest struct {
 	Path   string
 	Query  string
 	Actor  string
+	Auth   string
+	CSRF   string
 	Body   []byte
 }
 
@@ -61,7 +63,10 @@ type fakeSession struct {
 // cancel).
 type fakeTeamAPI struct {
 	mu       sync.Mutex
+	username string
 	password string
+	botKey   string
+	csrf     string
 	agents   map[string]httpapi.AgentView
 	teams    map[string]httpapi.AgentTeamView
 	sessions map[string]*fakeSession
@@ -84,11 +89,21 @@ type fakeTeamAPI struct {
 
 func newFakeTeamAPI(password string) *fakeTeamAPI {
 	return &fakeTeamAPI{
+		username: "admin",
 		password: password,
+		csrf:     "fake-csrf-token",
 		agents:   make(map[string]httpapi.AgentView),
 		teams:    make(map[string]httpapi.AgentTeamView),
 		sessions: make(map[string]*fakeSession),
 	}
+}
+
+// newFakeTeamAPIBot serves a deployment that accepts only one bot key: the
+// machine credential path (no login, no CSRF).
+func newFakeTeamAPIBot(botKey string) *fakeTeamAPI {
+	fake := newFakeTeamAPI("")
+	fake.botKey = botKey
+	return fake
 }
 
 func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -96,28 +111,50 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.requests = append(f.requests, recordedRequest{
 		Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery,
-		Actor: r.Header.Get(actorAgentHeader), Body: raw,
+		Actor: r.Header.Get(actorAgentHeader), Auth: r.Header.Get("Authorization"),
+		CSRF: r.Header.Get("X-Keel-CSRF"), Body: raw,
 	})
 	f.mu.Unlock()
 
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/auth/session" {
+		writeFakeJSON(w, http.StatusOK, map[string]any{
+			"authenticated": false, "csrfToken": f.csrf,
+		})
+		return
+	}
+
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login" {
+		if strings.TrimSpace(r.Header.Get("X-Keel-CSRF")) != f.csrf {
+			writeFakeJSON(w, http.StatusForbidden, map[string]any{"error": "a valid X-Keel-CSRF header is required for writes"})
+			return
+		}
 		var body struct {
+			Username string `json:"username"`
 			Password string `json:"password"`
 		}
 		_ = json.Unmarshal(raw, &body)
-		if strings.TrimSpace(body.Password) != f.password {
-			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid passphrase"})
+		if strings.TrimSpace(body.Username) != f.username || strings.TrimSpace(body.Password) != f.password {
+			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid username or password"})
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "fake-session", Path: "/"})
-		writeFakeJSON(w, http.StatusOK, map[string]any{"authenticated": true})
+		writeFakeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrfToken": f.csrf})
 		return
 	}
-	if f.password != "" {
+	if f.botKey != "" {
+		if strings.TrimSpace(r.Header.Get("Authorization")) != "Bearer "+f.botKey {
+			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid api key"})
+			return
+		}
+	} else if f.password != "" {
 		if cookie, err := r.Cookie(auth.SessionCookieName); err != nil || cookie.Value != "fake-session" {
 			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{
-				"error": "authentication required: POST /v1/auth/login with the server passphrase",
+				"error": "authentication required: POST /v1/auth/login with username+password",
 			})
+			return
+		}
+		if r.Method != http.MethodGet && strings.TrimSpace(r.Header.Get("X-Keel-CSRF")) != f.csrf {
+			writeFakeJSON(w, http.StatusForbidden, map[string]any{"error": "a valid X-Keel-CSRF header is required for writes"})
 			return
 		}
 	}
@@ -388,26 +425,56 @@ func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errOut.String()
 }
 
+// setAccountEnv is the one credential a test gives the CLI: a human account.
+// Every other auth variable is cleared so a developer's shell cannot leak in.
+func setAccountEnv(t *testing.T, username, password string) {
+	t.Helper()
+	t.Setenv("KEEL_ACCOUNT_USERNAME", username)
+	t.Setenv("KEEL_ACCOUNT_PASSWORD", password)
+	t.Setenv("KEEL_AGENT_TOKEN", "")
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	cliAuthUsername, cliAuthPasswordFile = "", ""
+}
+
+// setBotKeyEnv gives the CLI a machine credential: no username, no password.
+func setBotKeyEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv("KEEL_ACCOUNT_USERNAME", "")
+	t.Setenv("KEEL_ACCOUNT_PASSWORD", "")
+	t.Setenv("KEEL_AGENT_TOKEN", key)
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	cliAuthUsername, cliAuthPasswordFile = "", ""
+}
+
+func setNoAuthEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("KEEL_ACCOUNT_USERNAME", "")
+	t.Setenv("KEEL_ACCOUNT_PASSWORD", "")
+	t.Setenv("KEEL_AGENT_TOKEN", "")
+	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	cliAuthUsername, cliAuthPasswordFile = "", ""
+}
+
 // --- tests ---------------------------------------------------------------
 
-func TestAgentCLILoginAndNoPasswordLeak(t *testing.T) {
+func TestAgentCLILoginAndNoCredentialLeak(t *testing.T) {
 	api := newFakeTeamAPI("s3cret-passphrase")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "wrong-passphrase")
+	setAccountEnv(t, "admin", "wrong-passphrase")
 
 	code, stdout, stderr := runCLI(t, "agent", "list", "--server", hs.URL)
 	if code != 1 {
-		t.Fatalf("wrong passphrase: exit %d, want 1 (stderr %s)", code, stderr)
+		t.Fatalf("wrong password: exit %d, want 1 (stderr %s)", code, stderr)
 	}
 	if !strings.Contains(stderr, "login") {
 		t.Fatalf("stderr = %q, want a login failure", stderr)
 	}
 	if strings.Contains(stdout+stderr, "wrong-passphrase") {
-		t.Fatalf("the passphrase was printed: stdout=%q stderr=%q", stdout, stderr)
+		t.Fatalf("the password was printed: stdout=%q stderr=%q", stdout, stderr)
 	}
 
-	t.Setenv("KEEL_SERVE_PASSWORD", "s3cret-passphrase")
+	setAccountEnv(t, "admin", "s3cret-passphrase")
 	code, stdout, stderr = runCLI(t, "agent", "list", "--server", hs.URL)
 	if code != 0 {
 		t.Fatalf("list: exit %d stderr %s", code, stderr)
@@ -416,12 +483,153 @@ func TestAgentCLILoginAndNoPasswordLeak(t *testing.T) {
 		t.Fatalf("list output = %q", stdout)
 	}
 	if strings.Contains(stdout+stderr, "s3cret-passphrase") {
-		t.Fatalf("the passphrase was printed: stdout=%q stderr=%q", stdout, stderr)
+		t.Fatalf("the password was printed: stdout=%q stderr=%q", stdout, stderr)
 	}
-	// The login carried the passphrase in its body (not a flag, not a URL).
+	// The login carried username+password in its body (not a flag, not a URL),
+	// and the write path carries the CSRF token from the session.
 	login := api.lastRequest(t, http.MethodPost, "/v1/auth/login")
-	if !strings.Contains(string(login.Body), "s3cret-passphrase") {
+	var credentials struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(login.Body, &credentials); err != nil {
+		t.Fatalf("login body = %s (%v)", login.Body, err)
+	}
+	if credentials.Username != "admin" || credentials.Password != "s3cret-passphrase" {
 		t.Fatalf("login body = %s", login.Body)
+	}
+	if login.CSRF != api.csrf {
+		t.Fatalf("login CSRF = %q, want the anonymous session token", login.CSRF)
+	}
+}
+
+func TestAgentCLIRetiredPassphraseIsRefused(t *testing.T) {
+	api := newFakeTeamAPI("s3cret-passphrase")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	setAccountEnv(t, "", "")
+	t.Setenv("KEEL_SERVE_PASSWORD", "s3cret-passphrase")
+
+	code, stdout, stderr := runCLI(t, "agent", "list", "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("retired passphrase: exit %d, want 1 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "KEEL_SERVE_PASSWORD is retired") {
+		t.Fatalf("stderr = %q, want the retirement explanation", stderr)
+	}
+	if strings.Contains(stdout+stderr, "s3cret-passphrase") {
+		t.Fatalf("the retired passphrase was printed: stdout=%q stderr=%q", stdout, stderr)
+	}
+	api.mu.Lock()
+	requests := len(api.requests)
+	api.mu.Unlock()
+	if requests != 0 {
+		t.Fatalf("a retired credential still caused %d request(s)", requests)
+	}
+}
+
+func TestAgentCLIBotKeyLogin(t *testing.T) {
+	const botKey = "keel_bot_fake-machine-key"
+	api := newFakeTeamAPIBot(botKey)
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	setBotKeyEnv(t, botKey)
+
+	code, stdout, stderr := runCLI(t, "agent", "list", "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("bot key list: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "ID") {
+		t.Fatalf("list output = %q", stdout)
+	}
+	api.mu.Lock()
+	requests := append([]recordedRequest(nil), api.requests...)
+	api.mu.Unlock()
+	for _, request := range requests {
+		if request.Path == "/v1/auth/login" {
+			t.Fatal("a bot key must not log in")
+		}
+		if request.Auth != "Bearer "+botKey {
+			t.Fatalf("%s %s Authorization = %q", request.Method, request.Path, request.Auth)
+		}
+	}
+}
+
+func TestAgentCLIWriteCarriesCSRF(t *testing.T) {
+	api := newFakeTeamAPI("pass")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	setAccountEnv(t, "admin", "pass")
+
+	code, _, stderr := runCLI(t, "agent", "create", "--server", hs.URL, "--name", "客服一号")
+	if code != 0 {
+		t.Fatalf("create: exit %d stderr %s", code, stderr)
+	}
+	created := api.lastRequest(t, http.MethodPost, "/v1/agents")
+	if created.CSRF != api.csrf {
+		t.Fatalf("create CSRF = %q, want %q", created.CSRF, api.csrf)
+	}
+}
+
+func TestAgentCLIWriteWithoutCSRFFails(t *testing.T) {
+	api := newFakeTeamAPI("pass")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	setAccountEnv(t, "admin", "pass")
+	// A client with a session cookie but no CSRF token: the server must refuse
+	// the write exactly as it would for a browser that forgot the header.
+	client, err := newCLIClient(hs.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.csrf = ""
+	err = client.do(http.MethodPost, "/v1/agents", "", map[string]string{"name": "客服一号"}, nil)
+	var refusal *apiError
+	if !errors.As(err, &refusal) || refusal.Status != http.StatusForbidden {
+		t.Fatalf("write without CSRF = %v, want 403", err)
+	}
+}
+
+func TestAgentCLIPasswordFileAndUsernameFlag(t *testing.T) {
+	api := newFakeTeamAPI("file-pass")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	setAccountEnv(t, "", "")
+	t.Setenv("KEEL_ACCOUNT_USERNAME", "admin")
+	dir := t.TempDir()
+	passwordPath := filepath.Join(dir, "password")
+	if err := os.WriteFile(passwordPath, []byte("file-pass\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI(t, "agent", "list", "--server", hs.URL,
+		"--username", "admin", "--password-file", passwordPath)
+	if code != 0 {
+		t.Fatalf("password file list: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "ID") {
+		t.Fatalf("list output = %q", stdout)
+	}
+	if strings.Contains(stdout+stderr, "file-pass") {
+		t.Fatal("the password file's contents were printed")
+	}
+}
+
+func TestAgentCLIPasswordFlagIsRefused(t *testing.T) {
+	api := newFakeTeamAPI("pass")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+	setAccountEnv(t, "admin", "pass")
+
+	code, stdout, stderr := runCLI(t, "agent", "list", "--server", hs.URL, "--password", "visible-secret")
+	if code != 2 {
+		t.Fatalf("--password: exit %d, want 2 (stderr %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "not accepted") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stdout+stderr, "visible-secret") {
+		t.Fatalf("the refused password was echoed: %q", stdout+stderr)
 	}
 }
 
@@ -429,7 +637,7 @@ func TestAgentCLICreateShowUpdatePreservesFields(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	code, stdout, stderr := runCLI(t, "agent", "create", "--server", hs.URL,
 		"--name", "设计主理人", "--provider", "prov_a", "--model", "model_a",
@@ -518,7 +726,7 @@ func TestTeamCLICreateMemberAddRemove(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	if code, _, stderr := runCLI(t, "agent", "create", "--server", hs.URL, "--name", "队长"); code != 0 {
 		t.Fatalf("create captain: exit %d stderr %s", code, stderr)
@@ -611,7 +819,7 @@ func TestTeamCLIMemberAddAsCaptainForwardsActor(t *testing.T) {
 	api := newFakeTeamAPI("pass")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "pass")
+	setAccountEnv(t, "admin", "pass")
 
 	if code, _, stderr := runCLI(t, "team", "create", "--server", hs.URL,
 		"--name", "队", "--captain", "agent_cap"); code != 0 {
@@ -693,7 +901,7 @@ func TestAgentStartCreatesSessionAndQueuesRun(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	agentID := createCLIAgent(t, api, hs.URL, "运行主理人")
 	code, stdout, stderr := runCLI(t, "agent", "start", agentID, "--server", hs.URL, "--text", "请开始工作")
@@ -749,7 +957,7 @@ func TestAgentStopCancelsTheRunningSession(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	agentID := createCLIAgent(t, api, hs.URL, "被停止者")
 	if code, _, stderr := runCLI(t, "agent", "start", agentID, "--server", hs.URL, "--text", "开始"); code != 0 {
@@ -900,7 +1108,7 @@ func TestTeamStartUsesTheTeamBinding(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	captainID := createCLIAgent(t, api, hs.URL, "团队队长")
 	if code, _, stderr := runCLI(t, "team", "create", "--server", hs.URL,
@@ -1427,7 +1635,7 @@ func TestAgentStopNewestSelectionPagesUntilAShortPage(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	client, err := newCLIClient(hs.URL)
 	if err != nil {
@@ -1484,7 +1692,7 @@ func TestAgentStopNewestSelectionFailsClosedAtThePageBound(t *testing.T) {
 	api := newFakeTeamAPI("")
 	hs := httptest.NewServer(api)
 	t.Cleanup(hs.Close)
-	t.Setenv("KEEL_SERVE_PASSWORD", "")
+	setNoAuthEnv(t)
 
 	client, err := newCLIClient(hs.URL)
 	if err != nil {

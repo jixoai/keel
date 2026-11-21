@@ -24,8 +24,7 @@ type doctorCheck struct {
 	detail string
 }
 
-func runDoctorCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("keel doctor", flag.ContinueOnError)
+func runDoctorCmd(args []string, stdout, stderr io.Writer) int {	fs := flag.NewFlagSet("keel doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
 		dsn      = fs.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN to test")
@@ -84,6 +83,8 @@ func runDoctorCmd(args []string, stdout, stderr io.Writer) int {
 				"auth=" + string(mode) + " maps loopback requests to the local-admin super admin; never expose it"})
 		}
 	}
+
+	checks = append(checks, clientCredentialCheck())
 
 	if summary := webBuildSummary(*webDir); strings.HasPrefix(summary, "missing:") {
 		checks = append(checks, doctorCheck{"web build", "warn",
@@ -147,4 +148,33 @@ func runDoctorCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// clientCredentialCheck reports which credential `keel agent|team|model|skills`
+// will use. Values are never printed: only which variable is configured. The
+// retired passphrase is a warning, not a failure — a shell that still exports it
+// is not a broken deployment, but it must be told the variable no longer logs
+// anyone in.
+func clientCredentialCheck() doctorCheck {
+	legacy := strings.TrimSpace(os.Getenv("KEEL_SERVE_PASSWORD"))
+	token := strings.TrimSpace(os.Getenv("KEEL_AGENT_TOKEN"))
+	username := strings.TrimSpace(os.Getenv("KEEL_ACCOUNT_USERNAME"))
+	password := os.Getenv("KEEL_ACCOUNT_PASSWORD")
+	switch {
+	case legacy != "":
+		return doctorCheck{"client credential", "warn",
+			"KEEL_SERVE_PASSWORD is retired and no longer read; unset it and use KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD (or --password-file), or KEEL_AGENT_TOKEN"}
+	case token != "":
+		return doctorCheck{"client credential", "ok",
+			"bot key configured (KEEL_AGENT_TOKEN); machine clients present it as a Bearer credential"}
+	case username != "" && password != "":
+		return doctorCheck{"client credential", "ok",
+			"account credentials configured for keel agent/team/model/skills (POST /v1/auth/login)"}
+	case username != "" || password != "":
+		return doctorCheck{"client credential", "fail",
+			"KEEL_ACCOUNT_USERNAME and KEEL_ACCOUNT_PASSWORD must be set together (or use KEEL_AGENT_TOKEN)"}
+	default:
+		return doctorCheck{"client credential", "info",
+			"no CLI credential configured (auth=local-only works; auth=required needs KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD, --password-file, or KEEL_AGENT_TOKEN)"}
+	}
 }

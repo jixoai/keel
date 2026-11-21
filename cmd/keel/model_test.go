@@ -29,7 +29,9 @@ import (
 // /v1/settings/models) the provider management subset edits.
 type fakeModelAPI struct {
 	mu        sync.Mutex
+	username  string
 	password  string
+	csrf      string
 	providers []modelcfg.ProviderView
 	models    []modelcfg.ModelView
 	probes    map[string]modelcfg.ProviderProbe
@@ -57,21 +59,36 @@ func (f *fakeModelAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.requests = append(f.requests, recordedRequest{Method: r.Method, Path: r.URL.Path, Body: raw})
 	f.mu.Unlock()
 
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/auth/session" {
+		writeFakeJSON(w, http.StatusOK, map[string]any{
+			"authenticated": false, "csrfToken": f.csrf,
+		})
+		return
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login" {
+		if strings.TrimSpace(r.Header.Get("X-Keel-CSRF")) != f.csrf {
+			writeFakeJSON(w, http.StatusForbidden, map[string]any{"error": "a valid X-Keel-CSRF header is required for writes"})
+			return
+		}
 		var body struct {
+			Username string `json:"username"`
 			Password string `json:"password"`
 		}
 		_ = json.Unmarshal(raw, &body)
-		if strings.TrimSpace(body.Password) != f.password {
-			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid passphrase"})
+		if strings.TrimSpace(body.Username) != f.username || strings.TrimSpace(body.Password) != f.password {
+			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid username or password"})
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "fake-session", Path: "/"})
-		writeFakeJSON(w, http.StatusOK, map[string]any{"authenticated": true})
+		writeFakeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrfToken": f.csrf})
 		return
 	}
 	if cookie, err := r.Cookie(auth.SessionCookieName); err != nil || cookie.Value != "fake-session" {
 		writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+	if r.Method != http.MethodGet && strings.TrimSpace(r.Header.Get("X-Keel-CSRF")) != f.csrf {
+		writeFakeJSON(w, http.StatusForbidden, map[string]any{"error": "a valid X-Keel-CSRF header is required for writes"})
 		return
 	}
 	switch {
@@ -173,7 +190,9 @@ func fakeModelRegistry() *fakeModelAPI {
 		}
 	}
 	return &fakeModelAPI{
+		username: "admin",
 		password: "model-test-pass",
+		csrf:     "model-fake-csrf",
 		providers: []modelcfg.ProviderView{
 			{
 				ProviderID: "s2api", Name: "S2API", ProviderType: "llm", SurfaceKind: "llm",
@@ -254,7 +273,7 @@ func TestModelProvidersTable(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("providers", "--server", server.URL)
 	if code != 0 {
@@ -284,7 +303,7 @@ func TestModelProvidersJSON(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("providers", "--server", server.URL, "--json")
 	if code != 0 {
@@ -305,7 +324,7 @@ func TestModelListTable(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("list", "--server", server.URL)
 	if code != 0 {
@@ -322,7 +341,7 @@ func TestModelShowQualified(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("show", "s2api/deepseek-v4.1-flash", "--server", server.URL)
 	if code != 0 {
@@ -341,7 +360,7 @@ func TestModelShowBareIDAmbiguousNamesCandidates(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("show", "deepseek-v4.1-flash", "--server", server.URL)
 	if code != 2 {
@@ -358,7 +377,7 @@ func TestModelShowNotFound(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	_, stderr, code := runModel("show", "s2api/nope", "--server", server.URL)
 	if code != 1 {
@@ -397,7 +416,7 @@ func TestModelProviderAddWritesDocument(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel(
 		"provider", "add", "bailian", "--server", server.URL,
@@ -471,7 +490,7 @@ func TestModelProviderUpdateAppliesOnlyPassedFlags(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("provider", "update", "s2api", "--visibility", "hidden", "--server", server.URL)
 	if code != 0 {
@@ -524,7 +543,7 @@ func TestModelProviderRemoveDropsEntryAndReportsCatalogRegistry(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	// The document's default selection names magpie: removing it without saying
 	// where the selection moves is refused before any write (the command never
@@ -598,7 +617,7 @@ func TestModelProviderRemovePrintsReferenceRefusal(t *testing.T) {
 	}}
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	_, stderr, code := runModel(
 		"provider", "remove", "magpie", "--repoint-selection", "s2api/deepseek-v4.1-flash", "--server", server.URL)
@@ -625,7 +644,7 @@ func TestModelProviderTestProbe(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 	// A credential-looking value in the environment must never reach the CLI
 	// output: the CLI only names the reference, the server resolves it.
 	const secret = "probe-secret-value-that-must-not-leak"
@@ -704,7 +723,7 @@ func TestModelProviderListAlias(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("provider", "list", "--server", server.URL)
 	if code != 0 {
@@ -736,7 +755,7 @@ func TestModelProviderShow(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 	const secret = "provider-show-secret-value-that-must-not-leak"
 	t.Setenv("S2API_KEY", secret)
 
@@ -768,7 +787,7 @@ func TestModelCatalogResolvedAndRefresh(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	stdout, stderr, code := runModel("catalog", "s2api", "--server", server.URL)
 	if code != 0 {
@@ -840,7 +859,7 @@ func TestModelProviderAddRendersValidationIssues(t *testing.T) {
 	}}
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	setAccountEnv(t, "admin", fake.password)
 
 	_, stderr, code := runModel("provider", "add", "bad", "--api-type", "nope", "--server", server.URL)
 	if code != 1 {

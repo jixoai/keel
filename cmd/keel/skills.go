@@ -95,16 +95,22 @@ Commands:
 
 Common flags:
   --server <addr>   keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
+  --username <name> account login name (default $KEEL_ACCOUNT_USERNAME)
+  --password-file <path>
+                    read the account password from a file (default
+                    $KEEL_ACCOUNT_PASSWORD); never pass a password flag
   --json            print the raw response instead of a table
 
 The library is tenant-scoped by the server session. A trusted source and
---allow-untrusted are operator acts: the CLI authenticates with the serve
-passphrase (POST /v1/auth/login), and the model-facing skills tool cannot set
-either or subscribe outside the managed source root. A skill's scripts are never
-executed by this CLI (or by the library): run them through the bash tool so the
-sandbox, job accounting and output bounds apply.
-Authentication: KEEL_SERVE_PASSWORD is exchanged for the session cookie
-(POST /v1/auth/login); it is never taken from a flag and never printed.
+--allow-untrusted are operator acts: the CLI logs in with the account's
+username+password (POST /v1/auth/login) or presents a bot key
+(KEEL_AGENT_TOKEN), and the model-facing skills tool cannot set either or
+subscribe outside the managed source root. A skill's scripts are never executed
+by this CLI (or by the library): run them through the bash tool so the sandbox,
+job accounting and output bounds apply.
+Authentication: KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD, or
+KEEL_AGENT_TOKEN for a bot key. KEEL_SERVE_PASSWORD is retired and refused.
+Passwords are never taken from a flag and never printed.
 `)
 }
 

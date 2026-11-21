@@ -30,6 +30,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		usage(stderr)
 		return 2
 	}
+	// The client commands accept --username/--password-file before any
+	// subcommand flag parsing; the values live for this invocation only (a
+	// second run in the same process, as tests do, starts clean).
+	switch args[0] {
+	case "agent", "team", "model", "skills":
+		cliAuthUsername, cliAuthPasswordFile = "", ""
+		rest, err := extractAuthFlags(args[1:])
+		if err != nil {
+			fmt.Fprintf(stderr, "keel %s: %v\n", args[0], err)
+			return 2
+		}
+		args = append([]string{args[0]}, rest...)
+	}
 	switch args[0] {
 	case "serve":
 		return runServeCmd(args[1:], stdout, stderr)
@@ -90,9 +103,11 @@ Environment (serve):
   KEEL_SKILLS_ROOT         managed skill library root (default $KEEL_HOME/skills)
   KEEL_SKILLS_SOURCE_ROOT  managed subscription root (default $KEEL_SKILLS_ROOT/sources)
 
-Environment (tui, agent, team):
+Environment (tui, agent, team, model, skills):
   KEEL_TUI_BIN             path to the NSH TUI binary
   KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13750)
+  KEEL_ACCOUNT_USERNAME    human account login name (keel agent/team/model/skills)
+  KEEL_ACCOUNT_PASSWORD    human account password (or pass --password-file)
   KEEL_AGENT_TOKEN         bot API key (keel_bot_...) for machine clients
   KEEL_SERVE_ADDR          server address for keel agent / keel team
 

@@ -8,9 +8,14 @@
 // reference conflict and 403 for a captain's disabled team CLI, and this file
 // renders them.
 //
-// Authentication: the server passphrase arrives through KEEL_SERVE_PASSWORD and
-// is exchanged for the signed session cookie at POST /v1/auth/login. It is never
-// accepted on the command line (a flag shows up in `ps`) and never printed; the
+// Authentication (change keel-bot-identity-access, A4.3): the retired
+// deployment passphrase (KEEL_SERVE_PASSWORD) is refused, not ignored. A human
+// caller logs in with KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD (or
+// --password-file) and the session cookie carries the login; a machine caller
+// presents a bot key (KEEL_AGENT_TOKEN, keel_bot_...) as a Bearer credential and
+// never logs in. Every non-GET request carries the X-Keel-CSRF token issued by
+// /v1/auth/session and refreshed by login. A password is never accepted on the
+// command line (a flag shows up in `ps`) and no credential is ever printed; the
 // only credential-shaped output is the server's own error text, which is
 // redacted on the server side.
 package main
@@ -149,10 +154,16 @@ Stop semantics:
 
 Common flags:
   --server <addr>           keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
+  --username <name>         account login name (default $KEEL_ACCOUNT_USERNAME)
+  --password-file <path>    read the account password from a file (default
+                            $KEEL_ACCOUNT_PASSWORD); never pass a password flag
   --json                    print raw JSON instead of a table
 
-Authentication: KEEL_SERVE_PASSWORD is exchanged for the session cookie
-(POST /v1/auth/login); it is never taken from a flag and never printed.
+Authentication: KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD log in with
+username+password (POST /v1/auth/login); KEEL_AGENT_TOKEN presents a bot key
+(keel_bot_...) as a Bearer credential and never logs in. KEEL_SERVE_PASSWORD is
+retired and refused with an explanation. Passwords are never taken from a flag
+and never printed.
 `)
 }
 
@@ -195,20 +206,136 @@ Save/start flags:
 
 Common flags:
   --server <addr>           keel serve address (default $KEEL_SERVE_ADDR or 127.0.0.1:13750)
+  --username <name>         account login name (default $KEEL_ACCOUNT_USERNAME)
+  --password-file <path>    read the account password from a file (default
+                            $KEEL_ACCOUNT_PASSWORD); never pass a password flag
   --json                    print raw JSON instead of a table
 
-Authentication: KEEL_SERVE_PASSWORD is exchanged for the session cookie
-(POST /v1/auth/login); it is never taken from a flag and never printed.
+Authentication: KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD log in with
+username+password (POST /v1/auth/login); KEEL_AGENT_TOKEN presents a bot key
+(keel_bot_...) as a Bearer credential and never logs in. KEEL_SERVE_PASSWORD is
+retired and refused with an explanation. Passwords are never taken from a flag
+and never printed.
 `)
 }
 
 // --- client --------------------------------------------------------------
+
+// cliCredential is the resolved client authentication for one invocation.
+// Token is a bot key (Bearer, no login); Username/Password is a human account
+// login. Neither set means "no credential": a loopback local-only server maps
+// the request to its built-in local admin, and auth=required answers 401.
+type cliCredential struct {
+	Username string
+	Password string
+	Token    string
+}
+
+func (c cliCredential) usesBotKey() bool { return c.Token != "" }
+func (c cliCredential) usesAccount() bool { return c.Username != "" }
+
+// The auth flags live at the client-command level (run() pulls them out before
+// the subcommand parses its own flags), so every `keel agent|team|model|skills`
+// subcommand accepts them without each FlagSet re-declaring them.
+var (
+	cliAuthUsername     string
+	cliAuthPasswordFile string
+)
+
+// extractAuthFlags removes --username/--password-file from a client command's
+// arguments and stores them for resolveCLIAuth. A --password flag is refused:
+// it would be visible in `ps` and in shell history.
+func extractAuthFlags(args []string) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		value := ""
+		name := arg
+		if before, after, found := strings.Cut(arg, "="); found {
+			name, value = before, after
+		}
+		switch name {
+		case "--username", "-username":
+			if value == "" {
+				if index+1 >= len(args) {
+					return nil, errors.New("--username needs a value")
+				}
+				index++
+				value = args[index]
+			}
+			cliAuthUsername = strings.TrimSpace(value)
+		case "--password-file", "-password-file":
+			if value == "" {
+				if index+1 >= len(args) {
+					return nil, errors.New("--password-file needs a path")
+				}
+				index++
+				value = args[index]
+			}
+			cliAuthPasswordFile = strings.TrimSpace(value)
+		case "--password", "-password":
+			return nil, errors.New("--password is not accepted: pass --password-file <path> or set KEEL_ACCOUNT_PASSWORD (a password flag is visible in `ps`)")
+		default:
+			out = append(out, arg)
+		}
+	}
+	return out, nil
+}
+
+// resolveCLIAuth reads the one credential this invocation uses. A retired
+// variable is an explicit failure, never a silent fallback: a deployment that
+// still exports KEEL_SERVE_PASSWORD must be told that it no longer logs anyone
+// in.
+func resolveCLIAuth() (cliCredential, error) {
+	if strings.TrimSpace(os.Getenv("KEEL_SERVE_PASSWORD")) != "" {
+		return cliCredential{}, errors.New("KEEL_SERVE_PASSWORD is retired and no longer read: unset it and use KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD, --password-file, or KEEL_AGENT_TOKEN")
+	}
+	token := strings.TrimSpace(os.Getenv("KEEL_AGENT_TOKEN"))
+	username := strings.TrimSpace(cliAuthUsername)
+	if username == "" {
+		username = strings.TrimSpace(os.Getenv("KEEL_ACCOUNT_USERNAME"))
+	}
+	password := ""
+	if cliAuthPasswordFile != "" {
+		raw, err := os.ReadFile(cliAuthPasswordFile)
+		if err != nil {
+			return cliCredential{}, fmt.Errorf("read --password-file: %w", err)
+		}
+		// A file written by an editor ends in a newline; the password itself is
+		// everything before it (inner spaces are significant).
+		password = strings.TrimRight(string(raw), "\r\n")
+		if password == "" {
+			return cliCredential{}, fmt.Errorf("--password-file %s is empty", cliAuthPasswordFile)
+		}
+	} else {
+		password = os.Getenv("KEEL_ACCOUNT_PASSWORD")
+	}
+	switch {
+	case token != "" && (username != "" || password != ""):
+		return cliCredential{}, errors.New("both KEEL_AGENT_TOKEN and account credentials are set: choose one login method")
+	case token != "":
+		return cliCredential{Token: token}, nil
+	case username == "" && password == "":
+		return cliCredential{}, nil
+	case username == "":
+		return cliCredential{}, errors.New("a password is configured but KEEL_ACCOUNT_USERNAME (or --username) is missing")
+	case password == "":
+		return cliCredential{}, errors.New("KEEL_ACCOUNT_USERNAME is set but the password is missing: set KEEL_ACCOUNT_PASSWORD or pass --password-file")
+	default:
+		return cliCredential{Username: username, Password: password}, nil
+	}
+}
 
 // cliClient is one authenticated session against `keel serve`.
 type cliClient struct {
 	base  string
 	http  *http.Client
 	debug bool
+	// botKey is the Bearer credential of a machine caller; it never logs in.
+	botKey string
+	// csrf is the X-Keel-CSRF value for writes (the session's double-submit
+	// token). Empty means no human session has been established.
+	csrf string
 }
 
 // apiError is a refusal from the server, carrying the machine code and the
@@ -223,6 +350,10 @@ type apiError struct {
 	Fields     []agentteam.FieldError
 	Issues     []modelcfg.Issue
 	References []map[string]any
+	// Reason/RequiredKey are the permission engine's 403 detail: what the
+	// caller lacks, when the refusal is a missing grant or relation.
+	Reason      string
+	RequiredKey string
 	// Total is the server's real reference count; References may be bounded by
 	// the server (the session list is capped). Truncated marks that gap so the
 	// CLI can say "and N more" instead of pretending the list is complete.
@@ -246,8 +377,8 @@ func (e *apiError) Error() string {
 	}
 }
 
-// newCLIClient resolves the server address and, when a passphrase is
-// configured, logs in so the cookie jar carries the session.
+// newCLIClient resolves the server address and authenticates with the
+// credential the environment (or --username/--password-file) names.
 func newCLIClient(server string) (*cliClient, error) {
 	base, err := normalizeServerURL(server)
 	if err != nil {
@@ -257,8 +388,12 @@ func newCLIClient(server string) (*cliClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	credential, err := resolveCLIAuth()
+	if err != nil {
+		return nil, err
+	}
 	client := &cliClient{base: base, http: &http.Client{Jar: jar}}
-	if err := client.login(os.Getenv("KEEL_SERVE_PASSWORD")); err != nil {
+	if err := client.login(credential); err != nil {
 		return nil, err
 	}
 	return client, nil
@@ -284,27 +419,55 @@ func normalizeServerURL(raw string) (string, error) {
 	return strings.TrimRight(parsed.Scheme+"://"+parsed.Host+parsed.Path, "/"), nil
 }
 
-// login exchanges the passphrase for the session cookie. An empty passphrase is
-// a no-op: a loopback server with authentication disabled answers without one,
-// and a server WITH authentication answers 401 on the real request (which names
-// the missing setting), so no error is invented here.
-func (c *cliClient) login(password string) error {
-	if password == "" {
+// login authenticates the resolved credential. A bot key needs no login (it is
+// presented on every request); an account first reads the anonymous CSRF token
+// from GET /v1/auth/session (the server requires X-Keel-CSRF even for the login
+// POST), then exchanges username+password for the session cookie and the
+// session's own CSRF token. No credential configured is a no-op: a loopback
+// local-only server answers without one, and a server with authentication
+// answers 401 on the real request (which names the missing setting), so no
+// error is invented here.
+func (c *cliClient) login(credential cliCredential) error {
+	if credential.usesBotKey() {
+		c.botKey = credential.Token
 		return nil
 	}
-	body, _ := json.Marshal(map[string]string{"password": password})
-	request, err := http.NewRequest(http.MethodPost, c.base+"/v1/auth/login", bytes.NewReader(body))
-	if err != nil {
+	if !credential.usesAccount() {
+		return nil
+	}
+	if err := c.prepareCSRF(); err != nil {
 		return err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := c.http.Do(request)
-	if err != nil {
-		return fmt.Errorf("connect %s: %w", c.base, err)
+	var answer struct {
+		CSRF string `json:"csrfToken"`
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("login to %s failed: %w", c.base, readAPIError(response))
+	body := map[string]string{"username": credential.Username, "password": credential.Password}
+	if err := c.do(http.MethodPost, "/v1/auth/login", "", body, &answer); err != nil {
+		return fmt.Errorf("login to %s failed: %w", c.base, err)
+	}
+	if answer.CSRF != "" {
+		c.csrf = answer.CSRF
+	}
+	return nil
+}
+
+// prepareCSRF reads the anonymous session document: it sets the CSRF cookie and
+// returns the matching token, and it is also where a deployment with no super
+// admin says so (bootstrapRequired).
+func (c *cliClient) prepareCSRF() error {
+	var session struct {
+		CSRF              string `json:"csrfToken"`
+		Authenticated     bool   `json:"authenticated"`
+		BootstrapRequired bool   `json:"bootstrapRequired"`
+	}
+	if err := c.do(http.MethodGet, "/v1/auth/session", "", nil, &session); err != nil {
+		return fmt.Errorf("read %s/v1/auth/session: %w", c.base, err)
+	}
+	if session.CSRF != "" {
+		c.csrf = session.CSRF
+	}
+	if session.BootstrapRequired {
+		return fmt.Errorf("%s has no super admin: run `keel admin bootstrap` and finish setup before logging in", c.base)
 	}
 	return nil
 }
@@ -330,6 +493,12 @@ func (c *cliClient) do(method, path, actor string, body, out any) error {
 	if actor != "" {
 		request.Header.Set(actorAgentHeader, actor)
 	}
+	if c.botKey != "" {
+		// A bot key is the whole credential: no session, no CSRF token.
+		request.Header.Set("Authorization", "Bearer "+c.botKey)
+	} else if c.csrf != "" && method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+		request.Header.Set("X-Keel-CSRF", c.csrf)
+	}
 	response, err := c.http.Do(request)
 	if err != nil {
 		return fmt.Errorf("connect %s: %w", c.base, err)
@@ -339,6 +508,12 @@ func (c *cliClient) do(method, path, actor string, body, out any) error {
 		refusal := readAPIError(response)
 		if typed, ok := refusal.(*apiError); ok {
 			typed.Server = c.base
+			// A 401 on a read with no credential configured is the server asking
+			// for the login this shell never supplied. Name the variables instead
+			// of making the reader infer them from a one-word body.
+			if typed.Status == http.StatusUnauthorized && c.botKey == "" && c.csrf == "" {
+				typed.Message += " (set KEEL_ACCOUNT_USERNAME + KEEL_ACCOUNT_PASSWORD, or KEEL_AGENT_TOKEN for a bot key)"
+			}
 		}
 		return refusal
 	}
@@ -363,18 +538,22 @@ func readAPIError(response *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	out := &apiError{Status: response.StatusCode}
 	var envelope struct {
-		Error      string                 `json:"error"`
-		Code       string                 `json:"code"`
-		Fields     []agentteam.FieldError `json:"fields"`
-		Issues     []modelcfg.Issue       `json:"issues"`
-		References []map[string]any       `json:"references"`
-		Total      int                    `json:"total"`
-		Truncated  bool                   `json:"truncated"`
-		Revision   int64                  `json:"revision"`
+		Error       string                 `json:"error"`
+		Code        string                 `json:"code"`
+		Reason      string                 `json:"reason"`
+		RequiredKey string                 `json:"requiredKey"`
+		Fields      []agentteam.FieldError `json:"fields"`
+		Issues      []modelcfg.Issue       `json:"issues"`
+		References  []map[string]any       `json:"references"`
+		Total       int                    `json:"total"`
+		Truncated   bool                   `json:"truncated"`
+		Revision    int64                  `json:"revision"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err == nil {
 		out.Message = strings.TrimSpace(envelope.Error)
 		out.Code = envelope.Code
+		out.Reason = envelope.Reason
+		out.RequiredKey = envelope.RequiredKey
 		out.Fields = envelope.Fields
 		out.Issues = envelope.Issues
 		out.References = envelope.References
@@ -397,6 +576,14 @@ func reportError(stderr io.Writer, err error) int {
 	fmt.Fprintf(stderr, "keel: %v\n", err)
 	var refusal *apiError
 	if errors.As(err, &refusal) {
+		// The permission engine's 403 names what is missing; a bare "forbidden"
+		// is not actionable.
+		if refusal.RequiredKey != "" {
+			fmt.Fprintf(stderr, "  required permission: %s\n", refusal.RequiredKey)
+		}
+		if refusal.Reason != "" {
+			fmt.Fprintf(stderr, "  reason: %s\n", refusal.Reason)
+		}
 		for _, field := range refusal.Fields {
 			if field.Field == "" {
 				fmt.Fprintf(stderr, "  - %s: %s\n", field.Code, field.Message)
