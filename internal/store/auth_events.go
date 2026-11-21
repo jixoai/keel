@@ -32,6 +32,7 @@ const (
 	AuthEventLoginSucceeded = "login.succeeded"
 	AuthEventLoginFailed    = "login.failed"
 	AuthEventLoginRateLimit = "login.rate_limited"
+	AuthEventSessionReject  = "session.rejected"
 	AuthEventLogout         = "logout"
 	AuthEventPasswordChange = "password.changed"
 	AuthEventPasswordReset  = "password.reset"
