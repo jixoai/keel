@@ -118,6 +118,7 @@ import {
 } from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
 import { AgentTeamSettingsSection } from "./settings-agents";
+import { SkillsSection } from "./settings-skills";
 
 // ---- the section ----------------------------------------------------------
 
@@ -131,6 +132,7 @@ export type SettingsSection =
   | "capabilities"
   | "secrets"
   | "plugins"
+  | "skills"
   | "shortcuts"
   | "about";
 
@@ -149,6 +151,7 @@ const SECTIONS: SettingsSectionEntry[] = [
   { id: "capabilities", label: "能力", icon: "spark" },
   { id: "secrets", label: "密钥", icon: "key" },
   { id: "plugins", label: "插件", icon: "layers" },
+  { id: "skills", label: "技能", icon: "spark" },
   { id: "shortcuts", label: "快捷键", icon: "keyboard", group: "参考" },
   { id: "about", label: "关于", icon: "info" },
 ];
@@ -2778,8 +2781,16 @@ function SectionBodyRest() {
 
 function SectionBodyTail() {
   return (
-    <If when={settingsSection() === "plugins"} else={<SectionBodyEnd />}>
+    <If when={settingsSection() === "plugins"} else={<SectionBodySkills />}>
       <PluginsSection />
+    </If>
+  );
+}
+
+function SectionBodySkills() {
+  return (
+    <If when={settingsSection() === "skills"} else={<SectionBodyEnd />}>
+      <SkillsSection />
     </If>
   );
 }
@@ -2835,6 +2846,7 @@ export function SettingsScreen() {
       if (section === "models") void store.loadModelsPanel();
       else if (section === "secrets") void store.loadSecrets();
       else if (section === "plugins") void store.loadPlugins();
+      else if (section === "skills") void store.loadSkillsPanel(true);
     }, 0);
     cleanup(() => clearTimeout(timer));
   });

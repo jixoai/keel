@@ -39,9 +39,18 @@ import type {
   SecretSaved,
   SecretsView,
   SendOptions,
+  SessionFilesView,
   SessionSummary,
+  SessionTasksView,
   SettingsApi,
   SettingsIssue,
+  SkillDetailView,
+  SkillInstallRequest,
+  SkillRecordView,
+  SkillSourceView,
+  SkillsSettingsView,
+  SkillUpdateRequest,
+  SkillUpdateResult,
   TriggersView,
   UiCommands,
   WireEvent,
@@ -157,6 +166,19 @@ interface DemoModelResolution {
 
 const nowISO = () => new Date().toISOString();
 
+/** A deterministic 64-hex stand-in for a bundle hash (the demo never computes
+ * real content identity; the shapes are what the UI consumes). */
+const demoHash = (seed: string): string => {
+  const hex = seed
+    .split("")
+    .map((character) => character.charCodeAt(0).toString(16).padStart(2, "0"))
+    .join("");
+  return (hex + "0".repeat(64)).slice(0, 64);
+};
+
+const cloneSkill = (record: SkillRecordView): SkillRecordView =>
+  JSON.parse(JSON.stringify(record)) as SkillRecordView;
+
 /** A development-only switch carried in the launch: the embedding host's
  * launch parameters (the TUI host and the tests) or the web page's query
  * (`?fixture=1&teamNoCaptain=1`, passed in from the store's route read). The
@@ -268,6 +290,41 @@ export class FixtureClient implements SettingsApi {
   private secretState: SecretMeta[] = [
     { name: "s2api", createdAt: new Date(Date.now() - 86_400_000).toISOString(), updatedAt: new Date(Date.now() - 3_600_000).toISOString() },
     { name: "webhook-token", createdAt: new Date(Date.now() - 172_800_000).toISOString(), updatedAt: new Date(Date.now() - 172_800_000).toISOString() },
+  ];
+  /** The demo skill library (settings「技能」): one locally authored skill and
+   * one trusted subscription source. It is editable so the demo's install,
+   * update, pin and remove paths are real state transitions, not stubs. */
+  private skillRevision = 2;
+  private skillState: SkillRecordView[] = [
+    {
+      name: "deploy-flow",
+      description: "发布检查清单与回滚步骤",
+      trust: "local",
+      currentHash: demoHash("deploy-flow-v1"),
+      installedAt: new Date(Date.now() - 86_400_000).toISOString(),
+      updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+      versions: [
+        {
+          hash: demoHash("deploy-flow-v1"),
+          createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+          files: 2,
+          bytes: 512,
+        },
+      ],
+      fileCount: 2,
+      bytes: 512,
+      path: "/demo/skills/deploy-flow",
+      updateAvailable: false,
+    },
+  ];
+  private skillSourceState: SkillSourceView[] = [
+    {
+      id: "team",
+      kind: "local",
+      url: "/srv/keel-skills",
+      trust: "trusted",
+      createdAt: new Date(Date.now() - 604_800_000).toISOString(),
+    },
   ];
   private triggerFires = 12;
   /** The demo agent registry (the settings Agents section) — editable in the
@@ -539,6 +596,176 @@ export class FixtureClient implements SettingsApi {
       throw new KeelApiError(404, `secret ${name} was not found`);
     }
     this.secretState = this.secretState.filter((item) => item.name !== name);
+  }
+
+  // ---- skill library ------------------------------------------------------
+
+  async skillsSettings(check = true): Promise<SkillsSettingsView> {
+    return {
+      revision: this.skillRevision,
+      root: "/demo/skills",
+      checked: check,
+      skills: this.skillState.map((item) => cloneSkill(item)),
+      sources: this.skillSourceState.map((item) => ({ ...item })),
+      limits: { maxFiles: 256, maxBytes: 8 * 1024 * 1024, maxFileBytes: 2 * 1024 * 1024 },
+      policy: {
+        trustValues: ["trusted", "untrusted", "local"],
+        sourceKinds: ["local"],
+        maxFiles: 256,
+        maxBytes: 8 * 1024 * 1024,
+        maxFileBytes: 2 * 1024 * 1024,
+        scriptExecution: "bash",
+      },
+    };
+  }
+
+  async showSkill(name: string): Promise<SkillDetailView> {
+    const record = this.skillState.find((item) => item.name === name);
+    if (!record) throw new KeelApiError(404, `skill ${name} was not found`, [], undefined, "not_found");
+    return {
+      ...cloneSkill(record),
+      body: `# ${name}\n\n${record.description ?? ""}\n\n1. 运行发布检查\n2. 记录结果\n3. 需要时回滚\n`,
+      files: [
+        { path: "SKILL.md", size: 256, hash: demoHash(`${name}-skill`), mode: 0o644 },
+        { path: "references/checklist.md", size: 256, hash: demoHash(`${name}-checklist`), mode: 0o644 },
+      ],
+    };
+  }
+
+  async installSkill(request: SkillInstallRequest): Promise<SkillRecordView> {
+    const name = request.name.trim();
+    if (!name) throw new KeelApiError(400, "skill name is required");
+    const existing = this.skillState.find((item) => item.name === name);
+    if (existing?.pinnedHash) {
+      throw new KeelApiError(409, `skill ${name} is pinned; unpin before installing`, [], undefined, "pinned");
+    }
+    const hash = demoHash(`${name}-${this.skillRevision + 1}`);
+    const at = nowISO();
+    this.skillRevision += 1;
+    if (existing) {
+      existing.currentHash = hash;
+      existing.updatedAt = at;
+      existing.description = request.description || existing.description;
+      existing.versions = [...(existing.versions ?? []), { hash, createdAt: at, files: 1, bytes: 256 }];
+      if (request.pin) existing.pinnedHash = hash;
+      return cloneSkill(existing);
+    }
+    const record: SkillRecordView = {
+      name,
+      description: request.description,
+      trust: request.sourceId ? (this.skillSourceState.find((item) => item.id === request.sourceId)?.trust ?? "untrusted") : (request.trust ?? "local"),
+      sourceId: request.sourceId,
+      currentHash: hash,
+      pinnedHash: request.pin ? hash : undefined,
+      installedAt: at,
+      updatedAt: at,
+      versions: [{ hash, createdAt: at, files: 1, bytes: 256 }],
+      fileCount: 1,
+      bytes: 256,
+      path: `/demo/skills/${name}`,
+      updateAvailable: false,
+    };
+    this.skillState = [...this.skillState, record];
+    return cloneSkill(record);
+  }
+
+  async updateSkill(name: string, _request: SkillUpdateRequest = {}): Promise<SkillUpdateResult> {
+    const record = this.skillState.find((item) => item.name === name);
+    if (!record) throw new KeelApiError(404, `skill ${name} was not found`, [], undefined, "not_found");
+    if (record.pinnedHash) {
+      throw new KeelApiError(409, `skill ${name} is pinned; unpin before updating`, [], undefined, "pinned");
+    }
+    const previous = record.currentHash;
+    const next = demoHash(`${name}-${this.skillRevision + 1}`);
+    const at = nowISO();
+    this.skillRevision += 1;
+    record.currentHash = next;
+    record.updatedAt = at;
+    record.versions = [...(record.versions ?? []), { hash: next, createdAt: at, files: 1, bytes: 256 }];
+    record.updateAvailable = false;
+    record.availableHash = undefined;
+    return { status: "updated", record: cloneSkill(record), previousHash: previous };
+  }
+
+  async pinSkill(name: string, hash?: string): Promise<SkillRecordView> {
+    const record = this.skillState.find((item) => item.name === name);
+    if (!record) throw new KeelApiError(404, `skill ${name} was not found`, [], undefined, "not_found");
+    const target = hash || record.currentHash;
+    if (!(record.versions ?? []).some((version) => version.hash === target)) {
+      throw new KeelApiError(404, `skill ${name} has no version ${target.slice(0, 12)}`, [], undefined, "version_not_found");
+    }
+    record.currentHash = target;
+    record.pinnedHash = target;
+    return cloneSkill(record);
+  }
+
+  async unpinSkill(name: string): Promise<SkillRecordView> {
+    const record = this.skillState.find((item) => item.name === name);
+    if (!record) throw new KeelApiError(404, `skill ${name} was not found`, [], undefined, "not_found");
+    record.pinnedHash = undefined;
+    return cloneSkill(record);
+  }
+
+  async removeSkill(name: string): Promise<void> {
+    if (!this.skillState.some((item) => item.name === name)) {
+      throw new KeelApiError(404, `skill ${name} was not found`, [], undefined, "not_found");
+    }
+    this.skillState = this.skillState.filter((item) => item.name !== name);
+  }
+
+  async subscribeSkillSource(source: {
+    id: string;
+    kind?: string;
+    url: string;
+    trust?: string;
+  }): Promise<SkillSourceView> {
+    if (this.skillSourceState.some((item) => item.id === source.id)) {
+      throw new KeelApiError(409, `source ${source.id} already exists`, [], undefined, "already_exists");
+    }
+    const stored: SkillSourceView = {
+      id: source.id,
+      kind: source.kind ?? "local",
+      url: source.url,
+      trust: source.trust ?? "untrusted",
+      createdAt: nowISO(),
+    };
+    this.skillSourceState = [...this.skillSourceState, stored];
+    return { ...stored };
+  }
+
+  async unsubscribeSkillSource(id: string): Promise<void> {
+    const inUse = this.skillState.find((item) => item.sourceId === id);
+    if (inUse) {
+      throw new KeelApiError(409, `source ${id} is still the origin of skill ${inUse.name}`, [], undefined, "source_in_use");
+    }
+    if (!this.skillSourceState.some((item) => item.id === id)) {
+      throw new KeelApiError(404, `source ${id} was not found`, [], undefined, "not_found");
+    }
+    this.skillSourceState = this.skillSourceState.filter((item) => item.id !== id);
+  }
+
+  /** The `$` file group's demo source (a session's manifest paths). */
+  async sessionFiles(_sessionId: string): Promise<SessionFilesView> {
+    return {
+      files: [
+        { path: "src/composer.tsx", size: 1200, updatedSeq: 8 },
+        { path: "docs/release.md", size: 640, updatedSeq: 5 },
+      ],
+      count: 2,
+      truncated: false,
+    };
+  }
+
+  /** The `$` task group's demo source (the session's cards). */
+  async sessionTasks(_sessionId: string): Promise<SessionTasksView> {
+    return {
+      tasks: [
+        { taskId: "task-demo-1", title: "整理发布清单", status: "open", updatedAt: nowISO() },
+        { taskId: "task-demo-2", title: "回滚演练", status: "done", updatedAt: nowISO() },
+      ],
+      count: 2,
+      truncated: false,
+    };
   }
 
   async plugins(): Promise<PluginsView> {

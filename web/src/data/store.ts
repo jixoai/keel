@@ -37,8 +37,15 @@ import type {
   ScrollState,
   SendOptions,
   SessionSummary,
+  SessionFilesView,
+  SessionTasksView,
+  SessionFileView,
+  SessionTaskView,
   SettingsApi,
   SettingsIssue,
+  SkillDetailView,
+  SkillRecordView,
+  SkillsSettingsView,
   TeamTaskView,
   TeamTasksView,
   TriggerStatusView,
@@ -121,6 +128,10 @@ interface Client extends SettingsApi {
   /** The captain session's member task cards. Optional: a transport without
    * the projection answers a readable refusal instead of an empty list. */
   teamTasks?(sessionId: string, limit?: number, after?: string): Promise<TeamTasksView>;
+  /** The composer `$` completion sources. Optional: a transport without the
+   * projections leaves the file/task groups out instead of inventing rows. */
+  sessionFiles?(sessionId: string): Promise<SessionFilesView>;
+  sessionTasks?(sessionId: string): Promise<SessionTasksView>;
   createSession(): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
   source(sessionId: string): EventSource;
@@ -176,6 +187,17 @@ const messageOf = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   return String(error);
 };
+
+/** The 12-character hash a skill row shows; the full hash stays available in
+ * the detail dialog (a bundle identity is 64 hex characters). */
+const shortHash = (hash: string): string => (hash.length > 12 ? hash.slice(0, 12) : hash);
+
+/** A skill write failure with the server's code (pinned/untrusted_source/...),
+ * so the page can name the state instead of a generic error. */
+const actionErrorOf = (error: unknown): { code?: string; message: string } =>
+  error instanceof KeelApiError
+    ? { code: error.code, message: error.message }
+    : { message: messageOf(error) };
 
 /** Newest first by `lastMessageAt` — the same clock the row displays, so the
  * order and the "3 分钟前" beside it can never contradict each other (sorting by
@@ -290,6 +312,28 @@ class KeelStore {
   /** A write/delete failure, shown next to the form (never swallowed). */
   readonly secretsActionError = signal<string | null>(null);
 
+  // ---- skill library (change keel-harness-v2, W7 skills) ------------------
+
+  readonly skills = signal<SkillsSettingsView | null>(null);
+  readonly skillsLoading = signal(false);
+  readonly skillsError = signal<string | null>(null);
+  readonly skillsErrorCode = signal<string | null>(null);
+  readonly skillsBusy = signal(false);
+  /** A write failure with the server's stable code (`pinned`,
+   * `untrusted_source`, ...), so the page renders the specific state. */
+  readonly skillsActionError = signal<{ code?: string; message: string } | null>(null);
+  readonly skillsDetail = signal<SkillDetailView | null>(null);
+  readonly skillsDetailLoading = signal(false);
+  readonly skillsDetailError = signal<string | null>(null);
+  /** The composer `$` menu's three groups. They are loaded lazily, keep the
+   * last session's answer, and never invent a row when a source is absent. */
+  readonly completionSkills = signal<SkillRecordView[]>([]);
+  readonly completionFiles = signal<SessionFileView[]>([]);
+  readonly completionTasks = signal<SessionTaskView[]>([]);
+  readonly completionLoading = signal(false);
+  readonly completionError = signal<string | null>(null);
+  readonly completionSession = signal<string | null>(null);
+
   readonly plugins = signal<PluginsView | null>(null);
   readonly pluginsLoading = signal(false);
   readonly pluginsError = signal<string | null>(null);
@@ -354,6 +398,10 @@ class KeelStore {
   private agentTeamClient: AgentTeamApi | null = null;
   /** Test/host seam for the plugin reads; `null` uses the app's transport. */
   private pluginClient: PluginTransport | null = null;
+  /** Test/host seam for the skill library (the settings harness answers it in
+   * memory so the real `KeelHttp` parsing runs without a network). `null` uses
+   * the app's transport. */
+  private skillsClient: SettingsApi | null = null;
   /** Test/host seam for the member-task projection, same pattern. */
   private teamTaskClient: TeamTaskTransport | null = null;
   /** Bumped per read so a slow answer for a closed session cannot land. */
@@ -819,6 +867,199 @@ class KeelStore {
     }
   }
 
+  // ---- skill library ------------------------------------------------------
+
+  /** `GET /v1/settings/skills`. `check` reads each source (the server's
+   * default) and fills update/conflict state; false is the fast local read the
+   * composer uses. */
+  async loadSkillsPanel(check = true) {
+    if (this.skillsLoading()) return;
+    this.skillsLoading.set(true);
+    this.skillsError.set(null);
+    this.skillsErrorCode.set(null);
+    try {
+      this.skills.set(await this.skillsApi().skillsSettings(check));
+    } catch (error) {
+      this.skillsError.set(messageOf(error));
+      if (error instanceof KeelApiError) this.skillsErrorCode.set(error.code ?? null);
+    } finally {
+      this.skillsLoading.set(false);
+    }
+  }
+
+  /** One skill's body and manifest (`GET /v1/settings/skills/{name}`). */
+  async openSkillDetail(name: string) {
+    this.skillsDetailLoading.set(true);
+    this.skillsDetailError.set(null);
+    this.skillsDetail.set(null);
+    try {
+      this.skillsDetail.set(await this.skillsApi().showSkill(name));
+    } catch (error) {
+      this.skillsDetailError.set(messageOf(error));
+    } finally {
+      this.skillsDetailLoading.set(false);
+    }
+  }
+
+  closeSkillDetail() {
+    this.skillsDetail.set(null);
+    this.skillsDetailError.set(null);
+  }
+
+  /** Install the convenience form (name/description/body). A bundle upload is
+   * the CLI's `--dir`; the page's create form is the same skills.manage create
+   * shape, so the two surfaces cannot drift. */
+  async installSkillFromForm(name: string, description: string, body: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      const record = await this.skillsApi().installSkill({ name: name.trim(), description, body });
+      this.flash({ tone: "success", text: `技能已保存：${record.name}（${shortHash(record.currentHash)}）` });
+      await this.loadSkillsPanel(false);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  /** Advance a skill to its source's current bundle. A pinned skill answers
+   * 409 `pinned`: the page shows that code instead of a generic failure. */
+  async updateSkill(name: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      const result = await this.skillsApi().updateSkill(name);
+      const tone = result.status === "up_to_date" ? "info" : "success";
+      const text =
+        result.status === "up_to_date"
+          ? `${name} 已是最新版本`
+          : `${name} 已更新到 ${shortHash(result.record?.currentHash ?? "")}`;
+      this.flash({ tone, text });
+      await this.loadSkillsPanel(true);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  async pinSkill(name: string, hash?: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      const record = await this.skillsApi().pinSkill(name, hash);
+      this.flash({ tone: "success", text: `${name} 已固定在 ${shortHash(record.pinnedHash ?? "")}` });
+      await this.loadSkillsPanel(false);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  async unpinSkill(name: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      await this.skillsApi().unpinSkill(name);
+      this.flash({ tone: "success", text: `${name} 已解除固定` });
+      await this.loadSkillsPanel(false);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  async removeSkill(name: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      await this.skillsApi().removeSkill(name);
+      this.flash({ tone: "success", text: `技能已移除：${name}` });
+      await this.loadSkillsPanel(false);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  async subscribeSkillSource(id: string, url: string, trust: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      const source = await this.skillsApi().subscribeSkillSource({ id: id.trim(), kind: "local", url: url.trim(), trust });
+      this.flash({ tone: "success", text: `已订阅 ${source.id}（${source.trust}）` });
+      await this.loadSkillsPanel(true);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  async unsubscribeSkillSource(id: string): Promise<boolean> {
+    if (this.skillsBusy()) return false;
+    this.skillsBusy.set(true);
+    this.skillsActionError.set(null);
+    try {
+      await this.skillsApi().unsubscribeSkillSource(id);
+      this.flash({ tone: "success", text: `已取消订阅 ${id}` });
+      await this.loadSkillsPanel(true);
+      return true;
+    } catch (error) {
+      this.skillsActionError.set(actionErrorOf(error));
+      return false;
+    } finally {
+      this.skillsBusy.set(false);
+    }
+  }
+
+  /** The composer `$` menu's data: skills (fast read), files and tasks of the
+   * open session. A missing transport leaves that group out; a failed read is
+   * recorded, never presented as "no rows". */
+  async loadCompletion(sessionId: string) {
+    if (!sessionId) return;
+    this.completionLoading.set(true);
+    this.completionError.set(null);
+    this.completionSession.set(sessionId);
+    try {
+      const [skillsView, filesView, tasksView] = await Promise.all([
+        this.skillsApi().skillsSettings(false).catch(() => null),
+        this.client.sessionFiles ? this.client.sessionFiles(sessionId).catch(() => null) : Promise.resolve(null),
+        this.client.sessionTasks ? this.client.sessionTasks(sessionId).catch(() => null) : Promise.resolve(null),
+      ]);
+      this.completionSkills.set(skillsView?.skills ?? []);
+      this.completionFiles.set(filesView?.files ?? []);
+      this.completionTasks.set(tasksView?.tasks ?? []);
+      if (!skillsView && !filesView && !tasksView) {
+        this.completionError.set("补全数据不可用");
+      }
+    } finally {
+      this.completionLoading.set(false);
+    }
+  }
+
   // ---- plugins & triggers -------------------------------------------------
 
   async loadPlugins() {
@@ -876,6 +1117,16 @@ class KeelStore {
    * restores the app's own transport. */
   setAgentTeamTransport(client: AgentTeamApi | null): void {
     this.agentTeamClient = client;
+  }
+
+  /** Test/host seam: answer the skill library without a network. `null`
+   * restores the app's own transport. */
+  setSkillsTransport(client: SettingsApi | null): void {
+    this.skillsClient = client;
+  }
+
+  private skillsApi(): SettingsApi {
+    return this.skillsClient ?? this.client;
   }
 
   /** Test/host seam: answer the plugin and trigger reads without a network.

@@ -253,6 +253,160 @@ export interface SecretSaved {
   updatedAt?: string;
 }
 
+// ---- skill library (change keel-harness-v2, W7 skills) ---------------------
+
+/** Where a skill came from. `trusted`/`untrusted` are subscription sources;
+ * `local` is a skill authored in this deployment (an agent's skills.manage
+ * create, /learn, a manual install). */
+export type SkillTrust = "trusted" | "untrusted" | "local";
+
+/** The update conflict codes the server publishes. They are rendered as a
+ * badge and a sentence, never collapsed into "error". */
+export type SkillConflict =
+  | "pinned"
+  | "modified"
+  | "source_missing"
+  | "name_mismatch"
+  | "missing_active";
+
+/** One immutable bundle version. */
+export interface SkillVersionView {
+  hash: string;
+  createdAt?: string;
+  files?: number;
+  bytes?: number;
+}
+
+/** One installed skill. */
+export interface SkillRecordView {
+  name: string;
+  description?: string;
+  trust: SkillTrust | string;
+  sourceId?: string;
+  sourceKind?: string;
+  sourceUrl?: string;
+  currentHash: string;
+  pinnedHash?: string;
+  installedAt?: string;
+  updatedAt?: string;
+  versions?: SkillVersionView[];
+  path?: string;
+  fileCount?: number;
+  bytes?: number;
+  updateAvailable?: boolean;
+  availableHash?: string;
+  conflict?: SkillConflict | string;
+  diagnostics?: string[];
+}
+
+/** A subscription source. Only `local` is syncable in this build. */
+export interface SkillSourceView {
+  id: string;
+  kind: string;
+  url: string;
+  trust: SkillTrust | string;
+  createdAt?: string;
+}
+
+/** `GET /v1/settings/skills`. `checked` says whether the sources were read
+ * (the update/conflict fields are only meaningful then). */
+export interface SkillsSettingsView {
+  revision: number;
+  root?: string;
+  checked?: boolean;
+  skills?: SkillRecordView[];
+  sources?: SkillSourceView[];
+  limits?: Record<string, number>;
+  policy?: {
+    trustValues?: string[];
+    sourceKinds?: string[];
+    maxFiles?: number;
+    maxBytes?: number;
+    maxFileBytes?: number;
+    scriptExecution?: string;
+  };
+}
+
+/** One file of a skill bundle. */
+export interface SkillFileView {
+  path: string;
+  size: number;
+  hash?: string;
+  mode?: number;
+}
+
+/** `GET /v1/settings/skills/{name}`. */
+export interface SkillDetailView extends SkillRecordView {
+  body?: string;
+  files?: SkillFileView[];
+}
+
+/** `POST /v1/settings/skills/{name}/update`'s body. */
+export interface SkillUpdateResult {
+  status: "updated" | "up_to_date" | "pinned" | string;
+  record?: SkillRecordView;
+  previousHash?: string;
+  availableHash?: string;
+  pinnedHash?: string;
+  updateAvailable?: boolean;
+}
+
+/** One in-memory bundle file on the wire. */
+export interface SkillFileInput {
+  path: string;
+  content?: string;
+  contentBase64?: string;
+  mode?: number;
+}
+
+export interface SkillInstallRequest {
+  name: string;
+  description?: string;
+  body?: string;
+  files?: SkillFileInput[];
+  sourceId?: string;
+  trust?: SkillTrust | string;
+  allowUntrusted?: boolean;
+  pin?: boolean;
+}
+
+export interface SkillUpdateRequest {
+  files?: SkillFileInput[];
+  description?: string;
+  body?: string;
+  sourceId?: string;
+  allowUntrusted?: boolean;
+}
+
+/** One file row of `GET /v1/sessions/{id}/files` (the `$` file group). */
+export interface SessionFileView {
+  path: string;
+  size: number;
+  updatedSeq: number;
+  lastTaskId?: string;
+}
+
+export interface SessionFilesView {
+  files?: SessionFileView[];
+  count?: number;
+  truncated?: boolean;
+}
+
+/** One task-card row of `GET /v1/sessions/{id}/tasks` (the `$` task group). */
+export interface SessionTaskView {
+  taskId: string;
+  parentTaskId?: string;
+  title: string;
+  status: string;
+  updatedAt?: string;
+}
+
+export interface SessionTasksView {
+  tasks?: SessionTaskView[];
+  count?: number;
+  truncated?: boolean;
+}
+
 /** A trigger as the plugin manifest declares it. */
 export interface TriggerSpecView {
   id: string;
@@ -551,6 +705,15 @@ export interface SettingsApi {
   secrets(): Promise<SecretsView>;
   putSecret(name: string, value: string): Promise<SecretSaved>;
   deleteSecret(name: string): Promise<void>;
+  skillsSettings(check?: boolean): Promise<SkillsSettingsView>;
+  showSkill(name: string): Promise<SkillDetailView>;
+  installSkill(request: SkillInstallRequest): Promise<SkillRecordView>;
+  updateSkill(name: string, request?: SkillUpdateRequest): Promise<SkillUpdateResult>;
+  pinSkill(name: string, hash?: string): Promise<SkillRecordView>;
+  unpinSkill(name: string): Promise<SkillRecordView>;
+  removeSkill(name: string): Promise<void>;
+  subscribeSkillSource(source: { id: string; kind?: string; url: string; trust?: string }): Promise<SkillSourceView>;
+  unsubscribeSkillSource(id: string): Promise<void>;
   plugins(): Promise<PluginsView>;
   triggers(): Promise<TriggersView>;
   fireTrigger(id: string, reason?: string): Promise<FireResultView>;

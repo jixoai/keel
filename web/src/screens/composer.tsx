@@ -13,7 +13,7 @@
 // `Textarea` carry their own field chrome and expose no content-size callback,
 // while this field must be chrome-less (the shell's p-3 is the box) and
 // auto-grow. Everything it draws with is still a token.
-import { effect, Picker, platform, signal, Text, type InputRef, untracked, View } from "nsh";
+import { cleanup, effect, Picker, platform, signal, Text, type InputRef, untracked, View } from "nsh";
 import { Input } from "nsh/base";
 import type { ConversationView, Delivery, QueueItemView } from "../data/contract";
 import type { PendingAttachment } from "../data/store";
@@ -36,6 +36,14 @@ import {
   Tooltip,
   typeScale,
 } from "../ui/kit";
+
+import {
+  buildLearnInstruction,
+  completionTrigger,
+  CompletionMenu,
+  insertCompletion,
+  parseLearnCommand,
+} from "./composer-completion";
 
 const draft = signal("");
 const mode = signal<Delivery>("queue");
@@ -149,6 +157,26 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
   const showHint = () => !props.compact;
   const fieldHeight = () => Math.min(Math.max(inputHeight(), oneLine()), fieldCeiling());
 
+  // `$` opens the grouped menu once per session: the first activation loads
+  // skills/files/tasks, later keystrokes reuse the answer. The load leaves the
+  // effect's turn (a signal write inside the first render is not allowed).
+  effect(() => {
+    if (!completionTrigger(draft())) return;
+    const sessionId = store.activeId();
+    if (!sessionId) return;
+    if (store.completionSession() === sessionId) return;
+    const timer = setTimeout(() => void store.loadCompletion(sessionId), 0);
+    cleanup(() => clearTimeout(timer));
+  });
+
+  /** Replace the active `$token` with the chosen row; never send it. */
+  const pickCompletion = (insert: string) => {
+    const active = completionTrigger(draft());
+    if (!active) return;
+    draft.set(insertCompletion(draft(), active.start, insert));
+    untracked(() => input?.focus());
+  };
+
   const addPicked = async () => {
     try {
       const picked = await Picker.pickImages({ maxDimension: 2048, quality: 0.85 });
@@ -188,18 +216,26 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
 
   const send = async () => {
     if (!canSend() || stopping() || sending()) return;
-    const text = draft();
+    const raw = draft();
+    // `/learn` is one message that asks the agent for a skills.manage create;
+    // the tool result is the only success signal, so the composer says what it
+    // sent, never "learned".
+    const learn = parseLearnCommand(raw);
+    const text = learn ? buildLearnInstruction(learn.prompt) : raw;
     const pending = attachments();
     draft.set("");
     attachments.set([]);
     inputHeight.set(0);
     sending.set(true);
+    if (learn) {
+      store.flash({ tone: "info", text: "已发送沉淀请求；以 Agent 的 skills 工具结果为准。" });
+    }
     const ok = await store.send(text, effectiveMode(), pending);
     sending.set(false);
     if (!ok) {
       // Nothing was committed: give the writer their words back (attachment
       // previews included). The reason is in the turn-error banner.
-      draft.set(text);
+      draft.set(raw);
       attachments.set(pending);
     }
   };
@@ -250,6 +286,9 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
             </View>
           ))}
         </View>
+      </If>
+      <If when={!!completionTrigger(draft())}>
+        <CompletionMenu query={completionTrigger(draft())?.query ?? ""} onPick={pickCompletion} />
       </If>
       <ComposerSurface testID="composer-surface">
         <Input

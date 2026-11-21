@@ -39,9 +39,19 @@ import type {
   SecretSaved,
   SecretsView,
   SendOptions,
+  SessionFilesView,
   SessionSummary,
+  SessionTasksView,
   SettingsApi,
   SettingsIssue,
+  SkillDetailView,
+  SkillInstallRequest,
+  SkillRecordView,
+  SkillSourceView,
+  SkillsSettingsView,
+  SkillUpdateRequest,
+  SkillUpdateResult,
+  SkillVersionView,
   TeamMemberView,
   TeamTaskView,
   TeamTasksView,
@@ -66,11 +76,15 @@ export class KeelApiError extends Error {
   readonly issues: SettingsIssue[];
   /** The current revision of a 409 conflict, when the server named one. */
   readonly revision: number | undefined;
-  constructor(status: number, message: string, issues: SettingsIssue[] = [], revision?: number) {
+  /** The server's stable failure code (`pinned`, `untrusted_source`, ...).
+   * A page renders it as the specific state, not a generic error. */
+  readonly code: string | undefined;
+  constructor(status: number, message: string, issues: SettingsIssue[] = [], revision?: number, code?: string) {
     super(message);
     this.status = status;
     this.issues = issues;
     this.revision = revision;
+    this.code = code;
   }
 }
 
@@ -98,12 +112,65 @@ const issueList = (value: unknown): SettingsIssue[] => {
 const numberOr = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
-/** The error body's message, field issues and conflict revision. */
+const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const asText = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** One immutable skill version as the wire sends it. */
+function parseSkillVersion(value: unknown): SkillVersionView {
+  const row = asRecord(value);
+  return {
+    hash: asText(row.hash),
+    createdAt: asText(row.createdAt) || undefined,
+    files: typeof row.files === "number" ? row.files : undefined,
+    bytes: typeof row.bytes === "number" ? row.bytes : undefined,
+  };
+}
+
+/** One installed skill. Unknown trust/conflict values travel verbatim (the
+ * page renders the label it was given instead of guessing a safe one). */
+function parseSkillRecord(value: unknown): SkillRecordView {
+  const row = asRecord(value);
+  return {
+    name: asText(row.name),
+    description: asText(row.description) || undefined,
+    trust: asText(row.trust),
+    sourceId: asText(row.sourceId) || undefined,
+    sourceKind: asText(row.sourceKind) || undefined,
+    sourceUrl: asText(row.sourceUrl) || undefined,
+    currentHash: asText(row.currentHash),
+    pinnedHash: asText(row.pinnedHash) || undefined,
+    installedAt: asText(row.installedAt) || undefined,
+    updatedAt: asText(row.updatedAt) || undefined,
+    versions: listOf(row.versions).map(parseSkillVersion),
+    path: asText(row.path) || undefined,
+    fileCount: typeof row.fileCount === "number" ? row.fileCount : undefined,
+    bytes: typeof row.bytes === "number" ? row.bytes : undefined,
+    updateAvailable: row.updateAvailable === true,
+    availableHash: asText(row.availableHash) || undefined,
+    conflict: asText(row.conflict) || undefined,
+    diagnostics: listOf(row.diagnostics).map((item) => asText(item)).filter((item) => item),
+  };
+}
+
+function parseSkillSource(value: unknown): SkillSourceView {
+  const row = asRecord(value);
+  return {
+    id: asText(row.id),
+    kind: asText(row.kind),
+    url: asText(row.url),
+    trust: asText(row.trust),
+    createdAt: asText(row.createdAt) || undefined,
+  };
+}
+
+/** The error body's message, field issues, conflict revision and code. */
 async function readErrorBody(
   response: Response,
-): Promise<{ message: string; issues: SettingsIssue[]; revision: number | undefined }> {
+): Promise<{ message: string; issues: SettingsIssue[]; revision: number | undefined; code: string | undefined }> {
   const issues: SettingsIssue[] = [];
   let revision: number | undefined;
+  let code: string | undefined;
   let message = "";
   try {
     const text = await response.text();
@@ -113,6 +180,7 @@ async function readErrorBody(
       else if (typeof body.message === "string" && body.message) message = body.message;
       issues.push(...issueList(body.issues));
       if (typeof body.revision === "number" && Number.isFinite(body.revision)) revision = body.revision;
+      if (typeof body.code === "string" && body.code) code = body.code;
       if (!message && issues.length) message = issues[0]?.message ?? "";
     } catch {
       message = text;
@@ -121,7 +189,7 @@ async function readErrorBody(
   } catch {
     message = `HTTP ${response.status}`;
   }
-  return { message, issues, revision };
+  return { message, issues, revision, code };
 }
 
 async function readError(response: Response): Promise<string> {
@@ -524,8 +592,8 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
       ...init,
     });
     if (!response.ok) {
-      const { message, issues, revision } = await readErrorBody(response);
-      throw new KeelApiError(response.status, message, issues, revision);
+      const { message, issues, revision, code } = await readErrorBody(response);
+      throw new KeelApiError(response.status, message, issues, revision, code);
     }
     return response;
   }
@@ -931,6 +999,172 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
   /** `DELETE /v1/settings/secrets/{name}`. */
   async deleteSecret(name: string): Promise<void> {
     await this.request(`/v1/settings/secrets/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  // ---- skill library (change keel-harness-v2, W7 skills) ------------------
+
+  /** `GET /v1/settings/skills` — installed skills, sources and the update /
+   * conflict state. `check` reads each source (the server's default); false
+   * skips it for a fast local read. */
+  async skillsSettings(check = true): Promise<SkillsSettingsView> {
+    const response = await this.request(`/v1/settings/skills${check ? "" : "?check=0"}`);
+    const body = asRecord(await response.json());
+    const limits: Record<string, number> = {};
+    for (const [key, value] of Object.entries(asRecord(body.limits))) {
+      limits[key] = numberOr(value, 0);
+    }
+    const policyRow = asRecord(body.policy);
+    return {
+      revision: numberOr(body.revision, 0),
+      root: asText(body.root) || undefined,
+      checked: body.checked === true,
+      skills: listOf(body.skills).map(parseSkillRecord),
+      sources: listOf(body.sources).map(parseSkillSource),
+      limits,
+      policy: {
+        trustValues: listOf(policyRow.trustValues).map((item) => asText(item)).filter((item) => item),
+        sourceKinds: listOf(policyRow.sourceKinds).map((item) => asText(item)).filter((item) => item),
+        maxFiles: typeof policyRow.maxFiles === "number" ? policyRow.maxFiles : undefined,
+        maxBytes: typeof policyRow.maxBytes === "number" ? policyRow.maxBytes : undefined,
+        maxFileBytes: typeof policyRow.maxFileBytes === "number" ? policyRow.maxFileBytes : undefined,
+        scriptExecution: asText(policyRow.scriptExecution) || undefined,
+      },
+    };
+  }
+
+  /** `GET /v1/settings/skills/{name}` — one skill with its body and manifest. */
+  async showSkill(name: string): Promise<SkillDetailView> {
+    const response = await this.request(`/v1/settings/skills/${encodeURIComponent(name)}`);
+    const body = asRecord(await response.json());
+    const record = parseSkillRecord(body);
+    return {
+      ...record,
+      body: asText(body.body),
+      files: listOf(body.files).map((item) => {
+        const file = asRecord(item);
+        return {
+          path: asText(file.path),
+          size: numberOr(file.size, 0),
+          hash: asText(file.hash) || undefined,
+          mode: typeof file.mode === "number" ? file.mode : undefined,
+        };
+      }),
+    };
+  }
+
+  /** `POST /v1/settings/skills` — install a bundle or the convenience
+   * description/body form. The server returns the versioned record. */
+  async installSkill(request: SkillInstallRequest): Promise<SkillRecordView> {
+    const response = await this.request("/v1/settings/skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    return parseSkillRecord(await response.json());
+  }
+
+  /** `POST /v1/settings/skills/{name}/update` — advance to the recorded
+   * source's current bundle. A pinned skill answers 409 with code "pinned". */
+  async updateSkill(name: string, request: SkillUpdateRequest = {}): Promise<SkillUpdateResult> {
+    const response = await this.request(`/v1/settings/skills/${encodeURIComponent(name)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const body = asRecord(await response.json());
+    return {
+      status: asText(body.status) || "updated",
+      record: body.record ? parseSkillRecord(body.record) : undefined,
+      previousHash: asText(body.previousHash) || undefined,
+      availableHash: asText(body.availableHash) || undefined,
+      pinnedHash: asText(body.pinnedHash) || undefined,
+      updateAvailable: body.updateAvailable === true,
+    };
+  }
+
+  /** `POST /v1/settings/skills/{name}/pin` — activate and hold a version. */
+  async pinSkill(name: string, hash?: string): Promise<SkillRecordView> {
+    const response = await this.request(`/v1/settings/skills/${encodeURIComponent(name)}/pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(hash ? { hash } : {}),
+    });
+    return parseSkillRecord(await response.json());
+  }
+
+  /** `POST /v1/settings/skills/{name}/unpin` — release the hold. */
+  async unpinSkill(name: string): Promise<SkillRecordView> {
+    const response = await this.request(`/v1/settings/skills/${encodeURIComponent(name)}/unpin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    return parseSkillRecord(await response.json());
+  }
+
+  /** `DELETE /v1/settings/skills/{name}`. */
+  async removeSkill(name: string): Promise<void> {
+    await this.request(`/v1/settings/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  /** `POST /v1/settings/skills/sources` — subscribe a local source. */
+  async subscribeSkillSource(source: {
+    id: string;
+    kind?: string;
+    url: string;
+    trust?: string;
+  }): Promise<SkillSourceView> {
+    const response = await this.request("/v1/settings/skills/sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(source),
+    });
+    return parseSkillSource(await response.json());
+  }
+
+  /** `DELETE /v1/settings/skills/sources/{id}`. */
+  async unsubscribeSkillSource(id: string): Promise<void> {
+    await this.request(`/v1/settings/skills/sources/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** `GET /v1/sessions/{id}/files` — the `$` file group's source. Optional in
+   * the Client seam; the live transport always serves it. */
+  async sessionFiles(sessionId: string): Promise<SessionFilesView> {
+    const response = await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/files`);
+    const body = asRecord(await response.json());
+    return {
+      files: listOf(body.files).map((item) => {
+        const file = asRecord(item);
+        return {
+          path: asText(file.path),
+          size: numberOr(file.size, 0),
+          updatedSeq: numberOr(file.updatedSeq, 0),
+          lastTaskId: asText(file.lastTaskId) || undefined,
+        };
+      }),
+      count: numberOr(body.count, 0),
+      truncated: body.truncated === true,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/tasks` — the `$` task group's source. */
+  async sessionTasks(sessionId: string): Promise<SessionTasksView> {
+    const response = await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/tasks`);
+    const body = asRecord(await response.json());
+    return {
+      tasks: listOf(body.tasks).map((item) => {
+        const task = asRecord(item);
+        return {
+          taskId: asText(task.taskId),
+          parentTaskId: asText(task.parentTaskId) || undefined,
+          title: asText(task.title),
+          status: asText(task.status),
+          updatedAt: asText(task.updatedAt) || undefined,
+        };
+      }),
+      count: numberOr(body.count, 0),
+      truncated: body.truncated === true,
+    };
   }
 
   /** `GET /v1/plugins` — the assembled extension surface. */
