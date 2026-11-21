@@ -38,7 +38,7 @@ Agent 是**完整的智能体配置**，不是 subagent 的别名。一个 Agent
    支持上传/URL 覆盖。
 5. 描述、标签、技能、权限、团队 CLI 能力开关等扩展字段。
 
-Agent 插件 MUST 提供 CLI：`keel agent list|show|create|update|delete|start|stop`，
+Agent 插件 MUST 提供 CLI：`keel agent list|show|create|update|delete|archive|start|stop`，
 不仅能启动，也能管理 Agent 配置。
 
 ### 3. AgentTeam 插件（agent-team-plugin）
@@ -46,7 +46,7 @@ Agent 插件 MUST 提供 CLI：`keel agent list|show|create|update|delete|start|
 - **AgentTeam 必须有队长（captain）**；队长是 Agent 的一个实例。
 - 成员自由：可以 0 个、1 个或 N 个；成员本身就是 Agent 配置，可以引用已有 Agent 或现场创建。
 - Team 预设保存：队长、成员、团队级默认模型/工具、团队能力开关、CLI 组装权限。
-- AgentTeam 插件提供 CLI + UI：`keel team list|show|create|update|delete|member add|remove|start`。
+- AgentTeam 插件提供 CLI + UI：`keel team list|show|create|update|delete|archive|member add|remove|start`。
 - **队长可以通过 CLI 自己创建成员/组装团队**；只有显式禁用队长的
   `agent-team` CLI 能力时，团队才被锁死。
 - 团队不是 subagent：成员是独立 Agent（有自己的配置、模型、工具、提示词），由团队插件

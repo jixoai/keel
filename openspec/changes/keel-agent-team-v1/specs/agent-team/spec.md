@@ -39,7 +39,7 @@ AgentTeam MUST 是一个命名的团队配置，MUST 恰好包含一个 captain�
 ### Requirement: 团队 CLI 与自组装
 
 AgentTeam 插件 MUST 提供 CLI：
-`keel team list|show|create|update|delete|member add|remove|list|save|start`；
+`keel team list|show|create|update|delete|archive|member add|remove|list|save|start`；
 每个子命令 MUST 在能力树声明 summary/description/schema/permissions/danger/callable_by。
 
 - captain 能否调用 CLI MUST 由 Agent/团队两级 `teamCli.enabled` 与逐命令白名单单一裁决
@@ -85,6 +85,10 @@ MUST NOT 启动：启动门 MUST 要求已 Seal（`not_sealed`），否则 manif
 
 - Agent 被团队引用时 MUST NOT 被硬删除；只能归档/禁用，并列出引用团队。
 - 团队被会话引用时 MUST NOT 被硬删除；只能归档，历史会话保留快照可读。
+- 会话引用 MUST 以最新 selection 的派生绑定判定：未归档会话一律算引用；已归档会话不算，
+  但仍有 pending/running run 时算；409 MUST 列出会话 references（细节见 session-binding spec）。
+- 归档操作 MUST 复用同一引用检查（活跃会话时 409 `team_in_use`）；解绑 = 归档会话或发送
+  只选模型的新输入。
 - 团队切换只影响下一次 run，不改写历史。
 
 #### Scenario: 运行中修改团队

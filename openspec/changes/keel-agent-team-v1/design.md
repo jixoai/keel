@@ -126,9 +126,10 @@ Agent 是完整智能体配置，不是 subagent：
 - **头像**默认确定性 identicon（GitHub 风格 5×5 网格），由 `seed`（默认 agent id）本地生成，
   不依赖外部头像服务；支持上传/URL 覆盖。相同 seed 必须得到相同头像。
 - **description/标签**用于团队选择、Agent 库和会话显示；可由用户自由编辑。
-- **CLI**：`keel agent list|show|create|update|delete|start|stop`；
-  `start` 是启动，`create/update/delete` 是管理，不得只提供 start。
-- Agent 删除前检查团队/会话引用；被引用时只能归档。
+- **CLI**：`keel agent list|show|create|update|delete|archive|start|stop`；
+  `start` 是启动，`create/update/delete/archive` 是管理，不得只提供 start。
+- Agent 删除前检查团队/会话引用；被引用时只能归档。归档同样检查活跃会话引用，
+  团队席位不阻塞归档。
 
 ## 5. AgentTeam 插件（agent-team-plugin）
 

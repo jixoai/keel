@@ -57,7 +57,7 @@ UI MUST 提供 seed 重生成、上传与 URL 覆盖；头像加载失败 MUST �
 ### Requirement: Agent CLI 管理能力
 
 agent-plugin MUST 提供可发现的 CLI 能力树：
-`keel agent list|show|create|update|delete|start|stop`，每个子命令 MUST 声明
+`keel agent list|show|create|update|delete|archive|start|stop`，每个子命令 MUST 声明
 summary/description/args·output schema/权限/danger/idempotent/callable_by；
 CLI 写操作 MUST 与 UI 同一校验与租户边界，MUST NOT 出现只能启动不能管理的残缺能力。
 
@@ -75,9 +75,18 @@ CLI 写操作 MUST 与 UI 同一校验与租户边界，MUST NOT 出现只能启
 Agent 被团队或会话引用时 MUST NOT 被硬删除；只能归档/禁用，并 MUST 返回引用方。
 归档 Agent MUST 保留历史快照可读，MUST NOT 影响已启动 run。
 
+- 团队引用与会话引用 MUST 在同一个 `references` 数组中返回；会话项 MUST 带
+  `kind:"session"` 与 state/runStatus/archived（细节见 session-binding spec）。
+- 归档 MUST 允许团队引用（归档是被团队引用时的修复动作），但 MUST 被活跃会话引用拒绝，
+  返回同一 409 `agent_in_use` 与 references。
+
 #### Scenario: 删除被团队引用的 Agent
 - **WHEN** 用户删除一个团队成员 Agent
 - **THEN** 删除被拒绝并列出团队；UI 提供“从团队移除后删除”或“归档”动作
+
+#### Scenario: 删除被会话引用的 Agent
+- **WHEN** 用户删除一个被活跃会话绑定的 Agent
+- **THEN** 409 `agent_in_use` 列出会话；归档会话或发送只选模型的新输入后删除成功
 
 ### Requirement: Agent 配置在 run 装配中生效
 
