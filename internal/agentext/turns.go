@@ -73,12 +73,26 @@ type StartTurnResult struct {
 // path triggers, sub-agents and the manual fire endpoint share: the durable log
 // is the only truth and the kernel's requestId dedupe is the durable
 // idempotency key.
+// SessionBinder projects a committed user.message's selection onto the session
+// binding index (session reference protection). agentext keeps the seam narrow
+// on purpose: it must not depend on the product's selection vocabulary
+// (internal/sessionbinding -> internal/modelcfg), because modelcfg's own tests
+// import host -> agentext. The serve layer passes the concrete recorder.
+type SessionBinder interface {
+	Record(ctx context.Context, tenantID, sessionID uuid.UUID, payload json.RawMessage, seq int64, deduped bool) error
+}
+
 type TurnStarter struct {
 	Gate  SessionGate
 	Edge  kernel.Committer
 	Hooks *HookBus
 	Log   *slog.Logger
 	Now   func() time.Time
+	// Bindings projects a committed input's selection onto the session binding
+	// index. It is shared by every StartTurn caller — triggers, sub-agent spawn
+	// and manual fire — so a child session is never invisible to the registry's
+	// delete/archive guard. Nil is a no-op.
+	Bindings SessionBinder
 }
 
 // NewTurnStarter validates the inputs. Gate and Edge are required.
@@ -129,6 +143,15 @@ func (s *TurnStarter) StartTurn(ctx context.Context, req StartTurnRequest) (Star
 	})
 	if err != nil {
 		return StartTurnResult{}, err
+	}
+	// The committed event is the truth; the projection is what makes a live
+	// child session block an Agent/Team delete or archive. StartTurn is the one
+	// choke point triggers, sub-agent spawn and manual fire share, so every
+	// product-initiated input gets the same treatment as POST /input.
+	if s.Bindings != nil {
+		if err := s.Bindings.Record(ctx, req.TenantID, sessionID, raw, receipt.Seq, receipt.Deduped); err != nil {
+			return StartTurnResult{}, err
+		}
 	}
 	// No turn.started here: committing the input is a *submission*, not a start.
 	// The attempt-level emitter (TurnTelemetry, wrapping the runner's span) is the

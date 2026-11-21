@@ -44,6 +44,7 @@ import (
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
+	"github.com/jixoai/keel/internal/sessionbinding"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 	"github.com/jixoai/keel/internal/tasklog"
@@ -970,7 +971,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Logger:    log,
 		BaseURL:   os.Getenv("KEEL_PUBLIC_BASE_URL"),
 	})
+	// The binding projection is one recorder shared by every TurnStarter path
+	// (triggers, sub-agent spawn, manual fire) and by the HTTP input paths. It
+	// only writes the derived sessions.bound_* index; the event ledger stays the
+	// truth.
+	bindingRecorder := sessionbinding.New(st)
 	starter := agentext.NewTurnStarter(sessions, admission, hooks, log)
+	starter.Bindings = bindingRecorder
 	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate:    sessions,
 		Edge:    admission,
@@ -984,6 +991,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// before the child session or its user.message exists. Bind the same
 		// per-generation gate the /input edge uses so the two cannot drift.
 		ValidateSelection: selectFromCurrentGeneration(rt),
+		// A live child session must block its Agent's delete/archive exactly like
+		// a session started through POST /input (session reference protection).
+		Bindings: bindingRecorder,
 	})
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter,

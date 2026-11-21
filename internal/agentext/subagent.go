@@ -149,6 +149,10 @@ type SubagentOptions struct {
 	// deny is refused at the spawn call instead of failing every attempt.
 	// Nil is fail-closed: a selection is refused when no validator is wired.
 	ValidateSelection func(json.RawMessage) error
+	// Bindings projects the child's selection onto the session binding index, so
+	// a live child session blocks its Agent's delete/archive exactly like a
+	// session started through POST /input. Nil keeps the pre-projection behavior.
+	Bindings SessionBinder
 }
 
 const (
@@ -207,6 +211,7 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 	}
 	if opts.Gate != nil && opts.Edge != nil {
 		r.starter = NewTurnStarter(opts.Gate, opts.Edge, opts.Hooks, opts.Logger)
+		r.starter.Bindings = opts.Bindings
 	}
 	return r
 }

@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/sessionbinding"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // selectionValidator stands in for the input edge's submit-time gate: it records
@@ -53,6 +55,7 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 		Runs:              storeSessions{st},
 		Logger:            testLogger(),
 		ValidateSelection: validator.validate,
+		Bindings:          sessionbinding.New(st),
 	})
 
 	record, err := runner.SpawnAsync(ctx, agentext.SpawnRequest{
@@ -99,6 +102,24 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 	if selection.AgentID != "agent_member_7" || selection.TeamID != "" {
 		t.Fatalf("child selection = %+v, want agent_member_7", selection)
 	}
+	// The spawn is not only a ledger fact: it must also project onto the child
+	// session's binding index, which is what the registry's delete/archive guard
+	// reads. A child invisible here would let its Agent be deleted while the
+	// child is still live.
+	binding, found, err := st.GetSessionBinding(ctx, tenant, child)
+	if err != nil || !found {
+		t.Fatalf("child binding: found=%v err=%v", found, err)
+	}
+	if binding.AgentID != "agent_member_7" || binding.TeamID != "" || binding.Seq != events[0].Seq {
+		t.Fatalf("child binding = %+v, want agent_member_7 seq %d", binding, events[0].Seq)
+	}
+	refs, total, err := st.SessionsReferencingAgent(ctx, tenant, "agent_member_7")
+	if err != nil {
+		t.Fatalf("session references: %v", err)
+	}
+	if total != 1 || len(refs) != 1 || refs[0].ID != child.String() {
+		t.Fatalf("agent references = %+v, want the child session %s", refs, child)
+	}
 
 	// A spawn without a binding keeps the child input free of a selection fact
 	// (the child then runs the deployment default).
@@ -126,6 +147,13 @@ func TestSubagentSpawnCarriesTheMemberBinding(t *testing.T) {
 	}
 	if len(plainPayload.Selection) != 0 {
 		t.Fatalf("a bindingless spawn invented a selection: %s", plainPayload.Selection)
+	}
+	plainBinding, plainFound, err := st.GetSessionBinding(ctx, tenant, plainChild)
+	if err != nil || !plainFound {
+		t.Fatalf("plain child binding: found=%v err=%v", plainFound, err)
+	}
+	if plainBinding != (store.SessionBinding{}) {
+		t.Fatalf("a bindingless spawn wrote a projection: %+v", plainBinding)
 	}
 
 	// The binding the spawn stored is exactly the selection the submit-time gate
@@ -171,6 +199,7 @@ func TestSubagentSpawnRefusesAnInvalidSelectionBeforeCommit(t *testing.T) {
 		Runs:              storeSessions{st},
 		Logger:            testLogger(),
 		ValidateSelection: validator.validate,
+		Bindings:          sessionbinding.New(st),
 	})
 	const key = "refused-selection"
 	_, err = runner.SpawnAsync(ctx, agentext.SpawnRequest{

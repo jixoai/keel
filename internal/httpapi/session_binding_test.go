@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,9 +23,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/agentteam"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/modelcfg"
+	"github.com/jixoai/keel/internal/sessionbinding"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -430,5 +433,97 @@ func TestConcurrentInputsProjectNewestSeq(t *testing.T) {
 			t.Fatalf("round %d: binding = %+v, want seq %d agent %q (newest committed input)",
 				round, binding, newestSeq, newestAgent)
 		}
+	}
+}
+
+// sessionRefRuns adapts the store's run row to agentext.RunStateReader for the
+// spawn integration test.
+type sessionRefRuns struct{ *store.Store }
+
+func (r sessionRefRuns) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RunState, error) {
+	run, err := r.GetRun(ctx, tenantID, sessionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNoRun) {
+			return agentext.RunState{}, agentext.ErrNoRun
+		}
+		return agentext.RunState{}, err
+	}
+	return agentext.RunState{Status: run.Status, Attempts: run.Attempts, CursorSeq: run.CursorSeq, LastError: run.LastError}, nil
+}
+
+// TestSpawnedSubagentBlocksAgentDeletion pins the spawn path end to end: a child
+// created by agentext.TurnStarter projects its selection onto the child session,
+// and the HTTP delete guard therefore refuses the Agent with 409 agent_in_use.
+// This is the regression the B-axis review found (TurnStarter bypassed the
+// projection, so a live child session could not block its Agent).
+func TestSpawnedSubagentBlocksAgentDeletion(t *testing.T) {
+	hs, st := newSessionRefServer(t)
+	tenant := newSessionRefTenant(t, st)
+	tenantText := tenant.String()
+	parent := newSessionRefSession(t, st, tenant)
+	ctx := context.Background()
+
+	var agent AgentView
+	if status := doJSON(t, http.DefaultClient, http.MethodPost, hs.URL+"/v1/agents", tenantText,
+		map[string]any{"id": "agent_spawn_ref", "name": "Spawn Agent"}, &agent); status != http.StatusCreated {
+		t.Fatalf("create agent: status %d", status)
+	}
+
+	klog, err := kernel.NewPG(ctx, st.Pool())
+	if err != nil {
+		t.Fatalf("apply kernel migration: %v", err)
+	}
+	kern := kernel.New(klog, kernel.Options{})
+	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
+		Gate:   st,
+		Edge:   kern,
+		Events: kern,
+		Runs:   sessionRefRuns{st},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ValidateSelection: func(raw json.RawMessage) error {
+			return modelcfg.ValidateSelectionFact(raw)
+		},
+		Bindings: sessionbinding.New(st),
+	})
+	record, err := runner.SpawnAsync(ctx, agentext.SpawnRequest{
+		TenantID:        tenant,
+		ParentSessionID: parent,
+		Task:            "child task",
+		AgentID:         agent.ID,
+	})
+	if err != nil {
+		t.Fatalf("SpawnAsync: %v", err)
+	}
+	child, err := uuid.Parse(record.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, found, err := st.GetSessionBinding(ctx, tenant, child)
+	if err != nil || !found {
+		t.Fatalf("child binding: found=%v err=%v", found, err)
+	}
+	events, err := st.LoadEvents(ctx, tenant, child, 0, 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("child events = %d err=%v, want one user.message", len(events), err)
+	}
+	if binding.AgentID != agent.ID || binding.Seq != events[0].Seq {
+		t.Fatalf("child binding = %+v, want agent %s seq %d", binding, agent.ID, events[0].Seq)
+	}
+
+	// The guard must see the spawned child, not only sessions started through
+	// POST /input.
+	var refusal sessionRefusal
+	status := doJSON(t, http.DefaultClient, http.MethodDelete, hs.URL+"/v1/agents/"+agent.ID, tenantText, nil, &refusal)
+	if status != http.StatusConflict || refusal.Code != "agent_in_use" {
+		t.Fatalf("delete spawned agent: status %d code %q, want 409 agent_in_use", status, refusal.Code)
+	}
+	foundRef := false
+	for _, reference := range refusal.References {
+		if reference["kind"] == "session" && reference["id"] == child.String() {
+			foundRef = true
+		}
+	}
+	if !foundRef {
+		t.Fatalf("references = %+v, want the child session %s", refusal.References, child)
 	}
 }
