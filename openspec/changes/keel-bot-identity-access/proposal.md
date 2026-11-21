@@ -25,8 +25,8 @@ Keel 现在只有一个部署口令（`KEEL_SERVE_PASSWORD`）和一个租户（
 
 - **删除产品词汇 `Agent`**。产品内部、API、CLI、UI、文档、表名一律使用 `Bot`；
   `TeamAgent` 改为 `TeamBot`。
-- 保留内核技术词 `agentcore` / `agentloop` / `agenttool` 的讨论另见 Open Decision D4；
-  它们指 PI 的 loop/工具执行，不是产品实体。
+- 保留内核技术词 `agentcore` / `agentloop` / `agenttool` 作为 PI loop 的技术名词；
+  产品面/产品域包必须改为 Bot 语义，边界见 D4（已冻结）。
 - `AgentAPI`、`/v1/agents`、`keel agent`、`agents` 表等产品面命名全部改为 Bot 语义。
 
 ### 2. 领域模型
@@ -42,8 +42,9 @@ Session → 属于一个 Bot → 属于一个 Account
 - **Account**：登录主体与权限主体；人账号与 Bot 账号统一建模。
 - **Role**：只提供身份与灵魂（名字、Instruction、语气、默认行为），**不授予权限**。
 - **Profile**：Account + Role 的绑定；Bot 通过 Profile 获得权限与人格。
-- **ModelKind**：模型类型（text / image / decision / realtime / …），决定底层工作方式；
-  具体模型选择另见 Open Decision D3。
+- **ModelKind**：模型类型（text / image / decision / realtime / …），决定底层工作方式。
+  Bot 仍有一个**默认模型**（provider + model）；运行时可带参数覆盖默认模型；
+  Session/Run 快照记录实际解析出的模型。
 - **Harness**：给模型的环境，包含工具与上下文；上下文 = Instruction + permissions。
 - **TeamBot**：一个团队目标/使命（Mission）+ Bot 引用名单（Roster）。TeamBot **不是权限主体**，
   没有自己的 Account/Profile，不拥有 Session；权限始终只在 Bot。TeamBot 是资源，由某个
@@ -114,13 +115,17 @@ Session → 属于一个 Bot → 属于一个 Account
 | L11 | Bot 有效权限 | `Account 权限 ∩ Harness permissions`；Account 是上限，Harness 是收窄；Role 不授权 |
 | L12 | TeamBot 不是权限主体 | TeamBot = Mission + Roster；不拥有 Account/Profile/Session，不向成员授予权限；权限只在 Bot |
 | L13 | Bot 调用是能力授权 | `bot.invoke` 是授权边界；Bot 以自己的 Account ∩ Harness 权限执行，不做调用链交集；`bot.invoke` 高危、可撤销、审计 |
+| L14 | 权限对称 | 人类账号能做的事，Bot 账号在拥有相同 permission-key 时也能做；没有 Bot 专属权限，也没有人类专属权限（登录方式除外） |
+| L15 | ModelKind 与默认模型 | ModelKind 必填；Bot 有默认 provider/model；运行时可带参数覆盖；Session/Run 快照记录实际解析出的模型 |
+| L16 | 重命名边界 | 产品面（表/API/CLI/UI/文档）与产品域包改为 Bot；PI 技术包 `agentcore`/`agentloop`/`agenttool`/`internal/agent` 保留，例外清单入 design |
 
 ## Open Decisions（阻塞 spec 冻结）
 
 - **D1（已冻结）**：Bot 有效权限 = `Account 权限 ∩ Harness permissions`（L11）。
 - **D2（已冻结）**：TeamBot 不是 Bot，也不是权限主体；它是 Mission + Roster（L12）。
-- **D3**：ModelKind 只写类型，还是“类型 + 具体模型默认值”？
-- **D4**：重命名边界：只改产品面/API/CLI/UI/表名，还是连 Go 包名（`internal/agent*`）一起改？
+- **D3（已冻结）**：ModelKind 必填 + Bot 默认模型；运行时可带参数覆盖默认模型；
+  Session/Run 快照记录实际解析出的模型（L15）。
+- **D4（已冻结）**：产品面 + 产品域包重命名；PI 技术包保留（L16）。
 - **D5**：首个超管 bootstrap / auth-off / 恢复流程的具体形态。
 - **D6**：旧 sessions/agents/teams 数据是清空重建，还是由 bootstrap 超管接管为初始 Bot？
 - **D7**：Bot 账号是否可登录（密码）还是只发 API key；API key 是否绑定 Account。

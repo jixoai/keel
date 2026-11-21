@@ -39,6 +39,24 @@ Session → 属于一个 Bot → 属于一个 Account
    不做调用链交集。`bot.invoke` 是高危权限，必须精确授予、可撤销、审计。
 7. **无人值守不得绕过授权者。** 定时/Webhook/后台任务以 Bot 账号权限运行；创建/绑定受
    permission-key 与不变量 5 约束，不引入第二套委托机制。
+8. **权限对称。** 人类账号能做的事，Bot 账号在拥有相同 permission-key 时也能做；
+   没有 Bot 专属权限，也没有人类专属权限（登录方式除外）。`grant ⊆ own` 对两者同样生效。
+
+### 1.2 管家 Bot：权限对称的验收场景
+
+Owner 场景（2026-11-21）：部署里一开始只有一个“管家 Bot”。用户对它说需求，它用自己的
+Account 权限创建 Bot、创建 TeamBot（Mission + Roster）、配置权限组并启动团队。
+
+这条场景 MUST 成立，且 MUST NOT 需要任何 Bot 专属代码路径：
+
+1. 管家 Bot 有 `bot.create`、`team_bot.manage`、`permission.manage`、`account.read` 等 key；
+2. 它创建成员 Bot（默认属于同一个 Account，或按 `account.create` 新建 Account）；
+3. 它创建 TeamBot，写 mission 与 roster；
+4. 它在 `grant ⊆ own` 约束下创建/分配权限组；
+5. 它启动团队，成员 Bot 各自以自己的 Account/Harness 权限工作；
+6. 全过程落审计，DAG 可视化。
+
+如果某一步需要“只有人类能做”的特判，说明权限模型有漏洞；不允许加 Bot 专属旁路。
 
 ## 2. 账号与认证
 
@@ -202,6 +220,7 @@ resource_relations (
   "name": "客服一号",
   "profile": {"accountId": "...", "roleId": "..."},
   "modelKind": "text",
+  "defaultModel": {"providerId": "magpie", "modelId": "bailian-token-plan/qwen3.8-flash"},
   "harness": {
     "tools": ["bash", "mcp", "tasks"],
     "context": {
@@ -213,7 +232,8 @@ resource_relations (
 ```
 
 - `Profile` 是引用；Account 与 Role 都可复用。
-- `ModelKind` 必填；具体模型见 D3。
+- `ModelKind` 必填；Bot 有默认 `provider/model`；运行时参数可覆盖默认值；
+  Session/Run 快照记录实际解析出的模型。
 - `Harness.tools` 是白名单；实际工具面 = 部署 registry ∩ 白名单。
 - `Harness.context.permissions` 是 Bot 自己的收窄；有效权限 = `Account 权限 ∩ Harness permissions`（L11）。
 
@@ -288,6 +308,22 @@ TeamBot 是**团队目标/使命 + Bot 名单**，不是权限主体：
 - 无权限的导航/按钮隐藏；直接访问显示 403 页面（五态齐全）。
 
 ## 6. 迁移（Alpha 零兼容）
+
+### 6.1 重命名边界（D4 A）
+
+产品面与产品域包 MUST 改为 Bot 语义：
+
+- 表：`agents` → `bots`，`agent_teams` → `team_bots`；相关列/索引同步。
+- API：`/v1/agents` → `/v1/bots`，`/v1/teams` → `/v1/team-bots`。
+- CLI：`keel agent` → `keel bot`，`keel team` → `keel team-bot`。
+- UI/文档/错误文案：删除 `Agent`/`TeamAgent`。
+- 产品域包：`internal/agentteam` → `internal/botteam`；`internal/agentapi` → `internal/harnessapi`；
+  `internal/agentext` → `internal/harnessext`。
+
+PI 技术包保留原名，并在 `docs/ARCHITECTURE.md` 写明例外：
+
+- `internal/agentcore`、`internal/agentloop`、`internal/agenttool`、`internal/agent`
+  指 PI 的 loop/工具执行/runner，不是产品 Bot。
 
 1. 新 schema 启动时创建 `accounts` 等新表；旧 `agents`/`agent_teams`/`api_keys` 表删除或忽略。
 2. 首次启动无超管 → 要求 bootstrap；不允许匿名进入。

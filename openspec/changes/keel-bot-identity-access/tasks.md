@@ -7,8 +7,8 @@
 
 - [x] D1：Bot 有效权限 = `Account 权限 ∩ Harness permissions`（已冻结，L11）
 - [x] D2：TeamBot 不是 Bot、不做权限主体；它是 Mission + Roster（已冻结，L12）
-- [ ] D3：ModelKind 只写类型，还是“类型 + 具体模型默认值”
-- [ ] D4：重命名边界（产品面/表/API/CLI/UI vs 连 Go 包名一起改）
+- [x] D3：ModelKind + Bot 默认模型；运行时可覆盖；快照记录实际模型（L15）
+- [x] D4：产品面 + 产品域包重命名；PI 技术包保留（L16）
 - [ ] D5：bootstrap / auth-off / 超管恢复流程
 - [ ] D6：旧 sessions/agents/teams 数据清空还是接管
 - [ ] D7：Bot 账号登录方式（密码 vs API key）与 API key 归属
@@ -23,6 +23,9 @@
       `permission_group_members` / `permission_group_grants` / `permission_grants` /
       `resource_relations` / `auth_sessions` / `auth_events`
 - [ ] 旧表退役：`agents` / `agent_teams` / `api_keys`；不保留兼容视图
+- [ ] 重命名：`agents`→`bots`、`agent_teams`→`team_bots`、`/v1/agents`→`/v1/bots`、
+      `keel agent`→`keel bot`；产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、
+      `agentext`→`harnessext`；PI 技术包保留（L16）
 - [ ] `sessions` 增 `bot_id` / `account_id` / `created_by_account_id`；旧数据按 D6 处理
 - [ ] RLS：所有新表 ENABLE/FORCE ROW LEVEL SECURITY + tenant policy；目录级测试
 - [ ] 领域包：`Bot` / `TeamBot` / `Account` / `Role` / `Profile` 纯数据 + 校验 + 规范化
@@ -76,6 +79,9 @@
 - [ ] 单元/负控：密码、cookie、CSRF、限速、并集、scope、`grant ⊆ own`、跨租户、
       低权限借 Bot、旧入口
 - [ ] 集成：登录 → 建 Bot → Session → 工具 → 共享 → 撤销 → 下一工具 403
+- [ ] 管家 Bot E2E：一个有 `bot.create`/`team_bot.manage`/`permission.manage` 的 Bot
+      创建成员 Bot + TeamBot（Mission/Roster）+ 权限组并启动团队；无 Bot 专属旁路
+- [ ] 权限对称：同一 permission-key 下人类账号与 Bot 账号行为一致；只允许登录方式不同
 - [ ] 无人值守：触发器/Webhook 以 Bot 账号运行；`grant ⊆ own` 负控
 - [ ] CI 覆盖率门全绿；路由/工具/CLI/UI 清单快照
 - [ ] E2E 每步截图 + HTML 报告；人类调用 + 无人值守两条真链路

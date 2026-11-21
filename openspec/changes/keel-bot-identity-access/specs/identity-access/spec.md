@@ -62,10 +62,11 @@ MAY 跨租户操作，MUST 能管理账号、权限组、Bot 与 TeamBot。超�
 ### Requirement: 产品领域只使用 Bot 与 TeamBot
 
 产品内部、API、CLI、UI、文档与数据库表 MUST 使用 `Bot` 与 `TeamBot`，MUST NOT 使用
-`Agent` 或 `TeamAgent` 指代产品实体。Bot MUST 由 Profile、ModelKind 与 Harness 组成：
-Profile 提供 Account 与 Role；ModelKind 表示模型类型；Harness 提供工具与上下文
-（Instruction + permissions）。Role MUST 只提供身份与灵魂，MUST NOT 授予权限。
-Account MUST 拥有多个 Bot；TeamBot MUST 由多个 Bot 组装。
+`Agent` 或 `TeamAgent` 指代产品实体。Bot MUST 由 Profile、ModelKind、默认模型与 Harness
+组成：Profile 提供 Account 与 Role；ModelKind 表示模型类型；默认模型给出 provider/model；
+Harness 提供工具与上下文（Instruction + permissions）。运行时 MUST 允许用参数覆盖默认模型；
+Session/Run 快照 MUST 记录实际解析出的模型。Role MUST 只提供身份与灵魂，MUST NOT 授予权限。
+Account MUST 拥有多个 Bot；TeamBot MUST 由多个 Bot 组装，但 MUST NOT 成为权限主体。
 
 #### Scenario: 旧词汇入口被删除
 - **WHEN** 客户端请求 `/v1/agents` 或执行 `keel agent`
@@ -75,6 +76,27 @@ Account MUST 拥有多个 Bot；TeamBot MUST 由多个 Bot 组装。
 - **GIVEN** 一个 Bot 的 Role 文本声明“可以管理密钥”
 - **WHEN** 该 Bot 尝试调用密钥管理工具
 - **THEN** 权限判定只看 Account 与 Harness permissions，Role 文本不产生授权
+
+#### Scenario: 默认模型可被覆盖
+- **GIVEN** Bot 的默认模型是 M1
+- **WHEN** 一次调用带参数指定模型 M2
+- **THEN** 本次运行使用 M2
+- **AND** Session/Run 快照记录 M2
+
+### Requirement: 人类与 Bot 的权限对称
+
+人类账号能做的事，Bot 账号在拥有相同 permission-key 与 scope 时 MUST 也能做。
+系统 MUST NOT 定义 Bot 专属权限或人类专属权限（登录方式除外）。`grant ⊆ own` MUST 对
+人类账号与 Bot 账号同样生效。一个拥有 `bot.create`、`team_bot.manage`、`permission.manage`
+等 key 的 Bot MUST 能创建 Bot、创建 TeamBot、配置权限组并启动团队，不需要任何 Bot 专属
+代码路径。
+
+#### Scenario: 管家 Bot 创建并启动团队
+- **GIVEN** 管家 Bot 的账号持有 `bot.create`、`team_bot.manage`、`permission.manage`
+- **WHEN** 用户要求它组建一个团队
+- **THEN** 它创建成员 Bot、创建带 Mission/Roster 的 TeamBot、在 `grant ⊆ own` 内配置权限
+- **AND** 它启动团队，成员 Bot 各以自己的 Account/Harness 权限工作
+- **AND** 全过程写入审计，运行 DAG 可查询
 
 ### Requirement: permission-key 是功能的唯一权限词汇
 
