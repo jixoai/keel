@@ -1,0 +1,14 @@
+$ go test -v -count=1 ./internal/mediawiring ./internal/mediaadapter -run "TestBuildWiresImageAndVideoToolsIntoTheHostSurface|TestBuildKeepsMissingCredentialFailClosed|TestDecisionPreflightIsTheSettingsGate|TestMediaToolsTakeTheSessionFromTheRunScope"
+=== RUN   TestBuildWiresImageAndVideoToolsIntoTheHostSurface
+--- PASS: TestBuildWiresImageAndVideoToolsIntoTheHostSurface (0.08s)
+=== RUN   TestBuildKeepsMissingCredentialFailClosed
+--- PASS: TestBuildKeepsMissingCredentialFailClosed (0.00s)
+=== RUN   TestDecisionPreflightIsTheSettingsGate
+--- PASS: TestDecisionPreflightIsTheSettingsGate (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediawiring	0.399s
+=== RUN   TestMediaToolsTakeTheSessionFromTheRunScope
+--- PASS: TestMediaToolsTakeTheSessionFromTheRunScope (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.317s
+exit=0

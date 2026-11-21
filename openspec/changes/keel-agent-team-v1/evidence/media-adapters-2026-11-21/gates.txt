@@ -1,0 +1,17 @@
+# media adapters gates (2026-11-21, worktree keel-media-adapters)
+$ gofmt -l internal/mediaadapter
+exit=0
+
+$ go build ./...
+exit=0
+
+$ go vet ./internal/mediaadapter/
+exit=0
+
+$ go test -cover -count=1 ./internal/mediaadapter/
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.640s	coverage: 74.7% of statements
+exit=0
+
+$ go test -race -count=1 ./internal/mediaadapter/
+ok  	github.com/jixoai/keel/internal/mediaadapter	1.703s
+exit=0

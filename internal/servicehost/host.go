@@ -177,6 +177,19 @@ type ProductOptions struct {
 	// ExtraTools are static product tools appended to the host registry (plugin
 	// tools added later go through Runtime.RefreshProductTools).
 	ExtraTools []agentcore.AgentTool
+	// MediaTools builds the media generation tools (image_generate /
+	// video_generate) for one tenant document. It is invoked once per host
+	// assembly — boot and every reload — from that generation's document, so a
+	// settings write that adds or changes a media provider applies to the next
+	// run. Nil means this deployment serves no media tools. An error fails host
+	// assembly: a configured tool whose construction is broken must not silently
+	// disappear.
+	MediaTools func(tenant host.TenantConfig) ([]agentcore.AgentTool, error)
+	// ValidateMedia validates the media/decision slice of a candidate models
+	// document at the settings write path. Issues use provider-scoped field
+	// paths and are returned alongside the model issues; a non-empty result
+	// refuses the save. Nil skips the check.
+	ValidateMedia func(tenant host.TenantConfig) []modelcfg.Issue
 	// WrapTelemetry decorates the run telemetry context. The runner opens one
 	// keel.agent.run span per attempt; the product layer turns that span into
 	// the turn.started/turn.finished hooks without a worker change.
@@ -567,6 +580,15 @@ func (r *Runtime) ValidateModelsDocument(document json.RawMessage) (ModelsCandid
 	if err != nil {
 		return ModelsCandidate{}, selectionIssues(err), nil
 	}
+	// The product layer owns the media/decision slice of the same document.
+	// Its issues (a decision binding that fails Preflight, a media provider
+	// whose tool cannot be built) refuse the save exactly like a model issue,
+	// and the field paths point at the provider entry the operator edited.
+	if r.cfg.Product.ValidateMedia != nil {
+		if issues := r.cfg.Product.ValidateMedia(tenant); len(issues) > 0 {
+			return ModelsCandidate{}, issues, nil
+		}
+	}
 	return ModelsCandidate{
 		Selection: modelcfg.Selection{
 			ProviderID:     active.ProviderID,
@@ -846,6 +868,17 @@ func (r *Runtime) refreshAssembly() error {
 		}
 	}
 	extra = append(extra, r.cfg.Product.ExtraTools...)
+	// Media tools are generation configuration, not a static product tool: the
+	// assembly built them from the current tenant document, and a republish must
+	// rebuild them from the same document instead of dropping them. The builder
+	// is a pure construction (no IO), so calling it on a republish is safe.
+	if r.cfg.Product.MediaTools != nil {
+		mediaTools, err := r.cfg.Product.MediaTools(r.tenantConfig())
+		if err != nil {
+			return fmt.Errorf("republish media tools: %w", err)
+		}
+		extra = append(extra, mediaTools...)
+	}
 	extra = append(extra, pluginTools...)
 	// MCP's extra sections come first, then the product/plugin contributions.
 	extraSections := append(mcpExtra, pluginSections...)

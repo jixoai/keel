@@ -130,6 +130,7 @@ func resolveProvider(provider ProviderConfig, doc document) ProviderView {
 		Visibility:   visibility,
 		API:          cloneAPI(provider.API),
 		Access:       provider.Access,
+		Decision:     cloneDecisionConfig(provider.Decision),
 		Models:       make([]ModelView, 0, len(modelIDs)),
 	}
 	issues, complete := providerIssues(provider, len(modelIDs))
@@ -524,6 +525,21 @@ func providerIssues(provider ProviderConfig, modelCount int) ([]Issue, bool) {
 		issues = append(issues, Issue{Field: "modelIds", Message: "provider has no models"})
 		complete = false
 	}
+	// A provider declared as the decision family must name its System One
+	// adapter: the adapter decides the wire envelope and the supported question
+	// types, and guessing it from an id or a host is exactly the vendor
+	// enumeration the spec forbids. A provider whose models override their
+	// family to decision (the demo provider's shape) is checked by the media
+	// wiring at save time against its provider-level decision block.
+	if normalizeProviderType(provider.Type) == ProviderTypeDecision {
+		if provider.Decision == nil || strings.TrimSpace(provider.Decision.Adapter) == "" {
+			issues = append(issues, Issue{
+				Field:   "decision.adapter",
+				Message: "decision provider must declare an adapter (typesafe|cloudflare|openrouter|openjev)",
+			})
+			complete = false
+		}
+	}
 	return issues, complete
 }
 
@@ -551,6 +567,7 @@ func cloneProviderViews(providers []ProviderView) []ProviderView {
 func cloneProviderView(view ProviderView) ProviderView {
 	out := view
 	out.API = cloneAPI(view.API)
+	out.Decision = cloneDecisionConfig(view.Decision)
 	out.Models = make([]ModelView, len(view.Models))
 	for i := range view.Models {
 		out.Models[i] = cloneModelView(view.Models[i])
@@ -570,6 +587,35 @@ func cloneModelView(view ModelView) ModelView {
 func cloneAPI(api API) API {
 	out := api
 	out.Headers = cloneStringMap(api.Headers)
+	return out
+}
+
+// cloneDecisionConfig copies the decision slice so a settings read can never
+// mutate the resolution a generation runs.
+func cloneDecisionConfig(config *DecisionProviderConfig) *DecisionProviderConfig {
+	if config == nil {
+		return nil
+	}
+	out := *config
+	if config.Binding != nil {
+		binding := *config.Binding
+		binding.State = cloneRaw(binding.State)
+		binding.Questions = cloneRaw(binding.Questions)
+		if binding.Threshold != nil {
+			value := *binding.Threshold
+			binding.Threshold = &value
+		}
+		out.Binding = &binding
+	}
+	return &out
+}
+
+func cloneRaw(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	out := make(json.RawMessage, len(raw))
+	copy(out, raw)
 	return out
 }
 

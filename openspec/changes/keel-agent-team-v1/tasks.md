@@ -117,12 +117,39 @@
 
 ## P6 Provider 适配器
 
+> 2026-11-21 M1：四 family 适配器库落在 `internal/mediaadapter`，证据
+> `evidence/media-adapters-2026-11-21/`。产品装配（插件注册、凭据解析、设置页保存预检接线）
+> 不在本 lane，尚未接线；未调用真实上游，wire 由 fake/记录型 provider 验证。
+>
+> 2026-11-21 M2：装配已接。`internal/mediawiring` 从 generation 的租户 models 文档与同一凭据
+> 顺序构造 adapter；`servicehost.ProductOptions.MediaTools` 把 image/video 工具注册进每次
+> host 装配（设置写后跟随新 generation）；`ValidateMedia` 在 `PUT /v1/settings/models`
+> 保存前跑 decision Preflight。证据 `evidence/media-wiring-2026-11-21/`。仍未调用真实厂商，
+> 也未写 media 事件；speech 与 decision 的运行时消费面仍未接。
+
 - [x] LLM 适配器与现有模型配置迁移
-- [ ] 图像/视频适配器：Hermes `image_generate`/`video_generate` 形态；产物入 layerfs
+- [x] 图像/视频适配器：Hermes `image_generate`/`video_generate` 形态；产物入 layerfs
+      （`image_generate`/`video_generate` 工具 schema + OpenAI-images/视频网关 HTTP wire；
+      资产字节写 layerfs CAS 并返回 `sha256:` 引用，结果/工具输出不内联 base64；
+      usage 只计 Images/Videos/Bytes/InputTokens；失败结果保留 prompt/参数可重试。
+      M2 接线：租户 image/video provider → `internal/mediawiring` → `servicehost` 工具面；
+      `agentcore.ToolRunScope` 的 session 作为 layerfs 归属；记录型 provider E2E 断言
+      wire 的 Authorization/body、blobId 引用、usage，以及缺凭据时 typed
+      `missing_credentials` 且零 wire 请求；设置写后新 generation 的工具改用新 provider）
 - [ ] 语音适配器：TTS 文本→音频；STT 音频→transcript/时间戳；音色/语言参数
+      （库与 wire 已完成：`SpeechAdapter` + `/audio/speech`、`/audio/transcriptions`；
+      **M2 未接线**：没有任何 host tool、`/v1/media/audio` 或 run 消费面，运行时尚不可用；
+      人类 UI 的 demo 路由仍归 `internal/httpapi/media_audio.go`）
 - [ ] 决策适配器：System One 0.2.0；TypeSafe/Cloudflare Clef/OpenRouter/OpenJev；
       noul/choice/score（box 仅 TypeSafe）、能力预检、shadow/enforce、fail-closed 默认
+      （**M2 部分接线**：库 + descriptor/`Preflight` 已完成；`PUT /v1/settings/models` 在保存
+      含 decision provider 的文档时跑 adapter/model/协议与 binding Preflight，字段错误可见；
+      **运行时缺口**：没有 decision 工具或端点消费答案，run 不能发起决策；仍未调用真实厂商；
+      不合成 noul:0/choice:"unknown"/confidence:0）
 - [ ] Provider 崩溃隔离；usage 计量不写价格
+      （`guard` 与 `Usage` 已由 M2 工具路径复用：in-process panic → retryable
+      `provider_unavailable`，Usage 无价格字段且丢弃上游 cost；**缺口**：跨进程/provider
+      插件隔离仍由 provider 插件层承担，media 事件未写，usage 目前只在工具结果里）
 
 ## P7 验收
 

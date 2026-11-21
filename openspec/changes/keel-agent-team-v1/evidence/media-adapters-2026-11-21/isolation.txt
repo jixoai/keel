@@ -1,0 +1,16 @@
+=== RUN   TestProviderPanicIsIsolated
+=== RUN   TestProviderPanicIsIsolated/image
+    isolation_test.go:34: panicking image provider -> image.generate: provider panicked: image backend exploded
+    isolation_test.go:44: healthy image provider after panic -> image={Kind:image BlobID:sha256:2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df Mime:image/png Size:2 Width:0 Height:0 DurationMillis:0 Name:}
+=== RUN   TestProviderPanicIsIsolated/video
+=== RUN   TestProviderPanicIsIsolated/speech
+--- PASS: TestProviderPanicIsIsolated (0.00s)
+    --- PASS: TestProviderPanicIsIsolated/image (0.00s)
+    --- PASS: TestProviderPanicIsIsolated/video (0.00s)
+    --- PASS: TestProviderPanicIsIsolated/speech (0.00s)
+=== RUN   TestDecisionProviderFailureDoesNotPoisonAnotherClient
+--- PASS: TestDecisionProviderFailureDoesNotPoisonAnotherClient (0.00s)
+=== RUN   TestDecisionTimeoutFollowsPolicy
+--- PASS: TestDecisionTimeoutFollowsPolicy (0.15s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.412s

@@ -1,0 +1,9 @@
+=== RUN   TestMediaToolsCompileInTheToolRegistry
+--- PASS: TestMediaToolsCompileInTheToolRegistry (0.00s)
+=== RUN   TestUsageHasNoPricingFields
+    usage_test.go:37: usage JSON={"inputTokens":1,"outputTokens":2,"questions":3,"images":4,"videos":5,"inputCharacters":6,"transcriptCharacters":7,"audioBytes":8,"audioMillis":9,"bytes":10}
+--- PASS: TestUsageHasNoPricingFields (0.00s)
+=== RUN   TestDecisionUsageDropsUpstreamCost
+--- PASS: TestDecisionUsageDropsUpstreamCost (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.253s

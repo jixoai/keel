@@ -1,6 +1,9 @@
 package modelcfg
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // This file defines the data contract of the provider/model configuration
 // layer. Provider Config describes how to reach an endpoint; Model Config
@@ -218,6 +221,37 @@ type ProviderConfig struct {
 	Access     Access   `json:"access"`
 	ModelIDs   []string `json:"modelIds,omitempty"`
 	Visibility string   `json:"visibility,omitempty"` // "visible"|"hidden"
+	// Decision carries the decision-family configuration (System One adapter
+	// and an optional saved binding). It is absent on every other family; a
+	// provider whose effective model family is decision without it cannot be
+	// executed by the decision adapter.
+	Decision *DecisionProviderConfig `json:"decision,omitempty"`
+}
+
+// DecisionProviderConfig is the decision family's provider-level slice. The
+// adapter names the System One backend (typesafe|cloudflare|openrouter|openjev);
+// it is deliberately not inferred from the provider id or host. Binding is the
+// saved decision binding this provider answers: the settings write path runs
+// the mediaadapter Preflight over it, so an unsupported question type or an
+// over-limit rubric is refused before it can reach a run. No answer is ever
+// stored or synthesized here.
+type DecisionProviderConfig struct {
+	Adapter         string                 `json:"adapter,omitempty"`
+	ProtocolVersion string                 `json:"protocolVersion,omitempty"`
+	Binding         *DecisionBindingConfig `json:"binding,omitempty"`
+}
+
+// DecisionBindingConfig is one saved System One binding. State and Questions
+// are raw JSON because the decision adapter owns their shape; this package
+// only guarantees they are valid JSON. Mode/FailPolicy/Threshold are the
+// decision policy fields the spec exposes (no temperature/tools/stream/max
+// tokens).
+type DecisionBindingConfig struct {
+	State      json.RawMessage `json:"state,omitempty"`
+	Questions  json.RawMessage `json:"questions,omitempty"`
+	Mode       string          `json:"mode,omitempty"`
+	FailPolicy string          `json:"failPolicy,omitempty"`
+	Threshold  *float64        `json:"threshold,omitempty"`
 }
 
 // ModelConfig is a sparse model configuration. It is the shape carried by
@@ -297,18 +331,25 @@ type ModelView struct {
 // reports that the provider itself is complete enough to be used; Selectable
 // reports that it is visible and has at least one selectable model. Hidden
 // providers are not resolved at all, so they appear in no view.
+//
+// Decision is the decision-family configuration the media wiring validates. It
+// is deliberately excluded from the JSON projection: the binding's state is
+// caller data (it may carry a customer's text or an image), and the settings
+// surface reads the document itself, where the client already holds it. A
+// provider view must never become a second, unreviewed copy of that state.
 type ProviderView struct {
-	ProviderID   string      `json:"providerId"`
-	Name         string      `json:"name,omitempty"`
-	ProviderType string      `json:"providerType"`
-	SurfaceKind  string      `json:"surfaceKind"`
-	Visibility   string      `json:"visibility"`
-	API          API         `json:"api"`
-	Access       Access      `json:"access"`
-	Models       []ModelView `json:"models"`
-	Issues       []Issue     `json:"issues,omitempty"`
-	Executable   bool        `json:"executable"`
-	Selectable   bool        `json:"selectable"`
+	ProviderID   string                  `json:"providerId"`
+	Name         string                  `json:"name,omitempty"`
+	ProviderType string                  `json:"providerType"`
+	SurfaceKind  string                  `json:"surfaceKind"`
+	Visibility   string                  `json:"visibility"`
+	API          API                     `json:"api"`
+	Access       Access                  `json:"access"`
+	Decision     *DecisionProviderConfig `json:"-"`
+	Models       []ModelView             `json:"models"`
+	Issues       []Issue                 `json:"issues,omitempty"`
+	Executable   bool                    `json:"executable"`
+	Selectable   bool                    `json:"selectable"`
 }
 
 // Resolution is one complete parse of catalog + tenant overlay. Settings and

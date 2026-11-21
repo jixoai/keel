@@ -1,0 +1,70 @@
+=== RUN   TestDecisionAdaptersShareSystemOneWire
+=== RUN   TestDecisionAdaptersShareSystemOneWire/typesafe
+    decision_test.go:109: wire POST /v1/systemone body={"model":"jev-1.14","questions":{"bug":{"criteria":{"false":"not a defect","true":"a defect"},"instructions":"Is the customer reporting a software defect?","type":"noul"},"owner":{"criteria":{"frontend":"web UI","payments":"checkout and billing"},"instructions":"Which team should own this?","type":"choice"},"urgency":{"criteria":["low","medium","high"],"instructions":"How urgent is this?","type":"score"}},"state":{"ticket":"checkout page is blank"}}
+    decision_test.go:110: answers={"bug":{"type":"noul","noul":0.91},"owner":{"type":"choice","choice":"payments","probabilities":{"payments":0.7,"frontend":0.3},"confidence":0.8},"urgency":{"type":"score","score":1.4,"legend":{"0":"low","1":"medium","2":"high"},"confidence":0.6}} usage={InputTokens:11 OutputTokens:2 Questions:3 Images:0 Videos:0 InputCharacters:0 TranscriptCharacters:0 AudioBytes:0 AudioMillis:0 Bytes:0} mode=enforce
+=== RUN   TestDecisionAdaptersShareSystemOneWire/openrouter
+    decision_test.go:109: wire POST /api/alpha/decisions body={"model":"typesafe/jev-1.14","questions":{"bug":{"criteria":{"false":"not a defect","true":"a defect"},"instructions":"Is the customer reporting a software defect?","type":"noul"},"owner":{"criteria":{"frontend":"web UI","payments":"checkout and billing"},"instructions":"Which team should own this?","type":"choice"},"urgency":{"criteria":["low","medium","high"],"instructions":"How urgent is this?","type":"score"}},"state":{"ticket":"checkout page is blank"}}
+    decision_test.go:110: answers={"bug":{"type":"noul","noul":0.91},"owner":{"type":"choice","choice":"payments","probabilities":{"payments":0.7,"frontend":0.3},"confidence":0.8},"urgency":{"type":"score","score":1.4,"legend":{"0":"low","1":"medium","2":"high"},"confidence":0.6}} usage={InputTokens:11 OutputTokens:2 Questions:3 Images:0 Videos:0 InputCharacters:0 TranscriptCharacters:0 AudioBytes:0 AudioMillis:0 Bytes:0} mode=enforce
+=== RUN   TestDecisionAdaptersShareSystemOneWire/openjev
+    decision_test.go:109: wire POST /v1/systemone body={"model":"openjev","questions":{"bug":{"criteria":{"false":"not a defect","true":"a defect"},"instructions":"Is the customer reporting a software defect?","type":"noul"},"owner":{"criteria":{"frontend":"web UI","payments":"checkout and billing"},"instructions":"Which team should own this?","type":"choice"},"urgency":{"criteria":["low","medium","high"],"instructions":"How urgent is this?","type":"score"}},"state":{"ticket":"checkout page is blank"}}
+    decision_test.go:110: answers={"bug":{"type":"noul","noul":0.91},"owner":{"type":"choice","choice":"payments","probabilities":{"payments":0.7,"frontend":0.3},"confidence":0.8},"urgency":{"type":"score","score":1.4,"legend":{"0":"low","1":"medium","2":"high"},"confidence":0.6}} usage={InputTokens:11 OutputTokens:2 Questions:3 Images:0 Videos:0 InputCharacters:0 TranscriptCharacters:0 AudioBytes:0 AudioMillis:0 Bytes:0} mode=enforce
+=== RUN   TestDecisionAdaptersShareSystemOneWire/cloudflare
+    decision_test.go:109: wire POST /ai/run/@cf/cloudflare/clef body={"questions":{"bug":{"criteria":{"false":"not a defect","true":"a defect"},"instructions":"Is the customer reporting a software defect?","type":"noul"},"owner":{"criteria":{"frontend":"web UI","payments":"checkout and billing"},"instructions":"Which team should own this?","type":"choice"},"urgency":{"criteria":["low","medium","high"],"instructions":"How urgent is this?","type":"score"}},"state":{"ticket":"checkout page is blank"}}
+    decision_test.go:110: answers={"bug":{"type":"noul","noul":0.91},"owner":{"type":"choice","choice":"payments","probabilities":{"payments":0.7,"frontend":0.3},"confidence":0.8},"urgency":{"type":"score","score":1.4,"legend":{"0":"low","1":"medium","2":"high"},"confidence":0.6}} usage={InputTokens:11 OutputTokens:2 Questions:3 Images:0 Videos:0 InputCharacters:0 TranscriptCharacters:0 AudioBytes:0 AudioMillis:0 Bytes:0} mode=enforce
+--- PASS: TestDecisionAdaptersShareSystemOneWire (0.01s)
+    --- PASS: TestDecisionAdaptersShareSystemOneWire/typesafe (0.00s)
+    --- PASS: TestDecisionAdaptersShareSystemOneWire/openrouter (0.00s)
+    --- PASS: TestDecisionAdaptersShareSystemOneWire/openjev (0.00s)
+    --- PASS: TestDecisionAdaptersShareSystemOneWire/cloudflare (0.00s)
+=== RUN   TestDecisionPreflightCapabilities
+=== RUN   TestDecisionPreflightCapabilities/box_rejected_by_clef
+=== RUN   TestDecisionPreflightCapabilities/remote_image_rejected
+=== RUN   TestDecisionPreflightCapabilities/data_image_accepted
+=== RUN   TestDecisionPreflightCapabilities/empty_choice_criteria
+=== RUN   TestDecisionPreflightCapabilities/score_needs_two_levels
+=== RUN   TestDecisionPreflightCapabilities/unknown_question_type
+=== RUN   TestDecisionPreflightCapabilities/question_count_limit
+=== RUN   TestDecisionPreflightCapabilities/box_requires_an_image
+--- PASS: TestDecisionPreflightCapabilities (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/box_rejected_by_clef (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/remote_image_rejected (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/data_image_accepted (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/empty_choice_criteria (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/score_needs_two_levels (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/unknown_question_type (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/question_count_limit (0.00s)
+    --- PASS: TestDecisionPreflightCapabilities/box_requires_an_image (0.00s)
+=== RUN   TestDecisionFailClosedAndShadow
+--- PASS: TestDecisionFailClosedAndShadow (0.00s)
+=== RUN   TestDecisionShadowSuccessCarriesAnswersButStaysShadow
+--- PASS: TestDecisionShadowSuccessCarriesAnswersButStaysShadow (0.00s)
+=== RUN   TestDecisionMalformedAnswersNeverBecomeDefaults
+--- PASS: TestDecisionMalformedAnswersNeverBecomeDefaults (0.00s)
+=== RUN   TestDecisionCloudflareEnvelopeFailure
+--- PASS: TestDecisionCloudflareEnvelopeFailure (0.00s)
+=== RUN   TestDecisionCapabilitiesAreHonest
+--- PASS: TestDecisionCapabilitiesAreHonest (0.00s)
+=== RUN   TestDecisionAnswerContractRejectsProviderViolations
+=== RUN   TestDecisionAnswerContractRejectsProviderViolations/choice_not_declared
+=== RUN   TestDecisionAnswerContractRejectsProviderViolations/score_outside_levels
+=== RUN   TestDecisionAnswerContractRejectsProviderViolations/noul_confidence
+=== RUN   TestDecisionAnswerContractRejectsProviderViolations/noul_rationale
+--- PASS: TestDecisionAnswerContractRejectsProviderViolations (0.00s)
+    --- PASS: TestDecisionAnswerContractRejectsProviderViolations/choice_not_declared (0.00s)
+    --- PASS: TestDecisionAnswerContractRejectsProviderViolations/score_outside_levels (0.00s)
+    --- PASS: TestDecisionAnswerContractRejectsProviderViolations/noul_confidence (0.00s)
+    --- PASS: TestDecisionAnswerContractRejectsProviderViolations/noul_rationale (0.00s)
+=== RUN   TestDecisionBoxSendsTheTypeSafeDangerZoneHeader
+--- PASS: TestDecisionBoxSendsTheTypeSafeDangerZoneHeader (0.00s)
+=== RUN   TestDecisionHelpersAndDescriptorCopy
+--- PASS: TestDecisionHelpersAndDescriptorCopy (0.00s)
+=== RUN   TestDecisionWireRejectsInvalidJSON
+--- PASS: TestDecisionWireRejectsInvalidJSON (0.00s)
+=== RUN   TestDecisionProviderFailureDoesNotPoisonAnotherClient
+--- PASS: TestDecisionProviderFailureDoesNotPoisonAnotherClient (0.00s)
+=== RUN   TestDecisionTimeoutFollowsPolicy
+--- PASS: TestDecisionTimeoutFollowsPolicy (0.15s)
+=== RUN   TestDecisionUsageDropsUpstreamCost
+--- PASS: TestDecisionUsageDropsUpstreamCost (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.400s

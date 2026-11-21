@@ -84,7 +84,7 @@ func TestProductExtraToolsJoinTheRegistry(t *testing.T) {
 	// ExtraTools is a static contribution; a duplicate model-facing name is a
 	// fail-closed assembly error (two tools cannot share one name).
 	tool := productStubTool{name: "product_tool"}
-	prompt, err := newPromptFactory(productTestConfig(ProductOptions{ExtraTools: []agentcore.AgentTool{tool}}))(context.Background(), servicegraph.Resolved{})
+	prompt, err := newPromptFactory(host.TenantConfig{}, productTestConfig(ProductOptions{ExtraTools: []agentcore.AgentTool{tool}}))(context.Background(), servicegraph.Resolved{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestProductExtraToolsJoinTheRegistry(t *testing.T) {
 	if _, ok := registry.Get("product_tool"); !ok {
 		t.Fatal("product tool is not in the host registry")
 	}
-	dup := newPromptFactory(productTestConfig(ProductOptions{ExtraTools: []agentcore.AgentTool{tool, tool}}))
+	dup := newPromptFactory(host.TenantConfig{}, productTestConfig(ProductOptions{ExtraTools: []agentcore.AgentTool{tool, tool}}))
 	if _, err := dup(context.Background(), servicegraph.Resolved{}); err == nil {
 		t.Fatal("a duplicate product tool must fail host assembly")
 	}

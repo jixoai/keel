@@ -1,0 +1,8 @@
+=== RUN   TestVideoWirePersistsReferenceAndUsage
+    video_test.go:86: wire POST /videos/generations body={"aspect_ratio":"16:9","audio":true,"duration":5,"image_url":"data:image/png;base64,AAAA","model":"video-model","negative_prompt":"text","prompt":"a paper boat on a river","reference_image_urls":["data:image/png;base64,BBBB"],"resolution":"1080p","seed":42}
+    video_test.go:87: artifacts=[{"kind":"video","blobId":"sha256:225e2e71f6963695684cf5c2aef7d582fff76acb8c028ed8b79c9c52bc93495d","mime":"video/mp4","size":9,"width":1280,"height":720,"durationMillis":4200}] usage={InputTokens:3 OutputTokens:0 Questions:0 Images:0 Videos:1 InputCharacters:0 TranscriptCharacters:0 AudioBytes:0 AudioMillis:0 Bytes:9}
+--- PASS: TestVideoWirePersistsReferenceAndUsage (0.00s)
+=== RUN   TestVideoToolReturnsReferencesAndValidationEcho
+--- PASS: TestVideoToolReturnsReferencesAndValidationEcho (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.259s

@@ -1,0 +1,15 @@
+=== RUN   TestLayerFSStorePersistsEveryMediaFamily
+=== RUN   TestLayerFSStorePersistsEveryMediaFamily/image
+    layerfs_test.go:104: artifact kind=image blobId=sha256:2c8648d103e3dd7ad87660da0f126a1443b6d21ac1bd3ec000c5e24e2373a90c size=11 refs=1 bytes="image-bytes"
+=== RUN   TestLayerFSStorePersistsEveryMediaFamily/video
+    layerfs_test.go:104: artifact kind=video blobId=sha256:79fd615a866fe7f9eb4da8d9c41ab57e3bd48056df42fd2c13e4d461a87afbe3 size=11 refs=1 bytes="video-bytes"
+=== RUN   TestLayerFSStorePersistsEveryMediaFamily/audio
+    layerfs_test.go:104: artifact kind=audio blobId=sha256:15241589c52e7c4a511a160e040d12bab503cf5d0f586cba94889e554d8df241 size=11 refs=1 bytes="audio-bytes"
+--- PASS: TestLayerFSStorePersistsEveryMediaFamily (0.03s)
+    --- PASS: TestLayerFSStorePersistsEveryMediaFamily/image (0.00s)
+    --- PASS: TestLayerFSStorePersistsEveryMediaFamily/video (0.00s)
+    --- PASS: TestLayerFSStorePersistsEveryMediaFamily/audio (0.00s)
+=== RUN   TestLayerFSStoreRequiresSession
+--- PASS: TestLayerFSStoreRequiresSession (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.259s

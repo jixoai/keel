@@ -498,6 +498,21 @@ func (m *modelsService) credential(active modelcfg.ActiveModel) (string, error) 
 	return "", fmt.Errorf("model %s: no credential: %s", modelIdentity(active), decision.reason)
 }
 
+// ResolveAccessCredential resolves one provider access declaration with exactly
+// the ordering an attempt uses (credential-free, access.ref, access.env with
+// the same-name tenant secret, the process-wide legacy key). The second return
+// is the operator-readable reason no credential exists; it never carries a
+// value. This is the seam the media wiring resolves provider credentials with,
+// so a media call and a chat attempt can never disagree about authentication.
+func ResolveAccessCredential(access modelcfg.Access, legacyKey string, lookup func(string) (string, bool), lookupSecret func(string) (string, bool)) (string, string) {
+	service := &modelsService{legacyKey: legacyKey, lookup: lookup, lookupSecret: lookupSecret}
+	decision := service.credentialDecision(access)
+	if decision.found {
+		return decision.value, ""
+	}
+	return "", decision.reason
+}
+
 // credentialDecision is the single credential-ordering fact. It answers either a
 // value (found == true; a credential-free provider answers found with an empty
 // value) or the reason there is none (always naming the field and the source,

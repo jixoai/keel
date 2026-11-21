@@ -38,7 +38,7 @@ func newProvider(tenant host.TenantConfig, cfg Config, engine *servicegraph.Engi
 	factories := map[string]servicegraph.Factory{
 		loadout.ServiceStore:             newStoreFactory(cfg),
 		loadout.ServiceLLM:               newLLMFactory(tenant, cfg),
-		loadout.ServicePrompt:            newPromptFactory(cfg),
+		loadout.ServicePrompt:            newPromptFactory(tenant, cfg),
 		loadout.ServiceTools:             newToolsFactory(cfg),
 		loadout.ServicePiLoop:            newPiLoopFactory(cfg),
 		loadout.ServiceSessionProjection: newProjectionFactory(cfg),
@@ -191,7 +191,7 @@ func (p *promptService) RefreshSections(extra []agentcore.AgentTool, mcpSection 
 func (p *promptService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (p *promptService) Stop(context.Context) error                             { return nil }
 
-func newPromptFactory(cfg Config) servicegraph.Factory {
+func newPromptFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory {
 	return func(_ context.Context, resolved servicegraph.Resolved) (servicegraph.Instance, error) {
 		sections := append([]host.Section(nil), cfg.Prompt.Sections...)
 		for _, section := range cfg.Tenant.Agent.Sections {
@@ -228,6 +228,16 @@ func newPromptFactory(cfg Config) servicegraph.Factory {
 		// Static product tools (keel-agent): plugin tools are added later through
 		// Runtime.RefreshProductTools.
 		extra = append(extra, cfg.Product.ExtraTools...)
+		// Media tools are built from THIS generation's tenant document, not the
+		// boot document: a model settings write installs a new generation, and the
+		// next run must use the provider configuration it records.
+		if cfg.Product.MediaTools != nil {
+			mediaTools, err := cfg.Product.MediaTools(tenant)
+			if err != nil {
+				return nil, fmt.Errorf("assemble media tools: %w", err)
+			}
+			extra = append(extra, mediaTools...)
+		}
 		preamble := cfg.Tenant.Agent.SystemPrompt
 		if preamble == "" {
 			preamble = cfg.Prompt.Preamble

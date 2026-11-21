@@ -550,6 +550,9 @@ func validateProviderConfig(provider ProviderConfig) error {
 	if provider.Visibility != "" && provider.Visibility != VisibilityVisible && provider.Visibility != VisibilityHidden {
 		return fmt.Errorf("visibility %q is not supported (want visible|hidden)", provider.Visibility)
 	}
+	if err := validateDecisionProviderConfig(provider.Decision); err != nil {
+		return err
+	}
 	seen := make(map[string]struct{}, len(provider.ModelIDs))
 	for i, modelID := range provider.ModelIDs {
 		if err := validateIdentifier(modelID, fmt.Sprintf("modelIds[%d]", i)); err != nil {
@@ -559,6 +562,48 @@ func validateProviderConfig(provider ProviderConfig) error {
 			return fmt.Errorf("modelIds[%d] %q is duplicated", i, modelID)
 		}
 		seen[modelID] = struct{}{}
+	}
+	return nil
+}
+
+// validateDecisionProviderConfig checks the decision-family slice structurally.
+// The adapter vocabulary itself belongs to internal/mediaadapter (this package
+// stays a pure configuration contract): it checks the token shape, and the
+// media wiring reports an unknown adapter as a provider-scoped issue. The
+// binding's state/questions are opaque JSON here; the adapter owns their shape.
+func validateDecisionProviderConfig(config *DecisionProviderConfig) error {
+	if config == nil {
+		return nil
+	}
+	adapter := strings.TrimSpace(config.Adapter)
+	if adapter != "" && !providerTypePattern.MatchString(adapter) {
+		return fmt.Errorf("decision.adapter %q must be a lowercase token", config.Adapter)
+	}
+	if version := strings.TrimSpace(config.ProtocolVersion); version != "" && strings.ContainsAny(version, " \t\r\n") {
+		return errors.New("decision.protocolVersion must not contain whitespace")
+	}
+	binding := config.Binding
+	if binding == nil {
+		return nil
+	}
+	if len(binding.State) > 0 && !json.Valid(binding.State) {
+		return errors.New("decision.binding.state must be valid JSON")
+	}
+	if len(binding.Questions) > 0 && !json.Valid(binding.Questions) {
+		return errors.New("decision.binding.questions must be valid JSON")
+	}
+	switch strings.TrimSpace(binding.Mode) {
+	case "", "shadow", "enforce":
+	default:
+		return fmt.Errorf("decision.binding.mode %q is not supported (want shadow|enforce)", binding.Mode)
+	}
+	switch strings.TrimSpace(binding.FailPolicy) {
+	case "", "fail_closed", "fail_open":
+	default:
+		return fmt.Errorf("decision.binding.failPolicy %q is not supported (want fail_closed|fail_open)", binding.FailPolicy)
+	}
+	if binding.Threshold != nil && (*binding.Threshold < 0 || *binding.Threshold > 1) {
+		return errors.New("decision.binding.threshold must be between 0 and 1")
 	}
 	return nil
 }

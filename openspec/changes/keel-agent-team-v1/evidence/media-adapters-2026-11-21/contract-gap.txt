@@ -1,0 +1,46 @@
+Provider contract gap recorded for P6 media families (2026-11-21, lane M1)
+==========================================================================
+
+Existing contract: internal/provider.Provider
+  StreamCompletion(ctx, CompletionRequest{Model, LlmContext, StreamConfig})
+    -> (*AssistantMessageEventStream, error)
+  Shape: streaming chat completion. Input is system prompt + messages + tool
+  declarations; output is text/thinking/tool-call events. Failures after the
+  stream starts ride a terminal error event.
+
+Why the media families do not implement it
+  image / video : request is prompt + generation options; response is one or
+                  more binary assets (or asset URLs), not text events. Inline
+                  base64 in an event stream is exactly what the spec forbids.
+  tts / stt     : request/response audio bytes + transcript/timestamps; no
+                  chat messages, no tool calls.
+  decision      : spec decision-provider forbids messages/free text/streaming/
+                  tools/temperature. System One is state + typed questions ->
+                  typed answers. Implementing it as a chat provider would fake
+                  text the provider never generated.
+
+Interfaces this package adds instead
+  ArtifactStore.Put(ArtifactInput{Session, Kind, Mime, Data, Width, Height,
+    DurationMillis, Name}) -> Artifact{BlobID, Size, Mime, ...}
+  AssetFetcher.Fetch(url) -> bytes/mime
+  ImageProvider.GenerateImage(ImageRequest) -> ImageBatch{Assets, Usage}
+  VideoProvider.GenerateVideo(VideoRequest) -> VideoBatch{Assets, Usage}
+  SpeechProvider.Synthesize(SynthesizeRequest) -> SpeechAudio
+  SpeechProvider.Transcribe(TranscribeRequest) -> SpeechTranscript
+  DecisionClient (System One): Descriptor / Preflight / Decide with policy.
+
+What the provider plugin layer still must supply (not in this lane)
+  - resolved provider identity, family, base URL, model id and credential
+    (adapted from modelcfg.ActiveModel or the provider instance; the key is
+    injected, never read from a process-wide env by this package)
+  - a timeout/cancel budget per family
+  - process/sidecar isolation for third-party provider plugins. This package
+    recovers panics and isolates errors in-process; it does not create the
+    cross-process boundary.
+  - wiring the two tools into host.Config.ExtraTools and the settings save
+    path (Preflight -> field errors).
+
+Verification without upstream credentials
+  httptest servers record every request (path, auth header, JSON/multipart
+  body) and answer with provider-shaped fixtures. See wire-*.txt. No real
+  vendor endpoint or credential was used.

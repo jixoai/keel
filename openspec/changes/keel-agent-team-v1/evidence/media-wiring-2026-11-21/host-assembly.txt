@@ -1,0 +1,16 @@
+$ go test -v -count=1 ./internal/servicehost -run "TestWorkerRunCallsImageGenerateAndCommitsReferences|TestWorkerRunCallsVideoGenerateAndCommitsReferences|TestWorkerRunFailsClosedWithoutAMediaCredential|TestProductMediaToolServesARealHostCall|TestMediaToolsFollowTheGenerationOnSettingsWrite|TestSettingsWriteRunsDecisionPreflight"
+=== RUN   TestWorkerRunCallsImageGenerateAndCommitsReferences
+--- PASS: TestWorkerRunCallsImageGenerateAndCommitsReferences (0.25s)
+=== RUN   TestWorkerRunFailsClosedWithoutAMediaCredential
+--- PASS: TestWorkerRunFailsClosedWithoutAMediaCredential (0.22s)
+=== RUN   TestWorkerRunCallsVideoGenerateAndCommitsReferences
+--- PASS: TestWorkerRunCallsVideoGenerateAndCommitsReferences (0.22s)
+=== RUN   TestProductMediaToolServesARealHostCall
+--- PASS: TestProductMediaToolServesARealHostCall (0.02s)
+=== RUN   TestMediaToolsFollowTheGenerationOnSettingsWrite
+--- PASS: TestMediaToolsFollowTheGenerationOnSettingsWrite (0.02s)
+=== RUN   TestSettingsWriteRunsDecisionPreflight
+--- PASS: TestSettingsWriteRunsDecisionPreflight (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/servicehost	1.180s
+exit=0

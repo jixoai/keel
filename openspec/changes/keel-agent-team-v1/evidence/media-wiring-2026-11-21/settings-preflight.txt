@@ -1,0 +1,6 @@
+$ go test -v -count=1 ./internal/agentapi -run TestSettingsModelsRefusesADecisionBindingThatFailsPreflight
+=== RUN   TestSettingsModelsRefusesADecisionBindingThatFailsPreflight
+--- PASS: TestSettingsModelsRefusesADecisionBindingThatFailsPreflight (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentapi	0.318s
+exit=0

@@ -1,0 +1,20 @@
+=== RUN   TestImageWirePersistsReferencesAndObjectiveUsage
+    image_test.go:103: wire POST /images/generations body={"model":"img-model","n":2,"negative_prompt":"text, watermark","prompt":"a lighthouse at dusk","reference_image_urls":["data:image/png;base64,AAAA"],"size":"1024x768"}
+    image_test.go:104: artifacts=[{"kind":"image","blobId":"sha256:ae15b86487c1483f65602330223b377701615b136e55a453fa58d30a3a270dfd","mime":"image/png","size":16,"width":640,"height":480},{"kind":"image","blobId":"sha256:3179fb00e9fb651a6509547ad3a2c910d8cbdc57de59ddb90ce746d94f7541ef","mime":"image/png","size":16,"width":320,"height":240}] usage={InputTokens:7 OutputTokens:0 Questions:0 Images:2 Videos:0 InputCharacters:0 TranscriptCharacters:0 AudioBytes:0 AudioMillis:0 Bytes:32}
+--- PASS: TestImageWirePersistsReferencesAndObjectiveUsage (0.00s)
+=== RUN   TestImageToolSuccessAndRetryableFailureEcho
+--- PASS: TestImageToolSuccessAndRetryableFailureEcho (0.00s)
+=== RUN   TestImageToolRequiresSession
+--- PASS: TestImageToolRequiresSession (0.00s)
+=== RUN   TestImageAdapterRejectsInvalidInputBeforeProvider
+=== RUN   TestImageAdapterRejectsInvalidInputBeforeProvider/empty_prompt
+=== RUN   TestImageAdapterRejectsInvalidInputBeforeProvider/too_many_images
+=== RUN   TestImageAdapterRejectsInvalidInputBeforeProvider/bad_size
+--- PASS: TestImageAdapterRejectsInvalidInputBeforeProvider (0.00s)
+    --- PASS: TestImageAdapterRejectsInvalidInputBeforeProvider/empty_prompt (0.00s)
+    --- PASS: TestImageAdapterRejectsInvalidInputBeforeProvider/too_many_images (0.00s)
+    --- PASS: TestImageAdapterRejectsInvalidInputBeforeProvider/bad_size (0.00s)
+=== RUN   TestImageProviderHTTPErrorCarriesStatusAndRetryability
+--- PASS: TestImageProviderHTTPErrorCarriesStatusAndRetryability (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.242s
