@@ -43,6 +43,13 @@ func testSecretKey() []byte {
 }
 
 func newAuthTestEnv(t *testing.T, mode authMode, tenantID uuid.UUID) *authTestEnv {
+	return newAuthTestEnvWithProduct(t, mode, tenantID, nil)
+}
+
+// newAuthTestEnvWithProduct is the same edge fixture with an optional product
+// handler mounted under /v1/. The auth surface keeps precedence: its concrete
+// routes are registered first and the product sees the remaining paths.
+func newAuthTestEnvWithProduct(t *testing.T, mode authMode, tenantID uuid.UUID, product func(*store.Store) http.Handler) *authTestEnv {
 	t.Helper()
 	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
@@ -100,6 +107,9 @@ func newAuthTestEnv(t *testing.T, mode authMode, tenantID uuid.UUID) *authTestEn
 			"pathId":    r.PathValue("id"),
 		})
 	})
+	if product != nil {
+		mux.Handle("/v1/", product(st))
+	}
 	server := httptest.NewUnstartedServer(ctl.wrap(mux))
 	server.StartTLS()
 	t.Cleanup(server.Close)
@@ -254,6 +264,7 @@ func cleanupAuthTenant(t *testing.T, st *store.Store, tenantID uuid.UUID) {
 		// Delete in FK order: bots -> profiles -> roles -> accounts. Audit rows
 		// deliberately stay (auth_events is append-only).
 		for _, statement := range []string{
+			`DELETE FROM notifications WHERE tenant_id = $1`,
 			`DELETE FROM bot_api_keys WHERE tenant_id = $1`,
 			`DELETE FROM bots WHERE tenant_id = $1`,
 			`DELETE FROM profiles WHERE tenant_id = $1`,

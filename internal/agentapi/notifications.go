@@ -1,13 +1,19 @@
 package agentapi
 
-// Notification routes (change keel-harness-v2, W2.5).
+// Notification routes (change keel-harness-v2, W2.5; token routes hardened in
+// keel-bot-identity-access A4.2b2).
 //
 // The model creates notifications through the `notify` tool; these routes are
 // how a client lists them, acks one consumer, and how the capability URLs the
 // push mints are consumed. The open/pixel routes deliberately do NOT require
-// X-Tenant-ID: the unguessable single-use token is the authority, and the row
-// supplies its tenant. A tenant header, when present, is checked against the
-// row (defence in depth).
+// X-Tenant-ID or a session: the unguessable single-use token is the authority,
+// the auth edge lets exactly these two paths through, and the row supplies its
+// tenant. A tenant header, when present, is checked against the row (defence in
+// depth).
+//
+// A missing or wrong token answers 401, never 404: the token routes must not
+// become a notification-existence oracle. A real token on an expired/used/
+// consumed notification still answers 410 — possession has already been proven.
 
 import (
 	"errors"
@@ -189,7 +195,7 @@ func (s *Server) openNotificationURL(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.cfg.Notifications.OpenURL(r.Context(), notificationID, r.URL.Query().Get("token"), tenantHint)
 	if err != nil {
-		writeNotificationError(w, err)
+		writeNotificationTokenError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notification": view, "consumed": true})
@@ -210,7 +216,7 @@ func (s *Server) trackNotificationDelivery(w http.ResponseWriter, r *http.Reques
 	}
 	view, err := s.cfg.Notifications.TrackDelivery(r.Context(), notificationID, r.URL.Query().Get("token"), tenantHint)
 	if err != nil {
-		writeNotificationError(w, err)
+		writeNotificationTokenError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notification": view, "tracked": true})
@@ -238,6 +244,26 @@ func notificationTenantHint(w http.ResponseWriter, r *http.Request) (uuid.UUID, 
 		return uuid.Nil, false
 	}
 	return tenantID, true
+}
+
+// writeNotificationTokenError maps the capability-token routes. A missing,
+// wrong or unknown token answers 401 with the same body: the route never
+// discloses whether the notification exists. Expired/used/consumed keep 410
+// because the caller already proved possession of a real token.
+func writeNotificationTokenError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, notify.ErrTokenInvalid), errors.Is(err, notify.ErrNotFound):
+		writeIdentityError(w, http.StatusUnauthorized, "invalid_token",
+			"a valid notification token is required")
+	case errors.Is(err, notify.ErrTokenExpired), errors.Is(err, notify.ErrTokenUsed), errors.Is(err, notify.ErrConsumed):
+		writeErr(w, http.StatusGone, err)
+	case errors.Is(err, notify.ErrInvalid):
+		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, notify.ErrNotWired):
+		writeErr(w, http.StatusServiceUnavailable, err)
+	default:
+		writeErr(w, http.StatusInternalServerError, err)
+	}
 }
 
 // writeNotificationError maps the notify package's typed errors onto HTTP.

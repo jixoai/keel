@@ -197,6 +197,14 @@ func (a *authController) serve(w http.ResponseWriter, r *http.Request, next http
 		next.ServeHTTP(w, r)
 		return
 	}
+	// Notification capability links are token-authoritative: they bypass session,
+	// CSRF and must-change handling entirely so a stale cookie cannot shadow a
+	// valid link. The handler validates the token and answers 401 for a missing
+	// or invalid one (never 404, which would disclose existence).
+	if notificationTokenRoute(path) {
+		next.ServeHTTP(w, r)
+		return
+	}
 
 	if principal, handled := a.machinePrincipal(w, r, next); handled {
 		if principal != nil {
@@ -686,7 +694,32 @@ func anonymousAuthRoute(path string) bool {
 	case "/v1/auth/login", "/v1/auth/logout", "/v1/auth/session", "/v1/auth/bootstrap":
 		return true
 	}
-	return false
+	// Notification capability links are addressable without a session: the
+	// single-use token in the query is the authority, and the handler answers
+	// 401 for a missing/invalid token (never 404, which would disclose whether
+	// the notification exists). serve() has a dedicated early bypass for these
+	// paths; repeating the fact here keeps a future refactor of the anonymous
+	// branch from silently requiring a session.
+	return notificationTokenRoute(path)
+}
+
+// notificationTokenRoute reports whether path is one of the two
+// token-addressed notification routes: GET /v1/notifications/{uuid}/open or
+// /pixel. It is deliberately exact; a broader prefix would open unrelated
+// notification subroutes to anonymous callers.
+func notificationTokenRoute(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/v1/notifications/")
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	if _, err := uuid.Parse(parts[0]); err != nil {
+		return false
+	}
+	return parts[1] == "open" || parts[1] == "pixel"
 }
 
 func passwordChangeAllowed(r *http.Request) bool {

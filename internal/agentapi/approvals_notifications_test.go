@@ -319,6 +319,59 @@ func TestNotificationRoutesAreTenantScoped(t *testing.T) {
 	}
 }
 
+// TestNotificationTokenRoutesDoNotLeakExistence pins the A4.2b2 token contract:
+// a missing, wrong or unknown target answers 401 (never 404), so the capability
+// routes cannot be used to probe whether a notification exists.
+func TestNotificationTokenRoutesDoNotLeakExistence(t *testing.T) {
+	api := newNotifyAPI(t)
+	view := api.push(t,
+		notify.ConsumerSpec{ID: "mail", Kind: notify.ConsumerURL},
+		notify.ConsumerSpec{ID: "pixel", Kind: notify.ConsumerImage})
+	validToken := tokenOf(t, view.URLs["mail"])
+
+	probes := []struct {
+		name   string
+		method string
+		path   string
+		tenant uuid.UUID
+	}{
+		{"open without token", http.MethodGet, "/v1/notifications/" + view.NotificationID + "/open", uuid.Nil},
+		{"open with wrong token", http.MethodGet, "/v1/notifications/" + view.NotificationID + "/open?token=not-the-token", uuid.Nil},
+		{"open on a missing notification", http.MethodGet, "/v1/notifications/" + uuid.NewString() + "/open?token=not-the-token", uuid.Nil},
+		{"open with a foreign tenant hint", http.MethodGet, "/v1/notifications/" + view.NotificationID + "/open?token=" + validToken, uuid.New()},
+		{"pixel without token", http.MethodGet, "/v1/notifications/" + view.NotificationID + "/pixel", uuid.Nil},
+		{"pixel with wrong token", http.MethodGet, "/v1/notifications/" + view.NotificationID + "/pixel?token=not-the-token", uuid.Nil},
+	}
+	for _, probe := range probes {
+		var body map[string]any
+		code := doJSON(t, api.server.Client(), probe.method, api.server.URL+probe.path, probe.tenant, nil, &body)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("%s = %d, want 401; body=%v", probe.name, code, body)
+		}
+		if body["code"] != "invalid_token" {
+			t.Fatalf("%s: code = %v, want invalid_token", probe.name, body["code"])
+		}
+	}
+
+	// The real token still works, and a second notification's pixel token is
+	// still accepted (the refused probes did not consume anything).
+	var opened struct {
+		Consumed bool `json:"consumed"`
+	}
+	if code := doJSON(t, api.server.Client(), http.MethodGet,
+		api.server.URL+view.URLs["mail"], uuid.Nil, nil, &opened); code != http.StatusOK || !opened.Consumed {
+		t.Fatalf("open with the real token = %d %+v", code, opened)
+	}
+	pixelView := api.push(t, notify.ConsumerSpec{ID: "pixel2", Kind: notify.ConsumerImage})
+	var tracked struct {
+		Tracked bool `json:"tracked"`
+	}
+	if code := doJSON(t, api.server.Client(), http.MethodGet,
+		api.server.URL+pixelView.URLs["pixel2"], uuid.Nil, nil, &tracked); code != http.StatusOK || !tracked.Tracked {
+		t.Fatalf("pixel with the real token = %d %+v", code, tracked)
+	}
+}
+
 func TestNotificationRoutesWithoutServiceAre503(t *testing.T) {
 	server := httptest.NewServer(New(Config{Logger: testLogger()}))
 	defer server.Close()
