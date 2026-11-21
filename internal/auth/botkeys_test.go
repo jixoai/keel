@@ -34,6 +34,26 @@ func TestMintBotKeyFormat(t *testing.T) {
 	}
 }
 
+func TestMintSetupToken(t *testing.T) {
+	first, firstHash, err := MintSetupToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, secondHash, err := MintSetupToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first, SetupTokenScheme) {
+		t.Fatalf("token = %q", first)
+	}
+	if len(firstHash) != 32 || string(firstHash) != string(HashToken(first)) {
+		t.Fatal("setup token hash is not SHA-256 of the plaintext")
+	}
+	if first == second || string(firstHash) == string(secondHash) {
+		t.Fatal("two setup tokens collide")
+	}
+}
+
 func TestLooksLikeBotKeyRejectsForeignShapes(t *testing.T) {
 	minted, _ := MintBotKey()
 	cases := []string{
