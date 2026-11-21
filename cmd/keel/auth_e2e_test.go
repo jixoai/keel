@@ -172,12 +172,17 @@ func (e *authTestEnv) getSession(client *http.Client) (int, map[string]any) {
 
 func (e *authTestEnv) login(client *http.Client, username, password string) (int, map[string]any) {
 	e.t.Helper()
+	status, body, _ := e.loginWithHeaders(client, username, password)
+	return status, body
+}
+
+func (e *authTestEnv) loginWithHeaders(client *http.Client, username, password string) (int, map[string]any, http.Header) {
+	e.t.Helper()
 	if status, body := e.getSession(client); status != http.StatusOK {
 		e.t.Fatalf("session probe: %d %v", status, body)
 	}
-	status, body, _ := e.do(client, http.MethodPost, "/v1/auth/login",
+	return e.do(client, http.MethodPost, "/v1/auth/login",
 		map[string]any{"username": username, "password": password}, e.csrfHeader(client))
-	return status, body
 }
 
 func (e *authTestEnv) changePassword(client *http.Client, current, next string) (int, map[string]any) {
@@ -223,10 +228,11 @@ func (e *authTestEnv) bootstrapAdmin(initialPassword, finalPassword string) (uui
 		e.csrfHeader(e.client)); status != http.StatusUnauthorized {
 		e.t.Fatalf("replayed setup token: %d", status)
 	}
-	status, loginBody := e.login(e.client, "root", initialPassword)
+	status, loginBody, loginHeaders := e.loginWithHeaders(e.client, "root", initialPassword)
 	if status != http.StatusOK || loginBody["mustChangePassword"] != true {
 		e.t.Fatalf("first login: %d %v", status, loginBody)
 	}
+	assertSessionCookieAttributes(e.t, loginHeaders)
 	adminID := e.accountID(loginBody)
 	status, changed := e.changePassword(e.client, initialPassword, finalPassword)
 	if status != http.StatusOK || changed["mustChangePassword"] != false {
@@ -467,6 +473,53 @@ func sessionCookieValue(t *testing.T, client *http.Client, base string) string {
 		}
 	}
 	return ""
+}
+
+// assertSessionCookieAttributes pins the spec's cookie flags: HttpOnly, Secure
+// and SameSite=Lax, with the CSRF cookie readable by the app.
+func assertSessionCookieAttributes(t *testing.T, headers http.Header) {
+	t.Helper()
+	var session, csrf string
+	for _, value := range headers.Values("Set-Cookie") {
+		if strings.HasPrefix(value, auth.SessionCookieName+"=") {
+			session = value
+		}
+		if strings.HasPrefix(value, auth.CSRFCookieName+"=") {
+			csrf = value
+		}
+	}
+	if session == "" || csrf == "" {
+		t.Fatalf("login did not set both cookies: %v", headers.Values("Set-Cookie"))
+	}
+	for _, flag := range []string{"HttpOnly", "Secure", "SameSite=Lax"} {
+		if !strings.Contains(session, flag) {
+			t.Fatalf("session cookie lacks %s: %s", flag, session)
+		}
+	}
+	if !strings.Contains(csrf, "Secure") || !strings.Contains(csrf, "SameSite=Lax") {
+		t.Fatalf("csrf cookie lacks Secure/SameSite: %s", csrf)
+	}
+	if strings.Contains(csrf, "HttpOnly") {
+		t.Fatalf("csrf cookie must be readable by the app: %s", csrf)
+	}
+}
+
+func TestLoopbackRequestRequiresBothHostAndPeer(t *testing.T) {
+	loopback := func(host, remote string) bool {
+		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/v1/sessions", nil)
+		req.Host = host
+		req.RemoteAddr = remote
+		return loopbackRequest(req)
+	}
+	if !loopback("127.0.0.1:13750", "127.0.0.1:2222") {
+		t.Fatal("loopback host and peer were refused")
+	}
+	if loopback("evil.test", "127.0.0.1:2222") {
+		t.Fatal("a foreign Host header was admitted from loopback")
+	}
+	if loopback("127.0.0.1:13750", "203.0.113.5:2222") {
+		t.Fatal("a non-loopback peer was admitted")
+	}
 }
 
 func TestAuthRateLimitE2E(t *testing.T) {
