@@ -1,0 +1,18 @@
+$ gofmt -l internal/mediaadapter
+exit=0
+
+$ go build ./...
+exit=0
+
+$ go vet ./...
+exit=0
+
+$ go test -count=1 ./internal/mediaadapter ./internal/mediawiring ./internal/servicehost
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.532s
+ok  	github.com/jixoai/keel/internal/mediawiring	0.478s
+ok  	github.com/jixoai/keel/internal/servicehost	4.065s
+exit=0
+
+$ go test -race -count=1 ./internal/mediaadapter
+ok  	github.com/jixoai/keel/internal/mediaadapter	1.700s
+exit=0

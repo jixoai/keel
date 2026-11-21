@@ -1,0 +1,26 @@
+=== RUN   TestSpeechSTTToolRejectsHeaderInjectionBeforeTheWire
+--- PASS: TestSpeechSTTToolRejectsHeaderInjectionBeforeTheWire (0.02s)
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_CRLF
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_LF
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_NUL
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_tab
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_CRLF
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_control
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_parameters
+=== RUN   TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_whitespace
+--- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_CRLF (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_LF (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_NUL (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/filename_tab (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_CRLF (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_control (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_parameters (0.00s)
+    --- PASS: TestSpeechTranscribeRejectsMultipartHeaderInjection/mime_whitespace (0.00s)
+=== RUN   TestSpeechTranscribeEscapesQuotedFilename
+--- PASS: TestSpeechTranscribeEscapesQuotedFilename (0.01s)
+=== RUN   TestSpeechTranscribeDefaultsSafeMetadata
+--- PASS: TestSpeechTranscribeDefaultsSafeMetadata (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.390s

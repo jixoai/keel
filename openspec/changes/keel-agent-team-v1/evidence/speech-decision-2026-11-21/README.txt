@@ -2,7 +2,8 @@
 
 Worktree: .worktrees/keel-speech-decision (main 4a68729)
 Code commits: 5d0aae3 feat(media): wire speech and decision runtime tools;
-              54aabd5 fix(media): reject empty decision outcomes
+              54aabd5 fix(media): reject empty decision outcomes;
+              2ea0f42 fix(media): reject multipart header injection in STT
 DSN: read from .env.local as KEEL_TEST_DSN; the value is never printed.
 
 ## What is wired
@@ -29,6 +30,26 @@ DSN: read from .env.local as KEEL_TEST_DSN; the value is never printed.
   * adapter guard already covers provider panics; this tool-level recovery also
     covers adapter/seam panics (Store, Executor), returning retryable
     provider_unavailable without poisoning sibling tools
+
+## STT multipart header boundary (A-axis P2 fix)
+
+- internal/mediaadapter/speech.go: normalizeTranscribeMetadata
+  * both SpeechAdapter.Transcribe and HTTPSpeechProvider.Transcribe normalize
+    the model-controlled filename/mime before any wire call
+  * filename/mime containing CR, LF or any Unicode control character is
+    rejected with typed invalid_request (field-level filename/mime error);
+    it is never trimmed into a different safe value
+  * mime is lowercased and must be exactly one bare type/subtype using RFC 7230
+    token characters; parameters, whitespace and separators are refused
+  * quotes/backslashes remain legal and are escaped by escapeQuotes; the
+    regression test parses the wire part and proves one Content-Disposition,
+    the expected filename and no injected X-Evil header
+  * empty metadata still defaults to filename "audio" and
+    application/octet-stream
+- tests: internal/mediaadapter/speech_test.go (CRLF/LF/NUL/tab, mime CRLF/
+  control/parameters/whitespace, quoted filename, defaults) and
+  internal/mediaadapter/media_tools_test.go (model tool arg path rejects before
+  any HTTP request)
 
 ## Gates
 
