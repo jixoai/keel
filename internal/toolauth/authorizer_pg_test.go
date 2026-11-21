@@ -649,6 +649,214 @@ func contains(values []string, want string) bool {
 	return false
 }
 
+// TestForkAndResumeSelectionAgentIDRequiresBotInvoke is the P1-1 regression:
+// the backend prefers selection.agentId over the top-level agentId, so a
+// selection target must be authorized (and audited) exactly like a named one.
+func TestForkAndResumeSelectionAgentIDRequiresBotInvoke(t *testing.T) {
+	e := newEnv(t)
+	e.grant(e.owner.ID, access.KeyBotInvoke, access.ScopeOwn)
+
+	forkCall := rawCall("agent", `{"action":"fork","eventSeq":1,"task":"fork","selection":{"agentId":"member-1"}}`)
+	refusal := wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), forkCall))
+	if refusal.Key != access.KeyBotInvoke || refusal.Reason != string(access.ReasonMissingRelation) {
+		t.Fatalf("fork selection refusal = %+v", refusal)
+	}
+	if got := e.botInvokedCount("member-1"); got != 0 {
+		t.Fatalf("a denied fork selection was audited as accepted %d times", got)
+	}
+
+	e.addViewer(e.owner.ID, e.memberBot.ID)
+	if err := e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), forkCall); err != nil {
+		t.Fatalf("fork selection with viewer relation: %v", err)
+	}
+	if got := e.botInvokedCount("member-1"); got != 1 {
+		t.Fatalf("fork selection audits = %d, want 1", got)
+	}
+
+	e.removeViewer(e.owner.ID, e.memberBot.ID)
+	refusal = wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), forkCall))
+	if refusal.Reason != string(access.ReasonMissingRelation) {
+		t.Fatalf("fork selection after revoke = %+v", refusal)
+	}
+
+	child := e.newOwnedSession(e.captain.ID, e.owner.ID, e.owner.ID)
+	resumeCall := rawCall("agent", `{"action":"resume","sessionId":"`+child.String()+`","selection":{"agentId":"member-1"}}`)
+	refusal = wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), resumeCall))
+	if refusal.Reason != string(access.ReasonMissingRelation) {
+		t.Fatalf("resume selection refusal = %+v", refusal)
+	}
+
+	e.addViewer(e.owner.ID, e.memberBot.ID)
+	if err := e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), resumeCall); err != nil {
+		t.Fatalf("resume selection with viewer relation: %v", err)
+	}
+	if got := e.botInvokedCount("member-1"); got != 2 {
+		t.Fatalf("member-1 audits after resume = %d, want 2", got)
+	}
+	if got := e.botInvokedCount("captain-1"); got != 1 {
+		t.Fatalf("captain-1 (child owner) audits = %d, want 1", got)
+	}
+
+	e.removeViewer(e.owner.ID, e.memberBot.ID)
+	refusal = wantRefusal(t, e.auth.AuthorizeToolCall(e.ctx, e.scope(e.captainSession), resumeCall))
+	if refusal.Reason != string(access.ReasonMissingRelation) {
+		t.Fatalf("resume selection after revoke = %+v", refusal)
+	}
+}
+
+// TestRecoveryReplayIsDeniedAfterRevocation is the P2-3 regression: a crashed
+// attempt's unresolved tool call is replayed through the same authorization
+// seam, so revoking the grant (or narrowing the Harness) between attempts
+// refuses the replay instead of resurrecting the capability.
+func TestRecoveryReplayIsDeniedAfterRevocation(t *testing.T) {
+	cases := []struct {
+		name       string
+		wantReason string
+		mutate     func(e *env, grant store.PermissionGrantRecord)
+	}{
+		{
+			name:       "grant revoked",
+			wantReason: string(access.ReasonMissingGrant),
+			mutate: func(e *env, grant store.PermissionGrantRecord) {
+				e.t.Helper()
+				if err := e.st.DeletePermissionGrant(e.ctx, e.tenant, grant.ID); err != nil {
+					e.t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:       "harness narrowed",
+			wantReason: string(access.ReasonMissingKey),
+			mutate: func(e *env, _ store.PermissionGrantRecord) {
+				e.t.Helper()
+				without := make([]string, 0, len(allToolKeys()))
+				for _, key := range allToolKeys() {
+					if key != access.KeyPluginInvoke {
+						without = append(without, key)
+					}
+				}
+				e.setHarness(e.captain.ID, without)
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			e := newEnv(t)
+			grant := e.grant(e.owner.ID, access.KeyPluginInvoke, access.ScopeTenant)
+
+			kpg, err := kernel.NewPG(e.ctx, e.st.Pool())
+			if err != nil {
+				t.Fatal(err)
+			}
+			kern := kernel.New(kpg, kernel.Options{})
+			runner := agent.NewRunner(kern, kern, agent.FakeStream(), "fake", "fake", "", testLogger())
+			runner.ToolAccess = e.auth
+			if err := runner.Tools.Register(testkit.EchoTool{}); err != nil {
+				t.Fatal(err)
+			}
+
+			session := e.newOwnedSession(e.captain.ID, e.owner.ID, e.owner.ID)
+			if err := e.st.EnqueueRun(e.ctx, e.tenant, session); err != nil {
+				t.Fatal(err)
+			}
+			scope := e.scope(session)
+			receipt, err := kern.Commit(e.ctx, kernel.CommitRequest{
+				Scope: scope, Kind: kernel.KindUserMessage, RequestID: "r1",
+				Payload: json.RawMessage(`{"text":"please echo this","requestId":"r1"}`),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := kern.ClaimScope(e.ctx, scope, "toolauth-replay", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			toolCall, err := json.Marshal(map[string]any{
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type": "toolCall", "id": "call-crash", "name": "echo",
+					"arguments": map[string]string{"x": "replay"},
+				}},
+				"stopReason": "tool_use",
+				"inputSeqs":  []int64{receipt.Seq},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := kern.Commit(e.ctx, kernel.CommitRequest{
+				Scope: scope, Kind: kernel.KindAssistantMessage, Token: lease.Token,
+				GenerationID: "u1-a0", Payload: toolCall,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := kern.Release(e.ctx, lease); err != nil {
+				t.Fatal(err)
+			}
+
+			// The capability changes between the crash and the replay.
+			test.mutate(e, grant)
+
+			replay, err := kern.ClaimScope(e.ctx, scope, "toolauth-replay", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, runErr := runner.RunAttempt(e.ctx, replay)
+			if runErr != nil {
+				t.Fatalf("replay run: %v", runErr)
+			}
+			if err := kern.Finish(e.ctx, kernel.FinishRequest{Lease: replay, Cursor: res.Cursor, MaxAttempts: 3}); err != nil {
+				t.Fatal(err)
+			}
+
+			events, err := e.st.LoadEvents(e.ctx, e.tenant, session, 0, 500)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var results int
+			for _, event := range events {
+				if event.Kind != store.EventToolResult {
+					continue
+				}
+				results++
+				var payload struct {
+					IsError bool `json:"isError"`
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				}
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if !payload.IsError ||
+					!contentContains(payload.Content, access.KeyPluginInvoke) ||
+					!contentContains(payload.Content, test.wantReason) {
+					t.Fatalf("replayed tool result = %s, want a refused plugin.invoke call (%s)", event.Payload, test.wantReason)
+				}
+			}
+			if results != 1 {
+				t.Fatalf("replayed tool results = %d, want 1", results)
+			}
+		})
+	}
+}
+
+// botInvokedCount counts accepted bot.invoked audit rows for one target.
+func (e *env) botInvokedCount(botID string) int {
+	e.t.Helper()
+	events, err := e.st.ListAuthEvents(e.ctx, e.tenant, store.AuthEventFilter{Kind: store.AuthEventBotInvoked}, 100)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	count := 0
+	for _, event := range events {
+		if event.Detail["bot_id"] == botID && event.Detail["result"] == "authorized" {
+			count++
+		}
+	}
+	return count
+}
+
 func TestToolPermissionCatalogKeysResolve(t *testing.T) {
 	// This is a cheap non-PG guard in the PG file's package: the keys the
 	// runtime uses are all registry keys, so a test setup can grant them.

@@ -276,6 +276,100 @@ func TestAgentSpawnTargetsTheNamedOrOwnBot(t *testing.T) {
 	})
 }
 
+// TestAgentSelectionAgentIDIsATarget pins the P1-1 fix: the backend prefers a
+// non-empty selection fact over the top-level agentId, so selection.agentId is
+// a bot.invoke target (and is audited), not just the top-level field.
+func TestAgentSelectionAgentIDIsATarget(t *testing.T) {
+	child := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	cases := []struct {
+		name       string
+		call       agentcore.AgentToolCall
+		wantBots   []string
+		wantAudits []string
+	}{
+		{
+			name:       "spawn selection",
+			call:       call("agent", `{"action":"spawn","task":"x","selection":{"agentId":"member-1"}}`),
+			wantBots:   []string{"member-1"},
+			wantAudits: []string{"member-1"},
+		},
+		{
+			name:       "fork selection",
+			call:       call("agent", `{"action":"fork","eventSeq":1,"task":"x","selection":{"agentId":"member-1"}}`),
+			wantBots:   []string{"member-1"},
+			wantAudits: []string{"member-1"},
+		},
+		{
+			name:       "resume selection plus child owner",
+			call:       call("agent", `{"action":"resume","sessionId":"`+child.String()+`","selection":{"agentId":"member-1"}}`),
+			wantBots:   []string{"member-1", "captain-1"},
+			wantAudits: []string{"member-1", "captain-1"},
+		},
+		{
+			name:       "top level and selection union",
+			call:       call("agent", `{"action":"spawn","task":"x","agentId":"other-1","selection":{"agentId":"member-1"}}`),
+			wantBots:   []string{"other-1", "member-1"},
+			wantAudits: []string{"other-1", "member-1"},
+		},
+		{
+			name:       "team selection decides its own captain",
+			call:       call("agent", `{"action":"spawn","task":"x","selection":{"teamId":"team-1","agentId":"member-1"}}`),
+			wantBots:   []string{"captain-1"},
+			wantAudits: []string{"captain-1"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeAccess{
+				principal: access.Principal{TenantID: testTenant, AccountID: testAccount, BotID: "captain-1"},
+				botIDs:    map[uuid.UUID]string{child: "captain-1"},
+			}
+			auth := newTestAuthorizer(t, fake)
+			if err := auth.AuthorizeToolCall(context.Background(), testScope, test.call); err != nil {
+				t.Fatalf("authorize: %v", err)
+			}
+			if len(fake.authorized) != len(test.wantBots) {
+				t.Fatalf("authorize calls = %+v, want bots %v", fake.authorized, test.wantBots)
+			}
+			for i, want := range test.wantBots {
+				if fake.authorized[i].Key != access.KeyBotInvoke || fake.authorized[i].Resource.Type != "bot" || fake.authorized[i].Resource.ID != want {
+					t.Fatalf("decision[%d] = %+v, want bot/%s", i, fake.authorized[i], want)
+				}
+			}
+			if len(fake.audits) != len(test.wantAudits) {
+				t.Fatalf("audits = %+v, want %v", fake.audits, test.wantAudits)
+			}
+			for i, want := range test.wantAudits {
+				if fake.audits[i].BotID != want || fake.audits[i].Result != "authorized" {
+					t.Fatalf("audit[%d] = %+v, want %s authorized", i, fake.audits[i], want)
+				}
+			}
+		})
+	}
+}
+
+// TestAgentSelectionTargetDenialStopsBeforeAudit is the negative half: a denied
+// selection target never produces an accepted invocation audit.
+func TestAgentSelectionTargetDenialStopsBeforeAudit(t *testing.T) {
+	fake := &fakeAccess{
+		principal: access.Principal{TenantID: testTenant, AccountID: testAccount, BotID: "captain-1"},
+		decisions: map[string]access.Decision{
+			access.KeyBotInvoke + "/member-1": {
+				Allow: false, Key: access.KeyBotInvoke, Reason: access.ReasonMissingRelation,
+			},
+		},
+	}
+	auth := newTestAuthorizer(t, fake)
+	refusal := wantAccessError(t, auth.AuthorizeToolCall(context.Background(), testScope,
+		call("agent", `{"action":"fork","eventSeq":1,"task":"x","selection":{"agentId":"member-1"}}`)), agent.ToolAccessPermissionDenied)
+	if refusal.Key != access.KeyBotInvoke || refusal.Reason != string(access.ReasonMissingRelation) {
+		t.Fatalf("refusal = %+v", refusal)
+	}
+	if len(fake.audits) != 0 {
+		t.Fatalf("denied selection target was audited as accepted: %+v", fake.audits)
+	}
+}
+
 func TestAgentChildSessionResolvesItsOwner(t *testing.T) {
 	child := uuid.MustParse("55555555-5555-5555-5555-555555555555")
 	fake := &fakeAccess{

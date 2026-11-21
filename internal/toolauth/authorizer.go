@@ -124,7 +124,7 @@ func (a *Authorizer) AuthorizeToolCall(ctx context.Context, scope kernel.Scope, 
 		key = access.KeyPluginInvoke
 	}
 
-	requirements, invocation, refusal := a.requirements(ctx, scope, principal, tool, action, key, call.Arguments)
+	requirements, invocations, refusal := a.requirements(ctx, scope, principal, tool, action, key, call.Arguments)
 	if refusal != nil {
 		return refusal
 	}
@@ -155,10 +155,10 @@ func (a *Authorizer) AuthorizeToolCall(ctx context.Context, scope kernel.Scope, 
 		}
 	}
 
-	// An accepted bot invocation is audited with the caller and the callee
-	// before the child exists. A failed audit row denies the call: the spec
-	// treats bot.invoke as high-risk and every invocation as traceable.
-	if invocation != "" {
+	// An accepted bot invocation is audited with the caller and EVERY callee
+	// target before the child exists. A failed audit row denies the call: the
+	// spec treats bot.invoke as high-risk and every invocation as traceable.
+	for _, invocation := range invocations {
 		if err := a.Access.AuditInvoke(ctx, scope.TenantID, principal, invocation, scope.SessionID, "authorized"); err != nil {
 			return &agent.ToolAccessError{
 				Code:   agent.ToolAccessUnavailable,
@@ -175,10 +175,11 @@ func (a *Authorizer) AuthorizeToolCall(ctx context.Context, scope kernel.Scope, 
 //
 // The ambient session is the default resource for every session-scoped tool.
 // The agent tool is different: its resource is the TARGET Bot, resolved from
-// agentId/sessionId (or the run's own Bot when the call delegates to itself).
-// An unresolvable target denies with the same missing_relation shape as a real
-// unauthorized target, so the model cannot use the error to probe existence.
-func (a *Authorizer) requirements(ctx context.Context, scope kernel.Scope, principal access.Principal, tool, action, key string, args json.RawMessage) ([]requirement, string, *agent.ToolAccessError) {
+// agentId/selection.agentId/sessionId (or the run's own Bot when the call
+// delegates to itself). An unresolvable target denies with the same
+// missing_relation shape as a real unauthorized target, so the model cannot
+// use the error to probe existence.
+func (a *Authorizer) requirements(ctx context.Context, scope kernel.Scope, principal access.Principal, tool, action, key string, args json.RawMessage) ([]requirement, []string, *agent.ToolAccessError) {
 	ambient := access.Resource{TenantID: scope.TenantID, Type: "session", ID: scope.SessionID.String()}
 
 	if tool == toolsurface.Agent {
@@ -200,44 +201,45 @@ func (a *Authorizer) requirements(ctx context.Context, scope kernel.Scope, princ
 			return []requirement{
 				{Key: key, Resource: ambient},
 				{Key: access.KeySessionRead, Resource: access.Resource{TenantID: scope.TenantID, Type: "session", ID: named.String()}},
-			}, "", nil
+			}, nil, nil
 		}
 	}
-	return []requirement{{Key: key, Resource: resource}}, "", nil
+	return []requirement{{Key: key, Resource: resource}}, nil, nil
 }
 
-// agentRequirements resolves the bot.invoke target(s) of the `agent` tool.
-func (a *Authorizer) agentRequirements(ctx context.Context, scope kernel.Scope, principal access.Principal, action, key string, args json.RawMessage) ([]requirement, string, *agent.ToolAccessError) {
-	explicit, hasExplicit := stringArgument(args, "agentId")
+// agentRequirements resolves every bot.invoke target of the `agent` tool.
+//
+// The call may name a target twice (top-level agentId AND selection.agentId).
+// The backend prefers a non-empty selection over the top-level field, so the
+// union is deliberate: a caller cannot have the authorization check look at one
+// target while the actual child binding uses another.
+func (a *Authorizer) agentRequirements(ctx context.Context, scope kernel.Scope, principal access.Principal, action, key string, args json.RawMessage) ([]requirement, []string, *agent.ToolAccessError) {
+	targets := agentTargets(args)
 
 	switch action {
 	case toolsurface.ActionSpawn, toolsurface.ActionFork:
-		target := explicit
-		if !hasExplicit || target == "" {
-			target = principal.BotID
+		if len(targets) == 0 {
+			targets = append(targets, principal.BotID)
 		}
-		if target == "" {
-			return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+		targets = uniqueTargets(targets)
+		if len(targets) == 0 || targets[0] == "" {
+			return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 				access.ReasonMissingRelation,
 				"the session has no bot identity to delegate from and the call named no target bot")
 		}
-		return []requirement{{Key: key, Resource: botResource(scope.TenantID, target)}}, target, nil
+		return botRequirements(scope.TenantID, key, targets), targets, nil
 
 	case toolsurface.ActionResume:
 		// Resume may change the child's binding and continues an existing child
-		// session. Both the child's owning Bot and an explicitly named target
-		// are bot.invoke targets; the call needs authority on each.
-		targets := make([]string, 0, 2)
-		if explicit != "" {
-			targets = append(targets, explicit)
-		}
+		// session. Every named target AND the child's owning Bot are bot.invoke
+		// targets; the call needs authority on each.
 		if named, ok := sessionArgument(args, "sessionId"); ok {
 			childBot, err := a.Access.SessionBotID(ctx, scope.TenantID, named)
 			if err != nil {
 				// Missing, foreign and unowned children deliberately produce the
 				// same refusal; the tool backend's own not_found cannot be reached
 				// without this authority.
-				return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+				return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 					access.ReasonMissingRelation,
 					"the resumed child session has no resolvable owning bot")
 			}
@@ -246,19 +248,20 @@ func (a *Authorizer) agentRequirements(ctx context.Context, scope kernel.Scope, 
 		if len(targets) == 0 {
 			targets = append(targets, principal.BotID)
 		}
-		if targets[0] == "" {
-			return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+		targets = uniqueTargets(targets)
+		if len(targets) == 0 || targets[0] == "" {
+			return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 				access.ReasonMissingRelation,
 				"the resumed call named no target bot and the session has no bot identity")
 		}
-		return botRequirements(scope.TenantID, key, targets), targets[0], nil
+		return botRequirements(scope.TenantID, key, targets), targets, nil
 
 	case toolsurface.ActionCancel, toolsurface.ActionStatus:
 		target := ""
 		if named, ok := sessionArgument(args, "sessionId"); ok {
 			childBot, err := a.Access.SessionBotID(ctx, scope.TenantID, named)
 			if err != nil {
-				return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+				return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 					access.ReasonMissingRelation,
 					"the child session has no resolvable owning bot")
 			}
@@ -268,35 +271,89 @@ func (a *Authorizer) agentRequirements(ctx context.Context, scope kernel.Scope, 
 			target = principal.BotID
 		}
 		if target == "" {
-			return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+			return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 				access.ReasonMissingRelation,
 				"the call named no target bot and the session has no bot identity")
 		}
-		return []requirement{{Key: key, Resource: botResource(scope.TenantID, target)}}, "", nil
+		return []requirement{{Key: key, Resource: botResource(scope.TenantID, target)}}, nil, nil
 
 	case toolsurface.ActionList:
 		if principal.BotID == "" {
-			return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+			return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 				access.ReasonMissingRelation,
 				"the session has no bot identity to list children for")
 		}
-		return []requirement{{Key: key, Resource: botResource(scope.TenantID, principal.BotID)}}, "", nil
+		return []requirement{{Key: key, Resource: botResource(scope.TenantID, principal.BotID)}}, nil, nil
 
 	default:
 		// An unknown action reaches the tool's own unknown_action result; the
-		// call still needs authority on its target (or its own Bot) so the
+		// call still needs authority on every target (or its own Bot) so the
 		// unknown action cannot be used as an unauthenticated probe.
-		target := explicit
-		if target == "" {
-			target = principal.BotID
+		if len(targets) == 0 {
+			targets = append(targets, principal.BotID)
 		}
-		if target == "" {
-			return nil, "", a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
+		targets = uniqueTargets(targets)
+		if len(targets) == 0 || targets[0] == "" {
+			return nil, nil, a.deny(ctx, principal, access.Resource{TenantID: scope.TenantID, Type: "bot"}, key,
 				access.ReasonMissingRelation,
 				"the session has no bot identity and the call named no target bot")
 		}
-		return []requirement{{Key: key, Resource: botResource(scope.TenantID, target)}}, target, nil
+		return botRequirements(scope.TenantID, key, targets), targets, nil
 	}
+}
+
+// agentTargets returns every Bot the call itself names: the top-level agentId
+// and selection.agentId (when the selection does not name a team). A team
+// selection decides its own captain, so it is not a bot target here.
+func agentTargets(args json.RawMessage) []string {
+	out := make([]string, 0, 2)
+	if explicit, ok := stringArgument(args, "agentId"); ok && explicit != "" {
+		out = append(out, explicit)
+	}
+	if selected, ok := selectionAgentID(args); ok && selected != "" {
+		out = append(out, selected)
+	}
+	return uniqueTargets(out)
+}
+
+// selectionAgentID reads a selection fact's agentId. A fact that names a team
+// has no bot target: the team decides its captain, and the team binding keeps
+// its existing validation.
+func selectionAgentID(args json.RawMessage) (string, bool) {
+	raw, ok := rawArgument(args, "selection")
+	if !ok {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", false
+	}
+	var fact struct {
+		AgentID string `json:"agentId"`
+		TeamID  string `json:"teamId"`
+	}
+	if err := json.Unmarshal(raw, &fact); err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(fact.TeamID) != "" {
+		return "", false
+	}
+	return strings.TrimSpace(fact.AgentID), true
+}
+
+// uniqueTargets trims, drops empty and deduplicates targets in order.
+func uniqueTargets(targets []string) []string {
+	seen := make(map[string]bool, len(targets))
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		out = append(out, target)
+	}
+	return out
 }
 
 // botRequirements maps target bot handles to decisions, dropping duplicates.
@@ -348,16 +405,25 @@ func sessionArgument(args json.RawMessage, name string) (uuid.UUID, bool) {
 	return parsed, true
 }
 
-// stringArgument reads one string field from a JSON object.
-func stringArgument(args json.RawMessage, name string) (string, bool) {
+// rawArgument reads one field's raw JSON from an argument object.
+func rawArgument(args json.RawMessage, name string) (json.RawMessage, bool) {
 	if len(strings.TrimSpace(string(args))) == 0 {
-		return "", false
+		return nil, false
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return "", false
+		return nil, false
 	}
 	raw, ok := fields[name]
+	if !ok {
+		return nil, false
+	}
+	return raw, true
+}
+
+// stringArgument reads one string field from a JSON object.
+func stringArgument(args json.RawMessage, name string) (string, bool) {
+	raw, ok := rawArgument(args, name)
 	if !ok {
 		return "", false
 	}
