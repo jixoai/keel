@@ -68,6 +68,11 @@ type Config struct {
 	// KEEL_ADMIN_KEY at request time; when neither is set the admin API is
 	// disabled (503) rather than open.
 	AdminKey string
+	// TenantCreated, when set, runs after POST /v1/tenants writes the tenant
+	// row. The host binds it to the deployment's per-tenant seed (built-in
+	// permission groups), so a tenant created through the operator API is not
+	// born without presets. It is idempotent and runs on repeat creates too.
+	TenantCreated func(ctx context.Context, tenantID uuid.UUID) error
 	// MetricsExporter backs GET /metrics (Prometheus text). Nil returns 503.
 	MetricsExporter MetricsExporter
 	// Ready backs GET /v1/ready. Nil means the process is ready as soon as it
@@ -324,6 +329,17 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 	if err := s.cfg.Store.CreateTenant(r.Context(), id, body.Name); err != nil {
 		writeErr(w, 500, err)
 		return
+	}
+	if s.cfg.TenantCreated != nil {
+		if err := s.cfg.TenantCreated(r.Context(), id); err != nil {
+			// The row exists; report both facts instead of pretending the whole
+			// call failed (a retry converges the seed).
+			writeJSON(w, 500, map[string]any{
+				"tenantId": id, "name": body.Name,
+				"error": "tenant created, seeding failed",
+			})
+			return
+		}
 	}
 	writeJSON(w, 201, map[string]any{"tenantId": id, "name": body.Name})
 }

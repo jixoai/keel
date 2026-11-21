@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
+	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -465,6 +467,64 @@ func TestTenantProvisioningRequiresAdminKey(t *testing.T) {
 	}
 	if exists, err := st.TenantExists(ctx, parsed); err != nil || !exists {
 		t.Fatalf("authenticated provisioning did not create the tenant: exists=%v err=%v", exists, err)
+	}
+}
+
+// TestTenantProvisioningSeedsBuiltinGroups pins the operator path's seed hook:
+// a tenant created through POST /v1/tenants gets the five built-in presets, and
+// a repeated create converges instead of duplicating them.
+func TestTenantProvisioningSeedsBuiltinGroups(t *testing.T) {
+	dsn := os.Getenv("KEEL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Config{DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	seedCalls := 0
+	srv := New(Config{
+		Store: st, AdminKey: "operator-secret",
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		TenantCreated: func(ctx context.Context, tenantID uuid.UUID) error {
+			seedCalls++
+			return accesswire.EnsureBuiltinGroups(ctx, st, tenantID)
+		},
+	})
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	tenant := uuid.NewString()
+	for run := 0; run < 2; run++ {
+		if code := doTenantJSON(t, hs.Client(), hs.URL+"/v1/tenants", tenant,
+			"operator-secret", map[string]string{"name": "seeded"}); code != http.StatusCreated {
+			t.Fatalf("provision run %d = %d, want 201", run, code)
+		}
+	}
+	if seedCalls != 2 {
+		t.Fatalf("seed calls = %d, want 2", seedCalls)
+	}
+	parsed, _ := uuid.Parse(tenant)
+	groups, err := st.ListPermissionGroups(ctx, parsed, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != len(access.BuiltinGroups()) {
+		t.Fatalf("groups = %d, want %d", len(groups), len(access.BuiltinGroups()))
+	}
+	for _, group := range groups {
+		if !group.Builtin {
+			t.Fatalf("group %q is not builtin", group.Name)
+		}
+		grants, err := st.ListPermissionGroupGrants(ctx, parsed, group.ID, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(grants) == 0 {
+			t.Fatalf("group %q has no grants", group.Name)
+		}
 	}
 }
 

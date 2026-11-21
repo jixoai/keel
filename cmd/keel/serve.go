@@ -899,6 +899,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Product:         product.api,
 		SessionOwner:    newSessionOwner(st, product.access),
 		SessionCreator:  newAccountSessionOwner(st, product.access),
+		// A tenant created through the operator API gets the same built-in
+		// permission-group presets as the serving tenant at boot (idempotent).
+		TenantCreated: func(ctx context.Context, tenantID uuid.UUID) error {
+			return accesswire.EnsureBuiltinGroups(ctx, st, tenantID)
+		},
 		// A4.2a: every /v1 route is gated by the single route permission matrix
 		// before its handler runs. The startup check below refuses to serve when a
 		// registered route is missing from the matrix.

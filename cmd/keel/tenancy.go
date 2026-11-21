@@ -10,6 +10,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
@@ -21,9 +22,18 @@ type apiKeyStore struct {
 	store *store.Store
 }
 
-// CreateTenant implements agentapi.Provisioner.
+// CreateTenant implements agentapi.Provisioner. A new tenant is born with the
+// built-in permission-group presets; the seed is idempotent, so a repeated
+// create converges instead of duplicating.
 func (a apiKeyStore) CreateTenant(ctx context.Context, tenantID uuid.UUID, name string) (bool, error) {
-	return a.store.CreateTenantReport(ctx, tenantID, name)
+	created, err := a.store.CreateTenantReport(ctx, tenantID, name)
+	if err != nil {
+		return false, err
+	}
+	if err := accesswire.EnsureBuiltinGroups(ctx, a.store, tenantID); err != nil {
+		return false, err
+	}
+	return created, nil
 }
 
 // MintAPIKey implements agentapi.Provisioner.

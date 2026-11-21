@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -315,6 +316,10 @@ func runAdminTenantCreate(args []string, stdout, stderr io.Writer) int {
 	created, err := st.CreateTenantReport(ctx, tenantID, tenantName)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	if err := accesswire.EnsureBuiltinGroups(ctx, st, tenantID); err != nil {
+		fmt.Fprintf(stderr, "keel admin: seed built-in permission groups: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "tenant:  %s\n", tenantID)
