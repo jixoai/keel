@@ -529,9 +529,11 @@ func runBotKeyCreate(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	// The plaintext appears exactly once, in this answer.
+	// The plaintext appears exactly once, under `plaintext`; `key` is the
+	// non-secret metadata view.
+	view, _ := answer["key"].(map[string]any)
 	fmt.Fprintf(stdout, "key id: %v\nprefix: %v\n\nBOT KEY (shown once, store it now):\n%v\n\n",
-		answer["keyId"], answer["prefix"], answer["key"])
+		view["keyId"], view["prefix"], answer["plaintext"])
 	fmt.Fprintln(stdout, "This key cannot be shown again. Issue a new one if it is lost.")
 	return 0
 }

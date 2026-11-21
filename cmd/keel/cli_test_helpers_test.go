@@ -191,8 +191,10 @@ func newFakeProductAPI(t *testing.T) *fakeProductAPI {
 		if !f.writeAllowed(w, r) {
 			return
 		}
-		f.lastKey = map[string]any{"keyId": "22222222-2222-2222-2222-222222222222", "prefix": "keel_bot_abcdefgh",
-			"key": "keel_bot_abcdefgh_plaintext", "label": "test"}
+		f.lastKey = map[string]any{
+			"key":       map[string]any{"keyId": "22222222-2222-2222-2222-222222222222", "prefix": "keel_bot_abcdefgh"},
+			"plaintext": "keel_bot_abcdefgh_plaintext", "label": "test",
+		}
 		writeFakeJSON(w, 201, f.lastKey)
 	})
 	mux.HandleFunc("DELETE /v1/bots/{id}/keys/{keyId}", func(w http.ResponseWriter, r *http.Request) {
