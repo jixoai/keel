@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/quota"
 )
@@ -109,13 +110,27 @@ func identityServer(next http.Handler, identity auth.Identity) *httptest.Server 
 	}))
 }
 
-func TestWhoAmIReportsKeyIdentity(t *testing.T) {
-	tenantID, keyID := uuid.New(), uuid.New()
-	server := identityServer(New(Config{Logger: testLogger()}),
-		auth.Identity{TenantID: tenantID, KeyID: keyID, Prefix: "keel_tenant_abcd1234", Role: auth.RoleAdmin})
+// principalServer attaches the edge-resolved auth principal the way cmd/keel's
+// middleware does.
+func principalServer(next http.Handler, principal auth.Principal) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
+	}))
+}
+
+func TestWhoAmIReportsIdentityAndPermissions(t *testing.T) {
+	tenantID, accountID := uuid.New(), uuid.New()
+	fake := &fakeAccess{
+		principal: access.Principal{TenantID: tenantID, AccountID: accountID},
+		grants:    access.Grants{access.KeySessionRead: access.ScopeOwn},
+	}
+	edge := auth.Principal{
+		Kind: auth.PrincipalHuman, TenantID: tenantID, AccountID: accountID,
+		Username: "alice", DisplayName: "Alice",
+	}
+	server := principalServer(New(Config{Access: fake, Logger: testLogger()}), edge)
 	defer server.Close()
 
-	// Path A: the middleware resolved a key.
 	req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/auth/whoami", nil)
 	req.Header.Set("X-Tenant-ID", tenantID.String())
 	res, err := server.Client().Do(req)
@@ -127,16 +142,78 @@ func TestWhoAmIReportsKeyIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if res.StatusCode != 200 {
-		t.Fatalf("whoami: %d", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("whoami: %d %v", res.StatusCode, body)
 	}
-	if body["tenantId"] != tenantID.String() || body["role"] != auth.RoleAdmin || body["keyId"] != keyID.String() {
-		t.Fatalf("body = %v", body)
+	if body["tenantId"] != tenantID.String() {
+		t.Fatalf("tenantId = %v", body["tenantId"])
 	}
-	// The prefix is display material; the plaintext key must never appear.
+	account, _ := body["account"].(map[string]any)
+	if account["id"] != accountID.String() || account["username"] != "alice" {
+		t.Fatalf("account = %v", account)
+	}
+	permissions, _ := body["permissions"].(map[string]any)
+	if permissions[access.KeySessionRead] != string(access.ScopeOwn) {
+		t.Fatalf("permissions = %v", permissions)
+	}
+	// The old tenant role is gone, and no credential material is echoed.
+	if _, ok := body["role"]; ok {
+		t.Fatal("whoami still returns the old tenant role")
+	}
 	raw, _ := json.Marshal(body)
-	if strings.Contains(string(raw), "keel_tenant_abcd1234_CONTINUATION") {
-		t.Fatal("whoami leaked something key-shaped")
+	if strings.Contains(string(raw), "keel_bot_") || strings.Contains(string(raw), "key_hash") {
+		t.Fatal("whoami leaked credential material")
+	}
+}
+
+func TestWhoAmIReportsBotIdentity(t *testing.T) {
+	tenantID, accountID, keyID := uuid.New(), uuid.New(), uuid.New()
+	fake := &fakeAccess{
+		principal: access.Principal{TenantID: tenantID, AccountID: accountID, BotID: "support-1"},
+		grants:    access.Grants{access.KeySessionRead: access.ScopeTeam},
+	}
+	edge := auth.Principal{
+		Kind: auth.PrincipalBot, TenantID: tenantID, AccountID: accountID, BotID: "support-1",
+		KeyID: keyID, KeyPrefix: "keel_bot_abcd", Username: "bot-account",
+	}
+	server := principalServer(New(Config{Access: fake, Logger: testLogger()}), edge)
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/auth/whoami", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	bot, _ := body["bot"].(map[string]any)
+	if bot["id"] != "support-1" {
+		t.Fatalf("bot = %v", bot)
+	}
+	if body["keyId"] != keyID.String() || body["keyPrefix"] != "keel_bot_abcd" {
+		t.Fatalf("key identity = %v / %v", body["keyId"], body["keyPrefix"])
+	}
+}
+
+func TestWhoAmIFailsClosedWithoutAccess(t *testing.T) {
+	tenantID := uuid.New()
+	server := principalServer(New(Config{Logger: testLogger()}), auth.Principal{
+		Kind: auth.PrincipalHuman, TenantID: tenantID, AccountID: uuid.New(),
+	})
+	defer server.Close()
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/auth/whoami", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unwired whoami = %d, want 503", res.StatusCode)
 	}
 }
 

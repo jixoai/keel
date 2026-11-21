@@ -88,6 +88,12 @@ type Config struct {
 	// mounted under /v1/. Specific routes registered here keep precedence; the
 	// subtree handler only sees paths this server does not own. Nil disables it.
 	Product http.Handler
+	// SessionOwner writes the Bot ownership of a session created with a botId
+	// (POST /v1/sessions {"botId": ...}). The serve layer authorizes bot.invoke
+	// and persists (bot_id, account_id, created_by_account_id) plus the owner
+	// relation. Nil answers 501 for a bot-scoped create; a create without botId
+	// keeps the pre-A4 behavior (a tenant session row with no owner columns).
+	SessionOwner SessionOwnerFunc
 	// AgentTeams is the persistence seam of the agent registry and agent-team
 	// surfaces (GET/POST/PUT/DELETE /v1/agents and /v1/teams plus the member
 	// routes). Nil answers 503 on all of them: an unwired deployment serves no
@@ -292,6 +298,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		SessionID string `json:"sessionId"`
+		// BotID, when set, makes this a Bot-owned session: the callback
+		// authorizes bot.invoke and writes bot/account/created-by + the owner
+		// relation. Absent keeps the pre-A4 unowned session.
+		BotID string `json:"botId"`
 	}
 	_ = decodeBody(w, r, s.cfg.MaxBody, &body)
 	id := uuid.New()
@@ -302,6 +312,39 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id = parsed
+	}
+	if botID := strings.TrimSpace(body.BotID); botID != "" {
+		if s.cfg.SessionOwner == nil {
+			writeErr(w, http.StatusNotImplemented, errors.New("bot-owned session creation is not wired in this deployment"))
+			return
+		}
+		if err := s.cfg.SessionOwner(r.Context(), tenantID, id, botID); err != nil {
+			var ownership *SessionOwnerError
+			switch {
+			case errors.As(err, &ownership):
+				status := ownership.Status
+				if status == 0 {
+					status = http.StatusForbidden
+				}
+				body := map[string]any{"error": ownership.Message}
+				if ownership.Code != "" {
+					body["code"] = ownership.Code
+				}
+				if ownership.Reason != "" {
+					body["reason"] = ownership.Reason
+				}
+				writeJSON(w, status, body)
+			case errors.Is(err, store.ErrNotFound):
+				writeErr(w, http.StatusNotFound, errors.New("bot not found"))
+			case errors.Is(err, store.ErrConflict):
+				writeErr(w, http.StatusConflict, errors.New("the bot refuses a new session"))
+			default:
+				writeErr(w, 500, err)
+			}
+			return
+		}
+		writeJSON(w, 201, map[string]any{"sessionId": id, "botId": botID})
+		return
 	}
 	if err := s.cfg.Store.CreateSession(r.Context(), tenantID, id); err != nil {
 		writeErr(w, 500, err)

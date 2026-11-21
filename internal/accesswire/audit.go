@@ -138,6 +138,50 @@ func (a *Auditor) SuperAdmin(ctx context.Context, principal access.Principal, ac
 	})
 }
 
+// BotKey records a bot credential issue or revoke. The plaintext and hash are
+// never part of the row; the prefix is the display fragment.
+func (a *Auditor) BotKey(ctx context.Context, tenantID, actor, accountID uuid.UUID, botID, action, keyID, prefix, label string) {
+	if a == nil {
+		return
+	}
+	kind := store.AuthEventBotKeyIssued
+	if action == "revoke" {
+		kind = store.AuthEventBotKeyRevoked
+	}
+	a.record(ctx, store.AuthEvent{
+		TenantID: tenantID, AccountID: uuidPtr(accountID), ActorAccountID: uuidPtr(actor),
+		Kind: kind,
+		Detail: map[string]any{
+			"key_id": keyID, "key_prefix": prefix, "bot_id": botID,
+			"label": label, "action": action,
+		},
+	})
+}
+
+// Invoke records one bot invocation: caller, callee, session and result. The
+// spec treats bot.invoke as a high-risk capability, so every accepted (and
+// refused) call is traceable.
+func (a *Auditor) Invoke(ctx context.Context, tenantID uuid.UUID, caller access.Principal, botID string, sessionID uuid.UUID, result string) {
+	if a == nil {
+		return
+	}
+	detail := map[string]any{
+		"bot_id": botID, "caller_account_id": caller.AccountID.String(),
+		"result": result,
+	}
+	if caller.BotID != "" {
+		detail["caller_bot_id"] = caller.BotID
+	}
+	if sessionID != uuid.Nil {
+		detail["session_id"] = sessionID.String()
+	}
+	a.record(ctx, store.AuthEvent{
+		TenantID: tenantID, AccountID: uuidPtr(caller.AccountID),
+		ActorAccountID: uuidPtr(caller.AccountID),
+		Kind:           store.AuthEventBotInvoked, Detail: detail,
+	})
+}
+
 func uuidPtr(id uuid.UUID) *uuid.UUID {
 	if id == uuid.Nil {
 		return nil

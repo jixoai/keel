@@ -82,19 +82,60 @@ func (s *Server) registerTenancyRoutes() {
 	s.mux.HandleFunc("DELETE /v1/admin/tenants/{id}/keys/{keyId}", s.revokeAPIKey)
 }
 
-// whoAmI reports the credential's identity. The middleware attaches it; a
-// passphrase/cookie session has no key identity, so the answer carries the
-// tenant and an empty prefix.
+// whoAmI reports the caller's identity and effective permissions. It returns
+// the Account, the Bot when the credential is a bot key, and the materialized
+// (key -> scope) grant set. The old tenant role is gone: authority is the
+// permission registry, not an api_keys role (A4.1).
 func (s *Server) whoAmI(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFrom(w, r)
 	if !ok {
 		return
 	}
-	answer := map[string]any{"tenantId": tenantID.String(), "role": auth.RoleTenant}
-	if identity, ok := auth.IdentityFrom(r.Context()); ok {
-		answer["role"] = identity.Role
-		answer["keyId"] = identity.KeyID.String()
-		answer["keyPrefix"] = identity.Prefix
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("the identity surface is not wired in this deployment"))
+		return
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("authentication required"))
+		return
+	}
+	grants, err := s.cfg.Access.Effective(r.Context(), principal)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	permissions := make(map[string]string, len(grants))
+	for key, scope := range grants {
+		permissions[key] = string(scope)
+	}
+	account := map[string]any{
+		"id":           principal.AccountID.String(),
+		"isSuperAdmin": principal.IsSuperAdmin,
+	}
+	if edge, ok := auth.PrincipalFromContext(r.Context()); ok {
+		account["username"] = edge.Username
+		account["displayName"] = edge.DisplayName
+	}
+	if s.cfg.Identity != nil {
+		if record, err := s.cfg.Identity.GetAccount(r.Context(), tenantID, principal.AccountID); err == nil {
+			account["username"] = record.Username
+			account["displayName"] = record.DisplayName
+			account["kind"] = record.Kind
+			account["disabled"] = record.DisabledAt != nil
+		}
+	}
+	answer := map[string]any{
+		"tenantId":    tenantID.String(),
+		"account":     account,
+		"permissions": permissions,
+	}
+	if principal.BotID != "" {
+		answer["bot"] = map[string]any{"id": principal.BotID}
+	}
+	if edge, ok := auth.PrincipalFromContext(r.Context()); ok && edge.IsBot() {
+		answer["keyId"] = edge.KeyID.String()
+		answer["keyPrefix"] = edge.KeyPrefix
 	}
 	writeJSON(w, http.StatusOK, answer)
 }

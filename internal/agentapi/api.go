@@ -42,6 +42,7 @@ import (
 	"github.com/jixoai/keel/internal/approval"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/notify"
+	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/tasklog"
 )
 
@@ -246,8 +247,20 @@ type Config struct {
 	// MCPAppNow overrides the limiter clock (tests use a fake clock). Nil uses
 	// time.Now.
 	MCPAppNow func() time.Time
-	Logger    *slog.Logger
-	MaxBody   int64
+	// Identity is the identity store behind /v1/accounts, /v1/permission-groups,
+	// /v1/bots and /v1/team-bots (change keel-bot-identity-access, A4.1). Nil
+	// makes those routes answer 503.
+	Identity *store.Store
+	// Access is the authorization seam (accesswire.Bridge in production). Nil
+	// makes every identity route fail closed (503): there is no "allow all"
+	// fallback and no list endpoint that skips the relation filter.
+	Access Access
+	// StartBotSession starts one bot-owned session (bot invoke and team start).
+	// The serve layer owns the turn starter and the ownership write. Nil answers
+	// 501 on the invoke/start routes.
+	StartBotSession func(ctx context.Context, request BotSessionRequest) (BotSessionResult, error)
+	Logger          *slog.Logger
+	MaxBody         int64
 }
 
 // Server is the AgentAPI HTTP handler. Mount it on the runtime's mux under
@@ -340,6 +353,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/subagents/{id}", s.getSubagent)
 	// Tenancy surface (change keel-ga §2): who am I, provisioning, quota.
 	s.registerTenancyRoutes()
+	// Identity surface (change keel-bot-identity-access, A4.1): accounts,
+	// permission groups, bots, team bots and bot keys.
+	s.identityRoutes()
 }
 
 // --- shared helpers ------------------------------------------------------

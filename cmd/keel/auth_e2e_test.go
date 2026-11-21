@@ -615,20 +615,41 @@ func TestBotKeyLifecycleE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Only a super admin issues keys.
-	status, body, _ := env.do(env.client, http.MethodPost, "/v1/auth/bot-keys",
-		map[string]any{"accountId": botAccount.ID.String(), "botId": "support-1", "label": "ci"}, adminCSRF)
-	if status != http.StatusCreated {
-		t.Fatalf("issue bot key: %d %v", status, body)
+	// The issuance surface is /v1/bots/{id}/keys (A4.1); the A2 bridge route is
+	// gone with no alias. Mint through the store here: this test proves the bot
+	// key AUTHENTICATION path, while the HTTP issuance contract is covered by the
+	// agentapi identity tests.
+	// The removed route answers a plain 404 (no JSON error body to decode).
+	removedReq, err := http.NewRequest(http.MethodPost, env.server.URL+"/v1/auth/bot-keys",
+		strings.NewReader(`{"accountId":"`+botAccount.ID.String()+`","botId":"support-1"}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	plaintext, _ := body["plaintext"].(string)
+	removedReq.Header.Set("Content-Type", "application/json")
+	for key, value := range adminCSRF {
+		removedReq.Header.Set(key, value)
+	}
+	removedRes, err := env.client.Do(removedReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removedRes.Body.Close()
+	if removedRes.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed bot-key bridge route: %d, want 404", removedRes.StatusCode)
+	}
+	minted, err := auth.MintBotKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := env.st.CreateBotAPIKey(context.Background(), env.tenantID, uuid.New(), minted.Hash,
+		minted.Prefix, botAccount.ID, "support-1", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext := minted.Plaintext
+	keyID := key.KeyID.String()
 	if !strings.HasPrefix(plaintext, auth.BotKeyScheme) {
 		t.Fatalf("plaintext = %q", plaintext)
-	}
-	keyMeta, _ := body["key"].(map[string]any)
-	keyID := keyMeta["keyId"].(string)
-	if strings.Contains(authMustJSON(t, body), "key_hash") {
-		t.Fatal("issue response exposes a hash")
 	}
 
 	// The key acts as its bot; another bot id is a 403.
@@ -660,28 +681,12 @@ func TestBotKeyLifecycleE2E(t *testing.T) {
 	}
 
 	// Revocation is immediate.
-	if status, body, _ := env.do(env.client, http.MethodDelete, "/v1/auth/bot-keys/"+keyID, nil, adminCSRF); status != http.StatusOK {
-		t.Fatalf("revoke: %d %v", status, body)
+	if err := env.st.RevokeBotAPIKey(context.Background(), env.tenantID, keyUUID); err != nil {
+		t.Fatal(err)
 	}
 	if status, _, _ := env.do(env.newClient(), http.MethodGet, "/v1/bots/support-1/echo", nil,
 		map[string]string{"Authorization": "Bearer " + plaintext}); status != http.StatusUnauthorized {
 		t.Fatalf("revoked key: %d", status)
-	}
-
-	// A non-super-admin member cannot issue keys.
-	member, err := env.ctl.service.CreateAccount(context.Background(), admin, auth.AccountInput{
-		Username: "plain-member", DisplayName: "Plain", Kind: "human", Password: "member-password-123",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	memberClient := env.newClient()
-	if status, body := env.login(memberClient, member.Username, "member-password-123"); status != http.StatusOK {
-		t.Fatalf("member login: %d %v", status, body)
-	}
-	if status, body, _ := env.do(memberClient, http.MethodPost, "/v1/auth/bot-keys",
-		map[string]any{"accountId": botAccount.ID.String(), "botId": "support-1"}, env.csrfHeader(memberClient)); status != http.StatusForbidden {
-		t.Fatalf("non-super issue: %d %v", status, body)
 	}
 }
 

@@ -41,7 +41,9 @@ func (s *Source) DirectGrants(ctx context.Context, tenantID, accountID uuid.UUID
 	if s == nil || s.Store == nil {
 		return nil, errors.New("accesswire: source is not configured")
 	}
-	rows, err := s.Store.ListPermissionGrants(ctx, tenantID, store.PermissionSubjectAccount, accountID, 0)
+	// Ask for the store's maximum identity page: direct grants are rare, but a
+	// truncated read would silently narrow authority.
+	rows, err := s.Store.ListPermissionGrants(ctx, tenantID, store.PermissionSubjectAccount, accountID, 500)
 	if err != nil {
 		return nil, err
 	}

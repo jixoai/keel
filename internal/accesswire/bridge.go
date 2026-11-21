@@ -199,6 +199,55 @@ func (b *Bridge) CanGrant(ctx context.Context, principal access.Principal, propo
 	return access.CanGrant(grantor, proposed)
 }
 
+// AuditGrant records a grant/revoke write through the bridge.
+func (b *Bridge) AuditGrant(ctx context.Context, tenantID, actor, target uuid.UUID, action, via, key, scope, result string, extra map[string]any) {
+	if b == nil {
+		return
+	}
+	b.Audit.Grant(ctx, tenantID, actor, target, action, via, key, scope, result, extra)
+}
+
+// AuditRelation records a relation tuple change through the bridge.
+func (b *Bridge) AuditRelation(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string) {
+	if b == nil {
+		return
+	}
+	b.Audit.Relation(ctx, tenantID, actor, action, resourceType, resourceID, relation, subjectType, subjectID)
+}
+
+// AuditSuperAdmin records a super-admin action through the bridge.
+func (b *Bridge) AuditSuperAdmin(ctx context.Context, principal access.Principal, action string, detail map[string]any) {
+	if b == nil {
+		return
+	}
+	b.Audit.SuperAdmin(ctx, principal, action, detail)
+}
+
+// AuditInvoke records one bot invocation.
+func (b *Bridge) AuditInvoke(ctx context.Context, tenantID uuid.UUID, caller access.Principal, botID string, sessionID uuid.UUID, result string) {
+	if b == nil {
+		return
+	}
+	b.Audit.Invoke(ctx, tenantID, caller, botID, sessionID, result)
+}
+
+// AuditBotKey records a bot credential lifecycle write.
+func (b *Bridge) AuditBotKey(ctx context.Context, tenantID, actor, accountID uuid.UUID, botID, action, keyID, prefix, label string) {
+	if b == nil {
+		return
+	}
+	b.Audit.BotKey(ctx, tenantID, actor, accountID, botID, action, keyID, prefix, label)
+}
+
+// Denied records a denial the handler decided on (business denial, not one the
+// authorizer already wrote).
+func (b *Bridge) Denied(ctx context.Context, principal access.Principal, decision access.Decision, resource access.Resource) {
+	if b == nil {
+		return
+	}
+	b.Audit.Denied(ctx, principal, decision, resource)
+}
+
 // BotOwnerAccount resolves the account a Bot belongs to (through its Profile)
 // and reports whether the Bot is archived. A missing Bot is store.ErrNotFound.
 func (b *Bridge) BotOwnerAccount(ctx context.Context, tenantID uuid.UUID, botID string) (uuid.UUID, bool, error) {

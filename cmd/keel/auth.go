@@ -171,12 +171,8 @@ func (a *authController) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/auth/session", a.session)
 	mux.HandleFunc("POST /v1/auth/password", a.changePassword)
 	mux.HandleFunc("POST /v1/auth/bootstrap", a.bootstrap)
-	// Bot credentials are the A2 bridge until A4 mounts them under /v1/bots.
-	// They are super-admin-only here; A3/A4 will replace the check with the
-	// permission registry.
-	mux.HandleFunc("POST /v1/auth/bot-keys", a.issueBotKey)
-	mux.HandleFunc("GET /v1/auth/bot-keys", a.listBotKeys)
-	mux.HandleFunc("DELETE /v1/auth/bot-keys/{keyId}", a.revokeBotKey)
+	// Bot credentials live under /v1/bots/{id}/keys (A4.1). The A2 bridge routes
+	// were removed with no alias: the old paths answer 404.
 }
 
 // wrap returns the edge middleware around next (the quota edge + dispatcher).
@@ -572,98 +568,6 @@ func (a *authController) bootstrap(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.logger.Error("bootstrap", "err", err)
 		writeAuthError(w, http.StatusInternalServerError, "internal_error", "bootstrap failed")
-	}
-}
-
-type issueBotKeyRequest struct {
-	AccountID string `json:"accountId"`
-	BotID     string `json:"botId"`
-	Label     string `json:"label"`
-}
-
-func (a *authController) issueBotKey(w http.ResponseWriter, r *http.Request) {
-	principal, ok := principalFrom(r.Context())
-	if !ok {
-		writeAuthError(w, http.StatusUnauthorized, "authentication_required", "authentication required")
-		return
-	}
-	var body issueBotKeyRequest
-	if !decodeJSONBody(w, r, &body) {
-		return
-	}
-	accountID, err := uuid.Parse(strings.TrimSpace(body.AccountID))
-	if err != nil || accountID == uuid.Nil || strings.TrimSpace(body.BotID) == "" {
-		writeAuthError(w, http.StatusBadRequest, "invalid_request", "accountId and botId are required")
-		return
-	}
-	issued, err := a.service.IssueBotKey(r.Context(), principal, accountID, body.BotID, body.Label)
-	if err != nil {
-		a.writeBotKeyError(w, err)
-		return
-	}
-	writeAuthJSON(w, http.StatusCreated, map[string]any{
-		"key": map[string]any{
-			"keyId": issued.Key.KeyID.String(), "prefix": issued.Key.Prefix,
-			"accountId": issued.Key.AccountID.String(), "botId": issued.Key.BotID,
-			"label": issued.Key.Label, "createdAt": issued.Key.CreatedAt.UTC(),
-		},
-		"plaintext": issued.Plaintext,
-		"notice":    "this key is shown once; it cannot be read again",
-	})
-}
-
-func (a *authController) listBotKeys(w http.ResponseWriter, r *http.Request) {
-	principal, ok := principalFrom(r.Context())
-	if !ok {
-		writeAuthError(w, http.StatusUnauthorized, "authentication_required", "authentication required")
-		return
-	}
-	keys, err := a.service.ListBotKeys(r.Context(), principal, r.URL.Query().Get("botId"))
-	if err != nil {
-		a.writeBotKeyError(w, err)
-		return
-	}
-	out := make([]map[string]any, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, map[string]any{
-			"keyId": key.KeyID.String(), "prefix": key.Prefix,
-			"accountId": key.AccountID.String(), "botId": key.BotID,
-			"label": key.Label, "createdAt": key.CreatedAt.UTC(),
-			"revokedAt": key.RevokedAt, "lastUsedAt": key.LastUsedAt,
-		})
-	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{"keys": out})
-}
-
-func (a *authController) revokeBotKey(w http.ResponseWriter, r *http.Request) {
-	principal, ok := principalFrom(r.Context())
-	if !ok {
-		writeAuthError(w, http.StatusUnauthorized, "authentication_required", "authentication required")
-		return
-	}
-	keyID, err := uuid.Parse(strings.TrimSpace(r.PathValue("keyId")))
-	if err != nil || keyID == uuid.Nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid_request", "keyId must be a UUID")
-		return
-	}
-	if err := a.service.RevokeBotKey(r.Context(), principal, keyID); err != nil {
-		a.writeBotKeyError(w, err)
-		return
-	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{"revoked": keyID.String()})
-}
-
-func (a *authController) writeBotKeyError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, auth.ErrForbidden):
-		writeAuthError(w, http.StatusForbidden, "forbidden", "a super admin is required, and the bot must belong to the named account")
-	case errors.Is(err, store.ErrNotFound):
-		writeAuthError(w, http.StatusNotFound, "not_found", "account or bot not found")
-	case errors.Is(err, auth.ErrInvalidAccount):
-		writeAuthError(w, http.StatusBadRequest, "invalid_request", "invalid account or bot")
-	default:
-		a.logger.Error("bot key", "err", err)
-		writeAuthError(w, http.StatusInternalServerError, "internal_error", "bot key operation failed")
 	}
 }
 

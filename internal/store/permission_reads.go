@@ -17,13 +17,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxAccountGroupGrants bounds the group-grant join for one account. The bound
+// is far above any real preset combination; crossing it is an error, never a
+// silent truncation, because a dropped grant would make authorization depend on
+// row order.
+const maxAccountGroupGrants = 2000
+
 // ListPermissionGroupGrantsForAccount returns every (key, scope) granted to the
-// account through its group memberships, bounded by limit. Direct grants are
-// NOT included: they have their own read path (ListPermissionGrants), and the
-// access GrantSource contract keeps the two sources distinct (A1 decision 5).
+// account through its group memberships. Direct grants are NOT included: they
+// have their own read path (ListPermissionGrants), and the access GrantSource
+// contract keeps the two sources distinct (A1 decision 5).
 func (s *Store) ListPermissionGroupGrantsForAccount(ctx context.Context, tenantID, accountID uuid.UUID, limit int) ([]PermissionGroupGrantRecord, error) {
 	if tenantID == uuid.Nil || accountID == uuid.Nil {
 		return nil, invalidIdentity("list account group grants", "tenant and account ids are required")
+	}
+	if limit <= 0 || limit > maxAccountGroupGrants {
+		limit = maxAccountGroupGrants
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT g.tenant_id, g.group_id, g.permission_key, g.scope
@@ -32,7 +41,7 @@ func (s *Store) ListPermissionGroupGrantsForAccount(ctx context.Context, tenantI
 		     ON g.tenant_id = m.tenant_id AND g.group_id = m.group_id
 		  WHERE m.tenant_id = $1 AND m.account_id = $2
 		  ORDER BY g.permission_key, g.scope, g.group_id
-		  LIMIT $3`, tenantID, accountID, identityListLimit(limit))
+		  LIMIT $3`, tenantID, accountID, limit+1)
 	if err != nil {
 		return nil, identityWriteError("list account group grants", err)
 	}
@@ -48,6 +57,9 @@ func (s *Store) ListPermissionGroupGrantsForAccount(ctx context.Context, tenantI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, identityWriteError("list account group grants", err)
+	}
+	if len(out) > limit {
+		return nil, fmt.Errorf("list account group grants: more than %d grants (refusing to truncate authority)", limit)
 	}
 	return out, nil
 }

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentcore"
@@ -302,6 +303,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 		} else if !hasSuper {
 			log.Warn("no super admin exists: run `keel admin bootstrap` (or set KEEL_BOOTSTRAP_TOKEN) before signing in")
 		}
+	}
+	// The built-in permission-group presets are part of the deployment's
+	// authority surface: seed (idempotently) before any request can be served. A
+	// failure is fatal, so the product never runs with a half-seeded preset.
+	if err := accesswire.EnsureBuiltinGroups(ctx, st, opts.TenantID); err != nil {
+		return fmt.Errorf("seed built-in permission groups: %w", err)
 	}
 
 	// The file plugin's byte layer and its per-session execution space are built
@@ -872,6 +879,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Logger:          log,
 		CASDir:          opts.CASDir,
 		Product:         product.api,
+		SessionOwner:    newSessionOwner(st, product.access),
 		Partials:        agentapi.PartialSource(product.partials),
 		// Agent registry and agent teams: the store owns the documents, the HTTP
 		// surface owns the rules (change keel-agent-team-v1, P2/P3).
@@ -1003,6 +1011,9 @@ type productLayer struct {
 	pluginManager *agentext.Manager
 	api           *agentapi.Server
 	auth          *authController
+	// access is the product authorization bridge shared by the identity routes,
+	// the bot invoke/start seams and the generic session-owner callback.
+	access *accesswire.Bridge
 
 	closeFns []func(context.Context)
 }
@@ -1213,12 +1224,25 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// service without a restart, and a generation without provider
 	// configuration answers 501 exactly like a boot without a models document.
 	modelSeam := modelRuntimeSeam{rt: rt}
+	// The product identity surface shares one authorizer across HTTP, the Bot
+	// invoke/start seams and whoami. It reads grants and relations from the same
+	// store the request path uses; there is no second permission cache.
+	accessBridge, err := accesswire.NewBridge(st, log)
+	if err != nil {
+		return nil, fmt.Errorf("access bridge: %w", err)
+	}
 	var secretStore agentapi.SecretStore
 	if secretBox != nil {
 		secretStore = tenantSecretSeam{store: st, box: secretBox}
 	}
 	api := agentapi.New(agentapi.Config{
 		Sessions: agentapi.NewPGSessionLister(st),
+		// Identity/access surface (change keel-bot-identity-access, A4.1): the
+		// same store and authorizer the auth middleware uses. A bot invoke/start
+		// creates an owned session and commits the turn through the one starter.
+		Identity:        st,
+		Access:          accessBridge,
+		StartBotSession: newBotSessionStarter(st, starter),
 		// The member-task projection of a captain session: the child cards stay
 		// in their own ledgers and are read through parentTaskId. Read-only.
 		TeamTasks: taskLog,
@@ -1324,6 +1348,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		pluginManager: manager,
 		api:           api,
 		auth:          auth,
+		access:        accessBridge,
 	}
 	layer.closeFns = []func(context.Context){
 		func(ctx context.Context) { plugins.Close(ctx) },
@@ -1332,6 +1357,47 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		func(context.Context) { hooks.Close() },
 	}
 	return layer, nil
+}
+
+// newBotSessionStarter is the bot invoke/team start seam. It writes the session
+// ownership (bot → account, initiator, optional team mission) before committing
+// the turn, so a new session is private from its first row. The turn itself goes
+// through the same TurnStarter triggers and sub-agents use.
+func newBotSessionStarter(st *store.Store, starter *agentext.TurnStarter) func(context.Context, agentapi.BotSessionRequest) (agentapi.BotSessionResult, error) {
+	return func(ctx context.Context, request agentapi.BotSessionRequest) (agentapi.BotSessionResult, error) {
+		if st == nil || starter == nil {
+			return agentapi.BotSessionResult{}, errors.New("bot session starter is not configured")
+		}
+		sessionID := request.SessionID
+		if sessionID == uuid.Nil {
+			sessionID = uuid.New()
+		}
+		if err := st.CreateOwnedSession(ctx, store.SessionOwnership{
+			TenantID: request.TenantID, SessionID: sessionID, BotID: request.BotID,
+			AccountID: request.AccountID, CreatedByAccountID: request.ActorAccountID,
+			TeamBotID: request.TeamBotID,
+		}); err != nil {
+			return agentapi.BotSessionResult{}, err
+		}
+		var extras map[string]any
+		if request.TeamBotID != "" {
+			extras = map[string]any{"teamBotId": request.TeamBotID}
+			if request.Mission != "" {
+				extras["teamMission"] = request.Mission
+			}
+		}
+		result, err := starter.StartTurn(ctx, agentext.StartTurnRequest{
+			TenantID: request.TenantID, SessionID: sessionID,
+			Text: request.Text, RequestID: request.RequestID, Extras: extras,
+		})
+		if err != nil {
+			return agentapi.BotSessionResult{}, err
+		}
+		return agentapi.BotSessionResult{
+			SessionID: result.SessionID, Seq: result.Seq,
+			RequestID: result.RequestID, Deduped: result.Deduped,
+		}, nil
+	}
 }
 
 // pluginSurface is the product's plugin layer: the lifecycle authority, the

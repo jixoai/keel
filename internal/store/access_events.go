@@ -22,4 +22,7 @@ const (
 	AuthEventPermissionDenied = "permission.denied"
 	// AuthEventRelationChanged records a resource relation tuple write/delete.
 	AuthEventRelationChanged = "relation.changed"
+	// AuthEventBotInvoked records one bot.invoke call (caller, callee, session,
+	// result). The key is high risk, so every accepted call is traceable.
+	AuthEventBotInvoked = "bot.invoked"
 )
