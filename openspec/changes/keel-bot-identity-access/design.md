@@ -34,7 +34,9 @@ Session → 属于一个 Bot → 属于一个 Account
    由关系元组决定。
 5. **授予不得超过自己。** 任何 grant/bind 操作中，授予者必须持有被授予的 `(key, scope)`；
    超管除外（超管持有全部）。
-6. **人类调用 Bot 不得提权。** 有效权限 = 调用者权限 ∩ Bot 账号权限。
+6. **调用 Bot 是能力授权，不是权限合并。** 调用者必须持有 `bot.invoke`（按 Bot/关系授予）；
+   通过授权后，Bot 以自己的 `Account 权限 ∩ Harness permissions` 执行，结果返回调用者；
+   不做调用链交集。`bot.invoke` 是高危权限，必须精确授予、可撤销、审计。
 7. **无人值守不得绕过授权者。** 定时/Webhook/后台任务以 Bot 账号权限运行；创建/绑定受
    permission-key 与不变量 5 约束，不引入第二套委托机制。
 
@@ -184,7 +186,8 @@ resource_relations (
 - HTTP middleware：路由 → required key；资源 id 从 path 解析后查关系。
 - 工具调用：工具 manifest 声明 required key；Bot 的 Harness permissions 与 Account 权限
   交集后再判。
-- Agent/Bot spawn：`bot.invoke` + 调用者 ∩ Bot 账号。
+- Bot 调用：`bot.invoke`（按 Bot/关系授予）+ 审计；被调用 Bot 以自己的
+  `Account ∩ Harness` 权限执行，不做调用者/调用链交集。`bot.invoke` 是高危 key。
 - CLI：与 HTTP 同一套 key；CLI 登录后按账号权限。
 - UI：`can(key, resource)` 只做展示；后端仍是权威。无权限动作隐藏；直接访问返回 403。
 - Kernel：只记录 `actor_account_id` 与 `bot_id`，不 import `internal/access`。
@@ -311,6 +314,7 @@ TeamBot 是**团队目标/使命 + Bot 名单**，不是权限主体：
 | 重命名范围失控（包名/表/路由/文档） | D4 先冻结边界；按产品面 → 表/API → 包名分阶段 |
 | 权限系统做成“装饰” | CI 覆盖率门 + 负控 + 统一 evaluator，禁止 handler 手写判断 |
 | 超管单点/锁死 | 不可删除、CLI 恢复、bootstrap token 一次性、审计 |
-| 无人值守提权 | `grant ⊆ own` + 调用者 ∩ Bot 账号 + 触发器创建审计 |
+| 调用者借高权限 Bot 取数据 | 接受为能力模型：`bot.invoke` 是高危权限，按 Bot/关系精确授予、可撤销、每次调用审计 |
+| 无人值守提权 | `grant ⊆ own` + `bot.invoke` 高危授予 + 触发器创建审计 |
 | 旧数据丢失 | alpha 明确零兼容；D6 决定清空或接管；备份由部署方负责 |
 | Role/权限概念再次混淆 | Role 只读不授权；权限只在 Account/Harness；文档与 UI 文案钉死 |

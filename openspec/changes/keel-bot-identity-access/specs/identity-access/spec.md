@@ -142,18 +142,25 @@ Session；Bot 归档后 MUST 拒绝新 Session。
 - **WHEN** A 撤销该关系后 B 再次读取 S
 - **THEN** 返回 403
 
-### Requirement: 人类调用 Bot 不得提权
+### Requirement: 调用 Bot 是能力授权
 
-人类调用 Bot 时，有效权限 MUST 为调用者权限与 Bot 账号权限的交集。无人值守运行
-（定时、Webhook、后台任务）MUST 以 Bot 账号权限运行；创建绑定与触发器 MUST 受
-`grant ⊆ own` 约束。超级管理员权限 MUST NOT 委托给 Bot。Bot 调用 Bot 的调用链权限
-（D9）在冻结前不在本 spec 覆盖。
+调用 Bot MUST 需要 `bot.invoke`，按 Bot 或关系授予。通过授权后，被调用 Bot MUST 以自己的
+`Account 权限 ∩ Harness permissions` 执行，MUST NOT 与调用者权限求交集，也 MUST NOT 沿
+调用链收窄。`bot.invoke` MUST 被视为高危权限：授予、撤销与每次调用（调用者、被调用 Bot、
+结果状态）MUST 审计。超级管理员权限 MUST NOT 委托给 Bot。无人值守运行（定时、Webhook、
+后台任务）MUST 以 Bot 账号权限运行；创建绑定与触发器 MUST 受 `grant ⊆ own` 约束。
 
-#### Scenario: 低权限用户调用高权限 Bot
-- **GIVEN** 用户 A 只有 `session.read` + own
+#### Scenario: 有 invoke 权限即可使用 Bot 自己的能力
+- **GIVEN** 用户 A 持有 Bot X 的 `bot.invoke`
 - **AND** Bot X 的账号拥有 `secret.read`
 - **WHEN** A 调用 X 并要求读取密钥
-- **THEN** 该工具调用返回 403，有效权限取交集
+- **THEN** X 以自己的权限执行并返回结果
+- **AND** 审计记录调用者 A、被调用 Bot X 与结果状态
+
+#### Scenario: 没有 invoke 权限被拒绝
+- **GIVEN** 用户 A 没有 Bot X 的 `bot.invoke`
+- **WHEN** A 调用 X
+- **THEN** 返回 403，X 不启动
 
 ### Requirement: Alpha 零兼容
 

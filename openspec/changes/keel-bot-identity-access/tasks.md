@@ -13,6 +13,7 @@
 - [ ] D6：旧 sessions/agents/teams 数据清空还是接管
 - [ ] D7：Bot 账号登录方式（密码 vs API key）与 API key 归属
 - [ ] D8：TeamBot 跨 Account 组装/共享规则
+- [x] D9：调用 Bot 是能力授权——`bot.invoke` 边界；Bot 以自身权限执行，不做调用链交集（L2/L13）
 - [ ] 冻结 `specs/identity-access/spec.md` 与权限 key 初始目录；偏离走新 change
 
 ## A1 Schema 与领域模型
@@ -45,7 +46,7 @@
 - [ ] ReBAC-lite：`resource_relations` 四关系 + 判定函数；禁止 handler 手写 owner 判断
 - [ ] HTTP middleware：路由 → required key；资源关系解析
 - [ ] 工具调用：manifest required key + Bot Harness permissions 收窄
-- [ ] Bot spawn / session start：`bot.invoke` + 调用者 ∩ Bot 账号
+- [ ] Bot spawn / session start：`bot.invoke`（高危、审计）+ Bot 自身权限
 - [ ] CLI 与 HTTP 同一套 key；UI `can()` 接 registry
 - [ ] 初始 permission key 目录（粗粒度 + 高危细化）与内置权限组
 - [ ] CI 覆盖率门：路由/工具/CLI/UI 动作清单快照，缺 key/未知 key 失败
@@ -54,7 +55,7 @@
 ## A4 Bot / TeamBot 产品面
 
 - [ ] 删除产品词汇 `Agent`：API/CLI/UI/文档/表名统一为 Bot
-- [ ] `TeamAgent` → `TeamBot`；成员 Bot 作为 captain Harness 工具（按 D2）
+- [ ] `TeamAgent` → `TeamBot`；TeamBot = Mission + Roster，不是权限主体（L12）
 - [ ] Bot 级 Profile 绑定；权限实时判定；Role 变更 hook 注入提示
 - [ ] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
 - [ ] TeamBot 组装/启动/成员/共享（按 D8）

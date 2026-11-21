@@ -80,7 +80,9 @@ Session → 属于一个 Bot → 属于一个 Account
 - **Bot 级绑定 Profile**：一个 Bot 固定一个 Profile；该 Bot 的所有 Session 继承。
 - **权限实时判定**：每次工具调用/写操作读当前 Account/权限组授权；Role/Instruction 变更
   通过 hook 向相关 Session 注入提示，不承担权限正确性。
-- **人类调用 Bot 时有效权限 = 调用者权限 ∩ Bot 账号权限**，防止借高权限 Bot 提权。
+- **人类调用 Bot 是能力授权**：调用者 MUST 持有 `bot.invoke`（按 Bot/关系授予）；
+  通过授权后，Bot 以自己的 `Account 权限 ∩ Harness permissions` 执行，结果返回调用者；
+  **不做调用者 ∩ Bot 的交集**。`bot.invoke` 是高危权限，必须精确授予、可撤销、全程审计。
 - **Session 属于 Bot，Bot 属于 Account**：默认可见性由归属 + 关系元组决定；
   跨账号共享必须显式建立 `viewer/editor` 关系。
 - **无人值守运行**（定时/Webhook/后台）：以 Bot 账号权限运行；绑定与触发器创建受
@@ -100,7 +102,7 @@ Session → 属于一个 Bot → 属于一个 Account
 | # | 决策 | 结论 |
 |---|---|---|
 | L1 | 账号租户边界 | Account 属于 tenant；超级管理员为部署级、可跨租户；单租户部署 = 一个 tenant + 一个 bootstrap 超管 |
-| L2 | Agent 运行时权限主体 | Bot 是独立权限主体；人类调用时有效权限 = 调用者 ∩ Bot 账号 |
+| L2 | Bot 运行时权限主体 | Bot 是独立权限主体；`bot.invoke` 是调用授权边界；Bot 以自己的 Account ∩ Harness 权限执行，不做调用者交集 |
 | L3 | 资源级授权 | ReBAC-lite 关系元组 + permission-key；关系词表 `owner/team_member/viewer/editor` |
 | L4 | Profile 绑定粒度 | Bot 级绑定；权限每次工具调用实时判定；Role 变化用 hook 提示 |
 | L5 | 权限组合 | 只做加法；无 deny；无组嵌套 |
@@ -111,6 +113,7 @@ Session → 属于一个 Bot → 属于一个 Account
 | L10 | 归属 | Account 拥有多个 Bot；Session 属于 Bot → Account；TeamBot 由多个 Bot 组装 |
 | L11 | Bot 有效权限 | `Account 权限 ∩ Harness permissions`；Account 是上限，Harness 是收窄；Role 不授权 |
 | L12 | TeamBot 不是权限主体 | TeamBot = Mission + Roster；不拥有 Account/Profile/Session，不向成员授予权限；权限只在 Bot |
+| L13 | Bot 调用是能力授权 | `bot.invoke` 是授权边界；Bot 以自己的 Account ∩ Harness 权限执行，不做调用链交集；`bot.invoke` 高危、可撤销、审计 |
 
 ## Open Decisions（阻塞 spec 冻结）
 
@@ -122,8 +125,8 @@ Session → 属于一个 Bot → 属于一个 Account
 - **D6**：旧 sessions/agents/teams 数据是清空重建，还是由 bootstrap 超管接管为初始 Bot？
 - **D7**：Bot 账号是否可登录（密码）还是只发 API key；API key 是否绑定 Account。
 - **D8**：TeamBot 跨 Account 组装与共享的规则。
-- **D9**：Bot A 调用 Bot B 时，B 的有效权限是“仅 B 自己的权限”，还是“调用链交集”
-  （人类 ∩ Bot1 ∩ Bot2 …）？后者与已冻结的 L2 一致，且堵住借道提权。
+- **D9（已冻结）**：调用 Bot 是能力授权——`bot.invoke` 是边界；Bot 以自己的权限执行，
+  不做调用链交集（L2/L13）。
 
 ## Impact
 
@@ -138,7 +141,7 @@ Session → 属于一个 Bot → 属于一个 Account
 - **UI**：登录页改账号密码；设置页改 Account / Permission Group / Bot / TeamBot；
   `can()` 改为 permission-key 驱动；无权限动作隐藏或 403。
 - **Docs/Specs**：`docs/HARNESS.md`、`docs/ARCHITECTURE.md`、`PRODUCT-UNIVERSE.md` 术语对表。
-- **Tests**：权限矩阵、跨租户负控、提权负控、登录限速、CI 覆盖率门、旧入口 404 负控。
+- **Tests**：权限矩阵、跨租户负控、未授权 invoke 负控、登录限速、CI 覆盖率门、旧入口 404 负控。
 
 ## Non-Goals
 
