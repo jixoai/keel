@@ -126,6 +126,11 @@ const AFTER_SESSION = id("run-aftersales");
 
 const todayMs = (hours: number, minutes: number, seconds: number): number => Date.parse(todayAt(hours, minutes, seconds));
 
+/** A timestamp relative to the launch, so the sample run is always coherent
+ * (a fixed 14:32 can be in the future when the test runs in the morning). */
+const agoMs = (minutes: number, seconds = 0): number => Date.now() - minutes * 60_000 - seconds * 1000;
+const agoIso = (minutes: number, seconds = 0): string => new Date(agoMs(minutes, seconds)).toISOString();
+
 const runEvent = (seq: number, kind: string, payload: Record<string, unknown>): SessionEventView => ({
   seq,
   kind,
@@ -135,7 +140,7 @@ const runEvent = (seq: number, kind: string, payload: Record<string, unknown>): 
 const CAPTAIN_EVENTS: SessionEventView[] = [
   runEvent(1, "user.message", {
     text: "本周退款原因分析：按渠道拆开，找出异常升高的两类。",
-    timestamp: todayMs(14, 32, 8),
+    timestamp: agoMs(4, 12),
   }),
   runEvent(2, "assistant.message", {
     content: [
@@ -143,7 +148,7 @@ const CAPTAIN_EVENTS: SessionEventView[] = [
       { type: "toolCall", id: "call-orders", name: "search_orders", arguments: { range: "7d", status: "refunded" } },
     ],
     usage: { inputTokens: 1200, outputTokens: 400 },
-    timestamp: todayMs(14, 32, 18),
+    timestamp: agoMs(4, 0),
   }),
   runEvent(3, "tool.result", {
     toolCallId: "call-orders",
@@ -151,11 +156,11 @@ const CAPTAIN_EVENTS: SessionEventView[] = [
     content: [{ type: "text", text: "找到 3 个订单；其中 2 个来自同一渠道。" }],
     isError: false,
     durationMs: 800,
-    timestamp: todayMs(14, 32, 19),
+    timestamp: agoMs(3, 59),
   }),
   runEvent(4, "assistant.message", {
     content: [{ type: "toolCall", id: "call-aftersales", name: "invoke_bot", arguments: { botId: id("bot-aftersales") } }],
-    timestamp: todayMs(14, 35, 18),
+    timestamp: agoMs(0, 54),
   }),
   runEvent(5, "tool.result", {
     toolCallId: "call-aftersales",
@@ -163,7 +168,7 @@ const CAPTAIN_EVENTS: SessionEventView[] = [
     content: [{ type: "text", text: "403 denied: missing bot.invoke" }],
     isError: true,
     durationMs: 200,
-    timestamp: todayMs(14, 35, 18),
+    timestamp: agoMs(0, 54),
   }),
   runEvent(6, "run.finished", {
     tokensIn: 9000,
@@ -172,7 +177,7 @@ const CAPTAIN_EVENTS: SessionEventView[] = [
     stopReason: "completed",
     provider: "s2api",
     model: "deepseek-v4.1-flash",
-    timestamp: todayMs(14, 36, 20),
+    timestamp: agoMs(0, 0),
   }),
 ];
 
@@ -210,9 +215,9 @@ const memberEvents = (
 ];
 
 const MEMBER_EVENTS: Record<string, SessionEventView[]> = {
-  [ORDER_SESSION]: memberEvents("订单查询", 8400, 1500, 66_000, "search_orders", todayMs(14, 32, 18)),
-  [REFUND_SESSION]: memberEvents("退款专员", 2600, 600, 38_000, "refund_policy", todayMs(14, 33, 30)),
-  [KNOWLEDGE_SESSION]: memberEvents("知识库", 7200, 1900, 138_000, "search_docs", todayMs(14, 32, 30)),
+  [ORDER_SESSION]: memberEvents("订单查询", 8400, 1500, 66_000, "search_orders", agoMs(4, 0)),
+  [REFUND_SESSION]: memberEvents("退款专员", 2600, 600, 38_000, "refund_policy", agoMs(3, 0)),
+  [KNOWLEDGE_SESSION]: memberEvents("知识库", 7200, 1900, 138_000, "search_docs", agoMs(3, 50)),
 };
 
 /** The current user: 李娜, a team administrator — enough to see every chapter,
@@ -228,6 +233,7 @@ const CURRENT_PERMISSIONS: Record<string, PermissionScope> = {
   "bot.read": "tenant",
   "bot.create": "tenant",
   "bot.manage": "tenant",
+  "bot.bind": "tenant",
   "bot.invoke": "team",
   "team_bot.read": "tenant",
   "team_bot.manage": "tenant",
@@ -260,11 +266,11 @@ export class FixtureIdentity implements IdentityApi {
 
   private readonly profiles: ProfileView[] = [
     { profileId: id("profile-butler"), accountId: id("butler"), roleId: id("role-butler") },
-    { profileId: id("profile-support"), accountId: id("support1"), roleId: id("role-support") },
-    { profileId: id("profile-order"), accountId: id("orderbot"), roleId: id("role-order") },
-    { profileId: id("profile-refund"), accountId: id("refund"), roleId: id("role-refund") },
-    { profileId: id("profile-knowledge"), accountId: id("knowledge"), roleId: id("role-knowledge") },
-    { profileId: id("profile-aftersales"), accountId: id("aftersales"), roleId: id("role-aftersales") },
+    { profileId: id("profile-support"), accountId: id("lina"), roleId: id("role-support") },
+    { profileId: id("profile-order"), accountId: id("lina"), roleId: id("role-order") },
+    { profileId: id("profile-refund"), accountId: id("lina"), roleId: id("role-refund") },
+    { profileId: id("profile-knowledge"), accountId: id("wangqiang"), roleId: id("role-knowledge") },
+    { profileId: id("profile-aftersales"), accountId: id("wangqiang"), roleId: id("role-aftersales") },
     { profileId: id("profile-finance"), accountId: id("finance"), roleId: id("role-finance") },
   ];
 
@@ -279,11 +285,6 @@ export class FixtureIdentity implements IdentityApi {
     account("zhenghao", "zhenghao", "郑好", "human", { createdDaysAgo: 8 }),
     account("linke", "linke", "林可", "human", { createdDaysAgo: 5 }),
     account("butler", "butler", "管家", "bot", { createdDaysAgo: 21 }),
-    account("support1", "support-1", "客服一号", "bot", { createdDaysAgo: 14 }),
-    account("orderbot", "order-bot", "订单查询", "bot", { createdDaysAgo: 11 }),
-    account("refund", "refund-bot", "退款专员", "bot", { createdDaysAgo: 10 }),
-    account("knowledge", "knowledge-bot", "知识库", "bot", { createdDaysAgo: 9 }),
-    account("aftersales", "aftersales-bot", "售后升级", "bot", { createdDaysAgo: 8 }),
     account("finance", "finance-bot", "财务助手", "bot", { createdDaysAgo: 30 }),
   ];
 
@@ -319,8 +320,8 @@ export class FixtureIdentity implements IdentityApi {
         { accountId: id("zhouyu") },
         { accountId: id("zhenghao") },
         { accountId: id("linke") },
-        { accountId: id("support1") },
-        { accountId: id("orderbot") },
+        { accountId: id("butler") },
+        { accountId: id("finance") },
       ],
       grants: [
         grant("session.read", "team"),
@@ -336,8 +337,6 @@ export class FixtureIdentity implements IdentityApi {
       members: [
         { accountId: id("lina") },
         { accountId: id("butler") },
-        { accountId: id("support1") },
-        { accountId: id("orderbot") },
       ],
       grants: [
         grant("bot.read", "tenant"),
@@ -386,7 +385,7 @@ export class FixtureIdentity implements IdentityApi {
       ],
       days: 21,
     }),
-    bot("support", "客服一号", "support", "support1", {
+    bot("support", "客服一号", "support", "lina", {
       instruction: "客服一线：查订单、拟回复、升级人工。",
       permissions: [
         "session.read",
@@ -401,25 +400,25 @@ export class FixtureIdentity implements IdentityApi {
       tools: ["search_orders", "get_order", "send_reply"],
       days: 14,
     }),
-    bot("order", "订单查询", "order", "orderbot", {
+    bot("order", "订单查询", "order", "lina", {
       instruction: "查询订单与物流，给出可核对的事实。",
       permissions: ["session.read", "session.write", "bot.read", "team_bot.read"],
       tools: ["search_orders", "get_order"],
       days: 11,
     }),
-    bot("refund", "退款专员", "refund", "refund", {
+    bot("refund", "退款专员", "refund", "lina", {
       instruction: "核对退款条件，准备退款材料；金额超过阈值升级人工。",
       permissions: ["session.read", "session.write", "bot.read"],
       tools: ["refund_policy", "prepare_refund"],
       days: 10,
     }),
-    bot("knowledge", "知识库", "knowledge", "knowledge", {
+    bot("knowledge", "知识库", "knowledge", "wangqiang", {
       instruction: "在内部文档里找答案，引用来源。",
       permissions: ["session.read", "bot.read"],
       tools: ["search_docs"],
       days: 9,
     }),
-    bot("aftersales", "售后升级", "aftersales", "aftersales", {
+    bot("aftersales", "售后升级", "aftersales", "wangqiang", {
       instruction: "把无法自行解决的问题整理后升级给人工。",
       permissions: ["session.read", "bot.read"],
       tools: ["create_ticket"],
@@ -437,7 +436,7 @@ export class FixtureIdentity implements IdentityApi {
     {
       keyId: id("key-support-prod"),
       prefix: "kb_sup",
-      accountId: id("support1"),
+      accountId: id("lina"),
       botId: id("bot-support"),
       label: "生产 Webhook",
       createdAt: todayAt(9, 18, 41),
@@ -446,7 +445,7 @@ export class FixtureIdentity implements IdentityApi {
     {
       keyId: id("key-support-old"),
       prefix: "kb_old",
-      accountId: id("support1"),
+      accountId: id("lina"),
       botId: id("bot-support"),
       label: "旧版触发器",
       createdAt: daysAgoIso(12),
@@ -486,6 +485,17 @@ export class FixtureIdentity implements IdentityApi {
       createdAt: daysAgoIso(6),
       updatedAt: daysAgoIso(2),
     },
+    {
+      teamBotId: id("team-finance"),
+      name: "财务对账",
+      mission: "每月核对发票与账目；发现差异时列出订单号与金额，交给人工确认。",
+      roster: [{ botId: id("bot-finance"), role: "captain" }],
+      revision: 1,
+      hash: "fixture-team-finance-v1",
+      archived: false,
+      createdAt: daysAgoIso(20),
+      updatedAt: daysAgoIso(8),
+    },
   ];
 
   private readonly tasks: TeamTaskView[] = [
@@ -495,8 +505,8 @@ export class FixtureIdentity implements IdentityApi {
       title: "订单查询",
       status: "done",
       origin: "subagent",
-      createdAt: todayAt(14, 32, 18),
-      updatedAt: todayAt(14, 33, 24),
+      createdAt: agoIso(4, 0),
+      updatedAt: agoIso(3, 0),
     },
     {
       taskId: "task-refund",
@@ -505,8 +515,8 @@ export class FixtureIdentity implements IdentityApi {
       title: "退款专员",
       status: "done",
       origin: "subagent",
-      createdAt: todayAt(14, 33, 30),
-      updatedAt: todayAt(14, 34, 8),
+      createdAt: agoIso(3, 0),
+      updatedAt: agoIso(2, 30),
     },
     {
       taskId: "task-knowledge",
@@ -514,8 +524,8 @@ export class FixtureIdentity implements IdentityApi {
       title: "知识库",
       status: "done",
       origin: "subagent",
-      createdAt: todayAt(14, 32, 30),
-      updatedAt: todayAt(14, 34, 48),
+      createdAt: agoIso(3, 50),
+      updatedAt: agoIso(1, 50),
     },
     {
       taskId: "task-aftersales",
@@ -523,8 +533,8 @@ export class FixtureIdentity implements IdentityApi {
       title: "售后升级",
       status: "blocked",
       origin: "subagent",
-      createdAt: todayAt(14, 35, 18),
-      updatedAt: todayAt(14, 35, 18),
+      createdAt: agoIso(0, 54),
+      updatedAt: agoIso(0, 54),
     },
   ];
 
@@ -537,8 +547,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "订单查询",
       status: "completed",
       origin: "spawn",
-      startedAt: todayAt(14, 32, 18),
-      endedAt: todayAt(14, 33, 24),
+      startedAt: agoIso(4, 0),
+      endedAt: agoIso(3, 0),
       summary: "找到 3 个退款订单，2 个来自同一渠道。",
       usage: { turns: 2, inputTokens: 8400, outputTokens: 1500, durationMs: 66_000 },
     },
@@ -550,8 +560,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "退款专员",
       status: "completed",
       origin: "spawn",
-      startedAt: todayAt(14, 33, 30),
-      endedAt: todayAt(14, 34, 8),
+      startedAt: agoIso(3, 0),
+      endedAt: agoIso(2, 30),
       summary: "退款材料已备齐，等待人工确认。",
       usage: { turns: 1, inputTokens: 2600, outputTokens: 600, durationMs: 38_000 },
     },
@@ -563,8 +573,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "知识库",
       status: "completed",
       origin: "spawn",
-      startedAt: todayAt(14, 32, 30),
-      endedAt: todayAt(14, 34, 48),
+      startedAt: agoIso(3, 50),
+      endedAt: agoIso(1, 50),
       summary: "引用退款政策第 3 节。",
       usage: { turns: 2, inputTokens: 7200, outputTokens: 1900, durationMs: 138_000 },
     },
@@ -576,13 +586,14 @@ export class FixtureIdentity implements IdentityApi {
       agent: "售后升级",
       status: "failed",
       origin: "spawn",
-      startedAt: todayAt(14, 35, 18),
-      endedAt: todayAt(14, 35, 18),
+      startedAt: agoIso(0, 54),
+      endedAt: agoIso(0, 54),
       error: "调用被拒：缺「调用 Bot」能力（bot.invoke）。",
     },
   ];
 
   private cancelledRuns = new Set<string>();
+  private runLive = false;
   private runSequence = 0;
 
   private readonly events: AuditEventView[] = [
@@ -951,6 +962,7 @@ export class FixtureIdentity implements IdentityApi {
     if (!captainBot) throw new KeelApiError(409, "队长不在可见 Bot 里。");
     if (captainBot.archived) throw new KeelApiError(409, "队长已归档。");
     this.cancelledRuns.delete(RUN_ID);
+    this.runLive = true;
     return { teamBotId, captainBotId: captain.botId, sessionId: RUN_ID, seq: 1 };
   }
 
@@ -958,7 +970,11 @@ export class FixtureIdentity implements IdentityApi {
 
   async sessionEvents(sessionId: string): Promise<SessionEventView[]> {
     if (sessionId === RUN_ID) {
-      const events = CAPTAIN_EVENTS.map((event) => ({ ...event }));
+      // A started run is live until it is stopped: the fixture withholds the
+      // terminal run.finished so the page's running state is real (the stop
+      // action appends its own cancelled terminal event).
+      const suppressTerminal = this.runLive || this.cancelledRuns.has(sessionId);
+      const events = CAPTAIN_EVENTS.filter((event) => !(suppressTerminal && event.kind === "run.finished")).map((event) => ({ ...event }));
       if (this.cancelledRuns.has(sessionId)) {
         events.push(
           runEvent(7, "run.finished", {
@@ -968,7 +984,7 @@ export class FixtureIdentity implements IdentityApi {
             stopReason: "cancelled",
             provider: "s2api",
             model: "deepseek-v4.1-flash",
-            timestamp: todayMs(14, 36, 40),
+            timestamp: agoMs(0, 0),
           }),
         );
       }
@@ -995,6 +1011,7 @@ export class FixtureIdentity implements IdentityApi {
   async cancelSession(sessionId: string): Promise<SessionCancelView> {
     if (sessionId !== RUN_ID) throw new KeelApiError(404, "没有找到这个会话。");
     this.cancelledRuns.add(sessionId);
+    this.runLive = false;
     return { status: "cancelled", runStatus: "cancelled", cancelled: true };
   }
 

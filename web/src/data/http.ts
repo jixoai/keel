@@ -135,6 +135,9 @@ export class KeelApiError extends Error {
   readonly scope: string | undefined;
   /** A 429's Retry-After, in whole seconds. */
   readonly retryAfterSeconds: number | undefined;
+  /** The server's request id (`X-Request-ID`), when the edge answered one. A
+   * failed page prints it so a reader can quote it to the administrator. */
+  readonly requestId: string | undefined;
   constructor(
     status: number,
     message: string,
@@ -142,6 +145,7 @@ export class KeelApiError extends Error {
     revision?: number,
     code?: string,
     detail: KeelErrorDetail = {},
+    requestId?: string,
   ) {
     super(message);
     this.status = status;
@@ -152,6 +156,7 @@ export class KeelApiError extends Error {
     this.requiredKey = detail.requiredKey;
     this.scope = detail.scope;
     this.retryAfterSeconds = detail.retryAfterSeconds;
+    this.requestId = requestId;
   }
 }
 
@@ -808,7 +813,8 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
     });
     if (!response.ok) {
       const { message, issues, revision, code, detail } = await readErrorBody(response);
-      const error = new KeelApiError(response.status, message, issues, revision, code, detail);
+      const requestId = response.headers.get("x-request-id") ?? response.headers.get("x-keel-request-id") ?? undefined;
+      const error = new KeelApiError(response.status, message, issues, revision, code, detail, requestId ?? undefined);
       // A 401 from a real endpoint is the session ending. Login/bootstrap 401s
       // are credential answers for the form, and a password change's 401 is the
       // current password being wrong: neither may throw the reader out.
@@ -1938,7 +1944,8 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
    * parent session. The list is relation-filtered by the server; a child the
    * caller cannot read is not returned. */
   async listSubagents(parentSessionId?: string, limit = 200): Promise<SubagentView[]> {
-    const bounded = Math.min(500, Math.max(1, Math.floor(limit)));
+    // The server bounds this read to 1..200.
+    const bounded = Math.min(200, Math.max(1, Math.floor(limit)));
     const query = new URLSearchParams({ limit: String(bounded) });
     if (parentSessionId) query.set("parentSessionId", parentSessionId);
     const response = await this.request(`/v1/subagents?${query.toString()}`);

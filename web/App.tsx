@@ -34,6 +34,9 @@ import { BooksChapterRoute } from "./src/screens/books/chapters";
 import { BooksChrome } from "./src/screens/books/shell";
 import { identityAccess } from "./src/data/identity-access";
 import { botAccess } from "./src/data/bots";
+import { resetBotsUi } from "./src/screens/books/bots";
+import { resetTeamsUi } from "./src/screens/books/teams";
+import { resetRunUi } from "./src/screens/books/run";
 import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
@@ -499,6 +502,9 @@ function App() {
     authWas = auth;
     identityAccess.clearSession();
     botAccess.clearSession();
+    resetBotsUi();
+    resetTeamsUi();
+    resetRunUi();
   });
   // Boot: the appearance the last session chose (the settings page's 外观
   // section writes it through the same source) …

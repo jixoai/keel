@@ -23,7 +23,7 @@ test("TUI: 账簿壳——1440 章节带 + 身份索引 + 账号详情的能力�
   await view.waitFor("id:identity-index");
   // 1440 的身份章是索引列 + 纸面（不做 drill-in），不是五列表。
   expect(view.texts()).toContain("李娜");
-  expect(view.texts()).toContain("客服一号");
+  expect(view.texts()).toContain("财务助手");
   expect(view.texts()).toContain("选择一个账号");
   // 账号页：唯一 H1 与章节索引。
   await view.press("label:打开账号 李娜");

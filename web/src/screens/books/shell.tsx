@@ -11,7 +11,7 @@
 // queue (denied calls, failed runs, members without invoke, pending grants) is
 // A4.4b's read, so this slice says so instead of printing a made-up count.
 import type { JSX } from "nsh";
-import { signal, Text, View } from "nsh";
+import { effect, signal, Text, View } from "nsh";
 import {
   AlertDialog,
   Avatar,
@@ -36,8 +36,9 @@ import {
 import { Icon, type IconName } from "../../ui/icons";
 import { store } from "../../data/store";
 import { canAny } from "../../data/permissions";
+import { botAccess } from "../../data/bots";
 import { openPalette } from "../command-palette";
-import { BOOK_BAND_HEIGHT_PX, Hairline, Kicker, avatarLetter, booksFocusStyle, copyText, isMobile, touchStyle } from "./common";
+import { BOOK_BAND_HEIGHT_PX, Hairline, Kicker, PressRow, avatarLetter, booksFocusStyle, copyText, isMobile, touchStyle } from "./common";
 
 export type ChapterId = "workspace" | "bots" | "teams" | "identity" | "records";
 
@@ -65,16 +66,21 @@ const chapterOf = (): ChapterEntry =>
 
 const canRead = (chapter: ChapterEntry): boolean => chapterVisible(chapter);
 
-/** The live channel's own word. It is the app's real stream state (the workspace
- * opens it with a session); the identity/records pages are static projections,
- * so a closed channel says so instead of promising live updates. */
+/** The live channel's own word. The books pages are static projections, so a
+ * channel that was never opened is not a failure: it renders nothing. A
+ * channel that is connecting or reconnecting says so; an open one is green
+ * 实时. There is deliberately no gray 「未连接」 badge on a page that never
+ * promised a stream. */
 function LiveBadge() {
   const status = () => store.connection().status;
-  const label = () =>
-    status() === "open" ? "实时" : status() === "connecting" ? "连接中" : status() === "reconnecting" ? "重连中" : "未连接";
-  const variant = () =>
-    status() === "open" ? "success" : status() === "connecting" || status() === "reconnecting" ? "warning" : "secondary";
-  return <Badge testID="books-live" variant={variant()} label={label()} icon={status() === "open" ? "wifi" : "wifi-off"} />;
+  const visible = () => status() === "open" || status() === "connecting" || status() === "reconnecting";
+  const label = () => (status() === "open" ? "实时" : "重连中");
+  const variant = () => (status() === "open" ? "success" : "warning");
+  return (
+    <If when={visible()}>
+      <Badge testID="books-live" variant={variant()} label={label()} icon={status() === "open" ? "wifi" : "refresh"} />
+    </If>
+  );
 }
 
 // ---- the band --------------------------------------------------------------
@@ -124,8 +130,12 @@ function BandChapter(props: { chapter: ChapterEntry }) {
   );
 }
 
-/** 待我处理: a real entry whose body names the read that has not landed. */
+/** 待我处理: the real queue this chapter can prove — a team whose roster names a
+ * Bot that is archived or no longer visible. A failed run or a revoked
+ * `bot.invoke` needs a route the server does not expose yet, so they are named
+ * in the empty copy instead of being counted. */
 function TodoSheet(props: { open: boolean; onClose: () => void }) {
+  const items = () => botAccess.todoItems();
   return (
     <Sheet
       open={props.open}
@@ -134,7 +144,7 @@ function TodoSheet(props: { open: boolean; onClose: () => void }) {
         if (!event.open) props.onClose();
       }}
       title="待我处理"
-      description="越权调用、失败运行、缺「调用 Bot」能力的成员、待批准的授权，会在这里汇总。"
+      description="这里汇总需要你决定的团队与成员问题。"
       testID="books-todo-sheet"
       footer={
         <Button
@@ -148,8 +158,42 @@ function TodoSheet(props: { open: boolean; onClose: () => void }) {
         />
       }
     >
-      <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
-        待办的跨对象聚合在下一片（A4.4b）接入；这一片不显示推测数字。现在可以在「记录」里按「拒绝」筛选，查看每一次被拒的调用。
+      <If
+        when={items().length > 0}
+        else={
+          <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
+            现在没有需要你处理的事。团队运行失败、被别人拒绝的调用，会在「记录」里留下明细；可以按「拒绝」筛选查看。
+          </Text>
+        }
+      >
+        <View style={{ flexDirection: "column", gap: 0 }}>
+          <Each of={items()} key={(item) => item.teamId}>
+            {(item) => (
+              <PressRow
+                testID={`todo-team-${item().teamId}`}
+                accessibilityLabel={`打开团队 ${item().teamName}`}
+                onPress={() => {
+                  props.onClose();
+                  store.openTeam(item().teamId);
+                }}
+              >
+                <Icon name="users" size={14} tint={color.mutedForeground} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ fontSize: typeScale.base, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                    {item().teamName}
+                  </Text>
+                  <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                    {item().reason}
+                  </Text>
+                </View>
+                <Icon name="chevron-right" size={12} tint={color.mutedForeground} />
+              </PressRow>
+            )}
+          </Each>
+        </View>
+      </If>
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+        打开团队后，「启动前检查」会指出缺什么、找谁处理。
       </Text>
     </Sheet>
   );
@@ -319,6 +363,12 @@ function BottomBar() {
  * and the account menu. */
 function PhoneTopBar(props: { onTodo: () => void }) {
   const chapter = () => chapterOf();
+  const pageLabel = () =>
+    store.route() === "teams" && store.routeRunId() !== null
+      ? "运行"
+      : store.route() === "bots" && store.routeObjectId() !== null
+        ? "Bot"
+        : chapter().label;
   return (
     <View
       testID="books-phone-top"
@@ -333,11 +383,11 @@ function PhoneTopBar(props: { onTodo: () => void }) {
       }}
     >
       <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>{chapter().num}</Text>
-      <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>{chapter().label}</Text>
+      <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>{pageLabel()}</Text>
       <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: space.xs }}>
-        <IconButton testID="books-phone-todo" icon="alert" label="待我处理" onPress={props.onTodo} />
-        <IconButton testID="books-phone-search" icon="search" label="搜索" onPress={openPalette} />
-        <IconButton testID="books-phone-settings" icon="settings" label="打开部署设置" onPress={() => store.openSettings()} />
+        <IconButton testID="books-phone-todo" icon="alert" label="待我处理" onPress={props.onTodo} style={{ width: 44, height: 44 }} />
+        <IconButton testID="books-phone-search" icon="search" label="搜索" onPress={openPalette} style={{ width: 44, height: 44 }} />
+        <IconButton testID="books-phone-settings" icon="settings" label="打开部署设置" onPress={() => store.openSettings()} style={{ width: 44, height: 44 }} />
         <AccountMenu />
       </View>
     </View>
@@ -349,6 +399,13 @@ function PhoneTopBar(props: { onTodo: () => void }) {
  * band simply does not offer it. */
 export function BooksChrome(props: { children?: JSX.Element }) {
   const todoOpen = signal(false);
+  // The cross-object queue needs the two lists the team/bot chapters own. It is
+  // read when the shell mounts (not invented): a team whose roster names an
+  // archived or invisible Bot is the one pending item this slice can prove.
+  effect(() => {
+    if (canAny(["bot.read", "bot.manage"])) botAccess.ensureBots();
+    if (canAny(["team_bot.read", "team_bot.manage"])) botAccess.ensureTeams();
+  });
   // The workspace keeps its own header on a phone (the session list's brand
   // row), so the band's phone row is not drawn there: one header, not two. The
   // bottom bar still carries the chapters.
@@ -367,6 +424,7 @@ export function BooksChrome(props: { children?: JSX.Element }) {
 }
 
 function DesktopBand(props: { onTodo: () => void }) {
+  const todoCount = () => botAccess.todoItems().length;
   return (
     <View
       testID="books-band"
@@ -380,7 +438,7 @@ function DesktopBand(props: { onTodo: () => void }) {
         backgroundColor: color.background,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, paddingRight: space.lg }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, paddingRight: space.md }}>
         <View
           accessibilityLabel="Keel"
           style={{
@@ -396,6 +454,9 @@ function DesktopBand(props: { onTodo: () => void }) {
           <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, fontWeight: weight.semibold, color: color.foreground }}>K</Text>
         </View>
         <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, letterSpacing: 1.4, color: color.foreground }}>KEEL</Text>
+        <Text testID="books-deployment" style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          本部署
+        </Text>
       </View>
       <Hairline style={{ width: 1, height: 20, alignSelf: "center", marginRight: space.lg }} />
       <View style={{ flexDirection: "row", alignItems: "stretch", minWidth: 0 }}>
@@ -409,8 +470,8 @@ function DesktopBand(props: { onTodo: () => void }) {
           variant="ghost"
           size="sm"
           icon="alert"
-          label="待办"
-          accessibilityLabel="待我处理"
+          label={todoCount() > 0 ? `待办 ${todoCount()}` : "待办"}
+          accessibilityLabel={todoCount() > 0 ? `待我处理，${todoCount()} 项` : "待我处理"}
           onPress={props.onTodo}
         />
         <If when={store.route() !== "workspace"}>

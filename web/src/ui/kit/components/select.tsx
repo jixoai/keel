@@ -37,6 +37,9 @@ export function Select(props: {
   onChange?: (value: string | null) => void;
   placeholder?: string;
   size?: ControlSize;
+  /** The trigger's height, for a platform whose touch floor is taller than the
+   * size ladder (the books shell's 44px phone controls). */
+  height?: number;
   searchable?: boolean;
   searchPlaceholder?: string;
   disabled?: boolean;
@@ -109,7 +112,7 @@ export function Select(props: {
             alignItems: "center",
             justifyContent: "space-between",
             gap: space.sm,
-            height: controlHeight(size()),
+            height: props.height ?? controlHeight(size()),
             paddingHorizontal: controlPadding(size()),
             borderRadius: controlRadius(size()),
             borderWidth: 1,

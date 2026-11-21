@@ -13,6 +13,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Clipboard, Text, View, windowSize } from "nsh";
 import {
+  Avatar,
   Badge,
   Button,
   Empty,
@@ -21,6 +22,7 @@ import {
   EmptyMedia,
   EmptyTitle,
   Skeleton,
+  ScrollArea,
   alpha,
   color,
   font,
@@ -55,7 +57,8 @@ export const isNarrow = (): boolean => windowSize().width < 1024;
 
 /** A control that meets the 44px touch floor on a phone and keeps the kit's
  * own height elsewhere. */
-export const touchStyle = (): StyleProp<ViewStyle> => (isMobile() ? { height: BOOK_TOUCH_PX } : null);
+export const touchStyle = (): StyleProp<ViewStyle> =>
+  isMobile() ? { height: BOOK_TOUCH_PX, minHeight: BOOK_TOUCH_PX } : null;
 
 /** The focus ring at the kit's measured contrast (the kit's own helper is not
  * part of its public surface, so the same two values are repeated here: an
@@ -109,6 +112,36 @@ export const avatarLetter = (name: string | undefined): string => {
   const characters = [...trimmed];
   return characters[characters.length - 1] ?? "?";
 };
+
+/** A Bot/team name's first character: the mark a Bot avatar carries (客服一号 →
+ * 客), not a two-character initials block that a 24px circle cannot hold. */
+export const firstLetter = (name: string | undefined): string => {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return "?";
+  return [...trimmed][0] ?? "?";
+};
+
+/** The 账簿 avatar: one character, the same size ladder as the kit's. */
+export function BookAvatar(props: { name: string; size?: "sm" | "default" | "lg" }) {
+  const size = () => props.size ?? "sm";
+  return (
+    <Avatar
+      name={props.name}
+      size={size()}
+      fallback={
+        <Text
+          style={{
+            fontSize: size() === "lg" ? typeScale.base : size() === "default" ? typeScale.sm : typeScale["2xs"],
+            fontWeight: weight.medium,
+            color: color.mutedForeground,
+          }}
+        >
+          {firstLetter(props.name)}
+        </Text>
+      }
+    />
+  );
+}
 
 export const copyText = async (text: string): Promise<boolean> => {
   try {
@@ -339,6 +372,238 @@ export function PressRow(props: {
   );
 }
 
+/** A pressable segmented control for a small closed set (chapters, sections,
+ * modes). It is the identity segment's grammar, generalised: 44px on a phone,
+ * 28px elsewhere. */
+export function Segmented(props: {
+  testID?: string;
+  accessibilityLabel?: string;
+  items: Array<{ id: string; label: string; count?: string }>;
+  value: string;
+  disabled?: boolean;
+  onSelect: (id: string) => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View
+      testID={props.testID}
+      accessibilityLabel={props.accessibilityLabel}
+      style={[
+        {
+          flexDirection: "row",
+          gap: 2,
+          padding: 2,
+          borderRadius: radius.sm,
+          backgroundColor: color.muted,
+          borderWidth: 1,
+          borderColor: color.border,
+        },
+        props.style ?? null,
+      ]}
+    >
+      <Each of={props.items} key={(item) => item.id}>
+        {(item) => {
+          const active = () => props.value === item().id;
+          return (
+            <View
+              testID={props.testID ? `${props.testID}-${item().id}` : undefined}
+              role="button"
+              focusable={props.disabled !== true}
+              onPress={() => {
+                if (props.disabled !== true) props.onSelect(item().id);
+              }}
+              accessibilityLabel={item().label}
+              accessibilityState={{ selected: active(), disabled: props.disabled === true }}
+              hoverStyle={active() || props.disabled ? undefined : { backgroundColor: color.hover }}
+              focusStyle={booksFocusStyle()}
+              style={{
+                flex: 1,
+                minHeight: isMobile() ? BOOK_TOUCH_PX : 28,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingHorizontal: space.sm,
+                borderRadius: radius.xs,
+                backgroundColor: active() ? color.selected : "transparent",
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: typeScale.sm,
+                  color: active() ? color.foreground : color.mutedForeground,
+                  numberOfLines: 1,
+                }}
+              >
+                {item().label}
+                {item().count ? ` ${item().count}` : ""}
+              </Text>
+            </View>
+          );
+        }}
+      </Each>
+    </View>
+  );
+}
+
+/** The object page's spine at ≥1024: the object's identity, its facts, the
+ * in-chapter index and the primary action. It is fixed while the paper scrolls,
+ * so the reader always knows whose page this is and what remains. */
+export function ObjectSpine(props: {
+  testID?: string;
+  kicker: { icon?: IconName; text: string };
+  title: string;
+  subtitle?: string;
+  description?: string;
+  facts?: Array<{ label: string; value: string }>;
+  items: Array<{ id: string; num: string; label: string; count?: string }>;
+  section: string;
+  onSection: (id: string) => void;
+  actions?: JSX.Element;
+  footer?: JSX.Element;
+  testIDPrefix?: string;
+}) {
+  return (
+    <View
+      testID={props.testID ?? "object-spine"}
+      style={{
+        width: isWide() ? BOOK_SPINE_WIDTH_PX : 200,
+        flexShrink: 0,
+        minHeight: 0,
+        flexDirection: "column",
+        borderRightWidth: 1,
+        borderRightColor: color.border,
+        backgroundColor: color.background,
+      }}
+    >
+      <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+        <View style={{ paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.md, gap: space.sm }}>
+          <Kicker icon={props.kicker.icon} text={props.kicker.text} />
+          <Text
+            style={{
+              fontSize: typeScale["2xl"],
+              lineHeight: Math.round(typeScale["2xl"] * lineHeight.tight),
+              fontWeight: weight.semibold,
+              color: color.foreground,
+              letterSpacing: -0.3,
+              numberOfLines: 2,
+              textOverflow: "ellipsis",
+            }}
+          >
+            {props.title}
+          </Text>
+          {props.subtitle ? (
+            <Text
+              style={{
+                fontFamily: font.mono,
+                fontSize: typeScale.key,
+                color: color.mutedForeground,
+                numberOfLines: 1,
+                textOverflow: "ellipsis",
+              }}
+            >
+              {props.subtitle}
+            </Text>
+          ) : null}
+          {props.description ? (
+            <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
+              {props.description}
+            </Text>
+          ) : null}
+          {props.facts && props.facts.length ? (
+            <View style={{ flexDirection: "column", gap: space.xs, paddingTop: space.xs }}>
+              <Each of={props.facts} key={(fact) => fact.label}>
+                {(fact) => (
+                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm }}>
+                    <Text style={{ width: 58, flexShrink: 0, fontSize: typeScale.sm, color: color.mutedForeground }}>
+                      {fact().label}
+                    </Text>
+                    <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                      {fact().value}
+                    </Text>
+                  </View>
+                )}
+              </Each>
+            </View>
+          ) : null}
+          <View style={{ flexDirection: "column", gap: 0, paddingTop: space.sm }}>
+            <Each of={props.items} key={(item) => item.id}>
+              {(item) => {
+                const active = () => props.section === item().id;
+                return (
+                  <View
+                    testID={props.testIDPrefix ? `${props.testIDPrefix}-${item().id}` : undefined}
+                    role="button"
+                    focusable
+                    onPress={() => props.onSection(item().id)}
+                    accessibilityLabel={`打开${item().label}`}
+                    accessibilityState={{ selected: active() }}
+                    hoverStyle={active() ? undefined : { backgroundColor: color.hover }}
+                    focusStyle={booksFocusStyle()}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: space.sm,
+                      minHeight: 32,
+                      paddingHorizontal: space.xs,
+                      borderLeftWidth: 2,
+                      borderLeftColor: active() ? color.foreground : "transparent",
+                    }}
+                  >
+                    <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>{item().num}</Text>
+                    <Text style={{ fontSize: typeScale.sm, color: active() ? color.foreground : color.mutedForeground }}>
+                      {item().label}
+                    </Text>
+                    {item().count ? (
+                      <Text
+                        style={{
+                          marginLeft: "auto",
+                          fontFamily: font.mono,
+                          fontSize: typeScale.key,
+                          color: color.mutedForeground,
+                        }}
+                      >
+                        {item().count}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              }}
+            </Each>
+          </View>
+        </View>
+      </ScrollArea>
+      {props.actions || props.footer ? (
+        <View style={{ padding: space.lg, paddingTop: space.md, gap: space.md, borderTopWidth: 1, borderTopColor: color.border }}>
+          {props.actions}
+          {props.footer}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** The index page's paper: 1040 max, 32px gutters, one column. The index pages
+ * are not inside the shell's `Paper` (they own their scroll view), so they use
+ * this same geometry directly. */
+export function PaperBody(props: { children?: JSX.Element; testID?: string }) {
+  return (
+    <View
+      testID={props.testID}
+      style={{
+        width: "100%",
+        maxWidth: BOOK_PAPER_MAX_WIDTH_PX,
+        alignSelf: "center",
+        paddingHorizontal: isMobile() ? space.lg : space["2xl"],
+        paddingTop: space.lg,
+        paddingBottom: space["2xl"],
+        flexDirection: "column",
+        gap: space.lg,
+      }}
+    >
+      {props.children}
+    </View>
+  );
+}
+
 /** A fact line: a fixed-width key and a value that may truncate. */
 export function FactLine(props: { label: string; value: string; mono?: boolean }) {
   return (
@@ -479,14 +744,19 @@ export function PageLoading(props: { rows?: number; label?: string; testID?: str
   );
 }
 
-/** Error: what failed, that the reader's edits (when any) are still there, and
- * one retry. */
-export function PageError(props: { title: string; message: string; onRetry?: () => void; retrying?: boolean; testID?: string }) {
+/** Error: what failed, that the reader's edits (when any) are still there, one
+ * retry, and the server's request id when it answered one. */
+export function PageError(props: { title: string; message: string; onRetry?: () => void; retrying?: boolean; requestId?: string; testID?: string }) {
   return (
     <Empty testID={props.testID} accessibilityLabel={props.title}>
       <EmptyMedia icon="alert" tone="danger" />
       <EmptyTitle label={props.title} />
       <EmptyDescription label={props.message} />
+      {props.requestId ? (
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
+          请求编号 {props.requestId}
+        </Text>
+      ) : null}
       {props.onRetry ? (
         <EmptyContent>
           <Button

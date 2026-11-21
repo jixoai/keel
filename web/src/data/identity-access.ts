@@ -43,6 +43,8 @@ export interface AccessFailure {
   message: string;
   /** The capability a 403 named, when the server named one. */
   requiredKey?: string;
+  /** The server's request id, when the edge answered one. */
+  requestId?: string;
   /** The transport does not serve this surface at all (no method, or the
    * server's default-deny 404 on a route that has not landed). */
   unavailable?: boolean;
@@ -78,6 +80,7 @@ const failureOf = (error: unknown): AccessFailure => {
   if (error instanceof KeelApiError) {
     const failure: AccessFailure = { status: error.status, message: errorMessageOf(error) };
     if (error.requiredKey) failure.requiredKey = error.requiredKey;
+    if (error.requestId) failure.requestId = error.requestId;
     return failure;
   }
   return { status: null, message: errorMessageOf(error) };

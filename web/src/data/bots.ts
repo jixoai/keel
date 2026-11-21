@@ -50,6 +50,7 @@ const failureOf = (error: unknown): AccessFailure => {
   if (error instanceof KeelApiError) {
     const failure: AccessFailure = { status: error.status, message: errorMessageOf(error) };
     if (error.requiredKey) failure.requiredKey = error.requiredKey;
+    if (error.requestId) failure.requestId = error.requestId;
     return failure;
   }
   return { status: null, message: errorMessageOf(error) };
@@ -64,6 +65,14 @@ const newRequestId = (): string => {
 const textOfError = (error: unknown): string => errorMessageOf(error);
 
 const roleOfRoster = (role: string): "captain" | "member" => (role === "captain" ? "captain" : "member");
+
+/** A one-line excerpt of a mission for a diff row. The full sentence stays in
+ * the mission field; a diff must stay scannable. */
+const snippet = (value: string): string => {
+  const flat = value.replace(/\s+/g, " ").trim();
+  if (!flat) return "空";
+  return flat.length > 48 ? `${flat.slice(0, 47)}…` : flat;
+};
 
 const captainOf = (roster: RosterEntry[]): RosterEntry | undefined => roster.find((seat) => roleOfRoster(seat.role) === "captain");
 
@@ -476,6 +485,11 @@ class BotAccessStore {
   readonly nodeEventsError = signal<{ sessionId: string; message: string } | null>(null);
   private runToken = 0;
   private nodeToken = 0;
+  /** A run page reads once per (team, run); an error stays an error until the
+   * reader presses 重试 or 刷新. Without this, an effect that re-runs on every
+   * render would retry a failed read forever. */
+  private readonly runAttempted = new Set<string>();
+  private readonly nodeEventsAttempted = new Set<string>();
 
   private api(): IdentityApi | null {
     return store.identityApi();
@@ -662,8 +676,12 @@ class BotAccessStore {
     return scope;
   }
 
-  /** The account range is knowable only when the group details were read. */
-  accountScopeKnown(): boolean {
+  /** The account range is knowable when the group details were read, or when
+   * the account is the deployment administrator (the server short-circuits it
+   * to every key). */
+  accountScopeKnown(accountId?: string): boolean {
+    const account = accountId ? identityAccess.accounts().find((row) => row.accountId === accountId) : undefined;
+    if (account?.isSuperAdmin) return true;
     return identityAccess.groupsError() === null && identityAccess.groups().length > 0;
   }
 
@@ -1179,8 +1197,8 @@ class BotAccessStore {
       changes.push({
         kind: "mission",
         label: "使命",
-        from: saved.mission ? "已填写" : "空",
-        to: draft.mission ? "已修改" : "清空",
+        from: snippet(saved.mission),
+        to: snippet(draft.mission),
         highRisk: false,
       });
     }
@@ -1355,6 +1373,15 @@ class BotAccessStore {
     this.teamNotice.set(null);
     try {
       const result = await api.startTeamBot(teamId, undefined, undefined, newRequestId());
+      // A new run with a previously seen session id must be read again: the
+      // page's one-shot guard and the old projection both belong to the old run.
+      this.runAttempted.delete(`${teamId}:${result.sessionId}`);
+      this.run.set(null);
+      this.runSelected.set(null);
+      this.nodeEvents.set({});
+      this.nodeEventsAttempted.clear();
+      this.runStopNotice.set(null);
+      this.runStopError.set(null);
       this.startedRuns.update((map) => ({
         ...map,
         [teamId]: [{ start: { ...result }, startedAt: new Date().toISOString() }, ...(map[teamId] ?? [])].slice(0, 20),
@@ -1397,16 +1424,60 @@ class BotAccessStore {
     }
   }
 
+  async createTeam(input: { name: string; mission: string; roster: RosterEntry[] }): Promise<TeamBotView | null> {
+    const api = this.api();
+    if (!api?.createTeamBot) {
+      this.teamActionError.set("这个传输不支持创建团队。");
+      return null;
+    }
+    this.teamActionError.set(null);
+    try {
+      const created = await api.createTeamBot(input);
+      await this.loadTeams();
+      return created;
+    } catch (error) {
+      this.teamActionError.set(humanWriteError(error, "创建团队"));
+      return null;
+    }
+  }
+
   botNameOf(botId: string): string {
     return this.bots().find((bot) => bot.botId === botId)?.name ?? botId;
+  }
+
+  /** The 待我处理 queue this chapter can prove from its own reads: a team whose
+   * roster names a Bot that is archived or not visible. A run failure and a
+   * missing `bot.invoke` need a run list / relation read the server does not
+   * expose yet, so they are not counted here (an invented number is worse than
+   * a short queue). */
+  todoItems(): Array<{ teamId: string; teamName: string; reason: string }> {
+    const items: Array<{ teamId: string; teamName: string; reason: string }> = [];
+    for (const team of this.teams()) {
+      if (team.archived) continue;
+      for (const seat of team.roster) {
+        const bot = this.bots().find((entry) => entry.botId === seat.botId);
+        if (!bot) {
+          items.push({ teamId: team.teamBotId, teamName: team.name, reason: "名单里的一个 Bot 不在可见范围里" });
+          break;
+        }
+        if (bot.archived) {
+          items.push({ teamId: team.teamBotId, teamName: team.name, reason: `${bot.name} 已归档，团队不能启动` });
+          break;
+        }
+      }
+    }
+    return items;
   }
 
   // ---- the run projection --------------------------------------------------
 
   ensureRun(teamId: string, runId: string): void {
+    const key = `${teamId}:${runId}`;
     const current = this.run();
     if (current && current.teamId === teamId && current.runId === runId) return;
+    if (this.runAttempted.has(key)) return;
     if (this.runLoading()) return;
+    this.runAttempted.add(key);
     void this.loadRun(teamId, runId);
   }
 
@@ -1415,8 +1486,10 @@ class BotAccessStore {
     const token = ++this.runToken;
     this.runLoading.set(true);
     this.runError.set(null);
-    this.runStopError.set(null);
-    this.runStopNotice.set(null);
+    if (this.run() !== null && this.run()?.runId !== runId) {
+      this.runStopError.set(null);
+      this.runStopNotice.set(null);
+    }
     this.runSelected.set(null);
     this.nodeEvents.set({});
     this.run.set(null);
@@ -1433,7 +1506,16 @@ class BotAccessStore {
 
       const gaps: string[] = [];
       const sources = { session: false, tasks: false, subagents: false, events: false };
-      const summary = store.sessions().find((row) => row.sessionId === runId);
+      let summary = store.sessions().find((row) => row.sessionId === runId);
+      if (!summary && api.listSessions) {
+        // A deep link may land before the workspace list has been read. One
+        // bounded read gives the run its own summary; a failure stays a gap.
+        try {
+          summary = (await api.listSessions(200)).find((row) => row.sessionId === runId);
+        } catch {
+          /* the run's events and tasks still carry the projection */
+        }
+      }
       sources.session = summary !== undefined;
       const localStart = (this.startedRuns()[teamId] ?? []).find((row) => row.start.sessionId === runId);
       let events: SessionEventView[] = [];
@@ -1441,6 +1523,7 @@ class BotAccessStore {
         try {
           events = await api.sessionEvents(runId, 500);
           sources.events = true;
+          if (events.length >= 500) gaps.push("会话事件达到 500 条上限：更早的事件没有读入，工具与用量可能不完整。");
           this.nodeEvents.update((map) => ({ ...map, [runId]: events }));
         } catch (error) {
           const failure = failureOf(error);
@@ -1457,6 +1540,7 @@ class BotAccessStore {
         try {
           const page = await api.teamTasks(runId);
           tasks = page.tasks ?? [];
+          if (page.hasMore === true) gaps.push("成员任务卡还有下一页：当前只列了第一页。");
           sources.tasks = true;
         } catch (error) {
           const failure = failureOf(error);
@@ -1471,7 +1555,8 @@ class BotAccessStore {
       let subagents: SubagentView[] = [];
       if (api.listSubagents) {
         try {
-          const all = await api.listSubagents(undefined, 500);
+          const all = await api.listSubagents(undefined, 200);
+          if (all.length >= 200) gaps.push("子会话清单达到 200 条上限：更早的调用可能没有画出来。");
           subagents = subagentClosure(all, runId);
           sources.subagents = true;
         } catch {
@@ -1538,9 +1623,10 @@ class BotAccessStore {
   async ensureNodeEvents(node: RunNode): Promise<void> {
     const sessionId = node.sessionId;
     if (!sessionId) return;
-    if (this.nodeEvents()[sessionId]) return;
+    if (this.nodeEvents()[sessionId] || this.nodeEventsAttempted.has(sessionId)) return;
     const api = this.api();
     if (!api?.sessionEvents) return;
+    this.nodeEventsAttempted.add(sessionId);
     const token = ++this.nodeToken;
     this.nodeEventsLoading.set(sessionId);
     this.nodeEventsError.set(null);
@@ -1556,20 +1642,19 @@ class BotAccessStore {
     }
   }
 
+  /** The inspector's 重试: one explicit re-read of a failed node ledger. */
+  retryNodeEvents(node: RunNode): void {
+    if (!node.sessionId) return;
+    this.nodeEventsAttempted.delete(node.sessionId);
+    void this.ensureNodeEvents(node);
+  }
+
   nodeTools(node: RunNode): RunToolView[] {
     const sessionId = node.sessionId;
     if (!sessionId) return [];
     const events = this.nodeEvents()[sessionId];
     if (!events) return [];
     return toolsOf(events);
-  }
-
-  nodeUsage(node: RunNode): { tokens?: number; durationMs?: number; model?: string; error?: string; status?: RunNodeStatus } {
-    const sessionId = node.sessionId;
-    if (!sessionId) return {};
-    const events = this.nodeEvents()[sessionId];
-    if (!events) return {};
-    return usageOf(events);
   }
 
   nodeDenials(node: RunNode): RunPermissionView[] {
@@ -1611,11 +1696,6 @@ class BotAccessStore {
   }
 
   // ---- boot / clear --------------------------------------------------------
-
-  ensureChapters(): void {
-    this.ensureBots();
-    this.ensureTeams();
-  }
 
   clearSession(): void {
     this.botsToken += 1;
@@ -1681,6 +1761,8 @@ class BotAccessStore {
     this.nodeEvents.set({});
     this.nodeEventsLoading.set(null);
     this.nodeEventsError.set(null);
+    this.runAttempted.clear();
+    this.nodeEventsAttempted.clear();
     this.botsQuery.set("");
     this.botsModelKind.set("all");
     this.botsStatus.set("all");
@@ -1806,12 +1888,14 @@ function buildRun(input: {
   const captainSeat = captainOf(team.roster);
   const captainName = captainBot?.name ?? (captainSeat ? team.name : "队长");
   const captainUsage = usageOf(events);
-  const captainStatus =
-    captainUsage.status ??
-    sessionStatus(summary?.runStatus) ??
-    (localStart ? "running" : "unknown");
+  const summaryStatus = summary ? sessionStatus(summary.runStatus) : undefined;
+  const captainStatus = captainUsage.status ?? summaryStatus ?? (localStart ? "running" : "unknown");
   const startedAt = summary?.createdAt ?? eventIso(events[0]) ?? localStartedAt;
   const endedAt = captainStatus === "running" ? undefined : summary?.updatedAt ?? eventIso(events[events.length - 1]);
+  const liveDuration =
+    captainStatus === "running" && startedAt && Number.isFinite(Date.parse(startedAt))
+      ? Math.max(0, Date.now() - Date.parse(startedAt))
+      : undefined;
   const captainId = `captain:${captainSeat?.botId ?? "captain"}`;
   nodes.set(captainId, {
     id: captainId,
@@ -1827,7 +1911,7 @@ function buildRun(input: {
     status: captainStatus,
     startedAt,
     endedAt,
-    durationMs: captainUsage.durationMs ?? durationBetween(startedAt, endedAt),
+    durationMs: captainUsage.durationMs ?? durationBetween(startedAt, endedAt) ?? liveDuration,
     tokens: captainUsage.tokens,
     model: captainUsage.model,
     error: captainUsage.error,
@@ -1889,7 +1973,7 @@ function buildRun(input: {
         endedAt: record.endedAt ?? existing.endedAt,
         durationMs: existing.durationMs ?? record.usage?.durationMs ?? durationBetween(record.startedAt, record.endedAt),
         tokens: existing.tokens ?? usageTokens,
-        error: existing.error ?? record.error,
+        error: record.error ?? existing.error,
         summary: record.summary ?? existing.summary,
         agent: record.agent,
         source: existing.source,
@@ -1937,7 +2021,7 @@ function buildRun(input: {
     title: summary?.title,
     startedAt,
     endedAt,
-    durationMs: captainUsage.durationMs ?? durationBetween(startedAt, endedAt),
+    durationMs: captainUsage.durationMs ?? durationBetween(startedAt, endedAt) ?? liveDuration,
     nodes: all,
     failures,
     gaps: [],
