@@ -365,6 +365,8 @@ class KeelStore {
    * Kept apart from `route` so the chapter comparisons above stay one word. */
   readonly routeSection = signal<IdentitySection>("accounts");
   readonly routeObjectId = signal<string | null>(null);
+  /** The open team run (the captain session id) below a team page. */
+  readonly routeRunId = signal<string | null>(null);
 
   // ---- settings face (change keel-model-settings) ------------------------
 
@@ -934,6 +936,7 @@ class KeelStore {
     this.route.set(state.route);
     this.routeSection.set(state.section);
     this.routeObjectId.set(state.objectId);
+    this.routeRunId.set(state.runId);
   }
 
   /** Move to a route in-app and keep the page URL in step. The state is set
@@ -944,6 +947,7 @@ class KeelStore {
     this.route.set(state.route);
     this.routeSection.set(state.section);
     this.routeObjectId.set(state.objectId);
+    this.routeRunId.set(state.runId);
     this.navigate(routePath(state));
   }
 
@@ -983,13 +987,45 @@ class KeelStore {
     this.go(routeState("workspace"));
   }
 
-  // ---- the books chapters (change keel-bot-identity-access, A4.4a) ---------
+  // ---- the books chapters (change keel-bot-identity-access, A4.4a/A4.4b) ---
 
   /** Enter a chapter. Identity keeps whichever sub-page the reader was on; the
-   * others have one page in this slice. */
+   * object chapters open their index (a deep link keeps its own object). */
   openChapter(route: "workspace" | "bots" | "teams" | "identity" | "records") {
     const section: IdentitySection = route === "identity" ? this.routeSection() : "accounts";
     this.go(routeState(route, section, null));
+  }
+
+  /** One Bot page (`/bots/<id>`). */
+  openBot(botId: string) {
+    this.go(routeState("bots", "accounts", botId));
+  }
+
+  /** Back from a Bot page to the Bot index. */
+  closeBot() {
+    this.go(routeState("bots"));
+  }
+
+  /** One TeamBot page (`/teams/<id>`). */
+  openTeam(teamId: string) {
+    this.go(routeState("teams", "accounts", teamId));
+  }
+
+  /** One team run (`/teams/<id>/runs/<captainSessionId>`). The run id is the
+   * captain session's id: it is the only stable name the server gives a run. */
+  openTeamRun(teamId: string, runId: string) {
+    this.go(routeState("teams", "accounts", teamId, runId));
+  }
+
+  /** Back from a run to the team page. */
+  closeTeamRun() {
+    if (this.route() !== "teams") return;
+    this.go(routeState("teams", "accounts", this.routeObjectId(), null));
+  }
+
+  /** Back from a TeamBot page to the team index. */
+  closeTeam() {
+    this.go(routeState("teams"));
   }
 
   /** 账号 / 权限组 — the identity index column's segmented control. */

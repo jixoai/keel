@@ -33,6 +33,7 @@ import { KitGallery } from "./kit/KitGallery";
 import { BooksChapterRoute } from "./src/screens/books/chapters";
 import { BooksChrome } from "./src/screens/books/shell";
 import { identityAccess } from "./src/data/identity-access";
+import { botAccess } from "./src/data/bots";
 import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
@@ -497,6 +498,7 @@ function App() {
     if (auth === authWas) return;
     authWas = auth;
     identityAccess.clearSession();
+    botAccess.clearSession();
   });
   // Boot: the appearance the last session chose (the settings page's 外观
   // section writes it through the same source) …

@@ -11,17 +11,34 @@
 import { KeelApiError } from "./http";
 import { CAPABILITIES } from "./permission-catalog";
 import type { IdentityApi } from "./identity-api";
+import type { TeamTaskView } from "./contract";
+import type {
+  ProfileView,
+  RoleView,
+  RunStartView,
+  SessionCancelView,
+  SessionEventView,
+  SubagentView,
+} from "./bots-wire";
 import type {
   AccountView,
   AuditEventView,
   AuditKind,
   AuditQuery,
+  BotKeyView,
   BotView,
   CreateAccountInput,
+  CreateBotInput,
+  CreateTeamBotInput,
   IdentityPage,
+  ModelRef,
   PermissionGroupDetail,
   PermissionGroupSummary,
   PermissionScope,
+  RosterEntry,
+  TeamBotView,
+  UpdateBotInput,
+  UpdateTeamBotInput,
   WhoAmI,
 } from "./identity";
 
@@ -76,6 +93,128 @@ interface FixtureGroup {
 
 const grant = (key: string, scope: PermissionScope) => ({ key, scope });
 
+const bot = (
+  key: string,
+  name: string,
+  profileKey: string,
+  accountKey: string,
+  opts: { instruction: string; permissions: string[]; tools?: string[]; archived?: boolean; days?: number },
+): BotView => ({
+  botId: id(`bot-${key}`),
+  name,
+  profileId: id(`profile-${profileKey}`),
+  accountId: id(accountKey),
+  modelKind: "text",
+  defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
+  harness: {
+    tools: opts.tools ?? [],
+    context: { instruction: opts.instruction, permissions: opts.permissions },
+  },
+  archived: opts.archived === true,
+  createdAt: daysAgoIso(opts.days ?? 14),
+  updatedAt: daysAgoIso(1),
+});
+
+/** The fixture run's stable session ids. The same ids name the member task
+ * cards, the sub-agent records and the member ledgers, so the run page's
+ * projection joins on real keys. */
+const RUN_ID = id("run-captain");
+const ORDER_SESSION = id("run-order");
+const REFUND_SESSION = id("run-refund");
+const KNOWLEDGE_SESSION = id("run-knowledge");
+const AFTER_SESSION = id("run-aftersales");
+
+const todayMs = (hours: number, minutes: number, seconds: number): number => Date.parse(todayAt(hours, minutes, seconds));
+
+const runEvent = (seq: number, kind: string, payload: Record<string, unknown>): SessionEventView => ({
+  seq,
+  kind,
+  payload,
+});
+
+const CAPTAIN_EVENTS: SessionEventView[] = [
+  runEvent(1, "user.message", {
+    text: "本周退款原因分析：按渠道拆开，找出异常升高的两类。",
+    timestamp: todayMs(14, 32, 8),
+  }),
+  runEvent(2, "assistant.message", {
+    content: [
+      { type: "text", text: "我先查一遍本周的退款订单。" },
+      { type: "toolCall", id: "call-orders", name: "search_orders", arguments: { range: "7d", status: "refunded" } },
+    ],
+    usage: { inputTokens: 1200, outputTokens: 400 },
+    timestamp: todayMs(14, 32, 18),
+  }),
+  runEvent(3, "tool.result", {
+    toolCallId: "call-orders",
+    toolName: "search_orders",
+    content: [{ type: "text", text: "找到 3 个订单；其中 2 个来自同一渠道。" }],
+    isError: false,
+    durationMs: 800,
+    timestamp: todayMs(14, 32, 19),
+  }),
+  runEvent(4, "assistant.message", {
+    content: [{ type: "toolCall", id: "call-aftersales", name: "invoke_bot", arguments: { botId: id("bot-aftersales") } }],
+    timestamp: todayMs(14, 35, 18),
+  }),
+  runEvent(5, "tool.result", {
+    toolCallId: "call-aftersales",
+    toolName: "invoke_bot",
+    content: [{ type: "text", text: "403 denied: missing bot.invoke" }],
+    isError: true,
+    durationMs: 200,
+    timestamp: todayMs(14, 35, 18),
+  }),
+  runEvent(6, "run.finished", {
+    tokensIn: 9000,
+    tokensOut: 3400,
+    durationMs: 252_000,
+    stopReason: "completed",
+    provider: "s2api",
+    model: "deepseek-v4.1-flash",
+    timestamp: todayMs(14, 36, 20),
+  }),
+];
+
+const memberEvents = (
+  name: string,
+  tokensIn: number,
+  tokensOut: number,
+  durationMs: number,
+  tool: string,
+  startedAt: number,
+): SessionEventView[] => [
+  runEvent(1, "user.message", { text: `${name} 的成员任务`, timestamp: startedAt }),
+  runEvent(2, "assistant.message", {
+    content: [{ type: "toolCall", id: `${name}-call`, name: tool, arguments: {} }],
+    usage: { inputTokens: Math.round(tokensIn / 2), outputTokens: Math.round(tokensOut / 2) },
+    timestamp: startedAt + 2000,
+  }),
+  runEvent(3, "tool.result", {
+    toolCallId: `${name}-call`,
+    toolName: tool,
+    content: [{ type: "text", text: "完成" }],
+    isError: false,
+    durationMs: 600,
+    timestamp: startedAt + 2600,
+  }),
+  runEvent(4, "run.finished", {
+    tokensIn,
+    tokensOut,
+    durationMs,
+    stopReason: "completed",
+    provider: "s2api",
+    model: "deepseek-v4.1-flash",
+    timestamp: startedAt + durationMs,
+  }),
+];
+
+const MEMBER_EVENTS: Record<string, SessionEventView[]> = {
+  [ORDER_SESSION]: memberEvents("订单查询", 8400, 1500, 66_000, "search_orders", todayMs(14, 32, 18)),
+  [REFUND_SESSION]: memberEvents("退款专员", 2600, 600, 38_000, "refund_policy", todayMs(14, 33, 30)),
+  [KNOWLEDGE_SESSION]: memberEvents("知识库", 7200, 1900, 138_000, "search_docs", todayMs(14, 32, 30)),
+};
+
 /** The current user: 李娜, a team administrator — enough to see every chapter,
  * and a `bot.invoke` ceiling of 本团队 so the matrix's 全部/整个租户 options are
  * visibly disabled with their reason. */
@@ -109,6 +248,26 @@ const CURRENT_PERMISSIONS: Record<string, PermissionScope> = {
 };
 
 export class FixtureIdentity implements IdentityApi {
+  private readonly roles: RoleView[] = [
+    { roleId: id("role-butler"), name: "管家", instruction: "听懂一句话需求，组建团队、配权限、跑起来，并让人看懂你做了什么。" },
+    { roleId: id("role-support"), name: "客服专员", instruction: "客服一线：查订单、拟回复、升级人工。" },
+    { roleId: id("role-order"), name: "订单专家", instruction: "查询订单与物流，给出可核对的事实。" },
+    { roleId: id("role-refund"), name: "退款专员", instruction: "核对退款条件，准备退款材料。" },
+    { roleId: id("role-knowledge"), name: "知识库", instruction: "在内部文档里找答案，引用来源。" },
+    { roleId: id("role-aftersales"), name: "售后升级", instruction: "把无法自行解决的问题整理后升级给人工。" },
+    { roleId: id("role-finance"), name: "财务助手", instruction: "读取账目与发票信息。" },
+  ];
+
+  private readonly profiles: ProfileView[] = [
+    { profileId: id("profile-butler"), accountId: id("butler"), roleId: id("role-butler") },
+    { profileId: id("profile-support"), accountId: id("support1"), roleId: id("role-support") },
+    { profileId: id("profile-order"), accountId: id("orderbot"), roleId: id("role-order") },
+    { profileId: id("profile-refund"), accountId: id("refund"), roleId: id("role-refund") },
+    { profileId: id("profile-knowledge"), accountId: id("knowledge"), roleId: id("role-knowledge") },
+    { profileId: id("profile-aftersales"), accountId: id("aftersales"), roleId: id("role-aftersales") },
+    { profileId: id("profile-finance"), accountId: id("finance"), roleId: id("role-finance") },
+  ];
+
   private readonly accounts: AccountView[] = [
     CURRENT_ACCOUNT,
     account("wangqiang", "wangqiang", "王强", "human", { superAdmin: true, createdDaysAgo: 21 }),
@@ -122,6 +281,10 @@ export class FixtureIdentity implements IdentityApi {
     account("butler", "butler", "管家", "bot", { createdDaysAgo: 21 }),
     account("support1", "support-1", "客服一号", "bot", { createdDaysAgo: 14 }),
     account("orderbot", "order-bot", "订单查询", "bot", { createdDaysAgo: 11 }),
+    account("refund", "refund-bot", "退款专员", "bot", { createdDaysAgo: 10 }),
+    account("knowledge", "knowledge-bot", "知识库", "bot", { createdDaysAgo: 9 }),
+    account("aftersales", "aftersales-bot", "售后升级", "bot", { createdDaysAgo: 8 }),
+    account("finance", "finance-bot", "财务助手", "bot", { createdDaysAgo: 30 }),
   ];
 
   private readonly groups: FixtureGroup[] = [
@@ -203,37 +366,224 @@ export class FixtureIdentity implements IdentityApi {
   ];
 
   private readonly bots: BotView[] = [
+    bot("butler", "管家", "butler", "butler", {
+      instruction: "听懂一句话需求，组建团队、配权限、跑起来，并让人看懂你做了什么。",
+      permissions: [
+        "session.read",
+        "session.write",
+        "bot.read",
+        "bot.create",
+        "bot.manage",
+        "bot.bind",
+        "bot.invoke",
+        "team_bot.read",
+        "team_bot.manage",
+        "account.read",
+        "permission.read",
+        "permission.manage",
+        "model.read",
+        "audit.read",
+      ],
+      days: 21,
+    }),
+    bot("support", "客服一号", "support", "support1", {
+      instruction: "客服一线：查订单、拟回复、升级人工。",
+      permissions: [
+        "session.read",
+        "session.write",
+        "session.share",
+        "bot.read",
+        "bot.invoke",
+        "team_bot.read",
+        "account.read",
+        "secret.read.metadata",
+      ],
+      tools: ["search_orders", "get_order", "send_reply"],
+      days: 14,
+    }),
+    bot("order", "订单查询", "order", "orderbot", {
+      instruction: "查询订单与物流，给出可核对的事实。",
+      permissions: ["session.read", "session.write", "bot.read", "team_bot.read"],
+      tools: ["search_orders", "get_order"],
+      days: 11,
+    }),
+    bot("refund", "退款专员", "refund", "refund", {
+      instruction: "核对退款条件，准备退款材料；金额超过阈值升级人工。",
+      permissions: ["session.read", "session.write", "bot.read"],
+      tools: ["refund_policy", "prepare_refund"],
+      days: 10,
+    }),
+    bot("knowledge", "知识库", "knowledge", "knowledge", {
+      instruction: "在内部文档里找答案，引用来源。",
+      permissions: ["session.read", "bot.read"],
+      tools: ["search_docs"],
+      days: 9,
+    }),
+    bot("aftersales", "售后升级", "aftersales", "aftersales", {
+      instruction: "把无法自行解决的问题整理后升级给人工。",
+      permissions: ["session.read", "bot.read"],
+      tools: ["create_ticket"],
+      days: 8,
+    }),
+    bot("finance", "财务助手", "finance", "finance", {
+      instruction: "读取账目与发票信息。",
+      permissions: ["session.read", "secret.read.metadata", "secret.read.value"],
+      archived: true,
+      days: 30,
+    }),
+  ];
+
+  private readonly botKeys: BotKeyView[] = [
     {
-      botId: id("bot-butler"),
-      name: "管家",
-      profileId: id("profile-butler"),
-      accountId: id("butler"),
-      modelKind: "text",
-      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      harness: { tools: [], context: { instruction: "", permissions: [] } },
-      archived: false,
-    },
-    {
-      botId: id("bot-support"),
-      name: "客服一号",
-      profileId: id("profile-support"),
+      keyId: id("key-support-prod"),
+      prefix: "kb_sup",
       accountId: id("support1"),
-      modelKind: "text",
-      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      harness: { tools: [], context: { instruction: "", permissions: [] } },
-      archived: false,
+      botId: id("bot-support"),
+      label: "生产 Webhook",
+      createdAt: todayAt(9, 18, 41),
+      lastUsedAt: todayAt(14, 32, 18),
     },
     {
-      botId: id("bot-order"),
-      name: "订单查询",
-      profileId: id("profile-order"),
-      accountId: id("orderbot"),
-      modelKind: "text",
-      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      harness: { tools: [], context: { instruction: "", permissions: [] } },
-      archived: false,
+      keyId: id("key-support-old"),
+      prefix: "kb_old",
+      accountId: id("support1"),
+      botId: id("bot-support"),
+      label: "旧版触发器",
+      createdAt: daysAgoIso(12),
+      revokedAt: daysAgoIso(3),
+      lastUsedAt: daysAgoIso(4),
     },
   ];
+  private issuedPlaintext: string | null = null;
+
+  private readonly teams: TeamBotView[] = [
+    {
+      teamBotId: id("team-support"),
+      name: "客服团队",
+      mission:
+        "在 4 小时内解决客户问题。先查订单与物流；无法解决时升级给人工，并附上订单号、已尝试的步骤和客户原话。",
+      roster: [
+        { botId: id("bot-support"), role: "captain" },
+        { botId: id("bot-order"), role: "member" },
+        { botId: id("bot-refund"), role: "member" },
+        { botId: id("bot-knowledge"), role: "member" },
+        { botId: id("bot-aftersales"), role: "member" },
+      ],
+      revision: 3,
+      hash: "fixture-team-support-v3",
+      archived: false,
+      createdAt: daysAgoIso(12),
+      updatedAt: daysAgoIso(1),
+    },
+    {
+      teamBotId: id("team-content"),
+      name: "内容运营",
+      mission: "每周产出一篇客户故事，事实必须来自订单与客服记录。",
+      roster: [{ botId: id("bot-knowledge"), role: "captain" }],
+      revision: 1,
+      hash: "fixture-team-content-v1",
+      archived: false,
+      createdAt: daysAgoIso(6),
+      updatedAt: daysAgoIso(2),
+    },
+  ];
+
+  private readonly tasks: TeamTaskView[] = [
+    {
+      taskId: "task-order",
+      sessionId: ORDER_SESSION,
+      title: "订单查询",
+      status: "done",
+      origin: "subagent",
+      createdAt: todayAt(14, 32, 18),
+      updatedAt: todayAt(14, 33, 24),
+    },
+    {
+      taskId: "task-refund",
+      parentTaskId: "task-order",
+      sessionId: REFUND_SESSION,
+      title: "退款专员",
+      status: "done",
+      origin: "subagent",
+      createdAt: todayAt(14, 33, 30),
+      updatedAt: todayAt(14, 34, 8),
+    },
+    {
+      taskId: "task-knowledge",
+      sessionId: KNOWLEDGE_SESSION,
+      title: "知识库",
+      status: "done",
+      origin: "subagent",
+      createdAt: todayAt(14, 32, 30),
+      updatedAt: todayAt(14, 34, 48),
+    },
+    {
+      taskId: "task-aftersales",
+      sessionId: AFTER_SESSION,
+      title: "售后升级",
+      status: "blocked",
+      origin: "subagent",
+      createdAt: todayAt(14, 35, 18),
+      updatedAt: todayAt(14, 35, 18),
+    },
+  ];
+
+  private readonly subagents: SubagentView[] = [
+    {
+      id: `sub-${ORDER_SESSION}`,
+      parentSessionId: RUN_ID,
+      sessionId: ORDER_SESSION,
+      task: "查询本周退款订单",
+      agent: "订单查询",
+      status: "completed",
+      origin: "spawn",
+      startedAt: todayAt(14, 32, 18),
+      endedAt: todayAt(14, 33, 24),
+      summary: "找到 3 个退款订单，2 个来自同一渠道。",
+      usage: { turns: 2, inputTokens: 8400, outputTokens: 1500, durationMs: 66_000 },
+    },
+    {
+      id: `sub-${REFUND_SESSION}`,
+      parentSessionId: ORDER_SESSION,
+      sessionId: REFUND_SESSION,
+      task: "核对退款条件",
+      agent: "退款专员",
+      status: "completed",
+      origin: "spawn",
+      startedAt: todayAt(14, 33, 30),
+      endedAt: todayAt(14, 34, 8),
+      summary: "退款材料已备齐，等待人工确认。",
+      usage: { turns: 1, inputTokens: 2600, outputTokens: 600, durationMs: 38_000 },
+    },
+    {
+      id: `sub-${KNOWLEDGE_SESSION}`,
+      parentSessionId: RUN_ID,
+      sessionId: KNOWLEDGE_SESSION,
+      task: "查退款政策",
+      agent: "知识库",
+      status: "completed",
+      origin: "spawn",
+      startedAt: todayAt(14, 32, 30),
+      endedAt: todayAt(14, 34, 48),
+      summary: "引用退款政策第 3 节。",
+      usage: { turns: 2, inputTokens: 7200, outputTokens: 1900, durationMs: 138_000 },
+    },
+    {
+      id: `sub-${AFTER_SESSION}`,
+      parentSessionId: RUN_ID,
+      sessionId: AFTER_SESSION,
+      task: "升级给人工",
+      agent: "售后升级",
+      status: "failed",
+      origin: "spawn",
+      startedAt: todayAt(14, 35, 18),
+      endedAt: todayAt(14, 35, 18),
+      error: "调用被拒：缺「调用 Bot」能力（bot.invoke）。",
+    },
+  ];
+
+  private cancelledRuns = new Set<string>();
+  private runSequence = 0;
 
   private readonly events: AuditEventView[] = [
     event("ev-1", todayAt(14, 35, 18), "invoke", "调用 Bot 被拒", "客服一号", "Bot", "售后升级", "denied", "k-7f31"),
@@ -403,10 +753,249 @@ export class FixtureIdentity implements IdentityApi {
     group.summary.updatedAt = nowIso();
   }
 
+  // ---- profiles & roles ----------------------------------------------------
+
+  async listProfiles(limit = 100): Promise<IdentityPage<ProfileView>> {
+    return pageOf(this.profiles.map((profile) => ({ ...profile })), limit);
+  }
+
+  async getProfile(profileId: string): Promise<ProfileView> {
+    const found = this.profiles.find((profile) => profile.profileId === profileId);
+    if (!found) throw new KeelApiError(404, "没有找到这个身份档案。");
+    return { ...found };
+  }
+
+  async listRoles(limit = 100): Promise<IdentityPage<RoleView>> {
+    return pageOf(this.roles.map((role) => ({ ...role })), limit);
+  }
+
   // ---- bots ----------------------------------------------------------------
 
-  async listBots(limit = 100, _includeArchived = false): Promise<IdentityPage<BotView>> {
-    return pageOf(this.bots.map((bot) => ({ ...bot })), limit);
+  async listBots(limit = 100, includeArchived = false): Promise<IdentityPage<BotView>> {
+    const rows = this.bots.filter((entry) => includeArchived || !entry.archived);
+    return pageOf(rows.map((entry) => ({ ...entry })), limit);
+  }
+
+  async getBot(botId: string): Promise<BotView> {
+    const found = this.bots.find((entry) => entry.botId === botId);
+    if (!found) throw new KeelApiError(404, "没有找到这个 Bot，或者你没有访问权限。");
+    return { ...found };
+  }
+
+  async createBot(input: CreateBotInput): Promise<BotView> {
+    const profile = this.profiles.find((entry) => entry.profileId === input.profileId);
+    if (!profile) throw new KeelApiError(400, "这个身份档案不存在。");
+    if (this.bots.some((entry) => entry.name === input.name && !entry.archived)) {
+      throw new KeelApiError(409, "已经有一个同名 Bot 了，换一个名字。");
+    }
+    const created: BotView = {
+      botId: input.botId || id(`bot-created-${this.bots.length}`),
+      name: input.name.trim(),
+      profileId: profile.profileId,
+      accountId: profile.accountId,
+      modelKind: input.modelKind,
+      defaultModel: input.defaultModel ?? { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
+      harness: input.harness ?? { tools: [], context: { instruction: "", permissions: [] } },
+      archived: false,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    this.bots.push(created);
+    return { ...created };
+  }
+
+  async updateBot(botId: string, input: UpdateBotInput): Promise<BotView> {
+    const found = this.bots.find((entry) => entry.botId === botId);
+    if (!found) throw new KeelApiError(404, "没有找到这个 Bot，或者你没有访问权限。");
+    if (input.expectedArchived !== undefined && input.expectedArchived !== found.archived) {
+      throw new KeelApiError(409, "这个 Bot 刚被改过（归档状态已变化）。刷新后再试。");
+    }
+    if (input.profileId !== undefined) {
+      const profile = this.profiles.find((entry) => entry.profileId === input.profileId);
+      if (!profile) throw new KeelApiError(400, "这个身份档案不存在。");
+      found.profileId = profile.profileId;
+      found.accountId = profile.accountId;
+    }
+    if (input.name !== undefined) found.name = input.name;
+    if (input.modelKind !== undefined) found.modelKind = input.modelKind;
+    if (input.defaultModel !== undefined) found.defaultModel = { ...input.defaultModel };
+    if (input.harness !== undefined) {
+      const known = new Set(CAPABILITIES.map((capability) => capability.key));
+      const unknown = input.harness.context.permissions.find((key) => !known.has(key));
+      if (unknown) {
+        throw new KeelApiError(400, `harness permission: unknown key ${unknown}`, [], undefined, "invalid_permission_key");
+      }
+      found.harness = {
+        tools: [...input.harness.tools],
+        context: {
+          instruction: input.harness.context.instruction,
+          permissions: [...input.harness.context.permissions],
+        },
+      };
+    }
+    found.updatedAt = nowIso();
+    return { ...found };
+  }
+
+  async archiveBot(botId: string): Promise<void> {
+    const found = this.bots.find((entry) => entry.botId === botId);
+    if (!found) throw new KeelApiError(404, "没有找到这个 Bot。");
+    found.archived = true;
+    found.updatedAt = nowIso();
+  }
+
+  async invokeBot(botId: string, _text: string): Promise<RunStartView> {
+    const found = this.bots.find((entry) => entry.botId === botId);
+    if (!found) throw new KeelApiError(404, "没有找到这个 Bot。");
+    if (found.archived) throw new KeelApiError(409, "这个 Bot 已归档，不能再开始新的会话。");
+    this.runSequence += 1;
+    return { botId, sessionId: id(`bot-invoke-${this.runSequence}`), seq: 1 };
+  }
+
+  async listBotKeys(botId: string): Promise<BotKeyView[]> {
+    return this.botKeys.filter((key) => key.botId === botId).map((key) => ({ ...key }));
+  }
+
+  async issueBotKey(botId: string, label = ""): Promise<{ key: BotKeyView; plaintext: string; notice: string }> {
+    const found = this.bots.find((entry) => entry.botId === botId);
+    if (!found) throw new KeelApiError(404, "没有找到这个 Bot。");
+    if (found.archived) throw new KeelApiError(409, "已归档的 Bot 不能签发密钥。");
+    const key: BotKeyView = {
+      keyId: id(`key-new-${this.botKeys.length}`),
+      prefix: "kb_new",
+      accountId: found.accountId ?? "",
+      botId,
+      label: label.trim() || "未命名密钥",
+      createdAt: nowIso(),
+    };
+    this.botKeys.push(key);
+    this.issuedPlaintext = `kb_new_${key.keyId.replace(/-/g, "")}`;
+    return {
+      key: { ...key },
+      plaintext: this.issuedPlaintext,
+      notice: "这个密钥只显示一次，关闭后不能回读。",
+    };
+  }
+
+  async revokeBotKey(botId: string, keyId: string): Promise<void> {
+    const found = this.botKeys.find((key) => key.botId === botId && key.keyId === keyId);
+    if (!found) throw new KeelApiError(404, "没有找到这把密钥。");
+    found.revokedAt = nowIso();
+  }
+
+  // ---- team bots -----------------------------------------------------------
+
+  async listTeamBots(limit = 100, includeArchived = false): Promise<IdentityPage<TeamBotView>> {
+    const rows = this.teams.filter((team) => includeArchived || !team.archived);
+    return pageOf(
+      rows.map((team) => ({ ...team, roster: team.roster.map((seat) => ({ ...seat })) })),
+      limit,
+    );
+  }
+
+  async getTeamBot(teamBotId: string): Promise<TeamBotView> {
+    const found = this.teams.find((team) => team.teamBotId === teamBotId);
+    if (!found) throw new KeelApiError(404, "没有找到这个团队，或者你没有访问权限。");
+    return { ...found, roster: found.roster.map((seat) => ({ ...seat })) };
+  }
+
+  async createTeamBot(input: CreateTeamBotInput): Promise<TeamBotView> {
+    const created: TeamBotView = {
+      teamBotId: input.teamBotId || id(`team-new-${this.teams.length}`),
+      name: input.name,
+      mission: input.mission,
+      roster: (input.roster ?? []).map((seat) => ({ ...seat })),
+      revision: 1,
+      hash: `fixture-team-${this.teams.length + 1}`,
+      archived: false,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    this.teams.push(created);
+    return { ...created, roster: created.roster.map((seat) => ({ ...seat })) };
+  }
+
+  async updateTeamBot(teamBotId: string, input: UpdateTeamBotInput): Promise<TeamBotView> {
+    const found = this.teams.find((team) => team.teamBotId === teamBotId);
+    if (!found) throw new KeelApiError(404, "没有找到这个团队。");
+    if (input.expectedRevision !== found.revision) {
+      throw new KeelApiError(409, "这个团队刚被改过（版本已更新）。刷新后再试。", [], found.revision);
+    }
+    if (input.name !== undefined) found.name = input.name;
+    if (input.mission !== undefined) found.mission = input.mission;
+    if (input.roster !== undefined) found.roster = input.roster.map((seat) => ({ ...seat }));
+    found.revision += 1;
+    found.hash = `${found.hash}-r${found.revision}`;
+    found.updatedAt = nowIso();
+    return { ...found, roster: found.roster.map((seat) => ({ ...seat })) };
+  }
+
+  async updateTeamBotRoster(teamBotId: string, roster: RosterEntry[] | undefined, expectedRevision: number): Promise<TeamBotView> {
+    return this.updateTeamBot(teamBotId, { roster, expectedRevision });
+  }
+
+  async archiveTeamBot(teamBotId: string): Promise<void> {
+    const found = this.teams.find((team) => team.teamBotId === teamBotId);
+    if (!found) throw new KeelApiError(404, "没有找到这个团队。");
+    found.archived = true;
+    found.updatedAt = nowIso();
+  }
+
+  async startTeamBot(teamBotId: string, _text?: string): Promise<RunStartView> {
+    const found = this.teams.find((team) => team.teamBotId === teamBotId);
+    if (!found) throw new KeelApiError(404, "没有找到这个团队。");
+    if (found.archived) throw new KeelApiError(409, "这个团队已归档，不能启动。");
+    const captain = found.roster.find((seat) => seat.role === "captain");
+    if (!captain) throw new KeelApiError(409, "名单里没有队长。");
+    const captainBot = this.bots.find((entry) => entry.botId === captain.botId);
+    if (!captainBot) throw new KeelApiError(409, "队长不在可见 Bot 里。");
+    if (captainBot.archived) throw new KeelApiError(409, "队长已归档。");
+    this.cancelledRuns.delete(RUN_ID);
+    return { teamBotId, captainBotId: captain.botId, sessionId: RUN_ID, seq: 1 };
+  }
+
+  // ---- the run projection's reads -----------------------------------------
+
+  async sessionEvents(sessionId: string): Promise<SessionEventView[]> {
+    if (sessionId === RUN_ID) {
+      const events = CAPTAIN_EVENTS.map((event) => ({ ...event }));
+      if (this.cancelledRuns.has(sessionId)) {
+        events.push(
+          runEvent(7, "run.finished", {
+            tokensIn: 9000,
+            tokensOut: 3400,
+            durationMs: 260_000,
+            stopReason: "cancelled",
+            provider: "s2api",
+            model: "deepseek-v4.1-flash",
+            timestamp: todayMs(14, 36, 40),
+          }),
+        );
+      }
+      return events;
+    }
+    const member = MEMBER_EVENTS[sessionId];
+    if (member) return member.map((event) => ({ ...event }));
+    if (sessionId === AFTER_SESSION) return [];
+    return [];
+  }
+
+  async teamTasks(sessionId: string): Promise<{ tasks: TeamTaskView[]; hasMore: boolean }> {
+    if (sessionId !== RUN_ID) return { tasks: [], hasMore: false };
+    return { tasks: this.tasks.map((task) => ({ ...task })), hasMore: false };
+  }
+
+  async listSubagents(parentSessionId?: string): Promise<SubagentView[]> {
+    const rows = parentSessionId
+      ? this.subagents.filter((record) => record.parentSessionId === parentSessionId)
+      : this.subagents;
+    return rows.map((record) => ({ ...record, usage: record.usage ? { ...record.usage } : undefined }));
+  }
+
+  async cancelSession(sessionId: string): Promise<SessionCancelView> {
+    if (sessionId !== RUN_ID) throw new KeelApiError(404, "没有找到这个会话。");
+    this.cancelledRuns.add(sessionId);
+    return { status: "cancelled", runStatus: "cancelled", cancelled: true };
   }
 
   // ---- records -------------------------------------------------------------

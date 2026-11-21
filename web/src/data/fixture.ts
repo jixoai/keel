@@ -61,13 +61,29 @@ import type {
   AccountView,
   AuditEventView,
   AuditQuery,
+  BotKeyView,
   BotView,
   CreateAccountInput,
+  CreateBotInput,
+  CreateTeamBotInput,
   IdentityPage,
   PermissionGroupDetail,
   PermissionGroupSummary,
+  RosterEntry,
+  TeamBotView,
+  UpdateBotInput,
+  UpdateTeamBotInput,
   WhoAmI,
 } from "./identity";
+import type {
+  ProfileView,
+  RoleView,
+  RunStartView,
+  SessionCancelView,
+  SessionEventView,
+  SubagentView,
+  TeamTasksView,
+} from "./bots-wire";
 import demoShot from "../../assets/demo-shot.png";
 
 type Subscriber = {
@@ -1153,6 +1169,99 @@ export class FixtureClient implements SettingsApi {
 
   listBots(limit = 100, includeArchived = false): Promise<IdentityPage<BotView>> {
     return this.identity.listBots(limit, includeArchived);
+  }
+
+  getBot(botId: string): Promise<BotView> {
+    return this.identity.getBot(botId);
+  }
+
+  createBot(input: CreateBotInput): Promise<BotView> {
+    return this.identity.createBot(input);
+  }
+
+  updateBot(botId: string, input: UpdateBotInput): Promise<BotView> {
+    return this.identity.updateBot(botId, input);
+  }
+
+  archiveBot(botId: string): Promise<void> {
+    return this.identity.archiveBot(botId);
+  }
+
+  invokeBot(botId: string, text: string): Promise<RunStartView> {
+    return this.identity.invokeBot(botId, text);
+  }
+
+  listBotKeys(botId: string): Promise<BotKeyView[]> {
+    return this.identity.listBotKeys(botId);
+  }
+
+  issueBotKey(botId: string, label = "", accountId?: string): Promise<{ key: BotKeyView; plaintext: string; notice: string }> {
+    void accountId;
+    return this.identity.issueBotKey(botId, label);
+  }
+
+  revokeBotKey(botId: string, keyId: string): Promise<void> {
+    return this.identity.revokeBotKey(botId, keyId);
+  }
+
+  listProfiles(limit = 100): Promise<IdentityPage<ProfileView>> {
+    return this.identity.listProfiles(limit);
+  }
+
+  getProfile(profileId: string): Promise<ProfileView> {
+    return this.identity.getProfile(profileId);
+  }
+
+  listRoles(limit = 100): Promise<IdentityPage<RoleView>> {
+    return this.identity.listRoles(limit);
+  }
+
+  listTeamBots(limit = 100, includeArchived = false): Promise<IdentityPage<TeamBotView>> {
+    return this.identity.listTeamBots(limit, includeArchived);
+  }
+
+  getTeamBot(teamBotId: string): Promise<TeamBotView> {
+    return this.identity.getTeamBot(teamBotId);
+  }
+
+  createTeamBot(input: CreateTeamBotInput): Promise<TeamBotView> {
+    return this.identity.createTeamBot(input);
+  }
+
+  updateTeamBot(teamBotId: string, input: UpdateTeamBotInput): Promise<TeamBotView> {
+    return this.identity.updateTeamBot(teamBotId, input);
+  }
+
+  updateTeamBotRoster(
+    teamBotId: string,
+    roster: RosterEntry[] | undefined,
+    expectedRevision: number,
+  ): Promise<TeamBotView> {
+    return this.identity.updateTeamBotRoster(teamBotId, roster, expectedRevision);
+  }
+
+  archiveTeamBot(teamBotId: string): Promise<void> {
+    return this.identity.archiveTeamBot(teamBotId);
+  }
+
+  startTeamBot(teamBotId: string, text?: string): Promise<RunStartView> {
+    return this.identity.startTeamBot(teamBotId, text);
+  }
+
+  sessionEvents(sessionId: string): Promise<SessionEventView[]> {
+    return this.identity.sessionEvents(sessionId);
+  }
+
+  teamTasks(sessionId: string): Promise<TeamTasksView> {
+    return this.identity.teamTasks(sessionId);
+  }
+
+  listSubagents(parentSessionId?: string): Promise<SubagentView[]> {
+    return this.identity.listSubagents(parentSessionId);
+  }
+
+  cancelSession(sessionId: string): Promise<SessionCancelView> {
+    return this.identity.cancelSession(sessionId);
   }
 
   listAuditEvents(query?: AuditQuery): Promise<IdentityPage<AuditEventView>> {

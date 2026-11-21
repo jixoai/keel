@@ -97,6 +97,18 @@ import {
   type UpdateTeamBotInput,
   type WhoAmI,
 } from "./identity";
+import {
+  parseProfile,
+  parseRole,
+  parseSessionCancel,
+  parseSessionEvent,
+  parseSubagent,
+  type ProfileView,
+  type RoleView,
+  type SessionCancelView,
+  type SessionEventView,
+  type SubagentView,
+} from "./bots-wire";
 
 /** The structured detail of a refusal: the permission engine's 403 names the
  * key and reason; a 429 names the wait. */
@@ -1875,6 +1887,78 @@ export class KeelHttp implements SettingsApi, AgentTeamApi {
       requestId: typeof body.requestId === "string" ? body.requestId : undefined,
       deduped: body.deduped === true,
     };
+  }
+
+  // ---- profiles & roles (the Bot page's identity facts) -------------------
+
+  /** `GET /v1/profiles` — a Profile is (Account + Role); the Bot page reads it
+   * to name the Bot's owner and persona. A caller without `profile.read` gets
+   * the server's 403 and the page falls back to the Bot's own accountId. */
+  async listProfiles(limit = 100): Promise<IdentityPage<ProfileView>> {
+    const bounded = identityLimitOf(limit);
+    const response = await this.request(`/v1/profiles?limit=${bounded}`);
+    const body = asRecord(await response.json());
+    return identityPage<ProfileView>(listOf(body.profiles).map(parseProfile), bounded);
+  }
+
+  async getProfile(profileId: string): Promise<ProfileView> {
+    const response = await this.request(`/v1/profiles/${encodeURIComponent(profileId)}`);
+    return parseProfile(asRecord(await response.json()).profile);
+  }
+
+  /** `GET /v1/roles` — the persona documents a Profile points at. A Role never
+   * grants authority; the page only shows its name/instruction. */
+  async listRoles(limit = 100): Promise<IdentityPage<RoleView>> {
+    const bounded = identityLimitOf(limit);
+    const response = await this.request(`/v1/roles?limit=${bounded}`);
+    const body = asRecord(await response.json());
+    return identityPage<RoleView>(listOf(body.roles).map(parseRole), bounded);
+  }
+
+  // ---- the run projection's reads -----------------------------------------
+
+  /** One session's ledger events. The run page reads them for tool results,
+   * usage and the final stop reason; the events are the server's, never a
+   * reconstruction. */
+  async sessionEvents(sessionId: string, limit = 500): Promise<SessionEventView[]> {
+    const bounded = Math.min(1000, Math.max(1, Math.floor(limit)));
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/events?after=0&limit=${bounded}`,
+    );
+    const body = asRecord(await response.json());
+    return listOf(body.events)
+      .flatMap((row) => {
+        const event = parseSessionEvent(row);
+        return event ? [event] : [];
+      })
+      .sort((left, right) => left.seq - right.seq);
+  }
+
+  /** `GET /v1/subagents` — the spawned/forked child runs, optionally under one
+   * parent session. The list is relation-filtered by the server; a child the
+   * caller cannot read is not returned. */
+  async listSubagents(parentSessionId?: string, limit = 200): Promise<SubagentView[]> {
+    const bounded = Math.min(500, Math.max(1, Math.floor(limit)));
+    const query = new URLSearchParams({ limit: String(bounded) });
+    if (parentSessionId) query.set("parentSessionId", parentSessionId);
+    const response = await this.request(`/v1/subagents?${query.toString()}`);
+    const body = asRecord(await response.json());
+    return listOf(body.subagents).flatMap((row) => {
+      const record = parseSubagent(row);
+      return record ? [record] : [];
+    });
+  }
+
+  /** `POST /v1/sessions/{id}/cancel` — the run page's stop. A deployment whose
+   * cancel seam is not wired answers 501; the page prints that instead of
+   * pretending the run stopped. */
+  async cancelSession(sessionId: string): Promise<SessionCancelView> {
+    const response = await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    return parseSessionCancel(await response.json());
   }
 
   /** `GET /v1/audit/events` — the audit ledger's read projection. The route is

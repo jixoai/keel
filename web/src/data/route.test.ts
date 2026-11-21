@@ -18,6 +18,15 @@ test("路由：章节与深链一一对应", () => {
 
   expect(at("/bots").route).toBe("bots");
   expect(at("/teams").route).toBe("teams");
+  expect(at("/bots/bot-1").objectId).toBe("bot-1");
+  const team = at("/teams/team-1");
+  expect(team.route).toBe("teams");
+  expect(team.objectId).toBe("team-1");
+  expect(team.runId).toBe(null);
+  const run = at("/teams/team-1/runs/run-1");
+  expect(run.route).toBe("teams");
+  expect(run.objectId).toBe("team-1");
+  expect(run.runId).toBe("run-1");
 
   const identity = at("/identity");
   expect(identity.route).toBe("identity");
@@ -40,4 +49,8 @@ test("路由：路径生成与反解一致（含编码）", () => {
   expect(routePath(routeState("identity", "groups", "a/b"))).toBe("/identity/groups/a%2Fb");
   expect(resolveRoute("/identity/groups/a%2Fb").objectId).toBe("a/b");
   expect(routePath(routeState("records", "accounts", "ev-1"))).toBe("/records/ev-1");
+  expect(routePath(routeState("bots", "accounts", "bot-1"))).toBe("/bots/bot-1");
+  expect(routePath(routeState("teams", "accounts", "team-1"))).toBe("/teams/team-1");
+  expect(routePath(routeState("teams", "accounts", "team-1", "run-1"))).toBe("/teams/team-1/runs/run-1");
+  expect(resolveRoute("/teams/team-1/runs/run-1").runId).toBe("run-1");
 });
