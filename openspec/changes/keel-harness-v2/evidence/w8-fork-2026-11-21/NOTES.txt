@@ -63,3 +63,15 @@ Residual (honest)
 - Queue + ETA is not implemented; over-limit is explicit 429 + Retry-After (W2 scope).
 - agent.status after a process restart is registry-only (durable parent link exists, but
   the record is rebuilt from the child ledger only for resume/cancel authorization).
+
+P1 fix (B-axis review, 2026-11-21)
+- Fork side effects are now compensated when the first input never commits: the run slot
+  and placement are released, the fork fact is cleared, the child card is closed
+  (converged, not left open), and the child session is deleted when empty or archived
+  when it carries the closed-card ledger fact. A failure after the input commit is not
+  rolled back (the durable child run keeps its fact/card).
+- ForkCard's card id is the child's deterministic initial card; the create key derives
+  from the caller's stable callID. A closed card is reopened on retry. N capacity
+  refusals followed by a success leave exactly one child card and one input.
+- Tests: TestForkCapacityRetryConvergesToOneCard, TestForkCardIsIdempotentAndReopens,
+  TestTasksPluginDoesNotRelinkForkedCards; existing fork/resume tests unchanged.
