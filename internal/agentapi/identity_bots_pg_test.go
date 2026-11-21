@@ -64,6 +64,15 @@ func TestBotsHTTPSurface(t *testing.T) {
 	})
 	wantStatus(t, status, body, http.StatusBadRequest, "invalid model kind")
 
+	// An unknown Harness permission key would make the Bot unauthenticatable, so
+	// the write is refused at the edge.
+	status, body = env.asAlice(http.MethodPost, "/v1/bots", map[string]any{
+		"name": "bad-harness", "profileId": env.aliceProfile.ID.String(), "modelKind": "text",
+		"defaultModel": map[string]any{"providerId": "fake", "modelId": "fake"},
+		"harness":      map[string]any{"tools": []string{}, "context": map[string]any{"permissions": []string{"session.fly"}}},
+	})
+	wantStatus(t, status, body, http.StatusBadRequest, "unknown harness permission")
+
 	// CAS update: wrong expectedArchived after an archive is a 409.
 	status, body = env.asAlice(http.MethodPatch, "/v1/bots/"+env.aliceBot.ID, map[string]any{
 		"name": "Alice One",

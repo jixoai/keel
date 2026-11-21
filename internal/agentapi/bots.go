@@ -12,6 +12,7 @@ package agentapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +53,20 @@ func (s *Server) botViewOf(r *http.Request, tenantID uuid.UUID, record store.Bot
 		view.AccountID = profile.AccountID.String()
 	}
 	return view
+}
+
+// validateHarnessPermissions rejects a Harness narrowing that names a key the
+// registry does not know. Storage would accept the string, but the Bot could
+// never authenticate (NarrowToHarness fails closed), so the write is refused
+// at the edge with the offending key.
+func validateHarnessPermissions(permissions []string) error {
+	for _, raw := range permissions {
+		key := strings.TrimSpace(raw)
+		if err := access.ValidateKey(key); err != nil {
+			return fmt.Errorf("harness permission: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +226,10 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, err)
 		return
 	}
+	if err := validateHarnessPermissions(domain.Harness.Context.Permissions); err != nil {
+		writeIdentityError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	profile, err := s.cfg.Identity.GetProfile(r.Context(), tenantID, record.ProfileID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -324,6 +343,10 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(record.Harness, &domain.Harness)
 	if err := domain.Validate(); err != nil {
 		writeValidationError(w, err)
+		return
+	}
+	if err := validateHarnessPermissions(domain.Harness.Context.Permissions); err != nil {
+		writeIdentityError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	var newOwner, oldOwner uuid.UUID
