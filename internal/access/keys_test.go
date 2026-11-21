@@ -73,6 +73,7 @@ func TestRegistryCoversAcceptanceSurface(t *testing.T) {
 		KeyAppRead, KeyFileRead, KeyFileWrite, KeyMediaRead, KeyMediaInvoke,
 		KeyMCPRead, KeyMCPUse, KeySkillRead, KeySkillManage,
 		KeyNotificationRead, KeyNotificationWrite,
+		KeyShellExec, KeyTaskRead, KeyTaskWrite, KeyApprovalRead, KeyApprovalWrite, KeyDecisionAsk,
 	}
 	for _, key := range required {
 		if err := ValidateKey(key); err != nil {

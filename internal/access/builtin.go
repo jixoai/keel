@@ -87,6 +87,15 @@ var builtinGroups = []BuiltinGroup{
 		{Key: KeySkillManage, Scope: ScopeTenant},
 		{Key: KeyNotificationRead, Scope: ScopeTenant},
 		{Key: KeyNotificationWrite, Scope: ScopeTenant},
+		// Runtime tool actions. The session is the resource, so team scope
+		// covers the Bot's own sessions plus sessions shared with its group or
+		// team; it never reaches another account's session data.
+		{Key: KeyShellExec, Scope: ScopeTeam},
+		{Key: KeyTaskRead, Scope: ScopeTeam},
+		{Key: KeyTaskWrite, Scope: ScopeTeam},
+		{Key: KeyApprovalRead, Scope: ScopeTeam},
+		{Key: KeyApprovalWrite, Scope: ScopeTeam},
+		{Key: KeyDecisionAsk, Scope: ScopeTeam},
 	}},
 	{Name: "viewer", Grants: []Grant{
 		{Key: KeySessionRead, Scope: ScopeOwn},
@@ -104,6 +113,9 @@ var builtinGroups = []BuiltinGroup{
 		{Key: KeySkillRead, Scope: ScopeTenant},
 		{Key: KeyNotificationRead, Scope: ScopeTenant},
 		{Key: KeyNotificationWrite, Scope: ScopeTenant},
+		// The viewer can read the task cards of its own sessions; it can never
+		// write cards, run the shell or open approvals.
+		{Key: KeyTaskRead, Scope: ScopeOwn},
 	}},
 	{Name: "auditor", Grants: []Grant{
 		{Key: KeyAuditRead, Scope: ScopeTenant},

@@ -92,6 +92,16 @@ const (
 	KeyNotificationRead  = "notification.read"
 	KeyNotificationWrite = "notification.write"
 
+	// Model tool actions. These are the runtime tool surface's own keys: the
+	// session is the resource, so a key alone never reaches another account's
+	// sandbox, task cards or approval queue. A4.2b1.
+	KeyShellExec     = "shell.exec"
+	KeyTaskRead      = "task.read"
+	KeyTaskWrite     = "task.write"
+	KeyApprovalRead  = "approval.read"
+	KeyApprovalWrite = "approval.write"
+	KeyDecisionAsk   = "decision.ask"
+
 	// Secrets. Reads are split so metadata can be shown without exposing the
 	// value; there is no coarse secret.read that would include both.
 	KeySecretReadMetadata = "secret.read.metadata"
@@ -276,6 +286,16 @@ var keyCatalog = []KeySpec{
 	// Notifications.
 	key(KeyNotificationRead, "Read notifications", RiskNormal, RelationNone, tenantScopes...),
 	key(KeyNotificationWrite, "Acknowledge notifications", RiskHigh, RelationNone, tenantScopes...),
+
+	// Model tool actions. The resource is the session whose sandbox, task cards
+	// or approval queue the tool touches; the relation is what keeps one
+	// account's key from reaching another account's session data.
+	key(KeyShellExec, "Execute shell commands", RiskHigh, RelationEditor, resourceScopes...),
+	key(KeyTaskRead, "Read task cards", RiskNormal, RelationViewer, resourceScopes...),
+	key(KeyTaskWrite, "Write task cards", RiskNormal, RelationEditor, resourceScopes...),
+	key(KeyApprovalRead, "Ask a human for input", RiskNormal, RelationViewer, resourceScopes...),
+	key(KeyApprovalWrite, "Request human approvals", RiskHigh, RelationEditor, resourceScopes...),
+	key(KeyDecisionAsk, "Ask decision models", RiskHigh, RelationViewer, resourceScopes...),
 
 	// Secrets.
 	key(KeySecretReadMetadata, "Read secret metadata", RiskNormal, RelationNone, tenantScopes...),

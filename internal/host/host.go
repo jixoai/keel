@@ -94,6 +94,14 @@ func buildRegistry(cfg Config, discovered []skills.Skill) (*agenttool.ToolRegist
 			return nil, fmt.Errorf("host: register %s: %w", tool.Name(), err)
 		}
 	}
+	// Every model-visible tool must have a permission declaration: an unknown
+	// tool, an undeclared action or a key absent from the access registry is an
+	// assembly error (A4.2b1), never a first-call surprise. Plugin-published
+	// tools are not in the static map; the runtime gates them with
+	// plugin.invoke, the approval boundary that installed them.
+	if err := toolsurface.ValidatePermissionCatalog(); err != nil {
+		return nil, fmt.Errorf("host: tool permission catalog: %w", err)
+	}
 	return reg, nil
 }
 
