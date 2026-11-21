@@ -125,9 +125,10 @@ keel version
   creation → `plugin.invoke`；媒体 → `media.invoke`；decision → `decision.ask`。
   插件发布的工具按 `plugin.invoke` 授权。未知工具/未声明 action/未登记 key 是装配错误。
 - **资源**：Session 级工具以当前 Session 为资源；`agent` 的 spawn/fork/resume 以目标
-  Bot（`agentId`/子 Session 所属 Bot，未命名时为本 Session 的 Bot）为资源；带 `sessionId`
-  的参数以该 Session 为资源（跨 Session 通知读取另需 `session.read`）。文件目前没有
-  per-file 关系元组（见 tasks A4.2b 登记），以所属 Session 为资源边界。
+  Bot（顶层 `agentId`、`selection.agentId`、子 Session 所属 Bot 的并集；未命名时为本
+  Session 的 Bot）为资源，每个目标都要 `bot.invoke` 并各自写 `bot.invoked`；带
+  `sessionId` 的参数以该 Session 为资源（跨 Session 通知读取另需 `session.read`）。
+  文件目前没有 per-file 关系元组（见 tasks A4.2b 登记），以所属 Session 为资源边界。
 - **captain → member**：父级必须对目标持有 `bot.invoke`；撤销后下一次调用即 403。HTTP 的
   `agentId`/`selection` 子代理路由走同一检查，旧路径不是旁路。子 Session 继承父 Bot 归属，
   但每次调用按**自己**的 Account ∩ Harness 判定，不做调用链交集。

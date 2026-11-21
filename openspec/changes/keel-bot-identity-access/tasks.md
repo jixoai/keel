@@ -133,6 +133,18 @@
 - [ ] `GET /v1/files/{id}`：仅租户 `file.read`，无 per-file relation；补文件关系或明确租户级契约
 - [ ] P2 审计崩溃窗口：业务写已提交、审计行未追加时进程崩溃会留下无审计操作；用 outbox/
       同事务写入收敛（当前选择“写失败返回 500”；`bot.invoke` 关系阈值仍按 A4.1 待裁决项）
+- [ ] **P2（A4.2b1 复核登记，勿在本片做）Bot / legacy Agent id-space 双轨**：运行时仍可
+      `agentId` 选旧 agentteam 文档，新 Bot 是 `bots.bot_id`；两者语义/归属/工具面尚未合一。
+      随 A4.2b 重命名收口，删除旧 id 空间后再统一 `bot.invoke` 目标解析。
+- [ ] **P2（A4.2b1 复核登记）子 Session 归属 vs 成员自己的 Account**：当前 spawn/fork 子
+      Session 继承父 Bot 归属（A4.2a），目标成员 Bot 不 rebind；只有子 Session 确实归属成员
+      Bot 时才用其 Account∩Harness。A4.2b/A6 与 Bot invoke 路径统一时裁决。
+- [ ] **P2（A4.2b1 复核登记）plugin UI bridge 第二执行面**：`keel.plugin.callTool` 直接
+      `AgentTool.Execute`，不走 Runner 的 per-call toolauth；当前靠 bridge token + 插件
+      自身 tool 声明收口。若插件工具可产生跨资源副作用，需在 bridge 执行前补同一授权。
+- [ ] **P2（A4.2b1 复核登记）空 Harness = 全拒的产品语义**：`context.permissions` 为空时
+      Bot 工具面全部拒绝（安全默认）。创建/保存 Bot 时需要明确告警或文档说明，避免运营
+      误以为“空 = 继承全部”。
 
 ### A4.3 Web 登录与数据层（L5 前置）
 
