@@ -31,7 +31,8 @@
 > **状态（2026-11-21 · C4）**：团队画布补齐 design A6 的团队级默认工具/模型覆盖
 > （`defaults.tools` + `defaults.modelOverride`）与成员席位 label/description 编辑、成员替换
 > （保留席位文本；inline 席位同样可编辑）。保存继续走既有 team PUT 契约并合并未编辑字段，
-> `defaults` 总是整对象发送，因此清空默认也是一次真实写入。`settings-teams.test.tsx` 32 例、
+> `defaults` 总是整对象发送，未编辑字段不会被 PUT 静默清空（清空默认走同一路径，未单列门禁用例）。
+> `settings-teams.test.tsx` 32 例、
 > 全量 TUI 225 例、check/build/package 全过；真实 Chrome 390/1280 截图与测量
 > `evidence/canvas-defaults-2026-11-21/`。P5 画布行据此勾选。
 
