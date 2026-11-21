@@ -459,39 +459,6 @@ func TeamPluginCLISpec() PluginCLISpec {
 			examples:    []string{"keel team member remove team_growth agent_design_lead"},
 		},
 		{
-			path:    []string{"team", "member", "list"},
-			summary: "列出团队成员",
-			description: "输出团队配置里的成员席位（agentId、团队内 label/description、是否 inline 定义、是否为 captain），" +
-				"是团队画布、成员抽屉与队长自组装前的现状读取面。只读，不改写任何配置；不含凭据明文。",
-			args:        objectSchema(map[string]any{"teamId": stringProperty("团队 id")}, "teamId"),
-			output:      arrayOf(schemaRef("team_member")),
-			permissions: []string{"team.read"},
-			danger:      pluginpkg.DangerRead,
-			idempotent:  true,
-			callableBy:  callerAll,
-			examples:    []string{"keel team member list team_growth"},
-		},
-		{
-			path:    []string{"team", "member", "save"},
-			summary: "保存团队成员变更",
-			description: "把队长的成员增删与成员 label/description 修改持久化为 team 配置文件，并前移 revision/hash；" +
-				"只改成员席位，不改 captain/团队名/默认/能力（整份保存用 keel team save），也不改写 model/agent provider 共享配置。" +
-				"同一份内容重复保存结果相同。需要 teamCli.enabled 且允许 member.save。",
-			args: objectSchema(map[string]any{
-				"teamId":  stringProperty("团队 id"),
-				"message": stringProperty("变更说明，写入审计事实"),
-			}, "teamId"),
-			output: objectSchema(map[string]any{
-				"revision": integerProperty("保存后的配置 revision"),
-				"hash":     stringProperty("内容 hash"),
-			}, "revision", "hash"),
-			permissions: []string{"team.write"},
-			danger:      pluginpkg.DangerWrite,
-			idempotent:  true,
-			callableBy:  callerUICaptain,
-			examples:    []string{"keel team member save team_growth --message 新增设计主理人"},
-		},
-		{
 			path:    []string{"team", "save"},
 			summary: "保存团队配置",
 			description: "把队长自组装产生的成员变更持久化为 team 配置文件，并前移 revision/hash；同一份内容重复保存结果相同。" +
@@ -952,9 +919,9 @@ func agentRequiredPaths() [][]string {
 }
 
 // teamRequiredPaths freezes the agent-team plugin's command coverage:
-// list|show|create|update|delete|archive|member add|remove|list|save|save|start
-// (specs/agent-team + design.md §5: the captain needs `member list` to read the
-// current seats and `member save` to persist its assembly).
+// list|show|create|update|delete|archive|member add|remove|save|start
+// (specs/agent-team; member.list/member.save are an explicit backlog, not
+// declared here until the CLI implements them).
 func teamRequiredPaths() [][]string {
 	return [][]string{
 		{"team", "list"},
@@ -965,8 +932,6 @@ func teamRequiredPaths() [][]string {
 		{"team", "archive"},
 		{"team", "member", "add"},
 		{"team", "member", "remove"},
-		{"team", "member", "list"},
-		{"team", "member", "save"},
 		{"team", "save"},
 		{"team", "start"},
 	}

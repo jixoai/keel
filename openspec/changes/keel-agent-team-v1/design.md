@@ -145,7 +145,7 @@ Agent 是完整智能体配置，不是 subagent：
   ],
   "defaults": { "tools": ["bash", "read", "write"], "modelOverride": null },
   "capabilities": {
-    "teamCli": { "enabled": true, "commands": ["member.add", "member.remove", "member.list", "member.save"] }
+    "teamCli": { "enabled": true, "commands": ["member.add", "member.remove"] }
   },
   "featureBindings": [
     { "port": "team.assign", "cli": "keel team assign" }

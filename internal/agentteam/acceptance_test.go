@@ -534,8 +534,6 @@ func acceptanceCLIExpectations() []acceptanceCLIExpectation {
 				{"team", "archive"},
 				{"team", "member", "add"},
 				{"team", "member", "remove"},
-				{"team", "member", "list"},
-				{"team", "member", "save"},
 				{"team", "save"},
 				{"team", "start"},
 			},
@@ -945,13 +943,13 @@ func checkCaptainFaceTypedPermission(t *testing.T) {
 	t.Helper()
 	spec := TeamPluginCLISpec()
 	on := TeamCLI{Enabled: true, Commands: []string{
-		TeamCLIMemberAdd, TeamCLIMemberRemove, TeamCLIMemberList,
-		TeamCLIMemberSave, TeamCLISave, TeamCLIStart,
+		TeamCLIMemberAdd, TeamCLIMemberRemove,
+		TeamCLISave, TeamCLIStart,
 	}}
 	face := pathSet(CaptainTeamCapabilities(spec, on, on))
 	for _, key := range []string{
-		"team member add", "team member remove", "team member list",
-		"team member save", "team save", "team start",
+		"team member add", "team member remove",
+		"team save", "team start",
 	} {
 		if !face[key] {
 			t.Errorf("the captain face is missing %q", "keel "+key)

@@ -127,6 +127,26 @@ provides:
       idempotent: true
       callable_by: [ui, agent]
       examples: ["keel agent delete agent_3f1c…"]
+    - path: [agent, archive]
+      summary: "Archive an Agent; a live session bound to it is refused with 409."
+      description: "POSTs /v1/agents/{id}/archive. The archived mark keeps the document readable and leaves a started run untouched. A live session whose newest selection names this Agent is refused with 409 agent_in_use and the referencing sessions; archive that session (or send a model-only input) first. A team seat does not block archive: archiving is the documented remedy for an agent a team references. Repeating the call is idempotent."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          archived: { type: boolean }
+        required: [id]
+      permissions: [agent.write]
+      danger: write
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel agent archive agent_3f1c…"]
     - path: [agent, start]
       summary: "Start an Agent session and queue one run from its default configuration."
       description: "POSTs /v1/sessions, then POSTs /v1/sessions/{id}/input with selection.agentId. The server resolves the Agent's default model, system prompt and tool grants per attempt; the command returns the sessionId and the input submission id (runId) that queued the run. It sends no model identity: the binding is the server's authority."

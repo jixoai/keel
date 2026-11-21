@@ -39,7 +39,7 @@ AgentTeam MUST 是一个命名的团队配置，MUST 恰好包含一个 captain�
 ### Requirement: 团队 CLI 与自组装
 
 AgentTeam 插件 MUST 提供 CLI：
-`keel team list|show|create|update|delete|archive|member add|remove|list|save|start`；
+`keel team list|show|create|update|delete|archive|member add|remove|save|start`；
 每个子命令 MUST 在能力树声明 summary/description/schema/permissions/danger/callable_by。
 
 - captain 能否调用 CLI MUST 由 Agent/团队两级 `teamCli.enabled` 与逐命令白名单单一裁决

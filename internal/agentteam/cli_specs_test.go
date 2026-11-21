@@ -138,8 +138,6 @@ func TestTeamPluginTreeCoversSpecCommands(t *testing.T) {
 		{"team", "archive"},
 		{"team", "member", "add"},
 		{"team", "member", "remove"},
-		{"team", "member", "list"},
-		{"team", "member", "save"},
 		{"team", "save"},
 		{"team", "start"},
 	}
@@ -463,7 +461,7 @@ func TestTeamTreeMatchesTeamCLIVocabulary(t *testing.T) {
 	}
 	// The reverse direction is what keeps the vocabulary honest: a subcommand a
 	// team can allow but the tree does not declare would be a granted dead
-	// command (teamCli {enabled, commands: [member.list]} with no such command).
+	// command (teamCli {enabled, commands: [member.add]} with no such command).
 	for _, subcommand := range KnownTeamSubcommands() {
 		if !declared[subcommand] {
 			t.Errorf("TeamCLI subcommand %q has no declared command; granting it would be a dead command", subcommand)
@@ -505,12 +503,12 @@ func TestManifestServesCallerFaces(t *testing.T) {
 
 	teamManifest := TeamPluginCLISpec().Manifest()
 	teamCaptain := pathSet(teamManifest.CallableCLICapabilities(pluginpkg.CallerTeamCaptain))
-	for _, key := range []string{"team list", "team show", "team member add", "team member remove", "team member list", "team member save", "team save", "team start"} {
+	for _, key := range []string{"team list", "team show", "team member add", "team member remove", "team save", "team start"} {
 		if !teamCaptain[key] {
 			t.Errorf("the captain face is missing %q", "keel "+key)
 		}
 	}
-	for _, key := range []string{"team create", "team update", "team delete"} {
+	for _, key := range []string{"team create", "team update", "team delete", "team archive"} {
 		if teamCaptain[key] {
 			t.Errorf("the captain face must not expose %q", "keel "+key)
 		}
@@ -704,21 +702,21 @@ func TestCapabilityCatalogServesEveryTree(t *testing.T) {
 func TestCaptainCommandFaceFollowsEffectiveSwitch(t *testing.T) {
 	spec := TeamPluginCLISpec()
 	all := []string{
-		TeamCLIMemberAdd, TeamCLIMemberRemove, TeamCLIMemberList, TeamCLIMemberSave,
+		TeamCLIMemberAdd, TeamCLIMemberRemove,
 		TeamCLISave, TeamCLIStart,
 	}
 	on := TeamCLI{Enabled: true, Commands: all}
 
 	face := pathSet(CaptainTeamCapabilities(spec, on, on))
 	for _, key := range []string{
-		"team member add", "team member remove", "team member list",
-		"team member save", "team save", "team start",
+		"team member add", "team member remove",
+		"team save", "team start",
 	} {
 		if !face[key] {
 			t.Errorf("the captain face is missing %q", "keel "+key)
 		}
 	}
-	for _, key := range []string{"team create", "team update", "team delete"} {
+	for _, key := range []string{"team create", "team update", "team delete", "team archive"} {
 		if face[key] {
 			t.Errorf("the captain face exposes %q", "keel "+key)
 		}

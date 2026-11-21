@@ -121,6 +121,27 @@ provides:
       idempotent: true
       callable_by: [ui]
       examples: ["keel team delete team_9a02…"]
+    - path: [team, archive]
+      summary: "Archive a team; a live session bound to it is refused with 409."
+      description: "POSTs /v1/teams/{id}/archive. The archived team is invalid and cannot start a new run; its history and run snapshots stay readable. A live session whose newest selection names this team is refused with 409 team_in_use and the referencing sessions; archive that session (or send a model-only input) first. Archiving advances the team revision so a manifest can tell the retired configuration from the active one. Repeating the call is idempotent."
+      args_schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          revision: { type: integer }
+          archived: { type: boolean }
+        required: [id, revision]
+      permissions: [team.write]
+      danger: write
+      idempotent: true
+      callable_by: [ui]
+      examples: ["keel team archive team_9a02…"]
     - path: [team, member, add]
       summary: "Seat an agent on a team (a captain may seat members through its own team CLI)."
       description: "POSTs /v1/teams/{id}/members. A captain acting as itself (--as <captainId>) is allowed only when the team enables its team CLI and the allowlist covers member.add; the operator surface is not gated by that switch. The captain seat itself is never a member."

@@ -53,8 +53,9 @@ code 分别为 `agent_in_use` / `team_in_use`，并在 `references` 中列出引
 
 未归档会话 MUST 视为引用，无论其 run 是 idle、pending、running 还是 paused。已归档会话
 MUST NOT 视为引用，但若仍持有 `pending`/`running` run，MUST 继续视为引用。引用检查 MUST
-按租户隔离；无引用的删除 MUST 不被无关绑定阻塞。解绑路径 MUST 明确：归档会话，或发送
-只选模型的新输入；删除 MUST NOT 改写历史 selection 或级联删除会话/事件。
+按租户隔离；无引用的删除 MUST 不被无关绑定阻塞。409 的会话 references MUST 有界
+（最多 20 条 + `total`/`truncated`），MUST NOT 无界拼接 session id。解绑路径 MUST 明确：
+归档会话，或发送只选模型的新输入；删除 MUST NOT 改写历史 selection 或级联删除会话/事件。
 
 #### Scenario: 已归档会话仍有运行中 run
 - **WHEN** 会话已归档但 `runs.status` 仍为 `pending` 或 `running`

@@ -79,6 +79,8 @@ Agent 被团队或会话引用时 MUST NOT 被硬删除；只能归档/禁用，
   `kind:"session"` 与 state/runStatus/archived（细节见 session-binding spec）。
 - 归档 MUST 允许团队引用（归档是被团队引用时的修复动作），但 MUST 被活跃会话引用拒绝，
   返回同一 409 `agent_in_use` 与 references。
+- 归档位 MUST 只读：并发 PUT MUST NOT 把 `archived` 改回 false；过期写 MUST 返回
+  409 `agent_changed`，不得复活已归档 Agent。
 
 #### Scenario: 删除被团队引用的 Agent
 - **WHEN** 用户删除一个团队成员 Agent
@@ -87,6 +89,10 @@ Agent 被团队或会话引用时 MUST NOT 被硬删除；只能归档/禁用，
 #### Scenario: 删除被会话引用的 Agent
 - **WHEN** 用户删除一个被活跃会话绑定的 Agent
 - **THEN** 409 `agent_in_use` 列出会话；归档会话或发送只选模型的新输入后删除成功
+
+#### Scenario: 并发归档与更新
+- **WHEN** 一个 PUT 在读取后、写入前与归档并发
+- **THEN** PUT 返回 409 `agent_changed`；Agent 保持 archived=true
 
 ### Requirement: Agent 配置在 run 装配中生效
 
