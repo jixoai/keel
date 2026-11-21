@@ -54,7 +54,7 @@ keel version
 | POST | `/v1/sessions/{id}/cancel` | 停止当前 attempt（幂等；202=cancelling，501=跨进程无 seam） |
 | GET/POST | `/v1/sessions/{id}/decisions` | 审批开/列；`POST .../{decisionId}` 作答（幂等，409 冲突） |
 | GET | `/v1/plugins` | 插件/generation/hooks/工具 |
-| GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动触发（幂等键） |
+| GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.1） |
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
 
@@ -67,11 +67,50 @@ keel version
 | 能力 | 契约 |
 | --- | --- |
 | 插件 | **进程内声明式契约**（`agentext.Plugin`，`internal/agentext/plugin.go:67`）：`ID/Version/Provides/Requires/Tools/Hooks/Triggers/Effects/Start/Stop`；依赖拓扑激活（缺依赖 `PENDING` 可见）、反序卸载（hook 订阅/触发器/effects 精确撤销，无残留）、`generation+1`、工具重名 fail-closed（第二个插件 `FAILED`）；装配结果经唯一 sink 发布给模型工具集（`cmd/keel/serve.go` 用 `rt.RefreshProductTools`）。web 设置 › 插件（`web/src/screens/settings.tsx:1148`）渲染该装配面。**规划中**（`keel-plugin-core`，勿当作已实现）：`plugin.yaml` 包与安装/启用/禁用 API、三种 kind（in-process/sidecar/webview）、运维权限与审计、webview UI 托管与 `keel.plugin.*` 桥、创造模式 |
-| 触发器 | `cron` / `interval` / `webhook`；幂等键（确定性 session + kernel requestId 双保险）；有界重试；审计在 `/v1/triggers` |
+| 触发器 | `cron` / `interval` / `webhook`；幂等键（确定性 session + kernel requestId 双保险）；有界重试；HMAC 签名与重放窗口；按 last-run 有界追赶；每触发器并发上限；fire 即建初始任务卡；审计在 `/v1/triggers`（语义见 §3.1） |
 | Sub-agent | `agent` 聚合工具的 `spawn` action：独立子会话 + 结构化结果 `{status,summary,artifacts,usage}` + 预算（turns/tokens/timeout）；父会话经 `parentSessionId` 可查 |
 | Hooks | 闭集：`subagent.started\|finished`、`trigger.before\|after`、`turn.started\|finished`、`decision.opened\|answered`；有界异步队列，不阻塞账本，失败可见 |
 | 审批 | decision 原语：open/wait/timeout/cancel + 答案 journal；durable 在 tasks 行 |
 | Partials | token 级旁路：进程内 hub → SSE `event: partial`（无 `id:`，不进事件表，不重放） |
+
+### 3.1 触发器交付语义（W10）
+
+- **HMAC（webhook）**。`TriggerSpec.WebhookSecret` 是每个触发器的 HMAC-SHA256 密钥
+  （至少 16 字节），`json:"-"`，绝不进入 `GET /v1/triggers`、插件快照或日志；生产用
+  `WebhookSecretEnv` 指向环境变量（内置示例：`KEEL_EXAMPLE_WEBHOOK_SECRET`），注册时解析一次。
+  签名覆盖**原始 body 字节**，canonical 为：
+
+  ```
+  v1\n<tenantId>\n<triggerId>\n<timestamp>\n<idempotencyKey>\n<rawBody>
+  ```
+
+  请求头：`X-Keel-Timestamp: <unix 秒>`、`X-Keel-Signature: sha256=<hex>`；
+  另有 `X-Keel-Webhook: 1`（可省略，出现签名头即按 webhook 处理）。
+  时间戳必须在 `webhookToleranceSec`（默认 300s，上限 86400s）内，签名用
+  `hmac.Equal` 常量时间比较。
+- **fail-closed**。未配置 secret 的 webhook 触发拒绝一切签名投递（403）；缺失/错误/过期签名
+  返回 401。两者都写审计 `status:"rejected"`，错误只带类别（`missing_timestamp` /
+  `stale_timestamp` / `bad_signature` 等），不带 secret 或收到的签名。手动 fire 是已认证的
+  运维动作，不需要签名。
+- **去重**。幂等键仍是唯一身份：同键并发按 key 串行化，进程内重复投递返回
+  `deduped:true` 并审计 `status:"deduped"`；跨重启由 kernel 的 requestId 去重，返回
+  `fired + deduped:true`。重复投递不会产生第二条 `user.message`。
+- **漏跑补偿**。`trigger_state(tenant_id, trigger_id, last_scheduled_at, ...)` 持久化
+  “已处理的最新计划窗口”。重启/注册时按该游标计算 `(last, now]` 内错过的窗口：
+  只补 `catchUpLimit`（默认 3）个**最近的**窗口，且不早于 `catchUpWindow`（默认 24h）；
+  更老的窗口合并跳过，审计 `status:"skipped"` 并记录 coalesced 数量。补跑使用与正常计划相同
+  的稳定幂等键 `sched:<id>:<unix>`，所以即使补偿重复也不会二次提交。停机会话恢复不会
+  产生风暴；上限内仍失败的窗口由审计可见。
+- **并发上限**。`maxConcurrent`（默认 1）限制同一触发器同时在飞的 fire。超限返回
+  `ErrTriggerBusy` → HTTP 429 + `Retry-After: 1`，审计 `status:"throttled"`；不排队，
+  因为无界队列会把过载隐藏成延迟。同幂等键的重试先等待该键的首次 fire，再走去重分支，
+  不会被当作超限。
+- **初始任务卡**。一次成功 fire 在提交 `user.message` 后立即调用
+  `tasklog.EnsureCard`，返回 `taskCardId` 并写审计；失败不回滚已提交的回合，而是返回
+  `taskCardError`/审计字段（首次工具调用仍会懒创建）。满足 task-log「会话起步即有卡」。
+- **观测**。`GET /v1/triggers` 的每个条目带 `fires/failures/dedupes/throttled/rejected/skipped`、
+  `inFlight`、`webhookConfigured`、`lastScheduledAt` 与最近 20 条审计（fired/failed/deduped/
+  throttled/rejected/skipped）。
 
 ## 4. 与内核的接缝
 

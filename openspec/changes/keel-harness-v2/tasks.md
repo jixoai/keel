@@ -345,8 +345,25 @@
 
 ## W10 triggers 对齐
 
-- [ ] 沿用 v1 的 `cron/interval/webhook`；补 HMAC、去重键、漏跑补偿 （对账 2026-11-20：部分——缺口：cron/interval/webhook+幂等键+审计+重试在（internal/agentext/triggers.go:303-460）；无 HMAC 签名校验/漏跑补偿）
-- [ ] 每触发器并发上限；触发产生的会话自动建初始任务卡 （对账 2026-11-20：部分——缺口：同一幂等键串行化（triggers.go:345-348）；无 per-trigger 并发上限；初始任务卡由会话启动路径覆盖，未按触发器单独验证）
+- [x] 沿用 v1 的 `cron/interval/webhook`；补 HMAC、去重键、漏跑补偿
+      （W10 2026-11-21：HMAC-SHA256 + 重放窗口 + 常量时间比较 + 未配置 fail-closed 与
+      rejected 审计在 `internal/agentext/triggers.go:1118`（`verifyWebhook`），secret 以
+      `json:"-"` 隔离（`:87`），HTTP 原始 body/签名头 `internal/agentapi/ext.go:120`；
+      去重保留同 key 串行化并新增 deduped 审计；漏跑补偿用 durable
+      `trigger_state`（`internal/store/triggers.go:19,29,53`、`schema.sql:1078`、`rls.go:89`）
+      与有界追赶（`triggers.go:846,927,996`：最近 `catchUpLimit` 窗口、24h 回看、
+      超限合并为 skipped 审计）；测试 `TestTriggerWebhookHMACVerification`、
+      `TestTriggerWebhookWithoutSecretFailsClosed`、`TestTriggerCatchUpPlanIsBounded`、
+      `TestTriggerCatchUpAfterRestartAndCursor`、
+      `TestTriggerWebhookHMACAndInitialCardE2E`、`TestTriggerCatchUpUsesDurableCursorE2E`）
+- [x] 每触发器并发上限；触发产生的会话自动建初始任务卡
+      （W10 2026-11-21：`maxConcurrent`（默认 1）非阻塞占槽，超限 `ErrTriggerBusy` →
+      HTTP 429 + `Retry-After` + throttled 审计（`triggers.go:1087`、
+      `internal/agentapi/ext.go:140`）；同 key 重试先等待再去重。fire 成功即调
+      `tasklog.EnsureCard` 建初始卡（`triggers.go:663`），响应带 `taskCardId`，
+      失败可见但不回滚；测试 `TestTriggerConcurrencyCapRefusesInsteadOfQueueing`、
+      `TestTriggerCreatesInitialTaskCard`、`TestTriggerConcurrencyLimitOverHTTP`、
+      `TestTriggerWebhookHMACAndInitialCardE2E`）
 - [x] webhook 端口只绑回环或受控入口；记录审计
       （对账：默认监听 `127.0.0.1:13750`——`cmd/keel/serve.go:73` `defaultServeAddr`，
       `KEEL_SERVE_ADDR` 可指向受控入口；每次 fire 落审计 `internal/agentext/triggers.go:85-110`+`:424`，

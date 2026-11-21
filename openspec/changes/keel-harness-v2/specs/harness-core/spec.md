@@ -160,3 +160,50 @@ MUST NOT 用 cgroup peak 与 RSS 直接比较。
 #### Scenario: 两种读数都在
 - **WHEN** 提交 G4 内存报告
 - **THEN** 同时给出 RSS 与 cgroup peak、全机与每 group 分解，并注明采样间隔与进程清单
+
+
+### Requirement: Webhook 投递真实性
+
+webhook 触发 MUST 用每触发器的 HMAC-SHA256 secret 校验
+`v1\n<tenantId>\n<triggerId>\n<timestamp>\n<idempotencyKey>\n<rawBody>`，时间戳 MUST 落在
+配置的重放窗口内，签名比较 MUST 为常量时间。未配置 secret 的 webhook 触发 MUST fail-closed；
+缺失、错误或过期签名 MUST 被拒绝。任何拒绝 MUST 审计。secret MUST NOT 出现在 API、事件、
+日志或插件快照中。
+
+#### Scenario: 错误签名被拒并审计
+- **WHEN** 一个 webhook 投递的签名错误或时间戳超出窗口
+- **THEN** 请求被拒绝、没有 `user.message`，`GET /v1/triggers` 的审计出现一条 rejected
+
+#### Scenario: 未配置 secret 的 webhook 失败关闭
+- **WHEN** 触发器声明为 webhook 但未配置 HMAC secret，且收到带签名的投递
+- **THEN** 投递被拒绝并审计，绝不“无签名放行”
+
+### Requirement: 触发器去重与漏跑补偿
+
+同一幂等键 MUST 只提交一条 `user.message`；进程内重复投递返回 `deduped`，跨重启由 kernel
+requestId 去重。interval/cron MUST 持久化最后处理的计划窗口；重启后 MUST 按该 last-run 追赶
+错过的窗口，且 MUST 同时有数量上限与回看窗口上限；超出部分 MUST 合并跳过并审计，
+MUST NOT 形成重启风暴。
+
+#### Scenario: 重启后按 last-run 追赶但有界
+- **WHEN** 进程停机跨越 K 个 interval/cron 窗口后重启
+- **THEN** 至多补跑配置上限内的最近窗口，其余以 skipped 审计合并；同窗口不会产生第二条
+  `user.message`
+
+#### Scenario: 重复投递不产生第二回合
+- **WHEN** 同一个已成功的 webhook 幂等键在进程内被再次投递
+- **THEN** 返回 `deduped:true`，账本仍只有一条 `user.message`
+
+### Requirement: 触发器并发与归属
+
+每触发器 MUST 有在飞 fire 上限；超限 MUST 显式拒绝（429）或排队，MUST NOT 无界排队或静默
+丢弃；拒绝 MUST 审计。一次成功 fire MUST 使目标会话立即可归属：初始任务卡随 fire 创建，
+失败可见但不回滚已提交回合。
+
+#### Scenario: 并发超限可解释
+- **WHEN** 同一触发器已有 `maxConcurrent` 个 fire 在飞，第 N+1 个到达
+- **THEN** 返回 429 + `Retry-After`（或明确的排队语义），并记录 throttled 审计
+
+#### Scenario: 触发会话起步即有卡
+- **WHEN** 一次 trigger fire 为没有任务的会话提交了第一条输入
+- **THEN** 该会话的初始任务卡已存在，响应携带 `taskCardId`
