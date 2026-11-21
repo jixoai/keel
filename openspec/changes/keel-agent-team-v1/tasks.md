@@ -25,7 +25,15 @@
 > Team/member 运行时 E2E 在当前 schema 复跑通过（`evidence/runtime-p7-2026-11-21/`）。视觉复核 62 张
 > 真实 Chrome 截图（390/1280）零溢出，定向 TUI 69/69；报告 `evidence/p7-acceptance-2026-11-21/report.html`。
 > P0/P1 为 0；P2 三项：画廊 `Progress` 缺件（manifest 注明等裁决）、390 缺队长卡片拥挤、fixture 无
-> team-tasks 回退。未做项不变：P3 团队会话引用保护、P5 画布 defaults/成员 label 编辑、P6 speech/decision 运行时。
+> team-tasks 回退。未做项：P3 团队会话引用保护、P6 speech/decision 运行时；P5 画布 defaults/成员
+> label 编辑已由 C4 补齐（见下一条状态）。
+>
+> **状态（2026-11-21 · C4）**：团队画布补齐 design A6 的团队级默认工具/模型覆盖
+> （`defaults.tools` + `defaults.modelOverride`）与成员席位 label/description 编辑、成员替换
+> （保留席位文本；inline 席位同样可编辑）。保存继续走既有 team PUT 契约并合并未编辑字段，
+> `defaults` 总是整对象发送，因此清空默认也是一次真实写入。`settings-teams.test.tsx` 32 例、
+> 全量 TUI 225 例、check/build/package 全过；真实 Chrome 390/1280 截图与测量
+> `evidence/canvas-defaults-2026-11-21/`。P5 画布行据此勾选。
 
 ## P0 契约与设计冻结
 
@@ -134,7 +142,10 @@
       编辑回填、保存后卡片事实同步。证据 `settings-agents.test.tsx` 与
       `evidence/ui-tail-2026-11-21/screenshots/07-agent-editor-file-390.png`、
       `08-agent-editor-file-error-390.png`、`13-agent-editor-file-1280.png`）
-- [ ] 团队卡片、团队画布、captain 槽、成员库/新建 Agent、Team CLI 能力面板
+- [x] 团队卡片、团队画布、captain 槽、成员库/新建 Agent、Team CLI 能力面板
+      （C4 补齐画布剩余编辑面：团队级 `defaults.tools`/`defaults.modelOverride`、成员席位
+      label/description（inline 席位同样）、替换成员保留席位文本；证据
+      `settings-teams.test.tsx` 与 `evidence/canvas-defaults-2026-11-21/`）
 - [x] 会话启动模式选择（Standard/Team）、团队选择器、缺 captain 阻塞态
 - [x] 插件能力树 UI（命令/子命令/描述/权限/danger/callable_by/复制）
       （权限列表与复制动作已补：plugins.tsx 的 CliCapabilityRow 渲染 manifest 的 permissions 原样，

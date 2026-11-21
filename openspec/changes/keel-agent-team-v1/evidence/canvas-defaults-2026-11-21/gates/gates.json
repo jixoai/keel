@@ -1,0 +1,77 @@
+{
+  "change": "keel-agent-team-v1",
+  "lane": "C4",
+  "date": "2026-11-21",
+  "head": "035b36f",
+  "base": "4a68729",
+  "commands": [
+    {
+      "cmd": "cd web && nsh check",
+      "exit": 0,
+      "log": "gates/check.txt"
+    },
+    {
+      "cmd": "cd web && nsh test --target tui src/screens/settings-teams.test.tsx",
+      "exit": 0,
+      "result": "32 passed, 0 failed",
+      "log": "gates/settings-teams.txt"
+    },
+    {
+      "cmd": "cd web && nsh test --target tui",
+      "exit": 0,
+      "result": "225 passed, 0 failed",
+      "log": "gates/tui-full.txt"
+    },
+    {
+      "cmd": "cd web && nsh build",
+      "exit": 0,
+      "log": "gates/build.txt"
+    },
+    {
+      "cmd": "cd web && nsh package --target web",
+      "exit": 0,
+      "log": "gates/package-web.txt"
+    }
+  ],
+  "browser": {
+    "cmd": "cd web && nsh run --target web --port 13680; node openspec/changes/keel-agent-team-v1/evidence/canvas-defaults-2026-11-21/browser-check.mjs",
+    "viewport": [
+      "390x844",
+      "1280x900"
+    ],
+    "pass": true,
+    "findings": 0,
+    "screenshots": "screenshots/（7 张：defaults / seat edit / seat replace / replace options × 390/1280）",
+    "checks": "checks.json",
+    "storedDefaultsReadBack": {
+      "tools": "已选 2 个：workflow.plan · clock.now",
+      "model": "DeepSeek V4.1 Flash · S2API"
+    },
+    "noHorizontalOverflow": "每个视口 document scrollWidth == innerWidth；每个测量元素 right <= innerWidth（checks.json）"
+  },
+  "gateScope": {
+    "defaults": [
+      "defaults.tools 多选预填/保存/回读；defaults.modelOverride 选择/替换/回读",
+      "只改团队名字时 defaults 不被 PUT 清空（重开画布仍预填）",
+      "defaults 总是整对象发送；未编辑字段以 stored defaults 为基底合并"
+    ],
+    "members": [
+      "席位 label/description 草稿编辑后保存回读（含 inline 席位，inline 定义保留）",
+      "替换成员保留席位 label/description，保存后新 agentId 回读",
+      "空 agentId + inline 仍走 PUT 并以 inline.id 作为 wire agentId（C3 行为不变）",
+      "保存失败留场且 defaults/席位草稿不丢"
+    ],
+    "interaction": [
+      "保存中新增控件全部锁定（原生 choice 控件以拒绝 press 证明；按钮 enabled=false）",
+      "390 单列：成员操作另起一行，defaults 字段整宽；真实 Chrome 7 张截图",
+      "kit shadcn 组件（Combobox/Select/Input/Button/Field/Dialog）与 solid-glass 令牌，无手写控件"
+    ]
+  },
+  "processes": {
+    "port": 13680,
+    "release": "port-release.txt",
+    "freeAtCheck": true,
+    "orphanCheck": "pgrep -fl 'nsh run --target web' empty; lsof port 13680 empty"
+  },
+  "headNote": "可执行树（含演示 fixture）在 c83d488；3f0055d/035b36f 只补 harness/test 用例与断言，bundle 不变，因此浏览器证据对三棵树同样有效。本目录的 tasks/证据文档在最后提交，不改变可执行树。"
+}

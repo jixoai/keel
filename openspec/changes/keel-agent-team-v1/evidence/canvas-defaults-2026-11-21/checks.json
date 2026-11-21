@@ -1,0 +1,486 @@
+{
+  "base": "http://127.0.0.1:13680/?fixture=1",
+  "generatedAt": "2026-11-21T06:06:52.232Z",
+  "states": {
+    "canvas.defaults": "browser: 01-team-canvas-defaults-390.png / 05-team-canvas-defaults-1280.png",
+    "canvas.member-edit": "browser: 02-team-canvas-seat-edit-390.png / 06-team-canvas-seat-edit-1280.png",
+    "canvas.member-replace": "browser: 03-team-canvas-seat-replace-390.png / 07-team-canvas-seat-replace-1280.png",
+    "canvas.member-replace-options": "browser: 04-team-canvas-seat-replace-options-390.png",
+    "canvas.save/read-back": "TUI gate: settings-teams.test.tsx（defaults 保存/回读、席位文本、替换、失败留输入）",
+    "canvas.five-states": "TUI gate: settings-teams.test.tsx（空/加载/错误/403/成功 + 保存中/失败）"
+  },
+  "defaults": {
+    "tools": "已选 2 个：workflow.plan · clock.now",
+    "model": "DeepSeek V4.1 Flash · S2API"
+  },
+  "viewports": {
+    "390x844·canvas defaults": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasDefaults": {
+        "left": 17,
+        "right": 342,
+        "top": 226,
+        "bottom": 474,
+        "width": 325,
+        "height": 248
+      },
+      "defaultsTools": {
+        "left": 17,
+        "right": 342,
+        "top": 291,
+        "bottom": 321,
+        "width": 325,
+        "height": 30
+      },
+      "defaultsToolsFact": {
+        "left": 17,
+        "right": 342,
+        "top": 325,
+        "bottom": 337,
+        "width": 325,
+        "height": 12
+      },
+      "defaultsModel": {
+        "left": 17,
+        "right": 342,
+        "top": 406,
+        "bottom": 434,
+        "width": 325,
+        "height": 28
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 75,
+        "bottom": 163,
+        "width": 325,
+        "height": 88
+      },
+      "memberRow": {
+        "left": 17,
+        "right": 342,
+        "top": 91,
+        "bottom": 163,
+        "width": 325,
+        "height": 72
+      },
+      "seatEditor": null,
+      "seatLabel": null,
+      "seatDescription": null,
+      "seatReplace": null,
+      "seatReplaceAgent": null
+    },
+    "390x844·seat editor": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasDefaults": {
+        "left": 17,
+        "right": 342,
+        "top": 432,
+        "bottom": 680,
+        "width": 325,
+        "height": 248
+      },
+      "defaultsTools": {
+        "left": 17,
+        "right": 342,
+        "top": 497,
+        "bottom": 527,
+        "width": 325,
+        "height": 30
+      },
+      "defaultsToolsFact": {
+        "left": 17,
+        "right": 342,
+        "top": 531,
+        "bottom": 543,
+        "width": 325,
+        "height": 12
+      },
+      "defaultsModel": {
+        "left": 17,
+        "right": 342,
+        "top": 612,
+        "bottom": 640,
+        "width": 325,
+        "height": 28
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 75,
+        "bottom": 369,
+        "width": 325,
+        "height": 294
+      },
+      "memberRow": {
+        "left": 17,
+        "right": 342,
+        "top": 91,
+        "bottom": 369,
+        "width": 325,
+        "height": 278
+      },
+      "seatEditor": {
+        "left": 17,
+        "right": 342,
+        "top": 165,
+        "bottom": 365,
+        "width": 325,
+        "height": 200
+      },
+      "seatLabel": {
+        "left": 26,
+        "right": 333,
+        "top": 195,
+        "bottom": 223,
+        "width": 307,
+        "height": 28
+      },
+      "seatDescription": {
+        "left": 26,
+        "right": 333,
+        "top": 274,
+        "bottom": 302,
+        "width": 307,
+        "height": 28
+      },
+      "seatReplace": null,
+      "seatReplaceAgent": null
+    },
+    "390x844·seat replace": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "dialog": {
+        "left": 0,
+        "right": 390,
+        "top": 0,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "canvasDefaults": {
+        "left": 17,
+        "right": 342,
+        "top": 373,
+        "bottom": 621,
+        "width": 325,
+        "height": 248
+      },
+      "defaultsTools": {
+        "left": 17,
+        "right": 342,
+        "top": 438,
+        "bottom": 468,
+        "width": 325,
+        "height": 30
+      },
+      "defaultsToolsFact": {
+        "left": 17,
+        "right": 342,
+        "top": 472,
+        "bottom": 484,
+        "width": 325,
+        "height": 12
+      },
+      "defaultsModel": {
+        "left": 17,
+        "right": 342,
+        "top": 553,
+        "bottom": 581,
+        "width": 325,
+        "height": 28
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 342,
+        "top": 75,
+        "bottom": 310,
+        "width": 325,
+        "height": 235
+      },
+      "memberRow": {
+        "left": 17,
+        "right": 342,
+        "top": 91,
+        "bottom": 310,
+        "width": 325,
+        "height": 219
+      },
+      "seatEditor": null,
+      "seatLabel": null,
+      "seatDescription": null,
+      "seatReplace": {
+        "left": 17,
+        "right": 342,
+        "top": 165,
+        "bottom": 306,
+        "width": 325,
+        "height": 141
+      },
+      "seatReplaceAgent": {
+        "left": 26,
+        "right": 333,
+        "top": 215,
+        "bottom": 243,
+        "width": 307,
+        "height": 28
+      }
+    },
+    "1280x900·canvas defaults": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "dialog": {
+        "left": 0,
+        "right": 1280,
+        "top": 0,
+        "bottom": 900,
+        "width": 1280,
+        "height": 900
+      },
+      "canvasDefaults": {
+        "left": 17,
+        "right": 543,
+        "top": 265,
+        "bottom": 459,
+        "width": 526,
+        "height": 194
+      },
+      "defaultsTools": {
+        "left": 17,
+        "right": 543,
+        "top": 312,
+        "bottom": 342,
+        "width": 526,
+        "height": 30
+      },
+      "defaultsToolsFact": {
+        "left": 17,
+        "right": 543,
+        "top": 346,
+        "bottom": 358,
+        "width": 526,
+        "height": 12
+      },
+      "defaultsModel": {
+        "left": 17,
+        "right": 543,
+        "top": 409,
+        "bottom": 437,
+        "width": 526,
+        "height": 28
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 543,
+        "top": 146,
+        "bottom": 202,
+        "width": 526,
+        "height": 56
+      },
+      "memberRow": {
+        "left": 17,
+        "right": 543,
+        "top": 162,
+        "bottom": 202,
+        "width": 526,
+        "height": 40
+      },
+      "seatEditor": null,
+      "seatLabel": null,
+      "seatDescription": null,
+      "seatReplace": null,
+      "seatReplaceAgent": null
+    },
+    "1280x900·seat editor": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "dialog": {
+        "left": 0,
+        "right": 1280,
+        "top": 0,
+        "bottom": 900,
+        "width": 1280,
+        "height": 900
+      },
+      "canvasDefaults": {
+        "left": 17,
+        "right": 543,
+        "top": 471,
+        "bottom": 665,
+        "width": 526,
+        "height": 194
+      },
+      "defaultsTools": {
+        "left": 17,
+        "right": 543,
+        "top": 518,
+        "bottom": 548,
+        "width": 526,
+        "height": 30
+      },
+      "defaultsToolsFact": {
+        "left": 17,
+        "right": 543,
+        "top": 552,
+        "bottom": 564,
+        "width": 526,
+        "height": 12
+      },
+      "defaultsModel": {
+        "left": 17,
+        "right": 543,
+        "top": 615,
+        "bottom": 643,
+        "width": 526,
+        "height": 28
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 543,
+        "top": 146,
+        "bottom": 408,
+        "width": 526,
+        "height": 262
+      },
+      "memberRow": {
+        "left": 17,
+        "right": 543,
+        "top": 162,
+        "bottom": 408,
+        "width": 526,
+        "height": 246
+      },
+      "seatEditor": {
+        "left": 17,
+        "right": 543,
+        "top": 204,
+        "bottom": 404,
+        "width": 526,
+        "height": 200
+      },
+      "seatLabel": {
+        "left": 26,
+        "right": 534,
+        "top": 234,
+        "bottom": 262,
+        "width": 508,
+        "height": 28
+      },
+      "seatDescription": {
+        "left": 26,
+        "right": 534,
+        "top": 313,
+        "bottom": 341,
+        "width": 508,
+        "height": 28
+      },
+      "seatReplace": null,
+      "seatReplaceAgent": null
+    },
+    "1280x900·seat replace": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "dialog": {
+        "left": 0,
+        "right": 1280,
+        "top": 0,
+        "bottom": 900,
+        "width": 1280,
+        "height": 900
+      },
+      "canvasDefaults": {
+        "left": 17,
+        "right": 543,
+        "top": 412,
+        "bottom": 606,
+        "width": 526,
+        "height": 194
+      },
+      "defaultsTools": {
+        "left": 17,
+        "right": 543,
+        "top": 459,
+        "bottom": 489,
+        "width": 526,
+        "height": 30
+      },
+      "defaultsToolsFact": {
+        "left": 17,
+        "right": 543,
+        "top": 493,
+        "bottom": 505,
+        "width": 526,
+        "height": 12
+      },
+      "defaultsModel": {
+        "left": 17,
+        "right": 543,
+        "top": 556,
+        "bottom": 584,
+        "width": 526,
+        "height": 28
+      },
+      "canvasMembers": {
+        "left": 17,
+        "right": 543,
+        "top": 146,
+        "bottom": 349,
+        "width": 526,
+        "height": 203
+      },
+      "memberRow": {
+        "left": 17,
+        "right": 543,
+        "top": 162,
+        "bottom": 349,
+        "width": 526,
+        "height": 187
+      },
+      "seatEditor": null,
+      "seatLabel": null,
+      "seatDescription": null,
+      "seatReplace": {
+        "left": 17,
+        "right": 543,
+        "top": 204,
+        "bottom": 345,
+        "width": 526,
+        "height": 141
+      },
+      "seatReplaceAgent": {
+        "left": 26,
+        "right": 534,
+        "top": 254,
+        "bottom": 282,
+        "width": 508,
+        "height": 28
+      }
+    }
+  },
+  "pass": true,
+  "findings": []
+}
