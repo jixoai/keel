@@ -72,5 +72,5 @@ $ go test -v -count=1 ./internal/mediaadapter -run "TestHTTPFetcher|TestImageAda
 === RUN   TestHTTPFetcherAllowPrivateHostsIsExplicitOptIn
 --- PASS: TestHTTPFetcherAllowPrivateHostsIsExplicitOptIn (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/mediaadapter	0.236s
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.203s
 exit=0
