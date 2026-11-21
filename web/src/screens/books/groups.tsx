@@ -646,7 +646,9 @@ function CapabilityRow(props: {
       };
     }),
   ];
-  const canEdit = () => props.editable;
+  // A key this build does not know is preserved as-is, never edited into one of
+  // the catalogue's rows (the server would only refuse the write).
+  const canEdit = () => props.editable && isKnownKey(props.capability.key);
   return (
     <View
       testID={`capability-row-${props.capability.key}`}
