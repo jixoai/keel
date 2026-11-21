@@ -130,11 +130,11 @@ func toolAccessDecision(call agentcore.AgentToolCall, err error) *agentcore.Befo
 	var message string
 	switch code {
 	case ToolAccessPermissionDenied:
-		key := refusal.Key
-		if key == "" {
-			key = "a required permission"
+		if refusal.Key == "" {
+			message = fmt.Sprintf("Tool %q is not authorized: a required permission is missing.", call.Name)
+		} else {
+			message = fmt.Sprintf("Tool %q is not authorized: it requires the %q permission.", call.Name, refusal.Key)
 		}
-		message = fmt.Sprintf("Tool %q is not authorized: it requires the %q permission.", call.Name, key)
 		if refusal.Reason != "" {
 			message += " (reason: " + refusal.Reason + ")"
 		}
