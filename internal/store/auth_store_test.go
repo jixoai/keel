@@ -404,6 +404,10 @@ func TestSuperAdminCannotBeDisabled(t *testing.T) {
 	if _, err := st.DisableAccountAudited(ctx, tenantID, root.ID, uuid.Nil, true, "test"); !errors.Is(err, ErrSuperAdminProtected) {
 		t.Fatalf("disable super admin err = %v, want ErrSuperAdminProtected", err)
 	}
+	// The low-level write carries the same invariant: no caller can bypass it.
+	if err := st.SetAccountDisabled(ctx, tenantID, root.ID, true); !errors.Is(err, ErrSuperAdminProtected) {
+		t.Fatalf("raw disable super admin err = %v, want ErrSuperAdminProtected", err)
+	}
 	after, err := st.GetAccount(ctx, tenantID, root.ID)
 	if err != nil || after.DisabledAt != nil {
 		t.Fatalf("super admin changed: %+v err=%v", after, err)

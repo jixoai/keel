@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -180,7 +181,8 @@ func (s *Store) SetAccountPasswordHash(ctx context.Context, tenantID, accountID 
 
 // SetAccountDisabled soft-deletes (disables) or re-enables an account. Disabling
 // sets the mark once; enabling clears it. The row, its bots and its audit
-// history stay either way.
+// history stay either way. A super admin cannot be disabled: the deployment must
+// always keep at least one, and this is the low-level write every caller shares.
 func (s *Store) SetAccountDisabled(ctx context.Context, tenantID, accountID uuid.UUID, disabled bool) error {
 	if tenantID == uuid.Nil || accountID == uuid.Nil {
 		return invalidIdentity("set account disabled", "tenant and account ids are required")
@@ -189,11 +191,23 @@ func (s *Store) SetAccountDisabled(ctx context.Context, tenantID, accountID uuid
 		`UPDATE accounts
 		    SET disabled_at = CASE WHEN $3 THEN COALESCE(disabled_at, now()) ELSE NULL END,
 		        updated_at = now()
-		  WHERE tenant_id = $1 AND account_id = $2`, tenantID, accountID, disabled)
+		  WHERE tenant_id = $1 AND account_id = $2
+		    AND (NOT $3 OR NOT is_super_admin)`, tenantID, accountID, disabled)
 	if err != nil {
 		return identityWriteError("set account disabled", err)
 	}
-	return identityRowsResult("set account disabled", tag.RowsAffected())
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	current, err := s.GetAccount(ctx, tenantID, accountID)
+	if err != nil {
+		return err
+	}
+	if disabled && current.IsSuperAdmin {
+		return fmt.Errorf("%w: %w: a super admin cannot be disabled", ErrConflict, ErrSuperAdminProtected)
+	}
+	// Enabling an already-enabled account is a no-op success.
+	return nil
 }
 
 // CreateRole inserts a role.
