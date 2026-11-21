@@ -144,9 +144,12 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "account.create", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "account.create", map[string]any{
 			"target_account_id": created.ID.String(), "kind": created.Kind,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"account": accountViewOf(created)})
 }
@@ -218,9 +221,12 @@ func (s *Server) setAccountDisabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "account.disable", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "account.disable", map[string]any{
 			"target_account_id": accountID.String(), "disabled": *body.Disabled,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"account": accountViewOf(record)})
 }
@@ -279,9 +285,12 @@ func (s *Server) resetAccountPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "account.password_reset", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "account.password_reset", map[string]any{
 			"target_account_id": accountID.String(),
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accountId": accountID.String(), "passwordChanged": true, "sessionsRevoked": true,
@@ -361,10 +370,13 @@ func (s *Server) addAccountGroup(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
+	if err := s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
 		"grant", "group_membership", "", "", "ok", map[string]any{
 			"group_id": groupID.String(), "group": group.Name, "created": created,
-		})
+		}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accountId": accountID.String(), "groupId": groupID.String(), "added": created,
 	})
@@ -390,8 +402,11 @@ func (s *Server) removeAccountGroup(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
-		"revoke", "group_membership", "", "", "ok", map[string]any{"group_id": groupID.String()})
+	if err := s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
+		"revoke", "group_membership", "", "", "ok", map[string]any{"group_id": groupID.String()}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accountId": accountID.String(), "groupId": groupID.String(), "removed": true,
 	})

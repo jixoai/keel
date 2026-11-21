@@ -59,6 +59,111 @@ func (s *Store) CreateBot(ctx context.Context, record BotRecord) (BotRecord, err
 	return created, nil
 }
 
+// CreateBotWithOwner inserts a Bot and its owner relation in one transaction
+// (A4.2a §7). The owner account is the one named by the Bot's Profile; the
+// relation is what single-resource Bot routes authorize against. A failure
+// leaves neither row behind, so no Bot can exist without an owner.
+func (s *Store) CreateBotWithOwner(ctx context.Context, record BotRecord, ownerAccountID, createdBy uuid.UUID) (BotRecord, error) {
+	if err := validateBotRecord(record); err != nil {
+		return BotRecord{}, err
+	}
+	if ownerAccountID == uuid.Nil || createdBy == uuid.Nil {
+		return BotRecord{}, invalidIdentity("create bot", "owner and creator accounts are required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return BotRecord{}, identityWriteError("create bot", err)
+	}
+	defer tx.Rollback(ctx)
+	created, err := scanBotRow(tx.QueryRow(ctx,
+		`INSERT INTO bots
+		    (tenant_id, bot_id, name, profile_id, model_kind, default_model, harness, archived)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+		 RETURNING tenant_id, bot_id, name, profile_id, model_kind, default_model,
+		           harness, archived, created_at, updated_at`,
+		record.TenantID, record.ID, record.Name, record.ProfileID, record.ModelKind,
+		string(record.DefaultModel), string(record.Harness), record.Archived))
+	if err != nil {
+		return BotRecord{}, identityWriteError("create bot", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO resource_relations
+		    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+		 VALUES ($1, 'bot', $2, $3, $4, $5, $6)
+		 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+		 DO NOTHING`,
+		record.TenantID, created.ID, RelationOwner, RelationSubjectAccount,
+		ownerAccountID.String(), createdBy); err != nil {
+		return BotRecord{}, identityWriteError("create bot owner relation", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return BotRecord{}, identityWriteError("create bot", err)
+	}
+	return created, nil
+}
+
+// UpdateBotWithOwner replaces a Bot's editable content and moves its owner
+// relation in the same transaction (Profile rebind). newOwner/oldOwner are
+// zero when the Profile did not change. A stale CAS or a relation failure rolls
+// the whole write back, so the Bot never reports a new owner it does not have.
+func (s *Store) UpdateBotWithOwner(ctx context.Context, record BotRecord, expectedArchived bool, newOwner, oldOwner, actor uuid.UUID) (BotRecord, error) {
+	if err := validateBotRecord(record); err != nil {
+		return BotRecord{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return BotRecord{}, identityWriteError("update bot", err)
+	}
+	defer tx.Rollback(ctx)
+	updated, err := scanBotRow(tx.QueryRow(ctx,
+		`UPDATE bots
+		    SET name = $3, profile_id = $4, model_kind = $5,
+		        default_model = $6::jsonb, harness = $7::jsonb,
+		        archived = $8, updated_at = now()
+		  WHERE tenant_id = $1 AND bot_id = $2 AND archived = $9
+		    AND ($8 OR NOT archived)
+		  RETURNING tenant_id, bot_id, name, profile_id, model_kind, default_model,
+		            harness, archived, created_at, updated_at`,
+		record.TenantID, record.ID, record.Name, record.ProfileID, record.ModelKind,
+		string(record.DefaultModel), string(record.Harness), record.Archived, expectedArchived))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Distinguish "no such bot" from "the lifecycle bit moved first".
+			if _, existsErr := s.GetBot(ctx, record.TenantID, record.ID); existsErr != nil {
+				return BotRecord{}, existsErr
+			}
+			return BotRecord{}, conflictIdentity("update bot", "lifecycle changed concurrently (archived=%v)", expectedArchived)
+		}
+		return BotRecord{}, identityWriteError("update bot", err)
+	}
+	if newOwner != uuid.Nil && newOwner != oldOwner {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO resource_relations
+			    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+			 VALUES ($1, 'bot', $2, $3, $4, $5, $6)
+			 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+			 DO NOTHING`,
+			record.TenantID, updated.ID, RelationOwner, RelationSubjectAccount,
+			newOwner.String(), actor); err != nil {
+			return BotRecord{}, identityWriteError("update bot owner relation", err)
+		}
+		if oldOwner != uuid.Nil {
+			if _, err := tx.Exec(ctx,
+				`DELETE FROM resource_relations
+				  WHERE tenant_id = $1 AND resource_type = 'bot' AND resource_id = $2
+				    AND relation = $3 AND subject_type = $4 AND subject_id = $5`,
+				record.TenantID, updated.ID, RelationOwner, RelationSubjectAccount,
+				oldOwner.String()); err != nil {
+				return BotRecord{}, identityWriteError("delete stale bot owner relation", err)
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return BotRecord{}, identityWriteError("update bot", err)
+	}
+	return updated, nil
+}
+
 // GetBot reads one bot. Another tenant's bot is ErrNotFound.
 func (s *Store) GetBot(ctx context.Context, tenantID uuid.UUID, botID string) (BotRecord, error) {
 	botID = strings.TrimSpace(botID)

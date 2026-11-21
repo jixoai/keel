@@ -42,6 +42,7 @@ import (
 	"github.com/jixoai/keel/internal/approval"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/notify"
+	"github.com/jixoai/keel/internal/routemux"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/tasklog"
 )
@@ -267,7 +268,7 @@ type Config struct {
 // /v1/ (specific existing /v1 routes keep precedence in the outer mux).
 type Server struct {
 	cfg Config
-	mux *http.ServeMux
+	mux *routemux.Mux
 	// settingsMu serializes the model-settings write path (read current →
 	// validate → store → apply). Without it two concurrent writes can interleave
 	// as store(B), apply(A): the row says B while the generation serves A. The
@@ -309,7 +310,7 @@ func New(cfg Config) *Server {
 	}
 	s := &Server{
 		cfg:             cfg,
-		mux:             http.NewServeMux(),
+		mux:             routemux.New(),
 		mcpAppLimits:    newMCPAppLimiter(cfg.MCPAppNow),
 		mcpAuditSamples: make(map[string]*mcpAuditSample),
 	}
@@ -319,6 +320,10 @@ func New(cfg Config) *Server {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+
+// Routes returns every pattern registered on the product mux. The host's
+// startup permission-coverage check enumerates it alongside the runtime mux.
+func (s *Server) Routes() []string { return s.mux.Patterns() }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/capabilities", s.capabilities)

@@ -131,7 +131,7 @@ func (s *Server) serveLogged(w http.ResponseWriter, r *http.Request) {
 		s.rejectDraining(rec)
 		return
 	}
-	s.mux.ServeHTTP(rec, r)
+	s.handler.ServeHTTP(rec, r)
 }
 
 // sessionIDFromPath extracts /v1/sessions/{uuid}/... for the pre-mux drain gate.

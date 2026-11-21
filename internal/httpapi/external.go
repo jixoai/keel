@@ -26,13 +26,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/access"
+	"github.com/jixoai/keel/internal/accessgate"
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/externalgw"
 	"github.com/jixoai/keel/internal/gateway"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // ExternalSessions is the external-gateway surface the HTTP edge needs.
@@ -140,6 +145,28 @@ func (s *Server) externalOpen(w http.ResponseWriter, r *http.Request) {
 		writeExternalError(w, err)
 		return
 	}
+	// An external session is still a session resource: attribute it to the
+	// caller so the single-resource routes have a relation to authorize. The
+	// gate already required session.write; the relation is what later GET/send/
+	// cancel/close checks use.
+	if principal, ok := auth.PrincipalFromContext(r.Context()); ok && principal.AccountID != uuid.Nil {
+		if _, err := s.cfg.Store.PutResourceRelation(r.Context(), store.ResourceRelation{
+			TenantID: tenantID, ResourceType: "session", ResourceID: sessionID.String(),
+			Relation: store.RelationOwner, SubjectType: store.RelationSubjectAccount,
+			SubjectID: principal.AccountID.String(), CreatedBy: principal.AccountID,
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if s.cfg.AuditRelation != nil {
+			if err := s.cfg.AuditRelation(r.Context(), tenantID, principal.AccountID, "create",
+				"session", sessionID.String(), store.RelationOwner,
+				store.RelationSubjectAccount, principal.AccountID.String()); err != nil {
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
+		}
+	}
 	writeJSON(w, http.StatusCreated, view)
 }
 
@@ -163,7 +190,43 @@ func (s *Server) externalList(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []externalgw.SessionView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+	// The list is a relation-filtered page, never "every external session in the
+	// tenant": the same VisibleResources rule the native list uses.
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("external session listing requires the identity access surface"))
+		return
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("authentication required"))
+		return
+	}
+	candidates := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if id := strings.TrimSpace(session.SessionID); id != "" {
+			candidates = append(candidates, id)
+		}
+	}
+	visible, err := s.cfg.Access.Visible(r.Context(), principal, access.KeySessionRead, "session", candidates)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !visible.Allowed() {
+		accessgate.WriteDenied(w, visible.Decision)
+		return
+	}
+	allowed := make(map[string]bool, len(visible.IDs))
+	for _, id := range visible.IDs {
+		allowed[id] = true
+	}
+	filtered := make([]externalgw.SessionView, 0, len(sessions))
+	for _, session := range sessions {
+		if allowed[strings.TrimSpace(session.SessionID)] {
+			filtered = append(filtered, session)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": filtered})
 }
 
 func (s *Server) externalGet(w http.ResponseWriter, r *http.Request) {

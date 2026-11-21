@@ -120,6 +120,74 @@ func (s *Store) CreateOwnedSession(ctx context.Context, ownership SessionOwnersh
 	return nil
 }
 
+// CreateAccountOwnedSession creates the pre-A4 session shape (no Bot) and
+// writes the caller's owner relation in one transaction. It is the "create
+// without botId" path: the session is private to the creating account, and the
+// relation gate can authorize its single-resource routes.
+//
+// A session already owned by a Bot is a conflict (the create must name that
+// Bot); an existing unowned session is claimed; repeating the same claim is
+// idempotent. A different account can never take over an existing owner.
+func (s *Store) CreateAccountOwnedSession(ctx context.Context, tenantID, sessionID, accountID uuid.UUID) error {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil || accountID == uuid.Nil {
+		return invalidIdentity("create account session", "tenant, session and account ids are required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return identityWriteError("create account session", err)
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO sessions (tenant_id, session_id)
+		 VALUES ($1, $2) ON CONFLICT (tenant_id, session_id) DO NOTHING`,
+		tenantID, sessionID)
+	if err != nil {
+		return identityWriteError("create account session", err)
+	}
+	if tag.RowsAffected() == 0 {
+		existing, err := readSessionOwnership(ctx, tx, tenantID, sessionID)
+		if err != nil {
+			return err
+		}
+		if existing.BotID != "" || existing.AccountID != uuid.Nil {
+			return conflictIdentity("create account session",
+				"session %s is already owned by bot %q account %s",
+				sessionID, existing.BotID, existing.AccountID)
+		}
+	}
+	var owner *uuid.UUID
+	err = tx.QueryRow(ctx,
+		`SELECT subject_id FROM resource_relations
+		  WHERE tenant_id = $1 AND resource_type = 'session' AND resource_id = $2
+		    AND relation = $3 AND subject_type = $4
+		  LIMIT 1`,
+		tenantID, sessionID.String(), RelationOwner, RelationSubjectAccount).Scan(&owner)
+	switch {
+	case err == nil:
+		if *owner != accountID {
+			return conflictIdentity("create account session",
+				"session %s already has a different owner relation", sessionID)
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO resource_relations
+			    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+			 VALUES ($1, 'session', $2, $3, $4, $5, $5)
+			 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+			 DO NOTHING`,
+			tenantID, sessionID.String(), RelationOwner,
+			RelationSubjectAccount, accountID.String()); err != nil {
+			return identityWriteError("create account session", err)
+		}
+	default:
+		return identityWriteError("create account session", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return identityWriteError("create account session", err)
+	}
+	return nil
+}
+
 // GetSessionOwnership reads a session's ownership. A missing or foreign session
 // is ErrNotFound.
 func (s *Store) GetSessionOwnership(ctx context.Context, tenantID, sessionID uuid.UUID) (SessionOwnership, error) {

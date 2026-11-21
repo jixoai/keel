@@ -48,14 +48,49 @@ const (
 	// Plugins. The lifecycle actions are the high-risk refinement; there is no
 	// coarse plugin.install/uninstall key that could bypass them.
 	KeyPluginRead               = "plugin.read"
+	KeyPluginInvoke             = "plugin.invoke"
 	KeyPluginLifecycleInstall   = "plugin.lifecycle.install"
 	KeyPluginLifecycleEnable    = "plugin.lifecycle.enable"
 	KeyPluginLifecycleDisable   = "plugin.lifecycle.disable"
 	KeyPluginLifecycleUninstall = "plugin.lifecycle.uninstall"
 
-	// Model configuration.
+	// Model configuration and model use. model.invoke is the action of asking a
+	// configured model to produce an answer (the decision/media ask surfaces);
+	// it is separate from model.configure so a caller can use a model without
+	// being able to replace its provider credentials.
 	KeyModelRead      = "model.read"
 	KeyModelConfigure = "model.configure"
+	KeyModelInvoke    = "model.invoke"
+
+	// Application discovery and tenant quota. These are tenant-level reads: they
+	// carry no resource relation and no tenant data beyond the caller's own
+	// deployment surface.
+	KeyAppRead = "app.read"
+
+	// Files (tenant blob storage). Files have no ReBAC tuples of their own; the
+	// key is tenant-scoped and the blob store carries the tenant predicate.
+	KeyFileRead  = "file.read"
+	KeyFileWrite = "file.write"
+
+	// Media gateway capabilities. media.read is discovery; media.invoke spends
+	// the deployment's provider credential.
+	KeyMediaRead   = "media.read"
+	KeyMediaInvoke = "media.invoke"
+
+	// MCP servers and apps. mcp.read is discovery/state; mcp.use executes an app
+	// bridge action (tools/call, resources/read, ui/message, context).
+	KeyMCPRead = "mcp.read"
+	KeyMCPUse  = "mcp.use"
+
+	// Skills library. The settings surface owns the writes; skill.read is the
+	// list/detail projection.
+	KeySkillRead   = "skill.read"
+	KeySkillManage = "skill.manage"
+
+	// Notifications. The list is tenant-scoped at the key level and filtered to
+	// the caller's visible sessions in the handler; ack is the write action.
+	KeyNotificationRead  = "notification.read"
+	KeyNotificationWrite = "notification.write"
 
 	// Secrets. Reads are split so metadata can be shown without exposing the
 	// value; there is no coarse secret.read that would include both.
@@ -208,6 +243,7 @@ var keyCatalog = []KeySpec{
 
 	// Plugins.
 	key(KeyPluginRead, "Read plugins", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyPluginInvoke, "Invoke plugin actions", RiskHigh, RelationNone, tenantScopes...),
 	key(KeyPluginLifecycleInstall, "Install plugins", RiskCritical, RelationNone, tenantScopes...),
 	key(KeyPluginLifecycleEnable, "Enable plugins", RiskCritical, RelationNone, tenantScopes...),
 	key(KeyPluginLifecycleDisable, "Disable plugins", RiskCritical, RelationNone, tenantScopes...),
@@ -216,6 +252,30 @@ var keyCatalog = []KeySpec{
 	// Model configuration.
 	key(KeyModelRead, "Read model configuration", RiskNormal, RelationNone, tenantScopes...),
 	key(KeyModelConfigure, "Configure models", RiskHigh, RelationNone, tenantScopes...),
+	key(KeyModelInvoke, "Invoke configured models", RiskHigh, RelationNone, tenantScopes...),
+
+	// Application discovery and quota.
+	key(KeyAppRead, "Read application capabilities", RiskNormal, RelationNone, tenantScopes...),
+
+	// Files (tenant blob storage).
+	key(KeyFileRead, "Read files", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyFileWrite, "Write files", RiskHigh, RelationNone, tenantScopes...),
+
+	// Media gateway.
+	key(KeyMediaRead, "Read media capabilities", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyMediaInvoke, "Invoke media providers", RiskHigh, RelationNone, tenantScopes...),
+
+	// MCP servers and apps.
+	key(KeyMCPRead, "Read MCP servers and apps", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyMCPUse, "Use MCP app actions", RiskHigh, RelationNone, tenantScopes...),
+
+	// Skills library.
+	key(KeySkillRead, "Read skills", RiskNormal, RelationNone, tenantScopes...),
+	key(KeySkillManage, "Manage skills", RiskHigh, RelationNone, tenantScopes...),
+
+	// Notifications.
+	key(KeyNotificationRead, "Read notifications", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyNotificationWrite, "Acknowledge notifications", RiskHigh, RelationNone, tenantScopes...),
 
 	// Secrets.
 	key(KeySecretReadMetadata, "Read secret metadata", RiskNormal, RelationNone, tenantScopes...),

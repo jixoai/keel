@@ -22,6 +22,13 @@ import (
 // can authorize.
 type SessionOwnerFunc func(ctx context.Context, tenantID, sessionID uuid.UUID, botID string) error
 
+// SessionCreatorFunc creates a session with no Bot and attributes it to the
+// caller's account: the session row and the account's owner relation are
+// written in one transaction. It closes the "create without botId" bypass — the
+// old unowned row had no relation, so every single-resource session route would
+// deny, but any handler that skipped the relation check would expose it.
+type SessionCreatorFunc func(ctx context.Context, tenantID, sessionID uuid.UUID) error
+
 // SessionOwnerError carries the exact HTTP status and machine code of an
 // ownership refusal. Reason is the engine's stable denial reason, when present.
 type SessionOwnerError struct {

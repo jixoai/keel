@@ -57,6 +57,48 @@ func (s *Store) CreateTeamBot(ctx context.Context, record TeamBotRecord) (TeamBo
 	return created, nil
 }
 
+// CreateTeamBotWithOwner inserts a TeamBot and its owner relation in one
+// transaction. The owner is the creating account; TeamBot is a resource, never
+// a permission subject (L12).
+func (s *Store) CreateTeamBotWithOwner(ctx context.Context, record TeamBotRecord, ownerAccountID, createdBy uuid.UUID) (TeamBotRecord, error) {
+	if err := validateTeamBotRecord(record); err != nil {
+		return TeamBotRecord{}, err
+	}
+	if ownerAccountID == uuid.Nil || createdBy == uuid.Nil {
+		return TeamBotRecord{}, invalidIdentity("create team bot", "owner and creator accounts are required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return TeamBotRecord{}, identityWriteError("create team bot", err)
+	}
+	defer tx.Rollback(ctx)
+	created, err := scanTeamBotRow(tx.QueryRow(ctx,
+		`INSERT INTO team_bots
+		    (tenant_id, team_bot_id, name, mission, roster, revision, content_hash, archived)
+		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+		 RETURNING tenant_id, team_bot_id, name, mission, roster, revision,
+		           content_hash, archived, created_at, updated_at`,
+		record.TenantID, record.ID, record.Name, record.Mission, string(record.Roster),
+		record.Revision, record.ContentHash, record.Archived))
+	if err != nil {
+		return TeamBotRecord{}, identityWriteError("create team bot", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO resource_relations
+		    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+		 VALUES ($1, 'team_bot', $2, $3, $4, $5, $6)
+		 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+		 DO NOTHING`,
+		record.TenantID, created.ID, RelationOwner, RelationSubjectAccount,
+		ownerAccountID.String(), createdBy); err != nil {
+		return TeamBotRecord{}, identityWriteError("create team bot owner relation", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return TeamBotRecord{}, identityWriteError("create team bot", err)
+	}
+	return created, nil
+}
+
 // GetTeamBot reads one TeamBot. Another tenant's team is ErrNotFound.
 func (s *Store) GetTeamBot(ctx context.Context, tenantID uuid.UUID, teamBotID string) (TeamBotRecord, error) {
 	teamBotID = strings.TrimSpace(teamBotID)

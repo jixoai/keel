@@ -60,3 +60,24 @@ func newSessionOwner(st *store.Store, bridge *accesswire.Bridge) httpapi.Session
 		})
 	}
 }
+
+// newAccountSessionOwner returns the pre-A4 create path's callback: a session
+// with no botId is still created, but it is attributed to the caller and gets
+// an owner relation in the same transaction. The caller's identity comes from
+// the auth context, never from a header.
+func newAccountSessionOwner(st *store.Store, bridge *accesswire.Bridge) httpapi.SessionCreatorFunc {
+	return func(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+		if st == nil || bridge == nil {
+			return &httpapi.SessionOwnerError{
+				Status: 503, Code: "not_wired", Message: "session ownership is not wired in this deployment",
+			}
+		}
+		principal, err := bridge.Principal(ctx, tenantID)
+		if err != nil {
+			return &httpapi.SessionOwnerError{
+				Status: 401, Code: "invalid_session", Message: "authentication required",
+			}
+		}
+		return st.CreateAccountOwnedSession(ctx, tenantID, sessionID, principal.AccountID)
+	}
+}

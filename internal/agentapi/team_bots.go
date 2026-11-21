@@ -176,25 +176,24 @@ func (s *Server) createTeamBot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	created, err := s.cfg.Identity.CreateTeamBot(r.Context(), record)
+	// TeamBot and its owner relation are one transaction.
+	created, err := s.cfg.Identity.CreateTeamBotWithOwner(r.Context(), record, principal.AccountID, principal.AccountID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	if _, err := s.cfg.Identity.PutResourceRelation(r.Context(), store.ResourceRelation{
-		TenantID: tenantID, ResourceType: "team_bot", ResourceID: created.ID,
-		Relation: store.RelationOwner, SubjectType: store.RelationSubjectAccount,
-		SubjectID: principal.AccountID.String(), CreatedBy: principal.AccountID,
-	}); err != nil {
+	if err := s.cfg.Access.AuditRelation(r.Context(), tenantID, principal.AccountID, "create", "team_bot", created.ID,
+		store.RelationOwner, store.RelationSubjectAccount, principal.AccountID.String()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.cfg.Access.AuditRelation(r.Context(), tenantID, principal.AccountID, "create", "team_bot", created.ID,
-		store.RelationOwner, store.RelationSubjectAccount, principal.AccountID.String())
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "team_bot.create", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "team_bot.create", map[string]any{
 			"team_bot_id": created.ID,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"teamBot": teamBotViewOf(created)})
 }
@@ -296,9 +295,12 @@ func (s *Server) updateTeamBotContent(w http.ResponseWriter, r *http.Request, ro
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "team_bot.update", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "team_bot.update", map[string]any{
 			"team_bot_id": teamID,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"teamBot": teamBotViewOf(stored)})
 }
@@ -321,9 +323,12 @@ func (s *Server) archiveTeamBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "team_bot.archive", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "team_bot.archive", map[string]any{
 			"team_bot_id": teamID,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"teamBotId": teamID, "archived": true})
 }
@@ -381,9 +386,14 @@ func (s *Server) startTeamBot(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, http.StatusConflict, "invalid_team_bot", "the roster has no captain")
 		return
 	}
-	// Starting a team drives the captain, which is a bot.invoke action on that
-	// Bot (L20). Members are invoked by the captain later and are checked at
-	// roster write time.
+	// Starting a team drives every seated Bot: re-check bot.invoke for the whole
+	// roster at start time, so a grant revoked (or a Bot archived) after the
+	// roster write fails the next start instead of being trusted forever. The
+	// captain check below is still separate because starting it is a distinct
+	// action.
+	if !s.requireRosterInvoke(w, r, principal, tenantID, team.Roster) {
+		return
+	}
 	if _, _, ok := s.requireResource(w, r, access.KeyBotInvoke, "bot", captain); !ok {
 		return
 	}
@@ -421,11 +431,17 @@ func (s *Server) startTeamBot(w http.ResponseWriter, r *http.Request) {
 		RequestID: strings.TrimSpace(body.RequestID),
 	})
 	if err != nil {
-		s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, captain, sessionID, "failed")
+		if auditErr := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, captain, sessionID, "failed"); auditErr != nil {
+			writeErr(w, http.StatusInternalServerError, auditErr)
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, captain, result.SessionID, "ok")
+	if err := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, captain, result.SessionID, "ok"); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"teamBotId": teamID, "captainBotId": captain,
 		"sessionId": result.SessionID.String(), "seq": result.Seq,
@@ -451,8 +467,14 @@ func (s *Server) requireRosterInvoke(w http.ResponseWriter, r *http.Request, pri
 			writeDenied(w, decision)
 			return false
 		}
-		if _, err := s.cfg.Identity.GetBot(r.Context(), tenantID, seat.BotID); err != nil {
+		member, err := s.cfg.Identity.GetBot(r.Context(), tenantID, seat.BotID)
+		if err != nil {
 			writeStoreError(w, err)
+			return false
+		}
+		if member.Archived {
+			writeIdentityError(w, http.StatusConflict, "bot_archived",
+				"member bot "+seat.BotID+" is archived; update the roster before starting the team")
 			return false
 		}
 	}

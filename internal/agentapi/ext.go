@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/placement"
@@ -42,14 +43,18 @@ func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
-	if _, ok := tenantFrom(w, r); !ok {
+	tenantID, ok := tenantFrom(w, r)
+	if !ok {
 		return
 	}
 	if s.cfg.Triggers == nil {
 		writeErr(w, http.StatusServiceUnavailable, errors.New("triggers are not wired"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"triggers": s.cfg.Triggers.List()})
+	// The engine is process-wide; the list is the caller tenant's slice. A
+	// preview of another tenant's prompts/audit was the cross-tenant read this
+	// route used to leak.
+	writeJSON(w, http.StatusOK, map[string]any{"triggers": s.cfg.Triggers.ListForTenant(tenantID)})
 }
 
 // fireTriggerRequest is the manual/webhook fire body.
@@ -181,7 +186,25 @@ func (s *Server) listSubagents(w http.ResponseWriter, r *http.Request) {
 	if len(records) > limit {
 		records = records[:limit]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"subagents": records})
+	// Sub-agent records are session resources: the list is relation-filtered,
+	// never every sub-agent in the tenant.
+	candidates := make([]string, 0, len(records))
+	for _, record := range records {
+		if parsed, err := uuid.Parse(record.SessionID); err == nil {
+			candidates = append(candidates, parsed.String())
+		}
+	}
+	allowed, ok := s.visibleSessionIDs(w, r, tenantID, access.KeySessionRead, candidates)
+	if !ok {
+		return
+	}
+	filtered := records[:0]
+	for _, record := range records {
+		if allowed[record.SessionID] {
+			filtered = append(filtered, record)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"subagents": filtered})
 }
 
 func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +224,9 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 	record, found := s.cfg.Subagents.Get(sessionID)
 	if !found || record.TenantID != tenantID.String() {
 		writeErr(w, http.StatusNotFound, errors.New("sub-agent not found"))
+		return
+	}
+	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionRead) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"subagent": record})
@@ -461,6 +487,11 @@ func (s *Server) cancelSubagent(w http.ResponseWriter, r *http.Request) {
 	parentID, err := uuid.Parse(r.URL.Query().Get("parentSessionId"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, errors.New("parentSessionId must be a UUID"))
+		return
+	}
+	// Stopping a child is a write on the parent session: the query parameter is
+	// the authorizing resource, never the child id alone.
+	if !s.authorizeSessionResource(w, r, tenantID, parentID, access.KeySessionWrite) {
 		return
 	}
 	var body cancelSubagentRequest

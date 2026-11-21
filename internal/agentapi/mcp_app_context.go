@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -91,6 +92,9 @@ func (s *Server) mcpAppUpdateContext(w http.ResponseWriter, r *http.Request) {
 	}
 	if sessionID == uuid.Nil {
 		writeMCPAppRPCErr(w, http.StatusBadRequest, -32602, "sessionId is required")
+		return
+	}
+	if !s.authorizeMCPAppSession(w, r, tenantID, sessionID, access.KeySessionWrite) {
 		return
 	}
 	content, structured, err := validateMCPAppContext(body)

@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accessgate"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/placement"
+	"github.com/jixoai/keel/internal/routemux"
 	"github.com/jixoai/keel/internal/sessionbinding"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
@@ -94,6 +96,21 @@ type Config struct {
 	// relation. Nil answers 501 for a bot-scoped create; a create without botId
 	// keeps the pre-A4 behavior (a tenant session row with no owner columns).
 	SessionOwner SessionOwnerFunc
+	// SessionCreator creates a session with no Bot (the pre-A4 create shape) and
+	// writes the owner relation to the caller's account in the same transaction.
+	// It closes the "no botId" bypass: the session is private to its creator even
+	// though it has no Bot owner. Nil keeps the legacy unowned row, which the
+	// relation gate then makes unreachable (fail closed).
+	SessionCreator SessionCreatorFunc
+	// Access is the route authorization seam. When set, every /v1 request is
+	// gated by the accessgate matrix before the mux; nil keeps the pre-A4.2a
+	// behavior for unit tests only (cmd/keel refuses to start without it).
+	Access accessgate.Access
+	// AuditRelation records a relation write made by a route that creates a
+	// session outside the Bot path (the external gateway). Nil skips the audit.
+	// A non-nil error means the relation is committed but unaudited, and the
+	// route reports 500 rather than pretending success.
+	AuditRelation func(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string) error
 	// AgentTeams is the persistence seam of the agent registry and agent-team
 	// surfaces (GET/POST/PUT/DELETE /v1/agents and /v1/teams plus the member
 	// routes). Nil answers 503 on all of them: an unwired deployment serves no
@@ -132,7 +149,9 @@ type LoadoutReader interface {
 // Server is the HTTP handler.
 type Server struct {
 	cfg Config
-	mux *http.ServeMux
+	mux *routemux.Mux
+	// handler is the mux, optionally wrapped by the route permission gate.
+	handler http.Handler
 }
 
 // New builds the server and its routes.
@@ -169,10 +188,22 @@ func New(cfg Config) *Server {
 	if cfg.CASDir != "" && cfg.Blobs != nil {
 		cfg.Blobs.CASDir = cfg.CASDir
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, mux: routemux.New()}
 	s.routes()
+	s.handler = s.mux
+	if cfg.Access != nil {
+		s.handler = accessgate.New(cfg.Access, s.mux, cfg.Logger)
+	}
 	return s
 }
+
+// Routes returns every pattern registered on this server's mux (including the
+// product subtree mount). It feeds the startup permission-coverage check.
+func (s *Server) Routes() []string { return s.mux.Patterns() }
+
+// AccessWired reports whether the route permission gate is active. cmd/keel
+// refuses to start when it is false.
+func (s *Server) AccessWired() bool { return s.cfg.Access != nil }
 
 // ServeHTTP implements http.Handler. While draining, new API requests receive
 // 503 + Retry-After; probes and /metrics stay reachable so the orchestrator can
@@ -346,7 +377,24 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 201, map[string]any{"sessionId": id, "botId": botID})
 		return
 	}
-	if err := s.cfg.Store.CreateSession(r.Context(), tenantID, id); err != nil {
+	// No botId: create the pre-A4 session shape, but attribute it to the caller
+	// and write the owner relation in the same transaction. Without this the
+	// session would have no relation and no account, which is exactly the
+	// zero-permission path A4.2a closes. A deployment without the creator seam
+	// keeps the legacy row (test-only); production wires it.
+	if s.cfg.SessionCreator != nil {
+		if err := s.cfg.SessionCreator(r.Context(), tenantID, id); err != nil {
+			status := http.StatusInternalServerError
+			switch {
+			case errors.Is(err, store.ErrConflict):
+				status = http.StatusConflict
+			case errors.Is(err, store.ErrNotFound):
+				status = http.StatusNotFound
+			}
+			writeErr(w, status, err)
+			return
+		}
+	} else if err := s.cfg.Store.CreateSession(r.Context(), tenantID, id); err != nil {
 		writeErr(w, 500, err)
 		return
 	}

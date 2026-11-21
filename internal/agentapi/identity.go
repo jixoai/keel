@@ -17,6 +17,7 @@ package agentapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -43,12 +44,14 @@ type Access interface {
 	// BotOwnerAccount returns a Bot's owner account and archived flag.
 	BotOwnerAccount(ctx context.Context, tenantID uuid.UUID, botID string) (uuid.UUID, bool, error)
 	// Audit methods: grant/revoke, relation change, super-admin action, invoke,
-	// bot-key lifecycle and handler-decided denial.
-	AuditGrant(ctx context.Context, tenantID, actor, target uuid.UUID, action, via, key, scope, result string, extra map[string]any)
-	AuditRelation(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string)
-	AuditSuperAdmin(ctx context.Context, principal access.Principal, action string, detail map[string]any)
-	AuditInvoke(ctx context.Context, tenantID uuid.UUID, caller access.Principal, botID string, sessionID uuid.UUID, result string)
-	AuditBotKey(ctx context.Context, tenantID, actor, accountID uuid.UUID, botID, action, keyID, prefix, label string)
+	// bot-key lifecycle and handler-decided denial. The writes return an error:
+	// a business write without its audit row is reported to the caller (500),
+	// never silently logged as a warning (A4.2a §7).
+	AuditGrant(ctx context.Context, tenantID, actor, target uuid.UUID, action, via, key, scope, result string, extra map[string]any) error
+	AuditRelation(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string) error
+	AuditSuperAdmin(ctx context.Context, principal access.Principal, action string, detail map[string]any) error
+	AuditInvoke(ctx context.Context, tenantID uuid.UUID, caller access.Principal, botID string, sessionID uuid.UUID, result string) error
+	AuditBotKey(ctx context.Context, tenantID, actor, accountID uuid.UUID, botID, action, keyID, prefix, label string) error
 	Denied(ctx context.Context, principal access.Principal, decision access.Decision, resource access.Resource)
 }
 
@@ -98,8 +101,21 @@ func (s *Server) identityReady(w http.ResponseWriter) bool {
 // tenant boundary. A relation-scoped key is delegated to requireHeldKey: a
 // caller mistake must not turn a resource key into a relation-free allow.
 func (s *Server) requireKey(w http.ResponseWriter, r *http.Request, key string) (access.Principal, uuid.UUID, bool) {
-	if spec, known := access.Lookup(key); known && spec.RequiresRelation() {
-		return s.requireHeldKey(w, r, key)
+	spec, known := access.Lookup(key)
+	if !known {
+		// An unknown key is a code bug in this handler, not a client denial: the
+		// route cannot name authority the registry does not have.
+		writeErr(w, http.StatusInternalServerError,
+			fmt.Errorf("internal error: requireKey called with unregistered key %q", key))
+		return access.Principal{}, uuid.Nil, false
+	}
+	if spec.RequiresRelation() {
+		// A resource-scoped key cannot be authorized without a resource. Calling
+		// requireKey here would silently degrade it to "any held scope", which is
+		// exactly the relation bypass A4.2a closes: force the explicit call.
+		writeErr(w, http.StatusInternalServerError,
+			fmt.Errorf("internal error: requireKey called with resource-scoped key %q; use requireResource or requireHeldKey", key))
+		return access.Principal{}, uuid.Nil, false
 	}
 	tenantID, ok := tenantFrom(w, r)
 	if !ok {
@@ -148,6 +164,62 @@ func (s *Server) requireResource(w http.ResponseWriter, r *http.Request, key, re
 		return access.Principal{}, uuid.Nil, false
 	}
 	return principal, tenantID, true
+}
+
+// authorizeSessionResource applies a session-scoped key to one session. It is
+// the handler-level companion of the route matrix for endpoints whose resource
+// id is not in the path (a notification's row, a sub-agent record, a query
+// parameter). It returns false after writing the refusal.
+func (s *Server) authorizeSessionResource(w http.ResponseWriter, r *http.Request, tenantID, sessionID uuid.UUID, key string) bool {
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("the identity surface is not wired in this deployment"))
+		return false
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+		return false
+	}
+	decision, err := s.cfg.Access.Authorize(r.Context(), principal, key, access.Resource{
+		TenantID: tenantID, Type: "session", ID: sessionID.String(),
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if decision.Denied() {
+		writeDenied(w, decision)
+		return false
+	}
+	return true
+}
+
+// visibleSessionIDs filters a bounded candidate set through the engine's
+// relation filter and writes a 403 if the key-level gate itself is denied.
+func (s *Server) visibleSessionIDs(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, key string, candidates []string) (map[string]bool, bool) {
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("the identity surface is not wired in this deployment"))
+		return nil, false
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+		return nil, false
+	}
+	result, err := s.cfg.Access.Visible(r.Context(), principal, key, "session", candidates)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return nil, false
+	}
+	if !result.Allowed() {
+		writeDenied(w, result.Decision)
+		return nil, false
+	}
+	allowed := make(map[string]bool, len(result.IDs))
+	for _, id := range result.IDs {
+		allowed[id] = true
+	}
+	return allowed, true
 }
 
 // requireHeldKey authorizes creating a new resource of a relation-scoped type.

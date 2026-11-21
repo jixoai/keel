@@ -1,11 +1,13 @@
 // Audit writes for the access surface (change keel-bot-identity-access, A4.1).
 //
-// Every grant, revoke, denial, super-admin action and relation change lands in
-// auth_events — the same append-only stream A2 writes login facts to. The audit
-// is best effort in the sense that a failed append never turns a successful
-// operation into an error, but the failure is logged and the operation result
-// stays truthful; the detail maps carry identifiers, keys, scopes and reasons,
-// never a credential or a secret value.
+// Every grant, revoke, denial, super-admin action, relation change, invocation
+// and bot-key lifecycle write lands in auth_events — the same append-only
+// stream A2 writes login facts to. Grant/invoke/relation/bot-key/super-admin
+// writes return the append error: a business write whose audit row could not be
+// recorded is reported to the caller (500), never hidden behind a log warning
+// (A4.2a §7). Denials stay best effort: a refused request must not become a 500
+// because the audit stream is down (the failure is logged). Detail maps carry
+// identifiers, keys, scopes and reasons, never a credential or a secret value.
 package accesswire
 
 import (
@@ -32,13 +34,16 @@ func NewAuditor(st *store.Store, log *slog.Logger) *Auditor {
 	return &Auditor{Store: st, Logger: log}
 }
 
-func (a *Auditor) record(ctx context.Context, event store.AuthEvent) {
+// record writes one audit row. A configured auditor that cannot write returns
+// the error: callers decide whether the business write stands (it already
+// committed) but never report an unaudited success. A nil auditor is a no-op
+// (a deployment/test without one).
+func (a *Auditor) record(ctx context.Context, event store.AuthEvent) error {
 	if a == nil || a.Store == nil {
-		return
+		return nil
 	}
-	if _, err := a.Store.RecordAuthEvent(ctx, event); err != nil && a.Logger != nil {
-		a.Logger.Warn("access audit write failed", "kind", event.Kind, "err", err)
-	}
+	_, err := a.Store.RecordAuthEvent(ctx, event)
+	return err
 }
 
 // Denied records one authorization denial with its stable reason. The detail is
@@ -69,19 +74,23 @@ func (a *Auditor) Denied(ctx context.Context, principal access.Principal, decisi
 	if decision.Detail != "" {
 		detail["detail"] = decision.Detail
 	}
-	a.record(ctx, store.AuthEvent{
+	// Denials are best effort: a refused request must not become a 500 because
+	// the audit stream is unavailable, and the failure is still logged.
+	if err := a.record(ctx, store.AuthEvent{
 		TenantID: principal.TenantID, AccountID: uuidPtr(principal.AccountID),
 		ActorAccountID: uuidPtr(principal.AccountID),
 		Kind:           store.AuthEventPermissionDenied, Result: store.AuthResultDenied,
 		Detail: detail,
-	})
+	}); err != nil && a.Logger != nil {
+		a.Logger.Warn("access denial audit write failed", "kind", store.AuthEventPermissionDenied, "err", err)
+	}
 }
 
 // Grant records a grant or revoke write. action is "grant" or "revoke"; target
 // names the account or group, via names the storage surface.
-func (a *Auditor) Grant(ctx context.Context, tenantID, actor, target uuid.UUID, action, via, key, scope, result string, extra map[string]any) {
+func (a *Auditor) Grant(ctx context.Context, tenantID, actor, target uuid.UUID, action, via, key, scope, result string, extra map[string]any) error {
 	if a == nil {
-		return
+		return nil
 	}
 	detail := map[string]any{
 		"action": action, "via": via, "key": key, "scope": scope,
@@ -105,18 +114,18 @@ func (a *Auditor) Grant(ctx context.Context, tenantID, actor, target uuid.UUID, 
 	if result == "" {
 		result = store.AuthResultOK
 	}
-	a.record(ctx, store.AuthEvent{
+	return a.record(ctx, store.AuthEvent{
 		TenantID: tenantID, AccountID: uuidPtr(target), ActorAccountID: uuidPtr(actor),
 		Kind: kind, Result: result, Detail: detail,
 	})
 }
 
 // Relation records a resource-relation write or delete.
-func (a *Auditor) Relation(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string) {
+func (a *Auditor) Relation(ctx context.Context, tenantID, actor uuid.UUID, action, resourceType, resourceID, relation, subjectType, subjectID string) error {
 	if a == nil {
-		return
+		return nil
 	}
-	a.record(ctx, store.AuthEvent{
+	return a.record(ctx, store.AuthEvent{
 		TenantID: tenantID, ActorAccountID: uuidPtr(actor),
 		Kind: store.AuthEventRelationChanged,
 		Detail: map[string]any{
@@ -128,15 +137,15 @@ func (a *Auditor) Relation(ctx context.Context, tenantID, actor uuid.UUID, actio
 
 // SuperAdmin records a super-admin action. The caller passes the action name
 // and non-sensitive detail; the row always marks the actor.
-func (a *Auditor) SuperAdmin(ctx context.Context, principal access.Principal, action string, detail map[string]any) {
+func (a *Auditor) SuperAdmin(ctx context.Context, principal access.Principal, action string, detail map[string]any) error {
 	if a == nil || !principal.IsSuperAdmin {
-		return
+		return nil
 	}
 	merged := map[string]any{"action": action, "super_admin": true, "tenant_id": principal.TenantID.String()}
 	for name, value := range detail {
 		merged[name] = value
 	}
-	a.record(ctx, store.AuthEvent{
+	return a.record(ctx, store.AuthEvent{
 		TenantID: principal.TenantID, AccountID: uuidPtr(principal.AccountID),
 		ActorAccountID: uuidPtr(principal.AccountID),
 		Kind:           store.AuthEventSuperAdmin, Detail: merged,
@@ -145,15 +154,15 @@ func (a *Auditor) SuperAdmin(ctx context.Context, principal access.Principal, ac
 
 // BotKey records a bot credential issue or revoke. The plaintext and hash are
 // never part of the row; the prefix is the display fragment.
-func (a *Auditor) BotKey(ctx context.Context, tenantID, actor, accountID uuid.UUID, botID, action, keyID, prefix, label string) {
+func (a *Auditor) BotKey(ctx context.Context, tenantID, actor, accountID uuid.UUID, botID, action, keyID, prefix, label string) error {
 	if a == nil {
-		return
+		return nil
 	}
 	kind := store.AuthEventBotKeyIssued
 	if action == "revoke" {
 		kind = store.AuthEventBotKeyRevoked
 	}
-	a.record(ctx, store.AuthEvent{
+	return a.record(ctx, store.AuthEvent{
 		TenantID: tenantID, AccountID: uuidPtr(accountID), ActorAccountID: uuidPtr(actor),
 		Kind: kind,
 		Detail: map[string]any{
@@ -166,9 +175,9 @@ func (a *Auditor) BotKey(ctx context.Context, tenantID, actor, accountID uuid.UU
 // Invoke records one bot invocation: caller, callee, session and result. The
 // spec treats bot.invoke as a high-risk capability, so every accepted (and
 // refused) call is traceable.
-func (a *Auditor) Invoke(ctx context.Context, tenantID uuid.UUID, caller access.Principal, botID string, sessionID uuid.UUID, result string) {
+func (a *Auditor) Invoke(ctx context.Context, tenantID uuid.UUID, caller access.Principal, botID string, sessionID uuid.UUID, result string) error {
 	if a == nil {
-		return
+		return nil
 	}
 	detail := map[string]any{
 		"bot_id": botID, "caller_account_id": caller.AccountID.String(),
@@ -180,7 +189,7 @@ func (a *Auditor) Invoke(ctx context.Context, tenantID uuid.UUID, caller access.
 	if sessionID != uuid.Nil {
 		detail["session_id"] = sessionID.String()
 	}
-	a.record(ctx, store.AuthEvent{
+	return a.record(ctx, store.AuthEvent{
 		TenantID: tenantID, AccountID: uuidPtr(caller.AccountID),
 		ActorAccountID: uuidPtr(caller.AccountID),
 		Kind:           store.AuthEventBotInvoked, Detail: detail,

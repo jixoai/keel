@@ -245,31 +245,26 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	created, err := s.cfg.Identity.CreateBot(r.Context(), record)
+	// The Bot and its owner relation are one transaction: the owner is the
+	// Profile's Account (the account that will run it), not necessarily the
+	// creator. No Bot can exist without the relation the resource gate needs.
+	created, err := s.cfg.Identity.CreateBotWithOwner(r.Context(), record, profile.AccountID, principal.AccountID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	// The Bot's owner is its Profile's Account, not necessarily the creator: the
-	// Bot belongs to the account that will run it. Default visibility is private
-	// because no other account has a relation.
-	if _, err := s.cfg.Identity.PutResourceRelation(r.Context(), store.ResourceRelation{
-		TenantID: tenantID, ResourceType: "bot", ResourceID: created.ID,
-		Relation: store.RelationOwner, SubjectType: store.RelationSubjectAccount,
-		SubjectID: profile.AccountID.String(), CreatedBy: principal.AccountID,
-	}); err != nil {
-		// The bot exists; report the relation failure honestly instead of pretending
-		// the create failed. A retry of the create is a conflict, so the operator
-		// should retry the relation write (or delete the bot).
+	if err := s.cfg.Access.AuditRelation(r.Context(), tenantID, principal.AccountID, "create", "bot", created.ID,
+		store.RelationOwner, store.RelationSubjectAccount, profile.AccountID.String()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.cfg.Access.AuditRelation(r.Context(), tenantID, principal.AccountID, "create", "bot", created.ID,
-		store.RelationOwner, store.RelationSubjectAccount, profile.AccountID.String())
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "bot.create", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "bot.create", map[string]any{
 			"bot_id": created.ID, "account_id": profile.AccountID.String(),
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"bot":            s.botViewOf(r, tenantID, created),
@@ -371,33 +366,32 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 	if body.ExpectedArchived != nil {
 		expectedArchived = *body.ExpectedArchived
 	}
-	updated, err := s.cfg.Identity.UpdateBot(r.Context(), record, expectedArchived)
+	// A Profile rebind moves ownership; the content CAS and the relation move are
+	// one transaction, so a stale update can never hand the Bot to another
+	// account or leave two owners.
+	var updated store.BotRecord
+	if profileChanged {
+		updated, err = s.cfg.Identity.UpdateBotWithOwner(r.Context(), record, expectedArchived,
+			newOwner, oldOwner, principal.AccountID)
+	} else {
+		updated, err = s.cfg.Identity.UpdateBot(r.Context(), record, expectedArchived)
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	// Move ownership only after the CAS write succeeded: a stale update must not
-	// hand the Bot to another account.
 	if profileChanged && newOwner != oldOwner {
-		if _, err := s.cfg.Identity.PutResourceRelation(r.Context(), store.ResourceRelation{
-			TenantID: tenantID, ResourceType: "bot", ResourceID: botID,
-			Relation: store.RelationOwner, SubjectType: store.RelationSubjectAccount,
-			SubjectID: newOwner.String(), CreatedBy: principal.AccountID,
-		}); err != nil {
+		if err := s.cfg.Access.AuditRelation(r.Context(), tenantID, principal.AccountID, "update", "bot", botID,
+			store.RelationOwner, store.RelationSubjectAccount, newOwner.String()); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		if err := s.cfg.Identity.DeleteResourceRelation(r.Context(), tenantID, "bot", botID,
-			store.RelationOwner, store.RelationSubjectAccount, oldOwner.String()); err != nil &&
-			!errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		s.cfg.Access.AuditRelation(r.Context(), tenantID, principal.AccountID, "update", "bot", botID,
-			store.RelationOwner, store.RelationSubjectAccount, newOwner.String())
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "bot.update", map[string]any{"bot_id": botID})
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "bot.update", map[string]any{"bot_id": botID}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"bot": s.botViewOf(r, tenantID, updated)})
 }
@@ -420,7 +414,10 @@ func (s *Server) archiveBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "bot.archive", map[string]any{"bot_id": botID})
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "bot.archive", map[string]any{"bot_id": botID}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"botId": botID, "archived": true})
 }
@@ -487,11 +484,19 @@ func (s *Server) invokeBot(w http.ResponseWriter, r *http.Request) {
 		Text: text, RequestID: strings.TrimSpace(body.RequestID),
 	})
 	if err != nil {
-		s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, record.ID, sessionID, "failed")
+		// The invocation failed; the audit is still required. A failure to write
+		// it is reported (500) instead of being hidden behind the original error.
+		if auditErr := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, record.ID, sessionID, "failed"); auditErr != nil {
+			writeErr(w, http.StatusInternalServerError, auditErr)
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, record.ID, result.SessionID, "ok")
+	if err := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, record.ID, result.SessionID, "ok"); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"botId": record.ID, "sessionId": result.SessionID.String(), "seq": result.Seq,
 		"requestId": result.RequestID, "deduped": result.Deduped,
@@ -607,8 +612,11 @@ func (s *Server) issueBotKey(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditBotKey(r.Context(), tenantID, principal.AccountID, accountID, botID,
-		"issue", key.KeyID.String(), key.Prefix, key.Label)
+	if err := s.cfg.Access.AuditBotKey(r.Context(), tenantID, principal.AccountID, accountID, botID,
+		"issue", key.KeyID.String(), key.Prefix, key.Label); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"key":       botKeyViewOf(key),
 		"plaintext": minted.Plaintext,
@@ -647,7 +655,10 @@ func (s *Server) revokeBotKey(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditBotKey(r.Context(), tenantID, principal.AccountID, key.AccountID, botID,
-		"revoke", key.KeyID.String(), key.Prefix, key.Label)
+	if err := s.cfg.Access.AuditBotKey(r.Context(), tenantID, principal.AccountID, key.AccountID, botID,
+		"revoke", key.KeyID.String(), key.Prefix, key.Label); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"botId": botID, "keyId": keyID.String(), "revoked": true})
 }

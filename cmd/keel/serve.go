@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accessgate"
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/agentapi"
@@ -880,7 +881,13 @@ func runServe(parent context.Context, opts serveOptions) error {
 		CASDir:          opts.CASDir,
 		Product:         product.api,
 		SessionOwner:    newSessionOwner(st, product.access),
-		Partials:        agentapi.PartialSource(product.partials),
+		SessionCreator:  newAccountSessionOwner(st, product.access),
+		// A4.2a: every /v1 route is gated by the single route permission matrix
+		// before its handler runs. The startup check below refuses to serve when a
+		// registered route is missing from the matrix.
+		Access:        product.access,
+		AuditRelation: product.access.AuditRelation,
+		Partials:      agentapi.PartialSource(product.partials),
 		// Agent registry and agent teams: the store owns the documents, the HTTP
 		// surface owns the rules (change keel-agent-team-v1, P2/P3).
 		AgentTeams: st,
@@ -903,6 +910,20 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// so "what the edge accepts" stays "what the next attempt runs".
 		ValidateSelection: selectFromCurrentGeneration(rt),
 	})
+	// A4.2a route permission coverage: enumerate both muxes (the runtime edge
+	// and the nested product API) plus the A2 auth surface and refuse to start
+	// when a /v1 route has no declaration. The gate itself is wired above
+	// (Config.Access); this check is what makes a forgotten route a boot error
+	// instead of a silently unscoped handler.
+	if !api.AccessWired() {
+		return errors.New("route permission gate is not wired: refusing to serve /v1 without authorization")
+	}
+	routePatterns := append(api.Routes(), product.api.Routes()...)
+	routePatterns = append(routePatterns, accessgate.AuthRoutes()...)
+	if err := accessgate.CheckRoutes(routePatterns); err != nil {
+		return fmt.Errorf("route permission matrix: %w", err)
+	}
+	log.Info("route permission matrix verified", "rules", accessgate.RuleCount(), "routes", len(routePatterns))
 
 	// Auth routes live next to the API (same origin). The middleware wraps the
 	// dispatcher, not the API alone, so a static request is still servable (the

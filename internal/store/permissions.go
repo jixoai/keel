@@ -9,6 +9,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -339,19 +340,23 @@ func (s *Store) CreatePermissionGrant(ctx context.Context, record PermissionGran
 	return created, nil
 }
 
-// ListPermissionGrants returns up to limit direct grants of one subject.
+// ListPermissionGrants returns up to limit direct grants of one subject. The
+// read is bounded; crossing the bound is an error, never a silent truncation,
+// because a dropped grant would make authorization depend on row order
+// (A4.2a §7: 直授读取 >500 报错).
 func (s *Store) ListPermissionGrants(ctx context.Context, tenantID uuid.UUID, subjectType string, subjectID uuid.UUID, limit int) ([]PermissionGrantRecord, error) {
 	subjectType = strings.TrimSpace(subjectType)
 	if tenantID == uuid.Nil || !ValidPermissionSubject(subjectType) || subjectID == uuid.Nil {
 		return nil, invalidIdentity("list permission grants", "tenant, subject type and subject id are required")
 	}
+	bounded := identityListLimit(limit)
 	rows, err := s.pool.Query(ctx,
 		`SELECT tenant_id, grant_id, subject_type, subject_id, permission_key,
 		        scope, granted_by, created_at
 		   FROM permission_grants
 		  WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
 		  ORDER BY permission_key, scope, grant_id
-		  LIMIT $4`, tenantID, subjectType, subjectID, identityListLimit(limit))
+		  LIMIT $4`, tenantID, subjectType, subjectID, bounded+1)
 	if err != nil {
 		return nil, identityWriteError("list permission grants", err)
 	}
@@ -366,6 +371,9 @@ func (s *Store) ListPermissionGrants(ctx context.Context, tenantID uuid.UUID, su
 	}
 	if err := rows.Err(); err != nil {
 		return nil, identityWriteError("list permission grants", err)
+	}
+	if len(out) > bounded {
+		return nil, fmt.Errorf("list permission grants: more than %d direct grants (refusing to truncate authority)", bounded)
 	}
 	return out, nil
 }

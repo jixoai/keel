@@ -92,9 +92,12 @@ func (s *Server) createPermissionGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "permission_group.create", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "permission_group.create", map[string]any{
 			"group_id": record.ID.String(), "name": record.Name,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"group": permissionGroupViewOf(record)})
 }
@@ -176,9 +179,12 @@ func (s *Server) renamePermissionGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "permission_group.rename", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "permission_group.rename", map[string]any{
 			"group_id": groupID.String(), "name": updated.Name,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"group": permissionGroupViewOf(updated)})
 }
@@ -208,9 +214,12 @@ func (s *Server) deletePermissionGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if principal.IsSuperAdmin {
-		s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "permission_group.delete", map[string]any{
+		if err := s.cfg.Access.AuditSuperAdmin(r.Context(), principal, "permission_group.delete", map[string]any{
 			"group_id": groupID.String(), "name": group.Name,
-		})
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groupId": groupID.String(), "deleted": true})
 }
@@ -258,10 +267,13 @@ func (s *Server) addPermissionGroupMember(w http.ResponseWriter, r *http.Request
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
+	if err := s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
 		"grant", "group_membership", "", "", "ok", map[string]any{
 			"group_id": groupID.String(), "group": group.Name, "created": created,
-		})
+		}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "accountId": accountID.String(), "added": created,
 	})
@@ -287,8 +299,11 @@ func (s *Server) removePermissionGroupMember(w http.ResponseWriter, r *http.Requ
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
-		"revoke", "group_membership", "", "", "ok", map[string]any{"group_id": groupID.String()})
+	if err := s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, accountID,
+		"revoke", "group_membership", "", "", "ok", map[string]any{"group_id": groupID.String()}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "accountId": accountID.String(), "removed": true,
 	})
@@ -354,10 +369,13 @@ func (s *Server) addPermissionGroupGrant(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, uuid.Nil,
+	if err := s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, uuid.Nil,
 		"grant", "group_grant", key, string(scope), "ok", map[string]any{
 			"group_id": groupID.String(), "created": created,
-		})
+		}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "key": key, "scope": string(scope), "added": created,
 	})
@@ -393,8 +411,11 @@ func (s *Server) removePermissionGroupGrant(w http.ResponseWriter, r *http.Reque
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, uuid.Nil,
-		"revoke", "group_grant", key, string(scope), "ok", map[string]any{"group_id": groupID.String()})
+	if err := s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, uuid.Nil,
+		"revoke", "group_grant", key, string(scope), "ok", map[string]any{"group_id": groupID.String()}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "key": key, "scope": string(scope), "removed": true,
 	})

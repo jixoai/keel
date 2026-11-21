@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/notify"
 )
 
@@ -53,10 +54,49 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
+	if sessionID != nil {
+		if !s.authorizeSessionResource(w, r, tenantID, *sessionID, access.KeySessionRead) {
+			return
+		}
+	}
 	views, err := s.cfg.Notifications.List(r.Context(), tenantID, sessionID, limit)
 	if err != nil {
 		writeNotificationError(w, err)
 		return
+	}
+	// A tenant-wide list is still a session-visibility list: keep only the rows
+	// whose session the caller may read. Notifications without a session are
+	// shown to nobody but a super admin (a notification is never a tenant-public
+	// document).
+	if sessionID == nil {
+		candidates := make([]string, 0, len(views))
+		for _, view := range views {
+			if view.SessionID != "" {
+				candidates = append(candidates, view.SessionID)
+			}
+		}
+		allowed, ok := s.visibleSessionIDs(w, r, tenantID, access.KeySessionRead, candidates)
+		if !ok {
+			return
+		}
+		principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+		if err != nil {
+			writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+			return
+		}
+		filtered := views[:0]
+		for _, view := range views {
+			if view.SessionID == "" {
+				if principal.IsSuperAdmin {
+					filtered = append(filtered, view)
+				}
+				continue
+			}
+			if allowed[view.SessionID] {
+				filtered = append(filtered, view)
+			}
+		}
+		views = filtered
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"count": len(views), "notifications": views})
 }
@@ -81,6 +121,46 @@ func (s *Server) ackNotification(w http.ResponseWriter, r *http.Request) {
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	// The notification row names the session it belongs to; ack is a session
+	// write on that session. Reading the row first is also what makes an ack of
+	// another account's notification a relation denial instead of a tenant-level
+	// write. A sessionless notification is super-admin only.
+	current, err := s.cfg.Notifications.Get(r.Context(), tenantID, notificationID)
+	if err != nil {
+		writeNotificationError(w, err)
+		return
+	}
+	if current.SessionID != "" {
+		sessionID, err := uuid.Parse(current.SessionID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, errors.New("notification has a malformed session id"))
+			return
+		}
+		// Acking a notification is consumption state, not session content: the
+		// read relation is the right authority (a read-only viewer may ack).
+		if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionRead) {
+			return
+		}
+	} else {
+		if s.cfg.Access == nil {
+			writeErr(w, http.StatusServiceUnavailable, errors.New("the identity surface is not wired in this deployment"))
+			return
+		}
+		principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+		if err != nil {
+			writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+			return
+		}
+		if !principal.IsSuperAdmin {
+			s.cfg.Access.Denied(r.Context(), principal, access.Decision{
+				Allow: false, Reason: access.ReasonMissingRelation, Key: access.KeySessionWrite,
+				Detail: "a sessionless notification can only be acknowledged by a super admin",
+			}, access.Resource{TenantID: tenantID, Type: "notification", ID: notificationID.String()})
+			writeIdentityError(w, http.StatusForbidden, "forbidden",
+				"a sessionless notification can only be acknowledged by a super admin")
+			return
+		}
 	}
 	actor := strings.TrimSpace(r.Header.Get("X-Keel-Actor"))
 	if actor == "" {

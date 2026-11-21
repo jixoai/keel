@@ -753,6 +753,25 @@ func (e *TriggerEngine) List() []TriggerStatus {
 	return out
 }
 
+// ListForTenant returns the triggers that belong to one tenant, sorted by id.
+// A trigger with no TenantID is a manual/webhook registration that inherits the
+// caller's tenant per fire; it is not owned by any tenant and is never listed
+// (listing it would leak its prompt and audit to every tenant).
+func (e *TriggerEngine) ListForTenant(tenantID uuid.UUID) []TriggerStatus {
+	if tenantID == uuid.Nil {
+		return []TriggerStatus{}
+	}
+	wanted := tenantID.String()
+	all := e.List()
+	out := make([]TriggerStatus, 0, len(all))
+	for _, status := range all {
+		if status.TenantID == wanted {
+			out = append(out, status)
+		}
+	}
+	return out
+}
+
 // Get returns one trigger's state.
 func (e *TriggerEngine) Get(id string) (TriggerStatus, bool) {
 	for _, status := range e.List() {

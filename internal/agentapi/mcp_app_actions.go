@@ -34,6 +34,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/mcp"
@@ -332,6 +333,18 @@ func (s *Server) mcpAppSession(w http.ResponseWriter, r *http.Request, tenantID 
 	}
 }
 
+// authorizeMCPAppSession applies a session key to an app bridge action that
+// names a session in its body. The route matrix gates mcp.use; this is the
+// relation check the body-provided session id needs (otherwise a View could
+// drive another account's session with mcp.use alone). A deployment without the
+// access seam (unit tests) skips it; cmd/keel refuses to serve without it.
+func (s *Server) authorizeMCPAppSession(w http.ResponseWriter, r *http.Request, tenantID, sessionID uuid.UUID, key string) bool {
+	if sessionID == uuid.Nil || s.cfg.Access == nil {
+		return true
+	}
+	return s.authorizeSessionResource(w, r, tenantID, sessionID, key)
+}
+
 // mcpAppAuditEntry builds one audit row from identifiers only.
 func (s *Server) mcpAppAuditEntry(tenantID, sessionID uuid.UUID, app mcphost.AppSpec, action, result, detail string) store.MCPAppAuditEntry {
 	entry := store.MCPAppAuditEntry{
@@ -465,6 +478,9 @@ func (s *Server) mcpAppToolCall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.authorizeMCPAppSession(w, r, tenantID, sessionID, access.KeySessionWrite) {
+		return
+	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
@@ -550,6 +566,9 @@ func (s *Server) mcpAppResourceRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.authorizeMCPAppSession(w, r, tenantID, sessionID, access.KeySessionRead) {
+		return
+	}
 	uri := strings.TrimSpace(body.URI)
 	if reason := mcpAppURIProblem(uri); reason != "" {
 		s.recordMCPAppAudit(r.Context(), tenantID, sessionID, app, "resources/read", "refused",
@@ -622,6 +641,9 @@ func (s *Server) mcpAppMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID, ok := s.mcpAppSession(w, r, tenantID, body.SessionID, true)
 	if !ok {
+		return
+	}
+	if !s.authorizeMCPAppSession(w, r, tenantID, sessionID, access.KeySessionWrite) {
 		return
 	}
 	blocks, err := parseMCPAppMessageContent(body.Content)
@@ -786,6 +808,9 @@ func (s *Server) mcpAppOpenLink(w http.ResponseWriter, r *http.Request) {
 		return
 	default:
 		writeErr(w, http.StatusBadRequest, errors.New("sessionId must be a UUID"))
+		return
+	}
+	if !s.authorizeMCPAppSession(w, r, tenantID, sessionID, access.KeySessionWrite) {
 		return
 	}
 	display := scheme + "://" + parsed.Host + parsed.EscapedPath()
@@ -1013,6 +1038,9 @@ func (s *Server) mcpAppAuditRecord(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	sessionID, ok := s.mcpAppSession(w, r, tenantID, body.SessionID, false)
 	if !ok {
+		return
+	}
+	if !s.authorizeMCPAppSession(w, r, tenantID, sessionID, access.KeySessionWrite) {
 		return
 	}
 	entry := store.MCPAppAuditEntry{
