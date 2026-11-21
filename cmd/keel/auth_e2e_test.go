@@ -335,6 +335,17 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	if status, sessionBody := env.getSession(env.client); status != http.StatusOK || sessionBody["mustChangePassword"] != true {
 		t.Fatalf("failed change lifted must-change: %d %v", status, sessionBody)
 	}
+	// Repeated failed current-password attempts hit the change-password limiter
+	// (separate key from login) instead of burning Argon2 forever.
+	for i := 0; i < 2; i++ {
+		if status, body := env.changePassword(env.client, "wrong-current-123", "admin-password-456"); status != http.StatusUnauthorized {
+			t.Fatalf("failed password change %d: %d %v", i, status, body)
+		}
+	}
+	if status, body := env.changePassword(env.client, "wrong-current-123", "admin-password-456"); status != http.StatusTooManyRequests {
+		t.Fatalf("rate-limited password change: %d %v", status, body)
+	}
+	time.Sleep(1100 * time.Millisecond)
 	if status, body := env.changePassword(env.client, "admin-password-123", "admin-password-456"); status != http.StatusOK || body["mustChangePassword"] != false {
 		t.Fatalf("password change: %d %v", status, body)
 	}

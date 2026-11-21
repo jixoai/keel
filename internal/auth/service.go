@@ -283,7 +283,20 @@ func (s *Service) ChangePassword(ctx context.Context, principal Principal, curre
 	if strings.TrimSpace(account.PasswordHash) == "" {
 		return SessionResult{}, ErrInvalidCredentials
 	}
+	limitKey := "password-change:" + strings.ToLower(account.Username)
+	if wait := s.Limiter.Check(limitKey, ip); wait > 0 {
+		s.audit(ctx, store.AuthEvent{
+			TenantID: principal.TenantID, AccountID: &account.ID,
+			Kind: store.AuthEventPasswordChange, Result: store.AuthResultRefused,
+			Detail: map[string]any{
+				"reason": "rate_limited", "ip_hash": hashHex(ip),
+				"retry_after": int(wait.Round(time.Second).Seconds()),
+			},
+		})
+		return SessionResult{}, &RateLimitedError{RetryAfter: wait}
+	}
 	if err := VerifyPassword(account.PasswordHash, current); err != nil {
+		s.Limiter.Failure(limitKey, ip)
 		s.audit(ctx, store.AuthEvent{
 			TenantID: principal.TenantID, AccountID: &account.ID, Kind: store.AuthEventPasswordChange,
 			Result: store.AuthResultFailed, Detail: map[string]any{"reason": "current_password_mismatch"},
@@ -300,6 +313,7 @@ func (s *Service) ChangePassword(ctx context.Context, principal Principal, curre
 	if _, err := s.Store.ChangeAccountPassword(ctx, principal.TenantID, account.ID, hash, account.ID); err != nil {
 		return SessionResult{}, err
 	}
+	s.Limiter.Success(limitKey, ip)
 	if account.IsSuperAdmin {
 		s.audit(ctx, store.AuthEvent{
 			TenantID: principal.TenantID, AccountID: &account.ID, ActorAccountID: &account.ID,

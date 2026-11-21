@@ -506,9 +506,17 @@ func (a *authController) changePassword(w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := a.service.ChangePassword(r.Context(), principal,
 		body.CurrentPassword, body.NewPassword, r.UserAgent(), remoteIP(r))
+	var limited *auth.RateLimitedError
 	switch {
 	case err == nil:
 		a.writeSessionResult(w, result, http.StatusOK)
+	case errors.As(err, &limited):
+		seconds := int(limited.RetryAfter.Round(time.Second).Seconds())
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", fmt.Sprint(seconds))
+		writeAuthError(w, http.StatusTooManyRequests, "rate_limited", "too many password change attempts")
 	case errors.Is(err, auth.ErrPasswordPolicy):
 		writeAuthError(w, http.StatusBadRequest, "weak_password",
 			fmt.Sprintf("password must be %d..%d bytes", auth.MinPasswordBytes, auth.MaxPasswordBytes))
