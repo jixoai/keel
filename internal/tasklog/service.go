@@ -349,10 +349,15 @@ func (s *Service) Show(ctx context.Context, scope kernel.Scope, taskID uuid.UUID
 	return View{Card: card, Events: events, Children: children, Attachments: attachmentsFromEvents(events)}, nil
 }
 
-// ForkCard creates a new card in target (a new session) whose parentTaskId
-// points at the origin card. The file-view prefix of a fork belongs to
-// layerfs; this method records only the memory relation. It is the task-log
-// half of agent.fork; the production seam is not wired yet.
+// ForkCard creates (or converges on) the card of a forked child session. The
+// card id is the child's initial card id, derived from the session, and the
+// event key is derived from the caller's stable callID. A retried fork
+// therefore lands on the same card instead of appending a second task.created.
+//
+// A card left closed by a rolled-back fork attempt is reopened (task.updated)
+// so the retry that finally starts the child uses the one card the task tree
+// already knows. The file-view prefix of a fork belongs to layerfs; this method
+// records only the memory relation.
 func (s *Service) ForkCard(ctx context.Context, origin kernel.Scope, originTaskID uuid.UUID, originSeq int64, target kernel.Scope, title, callID string) (Card, error) {
 	if err := s.ready(); err != nil {
 		return Card{}, err
@@ -372,7 +377,14 @@ func (s *Service) ForkCard(ctx context.Context, origin kernel.Scope, originTaskI
 	if strings.TrimSpace(title) == "" {
 		title = originCard.Title
 	}
-	newID := s.newID()
+	taskID := InitialTaskID(target.TenantID, target.SessionID)
+	card, err := s.projection.GetCard(ctx, target.TenantID, target.SessionID, taskID)
+	switch {
+	case err == nil:
+		return s.reopenForkCard(ctx, target, card, originCard, originSeq, callID)
+	case !errors.Is(err, ErrTaskNotFound):
+		return Card{}, err
+	}
 	payload := taskEventPayload{
 		Title:        title,
 		Status:       StatusOpen,
@@ -380,12 +392,56 @@ func (s *Service) ForkCard(ctx context.Context, origin kernel.Scope, originTaskI
 		Origin:       OriginFork,
 		OriginSeq:    originSeq,
 	}
-	event, _, err := s.commit(ctx, target, kernel.KindTaskCreated, newID, payload,
-		fmt.Sprintf("%s:created:fork:%s", newID, callSuffix(callID)))
+	event, _, err := s.commit(ctx, target, kernel.KindTaskCreated, taskID, payload,
+		fmt.Sprintf("%s:created:fork:%s", taskID, forkCallSuffix(callID, taskID)))
 	if err != nil {
+		if errors.Is(err, kernel.ErrKeyConflict) {
+			// A concurrent attempt won the create; converge on its card.
+			if existing, readErr := s.projection.GetCard(ctx, target.TenantID, target.SessionID, taskID); readErr == nil {
+				return s.reopenForkCard(ctx, target, existing, originCard, originSeq, callID)
+			}
+			if _, rebuildErr := s.RebuildSession(ctx, target); rebuildErr == nil {
+				if existing, readErr := s.projection.GetCard(ctx, target.TenantID, target.SessionID, taskID); readErr == nil {
+					return s.reopenForkCard(ctx, target, existing, originCard, originSeq, callID)
+				}
+			}
+		}
 		return Card{}, err
 	}
 	return s.project(ctx, target, event, payload)
+}
+
+// reopenForkCard validates that an existing initial card is the same fork and
+// reopens it when a previous attempt rolled it back.
+func (s *Service) reopenForkCard(ctx context.Context, scope kernel.Scope, card Card, originCard Card, originSeq int64, callID string) (Card, error) {
+	if card.Origin != OriginFork || card.OriginSeq != originSeq ||
+		card.ParentTaskID == nil || *card.ParentTaskID != originCard.TaskID {
+		return Card{}, fmt.Errorf("%w: existing card %s is not the fork of %s at %d",
+			ErrInvalidEvent, card.TaskID, originCard.TaskID, originSeq)
+	}
+	if card.Status != StatusClosed {
+		return card, nil
+	}
+	payload := taskEventPayload{Status: StatusOpen}
+	reopenSeq := card.ClosedSeq
+	if reopenSeq <= 0 {
+		reopenSeq = card.UpdatedSeq
+	}
+	event, _, err := s.commit(ctx, scope, kernel.KindTaskUpdated, card.TaskID, payload,
+		fmt.Sprintf("%s:updated:fork-reopen:%d", card.TaskID, reopenSeq))
+	if err != nil {
+		return Card{}, err
+	}
+	return s.project(ctx, scope, event, payload)
+}
+
+// forkCallSuffix keeps a fork's event key deterministic even when the caller
+// omitted a call id: the child card id is the stable identity of the fork.
+func forkCallSuffix(callID string, taskID uuid.UUID) string {
+	if strings.TrimSpace(callID) == "" {
+		return "auto:" + taskID.String()
+	}
+	return callSuffix(callID)
 }
 
 // OriginCard resolves the card that owns a ledger position: the card of the

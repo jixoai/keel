@@ -529,3 +529,81 @@ func TestNoteSubagentFinishedLandsOnTheParentCard(t *testing.T) {
 		t.Fatalf("parent notes = %d, want one idempotent note", notes)
 	}
 }
+
+// TestForkCardIsIdempotentAndReopens pins the W8 fix: the forked card id is the
+// child's deterministic initial card, the create key derives from the caller's
+// stable callID, and a card closed by a rolled-back attempt is reopened on the
+// retry instead of appending a second card.
+func TestForkCardIsIdempotentAndReopens(t *testing.T) {
+	st, _, service, scope := taskLogHarness(t)
+	ctx := context.Background()
+	origin := mustCard(t)(service.EnsureCard(ctx, scope))
+	child := uuid.New()
+	if err := st.CreateSession(ctx, scope.TenantID, child); err != nil {
+		t.Fatal(err)
+	}
+	childScope := kernel.Scope{TenantID: scope.TenantID, SessionID: child}
+	first := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, 7, childScope, "branch", "fork-1"))
+	wantID := tasklog.InitialTaskID(scope.TenantID, child)
+	if first.TaskID != wantID {
+		t.Fatalf("forked card id = %s, want the deterministic child card %s", first.TaskID, wantID)
+	}
+	second := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, 7, childScope, "branch", "fork-1"))
+	if second.TaskID != first.TaskID {
+		t.Fatalf("retry card = %s, want %s", second.TaskID, first.TaskID)
+	}
+	// Even a different callID converges on the same child card: the child id,
+	// not the call, is the fork's identity.
+	third := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, 7, childScope, "branch", "fork-2"))
+	if third.TaskID != first.TaskID {
+		t.Fatalf("different-call card = %s, want %s", third.TaskID, first.TaskID)
+	}
+	created := 0
+	for _, event := range mustView(t)(service.Show(ctx, childScope, first.TaskID)).Events {
+		if event.Kind == string(kernel.KindTaskCreated) {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("task.created events = %d, want one card", created)
+	}
+
+	// A rollback closes the card; the next fork retry reopens the same card.
+	if _, err := service.Close(ctx, childScope, first.TaskID, "fork did not start", "close-1"); err != nil {
+		t.Fatal(err)
+	}
+	reopened := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, 7, childScope, "branch", "fork-1"))
+	if reopened.TaskID != first.TaskID || reopened.Status != tasklog.StatusOpen {
+		t.Fatalf("reopened card = %+v", reopened)
+	}
+	view := mustView(t)(service.Show(ctx, childScope, first.TaskID))
+	created, closed, updates := 0, 0, 0
+	for _, event := range view.Events {
+		switch event.Kind {
+		case string(kernel.KindTaskCreated):
+			created++
+		case string(kernel.KindTaskClosed):
+			closed++
+		case string(kernel.KindTaskUpdated):
+			updates++
+		}
+	}
+	if created != 1 || closed != 1 || updates != 1 {
+		t.Fatalf("card events = created %d, closed %d, updated %d; want 1/1/1", created, closed, updates)
+	}
+	children := mustView(t)(service.Show(ctx, scope, origin.TaskID)).Children
+	if len(children) != 1 || children[0].TaskID != first.TaskID {
+		t.Fatalf("origin children = %+v", children)
+	}
+}
+
+func mustView(t *testing.T) func(tasklog.View, error) tasklog.View {
+	t.Helper()
+	return func(view tasklog.View, err error) tasklog.View {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("task view: %v", err)
+		}
+		return view
+	}
+}

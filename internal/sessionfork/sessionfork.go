@@ -53,3 +53,16 @@ type Reader interface {
 type Writer interface {
 	RecordSessionFork(ctx context.Context, tenantID, sessionID uuid.UUID, fact Fact) error
 }
+
+// Clearer removes the fork origin of a session. It is the rollback half of a
+// fork that never started (a capacity refusal or a failed first input): the
+// child session must not keep a prefix reference to a run that does not exist.
+type Clearer interface {
+	ClearSessionFork(ctx context.Context, tenantID, sessionID uuid.UUID) error
+}
+
+// Store is the durable fork-fact seam the runner needs.
+type Store interface {
+	Writer
+	Clearer
+}

@@ -101,3 +101,63 @@ func (s *Store) SessionFork(ctx context.Context, tenantID, sessionID uuid.UUID) 
 	}
 	return fact, true, nil
 }
+
+// ClearSessionFork removes the fork origin of a session. It is the rollback of
+// a fork that never started: the child keeps its ledger (append-only) but no
+// longer claims a parent prefix it never ran under.
+func (s *Store) ClearSessionFork(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return errors.New("store: clear fork fact needs tenant and session")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE sessions
+		   SET fork_parent_session_id = NULL, fork_origin_seq = 0,
+		       fork_tree_hash = NULL, fork_config_hash = NULL,
+		       fork_tool_manifest_hash = NULL, fork_anchor_seq = 0,
+		       updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2`, tenantID, sessionID); err != nil {
+		return fmt.Errorf("store: clear session fork: %w", err)
+	}
+	return nil
+}
+
+// EnsureSessionActive revives a session archived by a rolled-back fork retry.
+// It is only called on the deterministic child id of a fork attempt; a normal
+// spawn never touches archived_at.
+func (s *Store) EnsureSessionActive(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return errors.New("store: revive session needs tenant and session")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE sessions SET archived_at = NULL, updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2`, tenantID, sessionID); err != nil {
+		return fmt.Errorf("store: revive session: %w", err)
+	}
+	return nil
+}
+
+// DeleteSessionIfEmpty removes a session only when nothing durable refers to
+// it: no event, no run, no task card and no placement. A fork that failed
+// before any card/input leaves exactly such a row; a session with ledger facts
+// is archived instead, never deleted (the ledger is the audit truth).
+func (s *Store) DeleteSessionIfEmpty(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return false, errors.New("store: delete session needs tenant and session")
+	}
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM sessions s
+		 WHERE s.tenant_id = $1 AND s.session_id = $2
+		   AND NOT EXISTS (SELECT 1 FROM events e
+		                    WHERE e.tenant_id = $1 AND e.session_id = $2)
+		   AND NOT EXISTS (SELECT 1 FROM runs r
+		                    WHERE r.tenant_id = $1 AND r.session_id = $2)
+		   AND NOT EXISTS (SELECT 1 FROM task_cards c
+		                    WHERE c.tenant_id = $1 AND c.session_id = $2)
+		   AND NOT EXISTS (SELECT 1 FROM session_placement p
+		                    WHERE p.tenant_id = $1 AND p.session_id = $2)`,
+		tenantID, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("store: delete empty session: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
