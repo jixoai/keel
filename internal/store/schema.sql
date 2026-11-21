@@ -56,6 +56,33 @@ CREATE INDEX IF NOT EXISTS sessions_external_backend
 -- once and never cleared by the delete route (idempotent).
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 
+-- Session execution binding index (change keel-agent-team-v1, P3 session
+-- reference protection). The selection fact in a committed user.message is the
+-- only truth: these columns are a derived "current binding" projection of the
+-- newest input that carried a selection, used by the registry's delete/archive
+-- reference guard (and readable as a hint). They are never read to run an
+-- attempt — the runner still resolves the selection from the ledger per attempt.
+--
+-- bound_seq is the user.message seq the projection came from. The write is a
+-- conditional update (bound_seq <= incoming seq), so two concurrent commits on
+-- one session cannot leave an older selection as the binding when their
+-- post-commit writes land out of order. A model-only selection clears both ids
+-- (the newest selection is authoritative); an input without a selection leaves
+-- the projection untouched. bound_at is write time for diagnosis only.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_agent_id text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_team_id  text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_seq      bigint;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_at       timestamptz;
+
+-- Reference checks filter by bound id and join runs for the archived boundary;
+-- the partial indexes keep them proportional to bound sessions, not the table.
+CREATE INDEX IF NOT EXISTS sessions_bound_agent
+    ON sessions (tenant_id, bound_agent_id)
+    WHERE bound_agent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sessions_bound_team
+    ON sessions (tenant_id, bound_team_id)
+    WHERE bound_team_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS events (
     tenant_id   uuid NOT NULL,
     session_id  uuid NOT NULL,

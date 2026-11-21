@@ -79,6 +79,28 @@ type TeamReference struct {
 	Name string
 }
 
+// SessionReference names one live session whose newest selection fact is bound
+// to the agent or team being deleted/archived. It is what a refused deletion
+// reports so the caller can offer "archive the session, or send an input that
+// selects a model only" (the two unbind paths).
+//
+// Archived sessions are not references (the user already removed them from the
+// view) UNLESS they still own a live run: archiving does not cancel a run, and
+// deleting its agent/team would break the next attempt of that run.
+type SessionReference struct {
+	// ID is the session identity (uuid text).
+	ID string
+	// State is sessions.state (today only "active" is ever written; the column
+	// exists for the state machine's idle/running/waiting_human/paused facts).
+	State string
+	// Archived reports that the session is soft-deleted but still owns a live run
+	// (that is the only way an archived session reaches this list).
+	Archived bool
+	// RunStatus is the runs.status when the session has a run row
+	// ("pending"/"running"/"done"/"failed"/"" when no run exists).
+	RunStatus string
+}
+
 // ProviderReference names one registry document that references a model
 // provider instance, and the field inside it that carries the reference. It is
 // what a refused provider removal reports so the caller can offer "repoint that
@@ -255,6 +277,70 @@ func (s *Store) TeamsReferencingAgent(ctx context.Context, tenantID uuid.UUID, a
 		out = append(out, reference)
 	}
 	return out, rows.Err()
+}
+
+// SessionReferenceQuery is the one SQL shape behind both session reference
+// reads. $2 is the bound id (agent or team); the column is chosen by the
+// caller from a closed set, never from user input.
+//
+// The lifecycle rule is deliberately in SQL so both guards share it:
+//   - an unarchived session is a reference whatever its run state (the user can
+//     still send it input, and its newest selection names the row);
+//   - an archived session is not a reference, except while it still owns a
+//     pending/running run — archive does not cancel the run, so deleting the
+//     agent/team would break its next attempt.
+func (s *Store) sessionsReferencing(ctx context.Context, tenantID uuid.UUID, column, id string) ([]SessionReference, error) {
+	var statement string
+	switch column {
+	case "bound_agent_id":
+		statement = `SELECT s.session_id::text, s.state, (s.archived_at IS NOT NULL),
+		                    COALESCE(r.status, '')
+		               FROM sessions s
+		               LEFT JOIN runs r
+		                 ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
+		              WHERE s.tenant_id = $1 AND s.bound_agent_id = $2
+		                AND (s.archived_at IS NULL OR r.status IN ('pending', 'running'))
+		              ORDER BY s.updated_at DESC, s.session_id`
+	case "bound_team_id":
+		statement = `SELECT s.session_id::text, s.state, (s.archived_at IS NOT NULL),
+		                    COALESCE(r.status, '')
+		               FROM sessions s
+		               LEFT JOIN runs r
+		                 ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
+		              WHERE s.tenant_id = $1 AND s.bound_team_id = $2
+		                AND (s.archived_at IS NULL OR r.status IN ('pending', 'running'))
+		              ORDER BY s.updated_at DESC, s.session_id`
+	default:
+		return nil, fmt.Errorf("store: unknown session reference column %q", column)
+	}
+	rows, err := s.pool.Query(ctx, statement, tenantID, id)
+	if err != nil {
+		return nil, fmt.Errorf("store: sessions referencing %s: %w", column, err)
+	}
+	defer rows.Close()
+	out := make([]SessionReference, 0)
+	for rows.Next() {
+		var reference SessionReference
+		if err := rows.Scan(&reference.ID, &reference.State, &reference.Archived, &reference.RunStatus); err != nil {
+			return nil, fmt.Errorf("store: scan session reference: %w", err)
+		}
+		out = append(out, reference)
+	}
+	return out, rows.Err()
+}
+
+// SessionsReferencingAgent lists the tenant's live sessions whose newest
+// selection fact names agentID. It is the session half of the agent delete/
+// archive guard (TeamsReferencingAgent is the other half).
+func (s *Store) SessionsReferencingAgent(ctx context.Context, tenantID uuid.UUID, agentID string) ([]SessionReference, error) {
+	return s.sessionsReferencing(ctx, tenantID, "bound_agent_id", agentID)
+}
+
+// SessionsReferencingTeam lists the tenant's live sessions whose newest
+// selection fact names teamID. Team selection is authoritative: a fact that
+// named both ids is recorded as a team binding and appears here only.
+func (s *Store) SessionsReferencingTeam(ctx context.Context, tenantID uuid.UUID, teamID string) ([]SessionReference, error) {
+	return s.sessionsReferencing(ctx, tenantID, "bound_team_id", teamID)
 }
 
 // CreateTeam inserts a new team row. created=false means the id already exists.

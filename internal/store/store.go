@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -373,6 +374,94 @@ func (s *Store) ArchiveSession(ctx context.Context, tenantID, sessionID uuid.UUI
 		return false, fmt.Errorf("store: archive session: %w", err)
 	}
 	return exists, nil
+}
+
+// SessionBinding is the derived current execution binding of a session: the
+// agent/team ids of the newest user.message selection fact, plus the seq of the
+// event it came from. The ledger stays the truth; this projection only exists so
+// the registry's delete/archive guard can ask "is a live session bound to this
+// row?" without scanning every session's events.
+type SessionBinding struct {
+	// AgentID and TeamID are exactly one non-empty value while a selection names
+	// an execution identity (team wins when both were sent), both empty when the
+	// newest selection named only a model (or no selection has ever bound it).
+	AgentID string
+	TeamID  string
+	// Seq is the user.message seq the projection was derived from (0 when none).
+	Seq int64
+	// At is when the projection was last written (zero when none).
+	At time.Time
+}
+
+// SetSessionBinding records the derived binding of one session. seq is the
+// user.message seq whose selection produced agentID/teamID; the write is
+// conditional on that seq, so a delayed post-commit write can never replace a
+// newer selection with an older one (concurrent inputs on one session).
+//
+// applied=false is a normal outcome: a newer seq already owns the projection
+// (or the same seq is being replayed). ErrNoSession means the session row does
+// not exist for this tenant.
+func (s *Store) SetSessionBinding(ctx context.Context, tenantID, sessionID uuid.UUID,
+	agentID, teamID string, seq int64) (bool, error) {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return false, errors.New("store: session binding requires tenant and session ids")
+	}
+	if seq <= 0 {
+		return false, fmt.Errorf("store: session binding requires a positive event seq, got %d", seq)
+	}
+	agentID = strings.TrimSpace(agentID)
+	teamID = strings.TrimSpace(teamID)
+	// The plan's ruling mirrored from the resolver: a fact naming both is a team
+	// fact, so the loose agentId cannot outlive a team binding in the projection.
+	if teamID != "" {
+		agentID = ""
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE sessions
+		    SET bound_agent_id = NULLIF($3, ''),
+		        bound_team_id  = NULLIF($4, ''),
+		        bound_seq      = $5,
+		        bound_at       = now()
+		  WHERE tenant_id = $1 AND session_id = $2
+		    AND (bound_seq IS NULL OR bound_seq <= $5)`,
+		tenantID, sessionID, agentID, teamID, seq)
+	if err != nil {
+		return false, fmt.Errorf("store: set session binding: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return true, nil
+	}
+	// A stale seq (a newer input already won) is a success, not a missing row.
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM sessions WHERE tenant_id = $1 AND session_id = $2)`,
+		tenantID, sessionID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: set session binding: %w", err)
+	}
+	if !exists {
+		return false, ErrNoSession
+	}
+	return false, nil
+}
+
+// GetSessionBinding reads the derived binding projection. found=false means the
+// session does not exist for this tenant; a found session with no binding
+// returns the zero value (Seq 0). It is a diagnostic/test read: run execution
+// still resolves the newest selection from the event ledger.
+func (s *Store) GetSessionBinding(ctx context.Context, tenantID, sessionID uuid.UUID) (SessionBinding, bool, error) {
+	var binding SessionBinding
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(bound_agent_id, ''), COALESCE(bound_team_id, ''),
+		        COALESCE(bound_seq, 0), bound_at
+		   FROM sessions WHERE tenant_id = $1 AND session_id = $2`,
+		tenantID, sessionID).Scan(&binding.AgentID, &binding.TeamID, &binding.Seq, &binding.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SessionBinding{}, false, nil
+	}
+	if err != nil {
+		return SessionBinding{}, false, fmt.Errorf("store: get session binding: %w", err)
+	}
+	return binding, true, nil
 }
 
 // Event is one committed fact.
