@@ -16,6 +16,7 @@ import (
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/placement"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // Extension query/control plane: plugins, triggers and sub-agents. Reads are
@@ -121,12 +122,25 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("reason is too long"))
 		return
 	}
+	// A manual fire records the caller as created_by_account_id; an unattended
+	// fire records the Bot's own account. The identity comes from the edge,
+	// never from the body.
+	var createdBy uuid.UUID
+	if s.cfg.Access != nil {
+		principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+		if err != nil {
+			writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+			return
+		}
+		createdBy = principal.AccountID
+	}
 	result, err := s.cfg.Triggers.Fire(r.Context(), triggerID, tenantID, agentext.FireRequest{
-		IdempotencyKey:   key,
-		Reason:           reason,
-		WebhookTimestamp: r.Header.Get("X-Keel-Timestamp"),
-		WebhookSignature: r.Header.Get("X-Keel-Signature"),
-		WebhookBody:      raw,
+		IdempotencyKey:     key,
+		Reason:             reason,
+		WebhookTimestamp:   r.Header.Get("X-Keel-Timestamp"),
+		WebhookSignature:   r.Header.Get("X-Keel-Signature"),
+		WebhookBody:        raw,
+		CreatedByAccountID: createdBy,
 	})
 	if err != nil {
 		switch {
@@ -134,6 +148,18 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, err)
 		case errors.Is(err, agentext.ErrTriggerDisabled):
 			writeErr(w, http.StatusConflict, err)
+		case errors.Is(err, agentext.ErrTriggerBotArchived),
+			errors.Is(err, store.ErrConflict):
+			// The trigger exists but its Bot (or the pinned session) can no
+			// longer own a new session.
+			writeErr(w, http.StatusConflict, err)
+		case errors.Is(err, agentext.ErrTriggerBotMissing),
+			errors.Is(err, agentext.ErrTriggerBotTenant):
+			// A fire whose Bot cannot be resolved in this tenant is forbidden;
+			// 404 would leak whether the handle exists elsewhere.
+			writeErr(w, http.StatusForbidden, err)
+		case errors.Is(err, agentext.ErrTriggerBotUnavailable):
+			writeErr(w, http.StatusServiceUnavailable, err)
 		case errors.Is(err, agentext.ErrTriggerKeyRequired),
 			errors.Is(err, agentext.ErrInvalidTrigger):
 			writeErr(w, http.StatusBadRequest, err)
@@ -335,7 +361,6 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		Agent:           body.Agent,
 		BotID:           body.BotID,
 		Selection:       body.Selection,
-		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
 	})
 	if err != nil {
@@ -449,7 +474,6 @@ func (s *Server) forkSubagent(w http.ResponseWriter, r *http.Request) {
 		Agent:           body.Agent,
 		BotID:           body.BotID,
 		Selection:       body.Selection,
-		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
 	})
 	if err != nil {
@@ -527,7 +551,6 @@ func (s *Server) resumeSubagent(w http.ResponseWriter, r *http.Request) {
 		ParentSessionID: parentID,
 		SessionID:       sessionID,
 		RequestID:       body.RequestID,
-		Reason:          body.Reason,
 		Selection:       body.Selection,
 		BotID:           body.BotID,
 	})
@@ -579,7 +602,6 @@ func (s *Server) cancelSubagent(w http.ResponseWriter, r *http.Request) {
 		TenantID:        tenantID,
 		ParentSessionID: parentID,
 		SessionID:       childID,
-		Reason:          body.Reason,
 	})
 	if err != nil {
 		writeSubagentError(w, err)

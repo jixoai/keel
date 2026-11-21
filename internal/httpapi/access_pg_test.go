@@ -245,8 +245,8 @@ func newAccessPGEnv(t *testing.T) *accessPGEnv {
 	t.Cleanup(triggers.Close)
 	env.triggers = triggers
 	for _, spec := range []agentext.TriggerSpec{
-		{ID: "owner-trigger", Kind: agentext.TriggerWebhook, TenantID: env.tenant.String(), Prompt: "owner", Enabled: true},
-		{ID: "other-trigger", Kind: agentext.TriggerWebhook, TenantID: env.other.String(), Prompt: "other", Enabled: true},
+		{ID: "owner-trigger", Kind: agentext.TriggerWebhook, TenantID: env.tenant.String(), BotID: "owner-bot", Prompt: "owner", Enabled: true},
+		{ID: "other-trigger", Kind: agentext.TriggerWebhook, TenantID: env.other.String(), BotID: "other-bot", Prompt: "other", Enabled: true},
 	} {
 		if _, err := triggers.Register(spec); err != nil {
 			t.Fatal(err)

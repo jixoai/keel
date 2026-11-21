@@ -23,7 +23,10 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 		id     string
 		plugin *Plugin
 	}{
-		{ExamplePluginID, NewExamplePlugin(ExamplePluginOptions{})},
+		// The example plugin declares its trigger only when a Bot is configured
+		// (every trigger must fire as a Bot); the embedded manifest describes
+		// that configured shape.
+		{ExamplePluginID, NewExamplePlugin(ExamplePluginOptions{BotID: "keel.example"})},
 		{"keel.testkit", NewTestkitPlugin()},
 		{CreationPluginID, NewCreationPlugin(CreationOptions{})},
 		{TasksPluginID, NewTasksPlugin(TasksOptions{})},

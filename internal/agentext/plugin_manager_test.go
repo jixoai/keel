@@ -236,7 +236,7 @@ func exampleBuiltin(defaultEnabled bool, events *[]string, mu *sync.Mutex) Built
 					mu.Unlock()
 					return nil
 				}}},
-				Triggers: []TriggerSpec{{ID: "keel.example.ping", Kind: TriggerWebhook, Prompt: "p", Enabled: true}},
+				Triggers: []TriggerSpec{{ID: "keel.example.ping", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true}},
 				Effects:  []Effect{{Name: "seal", Stop: func(context.Context) error { return nil }}},
 				Start: func(context.Context, *PluginEnv) error {
 					mu.Lock()

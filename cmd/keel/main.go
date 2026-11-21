@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jixoai/keel/internal/agentapi"
@@ -162,6 +163,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		mcpProject       = fs.String("mcp-project", os.Getenv("KEEL_MCP_PROJECT"), "project mcp.json path")
 		// modelsConfig carries the tenant models document (providers/rules/selection).
 		modelsConfig = fs.String("models-config", os.Getenv("KEEL_MODELS_CONFIG"), "tenant models document (providers/rules/selection; empty disables provider configuration)")
+		exampleBot   = fs.String("example-bot-id", os.Getenv("KEEL_EXAMPLE_BOT_ID"), "Bot handle the example plugin's triggers fire as (empty: the example plugin declares no trigger)")
 		exampleInt   = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
 		pluginsRoot  = fs.String("plugins-root", defaultPluginsRoot(), "managed plugins directory ($KEEL_HOME/plugins)")
 	)
@@ -204,6 +206,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		MCPProject:       *mcpProject,
 		ModelsConfig:     *modelsConfig,
 		PluginsRoot:      *pluginsRoot,
+		ExampleBotID:     strings.TrimSpace(*exampleBot),
 		ExampleInterval:  *exampleInt,
 		Log:              log,
 	}

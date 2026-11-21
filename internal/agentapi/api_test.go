@@ -389,11 +389,26 @@ func (s *countingStarter) StartTurn(_ context.Context, req agentext.StartTurnReq
 	return agentext.StartTurnResult{TenantID: req.TenantID, SessionID: req.SessionID, Seq: int64(s.counts), RequestID: req.RequestID}, nil
 }
 
+// triggerBotFixture satisfies the engine's ownership seams without a store:
+// the handler tests exercise routing/status mapping, not the store write.
+type triggerBotFixture struct{}
+
+func (triggerBotFixture) ResolveTriggerBot(_ context.Context, tenantID uuid.UUID, botID string) (agentext.TriggerBot, error) {
+	return agentext.TriggerBot{TenantID: tenantID, BotID: botID, AccountID: uuid.NewSHA1(uuid.NameSpaceOID, []byte("trigger-bot:"+botID))}, nil
+}
+
+func (triggerBotFixture) CreateOwnedSession(context.Context, agentext.TriggerSessionOwnership) error {
+	return nil
+}
+
 func TestExtensionRoutes(t *testing.T) {
 	starter := &countingStarter{}
 	hooks := agentext.NewHookBus(agentext.HookBusOptions{Logger: testLogger()})
 	defer hooks.Close()
-	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Starter: starter, Hooks: hooks, Logger: testLogger()})
+	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
+		Starter: starter, Hooks: hooks, Logger: testLogger(),
+		Bots: triggerBotFixture{}, Ownership: triggerBotFixture{},
+	})
 	defer triggers.Close()
 	tenant := uuid.New()
 	plugin := &agentext.Plugin{
@@ -407,7 +422,7 @@ func TestExtensionRoutes(t *testing.T) {
 		Hooks: []agentext.HookSpec{{Event: agentext.HookTurnStarted, Handler: func(context.Context, agentext.HookPayload) error { return nil }}},
 		// A webhook trigger registered for a tenant is listed to that tenant;
 		// an unowned trigger is not listable (cross-tenant prompt leak).
-		Triggers: []agentext.TriggerSpec{{ID: "test.webhook", Kind: agentext.TriggerWebhook, TenantID: tenant.String(), Prompt: "go", Enabled: true}},
+		Triggers: []agentext.TriggerSpec{{ID: "test.webhook", Kind: agentext.TriggerWebhook, TenantID: tenant.String(), BotID: "test-bot", Prompt: "go", Enabled: true}},
 	}
 	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
 		Plugins: []*agentext.Plugin{plugin}, Hooks: hooks, Triggers: triggers, Logger: testLogger(),

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -152,6 +153,68 @@ func dsnWithDatabase(dsn, name string) string {
 	return dsn + " dbname=" + name
 }
 
+// storeTriggerOwner binds the trigger engine's ownership seams to the real
+// store, exactly like cmd/keel's triggerBotOwner (the test package cannot
+// import package main).
+type storeTriggerOwner struct{ store *store.Store }
+
+func (o storeTriggerOwner) ResolveTriggerBot(ctx context.Context, tenantID uuid.UUID, botID string) (agentext.TriggerBot, error) {
+	bot, err := o.store.GetBot(ctx, tenantID, botID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return agentext.TriggerBot{}, agentext.ErrTriggerBotMissing
+		}
+		return agentext.TriggerBot{}, err
+	}
+	if bot.Archived {
+		return agentext.TriggerBot{}, agentext.ErrTriggerBotArchived
+	}
+	profile, err := o.store.GetProfile(ctx, tenantID, bot.ProfileID)
+	if err != nil {
+		return agentext.TriggerBot{}, err
+	}
+	return agentext.TriggerBot{TenantID: tenantID, BotID: bot.ID, AccountID: profile.AccountID}, nil
+}
+
+func (o storeTriggerOwner) CreateOwnedSession(ctx context.Context, ownership agentext.TriggerSessionOwnership) error {
+	return o.store.CreateOwnedSession(ctx, store.SessionOwnership{
+		TenantID: ownership.TenantID, SessionID: ownership.SessionID, BotID: ownership.BotID,
+		AccountID: ownership.AccountID, CreatedByAccountID: ownership.CreatedByAccountID,
+		TeamBotID: ownership.TeamBotID,
+	})
+}
+
+// createE2EBot creates the account/profile/bot triple a trigger fires as.
+func createE2EBot(t *testing.T, st *store.Store, ctx context.Context, tenantID uuid.UUID, botID string) (store.BotRecord, store.AccountRecord) {
+	t.Helper()
+	account, err := st.CreateAccount(ctx, store.AccountRecord{
+		TenantID: tenantID, ID: uuid.New(),
+		Username: botID + "-" + tenantID.String()[:8], DisplayName: botID, Kind: "bot",
+	})
+	if err != nil {
+		t.Fatalf("create bot account: %v", err)
+	}
+	role, err := st.CreateRole(ctx, store.RoleRecord{TenantID: tenantID, ID: uuid.New(), Name: "Operator"})
+	if err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	profile, err := st.CreateProfile(ctx, store.ProfileRecord{
+		TenantID: tenantID, ID: uuid.New(), AccountID: account.ID, RoleID: role.ID,
+	})
+	if err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	bot, err := st.CreateBotWithOwner(ctx, store.BotRecord{
+		TenantID: tenantID, ID: botID, Name: botID, ProfileID: profile.ID, ModelKind: "text",
+		DefaultModel: json.RawMessage(`{"providerId":"fake","modelId":"fake"}`),
+		Harness:      json.RawMessage(`{"tools":["read"],"context":{"permissions":["file.read"]}}`),
+	}, account.ID, account.ID)
+	if err != nil {
+		t.Fatalf("create bot: %v", err)
+	}
+	return bot, account
+}
+
 type storeSessions struct{ *store.Store }
 
 func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RunState, error) {
@@ -212,8 +275,14 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 	if err := st.CreateTenant(ctx, tenantID, "agentext-e2e"); err != nil {
 		t.Fatal(err)
 	}
+	// Every trigger fires as a Bot now: the fixture owns one real Bot so the
+	// example trigger can register and its fired session carries ownership.
+	e2eBot, e2eAccount := createE2EBot(t, st, ctx, tenantID, "e2e-bot")
 	parentID := uuid.New()
-	if err := st.CreateSession(ctx, tenantID, parentID); err != nil {
+	if err := st.CreateOwnedSession(ctx, store.SessionOwnership{
+		TenantID: tenantID, SessionID: parentID, BotID: e2eBot.ID,
+		AccountID: e2eAccount.ID, CreatedByAccountID: e2eAccount.ID,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -261,8 +330,10 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 		Gate: sessions, Edge: kern, Events: kern, Runs: sessions,
 		Control: runControl, Hooks: hooks, Logger: log, Poll: 50 * time.Millisecond,
 	})
+	triggerOwner := storeTriggerOwner{store: st}
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter, Hooks: hooks, Logger: log,
+		Bots: triggerOwner, Ownership: triggerOwner,
 	})
 	defer triggers.Close()
 
@@ -294,7 +365,9 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 			}},
 		},
 	}
-	example := agentext.NewExamplePlugin(agentext.ExamplePluginOptions{TenantID: tenantID.String()})
+	example := agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
+		TenantID: tenantID.String(), BotID: e2eBot.ID,
+	})
 	plugins := agentext.NewRuntime(agentext.RuntimeOptions{
 		Plugins:   []*agentext.Plugin{probe, example},
 		Hooks:     hooks,

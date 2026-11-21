@@ -101,7 +101,11 @@ type serveOptions struct {
 	// PluginsRoot is the managed plugin directory tree
 	// ($KEEL_HOME/plugins/<id>/plugin.yaml). An empty root disables install and
 	// discovery; bundled plugins still load.
-	PluginsRoot     string
+	PluginsRoot string
+	// ExampleBotID is the Bot the built-in example triggers fire as. Empty
+	// leaves the example plugin without triggers (every trigger needs a Bot
+	// owner); the plugin's tools/hooks still load.
+	ExampleBotID    string
 	ExampleInterval time.Duration
 	Log             *slog.Logger
 	// Bash is the keel.shell job manager (timeout-to-background jobs). It is
@@ -1159,8 +1163,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// the consumer set, while notification.ack / notification.push_sent are the
 	// event-ized truth (the kernel is the committer).
 	approvals := approval.NewService(approval.Options{
-		Store:  approval.NewPostgresStore(st),
-		Logger: log,
+		Store: approval.NewPostgresStore(st),
 	})
 	notifications := notify.NewService(notify.Options{
 		Store:     notify.NewPostgresStore(st),
@@ -1221,6 +1224,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// exactly like the parent's.
 		InheritOwnership: newSessionOwnershipInheritor(st),
 	})
+	// Triggers fire as a Bot: the store-backed resolver validates the Bot
+	// (existence/archive/tenant) at registration and before every fire, and
+	// the ownership writer creates the session with its Bot/account/created-by
+	// tuple in one transaction. Without these seams a fire is fail closed.
+	triggerOwnership := triggerBotOwner{store: st}
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter,
 		Hooks:   hooks,
@@ -1228,8 +1236,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// The durable cursor makes an interval/cron trigger replay what it
 		// missed while the process was down; the task log creates the initial
 		// card as part of a fire (task-log: 会话起步即有卡).
-		State: st,
-		Tasks: taskLog,
+		State:     st,
+		Tasks:     taskLog,
+		Bots:      triggerOwnership,
+		Ownership: triggerOwnership,
 	})
 
 	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, log)
@@ -1365,7 +1375,6 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		RunStatus: func(tenantID, sessionID uuid.UUID) (string, bool) {
 			return runControl.Status(kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 		},
-		Logger: log,
 	})
 	auth, err := newAuthController(authConfig{
 		Mode:       opts.AuthMode,
@@ -1494,6 +1503,7 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				// it the trigger stays fail-closed for signed deliveries and the
 				// manual fire route remains available.
 				WebhookSecretEnv: "KEEL_EXAMPLE_WEBHOOK_SECRET",
+				BotID:            opts.ExampleBotID,
 			})
 		},
 		testkit.PluginID: func() *agentext.Plugin { return agentext.NewTestkitPlugin() },
@@ -1534,6 +1544,12 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 	}
 	builtins := make([]agentext.Builtin, 0, len(builtinManifests))
 	for _, manifest := range builtinManifests {
+		if manifest.ID == agentext.ExamplePluginID && strings.TrimSpace(opts.ExampleBotID) == "" {
+			// The example factory declares its triggers only when a Bot is
+			// configured (an unowned trigger cannot register). Keep the
+			// advertised manifest consistent with what actually loads.
+			manifest.Provides.Triggers = nil
+		}
 		factory, ok := builtinFactories[manifest.ID]
 		if !ok {
 			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
@@ -1602,7 +1618,6 @@ func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hook
 		Prompt: func(sections []agentext.PromptSection) error {
 			return rt.RefreshProductPrompt(pluginPromptSections(sections))
 		},
-		Logger: log,
 	})
 }
 

@@ -44,6 +44,12 @@ import (
 //     skipping older ones with an audit record so a long outage cannot storm;
 //   - ownership: a fired turn is immediately attributable, so the session's
 //     initial task card is created as part of the fire (task-log: 会话起步即有卡).
+//   - ownership: every trigger fires as one Bot. The fired session is created
+//     with that Bot's ownership (bot/account/created_by + owner relation) in
+//     the same transaction as the session row, and the committed input carries
+//     the same Bot as its selection fact. A trigger without a Bot can neither
+//     register nor fire: an unowned session is not runnable (post-A4.2b3a), so
+//     accepting one would only produce a turn that fails closed.
 type TriggerKind string
 
 const (
@@ -62,6 +68,16 @@ type TriggerSpec struct {
 	Schedule string `json:"schedule,omitempty"`
 	// Prompt is the user message a fire commits.
 	Prompt string `json:"prompt"`
+	// BotID is the Bot every fire runs as. It is required: a fired Session must
+	// have a Bot owner (bot_id/account_id/created_by_account_id), and the
+	// attempt resolves that Bot's prompt, tool grants and default model.
+	//
+	// The handle is tenant-scoped. A trigger with a TenantID validates the Bot
+	// at registration and refuses a handle that belongs to another tenant. A
+	// tenantless manual/webhook trigger resolves the handle inside the firing
+	// caller's tenant, so there is no deployment-global Bot and one trigger id
+	// cannot silently cross tenants.
+	BotID string `json:"botId"`
 	// TenantID owns the turns a scheduled fire starts (manual/webhook fires
 	// inherit the caller's tenant).
 	TenantID string `json:"tenantId,omitempty"`
@@ -118,6 +134,11 @@ type FireRequest struct {
 	// and webhook fires). It is the durable catch-up cursor, not the wall clock
 	// of the attempt.
 	ScheduledFor time.Time
+	// CreatedByAccountID is the caller's account for a manual fire. A manual
+	// fire records the caller as created_by_account_id; schedule and webhook
+	// fires use the Bot's own account (the unattended service actor), so this
+	// field is ignored for them. Zero falls back to the Bot's account.
+	CreatedByAccountID uuid.UUID
 }
 
 // FireResult is the idempotent answer of a fire.
@@ -125,11 +146,15 @@ type FireResult struct {
 	TriggerID      string `json:"triggerId"`
 	Status         string `json:"status"`
 	IdempotencyKey string `json:"idempotencyKey"`
-	SessionID      string `json:"sessionId,omitempty"`
-	Seq            int64  `json:"seq,omitempty"`
-	Deduped        bool   `json:"deduped"`
-	Attempts       int    `json:"attempts"`
-	Error          string `json:"error,omitempty"`
+	// BotID is the Bot the fire ran as (the trigger's owner), present on a
+	// successful fire and on a refusal after resolution.
+	BotID     string `json:"botId,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	Seq       int64  `json:"seq,omitempty"`
+	Deduped   bool   `json:"deduped"`
+	Attempts  int    `json:"attempts"`
+	CreatedBy string `json:"createdByAccountId,omitempty"`
+	Error     string `json:"error,omitempty"`
 	// TaskCardID is the session's initial card, created as part of the fire so
 	// the first tool call is attributable without a lazy creation detour.
 	TaskCardID string `json:"taskCardId,omitempty"`
@@ -145,10 +170,12 @@ type AuditEntry struct {
 	TriggerID      string    `json:"triggerId"`
 	Reason         string    `json:"reason"`
 	IdempotencyKey string    `json:"idempotencyKey"`
+	BotID          string    `json:"botId,omitempty"`
 	SessionID      string    `json:"sessionId,omitempty"`
 	Seq            int64     `json:"seq,omitempty"`
 	Status         string    `json:"status"`
 	Attempts       int       `json:"attempts"`
+	CreatedBy      string    `json:"createdByAccountId,omitempty"`
 	Error          string    `json:"error,omitempty"`
 	Deduped        bool      `json:"deduped,omitempty"`
 	TaskCardID     string    `json:"taskCardId,omitempty"`
@@ -192,6 +219,21 @@ var (
 	// ErrTriggerWebhookUnconfigured is the fail-closed answer of a webhook
 	// trigger that declares no HMAC secret.
 	ErrTriggerWebhookUnconfigured = errors.New("agentext: webhook secret is not configured")
+
+	// ErrTriggerBotMissing is a fire whose Bot does not exist in the firing
+	// tenant. The HTTP layer answers 403 (the trigger is not fireable), not
+	// 404: whether the Bot exists is not the caller's resource to probe.
+	ErrTriggerBotMissing = errors.New("agentext: trigger bot does not exist")
+	// ErrTriggerBotArchived is a fire whose Bot was archived after
+	// registration. The HTTP layer answers 409: the trigger exists but its
+	// identity can no longer create sessions.
+	ErrTriggerBotArchived = errors.New("agentext: trigger bot is archived")
+	// ErrTriggerBotTenant is a Bot that does not belong to the trigger's (or
+	// caller's) tenant.
+	ErrTriggerBotTenant = errors.New("agentext: trigger bot belongs to another tenant")
+	// ErrTriggerBotUnavailable is the fail-closed answer of a deployment with
+	// no Bot ownership seam. It is never "create an unowned session".
+	ErrTriggerBotUnavailable = errors.New("agentext: trigger bot ownership is not wired")
 )
 
 // TriggerStateStore is the durable catch-up cursor (PostgreSQL in production).
@@ -210,6 +252,43 @@ type TaskCardEnsurer interface {
 	EnsureCard(ctx context.Context, scope kernel.Scope) (tasklog.Card, error)
 }
 
+// TriggerBot is the resolved identity a fire runs as: the Bot handle, its
+// owner Account (through its Profile) and the tenant the handle lives in.
+type TriggerBot struct {
+	TenantID uuid.UUID
+	BotID    string
+	// AccountID is the account named by the Bot's Profile (the session owner).
+	AccountID uuid.UUID
+}
+
+// TriggerBotResolver resolves and validates the Bot a trigger fires as. The
+// store-backed implementation lives in the serving layer; agentext only names
+// the seam so the engine never imports the product store.
+type TriggerBotResolver interface {
+	ResolveTriggerBot(ctx context.Context, tenantID uuid.UUID, botID string) (TriggerBot, error)
+}
+
+// TriggerSessionOwnership is the ownership tuple of one fired session. The
+// writer MUST insert the session row, the Bot/account/created-by columns and
+// the owner relation in one transaction (store.CreateOwnedSession).
+type TriggerSessionOwnership struct {
+	TenantID           uuid.UUID
+	SessionID          uuid.UUID
+	BotID              string
+	AccountID          uuid.UUID
+	CreatedByAccountID uuid.UUID
+	// TeamBotID is the optional mission snapshot. Bot triggers leave it empty;
+	// the field exists so a future TeamBot trigger writes the same tuple.
+	TeamBotID string
+}
+
+// TriggerSessionOwner writes a fired session's ownership before its first
+// input. It is the same transaction primitive the Bot invoke path uses, so a
+// trigger-created session is private from its first row.
+type TriggerSessionOwner interface {
+	CreateOwnedSession(ctx context.Context, ownership TriggerSessionOwnership) error
+}
+
 // TriggerEngineOptions configures the engine.
 type TriggerEngineOptions struct {
 	// Starter starts a turn (TurnStarter in production).
@@ -220,7 +299,14 @@ type TriggerEngineOptions struct {
 	// State persists the last processed scheduled window for catch-up.
 	State TriggerStateStore
 	// Tasks creates the session's initial card as part of a fire.
-	Tasks           TaskCardEnsurer
+	Tasks TaskCardEnsurer
+	// Bots resolves the trigger's Bot at registration and before every fire.
+	// Nil keeps a registration structurally valid (id present) but makes every
+	// fire fail closed: a trigger must never create an unowned session.
+	Bots TriggerBotResolver
+	// Ownership writes the fired session's Bot ownership in one transaction.
+	// Nil makes every fire fail closed (see ErrTriggerBotUnavailable).
+	Ownership       TriggerSessionOwner
 	DefaultAttempts int
 	DefaultBackoff  time.Duration
 	// DefaultConcurrency is the per-trigger in-flight cap when a spec does not
@@ -264,6 +350,8 @@ type TriggerEngine struct {
 	now                func() time.Time
 	state              TriggerStateStore
 	tasks              TaskCardEnsurer
+	bots               TriggerBotResolver
+	ownership          TriggerSessionOwner
 	defaultAttempts    int
 	defaultBackoff     time.Duration
 	defaultConcurrency int
@@ -348,6 +436,8 @@ func NewTriggerEngine(opts TriggerEngineOptions) *TriggerEngine {
 		now:                opts.Now,
 		state:              opts.State,
 		tasks:              opts.Tasks,
+		bots:               opts.Bots,
+		ownership:          opts.Ownership,
 		defaultAttempts:    opts.DefaultAttempts,
 		defaultBackoff:     opts.DefaultBackoff,
 		defaultConcurrency: opts.DefaultConcurrency,
@@ -363,8 +453,16 @@ func NewTriggerEngine(opts TriggerEngineOptions) *TriggerEngine {
 }
 
 // Register adds one trigger and starts its scheduler when it is enabled and
-// scheduled. The returned function removes it.
+// scheduled. The returned function removes it. It is the no-context form of
+// RegisterContext (boot/plugin activation uses the latter so a slow Bot lookup
+// is bounded by the caller's activation deadline).
 func (e *TriggerEngine) Register(spec TriggerSpec) (func(), error) {
+	return e.RegisterContext(context.Background(), spec)
+}
+
+// RegisterContext is Register with the caller's context: a tenant-bound
+// trigger resolves and validates its Bot before it is added.
+func (e *TriggerEngine) RegisterContext(ctx context.Context, spec TriggerSpec) (func(), error) {
 	if spec.ID == "" {
 		return nil, fmt.Errorf("%w: id is required", ErrInvalidTrigger)
 	}
@@ -375,6 +473,13 @@ func (e *TriggerEngine) Register(spec TriggerSpec) (func(), error) {
 	}
 	if strings.TrimSpace(spec.Prompt) == "" {
 		return nil, fmt.Errorf("%w: prompt is required", ErrInvalidTrigger)
+	}
+	// Every trigger fires as exactly one Bot. Registering without one would
+	// create sessions the runtime refuses (no Bot owner → fail closed), so the
+	// refusal belongs here, before the trigger can ever be observed or fired.
+	spec.BotID = strings.TrimSpace(spec.BotID)
+	if spec.BotID == "" {
+		return nil, fmt.Errorf("%w: botId is required (every trigger fires as a bot)", ErrInvalidTrigger)
 	}
 	rt := &triggerRuntime{spec: spec, stop: make(chan struct{})}
 	switch spec.Kind {
@@ -396,13 +501,26 @@ func (e *TriggerEngine) Register(spec TriggerSpec) (func(), error) {
 	case TriggerWebhook:
 		// Schedule may be empty: a webhook fires only when called.
 	}
-	if spec.Kind == TriggerInterval || spec.Kind == TriggerCron {
-		if _, err := uuid.Parse(spec.TenantID); err != nil && spec.TenantID != "" {
+	if spec.TenantID != "" {
+		parsed, err := uuid.Parse(spec.TenantID)
+		if err != nil {
 			return nil, fmt.Errorf("%w: tenantId %q is not a UUID", ErrInvalidTrigger, spec.TenantID)
 		}
-		if spec.TenantID == "" {
-			return nil, fmt.Errorf("%w: scheduled triggers need a tenantId", ErrInvalidTrigger)
+		// A trigger bound to a tenant resolves its Bot now, so a typo, an
+		// archived Bot or a handle from another tenant is a registration error
+		// instead of a trigger that fails every window. A tenantless
+		// manual/webhook trigger has no tenant to resolve against at
+		// registration; its fire resolves the handle inside the caller's
+		// tenant.
+		if e.bots != nil {
+			if _, err := e.resolveBot(ctx, parsed, spec.BotID); err != nil {
+				// Wrap both: the caller decides "invalid trigger" (400) while
+				// the plugin diagnostic keeps the precise Bot refusal.
+				return nil, fmt.Errorf("%w: bot %q: %w", ErrInvalidTrigger, spec.BotID, err)
+			}
 		}
+	} else if spec.Kind == TriggerInterval || spec.Kind == TriggerCron {
+		return nil, fmt.Errorf("%w: scheduled triggers need a tenantId", ErrInvalidTrigger)
 	}
 	if spec.SessionID != "" {
 		if _, err := uuid.Parse(spec.SessionID); err != nil {
@@ -600,6 +718,29 @@ func (e *TriggerEngine) Fire(ctx context.Context, id string, tenantID uuid.UUID,
 	}
 	requestID := "trigger:" + id + ":" + req.IdempotencyKey
 
+	// Resolve the owner before anything is written. A missing/archived Bot or an
+	// unwired ownership seam is refused here: the fire must not fall back to an
+	// unowned session (the runtime refuses to run one), and no turn is written.
+	bot, err := e.resolveBot(ctx, ownerTenant, rt.spec.BotID)
+	if err != nil {
+		return e.refuseFire(rt, id, req, "", err)
+	}
+	// A manual fire records the human/service account that asked; unattended
+	// fires record the Bot's own account as the service actor.
+	createdBy := bot.AccountID
+	if req.Reason == "manual" && req.CreatedByAccountID != uuid.Nil {
+		createdBy = req.CreatedByAccountID
+	}
+	if err := e.createOwnedSession(ctx, TriggerSessionOwnership{
+		TenantID:           ownerTenant,
+		SessionID:          sessionID,
+		BotID:              bot.BotID,
+		AccountID:          bot.AccountID,
+		CreatedByAccountID: createdBy,
+	}); err != nil {
+		return e.refuseFire(rt, id, req, bot.BotID, err)
+	}
+
 	if e.hooks != nil {
 		payload := HookPayload{
 			Event:     HookTriggerBefore,
@@ -611,13 +752,16 @@ func (e *TriggerEngine) Fire(ctx context.Context, id string, tenantID uuid.UUID,
 			At:        e.now(),
 		}
 		payload.SetData("reason", req.Reason)
+		payload.SetData("botId", bot.BotID)
 		e.hooks.Emit(payload)
 	}
 
 	result := FireResult{
 		TriggerID:      id,
 		IdempotencyKey: req.IdempotencyKey,
+		BotID:          bot.BotID,
 		SessionID:      sessionID.String(),
+		CreatedBy:      createdBy.String(),
 	}
 	var lastErr error
 	for attempt := 1; attempt <= rt.spec.MaxAttempts; attempt++ {
@@ -632,7 +776,12 @@ func (e *TriggerEngine) Fire(ctx context.Context, id string, tenantID uuid.UUID,
 					"id":             id,
 					"idempotencyKey": req.IdempotencyKey,
 					"reason":         req.Reason,
+					"botId":          bot.BotID,
 				},
+				// The fired input names the same Bot the session is owned by, so
+				// the attempt resolves the prompt/tools/model from one fact and
+				// the binding projection records a consistent selection.
+				"selection": map[string]string{"botId": bot.BotID},
 			},
 		})
 		if err == nil {
@@ -676,10 +825,12 @@ func (e *TriggerEngine) Fire(ctx context.Context, id string, tenantID uuid.UUID,
 		TriggerID:      id,
 		Reason:         req.Reason,
 		IdempotencyKey: req.IdempotencyKey,
+		BotID:          bot.BotID,
 		SessionID:      result.SessionID,
 		Seq:            result.Seq,
 		Status:         result.Status,
 		Attempts:       result.Attempts,
+		CreatedBy:      result.CreatedBy,
 		Error:          result.Error,
 		Deduped:        result.Deduped,
 		TaskCardID:     result.TaskCardID,
@@ -708,6 +859,58 @@ func (e *TriggerEngine) Fire(ctx context.Context, id string, tenantID uuid.UUID,
 		return result, fmt.Errorf("%w: %v", ErrTriggerStartFailed, lastErr)
 	}
 	return result, nil
+}
+
+// resolveBot validates the trigger's Bot against the firing tenant. A resolver
+// that is not wired is fail closed, never "run without an owner".
+func (e *TriggerEngine) resolveBot(ctx context.Context, tenantID uuid.UUID, botID string) (TriggerBot, error) {
+	if e.bots == nil {
+		return TriggerBot{}, ErrTriggerBotUnavailable
+	}
+	bot, err := e.bots.ResolveTriggerBot(ctx, tenantID, botID)
+	if err != nil {
+		return TriggerBot{}, err
+	}
+	if bot.TenantID == uuid.Nil || bot.AccountID == uuid.Nil || strings.TrimSpace(bot.BotID) == "" {
+		return TriggerBot{}, fmt.Errorf("%w: bot %q resolved without a tenant/account", ErrTriggerBotMissing, botID)
+	}
+	if bot.TenantID != tenantID {
+		return TriggerBot{}, fmt.Errorf("%w: bot %q is not in tenant %s", ErrTriggerBotTenant, botID, tenantID)
+	}
+	return bot, nil
+}
+
+// createOwnedSession writes the fired session's ownership. A deployment without
+// the seam refuses the fire rather than creating an unowned session.
+func (e *TriggerEngine) createOwnedSession(ctx context.Context, ownership TriggerSessionOwnership) error {
+	if e.ownership == nil {
+		return ErrTriggerBotUnavailable
+	}
+	return e.ownership.CreateOwnedSession(ctx, ownership)
+}
+
+// refuseFire records a fire that the ownership gate refused before any turn
+// was written. The failure is visible in the trigger's audit and returned to
+// the caller; the key is not remembered as fired, so a retry after the Bot is
+// fixed can still succeed.
+func (e *TriggerEngine) refuseFire(rt *triggerRuntime, id string, req FireRequest, botID string, err error) (FireResult, error) {
+	result := FireResult{
+		TriggerID:      id,
+		Status:         "refused",
+		IdempotencyKey: req.IdempotencyKey,
+		BotID:          botID,
+		Error:          err.Error(),
+	}
+	e.record(rt, AuditEntry{
+		At:             e.now(),
+		TriggerID:      id,
+		Reason:         req.Reason,
+		IdempotencyKey: req.IdempotencyKey,
+		BotID:          botID,
+		Status:         result.Status,
+		Error:          result.Error,
+	})
+	return result, err
 }
 
 // List returns every trigger's state, sorted by id.

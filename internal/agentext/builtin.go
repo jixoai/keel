@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,10 +33,15 @@ const (
 // ExamplePluginOptions configures the example plugin.
 type ExamplePluginOptions struct {
 	// TenantID + Interval (both set) add an enabled interval trigger, which is
-	// useful for a demo scheduler; without both, only the webhook trigger is
-	// declared.
+	// useful for a demo scheduler.
 	TenantID string
 	Interval time.Duration
+	// BotID is the Bot the example triggers fire as. Every trigger must have a
+	// Bot owner, so the plugin declares no trigger while this is empty: the
+	// alternative is a plugin that fails every activation (or, worse, an
+	// unowned session the runtime refuses). `keel serve --example-bot-id`
+	// (KEEL_EXAMPLE_BOT_ID) supplies it after the operator creates the Bot.
+	BotID string
 	// Prompt overrides the webhook turn text.
 	Prompt string
 	// WebhookSecret configures the ping trigger's HMAC key directly. Tests use
@@ -61,26 +67,35 @@ func NewExamplePlugin(opts ExamplePluginOptions) *Plugin {
 	if prompt == "" {
 		prompt = "Example plugin ping: confirm the extension surface is live."
 	}
-	triggers := []TriggerSpec{{
-		ID:               ExamplePingTriggerID,
-		Kind:             TriggerWebhook,
-		Prompt:           prompt,
-		Enabled:          true,
-		Owner:            ExamplePluginID,
-		Schedule:         "",
-		WebhookSecret:    opts.WebhookSecret,
-		WebhookSecretEnv: opts.WebhookSecretEnv,
-	}}
-	if opts.Interval > 0 && opts.TenantID != "" {
+	triggers := make([]TriggerSpec, 0, 2)
+	if botID := strings.TrimSpace(opts.BotID); botID != "" {
 		triggers = append(triggers, TriggerSpec{
-			ID:       ExamplePluginID + ".heartbeat",
-			Kind:     TriggerInterval,
-			Schedule: opts.Interval.String(),
-			Prompt:   "Heartbeat from the example plugin.",
-			TenantID: opts.TenantID,
-			Enabled:  true,
-			Owner:    ExamplePluginID,
+			ID:               ExamplePingTriggerID,
+			Kind:             TriggerWebhook,
+			Prompt:           prompt,
+			BotID:            botID,
+			Enabled:          true,
+			Owner:            ExamplePluginID,
+			Schedule:         "",
+			WebhookSecret:    opts.WebhookSecret,
+			WebhookSecretEnv: opts.WebhookSecretEnv,
 		})
+		if opts.Interval > 0 && opts.TenantID != "" {
+			triggers = append(triggers, TriggerSpec{
+				ID:       ExamplePluginID + ".heartbeat",
+				Kind:     TriggerInterval,
+				Schedule: opts.Interval.String(),
+				Prompt:   "Heartbeat from the example plugin.",
+				BotID:    botID,
+				TenantID: opts.TenantID,
+				Enabled:  true,
+				Owner:    ExamplePluginID,
+			})
+		}
+	}
+	triggerIDs := make([]string, 0, len(triggers))
+	for _, trigger := range triggers {
+		triggerIDs = append(triggerIDs, trigger.ID)
 	}
 
 	return &Plugin{
@@ -120,7 +135,7 @@ func NewExamplePlugin(opts ExamplePluginOptions) *Plugin {
 					"uptimeMs": uptime,
 					"ticks":    currentTicks,
 					"hooks":    audit.counts(),
-					"triggers": []string{ExamplePingTriggerID},
+					"triggers": triggerIDs,
 				}
 				raw, _ := json.Marshal(body)
 				return agentcore.AgentToolResult{

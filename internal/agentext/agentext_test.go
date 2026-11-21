@@ -289,28 +289,104 @@ func (s *countingStarter) last() StartTurnRequest {
 	return s.starts[len(s.starts)-1]
 }
 
+// fakeTriggerBot resolves every handle inside the requested tenant, so a unit
+// test can fire a tenantless trigger from any tenant without a store.
+type fakeTriggerBot struct {
+	mu       sync.Mutex
+	botID    string
+	account  uuid.UUID
+	err      error
+	resolved []uuid.UUID
+}
+
+func (f *fakeTriggerBot) ResolveTriggerBot(_ context.Context, tenantID uuid.UUID, botID string) (TriggerBot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resolved = append(f.resolved, tenantID)
+	if f.err != nil {
+		return TriggerBot{}, f.err
+	}
+	id := f.botID
+	if id == "" {
+		id = botID
+	}
+	return TriggerBot{TenantID: tenantID, BotID: id, AccountID: f.account}, nil
+}
+
+// recordingTriggerOwner records the ownership tuples the engine writes.
+type recordingTriggerOwner struct {
+	mu      sync.Mutex
+	created []TriggerSessionOwnership
+	err     error
+}
+
+func (o *recordingTriggerOwner) CreateOwnedSession(_ context.Context, ownership TriggerSessionOwnership) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.err != nil {
+		return o.err
+	}
+	o.created = append(o.created, ownership)
+	return nil
+}
+
+func (o *recordingTriggerOwner) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.created)
+}
+
+func (o *recordingTriggerOwner) last() TriggerSessionOwnership {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.created) == 0 {
+		return TriggerSessionOwnership{}
+	}
+	return o.created[len(o.created)-1]
+}
+
 func TestTriggerManualFireIdempotent(t *testing.T) {
 	starter := &countingStarter{}
 	hooks := NewHookBus(HookBusOptions{Logger: testLogger()})
 	defer hooks.Close()
-	engine := NewTriggerEngine(TriggerEngineOptions{Starter: starter, Hooks: hooks, Logger: testLogger()})
+	ownerAccount := uuid.New()
+	tbots := &fakeTriggerBot{botID: "bot-a", account: ownerAccount}
+	owner := &recordingTriggerOwner{}
+	engine := NewTriggerEngine(TriggerEngineOptions{
+		Starter: starter, Hooks: hooks, Logger: testLogger(), Bots: tbots, Ownership: owner,
+	})
 	defer engine.Close()
 	tenant := uuid.New()
+	caller := uuid.New()
 	if _, err := engine.Register(TriggerSpec{
-		ID: "test.ping", Kind: TriggerWebhook, Prompt: "ping", Enabled: true,
+		ID: "test.ping", Kind: TriggerWebhook, BotID: "bot-a", Prompt: "ping", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	first, err := engine.Fire(context.Background(), "test.ping", tenant, FireRequest{IdempotencyKey: "k1", Reason: "manual"})
+	first, err := engine.Fire(context.Background(), "test.ping", tenant, FireRequest{
+		IdempotencyKey: "k1", Reason: "manual", CreatedByAccountID: caller,
+	})
 	if err != nil || first.Status != "fired" || first.Deduped {
 		t.Fatalf("first fire: %+v err=%v", first, err)
 	}
-	second, err := engine.Fire(context.Background(), "test.ping", tenant, FireRequest{IdempotencyKey: "k1", Reason: "manual"})
+	if first.BotID != "bot-a" || first.CreatedBy != caller.String() {
+		t.Fatalf("fire provenance = %+v", first)
+	}
+	written := owner.last()
+	if written.BotID != "bot-a" || written.AccountID != ownerAccount || written.CreatedByAccountID != caller {
+		t.Fatalf("ownership = %+v", written)
+	}
+	if written.TenantID != tenant || written.SessionID.String() != first.SessionID {
+		t.Fatalf("ownership tenant/session = %+v, fire = %+v", written, first)
+	}
+	second, err := engine.Fire(context.Background(), "test.ping", tenant, FireRequest{
+		IdempotencyKey: "k1", Reason: "manual", CreatedByAccountID: caller,
+	})
 	if err != nil || !second.Deduped || second.SessionID != first.SessionID {
 		t.Fatalf("dedupe: %+v err=%v", second, err)
 	}
-	if starter.count() != 1 {
-		t.Fatalf("the same idempotency key started %d turns", starter.count())
+	if starter.count() != 1 || owner.count() != 1 {
+		t.Fatalf("the same idempotency key started %d turns / wrote %d ownerships", starter.count(), owner.count())
 	}
 	request := starter.last()
 	if request.RequestID != "trigger:test.ping:k1" {
@@ -318,8 +394,12 @@ func TestTriggerManualFireIdempotent(t *testing.T) {
 	}
 	// The durable provenance travels inside the committed user.message payload.
 	triggerMark, ok := request.Extras["trigger"].(map[string]any)
-	if !ok || triggerMark["id"] != "test.ping" || triggerMark["idempotencyKey"] != "k1" {
+	if !ok || triggerMark["id"] != "test.ping" || triggerMark["idempotencyKey"] != "k1" || triggerMark["botId"] != "bot-a" {
 		t.Fatalf("trigger provenance missing: %#v", request.Extras)
+	}
+	selection, ok := request.Extras["selection"].(map[string]string)
+	if !ok || selection["botId"] != "bot-a" {
+		t.Fatalf("selection fact = %#v", request.Extras["selection"])
 	}
 	if _, err := engine.Fire(context.Background(), "test.ping", tenant, FireRequest{Reason: "webhook"}); !errors.Is(err, ErrTriggerKeyRequired) {
 		t.Fatalf("webhook without key: %v", err)
@@ -327,10 +407,14 @@ func TestTriggerManualFireIdempotent(t *testing.T) {
 	if _, err := engine.Fire(context.Background(), "missing", tenant, FireRequest{IdempotencyKey: "x"}); !errors.Is(err, ErrTriggerNotFound) {
 		t.Fatalf("unknown trigger: %v", err)
 	}
-	if _, err := engine.Fire(context.Background(), "test.ping", uuid.New(), FireRequest{IdempotencyKey: "k1"}); err != nil {
-		// The trigger is tenantless, so any tenant can fire it; the session is
-		// derived per tenant+key, so this is a different target, not a dedupe.
+	// A tenantless trigger resolves its handle inside the firing tenant; the
+	// deterministic session is per tenant+key, so this is a different target.
+	otherTenant := uuid.New()
+	if _, err := engine.Fire(context.Background(), "test.ping", otherTenant, FireRequest{IdempotencyKey: "k1"}); err != nil {
 		t.Fatalf("tenantless trigger fire: %v", err)
+	}
+	if owner.last().TenantID != otherTenant || owner.last().BotID != "bot-a" {
+		t.Fatalf("tenantless ownership resolved in the wrong tenant: %+v", owner.last())
 	}
 	status, ok := engine.Get("test.ping")
 	if !ok || status.Fires != 2 || len(status.Audit) == 0 {
@@ -342,10 +426,12 @@ func TestTriggerRetriesAndFailure(t *testing.T) {
 	starter := &countingStarter{err: kernel.ErrStoreFailure, failFor: 2}
 	engine := NewTriggerEngine(TriggerEngineOptions{
 		Starter: starter, Logger: testLogger(), DefaultBackoff: time.Millisecond,
+		Bots:      &fakeTriggerBot{botID: "bot-a", account: uuid.New()},
+		Ownership: &recordingTriggerOwner{},
 	})
 	defer engine.Close()
 	tenant := uuid.New()
-	if _, err := engine.Register(TriggerSpec{ID: "retry", Kind: TriggerWebhook, Prompt: "x", Enabled: true, MaxAttempts: 3}); err != nil {
+	if _, err := engine.Register(TriggerSpec{ID: "retry", Kind: TriggerWebhook, BotID: "bot-a", Prompt: "x", Enabled: true, MaxAttempts: 3}); err != nil {
 		t.Fatal(err)
 	}
 	// Two failures then success: the retry budget covers it.
@@ -365,6 +451,110 @@ func TestTriggerRetriesAndFailure(t *testing.T) {
 	status, _ := engine.Get("retry")
 	if status.Failures != 1 || status.LastStatus != "failed" {
 		t.Fatalf("failure not visible: %+v", status)
+	}
+}
+
+func TestTriggerRegistrationRequiresAndValidatesBot(t *testing.T) {
+	engine := NewTriggerEngine(TriggerEngineOptions{Logger: testLogger()})
+	defer engine.Close()
+	if _, err := engine.Register(TriggerSpec{ID: "no-bot", Kind: TriggerWebhook, Prompt: "p", Enabled: true}); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("register without bot = %v, want ErrInvalidTrigger", err)
+	}
+	if _, err := engine.Register(TriggerSpec{ID: "blank-bot", Kind: TriggerWebhook, BotID: "  ", Prompt: "p", Enabled: true}); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("register with blank bot = %v, want ErrInvalidTrigger", err)
+	}
+
+	tenant := uuid.New()
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"missing", ErrTriggerBotMissing},
+		{"archived", ErrTriggerBotArchived},
+		{"other tenant", ErrTriggerBotTenant},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := NewTriggerEngine(TriggerEngineOptions{
+				Logger: testLogger(),
+				Bots:   &fakeTriggerBot{err: tc.err},
+			})
+			defer engine.Close()
+			_, err := engine.Register(TriggerSpec{
+				ID: "bad-bot", Kind: TriggerWebhook, TenantID: tenant.String(),
+				BotID: "bot-a", Prompt: "p", Enabled: true,
+			})
+			if !errors.Is(err, ErrInvalidTrigger) || !errors.Is(err, tc.err) {
+				t.Fatalf("register = %v, want ErrInvalidTrigger wrapping %v", err, tc.err)
+			}
+			if got := engine.List(); len(got) != 0 {
+				t.Fatalf("a refused trigger was registered: %+v", got)
+			}
+		})
+	}
+}
+
+func TestTriggerFireRefusesWithoutUsableBot(t *testing.T) {
+	tenant := uuid.New()
+	cases := []struct {
+		name       string
+		bots       TriggerBotResolver
+		owner      TriggerSessionOwner
+		want       error
+		wantStatus string
+	}{
+		{
+			name: "missing bot", bots: &fakeTriggerBot{err: ErrTriggerBotMissing},
+			owner: &recordingTriggerOwner{}, want: ErrTriggerBotMissing, wantStatus: "refused",
+		},
+		{
+			name: "archived bot", bots: &fakeTriggerBot{err: ErrTriggerBotArchived},
+			owner: &recordingTriggerOwner{}, want: ErrTriggerBotArchived, wantStatus: "refused",
+		},
+		{
+			name: "ownership not wired", bots: &fakeTriggerBot{botID: "bot-a", account: uuid.New()},
+			want: ErrTriggerBotUnavailable, wantStatus: "refused",
+		},
+		{
+			name:  "bot resolver not wired",
+			owner: &recordingTriggerOwner{}, want: ErrTriggerBotUnavailable, wantStatus: "refused",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			starter := &countingStarter{}
+			engine := NewTriggerEngine(TriggerEngineOptions{
+				Starter: starter, Logger: testLogger(), Bots: tc.bots, Ownership: tc.owner,
+			})
+			defer engine.Close()
+			// Registration is structural when the resolver is unwired; the fire
+			// is the fail-closed half.
+			if _, err := engine.Register(TriggerSpec{
+				ID: "guarded", Kind: TriggerWebhook, BotID: "bot-a", Prompt: "p", Enabled: true,
+			}); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			result, err := engine.Fire(context.Background(), "guarded", tenant, FireRequest{IdempotencyKey: "k"})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("fire = %v, want %v", err, tc.want)
+			}
+			if result.Status != tc.wantStatus {
+				t.Fatalf("result status = %q, want %q", result.Status, tc.wantStatus)
+			}
+			if starter.count() != 0 {
+				t.Fatalf("a refused fire started %d turns", starter.count())
+			}
+			if owner, ok := tc.owner.(*recordingTriggerOwner); ok && owner.count() != 0 {
+				t.Fatalf("a refused fire wrote %d sessions", owner.count())
+			}
+			status, ok := engine.Get("guarded")
+			if !ok || status.Failures != 1 || status.LastStatus != "refused" || len(status.Audit) != 1 {
+				t.Fatalf("refusal audit = %+v", status)
+			}
+			if status.Audit[0].Error == "" {
+				t.Fatal("refusal audit carries no reason")
+			}
+		})
 	}
 }
 
@@ -396,7 +586,7 @@ func TestPluginAssemblyUnloadOrderAndPending(t *testing.T) {
 			record("hook")
 			return nil
 		}}},
-		Triggers: []TriggerSpec{{ID: "provider.webhook", Kind: TriggerWebhook, Prompt: "p", Enabled: true}},
+		Triggers: []TriggerSpec{{ID: "provider.webhook", Kind: TriggerWebhook, BotID: "test-bot", Prompt: "p", Enabled: true}},
 		Effects: []Effect{
 			{Name: "first", Stop: func(context.Context) error { record("effect:first"); return nil }},
 			{Name: "second", Stop: func(context.Context) error { record("effect:second"); return nil }},

@@ -1,7 +1,7 @@
 id: keel.example
 version: 1.0.0
 kind: in-process
-description: "Built-in example plugin: two tools, three hook subscriptions and a webhook trigger that starts a real turn."
+description: "Built-in example plugin: two tools, three hook subscriptions and a webhook trigger that starts a real turn as the configured Bot."
 engines:
   keel: ">=0.1.0 <1.0.0"
 provides:
@@ -13,6 +13,9 @@ provides:
     - decision.answered
     - subagent.finished
   triggers:
+    # The trigger's botId is declared by the plugin code (TriggerSpec.BotID)
+    # and supplied by `keel serve --example-bot-id`; a manifest lists trigger
+    # ids only, so it cannot carry executable trigger configuration.
     - keel.example.ping
 permissions:
   tools:

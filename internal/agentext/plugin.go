@@ -420,7 +420,7 @@ func (r *Runtime) activate(ctx context.Context, plugin *Plugin) (*activatedPlugi
 				entry.cleanup(ctx, r.log)
 				return nil, fmt.Errorf("trigger %s needs a tenantId", spec.ID)
 			}
-			stop, err := r.triggers.Register(spec)
+			stop, err := r.triggers.RegisterContext(ctx, spec)
 			if err != nil {
 				entry.cleanup(ctx, r.log)
 				return nil, fmt.Errorf("trigger %s: %w", spec.ID, err)
