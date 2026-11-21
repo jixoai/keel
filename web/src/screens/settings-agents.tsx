@@ -1169,7 +1169,7 @@ function TeamCard(props: { team: () => AgentTeamView }) {
             <If when={members().length === 0}>
               <Text style={factText}>只有队长</Text>
             </If>
-            <Each of={members().slice(0, 6)} key={(member) => member.agentId}>
+            <Each of={members().slice(0, 6)} key={(member, index) => memberKeyOf(member, index)}>
               {(member) => (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: space.xxs, maxWidth: 150 }}>
                   <Avatar
