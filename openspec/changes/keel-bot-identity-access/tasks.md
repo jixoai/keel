@@ -44,6 +44,8 @@
 - [x] bootstrap/token/首次改密/超管不可删除/CLI 恢复（L17）
 - [x] Bot API key：`(account_id, bot_id)` 绑定、一次性明文、轮换/吊销、认证后以 Bot 身份行动（L18）
 - [x] 旧入口负控：旧 cookie 401、旧 API key 401、旧口令 401
+- [x] 改密端点失败节流（P2-3）：独立 limiter key，4 次失败 429
+- [ ] 反代可信 IP / 限速（P2-4）：`KEEL_TRUST_PROXY` opt-in 或部署文档钉死反代侧限流
 - [ ] 账号 HTTP `/v1/accounts`（A4 接权限后暴露；A2 只有 service/store）
 
 ## A3 权限引擎
