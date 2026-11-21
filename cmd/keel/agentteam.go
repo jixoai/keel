@@ -249,14 +249,14 @@ func extractAuthFlags(args []string) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
-		value := ""
-		name := arg
+		name, value := arg, ""
+		inlineValue := false
 		if before, after, found := strings.Cut(arg, "="); found {
-			name, value = before, after
+			name, value, inlineValue = before, after, true
 		}
 		switch name {
 		case "--username", "-username":
-			if value == "" {
+			if !inlineValue {
 				if index+1 >= len(args) {
 					return nil, errors.New("--username needs a value")
 				}
@@ -265,7 +265,7 @@ func extractAuthFlags(args []string) ([]string, error) {
 			}
 			cliAuthUsername = strings.TrimSpace(value)
 		case "--password-file", "-password-file":
-			if value == "" {
+			if !inlineValue {
 				if index+1 >= len(args) {
 					return nil, errors.New("--password-file needs a path")
 				}
