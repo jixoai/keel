@@ -473,32 +473,67 @@ func (s *Store) ResetAccountPassword(ctx context.Context, tenantID uuid.UUID, us
 	if tenantID == uuid.Nil || username == "" || strings.TrimSpace(passwordHash) == "" {
 		return AccountRecord{}, invalidIdentity("reset password", "tenant, username and password hash are required")
 	}
+	return s.resetAccountPassword(ctx, tenantID, uuid.Nil, username, passwordHash, uuid.Nil, "local-cli", strings.TrimSpace(actor))
+}
+
+// ResetAccountPasswordByID is the administrator reset path (HTTP
+// POST /v1/accounts/{id}/password-reset). It has exactly the CLI reset
+// semantics: the new credential is temporary, every live session is revoked and
+// a password.reset event (not password.changed) makes the next login require a
+// change. actor is the administrator performing the reset; the event carries it
+// in actor_account_id.
+func (s *Store) ResetAccountPasswordByID(ctx context.Context, tenantID, accountID uuid.UUID,
+	passwordHash string, actor uuid.UUID) (AccountRecord, error) {
+	if tenantID == uuid.Nil || accountID == uuid.Nil || strings.TrimSpace(passwordHash) == "" {
+		return AccountRecord{}, invalidIdentity("reset password", "tenant, account and password hash are required")
+	}
+	return s.resetAccountPassword(ctx, tenantID, accountID, "", passwordHash, actor, "admin", "")
+}
+
+// resetAccountPassword is the shared transaction. Exactly one of accountID and
+// username selects the target: the tenant predicate is always in the WHERE
+// clause, so a reset can never match another tenant's account.
+func (s *Store) resetAccountPassword(ctx context.Context, tenantID, accountID uuid.UUID, username,
+	passwordHash string, actor uuid.UUID, by, actorLabel string) (AccountRecord, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return AccountRecord{}, identityWriteError("reset password", err)
 	}
 	defer tx.Rollback(ctx)
-	record, err := scanAccountRow(tx.QueryRow(ctx,
-		`UPDATE accounts SET password_hash = $3, updated_at = now()
-		  WHERE tenant_id = $1 AND lower(username) = lower($2)
-		  RETURNING tenant_id, account_id, username, display_name, kind,
-		            COALESCE(password_hash, ''), is_super_admin, disabled_at,
-		            created_at, updated_at`, tenantID, username, passwordHash))
+	query := `UPDATE accounts SET password_hash = $3, updated_at = now()
+	           WHERE tenant_id = $1 AND account_id = $2
+	           RETURNING tenant_id, account_id, username, display_name, kind,
+	                     COALESCE(password_hash, ''), is_super_admin, disabled_at,
+	                     created_at, updated_at`
+	var target any = accountID
+	if username != "" {
+		query = `UPDATE accounts SET password_hash = $3, updated_at = now()
+		          WHERE tenant_id = $1 AND lower(username) = lower($2)
+		          RETURNING tenant_id, account_id, username, display_name, kind,
+		                    COALESCE(password_hash, ''), is_super_admin, disabled_at,
+		                    created_at, updated_at`
+		target = username
+	}
+	record, err := scanAccountRow(tx.QueryRow(ctx, query, tenantID, target, passwordHash))
 	if err != nil {
 		return AccountRecord{}, identityWriteError("reset password", err)
 	}
 	if _, err := revokeAccountSessions(ctx, tx, tenantID, record.ID); err != nil {
 		return AccountRecord{}, err
 	}
-	detail, _ := json.Marshal(map[string]any{
-		"by":                   "local-cli",
-		"actor":                strings.TrimSpace(actor),
-		"must_change_password": true,
-	})
+	detail := map[string]any{"by": by, "must_change_password": true}
+	if actorLabel != "" {
+		detail["actor"] = actorLabel
+	}
+	raw, _ := json.Marshal(detail)
+	var actorPtr *uuid.UUID
+	if actor != uuid.Nil {
+		actorPtr = &actor
+	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO auth_events (tenant_id, account_id, kind, result, detail)
-		 VALUES ($1, $2, $3, $4, $5::jsonb)`,
-		tenantID, record.ID, AuthEventPasswordReset, AuthResultOK, detail); err != nil {
+		`INSERT INTO auth_events (tenant_id, account_id, actor_account_id, kind, result, detail)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+		tenantID, record.ID, actorPtr, AuthEventPasswordReset, AuthResultOK, raw); err != nil {
 		return AccountRecord{}, identityWriteError("audit password reset", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

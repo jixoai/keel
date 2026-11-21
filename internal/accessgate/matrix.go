@@ -128,7 +128,9 @@ var rules = []Rule{
 	route(http.MethodGet, "/v1/auth/whoami", ModePublic, ""),
 	// The notification open/pixel links carry a single-use capability token and
 	// deliberately do not require X-Tenant-ID. The unguessable token is the
-	// authority and the row supplies its tenant.
+	// authority: the auth edge must let these two paths through even in
+	// auth=required, the handler answers 401 for a missing/invalid token, and the
+	// row supplies its tenant.
 	route(http.MethodGet, "/v1/notifications/{id}/open", ModePublic, ""),
 	route(http.MethodGet, "/v1/notifications/{id}/pixel", ModePublic, ""),
 	// Compiled-in demo tiles: fixed bytes, no tenant data.
@@ -211,6 +213,21 @@ var rules = []Rule{
 	route(http.MethodGet, "/v1/accounts/{id}/groups", ModeKey, access.KeyAccountRead),
 	route(http.MethodPost, "/v1/accounts/{id}/groups", ModeKey, access.KeyAccountPermissionGrant),
 	route(http.MethodDelete, "/v1/accounts/{id}/groups/{groupId}", ModeKey, access.KeyAccountPermissionGrant),
+
+	// --- identity: roles and profiles --------------------------------------
+	// Both are tenant-level documents. Role never grants authority; Profile is
+	// the Account+Role binding a Bot runs under. A profile rebind moves Bot
+	// owner relations in the same store transaction.
+	route(http.MethodGet, "/v1/roles", ModeKey, access.KeyRoleRead),
+	route(http.MethodPost, "/v1/roles", ModeKey, access.KeyRoleManage),
+	route(http.MethodGet, "/v1/roles/{id}", ModeKey, access.KeyRoleRead),
+	route(http.MethodPatch, "/v1/roles/{id}", ModeKey, access.KeyRoleManage),
+	route(http.MethodDelete, "/v1/roles/{id}", ModeKey, access.KeyRoleManage),
+	route(http.MethodGet, "/v1/profiles", ModeKey, access.KeyProfileRead),
+	route(http.MethodPost, "/v1/profiles", ModeKey, access.KeyProfileManage),
+	route(http.MethodGet, "/v1/profiles/{id}", ModeKey, access.KeyProfileRead),
+	route(http.MethodPatch, "/v1/profiles/{id}", ModeKey, access.KeyProfileManage),
+	route(http.MethodDelete, "/v1/profiles/{id}", ModeKey, access.KeyProfileManage),
 
 	// --- identity: permission groups ---------------------------------------
 	route(http.MethodGet, "/v1/permission-groups", ModeKey, access.KeyPermissionRead),

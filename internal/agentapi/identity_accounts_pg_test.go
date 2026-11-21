@@ -110,6 +110,9 @@ func TestAccountsHTTPSurface(t *testing.T) {
 		"password": "reset-password-456",
 	})
 	wantStatus(t, status, body, http.StatusOK, "reset password")
+	if body["mustChangePassword"] != true {
+		t.Fatalf("reset did not require a password change: %v", body)
+	}
 	stored, err := env.st.GetAccount(context.Background(), env.tenant, carolID)
 	if err != nil {
 		t.Fatal(err)
@@ -119,6 +122,24 @@ func TestAccountsHTTPSurface(t *testing.T) {
 	}
 	if err := auth.VerifyPassword(stored.PasswordHash, "initial-password-123"); err == nil {
 		t.Fatal("old password still verifies after reset")
+	}
+	// The reset records password.reset (not password.changed) and leaves the
+	// account in must-change state until a real password change follows.
+	must, err := env.st.AccountMustChangePassword(context.Background(), env.tenant, carolID)
+	if err != nil || !must {
+		t.Fatalf("must change after reset = %v, err=%v", must, err)
+	}
+	events, err := env.st.ListAuthEvents(context.Background(), env.tenant, store.AuthEventFilter{
+		AccountID: carolID, Kind: store.AuthEventPasswordReset,
+	}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != store.AuthEventPasswordReset || events[0].Result != store.AuthResultOK {
+		t.Fatalf("reset audit rows = %+v", events)
+	}
+	if events[0].ActorAccountID == nil || *events[0].ActorAccountID != env.alice.ID {
+		t.Fatalf("reset audit actor = %v, want alice", events[0].ActorAccountID)
 	}
 
 	// A tenant admin (not a deployment super admin) must not reset the super
@@ -294,6 +315,7 @@ func TestIdentityEndpointCoverageGate(t *testing.T) {
 	for _, key := range []string{
 		access.KeyAccountRead, access.KeyAccountManage, access.KeyAccountCredentialReset,
 		access.KeyAccountPermissionGrant, access.KeyPermissionRead, access.KeyPermissionManage,
+		access.KeyRoleRead, access.KeyRoleManage, access.KeyProfileRead, access.KeyProfileManage,
 		access.KeyBotRead, access.KeyBotCreate, access.KeyBotManage, access.KeyBotInvoke,
 		access.KeyTeamBotRead, access.KeyTeamBotManage,
 	} {

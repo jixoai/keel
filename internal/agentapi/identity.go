@@ -1,9 +1,9 @@
 // Identity and access HTTP surface (change keel-bot-identity-access, A4.1).
 //
-// This file is the shared plumbing of /v1/accounts, /v1/permission-groups,
-// /v1/bots and /v1/team-bots: the authorization seam, the structured 403 body,
-// store-error mapping and the endpoint catalog the permission-coverage gate
-// enumerates.
+// This file is the shared plumbing of /v1/accounts, /v1/roles, /v1/profiles,
+// /v1/permission-groups, /v1/bots and /v1/team-bots: the authorization seam,
+// the structured 403 body, store-error mapping and the endpoint catalog the
+// permission-coverage gate enumerates.
 //
 // Two rules drive the shape:
 //
@@ -329,6 +329,18 @@ var identityEndpointCatalog = []access.Endpoint{
 	{Kind: access.EndpointHTTP, Name: "POST /v1/accounts/{id}/groups", RequiredKey: access.KeyAccountPermissionGrant},
 	{Kind: access.EndpointHTTP, Name: "DELETE /v1/accounts/{id}/groups/{groupId}", RequiredKey: access.KeyAccountPermissionGrant},
 
+	{Kind: access.EndpointHTTP, Name: "GET /v1/roles", RequiredKey: access.KeyRoleRead},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/roles", RequiredKey: access.KeyRoleManage},
+	{Kind: access.EndpointHTTP, Name: "GET /v1/roles/{id}", RequiredKey: access.KeyRoleRead},
+	{Kind: access.EndpointHTTP, Name: "PATCH /v1/roles/{id}", RequiredKey: access.KeyRoleManage},
+	{Kind: access.EndpointHTTP, Name: "DELETE /v1/roles/{id}", RequiredKey: access.KeyRoleManage},
+
+	{Kind: access.EndpointHTTP, Name: "GET /v1/profiles", RequiredKey: access.KeyProfileRead},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/profiles", RequiredKey: access.KeyProfileManage},
+	{Kind: access.EndpointHTTP, Name: "GET /v1/profiles/{id}", RequiredKey: access.KeyProfileRead},
+	{Kind: access.EndpointHTTP, Name: "PATCH /v1/profiles/{id}", RequiredKey: access.KeyProfileManage},
+	{Kind: access.EndpointHTTP, Name: "DELETE /v1/profiles/{id}", RequiredKey: access.KeyProfileManage},
+
 	{Kind: access.EndpointHTTP, Name: "GET /v1/permission-groups", RequiredKey: access.KeyPermissionRead},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/permission-groups", RequiredKey: access.KeyPermissionManage},
 	{Kind: access.EndpointHTTP, Name: "GET /v1/permission-groups/{id}", RequiredKey: access.KeyPermissionRead},
@@ -376,6 +388,18 @@ func (s *Server) identityRoutes() {
 	s.mux.HandleFunc("GET /v1/accounts/{id}/groups", s.listAccountGroups)
 	s.mux.HandleFunc("POST /v1/accounts/{id}/groups", s.addAccountGroup)
 	s.mux.HandleFunc("DELETE /v1/accounts/{id}/groups/{groupId}", s.removeAccountGroup)
+
+	s.mux.HandleFunc("GET /v1/roles", s.listRoles)
+	s.mux.HandleFunc("POST /v1/roles", s.createRole)
+	s.mux.HandleFunc("GET /v1/roles/{id}", s.getRole)
+	s.mux.HandleFunc("PATCH /v1/roles/{id}", s.updateRole)
+	s.mux.HandleFunc("DELETE /v1/roles/{id}", s.deleteRole)
+
+	s.mux.HandleFunc("GET /v1/profiles", s.listProfiles)
+	s.mux.HandleFunc("POST /v1/profiles", s.createProfile)
+	s.mux.HandleFunc("GET /v1/profiles/{id}", s.getProfile)
+	s.mux.HandleFunc("PATCH /v1/profiles/{id}", s.updateProfile)
+	s.mux.HandleFunc("DELETE /v1/profiles/{id}", s.deleteProfile)
 
 	s.mux.HandleFunc("GET /v1/permission-groups", s.listPermissionGroups)
 	s.mux.HandleFunc("POST /v1/permission-groups", s.createPermissionGroup)

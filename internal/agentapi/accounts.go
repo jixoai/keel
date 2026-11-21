@@ -278,9 +278,10 @@ func (s *Server) resetAccountPassword(w http.ResponseWriter, r *http.Request) {
 			"a super admin credential can only be reset by a super admin (or the local CLI)")
 		return
 	}
-	// ChangeAccountPassword revokes every live session of the target and records
-	// password.changed; the new password is never echoed.
-	if _, err := s.cfg.Identity.ChangeAccountPassword(r.Context(), tenantID, accountID, hash, principal.AccountID); err != nil {
+	// The reset is the CLI reset semantics over HTTP: a password.reset event (not
+	// password.changed) revokes every live session and makes the next login
+	// require a password change.
+	if _, err := s.cfg.Identity.ResetAccountPasswordByID(r.Context(), tenantID, accountID, hash, principal.AccountID); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -293,7 +294,8 @@ func (s *Server) resetAccountPassword(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"accountId": accountID.String(), "passwordChanged": true, "sessionsRevoked": true,
+		"accountId": accountID.String(), "passwordChanged": true,
+		"mustChangePassword": true, "sessionsRevoked": true,
 	})
 }
 

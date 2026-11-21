@@ -380,6 +380,64 @@ func (s *Store) UpdateProfile(ctx context.Context, record ProfileRecord) (Profil
 	return updated, nil
 }
 
+// UpdateProfileWithOwner rebinds a profile and, when its account changes, moves
+// the owner relation of every Bot that references it in the same transaction.
+// A Bot's owner is the Account named by its Profile (design §3.3), so leaving
+// the old tuple behind would let the previous account keep authorizing against
+// a Bot that now belongs to someone else.
+func (s *Store) UpdateProfileWithOwner(ctx context.Context, record ProfileRecord, oldAccountID, actor uuid.UUID) (ProfileRecord, error) {
+	if err := validateProfileRecord(record); err != nil {
+		return ProfileRecord{}, err
+	}
+	if record.AccountID != oldAccountID && actor == uuid.Nil {
+		return ProfileRecord{}, invalidIdentity("update profile", "an actor account is required to move bot ownership")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ProfileRecord{}, identityWriteError("update profile", err)
+	}
+	defer tx.Rollback(ctx)
+	updated, err := scanProfileRow(tx.QueryRow(ctx,
+		`UPDATE profiles SET account_id = $3, role_id = $4, updated_at = now()
+		  WHERE tenant_id = $1 AND profile_id = $2
+		  RETURNING tenant_id, profile_id, account_id, role_id, created_at, updated_at`,
+		record.TenantID, record.ID, record.AccountID, record.RoleID))
+	if err != nil {
+		return ProfileRecord{}, identityWriteError("update profile", err)
+	}
+	if record.AccountID != oldAccountID {
+		// The bots table join keeps the move scoped to this profile; the tuple
+		// itself stays in the generic relation table.
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO resource_relations
+			    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+			 SELECT $1, 'bot', b.bot_id, $2, $3, $4, $5
+			   FROM bots b
+			  WHERE b.tenant_id = $1 AND b.profile_id = $6
+			 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+			 DO NOTHING`,
+			record.TenantID, RelationOwner, RelationSubjectAccount,
+			record.AccountID.String(), actor, record.ID); err != nil {
+			return ProfileRecord{}, identityWriteError("move bot owner relation", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM resource_relations r
+			  USING bots b
+			  WHERE r.tenant_id = $1 AND b.tenant_id = $1
+			    AND b.profile_id = $2
+			    AND r.resource_type = 'bot' AND r.resource_id = b.bot_id
+			    AND r.relation = $3 AND r.subject_type = $4 AND r.subject_id = $5`,
+			record.TenantID, record.ID, RelationOwner, RelationSubjectAccount,
+			oldAccountID.String()); err != nil {
+			return ProfileRecord{}, identityWriteError("delete stale bot owner relation", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ProfileRecord{}, identityWriteError("update profile", err)
+	}
+	return updated, nil
+}
+
 // DeleteProfile removes a profile. A bot still bound to it makes the delete
 // ErrConflict; rebind the bot first.
 func (s *Store) DeleteProfile(ctx context.Context, tenantID, profileID uuid.UUID) error {

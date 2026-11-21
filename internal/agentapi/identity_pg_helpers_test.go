@@ -30,6 +30,7 @@ type identityEnv struct {
 	limited store.AccountRecord
 	// botAccount owns support-1; alice owns alice-1.
 	botAccount   store.AccountRecord
+	role         store.RoleRecord
 	aliceBot     store.BotRecord
 	supportBot   store.BotRecord
 	aliceProfile store.ProfileRecord
@@ -125,6 +126,10 @@ func newIdentityEnv(t *testing.T) *identityEnv {
 	aliceProfile, err := st.CreateProfile(ctx, store.ProfileRecord{
 		TenantID: tenant, ID: uuid.New(), AccountID: env.alice.ID, RoleID: role.ID,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.role = role
 	if err != nil {
 		t.Fatal(err)
 	}
