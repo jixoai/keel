@@ -1,2 +1,2 @@
-keel: server refused (409 agent_in_use) at http://127.0.0.1:13610: agent "agent_ref_solo" is the current binding of 1 live session(s): 3b504aa1-f0dd-40c9-b043-b59bf088a1fe; archive or rebind those sessions before archiving it
-  referencing session: 3b504aa1-f0dd-40c9-b043-b59bf088a1fe (state active, run done)
+keel: server refused (409 agent_in_use) at http://127.0.0.1:13610: agent "agent_ref_solo" is the current binding of 1 live session(s): fcb7d56d-8d18-4f83-bb85-19d9eb69c464; archive or rebind those sessions before archiving it
+  referencing session: fcb7d56d-8d18-4f83-bb85-19d9eb69c464 (state active, run done)

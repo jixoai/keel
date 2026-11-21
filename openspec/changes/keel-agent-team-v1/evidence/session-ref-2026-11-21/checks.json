@@ -1,9 +1,9 @@
 {
-  "tenant": "3e654b13-1594-4303-8e59-0d4777221e19",
-  "teamSession": "02f2611a-356b-4a13-bc5a-b792cc6847f8",
-  "agentSession": "3b504aa1-f0dd-40c9-b043-b59bf088a1fe",
-  "concurrencySession": "089e2a55-c422-4aad-997c-24ad185913ce",
-  "projection": "agent_conc_a|8",
+  "tenant": "27f82212-0a91-4788-a0a2-3754794477df",
+  "teamSession": "4090dd58-0b55-4189-bc93-7c03c9494d44",
+  "agentSession": "fcb7d56d-8d18-4f83-bb85-19d9eb69c464",
+  "concurrencySession": "bcb12818-793e-421f-9570-ee2715d1e131",
+  "projection": "agent_conc_b|8",
   "checks": {
     "teamDeleteBlocked409": true,
     "teamArchiveBlocked409": true,

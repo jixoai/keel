@@ -1,2 +1,2 @@
-keel: server refused (409 team_in_use) at http://127.0.0.1:13610: team "team_ref" is the current binding of 1 live session(s): 02f2611a-356b-4a13-bc5a-b792cc6847f8; archive or rebind those sessions before deleting it
-  referencing session: 02f2611a-356b-4a13-bc5a-b792cc6847f8 (state active, run done)
+keel: server refused (409 team_in_use) at http://127.0.0.1:13610: team "team_ref" is the current binding of 1 live session(s): 4090dd58-0b55-4189-bc93-7c03c9494d44; archive or rebind those sessions before deleting it
+  referencing session: 4090dd58-0b55-4189-bc93-7c03c9494d44 (state active, run done)

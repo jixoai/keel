@@ -1,0 +1,47 @@
+# B 轴复核修复验证（2026-11-21）
+
+## P1-1 子代理 spawn 绑定投影
+=== RUN   TestSubagentSpawnCarriesTheMemberBinding
+--- PASS: TestSubagentSpawnCarriesTheMemberBinding (0.54s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentext	0.844s
+
+## P1-1 spawn 后删除 Agent 409
+=== RUN   TestSpawnedSubagentBlocksAgentDeletion
+--- PASS: TestSpawnedSubagentBlocksAgentDeletion (0.11s)
+PASS
+ok  	github.com/jixoai/keel/internal/httpapi	0.357s
+
+## P1-2 / A 轴 P2 有界 references + 归档 CAS + CLI 截断渲染
+=== RUN   TestAgentRecordsCRUDAndTenantIsolation
+--- PASS: TestAgentRecordsCRUDAndTenantIsolation (0.11s)
+=== RUN   TestSessionReferencesAreBounded
+--- PASS: TestSessionReferencesAreBounded (0.10s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	0.386s
+=== RUN   TestSessionReferenceRefusalIsBounded
+--- PASS: TestSessionReferenceRefusalIsBounded (0.00s)
+=== RUN   TestArchivedAgentCannotBeResurrectedByUpdate
+--- PASS: TestArchivedAgentCannotBeResurrectedByUpdate (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/httpapi	0.226s
+=== RUN   TestTeamDeleteRendersSessionReference
+--- PASS: TestTeamDeleteRendersSessionReference (0.00s)
+PASS
+ok  	github.com/jixoai/keel/cmd/keel	0.351s
+
+## 能力树 / 插件 manifest 同步（archive；member list/save 已移除）
+=== RUN   TestAgentPluginTreeCoversSpecCommands
+--- PASS: TestAgentPluginTreeCoversSpecCommands (0.00s)
+=== RUN   TestTeamPluginTreeCoversSpecCommands
+--- PASS: TestTeamPluginTreeCoversSpecCommands (0.00s)
+=== RUN   TestTeamTreeMatchesTeamCLIVocabulary
+--- PASS: TestTeamTreeMatchesTeamCLIVocabulary (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentteam	0.105s
+=== RUN   TestBuiltinManifestsDescribeTheirPlugins
+--- PASS: TestBuiltinManifestsDescribeTheirPlugins (0.03s)
+=== RUN   TestCapabilityPluginsDeclareTheirCLI
+--- PASS: TestCapabilityPluginsDeclareTheirCLI (0.01s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentext	0.336s
