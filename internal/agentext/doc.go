@@ -17,8 +17,11 @@
 //     rows (projected onto the existing tasks bookkeeping table, never a new
 //     event kind) and an answer journal;
 //   - triggers: interval/cron/webhook triggers with an idempotency key, an
-//     audit trail and bounded retries; a fire starts a turn through the edge
-//     commit seam (user.message), so the durable log stays the only truth;
+//     audit trail, bounded retries, HMAC-signed webhook deliveries with a
+//     replay window, per-trigger concurrency caps, a durable catch-up cursor
+//     and an initial task card per fired session; a fire starts a turn through
+//     the edge commit seam (user.message), so the durable log stays the only
+//     truth;
 //   - sub-agents: a spawn primitive that creates an independent child session,
 //     starts its run through the same edge seam, enforces a budget and returns
 //     a structured result to the parent;

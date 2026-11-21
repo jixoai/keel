@@ -1154,6 +1154,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Starter: starter,
 		Hooks:   hooks,
 		Logger:  log,
+		// The durable cursor makes an interval/cron trigger replay what it
+		// missed while the process was down; the task log creates the initial
+		// card as part of a fire (task-log: 会话起步即有卡).
+		State: st,
+		Tasks: taskLog,
 	})
 
 	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, log)
@@ -1334,6 +1339,11 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 			return agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
 				TenantID: opts.TenantID.String(),
 				Interval: opts.ExampleInterval,
+				// A signed webhook delivery proves its origin with this key. The
+				// value is resolved from the environment at registration; without
+				// it the trigger stays fail-closed for signed deliveries and the
+				// manual fire route remains available.
+				WebhookSecretEnv: "KEEL_EXAMPLE_WEBHOOK_SECRET",
 			})
 		},
 		testkit.PluginID: func() *agentext.Plugin { return agentext.NewTestkitPlugin() },

@@ -1,9 +1,11 @@
 package agentapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -70,9 +72,18 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errors.New("triggers are not wired"))
 		return
 	}
+	// Read the raw body once: the HMAC signature covers the exact bytes, so
+	// decoding them and re-marshalling would break every valid signature.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.cfg.MaxBody))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	var body fireTriggerRequest
-	if r.ContentLength != 0 {
-		if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
+	if len(bytes.TrimSpace(raw)) != 0 {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&body); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
@@ -82,12 +93,15 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 		key = r.Header.Get("Idempotency-Key")
 	}
 	reason := body.Reason
-	if reason == "" {
-		if r.Header.Get("X-Keel-Webhook") == "1" {
-			reason = "webhook"
-		} else {
-			reason = "manual"
-		}
+	// A signed request is a webhook delivery even when the sender does not set
+	// the convenience header, and a signature cannot be downgraded by a body
+	// that says "manual": the signature headers are the selector.
+	if r.Header.Get("X-Keel-Webhook") == "1" ||
+		r.Header.Get("X-Keel-Signature") != "" ||
+		r.Header.Get("X-Keel-Timestamp") != "" {
+		reason = "webhook"
+	} else if reason == "" {
+		reason = "manual"
 	}
 	// The reason is provenance written into the turn payload: a closed set, so a
 	// caller cannot dress a manual fire up as a schedule, and bounded.
@@ -102,8 +116,11 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.cfg.Triggers.Fire(r.Context(), triggerID, tenantID, agentext.FireRequest{
-		IdempotencyKey: key,
-		Reason:         reason,
+		IdempotencyKey:   key,
+		Reason:           reason,
+		WebhookTimestamp: r.Header.Get("X-Keel-Timestamp"),
+		WebhookSignature: r.Header.Get("X-Keel-Signature"),
+		WebhookBody:      raw,
 	})
 	if err != nil {
 		switch {
@@ -114,6 +131,15 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, agentext.ErrTriggerKeyRequired),
 			errors.Is(err, agentext.ErrInvalidTrigger):
 			writeErr(w, http.StatusBadRequest, err)
+		case errors.Is(err, agentext.ErrTriggerWebhookUnauthorized):
+			writeErr(w, http.StatusUnauthorized, err)
+		case errors.Is(err, agentext.ErrTriggerWebhookUnconfigured):
+			// Fail closed: a webhook trigger with no HMAC secret accepts no
+			// signed delivery. The tenant still cannot see the (absent) secret.
+			writeErr(w, http.StatusForbidden, err)
+		case errors.Is(err, agentext.ErrTriggerBusy):
+			w.Header().Set("Retry-After", "1")
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": err.Error(), "result": result})
 		case errors.Is(err, kernel.ErrQuota):
 			writeErr(w, http.StatusTooManyRequests, err)
 		case errors.Is(err, agentext.ErrTriggerStartFailed):

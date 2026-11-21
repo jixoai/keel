@@ -16,6 +16,11 @@ import (
 // exists so the extension surface is verified end to end without a third-party
 // plugin, and so an operator can POST /v1/triggers/keel.example.ping/fire on a
 // fresh `keel serve` and watch a real turn start with real audit records.
+//
+// The webhook trigger accepts an unsigned manual fire. Signed deliveries need
+// KEEL_EXAMPLE_WEBHOOK_SECRET (WebhookSecretEnv); without it the trigger is
+// fail-closed for webhook calls, exactly like every other unconfigured webhook
+// trigger.
 const (
 	ExamplePluginID      = "keel.example"
 	ExamplePluginVersion = "1.0.0"
@@ -33,6 +38,13 @@ type ExamplePluginOptions struct {
 	Interval time.Duration
 	// Prompt overrides the webhook turn text.
 	Prompt string
+	// WebhookSecret configures the ping trigger's HMAC key directly. Tests use
+	// it; production sets WebhookSecretEnv instead so no secret is compiled in.
+	WebhookSecret string
+	// WebhookSecretEnv names the environment variable holding the HMAC key.
+	// Unset/empty leaves the trigger fail-closed for signed deliveries; the
+	// manual fire route still works.
+	WebhookSecretEnv string
 }
 
 // NewExamplePlugin builds the built-in example plugin.
@@ -50,12 +62,14 @@ func NewExamplePlugin(opts ExamplePluginOptions) *Plugin {
 		prompt = "Example plugin ping: confirm the extension surface is live."
 	}
 	triggers := []TriggerSpec{{
-		ID:       ExamplePingTriggerID,
-		Kind:     TriggerWebhook,
-		Prompt:   prompt,
-		Enabled:  true,
-		Owner:    ExamplePluginID,
-		Schedule: "",
+		ID:               ExamplePingTriggerID,
+		Kind:             TriggerWebhook,
+		Prompt:           prompt,
+		Enabled:          true,
+		Owner:            ExamplePluginID,
+		Schedule:         "",
+		WebhookSecret:    opts.WebhookSecret,
+		WebhookSecretEnv: opts.WebhookSecretEnv,
 	}}
 	if opts.Interval > 0 && opts.TenantID != "" {
 		triggers = append(triggers, TriggerSpec{
