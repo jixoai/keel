@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -28,6 +30,11 @@ type Manifest interface {
 	// PutSnapshot records the tree hash at an event sequence (fork O(1)).
 	PutSnapshot(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64, tree layerfs.Hash) error
 	Snapshot(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64) (layerfs.Hash, bool, error)
+	// SnapshotAtOrBefore returns the newest snapshot at or before seq. A fork
+	// origin is usually not itself a capture seq; the caller verifies that no
+	// file mutation happened between the returned seq and the origin, which
+	// makes the older tree an exact view of the origin.
+	SnapshotAtOrBefore(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64) (layerfs.Hash, int64, bool, error)
 }
 
 // MemoryManifest is the in-memory manifest (tests and a deployment without the
@@ -128,6 +135,28 @@ func (m *MemoryManifest) Snapshot(_ context.Context, tenantID, sessionID uuid.UU
 	defer m.mu.Unlock()
 	tree, ok := m.snapshots[memoryKey(tenantID, sessionID, fmt.Sprintf("snapshot/%d", seq))]
 	return tree, ok, nil
+}
+
+// SnapshotAtOrBefore implements Manifest.
+func (m *MemoryManifest) SnapshotAtOrBefore(_ context.Context, tenantID, sessionID uuid.UUID, seq int64) (layerfs.Hash, int64, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := memoryKey(tenantID, sessionID, "snapshot/")
+	bestSeq, best := int64(-1), layerfs.Hash("")
+	for key, tree := range m.snapshots {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		candidate, err := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
+		if err != nil || candidate > seq || candidate < bestSeq {
+			continue
+		}
+		bestSeq, best = candidate, tree
+	}
+	if bestSeq < 0 {
+		return "", 0, false, nil
+	}
+	return best, bestSeq, true, nil
 }
 
 // PostgresManifest is the durable projection. It expects the tables in
@@ -308,6 +337,30 @@ func (p *PostgresManifest) Snapshot(ctx context.Context, tenantID, sessionID uui
 		return "", false, err
 	}
 	return tree, true, nil
+}
+
+// SnapshotAtOrBefore implements Manifest.
+func (p *PostgresManifest) SnapshotAtOrBefore(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64) (layerfs.Hash, int64, bool, error) {
+	var (
+		raw     string
+		snapSeq int64
+	)
+	err := p.pool.QueryRow(ctx, `
+		SELECT tree_hash, seq FROM session_snapshot
+		WHERE tenant_id = $1 AND session_id = $2 AND seq <= $3
+		ORDER BY seq DESC LIMIT 1`,
+		tenantID, sessionID, seq).Scan(&raw, &snapSeq)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, fmt.Errorf("fileplugin: read snapshot at or before: %w", err)
+	}
+	tree, err := layerfs.ParseHash(raw)
+	if err != nil {
+		return "", 0, false, err
+	}
+	return tree, snapSeq, true, nil
 }
 
 // SchemaDDL is the exact DDL the file plugin needs. It is intentionally not

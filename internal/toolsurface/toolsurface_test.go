@@ -9,12 +9,14 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/mcp"
+	"github.com/jixoai/keel/internal/placement"
 	"github.com/jixoai/keel/internal/skills"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -412,16 +414,34 @@ func TestSkillsActions(t *testing.T) {
 }
 
 type fakeAgents struct {
-	scope   agentext.RunScope
-	args    json.RawMessage
-	result  agentext.SubagentResult
-	records []agentext.SubagentRecord
+	scope        agentext.RunScope
+	args         json.RawMessage
+	result       agentext.SubagentResult
+	resumeResult agentext.ResumeResult
+	cancelResult agentext.CancelResult
+	records      []agentext.SubagentRecord
+	err          error
 }
 
 func (f *fakeAgents) Spawn(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.SubagentResult, error) {
 	f.scope = scope
 	f.args = append(json.RawMessage(nil), args...)
-	return f.result, nil
+	return f.result, f.err
+}
+func (f *fakeAgents) Fork(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.SubagentResult, error) {
+	f.scope = scope
+	f.args = append(json.RawMessage(nil), args...)
+	return f.result, f.err
+}
+func (f *fakeAgents) Resume(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.ResumeResult, error) {
+	f.scope = scope
+	f.args = append(json.RawMessage(nil), args...)
+	return f.resumeResult, f.err
+}
+func (f *fakeAgents) Cancel(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.CancelResult, error) {
+	f.scope = scope
+	f.args = append(json.RawMessage(nil), args...)
+	return f.cancelResult, f.err
 }
 func (f *fakeAgents) List(uuid.UUID, *uuid.UUID) []agentext.SubagentRecord { return f.records }
 func (f *fakeAgents) Get(sessionID uuid.UUID) (agentext.SubagentRecord, bool) {
@@ -469,12 +489,50 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 	if problem := errorDocument(t, outside); problem["code"] != toolsurface.CodeRunScopeMissing {
 		t.Fatalf("unscoped spawn = %v", problem)
 	}
-	for _, action := range []string{"fork", "resume", "cancel"} {
-		reserved := runAction(t, registry[toolsurface.Agent], `{"action":"`+action+`"}`)
-		if problem := errorDocument(t, reserved); problem["code"] != toolsurface.CodeNotImplemented {
-			t.Fatalf("agent.%s = %v", action, problem)
-		}
+
+	// fork/resume/cancel are live actions (W8), not reserved stubs. Each one
+	// reaches the backend with the ambient parent scope.
+	backend.result = agentext.SubagentResult{Status: "done", Summary: "forked", SessionID: uuid.NewString()}
+	forked, err := registry[toolsurface.Agent].Execute(ctx, "call-2",
+		json.RawMessage(`{"action":"fork","eventSeq":42,"task":"branch"}`), nil)
+	if err != nil || (forked.IsError != nil && *forked.IsError) {
+		t.Fatalf("agent fork = %#v err=%v", forked, err)
 	}
+	var forkArgs struct {
+		EventSeq int64  `json:"eventSeq"`
+		Task     string `json:"task"`
+	}
+	if err := json.Unmarshal(backend.args, &forkArgs); err != nil || forkArgs.EventSeq != 42 || forkArgs.Task != "branch" {
+		t.Fatalf("fork request = %+v err=%v", forkArgs, err)
+	}
+	if backend.scope.SessionID != parent {
+		t.Fatalf("fork scope = %+v", backend.scope)
+	}
+	backend.resumeResult = agentext.ResumeResult{Status: "resumed", SessionID: uuid.NewString(), EventSeq: 9}
+	resumed, err := registry[toolsurface.Agent].Execute(ctx, "call-3",
+		json.RawMessage(`{"action":"resume","sessionId":"`+backend.resumeResult.SessionID+`","requestId":"r1"}`), nil)
+	if err != nil || !strings.Contains(agentcore.ContentToText(resumed.Content), `"status":"resumed"`) {
+		t.Fatalf("agent resume = %#v err=%v", resumed, err)
+	}
+	backend.cancelResult = agentext.CancelResult{Status: "cancelled", RunStatus: "cancelled", Cancelled: true}
+	cancelled, err := registry[toolsurface.Agent].Execute(ctx, "call-4",
+		json.RawMessage(`{"action":"cancel","sessionId":"`+backend.resumeResult.SessionID+`"}`), nil)
+	if err != nil || !strings.Contains(agentcore.ContentToText(cancelled.Content), `"status":"cancelled"`) {
+		t.Fatalf("agent cancel = %#v err=%v", cancelled, err)
+	}
+
+	// A fork origin without an exact snapshot is its own typed code: the model
+	// must not read it as a generic backend failure.
+	backend.err = agentext.ErrForkSnapshotMissing
+	snapshotMissing, err := registry[toolsurface.Agent].Execute(ctx, "call-5",
+		json.RawMessage(`{"action":"fork","eventSeq":7}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problem := errorDocument(t, snapshotMissing); problem["code"] != toolsurface.CodeForkSnapshotMissing {
+		t.Fatalf("fork snapshot missing = %v", problem)
+	}
+	backend.err = nil
 }
 
 func TestAgentListAndStatusStayInTheParent(t *testing.T) {
@@ -826,5 +884,31 @@ func TestMCPCallDetailsBoundStructuredContent(t *testing.T) {
 	}
 	if len(details.StructuredContent) > 256 {
 		t.Fatalf("details.structuredContent = %d bytes, want a bounded marker", len(details.StructuredContent))
+	}
+}
+
+// TestAgentCapacityRefusalIsTyped pins the W8 slot vocabulary: a full group or
+// spent tenant quota reaches the model as capacity_exhausted with retryAfterMs,
+// never as a generic backend_error (the HTTP edge answers 429 + Retry-After for
+// the same typed error).
+func TestAgentCapacityRefusalIsTyped(t *testing.T) {
+	tenant, parent := uuid.New(), uuid.New()
+	backend := &fakeAgents{err: &placement.CapacityError{
+		Reason: placement.CapacityGroup, Resource: "group", TenantID: tenant, SessionID: parent,
+		Limit: 1, Active: 1, RetryAfter: 3 * time.Second,
+	}}
+	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
+	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{TenantID: tenant, SessionID: parent})
+	result, err := registry[toolsurface.Agent].Execute(ctx, "call-1",
+		json.RawMessage(`{"action":"spawn","task":"x"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	problem := errorDocument(t, result)
+	if problem["code"] != toolsurface.CodeCapacity {
+		t.Fatalf("capacity refusal = %v, want %s", problem, toolsurface.CodeCapacity)
+	}
+	if got := fmt.Sprint(problem["retryAfterMs"]); got != "3000" {
+		t.Fatalf("retryAfterMs = %v, want 3000", problem["retryAfterMs"])
 	}
 }

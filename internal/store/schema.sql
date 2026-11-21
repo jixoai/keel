@@ -87,6 +87,27 @@ CREATE INDEX IF NOT EXISTS sessions_bound_team
     ON sessions (tenant_id, bound_team_id)
     WHERE bound_team_id IS NOT NULL;
 
+-- Fork origin (change keel-harness-v2, W8). A forked session inherits the
+-- parent's ledger prefix up to fork_origin_seq and its file view from
+-- fork_tree_hash (a layerfs tree object). The columns are a reference, not a
+-- copy: no parent manifest rows and no bytes are duplicated, which is what
+-- makes fork O(1) and keeps a parent deletion from freeing a child's blobs.
+-- fork_config_hash / fork_tool_manifest_hash / fork_anchor_seq freeze the
+-- parent attempt's run snapshot values at the origin, so the child can answer
+-- "which configuration did I inherit" without replaying the parent log.
+-- RLS: the columns live on sessions, which already carries FORCE ROW LEVEL
+-- SECURITY and the tenant_isolation policy; no new table or policy is needed.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS fork_parent_session_id uuid;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS fork_origin_seq bigint NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS fork_tree_hash text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS fork_config_hash text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS fork_tool_manifest_hash text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS fork_anchor_seq bigint NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS sessions_fork_parent
+    ON sessions (tenant_id, fork_parent_session_id)
+    WHERE fork_parent_session_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS events (
     tenant_id   uuid NOT NULL,
     session_id  uuid NOT NULL,

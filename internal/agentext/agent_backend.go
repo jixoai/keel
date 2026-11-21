@@ -50,6 +50,31 @@ func (b AgentBackend) Spawn(ctx context.Context, scope RunScope, args json.RawMe
 	return SpawnFromTool(WithRunScope(ctx, scope), runner, args)
 }
 
+func (b AgentBackend) Fork(ctx context.Context, scope RunScope, args json.RawMessage) (SubagentResult, error) {
+	runner, err := b.runner()
+	if err != nil {
+		return SubagentResult{}, err
+	}
+	result, _, err := ForkFromTool(WithRunScope(ctx, scope), runner, args)
+	return result, err
+}
+
+func (b AgentBackend) Resume(ctx context.Context, scope RunScope, args json.RawMessage) (ResumeResult, error) {
+	runner, err := b.runner()
+	if err != nil {
+		return ResumeResult{}, err
+	}
+	return ResumeFromTool(WithRunScope(ctx, scope), runner, args)
+}
+
+func (b AgentBackend) Cancel(ctx context.Context, scope RunScope, args json.RawMessage) (CancelResult, error) {
+	runner, err := b.runner()
+	if err != nil {
+		return CancelResult{}, err
+	}
+	return CancelFromTool(WithRunScope(ctx, scope), runner, args)
+}
+
 func (b AgentBackend) List(tenantID uuid.UUID, parent *uuid.UUID) []SubagentRecord {
 	runner, err := b.runner()
 	if err != nil {

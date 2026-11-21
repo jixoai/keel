@@ -1,0 +1,76 @@
+$ go test -v -count=1 (W8 targeted)
+=== RUN   TestForkPrefixIsAReadTimeUnion
+--- PASS: TestForkPrefixIsAReadTimeUnion (0.00s)
+=== RUN   TestResumeSelectionOverridesTheChildBinding
+--- PASS: TestResumeSelectionOverridesTheChildBinding (0.00s)
+=== RUN   TestCancelAfterCommittedAnswerIsNotAborted
+--- PASS: TestCancelAfterCommittedAnswerIsNotAborted (2.49s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	3.261s
+=== RUN   TestForkCreatesAPrefixSessionCardAndInheritedBinding
+--- PASS: TestForkCreatesAPrefixSessionCardAndInheritedBinding (2.26s)
+=== RUN   TestForkRefusesAnInexactOrigin
+--- PASS: TestForkRefusesAnInexactOrigin (0.60s)
+=== RUN   TestResumeContinuesTheSameSession
+--- PASS: TestResumeContinuesTheSameSession (0.45s)
+=== RUN   TestCancelStopsTheChildInPlace
+--- PASS: TestCancelStopsTheChildInPlace (5.42s)
+=== RUN   TestSubagentReturnCarriesArtifactRefsAndParentNote
+--- PASS: TestSubagentReturnCarriesArtifactRefsAndParentNote (1.31s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentext	10.988s
+=== RUN   TestAgentTeamSchemaContract
+--- PASS: TestAgentTeamSchemaContract (1.41s)
+=== RUN   TestAgentRecordsCRUDAndTenantIsolation
+--- PASS: TestAgentRecordsCRUDAndTenantIsolation (0.38s)
+=== RUN   TestAgentRecordsRejectBadInput
+--- PASS: TestAgentRecordsRejectBadInput (0.13s)
+=== RUN   TestRequeueRunResumesOnlyInterruptedRuns
+--- PASS: TestRequeueRunResumesOnlyInterruptedRuns (0.32s)
+=== RUN   TestSessionForkRoundTripAndRefusals
+--- PASS: TestSessionForkRoundTripAndRefusals (0.11s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	3.098s
+=== RUN   TestForkCreatesANewCardPointingAtTheOrigin
+--- PASS: TestForkCreatesANewCardPointingAtTheOrigin (1.66s)
+=== RUN   TestOriginCardResolvesTheLedgerPosition
+--- PASS: TestOriginCardResolvesTheLedgerPosition (0.40s)
+=== RUN   TestNoteSubagentFinishedLandsOnTheParentCard
+--- PASS: TestNoteSubagentFinishedLandsOnTheParentCard (0.28s)
+PASS
+ok  	github.com/jixoai/keel/internal/tasklog	3.078s
+=== RUN   TestForkFileViewIsAnOverlay
+--- PASS: TestForkFileViewIsAnOverlay (0.06s)
+=== RUN   TestForkCaptureDoesNotCopyInheritedManifestRows
+--- PASS: TestForkCaptureDoesNotCopyInheritedManifestRows (0.07s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	1.035s
+=== RUN   TestLookupPathWalksTheTreeWithoutMaterializing
+--- PASS: TestLookupPathWalksTheTreeWithoutMaterializing (0.06s)
+PASS
+ok  	github.com/jixoai/keel/internal/layerfs	0.745s
+=== RUN   TestAgentSpawnCarriesTheBinding
+--- PASS: TestAgentSpawnCarriesTheBinding (0.00s)
+=== RUN   TestAgentListAndStatusStayInTheParent
+--- PASS: TestAgentListAndStatusStayInTheParent (0.00s)
+=== RUN   TestAgentUnresolvedBackendIsNotWired
+--- PASS: TestAgentUnresolvedBackendIsNotWired (0.00s)
+=== RUN   TestAgentCapacityRefusalIsTyped
+--- PASS: TestAgentCapacityRefusalIsTyped (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/toolsurface	0.817s
+=== RUN   TestCancelIdempotencyAndErrorMapping
+--- PASS: TestCancelIdempotencyAndErrorMapping (0.00s)
+=== RUN   TestCancelUnwiredAnswers501
+--- PASS: TestCancelUnwiredAnswers501 (0.00s)
+=== RUN   TestSubagentCapacityIs429
+--- PASS: TestSubagentCapacityIs429 (0.00s)
+=== RUN   TestResumeRouteAnswersTerminalExplicitly
+--- PASS: TestResumeRouteAnswersTerminalExplicitly (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agentapi	0.514s
+=== RUN   TestGateParentAndChildShareGroupSlots
+--- PASS: TestGateParentAndChildShareGroupSlots (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/placement	0.420s
+exit=0

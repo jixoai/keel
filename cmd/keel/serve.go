@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agentext"
@@ -566,6 +567,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 			}
 			return mcphost.RenderAppContexts(contexts)
 		},
+		// A forked session's transcript prefix is read from the parent log (a
+		// reference, never a copy). The store owns the durable fork fact.
+		ForkPrefixes: st,
 		Options: loadout.Options{
 			ID:             opts.LoadoutID,
 			Revision:       opts.LoadoutRevision,
@@ -941,6 +945,47 @@ func (p *productLayer) close() {
 	}
 }
 
+// forkSnapshots adapts the file plugin's manifest to the sub-agent fork seam.
+// The tree hash travels as its prefixed string form because agentext treats it
+// as an opaque reference.
+type forkSnapshots struct{ manifest fileplugin.Manifest }
+
+func (f forkSnapshots) SnapshotAtOrBefore(ctx context.Context, tenantID, sessionID uuid.UUID, seq int64) (string, int64, bool, error) {
+	tree, snapshotSeq, ok, err := f.manifest.SnapshotAtOrBefore(ctx, tenantID, sessionID, seq)
+	if err != nil || !ok {
+		return "", snapshotSeq, ok, err
+	}
+	return tree.Prefixed(), snapshotSeq, true, nil
+}
+
+// forkCards adapts the task log to the fork card seam (origin resolution and
+// the new card's parentTaskId).
+type forkCards struct{ service *tasklog.Service }
+
+func (f forkCards) OriginCard(ctx context.Context, scope kernel.Scope, seq int64) (uuid.UUID, error) {
+	card, err := f.service.OriginCard(ctx, scope, seq)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return card.TaskID, nil
+}
+
+func (f forkCards) ForkCard(ctx context.Context, origin kernel.Scope, originTaskID uuid.UUID, originSeq int64, target kernel.Scope, title, callID string) (uuid.UUID, error) {
+	card, err := f.service.ForkCard(ctx, origin, originTaskID, originSeq, target, title, callID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return card.TaskID, nil
+}
+
+// runRequeuer adapts the store's run requeue to the sub-agent resume seam.
+type runRequeuer struct{ store *store.Store }
+
+func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RequeueOutcome, error) {
+	outcome, err := r.store.RequeueRun(ctx, tenantID, sessionID)
+	return agentext.RequeueOutcome{Status: outcome.Status, Attempts: outcome.Attempts}, err
+}
+
 // newProductLayer assembles the extension surface over an already-booted
 // service runtime. secretBox (nil when KEEL_SECRET_KEY is unset) enables the
 // settings secret store; secretReason explains its absence to an operator;
@@ -978,6 +1023,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	bindingRecorder := sessionbinding.New(st)
 	starter := agentext.NewTurnStarter(sessions, admission, hooks, log)
 	starter.Bindings = bindingRecorder
+	var forkSnapshotReader agentext.ForkSnapshotReader
+	if opts.FileService != nil {
+		forkSnapshotReader = forkSnapshots{manifest: opts.FileService.Manifest()}
+	}
 	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{
 		Gate:    sessions,
 		Edge:    admission,
@@ -994,6 +1043,21 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// A live child session must block its Agent's delete/archive exactly like
 		// a session started through POST /input (session reference protection).
 		Bindings: bindingRecorder,
+		// Fork/resume (W8): the fork origin is a durable session fact (tree hash
+		// + ledger origin), the card writer points the new card at the origin
+		// card, and resume re-enqueues the same run row.
+		Forks:     st,
+		Snapshots: forkSnapshotReader,
+		Cards:     forkCards{service: taskLog},
+		Requeue:   runRequeuer{store: st},
+		Notes:     taskLog,
+		ConfigVersion: func() (string, int64) {
+			snapshot := rt.Snapshot()
+			if snapshot == nil {
+				return "", 0
+			}
+			return agent.ConfigHashForLoadout(snapshot.LoadoutID, snapshot.Revision), snapshot.Revision
+		},
 	})
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter,
@@ -1428,6 +1492,7 @@ func newFileService(st *store.Store, kern *kernel.Kernel, fileStore *layerfs.Sto
 		Leases:         kern,
 		SessionSurface: surface,
 		SnapshotSource: snapshots,
+		Forks:          st,
 		Logger:         log,
 	})
 	if err != nil {

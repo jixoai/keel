@@ -77,6 +77,13 @@ const (
 	CodeNotWired         = "not_wired"
 	CodeRunScopeMissing  = "run_scope_missing"
 	CodeBackendFailed    = "backend_error"
+	// CodeCapacity is the typed "not now" refusal of a group/tenant slot. It
+	// mirrors the HTTP 429 + Retry-After (W2's admission vocabulary); the model
+	// can read retryAfterMs and decide whether to wait.
+	CodeCapacity = "capacity_exhausted"
+	// CodeForkSnapshotMissing reports a fork origin whose file view is not an
+	// exact captured snapshot. Forking there would invent a file view.
+	CodeForkSnapshotMissing = "fork_snapshot_missing"
 )
 
 // actionInput is the envelope every aggregate tool parses.

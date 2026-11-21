@@ -67,7 +67,12 @@ type Runner struct {
 	// the whole log. It is optional: a test double or a deployment without the
 	// seam falls back to the full committed log.
 	Checkpoints kernel.CheckpointStore
-	Stream      provider.StreamFn
+	// ForkPrefixes, when set, resolves the parent ledger prefix a forked session
+	// inherits. The prefix is read at run time from the parent log (a reference,
+	// never a copy) and prepended to the model transcript; it never participates
+	// in the child's owed-turn/unread-input decisions.
+	ForkPrefixes ForkPrefixReader
+	Stream       provider.StreamFn
 	// ProviderName and Model describe the static model the runner calls; they
 	// are captured into telemetry and logs and stay the identity of a runner
 	// without a Models resolver (the fakestream path and the legacy flat
@@ -517,6 +522,17 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if !owedTurn(events, lease.ReadWatermark) {
 		return res, nil
 	}
+	// A forked session inherits its parent's transcript prefix as a read-time
+	// union: the parent log stays the only storage of those facts, and the
+	// prefix carries negative synthetic seqs so it can never be mistaken for a
+	// child input. It is prepended after the child's own checkpoint summary
+	// because a child compaction summarizes only the child's log.
+	if prefixMsgs, prefixSeqs, err := r.forkPrefixMessages(ctx, lease.Scope); err != nil {
+		return res, err
+	} else if len(prefixMsgs) > 0 {
+		msgs = append(prefixMsgs, msgs...)
+		seqs = append(prefixSeqs, seqs...)
+	}
 
 	// The execution identity of this attempt is resolved from the run's
 	// selection fact before anything is committed: a selection that cannot be
@@ -646,7 +662,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	inputSeqs := make([]int64, 0, len(msgs))
 	if len(seqs) == len(msgs) {
 		for i, m := range msgs {
-			if m.Role() == agentcore.RoleUser {
+			// seq <= 0 marks history that is not a committed child input: the
+			// fork prefix (negative) and an in-process rebuilt tool result (0).
+			if m.Role() == agentcore.RoleUser && seqs[i] > 0 {
 				inputSeqs = append(inputSeqs, seqs[i])
 			}
 		}
@@ -1159,15 +1177,19 @@ func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		switch events[i].Kind {
-		case store.EventRunStarted, store.EventRunFailed, store.EventRunFinished,
-			store.EventCompaction, store.EventExternalEvent,
-			store.EventTaskCreated, store.EventTaskUpdated, store.EventTaskAttached,
-			store.EventTaskDetached, store.EventTaskClosed, store.EventTaskNote:
-			continue
 		case store.EventUserMessage:
 			return true
+		case store.EventAssistantMessage, store.EventToolResult:
+			return newestAssistantHasToolCalls(events)
+		default:
+			// Every non-transcript kind is bookkeeping (run.*, task.*, fs.*,
+			// config.*, placement.*, supervision.*, guardrail.*, resume.attempt,
+			// notification.*). It must not hide an owed input: a resume.attempt
+			// committed after the user.message is exactly the W8 case where the
+			// old "break on anything unknown" rule settled a resumed run without
+			// ever calling the model.
+			continue
 		}
-		break
 	}
 	return newestAssistantHasToolCalls(events)
 }

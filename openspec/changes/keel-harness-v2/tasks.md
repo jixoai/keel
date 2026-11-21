@@ -220,9 +220,17 @@
       （W2.4：`subagent.started` 钩子建/更新子卡，`parentTaskId` → 父卡，幂等）
 - [x] 资源关联：`task.attached{path, hash}` / `task.detached`；面板可打开对应 blob
       （W2.4 事件与投影；面板打开 blob 属 W4 面板项，未做）
-- [ ] fork：`(eventSeq)` 原点；新会话 + 前缀引用 + 新卡（`parentTaskId`） （对账 2026-11-20：部分——缺口：tasklog.ForkCard 已交付（internal/tasklog/service.go:348-380），agent.fork 仍 not_implemented（internal/toolsurface/agent.go:49-50）；无新会话/文件前缀引用）
+- [x] fork：`(eventSeq)` 原点；新会话 + 前缀引用 + 新卡（`parentTaskId`） （对账 2026-11-20：部分——缺口：tasklog.ForkCard 已交付（internal/tasklog/service.go:348-380），agent.fork 仍 not_implemented（internal/toolsurface/agent.go:49-50）；无新会话/文件前缀引用）
       （W2.4 已交付 `Service.ForkCard` 投影；`agent.fork` 仍 not_implemented，待与 layerfs
       文件视图前缀在生产装配中合并验证）
+      （W8 2026-11-21 已交付：`agent.fork` 创建新会话；账本前缀是读时 union（父日志 ≤eventSeq
+      由 runner 以负合成 seq 注入，不复制事件，`internal/agent/fork_prefix.go`）；文件前缀是
+      `session_snapshot` tree hash 的 O(1) 引用，fileplugin 读/写/编辑/列目录/捕获按 overlay
+      解析，捕获不复制父 manifest 行（`internal/fileplugin/fork.go`）；新卡 `parentTaskId`
+      指向原点卡（`tasklog.ForkCard` + `OriginCard`）。测试
+      `TestForkPrefixIsAReadTimeUnion`、`TestForkFileViewIsAnOverlay`、
+      `TestForkCaptureDoesNotCopyInheritedManifestRows`、
+      `TestForkCreatesAPrefixSessionCardAndInheritedBinding`）
 - [ ] 面板：任务图、事件流、资源预览；纯投影，不写额外真值
 
 ## W5 approve 与 notification
@@ -271,10 +279,46 @@
 ## W8 agent-plugin 与 fork
 
 - [x] 内部子代理：同进程协程，独立会话 + 独立任务卡（`parentTaskId`） （对账 2026-11-20：已实现——SpawnAsync 建独立子会话（internal/agentext/subagent.go:216-292）；HookSubagentStarted → tasklog.LinkSubagent 建独立卡并写 parentTaskId（internal/agentext/tasks.go:267-293、internal/tasklog/service.go:390）；测试 TestSubagentCardLinksToParentActiveCard、TestTasksPluginLinksSubagentCards）
-- [ ] `agent` 工具：`spawn/fork/resume/cancel/list/status`；fork 原点 `eventSeq` （对账 2026-11-20：部分——缺口：agent 聚合工具已有 spawn/list/status（internal/toolsurface/agent.go:22-55）；fork/resume/cancel 返回 not_implemented，无 eventSeq 原点）
-- [ ] 子代理继承父的 `config.toml` 版本，随后可写自己的配置
-- [ ] 并发槽位记账：父与子都占组槽位，超限排队 （对账 2026-11-20：部分——缺口：父与子都占进程全局 worker 信号量；无组槽位/排队 ETA（同 W2-3））（W2H3A：父/子作为两个会话经同一 Gate 各占一个组槽位（可验证：`TestGateParentAndChildShareGroupSlots`，组限 1 时子 run 429）；「超限排队」仍未做，当前是显式 429 + Retry-After）
-- [ ] 子代理返回：结构化结果 + 产物 blob 引用；父卡追加 `task.note` （对账 2026-11-20：部分——缺口：SubagentResult 结构化结果在（subagent.go:103-113），Artifacts 是工具调用 trail（:520-545）；无产物 blob 引用/父卡 task.note）
+- [x] `agent` 工具：`spawn/fork/resume/cancel/list/status`；fork 原点 `eventSeq` （对账 2026-11-20：部分——缺口：agent 聚合工具已有 spawn/list/status（internal/toolsurface/agent.go:22-55）；fork/resume/cancel 返回 not_implemented，无 eventSeq 原点）
+      （W8 2026-11-21：六动作全部落地。`fork {eventSeq,...}` 校验原点在父账本内、解析原点卡、
+      写持久 fork fact（`sessions.fork_parent_session_id/fork_origin_seq/fork_tree_hash/...`，
+      `internal/store/session_fork.go`）、建子会话与 `parentTaskId` 新卡（`ForkCard`）、
+      以父 selection 为默认绑定启动子输入（`internal/agentext/fork.go`）；
+      `resume`/`cancel` 走同一父链接校验；`internal/toolsurface/agent.go` 六个 action 闭集，
+      不再有 `not_implemented`。测试 `TestForkCreatesAPrefixSessionCardAndInheritedBinding`、
+      `TestForkRefusesAnInexactOrigin`、`TestAgentSpawnCarriesTheBinding`（含 fork/resume/cancel）；
+      证据 `evidence/w8-fork-2026-11-21/`）
+- [ ] 子代理继承父的 `config.toml` 版本，随后可写自己的配置 （W8 2026-11-21：部分——已交付「继承父配置事实 + 可覆盖」：fork 冻结父 attempt 的
+      `configHash/toolManifestHash/anchorEventSeq` 到 fork fact 与子输入 `fork` 事实，默认继承父
+      selection（prompt/tool/model 绑定）；子代理后续输入可带自己的 selection，resume 可用
+      `selection`/`agentId` 覆盖绑定（写入 `resume.attempt`，不追加 user.message，
+      `internal/agent/model.go:runSelection`）。**未做**：跨 reassembly 强制子 run 使用父的
+      loadout revision（当前子 run 仍 pin claim 时的当前 generation；fork fact 只记录父版本，
+      worker 未按 session 指定 revision）。该缺口需要 per-session loadout pin，属 W2/loadout 面）
+- [x] 并发槽位记账：父与子都占组槽位，超限排队 （对账 2026-11-20：部分——缺口：父与子都占进程全局 worker 信号量；无组槽位/排队 ETA（同 W2-3））（W2H3A：父/子作为两个会话经同一 Gate 各占一个组槽位（可验证：`TestGateParentAndChildShareGroupSlots`，组限 1 时子 run 429）；「超限排队」仍未做，当前是显式 429 + Retry-After）（W8 2026-11-21：口径与 W2 一致——显式 429 + Retry-After，不排队。spawn/fork 子输入经同一
+      `admission`（GatedCommitter）占组槽位；HTTP 子代理路由把 `placement.CapacityError`
+      映射为 429 + `Retry-After`（`internal/agentapi/ext.go:writeSubagentError`），模型面
+      `agent` 工具映射为 `capacity_exhausted` + `retryAfterMs`
+      （`internal/toolsurface/agent.go:agentFailure`）。测试 `TestSubagentCapacityIs429`、
+      `TestAgentCapacityRefusalIsTyped`、`TestGateParentAndChildShareGroupSlots`）
+- [x] 子代理返回：结构化结果 + 产物 blob 引用；父卡追加 `task.note` （对账 2026-11-20：部分——缺口：SubagentResult 结构化结果在（subagent.go:103-113），Artifacts 是工具调用 trail（:520-545）；无产物 blob 引用/父卡 task.note）（W8 2026-11-21：`Artifact` 增 `path/hash/size`；从 `tool.result.details` 抽 stdout/stderr `blobId`、
+      `fs.write` 抽 `(path,hash)`、`fs.capture` 抽 `treeHash`，有界 256 条
+      （`internal/agentext/subagent.go:artifactsFromEvents`）。`finish` 调
+      `tasklog.NoteSubagentFinished`，把 note 追加到子卡 `parentTaskId` 指向的父卡（确定性
+      task-event key，重复 Wait 不重复）；重启后从子会话首条 user.message 恢复父链接
+      （`durableParent`）。测试 `TestSubagentReturnCarriesArtifactRefsAndParentNote`、
+      `TestNoteSubagentFinishedLandsOnTheParentCard`）
+- [x] resume：中断后继续原任务（不重开），事件/任务卡/绑定不重复；崩溃恢复证据 （W8 2026-11-21：`SubagentRunner.Resume` 先校验父链接，再按 run 行状态给出显式结果
+      （running/pending/terminal/no_run），仅 failed（或租约过期的 running）走 requeue：
+      同一 session、同一 run 行、`attempts=0`、`pending_input=true`
+      （`internal/store/resume.go`）；`resume.attempt` 以 requestId 为键幂等
+      （`internal/agentext/fork.go`）。未追加 user.message、未建新卡、未改绑定。
+      HTTP `POST /v1/sessions/{id}/resume` 与工具 `agent.resume` 同一实现。
+      测试 `TestResumeContinuesTheSameSession`（失败→resume→claim→同一 run 完成，
+      断言 1 条 user.message / 1 条 resume.attempt / 0 新卡 / run.finished 快照三值）、
+      `TestRequeueRunResumesOnlyInterruptedRuns`、`TestResumeRouteAnswersTerminalExplicitly`；
+      崩溃矩阵 `internal/agent/crash_matrix_test.go` 仍为 G2 的进程级证据）
+
 
 ## W9 oar-plugin（外部工具）
 
@@ -317,8 +361,8 @@
 - [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据
-- [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务 （对账 2026-11-20：部分——缺口：非终态 run 自动续跑/lease/chaos 在（internal/durable/recovery.go、internal/agent/crash_matrix_test.go）；子代理继续原任务（W8-2/3）未实现）
-- [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用） （对账 2026-11-20：部分——缺口：G3 幂等/409 在；G5 taskId 强制/资源引用已交付，fork 精确（W4-6）未实现）
+- [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务 （对账 2026-11-20：部分——缺口：非终态 run 自动续跑/lease/chaos 在（internal/durable/recovery.go、internal/agent/crash_matrix_test.go）；子代理继续原任务（W8-2/3）未实现）（W8 2026-11-21：子代理 resume 已实现并测「失败→requeue→claim→同一 run 完成」；G2 门本身仍缺 kill -9/容器重启端到端证据，保持未勾）
+- [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用） （对账 2026-11-20：部分——缺口：G3 幂等/409 在；G5 taskId 强制/资源引用已交付，fork 精确（W4-6）未实现）（W8 2026-11-21：fork 精确（eventSeq + snapshot + parentTaskId）已交付；G5 门级汇总仍未勾）
 - [ ] G4 内存门：后端 RSS ≤500MB（目标 ≤300MB），组 OOM 不扩散，前端 VM 配额独立断言 （对账 2026-11-20：部分——缺口：cgroup peak 门在（scripts/acceptance-perf.sh），无 VmRSS 采样门（W0-12）、组 OOM 隔离、前端 surface VM 配额断言）
 - [ ] G6 插件门 · G7 UI 门 · G9 有界门 （对账 2026-11-20：部分——缺口：G6 生命周期/依赖/回滚测试在；G7 槽位机制未实现（W12-16/17）；G9 bash 输出有界/作业上限在）
 - [ ] G8 创造模式门：AI 现场写 Native 插件端到端（装→渲染→卸载无残留） （对账 2026-11-20：部分——缺口：创造模式已有 webview E2E（creation_test.go）；缺 Native chunk 形态/macos target/卸载 diff）

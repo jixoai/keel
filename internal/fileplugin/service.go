@@ -59,8 +59,11 @@ type Options struct {
 	// MaxReadLines / MaxReadBytes bound one read page (0 uses the defaults).
 	MaxReadLines int
 	MaxReadBytes int
-	Logger       *slog.Logger
-	Now          func() time.Time
+	// Forks resolves the fork origin of a session. Nil keeps every session an
+	// unforked session; a fork then reads only its own manifest.
+	Forks  ForkBaseSource
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // Service is the file plugin's implementation. It is safe for concurrent use;
@@ -78,8 +81,14 @@ type Service struct {
 	cache        *layerfs.StatCache
 	maxLines     int
 	maxBytes     int
+	forks        ForkBaseSource
 	logger       *slog.Logger
 	now          func() time.Time
+
+	// forkMu guards forkViews: the flattened inherited view of one forked
+	// session (a derived cache, never a truth source).
+	forkMu    sync.Mutex
+	forkViews map[forkViewKey]*forkView
 
 	// settlements serializes every manifest mutation of one session (explicit
 	// writes and captures). A capture's snapshot, event commit and manifest
@@ -140,8 +149,10 @@ func New(opts Options) (*Service, error) {
 		cache:        cache,
 		maxLines:     opts.MaxReadLines,
 		maxBytes:     opts.MaxReadBytes,
+		forks:        opts.Forks,
 		logger:       logger,
 		now:          now,
+		forkViews:    make(map[forkViewKey]*forkView),
 		settlements:  make(map[settlementKey]*settlementState),
 	}, nil
 }
@@ -170,7 +181,7 @@ func (s *Service) Read(ctx context.Context, args json.RawMessage) (ReadResult, e
 	if err != nil {
 		return ReadResult{}, err
 	}
-	entry, ok, err := s.manifest.Get(ctx, scope.TenantID, scope.SessionID, path)
+	entry, ok, err := s.effectiveGet(ctx, scope.TenantID, scope.SessionID, path)
 	if err != nil {
 		return ReadResult{}, mapStoreError(err)
 	}
@@ -291,7 +302,7 @@ func (s *Service) WriteStream(ctx context.Context, scope Scope, callID, rawPath 
 	} else if found {
 		return replay, nil
 	}
-	current, exists, err := s.manifest.Get(ctx, scope.TenantID, scope.SessionID, path)
+	current, exists, err := s.effectiveGet(ctx, scope.TenantID, scope.SessionID, path)
 	if err != nil {
 		return WriteResult{}, mapStoreError(err)
 	}
@@ -381,7 +392,7 @@ func (s *Service) Edit(ctx context.Context, args json.RawMessage) (EditResult, e
 	} else if found {
 		return replay, nil
 	}
-	current, exists, err := s.manifest.Get(ctx, scope.TenantID, scope.SessionID, path)
+	current, exists, err := s.effectiveGet(ctx, scope.TenantID, scope.SessionID, path)
 	if err != nil {
 		return EditResult{}, mapStoreError(err)
 	}
@@ -613,11 +624,23 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 	// longer has was removed by the workspace (bash `rm`, a build clean, ...).
 	// The diff is computed before the commit so the one fs.capture event can
 	// carry it; the manifest delete runs after the commit and is guarded to rows
-	// established by an earlier event.
-	existing, err := s.manifest.List(ctx, scope.TenantID, scope.SessionID)
+	// established by an earlier event. The view includes the inherited fork
+	// half: a child that deletes an inherited file records the deletion, even
+	// though there is no child manifest row to remove.
+	existing, err := s.effectiveList(ctx, scope.TenantID, scope.SessionID)
 	if err != nil {
 		s.commitCaptureFailed(ctx, settlement, err)
 		return CaptureResult{}, mapStoreError(err)
+	}
+	ownRows, err := s.manifest.List(ctx, scope.TenantID, scope.SessionID)
+	if err != nil {
+		s.commitCaptureFailed(ctx, settlement, err)
+		return CaptureResult{}, mapStoreError(err)
+	}
+	base, err := s.forkBaseMap(ctx, scope.TenantID, scope.SessionID)
+	if err != nil {
+		s.commitCaptureFailed(ctx, settlement, err)
+		return CaptureResult{}, err
 	}
 	deleted := deletedManifestPaths(existing, snapshot.Files)
 	boundedDeleted := boundedDeletedPaths(deleted)
@@ -668,15 +691,27 @@ func (s *Service) captureWorkspace(ctx context.Context, settlement captureSettle
 		s.commitCaptureFailed(ctx, settlement, err)
 		return CaptureResult{}, mapKernelError(err)
 	}
-	entries := make([]Entry, len(snapshot.Files))
+	ownSet := make(map[string]struct{}, len(ownRows))
+	for _, entry := range ownRows {
+		ownSet[entry.Path] = struct{}{}
+	}
+	entries := make([]Entry, 0, len(snapshot.Files))
 	refs := make([]layerfs.RefEntry, 0, len(snapshot.Files)+1)
 	ref := layerfs.Ref{Session: scope.SessionID.String(), Seq: receipt.Seq}
-	for index, file := range snapshot.Files {
-		entries[index] = Entry{
+	for _, file := range snapshot.Files {
+		refs = append(refs, layerfs.RefEntry{Hash: file.Hash, Ref: ref})
+		if inherited, ok := base[file.Path]; ok && inherited.Hash == file.Hash {
+			if _, own := ownSet[file.Path]; !own {
+				// Unchanged inherited file: the child's view already resolves it
+				// from the parent snapshot tree. Writing a manifest row here
+				// would copy the parent's row, which fork MUST NOT do.
+				continue
+			}
+		}
+		entries = append(entries, Entry{
 			Path: file.Path, Hash: file.Hash, Mode: file.Mode, Size: file.Size,
 			UpdatedSeq: receipt.Seq, LastTaskID: settlement.taskID,
-		}
-		refs = append(refs, layerfs.RefEntry{Hash: file.Hash, Ref: ref})
+		})
 	}
 	refs = append(refs, layerfs.RefEntry{Hash: snapshot.Tree, Ref: ref})
 	if err := s.manifest.Upsert(ctx, scope.TenantID, scope.SessionID, entries); err != nil {
@@ -728,7 +763,7 @@ func (s *Service) Materialize(ctx context.Context, scope Scope, dir string) erro
 	if strings.TrimSpace(dir) == "" {
 		return Errorf(CodeInvalid, "materialize needs a target directory")
 	}
-	entries, err := s.manifest.List(ctx, scope.TenantID, scope.SessionID)
+	entries, err := s.effectiveList(ctx, scope.TenantID, scope.SessionID)
 	if err != nil {
 		return mapStoreError(err)
 	}
@@ -761,12 +796,13 @@ func (s *Service) MaterializeSnapshot(ctx context.Context, scope Scope, seq int6
 	return nil
 }
 
-// List returns the current manifest view.
+// List returns the current manifest view (the child's rows over the inherited
+// fork view).
 func (s *Service) List(ctx context.Context, scope Scope) ([]Entry, error) {
 	if !scope.Valid() {
 		return nil, Errorf(CodeRunScopeMissing, "list needs a session scope")
 	}
-	entries, err := s.manifest.List(ctx, scope.TenantID, scope.SessionID)
+	entries, err := s.effectiveList(ctx, scope.TenantID, scope.SessionID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}

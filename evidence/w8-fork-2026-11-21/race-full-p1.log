@@ -1,0 +1,77 @@
+$ go test -race -count=1 -p 1 ./...
+# KEEL_TEST_DSN is set (only KEEL_TEST_DSN exported)
+# started Sat Nov 21 17:03:21 CST 2026
+?   	github.com/jixoai/keel/cmd/chaos	[no test files]
+?   	github.com/jixoai/keel/cmd/e2e	[no test files]
+ok  	github.com/jixoai/keel/cmd/keel	7.751s
+?   	github.com/jixoai/keel/cmd/keel-dsh-ref	[no test files]
+?   	github.com/jixoai/keel/cmd/loadtest	[no test files]
+?   	github.com/jixoai/keel/cmd/mcpappload	[no test files]
+ok  	github.com/jixoai/keel/cmd/r1diff	1.356s
+ok  	github.com/jixoai/keel/cmd/runtime	1.475s
+ok  	github.com/jixoai/keel/internal/agent	25.376s
+ok  	github.com/jixoai/keel/internal/agentapi	6.959s
+?   	github.com/jixoai/keel/internal/agentcore	[no test files]
+ok  	github.com/jixoai/keel/internal/agentext	43.999s
+ok  	github.com/jixoai/keel/internal/agentloop	2.167s
+ok  	github.com/jixoai/keel/internal/agentloop/agentlooptest	1.435s
+?   	github.com/jixoai/keel/internal/agentloop/testloop	[no test files]
+ok  	github.com/jixoai/keel/internal/agentteam	1.652s
+ok  	github.com/jixoai/keel/internal/agenttool	1.399s
+ok  	github.com/jixoai/keel/internal/approval	1.646s
+ok  	github.com/jixoai/keel/internal/architecture	6.554s
+ok  	github.com/jixoai/keel/internal/auth	1.420s
+ok  	github.com/jixoai/keel/internal/bashbridge	3.251s
+ok  	github.com/jixoai/keel/internal/blob	33.874s
+ok  	github.com/jixoai/keel/internal/compaction	1.376s
+?   	github.com/jixoai/keel/internal/config	[no test files]
+ok  	github.com/jixoai/keel/internal/demo	1.323s
+ok  	github.com/jixoai/keel/internal/dshref	1.388s
+ok  	github.com/jixoai/keel/internal/durable	2.191s
+ok  	github.com/jixoai/keel/internal/externalgw	7.866s
+ok  	github.com/jixoai/keel/internal/fileplugin	91.584s
+ok  	github.com/jixoai/keel/internal/gateway	3.945s
+ok  	github.com/jixoai/keel/internal/handoff	13.200s
+ok  	github.com/jixoai/keel/internal/hooks	10.758s
+ok  	github.com/jixoai/keel/internal/host	1.512s
+ok  	github.com/jixoai/keel/internal/httpapi	16.314s
+ok  	github.com/jixoai/keel/internal/jobqueue	19.431s
+ok  	github.com/jixoai/keel/internal/kernel	26.310s
+ok  	github.com/jixoai/keel/internal/layerfs	5.046s
+ok  	github.com/jixoai/keel/internal/layerfs/gbashfs	1.947s
+ok  	github.com/jixoai/keel/internal/loadout	1.477s
+ok  	github.com/jixoai/keel/internal/logsafe	1.320s
+ok  	github.com/jixoai/keel/internal/loop	1.880s
+ok  	github.com/jixoai/keel/internal/mcp	4.477s
+ok  	github.com/jixoai/keel/internal/mcp/oauth	1.710s
+ok  	github.com/jixoai/keel/internal/mcphost	2.209s
+ok  	github.com/jixoai/keel/internal/mediaadapter	1.704s
+ok  	github.com/jixoai/keel/internal/mediagw	1.422s
+ok  	github.com/jixoai/keel/internal/mediawiring	1.584s
+ok  	github.com/jixoai/keel/internal/metrics	1.317s
+ok  	github.com/jixoai/keel/internal/modelcfg	1.989s
+ok  	github.com/jixoai/keel/internal/modelprovider	1.390s
+ok  	github.com/jixoai/keel/internal/notify	1.673s
+ok  	github.com/jixoai/keel/internal/placement	4.417s
+ok  	github.com/jixoai/keel/internal/placement/wiring	1.434s
+ok  	github.com/jixoai/keel/internal/pluginpkg	1.455s
+?   	github.com/jixoai/keel/internal/pluginpkg/builtin	[no test files]
+ok  	github.com/jixoai/keel/internal/provider	1.725s
+ok  	github.com/jixoai/keel/internal/quota	2.941s
+ok  	github.com/jixoai/keel/internal/r1diff	1.309s
+ok  	github.com/jixoai/keel/internal/realtime	2.617s
+ok  	github.com/jixoai/keel/internal/servicegraph	1.348s
+ok  	github.com/jixoai/keel/internal/servicehost	9.200s
+?   	github.com/jixoai/keel/internal/sessionbinding	[no test files]
+?   	github.com/jixoai/keel/internal/sessionfork	[no test files]
+ok  	github.com/jixoai/keel/internal/skills	1.396s
+ok  	github.com/jixoai/keel/internal/store	11.838s
+ok  	github.com/jixoai/keel/internal/stream	1.414s
+ok  	github.com/jixoai/keel/internal/tasklog	2.680s
+ok  	github.com/jixoai/keel/internal/telemetry	1.308s
+?   	github.com/jixoai/keel/internal/testkit	[no test files]
+ok  	github.com/jixoai/keel/internal/toolsurface	1.559s
+ok  	github.com/jixoai/keel/plugins/templates	1.370s
+?   	github.com/jixoai/keel/plugins/tools/verifypkg	[no test files]
+exit=0
+# finished Sat Nov 21 17:11:09 CST 2026

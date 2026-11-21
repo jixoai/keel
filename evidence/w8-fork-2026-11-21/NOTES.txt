@@ -1,0 +1,65 @@
+W8 fork/resume/cancel — evidence (2026-11-21)
+
+Base: main d43d0eb (worktree .worktrees/keel-w8-fork, branch task/keel-w8-fork)
+Change: openspec/changes/keel-harness-v2 (W8; W4 fork item reconciled)
+
+Scope delivered
+- agent tool actions: spawn / fork / resume / cancel / list / status (no not_implemented).
+- fork: eventSeq origin validated against the parent ledger; new session; durable fork
+  fact on sessions (parent, originSeq, tree hash, parent config/tool snapshot);
+  new card with parentTaskId = origin card; parent selection inherited by default.
+- ledger prefix: read-time union of the parent log (seq <= origin), injected with
+  negative synthetic seqs; no parent events copied; inputSeqs stays child-only.
+- file prefix: session_snapshot tree hash resolved O(1); read/write/edit/list/materialize
+  use an overlay; capture does not copy unchanged inherited manifest rows; inherited
+  blobs stay referenced by the child snapshot.
+- slots: child input goes through the same placement Gate/admission as any native run;
+  full group/tenant -> typed CapacityError; HTTP 429 + Retry-After (ceil, same as W2);
+  model tool -> capacity_exhausted + retryAfterMs. No queue (W2 decision: explicit 429).
+- return: structured result + artifact refs (tool trail, bash stdout/stderr blobId,
+  fs.write path/hash, fs.capture treeHash; bounded 256); parent card task.note via
+  NoteSubagentFinished, idempotent, lands on the child card's parentTaskId.
+- resume: same session/run/card; only failed or lease-expired running runs requeue;
+  resume.attempt keyed by requestId (idempotent); optional selection/agentId override
+  travels in resume.attempt (no new user.message); W2 run snapshot values asserted on
+  the recovered attempt.
+- owed-turn fix: non-transcript bookkeeping kinds (resume.attempt, fs.*, config.*,
+  placement.*, supervision.*, guardrail.*, notification.*) no longer hide an owed input.
+
+Commands (logs in this directory)
+- go build ./...                                        -> build.log (exit 0)
+- go vet ./...                                          -> vet.log (exit 0)
+- openspec validate keel-harness-v2 --strict            -> openspec.txt (valid)
+- W8 targeted go test -v ...                            -> test-targeted.log (exit 0)
+- scripts/conformance.sh                                -> conformance.txt (1108 pass / 0 fail / 1 skip)
+- go test -race -count=1 ./... (only KEEL_TEST_DSN)     -> race-full.log
+- go test -race -count=1 -p 2 ./... (only KEEL_TEST_DSN) -> race-full-p2.log
+- go test -race -count=1 -p 1 ./... (only KEEL_TEST_DSN) -> race-full-p1.log (GREEN: 59 ok, 0 FAIL, 0 DATA RACE)
+  The default-parallel full run hit pre-existing timing flakes in packages this lane
+  does not change (agentapi mcp audit sampler window, agentext sidecar 400ms handshake,
+  mcp/mcphost listen supervisor). The mcp audit test also fails intermittently in
+  isolation under -count=20, which confirms it is a pre-existing test-isolation issue,
+  not a W8 regression. The -p 1 full run is the deterministic gate result.
+
+Key tests
+- internal/agent: TestForkPrefixIsAReadTimeUnion, TestResumeSelectionOverridesTheChildBinding
+- internal/agentext: TestForkCreatesAPrefixSessionCardAndInheritedBinding,
+  TestForkRefusesAnInexactOrigin, TestResumeContinuesTheSameSession,
+  TestCancelStopsTheChildInPlace, TestSubagentReturnCarriesArtifactRefsAndParentNote
+- internal/fileplugin: TestForkFileViewIsAnOverlay, TestForkCaptureDoesNotCopyInheritedManifestRows
+- internal/layerfs: TestLookupPathWalksTheTreeWithoutMaterializing
+- internal/store: TestSessionForkRoundTripAndRefusals, TestRequeueRunResumesOnlyInterruptedRuns
+- internal/tasklog: TestOriginCardResolvesTheLedgerPosition,
+  TestNoteSubagentFinishedLandsOnTheParentCard
+- internal/toolsurface: TestAgentCapacityRefusalIsTyped (+ fork/resume/cancel action test)
+- internal/agentapi: TestSubagentCapacityIs429, TestResumeRouteAnswersTerminalExplicitly
+- internal/placement: TestGateParentAndChildShareGroupSlots (pre-existing, parent/child slots)
+
+Residual (honest)
+- config.toml/loadout revision inheritance is partial: the fork freezes the parent
+  attempt's configHash/toolManifestHash/anchor and inherits its selection, and resume can
+  override the binding; a child run still pins the current generation at claim time.
+  Forcing a specific old loadout revision needs per-session loadout pinning (W2/loadout).
+- Queue + ETA is not implemented; over-limit is explicit 429 + Retry-After (W2 scope).
+- agent.status after a process restart is registry-only (durable parent link exists, but
+  the record is rebuilt from the child ledger only for resume/cancel authorization).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -455,4 +456,76 @@ func sameJSON(t *testing.T, left, right []byte) bool {
 	leftCanonical, _ := json.Marshal(l)
 	rightCanonical, _ := json.Marshal(r)
 	return string(leftCanonical) == string(rightCanonical)
+}
+
+// TestOriginCardResolvesTheLedgerPosition pins the fork origin card rule: the
+// card of the newest task event at or before the origin, with the initial card
+// as the empty-log fallback.
+func TestOriginCardResolvesTheLedgerPosition(t *testing.T) {
+	_, _, service, scope := taskLogHarness(t)
+	ctx := context.Background()
+	initial := mustCard(t)(service.EnsureCard(ctx, scope))
+	second := mustCard(t)(service.Create(ctx, scope, tasklog.CreateInput{Title: "branch"}, ""))
+	if _, err := service.Note(ctx, scope, second.TaskID, "at the origin", "call-note"); err != nil {
+		t.Fatal(err)
+	}
+
+	origin, err := service.OriginCard(ctx, scope, 0)
+	if err != nil || origin.TaskID != initial.TaskID {
+		t.Fatalf("origin at 0 = %+v err=%v, want the initial card", origin, err)
+	}
+	origin, err = service.OriginCard(ctx, scope, second.CreatedSeq)
+	if err != nil || origin.TaskID != second.TaskID {
+		t.Fatalf("origin at create = %+v err=%v, want the created card", origin, err)
+	}
+	origin, err = service.OriginCard(ctx, scope, second.UpdatedSeq+10)
+	if err != nil || origin.TaskID != second.TaskID {
+		t.Fatalf("origin at tip = %+v err=%v, want the newest card", origin, err)
+	}
+}
+
+// TestNoteSubagentFinishedLandsOnTheParentCard pins the return note: it lands
+// on the card the child card points at (not a guessed active card), and a
+// repeated finish does not duplicate it.
+func TestNoteSubagentFinishedLandsOnTheParentCard(t *testing.T) {
+	st, _, service, parent := taskLogHarness(t)
+	ctx := context.Background()
+	parentCard := mustCard(t)(service.EnsureCard(ctx, parent))
+	child := uuid.New()
+	if err := st.CreateSession(ctx, parent.TenantID, child); err != nil {
+		t.Fatal(err)
+	}
+	childCard := mustCard(t)(service.LinkSubagent(ctx, parent, child))
+	if childCard.ParentTaskID == nil || *childCard.ParentTaskID != parentCard.TaskID {
+		t.Fatalf("child card parent = %+v", childCard.ParentTaskID)
+	}
+	if err := service.NoteSubagentFinished(ctx, parent, child, "done", "the child answer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.NoteSubagentFinished(ctx, parent, child, "done", "the child answer"); err != nil {
+		t.Fatalf("repeated note: %v", err)
+	}
+	view, err := service.Show(ctx, parent, parentCard.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := 0
+	for _, event := range view.Events {
+		if event.Kind != string(kernel.KindTaskNote) {
+			continue
+		}
+		notes++
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(payload.Text, child.String()) || !strings.Contains(payload.Text, "the child answer") {
+			t.Fatalf("note text = %q", payload.Text)
+		}
+	}
+	if notes != 1 {
+		t.Fatalf("parent notes = %d, want one idempotent note", notes)
+	}
 }

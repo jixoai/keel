@@ -67,14 +67,19 @@ type ModelResolver interface {
 	Resolve(ctx context.Context, scope kernel.Scope, selection json.RawMessage) (ActiveModel, error)
 }
 
-// runSelection returns the selection fact of this attempt: the newest input
-// that carried one. Selection is a per-input fact, not session state — the
-// attempt that answers an input must use the model that input asked for, and a
+// runSelection returns the selection fact of this attempt: the newest fact that
+// carried one. Selection is a per-input fact, not session state — the attempt
+// that answers an input must use the model that input asked for, and a
 // selection made while a run was live belongs to that input's own attempt.
+//
+// A resume.attempt may carry a selection too: an explicit resume is how a
+// parent changes a stopped child's execution binding (for example another
+// provider) without appending a second user message. The newest of the two
+// facts wins, so a later user input still overrides the resume override.
 func runSelection(events []store.Event) json.RawMessage {
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
-		if ev.Kind != store.EventUserMessage {
+		if ev.Kind != store.EventUserMessage && ev.Kind != store.EventResumeAttempt {
 			continue
 		}
 		var payload struct {

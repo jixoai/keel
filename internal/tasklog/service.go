@@ -388,6 +388,104 @@ func (s *Service) ForkCard(ctx context.Context, origin kernel.Scope, originTaskI
 	return s.project(ctx, target, event, payload)
 }
 
+// OriginCard resolves the card that owns a ledger position: the card of the
+// newest task.* event at or before seq. A session with no task event yet falls
+// back to its initial card. It is the "原点所在卡" half of fork (the caller
+// still passes the resolved id to ForkCard).
+func (s *Service) OriginCard(ctx context.Context, scope kernel.Scope, seq int64) (Card, error) {
+	if err := s.ready(); err != nil {
+		return Card{}, err
+	}
+	if scope.IsZero() {
+		return Card{}, fmt.Errorf("%w: tenant and session are required", ErrTaskRequired)
+	}
+	var (
+		cardID    uuid.UUID
+		lastAfter int64
+	)
+	for {
+		page, err := s.reader.LoadEvents(ctx, scope, lastAfter, 500)
+		if err != nil {
+			return Card{}, fmt.Errorf("tasklog: read origin ledger: %w", err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, event := range page {
+			if event.Seq > seq {
+				break
+			}
+			if !IsTaskKind(event.Kind) {
+				continue
+			}
+			var payload taskEventPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				continue
+			}
+			if parsed, err := uuid.Parse(payload.TaskID); err == nil {
+				cardID = parsed
+			}
+		}
+		lastAfter = page[len(page)-1].Seq
+		if lastAfter >= seq || len(page) < 500 {
+			break
+		}
+	}
+	if cardID == uuid.Nil {
+		return s.EnsureCard(ctx, scope)
+	}
+	card, err := s.requireCard(ctx, scope, cardID)
+	if err == nil {
+		return card, nil
+	}
+	// The projection lagged behind the ledger: the initial card is the safe
+	// attribution (it always exists) and the fork still records the origin seq.
+	return s.EnsureCard(ctx, scope)
+}
+
+// NoteSubagentFinished appends the parent-card task.note that closes a
+// sub-agent return. The note lands on the card the child card points at
+// (parentTaskId), not on a guessed "active" card, and it is idempotent through
+// the deterministic task-event key: a repeated Wait after a restart cannot
+// duplicate it.
+func (s *Service) NoteSubagentFinished(ctx context.Context, parent kernel.Scope, childSessionID uuid.UUID, status, summary string) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	if parent.IsZero() || childSessionID == uuid.Nil {
+		return fmt.Errorf("%w: parent session and child session are required", ErrTaskRequired)
+	}
+	childCardID := InitialTaskID(parent.TenantID, childSessionID)
+	childCard, err := s.projection.GetCardByID(ctx, parent.TenantID, childCardID)
+	if errors.Is(err, ErrTaskNotFound) {
+		// The child card was never linked (a spawn whose started hook failed):
+		// there is no parent card to note on.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if childCard.ParentTaskID == nil || *childCard.ParentTaskID == uuid.Nil {
+		return nil
+	}
+	text := strings.TrimSpace("subagent " + childSessionID.String() + " finished: " + status)
+	if trimmed := strings.TrimSpace(summary); trimmed != "" {
+		text += "; " + trimNote(trimmed, 2000)
+	}
+	_, err = s.Note(ctx, parent, *childCard.ParentTaskID, text,
+		fmt.Sprintf("%s:subagent-finished:%s", childSessionID, status))
+	return err
+}
+
+// trimNote bounds a note's summary so a long child answer cannot turn the
+// parent's task event into an unbounded transcript copy.
+func trimNote(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "…"
+}
+
 // LinkSubagent gives a sub-agent session its own card and points it at the
 // parent's active card. It is idempotent: the child's initial card id is
 // derived from its session, and the parent link is appended at most once.

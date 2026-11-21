@@ -251,6 +251,10 @@ type Config struct {
 	// app context written by ui/update-model-context). The hosting process wires
 	// it to the store; nil keeps the pre-P5 prompt byte-identical.
 	SessionContexts func(ctx context.Context, scope kernel.Scope) []agentcore.Content
+	// ForkPrefixes resolves a forked session's parent prefix for the runner. The
+	// hosting process wires it to the store; nil makes every run read only its
+	// own log (the pre-W8 behaviour).
+	ForkPrefixes agent.ForkPrefixReader
 
 	RetireTimeout   time.Duration
 	CollectInterval time.Duration

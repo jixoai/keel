@@ -451,7 +451,10 @@ func main() {
 			Environ:   os.Environ(),
 			Stderr:    os.Stderr,
 		},
-		DrainGate: coord,
+		// A forked session's transcript prefix is read from the parent log (a
+		// reference, never a copy).
+		ForkPrefixes: st,
+		DrainGate:    coord,
 	})
 	if err != nil {
 		log.Error("assemble service loadout", "err", err)

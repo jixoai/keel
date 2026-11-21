@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/placement"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -637,5 +638,67 @@ func TestCursorRoundTrip(t *testing.T) {
 	}
 	if _, err := decodeSessionCursor("!!!"); !errors.Is(err, ErrBadCursor) {
 		t.Fatalf("bad cursor error: %v", err)
+	}
+}
+
+// TestSubagentCapacityIs429 pins the HTTP half of the W8 slot vocabulary: the
+// same typed CapacityError the input/trigger paths map to 429 + Retry-After
+// reaches the sub-agent spawn route unchanged.
+func TestSubagentCapacityIs429(t *testing.T) {
+	tenant, parent := uuid.New(), uuid.New()
+	committer := &fakeCommitter{err: &placement.CapacityError{
+		Reason: placement.CapacityGroup, Resource: "group", TenantID: tenant, SessionID: parent,
+		Limit: 1, Active: 1, RetryAfter: 2 * time.Second,
+	}}
+	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
+		Gate: newFakeGate(parent), Edge: committer, Events: &fakeEvents{},
+		Runs: &fakeRuns{state: agentext.RunState{Status: "done"}}, Logger: testLogger(),
+	})
+	server := httptest.NewServer(New(Config{Subagents: runner, Logger: testLogger()}))
+	defer server.Close()
+	req, err := http.NewRequest(http.MethodPost,
+		server.URL+"/v1/sessions/"+parent.String()+"/subagents",
+		bytes.NewReader([]byte(`{"task":"delegate"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenant.String())
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("capacity spawn = %d, want 429", res.StatusCode)
+	}
+	if got := res.Header.Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After = %q, want 2", got)
+	}
+}
+
+// TestResumeRouteAnswersTerminalExplicitly pins the supervision requirement: a
+// completed child is answered as terminal, not silently reopened or reported as
+// a success.
+func TestResumeRouteAnswersTerminalExplicitly(t *testing.T) {
+	tenant, parent, child := uuid.New(), uuid.New(), uuid.New()
+	events := &fakeEvents{events: []kernel.Event{{
+		Seq: 1, Kind: kernel.KindUserMessage,
+		Payload: json.RawMessage(`{"text":"delegate","subagent":{"parentSessionId":"` + parent.String() + `"}}`),
+	}}}
+	runner := agentext.NewSubagentRunner(agentext.SubagentOptions{
+		Gate: newFakeGate(parent), Edge: &fakeCommitter{}, Events: events,
+		Runs: &fakeRuns{state: agentext.RunState{Status: "done"}}, Logger: testLogger(),
+	})
+	server := httptest.NewServer(New(Config{Subagents: runner, Logger: testLogger()}))
+	defer server.Close()
+	var body struct {
+		Resume agentext.ResumeResult `json:"resume"`
+	}
+	code := doJSON(t, server.Client(), http.MethodPost,
+		server.URL+"/v1/sessions/"+parent.String()+"/resume", tenant,
+		map[string]any{"sessionId": child.String()}, &body)
+	if code != http.StatusOK || body.Resume.Status != "terminal" {
+		t.Fatalf("terminal resume = %d %+v", code, body.Resume)
 	}
 }

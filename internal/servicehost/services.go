@@ -577,6 +577,10 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		if cfg.Tenant.Agent.MaxTurns > 0 {
 			runner.MaxTurns = cfg.Tenant.Agent.MaxTurns
 		}
+		// A forked session reads its parent's transcript prefix through this
+		// seam (a reference, not a copy). A hosting process without the store
+		// leaves it nil and every session runs on its own log alone.
+		runner.ForkPrefixes = cfg.ForkPrefixes
 		if bound, ok := resolved.Bind(loadout.CapCompaction); ok {
 			policy, ok := bound.(*compactionService)
 			if !ok {

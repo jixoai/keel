@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/sessionfork"
 )
 
 // Sub-agent primitive. A sub-agent is an independent session (same tenant,
@@ -83,14 +84,24 @@ func (r SpawnRequest) childSelection() json.RawMessage {
 	return encoded
 }
 
-// Artifact is one provenance entry of a sub-agent run (for now: the tool calls
-// it executed). It never carries tool output text: the summary is the value,
-// artifacts are the trail.
+// Artifact is one provenance entry of a sub-agent run. It never carries tool
+// output text: the summary is the value, artifacts are the trail. A blob/file
+// artifact carries the content-addressed reference only (never the bytes):
+// tool outputs land as blob ids, file writes as layerfs hashes and captures as
+// a tree hash.
 type Artifact struct {
 	Type string `json:"type"`
 	Name string `json:"name"`
 	Ref  string `json:"ref,omitempty"`
+	Path string `json:"path,omitempty"`
+	Hash string `json:"hash,omitempty"`
+	Size int64  `json:"size,omitempty"`
 }
+
+// artifactLimit bounds the artifact trail a parent receives. A long child run
+// can write thousands of files; the summary plus a bounded reference list is
+// the contract, and the full trail stays readable in the child's ledger.
+const artifactLimit = 256
 
 // Usage is the objective accounting of one sub-agent run.
 type Usage struct {
@@ -110,6 +121,14 @@ type SubagentResult struct {
 	ParentSessionID string     `json:"parentSessionId,omitempty"`
 	Agent           string     `json:"agent,omitempty"`
 	Error           string     `json:"error,omitempty"`
+	// Origin / OriginSeq / ParentTaskID make a fork result self-describing: the
+	// parent can see which ledger position the child branched from and which
+	// card it hangs under without a second status call.
+	Origin           string `json:"origin,omitempty"`
+	OriginSeq        int64  `json:"originSeq,omitempty"`
+	ParentTaskID     string `json:"parentTaskId,omitempty"`
+	ConfigHash       string `json:"configHash,omitempty"`
+	ToolManifestHash string `json:"toolManifestHash,omitempty"`
 }
 
 // SubagentRecord is the observable registry entry of one spawned sub-agent.
@@ -125,6 +144,21 @@ type SubagentRecord struct {
 	EndedAt         *time.Time      `json:"endedAt,omitempty"`
 	Result          *SubagentResult `json:"result,omitempty"`
 	Error           string          `json:"error,omitempty"`
+	// Origin is "spawn" or "fork"; OriginSeq is the parent ledger position a
+	// fork started at (0 for a spawn).
+	Origin    string `json:"origin,omitempty"`
+	OriginSeq int64  `json:"originSeq,omitempty"`
+	// ParentTaskID is the card the child card points at (set by the fork or
+	// subagent link).
+	ParentTaskID string `json:"parentTaskId,omitempty"`
+	// ConfigHash / ToolManifestHash freeze the parent attempt's run snapshot
+	// values at the fork origin (empty for a spawn, which has no parent run
+	// snapshot to inherit).
+	ConfigHash       string `json:"configHash,omitempty"`
+	ToolManifestHash string `json:"toolManifestHash,omitempty"`
+	// StartSeq is the child's initial input sequence (the resume point a parent
+	// can name).
+	StartSeq int64 `json:"startSeq,omitempty"`
 }
 
 // SubagentOptions configures the runner.
@@ -153,6 +187,24 @@ type SubagentOptions struct {
 	// a live child session blocks its Agent's delete/archive exactly like a
 	// session started through POST /input. Nil keeps the pre-projection behavior.
 	Bindings SessionBinder
+	// Forks records the durable fork origin (the store implements it). Fork
+	// refuses without it: a fork whose file/ledger prefix is not durable is a
+	// broken session, not a best-effort one.
+	Forks sessionfork.Writer
+	// Snapshots resolves the parent's file-view tree at a fork origin.
+	Snapshots ForkSnapshotReader
+	// Cards resolves the origin card and creates the forked card (parentTaskId).
+	Cards ForkCardStore
+	// Requeue re-enqueues an existing run for resume (the store implements it).
+	// Resume refuses without it.
+	Requeue RunRequeuer
+	// Notes appends the parent-card task.note when a sub-agent returns. Nil
+	// leaves the ledger note out; the structured result is unaffected.
+	Notes SubagentNoteWriter
+	// ConfigVersion reports the configuration identity the next attempt will
+	// run under (the current loadout). Resume returns it so the caller can tell
+	// "resumed under revision N" from a guess.
+	ConfigVersion func() (hash string, revision int64)
 }
 
 const (
@@ -176,6 +228,13 @@ type SubagentRunner struct {
 	// validateSelection is the input edge's submit-time selection gate (nil is
 	// fail-closed, see SubagentOptions.ValidateSelection).
 	validateSelection func(json.RawMessage) error
+
+	forks         sessionfork.Writer
+	snapshots     ForkSnapshotReader
+	cards         ForkCardStore
+	requeue       RunRequeuer
+	notes         SubagentNoteWriter
+	configVersion func() (string, int64)
 
 	mu      sync.Mutex
 	records map[string]*SubagentRecord
@@ -208,6 +267,12 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 		now:               opts.Now,
 		records:           make(map[string]*SubagentRecord),
 		validateSelection: opts.ValidateSelection,
+		forks:             opts.Forks,
+		snapshots:         opts.Snapshots,
+		cards:             opts.Cards,
+		requeue:           opts.Requeue,
+		notes:             opts.Notes,
+		configVersion:     opts.ConfigVersion,
 	}
 	if opts.Gate != nil && opts.Edge != nil {
 		r.starter = NewTurnStarter(opts.Gate, opts.Edge, opts.Hooks, opts.Logger)
@@ -265,6 +330,7 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 			"agent":           req.Agent,
 			"idempotencyKey":  key,
 			"budget":          req.Budget,
+			"origin":          "spawn",
 		},
 	}
 	// The validated selection travels as the child input's own fact.
@@ -290,9 +356,14 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 		Agent:           req.Agent,
 		Status:          "running",
 		StartedAt:       r.now(),
+		Origin:          "spawn",
+		StartSeq:        start.Seq,
 	}
 	r.store(record)
-	r.emit(HookSubagentStarted, record, map[string]string{"seq": fmt.Sprintf("%d", start.Seq)})
+	r.emit(HookSubagentStarted, record, map[string]string{
+		"seq":    fmt.Sprintf("%d", start.Seq),
+		"origin": "spawn",
+	})
 	return record, nil
 }
 
@@ -442,7 +513,18 @@ func (r *SubagentRunner) finish(ctx context.Context, tenantID, sessionID uuid.UU
 	parentSessionID := ""
 	if record := r.lookup(sessionID); record != nil {
 		result.ParentSessionID = record.ParentSessionID
+		result.Origin = record.Origin
+		result.OriginSeq = record.OriginSeq
+		result.ParentTaskID = record.ParentTaskID
+		result.ConfigHash = record.ConfigHash
+		result.ToolManifestHash = record.ToolManifestHash
 		parentSessionID = record.ParentSessionID
+	}
+	if parentSessionID == "" {
+		// A restart loses the registry; the child's first input carries the
+		// durable parent link. Without it the note has no card to land on.
+		parentSessionID = r.durableParent(ctx, tenantID, sessionID)
+		result.ParentSessionID = parentSessionID
 	}
 	now := r.now()
 	durationFrom := started
@@ -456,6 +538,14 @@ func (r *SubagentRunner) finish(ctx context.Context, tenantID, sessionID uuid.UU
 		}
 	})
 	result.Usage.DurationMs = now.Sub(durationFrom).Milliseconds()
+	// The parent card's task.note is the return fact the parent reads next to
+	// the structured value. It is idempotent through its task-event key, so a
+	// repeated Wait cannot duplicate it.
+	if parentSessionID != "" {
+		if parentID, err := uuid.Parse(parentSessionID); err == nil {
+			r.noteParent(ctx, tenantID, parentID, sessionID, status, summary)
+		}
+	}
 	payload := HookPayload{
 		Event:             HookSubagentFinished,
 		TenantID:          tenantID.String(),
@@ -524,23 +614,65 @@ func summarizeEvents(events []kernel.Event) (string, int, struct{ Input, Output 
 
 func artifactsFromEvents(events []kernel.Event) []Artifact {
 	seen := make(map[string]struct{})
-	var out []Artifact
+	out := make([]Artifact, 0)
+	add := func(artifact Artifact) {
+		if len(out) >= artifactLimit {
+			return
+		}
+		key := artifact.Type + "\x00" + artifact.Ref + "\x00" + artifact.Path
+		if artifact.Ref == "" && artifact.Path == "" {
+			return
+		}
+		if _, dup := seen[key]; dup {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, artifact)
+	}
 	for _, event := range events {
-		if event.Kind != kernel.KindToolResult {
-			continue
+		switch event.Kind {
+		case kernel.KindToolResult:
+			var result struct {
+				ToolCallID string `json:"toolCallId"`
+				ToolName   string `json:"toolName"`
+				Details    any    `json:"details"`
+			}
+			if err := json.Unmarshal(event.Payload, &result); err != nil || result.ToolCallID == "" {
+				continue
+			}
+			add(Artifact{Type: "tool", Name: result.ToolName, Ref: result.ToolCallID})
+			// A bash result's full output is a blob reference; the trail keeps
+			// the id, never the bytes.
+			if details, ok := result.Details.(map[string]any); ok {
+				for _, stream := range []string{"stdout", "stderr"} {
+					entry, ok := details[stream].(map[string]any)
+					if !ok {
+						continue
+					}
+					if blobID, ok := entry["blobId"].(string); ok && blobID != "" {
+						add(Artifact{Type: "blob", Name: stream, Ref: blobID})
+					}
+				}
+			}
+		case kernel.KindFSWrite:
+			var write struct {
+				Path string `json:"path"`
+				Hash string `json:"hash"`
+			}
+			if err := json.Unmarshal(event.Payload, &write); err != nil {
+				continue
+			}
+			add(Artifact{Type: "file", Name: write.Path, Ref: write.Hash, Path: write.Path, Hash: write.Hash})
+		case kernel.KindFSCapture:
+			var capture struct {
+				TreeHash string `json:"treeHash"`
+				Count    int    `json:"count"`
+			}
+			if err := json.Unmarshal(event.Payload, &capture); err != nil || capture.TreeHash == "" {
+				continue
+			}
+			add(Artifact{Type: "tree", Name: fmt.Sprintf("capture:%d", capture.Count), Ref: capture.TreeHash, Hash: capture.TreeHash})
 		}
-		var result struct {
-			ToolCallID string `json:"toolCallId"`
-			ToolName   string `json:"toolName"`
-		}
-		if err := json.Unmarshal(event.Payload, &result); err != nil || result.ToolCallID == "" {
-			continue
-		}
-		if _, dup := seen[result.ToolCallID]; dup {
-			continue
-		}
-		seen[result.ToolCallID] = struct{}{}
-		out = append(out, Artifact{Type: "tool", Name: result.ToolName, Ref: result.ToolCallID})
 	}
 	return out
 }

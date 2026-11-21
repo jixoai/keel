@@ -322,6 +322,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/triggers/{id}/fire", s.fireTrigger)
 	s.mux.HandleFunc("GET /v1/subagents", s.listSubagents)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/subagents", s.spawnSubagent)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.forkSubagent)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/resume", s.resumeSubagent)
+	s.mux.HandleFunc("POST /v1/subagents/{id}/cancel", s.cancelSubagent)
 	s.mux.HandleFunc("GET /v1/subagents/{id}", s.getSubagent)
 	// Tenancy surface (change keel-ga §2): who am I, provisioning, quota.
 	s.registerTenancyRoutes()
