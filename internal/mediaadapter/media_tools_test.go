@@ -245,3 +245,23 @@ func TestSpeechToolRecoversASeamPanicOutsideTheProviderGuard(t *testing.T) {
 		t.Fatalf("seam panic result = %s", text)
 	}
 }
+
+func TestDecisionToolRejectsAnEmptyOutcome(t *testing.T) {
+	runCtx := agentcore.WithToolRunScope(context.Background(), agentcore.ToolRunScope{
+		TenantID: "tenant-1", SessionID: "session-decision",
+	})
+	tool := NewDecisionTool(&fakeDecisionExecutor{outcome: &DecisionOutcome{Mode: DecisionModeEnforce}},
+		DefaultDecisionPolicy(), nil, nil)
+	result, err := tool.Execute(runCtx, "call-1",
+		json.RawMessage(`{"state":{"ticket":"x"},"questions":{"urgent":{"type":"noul","instructions":"is it urgent?"}}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError == nil || !*result.IsError {
+		t.Fatalf("empty outcome was reported as success: %+v", result)
+	}
+	text := contentText(t, result.Content)
+	if !strings.Contains(text, "no answers and no failure") || strings.Contains(text, "answers\":") {
+		t.Fatalf("empty outcome failure = %s", text)
+	}
+}

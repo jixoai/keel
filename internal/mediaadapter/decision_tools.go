@@ -147,6 +147,12 @@ func (t *DecisionTool) Execute(ctx context.Context, _ string, args json.RawMessa
 		return toolFailure("decision provider returned no outcome",
 			string(KindProviderUnavailable), true, nil, echo), nil
 	}
+	if len(outcome.Answers) == 0 && outcome.Failure == "" {
+		// A policy-compliant call must either answer or record why it could not.
+		// An empty success would be a fabricated "no decision" result.
+		return toolFailure("decision provider returned no answers and no failure",
+			string(KindProviderUnavailable), true, nil, echo), nil
+	}
 	output := DecisionToolOutput{
 		Success:   true,
 		Answered:  len(outcome.Answers) > 0,
