@@ -277,6 +277,15 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 			fmt.Sprintf("%d", origin)+"|"+key))
 		requestID = "subagent-fork:" + key
 	}
+	// The fork child is a session resource: copy the parent's owner relation
+	// before the row is written, so its routes are authorized by the same
+	// relation as the parent. gate.CreateSession below is ON CONFLICT DO NOTHING
+	// and therefore does not touch the owned row.
+	if r.inheritOwnership != nil {
+		if err := r.inheritOwnership(ctx, req.TenantID, req.ParentSessionID, childID); err != nil {
+			return SubagentRecord{}, err
+		}
+	}
 	if err := r.gate.CreateSession(ctx, req.TenantID, childID); err != nil {
 		return SubagentRecord{}, err
 	}

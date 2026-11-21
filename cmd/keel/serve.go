@@ -1206,6 +1206,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			}
 			return agent.ConfigHashForLoadout(snapshot.LoadoutID, snapshot.Revision), snapshot.Revision
 		},
+		// A spawned/forked child is a session resource: inherit the parent's
+		// owner relation before the child's first input, so its routes authorize
+		// exactly like the parent's.
+		InheritOwnership: newSessionOwnershipInheritor(st),
 	})
 	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
 		Starter: starter,

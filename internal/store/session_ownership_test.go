@@ -170,3 +170,68 @@ func TestCreateOwnedSessionClaimsAnUnownedSession(t *testing.T) {
 		t.Fatalf("re-own claimed session err = %v, want ErrConflict", err)
 	}
 }
+
+// TestCreateSessionLikeParentInheritsOwner pins the sub-agent spawn/fork
+// contract: a child session gets the parent's Bot/account ownership and the
+// same owner relation, so its single-resource routes authorize like the
+// parent's. A legacy account-owned parent is inherited through its relation.
+func TestCreateSessionLikeParentInheritsOwner(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	account, _, _, bot := identityFixture(t, st)
+
+	parent := uuid.New()
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: account.TenantID, SessionID: parent, BotID: bot.ID,
+		AccountID: account.ID, CreatedByAccountID: account.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	child := uuid.New()
+	if err := st.CreateSessionLikeParent(ctx, account.TenantID, parent, child); err != nil {
+		t.Fatalf("inherit owned parent: %v", err)
+	}
+	got, err := st.GetSessionOwnership(ctx, account.TenantID, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BotID != bot.ID || got.AccountID != account.ID {
+		t.Fatalf("child ownership = %+v, want bot %q account %s", got, bot.ID, account.ID)
+	}
+	holder, err := st.HasResourceRelation(ctx, account.TenantID, "session", child.String(),
+		RelationOwner, RelationSubjectAccount, account.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !holder {
+		t.Fatal("child owner relation missing")
+	}
+
+	// Legacy account-owned parent: no bot columns, only the owner relation.
+	legacy := uuid.New()
+	if err := st.CreateAccountOwnedSession(ctx, account.TenantID, legacy, account.ID); err != nil {
+		t.Fatal(err)
+	}
+	legacyChild := uuid.New()
+	if err := st.CreateSessionLikeParent(ctx, account.TenantID, legacy, legacyChild); err != nil {
+		t.Fatalf("inherit legacy parent: %v", err)
+	}
+	holder, err = st.HasResourceRelation(ctx, account.TenantID, "session", legacyChild.String(),
+		RelationOwner, RelationSubjectAccount, account.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !holder {
+		t.Fatal("legacy child owner relation missing")
+	}
+
+	// A session with no ownership and no owner relation cannot have a child: the
+	// child's owner would be unknowable.
+	orphan := uuid.New()
+	if err := st.CreateSession(ctx, account.TenantID, orphan); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSessionLikeParent(ctx, account.TenantID, orphan, uuid.New()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("orphan parent err = %v, want ErrConflict", err)
+	}
+}

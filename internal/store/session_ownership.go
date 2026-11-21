@@ -172,7 +172,7 @@ func (s *Store) CreateAccountOwnedSession(ctx context.Context, tenantID, session
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO resource_relations
 			    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
-			 VALUES ($1, 'session', $2, $3, $4, $5, $5)
+			 VALUES ($1, 'session', $2, $3, $4, $5::text, $5::uuid)
 			 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
 			 DO NOTHING`,
 			tenantID, sessionID.String(), RelationOwner,
@@ -186,6 +186,67 @@ func (s *Store) CreateAccountOwnedSession(ctx context.Context, tenantID, session
 		return identityWriteError("create account session", err)
 	}
 	return nil
+}
+
+// CreateSessionLikeParent creates a child session (sub-agent spawn/fork) with
+// the parent's owner: the child belongs to the same Bot/account as the parent,
+// or to the account named by the parent's owner relation for a legacy
+// account-owned session. The child's single-resource routes then authorize by
+// the same relation as the parent.
+//
+// A parent with neither ownership columns nor an owner relation is refused: a
+// child whose owner is unknowable must not exist (fail closed).
+func (s *Store) CreateSessionLikeParent(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error {
+	if tenantID == uuid.Nil || parentSessionID == uuid.Nil || childSessionID == uuid.Nil {
+		return invalidIdentity("inherit session owner", "tenant, parent and child ids are required")
+	}
+	parent, err := s.GetSessionOwnership(ctx, tenantID, parentSessionID)
+	if err != nil {
+		return err
+	}
+	if parent.BotID != "" || parent.AccountID != uuid.Nil {
+		inherited := parent
+		inherited.SessionID = childSessionID
+		if inherited.CreatedByAccountID == uuid.Nil {
+			inherited.CreatedByAccountID = parent.AccountID
+		}
+		return s.CreateOwnedSession(ctx, inherited)
+	}
+	owner, found, err := s.SessionOwnerAccount(ctx, tenantID, parentSessionID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return conflictIdentity("inherit session owner",
+			"parent session %s has no owner relation to inherit", parentSessionID)
+	}
+	return s.CreateAccountOwnedSession(ctx, tenantID, childSessionID, owner)
+}
+
+// SessionOwnerAccount returns the account named by a session's owner relation.
+// found=false is a session with no account owner tuple.
+func (s *Store) SessionOwnerAccount(ctx context.Context, tenantID, sessionID uuid.UUID) (uuid.UUID, bool, error) {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return uuid.Nil, false, invalidIdentity("session owner account", "tenant and session ids are required")
+	}
+	var raw string
+	err := s.pool.QueryRow(ctx,
+		`SELECT subject_id FROM resource_relations
+		  WHERE tenant_id = $1 AND resource_type = 'session' AND resource_id = $2
+		    AND relation = $3 AND subject_type = $4
+		  LIMIT 1`,
+		tenantID, sessionID.String(), RelationOwner, RelationSubjectAccount).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, identityWriteError("session owner account", err)
+	}
+	accountID, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, false, identityWriteError("session owner account", err)
+	}
+	return accountID, true, nil
 }
 
 // GetSessionOwnership reads a session's ownership. A missing or foreign session

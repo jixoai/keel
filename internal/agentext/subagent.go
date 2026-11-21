@@ -211,6 +211,13 @@ type SubagentOptions struct {
 	// run under (the current loadout). Resume returns it so the caller can tell
 	// "resumed under revision N" from a guess.
 	ConfigVersion func() (hash string, revision int64)
+	// InheritOwnership copies the parent session's ownership/owner relation to a
+	// newly created child (spawn/fork) before the child's first input. Nil
+	// leaves the child unowned: the route relation gate then denies its
+	// single-resource routes (fail closed), so a deployment with the identity
+	// surface must wire this. A failure aborts the child before any event is
+	// committed.
+	InheritOwnership func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error
 }
 
 const (
@@ -241,8 +248,9 @@ type SubagentRunner struct {
 	admission     ForkAdmission
 	cleanup       ForkSessionCleanup
 	requeue       RunRequeuer
-	notes         SubagentNoteWriter
-	configVersion func() (string, int64)
+	notes            SubagentNoteWriter
+	configVersion    func() (string, int64)
+	inheritOwnership func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error
 
 	mu      sync.Mutex
 	records map[string]*SubagentRecord
@@ -283,6 +291,7 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 		requeue:           opts.Requeue,
 		notes:             opts.Notes,
 		configVersion:     opts.ConfigVersion,
+		inheritOwnership:  opts.InheritOwnership,
 	}
 	if opts.Gate != nil && opts.Edge != nil {
 		r.starter = NewTurnStarter(opts.Gate, opts.Edge, opts.Hooks, opts.Logger)
@@ -346,6 +355,14 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 	// The validated selection travels as the child input's own fact.
 	if len(selection) > 0 {
 		extras["selection"] = selection
+	}
+	// The child is a session resource: inherit the parent's owner before its
+	// first input, so the route relation gate can authorize its single-resource
+	// endpoints. A failure aborts before anything is committed.
+	if r.inheritOwnership != nil {
+		if err := r.inheritOwnership(ctx, req.TenantID, req.ParentSessionID, childID); err != nil {
+			return SubagentRecord{}, err
+		}
 	}
 	start, err := r.starter.StartTurn(ctx, StartTurnRequest{
 		TenantID:  req.TenantID,

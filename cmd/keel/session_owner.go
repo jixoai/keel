@@ -81,3 +81,17 @@ func newAccountSessionOwner(st *store.Store, bridge *accesswire.Bridge) httpapi.
 		return st.CreateAccountOwnedSession(ctx, tenantID, sessionID, principal.AccountID)
 	}
 }
+
+// newSessionOwnershipInheritor returns the sub-agent spawn/fork seam: a child
+// session copies its parent's owner (Bot/account or the legacy account owner
+// relation), so its single-resource routes authorize like the parent's.
+func newSessionOwnershipInheritor(st *store.Store) func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error {
+	return func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error {
+		if st == nil {
+			return &httpapi.SessionOwnerError{
+				Status: 503, Code: "not_wired", Message: "session ownership is not wired in this deployment",
+			}
+		}
+		return st.CreateSessionLikeParent(ctx, tenantID, parentSessionID, childSessionID)
+	}
+}
