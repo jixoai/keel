@@ -5,8 +5,8 @@
 
 ## D0 设计冻结（阻塞全部实现）
 
-- [ ] D1：Bot 有效权限 = `Account 权限 ∩ Harness permissions`（proposal 推荐：是）
-- [ ] D2：TeamBot 本身是一个 Bot（proposal 推荐：是；成员 Bot 作为 Harness 工具）
+- [x] D1：Bot 有效权限 = `Account 权限 ∩ Harness permissions`（已冻结，L11）
+- [x] D2：TeamBot 不是 Bot、不做权限主体；它是 Mission + Roster（已冻结，L12）
 - [ ] D3：ModelKind 只写类型，还是“类型 + 具体模型默认值”
 - [ ] D4：重命名边界（产品面/表/API/CLI/UI vs 连 Go 包名一起改）
 - [ ] D5：bootstrap / auth-off / 超管恢复流程

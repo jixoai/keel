@@ -144,20 +144,16 @@ Session；Bot 归档后 MUST 拒绝新 Session。
 
 ### Requirement: 人类调用 Bot 不得提权
 
-人类调用 Bot 时，有效权限 MUST 为调用者权限与 Bot 账号权限的交集。子 Bot/成员 Bot 的
-有效权限 MUST 不超过父调用链。无人值守运行（定时、Webhook、后台任务）MUST 以 Bot 账号
-权限运行；创建绑定与触发器 MUST 受 `grant ⊆ own` 约束。超级管理员权限 MUST NOT 委托给 Bot。
+人类调用 Bot 时，有效权限 MUST 为调用者权限与 Bot 账号权限的交集。无人值守运行
+（定时、Webhook、后台任务）MUST 以 Bot 账号权限运行；创建绑定与触发器 MUST 受
+`grant ⊆ own` 约束。超级管理员权限 MUST NOT 委托给 Bot。Bot 调用 Bot 的调用链权限
+（D9）在冻结前不在本 spec 覆盖。
 
 #### Scenario: 低权限用户调用高权限 Bot
 - **GIVEN** 用户 A 只有 `session.read` + own
 - **AND** Bot X 的账号拥有 `secret.read`
 - **WHEN** A 调用 X 并要求读取密钥
 - **THEN** 该工具调用返回 403，有效权限取交集
-
-#### Scenario: 子 Bot 不超过父链
-- **GIVEN** 父 Bot 的有效权限只有 `session.read`
-- **WHEN** 父 Bot 启动一个拥有 `secret.read` 的子 Bot
-- **THEN** 子 Bot 的有效权限仍是 `session.read`，不能读取密钥
 
 ### Requirement: Alpha 零兼容
 

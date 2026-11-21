@@ -9,7 +9,7 @@
 Account 1 ── N Bot
 Bot = Profile + ModelKind + Harness(tools + context(Instruction + permissions))
 Profile = Account + Role
-TeamBot = Bot 的组合（是否本身是 Bot 见 D2）
+TeamBot = Mission + Roster（团队目标/使命 + Bot 引用名单；不是权限主体）
 Session → 属于一个 Bot → 属于一个 Account
 ```
 
@@ -19,14 +19,15 @@ Session → 属于一个 Bot → 属于一个 Account
 | Role | 身份与灵魂：名字、Instruction、语气、默认行为 | 任何权限 |
 | Profile | Account + Role 的绑定 | 运行状态 |
 | Bot | 一个可运行的 AI 员工：Profile + ModelKind + Harness | 登录会话 |
-| TeamBot | 多个 Bot 的组装 | 第二套执行拓扑 |
+| TeamBot | 提供团队目标/使命与 Bot 名单（Roster） | 权限主体、Account/Profile、Session 归属、第二套执行拓扑 |
 | Session | 某个 Bot 的一个上下文 | 模型/工具配置 |
 | Run | 内核执行周期（实现细节，用户无感） | 产品概念 |
 
 ### 1.1 不变量
 
 1. **每个 Session 必须属于且只属于一个 Bot；每个 Bot 必须属于且只属于一个 Account。**
-   （D2 若判定 TeamBot 是 Bot，则 TeamBot Session 也满足这条。）
+   TeamBot 不拥有 Session；一次“团队运行”是多个 Bot Session 按 Mission/父子关系组成的
+   运行视图，不是第三类 Session。
 2. **Role 永不授予权限。** 权限只来自 Account 的 grant 与 Harness permissions。
 3. **权限只做加法。** 有效 key 集合 = 直接 grant ∪ 所有权限组 grant；无 deny、无嵌套。
 4. **资源访问 = 动作 key + 关系。** 有 key 只能说明“能做这个动作”；能不能对这条资源做，
@@ -208,26 +209,44 @@ resource_relations (
 }
 ```
 
-- `Profile` 是引用还是内联由 D1/D2 之后定；建议引用，便于复用。
+- `Profile` 是引用；Account 与 Role 都可复用。
 - `ModelKind` 必填；具体模型见 D3。
 - `Harness.tools` 是白名单；实际工具面 = 部署 registry ∩ 白名单。
-- `Harness.context.permissions` 是 Bot 自己的收窄；与 Account 权限的关系见 D1。
+- `Harness.context.permissions` 是 Bot 自己的收窄；有效权限 = `Account 权限 ∩ Harness permissions`（L11）。
 
 ### 4.2 TeamBot
 
-- 由多个 Bot 组成，至少一个 captain；成员 Bot 是 captain Harness 里的工具。
-- 如果 D2 判定 TeamBot 本身是 Bot：
-  - 有独立 Profile/Account/ModelKind；
-  - Session 属于 TeamBot → 其 Account；
-  - 成员 Bot 可以是同 Account 或显式共享的其他 Account Bot。
-- 如果 D2 判定只是名单：
-  - Session 属于 captain Bot；
-  - TeamBot 没有权限主体，需要额外规则决定成员可见性。
+TeamBot 是**团队目标/使命 + Bot 名单**，不是权限主体：
+
+```json
+{
+  "teamBotId": "support-team",
+  "name": "客服团队",
+  "mission": "在 24 小时内解决客户问题，无法解决时升级给人工。",
+  "roster": [
+    {"botId": "support-1", "role": "captain"},
+    {"botId": "image-1", "role": "member"}
+  ]
+}
+```
+
+- TeamBot **没有** Account/Profile/ModelKind，**不拥有** Session，**不授予**任何权限。
+- TeamBot 是资源：由某个 Account 拥有，受 `team_bot.read/manage` 权限管理；它可以引用
+  同 Account 或其他 Account 的 Bot（跨 Account 引用需显式共享，见 D8）。
+- 团队目标（mission）作为上下文注入 captain/成员的 Session；Bot 仍以自己的
+  Account/Harness 权限工作。
+- 成员 Bot 是 captain 的工具（`invoke-bot` / `create-bot` / `fork-bot`）；具体怎么用由
+  AI 选择工具决定，产品不替它决定。
+- 运行时视图（TeamRun/DAG）是账本投影：Mission 节点 + Bot/Session 节点 +
+  create/fork/invoke 边；不是新的持久实体，也不是权限主体。
+- 不引入“临时 Bot”概念：`create-bot` 创建的就是普通 Bot（属于某个 Account）；
+  是否持久、是否入队由工具参数与权限决定，不做特殊生命周期。
 
 ### 4.3 Session 归属
 
 - `sessions.bot_id` 必填；`sessions.account_id` 由 Bot 派生并冗余存储（便于查询/RLS）。
 - `sessions.created_by_account_id` 记录发起人（人类或触发者）。
+- `sessions.team_bot_id` / `session_mission` 记录这次会话所属的团队目标（可选，快照）。
 - 删除 Bot 时：已有 Session 保留，Bot 归档；新 Session 拒绝。
 - 跨 Account 共享：`resource_relations` 加 `viewer/editor`；默认只有 Bot 的 Account 可见。
 

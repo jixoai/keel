@@ -45,7 +45,9 @@ Session → 属于一个 Bot → 属于一个 Account
 - **ModelKind**：模型类型（text / image / decision / realtime / …），决定底层工作方式；
   具体模型选择另见 Open Decision D3。
 - **Harness**：给模型的环境，包含工具与上下文；上下文 = Instruction + permissions。
-- **TeamBot**：由多个 Bot 组装；是否本身是一个 Bot 见 Open Decision D2。
+- **TeamBot**：一个团队目标/使命（Mission）+ Bot 引用名单（Roster）。TeamBot **不是权限主体**，
+  没有自己的 Account/Profile，不拥有 Session；权限始终只在 Bot。TeamBot 是资源，由某个
+  Account 拥有并受 `team_bot.*` 权限管理，但它不向成员授予任何权限。
 
 ### 3. 认证与账号（破坏性）
 
@@ -68,8 +70,10 @@ Session → 属于一个 Bot → 属于一个 Account
   `owner / team_member / viewer / editor`。handler 禁止再手写 owner/team 判断。
 - **目录治理**：代码内唯一 permission registry；CI 枚举所有 HTTP 路由、工具、CLI 子命令、
   UI 动作，缺 key 或未知 key 直接失败；高危域可拆细。
-- **Bot 有效权限**：Account 权限与 Harness permissions 的关系见 Open Decision D1；
-  未定之前不实现判定。
+- **Bot 有效权限 = Account 权限 ∩ Harness permissions**（L11）：Account 是上限，
+  Harness permissions 是 Bot 自身的收窄；Role/Instruction 不授予权限。
+- **TeamBot 不参与权限判定**（L12）：它只提供团队目标与 Bot 名单；Bot 仍按自己的
+  Account/Harness 权限工作。Bot 调用 Bot 的权限链规则见 Open Decision D9。
 
 ### 5. 运行时与归属
 
@@ -105,17 +109,21 @@ Session → 属于一个 Bot → 属于一个 Account
 | L8 | 产品词汇 | 删除 `Agent`；`Bot` / `TeamBot`；`TeamAgent` → `TeamBot` |
 | L9 | Bot 模型 | `Bot = Profile + ModelKind + Harness(tools + context(Instruction + permissions))` |
 | L10 | 归属 | Account 拥有多个 Bot；Session 属于 Bot → Account；TeamBot 由多个 Bot 组装 |
+| L11 | Bot 有效权限 | `Account 权限 ∩ Harness permissions`；Account 是上限，Harness 是收窄；Role 不授权 |
+| L12 | TeamBot 不是权限主体 | TeamBot = Mission + Roster；不拥有 Account/Profile/Session，不向成员授予权限；权限只在 Bot |
 
 ## Open Decisions（阻塞 spec 冻结）
 
-- **D1**：Bot 有效权限是否 = `Account 权限 ∩ Harness permissions`？
-- **D2**：TeamBot 本身是否是一个 Bot（拥有自己的 Profile/Account/ModelKind，成员 Bot 作为工具）？
+- **D1（已冻结）**：Bot 有效权限 = `Account 权限 ∩ Harness permissions`（L11）。
+- **D2（已冻结）**：TeamBot 不是 Bot，也不是权限主体；它是 Mission + Roster（L12）。
 - **D3**：ModelKind 只写类型，还是“类型 + 具体模型默认值”？
 - **D4**：重命名边界：只改产品面/API/CLI/UI/表名，还是连 Go 包名（`internal/agent*`）一起改？
 - **D5**：首个超管 bootstrap / auth-off / 恢复流程的具体形态。
 - **D6**：旧 sessions/agents/teams 数据是清空重建，还是由 bootstrap 超管接管为初始 Bot？
 - **D7**：Bot 账号是否可登录（密码）还是只发 API key；API key 是否绑定 Account。
 - **D8**：TeamBot 跨 Account 组装与共享的规则。
+- **D9**：Bot A 调用 Bot B 时，B 的有效权限是“仅 B 自己的权限”，还是“调用链交集”
+  （人类 ∩ Bot1 ∩ Bot2 …）？后者与已冻结的 L2 一致，且堵住借道提权。
 
 ## Impact
 
