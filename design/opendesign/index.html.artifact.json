@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "kind": "html",
+  "title": "Keel · 身份与访问设计板",
+  "entry": "index.html",
+  "renderer": "html",
+  "status": "complete",
+  "exports": ["html"],
+  "createdAt": "2026-11-21T15:08:37.000Z",
+  "updatedAt": "2026-11-21T15:40:25.000Z",
+  "metadata": {
+    "inferred": true
+  }
+}

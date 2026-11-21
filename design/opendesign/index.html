@@ -1,0 +1,2278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Keel · 身份与访问设计板</title>
+<style>
+/* ==========================================================================
+   Keel · keel-bot-identity-access · design board
+   Base: web/theme.json (Keel Zai Dark) + web/src/ui/kit tokens.
+   This file is a design artifact, not production code.
+   ========================================================================== */
+
+:root{
+  /* appearance tokens — copied from web/theme.json (dark) */
+  --bg:#161616;
+  --fg:#d4d4d4;
+  --panel:#202020;
+  --card:#2b2b2b;
+  --popover:#2b2b2b;
+  --primary:#ffffff;
+  --primary-ink:#000000;
+  --secondary:#363636;
+  --muted:rgba(255,255,255,.05);
+  --muted-fg:#adadad;
+  --border:rgba(255,255,255,.1);
+  --field:#2b2b2b;
+  --field-edge:rgba(255,255,255,.1);
+  --ring:rgba(255,255,255,.35);
+  --brand:#ffffff;
+  --danger:#ff5c5c;
+  --warning:#ff8a30;
+  --success:#46bf72;
+  --info:#4099ff;
+  --link:#80beff;
+  --chart-1:#4099ff; --chart-2:#46bf72; --chart-3:#7b5ce5; --chart-4:#ff5c5c; --chart-5:#ff8a30;
+  --glass-rim:rgba(255,255,255,.1);
+  --glass-inner:rgba(255,255,255,.04);
+  --glass-edge:rgba(255,255,255,.1);
+  --glass-shade:rgba(0,0,0,.6);
+  --glass-lift:rgba(0,0,0,.32);
+  --r-card:12px;
+  --r-control:6px;
+  --r-pill:999px;
+  --font:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"PingFang SC",monospace;
+
+  /* document chrome — separate from the product surface */
+  --doc-bg:#0e0e0f;
+  --doc-fg:#e7e5e0;
+  --doc-muted:#8d8b85;
+  --doc-line:#26262a;
+  --doc-panel:#131315;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--doc-bg);
+  color:var(--doc-fg);
+  font-family:var(--font);
+  font-size:14px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+button,input,textarea{font-family:inherit;color:inherit}
+button{cursor:default}
+h1,h2,h3,h4,p,ol,ul,dl,dd,dt{margin:0;padding:0}
+ol,ul{list-style:none}
+svg{display:block}
+::selection{background:rgba(255,255,255,.18)}
+*{scrollbar-width:thin;scrollbar-color:#2f2f33 transparent}
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-thumb{background:#2f2f33;border-radius:999px}
+*::-webkit-scrollbar-track{background:transparent}
+
+.icon{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.icon.sm{width:13px;height:13px}
+.icon.lg{width:18px;height:18px}
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+
+/* ---------- document ---------- */
+.doc{max-width:1440px;margin:0 auto;padding:56px 48px 120px}
+.doc-head{display:flex;flex-direction:column;gap:18px;padding-bottom:36px;border-bottom:1px solid var(--doc-line)}
+.doc-brand{display:flex;align-items:center;gap:12px}
+.doc-mark{width:28px;height:28px;border:1px solid rgba(255,255,255,.38);border-radius:7px;display:grid;place-items:center;font:600 12px var(--mono);color:#fff}
+.doc-brand-name{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
+.doc-brand-rule{width:1px;height:14px;background:var(--doc-line)}
+.doc-brand-doc{font-size:12px;color:var(--doc-muted)}
+.eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--doc-muted)}
+h1{font-size:36px;line-height:1.22;font-weight:600;letter-spacing:-.015em;max-width:960px}
+.lede{font-size:15px;line-height:1.75;color:#b6b3ac;max-width:860px}
+.doc-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.meta-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border:1px solid var(--doc-line);border-radius:999px;font-size:11px;color:#a5a39d;background:#141416}
+.meta-chip b{color:#dedcd6;font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:10px}
+.legend-item{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:#9d9b95}
+.swatch{width:12px;height:12px;border-radius:3px;border:1px solid rgba(255,255,255,.16)}
+.swatch.bg{background:var(--bg)} .swatch.card{background:var(--card)} .swatch.line{background:transparent;border-color:rgba(255,255,255,.3)}
+.swatch.primary{background:#fff} .swatch.danger{background:var(--danger)} .swatch.success{background:var(--success)}
+
+.section{padding-top:64px;margin-top:64px;border-top:1px solid var(--doc-line)}
+.section-head{display:flex;flex-direction:column;gap:10px;max-width:900px}
+.section-head h2{font-size:24px;font-weight:600;letter-spacing:-.01em}
+.section-head .lede{font-size:14px;line-height:1.7;color:#a9a6a0}
+.stage-wrap{margin-top:24px;padding:24px;border:1px solid var(--doc-line);border-radius:16px;background:var(--doc-panel);overflow-x:auto}
+.stage{width:1240px;margin:0 auto}
+.stage-narrow{width:auto;display:flex;justify-content:center;gap:20px;flex-wrap:nowrap}
+.caption{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:14px;font-size:11px;color:var(--doc-muted)}
+.caption b{color:#c9c7c1;font-weight:500}
+.notes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:18px}
+.note{border-left:1px solid var(--doc-line);padding-left:14px}
+.note .n{font:500 10px var(--mono);color:#7c7a74;letter-spacing:.08em}
+.note b{display:block;margin-top:3px;font-size:12px;font-weight:600;color:#d9d7d1}
+.note p{margin-top:4px;font-size:11.5px;line-height:1.65;color:#918f89}
+.note code{font:10.5px var(--mono);color:#c8c6c0;background:#1c1c1f;border:1px solid var(--doc-line);border-radius:4px;padding:1px 4px}
+
+/* ---------- app frame ---------- */
+.app{
+  width:1240px;height:780px;background:var(--bg);color:var(--fg);
+  border:1px solid rgba(255,255,255,.13);border-radius:12px;overflow:hidden;
+  display:flex;box-shadow:0 28px 70px rgba(0,0,0,.5);
+}
+.app.tall{height:820px}
+.rail{width:232px;flex:none;background:var(--bg);border-right:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;padding:10px}
+.rail-brand{height:46px;display:flex;align-items:center;gap:9px;padding:0 8px}
+.rail-mark{width:24px;height:24px;border:1px solid rgba(255,255,255,.34);border-radius:6px;display:grid;place-items:center;font:600 11px var(--mono);color:#f2f2f2}
+.rail-name{font-size:12.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#f0f0f0}
+.rail-env{margin-left:auto;font-size:9.5px;color:#9a9a9a;border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:1px 6px}
+.nav{display:flex;flex-direction:column;gap:2px;margin-top:10px}
+.nav-item{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:6px;font-size:13px;color:#b9b9b9;white-space:nowrap}
+.nav-item .icon{color:#8f8f8f}
+.nav-item.is-active{background:rgba(255,255,255,.06);color:#f4f4f4;box-shadow:inset 2px 0 0 #fff}
+.nav-item.is-active .icon{color:#f4f4f4}
+.nav-count{margin-left:auto;font:10px var(--mono);color:#8f8f8f}
+.rail-sep{height:1px;background:rgba(255,255,255,.07);margin:10px 8px}
+.rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:2px}
+.me{display:flex;align-items:center;gap:9px;height:44px;padding:0 8px;border-radius:8px;margin-top:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)}
+.me .who{min-width:0;display:flex;flex-direction:column;gap:0}
+.me b{font-size:12px;font-weight:500;color:#ededed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.me small{font-size:10px;color:#999}
+.me .icon{margin-left:auto;color:#8f8f8f}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{height:48px;flex:none;display:flex;align-items:center;gap:12px;padding:0 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+.crumb{display:flex;align-items:center;gap:7px;font-size:12px;color:#9a9a9a;white-space:nowrap;min-width:0}
+.crumb b{color:#e8e8e8;font-weight:500}
+.crumb .sep{color:#5f5f5f}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:#b9b9b9;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.live .dot{width:5px;height:5px;border-radius:50%;background:var(--success)}
+.page{flex:1;min-height:0;overflow:hidden;padding:22px 24px;display:flex;flex-direction:column;gap:18px}
+.page.flush{padding:0;gap:0}
+.page-head{display:flex;align-items:flex-start;gap:20px}
+.page-head h3{font-size:20px;line-height:1.3;font-weight:600;color:#f0f0f0;letter-spacing:-.01em}
+.page-head p{margin-top:3px;font-size:12px;color:#9c9c9c;max-width:620px}
+.page-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+
+.btn{height:30px;padding:0 10px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--fg);font-size:13px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+.btn-sm{height:26px;font-size:12px;padding:0 8px}
+.btn-primary{background:var(--primary);color:var(--primary-ink)}
+.btn-outline{border-color:rgba(255,255,255,.14);color:#e4e4e4}
+.btn-ghost{color:#a9a9a9}
+.btn-danger{background:rgba(255,92,92,.14);border-color:rgba(255,92,92,.32);color:#ffbcbc}
+.btn.is-disabled{opacity:.42}
+.btn .icon{width:14px;height:14px}
+
+.badge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:999px;border:1px solid transparent;font-size:10.5px;font-weight:500;white-space:nowrap;color:var(--fg)}
+.badge .dot{width:5px;height:5px;border-radius:50%;flex:none}
+.badge-success{background:rgba(70,191,114,.14);border-color:rgba(70,191,114,.3)}
+.badge-success .dot{background:var(--success)}
+.badge-warning{background:rgba(255,138,48,.14);border-color:rgba(255,138,48,.3)}
+.badge-warning .dot{background:var(--warning)}
+.badge-danger{background:rgba(255,92,92,.14);border-color:rgba(255,92,92,.32)}
+.badge-danger .dot{background:var(--danger)}
+.badge-info{background:rgba(64,153,255,.14);border-color:rgba(64,153,255,.3)}
+.badge-info .dot{background:var(--info)}
+.badge-neutral{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1)}
+.badge-neutral .dot{background:#b9b9b9}
+.badge-outline{border-color:rgba(255,255,255,.14);color:#a9a9a9}
+.badge-ghost{color:#9a9a9a;padding:0 4px}
+
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px}
+.panel-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.07)}
+.panel-head h4{font-size:12.5px;font-weight:600;color:#ececec}
+.panel-head .sub{font-size:10.5px;color:#969696}
+.panel-body{padding:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px}
+.muted{color:var(--muted-fg)}
+.mono{font-family:var(--mono)}
+.tiny{font-size:10.5px}
+.small{font-size:11.5px}
+
+.input{height:30px;border:1px solid var(--field-edge);background:var(--field);border-radius:6px;padding:0 9px;font-size:12.5px;color:#e6e6e6;display:flex;align-items:center;gap:6px;min-width:0}
+.input .ph{color:#8b8b8b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.input .icon{color:#8f8f8f}
+.input.grow{flex:1}
+.select{justify-content:space-between;cursor:default}
+.select .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.select .icon{width:12px;height:12px;color:#9a9a9a}
+.textarea{min-height:76px;padding:9px 10px;align-items:flex-start;line-height:1.6;font-size:12px;color:#dcdcdc}
+
+.tabs{display:flex;gap:20px;border-bottom:1px solid rgba(255,255,255,.09);flex:none}
+.tab{height:36px;display:flex;align-items:center;gap:6px;font-size:12.5px;color:#9d9d9d;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab.is-active{color:#f2f2f2;border-bottom-color:#fff;font-weight:500}
+.tab .count{font:10px var(--mono);color:#8d8d8d}
+
+.table{width:100%;border-collapse:collapse}
+.table th{height:30px;text-align:left;font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#8f8f8f;border-bottom:1px solid rgba(255,255,255,.08);padding:0 12px;white-space:nowrap}
+.table td{height:44px;border-bottom:1px solid rgba(255,255,255,.06);padding:0 12px;font-size:12.5px;color:#d8d8d8;vertical-align:middle}
+.table tr:last-child td{border-bottom:0}
+.table tr.is-selected td{background:rgba(255,255,255,.045)}
+.table .sub{display:block;font-size:10.5px;color:#929292;margin-top:1px}
+.table .num{font:11px var(--mono);color:#c9c9c9}
+
+.avatar{width:28px;height:28px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font-size:10.5px;font-weight:500;color:#eaeaea;flex:none}
+.avatar.sm{width:22px;height:22px;font-size:9.5px}
+.avatar.lg{width:36px;height:36px;font-size:13px}
+.who-cell{display:flex;align-items:center;gap:9px;min-width:0}
+.who-cell b{display:block;font-size:12.5px;font-weight:500;color:#eeeeee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who-cell small{display:block;font-size:10.5px;color:#929292;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.split{flex:1;min-height:0;display:grid;grid-template-columns:360px minmax(0,1fr)}
+.split.narrow{grid-template-columns:248px minmax(0,1fr)}
+.split.wide{grid-template-columns:280px minmax(0,1fr)}
+.split.team{grid-template-columns:260px minmax(0,1fr)}
+.pane{min-height:0;display:flex;flex-direction:column}
+.pane.left{border-right:1px solid rgba(255,255,255,.08);background:#181818}
+.pane-head{padding:14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;gap:9px;flex:none}
+.pane-title{display:flex;align-items:center;gap:8px}
+.pane-title h4{font-size:12.5px;font-weight:600}
+.pane-title .count{font:10px var(--mono);color:#8f8f8f}
+.pane-list{padding:8px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.row-item{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;border:1px solid transparent;min-width:0}
+.row-item.is-selected{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.09)}
+.row-item .body{min-width:0;flex:1}
+.row-item b{display:block;font-size:12px;font-weight:500;color:#e9e9e9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-item small{display:block;font-size:10px;color:#929292;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.row-item .tail{flex:none;display:flex;align-items:center;gap:5px}
+
+.detail{min-height:0;display:flex;flex-direction:column;flex:1}
+.detail-head{padding:18px 20px 0;display:flex;flex-direction:column;gap:10px;flex:none}
+.detail-title{display:flex;align-items:center;gap:11px;min-width:0}
+.detail-title h3{font-size:18px;font-weight:600;color:#f1f1f1;letter-spacing:-.01em;white-space:nowrap}
+.detail-title .handle{font:11px var(--mono);color:#8f8f8f}
+.detail-sub{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11px;color:#9a9a9a}
+.detail-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+.detail-body{padding:16px 20px 20px;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:14px}
+
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.fact{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 12px;min-width:0}
+.fact .k{font-size:10px;color:#929292}
+.fact .v{font-size:16px;font-weight:600;color:#f0f0f0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fact .v small{font-size:10px;font-weight:400;color:#9a9a9a;margin-left:4px}
+
+.list{display:flex;flex-direction:column}
+.list-row{display:flex;align-items:center;gap:10px;height:42px;border-bottom:1px solid rgba(255,255,255,.06);min-width:0}
+.list-row:last-child{border-bottom:0}
+.list-row .grow{flex:1;min-width:0}
+.list-row b{display:block;font-size:12px;font-weight:500;color:#e6e6e6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list-row small{display:block;font-size:10px;color:#929292;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.section-label{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8f8f8f;margin-top:2px}
+.section-label .line{flex:1;height:1px;background:rgba(255,255,255,.07)}
+
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-size:10.5px;color:#cfcfcf;white-space:nowrap}
+.chip .dot{width:4px;height:4px;border-radius:50%;background:#8f8f8f}
+
+.toolbar{display:flex;align-items:center;gap:8px;flex:none}
+.seg{display:inline-flex;align-items:center;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:2px}
+.seg span{height:24px;display:flex;align-items:center;padding:0 8px;border-radius:5px;font-size:11px;color:#9d9d9d;white-space:nowrap}
+.seg span.is-on{background:rgba(255,255,255,.1);color:#f0f0f0}
+
+/* permission matrix */
+.matrix{display:flex;flex-direction:column;min-height:0}
+.domain{border-bottom:1px solid rgba(255,255,255,.07)}
+.domain-head{height:38px;display:flex;align-items:center;gap:8px;padding:0 4px;font-size:11.5px;font-weight:600;color:#ececec}
+.domain-head .icon{color:#9a9a9a}
+.domain-head .count{font-weight:400;color:#8f8f8f;font-size:10.5px}
+.domain-head .spacer{flex:1}
+.prow{display:grid;grid-template-columns:minmax(0,1fr) 74px 168px;gap:12px;align-items:center;min-height:46px;padding:5px 4px;border-top:1px solid rgba(255,255,255,.055)}
+.pname{min-width:0}
+.pname b{display:block;font-size:12px;font-weight:500;color:#e4e4e4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pname small{display:block;font:10px var(--mono);color:#8d8d8d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.prow .note{grid-column:1 / -1;margin:-2px 0 0;padding:0;border:0;font-size:10px;color:#929292;display:flex;align-items:center;gap:5px}
+.prow .note .icon{width:11px;height:11px}
+.scope{height:28px;font-size:11.5px}
+.scope.is-off{color:#8f8f8f}
+.scope.is-narrow{color:#e8e8e8}
+.risk{justify-self:start}
+
+.savebar{position:relative;margin-top:auto;flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid rgba(255,255,255,.1);background:rgba(32,32,32,.92);box-shadow:0 -12px 24px rgba(0,0,0,.24)}
+.savebar .txt{font-size:11px;color:#bdbdbd}
+.savebar .txt b{color:#f0f0f0;font-weight:500}
+.savebar .actions{margin-left:auto;display:flex;gap:8px}
+
+/* layers / effective permissions */
+.layers{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.layer{border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.02);padding:11px 12px;min-width:0}
+.layer-head{display:flex;align-items:center;gap:7px}
+.layer-head b{font-size:11.5px;font-weight:600;color:#ececec}
+.layer-head small{font-size:10px;color:#929292;margin-left:auto;white-space:nowrap}
+.layer .chips{margin-top:8px}
+.layer-row{display:flex;align-items:center;gap:8px;height:28px;font-size:11px;color:#cfcfcf;min-width:0}
+.layer-row .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.layer-row .off{color:#8f8f8f}
+.switch{width:30px;height:17px;border-radius:999px;background:rgba(255,255,255,.12);position:relative;flex:none}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#d7d7d7}
+.switch.on{background:rgba(255,255,255,.72)}
+.switch.on::after{left:15px;background:#111}
+.switch.off{opacity:.6}
+
+.eff{border:1px solid rgba(255,255,255,.09);border-radius:10px;overflow:hidden}
+.eff-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.07)}
+.eff-head b{font-size:11.5px;font-weight:600}
+.eff-head .spacer{flex:1}
+.eff-row{display:grid;grid-template-columns:18px minmax(0,1fr) 92px 130px;gap:8px;align-items:center;height:36px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.055);font-size:11.5px}
+.eff-row:last-child{border-bottom:0}
+.eff-row .name{color:#dedede;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eff-row .src{font-size:10px;color:#929292;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eff-row.ok .icon{color:var(--success)}
+.eff-row.no .icon{color:#8f8f8f}
+.eff-row.block .icon{color:var(--warning)}
+.eff-row.block .name,.eff-row.no .name{color:#a9a9a9}
+
+/* team */
+.mission{border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.025);padding:12px 14px}
+.mission .k{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8f8f8f}
+.mission .k .icon{width:12px;height:12px}
+.mission p{margin-top:6px;font-size:12.5px;line-height:1.65;color:#dedede}
+.mission .edit{float:right;color:#9a9a9a;font-size:10.5px}
+.roster-head{display:flex;align-items:center;gap:8px;margin-top:2px}
+.roster-head b{font-size:11.5px;font-weight:600}
+.roster-head .count{font:10px var(--mono);color:#8f8f8f}
+.roster-head .add{margin-left:auto}
+.member{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.018);min-width:0}
+.member + .member{margin-top:6px}
+.member.is-captain{border-color:rgba(255,255,255,.16);background:rgba(255,255,255,.035)}
+.member .body{min-width:0;flex:1}
+.member b{display:block;font-size:12px;font-weight:500;color:#ededed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.member small{display:block;font-size:10px;color:#929292;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.member .tail{display:flex;align-items:center;gap:6px;flex:none}
+.member.is-blocked{background:rgba(255,92,92,.045);border-color:rgba(255,92,92,.2)}
+.preflight{display:flex;flex-direction:column;gap:0}
+.check{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);min-width:0}
+.check:last-child{border-bottom:0}
+.check .icon{width:13px;height:13px;margin-top:1px}
+.check.ok .icon{color:var(--success)}
+.check.bad .icon{color:var(--danger)}
+.check .body{min-width:0;flex:1}
+.check b{display:block;font-size:11.5px;font-weight:500;color:#e4e4e4}
+.check small{display:block;font-size:10px;color:#929292;margin-top:1px;line-height:1.5}
+.check .fix{flex:none;font-size:10.5px;color:#d8d8d8;text-decoration:underline;text-underline-offset:2px}
+.hint{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);border-radius:8px;padding:9px 10px;font-size:10.5px;line-height:1.6;color:#adadad;display:flex;gap:7px}
+.hint .icon{width:12px;height:12px;margin-top:1px;color:#a9a9a9}
+
+/* DAG */
+.run-head{display:flex;align-items:flex-start;gap:14px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);flex:none}
+.run-head h3{font-size:18px;font-weight:600;color:#f1f1f1}
+.run-facts{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:5px;font-size:10.5px;color:#9a9a9a}
+.run-facts b{color:#d6d6d6;font-weight:500}
+.run-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 330px}
+.dag-wrap{min-width:0;min-height:0;padding:12px 16px;position:relative;overflow:hidden;display:flex;flex-direction:column}
+.dag{position:relative;width:600px;height:430px;flex:none}
+.dag svg.edges{position:absolute;inset:0;width:600px;height:430px}
+.dag svg.edges path{fill:none;stroke:rgba(255,255,255,.22);stroke-width:1.2}
+.dag svg.edges path.is-strong{stroke:rgba(255,255,255,.62);stroke-width:1.4}
+.dag svg.edges path.is-fail{stroke:rgba(255,92,92,.62);stroke-dasharray:4 3}
+.dag svg.edges path.is-create{stroke:rgba(255,255,255,.38);stroke-dasharray:4 3}
+.node{position:absolute;width:180px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:var(--card);padding:9px 10px;display:flex;flex-direction:column;gap:3px;box-shadow:0 8px 18px rgba(0,0,0,.22)}
+.node .n1{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:#f0f0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .n1 .dot{width:6px;height:6px;border-radius:50%;flex:none}
+.node .n2{font-size:9.5px;color:#9a9a9a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .n3{display:flex;align-items:center;gap:8px;font-size:9.5px;color:#868686;white-space:nowrap}
+.node.is-mission{width:300px;background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.2)}
+.node.is-captain{border-color:rgba(255,255,255,.24)}
+.node.is-selected{border-color:rgba(255,255,255,.6);box-shadow:0 0 0 1px rgba(255,255,255,.25),0 10px 22px rgba(0,0,0,.32)}
+.node.is-fail{border-color:rgba(255,92,92,.38);background:rgba(255,92,92,.06)}
+.node.is-wait{border-style:dashed;background:rgba(255,255,255,.015)}
+.edge-label{position:absolute;font-size:9px;color:#9a9a9a;background:var(--panel);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:1px 6px;white-space:nowrap}
+.edge-label.fail{color:#ffb3b3;border-color:rgba(255,92,92,.3);background:#241818}
+.legend-row{display:flex;align-items:center;gap:14px;margin-top:auto;padding-top:10px;font-size:9.5px;color:#8f8f8f;flex-wrap:wrap}
+.legend-row span{display:inline-flex;align-items:center;gap:5px}
+.legend-row i{width:16px;height:0;border-top:1px solid rgba(255,255,255,.3);display:inline-block}
+.legend-row i.dash{border-top-style:dashed}
+.legend-row i.fail{border-top-color:rgba(255,92,92,.6)}
+.inspector{border-left:1px solid rgba(255,255,255,.08);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.insp-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:8px}
+.insp-head b{font-size:12px;font-weight:600}
+.insp-head .badge{margin-left:auto}
+.insp-tabs{display:flex;gap:14px;padding:0 14px;border-bottom:1px solid rgba(255,255,255,.07);flex:none}
+.insp-tabs span{height:32px;display:flex;align-items:center;font-size:10.5px;color:#969696;border-bottom:2px solid transparent}
+.insp-tabs span.on{color:#eaeaea;border-bottom-color:#fff}
+.insp-body{padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden}
+.kv{display:flex;align-items:center;gap:8px;font-size:10.5px;min-width:0}
+.kv .k{width:64px;flex:none;color:#8f8f8f}
+.kv .v{color:#d6d6d6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tool{display:flex;align-items:center;gap:7px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.055);font-size:10.5px}
+.tool:last-child{border-bottom:0}
+.tool .name{font-family:var(--mono);font-size:10px;color:#dcdcdc;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tool .ms{margin-left:auto;color:#8f8f8f;flex:none}
+.tool.is-denied .name{color:#ffb3b3}
+.insp-foot{margin-top:auto;padding:10px 14px;border-top:1px solid rgba(255,255,255,.07);display:flex;gap:8px;flex:none}
+
+/* empty / skeleton / error */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center;padding:26px 18px;flex:1}
+.empty .disc{width:42px;height:42px;border-radius:999px;display:grid;place-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);margin-bottom:2px}
+.empty .disc .icon{width:19px;height:19px;color:#b9b9b9}
+.empty h4{font-size:12.5px;font-weight:600;color:#ededed}
+.empty p{font-size:10.5px;line-height:1.65;color:#9a9a9a;max-width:300px}
+.empty .actions{display:flex;gap:7px;margin-top:3px}
+.skel{height:9px;border-radius:4px;background:rgba(255,255,255,.075)}
+.skel.short{width:38%}
+.skel.mid{width:62%}
+.skel.long{width:84%}
+.skel-box{height:32px;border-radius:6px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.05)}
+.alert-card{border:1px solid rgba(255,92,92,.32);background:rgba(255,92,92,.07);border-radius:9px;padding:9px 10px;display:flex;gap:8px;font-size:10.5px;line-height:1.55;color:#f0d2d2}
+.alert-card .icon{width:13px;height:13px;color:#ff9b9b;margin-top:1px;flex:none}
+.alert-card b{color:#ffe1e1;font-weight:600}
+
+/* ---------- direction comparison wireframes ---------- */
+.wire-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:20px}
+.wire-col{border:1px solid var(--doc-line);border-radius:12px;background:#121214;padding:14px;min-width:0}
+.wire-col.recommended{border-color:rgba(255,138,48,.34);background:linear-gradient(180deg,rgba(255,138,48,.045),rgba(18,18,20,0)),#121214}
+.wire-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.wire-head h3{font-size:15px;font-weight:600;color:#eeece6}
+.wire-head .tag{font:9px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#8f8d87;border:1px solid var(--doc-line);border-radius:999px;padding:2px 6px}
+.wire-col.recommended .wire-head .tag{color:#ffd8b8;border-color:rgba(255,138,48,.3)}
+.wire-engine{font-size:10.5px;line-height:1.55;color:#918f89;margin-top:5px}
+.wire-stage{position:relative;height:238px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#181818;overflow:hidden;margin-top:10px}
+.wb{position:absolute;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);border-radius:2px}
+.wb.fill{background:rgba(255,255,255,.085)}
+.wb.amber{border-color:rgba(255,138,48,.38);background:rgba(255,138,48,.08)}
+.wb.blue{border-color:rgba(64,153,255,.38);background:rgba(64,153,255,.08)}
+.wb.fail{border-color:rgba(255,92,92,.4);background:rgba(255,92,92,.08)}
+.wb.line{border:0;border-top:1px solid rgba(255,255,255,.16);background:transparent;border-radius:0}
+.wl{position:absolute;font:8px var(--mono);letter-spacing:.04em;color:#8f8f8f;white-space:nowrap}
+.wl.bright{color:#d8d8d8}
+.wl.amber{color:#ffd8b8}
+.wire-cap{display:flex;justify-content:space-between;gap:8px;font-size:9px;color:#7f7d77;margin-top:6px}
+.wire-meta{display:grid;grid-template-columns:1fr;gap:3px;margin-top:10px;padding-top:9px;border-top:1px solid var(--doc-line);font-size:9.5px;color:#8f8d87;line-height:1.5}
+.wire-meta b{color:#c9c7c1;font-weight:500}
+.wire-pick{margin-top:10px;font-size:9.5px;line-height:1.55;color:#a9a7a1}
+.wire-pick b{color:#ffd8b8;font-weight:500}
+
+/* ---------- B · ledger shell ---------- */
+.b-app{width:1240px;height:820px;background:var(--bg);color:var(--fg);border:1px solid rgba(255,255,255,.13);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 28px 70px rgba(0,0,0,.5)}
+.b-top{height:56px;flex:none;display:flex;align-items:stretch;gap:22px;padding:0 22px;border-bottom:1px solid rgba(255,255,255,.11)}
+.b-brand{display:flex;align-items:center;gap:9px;flex:none;padding-right:8px}
+.b-brand .rail-mark{width:22px;height:22px;font-size:10px}
+.b-brand b{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#f0f0f0}
+.b-env{font-size:9px;color:#8f8f8f;border-left:1px solid rgba(255,255,255,.14);padding-left:10px;margin-left:2px}
+.b-chapters{display:flex;align-items:stretch;gap:1px;min-width:0}
+.b-chapter{display:flex;align-items:center;gap:7px;padding:0 11px;font-size:12px;color:#9a9a9a;border-bottom:2px solid transparent;white-space:nowrap}
+.b-chapter i{font:9px var(--mono);font-style:normal;color:#6f6f6f;letter-spacing:.04em}
+.b-chapter.on{color:#f4f4f4;border-bottom-color:#f4f4f4}
+.b-chapter.on i{color:#cfcfcf}
+.b-top-right{margin-left:auto;display:flex;align-items:center;gap:14px;flex:none}
+.b-top-right .live{font-size:9.5px}
+.b-top-right .avatar{width:24px;height:24px;font-size:9px}
+.b-body{flex:1;min-height:0;display:flex}
+.b-spine{width:226px;flex:none;border-right:1px solid rgba(255,255,255,.1);padding:22px 18px 16px;display:flex;flex-direction:column;gap:13px;background:rgba(255,255,255,.015);min-height:0}
+.b-kicker{display:flex;align-items:center;gap:7px;font:9px var(--mono);letter-spacing:.15em;text-transform:uppercase;color:#8a8a8a}
+.b-kicker .icon{width:12px;height:12px;color:#a3a3a3}
+.b-title{font-size:24px;line-height:1.22;font-weight:600;color:#f2f2f2;letter-spacing:-.015em}
+.b-title small{display:block;font-size:10px;font-weight:400;letter-spacing:.02em;color:#959595;margin-top:3px}
+.b-desc{font-size:11px;line-height:1.65;color:#a3a3a3}
+.b-facts{display:flex;flex-direction:column;border-top:1px solid rgba(255,255,255,.1)}
+.b-fact{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.055);font-size:10px;min-width:0}
+.b-fact .k{width:56px;flex:none;color:#8a8a8a}
+.b-fact .v{color:#dcdcdc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-fact .v b{font-weight:500;color:#f0f0f0}
+.b-index{display:flex;flex-direction:column;gap:1px;margin-top:1px}
+.b-index a{display:flex;align-items:center;gap:9px;height:29px;font-size:10.5px;color:#9a9a9a;border-left:2px solid transparent;padding-left:9px;white-space:nowrap}
+.b-index a i{font:8.5px var(--mono);font-style:normal;color:#6f6f6f;letter-spacing:.04em}
+.b-index a.on{color:#f2f2f2;border-left-color:#f2f2f2;background:rgba(255,255,255,.04)}
+.b-index a.on i{color:#cfcfcf}
+.b-spine-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px}
+.b-switch{display:flex;align-items:center;gap:7px;height:30px;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:0 9px;font-size:10.5px;color:#c9c9c9}
+.b-switch .icon{width:12px;height:12px;color:#8f8f8f}
+.b-switch .spacer{flex:1}
+.b-spine-note{font:8.5px var(--mono);letter-spacing:.06em;color:#8f8f8f;line-height:1.6}
+.b-sheet{flex:1;min-width:0;min-height:0;padding:22px 30px 16px;display:flex;flex-direction:column;overflow:hidden}
+.b-band-head{display:flex;align-items:flex-end;gap:11px;padding-bottom:11px;border-bottom:1px solid rgba(255,255,255,.13);flex:none}
+.b-band-num{font:10px var(--mono);letter-spacing:.1em;color:#8a8a8a;padding-bottom:2px}
+.b-band-title{font-size:21px;font-weight:600;color:#f2f2f2;letter-spacing:-.012em;line-height:1.2}
+.b-band-sub{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:9.5px;color:#939393;flex:none}
+.b-search{height:26px;border-bottom:1px solid rgba(255,255,255,.14);display:flex;align-items:center;gap:6px;font-size:10px;color:#8a8a8a;min-width:190px;padding:0 2px}
+.b-search .icon{width:12px;height:12px}
+.b-domain{border-bottom:1px solid rgba(255,255,255,.11)}
+.b-domain-head{display:flex;align-items:baseline;gap:10px;padding:11px 0 7px}
+.b-domain-head .num{font:9px var(--mono);color:#7f7f7f;letter-spacing:.06em}
+.b-domain-head .name{font-size:11px;font-weight:600;color:#ededed;letter-spacing:.02em}
+.b-domain-head .count{font-size:9.5px;color:#8a8a8a}
+.b-domain-head .spacer{flex:1}
+.b-domain-head .icon{width:11px;height:11px;color:#8a8a8a}
+.b-prow{display:grid;grid-template-columns:minmax(0,1fr) 58px 128px;gap:12px;align-items:center;min-height:41px;border-top:1px solid rgba(255,255,255,.055)}
+.b-pname{min-width:0}
+.b-pname b{display:block;font-size:11.5px;font-weight:500;color:#e6e6e6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-pname small{display:block;font:9px var(--mono);color:#9a9a9a;letter-spacing:.02em;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-risk{justify-self:start;font:9px var(--mono);letter-spacing:.06em;color:#a9a9a9;border:1px solid rgba(255,255,255,.14);border-radius:3px;padding:2px 5px;white-space:nowrap}
+.b-risk.hot{color:#ffb3b3;border-color:rgba(255,92,92,.33);background:rgba(255,92,92,.05)}
+.b-stamp{height:32px;border:1px solid rgba(255,255,255,.16);border-radius:4px;padding:3px 8px;display:flex;flex-direction:column;justify-content:center;gap:0;min-width:116px;background:rgba(255,255,255,.02)}
+.b-stamp .lab{font:8px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#a9a9a9;line-height:1.2}
+.b-stamp .val{font-size:10.5px;color:#eee;display:flex;align-items:center;gap:5px;line-height:1.3;white-space:nowrap}
+.b-stamp .val .icon{width:10px;height:10px;color:#8f8f8f}
+.b-stamp.off{border-style:dashed;background:transparent}
+.b-stamp.off .val{color:#8f8f8f}
+.b-stamp.hot{border-color:rgba(255,138,48,.35);background:rgba(255,138,48,.06)}
+.b-stamp.hot .lab{color:#d9a56f}
+.b-signoff{margin-top:auto;flex:none;display:flex;align-items:center;gap:13px;padding:11px 0 0;border-top:1px solid rgba(255,255,255,.13)}
+.b-signoff .who{font-size:9.5px;color:#a3a3a3;line-height:1.5}
+.b-signoff .who b{display:block;color:#efefef;font-weight:500;font-size:10px}
+.b-signoff .note{font:8.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#c9a06a;border:1px solid rgba(255,138,48,.3);background:rgba(255,138,48,.07);padding:3px 6px;border-radius:3px;white-space:nowrap}
+.b-signoff .actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+.b-signoff .btn-save{height:30px;border:1px solid rgba(255,138,48,.45);background:rgba(255,138,48,.12);color:#ffe1c7;font-size:11px;font-weight:500;border-radius:4px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.b-two{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.1);min-width:0}
+.b-two > div:first-child{border-right:1px solid rgba(255,255,255,.09);padding-right:20px}
+.b-two > div:last-child{padding-left:20px}
+.b-diff{display:grid;grid-template-columns:minmax(0,1fr) 176px 76px;gap:12px;align-items:center;min-height:34px;border-top:1px solid rgba(255,255,255,.055);font-size:10px}
+.b-diff .name{color:#dedede;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-diff .name small{display:block;font:8.5px var(--mono);color:#8f8f8f;margin-top:1px}
+.b-diff .delta{display:flex;align-items:center;gap:6px;font-size:9.5px;color:#a9a9a9;white-space:nowrap}
+.b-diff .delta .to{color:#f0f0f0}
+.b-diff .tag{justify-self:start;font:8px var(--mono);letter-spacing:.06em;border:1px solid rgba(255,255,255,.14);border-radius:2px;padding:1px 4px;color:#a9a9a9;white-space:nowrap}
+.b-diff .tag.up{color:#ffd8b8;border-color:rgba(255,138,48,.3);background:rgba(255,138,48,.06)}
+.b-subhead{display:flex;align-items:baseline;gap:7px;margin-bottom:7px}
+.b-subhead b{font-size:10.5px;font-weight:600;color:#ececec}
+.b-subhead small{font-size:9px;color:#8f8f8f;margin-left:auto;white-space:nowrap}
+.b-cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.b-cap{display:flex;align-items:center;gap:6px;height:25px;border-bottom:1px solid rgba(255,255,255,.05);font-size:10px;color:#cfcfcf;min-width:0}
+.b-cap .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-cap .scope{font:8.5px var(--mono);color:#8f8f8f;white-space:nowrap}
+.b-range-row{display:flex;align-items:center;gap:7px;height:25px;border-bottom:1px solid rgba(255,255,255,.05);font-size:10px;color:#d4d4d4;min-width:0}
+.b-range-row .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-range-row .stamp-mini{font:8px var(--mono);letter-spacing:.06em;border:1px solid rgba(255,255,255,.14);border-radius:2px;padding:1px 4px;color:#a9a9a9;white-space:nowrap}
+.b-range-row .stamp-mini.off{color:#7f7f7f;border-style:dashed}
+.b-eff{border-bottom:1px solid rgba(255,255,255,.1)}
+.b-eff-row{display:grid;grid-template-columns:14px minmax(0,1fr) 116px 86px;gap:8px;align-items:center;height:34px;border-top:1px solid rgba(255,255,255,.05);font-size:10.5px}
+.b-eff-row .name{color:#dedede;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-eff-row .src{font-size:9px;color:#8f8f8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-eff-row .icon{width:11px;height:11px}
+.b-eff-row.ok .icon{color:var(--success)}
+.b-eff-row.block .icon{color:var(--warning)}
+.b-eff-row.no .icon{color:#8f8f8f}
+.b-eff-row.no .name{color:#a3a3a3}
+.b-note-line{display:flex;align-items:center;gap:9px;padding:9px 0;font-size:9.5px;color:#939393}
+.b-note-line b{color:#e0e0e0;font-weight:500}
+.b-note-line .link{margin-left:auto;color:#dedede;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+
+/* B run swimlane */
+.b-run-band{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.1);flex:none}
+.b-mission{font-size:11px;color:#dcdcdc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-mission .mk{font:8px var(--mono);letter-spacing:.14em;color:#8f8f8f;margin-right:7px}
+.b-run-body{display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:18px;min-height:0;flex:1}
+.b-swim{min-width:0;display:flex;flex-direction:column;padding-top:8px;position:relative}
+.b-axis{display:grid;grid-template-columns:132px repeat(5,1fr);align-items:center;height:22px;font:8px var(--mono);color:#8f8f8f;border-bottom:1px solid rgba(255,255,255,.08)}
+.b-axis span{padding-left:4px;white-space:nowrap}
+.b-lane{display:grid;grid-template-columns:132px minmax(0,1fr);align-items:center;height:54px;border-bottom:1px solid rgba(255,255,255,.055);min-width:0}
+.b-lane-actor{display:flex;align-items:center;gap:7px;min-width:0;padding-right:6px}
+.b-lane-actor .avatar{width:20px;height:20px;font-size:8px}
+.b-lane-actor b{display:block;font-size:10px;font-weight:500;color:#e6e6e6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-lane-actor small{display:block;font-size:8px;color:#8a8a8a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-track{position:relative;height:30px;min-width:0}
+.b-bar{position:absolute;top:7px;height:16px;border-radius:2px;background:rgba(64,153,255,.18);border:1px solid rgba(64,153,255,.38);display:flex;align-items:center;padding:0 5px;font:8px var(--mono);color:#bcdcff;white-space:nowrap;overflow:hidden}
+.b-bar.ok{background:rgba(70,191,114,.14);border-color:rgba(70,191,114,.34);color:#c4e9d3}
+.b-bar.fail{background:rgba(255,92,92,.13);border-color:rgba(255,92,92,.38);color:#ffc0c0}
+.b-bar.sel{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.55);color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.2)}
+.b-hand{position:absolute;width:1px;background:rgba(255,255,255,.22);top:-8px;height:20px}
+.b-hand.fail{background:rgba(255,92,92,.55);border-left:1px dashed rgba(255,92,92,.55);width:0}
+.b-hand-label{position:absolute;top:-12px;font:7.5px var(--mono);color:#9a9a9a;background:var(--panel);padding:0 3px;white-space:nowrap}
+.b-hand-label.fail{color:#ffb3b3}
+.b-run-log{margin-top:10px;border-top:1px solid rgba(255,255,255,.1);padding-top:8px;display:flex;flex-direction:column;gap:0;flex:none}
+.b-log-row{display:flex;align-items:center;gap:8px;height:30px;border-bottom:1px solid rgba(255,255,255,.05);font-size:9.5px;min-width:0}
+.b-log-row .t{font:8.5px var(--mono);color:#8f8f8f;width:52px;flex:none}
+.b-log-row .what{color:#cfcfcf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.b-log-row .res{flex:none}
+.b-insp{border-left:1px solid rgba(255,255,255,.1);padding-left:16px;min-height:0;display:flex;flex-direction:column;gap:9px}
+.b-insp-title{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#f0f0f0}
+.b-insp-title .badge{height:17px;font-size:8px;padding:0 5px}
+.b-kv{display:flex;align-items:center;gap:8px;font-size:9.5px;min-width:0}
+.b-kv .k{width:54px;flex:none;color:#8a8a8a}
+.b-kv .v{color:#d4d4d4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-sec{display:flex;align-items:center;gap:7px;font:8px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8f8f8f;margin-top:2px}
+.b-sec .line{flex:1;height:1px;background:rgba(255,255,255,.07)}
+.b-tool{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:9.5px}
+.b-tool .name{font:8.5px var(--mono);color:#dcdcdc;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-tool .badge{height:15px;font-size:7.5px;padding:0 4px}
+.b-tool .ms{font:8px var(--mono);color:#7f7f7f;flex:none}
+.b-insp-foot{margin-top:auto;display:flex;gap:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08);flex:none}
+
+/* ---------- bootstrap / login ---------- */
+.entry{width:100%;height:620px;background:var(--bg);border:1px solid rgba(255,255,255,.13);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.entry .entry-top{height:48px;display:flex;align-items:center;gap:8px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.08)}
+.entry .entry-top .rail-mark{width:22px;height:22px;font-size:10px}
+.entry .entry-top b{font-size:11.5px;letter-spacing:.12em;text-transform:uppercase}
+.entry .entry-body{flex:1;display:flex;flex-direction:column;justify-content:center;padding:28px 26px;gap:16px;min-height:0}
+.entry h4{font-size:20px;line-height:1.35;font-weight:600;color:#f2f2f2;letter-spacing:-.01em}
+.entry .sub{font-size:11.5px;line-height:1.7;color:#a3a3a3}
+.entry .field{display:flex;flex-direction:column;gap:5px}
+.entry label{font-size:10.5px;font-weight:500;color:#cfcfcf}
+.entry .field .input{height:34px}
+.entry .primary{height:34px;width:100%;font-size:12.5px;margin-top:2px}
+.entry .foot{font-size:10px;color:#8f8f8f;text-align:center;margin-top:2px}
+.entry .foot a{color:#cfcfcf;text-decoration:underline;text-underline-offset:2px}
+.entry .cmd{border:1px solid rgba(255,255,255,.12);background:#101010;border-radius:8px;padding:9px 10px;display:flex;align-items:center;gap:8px}
+.entry .cmd code{font:10.5px var(--mono);color:#e2e2e2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.entry .cmd .icon{color:#9a9a9a}
+.entry .steps{display:flex;align-items:center;gap:6px;font-size:10px;color:#8f8f8f}
+.entry .steps b{color:#e8e8e8;font-weight:500}
+.entry .steps i{width:14px;height:1px;background:rgba(255,255,255,.16);display:inline-block}
+.entry .rules{display:flex;flex-direction:column;gap:4px;font-size:10px;color:#a3a3a3}
+.entry .rules span{display:flex;align-items:center;gap:5px}
+.entry .rules .icon{width:11px;height:11px;color:var(--success)}
+
+/* five-state gallery */
+.gallery{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.state-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-height:246px;padding:11px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.state-card .tag{display:flex;align-items:center;gap:6px;font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#9a9a9a}
+.state-card .tag b{color:#e8e8e8}
+.state-card .frame{border:1px solid rgba(255,255,255,.07);border-radius:8px;background:#181818;flex:1;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+.mini-head{display:flex;align-items:center;gap:6px}
+.mini-head b{font-size:10.5px;font-weight:600;color:#e8e8e8}
+.mini-head .spacer{flex:1}
+.mini-row{display:flex;align-items:center;gap:6px;min-width:0}
+.mini-row .grow{flex:1;min-width:0}
+.mini-row b{display:block;font-size:9.5px;font-weight:500;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-row small{display:block;font-size:8.5px;color:#8f8f8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-row .badge{height:16px;font-size:8.5px;padding:0 5px}
+.mini-row .badge .dot{width:4px;height:4px}
+.mini-skel-row{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.mini-skel-row .avatar{width:18px;height:18px}
+.mini-skel-row .col{flex:1;display:flex;flex-direction:column;gap:4px}
+.mini-skel-row .skel{height:6px}
+.state-card .note-line{font-size:8.5px;color:#8f8f8f;line-height:1.5}
+.state-card .actions{display:flex;gap:5px;margin-top:auto}
+.state-card .actions .btn{height:22px;font-size:9px;padding:0 6px}
+
+/* mobile viewports */
+.phones{display:flex;gap:20px;justify-content:center;flex-wrap:nowrap}
+.phone-wrap{display:flex;flex-direction:column;gap:8px}
+.phone-label{font-size:10px;color:var(--doc-muted);display:flex;justify-content:space-between;gap:10px}
+.phone-label b{color:#c9c7c1;font-weight:500}
+.viewport{width:390px;height:760px;background:var(--bg);border:1px solid rgba(255,255,255,.15);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 18px 44px rgba(0,0,0,.4)}
+.m-head{height:48px;flex:none;display:flex;align-items:center;gap:9px;padding:0 14px;border-bottom:1px solid rgba(255,255,255,.08)}
+.m-head b{font-size:13px;font-weight:600;color:#f0f0f0}
+.m-head .icon{color:#a3a3a3}
+.m-head .spacer{flex:1}
+.m-body{flex:1;min-height:0;overflow:hidden;padding:14px;display:flex;flex-direction:column;gap:12px}
+.m-body.flush{padding:0;gap:0}
+.m-nav{height:56px;flex:none;display:flex;align-items:stretch;border-top:1px solid rgba(255,255,255,.09);background:#141414}
+.m-nav .item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:9.5px;color:#8f8f8f}
+.m-nav .item .icon{width:17px;height:17px}
+.m-nav .item.on{color:#f2f2f2}
+.m-nav .item.on .icon{color:#fff}
+.m-savebar{flex:none;display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid rgba(255,255,255,.1);background:#1c1c1c}
+.m-savebar .txt{font-size:10px;color:#bdbdbd}
+.m-savebar .actions{margin-left:auto;display:flex;gap:6px}
+.m-todo{border:1px solid rgba(255,138,48,.3);background:rgba(255,138,48,.07);border-radius:8px;padding:8px 9px;display:flex;gap:7px;align-items:flex-start}
+.m-todo .icon{width:12px;height:12px;color:#ffb37a;margin-top:1px}
+.m-todo b{display:block;font-size:10px;color:#ffe1c7;font-weight:600}
+.m-todo small{display:block;font-size:9px;color:#bda08a;line-height:1.45;margin-top:1px}
+.m-summary{border:1px solid rgba(255,255,255,.1);border-radius:9px;background:rgba(255,255,255,.025);padding:10px 11px}
+.m-summary .k{font:8px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:#8f8f8f}
+.m-summary h4{font-size:14px;font-weight:600;color:#f0f0f0;margin-top:2px;letter-spacing:-.01em}
+.m-summary p{font-size:9.5px;line-height:1.55;color:#a3a3a3;margin-top:3px}
+.m-summary .facts{display:flex;gap:12px;margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.07);font-size:9px;color:#9a9a9a;flex-wrap:wrap}
+.m-summary .facts b{color:#e6e6e6;font-weight:500}
+.m-summary .save{margin-top:8px;height:30px;width:100%;border:1px solid rgba(255,138,48,.45);background:rgba(255,138,48,.12);color:#ffe1c7;font-size:10.5px;border-radius:5px;display:flex;align-items:center;justify-content:center;gap:5px}
+.m-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);min-width:0}
+.m-row .grow{flex:1;min-width:0}
+.m-row b{display:block;font-size:11px;font-weight:500;color:#e6e6e6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-row small{display:block;font-size:9.5px;color:#929292;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-domain{border:1px solid rgba(255,255,255,.08);border-radius:9px;overflow:hidden}
+.m-domain .dh{height:34px;display:flex;align-items:center;gap:7px;padding:0 10px;background:rgba(255,255,255,.03);font-size:10.5px;font-weight:600}
+.m-domain .dh .count{font-weight:400;color:#8f8f8f;font-size:9px}
+.m-domain .dh .spacer{flex:1}
+.m-prow{padding:8px 10px;border-top:1px solid rgba(255,255,255,.055);display:flex;flex-direction:column;gap:6px}
+.m-prow .l1{display:flex;align-items:center;gap:7px}
+.m-prow b{font-size:10.5px;font-weight:500;color:#e2e2e2}
+.m-prow small{font:8.5px var(--mono);color:#8d8d8d}
+.m-prow .l1 .spacer{flex:1}
+.m-prow .select{height:28px;font-size:10.5px}
+.timeline{position:relative;display:flex;flex-direction:column;gap:0;padding-left:18px}
+.timeline::before{content:"";position:absolute;left:5px;top:8px;bottom:8px;width:1px;background:rgba(255,255,255,.16)}
+.tl-node{position:relative;padding:7px 0 12px}
+.tl-node::before{content:"";position:absolute;left:-17px;top:13px;width:7px;height:7px;border-radius:50%;background:#8f8f8f;border:2px solid var(--bg)}
+.tl-node.ok::before{background:var(--success)}
+.tl-node.run::before{background:var(--info)}
+.tl-node.fail::before{background:var(--danger)}
+.tl-card{border:1px solid rgba(255,255,255,.1);border-radius:9px;background:var(--card);padding:8px 9px}
+.tl-card b{display:block;font-size:10.5px;font-weight:600;color:#ededed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-card small{display:block;font-size:9px;color:#929292;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-edge{font-size:8.5px;color:#8f8f8f;margin:-4px 0 2px;display:flex;align-items:center;gap:4px}
+.tl-edge .icon{width:10px;height:10px}
+
+/* IA map */
+.ia{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:18px}
+.ia-col{border:1px solid var(--doc-line);border-radius:11px;background:var(--doc-panel);padding:12px;min-width:0}
+.ia-col h4{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#e4e2dc}
+.ia-col h4 .icon{width:14px;height:14px;color:#9a9892}
+.ia-col .role{font-size:9.5px;color:#7f7d77;margin-top:2px}
+.ia-col ul{margin-top:8px;display:flex;flex-direction:column;gap:3px}
+.ia-col li{font-size:10.5px;color:#a5a39d;line-height:1.5;display:flex;gap:5px}
+.ia-col li::before{content:"·";color:#5f5d58}
+.ia-col li b{color:#ceccc6;font-weight:500}
+
+.footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--doc-line);display:flex;justify-content:space-between;gap:20px;font-size:10.5px;color:#7f7d77}
+.footer b{color:#b9b7b1;font-weight:500}
+</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><path d="M8 16h.01"/><path d="M16 16h.01"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m6 3 14 9-14 9z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.8-8.8"/><path d="m16 7 3 3"/><path d="m18.5 4.5 2 2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-user-plus" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.8-2.8z"/></symbol>
+  <symbol id="i-coins" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.1 10.4a6 6 0 1 1-7.7 7.7"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M22 3H2l8 9.5V19l4 2v-8.5z"/></symbol>
+  <symbol id="i-circle-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></symbol>
+</svg>
+
+<div class="doc">
+  <header class="doc-head">
+    <div class="doc-brand">
+      <span class="doc-mark">K</span>
+      <span class="doc-brand-name">Keel</span>
+      <span class="doc-brand-rule"></span>
+      <span class="doc-brand-doc">身份与访问 · 设计板</span>
+    </div>
+    <p class="eyebrow">keel-bot-identity-access · P0 产品设计 · 2026-11-21</p>
+    <h1>人给能力，Bot 干活，团队有使命，所有动作可追溯。</h1>
+    <p class="lede">这是一次结构重做，不是旧设置页的换皮。下面先给三个真正不同的方向（同一批关键页面并排比较），再给推荐方向 <b>B · 账簿</b> 的完成稿；A · 控制台保留为 baseline，C · 任务简报保留为挑战者。所有数据均为设计样例，规范正文见 <b>design/PRODUCT-DESIGN.md</b> 与 <b>design/DIRECTIONS.md</b>。</p>
+    <div class="doc-meta">
+      <span class="meta-chip"><b>推荐</b> B · 账簿</span>
+      <span class="meta-chip"><b>baseline</b> A · 控制台</span>
+      <span class="meta-chip"><b>挑战者</b> C · 任务简报</span>
+      <span class="meta-chip"><b>探针</b> D · 索引表单（seed）</span>
+      <span class="meta-chip"><b>基座</b> shadcn 官方件 + solid-glass + lucide</span>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="swatch bg"></span>background #161616</span>
+      <span class="legend-item"><span class="swatch card"></span>card #2b2b2b</span>
+      <span class="legend-item"><span class="swatch line"></span>border 10%</span>
+      <span class="legend-item"><span class="swatch primary"></span>primary #fff</span>
+      <span class="legend-item"><span class="swatch danger"></span>danger #ff5c5c</span>
+      <span class="legend-item"><span class="swatch success"></span>success #46bf72</span>
+    </div>
+  </header>
+
+  <section class="section" style="border-top:0;margin-top:0;padding-top:40px">
+    <div class="section-head">
+      <p class="eyebrow">00 · 信息架构（推荐方向 B）</p>
+      <h2>五章一本账，对象各有一页</h2>
+      <p class="lede">顶部章节索引带代替左栏；每章先是一张对象索引（账页），点进对象后由页边固定身份、关键事实与主操作。身份与记录是同一本账的两面：一个记授予，一个记发生。设置仍在右上角，只放部署级配置。</p>
+    </div>
+    <div class="ia">
+      <div class="ia-col">
+        <h4><span class="mono" style="font-size:10px;color:#7f7d77">01</span><svg class="icon"><use href="#i-chat"/></svg>工作区</h4>
+        <p class="role">所有人 · 会话真源</p>
+        <ul><li><b>我的会话</b> 默认私有</li><li><b>共享给我</b> viewer / editor</li><li><b>待我处理</b> 越权 / 失败 / 缺 invoke</li><li>新建会话：选可调用的 Bot</li></ul>
+      </div>
+      <div class="ia-col">
+        <h4><span class="mono" style="font-size:10px;color:#7f7d77">02</span><svg class="icon"><use href="#i-bot"/></svg>员工</h4>
+        <p class="role">bot.read · AI 员工真源</p>
+        <ul><li>Bot 索引（一张账页）</li><li>对象页：身份 / 工作方式</li><li>能力 / 密钥 / 会话</li><li>试跑：真实一轮</li></ul>
+      </div>
+      <div class="ia-col">
+        <h4><span class="mono" style="font-size:10px;color:#7f7d77">03</span><svg class="icon"><use href="#i-users"/></svg>团队</h4>
+        <p class="role">team_bot.read · 团队真源</p>
+        <ul><li>团队索引 / 最近运行</li><li>Mission / Roster / 队长</li><li>启动前检查</li><li>运行：泳道 DAG + 图</li></ul>
+      </div>
+      <div class="ia-col">
+        <h4><span class="mono" style="font-size:10px;color:#7f7d77">04</span><svg class="icon"><use href="#i-shield"/></svg>身份</h4>
+        <p class="role">account / permission · 唯一授权面</p>
+        <ul><li><b>账号</b> 人 / Bot / 服务</li><li><b>权限组</b> 能力 + 范围</li><li>有效能力只读汇总</li><li>签记：谁改了哪几项</li></ul>
+      </div>
+      <div class="ia-col">
+        <h4><span class="mono" style="font-size:10px;color:#7f7d77">05</span><svg class="icon"><use href="#i-activity"/></svg>记录</h4>
+        <p class="role">audit.read · 账本真源</p>
+        <ul><li>登录 / 授权 / 调用</li><li>超管操作</li><li>按人 / Bot / 对象追链</li><li>导出与请求编号</li></ul>
+      </div>
+    </div>
+    <p class="tiny" style="color:#7f7d77;margin-top:12px">设置（模型接入 / 密钥 / 插件 / 技能 / 外观）在右上角齿轮，不占章节；账号详情里的「加入权限组」跳回身份，不产生第二个授权入口。</p>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">01 · 方向对照（同一批关键页面）</p>
+      <h2>三个方向，不是三种配色</h2>
+      <p class="lede">每一列是一个不同的结构引擎：A 用「对象 + 动作」的工作台骨架；B 用「账簿」的章节带 + 页边 + 纸面带；C 用「值班台」的待办 + 运行 + 名册。下面三行是同一批关键页面：身份/权限、员工/Bot、团队/运行。线框比描述更诚实。</p>
+    </div>
+
+    <div class="wire-grid">
+      <div class="wire-col">
+        <div class="wire-head"><h3>A · 控制台</h3><span class="tag">baseline</span></div>
+        <p class="wire-engine">引擎：对象 + 动作挨着。左栏导航，列表与详情同屏，详情用页签。最熟悉，也最像旧设置页。</p>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:13%;height:100%"></div>
+          <div class="wb" style="left:13%;top:0;width:30%;height:100%"></div>
+          <div class="wb" style="left:43%;top:0;width:57%;height:100%"></div>
+          <div class="wb line" style="left:13%;top:8%;width:87%"></div>
+          <div class="wb line" style="left:43%;top:14%;width:57%"></div>
+          <div class="wb line" style="left:16%;top:22%;width:24%"></div>
+          <div class="wb line" style="left:16%;top:32%;width:24%"></div>
+          <div class="wb line" style="left:16%;top:42%;width:24%"></div>
+          <div class="wb line" style="left:47%;top:26%;width:48%"></div>
+          <div class="wb line" style="left:47%;top:36%;width:48%"></div>
+          <div class="wb line" style="left:47%;top:46%;width:48%"></div>
+          <div class="wb" style="left:47%;top:58%;width:48%;height:22%"></div>
+          <div class="wl" style="left:2%;top:6%">导航</div>
+          <div class="wl bright" style="left:16%;top:16%">账号列表</div>
+          <div class="wl bright" style="left:47%;top:18%">详情 · 页签</div>
+          <div class="wl" style="left:47%;top:62%">权限矩阵</div>
+        </div>
+        <div class="wire-cap"><span>身份 / 权限组</span><span>列表 + 详情</span></div>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:13%;height:100%"></div>
+          <div class="wb" style="left:13%;top:0;width:24%;height:100%"></div>
+          <div class="wb" style="left:37%;top:0;width:63%;height:100%"></div>
+          <div class="wb line" style="left:37%;top:12%;width:63%"></div>
+          <div class="wb line" style="left:40%;top:20%;width:57%"></div>
+          <div class="wb" style="left:40%;top:28%;width:27%;height:20%"></div>
+          <div class="wb" style="left:69%;top:28%;width:28%;height:20%"></div>
+          <div class="wb" style="left:40%;top:54%;width:57%;height:30%"></div>
+          <div class="wl" style="left:2%;top:6%">导航</div>
+          <div class="wl bright" style="left:15%;top:8%">Bot 列表</div>
+          <div class="wl bright" style="left:40%;top:15%">对象头 + 页签</div>
+          <div class="wl" style="left:40%;top:31%">账号上限</div>
+          <div class="wl" style="left:69%;top:31%">工作范围</div>
+          <div class="wl" style="left:40%;top:58%">有效能力</div>
+        </div>
+        <div class="wire-cap"><span>员工 / Bot 编辑器</span><span>页签 + 三层块</span></div>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:13%;height:100%"></div>
+          <div class="wb" style="left:13%;top:0;width:22%;height:100%"></div>
+          <div class="wb" style="left:35%;top:0;width:65%;height:100%"></div>
+          <div class="wb" style="left:38%;top:16%;width:14%;height:10%"></div>
+          <div class="wb blue" style="left:54%;top:16%;width:14%;height:10%"></div>
+          <div class="wb" style="left:70%;top:16%;width:14%;height:10%"></div>
+          <div class="wb" style="left:86%;top:16%;width:12%;height:10%"></div>
+          <div class="wb line" style="left:54%;top:28%;width:36%"></div>
+          <div class="wb line" style="left:54%;top:46%;width:36%"></div>
+          <div class="wb line" style="left:54%;top:62%;width:36%"></div>
+          <div class="wb" style="left:75%;top:10%;width:23%;height:70%"></div>
+          <div class="wl" style="left:2%;top:6%">导航</div>
+          <div class="wl bright" style="left:15%;top:8%">团队列表</div>
+          <div class="wl bright" style="left:38%;top:8%">节点图</div>
+          <div class="wl" style="left:75%;top:12%">检查器</div>
+        </div>
+        <div class="wire-cap"><span>团队 / 运行</span><span>节点图 + 右检查器</span></div>
+        <div class="wire-meta"><span><b>Desktop</b> 左栏 + 列表 + 详情同屏</span><span><b>Pad</b> 左栏 64 图标；列表 → 详情</span><span><b>Mobile</b> 底部 4 tab；表格变卡片</span></div>
+        <p class="wire-pick">取舍：熟悉、效率高；但这是品类默认版式，与旧设置页同构——<b>不推荐</b>，保留为 baseline。</p>
+      </div>
+
+      <div class="wire-col recommended">
+        <div class="wire-head"><h3>B · 账簿</h3><span class="tag">推荐</span></div>
+        <p class="wire-engine">引擎：他领域媒介——有章节索引、页边、签记栏的账簿。身份是授予与归属的记录，审计是账本本身。</p>
+        <div class="wire-stage">
+          <div class="wb line" style="left:0;top:8%;width:100%"></div>
+          <div class="wb fill" style="left:0;top:0;width:100%;height:8%"></div>
+          <div class="wb" style="left:0;top:8%;width:20%;height:92%"></div>
+          <div class="wb" style="left:20%;top:8%;width:80%;height:92%"></div>
+          <div class="wb line" style="left:24%;top:26%;width:72%"></div>
+          <div class="wb line" style="left:24%;top:40%;width:72%"></div>
+          <div class="wb line" style="left:24%;top:54%;width:72%"></div>
+          <div class="wb line" style="left:24%;top:68%;width:72%"></div>
+          <div class="wb amber" style="left:24%;top:82%;width:48%;height:7%"></div>
+          <div class="wb fill" style="left:74%;top:82%;width:22%;height:7%"></div>
+          <div class="wl bright" style="left:2%;top:2%">01 工作区 · 02 员工 · 03 团队 · 04 身份 · 05 记录</div>
+          <div class="wl bright" style="left:2%;top:14%">页边</div>
+          <div class="wl" style="left:2%;top:20%">身份 / 主操作</div>
+          <div class="wl" style="left:2%;top:26%">章节内索引</div>
+          <div class="wl bright" style="left:24%;top:14%">04 / 能力</div>
+          <div class="wl" style="left:24%;top:30%">会话</div>
+          <div class="wl" style="left:24%;top:44%">Bot</div>
+          <div class="wl amber" style="left:24%;top:84%">签记条</div>
+          <div class="wl" style="left:74%;top:84%">保存并签记</div>
+        </div>
+        <div class="wire-cap"><span>身份 / 权限组</span><span>章节带 + 页边 + 纸面带</span></div>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:100%;height:8%"></div>
+          <div class="wb" style="left:0;top:8%;width:20%;height:92%"></div>
+          <div class="wb" style="left:20%;top:8%;width:80%;height:92%"></div>
+          <div class="wb line" style="left:24%;top:22%;width:72%"></div>
+          <div class="wb" style="left:24%;top:28%;width:34%;height:24%"></div>
+          <div class="wb" style="left:61%;top:28%;width:35%;height:24%"></div>
+          <div class="wb line" style="left:24%;top:58%;width:72%"></div>
+          <div class="wb line" style="left:24%;top:66%;width:72%"></div>
+          <div class="wb line" style="left:24%;top:73%;width:72%"></div>
+          <div class="wl bright" style="left:2%;top:14%">页边</div>
+          <div class="wl" style="left:2%;top:20%">Bot / 试跑</div>
+          <div class="wl" style="left:2%;top:26%">01–05 章节索引</div>
+          <div class="wl bright" style="left:24%;top:14%">03 / 能力</div>
+          <div class="wl" style="left:24%;top:31%">账号上限</div>
+          <div class="wl" style="left:61%;top:31%">工作范围</div>
+          <div class="wl" style="left:24%;top:61%">有效能力（行 + 印章）</div>
+        </div>
+        <div class="wire-cap"><span>员工 / Bot 对象页</span><span>无页签；页边做章节索引</span></div>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:100%;height:8%"></div>
+          <div class="wb" style="left:0;top:8%;width:20%;height:92%"></div>
+          <div class="wb" style="left:20%;top:8%;width:80%;height:92%"></div>
+          <div class="wb line" style="left:24%;top:22%;width:72%"></div>
+          <div class="wb" style="left:24%;top:26%;width:44%;height:4%"></div>
+          <div class="wb line" style="left:24%;top:34%;width:44%"></div>
+          <div class="wb blue" style="left:24%;top:40%;width:30%;height:5%"></div>
+          <div class="wb" style="left:56%;top:40%;width:10%;height:5%"></div>
+          <div class="wb" style="left:24%;top:50%;width:26%;height:4%"></div>
+          <div class="wb" style="left:52%;top:50%;width:14%;height:4%"></div>
+          <div class="wb" style="left:24%;top:58%;width:18%;height:4%"></div>
+          <div class="wb" style="left:44%;top:58%;width:14%;height:4%"></div>
+          <div class="wb" style="left:24%;top:66%;width:34%;height:4%"></div>
+          <div class="wb fail" style="left:60%;top:66%;width:8%;height:4%;border-color:rgba(255,92,92,.4);background:rgba(255,92,92,.08)"></div>
+          <div class="wb" style="left:76%;top:24%;width:20%;height:56%"></div>
+          <div class="wl bright" style="left:2%;top:14%">页边</div>
+          <div class="wl" style="left:2%;top:20%">团队 / 运行</div>
+          <div class="wl" style="left:2%;top:26%">队长 / 停止</div>
+          <div class="wl bright" style="left:24%;top:14%">03 / 运行</div>
+          <div class="wl" style="left:24%;top:36%">泳道（时间 × 执行者）</div>
+          <div class="wl" style="left:76%;top:27%">检查器</div>
+        </div>
+        <div class="wire-cap"><span>团队 / 运行</span><span>泳道 DAG + 检查器</span></div>
+        <div class="wire-meta"><span><b>Desktop</b> 章节带 + 页边 220 + 纸面</span><span><b>Pad</b> 页边变摘要带；章节带横滚</span><span><b>Mobile</b> 章节选择 + 摘要卡 + 单列</span></div>
+        <p class="wire-pick">取舍：结构真正不同；身份/审计的「记录」心智成立；drill-in 多一次点击，用页边「切换」补足。<b>推荐</b>。</p>
+      </div>
+
+      <div class="wire-col">
+        <div class="wire-head"><h3>C · 任务简报</h3><span class="tag">挑战者</span></div>
+        <p class="wire-engine">引擎：具体场景——8:50 的客服交接台。首屏先回答「今天在做什么、什么需要人」，对象从任务/名册进入。</p>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:100%;height:9%"></div>
+          <div class="wb amber" style="left:0;top:9%;width:25%;height:82%"></div>
+          <div class="wb" style="left:25%;top:9%;width:75%;height:82%"></div>
+          <div class="wb line" style="left:28%;top:22%;width:69%"></div>
+          <div class="wb line" style="left:28%;top:34%;width:69%"></div>
+          <div class="wb line" style="left:28%;top:46%;width:69%"></div>
+          <div class="wb" style="left:28%;top:56%;width:33%;height:26%"></div>
+          <div class="wb" style="left:64%;top:56%;width:33%;height:26%"></div>
+          <div class="wb fill" style="left:0;top:91%;width:100%;height:9%"></div>
+          <div class="wl amber" style="left:2%;top:12%">待我处理</div>
+          <div class="wl" style="left:2%;top:18%">越权 · 失败 · 缺 invoke</div>
+          <div class="wl bright" style="left:28%;top:12%">身份 / 权限（从名册打开）</div>
+          <div class="wl" style="left:28%;top:59%">账号</div>
+          <div class="wl" style="left:64%;top:59%">权限组</div>
+          <div class="wl" style="left:2%;top:93%">员工 / 成员名册横条</div>
+        </div>
+        <div class="wire-cap"><span>身份 / 权限组</span><span>从名册/队列打开的全屏 sheet</span></div>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:100%;height:9%"></div>
+          <div class="wb amber" style="left:0;top:9%;width:22%;height:82%"></div>
+          <div class="wb" style="left:22%;top:9%;width:78%;height:82%"></div>
+          <div class="wb line" style="left:25%;top:24%;width:72%"></div>
+          <div class="wb" style="left:25%;top:30%;width:30%;height:34%"></div>
+          <div class="wb blue" style="left:58%;top:30%;width:39%;height:8%"></div>
+          <div class="wb line" style="left:58%;top:44%;width:39%"></div>
+          <div class="wb line" style="left:58%;top:54%;width:39%"></div>
+          <div class="wb line" style="left:58%;top:64%;width:39%"></div>
+          <div class="wl bright" style="left:25%;top:14%">Bot 能力卡</div>
+          <div class="wl" style="left:25%;top:33%">身份 / 模型</div>
+          <div class="wl" style="left:58%;top:33%">能力 + 拒绝原因</div>
+        </div>
+        <div class="wire-cap"><span>员工 / Bot</span><span>能力卡：先看「它能做什么」</span></div>
+        <div class="wire-stage">
+          <div class="wb fill" style="left:0;top:0;width:100%;height:9%"></div>
+          <div class="wb amber" style="left:0;top:9%;width:24%;height:82%"></div>
+          <div class="wb" style="left:24%;top:9%;width:76%;height:82%"></div>
+          <div class="wb line" style="left:27%;top:24%;width:70%"></div>
+          <div class="wb blue" style="left:27%;top:30%;width:42%;height:7%"></div>
+          <div class="wb" style="left:27%;top:42%;width:20%;height:7%"></div>
+          <div class="wb" style="left:49%;top:42%;width:20%;height:7%"></div>
+          <div class="wb fail" style="left:71%;top:42%;width:19%;height:7%;border-color:rgba(255,92,92,.4);background:rgba(255,92,92,.08)"></div>
+          <div class="wb fill" style="left:0;top:91%;width:100%;height:9%"></div>
+          <div class="wl amber" style="left:2%;top:12%">待我处理</div>
+          <div class="wl" style="left:2%;top:18%">1 条越权 · 1 个失败</div>
+          <div class="wl bright" style="left:27%;top:12%">正在运行 · 客服团队</div>
+          <div class="wl" style="left:27%;top:33%">队长</div>
+          <div class="wl" style="left:27%;top:45%">成员</div>
+          <div class="wl" style="left:2%;top:93%">名册横条</div>
+        </div>
+        <div class="wire-cap"><span>团队 / 运行</span><span>首页即运行；队列优先</span></div>
+        <div class="wire-meta"><span><b>Desktop</b> 队列 + 运行 + 名册三区</span><span><b>Pad</b> 队列 + 运行；名册横滚</span><span><b>Mobile</b> 队列优先；运行卡</span></div>
+        <p class="wire-pick">取舍：最像「AI 员工操作台」，但新部署首页空，设置路径被降级。**保留为挑战者**，吸收其待办队列。</p>
+      </div>
+    </div>
+
+    <div class="stage-wrap" style="margin-top:16px;padding:16px 20px">
+      <div style="display:flex;align-items:flex-start;gap:18px">
+        <div style="width:150px;flex:none">
+          <p class="eyebrow" style="font-size:9px">Seed challenger · D</p>
+          <h3 style="font-size:14px;font-weight:600;margin-top:4px">索引表单</h3>
+          <p class="tiny" style="color:#8f8d87;line-height:1.55;margin-top:4px">外部种子只取图案：窄标签/宽内容交替、短编号、成对列、印章标签。字符串不进入界面。</p>
+        </div>
+        <div class="wire-stage" style="flex:1;height:170px;margin:0">
+          <div class="wb fill" style="left:0;top:0;width:8%;height:100%"></div>
+          <div class="wl" style="left:1.5%;top:8%">01</div><div class="wl" style="left:1.5%;top:28%">02</div><div class="wl" style="left:1.5%;top:48%">03</div><div class="wl" style="left:1.5%;top:68%">04</div><div class="wl" style="left:1.5%;top:88%">05</div>
+          <div class="wb line" style="left:10%;top:18%;width:88%"></div>
+          <div class="wb line" style="left:10%;top:38%;width:88%"></div>
+          <div class="wb line" style="left:10%;top:58%;width:88%"></div>
+          <div class="wb line" style="left:10%;top:78%;width:88%"></div>
+          <div class="wb" style="left:10%;top:6%;width:16%;height:8%"></div>
+          <div class="wb" style="left:28%;top:6%;width:32%;height:8%"></div>
+          <div class="wb" style="left:62%;top:6%;width:16%;height:8%"></div>
+          <div class="wb amber" style="left:80%;top:6%;width:16%;height:8%"></div>
+          <div class="wb" style="left:10%;top:24%;width:16%;height:8%"></div>
+          <div class="wb" style="left:28%;top:24%;width:32%;height:8%"></div>
+          <div class="wb" style="left:62%;top:24%;width:16%;height:8%"></div>
+          <div class="wb amber" style="left:80%;top:24%;width:16%;height:8%"></div>
+          <div class="wl bright" style="left:10%;top:2%">标签带</div>
+          <div class="wl" style="left:28%;top:2%">内容带</div>
+          <div class="wl" style="left:62%;top:2%">成对列 A</div>
+          <div class="wl amber" style="left:80%;top:2%">印章 B</div>
+        </div>
+      </div>
+    </div>
+    <p class="tiny" style="color:#8f8d87;margin-top:10px">D 的三尺寸：Desktop 索引条 72 + 表单 + 成对列；Pad 索引变顶部数字条、成对列上下叠；Mobile 索引横条、单列、印章变行内标签。只做 divergence probe，不进入实现。</p>
+
+    <div class="notes">
+      <div class="note"><span class="n">K1</span><b>五项差异</b><p>A/B/C 在骨架、字体、色彩身份、主视觉、页面结构上至少两项强差异；A/B 五项全不同，B/C 四项不同。D 与三者骨架不同。</p></div>
+      <div class="note"><span class="n">K2</span><b>破品类套路</b><p>A 是品类默认（左栏 + 列表/详情）；B 不用左栏、卡片、页签；C 不用对象分类做首页；D 不用常驻 chrome。</p></div>
+      <div class="note"><span class="n">K3</span><b>记忆点各一处</b><p>A：三层有效能力；B：页边 + 签记条；C：待我处理队列；D：无（探针不强行造）。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">02 · B 身份 / 权限（推荐方向完成稿）</p>
+      <h2>把授权变成一笔可签记的账</h2>
+      <p class="lede">页边固定「这是谁、几个人、改了几项、谁在改」；纸面按域分带，每行右侧是一枚范围印章；底部签记条把保存变成一次明确的承诺，并写明会影响 8 位成员的下一次操作。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="b-app">
+          <div class="b-top">
+            <div class="b-brand"><span class="rail-mark">K</span><b>Keel</b><span class="b-env">acme · 生产</span></div>
+            <nav class="b-chapters">
+              <span class="b-chapter"><i>01</i>工作区</span>
+              <span class="b-chapter"><i>02</i>员工</span>
+              <span class="b-chapter"><i>03</i>团队</span>
+              <span class="b-chapter on"><i>04</i>身份</span>
+              <span class="b-chapter"><i>05</i>记录</span>
+            </nav>
+            <div class="b-top-right"><span class="badge badge-warning"><span class="dot"></span>待办 3</span><span class="live"><span class="dot"></span>实时</span><svg class="icon" style="color:#9a9a9a"><use href="#i-search"/></svg><span class="avatar sm">王</span></div>
+          </div>
+          <div class="b-body">
+            <aside class="b-spine">
+              <div class="b-kicker"><svg class="icon"><use href="#i-shield"/></svg>身份 / 权限组</div>
+              <div class="b-title">客服组<small>自定义权限组 · 8 位成员</small></div>
+              <p class="b-desc">给客服同学：本团队的会话读写，加上订单查询 Bot 的调用权。</p>
+              <div class="b-facts">
+                <div class="b-fact"><span class="k">成员</span><span class="v"><b>8</b> 位</span></div>
+                <div class="b-fact"><span class="k">能力</span><span class="v"><b>7</b> 项 · 3 项未保存</span></div>
+                <div class="b-fact"><span class="k">最近修改</span><span class="v">今天 14:12 · 李娜</span></div>
+                <div class="b-fact"><span class="k">审计</span><span class="v">05 · 记录</span></div>
+              </div>
+              <div class="b-index">
+                <a><i>01</i>概览</a>
+                <a class="on"><i>02</i>能力</a>
+                <a><i>03</i>成员 <span style="margin-left:auto;font:8.5px var(--mono);color:#7f7f7f">8</span></a>
+                <a><i>04</i>变更记录</a>
+              </div>
+              <div class="b-spine-foot">
+                <div class="b-switch"><svg class="icon"><use href="#i-search"/></svg><span>切换权限组</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                <div class="b-spine-note">LEDGER 04 · PERMISSION GROUP<br>最后签记 11-20 18:04 · 王强</div>
+              </div>
+            </aside>
+            <main class="b-sheet">
+              <div class="b-band-head">
+                <span class="b-band-num">04 / 02</span>
+                <h3 class="b-band-title">能力</h3>
+                <div class="b-band-sub"><span>7 项已授 · 3 项未保存</span><div class="b-search"><svg class="icon"><use href="#i-search"/></svg>搜索能力或 key</div></div>
+              </div>
+              <div class="b-domain">
+                <div class="b-domain-head"><span class="num">01</span><span class="name">会话</span><span class="count">已授 3 / 4</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>查看会话</b><small>session.read</small></div>
+                  <span class="b-risk">常规</span>
+                  <div class="b-stamp"><span class="lab">范围</span><span class="val">本团队 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>继续会话</b><small>session.write</small></div>
+                  <span class="b-risk">常规</span>
+                  <div class="b-stamp"><span class="lab">范围</span><span class="val">本团队 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>删除会话</b><small>session.delete</small></div>
+                  <span class="b-risk">敏感</span>
+                  <div class="b-stamp off"><span class="lab">范围</span><span class="val">未授予 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>共享会话</b><small>session.share</small></div>
+                  <span class="b-risk">常规</span>
+                  <div class="b-stamp"><span class="lab">范围</span><span class="val">本团队 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+              </div>
+              <div class="b-domain">
+                <div class="b-domain-head"><span class="num">02</span><span class="name">Bot</span><span class="count">已授 2 / 5</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>查看 Bot</b><small>bot.read</small></div>
+                  <span class="b-risk">常规</span>
+                  <div class="b-stamp"><span class="lab">范围</span><span class="val">整个租户 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>管理 Bot</b><small>bot.manage</small></div>
+                  <span class="b-risk">敏感</span>
+                  <div class="b-stamp off"><span class="lab">范围</span><span class="val">未授予 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>绑定 Bot 密钥</b><small>bot.bind</small></div>
+                  <span class="b-risk">敏感</span>
+                  <div class="b-stamp off"><span class="lab">范围</span><span class="val">未授予 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+                <div class="b-prow">
+                  <div class="b-pname"><b>调用 Bot</b><small>bot.invoke</small></div>
+                  <span class="b-risk hot">高危</span>
+                  <div class="b-stamp hot"><span class="lab">范围</span><span class="val">本团队 <svg class="icon"><use href="#i-chev-down"/></svg></span></div>
+                </div>
+              </div>
+              <div class="b-domain">
+                <div class="b-domain-head"><span class="num">03</span><span class="name">账号</span><span class="count">已授 1 / 6</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-right"/></svg></div>
+              </div>
+              <div class="b-domain" style="border-bottom:0">
+                <div class="b-domain-head"><span class="num">04</span><span class="name">记录</span><span class="count">未授予</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-right"/></svg></div>
+              </div>
+              <div class="b-domain" style="border-bottom:0">
+                <div class="b-domain-head"><span class="num">—</span><span class="name">本次变更</span><span class="count">3 项</span><span class="spacer"></span><span class="tiny" style="color:#8f8f8f">保存前可核对</span></div>
+                <div class="b-diff"><div class="name">查看会话<small>session.read</small></div><div class="delta"><span>仅自己</span> → <span class="to">本团队</span></div><span class="tag up">范围提升</span></div>
+                <div class="b-diff"><div class="name">调用 Bot<small>bot.invoke</small></div><div class="delta"><span>未授予</span> → <span class="to">本团队</span></div><span class="tag up">新增</span></div>
+                <div class="b-diff"><div class="name">删除会话<small>session.delete</small></div><div class="delta"><span>本团队</span> → <span class="to">未授予</span></div><span class="tag">收回</span></div>
+              </div>
+              <div class="b-note-line"><svg class="icon" style="width:11px;height:11px;color:#d9a56f"><use href="#i-alert"/></svg><span><b>这次变更影响 8 位成员的下一次操作。</b> 正在运行的会话不受影响；撤销在下一次工具调用时生效。</span><span class="link">查看影响范围</span></div>
+              <div class="b-signoff">
+                <div class="who"><b>签记：李娜 · 团队管理员</b>保存后写入 05 记录 · 立即生效</div>
+                <span class="note">3 项未保存</span>
+                <div class="actions"><button class="btn btn-ghost btn-sm">放弃</button><button class="btn-save"><svg class="icon sm"><use href="#i-check"/></svg>保存并签记</button></div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 章节带 56 + 页边 226 + 纸面 · 签记条固定在纸面底部</span><span>组件：Table / Select（印章形态）/ Badge / Button / ScrollArea · 令牌：mark/warning 印章、border、primary</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>页边是记忆点</b><p>长页滚动时，页边始终回答「这是哪个组、8 个人、改了几项、谁在改」。它替代了页签与面包屑。</p></div>
+      <div class="note"><span class="n">02</span><b>范围是印章</b><p>不是复选框、不是下拉小箭头：一枚带「范围」小标签的印章，把 <code>own/team/tenant/all</code> 变成可比较的视觉单位。</p></div>
+      <div class="note"><span class="n">03</span><b>签记不是装饰</b><p>保存条写明影响人数与生效时机；保存后写入记录。高后果动作有承诺，不是「已保存」toast。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">03 · B 员工 / Bot（推荐方向完成稿）</p>
+      <h2>Bot 的一页规格书，不是七层页签</h2>
+      <p class="lede">页边是对象的身份与主操作；纸面按「身份 / 工作方式 / 能力 / 密钥 / 会话」分带。能力页把账号上限与工作范围并排，有效能力逐行给结论；没有页签，章节索引在页边。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="b-app">
+          <div class="b-top">
+            <div class="b-brand"><span class="rail-mark">K</span><b>Keel</b><span class="b-env">acme · 生产</span></div>
+            <nav class="b-chapters">
+              <span class="b-chapter"><i>01</i>工作区</span>
+              <span class="b-chapter on"><i>02</i>员工</span>
+              <span class="b-chapter"><i>03</i>团队</span>
+              <span class="b-chapter"><i>04</i>身份</span>
+              <span class="b-chapter"><i>05</i>记录</span>
+            </nav>
+            <div class="b-top-right"><span class="badge badge-warning"><span class="dot"></span>待办 3</span><span class="live"><span class="dot"></span>实时</span><svg class="icon" style="color:#9a9a9a"><use href="#i-search"/></svg><span class="avatar sm">李</span></div>
+          </div>
+          <div class="b-body">
+            <aside class="b-spine">
+              <div class="b-kicker"><svg class="icon"><use href="#i-bot"/></svg>员工 / Bot</div>
+              <div class="b-title">客服一号<small>文本 · qwen3.8-flash</small></div>
+              <p class="b-desc">客服一线：查订单、拟回复、升级人工。</p>
+              <div class="b-facts">
+                <div class="b-fact"><span class="k">归属</span><span class="v"><b>李娜</b> · 团队管理员</span></div>
+                <div class="b-fact"><span class="k">人设</span><span class="v">客服专员</span></div>
+                <div class="b-fact"><span class="k">最近活动</span><span class="v">5 分钟前</span></div>
+                <div class="b-fact"><span class="k">状态</span><span class="v">可用</span></div>
+              </div>
+              <div class="b-index">
+                <a><i>01</i>身份</a>
+                <a><i>02</i>工作方式</a>
+                <a class="on"><i>03</i>能力</a>
+                <a><i>04</i>密钥 <span style="margin-left:auto;font:8.5px var(--mono);color:#7f7f7f">1</span></a>
+                <a><i>05</i>会话 <span style="margin-left:auto;font:8.5px var(--mono);color:#7f7f7f">12</span></a>
+              </div>
+              <div class="b-spine-foot">
+                <button class="btn btn-primary" style="height:32px;width:100%"><svg class="icon sm"><use href="#i-play"/></svg>试跑</button>
+                <div class="b-switch"><svg class="icon"><use href="#i-search"/></svg><span>切换员工</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                <div class="b-spine-note">SPEC 02 · BOT<br>最近保存 11-21 09:18 · 李娜</div>
+              </div>
+            </aside>
+            <main class="b-sheet">
+              <div class="b-band-head">
+                <span class="b-band-num">02 / 03</span>
+                <h3 class="b-band-title">能力</h3>
+                <div class="b-band-sub"><span>账号上限 ∩ 工作范围</span><div class="b-search"><svg class="icon"><use href="#i-search"/></svg>为什么它不能…？</div></div>
+              </div>
+              <div class="b-two">
+                <div>
+                  <div class="b-subhead"><b>账号上限</b><small>来自 李娜 · 团队管理员</small></div>
+                  <div class="b-cap-grid">
+                    <div class="b-cap"><span class="grow">查看会话</span><span class="scope">本团队</span></div>
+                    <div class="b-cap"><span class="grow">继续会话</span><span class="scope">本团队</span></div>
+                    <div class="b-cap"><span class="grow">删除会话</span><span class="scope">本团队</span></div>
+                    <div class="b-cap"><span class="grow">共享会话</span><span class="scope">本团队</span></div>
+                    <div class="b-cap"><span class="grow">查看 Bot</span><span class="scope">整个租户</span></div>
+                    <div class="b-cap"><span class="grow">调用 Bot</span><span class="scope">指定 Bot</span></div>
+                    <div class="b-cap"><span class="grow">查看团队</span><span class="scope">本团队</span></div>
+                    <div class="b-cap"><span class="grow">读取密钥列表</span><span class="scope">本团队</span></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="b-subhead"><b>工作范围</b><small>这个 Bot 的收窄</small></div>
+                  <div class="b-range-row"><span class="grow">读取会话</span><span class="stamp-mini">允许</span></div>
+                  <div class="b-range-row"><span class="grow">写入会话</span><span class="stamp-mini">允许</span></div>
+                  <div class="b-range-row"><span class="grow">查看团队</span><span class="stamp-mini">允许</span></div>
+                  <div class="b-range-row"><span class="grow" style="color:#8f8f8f">读取密钥列表</span><span class="stamp-mini off">收窄</span></div>
+                  <div class="b-range-row"><span class="grow" style="color:#8f8f8f">删除会话</span><span class="stamp-mini off">收窄</span></div>
+                  <div class="b-note-line" style="padding:6px 0 0"><svg class="icon" style="width:11px;height:11px;color:#8f8f8f"><use href="#i-info"/></svg><span>工作范围只能收窄，不能超过账号上限。</span></div>
+                </div>
+              </div>
+              <div class="b-eff">
+                <div class="b-domain-head" style="padding:10px 0 6px"><span class="num">03</span><span class="name">有效能力</span><span class="count">可用 8 · 被挡下 2</span><span class="spacer"></span><span class="tiny" style="color:#8f8f8f">账号 ∩ 工作范围</span></div>
+                <div class="b-eff-row ok"><svg class="icon"><use href="#i-check"/></svg><span class="name">查看会话</span><span class="src">本团队</span><span class="badge badge-success" style="height:17px;font-size:8px;justify-self:start"><span class="dot"></span>可用</span></div>
+                <div class="b-eff-row ok"><svg class="icon"><use href="#i-check"/></svg><span class="name">继续会话</span><span class="src">本团队</span><span class="badge badge-success" style="height:17px;font-size:8px;justify-self:start"><span class="dot"></span>可用</span></div>
+                <div class="b-eff-row ok"><svg class="icon"><use href="#i-check"/></svg><span class="name">调用 Bot</span><span class="src">指定 Bot</span><span class="badge badge-success" style="height:17px;font-size:8px;justify-self:start"><span class="dot"></span>可用</span></div>
+                <div class="b-eff-row block"><svg class="icon"><use href="#i-lock"/></svg><span class="name">读取密钥列表</span><span class="src">被工作范围挡下</span><span class="badge badge-warning" style="height:17px;font-size:8px;justify-self:start"><span class="dot"></span>收窄</span></div>
+                <div class="b-eff-row no"><svg class="icon"><use href="#i-x"/></svg><span class="name">读取密钥值</span><span class="src">账号没有</span><span class="badge badge-outline" style="height:17px;font-size:8px;justify-self:start">不可用</span></div>
+              </div>
+              <div class="b-note-line"><span>本轮有效 8 项 · 被挡下 2 项</span><span class="link">查看完整清单</span></div>
+              <div class="b-domain" style="border-bottom:0;margin-top:2px">
+                <div class="b-domain-head"><span class="num">—</span><span class="name">本次变更</span><span class="count">3 项</span><span class="spacer"></span><span class="tiny" style="color:#8f8f8f">保存前可核对</span></div>
+                <div class="b-diff"><div class="name">读取密钥列表<small>secret.read · metadata</small></div><div class="delta"><span>允许</span> → <span class="to">收窄</span></div><span class="tag">收窄</span></div>
+                <div class="b-diff"><div class="name">删除会话<small>session.delete</small></div><div class="delta"><span>允许</span> → <span class="to">收窄</span></div><span class="tag">收窄</span></div>
+                <div class="b-diff"><div class="name">查看团队<small>team_bot.read</small></div><div class="delta"><span>未授予</span> → <span class="to">允许</span></div><span class="tag up">新增</span></div>
+              </div>
+              <div class="b-signoff">
+                <div class="who"><b>签记：李娜 · 团队管理员</b>保存后写入 05 记录 · 立即生效</div>
+                <span class="note">3 项未保存</span>
+                <div class="actions"><button class="btn btn-ghost btn-sm">放弃</button><button class="btn-save"><svg class="icon sm"><use href="#i-check"/></svg>保存 3 项</button></div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 页边主操作「试跑」；纸面三段：账号上限 / 工作范围 / 有效能力</span><span>组件：Table / Badge / Button / Field / Tooltip · 令牌：success / warning / mark</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>没有页签</b><p>页边的章节索引替代页签：滚动时仍然可见，且能显示计数（密钥 1 / 会话 12）。</p></div>
+      <div class="note"><span class="n">02</span><b>并排比较</b><p>账号上限与工作范围左右并排，用户不必在两层之间来回跳；有效能力给出最终结论与原因。</p></div>
+      <div class="note"><span class="n">03</span><b>两种主操作</b><p>白色「试跑」是对象的主 job；琥珀「保存 3 项」是编辑承诺。颜色区分承诺类型，不靠第二个白按钮。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">04 · B 团队 / 运行（推荐方向完成稿）</p>
+      <h2>运行不是一张图，是一条时间账</h2>
+      <p class="lede">泳道把「谁在什么时候做了什么」按执行者排开；调用边是泳道之间的细线，失败是一条红色断线。右侧检查器回答这一棒的会话、工具、权限与用量；「图」切换保留拓扑视角。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="b-app">
+          <div class="b-top">
+            <div class="b-brand"><span class="rail-mark">K</span><b>Keel</b><span class="b-env">acme · 生产</span></div>
+            <nav class="b-chapters">
+              <span class="b-chapter"><i>01</i>工作区</span>
+              <span class="b-chapter"><i>02</i>员工</span>
+              <span class="b-chapter on"><i>03</i>团队</span>
+              <span class="b-chapter"><i>04</i>身份</span>
+              <span class="b-chapter"><i>05</i>记录</span>
+            </nav>
+            <div class="b-top-right"><span class="badge badge-warning"><span class="dot"></span>待办 3</span><span class="live"><span class="dot"></span>实时</span><svg class="icon" style="color:#9a9a9a"><use href="#i-search"/></svg><span class="avatar sm">李</span></div>
+          </div>
+          <div class="b-body">
+            <aside class="b-spine">
+              <div class="b-kicker"><svg class="icon"><use href="#i-users"/></svg>团队 / 运行</div>
+              <div class="b-title">客服团队<small>运行 #128 · 本周退款原因分析</small></div>
+              <p class="b-desc">在 4 小时内解决客户问题；无法解决时升级给人工，并附订单号与已尝试的步骤。</p>
+              <div class="b-facts">
+                <div class="b-fact"><span class="k">队长</span><span class="v"><b>客服一号</b></span></div>
+                <div class="b-fact"><span class="k">成员</span><span class="v"><b>3</b> 名 · 1 个失败</span></div>
+                <div class="b-fact"><span class="k">用时</span><span class="v">4 分 12 秒 · ¥0.38</span></div>
+                <div class="b-fact"><span class="k">发起</span><span class="v">李娜 · 手动 · 14:32</span></div>
+              </div>
+              <div class="b-index">
+                <a><i>01</i>使命</a>
+                <a><i>02</i>成员 <span style="margin-left:auto;font:8.5px var(--mono);color:#7f7f7f">3</span></a>
+                <a class="on"><i>03</i>运行</a>
+                <a><i>04</i>记录</a>
+              </div>
+              <div class="b-spine-foot">
+                <button class="btn btn-danger" style="height:32px;width:100%"><svg class="icon sm"><use href="#i-stop"/></svg>停止运行</button>
+                <div class="b-switch"><svg class="icon"><use href="#i-search"/></svg><span>切换团队</span><span class="spacer"></span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                <div class="b-spine-note">RUN #128 · LIVE<br>节点事件 2 秒内到达</div>
+              </div>
+            </aside>
+            <main class="b-sheet">
+              <div class="b-band-head">
+                <span class="b-band-num">03 / 03</span>
+                <h3 class="b-band-title">运行</h3>
+                <div class="b-band-sub"><span class="badge badge-info" style="height:18px;font-size:8.5px"><span class="dot"></span>运行中</span><span class="badge badge-danger" style="height:18px;font-size:8.5px"><span class="dot"></span>1 个失败</span><div class="seg" style="margin-left:4px"><span class="is-on">泳道</span><span>图</span></div></div>
+              </div>
+              <div class="b-run-band"><span class="b-mission"><span class="mk">MISSION 节点</span>本周退款原因分析 · 按渠道拆开，找出异常升高的两类</span><span style="margin-left:auto;font:8.5px var(--mono);color:#8f8f8f">14:32:08 → 14:36:20</span></div>
+              <div class="b-run-body">
+                <div class="b-swim">
+                  <div class="b-axis"><span style="color:#7f7f7f">下发使命 ↓</span><span>14:32</span><span>14:33</span><span>14:34</span><span>14:35</span><span>14:36</span></div>
+                  <div class="b-lane">
+                    <div class="b-lane-actor"><span class="avatar sm" style="border-color:rgba(64,153,255,.3)">客</span><div><b>客服一号</b><small>队长 · 李娜</small></div></div>
+                    <div class="b-track"><div class="b-bar" style="left:1%;width:96%">队长会话 · 4m12s · 12.4k</div></div>
+                  </div>
+                  <div class="b-lane">
+                    <div class="b-lane-actor"><span class="avatar sm" style="border-color:rgba(64,153,255,.3)">订</span><div><b>订单查询</b><small>李娜 · 1m06s</small></div></div>
+                    <div class="b-track">
+                      <div class="b-hand" style="left:4%"></div><div class="b-hand-label" style="left:2%">调用</div>
+                      <div class="b-bar sel" style="left:4%;width:26%">8.4k tokens · 1m06s</div>
+                    </div>
+                  </div>
+                  <div class="b-lane">
+                    <div class="b-lane-actor"><span class="avatar sm">知</span><div><b>知识库</b><small>王强 · 2m18s</small></div></div>
+                    <div class="b-track"><div class="b-hand" style="left:29%"></div><div class="b-hand-label" style="left:27%">调用</div><div class="b-bar ok" style="left:29%;width:43%">9.1k tokens</div></div>
+                  </div>
+                  <div class="b-lane">
+                    <div class="b-lane-actor"><span class="avatar sm">售</span><div><b>售后升级</b><small>王强 · 失败</small></div></div>
+                    <div class="b-track"><div class="b-hand fail" style="left:75%"></div><div class="b-hand-label fail" style="left:71%">调用被拒</div><div class="b-bar fail" style="left:75%;width:6%">403</div></div>
+                  </div>
+                  <div class="b-lane" style="border-bottom:0">
+                    <div class="b-lane-actor"><span class="avatar sm">退</span><div><b>退款专员</b><small>李娜 · 38s</small></div></div>
+                    <div class="b-track"><div class="b-hand" style="left:26%"></div><div class="b-hand-label" style="left:22%">创建</div><div class="b-bar ok" style="left:26%;width:12%">3.2k</div></div>
+                  </div>
+                  <div class="b-run-log">
+                    <div class="b-log-row"><span class="t">14:32</span><span class="what">分叉 · 订单查询</span><span class="badge badge-success res" style="height:16px;font-size:7.5px"><span class="dot"></span>成功</span></div>
+                    <div class="b-log-row"><span class="t">14:33</span><span class="what">创建 Bot · 退款专员</span><span class="badge badge-success res" style="height:16px;font-size:7.5px"><span class="dot"></span>成功</span></div>
+                    <div class="b-log-row"><span class="t">14:33</span><span class="what">调用 · 知识库</span><span class="badge badge-success res" style="height:16px;font-size:7.5px"><span class="dot"></span>成功</span></div>
+                    <div class="b-log-row" style="border-bottom:0"><span class="t">14:35</span><span class="what">调用 · 售后升级（缺「调用 Bot」）</span><span class="badge badge-danger res" style="height:16px;font-size:7.5px"><span class="dot"></span>拒绝</span></div>
+                  </div>
+                  <div style="margin-top:10px;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 11px;background:rgba(255,255,255,.02)">
+                    <div class="b-sec" style="margin:0">队长小结<span class="line"></span>生成中</div>
+                    <div style="font-size:9.5px;color:#a3a3a3;line-height:1.6;margin-top:4px">已汇总 2 个成员结果；正在等待「售后升级」的失败原因，再给出建议。</div>
+                    <div class="skel mid" style="height:6px;margin-top:6px"></div>
+                    <div class="skel long" style="height:6px;margin-top:4px"></div>
+                  </div>
+                </div>
+                <aside class="b-insp">
+                  <div class="b-insp-title"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--info)"></span>订单查询<span class="badge badge-info"><span class="dot"></span>运行中</span></div>
+                  <div class="b-kv"><span class="k">归属</span><span class="v">李娜</span></div>
+                  <div class="b-kv"><span class="k">模型</span><span class="v">qwen3.8-flash</span></div>
+                  <div class="b-kv"><span class="k">开始</span><span class="v">14:32:08</span></div>
+                  <div class="b-kv"><span class="k">用量</span><span class="v">8,420 tokens · ¥0.11</span></div>
+                  <div class="b-sec">工具<span class="line"></span>3</div>
+                  <div class="b-tool"><span class="name">search_orders</span><span class="badge badge-success"><span class="dot"></span>成功</span><span class="ms">0.8s</span></div>
+                  <div class="b-tool"><span class="name">get_order</span><span class="badge badge-success"><span class="dot"></span>成功</span><span class="ms">0.3s</span></div>
+                  <div class="b-tool"><span class="name">read_secret</span><span class="badge badge-danger"><span class="dot"></span>拒绝</span><span class="ms">—</span></div>
+                  <div class="alert-card" style="font-size:9px;padding:7px 8px"><svg class="icon" style="width:11px;height:11px"><use href="#i-lock"/></svg><div><b>缺「读取密钥值」。</b> 账号没有该能力；已写入记录。</div></div>
+                  <div class="b-sec">权限<span class="line"></span>允许 6 · 拒绝 1</div>
+                  <div class="b-tool"><span class="name">session.read</span><span class="badge badge-success"><span class="dot"></span>允许</span><span class="ms">本团队</span></div>
+                  <div class="b-tool"><span class="name">bot.invoke</span><span class="badge badge-success"><span class="dot"></span>允许</span><span class="ms">指定</span></div>
+                  <div class="b-tool"><span class="name">secret.read.value</span><span class="badge badge-danger"><span class="dot"></span>拒绝</span><span class="ms">账号没有</span></div>
+                  <div class="b-insp-foot"><button class="btn btn-primary btn-sm" style="flex:1"><svg class="icon sm"><use href="#i-external"/></svg>打开会话</button><button class="btn btn-outline btn-sm">查看记录</button></div>
+                </aside>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 泳道 DAG（时间 × 执行者）+ 右侧检查器；「图」切换保留拓扑视角</span><span>组件：Tabs（泳道/图）/ Badge / Card / Sheet（移动端）/ Button · 令牌：info / danger / success</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>时间即账</b><p>王强要的是「谁在什么时候调用了谁」；泳道把时间轴横向展开，调用是泳道间的细线，失败是一条红色断线。</p></div>
+      <div class="note"><span class="n">02</span><b>检查器贴着证据</b><p>选中一棒，右侧立刻给会话、工具、权限判定与用量；「打开会话」回工作区，「记录」按该 Bot 过滤。</p></div>
+      <div class="note"><span class="n">03</span><b>图仍存在</b><p>「图」是同一账本的另一种投影，不是第二个真源；默认泳道，因为团队运行的常见问题是时序与拒绝，不是拓扑。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">A1 · 入口（跨方向，A 壳展示）</p>
+      <h2>首次设置不是错误页，是一条三步指引</h2>
+      <p class="lede">没有管理员时，用户看到的是一台「还没开张」的部署：终端命令、一次性口令、创建管理员，然后强制换成只有自己知道的密码。登录失败不泄露账号是否存在。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage-narrow">
+        <div class="entry" style="width:500px">
+          <div class="entry-top"><span class="rail-mark">K</span><b>Keel</b><span style="margin-left:auto" class="badge badge-neutral"><span class="dot"></span>首次设置</span></div>
+          <div class="entry-body">
+            <div class="steps"><b>1 生成口令</b><i></i><span>2 创建管理员</span><i></i><span>3 改密</span></div>
+            <h4>这台部署还没有管理员</h4>
+            <p class="sub">在运行 Keel 的机器上执行下面的命令，生成一次性口令。口令只显示一次，10 分钟内有效。</p>
+            <div class="cmd"><code>$ keel admin bootstrap</code><svg class="icon"><use href="#i-copy"/></svg></div>
+            <div class="field">
+              <label>一次性口令</label>
+              <div class="input"><span class="ph">粘贴终端打印的口令</span></div>
+            </div>
+            <button class="btn btn-primary primary">继续</button>
+            <p class="foot">容器部署？口令在启动日志或 <span class="mono">KEEL_BOOTSTRAP_TOKEN</span> 里。<br>为什么需要这一步？这台部署的第一个管理员不能由匿名访问者产生。</p>
+          </div>
+        </div>
+        <div class="entry" style="width:350px">
+          <div class="entry-top"><span class="rail-mark">K</span><b>Keel</b><span style="margin-left:auto" class="badge badge-outline">账号登录</span></div>
+          <div class="entry-body">
+            <p class="eyebrow">账号登录</p>
+            <h4>登录</h4>
+            <p class="sub">用你的账号进入工作区。人和 Bot 的权限规则相同，只是登录方式不同。</p>
+            <div class="field"><label>用户名</label><div class="input"><span class="ph">lina</span></div></div>
+            <div class="field"><label>密码</label><div class="input"><span class="ph">••••••••••••</span></div></div>
+            <button class="btn btn-primary primary">登录</button>
+            <p class="foot">超级管理员忘记密码？<br><a>在这台机器的终端重置</a></p>
+          </div>
+        </div>
+        <div class="entry" style="width:350px">
+          <div class="entry-top"><span class="rail-mark">K</span><b>Keel</b><span style="margin-left:auto" class="badge badge-info"><span class="dot"></span>第一次登录</span></div>
+          <div class="entry-body">
+            <p class="eyebrow">首次登录</p>
+            <h4>先设置一个新密码</h4>
+            <p class="sub">初始化密码可能经过他人之手。换成只有你知道的密码，再进入工作区。</p>
+            <div class="field"><label>新密码</label><div class="input"><span class="ph">••••••••••••••</span></div></div>
+            <div class="field"><label>再输一次</label><div class="input"><span class="ph">••••••••••••••</span></div></div>
+            <div class="rules">
+              <span><svg class="icon"><use href="#i-check"/></svg>至少 12 位</span>
+              <span><svg class="icon"><use href="#i-check"/></svg>包含字母和数字</span>
+              <span><svg class="icon"><use href="#i-check"/></svg>不与用户名相同</span>
+            </div>
+            <button class="btn btn-primary primary">保存并进入</button>
+            <p class="foot">保存后，其他设备上的旧会话会立即失效。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 三个入口状态并排</span><span>组件：Card / Field / Input / Button / Badge · 令牌：background / card / field / primary</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>命令是主内容</b><p>没有管理员时，最需要的是「下一步命令」，不是一句 503。命令块带复制，口令字段只有一个。</p></div>
+      <div class="note"><span class="n">02</span><b>错误不区分账号</b><p>「用户名或密码不正确」统一说法；限速与锁定单独说清等待时间，不暗示账号是否存在。</p></div>
+      <div class="note"><span class="n">03</span><b>强制改密有理由</b><p>不说「系统要求」，说「初始化密码可能经过他人之手」。这是用户能理解的信任时刻。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">A2 · 账号（baseline）</p>
+      <h2>列表回答「有谁」，详情回答「他能做什么」</h2>
+      <p class="lede">账号是权限主体。详情页的权限页签只读：有效能力按域分组，来源写到具体权限组；改权限永远回权限组，避免同一个人有两个授权入口。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app">
+          <aside class="rail">
+            <div class="rail-brand"><span class="rail-mark">K</span><span class="rail-name">Keel</span><span class="rail-env">本机</span></div>
+            <nav class="nav">
+              <div class="nav-item"><svg class="icon"><use href="#i-chat"/></svg>工作区</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-bot"/></svg>员工</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-users"/></svg>团队</div>
+              <div class="nav-item is-active"><svg class="icon"><use href="#i-shield"/></svg>管理</div>
+            </nav>
+            <div class="rail-sep"></div>
+            <div class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>设置</div>
+            <div class="rail-foot">
+              <div class="me"><span class="avatar sm">王</span><div class="who"><b>王强</b><small>部署管理员</small></div><svg class="icon sm"><use href="#i-more"/></svg></div>
+            </div>
+          </aside>
+          <div class="main">
+            <div class="topbar">
+              <div class="crumb">管理<span class="sep">/</span><b>账号</b></div>
+              <div class="top-right"><span class="live"><span class="dot"></span>实时</span><button class="btn btn-ghost btn-sm"><svg class="icon sm"><use href="#i-refresh"/></svg></button></div>
+            </div>
+            <div class="page">
+              <div class="page-head">
+                <div><h3>账号</h3><p>这台部署里有谁，他们能做什么，现在是否可用。</p></div>
+                <div class="page-actions"><button class="btn btn-outline">先建权限组</button><button class="btn btn-primary"><svg class="icon"><use href="#i-plus"/></svg>新建账号</button></div>
+              </div>
+              <div class="panel" style="flex:1;min-height:0;overflow:hidden;display:flex">
+                <div class="split" style="width:100%;grid-template-columns:380px minmax(0,1fr)">
+                  <div class="pane left">
+                    <div class="pane-head">
+                      <div class="pane-title"><h4>全部账号</h4><span class="count">12</span><span style="margin-left:auto" class="badge badge-outline">2 个待处理</span></div>
+                      <div class="input"><svg class="icon sm"><use href="#i-search"/></svg><span class="ph">搜索名字或用户名</span></div>
+                      <div class="seg"><span class="is-on">全部 12</span><span>人 9</span><span>Bot 3</span></div>
+                    </div>
+                    <div class="pane-list">
+                      <div class="row-item is-selected">
+                        <span class="avatar">李</span>
+                        <div class="body"><b>李娜</b><small>lina · 团队管理员 · 3 个组</small></div>
+                        <div class="tail"><span class="badge badge-success"><span class="dot"></span>在线</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar">王</span>
+                        <div class="body"><b>王强</b><small>wangqiang · 部署管理员</small></div>
+                        <div class="tail"><span class="badge badge-success"><span class="dot"></span>在线</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar">陈</span>
+                        <div class="body"><b>陈墨</b><small>chenmo · 成员 · 客服组</small></div>
+                        <div class="tail"><span class="badge badge-neutral"><span class="dot"></span>12 分钟前</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar">赵</span>
+                        <div class="body"><b>赵一鸣</b><small>zhaoym · 审计员 · 只读</small></div>
+                        <div class="tail"><span class="badge badge-neutral"><span class="dot"></span>昨天</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar" style="border-color:rgba(64,153,255,.3)">管</span>
+                        <div class="body"><b>管家</b><small>butler · Bot · 管家组</small></div>
+                        <div class="tail"><span class="badge badge-info"><span class="dot"></span>运行中</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar" style="border-color:rgba(64,153,255,.3)">客</span>
+                        <div class="body"><b>客服一号</b><small>support-1 · Bot · 客服组</small></div>
+                        <div class="tail"><span class="badge badge-neutral"><span class="dot"></span>5 分钟前</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar">周</span>
+                        <div class="body"><b>周雨</b><small>zhouyu · 成员 · 客服组</small></div>
+                        <div class="tail"><span class="badge badge-neutral"><span class="dot"></span>周一</span></div>
+                      </div>
+                      <div class="row-item">
+                        <span class="avatar">吴</span>
+                        <div class="body"><b>吴桐</b><small>wutong · 成员 · 已禁用</small></div>
+                        <div class="tail"><span class="badge badge-danger"><span class="dot"></span>已禁用</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="detail">
+                    <div class="detail-head">
+                      <div class="detail-title">
+                        <span class="avatar lg">李</span>
+                        <h3>李娜</h3>
+                        <span class="handle">@lina</span>
+                        <span class="badge badge-outline">人</span>
+                        <span class="badge badge-neutral">团队管理员</span>
+                        <div class="detail-actions">
+                          <button class="btn btn-ghost btn-sm">禁用</button>
+                          <button class="btn btn-primary btn-sm"><svg class="icon sm"><use href="#i-user-plus"/></svg>加入权限组</button>
+                        </div>
+                      </div>
+                      <div class="detail-sub"><span>租户 acme</span><span>·</span><span>创建于 2026-11-02</span><span>·</span><span>最近登录 今天 14:32</span></div>
+                      <div class="tabs"><span class="tab is-active">概览</span><span class="tab">权限 <span class="count">7</span></span><span class="tab">Bot <span class="count">2</span></span><span class="tab">会话</span><span class="tab">安全</span></div>
+                    </div>
+                    <div class="detail-body">
+                      <div class="facts">
+                        <div class="fact"><div class="k">权限组</div><div class="v">3 <small>个</small></div></div>
+                        <div class="fact"><div class="k">拥有的 Bot</div><div class="v">2 <small>个</small></div></div>
+                        <div class="fact"><div class="k">有效能力</div><div class="v">14 <small>项</small></div></div>
+                      </div>
+                      <div class="section-label">权限组 <span class="line"></span><span style="font-weight:400;letter-spacing:0;text-transform:none">改权限请去「管理 → 权限组」</span></div>
+                      <div class="chips">
+                        <span class="chip"><span class="dot"></span>团队管理员 · 内置</span>
+                        <span class="chip"><span class="dot"></span>客服组 · 8 人</span>
+                        <span class="chip"><span class="dot"></span>Bot 运营 · 4 人</span>
+                        <span class="chip" style="border-style:dashed;color:#9a9a9a"><svg class="icon sm"><use href="#i-plus"/></svg>加入组</span>
+                      </div>
+                      <div class="section-label">最近会话 <span class="line"></span><span style="font-weight:400;letter-spacing:0;text-transform:none">只读索引 · 点击回工作区</span></div>
+                      <div class="list">
+                        <div class="list-row"><span class="badge badge-info"><span class="dot"></span>进行中</span><div class="grow"><b>把本周退款原因按渠道拆开</b><small>客服一号 · 8 分钟前 · 仅自己</small></div><svg class="icon sm" style="color:#8f8f8f"><use href="#i-chev-right"/></svg></div>
+                        <div class="list-row"><span class="badge badge-success"><span class="dot"></span>完成</span><div class="grow"><b>订单 88213 的物流异常</b><small>订单查询 · 昨天 18:04 · 共享给 陈墨</small></div><svg class="icon sm" style="color:#8f8f8f"><use href="#i-chev-right"/></svg></div>
+                        <div class="list-row"><span class="badge badge-neutral"><span class="dot"></span>已归档</span><div class="grow"><b>十月客服周报</b><small>知识库 · 11 月 12 日 · 只读</small></div><svg class="icon sm" style="color:#8f8f8f"><use href="#i-chev-right"/></svg></div>
+                      </div>
+                      <div class="hint"><svg class="icon"><use href="#i-shield"/></svg><span>李娜是团队管理员：她能管理账号与权限组，但授出的范围不能超过她自己持有的范围。</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 列表 + 详情同屏</span><span>组件：Table / Tabs / Badge / Avatar / Input / Segmented · 令牌：panel / card / border / success</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>权限只读</b><p>账号详情展示有效能力与来源，但不做直接授权编辑。一个概念（给权限）只有一个入口（权限组）。</p></div>
+      <div class="note"><span class="n">02</span><b>类型是标签不是分支</b><p>「人 / Bot / 服务」只用于说明文案；按钮出现与否由 <code>can()</code> 决定，不由 kind 决定。</p></div>
+      <div class="note"><span class="n">03</span><b>危险操作降权</b><p>「禁用」是 ghost 文本按钮，主操作是「加入权限组」。禁用对话框会列出会话吊销与密钥失效的后果。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">A3 · 权限组（baseline）</p>
+      <h2>一张可比较的能力表，而不是散落的开关</h2>
+      <p class="lede">按域分组、每行一个能力、每行选一个范围。范围是独立的第二维，不用三态复选硬塞。授予者只能授出自己持有的范围，超出的选项直接禁用并写明原因。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app tall">
+          <aside class="rail">
+            <div class="rail-brand"><span class="rail-mark">K</span><span class="rail-name">Keel</span><span class="rail-env">本机</span></div>
+            <nav class="nav">
+              <div class="nav-item"><svg class="icon"><use href="#i-chat"/></svg>工作区</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-bot"/></svg>员工</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-users"/></svg>团队</div>
+              <div class="nav-item is-active"><svg class="icon"><use href="#i-shield"/></svg>管理</div>
+            </nav>
+            <div class="rail-sep"></div>
+            <div class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>设置</div>
+            <div class="rail-foot"><div class="me"><span class="avatar sm">王</span><div class="who"><b>王强</b><small>部署管理员</small></div><svg class="icon sm"><use href="#i-more"/></svg></div></div>
+          </aside>
+          <div class="main">
+            <div class="topbar">
+              <div class="crumb">管理<span class="sep">/</span><span>权限组</span><span class="sep">/</span><b>客服组</b></div>
+              <div class="top-right"><span class="live"><span class="dot"></span>实时</span><button class="btn btn-ghost btn-sm"><svg class="icon sm"><use href="#i-more"/></svg></button></div>
+            </div>
+            <div class="page flush">
+              <div class="split narrow" style="width:100%">
+                <div class="pane left">
+                  <div class="pane-head">
+                    <div class="pane-title"><h4>权限组</h4><span class="count">5</span><button class="btn btn-ghost btn-sm" style="margin-left:auto"><svg class="icon sm"><use href="#i-plus"/></svg></button></div>
+                    <div class="input"><svg class="icon sm"><use href="#i-search"/></svg><span class="ph">搜索权限组</span></div>
+                  </div>
+                  <div class="pane-list">
+                    <div class="row-item"><span class="avatar sm" style="border-color:rgba(255,255,255,.24)"><svg class="icon sm"><use href="#i-shield"/></svg></span><div class="body"><b>超级管理员</b><small>内置 · 全部能力 · 1 人</small></div></div>
+                    <div class="row-item"><span class="avatar sm"><svg class="icon sm"><use href="#i-shield"/></svg></span><div class="body"><b>租户管理员</b><small>内置 · 18 项 · 3 人</small></div></div>
+                    <div class="row-item is-selected"><span class="avatar sm">客</span><div class="body"><b>客服组</b><small>7 项 · 8 人 · 3 项未保存</small></div><div class="tail"><span class="badge badge-warning"><span class="dot"></span>改</span></div></div>
+                    <div class="row-item"><span class="avatar sm">运</span><div class="body"><b>Bot 运营</b><small>9 项 · 4 人</small></div></div>
+                    <div class="row-item"><span class="avatar sm">审</span><div class="body"><b>审计员</b><small>内置 · 6 项 · 2 人</small></div></div>
+                  </div>
+                  <div style="margin-top:auto;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07)" class="hint"><svg class="icon"><use href="#i-info"/></svg><span>权限只做加法。账号的最终能力是所有组与直接授权的并集。</span></div>
+                </div>
+                <div class="detail">
+                  <div class="detail-head">
+                    <div class="detail-title"><h3>客服组</h3><span class="badge badge-outline">自定义</span><span class="badge badge-neutral">8 位成员</span><span class="badge badge-neutral">7 项能力</span><div class="detail-actions"><button class="btn btn-outline btn-sm">另存为副本</button></div></div>
+                    <div class="detail-sub"><span>给客服同学：本团队的会话读写，加上订单查询 Bot 的调用权。</span></div>
+                    <div class="tabs"><span class="tab is-active">权限 <span class="count">7</span></span><span class="tab">成员 <span class="count">8</span></span></div>
+                  </div>
+                  <div style="padding:12px 20px 0;display:flex;align-items:center;gap:8px;flex:none">
+                    <div class="input grow"><svg class="icon sm"><use href="#i-search"/></svg><span class="ph">搜索能力或 key，例如「会话」或 session.read</span></div>
+                    <div class="seg"><span class="is-on">全部</span><span>仅看已授</span></div>
+                    <span class="tiny muted" style="white-space:nowrap">已授 7 / 24</span>
+                  </div>
+                  <div class="matrix" style="padding:0 20px">
+                    <div class="domain">
+                      <div class="domain-head"><svg class="icon sm"><use href="#i-chat"/></svg>会话<span class="count">已授 3 / 4</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-down"/></svg></div>
+                      <div class="prow">
+                        <div class="pname"><b>查看会话</b><small>session.read</small></div>
+                        <span class="badge badge-outline risk">常规</span>
+                        <div class="input select scope"><span class="v">本团队</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                      <div class="prow">
+                        <div class="pname"><b>继续会话</b><small>session.write</small></div>
+                        <span class="badge badge-outline risk">常规</span>
+                        <div class="input select scope"><span class="v">本团队</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                      <div class="prow">
+                        <div class="pname"><b>删除会话</b><small>session.delete</small></div>
+                        <span class="badge badge-warning risk"><span class="dot"></span>敏感</span>
+                        <div class="input select scope is-off"><span class="v">未授予</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                      <div class="prow">
+                        <div class="pname"><b>共享会话</b><small>session.share</small></div>
+                        <span class="badge badge-outline risk">常规</span>
+                        <div class="input select scope"><span class="v">本团队</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                    </div>
+                    <div class="domain">
+                      <div class="domain-head"><svg class="icon sm"><use href="#i-bot"/></svg>Bot<span class="count">已授 2 / 5</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-down"/></svg></div>
+                      <div class="prow">
+                        <div class="pname"><b>查看 Bot</b><small>bot.read</small></div>
+                        <span class="badge badge-outline risk">常规</span>
+                        <div class="input select scope"><span class="v">整个租户</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                      <div class="prow">
+                        <div class="pname"><b>管理 Bot</b><small>bot.manage</small></div>
+                        <span class="badge badge-warning risk"><span class="dot"></span>敏感</span>
+                        <div class="input select scope is-off"><span class="v">未授予</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                      <div class="prow">
+                        <div class="pname"><b>绑定 Bot 密钥</b><small>bot.bind</small></div>
+                        <span class="badge badge-warning risk"><span class="dot"></span>敏感</span>
+                        <div class="input select scope is-off"><span class="v">未授予</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                      </div>
+                      <div class="prow">
+                        <div class="pname"><b>调用 Bot</b><small>bot.invoke</small></div>
+                        <span class="badge badge-danger risk"><span class="dot"></span>高危</span>
+                        <div class="input select scope is-narrow"><span class="v">本团队</span><svg class="icon"><use href="#i-chev-down"/></svg></div>
+                        <div class="note"><svg class="icon"><use href="#i-lock"/></svg>按具体 Bot 精确授予；你最多可授「本团队」。</div>
+                      </div>
+                    </div>
+                    <div class="domain">
+                      <div class="domain-head"><svg class="icon sm"><use href="#i-shield"/></svg>账号<span class="count">已授 1 / 6</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-right"/></svg></div>
+                    </div>
+                    <div class="domain">
+                      <div class="domain-head"><svg class="icon sm"><use href="#i-activity"/></svg>审计<span class="count">未授予</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-right"/></svg></div>
+                    </div>
+                  </div>
+                  <div class="savebar">
+                    <span class="badge badge-warning"><span class="dot"></span>3 项未保存</span>
+                    <span class="txt">范围变更会立即影响这 8 位成员的<strong>下一次</strong>操作。</span>
+                    <div class="actions"><button class="btn btn-ghost btn-sm">放弃</button><button class="btn btn-primary btn-sm">保存 3 项变更</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 权限矩阵 + 成员页签 + 粘性保存条</span><span>组件：Collapsible / Table / Select / Badge / Segmented · 令牌：panel / border / warning / danger</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>range 是第二维</b><p>每行选范围（未授予/仅自己/本团队/整个租户/全部），不做三态复选：复选表达不了同一 key 的四种范围。</p></div>
+      <div class="note"><span class="n">02</span><b>上限可见</b><p>超出授予者自身范围的选项禁用并写「你最多可授…」，这是 <code>grant ⊆ own</code> 的产品表达。</p></div>
+      <div class="note"><span class="n">03</span><b>高风险单独标记</b><p><code>bot.invoke</code>、密钥读取、密码重置用「高危」并解释后果；保存条说明影响的是下一次操作。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">A4 · Bot（baseline）</p>
+      <h2>把「它能做什么」算给你看</h2>
+      <p class="lede">Bot 编辑器的核心不是表单，是解释：账号上限、工作范围、有效能力三层同时可见。用户能直接看到某一项能力是被账号挡住，还是被 Bot 自己收窄。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app tall">
+          <aside class="rail">
+            <div class="rail-brand"><span class="rail-mark">K</span><span class="rail-name">Keel</span><span class="rail-env">本机</span></div>
+            <nav class="nav">
+              <div class="nav-item"><svg class="icon"><use href="#i-chat"/></svg>工作区</div>
+              <div class="nav-item is-active"><svg class="icon"><use href="#i-bot"/></svg>员工</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-users"/></svg>团队</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-shield"/></svg>管理</div>
+            </nav>
+            <div class="rail-sep"></div>
+            <div class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>设置</div>
+            <div class="rail-foot"><div class="me"><span class="avatar sm">李</span><div class="who"><b>李娜</b><small>团队管理员</small></div><svg class="icon sm"><use href="#i-more"/></svg></div></div>
+          </aside>
+          <div class="main">
+            <div class="topbar">
+              <div class="crumb">员工<span class="sep">/</span><b>客服一号</b></div>
+              <div class="top-right"><span class="live"><span class="dot"></span>实时</span><button class="btn btn-ghost btn-sm"><svg class="icon sm"><use href="#i-refresh"/></svg></button></div>
+            </div>
+            <div class="page flush">
+              <div class="split wide" style="width:100%">
+                <div class="pane left">
+                  <div class="pane-head">
+                    <div class="pane-title"><h4>AI 员工</h4><span class="count">5</span><button class="btn btn-ghost btn-sm" style="margin-left:auto"><svg class="icon sm"><use href="#i-plus"/></svg></button></div>
+                    <div class="input"><svg class="icon sm"><use href="#i-search"/></svg><span class="ph">搜索名字或用途</span></div>
+                  </div>
+                  <div class="pane-list">
+                    <div class="row-item"><span class="avatar sm" style="border-color:rgba(64,153,255,.3)">管</span><div class="body"><b>管家</b><small>管家组 · 文本 · 运行中</small></div></div>
+                    <div class="row-item is-selected"><span class="avatar sm" style="border-color:rgba(64,153,255,.3)">客</span><div class="body"><b>客服一号</b><small>李娜 · 文本 · 可用</small></div><div class="tail"><span class="badge badge-success"><span class="dot"></span></span></div></div>
+                    <div class="row-item"><span class="avatar sm" style="border-color:rgba(64,153,255,.3)">订</span><div class="body"><b>订单查询</b><small>李娜 · 文本 · 可用</small></div></div>
+                    <div class="row-item"><span class="avatar sm">知</span><div class="body"><b>知识库</b><small>王强 · 文本 · 可用</small></div></div>
+                    <div class="row-item"><span class="avatar sm">图</span><div class="body"><b>图片工坊</b><small>王强 · 图像 · 已归档</small></div><div class="tail"><span class="badge badge-outline">只读</span></div></div>
+                  </div>
+                  <div style="margin-top:auto;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07)" class="hint"><svg class="icon"><use href="#i-bot"/></svg><span>Bot 属于一个账号。它的能力从来不会超过账号，也不会超过自己的工作范围。</span></div>
+                </div>
+                <div class="detail">
+                  <div class="detail-head">
+                    <div class="detail-title">
+                      <span class="avatar lg" style="border-color:rgba(64,153,255,.3)">客</span>
+                      <h3>客服一号</h3>
+                      <span class="badge badge-success"><span class="dot"></span>可用</span>
+                      <span class="badge badge-outline">文本</span>
+                      <span class="badge badge-neutral">归属 李娜</span>
+                      <div class="detail-actions"><button class="btn btn-outline btn-sm"><svg class="icon sm"><use href="#i-more"/></svg>更多</button><button class="btn btn-primary btn-sm"><svg class="icon sm"><use href="#i-play"/></svg>试跑</button></div>
+                    </div>
+                    <div class="detail-sub"><span>人设 客服专员</span><span>·</span><span>默认模型 qwen3.8-flash</span><span>·</span><span>最近活动 5 分钟前</span></div>
+                    <div class="tabs"><span class="tab">概览</span><span class="tab">行为</span><span class="tab is-active">权限</span><span class="tab">密钥 <span class="count">1</span></span><span class="tab">会话 <span class="count">12</span></span></div>
+                  </div>
+                  <div class="detail-body">
+                    <div class="hint"><svg class="icon"><use href="#i-shield"/></svg><span><b style="color:#f0f0f0;font-weight:600">Bot 只能做账号能做、且工作范围允许的事。</b> 人设决定语气与做法，不授予任何能力。</span></div>
+                    <div class="layers">
+                      <div class="layer">
+                        <div class="layer-head"><b>账号上限</b><small>来自 李娜 · 团队管理员</small></div>
+                        <div class="chips">
+                          <span class="chip">查看会话</span><span class="chip">继续会话</span><span class="chip">删除会话</span>
+                          <span class="chip">查看 Bot</span><span class="chip">调用 Bot</span><span class="chip">查看团队</span>
+                          <span class="chip">查看模型</span><span class="chip">密钥列表</span>
+                        </div>
+                      </div>
+                      <div class="layer">
+                        <div class="layer-head"><b>工作范围</b><small>这个 Bot 的收窄</small></div>
+                        <div style="margin-top:4px">
+                          <div class="layer-row"><span class="grow">读取会话</span><span class="switch on"></span></div>
+                          <div class="layer-row"><span class="grow">写入会话</span><span class="switch on"></span></div>
+                          <div class="layer-row"><span class="grow">查看团队</span><span class="switch on"></span></div>
+                          <div class="layer-row"><span class="grow off">读取密钥列表</span><span class="switch off"></span></div>
+                          <div class="layer-row"><span class="grow off">管理插件</span><span class="switch off"></span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="eff">
+                      <div class="eff-head"><b>有效能力</b><span class="badge badge-success"><span class="dot"></span>可用 8</span><span class="badge badge-warning"><span class="dot"></span>被挡下 2</span><span class="spacer"></span><span class="tiny muted">账号 ∩ 工作范围</span></div>
+                      <div class="eff-row ok"><svg class="icon sm"><use href="#i-check"/></svg><span class="name">查看会话</span><span class="src">本团队</span><span class="badge badge-success" style="justify-self:start"><span class="dot"></span>可用</span></div>
+                      <div class="eff-row ok"><svg class="icon sm"><use href="#i-check"/></svg><span class="name">继续会话</span><span class="src">本团队</span><span class="badge badge-success" style="justify-self:start"><span class="dot"></span>可用</span></div>
+                      <div class="eff-row ok"><svg class="icon sm"><use href="#i-check"/></svg><span class="name">调用 Bot</span><span class="src">指定 Bot</span><span class="badge badge-success" style="justify-self:start"><span class="dot"></span>可用</span></div>
+                      <div class="eff-row block"><svg class="icon sm"><use href="#i-lock"/></svg><span class="name">读取密钥列表</span><span class="src">被工作范围挡下</span><span class="badge badge-warning" style="justify-self:start"><span class="dot"></span>收窄</span></div>
+                      <div class="eff-row no"><svg class="icon sm"><use href="#i-x"/></svg><span class="name">读取密钥值</span><span class="src">账号没有</span><span class="badge badge-outline" style="justify-self:start">不可用</span></div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-size:10.5px;color:#9a9a9a">
+                      <span>本轮有效 8 项 · 被挡下 2 项</span>
+                      <span style="color:#d8d8d8;text-decoration:underline;text-underline-offset:2px">为什么它不能读密钥？</span>
+                      <span style="margin-left:auto;color:#d8d8d8;text-decoration:underline;text-underline-offset:2px">查看完整清单</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · Bot 列表 + 详情 · 权限页签</span><span>组件：Tabs / Card / Badge / Switch / Chips · 令牌：success / warning / muted-foreground</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>三层同时可见</b><p>账号上限、工作范围、有效能力并排，用户不用猜「为什么不行」。这是本 change 最重要的信任界面。</p></div>
+      <div class="note"><span class="n">02</span><b>人设不授权</b><p>常驻说明句把 Role 与权限切开，避免「人设写了就能做」的误解；人设只影响语气与做法。</p></div>
+      <div class="note"><span class="n">03</span><b>试跑是主操作</b><p>保存不是终点。创建后引导试跑一轮，真实看到工具调用与能力拒绝，再决定是否投入使用。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">A5 · 团队（baseline）</p>
+      <h2>团队不授权，只给使命与名单</h2>
+      <p class="lede">Mission 是团队唯一的目标来源，Roster 只是 Bot 引用。跨账号成员没有特殊规则，只有「你是否持有它的调用权」。启动前检查把缺失项变成可处理的下一步。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app tall">
+          <aside class="rail">
+            <div class="rail-brand"><span class="rail-mark">K</span><span class="rail-name">Keel</span><span class="rail-env">本机</span></div>
+            <nav class="nav">
+              <div class="nav-item"><svg class="icon"><use href="#i-chat"/></svg>工作区</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-bot"/></svg>员工</div>
+              <div class="nav-item is-active"><svg class="icon"><use href="#i-users"/></svg>团队</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-shield"/></svg>管理</div>
+            </nav>
+            <div class="rail-sep"></div>
+            <div class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>设置</div>
+            <div class="rail-foot"><div class="me"><span class="avatar sm">李</span><div class="who"><b>李娜</b><small>团队管理员</small></div><svg class="icon sm"><use href="#i-more"/></svg></div></div>
+          </aside>
+          <div class="main">
+            <div class="topbar">
+              <div class="crumb">团队<span class="sep">/</span><b>客服团队</b></div>
+              <div class="top-right"><span class="live"><span class="dot"></span>实时</span><button class="btn btn-ghost btn-sm"><svg class="icon sm"><use href="#i-refresh"/></svg></button></div>
+            </div>
+            <div class="page flush">
+              <div class="split team" style="width:100%">
+                <div class="pane left">
+                  <div class="pane-head">
+                    <div class="pane-title"><h4>团队</h4><span class="count">3</span><button class="btn btn-ghost btn-sm" style="margin-left:auto"><svg class="icon sm"><use href="#i-plus"/></svg></button></div>
+                    <div class="input"><svg class="icon sm"><use href="#i-search"/></svg><span class="ph">搜索团队或使命</span></div>
+                  </div>
+                  <div class="pane-list">
+                    <div class="row-item is-selected"><span class="avatar sm">客</span><div class="body"><b>客服团队</b><small>草稿 · 3 名成员 · 未跑过</small></div><div class="tail"><span class="badge badge-warning"><span class="dot"></span>1 项待处理</span></div></div>
+                    <div class="row-item"><span class="avatar sm">内</span><div class="body"><b>内容运营</b><small>草稿 · 2 名成员</small></div></div>
+                    <div class="row-item"><span class="avatar sm">售</span><div class="body"><b>售后升级</b><small>已停止 · 4 名成员 · 昨天</small></div></div>
+                  </div>
+                  <div style="margin-top:auto;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07)" class="hint"><svg class="icon"><use href="#i-users"/></svg><span>团队是一句使命 + 一份名单。它不拥有会话，也不向成员授予任何权限。</span></div>
+                </div>
+                <div class="detail">
+                  <div class="detail-head">
+                    <div class="detail-title"><h3>客服团队</h3><span class="badge badge-warning"><span class="dot"></span>草稿</span><span class="badge badge-neutral">3 名成员</span><div class="detail-actions"><button class="btn btn-outline btn-sm"><svg class="icon sm"><use href="#i-more"/></svg>更多</button><button class="btn btn-primary btn-sm is-disabled">启动团队</button></div></div>
+                    <div class="detail-sub"><span>队长 客服一号</span><span>·</span><span>创建于 今天 10:12</span><span>·</span><span>还有 1 项检查未通过</span></div>
+                    <div class="tabs"><span class="tab">概览</span><span class="tab is-active">成员 <span class="count">3</span></span><span class="tab">运行 <span class="count">0</span></span></div>
+                  </div>
+                  <div class="detail-body">
+                    <div class="hint"><svg class="icon"><use href="#i-info"/></svg><span>团队本身不拥有权限，也不拥有会话。每个成员 Bot 按自己的账号与工作范围执行；能不能调用某个 Bot，取决于你是否持有它的「调用 Bot」能力。</span></div>
+                    <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;min-width:0">
+                      <div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+                        <div class="mission">
+                          <span class="edit">编辑</span>
+                          <div class="k"><svg class="icon"><use href="#i-activity"/></svg>使命</div>
+                          <p>在 4 小时内解决客户问题。先查订单与物流；无法解决时升级给人工，并附上订单号、已尝试的步骤和客户原话。</p>
+                        </div>
+                        <div class="roster-head"><b>成员</b><span class="count">3 / 8</span><button class="btn btn-outline btn-sm add"><svg class="icon sm"><use href="#i-plus"/></svg>添加成员</button></div>
+                        <div class="member is-captain">
+                          <span class="avatar sm" style="border-color:rgba(64,153,255,.3)">客</span>
+                          <div class="body"><b>客服一号 <span class="badge badge-neutral" style="margin-left:4px">队长</span></b><small>李娜 · 文本 · qwen3.8-flash</small></div>
+                          <div class="tail"><span class="badge badge-success"><span class="dot"></span>可调用</span><button class="btn btn-ghost btn-sm">更换</button></div>
+                        </div>
+                        <div class="member">
+                          <span class="avatar sm" style="border-color:rgba(64,153,255,.3)">订</span>
+                          <div class="body"><b>订单查询</b><small>李娜 · 文本 · qwen3.8-flash</small></div>
+                          <div class="tail"><span class="badge badge-success"><span class="dot"></span>可调用</span><button class="btn btn-ghost btn-sm"><svg class="icon sm"><use href="#i-x"/></svg></button></div>
+                        </div>
+                        <div class="member is-blocked">
+                          <span class="avatar sm">知</span>
+                          <div class="body"><b>知识库</b><small>王强 · 其他账号 · 你需要它的调用权</small></div>
+                          <div class="tail"><span class="badge badge-danger"><span class="dot"></span>不可调用</span><button class="btn btn-outline btn-sm">复制申请</button></div>
+                        </div>
+                        <div class="member" style="border-style:dashed;background:transparent;color:#8f8f8f"><svg class="icon sm"><use href="#i-plus"/></svg><div class="body"><b style="color:#a9a9a9">添加成员</b><small>从你能调用的 Bot 里选</small></div></div>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+                        <div class="panel">
+                          <div class="panel-head"><h4>启动前检查</h4><span class="sub" style="margin-left:auto">2 / 3</span></div>
+                          <div class="panel-body" style="padding:6px 12px">
+                            <div class="check ok"><svg class="icon"><use href="#i-check"/></svg><div class="body"><b>使命已填写</b><small>会注入每次成员会话</small></div></div>
+                            <div class="check ok"><svg class="icon"><use href="#i-check"/></svg><div class="body"><b>已选队长</b><small>客服一号 · 负责任务拆分与调用</small></div></div>
+                            <div class="check bad"><svg class="icon"><use href="#i-alert"/></svg><div class="body"><b>1 个成员不可调用</b><small>知识库属于王强；你没有它的调用权。</small></div><span class="fix">去处理</span></div>
+                          </div>
+                        </div>
+                        <button class="btn btn-primary" style="height:34px;opacity:.45">启动团队</button>
+                        <p class="tiny" style="color:#929292;line-height:1.6">先处理未通过的检查，启动按钮才会可用。</p>
+                        <div class="section-label" style="margin-top:2px">启动后会发生什么<span class="line"></span></div>
+                        <div class="list">
+                          <div class="list-row" style="height:34px"><svg class="icon sm" style="color:#9a9a9a"><use href="#i-arrow-right"/></svg><div class="grow"><b style="font-size:10.5px">队长收到使命，可以创建、分叉、调用成员</b></div></div>
+                          <div class="list-row" style="height:34px"><svg class="icon sm" style="color:#9a9a9a"><use href="#i-coins"/></svg><div class="grow"><b style="font-size:10.5px">产生模型用量，运行页可随时停止</b></div></div>
+                          <div class="list-row" style="height:34px"><svg class="icon sm" style="color:#9a9a9a"><use href="#i-users"/></svg><div class="grow"><b style="font-size:10.5px">成员各自以自己的权限执行</b></div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 团队列表 + Mission / Roster / 启动前检查</span><span>组件：Textarea / Card / Badge / Command / AlertDialog · 令牌：panel / card / danger / success</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>没有「团队权限」</b><p>页面上不存在给团队授权的入口；常驻说明句解释为什么。跨账号成员只显示可调用性，不显示「已授权」。</p></div>
+      <div class="note"><span class="n">02</span><b>不可调用是可处理的</b><p>不是灰掉「加入」就完事：行内解释缺什么，给「复制申请」，让用户能去找归属者。</p></div>
+      <div class="note"><span class="n">03</span><b>启动是承诺</b><p>启动前检查 + 确认对话框说明会创建/调用成员、会产生用量、可停止。用户知道按下之后发生什么。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">A6 · 运行（baseline）</p>
+      <h2>DAG 是账本投影，不是装饰图</h2>
+      <p class="lede">Mission 在最上，队长与成员按调用深度分层，边只画真实发生的 create / fork / invoke。选中节点在右侧看会话摘要、工具、权限判定与用量；失败节点是红色边与一等公民。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app tall">
+          <aside class="rail">
+            <div class="rail-brand"><span class="rail-mark">K</span><span class="rail-name">Keel</span><span class="rail-env">本机</span></div>
+            <nav class="nav">
+              <div class="nav-item"><svg class="icon"><use href="#i-chat"/></svg>工作区</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-bot"/></svg>员工</div>
+              <div class="nav-item is-active"><svg class="icon"><use href="#i-users"/></svg>团队</div>
+              <div class="nav-item"><svg class="icon"><use href="#i-shield"/></svg>管理</div>
+            </nav>
+            <div class="rail-sep"></div>
+            <div class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>设置</div>
+            <div class="rail-foot"><div class="me"><span class="avatar sm">李</span><div class="who"><b>李娜</b><small>团队管理员</small></div><svg class="icon sm"><use href="#i-more"/></svg></div></div>
+          </aside>
+          <div class="main">
+            <div class="topbar">
+              <div class="crumb">团队<span class="sep">/</span><span>客服团队</span><span class="sep">/</span><b>运行 #128</b></div>
+              <div class="top-right"><span class="live"><span class="dot"></span>实时</span><button class="btn btn-ghost btn-sm"><svg class="icon sm"><use href="#i-download"/></svg>导出</button><button class="btn btn-danger btn-sm"><svg class="icon sm"><use href="#i-stop"/></svg>停止运行</button></div>
+            </div>
+            <div class="run-head">
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:8px"><h3>运行 #128</h3><span class="badge badge-info"><span class="dot"></span>运行中</span><span class="badge badge-neutral">手动启动</span><span class="badge badge-danger"><span class="dot"></span>1 个失败</span></div>
+                <div class="run-facts"><span>队长 <b>客服一号</b></span><span>用时 <b>4 分 12 秒</b></span><span>用量 <b>42,180 tokens</b></span><span>成本 <b>¥0.38</b></span><span>发起人 <b>李娜</b></span><span>开始 <b>今天 14:32</b></span></div>
+              </div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:10px;color:#9a9a9a;flex:none"><svg class="icon sm"><use href="#i-clock"/></svg>2 秒内更新</div>
+            </div>
+            <div class="run-body">
+              <div class="dag-wrap">
+                <div class="dag">
+                  <svg class="edges" viewBox="0 0 600 430" aria-hidden="true">
+                    <path d="M300 62 V96"/>
+                    <path class="is-strong" d="M300 158 V184"/>
+                    <path d="M96 184 H300"/>
+                    <path class="is-strong" d="M300 184 V210"/>
+                    <path d="M96 184 V210"/>
+                    <path class="is-fail" d="M300 184 H504 V210"/>
+                    <path class="is-create" d="M96 280 V330"/>
+                  </svg>
+                  <div class="edge-label" style="left:306px;top:70px">下发使命</div>
+                  <div class="edge-label" style="left:118px;top:188px">调用</div>
+                  <div class="edge-label is-strong" style="left:318px;top:188px;color:#e8e8e8;border-color:rgba(255,255,255,.24)">调用</div>
+                  <div class="edge-label fail" style="left:420px;top:188px">调用被拒</div>
+                  <div class="edge-label" style="left:102px;top:298px">创建</div>
+
+                  <div class="node is-mission" style="left:150px;top:8px">
+                    <div class="n1"><span class="dot" style="background:var(--info)"></span>客服团队 · 本周退款原因分析</div>
+                    <div class="n2">使命 · 3 名成员 · 队长 客服一号</div>
+                    <div class="n3"><span>运行 #128</span><span>14:32 开始</span></div>
+                  </div>
+
+                  <div class="node is-captain" style="left:170px;top:96px">
+                    <div class="n1"><span class="dot" style="background:var(--info)"></span>客服一号 <span class="badge badge-neutral" style="height:16px;font-size:8.5px">队长</span></div>
+                    <div class="n2">李娜 · qwen3.8-flash</div>
+                    <div class="n3"><span>运行中</span><span>4m12s</span><span>12.4k</span></div>
+                  </div>
+
+                  <div class="node is-selected" style="left:6px;top:210px">
+                    <div class="n1"><span class="dot" style="background:var(--info)"></span>订单查询</div>
+                    <div class="n2">李娜 · qwen3.8-flash</div>
+                    <div class="n3"><span>运行中</span><span>1m06s</span><span>8.4k</span></div>
+                  </div>
+
+                  <div class="node" style="left:210px;top:210px">
+                    <div class="n1"><span class="dot" style="background:var(--success)"></span>知识库</div>
+                    <div class="n2">王强 · qwen3.8-flash</div>
+                    <div class="n3"><span>完成</span><span>2m18s</span><span>9.1k</span></div>
+                  </div>
+
+                  <div class="node is-fail" style="left:414px;top:210px">
+                    <div class="n1"><span class="dot" style="background:var(--danger)"></span>售后升级</div>
+                    <div class="n2">王强 · qwen3.8-flash</div>
+                    <div class="n3"><span style="color:#ff9b9b">失败 · 调用被拒</span></div>
+                  </div>
+
+                  <div class="node" style="left:6px;top:330px">
+                    <div class="n1"><span class="dot" style="background:var(--success)"></span>退款专员</div>
+                    <div class="n2">李娜 · qwen3.8-flash</div>
+                    <div class="n3"><span>完成</span><span>38s</span><span>3.2k</span></div>
+                  </div>
+                </div>
+                <div class="legend-row">
+                  <span><i></i>调用</span>
+                  <span><i class="dash"></i>创建 / 分叉（本次：创建）</span>
+                  <span><i class="fail"></i>被拒绝</span>
+                  <span style="margin-left:auto">节点按调用深度分层，同层按开始时间排序</span>
+                </div>
+              </div>
+              <aside class="inspector">
+                <div class="insp-head"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--info)"></span><b>订单查询</b><span class="badge badge-info"><span class="dot"></span>运行中</span><svg class="icon sm" style="color:#8f8f8f"><use href="#i-x"/></svg></div>
+                <div class="insp-tabs"><span class="on">摘要</span><span>工具 3</span><span>权限 7</span></div>
+                <div class="insp-body">
+                  <div class="kv"><span class="k">归属账号</span><span class="v">李娜</span></div>
+                  <div class="kv"><span class="k">实际模型</span><span class="v">qwen3.8-flash</span></div>
+                  <div class="kv"><span class="k">开始</span><span class="v">14:32:08</span></div>
+                  <div class="kv"><span class="k">用时</span><span class="v">1 分 06 秒</span></div>
+                  <div class="kv"><span class="k">用量</span><span class="v">8,420 tokens · ¥0.11</span></div>
+                  <div class="section-label">最近工具<span class="line"></span></div>
+                  <div class="tool"><span class="name">search_orders</span><span class="badge badge-success" style="height:16px;font-size:8.5px"><span class="dot"></span>成功</span><span class="ms">0.8s</span></div>
+                  <div class="tool"><span class="name">get_order</span><span class="badge badge-success" style="height:16px;font-size:8.5px"><span class="dot"></span>成功</span><span class="ms">0.3s</span></div>
+                  <div class="tool is-denied"><span class="name">read_secret</span><span class="badge badge-danger" style="height:16px;font-size:8.5px"><span class="dot"></span>被拒绝</span><span class="ms">—</span></div>
+                  <div class="alert-card"><svg class="icon"><use href="#i-lock"/></svg><div><b>缺「读取密钥值」能力。</b> 这个 Bot 的账号没有该能力；工作范围也没有放行。结果已写入审计。</div></div>
+                  <div class="section-label">权限判定<span class="line"></span><span style="font-weight:400;letter-spacing:0;text-transform:none">允许 6 · 拒绝 1</span></div>
+                  <div class="tool"><span class="name">session.read</span><span class="badge badge-success" style="height:16px;font-size:8.5px"><span class="dot"></span>允许</span><span class="ms">本团队</span></div>
+                  <div class="tool"><span class="name">bot.invoke</span><span class="badge badge-success" style="height:16px;font-size:8.5px"><span class="dot"></span>允许</span><span class="ms">指定 Bot</span></div>
+                  <div class="tool"><span class="name">secret.read.value</span><span class="badge badge-danger" style="height:16px;font-size:8.5px"><span class="dot"></span>拒绝</span><span class="ms">账号没有</span></div>
+                </div>
+                <div class="insp-foot"><button class="btn btn-primary btn-sm" style="flex:1"><svg class="icon sm"><use href="#i-external"/></svg>打开会话</button><button class="btn btn-outline btn-sm">查看审计</button></div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>桌面 1240 · 运行摘要 + 分层 DAG + 节点检查器</span><span>组件：Breadcrumb / Tabs / Badge / Card / Sheet（移动端） · 令牌：info / danger / success / border</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>边只来自账本</b><p>create / fork / invoke 都是真实事件；没有推断边。失败分支用红色虚线，并在检查器里给出人话原因。</p></div>
+      <div class="note"><span class="n">02</span><b>节点可下钻</b><p>摘要、工具、权限判定、用量在同一检查器；「打开会话」回工作区，「查看审计」按该 Bot 过滤。</p></div>
+      <div class="note"><span class="n">03</span><b>移动端变时间线</b><p>窄屏不画自由图：纵向缩进时间线 + 连接线上的「调用」标签，点击节点弹底部检查器。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">05 · 五态（跨方向）</p>
+      <h2>每个列表都先设计「没有」和「不行」</h2>
+      <p class="lede">加载不跳版、空态给下一步、错误说人话并留请求编号、权限不足说缺什么和找谁、成功态有主次和下一步。下面是账号列表的五种真实形态。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="gallery">
+        <div class="state-card">
+          <div class="tag"><b>加载</b> 骨架匹配布局</div>
+          <div class="frame">
+            <div class="mini-head"><b>账号</b><span class="spacer"></span><span class="skel" style="width:38px;height:18px;border-radius:6px"></span></div>
+            <div class="mini-skel-row"><span class="avatar"></span><div class="col"><span class="skel mid"></span><span class="skel short"></span></div></div>
+            <div class="mini-skel-row"><span class="avatar"></span><div class="col"><span class="skel long"></span><span class="skel mid"></span></div></div>
+            <div class="mini-skel-row"><span class="avatar"></span><div class="col"><span class="skel mid"></span><span class="skel short"></span></div></div>
+            <div class="mini-skel-row"><span class="avatar"></span><div class="col"><span class="skel long"></span><span class="skel mid"></span></div></div>
+            <div class="note-line" style="margin-top:auto">列宽不变；主按钮进入 loading 并禁用，避免重复提交。</div>
+          </div>
+        </div>
+        <div class="state-card">
+          <div class="tag"><b>空</b> 解释 + 下一步</div>
+          <div class="frame">
+            <div class="mini-head"><b>账号</b><span class="spacer"></span><span class="skel" style="width:38px;height:18px;border-radius:6px"></span></div>
+            <div class="empty" style="padding:8px 4px">
+              <span class="disc"><svg class="icon"><use href="#i-users"/></svg></span>
+              <h4>还没有人加入这台部署</h4>
+              <p>先建一个账号，再决定他能看到什么。</p>
+              <div class="actions"><button class="btn btn-primary">新建账号</button><button class="btn btn-outline">先建权限组</button></div>
+            </div>
+            <div class="note-line" style="margin-top:auto">空态是引导，不是「暂无数据」。</div>
+          </div>
+        </div>
+        <div class="state-card">
+          <div class="tag"><b>错</b> 人话 + 重试 + 编号</div>
+          <div class="frame">
+            <div class="mini-head"><b>账号</b><span class="spacer"></span><span class="badge badge-danger"><span class="dot"></span>失败</span></div>
+            <div class="empty" style="padding:8px 4px">
+              <span class="disc" style="background:rgba(255,92,92,.12);border-color:rgba(255,92,92,.3)"><svg class="icon" style="color:#ff9b9b"><use href="#i-alert"/></svg></span>
+              <h4>没能读到账号列表</h4>
+              <p>服务暂时没有响应。稍后重试；如果一直失败，把编号 k-7f31 给管理员。</p>
+              <div class="actions"><button class="btn btn-primary">重试</button><button class="btn btn-ghost">复制编号</button></div>
+            </div>
+            <div class="note-line" style="margin-top:auto">不显示堆栈、不显示内部 id。</div>
+          </div>
+        </div>
+        <div class="state-card">
+          <div class="tag"><b>权限不足</b> 缺什么 + 找谁</div>
+          <div class="frame">
+            <div class="mini-head"><b>账号</b><span class="spacer"></span><span class="badge badge-outline">只读</span></div>
+            <div class="empty" style="padding:8px 4px">
+              <span class="disc" style="background:rgba(255,138,48,.12);border-color:rgba(255,138,48,.3)"><svg class="icon" style="color:#ffb37a"><use href="#i-lock"/></svg></span>
+              <h4>你没有查看账号的权限</h4>
+              <p>需要「查看账号」能力。找这台部署的管理员，把你的账号加入有该能力的权限组。</p>
+              <div class="actions"><button class="btn btn-primary">复制申请说明</button><button class="btn btn-outline">返回工作区</button></div>
+            </div>
+            <div class="note-line" style="margin-top:auto">不是白屏；技术 key 默认折叠。</div>
+          </div>
+        </div>
+        <div class="state-card">
+          <div class="tag"><b>成功</b> 主次 + 下一步</div>
+          <div class="frame">
+            <div class="mini-head"><b>账号</b><span class="spacer"></span><span class="badge badge-neutral">12 人</span></div>
+            <div class="mini-row"><span class="avatar">李</span><div class="grow"><b>李娜</b><small>团队管理员 · 3 个组</small></div><span class="badge badge-success"><span class="dot"></span>在线</span></div>
+            <div class="mini-row"><span class="avatar">陈</span><div class="grow"><b>陈墨</b><small>成员 · 客服组</small></div><span class="badge badge-neutral"><span class="dot"></span>12m</span></div>
+            <div class="mini-row"><span class="avatar" style="border-color:rgba(64,153,255,.3)">管</span><div class="grow"><b>管家</b><small>Bot · 管家组</small></div><span class="badge badge-info"><span class="dot"></span>运行中</span></div>
+            <div class="note-line" style="margin-top:auto">主操作唯一；下一步：打开某人，或新建账号。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>组件级五态 · 账号列表</span><span>同一列表在五种数据/权限条件下的真实文案</span></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">06 · 移动端（推荐方向 B）</p>
+      <h2>窄屏不是缩小的桌面</h2>
+      <p class="lede">375/390 保留五个章节（不超过 5 项），章节带变成「当前章节 + 切换」，页边变成一张摘要卡；权限矩阵域折叠，运行变纵向时间线。主操作固定在底部、在导航之上。</p>
+    </div>
+    <div class="stage-wrap">
+      <div class="phones">
+        <div class="phone-wrap">
+          <div class="phone-label"><span><b>工作区</b> · 待我处理 + 共享会话</span><span>390 × 760</span></div>
+          <div class="viewport">
+            <div class="m-head"><span style="font:9px var(--mono);color:#8f8f8f">01</span><b>工作区</b><span class="spacer"></span><span class="badge badge-warning" style="height:18px;font-size:8.5px"><span class="dot"></span>待办 2</span><span class="avatar sm">李</span></div>
+            <div class="m-body">
+              <div class="m-todo"><svg class="icon"><use href="#i-alert"/></svg><div><b>售后升级调用被拒</b><small>缺「调用 Bot」能力 · 14:35 · 查看原因</small></div></div>
+              <div class="input"><svg class="icon sm"><use href="#i-search"/></svg><span class="ph">搜索会话或 Bot</span></div>
+              <div class="seg" style="align-self:flex-start"><span>我的</span><span class="is-on">共享给我 3</span><span>团队</span></div>
+              <div class="m-row"><span class="avatar sm">李</span><div class="grow"><b>把本周退款原因按渠道拆开</b><small>客服一号 · 8 分钟前</small></div><span class="badge badge-info"><span class="dot"></span>可编辑</span></div>
+              <div class="m-row"><span class="avatar sm" style="border-color:rgba(64,153,255,.3)">订</span><div class="grow"><b>订单 88213 的物流异常</b><small>订单查询 · 1 小时前</small></div><span class="badge badge-neutral"><span class="dot"></span>可查看</span></div>
+              <div class="m-row"><span class="avatar sm">客</span><div class="grow"><b>十月客服周报</b><small>知识库 · 昨天</small></div><span class="badge badge-outline">团队</span></div>
+              <div class="hint" style="margin-top:auto"><svg class="icon"><use href="#i-share"/></svg><span>共享会话标明来源与权限；撤销后 2 秒内变只读。</span></div>
+            </div>
+            <nav class="m-nav">
+              <span class="item on"><svg class="icon"><use href="#i-chat"/></svg>工作区</span>
+              <span class="item"><svg class="icon"><use href="#i-bot"/></svg>员工</span>
+              <span class="item"><svg class="icon"><use href="#i-users"/></svg>团队</span>
+              <span class="item"><svg class="icon"><use href="#i-shield"/></svg>身份</span>
+              <span class="item"><svg class="icon"><use href="#i-activity"/></svg>记录</span>
+            </nav>
+          </div>
+        </div>
+        <div class="phone-wrap">
+          <div class="phone-label"><span><b>身份 / 权限组</b> · 摘要卡 + 域折叠</span><span>390 × 760</span></div>
+          <div class="viewport">
+            <div class="m-head"><svg class="icon"><use href="#i-chev-left"/></svg><span style="font:9px var(--mono);color:#8f8f8f">04</span><b>客服组</b><span class="spacer"></span><svg class="icon"><use href="#i-more"/></svg></div>
+            <div class="m-body flush" style="padding:12px 14px 0;gap:10px">
+              <div class="m-summary">
+                <div class="k">权限组 · 自定义</div>
+                <h4>客服组</h4>
+                <p>给客服同学：本团队的会话读写，加上订单查询 Bot 的调用权。</p>
+                <div class="facts"><span><b>8</b> 位成员</span><span><b>7</b> 项能力</span><span><b>3</b> 项未保存</span></div>
+              </div>
+              <div class="m-domain">
+                <div class="dh"><svg class="icon sm"><use href="#i-chat"/></svg>会话<span class="count">已授 3/4</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-down"/></svg></div>
+                <div class="m-prow"><div class="l1"><b>查看会话</b><small>session.read</small><span class="spacer"></span><span class="badge badge-outline">常规</span></div><div class="input select"><span class="v">本团队</span><svg class="icon"><use href="#i-chev-down"/></svg></div></div>
+                <div class="m-prow"><div class="l1"><b>继续会话</b><small>session.write</small><span class="spacer"></span><span class="badge badge-outline">常规</span></div><div class="input select"><span class="v">本团队</span><svg class="icon"><use href="#i-chev-down"/></svg></div></div>
+                <div class="m-prow"><div class="l1"><b>删除会话</b><small>session.delete</small><span class="spacer"></span><span class="badge badge-warning"><span class="dot"></span>敏感</span></div><div class="input select" style="color:#8f8f8f"><span class="v">未授予</span><svg class="icon"><use href="#i-chev-down"/></svg></div></div>
+              </div>
+              <div class="m-domain">
+                <div class="dh"><svg class="icon sm"><use href="#i-bot"/></svg>Bot<span class="count">已授 2/5</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-right"/></svg></div>
+              </div>
+              <div class="m-domain">
+                <div class="dh"><svg class="icon sm"><use href="#i-shield"/></svg>账号<span class="count">已授 1/6</span><span class="spacer"></span><svg class="icon sm"><use href="#i-chev-right"/></svg></div>
+              </div>
+            </div>
+            <div class="m-savebar"><span class="badge badge-warning"><span class="dot"></span>3 项</span><span class="txt">未保存</span><div class="actions"><button class="btn btn-ghost btn-sm">放弃</button><button class="btn btn-sm" style="background:rgba(255,138,48,.14);border:1px solid rgba(255,138,48,.42);color:#ffe1c7">保存并签记</button></div></div>
+            <nav class="m-nav">
+              <span class="item"><svg class="icon"><use href="#i-chat"/></svg>工作区</span>
+              <span class="item"><svg class="icon"><use href="#i-bot"/></svg>员工</span>
+              <span class="item"><svg class="icon"><use href="#i-users"/></svg>团队</span>
+              <span class="item on"><svg class="icon"><use href="#i-shield"/></svg>身份</span>
+              <span class="item"><svg class="icon"><use href="#i-activity"/></svg>记录</span>
+            </nav>
+          </div>
+        </div>
+        <div class="phone-wrap">
+          <div class="phone-label"><span><b>运行</b> · 泳道变时间线</span><span>390 × 760</span></div>
+          <div class="viewport">
+            <div class="m-head"><svg class="icon"><use href="#i-chev-left"/></svg><span style="font:9px var(--mono);color:#8f8f8f">03</span><b>运行 #128</b><span class="spacer"></span><span class="live"><span class="dot"></span>实时</span></div>
+            <div class="m-body">
+              <div class="m-summary">
+                <div class="k">团队 · 运行中</div>
+                <h4>客服团队</h4>
+                <p>本周退款原因分析 · 按渠道拆开，找出异常升高的两类。</p>
+                <div class="facts"><span><b>4m12s</b></span><span><b>¥0.38</b></span><span style="color:#ffb3b3"><b>1</b> 个失败</span></div>
+              </div>
+              <div class="timeline">
+                <div class="tl-node run"><div class="tl-card"><b>客服一号 <span class="badge badge-neutral" style="height:14px;font-size:8px">队长</span></b><small>运行中 · 4m12s · 12.4k tokens</small></div></div>
+                <div class="tl-edge"><svg class="icon"><use href="#i-arrow-right"/></svg>调用</div>
+                <div class="tl-node run"><div class="tl-card" style="border-color:rgba(255,255,255,.45)"><b>订单查询</b><small>运行中 · 1m06s · 8.4k</small></div></div>
+                <div class="tl-edge"><svg class="icon"><use href="#i-arrow-right"/></svg>调用</div>
+                <div class="tl-node ok"><div class="tl-card"><b>知识库</b><small>完成 · 2m18s · 9.1k</small></div></div>
+                <div class="tl-edge"><svg class="icon"><use href="#i-x"/></svg><span style="color:#ffb3b3">调用被拒</span></div>
+                <div class="tl-node fail"><div class="tl-card" style="border-color:rgba(255,92,92,.35)"><b>售后升级</b><small style="color:#ffb3b3">失败 · 缺「调用 Bot」能力</small></div></div>
+              </div>
+            </div>
+            <div class="m-savebar"><button class="btn btn-danger btn-sm" style="flex:1"><svg class="icon sm"><use href="#i-stop"/></svg>停止运行</button><button class="btn btn-outline btn-sm">打开会话</button></div>
+            <nav class="m-nav">
+              <span class="item"><svg class="icon"><use href="#i-chat"/></svg>工作区</span>
+              <span class="item"><svg class="icon"><use href="#i-bot"/></svg>员工</span>
+              <span class="item on"><svg class="icon"><use href="#i-users"/></svg>团队</span>
+              <span class="item"><svg class="icon"><use href="#i-shield"/></svg>身份</span>
+              <span class="item"><svg class="icon"><use href="#i-activity"/></svg>记录</span>
+            </nav>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><span>移动 390 · 章节 + 摘要卡 + 单列</span><span>触控目标 ≥44px · 底部主操作在导航之上 · 无横向滚动</span></div>
+    <div class="notes">
+      <div class="note"><span class="n">01</span><b>五章是上限</b><p>工作区、员工、团队、身份、记录是五个章节；设置与我的账号进头像菜单。再多的目的地应拆产品，不挤 tab。</p></div>
+      <div class="note"><span class="n">02</span><b>矩阵不横滚</b><p>域折叠 + 每行一个范围选择（底部 Sheet）。宽表在 390 上不可读，不做横向滚动。</p></div>
+      <div class="note"><span class="n">03</span><b>运行变时间线</b><p>保留调用顺序与边标签，牺牲空间布局；失败节点仍在原位，点开是底部检查器。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <p class="eyebrow">07 · 评审选择点</p>
+      <h2>需要 Owner 拍板的五件事</h2>
+      <p class="lede">方向与取舍见 <b>design/DIRECTIONS.md</b>，验收映射见 <b>design/REVIEW.md</b>。未拍板前，L5 不应进入实现。</p>
+    </div>
+    <div class="notes" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+      <div class="note"><span class="n">01</span><b>方向：B / C / A</b><p>推荐 B 账簿；C 任务简报是挑战者；A 控制台是 baseline。不是配色选择，是结构选择。</p></div>
+      <div class="note"><span class="n">02</span><b>章节命名</b><p><code>身份</code>（账号 + 权限组）与 <code>记录</code>（审计）；备选「访问 / 审计」。</p></div>
+      <div class="note"><span class="n">03</span><b>运行视图</b><p>泳道默认 + 「图」切换（推荐），还是节点图默认 + 「泳道」切换。</p></div>
+      <div class="note"><span class="n">04</span><b>索引形态</b><p>drill-in + 页边快速切换（推荐），还是常驻索引列（更像 A 的双栏）。</p></div>
+      <div class="note"><span class="n">05</span><b>吸收「待我处理」</b><p>作为工作区/索引页顶部窄带，还是独立章节；推荐前者，不做监控台。</p></div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span>Keel · <b>keel-bot-identity-access</b> · P0 产品设计 · 2026-11-21</span>
+    <span>设计样例，非生产代码 · 规范正文 <b>design/PRODUCT-DESIGN.md</b> · 方向与取舍 <b>design/DIRECTIONS.md</b> · 评审包 <b>design/REVIEW.md</b></span>
+  </footer>
+</div>
+</body>
+</html>
