@@ -69,6 +69,10 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 -- post-commit writes land out of order. A model-only selection clears both ids
 -- (the newest selection is authoritative); an input without a selection leaves
 -- the projection untouched. bound_at is write time for diagnosis only.
+--
+-- RLS: the columns live on sessions, which already carries FORCE ROW LEVEL
+-- SECURITY and the tenant_isolation policy (internal/store/rls.go). No new
+-- table and no new policy are introduced; adding columns inherits the policy.
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_agent_id text;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_team_id  text;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bound_seq      bigint;
