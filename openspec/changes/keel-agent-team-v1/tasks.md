@@ -88,19 +88,30 @@
       > 当前 CLI 未实现；属既有能力树与实现差异，未在本轮尾项内扩散。
 - [x] Team CLI 能力开关：关闭后拒绝并返回 typed permission error（线上 403 team_cli_disabled 实证）
 - [x] 队长自组装：成员增删只改 team 配置，不污染 model/agent provider
-- [ ] Team 删除/归档引用保护（未做：需要候选 B 的 sessions 绑定列，见 RUNTIME-PLAN §b）；运行中修改不影响当前 run [x]（per-attempt 解析：编辑只影响下一次 attempt，`internal/agent/runner.go` 的 Bindings seam）
-      > **阻塞（2026-11-20 核查）**：`sessions` 无 agent/team 绑定列（`internal/store/schema.sql:19-27`，
-      > 只有外部会话 6 列 `:34-40`），绑定仅存在于 `user.message.payload.selection`；删除保护依赖
-      > `keel-harness-v2` W2-1 的 `groups`/`session_placement`（未实现：`openspec/changes/keel-harness-v2/RECONCILIATION.md:158`）
-      > 或候选 B 的独立 change。本轮不抢建；Agent 侧被 team 引用的 409 保护已在 E2E 第 6 段实证，
-      > Agent/Team 的**会话**引用保护同此阻塞。
+- [x] Team 删除/归档引用保护（2026-11-21 交付；运行中修改不影响当前 run [x] 见下）
+      > **实现**：`sessions` 增加派生列 `bound_agent_id`/`bound_team_id`/`bound_seq`/`bound_at`
+      > （`internal/store/schema.sql` 会话段；RLS 随 sessions 既有策略，不新增表）。提交路径
+      > `POST /input`、`/retry`、兼容边 `POST /events` 在事件提交后调用
+      > `recordSessionBinding`（`internal/httpapi/input_commit.go`），按 `bound_seq <= 事件 seq`
+      > 条件写，并发下最新 input 胜；`selection` 仍只在 `user.message` 账本，该列只是派生索引，
+      > 不参与 run 装配。模型-only selection 清空绑定，无 selection 的输入不改绑定。
+      > 删除/归档守卫在 `internal/httpapi/agents.go`：Team 用 `SessionsReferencingTeam` →
+      > 409 `team_in_use`；Agent 合并 `TeamsReferencingAgent` + `SessionsReferencingAgent` →
+      > 409 `agent_in_use`；`references` 中会话项带 `kind:"session"`/state/runStatus/archived，
+      > CLI 沿用同一 envelope 渲染。新增 `POST /v1/agents/{id}/archive`、
+      > `POST /v1/teams/{id}/archive` 与 `keel agent|team archive`。
+      > **语义**：未归档会话无论 run 状态都算引用；已归档会话不算引用，但若仍持有
+      > pending/running run 仍算（归档不取消 run）；解绑 = 归档会话或发送只选模型的输入。
+      > 证据 `evidence/session-ref-2026-11-21/`。
+- [x] 运行中修改不影响当前 run（per-attempt 解析：编辑只影响下一次 attempt，`internal/agent/runner.go` 的 Bindings seam）
 - [x] 能力树声明 team CLI 子命令与 callable_by
 - [x] Team 卡片/成员管理 UI（settings › 团队）
 
 ## P4 会话启动与内核注入
 
 - [x] 会话 `mode` = standard|team；standard 保存 model 绑定，team 保存 teamId
-      （selection 随输入发送；teamId 为会话级内存标记，未持久化——见 2026-11-14 记录）
+      （selection 随输入发送；2026-11-21 起 `sessions.bound_agent_id/bound_team_id` 持久化
+      最新 selection 的派生绑定，供引用保护读取；执行仍按账本 per-attempt 解析）
 - [x] Standard：选模型/默认 Agent 启动；不要求团队
 - [x] Team：选有效团队启动；captain 为主 Agent；缺 captain 阻止启动（按钮禁用+原因）
 - [x] run manifest 冻结 agent/team/prompt hash：`run.finished` 摘要携带 agentId/teamId/teamRevision/teamHash/promptHash（`internal/agent/runner.go`，形状由 `internal/kernel/validate.go` 校验）；证据 `evidence/runtime-20261114-211425/captain-events.json`

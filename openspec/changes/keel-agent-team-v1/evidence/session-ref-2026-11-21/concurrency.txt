@@ -1,0 +1,4 @@
+session: 34d8f8df-ddf5-4447-a305-bf838409f194
+sessions.bound_agent_id|bound_seq: agent_conc_b|8
+newest user.message selection|seq: agent_conc_b|8
+writers: 8 (alternating agent_conc_a/agent_conc_b)

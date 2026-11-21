@@ -1,0 +1,18 @@
+{
+  "tenant": "7d30868b-db97-4d4c-b587-05b9fbf6369e",
+  "teamSession": "5739fc5e-08aa-4833-ae84-fc88ce9c0352",
+  "agentSession": "108aad4d-73b3-41db-af46-a94f0b1685ac",
+  "concurrencySession": "34d8f8df-ddf5-4447-a305-bf838409f194",
+  "projection": "agent_conc_b|8",
+  "checks": {
+    "teamDeleteBlocked409": true,
+    "teamArchiveBlocked409": true,
+    "teamArchiveAfterSessionArchive": true,
+    "teamDeleteArchived": true,
+    "agentDeleteBlocked409": true,
+    "agentArchiveBlocked409": true,
+    "agentArchiveAfterSessionArchive": true,
+    "agentDeleteArchived": true,
+    "concurrentProjectionMatchesLedger": true
+  }
+}
