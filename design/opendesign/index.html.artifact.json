@@ -5,9 +5,11 @@
   "entry": "index.html",
   "renderer": "html",
   "status": "complete",
-  "exports": ["html"],
+  "exports": [
+    "html"
+  ],
   "createdAt": "2026-11-21T15:08:37.000Z",
-  "updatedAt": "2026-11-21T16:33:55.000Z",
+  "updatedAt": "2026-11-21T17:42:53.000Z",
   "metadata": {
     "inferred": true
   }
