@@ -42,7 +42,7 @@ Integrate（rebase/squash）→ alpha 部署 → Verify → Archive
 
 | # | 切片 | owner | 文件范围（主） | 依赖 | 验收命令 | 状态 |
 |---|---|---|---|---|---|---|
-| P0 | 产品设计 | product-manager + OpenDesign | `design/`；OpenDesign 项目 | D0 | 设计评审通过（方向/IA/五态/原型） | 待做 |
+| P0 | 产品设计 | product-manager + OpenDesign | `design/`；OpenDesign 项目 | D0 | 2–3 个方向 + seed challenger；独立 fresh-context 视觉评审；Owner 选定后才实现 | 待做 |
 | L1 | Schema + 领域模型 | slow-agent | `internal/store/schema.sql`、`internal/store/{accounts,bots,team_bots,permissions,relations,bot_keys}.go`、`internal/botteam/` | D0 | `go build ./...`、`go vet ./...`、`go test -count=1 ./internal/store ./internal/botteam` | **进行中** |
 | L2 | 认证 | slow-agent | `cmd/keel/auth*.go`、`internal/auth/`、`internal/httpapi/auth*`、`cmd/keel/admin*` | L1 | L2 包测试 + 登录/bootstrap/CSRF/限速 E2E | 待做 |
 | L3 | 权限引擎 | slow-agent | `internal/access/`、`internal/httpapi/access*`、`internal/toolsurface/access*` | L1 | registry 覆盖率门 + 并集/scope/关系/`grant ⊆ own` 测试 | 待做 |
