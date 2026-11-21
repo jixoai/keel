@@ -382,3 +382,23 @@ PI 技术包保留原名，并在 `docs/ARCHITECTURE.md` 写明例外：
 | 无人值守提权 | `grant ⊆ own` + `bot.invoke` 高危授予 + 触发器创建审计 |
 | 旧数据丢失 | alpha 明确零兼容：清空重建（L19）；旧库拒绝启动；备份由部署方负责 |
 | Role/权限概念再次混淆 | Role 只读不授权；权限只在 Account/Harness；文档与 UI 文案钉死 |
+
+## 9. A1 实现裁决（2026-11-21，已接受）
+
+1. **ID 类型混合**：account/role/profile/group/grant 用 uuid；bot/team_bot 用 text handle
+   （`support-1`，与旧 agent id 语法和产品展示一致）；`resource_relations.resource_id/subject_id`
+   用 text，以同一张关系表同时命名 uuid 资源与 text 资源。
+2. **TeamBot hash 不含 archived**：归档是生命周期而非内容；`ArchiveTeamBot` 不产生 stale hash。
+   与旧 `agentteam` 把 archived 纳入 hash 不同，已在代码注释说明。
+3. **`auth_sessions`/`auth_events` 仅建表 + RLS**：A2 增加持久化方法，A1 不越界。
+4. **删除语义**：accounts 用 `disabled_at`；bots/team_bots 用 `archived`；roles/profiles/
+   permission_groups 硬删除，被引用时 FK 返回 `ErrConflict`。
+5. **权限授权单一化**：`permission_grants` 只用于**直接账号授权**（`subject_type=account`）；
+   组授权只用 `permission_group_grants`。A3 store/API 必须拒绝 `subject_type=group` 的直接
+   grant，避免两套组授权真值。
+6. **`permission_grants` 多态 subject 无 FK**：A3 evaluator 对无法解析的 subject MUST fail closed；
+   A3 增加引用校验/测试。
+7. **`permission_groups` 租户内 `lower(name)` 唯一**：接受，避免同名组。
+8. **`model_kind` 无 DB CHECK**：词汇由 `internal/botteam` 校验，保持可扩展；
+   `accounts.kind` 有 DB CHECK。
+9. **`permission_keys` 不建表**：A3 代码内 registry 是唯一真源。

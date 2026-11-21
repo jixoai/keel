@@ -18,18 +18,19 @@
 
 ## A1 Schema 与领域模型
 
-- [ ] 新表：`accounts` / `roles` / `profiles` / `bots` / `team_bots` /
-      `permission_keys`（可选，registry 可代码内）/ `permission_groups` /
-      `permission_group_members` / `permission_group_grants` / `permission_grants` /
-      `resource_relations` / `auth_sessions` / `auth_events`
-- [ ] 旧表退役：`agents` / `agent_teams` / `api_keys`；不保留兼容视图
+- [x] 新表：`accounts` / `roles` / `profiles` / `bots` / `team_bots` /
+      `permission_groups` / `permission_group_members` / `permission_group_grants` /
+      `permission_grants` / `resource_relations` / `auth_sessions` / `auth_events` /
+      `bot_api_keys`（`permission_keys` 不建表，A3 用代码内 registry）
+- [ ] 旧表退役：`agents` / `agent_teams` / `api_keys`；不保留兼容视图（A4/A5）
 - [ ] 重命名：`agents`→`bots`、`agent_teams`→`team_bots`、`/v1/agents`→`/v1/bots`、
       `keel agent`→`keel bot`；产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、
-      `agentext`→`harnessext`；PI 技术包保留（L16）
-- [ ] `sessions` 增 `bot_id` / `account_id` / `created_by_account_id`；旧数据清空（L19）
-- [ ] RLS：所有新表 ENABLE/FORCE ROW LEVEL SECURITY + tenant policy；目录级测试
-- [ ] 领域包：`Bot` / `TeamBot` / `Account` / `Role` / `Profile` 纯数据 + 校验 + 规范化
-- [ ] 架构测试：kernel 不 import access/accounts/bots
+      `agentext`→`harnessext`；PI 技术包保留（L16）（A4/A5）
+- [x] `sessions` 增可空 `bot_id` / `account_id` / `created_by_account_id` / `team_bot_id`；
+      旧数据清空、非空收口在 A4（L19）
+- [x] RLS：所有新表 ENABLE/FORCE ROW LEVEL SECURITY + tenant policy；目录级测试
+- [x] 领域包：`Bot` / `TeamBot` / `Account` / `Role` / `Profile` 纯数据 + 校验 + 规范化
+- [x] 架构测试：kernel 不 import access/accounts/bots
 
 ## A2 认证
 
