@@ -894,11 +894,18 @@ func (e *TriggerEngine) createOwnedSession(ctx context.Context, ownership Trigge
 // the caller; the key is not remembered as fired, so a retry after the Bot is
 // fixed can still succeed.
 func (e *TriggerEngine) refuseFire(rt *triggerRuntime, id string, req FireRequest, botID string, err error) (FireResult, error) {
+	// A manual refusal still records who asked; the Bot account is unknown when
+	// the Bot itself is the reason for the refusal.
+	createdBy := ""
+	if req.Reason == "manual" && req.CreatedByAccountID != uuid.Nil {
+		createdBy = req.CreatedByAccountID.String()
+	}
 	result := FireResult{
 		TriggerID:      id,
 		Status:         "refused",
 		IdempotencyKey: req.IdempotencyKey,
 		BotID:          botID,
+		CreatedBy:      createdBy,
 		Error:          err.Error(),
 	}
 	e.record(rt, AuditEntry{
@@ -908,6 +915,7 @@ func (e *TriggerEngine) refuseFire(rt *triggerRuntime, id string, req FireReques
 		IdempotencyKey: req.IdempotencyKey,
 		BotID:          botID,
 		Status:         result.Status,
+		CreatedBy:      createdBy,
 		Error:          result.Error,
 	})
 	return result, err

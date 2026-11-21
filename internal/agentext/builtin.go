@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/testkit"
 )
@@ -67,6 +69,14 @@ func NewExamplePlugin(opts ExamplePluginOptions) *Plugin {
 	if prompt == "" {
 		prompt = "Example plugin ping: confirm the extension surface is live."
 	}
+	// The example trigger is bound to the serve tenant when one is configured,
+	// so its Bot is validated at registration and the trigger is visible in
+	// that tenant's GET /v1/triggers. A zero tenant leaves it tenantless (the
+	// fire resolves the handle inside the caller's tenant).
+	triggerTenant := ""
+	if parsed, err := uuid.Parse(opts.TenantID); err == nil && parsed != uuid.Nil {
+		triggerTenant = parsed.String()
+	}
 	triggers := make([]TriggerSpec, 0, 2)
 	if botID := strings.TrimSpace(opts.BotID); botID != "" {
 		triggers = append(triggers, TriggerSpec{
@@ -74,6 +84,7 @@ func NewExamplePlugin(opts ExamplePluginOptions) *Plugin {
 			Kind:             TriggerWebhook,
 			Prompt:           prompt,
 			BotID:            botID,
+			TenantID:         triggerTenant,
 			Enabled:          true,
 			Owner:            ExamplePluginID,
 			Schedule:         "",
