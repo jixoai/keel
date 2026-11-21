@@ -247,6 +247,29 @@ func TestAuthorizeResourceRelations(t *testing.T) {
 	}
 }
 
+func TestAuthorizeUsesGroupGrants(t *testing.T) {
+	resource := resourceOf(tenantOne, "session", "s-1")
+	grants := &fakeGrantSource{group: map[uuid.UUID][]Grant{
+		accountAlice: {grantOf(KeySessionRead, ScopeTeam)},
+	}}
+	relations := newFakeRelationSource()
+	relations.put(resource, RelationViewer, SubjectTypeGroup, groupSupport.String())
+	relations.groups[groupSupport.String()] = map[string]bool{accountAlice.String(): true}
+	authorizer := newTestAuthorizer(t, grants, relations)
+
+	decision, err := authorizer.Authorize(context.Background(),
+		Principal{TenantID: tenantOne, AccountID: accountAlice}, KeySessionRead, resource)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if !decision.Allow || decision.Scope != ScopeTeam {
+		t.Fatalf("decision = %s, want allow at team scope", decision)
+	}
+	if grants.groupCalls != 1 {
+		t.Fatalf("group grant source calls = %d, want 1", grants.groupCalls)
+	}
+}
+
 func TestAuthorizeUnresolvedSubjectFailsClosed(t *testing.T) {
 	resource := resourceOf(tenantOne, "session", "s-1")
 	grants := &fakeGrantSource{direct: map[uuid.UUID][]Grant{

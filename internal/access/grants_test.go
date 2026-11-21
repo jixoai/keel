@@ -40,6 +40,19 @@ func (s *fakeGrantSource) GroupGrants(ctx context.Context, tenantID, accountID u
 	return append([]Grant(nil), s.group[accountID]...), nil
 }
 
+func TestEveryCatalogKeyValidatesItsAllowedScopes(t *testing.T) {
+	for _, spec := range All() {
+		if len(spec.AllowedScopes) == 0 {
+			t.Fatalf("key %q has no allowed scopes", spec.Key)
+		}
+		for _, scope := range spec.AllowedScopes {
+			if err := ValidateGrant(Grant{Key: spec.Key, Scope: scope}); err != nil {
+				t.Fatalf("catalog pair (%q, %q) rejected: %v", spec.Key, scope, err)
+			}
+		}
+	}
+}
+
 func TestEffectiveGrantsUnionTakesMax(t *testing.T) {
 	source := &fakeGrantSource{
 		direct: map[uuid.UUID][]Grant{
@@ -208,6 +221,9 @@ func TestCanGrantSuperAdmin(t *testing.T) {
 	var rejection *GrantRejection
 	if !errors.As(err, &rejection) || rejection.Reason != ReasonUnknownKey {
 		t.Fatalf("unknown-key rejection = %v", err)
+	}
+	if err := CanGrant(grantor, []Grant{grantOf(KeyAccountManage, ScopeOwn)}); err == nil {
+		t.Fatal("super admin granted a scope the key does not allow")
 	}
 }
 
