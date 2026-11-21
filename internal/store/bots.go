@@ -75,6 +75,17 @@ func (s *Store) CreateBotWithOwner(ctx context.Context, record BotRecord, ownerA
 		return BotRecord{}, identityWriteError("create bot", err)
 	}
 	defer tx.Rollback(ctx)
+	// The handler decided ownerAccountID from an earlier read. Re-read the
+	// profile under a share lock so a concurrent profile rebind either commits
+	// before this check (we see it and refuse) or waits until this transaction
+	// ends (then it moves the new bot too).
+	profileAccount, err := lockProfileAccount(ctx, tx, record.TenantID, record.ProfileID)
+	if err != nil {
+		return BotRecord{}, err
+	}
+	if profileAccount != ownerAccountID {
+		return BotRecord{}, conflictIdentity("create bot", "profile owner changed concurrently")
+	}
 	created, err := scanBotRow(tx.QueryRow(ctx,
 		`INSERT INTO bots
 		    (tenant_id, bot_id, name, profile_id, model_kind, default_model, harness, archived)
@@ -115,6 +126,18 @@ func (s *Store) UpdateBotWithOwner(ctx context.Context, record BotRecord, expect
 		return BotRecord{}, identityWriteError("update bot", err)
 	}
 	defer tx.Rollback(ctx)
+	if newOwner != uuid.Nil {
+		// Same lock/check as CreateBotWithOwner: the new owner came from an
+		// earlier profile read, and a concurrent rebind must not leave this Bot
+		// pointing at an account its profile no longer names.
+		profileAccount, err := lockProfileAccount(ctx, tx, record.TenantID, record.ProfileID)
+		if err != nil {
+			return BotRecord{}, err
+		}
+		if profileAccount != newOwner {
+			return BotRecord{}, conflictIdentity("update bot", "profile owner changed concurrently")
+		}
+	}
 	updated, err := scanBotRow(tx.QueryRow(ctx,
 		`UPDATE bots
 		    SET name = $3, profile_id = $4, model_kind = $5,
@@ -265,6 +288,21 @@ func (s *Store) ArchiveBot(ctx context.Context, tenantID uuid.UUID, botID string
 		return err
 	}
 	return nil
+}
+
+// lockProfileAccount reads a profile's account under a share lock. The owner a
+// caller wants to write came from an earlier profile read; this lock plus the
+// equality check in the caller closes the window where a concurrent profile
+// rebind commits between that read and the bot write.
+func lockProfileAccount(ctx context.Context, tx pgx.Tx, tenantID, profileID uuid.UUID) (uuid.UUID, error) {
+	var accountID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT account_id FROM profiles
+		  WHERE tenant_id = $1 AND profile_id = $2
+		  FOR SHARE`, tenantID, profileID).Scan(&accountID); err != nil {
+		return uuid.Nil, identityWriteError("lock profile", err)
+	}
+	return accountID, nil
 }
 
 func validateBotRecord(record BotRecord) error {

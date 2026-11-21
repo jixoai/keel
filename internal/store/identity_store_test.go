@@ -619,3 +619,36 @@ func TestBotAPIKeysStore(t *testing.T) {
 		t.Fatalf("foreign keys = %+v err=%v", keys, err)
 	}
 }
+
+// TestBotOwnerBindingRejectsStaleProfileAccount pins the profile-share lock: a
+// caller whose owner came from an earlier profile read cannot write a bot owner
+// that the profile no longer names. This closes the create/rebind race without
+// putting profile reads in the handler's transaction.
+func TestBotOwnerBindingRejectsStaleProfileAccount(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	owner, _, profile, _ := identityFixture(t, st)
+	other, err := st.CreateAccount(ctx, AccountRecord{
+		TenantID: owner.TenantID, ID: uuid.New(),
+		Username: "other-" + owner.TenantID.String()[:8], DisplayName: "Other", Kind: "human",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := BotRecord{
+		TenantID: owner.TenantID, ID: "stale-" + owner.TenantID.String()[:8],
+		Name: "Stale", ProfileID: profile.ID, ModelKind: "text",
+		DefaultModel: json.RawMessage(`{"providerId":"fake","modelId":"fake"}`),
+		Harness:      json.RawMessage(`{"tools":[],"context":{"permissions":[]}}`),
+	}
+	if _, err := st.CreateBotWithOwner(ctx, record, other.ID, owner.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale owner create err = %v, want ErrConflict", err)
+	}
+	bot, err := st.CreateBotWithOwner(ctx, record, owner.ID, owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateBotWithOwner(ctx, bot, false, other.ID, owner.ID, owner.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale owner update err = %v, want ErrConflict", err)
+	}
+}
