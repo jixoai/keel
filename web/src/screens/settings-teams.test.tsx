@@ -161,6 +161,9 @@ test("TUI: 团队——保存中：字段与按钮锁定，保存按钮带进行
   // gone while the request owns the dialog.
   expect(app.shows("label:关闭")).toBe(false);
   expect(app.shows("id:team-dialog")).toBe(true);
+  // The harness holds the response until this event: the assertions above ran
+  // inside the saving state, not inside a wall-clock window.
+  await app.host.send("harness.release-save");
   await app.waitFor("id:team-dialog", { state: "gone" });
   await app.waitFor("id:team-card-team_new_1");
 });

@@ -5,7 +5,8 @@
 // The scenario comes from the launch parameters (`host.params.scenario`):
 // `list` (two teams), `empty`, `loading` (the team read never settles),
 // `error` (500), `permission` (403), `refuse` (the member/team write is
-// refused), `slow` (a write takes long enough to observe the saving state),
+// refused), `slow` (a write stays pending until the test sends
+// `harness.release-save`, so the saving state is observed without a timer),
 // `referenced` (a team delete is refused), `no-captain` (a team document whose
 // captain seat is empty), `agents-loading` / `agents-error` / `agents-empty`
 // (the canvas member library's own states), `no-manifest` (no keel.team CLI
@@ -35,8 +36,19 @@ const empty = (): Response => new Response(null, { status: 204 });
 /** A response that never arrives: the section stays in its first read. */
 const pending = (): Promise<Response> => new Promise<Response>(() => {});
 
-const settleSlowly = (response: Response): Promise<Response> =>
-  new Promise((resolve) => setTimeout(() => resolve(response), 350));
+/** A write held open until the test says so: after `app.host.send
+ * ("harness.release-save")`, no wall-clock window decides whether the saving
+ * state is still on screen. */
+let heldSave: (() => void) | null = null;
+const holdSave = (response: Response): Promise<Response> =>
+  new Promise((resolve) => {
+    heldSave = () => resolve(response);
+  });
+const releaseHeldSave = () => {
+  const release = heldSave;
+  heldSave = null;
+  release?.();
+};
 
 const seedAgents = (): AgentView[] => [
   { id: "agent_design", name: "设计师", description: "负责界面与品牌视觉", avatar: { kind: "identicon", seed: "agent_design" } },
@@ -205,7 +217,7 @@ const stub: FetchLike = async (input, init) => {
     const request = JSON.parse(bodyText) as AgentTeamWriteRequest;
     const created = teamFrom(`team_new_${++sequence}`, request);
     teams = [...teams, created];
-    return scenario() === "slow" ? settleSlowly(respond(201, created)) : respond(201, created);
+    return scenario() === "slow" ? holdSave(respond(201, created)) : respond(201, created);
   }
 
   if (method === "PUT" && input.startsWith("/v1/teams/")) {
@@ -302,6 +314,15 @@ if (scenario() === "plugins-permission") {
   store.plugins.set(seedPlugins());
 }
 store.setAgentTeamTransport(new KeelHttp("", stub));
+if (scenario() === "slow") {
+  // The test plays the embedding app (`app.host.send`), so the held write can
+  // be released exactly when its assertions are done.
+  try {
+    host.on("harness.release-save", releaseHeldSave);
+  } catch {
+    /* a host without listeners: the write stays held until the test ends */
+  }
+}
 
 function Harness() {
   return (
