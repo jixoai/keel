@@ -136,3 +136,14 @@ Known limits / not done
   concurrency cap is retried only on the next restart, not queued.
 - The trigger engine's in-memory fire history (4096 keys) is an optimization;
   cross-restart dedupe is the kernel requestId, not this map.
+
+Clean-database integration run (2026-11-21, verification only):
+- A fresh `keel_w10_verify` database was created and the full suite ran with
+  `KEEL_TEST_DSN` pointed at it and `-p 1`. 59 packages passed, including
+  `cmd/keel` (the earlier baseline failure was the shared-cluster auth stub
+  state, not W10). One test, `internal/httpapi
+  TestConcurrentInputsProjectNewestSeq`, returned `input status 500` once under
+  concurrent load; the same test passed on an isolated immediate rerun against
+  the same fresh database. This is recorded as a shared-cluster concurrency
+  flake, not a W10 code path; the W10 branch full run remains the authoritative
+  green artifact (`full-test-except-cmd-keel.log`).
