@@ -358,8 +358,8 @@ func TestTriggerCatchUpAfterRestartAndCursor(t *testing.T) {
 	waitFor(t, 3*time.Second, func() bool { return starter.count() >= 2 }, "catch-up fires")
 	waitFor(t, 3*time.Second, func() bool {
 		status, _ := engine.Get("catchup.tick")
-		return status.Skipped >= 1
-	}, "skipped audit")
+		return status.Skipped >= 1 && status.Fires >= 2
+	}, "skipped audit and both replays")
 	status, _ := engine.Get("catchup.tick")
 	if status.LastScheduledAt == nil || !status.LastScheduledAt.After(seed) {
 		t.Fatalf("cursor did not advance: %+v", status.LastScheduledAt)
