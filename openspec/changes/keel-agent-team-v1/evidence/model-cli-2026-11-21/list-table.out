@@ -1,0 +1,11 @@
+ID          NAME              TYPE  MODELS  EXECUTABLE  SELECTABLE
+s2api       S2API             llm   1       yes         no
+a6api       A6API             llm   1       yes         no
+deepseek    DeepSeek          llm   3       yes         no
+anthropic   Anthropic         llm   1       yes         no
+openai      OpenAI            llm   1       yes         no
+openrouter  OpenRouter        llm   1       yes         no
+ollama      Ollama            llm   1       yes         no
+stub        Stub Provider     llm   2       yes         yes
+noauth      No Auth Provider  llm   1       yes         no
+dead        Dead Provider     llm   1       yes         yes

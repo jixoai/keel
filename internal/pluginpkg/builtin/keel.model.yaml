@@ -36,6 +36,69 @@ provides:
       idempotent: true
       callable_by: [ui, agent]
       examples: ["keel model providers", "keel model providers --json"]
+    - path: [model, provider, list]
+      summary: "List every configured provider with its family, executable state and model count."
+      description: "Reads GET /v1/providers — the resolved settings projection. It shows no credential material; a provider whose credential this process cannot resolve stays visible with its issue, so an operator can read why it is unavailable. --type filters the printed rows only; it does not resolve or validate a provider family (the family vocabulary is plugin-declared and open). It does not edit configuration: the settings page and the provider write subset are the document's only writers."
+      args_schema:
+        type: object
+        properties:
+          type:
+            type: string
+            description: "only providers of this family (presentation filter; plugin-declared, open vocabulary)"
+          json:
+            type: boolean
+            description: "print the raw response instead of a table"
+      output_schema:
+        type: object
+        properties:
+          providers:
+            type: array
+            items:
+              type: object
+              properties:
+                providerId: { type: string }
+                name: { type: string }
+                providerType: { type: string }
+                executable: { type: boolean }
+                selectable: { type: boolean }
+          issues:
+            type: array
+        required: [providers]
+      permissions: [model.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model provider list", "keel model provider list --type image"]
+    - path: [model, provider, show]
+      summary: "Show one configured provider's full resolved view as JSON."
+      description: "Reads GET /v1/providers and prints the named provider's resolved view: identity, family, session surface, visibility, API type/base URL, credential references (env name or secret reference only — never a value), its models and issues, and the executable/selectable flags. A hidden or unknown provider is a miss, never an empty success. Referencing agents/teams are surfaced by the remove refusal (the deletion-protection path), not invented here."
+      args_schema:
+        type: object
+        properties:
+          id:
+            type: string
+            description: "provider id"
+        required: [id]
+      output_schema:
+        type: object
+        properties:
+          providerId: { type: string }
+          name: { type: string }
+          providerType: { type: string }
+          surfaceKind: { type: string }
+          visibility: { type: string }
+          api: { type: object }
+          access: { type: object }
+          models: { type: array }
+          issues: { type: array }
+          executable: { type: boolean }
+          selectable: { type: boolean }
+        required: [providerId]
+      permissions: [model.read]
+      danger: read
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model provider show s2api", "keel model provider show magpie --json"]
     - path: [model, list]
       summary: "List the flat model registry: provider/model, family, session surface, selectability."
       description: "Reads GET /v1/models — the executable registry projection. It includes complete, enabled models that are not session-selectable (a decision model carries selectable=false) so the whole capability surface is visible. It does not filter by what a picker would offer; that filter is the client's."
@@ -182,8 +245,8 @@ provides:
       callable_by: [ui]
       examples: ["keel model provider remove magpie"]
     - path: [model, provider, test]
-      summary: "Probe one provider's resolved state: executable, models, issues."
-      description: "Reads the server's own resolved projections (GET /v1/providers and GET /v1/models) and reports the provider's family, executable/selectable state, its issues and every model it serves with that model's enabled/executable/selectable state. It never calls the upstream provider: no request leaves the server for a probe, so it costs nothing and is safe to repeat. Exit status is 0 only when the provider is executable with an enabled, executable model."
+      summary: "Probe one provider with one real minimal upstream request."
+      description: "Asks the server to send one minimal model-list request (GET /models, or /v1/models for Anthropic) with the provider's resolved credential and reports the measured health: ready (authenticated and answered), needs_auth (no credential could be resolved — nothing was sent), unreachable (a request was sent and failed), or invalid_config (the provider is incomplete on paper — nothing was sent). The credential is resolved on the server and never appears in the output; a probe that did not reach the provider never reports success. The in-process demo protocol answers without a network request. Safe to repeat: no configuration is written."
       args_schema:
         type: object
         properties:
@@ -195,16 +258,49 @@ provides:
         properties:
           providerId: { type: string }
           providerType: { type: string }
-          executable: { type: boolean }
-          selectable: { type: boolean }
+          apiType: { type: string }
+          endpoint: { type: string }
+          ok: { type: boolean }
+          status:
+            type: string
+            enum: [ready, needs_auth, unreachable, invalid_config]
+          latencyMs: { type: integer }
+          modelCount: { type: integer }
+          models: { type: array, items: { type: string } }
+          error: { type: string }
+          issues: { type: array }
+        required: [providerId, ok, status]
+      permissions: [model.read]
+      danger: write
+      idempotent: true
+      callable_by: [ui, agent]
+      examples: ["keel model provider test s2api", "keel model provider test magpie --json"]
+    - path: [model, catalog]
+      summary: "Read one provider's model catalog (live upstream list with --refresh)."
+      description: "Reads GET /v1/providers and prints the named provider's resolved model catalog — every model with its family, session surface, enabled/executable/selectable state and issues — or, with no provider id, every visible provider's models. --refresh asks the server to re-fetch the provider's live lineup with one minimal upstream request (the same probe `model provider test` uses) and prints those ids instead of the resolved view; it needs a provider id and never writes configuration. Credentials never appear: the CLI only sees the server-resolved projection or the discovered ids."
+      args_schema:
+        type: object
+        properties:
+          provider_id:
+            type: string
+            description: "provider id; omit to read every visible provider's resolved catalog"
+          refresh:
+            type: boolean
+            description: "re-fetch the provider's live model list (requires a provider id)"
+          json: { type: boolean }
+      output_schema:
+        type: object
+        properties:
+          providerId: { type: string }
+          source:
+            type: string
+            enum: [resolved, upstream]
           models: { type: array }
           issues: { type: array }
-          ok: { type: boolean }
-        required: [providerId, ok]
       permissions: [model.read]
       danger: read
       idempotent: true
       callable_by: [ui, agent]
-      examples: ["keel model provider test s2api", "keel model provider test magpie --json"]
+      examples: ["keel model catalog s2api", "keel model catalog s2api --refresh --json"]
 source:
   type: builtin

@@ -1,0 +1,15 @@
+{
+  "providerId": "stub",
+  "providerType": "llm",
+  "apiType": "openai-chat-completions",
+  "endpoint": "http://127.0.0.1:13661/v1",
+  "ok": true,
+  "status": "ready",
+  "latencyMs": 1,
+  "modelCount": 3,
+  "models": [
+    "stub-model-a",
+    "stub-model-b",
+    "stub-model-live"
+  ]
+}

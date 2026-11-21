@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"text/tabwriter"
 
@@ -53,6 +54,8 @@ func runModelCmd(args []string, stdout, stderr io.Writer) int {
 		return runModelList(args[1:], stdout, stderr)
 	case "show":
 		return runModelShow(args[1:], stdout, stderr)
+	case "catalog":
+		return runModelCatalog(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		modelUsage(stdout)
 		return 0
@@ -67,9 +70,12 @@ func modelUsage(w io.Writer) {
 	fmt.Fprint(w, `keel model — read the model registry, and manage its provider entries
 
 Usage:
-  keel model providers [--json]
+  keel model providers [--json]                 (alias of: keel model provider list)
   keel model list [--json]
   keel model show <providerId>/<modelId>
+  keel model catalog [<providerId>] [--refresh] [--json]
+  keel model provider list [--json]
+  keel model provider show <id>
   keel model provider add <id> [flags]
   keel model provider update <id> [flags]
   keel model provider remove <id> [--repoint-selection <providerId>/<modelId>]
@@ -79,10 +85,15 @@ Commands:
   providers   every configured provider: family, executable state, model count
   list        the flat model registry: family, session panel, selectability
   show        one model by "provider/model" (a bare model id must be unique)
-  provider add      declare a provider entry in the tenant models document
-  provider update   edit one entry (or start a patch of a catalog provider)
-  provider remove   drop one entry the document declares (reference protected)
-  provider test     probe one provider's resolved state: executable, models, issues
+  catalog     one provider's resolved model catalog (or the live upstream
+              catalog with --refresh, which sends one model-list request)
+  provider list      list the configured providers (same data as providers)
+  provider show      print one provider's full resolved view as JSON
+  provider add       declare a provider entry in the tenant models document
+  provider update    edit one entry (or start a patch of a catalog provider)
+  provider remove    drop one entry the document declares (reference protected)
+  provider test      probe one provider for real: one minimal upstream
+                     model-list request through the server's credential
 
 Provider flags:
   --name <display name>     display name
@@ -106,7 +117,9 @@ Common flags:
 The write subset edits the tenant models document (PUT /v1/settings/models,
 revision guarded): that document is the one provider write path this deployment
 serves. Credentials are only ever references (env names, secret refs); the CLI
-neither accepts nor prints a value.
+neither accepts nor prints a value. `+"`provider test`"+` and `+"`catalog --refresh`"+`
+ask the server to make one minimal upstream request, so the credential is
+resolved on the server and never travels through the CLI.
 Authentication: KEEL_SERVE_PASSWORD is exchanged for the session cookie
 (POST /v1/auth/login); it is never taken from a flag and never printed.
 `)
@@ -150,6 +163,81 @@ func runModelProviders(args []string, stdout, stderr io.Writer) int {
 	}
 	printProviderTable(stdout, body.Providers)
 	return 0
+}
+
+// runModelProviderList is `keel model provider list`: the same resolved
+// settings projection as `keel model providers`, with an optional family
+// filter. Filtering is presentation only; the server's projection stays the
+// single source of what a provider is.
+func runModelProviderList(args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("keel model provider list", stderr)
+	server, asJSON := commonFlags(fs)
+	family := fs.String("type", "", "only providers of this family (llm, image, tts, ...)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	client, err := newCLIClient(*server)
+	if err != nil {
+		return reportError(stderr, err)
+	}
+	var body providerListBody
+	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &body); err != nil {
+		return reportError(stderr, err)
+	}
+	if wanted := strings.TrimSpace(*family); wanted != "" {
+		filtered := make([]modelcfg.ProviderView, 0, len(body.Providers))
+		for _, view := range body.Providers {
+			if strings.EqualFold(view.ProviderType, wanted) {
+				filtered = append(filtered, view)
+			}
+		}
+		body.Providers = filtered
+	}
+	if *asJSON {
+		if err := printJSON(stdout, body); err != nil {
+			return reportError(stderr, err)
+		}
+		return 0
+	}
+	printProviderTable(stdout, body.Providers)
+	return 0
+}
+
+// runModelProviderShow prints one provider's full resolved view as JSON: the
+// same facts the settings page renders, with credential *references* only.
+// A missing (or hidden) id is a miss, never an empty success.
+func runModelProviderShow(args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("keel model provider show", stderr)
+	server, _ := commonFlags(fs)
+	positional, err := parseInterleaved(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(positional) != 1 || strings.TrimSpace(positional[0]) == "" {
+		fmt.Fprintln(stderr, "usage: keel model provider show <id>")
+		return 2
+	}
+	providerID := strings.TrimSpace(positional[0])
+	client, err := newCLIClient(*server)
+	if err != nil {
+		return reportError(stderr, err)
+	}
+	var body providerListBody
+	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &body); err != nil {
+		return reportError(stderr, err)
+	}
+	for _, view := range body.Providers {
+		if view.ProviderID != providerID {
+			continue
+		}
+		if err := printJSON(stdout, view); err != nil {
+			return reportError(stderr, err)
+		}
+		return 0
+	}
+	fmt.Fprintf(stderr,
+		"keel model provider show: this server does not serve a provider %q (see keel model provider list)\n", providerID)
+	return 1
 }
 
 func runModelList(args []string, stdout, stderr io.Writer) int {
@@ -235,6 +323,124 @@ func matchModels(models []modelcfg.ModelView, query string) []modelcfg.ModelView
 		}
 	}
 	return out
+}
+
+// --- catalog -----------------------------------------------------------------
+
+// catalogBody is the resolved catalog answer: the server's own model views.
+// source is always "resolved" — the projection was assembled from the tenant
+// document plus the built-in catalog, not fetched from an upstream.
+type catalogBody struct {
+	ProviderID string               `json:"providerId,omitempty"`
+	Source     string               `json:"source"`
+	Models     []modelcfg.ModelView `json:"models"`
+	Issues     []modelcfg.Issue     `json:"issues,omitempty"`
+}
+
+// catalogRefreshBody is the live answer of `--refresh`: the upstream model ids
+// the probe discovered, plus the measured latency. It is deliberately not the
+// resolved view: refresh exists to see the provider's current lineup.
+type catalogRefreshBody struct {
+	ProviderID string   `json:"providerId"`
+	Source     string   `json:"source"`
+	LatencyMS  int64    `json:"latencyMs"`
+	Models     []string `json:"models"`
+}
+
+// runModelCatalog prints one provider's model catalog. Without --refresh it
+// reads the resolved projection (the same facts the settings page and the
+// picker read); with --refresh it asks the server to re-fetch the provider's
+// live model list and prints that. A provider id is required for --refresh:
+// refreshing every provider at once would multiply upstream calls the operator
+// did not ask for.
+func runModelCatalog(args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("keel model catalog", stderr)
+	server, asJSON := commonFlags(fs)
+	refresh := fs.Bool("refresh", false, "re-fetch the provider's live model list from upstream")
+	positional, err := parseInterleaved(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(positional) > 1 {
+		fmt.Fprintln(stderr, "usage: keel model catalog [<providerId>] [--refresh]")
+		return 2
+	}
+	providerID := ""
+	if len(positional) == 1 {
+		providerID = strings.TrimSpace(positional[0])
+	}
+	if *refresh && providerID == "" {
+		fmt.Fprintln(stderr, "keel model catalog: --refresh needs a provider id (one upstream request per provider)")
+		return 2
+	}
+	client, err := newCLIClient(*server)
+	if err != nil {
+		return reportError(stderr, err)
+	}
+	if *refresh {
+		var probe modelcfg.ProviderProbe
+		if err := client.do(http.MethodPost, "/v1/providers/"+url.PathEscape(providerID)+"/test", "", nil, &probe); err != nil {
+			return reportError(stderr, err)
+		}
+		if !probe.OK {
+			printProviderProbe(stderr, probe)
+			return 1
+		}
+		answer := catalogRefreshBody{
+			ProviderID: probe.ProviderID,
+			Source:     "upstream",
+			LatencyMS:  probe.LatencyMS,
+			Models:     probe.Models,
+		}
+		if *asJSON {
+			if err := printJSON(stdout, answer); err != nil {
+				return reportError(stderr, err)
+			}
+			return 0
+		}
+		tw := tabwriter.NewWriter(stdout, 2, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "PROVIDER/MODEL\tSOURCE")
+		for _, modelID := range answer.Models {
+			fmt.Fprintf(tw, "%s/%s\tupstream\n", answer.ProviderID, modelID)
+		}
+		_ = tw.Flush()
+		return 0
+	}
+
+	var providers providerListBody
+	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &providers); err != nil {
+		return reportError(stderr, err)
+	}
+	answer := catalogBody{ProviderID: providerID, Source: "resolved", Models: make([]modelcfg.ModelView, 0)}
+	if providerID == "" {
+		for _, view := range providers.Providers {
+			answer.Models = append(answer.Models, view.Models...)
+		}
+	} else {
+		found := false
+		for _, view := range providers.Providers {
+			if view.ProviderID != providerID {
+				continue
+			}
+			found = true
+			answer.Models = append(answer.Models, view.Models...)
+			answer.Issues = append(answer.Issues, view.Issues...)
+			break
+		}
+		if !found {
+			fmt.Fprintf(stderr,
+				"keel model catalog: this server does not serve a provider %q (see keel model provider list)\n", providerID)
+			return 1
+		}
+	}
+	if *asJSON {
+		if err := printJSON(stdout, answer); err != nil {
+			return reportError(stderr, err)
+		}
+		return 0
+	}
+	printModelTable(stdout, answer.Models)
+	return 0
 }
 
 // --- rendering ----------------------------------------------------------------
@@ -459,6 +665,10 @@ func runModelProviderCmd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "list":
+		return runModelProviderList(args[1:], stdout, stderr)
+	case "show":
+		return runModelProviderShow(args[1:], stdout, stderr)
 	case "add":
 		return runModelProviderAdd(args[1:], stdout, stderr)
 	case "update":
@@ -471,35 +681,40 @@ func runModelProviderCmd(args []string, stdout, stderr io.Writer) int {
 		modelProviderUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "keel model provider: unknown command %q (add|update|remove|test)\n\n", args[0])
+		fmt.Fprintf(stderr, "keel model provider: unknown command %q (list|show|add|update|remove|test)\n\n", args[0])
 		modelProviderUsage(stderr)
 		return 2
 	}
 }
 
 func modelProviderUsage(w io.Writer) {
-	fmt.Fprint(w, `keel model provider — manage the tenant models document's provider entries
+	fmt.Fprint(w, `keel model provider — read the provider registry, and manage its document entries
 
 Usage:
+  keel model provider list [--json]
+  keel model provider show <id>
   keel model provider add <id> [flags]
   keel model provider update <id> [flags]
-  keel model provider remove <id>
+  keel model provider remove <id> [--repoint-selection <providerId>/<modelId>]
   keel model provider test <id> [--json]
 
-Read the registry with `+"`keel model providers`"+` and `+"`keel model list`"+`.
+Read the registry with `+"`keel model provider list`"+` and `+"`keel model list`"+`;
+read one provider's model catalog with `+"`keel model catalog <id>`"+`.
 
 Flags: keel model --help lists the provider flags (--name, --type, --api-type,
 --base-url, --env, --ref, --model, --header, --visibility), plus --server and
 --json. The document is written with the revision guard, and the server is the
 only authority on what the resulting configuration may be: a rejected write
-prints the server's field-level issues.
+prints the server's code and field-level issues.
 
 remove refuses a provider an agent or a team still binds (the refusal lists the
 referrers): repoint those bindings, or disable the provider instead. When the
-document's default selection names the provider being removed, --repoint-selection
-must name its replacement — the command never guesses one.
-test reports the provider's resolved state — executable, models, issues. It
-reads the server's own resolution and never calls the upstream provider.
+document's default selection names the provider being removed,
+--repoint-selection must name its replacement — the command never guesses one.
+test sends one minimal model-list request with the provider's resolved
+credential and reports the measured health: status, latency, live model count
+and issues. Without a resolvable credential it fails as needs_auth without
+sending anything; it never reports a success it did not observe.
 `)
 }
 
@@ -735,27 +950,11 @@ func providerStillServed(client *cliClient, providerID string) (bool, error) {
 
 // --- test --------------------------------------------------------------------
 
-// providerProbe is `keel model provider test`'s report: the provider's resolved
-// state and every model it serves, straight from the server's projection.
-type providerProbe struct {
-	ProviderID   string           `json:"providerId"`
-	ProviderType string           `json:"providerType"`
-	Executable   bool             `json:"executable"`
-	Selectable   bool             `json:"selectable"`
-	Models       []modelProbeRow  `json:"models"`
-	Issues       []modelcfg.Issue `json:"issues"`
-	OK           bool             `json:"ok"`
-}
-
-type modelProbeRow struct {
-	ModelID     string           `json:"modelId"`
-	SurfaceKind string           `json:"surfaceKind"`
-	Enabled     bool             `json:"enabled"`
-	Executable  bool             `json:"executable"`
-	Selectable  bool             `json:"selectable"`
-	Issues      []modelcfg.Issue `json:"issues,omitempty"`
-}
-
+// runModelProviderTest asks the server to probe one provider for real: one
+// minimal upstream model-list request through the server's own credential
+// resolution. The CLI never receives the credential, so the request body is
+// empty and the answer is a measured state (ready|needs_auth|unreachable|
+// invalid_config), never a guess.
 func runModelProviderTest(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("keel model provider test", stderr)
 	server, asJSON := commonFlags(fs)
@@ -772,60 +971,10 @@ func runModelProviderTest(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return reportError(stderr, err)
 	}
-	var providers providerListBody
-	if err := client.do(http.MethodGet, "/v1/providers", "", nil, &providers); err != nil {
+	var probe modelcfg.ProviderProbe
+	if err := client.do(http.MethodPost, "/v1/providers/"+url.PathEscape(providerID)+"/test", "", nil, &probe); err != nil {
 		return reportError(stderr, err)
 	}
-	var models modelListBody
-	if err := client.do(http.MethodGet, "/v1/models", "", nil, &models); err != nil {
-		return reportError(stderr, err)
-	}
-	var view *modelcfg.ProviderView
-	for _, candidate := range providers.Providers {
-		if candidate.ProviderID == providerID {
-			copied := candidate
-			view = &copied
-			break
-		}
-	}
-	if view == nil {
-		fmt.Fprintf(stderr,
-			"keel model provider test: this server does not serve a provider %q (see keel model providers)\n", providerID)
-		return 1
-	}
-	probe := providerProbe{
-		ProviderID:   view.ProviderID,
-		ProviderType: view.ProviderType,
-		Executable:   view.Executable,
-		Selectable:   view.Selectable,
-		Models:       make([]modelProbeRow, 0),
-		Issues:       append([]modelcfg.Issue{}, view.Issues...),
-	}
-	for _, model := range models.Models {
-		if model.ProviderID != providerID {
-			continue
-		}
-		probe.Models = append(probe.Models, modelProbeRow{
-			ModelID:     model.ModelID,
-			SurfaceKind: model.SurfaceKind,
-			Enabled:     model.Enabled,
-			Executable:  model.Executable,
-			Selectable:  model.Selectable,
-			Issues:      append([]modelcfg.Issue{}, model.Issues...),
-		})
-	}
-	// ok is what an operator would act on: the provider resolves executably,
-	// carries no issue, and offers at least one model that is executable and
-	// enabled. Selectability is reported but not required (a decision model is
-	// executable without being session-selectable).
-	executableModels := 0
-	for _, row := range probe.Models {
-		if row.Executable && row.Enabled {
-			executableModels++
-		}
-	}
-	probe.OK = probe.Executable && len(probe.Issues) == 0 && executableModels > 0
-
 	if *asJSON {
 		if err := printJSON(stdout, probe); err != nil {
 			return reportError(stderr, err)
@@ -842,29 +991,45 @@ func runModelProviderTest(args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
-func printProviderProbe(w io.Writer, probe providerProbe) {
-	fmt.Fprintf(w, "provider %s (%s)\nexecutable %s · selectable %s · models %d\n",
-		probe.ProviderID, probe.ProviderType, yesNo(probe.Executable), yesNo(probe.Selectable), len(probe.Models))
-	if len(probe.Issues) == 0 {
-		fmt.Fprintln(w, "issues —")
-	} else {
+func printProviderProbe(w io.Writer, probe modelcfg.ProviderProbe) {
+	endpoint := probe.Endpoint
+	if strings.TrimSpace(endpoint) == "" {
+		endpoint = "—"
+	}
+	fmt.Fprintf(w, "provider %s (%s)\n", probe.ProviderID, probe.ProviderType)
+	fmt.Fprintf(w, "endpoint %s · api %s\n", endpoint, probe.APIType)
+	fmt.Fprintf(w, "status %s", probe.Status)
+	requestSent := probe.APIType != modelcfg.APITypeDemo &&
+		(probe.Status == modelcfg.ProbeStatusReady || probe.Status == modelcfg.ProbeStatusUnreachable)
+	if probe.LatencyMS > 0 || requestSent {
+		fmt.Fprintf(w, " · latency %dms", probe.LatencyMS)
+	}
+	if probe.ModelCount > 0 {
+		fmt.Fprintf(w, " · models %d", probe.ModelCount)
+	}
+	fmt.Fprintln(w)
+	if len(probe.Issues) > 0 {
 		fmt.Fprintln(w, "issues")
 		for _, issue := range probe.Issues {
+			if issue.Field == "" {
+				fmt.Fprintf(w, "  %s\n", issue.Message)
+				continue
+			}
 			fmt.Fprintf(w, "  %s: %s\n", issue.Field, issue.Message)
 		}
 	}
-	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "MODEL\tSURFACE\tENABLED\tEXECUTABLE\tSELECTABLE")
-	for _, row := range probe.Models {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			row.ModelID, row.SurfaceKind, yesNo(row.Enabled), yesNo(row.Executable), yesNo(row.Selectable))
+	if probe.Error != "" {
+		fmt.Fprintf(w, "error: %s\n", probe.Error)
 	}
-	_ = tw.Flush()
 	if probe.OK {
-		fmt.Fprintln(w, "ok: the provider is executable")
+		if probe.APIType == modelcfg.APITypeDemo {
+			fmt.Fprintln(w, "ok: the in-process demo provider answers without an upstream request")
+			return
+		}
+		fmt.Fprintln(w, "ok: the provider answered a model-list request")
 		return
 	}
-	fmt.Fprintln(w, "not ok: the provider is not executable (read the issues above)")
+	fmt.Fprintln(w, "not ok: the provider did not answer a model-list request")
 }
 
 // --- settings document plumbing ----------------------------------------------

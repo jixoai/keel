@@ -41,6 +41,10 @@ type ModelService interface {
 	// value when the document names none). The llm service advertises this
 	// identity in its logs and loadout summary.
 	DefaultSelection() modelcfg.Selection
+	// ProbeProvider runs one minimal upstream request with the provider's
+	// resolved credential. found is false when no visible provider carries the
+	// id; a probe that ran and failed is a successful call with OK=false.
+	ProbeProvider(ctx context.Context, providerID string) (modelcfg.ProviderProbe, bool, error)
 }
 
 // modelsService implements ModelService over one immutable resolution.

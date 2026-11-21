@@ -66,7 +66,7 @@ Usage:
   keel tui [flags]       Run the NSH TUI client against a running keel serve
   keel agent <cmd>       Manage the Agent library (list|show|create|update|delete|start|stop)
   keel team <cmd>        Manage agent teams (list|show|create|update|delete|save|start|member add|remove)
-  keel model <cmd>       Read the model registry (providers|list|show)
+  keel model <cmd>       Read/manage the model registry (providers|list|show|catalog|provider ...)
   keel admin <cmd>       Provision tenants, API keys and quotas (operator)
   keel doctor [flags]    Diagnose configuration and build artifacts
   keel version           Print version and build information

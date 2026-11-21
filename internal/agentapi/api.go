@@ -147,6 +147,11 @@ type Config struct {
 	// be live; either nil answers 501.
 	ModelSettingsStore   ModelSettingsStore
 	ModelSettingsRuntime ModelSettingsRuntime
+	// ProviderProber powers POST /v1/providers/{id}/test: one minimal upstream
+	// request through the server's own credential resolution. It is optional;
+	// nil answers 501. The probe never mutates configuration and never returns a
+	// credential value.
+	ProviderProber ProviderProber
 	// ProviderReferences is the registry read behind provider deletion
 	// protection: the agents/teams whose model bindings name a provider the
 	// write would remove. Nil skips the check (a deployment without the
@@ -295,6 +300,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/capabilities", s.capabilities)
 	s.mux.HandleFunc("GET /v1/providers", s.listProviders)
+	s.mux.HandleFunc("POST /v1/providers/{id}/test", s.testProvider)
 	s.mux.HandleFunc("GET /v1/models", s.listModels)
 	s.settingsRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)

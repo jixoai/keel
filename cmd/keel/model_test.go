@@ -31,6 +31,7 @@ type fakeModelAPI struct {
 	password  string
 	providers []modelcfg.ProviderView
 	models    []modelcfg.ModelView
+	probes    map[string]modelcfg.ProviderProbe
 	requests  []recordedRequest
 
 	// The models document the GET serves and the PUT replaces. revision is the
@@ -75,6 +76,16 @@ func (f *fakeModelAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/v1/providers" && r.Method == http.MethodGet:
 		writeFakeJSON(w, http.StatusOK, map[string]any{"providers": f.providers, "issues": []modelcfg.Issue{}})
+	case strings.HasPrefix(r.URL.Path, "/v1/providers/") && strings.HasSuffix(r.URL.Path, "/test") && r.Method == http.MethodPost:
+		providerID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/providers/"), "/test")
+		probe, ok := f.probes[providerID]
+		if !ok {
+			writeFakeJSON(w, http.StatusNotFound, map[string]any{
+				"error": "provider " + providerID + " is not served by this deployment",
+			})
+			return
+		}
+		writeFakeJSON(w, http.StatusOK, probe)
 	case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
 		writeFakeJSON(w, http.StatusOK, map[string]any{"models": f.models, "issues": []modelcfg.Issue{}})
 	case r.URL.Path == "/v1/settings/models" && r.Method == http.MethodGet:
@@ -163,7 +174,15 @@ func fakeModelRegistry() *fakeModelAPI {
 	return &fakeModelAPI{
 		password: "model-test-pass",
 		providers: []modelcfg.ProviderView{
-			{ProviderID: "s2api", Name: "S2API", ProviderType: "llm", SurfaceKind: "llm", Executable: true, Selectable: true, Models: []modelcfg.ModelView{model("s2api")}},
+			{
+				ProviderID: "s2api", Name: "S2API", ProviderType: "llm", SurfaceKind: "llm",
+				Access:     modelcfg.Access{Type: modelcfg.AccessTypeAPIKey, Env: "S2API_KEY"},
+				Executable: true, Selectable: true,
+				Models: []modelcfg.ModelView{
+					model("s2api"),
+					{ProviderID: "s2api", ModelID: "gpt-image-canvas", ProviderType: "image", SurfaceKind: "image", Enabled: true, Executable: true, Selectable: true},
+				},
+			},
 			{ProviderID: "a6api", ProviderType: "llm", SurfaceKind: "llm", Executable: false, Selectable: false, Models: []modelcfg.ModelView{model("a6api")}},
 		},
 		models: []modelcfg.ModelView{
@@ -175,6 +194,24 @@ func fakeModelRegistry() *fakeModelAPI {
 				return view
 			}(),
 			{ProviderID: "s2api", ModelID: "gpt-image-canvas", ProviderType: "image", SurfaceKind: "image", Enabled: true, Executable: true, Selectable: true},
+		},
+		probes: map[string]modelcfg.ProviderProbe{
+			"s2api": {
+				ProviderID: "s2api", ProviderType: "llm",
+				APIType: "openai-chat-completions", Endpoint: "https://s2api.top/v1",
+				OK: true, Status: modelcfg.ProbeStatusReady, LatencyMS: 12,
+				ModelCount: 2, Models: []string{"deepseek-v4.1-flash", "gpt-image-canvas"},
+			},
+			"a6api": {
+				ProviderID: "a6api", ProviderType: "llm",
+				APIType: "openai-chat-completions", Endpoint: "https://a6api.example.test/v1",
+				OK: false, Status: modelcfg.ProbeStatusNeedsAuth,
+				Error: "no credential could be resolved; no request was sent",
+				Issues: []modelcfg.Issue{{
+					Field:   "access.env",
+					Message: "access.env (A6API_KEY) is not set in this process",
+				}},
+			},
 		},
 		document: map[string]any{
 			"providers": []any{
@@ -336,7 +373,9 @@ func TestModelUsageAndUnknownCommand(t *testing.T) {
 	if code := runModelCmd(nil, &out, &errBuf); code != 2 {
 		t.Fatalf("no args exit = %d, want 2", code)
 	}
-	if !strings.Contains(errBuf.String(), "keel model providers") {
+	if !strings.Contains(errBuf.String(), "keel model providers") ||
+		!strings.Contains(errBuf.String(), "keel model catalog") ||
+		!strings.Contains(errBuf.String(), "provider list") {
 		t.Fatalf("usage does not name the commands: %s", errBuf.String())
 	}
 	out.Reset()
@@ -576,71 +615,243 @@ func TestModelProviderRemovePrintsReferenceRefusal(t *testing.T) {
 	}
 }
 
-// TestModelProviderTestProbe pins `keel model provider test`: the report comes
-// from the server's resolved projections (never an upstream call), the exit
-// status follows executability, and a provider the server does not serve is a
-// readable miss.
+// TestModelProviderTestProbe pins `keel model provider test`: the command asks
+// the server for one real minimal upstream probe (POST
+// /v1/providers/{id}/test), never resolves the credential itself, follows the
+// measured status with its exit code, and prints every field path the server
+// reported. A provider the server does not serve is a readable miss.
 func TestModelProviderTestProbe(t *testing.T) {
 	fake := fakeModelRegistry()
 	server := httptest.NewServer(fake)
 	defer server.Close()
 	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	// A credential-looking value in the environment must never reach the CLI
+	// output: the CLI only names the reference, the server resolves it.
+	const secret = "probe-secret-value-that-must-not-leak"
+	t.Setenv("A6API_KEY", secret)
 
 	stdout, stderr, code := runModel("provider", "test", "s2api", "--server", server.URL)
 	if code != 0 {
-		t.Fatalf("an executable provider must exit 0, got %d (stderr: %s)", code, stderr)
+		t.Fatalf("a reachable provider must exit 0, got %d (stderr: %s)", code, stderr)
 	}
-	for _, want := range []string{"provider s2api (llm)", "executable yes", "issues —", "deepseek-v4.1-flash", "gpt-image-canvas", "ok:"} {
+	for _, want := range []string{
+		"provider s2api (llm)", "endpoint https://s2api.top/v1", "status ready",
+		"latency 12ms", "models 2", "ok: the provider answered a model-list request",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("probe output lacks %q:\n%s", want, stdout)
 		}
 	}
-	// The probe really reads both projections and never writes.
-	var sawProviders, sawModels, wrote bool
+	// The probe is one POST with an empty body: the credential stays server-side.
+	var probeCalls int
 	for _, request := range fake.requests {
 		switch {
-		case request.Path == "/v1/providers" && request.Method == http.MethodGet:
-			sawProviders = true
-		case request.Path == "/v1/models" && request.Method == http.MethodGet:
-			sawModels = true
-		case request.Method != http.MethodGet && request.Path != "/v1/auth/login":
-			wrote = true
+		case request.Method == http.MethodPost && request.Path == "/v1/providers/s2api/test":
+			probeCalls++
+			if len(strings.TrimSpace(string(request.Body))) != 0 {
+				t.Fatalf("the probe request carried a body: %s", request.Body)
+			}
+		case request.Method == http.MethodGet && request.Path == "/v1/providers":
+			t.Fatal("the probe must call the probe endpoint, not re-read the resolved list")
 		}
 	}
-	if !sawProviders || !sawModels {
-		t.Fatalf("the probe must read /v1/providers and /v1/models (providers=%v models=%v)", sawProviders, sawModels)
+	if probeCalls != 1 {
+		t.Fatalf("probe requests = %d, want 1", probeCalls)
 	}
-	if wrote {
-		t.Fatal("a probe must not write anything")
+	if strings.Contains(stdout+stderr, secret) {
+		t.Fatal("a credential value leaked into the probe output")
 	}
 
-	// A provider that cannot execute fails the probe with its state on screen.
+	// A provider whose credential cannot be resolved fails with needs_auth and
+	// the field path, never a fabricated success.
 	stdout, _, code = runModel("provider", "test", "a6api", "--server", server.URL)
 	if code != 1 {
-		t.Fatalf("a non-executable provider must exit 1, got %d", code)
+		t.Fatalf("a needs_auth provider must exit 1, got %d", code)
 	}
-	if !strings.Contains(stdout, "executable no") || !strings.Contains(stdout, "not ok:") {
-		t.Fatalf("the failure report does not say why:\n%s", stdout)
+	for _, want := range []string{"status needs_auth", "access.env: access.env (A6API_KEY)", "not ok:"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the needs_auth report lacks %q:\n%s", want, stdout)
+		}
 	}
 
-	// JSON output carries the same facts for a script.
+	// JSON output carries the same measured facts for a script.
 	stdout, stderr, code = runModel("provider", "test", "s2api", "--json", "--server", server.URL)
 	if code != 0 {
 		t.Fatalf("JSON probe exit = %d, stderr: %s", code, stderr)
 	}
-	var probe providerProbe
+	var probe modelcfg.ProviderProbe
 	if err := json.Unmarshal([]byte(stdout), &probe); err != nil {
 		t.Fatalf("probe JSON does not decode: %v\n%s", err, stdout)
 	}
-	if probe.ProviderID != "s2api" || !probe.Executable || !probe.OK || len(probe.Models) != 2 {
+	if probe.ProviderID != "s2api" || !probe.OK || probe.Status != modelcfg.ProbeStatusReady ||
+		probe.LatencyMS != 12 || probe.ModelCount != 2 {
 		t.Fatalf("probe = %+v", probe)
 	}
 
 	// An id this server does not serve is a miss (exit 1), never an empty
-	// success.
+	// success; the server's 404 text is rendered verbatim.
 	_, stderr, code = runModel("provider", "test", "nope", "--server", server.URL)
-	if code != 1 || !strings.Contains(stderr, "does not serve a provider") {
+	if code != 1 || !strings.Contains(stderr, "is not served by this deployment") {
 		t.Fatalf("unknown provider = %d, stderr: %s", code, stderr)
+	}
+}
+
+// TestModelProviderListAlias pins `keel model provider list`: same resolved
+// projection as `keel model providers`, with the family filter applied to the
+// printed rows only.
+func TestModelProviderListAlias(t *testing.T) {
+	fake := fakeModelRegistry()
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+
+	stdout, stderr, code := runModel("provider", "list", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "s2api") || !strings.Contains(stdout, "a6api") {
+		t.Fatalf("provider list lacks rows:\n%s", stdout)
+	}
+	stdout, stderr, code = runModel("provider", "list", "--type", "image", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("filtered list exit %d, stderr: %s", code, stderr)
+	}
+	if strings.Contains(stdout, "s2api") || strings.Contains(stdout, "a6api") {
+		t.Fatalf("the --type filter kept llm providers:\n%s", stdout)
+	}
+	stdout, stderr, code = runModel("provider", "list", "--type", "llm", "--json", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("JSON list exit %d, stderr: %s", code, stderr)
+	}
+	var body providerListBody
+	if err := json.Unmarshal([]byte(stdout), &body); err != nil || len(body.Providers) != 2 {
+		t.Fatalf("JSON list = %v, body %+v", err, body)
+	}
+}
+
+// TestModelProviderShow pins `keel model provider show`: the full resolved view
+// as JSON, credential references only, and a miss for an unknown id.
+func TestModelProviderShow(t *testing.T) {
+	fake := fakeModelRegistry()
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+	const secret = "provider-show-secret-value-that-must-not-leak"
+	t.Setenv("S2API_KEY", secret)
+
+	stdout, stderr, code := runModel("provider", "show", "s2api", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr)
+	}
+	var view modelcfg.ProviderView
+	if err := json.Unmarshal([]byte(stdout), &view); err != nil {
+		t.Fatalf("show did not print the provider JSON: %v\n%s", err, stdout)
+	}
+	if view.ProviderID != "s2api" || view.Name != "S2API" || !view.Executable ||
+		view.Access.Env != "S2API_KEY" || len(view.Models) != 2 {
+		t.Fatalf("view = %+v", view)
+	}
+	if strings.Contains(stdout, secret) {
+		t.Fatal("the credential value leaked into provider show")
+	}
+	_, stderr, code = runModel("provider", "show", "nope", "--server", server.URL)
+	if code != 1 || !strings.Contains(stderr, "does not serve a provider") {
+		t.Fatalf("unknown provider show = %d, stderr: %s", code, stderr)
+	}
+}
+
+// TestModelCatalogResolvedAndRefresh pins `keel model catalog`: the resolved
+// projection (optionally one provider) and the live upstream mode, which goes
+// through the same probe endpoint instead of inventing a catalog.
+func TestModelCatalogResolvedAndRefresh(t *testing.T) {
+	fake := fakeModelRegistry()
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+
+	stdout, stderr, code := runModel("catalog", "s2api", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "s2api/deepseek-v4.1-flash") || !strings.Contains(stdout, "s2api/gpt-image-canvas") {
+		t.Fatalf("resolved catalog lacks the provider's models:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "a6api/") {
+		t.Fatalf("the provider filter leaked another provider:\n%s", stdout)
+	}
+	stdout, stderr, code = runModel("catalog", "s2api", "--json", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("JSON catalog exit %d, stderr: %s", code, stderr)
+	}
+	var resolved catalogBody
+	if err := json.Unmarshal([]byte(stdout), &resolved); err != nil {
+		t.Fatalf("catalog JSON does not decode: %v\n%s", err, stdout)
+	}
+	if resolved.ProviderID != "s2api" || resolved.Source != "resolved" || len(resolved.Models) != 2 {
+		t.Fatalf("resolved catalog = %+v", resolved)
+	}
+
+	// --refresh sends the probe and prints its live ids, not the resolved view.
+	stdout, stderr, code = runModel("catalog", "s2api", "--refresh", "--json", "--server", server.URL)
+	if code != 0 {
+		t.Fatalf("refresh exit %d, stderr: %s", code, stderr)
+	}
+	var refreshed catalogRefreshBody
+	if err := json.Unmarshal([]byte(stdout), &refreshed); err != nil {
+		t.Fatalf("refresh JSON does not decode: %v\n%s", err, stdout)
+	}
+	if refreshed.ProviderID != "s2api" || refreshed.Source != "upstream" ||
+		len(refreshed.Models) != 2 || refreshed.Models[0] != "deepseek-v4.1-flash" {
+		t.Fatalf("refreshed catalog = %+v", refreshed)
+	}
+	var refreshCalls int
+	for _, request := range fake.requests {
+		if request.Method == http.MethodPost && request.Path == "/v1/providers/s2api/test" {
+			refreshCalls++
+		}
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh probe calls = %d, want 1", refreshCalls)
+	}
+
+	// A refresh without an explicit provider is refused before any request.
+	before := len(fake.requests)
+	_, stderr, code = runModel("catalog", "--refresh", "--server", server.URL)
+	if code != 2 || !strings.Contains(stderr, "--refresh needs a provider id") {
+		t.Fatalf("refresh without id = %d, stderr: %s", code, stderr)
+	}
+	if len(fake.requests) != before {
+		t.Fatal("a refused refresh still sent a request")
+	}
+}
+
+// TestModelProviderAddRendersValidationIssues pins the server-refusal
+// rendering: the settings write path answers field paths as modelcfg issues,
+// and the CLI must print them instead of only the top-level sentence.
+func TestModelProviderAddRendersValidationIssues(t *testing.T) {
+	fake := fakeModelRegistry()
+	fake.putRefusal = &fakeRefusal{status: http.StatusBadRequest, body: map[string]any{
+		"error": "model configuration: providers[bad].api.type: unsupported API type \"nope\"",
+		"issues": []any{map[string]any{
+			"field":   "providers[bad].api.type",
+			"message": "unsupported API type \"nope\"",
+		}},
+	}}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	t.Setenv("KEEL_SERVE_PASSWORD", fake.password)
+
+	_, stderr, code := runModel("provider", "add", "bad", "--api-type", "nope", "--server", server.URL)
+	if code != 1 {
+		t.Fatalf("a rejected write must exit 1, got %d (stderr: %s)", code, stderr)
+	}
+	for _, want := range []string{
+		"server refused (400)",
+		"providers[bad].api.type: unsupported API type",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr lacks %q:\n%s", want, stderr)
+		}
 	}
 }
 
@@ -651,7 +862,9 @@ func TestModelProviderUsage(t *testing.T) {
 		t.Fatalf("bare provider exit = %d, want 2", code)
 	}
 	if !strings.Contains(errBuf.String(), "keel model provider add") ||
-		!strings.Contains(errBuf.String(), "keel model provider remove") {
+		!strings.Contains(errBuf.String(), "keel model provider remove") ||
+		!strings.Contains(errBuf.String(), "keel model provider list") ||
+		!strings.Contains(errBuf.String(), "keel model provider show") {
 		t.Fatalf("usage does not name the verbs: %s", errBuf.String())
 	}
 	out.Reset()

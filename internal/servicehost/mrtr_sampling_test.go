@@ -39,6 +39,9 @@ func (m *recordingModelService) ProviderViews() []modelcfg.ProviderView  { retur
 func (m *recordingModelService) ModelViews() []modelcfg.ModelView        { return nil }
 func (m *recordingModelService) ResolutionIssues() []modelcfg.Issue      { return nil }
 func (m *recordingModelService) DefaultSelection() modelcfg.Selection    { return modelcfg.Selection{} }
+func (m *recordingModelService) ProbeProvider(context.Context, string) (modelcfg.ProviderProbe, bool, error) {
+	return modelcfg.ProviderProbe{}, false, nil
+}
 
 // samplingTextStream answers one completion with fixed text and captures the
 // provider config the sampler handed to the last layer.

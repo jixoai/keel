@@ -1,0 +1,4 @@
+provider stub (llm)
+endpoint http://127.0.0.1:13661/v1 · api openai-chat-completions
+status ready · latency 1ms · models 3
+ok: the provider answered a model-list request

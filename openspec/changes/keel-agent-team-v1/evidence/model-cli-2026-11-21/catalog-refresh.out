@@ -1,0 +1,10 @@
+{
+  "providerId": "stub",
+  "source": "upstream",
+  "latencyMs": 2,
+  "models": [
+    "stub-model-a",
+    "stub-model-b",
+    "stub-model-live"
+  ]
+}

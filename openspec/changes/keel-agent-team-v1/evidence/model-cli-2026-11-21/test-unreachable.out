@@ -1,0 +1,5 @@
+provider dead (llm)
+endpoint http://127.0.0.1:13662/v1 · api openai-chat-completions
+status unreachable · latency 0ms
+error: model discovery request failed: dial tcp 127.0.0.1:13662: connect: connection refused
+not ok: the provider did not answer a model-list request

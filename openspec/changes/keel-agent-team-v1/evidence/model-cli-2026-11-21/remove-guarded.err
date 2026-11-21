@@ -1,0 +1,3 @@
+keel: server refused (409 provider_in_use) at http://127.0.0.1:13660: provider guarded is referenced by agent agent_model_guard Model Guard (field defaultModel); repoint those bindings or disable the provider instead of removing it
+  - providers[guarded] (provider_in_use): provider guarded is still referenced by a registry document
+  referencing agent: agent_model_guard Model Guard (field defaultModel)

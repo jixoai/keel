@@ -1081,6 +1081,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		},
 		ModelSettingsStore:   st,
 		ModelSettingsRuntime: modelSeam,
+		// A provider test is one minimal upstream request through the same
+		// credential resolution an attempt uses; the CLI never sees the value.
+		ProviderProber: modelSeam,
 		// Provider deletion protection reads the agent/team registry (a provider
 		// an agent or a team still binds is refused, with the referrers listed).
 		ProviderReferences: st,
@@ -1332,6 +1335,15 @@ func (m modelRuntimeSeam) DefaultSelection() modelcfg.Selection {
 		return service.DefaultSelection()
 	}
 	return modelcfg.Selection{}
+}
+
+// ProbeProvider implements agentapi.ProviderProber.
+func (m modelRuntimeSeam) ProbeProvider(ctx context.Context, providerID string) (modelcfg.ProviderProbe, bool, error) {
+	service := m.rt.Models()
+	if service == nil {
+		return modelcfg.ProviderProbe{}, false, nil
+	}
+	return service.ProbeProvider(ctx, providerID)
 }
 
 // DeploymentModels implements agentapi.ModelSettingsRuntime.

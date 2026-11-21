@@ -1,7 +1,11 @@
 package agentapi
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/jixoai/keel/internal/modelcfg"
 )
@@ -35,6 +39,19 @@ type ModelCatalog interface {
 	// settings read view so a client can show the effective default even when
 	// the deployment document itself is empty.
 	DefaultSelection() modelcfg.Selection
+}
+
+// ProviderProber is the optional health-probe seam behind
+// POST /v1/providers/{id}/test. The implementation lives in the hosting
+// process, where the provider's credential can be resolved: the CLI never
+// receives (or sends) a credential value.
+//
+// found is false when no visible provider of the current resolution carries
+// the id. err is reserved for a probe that could not run at all; a probe that
+// ran and failed is a successful call with OK=false, because the CLI renders
+// the measured state instead of an opaque server error.
+type ProviderProber interface {
+	ProbeProvider(ctx context.Context, providerID string) (probe modelcfg.ProviderProbe, found bool, err error)
 }
 
 // providersResponse is the GET /v1/providers body. Top-level issues report
@@ -184,4 +201,34 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 		// (see the spec's capability scenario and the change's deferred list).
 		Enforcement: capabilityEnforcement{ToolCall: true, Media: false},
 	})
+}
+
+// testProvider implements POST /v1/providers/{id}/test: a real but minimal
+// upstream request through the hosting process's own credential resolution.
+// The handler is a thin shape: a provider that ran and failed still answers
+// 200 with OK=false (the CLI renders the measured state and exits nonzero), so
+// "needs auth" never masquerades as a server bug.
+func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
+	if _, ok := tenantFrom(w, r); !ok {
+		return
+	}
+	if s.cfg.ProviderProber == nil {
+		notWired(w, "provider probes are not wired")
+		return
+	}
+	providerID := strings.TrimSpace(r.PathValue("id"))
+	if providerID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("provider id is required"))
+		return
+	}
+	probe, found, err := s.cfg.ProviderProber.ProbeProvider(r.Context(), providerID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("provider %q is not served by this deployment", providerID))
+		return
+	}
+	writeJSON(w, http.StatusOK, probe)
 }

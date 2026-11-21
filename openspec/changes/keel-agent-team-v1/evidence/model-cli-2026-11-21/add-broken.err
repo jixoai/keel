@@ -1,0 +1,2 @@
+keel: server refused (400) at http://127.0.0.1:13660: models document rejected: document: model configuration: tenant document: providers[4]: api.type must be one of "openai-chat-completions", "openai-responses", "anthropic-messages"
+  - document: model configuration: tenant document: providers[4]: api.type must be one of "openai-chat-completions", "openai-responses", "anthropic-messages"

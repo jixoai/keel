@@ -92,10 +92,13 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 			"model providers",
 			"model list",
 			"model show",
+			"model provider list",
+			"model provider show",
 			"model provider add",
 			"model provider update",
 			"model provider remove",
 			"model provider test",
+			"model catalog",
 		},
 		AgentPluginID: {
 			"agent list",
@@ -169,8 +172,9 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 
 	// The model plugin's provider write subset declares its risk classes the
 	// same way: a removal is destructive and stays out of every agent face, an
-	// edit is a retryable write, and the probe is read-only (it reads the
-	// server's resolution and never calls upstream).
+	// edit is a retryable write, and the probe declares write because it sends a
+	// real (possibly billable) upstream request even though it changes no
+	// configuration.
 	model, _ := builtin.Manifest(ModelPluginID)
 	modelByKey := map[string]pluginpkg.CLICapability{}
 	for _, capability := range model.Provides.CLI {
@@ -191,8 +195,13 @@ func TestCapabilityPluginsDeclareTheirCLI(t *testing.T) {
 	if !modelByKey["model provider update"].Idempotent || !modelByKey["model provider test"].Idempotent {
 		t.Fatal("model provider update/test must be declared idempotent")
 	}
-	if modelByKey["model provider test"].Danger != pluginpkg.DangerRead {
-		t.Fatalf("model provider test danger = %s, want read (it reads the server's resolution)", modelByKey["model provider test"].Danger)
+	if modelByKey["model provider test"].Danger != pluginpkg.DangerWrite {
+		t.Fatalf("model provider test danger = %s, want write (it sends a real upstream request)", modelByKey["model provider test"].Danger)
+	}
+	for _, key := range []string{"model provider list", "model provider show", "model catalog"} {
+		if modelByKey[key].Danger != pluginpkg.DangerRead {
+			t.Fatalf("%s danger = %s, want read", key, modelByKey[key].Danger)
+		}
 	}
 	if !modelByKey["model provider add"].CallableByCaller(pluginpkg.CallerUI) ||
 		!modelByKey["model provider test"].CallableByCaller(pluginpkg.CallerAgent) {

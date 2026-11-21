@@ -1,6 +1,7 @@
 package agentapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -390,5 +391,74 @@ func TestModelsListCarriesProviderTypeAndSurfaceKind(t *testing.T) {
 	}
 	if len(settings.Providers) != 1 || settings.Providers[0].ProviderType != modelcfg.ProviderTypeRealtime {
 		t.Fatalf("provider view = %+v", settings.Providers)
+	}
+}
+
+// stubProber is the ProviderProber seam stand-in: it records the id the
+// handler resolved and answers a canned measured state.
+type stubProber struct {
+	probe  modelcfg.ProviderProbe
+	found  bool
+	err    error
+	called string
+}
+
+func (s *stubProber) ProbeProvider(_ context.Context, providerID string) (modelcfg.ProviderProbe, bool, error) {
+	s.called = providerID
+	return s.probe, s.found, s.err
+}
+
+// TestProviderProbeRoute pins POST /v1/providers/{id}/test: the tenant gate,
+// the optional seam (501 when unwired), the id handoff, a 404 for a provider
+// the deployment does not serve, and the measured body on success.
+func TestProviderProbeRoute(t *testing.T) {
+	tenant := uuid.New()
+	prober := &stubProber{
+		found: true,
+		probe: modelcfg.ProviderProbe{
+			ProviderID: "s2api", ProviderType: "llm", OK: true,
+			Status: modelcfg.ProbeStatusReady, LatencyMS: 7, ModelCount: 2,
+			Models: []string{"m1", "m2"},
+		},
+	}
+	server := httptest.NewServer(New(Config{ProviderProber: prober, Logger: testLogger()}))
+	defer server.Close()
+
+	// The tenant header is mandatory: an unauthenticated probe is refused
+	// before the seam runs.
+	if code := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/providers/s2api/test", uuid.Nil, nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("probe without a tenant = %d, want 401", code)
+	}
+	if prober.called != "" {
+		t.Fatal("an unauthenticated probe reached the prober")
+	}
+
+	var probe modelcfg.ProviderProbe
+	if code := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/providers/s2api/test", tenant, nil, &probe); code != http.StatusOK {
+		t.Fatalf("probe = %d", code)
+	}
+	if prober.called != "s2api" {
+		t.Fatalf("prober id = %q, want s2api", prober.called)
+	}
+	if !probe.OK || probe.ProviderID != "s2api" || probe.ModelCount != 2 || len(probe.Models) != 2 {
+		t.Fatalf("probe body = %+v", probe)
+	}
+
+	// A provider this deployment does not carry is a 404, not an empty success.
+	prober.found = false
+	var refusal map[string]any
+	if code := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/providers/nope/test", tenant, nil, &refusal); code != http.StatusNotFound {
+		t.Fatalf("unknown provider probe = %d", code)
+	}
+	if message, _ := refusal["error"].(string); !strings.Contains(message, "not served") {
+		t.Fatalf("refusal body = %+v", refusal)
+	}
+
+	// An unwired deployment answers 501 with the same shape as the other
+	// optional seams.
+	unwired := httptest.NewServer(New(Config{Logger: testLogger()}))
+	defer unwired.Close()
+	if code := doJSON(t, unwired.Client(), http.MethodPost, unwired.URL+"/v1/providers/s2api/test", tenant, nil, nil); code != http.StatusNotImplemented {
+		t.Fatalf("unwired probe = %d, want 501", code)
 	}
 }

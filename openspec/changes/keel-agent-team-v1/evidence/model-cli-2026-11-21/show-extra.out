@@ -1,0 +1,87 @@
+{
+  "providerId": "extra",
+  "name": "Extra Provider",
+  "providerType": "llm",
+  "surfaceKind": "llm",
+  "visibility": "visible",
+  "api": {
+    "type": "openai-chat-completions",
+    "baseUrl": "http://127.0.0.1:13661/v1"
+  },
+  "access": {
+    "type": "api-key",
+    "env": "KITE_MODEL_KEY"
+  },
+  "models": [
+    {
+      "providerId": "extra",
+      "modelId": "stub-model-a",
+      "providerType": "llm",
+      "surfaceKind": "llm",
+      "api": {
+        "type": "openai-chat-completions",
+        "baseUrl": "http://127.0.0.1:13661/v1"
+      },
+      "properties": {
+        "contextWindow": 128000,
+        "inputFormat": {
+          "text": true,
+          "image": false,
+          "video": false,
+          "audio": false,
+          "pdf": false
+        },
+        "outputFormat": {
+          "text": true,
+          "image": false,
+          "video": false,
+          "audio": false
+        },
+        "supportsToolCall": true,
+        "supportsJsonSchemaOutput": true,
+        "supportsNativeWebSearch": false
+      },
+      "options": {
+        "reasoningLevel": {
+          "values": [
+            "off",
+            "low",
+            "medium",
+            "high"
+          ],
+          "map": {
+            "high": {
+              "reasoning_effort": "high"
+            },
+            "low": {
+              "reasoning_effort": "low"
+            },
+            "medium": {
+              "reasoning_effort": "medium"
+            },
+            "off": {}
+          }
+        },
+        "maxOutputTokens": {
+          "max": 8192,
+          "map": {
+            "": {},
+            "*": {}
+          }
+        }
+      },
+      "enabled": true,
+      "executable": true,
+      "selectable": true,
+      "baseline": true,
+      "issues": [
+        {
+          "field": "properties",
+          "message": "baseline-derived capabilities; override with a model rule"
+        }
+      ]
+    }
+  ],
+  "executable": true,
+  "selectable": true
+}

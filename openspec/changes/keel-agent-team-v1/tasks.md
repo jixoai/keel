@@ -41,10 +41,12 @@
 ## P1 模型插件（model-plugin）
 
 - [x] `provider_types` / provider 实例 / 模型目录 / 参数 schema / 健康检查（沿用原设计）
-- [ ] CLI：`keel model provider list|show|add|update|remove|test`、`keel model catalog`
-      （已交付：只读子集 `keel model providers|list|show` + **写子集 `keel model provider add|update|remove`
-      （整文档读-改-写，PUT /v1/settings/models，revision 守卫）与只读探测 `keel model provider test`**；
-      未做：`model provider list|show`（读面已在 `model providers`/`model show`）、`model catalog`）
+- [x] CLI：`keel model provider list|show|add|update|remove|test`、`keel model catalog`
+      （已交付：读面 `provider list|show`（+ `model providers|list|show` 别名）、写子集
+      `provider add|update|remove`（整文档读-改-写，PUT /v1/settings/models，revision 守卫）、
+      真实探测 `provider test`（POST /v1/providers/{id}/test，服务端解析凭据并发一次最小
+      model-list 请求；无凭据 needs_auth、失败 unreachable，不伪造成功）、`catalog`
+      （解析目录 + `--refresh` 上游实取）；证据 `evidence/model-cli-2026-11-21/`）
 - [x] CLI 与 UI 共用 schema/租户边界；凭据只接受引用
 - [x] Provider 删除保护：被 Agent/Team 引用时拒绝并列出引用方
       （写路径 409 provider_in_use + references（agent.defaultModel / team.defaults.modelOverride /

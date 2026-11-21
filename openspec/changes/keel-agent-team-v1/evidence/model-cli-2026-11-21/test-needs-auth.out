@@ -1,0 +1,7 @@
+provider noauth (llm)
+endpoint http://127.0.0.1:13661/v1 · api openai-chat-completions
+status needs_auth
+issues
+  access.env: access.env (KITE_MISSING_KEY) is not set in this process and no API key is configured (this deployment has no tenant secret storage; KEEL_SECRET_KEY is not configured)
+error: no credential could be resolved; no request was sent
+not ok: the provider did not answer a model-list request

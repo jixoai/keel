@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "id": "stub",
+      "name": "Stub Provider",
+      "api": {"type": "openai-chat-completions", "baseUrl": "http://127.0.0.1:13661/v1"},
+      "access": {"type": "api-key", "env": "KITE_MODEL_KEY"},
+      "modelIds": ["stub-model-a", "stub-model-b"],
+      "visibility": "visible"
+    },
+    {
+      "id": "noauth",
+      "name": "No Auth Provider",
+      "api": {"type": "openai-chat-completions", "baseUrl": "http://127.0.0.1:13661/v1"},
+      "access": {"type": "api-key", "env": "KITE_MISSING_KEY"},
+      "modelIds": ["stub-model-a"]
+    },
+    {
+      "id": "dead",
+      "name": "Dead Provider",
+      "api": {"type": "openai-chat-completions", "baseUrl": "http://127.0.0.1:13662/v1"},
+      "access": {"type": "api-key", "env": "KITE_MODEL_KEY"},
+      "modelIds": ["stub-model-a"]
+    }
+  ],
+  "selection": {"providerId": "stub", "modelId": "stub-model-a"}
+}

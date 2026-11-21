@@ -31,6 +31,7 @@ import (
 
 	"github.com/jixoai/keel/internal/agentteam"
 	"github.com/jixoai/keel/internal/httpapi"
+	"github.com/jixoai/keel/internal/modelcfg"
 )
 
 // actorAgentHeader is the header a captain's member mutation carries, so the
@@ -214,7 +215,9 @@ type apiError struct {
 	Message    string
 	Server     string
 	Fields     []agentteam.FieldError
+	Issues     []modelcfg.Issue
 	References []map[string]any
+	Revision   int64
 }
 
 func (e *apiError) Error() string {
@@ -352,13 +355,17 @@ func readAPIError(response *http.Response) error {
 		Error      string                 `json:"error"`
 		Code       string                 `json:"code"`
 		Fields     []agentteam.FieldError `json:"fields"`
+		Issues     []modelcfg.Issue       `json:"issues"`
 		References []map[string]any       `json:"references"`
+		Revision   int64                  `json:"revision"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err == nil {
 		out.Message = strings.TrimSpace(envelope.Error)
 		out.Code = envelope.Code
 		out.Fields = envelope.Fields
+		out.Issues = envelope.Issues
 		out.References = envelope.References
+		out.Revision = envelope.Revision
 	}
 	if out.Message == "" {
 		out.Message = strings.TrimSpace(string(raw))
@@ -381,6 +388,19 @@ func reportError(stderr io.Writer, err error) int {
 				continue
 			}
 			fmt.Fprintf(stderr, "  - %s (%s): %s\n", field.Field, field.Code, field.Message)
+		}
+		// Settings validation answers field paths as modelcfg issues (no
+		// machine code); render the same `field: message` shape so a rejected
+		// models document is fixable from the CLI output.
+		for _, issue := range refusal.Issues {
+			if issue.Field == "" {
+				fmt.Fprintf(stderr, "  - %s\n", issue.Message)
+				continue
+			}
+			fmt.Fprintf(stderr, "  - %s: %s\n", issue.Field, issue.Message)
+		}
+		if refusal.Revision > 0 {
+			fmt.Fprintf(stderr, "  current revision: %d\n", refusal.Revision)
 		}
 		for _, reference := range refusal.References {
 			id, _ := reference["id"].(string)
