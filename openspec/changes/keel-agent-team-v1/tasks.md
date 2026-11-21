@@ -141,7 +141,9 @@
       M2 接线：租户 image/video provider → `internal/mediawiring` → `servicehost` 工具面；
       `agentcore.ToolRunScope` 的 session 作为 layerfs 归属；记录型 provider E2E 断言
       wire 的 Authorization/body、blobId 引用、usage，以及缺凭据时 typed
-      `missing_credentials` 且零 wire 请求；设置写后新 generation 的工具改用新 provider）
+      `missing_credentials` 且零 wire 请求；设置写后新 generation 的工具改用新 provider；
+      provider 返回的资产 URL 默认拒绝非公网地址（含每跳重定向，防 SSRF），
+      设置写的 decision binding Preflight 拒绝全树 http(s) URL）
 - [ ] 语音适配器：TTS 文本→音频；STT 音频→transcript/时间戳；音色/语言参数
       （库与 wire 已完成：`SpeechAdapter` + `/audio/speech`、`/audio/transcriptions`；
       **M2 未接线**：没有任何 host tool、`/v1/media/audio` 或 run 消费面，运行时尚不可用；

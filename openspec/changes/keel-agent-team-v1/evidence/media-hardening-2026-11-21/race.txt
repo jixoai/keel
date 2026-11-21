@@ -1,0 +1,9 @@
+$ go test -race -count=1 ./internal/mediaadapter ./internal/mediawiring ./internal/servicehost
+ok  	github.com/jixoai/keel/internal/mediaadapter	1.907s
+ok  	github.com/jixoai/keel/internal/mediawiring	1.765s
+ok  	github.com/jixoai/keel/internal/servicehost	6.866s
+exit=0
+
+$ go test -race -count=1 ./internal/agentapi -run TestSettingsModelsRefusesADecisionBindingThatFailsPreflight
+ok  	github.com/jixoai/keel/internal/agentapi	1.591s
+exit=0

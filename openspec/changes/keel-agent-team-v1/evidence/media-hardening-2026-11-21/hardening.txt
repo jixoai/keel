@@ -1,0 +1,76 @@
+$ go test -v -count=1 ./internal/mediaadapter -run "TestHTTPFetcher|TestImageAdapterRefusesLoopbackAssetURL|TestImageAspectRatioMapsToWireSize|TestImageToolAcceptsTheHermesAspectRatio|TestPromptLimitIsEnforcedAtTheAdapter|TestImageBatchIsTruncatedToTheHarnessCeiling|TestProviderPanicMessageIsBoundedAndFlattened|TestDecisionStateRejectsRemoteURLAnywhere"
+=== RUN   TestImageAdapterRefusesLoopbackAssetURL
+--- PASS: TestImageAdapterRefusesLoopbackAssetURL (0.00s)
+=== RUN   TestImageAspectRatioMapsToWireSize
+=== RUN   TestImageAspectRatioMapsToWireSize/landscape/
+=== RUN   TestImageAspectRatioMapsToWireSize/portrait/
+=== RUN   TestImageAspectRatioMapsToWireSize/square/
+=== RUN   TestImageAspectRatioMapsToWireSize/Portrait/
+=== RUN   TestImageAspectRatioMapsToWireSize/portrait/512x512
+--- PASS: TestImageAspectRatioMapsToWireSize (0.00s)
+    --- PASS: TestImageAspectRatioMapsToWireSize/landscape/ (0.00s)
+    --- PASS: TestImageAspectRatioMapsToWireSize/portrait/ (0.00s)
+    --- PASS: TestImageAspectRatioMapsToWireSize/square/ (0.00s)
+    --- PASS: TestImageAspectRatioMapsToWireSize/Portrait/ (0.00s)
+    --- PASS: TestImageAspectRatioMapsToWireSize/portrait/512x512 (0.00s)
+=== RUN   TestPromptLimitIsEnforcedAtTheAdapter
+--- PASS: TestPromptLimitIsEnforcedAtTheAdapter (0.00s)
+=== RUN   TestImageBatchIsTruncatedToTheHarnessCeiling
+--- PASS: TestImageBatchIsTruncatedToTheHarnessCeiling (0.00s)
+=== RUN   TestProviderPanicMessageIsBoundedAndFlattened
+--- PASS: TestProviderPanicMessageIsBoundedAndFlattened (0.00s)
+=== RUN   TestDecisionStateRejectsRemoteURLAnywhere
+=== RUN   TestDecisionStateRejectsRemoteURLAnywhere/plain_text_URL
+=== RUN   TestDecisionStateRejectsRemoteURLAnywhere/nested_non-image_URL
+=== RUN   TestDecisionStateRejectsRemoteURLAnywhere/array_leaf_URL
+--- PASS: TestDecisionStateRejectsRemoteURLAnywhere (0.00s)
+    --- PASS: TestDecisionStateRejectsRemoteURLAnywhere/plain_text_URL (0.00s)
+    --- PASS: TestDecisionStateRejectsRemoteURLAnywhere/nested_non-image_URL (0.00s)
+    --- PASS: TestDecisionStateRejectsRemoteURLAnywhere/array_leaf_URL (0.00s)
+=== RUN   TestImageToolAcceptsTheHermesAspectRatio
+--- PASS: TestImageToolAcceptsTheHermesAspectRatio (0.00s)
+=== RUN   TestHTTPFetcherRefusesLoopback
+--- PASS: TestHTTPFetcherRefusesLoopback (0.00s)
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://0.0.0.0/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://10.1.2.3/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://100.64.0.1/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://127.0.0.1/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://169.254.169.254/latest/meta-data
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://172.16.0.1/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://192.168.1.1/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://224.0.0.1/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://[::1]/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://[fc00::1]/a
+=== RUN   TestHTTPFetcherRefusesNonPublicLiterals/http://[fe80::1]/a
+--- PASS: TestHTTPFetcherRefusesNonPublicLiterals (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://0.0.0.0/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://10.1.2.3/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://100.64.0.1/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://127.0.0.1/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://169.254.169.254/latest/meta-data (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://172.16.0.1/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://192.168.1.1/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://224.0.0.1/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://[::1]/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://[fc00::1]/a (0.00s)
+    --- PASS: TestHTTPFetcherRefusesNonPublicLiterals/http://[fe80::1]/a (0.00s)
+=== RUN   TestHTTPFetcherRefusesHostnameResolvingToPrivate
+=== RUN   TestHTTPFetcherRefusesHostnameResolvingToPrivate/private
+=== RUN   TestHTTPFetcherRefusesHostnameResolvingToPrivate/loopback
+=== RUN   TestHTTPFetcherRefusesHostnameResolvingToPrivate/metadata
+=== RUN   TestHTTPFetcherRefusesHostnameResolvingToPrivate/mixed_public_and_private
+--- PASS: TestHTTPFetcherRefusesHostnameResolvingToPrivate (0.00s)
+    --- PASS: TestHTTPFetcherRefusesHostnameResolvingToPrivate/private (0.00s)
+    --- PASS: TestHTTPFetcherRefusesHostnameResolvingToPrivate/loopback (0.00s)
+    --- PASS: TestHTTPFetcherRefusesHostnameResolvingToPrivate/metadata (0.00s)
+    --- PASS: TestHTTPFetcherRefusesHostnameResolvingToPrivate/mixed_public_and_private (0.00s)
+=== RUN   TestHTTPFetcherRefusesRedirectToPrivate
+--- PASS: TestHTTPFetcherRefusesRedirectToPrivate (0.00s)
+=== RUN   TestHTTPFetcherFetchesPublicAsset
+--- PASS: TestHTTPFetcherFetchesPublicAsset (0.00s)
+=== RUN   TestHTTPFetcherAllowPrivateHostsIsExplicitOptIn
+--- PASS: TestHTTPFetcherAllowPrivateHostsIsExplicitOptIn (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.236s
+exit=0

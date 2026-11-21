@@ -1,0 +1,45 @@
+# media hardening gates (2026-11-21, worktree keel-media-adapters)
+# DSN read from .env.local; the value is never printed.
+
+$ gofmt -l internal/mediaadapter internal/mediawiring internal/servicehost cmd/keel
+(no output)
+exit=0
+
+$ go build ./...
+exit=0
+
+$ go vet ./...
+exit=0
+
+$ KEEL_TEST_DSN=<from .env.local> go test -p 1 -count=1 ./...
+exit=0
+(serial per package: the shared test database deadlocks/duplicates DDL under
+ parallel package execution. 59 packages ok, 0 FAIL; see full-go-test.txt.)
+
+$ go test -race -count=1 ./internal/mediaadapter ./internal/mediawiring ./internal/servicehost
+exit=0
+(see race.txt)
+
+$ go test -race -count=1 ./internal/agentapi -run TestSettingsModelsRefusesADecisionBindingThatFailsPreflight
+exit=0
+(see race.txt)
+
+$ KEEL_TEST_DSN=<from .env.local> scripts/conformance.sh
+TOTAL 1097 pass / 0 fail / 1 skip
+exit=0
+(see conformance.txt / conformance.json)
+
+$ openspec validate keel-agent-team-v1 --strict --no-interactive
+Change 'keel-agent-team-v1' is valid
+exit=0
+(see openspec-strict.txt)
+
+Hardening tests (see hardening.txt):
+  SSRF: loopback, RFC1918, link-local/metadata, CGNAT, multicast, IPv6
+        loopback/ULA/link-local, hostname resolving private, mixed public+
+        private, redirect to private, public control, explicit allow-private.
+  P2:   32 KiB prompt bound (schema + adapter), image batch truncation and
+        usage double-count guard, panic message bound, decision remote URL
+        anywhere in state.
+  B P1-1: image aspect_ratio landscape/portrait/square -> wire size, explicit
+        size precedence, invalid enum rejected (schema + adapter), tool path.
