@@ -40,20 +40,28 @@ func e2eSign(secret string, tenantID uuid.UUID, triggerID, timestamp, key string
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-// doSignedPost sends the exact body and returns its status (and optionally
-// decodes the JSON answer).
-func doSignedPost(t *testing.T, client *http.Client, url string, tenant uuid.UUID,
-	body []byte, timestamp, signature string, out any) (int, http.Header) {
-	t.Helper()
+func newSignedRequest(url string, tenant uuid.UUID, body []byte, timestamp, signature string) (*http.Request, error) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	req.Header.Set("X-Tenant-ID", tenant.String())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Keel-Webhook", "1")
 	req.Header.Set("X-Keel-Timestamp", timestamp)
 	req.Header.Set("X-Keel-Signature", signature)
+	return req, nil
+}
+
+// doSignedPost sends the exact body and returns its status (and optionally
+// decodes the JSON answer).
+func doSignedPost(t *testing.T, client *http.Client, url string, tenant uuid.UUID,
+	body []byte, timestamp, signature string, out any) (int, http.Header) {
+	t.Helper()
+	req, err := newSignedRequest(url, tenant, body, timestamp, signature)
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -353,8 +361,21 @@ func TestTriggerConcurrencyLimitOverHTTP(t *testing.T) {
 	firstSignature := e2eSign(e2eWebhookSecret, tenantID, "web.test.busy", firstTimestamp, "busy-1", firstBody)
 	firstStatus := make(chan int, 1)
 	go func() {
-		code, _ := doSignedPost(t, client, fireURL, tenantID, firstBody, firstTimestamp, firstSignature, nil)
-		firstStatus <- code
+		// No t.Fatal in a goroutine: report a sentinel status and let the test
+		// goroutine fail with context.
+		req, err := newSignedRequest(fireURL, tenantID, firstBody, firstTimestamp, firstSignature)
+		if err != nil {
+			firstStatus <- -1
+			return
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			firstStatus <- -1
+			return
+		}
+		_, _ = io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		firstStatus <- res.StatusCode
 	}()
 	select {
 	case <-gated.entered:
