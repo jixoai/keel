@@ -1,0 +1,14 @@
+# Session reference protection gates (2026-11-21)
+
+go build ./...                                  exit 0
+go vet ./...                                    exit 0
+gofmt -l internal cmd                           only pre-existing internal/mcp/apps_ready_test.go
+go test -p 1 ./... -count=1 (KEEL_TEST_DSN)      exit 0; 0 FAIL (full-suite.txt)
+scripts/conformance.sh                          exit 0; 1103 pass / 0 fail / 1 skip
+openspec validate keel-agent-team-v1 --strict    exit 0 (openspec-validate.txt)
+scripts/session-ref-e2e.sh                      PASS (checks.json, port-release.txt)
+
+Note: KEEL_SERVE_PASSWORD is not exported into unit-test processes; sourcing
+.env.local wholesale makes the fake-server CLI tests reject the login, which is
+an environment artifact, not a code failure. The full-suite run above exported
+only KEEL_TEST_DSN.

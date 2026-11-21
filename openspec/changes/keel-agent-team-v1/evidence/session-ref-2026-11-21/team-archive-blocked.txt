@@ -1,2 +1,2 @@
-keel: server refused (409 team_in_use) at http://127.0.0.1:13610: team "team_ref" is the current binding of 1 live session(s): 5739fc5e-08aa-4833-ae84-fc88ce9c0352; archive or rebind those sessions before archiving it
-  referencing session: 5739fc5e-08aa-4833-ae84-fc88ce9c0352 (state active, run done)
+keel: server refused (409 team_in_use) at http://127.0.0.1:13610: team "team_ref" is the current binding of 1 live session(s): 02f2611a-356b-4a13-bc5a-b792cc6847f8; archive or rebind those sessions before archiving it
+  referencing session: 02f2611a-356b-4a13-bc5a-b792cc6847f8 (state active, run done)
