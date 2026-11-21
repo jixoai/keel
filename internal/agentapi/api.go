@@ -454,7 +454,7 @@ type MCPAppsCapabilities struct {
 
 func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 	features := map[string]bool{
-		"sessions.list":   s.cfg.Sessions != nil,
+		"sessions.list":   s.cfg.Sessions != nil && s.cfg.Access != nil,
 		"sessions.cancel": s.cfg.Cancel != nil,
 		"decisions":       s.cfg.Decisions != nil,
 		"partials":        s.cfg.Partials != nil,

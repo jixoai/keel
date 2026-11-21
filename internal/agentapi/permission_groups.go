@@ -354,8 +354,10 @@ func (s *Server) addPermissionGroupGrant(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, groupID,
-		"grant", "group_grant", key, string(scope), "ok", map[string]any{"created": created})
+	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, uuid.Nil,
+		"grant", "group_grant", key, string(scope), "ok", map[string]any{
+			"group_id": groupID.String(), "created": created,
+		})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "key": key, "scope": string(scope), "added": created,
 	})
@@ -391,8 +393,8 @@ func (s *Server) removePermissionGroupGrant(w http.ResponseWriter, r *http.Reque
 		writeStoreError(w, err)
 		return
 	}
-	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, groupID,
-		"revoke", "group_grant", key, string(scope), "ok", nil)
+	s.cfg.Access.AuditGrant(r.Context(), tenantID, principal.AccountID, uuid.Nil,
+		"revoke", "group_grant", key, string(scope), "ok", map[string]any{"group_id": groupID.String()})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "key": key, "scope": string(scope), "removed": true,
 	})

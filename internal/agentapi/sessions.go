@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/agentext"
 )
 
@@ -81,6 +82,18 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errors.New("session listing is not wired"))
 		return
 	}
+	// Session visibility is a relation, not a scope: the list is filtered through
+	// the engine's VisibleResources (A4.1). A deployment without the access seam
+	// fails closed instead of listing every session in the tenant.
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("session listing requires the identity access surface"))
+		return
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("authentication required"))
+		return
+	}
 	limit, err := queryInt(r, "limit", defaultSessionsLimit, 1, maxSessionsLimit)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -94,6 +107,32 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	if len(page.Sessions) > 0 {
+		candidates := make([]string, 0, len(page.Sessions))
+		for _, summary := range page.Sessions {
+			candidates = append(candidates, summary.SessionID)
+		}
+		visible, err := s.cfg.Access.Visible(r.Context(), principal, access.KeySessionRead, "session", candidates)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !visible.Allowed() {
+			writeDenied(w, visible.Decision)
+			return
+		}
+		allowed := make(map[string]bool, len(visible.IDs))
+		for _, id := range visible.IDs {
+			allowed[id] = true
+		}
+		filtered := page.Sessions[:0]
+		for _, summary := range page.Sessions {
+			if allowed[summary.SessionID] {
+				filtered = append(filtered, summary)
+			}
+		}
+		page.Sessions = filtered
 	}
 	for i := range page.Sessions {
 		summary := &page.Sessions[i]

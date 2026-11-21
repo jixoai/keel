@@ -91,8 +91,8 @@ func TestBuiltinGroupsReturnCopies(t *testing.T) {
 
 func TestSelfCheckRejectsBadBuiltinCatalog(t *testing.T) {
 	cases := map[string][]BuiltinGroup{
-		"empty": nil,
-		"empty name": {{Name: " ", Grants: []Grant{{Key: KeySessionRead, Scope: ScopeOwn}}}},
+		"empty":       nil,
+		"empty name":  {{Name: " ", Grants: []Grant{{Key: KeySessionRead, Scope: ScopeOwn}}}},
 		"unknown key": {{Name: "x", Grants: []Grant{{Key: "session.fly", Scope: ScopeOwn}}}},
 		"bad scope":   {{Name: "x", Grants: []Grant{{Key: KeySessionRead, Scope: "galaxy"}}}},
 		"scope":       {{Name: "x", Grants: []Grant{{Key: KeyAccountRead, Scope: ScopeOwn}}}},

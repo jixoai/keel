@@ -72,7 +72,10 @@ func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	records, err := s.cfg.Identity.ListBots(r.Context(), tenantID, identityFlag(r, "includeArchived"), limit)
+	// Read the bounded candidate window, filter by relation, then apply the page
+	// limit: limiting before the filter could return an empty page while a later
+	// candidate in the same window is visible.
+	records, err := s.cfg.Identity.ListBots(r.Context(), tenantID, identityFlag(r, "includeArchived"), maxIdentityPageLimit)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -100,6 +103,9 @@ func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
 			views = append(views, s.botViewOf(r, tenantID, record))
 		}
 	}
+	if len(views) > limit {
+		views = views[:limit]
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"bots": views})
 }
 
@@ -119,8 +125,12 @@ func botRecordFrom(tenantID uuid.UUID, request botWriteRequest, existing *store.
 	record := store.BotRecord{TenantID: tenantID}
 	if existing != nil {
 		record = *existing
-	}
-	if id := strings.TrimSpace(request.BotID); id != "" {
+		// A bot handle is its stable identity; a PATCH may repeat it but never
+		// change it (the path is the authority).
+		if id := strings.TrimSpace(request.BotID); id != "" && id != existing.ID {
+			return store.BotRecord{}, errors.New("botId cannot be changed")
+		}
+	} else if id := strings.TrimSpace(request.BotID); id != "" {
 		record.ID = id
 	}
 	if record.ID == "" {

@@ -86,6 +86,12 @@ func newAuthTestEnv(t *testing.T, mode authMode, tenantID uuid.UUID) *authTestEn
 			"botId":     r.Header.Get("X-Bot-ID"),
 		})
 	})
+	mux.HandleFunc("GET /v1/auth/whoami", func(w http.ResponseWriter, r *http.Request) {
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"tenantId": r.Header.Get("X-Tenant-ID"), "botId": r.Header.Get("X-Bot-ID"),
+			"accountId": r.Header.Get("X-Account-ID"),
+		})
+	})
 	mux.HandleFunc("GET /v1/bots/{id}/echo", func(w http.ResponseWriter, r *http.Request) {
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"tenantId":  r.Header.Get("X-Tenant-ID"),
@@ -668,10 +674,15 @@ func TestBotKeyLifecycleE2E(t *testing.T) {
 		map[string]string{"X-API-Key": plaintext}); status != http.StatusOK || echo["botId"] != "support-1" {
 		t.Fatalf("bot key via X-API-Key: %d %v", status, echo)
 	}
-	// A bot never uses the browser auth surface.
+	// A bot never uses the browser auth surface...
 	if status, _, _ := env.do(env.newClient(), http.MethodGet, "/v1/auth/session", nil,
 		map[string]string{"Authorization": "Bearer " + plaintext}); status != http.StatusForbidden {
 		t.Fatalf("bot on browser auth surface: %d", status)
+	}
+	// ...but whoami is identity introspection and answers for a bot key.
+	if status, who, _ := env.do(env.newClient(), http.MethodGet, "/v1/auth/whoami", nil,
+		map[string]string{"Authorization": "Bearer " + plaintext}); status != http.StatusOK || who["botId"] != "support-1" {
+		t.Fatalf("bot whoami: %d %v", status, who)
 	}
 	// last_used_at is updated by authentication.
 	keyUUID, _ := uuid.Parse(keyID)

@@ -323,3 +323,57 @@ func TestWhoAmIRealBridge(t *testing.T) {
 		t.Fatalf("bob permissions = %v, want empty", got)
 	}
 }
+
+// TestSessionListUsesVisibleResources is the list-endpoint proof for the
+// private-by-default session model: a tenant-scoped session.read key does not
+// list another account's session, and a caller without the key is refused.
+func TestSessionListUsesVisibleResources(t *testing.T) {
+	env := newIdentityEnv(t)
+	sessionID := uuid.New()
+	if _, err := env.starter.start(context.Background(), BotSessionRequest{
+		TenantID: env.tenant, SessionID: sessionID, BotID: env.aliceBot.ID,
+		AccountID: env.alice.ID, ActorAccountID: env.alice.ID, Text: "hello",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	listIDs := func(account store.AccountRecord, super bool) ([]string, int, map[string]any) {
+		status, body := env.do(http.MethodGet, "/v1/sessions", account, super, nil)
+		raw, _ := body["sessions"].([]any)
+		ids := make([]string, 0, len(raw))
+		for _, item := range raw {
+			entry, _ := item.(map[string]any)
+			if id, ok := entry["sessionId"].(string); ok {
+				ids = append(ids, id)
+			}
+		}
+		return ids, status, body
+	}
+	ids, status, body := listIDs(env.alice, false)
+	wantStatus(t, status, body, http.StatusOK, "alice lists sessions")
+	if !containsID(ids, sessionID.String()) {
+		t.Fatalf("alice sessions = %v, want %s", ids, sessionID)
+	}
+	ids, status, body = listIDs(env.super, true)
+	wantStatus(t, status, body, http.StatusOK, "super lists sessions")
+	if !containsID(ids, sessionID.String()) {
+		t.Fatalf("super sessions = %v", ids)
+	}
+
+	// Bob holds session.read at tenant scope but has no relation to the session.
+	if _, err := env.st.CreatePermissionGrant(context.Background(), store.PermissionGrantRecord{
+		TenantID: env.tenant, ID: uuid.New(), SubjectType: store.PermissionSubjectAccount,
+		SubjectID: env.bob.ID, PermissionKey: access.KeySessionRead,
+		Scope: string(access.ScopeTenant), GrantedBy: env.super.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids, status, body = listIDs(env.bob, false)
+	wantStatus(t, status, body, http.StatusOK, "bob lists sessions")
+	if containsID(ids, sessionID.String()) {
+		t.Fatalf("tenant-scoped session.read leaked another account's session: %v", ids)
+	}
+	// A caller with no session.read at all is refused, not given an empty list.
+	ids, status, body = listIDs(env.botAccount, false)
+	wantReason(t, status, body, http.StatusForbidden, access.ReasonMissingGrant, "no session.read lists sessions")
+	_ = ids
+}

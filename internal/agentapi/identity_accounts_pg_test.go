@@ -2,13 +2,16 @@ package agentapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/auth"
+	"github.com/jixoai/keel/internal/store"
 )
 
 func TestAccountsHTTPSurface(t *testing.T) {
@@ -261,15 +264,17 @@ func TestIdentityEndpointsFailClosedWithoutAccess(t *testing.T) {
 	api := New(Config{Logger: testLogger()})
 	server := httptest.NewServer(api)
 	defer server.Close()
-	req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/bots", nil)
-	req.Header.Set("X-Tenant-ID", uuid.NewString())
-	res, err := server.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("unwired /v1/bots = %d, want 503", res.StatusCode)
+	for _, path := range []string{"/v1/bots", "/v1/team-bots", "/v1/accounts", "/v1/permission-groups"} {
+		req, _ := http.NewRequest(http.MethodGet, server.URL+path, nil)
+		req.Header.Set("X-Tenant-ID", uuid.NewString())
+		res, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("unwired %s = %d, want 503", path, res.StatusCode)
+		}
 	}
 }
 
@@ -294,6 +299,92 @@ func TestIdentityEndpointCoverageGate(t *testing.T) {
 	} {
 		if !used[key] {
 			t.Fatalf("endpoint catalog does not declare %q", key)
+		}
+	}
+}
+
+// TestIdentityWritesAreAudited proves the A4.1 audit surface: grant/revoke,
+// relation change and super-admin action each land in auth_events with
+// non-sensitive detail.
+func TestIdentityWritesAreAudited(t *testing.T) {
+	env := newIdentityEnv(t)
+	ctx := context.Background()
+
+	status, body := env.do(http.MethodPost, "/v1/permission-groups", env.limited, false, map[string]any{
+		"name": "audited",
+	})
+	wantStatus(t, status, body, http.StatusCreated, "create audited group")
+	group, _ := body["group"].(map[string]any)
+	groupID := group["groupId"].(string)
+	status, body = env.do(http.MethodPost, "/v1/permission-groups/"+groupID+"/grants", env.limited, false, map[string]any{
+		"key": access.KeySessionRead, "scope": string(access.ScopeOwn),
+	})
+	wantStatus(t, status, body, http.StatusOK, "add audited grant")
+	grantEvents, err := env.st.ListAuthEvents(ctx, env.tenant, store.AuthEventFilter{
+		Kind: store.AuthEventPermissionGrant,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range grantEvents {
+		if event.Detail["via"] == "group_grant" && event.Detail["key"] == access.KeySessionRead &&
+			event.Detail["group_id"] == groupID && event.Detail["scope"] == string(access.ScopeOwn) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("grant audit rows = %+v, want the group grant", grantEvents)
+	}
+	status, body = env.do(http.MethodDelete,
+		"/v1/permission-groups/"+groupID+"/grants/"+access.KeySessionRead+"?scope="+string(access.ScopeOwn),
+		env.limited, false, nil)
+	wantStatus(t, status, body, http.StatusOK, "remove audited grant")
+	revokeEvents, err := env.st.ListAuthEvents(ctx, env.tenant, store.AuthEventFilter{
+		Kind: store.AuthEventPermissionRevoke,
+	}, 0)
+	if err != nil || len(revokeEvents) == 0 {
+		t.Fatalf("revoke audit rows = %d err=%v", len(revokeEvents), err)
+	}
+
+	// Creating a bot writes the owner relation and audits the tuple.
+	status, body = env.asAlice(http.MethodPost, "/v1/bots", map[string]any{
+		"botId": "audited-bot", "name": "Audited", "profileId": env.aliceProfile.ID.String(),
+		"modelKind":    "text",
+		"defaultModel": map[string]any{"providerId": "fake", "modelId": "fake"},
+		"harness":      map[string]any{"tools": []string{}, "context": map[string]any{"permissions": []string{}}},
+	})
+	wantStatus(t, status, body, http.StatusCreated, "create audited bot")
+	relationEvents, err := env.st.ListAuthEvents(ctx, env.tenant, store.AuthEventFilter{
+		Kind: store.AuthEventRelationChanged,
+	}, 0)
+	if err != nil || len(relationEvents) == 0 {
+		t.Fatalf("relation audit rows = %d err=%v", len(relationEvents), err)
+	}
+	if relationEvents[0].Detail["resource_type"] != "bot" || relationEvents[0].Detail["relation"] != "owner" {
+		t.Fatalf("relation audit detail = %+v", relationEvents[0].Detail)
+	}
+
+	// A super admin write is marked as such.
+	status, body = env.asSuper(http.MethodPost, "/v1/accounts", map[string]any{
+		"username": "audited-account", "displayName": "Audited", "kind": "human",
+		"password": "audited-password-123",
+	})
+	wantStatus(t, status, body, http.StatusCreated, "super creates account")
+	superEvents, err := env.st.ListAuthEvents(ctx, env.tenant, store.AuthEventFilter{
+		Kind: store.AuthEventSuperAdmin,
+	}, 0)
+	if err != nil || len(superEvents) == 0 {
+		t.Fatalf("superadmin audit rows = %d err=%v", len(superEvents), err)
+	}
+	if superEvents[0].Detail["action"] != "account.create" || superEvents[0].Detail["super_admin"] != true {
+		t.Fatalf("superadmin audit detail = %+v", superEvents[0].Detail)
+	}
+	// No audit detail carries a credential-shaped value.
+	for _, event := range append(append(grantEvents, revokeEvents...), superEvents...) {
+		raw, _ := json.Marshal(event.Detail)
+		if strings.Contains(string(raw), "password") || strings.Contains(string(raw), "keel_bot_") {
+			t.Fatalf("audit detail leaked credential material: %s", raw)
 		}
 	}
 }

@@ -101,6 +101,7 @@ func TestCapabilities(t *testing.T) {
 	defer broker.Close()
 	server := httptest.NewServer(New(Config{
 		Sessions: &fakeLister{},
+		Access:   permitAllAccess(),
 		Cancel: func(context.Context, uuid.UUID, uuid.UUID) (agentext.CancelResult, error) {
 			return agentext.CancelResult{}, nil
 		},
@@ -144,7 +145,7 @@ func TestSessionListPaginationAndIsolation(t *testing.T) {
 			RunStatus: "done",
 		})
 	}
-	server := httptest.NewServer(New(Config{Sessions: lister, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Sessions: lister, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 	tenant := uuid.New()
 	seen := map[string]bool{}

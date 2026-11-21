@@ -399,7 +399,7 @@ func TestCrossTenantSessionIs404(t *testing.T) {
 	archive := func(_ context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
 		return tenantID == tenantA && sessionID == secret, nil
 	}
-	server := httptest.NewServer(New(Config{Sessions: lister, ArchiveSession: archive, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Sessions: lister, ArchiveSession: archive, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 
 	// Tenant A sees it.

@@ -213,6 +213,7 @@ func newIdentityEnv(t *testing.T) *identityEnv {
 	env.bridge = bridge
 	env.starter = &fakeBotSessionStarter{t: t, st: st}
 	api := New(Config{
+		Sessions: NewPGSessionLister(st),
 		Identity: st, Access: bridge, StartBotSession: env.starter.start,
 		Logger: testLogger(),
 	})

@@ -78,7 +78,27 @@ func (s *Store) CreateOwnedSession(ctx context.Context, ownership SessionOwnersh
 		if err != nil {
 			return err
 		}
-		if existing.BotID != ownership.BotID || existing.AccountID != ownership.AccountID {
+		switch {
+		case existing.BotID == ownership.BotID && existing.AccountID == ownership.AccountID:
+			// Idempotent repeat of the same ownership.
+		case existing.BotID == "" && existing.AccountID == uuid.Nil && existing.CreatedByAccountID == uuid.Nil:
+			// The session was created unowned by the pre-A4 path (POST
+			// /v1/sessions without a bot, or a UI shell that creates first). Claim
+			// it atomically; a concurrent claim loses the WHERE bot_id IS NULL race.
+			claimed, err := tx.Exec(ctx,
+				`UPDATE sessions
+				    SET bot_id = $3, account_id = $4, created_by_account_id = $5,
+				        team_bot_id = NULLIF($6, ''), updated_at = now()
+				  WHERE tenant_id = $1 AND session_id = $2 AND bot_id IS NULL`,
+				ownership.TenantID, ownership.SessionID, ownership.BotID,
+				ownership.AccountID, ownership.CreatedByAccountID, ownership.TeamBotID)
+			if err != nil {
+				return identityWriteError("create owned session", err)
+			}
+			if claimed.RowsAffected() == 0 {
+				return conflictIdentity("create owned session", "session %s was claimed concurrently", ownership.SessionID)
+			}
+		default:
 			return conflictIdentity("create owned session",
 				"session %s is already owned by bot %q account %s", ownership.SessionID, existing.BotID, existing.AccountID)
 		}

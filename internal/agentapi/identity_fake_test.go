@@ -16,6 +16,7 @@ type fakeAccess struct {
 	grants       access.Grants
 	decisions    map[string]access.Decision
 	visible      access.VisibleResult
+	visibleAll   bool
 	visibleErr   error
 	canGrantErr  error
 	owner        uuid.UUID
@@ -36,8 +37,18 @@ func (f *fakeAccess) Authorize(_ context.Context, _ access.Principal, key string
 	return access.Decision{Allow: true, Reason: access.ReasonAllow, Key: key, Scope: access.ScopeTenant}, nil
 }
 
-func (f *fakeAccess) Visible(context.Context, access.Principal, string, string, []string) (access.VisibleResult, error) {
-	return f.visible, f.visibleErr
+func (f *fakeAccess) Visible(_ context.Context, _ access.Principal, key, resourceType string, candidateIDs []string) (access.VisibleResult, error) {
+	if f.visibleErr != nil {
+		return access.VisibleResult{}, f.visibleErr
+	}
+	if f.visibleAll {
+		return access.VisibleResult{
+			IDs:      candidateIDs,
+			Scope:    access.ScopeTenant,
+			Decision: access.Decision{Allow: true, Reason: access.ReasonAllow, Key: key, Scope: access.ScopeTenant},
+		}, nil
+	}
+	return f.visible, nil
 }
 
 func (f *fakeAccess) Effective(context.Context, access.Principal) (access.Grants, error) {
@@ -71,4 +82,10 @@ func (f *fakeAccess) AuditBotKey(context.Context, uuid.UUID, uuid.UUID, uuid.UUI
 
 func (f *fakeAccess) Denied(_ context.Context, _ access.Principal, decision access.Decision, _ access.Resource) {
 	f.denials = append(f.denials, decision)
+}
+
+// permitAllAccess is the explicit test seam for tests that exercise listing
+// mechanics rather than visibility. Production always wires the real bridge.
+func permitAllAccess() *fakeAccess {
+	return &fakeAccess{visibleAll: true}
 }

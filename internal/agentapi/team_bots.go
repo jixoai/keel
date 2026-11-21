@@ -95,7 +95,8 @@ func (s *Server) listTeamBots(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	records, err := s.cfg.Identity.ListTeamBots(r.Context(), tenantID, identityFlag(r, "includeArchived"), limit)
+	// Candidate window first, relation filter second, page limit last (see listBots).
+	records, err := s.cfg.Identity.ListTeamBots(r.Context(), tenantID, identityFlag(r, "includeArchived"), maxIdentityPageLimit)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -122,6 +123,9 @@ func (s *Server) listTeamBots(w http.ResponseWriter, r *http.Request) {
 		if allowed[record.ID] {
 			views = append(views, teamBotViewOf(record))
 		}
+	}
+	if len(views) > limit {
+		views = views[:limit]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"teamBots": views})
 }
@@ -434,10 +438,8 @@ func (s *Server) startTeamBot(w http.ResponseWriter, r *http.Request) {
 // names another account's Bot.
 func (s *Server) requireRosterInvoke(w http.ResponseWriter, r *http.Request, principal access.Principal, tenantID uuid.UUID, roster []botteam.RosterEntry) bool {
 	for _, seat := range roster {
-		if _, err := s.cfg.Identity.GetBot(r.Context(), tenantID, seat.BotID); err != nil {
-			writeStoreError(w, err)
-			return false
-		}
+		// Authorize before the existence read: a caller without bot.invoke gets one
+		// 403 whether or not the named Bot exists.
 		decision, err := s.cfg.Access.Authorize(r.Context(), principal, access.KeyBotInvoke, access.Resource{
 			TenantID: tenantID, Type: "bot", ID: seat.BotID,
 		})
@@ -447,6 +449,10 @@ func (s *Server) requireRosterInvoke(w http.ResponseWriter, r *http.Request, pri
 		}
 		if decision.Denied() {
 			writeDenied(w, decision)
+			return false
+		}
+		if _, err := s.cfg.Identity.GetBot(r.Context(), tenantID, seat.BotID); err != nil {
+			writeStoreError(w, err)
 			return false
 		}
 	}

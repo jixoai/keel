@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -94,10 +93,14 @@ func (s *Server) identityReady(w http.ResponseWriter) bool {
 	return true
 }
 
-// requireKey authorizes a tenant-level action (accounts, groups, bot create,
-// team-bot manage create). The resource carries the tenant so scope "all" is
-// still required to cross a tenant boundary.
+// requireKey authorizes a tenant-level action (accounts, groups, bot create).
+// The resource carries the tenant so scope "all" is still required to cross a
+// tenant boundary. A relation-scoped key is delegated to requireHeldKey: a
+// caller mistake must not turn a resource key into a relation-free allow.
 func (s *Server) requireKey(w http.ResponseWriter, r *http.Request, key string) (access.Principal, uuid.UUID, bool) {
+	if spec, known := access.Lookup(key); known && spec.RequiresRelation() {
+		return s.requireHeldKey(w, r, key)
+	}
 	tenantID, ok := tenantFrom(w, r)
 	if !ok {
 		return access.Principal{}, uuid.Nil, false
@@ -239,15 +242,6 @@ func pathUUID(w http.ResponseWriter, r *http.Request, name, code string) (uuid.U
 	return id, true
 }
 
-// optionalInt64 reads an optional integer (a CAS revision).
-func optionalInt64(raw string) (int64, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, nil
-	}
-	return strconv.ParseInt(raw, 10, 64)
-}
-
 // identityEndpointCatalog is the declarative key map of this file's routes. The
 // coverage test enumerates it; the routes themselves call requireKey /
 // requireResource with the same constants. whoami is intentionally absent: it
@@ -348,14 +342,6 @@ func timeView(value time.Time) any {
 	return value.UTC()
 }
 
-// stringOrEmpty keeps an optional pointer readable in a view.
-func stringOrEmpty(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
 // grantView is one (key, scope) pair on the wire.
 type grantView struct {
 	Key   string `json:"key"`
@@ -369,6 +355,3 @@ func grantViews(grants []store.PermissionGroupGrantRecord) []grantView {
 	}
 	return out
 }
-
-// fmtScope renders a scope for a response.
-func fmtScope(scope access.Scope) string { return string(scope) }

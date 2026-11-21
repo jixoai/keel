@@ -138,9 +138,6 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		record.PasswordHash = hash
 	}
-	if record.DisplayName == "" {
-		record.DisplayName = record.Username
-	}
 	created, err := s.cfg.Identity.CreateAccountAudited(r.Context(), record, principal.AccountID)
 	if err != nil {
 		writeStoreError(w, err)

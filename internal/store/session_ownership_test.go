@@ -132,3 +132,41 @@ func TestCreateOwnedSessionTeamBotSnapshot(t *testing.T) {
 		t.Fatalf("archived team err = %v, want ErrConflict", err)
 	}
 }
+
+func TestCreateOwnedSessionClaimsAnUnownedSession(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	account, _, _, bot := identityFixture(t, st)
+	sessionID := uuid.New()
+	// The pre-A4 create path writes a tenant session with no owner columns.
+	if err := st.CreateSession(ctx, account.TenantID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: account.TenantID, SessionID: sessionID, BotID: bot.ID,
+		AccountID: account.ID, CreatedByAccountID: account.ID,
+	}); err != nil {
+		t.Fatalf("claim unowned session: %v", err)
+	}
+	got, err := st.GetSessionOwnership(ctx, account.TenantID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BotID != bot.ID || got.AccountID != account.ID || got.CreatedByAccountID != account.ID {
+		t.Fatalf("claimed ownership = %+v", got)
+	}
+	// A claimed session cannot be re-owned by another account.
+	other, err := st.CreateAccount(ctx, AccountRecord{
+		TenantID: account.TenantID, ID: uuid.New(), Username: "claim-other-" + account.Username,
+		DisplayName: "Other", Kind: "human",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: account.TenantID, SessionID: sessionID, BotID: bot.ID,
+		AccountID: other.ID, CreatedByAccountID: other.ID,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("re-own claimed session err = %v, want ErrConflict", err)
+	}
+}

@@ -85,7 +85,12 @@ func (a *Auditor) Grant(ctx context.Context, tenantID, actor, target uuid.UUID, 
 	}
 	detail := map[string]any{
 		"action": action, "via": via, "key": key, "scope": scope,
-		"target_id": target.String(), "tenant_id": tenantID.String(),
+		"tenant_id": tenantID.String(),
+	}
+	if target != uuid.Nil {
+		// A membership grant targets an account; a group-grant write targets a
+		// group and leaves account_id NULL (the group id rides in the extra map).
+		detail["target_id"] = target.String()
 	}
 	if actor != uuid.Nil {
 		detail["actor_account_id"] = actor.String()

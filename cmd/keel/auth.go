@@ -247,7 +247,10 @@ func (a *authController) serve(w http.ResponseWriter, r *http.Request, next http
 // headers and forwards. Client-supplied identity headers are always replaced.
 func (a *authController) servePrincipal(w http.ResponseWriter, r *http.Request, principal auth.Principal, next http.Handler) {
 	if principal.IsBot() {
-		if strings.HasPrefix(r.URL.Path, "/v1/auth/") {
+		// A bot key never drives the browser auth surface (login/session/password/
+		// bootstrap), but whoami is identity introspection and must answer for a
+		// bot credential too (A4.1).
+		if strings.HasPrefix(r.URL.Path, "/v1/auth/") && r.URL.Path != "/v1/auth/whoami" {
 			writeAuthError(w, http.StatusForbidden, "bot_browser_forbidden", "a bot key cannot use the browser auth surface")
 			return
 		}

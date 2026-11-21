@@ -208,7 +208,7 @@ func CheckCoverage(endpoints []Endpoint) CoverageReport {
 // coverage gate refuses a catalog below it, so a generator that silently
 // returns nothing (or loses a route family) fails CI instead of passing
 // vacuously.
-const MinHTTPEndpoints = 24
+const MinHTTPEndpoints = 30
 
 // CheckCoverageFloor is CheckCoverage plus the non-empty/known-floor
 // assertion. It is the gate form A4's CI runs; CheckCoverage stays the pure

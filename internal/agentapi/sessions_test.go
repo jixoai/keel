@@ -61,7 +61,7 @@ func TestSessionListRowCarriesTitleAndCreatedAt(t *testing.T) {
 		{SessionID: uuid.NewString(), CreatedAt: created, UpdatedAt: created, Title: "做一件事"},
 		{SessionID: uuid.NewString(), CreatedAt: created, UpdatedAt: created, Title: ""},
 	}}
-	server := httptest.NewServer(New(Config{Sessions: lister, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Sessions: lister, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 
 	var raw struct {
