@@ -9,6 +9,7 @@
 //   empty         no accounts and no groups
 //   error         the account read answers 500
 //   permission    the caller holds no identity key (the chapter gate)
+//   records-error the records chapter whose audit read answers 500
 //   unavailable   the records chapter with no audit read surface
 //   records       the records chapter with a small, real ledger
 //

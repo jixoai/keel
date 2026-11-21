@@ -538,6 +538,10 @@ class IdentityAccessStore {
     const detail = this.groupDetail();
     const changes = this.groupChanges();
     if (!api || !detail || !changes.length) return { ok: true, applied: 0, total: 0 };
+    if (!api.addPermissionGroupGrant || !api.removePermissionGroupGrant) {
+      this.groupSaveError.set("这个传输不支持保存权限组。");
+      return { ok: false, applied: 0, total: changes.length };
+    }
     const groupId = detail.group.groupId;
     const intended = { ...(this.groupDraft() ?? {}) };
     let applied = 0;
