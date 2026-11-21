@@ -64,23 +64,32 @@
 
 ### A4.1 后端接线（先做，阻塞 L5）
 
-- [ ] access 适配器：`GrantSource` 只取 account 直授；`GroupGrants` 走
+- [x] access 适配器：`GrantSource` 只取 account 直授；`GroupGrants` 走
       `permission_group_members` join `permission_group_grants`；`RelationSource` 解析 store；
       `ResolveSubject` 无法解析时 fail closed
-- [ ] 引擎级可见性过滤器 `VisibleResources`：列表/聚合端点只准用它，禁止 handler 用
+- [x] 引擎级可见性过滤器 `VisibleResources`：列表/聚合端点只准用它，禁止 handler 用
       `scope >= tenant` 跳过 relation；补跨租户/无关系负控
-- [ ] 内置权限组种子：super-admin（全部 key + all）、tenant-admin、bot-operator、viewer、auditor
-- [ ] 超管写入白名单：只有 bootstrap 可创建 `is_super_admin`；普通 API 拒绝提升；始终保留至少一个
-- [ ] 覆盖率门非空断言：CI 要求 `Checked >= 已知路由总数下限`，空快照失败
-- [ ] store/access 的 scope/subject 词表交叉一致性测试（漂移 fail closed）
-- [ ] 审计落盘：grant/revoke/deny/超管操作/relation 变更；敏感值不落日志
-- [ ] HTTP `/v1/accounts`（列表/创建/详情/禁用/启用/重置密码/授权组）接 access
-- [ ] HTTP `/v1/bots`（CRUD/归档/Profile/Harness/试跑）接 access
-- [ ] HTTP `/v1/team-bots`（CRUD/归档/Mission/Roster/启动）接 access
-- [ ] Bot key 端点迁到 `/v1/bots/{id}/keys`；删 A2 临时 `/v1/auth/bot-keys`
-- [ ] `/v1/auth/whoami` 返回 Account/Bot 身份，不再返回旧 tenant role
-- [ ] Bot 级 Profile 绑定；权限实时判定；Role 变更 hook 注入提示
-- [ ] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
+- [x] 内置权限组种子：super-admin（全部 key + all）、tenant-admin、bot-operator、viewer、auditor
+- [x] 超管写入白名单：只有 bootstrap 可创建 `is_super_admin`；普通 API 拒绝提升；始终保留至少一个
+- [x] 覆盖率门非空断言：CI 要求 `Checked >= 已知路由总数下限`，空快照失败
+- [x] store/access 的 scope/subject 词表交叉一致性测试（漂移 fail closed）
+- [x] 审计落盘：grant/revoke/deny/超管操作/relation 变更；敏感值不落日志
+- [x] HTTP `/v1/accounts`（列表/创建/详情/禁用/启用/重置密码/授权组）接 access
+- [x] HTTP `/v1/bots`（CRUD/归档/Profile/Harness/试跑）接 access
+- [x] HTTP `/v1/team-bots`（CRUD/归档/Mission/Roster/启动）接 access
+- [x] Bot key 端点迁到 `/v1/bots/{id}/keys`；删 A2 临时 `/v1/auth/bot-keys`
+- [x] `/v1/auth/whoami` 返回 Account/Bot 身份，不再返回旧 tenant role
+- [x] Bot 级 Profile 绑定；Role 变更 hook 注入提示（HTTP Profile/Role CRUD 留 A4.2）
+- [x] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
+- [x] 旧无主 session 原子认领；Bot invoke/TeamBot start/generic session 归属
+- [ ] **单资源 Session 路由接关系**：`/v1/sessions/{id}/events|input|run|decisions`、SSE、
+      cancel/archive 仍只有租户边界；A4.2 必须统一走 `session.read/write` + relation
+- [ ] Profile/Role HTTP CRUD（A4.2/L5）
+- [ ] 分页：accounts/groups 有界 limit；bots/teams 候选窗口 500；keyset 留后续
+- [ ] 多租户内置组 seed（新建租户时）
+- [ ] Bot 创建与 owner 关系同事务（当前关系写失败会留下无 owner Bot）
+- [ ] 管理员重置密码与 CLI reset 对齐：强制下次改密
+- [ ] `bot.invoke` 关系阈值（viewer vs editor/owner）产品裁决
 
 ### A4.2 重命名与旧入口删除
 
