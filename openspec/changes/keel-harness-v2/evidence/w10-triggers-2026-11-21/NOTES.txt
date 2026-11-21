@@ -117,6 +117,10 @@ see baseline-cmd-keel-preexisting.txt captured in the clean
 involved (auth stub vs CLI login). The full suites are run with -p 1 because
 parallel packages race the shared test cluster's schema/RLS migration and hit
 statement timeouts (pre-existing).
+`internal/agentapi.TestMCPAppRejectionAuditSampling` is a known pre-existing
+sampler-window flake (two audit rows for one window under concurrent load); it
+passes in the full -p 1 suite and in isolated -race -count=5, and W8 evidence
+recorded the same flake.
 
 Known limits / not done
 - HMAC keys are resolved from a direct spec value or a named environment
