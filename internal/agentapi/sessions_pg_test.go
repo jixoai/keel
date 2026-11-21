@@ -137,7 +137,7 @@ func TestPGSessionListerKeysetPagination(t *testing.T) {
 	}
 
 	// The HTTP layer turns the same cursor into a page.
-	server := httptest.NewServer(New(Config{Sessions: lister, Logger: testLogger()}))
+	server := httptest.NewServer(New(Config{Sessions: lister, Access: permitAllAccess(), Logger: testLogger()}))
 	defer server.Close()
 	var page struct {
 		Sessions   []SessionSummary `json:"sessions"`
