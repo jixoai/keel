@@ -233,6 +233,10 @@ type Config struct {
 	// DrainGate, when set, closes the worker's claim path during a drain and
 	// reports the in-flight run count (internal/handoff's Coordinator).
 	DrainGate agent.DrainGate
+	// ToolAccess authorizes every model tool call (A4.2b1). Production wires the
+	// access-backed implementation; nil leaves the runner fail-closed (every
+	// tool call is refused), never open.
+	ToolAccess agent.ToolAccess
 
 	Prompt PromptOptions
 	MCP    MCPOptions

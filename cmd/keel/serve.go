@@ -55,6 +55,7 @@ import (
 	"github.com/jixoai/keel/internal/tasklog"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/testkit"
+	"github.com/jixoai/keel/internal/toolauth"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
 
@@ -597,8 +598,24 @@ func runServe(parent context.Context, opts serveOptions) error {
 		SamplingMode: samplingMode,
 	})
 
+	// The access bridge is shared by the runtime tool surface and the product
+	// HTTP surface: one authorizer, one grant/relation read path, one audit
+	// stream. The tool seam must exist before Boot because the runner pins it
+	// with the generation.
+	accessBridge, err := accesswire.NewBridge(st, log)
+	if err != nil {
+		return fmt.Errorf("access bridge: %w", err)
+	}
+	toolAccess, err := toolauth.New(accessBridge, log)
+	if err != nil {
+		return fmt.Errorf("tool access: %w", err)
+	}
+
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
+		// Every model tool call is authorized against the session's principal
+		// (Bot Account ∩ Harness) before it executes (A4.2b1).
+		ToolAccess: toolAccess,
 		Seams: servicehost.Seams{
 			// The run loop keeps the raw kernel: its read-marker/checkpoint
 			// capabilities are derived from the concrete committer, and the
@@ -829,7 +846,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	edge := newEdgeQuota(st)
 	hostTheme := loadHostTheme(static.root, log)
 	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, placementRT.Gate, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr, log)
+		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr, log)
 	if err != nil {
 		return err
 	}
@@ -1133,7 +1150,7 @@ func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UU
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
 		Store:  agentext.NewTasksDecisionStore(st),
@@ -1250,11 +1267,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// configuration answers 501 exactly like a boot without a models document.
 	modelSeam := modelRuntimeSeam{rt: rt}
 	// The product identity surface shares one authorizer across HTTP, the Bot
-	// invoke/start seams and whoami. It reads grants and relations from the same
-	// store the request path uses; there is no second permission cache.
-	accessBridge, err := accesswire.NewBridge(st, log)
-	if err != nil {
-		return nil, fmt.Errorf("access bridge: %w", err)
+	// invoke/start seams, whoami and the runtime tool surface. It reads grants
+	// and relations from the same store the request path uses; there is no
+	// second permission cache.
+	if accessBridge == nil {
+		return nil, errors.New("access bridge is required")
 	}
 	var secretStore agentapi.SecretStore
 	if secretBox != nil {

@@ -226,7 +226,10 @@ func TestExtensionSurfaceE2E(t *testing.T) {
 	defer hooks.Close()
 	memTelemetry := telemetry.NewMemory()
 	runner := agent.NewRunner(kern, kern, agent.FakeStream(), "fake", "fake", "", log)
-	// This suite drives fake-provider turns through the deterministic echo tool.
+	// This suite drives fake-provider turns through the deterministic echo tool
+	// without the identity surface: the allow-all fake is the explicit opt-out
+	// the fail-closed production default requires (A4.2b1).
+	runner.ToolAccess = agent.AllowAllToolAccess{}
 	// Production runners get the tool from the keel.testkit plugin; the test
 	// registers it directly because it exercises the extension runtime, not the
 	// product tool surface.

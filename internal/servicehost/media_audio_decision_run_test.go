@@ -31,12 +31,13 @@ func bootScriptedRun(t *testing.T, document string, lookup map[string]string, ar
 	tenant, session := uuid.New(), uuid.New()
 	mem.CreateSession(tenant, session)
 	rt, err := Boot(context.Background(), Config{
-		Seams:     Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
-		Tenant:    host.TenantConfig{Models: json.RawMessage(document)},
-		LLM:       testLLM(lookup, ""),
-		Options:   loadout.Options{Worker: true, RunConcurrency: 1},
-		RuntimeID: "media-speech-decision-run",
-		Product:   mediaProduct(t, lookup, artifacts),
+		Seams:      Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
+		Tenant:     host.TenantConfig{Models: json.RawMessage(document)},
+		LLM:        testLLM(lookup, ""),
+		Options:    loadout.Options{Worker: true, RunConcurrency: 1},
+		RuntimeID:  "media-speech-decision-run",
+		ToolAccess: allowAllToolAccess(),
+		Product:    mediaProduct(t, lookup, artifacts),
 	})
 	if err != nil {
 		t.Fatalf("Boot: %v", err)

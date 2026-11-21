@@ -101,6 +101,12 @@ type Runner struct {
 	// the next attempt without touching an attempt already in flight.
 	Bindings BindingResolver
 	Tools    *agenttool.ToolRegistry
+	// ToolAccess authorizes every model tool call before execution (A4.2b1).
+	// The product layer resolves the session's principal (Bot Account ∩
+	// Harness) and checks the tool's required key/relation. Nil is fail-closed:
+	// a runner without the seam refuses every tool call. Tests and internal
+	// runtimes may inject AllowAllToolAccess explicitly.
+	ToolAccess ToolAccess
 	// Assembly, when set, overrides Tools and supplies the system prompt. It is
 	// the host layer (skills, MCP tools, tenant instructions) plugged into the
 	// runtime; the kernel loop never knows about it.
@@ -744,7 +750,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			// CompactionEvent, which the consumer persists below.
 		},
 		Batch: agenttool.BatchConfig{
-			ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: tools},
+			ToolExecutorConfig: agenttool.ToolExecutorConfig{
+				Registry: tools,
+				// Every model tool call is authorized against the session's
+				// principal (Bot Account ∩ Harness) before it executes. The guard
+				// is fail-closed when no access seam is wired.
+				BeforeToolCall: r.toolAccessGuard(lease.Scope),
+			},
 		},
 		EventBuffer: 32,
 		SessionID:   lease.Scope.SessionID.String(),
@@ -1233,8 +1245,14 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease,
 		return msgs, seqs, cursor, nil
 	}
 	r.Logger.Warn("resuming unresolved tool calls", "session", lease.Scope.SessionID, "count", len(missing))
+	// Recovery replays calls the same agent asked for; they pass through the
+	// same authorization seam as a live call, so a revoked grant cannot be
+	// resurrected by a crash/restart.
 	results, _ := agenttool.ExecuteToolCalls(ctx, agenttool.BatchConfig{
-		ToolExecutorConfig: agenttool.ToolExecutorConfig{Registry: tools},
+		ToolExecutorConfig: agenttool.ToolExecutorConfig{
+			Registry:       tools,
+			BeforeToolCall: r.toolAccessGuard(lease.Scope),
+		},
 	}, missing, nil)
 	for _, tr := range results {
 		msgs = append(msgs, tr)

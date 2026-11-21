@@ -156,12 +156,13 @@ func TestWorkerRunCallsImageGenerateAndCommitsReferences(t *testing.T) {
 	tenant, session := uuid.New(), uuid.New()
 	mem.CreateSession(tenant, session)
 	rt, err := Boot(context.Background(), Config{
-		Seams:     Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
-		Tenant:    host.TenantConfig{Models: json.RawMessage(runModelsDocument(fixture.server.URL, "image", "img-1", "IMG_KEY"))},
-		LLM:       testLLM(lookup, ""),
-		Options:   loadout.Options{Worker: true, RunConcurrency: 1},
-		RuntimeID: "media-run-runtime",
-		Product:   mediaProduct(t, lookup, artifacts),
+		Seams:      Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
+		Tenant:     host.TenantConfig{Models: json.RawMessage(runModelsDocument(fixture.server.URL, "image", "img-1", "IMG_KEY"))},
+		LLM:        testLLM(lookup, ""),
+		Options:    loadout.Options{Worker: true, RunConcurrency: 1},
+		RuntimeID:  "media-run-runtime",
+		ToolAccess: allowAllToolAccess(),
+		Product:    mediaProduct(t, lookup, artifacts),
 	})
 	if err != nil {
 		t.Fatalf("Boot: %v", err)
@@ -306,12 +307,13 @@ func TestWorkerRunFailsClosedWithoutAMediaCredential(t *testing.T) {
 	tenant, session := uuid.New(), uuid.New()
 	mem.CreateSession(tenant, session)
 	rt, err := Boot(context.Background(), Config{
-		Seams:     Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
-		Tenant:    host.TenantConfig{Models: json.RawMessage(runModelsDocument(fixture.server.URL, "image", "img-1", "IMG_KEY"))},
-		LLM:       testLLM(lookup, ""),
-		Options:   loadout.Options{Worker: true, RunConcurrency: 1},
-		RuntimeID: "media-run-runtime",
-		Product:   mediaProduct(t, lookup, artifacts),
+		Seams:      Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
+		Tenant:     host.TenantConfig{Models: json.RawMessage(runModelsDocument(fixture.server.URL, "image", "img-1", "IMG_KEY"))},
+		LLM:        testLLM(lookup, ""),
+		Options:    loadout.Options{Worker: true, RunConcurrency: 1},
+		RuntimeID:  "media-run-runtime",
+		ToolAccess: allowAllToolAccess(),
+		Product:    mediaProduct(t, lookup, artifacts),
 	})
 	if err != nil {
 		t.Fatalf("Boot: %v", err)
@@ -375,12 +377,13 @@ func TestWorkerRunCallsVideoGenerateAndCommitsReferences(t *testing.T) {
 	tenant, session := uuid.New(), uuid.New()
 	mem.CreateSession(tenant, session)
 	rt, err := Boot(context.Background(), Config{
-		Seams:     Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
-		Tenant:    host.TenantConfig{Models: json.RawMessage(runModelsDocument(fixture.server.URL, "video", "vid-1", "VID_KEY"))},
-		LLM:       testLLM(lookup, ""),
-		Options:   loadout.Options{Worker: true, RunConcurrency: 1},
-		RuntimeID: "media-run-runtime",
-		Product:   mediaProduct(t, lookup, artifacts),
+		Seams:      Seams{Committer: k, Reader: k, Leases: k, External: k, Runs: fakeMirror{}, Logger: discardLogger()},
+		Tenant:     host.TenantConfig{Models: json.RawMessage(runModelsDocument(fixture.server.URL, "video", "vid-1", "VID_KEY"))},
+		LLM:        testLLM(lookup, ""),
+		Options:    loadout.Options{Worker: true, RunConcurrency: 1},
+		RuntimeID:  "media-run-runtime",
+		ToolAccess: allowAllToolAccess(),
+		Product:    mediaProduct(t, lookup, artifacts),
 	})
 	if err != nil {
 		t.Fatalf("Boot: %v", err)

@@ -101,6 +101,7 @@ func TestMCPToolDetailsSurviveTheLedgerAndStayOutOfTheModelContext(t *testing.T)
 
 	stream := &detailsRecordingStream{}
 	runner := NewRunner(k, k, stream.fn(), "fake", "fake", "", discardLog())
+	runner.ToolAccess = AllowAllToolAccess{}
 	if err := runner.Tools.Register(mcpDetailsTool{}); err != nil {
 		t.Fatalf("register tool: %v", err)
 	}

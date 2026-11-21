@@ -77,6 +77,96 @@ func (b *Bridge) Principal(ctx context.Context, tenantID uuid.UUID) (access.Prin
 	return principal, nil
 }
 
+// SessionPrincipal resolves the identity a session runs as (A4.2b1): the Bot's
+// owner Account plus the Bot handle and its Harness narrowing. A legacy
+// account-owned session (no Bot) resolves to the account itself; a disabled
+// account, a missing/archived Bot or a Bot whose Profile names another account
+// is ErrNoPrincipal, never a guessed identity.
+//
+// This is the runtime tool surface's principal source. It reads the ownership
+// columns (not a header, not a request scope), so a model tool call can never
+// choose whose authority it runs under.
+func (b *Bridge) SessionPrincipal(ctx context.Context, tenantID, sessionID uuid.UUID) (access.Principal, error) {
+	if b == nil || b.Store == nil {
+		return access.Principal{}, errors.New("accesswire: bridge is not configured")
+	}
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return access.Principal{}, ErrNoPrincipal
+	}
+	ownership, err := b.Store.GetSessionOwnership(ctx, tenantID, sessionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return access.Principal{}, ErrNoPrincipal
+		}
+		return access.Principal{}, err
+	}
+	accountID := ownership.AccountID
+	if accountID == uuid.Nil {
+		// A pre-A4 session has null ownership columns; its owner relation is the
+		// identity. A session with neither a column nor an owner tuple is not a
+		// principal (fail closed).
+		owner, found, err := b.Store.SessionOwnerAccount(ctx, tenantID, sessionID)
+		if err != nil {
+			return access.Principal{}, err
+		}
+		if !found {
+			return access.Principal{}, ErrNoPrincipal
+		}
+		accountID = owner
+	}
+	// The account row is authoritative for the disabled state in BOTH modes. A
+	// disabled Bot account must not keep running tools: A2 rejects its login,
+	// and the runtime seam refuses the principal it already has (defense in
+	// depth, and the fact the next tool call reads live).
+	account, err := b.Store.GetAccount(ctx, tenantID, accountID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return access.Principal{}, ErrNoPrincipal
+		}
+		return access.Principal{}, err
+	}
+	if account.DisabledAt != nil {
+		return access.Principal{}, ErrNoPrincipal
+	}
+	principal := access.Principal{TenantID: tenantID, AccountID: accountID}
+	if ownership.BotID != "" {
+		permissions, err := b.BotHarnessPermissions(ctx, tenantID, ownership.BotID, ownership.AccountID)
+		if err != nil {
+			return access.Principal{}, err
+		}
+		principal.BotID = ownership.BotID
+		principal.HarnessPermissions = permissions
+		return principal, nil
+	}
+	// A pre-A4 session belongs to its creating account and has no Bot Harness to
+	// narrow it. The account row supplies the super-admin flag.
+	principal.IsSuperAdmin = account.IsSuperAdmin
+	return principal, nil
+}
+
+// SessionBotID returns the Bot handle a session is owned by ("" for a legacy
+// account-owned session). A missing or unowned session is ErrNoPrincipal: the
+// caller must fail closed, never report "no bot" as an authorization pass.
+func (b *Bridge) SessionBotID(ctx context.Context, tenantID, sessionID uuid.UUID) (string, error) {
+	if b == nil || b.Store == nil {
+		return "", errors.New("accesswire: bridge is not configured")
+	}
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return "", ErrNoPrincipal
+	}
+	ownership, err := b.Store.GetSessionOwnership(ctx, tenantID, sessionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return "", ErrNoPrincipal
+		}
+		return "", err
+	}
+	if ownership.BotID == "" || ownership.AccountID == uuid.Nil {
+		return "", ErrNoPrincipal
+	}
+	return ownership.BotID, nil
+}
+
 // BotHarnessPermissions reads the Bot's Harness narrowing. A bot key whose Bot
 // is missing, archived or owned by another account is not a usable principal;
 // an unreadable Harness document narrows to nothing (fail closed).

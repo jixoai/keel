@@ -12,6 +12,10 @@ import (
 // round-trip register the tool explicitly, exactly like the extension E2E.
 func registerTestkitTools(t *testing.T, runner *Runner) {
 	t.Helper()
+	// These tests drive the deterministic echo/clock tools without the identity
+	// surface; the allow-all fake is the explicit opt-out the production
+	// fail-closed default requires (A4.2b1).
+	runner.ToolAccess = AllowAllToolAccess{}
 	if err := runner.Tools.Register(testkit.ClockTool{}); err != nil {
 		t.Fatalf("register testkit clock: %v", err)
 	}

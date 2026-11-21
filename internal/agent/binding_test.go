@@ -133,6 +133,10 @@ func (t stubTool) Execute(context.Context, string, json.RawMessage, agentcore.To
 // assembly, resolver and stream.
 func bindingRunner(k *kernel.Kernel, assembly Assembly, bindings BindingResolver, models ModelResolver, stream provider.StreamFn) *Runner {
 	r := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	// These tests exercise the binding/tool-surface projection without the
+	// identity surface; the explicit allow-all fake is what the fail-closed
+	// production default requires.
+	r.ToolAccess = AllowAllToolAccess{}
 	r.Assembly = assembly
 	r.Bindings = bindings
 	r.Models = models

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -232,6 +233,68 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"subagent": record})
 }
 
+// requireSubagentBotInvoke closes the legacy agentId bypass on the HTTP
+// sub-agent routes (A4.2b1): a caller naming an Agent/Bot target needs
+// bot.invoke on it, exactly like the model-facing `agent` tool. A call naming
+// no target spawns the parent's own Bot and needs no extra capability (the
+// route's session.write/relation gate already authorized the parent).
+func (s *Server) requireSubagentBotInvoke(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, agentID string, selection json.RawMessage) bool {
+	target := strings.TrimSpace(agentID)
+	if target == "" {
+		target = selectionAgentID(selection)
+	}
+	if target == "" {
+		return true
+	}
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("the identity surface is not wired in this deployment"))
+		return false
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+		return false
+	}
+	decision, err := s.cfg.Access.Authorize(r.Context(), principal, access.KeyBotInvoke, access.Resource{
+		TenantID: tenantID, Type: "bot", ID: target,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if decision.Denied() {
+		writeDenied(w, decision)
+		return false
+	}
+	// bot.invoke is high risk: the accepted call is audited like the HTTP
+	// invoke route. A failed audit write refuses the call.
+	if err := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, target, uuid.Nil, "authorized"); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return false
+	}
+	return true
+}
+
+// selectionAgentID extracts a legacy agentId from a selection fact. A fact that
+// names a team is not a bot target (the team decides its captain); it is left
+// to the existing team validation.
+func selectionAgentID(selection json.RawMessage) string {
+	if len(strings.TrimSpace(string(selection))) == 0 {
+		return ""
+	}
+	var fact struct {
+		AgentID string `json:"agentId"`
+		TeamID  string `json:"teamId"`
+	}
+	if err := json.Unmarshal(selection, &fact); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(fact.TeamID) != "" {
+		return ""
+	}
+	return strings.TrimSpace(fact.AgentID)
+}
+
 // spawnSubagentRequest is the additive HTTP form of the spawn primitive. The
 // model-facing agent tool uses the same runner.
 type spawnSubagentRequest struct {
@@ -260,6 +323,9 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 	var body spawnSubagentRequest
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !s.requireSubagentBotInvoke(w, r, tenantID, body.AgentID, body.Selection) {
 		return
 	}
 	record, err := s.cfg.Subagents.SpawnAsync(r.Context(), agentext.SpawnRequest{
@@ -370,6 +436,9 @@ func (s *Server) forkSubagent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !s.requireSubagentBotInvoke(w, r, tenantID, body.AgentID, body.Selection) {
+		return
+	}
 	record, err := s.cfg.Subagents.ForkAsync(r.Context(), agentext.ForkRequest{
 		TenantID:        tenantID,
 		ParentSessionID: parentID,
@@ -446,6 +515,11 @@ func (s *Server) resumeSubagent(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := uuid.Parse(body.SessionID)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, errors.New("sessionId must be a UUID"))
+		return
+	}
+	// A legacy agentId/selection changes the binding the resumed child runs as;
+	// the caller needs bot.invoke on that target exactly like a fresh spawn.
+	if !s.requireSubagentBotInvoke(w, r, tenantID, body.AgentID, body.Selection) {
 		return
 	}
 	result, err := s.cfg.Subagents.Resume(r.Context(), agentext.ResumeRequest{

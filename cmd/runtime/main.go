@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/handoff"
 	"github.com/jixoai/keel/internal/host"
@@ -37,6 +38,7 @@ import (
 	"github.com/jixoai/keel/internal/servicehost"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
+	"github.com/jixoai/keel/internal/toolauth"
 )
 
 func main() {
@@ -412,7 +414,23 @@ func main() {
 	// narrow seams only (kernel Committer/Reader/LeaseManager/ExternalSessions,
 	// the read-only run mirror, its own interfaces); the raw store and kernel
 	// stay in this file.
+	//
+	// Model tool calls are authorized against the session's principal (Bot
+	// Account ∩ Harness) before execution. The runtime shares the access engine
+	// with the product surface; an unowned session fails closed rather than
+	// running tools with an unproven identity.
+	accessBridge, err := accesswire.NewBridge(st, log)
+	if err != nil {
+		log.Error("access bridge", "err", err)
+		os.Exit(1)
+	}
+	toolAccess, err := toolauth.New(accessBridge, log)
+	if err != nil {
+		log.Error("tool access", "err", err)
+		os.Exit(1)
+	}
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
+		ToolAccess: toolAccess,
 		Seams: servicehost.Seams{
 			// The run loop keeps the raw kernel: its read-marker/checkpoint
 			// capabilities are derived from the concrete committer, and the

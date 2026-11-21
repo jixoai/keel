@@ -481,6 +481,9 @@ func TestRunnerUsesHostAssembly(t *testing.T) {
 	}
 	k := testKernel(t, st)
 	r := NewRunner(k, k, stream, "fake", "fake", "", discardLog())
+	// This test drives the host assembly directly without the identity surface;
+	// the explicit allow-all fake is the fail-closed default's opt-out.
+	r.ToolAccess = AllowAllToolAccess{}
 	r.Tools = nil // only the host registry may execute tools
 	r.Assembly = staticAssembly{prompt: prompt, tools: reg}
 	if _, err := execRun(t, k, r, tenant, session); err != nil {
