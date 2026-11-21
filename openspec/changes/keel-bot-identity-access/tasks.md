@@ -34,16 +34,17 @@
 
 ## A2 认证
 
-- [ ] Argon2id 密码哈希 + 参数常量 + 单元测试
-- [ ] `POST /v1/auth/login|logout|session|password`；签名 cookie（HttpOnly/Secure/SameSite）
-- [ ] CSRF 双提交；所有写请求校验
-- [ ] 登录限速/锁定/审计（username + IP）
-- [ ] `auth_sessions` 持久化；登出/改密/禁用即时吊销
-- [ ] 删除 `KEEL_SERVE_PASSWORD` 单口令路径、旧 cookie、旧 Bearer 口令
-- [ ] auth 模式 `required|local-only|off`；公网 + off 拒绝启动
-- [ ] bootstrap/token/首次改密/超管不可删除/CLI 恢复（L17）
-- [ ] Bot API key：`(account_id, bot_id)` 绑定、一次性明文、轮换/吊销、认证后以 Bot 身份行动（L18）
-- [ ] 旧入口负控：旧 cookie 401、旧 API key 401、旧口令 401
+- [x] Argon2id 密码哈希 + 参数常量 + 单元测试
+- [x] `POST /v1/auth/login|logout|session|password`；签名 cookie（HttpOnly/Secure/SameSite）
+- [x] CSRF 双提交；所有写请求校验
+- [x] 登录限速/锁定/审计（username + IP）
+- [x] `auth_sessions` 持久化；登出/改密/禁用即时吊销
+- [x] 删除 `KEEL_SERVE_PASSWORD` 单口令路径、旧 cookie、旧 Bearer 口令
+- [x] auth 模式 `required|local-only|off`；公网 + off 拒绝启动
+- [x] bootstrap/token/首次改密/超管不可删除/CLI 恢复（L17）
+- [x] Bot API key：`(account_id, bot_id)` 绑定、一次性明文、轮换/吊销、认证后以 Bot 身份行动（L18）
+- [x] 旧入口负控：旧 cookie 401、旧 API key 401、旧口令 401
+- [ ] 账号 HTTP `/v1/accounts`（A4 接权限后暴露；A2 只有 service/store）
 
 ## A3 权限引擎
 
