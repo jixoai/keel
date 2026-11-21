@@ -561,12 +561,20 @@ func (l *Library) Show(tenantID uuid.UUID, name string) (Detail, error) {
 // Install writes a bundle as a new immutable version and makes it active.
 func (l *Library) Install(tenantID uuid.UUID, req InstallRequest) (Record, error) {
 	var record Record
+	if req.Name != "" {
+		if err := validateName(req.Name); err != nil {
+			return Record{}, err
+		}
+	}
 	err := l.withIndex(tenantID, func(idx *index, tenantRoot string) (bool, error) {
 		bundle, err := l.resolveInstallBundle(idx, req)
 		if err != nil {
 			return false, err
 		}
 		name := bundle.Skill.Name
+		if err := validateName(name); err != nil {
+			return false, err
+		}
 		if req.Name != "" && req.Name != name {
 			return false, errorf(CodeNameConflict,
 				"the bundle declares the skill %q, not %q", name, req.Name)
@@ -1107,6 +1115,9 @@ func validateName(name string) error {
 	if len(name) > skills.MaxNameLength || !skillNamePattern.MatchString(name) {
 		return errorf(CodeInvalid,
 			"skill name %q must be lowercase a-z, 0-9 and hyphens (max %d characters)", name, skills.MaxNameLength)
+	}
+	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") {
+		return errorf(CodeInvalid, "skill name %q must not start/end with a hyphen or contain consecutive hyphens", name)
 	}
 	return nil
 }

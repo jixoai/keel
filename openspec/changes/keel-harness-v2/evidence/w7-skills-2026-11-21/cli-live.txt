@@ -1,0 +1,89 @@
+$ keel skills ... (live server 127.0.0.1:13770, tenant 95fe027c-079e-41cb-b25b-ce5f0b55f137)
+
+== list (empty) ==
+还没有技能。用 keel skills install 或让 Agent 调用 skills.manage create 创建一个。
+
+== install v1 ==
+已安装 deploy-flow（5faa7b43b8d0，trust=local，1 个版本）
+
+== list ==
+NAME         TRUST  VERSION       PINNED  UPDATE  CONFLICT  DESCRIPTION
+deploy-flow  local  5faa7b43b8d0  -       -       -         发布检查清单
+
+1 个技能 · 版本 12
+  deploy-flow: no source is recorded; updates are manual
+
+== show ==
+name:        deploy-flow
+description: 发布检查清单
+trust:       local
+current:     5faa7b43b8d044dd4360851a0276442c109433751a968352aec3bdff3e346e1c
+path:        /tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/active/deploy-flow
+versions:    1
+  - 5faa7b43b8d0  1 files  72 bytes  2026-11-21T09:20:31Z
+
+resources:
+  SKILL.md  72 bytes
+
+--- SKILL.md ---
+1. 跑检查
+
+== install v2 (new immutable version) ==
+已安装 deploy-flow（b29313ca2e7e，trust=local，2 个版本）
+
+== list (2 versions) ==
+NAME         TRUST  VERSION       PINNED  UPDATE  CONFLICT  DESCRIPTION
+deploy-flow  local  b29313ca2e7e  -       -       -         发布检查清单 v2
+
+1 个技能 · 版本 13
+  deploy-flow: no source is recorded; updates are manual
+
+== pin ==
+deploy-flow 已固定在 b29313ca2e7e
+== unpin ==
+deploy-flow 已解除固定（当前 b29313ca2e7e）
+
+== versions on disk (content-addressed) ==
+/tmp/keel-w7-skills
+/tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137
+/tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/.versions
+/tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/.versions/5faa7b43b8d044dd4360851a0276442c109433751a968352aec3bdff3e346e1c
+/tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/.versions/b29313ca2e7ef09ec1a480046b5305a8c064915c06efe9d0a3630519115b7e3f
+/tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/active
+/tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/active/deploy-flow
+
+== registry index ==
+{
+  "revision": 15,
+  "skills": [
+    {
+      "name": "deploy-flow",
+      "description": "发布检查清单 v2",
+      "origin": {
+        "kind": "",
+        "url": ""
+      },
+      "trust": "local",
+      "current": "b29313ca2e7ef09ec1a480046b5305a8c064915c06efe9d0a3630519115b7e3f",
+      "installedAt": "2026-11-21T09:20:31.215434Z",
+      "updatedAt": "2026-11-21T09:20:31.39983Z",
+      "versions": [
+        {
+          "hash": "5faa7b43b8d044dd4360851a0276442c109433751a968352aec3bdff3e346e1c",
+          "createdAt": "2026-11-21T09:20:31.215434Z",
+          "files": 1,
+          "bytes": 72
+        },
+        {
+          "hash": "b29313ca2e7ef09ec1a480046b5305a8c064915c06efe9d0a3630519115b7e3f",
+          "createdAt": "2026-11-21T09:20:31.327101Z",
+          "files": 1,
+          "bytes": 85
+        }
+      ]
+    }
+  ]
+}
+
+== remove ==
+已移除 deploy-flow

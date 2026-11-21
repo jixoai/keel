@@ -164,7 +164,7 @@ func runSkillsList(args []string, stdout, stderr io.Writer) int {
 	if err := w.Flush(); err != nil {
 		return reportError(stderr, err)
 	}
-	fmt.Fprintf(stdout, "\n%d 个技能 · 版本 %d\n", len(body.Skills), body.Revision)
+	fmt.Fprintf(stdout, "\n%d 个技能 · 注册表版本 %d\n", len(body.Skills), body.Revision)
 	for _, skill := range body.Skills {
 		for _, diagnostic := range skill.Diagnostics {
 			fmt.Fprintf(stdout, "  %s: %s\n", skill.Name, diagnostic)
@@ -253,8 +253,8 @@ func runSkillsInstall(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "keel skills install: a skill name or --dir is required")
 		return 2
 	}
-	if bundleDir == "" && strings.TrimSpace(*description) == "" {
-		fmt.Fprintln(stderr, "keel skills install: --description is required when installing without --dir")
+	if bundleDir == "" && strings.TrimSpace(*source) == "" && strings.TrimSpace(*description) == "" {
+		fmt.Fprintln(stderr, "keel skills install: --description is required when installing without --dir or --source")
 		return 2
 	}
 	body := *bodyText

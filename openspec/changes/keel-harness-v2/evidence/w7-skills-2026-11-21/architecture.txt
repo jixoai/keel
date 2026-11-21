@@ -1,0 +1,5 @@
+$ go test ./internal/architecture -run TestSkillPackagesDoNotExecuteScripts -v
+=== RUN   TestSkillPackagesDoNotExecuteScripts
+--- PASS: TestSkillPackagesDoNotExecuteScripts (0.06s)
+PASS
+ok  	github.com/jixoai/keel/internal/architecture	0.453s

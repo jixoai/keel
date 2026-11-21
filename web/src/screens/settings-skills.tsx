@@ -328,7 +328,7 @@ function DetailDialog() {
           <ErrorBlock
             text={store.skillsDetailError() ?? ""}
             onRetry={() => {
-              const name = detail()?.name;
+              const name = store.skillsDetailName();
               if (name) void store.openSkillDetail(name);
             }}
           />

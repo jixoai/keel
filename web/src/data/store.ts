@@ -323,6 +323,7 @@ class KeelStore {
    * `untrusted_source`, ...), so the page renders the specific state. */
   readonly skillsActionError = signal<{ code?: string; message: string } | null>(null);
   readonly skillsDetail = signal<SkillDetailView | null>(null);
+  readonly skillsDetailName = signal<string | null>(null);
   readonly skillsDetailLoading = signal(false);
   readonly skillsDetailError = signal<string | null>(null);
   /** The composer `$` menu's three groups. They are loaded lazily, keep the
@@ -889,6 +890,7 @@ class KeelStore {
 
   /** One skill's body and manifest (`GET /v1/settings/skills/{name}`). */
   async openSkillDetail(name: string) {
+    this.skillsDetailName.set(name);
     this.skillsDetailLoading.set(true);
     this.skillsDetailError.set(null);
     this.skillsDetail.set(null);
@@ -903,6 +905,7 @@ class KeelStore {
 
   closeSkillDetail() {
     this.skillsDetail.set(null);
+    this.skillsDetailName.set(null);
     this.skillsDetailError.set(null);
   }
 
@@ -1049,6 +1052,9 @@ class KeelStore {
         this.client.sessionFiles ? this.client.sessionFiles(sessionId).catch(() => null) : Promise.resolve(null),
         this.client.sessionTasks ? this.client.sessionTasks(sessionId).catch(() => null) : Promise.resolve(null),
       ]);
+      // A slow answer for a session the reader already left must not land: the
+      // menu's rows are session-scoped, exactly like the transcript.
+      if (this.completionSession() !== sessionId) return;
       this.completionSkills.set(skillsView?.skills ?? []);
       this.completionFiles.set(filesView?.files ?? []);
       this.completionTasks.set(tasksView?.tasks ?? []);

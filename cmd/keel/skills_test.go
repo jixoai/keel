@@ -193,6 +193,24 @@ func TestSkillsCLIInstallReadsADirectory(t *testing.T) {
 	}
 }
 
+func TestSkillsCLIInstallFromSourceNeedsNoDescription(t *testing.T) {
+	stub, server := newSkillsStub(t)
+	_, stderr, code := runSkillsCLI(t, server, "install", "team-review", "--source", "team")
+	if code != 0 {
+		t.Fatalf("install from source = %d: %s", code, stderr)
+	}
+	body := stub.bodies["POST /v1/settings/skills"]
+	if body == nil {
+		t.Fatal("install sent no body")
+	}
+	if body["name"] != "team-review" || body["sourceId"] != "team" {
+		t.Fatalf("install body = %+v", body)
+	}
+	if _, has := body["files"]; has {
+		t.Fatalf("a source install must not upload files: %+v", body["files"])
+	}
+}
+
 func TestSkillsCLIUpdatePinUnpinRemove(t *testing.T) {
 	stub, server := newSkillsStub(t)
 

@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/skilllib"
 	"github.com/jixoai/keel/internal/skills"
 )
@@ -488,7 +489,7 @@ func (s *Server) writeSkillError(w http.ResponseWriter, err error) {
 		status = http.StatusNotImplemented
 	}
 	writeJSON(w, status, map[string]any{
-		"error": typed.Message,
+		"error": logsafe.Redact(typed.Message),
 		"code":  typed.Code,
 	})
 }

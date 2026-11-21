@@ -6,7 +6,7 @@
 // block (`web/src/ui/kit/layout/settings-shell.tsx`). This file draws none of
 // them.
 //
-// Eight sections, in the rail's order:
+// Eleven sections, in the rail's order:
 //   · 通用       the token-level partial switch (moved here from the session
 //                list: it is a reading preference, not a session action).
 //   · 外观       follow the system / light / dark, written through
@@ -27,6 +27,10 @@
 //   · 插件       the assembled extension surface (generation, plugin states,
 //                tools, hooks, triggers) with a diagnostics table that stays
 //                collapsed, and the entry to the plugin page (`/plugins`).
+//   · 技能       the tenant skill library: trust/pin/update/conflict facts,
+//                one skill's body and resources, create, and subscription
+//                sources. The agent's `skills manage` and `keel skills` drive
+//                the same registry.
 //   · 快捷键     the key vocabulary, as keycaps.
 //   · 关于       keel.info's version / online / user agent plus the build tag.
 //
@@ -122,7 +126,7 @@ import { SkillsSection } from "./settings-skills";
 
 // ---- the section ----------------------------------------------------------
 
-/** The ten sections the rail offers. */
+/** The eleven sections the rail offers. */
 export type SettingsSection =
   | "general"
   | "appearance"

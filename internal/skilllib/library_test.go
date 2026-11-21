@@ -109,6 +109,43 @@ func TestInstallContentAddressedAndImmutable(t *testing.T) {
 	}
 }
 
+func TestVersionContentIsDeduplicatedAcrossSwitches(t *testing.T) {
+	library := newLibrary(t)
+	first, err := library.Install(testTenant, skilllib.InstallRequest{Name: "dedupe", Description: "v1", Body: "one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := library.Install(testTenant, skilllib.InstallRequest{Name: "dedupe", Description: "v2", Body: "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pin back to v1, then install v2's exact bytes again: the second version is
+	// reused, not written a third time.
+	if _, err := library.Pin(testTenant, "dedupe", first.CurrentHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := library.Unpin(testTenant, "dedupe"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := library.Install(testTenant, skilllib.InstallRequest{Name: "dedupe", Description: "v2", Body: "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.CurrentHash != second.CurrentHash {
+		t.Fatalf("reinstall hash = %s, want %s", again.CurrentHash, second.CurrentHash)
+	}
+	if len(again.Versions) != 2 {
+		t.Fatalf("versions = %d, want 2 (content-addressed dedupe)", len(again.Versions))
+	}
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(again.Path), "..", ".versions"))
+	if err != nil {
+		t.Fatalf("read versions: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("version directories = %d, want 2", len(entries))
+	}
+}
+
 func TestModifiedActiveCopyIsAConflictNotAnUpdate(t *testing.T) {
 	library := newLibrary(t)
 	record, err := library.Install(testTenant, skilllib.InstallRequest{
@@ -447,6 +484,16 @@ func TestSourcesBackendAndDiscovery(t *testing.T) {
 
 	if _, err := library.SkillsSources(ctx, "unsubscribe", json.RawMessage(`{"id":"team"}`)); err != nil {
 		t.Fatalf("unsubscribe: %v", err)
+	}
+}
+
+func TestInstallRejectsAPathLikeName(t *testing.T) {
+	library := newLibrary(t)
+	for _, name := range []string{"../escape", "a/b", "UPPER", "-leading"} {
+		_, err := library.Install(testTenant, skilllib.InstallRequest{
+			Name: name, Description: "d", Body: "b",
+		})
+		requireCode(t, err, skilllib.CodeInvalid)
 	}
 }
 

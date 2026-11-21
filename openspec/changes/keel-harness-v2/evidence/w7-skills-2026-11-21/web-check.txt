@@ -1,0 +1,2 @@
+$ nsh check
+exit=0

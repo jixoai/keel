@@ -1,0 +1,56 @@
+$ keel skills sources subscribe/install/update ... (live)
+
+== subscribe trusted source ==
+已订阅 team（local，trust=trusted）
+
+== install from source ==
+已安装 team-review（9977a16a6cdf，trust=trusted，1 个版本）
+
+== source moves to v2 ==
+NAME         TRUST    VERSION       PINNED  UPDATE        CONFLICT  DESCRIPTION
+team-review  trusted  9977a16a6cdf  -       3ea2f5249dbb  -         团队评审清单 v1
+
+1 个技能 · 版本 18
+
+== pin holds the version ==
+team-review 已固定在 9977a16a6cdf
+NAME         TRUST    VERSION       PINNED        UPDATE        CONFLICT  DESCRIPTION
+team-review  trusted  9977a16a6cdf  9977a16a6cdf  3ea2f5249dbb  pinned    团队评审清单 v1
+
+1 个技能 · 版本 19
+  team-review: a pinned version holds back the update; unpin before updating
+
+== update while pinned ==
+keel: server refused (409 pinned) at http://127.0.0.1:13770: skill "team-review" is pinned at 9977a16a6cdf; unpin before updating to 3ea2f5249dbb
+exit=1
+
+== unpin then update ==
+team-review 已解除固定（当前 9977a16a6cdf）
+team-review 已更新：9977a16a6cdf → 3ea2f5249dbb（2 个版本）
+
+== show v2 ==
+name:        team-review
+description: 团队评审清单 v2
+trust:       trusted
+current:     3ea2f5249dbb0848f7473ce342b44a35f5d6efee7dd5190202bbec198f9ccaf8
+source:      team (local) /tmp/keel-w7-source2
+path:        /tmp/keel-w7-skills/95fe027c-079e-41cb-b25b-ce5f0b55f137/active/team-review
+versions:    2
+  - 3ea2f5249dbb  1 files  93 bytes  2026-11-21T09:20:38Z
+  - 9977a16a6cdf  1 files  77 bytes  2026-11-21T09:20:38Z
+
+resources:
+  SKILL.md  93 bytes
+
+--- SKILL.md ---
+1. 对照清单
+2. 记录结论
+
+== unsubscribe while in use ==
+keel: server refused (409 source_in_use) at http://127.0.0.1:13770: source "team" is still the origin of skill "team-review"; remove that skill first
+exit=1
+
+== remove, then unsubscribe ==
+已移除 team-review
+已取消订阅 team
+没有订阅源。

@@ -267,14 +267,16 @@
 
 ## W7 skills
 
-- [ ] skill 文件结构：`SKILL.md` + 资源；内容 hash 去重、版本不可变 （对账 2026-11-20：部分——缺口：SKILL.md 解析与 ContentHash 在（internal/skills/skills.go:46,138,338）；无内容 hash 去重/版本不可变注册表）
+- [x] skill 文件结构：`SKILL.md` + 资源；内容 hash 去重、版本不可变 （W7 2026-11-21：`internal/skills/bundle.go` 全树规范清单 `keel-skill-bundle-v1`（排序路径/大小/mode）派生一个内容哈希，同内容同哈希、版本目录 write-once，`Verify` 把篡改报 `ErrBundleMismatch`；上限 256 文件/8MiB/单文件 2MiB，拒绝符号链接；测试 `internal/skills/bundle_test.go`（同内容跨目录同哈希、改资源变哈希、写已有不同内容被拒、ReplaceBundle 移动 active）。证据 `evidence/w7-skills-2026-11-21/`）
 - [x] `skills` 聚合工具（W2.1 部分）：`ls` / `view` 已吸收旧 `skill` 工具；
-      `manage` / `sources` 动作保留为 `not_implemented`，待 W7 完整版
-- [ ] ChatInput `$` 补全：分组（技能/文件/任务），共享同一唤醒符
-- [ ] `/learn`：把经历沉淀为技能（走 `skills.manage`）
-- [ ] Settings `/settings/skills` + CLI `keel skills`（等价能力）
-- [ ] 订阅源管理：信任标注、版本 pin、更新冲突可见
-- [ ] 技能内脚本执行必须走 bash 策略，不在 skills 插件里直接执行
+      `manage` / `sources` 动作保留为 `not_implemented`，待 W7 完整版 （W7 2026-11-21：`manage`（create/patch/put/delete/write_file/remove_file）与 `sources`（list/subscribe/unsubscribe/pin）已接 `internal/skilllib`；`internal/toolsurface/skills.go` 闭集校验、库错误码透传、`ls`/`view` 合并租户库；测试 `internal/toolsurface/toolsurface_test.go:TestSkillsManageAndSourcesRouteToTheLibrary`、`internal/skilllib/library_test.go:TestManageBackendCreatesVersionsAndNeverExecutes`）
+- [x] ChatInput `$` 补全：分组（技能/文件/任务），共享同一唤醒符 （W7 2026-11-21：`web/src/screens/composer-completion.tsx` 一个 `$` 唤醒符、固定顺序三组、同一 query 过滤、选择只写输入框不发送；数据源 `GET /v1/settings/skills`、`GET /v1/sessions/{id}/files`、`/tasks`（`internal/agentapi/completion.go`）；前端测试 `composer-completion.test.ts`（纯规则）+ `composer-completion.test.tsx`（真实 composer、fixture 三组、逐组插入、空态））
+- [x] `/learn`：把经历沉淀为技能（走 `skills.manage`） （W7 2026-11-21：composer 的 `/learn` 生成一条让 Agent 调 `skills.manage create` 的消息（`buildLearnInstruction`），工具结果才是成功信号，界面只提示“已发送沉淀请求”不报“已学习”；`parseLearnCommand` 只认 `/learn`/`/learn <补充>`，`/learning` 不误匹配；测试 `composer-completion.test.ts`）
+- [x] Settings `/settings/skills` + CLI `keel skills`（等价能力） （W7 2026-11-21：`internal/agentapi/skills.go` 的 `GET/POST /v1/settings/skills*`（list/show/install/update/pin/unpin/remove/sources）是唯一写路径；`cmd/keel/skills.go` 是 HTTP 客户端（不直连 DB/目录），`keel skills list|show|install|update|pin|unpin|remove|sources`；设置页 `web/src/screens/settings-skills.tsx` 五态+详情+新建+订阅源；测试 `internal/agentapi/skills_test.go`、`cmd/keel/skills_test.go`、`web/src/screens/settings-skills.test.tsx`；真机 CLI 记录 `evidence/.../cli-live.txt`）
+- [x] 订阅源管理：信任标注、版本 pin、更新冲突可见 （W7 2026-11-21：`internal/skilllib` 源带 `trusted|untrusted`（本地创作 `local`），未信任源安装/更新都必须 `allowUntrusted`；`pin` 激活并保持一个不可变版本，源移动时更新返回 409 `pinned`，`modified`/`source_missing`/`name_mismatch`/`missing_active` 同列可见；源仍被技能引用时退订 409 `source_in_use`；测试 `library_test.go:TestSourceTrustPinAndUpdateConflicts`/`TestUntrustedSourceNeedsAnExplicitAcknowledgement`，真机 `evidence/.../cli-source-conflicts.txt`）
+- [x] 技能内脚本执行必须走 bash 策略，不在 skills 插件里直接执行 （W7 2026-11-21：`internal/skills`/`internal/skilllib` 不 import `os/exec` 或 `bashbridge`，`manage` 闭集没有执行成员；脚本作为 bundle 字节保存（`write_file` 保留 0755），运行只能经 bash 工具；结构断言 `internal/architecture/boundary_test.go:TestSkillPackagesDoNotExecuteScripts`，行为断言 `library_test.go:TestManageBackendCreatesVersionsAndNeverExecutes`；设置页与 CLI 都明文提示 `scriptExecution: bash`）
+
+> W7 证据：`openspec/changes/keel-harness-v2/evidence/w7-skills-2026-11-21/`（README、go build/vet/full、conformance、openspec、web check/build、TUI、脚本策略、真机 CLI/settings 记录）。
 
 ## W8 agent-plugin 与 fork
 
