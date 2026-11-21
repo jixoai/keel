@@ -10,9 +10,9 @@
 - [x] D3：ModelKind + Bot 默认模型；运行时可覆盖；快照记录实际模型（L15）
 - [x] D4：产品面 + 产品域包重命名；PI 技术包保留（L16）
 - [x] D5：CLI bootstrap + local-only 隐式超管 + CLI 恢复（L17）
-- [ ] D6：旧 sessions/agents/teams 数据清空还是接管
+- [x] D6：旧数据清空重建；旧 schema 拒绝启动（L19）
 - [x] D7：Bot 用绑定到具体 Bot 的 API key；人类用密码（L18）
-- [ ] D8：TeamBot 跨 Account 组装/共享规则
+- [x] D8：无 TeamBot 专属跨 Account 规则；由 `bot.invoke` 决定（L20）
 - [x] D9：调用 Bot 是能力授权——`bot.invoke` 边界；Bot 以自身权限执行，不做调用链交集（L2/L13）
 - [ ] 冻结 `specs/identity-access/spec.md` 与权限 key 初始目录；偏离走新 change
 
@@ -26,7 +26,7 @@
 - [ ] 重命名：`agents`→`bots`、`agent_teams`→`team_bots`、`/v1/agents`→`/v1/bots`、
       `keel agent`→`keel bot`；产品域包 `agentteam`→`botteam`、`agentapi`→`harnessapi`、
       `agentext`→`harnessext`；PI 技术包保留（L16）
-- [ ] `sessions` 增 `bot_id` / `account_id` / `created_by_account_id`；旧数据按 D6 处理
+- [ ] `sessions` 增 `bot_id` / `account_id` / `created_by_account_id`；旧数据清空（L19）
 - [ ] RLS：所有新表 ENABLE/FORCE ROW LEVEL SECURITY + tenant policy；目录级测试
 - [ ] 领域包：`Bot` / `TeamBot` / `Account` / `Role` / `Profile` 纯数据 + 校验 + 规范化
 - [ ] 架构测试：kernel 不 import access/accounts/bots
@@ -62,7 +62,7 @@
 - [ ] `TeamAgent` → `TeamBot`；TeamBot = Mission + Roster，不是权限主体（L12）
 - [ ] Bot 级 Profile 绑定；权限实时判定；Role 变更 hook 注入提示
 - [ ] Session 属于 Bot → Account；创建时写 owner 关系与 `created_by_account_id`
-- [ ] TeamBot 组装/启动/成员/共享（按 D8）
+- [ ] TeamBot 组装/启动/成员/共享（L20：无专属跨账号规则，由 `bot.invoke` 决定）
 - [ ] 旧 `/v1/agents` `/v1/teams` 404；旧 `keel agent/team` 删除
 - [ ] 设置页：账号 / 权限组 / Bot / TeamBot；五态齐全，无权限隐藏 + 403
 

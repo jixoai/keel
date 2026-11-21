@@ -280,8 +280,9 @@ TeamBot 是**团队目标/使命 + Bot 名单**，不是权限主体：
 ```
 
 - TeamBot **没有** Account/Profile/ModelKind，**不拥有** Session，**不授予**任何权限。
-- TeamBot 是资源：由某个 Account 拥有，受 `team_bot.read/manage` 权限管理；它可以引用
-  同 Account 或其他 Account 的 Bot（跨 Account 引用需显式共享，见 D8）。
+- TeamBot 是资源：由某个 Account 拥有，受 `team_bot.read/manage` 权限管理。Roster 可以
+  引用任何 Bot；**能否把某个 Bot 放进 roster / 调用它，由该 Account 是否持有该 Bot 的
+  `bot.invoke` 决定**——不存在 TeamBot 专属的跨 Account 规则（L20）。
 - 团队目标（mission）作为上下文注入 captain/成员的 Session；Bot 仍以自己的
   Account/Harness 权限工作。
 - 成员 Bot 是 captain 的工具（`invoke-bot` / `create-bot` / `fork-bot`）；具体怎么用由
@@ -353,7 +354,8 @@ PI 技术包保留原名，并在 `docs/ARCHITECTURE.md` 写明例外：
 
 1. 新 schema 启动时创建 `accounts` 等新表；旧 `agents`/`agent_teams`/`api_keys` 表删除或忽略。
 2. 首次启动无超管 → 要求 bootstrap；不允许匿名进入。
-3. 旧 Session 数据：D6 决定清空或由 bootstrap 超管接管为初始 Bot。
+3. 旧 Session/Agent/Team 数据：**清空重建**（L19）；旧 schema 拒绝启动，不写迁移代码。
+   部署方需要留档时自行备份；产品不提供运行时迁移路径。
 4. 旧 cookie/旧 API key：全部失效；文档明确写“升级即重新初始化账号”。
 5. 旧路由/CLI/UI：删除，不保留 301/别名。
 6. `docs/HARNESS.md`、`docs/ARCHITECTURE.md`、`README.md`、`site/docs` 同步词汇。
@@ -378,5 +380,5 @@ PI 技术包保留原名，并在 `docs/ARCHITECTURE.md` 写明例外：
 | 超管单点/锁死 | 不可删除、CLI 恢复、bootstrap token 一次性、审计 |
 | 调用者借高权限 Bot 取数据 | 接受为能力模型：`bot.invoke` 是高危权限，按 Bot/关系精确授予、可撤销、每次调用审计 |
 | 无人值守提权 | `grant ⊆ own` + `bot.invoke` 高危授予 + 触发器创建审计 |
-| 旧数据丢失 | alpha 明确零兼容；D6 决定清空或接管；备份由部署方负责 |
+| 旧数据丢失 | alpha 明确零兼容：清空重建（L19）；旧库拒绝启动；备份由部署方负责 |
 | Role/权限概念再次混淆 | Role 只读不授权；权限只在 Account/Harness；文档与 UI 文案钉死 |

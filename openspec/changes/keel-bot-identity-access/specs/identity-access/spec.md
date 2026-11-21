@@ -116,6 +116,14 @@ Account MUST 拥有多个 Bot；TeamBot MUST 由多个 Bot 组装，但 MUST NOT
 - **THEN** 本次运行使用 M2
 - **AND** Session/Run 快照记录 M2
 
+#### Scenario: TeamBot roster 由 bot.invoke 决定
+- **GIVEN** TeamBot T 的 owner 没有 Bot X 的 `bot.invoke`
+- **WHEN** T 尝试把 X 放进 roster 或调用 X
+- **THEN** 返回 403
+- **WHEN** T 的 owner 持有 X 的 `bot.invoke`
+- **THEN** 允许放入 roster 并调用
+- **AND** X 仍以自己的 Account/Harness 权限执行，T 不获得 X 的权限
+
 ### Requirement: 人类与 Bot 的权限对称
 
 人类账号能做的事，Bot 账号在拥有相同 permission-key 与 scope 时 MUST 也能做。
@@ -221,8 +229,8 @@ Session；Bot 归档后 MUST 拒绝新 Session。
 
 本 change MUST NOT 为旧口令登录、旧 cookie、旧 API key 角色、旧 `agents`/`agent_teams`
 模型、旧 `/v1/agents` `/v1/teams` 路由或旧 CLI 词汇保留兼容层、双读、重定向或迁移垫片。
-启动时发现旧 schema MUST 拒绝启动并输出重建指令。旧数据是否清空或接管 MUST 由
-`design.md` 的 D6 决定；无论哪种，MUST NOT 运行旧代码路径。
+启动时发现旧 schema MUST 拒绝启动并输出重建指令；旧 sessions/agents/teams 数据 MUST
+清空重建（L19），MUST NOT 写旧格式读取或迁移代码。
 
 #### Scenario: 旧 schema 拒绝启动
 - **WHEN** 数据库存在旧 `agents` 表且没有新 `bots` 表

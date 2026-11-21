@@ -94,8 +94,7 @@ Session → 属于一个 Bot → 属于一个 Account
 - 旧 `agents` / `agent_teams` 表、旧 `/v1/agents` `/v1/teams` 路由、旧 `keel agent` /
   `keel team` CLI、旧设置页“Agents/团队”文案全部替换。
 - 旧口令登录、旧 cookie、旧 `api_keys.role` 语义全部删除；旧 key 不再可用。
-- 旧 sessions/agents/teams 数据不保证迁移；alpha 环境按新 schema 重建，或由 bootstrap
-  超管接管为初始 Bot。具体见 Open Decision D6。
+- 旧 sessions/agents/teams 数据**清空重建**；旧 schema 启动即拒绝，不写迁移代码（L19）。
 - 不写兼容层、不写双读、不写迁移垫片。
 
 ## Decisions Locked
@@ -120,8 +119,10 @@ Session → 属于一个 Bot → 属于一个 Account
 | L16 | 重命名边界 | 产品面（表/API/CLI/UI/文档）与产品域包改为 Bot；PI 技术包 `agentcore`/`agentloop`/`agenttool`/`internal/agent` 保留，例外清单入 design |
 | L17 | 首个超管与恢复 | CLI `keel admin bootstrap` 一次性 setup token；`local-only` 映射内置 local-admin 超管；忘记密码只能本机 CLI 重置；超管不可删除/禁用；全部审计 |
 | L18 | Bot 凭据 | Bot 用绑定到具体 Bot 的 API key（`account_id + bot_id`）；不能登录浏览器；人类用密码；key 可轮换/吊销 |
+| L19 | 旧数据 | 清空重建；旧 schema 拒绝启动；不写旧格式读取/迁移代码 |
+| L20 | TeamBot 跨账号 | 不是专属规则：roster 只是引用；能否放入/调用由 `bot.invoke` 决定；无权限合并 |
 
-## Open Decisions（阻塞 spec 冻结）
+## Decisions（D1–D9，全部冻结）
 
 - **D1（已冻结）**：Bot 有效权限 = `Account 权限 ∩ Harness permissions`（L11）。
 - **D2（已冻结）**：TeamBot 不是 Bot，也不是权限主体；它是 Mission + Roster（L12）。
@@ -129,9 +130,10 @@ Session → 属于一个 Bot → 属于一个 Account
   Session/Run 快照记录实际解析出的模型（L15）。
 - **D4（已冻结）**：产品面 + 产品域包重命名；PI 技术包保留（L16）。
 - **D5（已冻结）**：CLI bootstrap + local-only 隐式超管 + CLI 恢复（L17）。
-- **D6**：旧 sessions/agents/teams 数据是清空重建，还是由 bootstrap 超管接管为初始 Bot？
+- **D6（已冻结）**：旧数据清空重建（L19）。
 - **D7（已冻结）**：Bot 用绑定到具体 Bot 的 API key，人类用密码（L18）。
-- **D8**：TeamBot 跨 Account 组装与共享的规则。
+- **D8（已冻结）**：不存在 TeamBot 专属的跨 Account 规则；roster 只是引用，能否放入/调用由
+  `bot.invoke` 权限决定（L20）。
 - **D9（已冻结）**：调用 Bot 是能力授权——`bot.invoke` 是边界；Bot 以自己的权限执行，
   不做调用链交集（L2/L13）。
 
