@@ -66,6 +66,10 @@ const (
 	// CoveragePublicWithKey means a public endpoint declared a key, which hides
 	// an authorization mistake behind an exemption.
 	CoveragePublicWithKey CoverageReason = "public_with_key"
+	// CoverageTooFewEndpoints means the enumerated list is shorter than the
+	// known-entrance floor. An empty or truncated catalog must fail the gate
+	// instead of passing vacuously ("zero routes checked, zero problems").
+	CoverageTooFewEndpoints CoverageReason = "too_few_endpoints"
 )
 
 // CoverageIssue is one failed endpoint.
@@ -195,6 +199,32 @@ func CheckCoverage(endpoints []Endpoint) CoverageReport {
 		if !used[key] {
 			report.UnusedKeys = append(report.UnusedKeys, key)
 		}
+	}
+	return report
+}
+
+// MinHTTPEndpoints is the floor of the A4.1 product HTTP surface: accounts,
+// permission groups, bots, team bots, bot keys and the identity summary. The
+// coverage gate refuses a catalog below it, so a generator that silently
+// returns nothing (or loses a route family) fails CI instead of passing
+// vacuously.
+const MinHTTPEndpoints = 24
+
+// CheckCoverageFloor is CheckCoverage plus the non-empty/known-floor
+// assertion. It is the gate form A4's CI runs; CheckCoverage stays the pure
+// per-endpoint check.
+func CheckCoverageFloor(endpoints []Endpoint, minimum int) CoverageReport {
+	report := CheckCoverage(endpoints)
+	if minimum <= 0 {
+		minimum = MinHTTPEndpoints
+	}
+	if report.Checked < minimum {
+		report.Issues = append([]CoverageIssue{{
+			Kind:   EndpointHTTP,
+			Name:   "<catalog>",
+			Reason: CoverageTooFewEndpoints,
+			Detail: fmt.Sprintf("enumerated %d endpoints, want at least %d", report.Checked, minimum),
+		}}, report.Issues...)
 	}
 	return report
 }

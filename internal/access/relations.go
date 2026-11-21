@@ -226,55 +226,75 @@ func EvaluateRelations(ctx context.Context, source RelationSource, principal Pri
 		return evaluation, err
 	}
 	for _, tuple := range tuples {
-		if !ValidRelation(tuple.Relation) || !ValidSubjectType(tuple.SubjectType) || tuple.SubjectID == "" {
-			evaluation.markUnresolved(fmt.Sprintf("malformed relation tuple (relation %q, subject %q %q)",
-				tuple.Relation, tuple.SubjectType, tuple.SubjectID))
+		match, err := matchTuple(ctx, source, principal, tuple)
+		if err != nil {
+			return evaluation, err
+		}
+		if match.unresolved != "" {
+			evaluation.markUnresolved(match.unresolved)
 			continue
 		}
-		switch tuple.SubjectType {
-		case SubjectTypeAccount:
-			subjectID, err := uuid.Parse(tuple.SubjectID)
-			if err != nil {
-				evaluation.markUnresolved(fmt.Sprintf("account subject %q is not a uuid", tuple.SubjectID))
-				continue
-			}
-			if subjectID == principal.AccountID {
-				evaluation.Held[tuple.Relation] = true
-				evaluation.Direct[tuple.Relation] = true
-			}
-		case SubjectTypeGroup:
-			matched, err := source.ResolveSubject(ctx, principal, tuple.SubjectType, tuple.SubjectID)
-			if errors.Is(err, ErrUnresolvedSubject) {
-				evaluation.markUnresolved(fmt.Sprintf("group subject %q cannot be resolved", tuple.SubjectID))
-				continue
-			}
-			if err != nil {
-				return evaluation, err
-			}
-			if matched {
-				evaluation.Held[tuple.Relation] = true
-			}
-		case SubjectTypeTeamBot:
-			// A human principal has no BotID and can never be a member of a
-			// TeamBot roster. That is a resolvable "not a member", not an
-			// unresolved subject.
-			if principal.BotID == "" {
-				continue
-			}
-			matched, err := source.ResolveSubject(ctx, principal, tuple.SubjectType, tuple.SubjectID)
-			if errors.Is(err, ErrUnresolvedSubject) {
-				evaluation.markUnresolved(fmt.Sprintf("team_bot subject %q cannot be resolved", tuple.SubjectID))
-				continue
-			}
-			if err != nil {
-				return evaluation, err
-			}
-			if matched {
-				evaluation.Held[tuple.Relation] = true
-			}
+		if !match.matched {
+			continue
+		}
+		evaluation.Held[tuple.Relation] = true
+		if match.direct {
+			evaluation.Direct[tuple.Relation] = true
 		}
 	}
 	return evaluation, nil
+}
+
+// tupleMatch is the local result of matching one stored tuple against a
+// principal. direct marks a relation that names the principal's own account.
+type tupleMatch struct {
+	matched    bool
+	direct     bool
+	unresolved string
+}
+
+// matchTuple applies one tuple. It is shared by EvaluateRelations and
+// VisibleResources so a single-resource decision and a list filter can never
+// disagree about what a tuple means.
+func matchTuple(ctx context.Context, source RelationSource, principal Principal, tuple RelationTuple) (tupleMatch, error) {
+	if !ValidRelation(tuple.Relation) || !ValidSubjectType(tuple.SubjectType) || tuple.SubjectID == "" {
+		return tupleMatch{unresolved: fmt.Sprintf("malformed relation tuple (relation %q, subject %q %q)",
+			tuple.Relation, tuple.SubjectType, tuple.SubjectID)}, nil
+	}
+	switch tuple.SubjectType {
+	case SubjectTypeAccount:
+		subjectID, err := uuid.Parse(tuple.SubjectID)
+		if err != nil {
+			return tupleMatch{unresolved: fmt.Sprintf("account subject %q is not a uuid", tuple.SubjectID)}, nil
+		}
+		matched := subjectID == principal.AccountID
+		return tupleMatch{matched: matched, direct: matched}, nil
+	case SubjectTypeGroup:
+		matched, err := source.ResolveSubject(ctx, principal, tuple.SubjectType, tuple.SubjectID)
+		if errors.Is(err, ErrUnresolvedSubject) {
+			return tupleMatch{unresolved: fmt.Sprintf("group subject %q cannot be resolved", tuple.SubjectID)}, nil
+		}
+		if err != nil {
+			return tupleMatch{}, err
+		}
+		return tupleMatch{matched: matched}, nil
+	case SubjectTypeTeamBot:
+		// A human principal has no BotID and can never be a member of a TeamBot
+		// roster. That is a resolvable "not a member", not an unresolved subject.
+		if principal.BotID == "" {
+			return tupleMatch{}, nil
+		}
+		matched, err := source.ResolveSubject(ctx, principal, tuple.SubjectType, tuple.SubjectID)
+		if errors.Is(err, ErrUnresolvedSubject) {
+			return tupleMatch{unresolved: fmt.Sprintf("team_bot subject %q cannot be resolved", tuple.SubjectID)}, nil
+		}
+		if err != nil {
+			return tupleMatch{}, err
+		}
+		return tupleMatch{matched: matched}, nil
+	default:
+		return tupleMatch{unresolved: fmt.Sprintf("unknown subject type %q", tuple.SubjectType)}, nil
+	}
 }
 
 // scopeReachSatisfied reports whether the scope reaches a relation that

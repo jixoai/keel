@@ -306,6 +306,9 @@ func SelfCheck() error {
 	if err := selfCheckCatalog(keyCatalog); err != nil {
 		return err
 	}
+	if err := SelfCheckBuiltinGroups(); err != nil {
+		return err
+	}
 	if len(registry) != len(keyCatalog) {
 		return fmt.Errorf("registry has %d keys but the catalog has %d", len(registry), len(keyCatalog))
 	}
