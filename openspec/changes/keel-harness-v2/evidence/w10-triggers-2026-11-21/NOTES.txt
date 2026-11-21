@@ -1,0 +1,132 @@
+W10 triggers 对齐 — evidence (2026-11-21)
+
+Base: main 6fc1b2c (worktree .worktrees/keel-w10-triggers, detached)
+Change: openspec/changes/keel-harness-v2 (W10-1/W10-2; W10-3 was already checked)
+
+Scope delivered
+
+1. HMAC (webhook)
+- TriggerSpec.WebhookSecret is a per-trigger HMAC-SHA256 key, json:"-" (never
+  serialized): internal/agentext/triggers.go:87. WebhookSecretEnv names the
+  env var resolved once at Register; an empty/unset value leaves the trigger
+  fail-closed.
+- Canonical signed bytes: v1\n<tenantId>\n<triggerId>\n<timestamp>\n
+  <idempotencyKey>\n<rawBody>; headers X-Keel-Timestamp (unix seconds) and
+  X-Keel-Signature: sha256=<hex>. Constant-time compare via hmac.Equal; the
+  timestamp must be inside webhookToleranceSec (default 300s, max 86400s):
+  internal/agentext/triggers.go:1120 (verifyWebhook).
+- Fail-closed: unconfigured trigger -> ErrTriggerWebhookUnconfigured (HTTP 403);
+  missing/bad/stale signature -> ErrTriggerWebhookUnauthorized (HTTP 401); no
+  turn is started and every refusal is audited status:"rejected" with a
+  category only (no secret, no received signature).
+- HTTP reads the exact body once before decoding, so re-marshalling cannot
+  break a signature: internal/agentapi/ext.go:121. Signature headers select
+  reason=webhook and cannot be downgraded by a body that says manual
+  (internal/agentapi/ext.go:96-103).
+- The example plugin uses KEEL_EXAMPLE_WEBHOOK_SECRET via WebhookSecretEnv
+  (cmd/keel/serve.go); without it the trigger stays fail-closed for signed
+  deliveries but the authenticated manual fire route still works.
+
+2. Dedupe / catch-up
+- Same-key serialization is retained. In-process duplicate deliveries return
+  deduped:true and audit status:"deduped"; across restarts the kernel requestId
+  dedupe returns fired+deduped:true, so no second user.message.
+- Durable cursor table trigger_state(tenant_id, trigger_id, last_scheduled_at,
+  last_fired_at, last_status, updated_at), RLS tenant table:
+  internal/store/schema.sql:1078, internal/store/rls.go:89,
+  internal/store/triggers.go:19-79 (Load/Save; monotonic last_scheduled_at).
+- On registration/restart the engine loads the cursor and replays missed
+  windows: internal/agentext/triggers.go:846 (resume), :929 (catchUpPlan),
+  :998 (saveCursor). Bounds: only the newest catchUpLimit windows (default 3),
+  lookback catchUpWindow (default 24h); older windows are coalesced into one
+  status:"skipped" audit entry. Catch-up fires use the same stable idempotency
+  key sched:<id>:<unix> as normal schedule fires and reason:"catchup".
+- A window that hits the concurrency cap is not advanced in the cursor, so a
+  restart can retry it instead of losing it silently.
+
+3. Per-trigger concurrency + initial task card
+- MaxConcurrent (default 1) is a non-blocking per-trigger slot:
+  internal/agentext/triggers.go:1089 (tryAcquire). Above the cap the fire is
+  refused with ErrTriggerBusy -> HTTP 429 + Retry-After: 1 and a
+  status:"throttled" audit (internal/agentapi/ext.go:141). No unbounded queue.
+  Idempotent retries of the in-flight key wait for the key's first fire and
+  then hit the dedupe branch instead of being throttled.
+- A successful fire immediately creates the session's initial task card via
+  tasklog.EnsureCard: internal/agentext/triggers.go:663. The response carries
+  taskCardId; a card failure is visible as taskCardError but does not roll back
+  the committed turn (the first tool call still has the lazy path).
+
+4. Observability
+- GET /v1/triggers now exposes fires/failures/dedupes/throttled/rejected/
+  skipped, inFlight, webhookConfigured, lastScheduledAt and the recent 20 audit
+  entries (fired/failed/deduped/throttled/rejected/skipped), never the secret.
+- docs/HARNESS.md §3.1 documents the signing string, headers, window,
+  fail-closed behavior, catch-up bounds, 429 semantics and card ownership.
+- The change spec gained three requirements (Webhook 投递真实性 / 触发器去重与
+  漏跑补偿 / 触发器并发与归属) in specs/harness-core/spec.md.
+
+Tests
+
+Unit (internal/agentext, package agentext):
+- TestTriggerWebhookHMACVerification: signed fire, replay dedupe, bad/stale/
+  future signature refusals + audit, secret absent from JSON.
+- TestTriggerWebhookWithoutSecretFailsClosed.
+- TestTriggerConcurrencyCapRefusesInsteadOfQueueing.
+- TestTriggerCatchUpPlanIsBounded (interval O(1) plan, cron ring, lookback).
+- TestTriggerCatchUpAfterRestartAndCursor (fake state store, no duplicate
+  requestId after restart).
+- TestTriggerCreatesInitialTaskCard (+ visible failure path).
+- TestTriggerRejectsUnsafeConfiguration (short secret, negative cap, bad
+  window, bad catch-up limit).
+
+Real PostgreSQL + real HTTP (internal/agentext, package agentext_test):
+- TestTriggerWebhookHMACAndInitialCardE2E: real kernel/store/tasklog/AgentAPI;
+  signed 200 -> user.message -> task_cards row (open, origin=session, title =
+  prompt); replay 200 deduped with one user.message; bad signature 401; stale
+  10m 401; unconfigured 403; audit counters; GET does not contain the secret;
+  manual fire still works.
+- TestTriggerConcurrencyLimitOverHTTP: first fire held in the starter, second
+  signed delivery 429 + Retry-After, throttled audit, first completes 200.
+- TestTriggerCatchUpUsesDurableCursorE2E: seeded trigger_state, 1s interval,
+  CatchUpLimit 2 -> at most 2 catch-up turns + skipped audit, persisted cursor
+  advances; restarting over the same DB never replays an already processed
+  requestId.
+Store:
+- TestTriggerStateSchemaAndRLS, TestTriggerStateRoundTrip (monotonic cursor,
+  tenant isolation).
+
+Gates (logs in this directory)
+
+| Gate | Command | Result | Artifact |
+|---|---|---|---|
+| build | go build ./... | pass | build.log |
+| vet | go vet ./... | pass | vet.log |
+| targeted | go test -count=1 -v ./internal/agentext -run TestTrigger | 12 pass | test-targeted-agentext.log |
+| targeted | go test -count=1 -v ./internal/store -run TestTriggerState | 2 pass | test-targeted-store.log |
+| targeted | go test -count=1 -v ./internal/agentapi -run TestExtensionRoutes | 1 pass | test-targeted-agentapi.log |
+| full (all) | go test -count=1 ./... | only cmd/keel fails, pre-existing | full-test.log |
+| full (green) | go test -count=1 <all packages except cmd/keel> | 59 ok, 0 fail | full-test-except-cmd-keel.log |
+| race | go test -race -count=1 -p 4 <all except cmd/keel> | 59 ok, 0 DATA RACE | race-full.log |
+| conformance | scripts/conformance.sh | 1115 pass / 0 fail / 1 skip | conformance.txt, conformance.json |
+| openspec | openspec validate keel-harness-v2 --strict | valid | openspec.txt |
+
+Pre-existing failure note: cmd/keel's CLI tests fail at base 6fc1b2c without any
+W10 change ("stub: no route for POST /v1/auth/login" / "invalid passphrase");
+see baseline-cmd-keel-preexisting.txt captured in the clean
+.worktrees/keel-task-harness-v2 at the same commit. No W10 code path is
+involved (auth stub vs CLI login).
+
+Known limits / not done
+- HMAC keys are resolved from a direct spec value or a named environment
+  variable. There is no operator settings UI/DB secret store for trigger
+  secrets in this change; the secret must be provided by the hosting plugin or
+  env.
+- Manual fires remain authenticated-but-unsigned by design; the reason flag is
+  provenance, and the route's tenant authentication is the boundary. A future
+  ingress that exposes webhook URLs to third parties should require signature
+  headers there.
+- Catch-up is best-effort: a DB outage at resume logs a warning and schedules
+  from now (the next fire persists a fresh cursor); a window that hits the
+  concurrency cap is retried only on the next restart, not queued.
+- The trigger engine's in-memory fire history (4096 keys) is an optimization;
+  cross-restart dedupe is the kernel requestId, not this map.

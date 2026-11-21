@@ -1,0 +1,2 @@
+# Derived conformance JSON is local-only; the summary txt is the committed artifact.
+*.json

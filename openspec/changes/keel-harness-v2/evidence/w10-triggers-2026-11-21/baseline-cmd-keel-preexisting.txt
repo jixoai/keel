@@ -1,0 +1,7 @@
+$ (baseline 6fc1b2c, no W10 changes) go test -count=1 ./cmd/keel -run TestSkillsCLIListShowAndSources
+--- FAIL: TestSkillsCLIListShowAndSources (0.00s)
+    skills_test.go:97: stub: no route for POST /v1/auth/login
+    skills_test.go:117: list = 1: keel: login to http://127.0.0.1:59754 failed: server refused (404): no route
+FAIL
+FAIL	github.com/jixoai/keel/cmd/keel	0.533s
+FAIL

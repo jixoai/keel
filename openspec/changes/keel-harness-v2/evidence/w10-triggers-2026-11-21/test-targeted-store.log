@@ -1,0 +1,6 @@
+=== RUN   TestTriggerStateSchemaAndRLS
+--- PASS: TestTriggerStateSchemaAndRLS (0.07s)
+=== RUN   TestTriggerStateRoundTrip
+--- PASS: TestTriggerStateRoundTrip (0.06s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	0.296s
