@@ -294,18 +294,38 @@ const teamDescriptionValue = signal("");
 const teamOpen = signal(false);
 const teamEditingId = signal<string | null>(null);
 const teamCaptain = signal("");
-const teamMembers = signal<string[]>([]);
+const teamMembers = signal<TeamMemberView[]>([]);
 const teamNameError = signal<string | null>(null);
 const teamCaptainError = signal<string | null>(null);
 const confirmingTeam = signal<AgentTeamView | null>(null);
 
-/** One seat's display name: a stored agent, an inline member's own name, the
- * seat's label, else a readable "not loaded" word. A raw id is never a display
- * name — the agents registry can be forbidden while teams are readable. */
+/** One seat's identity for the canvas list: the stored agent, the inline
+ * definition's id, else its label. A blank id never becomes a duplicate key. */
+const memberKeyOf = (member: TeamMemberView, index = 0): string =>
+  member.agentId || member.inline?.id || member.label || `seat-${index}`;
+
+/** The same identity without a positional fallback: two stored seats with a
+ * label but no agent/inline id should not be merged by position. */
+const memberIdentityOf = (member: TeamMemberView): string =>
+  member.agentId || member.inline?.id || "";
+
+/** A seat as the document stores it. The canvas edits membership only, so
+ * every other field (label, description, inline definition) is carried over;
+ * a blank agentId falls back to the inline id the server requires it to match. */
+const memberSeatOf = (member: TeamMemberView): TeamMemberView => {
+  const inline = member.inline ? { ...member.inline } : undefined;
+  const agentId = member.agentId?.trim() || inline?.id?.trim() || "";
+  return inline ? { ...member, agentId, inline } : { ...member, agentId };
+};
+
+/** One seat's display name: the team-local label wins (it is the editable
+ * name), then the inline definition's name, then the stored agent. A raw id is
+ * never a display name — the agents registry can be forbidden while teams are
+ * readable. */
 const memberNameOf = (member: TeamMemberView): string =>
-  agentNameOf(member.agentId, member.label) === "未载入的 Agent"
-    ? (member.inline?.name || member.label || "未载入的 Agent")
-    : agentNameOf(member.agentId, member.label);
+  member.label?.trim() ||
+  member.inline?.name?.trim() ||
+  agentNameOf(member.agentId, undefined);
 
 // ---- team canvas: the inline new-Agent form -------------------------------
 
@@ -358,7 +378,7 @@ const setTeamCaptain = (agentId: string | null) => {
   if (teamCaptainError()) teamCaptainError.set(null);
   // The captain is a seat, not a member: picking one removes it from the
   // additional roster, so the same person can never sit twice.
-  teamMembers.set(teamMembers().filter((member) => member !== captain));
+  teamMembers.set(teamMembers().filter((member) => member.agentId !== captain));
 };
 
 const editTeam = (team?: AgentTeamView) => {
@@ -369,7 +389,14 @@ const editTeam = (team?: AgentTeamView) => {
   teamNameValue.set(teamText.name);
   teamDescriptionValue.set(teamText.description);
   teamCaptain.set(team?.captain.agentId ?? "");
-  teamMembers.set((team?.members ?? []).map((member) => member.agentId));
+  // Keep each stored seat whole: a name/description edit must not erase the
+  // CLI-written label/description or an inline agent definition.
+  teamMembers.set(
+    (team?.members ?? []).map((member) => ({
+      ...member,
+      inline: member.inline ? { ...member.inline } : undefined,
+    })),
+  );
   teamEditingId.set(team?.id ?? null);
   teamOpen.set(true);
 };
@@ -396,13 +423,35 @@ const submitTeam = () => {
 
   const editingId = teamEditingId();
   const editing = editingId ? store.teams().find((team) => team.id === editingId) : undefined;
-  const members: TeamMemberView[] = teamMembers()
-    .filter((agentId) => agentId !== captain)
-    .map((agentId) => ({ agentId }));
+  const storedSeats = editing?.members ?? [];
+  const storedSeatByIdentity = new Map(storedSeats.map((member) => [memberIdentityOf(member), member]));
+  // The form edits membership, not the seat's own text or inline definition:
+  // every draft seat merges back onto the stored seat with the same identity.
+  // A re-added seat keeps its CLI-written label; a blank agentId falls back to
+  // the inline id the server requires it to match.
+  const draftSeats = teamMembers().map((draft) => {
+    const identity = memberIdentityOf(draft);
+    const stored = identity ? storedSeatByIdentity.get(identity) : undefined;
+    if (!stored) return memberSeatOf(draft);
+    return memberSeatOf({
+      ...stored,
+      ...draft,
+      agentId: draft.agentId?.trim() || stored.agentId,
+      label: draft.label ?? stored.label,
+      description: draft.description ?? stored.description,
+      inline: draft.inline ?? stored.inline,
+    });
+  });
+  const members: TeamMemberView[] = draftSeats.filter((member) => member.agentId !== captain);
+  const storedCaptain = editing?.captain;
+  const captainSeat: TeamMemberView =
+    storedCaptain && storedCaptain.agentId === captain
+      ? memberSeatOf(storedCaptain)
+      : { agentId: captain };
   const request: AgentTeamWriteRequest = {
     name,
     description: teamText.description.trim(),
-    captain: { agentId: captain },
+    captain: captainSeat,
     members,
   };
   if (editing) {
@@ -414,8 +463,14 @@ const submitTeam = () => {
     if (editing.featureBindings) request.featureBindings = editing.featureBindings;
   }
 
+  // A blank seat (an inline member with no agentId) cannot be addressed by the
+  // member routes; a PUT carries it whole instead. Otherwise a seats-only edit
+  // still takes the one-seat-at-a-time routes.
+  const blankSeat =
+    storedSeats.some((member) => !member.agentId) || draftSeats.some((member) => !member.agentId);
   const rosterOnly =
     editing !== undefined &&
+    !blankSeat &&
     editing.name === name &&
     (editing.description ?? "") === request.description &&
     editing.captain.agentId === captain;
@@ -424,8 +479,8 @@ const submitTeam = () => {
   };
   if (rosterOnly && editing) {
     // Only seats changed: use the member routes, one seat at a time.
-    const before = new Set((editing.members ?? []).map((member) => member.agentId));
-    const after = new Set(teamMembers());
+    const before = new Set(storedSeats.map((member) => member.agentId));
+    const after = new Set(draftSeats.map((member) => member.agentId));
     const calls: Promise<boolean>[] = [];
     for (const agentId of after) if (!before.has(agentId)) calls.push(store.addTeamMember(editing.id, agentId));
     for (const agentId of before) if (!after.has(agentId)) calls.push(store.removeTeamMember(editing.id, agentId));
@@ -1178,12 +1233,17 @@ function TeamCard(props: { team: () => AgentTeamView }) {
 /** One row in the canvas's member list: portrait, name, description and the
  * one action that seat has (remove). The captain is never in this list — it
  * has its own slot and cannot be removed here. */
-function CanvasMemberRow(props: { member: () => TeamMemberView }) {
+function CanvasMemberRow(props: { member: () => TeamMemberView; onRemove: () => void }) {
   const agent = () => store.agents().find((item) => item.id === props.member().agentId);
   const name = () => memberNameOf(props.member());
+  const key = () => memberKeyOf(props.member());
+  const fact = () =>
+    props.member().description ||
+    agent()?.description ||
+    (props.member().inline ? "内联定义 · 随团队保存" : "已加入团队");
   return (
     <View
-      testID={`canvas-member-${props.member().agentId}`}
+      testID={`canvas-member-${key()}`}
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -1191,7 +1251,7 @@ function CanvasMemberRow(props: { member: () => TeamMemberView }) {
         paddingVertical: space.xs,
       }}
     >
-      <Avatar src={agent()?.avatar?.url ?? null} name={name()} size="default" />
+      <Avatar src={agent()?.avatar?.url ?? props.member().inline?.avatar?.url ?? null} name={name()} size="default" />
       <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
         <Text
           style={{
@@ -1213,7 +1273,7 @@ function CanvasMemberRow(props: { member: () => TeamMemberView }) {
             textOverflow: "ellipsis",
           }}
         >
-          {agent()?.description || "已加入团队"}
+          {fact()}
         </Text>
       </View>
       <Button
@@ -1221,10 +1281,10 @@ function CanvasMemberRow(props: { member: () => TeamMemberView }) {
         size="sm"
         icon="x"
         label="移出"
-        testID={`canvas-remove-${props.member().agentId}`}
+        testID={`canvas-remove-${key()}`}
         accessibilityLabel={`移出成员 ${name()}`}
         disabled={store.teamsSaving()}
-        onPress={() => teamMembers.set(teamMembers().filter((id) => id !== props.member().agentId))}
+        onPress={props.onRemove}
       />
     </View>
   );
@@ -1271,7 +1331,7 @@ function CanvasLibraryRow(props: { agent: () => AgentView }) {
         testID={`canvas-add-${props.agent().id}`}
         accessibilityLabel={`加入成员 ${props.agent().name}`}
         disabled={store.teamsSaving()}
-        onPress={() => teamMembers.set([...teamMembers(), props.agent().id])}
+        onPress={() => teamMembers.set([...teamMembers(), { agentId: props.agent().id }])}
       />
     </View>
   );
@@ -1292,7 +1352,12 @@ function TeamCanvasDialog() {
     captain()?.name || (teamCaptain() ? "未载入的 Agent" : "未指定队长");
   const members = () => teamMembers();
   const library = () =>
-    agents().filter((agent) => agent.id !== teamCaptain() && !teamMembers().includes(agent.id));
+    agents().filter(
+      (agent) => agent.id !== teamCaptain() && !teamMembers().some((member) => member.agentId === agent.id),
+    );
+  const removeMemberAt = (index: number) => {
+    teamMembers.set(teamMembers().filter((_, seat) => seat !== index));
+  };
   // A team cannot be saved without a captain; the name is validated on submit
   // (so the field can explain itself) and does not gate the button.
   const canSave = () => !saving() && teamCaptain() !== "";
@@ -1462,8 +1527,10 @@ function TeamCanvasDialog() {
             <If when={members().length === 0}>
               <Text style={mutedProse}>只有队长；从下方成员库添加协作者。</Text>
             </If>
-            <Each of={members()} key={(agentId) => agentId}>
-              {(agentId) => <CanvasMemberRow member={() => ({ agentId: agentId() })} />}
+            <Each of={members()} key={(member, index) => memberKeyOf(member, index)}>
+              {(member, index) => (
+                <CanvasMemberRow member={member} onRemove={() => removeMemberAt(index())} />
+              )}
             </Each>
           </View>
 
@@ -1705,7 +1772,15 @@ function TeamCliPanel() {
         <If when={store.pluginsLoading() && store.plugins() === null}>
           <SectionLoading testID="team-cli-loading" text="正在读取插件能力清单…" />
         </If>
-        <If when={!!store.pluginsError()}>
+        <If when={!!store.pluginsError() && store.pluginsErrorStatus() === 403}>
+          <SectionPermission
+            testID="team-cli-permission"
+            scope="插件能力清单"
+            reason={store.pluginsError() ?? ""}
+            onRetry={() => void store.loadPlugins()}
+          />
+        </If>
+        <If when={!!store.pluginsError() && store.pluginsErrorStatus() !== 403}>
           <SectionError
             testID="team-cli-error"
             text={store.pluginsError() ?? ""}

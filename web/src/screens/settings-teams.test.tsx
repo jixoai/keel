@@ -302,6 +302,40 @@ test("TUI: 团队画布——新建 Agent 落在成员库，空队长槽自动�
   expect(app.enabled("id:team-save")).toBe(true);
 });
 
+test("TUI: 团队画布——改名+加成员保存保留 CLI label/description 与 inline 席位", async () => {
+  const app = await openSection("seats");
+  await app.waitFor("id:team-card-team_seats");
+  expect(joined(app)).toContain("初稿评审");
+  expect(joined(app)).toContain("内联席位");
+
+  await app.press("label:编辑团队 席位组");
+  await app.waitFor("id:team-dialog");
+  // The inline seat keeps its own text: the form edits membership, not the
+  // seat's label/description/definition.
+  expect(joined(app)).toContain("团队内定义");
+  // Re-seat an existing member: the draft is a bare agentId again, so the
+  // saved seat must merge back onto the stored one (label/description kept).
+  await app.press("id:canvas-remove-agent_research");
+  await app.waitFor("id:canvas-member-agent_research", { state: "gone" });
+  await app.press("id:canvas-add-agent_research");
+  await app.waitFor("id:canvas-member-agent_research");
+  await app.press("id:canvas-add-agent_ops");
+  await app.waitFor("id:canvas-member-agent_ops");
+  await app.clear("id:team-name");
+  await app.type("id:team-name", "席位组·改");
+  await app.press("id:team-save");
+
+  await app.waitFor("id:team-dialog", { state: "gone" });
+  await app.waitFor("id:team-card-team_seats");
+  expect(joined(app)).toContain("席位组·改");
+  // The harness' PUT refuses a seat whose label/description/inline is lost or
+  // whose agentId became blank, so this remaining text is the data contract.
+  expect(joined(app)).toContain("初稿评审");
+  expect(joined(app)).toContain("内联席位");
+  expect(joined(app)).toContain("成员 3 人");
+  expect(app.shows("id:team-save-error")).toBe(false);
+});
+
 test("TUI: 团队画布——加载态：成员库说明正在读取，主操作禁用", async () => {
   const app = await openSection("agents-loading");
   await app.waitFor("id:team-card-team_brand");
@@ -376,6 +410,15 @@ test("TUI: 团队——删除被会话引用时 Dialog 留场并逐字给出原�
   expect(joined(app)).toContain("删除失败：团队「品牌发布小组」正在运行任务，暂不能删除。");
   expect(app.shows("id:team-delete-dialog")).toBe(true);
   expect(app.shows("id:team-card-team_brand")).toBe(true);
+});
+
+test("TUI: Team CLI 能力面板——403 是权限面，不冒充加载失败", async () => {
+  const app = await openSection("plugins-permission");
+
+  await app.waitFor("id:team-cli-permission");
+  expect(joined(app)).toContain("没有查看插件能力清单的权限");
+  expect(joined(app)).toContain("当前账号没有 plugin.read 权限");
+  expect(app.shows("id:team-cli-error")).toBe(false);
 });
 
 test("TUI: Team CLI 能力面板——manifest 声明逐条渲染，权限与可调用方原样", async () => {

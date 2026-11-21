@@ -42,6 +42,7 @@ import type {
   TeamTaskView,
   TeamTasksView,
   TriggerStatusView,
+  TriggersView,
   TurnErrorState,
   UiCommands,
   WireEvent,
@@ -143,6 +144,14 @@ interface Client extends SettingsApi {
 /** The member-task projection seam (`GET /v1/sessions/{id}/team-tasks`). */
 type TeamTaskTransport = {
   teamTasks(sessionId: string, limit?: number, after?: string): Promise<TeamTasksView>;
+};
+
+/** The plugin/trigger read seam (`GET /v1/plugins`, `GET /v1/triggers`). The
+ * harness answers it so the Team CLI panel's 403 face is exercised through the
+ * real store error path instead of a hand-set message. */
+type PluginTransport = {
+  plugins(): Promise<PluginsView>;
+  triggers(): Promise<TriggersView>;
 };
 
 const newRequestId = () => {
@@ -284,6 +293,9 @@ class KeelStore {
   readonly plugins = signal<PluginsView | null>(null);
   readonly pluginsLoading = signal(false);
   readonly pluginsError = signal<string | null>(null);
+  /** As `agentsErrorStatus`: the 403 face is driven by the response status,
+   * not by matching a localized message. */
+  readonly pluginsErrorStatus = signal<number | null>(null);
   readonly triggers = signal<TriggerStatusView[]>([]);
   readonly firingTrigger = signal<string | null>(null);
   /** The last manual fire's outcome, per trigger id. */
@@ -340,6 +352,8 @@ class KeelStore {
    * it in memory so the real `KeelHttp` parsing runs without a network).
    * `null` = the app's own transport. */
   private agentTeamClient: AgentTeamApi | null = null;
+  /** Test/host seam for the plugin reads; `null` uses the app's transport. */
+  private pluginClient: PluginTransport | null = null;
   /** Test/host seam for the member-task projection, same pattern. */
   private teamTaskClient: TeamTaskTransport | null = null;
   /** Bumped per read so a slow answer for a closed session cannot land. */
@@ -811,12 +825,15 @@ class KeelStore {
     if (this.pluginsLoading()) return;
     this.pluginsLoading.set(true);
     this.pluginsError.set(null);
+    this.pluginsErrorStatus.set(null);
     try {
-      const [plugins, triggers] = await Promise.all([this.client.plugins(), this.client.triggers()]);
+      const client = this.pluginClient ?? this.client;
+      const [plugins, triggers] = await Promise.all([client.plugins(), client.triggers()]);
       this.plugins.set(plugins);
       this.triggers.set(triggers.triggers ?? []);
     } catch (error) {
       this.pluginsError.set(messageOf(error));
+      this.pluginsErrorStatus.set(error instanceof KeelApiError ? error.status : null);
     } finally {
       this.pluginsLoading.set(false);
     }
@@ -859,6 +876,12 @@ class KeelStore {
    * restores the app's own transport. */
   setAgentTeamTransport(client: AgentTeamApi | null): void {
     this.agentTeamClient = client;
+  }
+
+  /** Test/host seam: answer the plugin and trigger reads without a network.
+   * `null` restores the app's own transport. */
+  setPluginTransport(client: PluginTransport | null): void {
+    this.pluginClient = client;
   }
 
   /** Test/host seam: answer the member-task projection without a network.
@@ -1119,6 +1142,7 @@ class KeelStore {
     this.secretsActionError.set(null);
     this.plugins.set(null);
     this.pluginsError.set(null);
+    this.pluginsErrorStatus.set(null);
     this.triggers.set([]);
     this.fireOutcome.set(null);
     this.agents.set([]);

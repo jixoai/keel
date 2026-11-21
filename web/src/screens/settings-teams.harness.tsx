@@ -8,8 +8,10 @@
 // refused), `slow` (a write takes long enough to observe the saving state),
 // `referenced` (a team delete is refused), `no-captain` (a team document whose
 // captain seat is empty), `agents-loading` / `agents-error` / `agents-empty`
-// (the canvas member library's own states) and `no-manifest` (no keel.team CLI
-// declaration to render).
+// (the canvas member library's own states), `no-manifest` (no keel.team CLI
+// declaration to render) and `plugins-permission` (the plugin read is 403).
+// `seats` adds a team whose members keep a CLI-written label/description and
+// an inline definition, so a rename must not erase them.
 import { host, mount, View } from "nsh";
 import type {
   AgentTeamView,
@@ -19,7 +21,7 @@ import type {
   PluginsView,
   TeamMemberView,
 } from "../data/contract";
-import { KeelHttp, type FetchLike } from "../data/http";
+import { KeelApiError, KeelHttp, type FetchLike } from "../data/http";
 import { store } from "../data/store";
 import { TeamsSection } from "./settings-agents";
 
@@ -67,6 +69,32 @@ const seedTeams = (): AgentTeamView[] => {
   ];
   if (scenario() === "no-captain") {
     rows[0] = { ...rows[0], captain: { agentId: "" }, status: "invalid" };
+  }
+  if (scenario() === "seats") {
+    rows.push({
+      id: "team_seats",
+      name: "席位组",
+      description: "保留 CLI 写入的席位文本与内联定义",
+      captain: { agentId: "agent_design" },
+      members: [
+        { agentId: "agent_research", label: "初稿评审", description: "只审初稿" },
+        {
+          // An inline seat as an older document may carry it: the real seat
+          // identity lives in `inline.id`, and a rename must keep both.
+          agentId: "",
+          label: "内联席位",
+          description: "团队内定义",
+          inline: {
+            id: "agent_inline",
+            name: "内联研究员",
+            description: "团队内定义",
+            avatar: { kind: "identicon", seed: "agent_inline" },
+          },
+        },
+      ],
+      status: "valid",
+      revision: 1,
+    });
   }
   return rows;
 };
@@ -118,6 +146,11 @@ let teams: AgentTeamView[] = scenario() === "empty" ? [] : seedTeams();
 let sequence = 0;
 
 const memberOf = (agentId: string): TeamMemberView => ({ agentId });
+
+/** A seat's identity on the wire: the agent reference, or the inline id that
+ * an inline-only seat names as its agent. */
+const seatIdentityOf = (member: TeamMemberView): string =>
+  member.agentId || member.inline?.id || "";
 
 const teamFrom = (id: string, request: AgentTeamWriteRequest): AgentTeamView => ({
   id,
@@ -181,6 +214,29 @@ const stub: FetchLike = async (input, init) => {
     }
     const id = decodeURIComponent(input.slice("/v1/teams/".length));
     const request = JSON.parse(bodyText) as AgentTeamWriteRequest;
+    const seats = request.members ?? [];
+    // The server's own rule: every seat names an agent (an inline seat names
+    // its inline id). A bare `{agentId:""}` recreation is the data-loss bug.
+    if (seats.some((member) => !seatIdentityOf(member))) {
+      return respond(400, { error: "members[i].agentId: seat must reference an agent" });
+    }
+    // A kept seat must keep the fields the canvas does not edit. This makes a
+    // silent label/description/inline loss fail the write instead of passing.
+    const stored = teams.find((team) => team.id === id);
+    for (const old of stored?.members ?? []) {
+      const identity = seatIdentityOf(old);
+      const kept = seats.find((member) => seatIdentityOf(member) === identity);
+      if (!kept) continue; // removed by the form, not lost
+      if ((old.label ?? "") !== (kept.label ?? "")) {
+        return respond(400, { error: `member label lost for ${identity}` });
+      }
+      if ((old.description ?? "") !== (kept.description ?? "")) {
+        return respond(400, { error: `member description lost for ${identity}` });
+      }
+      if (old.inline && !kept.inline) {
+        return respond(400, { error: `member inline definition lost for ${identity}` });
+      }
+    }
     const updated = teamFrom(id, request);
     teams = teams.map((team) => (team.id === id ? updated : team));
     return respond(200, updated);
@@ -234,7 +290,17 @@ const stub: FetchLike = async (input, init) => {
 store.registryLoaded.set(true);
 store.providers.set([{ providerId: "s2api", name: "S2API" }]);
 store.models.set([{ providerId: "s2api", modelId: "deepseek-v4.1-flash", selectable: true, executable: true }]);
-store.plugins.set(seedPlugins());
+if (scenario() === "plugins-permission") {
+  // Let the section's own read run, against a transport that answers 403: the
+  // panel must show the permission face, not a generic load failure.
+  store.plugins.set(null);
+  store.setPluginTransport({
+    plugins: () => Promise.reject(new KeelApiError(403, "当前账号没有 plugin.read 权限")),
+    triggers: () => Promise.resolve({ triggers: [] }),
+  });
+} else {
+  store.plugins.set(seedPlugins());
+}
 store.setAgentTeamTransport(new KeelHttp("", stub));
 
 function Harness() {
