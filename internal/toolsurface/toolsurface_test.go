@@ -17,6 +17,7 @@ import (
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/placement"
+	"github.com/jixoai/keel/internal/skilllib"
 	"github.com/jixoai/keel/internal/skills"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -405,11 +406,95 @@ func TestSkillsActions(t *testing.T) {
 	if problem := errorDocument(t, missing); problem["code"] != toolsurface.CodeNotFound {
 		t.Fatalf("hidden skill view = %v", problem)
 	}
-	for _, action := range []string{"manage", "sources"} {
-		result := runAction(t, tool, `{"action":"`+action+`"}`)
-		if problem := errorDocument(t, result); problem["code"] != toolsurface.CodeNotImplemented {
-			t.Fatalf("skills.%s = %v, want not_implemented", action, problem)
+	for action, op := range map[string]string{"manage": "create", "sources": "list"} {
+		result := runAction(t, tool, `{"action":"`+action+`","op":"`+op+`"}`)
+		if problem := errorDocument(t, result); problem["code"] != toolsurface.CodeNotWired {
+			t.Fatalf("skills.%s = %v, want not_wired without a library", action, problem)
 		}
+	}
+}
+
+// fakeSkills is the library seam: it records the call and answers a fixed
+// value, so the tool surface's routing/merging is what is under test.
+type fakeSkills struct {
+	installed []skills.Skill
+	manageOp  string
+	sourceOp  string
+	args      json.RawMessage
+	err       error
+}
+
+func (f *fakeSkills) SkillsList(context.Context) ([]skills.Skill, error) {
+	return f.installed, f.err
+}
+
+func (f *fakeSkills) SkillsManage(_ context.Context, op string, args json.RawMessage) (any, error) {
+	f.manageOp = op
+	f.args = append(json.RawMessage(nil), args...)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return map[string]any{"status": "updated", "skill": map[string]any{"name": "learned"}}, nil
+}
+
+func (f *fakeSkills) SkillsSources(_ context.Context, op string, args json.RawMessage) (any, error) {
+	f.sourceOp = op
+	f.args = append(json.RawMessage(nil), args...)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return map[string]any{"sources": []any{}}, nil
+}
+
+func TestSkillsManageAndSourcesRouteToTheLibrary(t *testing.T) {
+	discovered := skills.Skill{Name: "pdf", Description: "Read PDFs", Path: "/skills/pdf/SKILL.md", Body: "body"}
+	installed := skills.Skill{Name: "deploy-flow", Description: "Ship it", Path: "/library/deploy-flow/SKILL.md", Body: "steps"}
+	backend := &fakeSkills{installed: []skills.Skill{installed}}
+	registry := builtinRegistry(t, toolsurface.Backends{Skills: backend}, discovered)
+	tool := registry[toolsurface.Skills]
+
+	list := runAction(t, tool, `{"action":"ls"}`)
+	listText := agentcore.ContentToText(list.Content)
+	if !strings.Contains(listText, `"deploy-flow"`) || !strings.Contains(listText, `"pdf"`) {
+		t.Fatalf("skills ls did not merge library skills: %s", listText)
+	}
+	view := runAction(t, tool, `{"action":"view","name":"deploy-flow"}`)
+	if !strings.Contains(agentcore.ContentToText(view.Content), "steps") {
+		t.Fatalf("library skill view = %s", agentcore.ContentToText(view.Content))
+	}
+
+	managed := runAction(t, tool, `{"action":"manage","op":"create","name":"learned","description":"d","body":"b"}`)
+	if backend.manageOp != "create" {
+		t.Fatalf("manage op = %q", backend.manageOp)
+	}
+	if !strings.Contains(agentcore.ContentToText(managed.Content), `"status":"updated"`) {
+		t.Fatalf("manage result = %s", agentcore.ContentToText(managed.Content))
+	}
+	// The spec's action table names the members without an `op` key; both
+	// spellings reach the same route.
+	runAction(t, tool, `{"action":"manage","manageAction":"patch","name":"deploy-flow"}`)
+	if backend.manageOp != "patch" {
+		t.Fatalf("manageAction spelling = %q", backend.manageOp)
+	}
+	unknown := runAction(t, tool, `{"action":"manage","op":"delete_everything"}`)
+	if problem := errorDocument(t, unknown); problem["code"] != toolsurface.CodeInvalidArguments {
+		t.Fatalf("unknown manage op = %v", problem)
+	}
+
+	runAction(t, tool, `{"action":"sources","sourceAction":"list"}`)
+	if backend.sourceOp != "list" {
+		t.Fatalf("sources op = %q", backend.sourceOp)
+	}
+}
+
+func TestSkillsBackendErrorCarriesTheLibraryCode(t *testing.T) {
+	backend := &fakeSkills{err: &skilllib.Error{Code: skilllib.CodePinned, Message: "pinned at abc"}}
+	registry := builtinRegistry(t, toolsurface.Backends{Skills: backend})
+	tool := registry[toolsurface.Skills]
+	result := runAction(t, tool, `{"action":"manage","op":"create","name":"x","description":"d"}`)
+	problem := errorDocument(t, result)
+	if problem["code"] != skilllib.CodePinned {
+		t.Fatalf("backend error code = %v, want %s", problem["code"], skilllib.CodePinned)
 	}
 }
 

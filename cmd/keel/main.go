@@ -41,6 +41,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runTeamCmd(args[1:], stdout, stderr)
 	case "model":
 		return runModelCmd(args[1:], stdout, stderr)
+	case "skills":
+		return runSkillsCmd(args[1:], stdout, stderr)
 	case "admin":
 		return runAdminCmd(args[1:], stdout, stderr)
 	case "doctor":
@@ -67,6 +69,7 @@ Usage:
   keel agent <cmd>       Manage the Agent library (list|show|create|update|delete|start|stop)
   keel team <cmd>        Manage agent teams (list|show|create|update|delete|save|start|member add|remove)
   keel model <cmd>       Read/manage the model registry (providers|list|show|catalog|provider ...)
+  keel skills <cmd>      Manage the tenant skill library (list|show|install|update|pin|unpin|remove|sources)
   keel admin <cmd>       Provision tenants, API keys and quotas (operator)
   keel doctor [flags]    Diagnose configuration and build artifacts
   keel version           Print version and build information
@@ -81,6 +84,7 @@ Environment (serve):
                            model selection (fake provider when unset)
   KEEL_MODELS_CONFIG       tenant models document (providers/rules/selection)
   KEEL_SKILLS_ROOTS        OS path list of skill roots (PI-compatible)
+  KEEL_SKILLS_ROOT         managed skill library root (default $KEEL_HOME/skills)
 
 Environment (tui, agent, team):
   KEEL_TUI_BIN             path to the NSH TUI binary
@@ -132,6 +136,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		apiKey     = fs.String("api-key", os.Getenv("KEEL_API_KEY"), "provider API key")
 		prompt     = fs.String("system-prompt", envOr("KEEL_SYSTEM_PROMPT", ""), "system prompt override")
 		skills     = fs.String("skills-roots", os.Getenv("KEEL_SKILLS_ROOTS"), "OS path list of skill roots")
+		skillsRoot = fs.String("skills-root", defaultSkillsRoot(), "managed skill library root ($KEEL_HOME/skills)")
 		loadoutID  = fs.String("loadout-id", envOr("KEEL_LOADOUT_ID", ""), "loadout id")
 		loadoutRev = fs.Int64("loadout-revision", envInt64("KEEL_LOADOUT_REVISION", 1), "loadout revision")
 		mcpConfig  = fs.String("mcp", os.Getenv("KEEL_MCP_CONFIG"), "global mcp.json path (empty disables MCP)")
@@ -167,6 +172,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		APIKey:          *apiKey,
 		SystemPrompt:    *prompt,
 		SkillsRoots:     splitPaths(*skills),
+		SkillsRoot:      *skillsRoot,
 		LoadoutID:       *loadoutID,
 		LoadoutRevision: *loadoutRev,
 		MCPConfig:       *mcpConfig,
@@ -200,6 +206,25 @@ func defaultPluginsRoot() string {
 		return ""
 	}
 	return filepath.Join(home, "plugins")
+}
+
+// defaultSkillsRoot resolves the managed skill library root: KEEL_SKILLS_ROOT
+// wins, then $KEEL_HOME/skills, then ~/.keel/skills. Each tenant's installed
+// skills live below <root>/<tenant>/active, which is a skill discovery root.
+func defaultSkillsRoot() string {
+	if root := os.Getenv("KEEL_SKILLS_ROOT"); root != "" {
+		return root
+	}
+	home := os.Getenv("KEEL_HOME")
+	if home == "" {
+		if dir, err := os.UserHomeDir(); err == nil {
+			home = filepath.Join(dir, ".keel")
+		}
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, "skills")
 }
 
 func envOr(name, def string) string {

@@ -46,6 +46,11 @@ type Host struct {
 	skills   []skills.Skill
 	warnings []skills.Warning
 	tools    *agenttool.ToolRegistry
+	// refreshMu serialises the two refresh seams (dynamic sections and skill
+	// rediscovery). Each rebuilds the registry from the complete config, so an
+	// interleaved pair could otherwise publish a registry built from a config it
+	// no longer owns.
+	refreshMu sync.Mutex
 	// dynamic holds the sections the refresh seam owns: the mcp_servers section
 	// and the sections plugins contribute. SystemPrompt renders cfg.Sections
 	// (the preamble's static and tenant sections) followed by these, so a refresh
@@ -146,6 +151,9 @@ func (h *Host) RefreshMCP(extra []agentcore.AgentTool, section string) error {
 // new registry is built and validated before it is published; callers already
 // holding the old registry (an in-flight run) continue safely.
 func (h *Host) RefreshSections(extra []agentcore.AgentTool, mcpSection string, extraSections []Section) error {
+	h.refreshMu.Lock()
+	defer h.refreshMu.Unlock()
+
 	h.mu.RLock()
 	cfg := h.cfg
 	discovered := h.skills
@@ -181,11 +189,53 @@ func (h *Host) RefreshSections(extra []agentcore.AgentTool, mcpSection string, e
 	return nil
 }
 
+// RefreshSkills rediscovers skills from the configured roots and publishes a
+// new registry. The hosting process calls it after a library write (install,
+// update, pin, remove): the managed library's active/ directory is one of the
+// roots, so the next run's prompt and the `skills ls`/`view` responses see the
+// change without a restart. In-flight runs keep the registry they resolved.
+//
+// Discovery failures stay warnings, exactly like boot: a broken skill must not
+// take the host down. A registry that fails to build leaves the previous one
+// published and returns the error.
+func (h *Host) RefreshSkills() ([]skills.Warning, error) {
+	h.refreshMu.Lock()
+	defer h.refreshMu.Unlock()
+
+	h.mu.RLock()
+	cfg := h.cfg
+	h.mu.RUnlock()
+	discovered, warnings := skills.Discover(cfg.SkillRoots)
+	reg, err := buildRegistry(cfg, discovered)
+	if err != nil {
+		return warnings, err
+	}
+	h.mu.Lock()
+	h.skills = discovered
+	h.warnings = warnings
+	h.tools = reg
+	h.mu.Unlock()
+	return warnings, nil
+}
+
+// Warnings returns the discovery warnings of the current assembly.
+func (h *Host) Warnings() []skills.Warning {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return append([]skills.Warning(nil), h.warnings...)
+}
+
 // Skills returns the discovered skills.
-func (h *Host) Skills() []skills.Skill { return h.skills }
+func (h *Host) Skills() []skills.Skill {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return append([]skills.Skill(nil), h.skills...)
+}
 
 // VisibleSkills returns the skills advertised to the model.
 func (h *Host) VisibleSkills() []skills.Skill {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return visibleSkills(h.skills)
 }
 

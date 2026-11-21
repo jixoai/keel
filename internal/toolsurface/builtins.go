@@ -24,6 +24,10 @@ type Backends struct {
 	Approve     ApproveBackend
 	Notify      NotifyBackend
 	Files       FileBackend
+	// Skills is the tenant-scoped skill library behind the `skills` tool's
+	// manage/sources actions and the merge behind ls/view. Nil keeps the tool
+	// constant and answers manage/sources with not_wired.
+	Skills SkillsBackend
 }
 
 // BuiltinNames returns the eleven builtin tool names, sorted.
@@ -43,7 +47,7 @@ func BuiltinTools(discovered []skills.Skill, backends Backends) []agentcore.Agen
 		newWriteTool(backends.Files),
 		newEditTool(backends.Files),
 		newMCPTool(backends.MCP, backends.MCPProgress),
-		newSkillsTool(discovered),
+		newSkillsTool(discovered, backends.Skills),
 		newTasksTool(backends.Tasks),
 		newAgentTool(backends.Agents),
 		newApproveTool(backends.Approve),

@@ -46,6 +46,7 @@ import (
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
 	"github.com/jixoai/keel/internal/sessionbinding"
+	"github.com/jixoai/keel/internal/skilllib"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 	"github.com/jixoai/keel/internal/tasklog"
@@ -56,22 +57,28 @@ import (
 
 // serveOptions is the resolved `keel serve` configuration (flags + environment).
 type serveOptions struct {
-	Addr            string
-	DSN             string
-	WebDir          string
-	CASDir          string
-	TenantID        uuid.UUID
-	Password        string
-	SecureCookies   bool
-	Runs            int
-	NoWorker        bool
-	Model           string
-	Provider        string
-	BaseURL         string
-	Protocol        string
-	APIKey          string
-	SystemPrompt    string
-	SkillsRoots     []string
+	Addr          string
+	DSN           string
+	WebDir        string
+	CASDir        string
+	TenantID      uuid.UUID
+	Password      string
+	SecureCookies bool
+	Runs          int
+	NoWorker      bool
+	Model         string
+	Provider      string
+	BaseURL       string
+	Protocol      string
+	APIKey        string
+	SystemPrompt  string
+	SkillsRoots   []string
+	// SkillsRoot is the managed skill library root ($KEEL_HOME/skills). The
+	// tenant's active/ directory below it is part of skill discovery, so an
+	// installed skill reaches the next run without restarting the process.
+	SkillsRoot string
+	// Skills is the built library (set by runServe before the product layer).
+	Skills          *skilllib.Library
 	LoadoutID       string
 	LoadoutRevision int64
 	MCPConfig       string
@@ -433,6 +440,17 @@ func runServe(parent context.Context, opts serveOptions) error {
 	} else {
 		secretBox = box
 	}
+	// The managed skill library: the tenant-scoped registry behind
+	// /v1/settings/skills, `keel skills` and the `skills` tool's manage/sources
+	// actions. Its active/ directory joins skill discovery, so an install reaches
+	// the next run's prompt; the OnChange callback (installed after boot, when the
+	// runtime exists) republishes the registry.
+	skillLibrary := skilllib.New(skilllib.Options{Root: opts.SkillsRoot, Logger: log})
+	opts.Skills = skillLibrary
+	skillsRoots := append([]string(nil), opts.SkillsRoots...)
+	if managed := skillLibrary.ActiveRoot(opts.TenantID); managed != "" {
+		skillsRoots = append(skillsRoots, managed)
+	}
 	tenantCfg := host.TenantConfig{
 		Agent: host.AgentConfig{
 			Provider:     opts.Provider,
@@ -442,7 +460,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 			SystemPrompt: opts.SystemPrompt,
 		},
 		Models: modelsDoc,
-		Skills: host.SkillsConfig{Roots: opts.SkillsRoots},
+		Skills: host.SkillsConfig{Roots: skillsRoots},
 		MCP:    host.MCPConfig{Servers: mcpServerEntries(mcpEntries)},
 		Quota:  host.QuotaConfig{RunConcurrency: envInt("KEEL_QUOTA_RUNS", 0), EventsPerMinute: envInt("KEEL_QUOTA_EVENTS_PER_MINUTE", 0)},
 	}
@@ -686,6 +704,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 				Approve: agentext.ApproveBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Notify:  agentext.NotifyBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
 				Files:   agentext.FileBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				// The skill library is the tenant-scoped registry behind
+				// `skills manage`/`sources` and the settings page.
+				Skills: skillLibrary,
 				// MCP notifications/progress reach the tool row through the same
 				// transient bus as token deltas (P4.5). The frame is advisory and
 				// never enters the ledger.
@@ -716,6 +737,22 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// path). A deployment without a model leaves it nil and sampling fails
 	// closed.
 	mrtr.SetSampler(rt.MCPSampler())
+	// The skill library's writes (install/update/pin/remove) republish the
+	// prompt registry: the active/ directory is a discovery root, so a new skill
+	// is indexed before the next run claims. The callback runs after the
+	// library's write lock is released from the caller's perspective (the write
+	// has landed), and a refresh failure leaves the previous registry in place —
+	// the settings write itself still succeeded and says so.
+	skillLibrary.SetOnChange(func() {
+		warnings, err := rt.RefreshSkills()
+		if err != nil {
+			log.Warn("skill refresh failed; the previous registry keeps serving", "err", err)
+			return
+		}
+		for _, warning := range warnings {
+			log.Warn("skill discovery", "warning", warning.String())
+		}
+	})
 	// The runtime is up: the SSE hub may hold its pool connection now.
 	go hub.Run(ctx)
 	// The MCP half was buffered while the graph activated (mcpService.Start
@@ -1164,6 +1201,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		ProviderReferences: st,
 		SecretStore:        secretStore,
 		SecretStoreReason:  secretReason,
+		// The skill settings surface and the session-local completion sources:
+		// both read services the tools already use, never a second copy.
+		Skills:       opts.Skills,
+		SessionFiles: opts.FileService,
+		SessionTasks: taskLog,
 		// Tenancy surface (change keel-ga §2): the operator provisioning path and
 		// the tenant's own quota projection. Both read the same store the request
 		// path uses; neither is reachable with a tenant credential alone.

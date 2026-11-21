@@ -95,3 +95,36 @@ func TestProductLayersCompileOnTopOfTheKernel(t *testing.T) {
 		t.Fatalf("resolved %d product packages, want %d: %s", got, len(productPackages), out)
 	}
 }
+
+// skillPackages are the skill library's two halves: the pure bundle/parser and
+// the tenant registry (which also implements the `skills` tool backend).
+var skillPackages = []string{
+	"github.com/jixoai/keel/internal/skills",
+	"github.com/jixoai/keel/internal/skilllib",
+}
+
+// TestSkillPackagesDoNotExecuteScripts is the structural half of the W7 rule
+// "a skill's script is executed by the bash tool, never by the skills plugin".
+// The registry stores a scripts/*.sh resource as bytes; any process spawn from
+// these packages (os/exec, or the bash adapter itself) would be a second
+// execution path outside the sandbox, job manager, timeout-to-background and
+// output bounds. The runtime half of the rule is tested in skilllib
+// (TestManageBackendCreatesVersionsAndNeverExecutes): the closed `manage`
+// operation set has no run member.
+func TestSkillPackagesDoNotExecuteScripts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "go", append([]string{"list", "-deps"}, skillPackages...)...).Output()
+	if err != nil {
+		t.Fatalf("go list -deps skills: %v", err)
+	}
+	forbidden := map[string]string{
+		"os/exec": "spawns a process",
+		"github.com/jixoai/keel/internal/bashbridge": "reaches the bash adapter directly",
+	}
+	for _, dep := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if why, bad := forbidden[dep]; bad {
+			t.Errorf("skills package imports %s (%s); execution belongs to the bash tool's policy", dep, why)
+		}
+	}
+}

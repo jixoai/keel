@@ -52,6 +52,7 @@ import (
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicegraph"
+	"github.com/jixoai/keel/internal/skills"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -486,6 +487,18 @@ func (r *Runtime) Host() *host.Host {
 		}
 	}
 	return nil
+}
+
+// RefreshSkills rediscovers the skill roots of the serving generation. The
+// product layer calls it after a skill-library write, so the next run's
+// system-prompt index and the `skills` tool see the change without a restart.
+// A runtime without a prompt service (a kernel-only deployment) is a no-op.
+func (r *Runtime) RefreshSkills() ([]skills.Warning, error) {
+	assembly := r.Host()
+	if assembly == nil {
+		return nil, nil
+	}
+	return assembly.RefreshSkills()
 }
 
 // Projection returns the read seam of the session-projection service (the

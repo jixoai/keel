@@ -164,6 +164,16 @@ type Config struct {
 	// SecretStoreReason explains a missing secret store to an operator. It is
 	// rendered verbatim and must never contain a value.
 	SecretStoreReason string
+	// Skills is the tenant-scoped skill library behind /v1/settings/skills and
+	// the `skills` aggregate tool's manage/sources actions. Nil answers 501 on
+	// the settings routes (the tool keeps its constant name).
+	Skills SkillLibrary
+	// SessionFiles lists the open session's file manifest for the composer's
+	// `$` file group. Nil omits the group from the capability answer.
+	SessionFiles SessionFileLister
+	// SessionTasks lists the session's task cards for the composer's `$` task
+	// group. Nil omits the group from the capability answer.
+	SessionTasks SessionTaskLister
 	// SessionExists validates that a session belongs to the tenant before a
 	// product endpoint writes to it (a decision opened on a missing session
 	// would be an orphan row). Nil skips the check (tests without a store).
@@ -303,6 +313,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/providers/{id}/test", s.testProvider)
 	s.mux.HandleFunc("GET /v1/models", s.listModels)
 	s.settingsRoutes()
+	s.skillsRoutes()
+	s.completionRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/team-tasks", s.listTeamTasks)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
@@ -448,6 +460,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// deployment does not serve.
 		"settings.models":  s.modelSettingsWired(),
 		"settings.secrets": s.cfg.SecretStore != nil,
+		// The skill library is its own settings surface and the backend of the
+		// `skills` tool's manage/sources actions. The completion flag reports the
+		// data a `$` group needs (the shell decides which groups to draw).
+		"settings.skills":   s.cfg.Skills != nil,
+		"skills.completion": s.cfg.SessionFiles != nil || s.cfg.SessionTasks != nil,
 		// MCP Apps (change feat-mcp-apps-events): the app catalogue and the
 		// document host exist only when the host registry is wired. The sandbox
 		// origin is a separate capability because it is a deployment choice:
