@@ -275,6 +275,9 @@ test("TUI: 团队画布——编辑名字保存走团队文档，卡片同步", 
   await app.waitFor("id:team-card-team_brand");
   expect(joined(app)).toContain("品牌发布小组·改");
   expect(joined(app)).toContain("负责新品发布的全链路交付");
+  // A name-only PUT carries the capabilities this form does not edit.
+  expect(joined(app)).toContain("Team CLI 已开");
+  expect(joined(app)).toContain("允许：member.add · member.remove");
 });
 
 test("TUI: 团队画布——更换队长保存后卡片队长槽同步，队长不留在成员列表", async () => {
