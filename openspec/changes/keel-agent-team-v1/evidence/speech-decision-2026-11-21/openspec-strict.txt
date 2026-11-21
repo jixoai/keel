@@ -1,0 +1,3 @@
+$ openspec validate keel-agent-team-v1 --strict --no-interactive
+Change 'keel-agent-team-v1' is valid
+exit=0

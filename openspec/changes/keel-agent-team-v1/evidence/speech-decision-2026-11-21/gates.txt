@@ -1,0 +1,8 @@
+$ gofmt -l internal/mediaadapter internal/mediawiring internal/servicehost cmd/keel
+exit=0
+
+$ go build ./...
+exit=0
+
+$ go vet ./...
+exit=0

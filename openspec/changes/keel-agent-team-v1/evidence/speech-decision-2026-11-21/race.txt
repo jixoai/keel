@@ -1,0 +1,3 @@
+ok  	github.com/jixoai/keel/internal/mediaadapter	1.818s
+ok  	github.com/jixoai/keel/internal/mediawiring	1.701s
+ok  	github.com/jixoai/keel/internal/servicehost	8.812s

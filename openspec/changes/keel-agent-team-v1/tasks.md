@@ -143,8 +143,16 @@
 > 2026-11-21 M2：装配已接。`internal/mediawiring` 从 generation 的租户 models 文档与同一凭据
 > 顺序构造 adapter；`servicehost.ProductOptions.MediaTools` 把 image/video 工具注册进每次
 > host 装配（设置写后跟随新 generation）；`ValidateMedia` 在 `PUT /v1/settings/models`
-> 保存前跑 decision Preflight。证据 `evidence/media-wiring-2026-11-21/`。仍未调用真实厂商，
-> 也未写 media 事件；speech 与 decision 的运行时消费面仍未接。
+> 保存前跑 decision Preflight。证据 `evidence/media-wiring-2026-11-21/`。仍未调用真实厂商。
+>
+> 2026-11-21 M3（S2）：speech 与 decision 的运行时消费面已接。`speech_tts`/`speech_stt`
+> 由租户 tts/stt provider 构造，TTS 音频入 layerfs，STT 读 layerfs 引用并回
+> transcript/segments；`decision_ask` 由租户 decision provider 构造，按保存 binding 的
+> enforce/shadow + failPolicy 执行，缺凭据 typed `missing_credentials`。媒体结果以既有
+> `tool.result.details.media` 携带 layerfs 引用与客观 usage（零价格），未扩内核 kind；
+> 工具级（含 adapter seam）panic → retryable `provider_unavailable`。证据
+> `evidence/speech-decision-2026-11-21/`。仍未调用真实厂商，跨进程 provider 插件隔离
+> 仍归插件层。
 
 - [x] LLM 适配器与现有模型配置迁移
 - [x] 图像/视频适配器：Hermes 静态参数（image: `prompt`/`aspect_ratio`；video: `prompt` 等）+ keel 扩展参数
@@ -158,20 +166,27 @@
       `missing_credentials` 且零 wire 请求；设置写后新 generation 的工具改用新 provider；
       provider 返回的资产 URL 默认拒绝非公网地址（含每跳重定向，防 SSRF），
       设置写的 decision binding Preflight 拒绝全树 http(s) URL）
-- [ ] 语音适配器：TTS 文本→音频；STT 音频→transcript/时间戳；音色/语言参数
-      （库与 wire 已完成：`SpeechAdapter` + `/audio/speech`、`/audio/transcriptions`；
-      **M2 未接线**：没有任何 host tool、`/v1/media/audio` 或 run 消费面，运行时尚不可用；
-      人类 UI 的 demo 路由仍归 `internal/httpapi/media_audio.go`）
-- [ ] 决策适配器：System One 0.2.0；TypeSafe/Cloudflare Clef/OpenRouter/OpenJev；
+- [x] 语音适配器：TTS 文本→音频；STT 音频→transcript/时间戳；音色/语言参数
+      （M3：`speech_tts` 从租户 tts provider 构造，文本→音频写 layerfs 并只回
+      `blobId`/mime/size/duration + 字符/字节/毫秒 usage；`speech_stt` 读 layerfs
+      `blob_id`、按 stt provider 走 multipart wire，回 transcript/segments 与输入音频引用；
+      voice/language/format 为显式参数；缺凭据 typed `missing_credentials` 且零 wire 请求；
+      工具级 panic 隔离；真实 run + 记录型 HTTP fixture 覆盖 TTS/STT。
+      人类 UI 的 demo 路由仍归 `internal/httpapi/media_audio.go`，不是租户运行时）
+- [x] 决策适配器：System One 0.2.0；TypeSafe/Cloudflare Clef/OpenRouter/OpenJev；
       noul/choice/score（box 仅 TypeSafe）、能力预检、shadow/enforce、fail-closed 默认
-      （**M2 部分接线**：库 + descriptor/`Preflight` 已完成；`PUT /v1/settings/models` 在保存
-      含 decision provider 的文档时跑 adapter/model/协议与 binding Preflight，字段错误可见；
-      **运行时缺口**：没有 decision 工具或端点消费答案，run 不能发起决策；仍未调用真实厂商；
-      不合成 noul:0/choice:"unknown"/confidence:0）
-- [ ] Provider 崩溃隔离；usage 计量不写价格
-      （`guard` 与 `Usage` 已由 M2 工具路径复用：in-process panic → retryable
-      `provider_unavailable`，Usage 无价格字段且丢弃上游 cost；**缺口**：跨进程/provider
-      插件隔离仍由 provider 插件层承担，media 事件未写，usage 目前只在工具结果里）
+      （M3：`decision_ask` 工具消费租户 decision provider；保存 binding 的 state/questions
+      可作默认输入，策略只取 binding 的 mode/failPolicy，模型不能改；enforce 失败回
+      typed `provider_unavailable` 且无答案，shadow 失败回 `shadow:true`/failure/无答案；
+      不合成 noul:0/choice:"unknown"/confidence:0；缺适配器/凭据明确失败。
+      真实 run + 记录型 HTTP fixture 覆盖成功/enforce 失败/shadow 失败；仍未调用真实厂商）
+- [x] Provider 崩溃隔离；usage 计量不写价格
+      （M3：媒体工具 boundary 双层隔离——adapter `guard` 包 provider 调用，工具
+      `recoverToolPanic` 包 adapter/seam（含 Store/Executor panic）；均回 retryable
+      `provider_unavailable`，不拖垮同 run 的其它工具。`Usage` 无 price/cost/currency 字段，
+      上游 cost 在 adapter 边缘丢弃；媒体结果用既有 `tool.result.details.media` 记录
+      layerfs 引用与 usage，未新增内核 media kind。跨进程 provider 插件隔离仍由插件层承担，
+      不在本 lane）
 
 ## P7 验收
 

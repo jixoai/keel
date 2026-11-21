@@ -1,0 +1,16 @@
+=== RUN   TestSpeechAndDecisionToolsRegisterInTheToolRegistry
+--- PASS: TestSpeechAndDecisionToolsRegisterInTheToolRegistry (0.00s)
+=== RUN   TestSpeechToolProviderPanicBecomesTypedFailureAndAnotherToolStillWorks
+--- PASS: TestSpeechToolProviderPanicBecomesTypedFailureAndAnotherToolStillWorks (0.00s)
+=== RUN   TestDecisionToolPanicBecomesTypedFailure
+--- PASS: TestDecisionToolPanicBecomesTypedFailure (0.00s)
+=== RUN   TestSpeechToolDetailsCarryOnlyReferencesAndObjectiveUsage
+--- PASS: TestSpeechToolDetailsCarryOnlyReferencesAndObjectiveUsage (0.00s)
+=== RUN   TestDecisionToolUsesSavedBindingButNeverModelPolicy
+--- PASS: TestDecisionToolUsesSavedBindingButNeverModelPolicy (0.00s)
+=== RUN   TestDecisionToolEnforceFailureIsTypedAndFabricatesNothing
+--- PASS: TestDecisionToolEnforceFailureIsTypedAndFabricatesNothing (0.00s)
+=== RUN   TestSpeechToolRecoversASeamPanicOutsideTheProviderGuard
+--- PASS: TestSpeechToolRecoversASeamPanicOutsideTheProviderGuard (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/mediaadapter	0.384s

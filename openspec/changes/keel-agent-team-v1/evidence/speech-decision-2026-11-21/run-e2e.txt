@@ -1,0 +1,14 @@
+=== RUN   TestWorkerRunCallsSpeechTTSAndCommitsAnAudioReference
+--- PASS: TestWorkerRunCallsSpeechTTSAndCommitsAnAudioReference (0.23s)
+=== RUN   TestWorkerRunCallsSpeechSTTWithALayerFSInput
+--- PASS: TestWorkerRunCallsSpeechSTTWithALayerFSInput (0.23s)
+=== RUN   TestWorkerRunCallsDecisionAskAndCommitsTypedAnswers
+--- PASS: TestWorkerRunCallsDecisionAskAndCommitsTypedAnswers (0.23s)
+=== RUN   TestWorkerRunDecisionEnforceFailureIsFailClosed
+--- PASS: TestWorkerRunDecisionEnforceFailureIsFailClosed (0.25s)
+=== RUN   TestWorkerRunDecisionShadowFailureIsObservableAndNonBlocking
+--- PASS: TestWorkerRunDecisionShadowFailureIsObservableAndNonBlocking (0.22s)
+=== RUN   TestWorkerRunCallsImageGenerateAndCommitsReferences
+--- PASS: TestWorkerRunCallsImageGenerateAndCommitsReferences (0.24s)
+PASS
+ok  	github.com/jixoai/keel/internal/servicehost	1.836s
