@@ -10,16 +10,51 @@ import (
 )
 
 // ImageRequest is one image generation (or reference-guided edit) call. Model
-// is provider configuration, not a model-chosen value: the Hermes image tool
-// shape keeps model selection with the user's configured backend.
+// is provider configuration, not a model-chosen value: the tool shape keeps
+// model selection with the user's configured backend.
+//
+// AspectRatio is the Hermes static parameter (landscape|portrait|square); the
+// adapter maps it to the WIDTHxHEIGHT Size the OpenAI-images-compatible wire
+// accepts. Size, NegativePrompt, N, ImageURL and ReferenceImageURLs are keel
+// extensions beyond the Hermes static surface.
 type ImageRequest struct {
 	Model              string
 	Prompt             string
 	NegativePrompt     string
+	AspectRatio        string
 	Size               string
 	N                  int
 	ImageURL           string
 	ReferenceImageURLs []string
+}
+
+// hermesImageAspectRatios maps the Hermes static aspect_ratio values onto the
+// pixel sizes the image wire accepts.
+var hermesImageAspectRatios = map[string]string{
+	"landscape": "1536x1024",
+	"portrait":  "1024x1536",
+	"square":    "1024x1024",
+}
+
+// resolveImageAspectRatio maps Hermes's aspect_ratio to Size. An explicit Size
+// (a keel extension, finer than a ratio) wins; an unknown ratio is refused, not
+// silently ignored.
+func resolveImageAspectRatio(family, aspectRatio, size string) (string, error) {
+	aspectRatio = strings.ToLower(strings.TrimSpace(aspectRatio))
+	if aspectRatio == "" {
+		return size, nil
+	}
+	mapped, ok := hermesImageAspectRatios[aspectRatio]
+	if !ok {
+		return "", requestError(family, "generate",
+			"aspect_ratio must be landscape, portrait or square", []FieldError{{
+				Field: "aspect_ratio", Message: "must be landscape, portrait or square",
+			}})
+	}
+	if strings.TrimSpace(size) != "" {
+		return size, nil
+	}
+	return mapped, nil
 }
 
 // ProviderAsset is one asset a provider returned: exactly one of Data and URL
@@ -66,8 +101,25 @@ type ImageAdapter struct {
 // harness-side ceiling.
 const MaxImagesPerCall = 8
 
-// MaxReferenceImages bounds reference inputs, matching the Hermes surface.
+// MaxReferenceImages bounds reference inputs, matching the tool surface.
 const MaxReferenceImages = 8
+
+// MaxPromptBytes bounds one generation prompt. The tool schema declares the
+// same number as maxLength; the adapter repeats the check because a tool call
+// may arrive from an older client or a direct caller, and an unbounded prompt
+// is both a context and a cost hazard.
+const MaxPromptBytes = 32 << 10
+
+// validatePrompt is the shared image/video prompt bound.
+func validatePrompt(family, prompt string) error {
+	if len(prompt) <= MaxPromptBytes {
+		return nil
+	}
+	return requestError(family, "generate",
+		fmt.Sprintf("prompt exceeds %d bytes", MaxPromptBytes), []FieldError{{
+			Field: "prompt", Message: fmt.Sprintf("at most %d bytes", MaxPromptBytes),
+		}})
+}
 
 // Generate implements the image family.
 func (a *ImageAdapter) Generate(ctx context.Context, session string, req ImageRequest) (ImageResult, error) {
@@ -83,6 +135,14 @@ func (a *ImageAdapter) Generate(ctx context.Context, session string, req ImageRe
 			Field: "prompt", Message: "prompt is required",
 		}})
 	}
+	if err := validatePrompt(FamilyImage, req.Prompt); err != nil {
+		return ImageResult{}, err
+	}
+	size, err := resolveImageAspectRatio(FamilyImage, req.AspectRatio, req.Size)
+	if err != nil {
+		return ImageResult{}, err
+	}
+	req.Size = size
 	if req.N == 0 {
 		req.N = 1
 	}
@@ -120,8 +180,17 @@ func (a *ImageAdapter) Generate(ctx context.Context, session string, req ImageRe
 			Message: "provider returned no images",
 		}
 	}
+	// A provider may ignore n or return a larger batch; the harness-side ceiling
+	// is what gets persisted (the video adapter truncates the same way).
+	if len(batch.Assets) > MaxImagesPerCall {
+		batch.Assets = batch.Assets[:MaxImagesPerCall]
+	}
 
 	result := ImageResult{Model: firstNonEmpty(batch.Model, req.Model), Usage: batch.Usage}
+	// The persisted assets are the objective count; a provider-reported image
+	// count (or one from a batch that was truncated above) must not double-count.
+	result.Usage.Images = 0
+	result.Usage.Bytes = 0
 	for _, asset := range batch.Assets {
 		data, mime, err := a.assetBytes(ctx, asset, FamilyImage)
 		if err != nil {
@@ -239,8 +308,8 @@ func asAdapterError(err error, target **Error) bool {
 }
 
 // HTTPImageProvider is the OpenAI-images-compatible wire client. The wire
-// accepts the Hermes-shaped optional fields (negative prompt, references) and
-// both asset forms providers return: an inline b64_json or a URL the adapter
+// accepts the keel-extended optional fields (negative prompt, references, size)
+// and both asset forms providers return: an inline b64_json or a URL the adapter
 // fetches.
 type HTTPImageProvider struct {
 	wire  *wireClient
@@ -353,7 +422,7 @@ func (p *HTTPImageProvider) GenerateImage(ctx context.Context, req ImageRequest)
 }
 
 // parseImageAssets accepts either an OpenAI images envelope (data[] entries
-// with url/b64_json) or a Hermes-shaped images[] list (strings or objects).
+// with url/b64_json) or a provider-shaped images[] list (strings or objects).
 func parseImageAssets(raw []byte, maxBytes int64) ([]ProviderAsset, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {

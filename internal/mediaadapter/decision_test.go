@@ -157,7 +157,7 @@ func TestDecisionPreflightCapabilities(t *testing.T) {
 	t.Run("remote image rejected", func(t *testing.T) {
 		client := newClient(DecisionAdapterOpenRouter, "typesafe/jev-1.14")
 		fields := client.Preflight(json.RawMessage(`{"image_url":"https://example.com/a.png"}`), decisionQuestions())
-		if !hasField(fields, "state", "remote image URLs") {
+		if !hasField(fields, "state", "remote URLs") {
 			t.Fatalf("fields = %+v", fields)
 		}
 	})

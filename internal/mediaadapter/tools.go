@@ -96,8 +96,13 @@ func toolFailureFromError(family string, err error, request any) agentcore.Agent
 }
 
 // ImageToolArgs is the model-facing image_generate input.
+//
+// Prompt and aspect_ratio are the Hermes static surface. NegativePrompt, Size,
+// N, ImageURL and ReferenceImageURLs are keel extensions: Size is a pixel size
+// and wins over aspect_ratio when both are present.
 type ImageToolArgs struct {
 	Prompt             string   `json:"prompt"`
+	AspectRatio        string   `json:"aspect_ratio,omitempty"`
 	NegativePrompt     string   `json:"negative_prompt,omitempty"`
 	Size               string   `json:"size,omitempty"`
 	N                  int      `json:"n,omitempty"`
@@ -114,8 +119,9 @@ type ImageToolOutput struct {
 }
 
 // ImageTool exposes the image adapter under the Hermes tool shape
-// `image_generate`. The backend/model is deployment configuration: the model
-// does not choose it.
+// `image_generate`: prompt + aspect_ratio are the Hermes static surface; the
+// remaining arguments are explicit keel extensions. The backend/model is
+// deployment configuration: the model does not choose it.
 type ImageTool struct {
 	Adapter *ImageAdapter
 }
@@ -128,9 +134,9 @@ func (t *ImageTool) Name() string { return "image_generate" }
 
 // Description implements agentcore.AgentTool.
 func (t *ImageTool) Description() string {
-	return "Generate images from a text prompt. The backend and model are configured by the deployment; " +
-		"the call may include a negative prompt, a WIDTHxHEIGHT size, an image-to-image source, and reference images. " +
-		"Returns durable image references (blobId), never inline bytes."
+	return "Generate images from a text prompt. The backend and model are configured by the deployment. " +
+		"aspect_ratio is landscape, portrait or square; size (WIDTHxHEIGHT), negative prompt, an image-to-image " +
+		"source and reference images are keel extensions. Returns durable image references (blobId), never inline bytes."
 }
 
 // Schema implements agentcore.AgentTool.
@@ -138,10 +144,11 @@ func (t *ImageTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 	  "type": "object",
 	  "properties": {
-	    "prompt": {"type": "string", "description": "The text prompt describing the desired image (or the edit to apply)."},
-	    "negative_prompt": {"type": "string", "description": "Content to avoid in the output, when the backend supports it."},
-	    "size": {"type": "string", "description": "Output size as WIDTHxHEIGHT, for example 1024x1024."},
-	    "n": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Number of images to generate."},
+		    "prompt": {"type": "string", "maxLength": 32768, "description": "The text prompt describing the desired image (or the edit to apply)."},
+		    "aspect_ratio": {"type": "string", "enum": ["landscape", "portrait", "square"], "description": "Hermes static aspect ratio; mapped to a WIDTHxHEIGHT size. An explicit size wins."},
+		    "negative_prompt": {"type": "string", "description": "Keel extension: content to avoid in the output, when the backend supports it."},
+		    "size": {"type": "string", "description": "Keel extension: explicit output size as WIDTHxHEIGHT; wins over aspect_ratio."},
+		    "n": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Keel extension: number of images to generate."},
 	    "image_url": {"type": "string", "description": "Optional source image for an image-to-image edit (data URL or provider URL)."},
 	    "reference_image_urls": {"type": "array", "items": {"type": "string"}, "maxItems": 8, "description": "Optional reference images."}
 	  },
@@ -172,6 +179,7 @@ func (t *ImageTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 	}
 	result, err := t.Adapter.Generate(ctx, session, ImageRequest{
 		Prompt:             input.Prompt,
+		AspectRatio:        input.AspectRatio,
 		NegativePrompt:     input.NegativePrompt,
 		Size:               input.Size,
 		N:                  input.N,
@@ -191,6 +199,7 @@ func (t *ImageTool) Execute(ctx context.Context, _ string, args json.RawMessage,
 
 type imageRequestEcho struct {
 	Prompt          string `json:"prompt"`
+	AspectRatio     string `json:"aspect_ratio,omitempty"`
 	NegativePrompt  string `json:"negative_prompt,omitempty"`
 	Size            string `json:"size,omitempty"`
 	N               int    `json:"n,omitempty"`
@@ -201,6 +210,7 @@ type imageRequestEcho struct {
 func newImageRequestEcho(input ImageToolArgs) imageRequestEcho {
 	return imageRequestEcho{
 		Prompt:          input.Prompt,
+		AspectRatio:     input.AspectRatio,
 		NegativePrompt:  input.NegativePrompt,
 		Size:            input.Size,
 		N:               input.N,
@@ -253,7 +263,7 @@ func (t *VideoTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 	  "type": "object",
 	  "properties": {
-	    "prompt": {"type": "string", "description": "Text instruction describing the desired video, motion, subject and style."},
+		    "prompt": {"type": "string", "maxLength": 32768, "description": "Text instruction describing the desired video, motion, subject and style."},
 	    "negative_prompt": {"type": "string", "description": "Content to avoid in the output, when the backend supports it."},
 	    "duration": {"type": "integer", "minimum": 0, "maximum": 300, "description": "Desired duration in seconds; providers clamp to their supported range."},
 	    "aspect_ratio": {"type": "string", "description": "Output aspect ratio, for example 16:9."},

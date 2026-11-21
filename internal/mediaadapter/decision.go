@@ -377,7 +377,7 @@ func (c *DecisionClient) Preflight(state json.RawMessage, questions map[string]D
 		add("state", err.Error())
 	} else {
 		if remoteURL != "" {
-			add("state", "remote image URLs are not accepted; send a data URL or base64 asset")
+			add("state", "remote URLs are not accepted anywhere in decision state; send text or a data URL/base64 asset")
 		}
 		if hasImage && !containsString(c.descriptor.InputModalities, "image") {
 			add("state", fmt.Sprintf("adapter %s does not accept image input", c.descriptor.Adapter))
@@ -493,6 +493,8 @@ func validateScoreCriteria(add func(string, string), path string, raw json.RawMe
 
 // scanState validates the top-level state kind and finds image media without
 // loading or decoding it. It returns the base64 length, not the byte length.
+// It also reports the first http(s) URL anywhere in the tree: the decision
+// protocol accepts text and inline data only, never a remote fetch target.
 func scanState(raw json.RawMessage) (bool, string, int64, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
@@ -518,16 +520,21 @@ func scanState(raw json.RawMessage) (bool, string, int64, error) {
 	walk = func(node any, imageContext bool) {
 		switch typed := node.(type) {
 		case string:
+			// The decision protocol never dereferences anything: state is text
+			// or inline media. A remote URL anywhere in the tree would make the
+			// provider (or a later proxy) fetch it, so the whole tree is scanned,
+			// not only image-keyed values.
+			if strings.Contains(typed, "http://") || strings.Contains(typed, "https://") {
+				if remoteURL == "" {
+					remoteURL = typed
+				}
+			}
 			if !imageContext {
 				return
 			}
 			if strings.HasPrefix(typed, "data:image/") {
 				hasImage = true
 				mediaBytes += int64(len(typed))
-			} else if strings.HasPrefix(typed, "http://") || strings.HasPrefix(typed, "https://") {
-				if remoteURL == "" {
-					remoteURL = typed
-				}
 			}
 		case []any:
 			for _, item := range typed {

@@ -52,7 +52,7 @@ func TestImageWirePersistsReferencesAndObjectiveUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &recordingStore{}
-	adapter := &ImageAdapter{Provider: provider, Store: store, Fetcher: NewHTTPFetcher(0)}
+	adapter := &ImageAdapter{Provider: provider, Store: store, Fetcher: newTestFetcher(0)}
 
 	result, err := adapter.Generate(context.Background(), "session-1", ImageRequest{
 		Prompt:             "a lighthouse at dusk",
@@ -92,7 +92,7 @@ func TestImageWirePersistsReferencesAndObjectiveUsage(t *testing.T) {
 		t.Fatalf("dimensions = %dx%d", result.Images[0].Width, result.Images[0].Height)
 	}
 
-	// The wire body keeps the Hermes-shaped optional fields.
+	// The wire body keeps the keel-extended optional fields.
 	body, _ := json.Marshal(posted)
 	for _, want := range []string{`"prompt":"a lighthouse at dusk"`, `"negative_prompt":"text, watermark"`, `"size":"1024x768"`, `"n":2`, `"reference_image_urls"`} {
 		if !strings.Contains(string(body), want) {
@@ -278,5 +278,32 @@ func TestImageProviderHTTPErrorCarriesStatusAndRetryability(t *testing.T) {
 	}
 	if strings.Contains(typed.Error(), "s3cret") {
 		t.Fatalf("error leaked the credential: %v", typed)
+	}
+}
+
+// TestImageToolAcceptsTheHermesAspectRatio: the model-facing schema carries the
+// Hermes static aspect_ratio and the tool maps it to the wire size.
+func TestImageToolAcceptsTheHermesAspectRatio(t *testing.T) {
+	provider := &fakeImageProvider{
+		batch: ImageBatch{Model: "img-1", Assets: []ProviderAsset{{Data: []byte("png"), Mime: "image/png"}}},
+	}
+	tool := NewImageTool(&ImageAdapter{Provider: provider, Store: &recordingStore{}})
+	ctx := WithArtifactSession(context.Background(), "session-aspect")
+	result, err := tool.Execute(ctx, "call", json.RawMessage(`{"prompt":"a kite","aspect_ratio":"portrait"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError != nil && *result.IsError {
+		t.Fatalf("tool result = %+v", result)
+	}
+	if got := provider.requests[0].Size; got != "1024x1536" {
+		t.Fatalf("wire size = %q, want the portrait mapping", got)
+	}
+	var output ImageToolOutput
+	if err := json.Unmarshal([]byte(contentText(t, result.Content)), &output); err != nil {
+		t.Fatal(err)
+	}
+	if !output.Success || len(output.Images) != 1 {
+		t.Fatalf("output = %+v", output)
 	}
 }

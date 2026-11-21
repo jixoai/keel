@@ -36,13 +36,13 @@ func TestImageURLErrorAndFetcherLimit(t *testing.T) {
 	adapter := &ImageAdapter{
 		Provider: &fakeImageProvider{batch: ImageBatch{Assets: []ProviderAsset{{URL: server.URL + "/missing.png"}}}},
 		Store:    &recordingStore{},
-		Fetcher:  NewHTTPFetcher(0),
+		Fetcher:  newTestFetcher(0),
 	}
 	if _, err := adapter.Generate(context.Background(), "s", ImageRequest{Prompt: "x"}); err == nil {
 		t.Fatal("404 asset did not fail")
 	}
 	adapter.Provider = &fakeImageProvider{batch: ImageBatch{Assets: []ProviderAsset{{URL: server.URL + "/large.png"}}}}
-	adapter.Fetcher = NewHTTPFetcher(4)
+	adapter.Fetcher = newTestFetcher(4)
 	_, err := adapter.Generate(context.Background(), "s", ImageRequest{Prompt: "x"})
 	var typed *Error
 	if !asAdapterError(err, &typed) || !strings.Contains(typed.Message, "exceeds") {

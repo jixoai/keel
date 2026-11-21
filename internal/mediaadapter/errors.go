@@ -186,10 +186,12 @@ func guard[T any](family, op string, call func() (T, error)) (out T, err error) 
 			var zero T
 			out = zero
 			err = &Error{
-				Family:    family,
-				Op:        op,
-				Kind:      KindProviderUnavailable,
-				Message:   fmt.Sprintf("provider panicked: %v", recovered),
+				Family: family,
+				Op:     op,
+				Kind:   KindProviderUnavailable,
+				// A panic value is untrusted: it may echo a request, a header or a
+				// credential. Bound and collapse it like any upstream message.
+				Message:   sanitize(fmt.Sprintf("provider panicked: %v", recovered), ""),
 				Retryable: true,
 			}
 		}

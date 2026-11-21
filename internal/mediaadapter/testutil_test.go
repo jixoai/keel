@@ -133,3 +133,9 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(raw)
 }
+
+// newTestFetcher is the allow-private fetcher for tests whose fixture server is
+// on loopback. Production fetchers use NewHTTPFetcher (non-public refused).
+func newTestFetcher(maxBytes int64) *HTTPFetcher {
+	return NewHTTPFetcherWithOptions(HTTPFetcherOptions{MaxBytes: maxBytes, AllowPrivateHosts: true})
+}

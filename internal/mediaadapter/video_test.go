@@ -48,7 +48,7 @@ func TestVideoWirePersistsReferenceAndUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &recordingStore{}
-	adapter := &VideoAdapter{Provider: provider, Store: store, Fetcher: NewHTTPFetcher(0)}
+	adapter := &VideoAdapter{Provider: provider, Store: store, Fetcher: newTestFetcher(0)}
 	seed := 42
 	audio := true
 	result, err := adapter.Generate(context.Background(), "session-v", VideoRequest{

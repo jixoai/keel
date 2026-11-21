@@ -170,36 +170,266 @@ type AssetFetcher interface {
 // HTTPFetcher is the default AssetFetcher. It never sends a credential: the
 // URL came from the provider, and forwarding an Authorization header to an
 // asset host would leak it.
+//
+// # SSRF boundary
+//
+// The asset URL is provider-controlled, not operator-controlled: an upstream
+// that answers with http://127.0.0.1/... or http://169.254.169.254/... must not
+// turn the harness into an internal-network probe whose response lands in
+// layerfs. Every dial — the first request and every redirect hop — resolves
+// the hostname itself, refuses the request if any resolved address is not
+// globally routable, and then dials the chosen IP literal (so a DNS answer
+// cannot change between check and connect). The HTTP proxy is disabled for the
+// same reason: a proxy would resolve the target on its own and bypass this
+// boundary. AllowPrivateHosts is the explicit opt-out for tests and a trusted
+// local deployment.
 type HTTPFetcher struct {
 	Client   *http.Client
 	MaxBytes int64
+	// AllowPrivateHosts disables the address guard. Never enable it for a
+	// deployment whose providers are not fully trusted.
+	AllowPrivateHosts bool
+
+	resolver func(context.Context, string) ([]net.IPAddr, error)
+	dial     func(context.Context, string, string) (net.Conn, error)
+}
+
+// HTTPFetcherOptions configures an HTTPFetcher.
+type HTTPFetcherOptions struct {
+	// MaxBytes bounds the downloaded body; non-positive uses DefaultAssetBytes.
+	MaxBytes int64
+	// AllowPrivateHosts disables the non-public-address refusal (tests and a
+	// trusted local deployment only).
+	AllowPrivateHosts bool
 }
 
 // DefaultAssetBytes bounds one downloaded asset (32 MiB). Providers that return
 // larger originals are asked to use their base64 form or a smaller rendition.
 const DefaultAssetBytes = 32 << 20
 
+// ErrAssetHostNotPublic is the fail-closed SSRF sentinel: the provider-supplied
+// URL (or one of its redirects) resolves to an address this host refuses to
+// dial.
+var ErrAssetHostNotPublic = errors.New("mediaadapter: asset host is not public")
+
 // NewHTTPFetcher returns a fetcher with a bounded client. A non-positive
-// maxBytes uses DefaultAssetBytes.
+// maxBytes uses DefaultAssetBytes. Non-public addresses are refused.
 func NewHTTPFetcher(maxBytes int64) *HTTPFetcher {
+	return NewHTTPFetcherWithOptions(HTTPFetcherOptions{MaxBytes: maxBytes})
+}
+
+// NewHTTPFetcherWithOptions builds a fetcher with an explicit address policy.
+func NewHTTPFetcherWithOptions(opts HTTPFetcherOptions) *HTTPFetcher {
+	maxBytes := opts.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = DefaultAssetBytes
 	}
-	return &HTTPFetcher{
-		MaxBytes: maxBytes,
-		Client: &http.Client{
-			Timeout: 2 * time.Minute,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return errors.New("too many redirects")
-				}
-				if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-					return fmt.Errorf("refusing redirect to scheme %q", req.URL.Scheme)
-				}
-				return nil
-			},
+	fetcher := &HTTPFetcher{
+		MaxBytes:          maxBytes,
+		AllowPrivateHosts: opts.AllowPrivateHosts,
+		resolver:          net.DefaultResolver.LookupIPAddr,
+		dial:              (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+	}
+	transport := &http.Transport{
+		// No proxy: a proxy resolves the asset host itself, which would bypass
+		// the address guard below.
+		Proxy:                 nil,
+		DialContext:           fetcher.dialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 2 * time.Minute,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+	}
+	fetcher.Client = &http.Client{
+		Timeout:   2 * time.Minute,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("refusing redirect to scheme %q", req.URL.Scheme)
+			}
+			// Defense in depth: the redirect target is checked here and again at
+			// its dial. The dial is the authoritative check (it pins the IP it
+			// validated); this one fails early and keeps the error readable.
+			return fetcher.validateHost(req.Context(), req.URL.Hostname())
 		},
 	}
+	return fetcher
+}
+
+// resolve resolves one asset host.
+func (f *HTTPFetcher) resolve(ctx context.Context, host string) ([]net.IPAddr, error) {
+	if f.resolver != nil {
+		return f.resolver(ctx, host)
+	}
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
+
+// validateHost refuses a host that is (or resolves to) a non-public address.
+func (f *HTTPFetcher) validateHost(ctx context.Context, host string) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return &Error{Family: "artifact", Op: "fetch", Kind: KindRequest, Message: "asset URL has no host"}
+	}
+	if f.AllowPrivateHosts {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if !publicAssetIP(ip) {
+			return nonPublicAssetError(host, ip)
+		}
+		return nil
+	}
+	addresses, err := f.resolve(ctx, host)
+	if err != nil {
+		return &Error{
+			Family: "artifact", Op: "fetch", Kind: KindUpstream, Retryable: true,
+			Message: "asset host " + host + " could not be resolved",
+			Err:     err,
+		}
+	}
+	if len(addresses) == 0 {
+		return &Error{
+			Family: "artifact", Op: "fetch", Kind: KindUpstream, Retryable: true,
+			Message: "asset host " + host + " resolved to no addresses",
+		}
+	}
+	for _, address := range addresses {
+		if !publicAssetIP(address.IP) {
+			return nonPublicAssetError(host, address.IP)
+		}
+	}
+	return nil
+}
+
+// dialContext validates every resolved address and dials the IP it checked,
+// so a DNS answer cannot change between the check and the connection.
+func (f *HTTPFetcher) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if f.dial == nil {
+		return nil, configError("artifact", "fetch", "asset fetcher has no dialer")
+	}
+	if f.AllowPrivateHosts {
+		return f.dial(ctx, network, address)
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, &Error{Family: "artifact", Op: "fetch", Kind: KindConfig, Message: "asset dial address is malformed", Err: err}
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if !publicAssetIP(ip) {
+			return nil, nonPublicAssetError(host, ip)
+		}
+		return f.dial(ctx, network, net.JoinHostPort(ip.String(), port))
+	}
+	addresses, err := f.resolve(ctx, host)
+	if err != nil {
+		return nil, &Error{
+			Family: "artifact", Op: "fetch", Kind: KindUpstream, Retryable: true,
+			Message: "asset host " + host + " could not be resolved",
+			Err:     err,
+		}
+	}
+	if len(addresses) == 0 {
+		return nil, &Error{
+			Family: "artifact", Op: "fetch", Kind: KindUpstream, Retryable: true,
+			Message: "asset host " + host + " resolved to no addresses",
+		}
+	}
+	// Fail closed if ANY answer is non-public: a host with a public and a
+	// private A record is a rebinding pattern, not a load-balanced CDN.
+	for _, candidate := range addresses {
+		if !publicAssetIP(candidate.IP) {
+			return nil, nonPublicAssetError(host, candidate.IP)
+		}
+	}
+	var lastErr error
+	for _, candidate := range addresses {
+		conn, dialErr := f.dial(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr != nil {
+		return nil, providerError("artifact", "fetch", lastErr)
+	}
+	return nil, &Error{Family: "artifact", Op: "fetch", Kind: KindUpstream, Message: "asset host could not be dialed"}
+}
+
+// nonPublicAssetError is the typed refusal. It names the host and the address
+// it resolved to, never a credential or the full URL.
+func nonPublicAssetError(host string, ip net.IP) *Error {
+	return &Error{
+		Family: "artifact",
+		Op:     "fetch",
+		Kind:   KindUpstream,
+		Message: fmt.Sprintf("asset host %s resolves to a non-public address (%s); refusing the fetch",
+			host, ip.String()),
+		Err: ErrAssetHostNotPublic,
+	}
+}
+
+// publicAssetIP reports whether ip is a globally routable unicast address.
+// Private, loopback, link-local, CGNAT, multicast, reserved and documentation
+// ranges are refused: an asset URL is not allowed to probe the host network.
+func publicAssetIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		switch {
+		case ip4[0] == 0: // "this network"
+			return false
+		case ip4[0] == 10:
+			return false
+		case ip4[0] == 127:
+			return false
+		case ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127: // CGNAT 100.64/10
+			return false
+		case ip4[0] == 169 && ip4[1] == 254: // link-local / cloud metadata
+			return false
+		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+			return false
+		case ip4[0] == 192 && ip4[1] == 168:
+			return false
+		case ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 0: // IETF protocol assignments
+			return false
+		case ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 2: // TEST-NET-1
+			return false
+		case ip4[0] == 192 && ip4[1] == 88 && ip4[2] == 99: // 6to4 relay anycast
+			return false
+		case ip4[0] == 198 && (ip4[1] == 18 || ip4[1] == 19): // benchmarking
+			return false
+		case ip4[0] == 198 && ip4[1] == 51 && ip4[2] == 100: // TEST-NET-2
+			return false
+		case ip4[0] == 203 && ip4[1] == 0 && ip4[2] == 113: // TEST-NET-3
+			return false
+		case ip4[0] >= 224: // multicast, reserved, broadcast
+			return false
+		}
+		return true
+	}
+	switch {
+	case ip.IsLoopback(), ip.IsPrivate(), ip.IsLinkLocalUnicast(),
+		ip.IsLinkLocalMulticast(), ip.IsMulticast(), ip.IsUnspecified():
+		return false
+	}
+	if len(ip) == net.IPv6len {
+		// Address families that can hide an IPv4 target: NAT64 (64:ff9b::/96),
+		// 6to4 (2002::/16) and the documentation prefix.
+		switch {
+		case ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b:
+			return false
+		case ip[0] == 0x20 && ip[1] == 0x02:
+			return false
+		case ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x0d && ip[3] == 0xb8:
+			return false
+		}
+	}
+	return true
 }
 
 // Fetch implements AssetFetcher.

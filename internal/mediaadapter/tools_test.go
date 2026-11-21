@@ -24,7 +24,7 @@ func TestMediaToolsCompileInTheToolRegistry(t *testing.T) {
 	}
 
 	valid := map[string]string{
-		"image_generate": `{"prompt":"a lighthouse","negative_prompt":"text","size":"1024x1024","n":2,"reference_image_urls":["data:image/png;base64,AAAA"]}`,
+		"image_generate": `{"prompt":"a lighthouse","aspect_ratio":"landscape","negative_prompt":"text","size":"1024x1024","n":2,"reference_image_urls":["data:image/png;base64,AAAA"]}`,
 		"video_generate": `{"prompt":"a paper boat","duration":5,"aspect_ratio":"16:9","resolution":"1080p","seed":1,"audio":true}`,
 	}
 	for name, args := range valid {
@@ -46,6 +46,15 @@ func TestMediaToolsCompileInTheToolRegistry(t *testing.T) {
 	fields = registry.Validate("video_generate", json.RawMessage(`{"prompt":"x","duration":301}`))
 	if len(fields) == 0 {
 		t.Fatal("out-of-range duration passed schema validation")
+	}
+	oversized, _ := json.Marshal(map[string]string{"prompt": strings.Repeat("x", MaxPromptBytes+1)})
+	for _, name := range []string{"image_generate", "video_generate"} {
+		if fields := registry.Validate(name, oversized); len(fields) == 0 {
+			t.Fatalf("%s accepted a prompt over the schema maxLength", name)
+		}
+	}
+	if fields := registry.Validate("image_generate", json.RawMessage(`{"prompt":"x","aspect_ratio":"wide"}`)); len(fields) == 0 {
+		t.Fatal("image_generate accepted an aspect_ratio outside the Hermes enum")
 	}
 }
 

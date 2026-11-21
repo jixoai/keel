@@ -70,6 +70,9 @@ func (a *VideoAdapter) Generate(ctx context.Context, session string, req VideoRe
 			Field: "prompt", Message: "prompt is required",
 		}})
 	}
+	if err := validatePrompt(FamilyVideo, req.Prompt); err != nil {
+		return VideoResult{}, err
+	}
 	if req.DurationSeconds < 0 || req.DurationSeconds > 300 {
 		return VideoResult{}, requestError(FamilyVideo, "generate",
 			"duration must be between 0 and 300 seconds", []FieldError{{
@@ -103,6 +106,10 @@ func (a *VideoAdapter) Generate(ctx context.Context, session string, req VideoRe
 	}
 
 	result := VideoResult{Model: firstNonEmpty(batch.Model, req.Model), Usage: batch.Usage}
+	// The persisted assets are the objective count; a provider-reported video
+	// count (or one from a batch that was truncated above) must not double-count.
+	result.Usage.Videos = 0
+	result.Usage.Bytes = 0
 	for _, asset := range batch.Assets {
 		data, mime, err := a.assetBytes(ctx, asset)
 		if err != nil {

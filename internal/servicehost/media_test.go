@@ -113,6 +113,9 @@ func mediaProduct(t *testing.T, lookup map[string]string, artifacts *layerfs.Sto
 				Legacy:     legacy(tenant),
 				Credential: credential,
 				Artifacts:  artifacts,
+				// The fixture provider is on loopback; the production fetcher
+				// refuses non-public asset hosts.
+				Fetcher: mediaadapter.NewHTTPFetcherWithOptions(mediaadapter.HTTPFetcherOptions{AllowPrivateHosts: true}),
 			})
 			return result.Tools, nil
 		},

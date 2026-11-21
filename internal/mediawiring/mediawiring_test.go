@@ -135,6 +135,8 @@ func buildForTest(t *testing.T, serverURL string, values map[string]string) (Res
 		Models:     mediaDocument(serverURL),
 		Credential: credentialLookup(values),
 		Artifacts:  store,
+		// The fixture server is on loopback; the production fetcher refuses it.
+		Fetcher: mediaadapter.NewHTTPFetcherWithOptions(mediaadapter.HTTPFetcherOptions{AllowPrivateHosts: true}),
 	}), store
 }
 
@@ -270,6 +272,7 @@ func TestBuildKeepsMissingCredentialFailClosed(t *testing.T) {
 		Models:     mediaDocument(server.server.URL),
 		Credential: credentialLookup(map[string]string{"VID_KEY": "vid-key"}),
 		Artifacts:  openArtifactStore(t),
+		Fetcher:    mediaadapter.NewHTTPFetcherWithOptions(mediaadapter.HTTPFetcherOptions{AllowPrivateHosts: true}),
 	})
 	if !result.Wired(FamilyImage) {
 		t.Fatalf("a configured image provider must keep its tool, state = %+v", result.Families[FamilyImage])

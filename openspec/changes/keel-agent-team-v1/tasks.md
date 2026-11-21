@@ -133,7 +133,8 @@
 > 也未写 media 事件；speech 与 decision 的运行时消费面仍未接。
 
 - [x] LLM 适配器与现有模型配置迁移
-- [x] 图像/视频适配器：Hermes `image_generate`/`video_generate` 形态；产物入 layerfs
+- [x] 图像/视频适配器：Hermes 静态参数（image: `prompt`/`aspect_ratio`；video: `prompt` 等）+ keel 扩展参数
+      （`negative_prompt`/`size`/`n`/`reference_image_urls` 等）；产物入 layerfs
       （`image_generate`/`video_generate` 工具 schema + OpenAI-images/视频网关 HTTP wire；
       资产字节写 layerfs CAS 并返回 `sha256:` 引用，结果/工具输出不内联 base64；
       usage 只计 Images/Videos/Bytes/InputTokens；失败结果保留 prompt/参数可重试。
