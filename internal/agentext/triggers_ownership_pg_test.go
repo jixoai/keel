@@ -314,6 +314,23 @@ func TestTriggerFireCreatesBotOwnedSession(t *testing.T) {
 	}
 	env.assertOneUserMessage(t, sessionID)
 
+	// --- missing Bot on a tenantless trigger: 403 at fire, no session row ---
+	if _, err := env.triggers.Register(agentext.TriggerSpec{
+		ID: "missing-bot-trigger", Kind: agentext.TriggerWebhook,
+		BotID: "ghost-bot", Prompt: "p", Enabled: true,
+	}); err != nil {
+		t.Fatalf("register tenantless trigger: %v", err)
+	}
+	missingSession := deterministicTriggerSession(env.tenant, "missing-bot-trigger", "ghost-1")
+	status, body = env.do(http.MethodPost, "/v1/triggers/missing-bot-trigger/fire",
+		map[string]any{"idempotencyKey": "ghost-1"})
+	if status != http.StatusForbidden {
+		t.Fatalf("fire missing bot = %d %v, want 403", status, body)
+	}
+	if _, err := env.st.GetSessionOwnership(context.Background(), env.tenant, missingSession); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing Bot wrote a session row: %v", err)
+	}
+
 	// --- archived Bot: 409, no session row, no turn ---
 	if err := env.st.ArchiveBot(context.Background(), env.tenant, env.bot.ID); err != nil {
 		t.Fatal(err)
