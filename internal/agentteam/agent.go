@@ -202,7 +202,10 @@ type TeamCLI struct {
 
 // Team CLI subcommand names. The set is the union of the CLI surface declared
 // by the agent-team spec (list|show|create|update|delete|archive|member
-// add|remove|save|start) and the design's finer-grained member commands.
+// add|remove|save|start) and the design's finer-grained member commands. It
+// includes operator-only commands for the same reason create/delete already do:
+// a stored allowlist may name them, while CaptainTeamCapabilities filters the
+// captain face by callable_by.
 const (
 	TeamCLIList         = "list"
 	TeamCLIShow         = "show"
