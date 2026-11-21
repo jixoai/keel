@@ -156,11 +156,12 @@ func TestSessionReferencesBoundary(t *testing.T) {
 		}
 	}
 	active := uuid.New()
+	paused := uuid.New()
 	archived := uuid.New()
 	archivedLive := uuid.New()
 	agentBound := uuid.New()
 	foreignBound := uuid.New()
-	for _, session := range []uuid.UUID{active, archived, archivedLive, agentBound} {
+	for _, session := range []uuid.UUID{active, paused, archived, archivedLive, agentBound} {
 		if err := st.CreateSession(ctx, tenant, session); err != nil {
 			t.Fatalf("create session %s: %v", session, err)
 		}
@@ -168,10 +169,17 @@ func TestSessionReferencesBoundary(t *testing.T) {
 	if err := st.CreateSession(ctx, foreign, foreignBound); err != nil {
 		t.Fatalf("create foreign session: %v", err)
 	}
-	for _, session := range []uuid.UUID{active, archived, archivedLive} {
+	for _, session := range []uuid.UUID{active, paused, archived, archivedLive} {
 		if _, err := st.SetSessionBinding(ctx, tenant, session, "", "team_busy", 1); err != nil {
 			t.Fatalf("bind team %s: %v", session, err)
 		}
+	}
+	// A paused (unarchived) session is still a reference: the user can resume it
+	// and its newest selection still names the team.
+	if _, err := st.Pool().Exec(ctx,
+		`UPDATE sessions SET state = 'paused' WHERE tenant_id = $1 AND session_id = $2`,
+		tenant, paused); err != nil {
+		t.Fatalf("mark paused: %v", err)
 	}
 	if _, err := st.SetSessionBinding(ctx, tenant, agentBound, "agent_busy", "", 1); err != nil {
 		t.Fatalf("bind agent: %v", err)
@@ -203,11 +211,14 @@ func TestSessionReferencesBoundary(t *testing.T) {
 		t.Fatalf("team references: %v", err)
 	}
 	got := byID(refs)
-	if len(got) != 2 {
-		t.Fatalf("team references = %+v, want active + archived-live", refs)
+	if len(got) != 3 {
+		t.Fatalf("team references = %+v, want active + paused + archived-live", refs)
 	}
 	if _, ok := got[active.String()]; !ok {
 		t.Fatalf("active session missing from %+v", refs)
+	}
+	if pausedRef, ok := got[paused.String()]; !ok || pausedRef.State != "paused" {
+		t.Fatalf("paused session missing or mislabelled in %+v", refs)
 	}
 	live, ok := got[archivedLive.String()]
 	if !ok {
@@ -242,14 +253,23 @@ func TestSessionReferencesBoundary(t *testing.T) {
 		t.Fatalf("settle run: %v", err)
 	}
 	refs, err = st.SessionsReferencingTeam(ctx, tenant, "team_busy")
-	if err != nil || len(refs) != 1 || refs[0].ID != active.String() {
-		t.Fatalf("after settle refs = %+v err=%v, want only the active session", refs, err)
+	if err != nil || len(refs) != 2 {
+		t.Fatalf("after settle refs = %+v err=%v, want active + paused", refs, err)
+	}
+	left := byID(refs)
+	if _, ok := left[active.String()]; !ok {
+		t.Fatalf("active session missing after settle: %+v", refs)
+	}
+	if _, ok := left[paused.String()]; !ok {
+		t.Fatalf("paused session missing after settle: %+v", refs)
 	}
 
-	// Unbind paths: archive the last active session, then a model-only input
-	// clears the agent binding. Both leave the projection row readable.
-	if found, err := st.ArchiveSession(ctx, tenant, active); err != nil || !found {
-		t.Fatalf("archive active: found=%v err=%v", found, err)
+	// Unbind paths: archive the remaining unarchived sessions, then a model-only
+	// input clears the agent binding. Both leave the projection row readable.
+	for _, session := range []uuid.UUID{active, paused} {
+		if found, err := st.ArchiveSession(ctx, tenant, session); err != nil || !found {
+			t.Fatalf("archive %s: found=%v err=%v", session, found, err)
+		}
 	}
 	if refs, err := st.SessionsReferencingTeam(ctx, tenant, "team_busy"); err != nil || len(refs) != 0 {
 		t.Fatalf("archived sessions still block team: %+v err=%v", refs, err)
