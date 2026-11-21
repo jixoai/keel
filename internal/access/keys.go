@@ -21,6 +21,13 @@ const (
 	// re-share a session (widening access); sharing needs the owner relation.
 	KeySessionShare = "session.share"
 
+	// Roles and profiles. Role is identity/soul only and never grants a
+	// permission; these keys govern editing the documents, not authority.
+	KeyRoleRead      = "role.read"
+	KeyRoleManage    = "role.manage"
+	KeyProfileRead   = "profile.read"
+	KeyProfileManage = "profile.manage"
+
 	// Bots.
 	KeyBotRead   = "bot.read"
 	KeyBotCreate = "bot.create"
@@ -177,6 +184,12 @@ var keyCatalog = []KeySpec{
 	key(KeySessionWrite, "Write sessions", RiskNormal, RelationForAction(ActionWrite), resourceScopes...),
 	key(KeySessionDelete, "Delete sessions", RiskHigh, RelationForAction(ActionDelete), resourceScopes...),
 	key(KeySessionShare, "Share sessions", RiskHigh, RelationForAction(ActionManage), resourceScopes...),
+
+	// Roles and profiles.
+	key(KeyRoleRead, "Read roles", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyRoleManage, "Manage roles", RiskHigh, RelationNone, tenantScopes...),
+	key(KeyProfileRead, "Read profiles", RiskNormal, RelationNone, tenantScopes...),
+	key(KeyProfileManage, "Manage profiles", RiskHigh, RelationNone, tenantScopes...),
 
 	// Bots.
 	key(KeyBotRead, "Read bots", RiskNormal, RelationForAction(ActionRead), resourceScopes...),

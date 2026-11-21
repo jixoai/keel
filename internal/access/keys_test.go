@@ -59,6 +59,7 @@ func TestRegistryEntriesAreWellFormed(t *testing.T) {
 func TestRegistryCoversAcceptanceSurface(t *testing.T) {
 	required := []string{
 		KeySessionRead, KeySessionWrite, KeySessionDelete, KeySessionShare,
+		KeyRoleRead, KeyRoleManage, KeyProfileRead, KeyProfileManage,
 		KeyBotRead, KeyBotCreate, KeyBotManage, KeyBotBind, KeyBotInvoke,
 		KeyTeamBotRead, KeyTeamBotManage,
 		KeyTriggerRead, KeyTriggerManage,

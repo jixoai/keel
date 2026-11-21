@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -108,6 +109,24 @@ func TestEvaluateRelationsMatchesAccountDirectly(t *testing.T) {
 	}
 	if source.resolveCalls != 0 {
 		t.Fatalf("account subjects should be matched locally, source resolve calls = %d", source.resolveCalls)
+	}
+}
+
+func TestEvaluateRelationsMatchesAccountUUIDSpelling(t *testing.T) {
+	source := newFakeRelationSource()
+	resource := resourceOf(tenantOne, "session", "s-1")
+	// A tuple may store the same uuid without hyphens; matching is by value,
+	// not by string spelling.
+	compact := strings.ReplaceAll(accountAlice.String(), "-", "")
+	source.put(resource, RelationViewer, SubjectTypeAccount, compact)
+
+	evaluation, err := EvaluateRelations(context.Background(), source,
+		Principal{TenantID: tenantOne, AccountID: accountAlice}, resource)
+	if err != nil {
+		t.Fatalf("EvaluateRelations: %v", err)
+	}
+	if !evaluation.Direct[RelationViewer] {
+		t.Fatal("a compact uuid spelling should still match the account")
 	}
 }
 

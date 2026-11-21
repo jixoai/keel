@@ -233,11 +233,12 @@ func EvaluateRelations(ctx context.Context, source RelationSource, principal Pri
 		}
 		switch tuple.SubjectType {
 		case SubjectTypeAccount:
-			if _, err := uuid.Parse(tuple.SubjectID); err != nil {
+			subjectID, err := uuid.Parse(tuple.SubjectID)
+			if err != nil {
 				evaluation.markUnresolved(fmt.Sprintf("account subject %q is not a uuid", tuple.SubjectID))
 				continue
 			}
-			if tuple.SubjectID == principal.AccountID.String() {
+			if subjectID == principal.AccountID {
 				evaluation.Held[tuple.Relation] = true
 				evaluation.Direct[tuple.Relation] = true
 			}
