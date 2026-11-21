@@ -3,7 +3,7 @@
 > change：`keel-bot-identity-access` · P0 产品设计
 > 设计正文：`design/PRODUCT-DESIGN.md`　方向与取舍：`design/DIRECTIONS.md`
 > 设计板：OpenDesign `keel-bot-identity-access/index.html`
-> 状态：**两轮独立视觉评审完成（7.5 → 8.2/10，YES WITH FIXES，P0 0 条）；第二轮 6 项硬门已修；待 Owner 拍板方向与第三轮复评**
+> 状态：**三轮独立视觉评审完成（7.5 → 8.2 → 8.6/10，YES WITH FIXES，P0 0 条）；第三轮 5 项 P1 已修；待 Owner 拍板方向与第四轮复评**
 
 ---
 
@@ -40,7 +40,7 @@
 - 权限表在 1024 需实测列宽；字体/本地化导致不足时收起 KEY 列或改双列。
 - 375 五个 tab 每项约 78px，中文 2–3 字可放下；需真机/浏览器实测折行。
 - A baseline 的账号表仍是混合状态，只作对照；B 的 1024 帧已拆列。
-- 第二轮已完成（8.2/10，P0 0 条）；第三轮复评未做，修完 §0.3 后再派 fresh-context critic 确认 ≥9。
+- 第三轮已完成（8.6/10，P0 0 条）；第四轮复评未做，修完 §0.4 后再派 fresh-context critic 确认 ≥9。
 
 ### 0.3 第二轮视觉评审（8.2/10，2026-11-22）
 
@@ -56,6 +56,19 @@
 - 已做 P2：清实现注释、统一计数/用词、设置齿轮、身份顶栏去重、检查器 Sheet 压暗 tab bar。
 
 **仍存**：第三轮复评未做；768 仍是检查器入口（完整 Sheet 在 390）；1024 列宽需实测；375 五 tab 需实测；A baseline 账号表仍是混合状态（只作对照）。
+
+### 0.4 第三轮视觉评审（8.6/10，2026-11-22）
+
+- 报告：`design/VISUAL-REVIEW-3.md`；P0 0 条，剩 5 项 P1。
+- 已修：
+  1. 390 身份/Bot「3 项未保存」pill → 账本确认 Sheet（diff + 本次登记人 + 高危勾选 + 确认并保存），保存前必过。
+  2. Bot 每行补风险 badge（常规/敏感/高危）；390 每行补有效能力 chip。
+  3. 「工作范围」拆为账号范围 / Bot 授权 / 有效能力；允许/收窄不再冒充范围。
+  4. 390 底部导航 11.5px，五个 tab 不换行；搜索框 44px。
+  5. 768 删「平板简化」，换「泳道/图」；修失败边/调用 badge；统一 4m12 / 14:32:08→14:36:20 / 14:35:18；身份 6 项、Bot 10 项、运行 4m12s 单源重算。
+- P2：未保存统一琥珀；移动时间线补退款专员创建节点；BOT/Bot casing；保存 CTA 统一「保存并签记」；1024/390 记录范围写清；移动端 H1/节标题降阶写入令牌例外。
+
+**仍存**：第四轮复评未做；768 仍是检查器入口（完整 Sheet 在 390）；1024 权限组详情/390 记录页按范围排除并写清；375 五 tab 需实测；A baseline 账号表仍是混合状态（只作对照）。
 
 ---
 
@@ -132,7 +145,7 @@
 |---|---|---|
 | §2.1 空库启动 / bootstrap / 一次性 token / 强制改密 / 登录错误不泄露 / 限速 / 旧凭证 401 | 登录、首次设置、强制改密三态；token 失效、限速、无超管文案 | `index.html` §A1（入口跨方向，A 壳展示）；`PRODUCT-DESIGN.md` §4.1 |
 | §2.2 账号 / 权限组 / 并集 / 未知 key / `grant ⊆ own` / 超管 / 禁用 / 最后一个超管 | 身份章节：账号索引、账号页、权限组能力带、范围印章、本次变更、签记条、403 | `index.html` §02（B 身份/权限）；`PRODUCT-DESIGN.md` §4.2–4.3 |
-| §2.3 Bot 创建 / ModelKind / 默认模型 / Harness / 有效权限 / 列表详情五态 / 归档 / 密钥 / 调用审计 | 员工章节：Bot 索引、Bot 页（身份/工作方式/能力/密钥/会话）、试跑、账号上限 ∩ 工作范围 | `index.html` §03（B 员工/Bot）；`PRODUCT-DESIGN.md` §4.4 |
+| §2.3 Bot 创建 / ModelKind / 默认模型 / Harness / 有效权限 / 列表详情五态 / 归档 / 密钥 / 调用审计 | 员工章节：Bot 索引、Bot 页（身份/工作方式/能力/密钥/会话）、试跑、账号范围 · Bot 授权 → 有效能力 | `index.html` §03（B 员工/Bot）；`PRODUCT-DESIGN.md` §4.4 |
 | §2.4 TeamBot 创建 / 无权限 / roster 跨账号 / 启动 / DAG / 成员独立 Session / 撤销 invoke | 团队章节：Mission、Roster、队长、可调用性、启动前检查、泳道 DAG、节点检查器 | `index.html` §04（B 团队/运行）；`PRODUCT-DESIGN.md` §4.5–4.6 |
 | §2.5 Session 归属 / 默认私有 / 共享 viewer/editor / 撤销 / Mission 注入 / Bot 归档只读 | 工作区「共享给我」、共享横幅、撤销后只读/403、Bot 归档只读 | `PRODUCT-DESIGN.md` §3 J5、§4.8；设计板五态「权限不足」 |
 | §2.6 管家 Bot 预置 / 一句话建团队 / 无 Bot 专属路径 / `grant ⊆ own` / DAG 审计 | 工作区工具卡 + 需要你决定卡 + 总结卡；团队/运行链接；无 Bot 专属 UI | `PRODUCT-DESIGN.md` §3 J4；设计板工作区移动帧的「待办」 |
@@ -174,12 +187,12 @@
 |---|---|
 | `1440-direction.png` | 方向对照（A/B/C 三列 + D seed 区） |
 | `1440-identity.png` | B 身份：280 索引 + 四列权限表 + 签记 + 高危确认 |
-| `1440-bot.png` | B 员工：四列表（能力 / 账号上限 / 工作范围 / 有效能力） |
+| `1440-bot.png` | B 员工：五列表（能力 / 风险 / 账号范围 / Bot 授权 / 有效能力） |
 | `1440-run.png` | B 运行：失败横条 + 跨泳道边 + 失败检查器 |
 | `1440-record.png` | 05 记录页：筛选 + 事件账 + 详情 |
 | `1440-states.png` | 四组页面级五态（账号 / 权限矩阵 / 运行 / 移动端） |
-| `1440-mobile.png` | 移动端一页（3 + 3 帧：检查器、停止确认、Bot 能力） |
-| `390-work.png` / `390-identity.png` / `390-run.png` / `390-inspector.png` / `390-stop.png` / `390-bot.png` | 390 六帧；检查器 Sheet、停止确认、Bot 能力 |
+| `1440-mobile.png` | 移动端一页（3 + 3 + 2 帧：检查器、停止确认、Bot 能力、身份/Bot 账本确认） |
+| `390-work.png` / `390-identity.png` / `390-run.png` / `390-inspector.png` / `390-stop.png` / `390-bot.png` / `390-ledger-identity.png` / `390-ledger-bot.png` | 390 八帧；检查器 Sheet、停止确认、Bot 能力、账本确认（身份/Bot） |
 | `1024-identity.png` | 1024 账号索引（全宽五列表 + 单搜索） |
 | `768-run.png` | 768 运行（摘要带 + 失败边 + 顶部失败摘要 + 平板简化 + 事件/检查器入口） |
 
@@ -187,9 +200,10 @@
 
 - **第一轮：已完成**（`design/VISUAL-REVIEW.md`），B = YES WITH FIXES，7.5/10。问题与修复见 §0。
 - **第二轮：已完成**（`VISUAL-REVIEW-2.md`，8.2/10，P0 0 条）；6 项硬门已修（见 §0.3）。
-- **第三轮：未做**。修完后应再派一个 fresh-context vision critic，只拿新截图，按 `world-class-designer/references/critic-protocol.md` 评分；目标 ≥9。
+- **第三轮：已完成**（`VISUAL-REVIEW-3.md`，8.6/10，P0 0 条）；5 项 P1 已修（见 §0.4）。
+- **第四轮：未做**。修完后再派一个 fresh-context vision critic，只拿新截图，按 `world-class-designer/references/critic-protocol.md` 评分；目标 ≥9。
 - 建议同时给四张同品类参考截图做 gold-standard 排序（Retool / ClickHouse / Linear / 一张自家 A baseline），确认 B 不是「另一种模板」。
-- 若第三轮仍低于 9：优先改层级与留白，不改结构；若连续两轮只差口味，升级给 Owner 而不是继续循环。
+- 若第四轮仍低于 9：优先改层级与留白，不改结构；若连续两轮只差口味，升级给 Owner 而不是继续循环。
 
 ### 4.3 自检（非独立评审，仅排除硬伤）
 
@@ -224,6 +238,6 @@
 ## 6. 建议的下一步
 
 1. Owner 拍板 §2 的 5 项（尤其是方向 B）。
-2. MainAgent 派第三轮 fresh-context vision critic，拿新截图复评；若 <9，按 critic 的具体差距修 B 的层级/留白，不改结构。
+2. MainAgent 派第四轮 fresh-context vision critic，拿新截图复评；若 <9，按 critic 的具体差距修 B 的层级/留白，不改结构。
 3. L5 实现顺序：先做壳（章节带 + 页边 + 纸面带 + 签记条 + 身份 280 索引）→ 身份四列表/权限组 → Bot → 团队/运行 → 工作区待办 → 五态/1024/768/移动端。
 4. 实现前把 §5 的 3 个 registry 口径（`bot.create` / `bot.manage` / `bot.invoke`）在 `internal/access/keys.go` 冻结，避免 UI 文案与 key 对不上。
