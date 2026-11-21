@@ -189,7 +189,7 @@ func ModelPluginCLISpec() PluginCLISpec {
 }
 
 // AgentPluginCLISpec returns the agent plugin's capability tree
-// (`keel agent ...`): list/show/create/update/delete/start/stop.
+// (`keel agent ...`): list/show/create/update/delete/archive/start/stop.
 func AgentPluginCLISpec() PluginCLISpec {
 	commands := []cliCommand{
 		{
@@ -277,6 +277,20 @@ func AgentPluginCLISpec() PluginCLISpec {
 			examples:    []string{"keel agent delete agent_retired"},
 		},
 		{
+			path:    []string{"agent", "archive"},
+			summary: "归档 Agent（活跃会话绑定时拒绝）",
+			description: "把 Agent 标记为归档：历史快照仍可读，已启动的 run 不受影响；被活跃会话的当前绑定引用时拒绝并列出会话，" +
+				"先归档会话或发送只选模型的新输入解除绑定。团队席位不阻塞归档（归档正是被团队引用时的修复动作）；" +
+				"重复归档幂等。只允许人工面调用。",
+			args:        objectSchema(map[string]any{"agentId": stringProperty("Agent id")}, "agentId"),
+			output:      schemaRef("agent_detail"),
+			permissions: []string{"agent.write"},
+			danger:      pluginpkg.DangerWrite,
+			idempotent:  true,
+			callableBy:  callerUIOnly,
+			examples:    []string{"keel agent archive agent_retired"},
+		},
+		{
 			path:    []string{"agent", "start"},
 			summary: "启动 Agent",
 			description: "用 Agent 的配置启动一个 session/run，并把解析后的模型绑定冻结进 run manifest 快照。" +
@@ -316,7 +330,7 @@ func AgentPluginCLISpec() PluginCLISpec {
 }
 
 // TeamPluginCLISpec returns the agent-team plugin's capability tree
-// (`keel team ...`): list/show/create/update/delete/member add/member
+// (`keel team ...`): list/show/create/update/delete/archive/member add/member
 // remove/save/start.
 func TeamPluginCLISpec() PluginCLISpec {
 	commands := []cliCommand{
@@ -395,6 +409,20 @@ func TeamPluginCLISpec() PluginCLISpec {
 			idempotent:  false,
 			callableBy:  callerUIOnly,
 			examples:    []string{"keel team delete team_retired"},
+		},
+		{
+			path:    []string{"team", "archive"},
+			summary: "归档团队（活跃会话绑定时拒绝）",
+			description: "把团队标记为归档并前移 revision/hash：归档团队视为 invalid，不得再启动新的 run，历史快照仍可读。" +
+				"被活跃会话的当前绑定引用时拒绝并列出会话，先归档会话或发送只选模型的新输入解除绑定；" +
+				"重复归档幂等。只允许人工面调用。",
+			args:        objectSchema(map[string]any{"teamId": stringProperty("团队 id")}, "teamId"),
+			output:      schemaRef("team_detail"),
+			permissions: []string{"team.write"},
+			danger:      pluginpkg.DangerWrite,
+			idempotent:  true,
+			callableBy:  callerUIOnly,
+			examples:    []string{"keel team archive team_retired"},
 		},
 		{
 			path:    []string{"team", "member", "add"},
@@ -909,7 +937,7 @@ func modelRequiredPaths() [][]string {
 }
 
 // agentRequiredPaths freezes the agent plugin's command coverage:
-// list|show|create|update|delete|start|stop (specs/agent-registry).
+// list|show|create|update|delete|archive|start|stop (specs/agent-registry).
 func agentRequiredPaths() [][]string {
 	return [][]string{
 		{"agent", "list"},
@@ -917,13 +945,14 @@ func agentRequiredPaths() [][]string {
 		{"agent", "create"},
 		{"agent", "update"},
 		{"agent", "delete"},
+		{"agent", "archive"},
 		{"agent", "start"},
 		{"agent", "stop"},
 	}
 }
 
 // teamRequiredPaths freezes the agent-team plugin's command coverage:
-// list|show|create|update|delete|member add|remove|list|save|save|start
+// list|show|create|update|delete|archive|member add|remove|list|save|save|start
 // (specs/agent-team + design.md §5: the captain needs `member list` to read the
 // current seats and `member save` to persist its assembly).
 func teamRequiredPaths() [][]string {
@@ -933,6 +962,7 @@ func teamRequiredPaths() [][]string {
 		{"team", "create"},
 		{"team", "update"},
 		{"team", "delete"},
+		{"team", "archive"},
 		{"team", "member", "add"},
 		{"team", "member", "remove"},
 		{"team", "member", "list"},

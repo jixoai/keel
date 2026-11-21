@@ -248,6 +248,16 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		view.Avatar = view.Avatar.WithDefaults(id)
 		f.agents[id] = view
 		writeFakeJSON(w, http.StatusCreated, view)
+	case strings.HasPrefix(r.URL.Path, "/v1/agents/") && strings.HasSuffix(r.URL.Path, "/archive") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/agents/"), "/archive")
+		view, found := f.agents[id]
+		if !found {
+			writeFakeJSON(w, http.StatusNotFound, map[string]any{"error": "agent " + id + " does not exist"})
+			return
+		}
+		view.Archived = true
+		f.agents[id] = view
+		writeFakeJSON(w, http.StatusOK, view)
 	case strings.HasPrefix(r.URL.Path, "/v1/agents/"):
 		id := strings.TrimPrefix(r.URL.Path, "/v1/agents/")
 		view, found := f.agents[id]
@@ -297,6 +307,11 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch {
+		case len(parts) == 2 && parts[1] == "archive" && r.Method == http.MethodPost:
+			view.Archived = true
+			view.Revision++
+			f.teams[id] = view
+			writeFakeJSON(w, http.StatusOK, view)
 		case len(parts) == 1 && r.Method == http.MethodGet:
 			writeFakeJSON(w, http.StatusOK, view)
 		case len(parts) == 1 && r.Method == http.MethodPut:
@@ -940,6 +955,136 @@ func TestAgentDeleteRendersReferenceRefusal(t *testing.T) {
 	for _, want := range []string{"agent_in_use", "referencing team: team_1 产品小队"} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
+// TestAgentDeleteRendersSessionReference pins the session half of the refusal:
+// the legacy team reference keeps its rendering, and a session reference names
+// the session plus the lifecycle facts that make it actionable.
+func TestAgentDeleteRendersSessionReference(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	api.mu.Lock()
+	api.refuseStatus = http.StatusConflict
+	api.refuseBody = map[string]any{
+		"error": `agent "agent_x" is a captain or member of team_1; it is the current binding of 1 live session(s): sess_1; remove it from those teams and archive or rebind those sessions before deleting it`,
+		"code":  "agent_in_use",
+		"references": []map[string]any{
+			{"id": "team_1", "name": "产品小队"},
+			{"kind": "session", "id": "sess_1", "name": "", "state": "active",
+				"archived": false, "runStatus": "running"},
+		},
+	}
+	api.mu.Unlock()
+
+	code, _, stderr := runCLI(t, "agent", "delete", "agent_x", "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	for _, want := range []string{
+		"agent_in_use",
+		"referencing team: team_1 产品小队",
+		"referencing session: sess_1 (state active, run running)",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
+// TestTeamDeleteRendersSessionReference pins the team_in_use refusal.
+func TestTeamDeleteRendersSessionReference(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	api.mu.Lock()
+	api.refuseStatus = http.StatusConflict
+	api.refuseBody = map[string]any{
+		"error": `team "team_1" is the current binding of 1 live session(s): sess_1; archive or rebind those sessions before deleting it`,
+		"code":  "team_in_use",
+		"references": []map[string]any{
+			{"kind": "session", "id": "sess_1", "name": "", "state": "active",
+				"archived": true, "runStatus": "pending"},
+		},
+	}
+	api.mu.Unlock()
+
+	code, _, stderr := runCLI(t, "team", "delete", "team_1", "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	for _, want := range []string{
+		"team_in_use",
+		"referencing session: sess_1 (state active, run pending, archived)",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
+// TestArchiveCommands pins the CLI surface: both archive verbs call the archive
+// route and render the returned view; a 409 refusal renders the same reference
+// envelope as delete.
+func TestArchiveCommands(t *testing.T) {
+	api := newFakeTeamAPI("")
+	hs := httptest.NewServer(api)
+	t.Cleanup(hs.Close)
+
+	agentID := createCLIAgent(t, api, hs.URL, "待归档")
+	code, stdout, stderr := runCLI(t, "agent", "archive", agentID, "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("agent archive: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "archived agent "+agentID) {
+		t.Fatalf("agent archive stdout = %q", stdout)
+	}
+	archived := api.lastRequest(t, http.MethodPost, "/v1/agents/"+agentID+"/archive")
+	if archived.Method != http.MethodPost {
+		t.Fatalf("agent archive request = %+v", archived)
+	}
+
+	if code, _, stderr := runCLI(t, "team", "create", "--server", hs.URL,
+		"--id", "team_archive", "--name", "归档队", "--captain", agentID); code != 0 {
+		t.Fatalf("team create: exit %d stderr %s", code, stderr)
+	}
+	code, stdout, stderr = runCLI(t, "team", "archive", "team_archive", "--server", hs.URL)
+	if code != 0 {
+		t.Fatalf("team archive: exit %d stderr %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "archived team team_archive") || !strings.Contains(stdout, "revision=2") {
+		t.Fatalf("team archive stdout = %q", stdout)
+	}
+	teamRequest := api.lastRequest(t, http.MethodPost, "/v1/teams/team_archive/archive")
+	if teamRequest.Method != http.MethodPost {
+		t.Fatalf("team archive request = %+v", teamRequest)
+	}
+
+	// A refused archive uses the same 409 references rendering.
+	api.mu.Lock()
+	api.refuseStatus = http.StatusConflict
+	api.refuseBody = map[string]any{
+		"error": "agent bindings still live",
+		"code":  "agent_in_use",
+		"references": []map[string]any{
+			{"kind": "session", "id": "sess_2", "name": "", "state": "active", "runStatus": "running"},
+		},
+	}
+	api.mu.Unlock()
+	code, stdout, stderr = runCLI(t, "agent", "archive", agentID, "--server", hs.URL)
+	if code != 1 {
+		t.Fatalf("refused archive: exit %d, want 1", code)
+	}
+	if strings.Contains(stdout, "archived agent") {
+		t.Fatalf("refused archive pretended success: %q", stdout)
+	}
+	for _, want := range []string{"agent_in_use", "referencing session: sess_2 (state active, run running)"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("refused archive stderr = %q, want %q", stderr, want)
 		}
 	}
 }

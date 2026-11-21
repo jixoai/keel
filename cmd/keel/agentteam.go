@@ -57,6 +57,8 @@ func runAgentCmd(args []string, stdout, stderr io.Writer) int {
 		return runAgentUpdate(args[1:], stdout, stderr)
 	case "delete":
 		return runAgentDelete(args[1:], stdout, stderr)
+	case "archive":
+		return runAgentArchive(args[1:], stdout, stderr)
 	case "start":
 		return runAgentStart(args[1:], stdout, stderr)
 	case "stop":
@@ -87,6 +89,8 @@ func runTeamCmd(args []string, stdout, stderr io.Writer) int {
 		return runTeamUpdate(args[1:], stdout, stderr)
 	case "delete":
 		return runTeamDelete(args[1:], stdout, stderr)
+	case "archive":
+		return runTeamArchive(args[1:], stdout, stderr)
 	case "save":
 		return runTeamSave(args[1:], stdout, stderr)
 	case "start":
@@ -112,6 +116,7 @@ Usage:
   keel agent create --name <name> [flags]
   keel agent update <id> [flags]
   keel agent delete <id>
+  keel agent archive <id>
   keel agent start <id> [--text <message>]
   keel agent stop <id>
 
@@ -160,6 +165,7 @@ Usage:
   keel team create --captain <agentId> --name <name> [flags]
   keel team update <id> [flags]
   keel team delete <id>
+  keel team archive <id>
   keel team save <file>     upsert a YAML/JSON team document (- reads stdin)
   keel team start <id> [--text <message>]
   keel team member add <teamId> <agentId> [--label <l>] [--description <d>] [--as <captainAgentId>]
@@ -413,6 +419,14 @@ func reportError(stderr io.Writer, err error) int {
 			if strings.TrimSpace(kind) == "" {
 				kind = "team"
 			}
+			if kind == "session" {
+				// A session reference names a live session whose newest selection
+				// is bound to the row being deleted/archived. Sessions have no
+				// display name; state/runStatus explain why an archived session
+				// still blocks (it owns a live run).
+				fmt.Fprintf(stderr, "  referencing session: %s%s\n", id, sessionReferenceDetail(reference))
+				continue
+			}
 			field, _ := reference["field"].(string)
 			if strings.TrimSpace(field) != "" {
 				fmt.Fprintf(stderr, "  referencing %s: %s %s (field %s)\n", kind, id, name, field)
@@ -422,6 +436,26 @@ func reportError(stderr io.Writer, err error) int {
 		}
 	}
 	return 1
+}
+
+// sessionReferenceDetail renders the facts that make a session reference
+// actionable: its lifecycle state, the live run that keeps an archived session
+// blocking, and the archive flag itself.
+func sessionReferenceDetail(reference map[string]any) string {
+	details := make([]string, 0, 3)
+	if state, _ := reference["state"].(string); strings.TrimSpace(state) != "" {
+		details = append(details, "state "+state)
+	}
+	if runStatus, _ := reference["runStatus"].(string); strings.TrimSpace(runStatus) != "" {
+		details = append(details, "run "+runStatus)
+	}
+	if archived, _ := reference["archived"].(bool); archived {
+		details = append(details, "archived")
+	}
+	if len(details) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(details, ", ") + ")"
 }
 
 // --- flag plumbing -------------------------------------------------------
@@ -735,6 +769,33 @@ func runAgentDelete(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// runAgentArchive retires one agent. The server refuses with 409 agent_in_use
+// while a live session's newest selection is bound to it; the refusal's
+// references are rendered by reportError so the operator sees which sessions to
+// archive or rebind first.
+func runAgentArchive(args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("keel agent archive", stderr)
+	server, _ := commonFlags(fs)
+	positional, err := parseInterleaved(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(positional) != 1 {
+		fmt.Fprintln(stderr, "usage: keel agent archive <id>")
+		return 2
+	}
+	client, err := newCLIClient(*server)
+	if err != nil {
+		return reportError(stderr, err)
+	}
+	var view httpapi.AgentView
+	if err := client.do(http.MethodPost, "/v1/agents/"+url.PathEscape(positional[0])+"/archive", "", nil, &view); err != nil {
+		return reportError(stderr, err)
+	}
+	fmt.Fprintf(stdout, "archived agent %s (%s)\n", view.ID, view.Name)
+	return 0
+}
+
 // --- team commands -------------------------------------------------------
 
 func runTeamList(args []string, stdout, stderr io.Writer) int {
@@ -952,6 +1013,31 @@ func runTeamDelete(args []string, stdout, stderr io.Writer) int {
 		return reportError(stderr, err)
 	}
 	fmt.Fprintf(stdout, "deleted team %s\n", positional[0])
+	return 0
+}
+
+// runTeamArchive retires one team. A live session binding is a 409 team_in_use
+// with the referencing sessions; the operator archives or rebinds them first.
+func runTeamArchive(args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("keel team archive", stderr)
+	server, _ := commonFlags(fs)
+	positional, err := parseInterleaved(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(positional) != 1 {
+		fmt.Fprintln(stderr, "usage: keel team archive <id>")
+		return 2
+	}
+	client, err := newCLIClient(*server)
+	if err != nil {
+		return reportError(stderr, err)
+	}
+	var view httpapi.AgentTeamView
+	if err := client.do(http.MethodPost, "/v1/teams/"+url.PathEscape(positional[0])+"/archive", "", nil, &view); err != nil {
+		return reportError(stderr, err)
+	}
+	fmt.Fprintf(stdout, "archived team %s (%s) revision=%d\n", view.ID, view.Name, view.Revision)
 	return 0
 }
 

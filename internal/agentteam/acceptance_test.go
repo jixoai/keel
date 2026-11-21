@@ -130,12 +130,12 @@ func acceptanceMatrix() []acceptanceRow {
 		},
 		{
 			ID:        "A10_cli_agent_tree",
-			Invariant: "agent CLI 树 MUST 声明 spec 冻结的 list|show|create|update|delete|start|stop，且不得多声明或少声明",
+			Invariant: "agent CLI 树 MUST 声明 spec 冻结的 list|show|create|update|delete|archive|start|stop，且不得多声明或少声明",
 			Check:     func(t *testing.T) { checkCLITreeByName(t, "agent") },
 		},
 		{
 			ID:        "A11_cli_team_tree",
-			Invariant: "team CLI 树 MUST 声明 spec 冻结的 list|show|create|update|delete|member add|member remove|save|start，且不得多声明或少声明",
+			Invariant: "team CLI 树 MUST 声明 spec 冻结的 list|show|create|update|delete|archive|member add|member remove|save|start，且不得多声明或少声明",
 			Check:     func(t *testing.T) { checkCLITreeByName(t, "team") },
 		},
 		{
@@ -516,6 +516,7 @@ func acceptanceCLIExpectations() []acceptanceCLIExpectation {
 				{"agent", "create"},
 				{"agent", "update"},
 				{"agent", "delete"},
+				{"agent", "archive"},
 				{"agent", "start"},
 				{"agent", "stop"},
 			},
@@ -530,6 +531,7 @@ func acceptanceCLIExpectations() []acceptanceCLIExpectation {
 				{"team", "create"},
 				{"team", "update"},
 				{"team", "delete"},
+				{"team", "archive"},
 				{"team", "member", "add"},
 				{"team", "member", "remove"},
 				{"team", "member", "list"},

@@ -111,6 +111,7 @@ func TestAgentPluginTreeCoversSpecCommands(t *testing.T) {
 		{"agent", "create"},
 		{"agent", "update"},
 		{"agent", "delete"},
+		{"agent", "archive"},
 		{"agent", "start"},
 		{"agent", "stop"},
 	}
@@ -134,6 +135,7 @@ func TestTeamPluginTreeCoversSpecCommands(t *testing.T) {
 		{"team", "create"},
 		{"team", "update"},
 		{"team", "delete"},
+		{"team", "archive"},
 		{"team", "member", "add"},
 		{"team", "member", "remove"},
 		{"team", "member", "list"},

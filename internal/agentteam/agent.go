@@ -201,14 +201,15 @@ type TeamCLI struct {
 }
 
 // Team CLI subcommand names. The set is the union of the CLI surface declared
-// by the agent-team spec (list|show|create|update|delete|member add|remove|save|start)
-// and the design's finer-grained member commands.
+// by the agent-team spec (list|show|create|update|delete|archive|member
+// add|remove|save|start) and the design's finer-grained member commands.
 const (
 	TeamCLIList         = "list"
 	TeamCLIShow         = "show"
 	TeamCLICreate       = "create"
 	TeamCLIUpdate       = "update"
 	TeamCLIDelete       = "delete"
+	TeamCLIArchive      = "archive"
 	TeamCLIMemberAdd    = "member.add"
 	TeamCLIMemberRemove = "member.remove"
 	TeamCLIMemberList   = "member.list"
@@ -224,6 +225,7 @@ var teamCLISubcommands = []string{
 	TeamCLICreate,
 	TeamCLIUpdate,
 	TeamCLIDelete,
+	TeamCLIArchive,
 	TeamCLIMemberAdd,
 	TeamCLIMemberRemove,
 	TeamCLIMemberList,
