@@ -261,13 +261,13 @@ func TestEdgeEventSelectionIsVetted(t *testing.T) {
 	hs, st := newTestServer(t, func(c *Config) {
 		c.ValidateSelection = func(raw json.RawMessage) error {
 			var sel struct {
-				TeamID string `json:"teamId"`
+				TeamBotID string `json:"teamBotId"`
 			}
 			if err := json.Unmarshal(raw, &sel); err != nil {
 				return err
 			}
-			if sel.TeamID != "" {
-				return errors.New(`selection binding is not available: teamId "` + sel.TeamID + `" does not exist`)
+			if sel.TeamBotID != "" {
+				return errors.New(`selection binding is not available: teamBotId "` + sel.TeamBotID + `" does not exist`)
 			}
 			return nil
 		}
@@ -286,7 +286,7 @@ func TestEdgeEventSelectionIsVetted(t *testing.T) {
 		"payload": map[string]any{
 			"text":      "smuggle a binding",
 			"requestId": "evt-bad-team",
-			"selection": map[string]any{"teamId": "team_x", "agentId": "agent_nope"},
+			"selection": map[string]any{"teamBotId": "team_x", "botId": "bot_nope"},
 		},
 	}
 	if code := doJSON(t, hc, "POST", url, tenant, body, &out); code != 400 {
