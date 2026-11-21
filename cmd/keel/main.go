@@ -77,8 +77,11 @@ Usage:
 Environment (serve):
   KEEL_DSN                 PostgreSQL DSN (required)
   KEEL_SERVE_ADDR          listen address (default 127.0.0.1:13750)
-  KEEL_SERVE_TENANT        tenant UUID the server acts as (required with auth)
-  KEEL_SERVE_PASSWORD      local passphrase; unset disables auth (loopback only)
+  KEEL_SERVE_TENANT        tenant UUID the server acts as (required with auth=required)
+  KEEL_AUTH                required|local-only|off (default required)
+  KEEL_INSECURE            allow auth=off (loopback only; never expose it)
+  KEEL_SECRET_KEY          32-byte base64/hex key for cookie/CSRF signing (required)
+  KEEL_BOOTSTRAP_TOKEN     one-time setup token for a container (auth=required, no super admin)
   KEEL_SERVE_WEB_DIR       static build directory (default web/dist)
   KEEL_MODEL / KEEL_PROVIDER / KEEL_BASE_URL / KEEL_PROTOCOL / KEEL_API_KEY
                            model selection (fake provider when unset)
@@ -90,9 +93,8 @@ Environment (serve):
 Environment (tui, agent, team):
   KEEL_TUI_BIN             path to the NSH TUI binary
   KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13750)
-  KEEL_AGENT_TOKEN         bearer token (the serve passphrase)
+  KEEL_AGENT_TOKEN         bot API key (keel_bot_...) for machine clients
   KEEL_SERVE_ADDR          server address for keel agent / keel team
-  KEEL_SERVE_PASSWORD      passphrase exchanged for the session cookie (never printed)
 
 Run "keel agent --help" or "keel team --help" for the full command surface.
 `)
@@ -126,8 +128,8 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		webDir           = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "static web build directory")
 		casDir           = fs.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
 		tenantRaw        = fs.String("tenant", os.Getenv("KEEL_SERVE_TENANT"), "tenant UUID the server acts as")
-		password         = fs.String("password", os.Getenv("KEEL_SERVE_PASSWORD"), "local passphrase (empty disables auth)")
-		secure           = fs.Bool("cookie-secure", envBool("KEEL_SERVE_COOKIE_SECURE"), "mark the auth cookie Secure (TLS deployments)")
+		authRaw          = fs.String("auth", envOr("KEEL_AUTH", string(authModeRequired)), "authentication mode: required|local-only|off")
+		insecure         = fs.Bool("insecure", envBool("KEEL_INSECURE"), "allow auth=off (loopback only)")
 		runs             = fs.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
 		noWorker         = fs.Bool("no-worker", false, "do not start the agent worker (API-only process)")
 		model            = fs.String("model", os.Getenv("KEEL_MODEL"), "model id")
@@ -156,6 +158,11 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "keel serve: %v\n", err)
 		return 2
 	}
+	mode, err := parseAuthMode(*authRaw)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel serve: %v\n", err)
+		return 2
+	}
 	log := slog.New(logsafe.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	opts := serveOptions{
 		Addr:             *addr,
@@ -163,8 +170,8 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		WebDir:           *webDir,
 		CASDir:           *casDir,
 		TenantID:         tenantID,
-		Password:         *password,
-		SecureCookies:    *secure,
+		AuthMode:         mode,
+		Insecure:         *insecure,
 		Runs:             *runs,
 		NoWorker:         *noWorker,
 		Model:            *model,

@@ -220,6 +220,12 @@ func (s *Service) AuthenticateSession(ctx context.Context, sessionID uuid.UUID) 
 	if err != nil || !session.Active(s.now()) {
 		return Principal{}, ErrSessionInvalid
 	}
+	// The serving process acts as one tenant (KEEL_SERVE_TENANT). A session
+	// minted for another tenant is refused here rather than injecting that
+	// tenant's id into this server's kernel boundary.
+	if session.TenantID != s.TenantID {
+		return Principal{}, ErrSessionInvalid
+	}
 	account, err := s.Store.GetAccount(ctx, session.TenantID, session.AccountID)
 	if err != nil {
 		return Principal{}, ErrSessionInvalid
@@ -486,6 +492,9 @@ func (s *Service) AuthenticateBotKey(ctx context.Context, plaintext string) (Pri
 	if err != nil {
 		return Principal{}, ErrInvalidBotKey
 	}
+	if key.TenantID != s.TenantID {
+		return Principal{}, ErrInvalidBotKey
+	}
 	account, err := s.Store.GetAccount(ctx, key.TenantID, key.AccountID)
 	if err != nil || account.DisabledAt != nil {
 		return Principal{}, ErrInvalidBotKey
@@ -522,6 +531,15 @@ func (s *Service) RevokeBotKey(ctx context.Context, actor Principal, keyID uuid.
 		Detail: map[string]any{"key_id": keyID.String()},
 	})
 	return nil
+}
+
+// ListBotKeys returns credential metadata for a super admin. The plaintext is
+// not part of the projection and cannot be recovered.
+func (s *Service) ListBotKeys(ctx context.Context, actor Principal, botID string) ([]store.BotAPIKey, error) {
+	if err := s.requireSuperAdmin(ctx, actor); err != nil {
+		return nil, err
+	}
+	return s.Store.ListBotAPIKeys(ctx, actor.TenantID, botID, 0)
 }
 
 // LocalAdmin returns the built-in local-only principal. The account row is

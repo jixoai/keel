@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // `keel doctor` is a read-only diagnostic: build identity, configuration
@@ -32,7 +33,8 @@ func runDoctorCmd(args []string, stdout, stderr io.Writer) int {
 		webDir   = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "web build directory")
 		tuiBin   = fs.String("tui-bin", os.Getenv("KEEL_TUI_BIN"), "NSH TUI binary")
 		tenant   = fs.String("tenant", os.Getenv("KEEL_SERVE_TENANT"), "tenant UUID the server acts as")
-		password = fs.String("password", os.Getenv("KEEL_SERVE_PASSWORD"), "local passphrase")
+		authRaw  = fs.String("auth", envOr("KEEL_AUTH", string(authModeRequired)), "authentication mode: required|local-only|off")
+		insecure = fs.Bool("insecure", envBool("KEEL_INSECURE"), "allow auth=off (loopback only)")
 		addr     = fs.String("addr", envOr("KEEL_SERVE_ADDR", defaultServeAddr), "planned listen address")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -62,13 +64,25 @@ func runDoctorCmd(args []string, stdout, stderr io.Writer) int {
 	default:
 		checks = append(checks, doctorCheck{"tenant", "ok", tenantID.String()})
 	}
+	mode, modeErr := parseAuthMode(*authRaw)
 	switch {
-	case *password == "":
-		checks = append(checks, doctorCheck{"auth", "warn", "KEEL_SERVE_PASSWORD is unset; authentication is disabled (loopback only)"})
-	case tenantErr == nil && tenantID.String() == "00000000-0000-0000-0000-000000000000":
-		checks = append(checks, doctorCheck{"auth", "fail", "authentication is enabled but KEEL_SERVE_TENANT is unset"})
+	case modeErr != nil:
+		checks = append(checks, doctorCheck{"auth", "fail", modeErr.Error()})
+	case mode == authModeRequired && tenantID.String() == "00000000-0000-0000-0000-000000000000":
+		checks = append(checks, doctorCheck{"auth", "fail", "auth=required but KEEL_SERVE_TENANT is unset"})
+	case mode == authModeRequired:
+		if _, err := store.SecretKeyFromEnv(os.Getenv); err != nil {
+			checks = append(checks, doctorCheck{"auth", "fail", "auth=required but KEEL_SECRET_KEY is not a valid 32-byte key"})
+		} else {
+			checks = append(checks, doctorCheck{"auth", "ok", "auth=required, account password + signed session cookie"})
+		}
 	default:
-		checks = append(checks, doctorCheck{"auth", "ok", "local passphrase + HMAC cookie"})
+		if err := validateAuthBinding(mode, *insecure, *addr); err != nil {
+			checks = append(checks, doctorCheck{"auth", "fail", err.Error()})
+		} else {
+			checks = append(checks, doctorCheck{"auth", "warn",
+				"auth=" + string(mode) + " maps loopback requests to the local-admin super admin; never expose it"})
+		}
 	}
 
 	if summary := webBuildSummary(*webDir); strings.HasPrefix(summary, "missing:") {

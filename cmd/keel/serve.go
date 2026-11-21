@@ -58,22 +58,27 @@ import (
 
 // serveOptions is the resolved `keel serve` configuration (flags + environment).
 type serveOptions struct {
-	Addr          string
-	DSN           string
-	WebDir        string
-	CASDir        string
-	TenantID      uuid.UUID
-	Password      string
-	SecureCookies bool
-	Runs          int
-	NoWorker      bool
-	Model         string
-	Provider      string
-	BaseURL       string
-	Protocol      string
-	APIKey        string
-	SystemPrompt  string
-	SkillsRoots   []string
+	Addr     string
+	DSN      string
+	WebDir   string
+	CASDir   string
+	TenantID uuid.UUID
+	AuthMode authMode
+	Insecure bool
+	// SecretKey is the 32-byte KEEL_SECRET_KEY (or an ephemeral key in
+	// local-only/off when it is unset). It signs the session cookie and CSRF.
+	SecretKey []byte
+	// LocalAdmin is the built-in principal for local-only/off.
+	LocalAdmin   auth.Principal
+	Runs         int
+	NoWorker     bool
+	Model        string
+	Provider     string
+	BaseURL      string
+	Protocol     string
+	APIKey       string
+	SystemPrompt string
+	SkillsRoots  []string
 	// SkillsRoot is the managed skill library root ($KEEL_HOME/skills). The
 	// tenant's active/ directory below it is part of skill discovery, so an
 	// installed skill reaches the next run without restarting the process.
@@ -250,9 +255,23 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if opts.SystemPrompt == "" {
 		opts.SystemPrompt = defaultSystemPrompt
 	}
-	if opts.TenantID == uuid.Nil && opts.Password != "" {
-		return errors.New("KEEL_SERVE_TENANT is required when authentication is enabled")
+	if opts.AuthMode == "" {
+		opts.AuthMode = authModeRequired
 	}
+	if err := validateAuthBinding(opts.AuthMode, opts.Insecure, opts.Addr); err != nil {
+		return err
+	}
+	if opts.AuthMode == authModeRequired && opts.TenantID == uuid.Nil {
+		return errors.New("KEEL_SERVE_TENANT is required for auth=required")
+	}
+	if opts.AuthMode.usesLocalAdmin() && opts.TenantID == uuid.Nil {
+		opts.TenantID = localTenantID
+	}
+	secretKey, err := ensureAuthSecret(opts.AuthMode, log)
+	if err != nil {
+		return err
+	}
+	opts.SecretKey = secretKey
 
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -268,6 +287,22 @@ func runServe(parent context.Context, opts serveOptions) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
+	if opts.AuthMode.usesLocalAdmin() {
+		localAdmin, err := ensureLocalIdentity(ctx, st, opts.TenantID, log)
+		if err != nil {
+			return fmt.Errorf("local admin identity: %w", err)
+		}
+		opts.LocalAdmin = localAdmin
+	} else {
+		if err := ensureBootstrapEnvToken(ctx, st, opts.TenantID, log); err != nil {
+			return fmt.Errorf("bootstrap token: %w", err)
+		}
+		if hasSuper, err := st.HasSuperAdmin(ctx); err != nil {
+			return fmt.Errorf("bootstrap state: %w", err)
+		} else if !hasSuper {
+			log.Warn("no super admin exists: run `keel admin bootstrap` (or set KEEL_BOOTSTRAP_TOKEN) before signing in")
+		}
+	}
 
 	// The file plugin's byte layer and its per-session execution space are built
 	// before the bash manager: the bridge's workspace provider is the same object
@@ -884,26 +919,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 			static.ServeHTTP(w, r)
 		}
 	})
-	// Credential order matters: a machine credential (Bearer keel_* / X-API-Key)
-	// is resolved first and wins over the cookie/passphrase session, because a
-	// key names its own tenant and a client holding one must never have the
-	// server's configured tenant substituted for it. Every request without a
-	// key-shaped credential falls through to the cookie handler unchanged, so a
-	// deployment whose tenants use the browser session is unaffected.
-	//
-	// The quota middleware sits inside the cookie handler, after the tenant is
-	// known: it needs the resolved X-Tenant-ID to charge the right tenant.
+	// The quota middleware sits inside the auth handler, after the principal is
+	// known: it needs the resolved X-Tenant-ID to charge the right tenant. Bot
+	// keys and cookie sessions are both resolved by the same auth controller, so
+	// there is exactly one place that decides "who is calling".
 	quotaEdge := &edgeQuotaMiddleware{Edge: edge, Next: dispatch}
-	// A verified key goes straight to the dispatch (through the quota check): the
-	// cookie handler would refuse a key-only request for lacking a session, which
-	// is exactly the shape a machine client has. Everything else keeps the
-	// passphrase path unchanged.
-	authorizer := &auth.Authorizer{
-		Keys:     apiKeyStore{store: st},
-		Verified: quotaEdge,
-		Next:     product.auth.wrap(quotaEdge),
-	}
-	var handler http.Handler = authorizer
+	var handler http.Handler = product.auth.wrap(quotaEdge)
 
 	hs := &http.Server{
 		Addr:              opts.Addr,
@@ -918,6 +939,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	ln, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", opts.Addr, err)
+	}
+	if err := validateListener(opts.AuthMode, ln); err != nil {
+		_ = ln.Close()
+		return err
 	}
 	inventory := product.pluginManager.Snapshot()
 	log.Info("keel serve listening", "addr", opts.Addr, "tenant", opts.TenantID.String(),
@@ -1276,11 +1301,16 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		},
 		Logger: log,
 	})
-	auth := newAuthController(authConfig{
-		Password:      opts.Password,
-		TenantID:      opts.TenantID,
-		SecureCookies: opts.SecureCookies,
+	auth, err := newAuthController(authConfig{
+		Mode:       opts.AuthMode,
+		Store:      st,
+		TenantID:   opts.TenantID,
+		SecretKey:  opts.SecretKey,
+		LocalAdmin: opts.LocalAdmin,
 	}, log)
+	if err != nil {
+		return nil, err
+	}
 
 	layer := &productLayer{
 		hooks:         hooks,
@@ -1701,42 +1731,6 @@ func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UU
 		return agentext.RunState{}, err
 	}
 	return agentext.RunState{Status: run.Status, Attempts: run.Attempts, CursorSeq: run.CursorSeq, LastError: run.LastError}, nil
-}
-
-// authController owns the middleware so routes and wrapping share one policy
-// (and one "auth disabled" warning at boot).
-type authController struct {
-	cfg    authConfig
-	logger *slog.Logger
-	h      *authHandler
-}
-
-func newAuthController(cfg authConfig, log *slog.Logger) *authController {
-	return &authController{cfg: cfg, logger: log}
-}
-
-func (a *authController) handler() *authHandler {
-	if a.h == nil {
-		a.h = newAuthHandler(a.cfg, http.NotFoundHandler(), a.logger)
-	}
-	return a.h
-}
-
-func (a *authController) register(mux *http.ServeMux) {
-	a.handler().register(mux)
-}
-
-func (a *authController) wrap(next http.Handler) http.Handler {
-	h := a.handler()
-	h.next = next
-	return h
-}
-
-func (a *authController) mode() string {
-	if a.cfg.Password == "" {
-		return "disabled"
-	}
-	return "password"
 }
 
 // adminKeyFromEnv decides whether a request carries the deployment's operator

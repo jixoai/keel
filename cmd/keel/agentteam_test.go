@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/auth"
 
 	"github.com/jixoai/keel/internal/agentteam"
 	"github.com/jixoai/keel/internal/httpapi"
@@ -108,12 +109,12 @@ func (f *fakeTeamAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid passphrase"})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: authCookieName, Value: "fake-session", Path: "/"})
+		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "fake-session", Path: "/"})
 		writeFakeJSON(w, http.StatusOK, map[string]any{"authenticated": true})
 		return
 	}
 	if f.password != "" {
-		if cookie, err := r.Cookie(authCookieName); err != nil || cookie.Value != "fake-session" {
+		if cookie, err := r.Cookie(auth.SessionCookieName); err != nil || cookie.Value != "fake-session" {
 			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{
 				"error": "authentication required: POST /v1/auth/login with the server passphrase",
 			})

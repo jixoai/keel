@@ -181,17 +181,21 @@ func (s *Store) BootstrapSuperAdmin(ctx context.Context, params BootstrapParams)
 		params.TenantID.String()); err != nil {
 		return AccountRecord{}, identityWriteError("bootstrap lock", err)
 	}
-	var hasSuper bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM accounts WHERE is_super_admin AND disabled_at IS NULL)`).Scan(&hasSuper); err != nil {
-		return AccountRecord{}, identityWriteError("bootstrap super admin check", err)
-	}
-	if hasSuper {
-		return AccountRecord{}, conflictIdentity("bootstrap", "a super admin already exists")
-	}
 
+	// Validate the token before the "already bootstrapped" check: replaying a
+	// used token must answer "invalid token" (401), not "already complete" (409).
 	tokenEventID, expiresAt, err := findBootstrapToken(ctx, tx, params.TenantID, params.TokenHash)
 	if err != nil {
+		if errors.Is(err, ErrInvalid) {
+			var hasSuper bool
+			if scanErr := tx.QueryRow(ctx,
+				`SELECT EXISTS (SELECT 1 FROM accounts WHERE is_super_admin AND disabled_at IS NULL)`).Scan(&hasSuper); scanErr != nil {
+				return AccountRecord{}, identityWriteError("bootstrap super admin check", scanErr)
+			}
+			if hasSuper {
+				return AccountRecord{}, conflictIdentity("bootstrap", "a super admin already exists")
+			}
+		}
 		return AccountRecord{}, err
 	}
 	if !now.Before(expiresAt) {
@@ -207,6 +211,14 @@ func (s *Store) BootstrapSuperAdmin(ctx context.Context, params BootstrapParams)
 	}
 	if used {
 		return AccountRecord{}, invalidIdentity("bootstrap", "setup token has already been used")
+	}
+	var hasSuper bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM accounts WHERE is_super_admin AND disabled_at IS NULL)`).Scan(&hasSuper); err != nil {
+		return AccountRecord{}, identityWriteError("bootstrap super admin check", err)
+	}
+	if hasSuper {
+		return AccountRecord{}, conflictIdentity("bootstrap", "a super admin already exists")
 	}
 
 	accountID := uuid.New()
@@ -495,7 +507,3 @@ func (s *Store) IsSuperAdmin(ctx context.Context, tenantID, accountID uuid.UUID)
 	}
 	return record.IsSuperAdmin && record.DisabledAt == nil, nil
 }
-
-// ErrBootstrapAlreadyComplete is a convenience alias for callers that want to
-// distinguish "someone is already super admin" without matching prose.
-var ErrBootstrapAlreadyComplete = errors.New("store: bootstrap already complete")

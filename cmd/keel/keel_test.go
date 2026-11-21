@@ -3,17 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -29,176 +26,6 @@ func TestVersionCommand(t *testing.T) {
 	}
 	if code := run([]string{"nope"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("unknown command exit = %d", code)
-	}
-}
-
-func TestAuthMiddlewarePasswordAndTenantInjection(t *testing.T) {
-	tenantID := uuid.New()
-	var seenTenant string
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenTenant = r.Header.Get("X-Tenant-ID")
-		w.WriteHeader(http.StatusOK)
-	})
-	mux := http.NewServeMux()
-	handler := newAuthHandler(authConfig{Password: "s3cret", TenantID: tenantID}, mux, noopLog{})
-	handler.register(mux)
-	mux.Handle("/", next)
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	// Unauthenticated API request: 401, never a default tenant.
-	res, err := server.Client().Get(server.URL + "/v1/sessions")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 401 {
-		t.Fatalf("unauthenticated: %d", res.StatusCode)
-	}
-
-	// Wrong passphrase.
-	body, _ := json.Marshal(map[string]string{"password": "nope"})
-	res, err = server.Client().Post(server.URL+"/v1/auth/login", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 401 {
-		t.Fatalf("wrong passphrase: %d", res.StatusCode)
-	}
-
-	// Login sets an HttpOnly cookie; the cookie authenticates and the client's
-	// own X-Tenant-ID is replaced by the server's tenant.
-	body, _ = json.Marshal(map[string]string{"password": "s3cret"})
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
-	res, err = client.Post(server.URL+"/v1/auth/login", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cookies := res.Cookies()
-	res.Body.Close()
-	if res.StatusCode != 200 || len(cookies) != 1 {
-		t.Fatalf("login: %d cookies=%d", res.StatusCode, len(cookies))
-	}
-	if !cookies[0].HttpOnly || cookies[0].Name != authCookieName {
-		t.Fatalf("cookie = %+v", cookies[0])
-	}
-	request, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/sessions", nil)
-	request.Header.Set("X-Tenant-ID", uuid.NewString())
-	res, err = client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 200 {
-		t.Fatalf("cookie auth: %d", res.StatusCode)
-	}
-	if seenTenant != tenantID.String() {
-		t.Fatalf("tenant not injected: %q", seenTenant)
-	}
-
-	// Bearer token (CLI/TUI) works without the cookie jar.
-	bearer, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/sessions", nil)
-	bearer.Header.Set("Authorization", "Bearer s3cret")
-	res, err = http.DefaultClient.Do(bearer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 200 {
-		t.Fatalf("bearer auth: %d", res.StatusCode)
-	}
-
-	// Probes and the login surface are exempt.
-	for _, path := range []string{"/v1/health", "/v1/auth/session"} {
-		res, err = server.Client().Get(server.URL + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res.Body.Close()
-		if res.StatusCode != 200 {
-			t.Fatalf("%s must be exempt, got %d", path, res.StatusCode)
-		}
-	}
-
-	// A tampered cookie is rejected.
-	tampered, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/sessions", nil)
-	tampered.Header.Set("Cookie", authCookieName+"=AAAA.BBBB")
-	res, err = http.DefaultClient.Do(tampered)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 401 {
-		t.Fatalf("tampered cookie: %d", res.StatusCode)
-	}
-}
-
-func TestAuthCookieExpiryAndDisabledMode(t *testing.T) {
-	tenantID := uuid.New()
-	now := time.Now().UTC()
-	cfg := authConfig{Password: "p", TenantID: tenantID, SessionTTL: time.Minute, Now: func() time.Time { return now }}
-	handler := newAuthHandler(cfg, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }), noopLog{})
-	login := httptest.NewRecorder()
-	loginReq := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewBufferString(`{"password":"p"}`))
-	loginReq.ContentLength = int64(len(`{"password":"p"}`))
-	handler.login(login, loginReq)
-	if login.Code != 200 {
-		t.Fatalf("login: %d %s", login.Code, login.Body.String())
-	}
-	cookies := login.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("cookies = %+v", cookies)
-	}
-	// Move the clock past the TTL: the same cookie is now invalid.
-	cfg.Now = func() time.Time { return now.Add(2 * time.Minute) }
-	expired := newAuthHandler(cfg, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }), noopLog{})
-	req := httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
-	req.AddCookie(cookies[0])
-	rec := httptest.NewRecorder()
-	expired.ServeHTTP(rec, req)
-	if rec.Code != 401 {
-		t.Fatalf("expired cookie: %d", rec.Code)
-	}
-
-	// Disabled mode (no passphrase) passes through and does not inject a tenant.
-	var seen string
-	disabled := newAuthHandler(authConfig{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = r.Header.Get("X-Tenant-ID")
-		w.WriteHeader(200)
-	}), noopLog{})
-	req = httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
-	req.Host = "127.0.0.1:13750"
-	req.Header.Set("X-Tenant-ID", tenantID.String())
-	rec = httptest.NewRecorder()
-	disabled.ServeHTTP(rec, req)
-	if rec.Code != 200 || seen != tenantID.String() {
-		t.Fatalf("disabled mode: %d tenant=%q", rec.Code, seen)
-	}
-
-	// Disabled mode with a configured tenant still injects it (the bundled web
-	// UI never sends X-Tenant-ID), and a foreign Host is refused so a rebinding
-	// page cannot reach the API.
-	seen = ""
-	disabledTenant := newAuthHandler(authConfig{TenantID: tenantID}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = r.Header.Get("X-Tenant-ID")
-		w.WriteHeader(200)
-	}), noopLog{})
-	req = httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
-	req.Host = "127.0.0.1:13750"
-	req.Header.Set("X-Tenant-ID", uuid.NewString())
-	rec = httptest.NewRecorder()
-	disabledTenant.ServeHTTP(rec, req)
-	if rec.Code != 200 || seen != tenantID.String() {
-		t.Fatalf("disabled mode with tenant: %d tenant=%q", rec.Code, seen)
-	}
-	req = httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
-	req.Host = "evil.test"
-	rec = httptest.NewRecorder()
-	disabledTenant.ServeHTTP(rec, req)
-	if rec.Code != 403 {
-		t.Fatalf("disabled mode foreign host: %d, want 403", rec.Code)
 	}
 }
 
@@ -320,9 +147,25 @@ func TestServeConfigValidation(t *testing.T) {
 	if err := runServe(context.Background(), serveOptions{}); err == nil || !strings.Contains(err.Error(), "KEEL_DSN") {
 		t.Fatalf("missing dsn: %v", err)
 	}
-	err := runServe(context.Background(), serveOptions{DSN: "postgres://ignored", Password: "p"})
+	err := runServe(context.Background(), serveOptions{DSN: "postgres://ignored", AuthMode: authModeRequired})
 	if err == nil || !strings.Contains(err.Error(), "KEEL_SERVE_TENANT") {
-		t.Fatalf("password without tenant: %v", err)
+		t.Fatalf("required auth without tenant: %v", err)
+	}
+	// local-only and off may not bind a public interface.
+	for _, mode := range []authMode{authModeLocalOnly, authModeOff} {
+		err := runServe(context.Background(), serveOptions{
+			DSN: "postgres://ignored", Addr: "0.0.0.0:13750", AuthMode: mode, Insecure: true,
+		})
+		if err == nil || !strings.Contains(err.Error(), "loopback") {
+			t.Fatalf("%s on 0.0.0.0: %v", mode, err)
+		}
+	}
+	// off needs the explicit unsafe flag.
+	err = runServe(context.Background(), serveOptions{
+		DSN: "postgres://ignored", Addr: "127.0.0.1:13750", AuthMode: authModeOff,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--insecure") {
+		t.Fatalf("off without --insecure: %v", err)
 	}
 }
 

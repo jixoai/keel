@@ -23,6 +23,11 @@ import (
 const (
 	// BotKeyScheme prefixes every bot credential.
 	BotKeyScheme = "keel_bot_"
+	// SetupTokenScheme prefixes a one-time first-super-admin setup token. It is
+	// a different shape from a bot key so a log reader can tell them apart.
+	SetupTokenScheme = "keel_setup_"
+	// SetupTokenBytes is the entropy of a setup token.
+	SetupTokenBytes = 32
 	// BotKeyBytes is the entropy of a key (256 bits).
 	BotKeyBytes = 32
 	// BotKeyDisplayChars is how much of the random part a list may show.
@@ -65,6 +70,28 @@ func HashBotKey(plaintext string) []byte {
 func HashToken(plaintext string) []byte {
 	sum := sha256.Sum256([]byte(plaintext))
 	return sum[:]
+}
+
+// MintSetupToken generates a one-time first-super-admin token and its stored
+// hash. The plaintext is printed once by `keel admin bootstrap`; the database
+// only ever sees the digest.
+func MintSetupToken() (plaintext string, hash []byte, err error) {
+	buf := make([]byte, SetupTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", nil, fmt.Errorf("auth: generate setup token: %w", err)
+	}
+	plaintext = SetupTokenScheme + base64.RawURLEncoding.EncodeToString(buf)
+	return plaintext, HashToken(plaintext), nil
+}
+
+// MintTemporaryPassword generates the one-time password `keel admin reset`
+// prints. 18 bytes encode to 24 characters, comfortably above the length floor.
+func MintTemporaryPassword() (string, error) {
+	buf := make([]byte, 18)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("auth: generate temporary password: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // LooksLikeBotKey reports whether a credential is in this package's format. It

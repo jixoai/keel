@@ -20,6 +20,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/modelcfg"
 )
 
@@ -65,11 +66,11 @@ func (f *fakeModelAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid passphrase"})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: authCookieName, Value: "fake-session", Path: "/"})
+		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "fake-session", Path: "/"})
 		writeFakeJSON(w, http.StatusOK, map[string]any{"authenticated": true})
 		return
 	}
-	if cookie, err := r.Cookie(authCookieName); err != nil || cookie.Value != "fake-session" {
+	if cookie, err := r.Cookie(auth.SessionCookieName); err != nil || cookie.Value != "fake-session" {
 		writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 		return
 	}

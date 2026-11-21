@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -315,93 +314,5 @@ func TestEdgeQuotaMiddlewareRejectsOversizedUpload(t *testing.T) {
 	}
 	if got := edge.ActiveStreams(tenant); got != 0 {
 		t.Fatalf("the upload slot leaked: %d active", got)
-	}
-}
-
-// TestAPIKeyAuthorizerWrapsServeChain pins the composition order of the serving
-// chain: a key request is authenticated and reaches the dispatch, while a
-// keyless request reaches the cookie handler untouched.
-func TestAPIKeyAuthorizerWrapsServeChain(t *testing.T) {
-	st := testStore(t)
-	ctx := context.Background()
-	tenantID := uuid.New()
-	if err := st.CreateTenant(ctx, tenantID, "serve-chain"); err != nil {
-		t.Fatal(err)
-	}
-	minted, err := auth.MintKey(auth.RoleTenant)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.CreateAPIKey(ctx, tenantID, uuid.New(), minted.Hash, minted.Prefix, minted.Role, ""); err != nil {
-		t.Fatal(err)
-	}
-
-	var mu sync.Mutex
-	var seen []string
-	var seenTenants []string
-	// productAuth stands in for the cookie/passphrase handler; dispatch is what
-	// it forwards to. A key request reaches dispatch with the key's tenant; a
-	// keyless request is recorded by the cookie handler (which then forwards in
-	// production), proving the authorizer did not consume it.
-	dispatch := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		seen = append(seen, "dispatch:"+r.URL.Path)
-		seenTenants = append(seenTenants, r.Header.Get(auth.HeaderTenantID))
-		mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-	})
-	productAuth := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		seen = append(seen, "cookie:"+r.URL.Path)
-		mu.Unlock()
-		dispatch.ServeHTTP(w, r)
-	})
-	chain := &auth.Authorizer{Keys: apiKeyStore{store: st}, Verified: dispatch, Next: productAuth}
-	server := httptest.NewServer(chain)
-	defer server.Close()
-
-	// Key request: authenticated, tenant injected, dispatch reached.
-	req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/sessions", nil)
-	req.Header.Set("Authorization", "Bearer "+minted.Plaintext)
-	res, err := server.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 200 {
-		t.Fatalf("key request: %d", res.StatusCode)
-	}
-	mu.Lock()
-	if len(seen) != 1 || seen[0] != "dispatch:/v1/sessions" {
-		mu.Unlock()
-		t.Fatalf("key request path = %v (the cookie handler must not see a key request)", seen)
-	}
-	if seenTenants[0] != tenantID.String() {
-		mu.Unlock()
-		t.Fatalf("dispatched tenant = %q", seenTenants[0])
-	}
-	mu.Unlock()
-
-	// Keyless request: the cookie handler owns it.
-	mu.Lock()
-	seen = nil
-	seenTenants = nil
-	mu.Unlock()
-	req, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/sessions", nil)
-	res, err = server.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 200 {
-		t.Fatalf("keyless request: %d", res.StatusCode)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(seen) != 2 || seen[0] != "cookie:/v1/sessions" || seen[1] != "dispatch:/v1/sessions" {
-		t.Fatalf("keyless path = %v", seen)
-	}
-	if seenTenants[0] != "" || len(seenTenants) != 1 {
-		t.Fatalf("the authorizer wrote a tenant on a keyless request: %v", seenTenants)
 	}
 }

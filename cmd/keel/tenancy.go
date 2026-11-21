@@ -1,15 +1,9 @@
-// Tenancy wiring for `keel serve`: the API-key middleware, the provisioning
-// seam the product API exposes, and the edge quota enforcer.
+// Tenancy wiring for `keel serve`: the operator provisioning seam the product
+// API exposes and the edge quota enforcer.
 //
-// The credential path is deliberately layered so nothing that existed before
-// this change changes behaviour:
-//
-//	auth.Authorizer   machine credential (Bearer keel_* / X-API-Key) → tenant
-//	authHandler       browser passphrase + signed cookie → tenant
-//
-// The authorizer only acts on a credential that is unambiguously a key; every
-// other request falls through to the cookie handler, which is why a deployment
-// with no keys (and no KEEL_ADMIN_KEY) behaves exactly as it did.
+// Credential authentication lives in cmd/keel/auth.go (account sessions and bot
+// keys). The legacy tenant api_keys are minted by `keel admin` for pre-A2
+// tooling but are not accepted by the serving path.
 package main
 
 import (
@@ -17,39 +11,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentapi"
-	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
 )
 
-// apiKeyStore adapts *store.Store to the two seams the tenancy surface needs:
-// auth.KeyStore (hash → credential) and agentapi.Provisioner (create/mint/list/
-// revoke). Both live here because the store's row type carries more than either
-// seam should see.
+// apiKeyStore adapts *store.Store to agentapi.Provisioner (create/mint/list/
+// revoke).
 type apiKeyStore struct {
 	store *store.Store
-}
-
-// LookupAPIKey implements auth.KeyStore.
-//
-// The lookup runs through the tenant pool with app.bypass_rls='on': the key's
-// tenant is what the lookup is trying to discover, so there is no tenant scope
-// to set yet. It is the one place the bypass marker is used on a request path,
-// and the query is a single indexed probe that returns only the key's own row.
-func (a apiKeyStore) LookupAPIKey(ctx context.Context, hash []byte) (auth.KeyRecord, error) {
-	if a.store == nil {
-		return auth.KeyRecord{}, auth.ErrInvalidCredential
-	}
-	record, err := a.store.LookupAPIKey(ctx, hash)
-	if err != nil {
-		return auth.KeyRecord{}, err
-	}
-	return auth.KeyRecord{
-		TenantID: record.TenantID,
-		KeyID:    record.KeyID,
-		Prefix:   record.Prefix,
-		Role:     record.Role,
-	}, nil
 }
 
 // CreateTenant implements agentapi.Provisioner.

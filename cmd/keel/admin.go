@@ -50,6 +50,10 @@ func runAdminCmd(args []string, stdout, stderr io.Writer) int {
 		return runAdminQuota(args[1:], stdout, stderr)
 	case "usage":
 		return runAdminUsage(args[1:], stdout, stderr)
+	case "bootstrap":
+		return runAdminBootstrap(args[1:], stdout, stderr)
+	case "reset":
+		return runAdminReset(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		adminUsage(stdout)
 		return 0
@@ -64,6 +68,8 @@ func adminUsage(w io.Writer) {
 	fmt.Fprint(w, `keel admin — operator provisioning of tenants, keys and quotas
 
 Usage:
+  keel admin bootstrap [--tenant <uuid>] [--name <text>] [--ttl 30m] [--token-file <path>]
+  keel admin reset --username <name> [--tenant <uuid>]
   keel admin tenant create --name <name> [--tenant <uuid>] [--role tenant|admin] [--no-key]
   keel admin tenant list
   keel admin tenant show <uuid>
@@ -73,11 +79,17 @@ Usage:
   keel admin quota set --tenant <uuid> [--streams n] [--bytes-per-sec n] [--storage-bytes n]
   keel admin quota show --tenant <uuid>
 
-The plaintext API key is printed exactly once, by "tenant create" / "key create".
-It is stored only as a SHA-256 hash; there is no command that shows it again.
+"bootstrap" mints a one-time setup token (printed to stderr once, or written to a
+0600 file) for the first super admin. "reset" sets a temporary password, revokes
+every session and forces a change at next login; both are local CLI operations.
+
+The plaintext tenant API key is printed exactly once, by "tenant create" /
+"key create". It is stored only as a SHA-256 hash; there is no command that shows
+it again.
 
 Environment:
   KEEL_DSN                 PostgreSQL DSN (required)
+  KEEL_SERVE_TENANT        default tenant UUID for bootstrap/reset
 `)
 }
 
@@ -93,6 +105,153 @@ func adminStore(ctx context.Context) (*store.Store, error) {
 		DSN:        dsn,
 		DisableRLS: strings.EqualFold(strings.TrimSpace(os.Getenv("KEEL_RLS")), "off"),
 	})
+}
+
+// runAdminBootstrap mints the one-time setup token for the first super admin.
+// The plaintext goes to stderr (or a 0600 file), never to the database: only
+// its SHA-256 hash is recorded in auth_events.
+func runAdminBootstrap(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("keel admin bootstrap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var (
+		tenant    = fs.String("tenant", "", "tenant UUID (default KEEL_SERVE_TENANT)")
+		name      = fs.String("name", "keel", "tenant name when the tenant row does not exist")
+		ttl       = fs.Duration("ttl", store.BootstrapTokenTTL, "setup token lifetime")
+		tokenFile = fs.String("token-file", "", "write the token to this file with mode 0600")
+	)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *ttl <= 0 || *ttl > 24*time.Hour {
+		fmt.Fprintln(stderr, "keel admin bootstrap: --ttl must be between 1s and 24h")
+		return 2
+	}
+	tenantID, ok := resolveAdminTenant(*tenant, "keel admin bootstrap", stderr)
+	if !ok {
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	st, err := adminStore(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	defer st.Close()
+
+	created, err := st.CreateTenantReport(ctx, tenantID, strings.TrimSpace(*name))
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	hasSuper, err := st.HasSuperAdmin(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	if hasSuper {
+		fmt.Fprintln(stderr, "keel admin bootstrap: a super admin already exists; use `keel admin reset --username ...` for recovery")
+		return 1
+	}
+	token, hash, err := auth.MintSetupToken()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	expiresAt := time.Now().UTC().Add(*ttl)
+	if _, err := st.CreateBootstrapToken(ctx, tenantID, hash, expiresAt, "local-cli"); err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "tenant:  %s\n", tenantID)
+	if created {
+		fmt.Fprintf(stdout, "created: tenant %q\n", strings.TrimSpace(*name))
+	}
+	fmt.Fprintf(stdout, "expires: %s\n", expiresAt.Format(time.RFC3339))
+	// The one and only appearance of the setup token. stderr is deliberate: a
+	// pipeline that captures stdout for machine output does not swallow it.
+	fmt.Fprintf(stderr, "\nSETUP TOKEN (shown once, expires %s):\n%s\n\n", expiresAt.Format(time.RFC3339), token)
+	fmt.Fprintln(stderr, "Open the login page and submit this token with the username and password for the first super admin.")
+	if strings.TrimSpace(*tokenFile) != "" {
+		if err := os.WriteFile(*tokenFile, []byte(token+"\n"), 0o600); err != nil {
+			fmt.Fprintf(stderr, "keel admin: write token file: %v\n", err)
+			return 1
+		}
+		if err := os.Chmod(*tokenFile, 0o600); err != nil {
+			fmt.Fprintf(stderr, "keel admin: chmod token file: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "token file: %s (mode 0600)\n", *tokenFile)
+	}
+	return 0
+}
+
+// runAdminReset is the local recovery path: a temporary password, every session
+// revoked and a forced change at next login. It never runs over HTTP.
+func runAdminReset(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("keel admin reset", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var (
+		tenant   = fs.String("tenant", "", "tenant UUID (default KEEL_SERVE_TENANT)")
+		username = fs.String("username", "", "account username (required)")
+	)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*username) == "" {
+		fmt.Fprintln(stderr, "keel admin reset: --username is required")
+		return 2
+	}
+	tenantID, ok := resolveAdminTenant(*tenant, "keel admin reset", stderr)
+	if !ok {
+		return 2
+	}
+	tempPassword, err := auth.MintTemporaryPassword()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	hash, err := auth.HashPassword(tempPassword)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	st, err := adminStore(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: %v\n", err)
+		return 1
+	}
+	defer st.Close()
+	account, err := st.ResetAccountPassword(ctx, tenantID, strings.TrimSpace(*username), hash, "local-cli")
+	if err != nil {
+		fmt.Fprintf(stderr, "keel admin: reset %q: %v\n", strings.TrimSpace(*username), err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "tenant:  %s\n", tenantID)
+	fmt.Fprintf(stdout, "account: %s (%s)\n", account.Username, account.ID)
+	fmt.Fprintf(stdout, "super admin: %v\n", account.IsSuperAdmin)
+	fmt.Fprintln(stdout, "sessions: all revoked")
+	fmt.Fprintf(stdout, "\nTEMPORARY PASSWORD (shown once, change at next login):\n%s\n\n", tempPassword)
+	return 0
+}
+
+func resolveAdminTenant(raw, command string, stderr io.Writer) (uuid.UUID, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("KEEL_SERVE_TENANT"))
+	}
+	if raw == "" {
+		fmt.Fprintf(stderr, "%s: --tenant (or KEEL_SERVE_TENANT) is required\n", command)
+		return uuid.Nil, false
+	}
+	tenantID, err := uuid.Parse(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: tenant id must be a UUID\n", command)
+		return uuid.Nil, false
+	}
+	return tenantID, true
 }
 
 func runAdminTenant(args []string, stdout, stderr io.Writer) int {
