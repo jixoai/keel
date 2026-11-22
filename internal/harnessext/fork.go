@@ -719,6 +719,39 @@ func (r *SubagentRunner) durableLink(ctx context.Context, tenantID, childID uuid
 	if err != nil {
 		return durableLink{}, false, err
 	}
+	return parseDurableLink(events)
+}
+
+// DurableParentSession answers the durable parent link of a sub-agent session
+// (the parentSessionId recorded in the child's first user.message). It is the
+// restart-safe version the supervisor's escalation ladder needs: the
+// SubagentRunner's in-process registry is only a warm index.
+func DurableParentSession(ctx context.Context, reader kernel.Reader, tenantID, childID uuid.UUID) (uuid.UUID, bool, error) {
+	if reader == nil || tenantID == uuid.Nil || childID == uuid.Nil {
+		return uuid.Nil, false, nil
+	}
+	scope := kernel.Scope{TenantID: tenantID, SessionID: childID}
+	var all []kernel.Event
+	var after int64
+	for {
+		page, err := reader.LoadEvents(ctx, scope, after, 200)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		all = append(all, page...)
+		if len(page) < 200 {
+			break
+		}
+		after = page[len(page)-1].Seq
+	}
+	link, ok, err := parseDurableLink(all)
+	if err != nil || !ok {
+		return uuid.Nil, false, err
+	}
+	return link.ParentSessionID, true, nil
+}
+
+func parseDurableLink(events []kernel.Event) (durableLink, bool, error) {
 	for _, event := range events {
 		if event.Kind != kernel.KindUserMessage {
 			continue

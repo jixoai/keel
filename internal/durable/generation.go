@@ -625,4 +625,18 @@ func isRetryableAssistantError(msg agentcore.AssistantMessage) bool {
 
 var nonRetryableErrorPattern = regexp.MustCompile(`(?i)(GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing|subscription_sharing_usage_limit_exceeded|"code"\s*:\s*"?1308)`)
 
+// providerExhaustedPattern is the subset of non-retryable provider errors that
+// means the account's quota or balance is spent: retrying the same provider is
+// pointless until the account or the configuration changes. The supervisor
+// uses it to decide when `resume.providerFallback` applies.
+var providerExhaustedPattern = regexp.MustCompile(`(?i)(GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|subscription_sharing_usage_limit_exceeded|"code"\s*:\s*"?1308)`)
+
+// IsProviderExhausted reports whether a recorded provider error means the
+// provider's quota or balance is exhausted. It is deliberately narrower than
+// "not retryable": an invalid request is also not retryable, but switching
+// providers would not help.
+func IsProviderExhausted(message string) bool {
+	return providerExhaustedPattern.MatchString(message)
+}
+
 var retryableErrorPattern = regexp.MustCompile(`(?i)(overloaded|server_busy|servers are currently busy|currently experiencing high demand|model is at capacity|rate.?limit|too many requests|\b(?:429|500|502|503|504|520|524)\b|service.?(?:is.?)?(?:temporarily.?)?unavailable|server.?error|internal.?error|provider.?returned.?(?:an.?)?error|exceeded request buffer limit while retrying upstream|unable to forward upstream|upstream.?request.?failed|upstream_stream_read_error|stream was interrupted|http/?2 stream failed|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|request to \S+ failed, reason:|getaddrinfo|ENOTFOUND)`) //nolint:lll
