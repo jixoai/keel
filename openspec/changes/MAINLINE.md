@@ -2,13 +2,13 @@
 
 > Owner 2026-11-22 裁决。本文件是唯一程序板（canonical board）；任务真值仍是各 change 的
 > `tasks.md` + 证据。勾选数只表示板面状态，不表示本文件重新验收过实现。
-> 更新：2026-11-22 · 分支：`task/keel-board` · 基线：`548e3ae`（main）
+> 更新：2026-11-22 · 分支：`main` · 基线：`5d422bd`
 
 ## 当前状态（板面快照）
 
 | Change | 勾选 | 状态 | 处置 |
 |---|---:|---|---|
-| `keel-harness-v2` | 68/157 | **唯一活跃主线** | 只推进这一条 |
+| `keel-harness-v2` | 90/157 | **唯一活跃主线** | 只推进这一条 |
 | `runtime-foundation` | 39/47 | 已折叠 | 8 项残余并入 W11；不单开线 |
 | `keel-ecosystem` | 4/72 | 冻结参考/backlog | 只有 W11 实际需要才取用 |
 | `keel-agent-team-v1` | 61/62 | 已被取代 | 归档；最后 1 条设计任务不做 |
@@ -19,9 +19,10 @@
   304/304 断言、P0/P1/P2=0；见 `.agents/docs/E2E-REPORTS.md` 2026-11-22 条目。
 - 任务→bash→capture→任务面板：W3/W4 主体已勾（W4 面板项仍开）。
 - Web + TUI：W7/TUI 证据在；W10 触发器已勾。
-- 恢复：W8 子代理 resume 已交付；W11 G2 的 kill -9/容器重启端到端证据仍开。
+- 恢复：W8 子代理 resume 已交付；W11 G2 的 kill -9/容器重启端到端证据已由 W2/W12 recovery 切片的真实 SIGKILL 测试补强，门级汇总仍待 W11。
+- 2026-11-22 已交付切片：W0.5 契约冻结；W9 OAR/Codex；W2/W12 恢复与护栏；W12 UI 槽位/chunk；身份 2s SSE invalidation。
 
-板面仍开的主要口子（按 W）：W0 多用户/清单/RSS/原生 target；W0.5 插件全景；W1 Rust+gRPC；
+板面仍开的主要口子（按 W）：W0 多用户/清单/RSS/原生 target；W0.5 剩余四层装配/能力矩阵；W1 Rust+gRPC；
 W2 组排队/ETA/OOM；W3 capture 策略覆写；W4 面板；W9 OAR；W11 收口门；W12 槽位/恢复/产品件。
 
 ## Owner 裁决（2026-11-22，记录，不再讨论）

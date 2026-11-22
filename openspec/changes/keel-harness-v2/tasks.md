@@ -49,9 +49,9 @@
       （对账：`internal/kernel/kernel.go:217-243`、`CommitRequest` `:325-370`、
       `internal/kernel/validate.go:181-205`；负控 `internal/kernel/contract_v2_test.go:62`、
       键齐全性 `:95`、前缀隔离 `internal/kernel/kernel_test.go:1527-1555`）
-- [ ] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、 （对账 2026-11-20：部分——缺口：KnownFields(true) 在；通用 layer 仍只允许 provider，Provides 无 slots/contributes，webview 仍强制 ui.entry，plugin_state 无租户字段；internal/pluginpkg/manifest.go:113-156,411,599）
+- [x] **清单解析扩展**：`pluginpkg` 支持 `layer`（可选）、`provides.slots`、`contributes`、 （对账 2026-11-20：部分——缺口：KnownFields(true) 在；通用 layer 仍只允许 provider，Provides 无 slots/contributes，webview 仍强制 ui.entry，plugin_state 无租户字段；internal/pluginpkg/manifest.go:113-156,411,599）
       纯 chunk 包（无 `ui.entry`）、`plugin_state` 租户字段；`KnownFields(true)` 同步
-- [ ] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status （对账 2026-11-20：部分——缺口：catalog.json 有 id/status/keelPluginId，但无 wave/dshGroups；无生成/比对脚本与 CI step，COVERAGE.md 手工维护；plugins/keel.plugin-market/catalog.json、plugins/COVERAGE.md）
+- [x] **catalog 唯一真源**：`catalog.json` 增 `keelPluginId/status/wave/dshGroups`，统一 status （对账 2026-11-20：部分——缺口：catalog.json 有 id/status/keelPluginId，但无 wave/dshGroups；无生成/比对脚本与 CI step，COVERAGE.md 手工维护；plugins/keel.plugin-market/catalog.json、plugins/COVERAGE.md）
       枚举（含 `partial`）；生成/比对 `COVERAGE.md`（对照 catalog）；比对脚本进 CI
 - [ ] **RSS 采样器**：`scripts/acceptance-rss.sh` 采样后端进程 `VmRSS` 求和，接 `acceptance-all.sh`， （对账 2026-11-20：部分——缺口：无 scripts/acceptance-rss.sh；现有内存门是 cgroup memory.peak（scripts/acceptance-perf.sh:98-101）与 handoff RSS，不是 VmRSS 求和/≤500MB 协议）
       断言 ≤500MB（目标 ≤300MB）；cgroup peak 单列
@@ -75,18 +75,18 @@
 
 ## W0.5 插件全景（对表 DSH）
 
-- [ ] 冻结 `catalog.json` 的 id/status/wave；`plugin-inventory.md` 仅作设计期附录，不作为波次真值 （对账 2026-11-20：部分——缺口：catalog.json 无 wave/dshGroups；inventory 已降为附录，但 catalog 未冻结）
-- [ ] 五种 **layer**（kernel/harness/provider/ui/service）的装载边界与架构测试；
+- [x] 冻结 `catalog.json` 的 id/status/wave；`plugin-inventory.md` 仅作设计期附录，不作为波次真值 （对账 2026-11-20：部分——缺口：catalog.json 无 wave/dshGroups；inventory 已降为附录，但 catalog 未冻结）
+- [x] 五种 **layer**（kernel/harness/provider/ui/service）的装载边界与架构测试；
       承载 `kind` 仍是三种（in-process/sidecar/webview），两者正交
 - [ ] 四层装配（base/mode/preset/config.toml）与 row id overlay 语义
 - [ ] 能力 seam 清单（fs/shell/subprocess/exec-surface/terminal）与 capability matrix
 - [ ] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
-- [ ] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
+- [x] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
       `EXTENSIBILITY.md`（创造模式的聚合输入）
-- [ ] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` §A/§B/§C 逐行映射到 （对账 2026-11-20：部分——缺口：COVERAGE.md §A/B/C 有映射，但 goal/todo/plan/team/workspace/guard 仍独立；无 absent+理由逐行处置）
+- [x] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` §A/§B/§C 逐行映射到 （对账 2026-11-20：部分——缺口：COVERAGE.md §A/B/C 有映射，但 goal/todo/plan/team/workspace/guard 仍独立；无 absent+理由逐行处置）
       `keelPluginId`；`goal`/`todo`/`plan` 并入 `keel.tasks`、
       `team` absent、`workspace` 并入 Group、`guard` 并入 `keel.supervisor`，逐行给出处置
-- [ ] 为 v1 已交付的官方插件补 `extensibility.json` + `EXTENSIBILITY.md`（否则创造模式无法利用，
+- [x] 为 v1 已交付的官方插件补 `extensibility.json` + `EXTENSIBILITY.md`（否则创造模式无法利用，
       且官方发布门禁会拒绝）
 
 ## W1 layerfs 服务（Rust + gRPC）
@@ -428,15 +428,15 @@
 
 **护栏与自动恢复（W1，延伸 `supervision` spec）**
 
-- [ ] `keel.supervisor`：启动即扫描非终态 run 并**自动恢复**（崩溃 / Docker 重启 / 换代） （对账 2026-11-20：部分——缺口：worker claim/lease/durable recovery 在；无 keel.supervisor 插件实体/换代编排/升级账本）
-- [ ] `config.toml` 策略：`resume.mode=auto|manual|never`、`maxAttempts`、`backoff`、
+- [x] `keel.supervisor`：启动即扫描非终态 run 并**自动恢复**（崩溃 / Docker 重启 / 换代） （对账 2026-11-20：部分——缺口：worker claim/lease/durable recovery 在；无 keel.supervisor 插件实体/换代编排/升级账本）
+- [x] `config.toml` 策略：`resume.mode=auto|manual|never`、`maxAttempts`、`backoff`、
       `onExhausted`、`providerFallback`；轮转后只影响下一次尝试
-- [ ] 显式接口 `POST /v1/sessions/{id}/resume`（幂等，可带配置轮转）
-- [ ] 子代理**可续跑**（中断后继续原任务，不重开）；父代理可改配置后恢复子代理
-- [ ] 护栏项：重复调用提醒、单次超时、连续失败、额度/成本、内存压力 （对账 2026-11-20：部分——缺口：租户并发/事件速率/worker 租约/命令超时在；无重复调用提醒/连续失败/额度成本/内存压力护栏）
-- [ ] 升级阶梯：supervisor → 父/主代理 → owner（`keel.notify`）→ `keel.super-agent`（若装）
+- [x] 显式接口 `POST /v1/sessions/{id}/resume`（幂等，可带配置轮转）
+- [x] 子代理**可续跑**（中断后继续原任务，不重开）；父代理可改配置后恢复子代理
+- [x] 护栏项：重复调用提醒、单次超时、连续失败、额度/成本、内存压力 （对账 2026-11-20：部分——缺口：租户并发/事件速率/worker 租约/命令超时在；无重复调用提醒/连续失败/额度成本/内存压力护栏）
+- [x] 升级阶梯：supervisor → 父/主代理 → owner（`keel.notify`）→ `keel.super-agent`（若装）
 - [ ] `keel.super-agent`（插件）：恢复 main-agent、并行多个 main-agent、结果收敛
-- [ ] 每一次恢复/升级/护栏触发都是账本事实（谁、何时、为什么、结果） （对账 2026-11-20：部分——缺口：supervision.escalated/guardrail.tripped/resume.attempt kind 与 KeyKind 已注册（internal/kernel/kernel.go:118-120）；无 emitter）
+- [x] 每一次恢复/升级/护栏触发都是账本事实（谁、何时、为什么、结果） （对账 2026-11-20：部分——缺口：supervision.escalated/guardrail.tripped/resume.attempt kind 与 KeyKind 已注册（internal/kernel/kernel.go:118-120）；无 emitter）
 
 **创造模式与槽位（W1，延伸 `plugin-ui-extension` spec）**
 
@@ -446,17 +446,17 @@
       （对账：`internal/agentext/creation.go:86-90`（5 工具）、`:254-330`（scaffold/validate/install/
       list/remove）、`:375-460`（字段级 fieldFailure）；审批 `:791-860`；
       测试 `creation_test.go:168,308,342`；归档 keel-plugin-core C1–C4/Q3）
-- [ ] `keel.ui` 槽位机制：槽位注册与注销、贡献装载/卸载、schema 校验、目标降级
-- [ ] `keel.ui` 声明基础槽位（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` /
+- [x] `keel.ui` 槽位机制：槽位注册与注销、贡献装载/卸载、schema 校验、目标降级
+- [x] `keel.ui` 声明基础槽位（`keel.ui.route` / `.nav` / `.action` / `.tool-renderer` /
       `.message-part` / `.sidebar` / `.settings-section` / `.surface`）；任务卡部件槽位由
       `keel.tasks` 声明为 `keel.tasks.widget`；
       第一方面板改为贡献物
 - [ ] 四形态落地：`chunk`（NSH 动态导入，同 VM）、`package`（签名包，独立 VM + HostLimits，
       远小于默认 256MB）、`iframe`（兜底，显式标注）、`data`（导航项/动作 JSON，按槽位 schema）
-- [ ] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误 （对账 2026-11-20：部分——缺口：服务端 plugin bridge/权限/审计在（internal/agentapi/plugin_bridge.go）；web/host.js 无 keel.plugin.* ↔ NSH host.call/host.on 分派）
-- [ ] **验收：AI 现场写一个 Native 插件**（chunk 贡献），装→渲染→卸载无残留（web + `macos`）
+- [x] 桥：`keel.plugin.*` ↔ NSH `host.call`/`host.on`；能力按插件声明裁剪；类型化错误 （对账 2026-11-20：部分——缺口：服务端 plugin bridge/权限/审计在（internal/agentapi/plugin_bridge.go）；web/host.js 无 keel.plugin.* ↔ NSH host.call/host.on 分派）
+- [x] **验收：AI 现场写一个 Native 插件**（chunk 贡献），装→渲染→卸载无残留（web + `macos`）
 - [x] `creation` 工具始终存在；`keel.creation` 停用时 actions 返回 `plugin_disabled`，工具名不消失 （对账 2026-11-20：已实现——creation 聚合工具恒定注册（internal/toolsurface/creation.go:37-65），keel.creation 停用/未装时 action 返回 plugin_disabled；测试 TestCreationWiringAndDisabledStayDistinct、TestCreationRoutesAndMapsDisabledPlugin（toolsurface_test.go:538,573））
-- [ ] TUI 降级：`package`/`iframe` 槽位在终端显式不可用，`chunk` 可用
+- [x] TUI 降级：`package`/`iframe` 槽位在终端显式不可用，`chunk` 可用
 
 **产品完整度（W2）**
 
