@@ -368,13 +368,15 @@ func (s *Server) revokeResourceShare(w http.ResponseWriter, r *http.Request, res
 	if !ok {
 		return
 	}
-	// Revoke resolves the subject too (the API contract): a missing subject is
-	// 404 exactly like a missing tuple. Self-share is not refused here: if such
-	// a tuple ever exists, the owner must be able to clean it up.
-	view, ok := s.resolveShareSubject(w, r, tenantID, principal, body, false)
-	if !ok {
-		return
-	}
+	// Revoke must still work after the subject row is gone: resource_relations
+	// keeps the polymorphic subject_id without an FK, and a deleted group would
+	// otherwise leave an unremovable tuple. The view is best effort for display;
+	// the delete below is the authority on whether the tuple existed. Self-share
+	// is not refused here: if such a tuple ever exists, the owner must be able to
+	// clean it up.
+	view := shareViewOf(r.Context(), s, tenantID, store.ResourceRelation{
+		SubjectType: body.SubjectType, SubjectID: body.SubjectID, Relation: body.Relation,
+	})
 	if err := s.cfg.Identity.DeleteResourceRelation(r.Context(), tenantID, resource.kind, resourceID,
 		body.Relation, body.SubjectType, body.SubjectID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {

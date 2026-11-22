@@ -24,13 +24,22 @@ type fakeAccess struct {
 
 	denials []access.Decision
 	granted []string
+	// deniedBotIDs refuses KeyBotInvoke on named Bot resources only; a test
+	// that must prove the edge authorized every named target uses it.
+	deniedBotIDs map[string]bool
 }
 
 func (f *fakeAccess) Principal(context.Context, uuid.UUID) (access.Principal, error) {
 	return f.principal, f.principalErr
 }
 
-func (f *fakeAccess) Authorize(_ context.Context, _ access.Principal, key string, _ access.Resource) (access.Decision, error) {
+func (f *fakeAccess) Authorize(_ context.Context, _ access.Principal, key string, resource access.Resource) (access.Decision, error) {
+	if key == access.KeyBotInvoke && f.deniedBotIDs[resource.ID] {
+		return access.Decision{
+			Allow: false, Key: key, Reason: access.ReasonMissingRelation,
+			Detail: "no relation satisfies viewer",
+		}, nil
+	}
 	if decision, ok := f.decisions[key]; ok {
 		return decision, nil
 	}

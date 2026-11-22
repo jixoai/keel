@@ -77,7 +77,61 @@ func TestSpawnBotIDRequiresBotInvoke(t *testing.T) {
 	}
 }
 
-// TestForkBotIDRequiresBotInvoke mirrors the spawn check on the fork route.
+// TestSpawnAuthorizesEveryNamedTarget pins the union rule: when the top-level
+// botId and selection.botId name different Bots, the HTTP edge must authorize
+// both. Otherwise a caller could be checked against the Bot it is allowed to
+// use while the child binding executes the other one.
+func TestSpawnAuthorizesEveryNamedTarget(t *testing.T) {
+	tenant, parent := uuid.New(), uuid.New()
+	runner := harnessext.NewSubagentRunner(harnessext.SubagentOptions{
+		Gate: newFakeGate(parent), Edge: &fakeCommitter{}, Events: &fakeEvents{},
+		Runs: &fakeRuns{state: harnessext.RunState{Status: "done"}}, Logger: testLogger(),
+		Poll: time.Millisecond,
+	})
+	seam := permitAllAccess()
+	seam.deniedBotIDs = map[string]bool{"member-2": true}
+	server := httptest.NewServer(New(Config{Subagents: runner, Access: seam, Logger: testLogger()}))
+	defer server.Close()
+
+	for _, route := range []struct {
+		name string
+		path string
+		body map[string]any
+	}{
+		{
+			name: "spawn",
+			path: "/v1/sessions/" + parent.String() + "/subagents",
+			body: map[string]any{
+				"task":      "delegate",
+				"botId":     "member-1",
+				"selection": map[string]any{"botId": "member-2"},
+			},
+		},
+		{
+			name: "fork",
+			path: "/v1/sessions/" + parent.String() + "/fork",
+			body: map[string]any{
+				"eventSeq":  1,
+				"task":      "fork",
+				"botId":     "member-1",
+				"selection": map[string]any{"botId": "member-2"},
+			},
+		},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			var refusal map[string]any
+			code := doJSON(t, server.Client(), http.MethodPost,
+				server.URL+route.path, tenant, route.body, &refusal)
+			if code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body=%v", code, refusal)
+			}
+			if refusal["requiredKey"] != access.KeyBotInvoke || refusal["reason"] != string(access.ReasonMissingRelation) {
+				t.Fatalf("403 body = %v", refusal)
+			}
+		})
+	}
+}
+
 func TestForkBotIDRequiresBotInvoke(t *testing.T) {
 	tenant, parent := uuid.New(), uuid.New()
 	runner := harnessext.NewSubagentRunner(harnessext.SubagentOptions{

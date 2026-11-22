@@ -83,29 +83,28 @@ func (r SpawnRequest) childSelection() json.RawMessage {
 	return encoded
 }
 
-// spawnedBotID is the member Bot a spawn delegates to. SpawnFromTool carries
-// the top-level botId; a caller that wrote only selection.botId still gets the
-// member ownership, while a team selection (teamBotId) keeps the parent's
-// captain ownership because the team decides the captain.
+// spawnedBotID is the member Bot a spawn delegates to. It follows the same
+// precedence as childSelection(): a non-empty selection is the complete
+// execution fact and wins over the top-level botId; a team selection
+// (teamBotId) keeps the parent's captain ownership because the team decides the
+// captain. When both name different Bots the HTTP edge authorizes both, but the
+// child may only be owned by the one the binding actually executes.
 func (r *SubagentRunner) spawnedBotID(req SpawnRequest) string {
-	if botID := strings.TrimSpace(req.BotID); botID != "" {
-		return botID
-	}
 	raw := bytes.TrimSpace(req.Selection)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return ""
+	if len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		var fact struct {
+			BotID     string `json:"botId"`
+			TeamBotID string `json:"teamBotId"`
+		}
+		if json.Unmarshal(raw, &fact) != nil {
+			return ""
+		}
+		if strings.TrimSpace(fact.TeamBotID) != "" {
+			return ""
+		}
+		return strings.TrimSpace(fact.BotID)
 	}
-	var fact struct {
-		BotID     string `json:"botId"`
-		TeamBotID string `json:"teamBotId"`
-	}
-	if json.Unmarshal(raw, &fact) != nil {
-		return ""
-	}
-	if strings.TrimSpace(fact.TeamBotID) != "" {
-		return ""
-	}
-	return strings.TrimSpace(fact.BotID)
+	return strings.TrimSpace(req.BotID)
 }
 
 // Artifact is one provenance entry of a sub-agent run. It never carries tool

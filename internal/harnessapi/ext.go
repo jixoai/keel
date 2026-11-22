@@ -265,11 +265,12 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 // no target spawns the parent's own Bot and needs no extra capability (the
 // route's session.write/relation gate already authorized the parent).
 func (s *Server) requireSubagentBotInvoke(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, botID string, selection json.RawMessage) bool {
-	target := strings.TrimSpace(botID)
-	if target == "" {
-		target = selectionBotID(selection)
-	}
-	if target == "" {
+	// The runner's childSelection() prefers a non-empty selection over the
+	// top-level field, so checking only one would let the authorization and the
+	// actual child binding name different Bots (the exact hole toolauth's
+	// agentTargets closes on the model-facing path). Authorize the union.
+	targets := uniqueSubagentTargets(strings.TrimSpace(botID), selectionBotID(selection))
+	if len(targets) == 0 {
 		return true
 	}
 	if s.cfg.Access == nil {
@@ -281,24 +282,43 @@ func (s *Server) requireSubagentBotInvoke(w http.ResponseWriter, r *http.Request
 		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
 		return false
 	}
-	decision, err := s.cfg.Access.Authorize(r.Context(), principal, access.KeyBotInvoke, access.Resource{
-		TenantID: tenantID, Type: "bot", ID: target,
-	})
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return false
-	}
-	if decision.Denied() {
-		writeDenied(w, decision)
-		return false
-	}
-	// bot.invoke is high risk: the accepted call is audited like the HTTP
-	// invoke route. A failed audit write refuses the call.
-	if err := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, target, uuid.Nil, "authorized"); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return false
+	for _, target := range targets {
+		decision, err := s.cfg.Access.Authorize(r.Context(), principal, access.KeyBotInvoke, access.Resource{
+			TenantID: tenantID, Type: "bot", ID: target,
+		})
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return false
+		}
+		if decision.Denied() {
+			writeDenied(w, decision)
+			return false
+		}
+		// bot.invoke is high risk: every accepted target is audited like the
+		// HTTP invoke route. A failed audit write refuses the call.
+		if err := s.cfg.Access.AuditInvoke(r.Context(), tenantID, principal, target, uuid.Nil, "authorized"); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return false
+		}
 	}
 	return true
+}
+
+// uniqueSubagentTargets trims and deduplicates the Bot targets the HTTP edge
+// must authorize. An empty target is not a capability: it means the child runs
+// the parent's own binding.
+func uniqueSubagentTargets(targets ...string) []string {
+	seen := make(map[string]bool, len(targets))
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		out = append(out, target)
+	}
+	return out
 }
 
 // selectionBotID extracts a botId from a selection fact. A fact that names a
