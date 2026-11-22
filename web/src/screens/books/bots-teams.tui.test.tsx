@@ -21,9 +21,11 @@ test("TUI: 员工索引——真实 Bot、账号、模型、状态与筛选", as
   expect(view.texts()).toContain("订单查询");
   expect(view.texts()).toContain("财务助手");
   expect(view.texts()).toContain("已归档");
-  // The band carries a deployment context and no gray 「未连接」 on a page that
-  // never opened a stream.
-  expect(view.texts()).toContain("本部署");
+  // The shell's top band is the brand / plugin strip; the chapter rail carries
+  // the destinations, and no gray 「未连接」 sits on a page that never opened a
+  // stream.
+  expect(view.texts()).toContain("KEEL");
+  expect(view.shows("id:books-rail")).toBe(true);
   expect(view.texts()).not.toContain("未连接");
   // No implementation language leaks into the product copy.
   const screen = view.texts().join("\n");

@@ -61,6 +61,9 @@ export function AlertDialog(props: {
   style?: StyleProp<ViewStyle>;
 }) {
   const insets = safeAreaInsets();
+  // A max-height is not carried through the style pipeline; the fixed-height
+  // Scroll viewport centers short cards and scrolls a tall one.
+  const cardMaxHeight = () => Math.max(200, Math.round(windowSize().height * 0.9) - space["2xl"]);
   return (
     <NativeDialog
       open={props.open ?? true}
@@ -81,6 +84,9 @@ export function AlertDialog(props: {
         right: 0,
         bottom: 0,
         left: 0,
+        // A definite height lets the card's own max-height resolve against it
+        // (a percentage cap of an inset-only box is indefinite in layout).
+        height: windowSize().height,
         alignItems: "center",
         justifyContent: "center",
         paddingHorizontal: space.lg,
@@ -89,13 +95,37 @@ export function AlertDialog(props: {
       }}
     >
       <View
+        style={{
+          width: "100%",
+          height: cardMaxHeight(),
+          minHeight: 0,
+          flexShrink: 0,
+          overflow: "hidden",
+          pointerEvents: "box-none",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+      <Scroll
+        centerContent
+        style={{ flex: 1, width: "100%", pointerEvents: "box-none" }}
+        contentStyle={{
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          minHeight: "100%",
+          pointerEvents: "none",
+        }}
+      >
+      <View
         testID={props.testID !== undefined ? `${props.testID}-card` : undefined}
         style={[
           {
             width: "100%",
             maxWidth: 400,
-            maxHeight: "90%",
             minWidth: 0,
+            pointerEvents: "auto",
             flexDirection: "column",
             gap: space.lg,
             padding: space.xl,
@@ -140,12 +170,7 @@ export function AlertDialog(props: {
           ) : null}
         </View>
       </View>
-      <Scroll
-        style={{ flexShrink: 1, minHeight: 0 }}
-        contentStyle={{ flexDirection: "column", gap: space.md }}
-      >
-        {props.children}
-      </Scroll>
+      <View style={{ flexDirection: "column", gap: space.md }}>{props.children}</View>
       <View
         style={{
           flexDirection: footerStacked() ? "column-reverse" : "row",
@@ -178,6 +203,8 @@ export function AlertDialog(props: {
         />
       </View>
       </View>
+      </View>
+      </Scroll>
       </View>
     </NativeDialog>
   );

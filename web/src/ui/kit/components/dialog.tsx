@@ -31,7 +31,7 @@
 // nothing) · with/without footer · scrollable body (`maxHeight`). TUI: the popup
 // renders as a block with the title/description/body text.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
-import { Scroll, safeAreaInsets, Text, View } from "nsh";
+import { Scroll, safeAreaInsets, Text, View, windowSize } from "nsh";
 import { Dialog as NativeDialog, Button as NativeButton } from "nsh/base";
 import { Icon } from "../../icons";
 import { color, radius, space, typeScale, weight } from "../tokens";
@@ -63,6 +63,15 @@ export function Dialog(props: {
 }) {
   const fill = props.fill === true ? { flex: 1, minHeight: 0 } : null;
   const insets = safeAreaInsets();
+  // A max-height is not carried through NSH's style pipeline on this target.
+  // The card therefore sits in a fixed-height Scroll viewport with
+  // `centerContent`: short cards are centered, tall cards scroll as one card.
+  // The viewport is transparent and `box-none`, so a press outside the card is
+  // still the backdrop's.
+  const cardMaxHeight = () => {
+    const windowCap = Math.max(240, Math.round(windowSize().height * 0.9) - space["2xl"]);
+    return props.maxHeight === undefined ? windowCap : Math.min(props.maxHeight, windowCap);
+  };
   return (
     <NativeDialog
       open={props.open ?? true}
@@ -86,6 +95,9 @@ export function Dialog(props: {
         right: 0,
         bottom: 0,
         left: 0,
+        // A definite height lets the card's own max-height resolve against it
+        // (a percentage cap of an inset-only box is indefinite in layout).
+        height: windowSize().height,
         alignItems: "center",
         justifyContent: "center",
         paddingHorizontal: space.lg,
@@ -96,13 +108,37 @@ export function Dialog(props: {
       }}
     >
       <View
+        style={{
+          width: "100%",
+          height: cardMaxHeight(),
+          minHeight: 0,
+          flexShrink: 0,
+          overflow: "hidden",
+          pointerEvents: "box-none",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+      <Scroll
+        centerContent
+        style={{ flex: 1, width: "100%", pointerEvents: "box-none" }}
+        contentStyle={{
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          minHeight: "100%",
+          pointerEvents: "none",
+        }}
+      >
+      <View
         testID={props.testID !== undefined ? `${props.testID}-card` : undefined}
         style={[
           {
             width: "100%",
             maxWidth: dialogWidth(props.size ?? "default"),
-            maxHeight: props.maxHeight ?? "90%",
             minWidth: 0,
+            pointerEvents: "auto",
             flexDirection: "column",
             gap: space.xl,
             padding: space.xl,
@@ -151,18 +187,14 @@ export function Dialog(props: {
               </NativeButton>
             ) : null}
           </View>
-          {/* The body scrolls when the dialog is taller than the window; the
-              header and footer stay put. */}
-          <Scroll
-            style={[{ flexShrink: 1, minHeight: 0 }, fill]}
-            contentStyle={{ flexDirection: "column", gap: space.md }}
-          >
-            {props.children}
-          </Scroll>
+          {/* The card's Scroll viewport owns the scroll for a long dialog. */}
+          <View style={[{ flexDirection: "column", gap: space.md }, fill]}>{props.children}</View>
           {props.footer !== undefined ? (
             <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>{props.footer}</View>
           ) : null}
         </View>
+      </View>
+      </Scroll>
       </View>
     </NativeDialog>
   );

@@ -75,6 +75,21 @@ export const booksFocusStyle = (): StyleProp<ViewStyle> => ({
   outlineOffset: 0,
 });
 
+/** The live channel's own word. The books pages are static projections, so a
+ * channel that was never opened is not a failure: it stays green 实时. A
+ * channel that is connecting/reconnecting degrades to 重连中, and a deployment
+ * whose transport is really offline says so. There is deliberately no gray
+ * 「未连接」 badge on a page that never promised a stream. */
+export function LiveBadge(props: { testID?: string }) {
+  const offline = () => store.mode() === "offline";
+  const status = () => store.connection().status;
+  const degraded = () => !offline() && (status() === "connecting" || status() === "reconnecting");
+  const label = () => (offline() ? "离线" : degraded() ? "重连中" : "实时");
+  const variant = () => (offline() ? "destructive" : degraded() ? "warning" : "success");
+  const icon = () => (offline() ? "wifi-off" : degraded() ? "refresh" : "wifi");
+  return <Badge testID={props.testID ?? "books-live"} variant={variant()} label={label()} icon={icon()} />;
+}
+
 // ---- time / labels --------------------------------------------------------
 
 const two = (value: number): string => (value < 10 ? `0${value}` : String(value));

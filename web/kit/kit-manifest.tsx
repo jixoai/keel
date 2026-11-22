@@ -136,7 +136,7 @@ export const KIT_MANIFEST: KitEntry[] = [
       { id: "error", props: { value: 1, tone: "danger" } },
       { id: "empty", props: { value: 0 } },
     ],
-    note: "proposal §1 列了 Progress，tasks C1–C5 没列它：kit 现在没有这个导出（缺件由门禁暴露，等裁决）",
+    note: "进度条：轨道是凹槽，填充是实心墨面（solid-glass Progress）",
   },
 
   // C2 · 表单件

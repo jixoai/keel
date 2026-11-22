@@ -47,7 +47,7 @@
 // function the JSX calls; nothing is copied into a local at the top of a
 // component.
 import type { JSX } from "nsh";
-import { cleanup, colorScheme, effect, host, signal, Storage, Text, View } from "nsh";
+import { cleanup, colorScheme, effect, host, signal, Storage, Text, View, windowSize } from "nsh";
 import type {
   DeploymentCapabilitiesApi,
   MediaCapabilitiesView,
@@ -61,6 +61,8 @@ import type {
 } from "../data/contract";
 import { KeelApiError, KeelHttp, type FetchLike } from "../data/http";
 import { store } from "../data/store";
+import { botAccess } from "../data/bots";
+import { canAny } from "../data/permissions";
 import {
   displayNameOf,
   formatTime,
@@ -96,6 +98,7 @@ import {
   RadioGroup,
   Select,
   Separator,
+  SETTINGS_RAIL_WIDE_MIN_WINDOW_PX,
   SETTINGS_SECTION_STORAGE_KEY,
   SettingsShell,
   Skeleton,
@@ -122,6 +125,7 @@ import {
 } from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
 import { SkillsSection } from "./settings-skills";
+import { LiveBadge, PressRow } from "./books/common";
 
 // ---- the section ----------------------------------------------------------
 
@@ -535,6 +539,7 @@ function GeneralSection() {
         </CardContent>
       </Card>
       <AccountSessionCard />
+      <TodoCard />
       <WorkspaceChaptersCard />
     </View>
   );
@@ -579,9 +584,75 @@ function WorkspaceChaptersCard() {
   );
 }
 
+/** 待我处理: the cross-object queue that used to ride the top band. It reads
+ * the same stores the team chapter does; a team whose roster names an archived
+ * or no-longer-visible Bot is the one item this slice can prove. */
+function TodoCard() {
+  effect(() => {
+    if (canAny(["bot.read", "bot.manage"])) botAccess.ensureBots();
+    if (canAny(["team_bot.read", "team_bot.manage"])) botAccess.ensureTeams();
+  });
+  const items = () => botAccess.todoItems();
+  return (
+    <Card testID="settings-todo">
+      <CardHeader
+        title="待我处理"
+        description="需要你决定的团队与成员问题；跨对象的失败与拒绝在「记录」里。"
+      />
+      <CardContent>
+        <If
+          when={items().length > 0}
+          else={
+            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+              现在没有需要你处理的事。团队运行失败、被别人拒绝的调用，会在「记录」里留下明细；可以按「拒绝」筛选查看。
+            </Text>
+          }
+        >
+          <View style={{ flexDirection: "column", gap: 0 }}>
+            <Each of={items()} key={(item) => item.teamId}>
+              {(item) => (
+                <PressRow
+                  testID={`settings-todo-team-${item().teamId}`}
+                  accessibilityLabel={`打开团队 ${item().teamName}`}
+                  onPress={() => store.openTeam(item().teamId)}
+                >
+                  <Icon name="users" size={14} tint={color.mutedForeground} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ fontSize: typeScale.base, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                      {item().teamName}
+                    </Text>
+                    <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                      {item().reason}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={12} tint={color.mutedForeground} />
+                </PressRow>
+              )}
+            </Each>
+          </View>
+        </If>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          打开团队后，「启动前检查」会指出缺什么、找谁处理。
+        </Text>
+        <View style={{ flexDirection: "row" }}>
+          <Button
+            testID="settings-todo-records"
+            variant="outline"
+            label="去记录"
+            accessibilityLabel="去记录"
+            onPress={() => store.openChapter("records")}
+          />
+        </View>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** The signed-in account and the one session action: logout (change
  * keel-bot-identity-access, A4.3). The identity is the server's whoami answer,
- * never a locally remembered name. */
+ * never a locally remembered name. The live-channel state moved here from the
+ * top band (A4.4f): the page that owns the session also says whether its
+ * channel is up. */
 function AccountSessionCard() {
   const name = () => {
     const me = store.identity();
@@ -616,6 +687,12 @@ function AccountSessionCard() {
           <If when={handle() !== ""}>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{handle()}</Text>
           </If>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+            <LiveBadge testID="settings-live" />
+            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+              {store.mode() === "http" && store.auth() === "ok" ? "浏览器会话" : "开发数据"} · 租户 本部署
+            </Text>
+          </View>
           <View style={{ flexDirection: "row" }}>
             <Button
               testID="settings-logout"
@@ -2945,6 +3022,7 @@ export function SettingsScreen() {
       section={settingsSection()}
       onSectionChange={chooseSection}
       breadcrumb={["设置", sectionLabel()]}
+      backLabel={windowSize().width >= SETTINGS_RAIL_WIDE_MIN_WINDOW_PX ? undefined : "返回"}
       onBack={() => store.closeSettings()}
     >
       <View testID="settings-section-body" style={{ flexDirection: "column" }}>

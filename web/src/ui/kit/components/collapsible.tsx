@@ -27,6 +27,7 @@ import { Text, View } from "nsh";
 import { Collapsible as NativeCollapsible, Button as NativeButton } from "nsh/base";
 import { Icon, type IconName } from "../../icons";
 import { color, radius, space, typeScale, weight } from "../tokens";
+import { glassStateFill } from "./styles";
 import { disabledOpacity, focusRing } from "./styles";
 
 export function Collapsible(props: {
@@ -83,7 +84,7 @@ export function CollapsibleTrigger(props: {
         onPress={props.onPress}
         accessibilityLabel={props.accessibilityLabel ?? props.label}
         hoverStyle={{ backgroundColor: color.hover }}
-        activeStyle={{ backgroundColor: color.accent }}
+        activeStyle={glassStateFill()}
         focusStyle={focusRing()}
         disabledStyle={{ opacity: disabledOpacity }}
         style={{

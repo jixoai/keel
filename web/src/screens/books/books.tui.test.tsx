@@ -18,6 +18,31 @@ const app = (width = 1440) => open("../../../App.tsx", { width, host: { params: 
 const harness = (width: number, params: Record<string, string>) =>
   open("./books.harness.tsx", { width, host: { params } });
 
+test("TUI: A4.4f 顶部只剩品牌/插件槽，章节在左栏，设置页收下待办与实时", async () => {
+  const wide = await app(1440);
+  expect(wide.shows("id:books-top")).toBe(true);
+  expect(wide.shows("id:books-rail")).toBe(true);
+  // The old top-band entries are gone, not merely hidden.
+  expect(wide.shows("id:books-search")).toBe(false);
+  expect(wide.shows("id:books-todo")).toBe(false);
+  expect(wide.shows("id:books-account-menu")).toBe(false);
+  // The plugin slot is empty until a plugin contributes a panel.
+  expect(wide.shows("id:plugin-top-panels")).toBe(false);
+  expect(wide.shows("id:books-settings")).toBe(true);
+
+  const phone = await app(390);
+  await phone.waitFor("id:books-tabbar");
+  expect(phone.shows("id:books-rail")).toBe(false);
+  expect(phone.shows("id:books-tab-identity")).toBe(true);
+  expect(phone.shows("id:books-mobile-settings")).toBe(true);
+  await phone.press("id:books-mobile-settings");
+  await phone.waitFor("id:settings-page");
+  await phone.press("id:settings-section-general");
+  await phone.waitFor("id:settings-live");
+  expect(phone.shows("id:settings-todo")).toBe(true);
+  expect(phone.shows("id:settings-logout")).toBe(true);
+});
+
 test("TUI: 账簿壳——1440 身份默认选中当前账号，详情有角色与账本摘要", async () => {
   const view = await app(1440);
   await view.press("id:books-chapter-identity");
@@ -29,8 +54,10 @@ test("TUI: 账簿壳——1440 身份默认选中当前账号，详情有角色�
   expect(view.texts().join("\n")).toContain("3 个权限组");
   expect(view.texts().join("\n")).toContain("租户管理员");
   expect(view.texts().join("\n")).toContain("最近活动 今天");
-  expect(view.shows("id:books-live")).toBe(true);
-  expect(view.texts()).toContain("实时");
+  // A4.4f: the live-channel word is not in the top band any more — it lives on
+  // the settings page's account card. The chapter navigation is the left rail.
+  expect(view.shows("id:books-live")).toBe(false);
+  expect(view.shows("id:books-rail")).toBe(true);
   // 账号页：唯一 H1 与章节索引。
   await view.press("id:account-section-capabilities");
   await view.waitFor("id:account-capabilities");

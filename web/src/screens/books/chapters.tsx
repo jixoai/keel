@@ -74,7 +74,7 @@ function Fallback() {
         <PageUnavailable
           icon="layers"
           title="这个页面不在当前章节里"
-          description="回到工作区，或从顶部章节索引进入员工、团队、身份与记录。"
+          description="回到工作区，或从章节导航进入员工、团队、身份与记录。"
         >
           <EmptyContent>
             <Button label="返回工作区" accessibilityLabel="返回工作区" onPress={() => store.openChapter("workspace")} style={touchStyle()} />

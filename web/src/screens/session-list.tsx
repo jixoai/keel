@@ -31,10 +31,9 @@
 //     reads「新会话 · <相对时间>」(`src/ui/session-title.ts` is the title's single
 //     source — the rows, the workspace header and the conversation read one
 //     name), and a raw session id is never rendered.
-//   · the footer — the connection status Badge and nothing else: the mode
-//     switches, the token-level switch (moved to the settings page) and the
-//     data-source prose are gone (task X1: the product surface carries no mode
-//     wording at all).
+//   · no footer: the connection status moved to the settings page's account
+//     card (A4.4f), together with the token-level switch. The product surface
+//     carries no mode wording at all (task X1).
 //
 // Registered deviations from the zcode reference:
 //   · the selected row's face is `color.sidebarAccent`. The reference paints
@@ -69,9 +68,7 @@ import {
   IconButton,
   Input,
   ScrollArea,
-  Separator,
   Skeleton,
-  Spinner,
   Tooltip,
   WORKSPACE_SHELL_HEADER_HEIGHT_PX,
   color,
@@ -530,54 +527,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           </View>
         </If>
       </ScrollArea>
-      {/* L1 · the footer: the connection status Badge, and nothing else. */}
-      <Separator />
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.md, paddingVertical: space.sm }}>
-        <ConnectionBadge />
-      </View>
     </View>
   );
 }
 
-/** The panel footer's one readout: what the live channel is really doing. It
- * reports the transport's own state (probing / connected / connecting /
- * reconnecting / offline) — never a mode name, and no sequence number. */
-export function ConnectionBadge() {
-  const state = () => store.connection();
-  const probing = () => store.mode() === "checking";
-  const label = () =>
-    probing()
-      ? "探测中"
-      : state().status === "open"
-        ? "已连接"
-        : state().status === "connecting"
-          ? "连接中"
-          : state().status === "reconnecting"
-            ? "重连中"
-            : "未连接";
-  const variant = (): BadgeVariant =>
-    probing()
-      ? "secondary"
-      : state().status === "open"
-        ? "success"
-        : state().status === "connecting" || state().status === "reconnecting"
-          ? "warning"
-          : "destructive";
-  return (
-    <Badge
-      testID="connection-badge"
-      variant={variant()}
-      label={label()}
-      icon={state().status === "open" ? "wifi" : "wifi-off"}
-      accessibilityLabel={`连接状态：${label()}`}
-    >
-      <If when={state().status === "connecting" || state().status === "reconnecting"}>
-        <Spinner
-          size={iconSize.xs}
-          tint={variant() === "warning" ? color.warning : color.mutedForeground}
-          accessibilityLabel="正在连接"
-        />
-      </If>
-    </Badge>
-  );
-}

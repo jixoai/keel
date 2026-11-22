@@ -24,7 +24,9 @@ test("TUI: 会话列表 → 打开会话 → 输入 → 显示回复", async () 
   const app = await openApp();
   expect(app.texts()).toContain("发布准备周报");
   expect(app.texts()).toContain("发布审批");
-  expect(app.texts()).toContain("未连接");
+  // A4.4f: the connection state is on the settings page's account card now,
+  // not in the session list's footer.
+  expect(app.texts()).not.toContain("未连接");
 
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("text:/本周发布准备已基本就绪/");

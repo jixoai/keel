@@ -20,7 +20,7 @@
 // nothing) · each of the four sides. TUI: the panel renders as a block with the
 // title/description/body text.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
-import { Scroll, safeAreaInsets, Text, View } from "nsh";
+import { safeAreaInsets, Text, View, windowSize } from "nsh";
 import { Button as NativeButton, Sheet as NativeSheet, type OpenChangeReason } from "nsh/base";
 import { Icon } from "../../icons";
 import { alpha, color, radius, space, typeScale, weight } from "../tokens";
@@ -48,6 +48,10 @@ export function Sheet(props: {
   const side = () => props.side ?? "bottom";
   const vertical = () => side() === "left" || side() === "right";
   const insets = safeAreaInsets();
+  // Percentage caps do not survive the style pipeline; points from the window
+  // keep a bottom sheet inside a short viewport (and a side sheet full-height).
+  const panelMaxHeight = () =>
+    vertical() ? windowSize().height : Math.max(240, Math.round(windowSize().height * 0.92) - space.lg);
   return (
     <NativeSheet
       open={props.open ?? true}
@@ -69,7 +73,7 @@ export function Sheet(props: {
           paddingBottom: space.xl + insets().bottom,
           width: vertical() ? "92%" : "100%",
           maxWidth: vertical() ? 380 : undefined,
-          maxHeight: vertical() ? "100%" : "92%",
+          maxHeight: panelMaxHeight(),
           height: vertical() ? "100%" : undefined,
           minHeight: vertical() ? undefined : 200,
           borderRadius: radius.xl,
@@ -78,6 +82,9 @@ export function Sheet(props: {
           alignSelf: vertical() ? (side() === "left" ? "flex-start" : "flex-end") : "center",
         },
         props.style ?? null,
+        // The window's own cap wins over a caller's percentage string (which
+        // NSH drops), so a sheet can never grow past the screen.
+        { maxHeight: panelMaxHeight() },
       ]}
     >
       <View
@@ -109,12 +116,10 @@ export function Sheet(props: {
           </NativeButton>
         ) : null}
       </View>
-      <Scroll
-        style={{ flex: 1, minHeight: 0 }}
-        contentStyle={{ flexDirection: "column", gap: space.md }}
-      >
-        {props.children}
-      </Scroll>
+      {/* The panel body keeps a flex column; a long body brings its own
+          `ScrollArea` (the callers' pattern), so the panel never nests two
+          vertical scrollers. */}
+      <View style={{ flexDirection: "column", gap: space.md, flex: 1, minHeight: 0 }}>{props.children}</View>
       {props.footer !== undefined ? (
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>{props.footer}</View>
       ) : null}
