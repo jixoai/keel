@@ -24,16 +24,18 @@
 
 ```text
 $ go test ./internal/oar/... -count=1
-ok  	github.com/jixoai/keel/internal/oar	2.936s
+ok  	github.com/jixoai/keel/internal/oar	7.685s
 ?   	github.com/jixoai/keel/internal/oar/cmd/keel-oar	[no test files]
+?   	github.com/jixoai/keel/internal/oar/cmd/oar-demo	[no test files]
 ?   	github.com/jixoai/keel/internal/oar/cmd/oar-view	[no test files]
-ok  	github.com/jixoai/keel/internal/oar/sidecar	0.585s
+ok  	github.com/jixoai/keel/internal/oar/sidecar	0.606s
 
 $ go test -race ./internal/oar/... -count=1
-ok  	github.com/jixoai/keel/internal/oar	3.850s
+ok  	github.com/jixoai/keel/internal/oar	12.627s
 ?   	github.com/jixoai/keel/internal/oar/cmd/keel-oar	[no test files]
+?   	github.com/jixoai/keel/internal/oar/cmd/oar-demo	[no test files]
 ?   	github.com/jixoai/keel/internal/oar/cmd/oar-view	[no test files]
-ok  	github.com/jixoai/keel/internal/oar/sidecar	1.458s
+ok  	github.com/jixoai/keel/internal/oar/sidecar	2.073s
 
 $ go vet ./internal/oar/...
 （无输出）
