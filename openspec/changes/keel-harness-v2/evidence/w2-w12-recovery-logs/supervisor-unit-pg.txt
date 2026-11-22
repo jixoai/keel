@@ -1,0 +1,54 @@
+=== RUN   TestPGSupervisorResumesFailedRunAndRecordsTheFact
+--- PASS: TestPGSupervisorResumesFailedRunAndRecordsTheFact (9.00s)
+=== RUN   TestPGManualPolicyParksAndExplicitResumeContinues
+--- PASS: TestPGManualPolicyParksAndExplicitResumeContinues (3.08s)
+=== RUN   TestPGEscalationIsDurable
+--- PASS: TestPGEscalationIsDurable (6.93s)
+=== RUN   TestParsePolicyJSON
+--- PASS: TestParsePolicyJSON (0.05s)
+=== RUN   TestParsePolicyTOMLSubset
+--- PASS: TestParsePolicyTOMLSubset (0.00s)
+=== RUN   TestParsePolicyRejectsInvalidValues
+--- PASS: TestParsePolicyRejectsInvalidValues (0.00s)
+=== RUN   TestPolicyEnvironmentOverrides
+--- PASS: TestPolicyEnvironmentOverrides (0.00s)
+=== RUN   TestLoadPolicyFileAndInline
+--- PASS: TestLoadPolicyFileAndInline (0.02s)
+=== RUN   TestBackoffDelay
+--- PASS: TestBackoffDelay (0.00s)
+=== RUN   TestPolicyHashChangesWithRotation
+--- PASS: TestPolicyHashChangesWithRotation (0.00s)
+=== RUN   TestScanAutoResumesFailedRun
+--- PASS: TestScanAutoResumesFailedRun (0.01s)
+=== RUN   TestScanRespectsBackoff
+--- PASS: TestScanRespectsBackoff (0.00s)
+=== RUN   TestScanEscalatesToParentAtExhaustion
+--- PASS: TestScanEscalatesToParentAtExhaustion (0.01s)
+=== RUN   TestScanEscalatesToOwnerWithoutParent
+--- PASS: TestScanEscalatesToOwnerWithoutParent (0.00s)
+=== RUN   TestScanOnExhaustedStop
+--- PASS: TestScanOnExhaustedStop (0.00s)
+=== RUN   TestScanCrashLoopExhaustsInsteadOfReclaiming
+--- PASS: TestScanCrashLoopExhaustsInsteadOfReclaiming (0.00s)
+=== RUN   TestScanManualParksPendingRun
+--- PASS: TestScanManualParksPendingRun (0.00s)
+=== RUN   TestScanNeverParksAndDoesNotResumeFailures
+--- PASS: TestScanNeverParksAndDoesNotResumeFailures (0.00s)
+=== RUN   TestScanAutoLeavesPendingToWorker
+--- PASS: TestScanAutoLeavesPendingToWorker (0.00s)
+=== RUN   TestScanSkipsOperatorCancelledRun
+--- PASS: TestScanSkipsOperatorCancelledRun (0.00s)
+=== RUN   TestScanProviderFallbackSelection
+--- PASS: TestScanProviderFallbackSelection (0.00s)
+=== RUN   TestScanProviderFallbackInvalidStillResumes
+--- PASS: TestScanProviderFallbackInvalidStillResumes (0.00s)
+=== RUN   TestConfigRotationAffectsOnlyLaterAttempts
+--- PASS: TestConfigRotationAffectsOnlyLaterAttempts (0.00s)
+=== RUN   TestScanIsIdempotentOnceRequeued
+--- PASS: TestScanIsIdempotentOnceRequeued (0.00s)
+=== RUN   TestScanEscalatesOncePerFailureEpoch
+--- PASS: TestScanEscalatesOncePerFailureEpoch (0.00s)
+=== RUN   TestScanReportsStoreFailuresWithoutStopping
+--- PASS: TestScanReportsStoreFailuresWithoutStopping (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/supervisor	22.634s

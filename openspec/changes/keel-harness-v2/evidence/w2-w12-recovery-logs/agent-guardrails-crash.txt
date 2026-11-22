@@ -1,0 +1,36 @@
+=== RUN   TestGuardrailMemoryPressureIsAuditedInTheLedger
+--- PASS: TestGuardrailMemoryPressureIsAuditedInTheLedger (0.14s)
+=== RUN   TestReclaimedLeaseRecordsTheRecoveryFact
+--- PASS: TestReclaimedLeaseRecordsTheRecoveryFact (0.27s)
+=== RUN   TestGuardrailDuplicateCallBlocksAndAudits
+--- PASS: TestGuardrailDuplicateCallBlocksAndAudits (0.00s)
+=== RUN   TestGuardrailDuplicateResetsOnDifferentCall
+--- PASS: TestGuardrailDuplicateResetsOnDifferentCall (0.00s)
+=== RUN   TestGuardrailDuplicateWhitespaceIsTheSameCall
+--- PASS: TestGuardrailDuplicateWhitespaceIsTheSameCall (0.00s)
+=== RUN   TestGuardrailAccessRefusalIsNotCountedAsDuplicate
+--- PASS: TestGuardrailAccessRefusalIsNotCountedAsDuplicate (0.00s)
+=== RUN   TestGuardrailCallTimeoutAbortsTheCallAndAudits
+--- PASS: TestGuardrailCallTimeoutAbortsTheCallAndAudits (0.01s)
+=== RUN   TestGuardrailTimeoutExemptionKeepsRegistry
+--- PASS: TestGuardrailTimeoutExemptionKeepsRegistry (0.00s)
+=== RUN   TestGuardrailConsecutiveFailuresAbortsRun
+--- PASS: TestGuardrailConsecutiveFailuresAbortsRun (0.00s)
+=== RUN   TestGuardrailSuccessResetsFailureStreak
+--- PASS: TestGuardrailSuccessResetsFailureStreak (0.00s)
+=== RUN   TestGuardrailTokenAndCostBudgets
+=== RUN   TestGuardrailTokenAndCostBudgets/tokens
+=== RUN   TestGuardrailTokenAndCostBudgets/cost
+--- PASS: TestGuardrailTokenAndCostBudgets (0.00s)
+    --- PASS: TestGuardrailTokenAndCostBudgets/tokens (0.00s)
+    --- PASS: TestGuardrailTokenAndCostBudgets/cost (0.00s)
+=== RUN   TestGuardrailMemoryPressureAbortsOnlyItsRun
+--- PASS: TestGuardrailMemoryPressureAbortsOnlyItsRun (0.00s)
+=== RUN   TestGuardrailDisabledPolicyKeepsRunPathUnchanged
+--- PASS: TestGuardrailDisabledPolicyKeepsRunPathUnchanged (0.00s)
+=== RUN   TestGuardrailCommitFailureDoesNotPanic
+--- PASS: TestGuardrailCommitFailureDoesNotPanic (0.00s)
+=== RUN   TestCrashThenRestartResumesWithoutADuplicateFinal
+--- PASS: TestCrashThenRestartResumesWithoutADuplicateFinal (7.58s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	8.491s
