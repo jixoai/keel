@@ -39,7 +39,7 @@ import {
   isMobile,
   touchStyle,
 } from "./common";
-import { BrandMark, PluginTopPanels, pluginTopPanels } from "./plugin-top-panels";
+import { BrandMark, PluginTopPanels, topBandHasContent } from "./plugin-top-panels";
 
 export type ChapterId = "workspace" | "bots" | "teams" | "identity" | "records";
 
@@ -222,7 +222,7 @@ function ChapterRail() {
  * contributes one. No chapter navigation, search, todo, live badge, settings
  * gear or avatar lives here (A4.4f). */
 function TopBand() {
-  const hasPlugins = () => pluginTopPanels().length > 0;
+  const hasPlugins = () => topBandHasContent();
   return (
     <View
       testID="books-top"

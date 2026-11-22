@@ -49,6 +49,7 @@ import { SessionStatusPane } from "./src/screens/session-status-pane";
 import { SettingsScreen } from "./src/screens/settings";
 import { ShareDialog } from "./src/screens/share-dialog";
 import { canShareResource, openSessionShare } from "./src/data/shares";
+import { applyPluginInventory, installPluginRuntime } from "./src/plugins";
 import { restoreAppearance } from "./src/ui/appearance";
 import { type IconName } from "./src/ui/icons";
 import {
@@ -91,6 +92,16 @@ setClientCapabilities({
   "mcp.apps.links": appSurface,
   "mcp.apps.context": appSurface,
 });
+
+// The plugin UI runtime's base slots (keel.ui's declarations). Installed once,
+// before the first render, so a plugin contribution scanned at boot always
+// finds the slot it targets.
+installPluginRuntime();
+
+/** The plugin inventory is one read per boot: the top band, the sidebar and
+ * the settings sections come from it, so waiting for the plugin page would
+ * leave the shell without its contributions. */
+let pluginsRequested = false;
 
 // ---- the route ------------------------------------------------------------
 
@@ -545,6 +556,30 @@ function App() {
     if (sidePaneRestored) return;
     sidePaneRestored = true;
     void restoreSidePane();
+  });
+  // The plugin inventory: one read once the session is authenticated. Every
+  // slot host reads the registry, so a contribution appears at boot without
+  // visiting the plugin page first.
+  effect(() => {
+    if (store.auth() !== "ok") {
+      // A logout resets the lazy boot read: the next account gets its own
+      // tenant-filtered inventory.
+      pluginsRequested = false;
+      return;
+    }
+    if (pluginsRequested) return;
+    pluginsRequested = true;
+    void store.loadPlugins();
+  });
+  // Sync what the server says is installed and enabled into the slot registry.
+  // The view object is replaced on every read, so identity is enough to skip a
+  // sync that changed nothing.
+  let lastPluginView: unknown = undefined;
+  effect(() => {
+    const view = store.plugins();
+    if (view === lastPluginView) return;
+    lastPluginView = view;
+    applyPluginInventory(view);
   });
   return (
     <View style={{ flex: 1, backgroundColor: color.background }}>

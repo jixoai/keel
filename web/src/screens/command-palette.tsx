@@ -31,11 +31,12 @@
 // so the app cannot bind Escape over it, and the dialog layer hears nothing
 // to close on. A one-press close needs the native command to give Escape up
 // (a prop or an nsh change), which this screen cannot do.
-import { keymap, platform, signal, View, windowSize } from "nsh";
+import { keymap, openUrl, platform, signal, View, windowSize } from "nsh";
 import type { CommandItem } from "../ui/kit";
 import { Command, Dialog, Empty, EmptyDescription, EmptyTitle, space } from "../ui/kit";
 import { store } from "../data/store";
 import { sessionTitle } from "../ui/session-title";
+import { pluginPaletteEntries, pluginSlots, type PluginActionHandlers } from "../plugins";
 import { openModelPicker } from "./model-picker";
 
 /** Whether the palette is up. Module-level like the app's other overlay
@@ -108,6 +109,34 @@ const chooseSettings = () => store.openSettings();
  * the back button in step (the same entry the settings page uses). */
 const choosePlugins = () => store.openPlugins();
 
+/** What a plugin nav/action row may do: the host's own vocabulary. A bridge
+ * call is the plugin's declared tool only; the bridge refuses anything else. */
+const pluginHandlers = (): PluginActionHandlers => ({
+  navigate: (path) => {
+    if (path.startsWith("/plugins")) choosePlugins();
+    else if (path.startsWith("/settings")) chooseSettings();
+    else store.closeSettings();
+  },
+  openUrl: (url) => {
+    void openUrl(url).catch(() => {
+      store.flash({ tone: "danger", text: `无法打开插件链接：${url}` });
+    });
+  },
+  callTool: (entry, tool, args) => {
+    void pluginSlots
+      .bridgeFor(entry.declaration.pluginId)
+      .callTool(tool, args)
+      .then(() => store.flash({ tone: "info", text: `插件动作完成：${tool}` }))
+      .catch((error) => {
+        store.flash({
+          tone: "danger",
+          text: `插件动作失败：${error instanceof Error ? error.message : String(error)}`,
+        });
+      });
+  },
+  notice: (text) => store.flash({ tone: "info", text }),
+});
+
 /** Every row, from the one source: the store's sessions first (its own order),
  * then the model picker, the settings page and the plugin page. */
 const paletteActions = (openSession: OpenPaletteSession): PaletteAction[] => {
@@ -155,6 +184,18 @@ const paletteActions = (openSession: OpenPaletteSession): PaletteAction[] => {
       },
       run: choosePlugins,
     },
+    // The plugin nav/action slots: rows a plugin contributed as `data`, or a
+    // chunk whose module exposes `activate`. Both are validated by the
+    // registry before they reach this list.
+    ...pluginPaletteEntries().map((entry) => ({
+      item: {
+        id: entry.id,
+        label: entry.label,
+        keywords: entry.keywords,
+        group: entry.group,
+      },
+      run: () => entry.run(pluginHandlers()),
+    })),
   ];
 };
 

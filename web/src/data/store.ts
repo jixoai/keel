@@ -469,6 +469,10 @@ class KeelStore {
   /** A development launch (`?fixture=1` / `host.params.fixture`): the one way
    * the fixture transport is used. */
   private dev = false;
+  /** The W12 slot fixture plugin is requested (`?plugins=1` /
+   * `host.params.plugins`): only the slot tests and the browser evidence ask
+   * for it; the default fixture stays the product-shaped sample. */
+  private pluginFixtures = false;
   /** The web page's query as read for the dev launch (`?fixture=1`). */
   private devSearch = "";
   private devRequest: Promise<boolean> | null = null;
@@ -517,11 +521,14 @@ class KeelStore {
   private async readDevLaunch(): Promise<boolean> {
     if (host.params?.fixture === true) {
       this.dev = true;
+      this.pluginFixtures = host.params?.plugins === true;
       return true;
     }
     const page = await this.pageRoute();
     this.devSearch = page?.search ?? "";
-    this.dev = new URLSearchParams(this.devSearch).get("fixture") === "1";
+    const params = new URLSearchParams(this.devSearch);
+    this.dev = params.get("fixture") === "1";
+    this.pluginFixtures = params.get("plugins") === "1";
     return this.dev;
   }
 
@@ -536,7 +543,7 @@ class KeelStore {
     // The product never reaches this branch — it is asked for at launch.
     if (await this.devLaunch()) {
       if (token !== this.detectToken) return;
-      if (!this.fixture) this.fixture = new FixtureClient();
+      if (!this.fixture) this.fixture = new FixtureClient(undefined, this.pluginFixtures);
       this.http = null;
       this.client = this.fixture;
       resetPermissions();

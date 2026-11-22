@@ -74,6 +74,9 @@ import {
 } from "../ui/kit";
 import { CliCapabilityRow } from "./cli-capability";
 import { prefillComposer } from "./composer";
+import { currentPluginTarget } from "../plugins/forms";
+import { pluginSlots } from "../plugins";
+import { PluginRouteSurface, PluginSurfaceSlot } from "../plugins/slots";
 
 // ---- where a plugin's page lives -----------------------------------------
 
@@ -774,6 +777,12 @@ function PluginPage(props: { id: string }) {
         />
       </View>
 
+      {/* The surface slot: a package/iframe page a plugin contributes for its
+          own surface. A package is an explicit unsupported face in this slice;
+          an iframe is the legacy fallback. Nothing renders when the plugin
+          contributes no surface. */}
+      <PluginSurfaceSlot pluginId={props.id} />
+
       <If when={state() === "checking"}>
         <View style={{ gap: space.md }} accessibilityLabel="正在读取插件页面">
           <Skeleton width="46%" height={14} />
@@ -972,18 +981,32 @@ export function PluginsScreen() {
         >
           {openId() ?? "插件"}
         </Text>
-        <If when={!!openId()}>
+        <If
+          when={pluginHasRoute(openId() ?? "")}
+          else={
+            <Text
+              style={{
+                flex: 1,
+                fontFamily: font.mono,
+                fontSize: typeScale.xs,
+                color: color.mutedForeground,
+                numberOfLines: 1,
+                userSelect: "text",
+              }}
+            >
+              {pluginPath(openId() ?? "")}
+            </Text>
+          }
+        >
           <Text
             style={{
               flex: 1,
-              fontFamily: font.mono,
               fontSize: typeScale.xs,
               color: color.mutedForeground,
               numberOfLines: 1,
-              userSelect: "text",
             }}
           >
-            {pluginPath(openId() ?? "")}
+            原生路由 · chunk
           </Text>
         </If>
         <If when={!openId()}>
@@ -993,8 +1016,21 @@ export function PluginsScreen() {
         </If>
       </View>
       <If when={openId()} else={<Inventory />}>
-        {(id) => <PluginPage id={id()} />}
+        {(id) => (
+          <If when={pluginHasRoute(id())} else={<PluginPage id={id()} />}>
+            <PluginRouteSurface pluginId={id()} />
+          </If>
+        )}
       </If>
     </View>
   );
 }
+
+/** Does the plugin contribute a route slot? A Native plugin's page is then the
+ * host-tree route, not a hosted webview page. */
+const pluginHasRoute = (pluginId: string): boolean => {
+  const view = pluginSlots.resolve("keel.ui.route", currentPluginTarget());
+  return [...(view?.contributions ?? []), ...(view?.unavailable ?? [])].some(
+    (entry) => entry.declaration.pluginId === pluginId,
+  );
+};

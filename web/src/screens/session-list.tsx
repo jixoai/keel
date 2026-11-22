@@ -84,6 +84,7 @@ import {
 import { Icon } from "../ui/icons";
 import { conversationState, runStateLabel, sessionState, type RunState } from "../ui/run-state";
 import { oneLine, sessionTitle } from "../ui/session-title";
+import { PluginSidebarSlot } from "../plugins/slots";
 import { requestDelete } from "./delete-dialog";
 
 const query = signal("");
@@ -526,6 +527,10 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           </View>
         </If>
       </ScrollArea>
+      {/* The sidebar slot: plugin contributions that belong beside the session
+          list. It renders nothing at all when no plugin contributes (no empty
+          strip, no fake row) — the same rule as the top band. */}
+      <PluginSidebarSlot />
     </View>
   );
 }

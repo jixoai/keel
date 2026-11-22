@@ -342,7 +342,13 @@ export class FixtureClient implements SettingsApi {
   ];
   private triggerFires = 12;
 
-  constructor(private readonly imageURL: string = demoShot.url) {
+  constructor(
+    private readonly imageURL: string = demoShot.url,
+    /** Include W12's slot fixture plugin (a test/evidence launch asks for it
+     * with `?fixture=1&plugins=1`, or `host.params.plugins === true`). The
+     * default fixture stays the product-shaped sample. */
+    private readonly pluginFixtures = false,
+  ) {
     this.seed();
   }
 
@@ -716,9 +722,7 @@ export class FixtureClient implements SettingsApi {
 
   async plugins(): Promise<PluginsView> {
     const started = new Date(Date.now() - 3_600_000).toISOString();
-    return {
-      generation: 3,
-      plugins: [
+    const plugins = [
         {
           id: "keel.team",
           version: "1.0.0",
@@ -779,6 +783,65 @@ export class FixtureClient implements SettingsApi {
           startedAt: started,
         },
         {
+          // W12's fixture contribution (change keel-harness-v2): one enabled
+          // plugin whose chunk draws in the host tree, plus the data nav and
+          // action forms. The development transport answers the same inventory
+          // shape the server does, so the registry's sync is exercised by the
+          // real path with no second installer.
+          id: "keel.w12.fixture",
+          version: "1.0.0",
+          state: "enabled",
+          layer: "ui",
+          provides: {},
+          requires: [],
+          tools: [],
+          hooks: [],
+          triggers: [],
+          diagnostics: [],
+          startedAt: started,
+          extensibility: { usable: true, doc: "EXTENSIBILITY.md", schema: "extensibility.json" },
+          contributes: [
+            { id: "top-band", slot: "keel.ui.top-band", form: "chunk", entry: "fixture:w12-hello", title: "W12 插件条" },
+            { id: "sidebar", slot: "keel.ui.sidebar", form: "chunk", entry: "fixture:w12-hello", title: "W12 插件侧栏" },
+            {
+              id: "settings-section",
+              slot: "keel.ui.settings-section",
+              form: "chunk",
+              entry: "fixture:w12-hello",
+              title: "W12 插件设置区",
+            },
+            { id: "route", slot: "keel.ui.route", form: "chunk", entry: "fixture:w12-hello", title: "W12 插件路由" },
+            {
+              id: "tool-renderer",
+              slot: "keel.ui.tool-renderer",
+              form: "chunk",
+              entry: "fixture:w12-hello",
+              title: "W12 工具渲染器",
+              tool: "deploy.prepare",
+            },
+            {
+              id: "message-part",
+              slot: "keel.ui.message-part",
+              form: "chunk",
+              entry: "fixture:w12-hello",
+              title: "W12 消息部件",
+              part: "assistant",
+            },
+            {
+              id: "nav",
+              slot: "keel.ui.nav",
+              form: "data",
+              payload: { label: "W12 插件导航", path: "/plugins", keywords: ["插件", "w12", "slot"] },
+            },
+            {
+              id: "action",
+              slot: "keel.ui.action",
+              form: "data",
+              payload: { label: "W12 插件动作", action: "navigate", path: "/settings", keywords: ["设置", "w12"] },
+            },
+          ],
+        },
+        {
           id: "demo.webhook",
           version: "0.2.0",
           state: "failed",
@@ -798,7 +861,10 @@ export class FixtureClient implements SettingsApi {
           diagnostics: ["start failed: listen tcp 127.0.0.1:0: permission denied"],
           stoppedAt: new Date(Date.now() - 3_590_000).toISOString(),
         },
-      ],
+    ];
+    return {
+      generation: 3,
+      plugins: this.pluginFixtures ? plugins : plugins.filter((plugin) => plugin.id !== "keel.w12.fixture"),
       hooks: { subscriptions: 6, emitted: 42, delivered: 42, dropped: 0, failed: 1, queued: 0, capacity: 256 },
       tools: ["workflow.plan", "workflow.status", "clock.now"],
       hookStats: { subscriptions: 6, emitted: 42, delivered: 42, dropped: 0, failed: 1, queued: 0, capacity: 256 },

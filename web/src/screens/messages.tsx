@@ -62,6 +62,7 @@ import {
   type BadgeVariant,
 } from "../ui/kit";
 import { McpAppSlot } from "../surfaces/mcp-app";
+import { PluginMessagePartSlot, PluginToolRendererSlot } from "../plugins/slots";
 import {
   FAMILY_ICON,
   FAMILY_LABEL,
@@ -432,6 +433,9 @@ function ToolRow(props: { call: ToolCallView; waiting?: boolean }) {
             borderColor: color.border,
           }}
         >
+          {/* A plugin's tool renderer draws above the text result; the text
+              stays the fallback and the terminal keeps its own row. */}
+          <PluginToolRendererSlot call={props.call} />
           {/* An MCP App renders above the text result; the text stays the
               fallback for every failure and for the terminal host (P2.7/P2.8). */}
           <McpAppSlot call={props.call} />
@@ -1203,6 +1207,17 @@ export function TurnRow(props: {
                             }
                           />
                         </If>
+                        {/* A plugin may draw a part of the assistant segment
+                            (a task card, a deliverable). It renders before the
+                            host's own text and never replaces it. */}
+                        <PluginMessagePartSlot
+                          partKind="assistant"
+                          props={{
+                            turnId: props.turn().turnId,
+                            segmentId: segment.segmentId,
+                            text: segment.assistantText,
+                          }}
+                        />
                         <If when={segment.toolCalls.length > 0}>
                           <ToolGroup
                             segment={segment}

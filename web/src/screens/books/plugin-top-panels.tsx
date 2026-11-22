@@ -15,6 +15,9 @@
 import type { JSX } from "nsh";
 import { signal, Text, View } from "nsh";
 import { color, font, radius, space, typeScale, weight } from "../../ui/kit";
+import { currentPluginTarget } from "../../plugins/forms";
+import { pluginSlots } from "../../plugins";
+import { PluginSlot, PluginTopBandEntry } from "../../plugins/slots";
 import { isMobile } from "./common";
 
 /** One panel a plugin puts in the shell's top band. */
@@ -29,9 +32,17 @@ export interface PluginTopPanel {
 
 const panels = signal<PluginTopPanel[]>([]);
 
-/** The live contributions (reactive). The shell reads it to decide whether
- * the band is a plugin row or the slim brand strip. */
+/** The live host nodes (the legacy `registerPluginTopPanel` seam). */
 export const pluginTopPanels = panels;
+
+/** True while the band has anything to show: a host node or a registered
+ * `keel.ui.top-band` contribution. The shell reads it for the band's height;
+ * with nothing, the band is the slim brand strip and never a fake panel. */
+export function topBandHasContent(): boolean {
+  if (panels().length > 0) return true;
+  const view = pluginSlots.resolve("keel.ui.top-band", currentPluginTarget());
+  return (view?.contributions.length ?? 0) > 0 || (view?.unavailable.length ?? 0) > 0;
+}
 
 /** Register a panel in the shell's top band. Returns the disposer a plugin
  * calls when it unloads; a duplicate id replaces the earlier panel. */
@@ -45,8 +56,9 @@ export function registerPluginTopPanel(panel: PluginTopPanel): () => void {
 /** The band's plugin area. Renders nothing at all when no plugin contributes:
  * an empty contribution list must not leave a visual hole. */
 export function PluginTopPanels(props: { testID?: string }) {
+  const hasContent = () => panels().length > 0 || topBandHasContent();
   return (
-    <If when={panels().length > 0}>
+    <If when={hasContent()}>
       <View
         testID={props.testID ?? "plugin-top-panels"}
         accessibilityLabel="插件面板"
@@ -84,6 +96,23 @@ export function PluginTopPanels(props: { testID?: string }) {
             </View>
           )}
         </Each>
+        <PluginSlot
+          slot="keel.ui.top-band"
+          testID="plugin-top-band-contributions"
+          style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0, overflow: "hidden" }}
+          render={(entry) => <PluginTopBandEntry entry={entry} />}
+          renderUnavailable={(entry) =>
+            entry.status === "failed" ? (
+              <Text style={{ fontSize: typeScale.xs, color: color.danger, numberOfLines: 1 }}>
+                {`${entry.code ?? "ERR_PLUGIN"} · ${entry.declaration.pluginId}`}
+              </Text>
+            ) : (
+              <Text style={{ fontSize: typeScale.xs, color: color.warning, numberOfLines: 1 }}>
+                {`${entry.code ?? "ERR_TARGET_UNAVAILABLE"} · 插件面板不可用`}
+              </Text>
+            )
+          }
+        />
       </View>
     </If>
   );

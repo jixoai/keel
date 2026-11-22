@@ -47,7 +47,7 @@
 // function the JSX calls; nothing is copied into a local at the top of a
 // component.
 import type { JSX } from "nsh";
-import { cleanup, colorScheme, effect, host, signal, Storage, Text, View, windowSize } from "nsh";
+import { cleanup, colorScheme, effect, host, openUrl, signal, Storage, Text, View, windowSize } from "nsh";
 import type {
   DeploymentCapabilitiesApi,
   MediaCapabilitiesView,
@@ -126,6 +126,8 @@ import {
 import { defaultReasoningFor } from "./model-picker";
 import { SkillsSection } from "./settings-skills";
 import { LiveBadge, PressRow } from "./books/common";
+import { pluginSlots, runDataAction, type PluginActionHandlers } from "../plugins";
+import { PluginActionButtons, PluginSettingsSections } from "../plugins/slots";
 
 // ---- the section ----------------------------------------------------------
 
@@ -2295,6 +2297,37 @@ function PluginDiagnostics() {
 
 function PluginsSection() {
   const plugins = () => store.plugins()?.plugins ?? [];
+  // The contributed action slot's data actions: the host's own vocabulary
+  // (navigate/openUrl/callTool), executed here because this page is where the
+  // action buttons render. A chunk action's module runs its own `activate`.
+  const runPluginAction = (entry: import("../plugins/types").MountedContribution) => {
+    const handlers: PluginActionHandlers = {
+      navigate: (path) => {
+        if (path.startsWith("/plugins")) store.openPlugins();
+        else if (path.startsWith("/settings")) return;
+        else store.closeSettings();
+      },
+      openUrl: (url) => {
+        void openUrl(url).catch(() => {
+          store.flash({ tone: "danger", text: `无法打开插件链接：${url}` });
+        });
+      },
+      callTool: (action, tool, args) => {
+        void pluginSlots
+          .bridgeFor(action.declaration.pluginId)
+          .callTool(tool, args)
+          .then(() => store.flash({ tone: "info", text: `插件动作完成：${tool}` }))
+          .catch((error) => {
+            store.flash({
+              tone: "danger",
+              text: `插件动作失败：${error instanceof Error ? error.message : String(error)}`,
+            });
+          });
+      },
+      notice: (text) => store.flash({ tone: "info", text }),
+    };
+    runDataAction(entry, handlers);
+  };
   return (
     <View style={{ gap: space["3xl"] }}>
       <Card testID="settings-plugins">
@@ -2385,6 +2418,13 @@ function PluginsSection() {
           </Each>
         </CardContent>
       </Card>
+
+      {/* The action and settings-section slots: plugin contributions draw in
+          the settings page where a section or a button belongs, never in the
+          top band (A4.4f). Both render nothing at all when no plugin
+          contributes. */}
+      <PluginActionButtons onData={runPluginAction} />
+      <PluginSettingsSections />
     </View>
   );
 }

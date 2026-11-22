@@ -1,0 +1,94 @@
+{
+  "base": "http://127.0.0.1:13681",
+  "steps": [
+    {
+      "label": "fixture plugin chunk rendered in top band and sidebar",
+      "kind": "assert",
+      "ok": true
+    },
+    {
+      "label": "workspace-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "workspace 1440",
+      "kind": "screenshot",
+      "file": "workspace-1440.png"
+    },
+    {
+      "label": "settings-section and action slots rendered",
+      "kind": "assert",
+      "ok": true
+    },
+    {
+      "label": "settings-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "settings plugins 1440",
+      "kind": "screenshot",
+      "file": "settings-plugins-1440.png"
+    },
+    {
+      "label": "settings plugins bottom 1440",
+      "kind": "screenshot",
+      "file": "settings-plugins-bottom-1440.png"
+    },
+    {
+      "label": "route slot rendered the chunk on the plugin page",
+      "kind": "assert",
+      "ok": true
+    },
+    {
+      "label": "plugin-route-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "plugin route 1440",
+      "kind": "screenshot",
+      "file": "plugin-route-1440.png"
+    },
+    {
+      "label": "workspace-390",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "workspace 390",
+      "kind": "screenshot",
+      "file": "workspace-390.png"
+    }
+  ],
+  "errors": [],
+  "pass": true,
+  "consoleErrors": [
+    "console: Failed to load resource: the server responded with a status of 404 (File not found)"
+  ]
+}
