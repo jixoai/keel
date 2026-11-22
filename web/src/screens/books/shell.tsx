@@ -227,7 +227,7 @@ function AccountDialog(props: { open: boolean; onClose: () => void; onSignOut: (
         </View>
         <Badge
           variant={me()?.isSuperAdmin ? "info" : "secondary"}
-          label={me()?.isSuperAdmin ? "部署管理员" : "成员"}
+          label={me()?.isSuperAdmin ? "超级管理员" : "成员"}
           style={{ marginLeft: "auto" }}
         />
       </View>
@@ -543,6 +543,7 @@ export function BackToIndex(props: { label: string; onPress: () => void }) {
         label={props.label}
         accessibilityLabel={`返回${props.label}`}
         onPress={props.onPress}
+        style={touchStyle()}
       />
     </View>
   );

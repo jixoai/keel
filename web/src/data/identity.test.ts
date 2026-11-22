@@ -3,7 +3,9 @@
 // guessed into a safe-looking value.
 import { expect, test } from "nsh/test";
 import {
+  groupDisplayName,
   identityPage,
+  isSuperAdminGroup,
   parseAuthSession,
   parseBot,
   parseBotKey,
@@ -134,4 +136,16 @@ test("pagination: a full page is a lower bound on more, not a total", () => {
   expect(identityPage(["a"], 500)).toEqual({ items: ["a"], limit: 500, hasMore: false });
   expect(identityPage(["a", "b"], 2).hasMore).toBe(true);
   expect(identityPage([], 2).hasMore).toBe(false);
+});
+
+test("built-in groups: the server tokens read as the product's role words", () => {
+  expect(groupDisplayName("super-admin")).toBe("超级管理员");
+  expect(groupDisplayName("tenant-admin")).toBe("租户管理员");
+  expect(groupDisplayName("bot-operator")).toBe("Bot 运营");
+  expect(groupDisplayName("viewer")).toBe("只读成员");
+  expect(groupDisplayName("auditor")).toBe("审计员");
+  expect(groupDisplayName("客服组")).toBe("客服组");
+  expect(isSuperAdminGroup("super-admin")).toBe(true);
+  expect(isSuperAdminGroup("超级管理员")).toBe(true);
+  expect(isSuperAdminGroup("tenant-admin")).toBe(false);
 });

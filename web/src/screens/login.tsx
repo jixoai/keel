@@ -173,7 +173,7 @@ export function LoginScreen() {
             <If when={store.authDenied()}>
               <GateCallout
                 tone="danger"
-                text="权限不足：这个账号不能使用网页登录，请联系部署管理员。"
+                text="权限不足：这个账号不能使用网页登录，请联系超级管理员。"
                 testID="auth-denied"
               />
             </If>

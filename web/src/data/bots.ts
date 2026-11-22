@@ -1823,7 +1823,7 @@ const humanWriteError = (error: unknown, action: string): string => {
   if (failure.status === 403) {
     return `${action}被拒：${
       failure.requiredKey ? `缺「${capabilityOf(failure.requiredKey).displayName}」能力` : "你的账号没有这个操作的能力"
-    }。找对象归属者或部署管理员。`;
+    }。找对象归属者或超级管理员。`;
   }
   if (failure.status === 404) return `${action}失败：没有找到这个对象，或者你没有访问权限。`;
   if (failure.status === 409) return `${action}失败：对象刚被改过或已归档；刷新后再试。`;

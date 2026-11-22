@@ -21,6 +21,8 @@ import { KeelApiError, errorMessageOf } from "./http";
 import { can, scopeOf } from "./permissions";
 import { store } from "./store";
 import {
+  groupDisplayName,
+  isSuperAdminGroup,
   scopeRank,
   type AccountView,
   type AuditEventView,
@@ -183,6 +185,15 @@ class IdentityAccessStore {
   readonly recordsResult = signal<"all" | "ok" | "denied" | "error">("all");
   private recordsToken = 0;
   private recordsAttempted = false;
+
+  // ---- the account index's 「最近活动」 -------------------------------------
+  // The account listing has no activity field. When the reader may read the
+  // audit ledger, the index derives the last event per account from it; when it
+  // may not (or the deployment has no audit read), the column prints 「—」 and
+  // the page says so once — it never repeats 「未记录」 on every row.
+  readonly activityEvents = signal<AuditEventView[]>([]);
+  readonly activityState = signal<"idle" | "loading" | "ready" | "unavailable" | "forbidden">("idle");
+  private activityToken = 0;
 
   // ---- plumbing ------------------------------------------------------------
 
@@ -745,6 +756,62 @@ class IdentityAccessStore {
     );
   }
 
+  // ---- the account index's recent activity --------------------------------
+
+  /** Read one bounded page of the ledger for the account index's fifth column.
+   * This is a projection, not a second ledger: the rows stay in
+   * `activityEvents`, the 05 chapter keeps its own filtered view. */
+  async loadActivity(): Promise<void> {
+    if (this.activityState() === "loading" || this.activityState() === "ready") return;
+    const api = this.api();
+    if (!api?.listAuditEvents) {
+      this.activityState.set("unavailable");
+      return;
+    }
+    const token = ++this.activityToken;
+    this.activityState.set("loading");
+    try {
+      const page = await api.listAuditEvents({
+        limit: 200,
+        since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      if (token !== this.activityToken) return;
+      this.activityEvents.set(
+        [...page.items].sort((left, right) => Date.parse(right.occurredAt ?? "") - Date.parse(left.occurredAt ?? "")),
+      );
+      this.activityState.set("ready");
+    } catch (error) {
+      if (token !== this.activityToken) return;
+      // A route that has not landed is the same honest 「—」 as a deployment
+      // without audit; a 403 keeps its own word (the reader may not read the
+      // ledger). Neither turns the identity page into an error page.
+      this.activityState.set(failureOf(error).status === 403 ? "forbidden" : "unavailable");
+    }
+  }
+
+  /** The last audit event this account acted in, matched by id first and by the
+   * display name the record carries (the wire's older shape). */
+  lastActivityOf(account: AccountView): AuditEventView | undefined {
+    const name = account.displayName || account.username;
+    return this.activityEvents().find(
+      (event) =>
+        event.actorId === account.accountId ||
+        (!!name && (event.actorName === name || event.actorName === account.username)),
+    );
+  }
+
+  /** The reader's own role in this deployment, in the same words the group page
+   * uses: a super admin first, then a built-in group, then any group. */
+  currentRoleLabel(): string {
+    const me = store.identity();
+    if (me?.isSuperAdmin) return "超级管理员";
+    const row = this.accounts().find((account) => account.accountId === me?.accountId);
+    const groups = row?.groups ?? [];
+    const preferred =
+      groups.find((group) => group.builtin && !isSuperAdminGroup(group.name)) ?? groups[0];
+    return preferred ? groupDisplayName(preferred.name) : "成员";
+  }
+
   // ---- boot ----------------------------------------------------------------
 
   /** The identity chapter's first read: the indexes are loaded once per launch
@@ -758,6 +825,10 @@ class IdentityAccessStore {
       this.groupsAttempted = true;
       void this.loadGroups();
     }
+    // The index's 「最近活动」 is the ledger's projection; only a reader with
+    // `audit.read` can derive it, and a deployment without the route leaves the
+    // column at 「—」 with one page-level note.
+    if (can("audit.read")) void this.loadActivity();
   }
 
   /** The records chapter's first read. */
@@ -808,6 +879,9 @@ class IdentityAccessStore {
     this.recordsUnavailable.set(false);
     this.recordsHasMore.set(false);
     this.recordsAttempted = false;
+    this.activityToken += 1;
+    this.activityEvents.set([]);
+    this.activityState.set("idle");
     // The view state is part of the session's memory too: the next account must
     // not open on the previous one's search/filter.
     this.accountsQuery.set("");

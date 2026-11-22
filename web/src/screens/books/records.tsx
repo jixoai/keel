@@ -25,7 +25,6 @@ import {
   Th,
   color,
   font,
-  lineHeight,
   radius,
   space,
   typeScale,
@@ -33,10 +32,11 @@ import {
 } from "../../ui/kit";
 import { Icon } from "../../ui/icons";
 import { store } from "../../data/store";
-import { can } from "../../data/permissions";
+import { botAccess } from "../../data/bots";
 import { canReadRecords, identityAccess } from "../../data/identity-access";
+import { capabilityOf } from "../../data/permission-catalog";
 import { Paper } from "./shell";
-import type { AuditEventView, AuditKind } from "../../data/identity";
+import { groupDisplayName, type AuditEventView, type AuditKind } from "../../data/identity";
 import {
   FactLine,
   Hairline,
@@ -81,6 +81,19 @@ const resultBadge = (event: AuditEventView) =>
   ) : (
     <Badge variant="destructive" label="失败" icon="alert" style={{ alignSelf: "flex-start" }} />
   );
+
+/** A super-admin action carries its own badge: the ledger's reader must see
+ * that a deployment-level role acted, not just "an admin". */
+const superBadge = (event: AuditEventView) =>
+  event.kind === "super-admin" ? <Badge variant="info" label="超管" accessibilityLabel="超级管理员操作" /> : null;
+
+/** The missing key: the record's structured field first, then a `domain.key`
+ * token in the sentence the server sent. */
+const missingKeyOf = (event: AuditEventView): string | undefined => {
+  if (event.capabilityKey) return event.capabilityKey;
+  const match = (event.summary ?? "").match(/\b[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\b/);
+  return match?.[0];
+};
 
 /** The human line: the server's sentence when it sent one; otherwise the kind's
  * own word (never an invented sentence about what happened). */
@@ -307,6 +320,7 @@ export function RecordsChapter() {
                   message={identityAccess.recordsError()?.message ?? ""}
                   onRetry={() => void identityAccess.loadRecords()}
                   retrying={identityAccess.recordsLoading()}
+                  requestId={identityAccess.recordsError()?.requestId}
                   testID="records-error"
                 />
               </If>
@@ -445,7 +459,10 @@ function RecordsFilters() {
 
 function RecordsGrid(props: { selectedId: () => string | null }) {
   const events = () => identityAccess.visibleRecords();
-  const selected = () => events().find((event) => event.eventId === props.selectedId()) ?? null;
+  // With a ledger on screen, the detail pane opens on the first (newest) row
+  // instead of leaving 310px of empty paper; only a truly empty ledger has no
+  // selection.
+  const selected = () => events().find((event) => event.eventId === props.selectedId()) ?? events()[0] ?? null;
   return (
     <View style={{ flexDirection: "row", gap: space.lg, minHeight: 0 }}>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -479,12 +496,22 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
                   <PressRow
                     accessibilityLabel={`打开记录 ${eventText(event())}`}
                     onPress={() => store.openRecord(event().eventId)}
-                    selected={props.selectedId() === event().eventId}
-                    style={{ borderBottomWidth: 0, minHeight: 42, marginHorizontal: -space.lg, paddingHorizontal: space.lg }}
+                    selected={props.selectedId() === event().eventId || (props.selectedId() === null && events()[0]?.eventId === event().eventId)}
+                    style={{ borderBottomWidth: 0, minHeight: 44, marginHorizontal: -space.lg, paddingHorizontal: space.lg }}
                   >
-                    <Text style={{ fontSize: typeScale.sm, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                    <Text
+                      style={{
+                        flexShrink: 1,
+                        minWidth: 0,
+                        fontSize: typeScale.sm,
+                        color: event().result === "denied" ? color.danger : color.foreground,
+                        numberOfLines: 1,
+                        textOverflow: "ellipsis",
+                      }}
+                    >
                       {eventText(event())}
                     </Text>
+                    {superBadge(event())}
                   </PressRow>
                 </Td>
                 <Td>
@@ -511,8 +538,16 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
           </If>
         </View>
       </View>
-      <View style={{ width: 310, flexShrink: 0, borderLeftWidth: 1, borderLeftColor: color.border, paddingLeft: space.lg }}>
-        <If when={selected() !== null} else={<RecordDetailEmpty />}>
+      <View style={{ width: 330, flexShrink: 0, borderLeftWidth: 1, borderLeftColor: color.border, paddingLeft: space.lg }}>
+        <If
+          when={selected() !== null}
+          else={
+            <View style={{ flexDirection: "column", gap: space.sm, paddingVertical: space.lg }}>
+              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>没有匹配的记录</Text>
+              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>清空搜索，或换一个时间范围与结果筛选。</Text>
+            </View>
+          }
+        >
           <RecordDetail event={() => selected()!} />
         </If>
       </View>
@@ -520,19 +555,54 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
   );
 }
 
-function RecordDetailEmpty() {
-  return (
-    <View style={{ flexDirection: "column", gap: space.md, paddingVertical: space.lg }}>
-      <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>选一条记录</Text>
-      <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
-        点左侧一行，看这句人话背后的结构化事实（谁、什么、何时、结果、请求编号）。
-      </Text>
-    </View>
-  );
-}
-
 function RecordDetail(props: { event: () => AuditEventView; showActions?: boolean }) {
   const event = () => props.event();
+  const missingKey = () => missingKeyOf(event());
+  const capability = () => (missingKey() ? capabilityOf(missingKey()!).displayName : undefined);
+  const objectLink = () => {
+    const objectId = event().objectId;
+    if (!objectId) return null;
+    switch (event().objectType) {
+      case "权限组":
+        return { label: "打开权限组", run: () => store.openIdentityObject("groups", objectId) };
+      case "Bot":
+        return { label: "打开 Bot", run: () => store.openBot(objectId) };
+      case "账号":
+        return { label: "打开账号", run: () => store.openIdentityObject("accounts", objectId) };
+      case "团队":
+        return event().runId
+          ? { label: "打开运行", run: () => store.openTeamRun(objectId, event().runId!) }
+          : { label: "打开团队", run: () => store.openTeam(objectId) };
+      case "会话":
+        return {
+          label: "打开会话",
+          run: () => {
+            store.openChapter("workspace");
+            void store.openSession(objectId);
+          },
+        };
+      default:
+        return null;
+    }
+  };
+  // The record may name the object without naming its owner. Resolve a Bot or
+  // account already in the reader's index so the detail still answers 「找谁」.
+  const ownerName = () => {
+    if (event().objectOwnerName) return event().objectOwnerName;
+    if (!event().objectId) return undefined;
+    if (event().objectType === "Bot") {
+      const bot = botAccess.bots().find((entry) => entry.botId === event().objectId);
+      const account = identityAccess.accounts().find((entry) => entry.accountId === bot?.accountId);
+      return account?.displayName || account?.username;
+    }
+    if (event().objectType === "账号") {
+      const account = identityAccess.accounts().find((entry) => entry.accountId === event().objectId);
+      return account?.displayName || account?.username;
+    }
+    if (event().objectType === "权限组") return "超级管理员";
+    return undefined;
+  };
+  const grantable = () => (event().grantableBy ?? []).map(groupDisplayName);
   return (
     <View testID="record-detail" style={{ flexDirection: "column", gap: space.md }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
@@ -540,10 +610,8 @@ function RecordDetail(props: { event: () => AuditEventView; showActions?: boolea
           {eventText(event())}
         </Text>
         {resultBadge(event())}
+        {superBadge(event())}
       </View>
-      <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
-        {eventText(event())}
-      </Text>
       <Hairline />
       <View style={{ flexDirection: "column", gap: space.sm }}>
         <FactLine label="时间" value={formatWhen(event().occurredAt)} />
@@ -559,14 +627,40 @@ function RecordDetail(props: { event: () => AuditEventView; showActions?: boolea
         </If>
       </View>
       <If when={event().result === "denied"}>
-        <StateNote
-          tone="danger"
-          icon="lock"
-          text="这次操作被拒：看「对象」属于谁、缺哪项能力，再找有授予权的人处理。记录不会告诉你对方的凭据。"
-        />
+        <StateNote testID="record-denied-reason" tone="danger" icon="lock" text="这次操作被拒。先看缺哪项能力，再找能授予它的人。">
+          <View style={{ flexDirection: "column", gap: space.xs, paddingTop: space.xs }}>
+            <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
+              缺少能力：{missingKey() ? (
+                <>
+                  {capability()}（<Text style={{ fontFamily: font.mono, fontSize: typeScale.key }}>{missingKey()}</Text>）
+                </>
+              ) : (
+                "记录没有提供缺失的能力 key"
+              )}
+            </Text>
+            <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
+              对象归属：{ownerName() || "记录没有提供归属账号"}
+            </Text>
+            <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
+              可授予组/人：{grantable().length ? grantable().join("、") : ownerName() ? `${ownerName()} 或超级管理员` : "找对象归属者的管理员"}
+            </Text>
+          </View>
+        </StateNote>
       </If>
       <If when={props.showActions !== false}>
       <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
+        <If when={objectLink() !== null}>
+          <Button
+            testID="record-open-object"
+            variant="outline"
+            size="sm"
+            icon="external"
+            label={objectLink()?.label ?? "打开对象"}
+            accessibilityLabel={objectLink()?.label ?? "打开对象"}
+            onPress={() => objectLink()?.run()}
+            style={touchStyle()}
+          />
+        </If>
         <If when={!!event().requestId}>
           <Button
             variant="outline"
@@ -579,11 +673,12 @@ function RecordDetail(props: { event: () => AuditEventView; showActions?: boolea
           />
         </If>
         <Button
-          variant="ghost"
+          variant="link"
           size="sm"
-          label="清除选择"
-          accessibilityLabel="清除记录选择"
-          onPress={() => store.openRecord(null)}
+          label="按操作者筛选"
+          accessibilityLabel="按操作者筛选记录"
+          onPress={() => identityAccess.recordsQuery.set(event().actorName ?? "")}
+          style={isMobile() ? { minHeight: 44 } : undefined}
         />
       </View>
       </If>
@@ -613,10 +708,20 @@ function RecordsCards() {
               minHeight: 64,
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
-              <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+              <Text
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: typeScale.sm,
+                  color: event().result === "denied" ? color.danger : color.foreground,
+                  numberOfLines: 1,
+                  textOverflow: "ellipsis",
+                }}
+              >
                 {eventText(event())}
               </Text>
+              {superBadge(event())}
               {resultBadge(event())}
             </View>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>

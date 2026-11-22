@@ -224,6 +224,15 @@ export const riskLabelOf = (key: string): string => RISK_LABEL[capabilityOf(key)
 
 export const isHighRisk = (key: string): boolean => capabilityOf(key).risk === "critical";
 
+/** The highest scope the caller may grant for a key: their own held scope,
+ * capped by the key's allowed set. `undefined` when they hold no grant. */
+export function scopeCeilingOf(key: string, held: PermissionScope | undefined): PermissionScope | undefined {
+  if (held === undefined) return undefined;
+  const allowed = scopesOf(key);
+  const heldIndex = ALL_SCOPES.indexOf(held);
+  return allowed.filter((scope) => ALL_SCOPES.indexOf(scope) <= heldIndex).pop();
+}
+
 /** The sentence that explains why a scope cannot be chosen. `held` is the
  * caller's own scope for the key (`undefined`: no grant). */
 export function scopeDisabledReason(
@@ -234,15 +243,15 @@ export function scopeDisabledReason(
   const allowed = scopesOf(key);
   if (!allowed.includes(scope)) {
     return scope === "own" || scope === "team"
-      ? "这项能力只支持租户级范围。"
+      ? "这项能力仅支持租户级范围。"
       : "这项能力没有这个范围。";
   }
   if (held === undefined) {
-    return "你没有这项能力，不能授予它。";
+    return "你没有这项能力，不能授予。";
   }
   const heldIndex = ALL_SCOPES.indexOf(held);
   if (ALL_SCOPES.indexOf(scope) > heldIndex) {
-    return `你最多只能授予「${scopeLabel(held)}」。`;
+    return `最高 ${scopeLabel(held)}，超出你的权限。`;
   }
   return undefined;
 }

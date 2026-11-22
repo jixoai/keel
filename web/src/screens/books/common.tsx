@@ -166,8 +166,8 @@ export function Kicker(props: { icon?: IconName; text: string; testID?: string }
       <Text
         style={{
           fontFamily: font.mono,
-          fontSize: typeScale.key,
-          letterSpacing: 0.6,
+          fontSize: typeScale.sm,
+          letterSpacing: 0.5,
           color: color.mutedForeground,
         }}
       >
@@ -267,13 +267,28 @@ export function BandHead(props: { num: string; title: string; right?: JSX.Elemen
   );
 }
 
-/** A label with a hairline: `权限组 ───────── 改权限请去「身份 → 权限组」`. */
-export function SectionLabel(props: { text: string; note?: string; testID?: string }) {
+/** A label with a hairline: `权限组 ───────── 改权限请去「身份 → 权限组」`.
+ * When `onNotePress` is set the note is a real link (not a tooltip), so the
+ * page keeps the object's one source of truth one tap away. */
+export function SectionLabel(props: { text: string; note?: string; onNotePress?: () => void; testID?: string }) {
   return (
     <View testID={props.testID} style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
       <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>{props.text}</Text>
       <Hairline style={{ flex: 1 }} />
-      {props.note ? <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.note}</Text> : null}
+      {props.note ? (
+        props.onNotePress ? (
+          <Button
+            variant="link"
+            size="sm"
+            label={props.note}
+            accessibilityLabel={props.note}
+            onPress={props.onNotePress}
+            style={isMobile() ? { minHeight: BOOK_TOUCH_PX } : undefined}
+          />
+        ) : (
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.note}</Text>
+        )
+      ) : null}
     </View>
   );
 }
@@ -635,16 +650,19 @@ export function RiskBadge(props: { risk: CapabilityRisk; testID?: string }) {
   return <Badge testID={props.testID} variant={riskVariant(props.risk)} label={RISK_LABEL[props.risk]} />;
 }
 
-/** The 32px scope stamp: a value + chevron in a bordered box; 未授予 is dashed. */
+/** The 32px scope stamp: a value + chevron in a bordered box. 未授予 is a true
+ * dashed ghost; a granted scope is a filled stamp; a stamp the reader cannot
+ * change carries a lock instead of the chevron. */
 export function ScopeStamp(props: { label: string; unset?: boolean; disabled?: boolean; onPress?: () => void; testID?: string }) {
-  const ink = () => (props.unset ? color.mutedForeground : props.disabled ? color.mutedForeground : color.foreground);
+  const unset = () => props.unset === true;
+  const ink = () => (unset() ? color.mutedForeground : props.disabled ? color.mutedForeground : color.foreground);
   return (
     <View
       testID={props.testID}
       role={props.onPress ? "button" : "text"}
       focusable={props.onPress !== undefined && !props.disabled}
       onPress={props.onPress !== undefined && !props.disabled ? props.onPress : undefined}
-      accessibilityLabel={`范围：${props.label}`}
+      accessibilityLabel={`范围：${props.label}${unset() && props.label !== "未授予" ? "，未授予" : ""}${props.disabled ? "，只读" : ""}`}
       accessibilityState={{ disabled: props.disabled === true }}
       hoverStyle={props.onPress && !props.disabled ? { borderColor: color.ring } : undefined}
       focusStyle={booksFocusStyle()}
@@ -658,13 +676,17 @@ export function ScopeStamp(props: { label: string; unset?: boolean; disabled?: b
         gap: space.xs,
         borderRadius: radius.sm,
         borderWidth: 1,
-        borderStyle: props.unset ? "dashed" : "solid",
-        borderColor: props.unset ? color.border : color.fieldEdge,
-        backgroundColor: props.unset ? "transparent" : color.muted,
+        borderStyle: unset() ? "dashed" : "solid",
+        borderColor: unset() ? color.border : props.disabled ? color.border : color.fieldEdge,
+        backgroundColor: unset() ? "transparent" : color.muted,
       }}
     >
       <Text style={{ fontSize: typeScale.sm, color: ink(), numberOfLines: 1, textOverflow: "ellipsis" }}>{props.label}</Text>
-      <Icon name="chevron-down" size={12} tint={color.mutedForeground} />
+      <Icon
+        name={props.disabled ? "lock" : "chevron-down"}
+        size={props.disabled ? 11 : 12}
+        tint={unset() ? color.mutedForeground : color.mutedForeground}
+      />
     </View>
   );
 }
@@ -753,7 +775,7 @@ export function PageError(props: { title: string; message: string; onRetry?: () 
       <EmptyTitle label={props.title} />
       <EmptyDescription label={props.message} />
       {props.requestId ? (
-        <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
           请求编号 {props.requestId}
         </Text>
       ) : null}
@@ -852,7 +874,7 @@ export function PagePermission(props: {
         />
       </EmptyContent>
       {props.capabilityKey ? (
-        <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
+        <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
           技术详情：需要 {props.capabilityKey}
         </Text>
       ) : null}

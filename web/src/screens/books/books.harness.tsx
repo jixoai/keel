@@ -29,6 +29,9 @@ import { RecordsChapter } from "./records";
 
 const scenario = (): string => String(host.params.scenario ?? "empty");
 const chapter = (): string => String(host.params.chapter ?? "identity");
+const identitySection = (): "accounts" | "groups" => (host.params.section === "groups" ? "groups" : "accounts");
+const identityObject = (): string | null =>
+  typeof host.params.object === "string" && host.params.object !== "" ? host.params.object : null;
 const recordsChapter = (): boolean => chapter() === "records";
 
 const pageOf = <T,>(items: T[]) => ({ items, limit: 100, hasMore: false });
@@ -60,19 +63,21 @@ const event: AuditEventView = {
 const apiFor = (name: string): IdentityApi => ({
   async listAccounts() {
     if (name === "loading") return new Promise(() => {});
-    if (name === "error") throw new Error("服务暂时没有响应");
+    if (name === "error") throw new KeelApiError(500, "服务暂时没有响应", [], undefined, undefined, {}, "req-42");
     if (name === "empty") return pageOf([]);
     return pageOf([account("lina", "李娜"), account("chenmo", "陈墨")]);
   },
   async listPermissionGroups() {
-    if (name === "error") throw new Error("服务暂时没有响应");
-    return pageOf(name === "empty" ? [] : [group]);
+    if (name === "error") throw new KeelApiError(500, "服务暂时没有响应", [], undefined, undefined, {}, "req-42");
+    return pageOf(name === "empty" || name === "groups-empty" ? [] : [group]);
   },
   async getPermissionGroup(groupId: string) {
+    if (name === "group-loading") return new Promise(() => {});
     if (name === "empty" || groupId !== group.groupId) throw new KeelApiError(404, "没有找到这个权限组。");
+    if (name === "group-error") throw new KeelApiError(500, "服务暂时没有响应");
     return {
       group,
-      grants: [{ key: "session.read", scope: "team" }],
+      grants: name === "group-empty" ? [] : [{ key: "session.read", scope: "team" }],
       members: [{ accountId: account("lina", "李娜").accountId }],
     };
   },
@@ -100,14 +105,32 @@ const ALL_KEYS: Record<string, PermissionScope> = {
   "session.read": "team",
 };
 
+const readonlyKeys = (): Record<string, PermissionScope> => {
+  const keys = { ...ALL_KEYS };
+  delete keys["permission.manage"];
+  return keys;
+};
+
 identityAccess.resetForTest();
 // The harness owns its transport and keys: cancel the store's boot probe so a
 // late answer cannot reset the scenario (the probe checks its token after every
 // await).
 store.skipBootForTest();
 store.setIdentityTransport(apiFor(scenario()));
-store.openChapter(recordsChapter() ? "records" : "identity");
-setEffectivePermissions(scenario() === "permission" ? { "session.read": "team" as PermissionScope } : ALL_KEYS, false);
+if (recordsChapter()) {
+  store.openChapter("records");
+} else {
+  store.openIdentitySection(identitySection());
+  if (identityObject() !== null) store.openIdentityObject(identitySection(), identityObject()!);
+}
+setEffectivePermissions(
+  scenario() === "permission"
+    ? { "session.read": "team" as PermissionScope }
+    : scenario() === "group-readonly"
+      ? readonlyKeys()
+      : ALL_KEYS,
+  false,
+);
 
 function Harness() {
   return (

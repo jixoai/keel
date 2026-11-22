@@ -597,18 +597,64 @@ export class FixtureIdentity implements IdentityApi {
   private runSequence = 0;
 
   private readonly events: AuditEventView[] = [
-    event("ev-1", todayAt(14, 35, 18), "invoke", "调用 Bot 被拒", "客服一号", "Bot", "售后升级", "denied", "k-7f31"),
-    event("ev-2", todayAt(14, 33, 30), "invoke", "创建 Bot", "客服一号", "Bot", "退款专员", "ok"),
-    event("ev-3", todayAt(14, 32, 18), "invoke", "调用 Bot", "客服一号", "Bot", "订单查询", "ok"),
-    event("ev-4", todayAt(14, 12, 4), "grant", "保存权限组", "李娜", "权限组", "客服组 · 3 项", "ok"),
-    event("ev-5", todayAt(14, 10, 22), "login", "登录成功", "李娜", "账号", "李娜", "ok"),
-    event("ev-6", todayAt(9, 20, 14), "deny", "调用 Bot 被拒", "客服一号", "Bot", "财务助手", "denied"),
-    event("ev-7", todayAt(9, 18, 41), "grant", "签发 Bot 密钥", "李娜", "Bot", "客服一号 · 生产 Webhook", "ok"),
-    event("ev-8", daysAgoIso(1), "deny", "读取密钥被拒", "客服一号", "密钥", "生产密钥", "denied"),
-    event("ev-9", daysAgoIso(1), "relation", "共享会话", "李娜", "会话", "订单 88213 → 陈墨", "ok"),
-    event("ev-10", daysAgoIso(2), "account", "禁用账号", "王强", "账号", "吴桐", "ok", undefined, true),
-    event("ev-11", daysAgoIso(2), "super-admin", "跨租户读取", "王强", "记录", "acme 审计", "ok", undefined, true),
-    event("ev-12", daysAgoIso(3), "team", "启动团队", "李娜", "团队", "客服团队", "ok"),
+    event("ev-1", todayAt(14, 35, 18), "invoke", "调用 Bot 被拒：缺「调用 Bot」（bot.invoke）", "客服一号", "Bot", "售后升级", "denied", "k-7f31", false, {
+      actorId: id("bot-support"),
+      objectId: id("bot-aftersales"),
+      capabilityKey: "bot.invoke",
+      objectOwnerName: "王强",
+      objectOwnerId: id("wangqiang"),
+      grantableBy: ["客服组", "超级管理员"],
+    }),
+    event("ev-2", todayAt(14, 33, 30), "invoke", "创建 Bot", "客服一号", "Bot", "退款专员", "ok", undefined, false, {
+      actorId: id("bot-support"),
+      objectId: id("bot-refund"),
+    }),
+    event("ev-3", todayAt(14, 32, 18), "invoke", "调用 Bot", "客服一号", "Bot", "订单查询", "ok", undefined, false, {
+      actorId: id("bot-support"),
+      objectId: id("bot-order"),
+    }),
+    event("ev-4", todayAt(14, 12, 4), "grant", "保存权限组", "李娜", "权限组", "客服组 · 3 项", "ok", undefined, false, {
+      actorId: id("lina"),
+      objectId: id("group-support"),
+    }),
+    event("ev-5", todayAt(14, 10, 22), "login", "登录成功", "李娜", "账号", "李娜", "ok", undefined, false, {
+      actorId: id("lina"),
+      objectId: id("lina"),
+    }),
+    event("ev-6", todayAt(9, 20, 14), "deny", "调用 Bot 被拒：缺「调用 Bot」（bot.invoke）", "客服一号", "Bot", "财务助手", "denied", undefined, false, {
+      actorId: id("bot-support"),
+      objectId: id("bot-finance"),
+      capabilityKey: "bot.invoke",
+      objectOwnerName: "财务助手",
+      grantableBy: ["Bot 运营", "超级管理员"],
+    }),
+    event("ev-7", todayAt(9, 18, 41), "grant", "签发 Bot 密钥", "李娜", "Bot", "客服一号 · 生产 Webhook", "ok", undefined, false, {
+      actorId: id("lina"),
+      objectId: id("bot-support"),
+    }),
+    event("ev-8", daysAgoIso(1), "deny", "读取密钥被拒：缺「读取密钥值」（secret.read.value）", "客服一号", "密钥", "生产密钥", "denied", undefined, false, {
+      actorId: id("bot-support"),
+      objectId: id("key-support-prod"),
+      capabilityKey: "secret.read.value",
+      objectOwnerName: "客服一号",
+      grantableBy: ["客服组"],
+    }),
+    event("ev-9", daysAgoIso(1), "relation", "共享会话", "李娜", "会话", "订单 88213 → 陈墨", "ok", undefined, false, {
+      actorId: id("lina"),
+    }),
+    event("ev-10", daysAgoIso(2), "account", "禁用账号", "王强", "账号", "吴桐", "ok", undefined, true, {
+      actorId: id("wangqiang"),
+      objectId: id("wutong"),
+    }),
+    event("ev-11", daysAgoIso(2), "super-admin", "跨租户读取", "王强", "记录", "acme 审计", "ok", undefined, true, {
+      actorId: id("wangqiang"),
+    }),
+    event("ev-12", daysAgoIso(3), "team", "启动团队", "李娜", "团队", "客服团队", "ok", undefined, false, {
+      actorId: id("lina"),
+      objectId: id("team-support"),
+      teamId: id("team-support"),
+      runId: RUN_ID,
+    }),
   ];
 
   async whoami(): Promise<WhoAmI> {
@@ -1045,6 +1091,7 @@ function event(
   result: AuditEventView["result"],
   requestId?: string,
   superAdmin = false,
+  extra: Partial<AuditEventView> = {},
 ): AuditEventView {
   return {
     eventId,
@@ -1059,5 +1106,6 @@ function event(
     result,
     requestId,
     source: "203.0.113.x",
+    ...extra,
   };
 }

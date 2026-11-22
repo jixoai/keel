@@ -205,7 +205,7 @@ const loginErrorOf = (error: unknown): string => {
       return "这个部署还没有管理员，请先完成初始化。";
     case "tenant_not_configured":
     case "auth_unavailable":
-      return "服务还没有配置好账号登录，请联系部署管理员。";
+      return "服务还没有配置好账号登录，请联系超级管理员。";
     case "rate_limited":
       return retrySentenceOf(error, "尝试次数过多，请稍后重试。");
     default:
@@ -225,7 +225,7 @@ const bootstrapErrorOf = (error: unknown): string => {
     case "weak_password":
       return "密码不符合要求：至少 12 个字节（中文约 4 个字），最多 1024 字节。";
     case "tenant_not_configured":
-      return "服务还没有配置租户，请联系部署管理员。";
+      return "服务还没有配置租户，请联系超级管理员。";
     case "csrf_failed":
       return "设置表单的安全令牌已失效，请刷新页面后重试。";
     default:

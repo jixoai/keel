@@ -7,9 +7,10 @@
 // caller holds its key; the server refuses the write either way.
 //
 // What the API does not return is said, not guessed: the account listing has no
-// "last activity" or "online" field, so the fifth column prints 未记录 (with the
-// reason under the table) instead of inventing activity; an account whose group
-// memberships could not be read shows "—", not "no groups".
+// "last activity" field, so the index derives it from the audit ledger when the
+// reader may read records; without that read the column prints 「—」 once with a
+// page note, never 「未记录」 on every row. An account whose group memberships
+// could not be read shows "—", not "no groups".
 import { effect, signal, Text, View } from "nsh";
 import {
   AlertDialog,
@@ -17,7 +18,10 @@ import {
   Badge,
   Button,
   Dialog,
+  DropdownMenu,
+  DropdownMenuItem,
   Field,
+  IconButton,
   Input,
   ScrollArea,
   Select,
@@ -26,6 +30,7 @@ import {
   TableHeaderRow,
   Td,
   Th,
+  Tooltip,
   color,
   font,
   lineHeight,
@@ -44,7 +49,14 @@ import {
   identityAccess,
 } from "../../data/identity-access";
 import { CAPABILITIES, capabilityOf, groupCapabilities, scopeLabel } from "../../data/permission-catalog";
-import type { AccountView, BotView, PermissionGroupSummary, PermissionScope } from "../../data/identity";
+import {
+  groupDisplayName,
+  isSuperAdminGroup,
+  type AccountView,
+  type BotView,
+  type PermissionGroupSummary,
+  type PermissionScope,
+} from "../../data/identity";
 import {
   FactLine,
   Hairline,
@@ -102,7 +114,7 @@ const visibleAccounts = (): AccountView[] => {
     if (status === "disabled" && !row.disabledAt) return false;
     if (!query) return true;
     const groups = (row as { groups?: PermissionGroupSummary[] }).groups ?? [];
-    return [row.displayName, row.username, ...groups.map((group) => group.name)]
+    return [row.displayName, row.username, ...groups.flatMap((group) => [group.name, groupDisplayName(group.name)])]
       .filter((part): part is string => typeof part === "string")
       .some((part) => part.toLowerCase().includes(query));
   });
@@ -112,7 +124,24 @@ const groupTextOf = (row: AccountView): string => {
   const groups = (row as { groups?: PermissionGroupSummary[] }).groups;
   if (groups === undefined) return "—";
   if (groups.length === 0) return "—";
-  return groups.map((group) => (group.builtin ? `${group.name}（内置组）` : group.name)).join(" · ");
+  return groups.map((group) => (group.builtin ? `${groupDisplayName(group.name)}（内置组）` : groupDisplayName(group.name))).join(" · ");
+};
+
+/** The account the paper opens on when the route names none: the reader's own
+ * account when the index has it, otherwise the first row. Only a genuinely
+ * empty index has no default and shows the welcome. */
+export const preferredAccountId = (): string | null => {
+  const rows = identityAccess.accounts();
+  const me = store.identity()?.accountId;
+  return (me ? rows.find((row) => row.accountId === me)?.accountId : undefined) ?? rows[0]?.accountId ?? null;
+};
+
+/** The role words the account header carries: a super admin is one deployment
+ * role, and each membership is a role badge of its own. */
+const roleBadgesOf = (row: AccountView | undefined, detail: { groups: PermissionGroupSummary[] } | null, superAdmin: boolean) => {
+  const groups = (row as { groups?: PermissionGroupSummary[] } | undefined)?.groups ?? detail?.groups ?? [];
+  if (superAdmin) return groups.filter((group) => !isSuperAdminGroup(group.name));
+  return groups;
 };
 
 const statusBadge = (row: AccountView) =>
@@ -137,13 +166,13 @@ function AccountIndexRow(props: { row: AccountView; selected: boolean }) {
         <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
           {props.row.displayName || props.row.username}
         </Text>
-        <Text style={{ fontSize: typeScale.key, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
           {props.row.username} · {accountKindLabel(props.row.kind)}
           {props.row.disabledAt ? " · 已禁用" : ""}
         </Text>
       </View>
       <If when={props.row.isSuperAdmin}>
-        <Badge variant="info" label="部署管理员" />
+        <Badge variant="info" label="超级管理员" />
       </If>
     </PressRow>
   );
@@ -177,6 +206,7 @@ export function AccountsIndex() {
                   message={identityAccess.accountsError()?.message ?? ""}
                   onRetry={() => void identityAccess.loadAccounts()}
                   retrying={identityAccess.accountsLoading()}
+                  requestId={identityAccess.accountsError()?.requestId}
                 />
               }
             >
@@ -202,7 +232,10 @@ export function AccountsIndex() {
           </If>
           <Each of={visibleAccounts()} key={(row) => row.accountId}>
             {(row) => (
-              <AccountIndexRow row={row()} selected={store.routeObjectId() === row().accountId} />
+              <AccountIndexRow
+                row={row()}
+                selected={(store.routeObjectId() ?? preferredAccountId()) === row().accountId}
+              />
             )}
           </Each>
         </View>
@@ -355,6 +388,7 @@ export function AccountsPage() {
               message={identityAccess.accountsError()?.message ?? ""}
               onRetry={() => void identityAccess.loadAccounts()}
               retrying={identityAccess.accountsLoading()}
+              requestId={identityAccess.accountsError()?.requestId}
               testID="accounts-error"
             />
           </If>
@@ -391,9 +425,22 @@ export function AccountsPage() {
               />
             </If>
           </View>
-          <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
-            账号接口暂未返回「最近活动」与会话在线状态；这一列显示「未记录」，不显示推测值。
-          </Text>
+          <If
+            when={
+              identityAccess.activityState() === "unavailable" ||
+              identityAccess.activityState() === "forbidden" ||
+              !can("audit.read")
+            }
+          >
+            <Text
+              testID="accounts-activity-note"
+              style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}
+            >
+              {identityAccess.activityState() === "unavailable"
+                ? "活动追踪待接入：账号接口没有最近活动字段，审计读取也未接通；这一列显示「—」，不显示推测值。"
+                : "你没有「查看记录」能力，所以「最近活动」显示「—」；这是一条说明，不逐行重复。"}
+            </Text>
+          </If>
         </If>
       </View>
     </ScrollArea>
@@ -450,7 +497,9 @@ function AccountsTable() {
             </Td>
             <Td>{statusBadge(row())}</Td>
             <Td>
-              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>—</Text>
+              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                {formatWhen(identityAccess.lastActivityOf(row())?.occurredAt)}
+              </Text>
             </Td>
           </TableBodyRow>
         )}
@@ -493,7 +542,10 @@ function AccountsCards() {
               {statusBadge(row())}
             </View>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-              {groupTextOf(row())} · 最近活动未记录
+              {groupTextOf(row())}
+              {identityAccess.lastActivityOf(row())
+                ? ` · 最近 ${formatWhen(identityAccess.lastActivityOf(row())?.occurredAt)}`
+                : ""}
             </Text>
           </PressRow>
         )}
@@ -513,7 +565,7 @@ const effectiveOf = (accountId: string): Array<{ key: string; scope: PermissionS
     return CAPABILITIES.map((capability) => ({
       key: capability.key,
       scope: "all" as PermissionScope,
-      sources: ["部署管理员"],
+      sources: ["超级管理员"],
     }));
   }
   const map = new Map<string, { scope: PermissionScope; sources: string[] }>();
@@ -523,11 +575,12 @@ const effectiveOf = (accountId: string): Array<{ key: string; scope: PermissionS
     for (const grant of groupDetail.grants) {
       const previous = map.get(grant.key);
       if (!previous) {
-        map.set(grant.key, { scope: grant.scope, sources: [group.name] });
+        map.set(grant.key, { scope: grant.scope, sources: [groupDisplayName(group.name)] });
         continue;
       }
       if (scopeIndex(grant.scope) > scopeIndex(previous.scope)) previous.scope = grant.scope;
-      if (!previous.sources.includes(group.name)) previous.sources.push(group.name);
+      const label = groupDisplayName(group.name);
+      if (!previous.sources.includes(label)) previous.sources.push(label);
     }
   }
   return [...map.entries()].map(([key, value]) => ({ key, ...value }));
@@ -577,6 +630,7 @@ export function AccountPage(props: { accountId: string; showBack: boolean }) {
               message={identityAccess.accountDetailError()?.message ?? ""}
               onRetry={() => void identityAccess.loadAccount(id())}
               retrying={identityAccess.accountDetailLoading()}
+              requestId={identityAccess.accountDetailError()?.requestId}
               testID="account-error"
             />
           </If>
@@ -610,7 +664,9 @@ export function AccountPage(props: { accountId: string; showBack: boolean }) {
 
 function AccountHead(props: { accountId: string; name: string; disabled: boolean; superAdmin: boolean; botAccount: boolean }) {
   const detail = () => identityAccess.accountDetail();
+  const row = () => identityAccess.accounts().find((entry) => entry.accountId === props.accountId);
   const groups = () => detail()?.groups ?? [];
+  const roles = () => roleBadgesOf(row(), detail(), props.superAdmin);
   return (
     <SheetHead
       testID="account-head"
@@ -621,7 +677,15 @@ function AccountHead(props: { accountId: string; name: string; disabled: boolean
         <>
           <Badge variant="outline" label={accountKindLabel(detail()?.account.kind)} />
           <If when={props.superAdmin}>
-            <Badge variant="info" label="部署管理员" />
+            <Badge variant="info" label="超级管理员" />
+          </If>
+          <Each of={roles().slice(0, 2)} key={(group) => group.groupId}>
+            {(group) => <Badge variant="secondary" label={groupDisplayName(group().name)} />}
+          </Each>
+          <If when={roles().length > 2}>
+            <View tooltip={<Tooltip label={roles().map((group) => groupDisplayName(group.name)).join("、")} />}>
+              <Badge variant="outline" label={`+${roles().length - 2}`} accessibilityLabel={`还有 ${roles().length - 2} 个角色`} />
+            </View>
           </If>
           <If when={props.disabled} else={<Badge variant="success" label="启用" icon="check" />}>
             <Badge variant="destructive" label="已禁用" />
@@ -635,20 +699,6 @@ function AccountHead(props: { accountId: string; name: string; disabled: boolean
       ]}
       actions={
         <>
-          <If when={!props.superAdmin && can("account.manage")}>
-            <Button
-              testID="account-disable-head"
-              variant="ghost"
-              size={isMobile() ? "default" : "sm"}
-              label={props.disabled ? "启用账号" : "禁用账号"}
-              accessibilityLabel={props.disabled ? "启用账号" : "禁用账号"}
-              onPress={() => {
-                if (props.disabled) void identityAccess.setAccountDisabled(props.accountId, false);
-                else disableAccountRequest.set({ accountId: props.accountId, name: props.name });
-              }}
-              style={touchStyle()}
-            />
-          </If>
           <If when={canGrantMembership()}>
             <Button
               testID="account-add-group-head"
@@ -660,9 +710,48 @@ function AccountHead(props: { accountId: string; name: string; disabled: boolean
               style={touchStyle()}
             />
           </If>
+          <If when={!props.superAdmin && can("account.manage")}>
+            <DropdownMenu
+              testID="account-more"
+              accessibilityLabel="更多账号操作"
+              align="end"
+              trigger={
+                <IconButton
+                  testID="account-more-trigger"
+                  icon="dots"
+                  label="更多账号操作"
+                  style={isMobile() ? { width: 44, height: 44 } : undefined}
+                />
+              }
+            >
+              <DropdownMenuItem
+                testID="account-disable-menu"
+                label={props.disabled ? "启用账号" : "禁用账号"}
+                icon={props.disabled ? "check" : "lock"}
+                danger={!props.disabled}
+                style={isMobile() ? { height: 44 } : undefined}
+                onSelect={() => {
+                  if (props.disabled) void identityAccess.setAccountDisabled(props.accountId, false);
+                  else disableAccountRequest.set({ accountId: props.accountId, name: props.name });
+                }}
+              />
+            </DropdownMenu>
+          </If>
         </>
       }
-    />
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Button
+          testID="account-records-link-inline"
+          variant="link"
+          size="sm"
+          label="记录 05"
+          accessibilityLabel="查看记录"
+          onPress={() => store.openChapter("records")}
+          style={isMobile() ? { minHeight: 44 } : undefined}
+        />
+      </View>
+    </SheetHead>
   );
 }
 
@@ -702,15 +791,38 @@ function AccountOverview(props: { accountId: string }) {
   const groups = () => detail()?.groups ?? [];
   const bots = () => identityAccess.accountBots();
   const effective = () => effectiveOf(props.accountId);
+  const superAdmin = () => detail()?.account.isSuperAdmin === true;
+  const lastActivity = () => {
+    const row = identityAccess.accounts().find((entry) => entry.accountId === props.accountId);
+    return row ? identityAccess.lastActivityOf(row) : undefined;
+  };
   return (
     <View style={{ flexDirection: "column", gap: space["2xl"] }}>
-      <View style={{ flexDirection: "row", gap: space.lg, flexWrap: "wrap" }}>
-        <FactTile label="权限组" value={`${groups().length}`} unit="个" />
-        <FactTile label="拥有的 Bot" value={identityAccess.accountBotsLoaded() ? `${bots().length}` : "—"} unit="个" />
-        <FactTile label="有效能力" value={`${effective().length}`} unit="项" />
+      <View testID="account-summary" style={{ flexDirection: "column", gap: space.xs }}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>账本摘要</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm, flexWrap: "wrap" }}>
+          <Text style={{ fontSize: typeScale.lg, fontWeight: weight.medium, color: color.foreground }}>
+            {groups().length} 个权限组
+          </Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>·</Text>
+          <Text style={{ fontSize: typeScale.lg, fontWeight: weight.medium, color: color.foreground }}>
+            {identityAccess.accountBotsLoaded() ? `${bots().length} 个 Bot` : "Bot 未读到"}
+          </Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>·</Text>
+          <Text style={{ fontSize: typeScale.lg, fontWeight: weight.medium, color: color.foreground }}>
+            {superAdmin() ? `全部能力（${effective().length} 项）` : `${effective().length} 项有效能力`}
+          </Text>
+        </View>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          {lastActivity() ? `最近活动 ${formatWhen(lastActivity()?.occurredAt)} · ${lastActivity()?.summary ?? "有记录"}` : "最近活动 —"}
+        </Text>
       </View>
       <View style={{ flexDirection: "column", gap: space.md }}>
-        <SectionLabel text="权限组" note="改权限请去「身份 → 权限组」" />
+        <SectionLabel
+          text="权限组"
+          note="改权限请去「身份 → 权限组」"
+          onNotePress={canReadGroups() ? () => store.openIdentitySection("groups") : undefined}
+        />
         <If when={groups().length === 0}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
             这个账号还没有加入任何权限组。加入一个组后，能力才会出现。
@@ -718,12 +830,21 @@ function AccountOverview(props: { accountId: string }) {
         </If>
         <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
           <Each of={groups()} key={(group) => group.groupId}>
-            {(group) => <Badge variant={group().builtin ? "outline" : "secondary"} label={group().builtin ? `${group().name} · 内置` : group().name} />}
+            {(group) => (
+              <Badge
+                variant={group().builtin ? "outline" : "secondary"}
+                label={group().builtin ? `${groupDisplayName(group().name)} · 内置` : groupDisplayName(group().name)}
+              />
+            )}
           </Each>
         </View>
       </View>
       <View style={{ flexDirection: "column", gap: space.md }}>
-        <SectionLabel text="拥有的 Bot" note="只读索引 · Bot 页在下一片接入" />
+        <SectionLabel
+          text="拥有的 Bot"
+          note="Bot 在「员工」章管理"
+          onNotePress={() => store.openChapter("bots")}
+        />
         <If when={identityAccess.accountBotsError() !== null}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
             {identityAccess.accountBotsError()?.message}
@@ -735,40 +856,28 @@ function AccountOverview(props: { accountId: string }) {
         <Each of={bots().slice(0, 3)} key={(bot) => bot.botId}>
           {(bot) => <BotRow bot={bot()} />}
         </Each>
+        <If when={bots().length > 3}>
+          <Button
+            variant="link"
+            size="sm"
+            label={`查看全部 ${bots().length} 个 Bot`}
+            accessibilityLabel="打开员工章"
+            onPress={() => store.openChapter("bots")}
+            style={isMobile() ? { minHeight: 44 } : undefined}
+          />
+        </If>
       </View>
       <StateNote
         tone={detail()?.account.isSuperAdmin ? "info" : detail()?.account.disabledAt ? "danger" : "info"}
         icon={detail()?.account.isSuperAdmin ? "shield" : detail()?.account.disabledAt ? "lock" : "info"}
         text={
           detail()?.account.isSuperAdmin
-            ? "这是部署管理员：不可禁用或删除；找回密码只能在这台机器的终端进行。"
+            ? "超级管理员由部署级身份短路为全部能力；不可禁用或删除，找回密码只能在这台机器的终端进行。"
             : detail()?.account.disabledAt
               ? "已禁用：登录会话已吊销，Bot 密钥不可用。启用后对方才能再次登录。"
               : "账号可用。权限来自所属权限组的并集；直接授权只走 API/CLI，不在本页编辑。"
         }
       />
-    </View>
-  );
-}
-
-function FactTile(props: { label: string; value: string; unit?: string }) {
-  return (
-    <View
-      style={{
-        minWidth: 140,
-        flex: 1,
-        padding: space.md,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: color.border,
-        backgroundColor: color.hoverFaint,
-      }}
-    >
-      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.label}</Text>
-      <Text style={{ fontSize: typeScale["2xl"], fontWeight: weight.semibold, color: color.foreground }}>
-        {props.value}
-        {props.unit ? <Text style={{ fontSize: typeScale.sm, fontWeight: weight.regular, color: color.mutedForeground }}> {props.unit}</Text> : null}
-      </Text>
     </View>
   );
 }
@@ -802,7 +911,7 @@ function AccountCapabilities(props: { accountId: string }) {
         icon="shield"
         text={
           detail()?.account.isSuperAdmin
-            ? "部署管理员由服务端短路为全部能力；这里按能力目录列出，范围均为「全部」。"
+            ? `超级管理员由服务端短路为全部能力（按目录 ${effective().length} 项列出），范围均为「全部」。`
             : "有效能力 = 这个账号所属权限组的并集（取最宽范围）。直接授权不在本页展示；本页只读。"
         }
       />
@@ -826,18 +935,47 @@ function AccountCapabilities(props: { accountId: string }) {
   );
 }
 
+function SourceCell(props: { sources: string[] }) {
+  if (props.sources.length === 0) {
+    return <Text style={{ width: 140, fontSize: typeScale.sm, color: color.mutedForeground }}>—</Text>;
+  }
+  const head = props.sources[0];
+  const extra = props.sources.length - 1;
+  return (
+    <View
+      style={{ width: 140, flexDirection: "row", alignItems: "center", gap: space.xxs, minWidth: 0 }}
+      tooltip={<Tooltip label={props.sources.join("、")} />}
+      accessibilityLabel={`来源 ${props.sources.join("、")}`}
+    >
+      <Text style={{ flexShrink: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+        {head}
+      </Text>
+      {extra > 0 ? (
+        <Text testID={`source-more-${head}`} style={{ flexShrink: 0, fontSize: typeScale.sm, color: color.mutedForeground }}>
+          +{extra}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function CapabilityDomains(props: {
   domains: () => Array<{ id: string; label: string; icon: string; items: Array<{ key: string; displayName: string; risk: string }> }>;
   sources: boolean;
 }) {
-  const sourceOf = (key: string): string => {
+  const sourceOf = (key: string): string[] => {
     const found = effectiveOf(ACTIVE_ACCOUNT() ?? "").find((entry) => entry.key === key);
-    return found ? found.sources.join("、") : "";
+    return found ? found.sources : [];
   };
   const scopeOfKey = (key: string): PermissionScope | undefined =>
     effectiveOf(ACTIVE_ACCOUNT() ?? "").find((entry) => entry.key === key)?.scope;
   return (
     <View style={{ flexDirection: "column", gap: space.lg }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, paddingBottom: space.xs, borderBottomWidth: 1, borderBottomColor: color.border }}>
+        <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>能力</Text>
+        <Text style={{ width: 110, fontSize: typeScale.sm, color: color.mutedForeground }}>范围</Text>
+        <Text style={{ width: 140, fontSize: typeScale.sm, color: color.mutedForeground }}>来源</Text>
+      </View>
       <Each of={props.domains()} key={(domain) => domain.id}>
         {(domain) => (
           <View style={{ flexDirection: "column" }}>
@@ -865,10 +1003,8 @@ function CapabilityDomains(props: {
                       {item().key}
                     </Text>
                   </View>
-                  <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{scopeLabel(scopeOfKey(item().key))}</Text>
-                  <Text style={{ width: 140, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-                    {props.sources ? sourceOf(item().key) : ""}
-                  </Text>
+                  <Text style={{ width: 110, fontSize: typeScale.sm, color: color.foreground }}>{scopeLabel(scopeOfKey(item().key))}</Text>
+                  {props.sources ? <SourceCell sources={sourceOf(item().key)} /> : <View style={{ width: 140 }} />}
                 </View>
               )}
             </Each>
@@ -926,7 +1062,7 @@ function AccountGroups(props: { accountId: string }) {
             >
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ fontSize: typeScale.base, color: color.foreground }}>
-                  {group().name}
+                  {groupDisplayName(group().name)}
                   {group().builtin ? <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}> · 内置组</Text> : null}
                 </Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
@@ -937,7 +1073,7 @@ function AccountGroups(props: { accountId: string }) {
                 variant="ghost"
                 size="sm"
                 label="查看"
-                accessibilityLabel={`打开权限组 ${group().name}`}
+                accessibilityLabel={`打开权限组 ${groupDisplayName(group().name)}`}
                 onPress={() => store.openIdentityObject("groups", group().groupId)}
               />
               <If when={canGrantMembership() && !group().builtin}>
@@ -945,8 +1081,8 @@ function AccountGroups(props: { accountId: string }) {
                   variant="ghost"
                   size="sm"
                   label="移除"
-                  accessibilityLabel={`移除 ${group().name}`}
-                  onPress={() => removeGroupRequest.set({ accountId: props.accountId, groupId: group().groupId, name: group().name })}
+                  accessibilityLabel={`移除 ${groupDisplayName(group().name)}`}
+                  onPress={() => removeGroupRequest.set({ accountId: props.accountId, groupId: group().groupId, name: groupDisplayName(group().name) })}
                   style={touchStyle()}
                 />
               </If>
@@ -967,12 +1103,13 @@ function AccountBots(props: { accountId: string }) {
   const bots = () => identityAccess.accountBots();
   return (
     <View testID="account-bots" style={{ flexDirection: "column", gap: space.lg }}>
-      <StateNote tone="info" icon="bot" text="Bot 页（身份、工作方式、密钥）在下一片（A4.4b）接入；这里只列这个账号拥有的 Bot。" />
+      <StateNote tone="info" icon="bot" text="这里只列这个账号拥有的 Bot；身份、工作方式与密钥在「员工」章管理。" />
       <If when={identityAccess.accountBotsError() !== null}>
         <PageError
           title="没能读到 Bot 列表"
           message={identityAccess.accountBotsError()?.message ?? ""}
           onRetry={() => void identityAccess.loadAccountBots(props.accountId)}
+          requestId={identityAccess.accountBotsError()?.requestId}
         />
       </If>
       <If when={identityAccess.accountBotsError() === null && bots().length === 0}>
@@ -1022,7 +1159,7 @@ function AccountSecurity(props: { accountId: string; name: string; disabled: boo
           >
             <Button
               testID="account-disable"
-              variant={props.disabled ? "outline" : "ghost"}
+              variant={props.disabled ? "outline" : "destructive"}
               label={props.disabled ? "启用账号" : "禁用账号"}
               accessibilityLabel={props.disabled ? "启用账号" : "禁用账号"}
               loading={busy()}
@@ -1096,7 +1233,7 @@ export function CreateAccountDialog() {
   const password = signal("");
   const busy = signal(false);
   const error = signal<string | null>(null);
-  const created = signal<{ name: string; password: string; bot: boolean } | null>(null);
+  const created = signal<{ name: string; password: string; bot: boolean; accountId: string } | null>(null);
   const open = () => createAccountDialog();
   const reset = () => {
     username.set("");
@@ -1108,6 +1245,14 @@ export function CreateAccountDialog() {
     created.set(null);
   };
   const close = () => createAccountDialog.set(false);
+  // Opening the dialog starts a clean form: a previous success's one-time
+  // password must never reappear behind a new attempt.
+  let wasOpen = false;
+  effect(() => {
+    const openNow = createAccountDialog();
+    if (openNow && !wasOpen) reset();
+    wasOpen = openNow;
+  });
   const submit = async () => {
     if (busy()) return;
     error.set(null);
@@ -1131,7 +1276,7 @@ export function CreateAccountDialog() {
       error.set(identityAccess.accountActionError() ?? "创建失败。");
       return;
     }
-    created.set({ name: account.displayName || account.username, password: password(), bot: account.kind === "bot" });
+    created.set({ name: account.displayName || account.username, password: password(), bot: account.kind === "bot", accountId: account.accountId });
   };
   return (
     <Dialog
@@ -1144,7 +1289,19 @@ export function CreateAccountDialog() {
       description={created() ? "把凭据通过安全渠道交给对方。" : "账号是权限主体；能力来自加入的权限组。"}
       footer={
         created() ? (
-          <Button label="我已保存" accessibilityLabel="我已保存" onPress={close} style={touchStyle()} />
+          <>
+            <Button variant="outline" label="关闭" accessibilityLabel="关闭新建账号" onPress={close} style={touchStyle()} />
+            <Button
+              label="查看账号"
+              accessibilityLabel="查看新建的账号"
+              onPress={() => {
+                const accountId = created()?.accountId ?? "";
+                close();
+                if (accountId) store.openIdentityObject("accounts", accountId);
+              }}
+              style={touchStyle()}
+            />
+          </>
         ) : (
           <>
             <Button variant="ghost" label="取消" accessibilityLabel="取消新建账号" onPress={close} style={touchStyle()} />
@@ -1166,7 +1323,7 @@ export function CreateAccountDialog() {
           <Text style={{ fontSize: typeScale.base, color: color.foreground }}>{created()?.name} 已创建。</Text>
           <If when={!!created()?.bot}>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-              Bot 账号用密钥登录；Bot 本身在「员工」章创建（下一片接入）。
+              Bot 账号用密钥登录；Bot 本身在「员工」章创建。
             </Text>
           </If>
           <If when={!created()?.bot}>
@@ -1274,7 +1431,7 @@ export function AddGroupDialog(props: { accountId: string }) {
     identityAccess.groups().filter((group) => {
       if (joined().has(group.groupId)) return false;
       const text = query().trim().toLowerCase();
-      return !text || group.name.toLowerCase().includes(text);
+      return !text || group.name.toLowerCase().includes(text) || groupDisplayName(group.name).toLowerCase().includes(text);
     });
   const close = () => addGroupDialog.set(false);
   const add = async (groupId: string) => {
@@ -1314,13 +1471,13 @@ export function AddGroupDialog(props: { accountId: string }) {
           {(group) => (
             <PressRow
               testID={`account-add-group-${group().groupId}`}
-              accessibilityLabel={`加入 ${group().name}`}
+              accessibilityLabel={`加入 ${groupDisplayName(group().name)}`}
               onPress={() => void add(group().groupId)}
               disabled={busy() !== null}
             >
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ fontSize: typeScale.base, color: color.foreground }}>
-                  {group().name}
+                  {groupDisplayName(group().name)}
                   {group().builtin ? <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}> · 内置组</Text> : null}
                 </Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
@@ -1494,14 +1651,21 @@ function ResetPasswordDialog() {
 
 /** The account page's empty paper (wide layout, nothing chosen yet). */
 export function AccountsWelcome() {
+  const empty = () => identityAccess.accounts().length === 0 && !identityAccess.accountsLoading();
   return (
     <PageEmpty
       testID="accounts-welcome"
       icon="shield"
-      title="选择一个账号"
-      description="左侧是这台部署的账号；点一行在右侧查看它的能力来源与安全操作。"
+      title={empty() ? "还没有人加入这台部署" : "选择一个账号"}
+      description={
+        empty()
+          ? "先建一个账号，再决定他能看到什么；也可以先建权限组，再往里加人。"
+          : "左侧是这台部署的账号；点一行在右侧查看它的能力来源与安全操作。"
+      }
       primaryLabel={canManageAccounts() ? "新建账号" : undefined}
       onPrimary={canManageAccounts() ? () => createAccountDialog.set(true) : undefined}
+      secondaryLabel={empty() && canReadGroups() ? "先建权限组" : undefined}
+      onSecondary={empty() && canReadGroups() ? () => store.openIdentitySection("groups") : undefined}
     />
   );
 }

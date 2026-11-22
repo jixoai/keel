@@ -19,13 +19,13 @@ import {
   Field,
   Input,
   ScrollArea,
-  Select,
   Sheet,
   Table,
   TableBodyRow,
   TableHeaderRow,
   Td,
   Th,
+  Tooltip,
   alpha,
   color,
   font,
@@ -34,6 +34,7 @@ import {
   space,
   typeScale,
   weight,
+  zIndex,
 } from "../../ui/kit";
 import { Icon, type IconName } from "../../ui/icons";
 import { store } from "../../data/store";
@@ -49,11 +50,17 @@ import {
   allCapabilityDomains,
   capabilityOf,
   isKnownKey,
+  scopeCeilingOf,
   scopeDisabledReason,
   scopeLabel,
   scopesOf,
 } from "../../data/permission-catalog";
-import type { PermissionGroupDetail, PermissionGroupSummary, PermissionScope } from "../../data/identity";
+import {
+  groupDisplayName,
+  isSuperAdminGroup,
+  type PermissionGroupDetail,
+  type PermissionGroupSummary,
+} from "../../data/identity";
 import {
   BandHead,
   Hairline,
@@ -78,31 +85,46 @@ const visibleGroups = (): PermissionGroupSummary[] => {
   const query = identityAccess.groupsQuery().trim().toLowerCase();
   const rows = identityAccess.groups();
   if (!query) return rows;
-  return rows.filter((group) => group.name.toLowerCase().includes(query));
+  return rows.filter((group) => group.name.toLowerCase().includes(query) || groupDisplayName(group.name).toLowerCase().includes(query));
+};
+
+/** The group the paper opens on at ≥1440 when the route names none: the first
+ * editable group (a read-only built-in is a poor first impression), else the
+ * first row. An empty list has no default and shows the welcome. */
+export const preferredGroupId = (): string | null => {
+  const rows = identityAccess.groups();
+  return (rows.find((group) => !group.builtin) ?? rows[0])?.groupId ?? null;
+};
+
+const groupGrantText = (group: PermissionGroupSummary): string => {
+  const row = identityAccess.groups().find((entry) => entry.groupId === group.groupId);
+  if (!row || row.grantCount === undefined) return "成员与能力未读到";
+  if (isSuperAdminGroup(group.name)) return `全部能力 · ${row.grantCount} 项`;
+  return `${row.grantCount} 项`;
 };
 
 const groupCountsOf = (group: PermissionGroupSummary): string => {
   const row = identityAccess.groups().find((entry) => entry.groupId === group.groupId);
   if (!row || row.memberCount === undefined) return "成员与能力未读到";
   const unsaved = group.groupId === identityAccess.groupDetailId() ? identityAccess.groupChanges().length : 0;
-  return `${row.grantCount ?? 0} 项 · ${row.memberCount} 人${unsaved ? ` · ${unsaved} 项未保存` : ""}`;
+  return `${groupGrantText(group)} · ${row.memberCount} 人${unsaved ? ` · ${unsaved} 项未保存` : ""}`;
 };
 
 function GroupIndexRow(props: { group: PermissionGroupSummary; selected: boolean }) {
   return (
     <PressRow
       testID={`group-row-${props.group.groupId}`}
-      accessibilityLabel={`打开权限组 ${props.group.name}`}
+      accessibilityLabel={`打开权限组 ${groupDisplayName(props.group.name)}`}
       selected={props.selected}
       onPress={() => store.openIdentityObject("groups", props.group.groupId)}
       style={{ borderBottomWidth: 0, minHeight: 52, borderRadius: radius.sm }}
     >
-      <Avatar name={props.group.name} size="sm" />
+      <Avatar name={groupDisplayName(props.group.name)} size="sm" />
       <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: 1 }}>
         <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-          {props.group.name}
+          {groupDisplayName(props.group.name)}
         </Text>
-        <Text style={{ fontSize: typeScale.key, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
           {props.group.builtin ? "内置 · " : ""}
           {groupCountsOf(props.group)}
         </Text>
@@ -141,6 +163,7 @@ export function GroupsIndex() {
                   message={identityAccess.groupsError()?.message ?? ""}
                   onRetry={() => void identityAccess.loadGroups()}
                   retrying={identityAccess.groupsLoading()}
+                  requestId={identityAccess.groupsError()?.requestId}
                 />
               }
             >
@@ -164,7 +187,12 @@ export function GroupsIndex() {
             />
           </If>
           <Each of={visibleGroups()} key={(group) => group.groupId}>
-            {(group) => <GroupIndexRow group={group()} selected={store.routeObjectId() === group().groupId} />}
+            {(group) => (
+              <GroupIndexRow
+                group={group()}
+                selected={(store.routeObjectId() ?? preferredGroupId()) === group().groupId}
+              />
+            )}
           </Each>
         </View>
       </ScrollArea>
@@ -281,12 +309,12 @@ function GroupsTable() {
             <TableBodyRow testID={`group-row-${group().groupId}`}>
               <Td>
                 <PressRow
-                  accessibilityLabel={`打开权限组 ${group().name}`}
+                  accessibilityLabel={`打开权限组 ${groupDisplayName(group().name)}`}
                   onPress={() => store.openIdentityObject("groups", group().groupId)}
                   style={{ borderBottomWidth: 0, minHeight: 44, marginHorizontal: -space.lg, paddingHorizontal: space.lg }}
                 >
-                  <Avatar name={group().name} size="sm" />
-                  <Text style={{ fontSize: typeScale.base, color: color.foreground }}>{group().name}</Text>
+                  <Avatar name={groupDisplayName(group().name)} size="sm" />
+                  <Text style={{ fontSize: typeScale.base, color: color.foreground }}>{groupDisplayName(group().name)}</Text>
                 </PressRow>
               </Td>
               <Td>
@@ -320,7 +348,7 @@ function GroupsCards() {
         {(group) => (
           <PressRow
             testID={`group-card-${group().groupId}`}
-            accessibilityLabel={`打开权限组 ${group().name}`}
+            accessibilityLabel={`打开权限组 ${groupDisplayName(group().name)}`}
             onPress={() => store.openIdentityObject("groups", group().groupId)}
             style={{
               flexDirection: "column",
@@ -334,8 +362,8 @@ function GroupsCards() {
             }}
           >
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
-              <Avatar name={group().name} size="sm" />
-              <Text style={{ flex: 1, fontSize: typeScale.base, fontWeight: weight.medium, color: color.foreground }}>{group().name}</Text>
+              <Avatar name={groupDisplayName(group().name)} size="sm" />
+              <Text style={{ flex: 1, fontSize: typeScale.base, fontWeight: weight.medium, color: color.foreground }}>{groupDisplayName(group().name)}</Text>
               <Badge variant={group().builtin ? "outline" : "secondary"} label={group().builtin ? "内置组" : "自定义"} />
             </View>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{groupCountsOf(group())}</Text>
@@ -370,7 +398,7 @@ export function GroupPage(props: { groupId: string; showBack: boolean }) {
   const detail = () => identityAccess.groupDetail();
   const builtin = () => detail()?.group.builtin === true;
   const editable = () => canManageGroups() && !builtin();
-  const name = () => detail()?.group.name ?? identityAccess.groups().find((row) => row.groupId === id())?.name ?? "权限组";
+  const name = () => groupDisplayName(detail()?.group.name ?? identityAccess.groups().find((row) => row.groupId === id())?.name ?? "权限组");
   return (
     <View style={{ flex: 1, minHeight: 0, flexDirection: "column" }}>
     <ScrollArea testID="group-page-scroll" accessibilityLabel={`权限组 ${name()}`} style={{ flex: 1, minHeight: 0 }}>
@@ -394,6 +422,7 @@ export function GroupPage(props: { groupId: string; showBack: boolean }) {
               message={identityAccess.groupDetailError()?.message ?? ""}
               onRetry={() => void identityAccess.loadGroup(id())}
               retrying={identityAccess.groupDetailLoading()}
+              requestId={identityAccess.groupDetailError()?.requestId}
               testID="group-error"
             />
           </If>
@@ -401,7 +430,26 @@ export function GroupPage(props: { groupId: string; showBack: boolean }) {
         <If when={detail() !== null && identityAccess.groupDetailError() === null}>
           <GroupHead groupId={id()} editable={editable()} builtin={builtin()} />
           <If when={savedNotice() !== null}>
-            <StateNote tone="success" icon="check" text={savedNotice() ?? ""} testID="group-saved-notice" />
+            <StateNote tone="success" icon="check" text={savedNotice() ?? ""} testID="group-saved-notice">
+              <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap", paddingTop: space.xs }}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  label="去记录查看"
+                  accessibilityLabel="去记录查看"
+                  onPress={() => store.openChapter("records")}
+                  style={touchStyle()}
+                />
+                <Button
+                  variant="link"
+                  size="sm"
+                  label="继续加成员"
+                  accessibilityLabel="继续加成员"
+                  onPress={() => addMemberDialog.set(true)}
+                  style={isMobile() ? { minHeight: 44 } : undefined}
+                />
+              </View>
+            </StateNote>
           </If>
           <If when={identityAccess.groupSaveError() !== null}>
             <StateNote tone="danger" icon="alert" text={identityAccess.groupSaveError() ?? ""} testID="group-save-error" />
@@ -434,31 +482,48 @@ export function GroupPage(props: { groupId: string; showBack: boolean }) {
 function GroupHead(props: { groupId: string; editable: boolean; builtin: boolean }) {
   const detail = () => identityAccess.groupDetail();
   const grants = () => detail()?.grants.length ?? 0;
+  const changes = () => identityAccess.groupChanges();
+  const full = () => isSuperAdminGroup(detail()?.group.name);
+  const title = () => groupDisplayName(detail()?.group.name ?? "权限组");
   return (
     <SheetHead
       testID="group-head"
       kicker={{ icon: "shield", text: "04 / 身份 · 权限组" }}
-      title={detail()?.group.name ?? "权限组"}
+      title={title()}
       badges={
         <>
           <Badge variant="outline" label={props.builtin ? "内置组" : "自定义"} />
           <Badge variant="secondary" label={`${detail()?.members.length ?? 0} 位成员`} />
-          <Badge variant="secondary" label={`已授 ${grants()} 项`} />
+          <Badge variant="secondary" label={full() ? `全部能力 · ${grants()} 项` : `已授 ${grants()} 项`} />
+          <If when={changes().length > 0}>
+            <Badge variant="warning" label={`${changes().length} 项未保存`} testID="group-unsaved-head" />
+          </If>
         </>
       }
       description="权限只做加法：账号的最终能力是所有组与直接授权的并集。保存会写入 05 记录。"
       facts={[{ label: "最近修改", value: formatWhen(detail()?.group.updatedAt) }]}
       actions={
-        <Button
-          testID="group-copy"
-          variant="outline"
-          size="sm"
-          label="另存为副本"
-          accessibilityLabel="另存为副本"
-          disabled={!canManageGroups()}
-          onPress={() => groupCopyDialog.set(true)}
-          style={touchStyle()}
-        />
+        <>
+          <Button
+            testID="group-records-link"
+            variant="ghost"
+            size="sm"
+            label="记录 05"
+            accessibilityLabel="打开记录"
+            onPress={() => store.openChapter("records")}
+            style={touchStyle()}
+          />
+          <Button
+            testID="group-copy"
+            variant="outline"
+            size="sm"
+            label="另存为副本"
+            accessibilityLabel="另存为副本"
+            disabled={!canManageGroups()}
+            onPress={() => groupCopyDialog.set(true)}
+            style={touchStyle()}
+          />
+        </>
       }
     />
   );
@@ -541,18 +606,45 @@ function GroupMatrix(props: { editable: boolean; builtin: boolean }) {
           已授 {Object.values(draft()).filter((scope) => scope !== undefined).length} 项
           {identityAccess.groupChanges().length ? ` · ${identityAccess.groupChanges().length} 项未保存` : ""}
         </Text>
-        <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
-          虚线 = 未授予
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+          <View
+            style={{
+              width: 18,
+              height: 10,
+              borderRadius: radius.xs,
+              borderWidth: 1,
+              borderStyle: "dashed",
+              borderColor: color.border,
+            }}
+          />
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>未授予</Text>
+          <View
+            style={{
+              width: 18,
+              height: 10,
+              borderRadius: radius.xs,
+              borderWidth: 1,
+              borderColor: color.fieldEdge,
+              backgroundColor: color.muted,
+            }}
+          />
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>已授</Text>
+        </View>
         <If when={!props.editable}>
           <Badge variant="outline" label="只读" />
         </If>
       </View>
+      <If when={props.editable}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          你只能授予自己持有的范围；超出的选项会锁定，并在行内写明这项能力你能授到的上限。
+        </Text>
+      </If>
       <If when={Object.values(draft()).filter((scope) => scope !== undefined).length === 0}>
         <StateNote
+          testID="group-matrix-empty"
           tone="info"
           icon="info"
-          text="这个组还没有任何能力。从下面的域开始勾选第一项；保存前会先给你看这次的变更。"
+          text="这个组还没有任何能力。从下面的域开始选择第一项；保存前会先给你看这次的变更。"
         />
       </If>
       <If when={!isMobile()}>
@@ -567,10 +659,10 @@ function GroupMatrix(props: { editable: boolean; builtin: boolean }) {
             maxWidth: 820,
           }}
         >
-          <Text style={{ flex: 1, fontFamily: font.mono, fontSize: typeScale.key, letterSpacing: 0.6, color: color.mutedForeground }}>能力</Text>
-          <Text style={{ width: 74, fontFamily: font.mono, fontSize: typeScale.key, letterSpacing: 0.6, color: color.mutedForeground }}>风险</Text>
-          <Text style={{ width: 168, fontFamily: font.mono, fontSize: typeScale.key, letterSpacing: 0.6, color: color.mutedForeground }}>KEY</Text>
-          <Text style={{ width: 150, fontFamily: font.mono, fontSize: typeScale.key, letterSpacing: 0.6, color: color.mutedForeground }}>范围</Text>
+          <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>能力</Text>
+          <Text style={{ width: 74, fontSize: typeScale.sm, color: color.mutedForeground }}>风险</Text>
+          <Text style={{ width: 168, fontSize: typeScale.sm, color: color.mutedForeground }}>KEY</Text>
+          <Text style={{ width: 150, fontSize: typeScale.sm, color: color.mutedForeground }}>范围</Text>
         </View>
       </If>
       <Each of={domains()} key={(domain) => domain.id}>
@@ -579,7 +671,15 @@ function GroupMatrix(props: { editable: boolean; builtin: boolean }) {
             <PressRow
               accessibilityLabel={`${isOpen(domain()) ? "折叠" : "展开"} ${domain().label} 能力`}
               onPress={() => toggle(domain())}
-              style={{ borderBottomWidth: 0, minHeight: 38, paddingHorizontal: 0 }}
+              style={{
+                borderBottomWidth: 0,
+                minHeight: isMobile() ? 44 : 36,
+                paddingHorizontal: 0,
+                position: "sticky",
+                top: 0,
+                zIndex: zIndex.sticky,
+                backgroundColor: color.background,
+              }}
             >
               <Icon name={domain().icon as IconName} size={14} tint={color.mutedForeground} />
               <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>{domain().label}</Text>
@@ -621,55 +721,59 @@ function CapabilityRow(props: {
   const value = () => draft()[props.capability.key];
   const changed = () => saved()[props.capability.key] !== value();
   const held = () => ownScopeOf(props.capability.key);
+  const ceiling = () => scopeCeilingOf(props.capability.key, held());
   const allowed = () => scopesOf(props.capability.key);
-  const ceiling = () => {
-    const scopes = allowed();
-    const own = held();
-    if (own === undefined) return undefined;
-    const ownIndex = ["own", "team", "tenant", "all"].indexOf(own);
-    return scopes.filter((scope) => ["own", "team", "tenant", "all"].indexOf(scope) <= ownIndex).pop();
-  };
   const limited = () => {
-    const allowedScopes = allowed();
-    const top = allowedScopes[allowedScopes.length - 1];
+    if (!props.editable) return false;
     if (held() === undefined) return true;
+    const top = allowed()[allowed().length - 1];
     return top !== undefined && top !== ceiling();
   };
-  const items = () => [
-    { value: "", title: "未授予" },
-    ...allowed().map((scope) => {
-      const reason = scopeDisabledReason(props.capability.key, scope, held());
-      return {
-        value: scope,
-        title: reason ? `${SCOPE_LABEL[scope]} — ${reason}` : SCOPE_LABEL[scope],
-        disabled: reason !== undefined && reason !== "",
-      };
-    }),
-  ];
   // A key this build does not know is preserved as-is, never edited into one of
   // the catalogue's rows (the server would only refuse the write).
   const canEdit = () => props.editable && isKnownKey(props.capability.key);
+  const microLabel = () => {
+    if (!limited()) return "";
+    if (held() === undefined) return "缺这项能力";
+    return `最高：${scopeLabel(ceiling())}`;
+  };
   return (
     <View
       testID={`capability-row-${props.capability.key}`}
       style={{
         flexDirection: "column",
-        gap: 2,
+        gap: 0,
         borderTopWidth: 1,
         borderTopColor: color.border,
-        paddingVertical: space.xs,
+        paddingVertical: 0,
         backgroundColor: changed() ? alpha(color.warning, 0.06) : undefined,
       }}
     >
-      <If when={!isMobile()} else={<CapabilityRowPhone capability={props.capability} canEdit={canEdit()} />}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 44 }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ fontSize: typeScale.base, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+      <If when={!isMobile()} else={<CapabilityRowPhone capability={props.capability} canEdit={canEdit()} microLabel={microLabel()} />}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 46 }}>
+          <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "baseline", gap: space.sm }}>
+            <Text
+              style={{
+                flexShrink: 1,
+                minWidth: 0,
+                fontSize: typeScale.base,
+                color: color.foreground,
+                numberOfLines: 1,
+                textOverflow: "ellipsis",
+              }}
+            >
               {props.capability.displayName}
               {changed() ? <Text style={{ color: color.warning }}> · 未保存</Text> : null}
             </Text>
+            <If when={microLabel() !== ""}>
+              <View tooltip={<Tooltip label={held() === undefined ? "你没有这项能力，不能授予。" : `你最多只能授予「${scopeLabel(ceiling())}」。`} />}>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1 }}>
+                  {microLabel()}
+                </Text>
+              </View>
+            </If>
             <If when={!isKnownKey(props.capability.key)}>
-              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>这个 key 不在当前能力目录里；按原样保留。</Text>
+              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>不在当前能力目录；按原样保留</Text>
             </If>
           </View>
           <View style={{ width: 74 }}>
@@ -681,47 +785,41 @@ function CapabilityRow(props: {
             {props.capability.key}
           </Text>
           <View style={{ width: 150 }}>
-            <If when={canEdit()} else={<ScopeStamp label={scopeLabel(value())} unset={value() === undefined} disabled />}>
-              <Select
-                testID={`capability-scope-${props.capability.key}`}
-                size="lg"
-                items={items()}
-                value={value() ?? ""}
-                onChange={(next) =>
-                  identityAccess.setDraftScope(props.capability.key, next === null || next === "" ? undefined : (next as PermissionScope))
-                }
-                accessibilityLabel={`${props.capability.displayName} 的范围`}
-              />
-            </If>
+            <ScopeStamp
+              testID={`capability-scope-${props.capability.key}`}
+              label={scopeLabel(value())}
+              unset={value() === undefined}
+              disabled={!canEdit()}
+              onPress={canEdit() ? () => scopeSheetKey.set(props.capability.key) : undefined}
+            />
           </View>
-        </View>
-      </If>
-      <If when={limited()}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs, paddingLeft: 2 }}>
-          <Icon name="lock" size={11} tint={color.mutedForeground} />
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            {held() === undefined ? "你没有这项能力，不能授予它。" : `你最多只能授予「${scopeLabel(ceiling())}」。`}
-          </Text>
         </View>
       </If>
     </View>
   );
 }
 
-/** The phone row: name + key + risk, then the 44px scope control (a stamp that
- * opens the bottom sheet; a wide table would scroll sideways here). */
+/** The phone row: name + key + risk + the ceiling micro-label, then the 44px
+ * scope control (a stamp that opens the bottom sheet; a wide table would scroll
+ * sideways here). */
 function CapabilityRowPhone(props: {
   capability: { key: string; displayName: string; risk: string };
   canEdit: boolean;
+  microLabel: string;
 }) {
   const value = () => (identityAccess.groupDraft() ?? {})[props.capability.key];
   return (
     <View style={{ flexDirection: "column", gap: space.sm, paddingVertical: space.xs }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ fontSize: typeScale.base, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-            {props.capability.displayName}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm, flexWrap: "wrap" }}>
+            <Text style={{ fontSize: typeScale.base, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+              {props.capability.displayName}
+            </Text>
+            <If when={props.microLabel !== ""}>
+              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.microLabel}</Text>
+            </If>
+          </View>
           <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
             {props.capability.key}
           </Text>
@@ -740,8 +838,8 @@ function CapabilityRowPhone(props: {
   );
 }
 
-/** The scope choice as a bottom sheet on a phone (44px rows, the reason in
- * words under every disabled option). */
+/** The scope choice as a sheet (bottom on a phone, right on the desktop; 44px
+ * rows, the reason in words under every locked option). */
 function ScopeSheet() {
   const key = () => scopeSheetKey();
   const value = () => (key() ? (identityAccess.groupDraft() ?? {})[key()!] : undefined);
@@ -750,10 +848,10 @@ function ScopeSheet() {
     <Sheet
       testID="capability-scope-sheet"
       open={key() !== null}
-      side="bottom"
+      side={isMobile() ? "bottom" : "right"}
       title={key() ? capabilityOf(key()!).displayName : "范围"}
       description="选择这个组在这项能力上的范围。"
-      style={isMobile() ? { height: 340, maxHeight: "80%" } : undefined}
+      style={isMobile() ? { height: 360, maxHeight: "80%" } : undefined}
       onOpenChange={(event) => {
         if (!event.open) close();
       }}
@@ -761,12 +859,18 @@ function ScopeSheet() {
     >
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flexDirection: "column", gap: 0 }}>
-        <ScopeChoice label="未授予" selected={value() === undefined} onPress={() => { identityAccess.setDraftScope(key()!, undefined); close(); }} />
+        <ScopeChoice
+          testID="scope-choice-unset"
+          label="未授予"
+          selected={value() === undefined}
+          onPress={() => { identityAccess.setDraftScope(key()!, undefined); close(); }}
+        />
         <Each of={key() ? scopesOf(key()!) : []} key={(scope) => scope}>
           {(scope) => {
             const reason = () => (key() ? scopeDisabledReason(key()!, scope(), ownScopeOf(key()!)) : undefined);
             return (
               <ScopeChoice
+                testID={`scope-choice-${scope()}`}
                 label={SCOPE_LABEL[scope()]}
                 selected={value() === scope()}
                 reason={reason()}
@@ -785,23 +889,31 @@ function ScopeSheet() {
   );
 }
 
-function ScopeChoice(props: { label: string; selected: boolean; reason?: string; onPress: () => void }) {
+function ScopeChoice(props: { label: string; selected: boolean; reason?: string; onPress: () => void; testID?: string }) {
   const disabled = () => props.reason !== undefined && props.reason !== "";
   return (
     <PressRow
+      testID={props.testID}
       accessibilityLabel={`${props.label}${props.reason ? `，${props.reason}` : ""}`}
       onPress={disabled() ? undefined : props.onPress}
       disabled={disabled()}
       selected={props.selected}
-      style={{ borderBottomWidth: 1 }}
+      style={{ borderBottomWidth: 1, minHeight: 48, alignItems: "flex-start", paddingVertical: space.sm }}
     >
-      <Text style={{ fontSize: typeScale.base, color: color.foreground }}>{props.label}</Text>
-      <If when={props.selected}>
-        <Icon name="check" size={14} tint={color.primary} />
-      </If>
-      <If when={props.reason !== undefined && props.reason !== ""}>
-        <Text style={{ marginLeft: "auto", fontSize: typeScale.sm, color: color.mutedForeground }}>{props.reason}</Text>
-      </If>
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+          <Text style={{ fontSize: typeScale.base, color: color.foreground }}>{props.label}</Text>
+          <If when={props.selected}>
+            <Icon name="check" size={14} tint={color.primary} />
+          </If>
+          <If when={disabled()}>
+            <Icon name="lock" size={12} tint={color.mutedForeground} />
+          </If>
+        </View>
+        <If when={props.reason !== undefined && props.reason !== ""}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{props.reason}</Text>
+        </If>
+      </View>
     </PressRow>
   );
 }
@@ -874,7 +986,7 @@ function GroupSignoff() {
     >
       <View style={{ flexDirection: "column", minWidth: 0 }}>
         <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
-          本次登记人：{me()?.displayName || me()?.username || "当前账号"}
+          本次登记人：{me()?.displayName || me()?.username || "当前账号"} · {identityAccess.currentRoleLabel()}
         </Text>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入 05 记录 · 立即生效</Text>
       </View>
@@ -885,16 +997,17 @@ function GroupSignoff() {
         <Badge variant="destructive" label={`${changes().filter((change) => change.highRisk).length} 项高危 · 需确认`} />
       </If>
       <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: space.sm }}>
-        <Button
-          testID="group-discard"
-          variant="ghost"
-          size="sm"
-          label="放弃"
-          accessibilityLabel="放弃修改"
-          disabled={!dirty()}
-          onPress={() => identityAccess.discardDraft()}
-          style={touchStyle()}
-        />
+        <If when={dirty()}>
+          <Button
+            testID="group-discard"
+            variant="ghost"
+            size="sm"
+            label="放弃"
+            accessibilityLabel="放弃修改"
+            onPress={() => identityAccess.discardDraft()}
+            style={touchStyle()}
+          />
+        </If>
         <Button
           testID="group-save"
           size={isMobile() ? "default" : "sm"}
@@ -966,7 +1079,7 @@ function LedgerSheet() {
         </If>
       </View>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-        本次登记人：{me()?.displayName || me()?.username || "当前账号"}
+        本次登记人：{me()?.displayName || me()?.username || "当前账号"} · {identityAccess.currentRoleLabel()}
       </Text>
       <ScrollArea maxHeight={isMobile() ? 260 : 360} style={{ flexDirection: "column" }}>
         <Each of={changes()} key={(change) => change.key}>
@@ -1245,7 +1358,7 @@ function CopyGroupDialog(props: { groupId: string }) {
     const detail = source();
     if (!detail || detail.group.groupId !== props.groupId || seededFor === detail.group.groupId) return;
     seededFor = detail.group.groupId;
-    name.set(`${detail.group.name} 副本`);
+    name.set(`${groupDisplayName(detail.group.name)} 副本`);
   });
   const close = () => groupCopyDialog.set(false);
   const submit = async () => {
@@ -1338,12 +1451,17 @@ export function GroupDialogs() {
 
 /** The group page's empty paper (wide layout). */
 export function GroupsWelcome() {
+  const empty = () => identityAccess.groups().length === 0 && !identityAccess.groupsLoading();
   return (
     <PageEmpty
       testID="groups-welcome"
       icon="shield"
-      title="选择一个权限组"
-      description="左侧是这台部署的权限组；点一行查看并编辑它的能力与成员。"
+      title={empty() ? "还没有权限组" : "选择一个权限组"}
+      description={
+        empty()
+          ? "内置组覆盖常见岗位；团队有自己的分工时，再建一个自定义组。"
+          : "左侧是这台部署的权限组；点一行查看并编辑它的能力与成员。"
+      }
       primaryLabel={canManageGroups() ? "新建权限组" : undefined}
       onPrimary={canManageGroups() ? () => createGroupDialog.set(true) : undefined}
     />

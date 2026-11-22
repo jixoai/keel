@@ -59,6 +59,29 @@ export interface PermissionGroupSummary {
   updatedAt?: string;
 }
 
+/** The built-in group tokens the server seeds (`internal/access/builtin.go`)
+ * and the words the product uses for them. A custom group keeps its own name;
+ * an unknown built-in token travels verbatim rather than being guessed. */
+const BUILTIN_GROUP_LABELS: Record<string, string> = {
+  "super-admin": "超级管理员",
+  "tenant-admin": "租户管理员",
+  "bot-operator": "Bot 运营",
+  viewer: "只读成员",
+  auditor: "审计员",
+};
+
+export const groupDisplayName = (name: string | undefined): string => {
+  const token = (name ?? "").trim();
+  return BUILTIN_GROUP_LABELS[token] ?? token;
+};
+
+/** The deployment's full-authority preset, in either the server token or the
+ * product word (the fixture and a live deployment use different spellings). */
+export const isSuperAdminGroup = (name: string | undefined): boolean => {
+  const token = (name ?? "").trim();
+  return token === "super-admin" || token === "超级管理员";
+};
+
 export interface PermissionGrantView {
   key: string;
   scope: PermissionScope;
@@ -197,12 +220,28 @@ export interface AuditEventView {
   summary?: string;
   actorName?: string;
   actorKind?: string;
+  /** The acting account's id, when the record carries it. It lets the account
+   * index derive a real 「最近活动」 instead of guessing by display name. */
+  actorId?: string;
   objectType?: string;
   objectName?: string;
+  /** The object's own id, when the record carries one (the actionable links). */
+  objectId?: string;
   result: "ok" | "denied" | "error";
   requestId?: string;
   /** A masked source (IP), already masked by the server. */
   source?: string;
+  /** The capability a refusal named (the server's `detail.key`), so the
+   * detail panel can print `bot.invoke` instead of a generic 「被拒绝」. */
+  capabilityKey?: string;
+  /** The object's owning account, when the record names it. */
+  objectOwnerName?: string;
+  objectOwnerId?: string;
+  /** The groups or people who can grant the missing capability, when named. */
+  grantableBy?: string[];
+  /** A run a team event points at (`team_bot_id` + captain `session_id`). */
+  teamId?: string;
+  runId?: string;
 }
 
 export interface AuditQuery {
@@ -221,11 +260,30 @@ export function parseAuditKind(value: unknown): AuditKind {
   return (AUDIT_KINDS as string[]).includes(token) ? (token as AuditKind) : "other";
 }
 
+/** A string list from the wire: an array of strings, or one comma/、 separated
+ * string. Empty entries are dropped, never turned into an empty chip. */
+const parseTextList = (value: unknown): string[] => {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,，、]/) : [];
+  return raw.map((entry) => text(entry).trim()).filter((entry) => entry !== "");
+};
+
+/** The first non-empty text among the record's top level and its detail map
+ * (the server writes identifiers into `detail`; a newer answer may hoist them). */
+const firstText = (row: Record<string, unknown>, detail: Record<string, unknown>, names: string[]): string | undefined => {
+  for (const name of names) {
+    const found = textOrUndefined(row[name]) ?? textOrUndefined(detail[name]);
+    if (found) return found;
+  }
+  return undefined;
+};
+
 export function parseAuditEvent(value: unknown): AuditEventView | undefined {
   const row = asRecord(value);
+  const detail = asRecord(row.detail);
   const eventId = text(row.eventId ?? row.id);
   if (!eventId) return undefined;
   const resultToken = text(row.result);
+  const grantable = row.grantableBy ?? row.grantable_by ?? detail.grantable_by ?? detail.grantableBy;
   return {
     eventId,
     occurredAt: textOrUndefined(row.occurredAt ?? row.createdAt),
@@ -234,11 +292,19 @@ export function parseAuditEvent(value: unknown): AuditEventView | undefined {
     summary: textOrUndefined(row.summary),
     actorName: textOrUndefined(row.actorName),
     actorKind: textOrUndefined(row.actorKind),
+    actorId: firstText(row, detail, ["actorId", "actorAccountId", "actor_account_id"]),
     objectType: textOrUndefined(row.objectType),
     objectName: textOrUndefined(row.objectName),
+    objectId: firstText(row, detail, ["objectId", "resourceId", "resource_id"]),
     result: resultToken === "denied" || resultToken === "error" ? resultToken : "ok",
     requestId: textOrUndefined(row.requestId),
     source: textOrUndefined(row.source),
+    capabilityKey: firstText(row, detail, ["capabilityKey", "requiredKey", "required_key", "key"]),
+    objectOwnerName: firstText(row, detail, ["objectOwnerName", "ownerName", "owner_name"]),
+    objectOwnerId: firstText(row, detail, ["objectOwnerId", "ownerId", "owner_id"]),
+    grantableBy: parseTextList(grantable),
+    teamId: firstText(row, detail, ["teamId", "teamBotId", "team_bot_id"]),
+    runId: firstText(row, detail, ["runId", "sessionId", "session_id"]),
   };
 }
 

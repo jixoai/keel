@@ -20,9 +20,10 @@ import {
   AccountsPage,
   AccountsWelcome,
   CreateAccountDialog,
+  preferredAccountId,
 } from "./accounts";
-import { GroupDialogs, GroupPage, GroupsIndex, GroupsPage, GroupsWelcome } from "./groups";
-import { IdentitySegmented, Kicker, PagePermission, isWide } from "./common";
+import { GroupDialogs, GroupPage, GroupsIndex, GroupsPage, GroupsWelcome, preferredGroupId } from "./groups";
+import { IdentitySegmented, Kicker, PageLoading, PagePermission, isWide } from "./common";
 import { IndexColumn, Paper } from "./shell";
 
 /** The chapter's own capability gate (the shell hides the tab, a deep link
@@ -70,13 +71,33 @@ export function IdentityChapter() {
           </IndexColumn>
           <Paper>
             <If when={section() === "accounts"}>
-              <If when={objectId() !== null} else={<View style={{ flex: 1, justifyContent: "center" }}><AccountsWelcome /></View>}>
-                <AccountPage accountId={objectId() ?? ""} showBack={false} />
+              <If
+                when={(objectId() ?? preferredAccountId()) !== null}
+                else={
+                  <If
+                    when={identityAccess.accountsLoading() && identityAccess.accounts().length === 0}
+                    else={<View style={{ flex: 1, justifyContent: "center" }}><AccountsWelcome /></View>}
+                  >
+                    <PageLoading rows={5} testID="identity-paper-loading" />
+                  </If>
+                }
+              >
+                <AccountPage accountId={objectId() ?? preferredAccountId() ?? ""} showBack={false} />
               </If>
             </If>
             <If when={section() === "groups"}>
-              <If when={objectId() !== null} else={<View style={{ flex: 1, justifyContent: "center" }}><GroupsWelcome /></View>}>
-                <GroupPage groupId={objectId() ?? ""} showBack={false} />
+              <If
+                when={(objectId() ?? preferredGroupId()) !== null}
+                else={
+                  <If
+                    when={identityAccess.groupsLoading() && identityAccess.groups().length === 0}
+                    else={<View style={{ flex: 1, justifyContent: "center" }}><GroupsWelcome /></View>}
+                  >
+                    <PageLoading rows={5} testID="identity-groups-loading" />
+                  </If>
+                }
+              >
+                <GroupPage groupId={objectId() ?? preferredGroupId() ?? ""} showBack={false} />
               </If>
             </If>
           </Paper>

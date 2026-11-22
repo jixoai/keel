@@ -25,13 +25,13 @@ test("范围上限：超过自己持有的范围禁用并给原因", () => {
   // session.read: the caller holds 本团队.
   expect(scopeDisabledReason("session.read", "own", "team")).toBeUndefined();
   expect(scopeDisabledReason("session.read", "team", "team")).toBeUndefined();
-  expect(scopeDisabledReason("session.read", "tenant", "team")).toBe("你最多只能授予「本团队」。");
-  expect(scopeDisabledReason("session.read", "all", "team")).toBe("你最多只能授予「本团队」。");
+  expect(scopeDisabledReason("session.read", "tenant", "team")).toBe("最高 本团队，超出你的权限。");
+  expect(scopeDisabledReason("session.read", "all", "team")).toBe("最高 本团队，超出你的权限。");
   // A tenant-only key cannot use own/team at all.
-  expect(scopeDisabledReason("account.read", "team", "tenant")).toBe("这项能力只支持租户级范围。");
+  expect(scopeDisabledReason("account.read", "team", "tenant")).toBe("这项能力仅支持租户级范围。");
   expect(scopeDisabledReason("account.read", "tenant", "tenant")).toBeUndefined();
   // No key, no grant.
-  expect(scopeDisabledReason("bot.manage", "team", undefined)).toBe("你没有这项能力，不能授予它。");
+  expect(scopeDisabledReason("bot.manage", "team", undefined)).toBe("你没有这项能力，不能授予。");
   // A deployment administrator holds everything.
   setEffectivePermissions({}, true);
   expect(scopeDisabledReason("session.read", "all", "all")).toBeUndefined();
