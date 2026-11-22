@@ -10,6 +10,10 @@
 > `docs/PLUGIN-CATALOG.md` (catalog schema + reconciliation). Schemas:
 > `plugins/keel.plugin-market/catalog.schema.json`,
 > `docs/schemas/extensibility.schema.json`.
+>
+> Commits: `5c8097a` (manifest/extensibility contract), `259f25e` (catalog
+> single source), `026d7d0` (layer boundary tests), `d105fb5` (R1 re-pin +
+> this evidence).
 
 ## 1. Delivered
 
