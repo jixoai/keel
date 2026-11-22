@@ -13,7 +13,8 @@
 >
 > Commits: `5c8097a` (manifest/extensibility contract), `259f25e` (catalog
 > single source), `026d7d0` (layer boundary tests), `d105fb5` (R1 re-pin +
-> this evidence).
+> this evidence), `a4aa252` (plugin-market README counts), `1bc1f91`
+> (extensibility loader test).
 
 ## 1. Delivered
 
