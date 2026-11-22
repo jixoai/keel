@@ -36,6 +36,8 @@ ENV_FILE="${FDE2E_ENV_PERSONAL:-$MAIN/.env.personal}"
 KEEP_STACK="${KEEL_E2E_KEEP_STACK:-0}"
 SKIP_BUILD="${KEEL_E2E_SKIP_BUILD:-0}"
 SERVER_PID=""
+SCRIPTED_PID=""
+SCRIPTED_PORT=""
 DB_CREATED=0
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -53,6 +55,11 @@ cleanup() {
   fi
   if [[ -n "$SERVER_PID" ]]; then
     if kill -0 "$SERVER_PID" 2>/dev/null; then proc_gone="no"; else proc_gone="yes"; fi
+  fi
+  if [[ -n "$SCRIPTED_PID" ]] && kill -0 "$SCRIPTED_PID" 2>/dev/null; then
+    kill "$SCRIPTED_PID" 2>/dev/null || true
+    for _ in $(seq 1 30); do kill -0 "$SCRIPTED_PID" 2>/dev/null || break; sleep 0.1; done
+    kill -9 "$SCRIPTED_PID" 2>/dev/null || true
   fi
   if command -v lsof >/dev/null 2>&1 && [[ -n "${PORT:-}" ]]; then
     if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then port_free="no"; else port_free="yes"; fi
@@ -79,15 +86,17 @@ cleanup() {
     fi
     rm -rf "$SECRETS" "$RUN_DIR/dsn" "$RUN_DIR/legacy-dsn" 2>/dev/null || true
   fi
-  python3 - "$RUN_DIR" "$DB" "${PORT:-}" "${SERVER_PID:-}" "$KEEP_STACK" \
+  python3 - "$RUN_DIR" "$DB" "${PORT:-}" "${SERVER_PID:-}" "${SCRIPTED_PORT:-}" "${SCRIPTED_PID:-}" "$KEEP_STACK" \
     "$port_free" "$db_gone" "$legacy_gone" "$proc_gone" "$STARTED_AT" "$code" <<'PY'
 import json, sys, datetime
-run_dir, db, port, pid, keep, port_free, db_gone, legacy_gone, proc_gone, started, code = sys.argv[1:]
+run_dir, db, port, pid, scripted_port, scripted_pid, keep, port_free, db_gone, legacy_gone, proc_gone, started, code = sys.argv[1:]
 payload = {
     "database": db,
     "port": port,
     "serverPid": pid,
     "kept": keep == "1",
+    "scriptedModelPort": scripted_port,
+    "scriptedModelPid": scripted_pid,
     "portFree": port_free,
     "databaseDropped": db_gone,
     "legacyDatabaseDropped": legacy_gone,
@@ -129,6 +138,23 @@ else
   [[ -n "$PORT" ]] || fail "no free port in 13600-13799"
 fi
 
+# The scripted model is a support process, not the product. Pick a nearby free
+# port that is not the serve port.
+if [[ -n "${KEEL_E2E_SCRIPTED_PORT:-}" ]]; then
+  SCRIPTED_PORT="$KEEL_E2E_SCRIPTED_PORT"
+  if lsof -nP -iTCP:"$SCRIPTED_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    fail "KEEL_E2E_SCRIPTED_PORT=$SCRIPTED_PORT is already listening"
+  fi
+else
+  for candidate in $(seq 13790 13799); do
+    if [[ "$candidate" != "$PORT" ]] && ! lsof -nP -iTCP:"$candidate" -sTCP:LISTEN >/dev/null 2>&1; then
+      SCRIPTED_PORT="$candidate"
+      break
+    fi
+  done
+  [[ -n "$SCRIPTED_PORT" ]] || fail "no free scripted-model port in 13790-13799"
+fi
+
 # ---- 2. DSN: derive the throwaway database from the personal DSN ----------
 python3 - "$ENV_FILE" "$DB" "$RUN_DIR/dsn" <<'PY'
 import re, sys, urllib.parse
@@ -166,6 +192,45 @@ write("bob.password", secrets.token_urlsafe(18))
 write("member.password", secrets.token_urlsafe(18))
 PY
 
+MODELS_CONFIG="$RUN_DIR/models.json"
+python3 - "$SCRIPTED_PORT" "$MODELS_CONFIG" <<'PY'
+import json, sys
+port, out = sys.argv[1], sys.argv[2]
+document = {
+    "schemaVersion": 1,
+    "providers": [{
+        "id": "e2e-scripted",
+        "name": "E2E Scripted",
+        "api": {"type": "openai-chat-completions", "baseUrl": f"http://127.0.0.1:{port}/v1"},
+        "access": {"type": "api-key", "env": "KEEL_E2E_MODEL_KEY"},
+        "modelIds": ["e2e-captain", "e2e-member"],
+        "visibility": "visible",
+    }],
+    "modelRules": [{
+        "match": "*",
+        "config": {
+            "enabled": True,
+            "properties": {
+                "contextWindow": 64000,
+                "inputFormat": {"text": True, "image": False, "video": False, "audio": False, "pdf": False},
+                "outputFormat": {"text": True},
+                "supportsToolCall": True,
+                "supportsJsonSchemaOutput": False,
+                "supportsNativeWebSearch": False,
+            },
+            "options": {
+                "reasoningLevel": {"values": ["off"], "map": {"off": {}}},
+                "maxOutputTokens": {"max": 2048, "map": {}},
+            },
+        },
+    }],
+    "selection": {"providerId": "e2e-scripted", "modelId": "e2e-captain"},
+}
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump(document, fh, indent=2)
+    fh.write("\n")
+PY
+
 BIN="${KEEL_E2E_BIN:-$RUN_DIR/keel}"
 WEB_DIR="${KEEL_E2E_WEB_DIR:-$RUN_DIR/web}"
 if [[ "$SKIP_BUILD" != "1" ]]; then
@@ -187,12 +252,36 @@ docker exec "$PG_CONTAINER" dropdb -U "$PG_USER" --if-exists "$DB" >/dev/null 2>
 docker exec "$PG_CONTAINER" createdb -U "$PG_USER" "$DB" || fail "createdb failed"
 DB_CREATED=1
 
+# ---- 4b. deterministic scripted model ------------------------------------
+SCRIPTED_LOG="$RUN_DIR/scripted-model.jsonl"
+say "starting scripted model on 127.0.0.1:$SCRIPTED_PORT"
+SCRIPTED_MODEL_PORT="$SCRIPTED_PORT" SCRIPTED_MODEL_LOG="$SCRIPTED_LOG" \
+  node "$ROOT/scripts/keel-identity-e2e/scripted-model.mjs" \
+  >"$RUN_DIR/scripted-model.stdout.log" 2>&1 &
+SCRIPTED_PID=$!
+SCRIPTED_READY=0
+for _ in $(seq 1 50); do
+  if curl -fsS --max-time 1 "http://127.0.0.1:$SCRIPTED_PORT/health" >/dev/null 2>&1; then
+    SCRIPTED_READY=1
+    break
+  fi
+  if ! kill -0 "$SCRIPTED_PID" 2>/dev/null; then
+    say "scripted model exited before readiness" >&2
+    tail -20 "$RUN_DIR/scripted-model.stdout.log" >&2 || true
+    exit 1
+  fi
+  sleep 0.1
+done
+[[ "$SCRIPTED_READY" == "1" ]] || fail "scripted model did not become healthy on 127.0.0.1:$SCRIPTED_PORT"
+
 # ---- 5. serve -------------------------------------------------------------
 say "starting keel serve on 127.0.0.1:$PORT (evidence $RUN_DIR)"
 KEEL_DSN="$DSN" \
 KEEL_BOOTSTRAP_TOKEN="$(cat "$SECRETS/bootstrap.token")" \
 KEEL_SECRET_KEY="$(cat "$SECRETS/secret.key")" \
 KEEL_SERVE_TENANT="$TENANT" \
+KEEL_MODELS_CONFIG="$MODELS_CONFIG" \
+KEEL_E2E_MODEL_KEY="e2e-scripted-key" \
 "$BIN" serve \
   --addr "127.0.0.1:$PORT" \
   --auth required \
@@ -236,6 +325,11 @@ LEGACY_DSN="$(cat "$RUN_DIR/legacy-dsn")"
 export E2E_BASE="http://127.0.0.1:$PORT"
 export E2E_REPO_ROOT="$ROOT"
 export E2E_HEAD_COMMIT="$(cd "$ROOT" && git rev-parse HEAD)"
+export E2E_SCRIPTED_MODEL_PORT="$SCRIPTED_PORT"
+export E2E_SCRIPTED_MODEL_LOG="$SCRIPTED_LOG"
+export E2E_MODEL_PROVIDER_ID="e2e-scripted"
+export E2E_MODEL_CAPTAIN="e2e-captain"
+export E2E_MODEL_MEMBER="e2e-member"
 export E2E_EVIDENCE="$RUN_DIR"
 export E2E_BOOTSTRAP_TOKEN_FILE="$SECRETS/bootstrap.token"
 export E2E_ADMIN_USERNAME="e2e-admin"

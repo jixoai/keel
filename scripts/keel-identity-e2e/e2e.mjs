@@ -24,6 +24,10 @@ const PLAYWRIGHT =
   process.env.PLAYWRIGHT_CORE ||
   '/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs';
 const HEADLESS = (process.env.E2E_HEADLESS || 'true') !== 'false';
+const MODEL_PROVIDER = process.env.E2E_MODEL_PROVIDER_ID || 'e2e-scripted';
+const MODEL_CAPTAIN = process.env.E2E_MODEL_CAPTAIN || 'e2e-captain';
+const MODEL_MEMBER = process.env.E2E_MODEL_MEMBER || 'e2e-member';
+const modelRef = (modelId) => ({ providerId: MODEL_PROVIDER, modelId });
 const KEEL_BIN = process.env.E2E_KEEL_BIN || '';
 const DB = process.env.E2E_DB || '';
 const PG_CONTAINER = process.env.E2E_PG_CONTAINER || 'keel-pg';
@@ -668,7 +672,7 @@ async function makeRoleProfileBot(api, spec) {
     name: spec.name,
     profileId: profile.body.profile?.profileId,
     modelKind: spec.modelKind ?? 'text',
-    defaultModel: spec.defaultModel ?? { providerId: 'fake', modelId: 'fake' },
+    defaultModel: spec.defaultModel ?? modelRef(MODEL_MEMBER),
     harness: spec.harness ?? { tools: [], context: { instruction: spec.instruction ?? '', permissions: [] } },
   });
   return { role, profile, bot };
@@ -682,11 +686,12 @@ async function step3(step, ctx) {
     accountId: ctx.aliceAccountId,
     botId: 'support-1',
     name: '客服一号',
+    defaultModel: modelRef(MODEL_CAPTAIN),
     harness: {
       tools: [],
       context: {
         instruction: '回答客户问题；先确认订单号，再给出下一步。',
-        permissions: ['session.read', 'session.write', 'bot.read'],
+        permissions: ['session.read', 'session.write', 'bot.read', 'bot.invoke'],
       },
     },
   });
@@ -703,7 +708,7 @@ async function step3(step, ctx) {
   check(step, 'bot carries profileId', bot.profileId === ctx.supportProfileId, ctx.supportProfileId, bot.profileId);
   check(step, 'bot carries the owner account (alice)', bot.accountId === ctx.aliceAccountId, ctx.aliceAccountId, bot.accountId);
   check(step, 'model kind is text', bot.modelKind === 'text', 'text', bot.modelKind);
-  check(step, 'default model is recorded', bot.defaultModel?.providerId === 'fake' && bot.defaultModel?.modelId === 'fake', 'fake/fake', `${bot.defaultModel?.providerId}/${bot.defaultModel?.modelId}`);
+  check(step, 'default model is recorded', bot.defaultModel?.providerId === MODEL_PROVIDER && bot.defaultModel?.modelId === MODEL_CAPTAIN, `${MODEL_PROVIDER}/${MODEL_CAPTAIN}`, `${bot.defaultModel?.providerId}/${bot.defaultModel?.modelId}`);
   check(step, 'harness instruction is recorded', String(bot.harness?.context?.instruction || '').includes('回答客户问题'), 'contains 回答客户问题', bot.harness?.context?.instruction);
   check(step, 'harness permissions are recorded', (bot.harness?.context?.permissions || []).includes('session.read'), 'session.read', JSON.stringify(bot.harness?.context?.permissions));
 
@@ -712,7 +717,7 @@ async function step3(step, ctx) {
   await waitTestId(page, 'bot-band-head', 30000);
   const text = await bodyText(page);
   check(step, 'bot page shows the name', text.includes('客服一号'), '客服一号', text.slice(0, 80));
-  check(step, 'bot page shows model kind and model', text.includes('文本') && text.toLowerCase().includes('fake'), '文本/fake', text.slice(0, 200));
+  check(step, 'bot page shows model kind and model', text.includes('文本') && (text.includes(MODEL_CAPTAIN) || text.toLowerCase().includes('scripted')), `文本/${MODEL_CAPTAIN}`, text.slice(0, 200));
   await shot(page, step, 'bot-detail');
   await gotoRoute(page, '/bots', 'bots-index');
   await waitTestId(page, 'bot-row-support-1', 30000);
@@ -734,6 +739,7 @@ async function step4(step, ctx) {
     accountId: ctx.bobAccountId,
     botId: 'other-1',
     name: '另一个 Bot',
+    defaultModel: modelRef(MODEL_MEMBER),
     harness: {
       tools: [],
       context: { instruction: '另一个账号的 Bot。', permissions: ['session.read', 'session.write'] },
@@ -783,6 +789,89 @@ async function step4(step, ctx) {
   log(step, `keyId=${keyView.keyId}; revoked key -> 401`);
 }
 
+
+// Evidence for one captain -> member delegation. It reads the sub-agent
+// registry, the child session ownership/events and the audit ledger; the
+// assertions are the A6 contract, not a screenshot of a tool row.
+async function captainSpawnEvidence(step, admin, ctx, spec) {
+  const { captainSessionId, captainBotId, memberBotId, memberAccountId, teamBotId, label } = spec;
+  const list = await admin.get(`/v1/subagents?parentSessionId=${captainSessionId}&limit=50`);
+  check(step, `${label}: sub-agent registry is readable`, list.status === 200, 200, list.status);
+  const record = (list.body.subagents || []).find(
+    (row) => row.parentSessionId === captainSessionId && row.sessionId,
+  );
+  check(step, `${label}: a child SubagentRecord points at the captain`, Boolean(record), 'record', record ? 'present' : 'missing');
+  if (!record) return null;
+  check(step, `${label}: child origin is spawn`, record.origin === 'spawn', 'spawn', record.origin);
+  const childId = record.sessionId;
+
+  const parentCreatedBy = psql(
+    `select created_by_account_id from sessions where tenant_id='${TENANT}' and session_id='${captainSessionId}'`,
+  );
+  const row = psql(
+    `select bot_id || '|' || account_id || '|' || created_by_account_id || '|' || coalesce(team_bot_id,'') from sessions where tenant_id='${TENANT}' and session_id='${childId}'`,
+  );
+  const [childBot, childAccount, childCreatedBy, childTeam] = row.split('|');
+  check(step, `${label}: child session is owned by the member Bot`, childBot === memberBotId, memberBotId, childBot);
+  check(step, `${label}: child session is owned by the member account`, childAccount === memberAccountId, memberAccountId, childAccount);
+  check(step, `${label}: child keeps the parent's initiator`, childCreatedBy === parentCreatedBy, parentCreatedBy, childCreatedBy);
+  if (teamBotId) {
+    check(step, `${label}: child records the TeamBot mission snapshot`, childTeam === teamBotId, teamBotId, childTeam);
+  }
+
+  const childEvents = await admin.get(`/v1/sessions/${childId}/events?limit=200`);
+  const childFirst = (childEvents.body.events || []).find((event) => event.kind === 'user.message');
+  check(step, `${label}: child input names the parent session`, childFirst?.payload?.subagent?.parentSessionId === captainSessionId, captainSessionId, childFirst?.payload?.subagent?.parentSessionId);
+  check(step, `${label}: child input selects the member Bot`, childFirst?.payload?.selection?.botId === memberBotId, memberBotId, childFirst?.payload?.selection?.botId);
+  const childFinished = (childEvents.body.events || []).find((event) => event.kind === 'run.finished');
+  check(step, `${label}: child run names the member Bot`, childFinished?.payload?.agentId === memberBotId, memberBotId, childFinished?.payload?.agentId);
+  check(step, `${label}: child run uses the member default model`, childFinished?.payload?.model === MODEL_MEMBER, MODEL_MEMBER, childFinished?.payload?.model);
+  check(step, `${label}: child run uses the scripted provider`, childFinished?.payload?.provider === MODEL_PROVIDER, MODEL_PROVIDER, childFinished?.payload?.provider);
+  if (teamBotId) {
+    check(step, `${label}: child run carries the team id`, childFinished?.payload?.teamId === teamBotId, teamBotId, childFinished?.payload?.teamId);
+  }
+
+  // The member's own tool surface must be its Account ∩ Harness. The scripted
+  // member emits one spawn probe; the member Harness (no bot.invoke) must
+  // refuse it even though the member Account may carry the key. The child run
+  // still settles after the refused tool.
+  const childProbe = (childEvents.body.events || []).find(
+    (event) => event.kind === 'tool.result' && event.payload?.toolName === 'agent',
+  );
+  check(step, `${label}: member's agent probe is refused`, childProbe?.payload?.isError === true, 'isError true', childProbe?.payload?.isError);
+  check(step, `${label}: refusal names bot.invoke`, childProbe?.payload?.details?.requiredKey === 'bot.invoke', 'bot.invoke', childProbe?.payload?.details?.requiredKey);
+
+  const captainEvents = await admin.get(`/v1/sessions/${captainSessionId}/events?limit=500`);
+  const captainFinished = (captainEvents.body.events || []).find((event) => event.kind === 'run.finished');
+  check(step, `${label}: captain and member prompts differ`, childFinished?.payload?.promptHash !== captainFinished?.payload?.promptHash, 'different promptHash', `${String(childFinished?.payload?.promptHash).slice(0, 12)} vs ${String(captainFinished?.payload?.promptHash).slice(0, 12)}`);
+  const toolCall = (captainEvents.body.events || [])
+    .flatMap((event) => (event.kind === 'assistant.message' ? event.payload?.content || [] : []))
+    .find((block) => block?.type === 'toolCall' && block?.name === 'agent');
+  check(step, `${label}: captain emits an agent tool call`, Boolean(toolCall), 'agent toolCall', toolCall ? 'present' : 'missing');
+  check(step, `${label}: agent call names the member Bot`, toolCall?.arguments?.botId === memberBotId, memberBotId, toolCall?.arguments?.botId);
+  check(step, `${label}: agent call is a spawn`, toolCall?.arguments?.action === 'spawn', 'spawn', toolCall?.arguments?.action);
+  const toolResult = (captainEvents.body.events || []).find((event) => event.kind === 'tool.result' && event.payload?.toolName === 'agent');
+  check(step, `${label}: agent tool result names the child session`, JSON.stringify(toolResult?.payload || {}).includes(childId), childId, String(toolResult?.payload?.content?.[0]?.text || '').slice(0, 120));
+
+  const audit = await admin.get('/v1/audit/events?limit=200');
+  const invoked = (audit.body.events || []).find(
+    (event) =>
+      event.action === 'bot.invoked' &&
+      event.objectId === memberBotId &&
+      event.runId === captainSessionId,
+  );
+  check(step, `${label}: audit records bot.invoked for the member`, Boolean(invoked), 'bot.invoked', invoked ? 'present' : 'missing');
+  check(step, `${label}: audit names the captain caller`, invoked?.detail?.caller_bot_id === captainBotId, captainBotId, invoked?.detail?.caller_bot_id);
+  const denied = (audit.body.events || []).find(
+    (event) =>
+      event.action === 'permission.denied' &&
+      event.capabilityKey === 'bot.invoke' &&
+      event.detail?.bot_id === memberBotId,
+  );
+  check(step, `${label}: audit records the member's bot.invoke refusal`, Boolean(denied), 'permission.denied bot.invoke', denied ? 'present' : 'missing');
+  return { childId, record };
+}
+
 // ================================================================================
 // Step 5 — TeamBot: mission/roster, cross-account control, start, run DAG
 // ================================================================================
@@ -810,6 +899,7 @@ async function step5(step, ctx) {
     accountId: ctx.aliceAccountId,
     botId: 'support-2',
     name: '客服二号',
+    defaultModel: modelRef(MODEL_MEMBER),
     harness: {
       tools: [],
       context: { instruction: '作为客服团队成员回答客户问题。', permissions: ['session.read', 'session.write'] },
@@ -823,6 +913,7 @@ async function step5(step, ctx) {
     accountId: ctx.bobAccountId,
     botId: 'outside-1',
     name: '外部成员',
+    defaultModel: modelRef(MODEL_MEMBER),
     harness: {
       tools: [],
       context: { instruction: '外部账号的 Bot。', permissions: ['session.read'] },
@@ -870,12 +961,38 @@ async function step5(step, ctx) {
     teamBotId: 'cross-team',
     name: '跨账号团队',
     mission: '验证跨账号成员需要 bot.invoke 关系。',
-    roster: [{ botId: 'outside-1', role: 'captain' }],
+    roster: [
+      { botId: 'support-1', role: 'captain' },
+      { botId: 'outside-1', role: 'member' },
+    ],
   });
   check(step, 'cross-account roster with a viewer relation is allowed', allowed.status === 201, 201, allowed.status);
   if (allowed.status === 201) {
     const startCross = await alice.post('/v1/team-bots/cross-team/start', { text: '开始' });
     check(step, 'cross-account team starts while the relation exists', startCross.status === 201, 201, startCross.status);
+    if (startCross.status === 201) {
+      const crossRun = await waitRunDone(admin, startCross.body.sessionId);
+      check(step, 'cross-account captain run settles (done)', crossRun.body?.status === 'done', 'done', crossRun.body?.status);
+      const crossSpawn = await captainSpawnEvidence(step, admin, ctx, {
+        captainSessionId: startCross.body.sessionId,
+        captainBotId: 'support-1',
+        memberBotId: 'outside-1',
+        memberAccountId: ctx.bobAccountId,
+        teamBotId: 'cross-team',
+        label: 'cross-team',
+      });
+      if (crossSpawn) {
+        ctx.crossChildId = crossSpawn.childId;
+        const aliceSubs = await alice.get(`/v1/subagents?parentSessionId=${startCross.body.sessionId}&limit=50`);
+        check(
+          step,
+          'cross-team: the team owner can read the member child in the DAG source',
+          aliceSubs.status === 200 && (aliceSubs.body.subagents || []).some((row) => row.sessionId === crossSpawn.childId),
+          200,
+          `${aliceSubs.status}/${(aliceSubs.body.subagents || []).length}`,
+        );
+      }
+    }
     psql(`delete from resource_relations where tenant_id='${TENANT}' and resource_type='bot' and resource_id='outside-1' and relation='viewer' and subject_type='account' and subject_id='${ctx.aliceAccountId}'`);
     const startAfter = await alice.post('/v1/team-bots/cross-team/start', { text: '再次开始' });
     check(step, 'after relation removal the next start is 403', startAfter.status === 403, 403, startAfter.status);
@@ -918,20 +1035,18 @@ async function step5(step, ctx) {
   check(step, 'captain session records the human initiator', createdBy === ctx.adminAccountId, ctx.adminAccountId, createdBy);
   check(step, 'captain session records the TeamBot mission id', teamBotId === 'support-team', 'support-team', teamBotId);
 
-  // The acceptance also asks the captain to organize members (create/fork/
-  // invoke) during the run. The runtime has no Bot-management tool surface, so
-  // the DAG can only show the captain node; record that as a gap rather than
-  // pretending the team ran as a team.
-  const toolEvents = (events.body.events || []).filter((row) => row.kind === 'tool_call' || row.kind === 'tool.result');
-  if (!toolEvents.some((row) => JSON.stringify(row.payload || {}).includes('bot'))) {
-    addFinding(
-      'no-captain-member-tool',
-      'P1',
-      'TeamBot 启动只跑队长：队长没有调用成员的运行时工具，DAG 没有成员节点',
-      '验收 §2.4/§5 要求队长 Bot 在运行中创建/分叉/调用成员，成员以独立 Session 执行并在 DAG 可见。当前 tasks.md A4.2b「captain→member 运行时工具调用 bot.invoke」仍未勾选，工具面没有 Bot 管理动作；本次真实 run 的 run.finished 只记录 agentId=support-1（队长），成员 Session 只能由人类另行 invoke 产生。',
-      ['run.finished.agentId = support-1（队长）', 'DAG 0 个成员节点', 'tasks.md A4.2b unchecked: captain→member 运行时工具调用'],
-    );
-  }
+  // The captain now delegates through the real `agent` tool. The scripted
+  // provider emits exactly one spawn call, and the assertions read the child
+  // session + registry + audit, not just the parent's summary text.
+  const spawn = await captainSpawnEvidence(step, admin, ctx, {
+    captainSessionId: sessionId,
+    captainBotId: 'support-1',
+    memberBotId: 'support-2',
+    memberAccountId: ctx.aliceAccountId,
+    teamBotId: 'support-team',
+    label: 'support-team',
+  });
+  if (spawn) ctx.supportChildId = spawn.childId;
 
   // A member Bot invoked by the human gets its own Session (not the captain's).
   const memberInvoke = await admin.post('/v1/bots/support-2/invoke', { text: '请回答一位客户的问题。' });
@@ -959,6 +1074,7 @@ async function step5(step, ctx) {
   const runText = await bodyText(page);
   check(step, 'run page renders the DAG', runText.includes('客服一号') || runText.includes('support-1'), 'captain node', runText.slice(0, 200));
   check(step, 'run page shows the team mission', runText.includes('回答客户问题'), 'mission', runText.slice(0, 200));
+  check(step, 'run page shows the deployed member node', runText.includes('请处理一位客户问题') || runText.includes('support-2'), 'member node', runText.slice(0, 300));
   await shot(page, step, 'run-dag');
   log(step, `captain session=${sessionId}; member session=${ctx.memberSessionId || 'n/a'}`);
 }
@@ -979,6 +1095,7 @@ async function step6(step, ctx) {
   });
   check(step, 'butler account created', account.status === 201, 201, account.status);
   const butlerAccountId = account.body.account?.accountId;
+  ctx.butlerAccountId = butlerAccountId;
   const role = await admin.post('/v1/roles', { name: '管家', instruction: '组织团队、配置权限并启动。' });
   const profile = await admin.post('/v1/profiles', { accountId: butlerAccountId, roleId: role.body.role?.roleId });
   const butlerPermissions = [
@@ -1007,7 +1124,7 @@ async function step6(step, ctx) {
     name: '管家',
     profileId: profile.body.profile?.profileId,
     modelKind: 'text',
-    defaultModel: { providerId: 'fake', modelId: 'fake' },
+    defaultModel: modelRef(MODEL_CAPTAIN),
     harness: {
       tools: [],
       context: { instruction: '组织团队、配置权限并启动。', permissions: butlerPermissions },
@@ -1046,7 +1163,7 @@ async function step6(step, ctx) {
     name: '管家成员',
     profileId: memberProfile.body.profile?.profileId,
     modelKind: 'text',
-    defaultModel: { providerId: 'fake', modelId: 'fake' },
+    defaultModel: modelRef(MODEL_MEMBER),
     harness: {
       tools: [],
       context: { instruction: '按管家分配回答客户问题。', permissions: ['session.read', 'session.write'] },
@@ -1082,6 +1199,15 @@ async function step6(step, ctx) {
     const finished = (events.body.events || []).find((row) => row.kind === 'run.finished');
     check(step, 'butler run uses the captain Bot', finished?.payload?.agentId === 'butler', 'butler', finished?.payload?.agentId);
     check(step, 'butler run records the team', finished?.payload?.teamId === 'butler-team', 'butler-team', finished?.payload?.teamId);
+    const spawn = await captainSpawnEvidence(step, admin, ctx, {
+      captainSessionId: start.body.sessionId,
+      captainBotId: 'butler',
+      memberBotId: 'butler-member',
+      memberAccountId: butlerAccountId,
+      teamBotId: 'butler-team',
+      label: 'butler-team',
+    });
+    if (spawn) ctx.butlerChildId = spawn.childId;
   }
 
   // 3) No Bot-specific bypass: super-admin reservation and foreign-bot manage.
@@ -1496,6 +1622,9 @@ async function step10(step, ctx) {
 function classifyFile(file) {
   const testLike = /(_test\.go|\.test\.tsx?|\.harness\.tsx?|harness\.test\.tsx?|\.fixture\.)/.test(file);
   if (testLike) return { status: 'EXEMPT-UNIT', surface: 'test/fixture', evidence: '同包单测（A5 门已跑）；本 lane 不重复跑单测' };
+  if (/^scripts\/keel-identity-e2e\//.test(file)) {
+    return { status: 'COVERED-E2E-HARNESS', surface: 'E2E 脚本/生成器', evidence: 'run.sh/e2e.mjs/report-gen.mjs 本次真实执行并生成报告' };
+  }
   if (/(^|\/)(openspec|\.agents|docs|site|design)\//.test(file) || /^(README|NOTICE|LICENSE)/.test(file)) {
     return { status: 'EXEMPT-DOC', surface: '文档/设计/证据', evidence: '无运行时面；文档词汇与设计方向在对应门禁审查' };
   }
@@ -1647,15 +1776,15 @@ try {
     await runStep(
       5,
       'TeamBot（Mission/Roster）/ 跨账号对照 / 启动 / DAG',
-      '建 support-team（support-1 队长 + support-2 成员）；alice 尝试拉 bob 的 outside-1；启动并等待 run；成员 Bot 独立 Session。',
-      '无关系时跨账号 403；有关系时 201、撤销后下一次 403；启动创建队长 Session 并跑完；成员 Session 独立归属。',
+      '建 support-team（support-1 队长 + support-2 成员）；alice 尝试拉 bob 的 outside-1；启动后队长通过 agent 工具 spawn 成员；跨账号在关系存在时启动并在撤销后复测。',
+      '无关系时跨账号 403；有关系时 201、撤销后下一次 403；队长真实发出 agent spawn；child Session 归属成员 Bot/Account、parent 链到队长、DAG 有成员节点、审计有 bot.invoked。',
       (step) => step5(step, ctx),
     );
     await runStep(
       6,
       '管家 Bot：用 Bot key 建成员 Bot / 权限组 / TeamBot 并启动',
-      '建 butler + butler-ops；用 butler key 建角色、Profile、成员 Bot、权限组、TeamBot 并启动；负控 super admin 与外部 Bot key。',
-      'Bot 与其 Account 同权限规则；能建团队并跑完；不能自升超管或管别人的 Bot。',
+      '建 butler + butler-ops；用 butler key 建角色、Profile、成员 Bot、权限组、TeamBot 并启动；队长 spawn 成员；负控 super admin 与外部 Bot key。',
+      'Bot 与其 Account 同权限规则；能建团队、spawn 成员并跑完；child 归属成员 Bot/Account；不能自升超管或管别人的 Bot。',
       (step) => step6(step, ctx),
     );
     await runStep(
@@ -1789,7 +1918,8 @@ try {
       realPostgres: true,
       realServe: true,
       realBrowser: `Chrome (playwright-core, headless=${HEADLESS})`,
-      model: 'fake（deployment 未配置 provider；run 生命周期真实，模型为确定性 fake）',
+      model: `scripted ${MODEL_PROVIDER} (${MODEL_CAPTAIN}/${MODEL_MEMBER})：确定性 OpenAI-compatible stub，真实走 provider 流式协议；未调用外部模型`,
+      scriptedModelPort: process.env.E2E_SCRIPTED_MODEL_PORT || null,
     },
     conclusion: `${passedSteps}/${steps.length} 步 PASS，${checksPassed}/${checks.length} 断言通过，${shots} 张截图；P0=${p0} P1=${p1} P2=${p2}${failedSteps ? `；${failedSteps} 步 FAIL` : ''}${blocked ? `；${blocked} 步 BLOCKED` : ''}。`,
     assertions: { total: checks.length, passed: checksPassed },
