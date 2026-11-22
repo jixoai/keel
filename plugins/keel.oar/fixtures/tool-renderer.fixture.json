@@ -1,0 +1,93 @@
+{
+  "schema": "keel.oar.render-projection/1",
+  "backendSessionId": "oar-1",
+  "hostSessionId": "session-host",
+  "taskId": "task-card-1",
+  "runtime": "fake",
+  "simulated": true,
+  "agents": [
+    {
+      "agentPath": "/main",
+      "runtime": "fake",
+      "status": "completed",
+      "calls": 1,
+      "failures": 0
+    },
+    {
+      "agentPath": "/main/worker-1",
+      "runtime": "fake",
+      "status": "completed",
+      "calls": 1,
+      "failures": 0
+    }
+  ],
+  "items": [
+    {
+      "seq": 1,
+      "agentPath": "/main",
+      "kind": "status",
+      "name": "turn.started",
+      "state": "started",
+      "text": "turn started"
+    },
+    {
+      "seq": 2,
+      "resultSeq": 3,
+      "agentPath": "/main",
+      "kind": "call",
+      "callId": "call-1",
+      "name": "shell",
+      "state": "completed",
+      "input": {
+        "command": "printf OAR-OK"
+      },
+      "output": {
+        "stdout": "OAR-OK",
+        "exitCode": 0
+      }
+    },
+    {
+      "seq": 4,
+      "resultSeq": 5,
+      "agentPath": "/main/worker-1",
+      "kind": "call",
+      "callId": "call-2",
+      "name": "read_file",
+      "state": "completed",
+      "input": {
+        "path": "README.md"
+      },
+      "output": {
+        "bytes": 42
+      }
+    },
+    {
+      "seq": 6,
+      "agentPath": "/main",
+      "kind": "message",
+      "name": "agent_message",
+      "text": "fake answer to: inspect the repo"
+    },
+    {
+      "seq": 7,
+      "agentPath": "/main",
+      "kind": "usage",
+      "name": "turn.usage",
+      "usage": {
+        "metering": "external",
+        "model": "fake-model",
+        "inputTokens": 12,
+        "outputTokens": 5,
+        "totalTokens": 17
+      }
+    },
+    {
+      "seq": 8,
+      "agentPath": "/main",
+      "kind": "status",
+      "name": "turn.finished",
+      "state": "completed",
+      "text": "turn completed"
+    }
+  ]
+}

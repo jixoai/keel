@@ -1,0 +1,84 @@
+{
+  "schema": "keel.extensibility/1",
+  "plugin": "keel.oar",
+  "version": "1.0.0",
+  "layer": "harness",
+  "summary": "External-runtime adapter for Codex (first), with a durable out-of-band record stream and a stable renderer projection.",
+  "slots": [],
+  "contributes": [],
+  "renderer": {
+    "slot": "keel.ui.tool-renderer",
+    "form": "chunk",
+    "owner": "W12 UI",
+    "projectionSchema": "keel.oar.render-projection/1",
+    "fixture": "fixtures/tool-renderer.fixture.json",
+    "note": "The UI agent owns the slot and renders the projection; OAR does not ship a parallel web renderer."
+  },
+  "config": [
+    {
+      "key": "runtime",
+      "type": "string",
+      "required": true,
+      "enum": ["codex", "fake"],
+      "description": "External runtime adapter. fake is simulated=true and is never used as a live model."
+    },
+    {
+      "key": "journalDir",
+      "type": "string",
+      "required": false,
+      "description": "Durable OAR journal directory (default: <user cache>/keel/oar)."
+    },
+    {
+      "key": "workdir",
+      "type": "string",
+      "required": false,
+      "description": "Default runtime working directory."
+    },
+    {
+      "key": "model",
+      "type": "string",
+      "required": false,
+      "description": "Optional Codex model override."
+    },
+    {
+      "key": "sandbox",
+      "type": "string",
+      "required": false,
+      "enum": ["read-only", "workspace-write", "danger-full-access"],
+      "description": "Codex sandbox mode; OAR defaults to read-only."
+    },
+    {
+      "key": "requireLiveModel",
+      "type": "boolean",
+      "required": false,
+      "description": "Reject a simulated runtime with simulated_runtime."
+    },
+    {
+      "key": "codexPath",
+      "type": "string",
+      "required": false,
+      "description": "Codex executable; empty means PATH lookup."
+    }
+  ],
+  "hooks": [],
+  "providers": [],
+  "tools": [],
+  "examples": [
+    {
+      "name": "fake record stream",
+      "command": "keel-oar sidecar -runtime=fake -usage -step-delay=50ms",
+      "shows": ["records", "agent_path", "calls", "results", "usage", "attribution"]
+    },
+    {
+      "name": "codex adapter",
+      "command": "keel-oar sidecar -runtime=codex -workdir /tmp/project -sandbox read-only",
+      "shows": ["records", "calls", "results", "messages", "usage", "live_model"]
+    }
+  ],
+  "limits": [
+    "Record schema is frozen at keel.oar.record/1; one record is <= 1 MiB.",
+    "seq is strictly increasing per backend session; gaps are allowed after a crash.",
+    "No task-card instruction is injected into prompts; attribution is out of band.",
+    "streaming token deltas, approval bridging, Claude, and cross-sidecar resume are not in v1."
+  ]
+}

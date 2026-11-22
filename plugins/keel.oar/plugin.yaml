@@ -1,0 +1,30 @@
+# Target manifest for the OAR external-runtime adapter.
+#
+# Install status: DEFERRED. The current sidecar loader only accepts
+# tool_provider connections; OAR is an agent_backend (session.open /
+# message.send / event.stream). Until W12 adds agent_backend plugin loading,
+# configure OAR through host.ExternalConfig.Backends or embed oar.Service.
+# The manifest is kept here so the package has one declaration to promote when
+# the loader supports it; do not install it on a current keel.
+id: keel.oar
+version: 1.0.0
+kind: sidecar
+description: "OAR external-runtime adapter: exposes Codex (and future runtimes) as out-of-band record streams; no task-card injection, typed capability rejection, process-group cleanup."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+permissions:
+  # The sidecar writes its own journal under the host-provided directory and
+  # reads the runtime's config/auth through the inherited minimal environment.
+  fs:
+    - plugin-data
+  secrets:
+    - OPENAI_API_KEY
+entry:
+  # `keel-oar` ships next to `keel`; `sidecar` selects the OAR protocol frame.
+  command:
+    - keel-oar
+    - sidecar
+  env:
+    - KEEL_OAR_JOURNAL_DIR
+    - CODEX_HOME
+    - OPENAI_API_KEY
