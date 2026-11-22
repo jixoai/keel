@@ -64,7 +64,7 @@ permissions:
 （`spec: 审计`）。当前代码库已在两个层面演示了该模式：
 
 - 触发器审计保留逐次触发历史与最近 N 条审计窗口
-  （`internal/agentext/triggers.go:86`、`:135`）；
+  （`internal/harnessext/triggers.go:86`、`:135`）；
 - 内核审计 sink 把每次拒绝投影为结构化日志字段（reason/op/tenant/session/kind/owner/epoch）
   并限频（`internal/servicehost/audit.go`、`docs/LOADOUT.md` §6）。
 
@@ -90,4 +90,4 @@ permissions:
 3. 它实际做了什么（审计）——§4；
 4. 谁在何时批准了它（decision 行）——§3；
 5. 它此刻提供什么（快照：tools/hooks/triggers/diagnostics）——
-   `GET /v1/plugins`（`internal/agentapi/ext.go:18`）。
+   `GET /v1/plugins`（`internal/harnessapi/ext.go:18`）。

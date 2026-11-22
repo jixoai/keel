@@ -15,15 +15,15 @@ section for those.
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ HTTP + SSE (one origin; no CORS by construction)
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
-│ HTTP edge + AgentAPI (internal/httpapi, internal/agentapi)                    │
+│ HTTP edge + AgentAPI (internal/httpapi, internal/harnessapi)                    │
 │  edge: tenants/sessions/input/retry/events/stream/files/runtime drain        │
 │  product: capabilities, session list, cancel, decisions, plugins/triggers/   │
 │           sub-agents, settings surface                                       │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ seams: kernel.Committer/Reader/LeaseManager,
-                                │ agentext primitives, service bindings
+                                │ harnessext primitives, service bindings
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
-│ Harness product primitives (internal/agentext)                               │
+│ Harness product primitives (internal/harnessext)                               │
 │  plugin runtime · hook bus · decision broker · triggers · sub-agents ·       │
 │  run control · partial hub                                                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
@@ -111,10 +111,10 @@ generations (`docs/LOADOUT.md` §4).
 ## 3. The plugin host
 
 The plugin host is the `Harness`'s extension runtime. Today it is
-`agentext.Runtime`: an **in-process, declarative** contract.
+`harnessext.Runtime`: an **in-process, declarative** contract.
 
 ```
-agentext.Runtime
+harnessext.Runtime
 ├─ assemble(): unload previous assembly → generation+1 → activate in dependency order
 │    ├─ duplicate tool names across plugins → fail-closed diagnostic
 │    ├─ requires not satisfied → PENDING with "waiting for: …"
@@ -125,8 +125,8 @@ agentext.Runtime
 └─ Close(): unload everything in reverse order, then publish an empty tool set
 ```
 
-Citations: plugin contract `internal/agentext/plugin.go:67`; assembly
-`internal/agentext/plugin.go:209`; activation `:317`; reverse cleanup `:387`;
+Citations: plugin contract `internal/harnessext/plugin.go:67`; assembly
+`internal/harnessext/plugin.go:209`; activation `:317`; reverse cleanup `:387`;
 unload `:417`; snapshot `:505`. The current plugin set in `keel serve` is the
 built-in manifests under `internal/pluginpkg/builtin/` (`keel.example`,
 `keel.creation`, `keel.testkit`, the model/agent/team registry plugins); the
@@ -171,12 +171,12 @@ tool.result commit      kernel pairs it with the call; duplicates deduped by too
   bounded (`internal/agenttool/utf8trim.go`).
 
 **Approvals** are not a property of the tool executor; they are the decision
-primitive of the product layer (`internal/agentext/decisions.go:233`). A run
+primitive of the product layer (`internal/harnessext/decisions.go:233`). A run
 that needs a human answer opens a decision, waits with a bounded timeout
-(default 5 minutes, `internal/agentext/decisions.go:162`), and continues or
+(default 5 minutes, `internal/harnessext/decisions.go:162`), and continues or
 fails on the answer. Decisions are durable rows in the tasks bookkeeping table,
 **never a new event kind** — the kernel's vocabulary is unchanged
-(`internal/kernel/validate.go:36`, `internal/agentext/doc.go`). See
+(`internal/kernel/validate.go:36`, `internal/harnessext/doc.go`). See
 [Approvals and questions](/harness/approvals-and-questions).
 
 ## 5. Projection
@@ -206,7 +206,7 @@ event-driven, and a stop is only confirmed by `run.finished`
 (`packages/chat-surface/src/projection.ts`). Partials are the one exception
 that proves the rule: token deltas travel beside the log, are never committed,
 and are dropped the moment the committed message arrives
-(`internal/agentext/streamtee.go:24`, `packages/chat-surface/src/engine.ts`).
+(`internal/harnessext/streamtee.go:24`, `packages/chat-surface/src/engine.ts`).
 
 The same projection powers both surfaces, which is why the web UI and the TUI
 cannot drift apart: `keel tui` runs the same TSX against the same AgentAPI

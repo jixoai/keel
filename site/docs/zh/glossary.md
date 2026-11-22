@@ -15,8 +15,8 @@ sidebar: false
 | --- | --- | --- |
 | **Keel** | 本项目：无状态、多租户的智能体运行时底座。 | `README.md` |
 | **Core** | 契约内核 + 事件账本 + 服务图 + loadout + 存储 + handoff。不可替换的部分。 | `docs/SERVICE-GRAPH.md`、`docs/KERNEL.md` |
-| **Harness**（原 Agent） | Core 之上的产品层：会话、回合、工具、审批、插件、触发器、子代理与客户端界面。进程即 `keel serve`。 | `internal/agentext/doc.go`、`docs/HARNESS.md` |
-| **AgentAPI** | `/v1` 产品 API 契约（别名：Harness API）。名称保留；web UI 与 TUI 消费的 wire 契约。 | `internal/agentapi/api.go:49` |
+| **Harness**（原 Agent） | Core 之上的产品层：会话、回合、工具、审批、插件、触发器、子代理与客户端界面。进程即 `keel serve`。 | `internal/harnessext/doc.go`、`docs/HARNESS.md` |
+| **AgentAPI** | `/v1` 产品 API 契约（别名：Harness API）。名称保留；web UI 与 TUI 消费的 wire 契约。 | `internal/harnessapi/api.go:49` |
 | **AgentBackend** | 外部智能体运行时（例如 DSH）作为 external backend 被驱动的协议。名称保留。 | `internal/gateway/protocol.go`、`docs/DSH-REFERENCE.md` |
 | **DSH** | DeepSeek Harness——插件模型的外部参照，也是 external-agent 目标。是参照，不是本项目的事实源。 | `docs/DSH-REFERENCE.md` |
 
@@ -37,9 +37,9 @@ sidebar: false
 | **Partial** | 沿日志旁路传输的 token 级增量；永不入库、永不重放、不携带游标。 | `internal/httpapi/partials.go:5` |
 | **压缩（Compaction）** | 用一条已提交的摘要事件替换转录最旧的一段；历史绝不被编辑。 | `internal/compaction/compact.go` |
 | **Handoff** | 跨进程接替：新 runtime、排空旧的、新 epoch、从账本继续。 | `docs/HANDOFF.md` |
-| **Decision（审批/问句）** | 审批/问句原语：durable 行、幂等作答、有界超时。不是内核事件 kind。 | `internal/agentext/decisions.go:233` |
-| **触发器（Trigger）** | 定时或 webhook 启动的回合（`interval`/`cron`/`webhook`），带幂等键与审计。 | `internal/agentext/triggers.go:30` |
-| **子代理（Sub-agent）** | 由工具或 API 派生的子会话，带预算与结构化结果。 | `internal/agentext/subagent.go:44` |
+| **Decision（审批/问句）** | 审批/问句原语：durable 行、幂等作答、有界超时。不是内核事件 kind。 | `internal/harnessext/decisions.go:233` |
+| **触发器（Trigger）** | 定时或 webhook 启动的回合（`interval`/`cron`/`webhook`），带幂等键与审计。 | `internal/harnessext/triggers.go:30` |
+| **子代理（Sub-agent）** | 由工具或 API 派生的子会话，带预算与结构化结果。 | `internal/harnessext/subagent.go:44` |
 
 ## 装配词汇
 
@@ -49,7 +49,7 @@ sidebar: false
 | **Loadout** | 服务集合的不可变快照 `{id, revision, version, summary, services}`，按 run 钉住。 | `docs/LOADOUT.md` §1 |
 | **Generation** | 每次重装配 +1 的计数器；旧代实例继续服务在途 run，之后退休。 | `internal/servicegraph/engine.go:270`、`docs/LOADOUT.md` §4 |
 | **Selection** | 随 run 记录的模型/provider 选择；按当前代的 provider 配置校验。 | `internal/modelcfg`、`internal/agent/runner.go:321` |
-| **插件（Plugin）** | Harness 的扩展。今天：进程内 Go 值（`agentext.Plugin`）。规划：三种 kind 之一的 `plugin.yaml` 包。 | `internal/agentext/plugin.go:67` |
+| **插件（Plugin）** | Harness 的扩展。今天：进程内 Go 值（`harnessext.Plugin`）。规划：三种 kind 之一的 `plugin.yaml` 包。 | `internal/harnessext/plugin.go:67` |
 | **`plugin.yaml`** | 规划中的插件清单（id/version/kind/engines/provides/requires/permissions/entry/source）。 | 规划：`keel-plugin-core` spec |
 | **in-process / sidecar / webview** | 三种规划中的插件 kind：编译进宿主 / 经 stdio JSON-RPC 的外部进程 / 宿主托管的 UI 包。 | 规划：`keel-plugin-core` spec |
 | **`keel.plugin.*`** | 规划中的桥：webview 插件借它读自身状态、调自身工具、请求审批、订阅事件——仅此而已。 | 规划：`keel-plugin-core` spec |
@@ -64,4 +64,4 @@ sidebar: false
 | effect | 插件拥有的可逆副作用 | `Plugin.Effects`，按反序释放 |
 | bundle | 一层补丁（配置 + 插件） | 规划中的启用清单；今天对应默认 loadout |
 | profile | 有序的 bundle 栈 | loadout（不可变快照，按 run 钉住） |
-| Cordis | TS 插件运行时 | **不移植**——`agentext` + `servicegraph` 以 Go 表达同一语义 |
+| Cordis | TS 插件运行时 | **不移植**——`harnessext` + `servicegraph` 以 Go 表达同一语义 |

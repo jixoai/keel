@@ -49,7 +49,7 @@
   `api.github.com`、`registry.npmjs.org`。
 - 无 `secrets`、无 `fs`。
 - 诚实边界：`permissions.net` 是声明式清单；sidecar 的 socket 由宿主进程组管理，运行时
-  不代理它的出网请求（见 `internal/agentext/plugin_permissions.go` 的诚实边界注释）。
+  不代理它的出网请求（见 `internal/harnessext/plugin_permissions.go` 的诚实边界注释）。
 
 ## 环境变量（`entry.env` 只声明名字，值由宿主环境提供）
 

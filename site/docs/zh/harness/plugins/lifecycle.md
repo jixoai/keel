@@ -3,7 +3,7 @@
 > 生命周期 API（`installed → enabled → disabled → uninstalled`、安装/启用/停用/卸载端点、
 > 版本替换）为**规划中**，见
 > `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md`（「生命周期」）。
-> 它所依赖的*装配机制*在 `internal/agentext` 与 `internal/servicegraph` 中**已实现**，
+> 它所依赖的*装配机制*在 `internal/harnessext` 与 `internal/servicegraph` 中**已实现**，
 > 下文逐一给出出处。
 
 ## 1. 状态机
@@ -30,13 +30,13 @@
 
 | 承诺 | 机制（已实现） | 出处 |
 | --- | --- | --- |
-| 依赖顺序激活 | 迭代式激活循环；依赖被 provide 后依赖方才激活 | `internal/agentext/plugin.go:237` |
-| 依赖缺失 ⇒ 不装载且可见 | 状态 `PENDING` + `waiting for: <ids>` 诊断 | `internal/agentext/plugin.go:291` |
-| 停用移除工具 | 每次装配后重算已发布工具集 | `internal/agentext/plugin.go:438` |
-| 停用移除订阅/触发器 | `unsubs` 与 `triggerStops` 按反序释放 | `internal/agentext/plugin.go:386` |
-| 停用时声明的清理恰好执行一次 | `effectsRun` 记账防止部分卸载重复执行 | `internal/agentext/plugin.go:396` |
-| 激活失败回滚自身 effects | 失败路径在返回前调用 `cleanup` | `internal/agentext/plugin.go:317` |
-| 每次变化可见 | 每次装配 generation 恰好 +1；快照报告状态与诊断 | `internal/agentext/plugin.go:209`、`:505` |
+| 依赖顺序激活 | 迭代式激活循环；依赖被 provide 后依赖方才激活 | `internal/harnessext/plugin.go:237` |
+| 依赖缺失 ⇒ 不装载且可见 | 状态 `PENDING` + `waiting for: <ids>` 诊断 | `internal/harnessext/plugin.go:291` |
+| 停用移除工具 | 每次装配后重算已发布工具集 | `internal/harnessext/plugin.go:438` |
+| 停用移除订阅/触发器 | `unsubs` 与 `triggerStops` 按反序释放 | `internal/harnessext/plugin.go:386` |
+| 停用时声明的清理恰好执行一次 | `effectsRun` 记账防止部分卸载重复执行 | `internal/harnessext/plugin.go:396` |
+| 激活失败回滚自身 effects | 失败路径在返回前调用 `cleanup` | `internal/harnessext/plugin.go:317` |
+| 每次变化可见 | 每次装配 generation 恰好 +1；快照报告状态与诊断 | `internal/harnessext/plugin.go:209`、`:505` |
 
 规格的验收场景把这同一件事说成产品语言：*启用一个提供工具 `x` 与 webhook 触发器的插件，
 停用它——模型侧不再有 `x`，触发器不再触发，清单显示 `disabled`，且无任何报错*
@@ -46,11 +46,11 @@
 
 - `requires` 指向**插件或服务**。当有活跃者 `provides` 该名字时依赖才算满足；无法满足的插件
   保持 `disabled` 并给出具名原因，绝不部分装载（`spec: 依赖缺失不装载`；机制：
-  `internal/agentext/plugin.go:291`）。
+  `internal/harnessext/plugin.go:291`）。
 - 工具是全局命名空间：两个启用插件不得提供同名工具。无论装配顺序如何，第二个 fail-closed
-  并给诊断（`internal/agentext/plugin.go:236`、`:454`）。
+  并给诊断（`internal/harnessext/plugin.go:236`、`:454`）。
 - Hook 事件必须属于闭集；未知事件在订阅时报错，绝不静默 no-op
-  （`internal/agentext/hooks.go:249`）。
+  （`internal/harnessext/hooks.go:249`）。
 
 ## 3. 不打扰在途工作的热更
 
@@ -59,7 +59,7 @@
 1. **产品层（今天）。** `Runtime.Apply` 先卸载上一代装配，再激活新装配并令 generation 恰好
    +1。引用已移除插件的 hook 回调与触发器触发会在各自计数器上可见地失败；已提交的 run 不受
    影响，因为 run 自身的注册活在转录里，而不是插件表里
-   （`internal/agentext/plugin.go:163`、`internal/agentext/hooks.go:399`）。
+   （`internal/harnessext/plugin.go:163`、`internal/harnessext/hooks.go:399`）。
 2. **服务层（插件成为服务之处）。** 规划中的统一把官方插件路由到服务图，后者为在途引用引入
    generation：`RETIRING` 实例不接新 run，待引用归零后按反序依赖卸载，或超过退休截止强制
    卸载——强制退休会把持有者的租约标记为 broken，使 run 以 `drain-expired` 诊断失败，而不是
@@ -77,7 +77,7 @@
 | sidecar 进程 | 协议层 `close`，随后关 stdin → 宽限 → 进程组 SIGTERM → SIGKILL |
 | 插件派生的子代理会话 | 继续运行——它们是账本中的会话，不是插件状态 |
 
-（effects 见 `internal/agentext/plugin.go:386`；sidecar 关闭路径见
+（effects 见 `internal/harnessext/plugin.go:386`；sidecar 关闭路径见
 `internal/gateway/stdio.go:228`。）
 
 ## 5. 审计
@@ -85,7 +85,7 @@
 每一次生命周期动作——`install`、`enable`、`disable`、`uninstall`、`update`——与每一次权限
 拒绝，都必须记录**时间、操作者、插件 id、版本、动作、结果**，并可通过
 `GET /v1/plugins/audit` 查询（`spec: 审计`）。审计车道复用触发器审计今天的同一纪律：有界
-记录、按时间序、含操作者与结果（既有审计条目形状见 `internal/agentext/triggers.go:86`）。
+记录、按时间序、含操作者与结果（既有审计条目形状见 `internal/harnessext/triggers.go:86`）。
 
 ## 6. UI 中的生命周期
 

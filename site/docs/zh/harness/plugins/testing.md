@@ -16,8 +16,8 @@
 
 | 层 | 回答的问题 | 运行方式 | 既有先例 |
 | --- | --- | --- | --- |
-| **单测** | 纯逻辑是否正确？清单解析、版本区间门、切点 | `go test ./internal/…` | `internal/agentext/agentext_test.go` |
-| **集成** | 插件在真实宿主中是否如愿？启用 → 工具调用 → hook → 触发器 → 停用 | 对真实 PG 跑 `go test -race` | `internal/agentext/e2e_test.go` |
+| **单测** | 纯逻辑是否正确？清单解析、版本区间门、切点 | `go test ./internal/…` | `internal/harnessext/harnessext_test.go` |
+| **集成** | 插件在真实宿主中是否如愿？启用 → 工具调用 → hook → 触发器 → 停用 | 对真实 PG 跑 `go test -race` | `internal/harnessext/e2e_test.go` |
 | **conformance** | 跨实现/版本是否守住契约？ | conformance 套件 | `internal/loop/conformance_suite_test.go`、`docs/PI-CONFORMANCE.md` |
 | **负控** | 每个失败模式是否以*正确方式*失败？ | 对错误/状态显式断言 | 网关冒烟 + fail-closed 测试 |
 
@@ -26,14 +26,14 @@
 - 清单：缺 `id`/`version`/`kind`、id 不合文法、semver 非法、未知 `kind`、`engines.keel`
   超区间——每种都必须以**字段级原因**失败，且插件目录不被采用（`spec: 清单非法即拒绝`）。
 - `provides.hooks` 中不在闭集里的条目必须在注册时被拒，绝不静默忽略
-  （`internal/agentext/hooks.go:249`）。
+  （`internal/harnessext/hooks.go:249`）。
 - 工具重名检测与顺序无关：谁第二个被装配，谁 fail-closed
-  （`internal/agentext/plugin.go:236`、`:454`）。
+  （`internal/harnessext/plugin.go:236`、`:454`）。
 
 ### 集成
 
 已实现的扩展 E2E 就是模板：*插件注册 → 触发器 fire → hook 投递 → 子代理派生 → 取消在线
-attempt*（`internal/agentext/e2e_test.go`，摘要见 `docs/HARNESS.md` §5）。插件套件的集成测试
+attempt*（`internal/harnessext/e2e_test.go`，摘要见 `docs/HARNESS.md` §5）。插件套件的集成测试
 还必须证明停用路径：停用一个提供工具 `x` 与 webhook 触发器的插件后，工具从模型工具集消失、
 触发器不再触发、清单显示 `disabled` 且无错误残留（`spec: 停用即撤销`）。
 
@@ -77,7 +77,7 @@ sidecar 各行的机制已被 `scripts/external-gateway-smoke.sh`（15 步，含
 
 ```bash
 # 单测 + 集成（-race 集成包需要真实 PostgreSQL）
-go test ./internal/agentext/… ./internal/servicegraph/… ./internal/loadout/…
+go test ./internal/harnessext/… ./internal/servicegraph/… ./internal/loadout/…
 
 # 扩展 E2E 与全量门禁
 scripts/acceptance-all.sh

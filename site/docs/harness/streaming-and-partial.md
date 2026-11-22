@@ -80,14 +80,14 @@ log. It is deliberately narrow:
 provider stream (SSE frames from the model)
    │
    ▼
-agentext.StreamTee            wraps the provider StreamFn; extracts text/thinking deltas
-   │                          internal/agentext/streamtee.go:24
+harnessext.StreamTee            wraps the provider StreamFn; extracts text/thinking deltas
+   │                          internal/harnessext/streamtee.go:24
    ▼
-agentext.PartialHub           process-local, per (tenant, session); bounded buffer (16)
-   │  Publish / Subscribe     internal/agentext/turns.go:360, :386, :407
+harnessext.PartialHub           process-local, per (tenant, session); bounded buffer (16)
+   │  Publish / Subscribe     internal/harnessext/turns.go:360, :386, :407
    ▼
-agentapi.PartialSource        adapts the hub to the HTTP frame type
-   │                          internal/agentapi/partials.go:16
+harnessapi.PartialSource        adapts the hub to the HTTP frame type
+   │                          internal/harnessapi/partials.go:16
    ▼
 SSE ?partials=1               event: partial, data: {...}, NO id line
                               internal/httpapi/partials.go:16
@@ -97,9 +97,9 @@ Properties, verbatim from the design:
 
 - **not durable** — partials never enter the event log and never appear in
   `GET /events`; a reconnecting client cannot replay them
-  (`internal/agentext/doc.go`).
+  (`internal/harnessext/doc.go`).
 - **droppable** — the hub is a bounded ring; a slow consumer drops frames
-  rather than blocking the producer (`internal/agentext/turns.go:373`,
+  rather than blocking the producer (`internal/harnessext/turns.go:373`,
   `internal/httpapi/partials.go:28`).
 - **no cursor** — because the frame has no `id:`, `Last-Event-ID` is untouched;
   the committed `assistant.message` that follows is the authoritative copy and
@@ -107,11 +107,11 @@ Properties, verbatim from the design:
   (`packages/chat-surface/src/engine.ts`).
 - **opt-in** — the producer is consulted only when the request asks for
   `?partials=1`, and `GET /v1/capabilities` reports whether the deployment has
-  a partial source at all (`internal/agentapi/api.go:262`).
+  a partial source at all (`internal/harnessapi/api.go:262`).
 
 If a process needs to know whether partials are flowing, the hub exposes
 counters (published, dropped, subscribers) through its `Stats`
-(`internal/agentext/turns.go:430`).
+(`internal/harnessext/turns.go:430`).
 
 ## 5. Draining a stream
 
@@ -139,7 +139,7 @@ The streaming behavior is pinned by tests rather than prose:
 - `internal/httpapi/ops_test.go` — SSE framing, heartbeat and cursor behavior;
 - `internal/httpapi/server_test.go` — tenant boundary before headers, resume
   with `after`/`Last-Event-ID`;
-- `internal/agentapi/partials_sse_test.go` — partial frames carry no `id` and do
+- `internal/harnessapi/partials_sse_test.go` — partial frames carry no `id` and do
   not move the cursor;
 - `cmd/e2e` — the cross-process stateless scenarios (blob resume, 2000-event
   sequence with no gap) summarized in `README.md`;

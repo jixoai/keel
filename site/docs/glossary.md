@@ -18,8 +18,8 @@ sidebar: false
 | --- | --- | --- |
 | **Keel** | The project: a stateless, multi-tenant agent runtime base. | `README.md` |
 | **Core** | The contract kernel + event ledger + service graph + loadout + storage + handoff. The part that cannot be swapped. | `docs/SERVICE-GRAPH.md`, `docs/KERNEL.md` |
-| **Harness** (formerly "Agent") | The product layer over the Core: sessions, turns, tools, approvals, plugins, triggers, sub-agents, and the client surfaces. The process is `keel serve`. | `internal/agentext/doc.go`, `docs/HARNESS.md` |
-| **AgentAPI** | The `/v1` product API contract (alias: Harness API). Name kept; it is a wire contract consumed by the web UI and TUI. | `internal/agentapi/api.go:49` |
+| **Harness** (formerly "Agent") | The product layer over the Core: sessions, turns, tools, approvals, plugins, triggers, sub-agents, and the client surfaces. The process is `keel serve`. | `internal/harnessext/doc.go`, `docs/HARNESS.md` |
+| **AgentAPI** | The `/v1` product API contract (alias: Harness API). Name kept; it is a wire contract consumed by the web UI and TUI. | `internal/harnessapi/api.go:49` |
 | **AgentBackend** | The protocol a foreign agent runtime (for example DSH) implements to be driven as an external backend. Name kept. | `internal/gateway/protocol.go`, `docs/DSH-REFERENCE.md` |
 | **DSH** | DeepSeek Harness — an external reference for the plugin model and an external-agent target. A reference, not this project's source of truth. | `docs/DSH-REFERENCE.md` |
 
@@ -40,9 +40,9 @@ sidebar: false
 | **Partial** | A token-level delta streamed beside the log; never stored, never replayed, carries no cursor. | `internal/httpapi/partials.go:5` |
 | **Compaction** | Replacing the oldest transcript span with a committed summary event; history is never edited. | `internal/compaction/compact.go` |
 | **Handoff** | Cross-process succession: new runtime, drain the old one, new epoch, continue from the ledger. | `docs/HANDOFF.md` |
-| **Decision** | The approval/question primitive: durable row, idempotent answer, bounded timeout. Not a kernel event kind. | `internal/agentext/decisions.go:233` |
-| **Trigger** | A scheduled or webhook-started turn (`interval`/`cron`/`webhook`) with idempotency keys and an audit trail. | `internal/agentext/triggers.go:30` |
-| **Sub-agent** | A child session spawned by a tool or API call, with a budget and a structured result. | `internal/agentext/subagent.go:44` |
+| **Decision** | The approval/question primitive: durable row, idempotent answer, bounded timeout. Not a kernel event kind. | `internal/harnessext/decisions.go:233` |
+| **Trigger** | A scheduled or webhook-started turn (`interval`/`cron`/`webhook`) with idempotency keys and an audit trail. | `internal/harnessext/triggers.go:30` |
+| **Sub-agent** | A child session spawned by a tool or API call, with a budget and a structured result. | `internal/harnessext/subagent.go:44` |
 
 ## Assembly vocabulary
 
@@ -52,7 +52,7 @@ sidebar: false
 | **Loadout** | An immutable snapshot of the assembled service set `{id, revision, version, summary, services}`, pinned per run. | `docs/LOADOUT.md` §1 |
 | **Generation** | A counter incremented once per reassembly; instances from an old generation serve in-flight runs and are retired afterwards. | `internal/servicegraph/engine.go:270`, `docs/LOADOUT.md` §4 |
 | **Selection** | The model/provider choice recorded with a run; validated against the current generation's provider configuration. | `internal/modelcfg`, `internal/agent/runner.go:321` |
-| **Plugin** | An extension of the Harness. Today: an in-process Go value (`agentext.Plugin`). Planned: a `plugin.yaml` package of one of three kinds. | `internal/agentext/plugin.go:67` |
+| **Plugin** | An extension of the Harness. Today: an in-process Go value (`harnessext.Plugin`). Planned: a `plugin.yaml` package of one of three kinds. | `internal/harnessext/plugin.go:67` |
 | **`plugin.yaml`** | The planned plugin manifest (id/version/kind/engines/provides/requires/permissions/entry/source). | planned: `keel-plugin-core` spec |
 | **in-process / sidecar / webview** | The three planned plugin kinds: compiled-in / external process over stdio JSON-RPC / hosted UI package. | planned: `keel-plugin-core` spec |
 | **`keel.plugin.*`** | The planned bridge a webview plugin uses to read its own state, call its own tools, request an approval and subscribe to events — and nothing else. | planned: `keel-plugin-core` spec |
@@ -67,4 +67,4 @@ sidebar: false
 | effect | a reversible side effect owned by a plugin | `Plugin.Effects` released in reverse order |
 | bundle | a patch layer (config + plugins) | planned enablement list; today the default loadout |
 | profile | an ordered stack of bundles | loadout (immutable snapshot, pinned per run) |
-| Cordis | the TS plugin runtime | **not ported** — `agentext` + `servicegraph` express the same semantics in Go |
+| Cordis | the TS plugin runtime | **not ported** — `harnessext` + `servicegraph` express the same semantics in Go |

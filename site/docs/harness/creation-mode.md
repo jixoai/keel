@@ -71,7 +71,7 @@ path is specified as strictly as the success path (`spec: a failed generation ro
 The rollback rule is the same discipline the service graph applies to
 activation: *a failed activation rolls back its own effects; it never leaves a
 half-registered listener* (`internal/servicegraph/lifecycle.go:36`,
-`internal/agentext/plugin.go:317`).
+`internal/harnessext/plugin.go:317`).
 
 ## 4. How creation mode talks to the model
 

@@ -25,7 +25,7 @@ working in a checkout of this repository (or a fork) — see
 | Expose an external tool server | `ToolProvider` (`external.tools`) | [Connect an external backend](/core/extend/external-backend) |
 | Add a model provider or change protocols | `provider.StreamFn` + `provider.ResolveProvider` | [Write a provider adapter](/core/extend/provider-adapter) |
 | Add a tool to the model's toolbox | `agenttool.ToolRegistry` (kernel side) or the host registry (`tools.allow` filters it) | [Embed the runtime](/core/extend/embed-runtime) |
-| Add a product capability (plugin, hook, trigger, sub-agent, approval) | the Harness extension surface (`internal/agentext` today; plugin standard documented in the Harness line) | [Harness plugins](/harness/plugins/) |
+| Add a product capability (plugin, hook, trigger, sub-agent, approval) | the Harness extension surface (`internal/harnessext` today; plugin standard documented in the Harness line) | [Harness plugins](/harness/plugins/) |
 | Add a new event kind | in-repo change: `kindRegistry` + `internal/store` constants + transcript/SSE/R1 rules move together | [Events and protocol](/core/events) |
 | Change storage or add a table | in-repo change: `internal/store/schema.sql` or a numbered kernel migration | [Storage and runtime](/core/storage) |
 | Build a UI | the Harness API + SSE (versioned `/v1`, capability discovery) | [AgentAPI reference](/core/agentapi) |

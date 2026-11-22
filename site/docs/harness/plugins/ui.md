@@ -34,7 +34,7 @@ Rules the spec fixes:
 The same-origin design is not an accident: the web client is already served by
 `keel serve` from the build directory (`cmd/keel/static.go:16`), so
 `/plugins/<id>/` rides the same origin and needs no CORS — the property the
-AgentAPI was designed around (`internal/agentapi/api.go:1`).
+AgentAPI was designed around (`internal/harnessapi/api.go:1`).
 
 ## 2. The `keel.plugin.*` bridge
 
@@ -42,10 +42,10 @@ The bridge is the plugin UI's whole capability budget. Four verbs, no more:
 
 | Bridge call | What it does | Backed by (today's analogue) |
 | --- | --- | --- |
-| read own state | the plugin's row from the inventory: id, version, state, provides, diagnostics | `GET /v1/plugins` snapshot (`internal/agentapi/ext.go:18`) |
+| read own state | the plugin's row from the inventory: id, version, state, provides, diagnostics | `GET /v1/plugins` snapshot (`internal/harnessapi/ext.go:18`) |
 | call own tools | invoke a tool **this plugin** declared (the host resolves the owning plugin from the session) | tool dispatch through the same registry the model uses |
 | request approval | open a decision and wait for the answer | the decision primitive ([Approvals](/harness/approvals-and-questions)) |
-| subscribe to events | receive forwarded events relevant to the plugin (its own trigger/decision/subagent lifecycle) | the hook bus and its closed event set (`internal/agentext/hooks.go:18`) |
+| subscribe to events | receive forwarded events relevant to the plugin (its own trigger/decision/subagent lifecycle) | the hook bus and its closed event set (`internal/harnessext/hooks.go:18`) |
 
 Deliberately absent from the bridge: arbitrary HTTP, filesystem access, shell
 execution, other plugins' tools, other sessions' events, and every secret. A

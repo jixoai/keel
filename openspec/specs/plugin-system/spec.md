@@ -68,7 +68,7 @@ MUST 支持从 `plugins-root` 发现插件；MUST 提供安装（本地目录/gi
 ### Requirement: 生命周期
 
 插件状态机 MUST 为 `installed → enabled → disabled → uninstalled`（升级为同 id 的版本替换）；
-启用/停用 MUST 走 agentext 的依赖拓扑装载与**反序卸载**；工具/hook/trigger/UI 的注册副作用
+启用/停用 MUST 走 harnessext 的依赖拓扑装载与**反序卸载**；工具/hook/trigger/UI 的注册副作用
 MUST 在停用时全部撤销（无残留工具、无残留订阅、无残留触发）。
 
 #### Scenario: 停用即撤销

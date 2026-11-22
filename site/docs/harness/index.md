@@ -17,7 +17,7 @@ The Core packages (`internal/kernel`, `internal/loop`, `internal/agentcore`,
 `internal/agenttool`, `internal/agent`) know only events, leases, tools and the
 transcript. Everything that is *policy* lives in the Harness and is layered on
 top: plugin assembly, hooks, approvals, triggers, sub-agents and token-level
-partials (`internal/agentext/doc.go:1`).
+partials (`internal/harnessext/doc.go:1`).
 
 | Question | Answered by | Citation |
 | --- | --- | --- |
@@ -25,8 +25,8 @@ partials (`internal/agentext/doc.go:1`).
 | Who owns the session right now? | Core (leases + fencing epoch) | `internal/kernel/lease.go:16` |
 | What does the model see? | Harness host assembly + the loop | `internal/agent/runner.go:280` |
 | Which tools exist for this run? | Harness (host registry + plugin tools) | `internal/agenttool/registry.go` |
-| May this tool run? What did it see? | Harness (hooks, approvals, policy) | `internal/agentext/hooks.go:18` |
-| Which plugins are active? | Harness (plugin runtime) | `internal/agentext/plugin.go:163` |
+| May this tool run? What did it see? | Harness (hooks, approvals, policy) | `internal/harnessext/hooks.go:18` |
+| Which plugins are active? | Harness (plugin runtime) | `internal/harnessext/plugin.go:163` |
 | What does the client display? | Harness projection (`@keel/chat-surface`) | `packages/chat-surface/src/types.ts` |
 
 The dependency direction is one-way: **Harness → Core**. A kernel package is
@@ -68,20 +68,20 @@ keel serve (one process)
 ├─ HTTP edge            /v1/tenants, /v1/sessions/{id}/input, /v1/sessions/{id}/events[/stream],
 │                       /v1/files, /v1/runtime/{drain,status}      internal/httpapi/server.go:146
 ├─ Product API (AgentAPI)
-│   ├─ discovery        GET /v1/capabilities                        internal/agentapi/api.go:257
-│   ├─ sessions         GET /v1/sessions, POST …/{id}/cancel        internal/agentapi/api.go:171
-│   ├─ decisions        GET/POST /v1/sessions/{id}/decisions[/…]    internal/agentapi/api.go:173
-│   ├─ plugins          GET /v1/plugins                             internal/agentapi/ext.go:18
-│   ├─ triggers         GET /v1/triggers, POST …/{id}/fire          internal/agentapi/ext.go:39
-│   └─ sub-agents       GET /v1/subagents, POST …/{id}/subagents    internal/agentapi/ext.go:128
-├─ Extension surface (agentext)
-│   ├─ plugin runtime   declarative plugins, generation, reverse unload   internal/agentext/plugin.go:163
-│   ├─ hook bus         closed event set, async, bounded queue            internal/agentext/hooks.go:298
-│   ├─ decisions        approval/clarify primitive with durable rows      internal/agentext/decisions.go:233
-│   ├─ triggers         interval/cron/webhook + idempotency + audit       internal/agentext/triggers.go:305
-│   ├─ sub-agents       child sessions with budgets and structured result internal/agentext/subagent.go:175
-│   ├─ run control      cancel registration for the executing attempt     internal/agentext/turns.go:222
-│   └─ partials         process-local token deltas (never in the log)     internal/agentext/turns.go:360
+│   ├─ discovery        GET /v1/capabilities                        internal/harnessapi/api.go:257
+│   ├─ sessions         GET /v1/sessions, POST …/{id}/cancel        internal/harnessapi/api.go:171
+│   ├─ decisions        GET/POST /v1/sessions/{id}/decisions[/…]    internal/harnessapi/api.go:173
+│   ├─ plugins          GET /v1/plugins                             internal/harnessapi/ext.go:18
+│   ├─ triggers         GET /v1/triggers, POST …/{id}/fire          internal/harnessapi/ext.go:39
+│   └─ sub-agents       GET /v1/subagents, POST …/{id}/subagents    internal/harnessapi/ext.go:128
+├─ Extension surface (harnessext)
+│   ├─ plugin runtime   declarative plugins, generation, reverse unload   internal/harnessext/plugin.go:163
+│   ├─ hook bus         closed event set, async, bounded queue            internal/harnessext/hooks.go:298
+│   ├─ decisions        approval/clarify primitive with durable rows      internal/harnessext/decisions.go:233
+│   ├─ triggers         interval/cron/webhook + idempotency + audit       internal/harnessext/triggers.go:305
+│   ├─ sub-agents       child sessions with budgets and structured result internal/harnessext/subagent.go:175
+│   ├─ run control      cancel registration for the executing attempt     internal/harnessext/turns.go:222
+│   └─ partials         process-local token deltas (never in the log)     internal/harnessext/turns.go:360
 ├─ Host assembly        system prompt, skills, tool registry, MCP         internal/host/host.go
 ├─ Service graph        store/llm/prompt/mcp/tools/pi-loop/…              internal/loadout/loadout.go:63
 ├─ Worker               claim → execute → settle                          internal/agent/worker.go:170
@@ -147,7 +147,7 @@ description of shipped code.
 | Ledger, kernel verbs, recovery, handoff | Implemented | [Anatomy of a turn](/harness/anatomy-of-a-turn), [Recovery and compaction](/harness/recovery-and-compaction) |
 | Streaming, partials, drain frame | Implemented | [Streaming and partials](/harness/streaming-and-partial) |
 | Decisions (approvals/questions) | Implemented | [Approvals and questions](/harness/approvals-and-questions) |
-| In-process declarative plugins (`agentext.Plugin`) | Implemented | [Plugin host](/harness/plugins/) |
+| In-process declarative plugins (`harnessext.Plugin`) | Implemented | [Plugin host](/harness/plugins/) |
 | MCP Apps host (catalogue, sandbox, bridge, events/era) | Implemented (P1–P5; P6 acceptance in progress) | [MCP Apps](/harness/mcp-apps) |
 | `plugin.yaml` packages, install, sidecar/webview kinds | Planned (`keel-plugin-core` W1) | [Manifest](/harness/plugins/manifest), [Kinds](/harness/plugins/kinds) |
 | Plugin permissions, sandbox boundary, audit endpoint | Planned (`keel-plugin-core` W1) | [Permissions](/harness/plugins/permissions) |

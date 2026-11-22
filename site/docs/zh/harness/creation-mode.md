@@ -57,7 +57,7 @@ keel.creation：生成插件包
 - 生成与安装都写审计行，包括失败。
 
 回滚规则与服务图对激活施加的纪律相同：*激活失败回滚自身 effects；绝不留下半注册的监听器*
-（`internal/servicegraph/lifecycle.go:36`、`internal/agentext/plugin.go:317`）。
+（`internal/servicegraph/lifecycle.go:36`、`internal/harnessext/plugin.go:317`）。
 
 ## 4. 创造模式如何与模型对话
 

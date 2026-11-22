@@ -51,7 +51,7 @@ the replaceable / non-replaceable table are in [Architecture](/core/architecture
 
 The kernel boundary is fixed by tests, not by convention: `internal/architecture/boundary_test.go:14`
 asserts with `go list -deps` that kernel packages (loop, agentcore, agenttool, kernel, agent, store)
-never import product packages (agentapi, agentext, servicehost, cmd/keel). Not in the kernel:
+never import product packages (harnessapi, harnessext, servicehost, cmd/keel). Not in the kernel:
 
 - authentication (a network middleware concern),
 - session listing, stop and approval semantics,

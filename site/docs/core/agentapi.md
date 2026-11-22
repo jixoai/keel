@@ -10,7 +10,7 @@ from a running `keel serve` at the documented revision.
 | Face | Package | Purpose | Who serves it |
 |---|---|---|---|
 | **Core shell** | `internal/httpapi` | the kernel-direct surface: tenants, sessions, input, events, SSE, run rows, files, runtime drain | `cmd/runtime` (runtime) and `cmd/keel` (product subset) |
-| **Harness API** | `internal/agentapi` | the product surface: session listing, cancel, decisions, plugins, triggers, sub-agents, capabilities | `cmd/keel serve` |
+| **Harness API** | `internal/harnessapi` | the product surface: session listing, cancel, decisions, plugins, triggers, sub-agents, capabilities | `cmd/keel serve` |
 
 Both mount under `/v1`; a breaking shape change would require `/v2`. New capabilities are
 additive, and clients discover them — see §6.
@@ -66,7 +66,7 @@ Verified response shapes:
 
 ## 3. Harness API endpoints
 
-From `internal/agentapi/api.go:167`:
+From `internal/harnessapi/api.go:167`:
 
 | Method | Path | Semantics |
 |---|---|---|
@@ -133,7 +133,7 @@ capability discovery flag is `false` at the same time, so a client can hide the 
 ## 6. Capabilities and downgrade
 
 The discovery document is the only correct way for a client to learn what this deployment serves
-(`internal/agentapi/api.go:249`). Verified response:
+(`internal/harnessapi/api.go:249`). Verified response:
 
 ```json
 {"apiVersion":"v1","serviceVersion":"keel-agent/0.1.0",

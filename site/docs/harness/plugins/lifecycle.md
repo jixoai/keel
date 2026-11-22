@@ -4,7 +4,7 @@
 > install/enable/disable/uninstall endpoints, version replacement) per
 > `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("lifecycle").
 > The *assembly mechanics* it builds on are **implemented** in
-> `internal/agentext` and `internal/servicegraph` and are cited below.
+> `internal/harnessext` and `internal/servicegraph` and are cited below.
 
 ## 1. The state machine
 
@@ -35,13 +35,13 @@ in-process plugins, and the planned lifecycle reuses it:
 
 | Promise | Mechanism (implemented) | Citation |
 | --- | --- | --- |
-| dependency-ordered activation | iterative activation loop; dependents activate once their requirements are provided | `internal/agentext/plugin.go:237` |
-| missing dependency ⇒ not loaded, visibly | state `PENDING` + `waiting for: <ids>` diagnostic | `internal/agentext/plugin.go:291` |
-| disable removes tools | the published tool set is recomputed after every assembly | `internal/agentext/plugin.go:438` |
-| disable removes subscriptions/triggers | `unsubs` and `triggerStops` are released in reverse order | `internal/agentext/plugin.go:386` |
-| disable runs declared cleanups exactly once | `effectsRun` bookkeeping prevents double execution on partial unload | `internal/agentext/plugin.go:396` |
-| a failed activation rolls back its own effects | failure path calls `cleanup` before returning | `internal/agentext/plugin.go:317` |
-| every change is visible | generation increments once per assembly; snapshot reports states + diagnostics | `internal/agentext/plugin.go:209`, `:505` |
+| dependency-ordered activation | iterative activation loop; dependents activate once their requirements are provided | `internal/harnessext/plugin.go:237` |
+| missing dependency ⇒ not loaded, visibly | state `PENDING` + `waiting for: <ids>` diagnostic | `internal/harnessext/plugin.go:291` |
+| disable removes tools | the published tool set is recomputed after every assembly | `internal/harnessext/plugin.go:438` |
+| disable removes subscriptions/triggers | `unsubs` and `triggerStops` are released in reverse order | `internal/harnessext/plugin.go:386` |
+| disable runs declared cleanups exactly once | `effectsRun` bookkeeping prevents double execution on partial unload | `internal/harnessext/plugin.go:396` |
+| a failed activation rolls back its own effects | failure path calls `cleanup` before returning | `internal/harnessext/plugin.go:317` |
+| every change is visible | generation increments once per assembly; snapshot reports states + diagnostics | `internal/harnessext/plugin.go:209`, `:505` |
 
 The spec's acceptance scenario is the same statement in product terms:
 *enable a plugin that provides tool `x` and a webhook trigger, disable it, and
@@ -53,12 +53,12 @@ the model no longer has `x`, the trigger no longer fires, the inventory shows
 - `requires` names **plugins or services**. A requirement is satisfied when
   something active `provides` it; a plugin that cannot be satisfied stays
   `disabled` with a named reason. It is never partially loaded
-  (`spec: a missing dependency blocks load`; mechanism: `internal/agentext/plugin.go:291`).
+  (`spec: a missing dependency blocks load`; mechanism: `internal/harnessext/plugin.go:291`).
 - Tools are a global namespace: two enabled plugins may not provide the same
   tool name. The second one fails closed with a diagnostic, whichever order
-  they are assembled in (`internal/agentext/plugin.go:236`, `:454`).
+  they are assembled in (`internal/harnessext/plugin.go:236`, `:454`).
 - Hook events must belong to the closed set; an unknown event is an error at
-  subscription time, never a silent no-op (`internal/agentext/hooks.go:249`).
+  subscription time, never a silent no-op (`internal/harnessext/hooks.go:249`).
 
 ## 3. Hot update without disturbing in-flight work
 
@@ -70,7 +70,7 @@ Two levels of protection keep it from disturbing work in progress:
    callbacks and trigger fires that reference removed plugins fail visibly in
    their own counters; committed runs are untouched because the run's own
    registrations live in its transcript, not in the plugin table
-   (`internal/agentext/plugin.go:163`, `internal/agentext/hooks.go:399`).
+   (`internal/harnessext/plugin.go:163`, `internal/harnessext/hooks.go:399`).
 2. **Service level (where plugins become services).** The planned unification
    routes official plugins through the service graph, which adds generations
    with in-flight references: `RETIRING` instances accept no new runs and are
@@ -92,7 +92,7 @@ Two levels of protection keep it from disturbing work in progress:
 | sidecar process | `close` on the protocol, then stdin close → grace → SIGTERM → SIGKILL on the process group |
 | sub-agent sessions the plugin spawned | keep running — they are sessions in the ledger, not plugin state |
 
-(`internal/agentext/plugin.go:386` for effects; sidecar close path
+(`internal/harnessext/plugin.go:386` for effects; sidecar close path
 `internal/gateway/stdio.go:228`.)
 
 ## 5. Audit
@@ -102,7 +102,7 @@ Every lifecycle action — `install`, `enable`, `disable`, `uninstall`, `update`
 version, action, result**, and be queryable through `GET /v1/plugins/audit`
 (`spec: audit`). The audit lane reuses the same discipline as the trigger audit
 today: bounded records, ordered by time, with the actor and the outcome
-(`internal/agentext/triggers.go:86` for the existing audit-entry shape).
+(`internal/harnessext/triggers.go:86` for the existing audit-entry shape).
 
 ## 6. Lifecycle in the UI
 

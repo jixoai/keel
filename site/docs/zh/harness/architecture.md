@@ -13,15 +13,15 @@
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ HTTP + SSE（同源；结构上无需 CORS）
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
-│ HTTP 边缘 + AgentAPI（internal/httpapi、internal/agentapi）                   │
+│ HTTP 边缘 + AgentAPI（internal/httpapi、internal/harnessapi）                   │
 │  边缘：tenants/sessions/input/retry/events/stream/files/runtime drain        │
 │  产品：capabilities、会话列表、cancel、decisions、plugins/triggers/          │
 │        subagents、settings 面                                                │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ 接缝：kernel.Committer/Reader/LeaseManager、
-                                │ agentext 原语、服务绑定
+                                │ harnessext 原语、服务绑定
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
-│ Harness 产品原语（internal/agentext）                                         │
+│ Harness 产品原语（internal/harnessext）                                         │
 │  插件运行时 · hook 总线 · decision broker · 触发器 · 子代理 · run 控制 ·      │
 │  partial hub                                                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
@@ -96,10 +96,10 @@ broken，持有者必须以 `drain-expired` 诊断让 run 失败（`internal/age
 
 ## 3. 插件宿主
 
-插件宿主是 Harness 的扩展运行时。今天它是 `agentext.Runtime`：一个**进程内、声明式**契约。
+插件宿主是 Harness 的扩展运行时。今天它是 `harnessext.Runtime`：一个**进程内、声明式**契约。
 
 ```
-agentext.Runtime
+harnessext.Runtime
 ├─ assemble()：先卸载上一代装配 → generation+1 → 按依赖顺序激活
 │    ├─ 跨插件工具重名 → fail-closed 诊断
 │    ├─ requires 未满足 → PENDING，附 "waiting for: …"
@@ -110,9 +110,9 @@ agentext.Runtime
 └─ Close()：反序卸载全部，随后发布空工具集
 ```
 
-出处：插件契约 `internal/agentext/plugin.go:67`；装配 `:209`；激活 `:317`；反序清理 `:387`；
+出处：插件契约 `internal/harnessext/plugin.go:67`；装配 `:209`；激活 `:317`；反序清理 `:387`；
 卸载 `:417`；快照 `:505`。`keel serve` 当前装配两个内置插件：`keel.example`
-（`internal/agentext/builtin.go:38`）与 `keel.creation` / `keel.testkit` 等内置插件
+（`internal/harnessext/builtin.go:38`）与 `keel.creation` / `keel.testkit` 等内置插件
 （`internal/pluginpkg/builtin/`）；子代理原语是 harness 内建的 `agent` 工具，不是插件工具。
 
 今天这个宿主给你的能力：按依赖顺序激活、对每个声明的副作用（hook 订阅、触发器注册、
@@ -145,10 +145,10 @@ tool.result 提交          内核与调用配对；重复结果按 toolCallId �
 - 工具结果可能很大；执行器会裁剪，转录保持有界（`internal/agenttool/utf8trim.go`）。
 
 **审批**不是工具执行器的属性，而是产品层的 decision 原语
-（`internal/agentext/decisions.go:233`）。需要人工回答的 run 打开一个 decision，以有界超时
-等待（默认 5 分钟，`internal/agentext/decisions.go:162`），按答案继续或失败。Decision 是
+（`internal/harnessext/decisions.go:233`）。需要人工回答的 run 打开一个 decision，以有界超时
+等待（默认 5 分钟，`internal/harnessext/decisions.go:162`），按答案继续或失败。Decision 是
 tasks 记账表中的 durable 行，**绝不是新的内核事件 kind**——内核词汇表不变
-（`internal/kernel/validate.go:36`、`internal/agentext/doc.go`）。见
+（`internal/kernel/validate.go:36`、`internal/harnessext/doc.go`）。见
 [审批与问句](/zh/harness/approvals-and-questions)。
 
 ## 5. 投影
@@ -176,7 +176,7 @@ NSH 渲染器           web 屏 / TUI target（同一份 TSX）
 queue/guide 状态是事件驱动的，停止只有 `run.finished` 才算确认
 （`packages/chat-surface/src/projection.ts`）。Partials 是证明这条规则的例外：token 增量
 沿日志旁路传输，永不落账，已提交消息一到即被丢弃
-（`internal/agentext/streamtee.go:24`、`packages/chat-surface/src/engine.ts`）。
+（`internal/harnessext/streamtee.go:24`、`packages/chat-surface/src/engine.ts`）。
 
 同一份投影驱动两个界面，这也是 web UI 与 TUI 不会漂移的原因：`keel tui` 用同一份 TSX
 对接同一个 AgentAPI（`docs/WEBUI.md`、`web/README.md`）。

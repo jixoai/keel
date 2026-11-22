@@ -34,7 +34,7 @@ Operational facts worth knowing before you expose the port:
 - **Authentication is a network middleware, not an API concern**: an
   HMAC-signed HttpOnly cookie for the web, `Authorization: Bearer` for
   CLI/TUI; the middleware injects the tenant and strips any client-supplied
-  `X-Tenant-ID` (`internal/agentapi/api.go:18`, `cmd/keel/auth.go:63`).
+  `X-Tenant-ID` (`internal/harnessapi/api.go:18`, `cmd/keel/auth.go:63`).
 - `--password ""` **only answers loopback hosts** — a wildcard bind without
   auth refuses non-loopback requests instead of exposing the tenant
   (`cmd/keel/auth.go:100`).
@@ -76,9 +76,9 @@ plugin UIs — plugin rows open a web URL instead
 | Aspect | Today | Planned |
 | --- | --- | --- |
 | Where plugins come from | compiled into the binary (`keel.example`, `keel.creation`, `keel.testkit`, the registry plugins — `internal/pluginpkg/builtin/`) | `<plugins-root>/<id>/` packages discovered at boot |
-| Enable/disable | process assembly (`agentext.Runtime.Apply`) | lifecycle API + approval ([Lifecycle](/harness/plugins/lifecycle)) |
+| Enable/disable | process assembly (`harnessext.Runtime.Apply`) | lifecycle API + approval ([Lifecycle](/harness/plugins/lifecycle)) |
 | State | `active`/`pending`/`failed`/`stopped` per plugin, generation counter, diagnostics | plus `installed`/`disabled`, install/uninstall/update audit |
-| Visible at | `GET /v1/plugins` + web settings › Plugins (`internal/agentapi/ext.go:18`, `web/src/screens/settings.tsx:1148`) | same endpoints extended, not replaced |
+| Visible at | `GET /v1/plugins` + web settings › Plugins (`internal/harnessapi/ext.go:18`, `web/src/screens/settings.tsx:1148`) | same endpoints extended, not replaced |
 
 The planned plugins root is a **managed directory**: packages are copied into
 it, content-hashed at install, and never referenced in place
@@ -95,7 +95,7 @@ directory; the ledger does not contain plugin binaries.
 | `GET /v1/ready` | store readiness (migrations applied) |
 | `GET /v1/metrics` (JSON) and `GET /metrics` (Prometheus) | stream/scheduler/admission counters, run metrics |
 | `GET /v1/plugins` | assembled surface: generation, plugin states, tools, hooks summary, diagnostics |
-| `GET /v1/triggers` | trigger inventory + audit windows (`internal/agentapi/ext.go:39`) |
+| `GET /v1/triggers` | trigger inventory + audit windows (`internal/harnessapi/ext.go:39`) |
 | `GET /v1/sessions/{id}/run` and `/run/loadout` | run row (status/attempts/cursor/lastError) and the pinned loadout (`docs/LOADOUT.md` §5) |
 | `POST /v1/runtime/drain`, `GET /v1/runtime/status` | drain control and observability (`docs/HANDOFF.md`) |
 | `GET /v1/sessions/{id}/decisions` | open/answered/timed-out approvals |

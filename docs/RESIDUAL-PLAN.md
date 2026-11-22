@@ -82,7 +82,7 @@
     `agent.spawn`，不留过渡名；§5.1-1 已按此更新）
   - W2.2–W2.5 在 W2.1 合入后**并行分线（文件分区）**：bash+JobManager / layerfs+file /
     task-log / approve+notify
-  - 顺序依赖：W2.2 待 W2.0；W2.3 复用 blob（Wave 1 线 B 之后）；W2.4/W2.5 的 store/agentapi
+  - 顺序依赖：W2.2 待 W2.0；W2.3 复用 blob（Wave 1 线 B 之后）；W2.4/W2.5 的 store/harnessapi
     增面待 Wave 1 收口
 
 ### Wave 3 — 运维与产品尾项（并行 3 条）

@@ -11,7 +11,7 @@ Every runtime package lives under `internal/`:
 ```
 internal/kernel     internal/agent      internal/loop      internal/agentcore
 internal/store      internal/servicegraph  internal/loadout   internal/servicehost
-internal/agentapi   internal/agentext   internal/agentloop  internal/provider
+internal/harnessapi   internal/harnessext   internal/agentloop  internal/provider
 internal/host       internal/httpapi    internal/blob       internal/gateway …
 ```
 

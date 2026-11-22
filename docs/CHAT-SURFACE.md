@@ -72,7 +72,7 @@ import { ChatSurfaceEngine, toAgUi } from "@keel/chat-surface";
 > 服务端 SHOULD 在 `user.message`/`assistant.message` 带 `turnId` 与 `origin`；缺失时见 §4。
 > 时间字段缺失时 `InputView.createdAt` 回退到事件 `seq`（确定性优先；服务端应带
 > `timestamp`，工具耗时则用 `timestamp + durationMs` 反推）。
-> 审批在 `agentext` 是产品层原语（独立 decision journal，不是内核事件 kind）：宿主可把它
+> 审批在 `harnessext` 是产品层原语（独立 decision journal，不是内核事件 kind）：宿主可把它
 > 作为 `decision` 事件喂给核心，或从 `GET /v1/sessions/{id}/decisions` 合成同形状事件；
 > 核心只消费 `decision` 事件，不直接访问 decisions API。
 

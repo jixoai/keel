@@ -20,8 +20,8 @@ closed when denied" is the interesting one.
 
 | Layer | Question it answers | Runs as | Existing precedent |
 | --- | --- | --- | --- |
-| **Unit** | do the pure pieces behave? manifest parsing, version-range gate, cut points | `go test ./internal/…` | `internal/agentext/agentext_test.go` |
-| **Integration** | does the plugin behave inside a real host? enable → tool call → hook → trigger → disable | `go test -race` against a real PG | `internal/agentext/e2e_test.go` |
+| **Unit** | do the pure pieces behave? manifest parsing, version-range gate, cut points | `go test ./internal/…` | `internal/harnessext/harnessext_test.go` |
+| **Integration** | does the plugin behave inside a real host? enable → tool call → hook → trigger → disable | `go test -race` against a real PG | `internal/harnessext/e2e_test.go` |
 | **Conformance** | does the system keep the contract across implementations/versions? | conformance suite | `internal/loop/conformance_suite_test.go`, `docs/PI-CONFORMANCE.md` |
 | **Negative controls** | does each failure mode fail the *right* way? | explicit assertions on errors/state | gateway smoke + fail-closed tests |
 
@@ -31,15 +31,15 @@ closed when denied" is the interesting one.
   `kind`, `engines.keel` outside range — each must fail with a **field-level
   reason** and leave the plugin directory unadopted (`spec: an illegal manifest is rejected`).
 - `provides.hooks` entries outside the closed set must be rejected at
-  registration, never silently ignored (`internal/agentext/hooks.go:249`).
+  registration, never silently ignored (`internal/harnessext/hooks.go:249`).
 - Tool-name conflict detection is order-independent: whichever plugin is
-  assembled second fails closed (`internal/agentext/plugin.go:236`, `:454`).
+  assembled second fails closed (`internal/harnessext/plugin.go:236`, `:454`).
 
 ### Integration
 
 The implemented extension E2E is the template: *plugin registration → trigger
 fire → hook delivery → sub-agent spawn → cancel of an online attempt*
-(`internal/agentext/e2e_test.go`, summarized in `docs/HARNESS.md` §5). A
+(`internal/harnessext/e2e_test.go`, summarized in `docs/HARNESS.md` §5). A
 plugin-suite integration test must additionally prove the disable
 path: after disabling a plugin that provided tool `x` and a webhook trigger,
 the tool is gone from the model's tool set, the trigger no longer fires, and
@@ -93,7 +93,7 @@ For `webview` plugins (planned):
 
 ```bash
 # unit + integration (needs a PostgreSQL for the -race integration packages)
-go test ./internal/agentext/… ./internal/servicegraph/… ./internal/loadout/…
+go test ./internal/harnessext/… ./internal/servicegraph/… ./internal/loadout/…
 
 # extension E2E and the full gate
 scripts/acceptance-all.sh

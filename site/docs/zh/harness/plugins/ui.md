@@ -28,7 +28,7 @@ keel.plugin.* 桥                 唯一能力通道：
 
 同源设计不是巧合：web 客户端本就由 `keel serve` 从构建目录托管（`cmd/keel/static.go:16`），
 `/plugins/<id>/` 因此搭同一 origin，无需 CORS——这正是 AgentAPI 设计时的前提
-（`internal/agentapi/api.go:1`）。
+（`internal/harnessapi/api.go:1`）。
 
 ## 2. `keel.plugin.*` 桥
 
@@ -36,10 +36,10 @@ keel.plugin.* 桥                 唯一能力通道：
 
 | 桥调用 | 做什么 | 今天由什么支撑 |
 | --- | --- | --- |
-| 读自身状态 | 插件在清单中的那一行：id、version、state、provides、diagnostics | `GET /v1/plugins` 快照（`internal/agentapi/ext.go:18`） |
+| 读自身状态 | 插件在清单中的那一行：id、version、state、provides、diagnostics | `GET /v1/plugins` 快照（`internal/harnessapi/ext.go:18`） |
 | 调自身工具 | 调用**本插件**声明的工具（宿主按会话解析所属插件） | 与模型共用的同一工具派发 |
 | 请求审批 | 打开一条 decision 并等待答案 | decision 原语（[审批与问句](/zh/harness/approvals-and-questions)） |
-| 订阅事件 | 接收与本插件相关的事件（其触发器/decision/子代理生命周期） | hook 总线及其闭集（`internal/agentext/hooks.go:18`） |
+| 订阅事件 | 接收与本插件相关的事件（其触发器/decision/子代理生命周期） | hook 总线及其闭集（`internal/harnessext/hooks.go:18`） |
 
 刻意不在桥内的：任意 HTTP、文件系统访问、shell 执行、其他插件的工具、其他会话的事件，以及
 任何密钥。需要网络能力的插件需要 sidecar 与声明的权限

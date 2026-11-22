@@ -11,7 +11,7 @@ Harness 不是另一个运行时。它是建立在 Core 之上的**宿主进程*
 
 Core 各包（`internal/kernel`、`internal/loop`、`internal/agentcore`、`internal/agenttool`、
 `internal/agent`）只认识事件、租约、工具与转录。一切**策略**都住在 Harness 里并叠加其上：
-插件装配、hooks、审批、触发器、子代理与 token 级 partials（`internal/agentext/doc.go:1`）。
+插件装配、hooks、审批、触发器、子代理与 token 级 partials（`internal/harnessext/doc.go:1`）。
 
 | 问题 | 由谁回答 | 出处 |
 | --- | --- | --- |
@@ -19,8 +19,8 @@ Core 各包（`internal/kernel`、`internal/loop`、`internal/agentcore`、`inte
 | 此刻谁拥有这个会话？ | Core（租约 + fencing epoch） | `internal/kernel/lease.go:16` |
 | 模型看到什么？ | Harness 宿主装配 + loop | `internal/agent/runner.go:280` |
 | 这次 run 有哪些工具？ | Harness（宿主 registry + 插件工具） | `internal/agenttool/registry.go` |
-| 这个工具可以执行吗？它看到了什么？ | Harness（hooks、审批、策略） | `internal/agentext/hooks.go:18` |
-| 哪些插件处于激活状态？ | Harness（插件运行时） | `internal/agentext/plugin.go:163` |
+| 这个工具可以执行吗？它看到了什么？ | Harness（hooks、审批、策略） | `internal/harnessext/hooks.go:18` |
+| 哪些插件处于激活状态？ | Harness（插件运行时） | `internal/harnessext/plugin.go:163` |
 | 客户端展示什么？ | Harness 投影（`@keel/chat-surface`） | `packages/chat-surface/src/types.ts` |
 
 依赖方向只有一条：**Harness → Core**。内核包永远不允许 import 产品包，且有测试机器把守
@@ -55,20 +55,20 @@ keel serve（单进程）
 ├─ HTTP 边缘            /v1/tenants, /v1/sessions/{id}/input, /v1/sessions/{id}/events[/stream],
 │                       /v1/files, /v1/runtime/{drain,status}      internal/httpapi/server.go:146
 ├─ 产品 API（AgentAPI）
-│   ├─ 能力发现         GET /v1/capabilities                        internal/agentapi/api.go:257
-│   ├─ 会话             GET /v1/sessions, POST …/{id}/cancel        internal/agentapi/api.go:171
-│   ├─ 审批             GET/POST /v1/sessions/{id}/decisions[/…]    internal/agentapi/api.go:173
-│   ├─ 插件             GET /v1/plugins                             internal/agentapi/ext.go:18
-│   ├─ 触发器           GET /v1/triggers, POST …/{id}/fire          internal/agentapi/ext.go:39
-│   └─ 子代理           GET /v1/subagents, POST …/{id}/subagents    internal/agentapi/ext.go:128
-├─ 扩展面（agentext）
-│   ├─ 插件运行时       声明式插件、generation、反序卸载            internal/agentext/plugin.go:163
-│   ├─ hook 总线        闭集事件、异步、有界队列                    internal/agentext/hooks.go:298
-│   ├─ 审批             开/答/等/超时/取消 + durable 行             internal/agentext/decisions.go:233
-│   ├─ 触发器           interval/cron/webhook + 幂等 + 审计         internal/agentext/triggers.go:305
-│   ├─ 子代理           带预算与结构化结果的子会话                  internal/agentext/subagent.go:175
-│   ├─ run 控制         为正在执行的 attempt 注册取消               internal/agentext/turns.go:222
-│   └─ partials         进程本地 token 增量（永不进日志）           internal/agentext/turns.go:360
+│   ├─ 能力发现         GET /v1/capabilities                        internal/harnessapi/api.go:257
+│   ├─ 会话             GET /v1/sessions, POST …/{id}/cancel        internal/harnessapi/api.go:171
+│   ├─ 审批             GET/POST /v1/sessions/{id}/decisions[/…]    internal/harnessapi/api.go:173
+│   ├─ 插件             GET /v1/plugins                             internal/harnessapi/ext.go:18
+│   ├─ 触发器           GET /v1/triggers, POST …/{id}/fire          internal/harnessapi/ext.go:39
+│   └─ 子代理           GET /v1/subagents, POST …/{id}/subagents    internal/harnessapi/ext.go:128
+├─ 扩展面（harnessext）
+│   ├─ 插件运行时       声明式插件、generation、反序卸载            internal/harnessext/plugin.go:163
+│   ├─ hook 总线        闭集事件、异步、有界队列                    internal/harnessext/hooks.go:298
+│   ├─ 审批             开/答/等/超时/取消 + durable 行             internal/harnessext/decisions.go:233
+│   ├─ 触发器           interval/cron/webhook + 幂等 + 审计         internal/harnessext/triggers.go:305
+│   ├─ 子代理           带预算与结构化结果的子会话                  internal/harnessext/subagent.go:175
+│   ├─ run 控制         为正在执行的 attempt 注册取消               internal/harnessext/turns.go:222
+│   └─ partials         进程本地 token 增量（永不进日志）           internal/harnessext/turns.go:360
 ├─ 宿主装配             system prompt、技能、工具 registry、MCP     internal/host/host.go
 ├─ 服务图               store/llm/prompt/mcp/tools/pi-loop/…        internal/loadout/loadout.go:63
 ├─ Worker               claim → execute → settle                    internal/agent/worker.go:170
@@ -127,7 +127,7 @@ change）。这个区分是刻意的：下面的插件标准是规格，不是�
 | 账本、内核动词、恢复、handoff | 已实现 | [一次输入的解剖](/zh/harness/anatomy-of-a-turn)、[恢复与压缩](/zh/harness/recovery-and-compaction) |
 | 流式、partials、drain 帧 | 已实现 | [流式与 partial](/zh/harness/streaming-and-partial) |
 | 审批/问句（decision 原语） | 已实现 | [审批与问句](/zh/harness/approvals-and-questions) |
-| 进程内声明式插件（`agentext.Plugin`） | 已实现 | [插件宿主](/zh/harness/plugins/) |
+| 进程内声明式插件（`harnessext.Plugin`） | 已实现 | [插件宿主](/zh/harness/plugins/) |
 | MCP Apps 宿主（目录/沙箱/桥/events/era） | 已实现（P1–P5；P6 验收进行中） | [MCP Apps](/zh/harness/mcp-apps) |
 | `plugin.yaml` 包、安装、sidecar/webview kind | 规划（`keel-plugin-core` W1） | [清单](/zh/harness/plugins/manifest)、[三种 kind](/zh/harness/plugins/kinds) |
 | 插件权限、沙箱边界、审计端点 | 规划（`keel-plugin-core` W1） | [权限](/zh/harness/plugins/permissions) |

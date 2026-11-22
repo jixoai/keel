@@ -52,7 +52,7 @@ source: { type: builtin | local | git | npm, ... }
 | `kind` | 三种之一；决定 `entry`/`ui` 的合法形状 | 安装校验、[三种 kind](/zh/harness/plugins/kinds) |
 | `engines.keel` | 插件支持的 semver 区间；不匹配则安装**与**启用都被拒，并明示区间 | 版本门 |
 | `provides.tools` | 插件贡献的工具名；启用插件间重名即 fail-closed 冲突 | 工具派发、装配 |
-| `provides.hooks` | 对**闭集**事件的订阅（当前：`subagent.*`、`trigger.*`、`turn.*`、`decision.*`；`internal/agentext/hooks.go:18`） | 订阅注册 |
+| `provides.hooks` | 对**闭集**事件的订阅（当前：`subagent.*`、`trigger.*`、`turn.*`、`decision.*`；`internal/harnessext/hooks.go:18`） | 订阅注册 |
 | `provides.triggers` | 插件拥有的触发器 id（`interval`/`cron`/`webhook`） | 触发器引擎 |
 | `provides.ui` | webview 入口文档 + 标题；`kind: webview` 必填 | UI 托管 |
 | `requires` | 必须存在的插件或服务 id；缺失 ⇒ `disabled` 并给原因，绝不半装载 | 生命周期装配 |
@@ -80,14 +80,14 @@ source: { type: builtin | local | git | npm, ... }
 | 升级 | 同 id 换新版本 | 版本替换；启用路径重新走依赖拓扑装配 |
 
 今天的 `GET /v1/plugins` 已存在，返回的是装配结果——generation、插件状态、hooks 摘要、
-工具名（`internal/agentapi/ext.go:18`、`internal/agentext/plugin.go:505`）。该 change 扩展这份
+工具名（`internal/harnessapi/ext.go:18`、`internal/harnessext/plugin.go:505`）。该 change 扩展这份
 响应以包含已安装/已停用的包，而不是另造第二个端点。
 
 ## 4. 今天没有这份清单，有什么
 
 已实现的进程内契约承载同样的*概念*，只是没有文件：`ID`、`Version`、`Provides`、
 `Requires`、`Tools`、`Hooks`、`Triggers`、`Effects`、`Start`、`Stop`
-（`internal/agentext/plugin.go:67`）。映射是单向的——规划中的清单是同一份声明的序列化，
+（`internal/harnessext/plugin.go:67`）。映射是单向的——规划中的清单是同一份声明的序列化，
 外加 Go 类型刻意省略的一切（权限、来源、UI）。
 
 | `plugin.yaml` 概念 | 今天的 Go 等价物 | 备注 |

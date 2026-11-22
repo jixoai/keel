@@ -31,7 +31,7 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 
 - **认证是网络中间件，不是 API 的事**：web 用 HMAC 签名的 HttpOnly cookie，CLI/TUI 用
   `Authorization: Bearer`；中间件注入租户并剥离客户端提供的 `X-Tenant-ID`
-  （`internal/agentapi/api.go:18`、`cmd/keel/auth.go:63`）。
+  （`internal/harnessapi/api.go:18`、`cmd/keel/auth.go:63`）。
 - `--password ""` **只应答回环 Host**——关闭认证的监听地址若绑定通配，会拒绝非回环请求而不是
   暴露租户（`cmd/keel/auth.go:100`）。
 - `keel serve` 是**单租户**（`KEEL_SERVE_TENANT`）；多租户复用需要多租户前置层（那是产品决策，
@@ -67,9 +67,9 @@ TUI 是同一个客户端（同一份 TSX、同一个 AgentAPI）在终端宿主
 | 方面 | 今天 | 规划 |
 | --- | --- | --- |
 | 插件从哪来 | 编译进二进制（`keel.example`、`keel.creation`、`keel.testkit`、registry 插件——`internal/pluginpkg/builtin/`） | 启动时发现 `<plugins-root>/<id>/` 包 |
-| 启用/停用 | 进程装配（`agentext.Runtime.Apply`） | 生命周期 API + 审批（[生命周期](/zh/harness/plugins/lifecycle)） |
+| 启用/停用 | 进程装配（`harnessext.Runtime.Apply`） | 生命周期 API + 审批（[生命周期](/zh/harness/plugins/lifecycle)） |
 | 状态 | 逐插件 `active`/`pending`/`failed`/`stopped`、generation 计数、诊断 | 加上 `installed`/`disabled`，以及安装/卸载/更新审计 |
-| 在哪可见 | `GET /v1/plugins` + web 设置 › 插件（`internal/agentapi/ext.go:18`、`web/src/screens/settings.tsx:1148`） | 同一端点扩展，而非替换 |
+| 在哪可见 | `GET /v1/plugins` + web 设置 › 插件（`internal/harnessapi/ext.go:18`、`web/src/screens/settings.tsx:1148`） | 同一端点扩展，而非替换 |
 
 规划中的插件根目录是**受管目录**：包被拷入其中、安装时做内容 hash、绝不就地引用
 （[清单](/zh/harness/plugins/manifest)）。像备份其他状态目录一样备份它；账本里没有插件二进制。
@@ -84,7 +84,7 @@ TUI 是同一个客户端（同一份 TSX、同一个 AgentAPI）在终端宿主
 | `GET /v1/ready` | store 就绪（迁移已应用） |
 | `GET /v1/metrics`（JSON）与 `GET /metrics`（Prometheus） | 流/调度/准入计数、run 指标 |
 | `GET /v1/plugins` | 装配结果：generation、插件状态、工具、hooks 摘要、诊断 |
-| `GET /v1/triggers` | 触发器清单 + 审计窗口（`internal/agentapi/ext.go:39`） |
+| `GET /v1/triggers` | 触发器清单 + 审计窗口（`internal/harnessapi/ext.go:39`） |
 | `GET /v1/sessions/{id}/run` 与 `/run/loadout` | run 行（status/attempts/cursor/lastError）与钉住的 loadout（`docs/LOADOUT.md` §5） |
 | `POST /v1/runtime/drain`、`GET /v1/runtime/status` | 排水控制与可观测性（`docs/HANDOFF.md`） |
 | `GET /v1/sessions/{id}/decisions` | 未决/已答/超时审批 |

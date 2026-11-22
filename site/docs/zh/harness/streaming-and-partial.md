@@ -63,14 +63,14 @@ partial 旁路——以及围绕它们的交付保证：续传游标、唤醒、
 provider 流（模型的 SSE 帧）
    │
    ▼
-agentext.StreamTee            包裹 provider StreamFn；提取 text/thinking 增量
-   │                          internal/agentext/streamtee.go:24
+harnessext.StreamTee            包裹 provider StreamFn；提取 text/thinking 增量
+   │                          internal/harnessext/streamtee.go:24
    ▼
-agentext.PartialHub           进程本地，按 (tenant, session)；有界缓冲（16）
-   │  Publish / Subscribe     internal/agentext/turns.go:360、:386、:407
+harnessext.PartialHub           进程本地，按 (tenant, session)；有界缓冲（16）
+   │  Publish / Subscribe     internal/harnessext/turns.go:360、:386、:407
    ▼
-agentapi.PartialSource        把 hub 适配为 HTTP 帧类型
-   │                          internal/agentapi/partials.go:16
+harnessapi.PartialSource        把 hub 适配为 HTTP 帧类型
+   │                          internal/harnessapi/partials.go:16
    ▼
 SSE ?partials=1               event: partial, data: {...}，无 id 行
                               internal/httpapi/partials.go:16
@@ -79,17 +79,17 @@ SSE ?partials=1               event: partial, data: {...}，无 id 行
 性质，逐条照设计原文：
 
 - **非 durable**——partials 永不进入事件日志，也不出现在 `GET /events`；重连客户端无法重放
-  它们（`internal/agentext/doc.go`）。
+  它们（`internal/harnessext/doc.go`）。
 - **可丢弃**——hub 是有界环形缓冲；慢消费者丢帧而不是阻塞生产者
-  （`internal/agentext/turns.go:373`、`internal/httpapi/partials.go:28`）。
+  （`internal/harnessext/turns.go:373`、`internal/httpapi/partials.go:28`）。
 - **无游标**——帧没有 `id:`，`Last-Event-ID` 不受影响；随后到达的已提交
   `assistant.message` 是权威副本，并清除客户端上的 partial
   （`packages/chat-surface/src/engine.ts`）。
 - **显式选择**——只有请求带 `?partials=1` 时才咨询生产者；`GET /v1/capabilities` 报告该部署
-  是否有 partial 源（`internal/agentapi/api.go:262`）。
+  是否有 partial 源（`internal/harnessapi/api.go:262`）。
 
 进程若需要知道 partial 是否在流动，hub 通过其 `Stats` 暴露计数器（published、dropped、
-subscribers）（`internal/agentext/turns.go:430`）。
+subscribers）（`internal/harnessext/turns.go:430`）。
 
 ## 5. 流的排水
 
@@ -112,7 +112,7 @@ SSE flush 路径保持可达（`internal/httpapi/drain.go:105`）。客户端重
 
 - `internal/httpapi/ops_test.go`——SSE 帧格式、心跳与游标行为；
 - `internal/httpapi/server_test.go`——写头前的租户边界、用 `after`/`Last-Event-ID` 续传；
-- `internal/agentapi/partials_sse_test.go`——partial 帧不带 `id`、不移动游标；
+- `internal/harnessapi/partials_sse_test.go`——partial 帧不带 `id`、不移动游标；
 - `cmd/e2e`——跨进程无状态场景（blob 续传、2000 事件序列无缺口），摘要见 `README.md`；
 - `packages/chat-surface/test`——10k 事件投影上界与重连/重新同步状态机
   （`docs/CHAT-SURFACE.md` §8）。

@@ -55,7 +55,7 @@ Field-by-field semantics and enforcement points:
 | `kind` | one of three; drives which `entry`/`ui` shape is valid | install validation, [Kinds](/harness/plugins/kinds) |
 | `engines.keel` | semver range the plugin supports; mismatch refuses install **and** enable with the mismatched range named | version gate |
 | `provides.tools` | tool names the plugin contributes; a duplicate across enabled plugins is a fail-closed conflict | tool dispatch, assembly |
-| `provides.hooks` | subscriptions to the **closed** event set (today: `subagent.*`, `trigger.*`, `turn.*`, `decision.*`; `internal/agentext/hooks.go:18`) | subscription registration |
+| `provides.hooks` | subscriptions to the **closed** event set (today: `subagent.*`, `trigger.*`, `turn.*`, `decision.*`; `internal/harnessext/hooks.go:18`) | subscription registration |
 | `provides.triggers` | trigger ids the plugin owns (`interval`/`cron`/`webhook`) | trigger engine |
 | `provides.ui` | webview entry document + title; required for `kind: webview` | UI hosting |
 | `requires` | plugin or service ids that must be present; missing ⇒ `disabled` with a reason, never a half-load | lifecycle assembly |
@@ -87,7 +87,7 @@ Rules that are *not* field-level but are part of the same contract:
 
 Today's `GET /v1/plugins` already exists and answers the assembled surface —
 generation, plugin states, hooks summary, tool names
-(`internal/agentapi/ext.go:18`, `internal/agentext/plugin.go:505`). The change
+(`internal/harnessapi/ext.go:18`, `internal/harnessext/plugin.go:505`). The change
 extends that response with installed/disabled packages rather than inventing a
 second endpoint.
 
@@ -95,7 +95,7 @@ second endpoint.
 
 The implemented in-process contract carries the same *concepts* without a file:
 `ID`, `Version`, `Provides`, `Requires`, `Tools`, `Hooks`, `Triggers`,
-`Effects`, `Start`, `Stop` (`internal/agentext/plugin.go:67`). The mapping is
+`Effects`, `Start`, `Stop` (`internal/harnessext/plugin.go:67`). The mapping is
 one-way — the planned manifest is a serialization of the same declaration plus
 everything the Go type deliberately left out (permissions, source, UI).
 

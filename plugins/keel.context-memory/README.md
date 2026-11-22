@@ -51,7 +51,7 @@
   记忆不会被 `keel` 的包存储一并删除；同时不会污染包内容哈希。
 - 权限：`permissions.fs: ["plugin-data"]`（声明本地数据目录）。**不读**宿主配置、
   **不碰**宿主密钥、**不出网**、无 `secrets`。
-- 诚实边界：运行时不代理 sidecar 的文件访问（见 `internal/agentext/plugin_permissions.go`
+- 诚实边界：运行时不代理 sidecar 的文件访问（见 `internal/harnessext/plugin_permissions.go`
   的诚实边界注释）；本插件只写自己的数据目录，且不读取任何宿主路径。
 
 ## 并发安全

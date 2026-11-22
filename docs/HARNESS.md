@@ -2,12 +2,14 @@
 
 `keel` 是内核（`docs/KERNEL.md`）之上的**第一个验证者**：一个 Harness 服务 + 一套产品 API +
 扩展面（插件/触发器/subagent/hooks/审批），供 AI UI（`web/` 的 NSH 客户端、TUI）对接。
-内核不知道它存在；依赖方向只有 `cmd/keel → agentapi/agentext → kernel`。
+内核不知道它存在；依赖方向只有 `cmd/keel → harnessapi/harnessext → kernel`。
 
 > 命名：产品面统一 **Bot / TeamBot / Account / Role / Profile**；`Harness` 是 Bot 的运行环境
-> （工具白名单 + 上下文）。旧称 `Agent`/`TeamAgent`（已删除），只有 PI 技术包
-> （`agentcore`/`agentloop`/`agenttool`/`internal/agent`）与协议名 `AgentAPI`/`AgentBackend`
-> 作为技术名词保留。术语与别名说明见官网术语表（`site/docs/glossary.md`）。
+> （工具白名单 + 上下文）。产品 API 包为 `internal/harnessapi`，扩展面包为
+> `internal/harnessext`。旧称 `Agent`/`TeamAgent`（已删除），只有 PI 技术包
+> （`agentcore`/`agentloop`/`agenttool`/`internal/agent`）与线协议名
+> `AgentAPI`/`AgentBackend` 作为技术名词保留。术语与别名说明见官网术语表
+> （`site/docs/glossary.md`）。
 
 ## 1. 启动
 
@@ -46,7 +48,7 @@ keel version
 | GET | `/v1/sessions/{id}/run` | run 行（status/attempts/cursorSeq/lastError） |
 | POST | `/v1/runtime/drain`、`GET /v1/runtime/status` | 排空/交接 |
 
-### 产品 API（`internal/agentapi`）
+### 产品 API（`internal/harnessapi`）
 
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
@@ -64,11 +66,11 @@ keel version
 
 取消的语义：kernel 的 run 行按失败终态结算（attempt 不自动重跑），产品的 `runStatus` overlay 记 `cancelled`；重复 cancel 在同一进程生命周期内幂等（重启后按 durable 终态回答）。
 
-## 3. 扩展面（`internal/agentext`）
+## 3. 扩展面（`internal/harnessext`）
 
 | 能力 | 契约 |
 | --- | --- |
-| 插件 | **进程内声明式契约**（`agentext.Plugin`，`internal/agentext/plugin.go:67`）：`ID/Version/Provides/Requires/Tools/Hooks/Triggers/Effects/Start/Stop`；依赖拓扑激活（缺依赖 `PENDING` 可见）、反序卸载（hook 订阅/触发器/effects 精确撤销，无残留）、`generation+1`、工具重名 fail-closed（第二个插件 `FAILED`）；装配结果经唯一 sink 发布给模型工具集（`cmd/keel/serve.go` 用 `rt.RefreshProductTools`）。web 设置 › 插件（`web/src/screens/settings.tsx:1148`）渲染该装配面。**规划中**（`keel-plugin-core`，勿当作已实现）：`plugin.yaml` 包与安装/启用/禁用 API、三种 kind（in-process/sidecar/webview）、运维权限与审计、webview UI 托管与 `keel.plugin.*` 桥、创造模式 |
+| 插件 | **进程内声明式契约**（`harnessext.Plugin`，`internal/harnessext/plugin.go:67`）：`ID/Version/Provides/Requires/Tools/Hooks/Triggers/Effects/Start/Stop`；依赖拓扑激活（缺依赖 `PENDING` 可见）、反序卸载（hook 订阅/触发器/effects 精确撤销，无残留）、`generation+1`、工具重名 fail-closed（第二个插件 `FAILED`）；装配结果经唯一 sink 发布给模型工具集（`cmd/keel/serve.go` 用 `rt.RefreshProductTools`）。web 设置 › 插件（`web/src/screens/settings.tsx:1148`）渲染该装配面。**规划中**（`keel-plugin-core`，勿当作已实现）：`plugin.yaml` 包与安装/启用/禁用 API、三种 kind（in-process/sidecar/webview）、运维权限与审计、webview UI 托管与 `keel.plugin.*` 桥、创造模式 |
 | GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | Sub-agent | `agent` 聚合工具的 `spawn` action：独立子会话 + 结构化结果 `{status,summary,artifacts,usage}` + 预算（turns/tokens/timeout）；父会话经 `parentSessionId` 可查 |
 | Hooks | 闭集：`subagent.started\|finished`、`trigger.before\|after`、`turn.started\|finished`、`decision.opened\|answered`；有界异步队列，不阻塞账本，失败可见 |
@@ -213,14 +215,14 @@ keel version
 
 ## 4. 与内核的接缝
 
-- `RunControl`（`agentext`）→ `agent.RunController` → worker：取消注册在**执行 attempt 的进程**；
+- `RunControl`（`harnessext`）→ `agent.RunController` → worker：取消注册在**执行 attempt 的进程**；
   跨进程只能返回 501，不伪造成功。
-- `TurnStarter`（`agentext`）→ kernel edge commit：触发器/subagent/手动触发共用一条写路径。
+- `TurnStarter`（`harnessext`）→ kernel edge commit：触发器/subagent/手动触发共用一条写路径。
 - `WrapStream`/`WrapTelemetry`（`servicehost`）：partial 生产者与 turn 遥测，不碰内核。
 - 摘要/取消语义见 `docs/KERNEL.md` §2「运行摘要」。
 
 ## 5. 验收
 
-`internal/agentapi`、`internal/agentext`、`cmd/keel` 均有 PG 集成测试；扩展面 E2E 覆盖
+`internal/harnessapi`、`internal/harnessext`、`cmd/keel` 均有 PG 集成测试；扩展面 E2E 覆盖
 插件注册→触发→hook→subagent→取消在线 attempt。全量门禁见 `scripts/acceptance-all.sh`。
 对外文档的术语纪律由 `scripts/naming-scan.sh` 扫描。

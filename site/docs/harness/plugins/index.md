@@ -26,21 +26,21 @@ Two mechanisms express the same semantics in Go:
 | Mechanism | What it assembles | Citation |
 | --- | --- | --- |
 | **Service graph** (`internal/servicegraph` + `internal/loadout`) | first-party runtime services: store, llm, prompt, tools, loop, compaction, projection, telemetry, external gateways | `internal/loadout/loadout.go:63` |
-| **Plugin runtime** (`internal/agentext`) | product extensions: tools, hooks, triggers, and their cleanup | `internal/agentext/plugin.go:163` |
+| **Plugin runtime** (`internal/harnessext`) | product extensions: tools, hooks, triggers, and their cleanup | `internal/harnessext/plugin.go:163` |
 
 Both use the same vocabulary — `provides`/`requires`/`optional`, ordered
 activation, **reverse-order reversal** of every registered side effect, a
 generation counter, and observable diagnostics. A service whose assembly
 identity is unchanged is shared across generations
 (`docs/LOADOUT.md` §4); a plugin is re-assembled on every `Apply`
-(`internal/agentext/plugin.go:209`).
+(`internal/harnessext/plugin.go:209`).
 
 The correlation with the DSH plugin model is deliberate but semantic, not
 mechanical — see §4.
 
 ## 2. What is implemented today
 
-The `agentext` plugin contract is a Go value:
+The `harnessext` plugin contract is a Go value:
 
 ```go
 type Plugin struct {
@@ -56,31 +56,31 @@ type Plugin struct {
 }
 ```
 
-(`internal/agentext/plugin.go:67`; `Start` `:78`, `Stop` `:80`, `Effect` `:51`,
+(`internal/harnessext/plugin.go:67`; `Start` `:78`, `Stop` `:80`, `Effect` `:51`,
 `PluginEnv` `:57`.)
 
 Guarantees the host provides, each with a test in
-`internal/agentext/agentext_test.go` / `e2e_test.go`:
+`internal/harnessext/harnessext_test.go` / `e2e_test.go`:
 
 - **dependency topology** — activation proceeds in dependency order; a plugin
   whose requirement is missing stays `PENDING` with a `waiting for: …`
-  diagnostic instead of half-loading (`internal/agentext/plugin.go:291`);
+  diagnostic instead of half-loading (`internal/harnessext/plugin.go:291`);
 - **reversible registration** — hook subscriptions, trigger registrations and
   declared effects are released in exact reverse order; an unload cannot leave
-  a listener, timer or tool behind (`internal/agentext/plugin.go:386`,
+  a listener, timer or tool behind (`internal/harnessext/plugin.go:386`,
   `:417`);
 - **fail-closed tool namespace** — two plugins declaring the same tool name
   make the second plugin `FAILED`; the model never sees an ambiguous name
-  (`internal/agentext/plugin.go:236`);
+  (`internal/harnessext/plugin.go:236`);
 - **generation** — every `Apply` increments the generation once; the snapshot
-  reports it (`internal/agentext/plugin.go:213`, `:505`);
+  reports it (`internal/harnessext/plugin.go:213`, `:505`);
 - **tool publishing** — after every assembly the active tool set is pushed into
   the host registry through one sink (in `keel serve`:
   `rt.RefreshProductTools`, `cmd/keel/serve.go:464`).
 
 Out of the box, `keel serve` assembles built-in plugins such as `keel.example`
 (a complete demo: two tools, three hook subscriptions, two triggers, two
-effects; `internal/agentext/builtin.go:38`), `keel.creation` (the action backend
+effects; `internal/harnessext/builtin.go:38`), `keel.creation` (the action backend
 of the harness-owned `creation` tool) and the disabled-by-default
 `keel.testkit` (`clock`/`echo`, used by E2E grant filtering). The sub-agent
 primitive is the harness-owned `agent` tool, not a plugin tool
@@ -105,7 +105,7 @@ specification's key decisions:
 | --- | --- | --- |
 | Package & manifest | `plugin.yaml` with id/version/kind/engines/provides/requires/permissions/entry/source; invalid manifest → install refused with a field-level reason | [Manifest](/harness/plugins/manifest) |
 | Three kinds | `in-process` (official, compiled), `sidecar` (external process, stdio newline JSON-RPC), `webview` (UI package hosted by the host) | [Kinds](/harness/plugins/kinds) |
-| Lifecycle | `installed → enabled → disabled → uninstalled`; enable goes through `agentext`'s dependency-ordered assembly and reverse unload; disable must leave zero residue | [Lifecycle](/harness/plugins/lifecycle) |
+| Lifecycle | `installed → enabled → disabled → uninstalled`; enable goes through `harnessext`'s dependency-ordered assembly and reverse unload; disable must leave zero residue | [Lifecycle](/harness/plugins/lifecycle) |
 | Permissions | tools allowlist checked at dispatch; `net` hosts; `secrets` references; sidecar env whitelist; install/enable/upgrade require a durable approval; violations are audited | [Permissions](/harness/plugins/permissions) |
 | UI | webview resources under `/plugins/<id>/`, bridged via `keel.plugin.*`, theme from host tokens; TUI never renders plugin UI (opens the URL instead) | [Plugin UI](/harness/plugins/ui) |
 | Testing | unit + integration + conformance + negative controls (crash isolation, permission denial, rollback) | [Testing](/harness/plugins/testing) |
@@ -120,13 +120,13 @@ this:
 
 | DSH plugin model | keel counterpart | Status |
 | --- | --- | --- |
-| plugin = `apply(ctx)` + injected dependencies + reversible side effects | `Plugin.Start(ctx, *PluginEnv)` with `Provides`/`Requires` and `Effects` released in reverse order (`internal/agentext/plugin.go:57`, `:78`, `:51`, `:387`) | **Implemented** (in-process) |
+| plugin = `apply(ctx)` + injected dependencies + reversible side effects | `Plugin.Start(ctx, *PluginEnv)` with `Provides`/`Requires` and `Effects` released in reverse order (`internal/harnessext/plugin.go:57`, `:78`, `:51`, `:387`) | **Implemented** (in-process) |
 | capability triad: Definition / Provider / Consumer | service graph: a descriptor `provides` a capability, dependents declare `requires`/`optional`, bindings are asserted narrow interfaces (`internal/servicegraph/descriptor.go`, `docs/LOADOUT.md` §7) | **Implemented** |
 | bundle = a patch layer of config/plugins | the planned enablement list + `plugin.yaml` (`keel-plugin-core`); today the closest analogue is the default loadout blueprint (`internal/loadout/loadout.go:63`) | **Planned** |
 | profile = an ordered stack of bundles | loadout: an immutable snapshot `{id, revision, version, summary, services}` pinned per run (`docs/LOADOUT.md` §1) | **Implemented** (services), planned (plugins in the set) |
-| plugin can provide tool / hook / command / UI slot / provider / storage | tools, hooks, triggers implemented (`internal/agentext/plugin.go:67`); commands, UI slots, providers-as-plugins and storage are on the W1/W2 waves (`plugins/COVERAGE.md`) | **Partly implemented / planned** |
+| plugin can provide tool / hook / command / UI slot / provider / storage | tools, hooks, triggers implemented (`internal/harnessext/plugin.go:67`); commands, UI slots, providers-as-plugins and storage are on the W1/W2 waves (`plugins/COVERAGE.md`) | **Partly implemented / planned** |
 | installing third-party code executes it; explicit permission is required | today: code is compiled in, so trust is implicit; planned: permission enforcement + durable install approval (`keel-plugin-core` "permissions and sandbox") | **Planned** |
-| Cordis runtime (in-process object graph, synchronous `get/provide`, effect system, event bus) | **not ported.** keel expresses the same semantics with Go `agentext` + `servicegraph`; introducing a second plugin runtime would violate the single-source-of-truth rule (`plugins/COVERAGE.md` §D, `vendor/cordis` = absent with reason) | **Deliberate difference** |
+| Cordis runtime (in-process object graph, synchronous `get/provide`, effect system, event bus) | **not ported.** keel expresses the same semantics with Go `harnessext` + `servicegraph`; introducing a second plugin runtime would violate the single-source-of-truth rule (`plugins/COVERAGE.md` §D, `vendor/cordis` = absent with reason) | **Deliberate difference** |
 
 Two more differences worth knowing before reading the plugin pages:
 

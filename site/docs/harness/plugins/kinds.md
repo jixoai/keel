@@ -20,8 +20,8 @@ must handle.
 Official plugins that ship with the binary. The manifest controls enablement
 and configuration; the code is compiled in. There is no sandbox and none is
 claimed: an in-process plugin has full host privileges by construction. This is
-the kind the current `agentext` runtime already implements for built-ins
-(`internal/agentext/builtin.go:38`, `:256`).
+the kind the current `harnessext` runtime already implements for built-ins
+(`internal/harnessext/builtin.go:38`, `:256`).
 
 ## 2. `sidecar`
 

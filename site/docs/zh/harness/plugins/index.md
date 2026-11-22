@@ -21,17 +21,17 @@ Go 里用两个机制表达同一套语义：
 | 机制 | 装配什么 | 出处 |
 | --- | --- | --- |
 | **服务图**（`internal/servicegraph` + `internal/loadout`） | 一方运行时服务：store、llm、prompt、tools、loop、compaction、projection、telemetry、外部网关 | `internal/loadout/loadout.go:63` |
-| **插件运行时**（`internal/agentext`） | 产品扩展：工具、hooks、触发器及其清理 | `internal/agentext/plugin.go:163` |
+| **插件运行时**（`internal/harnessext`） | 产品扩展：工具、hooks、触发器及其清理 | `internal/harnessext/plugin.go:163` |
 
 两者的词汇相同——`provides`/`requires`/`optional`、有序激活、对每个注册副作用做**反序撤销**、
 generation 计数、可观测诊断。装配身份未变的服务跨代共享（`docs/LOADOUT.md` §4）；插件则在
-每次 `Apply` 时重新装配（`internal/agentext/plugin.go:209`）。
+每次 `Apply` 时重新装配（`internal/harnessext/plugin.go:209`）。
 
 它与 DSH 插件模型的对应是刻意的，但属于语义对应而非机械移植——见 §4。
 
 ## 2. 今天已实现的部分
 
-`agentext` 插件契约是一个 Go 值：
+`harnessext` 插件契约是一个 Go 值：
 
 ```go
 type Plugin struct {
@@ -47,24 +47,24 @@ type Plugin struct {
 }
 ```
 
-（`internal/agentext/plugin.go:67`；`Start` `:78`、`Stop` `:80`、`Effect` `:51`、
+（`internal/harnessext/plugin.go:67`；`Start` `:78`、`Stop` `:80`、`Effect` `:51`、
 `PluginEnv` `:57`。）
 
-宿主提供的保证，每条都在 `internal/agentext/agentext_test.go` / `e2e_test.go` 有测试：
+宿主提供的保证，每条都在 `internal/harnessext/harnessext_test.go` / `e2e_test.go` 有测试：
 
 - **依赖拓扑**——按依赖顺序激活；依赖缺失的插件保持 `PENDING` 并给出 `waiting for: …`
-  诊断，绝不半装载（`internal/agentext/plugin.go:291`）；
+  诊断，绝不半装载（`internal/harnessext/plugin.go:291`）；
 - **可逆注册**——hook 订阅、触发器注册与声明的 effects 按精确反序释放；一次卸载不可能留下
-  监听器、定时器或工具（`internal/agentext/plugin.go:386`、`:417`）；
+  监听器、定时器或工具（`internal/harnessext/plugin.go:386`、`:417`）；
 - **fail-closed 工具命名空间**——两个插件声明同名工具时，第二个插件进入 `FAILED`；模型永远
-  看不到有歧义的名字（`internal/agentext/plugin.go:236`）；
-- **generation**——每次 `Apply` 令 generation 恰好 +1；快照可查（`internal/agentext/plugin.go:213`、
+  看不到有歧义的名字（`internal/harnessext/plugin.go:236`）；
+- **generation**——每次 `Apply` 令 generation 恰好 +1；快照可查（`internal/harnessext/plugin.go:213`、
   `:505`）；
 - **工具发布**——每次装配后，激活的工具集经唯一 sink 推入宿主 registry（`keel serve` 中为
   `rt.RefreshProductTools`，`cmd/keel/serve.go:464`）。
 
 开箱即用，`keel serve` 装配若干内置插件——`keel.example`（完整示例：两个工具、三条 hook
-订阅、两个触发器、两个 effect；`internal/agentext/builtin.go:38`）、`keel.creation`
+订阅、两个触发器、两个 effect；`internal/harnessext/builtin.go:38`）、`keel.creation`
 （harness 内建 `creation` 工具的 action 后端）与默认关闭的 `keel.testkit`
 （`clock`/`echo`，供 E2E 验证 grant 过滤）。子代理原语是 harness 内建的 `agent` 工具，
 不再是插件工具（`internal/toolsurface`）。设置界面渲染装配结果——generation、逐插件状态、
@@ -83,7 +83,7 @@ type Plugin struct {
 | --- | --- | --- |
 | 包与清单 | `plugin.yaml`：id/version/kind/engines/provides/requires/permissions/entry/source；清单非法 → 安装被拒并给字段级原因 | [清单](/zh/harness/plugins/manifest) |
 | 三种 kind | `in-process`（官方、编译进）、`sidecar`（外部进程、stdio 换行 JSON-RPC）、`webview`（宿主托管的 UI 包） | [三种 kind](/zh/harness/plugins/kinds) |
-| 生命周期 | `installed → enabled → disabled → uninstalled`；启用走 `agentext` 的依赖拓扑装配与反序卸载；停用必须零残留 | [生命周期](/zh/harness/plugins/lifecycle) |
+| 生命周期 | `installed → enabled → disabled → uninstalled`；启用走 `harnessext` 的依赖拓扑装配与反序卸载；停用必须零残留 | [生命周期](/zh/harness/plugins/lifecycle) |
 | 权限 | 工具白名单在派发处校验；`net` host 白名单；`secrets` 引用白名单；sidecar 环境变量白名单；安装/启用/升级需 durable 审批；越权写审计 | [权限](/zh/harness/plugins/permissions) |
 | UI | webview 资源托管于 `/plugins/<id>/`，经 `keel.plugin.*` 桥接，主题取自宿主令牌；TUI 绝不渲染插件 UI（改为打开 URL） | [插件 UI](/zh/harness/plugins/ui) |
 | 测试 | 单测 + 集成 + conformance + 负控（崩溃隔离、越权拒绝、回滚） | [测试](/zh/harness/plugins/testing) |
@@ -97,13 +97,13 @@ DeepSeek Harness 是**参考**，不是 keel 的事实源。其插件模型（�
 
 | DSH 插件模型 | keel 对应 | 状态 |
 | --- | --- | --- |
-| 插件 = `apply(ctx)` + 依赖注入 + 可逆副作用 | `Plugin.Start(ctx, *PluginEnv)` + `Provides`/`Requires` + 按反序释放的 `Effects`（`internal/agentext/plugin.go:57`、`:78`、`:51`、`:387`） | **已实现**（进程内） |
+| 插件 = `apply(ctx)` + 依赖注入 + 可逆副作用 | `Plugin.Start(ctx, *PluginEnv)` + `Provides`/`Requires` + 按反序释放的 `Effects`（`internal/harnessext/plugin.go:57`、`:78`、`:51`、`:387`） | **已实现**（进程内） |
 | 能力三角：Definition / Provider / Consumer | 服务图：描述符 `provides` 一个 capability，依赖方声明 `requires`/`optional`，绑定被断言为窄接口（`internal/servicegraph/descriptor.go`、`docs/LOADOUT.md` §7） | **已实现** |
 | bundle = 一层补丁（配置/插件） | 规划中的启用清单 + `plugin.yaml`（`keel-plugin-core`）；今天最接近的类比是默认 loadout 蓝图（`internal/loadout/loadout.go:63`） | **规划中** |
 | profile = 有序的 bundle 栈 | loadout：不可变快照 `{id, revision, version, summary, services}`，按 run 钉住（`docs/LOADOUT.md` §1） | **已实现**（服务层面），插件入集为规划 |
-| 插件可提供 tool / hook / command / UI slot / provider / storage | 工具、hooks、触发器已实现（`internal/agentext/plugin.go:67`）；command、UI slot、provider 与 storage 在 W1/W2 波次（`plugins/COVERAGE.md`） | **部分实现 / 规划中** |
+| 插件可提供 tool / hook / command / UI slot / provider / storage | 工具、hooks、触发器已实现（`internal/harnessext/plugin.go:67`）；command、UI slot、provider 与 storage 在 W1/W2 波次（`plugins/COVERAGE.md`） | **部分实现 / 规划中** |
 | 安装第三方代码即执行；需显式许可 | 今天：代码编译进宿主，信任是隐含的；规划：权限强制执行 + durable 安装审批（`keel-plugin-core`「权限与沙箱」） | **规划中** |
-| Cordis 运行时（进程内对象图、同步 `get/provide`、effect 系统、事件总线） | **不移植。** keel 用 Go 的 `agentext` + `servicegraph` 表达同一语义；引入第二套插件运行时会违背单一真值（`plugins/COVERAGE.md` §D，`vendor/cordis` = absent 并附理由） | **刻意差异** |
+| Cordis 运行时（进程内对象图、同步 `get/provide`、effect 系统、事件总线） | **不移植。** keel 用 Go 的 `harnessext` + `servicegraph` 表达同一语义；引入第二套插件运行时会违背单一真值（`plugins/COVERAGE.md` §D，`vendor/cordis` = absent 并附理由） | **刻意差异** |
 
 阅读插件各页之前，还有两点差异值得知道：
 

@@ -40,7 +40,7 @@ Core 之上的产品层叫 **Harness**，它有独立的主线，从 [Harness �
 
 内核边界由测试钉住，而不是靠约定：`internal/architecture/boundary_test.go:14` 用 `go list -deps`
 断言内核包（loop、agentcore、agenttool、kernel、agent、store）**不得** import 产品包
-（agentapi、agentext、servicehost、cmd/keel）。不属于内核：
+（harnessapi、harnessext、servicehost、cmd/keel）。不属于内核：
 
 - 认证（网络中间件的事）；
 - 会话列表、停止与审批语义；

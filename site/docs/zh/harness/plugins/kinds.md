@@ -16,8 +16,8 @@
 ## 1. `in-process`
 
 随二进制发布的官方插件。清单只控制启用与配置，代码已编译在内。不存在沙箱，也不做此声称：
-进程内插件按构造即拥有宿主全部权限。这正是当前 `agentext` 运行时已为内置插件实现的 kind
-（`internal/agentext/builtin.go:38`、`:256`）。
+进程内插件按构造即拥有宿主全部权限。这正是当前 `harnessext` 运行时已为内置插件实现的 kind
+（`internal/harnessext/builtin.go:38`、`:256`）。
 
 ## 2. `sidecar`
 

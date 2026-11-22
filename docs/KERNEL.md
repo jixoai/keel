@@ -20,8 +20,8 @@ keel 的内核只有一个职责：**把一个会话的一次运行（run）跑�
 
 产品层（**只能依赖内核，不能被内核依赖**）：
 
-- `internal/agentapi` —— `/v1` AgentAPI（协议名保留，即 Harness API；会话列表/停止/审批/扩展面）
-- `internal/agentext` —— 插件、触发器、subagent、hooks、RunControl、partials
+- `internal/harnessapi` —— `/v1` Harness API（线协议名 `AgentAPI` 保留为技术别名；会话列表/停止/审批/扩展面）
+- `internal/harnessext` —— 插件、触发器、subagent、hooks、RunControl、partials
 - `internal/servicehost` —— 服务图装配（loadout / generation）
 - `cmd/keel` —— `keel serve` / `keel tui`
 
@@ -84,7 +84,7 @@ toolTimings/context/stopReason/error/durationMs。provider 失败按 PI 语义�
 | --- | --- |
 | 换 loop 实现 | 实现 `internal/agentloop` 的契约，跑 conformance manifest（fail-closed 哈希门） |
 | 加工具 | `agenttool.ToolRegistry`（内核侧）或产品层 `ProductOptions.ExtraTools` |
-| 加产品能力 | 在 `internal/agentext` 加插件/触发器/hook，经 `keel serve` 装配 |
+| 加产品能力 | 在 `internal/harnessext` 加插件/触发器/hook，经 `keel serve` 装配 |
 | 加事件 kind | 走 openspec change：`kindRegistry` + `internal/store` 常量 + 转录/SSE/R1 规则同步 |
 
 **不属于内核**：认证（网络中间件）、会话列表、停止/审批的语义、插件生命周期、触发器调度、

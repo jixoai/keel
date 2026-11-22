@@ -21,7 +21,7 @@ Keel 只有两种扩展哲学，适用哪一种取决于**你要改的是什么�
 | 暴露外部工具服务 | `ToolProvider`（`external.tools`） | [接外部 backend](/zh/core/extend/external-backend) |
 | 加模型 provider 或换协议 | `provider.StreamFn` + `provider.ResolveProvider` | [写 provider 适配器](/zh/core/extend/provider-adapter) |
 | 给模型加一个工具 | `agenttool.ToolRegistry`（内核侧）或宿主 registry（受 `tools.allow` 过滤） | [嵌入 runtime](/zh/core/extend/embed-runtime) |
-| 加产品能力（插件、hook、触发器、子代理、审批） | Harness 扩展面（当前实现 `internal/agentext`；插件标准在 Harness 主线） | [Harness 插件](/zh/harness/plugins/) |
+| 加产品能力（插件、hook、触发器、子代理、审批） | Harness 扩展面（当前实现 `internal/harnessext`；插件标准在 Harness 主线） | [Harness 插件](/zh/harness/plugins/) |
 | 加新事件 kind | 仓内变更：`kindRegistry` + `internal/store` 常量 + 转录/SSE/R1 规则同步移动 | [事件与协议](/zh/core/events) |
 | 改存储或加表 | 仓内变更：`internal/store/schema.sql` 或带编号的内核迁移 | [存储与运行](/zh/core/storage) |
 | 做 UI | Harness API + SSE（版本化 `/v1`，能力探测） | [AgentAPI 参考](/zh/core/agentapi) |

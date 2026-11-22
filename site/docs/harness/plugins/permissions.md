@@ -80,7 +80,7 @@ result**, and is queryable through `GET /v1/plugins/audit`
 levels:
 
 - the trigger audit keeps per-fire history and the last-N audit window
-  (`internal/agentext/triggers.go:86`, `:135`);
+  (`internal/harnessext/triggers.go:86`, `:135`);
 - the kernel audit sink projects every rejection into structured log fields
   (reason/op/tenant/session/kind/owner/epoch) with rate limiting
   (`internal/servicehost/audit.go`, `docs/LOADOUT.md` §6).
@@ -110,4 +110,4 @@ alone:
 3. what it actually did (audit) — §4;
 4. who approved it and when (decision row) — §3;
 5. what it provides right now (snapshot: tools/hooks/triggers/diagnostics) —
-   `GET /v1/plugins` (`internal/agentapi/ext.go:18`).
+   `GET /v1/plugins` (`internal/harnessapi/ext.go:18`).

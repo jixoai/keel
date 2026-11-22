@@ -8,7 +8,7 @@ The design rule is the same as everywhere else: the primitive lives in the
 product layer, and the ledger's vocabulary does not grow. A decision is **not**
 a kernel event kind (`internal/kernel/validate.go:36`); it is a durable row
 projected onto the existing tasks bookkeeping table with an answer journal
-(`internal/agentext/doc.go`).
+(`internal/harnessext/doc.go`).
 
 ## 1. The primitive
 
@@ -19,15 +19,15 @@ open ──▶ (waiting) ──┬─▶ answered      (option and/or free text;
 ```
 
 - Statuses: `open`, `answered`, `timed_out`, `cancelled`
-  (`internal/agentext/decisions.go:28`).
+  (`internal/harnessext/decisions.go:28`).
 - An answer is an option id, a free-text string, or both — free text is only
   accepted when the decision declared `allowFreeText`
-  (`internal/agentext/decisions.go:49`, `:309`).
+  (`internal/harnessext/decisions.go:49`, `:309`).
 - Timeouts are bounded per decision: `timeoutMs` on open, default 5 minutes,
-  capped at 24 hours (`internal/agentext/decisions.go:162`, `:163`).
+  capped at 24 hours (`internal/harnessext/decisions.go:162`, `:163`).
 - Per session there is a bound on in-process bookkeeping (512 decisions); the
   durable rows themselves are unbounded but a session opening thousands of
-  decisions is a bug (`internal/agentext/decisions.go:167`).
+  decisions is a bug (`internal/harnessext/decisions.go:167`).
 
 ## 2. Identity and idempotency
 
@@ -35,11 +35,11 @@ Two keys, both durable, both at different levels:
 
 | Key | Scope | Meaning |
 | --- | --- | --- |
-| `requestId` (opener's key) | the question | opening twice with the same key returns the same decision (`DecisionIDFor`, `internal/agentext/decisions.go:222`) |
+| `requestId` (opener's key) | the question | opening twice with the same key returns the same decision (`DecisionIDFor`, `internal/harnessext/decisions.go:222`) |
 | `decisionId` (deterministic UUID) | the answer | an answer is idempotent: the same answer replays as a no-op; a *different* answer is a conflict, never an overwrite |
 
 Answer semantics, exactly as implemented
-(`internal/agentext/decisions.go:309`):
+(`internal/harnessext/decisions.go:309`):
 
 - already `answered` with the **same** answer → returns the row, `deduped=true`;
 - already `answered` **differently** → `ErrDecisionConflict` (HTTP 409);
@@ -72,11 +72,11 @@ the run continues (or settles) — the answer is a fact again
 ```
 
 Cancelling a session cancels its open decisions in one pass — `CancelSession`
-(`internal/agentext/decisions.go:437`) — so a stopped run never leaves
+(`internal/harnessext/decisions.go:437`) — so a stopped run never leaves
 questions that nobody can answer.
 
 The broker is also the only place where the answer journal lives: rows carry
-their own ordered events (`DecisionEvent`, `internal/agentext/decisions.go:78`),
+their own ordered events (`DecisionEvent`, `internal/harnessext/decisions.go:78`),
 which is how an operator can reconstruct "asked at T1, answered at T2" without
 touching the ledger.
 
@@ -85,7 +85,7 @@ touching the ledger.
 Decisions are exposed to clients in two equivalent ways:
 
 1. **HTTP** — the `/v1/sessions/{id}/decisions` routes, mounted by the product
-   API next to every other `/v1` route (`internal/agentapi/api.go:173`). The
+   API next to every other `/v1` route (`internal/harnessapi/api.go:173`). The
    wire type is the `Decision` document (id, kind, prompt, options,
    recommendation, status, answer, timestamps).
 2. **Projection** — the UI consumes `decision` events. A host either feeds them
@@ -101,16 +101,16 @@ opens a new run — the question never blocks a worker thread.
 
 If the deployment has no decision broker wired, the routes answer 503 and
 `GET /v1/capabilities` reports `"decisions": false`, so a client hides the
-section instead of guessing (`internal/agentapi/api.go:261`).
+section instead of guessing (`internal/harnessapi/api.go:261`).
 
 ## 5. What a decision is not
 
 - **Not a kernel event.** The kernel never learns what an approval means; it
   only ever sees the next committed `user.message`/`assistant.message`
-  (`internal/agentext/doc.go`).
+  (`internal/harnessext/doc.go`).
 - **Not a hook.** Hooks observe; decisions ask and block. The hook bus carries
   `decision.opened`/`decision.answered` as *notifications* of the primitive
-  (`internal/agentext/hooks.go:25`), never as the mechanism itself.
+  (`internal/harnessext/hooks.go:25`), never as the mechanism itself.
 - **Not a UI state.** The UI may render optimistically, but the durable row is
   the answer of record; a refresh re-reads it from the API.
 

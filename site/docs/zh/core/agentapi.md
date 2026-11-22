@@ -9,7 +9,7 @@
 | 面 | 包 | 用途 | 谁提供 |
 |---|---|---|---|
 | **Core 壳** | `internal/httpapi` | 内核直连面：租户、会话、输入、事件、SSE、run 行、文件、运行时排水 | `cmd/runtime`（运行时）与 `cmd/keel`（产品子集） |
-| **Harness API** | `internal/agentapi` | 产品面：会话列表、取消、审批、插件、触发器、子代理、能力探测 | `cmd/keel serve` |
+| **Harness API** | `internal/harnessapi` | 产品面：会话列表、取消、审批、插件、触发器、子代理、能力探测 | `cmd/keel serve` |
 
 两者都挂在 `/v1` 下；破坏性形状变更需要 `/v2`。新能力只增不改，由客户端发现——见 §6。
 
@@ -63,7 +63,7 @@
 
 ## 3. Harness API 端点
 
-来自 `internal/agentapi/api.go:167`：
+来自 `internal/harnessapi/api.go:167`：
 
 | 方法 | 路径 | 语义 |
 |---|---|---|
@@ -127,7 +127,7 @@
 
 ## 6. 能力探测与降级
 
-能力文档是客户端获知「本部署提供什么」的唯一正确途径（`internal/agentapi/api.go:249`）。实测响应：
+能力文档是客户端获知「本部署提供什么」的唯一正确途径（`internal/harnessapi/api.go:249`）。实测响应：
 
 ```json
 {"apiVersion":"v1","serviceVersion":"keel-agent/0.1.0",
