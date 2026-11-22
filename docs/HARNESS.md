@@ -82,6 +82,8 @@ keel version
 | GET/POST/PATCH | `/v1/bots`、`/v1/bots/{id}`、`POST …/archive`、`POST …/invoke` | Bot CRUD/归档/调用；Session 属于 Bot → Account |
 | GET/POST/DELETE | `/v1/bots/{id}/keys`、`/v1/bots/{id}/keys/{keyId}` | 签发/列出/吊销绑定到具体 Bot 的 key（明文只出现一次） |
 | GET/POST/PATCH | `/v1/team-bots`、`/v1/team-bots/{id}`、`POST …/roster`、`POST …/start`、`POST …/archive` | TeamBot = Mission + Roster；不是权限主体，不拥有 Session |
+| GET | `/v1/audit/events?from=&to=&since=&kind=&result=&accountId=&q=&after=&limit=` | 记录页的审计账本只读投影（需 `audit.read`）；`from/to` 收 RFC3339 或 unix（`since` 是 `from` 的 Web 别名），时间窗 ≤90 天，`limit` 1–200，keyset 分页（`nextCursor`/`hasMore`；`cursor` 同 `after`）；`detail` 过 redaction：凭据类 password/token/api key/hash 只回占位，能力 key 保留用于缺权提示。超管可用 `tenantId=` 跨租户 |
+| GET | `/v1/audit/events/{id}` | 单条审计事件（需 `audit.read`；跨租户 id 404；无权限 403） |
 
 旧 `/v1/agents`、`/v1/teams` 已删除（404，不重定向/不设别名）。
 

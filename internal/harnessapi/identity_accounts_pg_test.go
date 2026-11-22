@@ -317,7 +317,7 @@ func TestIdentityEndpointCoverageGate(t *testing.T) {
 		access.KeyAccountPermissionGrant, access.KeyPermissionRead, access.KeyPermissionManage,
 		access.KeyRoleRead, access.KeyRoleManage, access.KeyProfileRead, access.KeyProfileManage,
 		access.KeyBotRead, access.KeyBotCreate, access.KeyBotManage, access.KeyBotInvoke,
-		access.KeyTeamBotRead, access.KeyTeamBotManage,
+		access.KeyTeamBotRead, access.KeyTeamBotManage, access.KeyAuditRead,
 	} {
 		if !used[key] {
 			t.Fatalf("endpoint catalog does not declare %q", key)

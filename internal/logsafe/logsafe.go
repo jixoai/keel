@@ -176,6 +176,15 @@ func redactField(key string, value any, depth int) any {
 	return redactAny(value, depth+1)
 }
 
+// RedactValue returns a JSON-safe copy of an arbitrary value with the same
+// rules the log handler applies: sensitive keys are replaced by Redacted and
+// credential-shaped strings are masked in place. It is for API payloads that
+// replay a stored detail map to a client — the HTTP layer must not hand out a
+// value the log pipeline would have redacted.
+func RedactValue(value any) any {
+	return redactAny(value, 0)
+}
+
 // redactReflect handles typed maps/slices/structs that did not match the
 // map[string]any fast path. Unsupported kinds are marked explicitly instead of
 // being rendered verbatim.

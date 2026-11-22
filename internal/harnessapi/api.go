@@ -366,6 +366,8 @@ func (s *Server) routes() {
 	// Identity surface (change keel-bot-identity-access, A4.1): accounts,
 	// permission groups, bots, team bots and bot keys.
 	s.identityRoutes()
+	// Audit read surface (A4.4c): the 记录 page's GET /v1/audit/events.
+	s.auditRoutes()
 }
 
 // --- shared helpers ------------------------------------------------------

@@ -1242,8 +1242,14 @@ CREATE TABLE IF NOT EXISTS auth_events (
 
 CREATE INDEX IF NOT EXISTS auth_events_by_account
     ON auth_events (tenant_id, account_id, event_id);
+CREATE INDEX IF NOT EXISTS auth_events_by_actor
+    ON auth_events (tenant_id, actor_account_id, created_at DESC, event_id DESC);
 CREATE INDEX IF NOT EXISTS auth_events_by_created
     ON auth_events (tenant_id, created_at DESC);
+-- The 记录 read orders by (created_at, event_id) and pages with a keyset cursor;
+-- this composite index is the one the bounded query uses.
+CREATE INDEX IF NOT EXISTS auth_events_by_created_event
+    ON auth_events (tenant_id, created_at DESC, event_id DESC);
 
 -- Bot credentials (L18). A key binds to one (account, bot) pair; the plaintext
 -- is returned once and only its SHA-256 hash plus a display prefix are stored.

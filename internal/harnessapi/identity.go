@@ -314,11 +314,11 @@ func pathUUID(w http.ResponseWriter, r *http.Request, name, code string) (uuid.U
 	return id, true
 }
 
-// identityEndpointCatalog is the declarative key map of this file's routes. The
-// coverage test enumerates it; the routes themselves call requireKey /
-// requireResource with the same constants. whoami is intentionally absent: it
-// returns only the caller's own identity and grants no resource access, so it
-// has no permission key.
+// identityEndpointCatalog is the declarative key map of the identity and audit
+// read routes. The coverage test enumerates it; the routes themselves call
+// requireKey / requireResource with the same constants. whoami is intentionally
+// absent: it returns only the caller's own identity and grants no resource
+// access, so it has no permission key.
 var identityEndpointCatalog = []access.Endpoint{
 	{Kind: access.EndpointHTTP, Name: "GET /v1/accounts", RequiredKey: access.KeyAccountRead},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/accounts", RequiredKey: access.KeyAccountManage},
@@ -368,6 +368,10 @@ var identityEndpointCatalog = []access.Endpoint{
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/archive", RequiredKey: access.KeyTeamBotManage},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/roster", RequiredKey: access.KeyTeamBotManage},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/start", RequiredKey: access.KeyTeamBotManage},
+
+	// Audit read (A4.4c). Both are tenant-level reads of auth_events.
+	{Kind: access.EndpointHTTP, Name: "GET /v1/audit/events", RequiredKey: access.KeyAuditRead},
+	{Kind: access.EndpointHTTP, Name: "GET /v1/audit/events/{id}", RequiredKey: access.KeyAuditRead},
 }
 
 // IdentityEndpoints returns a copy of the declarative key map: the coverage

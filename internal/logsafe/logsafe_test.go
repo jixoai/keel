@@ -202,3 +202,42 @@ func TestHandlerUsesJSONFieldNamesForStructs(t *testing.T) {
 		t.Fatalf("non-sensitive field missing:\n%s", out)
 	}
 }
+
+// TestRedactValueReplaysStoredDetails pins the API-facing helper: a stored
+// detail map keeps its safe identifiers, masks sensitive values and does not
+// mutate the caller's map.
+func TestRedactValueReplaysStoredDetails(t *testing.T) {
+	stored := map[string]any{
+		"username": "alice",
+		"token":    "tok_live_1234567890",
+		"note":     "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+		"nested":   map[string]any{"secret": "nested-secret", "safe": "ok"},
+		"list":     []any{"token=abc123456", "plain"},
+	}
+	redacted, ok := RedactValue(stored).(map[string]any)
+	if !ok {
+		t.Fatalf("RedactValue returned %T", RedactValue(stored))
+	}
+	if redacted["username"] != "alice" {
+		t.Fatalf("username = %v", redacted["username"])
+	}
+	if redacted["token"] != Redacted {
+		t.Fatalf("token = %v", redacted["token"])
+	}
+	if strings.Contains(fmt.Sprint(redacted["note"]), "abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("note was not redacted: %v", redacted["note"])
+	}
+	nested, _ := redacted["nested"].(map[string]any)
+	if nested["secret"] != Redacted || nested["safe"] != "ok" {
+		t.Fatalf("nested = %v", nested)
+	}
+	list, _ := redacted["list"].([]any)
+	if len(list) != 2 || list[1] != "plain" ||
+		strings.Contains(fmt.Sprint(list[0]), "abc123456") {
+		t.Fatalf("list = %v", list)
+	}
+	// The input map is the caller's; redaction must be a copy.
+	if stored["token"] != "tok_live_1234567890" {
+		t.Fatalf("RedactValue mutated the input: %v", stored)
+	}
+}

@@ -257,6 +257,12 @@ var rules = []Rule{
 	resource(http.MethodPost, "/v1/team-bots/{id}/roster", access.KeyTeamBotManage, "team_bot", "path:id"),
 	resource(http.MethodPost, "/v1/team-bots/{id}/start", access.KeyTeamBotManage, "team_bot", "path:id"),
 
+	// --- audit trail ---------------------------------------------------------
+	// The ledger is tenant-global (no relation tuples). The handler additionally
+	// checks ?tenantId=: another tenant requires the deployment super admin.
+	route(http.MethodGet, "/v1/audit/events", ModeKey, access.KeyAuditRead),
+	route(http.MethodGet, "/v1/audit/events/{id}", ModeKey, access.KeyAuditRead),
+
 	// --- triggers ------------------------------------------------------------
 	// Triggers are tenant-global runtime registrations with no relation tuples.
 	// The key must reach tenant scope and the handler filters by tenant.
