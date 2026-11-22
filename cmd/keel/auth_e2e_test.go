@@ -275,6 +275,44 @@ func cleanupAuthTenant(t *testing.T, st *store.Store, tenantID uuid.UUID) {
 	})
 }
 
+// TestEnsureServeTenantProvisionsEmptyDatabase covers the container bootstrap
+// path: KEEL_SERVE_TENANT + KEEL_BOOTSTRAP_TOKEN against a database with no
+// tenants row. The tenant must exist before the token is stored or the first
+// session placement write fails on groups_tenant_fk.
+func TestEnsureServeTenantProvisionsEmptyDatabase(t *testing.T) {
+	dsn := os.Getenv("KEEL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Config{DSN: dsn})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(st.Close)
+	tenantID := uuid.New()
+	t.Cleanup(func() {
+		_, _ = st.Pool().Exec(context.Background(), `DELETE FROM auth_events WHERE tenant_id = $1`, tenantID)
+		_, _ = st.Pool().Exec(context.Background(), `DELETE FROM tenants WHERE tenant_id = $1`, tenantID)
+	})
+	if err := ensureServeTenant(ctx, st, tenantID, discardLogger()); err != nil {
+		t.Fatalf("ensure serve tenant: %v", err)
+	}
+	created, err := st.CreateTenantReport(ctx, tenantID, "probe")
+	if err != nil || created {
+		t.Fatalf("tenant not materialized: created=%v err=%v", created, err)
+	}
+	t.Setenv("KEEL_BOOTSTRAP_TOKEN", "setup-token-"+uuid.NewString())
+	if err := ensureBootstrapEnvToken(ctx, st, tenantID, discardLogger()); err != nil {
+		t.Fatalf("ensure bootstrap token: %v", err)
+	}
+	state, err := st.BootstrapTokenState(ctx, tenantID,
+		auth.HashToken(os.Getenv("KEEL_BOOTSTRAP_TOKEN")), time.Now().UTC())
+	if err != nil || state != store.BootstrapTokenValid {
+		t.Fatalf("bootstrap token state: %s err=%v", state, err)
+	}
+}
+
 func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	env := newAuthTestEnv(t, authModeRequired, uuid.Nil)
 

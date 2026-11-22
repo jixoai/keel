@@ -899,6 +899,26 @@ func ensureLocalIdentity(ctx context.Context, st *store.Store, tenantID uuid.UUI
 	}, nil
 }
 
+// ensureServeTenant materializes the tenant row for auth=required. The CLI
+// (`keel admin tenant create` / `keel admin bootstrap`) used to be the only
+// writer, but the container path starts from an empty database with just
+// KEEL_SERVE_TENANT. Without the row, the first session placement write fails
+// on `groups_tenant_fk` after bootstrap succeeded. Idempotent: an existing
+// tenant keeps its provisioned name.
+func ensureServeTenant(ctx context.Context, st *store.Store, tenantID uuid.UUID, log *slog.Logger) error {
+	if tenantID == uuid.Nil {
+		return errors.New("a tenant id is required")
+	}
+	created, err := st.CreateTenantReport(ctx, tenantID, "default")
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Info("tenant provisioned from KEEL_SERVE_TENANT", "tenant", tenantID.String())
+	}
+	return nil
+}
+
 // ensureBootstrapEnvToken installs KEEL_BOOTSTRAP_TOKEN as a one-time setup
 // token. It is the container-friendly alternative to running the CLI inside the
 // container; the plaintext still lives only in the environment and the hash in

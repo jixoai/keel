@@ -301,6 +301,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 		}
 		opts.LocalAdmin = localAdmin
 	} else {
+		if err := ensureServeTenant(ctx, st, opts.TenantID, log); err != nil {
+			return fmt.Errorf("serve tenant: %w", err)
+		}
 		if err := ensureBootstrapEnvToken(ctx, st, opts.TenantID, log); err != nil {
 			return fmt.Errorf("bootstrap token: %w", err)
 		}
