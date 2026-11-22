@@ -368,6 +368,29 @@ func validDocJSON(t *testing.T, plugin string) string {
 }`
 }
 
+func TestLoadExtensibilityFromPackage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ExtensibilityFileName)
+	if err := os.WriteFile(path, []byte(validDocJSON(t, "vendor.panel")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, fields, err := LoadExtensibility(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(fields) != 0 {
+		t.Fatalf("fields = %v", fields)
+	}
+	if doc == nil || doc.Plugin != "vendor.panel" {
+		t.Fatalf("doc = %+v", doc)
+	}
+	empty := t.TempDir()
+	doc, fields, err = LoadExtensibility(empty)
+	if err != nil || doc != nil || fields != nil {
+		t.Fatalf("a package without the document must return (nil,nil,nil), got (%v,%v,%v)", doc, fields, err)
+	}
+}
+
 func TestExtensibilityDocValidate(t *testing.T) {
 	doc, err := ParseExtensibility([]byte(validDocJSON(t, "vendor.panel")))
 	if err != nil {
