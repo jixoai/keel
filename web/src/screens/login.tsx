@@ -4,9 +4,10 @@
 //
 //   required     username + password → the server session
 //   bootstrap    the deployment has no super admin: one-time setup token +
-//                username + password, then the forced password change
-//   must-change  the account is signed in but the server allows only the
-//                password change until it has a new credential
+//                username + password; the chosen password is final and the
+//                auto-login lands directly in the app
+//   must-change  the account was given a temporary password by a CLI/admin
+//                reset and may only change it until it has a new credential
 //   unknown/off  the boot probe is running, or there is no live service
 //
 // The five states a page must have are here: loading (the probe), empty (the
@@ -139,9 +140,9 @@ export function LoginScreen() {
     stage() === "bootstrap" ? "初始化部署" : stage() === "must-change" ? "设置新密码" : "登录 Keel";
   const description = () =>
     stage() === "bootstrap"
-      ? "这个部署还没有管理员。用一次性设置令牌创建第一个超级管理员。"
+      ? "这个部署还没有管理员。用一次性设置令牌创建第一个超级管理员，设置完成即可进入。"
       : stage() === "must-change"
-        ? "首次登录需要先修改密码，改完即可进入应用。"
+        ? "这个账号收到的是临时密码，先设置自己的新密码再进入。"
         : "用账号和密码进入；Bot 请使用绑定的 API key，不从网页登录。";
 
   return (
@@ -270,7 +271,7 @@ export function LoginScreen() {
                   accessibilityLabel="管理员用户名"
                 />
               </Field>
-              <Field label="密码" hint="至少 8 个字符。创建后首次登录会要求再改一次密码。">
+              <Field label="密码" hint="至少 8 个字符；这个密码就是管理员密码，设置后直接进入应用。">
                 <Input
                   testID="bootstrap-password"
                   value={setupPassword()}
@@ -307,7 +308,7 @@ export function LoginScreen() {
             <If when={stage() === "must-change"}>
               <GateCallout
                 tone="warning"
-                text="这个账号还在使用初始密码。新密码生效后，其他已登录的会话会全部失效。"
+                text="这个账号收到的是临时密码。新密码生效后，其他已登录的会话会全部失效。"
                 testID="must-change-hint"
               />
               <Field label="当前密码" error={fieldError() ?? undefined}>

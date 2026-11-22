@@ -42,10 +42,9 @@ import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
 import { LoginScreen } from "./src/screens/login";
-import { SessionModelChip, SessionModelPicker } from "./src/screens/model-picker";
+import { SessionModelChip, SessionModelFacts, SessionModelPicker } from "./src/screens/model-picker";
 import { PluginsScreen } from "./src/screens/plugins";
 import { SessionList } from "./src/screens/session-list";
-import { SessionModelFacts, SessionTeamChip, SessionTeamFacts, SessionTeamRosterDialog } from "./src/screens/session-team";
 import { SessionStatusPane } from "./src/screens/session-status-pane";
 import { SettingsScreen } from "./src/screens/settings";
 import { restoreAppearance } from "./src/ui/appearance";
@@ -276,12 +275,10 @@ function WorkspaceHeader() {
         >
           {headerTitle()}
         </Text>
-        {/* A team session's team name, captain and running model, or a
-            standard session's running model at the single column (where its
-            chip is icon-only): one quiet line under the title, so the header's
+        {/* The running model at the single column, where the chip is
+            icon-only: one quiet line under the title, so the header's
             horizontal room is spent on the controls, not on more pills. At the
-            wide column a standard session's model is the chip itself. */}
-        <SessionTeamFacts compact={singleColumn()} />
+            wide column the chip itself carries the same fact. */}
         <SessionModelFacts compact={singleColumn()} />
       </View>
       {/* The state word is the row's first concession: at the single column it
@@ -294,26 +291,14 @@ function WorkspaceHeader() {
           label={runStateLabel[conversationState(store.conversation())]}
         />
       </If>
-      {/* The model/team chip: a standard session shows the model its next
-          input runs; a team session shows the team (the team's captain and
-          model are the title's second line) and the roster entry. The single
-          column uses the compact form so back + title + two entries still fit
-          one row: icons on a drawn platform, short text on a terminal (an
+      {/* The model chip: the model this session's next input runs. The single
+          column uses the compact form so back + title + one entry still fit
+          one row: an icon on a drawn platform, short text on a terminal (an
           icon-only view has no characters there, and the TUI acceptance reads
           the same labels). */}
       <If when={!!store.activeId()}>
-        <If when={!!store.sessionTeam()} else={
-          <If
-            when={singleColumn() && platform.idiom !== "terminal"}
-            else={<SessionModelChip />}
-          >
-            <SessionModelChip iconOnly />
-          </If>
-        }>
-          <SessionTeamChip
-            compact={singleColumn()}
-            iconOnly={singleColumn() && platform.idiom !== "terminal"}
-          />
+        <If when={singleColumn() && platform.idiom !== "terminal"} else={<SessionModelChip />}>
+          <SessionModelChip iconOnly />
         </If>
       </If>
       <If when={sidePaneFits()}>
@@ -556,7 +541,6 @@ function App() {
       <NoticeToasts />
       <DeleteConfirm />
       <SessionModelPicker />
-      <SessionTeamRosterDialog />
       {/* The global palette: mounted at the root so Mod+K opens it over every
           route, and a choice can leave the settings/plugin page for the
           workspace. It opens a session through the same `selectSession` the

@@ -9,14 +9,7 @@
 // compaction, decision, run.finished) and the queue/guide rules: a guide sent
 // to an idle session is queued; a guide sent while running joins the turn and
 // is consumed by the next assistant message; stop leaves queued input alone.
-import { host } from "nsh";
 import type {
-  AgentTeamsResponse,
-  AgentTeamView,
-  AgentTeamWriteRequest,
-  AgentsResponse,
-  AgentView,
-  AgentWriteRequest,
   AttachmentRef,
   CliCapabilityView,
   ConnectionState,
@@ -207,17 +200,6 @@ const demoHash = (seed: string): string => {
 const cloneSkill = (record: SkillRecordView): SkillRecordView =>
   JSON.parse(JSON.stringify(record)) as SkillRecordView;
 
-/** A development-only switch carried in the launch: the embedding host's
- * launch parameters (the TUI host and the tests) or the web page's query
- * (`?fixture=1&teamNoCaptain=1`, passed in from the store's route read). The
- * evidence run uses it to render a defensive state without changing the
- * demo's normal data. */
-const fixtureFlag = (name: string, search: string): boolean => {
-  const launch = host.params?.[name];
-  if (launch === true || launch === 1 || launch === "1") return true;
-  return new URLSearchParams(search).get(name) === "1";
-};
-
 function textPreview(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const row = payload as { text?: string; summary?: string; question?: string };
@@ -355,77 +337,9 @@ export class FixtureClient implements SettingsApi {
     },
   ];
   private triggerFires = 12;
-  /** The demo Bot registry (the settings Bots section) — editable in the
-   * fixture so the demo's create/edit/delete paths are real, not stubs. */
-  private agentState: AgentView[] = [
-    {
-      id: "agent_demo_design",
-      name: "设计师",
-      description: "负责界面与品牌视觉",
-      avatar: { kind: "identicon", seed: "agent_demo_design" },
-      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      tools: [{ toolId: "workspace.read", enabled: true }],
-      systemPrompt: { kind: "inline", text: "你是资深视觉设计师。" },
-    },
-    {
-      id: "agent_demo_research",
-      name: "研究员",
-      description: "负责资料检索与整理",
-      avatar: { kind: "identicon", seed: "agent_demo_research" },
-      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      tools: [{ toolId: "web.fetch", enabled: true }],
-    },
-    {
-      id: "agent_demo_ops",
-      name: "运营",
-      description: "负责发布与渠道沟通",
-      avatar: { kind: "identicon", seed: "agent_demo_ops" },
-      defaultModel: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      tools: [{ toolId: "workflow.status", enabled: true }],
-    },
-  ];
-  private teamState: AgentTeamView[] = [
-    {
-      id: "team_demo_brand",
-      name: "品牌发布小组",
-      description: "负责新品发布的全链路交付",
-      captain: { agentId: "agent_demo_design" },
-      members: [{ agentId: "agent_demo_research" }],
-      defaults: {
-        tools: ["workflow.plan", "clock.now"],
-        modelOverride: { providerId: "s2api", modelId: "deepseek-v4.1-flash" },
-      },
-      capabilities: { teamCli: { enabled: true, commands: ["member.add", "member.remove", "save", "start"] } },
-      status: "valid",
-      revision: 1,
-      hash: "demo-brand",
-    },
-  ];
-  private agentSequence = 0;
-  private teamSequence = 0;
 
-  constructor(
-    private readonly imageURL: string = demoShot.url,
-    private readonly search: string = "",
-  ) {
+  constructor(private readonly imageURL: string = demoShot.url) {
     this.seed();
-    // `?teamNoCaptain=1`: a defensive card for a document whose captain seat
-    // is empty. The API refuses to create one, so the state exists only to
-    // prove the UI blocks it instead of pretending it can start.
-    if (fixtureFlag("teamNoCaptain", this.search)) {
-      this.teamState = [
-        ...this.teamState,
-        {
-          id: "team_demo_pending",
-          name: "待定小组",
-          description: "新渠道试投，队长还没定",
-          captain: { agentId: "" },
-          members: [{ agentId: "agent_demo_research" }],
-          status: "invalid",
-          revision: 1,
-        },
-      ];
-    }
   }
 
   async probe(): Promise<"ok" | "auth" | "down"> {
@@ -963,139 +877,6 @@ export class FixtureClient implements SettingsApi {
     const requestId = `retry:${this.sequence++}-${Math.random().toString(36).slice(2, 8)}`;
     await this.send(peer, source.text ?? "", "queue", requestId, undefined, source.selection);
     return { created: true, seq: peer.nextSeq - 1, requestId };
-  }
-
-  // ---- agent & team registry (demo) --------------------------------------
-  //
-  // The same shapes the HTTP DTOs declare, kept in memory: the demo's Bots
-  // and 团队 sections create, edit and delete for real, and the captain /
-  // reference rules answer with the same readable refusals the server does.
-
-  async listAgents(): Promise<AgentsResponse> {
-    return { agents: this.agentState.map((agent) => ({ ...agent })) };
-  }
-
-  async createAgent(request: AgentWriteRequest): Promise<AgentView> {
-    if (!request.name.trim()) throw new KeelApiError(400, "Bot 名字不能为空");
-    const created: AgentView = {
-      id: request.id || `agent_demo_new_${++this.agentSequence}`,
-      name: request.name,
-      description: request.description,
-      avatar: request.avatar,
-      defaultModel: request.defaultModel,
-      tools: request.tools,
-      systemPrompt: request.systemPrompt,
-      skills: request.skills,
-    };
-    this.agentState = [...this.agentState, created];
-    return created;
-  }
-
-  async updateAgent(id: string, request: AgentWriteRequest): Promise<AgentView> {
-    const index = this.agentState.findIndex((agent) => agent.id === id);
-    if (index < 0) throw new KeelApiError(404, `Bot ${id} 不存在`);
-    const updated: AgentView = {
-      ...this.agentState[index],
-      id,
-      name: request.name,
-      description: request.description,
-      avatar: request.avatar,
-      defaultModel: request.defaultModel,
-      tools: request.tools,
-      systemPrompt: request.systemPrompt,
-      skills: request.skills,
-    };
-    this.agentState = this.agentState.map((agent, at) => (at === index ? updated : agent));
-    return updated;
-  }
-
-  async deleteAgent(id: string): Promise<void> {
-    const referencing = this.teamState.find(
-      (team) =>
-        team.captain.agentId === id || (team.members ?? []).some((member) => member.agentId === id),
-    );
-    if (referencing) {
-      throw new KeelApiError(409, `Bot ${id} 正被团队「${referencing.name}」引用，先移出团队再删除。`);
-    }
-    if (!this.agentState.some((agent) => agent.id === id)) throw new KeelApiError(404, `Bot ${id} 不存在`);
-    this.agentState = this.agentState.filter((agent) => agent.id !== id);
-  }
-
-  async listTeams(): Promise<AgentTeamsResponse> {
-    return { teams: this.teamState.map((team) => ({ ...team })) };
-  }
-
-  /** The demo's team rules: a captain is mandatory, exists, and is never a
-   * member; the captain seat itself is not removable. */
-  private teamViewOf(id: string, request: AgentTeamWriteRequest): AgentTeamView {
-    if (!request.captain?.agentId) throw new KeelApiError(400, "团队必须有队长");
-    if (!this.agentState.some((agent) => agent.id === request.captain.agentId)) {
-      throw new KeelApiError(400, "队长必须是已存在的 Bot");
-    }
-    return {
-      id,
-      name: request.name,
-      description: request.description,
-      captain: { agentId: request.captain.agentId },
-      members: (request.members ?? []).filter(
-        (member) => member.agentId && member.agentId !== request.captain.agentId,
-      ),
-      defaults: request.defaults,
-      capabilities: request.capabilities,
-      featureBindings: request.featureBindings,
-      status: "valid",
-      revision: 1,
-    };
-  }
-
-  async createTeam(request: AgentTeamWriteRequest): Promise<AgentTeamView> {
-    if (!request.name.trim()) throw new KeelApiError(400, "团队名字不能为空");
-    const created = this.teamViewOf(request.id || `team_demo_new_${++this.teamSequence}`, request);
-    this.teamState = [...this.teamState, created];
-    return created;
-  }
-
-  async updateTeam(id: string, request: AgentTeamWriteRequest): Promise<AgentTeamView> {
-    if (!this.teamState.some((team) => team.id === id)) throw new KeelApiError(404, `团队 ${id} 不存在`);
-    const updated = this.teamViewOf(id, request);
-    this.teamState = this.teamState.map((team) => (team.id === id ? updated : team));
-    return updated;
-  }
-
-  async deleteTeam(id: string): Promise<void> {
-    if (!this.teamState.some((team) => team.id === id)) throw new KeelApiError(404, `团队 ${id} 不存在`);
-    this.teamState = this.teamState.filter((team) => team.id !== id);
-  }
-
-  private mutateTeam(id: string, mutate: (team: AgentTeamView) => AgentTeamView): AgentTeamView {
-    const team = this.teamState.find((item) => item.id === id);
-    if (!team) throw new KeelApiError(404, `团队 ${id} 不存在`);
-    const next = mutate(team);
-    this.teamState = this.teamState.map((item) => (item.id === id ? next : item));
-    return next;
-  }
-
-  async addTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
-    if (!this.agentState.some((agent) => agent.id === agentId)) {
-      throw new KeelApiError(400, `Bot ${agentId} 不存在`);
-    }
-    return this.mutateTeam(id, (team) => {
-      if (team.captain.agentId === agentId) {
-        throw new KeelApiError(400, "队长已经在队内，不能作为普通成员重复添加");
-      }
-      const members = team.members ?? [];
-      if (members.some((member) => member.agentId === agentId)) return team;
-      return { ...team, members: [...members, { agentId }] };
-    });
-  }
-
-  async removeTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
-    return this.mutateTeam(id, (team) => {
-      if (team.captain.agentId === agentId) {
-        throw new KeelApiError(400, "队长不可移除：请先改派队长");
-      }
-      return { ...team, members: (team.members ?? []).filter((member) => member.agentId !== agentId) };
-    });
   }
 
   // ---- identity & access (change keel-bot-identity-access, A4.4a) ---------

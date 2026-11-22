@@ -4,7 +4,7 @@
 //
 //   login        an ordinary deployment; `admin` / `correct-password-123`
 //   rate-limit   the login endpoint answers 429 with Retry-After: 30
-//   bootstrap    no super admin: the setup form, then the forced change
+//   bootstrap    no super admin: the setup form, then straight into the app
 //   must-change  an authenticated session whose password must be replaced
 //   denied       the login endpoint answers 403 (not CSRF): the permission face
 //   csrf         the anonymous session carries no token, so the login POST is
@@ -90,7 +90,7 @@ const stub: FetchLike = async (input, init) => {
         authenticated: true,
         mode: "required",
         csrfToken: "session-csrf",
-        mustChangePassword: scenario() === "bootstrap",
+        mustChangePassword: false,
         tenantId: "t-1",
         account: { id: "a-1", username: "admin", displayName: "管理员", isSuperAdmin: false },
       });
@@ -98,7 +98,7 @@ const stub: FetchLike = async (input, init) => {
       if (body.token !== "setup-token-123") {
         return json(401, { error: "the setup token is invalid", code: "invalid_setup_token" });
       }
-      return json(200, { bootstrapped: true, mustChangePassword: true });
+      return json(200, { bootstrapped: true, mustChangePassword: false });
     case "POST /v1/auth/password":
       if (body.currentPassword !== setupPassword) {
         return json(401, { error: "the current password is not valid", code: "invalid_credentials" });

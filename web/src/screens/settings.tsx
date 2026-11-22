@@ -121,17 +121,15 @@ import {
   type SettingsSectionEntry,
 } from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
-import { AgentTeamSettingsSection } from "./settings-agents";
 import { SkillsSection } from "./settings-skills";
 
 // ---- the section ----------------------------------------------------------
 
-/** The eleven sections the rail offers. */
+/** The nine sections the rail offers. Deployment configuration only: account,
+ * Bot and team management live in the books chapters. */
 export type SettingsSection =
   | "general"
   | "appearance"
-  | "agents"
-  | "teams"
   | "models"
   | "capabilities"
   | "secrets"
@@ -150,8 +148,6 @@ const SECTIONS: SettingsSectionEntry[] = [
   { id: "general", label: "通用", icon: "settings", group: "常规" },
   { id: "appearance", label: "外观", icon: "sun" },
   { id: "models", label: "模型接入", icon: "brain", group: "配置" },
-  { id: "agents", label: "Agents", icon: "terminal" },
-  { id: "teams", label: "团队", icon: "message" },
   { id: "capabilities", label: "能力", icon: "spark" },
   { id: "secrets", label: "密钥", icon: "key" },
   { id: "plugins", label: "插件", icon: "layers" },
@@ -539,7 +535,47 @@ function GeneralSection() {
         </CardContent>
       </Card>
       <AccountSessionCard />
+      <WorkspaceChaptersCard />
     </View>
+  );
+}
+
+/** The product objects are not deployment settings: account, Bot and team
+ * management live in the books chapters. This card is a pointer, never a
+ * second copy of those pages. */
+function WorkspaceChaptersCard() {
+  return (
+    <Card testID="settings-chapters">
+      <CardHeader
+        title="账号、Bot 与团队"
+        description="这些是产品对象，在「账簿」章节里管理；设置页只保留部署级配置。"
+      />
+      <CardContent>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <Button
+            testID="settings-open-identity"
+            variant="outline"
+            label="账号与权限"
+            accessibilityLabel="打开账号与权限章节"
+            onPress={() => store.openChapter("identity")}
+          />
+          <Button
+            testID="settings-open-bots"
+            variant="outline"
+            label="Bot"
+            accessibilityLabel="打开 Bot 章节"
+            onPress={() => store.openChapter("bots")}
+          />
+          <Button
+            testID="settings-open-teams"
+            variant="outline"
+            label="团队"
+            accessibilityLabel="打开团队章节"
+            onPress={() => store.openChapter("teams")}
+          />
+        </View>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2798,14 +2834,6 @@ function AboutSection() {
 
 // ---- the page -------------------------------------------------------------
 
-function SectionBody() {
-  return (
-    <If when={settingsSection() === "agents" || settingsSection() === "teams"} else={<SectionBodyGeneral />}>
-      <AgentTeamSettingsSection section={() => settingsSection()} />
-    </If>
-  );
-}
-
 function SectionBodyGeneral() {
   return (
     <If when={settingsSection() === "general"} else={<SectionBodyNext />}>
@@ -2920,7 +2948,7 @@ export function SettingsScreen() {
       onBack={() => store.closeSettings()}
     >
       <View testID="settings-section-body" style={{ flexDirection: "column" }}>
-        <SectionBody />
+        <SectionBodyGeneral />
       </View>
     </SettingsShell>
   );

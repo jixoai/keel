@@ -34,7 +34,6 @@ import type { ConversationView, DecisionView, QueueItemView, ScrollState, TurnVi
 import { store } from "../data/store";
 import { Badge, color, ComposerDock, ConversationColumn, row, Skeleton, space, typeScale } from "../ui/kit";
 import { ApprovalCard, EmptyConversation, GuideWaitingRow, OfflineBanner, TurnErrorBanner, TurnRow } from "./messages";
-import { TeamActivityPanel } from "./team-activity";
 import { Composer, prefillComposer } from "./composer";
 import { ImageSurface } from "../surfaces/image";
 import { RealtimeSurface } from "../surfaces/realtime";
@@ -271,10 +270,6 @@ function LlmConversation(props: { wide: boolean; onOpenList?: () => void; onBack
         // width, height or inset is written here.
         style={{ flex: 1, minHeight: 0, flexDirection: "row" }}
       >
-        {/* The team face is a sibling of the transcript list, never a row
-            inside it: member task cards are a separate projection and the
-            captain's user/assistant/tool rows must not learn about them. */}
-        <TeamActivityPanel />
         {/* Three states, one surface: the answer is loading, there is nothing
             to show yet (the greeting), or there are rows. The list keeps its
             own `<List>` element (the rows are recycled through it), so it is a

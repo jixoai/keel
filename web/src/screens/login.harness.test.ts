@@ -45,7 +45,7 @@ test("登录页：429 显示等待秒数", async () => {
   expect(app.shows("id:login-username")).toBe(true);
 });
 
-test("引导：setup token + 用户名 + 密码 → 强制改密 → 应用", async () => {
+test("引导：setup token + 用户名 + 密码 → 直接进入应用，不再强制改密", async () => {
   const app = await openGate("bootstrap");
   await app.waitFor("id:bootstrap-token");
   await app.type("id:bootstrap-token", "setup-token-123");
@@ -53,13 +53,9 @@ test("引导：setup token + 用户名 + 密码 → 强制改密 → 应用", as
   await app.type("id:bootstrap-password", "new-password-123");
   await app.type("id:bootstrap-confirm", "new-password-123");
   await app.press("id:bootstrap-submit");
-  await app.waitFor("id:change-current");
-  expect(app.texts()).toContain("设置新密码");
-  await app.type("id:change-current", "new-password-123");
-  await app.type("id:change-new", "changed-password-456");
-  await app.type("id:change-confirm", "changed-password-456");
-  await app.press("id:change-submit");
   await app.waitFor("text:已进入应用");
+  expect(app.shows("id:change-current")).toBe(false);
+  expect(app.texts().join("\n")).not.toContain("设置新密码");
 });
 
 test("强制改密门：当前密码错了仍停在门内，改对才进入", async () => {
