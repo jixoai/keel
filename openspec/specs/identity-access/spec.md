@@ -1,7 +1,13 @@
 # identity-access Specification
 
 ## Purpose
-TBD - created by archiving change keel-bot-identity-access. Update Purpose after archive.
+Define Keel's single identity and authorization model: Account is the login and permission
+subject; Bot is a runnable AI employee owned by an Account; TeamBot is a mission and roster,
+not a permission subject; Sessions belong to a Bot and therefore an Account. Permissions are
+the intersection of Account grants and Bot Harness narrowing, resources use ReBAC-lite
+relations, and every high-risk action and denial is auditable. The spec covers password and
+Bot-key authentication, permission groups, Bots, TeamBots, session ownership/sharing,
+runtime tool authorization, and the retired single-passphrase/Agent surfaces.
 
 ## Requirements
 
