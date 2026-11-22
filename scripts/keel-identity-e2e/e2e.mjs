@@ -432,11 +432,12 @@ async function step1(step, ctx) {
   check(step, 'no must-change gate after bootstrap', !forcedChangeAfter, 'absent', forcedChangeAfter ? 'present' : 'absent');
   await shot(page, step, 'direct-entry');
 
-  // logout through the account menu, then sign back in through the form
-  await clickTestId(page, 'books-account-trigger');
-  await page.getByText('退出登录', { exact: true }).last().click();
-  await waitTestId(page, 'books-signout-dialog');
-  await page.getByText('确认退出', { exact: true }).last().click();
+  // A4.4f moved the account action and logout to the settings page; the top
+  // band no longer owns an avatar menu.
+  await navigate(page, `${BASE}/settings`);
+  await clickTestId(page, 'settings-section-general');
+  await waitTestId(page, 'settings-logout', 30000);
+  await clickTestId(page, 'settings-logout');
   await waitTestId(page, 'login-gate', 20000);
   check(step, 'logout returns to the login gate', true, 'login gate', 'login gate');
   await loginUI(page, ADMIN_USER, ADMIN_PASSWORD);
@@ -572,7 +573,10 @@ async function step2(step, ctx) {
   const grants = [
     ['session.read', 'own'],
     ['session.write', 'own'],
+    ['session.share', 'own'],
+    ['app.read', 'tenant'],
     ['bot.read', 'own'],
+    ['bot.manage', 'own'],
     ['bot.invoke', 'own'],
     ['team_bot.read', 'own'],
     ['team_bot.manage', 'tenant'],
@@ -890,6 +894,18 @@ async function waitRunDone(api, sessionId, timeoutMs = 30000) {
   return { status: 200, body: last };
 }
 
+function shareAuditEvent(events, spec) {
+  return events.find(
+    (event) =>
+      event.action === 'relation.changed' &&
+      event.detail?.action === spec.action &&
+      event.detail?.resource_type === spec.resourceType &&
+      String(event.detail?.resource_id) === String(spec.resourceId) &&
+      event.detail?.relation === spec.relation &&
+      event.detail?.subject_id === spec.subjectId,
+  );
+}
+
 async function step5(step, ctx) {
   const admin = ctx.admin;
   // support-2 is a second Bot on alice's account: same-account roster works.
@@ -951,12 +967,19 @@ async function step5(step, ctx) {
   const leak = await admin.get('/v1/team-bots/leak-team');
   check(step, 'refused TeamBot is not created', leak.status === 404, 404, leak.status);
 
-  // Positive cross-account path: the product has no share endpoint, so the
-  // fixture writes the viewer relation the engine needs and documents the gap.
-  const relation = psql(
-    `insert into resource_relations (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by) values ('${TENANT}','bot','outside-1','viewer','account','${ctx.aliceAccountId}','${ctx.adminAccountId}') on conflict do nothing returning 1`,
-  );
-  check(step, 'fixture: alice receives viewer on outside-1', relation.startsWith('1') || relation === '', 'row written', relation.split('\n')[0] || 'already existed');
+  // Positive cross-account path through the real share API. Bob owns the Bot,
+  // so bob is the actor; alice receives a viewer relation and can then seat it.
+  const bob = new Api('bob');
+  await bob.login('bob', BOB_PASSWORD);
+  const botShareBody = { subjectType: 'account', subjectId: ctx.aliceAccountId, relation: 'viewer' };
+  const botShare = await bob.post('/v1/bots/outside-1/shares', botShareBody);
+  check(step, 'bot share is created through the product API', [200, 201].includes(botShare.status) && botShare.body.created === true, 'created', botShare.status);
+  check(step, 'bot share response names alice', botShare.body.share?.subjectId === ctx.aliceAccountId && botShare.body.share?.relation === 'viewer', `${ctx.aliceAccountId}/viewer`, `${botShare.body.share?.subjectId}/${botShare.body.share?.relation}`);
+  const botShares = await admin.get('/v1/bots/outside-1/shares');
+  check(step, 'bot share is listed by GET shares', (botShares.body.shares || []).some((row) => row.subjectId === ctx.aliceAccountId && row.relation === 'viewer'), 'alice viewer', JSON.stringify(botShares.body.shares));
+  const botAudit = await admin.get('/v1/audit/events?limit=200');
+  const botShareAudit = shareAuditEvent(botAudit.body.events || [], { action: 'share', resourceType: 'bot', resourceId: 'outside-1', relation: 'viewer', subjectId: ctx.aliceAccountId });
+  check(step, 'bot share writes a relation audit row', Boolean(botShareAudit), 'relation.changed share', botShareAudit ? 'present' : 'missing');
   const allowed = await alice.post('/v1/team-bots', {
     teamBotId: 'cross-team',
     name: '跨账号团队',
@@ -993,16 +1016,16 @@ async function step5(step, ctx) {
         );
       }
     }
-    psql(`delete from resource_relations where tenant_id='${TENANT}' and resource_type='bot' and resource_id='outside-1' and relation='viewer' and subject_type='account' and subject_id='${ctx.aliceAccountId}'`);
+    const botRevoke = await bob.post('/v1/bots/outside-1/shares/revoke', botShareBody);
+    check(step, 'bot share is revoked through the product API', botRevoke.status === 200 && botRevoke.body.revoked === true, 'revoked', botRevoke.status);
+    const botSharesAfter = await admin.get('/v1/bots/outside-1/shares');
+    const botShareStillListed = (botSharesAfter.body.shares || []).some((row) => row.subjectId === ctx.aliceAccountId && row.relation === 'viewer');
+    check(step, 'revoked bot share is absent from the list', !botShareStillListed, 'absent', botShareStillListed ? 'present' : 'absent');
+    const revokeAudit = await admin.get('/v1/audit/events?limit=200');
+    const botRevokeAudit = shareAuditEvent(revokeAudit.body.events || [], { action: 'revoke', resourceType: 'bot', resourceId: 'outside-1', relation: 'viewer', subjectId: ctx.aliceAccountId });
+    check(step, 'bot revoke writes a relation audit row', Boolean(botRevokeAudit), 'relation.changed revoke', botRevokeAudit ? 'present' : 'missing');
     const startAfter = await alice.post('/v1/team-bots/cross-team/start', { text: '再次开始' });
-    check(step, 'after relation removal the next start is 403', startAfter.status === 403, 403, startAfter.status);
-    addFinding(
-      'no-bot-share-surface',
-      'P1',
-      '产品没有 Bot/TeamBot 共享/关系写入端点：跨账号 roster 只能靠 DB 夹具验证',
-      '验收 §2.4 要求 roster 可引用同/跨 Account 的 Bot，能否放入/调用由 bot.invoke 决定；但 /v1 没有任何 Bot 共享/relations 写入路由（resource_relations 只在 Bot owner 创建与 external session 路径写入）。E2E 用 DB 夹具补 viewer 关系后验证了引擎的 allow/deny，但真实用户无路径把外部 Bot 放进团队。',
-      ['fixture insert resource_relations', 'POST /v1/team-bots cross-team → 201', 'relation delete → start 403'],
-    );
+    check(step, 'after API revoke the next start is 403', startAfter.status === 403, 403, startAfter.status);
     ctx.crossTeamSession = startCross.body.sessionId;
   }
 
@@ -1064,8 +1087,17 @@ async function step5(step, ctx) {
 
   const { page } = ctx.adminPage;
   await gotoRoute(page, '/teams/support-team', 'team-page');
-  const teamText = await bodyText(page);
-  check(step, 'team page shows mission and roster', teamText.includes('客服团队') && teamText.includes('回答客户问题'), 'mission + roster', teamText.slice(0, 160));
+  await waitTestId(page, 'team-band-head', 30000);
+  const missionNav = (await page.$(sel('team-section-mission'))) !== null ? 'team-section-mission' : 'team-segment-mission';
+  await clickTestId(page, missionNav);
+  await waitTestId(page, 'team-mission', 30000);
+  const missionText = await bodyText(page);
+  check(step, 'team page shows the mission section', missionText.includes('回答客户问题'), 'mission', missionText.slice(0, 200));
+  const rosterNav = (await page.$(sel('team-section-roster'))) !== null ? 'team-section-roster' : 'team-segment-roster';
+  await clickTestId(page, rosterNav);
+  await waitTestId(page, 'team-roster', 30000);
+  const rosterText = await bodyText(page);
+  check(step, 'team page shows the roster', rosterText.includes('客服二号') && rosterText.includes('队长'), 'roster', rosterText.slice(0, 200));
   await shot(page, step, 'team-detail');
   await gotoRoute(page, `/teams/support-team/runs/${sessionId}`, 'run-page');
   await waitTestId(page, 'run-lanes', 30000);
@@ -1265,28 +1297,70 @@ async function step7(step, ctx) {
   check(step, 'unrelated account is denied by default', bobBefore.status === 403, 403, bobBefore.status);
   check(step, 'denial names session.read', bobBefore.body.requiredKey === 'session.read', 'session.read', bobBefore.body.requiredKey);
 
-  // Product gap: no share endpoint. The fixture writes the viewer relation the
-  // engine is designed to consume; the gap is reported, not hidden.
-  psql(
-    `insert into resource_relations (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by) values ('${TENANT}','session','${sessionId}','viewer','account','${ctx.bobAccountId}','${ctx.aliceAccountId}') on conflict do nothing`,
-  );
-  const bobShared = await bob.get(`/v1/sessions/${sessionId}/events`);
-  check(step, 'viewer relation makes the Session readable', bobShared.status === 200, 200, bobShared.status);
+  // Owner shares through the real product API. Alice owns the session and
+  // holds session.share; bob is a plain member of the readers group.
+  const viewerBody = { subjectType: 'account', subjectId: ctx.bobAccountId, relation: 'viewer' };
+  const viewerShare = await alice.post(`/v1/sessions/${sessionId}/shares`, viewerBody);
+  check(step, 'viewer share is created through the product API', [200, 201].includes(viewerShare.status) && viewerShare.body.created === true, 'created', viewerShare.status);
+  check(step, 'viewer share names bob', viewerShare.body.share?.subjectId === ctx.bobAccountId && viewerShare.body.share?.relation === 'viewer', `${ctx.bobAccountId}/viewer`, `${viewerShare.body.share?.subjectId}/${viewerShare.body.share?.relation}`);
+  const shares = await alice.get(`/v1/sessions/${sessionId}/shares`);
+  check(step, 'viewer share is listed by GET shares', (shares.body.shares || []).some((row) => row.subjectId === ctx.bobAccountId && row.relation === 'viewer'), 'bob viewer', JSON.stringify(shares.body.shares));
+  const audit = await admin.get('/v1/audit/events?limit=200');
+  const sessionShareAudit = shareAuditEvent(audit.body.events || [], { action: 'share', resourceType: 'session', resourceId: sessionId, relation: 'viewer', subjectId: ctx.bobAccountId });
+  check(step, 'session share writes a relation audit row', Boolean(sessionShareAudit), 'relation.changed share', sessionShareAudit ? 'present' : 'missing');
 
-  // Bob sees it in the workspace; capture before/after revoke.
+  const bobShared = await bob.get(`/v1/sessions/${sessionId}/events`);
+  check(step, 'viewer can read the shared Session', bobShared.status === 200, 200, bobShared.status);
+  const bobViewerWrite = await bob.post(`/v1/sessions/${sessionId}/input`, { text: 'viewer write probe' });
+  check(step, 'viewer cannot write the Session', bobViewerWrite.status === 403, 403, bobViewerWrite.status);
+  check(step, 'viewer write refusal names session.write', bobViewerWrite.body.requiredKey === 'session.write', 'session.write', bobViewerWrite.body.requiredKey);
+
+  const bobList = await bob.get('/v1/sessions?limit=200');
+  const bobRow = (bobList.body.sessions || []).find((row) => row.sessionId === sessionId);
+  check(step, 'session list marks sharedWithMe for the other account', bobRow?.sharedWithMe === true, true, bobRow?.sharedWithMe);
+  check(step, 'session list carries the owner display name', bobRow?.ownerDisplayName === 'Alice', 'Alice', bobRow?.ownerDisplayName);
+
+  // Bob sees it in the workspace with the 「由 X 共享」 marker.
   const { page } = ctx.bobPage;
   await navigate(page, BASE);
   await waitTestId(page, 'books-shell', 30000);
   await page.waitForSelector(`[data-testid="session-row-${sessionId}"]`, { timeout: 20000 }).catch(() => {});
   const bobHasRow = (await page.$(sel(`session-row-${sessionId}`))) !== null;
+  const bobText = await bodyText(page);
   check(step, 'shared Session appears in the other account workspace', bobHasRow, 'row visible', bobHasRow ? 'visible' : 'absent');
+  check(step, 'shared row is marked 由 Alice 共享', bobText.includes('由 Alice 共享'), '由 Alice 共享', bobText.slice(0, 220));
   await shot(page, step, 'shared-session-bob');
 
-  psql(
-    `delete from resource_relations where tenant_id='${TENANT}' and resource_type='session' and resource_id='${sessionId}' and relation='viewer' and subject_type='account' and subject_id='${ctx.bobAccountId}'`,
-  );
+  // Editor is the write relation. A second share upgrades the same account.
+  const editorBody = { subjectType: 'account', subjectId: ctx.bobAccountId, relation: 'editor' };
+  const editorShare = await alice.post(`/v1/sessions/${sessionId}/shares`, editorBody);
+  check(step, 'editor share is created through the product API', [200, 201].includes(editorShare.status) && editorShare.body.created === true, 'created', editorShare.status);
+  const auditEditor = await admin.get('/v1/audit/events?limit=200');
+  const editorShareAudit = shareAuditEvent(auditEditor.body.events || [], { action: 'share', resourceType: 'session', resourceId: sessionId, relation: 'editor', subjectId: ctx.bobAccountId });
+  check(step, 'editor share writes a relation audit row', Boolean(editorShareAudit), 'relation.changed share editor', editorShareAudit ? 'present' : 'missing');
+  const bobEditorWrite = await bob.post(`/v1/sessions/${sessionId}/input`, { text: 'editor write probe' });
+  check(step, 'editor can write the Session', bobEditorWrite.status === 201, 201, bobEditorWrite.status);
+  await sleep(800);
+
+  // Revoke editor, then viewer. The next read/write is refused.
+  for (const body of [editorBody, viewerBody]) {
+    const revoke = await alice.post(`/v1/sessions/${sessionId}/shares/revoke`, body);
+    check(step, `revoke ${body.relation} share through the product API`, revoke.status === 200 && revoke.body.revoked === true, 'revoked', revoke.status);
+  }
+  const sharesAfter = await alice.get(`/v1/sessions/${sessionId}/shares`);
+  const shareStillListed = (sharesAfter.body.shares || []).some((row) => row.subjectId === ctx.bobAccountId);
+  check(step, 'revoked session shares are absent from the list', !shareStillListed, 'absent', shareStillListed ? 'present' : 'absent');
+  const auditRevoke = await admin.get('/v1/audit/events?limit=200');
+  const sessionRevokeAudit = shareAuditEvent(auditRevoke.body.events || [], { action: 'revoke', resourceType: 'session', resourceId: sessionId, relation: 'viewer', subjectId: ctx.bobAccountId });
+  check(step, 'session revoke writes a relation audit row', Boolean(sessionRevokeAudit), 'relation.changed revoke', sessionRevokeAudit ? 'present' : 'missing');
+
   const bobAfter = await bob.get(`/v1/sessions/${sessionId}/events`);
   check(step, 'revocation denies the next read', bobAfter.status === 403, 403, bobAfter.status);
+  const bobAfterWrite = await bob.post(`/v1/sessions/${sessionId}/input`, { text: 'revoked write probe' });
+  check(step, 'revocation denies the next write', bobAfterWrite.status === 403, 403, bobAfterWrite.status);
+  const bobListAfter = await bob.get('/v1/sessions?limit=200');
+  const sharedStillListed = (bobListAfter.body.sessions || []).some((row) => row.sessionId === sessionId);
+  check(step, 'revoked Session leaves the shared-with-me list', !sharedStillListed, 'absent', sharedStillListed ? 'present' : 'absent');
   await reload(page);
   await waitTestId(page, 'books-shell', 30000);
   await page.waitForTimeout(800);
@@ -1294,14 +1368,7 @@ async function step7(step, ctx) {
   check(step, 'revoked Session leaves the other workspace', !bobHasRowAfter, 'absent', bobHasRowAfter ? 'visible' : 'absent');
   await shot(page, step, 'revoked-session-bob');
 
-  addFinding(
-    'no-session-share-surface',
-    'P1',
-    '没有 Session 分享/关系写入 API 或 UI：viewer/editor 分享无法由真实用户完成',
-    '验收 §2.5 要求 owner 可给 viewer/editor 关系并撤销；产品无 /v1/sessions/{id}/share、无 ReBAC 关系写路由，Session 详情也没有分享动作。E2E 只能用 DB 夹具写 resource_relations 验证引擎 allow→revoke→403。',
-    ['fixture insert viewer relation on session', 'bob GET events 200', 'delete relation → bob GET events 403'],
-  );
-  log(step, `session=${sessionId}; bob before=403 shared=200 revoked=403`);
+  log(step, `session=${sessionId}; viewer 200/no-write; editor 201; revoked read/write 403`);
 }
 
 // ================================================================================
@@ -1400,6 +1467,15 @@ async function captureViewport(page, step, width, height, suffix) {
 }
 
 async function step9(step, ctx) {
+  // The long browser lane can leave a page with many live streams; start the
+  // responsive/visual pass from a clean context so one broken page cannot block
+  // the screenshots or step 10. This re-login is also the 2s-refresh evidence
+  // for a fresh server session.
+  const previous = ctx.adminPage;
+  const fresh = await newContextPage(1440, 900);
+  await loginUI(fresh.page, ADMIN_USER, ADMIN_PASSWORD);
+  ctx.adminPage = fresh;
+  await previous.context.close().catch(() => {});
   const { page } = ctx.adminPage;
   const viewports = [
     [1440, 900, '1440'],
@@ -1500,17 +1576,68 @@ async function step9(step, ctx) {
   check(step, 'permission page explains the missing capability', permissionText.includes('权限'), 'explains permission', permissionText.slice(0, 160));
   await shot(alicePage, step, 'state-permission');
 
-  // 44px targets on the phone layout.
+  // Shell contract (A4.4f): the top band is a brand/drag strip only; desktop
+  // navigation is the rail; the phone tab bar is five chapter tabs plus a
+  // separate 44px settings target. The old avatar trigger is gone, so its P2
+  // is closed as "control removed; new targets 44+".
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoRoute(page, `/identity/accounts/${ctx.aliceAccountId}`, 'account-head');
+  await waitTestId(page, 'books-top', 30000);
+  const desktopShell = await page.evaluate(() => {
+    const top = document.querySelector('[data-testid="books-top"]');
+    const forbidden = top
+      ? [...top.querySelectorAll('[data-testid]')]
+          .map((el) => el.getAttribute('data-testid') || '')
+          .filter((id) => /^books-chapter-|^books-tab-|^books-search$|^books-todo$|^books-settings$|^books-account-(trigger|menu)$|^books-mobile-settings$/.test(id))
+      : ['books-top-missing'];
+    return {
+      top: Boolean(top),
+      rail: Boolean(document.querySelector('[data-testid="books-rail"]')),
+      forbidden,
+    };
+  });
+  check(step, 'desktop shell has books-top', desktopShell.top, true, desktopShell.top);
+  check(step, 'desktop shell has the chapter rail', desktopShell.rail, true, desktopShell.rail);
+  check(step, 'top band has no chapter/search/todo/settings/avatar controls', desktopShell.forbidden.length === 0, '0 controls', desktopShell.forbidden.join(',') || '0');
+  await shot(page, step, 'shell-contract-1440');
+
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoRoute(page, '/identity/accounts', 'accounts-head');
-  // The page renders its head before the account list arrives; the create
-  // button is a data-dependent action, so wait for the list's action row.
   await page.waitForSelector(`${sel('accounts-create-page')}, ${sel('accounts-create')}`, { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(400);
+  const phoneShell = await page.evaluate(() => {
+    const top = document.querySelector('[data-testid="books-top"]');
+    const forbidden = top
+      ? [...top.querySelectorAll('[data-testid]')]
+          .map((el) => el.getAttribute('data-testid') || '')
+          .filter((id) => /^books-chapter-|^books-tab-|^books-search$|^books-todo$|^books-settings$|^books-account-(trigger|menu)$|^books-mobile-settings$/.test(id))
+      : ['books-top-missing'];
+    const tabs = [...document.querySelectorAll('[data-testid^="books-tab-"]')].map((el) => el.getAttribute('data-testid'));
+    const tabbar = document.querySelector('[data-testid="books-tabbar"]');
+    return {
+      top: Boolean(top),
+      tabbar: Boolean(tabbar),
+      tabs,
+      forbidden,
+      legacyTrigger: Boolean(document.querySelector('[data-testid="books-account-trigger"]')),
+    };
+  });
+  const expectedTabs = ['books-tab-workspace', 'books-tab-bots', 'books-tab-teams', 'books-tab-identity', 'books-tab-records'];
+  check(step, 'phone shell has books-top', phoneShell.top, true, phoneShell.top);
+  check(step, 'phone shell has the bottom chapter bar', phoneShell.tabbar, true, phoneShell.tabbar);
+  check(step, 'phone tab bar has exactly the five chapter tabs', expectedTabs.every((id) => phoneShell.tabs.includes(id)) && phoneShell.tabs.length === expectedTabs.length, expectedTabs.join(','), phoneShell.tabs.join(','));
+  const mobileSettings = (await page.$(sel('books-mobile-settings'))) !== null;
+  check(step, 'phone tab bar has a separate settings target', mobileSettings, 'books-mobile-settings', mobileSettings ? 'present' : 'missing');
+  check(step, 'phone top band has no chapter/search/todo/settings/avatar controls', phoneShell.forbidden.length === 0, '0 controls', phoneShell.forbidden.join(',') || '0');
+  check(step, 'the removed avatar trigger is not in the phone shell', !phoneShell.legacyTrigger, 'absent', phoneShell.legacyTrigger ? 'present' : 'absent');
+
   const targets = [
     'books-tab-workspace',
+    'books-tab-bots',
+    'books-tab-teams',
     'books-tab-identity',
-    'books-account-trigger',
+    'books-tab-records',
+    'books-mobile-settings',
     'accounts-create-page',
     'accounts-search-page',
   ];
@@ -1524,22 +1651,9 @@ async function step9(step, ctx) {
   }, targets);
   for (const row of measured) {
     const ok = !row.missing && row.height >= 44 && row.width >= 44;
-    check(step, `44px target ${row.id}`, ok, '>=44x44', row.missing ? 'missing' : `${row.width}x${row.height}`, {
-      severity: row.id === 'books-account-trigger' ? 'P2' : 'P1',
-      findingId: row.id === 'books-account-trigger' ? 'account-trigger-under-44' : null,
-    });
+    check(step, `44px target ${row.id}`, ok, '>=44x44', row.missing ? 'missing' : `${row.width}x${row.height}`);
   }
-  const trigger = measured.find((row) => row.id === 'books-account-trigger');
-  if (trigger && !trigger.missing && (trigger.width < 44 || trigger.height < 44)) {
-    addFinding(
-      'account-trigger-under-44',
-      'P2',
-      '手机端账号菜单触控目标宽 32px（高 56px），低于 44px 目标',
-      '390 宽下 books-account-trigger 的命中框为 32×56；底部章导航与新建/搜索按钮均 >=44。视觉门要求关键目标 >=44px，需给头像按钮补横向内边距或最小宽度。',
-      [`measured books-account-trigger = ${trigger.width}x${trigger.height}`],
-    );
-  }
-  await shot(page, step, 'targets-390');
+  await shot(page, step, 'shell-contract-390');
 
   // A team/run page on the phone too, so the DAG is reachable at 390.
   if (ctx.teamSessionId) {
