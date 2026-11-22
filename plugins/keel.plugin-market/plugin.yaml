@@ -1,6 +1,7 @@
 id: keel.plugin-market
 version: 1.0.0
 kind: sidecar
+layer: provider
 description: "Official plugin-market index client: answers DSH official/community capability questions from a static catalog shipped with the package, including which keel plugin covers each capability."
 engines:
   keel: ">=0.1.0 <1.0.0"
@@ -8,6 +9,9 @@ provides:
   tools:
     - search
     - info
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
 permissions:
   # The sidecar reads catalog.json from its own package directory and nothing
   # else. The runtime does not mediate sidecar file access yet; the declaration

@@ -1,6 +1,7 @@
 id: keel.context-memory
 version: 1.0.0
 kind: sidecar
+layer: provider
 description: "Official context-memory plugin: durable local memory with tag/keyword/time recall, stored in the plugin's own journal and never in host secrets."
 engines:
   keel: ">=0.1.0 <1.0.0"
@@ -8,6 +9,9 @@ provides:
   tools:
     - remember
     - recall
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
 permissions:
   # The sidecar writes its own append-only journal under <plugins root>/.data/
   # (or $KEEL_CONTEXT_MEMORY_DIR). The runtime does not mediate sidecar file

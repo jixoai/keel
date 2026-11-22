@@ -90,7 +90,10 @@ func packageDirs(root string) ([]string, error) {
 }
 
 func verifyPackage(dir, keelVersion string, timeout time.Duration) error {
-	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{KeelVersion: keelVersion})
+	// Official packages under plugins/ are held to the release gate: the
+	// manifest must declare extensibility.doc + extensibility.schema, both files
+	// must exist, and the JSON must agree with plugin.yaml.
+	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{KeelVersion: keelVersion, RequireExtensibility: true})
 	if !pkg.Usable() {
 		problem := pkg.Problem
 		if len(problem.Fields) > 0 {

@@ -57,6 +57,71 @@ func ParseKind(raw string) (Kind, bool) {
 	return "", false
 }
 
+// Layer is the plugin's architectural role. It is orthogonal to Kind: kind says
+// *how* a plugin is carried (in-process/sidecar/webview), layer says *where* its
+// contract lives (kernel/harness/provider/ui/service).
+//
+// Spec: openspec/changes/keel-harness-v2/specs/plugin-system/spec.md
+// (Requirement: 三种 kind) and specs/plugin-architecture (Requirement: 插件
+// layer 与装载边界). The freeze document is docs/PLUGIN-EXTENSIBILITY.md.
+type Layer string
+
+const (
+	// LayerKernel plugins implement an agent-loop seam. They run in the kernel
+	// process and MUST NOT reach the product layer or do direct IO.
+	LayerKernel Layer = "kernel"
+	// LayerHarness plugins provide tools, services, placement or memory inside
+	// the Harness process.
+	LayerHarness Layer = "harness"
+	// LayerProvider plugins adapt an external capability in a separate process
+	// (sidecar or a webview backend).
+	LayerProvider Layer = "provider"
+	// LayerUI plugins contribute client slots. They are carried by the NSH
+	// client as webview packages.
+	LayerUI Layer = "ui"
+	// LayerService plugins are independent services spoken to over gRPC.
+	LayerService Layer = "service"
+)
+
+// Layers is the closed set of plugin layers.
+func Layers() []Layer {
+	return []Layer{LayerKernel, LayerHarness, LayerProvider, LayerUI, LayerService}
+}
+
+// ParseLayer validates a layer string.
+func ParseLayer(raw string) (Layer, bool) {
+	for _, layer := range Layers() {
+		if string(layer) == raw {
+			return layer, true
+		}
+	}
+	return "", false
+}
+
+// DeriveLayer maps a carry kind onto its default layer. The mapping is the
+// spec's default (webview→ui, sidecar→provider, in-process→harness); an
+// explicit `layer:` overrides it.
+func DeriveLayer(kind Kind) Layer {
+	switch kind {
+	case KindWebview:
+		return LayerUI
+	case KindSidecar:
+		return LayerProvider
+	case KindInProcess:
+		return LayerHarness
+	}
+	return ""
+}
+
+// ResolvedLayer is the manifest's architectural layer: the declared value when
+// present, otherwise the kind's default. It is empty when the kind is invalid.
+func (m *Manifest) ResolvedLayer() Layer {
+	if m.Layer != "" {
+		return m.Layer
+	}
+	return DeriveLayer(m.Kind)
+}
+
 // SourceType is the closed set of provenance types a manifest may declare.
 type SourceType string
 
@@ -81,6 +146,9 @@ type Manifest struct {
 	Version string `yaml:"version" json:"version"`
 	// Kind selects the loading strategy.
 	Kind Kind `yaml:"kind" json:"kind"`
+	// Layer is the architectural role. Optional: an empty value is derived
+	// from Kind (see ResolvedLayer).
+	Layer Layer `yaml:"layer,omitempty" json:"layer,omitempty"`
 	// Description is one line shown in listings.
 	Description string `yaml:"description" json:"description"`
 	// Engines carries the host compatibility gate; a missing keel entry means
@@ -88,6 +156,11 @@ type Manifest struct {
 	Engines Engines `yaml:"engines,omitempty" json:"engines,omitempty"`
 	// Provides declares what the plugin contributes.
 	Provides Provides `yaml:"provides,omitempty" json:"provides,omitempty"`
+	// Contributes are the slot contributions this plugin ships.
+	Contributes []Contribution `yaml:"contributes,omitempty" json:"contributes,omitempty"`
+	// Extensibility points at the plugin's extension-surface documents. Official
+	// plugins MUST declare it; third-party plugins MAY omit it.
+	Extensibility *Extensibility `yaml:"extensibility,omitempty" json:"extensibility,omitempty"`
 	// Requires lists plugin or service ids the plugin needs to load.
 	Requires []string `yaml:"requires,omitempty" json:"requires,omitempty"`
 	// Permissions declares the capabilities the plugin may use.
@@ -141,8 +214,143 @@ type Provides struct {
 	// idempotency and callers that `--help`, the settings page, creation mode
 	// and the agent tool face share as one source of truth.
 	CLI []CLICapability `yaml:"cli,omitempty" json:"cli,omitempty"`
-	// UI is the webview resource declaration; required for kind webview.
+	// UI is the webview resource declaration. It is required for a webview
+	// package that contributes iframe surfaces; a pure chunk package may omit
+	// it (see validateProvides).
 	UI *UI `yaml:"ui,omitempty" json:"ui,omitempty"`
+	// Slots are the slots this plugin declares (the extension points others
+	// contribute to). Slot ids carry the declaring plugin's namespace.
+	Slots []SlotDecl `yaml:"slots,omitempty" json:"slots,omitempty"`
+	// Backends map existing aggregate-tool actions onto this plugin's
+	// implementation. The action set itself is owned by the tool surface; a
+	// backend cannot add an action name.
+	Backends []BackendDecl `yaml:"backends,omitempty" json:"backends,omitempty"`
+}
+
+// SlotForm is one contribution carrier a slot may accept.
+type SlotForm string
+
+const (
+	// SlotFormChunk is an NSH dynamic import rendered inside the host tree.
+	SlotFormChunk SlotForm = "chunk"
+	// SlotFormPackage is a signed NSH package run as an isolated surface.
+	SlotFormPackage SlotForm = "package"
+	// SlotFormIframe is an HTML page rendered in an iframe/WebView.
+	SlotFormIframe SlotForm = "iframe"
+	// SlotFormData is host-consumed JSON (nav items, actions); no code runs.
+	SlotFormData SlotForm = "data"
+)
+
+// SlotForms is the closed set of contribution forms.
+func SlotForms() []SlotForm {
+	return []SlotForm{SlotFormChunk, SlotFormPackage, SlotFormIframe, SlotFormData}
+}
+
+// SlotArity is the multiplicity semantics of a slot.
+type SlotArity string
+
+const (
+	SlotAritySingle  SlotArity = "single"
+	SlotArityMulti   SlotArity = "multi"
+	SlotArityOrdered SlotArity = "ordered"
+)
+
+// SlotArities is the closed set of slot arities.
+func SlotArities() []SlotArity { return []SlotArity{SlotAritySingle, SlotArityMulti, SlotArityOrdered} }
+
+// SlotTarget is a client target a slot is available on.
+type SlotTarget string
+
+const (
+	SlotTargetWeb    SlotTarget = "web"
+	SlotTargetNative SlotTarget = "native"
+	SlotTargetTUI    SlotTarget = "tui"
+)
+
+// SlotTargets is the closed set of slot targets.
+func SlotTargets() []SlotTarget { return []SlotTarget{SlotTargetWeb, SlotTargetNative, SlotTargetTUI} }
+
+// SlotDecl is one slot declaration (`provides.slots[]`). A slot declares the
+// forms it accepts, its multiplicity, the targets it is available on and (for
+// data contributions) the JSON schema those payloads obey.
+type SlotDecl struct {
+	// ID is the namespaced slot id (`<plugin>.<name>`).
+	ID string `yaml:"id" json:"id"`
+	// Forms are the contribution forms the slot accepts; non-empty.
+	Forms []SlotForm `yaml:"forms" json:"forms"`
+	// Arity is single|multi|ordered.
+	Arity SlotArity `yaml:"arity" json:"arity"`
+	// Targets are the client targets the slot is available on; non-empty.
+	Targets []SlotTarget `yaml:"targets" json:"targets"`
+	// Schema is the JSON schema data contributions must satisfy. Required when
+	// Forms contains data.
+	Schema map[string]any `yaml:"schema,omitempty" json:"schema,omitempty"`
+}
+
+// BackendDecl is one `provides.backends[]` entry: an aggregate-tool action this
+// plugin implements. The action name is validated against the host's closed
+// action set at assembly when the host supplies Environment.KnownBackend.
+type BackendDecl struct {
+	// Tool is the aggregate tool name (bash, mcp, skills, tasks, ...).
+	Tool string `yaml:"tool" json:"tool"`
+	// Action is the existing action inside that tool.
+	Action string `yaml:"action" json:"action"`
+	// Impl names the implementation inside the plugin (informational for the
+	// host; never a model-facing name).
+	Impl string `yaml:"impl" json:"impl"`
+}
+
+// Contribution is one `contributes[]` entry: what this plugin puts into a slot.
+type Contribution struct {
+	// Slot is the target slot id (the declaring plugin's namespace).
+	Slot string `yaml:"slot" json:"slot"`
+	// Form is chunk|package|iframe|data.
+	Form SlotForm `yaml:"form" json:"form"`
+	// Entry is the package-relative file for chunk/package/iframe forms.
+	Entry string `yaml:"entry,omitempty" json:"entry,omitempty"`
+	// Payload is the host-consumed JSON for the data form.
+	Payload map[string]any `yaml:"payload,omitempty" json:"payload,omitempty"`
+}
+
+// Extensibility is the manifest's pointer at a plugin's extension-surface
+// documents: EXTENSIBILITY.md (human) and extensibility.json (machine). An
+// official plugin MUST declare it; a third-party plugin MAY omit it and is then
+// marked "not usable by creation mode" (spec: 创造模式的聚合协议).
+type Extensibility struct {
+	// Doc is the human-readable document, relative to the package root.
+	Doc string `yaml:"doc,omitempty" json:"doc,omitempty"`
+	// Schema is the machine-readable document, relative to the package root.
+	Schema string `yaml:"schema,omitempty" json:"schema,omitempty"`
+}
+
+// ReservedSlotIDs are the first-party slot ids frozen by this contract. They
+// are declared by plugins (`keel.ui`, `keel.tasks`), never built into the
+// Harness; the list is exported so tooling and tests share one spelling.
+func ReservedSlotIDs() []string {
+	return []string{
+		"keel.ui.route",
+		"keel.ui.nav",
+		"keel.ui.action",
+		"keel.ui.tool-renderer",
+		"keel.ui.message-part",
+		"keel.ui.sidebar",
+		"keel.ui.settings-section",
+		"keel.ui.surface",
+		"keel.tasks.widget",
+	}
+}
+
+// formSupportsTarget reports whether a contribution form can render on a
+// target. `package` and `iframe` need a graphics surface; `chunk` and `data`
+// render everywhere, including the TUI.
+func formSupportsTarget(form SlotForm, target SlotTarget) bool {
+	switch form {
+	case SlotFormChunk, SlotFormData:
+		return true
+	case SlotFormPackage, SlotFormIframe:
+		return target == SlotTargetWeb || target == SlotTargetNative
+	}
+	return false
 }
 
 // ProviderPluginLayer is the only legal value of `provides.provider.layer`.
@@ -220,6 +428,18 @@ type Environment struct {
 	// KnownHookEvent reports membership in the closed hook-event set. Nil skips
 	// the closed-set check (used by pure manifest-syntax tests).
 	KnownHookEvent func(string) bool
+	// KnownSlot resolves a slot id declared by an installed plugin. When set,
+	// a contribution to an unknown slot — or in a form the slot does not accept
+	// — is refused. Nil keeps validation to syntax + self-declared slots.
+	KnownSlot func(id string) (SlotDecl, bool)
+	// KnownBackend reports whether (tool, action) is an existing action of an
+	// aggregate tool. When set, a plugin cannot invent an action name. Nil keeps
+	// validation to syntax.
+	KnownBackend func(tool, action string) bool
+	// RequireExtensibility is the official-package release gate: a manifest
+	// without `extensibility.doc` + `extensibility.schema` is refused. The
+	// runtime install path leaves it false (third parties may omit the docs).
+	RequireExtensibility bool
 }
 
 // idPattern is the spec's plugin id grammar.
@@ -239,6 +459,14 @@ var secretPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 
 // envPattern is the grammar of an entry.env variable name.
 var envPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+
+// slotIDPattern is the grammar of a namespaced slot id. A slot id always
+// contains a dot (the declaring plugin's namespace), so a bare name like
+// "route" is refused instead of silently becoming a global slot.
+var slotIDPattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{2,127}$`)
+
+// backendNamePattern is the grammar of a contribution/backend name.
+var backendNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._:-]{0,127}$`)
 
 // MaxPublishedToolName bounds a model-facing tool name. OpenAI-compatible
 // endpoints accept `^[a-zA-Z0-9_-]{1,64}$` as a function name; a published name
@@ -429,6 +657,7 @@ func (m *Manifest) Validate(env Environment) error {
 		m.ParsedVersion, _ = ParseSemVer(m.Version)
 	}
 	m.validateEngines(errs)
+	m.validateLayer(errs, validKind)
 	m.validateProvides(errs, env, validKind)
 	m.validateRequires(errs, validID)
 	m.validatePermissions(errs)
@@ -474,6 +703,49 @@ func kindList() string {
 		names = append(names, string(kind))
 	}
 	return strings.Join(names, "|")
+}
+
+func layerList() string {
+	names := make([]string, 0, len(Layers()))
+	for _, layer := range Layers() {
+		names = append(names, string(layer))
+	}
+	return strings.Join(names, "|")
+}
+
+// validateLayer checks the architectural layer and its carry-kind constraint.
+// The layer is optional (derived from kind), but when declared it must be one of
+// the five values and the carry kind must be able to host it: kernel seams are
+// compiled in, services are separate processes, providers are sidecars (or a
+// webview with a sidecar backend), and UI packages are webviews.
+func (m *Manifest) validateLayer(errs *fieldSet, validKind bool) {
+	if m.Layer != "" {
+		if _, ok := ParseLayer(string(m.Layer)); !ok {
+			errs.add("layer", "layer %q is not one of %s", m.Layer, layerList())
+			return
+		}
+	}
+	if !validKind || m.Layer == "" {
+		return
+	}
+	switch m.Layer {
+	case LayerKernel:
+		if m.Kind != KindInProcess {
+			errs.add("layer", "layer kernel runs inside the kernel process: kind %q is not in-process", m.Kind)
+		}
+	case LayerService:
+		if m.Kind == KindWebview {
+			errs.add("layer", "layer service is an independent service reached over gRPC: kind webview is not allowed")
+		}
+	case LayerProvider:
+		if m.Kind == KindInProcess {
+			errs.add("layer", "layer provider must run outside the Harness process: kind in-process is not allowed")
+		}
+	case LayerUI:
+		if m.Kind != KindWebview {
+			errs.add("layer", "layer ui is carried by the client: kind %q must be webview", m.Kind)
+		}
+	}
 }
 
 // validateEngines checks the range *syntax*. Whether this host satisfies the
@@ -596,9 +868,23 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 	m.validateProviderProvides(errs)
 	m.validateAgentProvides(errs)
 	m.validateCLI(errs)
+	m.validateSlots(errs)
+	m.validateBackends(errs, env)
+	m.validateContributions(errs, env)
+	m.validateExtensibility(errs, env)
+	// An iframe contribution is an HTML surface: the package must declare the
+	// resource entry it is loaded from (spec: webview 的两种承载). This is
+	// checked before the provides.ui block below because the requirement is
+	// about the contribution, not about the manifest having a UI block.
+	for index, contribution := range m.Contributes {
+		if contribution.Form == SlotFormIframe && (m.Provides.UI == nil || strings.TrimSpace(m.Provides.UI.Entry) == "") {
+			errs.add(fmt.Sprintf("contributes[%d].entry", index),
+				"form iframe requires provides.ui.entry (the HTML surface served at /plugins/<id>/)")
+		}
+	}
 	if m.Provides.UI == nil {
-		if validKind && m.Kind == KindWebview {
-			errs.add("provides.ui", "kind webview requires provides.ui.entry")
+		if validKind && m.Kind == KindWebview && len(m.Contributes) == 0 {
+			errs.add("provides.ui", "kind webview requires provides.ui.entry or at least one contributes entry")
 		}
 		return
 	}
@@ -608,6 +894,265 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 	if len([]rune(m.Provides.UI.Title)) > 128 {
 		errs.add("provides.ui.title", "title must be at most 128 characters")
 	}
+}
+
+// validateSlots checks `provides.slots`: namespaced ids owned by this manifest,
+// closed form/arity/target sets, unique values, and a data schema when the slot
+// accepts data contributions.
+func (m *Manifest) validateSlots(errs *fieldSet) {
+	validateSlotList(errs, "provides.slots", m.ID, m.Provides.Slots)
+}
+
+// validateSlotList is the one slot validator shared by plugin.yaml and
+// extensibility.json, so the two spellings cannot drift.
+func validateSlotList(errs *fieldSet, fieldPrefix, ownerID string, slots []SlotDecl) {
+	seen := map[string]bool{}
+	for index, slot := range slots {
+		prefix := fmt.Sprintf("%s[%d]", fieldPrefix, index)
+		if !slotIDPattern.MatchString(slot.ID) || !strings.Contains(slot.ID, ".") {
+			errs.add(prefix+".id", "slot id %q must be namespaced (<plugin>.<name>) and match %s", slot.ID, slotIDPattern.String())
+		} else if ownerID != "" && !strings.HasPrefix(slot.ID, ownerID+".") {
+			errs.add(prefix+".id", "slot id %q must carry the declaring plugin's namespace %q", slot.ID, ownerID+".")
+		}
+		if seen[slot.ID] {
+			errs.add(prefix+".id", "slot id %q is declared twice", slot.ID)
+		}
+		seen[slot.ID] = true
+
+		if len(slot.Forms) == 0 {
+			errs.add(prefix+".forms", "a slot must declare at least one form")
+		}
+		forms := map[SlotForm]bool{}
+		for formIndex, form := range slot.Forms {
+			if !validSlotForm(form) {
+				errs.add(fmt.Sprintf("%s.forms[%d]", prefix, formIndex), "form %q is not one of chunk|package|iframe|data", form)
+				continue
+			}
+			if forms[form] {
+				errs.add(fmt.Sprintf("%s.forms[%d]", prefix, formIndex), "form %q is declared twice", form)
+			}
+			forms[form] = true
+		}
+		if !validSlotArity(slot.Arity) {
+			errs.add(prefix+".arity", "arity %q is not one of single|multi|ordered", slot.Arity)
+		}
+		if len(slot.Targets) == 0 {
+			errs.add(prefix+".targets", "a slot must declare at least one target")
+		}
+		targets := map[SlotTarget]bool{}
+		for targetIndex, target := range slot.Targets {
+			if !validSlotTarget(target) {
+				errs.add(fmt.Sprintf("%s.targets[%d]", prefix, targetIndex), "target %q is not one of web|native|tui", target)
+				continue
+			}
+			if targets[target] {
+				errs.add(fmt.Sprintf("%s.targets[%d]", prefix, targetIndex), "target %q is declared twice", target)
+			}
+			targets[target] = true
+		}
+		// A target no accepted form can render is a broken slot: the TUI, for
+		// example, has no graphics surface, so a slot that only accepts
+		// iframe/package cannot be TUI-only.
+		for target := range targets {
+			renderable := false
+			for form := range forms {
+				if formSupportsTarget(form, target) {
+					renderable = true
+					break
+				}
+			}
+			if !renderable {
+				errs.add(prefix+".targets", "no declared form can render on target %q (package/iframe need web or native)", target)
+			}
+		}
+		if forms[SlotFormData] && len(slot.Schema) == 0 {
+			errs.add(prefix+".schema", "a slot accepting data contributions must declare its JSON schema")
+		}
+	}
+}
+
+// validateBackends checks `provides.backends` syntax and, when the host supplies
+// the action catalog, that the action exists.
+func (m *Manifest) validateBackends(errs *fieldSet, env Environment) {
+	seen := map[string]bool{}
+	for index, backend := range m.Provides.Backends {
+		prefix := fmt.Sprintf("provides.backends[%d]", index)
+		valid := true
+		switch {
+		case strings.TrimSpace(backend.Tool) == "":
+			errs.add(prefix+".tool", "tool must not be empty")
+			valid = false
+		case !backendNamePattern.MatchString(backend.Tool):
+			errs.add(prefix+".tool", "tool %q must match %s", backend.Tool, backendNamePattern.String())
+			valid = false
+		}
+		switch {
+		case strings.TrimSpace(backend.Action) == "":
+			errs.add(prefix+".action", "action must not be empty")
+			valid = false
+		case !backendNamePattern.MatchString(backend.Action):
+			errs.add(prefix+".action", "action %q must match %s", backend.Action, backendNamePattern.String())
+			valid = false
+		}
+		if strings.TrimSpace(backend.Impl) == "" {
+			errs.add(prefix+".impl", "impl must not be empty")
+			valid = false
+		}
+		key := backend.Tool + "." + backend.Action
+		if seen[key] {
+			errs.add(prefix, "backend %s is declared twice", key)
+		}
+		seen[key] = true
+		if valid && env.KnownBackend != nil && !env.KnownBackend(backend.Tool, backend.Action) {
+			errs.add(prefix+".action", "%s.%s is not an existing action of the aggregate tool", backend.Tool, backend.Action)
+		}
+	}
+}
+
+// validateContributions checks `contributes`: namespaced target slots, closed
+// forms, form-specific entry/payload shape, package-relative entries and — when
+// the host supplies the slot catalog — that the target exists and accepts the
+// form.
+func (m *Manifest) validateContributions(errs *fieldSet, env Environment) {
+	selfSlots := map[string]SlotDecl{}
+	for _, slot := range m.Provides.Slots {
+		selfSlots[slot.ID] = slot
+	}
+	validateContributionList(errs, "contributes", selfSlots, env, m.Contributes)
+}
+
+// validateContributionList is the one contribution validator shared by
+// plugin.yaml and extensibility.json.
+func validateContributionList(errs *fieldSet, fieldPrefix string, selfSlots map[string]SlotDecl, env Environment, contributions []Contribution) {
+	seen := map[string]bool{}
+	for index, contribution := range contributions {
+		prefix := fmt.Sprintf("%s[%d]", fieldPrefix, index)
+		validSlot := false
+		switch {
+		case strings.TrimSpace(contribution.Slot) == "":
+			errs.add(prefix+".slot", "slot must not be empty")
+		case !slotIDPattern.MatchString(contribution.Slot) || !strings.Contains(contribution.Slot, "."):
+			errs.add(prefix+".slot", "slot %q must be a namespaced slot id (<plugin>.<name>)", contribution.Slot)
+		default:
+			validSlot = true
+		}
+		if !validSlotForm(contribution.Form) {
+			errs.add(prefix+".form", "form %q is not one of chunk|package|iframe|data", contribution.Form)
+			continue
+		}
+		switch contribution.Form {
+		case SlotFormChunk, SlotFormPackage, SlotFormIframe:
+			if err := validateRelPath(contribution.Entry); err != nil {
+				errs.add(prefix+".entry", "form %s: %v", contribution.Form, err)
+			}
+			if len(contribution.Payload) > 0 {
+				errs.add(prefix+".payload", "form %s carries an entry, not a payload", contribution.Form)
+			}
+		case SlotFormData:
+			if strings.TrimSpace(contribution.Entry) != "" {
+				errs.add(prefix+".entry", "form data carries a payload, not an entry")
+			}
+			if len(contribution.Payload) == 0 {
+				errs.add(prefix+".payload", "form data requires a non-empty payload")
+			}
+		}
+		key := contribution.Slot + "|" + string(contribution.Form) + "|" + contribution.Entry
+		if seen[key] {
+			errs.add(prefix, "the same contribution to %s is declared twice", contribution.Slot)
+		}
+		seen[key] = true
+
+		if !validSlot {
+			continue
+		}
+		if slot, declared := selfSlots[contribution.Slot]; declared {
+			if !slotAcceptsForm(slot, contribution.Form) {
+				errs.add(prefix+".form", "slot %q accepts only %s, not %q",
+					contribution.Slot, formList(slot.Forms), contribution.Form)
+			}
+			continue
+		}
+		if env.KnownSlot != nil {
+			slot, known := env.KnownSlot(contribution.Slot)
+			if !known {
+				errs.add(prefix+".slot", "slot %q is not declared by any installed plugin", contribution.Slot)
+				continue
+			}
+			if !slotAcceptsForm(slot, contribution.Form) {
+				errs.add(prefix+".form", "slot %q accepts only %s, not %q",
+					contribution.Slot, formList(slot.Forms), contribution.Form)
+			}
+		}
+	}
+}
+
+// validateExtensibility checks the document pointer and the official-package
+// gate. File existence is checked by validateTree, which has the package root.
+func (m *Manifest) validateExtensibility(errs *fieldSet, env Environment) {
+	ext := m.Extensibility
+	if ext == nil {
+		if env.RequireExtensibility {
+			errs.add("extensibility", "official plugins MUST ship extensibility.doc (EXTENSIBILITY.md) and extensibility.schema (extensibility.json)")
+		}
+		return
+	}
+	if strings.TrimSpace(ext.Doc) == "" {
+		errs.add("extensibility.doc", "extensibility.doc must name the human-readable document (EXTENSIBILITY.md)")
+	} else if err := validateRelPath(ext.Doc); err != nil {
+		errs.add("extensibility.doc", "%v", err)
+	}
+	if strings.TrimSpace(ext.Schema) == "" {
+		errs.add("extensibility.schema", "extensibility.schema must name the machine-readable document (extensibility.json)")
+	} else if err := validateRelPath(ext.Schema); err != nil {
+		errs.add("extensibility.schema", "%v", err)
+	}
+}
+
+func validSlotForm(form SlotForm) bool {
+	for _, allowed := range SlotForms() {
+		if form == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func validSlotArity(arity SlotArity) bool {
+	for _, allowed := range SlotArities() {
+		if arity == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func validSlotTarget(target SlotTarget) bool {
+	for _, allowed := range SlotTargets() {
+		if target == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func slotAcceptsForm(slot SlotDecl, form SlotForm) bool {
+	for _, allowed := range slot.Forms {
+		if allowed == form {
+			return true
+		}
+	}
+	return false
+}
+
+func formList(forms []SlotForm) string {
+	names := make([]string, 0, len(forms))
+	for _, form := range forms {
+		names = append(names, string(form))
+	}
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, "|")
 }
 
 // providerDeclarationFieldNames maps the domain field names of a provider type

@@ -1,12 +1,16 @@
 id: keel.web-search
 version: 1.0.0
 kind: sidecar
+layer: provider
 description: "Official web-search plugin: one tool that searches the live web through a fallback chain of five upstreams and reports upstream failures verbatim."
 engines:
   keel: ">=0.1.0 <1.0.0"
 provides:
   tools:
     - search
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
 permissions:
   # The sidecar makes its own outbound HTTPS requests (the runtime does not
   # proxy them); these are the hosts the default provider chain can reach.

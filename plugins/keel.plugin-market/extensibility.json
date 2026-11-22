@@ -1,0 +1,40 @@
+{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "keel.plugin-market",
+  "version": "1.0.0",
+  "summary": "Answers DSH official/community capability questions from a static catalog shipped with the package, including which keel plugin covers each capability.",
+  "slots": [],
+  "contributes": [],
+  "configuration": [],
+  "hooks": [],
+  "providers": [
+    {
+      "port": "plugin.market.index",
+      "description": "Read-only index seam over catalog.json; a hosted market can replace it without changing the search/info tool names."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Search the catalog",
+      "description": "Keyword search with a result limit.",
+      "snippet": "{\"query\":\"memory\",\"limit\":4}"
+    },
+    {
+      "title": "Look up one entry",
+      "description": "Exact lookup by entry id, keel plugin id, tool name or DSH package name.",
+      "snippet": "{\"id\":\"dsh.web\"}"
+    }
+  ],
+  "limits": [
+    {
+      "name": "max_results",
+      "value": "100",
+      "description": "Search returns at most 100 entries per call."
+    },
+    {
+      "name": "catalog_bytes",
+      "value": "package-managed",
+      "description": "The catalog is a static package file; there is no network fetch and no live market state."
+    }
+  ]
+}

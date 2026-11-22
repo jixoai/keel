@@ -98,6 +98,11 @@ func LoadDir(dir string, env Environment) Package {
 		problem.Reason = problem.Fields[0].String()
 		return Package{Dir: absolute, Manifest: manifest, Problem: problem}
 	}
+	if fieldErrs := validateExtensibilityFiles(absolute, manifest); len(fieldErrs) > 0 {
+		problem := &Problem{Path: filepath.Join(absolute, ExtensibilityFileName), Reason: "extensibility document is invalid", Fields: fieldErrs}
+		problem.Reason = problem.Fields[0].String()
+		return Package{Dir: absolute, Manifest: manifest, Problem: problem}
+	}
 	hash, err := HashTree(absolute)
 	if err != nil {
 		return Package{Dir: absolute, Manifest: manifest, Problem: &Problem{Path: absolute, Reason: "hash package: " + err.Error()}}
@@ -106,22 +111,88 @@ func LoadDir(dir string, env Environment) Package {
 }
 
 // validateTree checks the parts of the manifest that only the filesystem can
-// answer: the UI entry exists, and the declared entry.command head resolves
-// inside the package (a sidecar command is allowed to be a host binary name
-// found on PATH, so only an explicit relative path is resolved).
+// answer: UI/contribution/extensibility entries exist inside the package, and
+// the declared entry.command head resolves inside the package (a sidecar
+// command is allowed to be a host binary name found on PATH, so only an
+// explicit relative path is resolved).
 func validateTree(dir string, manifest *Manifest) []FieldError {
 	var errs fieldSet
-	if ui := manifest.Provides.UI; ui != nil && ui.Entry != "" {
-		entry := filepath.Join(dir, filepath.FromSlash(ui.Entry))
+	checkFile := func(field, value string) {
+		entry := filepath.Join(dir, filepath.FromSlash(value))
 		if !IsInside(dir, entry) {
-			errs.add("provides.ui.entry", "path %q escapes the plugin package", ui.Entry)
-		} else if info, err := os.Stat(entry); err != nil {
-			errs.add("provides.ui.entry", "path %q does not exist in the package", ui.Entry)
-		} else if info.IsDir() {
-			errs.add("provides.ui.entry", "path %q is a directory, not a file", ui.Entry)
+			errs.add(field, "path %q escapes the plugin package", value)
+			return
+		}
+		info, err := os.Stat(entry)
+		if err != nil {
+			errs.add(field, "path %q does not exist in the package", value)
+			return
+		}
+		if info.IsDir() {
+			errs.add(field, "path %q is a directory, not a file", value)
+		}
+	}
+	if ui := manifest.Provides.UI; ui != nil && ui.Entry != "" {
+		checkFile("provides.ui.entry", ui.Entry)
+	}
+	for index, contribution := range manifest.Contributes {
+		if contribution.Entry != "" {
+			checkFile(fmt.Sprintf("contributes[%d].entry", index), contribution.Entry)
+		}
+	}
+	if ext := manifest.Extensibility; ext != nil {
+		if ext.Doc != "" {
+			checkFile("extensibility.doc", ext.Doc)
+		}
+		if ext.Schema != "" {
+			checkFile("extensibility.schema", ext.Schema)
 		}
 	}
 	return errs.list
+}
+
+// validateExtensibilityFiles parses and cross-checks the machine-readable
+// document when the manifest declares one. A package whose JSON drifted from
+// plugin.yaml is refused here, so creation mode never aggregates a document
+// that describes a different surface than the installed manifest.
+func validateExtensibilityFiles(dir string, manifest *Manifest) []FieldError {
+	if manifest.Extensibility == nil || manifest.Extensibility.Schema == "" {
+		return nil
+	}
+	path := filepath.Join(dir, filepath.FromSlash(manifest.Extensibility.Schema))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		// validateTree already reported a missing file; a read failure here is
+		// the same problem and must not be hidden.
+		return []FieldError{{Field: "extensibility.schema", Message: err.Error()}}
+	}
+	doc, err := ParseExtensibility(raw)
+	if err != nil {
+		return prefixedFields("extensibility.", FieldErrors(err))
+	}
+	var failures []FieldError
+	if err := doc.Validate(); err != nil {
+		failures = append(failures, FieldErrors(err)...)
+	}
+	if err := doc.ValidateAgainstManifest(manifest); err != nil {
+		failures = append(failures, FieldErrors(err)...)
+	}
+	return prefixedFields("extensibility.", failures)
+}
+
+// prefixedFields qualifies document field errors with the manifest key that
+// points at the document, so a 400 can say
+// "extensibility.schema: contributes[0].slot ...".
+func prefixedFields(prefix string, fields []FieldError) []FieldError {
+	out := make([]FieldError, 0, len(fields))
+	for _, field := range fields {
+		name := prefix + field.Field
+		if field.Field == "" {
+			name = strings.TrimSuffix(prefix, ".")
+		}
+		out = append(out, FieldError{Field: name, Message: field.Message})
+	}
+	return out
 }
 
 // IsInside reports whether target stays inside root (both may be relative; they

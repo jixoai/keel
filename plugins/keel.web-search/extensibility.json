@@ -1,0 +1,69 @@
+{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "keel.web-search",
+  "version": "1.0.0",
+  "summary": "One model tool that searches the live web through a fallback chain of five upstreams and reports upstream failures verbatim.",
+  "slots": [],
+  "contributes": [],
+  "configuration": [
+    {
+      "key": "KEEL_WEB_SEARCH_PROVIDERS",
+      "type": "string_list",
+      "description": "Ordered upstream list (bing,duckduckgo,hn,github,npm); an unknown provider name is refused at startup."
+    },
+    {
+      "key": "KEEL_WEB_SEARCH_TIMEOUT_MS",
+      "type": "integer",
+      "default": 12000,
+      "description": "Per-upstream timeout in milliseconds."
+    },
+    {
+      "key": "KEEL_WEB_SEARCH_BUDGET_MS",
+      "type": "integer",
+      "default": 30000,
+      "description": "Whole fallback-chain budget in milliseconds."
+    },
+    {
+      "key": "KEEL_WEB_SEARCH_LIMIT",
+      "type": "integer",
+      "default": 5,
+      "description": "Default result count (1-10); the tool argument overrides it."
+    }
+  ],
+  "hooks": [],
+  "providers": [
+    {
+      "port": "web.search",
+      "description": "Search provider consumed by the web capability; a different implementation can serve the same port without changing the tool surface."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Search the web",
+      "description": "Call the published tool with a query and an optional result limit.",
+      "snippet": "{\"query\":\"keel harness v2\",\"limit\":5}"
+    },
+    {
+      "title": "Restrict upstreams",
+      "description": "Set KEEL_WEB_SEARCH_PROVIDERS=hn,github to search only Hacker News and GitHub.",
+      "snippet": "KEEL_WEB_SEARCH_PROVIDERS=hn,github"
+    }
+  ],
+  "limits": [
+    {
+      "name": "total_budget_ms",
+      "value": "30000",
+      "description": "The chain stops once the budget is spent and reports the providers it did not reach."
+    },
+    {
+      "name": "provider_timeout_ms",
+      "value": "12000",
+      "description": "One slow upstream cannot hold the whole chain past this bound."
+    },
+    {
+      "name": "max_results",
+      "value": "10",
+      "description": "Hard cap on the result count returned to the model."
+    }
+  ]
+}

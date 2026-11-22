@@ -1,0 +1,51 @@
+{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "keel.context-memory",
+  "version": "1.0.0",
+  "summary": "Durable local memory with tag/keyword/time recall, stored in the plugin's own append-only journal.",
+  "slots": [],
+  "contributes": [],
+  "configuration": [
+    {
+      "key": "KEEL_CONTEXT_MEMORY_DIR",
+      "type": "string",
+      "description": "Explicit data directory; defaults to <plugins root>/.data/keel.context-memory and then <cwd>/.data."
+    }
+  ],
+  "hooks": [],
+  "providers": [
+    {
+      "port": "memory.store",
+      "description": "Recall/store seam behind the remember and recall tools; a different backend can serve the same port without changing the tool names."
+    }
+  ],
+  "examples": [
+    {
+      "title": "Remember a fact",
+      "description": "Append one memory with optional tags.",
+      "snippet": "{\"text\":\"The bi-weekly release train leaves on Thursday\",\"tags\":[\"release\"]}"
+    },
+    {
+      "title": "Recall by keyword",
+      "description": "Search the journal; an empty query returns the most recent entries.",
+      "snippet": "{\"query\":\"release\",\"limit\":5}"
+    }
+  ],
+  "limits": [
+    {
+      "name": "max_text",
+      "value": "20000",
+      "description": "One memory text is bounded to 20k characters."
+    },
+    {
+      "name": "max_tags",
+      "value": "32",
+      "description": "At most 32 tags per memory; each tag is at most 64 characters."
+    },
+    {
+      "name": "max_results",
+      "value": "50",
+      "description": "Recall returns at most 50 entries per call."
+    }
+  ]
+}
