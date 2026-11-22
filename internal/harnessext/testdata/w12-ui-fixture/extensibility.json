@@ -1,0 +1,53 @@
+{
+  "layer": "ui",
+  "slots": [],
+  "contributes": [
+    {
+      "id": "top-band",
+      "slot": "keel.ui.top-band",
+      "form": "chunk",
+      "entry": "ui/panel.js",
+      "title": "W12 插件条",
+      "capabilities": ["state"]
+    },
+    {
+      "id": "sidebar",
+      "slot": "keel.ui.sidebar",
+      "form": "chunk",
+      "entry": "ui/panel.js",
+      "title": "W12 插件侧栏",
+      "capabilities": ["state"]
+    },
+    {
+      "id": "settings-section",
+      "slot": "keel.ui.settings-section",
+      "form": "chunk",
+      "entry": "ui/panel.js",
+      "title": "W12 插件设置区",
+      "capabilities": ["state"]
+    },
+    {
+      "id": "route",
+      "slot": "keel.ui.route",
+      "form": "chunk",
+      "entry": "ui/panel.js",
+      "title": "W12 插件路由",
+      "capabilities": ["state"]
+    },
+    {
+      "id": "nav",
+      "slot": "keel.ui.nav",
+      "form": "data",
+      "payload": {"label": "W12 插件导航", "path": "/plugins", "keywords": ["插件", "w12"]},
+      "capabilities": ["state"]
+    },
+    {
+      "id": "action",
+      "slot": "keel.ui.action",
+      "form": "data",
+      "payload": {"label": "W12 插件动作", "action": "navigate", "path": "/settings"},
+      "capabilities": ["state"]
+    }
+  ],
+  "extensibility": {"doc": "EXTENSIBILITY.md", "schema": "extensibility.json"}
+}

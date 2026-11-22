@@ -1,0 +1,12 @@
+id: keel.w12.fixture
+version: 1.0.0
+kind: webview
+description: W12 UI slot fixture (a chunk contribution installed through the plugin manager)
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  ui:
+    entry: ui/index.html
+    title: W12 fixture
+requires: []
+permissions: {}

@@ -223,6 +223,9 @@ type managerEntry struct {
 	// stateBeforeInvalid remembers the intent an invalid package had, so a
 	// package that validates again restores it (a disable stays a disable).
 	stateBeforeInvalid LifecycleState
+	// extension is the plugin's UI extension declaration (slots, contributions,
+	// extensibility.json), decoded from the package and validated at install.
+	extension ExtensionDeclaration
 }
 
 // Manager is the plugin lifecycle authority: discovery, install, enable,

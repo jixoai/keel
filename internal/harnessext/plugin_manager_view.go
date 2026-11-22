@@ -63,6 +63,17 @@ type PluginView struct {
 	StoppedAt *time.Time `json:"stoppedAt,omitempty"`
 	// Runtime is the live assembly state (nil when the plugin is not loaded).
 	Runtime *PluginRuntimeView `json:"runtime,omitempty"`
+	// Endpoints and host APIs the plugin contributes to other plugins' slots
+	// (change keel-harness-v2, W12). The declarations travel even while the
+	// plugin is disabled: the client decides what to load, and a disabled
+	// plugin's contributions are not loaded.
+	Layer       string                  `json:"layer,omitempty"`
+	Slots       []ExtensionSlot         `json:"slots,omitempty"`
+	Contributes []ExtensionContribution `json:"contributes,omitempty"`
+	// Extensibility is the machine-readable document's presence. A third-party
+	// package may omit it; the client then marks it "not usable by creation
+	// mode" without blocking the install.
+	Extensibility *ExtensionDoc `json:"extensibility,omitempty"`
 	// InstalledAt, UpdatedAt, EnabledAt and DisabledAt are UTC timestamps.
 	InstalledAt *time.Time `json:"installedAt,omitempty"`
 	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
@@ -183,6 +194,16 @@ func (m *Manager) viewWithStatus(entry *managerEntry, status PluginStatus) Plugi
 		view.Provides = entry.manifest.Provides
 		view.Requires = append([]string(nil), entry.manifest.Requires...)
 		view.Permissions = entry.manifest.Permissions
+	}
+	view.Layer = entry.extension.Layer
+	if view.Layer == "" && entry.manifest != nil {
+		view.Layer = derivedLayer(string(entry.manifest.Kind))
+	}
+	view.Slots = append([]ExtensionSlot(nil), entry.extension.Slots...)
+	view.Contributes = append([]ExtensionContribution(nil), entry.extension.Contributes...)
+	view.Extensibility = entry.extension.Doc
+	for _, problem := range entry.extension.Problems {
+		view.Diagnostics = appendUnique(view.Diagnostics, "extension: "+problem.String())
 	}
 	if !entry.installedAt.IsZero() {
 		installedAt := entry.installedAt

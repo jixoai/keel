@@ -38,6 +38,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -138,8 +139,15 @@ type pluginBridgeStateResponse struct {
 	Hooks       []harnessext.HookEvent `json:"hooks,omitempty"`
 	Triggers    []string               `json:"triggers,omitempty"`
 	Diagnostics []string               `json:"diagnostics,omitempty"`
-	Revision    int64                  `json:"revision"`
-	Generation  int64                  `json:"generation"`
+	// The plugin's declared extension surface (W12): what it contributes to
+	// other plugins' slots, and the machine-readable extensibility document's
+	// presence. These are declarations, never host data.
+	Layer         string                             `json:"layer,omitempty"`
+	Slots         []harnessext.ExtensionSlot         `json:"slots,omitempty"`
+	Contributes   []harnessext.ExtensionContribution `json:"contributes,omitempty"`
+	Extensibility *harnessext.ExtensionDoc           `json:"extensibility,omitempty"`
+	Revision      int64                              `json:"revision"`
+	Generation    int64                              `json:"generation"`
 	// Theme is the host theme token document (web/theme.json) the UI renders
 	// itself with, so a plugin inherits the host's light/dark and spacing instead
 	// of shipping its own design system.
@@ -162,26 +170,30 @@ func (s *Server) bridgePluginState(w http.ResponseWriter, r *http.Request) {
 	inventory := s.cfg.PluginManager.Snapshot()
 	view := bridge.View
 	body := pluginBridgeStateResponse{
-		ID:          view.ID,
-		Version:     view.Version,
-		Kind:        view.Kind,
-		Description: view.Description,
-		State:       view.State,
-		Bundled:     view.Bundled,
-		Provides:    view.Provides,
-		Permissions: view.Permissions,
-		Requires:    view.Requires,
-		Tools:       view.Tools,
-		Hooks:       view.Hooks,
-		Triggers:    view.Triggers,
-		Diagnostics: view.Diagnostics,
-		Revision:    inventory.Revision,
-		Generation:  inventory.Generation,
-		Theme:       s.cfg.Theme,
+		ID:            view.ID,
+		Version:       view.Version,
+		Kind:          view.Kind,
+		Description:   view.Description,
+		State:         view.State,
+		Bundled:       view.Bundled,
+		Provides:      view.Provides,
+		Permissions:   view.Permissions,
+		Requires:      view.Requires,
+		Tools:         view.Tools,
+		Hooks:         view.Hooks,
+		Triggers:      view.Triggers,
+		Diagnostics:   view.Diagnostics,
+		Layer:         view.Layer,
+		Slots:         view.Slots,
+		Contributes:   view.Contributes,
+		Extensibility: view.Extensibility,
+		Revision:      inventory.Revision,
+		Generation:    inventory.Generation,
+		Theme:         s.cfg.Theme,
 		Bridge: pluginBridgeCapabilities{
-			Call:      s.cfg.PluginTools != nil,
-			Approve:   s.cfg.Decisions != nil,
-			Subscribe: s.cfg.Hooks != nil,
+			Call:      s.cfg.PluginTools != nil && pluginBridgeAllows(view, "call"),
+			Approve:   s.cfg.Decisions != nil && pluginBridgeAllows(view, "approve"),
+			Subscribe: s.cfg.Hooks != nil && pluginBridgeAllows(view, "subscribe"),
 		},
 	}
 	if body.Tools == nil {
@@ -204,6 +216,11 @@ func (s *Server) bridgePluginCall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !pluginBridgeAllows(bridge.View, "call") {
+		writeBridgeErr(w, http.StatusForbidden, "ERR_ACCESS_DENIED",
+			fmt.Sprintf("plugin %s did not declare the call capability on any contribution", bridge.View.ID))
+		return
+	}
 	var body bridgePluginCallRequest
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -219,11 +236,13 @@ func (s *Server) bridgePluginCall(w http.ResponseWriter, r *http.Request) {
 	// of the bridge's vocabulary entirely.
 	if !pluginDeclaresTool(bridge.View, tool) {
 		s.refuseBridgeCall(r, bridge, tool, "the tool is not declared by this plugin")
-		writeErr(w, http.StatusForbidden, fmt.Errorf("tool %s is not declared by plugin %s", tool, bridge.View.ID))
+		writeBridgeErr(w, http.StatusForbidden, "ERR_ACCESS_DENIED",
+			fmt.Sprintf("tool %s is not declared by plugin %s", tool, bridge.View.ID))
 		return
 	}
 	if s.cfg.PluginTools == nil {
-		writeErr(w, http.StatusServiceUnavailable, errors.New("the plugin bridge has no tool invocation seam in this deployment"))
+		writeBridgeErr(w, http.StatusServiceUnavailable, "ERR_UNAVAILABLE",
+			"the plugin bridge has no tool invocation seam in this deployment")
 		return
 	}
 	args := body.Args
@@ -266,6 +285,38 @@ func pluginDeclaresTool(view harnessext.PluginView, tool string) bool {
 		}
 	}
 	return false
+}
+
+// pluginBridgeAllows reports whether a plugin's own declarations grant a
+// bridge verb. A plugin with no `contributes` is a legacy webview/UI package:
+// it predates contribution capabilities and keeps today's full bridge (its
+// tools are still ownership-checked). A plugin whose contributions declare
+// `capabilities` is gated by the union of those declarations.
+func pluginBridgeAllows(view harnessext.PluginView, capability string) bool {
+	declared := false
+	for _, contribution := range view.Contributes {
+		if len(contribution.Capabilities) == 0 {
+			continue
+		}
+		declared = true
+		for _, granted := range contribution.Capabilities {
+			if granted == capability {
+				return true
+			}
+		}
+	}
+	// No contribution declares capabilities: the plugin predates the field and
+	// keeps the legacy full bridge (its tools are still ownership-checked).
+	return !declared
+}
+
+// writeBridgeErr is the bridge's typed failure document: the client maps
+// `code` to its own error class, and the sentence is still the server's.
+func writeBridgeErr(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{
+		"error": logsafe.Redact(message),
+		"code":  code,
+	})
 }
 
 // refuseBridgeCall audits a bridge call that named something the plugin does not
@@ -313,8 +364,13 @@ func (s *Server) bridgePluginApprove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !pluginBridgeAllows(bridge.View, "approve") {
+		writeBridgeErr(w, http.StatusForbidden, "ERR_ACCESS_DENIED",
+			fmt.Sprintf("plugin %s did not declare the approve capability on any contribution", bridge.View.ID))
+		return
+	}
 	if s.cfg.Decisions == nil {
-		writeErr(w, http.StatusServiceUnavailable, errors.New("decisions are not wired"))
+		writeBridgeErr(w, http.StatusServiceUnavailable, "ERR_UNAVAILABLE", "decisions are not wired")
 		return
 	}
 	var body bridgePluginApproveRequest
@@ -543,8 +599,13 @@ func (s *Server) bridgePluginSubscribe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !pluginBridgeAllows(bridge.View, "subscribe") {
+		writeBridgeErr(w, http.StatusForbidden, "ERR_ACCESS_DENIED",
+			fmt.Sprintf("plugin %s did not declare the subscribe capability on any contribution", bridge.View.ID))
+		return
+	}
 	if s.cfg.Hooks == nil {
-		writeErr(w, http.StatusServiceUnavailable, errors.New("the hook bus is not wired"))
+		writeBridgeErr(w, http.StatusServiceUnavailable, "ERR_UNAVAILABLE", "the hook bus is not wired")
 		return
 	}
 	events, err := bridgeSubscribeEvents(r)

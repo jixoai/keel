@@ -183,6 +183,10 @@ func (m *Manager) reconcileLocked(ctx context.Context) error {
 		entry.shadowed = shadowedByID[id]
 		entry.source = sourceOf(pkg)
 		entry.updatedAt = now
+		entry.extension = DecodeExtension(pkg.Dir, pkg.Manifest)
+		for _, problem := range entry.extension.Problems {
+			entry.diagnostics = appendUnique(entry.diagnostics, "extension: "+problem.String())
+		}
 		seen[id] = true
 		if previouslyInvalid {
 			// The package validates again: restore the intent it had before it
@@ -579,6 +583,21 @@ func (m *Manager) stagePackageLocked(path, expectedID string) (*managerEntry, pl
 		hash:     pkg.Hash,
 		dir:      pkg.Dir,
 		state:    LifecycleInstalled,
+	}
+	// The UI extension surface is part of the package contract: validate its
+	// shape before the package is copied, so a bad contribution is refused at
+	// install with the field the author wrote (the client would otherwise drop
+	// it silently).
+	entry.extension = DecodeExtension(pkg.Dir, pkg.Manifest)
+	if len(entry.extension.Problems) > 0 {
+		problems := entry.extension.Problems
+		return nil, pkg, &PluginError{
+			Op:      actionFor(expectedID),
+			ID:      pkg.ID(),
+			Message: "plugin extension declaration is invalid: " + problems[0].String(),
+			Fields:  problems,
+			cause:   ErrPluginInvalid,
+		}
 	}
 	return entry, pkg, nil
 }
