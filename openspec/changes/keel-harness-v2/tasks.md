@@ -392,10 +392,11 @@
 
 - [ ] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
-      （W9 2026-11-22：OAR 切片已交付——真实 `codex exec --json` 被 spawn 并映射出
-      `thread.started`/`agent_message`/失败 status；但本机模型出口 HTTP 403，turn 以
-      `context deadline exceeded` 收敛，**真链路未全绿**；渲染 seam 已交 projection +
-      fixture，`keel.ui.tool-renderer` 槽位由 W12 实现；证据 `evidence/w09-oar.md`）
+      （W9 2026-11-22：**Codex 真链路在 OAR record 层面已绿**——真实
+      `codex exec --json` 被 spawn，模型回答 `OAR-OK`，usage total=17538，
+      `turn.finished completed`，attribution 带外；本机 403 噪声记为 degraded 不改变终态。
+      仍缺：`keel.ui.tool-renderer` 专用渲染器（W12 UI 槽位）与宿主任务图闭环证明；
+      证据 `evidence/w09-oar.md`）
 - [x] 工具清单稳定性：增删 MCP server / 技能后清单哈希不变（除非 config 轮转） （对账 2026-11-20：已实现——ManifestHash（internal/toolsurface/hash.go:31）；TestManifestHashStableAcrossMCPServers 断言 100 个 server 哈希不变（toolsurface_test.go:593）；TestApprovedPluginToolsChangeAndRestoreTheManifestHash 断言仅 provides.tools 变更/卸载恢复）
 - [x] 真实模型 E2E：至少一条真 provider 链路（无凭据时用 fake provider），不得只测 happy path
       （对账：`scripts/real-model-e2e.sh`（成功 + `--with-failure`/`--failure-auth` 失败路径 +

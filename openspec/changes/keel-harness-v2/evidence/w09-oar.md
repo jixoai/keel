@@ -118,8 +118,9 @@ TestWriteTable
 命令（宿主 demo 使用 `oar.Service`；sidecar 由 `gateway.SpawnStdio` 拉起）：
 
 ```text
-$ go run ./.tmp/oar-demo -runtime=fake -sidecar=$PWD/.tmp/bin/keel-oar \
-    -journal=$PWD/.tmp/journal-fake -prompt="inspect the repo"
+$ go build -o /tmp/keel-oar-w09 ./internal/oar/cmd/keel-oar
+$ go run ./internal/oar/cmd/oar-demo -runtime=fake -sidecar=/tmp/keel-oar-w09 \
+    -journal=/tmp/oar-journal-fake -prompt="inspect the repo"
 runtime=fake sidecar_pid=93289 declaration={Schema:keel.oar.capabilities/1 ContractVersion:1 Runtime:fake RuntimeVersion:1.0.0 Simulated:true Capabilities:[records agent_path calls results status messages cancel resume subagents]}
 {"schema":"keel.oar.record/1","seq":1,"agentPath":"/main",...,"kind":"status","name":"turn.started","status":"started",...}
 {"schema":"keel.oar.record/1","seq":2,"agentPath":"/main",...,"kind":"call","callId":"call-1","name":"shell","status":"started","input":{"command":"printf OAR-OK"}}
@@ -128,13 +129,13 @@ runtime=fake sidecar_pid=93289 declaration={Schema:keel.oar.capabilities/1 Contr
 {"schema":"keel.oar.record/1","seq":5,"agentPath":"/main/worker-1",...,"kind":"result","callId":"call-2","name":"read_file","status":"completed","output":{"bytes":42}}
 {"schema":"keel.oar.record/1","seq":6,"agentPath":"/main",...,"kind":"message","name":"agent_message","message":"fake answer to: inspect the repo"}
 {"schema":"keel.oar.record/1","seq":7,"agentPath":"/main",...,"kind":"status","name":"turn.finished","status":"completed"}
-journal=/Users/kzf/.../.tmp/journal-fake/session-oar-1.ndjson
+journal=/tmp/oar-journal-fake/session-oar-1.ndjson
 ```
 
 CLI 视图：
 
 ```text
-$ .tmp/bin/oar-view -journal .tmp/journal-fake
+$ go run ./internal/oar/cmd/oar-view -journal /tmp/oar-journal-fake
 SEQ  AGENT           KIND     NAME           STATUS     CALL    SUMMARY
 1    /main           status   turn.started   started            turn started
 2    /main           call     shell          started    call-1  {"command":"printf OAR-OK"}
@@ -144,7 +145,7 @@ SEQ  AGENT           KIND     NAME           STATUS     CALL    SUMMARY
 6    /main           message  agent_message                     fake answer to: inspect the repo
 7    /main           status   turn.finished  completed          turn completed
 
-$ .tmp/bin/oar-view -journal .tmp/journal-fake -projection
+$ go run ./internal/oar/cmd/oar-view -journal /tmp/oar-journal-fake -projection
 {
   "schema": "keel.oar.render-projection/1",
   "backendSessionId": "oar-1",
@@ -198,17 +199,19 @@ Runtime:codex RuntimeVersion:codex-cli 0.166.0 Simulated:false Capabilities:[rec
 calls results status messages usage cancel live_model]}
 ```
 
-真实 turn（`timeout=10s`，prompt `Reply with exactly OAR-OK`）：
+真实 turn（`timeout=25s`，prompt `Reply with exactly OAR-OK`）：
 
 ```text
-$ go run ./.tmp/oar-demo -runtime=codex -sidecar=$PWD/.tmp/bin/keel-oar \
-    -journal=$PWD/.tmp/journal-codex3 -codex-path="$(command -v codex)" \
-    -timeout=10s -prompt="Reply with exactly OAR-OK"
+$ go run ./internal/oar/cmd/oar-demo -runtime=codex -sidecar=/tmp/keel-oar-w09 \
+    -journal=/tmp/oar-journal-codex -codex-path="$(command -v codex)" \
+    -timeout=25s -prompt="Reply with exactly OAR-OK"
 
 stderr:
+runtime=codex sidecar_pid=14024 declaration={... RuntimeVersion:codex-cli 0.166.0 Simulated:false ...}
 Reading additional input from stdin...
-2026-11-22T13:20:32Z ERROR rmcp::transport::worker: worker quit with fatal:
+2026-11-22T13:36:19Z ERROR rmcp::transport::worker: worker quit with fatal:
   Transport channel closed, when UnexpectedServerResponse("HTTP 403: ... Forbidden ...")
+journal=/tmp/oar-journal-codex/session-oar-1.ndjson
 
 records:
 1 status turn.started started turn started
@@ -216,27 +219,43 @@ records:
 3 status codex.item.error degraded Codex is ignoring 1 unrecognized configuration setting...
 4 status codex.item.error degraded Codex is ignoring 1 unrecognized configuration setting...
 5 status codex.turn.started started
-6 error turn.failed context deadline exceeded
-7 status turn.finished failed context deadline exceeded
+6 message agent_message "OAR-OK"
+7 usage turn.usage total=17538 (input=17530, output=8, metering=external)
+8 status turn.finished completed turn completed
 ```
 
-（前一次同参数运行在 timeout 前还收到过一条 `agent_message` item，说明 JSONL 解析
-包含消息路径；本次运行未在窗口内完成模型回合。）
+关键原始记录（截断）：
+
+```json
+{"schema":"keel.oar.record/1","seq":6,"agentPath":"/main","kind":"message",
+ "name":"agent_message","message":"OAR-OK",
+ "attribution":{"sessionId":"demo-host-session","taskId":"demo-task-card"},
+ "runtime":"codex","ts":"2026-11-22T13:36:25.4774Z"}
+{"schema":"keel.oar.record/1","seq":7,"agentPath":"/main","kind":"usage",
+ "name":"turn.usage","usage":{"metering":"external","inputTokens":17530,
+ "outputTokens":8,"totalTokens":17538},"runtime":"codex"}
+{"schema":"keel.oar.record/1","seq":8,"agentPath":"/main","kind":"status",
+ "name":"turn.finished","status":"completed","message":"turn completed"}
+```
 
 结论（诚实口径）：
-- 适配器确实 spawn 了 `codex exec --json`，解析了真实 JSONL（`thread.started`、配置
-  warning item、`codex.turn.started`；另一次运行还收到 `agent_message`），record stream
-  带 `seq`/`agentPath`/attribution。
-- 本机网络对模型出口返回 **HTTP 403 Forbidden**，Codex 持续 Reconnecting；10s turn
-  timeout 把它收敛为 `turn.finished failed (context deadline exceeded)`，进程组被回收。
-- **没有**把这次运行当作成功模型链路；W11 的「Codex 真链路全绿」仍未达成（缺可用
-  模型网络/凭据）。
+- 适配器确实 spawn 了 `codex exec --json`，解析了真实 JSONL：`thread.started`、
+  配置 warning item、`codex.turn.started`、`agent_message`（模型回答 `OAR-OK`）、
+  `turn.completed.usage`，最终 `turn.finished completed`；record stream 带
+  `seq`/`agentPath`/out-of-band attribution。
+- 本机模型出口确实返回过 **HTTP 403 Forbidden**（Codex 记 `error`/Reconnecting）；
+  该错误映射为 `degraded` status，不污染 turn 终态。10s timeout 的运行曾在收到
+  `turn.completed` 前超时；25s 运行完成。`turn.completed` 到达后 sidecar 主动回收
+  lingering 的 Codex 进程组，不再等 CLI 的 transport teardown。
+- **Codex 真链路在 OAR record 层面已绿**（真实模型回答 + usage + completed，无 fake）。
+  W11-2 仍未勾：专用渲染器 UI（`keel.ui.tool-renderer`）和宿主任务图闭环属于 W12/W11
+  后续，不在本切片。
 
 缺失 Codex 的 typed 路径：
 
 ```text
-$ go run ./.tmp/oar-demo -runtime=codex -sidecar=$PWD/.tmp/bin/keel-oar \
-    -journal=$PWD/.tmp/journal-missing -codex-path=/nonexistent/codex -timeout=5s
+$ go run ./internal/oar/cmd/oar-demo -runtime=codex -sidecar=/tmp/keel-oar-w09 \
+    -journal=/tmp/oar-journal-missing -codex-path=/nonexistent/codex -timeout=5s
 start: oar: runtime_unavailable (runtime codex): codex --version failed:
   fork/exec /nonexistent/codex: no such file or directory
 ```
