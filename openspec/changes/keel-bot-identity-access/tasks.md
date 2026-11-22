@@ -179,6 +179,8 @@
 - [ ] 单元/负控：密码、cookie、CSRF、限速、并集、scope、`grant ⊆ own`、跨租户、
       低权限借 Bot、旧入口
 - [ ] 集成：登录 → 建 Bot → Session → 工具 → 共享 → 撤销 → 下一工具 403
+- [x] 共享面（A6 P1）：session / bot / team_bot 的 viewer/editor 创建、列表、撤销 HTTP +
+      Web 对话框 + PG/TUI 测试；176/176 路由对表。证据 `evidence/A6-share-surface.md`
 - [ ] 管家 Bot E2E：一个有 `bot.create`/`team_bot.manage`/`permission.manage` 的 Bot
       创建成员 Bot + TeamBot（Mission/Roster）+ 权限组并启动团队；无 Bot 专属旁路
 - [ ] 权限对称：同一 permission-key 下人类账号与 Bot 账号行为一致；只允许登录方式不同
