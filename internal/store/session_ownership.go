@@ -223,6 +223,61 @@ func (s *Store) CreateSessionLikeParent(ctx context.Context, tenantID, parentSes
 	return s.CreateAccountOwnedSession(ctx, tenantID, childSessionID, owner)
 }
 
+// CreateSpawnedSession creates the child session of a delegation. When botID
+// names a member Bot, the child belongs to that Bot and its Profile's Account:
+// the member runs with its own Account permissions and Harness, while
+// created_by keeps the original initiator. A bindingless spawn (empty botID)
+// keeps the pre-delegation behavior and inherits the parent's ownership.
+//
+// The team mission snapshot rides along: a member session inside a TeamBot run
+// still records the TeamBot it was started for.
+func (s *Store) CreateSpawnedSession(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID, botID string) error {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return s.CreateSessionLikeParent(ctx, tenantID, parentSessionID, childSessionID)
+	}
+	if tenantID == uuid.Nil || parentSessionID == uuid.Nil || childSessionID == uuid.Nil {
+		return invalidIdentity("create spawned session", "tenant, parent and child ids are required")
+	}
+	parent, err := s.GetSessionOwnership(ctx, tenantID, parentSessionID)
+	if err != nil {
+		return err
+	}
+	bot, err := s.GetBot(ctx, tenantID, botID)
+	if err != nil {
+		return err
+	}
+	profile, err := s.GetProfile(ctx, tenantID, bot.ProfileID)
+	if err != nil {
+		return err
+	}
+	createdBy := parent.CreatedByAccountID
+	if createdBy == uuid.Nil {
+		createdBy = parent.AccountID
+	}
+	if err := s.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: tenantID, SessionID: childSessionID,
+		BotID: botID, AccountID: profile.AccountID,
+		CreatedByAccountID: createdBy, TeamBotID: parent.TeamBotID,
+	}); err != nil {
+		return err
+	}
+	// The delegating account observes the child it spawned (the run page's
+	// sub-agent DAG reads child sessions through session.read). The member stays
+	// the owner; this is an explicit parent -> child viewer relation, not a
+	// second owner.
+	if parent.AccountID != uuid.Nil && parent.AccountID != profile.AccountID {
+		if _, err := s.PutResourceRelation(ctx, ResourceRelation{
+			TenantID: tenantID, ResourceType: "session", ResourceID: childSessionID.String(),
+			Relation: RelationViewer, SubjectType: RelationSubjectAccount,
+			SubjectID: parent.AccountID.String(), CreatedBy: createdBy,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SessionOwnerAccount returns the account named by a session's owner relation.
 // found=false is a session with no account owner tuple.
 func (s *Store) SessionOwnerAccount(ctx context.Context, tenantID, sessionID uuid.UUID) (uuid.UUID, bool, error) {

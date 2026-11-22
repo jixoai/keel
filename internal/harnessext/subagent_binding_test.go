@@ -283,3 +283,94 @@ func TestSubagentSpawnRefusesAnInvalidSelectionBeforeCommit(t *testing.T) {
 		t.Fatalf("child session = %s, want %s", record.SessionID, childID)
 	}
 }
+
+// TestSubagentSpawnOwnsTheMemberBot pins the A6 delegation ownership: a spawn
+// naming a member Bot creates the child as that Bot, so its tools run under the
+// member's Account ∩ Harness instead of the captain's. Fork still inherits the
+// parent; only the spawn path rebinds.
+func TestSubagentSpawnOwnsTheMemberBot(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "subagent-member-owner"); err != nil {
+		t.Fatal(err)
+	}
+	parent, _ := ownedParentSession(t, st, tenant)
+	// The parent fixture's account/role are enough for a second Profile.
+	parentOwnership, err := st.GetSessionOwnership(ctx, tenant, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, err := st.CreateRole(ctx, store.RoleRecord{TenantID: tenant, ID: uuid.New(), Name: "Member"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAccount, err := st.CreateAccount(ctx, store.AccountRecord{
+		TenantID: tenant, ID: uuid.New(), Username: "member-" + tenant.String()[:8],
+		DisplayName: "Member", Kind: "bot",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberProfile, err := st.CreateProfile(ctx, store.ProfileRecord{
+		TenantID: tenant, ID: uuid.New(), AccountID: memberAccount.ID, RoleID: role.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberBot, err := st.CreateBot(ctx, store.BotRecord{
+		TenantID: tenant, ID: "member-" + tenant.String()[:8], Name: "Member Bot",
+		ProfileID: memberProfile.ID, ModelKind: "text",
+		DefaultModel: json.RawMessage(`{"providerId":"magpie","modelId":"qwen"}`),
+		Harness:      json.RawMessage(`{"tools":[],"context":{"permissions":["session.read"]}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	klog, err := kernel.NewPG(ctx, st.Pool())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kern := kernel.New(klog, kernel.Options{})
+	runner := harnessext.NewSubagentRunner(harnessext.SubagentOptions{
+		Gate:              st,
+		Edge:              kern,
+		Events:            kern,
+		Runs:              storeSessions{st},
+		Logger:            testLogger(),
+		ValidateSelection: func(json.RawMessage) error { return nil },
+		Bindings:          sessionbinding.New(st),
+		InheritOwnership:  st.CreateSessionLikeParent,
+		OwnSpawnedChild:   st.CreateSpawnedSession,
+	})
+	record, err := runner.SpawnAsync(ctx, harnessext.SpawnRequest{
+		TenantID: tenant, ParentSessionID: parent,
+		Task: "answer a customer", BotID: memberBot.ID,
+	})
+	if err != nil {
+		t.Fatalf("SpawnAsync: %v", err)
+	}
+	child, err := uuid.Parse(record.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetSessionOwnership(ctx, tenant, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BotID != memberBot.ID || got.AccountID != memberAccount.ID {
+		t.Fatalf("child ownership = %+v, want member %q/%s", got, memberBot.ID, memberAccount.ID)
+	}
+	if got.CreatedByAccountID != parentOwnership.CreatedByAccountID {
+		t.Fatalf("child created-by = %s, want %s", got.CreatedByAccountID, parentOwnership.CreatedByAccountID)
+	}
+	holder, err := st.HasResourceRelation(ctx, tenant, "session", child.String(),
+		store.RelationOwner, store.RelationSubjectAccount, memberAccount.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !holder {
+		t.Fatal("member owner relation missing")
+	}
+}

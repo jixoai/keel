@@ -83,6 +83,31 @@ func (r SpawnRequest) childSelection() json.RawMessage {
 	return encoded
 }
 
+// spawnedBotID is the member Bot a spawn delegates to. SpawnFromTool carries
+// the top-level botId; a caller that wrote only selection.botId still gets the
+// member ownership, while a team selection (teamBotId) keeps the parent's
+// captain ownership because the team decides the captain.
+func (r *SubagentRunner) spawnedBotID(req SpawnRequest) string {
+	if botID := strings.TrimSpace(req.BotID); botID != "" {
+		return botID
+	}
+	raw := bytes.TrimSpace(req.Selection)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var fact struct {
+		BotID     string `json:"botId"`
+		TeamBotID string `json:"teamBotId"`
+	}
+	if json.Unmarshal(raw, &fact) != nil {
+		return ""
+	}
+	if strings.TrimSpace(fact.TeamBotID) != "" {
+		return ""
+	}
+	return strings.TrimSpace(fact.BotID)
+}
+
 // Artifact is one provenance entry of a sub-agent run. It never carries tool
 // output text: the summary is the value, artifacts are the trail. A blob/file
 // artifact carries the content-addressed reference only (never the bytes):
@@ -217,6 +242,12 @@ type SubagentOptions struct {
 	// surface must wire this. A failure aborts the child before any event is
 	// committed.
 	InheritOwnership func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error
+	// OwnSpawnedChild creates a spawned child's ownership. When botID is
+	// non-empty the child belongs to that member Bot (its Profile's Account);
+	// an empty botID inherits the parent. It takes precedence over
+	// InheritOwnership for spawn; fork keeps using InheritOwnership because a
+	// fork is a copy of the parent's identity, not a delegation to a member.
+	OwnSpawnedChild func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID, botID string) error
 }
 
 const (
@@ -250,6 +281,7 @@ type SubagentRunner struct {
 	notes            SubagentNoteWriter
 	configVersion    func() (string, int64)
 	inheritOwnership func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID) error
+	ownSpawnedChild  func(ctx context.Context, tenantID, parentSessionID, childSessionID uuid.UUID, botID string) error
 
 	mu      sync.Mutex
 	records map[string]*SubagentRecord
@@ -291,6 +323,7 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 		notes:             opts.Notes,
 		configVersion:     opts.ConfigVersion,
 		inheritOwnership:  opts.InheritOwnership,
+		ownSpawnedChild:   opts.OwnSpawnedChild,
 	}
 	if opts.Gate != nil && opts.Edge != nil {
 		r.starter = NewTurnStarter(opts.Gate, opts.Edge, opts.Hooks, opts.Logger)
@@ -358,7 +391,12 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 	// The child is a session resource: inherit the parent's owner before its
 	// first input, so the route relation gate can authorize its single-resource
 	// endpoints. A failure aborts before anything is committed.
-	if r.inheritOwnership != nil {
+	spawnBotID := r.spawnedBotID(req)
+	if r.ownSpawnedChild != nil {
+		if err := r.ownSpawnedChild(ctx, req.TenantID, req.ParentSessionID, childID, spawnBotID); err != nil {
+			return SubagentRecord{}, err
+		}
+	} else if r.inheritOwnership != nil {
 		if err := r.inheritOwnership(ctx, req.TenantID, req.ParentSessionID, childID); err != nil {
 			return SubagentRecord{}, err
 		}

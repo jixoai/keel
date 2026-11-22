@@ -1224,8 +1224,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		},
 		// A spawned/forked child is a session resource: inherit the parent's
 		// owner relation before the child's first input, so its routes authorize
-		// exactly like the parent's.
+		// exactly like the parent's. A spawn naming a member Bot owns the child
+		// as that member (its Profile's Account), so the member's tools run under
+		// the member's Account ∩ Harness, not the captain's.
 		InheritOwnership: newSessionOwnershipInheritor(st),
+		OwnSpawnedChild:  st.CreateSpawnedSession,
 	})
 	// Triggers fire as a Bot: the store-backed resolver validates the Bot
 	// (existence/archive/tenant) at registration and before every fire, and

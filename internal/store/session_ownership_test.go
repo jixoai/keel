@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -233,5 +234,114 @@ func TestCreateSessionLikeParentInheritsOwner(t *testing.T) {
 	}
 	if err := st.CreateSessionLikeParent(ctx, account.TenantID, orphan, uuid.New()); !errors.Is(err, ErrConflict) {
 		t.Fatalf("orphan parent err = %v, want ErrConflict", err)
+	}
+}
+
+// TestCreateSpawnedSessionOwnsTheMemberBot pins the delegation ownership
+// contract: a spawn naming a member Bot creates a child owned by that Bot's
+// Profile Account (so the member's tools run under its own Account ∩ Harness),
+// while the team mission snapshot and the original initiator are preserved.
+// A bindingless spawn still inherits the parent.
+func TestCreateSpawnedSessionOwnsTheMemberBot(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	parentAccount, role, _, parentBot := identityFixture(t, st)
+
+	memberAccount, err := st.CreateAccount(ctx, AccountRecord{
+		TenantID: parentAccount.TenantID, ID: uuid.New(),
+		Username:    "member-" + parentAccount.TenantID.String()[:8],
+		DisplayName: "Member", Kind: "bot",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberProfile, err := st.CreateProfile(ctx, ProfileRecord{
+		TenantID: parentAccount.TenantID, ID: uuid.New(), AccountID: memberAccount.ID, RoleID: role.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberBot, err := st.CreateBot(ctx, BotRecord{
+		TenantID: parentAccount.TenantID, ID: "member-bot-" + parentAccount.TenantID.String()[:8],
+		Name: "Member Bot", ProfileID: memberProfile.ID, ModelKind: "text",
+		DefaultModel: json.RawMessage(`{"providerId":"magpie","modelId":"qwen"}`),
+		Harness:      json.RawMessage(`{"tools":[],"context":{"permissions":["session.read"]}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team, err := st.CreateTeamBot(ctx, TeamBotRecord{
+		TenantID: parentAccount.TenantID, ID: "team-" + parentAccount.TenantID.String()[:8],
+		Name: "Team", Mission: "ship",
+		Roster:   []byte(`[{"botId":"` + parentBot.ID + `","role":"captain"},{"botId":"` + memberBot.ID + `","role":"member"}]`),
+		Revision: 1, ContentHash: "hash",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := uuid.New()
+	if err := st.CreateOwnedSession(ctx, SessionOwnership{
+		TenantID: parentAccount.TenantID, SessionID: parent, BotID: parentBot.ID,
+		AccountID: parentAccount.ID, CreatedByAccountID: parentAccount.ID, TeamBotID: team.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	child := uuid.New()
+	if err := st.CreateSpawnedSession(ctx, parentAccount.TenantID, parent, child, memberBot.ID); err != nil {
+		t.Fatalf("CreateSpawnedSession: %v", err)
+	}
+	got, err := st.GetSessionOwnership(ctx, parentAccount.TenantID, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BotID != memberBot.ID || got.AccountID != memberAccount.ID {
+		t.Fatalf("child ownership = %+v, want member bot %q account %s", got, memberBot.ID, memberAccount.ID)
+	}
+	if got.CreatedByAccountID != parentAccount.ID {
+		t.Fatalf("child created-by = %s, want the original initiator %s", got.CreatedByAccountID, parentAccount.ID)
+	}
+	if got.TeamBotID != team.ID {
+		t.Fatalf("child team snapshot = %q, want %q", got.TeamBotID, team.ID)
+	}
+	holder, err := st.HasResourceRelation(ctx, parentAccount.TenantID, "session", child.String(),
+		RelationOwner, RelationSubjectAccount, memberAccount.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !holder {
+		t.Fatal("member owner relation missing")
+	}
+	if held, err := st.HasResourceRelation(ctx, parentAccount.TenantID, "session", child.String(),
+		RelationOwner, RelationSubjectAccount, parentAccount.ID.String()); err != nil {
+		t.Fatal(err)
+	} else if held {
+		t.Fatal("the parent account must not own the member's child session")
+	}
+	// The delegating account can observe the child (the run DAG), but as a
+	// viewer, never as the owner.
+	if visible, err := st.HasResourceRelation(ctx, parentAccount.TenantID, "session", child.String(),
+		RelationViewer, RelationSubjectAccount, parentAccount.ID.String()); err != nil {
+		t.Fatal(err)
+	} else if !visible {
+		t.Fatal("the parent account viewer relation on the child is missing")
+	}
+
+	// A bindingless spawn keeps the parent's ownership.
+	plain := uuid.New()
+	if err := st.CreateSpawnedSession(ctx, parentAccount.TenantID, parent, plain, ""); err != nil {
+		t.Fatalf("bindingless spawn: %v", err)
+	}
+	plainOwner, err := st.GetSessionOwnership(ctx, parentAccount.TenantID, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plainOwner.BotID != parentBot.ID || plainOwner.AccountID != parentAccount.ID {
+		t.Fatalf("bindingless child ownership = %+v, want parent %q/%s", plainOwner, parentBot.ID, parentAccount.ID)
+	}
+
+	// A missing member Bot is refused before a child row exists.
+	if err := st.CreateSpawnedSession(ctx, parentAccount.TenantID, parent, uuid.New(), "missing-bot"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing member err = %v, want ErrNotFound", err)
 	}
 }
