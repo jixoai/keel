@@ -1,0 +1,21 @@
+{
+  "schema": "keel.r1diff.pin/1",
+  "scenario": "r1-basic-v2",
+  "ref": "e7361f8",
+  "refSubject": "fix(store): AppendEvent 对 40P01/40001/55P03 重试（并发 append 死锁不再冒到 500）",
+  "allowlist": "cmd/r1diff/allow-v2.json",
+  "repinnedAt": "2026-11-22",
+  "reason": "e7361f8 is the last commit before the keel-service-graph work and therefore the pre-v2 runtime. keel-harness-v2 keeps it as the frozen reference (v1 HTTP/SSE remains the contract); the scenario is bumped to r1-basic-v2 to add the eight v2 kind-family probes and the new allowlist records every intentional delta with a reason.",
+  "v2Kinds": [
+    "task.created",
+    "fs.write",
+    "config.rotated",
+    "placement.joined",
+    "supervision.escalated",
+    "guardrail.tripped",
+    "resume.attempt",
+    "notification.ack"
+  ],
+  "allowRules": 77,
+  "negativeRun": "the same dump on both sides must still fail because every allow rule becomes stale"
+}

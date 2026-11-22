@@ -1,0 +1,426 @@
+[
+  {
+    "path": "/http/events.owner_scoped/status",
+    "old": "201",
+    "new": "400",
+    "reason": "MODIFIED API (contract-kernel): the edge accepts only user.message; an owner-scoped kind now answers 400 instead of 201"
+  },
+  {
+    "path": "/http/events.owner_scoped/body/error",
+    "reason": "Same delta: the 400 body carries the whitelist message instead of a committed seq. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.owner_scoped/body/seq",
+    "old": "1",
+    "new": "$absent",
+    "reason": "Same delta: the baseline answered with the seq it stored; the tightened edge has no seq to report"
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events",
+    "old": "$absent",
+    "new": "[]",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/seq",
+    "old": "1",
+    "new": "$absent",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/kind",
+    "old": "\"assistant.message\"",
+    "new": "$absent",
+    "reason": "Same delta, observed from the log: the refused owner-scoped write leaves the probe session empty (baseline stored the event). Pinned per path so an unrelated drift (a status change, a different element count) is not swallowed by a broad prefix rule."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/0/payload/text",
+    "reason": "The stored text of the baseline's refused write; content, not a contract."
+  },
+  {
+    "path": "/http/events.foreign_tenant/status",
+    "old": "200",
+    "new": "404",
+    "reason": "MODIFIED API (contract-kernel): a cross-tenant or missing session answers 404 instead of an empty page"
+  },
+  {
+    "path": "/http/events.foreign_tenant/body/error",
+    "reason": "Same delta: 404 error body instead of an empty events array. Message wording is not pinned."
+  },
+  {
+    "path": "/http/events.foreign_tenant/body/events",
+    "old": "[]",
+    "new": "$absent",
+    "reason": "Same delta: the baseline answered an empty array; the tightened edge answers an error body instead"
+  },
+  {
+    "path": "/http/input.user1/body/status",
+    "old": "\"pending\"",
+    "new": "\"committed\"",
+    "reason": "MODIFIED API: the /input response reports the authoritative submission status (the commit already happened, so \"pending\" was a lie). Pinned per step because the fix applies to every first submit."
+  },
+  {
+    "path": "/http/input.user2/body/status",
+    "old": "\"pending\"",
+    "new": "\"committed\"",
+    "reason": "MODIFIED API: the /input response reports the authoritative submission status (the commit already happened, so \"pending\" was a lie). Pinned per step because the fix applies to every first submit."
+  },
+  {
+    "path": "/bookkeeping/0/kind",
+    "old": "$absent",
+    "new": "\"run.finished\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/0/status",
+    "old": "$absent",
+    "new": "\"done\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/0/stopReason",
+    "old": "$absent",
+    "new": "\"end_turn\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/0/turns",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/kind",
+    "old": "$absent",
+    "new": "\"run.finished\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/status",
+    "old": "$absent",
+    "new": "\"done\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/stopReason",
+    "old": "$absent",
+    "new": "\"end_turn\"",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/bookkeeping/1/turns",
+    "old": "$absent",
+    "new": "2",
+    "reason": "ADDED event kind (kernel-loop): every settled attempt records run.finished under its lease before the settle. The parity dump compares it as a separate normalized section because inserting it into the log shifts the absolute seq of every later conversation event (the conversation itself is compared index-stable)."
+  },
+  {
+    "path": "/events/1/payload/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/3/payload/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/3/payload/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/5/payload/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/events/5/payload/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/0/data/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/0/data/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/2/data/inputSeqs/0",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/sse/2/data/inputSeqs/1",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate."
+  },
+  {
+    "path": "/http/input.user2/body/seq",
+    "old": "3",
+    "new": "4",
+    "reason": "Same delta, observed on the HTTP surface: each settled attempt adds one run.finished event, so the second input and the final cursor sit two events later than in the frozen baseline. Pinned to the exact values."
+  },
+  {
+    "path": "/runStatus/body/cursorSeq",
+    "old": "6",
+    "new": "8",
+    "reason": "Same delta, observed on the HTTP surface: each settled attempt adds one run.finished event, so the second input and the final cursor sit two events later than in the frozen baseline. Pinned to the exact values."
+  },
+  {
+    "path": "/bookkeeping/0/configHashBefore",
+    "old": "$absent",
+    "new": "\"sha256:a43ee8b912ad67993792c3cf619ae632cda551051e5d329b73dd0e0cbc8da859\"",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): the config version the attempt started with. Pinned so a wrong pinned loadout fails the gate."
+  },
+  {
+    "path": "/bookkeeping/0/configHashAfter",
+    "old": "$absent",
+    "new": "\"sha256:a43ee8b912ad67993792c3cf619ae632cda551051e5d329b73dd0e0cbc8da859\"",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): the config version in effect when the attempt settled; equal to Before unless a rotation interleaved. Pinned."
+  },
+  {
+    "path": "/bookkeeping/0/anchorEventSeq",
+    "old": "$absent",
+    "new": "1",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): the ledger seq anchoring the config version. Pinned to the attempt's real start seq."
+  },
+  {
+    "path": "/bookkeeping/0/toolManifestHash",
+    "old": "$absent",
+    "new": "\"sha256:e8d55a6a495f6784117f5af1a6075c54e1e243b957efa1ca66f95e407c851c0b\"",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): hash of the tool manifest this attempt saw. Pinned so a wrong or drifting tool surface fails."
+  },
+  {
+    "path": "/bookkeeping/1/configHashBefore",
+    "old": "$absent",
+    "new": "\"sha256:a43ee8b912ad67993792c3cf619ae632cda551051e5d329b73dd0e0cbc8da859\"",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): the config version the attempt started with. Pinned so a wrong pinned loadout fails the gate."
+  },
+  {
+    "path": "/bookkeeping/1/configHashAfter",
+    "old": "$absent",
+    "new": "\"sha256:a43ee8b912ad67993792c3cf619ae632cda551051e5d329b73dd0e0cbc8da859\"",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): the config version in effect when the attempt settled; equal to Before unless a rotation interleaved. Pinned."
+  },
+  {
+    "path": "/bookkeeping/1/anchorEventSeq",
+    "old": "$absent",
+    "new": "4",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): the ledger seq anchoring the config version. Pinned to the attempt's real start seq."
+  },
+  {
+    "path": "/bookkeeping/1/toolManifestHash",
+    "old": "$absent",
+    "new": "\"sha256:e8d55a6a495f6784117f5af1a6075c54e1e243b957efa1ca66f95e407c851c0b\"",
+    "reason": "ADDED v2 run snapshot (agent-loop-contract): hash of the tool manifest this attempt saw. Pinned so a wrong or drifting tool surface fails."
+  },
+  {
+    "path": "/events/4/payload/content/0/text",
+    "old": "\"please echo this\"",
+    "new": "\"Tool echo not found\"",
+    "reason": "MODIFIED tool surface (W2.1, constant 11-tool aggregate): the v1 `echo` tool is deleted (no shim). The scenario's fake provider still calls it, so the call now returns a structured not-found error instead of executing. Pinned as the new behavior; the scenario keeps exercising the tool-call path."
+  },
+  {
+    "path": "/events/4/payload/isError",
+    "old": "false",
+    "new": "true",
+    "reason": "MODIFIED tool surface (W2.1, constant 11-tool aggregate): the v1 `echo` tool is deleted (no shim). The scenario's fake provider still calls it, so the call now returns a structured not-found error instead of executing. Pinned as the new behavior; the scenario keeps exercising the tool-call path."
+  },
+  {
+    "path": "/events/5/payload/content/0/text",
+    "old": "\"tool echo returned: please echo this\"",
+    "new": "\"tool echo returned: Tool echo not found\"",
+    "reason": "MODIFIED tool surface (W2.1, constant 11-tool aggregate): the v1 `echo` tool is deleted (no shim). The scenario's fake provider still calls it, so the call now returns a structured not-found error instead of executing. Pinned as the new behavior; the scenario keeps exercising the tool-call path."
+  },
+  {
+    "path": "/sse/1/data/content/0/text",
+    "old": "\"please echo this\"",
+    "new": "\"Tool echo not found\"",
+    "reason": "MODIFIED tool surface (W2.1, constant 11-tool aggregate): the v1 `echo` tool is deleted (no shim). The scenario's fake provider still calls it, so the call now returns a structured not-found error instead of executing. Pinned as the new behavior; the scenario keeps exercising the tool-call path."
+  },
+  {
+    "path": "/sse/1/data/isError",
+    "old": "false",
+    "new": "true",
+    "reason": "MODIFIED tool surface (W2.1, constant 11-tool aggregate): the v1 `echo` tool is deleted (no shim). The scenario's fake provider still calls it, so the call now returns a structured not-found error instead of executing. Pinned as the new behavior; the scenario keeps exercising the tool-call path."
+  },
+  {
+    "path": "/sse/2/data/content/0/text",
+    "old": "\"tool echo returned: please echo this\"",
+    "new": "\"tool echo returned: Tool echo not found\"",
+    "reason": "MODIFIED tool surface (W2.1, constant 11-tool aggregate): the v1 `echo` tool is deleted (no shim). The scenario's fake provider still calls it, so the call now returns a structured not-found error instead of executing. Pinned as the new behavior; the scenario keeps exercising the tool-call path."
+  },
+  {
+    "path": "/http/events.v2_task.created/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_task.created/body/seq",
+    "old": "2",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_task.created/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/1",
+    "reason": "Same delta, observed from the log: the baseline stored the task.created probe as event 1; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_fs.write/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_fs.write/body/seq",
+    "old": "3",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_fs.write/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/2",
+    "reason": "Same delta, observed from the log: the baseline stored the fs.write probe as event 2; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_config.rotated/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_config.rotated/body/seq",
+    "old": "4",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_config.rotated/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/3",
+    "reason": "Same delta, observed from the log: the baseline stored the config.rotated probe as event 3; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_placement.joined/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_placement.joined/body/seq",
+    "old": "5",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_placement.joined/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/4",
+    "reason": "Same delta, observed from the log: the baseline stored the placement.joined probe as event 4; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_supervision.escalated/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_supervision.escalated/body/seq",
+    "old": "6",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_supervision.escalated/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/5",
+    "reason": "Same delta, observed from the log: the baseline stored the supervision.escalated probe as event 5; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_guardrail.tripped/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_guardrail.tripped/body/seq",
+    "old": "7",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_guardrail.tripped/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/6",
+    "reason": "Same delta, observed from the log: the baseline stored the guardrail.tripped probe as event 6; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_resume.attempt/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_resume.attempt/body/seq",
+    "old": "8",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_resume.attempt/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/7",
+    "reason": "Same delta, observed from the log: the baseline stored the resume.attempt probe as event 7; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  },
+  {
+    "path": "/http/events.v2_notification.ack/status",
+    "old": "201",
+    "new": "400",
+    "reason": "ADDED v2 kind vocabulary + MODIFIED edge (contract-kernel): the pre-v2 baseline stored any owner-scoped kind (201); the candidate knows the kind and refuses it on the user edge (400; system/owner lanes only)."
+  },
+  {
+    "path": "/http/events.v2_notification.ack/body/seq",
+    "old": "9",
+    "new": "$absent",
+    "reason": "Same delta: the baseline assigned a seq to the stored probe; the candidate stores nothing, so there is no seq to report."
+  },
+  {
+    "path": "/http/events.v2_notification.ack/body/error",
+    "reason": "Same delta: the 400 body names the user-edge whitelist. The wording is not part of the contract, so the value is not pinned."
+  },
+  {
+    "path": "/http/events.probe_session_log/body/events/8",
+    "reason": "Same delta, observed from the log: the baseline stored the notification.ack probe as event 8; the candidate refuses the user-edge write, so the whole event is absent. One prefix rule per index keeps the rest of the probe log index-stable."
+  }
+]

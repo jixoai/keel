@@ -8,8 +8,11 @@
 // Usage:
 //
 //	r1diff -old-bin /tmp/keel-baseline -new-bin /tmp/keel-candidate \
-//	       -dsn "$KEEL_R1_DSN" -out /tmp/r1diff -allow r1-allow.json
+//	       -dsn "$KEEL_R1_DSN" -out /tmp/r1diff -pin cmd/r1diff/baseline.json
 //	r1diff -old-dump /tmp/r1diff/old.json -new-dump /tmp/r1diff/new.json
+//
+// The pin names the baseline ref, the scenario and the allowlist; passing
+// -pin "" disables those checks for an exploratory capture.
 //
 // The DSN must point at a database whose name contains "r1diff": every capture
 // drops and recreates its schema, and the interlock keeps a mistyped DSN from
@@ -39,7 +42,7 @@ import (
 	"github.com/jixoai/keel/internal/r1diff"
 )
 
-const scenarioName = "r1-basic-v1"
+const scenarioName = "r1-basic-v2"
 
 // Fixed identities keep both captures comparable: the scenario always uses the
 // same tenant and session, so the dump differs only in normalized values.
@@ -89,13 +92,27 @@ func main() {
 		newDump = flag.String("new-dump", "", "re-diff an existing candidate dump")
 		dsn     = flag.String("dsn", os.Getenv("KEEL_R1_DSN"), "DSN of a dedicated r1diff database")
 		out     = flag.String("out", "/tmp/r1diff", "output directory for dumps and the report")
-		allow   = flag.String("allow", "", "allowlist JSON ({path,reason}[]); default: none")
+		allow   = flag.String("allow", "", "allowlist JSON ({path,reason}[]); default: the pin's allowlist")
+		pinPath = flag.String("pin", "cmd/r1diff/baseline.json", "baseline pin JSON; empty disables pin checks")
 		portOld = flag.Int("port-old", 13746, "port for the baseline run")
 		portNew = flag.Int("port-new", 13747, "port for the candidate run")
 	)
 	flag.Parse()
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatal(err)
+	}
+	var pin *baselinePin
+	if *pinPath != "" {
+		loaded, err := loadPin(*pinPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pin = &loaded
+		if *allow == "" {
+			*allow = pin.Allowlist
+		}
+		fmt.Printf("R1 pin: ref %s, scenario %s, allowlist %s (%d rules)\n",
+			pin.Ref, pin.Scenario, pin.Allowlist, pin.AllowRules)
 	}
 
 	oldPath, newPath := *oldDump, *newDump
@@ -121,6 +138,10 @@ func main() {
 	report, err := diffFiles(oldPath, newPath, *allow)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if pin != nil && report.AllowRules != pin.AllowRules {
+		log.Fatalf("r1diff: allowlist %s has %d rules, the pin records %d; re-pin after editing the allowlist",
+			*allow, report.AllowRules, pin.AllowRules)
 	}
 	reportPath := filepath.Join(*out, "report.json")
 	raw, _ := json.MarshalIndent(report, "", "  ")
@@ -402,6 +423,21 @@ func runScenario(base string) (*dump, error) {
 	}
 	d.HTTP["events.owner_scoped"] = httpStep{st, body}
 
+	// The v2 contract kinds must not be writable through the user edge. Every
+	// probe is refused by both sides, but for a different reason (the frozen
+	// baseline does not know the kind; the candidate knows it and refuses the
+	// lane). Recording each status/body makes that delta an explicit allowlist
+	// entry instead of an untested vocabulary claim.
+	for _, probe := range v2KindProbes {
+		st, body, err = doJSON(ctx, "POST", probeEventsURL, r1Tenant, map[string]any{
+			"kind": probe.Kind, "payload": probe.Payload,
+		}, nil)
+		if err != nil {
+			return nil, err
+		}
+		d.HTTP["events.v2_"+probe.Kind] = httpStep{st, body}
+	}
+
 	// Wait for the scripted conversation to settle: a run row that is done and
 	// a log that stopped growing.
 	events, err := waitSettled(ctx, base)
@@ -423,8 +459,8 @@ func runScenario(base string) (*dump, error) {
 		}
 	}
 
-	// The probe session's log: the baseline accepted the owner-scoped write,
-	// the tightened edge refuses it.
+	// The probe session's log: the baseline accepted the owner-scoped and v2
+	// writes, the tightened edge refuses them.
 	st, body, err = doJSON(ctx, "GET", probeEventsURL, r1Tenant, nil, nil)
 	if err != nil {
 		return nil, err

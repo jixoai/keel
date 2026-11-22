@@ -6,7 +6,7 @@
 #   race-full.log            go test -race ./... (with command header)
 #   conformance.json         scripts/conformance.sh (the 673 caliber, with DSN)
 #   conformance-summary.txt  its human summary
-#   r1-live.txt, r1/         the R1 capture (baseline e7361f8 vs candidate)
+#   r1-live.txt, r1/         the R1 capture (pinned baseline from cmd/r1diff/baseline.json vs candidate)
 #   r1-negative.txt          stale-rule negative control (must FAIL)
 #   e2e-8of8.json            cmd/e2e on a freshly created database
 #   drain-smoke.txt          SIGTERM drain (health during drain, 503, SSE frame)
@@ -102,6 +102,9 @@ say "evidence: $EVID"
 run "go build ./..." "$EVID/build.log" go build ./...
 run "go vet ./..." "$EVID/vet.log" go vet ./...
 run "build candidate runtime" "$EVID/runtime-build.log" go build -o "$BIN" ./cmd/runtime
+# The catalog is the only machine-readable coverage truth; COVERAGE.md §A/§B/§C
+# are mapped onto it and §H is generated (docs/PLUGIN-CATALOG.md).
+run "plugin catalog" "$EVID/plugin-catalog.txt" node scripts/plugin-catalog.mjs --check
 
 # --- 1. the full race suite -------------------------------------------------
 {
@@ -120,21 +123,22 @@ run "conformance" "$EVID/conformance-summary.txt" \
   scripts/conformance.sh "$EVID/conformance.json"
 
 # --- 3. R1 differential against the frozen baseline -------------------------
-run "build R1 baseline (e7361f8)" "$EVID/r1-build.txt" \
-  scripts/build-r1-baseline.sh e7361f8 "$BASE"
+run "build R1 baseline (pin)" "$EVID/r1-build.txt" \
+  scripts/build-r1-baseline.sh
 db_reset keel_r1diff
 port_free 13778
 port_free 13779
 run "R1 live capture" "$EVID/r1-live.txt" \
   go run ./cmd/r1diff -old-bin "$BASE" -new-bin "$BIN" \
   -dsn "$(dsn keel_r1diff)" -out "$EVID/r1" \
-  -allow openspec/changes/archive/2026-11-09-keel-kernel-loop/r1-allow.json \
+  -pin cmd/r1diff/baseline.json \
+  -allow cmd/r1diff/allow-v2.json \
   -port-old 13778 -port-new 13779
 # Negative control: the same dump on both sides means every rule went stale —
 # the gate must refuse to pass (it is not allowed to pass vacuously).
 say "-- R1 negative control (identical dumps must FAIL)"
 if go run ./cmd/r1diff -old-dump "$EVID/r1/new.json" -new-dump "$EVID/r1/new.json" \
-  -allow openspec/changes/archive/2026-11-09-keel-kernel-loop/r1-allow.json \
+  -pin cmd/r1diff/baseline.json -allow cmd/r1diff/allow-v2.json \
   -out "$EVID/r1-negative-control" >"$EVID/r1-negative.txt" 2>&1; then
   fail "R1 negative control passed: the gate can be satisfied without its differences"
 fi

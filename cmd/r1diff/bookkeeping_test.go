@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/jixoai/keel/internal/kernel"
+)
 
 // TestSplitBookkeepingKeepsTheConversation pins the normalization the R1 gate
 // relies on: bookkeeping events leave the indexed conversation (so an additive
@@ -60,5 +67,128 @@ func TestNormalizeFramesRenumbers(t *testing.T) {
 	}
 	if out[0].Event != "assistant.message" || out[1].Event != "tool.result" {
 		t.Fatalf("order = %+v", out)
+	}
+}
+
+// v2Kinds is the frozen vocabulary the R1 classifier must account for. It is
+// spelled out here (instead of reflecting over the kernel) so adding a kind
+// without classifying it fails this test.
+var v2Kinds = []kernel.EventKind{
+	kernel.KindTaskCreated, kernel.KindTaskUpdated, kernel.KindTaskAttached,
+	kernel.KindTaskDetached, kernel.KindTaskClosed, kernel.KindTaskNote,
+	kernel.KindFSWrite, kernel.KindFSCapture, kernel.KindFSCaptureFailed,
+	kernel.KindConfigRotated,
+	kernel.KindPlacementJoined, kernel.KindPlacementLeft,
+	kernel.KindSupervisionEscalated, kernel.KindGuardrailTripped, kernel.KindResumeAttempt,
+	kernel.KindNotificationAck, kernel.KindNotificationPushSent,
+}
+
+func TestEveryV2KindIsBookkeepingWithAReason(t *testing.T) {
+	for _, kind := range v2Kinds {
+		reason, ok := bookkeepingReasons[string(kind)]
+		if !ok {
+			t.Errorf("v2 kind %q is not classified as bookkeeping; adding it would shift every later conversation seq", kind)
+			continue
+		}
+		if len(strings.TrimSpace(reason)) < 20 {
+			t.Errorf("v2 kind %q has no substantive reason (%q)", kind, reason)
+		}
+	}
+}
+
+func TestRunKindsAreClassified(t *testing.T) {
+	for _, kind := range []string{"run.started", "run.failed", "run.finished"} {
+		if !bookkeepingKinds[kind] {
+			t.Errorf("%s must be bookkeeping", kind)
+		}
+	}
+}
+
+func TestSplitBookkeepingCapturesRunSnapshotFields(t *testing.T) {
+	events := []map[string]any{{
+		"kind": "run.finished",
+		"payload": map[string]any{
+			"status": "done", "stopReason": "end_turn", "turns": float64(2),
+			"configHashBefore": "sha256:before", "configHashAfter": "sha256:after",
+			"anchorEventSeq": float64(4), "toolManifestHash": "sha256:manifest",
+			"durationMs": float64(123), // volatile: must not be pinned
+		},
+	}}
+	_, bookkeeping := splitBookkeeping(events)
+	if len(bookkeeping) != 1 {
+		t.Fatalf("bookkeeping = %v", bookkeeping)
+	}
+	fact := bookkeeping[0]
+	for field, want := range map[string]any{
+		"configHashBefore": "sha256:before", "configHashAfter": "sha256:after",
+		"anchorEventSeq": float64(4), "toolManifestHash": "sha256:manifest",
+	} {
+		if got := fact[field]; got != want {
+			t.Errorf("%s = %v, want %v", field, got, want)
+		}
+	}
+	if _, ok := fact["durationMs"]; ok {
+		t.Error("volatile durationMs must not be pinned in bookkeeping")
+	}
+}
+
+func TestLoadPin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "baseline.json")
+	valid := `{
+	  "schema": "keel.r1diff.pin/1",
+	  "scenario": "r1-basic-v2",
+	  "ref": "e7361f8",
+	  "allowlist": "cmd/r1diff/allow-v2.json",
+	  "allowRules": 3,
+	  "reason": "pre-v2 reference"
+	}`
+	if err := os.WriteFile(path, []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := loadPin(path)
+	if err != nil {
+		t.Fatalf("valid pin: %v", err)
+	}
+	if pin.Ref != "e7361f8" || pin.AllowRules != 3 {
+		t.Fatalf("pin = %+v", pin)
+	}
+	for name, mutate := range map[string]func(string) string{
+		"wrong schema":   func(s string) string { return strings.Replace(s, "keel.r1diff.pin/1", "keel.r1diff.pin/2", 1) },
+		"wrong scenario": func(s string) string { return strings.Replace(s, "r1-basic-v2", "r1-basic-v1", 1) },
+		"no ref":         func(s string) string { return strings.Replace(s, `"ref": "e7361f8"`, `"ref": ""`, 1) },
+		"no rules":       func(s string) string { return strings.Replace(s, `"allowRules": 3`, `"allowRules": 0`, 1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := filepath.Join(dir, "bad-"+strings.ReplaceAll(name, " ", "-")+".json")
+			if err := os.WriteFile(bad, []byte(mutate(valid)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadPin(bad); err == nil {
+				t.Fatalf("%s must be rejected", name)
+			}
+		})
+	}
+}
+
+// TestV2ProbesCoverEveryFamily keeps the scenario honest: one probe per v2
+// family and every probe carries a payload.
+func TestV2ProbesCoverEveryFamily(t *testing.T) {
+	wantFamilies := []string{"task.", "fs.", "config.", "placement.", "supervision.", "guardrail.", "resume.", "notification."}
+	seen := map[string]bool{}
+	for _, probe := range v2KindProbes {
+		for _, family := range wantFamilies {
+			if strings.HasPrefix(probe.Kind, family) {
+				seen[family] = true
+			}
+		}
+		if len(probe.Payload) == 0 {
+			t.Errorf("probe %s has no payload", probe.Kind)
+		}
+	}
+	for _, family := range wantFamilies {
+		if !seen[family] {
+			t.Errorf("no v2 probe covers the %s family", family)
+		}
 	}
 }

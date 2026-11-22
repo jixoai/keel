@@ -133,10 +133,15 @@ func LoadRules(path string) ([]AllowRule, error) {
 	if err := json.Unmarshal(raw, &rules); err != nil {
 		return nil, fmt.Errorf("r1diff: parse allowlist %s: %w", path, err)
 	}
+	seen := map[string]bool{}
 	for i, r := range rules {
-		if r.Path == "" || r.Reason == "" {
+		if strings.TrimSpace(r.Path) == "" || strings.TrimSpace(r.Reason) == "" {
 			return nil, fmt.Errorf("r1diff: allowlist entry %d needs both path and reason", i)
 		}
+		if seen[r.Path] {
+			return nil, fmt.Errorf("r1diff: allowlist entry %d duplicates path %q; one rule per path keeps the reason accountable", i, r.Path)
+		}
+		seen[r.Path] = true
 	}
 	return rules, nil
 }
