@@ -12,11 +12,15 @@
 > `dsh-plugin in:name` **5,854** 仓；按 star 排序各取前 30 逐条核对，C/F 节只收录
 > 描述明确是 DSH 插件/市场/技能/桌面端的项目，star 数为抓取时刻值。
 >
-> 机器可读版本＝`plugins/keel.plugin-market/catalog.json`（86 条：53 官方组 + 30 社区 + 3
-> 本轮交付插件，含每组的真实 DSH 包名、来源链接、覆盖状态与覆盖它的 keel 插件 id）。
+> 机器可读版本＝`plugins/keel.plugin-market/catalog.json`（**102 条**：53 官方组 + 33 社区 +
+> 3 已交付 + 13 规划中的第一方插件），含每条的 `keelPluginId` / `status` / `wave` / `dshGroups`、
+> 真实 DSH 包名与来源链接。**catalog 是唯一机读真源**：本文件 §A/§B/§C 的每行都经
+> `scripts/plugin-catalog.mjs --check` 映射到 catalog；§H 由 `--write` 生成，禁止手工编辑。
 >
-> 状态：`delivered` = 本轮已交付可安装；`planned` = 已登记、下一波；`registered` = 已登记、
-> 长期/受限能力；`absent` = 明确不做（必须给理由）。
+> 状态（闭集）：`delivered` = 已交付可安装；`partial` = 部分能力已交付；`planned` = 已登记、
+> 下一波；`registered` = 已登记、长期/受限能力；`merged` = 并入其他插件/实体（必须在
+> `coverage.note` 或顶层 `retiredIds` 给出目的地）；`absent` = 明确不做（必须给理由）。
+> 波次（闭集）：`W0.5` / `W1` / `W2` / `W3` / `never`。
 
 ## A. DSH 能力组 → keel 插件
 
@@ -30,27 +34,27 @@
 | session | 持久化 / 投影 / 标题 / 遥测 / 格式版本 | `keel.session` | in-process | W1 | planned |
 | fs | 文件契约 + 本地/沙箱后端 + 文件工具 | `keel.fs` | in-process | W1 | planned |
 | shell | bash/pwsh 执行（含持久终端） | `keel.shell` / `keel.shell.pwsh` | in-process | W1 / W2 | planned |
-| tools | 工具执行管线（pre/execute/post/guard） | `keel.tools` | in-process | W1 | planned |
+| tools | 工具执行管线（pre/execute/post/guard） | `keel.tool-executor` | in-process | W1 | planned |
 | interaction | 命令 / 审批 / 问句 / 权限预设 | `keel.interaction` | in-process | W1 | planned |
-| guard | 重复工具提醒 / 单次超时策略 | `keel.guard` | in-process | W1 | planned |
+| guard | 重复工具提醒 / 单次超时策略 | `keel.supervisor` | in-process | W1 | merged（并入 `keel.supervisor` 护栏） |
 | sandbox | 三档文件效应 + 平台后端 | `keel.sandbox` | in-process | W1 | planned |
 | credentials | 凭据引用缝 + env/文件 provider + 授权流 | `keel.credentials` | in-process | W1 | planned |
 | api | Remote 层（类型化 Host↔Client + 流 + 访问控制） | `keel.api` | in-process | W1 | planned |
 | client | Web GUI（外壳/聊天/设置/插件市场/审批/…） | `keel.client-ui`（NSH 客户端本身） | in-process | W1 | planned |
 | host | HTTP/SPA 宿主 / 目录选择 / open-in-app | `keel.host` | in-process | W1 | planned |
-| boot | 启动/profile/patch/热重载/插件管理/市场 | `keel.boot` + `keel.plugin-manager` + **`keel.plugin-market`** | in-process | W1 | `keel.plugin-market` **delivered**（索引客户端）；其余 planned |
+| boot | 启动/profile/patch/热重载/插件管理/市场 | `keel.boot` + `keel.plugin-manager` + **`keel.plugin-market`** | in-process | W1 | partial（`keel.plugin-market` **delivered**；boot/plugin-manager planned） |
 | bundle | 6 个 profile bundle | `keel.bundles`（serve/runtime/headless/tui 四种装配面） | in-process | W2 | planned |
-| preset | 按 revision 换工具/提示词/技能 | `keel.preset` | in-process | W2 | planned |
+| preset | 按 revision 换工具/提示词/技能 | `keel.presets` | in-process | W2 | planned（由 `keel.preset` 改名） |
 | mcp | MCP server 连接（工具+资源） | `keel.mcp` | in-process | W1 | planned |
-| skill | 技能发现/装载/工具 | `keel.skill` | in-process | W1 | planned |
+| skill | 技能发现/装载/工具 | `keel.skills` | in-process | W1 | planned（由 `keel.skill` 改名） |
 | subagent | 委派 + 进程内外后端 + 工具 | `keel.subagent`（+`.claude-code`/`.codex` 适配器） | in-process/sidecar | W1 / W2 | planned |
-| team | 子代理树任务协调 | `keel.team` | in-process | W2 | planned |
+| team | 子代理树任务协调 | — | — | W2 | absent（不设团队协调插件；协调由 `keel.tasks` 父子卡 + `keel.subagent` 承担） |
 | workflow | 模型自写编排脚本扇出 | `keel.workflow` | in-process | W2 | planned |
 | jobs | 后台作业控制 | `keel.jobs` | in-process | W1 | planned |
 | schedule | Host 定时任务/提醒 | `keel.schedule` | in-process | W1 | planned |
-| goal | 每会话持久目标 + 自动续跑 | `keel.goal` | in-process | W1 | planned |
-| todo | `todo_write` 工具 | `keel.todo` | in-process | W1 | planned |
-| plan | 计划模式 | `keel.plan` | in-process | W1 | planned |
+| goal | 每会话持久目标 + 自动续跑 | `keel.tasks` | in-process | W1 | merged（目标并入 `keel.tasks`；自动续跑归 `keel.supervisor`） |
+| todo | `todo_write` 工具 | `keel.tasks` | in-process | W1 | merged（待办是 `keel.tasks` 的动作） |
+| plan | 计划模式 | `keel.tasks` | in-process | W1 | merged（计划模式是任务卡视图） |
 | compaction | 自动压缩 / `/compact` / 结果修剪 | `keel.compaction` | in-process | W1 | planned |
 | context | 指令/时间/文件引用/harness 上下文 | `keel.context` + **`keel.context-memory`** | in-process / sidecar | W1 | `keel.context-memory` **delivered**；`keel.context` planned |
 | deliverables | 交付物登记（文件/工作区变更） | `keel.deliverables` | in-process | W2 | planned |
@@ -63,7 +67,7 @@
 | lsp | 代码导航（stdio provider + 工具） | `keel.lsp` | sidecar | W2 | planned |
 | ssh | 远端 fs/subprocess/sandbox | `keel.ssh` | sidecar | W3 | planned |
 | web | 搜索/抓取 + provider + 工具 | `keel.web` + **`keel.web-search`** | in-process / sidecar | W1 | `keel.web-search` **delivered**；`keel.web` planned |
-| workspace | workspace 实体与会话成员关系 | `keel.workspace` | in-process | W1 | planned |
+| workspace | workspace 实体与会话成员关系 | — | — | W2 | merged（并入 Group；放置与协作单元，不是插件） |
 | session-query | 历史会话检索/导出 | `keel.session-query` | in-process | W2 | planned |
 | attachment | 图片附件能力 | `keel.attachment` | in-process | W1 | planned |
 | document | Office→PDF | `keel.document` | sidecar | W3 | planned |
@@ -73,8 +77,8 @@
 | sdk | 进程外 SDK（JSON-RPC + 客户端） | `keel.sdk` | in-process | W2 | planned |
 | acp | Agent Client Protocol | `keel.acp` | in-process | W3 | registered |
 | typert | TS 构建期类型图 + Host→Client 类型化调用 | — | — | — | absent（keel 全 Go + 静态客户端，无此构建层；等价能力由 `keel.api` 的生成式 schema 承担） |
-| extensions | 运行时自省 + Cordis 运行器 + 动态插件卡（agent 现场写插件） | `keel.creation` | in-process + webview | W1 | delivered（脚手架/校验/审批安装/列举/删除 + 模板 `plugins/templates/webview-react-solidglass/`） |
-| experimental | 61 个原型（auto-review/cua/forge/liveshare/voice/stt/翻译/hook 协议/会话搜索/市场…） | 按能力面拆到 W3（见 D 节） | 混合 | W3 | registered |
+| extensions | 运行时自省 + Cordis 运行器 + 动态插件卡（agent 现场写插件） | `keel.creation` | in-process + webview | W1 | partial（v1 脚手架/校验/审批安装/列举/删除已交付；v2 扩展面聚合与 Native chunk 主路径未完成） |
+| experimental | 61 个原型（auto-review/cua/forge/liveshare/voice/stt/翻译/hook 协议/会话搜索/市场…） | — | — | W3 | absent（不设单体插件；按能力面拆到 W3，见 D 节） |
 | util | 共享工具库 | `keel.util` | in-process | W1 | planned |
 | identity/telemetry | 匿名 id / OTel | `keel.telemetry` | in-process | W1 | planned |
 | test-support | 无密钥测试台 / LLM mock-replay | `keel.testkit` | in-process | W1 | planned |
@@ -88,12 +92,12 @@
 
 | DSH bundle | keel 对应 | 波次 | 状态 |
 |---|---|---|---|
-| `dsh-base`（核心） | `keel serve` 内置插件集（W1 默认启用） | W1 | planned |
-| `dsh-web-app`（GUI） | `keel serve -web-dir` + NSH 客户端 + WebView 插件面 | W1 | planned |
-| `dsh-headless` | `cmd/runtime`（无 UI 装配） | W1 | planned |
-| `dsh-sdk-app` / `dsh-sdk-minimal` | `keel sdk` 面（JSON-RPC） | W2 | planned |
-| `dsh-acp-app` | `keel acp` | W3 | planned |
-| 官方实验 bundle（badge-skill / cot-translation / cua / forge / plugin-market / ralph / session-titles / terminal / voice-input） | 逐能力面 W3（市场索引 W1 已交付） | W3 | registered |
+| `dsh-base`（核心） | `keel.bundles`（base bundle）+ `keel serve` 内置插件集（W1 默认启用） | W1 | planned |
+| `dsh-web-app`（GUI） | `keel.bundles`（web mode）+ `keel serve -web-dir` + NSH 客户端 + WebView 插件面 | W1 | planned |
+| `dsh-headless` | `keel.bundles`（headless mode）+ `cmd/runtime`（无 UI 装配） | W1 | planned |
+| `dsh-sdk-app` / `dsh-sdk-minimal` | `keel.bundles`（sdk mode）+ `keel sdk` 面（JSON-RPC） | W2 | planned |
+| `dsh-acp-app` | `keel.bundles`（acp mode）+ `keel acp` | W3 | planned |
+| 官方实验 bundle（badge-skill / cot-translation / cua / forge / plugin-market / ralph / session-titles / terminal / voice-input） | `keel.bundles` 的实验 row；逐能力面 W3（市场索引 W1 已交付） | W3 | registered |
 | `dsh-subagent-claude-code` / `-codex` | `keel.subagent.claude-code` / `.codex` | W2 | planned |
 
 ## C. 社区高星能力面 → keel
@@ -125,6 +129,48 @@
   移植只会引入第二套插件运行时（违背单一真值）。
 - `experimental/*` 61 个原型：逐个评估后按能力面并入 W3；不在 W1 承诺。
 - 桌面端 / 移动端 / 公网市场托管：需要独立产品的发布与签名链路，登记 W3。
+
+### D.1 合并/废弃 id 的逐条处置（`catalog.retiredIds`）
+
+| 旧 id | 处置 | 目的地与理由 |
+|---|---|---|
+| `keel.goal` | merged | `keel.tasks`（目标即任务卡）；自动续跑归 `keel.supervisor` |
+| `keel.todo` | merged | `keel.tasks` 的动作 |
+| `keel.plan` | merged | `keel.tasks` 的计划视图 |
+| `keel.team` | absent | 不做团队协调插件；由 `keel.tasks` 父子卡 + `keel.subagent` 承担 |
+| `keel.workspace` | merged | Group（放置与协作单元，不是插件） |
+| `keel.guard` | merged | `keel.supervisor`（重复提醒/超时策略并入护栏） |
+| `keel.skill` | merged | `keel.skills`（复数统一，能力面不变） |
+| `keel.preset` | merged | `keel.presets`（复数统一，能力面不变） |
+| `keel.tools` | merged | `keel.tool-executor`（工具执行管线） |
+
+### D.2 catalog 独有 id（不在 `plugin-inventory.md` §3 的 60 项设计清单内）
+
+这些 id 是 §A/§C 已登记的覆盖目标，保留在 catalog 中并逐条给出处置；状态与波次以 catalog
+的 `status`/`wave` 为准，不因「设计清单未列」而删除。
+
+| id | 处置 | 理由 |
+|---|---|---|
+| `keel.core` | 保留（W1 planned） | §A core 行；内核 seam 的装配名 |
+| `keel.interaction` | 保留（W1 planned） | §A interaction 行 |
+| `keel.session` | 保留（W1 planned） | §A session 行 |
+| `keel.ssh` | 保留（W3 planned） | §A ssh 行；远端执行面走自研契约 |
+| `keel.sandbox` | 保留（W1 planned） | §A sandbox 行；本 change 不新增沙箱要求 |
+| `keel.sdk` | 保留（W2 planned） | §A sdk 行 |
+| `keel.api` | 保留（W1 planned） | §A api 行；等价 typert 的生成式 schema |
+| `keel.client-ui` | 保留（W1 planned） | §A client 行；NSH 客户端本身 |
+| `keel.host` | 保留（W1 planned） | §A host 行 |
+| `keel.util` | 保留（W1 planned） | §A util 行；共享工具库 |
+| `keel.acp` | 保留（W3 registered） | §A acp 行；登记不承诺 |
+| `keel.desktop` | 保留（W3 registered） | §C 桌面端；需独立发布/签名链路 |
+| `keel.mobile-gateway` | 保留（W3 registered） | §C 移动接入；登记不承诺 |
+| `keel.llm.subscription` | 保留（W3 registered） | §C 订阅账号 provider；第三方额度不在官方承诺内 |
+| `keel.plugin-gate` | 保留（W2 planned） | §C 插件门禁/回滚/证据账本 |
+| `keel.session-migrate` | 保留（W3 registered） | §C 跨 preset 会话迁移 |
+| `keel.research.literature` | 保留（W3 registered） | §C 科研文献库 |
+| `keel.blender` | 保留（W3 registered） | §C Blender 直连 |
+| `keel.theme.glass` | 保留（W2 planned） | §C 玻璃主题；落在 solid-glass 令牌 |
+| `keel.subagent-adapter` | 保留（W2 planned） | §C Claude Code 桥接；与 `keel.oar` 同族 |
 
 ## E. 已交付的官方插件（可安装）
 
@@ -160,7 +206,7 @@
 
 - 工具：`keel_plugin-market_search` / `keel_plugin-market_info`（侧车本地名
   `search` / `info`）
-- 依赖：`node`（≥20）；包内静态索引 `catalog.json`（86 条）
+- 依赖：`node`（≥20）；包内静态索引 `catalog.json`（102 条）
 - 权限：`permissions.fs: ["read:plugin-package"]`；无 net / secrets
 - 安装：`POST /v1/plugins/install {"path":"<repo>/plugins/keel.plugin-market"}`（同上审批路径）
 - 验证：README 的 `search "memory"`（4 条）、`info "dsh.web"`（partial → `keel.web-search`）、
@@ -228,3 +274,116 @@
   - 部分社区仓库是否“可直接 `dsh plugin` 安装”未逐个真机安装验证（只核对了仓库描述与
     插件形态）；`keel.plugin-market` 的 `source.discovery` 记录了抓取口径。
   - 官方 61 个 experimental 原型未逐个评估（只按能力面登记 W3）。
+
+<!-- keel-plugin-catalog:begin -->
+## H. Catalog 机读真源（自动生成）
+
+> 本段由 `node scripts/plugin-catalog.mjs --write` 生成，`--check` 校验；
+> 禁止手工编辑。`plugins/keel.plugin-market/catalog.json` 是唯一机读真源。
+
+| 条目 | keel 插件 id | 状态 | 波次 | dshGroups |
+|---|---|---|---|---|
+| `community.AdamPlatin123.dsh-plugin-radar` | `keel.plugin-market` | partial | W1 | — |
+| `community.alchaincyf.nuwa-skill` | `keel.skill.distill` | registered | W3 | — |
+| `community.anbeime.skill` | `keel.skill-store` | registered | W2 | — |
+| `community.anywhere-labs.dsh-desktop` | `keel.desktop` | registered | W3 | — |
+| `community.awesome-dsh-plugin.awesome-dsh-plugin` | `keel.plugin-market` | partial | W1 | — |
+| `community.awesome-dsh-plugin.dsh-find-plugin` | `keel.plugin-market` | partial | W1 | — |
+| `community.bradeGithub.DSH-Plugins-Marketplace` | `keel.plugin-market` | partial | W1 | — |
+| `community.bruc3van.awesome-dsh-plugin` | `keel.plugin-market` | partial | W1 | — |
+| `community.ccch1mneyyy.dsh-Go` | `keel.mobile-gateway` | registered | W3 | — |
+| `community.Clarklevis1995.dsh-plugin-mobile-gateway` | `keel.mobile-gateway` | registered | W3 | — |
+| `community.cpj-dev.dsh-plugin-cc` | `keel.subagent-adapter` | planned | W2 | — |
+| `community.dataelement.dsh-desktop` | `keel.desktop` | registered | W3 | — |
+| `community.dsh-market.dsh-market` | `keel.plugin-market` | partial | W1 | — |
+| `community.dshplugin.dsh-plugin-hub` | `keel.plugin-market` | partial | W1 | — |
+| `community.Ebony-Vinyl.dsh-our-free-model` | `keel.llm.subscription` | registered | W3 | — |
+| `community.EverMind-AI.EverOS` | `keel.context-memory` | delivered | W1 | — |
+| `community.lili-luo.dsh-plugin-bundle` | `keel.bundles` | planned | W2 | — |
+| `community.LivXue.dsh-plugin-shop` | `keel.plugin-market` | partial | W1 | — |
+| `community.luobosibing2.dsh-jev-plugin` | `keel.interaction` | planned | W2 | — |
+| `community.MemTensor.MemOS` | `keel.context-memory` | partial | W1 | — |
+| `community.Nagi-ovo.dsh-find-plugins` | `keel.plugin-market` | partial | W1 | — |
+| `community.Noob-stupid.dsh-plugin-gating-hub` | `keel.plugin-gate` | registered | W2 | — |
+| `community.oh-my-dsh.dsh-plugin-upgrade-skill` | `keel.plugin-gate` | registered | W2 | — |
+| `community.poco-ai.agentero-dsh-plugin` | `keel.research.literature` | registered | W3 | — |
+| `community.polang233.dsh-plugin-index` | `keel.plugin-market` | partial | W1 | — |
+| `community.sixtysevenlf.dsh-blender-plugin` | `keel.blender` | registered | W3 | — |
+| `community.Tencent.BrowserSkill` | `keel.browser-use` | planned | W2 | — |
+| `community.Tencent.WeKnora` | `keel.knowledge` | registered | W3 | — |
+| `community.Totoro-qaq.dsh-plugin-bridge` | `keel.session-migrate` | registered | W3 | — |
+| `community.V1ki.dsh-plugin-subscriptions` | `keel.llm.subscription` | registered | W3 | — |
+| `community.volcengine.OpenViking` | `keel.knowledge` | registered | W3 | — |
+| `community.WYH66666666.DSH-Transparent-UI-Plugin` | `keel.theme.glass` | planned | W2 | — |
+| `community.xuanyuanzhifeng.dsh-plugin-agent-workflow` | `keel.workflow` | planned | W2 | — |
+| `dsh.acp` | `keel.acp` | registered | W3 | `dsh.acp` |
+| `dsh.api` | `keel.api` | planned | W1 | `dsh.api` |
+| `dsh.attachment` | `keel.attachment` | planned | W1 | `dsh.attachment` |
+| `dsh.boot` | `keel.plugin-market` | partial | W1 | `dsh.boot` |
+| `dsh.browser-use` | `keel.browser-use` | planned | W2 | `dsh.browser-use` |
+| `dsh.bundle` | `keel.bundles` | planned | W2 | `dsh.bundle` |
+| `dsh.client` | `keel.client-ui` | planned | W1 | `dsh.client` |
+| `dsh.compaction` | `keel.compaction` | planned | W1 | `dsh.compaction` |
+| `dsh.computer-use` | `keel.computer-use` | planned | W2 | `dsh.computer-use` |
+| `dsh.context` | `keel.context-memory` | partial | W1 | `dsh.context` |
+| `dsh.core` | `keel.core` | planned | W1 | `dsh.core` |
+| `dsh.credentials` | `keel.credentials` | planned | W1 | `dsh.credentials` |
+| `dsh.deliverables` | `keel.deliverables` | planned | W2 | `dsh.deliverables` |
+| `dsh.document` | `keel.document` | planned | W3 | `dsh.document` |
+| `dsh.experimental` | — | absent | W3 | `dsh.experimental` |
+| `dsh.extensions` | `keel.creation` | partial | W1 | `dsh.extensions` |
+| `dsh.feedback` | `keel.feedback` | planned | W2 | `dsh.feedback` |
+| `dsh.fs` | `keel.fs` | planned | W1 | `dsh.fs` |
+| `dsh.goal` | `keel.tasks` | merged | W1 | `dsh.goal` |
+| `dsh.guard` | `keel.supervisor` | merged | W1 | `dsh.guard` |
+| `dsh.host` | `keel.host` | planned | W1 | `dsh.host` |
+| `dsh.identity` | `keel.telemetry` | planned | W1 | `dsh.identity` |
+| `dsh.interaction` | `keel.interaction` | planned | W1 | `dsh.interaction` |
+| `dsh.jobs` | `keel.jobs` | planned | W1 | `dsh.jobs` |
+| `dsh.llm` | `keel.llm` | planned | W1 | `dsh.llm` |
+| `dsh.lsp` | `keel.lsp` | planned | W2 | `dsh.lsp` |
+| `dsh.mcp` | `keel.mcp` | planned | W1 | `dsh.mcp` |
+| `dsh.plan` | `keel.tasks` | merged | W1 | `dsh.plan` |
+| `dsh.preset` | `keel.presets` | planned | W2 | `dsh.preset` |
+| `dsh.ptc-runtime` | `keel.ptc` | planned | W2 | `dsh.ptc-runtime` |
+| `dsh.sandbox` | `keel.sandbox` | planned | W1 | `dsh.sandbox` |
+| `dsh.schedule` | `keel.schedule` | planned | W1 | `dsh.schedule` |
+| `dsh.sdk` | `keel.sdk` | planned | W2 | `dsh.sdk` |
+| `dsh.session` | `keel.session` | planned | W1 | `dsh.session` |
+| `dsh.session-query` | `keel.session-query` | planned | W2 | `dsh.session-query` |
+| `dsh.settings` | `keel.settings` | planned | W1 | `dsh.settings` |
+| `dsh.shell` | `keel.shell` | planned | W1 | `dsh.shell` |
+| `dsh.skill` | `keel.skills` | planned | W1 | `dsh.skill` |
+| `dsh.spill` | `keel.spill` | planned | W1 | `dsh.spill` |
+| `dsh.ssh` | `keel.ssh` | planned | W3 | `dsh.ssh` |
+| `dsh.storage` | `keel.storage` | planned | W1 | `dsh.storage` |
+| `dsh.subagent` | `keel.subagent` | planned | W1 | `dsh.subagent` |
+| `dsh.subprocess` | `keel.subprocess` | planned | W1 | `dsh.subprocess` |
+| `dsh.team` | — | absent | never | `dsh.team` |
+| `dsh.telemetry` | `keel.telemetry` | planned | W1 | `dsh.telemetry` |
+| `dsh.terminal` | `keel.terminal` | planned | W2 | `dsh.terminal` |
+| `dsh.test-support` | `keel.testkit` | planned | W1 | `dsh.test-support` |
+| `dsh.todo` | `keel.tasks` | merged | W1 | `dsh.todo` |
+| `dsh.typert` | — | absent | never | `dsh.typert` |
+| `dsh.util` | `keel.util` | planned | W1 | `dsh.util` |
+| `dsh.web` | `keel.web-search` | partial | W1 | `dsh.web` |
+| `dsh.workflow` | `keel.workflow` | planned | W2 | `dsh.workflow` |
+| `dsh.workspace` | — | merged | W2 | `dsh.workspace` |
+| `keel.boot` | `keel.boot` | planned | W1 | `dsh.boot` |
+| `keel.cli` | `keel.cli` | planned | W1 | — |
+| `keel.context` | `keel.context` | planned | W1 | `dsh.context` |
+| `keel.context-memory` | `keel.context-memory` | delivered | W1 | `dsh.context` |
+| `keel.plugin-manager` | `keel.plugin-manager` | planned | W1 | `dsh.boot` |
+| `keel.plugin-market` | `keel.plugin-market` | delivered | W1 | `dsh.boot`, `dsh.util` |
+| `keel.presets` | `keel.presets` | planned | W2 | `dsh.preset` |
+| `keel.shell.pwsh` | `keel.shell.pwsh` | planned | W2 | `dsh.shell` |
+| `keel.skills` | `keel.skills` | planned | W1 | `dsh.skill` |
+| `keel.subagent.claude-code` | `keel.subagent.claude-code` | planned | W2 | `dsh.subagent` |
+| `keel.supervisor` | `keel.supervisor` | planned | W1 | `dsh.guard`, `dsh.goal` |
+| `keel.tasks` | `keel.tasks` | planned | W1 | `dsh.goal`, `dsh.todo`, `dsh.plan` |
+| `keel.tool-executor` | `keel.tool-executor` | planned | W1 | `dsh.core` |
+| `keel.ui` | `keel.ui` | planned | W1 | `dsh.client` |
+| `keel.web` | `keel.web` | planned | W1 | `dsh.web` |
+| `keel.web-search` | `keel.web-search` | delivered | W1 | `dsh.web` |
+
+<!-- keel-plugin-catalog:end -->

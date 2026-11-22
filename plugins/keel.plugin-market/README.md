@@ -37,10 +37,11 @@ provider 协议（`internal/gateway`，stdio 行 JSON-RPC 2.0）提供**两个**
 
 ## 索引 `catalog.json`（随包分发，离线可审计）
 
-- 86 条：53 条 DSH 官方能力组（一条对应 `packages/<group>/`）+ 30 条社区项目 +
-  3 条本轮交付的 keel 官方插件。
+- 102 条：53 条 DSH 官方能力组（一条对应 `packages/<group>/`）+ 33 条社区项目 +
+  16 条 keel 官方插件（3 条已交付 + 13 条规划中）。字段与对账规则见 `docs/PLUGIN-CATALOG.md`。
 - 每条字段：`id`、`name`、`summary`、`capabilities[]`、`source{kind,repo,url,...}`、
-  `dshPackages[]`（**真实包名**，从 DSH 仓库树核对）、`coverage{covered,status,keelPluginId,tools,note}`。
+  `dshPackages[]`（**真实包名**，从 DSH 仓库树核对）、`wave`、`dshGroups[]`、
+  `coverage{covered,status,keelPluginId,mergedInto,tools,note}`；`retiredIds[]` 记录合并/改名的旧 id。
 - 顶层 `sources` 记录基线：仓库 `deepseek-ai/deepseek-harness`、commit `fcc0ad462172`
   （2026-11-04）、53 组 / 370 个 workspace 包（`packages/**/package.json` 共 379 个，余下
   是 fixtures/templates）、15 个 bundle；web profile 主层 196 行（171 行启用）。
