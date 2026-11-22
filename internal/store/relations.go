@@ -209,6 +209,111 @@ func (s *Store) ListResourceRelationsForSubject(ctx context.Context, tenantID uu
 	return out, nil
 }
 
+// ResourceOwnerAccounts returns the owner account of every named resource, in
+// one query. A resource with no owner tuple is absent from the map (the caller
+// decides whether that is an error); a malformed stored subject is an error
+// rather than a silently dropped row.
+func (s *Store) ResourceOwnerAccounts(ctx context.Context, tenantID uuid.UUID, resourceType string, resourceIDs []string) (map[string]uuid.UUID, error) {
+	resourceType = strings.TrimSpace(resourceType)
+	ids := normalizedIDs(resourceIDs)
+	if tenantID == uuid.Nil || resourceType == "" {
+		return nil, invalidIdentity("resource owners", "tenant and resource type are required")
+	}
+	out := make(map[string]uuid.UUID, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT resource_id, subject_id
+		   FROM resource_relations
+		  WHERE tenant_id = $1 AND resource_type = $2
+		    AND relation = $3 AND subject_type = $4
+		    AND resource_id = ANY($5)`,
+		tenantID, resourceType, RelationOwner, RelationSubjectAccount, ids)
+	if err != nil {
+		return nil, identityWriteError("resource owners", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resourceID, subjectID string
+		if err := rows.Scan(&resourceID, &subjectID); err != nil {
+			return nil, identityWriteError("scan resource owner", err)
+		}
+		accountID, err := uuid.Parse(subjectID)
+		if err != nil {
+			return nil, identityWriteError("resource owner", err)
+		}
+		out[resourceID] = accountID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, identityWriteError("resource owners", err)
+	}
+	return out, nil
+}
+
+// ResourceRelationCounts counts the named relations on each resource, in one
+// query. It powers the "shared" badge on a list without a query per row.
+func (s *Store) ResourceRelationCounts(ctx context.Context, tenantID uuid.UUID, resourceType string, resourceIDs []string, relations []string) (map[string]int, error) {
+	resourceType = strings.TrimSpace(resourceType)
+	ids := normalizedIDs(resourceIDs)
+	if tenantID == uuid.Nil || resourceType == "" {
+		return nil, invalidIdentity("resource relation counts", "tenant and resource type are required")
+	}
+	out := make(map[string]int, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	relationSet := make([]string, 0, len(relations))
+	for _, relation := range relations {
+		relation = strings.TrimSpace(relation)
+		if !ValidRelation(relation) {
+			return nil, invalidIdentity("resource relation counts", "unknown relation %q", relation)
+		}
+		relationSet = append(relationSet, relation)
+	}
+	if len(relationSet) == 0 {
+		relationSet = []string{RelationViewer, RelationEditor}
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT resource_id, count(*)
+		   FROM resource_relations
+		  WHERE tenant_id = $1 AND resource_type = $2
+		    AND relation = ANY($3) AND resource_id = ANY($4)
+		  GROUP BY resource_id`,
+		tenantID, resourceType, relationSet, ids)
+	if err != nil {
+		return nil, identityWriteError("resource relation counts", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resourceID string
+		var count int
+		if err := rows.Scan(&resourceID, &count); err != nil {
+			return nil, identityWriteError("scan resource relation count", err)
+		}
+		out[resourceID] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, identityWriteError("resource relation counts", err)
+	}
+	return out, nil
+}
+
+// normalizedIDs trims and de-duplicates a bounded resource-id list.
+func normalizedIDs(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
 func validateResourceRelation(relation ResourceRelation) error {
 	if err := validateResourceRelationTuple(relation); err != nil {
 		return err

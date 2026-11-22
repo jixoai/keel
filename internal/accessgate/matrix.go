@@ -178,6 +178,12 @@ var rules = []Rule{
 	resource(http.MethodPost, "/v1/sessions/{id}/subagents", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/fork", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/resume", access.KeySessionWrite, "session", "path:id"),
+	// Sharing writes/reads relation tuples. session.share requires the owner
+	// relation, so an editor can never re-share (widening access). Revoke is a
+	// POST with a body: the matrix stays method+pattern simple.
+	resource(http.MethodGet, "/v1/sessions/{id}/shares", access.KeySessionShare, "session", "path:id"),
+	resource(http.MethodPost, "/v1/sessions/{id}/shares", access.KeySessionShare, "session", "path:id"),
+	resource(http.MethodPost, "/v1/sessions/{id}/shares/revoke", access.KeySessionShare, "session", "path:id"),
 	route(http.MethodGet, "/v1/subagents", ModeHeldKey, access.KeySessionRead),
 	resource(http.MethodGet, "/v1/subagents/{id}", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodPost, "/v1/subagents/{id}/cancel", access.KeySessionWrite, "session", "query:parentSessionId"),
@@ -247,6 +253,9 @@ var rules = []Rule{
 	resource(http.MethodGet, "/v1/bots/{id}/keys", access.KeyBotManage, "bot", "path:id"),
 	resource(http.MethodPost, "/v1/bots/{id}/keys", access.KeyBotManage, "bot", "path:id"),
 	resource(http.MethodDelete, "/v1/bots/{id}/keys/{keyId}", access.KeyBotManage, "bot", "path:id"),
+	resource(http.MethodGet, "/v1/bots/{id}/shares", access.KeyBotManage, "bot", "path:id"),
+	resource(http.MethodPost, "/v1/bots/{id}/shares", access.KeyBotManage, "bot", "path:id"),
+	resource(http.MethodPost, "/v1/bots/{id}/shares/revoke", access.KeyBotManage, "bot", "path:id"),
 
 	// --- identity: team bots -------------------------------------------------
 	route(http.MethodGet, "/v1/team-bots", ModeHeldKey, access.KeyTeamBotRead),
@@ -256,6 +265,9 @@ var rules = []Rule{
 	resource(http.MethodPost, "/v1/team-bots/{id}/archive", access.KeyTeamBotManage, "team_bot", "path:id"),
 	resource(http.MethodPost, "/v1/team-bots/{id}/roster", access.KeyTeamBotManage, "team_bot", "path:id"),
 	resource(http.MethodPost, "/v1/team-bots/{id}/start", access.KeyTeamBotManage, "team_bot", "path:id"),
+	resource(http.MethodGet, "/v1/team-bots/{id}/shares", access.KeyTeamBotManage, "team_bot", "path:id"),
+	resource(http.MethodPost, "/v1/team-bots/{id}/shares", access.KeyTeamBotManage, "team_bot", "path:id"),
+	resource(http.MethodPost, "/v1/team-bots/{id}/shares/revoke", access.KeyTeamBotManage, "team_bot", "path:id"),
 
 	// --- audit trail ---------------------------------------------------------
 	// The ledger is tenant-global (no relation tuples). The handler additionally

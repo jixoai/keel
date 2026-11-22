@@ -54,7 +54,16 @@ const sessionSelect = `SELECT s.session_id, s.created_at, s.updated_at,
        COALESCE(r.status, '') AS run_status,
        (SELECT max(e.created_at) FROM events e
          WHERE e.tenant_id = s.tenant_id AND e.session_id = s.session_id) AS last_message_at,
-       COALESCE(first_input.text, '') AS first_input_text
+       COALESCE(first_input.text, '') AS first_input_text,
+       COALESCE(owner_rel.subject_id, s.account_id::text, '') AS owner_account_id,
+       COALESCE(s.created_by_account_id::text, '') AS created_by_account_id,
+       COALESCE(owner_account.display_name, owner_account.username, '') AS owner_display_name,
+       EXISTS (
+         SELECT 1 FROM resource_relations rr
+          WHERE rr.tenant_id = s.tenant_id AND rr.resource_type = 'session'
+            AND rr.resource_id = s.session_id::text
+            AND rr.relation IN ('viewer', 'editor')
+       ) AS shared
   FROM sessions s
   LEFT JOIN runs r ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
   LEFT JOIN LATERAL (
@@ -65,6 +74,18 @@ const sessionSelect = `SELECT s.session_id, s.created_at, s.updated_at,
         ORDER BY e.seq
         LIMIT 1
   ) first_input ON true
+  LEFT JOIN LATERAL (
+       SELECT rr.subject_id
+         FROM resource_relations rr
+        WHERE rr.tenant_id = s.tenant_id AND rr.resource_type = 'session'
+          AND rr.resource_id = s.session_id::text
+          AND rr.relation = 'owner' AND rr.subject_type = 'account'
+        ORDER BY rr.subject_id
+        LIMIT 1
+  ) owner_rel ON true
+  LEFT JOIN accounts owner_account
+    ON owner_account.tenant_id = s.tenant_id
+   AND owner_account.account_id::text = owner_rel.subject_id
  WHERE s.tenant_id = $1
    AND s.archived_at IS NULL`
 
@@ -115,17 +136,26 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
 				runStatus     string
 				lastMessageAt sql.NullTime
 				firstInput    sql.NullString
+				ownerAccount  string
+				createdBy     string
+				ownerName     string
+				shared        bool
 			)
-			if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt, &firstInput); err != nil {
+			if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt, &firstInput,
+				&ownerAccount, &createdBy, &ownerName, &shared); err != nil {
 				return fmt.Errorf("harnessapi: scan session: %w", err)
 			}
 			summary := SessionSummary{
-				SessionID: sessionID.String(),
-				CreatedAt: createdAt.UTC(),
-				UpdatedAt: updatedAt.UTC(),
-				LastSeq:   lastSeq,
-				RunStatus: runStatus,
-				Title:     deriveSessionTitle(firstInput.String),
+				SessionID:          sessionID.String(),
+				CreatedAt:          createdAt.UTC(),
+				UpdatedAt:          updatedAt.UTC(),
+				LastSeq:            lastSeq,
+				RunStatus:          runStatus,
+				Title:              deriveSessionTitle(firstInput.String),
+				OwnerAccountID:     ownerAccount,
+				CreatedByAccountID: createdBy,
+				OwnerDisplayName:   ownerName,
+				Shared:             shared,
 			}
 			if lastMessageAt.Valid {
 				at := lastMessageAt.Time.UTC()

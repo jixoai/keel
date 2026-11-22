@@ -7,6 +7,7 @@
 package harnessapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -29,6 +30,11 @@ type teamBotView struct {
 	Archived  bool                  `json:"archived"`
 	CreatedAt time.Time             `json:"createdAt"`
 	UpdatedAt time.Time             `json:"updatedAt"`
+	// OwnerAccountID is the account named by the team bot's owner relation. The
+	// share action is owner-only, so the UI needs the same fact the engine
+	// checks. SharedCount is the viewer/editor tuple count (visibility shares).
+	OwnerAccountID string `json:"ownerAccountId,omitempty"`
+	SharedCount    int    `json:"sharedCount"`
 }
 
 func teamBotViewOf(record store.TeamBotRecord) teamBotView {
@@ -119,15 +125,46 @@ func (s *Server) listTeamBots(w http.ResponseWriter, r *http.Request) {
 		allowed[id] = true
 	}
 	views := make([]teamBotView, 0, len(visible.IDs))
+	viewIDs := make([]string, 0, len(visible.IDs))
 	for _, record := range records {
 		if allowed[record.ID] {
 			views = append(views, teamBotViewOf(record))
+			viewIDs = append(viewIDs, record.ID)
 		}
 	}
+	s.setTeamBotMeta(r.Context(), tenantID, views, viewIDs)
 	if len(views) > limit {
 		views = views[:limit]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"teamBots": views})
+}
+
+// teamBotViewWithMeta is the single-TeamBot detail projection: owner + share
+// badge resolved in two bounded queries.
+func (s *Server) teamBotViewWithMeta(r *http.Request, tenantID uuid.UUID, record store.TeamBotRecord) teamBotView {
+	views := []teamBotView{teamBotViewOf(record)}
+	s.setTeamBotMeta(r.Context(), tenantID, views, []string{record.ID})
+	return views[0]
+}
+
+// setTeamBotMeta fills owner and share count in two queries. Both are additive
+// facts for the UI; a failure leaves them empty rather than failing the list.
+func (s *Server) setTeamBotMeta(ctx context.Context, tenantID uuid.UUID, views []teamBotView, ids []string) {
+	owners, err := s.cfg.Identity.ResourceOwnerAccounts(ctx, tenantID, "team_bot", ids)
+	if err != nil {
+		return
+	}
+	counts, err := s.cfg.Identity.ResourceRelationCounts(ctx, tenantID, "team_bot", ids,
+		[]string{store.RelationViewer, store.RelationEditor})
+	if err != nil {
+		return
+	}
+	for index := range views {
+		if owner, ok := owners[views[index].TeamBotID]; ok {
+			views[index].OwnerAccountID = owner.String()
+		}
+		views[index].SharedCount = counts[views[index].TeamBotID]
+	}
 }
 
 type teamBotWriteRequest struct {
@@ -195,7 +232,9 @@ func (s *Server) createTeamBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"teamBot": teamBotViewOf(created)})
+	view := teamBotViewOf(created)
+	view.OwnerAccountID = principal.AccountID.String()
+	writeJSON(w, http.StatusCreated, map[string]any{"teamBot": view})
 }
 
 func (s *Server) getTeamBot(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +255,7 @@ func (s *Server) getTeamBot(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"teamBot": teamBotViewOf(record)})
+	writeJSON(w, http.StatusOK, map[string]any{"teamBot": s.teamBotViewWithMeta(r, tenantID, record)})
 }
 
 func (s *Server) updateTeamBot(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +341,7 @@ func (s *Server) updateTeamBotContent(w http.ResponseWriter, r *http.Request, ro
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"teamBot": teamBotViewOf(stored)})
+	writeJSON(w, http.StatusOK, map[string]any{"teamBot": s.teamBotViewWithMeta(r, tenantID, stored)})
 }
 
 func (s *Server) archiveTeamBot(w http.ResponseWriter, r *http.Request) {

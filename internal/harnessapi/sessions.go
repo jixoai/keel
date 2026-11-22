@@ -42,6 +42,21 @@ type SessionSummary struct {
 	// user message. Always present, so the client never has to fall back to
 	// rendering the session id.
 	Title string `json:"title"`
+	// OwnerAccountID is the account named by the session's owner relation (the
+	// Bot's Account, or the creator for an account-owned session). The list
+	// uses it to separate 「我的」 from 「共享给我」 without a second read.
+	OwnerAccountID string `json:"ownerAccountId,omitempty"`
+	// CreatedByAccountID is the initiator, which may differ from the owner.
+	CreatedByAccountID string `json:"createdByAccountId,omitempty"`
+	// OwnerDisplayName is the owner account's display name (best effort), so a
+	// shared row can say 「由 X 共享」 without exposing credentials.
+	OwnerDisplayName string `json:"ownerDisplayName,omitempty"`
+	// Shared reports that at least one viewer/editor tuple exists on this
+	// session: the owner has shared it with somebody.
+	Shared bool `json:"shared"`
+	// SharedWithMe is computed against the caller after the visibility filter:
+	// a visible session owned by another account is a session shared with me.
+	SharedWithMe bool `json:"sharedWithMe"`
 }
 
 // deriveSessionTitle renders a session's list title from the text of its first
@@ -136,6 +151,12 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range page.Sessions {
 		summary := &page.Sessions[i]
+		// The visibility filter above is the authority: a row that survived it is
+		// readable. If its owner is another account, it reached me through a
+		// share (direct, group or team), so the list can offer 「共享给我」.
+		if summary.OwnerAccountID != "" && summary.OwnerAccountID != principal.AccountID.String() {
+			summary.SharedWithMe = true
+		}
 		if summary.RunStatus == "" {
 			summary.RunStatus = "idle"
 		}

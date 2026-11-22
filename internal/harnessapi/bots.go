@@ -10,6 +10,7 @@
 package harnessapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,9 @@ type botView struct {
 	Archived     bool             `json:"archived"`
 	CreatedAt    time.Time        `json:"createdAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
+	// SharedCount is the number of viewer/editor tuples (accounts, groups and
+	// team bots). The list badge reads it; the share dialog is the detail.
+	SharedCount int `json:"sharedCount"`
 }
 
 // botViewOf projects a stored row. Account resolution is best effort: a dangling
@@ -51,6 +55,17 @@ func (s *Server) botViewOf(r *http.Request, tenantID uuid.UUID, record store.Bot
 	}
 	if profile, err := s.cfg.Identity.GetProfile(r.Context(), tenantID, record.ProfileID); err == nil {
 		view.AccountID = profile.AccountID.String()
+	}
+	return view
+}
+
+// botViewWithSharedCount is the single-bot detail projection: the same view as
+// the list, with the share badge resolved in one bounded query.
+func (s *Server) botViewWithSharedCount(r *http.Request, tenantID uuid.UUID, record store.BotRecord) botView {
+	view := s.botViewOf(r, tenantID, record)
+	if counts, err := s.cfg.Identity.ResourceRelationCounts(r.Context(), tenantID, "bot",
+		[]string{record.ID}, []string{store.RelationViewer, store.RelationEditor}); err == nil {
+		view.SharedCount = counts[record.ID]
 	}
 	return view
 }
@@ -140,15 +155,31 @@ func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
 		allowed[id] = true
 	}
 	views := make([]botView, 0, len(visible.IDs))
+	viewIDs := make([]string, 0, len(visible.IDs))
 	for _, record := range records {
 		if allowed[record.ID] {
 			views = append(views, s.botViewOf(r, tenantID, record))
+			viewIDs = append(viewIDs, record.ID)
 		}
 	}
+	s.setBotSharedCounts(r.Context(), tenantID, views, viewIDs)
 	if len(views) > limit {
 		views = views[:limit]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"bots": views})
+}
+
+// setBotSharedCounts fills the list badge in one query. A count failure is not
+// a list failure: the badge is additive, the rows are the server's truth.
+func (s *Server) setBotSharedCounts(ctx context.Context, tenantID uuid.UUID, views []botView, ids []string) {
+	counts, err := s.cfg.Identity.ResourceRelationCounts(ctx, tenantID, "bot", ids,
+		[]string{store.RelationViewer, store.RelationEditor})
+	if err != nil {
+		return
+	}
+	for index := range views {
+		views[index].SharedCount = counts[views[index].BotID]
+	}
 }
 
 type botWriteRequest struct {
@@ -298,7 +329,7 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"bot":            s.botViewOf(r, tenantID, created),
+		"bot":            s.botViewWithSharedCount(r, tenantID, created),
 		"ownerAccountId": profile.AccountID.String(),
 	})
 }
@@ -321,7 +352,7 @@ func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bot": s.botViewOf(r, tenantID, record)})
+	writeJSON(w, http.StatusOK, map[string]any{"bot": s.botViewWithSharedCount(r, tenantID, record)})
 }
 
 func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +459,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bot": s.botViewOf(r, tenantID, updated)})
+	writeJSON(w, http.StatusOK, map[string]any{"bot": s.botViewWithSharedCount(r, tenantID, updated)})
 }
 
 func (s *Server) archiveBot(w http.ResponseWriter, r *http.Request) {

@@ -351,6 +351,13 @@ var identityEndpointCatalog = []access.Endpoint{
 	{Kind: access.EndpointHTTP, Name: "POST /v1/permission-groups/{id}/grants", RequiredKey: access.KeyPermissionManage},
 	{Kind: access.EndpointHTTP, Name: "DELETE /v1/permission-groups/{id}/grants/{key}", RequiredKey: access.KeyPermissionManage},
 
+	// Resource sharing (A6): the same trio for sessions, bots and team bots.
+	// Each route requires the family's manage key plus the owner relation; only
+	// viewer/editor can be granted.
+	{Kind: access.EndpointHTTP, Name: "GET /v1/sessions/{id}/shares", RequiredKey: access.KeySessionShare},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/sessions/{id}/shares", RequiredKey: access.KeySessionShare},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/sessions/{id}/shares/revoke", RequiredKey: access.KeySessionShare},
+
 	{Kind: access.EndpointHTTP, Name: "GET /v1/bots", RequiredKey: access.KeyBotRead},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/bots", RequiredKey: access.KeyBotCreate},
 	{Kind: access.EndpointHTTP, Name: "GET /v1/bots/{id}", RequiredKey: access.KeyBotRead},
@@ -360,6 +367,9 @@ var identityEndpointCatalog = []access.Endpoint{
 	{Kind: access.EndpointHTTP, Name: "GET /v1/bots/{id}/keys", RequiredKey: access.KeyBotManage},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/bots/{id}/keys", RequiredKey: access.KeyBotManage},
 	{Kind: access.EndpointHTTP, Name: "DELETE /v1/bots/{id}/keys/{keyId}", RequiredKey: access.KeyBotManage},
+	{Kind: access.EndpointHTTP, Name: "GET /v1/bots/{id}/shares", RequiredKey: access.KeyBotManage},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/bots/{id}/shares", RequiredKey: access.KeyBotManage},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/bots/{id}/shares/revoke", RequiredKey: access.KeyBotManage},
 
 	{Kind: access.EndpointHTTP, Name: "GET /v1/team-bots", RequiredKey: access.KeyTeamBotRead},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots", RequiredKey: access.KeyTeamBotManage},
@@ -368,6 +378,9 @@ var identityEndpointCatalog = []access.Endpoint{
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/archive", RequiredKey: access.KeyTeamBotManage},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/roster", RequiredKey: access.KeyTeamBotManage},
 	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/start", RequiredKey: access.KeyTeamBotManage},
+	{Kind: access.EndpointHTTP, Name: "GET /v1/team-bots/{id}/shares", RequiredKey: access.KeyTeamBotManage},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/shares", RequiredKey: access.KeyTeamBotManage},
+	{Kind: access.EndpointHTTP, Name: "POST /v1/team-bots/{id}/shares/revoke", RequiredKey: access.KeyTeamBotManage},
 
 	// Audit read (A4.4c). Both are tenant-level reads of auth_events.
 	{Kind: access.EndpointHTTP, Name: "GET /v1/audit/events", RequiredKey: access.KeyAuditRead},
@@ -415,6 +428,10 @@ func (s *Server) identityRoutes() {
 	s.mux.HandleFunc("POST /v1/permission-groups/{id}/grants", s.addPermissionGroupGrant)
 	s.mux.HandleFunc("DELETE /v1/permission-groups/{id}/grants/{key}", s.removePermissionGroupGrant)
 
+	s.mux.HandleFunc("GET /v1/sessions/{id}/shares", s.listSessionShares)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/shares", s.addSessionShare)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/shares/revoke", s.revokeSessionShare)
+
 	s.mux.HandleFunc("GET /v1/bots", s.listBots)
 	s.mux.HandleFunc("POST /v1/bots", s.createBot)
 	s.mux.HandleFunc("GET /v1/bots/{id}", s.getBot)
@@ -424,6 +441,9 @@ func (s *Server) identityRoutes() {
 	s.mux.HandleFunc("GET /v1/bots/{id}/keys", s.listBotKeys)
 	s.mux.HandleFunc("POST /v1/bots/{id}/keys", s.issueBotKey)
 	s.mux.HandleFunc("DELETE /v1/bots/{id}/keys/{keyId}", s.revokeBotKey)
+	s.mux.HandleFunc("GET /v1/bots/{id}/shares", s.listBotShares)
+	s.mux.HandleFunc("POST /v1/bots/{id}/shares", s.addBotShare)
+	s.mux.HandleFunc("POST /v1/bots/{id}/shares/revoke", s.revokeBotShare)
 
 	s.mux.HandleFunc("GET /v1/team-bots", s.listTeamBots)
 	s.mux.HandleFunc("POST /v1/team-bots", s.createTeamBot)
@@ -432,6 +452,9 @@ func (s *Server) identityRoutes() {
 	s.mux.HandleFunc("POST /v1/team-bots/{id}/archive", s.archiveTeamBot)
 	s.mux.HandleFunc("POST /v1/team-bots/{id}/roster", s.updateTeamBotRoster)
 	s.mux.HandleFunc("POST /v1/team-bots/{id}/start", s.startTeamBot)
+	s.mux.HandleFunc("GET /v1/team-bots/{id}/shares", s.listTeamBotShares)
+	s.mux.HandleFunc("POST /v1/team-bots/{id}/shares", s.addTeamBotShare)
+	s.mux.HandleFunc("POST /v1/team-bots/{id}/shares/revoke", s.revokeTeamBotShare)
 }
 
 // timeView renders a timestamp in UTC and omits a zero value.
