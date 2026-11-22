@@ -53,6 +53,7 @@ import (
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicegraph"
 	"github.com/jixoai/keel/internal/skills"
+	"github.com/jixoai/keel/internal/supervisor"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -237,6 +238,10 @@ type Config struct {
 	// access-backed implementation; nil leaves the runner fail-closed (every
 	// tool call is refused), never open.
 	ToolAccess agent.ToolAccess
+	// GuardrailPolicy is the runner's per-attempt guardrail policy source. The
+	// runner consults it once per attempt, so a policy rotation affects only
+	// later attempts. Nil keeps the runner's environment-driven defaults.
+	GuardrailPolicy func() supervisor.GuardrailPolicy
 
 	Prompt PromptOptions
 	MCP    MCPOptions

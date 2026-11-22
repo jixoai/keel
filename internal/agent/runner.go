@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/jixoai/keel/internal/loop"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/supervisor"
 	"github.com/jixoai/keel/internal/telemetry"
 )
 
@@ -90,6 +92,15 @@ type Runner struct {
 	// field is the fallback for hosts (and tests) that drive a Runner without a
 	// binding. Empty means the deployment supplies no configuration identity.
 	ConfigHash string
+	// ConfigRevision is the loadout revision paired with ConfigHash. Recovery
+	// facts record it so "which configuration did this attempt resume under" is
+	// answerable without decoding the hash.
+	ConfigRevision int64
+	// Guardrails supplies the attempt's guardrail policy. It is consulted once
+	// per attempt, so a policy rotation affects only later attempts. Nil keeps
+	// the default policy (the same environment-driven defaults the process
+	// uses); an explicit function returning a zero policy disables guardrails.
+	Guardrails func() supervisor.GuardrailPolicy
 	// Models, when set, resolves the execution identity per attempt from the
 	// run's selection fact (the product-layer provider configuration). It is
 	// consulted per attempt, so a configuration change applies to runs that
@@ -278,6 +289,11 @@ func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider
 		Tools:        agenttool.NewToolRegistry(),
 		MaxTurns:     8,
 		Logger:       logger,
+		// Guardrails are built in: the environment can tune the budgets, and a
+		// test remaps the field to disable them. The policy is read per attempt.
+		Guardrails: func() supervisor.GuardrailPolicy {
+			return supervisor.GuardrailsFromEnvironment(os.Getenv)
+		},
 	}
 	// The kernel satisfies all three seams; deriving the read marker from the
 	// committer keeps the constructor honest without a fourth argument. The
@@ -502,6 +518,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if err != nil {
 		return res, err
 	}
+	// A reclaimed lease is a crashed process's attempt being adopted. Record the
+	// recovery before any new work: the fact answers who/when/why and which
+	// configuration the successor runs under.
+	r.recordRecovery(ctx, lease)
 	// Persist the load point BEFORE anything else (in particular before
 	// fillMissingToolResults can commit): whatever happens next — a model
 	// failure, a kill, a drain — the successor can see exactly which input this
@@ -588,6 +608,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if err != nil {
 		return res, err
 	}
+	// The guardrail policy is captured once for this attempt: a rotation
+	// affecting the process later changes only later attempts. The guarded
+	// registry preserves tool names/schemas, so the manifest hash is unchanged.
+	guard := newRunGuard(r, lease)
+	if guard != nil {
+		tools, err = guard.wrapRegistry(tools)
+		if err != nil {
+			return res, err
+		}
+	}
 	// The attempt's injected tool surface, materialized once. This exact slice
 	// goes to the loop and is hashed for the run snapshot: a host refresh that
 	// adds an MCP server or a plugin tool after this point changes the next
@@ -634,7 +664,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// tool the binding does not grant (a removed grant, or a captain that
 	// explicitly disabled delegation, would otherwise only hold until the next
 	// restart).
-	msgs, seqs, cursor, err = r.fillMissingToolResults(runCtx, lease, msgs, seqs, cursor, tools)
+	msgs, seqs, cursor, err = r.fillMissingToolResults(runCtx, lease, msgs, seqs, cursor, tools, guard)
 	res.Cursor = cursor
 	if err != nil {
 		return res, err
@@ -735,6 +765,17 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		}
 		promptCount++
 	}
+	beforeToolCall := r.toolAccessGuard(lease.Scope)
+	if guard != nil {
+		beforeToolCall = guard.composeBefore(beforeToolCall)
+	}
+	var guardCancel context.CancelFunc
+	loopCtx := runCtx
+	if guard != nil {
+		loopCtx, guardCancel = context.WithCancel(runCtx)
+		guard.bindCancel(guardCancel)
+		defer guardCancel()
+	}
 	cfg := loop.RunConfig{
 		LoopConfig: loop.LoopConfig{
 			Model:         model.Model,
@@ -765,8 +806,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				Registry: tools,
 				// Every model tool call is authorized against the session's
 				// principal (Bot Account ∩ Harness) before it executes. The guard
-				// is fail-closed when no access seam is wired.
-				BeforeToolCall: r.toolAccessGuard(lease.Scope),
+				// is fail-closed when no access seam is wired. Guardrails run
+				// after authorization, so a refusal is never counted as a repeat.
+				BeforeToolCall: beforeToolCall,
 			},
 		},
 		EventBuffer: 32,
@@ -832,7 +874,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		Messages:     msgs,
 		Tools:        injectedTools,
 	}
-	stream := loop.StartRun(runCtx, agentCtx, cfg)
+	stream := loop.StartRun(loopCtx, agentCtx, cfg)
 	for ev := range stream.Events() {
 		if ctx.Err() != nil {
 			res.Cursor = cursor
@@ -842,6 +884,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		switch e := ev.(type) {
 		case agentcore.TurnEndEvent:
 			summary.Turns++
+			if guard != nil {
+				guard.checkMemory()
+			}
 		case agentcore.CompactionEvent:
 			// The loop compacted its in-memory context. The compaction event is
 			// the durable fact (the summary and the kept boundary), and it is
@@ -957,6 +1002,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				return res, err
 			}
 			cursor = seq
+			if guard != nil {
+				guard.checkUsage(summary.Tokens.Input, summary.Tokens.Output)
+			}
 		case agentcore.ToolExecutionEndEvent:
 			timing := ToolTiming{Tool: e.ToolName, IsError: e.IsError}
 			if e.DurationMs != nil {
@@ -977,6 +1025,19 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				return res, err
 			}
 			cursor = seq
+			if guard != nil {
+				guard.recordToolResult(e.IsError, e.ToolName, e.ToolCallID)
+			}
+		}
+	}
+	// A guardrail abort is this attempt's outcome. It is checked before the
+	// cancellation guard: the guard cancels only this attempt's context, and the
+	// run must settle as failed (not as an operator cancellation).
+	if guard != nil {
+		if err := guard.err(); err != nil {
+			res.Cursor = cursor
+			summary.StopReason = agentcore.StopReasonAborted
+			return res, err
 		}
 	}
 	// A cancel that lands while the loop is settling is invisible to the per-event
@@ -1224,7 +1285,7 @@ func legacyOwedTurn(events []store.Event, readWatermark int64) bool {
 // The registry is the attempt's filtered surface (toolsForRun), not the host
 // one: recovery replays work the same agent asked for under the same grants, so
 // a call outside the surface must fail as an unknown tool rather than execute.
-func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease, msgs agentcore.MessageList, seqs []int64, cursor int64, tools *agenttool.ToolRegistry) (agentcore.MessageList, []int64, int64, error) {
+func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease, msgs agentcore.MessageList, seqs []int64, cursor int64, tools *agenttool.ToolRegistry, guard *runGuard) (agentcore.MessageList, []int64, int64, error) {
 	lastAssistant := -1
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if _, ok := msgs[i].(agentcore.AssistantMessage); ok {
@@ -1258,14 +1319,22 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease,
 	r.Logger.Warn("resuming unresolved tool calls", "session", lease.Scope.SessionID, "count", len(missing))
 	// Recovery replays calls the same agent asked for; they pass through the
 	// same authorization seam as a live call, so a revoked grant cannot be
-	// resurrected by a crash/restart.
+	// resurrected by a crash/restart. The guardrails apply too: a recovered
+	// attempt is still one attempt.
+	before := r.toolAccessGuard(lease.Scope)
+	if guard != nil {
+		before = guard.composeBefore(before)
+	}
 	results, _ := agenttool.ExecuteToolCalls(ctx, agenttool.BatchConfig{
 		ToolExecutorConfig: agenttool.ToolExecutorConfig{
 			Registry:       tools,
-			BeforeToolCall: r.toolAccessGuard(lease.Scope),
+			BeforeToolCall: before,
 		},
 	}, missing, nil)
 	for _, tr := range results {
+		if guard != nil {
+			guard.recordToolResult(tr.IsError, tr.ToolName, tr.ToolCallID)
+		}
 		msgs = append(msgs, tr)
 		// A re-executed result was not read from the log: it belongs after the
 		// call it answers, never in the "unread input" set.

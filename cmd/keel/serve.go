@@ -618,11 +618,16 @@ func runServe(parent context.Context, opts serveOptions) error {
 		return fmt.Errorf("tool access: %w", err)
 	}
 
+	// The recovery/guardrail policy is read per attempt by the runner and per
+	// scan by the supervisor. One reader keeps both halves on the same document;
+	// a rotation therefore changes later attempts only.
+	policyReader := newSupervisorPolicyReader(log)
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
 		// Every model tool call is authorized against the session's principal
 		// (Bot Account ∩ Harness) before it executes (A4.2b1).
-		ToolAccess: toolAccess,
+		ToolAccess:      toolAccess,
+		GuardrailPolicy: policyReader.guardrails,
 		Seams: servicehost.Seams{
 			// The run loop keeps the raw kernel: its read-marker/checkpoint
 			// capabilities are derived from the concrete committer, and the
@@ -860,6 +865,14 @@ func runServe(parent context.Context, opts serveOptions) error {
 	toolPluginManager = product.pluginManager
 	defer product.close()
 
+	// Automatic recovery is default behavior, not a button: scan every
+	// non-terminal run before the listener opens, record the recovery facts and
+	// keep reconciling failed runs in the background. The worker's claim/lease
+	// path remains the execution engine; this only orchestrates and audits.
+	if _, err := newRecoverySupervisor(ctx, st, kern, rt, product, policyReader, log); err != nil {
+		return fmt.Errorf("recovery supervisor: %w", err)
+	}
+
 	// Drain is the same edge contract the runtime uses: new requests get 503 +
 	// Retry-After, every open SSE stream receives the drain frame and closes at
 	// the configured rate. keel serve owns the worker, so draining also stops
@@ -1047,6 +1060,11 @@ type productLayer struct {
 	// pluginManager is the lifecycle authority over plugins; api serves it and
 	// the runtime is only ever told what to load through it.
 	pluginManager *harnessext.Manager
+	// notifications and taskLog are the recovery supervisor's owner/parent
+	// rungs. They stay product-layer services; the supervisor receives narrow
+	// adapters.
+	notifications *notify.Service
+	taskLog       *tasklog.Service
 	api           *harnessapi.Server
 	auth          *authController
 	// access is the product authorization bridge shared by the identity routes,
@@ -1403,6 +1421,8 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		triggers:      triggers,
 		plugins:       plugins,
 		pluginManager: manager,
+		notifications: notifications,
+		taskLog:       taskLog,
 		api:           api,
 		auth:          auth,
 		access:        accessBridge,

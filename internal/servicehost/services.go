@@ -553,6 +553,12 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		}
 		runner := agent.NewRunner(cfg.Seams.Committer, cfg.Seams.Reader,
 			llm.StreamFn(), llm.ProviderName(), llm.Model(), llm.APIKey(), cfg.Seams.Logger)
+		// The runner belongs to one loadout generation, so its configuration
+		// identity is stable for every attempt it serves. Recovery and guardrail
+		// facts record it; a rotation creates a new runner and affects only later
+		// attempts.
+		runner.ConfigHash = agent.ConfigHashForLoadout(cfg.Options.ID, cfg.Options.Revision)
+		runner.ConfigRevision = cfg.Options.Revision
 		// The attempt's execution identity comes from the provider configuration
 		// when the tenant declares one; without it the runner's static fields
 		// (the fake/legacy path) stay authoritative.
@@ -564,6 +570,11 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		// (Bot Account ∩ Harness). A nil seam stays fail-closed in the runner;
 		// the product layer's absence is a deployment gap, never an open surface.
 		runner.ToolAccess = cfg.ToolAccess
+		// The guardrail policy is captured once per attempt. A settings/policy
+		// rotation therefore changes later attempts only.
+		if cfg.GuardrailPolicy != nil {
+			runner.Guardrails = cfg.GuardrailPolicy
+		}
 		// The execution binding (the Bot/TeamBot the session belongs to or the
 		// input selected) resolves per attempt through this seam: the runner reads
 		// the binding and freezes its identity into the run summary. A zero
