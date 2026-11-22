@@ -489,3 +489,17 @@
       再决定是否准入（组满不 429、不占槽）；`*Conflict → 409` 有真库 HTTP 线级测试
 - [ ] fileplugin settlement 锁 map 无在途回收（P2 暂缓：回收会重置进程内 `snapshotVersion`
       单调计数，需先有持久版本源；定序语义不受影响）
+
+## W11 收口补充（from runtime-foundation）
+
+> Owner 2026-11-22：`runtime-foundation` 不再单独推进；以下 8 项残余并入 W11，保持未勾。
+> 映射与门级口径见 `openspec/changes/runtime-foundation/FOLDED.md`；本附加段不改上方任务状态。
+
+- [ ] RF-1 主仓挂 submodule + PROJECT-MAP 登记（W11 G10；核对 keel 指针与主仓登记）
+- [ ] RF-2 为 loop 补单测（fake stream：文本/工具/压缩/取消）（W11 G2，兼 G3）
+- [ ] RF-3 loop 的持久任务接线（工具执行/压缩 `resume()`）（W11 G2）
+- [ ] RF-4 缩略图异步生成（可选）（W11 G4）
+- [ ] RF-5 RLS 可选启用 + 非 owner 角色（W11 G4）
+- [ ] RF-6 每租户配额（并发/带宽/存储）（W11 G4）
+- [ ] RF-7 HTML 报告 + 公网链接（W11 G11）
+- [ ] RF-8 子代理交叉复核（本项目不使用 Codex）（W11 G11）
