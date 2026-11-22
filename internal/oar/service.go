@@ -23,6 +23,9 @@ import (
 type Config struct {
 	// Runtime is "codex" or "fake".
 	Runtime string
+	// RuntimeVersion is the underlying runtime version reported in the OAR
+	// declaration. Codex preflight overrides it with the probed value.
+	RuntimeVersion string
 	// SidecarPath is the OAR sidecar executable. Empty looks at KEEL_OAR_BIN,
 	// then `keel-oar` on PATH.
 	SidecarPath string
@@ -116,8 +119,9 @@ func (s *Service) Start(ctx context.Context) error {
 		}
 		s.info = info
 		// The preflight may have resolved the binary from PATH; make sure the
-		// sidecar uses the exact same binary.
+		// sidecar uses the exact same binary and reports the probed version.
 		args = replaceFlag(args, "-codex-path", info.Path)
+		args = replaceFlag(args, "-runtime-version", info.Version)
 	}
 	journalDir := s.cfg.JournalDir
 	if journalDir == "" {
@@ -315,6 +319,9 @@ func (s *Service) sidecarCommand(context.Context) (string, []string, error) {
 	args := append([]string(nil), s.cfg.SidecarArgs...)
 	if len(args) == 0 {
 		args = []string{"sidecar", "-runtime=" + s.cfg.Runtime}
+		if s.cfg.RuntimeVersion != "" {
+			args = append(args, "-runtime-version", s.cfg.RuntimeVersion)
+		}
 		switch s.cfg.Runtime {
 		case RuntimeCodex:
 			args = append(args,

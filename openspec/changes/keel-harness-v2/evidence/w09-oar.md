@@ -192,9 +192,9 @@ NewAgentService -> Start -> WaitReady -> Open(scope,"oar",{config.attribution})
 能力协商（真实 sidecar initialize）：
 
 ```text
-runtime=codex sidecar_pid=96500 declaration={Schema:keel.oar.capabilities/1 ContractVersion:1
-Runtime:codex RuntimeVersion:1.0.0 Simulated:false Capabilities:[records agent_path calls results
-status messages usage cancel live_model]}
+runtime=codex sidecar_pid=5850 declaration={Schema:keel.oar.capabilities/1 ContractVersion:1
+Runtime:codex RuntimeVersion:codex-cli 0.166.0 Simulated:false Capabilities:[records agent_path
+calls results status messages usage cancel live_model]}
 ```
 
 真实 turn（`timeout=10s`，prompt `Reply with exactly OAR-OK`）：
@@ -215,15 +215,17 @@ records:
 3 status codex.item.error degraded Codex is ignoring 1 unrecognized configuration setting...
 4 status codex.item.error degraded Codex is ignoring 1 unrecognized configuration setting...
 5 status codex.turn.started started
-6 message agent_message (text from the Codex JSONL item, possibly empty)
-7 error turn.failed context deadline exceeded
-8 status turn.finished failed context deadline exceeded
+6 error turn.failed context deadline exceeded
+7 status turn.finished failed context deadline exceeded
 ```
+
+（前一次同参数运行在 timeout 前还收到过一条 `agent_message` item，说明 JSONL 解析
+包含消息路径；本次运行未在窗口内完成模型回合。）
 
 结论（诚实口径）：
 - 适配器确实 spawn 了 `codex exec --json`，解析了真实 JSONL（`thread.started`、配置
-  warning item、`turn.started`、`agent_message`），record stream 带 `seq`/`agentPath`/
-  attribution。
+  warning item、`codex.turn.started`；另一次运行还收到 `agent_message`），record stream
+  带 `seq`/`agentPath`/attribution。
 - 本机网络对模型出口返回 **HTTP 403 Forbidden**，Codex 持续 Reconnecting；10s turn
   timeout 把它收敛为 `turn.finished failed (context deadline exceeded)`，进程组被回收。
 - **没有**把这次运行当作成功模型链路；W11 的「Codex 真链路全绿」仍未达成（缺可用

@@ -374,6 +374,9 @@ func TestServiceCodexAdapterWithFakeCodex(t *testing.T) {
 	if service.Declaration().Runtime != RuntimeCodex || service.Declaration().Simulated {
 		t.Fatalf("declaration = %+v", service.Declaration())
 	}
+	if service.Declaration().RuntimeVersion != "codex-cli 9.9.9" {
+		t.Fatalf("runtime version = %q, want the probed codex version", service.Declaration().RuntimeVersion)
+	}
 	session, err := service.Open(context.Background(), OpenRequest{
 		Reference:     "codex-ref",
 		HostSessionID: "host-codex",

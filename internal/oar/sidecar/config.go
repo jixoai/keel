@@ -39,6 +39,10 @@ type Config struct {
 	// Name and Version are the initialize server identity.
 	Name    string
 	Version string
+	// RuntimeVersion is the underlying runtime's own version (for example
+	// "codex-cli 0.166.0"), reported in the OAR declaration. Empty falls back to
+	// the sidecar version.
+	RuntimeVersion string
 
 	// Capabilities overrides the runtime's frozen declaration. It exists for
 	// negative tests (a runtime that omits a capability must be rejected); the
@@ -111,7 +115,11 @@ func (c Config) validate() error {
 // always simulated and never claims live_model.
 func (c Config) Declaration() oar.Declaration {
 	runtime := c.runtime()
-	declaration := oar.DeclarationFor(runtime, c.Version)
+	runtimeVersion := c.RuntimeVersion
+	if runtimeVersion == "" {
+		runtimeVersion = c.Version
+	}
+	declaration := oar.DeclarationFor(runtime, runtimeVersion)
 	if runtime == RuntimeFake {
 		declaration.Simulated = true
 	}

@@ -39,6 +39,7 @@ func run(args []string) int {
 	runtime := flags.String("runtime", sidecar.RuntimeFake, "runtime adapter: fake|codex")
 	name := flags.String("name", "keel-oar-sidecar", "initialize server name")
 	version := flags.String("version", "1.0.0", "initialize server version")
+	runtimeVersion := flags.String("runtime-version", "", "underlying runtime version reported in the OAR declaration")
 	capabilities := flags.String("capabilities", "", "comma-separated capability override (negative tests)")
 	simulated := flags.Bool("simulated", false, "force simulated=true (never claims live_model)")
 	usage := flags.Bool("usage", false, "declare and emit token usage (fake driver)")
@@ -88,6 +89,7 @@ func run(args []string) int {
 		Runtime:        *runtime,
 		Name:           *name,
 		Version:        *version,
+		RuntimeVersion: *runtimeVersion,
 		Capabilities:   declared,
 		Simulated:      *simulated,
 		Usage:          *usage,
