@@ -99,6 +99,7 @@ func (s *Server) createPermissionGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusCreated, map[string]any{"group": permissionGroupViewOf(record)})
 }
 
@@ -186,6 +187,7 @@ func (s *Server) renamePermissionGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{"group": permissionGroupViewOf(updated)})
 }
 
@@ -221,6 +223,7 @@ func (s *Server) deletePermissionGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{"groupId": groupID.String(), "deleted": true})
 }
 
@@ -274,6 +277,7 @@ func (s *Server) addPermissionGroupMember(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "accountId": accountID.String(), "added": created,
 	})
@@ -304,6 +308,7 @@ func (s *Server) removePermissionGroupMember(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "accountId": accountID.String(), "removed": true,
 	})
@@ -376,6 +381,7 @@ func (s *Server) addPermissionGroupGrant(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "key": key, "scope": string(scope), "added": created,
 	})
@@ -416,6 +422,7 @@ func (s *Server) removePermissionGroupGrant(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"groupId": groupID.String(), "key": key, "scope": string(scope), "removed": true,
 	})

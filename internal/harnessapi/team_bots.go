@@ -232,6 +232,7 @@ func (s *Server) createTeamBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventTeams)
 	view := teamBotViewOf(created)
 	view.OwnerAccountID = principal.AccountID.String()
 	writeJSON(w, http.StatusCreated, map[string]any{"teamBot": view})
@@ -341,6 +342,7 @@ func (s *Server) updateTeamBotContent(w http.ResponseWriter, r *http.Request, ro
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventTeams)
 	writeJSON(w, http.StatusOK, map[string]any{"teamBot": s.teamBotViewWithMeta(r, tenantID, stored)})
 }
 
@@ -369,6 +371,7 @@ func (s *Server) archiveTeamBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventTeams)
 	writeJSON(w, http.StatusOK, map[string]any{"teamBotId": teamID, "archived": true})
 }
 
@@ -481,6 +484,7 @@ func (s *Server) startTeamBot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventSessions)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"teamBotId": teamID, "captainBotId": captain,
 		"sessionId": result.SessionID.String(), "seq": result.Seq,

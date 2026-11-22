@@ -151,6 +151,7 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventAccounts)
 	writeJSON(w, http.StatusCreated, map[string]any{"account": accountViewOf(created)})
 }
 
@@ -228,6 +229,7 @@ func (s *Server) setAccountDisabled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventAccounts)
 	writeJSON(w, http.StatusOK, map[string]any{"account": accountViewOf(record)})
 }
 
@@ -293,6 +295,7 @@ func (s *Server) resetAccountPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventAccounts)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accountId": accountID.String(), "passwordChanged": true,
 		"mustChangePassword": true, "sessionsRevoked": true,
@@ -379,6 +382,7 @@ func (s *Server) addAccountGroup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accountId": accountID.String(), "groupId": groupID.String(), "added": created,
 	})
@@ -409,6 +413,7 @@ func (s *Server) removeAccountGroup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accountId": accountID.String(), "groupId": groupID.String(), "removed": true,
 	})

@@ -385,6 +385,11 @@ var identityEndpointCatalog = []access.Endpoint{
 	// Audit read (A4.4c). Both are tenant-level reads of auth_events.
 	{Kind: access.EndpointHTTP, Name: "GET /v1/audit/events", RequiredKey: access.KeyAuditRead},
 	{Kind: access.EndpointHTTP, Name: "GET /v1/audit/events/{id}", RequiredKey: access.KeyAuditRead},
+
+	// The identity invalidation stream (change keel-harness-v2). It carries only
+	// projection names and times, never rows, so the existing tenant discovery
+	// key is the authority; the hub scopes every event to the caller's tenant.
+	{Kind: access.EndpointHTTP, Name: "GET /v1/identity/events", RequiredKey: access.KeyAppRead},
 }
 
 // IdentityEndpoints returns a copy of the declarative key map: the coverage
@@ -455,6 +460,11 @@ func (s *Server) identityRoutes() {
 	s.mux.HandleFunc("GET /v1/team-bots/{id}/shares", s.listTeamBotShares)
 	s.mux.HandleFunc("POST /v1/team-bots/{id}/shares", s.addTeamBotShare)
 	s.mux.HandleFunc("POST /v1/team-bots/{id}/shares/revoke", s.revokeTeamBotShare)
+
+	// The tenant-local invalidation tail (change keel-harness-v2). It is mounted
+	// with the identity surface because it is authorized with app.read and
+	// carries only that surface's invalidation vocabulary.
+	s.mux.HandleFunc("GET /v1/identity/events", s.identityEventStream)
 }
 
 // timeView renders a timestamp in UTC and omits a zero value.

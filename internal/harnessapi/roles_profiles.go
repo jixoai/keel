@@ -110,6 +110,7 @@ func (s *Server) createRole(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions)
 	writeJSON(w, http.StatusCreated, map[string]any{"role": roleViewOf(record)})
 }
 
@@ -182,6 +183,7 @@ func (s *Server) updateRole(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"role": roleViewOf(updated)})
 }
 
@@ -201,6 +203,7 @@ func (s *Server) deleteRole(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"roleId": roleID.String(), "deleted": true})
 }
 
@@ -267,6 +270,7 @@ func (s *Server) createProfile(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions, IdentityEventBots)
 	writeJSON(w, http.StatusCreated, map[string]any{"profile": profileViewOf(record)})
 }
 
@@ -351,6 +355,7 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"profile": profileViewOf(updated)})
 }
 
@@ -370,6 +375,7 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventPermissions, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"profileId": profileID.String(), "deleted": true})
 }
 

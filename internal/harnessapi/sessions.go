@@ -209,6 +209,7 @@ func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errors.New("session not found"))
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventSessions)
 	writeJSON(w, http.StatusOK, map[string]any{"sessionId": sessionID.String(), "archived": true})
 }
 

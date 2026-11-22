@@ -349,6 +349,7 @@ func (s *Server) addResourceShare(w http.ResponseWriter, r *http.Request, resour
 	if created {
 		status = http.StatusCreated
 	}
+	s.identityChanged(tenantID, shareEventKind(resource.kind))
 	writeJSON(w, status, map[string]any{"created": created, "share": view})
 }
 
@@ -400,7 +401,22 @@ func (s *Server) revokeResourceShare(w http.ResponseWriter, r *http.Request, res
 			return
 		}
 	}
+	s.identityChanged(tenantID, shareEventKind(resource.kind))
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": true, "share": view})
+}
+
+// shareEventKind maps a shareable resource family to the projection its tuple
+// change makes stale. A session share changes the session list (sharedWithMe),
+// a Bot/TeamBot share changes its row's shared badge.
+func shareEventKind(kind string) IdentityEventKind {
+	switch kind {
+	case "session":
+		return IdentityEventSessions
+	case "team_bot":
+		return IdentityEventTeams
+	default:
+		return IdentityEventBots
+	}
 }
 
 // The nine route handlers. They are deliberately one-liners: the semantics live

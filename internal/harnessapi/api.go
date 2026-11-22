@@ -255,6 +255,16 @@ type Config struct {
 	// makes every identity route fail closed (503): there is no "allow all"
 	// fallback and no list endpoint that skips the relation filter.
 	Access Access
+	// IdentityEvents is the tenant-local invalidation hub behind
+	// GET /v1/identity/events. Nil builds a private hub: the identity handlers
+	// and the stream must share one instance, which this package does by default.
+	// A host that also mutates identity rows elsewhere may inject its own. The
+	// hub is process-local by design (keel serve is one process); a multi-replica
+	// deployment would need a shared fan-out in front of it.
+	IdentityEvents *IdentityEvents
+	// IdentityEventsHeartbeat is the SSE keepalive interval. Zero uses 15s,
+	// which stays under a typical 75s proxy idle timeout.
+	IdentityEventsHeartbeat time.Duration
 	// StartBotSession starts one bot-owned session (bot invoke and team start).
 	// The serve layer owns the turn starter and the ownership write. Nil answers
 	// 501 on the invoke/start routes.
@@ -288,6 +298,9 @@ type Server struct {
 	// one per (app, action, second); the row carries the suppressed count.
 	mcpAuditMu      sync.Mutex
 	mcpAuditSamples map[string]*mcpAuditSample
+	// identityEvents is the invalidation hub the identity handlers publish to and
+	// GET /v1/identity/events tails. It is always set by New.
+	identityEvents *IdentityEvents
 }
 
 // New builds the API and its routes.
@@ -313,11 +326,16 @@ func New(cfg Config) *Server {
 	if cfg.MCPAppNow == nil {
 		cfg.MCPAppNow = func() time.Time { return time.Now().UTC() }
 	}
+	events := cfg.IdentityEvents
+	if events == nil {
+		events = NewIdentityEvents()
+	}
 	s := &Server{
 		cfg:             cfg,
 		mux:             routemux.New(),
 		mcpAppLimits:    newMCPAppLimiter(cfg.MCPAppNow),
 		mcpAuditSamples: make(map[string]*mcpAuditSample),
+		identityEvents:  events,
 	}
 	s.routes()
 	return s

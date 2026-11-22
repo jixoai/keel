@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
@@ -38,6 +39,7 @@ type identityEnv struct {
 	opsGroup     store.PermissionGroupRecord
 	starter      *fakeBotSessionStarter
 	bridge       *accesswire.Bridge
+	api          *Server
 	server       *httptest.Server
 	otherTenant  uuid.UUID
 	otherAcct    store.AccountRecord
@@ -220,8 +222,12 @@ func newIdentityEnv(t *testing.T) *identityEnv {
 	api := New(Config{
 		Sessions: NewPGSessionLister(st),
 		Identity: st, Access: bridge, StartBotSession: env.starter.start,
-		Logger: testLogger(),
+		// The invalidation stream's tests use a short keepalive; the production
+		// default is 15s.
+		IdentityEventsHeartbeat: 40 * time.Millisecond,
+		Logger:                  testLogger(),
 	})
+	env.api = api
 	env.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := r.Header.Get("X-Test-Account")
 		accountID, err := uuid.Parse(raw)

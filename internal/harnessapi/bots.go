@@ -328,6 +328,7 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventBots)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"bot":            s.botViewWithSharedCount(r, tenantID, created),
 		"ownerAccountId": profile.AccountID.String(),
@@ -459,6 +460,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"bot": s.botViewWithSharedCount(r, tenantID, updated)})
 }
 
@@ -485,6 +487,7 @@ func (s *Server) archiveBot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.identityChanged(tenantID, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"botId": botID, "archived": true})
 }
 
@@ -563,6 +566,7 @@ func (s *Server) invokeBot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventSessions)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"botId": record.ID, "sessionId": result.SessionID.String(), "seq": result.Seq,
 		"requestId": result.RequestID, "deduped": result.Deduped,
@@ -683,6 +687,7 @@ func (s *Server) issueBotKey(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventBots)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"key":       botKeyViewOf(key),
 		"plaintext": minted.Plaintext,
@@ -726,5 +731,6 @@ func (s *Server) revokeBotKey(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.identityChanged(tenantID, IdentityEventBots)
 	writeJSON(w, http.StatusOK, map[string]any{"botId": botID, "keyId": keyID.String(), "revoked": true})
 }

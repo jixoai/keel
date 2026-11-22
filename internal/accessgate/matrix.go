@@ -358,6 +358,10 @@ var rules = []Rule{
 	// --- application discovery and quota ------------------------------------
 	route(http.MethodGet, "/v1/capabilities", ModeKey, access.KeyAppRead),
 	route(http.MethodGet, "/v1/quota", ModeKey, access.KeyAppRead),
+	// The identity invalidation stream: the same tenant-level discovery key as
+	// capabilities. Facts are projection names and times, scoped by the hub to
+	// the caller's tenant.
+	route(http.MethodGet, "/v1/identity/events", ModeKey, access.KeyAppRead),
 }
 
 // AuthRoutes returns the A2 auth patterns the host mounts outside the runtime
