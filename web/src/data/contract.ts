@@ -42,6 +42,18 @@ export interface SessionSummary {
    * ledger (the tail's last decision event), so the list badge and the
    * conversation agree on one fact. */
   pendingDecision?: boolean;
+  /** The account named by the session's owner relation (the Bot's Account, or
+   * the creator for an account-owned session). */
+  ownerAccountId?: string;
+  /** The initiator, which may differ from the owner. */
+  createdByAccountId?: string;
+  /** The owner's display name, for 「由 X 共享」. */
+  ownerDisplayName?: string;
+  /** The owner has shared this session with at least one viewer/editor. */
+  shared?: boolean;
+  /** This session is visible to the caller through a share (its owner is
+   * another account). Computed by the server against the caller. */
+  sharedWithMe?: boolean;
 }
 
 /** A failed turn the composer's error banner is showing (change

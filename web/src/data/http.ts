@@ -66,6 +66,7 @@ import {
   parseBotKey,
   parsePermissionGroup,
   parsePermissionGroupDetail,
+  parseShareView,
   parseTeamBot,
   parseWhoAmI,
   type AccountView,
@@ -80,6 +81,10 @@ import {
   type IdentityPage,
   type PermissionGroupDetail,
   type PermissionGroupSummary,
+  type ShareInput,
+  type ShareResourceKind,
+  type ShareView,
+  type ShareWriteResult,
   type TeamBotView,
   type UpdateBotInput,
   type UpdateTeamBotInput,
@@ -175,6 +180,24 @@ const numberOr = (value: unknown, fallback: number): number =>
 const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 const asText = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** The share route family: sessions, bots and team bots use the same trio. */
+const sharePath = (kind: ShareResourceKind, resourceId: string): string => {
+  const family = kind === "session" ? "sessions" : kind === "bot" ? "bots" : "team-bots";
+  return `/v1/${family}/${encodeURIComponent(resourceId)}/shares`;
+};
+
+/** One add/revoke answer. A malformed share is an error, not an empty success:
+ * the dialog must not claim a tuple the server did not confirm. */
+const shareWriteOf = (value: unknown): ShareWriteResult => {
+  const body = asRecord(value);
+  const share = parseShareView(body.share);
+  if (!share) throw new KeelApiError(500, "服务端返回了无法识别的共享结果");
+  const result: ShareWriteResult = { share };
+  if (typeof body.created === "boolean") result.created = body.created;
+  if (typeof body.revoked === "boolean") result.revoked = body.revoked;
+  return result;
+};
 
 /** One immutable skill version as the wire sends it. */
 function parseSkillVersion(value: unknown): SkillVersionView {
@@ -850,6 +873,11 @@ export class KeelHttp implements SettingsApi {
       lastMessageAt: row.lastMessageAt as string | undefined,
       title: row.title as string | undefined,
       lastMessage: (row.lastMessage ?? row.summary) as string | undefined,
+      ownerAccountId: row.ownerAccountId as string | undefined,
+      createdByAccountId: row.createdByAccountId as string | undefined,
+      ownerDisplayName: row.ownerDisplayName as string | undefined,
+      shared: row.shared === true,
+      sharedWithMe: row.sharedWithMe === true,
     };
   }
 
@@ -1630,6 +1658,36 @@ export class KeelHttp implements SettingsApi {
       requestId: typeof body.requestId === "string" ? body.requestId : undefined,
       deduped: body.deduped === true,
     };
+  }
+
+  // ---- resource sharing (A6) ---------------------------------------------
+
+  async listShares(kind: ShareResourceKind, resourceId: string): Promise<ShareView[]> {
+    const response = await this.request(sharePath(kind, resourceId));
+    const body = asRecord(await response.json());
+    return listOf(body.shares).flatMap((item) => {
+      const share = parseShareView(item);
+      return share ? [share] : [];
+    });
+  }
+
+  async addShare(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult> {
+    const response = await this.request(sharePath(kind, resourceId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return shareWriteOf(await response.json());
+  }
+
+  /** Revoke is a POST with the tuple as its body (no DELETE body). */
+  async revokeShare(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult> {
+    const response = await this.request(`${sharePath(kind, resourceId)}/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return shareWriteOf(await response.json());
   }
 
   // ---- profiles & roles (the Bot page's identity facts) -------------------

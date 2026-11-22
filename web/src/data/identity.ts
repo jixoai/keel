@@ -123,6 +123,8 @@ export interface BotView {
   archived: boolean;
   createdAt?: string;
   updatedAt?: string;
+  /** Viewer/editor tuples on this Bot (the 「已共享」 badge). */
+  sharedCount?: number;
 }
 
 export interface RosterEntry {
@@ -140,6 +142,47 @@ export interface TeamBotView {
   archived: boolean;
   createdAt?: string;
   updatedAt?: string;
+  /** The account named by the TeamBot's owner relation; sharing is owner-only. */
+  ownerAccountId?: string;
+  /** Viewer/editor tuples on this TeamBot (visibility shares). */
+  sharedCount?: number;
+}
+
+// ---- resource sharing (A6) ------------------------------------------------
+
+/** The three shareable resource families. */
+export type ShareResourceKind = "session" | "bot" | "team_bot";
+
+/** Only viewer/editor are writable through sharing; owner/team_member are
+ * system-managed and the server answers 400 for them. */
+export type ShareRelation = "viewer" | "editor";
+
+/** The subject types a share tuple may name. The product UI offers accounts and
+ * permission groups; team_bot exists on the API for team-scoped visibility. */
+export type ShareSubjectType = "account" | "group" | "team_bot";
+
+export interface ShareView {
+  subjectType: ShareSubjectType;
+  subjectId: string;
+  relation: ShareRelation;
+  /** Resolved display name (account display name, group/team name). */
+  displayName?: string;
+  /** Account username, when the subject is an account. Never a credential. */
+  username?: string;
+}
+
+export interface ShareInput {
+  subjectType: ShareSubjectType;
+  subjectId: string;
+  relation: ShareRelation;
+}
+
+export interface ShareWriteResult {
+  /** Present on add: false for an idempotent duplicate tuple. */
+  created?: boolean;
+  /** Present on revoke. */
+  revoked?: boolean;
+  share: ShareView;
 }
 
 export interface BotKeyView {
@@ -362,6 +405,8 @@ const bool = (value: unknown): boolean => value === true;
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const count = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const countOrUndefined = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 export function parseAccount(value: unknown): AccountView {
   const row = asRecord(value);
@@ -451,6 +496,7 @@ export function parseBot(value: unknown): BotView {
     archived: bool(row.archived),
     createdAt: textOrUndefined(row.createdAt),
     updatedAt: textOrUndefined(row.updatedAt),
+    sharedCount: countOrUndefined(row.sharedCount),
   };
 }
 
@@ -476,6 +522,31 @@ export function parseTeamBot(value: unknown): TeamBotView {
     archived: bool(row.archived),
     createdAt: textOrUndefined(row.createdAt),
     updatedAt: textOrUndefined(row.updatedAt),
+    ownerAccountId: textOrUndefined(row.ownerAccountId),
+    sharedCount: countOrUndefined(row.sharedCount),
+  };
+}
+
+/** One share tuple from the wire. An unknown relation/subject token is dropped
+ * rather than rendered as a share the server did not confirm. */
+export function parseShareView(value: unknown): ShareView | undefined {
+  const row = asRecord(value);
+  const subjectType = text(row.subjectType);
+  const relation = text(row.relation);
+  const subjectId = text(row.subjectId);
+  if (
+    (subjectType !== "account" && subjectType !== "group" && subjectType !== "team_bot") ||
+    (relation !== "viewer" && relation !== "editor") ||
+    !subjectId
+  ) {
+    return undefined;
+  }
+  return {
+    subjectType,
+    subjectId,
+    relation,
+    displayName: textOrUndefined(row.displayName),
+    username: textOrUndefined(row.username),
   };
 }
 

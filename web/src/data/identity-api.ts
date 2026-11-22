@@ -23,6 +23,10 @@ import type {
   IdentityPage,
   PermissionGroupDetail,
   PermissionGroupSummary,
+  ShareInput,
+  ShareResourceKind,
+  ShareView,
+  ShareWriteResult,
   TeamBotView,
   UpdateBotInput,
   UpdateTeamBotInput,
@@ -93,6 +97,12 @@ export interface IdentityApi {
   ): Promise<TeamBotView>;
   archiveTeamBot?(teamBotId: string): Promise<void>;
   startTeamBot?(teamBotId: string, text?: string, sessionId?: string, requestId?: string): Promise<RunStartView>;
+
+  /** Resource sharing (A6). One trio per family; only viewer/editor can be
+   * written, and the server requires the owner relation. */
+  listShares?(kind: ShareResourceKind, resourceId: string): Promise<ShareView[]>;
+  addShare?(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult>;
+  revokeShare?(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult>;
 
   /** The run projection's reads. The session list already exists on the app's
    * own transport; it is named here so the run page can look up one session's

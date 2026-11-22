@@ -36,6 +36,10 @@ import type {
   PermissionGroupSummary,
   PermissionScope,
   RosterEntry,
+  ShareInput,
+  ShareResourceKind,
+  ShareView,
+  ShareWriteResult,
   TeamBotView,
   UpdateBotInput,
   UpdateTeamBotInput,
@@ -98,7 +102,7 @@ const bot = (
   name: string,
   profileKey: string,
   accountKey: string,
-  opts: { instruction: string; permissions: string[]; tools?: string[]; archived?: boolean; days?: number },
+  opts: { instruction: string; permissions: string[]; tools?: string[]; archived?: boolean; days?: number; sharedCount?: number },
 ): BotView => ({
   botId: id(`bot-${key}`),
   name,
@@ -113,6 +117,7 @@ const bot = (
   archived: opts.archived === true,
   createdAt: daysAgoIso(opts.days ?? 14),
   updatedAt: daysAgoIso(1),
+  sharedCount: opts.sharedCount ?? 0,
 });
 
 /** The fixture run's stable session ids. The same ids name the member task
@@ -224,6 +229,11 @@ const MEMBER_EVENTS: Record<string, SessionEventView[]> = {
  * and a `bot.invoke` ceiling of 本团队 so the matrix's 全部/整个租户 options are
  * visibly disabled with their reason. */
 const CURRENT_ACCOUNT: AccountView = account("lina", "lina", "李娜", "human", { createdDaysAgo: 19 });
+
+/** The fixture's own ids, exported so the session fixture can attribute its
+ * sample sessions to the same accounts the share dialogs list. */
+export const fixtureAccountId = (key: string): string => id(key);
+export const fixtureCurrentAccountId: string = CURRENT_ACCOUNT.accountId;
 
 const CURRENT_PERMISSIONS: Record<string, PermissionScope> = {
   "session.read": "team",
@@ -399,6 +409,7 @@ export class FixtureIdentity implements IdentityApi {
       ],
       tools: ["search_orders", "get_order", "send_reply"],
       days: 14,
+      sharedCount: 1,
     }),
     bot("order", "订单查询", "order", "lina", {
       instruction: "查询订单与物流，给出可核对的事实。",
@@ -455,6 +466,20 @@ export class FixtureIdentity implements IdentityApi {
   ];
   private issuedPlaintext: string | null = null;
 
+  /** In-memory relation tuples for the share dialogs. The keys are
+   * `<kind>:<resourceId>`, the values the viewer/editor tuples. Two seeds keep
+   * the success faces real: 客服一号 is shared with 陈墨, 客服团队 with 客服组. */
+  private readonly shareTuples = new Map<string, ShareView[]>([
+    [
+      `bot:${id("bot-support")}`,
+      [{ subjectType: "account", subjectId: id("chenmo"), relation: "viewer", displayName: "陈墨", username: "chenmo" }],
+    ],
+    [
+      `team_bot:${id("team-support")}`,
+      [{ subjectType: "group", subjectId: id("group-support"), relation: "viewer", displayName: "客服组" }],
+    ],
+  ]);
+
   private readonly teams: TeamBotView[] = [
     {
       teamBotId: id("team-support"),
@@ -473,6 +498,8 @@ export class FixtureIdentity implements IdentityApi {
       archived: false,
       createdAt: daysAgoIso(12),
       updatedAt: daysAgoIso(1),
+      ownerAccountId: id("lina"),
+      sharedCount: 1,
     },
     {
       teamBotId: id("team-content"),
@@ -484,6 +511,8 @@ export class FixtureIdentity implements IdentityApi {
       archived: false,
       createdAt: daysAgoIso(6),
       updatedAt: daysAgoIso(2),
+      ownerAccountId: id("lina"),
+      sharedCount: 0,
     },
     {
       teamBotId: id("team-finance"),
@@ -495,6 +524,8 @@ export class FixtureIdentity implements IdentityApi {
       archived: false,
       createdAt: daysAgoIso(20),
       updatedAt: daysAgoIso(8),
+      ownerAccountId: id("finance"),
+      sharedCount: 0,
     },
   ];
 
@@ -808,6 +839,88 @@ export class FixtureIdentity implements IdentityApi {
     if (group.summary.builtin) throw new KeelApiError(403, "这是内置组，不能直接修改。");
     group.grants = group.grants.filter((entry) => !(entry.key === key && entry.scope === scope));
     group.summary.updatedAt = nowIso();
+  }
+
+  // ---- resource sharing ----------------------------------------------------
+
+  async listShares(kind: ShareResourceKind, resourceId: string): Promise<ShareView[]> {
+    return (this.shareTuples.get(`${kind}:${resourceId}`) ?? []).map((share) => ({ ...share }));
+  }
+
+  async addShare(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult> {
+    if (input.relation !== "viewer" && input.relation !== "editor") {
+      throw new KeelApiError(400, "owner 与 team_member 由系统管理，不能通过共享授予。", [], undefined, "invalid_relation");
+    }
+    if (input.subjectType === "account" && input.subjectId === CURRENT_ACCOUNT.accountId) {
+      throw new KeelApiError(400, "不能把资源共享给自己。", [], undefined, "self_share");
+    }
+    this.requireShareResource(kind, resourceId);
+    const share: ShareView = {
+      subjectType: input.subjectType,
+      subjectId: input.subjectId,
+      relation: input.relation,
+      ...this.shareSubjectFacts(input),
+    };
+    const key = `${kind}:${resourceId}`;
+    const rows = this.shareTuples.get(key) ?? [];
+    if (rows.some((row) => row.subjectType === share.subjectType && row.subjectId === share.subjectId && row.relation === share.relation)) {
+      return { created: false, share: { ...share } };
+    }
+    rows.push(share);
+    this.shareTuples.set(key, rows);
+    this.bumpSharedCount(kind, resourceId, 1);
+    return { created: true, share: { ...share } };
+  }
+
+  async revokeShare(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult> {
+    const key = `${kind}:${resourceId}`;
+    const rows = this.shareTuples.get(key) ?? [];
+    const index = rows.findIndex(
+      (row) => row.subjectType === input.subjectType && row.subjectId === input.subjectId && row.relation === input.relation,
+    );
+    const removed = index >= 0 ? rows[index] : undefined;
+    if (!removed) throw new KeelApiError(404, "这条共享不存在。", [], undefined, "not_found");
+    rows.splice(index, 1);
+    this.shareTuples.set(key, rows);
+    this.bumpSharedCount(kind, resourceId, -1);
+    return { revoked: true, share: { ...removed } };
+  }
+
+  private requireShareResource(kind: ShareResourceKind, resourceId: string): void {
+    if (!resourceId) throw new KeelApiError(400, "缺少资源 id。");
+    if (kind === "bot" && !this.bots.some((entry) => entry.botId === resourceId)) {
+      throw new KeelApiError(404, "没有找到这个 Bot。", [], undefined, "not_found");
+    }
+    if (kind === "team_bot" && !this.teams.some((entry) => entry.teamBotId === resourceId)) {
+      throw new KeelApiError(404, "没有找到这个团队。", [], undefined, "not_found");
+    }
+  }
+
+  private shareSubjectFacts(input: ShareInput): Pick<ShareView, "displayName" | "username"> {
+    if (input.subjectType === "account") {
+      const account = this.accounts.find((row) => row.accountId === input.subjectId);
+      if (!account) throw new KeelApiError(404, "共享对象不存在。", [], undefined, "subject_not_found");
+      return { displayName: account.displayName, username: account.username };
+    }
+    if (input.subjectType === "group") {
+      const group = this.groups.find((row) => row.summary.groupId === input.subjectId);
+      if (!group) throw new KeelApiError(404, "共享对象不存在。", [], undefined, "subject_not_found");
+      return { displayName: group.summary.name };
+    }
+    const team = this.teams.find((row) => row.teamBotId === input.subjectId);
+    if (!team) throw new KeelApiError(404, "共享对象不存在。", [], undefined, "subject_not_found");
+    return { displayName: team.name };
+  }
+
+  private bumpSharedCount(kind: ShareResourceKind, resourceId: string, delta: number): void {
+    const apply = (current: number | undefined) => Math.max(0, (current ?? 0) + delta);
+    if (kind === "bot") {
+      const bot = this.bots.find((entry) => entry.botId === resourceId);
+      if (bot) bot.sharedCount = apply(bot.sharedCount);
+    } else if (kind === "team_bot") {
+      const team = this.teams.find((entry) => entry.teamBotId === resourceId);
+      if (team) team.sharedCount = apply(team.sharedCount);
+    }
   }
 
   // ---- profiles & roles ----------------------------------------------------

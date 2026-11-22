@@ -49,7 +49,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { KeelApiError } from "./http";
-import { FixtureIdentity } from "./fixture-identity";
+import { FixtureIdentity, fixtureAccountId, fixtureCurrentAccountId } from "./fixture-identity";
 import type {
   AccountView,
   AuditEventView,
@@ -63,6 +63,10 @@ import type {
   PermissionGroupDetail,
   PermissionGroupSummary,
   RosterEntry,
+  ShareInput,
+  ShareResourceKind,
+  ShareView,
+  ShareWriteResult,
   TeamBotView,
   UpdateBotInput,
   UpdateTeamBotInput,
@@ -1045,6 +1049,18 @@ export class FixtureClient implements SettingsApi {
     return this.identity.cancelSession(sessionId);
   }
 
+  listShares(kind: ShareResourceKind, resourceId: string): Promise<ShareView[]> {
+    return this.identity.listShares(kind, resourceId);
+  }
+
+  addShare(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult> {
+    return this.identity.addShare(kind, resourceId, input);
+  }
+
+  revokeShare(kind: ShareResourceKind, resourceId: string, input: ShareInput): Promise<ShareWriteResult> {
+    return this.identity.revokeShare(kind, resourceId, input);
+  }
+
   listAuditEvents(query?: AuditQuery): Promise<IdentityPage<AuditEventView>> {
     return this.identity.listAuditEvents(query);
   }
@@ -1211,6 +1227,14 @@ export class FixtureClient implements SettingsApi {
         createdAt: nowISO(),
         updatedAt: nowISO(),
         lastMessageAt: nowISO(),
+        // The fixture's sessions belong to the current user, like a live
+        // deployment's own workspace. The shared sample below overrides one
+        // row so 「共享给我」 has a real member.
+        ownerAccountId: fixtureCurrentAccountId,
+        createdByAccountId: fixtureCurrentAccountId,
+        ownerDisplayName: "李娜",
+        shared: false,
+        sharedWithMe: false,
       },
       events: [],
       nextSeq: 1,
@@ -1503,6 +1527,15 @@ export class FixtureClient implements SettingsApi {
     ]);
 
     this.add("demo-empty", "新会话", []);
+
+    // One session shared with 李娜 by 陈墨, so 「共享给我」 and 「由 陈墨 共享」
+    // are a real row rather than a fabricated filter.
+    const sharedSession = this.sessions.get("demo-chat");
+    if (sharedSession) {
+      sharedSession.meta.ownerAccountId = fixtureAccountId("chenmo");
+      sharedSession.meta.ownerDisplayName = "陈墨";
+      sharedSession.meta.sharedWithMe = true;
+    }
   }
 
   private add(id: string, title: string, events: Array<{ kind: string; payload: unknown }>, runStatus = "done") {

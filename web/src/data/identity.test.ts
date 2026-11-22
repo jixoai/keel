@@ -10,6 +10,7 @@ import {
   parseBot,
   parseBotKey,
   parsePermissionGroupDetail,
+  parseShareView,
   parseTeamBot,
   parseWhoAmI,
 } from "./identity";
@@ -99,6 +100,32 @@ test("team bot: mission + roster; a seat without a bot id is dropped", () => {
   expect(team.roster.map((seat) => seat.botId)).toEqual(["support-1", "image-1"]);
   expect(team.revision).toBe(4);
   expect(team.hash).toBe("h-4");
+});
+
+test("share: a viewer/editor tuple keeps its display facts; a malformed tuple is dropped", () => {
+  const account = parseShareView({
+    subjectType: "account",
+    subjectId: "a-2",
+    relation: "editor",
+    displayName: "陈墨",
+    username: "chenmo",
+  });
+  expect(account?.relation).toBe("editor");
+  expect(account?.displayName).toBe("陈墨");
+  expect(account?.username).toBe("chenmo");
+  // owner/team_member are not writable share relations, so a server answer
+  // carrying one is not rendered as a share.
+  expect(parseShareView({ subjectType: "account", subjectId: "a-2", relation: "owner" })).toBe(undefined);
+  expect(parseShareView({ subjectType: "tenant", subjectId: "a-2", relation: "viewer" })).toBe(undefined);
+  expect(parseShareView({ subjectType: "account", subjectId: "", relation: "viewer" })).toBe(undefined);
+});
+
+test("share badges: sharedCount and TeamBot owner survive the parsers", () => {
+  const bot = parseBot({ botId: "b-1", name: "B", profileId: "p", modelKind: "text", sharedCount: 2 });
+  expect(bot.sharedCount).toBe(2);
+  const team = parseTeamBot({ teamBotId: "t-1", name: "T", mission: "m", ownerAccountId: "a-1", sharedCount: 1 });
+  expect(team.ownerAccountId).toBe("a-1");
+  expect(team.sharedCount).toBe(1);
 });
 
 test("bot key: metadata only (no plaintext field exists on the wire shape)", () => {

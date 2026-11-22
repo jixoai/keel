@@ -126,6 +126,57 @@ test("403 keeps the engine's reason and required key", async () => {
   expect(errorMessageOf(refusal)).toContain("bot.read");
 });
 
+test("shares: the three families use the same trio; add/revoke keep the tuple body", async () => {
+  const { fetchImpl, calls } = stub({
+    "GET /v1/sessions/s-1/shares": () =>
+      json(200, {
+        resourceType: "session",
+        resourceId: "s-1",
+        shares: [{ subjectType: "account", subjectId: "a-2", relation: "viewer", displayName: "陈墨" }],
+      }),
+    "POST /v1/bots/support-1/shares": (call) => {
+      expect(JSON.parse(call.body)).toEqual({ subjectType: "group", subjectId: "g-1", relation: "editor" });
+      return json(201, {
+        created: true,
+        share: { subjectType: "group", subjectId: "g-1", relation: "editor", displayName: "客服组" },
+      });
+    },
+    "POST /v1/team-bots/support-team/shares/revoke": (call) => {
+      expect(call.headers["X-Keel-CSRF"]).toBe("csrf-1");
+      expect(JSON.parse(call.body)).toEqual({ subjectType: "account", subjectId: "a-2", relation: "viewer" });
+      return json(200, {
+        revoked: true,
+        share: { subjectType: "account", subjectId: "a-2", relation: "viewer", displayName: "陈墨" },
+      });
+    },
+    "GET /v1/auth/session": () =>
+      json(200, { authenticated: true, mode: "required", csrfToken: "csrf-1", account: { id: "a-1" } }),
+  });
+  const http = new KeelHttp("", fetchImpl);
+  await http.authSession();
+
+  const sessionShares = await http.listShares("session", "s-1");
+  expect(sessionShares.length).toBe(1);
+  expect(sessionShares[0].displayName).toBe("陈墨");
+
+  const added = await http.addShare("bot", "support-1", { subjectType: "group", subjectId: "g-1", relation: "editor" });
+  expect(added.created).toBe(true);
+  expect(added.share.relation).toBe("editor");
+
+  const revoked = await http.revokeShare("team_bot", "support-team", {
+    subjectType: "account",
+    subjectId: "a-2",
+    relation: "viewer",
+  });
+  expect(revoked.revoked).toBe(true);
+  expect(calls.map((call) => `${call.method} ${call.url.split("?")[0]}`)).toEqual([
+    "GET /v1/auth/session",
+    "GET /v1/sessions/s-1/shares",
+    "POST /v1/bots/support-1/shares",
+    "POST /v1/team-bots/support-team/shares/revoke",
+  ]);
+});
+
 test("429 carries Retry-After as whole seconds", async () => {
   const { fetchImpl } = stub({
     "GET /v1/auth/session": () => json(200, { authenticated: false, csrfToken: "anon" }),
