@@ -55,6 +55,7 @@ export function PluginTopPanels(props: { testID?: string }) {
           flexDirection: "row",
           alignItems: "center",
           gap: space.sm,
+          overflow: "hidden",
         }}
       >
         <Each of={panels()} key={(panel) => panel.id}>
@@ -65,6 +66,7 @@ export function PluginTopPanels(props: { testID?: string }) {
               style={{
                 minWidth: 0,
                 maxWidth: "100%",
+                flexShrink: 1,
                 height: 32,
                 flexDirection: "row",
                 alignItems: "center",

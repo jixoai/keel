@@ -11,9 +11,9 @@
 // What the panel holds, top to bottom:
 //   · the header row — h-12 (`WORKSPACE_SHELL_HEADER_HEIGHT_PX`, the height the
 //     shell gives its own header): the logo tile (12px-rounded, the reference's
-//     titlebar mark), the wordmark, and three `IconButton`s — 新建会话 / 刷新会话 /
-//     the *one* settings entry (打开设置). The footer's second settings control
-//     is gone.
+//     titlebar mark), the wordmark, and two `IconButton`s — 新建会话 / 刷新会话.
+//     The settings entry is the shell's (the desktop rail's bottom row, the
+//     phone's bottom-bar gear), so the list does not repeat it (A4.4f).
 //   · the search field — the kit's `Input` (the hand-drawn glass pill is gone).
 //   · the rows — `Each` over the store's own order, so a refresh that only
 //     changes state updates rows in place (the polish change's C5). A row is a
@@ -430,9 +430,9 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           {/* 12px is the UI floor; 9px CJK ink read as a solid block. */}
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>AI 员工会话</Text>
         </View>
-        {/* The three icon buttons are borderless and gapless-looking at 6px: a
+        {/* The two icon buttons are borderless and gapless-looking at 6px: a
             row gap one step wider (8px) plus their own padding keeps them apart
-            as three targets, so 「新建会话」 and 「刷新会话」 are not one press
+            as two targets, so 「新建会话」 and 「刷新会话」 are not one press
             away from each other by accident. */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
           <IconButton icon="plus" label="新建会话" onPress={() => void store.createSession()} />
@@ -442,7 +442,6 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             disabled={refreshing()}
             onPress={() => void refresh()}
           />
-          <IconButton icon="settings" label="打开设置" onPress={() => store.openSettings()} />
         </View>
       </View>
       {/* L1 · the search: the kit's Input, nothing drawn around it. */}

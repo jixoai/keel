@@ -13,7 +13,7 @@
 // destinations' test ids (`books-chapter-*`); the phone's bottom tabs keep
 // theirs (`books-tab-*`).
 import type { JSX } from "nsh";
-import { Text, View, windowSize } from "nsh";
+import { effect, Text, View, windowSize } from "nsh";
 import {
   Button,
   GLASS_BLUR,
@@ -28,6 +28,7 @@ import {
 } from "../../ui/kit";
 import { Icon, type IconName } from "../../ui/icons";
 import { store } from "../../data/store";
+import { botAccess } from "../../data/bots";
 import { canAny } from "../../data/permissions";
 import {
   BOOK_TOUCH_PX,
@@ -314,7 +315,7 @@ function BottomBar() {
         <IconButton
           testID="books-mobile-settings"
           icon="settings"
-          label="设置"
+          label="打开设置"
           onPress={() => store.openSettings()}
           style={{ width: BOOK_TOUCH_PX, height: BOOK_TOUCH_PX }}
         />
@@ -326,6 +327,12 @@ function BottomBar() {
 /** The shell: the top band, the desktop rail or the phone's bottom tabs, and
  * the chapter's paper. */
 export function BooksChrome(props: { children?: JSX.Element }) {
+  // The team/bot chapters read one shared store; the shell warms it once (the
+  // top band no longer owns a todo count, but the lists still need the data).
+  effect(() => {
+    if (canAny(["bot.read", "bot.manage"])) botAccess.ensureBots();
+    if (canAny(["team_bot.read", "team_bot.manage"])) botAccess.ensureTeams();
+  });
   return (
     <View testID="books-shell" style={{ flex: 1, minHeight: 0, backgroundColor: color.background }}>
       <TopBand />

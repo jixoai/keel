@@ -163,7 +163,9 @@ test("TUI: 团队索引——队长、使命、状态与待处理", async () => 
   expect(view.texts()).toContain("内容运营");
   expect(view.texts()).toContain("财务对账");
   expect(view.texts()).toContain("有成员需处理");
-  expect(view.texts().join("\n")).toContain("待办 1");
+  // The cross-object todo count left the top band (A4.4f); the team page's own
+  // summary still reports the same pending item.
+  expect(view.texts().join("\n")).toContain("1 项待处理");
 });
 
 test("TUI: 团队页——使命、名单、启动前检查与启动", async () => {
