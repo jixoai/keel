@@ -810,7 +810,7 @@ class BotAccessStore {
       this.botDraft.set(draftOf(updated));
       this.botSaved.set(draftOf(updated));
       this.bots.update((rows) => rows.map((row) => (row.botId === updated.botId ? { ...row, ...updated } : row)));
-      this.botNotice.set(`已保存并登记 ${changes.length} 项变更 · 已写入 05 记录。`);
+      this.botNotice.set(`已登记 ${changes.length} 项变更 · 已写入记录 05。`);
       return { ok: true, applied: changes.length, total: changes.length };
     } catch (error) {
       const failure = failureOf(error);
@@ -1269,7 +1269,7 @@ class BotAccessStore {
       this.teamDraft.set({ mission: updated.mission, roster: updated.roster.map((seat) => ({ ...seat })) });
       this.teamSaved.set({ mission: updated.mission, roster: updated.roster.map((seat) => ({ ...seat })) });
       this.teams.update((rows) => rows.map((row) => (row.teamBotId === updated.teamBotId ? { ...row, ...updated } : row)));
-      this.teamNotice.set(`已保存并登记 ${changes.length} 项变更 · 影响下一次启动，不影响正在运行的会话。`);
+      this.teamNotice.set(`已登记 ${changes.length} 项变更 · 影响下一次启动，不影响正在运行的会话。`);
       return { ok: true, applied: changes.length, total: changes.length };
     } catch (error) {
       const failure = failureOf(error);

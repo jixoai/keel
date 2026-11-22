@@ -105,6 +105,10 @@ const groupGrantText = (group: PermissionGroupSummary): string => {
 
 const groupCountsOf = (group: PermissionGroupSummary): string => {
   const row = identityAccess.groups().find((entry) => entry.groupId === group.groupId);
+  const loading =
+    identityAccess.groupsLoading() ||
+    (group.groupId === identityAccess.groupDetailId() && identityAccess.groupDetailLoading());
+  if (loading && (row === undefined || row.grantCount === undefined)) return "读取中…";
   if (!row || row.memberCount === undefined) return "成员与能力未读到";
   const unsaved = group.groupId === identityAccess.groupDetailId() ? identityAccess.groupChanges().length : 0;
   return `${groupGrantText(group)} · ${row.memberCount} 人${unsaved ? ` · ${unsaved} 项未保存` : ""}`;
@@ -138,6 +142,8 @@ function GroupIndexRow(props: { group: PermissionGroupSummary; selected: boolean
 
 /** The identity chapter's permission-group index (≥1440). */
 export function GroupsIndex() {
+  const all = () => identityAccess.groups();
+  const busy = () => identityAccess.groupsLoading() || identityAccess.groupsError() !== null;
   return (
     <View style={{ flex: 1, minHeight: 0, flexDirection: "column" }}>
       <View style={{ padding: space.lg, gap: space.md, borderBottomWidth: 1, borderBottomColor: color.border }}>
@@ -174,17 +180,16 @@ export function GroupsIndex() {
             </If>
           </If>
           <If when={!identityAccess.groupsLoading() && identityAccess.groupsError() === null && visibleGroups().length === 0}>
-            <PageEmpty
-              icon="shield"
-              title={identityAccess.groups().length === 0 ? "还没有自定义组" : "没有匹配的权限组"}
-              description={
-                identityAccess.groups().length === 0
-                  ? "内置组已经覆盖常见岗位。团队有自己的分工时，再建一个组。"
-                  : "换个名字再试。"
-              }
-              primaryLabel={canManageGroups() ? "新建权限组" : undefined}
-              onPrimary={canManageGroups() ? () => createGroupDialog.set(true) : undefined}
-            />
+            <If when={all().length === 0}>
+              <View testID="groups-index-empty" style={{ padding: space.lg }}>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                  还没有权限组。在主区新建第一个权限组。
+                </Text>
+              </View>
+            </If>
+            <If when={all().length > 0}>
+              <PageEmpty icon="shield" title="没有匹配的权限组" description="换个名字再试。" />
+            </If>
           </If>
           <Each of={visibleGroups()} key={(group) => group.groupId}>
             {(group) => (
@@ -197,7 +202,13 @@ export function GroupsIndex() {
         </View>
       </ScrollArea>
       <View style={{ padding: space.lg, borderTopWidth: 1, borderTopColor: color.border }}>
-        <If when={canManageGroups()} else={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：缺「管理权限组」能力。</Text>}>
+        <If when={!canManageGroups()}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：缺「管理权限组」能力。</Text>
+        </If>
+        <If when={canManageGroups() && busy()}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>读取完成后再新建权限组。</Text>
+        </If>
+        <If when={canManageGroups() && !busy() && all().length > 0}>
           <Button
             testID="groups-create"
             variant="outline"
@@ -217,6 +228,8 @@ export function GroupsIndex() {
 /** The permission-group index as a page (1024–1439). */
 export function GroupsPage() {
   const all = () => identityAccess.groups();
+  const noData = () => (identityAccess.groupsLoading() || identityAccess.groupsError() !== null) && all().length === 0;
+  const busy = () => identityAccess.groupsLoading() || identityAccess.groupsError() !== null;
   return (
     <ScrollArea testID="groups-page-scroll" accessibilityLabel="权限组" style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flexDirection: "column", gap: space.lg }}>
@@ -225,18 +238,26 @@ export function GroupsPage() {
           kicker={{ icon: "shield", text: "04 / 身份 · 权限组" }}
           title="权限组"
           description="谁能做什么，按组维护；内置组只读，可以另存为副本。"
-          facts={[
-            { label: "共", value: `${all().length} 个组` },
-            { label: "", value: `${all().filter((group) => group.builtin).length} 个内置 · ${all().filter((group) => !group.builtin).length} 个自定义` },
-          ]}
+          facts={
+            noData()
+              ? [{ label: "共", value: "—" }]
+              : [
+                  { label: "共", value: `${all().length} 个组` },
+                  {
+                    label: "",
+                    value: `${all().filter((group) => group.builtin).length} 个内置 · ${all().filter((group) => !group.builtin).length} 个自定义`,
+                  },
+                ]
+          }
           actions={
-            canManageGroups() ? (
+            canManageGroups() && all().length > 0 && !busy() ? (
               <Button
                 testID="groups-create-page"
                 size={isMobile() ? "default" : "sm"}
                 icon="plus"
                 label="新建权限组"
                 accessibilityLabel="新建权限组"
+                disabled={busy()}
                 onPress={() => createGroupDialog.set(true)}
                 style={touchStyle()}
               />
@@ -292,6 +313,11 @@ export function GroupsPage() {
   );
 }
 
+const GROUP_TYPE_WIDTH = 90;
+const GROUP_MEMBERS_WIDTH = 90;
+const GROUP_CAPABILITIES_WIDTH = 90;
+const GROUP_MODIFIED_WIDTH = 130;
+
 function GroupsTable() {
   return (
     <Table testID="groups-table" bare accessibilityLabel="权限组列表">
@@ -299,16 +325,16 @@ function GroupsTable() {
         <Th>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>权限组</Text>
         </Th>
-        <Th width={90}>
+        <Th width={GROUP_TYPE_WIDTH}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>类型</Text>
         </Th>
-        <Th width={90}>
+        <Th width={GROUP_MEMBERS_WIDTH}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>成员</Text>
         </Th>
-        <Th width={90}>
+        <Th width={GROUP_CAPABILITIES_WIDTH}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>能力</Text>
         </Th>
-        <Th width={130}>
+        <Th width={GROUP_MODIFIED_WIDTH}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>最近修改</Text>
         </Th>
       </TableHeaderRow>
@@ -327,24 +353,24 @@ function GroupsTable() {
                   <Text style={{ fontSize: typeScale.base, color: color.foreground }}>{groupDisplayName(group().name)}</Text>
                 </PressRow>
               </Td>
-              <Td>
+              <Td width={GROUP_TYPE_WIDTH}>
                 <Badge
                   variant={group().builtin ? "outline" : "secondary"}
                   label={group().builtin ? "内置组" : "自定义"}
                   style={{ alignSelf: "flex-start" }}
                 />
               </Td>
-              <Td>
+              <Td width={GROUP_MEMBERS_WIDTH}>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                   {row()?.memberCount !== undefined ? `${row()?.memberCount} 人` : "—"}
                 </Text>
               </Td>
-              <Td>
+              <Td width={GROUP_CAPABILITIES_WIDTH}>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                   {row()?.grantCount !== undefined ? `${row()?.grantCount} 项` : "—"}
                 </Text>
               </Td>
-              <Td>
+              <Td width={GROUP_MODIFIED_WIDTH}>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{formatWhen(group().updatedAt)}</Text>
               </Td>
             </TableBodyRow>
@@ -514,7 +540,7 @@ function GroupHead(props: { groupId: string; editable: boolean; builtin: boolean
           </If>
         </>
       }
-      description="权限只做加法：账号的最终能力是所有组与直接授权的并集。保存会写入记录 05。"
+      description="权限只做加法：账号的最终能力是所有组与直接授权的并集。登记后写入记录 05。"
       facts={[{ label: "最近修改", value: formatWhen(detail()?.group.updatedAt) }]}
       actions={
         <>
@@ -658,7 +684,7 @@ function GroupMatrix(props: { editable: boolean; builtin: boolean }) {
           testID="group-matrix-empty"
           tone="info"
           icon="info"
-          text="这个组还没有任何能力。从下面的域开始选择第一项；保存前会先给你看这次的变更。"
+          text="这个组还没有任何能力。从下面的域开始选择第一项；登记前会先给你看这次的变更。"
         />
       </If>
       <If when={!isMobile()}>
@@ -944,7 +970,7 @@ function GroupChanges(props: { editable: boolean }) {
   return (
     <If when={changes().length > 0}>
       <View testID="group-changes" style={{ flexDirection: "column", gap: space.sm }}>
-        <BandHead num="—" title="本次变更" right={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存前可核对</Text>} />
+        <BandHead num="—" title="本次变更" right={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>登记前可核对</Text>} />
         <Each of={changes()} key={(change) => change.key}>
           {(change) => (
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 32, borderTopWidth: 1, borderTopColor: color.border }}>
@@ -967,14 +993,14 @@ function GroupChanges(props: { editable: boolean }) {
             </View>
           )}
         </Each>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.sm }}>
           <Icon name="alert" size={12} tint={color.mutedForeground} />
-          <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
+          <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.mutedForeground }}>
             这次变更影响 {members()} 位成员的下一次操作；正在运行的会话不受影响，撤销在下一次工具调用时生效。
           </Text>
         </View>
         <If when={!props.editable}>
-          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：这里不提供保存。</Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：这里不提供登记。</Text>
         </If>
       </View>
     </If>
@@ -1010,7 +1036,7 @@ function GroupSignoff() {
         >
           <View style={{ flexDirection: "column", minWidth: 0 }}>
             <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
-              本次登记人：{me()?.displayName || me()?.username || "当前账号"} · {identityAccess.currentRoleLabel()}
+              本次登记人：{me()?.displayName || me()?.username || "你的账号"} · {identityAccess.currentRoleLabel()}
             </Text>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>登记后写入记录 05 · 立即生效</Text>
           </View>
@@ -1040,7 +1066,7 @@ function GroupSignoff() {
               variant={dirty() ? "default" : "outline"}
               size={isMobile() ? "default" : "sm"}
               icon="check"
-              label={identityAccess.groupSaving() ? "保存中…" : "检查并登记"}
+              label={identityAccess.groupSaving() ? "登记中…" : "检查并登记"}
               accessibilityLabel="检查并登记"
               disabled={!dirty() || identityAccess.groupSaving()}
               loading={identityAccess.groupSaving()}
@@ -1086,7 +1112,7 @@ function GroupSignoff() {
   );
 }
 
-/** 保存前账本: the diff, the signatory, the affected members and one explicit
+/** 登记前账本: the diff, the signatory, the affected members and one explicit
  * tick per widened high-risk key. The confirm stays disabled until every tick is
  * there. */
 function LedgerSheet() {
@@ -1100,7 +1126,7 @@ function LedgerSheet() {
     const result = await identityAccess.saveGroupDraft();
     if (result.ok) {
       ledgerOpen.set(false);
-      savedNotice.set(`已保存并登记 ${result.applied} 项变更 · 已写入记录 05。`);
+      savedNotice.set(`已登记 ${result.applied} 项变更 · 已写入记录 05。`);
       confirmHighRisk.set({});
     }
   };
@@ -1111,16 +1137,17 @@ function LedgerSheet() {
       side={isMobile() ? "bottom" : "right"}
       style={isMobile() ? { height: 520, maxHeight: "88%" } : undefined}
       title={`确认 ${changes().length} 项变更`}
-      description="保存前核对：这次变更会立即影响这些成员的下一次操作。"
+      description="登记前核对：这次变更会立即影响这些成员的下一次操作。"
       onOpenChange={(event) => {
         if (!event.open) close();
       }}
       footer={
         <>
-          <Button variant="outline" label="取消" accessibilityLabel="取消保存" onPress={close} style={touchStyle()} />
+          <Button variant="outline" label="取消" accessibilityLabel="取消登记" onPress={close} style={touchStyle()} />
           <Button
             testID="group-ledger-confirm"
-            label={identityAccess.groupSaving() ? "保存中…" : "确认并登记"}
+            variant={allTicked() ? "default" : "outline"}
+            label={identityAccess.groupSaving() ? "登记中…" : "确认并登记"}
             accessibilityLabel="确认并登记"
             loading={identityAccess.groupSaving()}
             disabled={!allTicked() || identityAccess.groupSaving()}
@@ -1138,7 +1165,7 @@ function LedgerSheet() {
         </If>
       </View>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-        本次登记人：{me()?.displayName || me()?.username || "当前账号"} · {identityAccess.currentRoleLabel()}
+        本次登记人：{me()?.displayName || me()?.username || "你的账号"} · {identityAccess.currentRoleLabel()}
       </Text>
       <ScrollArea maxHeight={isMobile() ? 260 : 360} style={{ flexDirection: "column" }}>
         <Each of={changes()} key={(change) => change.key}>

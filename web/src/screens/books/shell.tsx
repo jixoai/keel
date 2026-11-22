@@ -200,7 +200,7 @@ function TodoSheet(props: { open: boolean; onClose: () => void }) {
 /** 我的账号: the whoami facts and the one session action. */
 function AccountDialog(props: { open: boolean; onClose: () => void; onSignOut: () => void }) {
   const me = () => store.identity();
-  const name = () => me()?.displayName || me()?.username || "当前账号";
+  const name = () => me()?.displayName || me()?.username || "你的账号";
   return (
     <Dialog
       open={props.open}

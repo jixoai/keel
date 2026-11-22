@@ -23,7 +23,7 @@ import {
   preferredAccountId,
 } from "./accounts";
 import { GroupDialogs, GroupPage, GroupsIndex, GroupsPage, GroupsWelcome, preferredGroupId } from "./groups";
-import { IdentitySegmented, Kicker, PageLoading, PagePermission, isWide } from "./common";
+import { IdentitySegmented, Kicker, PageEmpty, PageLoading, PagePermission, isWide } from "./common";
 import { IndexColumn, Paper } from "./shell";
 
 /** The chapter's own capability gate (the shell hides the tab, a deep link
@@ -71,33 +71,87 @@ export function IdentityChapter() {
           </IndexColumn>
           <Paper>
             <If when={section() === "accounts"}>
+              <If when={identityAccess.accountsError() !== null}>
+                <View style={{ flex: 1, justifyContent: "center" }}>
+                  <PageEmpty
+                    testID="accounts-paper-error"
+                    icon="alert"
+                    title="账号列表读取失败"
+                    description={
+                      identityAccess.accountsError()?.status === 403
+                        ? "你没有查看账号的权限；左侧写明了缺什么、找谁。"
+                        : "在左侧重试；读取成功后，这里会显示账号详情供你选择。"
+                    }
+                  />
+                </View>
+              </If>
               <If
-                when={(objectId() ?? preferredAccountId()) !== null}
-                else={
-                  <If
-                    when={identityAccess.accountsLoading() && identityAccess.accounts().length === 0}
-                    else={<View style={{ flex: 1, justifyContent: "center" }}><AccountsWelcome /></View>}
-                  >
-                    <PageLoading rows={5} testID="identity-paper-loading" />
-                  </If>
+                when={
+                  identityAccess.accountsError() === null &&
+                  (objectId() ?? preferredAccountId()) !== null
                 }
               >
                 <AccountPage accountId={objectId() ?? preferredAccountId() ?? ""} showBack={false} />
               </If>
+              <If
+                when={
+                  identityAccess.accountsError() === null &&
+                  (objectId() ?? preferredAccountId()) === null &&
+                  identityAccess.accountsLoading()
+                }
+              >
+                <PageLoading rows={5} testID="identity-paper-loading" />
+              </If>
+              <If
+                when={
+                  identityAccess.accountsError() === null &&
+                  (objectId() ?? preferredAccountId()) === null &&
+                  !identityAccess.accountsLoading()
+                }
+              >
+                <View style={{ flex: 1, justifyContent: "center" }}><AccountsWelcome /></View>
+              </If>
             </If>
             <If when={section() === "groups"}>
+              <If when={identityAccess.groupsError() !== null}>
+                <View style={{ flex: 1, justifyContent: "center" }}>
+                  <PageEmpty
+                    testID="groups-paper-error"
+                    icon="alert"
+                    title="权限组列表读取失败"
+                    description={
+                      identityAccess.groupsError()?.status === 403
+                        ? "你没有查看权限组的权限；左侧写明了缺什么、找谁。"
+                        : "在左侧重试；读取成功后，这里会显示权限组详情供你选择。"
+                    }
+                  />
+                </View>
+              </If>
               <If
-                when={(objectId() ?? preferredGroupId()) !== null}
-                else={
-                  <If
-                    when={identityAccess.groupsLoading() && identityAccess.groups().length === 0}
-                    else={<View style={{ flex: 1, justifyContent: "center" }}><GroupsWelcome /></View>}
-                  >
-                    <PageLoading rows={5} testID="identity-groups-loading" />
-                  </If>
+                when={
+                  identityAccess.groupsError() === null &&
+                  (objectId() ?? preferredGroupId()) !== null
                 }
               >
                 <GroupPage groupId={objectId() ?? preferredGroupId() ?? ""} showBack={false} />
+              </If>
+              <If
+                when={
+                  identityAccess.groupsError() === null &&
+                  (objectId() ?? preferredGroupId()) === null &&
+                  identityAccess.groupsLoading()
+                }
+              >
+                <PageLoading rows={5} testID="identity-groups-loading" />
+              </If>
+              <If
+                when={
+                  identityAccess.groupsError() === null &&
+                  (objectId() ?? preferredGroupId()) === null &&
+                  !identityAccess.groupsLoading()
+                }
+              >
+                <View style={{ flex: 1, justifyContent: "center" }}><GroupsWelcome /></View>
               </If>
             </If>
           </Paper>

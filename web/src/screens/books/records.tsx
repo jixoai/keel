@@ -235,6 +235,10 @@ export function RecordsChapter() {
   const records = () => identityAccess.visibleRecords();
   const selected = () => records().find((event) => event.eventId === store.routeObjectId()) ?? null;
   const allowed = () => canReadRecords();
+  const quiet = () =>
+    identityAccess.recordsUnavailable() ||
+    identityAccess.recordsError() !== null ||
+    (identityAccess.recordsLoading() && records().length === 0);
   effect(() => {
     if (allowed()) identityAccess.ensureRecords();
   });
@@ -249,15 +253,22 @@ export function RecordsChapter() {
               kicker={{ icon: "activity", text: "05 / 记录" }}
               title="记录"
               badges={
-                <If when={deniedCount() > 0}>
+                <If when={!quiet() && deniedCount() > 0}>
                   <Badge variant="destructive" label={`${deniedCount()} 条拒绝`} />
                 </If>
               }
               description="登录、授权、拒绝、超级管理员、关系与调用在同一张账上；记录只有一个真源。"
-              facts={[
-                { label: "当前", value: `${records().length} 条事件` },
-                { label: "", value: `${deniedCount()} 条拒绝 · ${superAdminCount()} 条超级管理员` },
-              ]}
+              facts={
+                quiet()
+                  ? [{ label: "当前", value: "—" }]
+                  : [
+                      { label: "当前", value: `${records().length} 条事件` },
+                      {
+                        label: "",
+                        value: `${deniedCount()} 条拒绝 · ${superAdminCount()} 条超级管理员`,
+                      },
+                    ]
+              }
               actions={
                 <Button
                   testID="records-export"
@@ -266,7 +277,7 @@ export function RecordsChapter() {
                   icon="download"
                   label="导出 CSV"
                   accessibilityLabel="导出 CSV"
-                  disabled={records().length === 0}
+                  disabled={quiet() || identityAccess.recordsLoading() || records().length === 0}
                   onPress={() => {
                     void copyText(csvOf(records())).then((ok) => {
                       exportNotice.set(ok ? `已复制 ${records().length} 行 CSV 到剪贴板。` : "复制失败：这个环境没有可写的剪贴板。");

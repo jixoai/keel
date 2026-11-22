@@ -793,8 +793,8 @@ function BotMobileBar(props: { canManage: boolean; tryReason: string }) {
         <Button
           size="lg"
           icon="check"
-          label="检查并保存"
-          accessibilityLabel="检查并保存"
+          label="检查并登记"
+          accessibilityLabel="检查并登记"
           disabled={!props.canManage}
           onPress={() => {
             botConfirmHigh.set({});
@@ -1018,7 +1018,7 @@ function BotCapabilitiesSection() {
         <StateNote
           tone="danger"
           icon="alert"
-          text={`这个 Bot 的工作范围里有不在当前能力目录的 key：${unknown().join("、")}。服务端会拒绝保存；把对应行改为「收窄」移除它。`}
+          text={`这个 Bot 的工作范围里有不在当前能力目录的 key：${unknown().join("、")}。服务端会拒绝登记；把对应行改为「收窄」移除它。`}
         />
       </If>
       <If when={!botAccess.accountScopeKnown(bot()?.accountId)}>
@@ -1083,7 +1083,7 @@ function BotCapabilitiesSection() {
         </If>
         <If when={canManage() && botAccess.unknownDraftKeys().length > 0}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            先处理未知 key，保存才会可用。
+            先处理未知 key，登记才会可用。
           </Text>
         </If>
       </If>
@@ -1230,7 +1230,7 @@ function BotChanges() {
   return (
     <If when={changes().length > 0}>
       <View testID="bot-changes" style={{ flexDirection: "column", gap: space.sm, maxWidth: 820 }}>
-        <BandHead num="—" title="本次变更" right={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存前可核对</Text>} />
+        <BandHead num="—" title="本次变更" right={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>登记前可核对</Text>} />
         <Each of={changes()} key={(change) => `${change.field}-${change.key ?? ""}`}>
           {(change) => (
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 36, borderTopWidth: 1, borderTopColor: color.border }}>
@@ -1250,7 +1250,7 @@ function BotChanges() {
           )}
         </Each>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          影响下一次会话；正在运行的会话不会被改写。保存后会写入记录 05。
+          影响下一次会话；正在运行的会话不会被改写。登记后会写入记录 05。
         </Text>
       </View>
     </If>
@@ -1277,9 +1277,9 @@ function BotSignoff() {
     >
       <View style={{ flexDirection: "column", minWidth: 0 }}>
         <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
-          本次登记人：{me()?.displayName || me()?.username || "当前账号"}
+          本次登记人：{me()?.displayName || me()?.username || "你的账号"}
         </Text>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入记录 05 · 影响下一次会话</Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>登记后写入记录 05 · 影响下一次会话</Text>
       </View>
       <If when={dirty()}>
         <Badge variant="warning" label={`${changes().length} 项未保存`} />
@@ -1611,16 +1611,16 @@ function BotLedgerSheet() {
       side={isMobile() ? "bottom" : "right"}
       style={isMobile() ? { height: 560, maxHeight: "88%" } : undefined}
       title={`确认 ${changes().length} 项变更`}
-      description="保存前核对：这次变更会影响这个 Bot 的下一次会话。"
+      description="登记前核对：这次变更会影响这个 Bot 的下一次会话。"
       onOpenChange={(event) => {
         if (!event.open) close();
       }}
       footer={
         <>
-          <Button variant="outline" label="取消" accessibilityLabel="取消保存" onPress={close} style={touchStyle()} />
+          <Button variant="outline" label="取消" accessibilityLabel="取消登记" onPress={close} style={touchStyle()} />
           <Button
             testID="bot-ledger-confirm"
-            label={botAccess.botSaving() ? "保存中…" : "确认并登记"}
+            label={botAccess.botSaving() ? "登记中…" : "确认并登记"}
             accessibilityLabel="确认并登记"
             loading={botAccess.botSaving()}
             disabled={!allTicked() || unknown().length > 0 || botAccess.botSaving()}
@@ -1641,7 +1641,7 @@ function BotLedgerSheet() {
             </If>
           </View>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            本次登记人：{me()?.displayName || me()?.username || "当前账号"}
+            本次登记人：{me()?.displayName || me()?.username || "你的账号"}
           </Text>
           <Each of={changes()} key={(change) => `${change.field}-${change.key ?? ""}`}>
             {(change) => (
@@ -1666,7 +1666,7 @@ function BotLedgerSheet() {
             <StateNote
               tone="danger"
               icon="alert"
-              text={`这些 key 不在当前能力目录里，服务端会拒绝保存：${unknown().join("、")}。先把对应行改为「收窄」移除。`}
+              text={`这些 key 不在当前能力目录里，服务端会拒绝登记：${unknown().join("、")}。先把对应行改为「收窄」移除。`}
             />
           </If>
           <Each of={high()} key={(change) => change.key ?? ""}>

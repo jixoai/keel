@@ -537,7 +537,7 @@ export function TeamPage(props: { teamId: string }) {
                 />
               </DropdownMenu>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, lineHeight: Math.round(typeScale.sm * lineHeight.normal) }}>
-                {dirty() ? "有未保存的变更；保存后影响下一次启动。" : "保存会写入记录 05。"}
+                {dirty() ? "有未保存的变更；登记后影响下一次启动。" : "登记后写入记录 05。"}
               </Text>
             </>
           }
@@ -689,8 +689,8 @@ function TeamMobileBar(props: { canManage: boolean }) {
         <Button
           size="lg"
           icon="check"
-          label="检查并保存"
-          accessibilityLabel="检查并保存"
+          label="检查并登记"
+          accessibilityLabel="检查并登记"
           disabled={!props.canManage || team()?.archived === true}
           onPress={() => {
             teamConfirmHigh.set({});
@@ -731,7 +731,7 @@ function TeamMissionSection() {
         {draft()?.mission.length ?? 0} / 4000 · 每次成员会话都会带上这句使命。写清楚目标、边界、升级条件。
       </Text>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-        保存后影响下一次启动，不影响正在运行的会话。
+        登记后影响下一次启动，不影响正在运行的会话。
       </Text>
       <If when={!canManage()}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：需要「管理团队」能力才能修改使命。</Text>
@@ -1060,9 +1060,9 @@ function TeamSignoff() {
     >
       <View style={{ flexDirection: "column", minWidth: 0 }}>
         <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
-          本次登记人：{me()?.displayName || me()?.username || "当前账号"}
+          本次登记人：{me()?.displayName || me()?.username || "你的账号"}
         </Text>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入记录 05 · 影响下一次启动</Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>登记后写入记录 05 · 影响下一次启动</Text>
       </View>
       <If when={dirty()}>
         <Badge variant="warning" label={`${changes().length} 项未保存`} />
@@ -1216,16 +1216,16 @@ function TeamLedgerSheet() {
       side={isMobile() ? "bottom" : "right"}
       style={isMobile() ? { height: 560, maxHeight: "88%" } : undefined}
       title={`确认 ${changes().length} 项变更`}
-      description="保存前核对：这次变更会影响这个团队的下一次启动。"
+      description="登记前核对：这次变更会影响这个团队的下一次启动。"
       onOpenChange={(event) => {
         if (!event.open) close();
       }}
       footer={
         <>
-          <Button variant="outline" label="取消" accessibilityLabel="取消保存" onPress={close} style={touchStyle()} />
+          <Button variant="outline" label="取消" accessibilityLabel="取消登记" onPress={close} style={touchStyle()} />
           <Button
             testID="team-ledger-confirm"
-            label={botAccess.teamSaving() ? "保存中…" : "确认并登记"}
+            label={botAccess.teamSaving() ? "登记中…" : "确认并登记"}
             accessibilityLabel="确认并登记"
             loading={botAccess.teamSaving()}
             disabled={!allTicked() || botAccess.teamSaving()}
@@ -1243,7 +1243,7 @@ function TeamLedgerSheet() {
             </If>
           </View>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            本次登记人：{me()?.displayName || me()?.username || "当前账号"}
+            本次登记人：{me()?.displayName || me()?.username || "你的账号"}
           </Text>
           <Each of={changes()} key={(change) => `${change.kind}-${change.memberId ?? ""}`}>
             {(change) => (

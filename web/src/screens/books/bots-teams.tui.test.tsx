@@ -70,7 +70,7 @@ test("TUI: Bot 页——五列能力表、Harness 编辑、账本高危确认", 
   await view.waitFor("text:确认 1 项变更");
   expect(view.texts().join("\n")).toContain("本次登记人");
   await view.press("id:bot-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 1 项变更/");
+  await view.waitFor("text:/已登记 1 项变更/");
 });
 
 test("TUI: Bot 页——工作方式编辑走账本确认", async () => {
@@ -89,7 +89,7 @@ test("TUI: Bot 页——工作方式编辑走账本确认", async () => {
   await view.press("id:bot-save");
   await view.waitFor("text:确认 1 项变更");
   await view.press("id:bot-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 1 项变更/");
+  await view.waitFor("text:/已登记 1 项变更/");
 });
 
 test("TUI: Bot 页——高危能力保存必须先勾选", async () => {
@@ -108,7 +108,7 @@ test("TUI: Bot 页——高危能力保存必须先勾选", async () => {
   expect(view.texts().join("\n")).toContain("勾选后才能登记");
   await view.press("id:bot-high-risk-secret.read.value");
   await view.press("id:bot-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 1 项变更/");
+  await view.waitFor("text:/已登记 1 项变更/");
 });
 
 test("TUI: Bot 页——密钥列表、签发（明文只显示一次）与吊销", async () => {
@@ -198,7 +198,7 @@ test("TUI: 团队页——添加成员走账本确认", async () => {
   await view.waitFor("text:确认 1 项变更");
   expect(view.texts().join("\n")).toContain("管家");
   await view.press("id:team-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 1 项变更/");
+  await view.waitFor("text:/已登记 1 项变更/");
   expect(view.texts().join("\n")).toContain("6 名成员");
 });
 
@@ -219,7 +219,7 @@ test("TUI: 团队页——更换队长必须高危确认", async () => {
   expect(view.texts().join("\n")).toContain("我确认更换队长为「订单查询」（高危）");
   await view.press("id:team-high-risk-captain");
   await view.press("id:team-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 1 项变更/");
+  await view.waitFor("text:/已登记 1 项变更/");
 });
 
 test("TUI: Bot 页——改绑身份档案", async () => {
@@ -266,7 +266,7 @@ test("TUI: 团队页——使命保存走账本确认", async () => {
   await view.waitFor("text:确认 1 项变更");
   expect(view.texts().join("\n")).toContain("影响下一次启动");
   await view.press("id:team-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 1 项变更/");
+  await view.waitFor("text:/已登记 1 项变更/");
 });
 
 test("TUI: 运行页——泳道、失败横条、默认失败检查器与图切换", async () => {

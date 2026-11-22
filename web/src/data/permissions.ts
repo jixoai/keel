@@ -87,5 +87,5 @@ export function heldRank(key: string): number {
 
 /** The sentence a 403 page shows: what is missing, not a bare "forbidden". */
 export function permissionHint(key: string): string {
-  return key ? `需要 ${key} 权限；请联系管理员授予，或换一个有权限的账号。` : "当前账号没有执行这个操作的权限。";
+  return key ? `需要 ${key} 权限；请联系管理员授予，或换一个有权限的账号。` : "你的账号没有执行这个操作的权限。";
 }

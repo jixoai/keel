@@ -181,6 +181,8 @@ function AccountIndexRow(props: { row: AccountView; selected: boolean }) {
 /** The identity chapter's left column: the segmented sub-page, one search, the
  * rows, and the one create action. ≥1440 only. */
 export function AccountsIndex() {
+  const all = () => identityAccess.accounts();
+  const busy = () => identityAccess.accountsLoading() || identityAccess.accountsError() !== null;
   return (
     <View style={{ flex: 1, minHeight: 0, flexDirection: "column" }}>
       <View style={{ padding: space.lg, gap: space.md, borderBottomWidth: 1, borderBottomColor: color.border }}>
@@ -217,18 +219,20 @@ export function AccountsIndex() {
             </If>
           </If>
           <If when={!identityAccess.accountsLoading() && identityAccess.accountsError() === null && visibleAccounts().length === 0}>
-            <PageEmpty
-              testID="accounts-index-empty"
-              icon="users"
-              title={identityAccess.accounts().length === 0 ? "还没有人加入这台部署" : "没有匹配的账号"}
-              description={
-                identityAccess.accounts().length === 0
-                  ? "先建一个账号，再决定他能看到什么。"
-                  : "换个名字或用户名；也可以清空类型/状态筛选。"
-              }
-              primaryLabel={canManageAccounts() ? "新建账号" : undefined}
-              onPrimary={canManageAccounts() ? () => createAccountDialog.set(true) : undefined}
-            />
+            <If when={all().length === 0}>
+              <View testID="accounts-index-empty" style={{ padding: space.lg }}>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                  还没有账号。在主区新建第一个账号。
+                </Text>
+              </View>
+            </If>
+            <If when={all().length > 0}>
+              <PageEmpty
+                icon="users"
+                title="没有匹配的账号"
+                description="换个名字或用户名；也可以清空类型/状态筛选。"
+              />
+            </If>
           </If>
           <Each of={visibleAccounts()} key={(row) => row.accountId}>
             {(row) => (
@@ -252,7 +256,13 @@ export function AccountsIndex() {
             style={{ alignSelf: "stretch" }}
           />
         </If>
-        <If when={canManageAccounts()} else={<Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：缺「管理账号」能力。</Text>}>
+        <If when={!canManageAccounts()}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>只读：缺「管理账号」能力。</Text>
+        </If>
+        <If when={canManageAccounts() && busy()}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>读取完成后再新建账号。</Text>
+        </If>
+        <If when={canManageAccounts() && !busy() && all().length > 0}>
           <Button
             testID="accounts-create"
             variant="outline"
@@ -275,6 +285,8 @@ export function AccountsPage() {
   const people = () => all().filter((row) => row.kind === "human").length;
   const bots = () => all().filter((row) => row.kind === "bot").length;
   const services = () => all().filter((row) => row.kind === "service").length;
+  const noData = () => (identityAccess.accountsLoading() || identityAccess.accountsError() !== null) && all().length === 0;
+  const busy = () => identityAccess.accountsLoading() || identityAccess.accountsError() !== null;
   return (
     <ScrollArea testID="accounts-page-scroll" accessibilityLabel="账号" style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flexDirection: "column", gap: space.lg }}>
@@ -284,17 +296,21 @@ export function AccountsPage() {
           title="账号"
           description="这台部署里有谁，他们能做什么，现在是否可用。"
           facts={[
-            { label: "共", value: `${all().length} 个账号` },
-            { label: "构成", value: `${people()} 人 · ${bots()} Bot${services() ? ` · ${services()} 服务` : ""}` },
+            { label: "共", value: noData() ? "—" : `${all().length} 个账号` },
+            {
+              label: "构成",
+              value: noData() ? "—" : `${people()} 人 · ${bots()} Bot${services() ? ` · ${services()} 服务` : ""}`,
+            },
           ]}
           actions={
-            canManageAccounts() ? (
+            canManageAccounts() && all().length > 0 && !busy() ? (
               <Button
                 testID="accounts-create-page"
                 size={isMobile() ? "default" : "sm"}
                 icon="plus"
                 label="新建账号"
                 accessibilityLabel="新建账号"
+                disabled={busy()}
                 onPress={() => createAccountDialog.set(true)}
                 style={touchStyle()}
               />

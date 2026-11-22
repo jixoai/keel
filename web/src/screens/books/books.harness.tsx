@@ -17,6 +17,7 @@
 // (`?fixture=1` / `host.params.fixture`), not here.
 import { effect, host, mount, signal, View } from "nsh";
 import { setEffectivePermissions } from "../../data/permissions";
+import { applyAppearance } from "../../ui/appearance";
 import { KeelApiError } from "../../data/http";
 import type { IdentityApi } from "../../data/identity-api";
 import type { AccountView, AuditEventView, PermissionGroupSummary, PermissionScope } from "../../data/identity";
@@ -90,17 +91,35 @@ const apiFor = (name: string): IdentityApi => ({
   async listAccounts() {
     if (name === "loading") return new Promise(() => {});
     if (name === "error") throw new KeelApiError(500, "服务暂时没有响应", [], undefined, undefined, {}, "req-42");
+    if (name === "accounts-forbidden") {
+      throw new KeelApiError(403, "你没有查看账号的权限。", [], undefined, undefined, {
+        reason: "missing_grant",
+        requiredKey: "account.read",
+      });
+    }
     if (name === "empty") return pageOf([]);
     return pageOf([account("lina", "李娜"), account("chenmo", "陈墨")]);
   },
   async listPermissionGroups() {
     if (name === "error") throw new KeelApiError(500, "服务暂时没有响应", [], undefined, undefined, {}, "req-42");
+    if (name === "groups-forbidden") {
+      throw new KeelApiError(403, "你没有查看权限组的权限。", [], undefined, undefined, {
+        reason: "missing_grant",
+        requiredKey: "permission.read",
+      });
+    }
     return pageOf(name === "empty" || name === "groups-empty" ? [] : [group]);
   },
   async getPermissionGroup(groupId: string) {
     if (name === "group-loading") return new Promise(() => {});
+    if (name === "groups-forbidden" || name === "group-forbidden") {
+      throw new KeelApiError(403, "你没有查看权限组的权限。", [], undefined, undefined, {
+        reason: "missing_grant",
+        requiredKey: "permission.read",
+      });
+    }
     if (name === "empty" || groupId !== group.groupId) throw new KeelApiError(404, "没有找到这个权限组。");
-    if (name === "group-error") throw new KeelApiError(500, "服务暂时没有响应");
+    if (name === "group-error") throw new KeelApiError(500, "服务暂时没有响应", [], undefined, undefined, {}, "req-group");
     return {
       group,
       grants: name === "group-empty" ? [] : [{ key: "session.read", scope: "team" }],
@@ -115,7 +134,13 @@ const apiFor = (name: string): IdentityApi => ({
     : {
         async listAuditEvents() {
           if (name === "records-loading") return new Promise(() => {});
-          if (name === "records-error") throw new KeelApiError(500, "服务暂时没有响应");
+          if (name === "records-error") throw new KeelApiError(500, "服务暂时没有响应", [], undefined, undefined, {}, "req-records");
+          if (name === "records-forbidden") {
+            throw new KeelApiError(403, "你没有查看记录的权限。", [], undefined, undefined, {
+              reason: "missing_grant",
+              requiredKey: "audit.read",
+            });
+          }
           return pageOf(name === "empty" ? [] : [event]);
         },
       }),
@@ -124,6 +149,8 @@ const apiFor = (name: string): IdentityApi => ({
 const ALL_KEYS: Record<string, PermissionScope> = {
   "account.read": "tenant",
   "account.manage": "tenant",
+  "bot.read": "tenant",
+  "team_bot.read": "tenant",
   "account.credential.reset": "tenant",
   "account.permission.grant": "tenant",
   "permission.read": "tenant",
@@ -151,6 +178,17 @@ function configure(p: HarnessParams): void {
   // every await).
   store.skipBootForTest();
   store.setIdentityTransport(apiFor(scenarioOf(p)));
+  applyAppearance("dark");
+  store.identity.set({
+    tenantId: "tenant-harness",
+    accountId: "acc-lina",
+    username: "lina",
+    displayName: "李娜",
+    kind: "human",
+    disabled: false,
+    isSuperAdmin: false,
+    permissions: {},
+  });
   if (recordsChapterOf(p)) {
     store.openChapter("records");
   } else {

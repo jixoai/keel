@@ -854,7 +854,7 @@ export function PagePermission(props: {
   testID?: string;
   onCopyRequest?: () => void;
 }) {
-  const account = () => store.identity()?.displayName || store.identity()?.username || "当前账号";
+  const account = () => store.identity()?.displayName || store.identity()?.username || "你的账号";
   const request = () =>
     `我需要「${props.capability}」能力${props.capabilityKey ? `（${props.capabilityKey}）` : ""}，请把我的账号「${account()}」加入有该能力的权限组。`;
   const copy = () => {

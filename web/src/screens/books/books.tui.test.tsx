@@ -102,7 +102,7 @@ test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet
   expect(ledger).toContain("勾选后才能登记");
   await view.press("id:group-high-risk-account.permission.grant");
   await view.press("id:group-ledger-confirm");
-  await view.waitFor("text:/已保存并登记 2 项变更/");
+  await view.waitFor("text:/已登记 2 项变更/");
   expect(view.texts()).toContain("整个租户");
   expect(view.texts().join("\n")).toContain("去记录查看");
 });
@@ -151,6 +151,9 @@ test("TUI: 五态·空——账号索引给下一步，不是「暂无数据」"
   await empty.waitFor("id:accounts-index-empty");
   expect(empty.texts()).toContain("还没有人加入这台部署");
   expect(empty.texts()).toContain("新建账号");
+  // 空态只在主区出现一次；索引列只留一句说明，不重复 CTA。
+  expect(empty.texts().filter((text) => text === "新建账号").length).toBe(1);
+  expect(empty.texts().join("\n")).not.toContain("共 0 个账号");
 });
 
 test("TUI: 五态·错——保留原因、请求编号与重试", async () => {
@@ -158,6 +161,10 @@ test("TUI: 五态·错——保留原因、请求编号与重试", async () => {
   await broken.waitFor("text:没能读到账号列表");
   expect(broken.texts()).toContain("重试");
   expect(broken.texts().join("\n")).toContain("请求编号 req-42");
+  // 错误态不渲染空态；右栏说明读取失败，索引列提示读取后再新建。
+  expect(broken.texts().join("\n")).toContain("账号列表读取失败");
+  expect(broken.texts().join("\n")).not.toContain("还没有人加入这台部署");
+  expect(broken.texts().join("\n")).toContain("读取完成后再新建账号");
 });
 
 test("TUI: 五态·权限不足——章节门给出缺什么 / 找谁 / 下一步", async () => {
@@ -172,6 +179,8 @@ test("TUI: 权限矩阵五态——加载 / 空 / 错 / 只读", async () => {
   const loading = await harness(1440, { scenario: "group-loading", section: "groups", object: "grp-support" });
   await loading.waitFor("id:group-loading");
   expect(loading.shows("id:group-loading")).toBe(true);
+  expect(loading.texts().join("\n")).toContain("读取中…");
+  expect(loading.texts().join("\n")).not.toContain("成员与能力未读到");
 
   const empty = await harness(1440, { scenario: "group-empty", section: "groups", object: "grp-support" });
   await empty.waitFor("id:group-matrix-empty");
@@ -181,6 +190,7 @@ test("TUI: 权限矩阵五态——加载 / 空 / 错 / 只读", async () => {
   await broken.waitFor("id:group-error");
   expect(broken.texts().join("\n")).toContain("没能读到这个权限组");
   expect(broken.texts()).toContain("重试");
+  expect(broken.texts().join("\n")).toContain("请求编号 req-group");
 
   const readonly = await harness(1440, { scenario: "group-readonly", section: "groups", object: "grp-support" });
   await readonly.waitFor("id:group-matrix");
@@ -196,6 +206,7 @@ test("TUI: 记录五态——空 / 错 / 权限不足", async () => {
   const broken = await harness(1440, { scenario: "records-error", chapter: "records" });
   await broken.waitFor("id:records-error");
   expect(broken.texts()).toContain("没能读到记录");
+  expect(broken.texts().join("\n")).toContain("请求编号 req-records");
 
   const denied = await harness(1440, { scenario: "permission", chapter: "records" });
   await denied.waitFor("id:page-permission");
