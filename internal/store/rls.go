@@ -100,7 +100,6 @@ var rlsTenantTables = []string{
 	"auth_sessions",
 	"auth_events",
 	"bot_api_keys",
-	"trigger_state",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a

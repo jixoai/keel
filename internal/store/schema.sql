@@ -1297,21 +1297,3 @@ CREATE INDEX IF NOT EXISTS sessions_by_created_by
     ON sessions (tenant_id, created_by_account_id) WHERE created_by_account_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS sessions_by_team_bot
     ON sessions (tenant_id, team_bot_id) WHERE team_bot_id IS NOT NULL;
--- Scheduled-trigger catch-up cursor (change keel-harness-v2, W10). One row per
--- (tenant, trigger): the newest scheduled window the engine processed. It is
--- the durable "last-run" a restart compares against, so an interval/cron
--- trigger can replay the windows that elapsed while the process was down
--- (bounded by the engine's catch-up limit/window). A trigger without a row has
--- never fired and MUST NOT catch up from zero.
---
--- No secret material is stored here: webhook HMAC keys are configuration, not
--- runtime state.
-CREATE TABLE IF NOT EXISTS trigger_state (
-    tenant_id         uuid NOT NULL,
-    trigger_id        text NOT NULL,
-    last_scheduled_at timestamptz NOT NULL,
-    last_fired_at     timestamptz NOT NULL DEFAULT now(),
-    last_status       text NOT NULL DEFAULT '',
-    updated_at        timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, trigger_id)
-);
