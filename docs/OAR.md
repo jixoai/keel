@@ -204,6 +204,8 @@ Go 类型：`*oar.Error{Code, Runtime, Detail, Required, Declared, Err}`；`oar.
   degraded status；未知事件 → `codex.<type>` status + 原始输出（有界），不丢行。
 - 单条输出超过 `-max-output-bytes`（默认 64 KiB）时写成
   `{"truncated":true,"bytes":N,"preview":"…"}`，记录不超 1 MiB。
+- **一个 sidecar 同时只跑一个 Codex turn**：`-codex-pid-file` 是单值，并发会话的 turn
+  在 sidecar 内排队；排队中的 turn 在获取执行权前先检查取消。
 - **不静默 fake**：`runtime=codex` 但二进制缺失时初始化失败；`runtime=fake` 声明
   `simulated=true`，要求 `live_model` 的调用方会被拒绝。
 

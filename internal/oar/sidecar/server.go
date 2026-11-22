@@ -76,7 +76,11 @@ type Server struct {
 	runtimeErr  error
 	child       *exec.Cmd
 	turns       sync.WaitGroup
-	shutOnce    sync.Once
+	// codexTurn serializes Codex processes: one pid file and one heavy runtime
+	// per sidecar is the v1 resource contract. A queued turn observes its own
+	// cancellation before starting.
+	codexTurn sync.Mutex
+	shutOnce  sync.Once
 }
 
 type sessionState struct {

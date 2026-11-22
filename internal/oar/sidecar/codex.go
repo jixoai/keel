@@ -21,6 +21,14 @@ import (
 // SIGKILL); a crash of the sidecar is covered by the host's group shutdown and
 // the pid file.
 func (s *Server) runCodexTurn(ctx context.Context, session *sessionState, turn *turnState, prompt string) turnResult {
+	if err := ctx.Err(); err != nil {
+		return turnResult{err: err}
+	}
+	s.codexTurn.Lock()
+	defer s.codexTurn.Unlock()
+	if err := ctx.Err(); err != nil {
+		return turnResult{err: err}
+	}
 	path, err := s.cfg.resolveCodexPath()
 	if err != nil {
 		return turnResult{err: err}
