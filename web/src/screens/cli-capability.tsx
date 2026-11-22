@@ -55,7 +55,7 @@ const dangerLabel = (danger: string | undefined): string =>
 
 /** One `callable_by` value in the reader's words. */
 const callerLabel = (caller: string): string =>
-  caller === "team_captain" ? "队长" : caller === "agent" ? "Agent" : "人工";
+  caller === "team_captain" ? "队长" : caller === "agent" ? "Bot" : "人工";
 
 /** The command as a reader types it below `keel`. */
 export const cliCommandOf = (capability: CliCapabilityView): string =>
