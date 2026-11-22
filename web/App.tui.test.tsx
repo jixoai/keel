@@ -171,7 +171,7 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   expect(app.texts()).toContain("keel workflow status");
   expect(app.texts()).toContain("只读");
   expect(app.texts()).toContain("可重试");
-  expect(app.texts().join("\n")).toContain("可调用：人工 · Agent");
+  expect(app.texts().join("\n")).toContain("可调用：人工 · Bot");
   // 权限列表是 manifest 的 permissions 原样渲染（词汇开放，不做翻译）。
   expect(app.texts().join("\n")).toContain("权限：workflow.write");
   expect(app.texts().join("\n")).toContain("权限：workflow.read");
