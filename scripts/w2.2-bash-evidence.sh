@@ -64,15 +64,15 @@ cd "$ROOT"
 
 # --- build / static gates --------------------------------------------------
 run_gate build go build ./...
-run_gate vet go vet ./internal/bashbridge ./internal/jobqueue ./internal/store ./internal/toolsurface ./internal/agentext ./cmd/keel
+run_gate vet go vet ./internal/bashbridge ./internal/jobqueue ./internal/store ./internal/toolsurface ./internal/harnessext ./cmd/keel
 
 # --- package tests (real output, real test DB) -----------------------------
 run_gate bashbridge-test go test ./internal/bashbridge -count=1 -v
 run_gate jobqueue-test go test ./internal/jobqueue -count=1 -v
 run_gate toolsurface-test go test ./internal/toolsurface -count=1 -v -run 'Bash|BuiltinSurface|ManifestHash|UnknownAction|ReservedAction'
-run_gate agentext-shell-test go test ./internal/agentext -count=1 -v -run 'Shell'
+run_gate harnessext-shell-test go test ./internal/harnessext -count=1 -v -run 'Shell'
 run_gate store-test go test ./internal/store -count=1 -v -run 'BashJobs|ArchiveSession'
-run_gate race-test go test -race ./internal/bashbridge ./internal/jobqueue ./internal/toolsurface ./internal/agentext -count=1
+run_gate race-test go test -race ./internal/bashbridge ./internal/jobqueue ./internal/toolsurface ./internal/harnessext -count=1
 
 # --- contract assertions ---------------------------------------------------
 log "contract assertions"

@@ -4,7 +4,7 @@
 // version gate (`engines.keel`) and the content-addressed package store (tree
 // hash + managed copy).
 //
-// The package never loads a plugin. Loading is the agentext plugin manager's
+// The package never loads a plugin. Loading is the harnessext plugin manager's
 // job, which consumes the types here; keeping the split means a manifest can be
 // parsed, validated and audited in tests (and by tooling) without a runtime.
 //
@@ -233,7 +233,7 @@ var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 var hostPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.*-]{0,126})(:[0-9]{1,5})?$`)
 
 // secretPattern mirrors the secret-name grammar of the settings surface
-// (internal/agentapi/settings.go): a manifest cannot reference a secret name
+// (internal/harnessapi/settings.go): a manifest cannot reference a secret name
 // that no store would accept.
 var secretPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 

@@ -68,7 +68,7 @@ describe("decision rows", () => {
 
   test("the agentext Decision document shape is projected", () => {
     const e = engine();
-    // Mirrors internal/agentext.Decision: prompt/id options/DecisionAnswer.
+    // Mirrors internal/harnessext.Decision: prompt/id options/DecisionAnswer.
     e.apply({
       seq: 1,
       kind: "decision",

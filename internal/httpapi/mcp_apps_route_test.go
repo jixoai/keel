@@ -1,8 +1,8 @@
 package httpapi_test
 
 // Routing composition (P2-5): the product-layer MCP app routes live on the
-// AgentAPI mounted under /v1/, while /v1/mcp/servers/{name}/signin is an edge
-// route. This test drives the composed mux (not the AgentAPI alone) so the
+// HarnessAPI mounted under /v1/, while /v1/mcp/servers/{name}/signin is an edge
+// route. This test drives the composed mux (not the HarnessAPI alone) so the
 // precedence rule — specific edge routes win, the rest reaches the product — is
 // pinned for the two paths that share the /v1/mcp prefix.
 
@@ -18,7 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/mcphost"
 )
@@ -29,7 +29,7 @@ const (
 	edgeAppHTML = "<html><body>edge panel</body></html>"
 )
 
-// edgeMCPApps is the AgentAPI read model used through the composed mux.
+// edgeMCPApps is the HarnessAPI read model used through the composed mux.
 type edgeMCPApps struct {
 	tenant uuid.UUID
 }
@@ -108,7 +108,7 @@ func (p *recordingProduct) saw(path string) bool {
 
 func TestProductMCPAppRoutesThroughEdgeMux(t *testing.T) {
 	tenant := uuid.New()
-	product := &recordingProduct{next: agentapi.New(agentapi.Config{
+	product := &recordingProduct{next: harnessapi.New(harnessapi.Config{
 		MCPApps: edgeMCPApps{tenant: tenant},
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})}
@@ -184,7 +184,7 @@ func TestProductMCPAppRoutesThroughEdgeMux(t *testing.T) {
 		t.Fatalf("sign-in without OAuth configuration = %d, want the edge's refusal", response.StatusCode)
 	}
 
-	// The tenant boundary is the AgentAPI's: without the header the product
+	// The tenant boundary is the HarnessAPI's: without the header the product
 	// answers 401 before any catalogue byte, through the same composition.
 	anonymous := get("/v1/mcp/apps", uuid.Nil)
 	if anonymous.StatusCode != http.StatusUnauthorized {

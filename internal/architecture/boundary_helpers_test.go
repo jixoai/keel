@@ -21,7 +21,7 @@ const (
 	storeImportPath         = "github.com/jixoai/keel/internal/store"
 	modelProviderImportPath = "github.com/jixoai/keel/internal/modelprovider"
 	agentImportPath         = "github.com/jixoai/keel/internal/agent"
-	agentExtImportPath      = "github.com/jixoai/keel/internal/agentext"
+	harnessExtImportPath    = "github.com/jixoai/keel/internal/harnessext"
 )
 
 // packageGraph returns the direct import edges of pkg and of every package it

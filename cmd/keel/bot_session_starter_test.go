@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/keel/internal/agentapi"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -90,11 +90,11 @@ func starterFixture(t *testing.T) (*store.Store, uuid.UUID, uuid.UUID, store.Bot
 func TestBotSessionStarterWritesOwnershipAndSelection(t *testing.T) {
 	st, tenant, accountID, bot, _ := starterFixture(t)
 	committer := &captureCommitter{}
-	starter := agentext.NewTurnStarter(st, committer, nil,
+	starter := harnessext.NewTurnStarter(st, committer, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	start := newBotSessionStarter(st, starter)
 	ctx := context.Background()
-	result, err := start(ctx, agentapi.BotSessionRequest{
+	result, err := start(ctx, harnessapi.BotSessionRequest{
 		TenantID: tenant, BotID: bot.ID, AccountID: accountID,
 		ActorAccountID: accountID, Text: "hello", RequestID: "req-bot",
 	})
@@ -126,11 +126,11 @@ func TestBotSessionStarterWritesOwnershipAndSelection(t *testing.T) {
 func TestTeamBotSessionStarterWritesMissionSnapshotAndTeamSelection(t *testing.T) {
 	st, tenant, accountID, bot, team := starterFixture(t)
 	committer := &captureCommitter{}
-	starter := agentext.NewTurnStarter(st, committer, nil,
+	starter := harnessext.NewTurnStarter(st, committer, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	start := newBotSessionStarter(st, starter)
 	ctx := context.Background()
-	result, err := start(ctx, agentapi.BotSessionRequest{
+	result, err := start(ctx, harnessapi.BotSessionRequest{
 		TenantID: tenant, BotID: bot.ID, AccountID: accountID,
 		ActorAccountID: accountID, TeamBotID: team.ID, Mission: team.Mission,
 		Text: "go", RequestID: "req-team",
@@ -166,10 +166,10 @@ func TestBotSessionStarterRefusesArchivedBot(t *testing.T) {
 		t.Fatal(err)
 	}
 	committer := &captureCommitter{}
-	starter := agentext.NewTurnStarter(st, committer, nil,
+	starter := harnessext.NewTurnStarter(st, committer, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	start := newBotSessionStarter(st, starter)
-	_, err := start(context.Background(), agentapi.BotSessionRequest{
+	_, err := start(context.Background(), harnessapi.BotSessionRequest{
 		TenantID: tenant, BotID: bot.ID, AccountID: accountID,
 		ActorAccountID: accountID, Text: "hello", RequestID: "req-archived",
 	})

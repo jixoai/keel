@@ -5,7 +5,7 @@ package httpapi
 // A partial frame is NOT an event: it is never stored, never replayed and never
 // carries an SSE id, so it cannot move a client's Last-Event-ID cursor. The
 // runtime's SSE handler subscribes only when the client asks for
-// `?partials=1`; the producer is an in-process hub (internal/agentext) and the
+// `?partials=1`; the producer is an in-process hub (internal/harnessext) and the
 // committed event stream stays authoritative for everything a client resumes
 // from.
 

@@ -9,7 +9,7 @@ package main
 //     fetches and validates the app documents, and published through
 //     mcphost.Sinks;
 //   - the plugin half: the plugin tools and prompt sections published by
-//     agentext.Runtime through Runtime.RefreshProductTools/RefreshProductPrompt.
+//     harnessext.Runtime through Runtime.RefreshProductTools/RefreshProductPrompt.
 //
 // Both halves are merged into one republish (servicehost.Runtime composes
 // them), so a plugin refresh keeps the MCP sections and an MCP refresh keeps

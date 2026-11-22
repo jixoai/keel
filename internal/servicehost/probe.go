@@ -27,7 +27,7 @@ import (
 	"github.com/jixoai/keel/internal/provider"
 )
 
-// ProbeProvider implements the agentapi.ProviderProber seam.
+// ProbeProvider implements the harnessapi.ProviderProber seam.
 //
 // The ordering is deliberate: a provider that is incomplete on paper is
 // reported as invalid_config without a request; a provider whose credential

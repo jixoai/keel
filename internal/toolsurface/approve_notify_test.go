@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
 
@@ -67,7 +67,7 @@ func TestNotifyToolRoutesToItsBackend(t *testing.T) {
 }
 
 func TestApproveAndNotifyDisabledPluginsAreTyped(t *testing.T) {
-	disabled := agentext.ErrPluginState
+	disabled := harnessext.ErrPluginState
 	registry := builtinRegistry(t, toolsurface.Backends{
 		Approve: &fakeApproveBackend{err: disabled},
 		Notify:  &fakeNotifyBackend{err: disabled},

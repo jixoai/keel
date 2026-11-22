@@ -2,7 +2,7 @@
 // tool (change keel-harness-v2, requirement "通知与审批是持久事实").
 //
 // The decision lifecycle itself is the v1 decision primitive
-// (internal/agentext/decisions.go): a durable row with an answer journal, an
+// (internal/harnessext/decisions.go): a durable row with an answer journal, an
 // idempotent answer and a persisted deadline. The decision broker knows *what*
 // was answered; it does not know on whose authority. This package records that
 // second fact — the provenance — as its own durable row:

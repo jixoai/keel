@@ -3,7 +3,7 @@ package httpapi_test
 // Real-PostgreSQL negative controls for the A4.2a route permission gate. The
 // fixture is one tenant with an owner account (A), a zero-grant account (B), a
 // third account in another tenant, and a Bot-owned session. Requests run
-// through the real httpapi edge with the product AgentAPI nested, so a denial
+// through the real httpapi edge with the product HarnessAPI nested, so a denial
 // proves the route matrix + engine, not a handler unit.
 //
 // The suite is skipped without KEEL_TEST_DSN. The test database is expected to
@@ -25,9 +25,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/accesswire"
-	"github.com/jixoai/keel/internal/agentapi"
-	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/auth"
+	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/modelcfg"
@@ -46,7 +46,7 @@ type accessPGEnv struct {
 	otherAcct   store.AccountRecord
 	ownerBot    store.BotRecord
 	session     uuid.UUID
-	triggers    *agentext.TriggerEngine
+	triggers    *harnessext.TriggerEngine
 	server      *httptest.Server
 	ownerRole   store.RoleRecord
 	ownerProf   store.ProfileRecord
@@ -74,8 +74,8 @@ type fakeModelRuntime struct{}
 
 func (fakeModelRuntime) DeploymentModels() json.RawMessage { return nil }
 
-func (fakeModelRuntime) ValidateModelsDocument(json.RawMessage) (agentapi.ModelCandidate, []modelcfg.Issue, error) {
-	return agentapi.ModelCandidate{}, nil, nil
+func (fakeModelRuntime) ValidateModelsDocument(json.RawMessage) (harnessapi.ModelCandidate, []modelcfg.Issue, error) {
+	return harnessapi.ModelCandidate{}, nil, nil
 }
 
 func (fakeModelRuntime) ApplyModels(context.Context, json.RawMessage) error { return nil }
@@ -84,10 +84,10 @@ func (fakeModelRuntime) RejectedModelsOverride() (int64, string, bool) { return 
 
 type fakeSecretStore struct{ values map[string][]byte }
 
-func (f *fakeSecretStore) List(context.Context, uuid.UUID) ([]agentapi.SecretMeta, error) {
-	out := make([]agentapi.SecretMeta, 0, len(f.values))
+func (f *fakeSecretStore) List(context.Context, uuid.UUID) ([]harnessapi.SecretMeta, error) {
+	out := make([]harnessapi.SecretMeta, 0, len(f.values))
 	for name := range f.values {
-		out = append(out, agentapi.SecretMeta{Name: name, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
+		out = append(out, harnessapi.SecretMeta{Name: name, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
 	}
 	return out, nil
 }
@@ -241,23 +241,23 @@ func newAccessPGEnv(t *testing.T) *accessPGEnv {
 		t.Fatal(err)
 	}
 	env.bridge = bridge
-	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Logger: accessTestLogger()})
+	triggers := harnessext.NewTriggerEngine(harnessext.TriggerEngineOptions{Logger: accessTestLogger()})
 	t.Cleanup(triggers.Close)
 	env.triggers = triggers
-	for _, spec := range []agentext.TriggerSpec{
-		{ID: "owner-trigger", Kind: agentext.TriggerWebhook, TenantID: env.tenant.String(), BotID: "owner-bot", Prompt: "owner", Enabled: true},
-		{ID: "other-trigger", Kind: agentext.TriggerWebhook, TenantID: env.other.String(), BotID: "other-bot", Prompt: "other", Enabled: true},
+	for _, spec := range []harnessext.TriggerSpec{
+		{ID: "owner-trigger", Kind: harnessext.TriggerWebhook, TenantID: env.tenant.String(), BotID: "owner-bot", Prompt: "owner", Enabled: true},
+		{ID: "other-trigger", Kind: harnessext.TriggerWebhook, TenantID: env.other.String(), BotID: "other-bot", Prompt: "other", Enabled: true},
 	} {
 		if _, err := triggers.Register(spec); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	starter := func(context.Context, agentapi.BotSessionRequest) (agentapi.BotSessionResult, error) {
-		return agentapi.BotSessionResult{SessionID: uuid.New(), Seq: 1, RequestID: uuid.NewString()}, nil
+	starter := func(context.Context, harnessapi.BotSessionRequest) (harnessapi.BotSessionResult, error) {
+		return harnessapi.BotSessionResult{SessionID: uuid.New(), Seq: 1, RequestID: uuid.NewString()}, nil
 	}
-	product := agentapi.New(agentapi.Config{
-		Sessions: agentapi.NewPGSessionLister(st),
+	product := harnessapi.New(harnessapi.Config{
+		Sessions: harnessapi.NewPGSessionLister(st),
 		Identity: st, Access: bridge, StartBotSession: starter,
 		Triggers:             triggers,
 		ModelSettingsStore:   &fakeModelSettingsStore{},

@@ -6,7 +6,7 @@ package main
 // ui/message into a normal user.message.
 //
 // The adapters are the only place cmd/keel connects the app contract to the
-// process: internal/agentapi owns the HTTP contract, internal/mcphost owns the
+// process: internal/harnessapi owns the HTTP contract, internal/mcphost owns the
 // catalogue, and neither learns about the manager's connection details.
 
 import (
@@ -19,7 +19,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/mcp"
@@ -31,7 +31,7 @@ import (
 // mcpAppAuditTimeout bounds one durable audit write from the registry adapter.
 const mcpAppAuditTimeout = 2 * time.Second
 
-// mcpAppRuntime is agentapi.MCPAppRuntime over the live MCP manager. AppTool is
+// mcpAppRuntime is harnessapi.MCPAppRuntime over the live MCP manager. AppTool is
 // the ownership gate: a tool must exist on the catalogue-derived server and
 // carry "app" visibility; the manager's CallTool would otherwise accept any
 // tool the model can see.
@@ -39,13 +39,13 @@ type mcpAppRuntime struct {
 	manager *mcp.Manager
 }
 
-func (r mcpAppRuntime) AppTool(server, tool string) (agentapi.MCPAppTool, bool) {
+func (r mcpAppRuntime) AppTool(server, tool string) (harnessapi.MCPAppTool, bool) {
 	entry, srv, found := r.manager.FindTool(server, tool)
 	if !found || srv == nil || srv.Err != nil || !entry.VisibleToApp() {
-		return agentapi.MCPAppTool{}, false
+		return harnessapi.MCPAppTool{}, false
 	}
 	destructive, _ := entry.DestructiveHint()
-	return agentapi.MCPAppTool{Name: entry.Name, Destructive: destructive}, true
+	return harnessapi.MCPAppTool{Name: entry.Name, Destructive: destructive}, true
 }
 
 func (r mcpAppRuntime) CallTool(ctx context.Context, server, tool string, arguments json.RawMessage) (mcp.CallToolResult, error) {
@@ -70,7 +70,7 @@ func (r mcpAppRuntime) ReadResource(ctx context.Context, server, uri string) (mc
 
 // mcpAppRuntimeOrNil keeps a disabled MCP service nil at the interface value:
 // a typed nil struct would make the product API believe the proxy is wired.
-func mcpAppRuntimeOrNil(rt *servicehost.Runtime) agentapi.MCPAppRuntime {
+func mcpAppRuntimeOrNil(rt *servicehost.Runtime) harnessapi.MCPAppRuntime {
 	manager := rt.MCPManager()
 	if manager == nil {
 		return nil
@@ -107,12 +107,12 @@ func (a mcpAppAuditor) RecordMCPApp(ctx context.Context, event mcphost.AuditEven
 	}
 }
 
-// mcpAppInputCommit is agentapi's ui/message write seam. A confirmed send goes
+// mcpAppInputCommit is harnessapi's ui/message write seam. A confirmed send goes
 // through httpapi.CommitClientInput — the same validation, kernel commit and
 // submissions bookkeeping as POST /v1/sessions/{id}/input — with delivery fixed
 // to queue (a View never steers a running turn).
-func mcpAppInputCommit(st *store.Store, edge kernel.Committer) func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (agentapi.MCPAppInput, error) {
-	return func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (agentapi.MCPAppInput, error) {
+func mcpAppInputCommit(st *store.Store, edge kernel.Committer) func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (harnessapi.MCPAppInput, error) {
+	return func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (harnessapi.MCPAppInput, error) {
 		commit, err := httpapi.CommitClientInput(ctx, st, edge, httpapi.ClientInput{
 			TenantID:    tenantID,
 			SessionID:   sessionID,
@@ -123,15 +123,15 @@ func mcpAppInputCommit(st *store.Store, edge kernel.Committer) func(ctx context.
 		})
 		if err != nil {
 			if errors.Is(err, httpapi.ErrInputExternalSession) {
-				return agentapi.MCPAppInput{}, agentapi.ErrExternalSession
+				return harnessapi.MCPAppInput{}, harnessapi.ErrExternalSession
 			}
-			return agentapi.MCPAppInput{}, err
+			return harnessapi.MCPAppInput{}, err
 		}
 		seq := int64(0)
 		if commit.Submission.Seq != nil {
 			seq = *commit.Submission.Seq
 		}
-		return agentapi.MCPAppInput{
+		return harnessapi.MCPAppInput{
 			SubmissionID: commit.Submission.ID.String(),
 			RequestID:    requestID,
 			Status:       commit.Submission.Status,

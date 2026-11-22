@@ -7,7 +7,7 @@
 // tenant pool without app.tenant_id sees nothing, and that setting it to one
 // tenant hides the other's rows. That is the property the spec's "跨租户查询 MUST
 // 返回 0 行" names, asserted at the storage seam rather than through HTTP (the
-// HTTP 404 is asserted in internal/agentapi).
+// HTTP 404 is asserted in internal/harnessapi).
 
 package store
 

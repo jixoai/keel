@@ -6,7 +6,7 @@ package architecture
 // must never share a handler, a hub or a recovery semantic, so the import graph
 // keeps them apart:
 //
-//   - internal/mcphost must not import internal/httpapi, internal/agentapi or
+//   - internal/mcphost must not import internal/httpapi, internal/harnessapi or
 //     the cmd/keel wiring;
 //   - internal/mcp (the client/transport layer) must not import the host
 //     dispatcher (internal/mcphost): the dependency only points host → client.
@@ -14,15 +14,15 @@ package architecture
 import "testing"
 
 const (
-	mcpHostImportPath  = "github.com/jixoai/keel/internal/mcphost"
-	mcpImportPath      = "github.com/jixoai/keel/internal/mcp"
-	httpapiImportPath  = "github.com/jixoai/keel/internal/httpapi"
-	agentapiImportPath = "github.com/jixoai/keel/internal/agentapi"
+	mcpHostImportPath    = "github.com/jixoai/keel/internal/mcphost"
+	mcpImportPath        = "github.com/jixoai/keel/internal/mcp"
+	httpapiImportPath    = "github.com/jixoai/keel/internal/httpapi"
+	harnessAPIImportPath = "github.com/jixoai/keel/internal/harnessapi"
 )
 
 func TestMCPHostDoesNotImportProductSSE(t *testing.T) {
 	graph := packageGraph(t, mcpHostImportPath)
-	for _, forbidden := range []string{httpapiImportPath, agentapiImportPath} {
+	for _, forbidden := range []string{httpapiImportPath, harnessAPIImportPath} {
 		requireNoImport(t, graph, mcpHostImportPath, forbidden)
 	}
 }

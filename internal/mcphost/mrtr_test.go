@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/mcp"
 )
 
@@ -25,23 +25,23 @@ import (
 // records the opener document and lets the test answer it.
 type fakeDecisions struct {
 	mu      sync.Mutex
-	opened  []agentext.OpenDecisionRequest
-	answer  *agentext.DecisionAnswer
-	status  agentext.DecisionStatus
+	opened  []harnessext.OpenDecisionRequest
+	answer  *harnessext.DecisionAnswer
+	status  harnessext.DecisionStatus
 	decided chan struct{}
 	once    sync.Once
 }
 
 func newFakeDecisions() *fakeDecisions {
-	return &fakeDecisions{decided: make(chan struct{}), status: agentext.DecisionAnswered}
+	return &fakeDecisions{decided: make(chan struct{}), status: harnessext.DecisionAnswered}
 }
 
-func (f *fakeDecisions) Open(_ context.Context, request agentext.OpenDecisionRequest) (agentext.Decision, bool, error) {
+func (f *fakeDecisions) Open(_ context.Context, request harnessext.OpenDecisionRequest) (harnessext.Decision, bool, error) {
 	f.mu.Lock()
 	f.opened = append(f.opened, request)
 	f.mu.Unlock()
-	id := agentext.DecisionIDFor(request.TenantID, request.SessionID, request.RequestID)
-	return agentext.Decision{
+	id := harnessext.DecisionIDFor(request.TenantID, request.SessionID, request.RequestID)
+	return harnessext.Decision{
 		DecisionID:    id.String(),
 		TenantID:      request.TenantID.String(),
 		SessionID:     request.SessionID.String(),
@@ -50,32 +50,32 @@ func (f *fakeDecisions) Open(_ context.Context, request agentext.OpenDecisionReq
 		Prompt:        request.Prompt,
 		Options:       request.Options,
 		AllowFreeText: request.AllowFreeText,
-		Status:        agentext.DecisionOpen,
+		Status:        harnessext.DecisionOpen,
 	}, true, nil
 }
 
-func (f *fakeDecisions) Wait(ctx context.Context, _, _, _ uuid.UUID) (agentext.Decision, error) {
+func (f *fakeDecisions) Wait(ctx context.Context, _, _, _ uuid.UUID) (harnessext.Decision, error) {
 	select {
 	case <-f.decided:
 	case <-ctx.Done():
-		return agentext.Decision{}, ctx.Err()
+		return harnessext.Decision{}, ctx.Err()
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return agentext.Decision{Status: f.status, Answer: f.answer}, nil
+	return harnessext.Decision{Status: f.status, Answer: f.answer}, nil
 }
 
 func (f *fakeDecisions) answerWith(optionID, text string) {
 	f.mu.Lock()
-	f.answer = &agentext.DecisionAnswer{OptionID: optionID, Text: text, At: time.Now()}
+	f.answer = &harnessext.DecisionAnswer{OptionID: optionID, Text: text, At: time.Now()}
 	f.mu.Unlock()
 	f.once.Do(func() { close(f.decided) })
 }
 
-func (f *fakeDecisions) openedRequests() []agentext.OpenDecisionRequest {
+func (f *fakeDecisions) openedRequests() []harnessext.OpenDecisionRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]agentext.OpenDecisionRequest(nil), f.opened...)
+	return append([]harnessext.OpenDecisionRequest(nil), f.opened...)
 }
 
 // recordingAuditor collects the executor's audit rows.
@@ -163,7 +163,7 @@ func TestMRTRElicitationProjectsSchemaOntoDecision(t *testing.T) {
 	if opened.Kind != "mcp.elicitation" || !strings.Contains(opened.Prompt, "Pick an account") {
 		t.Fatalf("decision = %+v", opened)
 	}
-	options := map[string]agentext.DecisionOption{}
+	options := map[string]harnessext.DecisionOption{}
 	for _, option := range opened.Options {
 		options[option.ID] = option
 	}
@@ -383,9 +383,9 @@ func TestElicitationAnswerTerminalOptionBeatsText(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			decision := agentext.Decision{
-				Status: agentext.DecisionAnswered,
-				Answer: &agentext.DecisionAnswer{OptionID: test.optionID, Text: test.text},
+			decision := harnessext.Decision{
+				Status: harnessext.DecisionAnswered,
+				Answer: &harnessext.DecisionAnswer{OptionID: test.optionID, Text: test.text},
 			}
 			action, content := plan.answer(decision)
 			if action != test.wantAction {

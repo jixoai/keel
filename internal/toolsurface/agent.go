@@ -8,20 +8,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/placement"
 )
 
 // AgentBackend is the internal sub-agent registry the aggregate tool drives.
-// *agentext.AgentBackend implements it.
+// *harnessext.AgentBackend implements it.
 type AgentBackend interface {
-	Spawn(ctx context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.SubagentResult, error)
-	Fork(ctx context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.SubagentResult, error)
-	Resume(ctx context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.ResumeResult, error)
-	Cancel(ctx context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.CancelResult, error)
-	List(tenantID uuid.UUID, parent *uuid.UUID) []agentext.SubagentRecord
-	Get(sessionID uuid.UUID) (agentext.SubagentRecord, bool)
+	Spawn(ctx context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.SubagentResult, error)
+	Fork(ctx context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.SubagentResult, error)
+	Resume(ctx context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.ResumeResult, error)
+	Cancel(ctx context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.CancelResult, error)
+	List(tenantID uuid.UUID, parent *uuid.UUID) []harnessext.SubagentRecord
+	Get(sessionID uuid.UUID) (harnessext.SubagentRecord, bool)
 }
 
 var agentActions = []string{ActionSpawn, ActionFork, ActionResume, ActionCancel, ActionList, ActionStatus}
@@ -71,8 +71,8 @@ func newAgentTool(backend AgentBackend) *actionTool {
 	}
 }
 
-func runScope(ctx context.Context) (agentext.RunScope, bool) {
-	return agentext.RunScopeFromContext(ctx)
+func runScope(ctx context.Context) (harnessext.RunScope, bool) {
+	return harnessext.RunScopeFromContext(ctx)
 }
 
 func agentScopeMissing() (agentcore.AgentToolResult, error) {
@@ -107,17 +107,17 @@ func agentBackendWired(backend AgentBackend) bool {
 func agentFailure(action string, err error) (agentcore.AgentToolResult, error) {
 	var capacity *placement.CapacityError
 	switch {
-	case errors.Is(err, agentext.ErrRunScopeMissing):
+	case errors.Is(err, harnessext.ErrRunScopeMissing):
 		return agentScopeMissing()
-	case errors.Is(err, agentext.ErrInvalidSpawn), errors.Is(err, agentext.ErrForkOriginInvalid):
+	case errors.Is(err, harnessext.ErrInvalidSpawn), errors.Is(err, harnessext.ErrForkOriginInvalid):
 		return invalidArguments(Agent, err.Error())
-	case errors.Is(err, agentext.ErrForkSnapshotMissing):
+	case errors.Is(err, harnessext.ErrForkSnapshotMissing):
 		return ErrorResult(CodeForkSnapshotMissing, Agent, err.Error(), map[string]any{"action": action})
-	case errors.Is(err, agentext.ErrSubagentNotFound):
+	case errors.Is(err, harnessext.ErrSubagentNotFound):
 		return notFound(Agent, err.Error())
-	case errors.Is(err, agentext.ErrForkUnavailable),
-		errors.Is(err, agentext.ErrResumeUnavailable),
-		errors.Is(err, agentext.ErrNotWired):
+	case errors.Is(err, harnessext.ErrForkUnavailable),
+		errors.Is(err, harnessext.ErrResumeUnavailable),
+		errors.Is(err, harnessext.ErrNotWired):
 		return notWired(Agent, err.Error())
 	case errors.As(err, &capacity):
 		return ErrorResult(CodeCapacity, Agent, capacity.Error(), map[string]any{

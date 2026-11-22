@@ -4,7 +4,7 @@
 //
 // The scenario owns the process lifecycle: it writes an mcp.json pointing at
 // this binary's `fake-mcp-server` subcommand, starts keel serve, drives the
-// public AgentAPI, SIGKILLs the process group at provable points, restarts it,
+// public HarnessAPI, SIGKILLs the process group at provable points, restarts it,
 // and asserts against the ledger and the HTTP surface of the new process.
 package main
 

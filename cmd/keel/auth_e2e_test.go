@@ -631,7 +631,7 @@ func TestBotKeyLifecycleE2E(t *testing.T) {
 	// The issuance surface is /v1/bots/{id}/keys (A4.1); the A2 bridge route is
 	// gone with no alias. Mint through the store here: this test proves the bot
 	// key AUTHENTICATION path, while the HTTP issuance contract is covered by the
-	// agentapi identity tests.
+	// harnessapi identity tests.
 	// The removed route answers a plain 404 (no JSON error body to decode).
 	removedReq, err := http.NewRequest(http.MethodPost, env.server.URL+"/v1/auth/bot-keys",
 		strings.NewReader(`{"accountId":"`+botAccount.ID.String()+`","botId":"support-1"}`))

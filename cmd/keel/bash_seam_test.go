@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/bashbridge"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/jobqueue"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/tasklog"
@@ -209,7 +209,7 @@ func (b *recordingBashBackend) Invoke(ctx context.Context, action string, args j
 // as one identity, unchanged.
 func TestBashSessionBackendStampsRunIdentity(t *testing.T) {
 	tenantID, sessionID := uuid.New(), uuid.New()
-	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{
+	ctx := harnessext.WithRunScope(context.Background(), harnessext.RunScope{
 		TenantID: tenantID, SessionID: sessionID, RunID: "run-1",
 	})
 	ctx = tasklog.WithCallID(ctx, "call-bash-1")

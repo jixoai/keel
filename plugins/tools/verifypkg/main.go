@@ -7,7 +7,7 @@
 //	manifest      internal/pluginpkg.LoadDir   (parse + field validation + tree hash)
 //	version gate  Manifest.CheckEngines        (the same gate install/enable run)
 //	sidecar       internal/gateway.SpawnStdio + Conn.Connect + ToolClient.ListTools
-//	              (the same primitives internal/agentext's sidecar loader uses)
+//	              (the same primitives internal/harnessext's sidecar loader uses)
 //
 // A package that passes here passes the package-level half of the install path;
 // the runtime half (enable, tool dispatch, permissions) is exercised by the
@@ -132,7 +132,7 @@ func verifyPackage(dir, keelVersion string, timeout time.Duration) error {
 	return nil
 }
 
-// verifySidecar spawns the package's sidecar exactly like the agentext loader
+// verifySidecar spawns the package's sidecar exactly like the harnessext loader
 // (same env allowlist, same cwd, same host identity variables), negotiates the
 // handshake and reads the tool catalogue.
 func verifySidecar(ctx context.Context, pkg pluginpkg.Package, keelVersion string, timeout time.Duration) ([]string, error) {

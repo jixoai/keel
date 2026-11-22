@@ -15,13 +15,13 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-// tenantProvisioner adapts *store.Store to agentapi.Provisioner (tenant create
+// tenantProvisioner adapts *store.Store to harnessapi.Provisioner (tenant create
 // and existence).
 type tenantProvisioner struct {
 	store *store.Store
 }
 
-// CreateTenant implements agentapi.Provisioner. A new tenant is born with the
+// CreateTenant implements harnessapi.Provisioner. A new tenant is born with the
 // built-in permission-group presets; the seed is idempotent, so a repeated
 // create converges instead of duplicating.
 func (a tenantProvisioner) CreateTenant(ctx context.Context, tenantID uuid.UUID, name string) (bool, error) {
@@ -35,18 +35,18 @@ func (a tenantProvisioner) CreateTenant(ctx context.Context, tenantID uuid.UUID,
 	return created, nil
 }
 
-// TenantExists implements agentapi.Provisioner.
+// TenantExists implements harnessapi.Provisioner.
 func (a tenantProvisioner) TenantExists(ctx context.Context, tenantID uuid.UUID) (bool, error) {
 	return a.store.TenantExists(ctx, tenantID)
 }
 
-// quotaReporter adapts the store and the edge enforcer to agentapi.QuotaReporter.
+// quotaReporter adapts the store and the edge enforcer to harnessapi.QuotaReporter.
 type quotaReporter struct {
 	store *store.Store
 	edge  *quota.Edge
 }
 
-// TenantQuota implements agentapi.QuotaReporter.
+// TenantQuota implements harnessapi.QuotaReporter.
 func (q quotaReporter) TenantQuota(ctx context.Context, tenantID uuid.UUID) (quota.TenantQuota, error) {
 	row, err := q.store.GetTenantQuota(ctx, tenantID)
 	if err != nil {
@@ -59,12 +59,12 @@ func (q quotaReporter) TenantQuota(ctx context.Context, tenantID uuid.UUID) (quo
 	}, nil
 }
 
-// StoredBytes implements agentapi.QuotaReporter.
+// StoredBytes implements harnessapi.QuotaReporter.
 func (q quotaReporter) StoredBytes(ctx context.Context, tenantID uuid.UUID) (int64, error) {
 	return q.store.TenantStoredBytes(ctx, tenantID)
 }
 
-// ActiveStreams implements agentapi.QuotaReporter.
+// ActiveStreams implements harnessapi.QuotaReporter.
 func (q quotaReporter) ActiveStreams(tenantID uuid.UUID) int {
 	if q.edge == nil {
 		return 0

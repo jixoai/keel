@@ -6,8 +6,8 @@ import (
 	"errors"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/fileplugin"
+	"github.com/jixoai/keel/internal/harnessext"
 )
 
 // Typed file-tool failures. not_found / invalid_arguments / plugin_disabled /
@@ -65,7 +65,7 @@ func (t *fileTool) Execute(ctx context.Context, callID string, args json.RawMess
 
 // fileCallContext carries the run identity and the tool-call id into the plugin.
 func fileCallContext(ctx context.Context, callID string) (context.Context, error) {
-	scope, ok := agentext.RunScopeFromContext(ctx)
+	scope, ok := harnessext.RunScopeFromContext(ctx)
 	if !ok {
 		return ctx, fileplugin.Errorf(fileplugin.CodeRunScopeMissing,
 			"read/write/edit need the ambient run scope; a model tool call inside a run always has it")

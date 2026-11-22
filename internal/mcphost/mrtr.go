@@ -40,7 +40,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/mcp"
 )
 
@@ -138,10 +138,10 @@ func (f SamplerFunc) Sample(ctx context.Context, request SamplingRequest) (Sampl
 }
 
 // DecisionBridge is the decision primitive the executor opens elicitations on.
-// *agentext.DecisionBroker implements it.
+// *harnessext.DecisionBroker implements it.
 type DecisionBridge interface {
-	Open(ctx context.Context, request agentext.OpenDecisionRequest) (agentext.Decision, bool, error)
-	Wait(ctx context.Context, tenantID, sessionID, decisionID uuid.UUID) (agentext.Decision, error)
+	Open(ctx context.Context, request harnessext.OpenDecisionRequest) (harnessext.Decision, bool, error)
+	Wait(ctx context.Context, tenantID, sessionID, decisionID uuid.UUID) (harnessext.Decision, error)
 }
 
 // MRTROptions configures the executor. The zero value is a safe deployment:
@@ -402,7 +402,7 @@ func (m *MRTR) elicit(ctx context.Context, server, key string, input mcp.InputRe
 
 	plan := elicitationPlanFor(params, mode)
 	requestID := elicitationRequestID(server, key, round, state)
-	decision, _, err := decisions.Open(ctx, agentext.OpenDecisionRequest{
+	decision, _, err := decisions.Open(ctx, harnessext.OpenDecisionRequest{
 		TenantID:      tenantID,
 		SessionID:     sessionID,
 		RequestID:     requestID,
@@ -449,7 +449,7 @@ type elicitationValue struct {
 // elicitationPlan is the decision projection of a requestedSchema.
 type elicitationPlan struct {
 	prompt        string
-	options       []agentext.DecisionOption
+	options       []harnessext.DecisionOption
 	freeTextField string
 	values        map[string]elicitationValue
 }
@@ -482,7 +482,7 @@ func elicitationPlanFor(params elicitParams, mode string) elicitationPlan {
 				// Field and value indices keep option ids unique across properties;
 				// a duplicate id would make the decision primitive reject the open.
 				id := fmt.Sprintf("v%d_%d", fieldIndex, valueIndex)
-				plan.options = append(plan.options, agentext.DecisionOption{
+				plan.options = append(plan.options, harnessext.DecisionOption{
 					ID:          id,
 					Label:       bounded(enumString(literal), 128),
 					Description: bounded(title, 128),
@@ -499,18 +499,18 @@ func elicitationPlanFor(params elicitParams, mode string) elicitationPlan {
 		}
 	}
 	if mode == "url" {
-		plan.options = append(plan.options, agentext.DecisionOption{
+		plan.options = append(plan.options, harnessext.DecisionOption{
 			ID:          "accept",
 			Label:       "同意将该链接交给 View 打开",
 			Description: bounded(strings.TrimSpace(params.URL), 256),
 		})
 	}
 	if len(plan.options) == 0 {
-		plan.options = append(plan.options, agentext.DecisionOption{ID: "accept", Label: "接受"})
+		plan.options = append(plan.options, harnessext.DecisionOption{ID: "accept", Label: "接受"})
 	}
 	plan.options = append(plan.options,
-		agentext.DecisionOption{ID: "decline", Label: "拒绝"},
-		agentext.DecisionOption{ID: "cancel", Label: "取消"},
+		harnessext.DecisionOption{ID: "decline", Label: "拒绝"},
+		harnessext.DecisionOption{ID: "cancel", Label: "取消"},
 	)
 	return plan
 }
@@ -519,8 +519,8 @@ func elicitationPlanFor(params elicitParams, mode string) elicitationPlan {
 // An explicit decline/cancel option always wins over free text: the decision
 // UI may leave typed text in the box when the user picks a terminal option,
 // and forwarding that text as an accept would turn a refusal into consent.
-func (p elicitationPlan) answer(decision agentext.Decision) (string, map[string]any) {
-	if decision.Status != agentext.DecisionAnswered || decision.Answer == nil {
+func (p elicitationPlan) answer(decision harnessext.Decision) (string, map[string]any) {
+	if decision.Status != harnessext.DecisionAnswered || decision.Answer == nil {
 		return "cancel", nil
 	}
 	answer := decision.Answer

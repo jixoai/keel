@@ -30,8 +30,8 @@ run() { # NAME COMMAND...
 cd "$ROOT"
 
 run go-build go build ./...
-run go-vet go vet ./internal/layerfs/... ./internal/fileplugin ./internal/toolsurface ./internal/agentext ./cmd/keel
-run test-race go test -race ./internal/layerfs/... ./internal/fileplugin ./internal/toolsurface ./internal/agentext -count=1
+run go-vet go vet ./internal/layerfs/... ./internal/fileplugin ./internal/toolsurface ./internal/harnessext ./cmd/keel
+run test-race go test -race ./internal/layerfs/... ./internal/fileplugin ./internal/toolsurface ./internal/harnessext -count=1
 run test-scale go test ./internal/fileplugin -run 'TestCaptureOneHundredThousandFilesIsOneEvent' -v -count=1
 run test-gbash go test ./internal/layerfs/gbashfs -run 'TestGBashUsesLayerfsAtANonRootMount' -v -count=1
 run test-write-through go test ./internal/fileplugin -run 'TestWriteReadPagingAndPreconditions|TestEditExactUniqueAndReplaceAll|TestMaterializeFromManifestAndSnapshot|TestWriteThroughReachesBash' -v -count=1

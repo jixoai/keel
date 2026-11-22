@@ -138,7 +138,7 @@ var rules = []Rule{
 	// MCP OAuth callback: the provider redirects the browser here; the signed
 	// state is the authority, so no permission key can be required.
 	route("", "/v1/mcp/callback", ModePublic, ""),
-	// Product subtree mount; the concrete agentapi route owns the decision.
+	// Product subtree mount; the concrete harnessapi route owns the decision.
 	{Pattern: "/v1/", Mode: ModeDelegated, Note: "product subtree mount"},
 
 	// --- operator surface (deployment credential checked in the handler) ----

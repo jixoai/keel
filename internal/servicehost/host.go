@@ -279,7 +279,7 @@ type Runtime struct {
 
 	// publishMu guards the product layer's republish state: the MCP half (tools
 	// and prompt sections published by the MCP registry) and the plugin half
-	// (tools and prompt sections published by agentext.Runtime) are composed on
+	// (tools and prompt sections published by harnessext.Runtime) are composed on
 	// every republish, and either sink may fire first (see refreshAssembly).
 	// Publishing one half never drops the other: mcp_published records that the
 	// MCP half was published at least once, so the assembly switches from the

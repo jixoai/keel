@@ -1,6 +1,6 @@
 package servicehost
 
-// The plugin prompt seam: the sections a plugin contributes (agentext
+// The plugin prompt seam: the sections a plugin contributes (harnessext
 // PromptSections, published through RuntimeOptions.Prompt) must reach the
 // system prompt the runner assembles, an enable/disable must be effective
 // without a restart, and publishing one half of the dynamic surface (tools)

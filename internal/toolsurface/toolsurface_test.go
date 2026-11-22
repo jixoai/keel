@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/placement"
@@ -239,7 +239,7 @@ func TestBashDelegatesToBackend(t *testing.T) {
 }
 
 func TestBashMapsPluginStateAndBackendErrors(t *testing.T) {
-	disabled := &fakeBash{err: agentext.ErrPluginState}
+	disabled := &fakeBash{err: harnessext.ErrPluginState}
 	registry := builtinRegistry(t, toolsurface.Backends{Bash: disabled})
 	problem := errorDocument(t, runAction(t, registry[toolsurface.Bash], `{"action":"run","command":"ls"}`))
 	if problem["code"] != toolsurface.CodePluginDisabled {
@@ -509,50 +509,50 @@ func TestSkillsBackendErrorCarriesTheLibraryCode(t *testing.T) {
 }
 
 type fakeAgents struct {
-	scope        agentext.RunScope
+	scope        harnessext.RunScope
 	args         json.RawMessage
-	result       agentext.SubagentResult
-	resumeResult agentext.ResumeResult
-	cancelResult agentext.CancelResult
-	records      []agentext.SubagentRecord
+	result       harnessext.SubagentResult
+	resumeResult harnessext.ResumeResult
+	cancelResult harnessext.CancelResult
+	records      []harnessext.SubagentRecord
 	err          error
 }
 
-func (f *fakeAgents) Spawn(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.SubagentResult, error) {
+func (f *fakeAgents) Spawn(_ context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.SubagentResult, error) {
 	f.scope = scope
 	f.args = append(json.RawMessage(nil), args...)
 	return f.result, f.err
 }
-func (f *fakeAgents) Fork(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.SubagentResult, error) {
+func (f *fakeAgents) Fork(_ context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.SubagentResult, error) {
 	f.scope = scope
 	f.args = append(json.RawMessage(nil), args...)
 	return f.result, f.err
 }
-func (f *fakeAgents) Resume(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.ResumeResult, error) {
+func (f *fakeAgents) Resume(_ context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.ResumeResult, error) {
 	f.scope = scope
 	f.args = append(json.RawMessage(nil), args...)
 	return f.resumeResult, f.err
 }
-func (f *fakeAgents) Cancel(_ context.Context, scope agentext.RunScope, args json.RawMessage) (agentext.CancelResult, error) {
+func (f *fakeAgents) Cancel(_ context.Context, scope harnessext.RunScope, args json.RawMessage) (harnessext.CancelResult, error) {
 	f.scope = scope
 	f.args = append(json.RawMessage(nil), args...)
 	return f.cancelResult, f.err
 }
-func (f *fakeAgents) List(uuid.UUID, *uuid.UUID) []agentext.SubagentRecord { return f.records }
-func (f *fakeAgents) Get(sessionID uuid.UUID) (agentext.SubagentRecord, bool) {
+func (f *fakeAgents) List(uuid.UUID, *uuid.UUID) []harnessext.SubagentRecord { return f.records }
+func (f *fakeAgents) Get(sessionID uuid.UUID) (harnessext.SubagentRecord, bool) {
 	for _, record := range f.records {
 		if record.SessionID == sessionID.String() {
 			return record, true
 		}
 	}
-	return agentext.SubagentRecord{}, false
+	return harnessext.SubagentRecord{}, false
 }
 
 func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 	tenant, parent := uuid.New(), uuid.New()
-	backend := &fakeAgents{result: agentext.SubagentResult{Status: "done", Summary: "ok", SessionID: uuid.NewString()}}
+	backend := &fakeAgents{result: harnessext.SubagentResult{Status: "done", Summary: "ok", SessionID: uuid.NewString()}}
 	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
-	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{TenantID: tenant, SessionID: parent, RunID: "run-1"})
+	ctx := harnessext.WithRunScope(context.Background(), harnessext.RunScope{TenantID: tenant, SessionID: parent, RunID: "run-1"})
 	result, err := registry[toolsurface.Agent].Execute(ctx, "call-1",
 		json.RawMessage(`{"action":"spawn","task":"review","botId":"agent_member","idempotencyKey":"k1"}`), nil)
 	if err != nil {
@@ -587,7 +587,7 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 
 	// fork/resume/cancel are live actions (W8), not reserved stubs. Each one
 	// reaches the backend with the ambient parent scope.
-	backend.result = agentext.SubagentResult{Status: "done", Summary: "forked", SessionID: uuid.NewString()}
+	backend.result = harnessext.SubagentResult{Status: "done", Summary: "forked", SessionID: uuid.NewString()}
 	forked, err := registry[toolsurface.Agent].Execute(ctx, "call-2",
 		json.RawMessage(`{"action":"fork","eventSeq":42,"task":"branch"}`), nil)
 	if err != nil || (forked.IsError != nil && *forked.IsError) {
@@ -603,13 +603,13 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 	if backend.scope.SessionID != parent {
 		t.Fatalf("fork scope = %+v", backend.scope)
 	}
-	backend.resumeResult = agentext.ResumeResult{Status: "resumed", SessionID: uuid.NewString(), EventSeq: 9}
+	backend.resumeResult = harnessext.ResumeResult{Status: "resumed", SessionID: uuid.NewString(), EventSeq: 9}
 	resumed, err := registry[toolsurface.Agent].Execute(ctx, "call-3",
 		json.RawMessage(`{"action":"resume","sessionId":"`+backend.resumeResult.SessionID+`","requestId":"r1"}`), nil)
 	if err != nil || !strings.Contains(agentcore.ContentToText(resumed.Content), `"status":"resumed"`) {
 		t.Fatalf("agent resume = %#v err=%v", resumed, err)
 	}
-	backend.cancelResult = agentext.CancelResult{Status: "cancelled", RunStatus: "cancelled", Cancelled: true}
+	backend.cancelResult = harnessext.CancelResult{Status: "cancelled", RunStatus: "cancelled", Cancelled: true}
 	cancelled, err := registry[toolsurface.Agent].Execute(ctx, "call-4",
 		json.RawMessage(`{"action":"cancel","sessionId":"`+backend.resumeResult.SessionID+`"}`), nil)
 	if err != nil || !strings.Contains(agentcore.ContentToText(cancelled.Content), `"status":"cancelled"`) {
@@ -618,7 +618,7 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 
 	// A fork origin without an exact snapshot is its own typed code: the model
 	// must not read it as a generic backend failure.
-	backend.err = agentext.ErrForkSnapshotMissing
+	backend.err = harnessext.ErrForkSnapshotMissing
 	snapshotMissing, err := registry[toolsurface.Agent].Execute(ctx, "call-5",
 		json.RawMessage(`{"action":"fork","eventSeq":7}`), nil)
 	if err != nil {
@@ -633,11 +633,11 @@ func TestAgentSpawnCarriesTheBinding(t *testing.T) {
 func TestAgentListAndStatusStayInTheParent(t *testing.T) {
 	tenant, parent := uuid.New(), uuid.New()
 	child := uuid.NewString()
-	backend := &fakeAgents{records: []agentext.SubagentRecord{{
+	backend := &fakeAgents{records: []harnessext.SubagentRecord{{
 		SessionID: child, TenantID: tenant.String(), ParentSessionID: parent.String(), Status: "done",
 	}}}
 	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
-	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{TenantID: tenant, SessionID: parent})
+	ctx := harnessext.WithRunScope(context.Background(), harnessext.RunScope{TenantID: tenant, SessionID: parent})
 	list, err := registry[toolsurface.Agent].Execute(ctx, "call-1", json.RawMessage(`{"action":"list"}`), nil)
 	if err != nil || !strings.Contains(agentcore.ContentToText(list.Content), child) {
 		t.Fatalf("agent list = %#v err=%v", list, err)
@@ -648,7 +648,7 @@ func TestAgentListAndStatusStayInTheParent(t *testing.T) {
 	}
 	// A child of another parent is invisible.
 	otherParent := uuid.New()
-	ctxOther := agentext.WithRunScope(context.Background(), agentext.RunScope{TenantID: tenant, SessionID: otherParent})
+	ctxOther := harnessext.WithRunScope(context.Background(), harnessext.RunScope{TenantID: tenant, SessionID: otherParent})
 	missing, err := registry[toolsurface.Agent].Execute(ctxOther, "call-3", json.RawMessage(`{"action":"status","sessionId":"`+child+`"}`), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -664,9 +664,9 @@ func TestAgentListAndStatusStayInTheParent(t *testing.T) {
 // every action — never backend_error for spawn, and never a misleading empty
 // child list for list/status.
 func TestAgentUnresolvedBackendIsNotWired(t *testing.T) {
-	backend := agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return nil }}
+	backend := harnessext.AgentBackend{Runner: func() *harnessext.SubagentRunner { return nil }}
 	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
-	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{
+	ctx := harnessext.WithRunScope(context.Background(), harnessext.RunScope{
 		TenantID: uuid.New(), SessionID: uuid.New(), RunID: "run-1",
 	})
 	for _, args := range []string{
@@ -689,22 +689,22 @@ func TestAgentUnresolvedBackendIsNotWired(t *testing.T) {
 // backend), while an installed-but-disabled or uninstalled plugin is
 // plugin_disabled with wording that matches which one it is.
 func TestCreationWiringAndDisabledStayDistinct(t *testing.T) {
-	unwired := builtinRegistry(t, toolsurface.Backends{Creation: agentext.CreationBackend{
-		Manager: func() *agentext.Manager { return nil },
+	unwired := builtinRegistry(t, toolsurface.Backends{Creation: harnessext.CreationBackend{
+		Manager: func() *harnessext.Manager { return nil },
 	}})
 	result := runAction(t, unwired[toolsurface.Creation], `{"action":"list"}`)
 	if problem := errorDocument(t, result); problem["code"] != toolsurface.CodeNotWired {
 		t.Fatalf("nil manager = %v, want %s", problem, toolsurface.CodeNotWired)
 	}
 
-	missing := &fakeCreation{err: agentext.ErrPluginNotFound}
+	missing := &fakeCreation{err: harnessext.ErrPluginNotFound}
 	result = runAction(t, builtinRegistry(t, toolsurface.Backends{Creation: missing})[toolsurface.Creation], `{"action":"list"}`)
 	problem := errorDocument(t, result)
 	if problem["code"] != toolsurface.CodePluginDisabled || !strings.Contains(problem["message"].(string), "not installed") {
 		t.Fatalf("uninstalled plugin = %v, want plugin_disabled naming installation", problem)
 	}
 
-	disabled := &fakeCreation{err: agentext.ErrPluginState}
+	disabled := &fakeCreation{err: harnessext.ErrPluginState}
 	result = runAction(t, builtinRegistry(t, toolsurface.Backends{Creation: disabled})[toolsurface.Creation], `{"action":"list"}`)
 	problem = errorDocument(t, result)
 	if problem["code"] != toolsurface.CodePluginDisabled || !strings.Contains(problem["message"].(string), "not enabled") {
@@ -733,7 +733,7 @@ func TestCreationRoutesAndMapsDisabledPlugin(t *testing.T) {
 	if backend.action != "catalog" || !strings.Contains(agentcore.ContentToText(result.Content), `"status":"ok"`) {
 		t.Fatalf("creation catalog = %#v action=%q", result, backend.action)
 	}
-	backend.err = agentext.ErrPluginState
+	backend.err = harnessext.ErrPluginState
 	disabled := runAction(t, registry[toolsurface.Creation], `{"action":"scaffold","id":"demo"}`)
 	if problem := errorDocument(t, disabled); problem["code"] != toolsurface.CodePluginDisabled {
 		t.Fatalf("disabled creation = %v", problem)
@@ -780,17 +780,17 @@ func TestApprovedPluginToolsChangeAndRestoreTheManifestHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The durable approval is the HTTP gate in front of install/enable
-	// (internal/agentapi/plugin_approval.go). Once answered, the plugin runtime's
+	// (internal/harnessapi/plugin_approval.go). Once answered, the plugin runtime's
 	// ToolSink is the publication point its provides.tools reaches; patch it onto
 	// the host exactly as servicehost.RefreshProductTools does.
 	publish := func(tools []agentcore.AgentTool) error {
 		return h.RefreshSections(tools, "", nil)
 	}
-	runtime := agentext.NewRuntime(agentext.RuntimeOptions{Tools: publish})
+	runtime := harnessext.NewRuntime(harnessext.RuntimeOptions{Tools: publish})
 	t.Cleanup(func() { runtime.Close(context.Background()) })
-	plugin := &agentext.Plugin{
+	plugin := &harnessext.Plugin{
 		ID: "vendor.panel", Version: "1.0.0",
-		Tools: []agentext.ToolSpec{{
+		Tools: []harnessext.ToolSpec{{
 			Name:        "vendor_panel_refresh",
 			Description: "Refresh the vendor panel.",
 			Schema:      json.RawMessage(`{"type":"object"}`),
@@ -799,7 +799,7 @@ func TestApprovedPluginToolsChangeAndRestoreTheManifestHash(t *testing.T) {
 			},
 		}},
 	}
-	if err := runtime.ApplyPlugins(context.Background(), []*agentext.Plugin{plugin}); err != nil {
+	if err := runtime.ApplyPlugins(context.Background(), []*harnessext.Plugin{plugin}); err != nil {
 		t.Fatalf("enable plugin: %v", err)
 	}
 	enabled, err := toolsurface.RegistryHash(h.Tools())
@@ -993,7 +993,7 @@ func TestAgentCapacityRefusalIsTyped(t *testing.T) {
 		Limit: 1, Active: 1, RetryAfter: 3 * time.Second,
 	}}
 	registry := builtinRegistry(t, toolsurface.Backends{Agents: backend})
-	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{TenantID: tenant, SessionID: parent})
+	ctx := harnessext.WithRunScope(context.Background(), harnessext.RunScope{TenantID: tenant, SessionID: parent})
 	result, err := registry[toolsurface.Agent].Execute(ctx, "call-1",
 		json.RawMessage(`{"action":"spawn","task":"x"}`), nil)
 	if err != nil {

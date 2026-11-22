@@ -1,7 +1,7 @@
 package main
 
 // The P2 assembly proof (change feat-mcp-apps-events): the MCP half (registry →
-// prompt sections + catalogue) and the plugin half (agentext runtime → tools +
+// prompt sections + catalogue) and the plugin half (harnessext runtime → tools +
 // sections) are published through separate sinks and composed on every
 // republish. The test drives the production wiring — a real MCP stdio fixture,
 // the real plugin layer, the real registry — and asserts the two directions:
@@ -11,7 +11,7 @@ package main
 //   - an MCP republish (reconnect) keeps the plugin tools and prompt sections
 //     (R2, direction B).
 //
-// It then serves the registry through the production AgentAPI and asserts the
+// It then serves the registry through the production HarnessAPI and asserts the
 // app document contract end to end: catalogue identity, content hash, CSP and
 // the four security headers.
 
@@ -29,8 +29,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/jixoai/keel/internal/agentapi"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
@@ -107,11 +107,11 @@ func newMCPSurfaceHarness(t *testing.T) *mcpSurfaceHarness {
 	})
 	publication.attach(rt)
 
-	hooks := agentext.NewHookBus(agentext.HookBusOptions{Logger: log})
-	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Logger: log})
-	partials := agentext.NewPartialHub()
-	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Hooks: hooks, Logger: log})
-	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{Hooks: hooks, Logger: log})
+	hooks := harnessext.NewHookBus(harnessext.HookBusOptions{Logger: log})
+	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Logger: log})
+	partials := harnessext.NewPartialHub()
+	triggers := harnessext.NewTriggerEngine(harnessext.TriggerEngineOptions{Hooks: hooks, Logger: log})
+	subagents := harnessext.NewSubagentRunner(harnessext.SubagentOptions{Hooks: hooks, Logger: log})
 	t.Cleanup(func() {
 		triggers.Close()
 		decisions.Close()
@@ -124,7 +124,7 @@ func newMCPSurfaceHarness(t *testing.T) *mcpSurfaceHarness {
 	if err != nil {
 		t.Fatalf("plugin surface: %v", err)
 	}
-	if _, err := surface.manager.Enable(ctx, testkit.PluginID, agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := surface.manager.Enable(ctx, testkit.PluginID, harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatalf("enable the testkit plugin: %v", err)
 	}
 	t.Cleanup(func() { surface.runtime.Close(context.Background()) })
@@ -157,7 +157,7 @@ func (h *mcpSurfaceHarness) mustContainMCPHalf(t *testing.T, step string) {
 	if _, ok := h.rt.Assembly().Tools().Get("clock"); !ok {
 		t.Fatalf("%s: the plugin tool is missing", step)
 	}
-	if !strings.Contains(prompt, "<plugin_standard>") || !strings.Contains(prompt, agentext.CreationPrompt()) {
+	if !strings.Contains(prompt, "<plugin_standard>") || !strings.Contains(prompt, harnessext.CreationPrompt()) {
 		t.Fatalf("%s: the plugin prompt section is missing: %q", step, prompt)
 	}
 }
@@ -168,7 +168,7 @@ func TestMCPHalfSurvivesPluginRefresh(t *testing.T) {
 	harness := newMCPSurfaceHarness(t)
 	harness.mustContainMCPHalf(t, "boot")
 
-	if _, err := harness.plugins.manager.Disable(context.Background(), agentext.CreationPluginID, agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := harness.plugins.manager.Disable(context.Background(), harnessext.CreationPluginID, harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	prompt := harness.rt.Assembly().SystemPrompt()
@@ -181,7 +181,7 @@ func TestMCPHalfSurvivesPluginRefresh(t *testing.T) {
 		t.Fatalf("the mcp tool stopped working after a plugin refresh: %v", err)
 	}
 
-	if _, err := harness.plugins.manager.Enable(context.Background(), agentext.CreationPluginID, agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := harness.plugins.manager.Enable(context.Background(), harnessext.CreationPluginID, harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 	harness.mustContainMCPHalf(t, "after re-enable")
@@ -204,13 +204,13 @@ func TestPluginHalfSurvivesMCPRepublish(t *testing.T) {
 	harness.mustContainMCPHalf(t, "after MCP republish")
 }
 
-// TestMCPAppsHTTPEndToEnd drives the registry through the production AgentAPI:
+// TestMCPAppsHTTPEndToEnd drives the registry through the production HarnessAPI:
 // the catalogue identity, the document hash/URL, the CSP and the four security
 // headers, with the tenant boundary in front.
 func TestMCPAppsHTTPEndToEnd(t *testing.T) {
 	harness := newMCPSurfaceHarness(t)
 	theme := json.RawMessage(`{"cssVars":{"theme":{"radius":"12px"},"light":{"card":"#fff","foreground":"#111"},"dark":{"card":"#111","foreground":"#eee"}}}`)
-	server := httptest.NewServer(agentapi.New(agentapi.Config{
+	server := httptest.NewServer(harnessapi.New(harnessapi.Config{
 		MCPApps:      harness.registry,
 		MCPAppsTheme: theme,
 		Logger:       discardLogger(),

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/fileplugin"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/pluginpkg/builtin"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -18,20 +18,20 @@ import (
 // and disabling the plugin yields plugin_disabled without changing the surface.
 func TestReadWriteEditThroughTheKeelFilePlugin(t *testing.T) {
 	h := newHarness(t)
-	manifest, ok := builtin.Manifest(agentext.FilePluginID)
+	manifest, ok := builtin.Manifest(harnessext.FilePluginID)
 	if !ok {
 		t.Fatal("keel.file manifest is not embedded")
 	}
-	runtime := agentext.NewRuntime(agentext.RuntimeOptions{})
+	runtime := harnessext.NewRuntime(harnessext.RuntimeOptions{})
 	t.Cleanup(func() { runtime.Close(context.Background()) })
-	manager, err := agentext.NewPluginManager(agentext.ManagerOptions{
+	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
 		Runtime:     runtime,
 		KeelVersion: "0.1.0",
-		Builtins: []agentext.Builtin{{
+		Builtins: []harnessext.Builtin{{
 			Manifest:       manifest,
 			DefaultEnabled: true,
-			Factory: func() *agentext.Plugin {
-				return agentext.NewFilePlugin(agentext.FilePluginOptions{Service: h.service})
+			Factory: func() *harnessext.Plugin {
+				return harnessext.NewFilePlugin(harnessext.FilePluginOptions{Service: h.service})
 			},
 		}},
 	})
@@ -43,11 +43,11 @@ func TestReadWriteEditThroughTheKeelFilePlugin(t *testing.T) {
 	}
 	registry := map[string]agentcore.AgentTool{}
 	for _, tool := range toolsurface.BuiltinTools(nil, toolsurface.Backends{
-		Files: agentext.FileBackend{Manager: func() *agentext.Manager { return manager }},
+		Files: harnessext.FileBackend{Manager: func() *harnessext.Manager { return manager }},
 	}) {
 		registry[tool.Name()] = tool
 	}
-	ctx := agentext.WithRunScope(context.Background(), agentext.RunScope{
+	ctx := harnessext.WithRunScope(context.Background(), harnessext.RunScope{
 		TenantID: h.scope.TenantID, SessionID: h.scope.SessionID, RunID: "run-1",
 	})
 
@@ -89,7 +89,7 @@ func TestReadWriteEditThroughTheKeelFilePlugin(t *testing.T) {
 
 	// The surface never changes: disabling keel.file makes the actions answer
 	// plugin_disabled, it does not remove read/write/edit.
-	if _, err := manager.Disable(context.Background(), agentext.FilePluginID, agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := manager.Disable(context.Background(), harnessext.FilePluginID, harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	disabled, err := registry[toolsurface.Write].Execute(ctx, "call-w2",

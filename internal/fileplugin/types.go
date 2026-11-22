@@ -69,7 +69,7 @@ func CodeOf(err error) string {
 	return ""
 }
 
-// ErrPluginDisabled is the sentinel the agentext backend returns when the
+// ErrPluginDisabled is the sentinel the harnessext backend returns when the
 // keel.file plugin is not enabled. The tool surface maps it to plugin_disabled.
 var ErrPluginDisabled = errors.New("fileplugin: the keel.file plugin is not enabled")
 

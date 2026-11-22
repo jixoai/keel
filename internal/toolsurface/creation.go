@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 )
 
 // CreationBackend is the keel.creation plugin's action backend. The aggregate
@@ -44,14 +44,14 @@ func newCreationTool(backend CreationBackend) *actionTool {
 			result, err := backend.Invoke(ctx, action, raw)
 			if err != nil {
 				switch {
-				case errors.Is(err, agentext.ErrNotWired):
+				case errors.Is(err, harnessext.ErrNotWired):
 					// The manager itself is absent: a deployment wiring gap, not a
 					// disabled plugin. Keep the two facts distinguishable.
 					return notWired(Creation, err.Error())
-				case errors.Is(err, agentext.ErrPluginNotFound):
+				case errors.Is(err, harnessext.ErrPluginNotFound):
 					return ErrorResult(CodePluginDisabled, Creation,
 						"keel.creation is not installed; install the plugin to use creation actions", nil)
-				case errors.Is(err, agentext.ErrPluginState):
+				case errors.Is(err, harnessext.ErrPluginState):
 					return ErrorResult(CodePluginDisabled, Creation,
 						"keel.creation is not enabled; enable the plugin to use creation actions", nil)
 				default:

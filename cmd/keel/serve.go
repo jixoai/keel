@@ -21,14 +21,14 @@ import (
 	"github.com/jixoai/keel/internal/accessgate"
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/agent"
-	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
 	"github.com/jixoai/keel/internal/approval"
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/fileplugin"
+	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/jobqueue"
@@ -136,7 +136,7 @@ type bashSessionBackend struct {
 }
 
 func (b bashSessionBackend) Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error) {
-	if scope, ok := agentext.RunScopeFromContext(ctx); ok && scope.TenantID != uuid.Nil && scope.SessionID != uuid.Nil {
+	if scope, ok := harnessext.RunScopeFromContext(ctx); ok && scope.TenantID != uuid.Nil && scope.SessionID != uuid.Nil {
 		var fields struct {
 			TaskID string `json:"taskId"`
 		}
@@ -416,15 +416,15 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// decorator can be installed at assembly time: the runner's
 	// keel.agent.run span becomes turn.started/turn.finished with no worker
 	// change.
-	hooks := agentext.NewHookBus(agentext.HookBusOptions{Logger: log})
+	hooks := harnessext.NewHookBus(harnessext.HookBusOptions{Logger: log})
 	// The run-control seam is created before the service graph so the worker
 	// registers every attempt: the cancel endpoint can then stop an in-process
 	// run instead of answering 501.
-	runControl := agentext.NewRunControl(storeSessions{Store: st}, log)
+	runControl := harnessext.NewRunControl(storeSessions{Store: st}, log)
 	// Partials are created before the service graph: the provider-stream tee
 	// publishes the run's text deltas into this hub, and the SSE endpoint reads
 	// them for clients that ask (?partials=1).
-	partials := agentext.NewPartialHub()
+	partials := harnessext.NewPartialHub()
 
 	var mcpEntries []mcp.ServerEntry
 	if opts.MCPConfig != "" {
@@ -581,8 +581,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// The constant tool surface needs the sub-agent runner and the plugin
 	// manager, both created after Boot. The getters are captured now and resolve
 	// at tool-call time; no run executes before newProductLayer returns.
-	var toolSubagents *agentext.SubagentRunner
-	var toolPluginManager *agentext.Manager
+	var toolSubagents *harnessext.SubagentRunner
+	var toolPluginManager *harnessext.Manager
 
 	// MRTR / legacy server-request executor (P5). It is constructed before the
 	// MCP connections so initialize declares exactly what this host can answer:
@@ -694,8 +694,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 				Auditor: mcpAppAuditor{store: st, log: log},
 				Metrics: mcpMetrics,
 				OnSurfaceChanged: func(change mcphost.SurfaceChange) {
-					payload := agentext.HookPayload{
-						Event:    agentext.HookMCPSurfaceChanged,
+					payload := harnessext.HookPayload{
+						Event:    harnessext.HookMCPSurfaceChanged,
 						TenantID: opts.TenantID.String(),
 					}
 					payload.SetData("generation", fmt.Sprintf("%d", change.Generation))
@@ -758,23 +758,23 @@ func runServe(parent context.Context, opts serveOptions) error {
 				return mediawiring.ValidateModels(mediaOptions(tenant))
 			},
 			WrapTelemetry: func(base telemetry.Context) telemetry.Context {
-				return &agentext.TurnTelemetry{Base: base, Hooks: hooks}
+				return &harnessext.TurnTelemetry{Base: base, Hooks: hooks}
 			},
 			WrapStream: func(base provider.StreamFn) provider.StreamFn {
-				return agentext.StreamTee(base, partials)
+				return harnessext.StreamTee(base, partials)
 			},
 			RunControl: runControl,
 			ToolBackends: toolsurface.Backends{
-				Bash:     bashSessionBackend{inner: agentext.ShellBackend{Manager: func() *agentext.Manager { return toolPluginManager }}},
-				Agents:   agentext.AgentBackend{Runner: func() *agentext.SubagentRunner { return toolSubagents }},
-				Creation: agentext.CreationBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
-				Tasks: agentext.TasksBackend{
-					Manager: func() *agentext.Manager { return toolPluginManager },
+				Bash:     bashSessionBackend{inner: harnessext.ShellBackend{Manager: func() *harnessext.Manager { return toolPluginManager }}},
+				Agents:   harnessext.AgentBackend{Runner: func() *harnessext.SubagentRunner { return toolSubagents }},
+				Creation: harnessext.CreationBackend{Manager: func() *harnessext.Manager { return toolPluginManager }},
+				Tasks: harnessext.TasksBackend{
+					Manager: func() *harnessext.Manager { return toolPluginManager },
 					Service: taskLog,
 				},
-				Approve: agentext.ApproveBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
-				Notify:  agentext.NotifyBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
-				Files:   agentext.FileBackend{Manager: func() *agentext.Manager { return toolPluginManager }},
+				Approve: harnessext.ApproveBackend{Manager: func() *harnessext.Manager { return toolPluginManager }},
+				Notify:  harnessext.NotifyBackend{Manager: func() *harnessext.Manager { return toolPluginManager }},
+				Files:   harnessext.FileBackend{Manager: func() *harnessext.Manager { return toolPluginManager }},
 				// The skill library is the tenant-scoped registry behind
 				// `skills manage`/`sources` and the settings page.
 				Skills: skillLibrary,
@@ -912,7 +912,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// registered route is missing from the matrix.
 		Access:        product.access,
 		AuditRelation: product.access.AuditRelation,
-		Partials:      agentapi.PartialSource(product.partials),
+		Partials:      harnessapi.PartialSource(product.partials),
 		// The selection vocabulary is read from the CURRENT generation at call
 		// time: a settings write installs a new model service, and the input edge
 		// must accept exactly what that generation can run. A runtime without
@@ -1033,18 +1033,18 @@ drainWait:
 
 // productLayer owns every product-layer service and its shutdown order.
 type productLayer struct {
-	hooks     *agentext.HookBus
-	decisions *agentext.DecisionBroker
-	partials  *agentext.PartialHub
-	runCtrl   *agentext.RunControl
-	starter   *agentext.TurnStarter
-	subagents *agentext.SubagentRunner
-	triggers  *agentext.TriggerEngine
-	plugins   *agentext.Runtime
+	hooks     *harnessext.HookBus
+	decisions *harnessext.DecisionBroker
+	partials  *harnessext.PartialHub
+	runCtrl   *harnessext.RunControl
+	starter   *harnessext.TurnStarter
+	subagents *harnessext.SubagentRunner
+	triggers  *harnessext.TriggerEngine
+	plugins   *harnessext.Runtime
 	// pluginManager is the lifecycle authority over plugins; api serves it and
 	// the runtime is only ever told what to load through it.
-	pluginManager *agentext.Manager
-	api           *agentapi.Server
+	pluginManager *harnessext.Manager
+	api           *harnessapi.Server
 	auth          *authController
 	// access is the product authorization bridge shared by the identity routes,
 	// the bot invoke/start seams and the generic session-owner callback.
@@ -1062,7 +1062,7 @@ func (p *productLayer) close() {
 }
 
 // forkSnapshots adapts the file plugin's manifest to the sub-agent fork seam.
-// The tree hash travels as its prefixed string form because agentext treats it
+// The tree hash travels as its prefixed string form because harnessext treats it
 // as an opaque reference.
 type forkSnapshots struct{ manifest fileplugin.Manifest }
 
@@ -1137,9 +1137,9 @@ func (f forkAdmission) Leave(ctx context.Context, tenantID, sessionID uuid.UUID)
 // runRequeuer adapts the store's run requeue to the sub-agent resume seam.
 type runRequeuer struct{ store *store.Store }
 
-func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RequeueOutcome, error) {
+func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UUID) (harnessext.RequeueOutcome, error) {
 	outcome, err := r.store.RequeueRun(ctx, tenantID, sessionID)
-	return agentext.RequeueOutcome{Status: outcome.Status, Attempts: outcome.Attempts}, err
+	return harnessext.RequeueOutcome{Status: outcome.Status, Attempts: outcome.Attempts}, err
 }
 
 // newProductLayer assembles the extension surface over an already-booted
@@ -1147,10 +1147,10 @@ func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UU
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *agentext.HookBus, runControl *agentext.RunControl, partials *agentext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
-	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{
-		Store:  agentext.NewTasksDecisionStore(st),
+	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{
+		Store:  harnessext.NewTasksDecisionStore(st),
 		Hooks:  hooks,
 		Logger: log,
 	})
@@ -1176,17 +1176,17 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// only writes the derived sessions.bound_* index; the event ledger stays the
 	// truth.
 	bindingRecorder := sessionbinding.New(st)
-	starter := agentext.NewTurnStarter(sessions, admission, hooks, log)
+	starter := harnessext.NewTurnStarter(sessions, admission, hooks, log)
 	starter.Bindings = bindingRecorder
-	var forkSnapshotReader agentext.ForkSnapshotReader
+	var forkSnapshotReader harnessext.ForkSnapshotReader
 	if opts.FileService != nil {
 		forkSnapshotReader = forkSnapshots{manifest: opts.FileService.Manifest()}
 	}
-	var forkAdmissionOpt agentext.ForkAdmission
+	var forkAdmissionOpt harnessext.ForkAdmission
 	if admissionGate != nil {
 		forkAdmissionOpt = forkAdmission{gate: admissionGate}
 	}
-	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{
+	subagents := harnessext.NewSubagentRunner(harnessext.SubagentOptions{
 		Gate:    sessions,
 		Edge:    admission,
 		Events:  kern,
@@ -1229,7 +1229,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// the ownership writer creates the session with its Bot/account/created-by
 	// tuple in one transaction. Without these seams a fire is fail closed.
 	triggerOwnership := triggerBotOwner{store: st}
-	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{
+	triggers := harnessext.NewTriggerEngine(harnessext.TriggerEngineOptions{
 		Starter: starter,
 		Hooks:   hooks,
 		Logger:  log,
@@ -1248,17 +1248,17 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 	manager, toolIndex, plugins := surface.manager, surface.toolIndex, surface.runtime
 
-	cancelFn := func(cancelCtx context.Context, tenantID, sessionID uuid.UUID) (agentext.CancelResult, error) {
+	cancelFn := func(cancelCtx context.Context, tenantID, sessionID uuid.UUID) (harnessext.CancelResult, error) {
 		owner, exists, err := st.SessionOwner(cancelCtx, tenantID, sessionID)
 		if err != nil {
-			return agentext.CancelResult{}, err
+			return harnessext.CancelResult{}, err
 		}
 		if !exists {
-			return agentext.CancelResult{}, agentapi.ErrSessionNotFound
+			return harnessext.CancelResult{}, harnessapi.ErrSessionNotFound
 		}
 		if owner == store.StateOwnerExternal {
-			return agentext.CancelResult{Status: "idle", RunStatus: "external",
-				Detail: "external sessions have no native run to cancel"}, agentapi.ErrExternalSession
+			return harnessext.CancelResult{Status: "idle", RunStatus: "external",
+				Detail: "external sessions have no native run to cancel"}, harnessapi.ErrExternalSession
 		}
 		return runControl.Cancel(cancelCtx, kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 	}
@@ -1276,12 +1276,12 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if accessBridge == nil {
 		return nil, errors.New("access bridge is required")
 	}
-	var secretStore agentapi.SecretStore
+	var secretStore harnessapi.SecretStore
 	if secretBox != nil {
 		secretStore = tenantSecretSeam{store: st, box: secretBox}
 	}
-	api := agentapi.New(agentapi.Config{
-		Sessions: agentapi.NewPGSessionLister(st),
+	api := harnessapi.New(harnessapi.Config{
+		Sessions: harnessapi.NewPGSessionLister(st),
 		// Identity/access surface (change keel-bot-identity-access, A4.1): the
 		// same store and authorizer the auth middleware uses. A bot invoke/start
 		// creates an owned session and commits the turn through the one starter.
@@ -1345,7 +1345,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Triggers:      triggers,
 		Subagents:     subagents,
 		Hooks:         hooks,
-		ModelsLive: func() agentapi.ModelCatalog {
+		ModelsLive: func() harnessapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil
 			}
@@ -1414,10 +1414,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 // ownership (bot → account, initiator, optional team mission) before committing
 // the turn, so a new session is private from its first row. The turn itself goes
 // through the same TurnStarter triggers and sub-agents use.
-func newBotSessionStarter(st *store.Store, starter *agentext.TurnStarter) func(context.Context, agentapi.BotSessionRequest) (agentapi.BotSessionResult, error) {
-	return func(ctx context.Context, request agentapi.BotSessionRequest) (agentapi.BotSessionResult, error) {
+func newBotSessionStarter(st *store.Store, starter *harnessext.TurnStarter) func(context.Context, harnessapi.BotSessionRequest) (harnessapi.BotSessionResult, error) {
+	return func(ctx context.Context, request harnessapi.BotSessionRequest) (harnessapi.BotSessionResult, error) {
 		if st == nil || starter == nil {
-			return agentapi.BotSessionResult{}, errors.New("bot session starter is not configured")
+			return harnessapi.BotSessionResult{}, errors.New("bot session starter is not configured")
 		}
 		sessionID := request.SessionID
 		if sessionID == uuid.Nil {
@@ -1428,7 +1428,7 @@ func newBotSessionStarter(st *store.Store, starter *agentext.TurnStarter) func(c
 			AccountID: request.AccountID, CreatedByAccountID: request.ActorAccountID,
 			TeamBotID: request.TeamBotID,
 		}); err != nil {
-			return agentapi.BotSessionResult{}, err
+			return harnessapi.BotSessionResult{}, err
 		}
 		var extras map[string]any
 		if request.TeamBotID != "" {
@@ -1449,14 +1449,14 @@ func newBotSessionStarter(st *store.Store, starter *agentext.TurnStarter) func(c
 				"selection": map[string]string{"botId": request.BotID},
 			}
 		}
-		result, err := starter.StartTurn(ctx, agentext.StartTurnRequest{
+		result, err := starter.StartTurn(ctx, harnessext.StartTurnRequest{
 			TenantID: request.TenantID, SessionID: sessionID,
 			Text: request.Text, RequestID: request.RequestID, Extras: extras,
 		})
 		if err != nil {
-			return agentapi.BotSessionResult{}, err
+			return harnessapi.BotSessionResult{}, err
 		}
-		return agentapi.BotSessionResult{
+		return harnessapi.BotSessionResult{
 			SessionID: result.SessionID, Seq: result.Seq,
 			RequestID: result.RequestID, Deduped: result.Deduped,
 		}, nil
@@ -1467,9 +1467,9 @@ func newBotSessionStarter(st *store.Store, starter *agentext.TurnStarter) func(c
 // tool index the UI bridge shares with the model registry, and the runtime the
 // api reads snapshots from.
 type pluginSurface struct {
-	manager   *agentext.Manager
+	manager   *harnessext.Manager
 	toolIndex *productToolIndex
-	runtime   *agentext.Runtime
+	runtime   *harnessext.Runtime
 }
 
 // newPluginSurface builds the plugin lifecycle authority over the live host
@@ -1485,17 +1485,17 @@ type pluginSurface struct {
 // It is a constructor rather than inline code so the serving path and its tests
 // share exactly this wiring: the model-side proof that a plugin's prompt
 // section reaches the system prompt rides on these sinks.
-func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence agentext.PluginPersistence, opts serveOptions, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, approvals *approval.Service, notifications *notify.Service, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, tasks *tasklog.Service, log *slog.Logger) (*pluginSurface, error) {
+func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence harnessext.PluginPersistence, opts serveOptions, hooks *harnessext.HookBus, triggers *harnessext.TriggerEngine, decisions *harnessext.DecisionBroker, approvals *approval.Service, notifications *notify.Service, subagents *harnessext.SubagentRunner, partials *harnessext.PartialHub, tasks *tasklog.Service, log *slog.Logger) (*pluginSurface, error) {
 	builtinManifests, err := builtin.Manifests()
 	if err != nil {
 		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
 	}
 	// Creation mode drives the plugin manager itself, so its factory resolves the
 	// manager lazily: the manager is built with (and after) this builtin set.
-	var pluginManager *agentext.Manager
-	builtinFactories := map[string]func() *agentext.Plugin{
-		agentext.ExamplePluginID: func() *agentext.Plugin {
-			return agentext.NewExamplePlugin(agentext.ExamplePluginOptions{
+	var pluginManager *harnessext.Manager
+	builtinFactories := map[string]func() *harnessext.Plugin{
+		harnessext.ExamplePluginID: func() *harnessext.Plugin {
+			return harnessext.NewExamplePlugin(harnessext.ExamplePluginOptions{
 				TenantID: opts.TenantID.String(),
 				Interval: opts.ExampleInterval,
 				// A signed webhook delivery proves its origin with this key. The
@@ -1506,45 +1506,45 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				BotID:            opts.ExampleBotID,
 			})
 		},
-		testkit.PluginID: func() *agentext.Plugin { return agentext.NewTestkitPlugin() },
-		agentext.FilePluginID: func() *agentext.Plugin {
-			return agentext.NewFilePlugin(agentext.FilePluginOptions{Service: opts.FileService})
+		testkit.PluginID: func() *harnessext.Plugin { return harnessext.NewTestkitPlugin() },
+		harnessext.FilePluginID: func() *harnessext.Plugin {
+			return harnessext.NewFilePlugin(harnessext.FilePluginOptions{Service: opts.FileService})
 		},
-		agentext.ModelPluginID:   func() *agentext.Plugin { return agentext.NewModelPlugin() },
-		agentext.BotPluginID:     func() *agentext.Plugin { return agentext.NewBotPlugin() },
-		agentext.TeamBotPluginID: func() *agentext.Plugin { return agentext.NewTeamBotPlugin() },
-		agentext.CreationPluginID: func() *agentext.Plugin {
-			return agentext.NewCreationPlugin(agentext.CreationOptions{
-				Manager:  func() *agentext.Manager { return pluginManager },
+		harnessext.ModelPluginID:   func() *harnessext.Plugin { return harnessext.NewModelPlugin() },
+		harnessext.BotPluginID:     func() *harnessext.Plugin { return harnessext.NewBotPlugin() },
+		harnessext.TeamBotPluginID: func() *harnessext.Plugin { return harnessext.NewTeamBotPlugin() },
+		harnessext.CreationPluginID: func() *harnessext.Plugin {
+			return harnessext.NewCreationPlugin(harnessext.CreationOptions{
+				Manager:  func() *harnessext.Manager { return pluginManager },
 				TenantID: opts.TenantID,
 			})
 		},
-		agentext.TasksPluginID: func() *agentext.Plugin {
-			return agentext.NewTasksPlugin(agentext.TasksOptions{Service: tasks})
+		harnessext.TasksPluginID: func() *harnessext.Plugin {
+			return harnessext.NewTasksPlugin(harnessext.TasksOptions{Service: tasks})
 		},
-		agentext.ShellPluginID: func() *agentext.Plugin {
-			return agentext.NewShellPlugin(agentext.ShellOptions{
+		harnessext.ShellPluginID: func() *harnessext.Plugin {
+			return harnessext.NewShellPlugin(harnessext.ShellOptions{
 				Service:  func() *jobqueue.Manager { return opts.Bash },
 				TenantID: opts.TenantID,
 			})
 		},
-		agentext.ApprovalPluginID: func() *agentext.Plugin {
-			return agentext.NewApprovalPlugin(agentext.ApprovalOptions{
+		harnessext.ApprovalPluginID: func() *harnessext.Plugin {
+			return harnessext.NewApprovalPlugin(harnessext.ApprovalOptions{
 				Decisions:  decisions,
 				Provenance: approvals,
 				Logger:     log,
 			})
 		},
-		agentext.NotifyPluginID: func() *agentext.Plugin {
-			return agentext.NewNotifyPlugin(agentext.NotifyOptions{
+		harnessext.NotifyPluginID: func() *harnessext.Plugin {
+			return harnessext.NewNotifyPlugin(harnessext.NotifyOptions{
 				Service: notifications,
 				Logger:  log,
 			})
 		},
 	}
-	builtins := make([]agentext.Builtin, 0, len(builtinManifests))
+	builtins := make([]harnessext.Builtin, 0, len(builtinManifests))
 	for _, manifest := range builtinManifests {
-		if manifest.ID == agentext.ExamplePluginID && strings.TrimSpace(opts.ExampleBotID) == "" {
+		if manifest.ID == harnessext.ExamplePluginID && strings.TrimSpace(opts.ExampleBotID) == "" {
 			// The example factory declares its triggers only when a Bot is
 			// configured (an unowned trigger cannot register). Keep the
 			// advertised manifest consistent with what actually loads.
@@ -1555,14 +1555,14 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
 		}
 		defaultEnabled := manifest.ID != testkit.PluginID
-		builtins = append(builtins, agentext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: defaultEnabled})
+		builtins = append(builtins, harnessext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: defaultEnabled})
 	}
 	// The tool index mirrors the dynamic tool set the plugin runtime publishes:
 	// the plugin UI bridge calls a plugin's own tools through it, so a bridge call
 	// executes exactly what the model would execute.
 	toolIndex := newProductToolIndex()
 	plugins := newPluginRuntime(rt, toolIndex, hooks, triggers, decisions, subagents, partials, log)
-	manager, err := agentext.NewPluginManager(agentext.ManagerOptions{
+	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
 		Root:        opts.PluginsRoot,
 		Runtime:     plugins,
 		Persistence: persistence,
@@ -1570,8 +1570,8 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		// The sidecar loader is the one loading strategy this build ships for
 		// non-compiled kinds; the manager installs its denial sink so a sidecar's
 		// permission refusals land in the audit trail (spec P3).
-		Loaders: map[pluginpkg.Kind]agentext.PluginLoader{
-			pluginpkg.KindSidecar: agentext.NewSidecarLoader(agentext.SidecarOptions{
+		Loaders: map[pluginpkg.Kind]harnessext.PluginLoader{
+			pluginpkg.KindSidecar: harnessext.NewSidecarLoader(harnessext.SidecarOptions{
 				KeelVersion: version,
 				Logger:      log,
 			}),
@@ -1604,8 +1604,8 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 //
 // The prompt sink is what makes a plugin's PromptSections reach the model:
 // RuntimeOptions.Prompt is the runtime's seam, and this is its wiring.
-func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hooks *agentext.HookBus, triggers *agentext.TriggerEngine, decisions *agentext.DecisionBroker, subagents *agentext.SubagentRunner, partials *agentext.PartialHub, log *slog.Logger) *agentext.Runtime {
-	return agentext.NewRuntime(agentext.RuntimeOptions{
+func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hooks *harnessext.HookBus, triggers *harnessext.TriggerEngine, decisions *harnessext.DecisionBroker, subagents *harnessext.SubagentRunner, partials *harnessext.PartialHub, log *slog.Logger) *harnessext.Runtime {
+	return harnessext.NewRuntime(harnessext.RuntimeOptions{
 		Hooks:     hooks,
 		Triggers:  triggers,
 		Decisions: decisions,
@@ -1615,7 +1615,7 @@ func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hook
 			toolIndex.publish(tools)
 			return rt.RefreshProductTools(tools)
 		},
-		Prompt: func(sections []agentext.PromptSection) error {
+		Prompt: func(sections []harnessext.PromptSection) error {
 			return rt.RefreshProductPrompt(pluginPromptSections(sections))
 		},
 	})
@@ -1625,7 +1625,7 @@ func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hook
 // onto the host assembly's section type. Section names carry over verbatim: the
 // name is what the model sees (<name>...</name>), and the runtime has already
 // dropped empty contributions.
-func pluginPromptSections(sections []agentext.PromptSection) []host.Section {
+func pluginPromptSections(sections []harnessext.PromptSection) []host.Section {
 	if len(sections) == 0 {
 		return nil
 	}
@@ -1646,12 +1646,12 @@ type storeSessions struct {
 // seams. Both sides read the CURRENT generation per call (never a boot capture):
 // the registry projections the picker consumes, and the settings write path's
 // validate/apply pair. It lives in cmd/keel because that is the only package
-// that knows both sides: agentapi must not depend on servicehost.
+// that knows both sides: harnessapi must not depend on servicehost.
 type modelRuntimeSeam struct {
 	rt *servicehost.Runtime
 }
 
-// ProviderViews implements agentapi.ModelCatalog.
+// ProviderViews implements harnessapi.ModelCatalog.
 func (m modelRuntimeSeam) ProviderViews() []modelcfg.ProviderView {
 	if service := m.rt.Models(); service != nil {
 		return service.ProviderViews()
@@ -1659,7 +1659,7 @@ func (m modelRuntimeSeam) ProviderViews() []modelcfg.ProviderView {
 	return nil
 }
 
-// ModelViews implements agentapi.ModelCatalog.
+// ModelViews implements harnessapi.ModelCatalog.
 func (m modelRuntimeSeam) ModelViews() []modelcfg.ModelView {
 	if service := m.rt.Models(); service != nil {
 		return service.ModelViews()
@@ -1667,7 +1667,7 @@ func (m modelRuntimeSeam) ModelViews() []modelcfg.ModelView {
 	return nil
 }
 
-// ResolutionIssues implements agentapi.ModelCatalog.
+// ResolutionIssues implements harnessapi.ModelCatalog.
 func (m modelRuntimeSeam) ResolutionIssues() []modelcfg.Issue {
 	if service := m.rt.Models(); service != nil {
 		return service.ResolutionIssues()
@@ -1675,7 +1675,7 @@ func (m modelRuntimeSeam) ResolutionIssues() []modelcfg.Issue {
 	return nil
 }
 
-// DefaultSelection implements agentapi.ModelCatalog.
+// DefaultSelection implements harnessapi.ModelCatalog.
 func (m modelRuntimeSeam) DefaultSelection() modelcfg.Selection {
 	if service := m.rt.Models(); service != nil {
 		return service.DefaultSelection()
@@ -1683,7 +1683,7 @@ func (m modelRuntimeSeam) DefaultSelection() modelcfg.Selection {
 	return modelcfg.Selection{}
 }
 
-// ProbeProvider implements agentapi.ProviderProber.
+// ProbeProvider implements harnessapi.ProviderProber.
 func (m modelRuntimeSeam) ProbeProvider(ctx context.Context, providerID string) (modelcfg.ProviderProbe, bool, error) {
 	service := m.rt.Models()
 	if service == nil {
@@ -1692,10 +1692,10 @@ func (m modelRuntimeSeam) ProbeProvider(ctx context.Context, providerID string) 
 	return service.ProbeProvider(ctx, providerID)
 }
 
-// DeploymentModels implements agentapi.ModelSettingsRuntime.
+// DeploymentModels implements harnessapi.ModelSettingsRuntime.
 func (m modelRuntimeSeam) DeploymentModels() json.RawMessage { return m.rt.DeploymentModels() }
 
-// RejectedModelsOverride implements agentapi.ModelSettingsRuntime.
+// RejectedModelsOverride implements harnessapi.ModelSettingsRuntime.
 func (m modelRuntimeSeam) RejectedModelsOverride() (int64, string, bool) {
 	rejected, ok := m.rt.RejectedModelsOverride()
 	if !ok {
@@ -1704,13 +1704,13 @@ func (m modelRuntimeSeam) RejectedModelsOverride() (int64, string, bool) {
 	return rejected.Revision, rejected.Reason, true
 }
 
-// ValidateModelsDocument implements agentapi.ModelSettingsRuntime.
-func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (agentapi.ModelCandidate, []modelcfg.Issue, error) {
+// ValidateModelsDocument implements harnessapi.ModelSettingsRuntime.
+func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (harnessapi.ModelCandidate, []modelcfg.Issue, error) {
 	candidate, issues, err := m.rt.ValidateModelsDocument(document)
 	if err != nil || len(issues) > 0 {
-		return agentapi.ModelCandidate{}, issues, err
+		return harnessapi.ModelCandidate{}, issues, err
 	}
-	return agentapi.ModelCandidate{
+	return harnessapi.ModelCandidate{
 		Selection:           candidate.Selection,
 		ProvidersExecutable: candidate.ProvidersExecutable,
 		ModelsSelectable:    candidate.ModelsSelectable,
@@ -1718,7 +1718,7 @@ func (m modelRuntimeSeam) ValidateModelsDocument(document json.RawMessage) (agen
 	}, nil, nil
 }
 
-// ApplyModels implements agentapi.ModelSettingsRuntime.
+// ApplyModels implements harnessapi.ModelSettingsRuntime.
 func (m modelRuntimeSeam) ApplyModels(ctx context.Context, document json.RawMessage) error {
 	_, err := m.rt.ApplyModels(ctx, document)
 	return err
@@ -1791,21 +1791,21 @@ func selectFromCurrentGeneration(rt *servicehost.Runtime) func(json.RawMessage) 
 }
 
 // tenantSecretSeam adapts the store's encrypted tenant secrets to
-// agentapi.SecretStore. The value crosses this boundary exactly once, on the
+// harnessapi.SecretStore. The value crosses this boundary exactly once, on the
 // way in; no method here returns one to a caller.
 type tenantSecretSeam struct {
 	store *store.Store
 	box   *store.SecretBox
 }
 
-func (s tenantSecretSeam) List(ctx context.Context, tenantID uuid.UUID) ([]agentapi.SecretMeta, error) {
+func (s tenantSecretSeam) List(ctx context.Context, tenantID uuid.UUID) ([]harnessapi.SecretMeta, error) {
 	metas, err := s.store.ListTenantSecrets(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]agentapi.SecretMeta, 0, len(metas))
+	out := make([]harnessapi.SecretMeta, 0, len(metas))
 	for _, meta := range metas {
-		out = append(out, agentapi.SecretMeta{Name: meta.Name, CreatedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt})
+		out = append(out, harnessapi.SecretMeta{Name: meta.Name, CreatedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt})
 	}
 	return out, nil
 }
@@ -1844,16 +1844,16 @@ func tenantSecretLookup(st *store.Store, box *store.SecretBox, tenantID uuid.UUI
 	}
 }
 
-// RunState implements agentext.RunStatusReader.
-func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (agentext.RunState, error) {
+// RunState implements harnessext.RunStatusReader.
+func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (harnessext.RunState, error) {
 	run, err := s.Store.GetRun(ctx, tenantID, sessionID)
 	if err != nil {
 		if errors.Is(err, store.ErrNoRun) {
-			return agentext.RunState{}, agentext.ErrNoRun
+			return harnessext.RunState{}, harnessext.ErrNoRun
 		}
-		return agentext.RunState{}, err
+		return harnessext.RunState{}, err
 	}
-	return agentext.RunState{Status: run.Status, Attempts: run.Attempts, CursorSeq: run.CursorSeq, LastError: run.LastError}, nil
+	return harnessext.RunState{Status: run.Status, Attempts: run.Attempts, CursorSeq: run.CursorSeq, LastError: run.LastError}, nil
 }
 
 // adminKeyFromEnv decides whether a request carries the deployment's operator

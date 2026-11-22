@@ -91,7 +91,7 @@ type Config struct {
 	// answers 503 on every /v1/external route; a tenant document that declares
 	// no external backend also leaves it nil.
 	External ExternalSessions
-	// Product is the product-layer AgentAPI (keel-agent, internal/agentapi)
+	// Product is the product-layer HarnessAPI (keel-agent, internal/harnessapi)
 	// mounted under /v1/. Specific routes registered here keep precedence; the
 	// subtree handler only sees paths this server does not own. Nil disables it.
 	Product http.Handler
@@ -238,7 +238,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
 	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
-	// Product-layer AgentAPI (keel-agent): its own mux owns the remaining /v1
+	// Product-layer HarnessAPI (keel-agent): its own mux owns the remaining /v1
 	// patterns. The more specific patterns above win, so the existing edge
 	// contract is unchanged.
 	if s.cfg.Product != nil {
@@ -719,7 +719,7 @@ func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	// The edge event is a second door into the input log, so it is a second door
 	// into the binding projection. The sessionbinding package is shared with
-	// /input, /retry, the MCP bridge and the agentext TurnStarter; a failure
+	// /input, /retry, the MCP bridge and the harnessext TurnStarter; a failure
 	// returns 500 after the commit, and the requestId dedupe makes the client's
 	// retry repair the projection.
 	if err := sessionbinding.New(s.cfg.Store).Record(r.Context(), tenantID, sessionID,

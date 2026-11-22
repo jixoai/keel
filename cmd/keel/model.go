@@ -132,7 +132,7 @@ never taken from a flag and never printed.
 
 // --- wire shapes ------------------------------------------------------------
 
-// providerListBody / modelListBody mirror the AgentAPI responses (the fields
+// providerListBody / modelListBody mirror the HarnessAPI responses (the fields
 // this CLI renders; the JSON decodes the whole object).
 type providerListBody struct {
 	Providers []modelcfg.ProviderView `json:"providers"`

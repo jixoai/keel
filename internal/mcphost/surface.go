@@ -5,7 +5,7 @@
 // resulting surface to the serving runtime.
 //
 // The package owns no HTTP and no frontend. The catalogue and the documents are
-// read by internal/agentapi; the prompt half is republished through Sinks by
+// read by internal/harnessapi; the prompt half is republished through Sinks by
 // the hosting process. mcphost never imports cmd/keel — the reverse is how a
 // host wires it.
 //

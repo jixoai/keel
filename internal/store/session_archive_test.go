@@ -3,7 +3,7 @@ package store
 // ArchiveSession round trip against the real test database (KEEL_TEST_DSN):
 // the mark is set (soft delete), a repeat reports the session still exists, a
 // missing/foreign id reports false (the route's 404), and the ledger rows are
-// never touched. The list-side filter lives in internal/agentapi's SQL
+// never touched. The list-side filter lives in internal/harnessapi's SQL
 // (PGSessionLister) and is pinned by its own tests.
 
 import (

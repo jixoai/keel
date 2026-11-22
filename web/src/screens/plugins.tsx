@@ -188,7 +188,7 @@ const navigate = (path: string) => {
 };
 
 /** The states the server's `PluginState` declares
- * (`internal/agentext/plugin.go:25-28`). A token this build does not know keeps
+ * (`internal/harnessext/plugin.go:25-28`). A token this build does not know keeps
  * its raw text and the neutral outline — it is never mapped onto a made-up
  * state. */
 const pluginStateVariant = (state: string): BadgeVariant => {

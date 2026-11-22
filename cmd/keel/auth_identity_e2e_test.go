@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/accesswire"
-	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/notify"
 	"github.com/jixoai/keel/internal/store"
@@ -67,7 +67,7 @@ func TestAdminPasswordResetE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("access bridge: %v", err)
 		}
-		return agentapi.New(agentapi.Config{Identity: st, Access: bridge, Logger: discardLogger()})
+		return harnessapi.New(harnessapi.Config{Identity: st, Access: bridge, Logger: discardLogger()})
 	})
 	adminID, csrf := env.bootstrapAdmin("bootstrap-password-1", "admin-password-2")
 	username := "target-" + env.tenantID.String()[:8]
@@ -158,7 +158,7 @@ func TestNotificationTokenRoutesE2E(t *testing.T) {
 			Store: notify.NewPostgresStore(st), Committer: okCommitter{}, Logger: discardLogger(),
 			URLTTL: 30 * time.Minute,
 		})
-		return agentapi.New(agentapi.Config{Notifications: notifier, Logger: discardLogger()})
+		return harnessapi.New(harnessapi.Config{Notifications: notifier, Logger: discardLogger()})
 	})
 	ctx := context.Background()
 	push := func(consumers ...notify.ConsumerSpec) notify.View {

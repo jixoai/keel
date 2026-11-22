@@ -3,9 +3,9 @@ package main
 // CLI conformance tests for `keel model` — the declared surface of the
 // keel.model plugin (internal/pluginpkg/builtin/keel.model.yaml). Every
 // command the manifest declares is exercised here against an httptest fake of
-// the AgentAPI, so the declaration and the implementation are checked from both
+// the HarnessAPI, so the declaration and the implementation are checked from both
 // sides (the declaration side is TestCapabilityPluginsDeclareTheirCLI in
-// internal/agentext).
+// internal/harnessext).
 //
 // The passphrase assertion mirrors `keel agent`: it is exchanged at
 // /v1/auth/login and never appears in any output.

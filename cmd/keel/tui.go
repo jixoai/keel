@@ -13,7 +13,7 @@ import (
 
 // `keel tui` runs the NSH TUI client. NSH builds the terminal target from the
 // same chat-surface code as the web UI; this command is the thin launcher: it
-// resolves the artifact, points it at the AgentAPI and hands over the terminal.
+// resolves the artifact, points it at the HarnessAPI and hands over the terminal.
 //
 // The artifact is not part of this Go repository. When it is missing, the
 // command explains exactly what to build and how to point keel at it — it never
@@ -23,7 +23,7 @@ func runTUICmd(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var (
 		bin    = fs.String("bin", os.Getenv("KEEL_TUI_BIN"), "path to the NSH TUI binary")
-		url    = fs.String("url", envOr("KEEL_AGENT_URL", "http://"+defaultServeAddr), "AgentAPI base URL")
+		url    = fs.String("url", envOr("KEEL_AGENT_URL", "http://"+defaultServeAddr), "HarnessAPI base URL")
 		token  = fs.String("token", os.Getenv("KEEL_AGENT_TOKEN"), "bearer token (the keel serve passphrase)")
 		webDir = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "web build directory (a tui/ subdirectory is searched)")
 		dryRun = fs.Bool("print", false, "print the resolved command instead of executing it")

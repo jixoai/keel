@@ -1,7 +1,7 @@
 // Package auth: request-scoped principal carrier.
 //
 // The serving edge (cmd/keel) resolves a cookie session or a bot key and then
-// forwards the request. Handlers above the edge (internal/agentapi, future
+// forwards the request. Handlers above the edge (internal/harnessapi, future
 // harnessapi) must authorize against that resolved identity, never against a
 // client-supplied header. This file carries the principal through the request
 // context so the edge and the product surface share one identity object

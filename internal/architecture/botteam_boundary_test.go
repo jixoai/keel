@@ -25,7 +25,7 @@ func TestBotteamStaysPure(t *testing.T) {
 		httpAPIImportPath,
 		"net/http",
 		agentImportPath,
-		agentExtImportPath,
+		harnessExtImportPath,
 		"github.com/jixoai/keel/internal/agentcore",
 		"github.com/jixoai/keel/internal/agentloop",
 		"github.com/jixoai/keel/internal/agenttool",

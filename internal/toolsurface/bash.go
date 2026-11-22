@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 )
 
 // BashBackend is the keel.shell plugin's action backend. The aggregate `bash`
@@ -42,7 +42,7 @@ func newBashTool(backend BashBackend) *actionTool {
 		result, err := backend.Invoke(ctx, action, raw)
 		if err != nil {
 			switch {
-			case errors.Is(err, agentext.ErrPluginState), errors.Is(err, agentext.ErrPluginNotFound):
+			case errors.Is(err, harnessext.ErrPluginState), errors.Is(err, harnessext.ErrPluginNotFound):
 				return ErrorResult(CodePluginDisabled, Bash,
 					"keel.shell is not enabled; enable the plugin to use bash", nil)
 			default:

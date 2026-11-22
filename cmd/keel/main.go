@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/logsafe"
 )
 
 // version is the keel product version. It is deliberately separate from the
-// AgentAPI contract version (agentapi.APIVersion): a UI pins /v1 and asks
+// HarnessAPI contract version (harnessapi.APIVersion): a UI pins /v1 and asks
 // /v1/capabilities, never a binary version.
 var version = "0.1.0"
 
@@ -132,7 +132,7 @@ func printVersion(w io.Writer) {
 		fmt.Fprintf(w, "  commit:   %s%s\n", commit, suffix)
 	}
 	fmt.Fprintf(w, "  go:       %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-	fmt.Fprintf(w, "  agent-api: %s (%s)\n", agentapi.APIVersion, agentapi.Version)
+	fmt.Fprintf(w, "  agent-api: %s (%s)\n", harnessapi.APIVersion, harnessapi.Version)
 }
 
 func runServeCmd(args []string, stdout, stderr io.Writer) int {

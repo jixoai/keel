@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/tasklog"
 )
 
@@ -20,7 +20,7 @@ import (
 // not a plugin feature.
 type TasksBackend interface {
 	Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error)
-	Attribute(ctx context.Context, scope agentext.RunScope, taskID string) (string, error)
+	Attribute(ctx context.Context, scope harnessext.RunScope, taskID string) (string, error)
 }
 
 // Typed result codes specific to task attribution. They extend the shared
@@ -61,7 +61,7 @@ func newTasksTool(backend TasksBackend) *actionTool {
 			result, err := backend.Invoke(ctx, action, raw)
 			if err != nil {
 				switch {
-				case errors.Is(err, agentext.ErrPluginState), errors.Is(err, agentext.ErrPluginNotFound):
+				case errors.Is(err, harnessext.ErrPluginState), errors.Is(err, harnessext.ErrPluginNotFound):
 					return ErrorResult(CodePluginDisabled, Tasks,
 						"keel.tasks is not enabled; enable the plugin to use task actions", nil)
 				case errors.Is(err, tasklog.ErrTaskNotFound):
@@ -114,7 +114,7 @@ func (g *gatedTool) ExecutionMode() agentcore.ToolExecutionMode {
 //     registry) are passed through untouched: there is no run to attribute and
 //     inventing a session would be worse than an unstamped call.
 func (g *gatedTool) Execute(ctx context.Context, id string, args json.RawMessage, onUpdate agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
-	scope, ok := agentext.RunScopeFromContext(ctx)
+	scope, ok := harnessext.RunScopeFromContext(ctx)
 	if !ok {
 		return g.inner.Execute(ctx, id, args, onUpdate)
 	}

@@ -11,15 +11,15 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/keel/internal/agentapi"
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/store"
 )
 
 // Host-side adapters of the plugin product surface (change keel-plugin-core):
 // they live in cmd/keel because that is the only place that knows both the
-// product API (internal/agentapi) and the live host registry.
+// product API (internal/harnessapi) and the live host registry.
 
 // productToolIndex remembers the dynamic tool set the plugin runtime publishes
 // through servicehost.Runtime.RefreshProductTools. The bridge's `call` verb
@@ -56,12 +56,12 @@ func (i *productToolIndex) find(name string) agentcore.AgentTool {
 	return i.tools[name]
 }
 
-// pluginToolBridge implements agentapi.PluginToolInvoker over the published
+// pluginToolBridge implements harnessapi.PluginToolInvoker over the published
 // registry. Ownership is re-checked against the manager's live view, so a call
 // naming another plugin's tool fails even if the caller's own gate was bypassed.
 type pluginToolBridge struct {
 	index   *productToolIndex
-	manager *agentext.Manager
+	manager *harnessext.Manager
 }
 
 // InvokePluginTool runs one tool the plugin provides right now.
@@ -100,14 +100,14 @@ func (b *pluginToolBridge) InvokePluginTool(ctx context.Context, pluginID, tool 
 	return raw, nil
 }
 
-// pluginAuditStore adapts the durable store to agentapi.PluginAuditWriter: the
+// pluginAuditStore adapts the durable store to harnessapi.PluginAuditWriter: the
 // audit row of a lifecycle write the manager never saw (an approval refusal)
 // lands in the same trail as the manager's own rows.
 type pluginAuditStore struct {
 	store *store.Store
 }
 
-// RecordPluginAudit implements agentapi.PluginAuditWriter.
+// RecordPluginAudit implements harnessapi.PluginAuditWriter.
 func (a pluginAuditStore) RecordPluginAudit(ctx context.Context, entry store.PluginAuditEntry) error {
 	if a.store == nil {
 		return errors.New("no store is wired")
@@ -157,6 +157,6 @@ func loadHostTheme(webRoot string, log *slog.Logger) json.RawMessage {
 
 // Compile-time assertions of the product-API seams this file implements.
 var (
-	_ agentapi.PluginToolInvoker = (*pluginToolBridge)(nil)
-	_ agentapi.PluginAuditWriter = pluginAuditStore{}
+	_ harnessapi.PluginToolInvoker = (*pluginToolBridge)(nil)
+	_ harnessapi.PluginAuditWriter = pluginAuditStore{}
 )

@@ -15,7 +15,7 @@ func edgePrincipal(f fixture) auth.Principal {
 }
 
 // WithEdgePrincipal seeds the request context the way cmd/keel's middleware
-// does. It is shared by the accesswire and agentapi tests.
+// does. It is shared by the accesswire and harnessapi tests.
 func WithEdgePrincipal(ctx context.Context, principal auth.Principal) context.Context {
 	return auth.WithPrincipal(ctx, principal)
 }

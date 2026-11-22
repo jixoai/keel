@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/pluginpkg"
 )
 
 // Plugin UI hosting (change keel-plugin-core, W1): /plugins/<id>/* serves the UI
 // resource package of an ENABLED plugin, on the same origin as the product, so
-// the page reaches the `keel.plugin.*` bridge (internal/agentapi/plugin_bridge.go)
+// the page reaches the `keel.plugin.*` bridge (internal/harnessapi/plugin_bridge.go)
 // without CORS.
 //
 // The gate is the lifecycle state, and only the enabled state opens it:
@@ -33,7 +33,7 @@ import (
 // directory of the manifest's provides.ui.entry, which pluginpkg validates to
 // be relative and inside the package.
 type pluginUIHandler struct {
-	manager *agentext.Manager
+	manager *harnessext.Manager
 	log     *slog.Logger
 }
 
@@ -44,7 +44,7 @@ const (
 	pluginUIManifestName = "plugin.yaml"
 )
 
-func newPluginUIHandler(manager *agentext.Manager, log *slog.Logger) *pluginUIHandler {
+func newPluginUIHandler(manager *harnessext.Manager, log *slog.Logger) *pluginUIHandler {
 	return &pluginUIHandler{manager: manager, log: log}
 }
 
@@ -82,7 +82,7 @@ func (h *pluginUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusNotFound, "plugin is not installed")
 		return
 	}
-	if view.State != agentext.LifecycleEnabled {
+	if view.State != harnessext.LifecycleEnabled {
 		h.fail(w, r, http.StatusForbidden,
 			"plugin "+id+" is "+string(view.State)+": only an enabled plugin's UI is hosted")
 		return
@@ -115,7 +115,7 @@ func (h *pluginUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // plugin returns the inventory row of id, or nil.
-func (h *pluginUIHandler) plugin(id string) *agentext.PluginView {
+func (h *pluginUIHandler) plugin(id string) *harnessext.PluginView {
 	for _, view := range h.manager.Snapshot().Plugins {
 		if view.ID == id {
 			copied := view

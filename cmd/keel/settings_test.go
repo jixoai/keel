@@ -1,7 +1,7 @@
 package main
 
 // End-to-end settings test (change keel-model-settings) over the real HTTP
-// surface: the store, the service runtime, the agentapi settings endpoints and
+// surface: the store, the service runtime, the harnessapi settings endpoints and
 // the runtime edge's per-request selection seam are the production ones; only
 // the kernel is the in-memory implementation. Skipped without KEEL_TEST_DSN
 // (the write path is durable).
@@ -21,7 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/kernel"
@@ -129,8 +129,8 @@ func TestSettingsEndToEndOverHTTP(t *testing.T) {
 	t.Cleanup(func() { rt.Close(context.Background()) })
 
 	modelSeam := modelRuntimeSeam{rt: rt}
-	settingsAPI := agentapi.New(agentapi.Config{
-		ModelsLive: func() agentapi.ModelCatalog {
+	settingsAPI := harnessapi.New(harnessapi.Config{
+		ModelsLive: func() harnessapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil
 			}

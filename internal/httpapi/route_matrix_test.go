@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jixoai/keel/internal/accessgate"
-	"github.com/jixoai/keel/internal/agentapi"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/httpapi"
 )
 
@@ -14,7 +14,7 @@ import (
 // single route permission matrix covers every /v1 route. cmd/keel runs the same
 // check at startup; this test is the CI half.
 func TestEveryV1RouteHasPermissionDeclaration(t *testing.T) {
-	product := agentapi.New(agentapi.Config{})
+	product := harnessapi.New(harnessapi.Config{})
 	server := httpapi.New(httpapi.Config{Product: product})
 	routes := append(server.Routes(), product.Routes()...)
 	routes = append(routes, accessgate.AuthRoutes()...)
@@ -61,7 +61,7 @@ func TestAdminAndOperatorSurfacesAreExplicit(t *testing.T) {
 // This catches a precedence bug (a wildcard rule shadowing a literal one)
 // that a pure coverage check would miss.
 func TestMatchSelectsTheDeclaredRuleForEveryRoute(t *testing.T) {
-	product := agentapi.New(agentapi.Config{})
+	product := harnessapi.New(harnessapi.Config{})
 	server := httpapi.New(httpapi.Config{Product: product})
 	routes := append(server.Routes(), product.Routes()...)
 	routes = append(routes, accessgate.AuthRoutes()...)

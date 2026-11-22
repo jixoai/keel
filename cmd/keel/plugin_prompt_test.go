@@ -21,7 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
@@ -35,11 +35,11 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 	log := discardLogger()
 	rt := pluginPromptTestRuntime(t)
 
-	hooks := agentext.NewHookBus(agentext.HookBusOptions{Logger: log})
-	decisions := agentext.NewDecisionBroker(agentext.DecisionBrokerOptions{Logger: log})
-	partials := agentext.NewPartialHub()
-	triggers := agentext.NewTriggerEngine(agentext.TriggerEngineOptions{Hooks: hooks, Logger: log})
-	subagents := agentext.NewSubagentRunner(agentext.SubagentOptions{Hooks: hooks, Logger: log})
+	hooks := harnessext.NewHookBus(harnessext.HookBusOptions{Logger: log})
+	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Logger: log})
+	partials := harnessext.NewPartialHub()
+	triggers := harnessext.NewTriggerEngine(harnessext.TriggerEngineOptions{Hooks: hooks, Logger: log})
+	subagents := harnessext.NewSubagentRunner(harnessext.SubagentOptions{Hooks: hooks, Logger: log})
 	t.Cleanup(func() {
 		triggers.Close()
 		decisions.Close()
@@ -75,7 +75,7 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 		}
 		hasPlugin := strings.Contains(prompt, "<plugin_standard>")
 		if wantPlugin {
-			if !hasPlugin || !strings.Contains(prompt, agentext.CreationPrompt()) {
+			if !hasPlugin || !strings.Contains(prompt, harnessext.CreationPrompt()) {
 				t.Fatalf("%s: the plugin_standard section (name and content) is not in the prompt: %q", step, prompt)
 			}
 			return
@@ -118,13 +118,13 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 
 	// The inventory the API serves carries the same effective contribution.
 	if snapshot := surface.manager.Snapshot(); len(snapshot.Prompt) == 0 ||
-		snapshot.Prompt[0].Name != agentext.CreationPromptSectionName {
+		snapshot.Prompt[0].Name != harnessext.CreationPromptSectionName {
 		t.Fatalf("inventory prompt = %+v", snapshot.Prompt)
 	}
 
 	// Disable: the section is retracted from the prompt the model would see, and
 	// the MCP section — the one the previous refresh seam could carry — survives.
-	if _, err := surface.manager.Disable(ctx, agentext.CreationPluginID, agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := surface.manager.Disable(ctx, harnessext.CreationPluginID, harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	assertPrompt("disable", false)
@@ -157,7 +157,7 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 	}
 
 	// Re-enable: the section is back on the same live assembly, no restart.
-	if _, err := surface.manager.Enable(ctx, agentext.CreationPluginID, agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := surface.manager.Enable(ctx, harnessext.CreationPluginID, harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 	assertPrompt("enable", true)

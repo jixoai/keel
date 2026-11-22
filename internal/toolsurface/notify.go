@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 )
 
 // NotifyBackend is the keel.notify plugin's action backend. The aggregate tool
@@ -51,7 +51,7 @@ func newNotifyTool(backend NotifyBackend) *actionTool {
 			result, err := backend.Invoke(ctx, action, raw)
 			if err != nil {
 				switch {
-				case errors.Is(err, agentext.ErrPluginState), errors.Is(err, agentext.ErrPluginNotFound):
+				case errors.Is(err, harnessext.ErrPluginState), errors.Is(err, harnessext.ErrPluginNotFound):
 					return ErrorResult(CodePluginDisabled, Notify,
 						"keel.notify is not enabled; enable the plugin to use notification actions", map[string]any{"action": action})
 				default:

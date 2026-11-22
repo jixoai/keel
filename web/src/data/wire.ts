@@ -319,7 +319,7 @@ export function selectionDisplay(selection: ModelSelection | null | undefined): 
 }
 
 /** A plugin's lifecycle in the reader's words. The vocabulary is the server's
- * (`agentext.LifecycleState`, persisted by internal/store) — installed|
+ * (`harnessext.LifecycleState`, persisted by internal/store) — installed|
  * enabled|disabled|failed|invalid|uninstalled; a token this build does not
  * know keeps its raw text and is never mapped onto a made-up state. */
 export const pluginStateLabels: Record<string, string> = {

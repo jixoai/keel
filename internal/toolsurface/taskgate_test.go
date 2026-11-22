@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/tasklog"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -25,7 +25,7 @@ type fakeTasks struct {
 	invokeErr    error
 }
 
-func (f *fakeTasks) Attribute(_ context.Context, scope agentext.RunScope, taskID string) (string, error) {
+func (f *fakeTasks) Attribute(_ context.Context, scope harnessext.RunScope, taskID string) (string, error) {
 	f.attribute = append(f.attribute, scope.SessionID.String()+":"+taskID)
 	if f.attributeErr != nil {
 		return "", f.attributeErr
@@ -64,9 +64,9 @@ func (r *recordingCreation) Invoke(_ context.Context, _ string, args json.RawMes
 	return agentcore.AgentToolResult{StructuredContent: map[string]any{"ok": true}}, nil
 }
 
-func taskScope() (context.Context, agentext.RunScope) {
-	scope := agentext.RunScope{TenantID: uuid.New(), SessionID: uuid.New(), RunID: "run-1"}
-	return agentext.WithRunScope(context.Background(), scope), scope
+func taskScope() (context.Context, harnessext.RunScope) {
+	scope := harnessext.RunScope{TenantID: uuid.New(), SessionID: uuid.New(), RunID: "run-1"}
+	return harnessext.WithRunScope(context.Background(), scope), scope
 }
 
 func TestTaskGateStampsTheAmbientCard(t *testing.T) {
@@ -225,7 +225,7 @@ func TestTaskGateDisabledPluginIsTyped(t *testing.T) {
 	// A disabled plugin's Invoke answers ErrPluginState (what
 	// Manager.InvokeToolResult returns): the tasks tool maps it to
 	// plugin_disabled, which is the plugin-boundary contract.
-	backend := &fakeTasks{defaultTask: "task-initial", invokeErr: agentext.ErrPluginState}
+	backend := &fakeTasks{defaultTask: "task-initial", invokeErr: harnessext.ErrPluginState}
 	registry := builtinRegistry(t, toolsurface.Backends{Tasks: backend})
 	ctx, _ := taskScope()
 	result, err := registry[toolsurface.Tasks].Execute(ctx, "call-6", json.RawMessage(`{"action":"list"}`), nil)

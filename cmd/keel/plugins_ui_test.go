@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jixoai/keel/internal/agentext"
+	"github.com/jixoai/keel/internal/harnessext"
 )
 
 // Plugin UI hosting (change keel-plugin-core, W1): /plugins/<id>/* serves an
@@ -42,7 +42,7 @@ func writePluginPackage(t *testing.T, root, id, entry string, files map[string]s
 
 // pluginUITestManager builds a real manager over a temp plugins root holding one
 // enabled webview plugin.
-func pluginUITestManager(t *testing.T, mutate func(root string)) (*agentext.Manager, string) {
+func pluginUITestManager(t *testing.T, mutate func(root string)) (*harnessext.Manager, string) {
 	t.Helper()
 	root := t.TempDir()
 	writePluginPackage(t, root, "vendor.panel", "ui/index.html", map[string]string{
@@ -53,9 +53,9 @@ func pluginUITestManager(t *testing.T, mutate func(root string)) (*agentext.Mana
 	if mutate != nil {
 		mutate(root)
 	}
-	manager, err := agentext.NewPluginManager(agentext.ManagerOptions{
+	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
 		Root: root,
-		Runtime: agentext.NewRuntime(agentext.RuntimeOptions{
+		Runtime: harnessext.NewRuntime(harnessext.RuntimeOptions{
 			Logger: discardLogger(),
 		}),
 		KeelVersion: "0.2.0",
@@ -94,7 +94,7 @@ func TestPluginUIHostsEnabledPluginOnly(t *testing.T) {
 
 	// Enable it: a UI-only webview plugin has no runtime surface, and its UI is
 	// exactly what the enablement gates.
-	if _, err := manager.Enable(context.Background(), "vendor.panel", agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := manager.Enable(context.Background(), "vendor.panel", harnessext.AuditContext{Actor: "test"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestPluginUIRefusesTraversalAndSymlinkEscape(t *testing.T) {
 		}
 	})
 	handler := newPluginUIHandler(manager, discardLogger())
-	if _, err := manager.Enable(context.Background(), "vendor.panel", agentext.AuditContext{Actor: "test"}); err != nil {
+	if _, err := manager.Enable(context.Background(), "vendor.panel", harnessext.AuditContext{Actor: "test"}); err != nil {
 		// The escaping symlink may make the package invalid, which is itself a
 		// refusal — but then the handler must never serve it either.
 		t.Logf("enable refused by the package validator: %v", err)
