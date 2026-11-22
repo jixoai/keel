@@ -223,7 +223,7 @@ const bootstrapErrorOf = (error: unknown): string => {
     case "username_taken":
       return "这个用户名已被占用，请换一个。";
     case "weak_password":
-      return "密码不符合要求：至少 12 个字节（中文约 4 个字），最多 1024 字节。";
+      return "密码不符合要求：至少 8 个字符，最多 1024 字节。";
     case "tenant_not_configured":
       return "服务还没有配置租户，请联系超级管理员。";
     case "csrf_failed":
@@ -239,7 +239,7 @@ const passwordChangeErrorOf = (error: unknown): string => {
     case "invalid_credentials":
       return "当前密码不正确。";
     case "weak_password":
-      return "新密码不符合要求：至少 12 个字节（中文约 4 个字），最多 1024 字节。";
+      return "新密码不符合要求：至少 8 个字符，最多 1024 字节。";
     case "password_reused":
       return "新密码不能和当前密码相同。";
     case "invalid_session":

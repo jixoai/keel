@@ -270,7 +270,7 @@ export function LoginScreen() {
                   accessibilityLabel="管理员用户名"
                 />
               </Field>
-              <Field label="密码" hint="至少 12 个字节（中文约 4 个字）。创建后首次登录会要求再改一次密码。">
+              <Field label="密码" hint="至少 8 个字符。创建后首次登录会要求再改一次密码。">
                 <Input
                   testID="bootstrap-password"
                   value={setupPassword()}
@@ -321,7 +321,7 @@ export function LoginScreen() {
                   accessibilityLabel="当前密码"
                 />
               </Field>
-              <Field label="新密码" hint="至少 12 个字节（中文约 4 个字），且不能与当前密码相同。">
+              <Field label="新密码" hint="至少 8 个字符，且不能与当前密码相同。">
                 <Input
                   testID="change-new"
                   value={newPassword()}

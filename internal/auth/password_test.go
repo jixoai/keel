@@ -69,10 +69,12 @@ func TestPasswordPolicy(t *testing.T) {
 		wantErr  bool
 	}{
 		{"empty", "", true},
-		{"one below minimum", strings.Repeat("a", MinPasswordBytes-1), true},
-		{"minimum", strings.Repeat("a", MinPasswordBytes), false},
+		{"one below minimum", strings.Repeat("a", MinPasswordChars-1), true},
+		{"minimum", strings.Repeat("a", MinPasswordChars), false},
 		{"maximum", strings.Repeat("a", MaxPasswordBytes), false},
 		{"one above maximum", strings.Repeat("a", MaxPasswordBytes+1), true},
+		{"multi-byte below minimum", strings.Repeat("密", MinPasswordChars-1), true},
+		{"multi-byte minimum", strings.Repeat("密", MinPasswordChars), false},
 		{"multi-byte within byte budget", strings.Repeat("密码", 100), false},
 	}
 	for _, tc := range cases {

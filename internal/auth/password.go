@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -34,9 +35,9 @@ import (
 // a request from turning into an unbounded Argon2 allocation, not to impose a
 // composition rule (the modern guidance is length over character classes).
 const (
-	// MinPasswordBytes is the shortest accepted password (12 bytes). Setup,
-	// login-time change and CLI reset all use it.
-	MinPasswordBytes = 12
+	// MinPasswordChars is the shortest accepted password (8 characters, counted
+	// as Unicode code points). Setup, login-time change and CLI reset all use it.
+	MinPasswordChars = 8
 	// MaxPasswordBytes is the longest accepted password. It bounds the memory a
 	// single verification may touch and matches common proxy header limits.
 	MaxPasswordBytes = 1024
@@ -143,12 +144,15 @@ func HashPasswordWithParams(password string, params PasswordParams) (string, err
 	return encodePasswordHash(params, salt, key), nil
 }
 
-// CheckPasswordPolicy validates a candidate password's length in bytes. It is
-// the single policy call site for setup, change and CLI reset; it deliberately
-// does not impose character classes.
+// CheckPasswordPolicy validates a candidate password's length. It counts
+// characters (Unicode code points) for the minimum so a short multi-byte
+// password is not accidentally accepted, and bounds the encoded size for the
+// maximum. It is the single policy call site for setup, change and CLI reset;
+// it deliberately does not impose character classes.
 func CheckPasswordPolicy(password string) error {
-	if len(password) < MinPasswordBytes || len(password) > MaxPasswordBytes {
-		return fmt.Errorf("%w: must be %d..%d bytes", ErrPasswordPolicy, MinPasswordBytes, MaxPasswordBytes)
+	if utf8.RuneCountInString(password) < MinPasswordChars || len(password) > MaxPasswordBytes {
+		return fmt.Errorf("%w: must be at least %d characters and at most %d bytes",
+			ErrPasswordPolicy, MinPasswordChars, MaxPasswordBytes)
 	}
 	return nil
 }

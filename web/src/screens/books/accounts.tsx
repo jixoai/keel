@@ -1274,7 +1274,7 @@ export function CreateAccountDialog() {
       return;
     }
     if (kind() === "human" && password().length < 12) {
-      error.set("人账号的密码至少要 12 个字符。");
+      error.set("人账号的密码至少要 8 个字符。");
       return;
     }
     busy.set(true);
@@ -1407,7 +1407,7 @@ function CreateAccountForm(props: {
         />
       </Field>
       <If when={props.kind() === "human"}>
-        <Field label="临时密码" hint="至少 12 个字符；创建后只显示一次。">
+        <Field label="临时密码" hint="至少 8 个字符；创建后只显示一次。">
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
             <Input
               testID="account-create-password"
@@ -1617,7 +1617,7 @@ function ResetPasswordDialog() {
     >
       <If when={done()} else={
         <View style={{ flexDirection: "column", gap: space.md }}>
-          <Field label="临时密码" hint="至少 12 个字符；可以换一个。">
+          <Field label="临时密码" hint="至少 8 个字符；可以换一个。">
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
               <Input
                 testID="account-reset-password"

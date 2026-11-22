@@ -526,7 +526,7 @@ func (a *authController) changePassword(w http.ResponseWriter, r *http.Request) 
 		writeAuthError(w, http.StatusTooManyRequests, "rate_limited", "too many password change attempts")
 	case errors.Is(err, auth.ErrPasswordPolicy):
 		writeAuthError(w, http.StatusBadRequest, "weak_password",
-			fmt.Sprintf("password must be %d..%d bytes", auth.MinPasswordBytes, auth.MaxPasswordBytes))
+			fmt.Sprintf("password must be at least %d characters and at most %d bytes", auth.MinPasswordChars, auth.MaxPasswordBytes))
 	case errors.Is(err, auth.ErrPasswordReused):
 		writeAuthError(w, http.StatusBadRequest, "password_reused", "the new password must differ from the current one")
 	case errors.Is(err, auth.ErrInvalidCredentials):
@@ -573,7 +573,7 @@ func (a *authController) bootstrap(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "invalid_setup_token", "the setup token is invalid, expired or already used")
 	case errors.Is(err, auth.ErrPasswordPolicy):
 		writeAuthError(w, http.StatusBadRequest, "weak_password",
-			fmt.Sprintf("password must be %d..%d bytes", auth.MinPasswordBytes, auth.MaxPasswordBytes))
+			fmt.Sprintf("password must be at least %d characters and at most %d bytes", auth.MinPasswordChars, auth.MaxPasswordBytes))
 	case errors.Is(err, auth.ErrTenantNotConfigured):
 		writeAuthError(w, http.StatusServiceUnavailable, "tenant_not_configured", "the deployment tenant is not configured")
 	default:
