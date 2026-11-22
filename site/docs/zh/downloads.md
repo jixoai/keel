@@ -64,7 +64,7 @@ keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
 keel serve -addr 127.0.0.1:13750
 ```
 
-打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，首次登录会强制改密。
+打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入；只有 CLI/管理员重置出的临时密码才会要求先改密。
 机器客户端用绑定到 Bot 的 key（`keel_bot_...`），不走浏览器登录。起不来时先跑
 `keel doctor` —— 它会打印进程实际解析到的配置、构建信息与产物路径。
 

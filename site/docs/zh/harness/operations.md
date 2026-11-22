@@ -34,7 +34,7 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 - **认证是网络中间件，不是 API 的事**：人类用账号 + 密码换 HMAC 签名 HttpOnly cookie，
   写请求带 `X-Keel-CSRF`；机器客户端用绑定到 Bot 的 `keel_bot_...` key。中间件注入租户并
   剥离客户端提供的 `X-Tenant-ID`（`internal/harnessapi/api.go`、`cmd/keel/auth.go`）。
-- **空库没有超管。** `keel admin bootstrap` 生成一次性 setup token；浏览器完成设置并强制改密。
+- **空库没有超管。** `keel admin bootstrap` 生成一次性 setup token；浏览器完成设置即完成并直接进入。CLI/管理员重置出的临时密码仍需先改密。
   不存在“第一个访问者自动成为超管”。
 - `local-only` 只应答回环并映射内置 local-admin；`off` 还需显式 `--insecure`，公网绑定拒绝启动
   （`cmd/keel/auth.go`）。

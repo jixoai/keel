@@ -562,7 +562,10 @@ func (a *authController) bootstrap(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		a.logger.Info("super admin bootstrapped", "account", account.ID.String(), "username", account.Username)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
-			"bootstrapped": true, "mustChangePassword": true,
+			// Bootstrap sets the final credential: the web store auto-logs in
+			// with it and must land directly in the app, not on a second
+			// password screen.
+			"bootstrapped": true, "mustChangePassword": false,
 			"account": map[string]any{"id": account.ID.String(), "username": account.Username},
 		})
 	case errors.Is(err, auth.ErrBootstrapComplete):

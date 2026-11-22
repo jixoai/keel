@@ -71,7 +71,7 @@ export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # 签 session/CSRF cookie
 ./keel serve --addr 127.0.0.1:13750
 ```
 
-打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，浏览器会强制改密后再进入。
+打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入应用。
 没有口令，也没有“第一个访问者自动成为超管”的路径。机器客户端用绑定到 Bot 的 key
 （`keel_bot_...`），不走浏览器登录。登录/CSRF 请求与每个端点的形状见
 [AgentAPI 参考](/zh/core/agentapi)。

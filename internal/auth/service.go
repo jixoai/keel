@@ -336,8 +336,9 @@ func (s *Service) ChangePassword(ctx context.Context, principal Principal, curre
 }
 
 // Bootstrap redeems a one-time setup token and creates the first super admin.
-// It does not log the browser in: the account deliberately starts in the
-// must-change state, so the first login is followed by a password change.
+// It does not log the browser in, but the password chosen in the setup form is
+// final: the account is immediately usable and is not put in the must-change
+// state. Only a CLI/admin reset introduces a temporary credential.
 func (s *Service) Bootstrap(ctx context.Context, token, username, password, displayName string) (store.AccountRecord, error) {
 	if s == nil || s.Store == nil {
 		return store.AccountRecord{}, errors.New("auth: login service is not configured")

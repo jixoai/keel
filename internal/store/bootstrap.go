@@ -341,8 +341,10 @@ func (s *Store) BootstrapSuperAdmin(ctx context.Context, params BootstrapParams)
 	if err != nil {
 		return AccountRecord{}, identityWriteError("bootstrap create account", err)
 	}
+	// The setup form already carries the final credential, so the audit row
+	// records creation only. Must-change is a password.reset fact (see
+	// AccountMustChangePassword), never an account.bootstrap one.
 	bootDetail, _ := json.Marshal(map[string]any{
-		"must_change_password":     true,
 		"username":                 created.Username,
 		"bootstrap_token_event_id": tokenEventID,
 	})

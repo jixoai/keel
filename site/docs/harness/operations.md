@@ -39,8 +39,9 @@ Operational facts worth knowing before you expose the port:
   The middleware injects the tenant and strips any client-supplied
   `X-Tenant-ID` (`internal/harnessapi/api.go`, `cmd/keel/auth.go`).
 - **An empty database has no super admin.** `keel admin bootstrap` mints a
-  one-time setup token; the browser completes setup and must change the
-  password at first login. There is no first-visitor-becomes-admin path.
+  one-time setup token; the browser completes setup and enters the app directly.
+  Only a CLI/admin password reset leaves a temporary credential that must be
+  changed at first login. There is no first-visitor-becomes-admin path.
 - `local-only` answers loopback only and maps requests to a built-in
   local-admin; `off` additionally requires explicit `--insecure` and refuses a
   public bind (`cmd/keel/auth.go`).

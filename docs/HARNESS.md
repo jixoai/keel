@@ -31,7 +31,7 @@ keel version
   写请求带 `X-Keel-CSRF`；机器客户端用绑定到 Bot 的 `keel_bot_...` key（`KEEL_AGENT_TOKEN`）。
   服务端注入租户、剥离客户端 `X-Tenant-ID`。
 - 空库没有超管：`keel admin bootstrap` 生成一次性 setup token（或用 `KEEL_BOOTSTRAP_TOKEN`
-  传入容器），浏览器完成首次设置并强制改密。旧 `KEEL_SERVE_PASSWORD`、旧 cookie、旧 API key
+  传入容器），浏览器完成首次设置即完成（直接进入应用，不再强制改密）。旧 `KEEL_SERVE_PASSWORD`、旧 cookie、旧 API key
   全部失效；旧 schema 启动即拒绝（alpha 零兼容）。
 - `--auth required|local-only|off`：`local-only` 仅回环并映射内置 local-admin；`off` 需显式
   `--insecure` 且公网拒绝启动。
@@ -74,7 +74,7 @@ keel version
 
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
-| POST | `/v1/auth/login`、`/v1/auth/logout`、`/v1/auth/password`、`/v1/auth/bootstrap` | 账号密码登录 / 登出 / 强制改密 / 一次性 setup token；GET `/v1/auth/session` 发 CSRF 与引导状态 |
+| POST | `/v1/auth/login`、`/v1/auth/logout`、`/v1/auth/password`、`/v1/auth/bootstrap` | 账号密码登录 / 登出 / 改密（仅 CLI/管理员重置的临时密码会强制先改） / 一次性 setup token；GET `/v1/auth/session` 发 CSRF 与引导状态 |
 | GET/POST | `/v1/accounts`、`/v1/accounts/{id}`、`POST …/disable`、`POST …/password-reset`、`GET/POST/DELETE …/groups` | 账号列表/创建/禁用/重置密码/权限组（Bot 账号无密码，用 Bot key） |
 | GET/POST/PATCH/DELETE | `/v1/roles`、`/v1/profiles` | Role（只给身份/Instruction，不授权）与 Profile（Account + Role） |
 | GET/POST/PATCH/DELETE | `/v1/permission-groups`、`POST …/{id}/members`、`POST …/{id}/grants` | 权限组与成员/授权；有效权限是并集，同 key 取最大 scope |

@@ -219,10 +219,11 @@ func (e *authTestEnv) accountID(body map[string]any) uuid.UUID {
 	return parsed
 }
 
-// bootstrapAdmin runs the whole first-admin journey: token, setup, login and the
-// forced password change. It returns the admin account id and the client's
-// session-bound CSRF header helper.
-func (e *authTestEnv) bootstrapAdmin(initialPassword, finalPassword string) (uuid.UUID, map[string]string) {
+// bootstrapAdmin runs the first-admin journey: token, setup and login. The
+// setup password is final, so the first login must be fully usable with no
+// forced change. It returns the admin account id and the client's session-bound
+// CSRF header.
+func (e *authTestEnv) bootstrapAdmin(password string) (uuid.UUID, map[string]string) {
 	e.t.Helper()
 	token := auth.SetupTokenScheme + uuid.NewString()
 	if _, err := e.st.CreateBootstrapToken(context.Background(), e.tenantID,
@@ -233,28 +234,23 @@ func (e *authTestEnv) bootstrapAdmin(initialPassword, finalPassword string) (uui
 		e.t.Fatalf("anonymous session: %d %v", status, body)
 	}
 	status, body, _ := e.do(e.client, http.MethodPost, "/v1/auth/bootstrap",
-		map[string]any{"token": token, "username": "root", "password": initialPassword, "displayName": "Root"},
+		map[string]any{"token": token, "username": "root", "password": password, "displayName": "Root"},
 		e.csrfHeader(e.client))
-	if status != http.StatusOK {
+	if status != http.StatusOK || body["mustChangePassword"] != false {
 		e.t.Fatalf("bootstrap: %d %v", status, body)
 	}
 	// Replay must fail before the login stage.
 	if status, _, _ := e.do(e.client, http.MethodPost, "/v1/auth/bootstrap",
-		map[string]any{"token": token, "username": "other", "password": initialPassword},
+		map[string]any{"token": token, "username": "other", "password": password},
 		e.csrfHeader(e.client)); status != http.StatusUnauthorized {
 		e.t.Fatalf("replayed setup token: %d", status)
 	}
-	status, loginBody, loginHeaders := e.loginWithHeaders(e.client, "root", initialPassword)
-	if status != http.StatusOK || loginBody["mustChangePassword"] != true {
+	status, loginBody, loginHeaders := e.loginWithHeaders(e.client, "root", password)
+	if status != http.StatusOK || loginBody["mustChangePassword"] != false {
 		e.t.Fatalf("first login: %d %v", status, loginBody)
 	}
 	assertSessionCookieAttributes(e.t, loginHeaders)
-	adminID := e.accountID(loginBody)
-	status, changed := e.changePassword(e.client, initialPassword, finalPassword)
-	if status != http.StatusOK || changed["mustChangePassword"] != false {
-		e.t.Fatalf("forced password change: %d %v", status, changed)
-	}
-	return adminID, e.csrfHeader(e.client)
+	return e.accountID(loginBody), e.csrfHeader(e.client)
 }
 
 func cleanupAuthTenant(t *testing.T, st *store.Store, tenantID uuid.UUID) {
@@ -310,7 +306,7 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	status, body, _ = env.do(env.client, http.MethodPost, "/v1/auth/bootstrap",
 		map[string]any{"token": token, "username": "root", "password": "admin-password-123", "displayName": "Root"},
 		env.csrfHeader(env.client))
-	if status != http.StatusOK || body["mustChangePassword"] != true {
+	if status != http.StatusOK || body["mustChangePassword"] != false {
 		t.Fatalf("bootstrap: %d %v", status, body)
 	}
 	// The token is one-time.
@@ -331,14 +327,56 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	}
 
 	status, loginBody := env.login(env.client, "root", "admin-password-123")
-	if status != http.StatusOK || loginBody["authenticated"] != true || loginBody["mustChangePassword"] != true {
+	if status != http.StatusOK || loginBody["authenticated"] != true || loginBody["mustChangePassword"] != false {
 		t.Fatalf("first login: %d %v", status, loginBody)
 	}
 	adminID := env.accountID(loginBody)
-	oldCookie := sessionCookieValue(t, env.client, env.server.URL)
-	if oldCookie == "" {
+	bootstrapCookie := sessionCookieValue(t, env.client, env.server.URL)
+	if bootstrapCookie == "" {
 		t.Fatal("login did not set a session cookie")
 	}
+	// The bootstrap password is final: the first login is already a full
+	// session and /v1 is usable without a second password screen.
+	if status, body, _ := env.do(env.client, http.MethodGet, "/v1/sessions", nil, nil); status != http.StatusOK ||
+		body["tenantId"] != env.tenantID.String() || body["accountId"] != adminID.String() {
+		t.Fatalf("post-bootstrap session: %d %v", status, body)
+	}
+
+	// The CLI reset path is different and keeps its forced-change contract:
+	// install a temporary credential through the store (the CLI write), then
+	// prove the gate and its recovery through HTTP.
+	resetHash, err := auth.HashPassword("admin-temp-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.st.ResetAccountPassword(context.Background(), env.tenantID, "root", resetHash, "e2e"); err != nil {
+		t.Fatal(err)
+	}
+	// The bootstrap session dies with the reset.
+	req, _ := http.NewRequest(http.MethodGet, env.server.URL+"/v1/sessions", nil)
+	req.Header.Set("Cookie", auth.SessionCookieName+"="+bootstrapCookie)
+	res, err := env.server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("bootstrap cookie after reset: %d", res.StatusCode)
+	}
+	resetClient := env.newClient()
+	status, loginBody = env.login(resetClient, "root", "admin-temp-123")
+	if status != http.StatusOK || loginBody["mustChangePassword"] != true {
+		t.Fatalf("login after reset: %d %v", status, loginBody)
+	}
+	env.client = resetClient
+	oldCookie := sessionCookieValue(t, env.client, env.server.URL)
+	if oldCookie == "" {
+		t.Fatal("reset login did not set a session cookie")
+	}
+	// Freeze the change-password limiter's clock: Argon2 verification can take
+	// longer than the first 1s lock, so a wall-clock test would be flaky.
+	limiterNow := time.Now().UTC()
+	env.ctl.service.Limiter.SetClock(func() time.Time { return limiterNow })
 
 	// The must-change principal may only reach the password surface.
 	if status, body, _ := env.do(env.client, http.MethodGet, "/v1/sessions", nil, nil); status != http.StatusForbidden || body["code"] != "password_change_required" {
@@ -354,7 +392,7 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	}
 	// Repeated failed current-password attempts hit the change-password limiter
 	// (separate key from login) instead of burning Argon2 forever.
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		if status, body := env.changePassword(env.client, "wrong-current-123", "admin-password-456"); status != http.StatusUnauthorized {
 			t.Fatalf("failed password change %d: %d %v", i, status, body)
 		}
@@ -362,14 +400,14 @@ func TestAuthRequiredLifecycleE2E(t *testing.T) {
 	if status, body := env.changePassword(env.client, "wrong-current-123", "admin-password-456"); status != http.StatusTooManyRequests {
 		t.Fatalf("rate-limited password change: %d %v", status, body)
 	}
-	time.Sleep(1100 * time.Millisecond)
-	if status, body := env.changePassword(env.client, "admin-password-123", "admin-password-456"); status != http.StatusOK || body["mustChangePassword"] != false {
+	limiterNow = limiterNow.Add(2 * time.Second)
+	if status, body := env.changePassword(env.client, "admin-temp-123", "admin-password-456"); status != http.StatusOK || body["mustChangePassword"] != false {
 		t.Fatalf("password change: %d %v", status, body)
 	}
 	// The pre-change cookie is dead.
-	req, _ := http.NewRequest(http.MethodGet, env.server.URL+"/v1/sessions", nil)
+	req, _ = http.NewRequest(http.MethodGet, env.server.URL+"/v1/sessions", nil)
 	req.Header.Set("Cookie", auth.SessionCookieName+"="+oldCookie)
-	res, err := env.server.Client().Do(req)
+	res, err = env.server.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +594,7 @@ func TestLoopbackRequestRequiresBothHostAndPeer(t *testing.T) {
 
 func TestAuthRateLimitE2E(t *testing.T) {
 	env := newAuthTestEnv(t, authModeRequired, uuid.Nil)
-	env.bootstrapAdmin("admin-password-123", "admin-password-456")
+	env.bootstrapAdmin("admin-password-123")
 	spray := env.newClient()
 	for i := 1; i <= 4; i++ {
 		status, body := env.login(spray, "spray-user", "wrong-password-123")
@@ -599,7 +637,7 @@ func mergeHeaders(left, right map[string]string) map[string]string {
 
 func TestBotKeyLifecycleE2E(t *testing.T) {
 	env := newAuthTestEnv(t, authModeRequired, uuid.Nil)
-	adminID, adminCSRF := env.bootstrapAdmin("admin-password-123", "admin-password-456")
+	adminID, adminCSRF := env.bootstrapAdmin("admin-password-123")
 	admin := auth.Principal{Kind: auth.PrincipalHuman, TenantID: env.tenantID, AccountID: adminID, IsSuperAdmin: true}
 
 	botAccount, err := env.ctl.service.CreateAccount(context.Background(), admin, auth.AccountInput{
@@ -750,7 +788,7 @@ func TestAuthLocalOnlyE2E(t *testing.T) {
 
 func TestAuthRejectsCrossTenantSessionAndKeyE2E(t *testing.T) {
 	env := newAuthTestEnv(t, authModeRequired, uuid.Nil)
-	env.bootstrapAdmin("admin-password-123", "admin-password-456")
+	env.bootstrapAdmin("admin-password-123")
 
 	// A session minted for another tenant (same signing key) must not inject
 	// that tenant into this server.

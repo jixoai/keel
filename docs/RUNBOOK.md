@@ -36,7 +36,7 @@ keel admin bootstrap --tenant "$KEEL_SERVE_TENANT"  # 空库首次；一次性 s
 keel serve --addr 127.0.0.1:13750
 ```
 
-- 浏览器用 setup token 完成首个超管设置，首次登录强制改密；之后用户名/密码登录。
+- 浏览器用 setup token 完成首个超管设置，设置即完成并直接进入；之后用户名/密码登录。CLI/管理员重置出的临时密码仍需先改密。
 - CLI/TUI：`KEEL_ACCOUNT_USERNAME` + `KEEL_ACCOUNT_PASSWORD`（或 `--password-file`）；
   写请求由客户端带 `X-Keel-CSRF`。
 - 机器客户端：`KEEL_AGENT_TOKEN=keel_bot_...`（绑定 `account_id + bot_id`，不能登录浏览器）。

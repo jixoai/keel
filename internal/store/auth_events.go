@@ -5,8 +5,10 @@
 // durable state behind two derived facts that deliberately have no column in
 // the A1 schema:
 //
-//   - "the account must change its password" — an account.bootstrap or
-//     password.reset event with no later password.changed event;
+//   - "the account must change its password" — a password.reset event with no
+//     later password.changed event. account.bootstrap deliberately does not
+//     count: bootstrap asks the operator to choose the final credential, while
+//     a reset hands out a temporary one;
 //   - "this bootstrap token was used" — a bootstrap.used event naming the
 //     token event id. Tokens themselves are stored as hashes in a
 //     bootstrap.token event, so no schema change is needed and the whole
@@ -168,8 +170,13 @@ func (s *Store) HasSuperAdmin(ctx context.Context) (bool, error) {
 	return exists, nil
 }
 
-// AccountMustChangePassword reports whether the account's newest credential
-// fact is a bootstrap/reset that no later password change has superseded.
+// AccountMustChangePassword reports whether a password reset left a temporary
+// credential that no later password change has superseded.
+//
+// Bootstrap is not a reset: the operator chooses the final password in the
+// setup form, so the account is immediately usable and must not be sent to a
+// second password screen. Only password.reset (a CLI/admin-issued temporary
+// credential) opens the forced-change gate.
 func (s *Store) AccountMustChangePassword(ctx context.Context, tenantID, accountID uuid.UUID) (bool, error) {
 	if tenantID == uuid.Nil || accountID == uuid.Nil {
 		return false, invalidIdentity("account must change password", "tenant and account ids are required")
@@ -179,14 +186,14 @@ func (s *Store) AccountMustChangePassword(ctx context.Context, tenantID, account
 		`SELECT EXISTS (
 		    SELECT 1 FROM auth_events b
 		     WHERE b.tenant_id = $1 AND b.account_id = $2
-		       AND b.kind IN ($3, $4)
+		       AND b.kind = $3
 		       AND NOT EXISTS (
 		           SELECT 1 FROM auth_events c
 		            WHERE c.tenant_id = b.tenant_id AND c.account_id = b.account_id
-		              AND c.kind = $5 AND c.result = $6 AND c.event_id > b.event_id
+		              AND c.kind = $4 AND c.result = $5 AND c.event_id > b.event_id
 		       )
 		 )`,
-		tenantID, accountID, AuthEventAccountBoot, AuthEventPasswordReset,
+		tenantID, accountID, AuthEventPasswordReset,
 		AuthEventPasswordChange, AuthResultOK).Scan(&must); err != nil {
 		return false, identityWriteError("account must change password", err)
 	}

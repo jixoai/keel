@@ -83,7 +83,7 @@
 
 | 方法 | 路径 | 语义 |
 |---|---|---|
-| POST/GET | `/v1/auth/login`、`/v1/auth/logout`、`/v1/auth/session`、`/v1/auth/password`、`/v1/auth/bootstrap` | 账号登录/登出、CSRF 与引导状态、强制改密、一次性 setup token |
+| POST/GET | `/v1/auth/login`、`/v1/auth/logout`、`/v1/auth/session`、`/v1/auth/password`、`/v1/auth/bootstrap` | 账号登录/登出、CSRF 与引导状态、改密（仅 CLI/管理员重置的临时密码会强制先改）、一次性 setup token |
 | GET/POST | `/v1/accounts`、`POST …/disable`、`POST …/password-reset`、`GET/POST/DELETE …/groups` | Account（登录/权限主体）、禁用/重置密码/权限组写入 |
 | GET/POST/PATCH/DELETE | `/v1/roles`、`/v1/profiles` | Role（只给身份，不授权）、Profile（Account + Role） |
 | GET/POST/PATCH/DELETE | `/v1/permission-groups`、`/v1/permissions` | permission-key registry、scope、权限组与有效授权 |

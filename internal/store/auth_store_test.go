@@ -253,7 +253,7 @@ func TestBootstrapTokenOnceAndAtomicSuperAdmin(t *testing.T) {
 	if !account.IsSuperAdmin || account.Kind != "human" || account.PasswordHash != passwordHash {
 		t.Fatalf("bootstrapped account = %+v", account)
 	}
-	if must, err := st.AccountMustChangePassword(ctx, tenantID, account.ID); err != nil || !must {
+	if must, err := st.AccountMustChangePassword(ctx, tenantID, account.ID); err != nil || must {
 		t.Fatalf("bootstrapped must-change = %v err=%v", must, err)
 	}
 	if has, err := st.HasSuperAdmin(ctx); err != nil || !has {
@@ -318,16 +318,25 @@ func TestAuthEventsAuditAndDerivedFacts(t *testing.T) {
 		t.Fatalf("detail lost: %+v", byAccount[0].Detail)
 	}
 
-	// A bootstrap event makes the account owe a password change until a later
-	// password.changed event lands.
+	// account.bootstrap is a creation fact, not a temporary credential: it must
+	// not open the forced-change gate. A password.reset does.
 	if _, err := st.RecordAuthEvent(ctx, AuthEvent{
 		TenantID: tenantID, AccountID: &account.ID, Kind: AuthEventAccountBoot,
-		Detail: map[string]any{"must_change_password": true},
+		Detail: map[string]any{"username": account.Username},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if must, err := st.AccountMustChangePassword(ctx, tenantID, account.ID); err != nil || must {
+		t.Fatalf("after bootstrap must-change = %v err=%v", must, err)
+	}
+	if _, err := st.RecordAuthEvent(ctx, AuthEvent{
+		TenantID: tenantID, AccountID: &account.ID, Kind: AuthEventPasswordReset,
+		Detail: map[string]any{"by": "local-cli", "must_change_password": true},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if must, err := st.AccountMustChangePassword(ctx, tenantID, account.ID); err != nil || !must {
-		t.Fatalf("after bootstrap must-change = %v err=%v", must, err)
+		t.Fatalf("after reset must-change = %v err=%v", must, err)
 	}
 	// A failed password-change attempt must not lift the gate: only an
 	// ok password.changed event counts as the rotation.

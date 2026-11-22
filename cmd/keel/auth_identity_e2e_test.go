@@ -69,7 +69,7 @@ func TestAdminPasswordResetE2E(t *testing.T) {
 		}
 		return harnessapi.New(harnessapi.Config{Identity: st, Access: bridge, Logger: discardLogger()})
 	})
-	adminID, csrf := env.bootstrapAdmin("bootstrap-password-1", "admin-password-2")
+	adminID, csrf := env.bootstrapAdmin("bootstrap-password-1")
 	username := "target-" + env.tenantID.String()[:8]
 
 	status, body, _ := env.do(env.client, http.MethodPost, "/v1/accounts", map[string]any{
@@ -198,7 +198,7 @@ func TestNotificationTokenRoutesE2E(t *testing.T) {
 	}
 
 	// A real super admin makes the edge's ordinary 401 (not 503) observable.
-	env.bootstrapAdmin("bootstrap-password-1", "admin-password-2")
+	env.bootstrapAdmin("bootstrap-password-1")
 	if status, body, _ := env.do(anonymous, http.MethodGet, "/v1/notifications", nil, nil); status != http.StatusUnauthorized {
 		t.Fatalf("protected notification list without a session = %d %v, want 401", status, body)
 	}
