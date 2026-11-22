@@ -76,8 +76,9 @@ const railWide = (): boolean => windowSize().width >= BOOK_RAIL_WIDE_MIN_PX;
 
 // ---- the left rail ---------------------------------------------------------
 
-function RailEntry(props: { chapter: ChapterEntry; compact: boolean }) {
+function RailEntry(props: { chapter: ChapterEntry }) {
   const active = () => store.route() === props.chapter.id;
+  const compact = () => !railWide();
   return (
     <View
       testID={`books-chapter-${props.chapter.id}`}
@@ -92,19 +93,19 @@ function RailEntry(props: { chapter: ChapterEntry; compact: boolean }) {
         {
           flexDirection: "row",
           alignItems: "center",
-          justifyContent: props.compact ? "center" : "flex-start",
+          justifyContent: compact() ? "center" : "flex-start",
           gap: space.sm,
-          height: props.compact ? BOOK_TOUCH_PX : 40,
-          width: props.compact ? BOOK_TOUCH_PX : undefined,
-          alignSelf: props.compact ? "center" : undefined,
-          paddingHorizontal: props.compact ? 0 : space.md,
+          height: compact() ? BOOK_TOUCH_PX : 40,
+          width: compact() ? BOOK_TOUCH_PX : undefined,
+          alignSelf: compact() ? "center" : undefined,
+          paddingHorizontal: compact() ? 0 : space.md,
           borderRadius: radius.md,
         },
         active() ? glassState() : {},
       ]}
     >
       <If
-        when={props.compact}
+        when={compact()}
         else={
           <Text
             style={{
@@ -125,7 +126,7 @@ function RailEntry(props: { chapter: ChapterEntry; compact: boolean }) {
           tint={active() ? color.foreground : color.mutedForeground}
         />
       </If>
-      <If when={!props.compact}>
+      <If when={!compact()}>
         <Text
           style={{
             flex: 1,
@@ -179,7 +180,7 @@ function ChapterRail() {
           </Text>
         </If>
         <Each of={CHAPTERS.filter((chapter) => chapterVisible(chapter))} key={(chapter) => chapter.id}>
-          {(chapter) => <RailEntry chapter={chapter()} compact={compact()} />}
+          {(chapter) => <RailEntry chapter={chapter()} />}
         </Each>
       </View>
       <Hairline />
@@ -237,7 +238,7 @@ function TopBand() {
         borderBottomColor: color.border,
       }}
     >
-      <BrandMark compact={isMobile()} />
+      <BrandMark />
       <PluginTopPanels />
       <If when={!hasPlugins()}>
         {/* The empty half is the window's drag region; it draws nothing. */}

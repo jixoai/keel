@@ -15,6 +15,7 @@
 import type { JSX } from "nsh";
 import { signal, Text, View } from "nsh";
 import { color, font, radius, space, typeScale, weight } from "../../ui/kit";
+import { isMobile } from "./common";
 
 /** One panel a plugin puts in the shell's top band. */
 export interface PluginTopPanel {
@@ -90,7 +91,8 @@ export function PluginTopPanels(props: { testID?: string }) {
 
 /** The brand half of the band: a K tile and the wordmark. It doubles as the
  * window's drag region; it never grows a control of its own. */
-export function BrandMark(props: { compact?: boolean }) {
+export function BrandMark() {
+  const compact = () => isMobile();
   return (
     <View
       accessibilityLabel="Keel"
@@ -98,8 +100,8 @@ export function BrandMark(props: { compact?: boolean }) {
     >
       <View
         style={{
-          width: props.compact ? 20 : 22,
-          height: props.compact ? 20 : 22,
+          width: compact() ? 20 : 22,
+          height: compact() ? 20 : 22,
           borderRadius: radius.sm,
           alignItems: "center",
           justifyContent: "center",
@@ -120,7 +122,7 @@ export function BrandMark(props: { compact?: boolean }) {
           K
         </Text>
       </View>
-      <If when={!props.compact}>
+      <If when={!compact()}>
         <Text
           style={{
             fontSize: typeScale.sm,
