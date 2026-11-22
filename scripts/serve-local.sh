@@ -29,9 +29,8 @@
 # KEEL_BOOTSTRAP_TOKEN before boot) and complete setup in the browser. The
 # token is shown once and is never printed by this script.
 #
-# KEEL_SERVE_PASSWORD is retired and refused by the product. If the env file
-# still carries it, this script ignores it and says so once; it never forwards
-# it to the server or to any child process.
+# KEEL_SERVE_PASSWORD is retired and refused by the product. This script does
+# not read it from the env file and never forwards it to the server.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -103,26 +102,16 @@ fi
 # Read only KEY-shaped assignments (KEEL_* plus provider credential keys like
 # S2API_KEY / DEEPSEEK_API_KEY — the shape the builtin catalog declares in
 # `access.env`). The env file is shared with other tools and may contain prose
-# or non-shell lines; executing it wholesale would run them.
-RETIRED_PASSWORD_SEEN=0
+# or non-shell lines; executing it wholesale would run them. The retired
+# KEEL_SERVE_PASSWORD is excluded and never exported.
 while IFS= read -r line; do
   key="${line%%=*}"
   value="${line#*=}"
   # Strip one layer of matching quotes, as a shell assignment would.
   value="${value%\"}"; value="${value#\"}"
   value="${value%\'}"; value="${value#\'}"
-  case "$key" in
-    KEEL_SERVE_PASSWORD)
-      RETIRED_PASSWORD_SEEN=1
-      continue
-      ;;
-  esac
   export "$key=$value"
-done < <(grep -E '^(KEEL_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_KEY)=' "$PERSONAL")
-
-if [[ "$RETIRED_PASSWORD_SEEN" == 1 ]]; then
-  echo "note: KEEL_SERVE_PASSWORD is retired; ignored (use account login or a Bot key)" >&2
-fi
+done < <(grep -E '^(KEEL_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_KEY)=' "$PERSONAL" | grep -v '^KEEL_SERVE_PASSWORD=')
 
 : "${KEEL_DSN:?KEEL_DSN is not set in $PERSONAL}"
 : "${KEEL_SERVE_TENANT:?KEEL_SERVE_TENANT is not set in $PERSONAL}"

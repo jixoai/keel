@@ -14,8 +14,7 @@
 #                        「formerly」「old」「deleted」）；这类行逐条打印，便于人工复核。
 #   4. upstream        —— 上游命名：pi/pigo 的「Agent Skills 规范」、agentskills.io、
 #                        「pi Agent」（描述 pigo 时的上游事实说法）。
-#   5. ui-debt         —— 旧 UI demo fixture 里尚未替换的产品词（A4.4 所属）；逐条打印，
-#                        不静默丢弃。
+#   5. ui-debt         —— 已知 UI fixture 遗留（当前为空；逐条打印，不静默丢弃）。
 #   6. historical      —— 历史规划/残留计划文档；文件级白名单。
 #
 # A5 追加 legacy 扫描：docs 中不得再出现仍在使用的旧产品入口（`/v1/agents`、
@@ -83,17 +82,9 @@ ALIAS = re.compile(
     r"原 Agent|旧称|原名|别名|取代|更名|删除|\bold\b|\bdeleted\b|rename|formerly|earlier|alias"
 )
 # --- known debt (printed, not silently dropped) ----------------------------
-# The old UI demo fixture still speaks the retired Agent vocabulary. A4.4 owns
-# that screen and replaces it; A5 (docs/scripts) must not edit web/. Every
-# entry is printed on every run so the debt stays visible.
-KNOWN_UI_DEBT = {
-    ("web/src/data/fixture.ts", 979): "A4.4 UI fixture string",
-    ("web/src/data/fixture.ts", 996): "A4.4 UI fixture string",
-    ("web/src/data/fixture.ts", 1018): "A4.4 UI fixture string",
-    ("web/src/data/fixture.ts", 1020): "A4.4 UI fixture string",
-    ("web/src/data/fixture.ts", 1033): "A4.4 UI fixture string",
-    ("web/src/data/fixture.ts", 1080): "A4.4 UI fixture string",
-}
+# The retired Agent settings/fixture UI is gone; there is no known UI debt.
+# Keep the category so a future exception is printed, never silently ignored.
+KNOWN_UI_DEBT = {}
 # Historical planning notes describe the old model; they are not product copy.
 HISTORICAL_DOCS = {
     "docs/RESIDUAL-PLAN.md": "historical residual plan (pre-A5 vocabulary)",
@@ -196,14 +187,14 @@ if not quiet:
     print(f"  code-ident (Agent* symbols / .Agent fields) hits: {counts['code-ident']}")
     print(f"  alias      (rename notes, audited below)    hits: {counts['alias']}")
     print(f"  upstream   (pi/pigo naming)                 hits: {counts['upstream']}")
-    print(f"  ui-debt    (A4.4 fixture, printed below)    hits: {counts['ui-debt']}")
+    print(f"  ui-debt    (known fixture debt)             hits: {counts['ui-debt']}")
     print(f"  historical (historical plans)               hits: {counts['historical']}")
     if alias_lines:
         print("naming-scan: alias lines (explicit rename notes, for review):")
         for line in alias_lines:
             print(line)
     if debt_lines:
-        print("naming-scan: known UI debt (A4.4 owns these; not silently ignored):")
+        print("naming-scan: known UI debt (none expected; printed if it returns):")
         for line in debt_lines:
             print(line)
 

@@ -99,8 +99,8 @@ scripts/serve-local.sh --stop    # 停止
   `--password-file`）；第一次用 CLI/TUI 前先登录，写请求带 `X-Keel-CSRF`。
 - **机器客户端**用绑定到具体 Bot 的 key（`KEEL_AGENT_TOKEN`，`keel_bot_...`），不走浏览器登录。
 - 空库首次启动：运行 `keel admin bootstrap`（或设置 `KEEL_BOOTSTRAP_TOKEN`），在浏览器用一次性
-  setup token 设置首个超管；脚本只提示，不打印令牌。
-- 旧的 `KEEL_SERVE_PASSWORD` 已删除；env 文件里残留时脚本会忽略并提示。旧 cookie、旧 API key、
+  setup token 设置首个超管；密码设置即完成，直接进入应用。脚本只提示，不打印令牌。
+- 旧的 `KEEL_SERVE_PASSWORD` 已删除且不被脚本读取；旧 cookie、旧 API key、
   旧 `agents`/`agent_teams` schema 均不兼容，升级即重新初始化账号（alpha 零兼容）。
 
 env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.personal`（gitignored）；
