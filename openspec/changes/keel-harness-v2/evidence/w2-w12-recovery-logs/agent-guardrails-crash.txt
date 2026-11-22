@@ -1,7 +1,7 @@
 === RUN   TestGuardrailMemoryPressureIsAuditedInTheLedger
---- PASS: TestGuardrailMemoryPressureIsAuditedInTheLedger (0.14s)
+--- PASS: TestGuardrailMemoryPressureIsAuditedInTheLedger (0.16s)
 === RUN   TestReclaimedLeaseRecordsTheRecoveryFact
---- PASS: TestReclaimedLeaseRecordsTheRecoveryFact (0.27s)
+--- PASS: TestReclaimedLeaseRecordsTheRecoveryFact (0.19s)
 === RUN   TestGuardrailDuplicateCallBlocksAndAudits
 --- PASS: TestGuardrailDuplicateCallBlocksAndAudits (0.00s)
 === RUN   TestGuardrailDuplicateResetsOnDifferentCall
@@ -31,6 +31,6 @@
 === RUN   TestGuardrailCommitFailureDoesNotPanic
 --- PASS: TestGuardrailCommitFailureDoesNotPanic (0.00s)
 === RUN   TestCrashThenRestartResumesWithoutADuplicateFinal
---- PASS: TestCrashThenRestartResumesWithoutADuplicateFinal (7.58s)
+--- PASS: TestCrashThenRestartResumesWithoutADuplicateFinal (5.33s)
 PASS
-ok  	github.com/jixoai/keel/internal/agent	8.491s
+ok  	github.com/jixoai/keel/internal/agent	6.232s

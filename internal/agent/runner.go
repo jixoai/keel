@@ -669,6 +669,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if err != nil {
 		return res, err
 	}
+	if guard != nil {
+		if err := guard.err(); err != nil {
+			// A recovery replay already reached the failure/timeout limit; do not
+			// start a model turn on top of an aborted attempt.
+			return res, err
+		}
+	}
 	// The model must see the input this transcript owes an answer to LAST:
 	// input that arrived while the previous attempt was running sits before
 	// that attempt's answer in the log, so leaving the log order intact makes

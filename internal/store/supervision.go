@@ -31,28 +31,47 @@ type SupervisorRun struct {
 	UpdatedAt  time.Time
 }
 
+// SupervisorCursor is the keyset continuation of a supervisor scan. It matches
+// the (updated_at, tenant_id, session_id) order, so pages cannot skip or repeat
+// a row whose timestamp ties another.
+type SupervisorCursor struct {
+	UpdatedAt time.Time
+	TenantID  uuid.UUID
+	SessionID uuid.UUID
+}
+
 // supervisorFailedLookback bounds automatic resume of already-failed runs to
 // recent history. Non-terminal runs are always scanned; an old failed run is
 // not silently retried months later by a restart.
 const supervisorFailedLookback = 24 * time.Hour
 
-// ListSupervisorRuns returns the runs one supervisor scan may act on: every
-// non-terminal row (pending/running) and failed rows that changed within the
-// lookback. The scan is cross-tenant by design (it is the run queue's global
-// reader, like the kernel's claim), so it uses the operator pool with its
-// explicit tenant column.
-func (s *Store) ListSupervisorRuns(ctx context.Context, limit int) ([]SupervisorRun, error) {
+// ListSupervisorRuns returns one page of the runs a supervisor scan may act on:
+// every non-terminal row (pending/running) and failed rows that changed within
+// the lookback. The scan is cross-tenant by design (it is the run queue's
+// global reader, like the kernel's claim), so it uses the operator pool with
+// its explicit tenant column. after=nil starts at the beginning; a full page is
+// continued by passing the last row's SupervisorCursor.
+func (s *Store) ListSupervisorRuns(ctx context.Context, limit int, after *SupervisorCursor) ([]SupervisorRun, error) {
 	if limit <= 0 {
 		limit = 200
+	}
+	var afterAt any
+	var afterTenant, afterSession any
+	if after != nil {
+		afterAt = after.UpdatedAt
+		afterTenant = after.TenantID
+		afterSession = after.SessionID
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, session_id, status, attempts, lease_until, cursor_seq,
 		       COALESCE(last_error, ''), updated_at
 		  FROM runs
-		 WHERE status IN ('pending', 'running')
-		    OR (status = 'failed' AND updated_at >= now() - $2::interval)
+		 WHERE (status IN ('pending', 'running')
+		    OR (status = 'failed' AND updated_at >= now() - $2::interval))
+		   AND ($3::timestamptz IS NULL
+		        OR (updated_at, tenant_id, session_id) > ($3::timestamptz, $4::uuid, $5::uuid))
 		 ORDER BY updated_at ASC, tenant_id, session_id
-		 LIMIT $1`, limit, supervisorFailedLookback.String())
+		 LIMIT $1`, limit, supervisorFailedLookback.String(), afterAt, afterTenant, afterSession)
 	if err != nil {
 		return nil, fmt.Errorf("store: list supervisor runs: %w", err)
 	}

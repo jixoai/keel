@@ -1,11 +1,13 @@
 === RUN   TestPGSupervisorResumesFailedRunAndRecordsTheFact
---- PASS: TestPGSupervisorResumesFailedRunAndRecordsTheFact (9.00s)
+--- PASS: TestPGSupervisorResumesFailedRunAndRecordsTheFact (1.00s)
+=== RUN   TestPGSupervisorPaginatesEveryRun
+--- PASS: TestPGSupervisorPaginatesEveryRun (0.71s)
 === RUN   TestPGManualPolicyParksAndExplicitResumeContinues
---- PASS: TestPGManualPolicyParksAndExplicitResumeContinues (3.08s)
+--- PASS: TestPGManualPolicyParksAndExplicitResumeContinues (0.18s)
 === RUN   TestPGEscalationIsDurable
---- PASS: TestPGEscalationIsDurable (6.93s)
+--- PASS: TestPGEscalationIsDurable (0.42s)
 === RUN   TestParsePolicyJSON
---- PASS: TestParsePolicyJSON (0.05s)
+--- PASS: TestParsePolicyJSON (0.00s)
 === RUN   TestParsePolicyTOMLSubset
 --- PASS: TestParsePolicyTOMLSubset (0.00s)
 === RUN   TestParsePolicyRejectsInvalidValues
@@ -13,21 +15,23 @@
 === RUN   TestPolicyEnvironmentOverrides
 --- PASS: TestPolicyEnvironmentOverrides (0.00s)
 === RUN   TestLoadPolicyFileAndInline
---- PASS: TestLoadPolicyFileAndInline (0.02s)
+--- PASS: TestLoadPolicyFileAndInline (0.00s)
 === RUN   TestBackoffDelay
 --- PASS: TestBackoffDelay (0.00s)
 === RUN   TestPolicyHashChangesWithRotation
 --- PASS: TestPolicyHashChangesWithRotation (0.00s)
 === RUN   TestScanAutoResumesFailedRun
---- PASS: TestScanAutoResumesFailedRun (0.01s)
+--- PASS: TestScanAutoResumesFailedRun (0.00s)
 === RUN   TestScanRespectsBackoff
 --- PASS: TestScanRespectsBackoff (0.00s)
 === RUN   TestScanEscalatesToParentAtExhaustion
---- PASS: TestScanEscalatesToParentAtExhaustion (0.01s)
+--- PASS: TestScanEscalatesToParentAtExhaustion (0.00s)
 === RUN   TestScanEscalatesToOwnerWithoutParent
 --- PASS: TestScanEscalatesToOwnerWithoutParent (0.00s)
 === RUN   TestScanOnExhaustedStop
 --- PASS: TestScanOnExhaustedStop (0.00s)
+=== RUN   TestScanPaginatesEveryRun
+--- PASS: TestScanPaginatesEveryRun (0.00s)
 === RUN   TestScanCrashLoopExhaustsInsteadOfReclaiming
 --- PASS: TestScanCrashLoopExhaustsInsteadOfReclaiming (0.00s)
 === RUN   TestScanManualParksPendingRun
@@ -51,4 +55,4 @@
 === RUN   TestScanReportsStoreFailuresWithoutStopping
 --- PASS: TestScanReportsStoreFailuresWithoutStopping (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/supervisor	22.634s
+ok  	github.com/jixoai/keel/internal/supervisor	3.012s

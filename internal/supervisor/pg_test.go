@@ -217,6 +217,66 @@ func TestPGSupervisorResumesFailedRunAndRecordsTheFact(t *testing.T) {
 	}
 }
 
+func TestPGSupervisorPaginatesEveryRun(t *testing.T) {
+	st := pgStoreForSupervisor(t)
+	kern := pgKernelForSupervisor(t, st)
+	tenant := uuid.New()
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, tenant, "supervisor-page-test"); err != nil {
+		t.Fatal(err)
+	}
+	var sessions []uuid.UUID
+	for i := 0; i < 3; i++ {
+		session := uuid.New()
+		if err := st.CreateSession(ctx, tenant, session); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.EnqueueRun(ctx, tenant, session); err != nil {
+			t.Fatal(err)
+		}
+		sessions = append(sessions, session)
+	}
+	policy := DefaultPolicy()
+	policy.Resume.Mode = ModeManual
+	sup, err := New(Config{
+		Store: NewSQLStore(st), Ledger: kern, Logger: testLogger(), Limit: 1,
+		Policy: func() (Policy, ConfigVersion) { return policy, ConfigVersion{} },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	report, err := sup.Scan(ctx)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if report.Parked != 3 || report.Scanned < 3 {
+		t.Fatalf("report = %+v, want 3 parked across pages", report)
+	}
+	for _, session := range sessions {
+		run, err := st.GetRun(ctx, tenant, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status != store.RunFailed {
+			t.Fatalf("session %s status = %q, want failed", session, run.Status)
+		}
+	}
+	// A second scan sees the parked rows as failed under manual mode: no new
+	// park facts and no duplicate attempts.
+	if _, err := sup.Scan(ctx); err != nil {
+		t.Fatalf("second Scan: %v", err)
+	}
+	for _, session := range sessions {
+		count, err := st.ResumeAttemptCount(ctx, tenant, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("session %s resume facts = %d, want 1", session, count)
+		}
+	}
+}
+
 func TestPGManualPolicyParksAndExplicitResumeContinues(t *testing.T) {
 	st := pgStoreForSupervisor(t)
 	kern := pgKernelForSupervisor(t, st)

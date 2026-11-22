@@ -49,11 +49,31 @@ func newFakeStore(runs ...RunRecord) *fakeStore {
 	}
 }
 
-func (s *fakeStore) ListSupervisorRuns(context.Context, int) ([]RunRecord, error) {
+func (s *fakeStore) ListSupervisorRuns(_ context.Context, limit int, after *RunCursor) ([]RunRecord, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
-	return append([]RunRecord(nil), s.runs...), nil
+	start := 0
+	if after != nil {
+		for start < len(s.runs) && !runAfter(s.runs[start], *after) {
+			start++
+		}
+	}
+	end := start + limit
+	if limit <= 0 || end > len(s.runs) {
+		end = len(s.runs)
+	}
+	return append([]RunRecord(nil), s.runs[start:end]...), nil
+}
+
+func runAfter(run RunRecord, cursor RunCursor) bool {
+	if !run.UpdatedAt.Equal(cursor.UpdatedAt) {
+		return run.UpdatedAt.After(cursor.UpdatedAt)
+	}
+	if run.TenantID != cursor.TenantID {
+		return run.TenantID.String() > cursor.TenantID.String()
+	}
+	return run.SessionID.String() > cursor.SessionID.String()
 }
 
 func (s *fakeStore) RequeueRun(_ context.Context, tenantID, sessionID uuid.UUID) (RequeueOutcome, error) {
@@ -338,6 +358,35 @@ func TestScanOnExhaustedStop(t *testing.T) {
 	payload := decodePayload(t, ledger.ofKind(kernel.KindSupervisionEscalated)[0])
 	if payload["level"] != "stop" || payload["result"] != "stopped" {
 		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestScanPaginatesEveryRun(t *testing.T) {
+	tenant := uuid.New()
+	base := time.Now().UTC().Add(-time.Hour)
+	store := newFakeStore()
+	for i := 0; i < 3; i++ {
+		store.runs = append(store.runs, RunRecord{
+			TenantID: tenant, SessionID: uuid.New(), Status: "pending",
+			UpdatedAt: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+	store.parkChanged = true
+	policy := DefaultPolicy()
+	policy.Resume.Mode = ModeManual
+	sup, err := New(Config{
+		Store: store, Ledger: &fakeLedger{}, Logger: testLogger(), Limit: 1,
+		Policy: func() (Policy, ConfigVersion) { return policy, ConfigVersion{} },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	report, err := sup.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if report.Scanned != 3 || report.Parked != 3 {
+		t.Fatalf("report = %+v, want 3 scanned and parked (one page per run)", report)
 	}
 }
 

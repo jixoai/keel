@@ -36,12 +36,22 @@ type RequeueOutcome struct {
 	Attempts int
 }
 
+// RunCursor is the keyset continuation of one scan. The tuple matches the order
+// of ListSupervisorRuns, so a page boundary cannot skip or repeat a row because
+// two rows share a timestamp.
+type RunCursor struct {
+	UpdatedAt time.Time
+	TenantID  uuid.UUID
+	SessionID uuid.UUID
+}
+
 // Store is the narrow persistence seam the supervisor needs. All methods are
 // idempotent or read-only; the supervisor never claims a run.
 type Store interface {
-	// ListSupervisorRuns returns non-terminal runs plus failed runs that may be
-	// resumed, oldest activity first.
-	ListSupervisorRuns(ctx context.Context, limit int) ([]RunRecord, error)
+	// ListSupervisorRuns returns one page of non-terminal runs plus failed runs
+	// that may be resumed, ordered by (updated_at, tenant_id, session_id). A nil
+	// after starts at the beginning.
+	ListSupervisorRuns(ctx context.Context, limit int, after *RunCursor) ([]RunRecord, error)
 	// RequeueRun re-enqueues one session's existing run row. It must be safe to
 	// call while a worker claims the same row.
 	RequeueRun(ctx context.Context, tenantID, sessionID uuid.UUID) (RequeueOutcome, error)
@@ -247,67 +257,84 @@ func (s *Supervisor) Scan(ctx context.Context) (Report, error) {
 	if err := policy.Validate(); err != nil {
 		return report, err
 	}
-	runs, err := s.store.ListSupervisorRuns(ctx, s.limit)
+	runs, err := s.store.ListSupervisorRuns(ctx, s.limit, nil)
 	if err != nil {
 		return report, fmt.Errorf("supervisor: list runs: %w", err)
 	}
 	now := s.now()
-	for _, run := range runs {
-		if ctx.Err() != nil {
-			return report, ctx.Err()
+	for {
+		for _, run := range runs {
+			if ctx.Err() != nil {
+				return report, ctx.Err()
+			}
+			report.Scanned++
+			s.scanRun(ctx, &report, policy, version, run, now)
 		}
-		report.Scanned++
-		switch run.Status {
-		case "done":
-			continue
-		case "pending":
-			report.Queued++
-			if policy.Resume.Mode == ModeAuto {
-				// The run is already in the durable queue; a worker claim is the
-				// resume, and the reclaimed-lease path records the recovery fact.
-				continue
-			}
-			s.park(ctx, &report, policy, version, run, now)
-		case "running":
-			if run.LeaseUntil != nil && run.LeaseUntil.After(now) {
-				report.Live++
-				continue
-			}
-			if policy.Resume.Mode == ModeAuto {
-				// A running row with an expired lease is claimable. Before letting
-				// the worker reclaim it, enforce the automatic-recovery budget: a
-				// crash loop must escalate, not recur forever.
-				attempts, err := s.store.AutoResumeCount(ctx, run.TenantID, run.SessionID)
-				if err != nil {
-					s.fail(&report, run, "count attempts", err)
-					continue
-				}
-				if attempts >= policy.Resume.MaxAttempts {
-					reason := fmt.Sprintf("resume budget exhausted after %d automatic attempts", attempts)
-					if changed, err := s.store.ParkRun(ctx, run.TenantID, run.SessionID, reason); err != nil {
-						s.fail(&report, run, "park exhausted run", err)
-					} else if changed {
-						report.Parked++
-						s.exhaust(ctx, &report, policy, version, run, attempts, now)
-					}
-					continue
-				}
-				// A worker claim is the resume; the reclaimed-lease path records
-				// the recovery fact under its new epoch and consumes one attempt.
-				continue
-			}
-			s.park(ctx, &report, policy, version, run, now)
-		case "failed":
-			if isCancelled(run) {
-				report.Cancelled++
-				continue
-			}
-			s.recoverFailed(ctx, &report, policy, version, run, now)
-		default:
-			report.Skipped++
+		if len(runs) < s.limit {
+			break
+		}
+		last := runs[len(runs)-1]
+		runs, err = s.store.ListSupervisorRuns(ctx, s.limit, &RunCursor{
+			UpdatedAt: last.UpdatedAt, TenantID: last.TenantID, SessionID: last.SessionID,
+		})
+		if err != nil {
+			return report, fmt.Errorf("supervisor: list runs after %s: %w", last.SessionID, err)
 		}
 	}
 	return report, nil
+}
+
+// scanRun applies the policy to one run row. It never claims a lease.
+func (s *Supervisor) scanRun(ctx context.Context, report *Report, policy Policy, version ConfigVersion, run RunRecord, now time.Time) {
+	switch run.Status {
+	case "done":
+		return
+	case "pending":
+		report.Queued++
+		if policy.Resume.Mode == ModeAuto {
+			// The run is already in the durable queue; a worker claim is the
+			// resume, and the reclaimed-lease path records the recovery fact.
+			return
+		}
+		s.park(ctx, report, policy, version, run, now)
+	case "running":
+		if run.LeaseUntil != nil && run.LeaseUntil.After(now) {
+			report.Live++
+			return
+		}
+		if policy.Resume.Mode == ModeAuto {
+			// A running row with an expired lease is claimable. Before letting
+			// the worker reclaim it, enforce the automatic-recovery budget: a
+			// crash loop must escalate, not recur forever.
+			attempts, err := s.store.AutoResumeCount(ctx, run.TenantID, run.SessionID)
+			if err != nil {
+				s.fail(report, run, "count attempts", err)
+				return
+			}
+			if attempts >= policy.Resume.MaxAttempts {
+				reason := fmt.Sprintf("resume budget exhausted after %d automatic attempts", attempts)
+				if changed, err := s.store.ParkRun(ctx, run.TenantID, run.SessionID, reason); err != nil {
+					s.fail(report, run, "park exhausted run", err)
+				} else if changed {
+					report.Parked++
+					s.exhaust(ctx, report, policy, version, run, attempts, now)
+				}
+				return
+			}
+			// A worker claim is the resume; the reclaimed-lease path records
+			// the recovery fact under its new epoch and consumes one attempt.
+			return
+		}
+		s.park(ctx, report, policy, version, run, now)
+	case "failed":
+		if isCancelled(run) {
+			report.Cancelled++
+			return
+		}
+		s.recoverFailed(ctx, report, policy, version, run, now)
+	default:
+		report.Skipped++
+	}
 }
 
 // park moves an auto-disabled run to a resumable failed state and records the

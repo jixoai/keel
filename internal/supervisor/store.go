@@ -24,8 +24,14 @@ func NewSQLStore(st *store.Store) *SQLStore {
 }
 
 // ListSupervisorRuns implements Store.
-func (s *SQLStore) ListSupervisorRuns(ctx context.Context, limit int) ([]RunRecord, error) {
-	rows, err := s.st.ListSupervisorRuns(ctx, limit)
+func (s *SQLStore) ListSupervisorRuns(ctx context.Context, limit int, after *RunCursor) ([]RunRecord, error) {
+	var cursor *store.SupervisorCursor
+	if after != nil {
+		cursor = &store.SupervisorCursor{
+			UpdatedAt: after.UpdatedAt, TenantID: after.TenantID, SessionID: after.SessionID,
+		}
+	}
+	rows, err := s.st.ListSupervisorRuns(ctx, limit, cursor)
 	if err != nil {
 		return nil, err
 	}

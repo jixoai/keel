@@ -12,7 +12,7 @@
 |---|---|---|
 | Policy | `internal/supervisor/policy.go` | `resume.mode=auto\|manual\|never`, `maxAttempts`, `backoff` (exponential, capped), `onExhausted=escalate\|stop`, ordered `providerFallback`; `[guardrails]` budgets. Parses a `config.toml` subset (`[resume]`, `[guardrails]`), inline JSON (`KEEL_SUPERVISOR_POLICY`) or a file (`KEEL_SUPERVISOR_POLICY_FILE`), then applies `KEEL_RESUME_*` / `KEEL_GUARDRAIL_*` overrides. Unknown keys inside the two supervised sections are refused (fail closed). |
 | Orchestration | `internal/supervisor/supervisor.go` | Startup + periodic scan; auto-resume failed runs with budget, backoff and provider fallback; park `manual`/`never` runs as resumable failed rows; crash-loop budget; escalation ladder; `resume.attempt` / `supervision.escalated` facts. |
-| Store seam | `internal/store/supervision.go` | Cross-tenant run scan, `ParkRun`, resume/escalation counting, latest selection read. Additive methods only; **no schema/table change** and no change to `RequeueRun`. |
+| Store seam | `internal/store/supervision.go` | Cross-tenant run scan (keyset-paginated by `(updated_at, tenant_id, session_id)` so every non-terminal run is reached), `ParkRun`, resume/escalation counting, latest selection read. Additive methods only; **no schema/table change** and no change to `RequeueRun`. |
 | Provider quota | `internal/durable/generation.go` | `IsProviderExhausted` classification for `providerFallback`. |
 | Parent link | `internal/harnessext/fork.go` | `DurableParentSession` reads the child's first input, so escalation survives a restart. |
 | Guardrails | `internal/agent/guardrails.go` | Duplicate-call reminder/block, per-call timeout, consecutive-failure limit, token/cost budget, heap-pressure signal. Each trip commits `guardrail.tripped` and has a deterministic outcome. |
@@ -53,7 +53,7 @@ All names are test functions in the committed tree.
 |---|---|---|
 | R1 | **`kill -9` after the answer committed, before settle.** A helper process claims the run, runs the real `Runner` (answer + read watermark committed), then sleeps. The parent SIGKILLs it. A second process starts the real `Worker`, waits for the dead lease, reclaims the **same run** with a new epoch and settles it. | `TestCrashThenRestartResumesWithoutADuplicateFinal` (`internal/agent/recovery_process_test.go`). Asserts: one `assistant.message` (no duplicate final), exactly one `run.finished`, exactly one counted `resume.attempt` with `reason=lease_expired`, `result=adopted`, `owner=recovering-worker`, contiguous `seq` 1..N, final status `done`. Log: `w2-w12-recovery-logs/agent-guardrails-crash.txt`. |
 | R2 | **Worker reclaims an expired lease and records who/why/config.** Short first lease, successor claim reports `Reclaimed`, `RunAttempt` commits the adoption fact before reading/answering. | `TestReclaimedLeaseRecordsTheRecoveryFact` (`internal/agent/guardrails_pg_test.go`). Asserts one `resume.attempt` fact with `reason=lease_expired`, `result=adopted`, `counted=true`, owner `successor-runtime`, config hash/revision, and one answer. |
-| R3 | **Startup/periodic scan auto-resumes a failed run, idempotently.** Failed run → `RequeueRun` → pending; fact committed; second scan does not add an attempt. | `TestPGSupervisorResumesFailedRunAndRecordsTheFact` (`internal/supervisor/pg_test.go`), `TestScanIsIdempotentOnceRequeued`, `TestScanAutoResumesFailedRun`. |
+| R3 | **Startup/periodic scan auto-resumes a failed run, idempotently.** Failed run → `RequeueRun` → pending; fact committed; second scan does not add an attempt. The scan pages by keyset, so a backlog larger than one page is still fully visited. | `TestPGSupervisorResumesFailedRunAndRecordsTheFact` (`internal/supervisor/pg_test.go`), `TestScanIsIdempotentOnceRequeued`, `TestScanAutoResumesFailedRun`, `TestScanPaginatesEveryRun`, `TestPGSupervisorPaginatesEveryRun`. |
 | R4 | **`resume.mode=manual` parks the run; explicit resume continues it.** Parked row is `failed` with a policy reason; `ClaimScope` returns `ErrNoRunnable`; `RequeueRun` (the `/resume` store path) makes it claimable. | `TestPGManualPolicyParksAndExplicitResumeContinues`; unit: `TestScanManualParksPendingRun`. |
 | R5 | **`resume.mode=never` never auto-recovers.** Pending row is parked with `policy_never`; an already-failed row is not retried. | `TestScanNeverParksAndDoesNotResumeFailures`. |
 | R6 | **Budget, backoff and crash loops.** Backoff skips a scan before the next deadline; `maxAttempts` exhaustion escalates; a crash loop at the budget is parked/escalated instead of being reclaimed forever. | `TestScanRespectsBackoff`, `TestScanCrashLoopExhaustsInsteadOfReclaiming`, `TestBackoffDelay`. |
@@ -118,8 +118,8 @@ KEEL_TEST_DSN=<local test DSN> go test ./internal/supervisor \
 KEEL_TEST_DSN=<local test DSN> go test \
   ./internal/agent ./internal/supervisor ./internal/servicehost ./cmd/keel \
   ./internal/store ./internal/harnessext ./internal/durable -count=1 -p 1
-# => ok agent 56.996s; supervisor 1.356s; servicehost 6.282s; cmd/keel 28.470s;
-#    store 10.947s; harnessext 18.440s; durable 0.668s
+# => ok agent 57.868s; supervisor 1.817s; servicehost 5.484s; cmd/keel 9.856s;
+#    store 15.385s; harnessext 27.869s; durable 0.666s
 
 go vet ./internal/supervisor ./internal/agent ./internal/store \
   ./internal/durable ./internal/harnessext ./internal/servicehost ./cmd/keel
