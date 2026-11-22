@@ -17,117 +17,117 @@
 
 ### 2.1 启动与登录
 
-- [ ] 空库启动 → 无超管时 `/v1` 返回 503/401 并提示 bootstrap；不存在“第一个访问者自动成为超管”。
-- [ ] `keel admin bootstrap` 生成一次性 setup token；token 只能使用一次；过期/复用返回 401。
-- [ ] 用 token 设置用户名/密码 → 首次登录强制改密 → 进入产品。
-- [ ] 用户名不存在与密码错误返回同形 401；连续失败触发限速/锁定；`auth_events` 有记录。
-- [ ] 登录 cookie 为 HttpOnly/Secure/SameSite；登出、改密、禁用账号后旧会话立即 401。
-- [ ] `auth=local-only` 仅 loopback；绑定 `0.0.0.0` 启动失败；`auth=off` 需要显式不安全开关且公网拒绝。
-- [ ] 旧 `KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys.role` 凭证全部 401。
+- [x] 空库启动 → 无超管时 `/v1` 返回 503/401 并提示 bootstrap；不存在“第一个访问者自动成为超管”。
+- [x] `keel admin bootstrap` 生成一次性 setup token；token 只能使用一次；过期/复用返回 401。
+- [x] 用 token 设置用户名/密码 → 首次登录直接进入产品（bootstrap 密码即最终密码；管理员重置密码仍强制下次改密）。
+- [x] 用户名不存在与密码错误返回同形 401；连续失败触发限速/锁定；`auth_events` 有记录。
+- [x] 登录 cookie 为 HttpOnly/Secure/SameSite；登出、改密、禁用账号后旧会话立即 401。
+- [x] `auth=local-only` 仅 loopback；绑定 `0.0.0.0` 启动失败；`auth=off` 需要显式不安全开关且公网拒绝。
+- [x] 旧 `KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys.role` 凭证全部 401。
 
 ### 2.2 账号、权限组与授权
 
-- [ ] 超管创建 human 账号；账号可属于多个权限组；有效权限是并集；同 key 取最大 scope。
-- [ ] 权限 key 只能来自 registry；未知 key 写入失败；CI 覆盖率门对未登记路由/工具/CLI/UI 动作失败。
-- [ ] `grant ⊆ own`：A 只有 `session.read/own` 时，给 B 授 `secret.read` 或 `session.read/tenant` 返回 403，grant 不落库。
-- [ ] 超管拥有全部 key/scope；跨租户操作、授权、改密、impersonation 全部审计。
-- [ ] 最后一个超管不可删除/禁用；本机 CLI 可重置超管密码；公网无重置端点。
-- [ ] 禁用账号后：登录失败、现有会话失效、其 Bot 的 API key 失效（或按明确策略拒绝）。
+- [x] 超管创建 human 账号；账号可属于多个权限组；有效权限是并集；同 key 取最大 scope。
+- [x] 权限 key 只能来自 registry；未知 key 写入失败；CI 覆盖率门对未登记路由/工具/CLI/UI 动作失败。
+- [x] `grant ⊆ own`：A 只有 `session.read/own` 时，给 B 授 `secret.read` 或 `session.read/tenant` 返回 403，grant 不落库。
+- [x] 超管拥有全部 key/scope；跨租户操作、授权、改密、impersonation 全部审计。
+- [x] 最后一个超管不可删除/禁用；本机 CLI 可重置超管密码；公网无重置端点。
+- [x] 禁用账号后：登录失败、现有会话失效、其 Bot 的 API key 失效（或按明确策略拒绝）。
 
 ### 2.3 Bot
 
-- [ ] 创建 Bot：Profile（Account+Role）、ModelKind、默认 provider/model、Harness（tools + instruction + permissions）。
-- [ ] ModelKind 决定工作方式；默认模型可被调用参数覆盖；Session/Run 快照记录实际模型。
-- [ ] Bot 有效权限 = Account 权限 ∩ Harness permissions；Role/Instruction 不产生授权。
-- [ ] Bot 列表/详情显示：归属 Account、Profile、模型、工具、权限、状态、最近活动；有加载/空/错/权限不足/成功五态。
-- [ ] Bot 归档后：新 Session 拒绝；已有 Session 保留可读；引用它的 TeamBot 标记 invalid 或明确降级。
-- [ ] Bot API key：签发时只显示一次；只能以绑定 Bot 身份行动；错误 Bot 403；吊销后 401；last_used_at 更新。
-- [ ] 人类调用 Bot 需要 `bot.invoke`；有权限时 Bot 以自己的权限执行；没有则 403；调用审计含 caller/callee/result。
+- [x] 创建 Bot：Profile（Account+Role）、ModelKind、默认 provider/model、Harness（tools + instruction + permissions）。
+- [x] ModelKind 决定工作方式；默认模型可被调用参数覆盖；Session/Run 快照记录实际模型。
+- [x] Bot 有效权限 = Account 权限 ∩ Harness permissions；Role/Instruction 不产生授权。
+- [x] Bot 列表/详情显示：归属 Account、Profile、模型、工具、权限、状态、最近活动；有加载/空/错/权限不足/成功五态。
+- [x] Bot 归档后：新 Session 拒绝；已有 Session 保留可读；引用它的 TeamBot 标记 invalid 或明确降级。
+- [x] Bot API key：签发时只显示一次；只能以绑定 Bot 身份行动；错误 Bot 403；吊销后 401；last_used_at 更新。
+- [x] 人类调用 Bot 需要 `bot.invoke`；有权限时 Bot 以自己的权限执行；没有则 403；调用审计含 caller/callee/result。
 
 ### 2.4 TeamBot
 
-- [ ] 创建 TeamBot：mission 非空；roster 至少一个 captain；成员引用唯一；revision/content_hash 稳定。
-- [ ] TeamBot **没有** Account/Profile/权限；不能给它授权；权限判定永远落在成员 Bot 上。
-- [ ] roster 可引用同/跨 Account 的 Bot；能否放入/调用由 `bot.invoke` 决定；无专属跨账号规则。
-- [ ] 启动 TeamBot：队长 Bot 创建/调用成员；成员各自以自己的 Account/Harness 权限执行；TeamBot 不获得成员权限。
-- [ ] TeamBot 运行 DAG 可查看：Mission、Bot/Session 节点、create/fork/invoke 边、状态、成本/用量、失败原因。
-- [ ] 成员 Bot 被调用时是独立 Session（归属成员 Bot），父 Session 只收结果摘要；链路可追溯。
-- [ ] 跨账号成员被撤销 `bot.invoke` 后，下一次调用 403；正在跑的成员按其自身权限/生命周期收敛。
+- [x] 创建 TeamBot：mission 非空；roster 至少一个 captain；成员引用唯一；revision/content_hash 稳定。
+- [x] TeamBot **没有** Account/Profile/权限；不能给它授权；权限判定永远落在成员 Bot 上。
+- [x] roster 可引用同/跨 Account 的 Bot；能否放入/调用由 `bot.invoke` 决定；无专属跨账号规则。
+- [x] 启动 TeamBot：队长 Bot 创建/调用成员；成员各自以自己的 Account/Harness 权限执行；TeamBot 不获得成员权限。
+- [x] TeamBot 运行 DAG 可查看：Mission、Bot/Session 节点、create/fork/invoke 边、状态、成本/用量、失败原因。
+- [x] 成员 Bot 被调用时是独立 Session（归属成员 Bot），父 Session 只收结果摘要；链路可追溯。
+- [x] 跨账号成员被撤销 `bot.invoke` 后，下一次调用 403；正在跑的成员按其自身权限/生命周期收敛。
 
 ### 2.5 Session 归属与共享
 
-- [ ] 新 Session 必属于一个 Bot → Account；`created_by_account_id` 记录发起人。
-- [ ] 默认只有 Bot 的 Account 可见；同租户其他账号无关系时 403。
-- [ ] owner 可给 viewer/editor 关系；撤销后下一次读取/写入 403。
-- [ ] 团队 Mission 注入成员上下文；成员 Session 记录 team_bot_id/mission 快照。
-- [ ] 删除 Bot 不删除历史 Session；Bot 归档后 UI 明确显示“已归档，只读”。
+- [x] 新 Session 必属于一个 Bot → Account；`created_by_account_id` 记录发起人。
+- [x] 默认只有 Bot 的 Account 可见；同租户其他账号无关系时 403。
+- [x] owner 可给 viewer/editor 关系；撤销后下一次读取/写入 403。
+- [x] 团队 Mission 注入成员上下文；成员 Session 记录 team_bot_id/mission 快照。
+- [x] 删除 Bot 不删除历史 Session；Bot 归档后 UI 明确显示“已归档，只读”。
 
 ### 2.6 管家 Bot（关键验收场景）
 
-- [ ] 预置一个管家 Bot，持有 `bot.create`、`team_bot.manage`、`permission.manage`、`account.read`。
-- [ ] 用户对它说“帮我组建客服团队并跑起来”；它创建成员 Bot、TeamBot（Mission+Roster）、权限组并启动。
-- [ ] 全程无 Bot 专属代码路径；每一步都受 `grant ⊆ own` 约束；越权步骤 403 并解释缺什么权限。
-- [ ] 运行后在 DAG/审计中能看到：谁创建了哪个 Bot、哪个 TeamBot、授了哪些权限、成员跑了什么、花了多少。
+- [x] 预置一个管家 Bot，持有 `bot.create`、`team_bot.manage`、`permission.manage`、`account.read`。
+- [x] 用户对它说“帮我组建客服团队并跑起来”；它创建成员 Bot、TeamBot（Mission+Roster）、权限组并启动。
+- [x] 全程无 Bot 专属代码路径；每一步都受 `grant ⊆ own` 约束；越权步骤 403 并解释缺什么权限。
+- [x] 运行后在 DAG/审计中能看到：谁创建了哪个 Bot、哪个 TeamBot、授了哪些权限、成员跑了什么、花了多少。
 
 ### 2.7 零兼容
 
-- [ ] `/v1/agents`、`/v1/teams`、旧 CLI `keel agent/team` 返回 404/未知命令，无重定向/别名。
-- [ ] 旧 `agents`/`agent_teams`/旧 `api_keys` schema 启动即拒绝，输出重建指令；不写旧格式读取/迁移代码。
-- [ ] 旧数据库清空重建；不保留兼容视图、双读、迁移垫片。
-- [ ] 文档/UI/错误文案不再出现面向用户的 `Agent`/`TeamAgent`（PI 技术包例外仅在架构文档说明）。
+- [x] `/v1/agents`、`/v1/teams`、旧 CLI `keel agent/team` 返回 404/未知命令，无重定向/别名。
+- [x] 旧 `agents`/`agent_teams`/旧 `api_keys` schema 启动即拒绝，输出重建指令；不写旧格式读取/迁移代码。
+- [x] 旧数据库清空重建；不保留兼容视图、双读、迁移垫片。
+- [x] 文档/UI/错误文案不再出现面向用户的 `Agent`/`TeamAgent`（PI 技术包例外仅在架构文档说明）。
 
 ## 3. UI/UX 验收（产品级）
 
 > Owner 2026-11-21：**旧界面视觉不满意，旧 UI 不是基线**。这次必须用 OpenDesign 从产品目标重新做，
 > 不是换皮。设计方向未选定前，不进入 UI 实现。
 
-- [ ] OpenDesign 至少给出 **2–3 个真正不同的方向**（不同 engine，不是同布局换色）+ 一个 seed challenger；
+- [x] OpenDesign 至少给出 **2–3 个真正不同的方向**（不同 engine，不是同布局换色）+ 一个 seed challenger；
       每个方向注明 desktop/pad/mobile 行为；独立 fresh-context 视觉评审后由 Owner/评审选定。
-- [ ] 信息架构：登录/引导 → 账号 → 权限组 → Bot → TeamBot → TeamRun/DAG → 审计；每页有目的陈述与主操作。
-- [ ] 五态齐全：加载（骨架/可取消）、空（解释+下一步）、错（人话+重试+错误码）、权限不足（缺什么+如何获取）、成功（主次信息+下一步）。
-- [ ] 渐进披露：高频操作在首屏；低频进 Menu/Dialog/Sheet；不把裸 JSON/裸表丢给用户。
-- [ ] 权限感知：无权限的导航/按钮隐藏或禁用并解释；直接访问 403 页面；不是白屏。
-- [ ] 四档 viewport：375/390/768/1440；移动端可滚动可达，关键操作不被遮挡；四档截图。
-- [ ] 设计语言：shadcn 官方组件 + solid-glass + 主题令牌 + lucide 单色；禁手写仿制；无未定义令牌。
-- [ ] 文案：人话、单一语言；不出现 fixture/test/内部 id/长哈希。
-- [ ] 对比度：正文 ≥4.5:1；图标/边框 ≥3:1；焦点环可见且全局单一定义。
-- [ ] 触控目标 ≥44px；单行标签不折行；容器按内容收缩。
+- [x] 信息架构：登录/引导 → 账号 → 权限组 → Bot → TeamBot → TeamRun/DAG → 审计；每页有目的陈述与主操作。
+- [x] 五态齐全：加载（骨架/可取消）、空（解释+下一步）、错（人话+重试+错误码）、权限不足（缺什么+如何获取）、成功（主次信息+下一步）。
+- [x] 渐进披露：高频操作在首屏；低频进 Menu/Dialog/Sheet；不把裸 JSON/裸表丢给用户。
+- [x] 权限感知：无权限的导航/按钮隐藏或禁用并解释；直接访问 403 页面；不是白屏。
+- [x] 四档 viewport：375/390/768/1440；移动端可滚动可达，关键操作不被遮挡；四档截图。
+- [x] 设计语言：shadcn 官方组件 + solid-glass + 主题令牌 + lucide 单色；禁手写仿制；无未定义令牌。
+- [x] 文案：人话、单一语言；不出现 fixture/test/内部 id/长哈希。
+- [x] 对比度：正文 ≥4.5:1；图标/边框 ≥3:1；焦点环可见且全局单一定义。
+- [x] 触控目标 ≥44px；单行标签不折行；容器按内容收缩。
 - [ ] 实时性：账号/权限/Bot 状态变化在 2s 内反映（SSE/事件），不要求手动刷新。
-- [ ] OpenDesign 产出：设计方向 + 信息架构 + 关键页面原型 + 五态矩阵；评审选定后才实现。
+- [x] OpenDesign 产出：设计方向 + 信息架构 + 关键页面原型 + 五态矩阵；评审选定后才实现。
 
 ## 4. 三轴对抗审查（独立子代理，实现方不得兼任）
 
 ### A 安全红队（P0/P1）
 
-- [ ] 跨租户读取账号/Bot/TeamBot/Session/权限/审计 → 全部 403/404。
-- [ ] 低权限账号调用高权限 Bot：无 `bot.invoke` → 403；有 → 允许，且审计；不能借 Bot 改权限。
-- [ ] 伪造 `X-Tenant-ID`/`X-Account-ID`/`X-Bot-ID` → 被服务端覆盖/拒绝。
-- [ ] CSRF：无 token 的写请求 403；跨站 cookie 不生效。
-- [ ] 会话固定/重放：旧 cookie、登出后 cookie、改密前 cookie → 401。
-- [ ] Bot key：错误 Bot、吊销 key、跨租户 key → 401/403；key 不出现在日志/响应。
-- [ ] `grant ⊆ own` 绕过：直接 API、组嵌套、scope 提升、超管提升 → 全部拒绝。
-- [ ] ReBAC 绕过：无关系读/写、伪造 relation、删除后缓存仍放行 → 全部拒绝。
-- [ ] 旧路由/旧 schema/旧凭证 → 404/401/启动拒绝。
-- [ ] 登录限速/锁定可被绕过（X-Forwarded-For 伪造等）→ 不能绕过。
+- [x] 跨租户读取账号/Bot/TeamBot/Session/权限/审计 → 全部 403/404。
+- [x] 低权限账号调用高权限 Bot：无 `bot.invoke` → 403；有 → 允许，且审计；不能借 Bot 改权限。
+- [x] 伪造 `X-Tenant-ID`/`X-Account-ID`/`X-Bot-ID` → 被服务端覆盖/拒绝。
+- [x] CSRF：无 token 的写请求 403；跨站 cookie 不生效。
+- [x] 会话固定/重放：旧 cookie、登出后 cookie、改密前 cookie → 401。
+- [x] Bot key：错误 Bot、吊销 key、跨租户 key → 401/403；key 不出现在日志/响应。
+- [x] `grant ⊆ own` 绕过：直接 API、组嵌套、scope 提升、超管提升 → 全部拒绝。
+- [x] ReBAC 绕过：无关系读/写、伪造 relation、删除后缓存仍放行 → 全部拒绝。
+- [x] 旧路由/旧 schema/旧凭证 → 404/401/启动拒绝。
+- [x] 登录限速/锁定可被绕过（X-Forwarded-For 伪造等）→ 不能绕过。
 
 ### B 功能与链路红队（P0/P1）
 
-- [ ] 真实角色旅程：超管 bootstrap → 建组 → 建账号 → 建 Bot → 发 key → 建 TeamBot → 启动 → 成员产出 → 队长汇总 → 审计/DAG 可见。
-- [ ] 每个按钮/表单真实有效；“toast 成功但数据没变”判 P0。
-- [ ] 五态在真实数据下可复现；空态有引导；权限不足有解释。
-- [ ] 上游产出下游可见：Bot 创建 → TeamBot roster 可选；权限组变更 → 账号有效权限变化；Session 共享 → 对方可见。
+- [x] 真实角色旅程：超管 bootstrap → 建组 → 建账号 → 建 Bot → 发 key → 建 TeamBot → 启动 → 成员产出 → 队长汇总 → 审计/DAG 可见。
+- [x] 每个按钮/表单真实有效；“toast 成功但数据没变”判 P0。
+- [x] 五态在真实数据下可复现；空态有引导；权限不足有解释。
+- [x] 上游产出下游可见：Bot 创建 → TeamBot roster 可选；权限组变更 → 账号有效权限变化；Session 共享 → 对方可见。
 - [ ] 实时性：权限撤销/账号禁用/Bot 归档在 2s 内反映到 UI 与下一次调用。
-- [ ] 管家 Bot 场景完整跑通。
-- [ ] 审计/DAG 与真实操作逐条对得上；不丢边、不重复、不伪造。
+- [x] 管家 Bot 场景完整跑通。
+- [x] 审计/DAG 与真实操作逐条对得上；不丢边、不重复、不伪造。
 
 ### C 视觉与设备红队（P0/P1）
 
-- [ ] 375/390/768/1440 四档截图；页面可滚动、无横向溢出、关键操作可达。
-- [ ] 五态视觉均有设计；不是“只有成功态”。
-- [ ] 材质/对比度/字号阶梯/间距档位/触控目标/焦点环达标。
-- [ ] 单行标签不折行；表格/卡片不出现半个字形；溢出有交代。
-- [ ] 权限不足页不是白屏；有缺什么/如何获取。
-- [ ] 视觉层级：主操作唯一、次操作可辨；不是“所有按钮一样重”。
+- [x] 375/390/768/1440 四档截图；页面可滚动、无横向溢出、关键操作可达。
+- [x] 五态视觉均有设计；不是“只有成功态”。
+- [x] 材质/对比度/字号阶梯/间距档位/触控目标/焦点环达标。
+- [x] 单行标签不折行；表格/卡片不出现半个字形；溢出有交代。
+- [x] 权限不足页不是白屏；有缺什么/如何获取。
+- [x] 视觉层级：主操作唯一、次操作可辨；不是“所有按钮一样重”。
 
 ## 5. E2E 报告（脚本生成，禁手写）
 
@@ -153,14 +153,14 @@
 
 ## 6. 工程门
 
-- [ ] `go build ./...`、`go vet ./...`。
-- [ ] `go test -p 1 -count=1 ./...`（仅导出 `KEEL_TEST_DSN`，独立测试库）。
-- [ ] `scripts/conformance.sh`。
-- [ ] `nsh check`、`nsh test --target tui`、`nsh build --target web`。
-- [ ] `openspec validate keel-bot-identity-access --strict`。
-- [ ] 权限覆盖率门（路由/工具/CLI/UI 动作清单快照）。
-- [ ] 架构测试：kernel 不 import access/accounts/bots。
-- [ ] 无孤儿进程/端口/临时 DB；测试结束回收并留证。
+- [x] `go build ./...`、`go vet ./...`。
+- [x] `go test -p 1 -count=1 ./...`（仅导出 `KEEL_TEST_DSN`，独立测试库）。
+- [x] `scripts/conformance.sh`。
+- [x] `nsh check`、`nsh test --target tui`、`nsh build --target web`。
+- [x] `openspec validate keel-bot-identity-access --strict`。
+- [x] 权限覆盖率门（路由/工具/CLI/UI 动作清单快照）。
+- [x] 架构测试：kernel 不 import access/accounts/bots。
+- [x] 无孤儿进程/端口/临时 DB；测试结束回收并留证。
 
 ## 7. 完成定义（DoD）
 
