@@ -22,6 +22,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Icon, type IconName } from "../../icons";
 import { alpha, color, radius, space, typeScale, weight } from "../tokens";
+import { glassPrimary } from "./styles";
 
 export type BadgeVariant =
   | "default"
@@ -64,6 +65,43 @@ const badgeTint = (variant: BadgeVariant): { face: string; ink: string; border: 
   }
 };
 
+/** The glass finish of one badge kind: the ink's solid pane, clear glass, an
+ * empty frame, or glass tinted the colour of its meaning (vendor
+ * `[data-slot="badge"]` rules). */
+const badgeFinish = (variant: BadgeVariant): StyleProp<ViewStyle> => {
+  switch (variant) {
+    case "default":
+      return glassPrimary();
+    case "secondary":
+      return {
+        backgroundColor: color.secondary,
+        borderColor: color.glassEdge,
+        boxShadow: `inset 0 1px 0 ${color.glassControlRim}, inset 0 0 0 1px ${color.glassEdge}`,
+      };
+    case "outline":
+      return {
+        backgroundColor: "transparent",
+        borderColor: color.border,
+        boxShadow: `inset 0 1px 0 ${color.glassControlRim}, inset 0 0 0 1px ${color.border}`,
+      };
+    case "destructive":
+      return {
+        boxShadow: `inset 0 1px 0 ${alpha(color.destructive, 0.28)}, inset 0 0 0 1px ${alpha(color.destructive, 0.16)}`,
+      };
+    case "success":
+    case "warning":
+    case "info": {
+      const hue = variant === "success" ? color.success : variant === "warning" ? color.warning : color.info;
+      return {
+        boxShadow: `inset 0 1px 0 ${alpha(hue, 0.3)}, inset 0 0 0 1px ${alpha(hue, 0.24)}`,
+      };
+    }
+    case "ghost":
+    default:
+      return { backgroundColor: "transparent", borderColor: "transparent" };
+  }
+};
+
 export function Badge(props: {
   variant?: BadgeVariant;
   label?: string;
@@ -101,6 +139,7 @@ export function Badge(props: {
           backgroundColor: tint().face,
           borderWidth: 1,
           borderColor: tint().border,
+          ...badgeFinish(variant()),
           ...(props.truncate === true ? { flexShrink: 1, minWidth: 0 } : null),
         },
         props.disabled ? { opacity: 0.5 } : null,

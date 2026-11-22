@@ -16,6 +16,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { color, radius, space, typeScale, weight } from "../tokens";
+import { glassControl } from "./styles";
 
 /** One keycap. */
 export function KbdCap(props: { label: string; style?: StyleProp<ViewStyle> }) {
@@ -29,9 +30,7 @@ export function KbdCap(props: { label: string; style?: StyleProp<ViewStyle> }) {
           alignItems: "center",
           justifyContent: "center",
           borderRadius: radius.xs,
-          borderWidth: 1,
-          borderColor: color.border,
-          backgroundColor: color.muted,
+          ...glassControl(),
         },
         props.style ?? null,
       ]}

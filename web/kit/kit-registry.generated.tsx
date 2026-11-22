@@ -8,167 +8,192 @@
 // a module no manifest entry needs cannot break the gallery's build.
 // kit:      web/src/ui/kit
 // barrel:   ../src/ui/kit/index (public exit)
-// exported: 167 (imported 67, unlisted 100)
-// composite sub-components: 28
+// exported: 192 (imported 78, unlisted 114)
+// composite sub-components: 36
 // defined in more than one module (the shortest path wins, others listed):
 //   Accordion: also in ../src/ui/kit/components/accordion
 //   AccordionItem: also in ../src/ui/kit/components/accordion
+//   Alert: also in ../src/ui/kit/components/alert
+//   AlertDescription: also in ../src/ui/kit/components/alert
 //   AlertDialog: also in ../src/ui/kit/components/alert-dialog
+//   AlertTitle: also in ../src/ui/kit/components/alert
 //   Avatar: also in ../src/ui/kit/components/avatar
 //   Badge: also in ../src/ui/kit/components/badge
 //   Breadcrumb: also in ../src/ui/kit/components/breadcrumb
 //   BreadcrumbItem: also in ../src/ui/kit/components/breadcrumb
 //   BreadcrumbLink: also in ../src/ui/kit/components/breadcrumb
 //   BreadcrumbList: also in ../src/ui/kit/components/breadcrumb
-//   BreadcrumbPage: also in ../src/ui/kit/components/breadcrumb
-//   BreadcrumbSeparator: also in ../src/ui/kit/components/breadcrumb
-//   Button: also in ../src/ui/kit/components/button
-//   … and 43 more
+//   … and 54 more
 
 import { Accordion as kit0 } from "../src/ui/kit/index";
 import { AccordionItem as kit1 } from "../src/ui/kit/index";
-import { AlertDialog as kit2 } from "../src/ui/kit/index";
-import { Avatar as kit3 } from "../src/ui/kit/index";
-import { Badge as kit4 } from "../src/ui/kit/index";
-import { Breadcrumb as kit5 } from "../src/ui/kit/index";
-import { BreadcrumbItem as kit6 } from "../src/ui/kit/index";
-import { BreadcrumbLink as kit7 } from "../src/ui/kit/index";
-import { BreadcrumbList as kit8 } from "../src/ui/kit/index";
-import { BreadcrumbPage as kit9 } from "../src/ui/kit/index";
-import { BreadcrumbSeparator as kit10 } from "../src/ui/kit/index";
-import { Button as kit11 } from "../src/ui/kit/index";
-import { Card as kit12 } from "../src/ui/kit/index";
-import { CardContent as kit13 } from "../src/ui/kit/index";
-import { CardFooter as kit14 } from "../src/ui/kit/index";
-import { CardHeader as kit15 } from "../src/ui/kit/index";
-import { Checkbox as kit16 } from "../src/ui/kit/index";
-import { Collapsible as kit17 } from "../src/ui/kit/index";
-import { CollapsibleTrigger as kit18 } from "../src/ui/kit/index";
-import { Combobox as kit19 } from "../src/ui/kit/index";
-import { Command as kit20 } from "../src/ui/kit/index";
-import { ComposerDock as kit21 } from "../src/ui/kit/layout/composer-dock"; // direct (not re-exported by the barrel)
-import { ContextMenu as kit22 } from "../src/ui/kit/index";
-import { ContextMenuItem as kit23 } from "../src/ui/kit/components/context-menu"; // direct (not re-exported by the barrel)
-import { ConversationColumn as kit24 } from "../src/ui/kit/layout/conversation-column"; // direct (not re-exported by the barrel)
-import { ConversationStatusRail as kit25 } from "../src/ui/kit/layout/conversation-column"; // direct (not re-exported by the barrel)
-import { Dialog as kit26 } from "../src/ui/kit/index";
-import { DropdownMenu as kit27 } from "../src/ui/kit/index";
-import { DropdownMenuItem as kit28 } from "../src/ui/kit/index";
-import { DropdownMenuLabel as kit29 } from "../src/ui/kit/index";
-import { DropdownMenuSeparator as kit30 } from "../src/ui/kit/components/dropdown-menu"; // direct (not re-exported by the barrel)
-import { Empty as kit31 } from "../src/ui/kit/index";
-import { EmptyContent as kit32 } from "../src/ui/kit/index";
-import { EmptyDescription as kit33 } from "../src/ui/kit/index";
-import { EmptyMedia as kit34 } from "../src/ui/kit/index";
-import { EmptyTitle as kit35 } from "../src/ui/kit/index";
-import { Field as kit36 } from "../src/ui/kit/index";
-import { Input as kit37 } from "../src/ui/kit/index";
-import { Kbd as kit38 } from "../src/ui/kit/index";
-import { Label as kit39 } from "../src/ui/kit/index";
-import { Popover as kit40 } from "../src/ui/kit/index";
-import { RadioGroup as kit41 } from "../src/ui/kit/index";
-import { ResizablePanel as kit42 } from "../src/ui/kit/layout/resizable"; // direct (not re-exported by the barrel)
-import { ResizablePanelGroup as kit43 } from "../src/ui/kit/layout/resizable"; // direct (not re-exported by the barrel)
-import { ScrollArea as kit44 } from "../src/ui/kit/index";
-import { Select as kit45 } from "../src/ui/kit/index";
-import { Separator as kit46 } from "../src/ui/kit/index";
-import { SettingsShell as kit47 } from "../src/ui/kit/layout/settings-shell"; // direct (not re-exported by the barrel)
-import { Sheet as kit48 } from "../src/ui/kit/index";
-import { Sidebar as kit49 } from "../src/ui/kit/layout/sidebar"; // direct (not re-exported by the barrel)
-import { SidePane as kit50 } from "../src/ui/kit/layout/workspace-shell"; // direct (not re-exported by the barrel)
-import { Skeleton as kit51 } from "../src/ui/kit/index";
-import { Spinner as kit52 } from "../src/ui/kit/index";
-import { Switch as kit53 } from "../src/ui/kit/index";
-import { Tab as kit54 } from "../src/ui/kit/index";
-import { Table as kit55 } from "../src/ui/kit/index";
-import { TableBody as kit56 } from "../src/ui/kit/components/table"; // direct (not re-exported by the barrel)
-import { TableBodyRow as kit57 } from "../src/ui/kit/index";
-import { TableHeaderRow as kit58 } from "../src/ui/kit/index";
-import { Tabs as kit59 } from "../src/ui/kit/index";
-import { TabsContent as kit60 } from "../src/ui/kit/index";
-import { Td as kit61 } from "../src/ui/kit/index";
-import { Textarea as kit62 } from "../src/ui/kit/index";
-import { Th as kit63 } from "../src/ui/kit/index";
-import { Toast as kit64 } from "../src/ui/kit/index";
-import { Tooltip as kit65 } from "../src/ui/kit/index";
-import { WorkspaceShell as kit66 } from "../src/ui/kit/layout/workspace-shell"; // direct (not re-exported by the barrel)
+import { Alert as kit2 } from "../src/ui/kit/index";
+import { AlertDescription as kit3 } from "../src/ui/kit/index";
+import { AlertDialog as kit4 } from "../src/ui/kit/index";
+import { AlertTitle as kit5 } from "../src/ui/kit/index";
+import { Avatar as kit6 } from "../src/ui/kit/index";
+import { Badge as kit7 } from "../src/ui/kit/index";
+import { Breadcrumb as kit8 } from "../src/ui/kit/index";
+import { BreadcrumbItem as kit9 } from "../src/ui/kit/index";
+import { BreadcrumbLink as kit10 } from "../src/ui/kit/index";
+import { BreadcrumbList as kit11 } from "../src/ui/kit/index";
+import { BreadcrumbPage as kit12 } from "../src/ui/kit/index";
+import { BreadcrumbSeparator as kit13 } from "../src/ui/kit/index";
+import { Button as kit14 } from "../src/ui/kit/index";
+import { Card as kit15 } from "../src/ui/kit/index";
+import { CardContent as kit16 } from "../src/ui/kit/index";
+import { CardFooter as kit17 } from "../src/ui/kit/index";
+import { CardHeader as kit18 } from "../src/ui/kit/index";
+import { Checkbox as kit19 } from "../src/ui/kit/index";
+import { Collapsible as kit20 } from "../src/ui/kit/index";
+import { CollapsibleTrigger as kit21 } from "../src/ui/kit/index";
+import { Combobox as kit22 } from "../src/ui/kit/index";
+import { Command as kit23 } from "../src/ui/kit/index";
+import { ComposerDock as kit24 } from "../src/ui/kit/layout/composer-dock"; // direct (not re-exported by the barrel)
+import { ContextMenu as kit25 } from "../src/ui/kit/index";
+import { ContextMenuItem as kit26 } from "../src/ui/kit/components/context-menu"; // direct (not re-exported by the barrel)
+import { ConversationColumn as kit27 } from "../src/ui/kit/layout/conversation-column"; // direct (not re-exported by the barrel)
+import { ConversationStatusRail as kit28 } from "../src/ui/kit/layout/conversation-column"; // direct (not re-exported by the barrel)
+import { Dialog as kit29 } from "../src/ui/kit/index";
+import { DropdownMenu as kit30 } from "../src/ui/kit/index";
+import { DropdownMenuItem as kit31 } from "../src/ui/kit/index";
+import { DropdownMenuLabel as kit32 } from "../src/ui/kit/index";
+import { DropdownMenuSeparator as kit33 } from "../src/ui/kit/components/dropdown-menu"; // direct (not re-exported by the barrel)
+import { Empty as kit34 } from "../src/ui/kit/index";
+import { EmptyContent as kit35 } from "../src/ui/kit/index";
+import { EmptyDescription as kit36 } from "../src/ui/kit/index";
+import { EmptyMedia as kit37 } from "../src/ui/kit/index";
+import { EmptyTitle as kit38 } from "../src/ui/kit/index";
+import { Field as kit39 } from "../src/ui/kit/index";
+import { Input as kit40 } from "../src/ui/kit/index";
+import { Kbd as kit41 } from "../src/ui/kit/index";
+import { Label as kit42 } from "../src/ui/kit/index";
+import { Pagination as kit43 } from "../src/ui/kit/index";
+import { PaginationContent as kit44 } from "../src/ui/kit/index";
+import { PaginationEllipsis as kit45 } from "../src/ui/kit/index";
+import { PaginationItem as kit46 } from "../src/ui/kit/index";
+import { PaginationLink as kit47 } from "../src/ui/kit/index";
+import { PaginationNext as kit48 } from "../src/ui/kit/index";
+import { PaginationPrevious as kit49 } from "../src/ui/kit/index";
+import { Popover as kit50 } from "../src/ui/kit/index";
+import { Progress as kit51 } from "../src/ui/kit/index";
+import { RadioGroup as kit52 } from "../src/ui/kit/index";
+import { ResizablePanel as kit53 } from "../src/ui/kit/layout/resizable"; // direct (not re-exported by the barrel)
+import { ResizablePanelGroup as kit54 } from "../src/ui/kit/layout/resizable"; // direct (not re-exported by the barrel)
+import { ScrollArea as kit55 } from "../src/ui/kit/index";
+import { Select as kit56 } from "../src/ui/kit/index";
+import { Separator as kit57 } from "../src/ui/kit/index";
+import { SettingsShell as kit58 } from "../src/ui/kit/layout/settings-shell"; // direct (not re-exported by the barrel)
+import { Sheet as kit59 } from "../src/ui/kit/index";
+import { Sidebar as kit60 } from "../src/ui/kit/layout/sidebar"; // direct (not re-exported by the barrel)
+import { SidePane as kit61 } from "../src/ui/kit/layout/workspace-shell"; // direct (not re-exported by the barrel)
+import { Skeleton as kit62 } from "../src/ui/kit/index";
+import { Spinner as kit63 } from "../src/ui/kit/index";
+import { Switch as kit64 } from "../src/ui/kit/index";
+import { Tab as kit65 } from "../src/ui/kit/index";
+import { Table as kit66 } from "../src/ui/kit/index";
+import { TableBody as kit67 } from "../src/ui/kit/components/table"; // direct (not re-exported by the barrel)
+import { TableBodyRow as kit68 } from "../src/ui/kit/index";
+import { TableHeaderRow as kit69 } from "../src/ui/kit/index";
+import { Tabs as kit70 } from "../src/ui/kit/index";
+import { TabsContent as kit71 } from "../src/ui/kit/index";
+import { Td as kit72 } from "../src/ui/kit/index";
+import { Textarea as kit73 } from "../src/ui/kit/index";
+import { Th as kit74 } from "../src/ui/kit/index";
+import { Toast as kit75 } from "../src/ui/kit/index";
+import { Tooltip as kit76 } from "../src/ui/kit/index";
+import { WorkspaceShell as kit77 } from "../src/ui/kit/layout/workspace-shell"; // direct (not re-exported by the barrel)
 
 /** name -> the export, for the gallery's dynamic render. */
 export const kitComponents: Record<string, unknown> = {
   "Accordion": kit0,
   "AccordionItem": kit1,
-  "AlertDialog": kit2,
-  "Avatar": kit3,
-  "Badge": kit4,
-  "Breadcrumb": kit5,
-  "BreadcrumbItem": kit6,
-  "BreadcrumbLink": kit7,
-  "BreadcrumbList": kit8,
-  "BreadcrumbPage": kit9,
-  "BreadcrumbSeparator": kit10,
-  "Button": kit11,
-  "Card": kit12,
-  "CardContent": kit13,
-  "CardFooter": kit14,
-  "CardHeader": kit15,
-  "Checkbox": kit16,
-  "Collapsible": kit17,
-  "CollapsibleTrigger": kit18,
-  "Combobox": kit19,
-  "Command": kit20,
-  "ComposerDock": kit21,
-  "ContextMenu": kit22,
-  "ContextMenuItem": kit23,
-  "ConversationColumn": kit24,
-  "ConversationStatusRail": kit25,
-  "Dialog": kit26,
-  "DropdownMenu": kit27,
-  "DropdownMenuItem": kit28,
-  "DropdownMenuLabel": kit29,
-  "DropdownMenuSeparator": kit30,
-  "Empty": kit31,
-  "EmptyContent": kit32,
-  "EmptyDescription": kit33,
-  "EmptyMedia": kit34,
-  "EmptyTitle": kit35,
-  "Field": kit36,
-  "Input": kit37,
-  "Kbd": kit38,
-  "Label": kit39,
-  "Popover": kit40,
-  "RadioGroup": kit41,
-  "ResizablePanel": kit42,
-  "ResizablePanelGroup": kit43,
-  "ScrollArea": kit44,
-  "Select": kit45,
-  "Separator": kit46,
-  "SettingsShell": kit47,
-  "Sheet": kit48,
-  "Sidebar": kit49,
-  "SidePane": kit50,
-  "Skeleton": kit51,
-  "Spinner": kit52,
-  "Switch": kit53,
-  "Tab": kit54,
-  "Table": kit55,
-  "TableBody": kit56,
-  "TableBodyRow": kit57,
-  "TableHeaderRow": kit58,
-  "Tabs": kit59,
-  "TabsContent": kit60,
-  "Td": kit61,
-  "Textarea": kit62,
-  "Th": kit63,
-  "Toast": kit64,
-  "Tooltip": kit65,
-  "WorkspaceShell": kit66,
+  "Alert": kit2,
+  "AlertDescription": kit3,
+  "AlertDialog": kit4,
+  "AlertTitle": kit5,
+  "Avatar": kit6,
+  "Badge": kit7,
+  "Breadcrumb": kit8,
+  "BreadcrumbItem": kit9,
+  "BreadcrumbLink": kit10,
+  "BreadcrumbList": kit11,
+  "BreadcrumbPage": kit12,
+  "BreadcrumbSeparator": kit13,
+  "Button": kit14,
+  "Card": kit15,
+  "CardContent": kit16,
+  "CardFooter": kit17,
+  "CardHeader": kit18,
+  "Checkbox": kit19,
+  "Collapsible": kit20,
+  "CollapsibleTrigger": kit21,
+  "Combobox": kit22,
+  "Command": kit23,
+  "ComposerDock": kit24,
+  "ContextMenu": kit25,
+  "ContextMenuItem": kit26,
+  "ConversationColumn": kit27,
+  "ConversationStatusRail": kit28,
+  "Dialog": kit29,
+  "DropdownMenu": kit30,
+  "DropdownMenuItem": kit31,
+  "DropdownMenuLabel": kit32,
+  "DropdownMenuSeparator": kit33,
+  "Empty": kit34,
+  "EmptyContent": kit35,
+  "EmptyDescription": kit36,
+  "EmptyMedia": kit37,
+  "EmptyTitle": kit38,
+  "Field": kit39,
+  "Input": kit40,
+  "Kbd": kit41,
+  "Label": kit42,
+  "Pagination": kit43,
+  "PaginationContent": kit44,
+  "PaginationEllipsis": kit45,
+  "PaginationItem": kit46,
+  "PaginationLink": kit47,
+  "PaginationNext": kit48,
+  "PaginationPrevious": kit49,
+  "Popover": kit50,
+  "Progress": kit51,
+  "RadioGroup": kit52,
+  "ResizablePanel": kit53,
+  "ResizablePanelGroup": kit54,
+  "ScrollArea": kit55,
+  "Select": kit56,
+  "Separator": kit57,
+  "SettingsShell": kit58,
+  "Sheet": kit59,
+  "Sidebar": kit60,
+  "SidePane": kit61,
+  "Skeleton": kit62,
+  "Spinner": kit63,
+  "Switch": kit64,
+  "Tab": kit65,
+  "Table": kit66,
+  "TableBody": kit67,
+  "TableBodyRow": kit68,
+  "TableHeaderRow": kit69,
+  "Tabs": kit70,
+  "TabsContent": kit71,
+  "Td": kit72,
+  "Textarea": kit73,
+  "Th": kit74,
+  "Toast": kit75,
+  "Tooltip": kit76,
+  "WorkspaceShell": kit77,
 };
 
 /** name -> the module it came from (shown in the gallery's source line). */
 export const kitComponentSources: Record<string, string> = {
   "Accordion": "../src/ui/kit/index",
   "AccordionItem": "../src/ui/kit/index",
+  "Alert": "../src/ui/kit/index",
+  "AlertDescription": "../src/ui/kit/index",
   "AlertDialog": "../src/ui/kit/index",
+  "AlertTitle": "../src/ui/kit/index",
   "Avatar": "../src/ui/kit/index",
   "Badge": "../src/ui/kit/index",
   "Breadcrumb": "../src/ui/kit/index",
@@ -206,7 +231,15 @@ export const kitComponentSources: Record<string, string> = {
   "Input": "../src/ui/kit/index",
   "Kbd": "../src/ui/kit/index",
   "Label": "../src/ui/kit/index",
+  "Pagination": "../src/ui/kit/index",
+  "PaginationContent": "../src/ui/kit/index",
+  "PaginationEllipsis": "../src/ui/kit/index",
+  "PaginationItem": "../src/ui/kit/index",
+  "PaginationLink": "../src/ui/kit/index",
+  "PaginationNext": "../src/ui/kit/index",
+  "PaginationPrevious": "../src/ui/kit/index",
   "Popover": "../src/ui/kit/index",
+  "Progress": "../src/ui/kit/index",
   "RadioGroup": "../src/ui/kit/index",
   "ResizablePanel": "../src/ui/kit/layout/resizable",
   "ResizablePanelGroup": "../src/ui/kit/layout/resizable",
@@ -239,7 +272,10 @@ export const kitComponentSources: Record<string, string> = {
 export const kitComponentVia: Record<string, string> = {
   "Accordion": "barrel",
   "AccordionItem": "barrel",
+  "Alert": "barrel",
+  "AlertDescription": "barrel",
   "AlertDialog": "barrel",
+  "AlertTitle": "barrel",
   "Avatar": "barrel",
   "Badge": "barrel",
   "Breadcrumb": "barrel",
@@ -277,7 +313,15 @@ export const kitComponentVia: Record<string, string> = {
   "Input": "barrel",
   "Kbd": "barrel",
   "Label": "barrel",
+  "Pagination": "barrel",
+  "PaginationContent": "barrel",
+  "PaginationEllipsis": "barrel",
+  "PaginationItem": "barrel",
+  "PaginationLink": "barrel",
+  "PaginationNext": "barrel",
+  "PaginationPrevious": "barrel",
   "Popover": "barrel",
+  "Progress": "barrel",
   "RadioGroup": "barrel",
   "ResizablePanel": "direct",
   "ResizablePanelGroup": "direct",
@@ -315,7 +359,10 @@ export const kitDetected: string[] = [
   "AccordionItem",
   "AccordionPanel",
   "AccordionTrigger",
+  "Alert",
+  "AlertDescription",
   "AlertDialog",
+  "AlertTitle",
   "alpha",
   "autoCollapseDecision",
   "Avatar",
@@ -390,6 +437,20 @@ export const kitDetected: string[] = [
   "fieldShell",
   "focusRing",
   "font",
+  "GLASS_BLUR",
+  "GLASS_BLUR_CONTROL",
+  "glassCard",
+  "glassControl",
+  "glassField",
+  "glassGroove",
+  "glassKnob",
+  "glassPanel",
+  "glassPopover",
+  "glassPrimary",
+  "glassState",
+  "glassStateFill",
+  "glassTabsActive",
+  "glassTabsTray",
   "hairline",
   "IconButton",
   "iconSize",
@@ -403,8 +464,16 @@ export const kitDetected: string[] = [
   "lineHeight",
   "menuRow",
   "motion",
+  "Pagination",
+  "PaginationContent",
+  "PaginationEllipsis",
+  "PaginationItem",
+  "PaginationLink",
+  "PaginationNext",
+  "PaginationPrevious",
   "Popover",
   "popupSurface",
+  "Progress",
   "RadioGroup",
   "radius",
   "readLegacySidebarWidthRatio",
@@ -524,6 +593,20 @@ export const kitUnlisted: string[] = [
   "fieldShell",
   "focusRing",
   "font",
+  "GLASS_BLUR",
+  "GLASS_BLUR_CONTROL",
+  "glassCard",
+  "glassControl",
+  "glassField",
+  "glassGroove",
+  "glassKnob",
+  "glassPanel",
+  "glassPopover",
+  "glassPrimary",
+  "glassState",
+  "glassStateFill",
+  "glassTabsActive",
+  "glassTabsTray",
   "hairline",
   "IconButton",
   "iconSize",
@@ -586,6 +669,8 @@ export const kitUnlisted: string[] = [
 /** The sub-components the manifest's composite demos ask for. */
 export const kitSubComponents: string[] = [
   "AccordionItem",
+  "AlertDescription",
+  "AlertTitle",
   "BreadcrumbItem",
   "BreadcrumbLink",
   "BreadcrumbList",
@@ -604,6 +689,12 @@ export const kitSubComponents: string[] = [
   "EmptyDescription",
   "EmptyMedia",
   "EmptyTitle",
+  "PaginationContent",
+  "PaginationEllipsis",
+  "PaginationItem",
+  "PaginationLink",
+  "PaginationNext",
+  "PaginationPrevious",
   "ResizablePanel",
   "Tab",
   "Table",

@@ -34,7 +34,7 @@ import { Text, View } from "nsh";
 import { Menu as NativeMenu, MenuItem as NativeMenuItem, MenuSeparator, type OpenChangeReason } from "nsh/base";
 import { Icon, type IconName } from "../../icons";
 import { color, radius, space, typeScale, weight } from "../tokens";
-import { disabledOpacity, menuRow, popupSurface } from "./styles";
+import { disabledOpacity, glassStateFill, menuRow, popupSurface } from "./styles";
 
 export { MenuSeparator as DropdownMenuSeparator };
 
@@ -98,9 +98,11 @@ export function DropdownMenuItem(props: {
       onSelect={props.onSelect}
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       hoverStyle={{ backgroundColor: color.hover }}
-      activeStyle={{ backgroundColor: color.accent }}
+      // The one chosen / keyboard-highlighted state the whole kit wears: a
+      // small pane of clear glass, not a flat accent fill.
+      activeStyle={glassStateFill()}
       disabledStyle={{ opacity: disabledOpacity }}
-      checkedStyle={{ backgroundColor: color.accent }}
+      checkedStyle={glassStateFill()}
       style={[menuRow(), props.style ?? null]}
       indicator={
         props.checked ? <Icon name="check" size={12} tint={color.popoverForeground} /> : <View style={{ width: 12 }} />

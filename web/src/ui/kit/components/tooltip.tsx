@@ -23,6 +23,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Tooltip as NativeTooltip } from "nsh/base";
 import { color, radius, space, typeScale } from "../tokens";
+import { glassPopover } from "./styles";
 
 export function Tooltip(props: {
   label?: string;
@@ -53,9 +54,7 @@ export function Tooltip(props: {
           paddingHorizontal: space.md,
           paddingVertical: space.sm,
           borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: color.popoverEdge,
-          backgroundColor: color.popover,
+          ...glassPopover(),
         },
         props.style ?? null,
       ]}

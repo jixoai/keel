@@ -21,6 +21,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Icon, type IconName } from "../../icons";
 import { alpha, color, lineHeight, radius, space, typeScale, weight } from "../tokens";
+import { glassControl } from "./styles";
 
 export function Empty(props: {
   children?: JSX.Element;
@@ -61,8 +62,8 @@ export function EmptyMedia(props: { icon?: IconName; tone?: "neutral" | "brand" 
         borderRadius: radius.pill,
         alignItems: "center",
         justifyContent: "center",
+        ...glassControl(),
         backgroundColor: face(),
-        borderWidth: 1,
         borderColor: alpha(tint(), 0.25),
       }}
     >

@@ -57,6 +57,7 @@ export function Avatar(props: {
       fallbackStyle={{
         borderRadius: radius.pill,
         backgroundColor: color.muted,
+        boxShadow: `inset 0 1px 0 ${color.glassInner}, inset 0 0 0 1px ${color.glassEdge}`,
         alignItems: "center",
         justifyContent: "center",
       }}

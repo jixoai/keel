@@ -20,11 +20,11 @@
 // nothing) · each of the four sides. TUI: the panel renders as a block with the
 // title/description/body text.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
-import { Text, View } from "nsh";
+import { Scroll, safeAreaInsets, Text, View } from "nsh";
 import { Button as NativeButton, Sheet as NativeSheet, type OpenChangeReason } from "nsh/base";
 import { Icon } from "../../icons";
 import { alpha, color, radius, space, typeScale, weight } from "../tokens";
-import { disabledOpacity, focusRing } from "./styles";
+import { disabledOpacity, focusRing, glassPopover } from "./styles";
 
 export type SheetSide = "top" | "bottom" | "left" | "right";
 
@@ -47,6 +47,7 @@ export function Sheet(props: {
 }) {
   const side = () => props.side ?? "bottom";
   const vertical = () => side() === "left" || side() === "right";
+  const insets = safeAreaInsets();
   return (
     <NativeSheet
       open={props.open ?? true}
@@ -63,19 +64,17 @@ export function Sheet(props: {
           flexDirection: "column",
           gap: space.lg,
           padding: space.xl,
-          backgroundColor: color.popover,
-          borderColor: color.popoverEdge,
-          boxShadow: `0 24px 64px ${alpha(color.glassShade, 1)}`,
-          width: vertical() ? 380 : "100%",
+          // A phone's bottom sheet keeps its last action above the home
+          // indicator; the runtime gives the panel the window's safe area.
+          paddingBottom: space.xl + insets().bottom,
+          width: vertical() ? "92%" : "100%",
+          maxWidth: vertical() ? 380 : undefined,
+          maxHeight: vertical() ? "100%" : "92%",
           height: vertical() ? "100%" : undefined,
           minHeight: vertical() ? undefined : 200,
-          borderRadius:
-            side() === "bottom"
-              ? radius.xl
-              : side() === "top"
-                ? radius.xl
-                : radius.xl,
-          borderWidth: 1,
+          borderRadius: radius.xl,
+          ...glassPopover(),
+          overflow: "hidden",
           alignSelf: vertical() ? (side() === "left" ? "flex-start" : "flex-end") : "center",
         },
         props.style ?? null,
@@ -110,7 +109,12 @@ export function Sheet(props: {
           </NativeButton>
         ) : null}
       </View>
-      <View style={{ flexDirection: "column", gap: space.md, flex: 1 }}>{props.children}</View>
+      <Scroll
+        style={{ flex: 1, minHeight: 0 }}
+        contentStyle={{ flexDirection: "column", gap: space.md }}
+      >
+        {props.children}
+      </Scroll>
       {props.footer !== undefined ? (
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>{props.footer}</View>
       ) : null}

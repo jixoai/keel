@@ -28,7 +28,7 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { effect, platform, Scroll, Storage, signal, Text, View, windowSize } from "nsh";
 import { Icon, type IconName } from "../../icons";
 import { color, motion, radius as kitRadius, typeScale } from "../tokens";
-import { focusRing } from "../components/styles";
+import { focusRing, GLASS_BLUR, glassState } from "../components/styles";
 
 /** The rail's two widths (zcode's `grid-cols-[68px…] lg:grid-cols-[268px…]`). */
 export const SETTINGS_RAIL_WIDTH_PX = 68;
@@ -110,8 +110,10 @@ export function SettingsShell(props: SettingsShellProps) {
           flexShrink: 0,
           flexDirection: "column",
           backgroundColor: color.sidebar,
+          backdropFilter: GLASS_BLUR,
           borderRightWidth: 1,
           borderColor: color.sidebarBorder,
+          boxShadow: `inset -1px 0 0 ${color.glassEdge}, inset 0 1px 0 ${color.glassInner}`,
         }}
       >
         {/* The window-drag/title band: h-12, empty on the web and in a
@@ -151,11 +153,13 @@ export function SettingsShell(props: SettingsShellProps) {
             flex: 1,
             minHeight: 0,
             borderWidth: 1,
-            borderColor: color.border,
+            borderColor: color.glassEdge,
             // rounded-xl on the web, rounded-md on Windows (the reference's
             // panel-radius branch).
             borderRadius: kitRadius.lg,
-            backgroundColor: color.background,
+            backgroundColor: color.card,
+            backdropFilter: GLASS_BLUR,
+            boxShadow: `inset 0 1px 0 ${color.glassRim}, inset 0 0 0 1px ${color.glassInner}`,
             overflow: "hidden",
           }}
         >
@@ -284,9 +288,7 @@ function SettingsRailButton(props: {
         gap: props.stacked ? 4 : 8,
         paddingHorizontal: props.wide ? 10 : 0,
         borderRadius: kitRadius.md,
-        backgroundColor: props.selected ? color.glassState : undefined,
-        borderWidth: props.selected ? 1 : 0,
-        borderColor: props.selected ? color.glassStateRim : undefined,
+        ...(props.selected ? glassState() : {}),
         transitionProperty: "background-color",
         transitionDuration: motion.fast,
       }}

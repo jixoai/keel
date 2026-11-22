@@ -33,6 +33,7 @@ export function Skeleton(props: {
         height: props.height ?? 12,
         borderRadius: props.radius ?? radiusToken.sm,
         backgroundColor: color.muted,
+        boxShadow: `inset 0 1px 0 ${color.glassInner}, inset 0 0 0 1px ${color.glassEdge}`,
         animationName: "pulse",
         animationDuration: 1400,
         animationIterationCount: "infinite",

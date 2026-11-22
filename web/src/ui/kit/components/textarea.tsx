@@ -22,7 +22,7 @@ import type { StyleProp } from "nsh";
 import type { InputStyle } from "nsh";
 import { Input as NativeInput } from "nsh/base";
 import { color, lineHeight, space, typeScale } from "../tokens";
-import { controlRadius, focusRing, invalidRing } from "./styles";
+import { controlRadius, focusRing, glassField, invalidRing } from "./styles";
 
 export function Textarea(props: {
   value?: string;
@@ -56,11 +56,9 @@ export function Textarea(props: {
       disabledStyle={{ opacity: 0.5 }}
       style={[
         {
+          ...glassField(),
           minHeight: minHeight(),
           borderRadius: controlRadius("default"),
-          borderWidth: 1,
-          borderColor: color.input,
-          backgroundColor: color.field,
           paddingHorizontal: space.md,
           paddingVertical: space.sm,
           fontSize: typeScale.base,

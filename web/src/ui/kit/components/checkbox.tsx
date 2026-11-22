@@ -19,7 +19,8 @@ import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Checkbox as NativeCheckbox } from "nsh/base";
 import { Icon } from "../../icons";
-import { alpha, color, radius, space, typeScale } from "../tokens";
+import { color, radius, space, typeScale } from "../tokens";
+import { glassGroove, glassPrimary } from "./styles";
 
 export function Checkbox(props: {
   checked?: boolean;
@@ -45,11 +46,9 @@ export function Checkbox(props: {
         width: 16,
         height: 16,
         borderRadius: radius.xs,
-        borderWidth: 1,
-        // Same rule as the radio ring: an unchecked box needs an edge that
-        // reads on every card face (`color.input` is that face itself).
-        borderColor: filled() ? color.primary : alpha(color.mutedForeground, 0.55),
-        backgroundColor: filled() ? color.primary : "transparent",
+        // The checked box is the ink's solid pane; an empty one is a groove
+        // cut into the surface (vendor solid-glass, `Grooves`).
+        ...(filled() ? glassPrimary() : glassGroove()),
         alignItems: "center",
         justifyContent: "center",
       }}

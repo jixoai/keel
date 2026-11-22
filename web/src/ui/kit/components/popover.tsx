@@ -21,7 +21,8 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Popover as NativePopover, type OpenChangeReason } from "nsh/base";
 import { View } from "nsh";
-import { alpha, color, radius, space } from "../tokens";
+import { radius, space } from "../tokens";
+import { glassPopover } from "./styles";
 
 export function Popover(props: {
   trigger?: JSX.Element;
@@ -55,12 +56,10 @@ export function Popover(props: {
         {
           minWidth: props.width ?? 280,
           maxWidth: 420,
+          maxHeight: "88%",
           padding: space.lg,
           borderRadius: radius.lg,
-          borderWidth: 1,
-          borderColor: color.popoverEdge,
-          backgroundColor: color.popover,
-          boxShadow: `0 16px 40px ${alpha(color.glassShade, 1)}`,
+          ...glassPopover(),
         },
         props.style ?? null,
       ]}

@@ -29,6 +29,7 @@ import {
   TableRow,
 } from "nsh/base";
 import { color, radius, space, typeScale, weight } from "../tokens";
+import { glassCard } from "./styles";
 
 export { TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow };
 
@@ -47,9 +48,7 @@ export function Table(props: {
           ? {}
           : {
               borderRadius: radius.lg,
-              borderWidth: 1,
-              borderColor: color.border,
-              backgroundColor: color.card,
+              ...glassCard(),
               overflow: "hidden",
             },
         props.style ?? null,

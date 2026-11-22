@@ -26,7 +26,7 @@ import { Text, View } from "nsh";
 import { Select as NativeSelect, type SelectEntry, type SelectItem } from "nsh/base";
 import { Icon } from "../../icons";
 import { color, radius, space, typeScale } from "../tokens";
-import { controlHeight, controlPadding, controlRadius, focusRing, invalidRing, menuRow, popupSurface, type ControlSize } from "./styles";
+import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, menuRow, popupSurface, type ControlSize } from "./styles";
 
 export type { SelectItem };
 
@@ -77,11 +77,9 @@ export function Select(props: {
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, padding: space.xs }}>{group.title}</Text>
       )}
       searchStyle={{
+        ...glassField(),
         height: controlHeight("sm"),
         borderRadius: controlRadius("sm"),
-        borderWidth: 1,
-        borderColor: color.input,
-        backgroundColor: color.field,
         paddingHorizontal: space.sm,
         fontSize: typeScale.sm,
         color: color.foreground,
@@ -108,6 +106,7 @@ export function Select(props: {
       trigger={
         <View
           style={{
+            ...glassField(),
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "space-between",
@@ -115,9 +114,7 @@ export function Select(props: {
             height: props.height ?? controlHeight(size()),
             paddingHorizontal: controlPadding(size()),
             borderRadius: controlRadius(size()),
-            borderWidth: 1,
-            borderColor: props.invalid ? color.destructive : color.input,
-            backgroundColor: color.field,
+            borderColor: props.invalid ? color.destructive : color.fieldEdge,
           }}
         >
           <Text

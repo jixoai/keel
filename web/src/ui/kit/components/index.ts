@@ -3,6 +3,7 @@
 // it beside the layout blocks and the tokens, and `scripts/kit-imports.mjs`
 // checks that screens import from `web/src/ui/kit` alone.
 export * from "./accordion";
+export * from "./alert";
 export * from "./alert-dialog";
 export * from "./avatar";
 export * from "./badge";
@@ -21,7 +22,9 @@ export * from "./field";
 export * from "./input";
 export * from "./kbd";
 export * from "./label";
+export * from "./pagination";
 export * from "./popover";
+export * from "./progress";
 export * from "./radio-group";
 export * from "./scroll-area";
 export * from "./select";

@@ -184,8 +184,22 @@ export const color = {
   get primary() {
     return token("primary");
   },
+  /** The lines of light and shade inside a solid primary pane (vendor
+   * `--primary-rim` / `--primary-under` / `--primary-inner` / `--primary-edge`). */
+  get primaryEdge() {
+    return token("primary-edge");
+  },
   get primaryForeground() {
     return token("primary-foreground");
+  },
+  get primaryInner() {
+    return token("primary-inner");
+  },
+  get primaryRim() {
+    return token("primary-rim");
+  },
+  get primaryUnder() {
+    return token("primary-under");
   },
   get ring() {
     return token("ring");
@@ -245,6 +259,14 @@ export const color = {
   },
   get warningTint() {
     return token("warning-tint");
+  },
+  /** A groove cut into the surface (an unchecked box, an empty switch track):
+   * shade under the upper lip, light along the lower one. */
+  get wellRim() {
+    return token("well-rim");
+  },
+  get wellShade() {
+    return token("well-shade");
   },
 };
 

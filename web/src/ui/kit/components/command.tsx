@@ -41,7 +41,7 @@ import { signal, Text, View } from "nsh";
 import { Command as NativeCommand, type CommandEntry, type CommandGroup, type CommandItem } from "nsh/base";
 import { Icon } from "../../icons";
 import { color, radius, space, typeScale, weight } from "../tokens";
-import { menuRow, popupSurface } from "./styles";
+import { glassField, glassStateFill, menuRow, popupSurface } from "./styles";
 
 export type { CommandEntry, CommandGroup, CommandItem };
 
@@ -57,10 +57,9 @@ function CommandRow(props: { entry: CommandEntry; highlighted: boolean }) {
         width: "100%",
         height: 28,
         borderRadius: radius.sm,
-        // The reference's `data-selected:bg-menu-hover`: the kit's selected
-        // surface token (a step above `hover`, so the keyboard cursor reads at
-        // a glance), never a colour of its own.
-        backgroundColor: props.highlighted ? color.selected : undefined,
+        // The one state (vendor `glass-chosen`): a small pane of clear glass,
+        // not a flat grey wash, so the keyboard cursor reads at a glance.
+        ...(props.highlighted ? glassStateFill() : {}),
       }}
     >
       <Text
@@ -145,6 +144,7 @@ export function Command(props: {
         paddingHorizontal: space.sm,
       }}
       searchStyle={{
+        ...glassField(),
         flex: 1,
         height: 32,
         fontSize: typeScale.base,

@@ -38,7 +38,7 @@ import {
 import { context } from "nsh";
 import { Icon } from "../../icons";
 import { color, radius, space, typeScale, weight } from "../tokens";
-import { disabledOpacity, focusRing } from "./styles";
+import { disabledOpacity, focusRing, glassStateFill } from "./styles";
 
 /** The accordion's open values, so an item can draw its own chevron. */
 const openValues = context<() => readonly string[]>(() => []);
@@ -97,7 +97,7 @@ export function AccordionItem(props: {
         <AccordionTrigger
           accessibilityLabel={props.accessibilityLabel ?? props.title}
           hoverStyle={{ backgroundColor: color.hover }}
-          activeStyle={{ backgroundColor: color.accent }}
+          activeStyle={glassStateFill()}
           focusStyle={focusRing()}
           disabledStyle={{ opacity: disabledOpacity }}
           style={{

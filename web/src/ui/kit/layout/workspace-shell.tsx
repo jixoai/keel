@@ -30,6 +30,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { effect, signal, untracked, View, windowSize } from "nsh";
 import { color, zIndex } from "../tokens";
+import { GLASS_BLUR } from "../components/styles";
 import {
   ResizableGroupWidth,
   ResizablePanel,
@@ -356,8 +357,10 @@ function ShellColumn(props: { header?: JSX.Element; children: JSX.Element }) {
             paddingHorizontal: 12,
             gap: 8,
             backgroundColor: color.panel,
+            backdropFilter: GLASS_BLUR,
             borderBottomWidth: 1,
             borderColor: color.headerBorder,
+            boxShadow: `inset 0 1px 0 ${color.glassInner}`,
           }}
         >
           {props.header}
@@ -408,8 +411,10 @@ export function SidePane(props: SidePaneProps) {
       style={[
         {
           backgroundColor: color.panel,
+          backdropFilter: GLASS_BLUR,
           borderLeftWidth: 1,
           borderColor: color.border,
+          boxShadow: `inset 1px 0 0 ${color.glassEdge}, inset 0 1px 0 ${color.glassInner}`,
         },
         props.style ?? null,
       ]}

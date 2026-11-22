@@ -224,6 +224,30 @@ export const KIT_MANIFEST: KitEntry[] = [
 
   // C3 · 容器件
   {
+    name: "Alert",
+    group: "container",
+    compose: (need) => {
+      const Title = need("AlertTitle");
+      const Description = need("AlertDescription");
+      return {
+        title: undefined,
+        icon: "info",
+        children: (
+          <>
+            <Title label="连接已恢复" />
+            <Description label="断线期间的事件已按顺序补齐。" />
+          </>
+        ),
+      };
+    },
+    states: [
+      { id: "default" },
+      { id: "error", props: { variant: "destructive", icon: "alert", children: null } },
+      { id: "empty", props: { title: "", description: "", children: null } },
+    ],
+    note: "内联提示：中性玻璃面 / 失败色玻璃面",
+  },
+  {
     name: "Card",
     group: "container",
     compose: (need) => {
@@ -490,6 +514,47 @@ export const KIT_MANIFEST: KitEntry[] = [
     },
     states: defaultThenEmpty({ children: null }),
     note: "层级组合：List / Item / Link / Separator / Page",
+  },
+
+  {
+    name: "Pagination",
+    group: "overlay",
+    compose: (need) => {
+      const Content = need("PaginationContent");
+      const Item = need("PaginationItem");
+      const Link = need("PaginationLink");
+      const Previous = need("PaginationPrevious");
+      const Next = need("PaginationNext");
+      const Ellipsis = need("PaginationEllipsis");
+      return {
+        children: (
+          <Content>
+            <>
+              <Item>
+                <Previous />
+              </Item>
+              <Item>
+                <Link label="1" active />
+              </Item>
+              <Item>
+                <Link label="2" />
+              </Item>
+              <Item>
+                <Ellipsis />
+              </Item>
+              <Item>
+                <Link label="9" />
+              </Item>
+              <Item>
+                <Next />
+              </Item>
+            </>
+          </Content>
+        ),
+      };
+    },
+    states: defaultThenEmpty({ children: null }),
+    note: "当前页是实心墨面；其余页是清玻璃",
   },
 
   // C5 · 布局原语

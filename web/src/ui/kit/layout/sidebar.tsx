@@ -24,7 +24,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { effect, platform, signal, Storage, Text, untracked, View, windowSize } from "nsh";
 import { color, radius as kitRadius, typeScale } from "../tokens";
-import { focusRing } from "../components/styles";
+import { focusRing, GLASS_BLUR } from "../components/styles";
 import {
   clampMaxSize,
   ResizableGroupWidth,
@@ -185,6 +185,10 @@ export function Sidebar(props: SidebarProps) {
           backgroundColor: color.sidebar,
           borderRightWidth: 1,
           borderColor: color.sidebarBorder,
+          // A sidebar is a pane standing on its edge: lit where it faces the
+          // page (vendor `[data-slot="sidebar-inner"]`).
+          backdropFilter: GLASS_BLUR,
+          boxShadow: `inset -1px 0 0 ${color.glassEdge}, inset 0 1px 0 ${color.glassInner}`,
           // 200ms width/opacity, only while a collapse/expand is running (a
           // transition during a drag would make the panel trail the pointer).
           transitionProperty: animatingWidth() ? "width, opacity" : undefined,

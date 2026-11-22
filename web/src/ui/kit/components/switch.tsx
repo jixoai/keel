@@ -20,7 +20,8 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text } from "nsh";
 import { Switch as NativeSwitch } from "nsh/base";
-import { alpha, color, radius, space, typeScale } from "../tokens";
+import { color, radius, space, typeScale } from "../tokens";
+import { glassGroove, glassKnob, glassPrimary } from "./styles";
 
 export type SwitchSize = "sm" | "default";
 
@@ -50,16 +51,14 @@ export function Switch(props: {
         height: size() === "sm" ? 16 : 18,
         borderRadius: radius.pill,
         padding: 1,
-        backgroundColor: props.checked ? color.primary : alpha(color.primary, 0.3),
         justifyContent: "center",
-        borderWidth: props.checked ? 0 : 1,
-        borderColor: alpha(color.primary, 0.4),
+        ...(props.checked ? glassPrimary() : glassGroove()),
       }}
       thumbStyle={{
         width: thumb(),
         height: thumb(),
         borderRadius: radius.pill,
-        backgroundColor: props.checked ? color.primaryForeground : color.mutedForeground,
+        ...glassKnob(),
         transform: props.checked ? `translateX(${travel()}px)` : "translateX(0px)",
         transitionProperty: "transform, background-color",
         transitionDuration: 120,

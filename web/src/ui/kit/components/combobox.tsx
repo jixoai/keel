@@ -26,7 +26,7 @@ import { Text, View } from "nsh";
 import { Combobox as NativeCombobox, type SelectEntry, type SelectItem } from "nsh/base";
 import { Icon } from "../../icons";
 import { color, radius, space, typeScale } from "../tokens";
-import { controlHeight, controlPadding, controlRadius, focusRing, invalidRing, menuRow, popupSurface } from "./styles";
+import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, menuRow, popupSurface } from "./styles";
 
 export function Combobox(props: {
   items?: SelectItem[];
@@ -69,11 +69,9 @@ export function Combobox(props: {
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, padding: space.xs }}>{group.title}</Text>
       )}
       inputStyle={{
+        ...glassField(),
         height: controlHeight("default"),
         borderRadius: controlRadius("default"),
-        borderWidth: 1,
-        borderColor: color.input,
-        backgroundColor: color.field,
         paddingHorizontal: space.sm,
         fontSize: typeScale.base,
         color: color.foreground,
@@ -109,9 +107,8 @@ export function Combobox(props: {
           height: controlHeight("default") + 2,
           paddingHorizontal: controlPadding("default") - 2,
           borderRadius: controlRadius("default"),
-          borderWidth: 1,
-          borderColor: props.invalid ? color.destructive : color.input,
-          backgroundColor: color.field,
+          ...glassField(),
+          borderColor: props.invalid ? color.destructive : color.fieldEdge,
         },
         props.style ?? null,
       ]}

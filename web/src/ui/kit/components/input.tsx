@@ -24,8 +24,8 @@
 import type { StyleProp } from "nsh";
 import type { InputStyle } from "nsh";
 import { Input as NativeInput } from "nsh/base";
-import { alpha, color, space, typeScale } from "../tokens";
-import { controlHeight, controlPadding, controlRadius, focusRing, invalidRing, type ControlSize } from "./styles";
+import { alpha, color, typeScale } from "../tokens";
+import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, type ControlSize } from "./styles";
 
 export function Input(props: {
   size?: ControlSize;
@@ -68,11 +68,9 @@ export function Input(props: {
       disabledStyle={{ opacity: 0.5 }}
       style={[
         {
+          ...glassField(),
           height: controlHeight(size()),
           borderRadius: controlRadius(size()),
-          borderWidth: 1,
-          borderColor: color.input,
-          backgroundColor: color.field,
           paddingHorizontal: controlPadding(size()),
           fontSize: typeScale.base,
           color: color.foreground,

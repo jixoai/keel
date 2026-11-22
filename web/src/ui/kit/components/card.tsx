@@ -26,6 +26,7 @@
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { color, lineHeight, radius, space, typeScale, weight } from "../tokens";
+import { glassCard } from "./styles";
 
 export type CardSize = "default" | "sm";
 
@@ -47,9 +48,7 @@ export function Card(props: {
           gap: props.size === "sm" ? space.md : space.lg,
           padding: pad(),
           borderRadius: radius.lg,
-          borderWidth: 1,
-          borderColor: color.border,
-          backgroundColor: color.card,
+          ...glassCard(),
           overflow: "hidden",
         },
         props.style ?? null,

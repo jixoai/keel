@@ -19,7 +19,8 @@
 import type { StyleProp, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Radio, RadioGroup as NativeRadioGroup } from "nsh/base";
-import { alpha, color, radius, space, typeScale } from "../tokens";
+import { color, radius, space, typeScale } from "../tokens";
+import { glassGroove, glassPrimary } from "./styles";
 
 export function RadioGroup(props: {
   value?: string;
@@ -63,19 +64,23 @@ export function RadioGroup(props: {
                   width: 16,
                   height: 16,
                   borderRadius: radius.pill,
-                  borderWidth: 1,
-                  // The unchecked ring is a visible affordance on any card:
-                  // `color.input` is the card's own face in the dark
-                  // appearance, which made the ring disappear. A muted
-                  // foreground at half strength reads on card, panel and
-                  // popover alike.
-                  borderColor: checked() ? color.primary : alpha(color.mutedForeground, 0.55),
+                  // Checked is the ink's solid pane and a light dot; an empty
+                  // one is a groove in the surface (vendor `Grooves`).
+                  ...(checked() ? glassPrimary() : glassGroove()),
                   alignItems: "center",
                   justifyContent: "center",
                 }}
               >
                 {checked() ? (
-                  <View style={{ width: 8, height: 8, borderRadius: radius.pill, backgroundColor: color.primary }} />
+                  <View
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: radius.pill,
+                      backgroundColor: color.primaryForeground,
+                      boxShadow: `inset 0 1px 0 ${color.primaryRim}`,
+                    }}
+                  />
                 ) : null}
               </View>
               <Text style={{ fontSize: typeScale.base, color: disabled() ? color.mutedForeground : color.foreground }}>

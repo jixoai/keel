@@ -30,6 +30,7 @@ import { Text, View } from "nsh";
 import { Tab as NativeTab, Tabs as NativeTabs } from "nsh/base";
 import { Icon, type IconName } from "../../icons";
 import { color, radius, space, typeScale, weight } from "../tokens";
+import { glassTabsActive, glassTabsTray } from "./styles";
 
 export type TabsVariant = "default" | "line";
 
@@ -58,10 +59,10 @@ export function Tabs(props: {
                 backgroundColor: color.foreground,
               }
             : {
+                ...glassTabsActive(),
                 top: 2,
                 bottom: 2,
                 borderRadius: radius.sm,
-                backgroundColor: color.card,
               }
         }
         style={{
@@ -70,9 +71,9 @@ export function Tabs(props: {
           gap: line() ? space.md : space.xxs,
           padding: line() ? 0 : 3,
           borderRadius: line() ? 0 : radius.lg,
-          backgroundColor: line() ? "transparent" : color.muted,
-          borderBottomWidth: line() ? 1 : 0,
-          borderBottomColor: color.border,
+          ...(line()
+            ? { backgroundColor: "transparent", borderBottomWidth: 1, borderBottomColor: color.border }
+            : glassTabsTray()),
         }}
       >
         {props.children}

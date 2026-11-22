@@ -33,6 +33,7 @@ import { Text, View } from "nsh";
 import { Toast as NativeToast, ToastStack as NativeToastStack, type Anchor, type ToastTransitionStatus } from "nsh/base";
 import { color, radius, space, typeScale, weight, zIndex } from "../tokens";
 import { IconButton } from "./button";
+import { glassPopover } from "./styles";
 
 export type ToastTone = "default" | "success" | "warning" | "danger";
 
@@ -86,10 +87,9 @@ export function Toast(props: {
           minWidth: 280,
           padding: space.lg,
           borderRadius: radius.lg,
-          borderWidth: 1,
+          ...glassPopover(),
           borderColor: tint().edge,
           backgroundColor: tint().face,
-          boxShadow: `0 16px 40px ${color.glassShade}`,
         }}
       >
         <View style={{ flex: 1, flexDirection: "column", gap: space.xxs }}>

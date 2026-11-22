@@ -35,6 +35,8 @@ import {
   controlRadius,
   disabledOpacity,
   focusRing,
+  glassControl,
+  glassPrimary,
   invalidRing,
   type ControlSize,
 } from "./styles";
@@ -50,8 +52,8 @@ export const buttonFace = (
   switch (variant) {
     case "secondary":
       return {
-        base: { backgroundColor: color.secondary },
-        hover: { backgroundColor: alpha(color.secondary, 0.8) },
+        base: { ...glassControl(), backgroundColor: color.secondary, borderColor: color.glassEdge },
+        hover: { backgroundColor: alpha(color.foreground, 0.12) },
         ink: color.secondaryForeground,
         border: {},
       };
@@ -59,25 +61,29 @@ export const buttonFace = (
       return { base: {}, hover: { backgroundColor: color.hover }, ink: color.foreground, border: {} };
     case "outline":
       return {
-        base: { borderWidth: 1, borderColor: color.border, backgroundColor: "transparent" },
-        hover: { backgroundColor: color.hover },
+        base: { ...glassControl(), borderColor: color.border },
+        hover: { backgroundColor: alpha(color.foreground, 0.12) },
         ink: color.foreground,
         border: { borderWidth: 1, borderColor: color.border },
       };
     case "destructive":
       return {
-        base: { backgroundColor: color.destructive },
+        base: {
+          ...glassPrimary(),
+          backgroundColor: color.destructive,
+          borderColor: alpha(color.destructive, 0.55),
+        },
         hover: { backgroundColor: alpha(color.destructive, 0.9) },
         ink: color.destructiveForeground,
         border: {},
       };
     case "link":
-      return { base: {}, hover: { opacity: 0.8 }, ink: color.primary, border: {} };
+      return { base: { backgroundColor: "transparent" }, hover: { opacity: 0.8 }, ink: color.primary, border: {} };
     case "default":
     default:
       return {
-        base: { backgroundColor: color.primary },
-        hover: { backgroundColor: alpha(color.primary, 0.85) },
+        base: glassPrimary(),
+        hover: { backgroundColor: alpha(color.primary, 0.92) },
         ink: color.primaryForeground,
         border: {},
       };

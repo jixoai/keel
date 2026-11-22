@@ -26,11 +26,12 @@
 // the title, description and both actions are text rows; `press` on them fires
 // `onConfirm` / `onCancel`.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
-import { Text, View, windowSize } from "nsh";
+import { Scroll, safeAreaInsets, Text, View, windowSize } from "nsh";
 import { Dialog as NativeDialog } from "nsh/base";
 import { Icon } from "../../icons";
 import { alpha, color, radius, space, typeScale, weight } from "../tokens";
 import { Button } from "./button";
+import { glassPopover } from "./styles";
 
 /** Where the footer stops being one row and stacks, shadcn's `sm` (`flex-col-reverse
  * gap-2 sm:flex-row sm:justify-end`): below it the two buttons would push each
@@ -59,40 +60,53 @@ export function AlertDialog(props: {
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const insets = safeAreaInsets();
   return (
     <NativeDialog
       open={props.open ?? true}
       testID={props.testID}
+      animation="fade"
       closeOnEscape={props.closeOnEscape ?? true}
       closeOnBackdropPress={props.closeOnBackdropPress ?? true}
       onOpenChange={() => props.onCancel?.()}
       // One scrim for every modal: the theme's shade at full strength (60%
       // black in the dark appearance) and the reference's `backdrop-blur-xs`.
       backdropStyle={{ backgroundColor: color.glassShade, backdropFilter: "blur(4px)" }}
-      style={[
-        {
-          width: 400,
-          maxWidth: "92%",
-          flexDirection: "column",
-          gap: space.lg,
-          padding: space.xl,
-          borderRadius: radius.xl,
-          borderWidth: 1,
-          borderColor: color.popoverEdge,
-          backgroundColor: color.popover,
-          boxShadow: `0 24px 64px ${alpha(color.glassShade, 1)}`,
-          // shadcn's placement (`fixed top-1/2 left-1/2 -translate-x-1/2
-          // -translate-y-1/2`): the dialog layer is a full-window column, so the
-          // cross axis centers with `alignSelf` and the main axis with auto
-          // margins. Without these the popup sits at the window's top-left
-          // corner — the runtime gives the layer no placement of its own.
-          alignSelf: "center",
-          marginTop: "auto",
-          marginBottom: "auto",
-        },
-        props.style ?? null,
-      ]}
+      // The native layer has no placement and no flex parent: the popup is a
+      // transparent full-window wrapper that centers its card. `box-none`
+      // leaves the margin's presses to the backdrop.
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: space.lg,
+        paddingVertical: space["2xl"],
+        pointerEvents: "box-none",
+      }}
     >
+      <View
+        testID={props.testID !== undefined ? `${props.testID}-card` : undefined}
+        style={[
+          {
+            width: "100%",
+            maxWidth: 400,
+            maxHeight: "90%",
+            minWidth: 0,
+            flexDirection: "column",
+            gap: space.lg,
+            padding: space.xl,
+            paddingBottom: space.xl + insets().bottom,
+            borderRadius: radius.xl,
+            ...glassPopover(),
+            overflow: "hidden",
+          },
+          props.style ?? null,
+        ]}
+      >
       <View
         role="alert"
         accessibilityLabel={props.accessibilityLabel ?? props.title}
@@ -126,7 +140,12 @@ export function AlertDialog(props: {
           ) : null}
         </View>
       </View>
-      {props.children}
+      <Scroll
+        style={{ flexShrink: 1, minHeight: 0 }}
+        contentStyle={{ flexDirection: "column", gap: space.md }}
+      >
+        {props.children}
+      </Scroll>
       <View
         style={{
           flexDirection: footerStacked() ? "column-reverse" : "row",
@@ -157,6 +176,7 @@ export function AlertDialog(props: {
           testID={props.testID !== undefined ? `${props.testID}-confirm` : undefined}
           style={actionStyle()}
         />
+      </View>
       </View>
       </View>
     </NativeDialog>
