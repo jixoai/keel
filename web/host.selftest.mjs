@@ -270,6 +270,7 @@ const statusResponse = (body, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
   json: async () => body,
+  text: async () => JSON.stringify(body),
 });
 
 test("preflight: a configured service answers kind, models and rates", async () => {
@@ -552,4 +553,177 @@ test("session: stop releases the microphone, the socket and the context", async 
   assert.equal(socket.readyState, 3);
   assert.equal(tracks[0].stopped, true);
   assert.equal(lastState().phase, "closed");
+});
+
+// ---- the plugin bridge ----------------------------------------------------
+
+/** A fetch body that yields the given SSE frames in order. */
+const streamResponse = (frames) => ({
+  ok: true,
+  status: 200,
+  body: {
+    getReader: () => {
+      let index = 0;
+      return {
+        read: async () =>
+          index < frames.length
+            ? { value: new TextEncoder().encode(frames[index++]), done: false }
+            : { done: true },
+      };
+    },
+  },
+});
+
+test("plugin bridge: a scope, state, and the declared tool only", async () => {
+  reset();
+  fetchStub = async (url, init) => {
+    if (String(url).endsWith("/bridge/state")) {
+      return statusResponse({ id: "vendor.panel", state: "enabled", tools: ["refresh"], theme: { name: "Keel" } });
+    }
+    if (String(url).endsWith("/bridge/call")) {
+      assert.equal(init.method, "POST");
+      const body = JSON.parse(init.body);
+      assert.equal(body.tool, "refresh");
+      assert.deepEqual(body.args, { scope: "all" });
+      return statusResponse({ tool: "refresh", result: { ok: true, indexed: 3 } });
+    }
+    return statusResponse({ error: "unexpected" }, 500);
+  };
+  const host = await makeHost();
+  const scope = await host.call("keel.plugin.scope", {
+    pluginId: "vendor.panel",
+    capabilities: ["state", "call"],
+    tools: ["refresh"],
+  });
+  assert.equal(scope.ok, true);
+  assert.equal(scope.pluginId, "vendor.panel");
+  assert.deepEqual(scope.capabilities, ["state", "call"]);
+  assert.equal(typeof scope.token, "string");
+
+  const state = await host.call("keel.plugin.call", { token: scope.token, name: "keel.plugin.state", args: {} });
+  assert.equal(state.ok, true);
+  assert.equal(state.result.id, "vendor.panel");
+  assert.equal(state.result.theme.name, "Keel");
+
+  const called = await host.call("keel.plugin.call", {
+    token: scope.token,
+    name: "keel.plugin.callTool",
+    args: { tool: "refresh", args: { scope: "all" } },
+  });
+  assert.deepEqual(called, { ok: true, result: { ok: true, indexed: 3 } });
+  // Every request was same-origin and scoped to this plugin's bridge.
+  assert.equal(fetchCalls.length, 2);
+  assert.equal(fetchCalls[0][0], "/v1/plugins/vendor.panel/bridge/state");
+  assert.equal(fetchCalls[1][0], "/v1/plugins/vendor.panel/bridge/call");
+});
+
+test("plugin bridge: an undeclared verb or tool is ERR_ACCESS_DENIED with no request", async () => {
+  reset();
+  fetchStub = async () => statusResponse({ error: "must not be called" }, 500);
+  const host = await makeHost();
+  const scope = await host.call("keel.plugin.scope", {
+    pluginId: "vendor.panel",
+    capabilities: ["state"],
+    tools: ["refresh"],
+  });
+  const denied = await host.call("keel.plugin.call", {
+    token: scope.token,
+    name: "keel.plugin.callTool",
+    args: { tool: "refresh", args: {} },
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, "ERR_ACCESS_DENIED");
+  assert.match(denied.message, /call/);
+
+  const unknown = await host.call("keel.plugin.call", {
+    token: scope.token,
+    name: "keel.admin.grant",
+    args: {},
+  });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, "ERR_ACCESS_DENIED");
+  assert.equal(fetchCalls.length, 0);
+});
+
+test("plugin bridge: the tool must be in the issued grant even with call", async () => {
+  reset();
+  fetchStub = async () => statusResponse({ error: "must not be called" }, 500);
+  const host = await makeHost();
+  const scope = await host.call("keel.plugin.scope", {
+    pluginId: "vendor.panel",
+    capabilities: ["call"],
+    tools: ["refresh"],
+  });
+  const denied = await host.call("keel.plugin.call", {
+    token: scope.token,
+    name: "keel.plugin.callTool",
+    args: { tool: "other_plugin_tool", args: {} },
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, "ERR_ACCESS_DENIED");
+  assert.equal(fetchCalls.length, 0);
+});
+
+test("plugin bridge: an HTTP refusal keeps its code and the server's sentence", async () => {
+  reset();
+  fetchStub = async () => statusResponse({ error: "tool is not declared by this plugin" }, 403);
+  const host = await makeHost();
+  const scope = await host.call("keel.plugin.scope", {
+    pluginId: "vendor.panel",
+    capabilities: ["state"],
+  });
+  const reply = await host.call("keel.plugin.call", { token: scope.token, name: "keel.plugin.state", args: {} });
+  assert.equal(reply.ok, false);
+  assert.equal(reply.code, "ERR_ACCESS_DENIED");
+  assert.match(reply.message, /not declared/);
+});
+
+test("plugin bridge: an unknown or missing scope is refused", async () => {
+  reset();
+  const host = await makeHost();
+  for (const token of ["", "vendor.panel:not-a-token"]) {
+    const reply = await host.call("keel.plugin.call", { token, name: "keel.plugin.state", args: {} });
+    assert.equal(reply.ok, false);
+    assert.equal(reply.code, "ERR_ACCESS_DENIED");
+  }
+  const bad = await host.call("keel.plugin.scope", { pluginId: "Not A Plugin", capabilities: ["state"] });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "ERR_ACCESS_DENIED");
+  const badCapability = await host.call("keel.plugin.scope", {
+    pluginId: "vendor.panel",
+    capabilities: ["admin"],
+  });
+  assert.equal(badCapability.ok, false);
+  assert.equal(badCapability.code, "ERR_ACCESS_DENIED");
+});
+
+test("plugin bridge: subscribe forwards only this plugin's SSE events", async () => {
+  reset();
+  fetchStub = async () =>
+    streamResponse([
+      "event: decision.opened\ndata: {\"decisionId\":\"d1\"}\n\n",
+      ": keep-alive\n\n",
+      "event: trigger.before\ndata: {\"triggerId\":\"vendor.panel.daily\"}\n\n",
+    ]);
+  const host = await makeHost();
+  const scope = await host.call("keel.plugin.scope", {
+    pluginId: "vendor.panel",
+    capabilities: ["subscribe"],
+  });
+  const started = await host.call("keel.plugin.call", {
+    token: scope.token,
+    name: "keel.plugin.subscribe",
+    args: { events: ["decision.opened", "trigger.before"] },
+  });
+  assert.equal(started.ok, true);
+  assert.equal(typeof started.result.subscriptionId, "string");
+  await tick(30);
+  const forwarded = events.filter((entry) => entry.name === "keel.plugin.event").map((entry) => entry.payload);
+  assert.equal(forwarded.length, 2);
+  assert.equal(forwarded[0].pluginId, "vendor.panel");
+  assert.equal(forwarded[0].event, "decision.opened");
+  assert.equal(forwarded[0].payload.decisionId, "d1");
+  assert.equal(forwarded[1].event, "trigger.before");
+  const stopped = await host.call("keel.plugin.unsubscribe", { token: scope.token });
+  assert.equal(stopped.ok, true);
 });

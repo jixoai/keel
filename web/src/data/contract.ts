@@ -457,6 +457,33 @@ export interface PluginProvidesView {
   agents?: string[];
   agent_teams?: string[];
   feature_ports?: string[];
+  /** The slots this plugin declares (`provides.slots`). */
+  slots?: unknown[];
+}
+
+/** One contribution a plugin makes to a slot (`contributes[]`). The server
+ * sends the declaration; the client validates it before loading. */
+export interface PluginContributionView {
+  id?: string;
+  slot: string;
+  form: string;
+  entry?: string;
+  title?: string;
+  description?: string;
+  payload?: unknown;
+  capabilities?: string[];
+  targets?: string[];
+  tool?: string;
+  toolName?: string;
+  part?: string;
+  partKind?: string;
+}
+
+export interface PluginExtensibilityView {
+  usable?: boolean;
+  doc?: string;
+  schema?: string;
+  reason?: string;
 }
 
 export interface PluginStatusView {
@@ -472,6 +499,14 @@ export interface PluginStatusView {
   diagnostics?: string[];
   startedAt?: string;
   stoppedAt?: string;
+  /** `kernel|harness|provider|ui|service`, when the manifest declares it. */
+  layer?: string;
+  /** The slots this plugin declares (a tolerance alias of `provides.slots`). */
+  slots?: unknown[];
+  /** What this plugin contributes to other plugins' slots. */
+  contributes?: PluginContributionView[];
+  /** The machine-readable extension document's presence. */
+  extensibility?: PluginExtensibilityView;
 }
 
 export interface HookStatsView {

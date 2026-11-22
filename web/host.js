@@ -106,6 +106,16 @@ export async function createHost(player) {
 
   const realtime = createRealtime(player);
 
+  // ---- the plugin UI bridge ----------------------------------------------
+  //
+  // A contribution never receives this module. It receives a scope token from
+  // `keel.plugin.scope` and calls `keel.plugin.call` with it; the host checks
+  // the name and the grant, so a plugin cannot call a verb it did not declare
+  // or a tool another plugin owns. The same-VM chunk form is trusted by
+  // assembly (spec: chunk 无隔离); this is the capability boundary, not a
+  // sandbox for malicious code.
+  const pluginBridge = createPluginBridge(player);
+
   const call = async (name, args) => {
     switch (name) {
       case "keel.notify":
@@ -128,6 +138,12 @@ export async function createHost(player) {
         return realtime.stop();
       case "keel.realtime.status":
         return realtime.status();
+      case "keel.plugin.scope":
+        return pluginBridge.scope(args);
+      case "keel.plugin.call":
+        return pluginBridge.call(args);
+      case "keel.plugin.unsubscribe":
+        return pluginBridge.unsubscribe(args);
       default:
         throw new Error(`no host function ${name}`);
     }
@@ -177,6 +193,280 @@ export async function createHost(player) {
   onGlobal("pagehide", () => realtime.end("页面已关闭，通话已结束"));
 
   return { call };
+}
+
+// ---- the plugin bridge ----------------------------------------------------
+
+const PLUGIN_ID = /^[a-z][a-z0-9._-]{1,63}$/;
+const PLUGIN_CAPABILITIES = new Set(["state", "call", "approve", "subscribe"]);
+const PLUGIN_SCOPE_TTL_MS = 60 * 60 * 1000;
+
+/** The status → stable code vocabulary the client rethrows. */
+function pluginStatus(code) {
+  if (code === 401 || code === 403) return "ERR_ACCESS_DENIED";
+  if (code === 404) return "ERR_NOT_FOUND";
+  if (code === 408 || code === 504) return "ETIMEDOUT";
+  if (code === 501 || code === 503) return "ERR_UNAVAILABLE";
+  return "ERR_PLUGIN";
+}
+
+function pluginFailure(code, message) {
+  return { ok: false, code, message: String(message) };
+}
+
+/**
+ * The capability channel behind `keel.plugin.scope` / `keel.plugin.call`.
+ * A scope is issued for one plugin and carries exactly the declarations the
+ * app read from the inventory; every verb is refused unless the grant names
+ * it. The token is a bearer value the host minted, never a secret.
+ */
+function createPluginBridge(player) {
+  /** token -> { pluginId, capabilities, tools, events, expiresAt } */
+  const scopes = new Map();
+  /** pluginId -> { controller, subscriptionId } */
+  const streams = new Map();
+  let sequence = 0;
+
+  const event = (name, payload) => {
+    try {
+      player.hostEvent(name, payload);
+    } catch {
+      /* an event that is not JSON must not break the page */
+    }
+  };
+
+  const issueToken = (pluginId) => {
+    sequence += 1;
+    try {
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return `${pluginId}:${crypto.randomUUID()}`;
+      }
+    } catch {
+      /* a host without crypto still gets a unique scope */
+    }
+    return `${pluginId}:${Date.now().toString(36)}-${sequence}`;
+  };
+
+  const scope = (args) => {
+    const pluginId = String(args?.pluginId ?? "").trim();
+    if (!PLUGIN_ID.test(pluginId)) {
+      return { ok: false, code: "ERR_ACCESS_DENIED", message: `插件 id「${pluginId}」不合法。` };
+    }
+    const requested = Array.isArray(args?.capabilities) ? args.capabilities : ["state"];
+    const capabilities = [];
+    for (const name of requested) {
+      const value = String(name ?? "").trim();
+      if (!PLUGIN_CAPABILITIES.has(value)) {
+        return {
+          ok: false,
+          code: "ERR_ACCESS_DENIED",
+          message: `桥能力「${value}」不存在；只接受 state/call/approve/subscribe。`,
+        };
+      }
+      if (!capabilities.includes(value)) capabilities.push(value);
+    }
+    const tools = (Array.isArray(args?.tools) ? args.tools : [])
+      .map((name) => String(name ?? "").trim())
+      .filter((name) => name.length > 0 && name.length <= 128);
+    const events = (Array.isArray(args?.events) ? args.events : [])
+      .map((name) => String(name ?? "").trim())
+      .filter((name) => name.length > 0 && name.length <= 128);
+    const token = issueToken(pluginId);
+    scopes.set(token, {
+      pluginId,
+      capabilities,
+      tools,
+      events,
+      expiresAt: Date.now() + PLUGIN_SCOPE_TTL_MS,
+    });
+    return { ok: true, token, pluginId, capabilities, tools, events };
+  };
+
+  const request = async (path, init) => {
+    let response;
+    try {
+      response = await fetch(path, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        ...(init ?? {}),
+      });
+    } catch {
+      return pluginFailure("ERR_UNAVAILABLE", "无法连接插件桥：宿主没有响应。");
+    }
+    let text = "";
+    try {
+      text = await response.text();
+    } catch {
+      text = "";
+    }
+    let body = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = {};
+      }
+    }
+    if (!response.ok) {
+      const message = typeof body?.error === "string" && body.error ? body.error : `插件桥返回 HTTP ${response.status}`;
+      return pluginFailure(pluginStatus(response.status), message);
+    }
+    return { ok: true, result: body };
+  };
+
+  const handleFrame = (frame, grant) => {
+    let name = "message";
+    const data = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith(":")) continue;
+      if (line.startsWith("event:")) name = line.slice(6).trim();
+      else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+    }
+    if (data.length === 0) return;
+    const raw = data.join("\n");
+    let payload;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = raw;
+    }
+    event("keel.plugin.event", { pluginId: grant.pluginId, event: name, payload });
+  };
+
+  const pump = async (response, grant) => {
+    const reader = response?.body?.getReader?.();
+    if (!reader || typeof TextDecoder === "undefined") return;
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let at = buffer.indexOf("\n\n");
+        while (at >= 0) {
+          handleFrame(buffer.slice(0, at), grant);
+          buffer = buffer.slice(at + 2);
+          at = buffer.indexOf("\n\n");
+        }
+      }
+    } finally {
+      const current = streams.get(grant.pluginId);
+      if (current?.controller === grant.controller) streams.delete(grant.pluginId);
+    }
+  };
+
+  const subscribe = async (grant, args) => {
+    if (!grant.capabilities.includes("subscribe")) {
+      return pluginFailure("ERR_ACCESS_DENIED", `插件 ${grant.pluginId} 没有声明 subscribe 能力。`);
+    }
+    const controller = new AbortController();
+    const scoped = { ...grant, controller };
+    const events = Array.isArray(args?.events)
+      ? args.events.map((name) => String(name ?? "").trim()).filter((name) => name.length > 0)
+      : [];
+    const query = events.length > 0 ? `?events=${encodeURIComponent(events.join(","))}` : "";
+    let response;
+    try {
+      response = await fetch(
+        `/v1/plugins/${encodeURIComponent(grant.pluginId)}/bridge/subscribe${query}`,
+        {
+          credentials: "same-origin",
+          headers: { Accept: "text/event-stream" },
+          cache: "no-store",
+          signal: controller.signal,
+        },
+      );
+    } catch {
+      return pluginFailure("ERR_UNAVAILABLE", "插件事件流没有建立。");
+    }
+    if (!response.ok) {
+      return pluginFailure(pluginStatus(response.status), `插件事件流返回 HTTP ${response.status}`);
+    }
+    sequence += 1;
+    const subscriptionId = `sub-${sequence}`;
+    streams.set(grant.pluginId, { controller, subscriptionId });
+    void pump(response, scoped).catch(() => {
+      /* a closed stream is not a page error; a reconnect is the app's call */
+    });
+    return { ok: true, result: { subscriptionId } };
+  };
+
+  const call = async (args) => {
+    const token = String(args?.token ?? "");
+    const grant = scopes.get(token);
+    if (!grant) {
+      return pluginFailure("ERR_ACCESS_DENIED", "插件桥凭据无效：先调用 keel.plugin.scope。");
+    }
+    if (grant.expiresAt <= Date.now()) {
+      scopes.delete(token);
+      return pluginFailure("ERR_ACCESS_DENIED", "插件桥凭据已过期。");
+    }
+    const name = String(args?.name ?? "");
+    const verb = args?.args && typeof args.args === "object" ? args.args : {};
+    const base = `/v1/plugins/${encodeURIComponent(grant.pluginId)}/bridge`;
+    switch (name) {
+      case "keel.plugin.state": {
+        if (!grant.capabilities.includes("state")) {
+          return pluginFailure("ERR_ACCESS_DENIED", `插件 ${grant.pluginId} 没有声明 state 能力。`);
+        }
+        const reply = await request(`${base}/state`, { method: "GET" });
+        return reply.ok ? { ok: true, result: reply.result } : reply;
+      }
+      case "keel.plugin.callTool": {
+        if (!grant.capabilities.includes("call")) {
+          return pluginFailure("ERR_ACCESS_DENIED", `插件 ${grant.pluginId} 没有声明 call 能力。`);
+        }
+        const tool = String(verb?.tool ?? "").trim();
+        if (!tool || !grant.tools.includes(tool)) {
+          return pluginFailure(
+            "ERR_ACCESS_DENIED",
+            `工具「${tool}」不在插件 ${grant.pluginId} 的 provides.tools 声明里。`,
+          );
+        }
+        const reply = await request(`${base}/call`, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ tool, args: verb?.args ?? {} }),
+        });
+        if (!reply.ok) return reply;
+        return { ok: true, result: reply.result?.result ?? reply.result };
+      }
+      case "keel.plugin.requestApproval": {
+        if (!grant.capabilities.includes("approve")) {
+          return pluginFailure("ERR_ACCESS_DENIED", `插件 ${grant.pluginId} 没有声明 approve 能力。`);
+        }
+        const body = verb?.request && typeof verb.request === "object" ? verb.request : verb;
+        const reply = await request(`${base}/approve`, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify(body ?? {}),
+        });
+        return reply.ok ? { ok: true, result: reply.result } : reply;
+      }
+      case "keel.plugin.subscribe":
+        return subscribe(grant, verb);
+      case "keel.plugin.unsubscribe": {
+        const current = streams.get(grant.pluginId);
+        if (current) {
+          try {
+            current.controller.abort();
+          } catch {
+            /* already closed */
+          }
+          streams.delete(grant.pluginId);
+        }
+        return { ok: true, result: { stopped: !!current } };
+      }
+      default:
+        return pluginFailure(
+          "ERR_ACCESS_DENIED",
+          `「${name}」不是插件桥的动词；只接受 state/callTool/requestApproval/subscribe/unsubscribe。`,
+        );
+    }
+  };
+
+  return { scope, call, unsubscribe: (args) => call({ ...args, name: "keel.plugin.unsubscribe" }) };
 }
 
 // ---- pure audio/provider helpers (exported for the host-level tests) ------
