@@ -331,17 +331,34 @@
 
 ## W9 oar-plugin（外部工具）
 
-- [ ] sidecar 接入 OAR：runtime 能力矩阵、record stream（`seq` + `agentPath`）
-- [ ] 外部工具渲染器：把 record stream 折叠成可读的调用/结果视图
-- [ ] 不注入「请记录任务卡」；归属由 record stream 带外提供
+- [x] sidecar 接入 OAR：runtime 能力矩阵、record stream（`seq` + `agentPath`）
+      （W9 2026-11-22：契约冻结 `docs/OAR.md`；`internal/oar` 能力矩阵/typed 码表/
+      `keel.oar.capabilities/1` + `keel.oar.record/1`；sidecar `internal/oar/cmd/keel-oar`
+      复用 `internal/gateway` agent_backend；fake 与 codex 驱动；durable journal
+      `internal/oar/journal.go`；测试 `TestBridgeFakeSidecarRecordStream`、
+      `TestDeclarationMatchesRuntimeMatrix`）
+- [x] 外部工具渲染器：把 record stream 折叠成可读的调用/结果视图
+      （W9 2026-11-22：渲染 seam `keel.oar.render-projection/1`（`internal/oar/projection.go`、
+      fixture `internal/oar/testdata/tool-renderer.fixture.json`）；CLI `cmd/oar-view`；
+      **web UI 槽位未实现**，`keel.ui.tool-renderer` 渲染由 W12 UI agent 拥有）
+- [x] 不注入「请记录任务卡」；归属由 record stream 带外提供
+      （W9 2026-11-22：`session.open.config.attribution{sessionId,taskId}` 带外传递并在
+      每条 Record 回显；sidecar 不追加 prompt；`TestBridgeFakeSidecarRecordStream`
+      扫描记录断言无 `task card`/`任务卡`/`please record`）
 - [x] typed rejection：runtime 不支持的能力在启动前拒绝
       （对账：通用外部网关已实现——`internal/gateway/initialize.go:81-121` 能力集、
       `:150+` `validateInitializeResult`、`internal/gateway/errors.go:124-144` 类型化握手错误；
-      测试 `internal/gateway/conn_test.go:18,40,56`。注：OAR 专用绑定仍缺，见上一条）
+      测试 `internal/gateway/conn_test.go:18,40,56`。W9 2026-11-22 补 OAR 专用绑定：
+      `oar.Error` 码表 + `Declaration.Require` + Codex preflight；测试
+      `TestBridgeRejectsMissingCapability`、`TestBridgeRejectsSimulatedRuntimeForLiveModel`、
+      `TestServiceCodexUnavailableIsTyped`）
 - [x] 进程回收：外部 runtime 退出/崩溃后的孤儿清理
       （对账：通用外部网关已实现——`internal/gateway/process_unix.go`（Setpgid 进程组、
       terminateProcessTree/killProcessTree/KillTree）、测试 `internal/gateway/spawn_unix_test.go:18`、
-      `internal/externalgw/agent.go` 监督重启。注：OAR 专用 runtime 未接）
+      `internal/externalgw/agent.go` 监督重启。W9 2026-11-22 补 OAR 专用 runtime：
+      sidecar stdin EOF/信号清理、codex 进程组 SIGTERM→SIGKILL、`-codex-pid-file` 兜底；
+      测试 `TestBridgeReapsSidecarProcessGroup`、`TestServiceCodexCancelReapsProcessGroup`、
+      `TestBridgeFakeSidecarCrashesCleanly`；证据 `evidence/w09-oar.md`）
 
 ## W10 triggers 对齐
 
@@ -375,6 +392,10 @@
 
 - [ ] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
+      （W9 2026-11-22：OAR 切片已交付——真实 `codex exec --json` 被 spawn 并映射出
+      `thread.started`/`agent_message`/失败 status；但本机模型出口 HTTP 403，turn 以
+      `context deadline exceeded` 收敛，**真链路未全绿**；渲染 seam 已交 projection +
+      fixture，`keel.ui.tool-renderer` 槽位由 W12 实现；证据 `evidence/w09-oar.md`）
 - [x] 工具清单稳定性：增删 MCP server / 技能后清单哈希不变（除非 config 轮转） （对账 2026-11-20：已实现——ManifestHash（internal/toolsurface/hash.go:31）；TestManifestHashStableAcrossMCPServers 断言 100 个 server 哈希不变（toolsurface_test.go:593）；TestApprovedPluginToolsChangeAndRestoreTheManifestHash 断言仅 provides.tools 变更/卸载恢复）
 - [x] 真实模型 E2E：至少一条真 provider 链路（无凭据时用 fake provider），不得只测 happy path
       （对账：`scripts/real-model-e2e.sh`（成功 + `--with-failure`/`--failure-auth` 失败路径 +
