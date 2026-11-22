@@ -33,7 +33,7 @@ var creationBackendActions = map[string]string{
 func (b CreationBackend) Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error) {
 	tool, ok := creationBackendActions[action]
 	if !ok {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: unknown creation action %q", action)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: unknown creation action %q", action)
 	}
 	manager := (*Manager)(nil)
 	if b.Manager != nil {

@@ -13,7 +13,7 @@
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ HTTP + SSE（同源；结构上无需 CORS）
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
-│ HTTP 边缘 + AgentAPI（internal/httpapi、internal/harnessapi）                   │
+│ HTTP 边缘 + Harness API（internal/httpapi、internal/harnessapi）                  │
 │  边缘：tenants/sessions/input/retry/events/stream/files/runtime drain        │
 │  产品：capabilities、会话列表、cancel、decisions、plugins/triggers/          │
 │        subagents、settings 面                                                │
@@ -54,7 +54,7 @@
 4. `servicehost.Boot` → `loadout.FromTenantConfig` → `Engine.Apply` → 断言运行路径上的服务
    全部 `ACTIVE`（`cmd/keel/serve.go:213`）；
 5. 运行时就绪后才启动 SSE hub——启动失败不能占住连接池（`cmd/keel/serve.go:275`）；
-6. 构建产品层（decisions、triggers、subagents、plugins），并把 AgentAPI 挂在 HTTP 边缘旁
+6. 构建产品层（decisions、triggers、subagents、plugins），并把 Harness API 挂在 HTTP 边缘旁
    （`cmd/keel/serve.go:282`、`:294`）。
 
 默认 loadout 是权威装配（`internal/loadout/loadout.go:63`；见 `docs/LOADOUT.md` §2）：
@@ -179,7 +179,7 @@ queue/guide 状态是事件驱动的，停止只有 `run.finished` 才算确认
 （`internal/harnessext/streamtee.go:24`、`packages/chat-surface/src/engine.ts`）。
 
 同一份投影驱动两个界面，这也是 web UI 与 TUI 不会漂移的原因：`keel tui` 用同一份 TSX
-对接同一个 AgentAPI（`docs/WEBUI.md`、`web/README.md`）。
+对接同一个 Harness API（`docs/WEBUI.md`、`web/README.md`）。
 
 ## 6. 什么可替换，什么不可以
 

@@ -218,7 +218,7 @@ func (h *staticHandler) notBuilt(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNotFound)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error":  "web build not found",
-		"detail": "keel serve hosts the NSH web package (nsh package --target web) from " + dir + "; the AgentAPI is still available under /v1",
+		"detail": "keel serve hosts the NSH web package (nsh package --target web) from " + dir + "; the Harness API is still available under /v1",
 		"webDir": dir,
 	})
 }

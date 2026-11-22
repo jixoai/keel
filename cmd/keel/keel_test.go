@@ -21,7 +21,7 @@ func TestVersionCommand(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "keel "+version) || !strings.Contains(out, "agent-api: v1") {
+	if !strings.Contains(out, "keel "+version) || !strings.Contains(out, "harness-api: v1") {
 		t.Fatalf("version output:\n%s", out)
 	}
 	if code := run([]string{"nope"}, &stdout, &stderr); code != 2 {

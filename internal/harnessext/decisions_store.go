@@ -128,7 +128,7 @@ func (s *TasksDecisionStore) Create(ctx context.Context, row DecisionRow) error 
 	}
 	checkpoint, err := json.Marshal(decisionJournal{Events: row.Events})
 	if err != nil {
-		return fmt.Errorf("agentext: encode decision journal: %w", err)
+		return fmt.Errorf("harnessext: encode decision journal: %w", err)
 	}
 	_, err = s.store.CreateTask(ctx, store.TaskRow{
 		TenantID:   row.TenantID,
@@ -144,7 +144,7 @@ func (s *TasksDecisionStore) Create(ctx context.Context, row DecisionRow) error 
 		EndedAt:    row.AnsweredAt,
 	})
 	if err != nil {
-		return fmt.Errorf("agentext: create decision row: %w", err)
+		return fmt.Errorf("harnessext: create decision row: %w", err)
 	}
 	return nil
 }
@@ -176,7 +176,7 @@ func (s *TasksDecisionStore) Save(ctx context.Context, row DecisionRow) error {
 	}
 	checkpoint, err := json.Marshal(decisionJournal{Events: row.Events})
 	if err != nil {
-		return fmt.Errorf("agentext: encode decision journal: %w", err)
+		return fmt.Errorf("harnessext: encode decision journal: %w", err)
 	}
 	if err := s.store.SaveTask(ctx, store.TaskRow{
 		TenantID:   row.TenantID,
@@ -232,7 +232,7 @@ func encodeDecisionDoc(row DecisionRow) (json.RawMessage, error) {
 		Deadline:      row.Deadline,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("agentext: encode decision: %w", err)
+		return nil, fmt.Errorf("harnessext: encode decision: %w", err)
 	}
 	return raw, nil
 }
@@ -252,13 +252,13 @@ func decodeDecisionTask(task store.TaskRow) (DecisionRow, error) {
 	var doc decisionDoc
 	if len(task.Input) > 0 {
 		if err := json.Unmarshal(task.Input, &doc); err != nil {
-			return DecisionRow{}, fmt.Errorf("agentext: decode decision %s: %w", task.TaskID, err)
+			return DecisionRow{}, fmt.Errorf("harnessext: decode decision %s: %w", task.TaskID, err)
 		}
 	}
 	var journal decisionJournal
 	if len(task.Checkpoint) > 0 {
 		if err := json.Unmarshal(task.Checkpoint, &journal); err != nil {
-			return DecisionRow{}, fmt.Errorf("agentext: decode decision journal %s: %w", task.TaskID, err)
+			return DecisionRow{}, fmt.Errorf("harnessext: decode decision journal %s: %w", task.TaskID, err)
 		}
 	}
 	row := DecisionRow{
@@ -282,7 +282,7 @@ func decodeDecisionTask(task store.TaskRow) (DecisionRow, error) {
 	if len(task.Outcome) > 0 {
 		var answer DecisionAnswer
 		if err := json.Unmarshal(task.Outcome, &answer); err != nil {
-			return DecisionRow{}, fmt.Errorf("agentext: decode decision answer %s: %w", task.TaskID, err)
+			return DecisionRow{}, fmt.Errorf("harnessext: decode decision answer %s: %w", task.TaskID, err)
 		}
 		row.Answer = &answer
 	}

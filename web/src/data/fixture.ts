@@ -296,7 +296,7 @@ const demoTeamCli = (): CliCapabilityView[] => [
   },
   {
     path: ["team", "start"],
-    summary: "Start a team session; the captain answers and members run as their own Agents.",
+    summary: "Start a team session; the captain answers and members run as their own Bots.",
     permissions: ["team.run"],
     danger: "write",
     idempotent: false,
@@ -355,7 +355,7 @@ export class FixtureClient implements SettingsApi {
     },
   ];
   private triggerFires = 12;
-  /** The demo agent registry (the settings Agents section) — editable in the
+  /** The demo Bot registry (the settings Bots section) — editable in the
    * fixture so the demo's create/edit/delete paths are real, not stubs. */
   private agentState: AgentView[] = [
     {
@@ -967,7 +967,7 @@ export class FixtureClient implements SettingsApi {
 
   // ---- agent & team registry (demo) --------------------------------------
   //
-  // The same shapes the HTTP DTOs declare, kept in memory: the demo's Agents
+  // The same shapes the HTTP DTOs declare, kept in memory: the demo's Bots
   // and 团队 sections create, edit and delete for real, and the captain /
   // reference rules answer with the same readable refusals the server does.
 
@@ -976,7 +976,7 @@ export class FixtureClient implements SettingsApi {
   }
 
   async createAgent(request: AgentWriteRequest): Promise<AgentView> {
-    if (!request.name.trim()) throw new KeelApiError(400, "Agent 名字不能为空");
+    if (!request.name.trim()) throw new KeelApiError(400, "Bot 名字不能为空");
     const created: AgentView = {
       id: request.id || `agent_demo_new_${++this.agentSequence}`,
       name: request.name,
@@ -993,7 +993,7 @@ export class FixtureClient implements SettingsApi {
 
   async updateAgent(id: string, request: AgentWriteRequest): Promise<AgentView> {
     const index = this.agentState.findIndex((agent) => agent.id === id);
-    if (index < 0) throw new KeelApiError(404, `Agent ${id} 不存在`);
+    if (index < 0) throw new KeelApiError(404, `Bot ${id} 不存在`);
     const updated: AgentView = {
       ...this.agentState[index],
       id,
@@ -1015,9 +1015,9 @@ export class FixtureClient implements SettingsApi {
         team.captain.agentId === id || (team.members ?? []).some((member) => member.agentId === id),
     );
     if (referencing) {
-      throw new KeelApiError(409, `Agent ${id} 正被团队「${referencing.name}」引用，先移出团队再删除。`);
+      throw new KeelApiError(409, `Bot ${id} 正被团队「${referencing.name}」引用，先移出团队再删除。`);
     }
-    if (!this.agentState.some((agent) => agent.id === id)) throw new KeelApiError(404, `Agent ${id} 不存在`);
+    if (!this.agentState.some((agent) => agent.id === id)) throw new KeelApiError(404, `Bot ${id} 不存在`);
     this.agentState = this.agentState.filter((agent) => agent.id !== id);
   }
 
@@ -1030,7 +1030,7 @@ export class FixtureClient implements SettingsApi {
   private teamViewOf(id: string, request: AgentTeamWriteRequest): AgentTeamView {
     if (!request.captain?.agentId) throw new KeelApiError(400, "团队必须有队长");
     if (!this.agentState.some((agent) => agent.id === request.captain.agentId)) {
-      throw new KeelApiError(400, "队长必须是已存在的 Agent");
+      throw new KeelApiError(400, "队长必须是已存在的 Bot");
     }
     return {
       id,
@@ -1077,7 +1077,7 @@ export class FixtureClient implements SettingsApi {
 
   async addTeamMember(id: string, agentId: string): Promise<AgentTeamView> {
     if (!this.agentState.some((agent) => agent.id === agentId)) {
-      throw new KeelApiError(400, `Agent ${agentId} 不存在`);
+      throw new KeelApiError(400, `Bot ${agentId} 不存在`);
     }
     return this.mutateTeam(id, (team) => {
       if (team.captain.agentId === agentId) {

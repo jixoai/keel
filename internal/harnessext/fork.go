@@ -29,19 +29,19 @@ var (
 	// ErrForkUnavailable reports a deployment without the fork seams (durable
 	// fork fact or card writer). A fork without them would create a child that
 	// cannot answer where it came from.
-	ErrForkUnavailable = errors.New("agentext: fork is not wired in this deployment")
+	ErrForkUnavailable = errors.New("harnessext: fork is not wired in this deployment")
 	// ErrForkOriginInvalid reports an eventSeq outside the parent's committed
 	// log (negative, or beyond the newest seq).
-	ErrForkOriginInvalid = errors.New("agentext: fork origin is outside the parent ledger")
+	ErrForkOriginInvalid = errors.New("harnessext: fork origin is outside the parent ledger")
 	// ErrForkSnapshotMissing reports a fork origin whose file view cannot be
 	// resolved exactly: the parent has file mutations after the newest snapshot
 	// at or before the origin. The caller must fork at a captured seq.
-	ErrForkSnapshotMissing = errors.New("agentext: fork origin has no exact file snapshot")
+	ErrForkSnapshotMissing = errors.New("harnessext: fork origin has no exact file snapshot")
 	// ErrSubagentNotFound reports a child session that is not a sub-agent of the
 	// named parent (or does not exist in the tenant).
-	ErrSubagentNotFound = errors.New("agentext: sub-agent not found under this parent")
+	ErrSubagentNotFound = errors.New("harnessext: sub-agent not found under this parent")
 	// ErrResumeUnavailable reports a deployment without the run requeue seam.
-	ErrResumeUnavailable = errors.New("agentext: resume is not wired in this deployment")
+	ErrResumeUnavailable = errors.New("harnessext: resume is not wired in this deployment")
 )
 
 // ForkSnapshotReader resolves a session's file-view tree at or before an event
@@ -199,10 +199,10 @@ type CancelRequest struct {
 // input, then returns immediately. Wait collects the structured result.
 func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (SubagentRecord, error) {
 	if r.starter == nil || r.runs == nil {
-		return SubagentRecord{}, errors.New("agentext: fork needs the session gate, the kernel edge and the run reader")
+		return SubagentRecord{}, errors.New("harnessext: fork needs the session gate, the kernel edge and the run reader")
 	}
 	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil {
-		return SubagentRecord{}, errors.New("agentext: tenant and parent session are required")
+		return SubagentRecord{}, errors.New("harnessext: tenant and parent session are required")
 	}
 	if req.EventSeq < 0 {
 		return SubagentRecord{}, fmt.Errorf("%w: eventSeq must be non-negative", ErrForkOriginInvalid)
@@ -317,7 +317,7 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 	callID := "fork:" + childID.String()
 	if _, err := r.cards.ForkCard(ctx, parentScope, originTaskID, origin, childScope, title, callID); err != nil {
 		r.rollbackFork(ctx, req.TenantID, childID, true)
-		return SubagentRecord{}, fmt.Errorf("agentext: create forked card: %w", err)
+		return SubagentRecord{}, fmt.Errorf("harnessext: create forked card: %w", err)
 	}
 
 	task := strings.TrimSpace(req.Task)
@@ -423,7 +423,7 @@ func (r *SubagentRunner) Fork(ctx context.Context, req ForkRequest) (SubagentRes
 // is a bookkeeping event (resume.attempt) keyed by requestId.
 func (r *SubagentRunner) Resume(ctx context.Context, req ResumeRequest) (ResumeResult, error) {
 	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil || req.SessionID == uuid.Nil {
-		return ResumeResult{}, errors.New("agentext: tenant, parent session and child session are required")
+		return ResumeResult{}, errors.New("harnessext: tenant, parent session and child session are required")
 	}
 	if _, err := r.requireChild(ctx, req.TenantID, req.ParentSessionID, req.SessionID); err != nil {
 		return ResumeResult{}, err
@@ -528,7 +528,7 @@ func (r *SubagentRunner) Resume(ctx context.Context, req ResumeRequest) (ResumeR
 // Cancel stops a child run in place. It never creates a card or a new run.
 func (r *SubagentRunner) Cancel(ctx context.Context, req CancelRequest) (CancelResult, error) {
 	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil || req.SessionID == uuid.Nil {
-		return CancelResult{}, errors.New("agentext: tenant, parent session and child session are required")
+		return CancelResult{}, errors.New("harnessext: tenant, parent session and child session are required")
 	}
 	if _, err := r.requireChild(ctx, req.TenantID, req.ParentSessionID, req.SessionID); err != nil {
 		return CancelResult{}, err
@@ -847,7 +847,7 @@ func ForkFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMess
 		return SubagentResult{}, SubagentRecord{}, ErrRunScopeMissing
 	}
 	if runner == nil {
-		return SubagentResult{}, SubagentRecord{}, errors.New("agentext: no sub-agent runner is wired")
+		return SubagentResult{}, SubagentRecord{}, errors.New("harnessext: no sub-agent runner is wired")
 	}
 	var input struct {
 		EventSeq       *int64          `json:"eventSeq"`
@@ -891,7 +891,7 @@ func ResumeFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMe
 		return ResumeResult{}, ErrRunScopeMissing
 	}
 	if runner == nil {
-		return ResumeResult{}, errors.New("agentext: no sub-agent runner is wired")
+		return ResumeResult{}, errors.New("harnessext: no sub-agent runner is wired")
 	}
 	var input struct {
 		SessionID string          `json:"sessionId"`
@@ -926,7 +926,7 @@ func CancelFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMe
 		return CancelResult{}, ErrRunScopeMissing
 	}
 	if runner == nil {
-		return CancelResult{}, errors.New("agentext: no sub-agent runner is wired")
+		return CancelResult{}, errors.New("harnessext: no sub-agent runner is wired")
 	}
 	var input struct {
 		SessionID string `json:"sessionId"`

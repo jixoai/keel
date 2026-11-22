@@ -71,7 +71,7 @@ const sessionSelect = `SELECT s.session_id, s.created_at, s.updated_at,
 // ListSessionSummaries reads one page, newest activity first.
 func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uuid.UUID, limit int, after string) (SessionPage, error) {
 	if l == nil || l.db == nil {
-		return SessionPage{}, fmt.Errorf("agentapi: session lister is not configured")
+		return SessionPage{}, fmt.Errorf("harnessapi: session lister is not configured")
 	}
 	if limit <= 0 || limit > maxSessionsLimit {
 		limit = defaultSessionsLimit
@@ -117,7 +117,7 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
 				firstInput    sql.NullString
 			)
 			if err := rows.Scan(&sessionID, &createdAt, &updatedAt, &lastSeq, &runStatus, &lastMessageAt, &firstInput); err != nil {
-				return fmt.Errorf("agentapi: scan session: %w", err)
+				return fmt.Errorf("harnessapi: scan session: %w", err)
 			}
 			summary := SessionSummary{
 				SessionID: sessionID.String(),
@@ -139,10 +139,10 @@ func (l *PGSessionLister) ListSessionSummaries(ctx context.Context, tenantID uui
 		if err := l.store.TenantScoped(ctx, tenantID, func(tx store.TenantTx) error {
 			return collect(tx)
 		}); err != nil {
-			return SessionPage{}, fmt.Errorf("agentapi: list sessions: %w", err)
+			return SessionPage{}, fmt.Errorf("harnessapi: list sessions: %w", err)
 		}
 	} else if err := collect(poolQuerier{l.db}); err != nil {
-		return SessionPage{}, fmt.Errorf("agentapi: list sessions: %w", err)
+		return SessionPage{}, fmt.Errorf("harnessapi: list sessions: %w", err)
 	}
 
 	page := SessionPage{HasMore: len(collected) > limit}
@@ -170,7 +170,7 @@ type poolQuerier struct{ db PGQuerier }
 
 func (p poolQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	if p.db == nil {
-		return nil, fmt.Errorf("agentapi: session lister is not configured")
+		return nil, fmt.Errorf("harnessapi: session lister is not configured")
 	}
 	return p.db.Query(ctx, sql, args...)
 }

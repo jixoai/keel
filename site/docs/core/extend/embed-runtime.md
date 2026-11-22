@@ -25,7 +25,7 @@ project makes no versioning promise about internal packages. Practical options:
 2. **Vendor/replace the module** in a private build. The code is Apache-2.0, so this is legal; the
    boundary tests still keep the kernel pure, but you own the upgrade path.
 3. **Do not embed the process; talk to it.** If what you need is "my application drives an agent",
-   the supported contract is the HTTP face — [AgentAPI](/core/agentapi) plus SSE. That contract *is*
+   the supported contract is the HTTP face — [Harness API](/core/agentapi) plus SSE. That contract *is*
    versioned (`/v1`, additive) and is what the shipped clients use.
 
 Options 1 and 2 are covered below; option 3 is the recommended default for anything that is not the
@@ -151,7 +151,7 @@ Adding a service (rather than a whole process) is the subject of the next page:
 
 | Not available | Why | Alternative |
 |---|---|---|
-| A stable public Go API | runtime packages are `internal/`; there is no semver promise on them | HTTP [AgentAPI](/core/agentapi) with `/v1` + capability discovery |
+| A stable public Go API | runtime packages are `internal/`; there is no semver promise on them | HTTP [Harness API](/core/agentapi) with `/v1` + capability discovery |
 | In-process hot-swap of services | the assembly is compiled in; hot-plugging old goroutines/listeners makes the 2GB bound unpredictable | [handoff](/core/architecture) |
 | Multiple writers to one session | the one-writer-per-session rule is what makes recovery sound | leases and fencing (claim/epoch) |
 | Process-level multi-tenancy in `keel serve` | `serve` is a single-tenant shell (`KEEL_SERVE_TENANT`); the multi-tenant runtime is `cmd/runtime` | `cmd/runtime` with per-request `X-Tenant-ID` |

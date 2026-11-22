@@ -27,7 +27,7 @@ keel.plugin.* 桥                 唯一能力通道：
 - 主题必须使用**宿主令牌**，即 webview + react + solid-glass 模板（§3）。
 
 同源设计不是巧合：web 客户端本就由 `keel serve` 从构建目录托管（`cmd/keel/static.go:16`），
-`/plugins/<id>/` 因此搭同一 origin，无需 CORS——这正是 AgentAPI 设计时的前提
+`/plugins/<id>/` 因此搭同一 origin，无需 CORS——这正是 Harness API 设计时的前提
 （`internal/harnessapi/api.go:1`）。
 
 ## 2. `keel.plugin.*` 桥

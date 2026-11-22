@@ -102,7 +102,7 @@ func (b ShellBackend) Invoke(ctx context.Context, action string, args json.RawMe
 		manager = b.Manager()
 	}
 	if manager == nil {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: %w: the plugin manager is not wired", ErrPluginState)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: %w: the plugin manager is not wired", ErrPluginState)
 	}
 	tool := shellRunTool
 	switch action {
@@ -110,7 +110,7 @@ func (b ShellBackend) Invoke(ctx context.Context, action string, args json.RawMe
 	case "jobs":
 		tool = shellJobsTool
 	default:
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: unknown bash action %q", action)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: unknown bash action %q", action)
 	}
 	return manager.InvokeToolResult(ctx, ShellPluginID, tool, args)
 }
@@ -121,7 +121,7 @@ func shellInvoke(ctx context.Context, opts ShellOptions, action string, raw json
 		manager = opts.Service()
 	}
 	if manager == nil {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: %w: the bash job manager is not wired", ErrPluginState)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: %w: the bash job manager is not wired", ErrPluginState)
 	}
 	tenant, session := shellScope(ctx, opts.TenantID)
 	switch action {

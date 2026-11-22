@@ -64,7 +64,7 @@ keel tui --url http://127.0.0.1:13750 --token "$KEEL_SERVE_PASSWORD"
 keel tui --print
 ```
 
-The TUI is the same client (same TSX, same AgentAPI) rendered in a terminal
+The TUI is the same client (same TSX, same Harness API) rendered in a terminal
 host; it is not a second implementation (`docs/WEBUI.md`). `KEEL_TUI_BIN`
 points at the packaged TUI binary (`nsh package --target tui`), `KEEL_AGENT_URL`
 at the running host (`cmd/keel/tui.go:22`). It deliberately does not render

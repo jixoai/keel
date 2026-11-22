@@ -22,7 +22,7 @@ const (
 )
 
 // ErrBadCursor is a malformed pagination cursor (400).
-var ErrBadCursor = errors.New("agentapi: malformed pagination cursor")
+var ErrBadCursor = errors.New("harnessapi: malformed pagination cursor")
 
 // SessionSummary is one row of GET /v1/sessions. The six spec fields are
 // sessionId, createdAt, updatedAt, lastSeq, runStatus, lastMessageAt;

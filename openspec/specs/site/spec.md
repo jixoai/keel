@@ -32,7 +32,7 @@ TBD - created by archiving change keel-site. Update Purpose after archive.
 ### Requirement: Core 主线（原理 + 二次开发）
 
 Core 文档 MUST 覆盖：架构总览、事件账本与提交分类、内核与 PI loop、服务图与 loadout、handoff 与
-背压、事件种类与 AgentAPI 契约、存储（PG/CAS/溢出）、以及**二次开发**：嵌入 runtime、写服务描述符、
+背压、事件种类与 Harness API 契约、存储（PG/CAS/溢出）、以及**二次开发**：嵌入 runtime、写服务描述符、
 接外部 backend、写 provider 适配器、测试与验收（含 `acceptance-all` 口径）。
 
 #### Scenario: 二次开发可照做

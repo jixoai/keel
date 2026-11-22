@@ -23,8 +23,8 @@ import (
 // The parent receives a structured result; the sub-agent's failure can never
 // take the parent's turn down (it is a value, not an exception).
 var (
-	ErrParentSessionNotFound  = errors.New("agentext: parent session not found")
-	ErrSubagentBudgetExceeded = errors.New("agentext: sub-agent budget exhausted")
+	ErrParentSessionNotFound  = errors.New("harnessext: parent session not found")
+	ErrSubagentBudgetExceeded = errors.New("harnessext: sub-agent budget exhausted")
 )
 
 // Budget bounds one sub-agent execution. Zero means "inherit the runner
@@ -303,14 +303,14 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 // owned by the worker; call Wait to collect the structured result.
 func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (SubagentRecord, error) {
 	if r.starter == nil || r.runs == nil {
-		return SubagentRecord{}, errors.New("agentext: sub-agent runner needs the session gate, the kernel edge and the run reader")
+		return SubagentRecord{}, errors.New("harnessext: sub-agent runner needs the session gate, the kernel edge and the run reader")
 	}
 	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil {
-		return SubagentRecord{}, errors.New("agentext: tenant and parent session are required")
+		return SubagentRecord{}, errors.New("harnessext: tenant and parent session are required")
 	}
 	req.Task = strings.TrimSpace(req.Task)
 	if req.Task == "" {
-		return SubagentRecord{}, errors.New("agentext: task is required")
+		return SubagentRecord{}, errors.New("harnessext: task is required")
 	}
 	if _, exists, err := r.gate.SessionOwner(ctx, req.TenantID, req.ParentSessionID); err != nil {
 		return SubagentRecord{}, err
@@ -417,7 +417,7 @@ func (r *SubagentRunner) Spawn(ctx context.Context, req SpawnRequest) (SubagentR
 // parent-link index).
 func (r *SubagentRunner) Wait(ctx context.Context, tenantID, sessionID uuid.UUID, budget Budget, agent string) (SubagentResult, error) {
 	if r.runs == nil {
-		return SubagentResult{}, errors.New("agentext: sub-agent runner has no run reader")
+		return SubagentResult{}, errors.New("harnessext: sub-agent runner has no run reader")
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, budget.timeout(r.defaultTimeout))
 	defer cancel()
@@ -841,10 +841,10 @@ func RunScopeFromContext(ctx context.Context) (RunScope, bool) {
 }
 
 // ErrRunScopeMissing reports a spawn request outside a run (no ambient parent).
-var ErrRunScopeMissing = errors.New("agentext: the spawn action needs the ambient run scope")
+var ErrRunScopeMissing = errors.New("harnessext: the spawn action needs the ambient run scope")
 
 // ErrInvalidSpawn reports a malformed spawn request (bad JSON, missing task).
-var ErrInvalidSpawn = errors.New("agentext: invalid spawn arguments")
+var ErrInvalidSpawn = errors.New("harnessext: invalid spawn arguments")
 
 // SpawnFromTool is the one parser/handler behind the `agent` aggregate tool's
 // spawn action. It carries the model's botId into the child input's selection
@@ -856,7 +856,7 @@ func SpawnFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMes
 		return SubagentResult{}, ErrRunScopeMissing
 	}
 	if runner == nil {
-		return SubagentResult{}, errors.New("agentext: no sub-agent runner is wired")
+		return SubagentResult{}, errors.New("harnessext: no sub-agent runner is wired")
 	}
 	var input struct {
 		Task           string `json:"task"`

@@ -196,10 +196,10 @@ func (l *SidecarLoader) SetFailureSink(sink func(pluginID, version, reason strin
 // leaves a process behind (spec S2: no orphans).
 func (l *SidecarLoader) Load(ctx context.Context, pkg pluginpkg.Package, manifest *pluginpkg.Manifest) (*Plugin, error) {
 	if manifest == nil {
-		return nil, errors.New("agentext: sidecar loader needs the plugin manifest")
+		return nil, errors.New("harnessext: sidecar loader needs the plugin manifest")
 	}
 	if manifest.Kind != pluginpkg.KindSidecar && manifest.Kind != pluginpkg.KindWebview {
-		return nil, fmt.Errorf("agentext: sidecar loader does not load kind %s", manifest.Kind)
+		return nil, fmt.Errorf("harnessext: sidecar loader does not load kind %s", manifest.Kind)
 	}
 	command, args, err := l.resolveCommand(pkg, manifest)
 	if err != nil {
@@ -217,7 +217,7 @@ func (l *SidecarLoader) Load(ctx context.Context, pkg pluginpkg.Package, manifes
 		CloseGrace: l.opts.CloseGrace,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("agentext: plugin %s: spawn sidecar: %w", manifest.ID, err)
+		return nil, fmt.Errorf("harnessext: plugin %s: spawn sidecar: %w", manifest.ID, err)
 	}
 	// A refused plugin must not leave a process behind: every early return
 	// below closes the transport, which is the documented shutdown ladder.

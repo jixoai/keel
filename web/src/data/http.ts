@@ -1,4 +1,4 @@
-// The live transport: `fetch` + SSE against keel's AgentAPI, and the
+// The live transport: `fetch` + SSE against keel's Harness API, and the
 // `SurfaceCommands` that write through it. Same origin by default (`keel
 // serve` hosts the web build, the API and the stream), so no CORS and no
 // tenant headers in the browser; a dev origin can be passed explicitly.

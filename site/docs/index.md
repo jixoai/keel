@@ -102,7 +102,7 @@ The complete runbook, including tests, load tests and the 2GB cgroup replay, is 
 ## Where to go next
 
 - **Core** — [what Keel is](/core/), then [architecture](/core/architecture),
-  [events and protocol](/core/events), [AgentAPI](/core/agentapi),
+  [events and protocol](/core/events), [Harness API](/core/agentapi),
   [storage and runtime](/core/storage), and the [extension map](/core/extend/).
 - **Harness** — [what the Harness is](/harness/) and its plugin standard, starting at
   [plugins](/harness/plugins/).

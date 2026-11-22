@@ -165,7 +165,7 @@ data: {"retry_after_ms":3000}
 
 ## 9. 问服务端，不要猜
 
-客户端的线契约是版本化的：`AgentAPI` 以 `/v1` 前缀且只增不改（`internal/harnessapi/api.go:268`）。
+客户端的线契约是版本化的：Harness API 以 `/v1` 前缀且只增不改（`internal/harnessapi/api.go:268`）。
 客户端不得从二进制版本推断特性；它问 `GET /v1/capabilities` 并对 `false` 降级。实测响应：
 
 ```json
@@ -177,4 +177,4 @@ data: {"retry_after_ms":3000}
  "hooks":["subagent.started","subagent.finished","trigger.before","trigger.after","turn.started","turn.finished","decision.opened","decision.answered"]}
 ```
 
-端点参考在下一页：[AgentAPI 参考](/zh/core/agentapi)。
+端点参考在下一页：[Harness API 参考](/zh/core/agentapi)。

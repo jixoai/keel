@@ -22,7 +22,7 @@ Go 的 `internal/` 规则意味着这些包只能被模块 `github.com/jixoai/ke
 2. **vendor/replace 该模块**做私有构建。代码是 Apache-2.0，合法；边界测试仍保证内核纯净，但升级路径
    归你自己。
 3. **不嵌入进程，而是与它对话**。若你的需求是「我的应用驱动一个智能体」，受支持的契约是 HTTP 面——
-   [AgentAPI](/zh/core/agentapi) 加 SSE。该契约**是**版本化的（`/v1`，只增不改），也是随仓客户端的用法。
+   [Harness API](/zh/core/agentapi) 加 SSE。该契约**是**版本化的（`/v1`，只增不改），也是随仓客户端的用法。
 
 1、2 见下；3 是「除运行时本身之外的一切」的推荐默认。
 
@@ -140,7 +140,7 @@ func main() {
 
 | 拿不到 | 原因 | 替代 |
 |---|---|---|
-| 稳定的公开 Go API | 运行时包是 `internal/`；不对它们作 semver 承诺 | 走 HTTP [AgentAPI](/zh/core/agentapi)：`/v1` + 能力探测 |
+| 稳定的公开 Go API | 运行时包是 `internal/`；不对它们作 semver 承诺 | 走 HTTP [Harness API](/zh/core/agentapi)：`/v1` + 能力探测 |
 | 进程内热替换服务 | 装配被编译进二进制；热拔插旧 goroutine/监听器会让 2GB 边界不可预测 | [handoff](/zh/core/architecture) |
 | 同一会话多写者 | 「一会话一写者」是恢复可证的前提 | 租约与 fencing（claim/epoch） |
 | `keel serve` 的进程级多租户 | `serve` 是单租户壳（`KEEL_SERVE_TENANT`）；多租户运行时是 `cmd/runtime` | `cmd/runtime` + 每请求 `X-Tenant-ID` |

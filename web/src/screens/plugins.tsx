@@ -78,7 +78,7 @@ import { prefillComposer } from "./composer";
 // ---- where a plugin's page lives -----------------------------------------
 
 /**
- * The origin the AgentAPI answers on — and therefore the origin the plugin
+ * The origin the Harness API answers on — and therefore the origin the plugin
  * page is served from. Two sources, each one the platform's own:
  *
  *   · web    `keel.info.origin`, answered by the page host (`web/host.js:69-75`);

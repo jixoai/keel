@@ -54,7 +54,7 @@ loadout）与产品层，并拥有全部关闭顺序（`cmd/keel/serve.go:75`、
 keel serve（单进程）
 ├─ HTTP 边缘            /v1/tenants, /v1/sessions/{id}/input, /v1/sessions/{id}/events[/stream],
 │                       /v1/files, /v1/runtime/{drain,status}      internal/httpapi/server.go:146
-├─ 产品 API（AgentAPI）
+├─ 产品 API（Harness API）
 │   ├─ 能力发现         GET /v1/capabilities                        internal/harnessapi/api.go:257
 │   ├─ 会话             GET /v1/sessions, POST …/{id}/cancel        internal/harnessapi/api.go:171
 │   ├─ 审批             GET/POST /v1/sessions/{id}/decisions[/…]    internal/harnessapi/api.go:173

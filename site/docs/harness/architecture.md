@@ -15,7 +15,7 @@ section for those.
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ HTTP + SSE (one origin; no CORS by construction)
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
-│ HTTP edge + AgentAPI (internal/httpapi, internal/harnessapi)                    │
+│ HTTP edge + Harness API (internal/httpapi, internal/harnessapi)              │
 │  edge: tenants/sessions/input/retry/events/stream/files/runtime drain        │
 │  product: capabilities, session list, cancel, decisions, plugins/triggers/   │
 │           sub-agents, settings surface                                       │
@@ -60,7 +60,7 @@ order, and the order *is* the safety contract (`cmd/keel/serve.go:75`):
 5. start the SSE hub only after the runtime is up, so a boot failure cannot
    park a pool connection (`cmd/keel/serve.go:275`);
 6. build the product layer (decisions, triggers, sub-agents, plugins) and mount
-   the AgentAPI next to the HTTP edge (`cmd/keel/serve.go:282`, `:294`).
+   the Harness API next to the HTTP edge (`cmd/keel/serve.go:282`, `:294`).
 
 The default loadout is the assembly of record
 (`internal/loadout/loadout.go:63`; documented in `docs/LOADOUT.md` §2):
@@ -209,7 +209,7 @@ and are dropped the moment the committed message arrives
 (`internal/harnessext/streamtee.go:24`, `packages/chat-surface/src/engine.ts`).
 
 The same projection powers both surfaces, which is why the web UI and the TUI
-cannot drift apart: `keel tui` runs the same TSX against the same AgentAPI
+cannot drift apart: `keel tui` runs the same TSX against the same Harness API
 (`docs/WEBUI.md`, `web/README.md`).
 
 ## 6. What can be replaced, what cannot

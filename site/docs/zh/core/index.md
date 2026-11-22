@@ -121,7 +121,7 @@ Core 主线是五页原理 + 六页实践：
 |---|---|
 | [架构](/zh/core/architecture) | 账本、内核、服务图、loadout、handoff、背压分别是什么，边界在哪？ |
 | [事件与协议](/zh/core/events) | 事件种类有哪些？提交如何分类、如何幂等？SSE 保证什么？ |
-| [AgentAPI 参考](/zh/core/agentapi) | 每个 HTTP 面有哪些端点？请求/响应形状与错误码是什么？ |
+| [Harness API 参考](/zh/core/agentapi) | 每个 HTTP 面有哪些端点？请求/响应形状与错误码是什么？ |
 | [存储与运行](/zh/core/storage) | 数据怎么存（PG、分块、CAS）？请求怎么分池？内存预算多少？ |
 | [扩展地图](/zh/core/extend/) | 我想改 X——该用哪个接缝？ |
 | [嵌入 runtime](/zh/core/extend/embed-runtime) · [写一个服务描述符](/zh/core/extend/service-descriptor) · [接外部 backend](/zh/core/extend/external-backend) · [写 provider 适配器](/zh/core/extend/provider-adapter) · [测试与验收](/zh/core/extend/testing) | 四条扩展路径，各带代码、命令与验收口径。 |

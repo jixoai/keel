@@ -31,7 +31,7 @@ const coreSidebarEn = [
       { text: 'What Keel is', link: '/core/' },
       { text: 'Architecture', link: '/core/architecture' },
       { text: 'Events and protocol', link: '/core/events' },
-      { text: 'AgentAPI reference', link: '/core/agentapi' },
+      { text: 'Harness API reference', link: '/core/agentapi' },
       { text: 'Storage and runtime', link: '/core/storage' }
     ]
   },
@@ -94,7 +94,7 @@ const coreSidebarZh = [
       { text: 'Keel 是什么', link: '/zh/core/' },
       { text: '架构', link: '/zh/core/architecture' },
       { text: '事件与协议', link: '/zh/core/events' },
-      { text: 'AgentAPI 参考', link: '/zh/core/agentapi' },
+      { text: 'Harness API 参考', link: '/zh/core/agentapi' },
       { text: '存储与运行', link: '/zh/core/storage' }
     ]
   },

@@ -52,25 +52,25 @@ func LifecycleStates() []LifecycleState {
 // Lifecycle transitions the operator may drive.
 var (
 	// ErrPluginNotFound is the 404 of the plugin API: no such id is installed.
-	ErrPluginNotFound = errors.New("agentext: plugin not found")
+	ErrPluginNotFound = errors.New("harnessext: plugin not found")
 	// ErrPluginExists reports an install of an id that is already installed.
-	ErrPluginExists = errors.New("agentext: plugin is already installed")
+	ErrPluginExists = errors.New("harnessext: plugin is already installed")
 	// ErrPluginState reports a transition the state machine does not allow.
-	ErrPluginState = errors.New("agentext: plugin state does not allow this action")
+	ErrPluginState = errors.New("harnessext: plugin state does not allow this action")
 	// ErrPluginDependency reports a missing requirement (enable) or an enabled
 	// dependent (disable/uninstall).
-	ErrPluginDependency = errors.New("agentext: plugin dependency")
+	ErrPluginDependency = errors.New("harnessext: plugin dependency")
 	// ErrPluginKind reports a kind this build has no loader for.
-	ErrPluginKind = errors.New("agentext: plugin kind has no loader in this build")
+	ErrPluginKind = errors.New("harnessext: plugin kind has no loader in this build")
 	// ErrPluginInvalid reports a package that does not validate.
-	ErrPluginInvalid = errors.New("agentext: plugin package is invalid")
+	ErrPluginInvalid = errors.New("harnessext: plugin package is invalid")
 	// ErrPluginGate reports an engines.keel mismatch (the version gate).
-	ErrPluginGate = errors.New("agentext: plugin version gate")
+	ErrPluginGate = errors.New("harnessext: plugin version gate")
 	// ErrPluginBundled reports an action that does not apply to a plugin
 	// compiled into the binary.
-	ErrPluginBundled = errors.New("agentext: bundled plugin")
+	ErrPluginBundled = errors.New("harnessext: bundled plugin")
 	// ErrPluginPath reports a package location the manager refuses to touch.
-	ErrPluginPath = errors.New("agentext: plugin package path is not allowed")
+	ErrPluginPath = errors.New("harnessext: plugin package path is not allowed")
 )
 
 // PluginError is the structured failure of a plugin action: a sentinel for the
@@ -246,7 +246,7 @@ type Manager struct {
 // Boot does.
 func NewPluginManager(opts ManagerOptions) (*Manager, error) {
 	if opts.Runtime == nil {
-		return nil, errors.New("agentext: plugin manager needs the plugin runtime")
+		return nil, errors.New("harnessext: plugin manager needs the plugin runtime")
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -261,7 +261,7 @@ func NewPluginManager(opts ManagerOptions) (*Manager, error) {
 	if root != "" {
 		absolute, err := filepath.Abs(root)
 		if err != nil {
-			return nil, fmt.Errorf("agentext: plugins root: %w", err)
+			return nil, fmt.Errorf("harnessext: plugins root: %w", err)
 		}
 		root = absolute
 	}
@@ -297,12 +297,12 @@ func NewPluginManager(opts ManagerOptions) (*Manager, error) {
 	}
 	for _, builtin := range opts.Builtins {
 		if builtin.Manifest == nil {
-			return nil, errors.New("agentext: builtin plugin without a manifest")
+			return nil, errors.New("harnessext: builtin plugin without a manifest")
 		}
 		manifest := builtin.Manifest
 		manifest.Dir = ""
 		if err := manifest.CheckEngines(manager.version); err != nil {
-			return nil, fmt.Errorf("agentext: builtin manifest %s: %w", manifest.ID, err)
+			return nil, fmt.Errorf("harnessext: builtin manifest %s: %w", manifest.ID, err)
 		}
 		manager.entries[manifest.ID] = &managerEntry{
 			id:             manifest.ID,

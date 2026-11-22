@@ -45,7 +45,7 @@
 - **归档遗留缺口**（无活跃任务板承接，本计划接管）：
   `keel-service-graph` 的「DSH sidecar 参考适配器」→ 并入 Wave 4 插件波；
   其「gateway 故障 scenario（crash-loop/大帧取消/stderr 洪泛）」→ 并入 Wave 3 可恢复性。
-- **Agent/插件补全**：keel-harness-v2 W8/W12 与 agent-team 插件面部分重叠 → 对账后合并归属。
+- **Harness/插件补全**：keel-harness-v2 W8/W12 与 agent-team 插件面部分重叠 → 对账后合并归属。
 - **媒体适配器**（图/视/音/决策）与 ecosystem 的「能力」不同轴 → 独立清单（Wave 2）。
 
 ## 3. 计划（波次；每波开头对账，结尾 G 级证据 + 勾选 + 提交）

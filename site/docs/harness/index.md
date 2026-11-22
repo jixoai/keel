@@ -67,7 +67,7 @@ in that order, and it owns every shutdown order (`cmd/keel/serve.go:75`,
 keel serve (one process)
 ├─ HTTP edge            /v1/tenants, /v1/sessions/{id}/input, /v1/sessions/{id}/events[/stream],
 │                       /v1/files, /v1/runtime/{drain,status}      internal/httpapi/server.go:146
-├─ Product API (AgentAPI)
+├─ Product API (Harness API)
 │   ├─ discovery        GET /v1/capabilities                        internal/harnessapi/api.go:257
 │   ├─ sessions         GET /v1/sessions, POST …/{id}/cancel        internal/harnessapi/api.go:171
 │   ├─ decisions        GET/POST /v1/sessions/{id}/decisions[/…]    internal/harnessapi/api.go:173

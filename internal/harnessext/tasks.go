@@ -97,14 +97,14 @@ type TasksBackend struct {
 func (b TasksBackend) Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error) {
 	tool, ok := tasksBackendActions[action]
 	if !ok {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: unknown tasks action %q", action)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: unknown tasks action %q", action)
 	}
 	var manager *Manager
 	if b.Manager != nil {
 		manager = b.Manager()
 	}
 	if manager == nil {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: %w: the plugin manager is not wired", ErrPluginState)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: %w: the plugin manager is not wired", ErrPluginState)
 	}
 	return manager.InvokeToolResult(ctx, TasksPluginID, tool, args)
 }

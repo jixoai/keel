@@ -56,11 +56,11 @@ const APIVersion = "v1"
 
 // ErrSessionNotFound is the honest 404 of the product API: the session does not
 // exist for this tenant (a foreign tenant's session answers the same way).
-var ErrSessionNotFound = errors.New("agentapi: session not found")
+var ErrSessionNotFound = errors.New("harnessapi: session not found")
 
 // ErrExternalSession reports that the session is owned by an external backend:
 // it has no native run to cancel (409).
-var ErrExternalSession = errors.New("agentapi: session is owned by an external backend")
+var ErrExternalSession = errors.New("harnessapi: session is owned by an external backend")
 
 // CancelFunc cancels the session's active run. The adapter lives in the hosting
 // process (cmd/keel) because it needs the run seam and the session check.

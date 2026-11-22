@@ -73,7 +73,7 @@ const (
 const PluginActionDeny = "deny"
 
 // ErrPermissionDenied is the sentinel of a refused capability request.
-var ErrPermissionDenied = errors.New("agentext: plugin permission denied")
+var ErrPermissionDenied = errors.New("harnessext: plugin permission denied")
 
 // PermissionDeniedError is one refusal: which plugin asked for what, and why it
 // was not allowed.
@@ -737,7 +737,7 @@ func (m *Manager) InvokePluginTool(ctx context.Context, pluginID, tool string, a
 	}
 	raw, err := json.Marshal(toolResultDocument(result))
 	if err != nil {
-		return nil, fmt.Errorf("agentext: encode tool result: %w", err)
+		return nil, fmt.Errorf("harnessext: encode tool result: %w", err)
 	}
 	return raw, nil
 }
@@ -749,7 +749,7 @@ func (m *Manager) InvokePluginTool(ctx context.Context, pluginID, tool string, a
 // permission-checked exactly like any plugin tool.
 func (m *Manager) InvokeToolResult(ctx context.Context, pluginID, tool string, args json.RawMessage) (agentcore.AgentToolResult, error) {
 	if strings.TrimSpace(pluginID) == "" || strings.TrimSpace(tool) == "" {
-		return agentcore.AgentToolResult{}, errors.New("agentext: InvokeToolResult requires a plugin id and a tool name")
+		return agentcore.AgentToolResult{}, errors.New("harnessext: InvokeToolResult requires a plugin id and a tool name")
 	}
 	m.mu.Lock()
 	entry := m.entries[pluginID]

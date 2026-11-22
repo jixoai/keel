@@ -254,10 +254,10 @@ func NewHookBus(opts HookBusOptions) *HookBus {
 // nil handler is an error (the closed set is part of the contract).
 func (b *HookBus) Subscribe(owner string, opts HookOptions) (func(), error) {
 	if opts.Handler == nil {
-		return nil, fmt.Errorf("agentext: hook handler is required")
+		return nil, fmt.Errorf("harnessext: hook handler is required")
 	}
 	if !ValidHookEvent(string(opts.Event)) {
-		return nil, fmt.Errorf("agentext: %q is not in the first-phase hook set", opts.Event)
+		return nil, fmt.Errorf("harnessext: %q is not in the first-phase hook set", opts.Event)
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 5 * time.Second
@@ -265,7 +265,7 @@ func (b *HookBus) Subscribe(owner string, opts HookOptions) (func(), error) {
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
-		return nil, fmt.Errorf("agentext: hook bus is closed")
+		return nil, fmt.Errorf("harnessext: hook bus is closed")
 	}
 	b.nextID++
 	sub := &hookSubscription{

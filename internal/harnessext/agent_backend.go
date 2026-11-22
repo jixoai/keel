@@ -14,7 +14,7 @@ import (
 // It is a wiring fact, not a backend call failure: the aggregate tools map it
 // to the typed not_wired result, while an actual transport/plugin failure stays
 // backend_error (or plugin_disabled for a disabled plugin).
-var ErrNotWired = errors.New("agentext: backend is not wired")
+var ErrNotWired = errors.New("harnessext: backend is not wired")
 
 // AgentBackend adapts the SubagentRunner to the harness-owned `agent` aggregate
 // tool. The getter is lazy because the runner is created after the host

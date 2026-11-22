@@ -56,7 +56,7 @@ keel tui --url http://127.0.0.1:13750 --token "$KEEL_SERVE_PASSWORD"
 keel tui --print
 ```
 
-TUI 是同一个客户端（同一份 TSX、同一个 AgentAPI）在终端宿主中的渲染；它不是第二套实现
+TUI 是同一个客户端（同一份 TSX、同一个 Harness API）在终端宿主中的渲染；它不是第二套实现
 （`docs/WEBUI.md`）。`KEEL_TUI_BIN` 指向打包的 TUI 二进制
 （`nsh package --target tui`），`KEEL_AGENT_URL` 指向运行中的宿主（`cmd/keel/tui.go:22`）。
 它刻意不渲染插件 UI——插件行改为打开 web URL

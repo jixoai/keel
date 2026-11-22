@@ -466,14 +466,14 @@ var approveBackendActions = map[string]string{
 func (b ApproveBackend) Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error) {
 	tool, ok := approveBackendActions[action]
 	if !ok {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: unknown approve action %q", action)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: unknown approve action %q", action)
 	}
 	manager := (*Manager)(nil)
 	if b.Manager != nil {
 		manager = b.Manager()
 	}
 	if manager == nil {
-		return agentcore.AgentToolResult{}, fmt.Errorf("agentext: %w: the plugin manager is not wired", ErrPluginState)
+		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: %w: the plugin manager is not wired", ErrPluginState)
 	}
 	return manager.InvokeToolResult(ctx, ApprovalPluginID, tool, args)
 }

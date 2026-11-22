@@ -28,7 +28,7 @@ working in a checkout of this repository (or a fork) — see
 | Add a product capability (plugin, hook, trigger, sub-agent, approval) | the Harness extension surface (`internal/harnessext` today; plugin standard documented in the Harness line) | [Harness plugins](/harness/plugins/) |
 | Add a new event kind | in-repo change: `kindRegistry` + `internal/store` constants + transcript/SSE/R1 rules move together | [Events and protocol](/core/events) |
 | Change storage or add a table | in-repo change: `internal/store/schema.sql` or a numbered kernel migration | [Storage and runtime](/core/storage) |
-| Build a UI | the Harness API + SSE (versioned `/v1`, capability discovery) | [AgentAPI reference](/core/agentapi) |
+| Build a UI | the Harness API + SSE (versioned `/v1`, capability discovery) | [Harness API reference](/core/agentapi) |
 
 ## The two hard rules
 

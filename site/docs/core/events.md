@@ -193,7 +193,7 @@ in the log is permanent (`internal/kernel/validate.go:265`):
 
 ## 9. Ask the server, do not guess
 
-The wire contract for clients is versioned: `AgentAPI` is prefixed `/v1` and only grows
+The wire contract for clients is versioned: Harness API is prefixed `/v1` and only grows
 (`internal/harnessapi/api.go:268`). A client must not infer features from a binary version; it asks
 `GET /v1/capabilities` and downgrades on `false` flags. The response (verified):
 
@@ -206,4 +206,4 @@ The wire contract for clients is versioned: `AgentAPI` is prefixed `/v1` and onl
  "hooks":["subagent.started","subagent.finished","trigger.before","trigger.after","turn.started","turn.finished","decision.opened","decision.answered"]}
 ```
 
-The endpoint reference is on the next page: [AgentAPI reference](/core/agentapi).
+The endpoint reference is on the next page: [Harness API reference](/core/agentapi).

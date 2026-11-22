@@ -86,10 +86,10 @@ type DecisionEvent struct {
 
 // Errors of the decision primitive. The HTTP layer maps them onto 404/409/400.
 var (
-	ErrDecisionNotFound = errors.New("agentext: decision not found")
-	ErrDecisionClosed   = errors.New("agentext: decision is already terminal")
-	ErrDecisionConflict = errors.New("agentext: decision was already answered differently")
-	ErrInvalidDecision  = errors.New("agentext: invalid decision request")
+	ErrDecisionNotFound = errors.New("harnessext: decision not found")
+	ErrDecisionClosed   = errors.New("harnessext: decision is already terminal")
+	ErrDecisionConflict = errors.New("harnessext: decision was already answered differently")
+	ErrInvalidDecision  = errors.New("harnessext: invalid decision request")
 )
 
 // OpenDecisionRequest asks for a new decision.

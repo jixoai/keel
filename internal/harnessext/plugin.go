@@ -231,7 +231,7 @@ func (r *Runtime) Apply(ctx context.Context) error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return errors.New("agentext: plugin runtime is closed")
+		return errors.New("harnessext: plugin runtime is closed")
 	}
 	plugins := append([]*Plugin(nil), r.plugins...)
 	r.mu.Unlock()
@@ -243,7 +243,7 @@ func (r *Runtime) ApplyPlugins(ctx context.Context, plugins []*Plugin) error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return errors.New("agentext: plugin runtime is closed")
+		return errors.New("harnessext: plugin runtime is closed")
 	}
 	r.plugins = append([]*Plugin(nil), plugins...)
 	r.mu.Unlock()
@@ -508,12 +508,12 @@ func (r *Runtime) publish() error {
 	r.mu.Unlock()
 	if r.sink != nil {
 		if err := r.sink(tools); err != nil {
-			return fmt.Errorf("agentext: publish plugin tools: %w", err)
+			return fmt.Errorf("harnessext: publish plugin tools: %w", err)
 		}
 	}
 	if r.promptSink != nil {
 		if err := r.promptSink(sections); err != nil {
-			return fmt.Errorf("agentext: publish plugin prompt sections: %w", err)
+			return fmt.Errorf("harnessext: publish plugin prompt sections: %w", err)
 		}
 	}
 	return nil

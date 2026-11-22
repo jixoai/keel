@@ -35,7 +35,7 @@ func (m *Manager) Boot(ctx context.Context) error {
 	if m.store != nil {
 		rows, err := m.store.ListPlugins(ctx)
 		if err != nil {
-			return fmt.Errorf("agentext: read plugin inventory: %w", err)
+			return fmt.Errorf("harnessext: read plugin inventory: %w", err)
 		}
 		for _, row := range rows {
 			entry := &managerEntry{
@@ -345,7 +345,7 @@ func (m *Manager) assembleLocked(ctx context.Context) (map[string]error, error) 
 		plugins = append(plugins, plugin)
 	}
 	if err := m.runtime.ApplyPlugins(ctx, plugins); err != nil {
-		return failures, fmt.Errorf("agentext: assemble plugins: %w", err)
+		return failures, fmt.Errorf("harnessext: assemble plugins: %w", err)
 	}
 	return failures, nil
 }
@@ -689,7 +689,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 		// assembly does not contain it, so this is not a half-load.
 		entry.state = previous
 		if _, _, rollbackErr := m.applyEnabledLocked(ctx); rollbackErr != nil {
-			return m.viewLocked(entry), fmt.Errorf("agentext: enable %s: rollback: %w", id, rollbackErr)
+			return m.viewLocked(entry), fmt.Errorf("harnessext: enable %s: rollback: %w", id, rollbackErr)
 		}
 		entry.state = LifecycleFailed
 		entry.diagnostics = appendUnique(entry.diagnostics, failure.Error())
@@ -705,7 +705,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 		// reason. Nothing is left half-loaded.
 		entry.state = previous
 		if _, _, rollbackErr := m.applyEnabledLocked(ctx); rollbackErr != nil {
-			return m.viewLocked(entry), fmt.Errorf("agentext: enable %s: rollback: %w", id, rollbackErr)
+			return m.viewLocked(entry), fmt.Errorf("harnessext: enable %s: rollback: %w", id, rollbackErr)
 		}
 		diagnostics := append([]string(nil), status.Diagnostics...)
 		state := LifecycleFailed
@@ -996,7 +996,7 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 		entry.state = previous.state
 		rollbackView, rollbackErr := m.restoreLocked(ctx, entry, previous, archived, wasEnabled)
 		if rollbackErr != nil {
-			return rollbackView, fmt.Errorf("agentext: update %s: %w (rollback: %v)", id, err, rollbackErr)
+			return rollbackView, fmt.Errorf("harnessext: update %s: %w (rollback: %v)", id, err, rollbackErr)
 		}
 		m.auditLocked(ctx, audit, id, previous.manifestVersion(), store.PluginActionUpdate, store.PluginResultFailed, detailOf(err))
 		return rollbackView, err
@@ -1020,7 +1020,7 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 			entry.state = previous.state
 			rollbackView, rollbackErr := m.restoreLocked(ctx, entry, previous, archived, wasEnabled)
 			if rollbackErr != nil {
-				return rollbackView, fmt.Errorf("agentext: update %s: %v (rollback: %v)", id, failure, rollbackErr)
+				return rollbackView, fmt.Errorf("harnessext: update %s: %v (rollback: %v)", id, failure, rollbackErr)
 			}
 			m.auditLocked(ctx, audit, id, previous.manifestVersion(), store.PluginActionUpdate, store.PluginResultFailed, detailOf(failure))
 			return rollbackView, failure
@@ -1036,7 +1036,7 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 			rollbackView, rollbackErr := m.restoreLocked(ctx, entry, previous, archived, wasEnabled)
 			failure := &PluginError{Op: "update", ID: id, Message: message, Diagnostics: status.Diagnostics, cause: ErrPluginDependency}
 			if rollbackErr != nil {
-				return rollbackView, fmt.Errorf("agentext: update %s: %s (rollback: %v)", id, message, rollbackErr)
+				return rollbackView, fmt.Errorf("harnessext: update %s: %s (rollback: %v)", id, message, rollbackErr)
 			}
 			m.auditLocked(ctx, audit, id, previous.manifestVersion(), store.PluginActionUpdate, store.PluginResultFailed,
 				map[string]any{"from": previous.manifestVersion(), "to": entry.manifestVersion(), "rolledBack": true, "diagnostics": status.Diagnostics})
@@ -1229,7 +1229,7 @@ func (m *Manager) persistLocked(ctx context.Context, entry *managerEntry) error 
 		DisabledAt:  entry.disabledAt,
 	}
 	if err := m.store.UpsertPlugin(ctx, record); err != nil {
-		return fmt.Errorf("agentext: persist plugin %s: %w", entry.id, err)
+		return fmt.Errorf("harnessext: persist plugin %s: %w", entry.id, err)
 	}
 	return nil
 }

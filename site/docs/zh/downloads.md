@@ -12,7 +12,7 @@ keel 交付为一个 Go 二进制加一份静态网页客户端。两者来自�
 
 | 产物 | 说明 |
 |---|---|
-| `keel` | 产品外壳：`keel serve`（AgentAPI + 网页界面 + SSE 同一个源）、`keel tui`（终端客户端）、`keel doctor`、`keel version` |
+| `keel` | 产品外壳：`keel serve`（Harness API + 网页界面 + SSE 同一个源）、`keel tui`（终端客户端）、`keel doctor`、`keel version` |
 | `keel-web-0.1.0.zip` | 打包好的网页客户端。解压后用 `keel serve -web-dir <目录>` 指过去 |
 
 ## 运行前提
@@ -73,6 +73,6 @@ keel tui --url http://127.0.0.1:13750
 
 - **没有代码签名。** macOS 上先清一次隔离标记：`xattr -dr com.apple.quarantine ./keel`。
 - **不带数据库。** 自备 PostgreSQL；`keel` 首次启动时跑自己的迁移。
-- **1.0 之前。** AgentAPI 有版本号（`apiVersion: v1`），但产品面仍在动；稳定的是插件契约。
+- **1.0 之前。** Harness API 有版本号（`apiVersion: v1`），但产品面仍在动；稳定的是插件契约。
 - **镜像。** GitHub 慢时把域名换成 `https://gh.fde2e.tweb.xin/`（自建镜像，国内首选）或
   `https://ghfast.top/https://github.com/…` —— 路径与校验和完全一致。

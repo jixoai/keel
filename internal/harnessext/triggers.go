@@ -205,35 +205,35 @@ type TriggerStatus struct {
 
 // Trigger errors. The HTTP layer maps them onto 404/400/409/401/403/429/502.
 var (
-	ErrTriggerNotFound    = errors.New("agentext: trigger not found")
-	ErrTriggerDisabled    = errors.New("agentext: trigger is disabled")
-	ErrTriggerKeyRequired = errors.New("agentext: an idempotency key is required")
-	ErrInvalidTrigger     = errors.New("agentext: invalid trigger")
-	ErrTriggerStartFailed = errors.New("agentext: trigger start failed")
+	ErrTriggerNotFound    = errors.New("harnessext: trigger not found")
+	ErrTriggerDisabled    = errors.New("harnessext: trigger is disabled")
+	ErrTriggerKeyRequired = errors.New("harnessext: an idempotency key is required")
+	ErrInvalidTrigger     = errors.New("harnessext: invalid trigger")
+	ErrTriggerStartFailed = errors.New("harnessext: trigger start failed")
 	// ErrTriggerBusy is the explicit per-trigger concurrency refusal (HTTP
 	// 429). The engine does not queue above the cap: a bounded refusal is
 	// observable, a growing queue is not.
-	ErrTriggerBusy = errors.New("agentext: trigger is at its concurrency limit")
+	ErrTriggerBusy = errors.New("harnessext: trigger is at its concurrency limit")
 	// ErrTriggerWebhookUnauthorized covers a missing/invalid/stale signature.
-	ErrTriggerWebhookUnauthorized = errors.New("agentext: webhook signature is invalid")
+	ErrTriggerWebhookUnauthorized = errors.New("harnessext: webhook signature is invalid")
 	// ErrTriggerWebhookUnconfigured is the fail-closed answer of a webhook
 	// trigger that declares no HMAC secret.
-	ErrTriggerWebhookUnconfigured = errors.New("agentext: webhook secret is not configured")
+	ErrTriggerWebhookUnconfigured = errors.New("harnessext: webhook secret is not configured")
 
 	// ErrTriggerBotMissing is a fire whose Bot does not exist in the firing
 	// tenant. The HTTP layer answers 403 (the trigger is not fireable), not
 	// 404: whether the Bot exists is not the caller's resource to probe.
-	ErrTriggerBotMissing = errors.New("agentext: trigger bot does not exist")
+	ErrTriggerBotMissing = errors.New("harnessext: trigger bot does not exist")
 	// ErrTriggerBotArchived is a fire whose Bot was archived after
 	// registration. The HTTP layer answers 409: the trigger exists but its
 	// identity can no longer create sessions.
-	ErrTriggerBotArchived = errors.New("agentext: trigger bot is archived")
+	ErrTriggerBotArchived = errors.New("harnessext: trigger bot is archived")
 	// ErrTriggerBotTenant is a Bot that does not belong to the trigger's (or
 	// caller's) tenant.
-	ErrTriggerBotTenant = errors.New("agentext: trigger bot belongs to another tenant")
+	ErrTriggerBotTenant = errors.New("harnessext: trigger bot belongs to another tenant")
 	// ErrTriggerBotUnavailable is the fail-closed answer of a deployment with
 	// no Bot ownership seam. It is never "create an unowned session".
-	ErrTriggerBotUnavailable = errors.New("agentext: trigger bot ownership is not wired")
+	ErrTriggerBotUnavailable = errors.New("harnessext: trigger bot ownership is not wired")
 )
 
 // TriggerStateStore is the durable catch-up cursor (PostgreSQL in production).
@@ -573,7 +573,7 @@ func (e *TriggerEngine) RegisterContext(ctx context.Context, spec TriggerSpec) (
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
-		return nil, fmt.Errorf("agentext: trigger engine is closed")
+		return nil, fmt.Errorf("harnessext: trigger engine is closed")
 	}
 	if existing, ok := e.triggers[spec.ID]; ok {
 		e.mu.Unlock()
@@ -615,7 +615,7 @@ func (e *TriggerEngine) Fire(ctx context.Context, id string, tenantID uuid.UUID,
 	closed := e.closed
 	e.mu.Unlock()
 	if closed {
-		return FireResult{}, fmt.Errorf("agentext: trigger engine is closed")
+		return FireResult{}, fmt.Errorf("harnessext: trigger engine is closed")
 	}
 	if rt == nil {
 		return FireResult{}, ErrTriggerNotFound

@@ -1,7 +1,7 @@
-# AgentAPI reference
+# Harness API reference
 
-`AgentAPI` is the HTTP protocol name. In product terms it is the **Harness API**: the Harness is
-what serves it, and the protocol keeps its original spelling (see the [glossary](/glossary)).
+The **Harness API** is the `/v1` product surface. Its wire-protocol name, `AgentAPI`, is
+retained as a technical alias (see the [glossary](/glossary)).
 This page is the endpoint reference with request/response shapes; every example below was captured
 from a running `keel serve` at the documented revision.
 

@@ -134,7 +134,7 @@ The Core main line is five pages of theory plus six pages of practice:
 |---|---|
 | [Architecture](/core/architecture) | What are the ledger, the kernel, the service graph, loadout, handoff and backpressure, and where is the line between them? |
 | [Events and protocol](/core/events) | What are the event kinds, how is a commit classified, how is idempotency enforced, what does SSE guarantee? |
-| [AgentAPI reference](/core/agentapi) | Which HTTP endpoints exist on each face, with what request/response shapes and error codes? |
+| [Harness API reference](/core/agentapi) | Which HTTP endpoints exist on each face, with what request/response shapes and error codes? |
 | [Storage and runtime](/core/storage) | How is data stored (PostgreSQL, chunks, CAS), how are requests pooled, and what is the memory budget? |
 | [Extension map](/core/extend/) | I want to change X — which seam do I use? |
 | [Embed the runtime](/core/extend/embed-runtime) · [Write a service descriptor](/core/extend/service-descriptor) · [Connect an external backend](/core/extend/external-backend) · [Write a provider adapter](/core/extend/provider-adapter) · [Test and accept](/core/extend/testing) | The four extension paths, each with code, commands and acceptance criteria. |

@@ -39,11 +39,11 @@ type RunStatusReader interface {
 }
 
 // ErrNoRun reports that the session has no run row (nothing was ever queued).
-var ErrNoRun = errors.New("agentext: session has no run row")
+var ErrNoRun = errors.New("harnessext: session has no run row")
 
 // ErrCancelUnavailable reports that the cancel seam cannot reach the attempt
 // (a run executing in another process, or no RunControl wiring at all).
-var ErrCancelUnavailable = errors.New("agentext: cancel seam is not wired for this run")
+var ErrCancelUnavailable = errors.New("harnessext: cancel seam is not wired for this run")
 
 // StartTurnRequest is one product-initiated turn: a user.message committed
 // through the kernel's edge seam (which also wakes the run in the same
@@ -110,10 +110,10 @@ func (s *TurnStarter) StartTurn(ctx context.Context, req StartTurnRequest) (Star
 		return StartTurnResult{}, fmt.Errorf("%w: turn starter needs the session gate and the kernel commit seam", ErrCancelUnavailable)
 	}
 	if req.TenantID == uuid.Nil {
-		return StartTurnResult{}, errors.New("agentext: tenant is required")
+		return StartTurnResult{}, errors.New("harnessext: tenant is required")
 	}
 	if req.Text == "" {
-		return StartTurnResult{}, errors.New("agentext: turn text is required")
+		return StartTurnResult{}, errors.New("harnessext: turn text is required")
 	}
 	requestID := req.RequestID
 	if requestID == "" {
@@ -124,7 +124,7 @@ func (s *TurnStarter) StartTurn(ctx context.Context, req StartTurnRequest) (Star
 		sessionID = uuid.New()
 	}
 	if err := s.Gate.CreateSession(ctx, req.TenantID, sessionID); err != nil {
-		return StartTurnResult{}, fmt.Errorf("agentext: create session: %w", err)
+		return StartTurnResult{}, fmt.Errorf("harnessext: create session: %w", err)
 	}
 	payload := map[string]any{"text": req.Text, "requestId": requestID}
 	for key, value := range req.Extras {
@@ -132,7 +132,7 @@ func (s *TurnStarter) StartTurn(ctx context.Context, req StartTurnRequest) (Star
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return StartTurnResult{}, fmt.Errorf("agentext: encode turn: %w", err)
+		return StartTurnResult{}, fmt.Errorf("harnessext: encode turn: %w", err)
 	}
 	receipt, err := s.Edge.Commit(ctx, kernel.CommitRequest{
 		Scope:      kernel.Scope{TenantID: req.TenantID, SessionID: sessionID},

@@ -14,7 +14,7 @@ checksums below mean something.
 
 | Artifact | What it is |
 |---|---|
-| `keel` | The product shell: `keel serve` (AgentAPI + web UI + SSE on one origin), `keel tui` (terminal client), `keel doctor`, `keel version` |
+| `keel` | The product shell: `keel serve` (Harness API + web UI + SSE on one origin), `keel tui` (terminal client), `keel doctor`, `keel version` |
 | `keel-web-0.1.0.zip` | The packaged web client. Unzip it and point `keel serve -web-dir <dir>` at it |
 
 ## Requirements
@@ -79,7 +79,7 @@ keel tui --url http://127.0.0.1:13750
   `xattr -dr com.apple.quarantine ./keel`.
 - **No bundled database.** Bring your own PostgreSQL; `keel` runs its own
   migrations on first start.
-- **Pre-1.0.** The AgentAPI is versioned (`apiVersion: v1`) but the product
+- **Pre-1.0.** The Harness API is versioned (`apiVersion: v1`) but the product
   surface still moves. The plugin contract is the stable part.
 - **Mirrors.** If GitHub is slow, swap the host for `https://gh.fde2e.tweb.xin/`
   (self-built mirror, domestic) or `https://ghfast.top/https://github.com/…` —

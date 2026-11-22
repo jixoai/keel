@@ -34,7 +34,7 @@ Rules the spec fixes:
 The same-origin design is not an accident: the web client is already served by
 `keel serve` from the build directory (`cmd/keel/static.go:16`), so
 `/plugins/<id>/` rides the same origin and needs no CORS — the property the
-AgentAPI was designed around (`internal/harnessapi/api.go:1`).
+Harness API was designed around (`internal/harnessapi/api.go:1`).
 
 ## 2. The `keel.plugin.*` bridge
 

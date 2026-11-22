@@ -1,7 +1,6 @@
-# AgentAPI 参考
+# Harness API 参考
 
-`AgentAPI` 是 HTTP 协议名。按产品口径它就是 **Harness API**：由 Harness 提供服务，协议名保留原样
-（见[术语表](/zh/glossary)）。本页是端点参考与请求/响应形状；下面的示例全部取自运行中的
+**Harness API** 是 `/v1` 产品面。其线协议名 `AgentAPI` 作为技术别名保留（见[术语表](/zh/glossary)）。本页是端点参考与请求/响应形状；下面的示例全部取自运行中的
 `keel serve`（所述修订）。
 
 ## 1. 两个 HTTP 面，一个进程壳

@@ -50,7 +50,7 @@ or per invocation:
 Searched:
   %s
 
-The AgentAPI itself is available now: keel serve serves /v1 and the web build.
+The Harness API itself is available now: keel serve serves /v1 and the web build.
 `, *url, strings.Join(searched, "\n  "))
 		return 3
 	}

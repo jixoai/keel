@@ -75,10 +75,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `keel — the agent product shell over the Keel runtime
+	fmt.Fprint(w, `keel — the Bot product shell over the Keel runtime
 
 Usage:
-  keel serve [flags]     Host the AgentAPI (/v1), the web UI and SSE on one origin
+  keel serve [flags]     Host the Harness API (/v1), the web UI and SSE on one origin
   keel tui [flags]       Run the NSH TUI client against a running keel serve
   keel bot <cmd>         Manage Bots (list|show|create|update|archive|start|keys|key-create|key-revoke)
   keel team-bot <cmd>    Manage TeamBots (list|show|create|update|archive|roster|start)
@@ -106,7 +106,7 @@ Environment (serve):
 
 Environment (tui, bot, team-bot, model, skills):
   KEEL_TUI_BIN             path to the NSH TUI binary
-  KEEL_AGENT_URL           AgentAPI base URL (default http://127.0.0.1:13750)
+  KEEL_AGENT_URL           Harness API base URL (default http://127.0.0.1:13750)
   KEEL_ACCOUNT_USERNAME    human account login name (keel bot/team-bot/model/skills)
   KEEL_ACCOUNT_PASSWORD    human account password (or pass --password-file)
   KEEL_AGENT_TOKEN         bot API key (keel_bot_...) for machine clients
@@ -132,7 +132,7 @@ func printVersion(w io.Writer) {
 		fmt.Fprintf(w, "  commit:   %s%s\n", commit, suffix)
 	}
 	fmt.Fprintf(w, "  go:       %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-	fmt.Fprintf(w, "  agent-api: %s (%s)\n", harnessapi.APIVersion, harnessapi.Version)
+	fmt.Fprintf(w, "  harness-api: %s (%s)\n", harnessapi.APIVersion, harnessapi.Version)
 }
 
 func runServeCmd(args []string, stdout, stderr io.Writer) int {

@@ -2,7 +2,7 @@
 
 `web/` 是 keel 的第一方客户端：**同一份 TSX** 经 NSH 打包成 web 静态站点，也在 NSH 的
 TUI target 里运行（`keel tui`）。它只消费两样东西：`@keel/chat-surface` 的冻结契约
-（`packages/chat-surface/src/types.ts`）与 AgentAPI（Harness API，`docs/HARNESS.md`）；不直连内核。
+（`packages/chat-surface/src/types.ts`）与 Harness API（`docs/HARNESS.md`）；不直连内核。
 细节（目录/主题/屏幕/QA 产物）见 `web/README.md`。
 
 ## 1. 构建与托管
@@ -21,7 +21,7 @@ nsh package --target web -o dist/web/keel   # 静态站点 → dist/web/keel/Kee
 
 | 模式 | 数据源 | 用途 |
 | --- | --- | --- |
-| 实时 | AgentAPI + SSE（`fetch` 流式解析，`after`/`Last-Event-ID` 续传） | 真实服务 |
+| 实时 | Harness API + SSE（`fetch` 流式解析，`after`/`Last-Event-ID` 续传） | 真实服务 |
 | 演示 | `src/data/fixture.ts` 本地 scripted 服务（覆盖聊天/3 并行工具/审批/引导/压缩/失败/空会话/断线） | 视觉走查、无后端演示 |
 
 启动时探测 `/v1/capabilities`：失败自动回退演示模式，侧栏可手动切换「演示/实时」。
