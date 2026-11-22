@@ -41,6 +41,7 @@ import { Icon } from "../../ui/icons";
 import { store } from "../../data/store";
 import { can } from "../../data/permissions";
 import { botAccess, type PreflightRow, type StartedRun } from "../../data/bots";
+import { canShareResource, openTeamBotShare, sharedBadgeOf } from "../../data/shares";
 import { capabilityOf } from "../../data/permission-catalog";
 import type { BotView, RosterEntry, TeamBotView } from "../../data/identity";
 import { identityAccess } from "../../data/identity-access";
@@ -482,6 +483,7 @@ export function TeamPage(props: { teamId: string }) {
                   { label: "队长", value: captainBot()?.name ?? "未设队长" },
                   { label: "成员", value: `${team()!.roster.length} 名` },
                   { label: "最近运行", value: latestRun(team()!.teamBotId) ? formatWhen(latestRun(team()!.teamBotId)?.startedAt) : "未记录" },
+                  { label: "共享", value: sharedBadgeOf(team()!.sharedCount) ?? "未共享" },
                   { label: "状态", value: team()!.archived ? "已归档" : teamStatus(team()!).label },
                 ]
               : []
@@ -519,6 +521,12 @@ export function TeamPage(props: { teamId: string }) {
                 align="start"
                 trigger={<Button variant="ghost" size="sm" icon="dots" label="更多" accessibilityLabel="更多团队操作" style={{ width: "100%" }} />}
               >
+                <DropdownMenuItem
+                  label="共享团队"
+                  icon="users"
+                  disabled={!canShareResource("team_bot", team()?.ownerAccountId)}
+                  onSelect={() => openTeamBotShare(id(), name())}
+                />
                 <DropdownMenuItem
                   label="归档团队"
                   icon="trash"

@@ -91,11 +91,26 @@ import { requestDelete } from "./delete-dialog";
 
 const query = signal("");
 const refreshing = signal(false);
+/** The list's source filter: every visible session, only mine, or the ones
+ * shared with me (direct, group or team — the server's `sharedWithMe` already
+ * folds those into one caller relative fact). */
+const source = signal<"all" | "mine" | "shared">("all");
+
+const isMine = (row: SessionSummary): boolean => {
+  const me = store.identity()?.accountId;
+  return !!me && row.ownerAccountId === me;
+};
 
 /** The row's preview line: the last message, or the fact that there is none.
- * The title is not derived here: `../ui/session-title` is its single source
- * (the list rows, the workspace header and the conversation read one name). */
-const summaryOf = (row: SessionSummary): string => oneLine(row.lastMessage) || "还没有消息";
+ * A session shared with this reader says who shared it first — that is the one
+ * fact the reader needs before opening it. The title is not derived here:
+ * `../ui/session-title` is its single source (the list rows, the workspace
+ * header and the conversation read one name). */
+const summaryOf = (row: SessionSummary): string => {
+  const preview = oneLine(row.lastMessage) || "还没有消息";
+  if (row.sharedWithMe && row.ownerDisplayName) return `由 ${row.ownerDisplayName} 共享 · ${preview}`;
+  return preview;
+};
 
 /** The one-word state of a row: the active row projects the open conversation
  * (which knows about stopping), every other row projects runStatus. */
@@ -366,7 +381,10 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
   // match is always visible in the row it keeps.
   const rows = () => {
     const needle = query().trim().toLowerCase();
-    const all = store.sessions();
+    const filter = source();
+    const all = store.sessions().filter((row) =>
+      filter === "mine" ? isMine(row) : filter === "shared" ? row.sharedWithMe === true : true,
+    );
     if (!needle) return all;
     return all.filter((row) => `${sessionTitle(row)} ${summaryOf(row)}`.toLowerCase().includes(needle));
   };
@@ -438,6 +456,38 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           placeholder="搜索会话"
           accessibilityLabel="搜索会话"
           testID="session-search"
+        />
+      </View>
+      {/* The source filter: the server already decided visibility and computed
+          `sharedWithMe` against this account, so these are projections of one
+          list, never three reads. */}
+      <View
+        testID="session-source-filter"
+        style={{ flexDirection: "row", alignItems: "center", gap: space.xs, paddingHorizontal: space.md, paddingBottom: space.md }}
+      >
+        <Button
+          testID="session-filter-all"
+          variant={source() === "all" ? "secondary" : "ghost"}
+          size="sm"
+          label="全部"
+          selected={source() === "all"}
+          onPress={() => source.set("all")}
+        />
+        <Button
+          testID="session-filter-mine"
+          variant={source() === "mine" ? "secondary" : "ghost"}
+          size="sm"
+          label="我的"
+          selected={source() === "mine"}
+          onPress={() => source.set("mine")}
+        />
+        <Button
+          testID="session-filter-shared"
+          variant={source() === "shared" ? "secondary" : "ghost"}
+          size="sm"
+          label="共享给我"
+          selected={source() === "shared"}
+          onPress={() => source.set("shared")}
         />
       </View>
       <ScrollArea

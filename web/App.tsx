@@ -47,6 +47,8 @@ import { PluginsScreen } from "./src/screens/plugins";
 import { SessionList } from "./src/screens/session-list";
 import { SessionStatusPane } from "./src/screens/session-status-pane";
 import { SettingsScreen } from "./src/screens/settings";
+import { ShareDialog } from "./src/screens/share-dialog";
+import { canShareResource, openSessionShare } from "./src/data/shares";
 import { restoreAppearance } from "./src/ui/appearance";
 import { type IconName } from "./src/ui/icons";
 import {
@@ -301,6 +303,21 @@ function WorkspaceHeader() {
           <SessionModelChip iconOnly />
         </If>
       </If>
+      {/* Sharing is owner-only (`session.share` + the owner relation). The
+          header offers it only when the open session is mine (or I am a super
+          admin); the server still refuses a stale decision. */}
+      <If when={!!store.activeId() && canShareResource("session", activeRow()?.ownerAccountId)}>
+        <HeaderAction
+          testID="workspace-header-share"
+          icon="users"
+          text="共享"
+          label="共享这个会话"
+          onPress={() => {
+            const row = activeRow();
+            if (row) openSessionShare(row.sessionId, sessionTitle(row));
+          }}
+        />
+      </If>
       <If when={sidePaneFits()}>
         <HeaderAction
           testID="workspace-header-side-pane"
@@ -540,6 +557,7 @@ function App() {
       </If>
       <NoticeToasts />
       <DeleteConfirm />
+      <ShareDialog />
       <SessionModelPicker />
       {/* The global palette: mounted at the root so Mod+K opens it over every
           route, and a choice can leave the settings/plugin page for the

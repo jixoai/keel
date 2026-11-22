@@ -46,6 +46,7 @@ import { store } from "../../data/store";
 import { can, canAny } from "../../data/permissions";
 import { identityAccess } from "../../data/identity-access";
 import { botAccess, type BotChange, type BotOption } from "../../data/bots";
+import { canShareResource, openBotShare, sharedBadgeOf } from "../../data/shares";
 import { capabilityOf, scopeLabel, type CapabilityRisk } from "../../data/permission-catalog";
 import type { BotKeyView, BotView, ModelRef, PermissionScope } from "../../data/identity";
 import { displayNameOf, selectionDisplay } from "../../data/wire";
@@ -426,7 +427,14 @@ function BotsTable(props: { rows: BotView[] }) {
                 </Text>
               </View>
             </Td>
-            <Td>{statusBadge(bot())}</Td>
+            <Td>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+                {statusBadge(bot())}
+                <If when={sharedBadgeOf(bot().sharedCount) !== undefined}>
+                  <Badge variant="outline" label={sharedBadgeOf(bot().sharedCount)} />
+                </If>
+              </View>
+            </Td>
             <Td>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>—</Text>
             </Td>
@@ -468,7 +476,12 @@ function BotsCards(props: { rows: BotView[] }) {
                   {accountLabel(bot().accountId)} · {modelKindLabel(bot().modelKind)}
                 </Text>
               </View>
-              {statusBadge(bot())}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
+                {statusBadge(bot())}
+                <If when={sharedBadgeOf(bot().sharedCount) !== undefined}>
+                  <Badge variant="outline" label={sharedBadgeOf(bot().sharedCount)} />
+                </If>
+              </View>
             </View>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
               {modelLabel(bot().defaultModel)} · 最近活动未记录
@@ -525,6 +538,7 @@ export function BotPage(props: { botId: string }) {
                   { label: "归属者", value: accountLabel(bot()!.accountId) },
                   { label: "人设", value: botAccess.roleOf(botAccess.profileOf(bot()))?.name ?? "未读取" },
                   { label: "最近活动", value: "未记录" },
+                  { label: "共享", value: sharedBadgeOf(bot()!.sharedCount) ?? "未共享" },
                   { label: "状态", value: bot()!.archived ? "已归档" : "可用" },
                 ]
               : []
@@ -567,6 +581,12 @@ export function BotPage(props: { botId: string }) {
                 align="start"
                 trigger={<Button variant="ghost" size="sm" icon="dots" label="更多" accessibilityLabel="更多 Bot 操作" style={{ width: "100%" }} />}
               >
+                <DropdownMenuItem
+                  label="共享 Bot"
+                  icon="users"
+                  disabled={!canShareResource("bot", bot()?.accountId)}
+                  onSelect={() => openBotShare(id(), name())}
+                />
                 <DropdownMenuItem
                   label="改绑身份档案"
                   icon="users"
