@@ -900,6 +900,41 @@ class IdentityAccessStore {
   resetForTest(): void {
     this.clearSession();
   }
+
+  /** Re-read the projections an invalidation fact names (change
+   * keel-harness-v2's identity stream). Only lists the reader already loaded
+   * are refreshed: an untouched chapter must not fire requests from the
+   * background. The event is a fact about staleness, not data. */
+  async refreshForEvent(kinds: ReadonlySet<string>): Promise<void> {
+    const permissions = kinds.has("permissions");
+    const accounts = kinds.has("accounts") || permissions;
+    if (permissions && can("permission.read") && (this.groupsAttempted || this.groups().length > 0)) {
+      await this.loadGroups();
+    }
+    if (accounts && can("account.read") && (this.accountsAttempted || this.accounts().length > 0)) {
+      await this.loadAccounts();
+    }
+    if (permissions && can("permission.read")) {
+      const groupId = this.groupDetailId();
+      if (groupId && this.groupDetail()?.group.groupId === groupId) {
+        await this.loadGroup(groupId, { keepDraft: true });
+      }
+    }
+    if (accounts && can("account.read")) {
+      const accountId = this.accountDetailId();
+      if (accountId && this.accountDetail()) {
+        await this.loadAccount(accountId);
+        if (this.accountBotsLoaded() && can("bot.read")) await this.loadAccountBots(accountId);
+      }
+    }
+    // The account index's 「最近活动」 is derived from the audit ledger; a
+    // permissions/accounts change can add a row. Reload only when it had
+    // already been read (the idle state means the reader cannot read audit).
+    if (accounts && this.activityState() === "ready") {
+      this.activityState.set("idle");
+      void this.loadActivity();
+    }
+  }
 }
 
 export const identityAccess = new IdentityAccessStore();

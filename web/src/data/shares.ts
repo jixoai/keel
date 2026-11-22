@@ -316,6 +316,20 @@ class ShareStore {
       );
     }
   }
+
+  /** Re-read the open dialog after an invalidation fact (change
+   * keel-harness-v2's identity stream). A closed dialog costs nothing; an
+   * account/group change also refreshes the subject directory. */
+  async refreshForEvent(kinds: ReadonlySet<string>): Promise<void> {
+    const target = this.target();
+    if (!target) return;
+    const family =
+      target.kind === "session" ? "sessions" : target.kind === "bot" ? "bots" : "teams";
+    const directory = kinds.has("accounts") || kinds.has("permissions");
+    if (!kinds.has(family) && !directory) return;
+    await this.load();
+    if (directory) await this.loadDirectory();
+  }
 }
 
 export const shares = new ShareStore();

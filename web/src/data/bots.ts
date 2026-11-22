@@ -21,7 +21,7 @@
 import { signal } from "nsh";
 import type { SessionSummary } from "./contract";
 import { KeelApiError, errorMessageOf } from "./http";
-import { can } from "./permissions";
+import { can, canAny } from "./permissions";
 import { store } from "./store";
 import { identityAccess, type AccessFailure } from "./identity-access";
 import { capabilityOf, isHighRisk, isKnownKey, type CapabilityRisk } from "./permission-catalog";
@@ -1692,6 +1692,39 @@ class BotAccessStore {
       return null;
     } finally {
       this.runStopping.set(false);
+    }
+  }
+
+  // ---- invalidation stream ------------------------------------------------
+
+  /** Re-read the Bot/TeamBot projections an invalidation fact names (change
+   * keel-harness-v2's identity stream). Only views the reader already loaded
+   * are refreshed; a chapter that was never opened stays quiet. */
+  async refreshForEvent(kinds: ReadonlySet<string>): Promise<void> {
+    const bots = kinds.has("bots");
+    const teams = kinds.has("teams");
+    if (bots && can("bot.read") && (this.botsAttempted || this.bots().length > 0)) {
+      await this.loadBots();
+    }
+    if (bots && can("bot.read")) {
+      const botId = this.botDetailId();
+      if (botId && this.botDetail()) {
+        await this.loadBot(botId);
+        if (this.botKeysLoaded() && can("bot.manage")) await this.loadBotKeys(botId);
+      }
+    }
+    if (teams && can("team_bot.read") && (this.teamsAttempted || this.teams().length > 0)) {
+      await this.loadTeams();
+    }
+    if (teams && can("team_bot.read")) {
+      const teamId = this.teamDetailId();
+      if (teamId && this.teamDetail()) await this.loadTeam(teamId);
+    }
+    // A role/profile change alters the persona names beside a Bot; profiles are
+    // only re-read when that projection had been loaded.
+    if (kinds.has("permissions") && this.profilesAttempted && canAny(["profile.read", "role.read"])) {
+      this.profilesAttempted = false;
+      this.ensureProfiles();
     }
   }
 

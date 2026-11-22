@@ -6,7 +6,7 @@
 import { host, signal } from "nsh";
 import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
-import { KeelApiError, KeelHttp, errorMessageOf } from "./http";
+import { KeelApiError, KeelHttp, errorMessageOf, type FetchLike } from "./http";
 import { setEffectivePermissions, resetPermissions } from "./permissions";
 import type { AuthSessionView, WhoAmI } from "./identity";
 import type { IdentityApi } from "./identity-api";
@@ -433,6 +433,13 @@ class KeelStore {
    * answers it in memory so the real parsing runs without a network). `null`
    * uses the app's own transport. */
   private identityClient: IdentityApi | null = null;
+  /** The identity invalidation stream's lifecycle hooks (identity-stream.ts
+   * installs them when it loads). The store owns the session: it starts the
+   * stream after whoami answers (any route, not just the books shell) and closes
+   * it on every path that ends a session — logout, a 401, an account switch —
+   * without importing the stream module (which imports us). */
+  private identityStreamCloser: (() => void) | null = null;
+  private identityStreamStarter: (() => void) | null = null;
   private engine: CoreEngine | null = null;
   private unsubscribeEngine: (() => void) | null = null;
   private unsubscribeStream: (() => void) | null = null;
@@ -675,6 +682,11 @@ class KeelStore {
       if (!(error instanceof KeelApiError && error.status === 401)) {
         console.warn(`[keel] whoami unavailable: ${errorMessageOf(error)}`);
       }
+    } finally {
+      // whoami is the authoritative `app.read` answer: the stream starts once
+      // it is held and stops if it was revoked (the stream's own flush calls
+      // this too, through the same hook).
+      this.identityStreamStarter?.();
     }
   }
 
@@ -783,6 +795,7 @@ class KeelStore {
   /** Drop everything scoped to the signed-in account, so a login page never
    * shows the previous account's rows behind it. */
   private clearSessionState() {
+    this.identityStreamCloser?.();
     this.closeStream();
     this.sessions.set([]);
     this.activeId.set(null);
@@ -1460,6 +1473,39 @@ class KeelStore {
   identityApi(): IdentityApi | null {
     const client = this.identityClient ?? this.client;
     return typeof client.listAccounts === "function" ? (client as IdentityApi) : null;
+  }
+
+  /** The live transport's streaming seam for GET /v1/identity/events. The
+   * fixture and a hand-written test IdentityApi do not expose it, so the
+   * stream module simply stays off there. */
+  identityStreamTransport(): { url(path: string): string; transport(): FetchLike } | null {
+    const client = this.identityClient ?? this.client;
+    const candidate = client as unknown as { url?: unknown; transport?: unknown };
+    if (typeof candidate.url !== "function" || typeof candidate.transport !== "function") return null;
+    return candidate as { url(path: string): string; transport(): FetchLike };
+  }
+
+  /** identity-stream.ts installs its stop function here; `null` clears it. */
+  setIdentityStreamCloser(closer: (() => void) | null): void {
+    this.identityStreamCloser = closer;
+  }
+
+  /** identity-stream.ts installs its sync function here; the store calls it
+   * after every whoami answer, so a permission change starts/stops the stream
+   * on any route (settings, plugins, workspace), not only inside the books
+   * shell. */
+  setIdentityStreamStarter(starter: (() => void) | null): void {
+    this.identityStreamStarter = starter;
+  }
+
+  /** The invalidation stream answers a 401 outside KeelHttp's request path
+   * (it streams a body), so it reports the expired session here: close every
+   * local trace and return to the login gate, exactly like a 401 from a route. */
+  identityStreamUnauthorized(): void {
+    if (this.auth() === "unknown") return;
+    this.clearSessionState();
+    this.auth.set("required");
+    this.authNotice.set("会话已过期，请重新登录。");
   }
 
   /** Test/host seam: answer the skill library without a network. `null`

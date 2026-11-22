@@ -29,6 +29,7 @@ import {
 import { Icon, type IconName } from "../../ui/icons";
 import { store } from "../../data/store";
 import { botAccess } from "../../data/bots";
+import { identityStream } from "../../data/identity-stream";
 import { canAny } from "../../data/permissions";
 import {
   BOOK_TOUCH_PX,
@@ -332,6 +333,12 @@ export function BooksChrome(props: { children?: JSX.Element }) {
   // The team/bot chapters read one shared store; the shell warms it once (the
   // top band no longer owns a todo count, but the lists still need the data).
   effect(() => {
+    // The identity invalidation tail is keyed to the auth stage and to
+    // app.read. `sync` starts it once after login (whoami lands a moment
+    // later) and closes it on logout/401/account switch; the store's own
+    // session teardown also calls the closer, so an unmounted shell cannot
+    // leave the old cookie's stream running.
+    identityStream.sync(store.auth());
     if (canAny(["bot.read", "bot.manage"])) botAccess.ensureBots();
     if (canAny(["team_bot.read", "team_bot.manage"])) botAccess.ensureTeams();
   });
