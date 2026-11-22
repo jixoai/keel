@@ -1,84 +1,71 @@
 {
-  "schema": "keel.extensibility/1",
+  "schema": "keel.plugin-extensibility/1",
   "plugin": "keel.oar",
   "version": "1.0.0",
-  "layer": "harness",
-  "summary": "External-runtime adapter for Codex (first), with a durable out-of-band record stream and a stable renderer projection.",
+  "summary": "External-runtime adapter for Codex (first), with a durable out-of-band record stream and a stable renderer projection. The adapter is an agent backend; the UI slot renders the projection and the host task graph consumes the records.",
   "slots": [],
   "contributes": [],
-  "renderer": {
-    "slot": "keel.ui.tool-renderer",
-    "form": "chunk",
-    "owner": "W12 UI",
-    "projectionSchema": "keel.oar.render-projection/1",
-    "fixture": "fixtures/tool-renderer.fixture.json",
-    "note": "The UI agent owns the slot and renders the projection; OAR does not ship a parallel web renderer."
-  },
-  "config": [
+  "configuration": [
     {
-      "key": "runtime",
+      "key": "KEEL_OAR_RUNTIME",
       "type": "string",
       "required": true,
-      "enum": ["codex", "fake"],
-      "description": "External runtime adapter. fake is simulated=true and is never used as a live model."
+      "description": "External runtime adapter: codex for the live Codex CLI, fake for the deterministic simulated journal."
     },
     {
-      "key": "journalDir",
+      "key": "KEEL_OAR_JOURNAL_DIR",
       "type": "string",
       "required": false,
-      "description": "Durable OAR journal directory (default: <user cache>/keel/oar)."
+      "description": "Durable OAR journal directory; defaults to the host-provided plugin data directory."
     },
     {
-      "key": "workdir",
+      "key": "KEEL_OAR_WORKDIR",
       "type": "string",
       "required": false,
-      "description": "Default runtime working directory."
+      "description": "Default working directory passed to the external runtime."
     },
     {
-      "key": "model",
+      "key": "KEEL_OAR_CODEX_PATH",
       "type": "string",
       "required": false,
-      "description": "Optional Codex model override."
+      "description": "Codex executable path; defaults to codex on PATH. A missing executable is a typed runtime_unavailable preflight failure."
     },
     {
-      "key": "sandbox",
+      "key": "KEEL_OAR_MODEL",
       "type": "string",
       "required": false,
-      "enum": ["read-only", "workspace-write", "danger-full-access"],
-      "description": "Codex sandbox mode; OAR defaults to read-only."
-    },
-    {
-      "key": "requireLiveModel",
-      "type": "boolean",
-      "required": false,
-      "description": "Reject a simulated runtime with simulated_runtime."
-    },
-    {
-      "key": "codexPath",
-      "type": "string",
-      "required": false,
-      "description": "Codex executable; empty means PATH lookup."
+      "description": "Optional model override passed to the Codex runtime; empty uses the runtime default."
     }
   ],
   "hooks": [],
   "providers": [],
-  "tools": [],
   "examples": [
     {
-      "name": "fake record stream",
-      "command": "keel-oar sidecar -runtime=fake -usage -step-delay=50ms",
-      "shows": ["records", "agent_path", "calls", "results", "usage", "attribution"]
+      "title": "Run one Codex turn",
+      "description": "Start the OAR sidecar with the codex runtime and send a task; records carry sessionId/taskId attribution out of band.",
+      "snippet": "{\"runtime\":\"codex\",\"prompt\":\"Reply with exactly OAR-OK\"}"
     },
     {
-      "name": "codex adapter",
-      "command": "keel-oar sidecar -runtime=codex -workdir /tmp/project -sandbox read-only",
-      "shows": ["records", "calls", "results", "messages", "usage", "live_model"]
+      "title": "Replay a deterministic journal",
+      "description": "Use the fake runtime to exercise call/result folding and the renderer projection without a live model.",
+      "snippet": "oar-view -journal <dir> -projection"
     }
   ],
   "limits": [
-    "Record schema is frozen at keel.oar.record/1; one record is <= 1 MiB.",
-    "seq is strictly increasing per backend session; gaps are allowed after a crash.",
-    "No task-card instruction is injected into prompts; attribution is out of band.",
-    "streaming token deltas, approval bridging, Claude, and cross-sidecar resume are not in v1."
+    {
+      "name": "record_sequence",
+      "value": "monotonic",
+      "description": "Every record carries a monotonic seq and an agentPath; the journal never reorders a published record."
+    },
+    {
+      "name": "process_group_cleanup",
+      "value": "5s",
+      "description": "Sidecar and external runtime process groups are terminated and reaped after exit, crash or cancellation."
+    },
+    {
+      "name": "live_model_preflight",
+      "value": "typed",
+      "description": "A simulated or unavailable runtime is refused before a live model turn; it is never silently treated as a real model."
+    }
   ]
 }

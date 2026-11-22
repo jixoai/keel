@@ -9,9 +9,13 @@
 id: keel.oar
 version: 1.0.0
 kind: sidecar
+layer: harness
 description: "OAR external-runtime adapter: exposes Codex (and future runtimes) as out-of-band record streams; no task-card injection, typed capability rejection, process-group cleanup."
 engines:
   keel: ">=0.1.0 <1.0.0"
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
 permissions:
   # The sidecar writes its own journal under the host-provided directory and
   # reads the runtime's config/auth through the inherited minimal environment.
