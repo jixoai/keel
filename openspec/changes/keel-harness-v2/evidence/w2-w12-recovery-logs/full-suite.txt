@@ -1,7 +1,7 @@
-ok  	github.com/jixoai/keel/internal/agent	57.868s
-ok  	github.com/jixoai/keel/internal/supervisor	1.817s
-ok  	github.com/jixoai/keel/internal/servicehost	5.484s
-ok  	github.com/jixoai/keel/cmd/keel	9.856s
-ok  	github.com/jixoai/keel/internal/store	15.385s
-ok  	github.com/jixoai/keel/internal/harnessext	27.869s
-ok  	github.com/jixoai/keel/internal/durable	0.666s
+ok  	github.com/jixoai/keel/internal/agent	82.895s
+ok  	github.com/jixoai/keel/internal/supervisor	2.405s
+ok  	github.com/jixoai/keel/internal/servicehost	5.505s
+ok  	github.com/jixoai/keel/cmd/keel	12.113s
+ok  	github.com/jixoai/keel/internal/store	21.537s
+ok  	github.com/jixoai/keel/internal/harnessext	26.133s
+ok  	github.com/jixoai/keel/internal/durable	0.413s

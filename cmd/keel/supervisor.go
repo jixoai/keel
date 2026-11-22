@@ -17,6 +17,35 @@ import (
 	"github.com/jixoai/keel/internal/tasklog"
 )
 
+// parkDisabledBeforeBoot applies resume.mode=manual|never before the worker
+// starts. servicehost.Boot starts the claim loop, so without this pass a
+// pending run could be claimed in the milliseconds before the post-boot
+// supervisor scan. It acts only on non-terminal rows and never touches a live
+// lease.
+func parkDisabledBeforeBoot(ctx context.Context, st *store.Store, kern *kernel.Kernel, policyReader *supervisorPolicyReader, log *slog.Logger) error {
+	if st == nil || kern == nil || policyReader == nil {
+		return nil
+	}
+	sup, err := supervisor.New(supervisor.Config{
+		Store:  supervisor.NewSQLStore(st),
+		Ledger: kern,
+		Policy: policyReader.policy,
+		Logger: log,
+	})
+	if err != nil {
+		return err
+	}
+	report, err := sup.ParkDisabled(ctx)
+	if err != nil {
+		return err
+	}
+	if report.Parked > 0 {
+		log.Warn("supervisor parked runs before the worker started",
+			"parked", report.Parked, "scanned", report.Scanned)
+	}
+	return nil
+}
+
 // newRecoverySupervisor wires the W12 recovery slice into `keel serve`:
 // automatic startup scan, periodic reconciliation, the parent/owner escalation
 // ladder and the providerFallback policy. It is deliberately a product-layer

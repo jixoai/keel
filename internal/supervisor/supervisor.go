@@ -337,6 +337,58 @@ func (s *Supervisor) scanRun(ctx context.Context, report *Report, policy Policy,
 	}
 }
 
+// ParkDisabled is the pre-worker pass: when the policy disables automatic
+// recovery, it parks pending/expired-running rows before servicehost.Boot
+// starts claiming them. It never touches a live lease and never acts when the
+// mode is auto. The normal Scan remains idempotent if it runs afterwards.
+func (s *Supervisor) ParkDisabled(ctx context.Context) (Report, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+
+	var report Report
+	policy, version := s.policy()
+	if err := policy.Validate(); err != nil {
+		return report, err
+	}
+	if policy.Resume.Mode == ModeAuto {
+		return report, nil
+	}
+	now := s.now()
+	runs, err := s.store.ListSupervisorRuns(ctx, s.limit, nil)
+	if err != nil {
+		return report, fmt.Errorf("supervisor: list runs: %w", err)
+	}
+	for {
+		for _, run := range runs {
+			if ctx.Err() != nil {
+				return report, ctx.Err()
+			}
+			switch run.Status {
+			case "pending":
+				report.Scanned++
+				s.park(ctx, &report, policy, version, run, now)
+			case "running":
+				if run.LeaseUntil != nil && run.LeaseUntil.After(now) {
+					continue
+				}
+				report.Scanned++
+				s.park(ctx, &report, policy, version, run, now)
+			}
+		}
+		if len(runs) < s.limit {
+			break
+		}
+		last := runs[len(runs)-1]
+		runs, err = s.store.ListSupervisorRuns(ctx, s.limit, &RunCursor{
+			UpdatedAt: last.UpdatedAt, TenantID: last.TenantID, SessionID: last.SessionID,
+		})
+		if err != nil {
+			return report, fmt.Errorf("supervisor: list runs after %s: %w", last.SessionID, err)
+		}
+	}
+	return report, nil
+}
+
 // park moves an auto-disabled run to a resumable failed state and records the
 // decision. Parking is the honest "pending recovery" state: the row stays in
 // the queue's table, no worker claims it, and the explicit resume endpoint

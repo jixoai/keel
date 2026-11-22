@@ -1,11 +1,11 @@
 === RUN   TestPGSupervisorResumesFailedRunAndRecordsTheFact
---- PASS: TestPGSupervisorResumesFailedRunAndRecordsTheFact (1.00s)
+--- PASS: TestPGSupervisorResumesFailedRunAndRecordsTheFact (2.20s)
 === RUN   TestPGSupervisorPaginatesEveryRun
---- PASS: TestPGSupervisorPaginatesEveryRun (0.71s)
+--- PASS: TestPGSupervisorPaginatesEveryRun (0.38s)
 === RUN   TestPGManualPolicyParksAndExplicitResumeContinues
---- PASS: TestPGManualPolicyParksAndExplicitResumeContinues (0.18s)
+--- PASS: TestPGManualPolicyParksAndExplicitResumeContinues (0.54s)
 === RUN   TestPGEscalationIsDurable
---- PASS: TestPGEscalationIsDurable (0.42s)
+--- PASS: TestPGEscalationIsDurable (0.46s)
 === RUN   TestParsePolicyJSON
 --- PASS: TestParsePolicyJSON (0.00s)
 === RUN   TestParsePolicyTOMLSubset
@@ -34,6 +34,10 @@
 --- PASS: TestScanPaginatesEveryRun (0.00s)
 === RUN   TestScanCrashLoopExhaustsInsteadOfReclaiming
 --- PASS: TestScanCrashLoopExhaustsInsteadOfReclaiming (0.00s)
+=== RUN   TestParkDisabledRunsBeforeBoot
+--- PASS: TestParkDisabledRunsBeforeBoot (0.00s)
+=== RUN   TestParkDisabledIsANoopForAuto
+--- PASS: TestParkDisabledIsANoopForAuto (0.00s)
 === RUN   TestScanManualParksPendingRun
 --- PASS: TestScanManualParksPendingRun (0.00s)
 === RUN   TestScanNeverParksAndDoesNotResumeFailures
@@ -55,4 +59,4 @@
 === RUN   TestScanReportsStoreFailuresWithoutStopping
 --- PASS: TestScanReportsStoreFailuresWithoutStopping (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/supervisor	3.012s
+ok  	github.com/jixoai/keel/internal/supervisor	4.576s

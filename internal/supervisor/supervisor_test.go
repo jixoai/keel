@@ -416,6 +416,53 @@ func TestScanCrashLoopExhaustsInsteadOfReclaiming(t *testing.T) {
 	}
 }
 
+func TestParkDisabledRunsBeforeBoot(t *testing.T) {
+	tenant, pending, expired, live := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	expiredAt := time.Now().UTC().Add(-time.Minute)
+	liveAt := time.Now().UTC().Add(time.Minute)
+	store := newFakeStore(
+		RunRecord{TenantID: tenant, SessionID: pending, Status: "pending", UpdatedAt: expiredAt},
+		RunRecord{TenantID: tenant, SessionID: expired, Status: "running", LeaseUntil: &expiredAt, UpdatedAt: expiredAt},
+		RunRecord{TenantID: tenant, SessionID: live, Status: "running", LeaseUntil: &liveAt, UpdatedAt: expiredAt},
+	)
+	store.parkChanged = true
+	ledger := &fakeLedger{}
+	policy := DefaultPolicy()
+	policy.Resume.Mode = ModeNever
+	sup := newTestSupervisor(t, store, ledger, policy, ConfigVersion{})
+
+	report, err := sup.ParkDisabled(context.Background())
+	if err != nil {
+		t.Fatalf("ParkDisabled: %v", err)
+	}
+	if report.Parked != 2 {
+		t.Fatalf("report = %+v, want 2 parked", report)
+	}
+	if store.parked[pending] == "" || store.parked[expired] == "" {
+		t.Fatalf("parked = %+v", store.parked)
+	}
+	if store.parked[live] != "" {
+		t.Fatal("a live lease was parked")
+	}
+	if facts := ledger.ofKind(kernel.KindResumeAttempt); len(facts) != 2 {
+		t.Fatalf("park facts = %d, want 2", len(facts))
+	}
+}
+
+func TestParkDisabledIsANoopForAuto(t *testing.T) {
+	tenant, session := uuid.New(), uuid.New()
+	store := newFakeStore(RunRecord{TenantID: tenant, SessionID: session, Status: "pending", UpdatedAt: time.Now().UTC()})
+	store.parkChanged = true
+	sup := newTestSupervisor(t, store, &fakeLedger{}, DefaultPolicy(), ConfigVersion{})
+	report, err := sup.ParkDisabled(context.Background())
+	if err != nil {
+		t.Fatalf("ParkDisabled: %v", err)
+	}
+	if report.Parked != 0 || len(store.parked) != 0 {
+		t.Fatalf("auto mode parked a run: report=%+v parked=%v", report, store.parked)
+	}
+}
+
 func TestScanManualParksPendingRun(t *testing.T) {
 	tenant, session := uuid.New(), uuid.New()
 	store := newFakeStore(RunRecord{

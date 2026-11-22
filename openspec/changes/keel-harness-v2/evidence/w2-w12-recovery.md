@@ -17,7 +17,7 @@
 | Parent link | `internal/harnessext/fork.go` | `DurableParentSession` reads the child's first input, so escalation survives a restart. |
 | Guardrails | `internal/agent/guardrails.go` | Duplicate-call reminder/block, per-call timeout, consecutive-failure limit, token/cost budget, heap-pressure signal. Each trip commits `guardrail.tripped` and has a deterministic outcome. |
 | Recovery fact | `internal/agent/runner.go` | A reclaimed lease commits a counted `resume.attempt` adoption fact (owner, epoch, reason, config hash/revision) before any new work. |
-| Wiring | `internal/servicehost/{host,services}.go`, `cmd/keel/{serve,supervisor}.go` | Runner captures the guardrail policy once per attempt; `keel serve` runs the supervisor startup scan before the listener and keeps reconciling. |
+| Wiring | `internal/servicehost/{host,services}.go`, `cmd/keel/{serve,supervisor}.go` | Runner captures the guardrail policy once per attempt; `keel serve` runs a pre-boot `ParkDisabled` pass for `manual|never`, then the full supervisor startup scan before the listener, and keeps reconciling. |
 
 Deliberate choices:
 
@@ -51,11 +51,11 @@ All names are test functions in the committed tree.
 
 | # | Scenario | Proof |
 |---|---|---|
-| R1 | **`kill -9` after the answer committed, before settle.** A helper process claims the run, runs the real `Runner` (answer + read watermark committed), then sleeps. The parent SIGKILLs it. A second process starts the real `Worker`, waits for the dead lease, reclaims the **same run** with a new epoch and settles it. | `TestCrashThenRestartResumesWithoutADuplicateFinal` (`internal/agent/recovery_process_test.go`). Asserts: one `assistant.message` (no duplicate final), exactly one `run.finished`, exactly one counted `resume.attempt` with `reason=lease_expired`, `result=adopted`, `owner=recovering-worker`, contiguous `seq` 1..N, final status `done`. Log: `w2-w12-recovery-logs/agent-guardrails-crash.txt`. |
+| R1 | **`kill -9` after the answer committed, before settle.** A helper process claims the run, runs the real `Runner` (answer + read watermark committed), then sleeps. The parent SIGKILLs it. A second process starts the real `Worker`, waits for the dead lease, reclaims the **same run** with a new epoch and settles it. | `TestCrashThenRestartResumesWithoutADuplicateFinal` (`internal/agent/recovery_process_test.go`). Asserts: one `assistant.message` (no duplicate final), exactly one `run.finished`, at least one counted `resume.attempt` adoption fact (`reason=lease_expired`, `result=adopted`, `owner=recovering-worker`; a recovery attempt that itself loses its lease may legitimately add another adoption fact), contiguous `seq` 1..N, final status `done`. Log: `w2-w12-recovery-logs/agent-guardrails-crash.txt`. |
 | R2 | **Worker reclaims an expired lease and records who/why/config.** Short first lease, successor claim reports `Reclaimed`, `RunAttempt` commits the adoption fact before reading/answering. | `TestReclaimedLeaseRecordsTheRecoveryFact` (`internal/agent/guardrails_pg_test.go`). Asserts one `resume.attempt` fact with `reason=lease_expired`, `result=adopted`, `counted=true`, owner `successor-runtime`, config hash/revision, and one answer. |
 | R3 | **Startup/periodic scan auto-resumes a failed run, idempotently.** Failed run → `RequeueRun` → pending; fact committed; second scan does not add an attempt. The scan pages by keyset, so a backlog larger than one page is still fully visited. | `TestPGSupervisorResumesFailedRunAndRecordsTheFact` (`internal/supervisor/pg_test.go`), `TestScanIsIdempotentOnceRequeued`, `TestScanAutoResumesFailedRun`, `TestScanPaginatesEveryRun`, `TestPGSupervisorPaginatesEveryRun`. |
-| R4 | **`resume.mode=manual` parks the run; explicit resume continues it.** Parked row is `failed` with a policy reason; `ClaimScope` returns `ErrNoRunnable`; `RequeueRun` (the `/resume` store path) makes it claimable. | `TestPGManualPolicyParksAndExplicitResumeContinues`; unit: `TestScanManualParksPendingRun`. |
-| R5 | **`resume.mode=never` never auto-recovers.** Pending row is parked with `policy_never`; an already-failed row is not retried. | `TestScanNeverParksAndDoesNotResumeFailures`. |
+| R4 | **`resume.mode=manual` parks the run; explicit resume continues it.** A pre-boot pass parks pending/expired-running rows before the worker starts claiming; the parked row is `failed` with a policy reason; `ClaimScope` returns `ErrNoRunnable`; `RequeueRun` (the `/resume` store path) makes it claimable. | `TestPGManualPolicyParksAndExplicitResumeContinues`; unit: `TestScanManualParksPendingRun`, `TestParkDisabledRunsBeforeBoot`. |
+| R5 | **`resume.mode=never` never auto-recovers.** The pre-boot and normal scans park pending/expired-running rows with `policy_never`; an already-failed row is not retried; a live lease is never touched. | `TestScanNeverParksAndDoesNotResumeFailures`, `TestParkDisabledRunsBeforeBoot`, `TestParkDisabledIsANoopForAuto`. |
 | R6 | **Budget, backoff and crash loops.** Backoff skips a scan before the next deadline; `maxAttempts` exhaustion escalates; a crash loop at the budget is parked/escalated instead of being reclaimed forever. | `TestScanRespectsBackoff`, `TestScanCrashLoopExhaustsInsteadOfReclaiming`, `TestBackoffDelay`. |
 | R7 | **Escalation ladder.** Exhaustion: parent via a task.note on the parent card; no parent → owner via `notify.Service`; `onExhausted=stop` records a stop fact; one escalation per failure epoch; super-agent is an optional L3 seam only when the parent rung did not take the hand-off. | `TestScanEscalatesToParentAtExhaustion`, `TestScanEscalatesToOwnerWithoutParent`, `TestScanOnExhaustedStop`, `TestScanEscalatesOncePerFailureEpoch`, `TestPGEscalationIsDurable`. |
 | R8 | **Provider fallback.** A quota-exhausted failure with `providerFallback` writes the fallback `selection` into the `resume.attempt` fact; the runner already resolves the newest `selection` fact, so the next attempt uses it. An invalid fallback is recorded (`fallbackError`) but does not block the resume. | `TestScanProviderFallbackSelection`, `TestScanProviderFallbackInvalidStillResumes`; selection resolution is the existing `internal/agent/model.go: runSelection`. |
@@ -118,8 +118,8 @@ KEEL_TEST_DSN=<local test DSN> go test ./internal/supervisor \
 KEEL_TEST_DSN=<local test DSN> go test \
   ./internal/agent ./internal/supervisor ./internal/servicehost ./cmd/keel \
   ./internal/store ./internal/harnessext ./internal/durable -count=1 -p 1
-# => ok agent 57.868s; supervisor 1.817s; servicehost 5.484s; cmd/keel 9.856s;
-#    store 15.385s; harnessext 27.869s; durable 0.666s
+# => ok agent 82.895s; supervisor 2.405s; servicehost 5.505s; cmd/keel 12.113s;
+#    store 21.537s; harnessext 26.133s; durable 0.413s
 
 go vet ./internal/supervisor ./internal/agent ./internal/store \
   ./internal/durable ./internal/harnessext ./internal/servicehost ./cmd/keel
@@ -145,11 +145,14 @@ Negative controls exercised:
 
 ## 5. Walkthrough / review notes
 
-- Startup order: `servicehost.Boot` starts the worker, so a queued run may be
-  claimed in the milliseconds before `newRecoverySupervisor` runs. This is
-  harmless: the worker's own claim is the execution, and a reclaimed lease
-  records the recovery fact. Failed-run reconciliation and parking run in the
-  explicit startup `Scan` before the HTTP listener opens.
+- Startup order: `servicehost.Boot` starts the worker, so a `manual|never`
+  policy needs to win earlier. `parkDisabledBeforeBoot` runs before Boot (a
+  no-op for `auto`) and parks only pending/expired-running rows without touching
+  a live lease. After Boot, `newRecoverySupervisor` runs the full startup `Scan`
+  before the HTTP listener opens. A queued run under `auto` may be claimed in
+  the milliseconds before that full scan; that is harmless (the worker's claim
+  is the execution, and a reclaimed lease records the recovery fact). Failed-run
+  reconciliation and escalation run in the explicit startup `Scan`.
 - The supervisor never claims/renews/finishes a lease. It only reads rows,
   calls the shared `RequeueRun`, parks policy-disabled rows, and commits facts.
 - `ParkRun` never touches a live lease: a policy flag must not kill work another

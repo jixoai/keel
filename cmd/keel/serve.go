@@ -622,6 +622,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// scan by the supervisor. One reader keeps both halves on the same document;
 	// a rotation therefore changes later attempts only.
 	policyReader := newSupervisorPolicyReader(log)
+	// manual/never must win before the worker starts claiming; this pass is a
+	// no-op for auto.
+	if err := parkDisabledBeforeBoot(ctx, st, kern, policyReader, log); err != nil {
+		return fmt.Errorf("supervisor pre-boot park: %w", err)
+	}
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
 		// Every model tool call is authorized against the session's principal
