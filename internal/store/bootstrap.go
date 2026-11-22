@@ -26,6 +26,12 @@ import (
 // expiry; this constant is the default the caller uses.
 const BootstrapTokenTTL = 30 * time.Minute
 
+// BootstrapEnvTokenTTL is the lifetime of the operator-provided
+// KEEL_BOOTSTRAP_TOKEN. It is longer than the CLI token because the environment
+// value is meant to survive container restarts until setup is completed; every
+// boot refreshes an expired value.
+const BootstrapEnvTokenTTL = 24 * time.Hour
+
 // ErrBootstrapAlreadyComplete distinguishes "a real super admin already exists"
 // from other conflicts (a duplicate username) during setup.
 var ErrBootstrapAlreadyComplete = errors.New("store: bootstrap already complete")
@@ -99,6 +105,32 @@ func (s *Store) EnsureBootstrapToken(ctx context.Context, tenantID uuid.UUID, to
 		return false, nil
 	}
 	if _, err := s.CreateBootstrapToken(ctx, tenantID, tokenHash, expiresAt, actor); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// EnsureLiveBootstrapToken is the container/env path: it keeps one operator
+// token live until setup completes. If the same hash already has an unexpired
+// unused event, it does nothing; if it expired (or was consumed without a
+// super admin, an inconsistent state), it writes a fresh token event so a
+// container restart does not leave the operator with an expired token.
+func (s *Store) EnsureLiveBootstrapToken(ctx context.Context, tenantID uuid.UUID, tokenHash []byte,
+	now time.Time, ttl time.Duration) (bool, error) {
+	if tenantID == uuid.Nil || len(tokenHash) != 32 {
+		return false, invalidIdentity("ensure live bootstrap token", "tenant and a 32-byte token hash are required")
+	}
+	if ttl <= 0 {
+		ttl = BootstrapEnvTokenTTL
+	}
+	state, err := s.BootstrapTokenState(ctx, tenantID, tokenHash, now)
+	if err != nil {
+		return false, err
+	}
+	if state == BootstrapTokenValid {
+		return false, nil
+	}
+	if _, err := s.CreateBootstrapToken(ctx, tenantID, tokenHash, now.Add(ttl), "environment"); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -913,13 +913,13 @@ func ensureBootstrapEnvToken(ctx context.Context, st *store.Store, tenantID uuid
 		log.Info("KEEL_BOOTSTRAP_TOKEN ignored: a super admin already exists")
 		return nil
 	}
-	created, err := st.EnsureBootstrapToken(ctx, tenantID, auth.HashToken(token),
-		time.Now().UTC().Add(store.BootstrapTokenTTL), "environment")
+	created, err := st.EnsureLiveBootstrapToken(ctx, tenantID, auth.HashToken(token),
+		time.Now().UTC(), store.BootstrapEnvTokenTTL)
 	if err != nil {
 		return err
 	}
 	if created {
-		log.Info("bootstrap token configured from environment", "ttl", store.BootstrapTokenTTL.String())
+		log.Info("bootstrap token configured from environment", "ttl", store.BootstrapEnvTokenTTL.String())
 	}
 	return nil
 }
