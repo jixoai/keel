@@ -24,22 +24,22 @@
 
 ```text
 $ go test ./internal/oar/... -count=1
-ok  	github.com/jixoai/keel/internal/oar	2.511s
+ok  	github.com/jixoai/keel/internal/oar	2.936s
 ?   	github.com/jixoai/keel/internal/oar/cmd/keel-oar	[no test files]
 ?   	github.com/jixoai/keel/internal/oar/cmd/oar-view	[no test files]
-ok  	github.com/jixoai/keel/internal/oar/sidecar	0.130s
+ok  	github.com/jixoai/keel/internal/oar/sidecar	0.585s
 
 $ go test -race ./internal/oar/... -count=1
-ok  	github.com/jixoai/keel/internal/oar	6.195s
+ok  	github.com/jixoai/keel/internal/oar	3.850s
 ?   	github.com/jixoai/keel/internal/oar/cmd/keel-oar	[no test files]
 ?   	github.com/jixoai/keel/internal/oar/cmd/oar-view	[no test files]
-ok  	github.com/jixoai/keel/internal/oar/sidecar	1.911s
+ok  	github.com/jixoai/keel/internal/oar/sidecar	1.458s
 
 $ go vet ./internal/oar/...
 （无输出）
 ```
 
-测试清单（38 个顶层用例）：
+测试清单（40 个顶层用例）：
 
 ```text
 TestBridgeFakeSidecarCrashesCleanly
@@ -79,6 +79,7 @@ TestServiceCodexAdapterWithFakeCodex
 TestServiceCodexCancelReapsProcessGroup
 TestServiceCodexUnavailableIsTyped
 TestServiceDisabled
+TestServiceMissingSidecarIsTyped
 TestSimulatedRuntimeCannotClaimLiveModel
 TestWriteTable
 ```
@@ -108,7 +109,7 @@ TestWriteTable
 | 进程树回收 | `TestBridgeReapsSidecarProcessGroup`（sidecar + fake child）、`TestServiceCodexCancelReapsProcessGroup`（codex shell + sleep）、`TestBridgeFakeSidecarCrashesCleanly` |
 | record 顺序/归属 | `TestBridgeFakeSidecarRecordStream`（seq 1..N、跨 agentPath、attribution、journal 一致、无任务卡字样） |
 | Codex 适配器（fake codex） | `TestServiceCodexAdapterWithFakeCodex`（call/result/message/usage 映射） |
-| OAR 关闭/不可用 | `TestServiceDisabled`、`TestServiceCodexUnavailableIsTyped` |
+| OAR 关闭/不可用 | `TestServiceDisabled`、`TestServiceMissingSidecarIsTyped`、`TestServiceCodexUnavailableIsTyped` |
 | 渲染投影 | `TestBuildProjectionFoldsCallsAndResults`、`TestProjectionFixture`、`TestResultWithoutCallStaysAStandaloneItem` |
 | 既有 externalgw 桥 | `TestExternalGatewayProjectsOARRecords`（OAR sidecar 作为 `host.ExternalConfig.Backends` 后端，`external.event` payload 含完整 record） |
 
