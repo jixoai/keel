@@ -13,7 +13,7 @@
 // destinations' test ids (`books-chapter-*`); the phone's bottom tabs keep
 // theirs (`books-tab-*`).
 import type { JSX } from "nsh";
-import { effect, Text, View, windowSize } from "nsh";
+import { effect, safeAreaInsets, Text, View, windowSize } from "nsh";
 import {
   Button,
   GLASS_BLUR,
@@ -251,6 +251,7 @@ function TopBand() {
 // ---- the phone's bottom bar ------------------------------------------------
 
 function BottomBar() {
+  const insets = safeAreaInsets();
   return (
     <View
       testID="books-tabbar"
@@ -263,7 +264,7 @@ function BottomBar() {
         borderTopColor: color.border,
         minHeight: BOOK_TOUCH_PX + 12,
         paddingTop: space.xxs,
-        paddingBottom: space.sm,
+        paddingBottom: space.sm + insets().bottom,
       }}
     >
       <Each of={CHAPTERS.filter((chapter) => chapterVisible(chapter))} key={(chapter) => chapter.id}>
