@@ -8,7 +8,8 @@
 ```bash
 export KEEL_DSN='postgres://postgres:<password>@127.0.0.1:13741/runtime?sslmode=disable'
 export KEEL_SERVE_TENANT=<tenant-uuid>
-export KEEL_SERVE_PASSWORD='<passphrase>'      # 或 ""（仅回环）
+export KEEL_SECRET_KEY='<32-byte base64/hex>'   # 给 session/CSRF cookie 签名
+keel admin bootstrap --tenant "$KEEL_SERVE_TENANT"   # 空库首次
 keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 ```
 
@@ -17,23 +18,26 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 | `KEEL_DSN` / `--dsn` | PostgreSQL DSN（必需） | — |
 | `KEEL_SERVE_ADDR` / `--addr` | 监听地址 | `127.0.0.1:13750` |
 | `KEEL_SERVE_TENANT` / `--tenant` | 本进程代表的单一租户（开启认证时必需） | — |
-| `KEEL_SERVE_PASSWORD` / `--password` | 本地口令；置空关闭认证（仅回环） | — |
+| `KEEL_SECRET_KEY` | 32 字节 base64/hex，签 cookie + CSRF；同时启用 AES-256-GCM 租户密钥存储 | `auth=required` 时必需 |
+| `KEEL_AUTH` / `--auth` | `required`、`local-only` 或 `off` | `required` |
+| `KEEL_BOOTSTRAP_TOKEN` | 容器式首次启动的一次性 setup token | — |
 | `KEEL_SERVE_WEB_DIR` / `--web-dir` | 静态 web 构建目录 | `web/dist` |
 | `KEEL_MODEL` / `KEEL_PROVIDER` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_API_KEY` | 模型选择（未设 = fake provider） | — |
 | `KEEL_MODELS_CONFIG` / `--models-config` | 租户模型文档（providers/rules/selection） | — |
 | `KEEL_SKILLS_ROOTS` | 技能根目录的 OS 路径列表（PI 兼容） | — |
-| `KEEL_SECRET_KEY` | 启用 AES-256-GCM 租户密钥存储；未设则显式禁用 | — |
 | `KEEL_RUNTIME_ID` | 写入 claim/审计的运行时身份（handoff） | hostname-pid |
 
-（出处：`cmd/keel/main.go:53`、`cmd/keel/serve.go:37`、`docs/HANDOFF.md`。）
+（出处：`cmd/keel/main.go`、`cmd/keel/auth.go`、`docs/HANDOFF.md`。）
 
 暴露端口前值得知道的运维事实：
 
-- **认证是网络中间件，不是 API 的事**：web 用 HMAC 签名的 HttpOnly cookie，CLI/TUI 用
-  `Authorization: Bearer`；中间件注入租户并剥离客户端提供的 `X-Tenant-ID`
-  （`internal/harnessapi/api.go:18`、`cmd/keel/auth.go:63`）。
-- `--password ""` **只应答回环 Host**——关闭认证的监听地址若绑定通配，会拒绝非回环请求而不是
-  暴露租户（`cmd/keel/auth.go:100`）。
+- **认证是网络中间件，不是 API 的事**：人类用账号 + 密码换 HMAC 签名 HttpOnly cookie，
+  写请求带 `X-Keel-CSRF`；机器客户端用绑定到 Bot 的 `keel_bot_...` key。中间件注入租户并
+  剥离客户端提供的 `X-Tenant-ID`（`internal/harnessapi/api.go`、`cmd/keel/auth.go`）。
+- **空库没有超管。** `keel admin bootstrap` 生成一次性 setup token；浏览器完成设置并强制改密。
+  不存在“第一个访问者自动成为超管”。
+- `local-only` 只应答回环并映射内置 local-admin；`off` 还需显式 `--insecure`，公网绑定拒绝启动
+  （`cmd/keel/auth.go`）。
 - `keel serve` 是**单租户**（`KEEL_SERVE_TENANT`）；多租户复用需要多租户前置层（那是产品决策，
   不是 flag）。
 - 进程无状态：一切事实在 PostgreSQL（大 blob 另加 CAS），因此 `kill -9` 是被支持的失败模式，
@@ -51,7 +55,8 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 ## 2. `keel tui`
 
 ```bash
-keel tui --url http://127.0.0.1:13750 --token "$KEEL_SERVE_PASSWORD"
+# 机器客户端：绑定到 Bot 的 key；人类走账号会话
+keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"
 # 只看解析出的命令而不执行：
 keel tui --print
 ```
@@ -78,7 +83,7 @@ TUI 是同一个客户端（同一份 TSX、同一个 Harness API）在终端宿
 
 | 面 | 回答什么 |
 | --- | --- |
-| `keel doctor` | 构建身份、配置配对（password/tenant）、web 产物、TUI 产物；加 `--db` 则测数据库可达与 schema 存在。只读——不迁移、不写入、不启动 worker（`cmd/keel/doctor.go:16`、`:26`） |
+| `keel doctor` | 构建身份、配置配对（secret/tenant/auth mode）、web 产物、TUI 产物；加 `--db` 则测数据库可达与 schema 存在。只读——不迁移、不写入、不启动 worker（`cmd/keel/doctor.go`） |
 | `keel version` | 模块版本、VCS revision（含 dirty）、Go 工具链（`cmd/keel/main.go:80`） |
 | `GET /v1/health` | 进程存活 |
 | `GET /v1/ready` | store 就绪（迁移已应用） |
@@ -99,11 +104,11 @@ TUI 是同一个客户端（同一份 TSX、同一个 Harness API）在终端宿
 
 ```bash
 # 1) 启动新二进制（同一 DSN，不同的 KEEL_RUNTIME_ID）
-# 2) 让旧进程排水：
-curl -XPOST $old/v1/runtime/drain -H "Authorization: Bearer $KEEL_ADMIN_KEY" \
+# 2) 让旧进程排水（人类账号 cookie + CSRF，或 Bot key）：
+curl -XPOST $old/v1/runtime/drain -b "$JAR" -H "X-Keel-CSRF: $CSRF" \
   -d '{"mode":"handoff","deadlineMs":30000}'
 # 3) 观察它安静下来：
-curl -s $old/v1/runtime/status     # claiming=false, inFlightRuns=0
+curl -s -b "$JAR" $old/v1/runtime/status     # claiming=false, inFlightRuns=0
 # 4) SSE 客户端收到 `event: drain` 后重连，并从 Last-Event-ID 续传
 ```
 

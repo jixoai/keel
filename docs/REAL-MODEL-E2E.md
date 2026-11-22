@@ -260,7 +260,7 @@ harness，不掩盖缺陷：不打开它时，真实回合在修复前必然失�
   并把“标记串是否原样回显”作为摘要字段（`markerEchoed`），默认不作硬门。
 - 证据里的消息正文只留在 `/tmp`（不入库、不贴报告）；报告只写长度/seq/耗时。
 
-## 8. 租户模型文档路径（`--models` / `--models-baseline`）
+## 8. 租户模型文档路径（`--models`）
 
 `keel serve` 与 `cmd/runtime` 都能从**一份租户模型文档**装配 provider/model：
 `--models-config <file>`（serve）或 `KEEL_MODELS_CONFIG=<file>`（两者）。文件内容
@@ -339,16 +339,18 @@ selection 被设计成输入事实的原因：持有当前选择的是客户端�
 脚本阶段：
 
 ```bash
-scripts/real-model-e2e.sh --models           # after：keel serve + 文档 + 录制代理
-scripts/real-model-e2e.sh --models-baseline  # before：改前二进制 + 扁平配置
-scripts/real-model-e2e.sh --models-all       # 两半一起跑，证据可逐字段对照
+scripts/real-model-e2e.sh --models   # keel serve + 租户模型文档 + 录制代理
 ```
 
-两半都把 provider 的 base URL 指向**录制代理**（只转发、不改造；流式原样回传），
+脚本把 provider 的 base URL 指向**录制代理**（只转发、不改造；流式原样回传），
 代理把每次请求的 `model`、`reasoning_effort`、`max_tokens`、是否带凭据（只记布尔，
 不记值）写进 `wire-requests.jsonl`。因此断言的是**线路事实**，而不是配置解析结果：
 
-| 断言 | before（`--models-baseline`，参考 `ed3f733`） | after（`--models`） |
+> 改前基线（`--models-baseline` / `--models-legacy`）已随 alpha 零兼容删除：
+> 旧二进制使用已删除的口令/旧 `agents` schema，不能与新二进制共享测试库。下表保留
+> 当时的对照事实作为设计依据，脚本不再提供这些模式。
+
+| 断言 | 改前（历史基线，已退役） | 现在（`--models`） |
 |---|---|---|
 | `GET /v1/providers` | 无此路由（404） | 200，可见 provider 列出、隐藏 provider 不出现 |
 | 线路 `model` | 扁平配置的模型 id | 文档里 `modelIds` 的模型 id |

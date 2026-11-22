@@ -1,7 +1,9 @@
 # Harness
 
 > **Harness** 是 keel 的产品层。它把 Core 的事件账本与 loop 变成可用的智能体产品：会话、回合、
-> 工具、审批、插件、触发器，以及与之对话的客户端界面。此名取代早期的「Agent」命名；
+> 工具、审批、插件、触发器，以及与之对话的客户端界面。产品实体是 **Account**、**Role**、
+> **Profile**、**Bot**、**TeamBot**：Bot 是可运行的 AI 员工（`Profile + ModelKind + Harness`），
+> TeamBot 是 Mission + Bot 名单。旧的「Agent」/`TeamAgent` 已删除（alpha 零兼容）；
 > 协议名 **AgentAPI** 与 **AgentBackend** 是契约，予以保留（见[术语表](/zh/glossary)）。
 
 Harness 不是另一个运行时。它是建立在 Core 之上的**宿主进程**（`keel serve`），加一组从不

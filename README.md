@@ -1,7 +1,8 @@
 # Keel · Harness
 
 > **Keel（龙骨）**——船体最承重的结构。Keel 是智能体集群的龙骨：
-> 一个**通用、无状态、多租户**的运行时底座：契约内核（Core）+ 产品层（**Harness**，原 Agent）。
+> 一个**通用、无状态、多租户**的运行时底座：契约内核（Core）+ 产品层（**Harness**：
+> Bot / TeamBot / Account / Role / Profile）。
 >
 > **Keel 是 [PI](https://github.com/earendil-works/pi) 的 Go 重构**：接口、事件语义与
 > 生态产物（SKILL.md / MCP / 压缩 / 遥测）以 PI 为唯一参照；只替换运行时
@@ -83,19 +84,28 @@ go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 
 完整命令（测试、E2E、压测、2GB cgroup 复跑）见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
 
-### 本地评审服务器（口令在 env 文件里）
+### 本地评审服务器（账号登录 / Bot key）
 
-`scripts/serve-local.sh` 从**个人 env 文件**读取 `KEEL_SERVE_PASSWORD` / `KEEL_SERVE_TENANT` /
-`KEEL_DSN` / `KEEL_SERVE_ADDR`，再启动 `keel serve`。口令与 DSN 因此不出现在命令行、shell 历史
-或 `ps` 输出里。
+`scripts/serve-local.sh` 从**个人 env 文件**读取 `KEEL_DSN` / `KEEL_SERVE_TENANT` /
+`KEEL_SECRET_KEY` / `KEEL_SERVE_ADDR`，再启动 `keel serve`。cookie/CSRF 签名密钥与 DSN 因此
+不出现在命令行、shell 历史或 `ps` 输出里。
 
 ```bash
 scripts/serve-local.sh --build   # 编译并前台启动
 scripts/serve-local.sh --stop    # 停止
 ```
 
+- **人类**用账号用户名 + 密码登录（`KEEL_ACCOUNT_USERNAME` / `KEEL_ACCOUNT_PASSWORD`，或
+  `--password-file`）；第一次用 CLI/TUI 前先登录，写请求带 `X-Keel-CSRF`。
+- **机器客户端**用绑定到具体 Bot 的 key（`KEEL_AGENT_TOKEN`，`keel_bot_...`），不走浏览器登录。
+- 空库首次启动：运行 `keel admin bootstrap`（或设置 `KEEL_BOOTSTRAP_TOKEN`），在浏览器用一次性
+  setup token 设置首个超管；脚本只提示，不打印令牌。
+- 旧的 `KEEL_SERVE_PASSWORD` 已删除；env 文件里残留时脚本会忽略并提示。旧 cookie、旧 API key、
+  旧 `agents`/`agent_teams` schema 均不兼容，升级即重新初始化账号（alpha 零兼容）。
+
 env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.personal`（gitignored）；
 本 worktree 会自动向上解析三层。需要新增变量时只改那个文件，脚本本身不保存任何凭据。
+术语与旧词对表见 [docs/PRODUCT-TERMS.md](docs/PRODUCT-TERMS.md)。
 
 
 ## 状态与路线

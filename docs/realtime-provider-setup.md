@@ -456,22 +456,22 @@ GET /v1/realtime
 
 - `/v1/realtime` 和 `/v1/realtime/status` 不在 auth 豁免列表里，必须经过
   auth middleware（`cmd/keel/auth.go:52-63`）。
-- 配置了 `KEEL_SERVE_PASSWORD` 时：支持 `Authorization: Bearer <password>` 或
-  `keel_session` cookie；未认证返回 401
-  （`cmd/keel/auth.go:121-143`、`cmd/keel/auth.go:145-159`）。
-- 认证启用但 `KEEL_SERVE_TENANT` 未配置：503
-  （`cmd/keel/auth.go:131-135`）。
-- middleware 会删除客户端自带的 `X-Tenant-ID`，注入服务端配置的 tenant
-  （`cmd/keel/auth.go:137-141`）。
-- 认证禁用时只接受回环 Host；在回环上仍会注入配置的 tenant
-  （`cmd/keel/auth.go:96-118`）。
+- 人类：`POST /v1/auth/login {username,password}` 换 `keel_session` cookie；写请求另需
+  `X-Keel-CSRF`（登录前先从 `GET /v1/auth/session` 取匿名 token）。未认证返回 401。
+- 机器：`Authorization: Bearer keel_bot_...`（绑定到具体 Bot 的 key）；旧
+  `Bearer <passphrase>` 与旧 `keel_session` 全部 401。
+- `--auth local-only` 只应答回环请求并映射内置 local-admin；`off` 还需显式 `--insecure`。
+  空库没有超管，先运行 `keel admin bootstrap`（或设置 `KEEL_BOOTSTRAP_TOKEN`）。
+- 认证启用但 `KEEL_SERVE_TENANT` / `KEEL_SECRET_KEY` 未配置：启动失败或 503
+  （`cmd/keel/auth.go`）。
+- middleware 会删除客户端自带的 `X-Tenant-ID`，注入登录身份派生/服务端配置的 tenant
+  （`cmd/keel/auth.go`）。
 
-因此浏览器不需要、也不应该自己发 `X-Tenant-ID`；直接调用 API 的运维脚本在
-认证关闭且未配置 tenant 时才需要自己发这个头。
+因此浏览器不需要、也不应该自己发 `X-Tenant-ID`；直接调用 API 的运维脚本用账号 cookie
+或 Bot key，不手工注入租户头。
 
-注意：下面两节的 handler 行为都以请求已通过 auth middleware 为前提。认证启用但
-`KEEL_SERVE_TENANT` 未配置时，middleware 会先返回 503；未认证会先返回 401
-（`cmd/keel/auth.go:121-143`）。
+注意：下面两节的 handler 行为都以请求已通过 auth middleware 为前提。未认证会先返回 401；
+`local-only` 模式绑定非回环地址会直接拒绝启动。
 
 ### 4.2 `GET /v1/realtime/status`
 
@@ -731,14 +731,15 @@ Surface 在 `keel.realtime.event` 上进一步归约的事件
 ### 6.1 前置检查
 
 1. 启动带 web 构建的 `keel serve`，确保：
-   - `KEEL_SERVE_PASSWORD` / `KEEL_SERVE_TENANT`（或回环开发模式）已配置；
-   - 浏览器能打开同源 web UI；
+   - `KEEL_SECRET_KEY` / `KEEL_SERVE_TENANT` 已配置；空库先 `keel admin bootstrap`
+     （或回环 `--auth local-only`）；
+   - 浏览器能打开同源 web UI 并完成账号登录；
    - 数据库/事件 seam 已接线（否则 `/v1/realtime` 会 503，见 §4.6）。
 2. 配置 `KEEL_REALTIME_*` 并重启 Keel 进程。
-3. 用运维脚本查状态：
+3. 用运维脚本查状态（Bot key 或已登录的账号 cookie；旧口令 Bearer 不再可用）：
 
 ```sh
-curl -sS -H "Authorization: Bearer $KEEL_SERVE_PASSWORD" \
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" \
   http://127.0.0.1:13750/v1/realtime/status
 ```
 

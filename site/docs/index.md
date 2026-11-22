@@ -66,32 +66,21 @@ docker run -d --name keel-pg \
   -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
   -p 13741:5432 postgres:18
 
-# 2. build and start the Harness (product shell + API + worker)
+# 2. build, bootstrap the first super admin, and start the Harness
 git clone https://github.com/jixoai/keel.git && cd keel
 go build -o keel ./cmd/keel
 export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
-./keel serve --addr 127.0.0.1:13750 \
-  --tenant 11111111-2222-3333-4444-555555555555 \
-  --password devpass
+export KEEL_SERVE_TENANT=11111111-2222-3333-4444-555555555555
+export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookies
+./keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
+./keel serve --addr 127.0.0.1:13750
 ```
 
-```bash
-# 3. talk to it (second terminal; the passphrase is the bearer token)
-T=http://127.0.0.1:13750
-TENANT=11111111-2222-3333-4444-555555555555
-SID=$(curl -s -X POST -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  -H 'Content-Type: application/json' -d '{}' $T/v1/sessions | cut -d'"' -f4)
-
-curl -s -X POST -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  -H 'Content-Type: application/json' -d '{"text":"hello keel"}' \
-  $T/v1/sessions/$SID/input
-# {"created":true,"requestId":"…","seq":1,"status":"committed","submissionId":"…"}
-
-curl -s -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  "$T/v1/sessions/$SID/events" | head -c 400
-# {"events":[{"seq":1,"kind":"user.message",…},{"seq":2,"kind":"assistant.message",…},
-#            {"seq":3,"kind":"run.finished","payload":{"status":"done",…}}]}
-```
+Open `http://127.0.0.1:13750`, enter the setup token plus the username and password for the first
+super admin, and the browser forces a password change before entering. There is no passphrase and
+no first-visitor-becomes-admin path. Machines use a Bot-bound key (`keel_bot_...`), never a browser
+login. The exact login/CSRF requests and every endpoint shape are in the
+[AgentAPI reference](/core/agentapi).
 
 With no model configured, the runtime uses its deterministic **fake provider**, so the reply is
 canned and the whole path — edge commit, claim, loop, commit, projection — still runs. Point

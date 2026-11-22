@@ -10,7 +10,8 @@ root (marked).
 ```bash
 export KEEL_DSN='postgres://postgres:<password>@127.0.0.1:13741/runtime?sslmode=disable'
 export KEEL_SERVE_TENANT=<tenant-uuid>
-export KEEL_SERVE_PASSWORD='<passphrase>'      # or "" on loopback only
+export KEEL_SECRET_KEY='<32-byte base64/hex>'   # signs the session + CSRF cookies
+keel admin bootstrap --tenant "$KEEL_SERVE_TENANT"   # empty database, once
 keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 ```
 
@@ -19,25 +20,30 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 | `KEEL_DSN` / `--dsn` | PostgreSQL DSN (required) | — |
 | `KEEL_SERVE_ADDR` / `--addr` | listen address | `127.0.0.1:13750` |
 | `KEEL_SERVE_TENANT` / `--tenant` | the single tenant this process acts as (required when auth is on) | — |
-| `KEEL_SERVE_PASSWORD` / `--password` | local passphrase; empty disables auth (loopback only) | — |
+| `KEEL_SECRET_KEY` | 32-byte base64/hex key for cookie + CSRF signing; also enables AES-256-GCM tenant secret storage | required (`auth=required`) |
+| `KEEL_AUTH` / `--auth` | `required`, `local-only` or `off` | `required` |
+| `KEEL_BOOTSTRAP_TOKEN` | one-time setup token for a container-like first boot | — |
 | `KEEL_SERVE_WEB_DIR` / `--web-dir` | static web build directory | `web/dist` |
 | `KEEL_MODEL` / `KEEL_PROVIDER` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_API_KEY` | model selection (fake provider when unset) | — |
 | `KEEL_MODELS_CONFIG` / `--models-config` | tenant models document (providers/rules/selection) | — |
 | `KEEL_SKILLS_ROOTS` | OS path list of skill roots (PI-compatible) | — |
-| `KEEL_SECRET_KEY` | enables AES-256-GCM tenant secret storage; unset disables it explicitly | — |
 | `KEEL_RUNTIME_ID` | runtime identity written into claims/audit (handoff) | hostname-pid |
 
-(Source: `cmd/keel/main.go:53`, `cmd/keel/serve.go:37`, `docs/HANDOFF.md`.)
+(Source: `cmd/keel/main.go`, `cmd/keel/auth.go`, `docs/HANDOFF.md`.)
 
 Operational facts worth knowing before you expose the port:
 
-- **Authentication is a network middleware, not an API concern**: an
-  HMAC-signed HttpOnly cookie for the web, `Authorization: Bearer` for
-  CLI/TUI; the middleware injects the tenant and strips any client-supplied
-  `X-Tenant-ID` (`internal/harnessapi/api.go:18`, `cmd/keel/auth.go:63`).
-- `--password ""` **only answers loopback hosts** — a wildcard bind without
-  auth refuses non-loopback requests instead of exposing the tenant
-  (`cmd/keel/auth.go:100`).
+- **Authentication is a network middleware, not an API concern**: a human
+  exchanges username + password for an HMAC-signed HttpOnly cookie and sends
+  `X-Keel-CSRF` on writes; a machine presents a Bot-bound `keel_bot_...` key.
+  The middleware injects the tenant and strips any client-supplied
+  `X-Tenant-ID` (`internal/harnessapi/api.go`, `cmd/keel/auth.go`).
+- **An empty database has no super admin.** `keel admin bootstrap` mints a
+  one-time setup token; the browser completes setup and must change the
+  password at first login. There is no first-visitor-becomes-admin path.
+- `local-only` answers loopback only and maps requests to a built-in
+  local-admin; `off` additionally requires explicit `--insecure` and refuses a
+  public bind (`cmd/keel/auth.go`).
 - `keel serve` is **single-tenant** (`KEEL_SERVE_TENANT`); multi-tenant reuse
   needs the multi-tenant front (that is a product decision, not a flag).
 - The process is stateless: every fact is in PostgreSQL (plus the CAS for
@@ -59,7 +65,8 @@ page (`cmd/keel/static.go:13`).
 ## 2. `keel tui`
 
 ```bash
-keel tui --url http://127.0.0.1:13750 --token "$KEEL_SERVE_PASSWORD"
+# a Bot-bound key (machine client); a human uses an account session instead
+keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"
 # or inspect the resolved command without running it:
 keel tui --print
 ```
@@ -89,7 +96,7 @@ directory; the ledger does not contain plugin binaries.
 
 | Surface | What it answers |
 | --- | --- |
-| `keel doctor` | build identity, config pairing (password/tenant), web artifact, TUI artifact; with `--db`: database reachability and schema presence. Read-only — never migrates, never writes, never starts the worker (`cmd/keel/doctor.go:16`, `:26`) |
+| `keel doctor` | build identity, config pairing (secret/tenant/auth mode), web artifact, TUI artifact; with `--db`: database reachability and schema presence. Read-only — never migrates, never writes, never starts the worker (`cmd/keel/doctor.go`) |
 | `keel version` | module version, VCS revision (+dirty), Go toolchain (`cmd/keel/main.go:80`) |
 | `GET /v1/health` | process liveness |
 | `GET /v1/ready` | store readiness (migrations applied) |
@@ -112,11 +119,11 @@ Upgrades are **handoff**, not restart (`docs/HANDOFF.md`; full description in
 
 ```bash
 # 1) start the new binary (same DSN, distinct KEEL_RUNTIME_ID)
-# 2) drain the old process:
-curl -XPOST $old/v1/runtime/drain -H "Authorization: Bearer $KEEL_ADMIN_KEY" \
+# 2) drain the old process (human session cookie + CSRF, or a Bot key)
+curl -XPOST $old/v1/runtime/drain -b "$JAR" -H "X-Keel-CSRF: $CSRF" \
   -d '{"mode":"handoff","deadlineMs":30000}'
 # 3) watch it go quiet:
-curl -s $old/v1/runtime/status     # claiming=false, inFlightRuns=0
+curl -s -b "$JAR" $old/v1/runtime/status     # claiming=false, inFlightRuns=0
 # 4) SSE clients reconnect on `event: drain` and resume from Last-Event-ID
 ```
 

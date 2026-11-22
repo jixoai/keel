@@ -5,9 +5,11 @@ sidebar: false
 
 # 术语表
 
-> 本项目的命名规则：产品层称 **Harness**（旧称「Agent」）。协议名 **AgentAPI** 与
-> **AgentBackend** 是契约，予以保留——改名会破坏客户端与适配器。本站全部页面遵循此规则，
-> 并由扫描脚本（`scripts/naming-scan.sh`）检查。
+> 本项目的命名规则：产品层称 **Harness**；产品实体是 **Bot**、**TeamBot**、**Account**、
+> **Role**、**Profile**。旧的「Agent」与 `TeamAgent` 已删除（alpha 零兼容），不是别名。
+> 协议名 **AgentAPI** 与 **AgentBackend** 是契约，予以保留——改名会破坏客户端与适配器。
+> PI 技术包（`agentcore`、`agentloop`、`agenttool`、`internal/agent`）同样保留原名。本站
+> 全部页面遵循此规则，并由扫描脚本（`scripts/naming-scan.sh`）检查。
 
 ## 产品词汇
 
@@ -15,8 +17,13 @@ sidebar: false
 | --- | --- | --- |
 | **Keel** | 本项目：无状态、多租户的智能体运行时底座。 | `README.md` |
 | **Core** | 契约内核 + 事件账本 + 服务图 + loadout + 存储 + handoff。不可替换的部分。 | `docs/SERVICE-GRAPH.md`、`docs/KERNEL.md` |
-| **Harness**（原 Agent） | Core 之上的产品层：会话、回合、工具、审批、插件、触发器、子代理与客户端界面。进程即 `keel serve`。 | `internal/harnessext/doc.go`、`docs/HARNESS.md` |
-| **AgentAPI** | `/v1` 产品 API 契约（别名：Harness API）。名称保留；web UI 与 TUI 消费的 wire 契约。 | `internal/harnessapi/api.go:49` |
+| **Harness** | Core 之上的产品层：会话、回合、工具、审批、插件、触发器、子代理与客户端界面。进程即 `keel serve`。 | `internal/harnessext/doc.go`、`docs/HARNESS.md` |
+| **Account** | 登录与权限主体；human / bot / service 共用一套模型。 | `accounts` 表、`/v1/accounts`、`internal/botteam` |
+| **Role** | 身份与灵魂：名字、Instruction、语气、默认行为；**不授予**权限。 | `roles` 表、`/v1/roles` |
+| **Profile** | `Account + Role` 的绑定，Bot 通过它获得人格与权限上限。 | `profiles` 表、`/v1/profiles` |
+| **Bot** | 可运行的 AI 员工：`Profile + ModelKind + Harness`；是权限主体，拥有 Session。 | `bots` 表、`/v1/bots`、`keel bot` |
+| **TeamBot** | Mission + Bot 名单（Roster）；是资源，不是权限主体，不拥有 Session/Account/Profile。 | `team_bots` 表、`/v1/team-bots`、`keel team-bot` |
+| **AgentAPI** | `/v1` 产品 API 契约（别名：Harness API）。名称保留；web UI 与 TUI 消费的 wire 契约。 | `internal/harnessapi/api.go` |
 | **AgentBackend** | 外部智能体运行时（例如 DSH）作为 external backend 被驱动的协议。名称保留。 | `internal/gateway/protocol.go`、`docs/DSH-REFERENCE.md` |
 | **DSH** | DeepSeek Harness——插件模型的外部参照，也是 external-agent 目标。是参照，不是本项目的事实源。 | `docs/DSH-REFERENCE.md` |
 

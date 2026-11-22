@@ -49,12 +49,12 @@
 #   scripts/real-model-e2e.sh                 # success round trip
 #   scripts/real-model-e2e.sh --with-failure  # success + 401 failure path
 #   scripts/real-model-e2e.sh --failure-auth  # 401 failure path only
-#   scripts/real-model-e2e.sh --models        # provider-configuration phase (after)
-#   scripts/real-model-e2e.sh --models-baseline  # the pre-change binary (before)
-#   scripts/real-model-e2e.sh --models-legacy    # this binary on the flat flags (compat)
-#   scripts/real-model-e2e.sh --settings         # settings write -> hot reload -> reset
-#   scripts/real-model-e2e.sh --models-all    # all three phases in one evidence directory
+#   scripts/real-model-e2e.sh --models        # provider-configuration phase
+#   scripts/real-model-e2e.sh --settings      # settings write -> hot reload -> reset
 #   scripts/real-model-e2e.sh --check         # resolve config only, no network
+#
+# The pre-change baseline / flat-flag compatibility phases are gone: alpha zero
+# compatibility (keel-bot-identity-access L19) has no old binary to compare to.
 #
 # Exit codes: 0 pass; 1 assertion/runtime failure; 2 blocked (credentials or
 # dependencies missing).
@@ -80,9 +80,6 @@ for arg in "$@"; do
     --failure-auth) MODE=failure ;;
     --with-failure) MODE=both ;;
     --models) MODE=models ;;
-    --models-baseline) MODE=models-baseline ;;
-    --models-legacy) MODE=models-legacy ;;
-    --models-all) MODE=models-all ;;
     --settings) MODE=settings ;;
     -h|--help)
       sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
@@ -604,11 +601,14 @@ stop_serve() {
   SERVE_PID=""
 }
 
-start_serve() { # PORT LOG MODELS_FILE PASSWORD TENANT
-  local port="$1" log="$2" models="$3" password="$4" tenant="$5"
+start_serve() { # PORT LOG MODELS_FILE TENANT
+  local port="$1" log="$2" models="$3" tenant="$4"
   SERVE_LOG="$log"
   : > "$log"
   info "starting keel serve on 127.0.0.1:$port (log: $log)"
+  # local-only keeps this feature lane on loopback with the built-in local
+  # admin: no passphrase, no account fixture. Writes still carry the CSRF pair
+  # from serve_login.
   # KEEL_E2E_MODEL_KEY is the variable the models document's access.env names:
   # the credential reaches the process through the environment, never through
   # the document. It is deliberately NOT the flat KEEL_API_KEY, so the picker's
@@ -619,7 +619,7 @@ start_serve() { # PORT LOG MODELS_FILE PASSWORD TENANT
     KEEL_SECRET_KEY="${KEEL_E2E_SECRET_KEY:-$(openssl rand -hex 32)}" \
     KEEL_MODELS_CONFIG="$models" \
     KEEL_SYSTEM_PROMPT="${KEEL_SYSTEM_PROMPT:-You are a deterministic integration-test agent. When the user asks you to call the echo tool, call it exactly once and then answer with the tool result.}" \
-    "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/serve-cas" -password "$password" -tenant "$tenant" \
+    "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/serve-cas" -auth local-only -tenant "$tenant" \
     >>"$log" 2>&1 &
   SERVE_PID=$!
 
@@ -638,24 +638,33 @@ start_serve() { # PORT LOG MODELS_FILE PASSWORD TENANT
   die "keel serve did not become healthy within 30s; see $log"
 }
 
-serve_login() { # PORT JAR PASSWORD
+serve_login() { # PORT JAR — local-only: fetch the CSRF pair, no account login
   local code
   code="$(curl -sS -m 10 -o "$EVIDENCE_DIR/serve-login.json" -w '%{http_code}' \
-    -c "$2" -X POST "http://127.0.0.1:$1/v1/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "$(PASSWORD_ENV="$3" python3 -c 'import json,os; print(json.dumps({"password": os.environ["PASSWORD_ENV"]}))')")"
-  [ "$code" = "200" ] || die "login returned HTTP $code: $(cat "$EVIDENCE_DIR/serve-login.json" 2>/dev/null)"
-  info "logged in (cookie jar: $2)"
+    -c "$2" -b "$2" "http://127.0.0.1:$1/v1/auth/session")"
+  [ "$code" = "200" ] || die "auth/session returned HTTP $code: $(cat "$EVIDENCE_DIR/serve-login.json" 2>/dev/null)"
+  SERVE_CSRF="$(python3 - "$EVIDENCE_DIR/serve-login.json" <<'PY'
+import json, sys
+token = json.load(open(sys.argv[1])).get("csrfToken") or ""
+if not token:
+    raise SystemExit("no csrfToken")
+print(token)
+PY
+)" || die "auth/session did not issue a CSRF token"
+  info "local-only session ready (cookie jar: $2)"
 }
 
 # serve_json METHOD JAR URL OUT [DATA] -> prints the HTTP status
 serve_json() {
   local method="$1" jar="$2" url="$3" out="$4" data="${5:-}"
+  local -a args=(-sS -m 30 -o "$out" -w '%{http_code}' -b "$jar" -c "$jar" -X "$method" "$url")
+  if [ "$method" != "GET" ] && [ -n "${SERVE_CSRF:-}" ]; then
+    args+=(-H "X-Keel-CSRF: $SERVE_CSRF")
+  fi
   if [ -n "$data" ]; then
-    curl -sS -m 30 -o "$out" -w '%{http_code}' -b "$jar" -c "$jar" -X "$method" "$url" \
-      -H 'Content-Type: application/json' -d "$data"
+    curl "${args[@]}" -H 'Content-Type: application/json' -d "$data"
   else
-    curl -sS -m 30 -o "$out" -w '%{http_code}' -b "$jar" -c "$jar" -X "$method" "$url"
+    curl "${args[@]}"
   fi
 }
 
@@ -1228,7 +1237,7 @@ PY
 # selection fact travels from the client through the log to the attempt.
 run_provider_config() {
   info "phase: provider configuration (keel serve + models document + recording proxy)"
-  local port rec_port serve_port tenant password models bodies prefix
+  local port rec_port serve_port tenant models bodies prefix
   port="$(pick_port)"
   rec_port="$(pick_port)"
   serve_port="$(pick_port)"
@@ -1236,7 +1245,6 @@ run_provider_config() {
   bodies="$EVIDENCE_DIR/wire-requests.jsonl"
   models="$EVIDENCE_DIR/models-config.json"
   tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
   JAR="$EVIDENCE_DIR/cookies.txt"
   : > "$JAR"
 
@@ -1247,10 +1255,10 @@ run_provider_config() {
   export KEEL_E2E_MODEL_KEY="$API_KEY"
   PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/recording-proxy.log" "$bodies" "$BASE_URL"
   write_models_config "$models" "http://127.0.0.1:$rec_port/v1" "$MODEL"
-  start_serve "$serve_port" "$EVIDENCE_DIR/serve.log" "$models" "$password" "$tenant"
+  start_serve "$serve_port" "$EVIDENCE_DIR/serve.log" "$models" "$tenant"
 
   local base="http://127.0.0.1:$serve_port" code
-  serve_login "$serve_port" "$JAR" "$password"
+  serve_login "$serve_port" "$JAR"
 
   # The capability surface: an authenticated client must see the tenant's
   # visible provider and never the hidden one.
@@ -1502,14 +1510,13 @@ print(sum(1 for e in ev if e.get("kind") in ("assistant.message", "run.finished"
 # without disturbing the configuration that is serving.
 run_model_settings() {
   info "phase: model settings (write -> hot reload -> reset)"
-  local rec_port serve_port tenant password models bodies prefix
+  local rec_port serve_port tenant models bodies prefix
   rec_port="$(pick_port)"
   serve_port="$(pick_port)"
   prefix="$EVIDENCE_DIR/settings"
   bodies="$EVIDENCE_DIR/settings-wire.jsonl"
   models="$EVIDENCE_DIR/settings-boot-models.json"
   tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
   JAR="$EVIDENCE_DIR/settings-cookies.txt"
   : > "$JAR"
 
@@ -1519,10 +1526,10 @@ run_model_settings() {
   # The BOOT document selects the first model; the settings write moves the
   # default to the second one, which is the observable difference.
   write_settings_boot_document "$models" "http://127.0.0.1:$rec_port/v1"
-  start_serve "$serve_port" "$EVIDENCE_DIR/settings-serve.log" "$models" "$password" "$tenant"
+  start_serve "$serve_port" "$EVIDENCE_DIR/settings-serve.log" "$models" "$tenant"
 
   local base="http://127.0.0.1:$serve_port" code
-  serve_login "$serve_port" "$JAR" "$password"
+  serve_login "$serve_port" "$JAR"
 
   code="$(serve_json POST "$JAR" "$base/v1/sessions" "$prefix-session.json" '{}')"
   [ "$code" = "201" ] || die "create session returned HTTP $code: $(cat "$prefix-session.json" 2>/dev/null)"
@@ -1722,14 +1729,13 @@ PY
 # document. No amount of "the value is stored" assertion proves that.
 run_settings_secrets() {
   info "phase: secrets (wrong value fails, right value works, value never readable)"
-  local rec_port serve_port tenant password models bodies prefix
+  local rec_port serve_port tenant models bodies prefix
   rec_port="$(pick_port)"
   serve_port="$(pick_port)"
   prefix="$EVIDENCE_DIR/secrets"
   bodies="$EVIDENCE_DIR/secrets-wire.jsonl"
   models="$EVIDENCE_DIR/secrets-boot-models.json"
   tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
   JAR="$EVIDENCE_DIR/secrets-cookies.txt"
   : > "$JAR"
 
@@ -1738,10 +1744,10 @@ run_settings_secrets() {
   write_settings_boot_document "$models" "http://127.0.0.1:$rec_port/v1"
   # The boot document uses the env credential; the secrets phase moves the
   # tenant to a provider that references the secret store instead.
-  start_serve "$serve_port" "$EVIDENCE_DIR/secrets-serve.log" "$models" "$password" "$tenant"
+  start_serve "$serve_port" "$EVIDENCE_DIR/secrets-serve.log" "$models" "$tenant"
 
   local base="http://127.0.0.1:$serve_port" code wrong
-  serve_login "$serve_port" "$JAR" "$password"
+  serve_login "$serve_port" "$JAR"
   wrong="wrong-$(date +%s)-$$"
 
   code="$(serve_json PUT "$JAR" "$base/v1/settings/secrets/e2e_key" "$prefix-put-wrong.json" \
@@ -2022,282 +2028,6 @@ run_failure() {
   stop_proxy
 }
 
-# --- current binary on the flat configuration (compatibility gate) ---------
-#
-# The other half of the compatibility promise: this branch's binary, started
-# with ONLY the flat flags, must send exactly what the baseline sent (same wire
-# model, same thinking level, no request overlay) AND must refuse a selection
-# instead of silently ignoring one — a deployment with no provider document has
-# no vocabulary to vet it, so storing it would be a promise nobody keeps.
-run_current_legacy() {
-  info "phase: current binary on the flat configuration (compatibility)"
-  local rec_port serve_port tenant password bodies code
-  rec_port="$(pick_port)"
-  serve_port="$(pick_port)"
-  bodies="$EVIDENCE_DIR/legacy-wire-requests.jsonl"
-  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
-  JAR="$EVIDENCE_DIR/legacy-cookies.txt"
-  : > "$JAR"
-
-  SERVE_BIN="$(ensure_serve_binary)"
-  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/legacy-recording-proxy.log" "$bodies" "$BASE_URL"
-  KEEL_MODELS_CONFIG="" \
-  SERVE_BASE_URL="http://127.0.0.1:$rec_port/v1" \
-  SERVE_MODEL="$MODEL" SERVE_PROTOCOL=openai SERVE_KEY="$API_KEY" SERVE_TENANT="$tenant" \
-  start_serve_legacy "$serve_port" "$EVIDENCE_DIR/legacy-serve.log" "$password"
-
-  local base="http://127.0.0.1:$serve_port"
-  serve_login "$serve_port" "$JAR" "$password"
-
-  code="$(serve_json GET "$JAR" "$base/v1/providers" "$EVIDENCE_DIR/legacy-providers.json")"
-  LEGACY_PROVIDERS_CODE="$code"
-  info "current binary, no models document: GET /v1/providers -> HTTP $code (expected 501)"
-
-  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$EVIDENCE_DIR/legacy-session.json" '{}')"
-  [ "$code" = "201" ] || die "create session returned HTTP $code: $(cat "$EVIDENCE_DIR/legacy-session.json" 2>/dev/null)"
-  SESSION="$(SESSION_FILE="$EVIDENCE_DIR/legacy-session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
-
-  # 1. A selection is refused: 400, nothing committed.
-  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/legacy-refused.json" \
-    "$(REQUEST_ID="legacy-refused-$(date +%s)-$$" MODEL_ID="$MODEL" python3 -c '
-import json, os
-print(json.dumps({"text": "this must not be stored",
-                  "requestId": os.environ["REQUEST_ID"],
-                  "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": "high"}}))'  )")"
-  LEGACY_REFUSED_CODE="$code"
-
-  # 2. A plain input runs exactly like the baseline did.
-  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/legacy-input.json" \
-    "$(REQUEST_ID="legacy-$(date +%s)-$$" python3 -c '
-import json, os
-print(json.dumps({"text": "Call the echo tool exactly once with the argument x set to \"legacy-marker\". Then reply with one short sentence that contains the exact text the tool returned.",
-                  "requestId": os.environ["REQUEST_ID"]}))'  )")"
-  [ "$code" = "201" ] || die "input returned HTTP $code: $(cat "$EVIDENCE_DIR/legacy-input.json" 2>/dev/null)"
-  wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/legacy-events.json" "$EVIDENCE_DIR/legacy-run.json" \
-    || die "the flat-configuration attempt did not settle done; see $EVIDENCE_DIR/legacy-serve.log"
-
-  MODEL_ID="$MODEL" BODIES="$bodies" REFUSED_CODE="$LEGACY_REFUSED_CODE" \
-  PROVIDERS_CODE="$LEGACY_PROVIDERS_CODE" EVENTS="$EVIDENCE_DIR/legacy-events.json" \
-  BASELINE_BODIES="$EVIDENCE_DIR/baseline-wire-requests.jsonl" \
-  SUMMARY_OUT="$EVIDENCE_DIR/legacy-summary.json" \
-  python3 - <<'PY' || die "compatibility assertions failed; see $EVIDENCE_DIR/legacy-summary.json"
-import json, os
-
-model = os.environ["MODEL_ID"]
-checks = []
-
-
-def check(name, ok, detail=""):
-    checks.append({"check": name, "ok": bool(ok), "detail": detail})
-    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
-
-
-def rows(path):
-    if not os.path.exists(path):
-        return []
-    out = []
-    for line in open(path, encoding="utf-8"):
-        if line.strip():
-            row = json.loads(line)
-            if row.get("path", "").endswith("/chat/completions"):
-                out.append(row)
-    return out
-
-
-current = rows(os.environ["BODIES"])
-baseline = rows(os.environ["BASELINE_BODIES"])
-check("the selection was refused before anything was committed",
-      os.environ["REFUSED_CODE"] == "400", "HTTP %s" % os.environ["REFUSED_CODE"])
-check("no provider document means no settings surface",
-      os.environ["PROVIDERS_CODE"] == "501", "HTTP %s" % os.environ["PROVIDERS_CODE"])
-check("the flat configuration still reaches the gateway", bool(current), "%d requests" % len(current))
-shape = lambda rows_: sorted({(r.get("model"), r.get("reasoningEffort"), r.get("maxTokens")) for r in rows_})
-check("current wire shape equals the baseline wire shape", bool(current) and shape(current) == shape(baseline),
-      "current=%s baseline=%s" % (shape(current), shape(baseline)))
-events = json.load(open(os.environ["EVENTS"], encoding="utf-8")).get("events") or []
-refused = [ev for ev in events if ev.get("kind") == "user.message"
-           and "must not be stored" in json.dumps(ev.get("payload"))]
-check("the refused input is not in the log", not refused, "%d matching events" % len(refused))
-
-summary = {"ok": all(c["ok"] for c in checks), "model": model, "requests": current, "checks": checks}
-with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
-    json.dump(summary, fh, ensure_ascii=False, indent=2)
-print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
-raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
-PY
-
-  stop_serve
-  stop_record_proxy
-  say ""
-  say "PASS: the flat configuration is unchanged and a selection is refused without a document"
-  say "  evidence   = $EVIDENCE_DIR/legacy-wire-requests.jsonl, legacy-summary.json"
-}
-
-# --- baseline (before) phase -----------------------------------------------
-#
-# The "before" half of the provider-configuration comparison, and the
-# legacy-configuration compatibility gate: the pre-change binary, configured
-# with the flat flags, must ignore a selection (it has no provider document),
-# which is exactly what the after phase proves it now honours. Both halves write
-# the same evidence shape, so a report can diff them field by field.
-ensure_baseline_binary() {
-  local ref="${KEEL_E2E_BASELINE_REF:-ed3f733}"
-  local bin="${KEEL_E2E_BASELINE_BIN:-/tmp/keel-real-model-baseline-$ref}"
-  if [ -x "$bin" ]; then
-    printf '%s\n' "$bin"
-    return 0
-  fi
-  local src="/tmp/keel-baseline-src-$ref"
-  rm -rf "$src"
-  mkdir -p "$src"
-  info "extracting baseline $ref -> $src"
-  git archive "$ref" | tar -x -C "$src" || die "git archive $ref failed (is the ref present?)"
-  ( cd "$src" && go build -o "$bin" ./cmd/keel ) || die "go build baseline ./cmd/keel failed"
-  printf '%s\n' "$bin"
-}
-
-run_baseline() { # REF
-  local ref="$1"
-  info "phase: baseline $ref (flat configuration, selection must be ignored)"
-  local rec_port serve_port tenant password bodies models
-  rec_port="$(pick_port)"
-  serve_port="$(pick_port)"
-  bodies="$EVIDENCE_DIR/baseline-wire-requests.jsonl"
-  models="$EVIDENCE_DIR/baseline-models-config.json"
-  tenant="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-  password="${KEEL_E2E_SERVE_PASSWORD:-keel-e2e-$$-$(date +%s)}"
-  JAR="$EVIDENCE_DIR/baseline-cookies.txt"
-  : > "$JAR"
-
-  SERVE_BIN="$(ensure_baseline_binary)"
-  PROXY_EXPECT_KEY="$API_KEY" start_recording_proxy "$rec_port" "$EVIDENCE_DIR/baseline-recording-proxy.log" "$bodies" "$BASE_URL"
-  # A models document IS written and exported, so the run proves the baseline
-  # ignores it (the feature did not exist) rather than proving the flag is
-  # unset.
-  write_models_config "$models" "http://127.0.0.1:$rec_port/v1" "$MODEL"
-
-  local base="http://127.0.0.1:$serve_port" code
-  # Flat flags only: the baseline binary has no --models-config at all.
-  KEEL_MODELS_CONFIG="$models" \
-  SERVE_BASE_URL="http://127.0.0.1:$rec_port/v1" \
-  SERVE_MODEL="$MODEL" SERVE_PROTOCOL=openai SERVE_KEY="$API_KEY" SERVE_TENANT="$tenant" \
-  start_serve_legacy "$serve_port" "$EVIDENCE_DIR/baseline-serve.log" "$password"
-  base="http://127.0.0.1:$serve_port"
-  serve_login "$serve_port" "$JAR" "$password"
-
-  code="$(serve_json GET "$JAR" "$base/v1/providers" "$EVIDENCE_DIR/baseline-providers.json")"
-  BASELINE_PROVIDERS_CODE="$code"
-  info "baseline GET /v1/providers -> HTTP $code (expected: absent route)"
-
-  code="$(serve_json POST "$JAR" "$base/v1/sessions" "$EVIDENCE_DIR/baseline-session.json" '{}')"
-  [ "$code" = "201" ] || die "baseline create session returned HTTP $code: $(cat "$EVIDENCE_DIR/baseline-session.json" 2>/dev/null)"
-  SESSION="$(SESSION_FILE="$EVIDENCE_DIR/baseline-session.json" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_FILE"])); print(d.get("sessionId") or d.get("id") or "")')"
-
-  local prompt
-  prompt="Call the echo tool exactly once with the argument x set to \"baseline-marker\". Then reply with one short sentence that contains the exact text the tool returned."
-  code="$(serve_json POST "$JAR" "$base/v1/sessions/$SESSION/input" "$EVIDENCE_DIR/baseline-input.json" \
-    "$(REQUEST_ID="baseline-$(date +%s)-$$" PROMPT="$prompt" MODEL_ID="$MODEL" python3 -c '
-import json, os
-print(json.dumps({
-    "text": os.environ["PROMPT"],
-    "requestId": os.environ["REQUEST_ID"],
-    "selection": {"providerId": "s2api-e2e", "modelId": os.environ["MODEL_ID"], "reasoningLevel": "high"},
-}))'  )")"
-  [ "$code" = "201" ] || die "baseline input returned HTTP $code: $(cat "$EVIDENCE_DIR/baseline-input.json" 2>/dev/null)"
-  wait_serve_run "$base" "$JAR" "$SESSION" "$EVIDENCE_DIR/baseline-events.json" "$EVIDENCE_DIR/baseline-run.json" \
-    || die "baseline attempt did not settle done; see $EVIDENCE_DIR/baseline-serve.log"
-
-  MODEL_ID="$MODEL" BODIES="$bodies" PROVIDERS_CODE="$BASELINE_PROVIDERS_CODE" \
-  EVENTS="$EVIDENCE_DIR/baseline-events.json" REF="$ref" \
-  SUMMARY_OUT="$EVIDENCE_DIR/baseline-summary.json" \
-  python3 - <<'PY' || die "baseline assertions failed; see $EVIDENCE_DIR/baseline-summary.json"
-import json, os
-
-model = os.environ["MODEL_ID"]
-bodies = [json.loads(line) for line in open(os.environ["BODIES"], encoding="utf-8") if line.strip()]
-events = json.load(open(os.environ["EVENTS"], encoding="utf-8")).get("events") or []
-checks = []
-
-
-def check(name, ok, detail=""):
-    checks.append({"check": name, "ok": bool(ok), "detail": detail})
-    print(("PASS: " if ok else "FAIL: ") + name + ((" (%s)" % detail) if detail else ""), flush=True)
-
-
-def payload(ev):
-    raw = ev.get("payload")
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except Exception:
-            raw = {}
-    return raw if isinstance(raw, dict) else {}
-
-
-chat = [b for b in bodies if b.get("path", "").endswith("/chat/completions")]
-check("baseline called the gateway through the flat configuration", bool(chat), "requests=%d" % len(chat))
-check("baseline had no provider-settings route", os.environ["PROVIDERS_CODE"] in ("404", "501", "405"),
-      "HTTP %s" % os.environ["PROVIDERS_CODE"])
-check("baseline used the legacy wire model", bool(chat) and all(b.get("model") == model for b in chat),
-      "models=%s" % sorted({b.get("model") for b in chat}))
-check("baseline ignored the selection's reasoning level (flat default low)",
-      bool(chat) and all(b.get("reasoningEffort") == "low" for b in chat),
-      "efforts=%s" % sorted({b.get("reasoningEffort") for b in chat}))
-check("baseline applied no request overlay (no configured max tokens)",
-      bool(chat) and all(b.get("maxTokens") is None for b in chat),
-      "maxTokens=%s" % [b.get("maxTokens") for b in chat])
-users = [payload(ev) for ev in events if ev.get("kind") == "user.message"]
-check("baseline stored no selection fact (the field did not exist, so the value was dropped at the edge)",
-      bool(users) and all(u.get("selection") is None for u in users),
-      "selections=%s" % [u.get("selection") for u in users])
-finished = [payload(ev) for ev in events if ev.get("kind") == "run.finished"]
-check("baseline run summary carries no execution identity",
-      not any(f.get("model") or f.get("provider") for f in finished),
-      "identities=%s" % [(f.get("provider"), f.get("model")) for f in finished])
-
-summary = {"ok": all(c["ok"] for c in checks), "ref": os.environ["REF"], "requests": bodies, "checks": checks}
-with open(os.environ["SUMMARY_OUT"], "w", encoding="utf-8") as fh:
-    json.dump(summary, fh, ensure_ascii=False, indent=2)
-print("summary: %s" % os.environ["SUMMARY_OUT"], flush=True)
-raise SystemExit(0 if all(c["ok"] for c in checks) else 1)
-PY
-
-  stop_serve
-  stop_record_proxy
-  say ""
-  say "PASS: baseline $ref (flat configuration, selection ignored)"
-  say "  evidence   = $EVIDENCE_DIR/baseline-wire-requests.jsonl, baseline-summary.json"
-}
-
-# start_serve_legacy PORT LOG PASSWORD — the flat-configuration boot, used by
-# the baseline phase (a pre-provider binary has no models document flag).
-start_serve_legacy() {
-  local port="$1" log="$2" password="$3"
-  SERVE_LOG="$log"
-  : > "$log"
-  info "starting baseline keel serve on 127.0.0.1:$port (log: $log)"
-  env KEEL_DSN="$DSN" "$SERVE_BIN" serve -addr "127.0.0.1:$port" -cas "$EVIDENCE_DIR/baseline-cas" \
-    -password "$password" -tenant "${SERVE_TENANT:?}" \
-    -model "${SERVE_MODEL:?}" -base-url "${SERVE_BASE_URL:?}" -protocol "${SERVE_PROTOCOL:?}" -api-key "${SERVE_KEY:?}" \
-    >>"$log" 2>&1 &
-  SERVE_PID=$!
-
-  local body pid i
-  for i in $(seq 1 150); do
-    body="$(curl -fsS -m 2 "http://127.0.0.1:$port/v1/health" 2>/dev/null || true)"
-    if [ -n "$body" ]; then
-      pid="$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid"))' 2>/dev/null || true)"
-      [ "$pid" = "$SERVE_PID" ] || die "port $port answers with pid $pid, not $SERVE_PID (foreign process)"
-      info "baseline keel serve healthy (pid $SERVE_PID)"
-      return 0
-    fi
-    kill -0 "$SERVE_PID" 2>/dev/null || die "baseline keel serve exited during startup; see $log"
-    sleep 0.2
-  done
-  die "baseline keel serve did not become healthy within 30s; see $log"
-}
-
 # --- main ------------------------------------------------------------------
 
 resolve_credentials
@@ -2322,9 +2052,6 @@ case "$MODE" in
   failure) run_failure ;;
   both)    run_success; run_failure ;;
   models)  run_provider_config ;;
-  models-baseline) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}" ;;
-  models-legacy) run_current_legacy ;;
-  models-all) run_baseline "${KEEL_E2E_BASELINE_REF:-ed3f733}"; run_current_legacy; run_provider_config ;;
   settings) run_model_settings; run_settings_secrets ;;
   *) die "internal: unknown mode $MODE" ;;
 esac

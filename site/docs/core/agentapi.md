@@ -17,10 +17,12 @@ additive, and clients discover them — see §6.
 
 Auth differs by deployment, and it is a network middleware concern, never a kernel one:
 
-- **`keel serve`**: HMAC-signed HttpOnly cookie for browsers, `Authorization: Bearer <passphrase>`
-  for CLI/TUI. The server injects the tenant and strips any client-supplied `X-Tenant-ID`
-  (`docs/WEBUI.md`, `cmd/keel/auth.go`). `--password ""` disables auth for loopback development and
-  then only answers loopback hosts.
+- **`keel serve`**: a human exchanges username + password at `POST /v1/auth/login` for an
+  HMAC-signed HttpOnly cookie and sends `X-Keel-CSRF` on writes; a machine presents a Bot-bound
+  `keel_bot_...` key as `Authorization: Bearer`. The server injects the tenant and strips any
+  client-supplied `X-Tenant-ID` (`docs/HARNESS.md`, `cmd/keel/auth.go`). An empty database has no
+  super admin: `keel admin bootstrap` mints a one-time setup token; `--auth local-only` maps
+  loopback requests to a built-in local admin, and `off` needs explicit `--insecure`.
 - **`cmd/runtime`**: `X-Tenant-ID` names the tenant on every request; administrator endpoints
   additionally require `Authorization: Bearer <KEEL_ADMIN_KEY>`. `X-Tenant-ID` is a row id, never
   an identity credential; with no admin key configured the admin API is closed (503).
@@ -80,6 +82,21 @@ From `internal/harnessapi/api.go:167`:
 | `GET` | `/v1/triggers` · `POST` `/v1/triggers/{id}/fire` | trigger audit and manual fire with an idempotency key |
 | `GET` | `/v1/subagents` · `GET` `/v1/subagents/{id}` | sub-agent list / detail |
 | `POST` | `/v1/sessions/{id}/subagents` | spawn a sub-agent (`wait:true` waits synchronously; a disconnect does not cancel it) |
+
+Identity, permissions and Bots (change `keel-bot-identity-access`; full table in
+`docs/HARNESS.md` §2):
+
+| Method | Path | Semantics |
+|---|---|---|
+| POST/GET | `/v1/auth/login`, `/v1/auth/logout`, `/v1/auth/session`, `/v1/auth/password`, `/v1/auth/bootstrap` | account login/logout, CSRF + bootstrap state, forced password change, one-time setup token |
+| GET/POST | `/v1/accounts`, `POST …/disable`, `POST …/password-reset`, `GET/POST/DELETE …/groups` | Account (login/permission subject), disable/reset/password-group writes |
+| GET/POST/PATCH/DELETE | `/v1/roles`, `/v1/profiles` | Role (identity only, no permissions), Profile (Account + Role) |
+| GET/POST/PATCH/DELETE | `/v1/permission-groups`, `/v1/permissions` | permission-key registry, scopes, groups and effective grants |
+| GET/POST/PATCH | `/v1/bots`, `/v1/bots/{id}`, `/v1/bots/{id}/archive`, `/v1/bots/{id}/invoke` | Bot CRUD/archive/invoke; a Session belongs to a Bot → Account |
+| GET/POST/DELETE | `/v1/bots/{id}/keys` | issue/list/revoke a Bot-bound key (plaintext shown once) |
+| GET/POST/PATCH | `/v1/team-bots`, `/v1/team-bots/{id}`, `/v1/team-bots/{id}/roster`, `/v1/team-bots/{id}/start` | TeamBot = Mission + Roster; not a permission subject |
+
+The retired `/v1/agents` and `/v1/teams` routes answer 404 with no alias.
 
 Verified listing and plugin responses (abridged):
 

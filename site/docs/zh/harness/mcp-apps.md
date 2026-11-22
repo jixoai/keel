@@ -95,7 +95,8 @@ MCP Apps 是官方 MCP 扩展（SEP-1865，扩展标识 `io.modelcontextprotocol
 宿主在连接后取回并校验每个声明的文档，生成目录：
 
 ```bash
-curl -sS -H "X-Tenant-ID: $TENANT" https://<host>/v1/mcp/apps
+# 机器客户端用绑定到 Bot 的 key；浏览器用账号会话 cookie
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" https://<host>/v1/mcp/apps
 ```
 
 每个 app 条目包含 `appId`、`server`、`title`、`resourceUri`、`tools`、`visibility`、
@@ -229,8 +230,8 @@ View 的所有出站动作都经宿主 HTTP 面代理，`appId` 是唯一由客�
 | `POST /v1/mcp/apps/{appId}/context` | 记录 app 上下文 |
 | `GET /v1/mcp/apps/audit` | 审计读 |
 
-所有 `/v1` 路由都要求租户身份；浏览器会话由 `keel serve` 注入 `X-Tenant-ID`，直接 API
-调用需自带。
+所有 `/v1` 路由都在鉴权中间件之后：账号 cookie 或 Bot key 决定租户，`X-Tenant-ID` 由
+`keel serve` 注入；客户端不手工发送，自发头会被剥离。
 
 ### 6.4 限额
 

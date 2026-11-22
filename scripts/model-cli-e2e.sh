@@ -15,7 +15,7 @@
 #   4. catalog reads the resolved catalog and --refresh prints the live upstream
 #      lineup discovered by the same probe.
 #   5. a rejected write renders the server's field path; a referenced provider
-#      removal renders 409 provider_in_use and the referring agent.
+#      removal renders 409 provider_in_use and the referring Bot.
 #   6. the credential value never appears in any CLI output, evidence file or
 #      the serve log; the document stores references only.
 #
@@ -83,9 +83,10 @@ while IFS= read -r line; do
   case "$key" in
     KEEL_TEST_DSN) [[ -z "$DSN" ]] && DSN="$value" ;;
     KEEL_DSN) [[ -z "$DSN" ]] && DSN="$value" ;;
-    KEEL_SERVE_PASSWORD) export KEEL_SERVE_PASSWORD="$value" ;;
+    KEEL_SERVE_PASSWORD) : ;; # retired; never forwarded to the server or CLI
   esac
 done < <(grep -E '^(KEEL_[A-Z0-9_]+)=|^KEEL_DSN=' "$ENV_FILE")
+unset KEEL_SERVE_PASSWORD KEEL_AGENT_TOKEN
 [[ -n "$DSN" ]] || die "KEEL_TEST_DSN / KEEL_DSN is not set in $ENV_FILE"
 
 TEST_DSN="$(KEEL_DSN_VALUE="$DSN" DB_NAME="$DB" python3 - <<'PY'
@@ -117,6 +118,7 @@ cleanup() {
   [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null || true
   [[ -n "${SERVE_PID:-}" ]] && wait "$SERVE_PID" 2>/dev/null || true
   [[ -n "${STUB_PID:-}" ]] && wait "$STUB_PID" 2>/dev/null || true
+  [[ -n "${KEEL_E2E_JAR:-}" ]] && rm -f "$KEEL_E2E_JAR" "$EVIDENCE/csrf.txt" "$EVIDENCE/auth.json" 2>/dev/null || true
   docker exec "$PG_CTR" psql -U postgres -c "DROP DATABASE IF EXISTS \"$DB\" WITH (FORCE)" >/dev/null 2>&1 || true
   sleep 0.5
   {
@@ -229,8 +231,10 @@ log "building $KEEL_BIN"
 TENANT="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 # The probe must see exactly the credentials this script controls: an inherited
 # process-wide key would turn the needs_auth case into a success.
-unset KEEL_API_KEY KITE_MISSING_KEY
-KEEL_DSN="$TEST_DSN" KEEL_MODELS_CONFIG="$EVIDENCE/models-config.json" \
+unset KEEL_API_KEY KITE_MISSING_KEY KEEL_AGENT_TOKEN
+KEEL_DSN="$TEST_DSN" KEEL_SERVE_TENANT="$TENANT" \
+  KEEL_SECRET_KEY="$(openssl rand -hex 32)" \
+  KEEL_MODELS_CONFIG="$EVIDENCE/models-config.json" \
   "$KEEL_BIN" serve --addr "127.0.0.1:$SERVE_PORT" --tenant "$TENANT" \
   > "$EVIDENCE/serve.log" 2>&1 &
 SERVE_PID=$!
@@ -242,6 +246,27 @@ done
 curl -sf -m 2 "http://127.0.0.1:$SERVE_PORT/v1/health" >/dev/null || die "keel serve did not become healthy"
 
 export KEEL_SERVE_ADDR="127.0.0.1:$SERVE_PORT"
+
+# The fresh database has no super admin: bootstrap one account and let the CLI
+# log in with KEEL_ACCOUNT_USERNAME/PASSWORD (the password flag is refused).
+source "$ROOT/scripts/lib/keel-auth.sh"
+keel_auth_provision "http://127.0.0.1:$SERVE_PORT" "$KEEL_BIN" "$TEST_DSN" "$TENANT" "$EVIDENCE"
+export KEEL_SERVE_ADDR="127.0.0.1:$SERVE_PORT"
+
+# api METHOD PATH [BODY] -> body in last-body.json, status on stdout. The
+# session cookie and CSRF token come from keel_auth_provision.
+api() {
+  local method="$1" path="$2" body="${3:-}"
+  local -a args=(-sS -b "$KEEL_E2E_JAR" -c "$KEEL_E2E_JAR" -X "$method"
+    -H "X-Keel-CSRF: $KEEL_E2E_CSRF")
+  local base="http://127.0.0.1:$SERVE_PORT"
+  if [[ -n "$body" ]]; then
+    curl "${args[@]}" "$base$path" -H 'Content-Type: application/json' \
+      --data-binary "$body" -o "$EVIDENCE/last-body.json" -w '%{http_code}'
+  else
+    curl "${args[@]}" "$base$path" -o "$EVIDENCE/last-body.json" -w '%{http_code}'
+  fi
+}
 
 # cli NAME ARGS... -> stdout in NAME.out, stderr in NAME.err, exit in NAME.code
 cli() {
@@ -409,24 +434,51 @@ expect_code show-hidden 1
 expect_err show-hidden "does not serve a provider"
 
 # A referenced provider cannot be removed: the server answers 409
-# provider_in_use with the referring registry row.
+# provider_in_use with the referring Bot (the provider registry's deletion
+# protection scans bots.default_model, not the retired agent registry).
 cli add-guarded model provider add guarded --type llm --name "Guarded Provider" \
   --api-type openai-chat-completions --base-url "http://127.0.0.1:$STUB_PORT/v1" \
   --env KITE_MODEL_KEY --model stub-model-a
 expect_code add-guarded 0
-cli agent-create agent create --id agent_model_guard --name "Model Guard" \
-  --provider guarded --model stub-model-a
-expect_code agent-create 0
+
+role_code="$(api POST /v1/roles '{"name":"Model Guard Role"}')"
+[[ "$role_code" == "201" ]] || die "create role: HTTP $role_code $(cat "$EVIDENCE/last-body.json")"
+ROLE_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"]["roleId"])' "$EVIDENCE/last-body.json")"
+profile_body="$(ACCOUNT_ID="$KEEL_E2E_ACCOUNT_ID" ROLE_ID="$ROLE_ID" python3 -c '
+import json, os
+print(json.dumps({"accountId": os.environ["ACCOUNT_ID"], "roleId": os.environ["ROLE_ID"]}))')"
+profile_code="$(api POST /v1/profiles "$profile_body")"
+[[ "$profile_code" == "201" ]] || die "create profile: HTTP $profile_code $(cat "$EVIDENCE/last-body.json")"
+PROFILE_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["profile"]["profileId"])' "$EVIDENCE/last-body.json")"
+bot_body="$(PROFILE_ID="$PROFILE_ID" python3 -c '
+import json, os
+print(json.dumps({
+    "botId": "bot_model_guard", "name": "Model Guard",
+    "profileId": os.environ["PROFILE_ID"], "modelKind": "text",
+    "defaultModel": {"providerId": "guarded", "modelId": "stub-model-a"},
+    "harness": {"tools": [], "context": {"instruction": "", "permissions": []}},
+}))')"
+bot_code="$(api POST /v1/bots "$bot_body")"
+[[ "$bot_code" == "201" ]] || die "create bot: HTTP $bot_code $(cat "$EVIDENCE/last-body.json")"
+
 cli remove-guarded model provider remove guarded
 expect_code remove-guarded 1
-for want in "409 provider_in_use" "referencing agent: agent_model_guard" "defaultModel"; do
+for want in "409 provider_in_use" "bot bot_model_guard Model Guard" "defaultModel"; do
   expect_err remove-guarded "$want"
 done
-cli agent-delete agent delete agent_model_guard
-expect_code agent-delete 0
+
+# Repoint the Bot, then the provider is no longer referenced and the removal
+# succeeds. (Bots archive rather than hard-delete, and an archived Bot still
+# counts as a reference, so deleting the Bot would not free the provider.)
+repoint_code="$(api PATCH /v1/bots/bot_model_guard \
+  '{"defaultModel":{"providerId":"stub","modelId":"stub-model-a"}}')"
+[[ "$repoint_code" == "200" ]] || die "repoint bot: HTTP $repoint_code $(cat "$EVIDENCE/last-body.json")"
 cli remove-guarded-after model provider remove guarded
 expect_code remove-guarded-after 0
 expect_out remove-guarded-after "removed provider guarded"
+
+archive_code="$(api POST /v1/bots/bot_model_guard/archive '{}')"
+[[ "$archive_code" == "200" ]] || die "archive bot: HTTP $archive_code $(cat "$EVIDENCE/last-body.json")"
 
 # A rejected settings write renders the server's field path.
 cli add-broken model provider add broken --type llm --name "Broken" \

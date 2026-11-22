@@ -164,7 +164,12 @@ type finalResult struct {
 }
 
 type driver struct {
-	config        loadConfig
+	config loadConfig
+	// csrf is the X-Keel-CSRF value for writes. Even loopback local-only auth
+	// requires the double-submit token (the cookie pair is issued by
+	// GET /v1/auth/session).
+	csrf          string
+	csrfCookie    string
 	api           *http.Client
 	sseClient     *http.Client
 	controlClient *http.Client
@@ -220,6 +225,10 @@ func runLoad(args []string) (retErr error) {
 	log.Printf("phase boot: base=%s pprof=%s control=%s evidence=%s", d.config.base, d.config.pprof, d.config.control, d.config.evidence)
 	if err := d.waitBoot(ctx); err != nil {
 		d.fail("boot: %v", err)
+		return err
+	}
+	if err := d.refreshCSRF(ctx); err != nil {
+		d.fail("csrf: %v", err)
 		return err
 	}
 	log.Printf("boot ok: sessions target=%d apps=%d", d.config.sessions, d.config.apps)

@@ -20,9 +20,9 @@
 | `POST /v1/mcp/apps/{appId}/context` | `ui/update-model-context` 覆盖式落库 |
 | `GET/POST /v1/mcp/apps/audit` | 审计读 / 宿主侧动作审计（闭集） |
 
-全部路由都要求 `X-Tenant-ID`（浏览器会话由 `keel serve` 的鉴权中间件注入），
-租户判定先于任何目录/文档字节。未接线 registry 时读路径 501；桥动作按各自 seam
-回 501/503，不用假成功。
+全部路由都在鉴权中间件之后：`X-Tenant-ID` 由登录账号 cookie 或 Bot key 的中间件注入，
+客户端不手工发送（自发头会被剥离）。租户判定先于任何目录/文档字节。未接线 registry 时
+读路径 501；桥动作按各自 seam 回 501/503，不用假成功。
 
 ## 身份与缓存
 
@@ -64,7 +64,7 @@ base-uri <baseUriDomains|'self'>; frame-ancestors 'self'
 `mcphost.Registry` 的 `TenantID` 决定目录可见性：
 
 - `TenantID = uuid.Nil`：**进程级目录**（无租户隔离）——只适用于单租户进程。
-  HTTP 端点仍要求 `X-Tenant-ID`，任何已鉴权租户都能读到这份进程级目录。
+  HTTP 端点的租户头由鉴权中间件注入，任何已鉴权租户都能读到这份进程级目录。
 - `TenantID = <tenant>`：目录只对该租户可见；其它租户得到空目录，文档 404。
   `keel serve` 用 serve 进程的租户（`KEEL_SERVE_TENANT`）构造 registry。
 

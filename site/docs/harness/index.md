@@ -2,8 +2,11 @@
 
 > **Harness** is keel's product layer. It turns the Core's event ledger and loop into a
 > usable agent product: sessions, turns, tools, approvals, plugins, triggers and the
-> client surfaces that speak to them. The name replaces the earlier "Agent" naming;
-> the protocol names **AgentAPI** and **AgentBackend** are contracts and are kept
+> client surfaces that speak to them. Its product entities are **Account**, **Role**,
+> **Profile**, **Bot** and **TeamBot**: a Bot is a runnable AI employee
+> (`Profile + ModelKind + Harness`), and a TeamBot is a mission plus a roster of Bots.
+> The old "Agent"/`TeamAgent` naming is deleted (alpha zero compatibility); the protocol
+> names **AgentAPI** and **AgentBackend** are contracts and are kept
 > (see the [glossary](/glossary)).
 
 The Harness is not a new runtime. It is a **host process** (`keel serve`) assembled

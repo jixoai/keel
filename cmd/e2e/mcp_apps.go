@@ -19,6 +19,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,12 @@ type mcpAppsEnv struct {
 	out      string
 	phase    string
 	dbName   string
+	// client carries the CSRF cookie pair; local-only auth still enforces the
+	// double-submit token on writes. csrf is refreshed after every boot because
+	// the process's ephemeral signing key changes across SIGKILL restarts.
+	client     *http.Client
+	csrf       string
+	csrfCookie string
 
 	cmd     *exec.Cmd
 	logFile *os.File
@@ -138,6 +145,10 @@ func newMCPAppsEnv(keelBin, outDir, dsn string, port int) (*mcpAppsEnv, error) {
 	if cfg, err := pgxpool.ParseConfig(dsn); err == nil {
 		dbName = cfg.ConnConfig.Database
 	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("cookie jar: %w", err)
+	}
 	env := &mcpAppsEnv{
 		keelBin:   keelBin,
 		dsn:       dsn,
@@ -147,6 +158,7 @@ func newMCPAppsEnv(keelBin, outDir, dsn string, port int) (*mcpAppsEnv, error) {
 		work:      work,
 		out:       outDir,
 		dbName:    dbName,
+		client:    &http.Client{Jar: jar},
 		startedAt: time.Now(),
 	}
 	// The scenario uses a dedicated port; a stale listener would silently make
@@ -175,11 +187,13 @@ func (e *mcpAppsEnv) cleanup() {
 }
 
 // envWithoutKeelConfig removes ambient KEEL_* deployment settings (.env.local
-// sets KEEL_SERVE_PASSWORD/TENANT) so the harness starts a deterministic
-// no-auth, fake-provider process; the scenario's own values are appended.
+// may still carry the retired KEEL_SERVE_PASSWORD) so the harness starts a
+// deterministic loopback-local-admin, fake-provider process; the scenario's own
+// values are appended.
 func envWithoutKeelConfig() []string {
 	drop := []string{
 		"KEEL_DSN=", "KEEL_SERVE_TENANT=", "KEEL_SERVE_PASSWORD=", "KEEL_SERVE_ADDR=",
+		"KEEL_AUTH=", "KEEL_INSECURE=", "KEEL_SECRET_KEY=",
 		"KEEL_MCP_CONFIG=", "KEEL_MCP_PROJECT=", "KEEL_MCP_PROTOCOL_ERA=",
 		"KEEL_ADMIN_KEY=", "KEEL_FAKE_DELAY_MS=", "KEEL_TOOL_DELAY_MS=",
 		"KEEL_LEASE_MS=", "KEEL_MODELS_CONFIG=", "KEEL_PROVIDER=", "KEEL_MODEL=",
@@ -251,14 +265,21 @@ func (e *mcpAppsEnv) start(phase, scenario string, toolDelayMS int, extra ...str
 	if err != nil {
 		return err
 	}
+	// Each case gets its own tenant at process start. local-only maps loopback
+	// requests to the built-in local-admin super admin and strips any client
+	// X-Tenant-ID, so the tenant must be the process tenant rather than a
+	// per-request header (the old no-password boot accepted neither model).
+	if e.tenant == "" {
+		e.tenant = uuid.NewString()
+	}
 	cmd := exec.Command(e.keelBin, "serve",
 		"-addr", fmt.Sprintf("127.0.0.1:%d", e.port),
 		"-dsn", e.dsn,
 		"-cas", filepath.Join(e.work, "cas"),
 		"-web-dir", filepath.Join(e.work, "web-missing"),
 		"-plugins-root", filepath.Join(e.work, "plugins"),
-		"-password=",
-		"-tenant=",
+		"-auth", "local-only",
+		"-tenant", e.tenant,
 		"-mcp", mcpConfigPath,
 		"-runs", "8",
 	)
@@ -286,12 +307,13 @@ func (e *mcpAppsEnv) start(phase, scenario string, toolDelayMS int, extra ...str
 		if err == nil {
 			res.Body.Close()
 			if res.StatusCode == 200 {
-				if e.tenant == "" {
-					e.tenant = uuid.NewString()
-				}
-				if code, err := e.createTenant(context.Background(), e.tenant, "mcp-apps-e2e"); err != nil || code != 201 {
+				// local-only provisions the tenant and its local-admin identity
+				// during boot; there is no separate tenant write to make. The
+				// CSRF pair is per-process (ephemeral signing key), so every
+				// start refreshes it before the scenario writes.
+				if err := e.refreshCSRF(context.Background()); err != nil {
 					e.kill9()
-					return fmt.Errorf("create the scenario tenant: code=%d err=%v", code, err)
+					return fmt.Errorf("refresh csrf: %w", err)
 				}
 				e.writeText(fmt.Sprintf("start-%s-%d.txt", phase, e.startCount),
 					fmt.Sprintf("pid=%d\ntenant=%s\nphase=%s\nscenario=%s\ntoolDelayMs=%d\nfakeEvents=%s\nlog=%s\n",
@@ -550,6 +572,52 @@ func countMarkers(markers []fakeMarker, pred func(fakeMarker) bool) int {
 
 // --- HTTP helpers ----------------------------------------------------------
 
+// refreshCSRF reads the double-submit pair. local-only authenticates the
+// request as the built-in local admin, but non-GET requests still require the
+// token. The cookie is carried explicitly because Go's jar refuses Secure
+// cookies over plain-HTTP loopback.
+func (e *mcpAppsEnv) refreshCSRF(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.base+"/v1/auth/session", nil)
+	if err != nil {
+		return err
+	}
+	res, err := e.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET /v1/auth/session: HTTP %d", res.StatusCode)
+	}
+	var body struct {
+		CSRF string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return fmt.Errorf("decode /v1/auth/session: %w", err)
+	}
+	if body.CSRF == "" {
+		return fmt.Errorf("GET /v1/auth/session returned no csrfToken")
+	}
+	e.csrf = body.CSRF
+	// The cookie is Secure; Go's jar refuses to send it over plain-HTTP
+	// loopback (unlike Chrome/curl), so carry the value explicitly.
+	e.csrfCookie = ""
+	for _, cookie := range res.Cookies() {
+		if cookie.Name == "keel_csrf" {
+			e.csrfCookie = cookie.Value
+			break
+		}
+	}
+	if e.csrfCookie == "" {
+		return fmt.Errorf("GET /v1/auth/session set no keel_csrf cookie")
+	}
+	return nil
+}
+
 func (e *mcpAppsEnv) request(ctx context.Context, method, path, tenant string, body any) (int, http.Header, []byte, error) {
 	var reader io.Reader
 	if body != nil {
@@ -566,10 +634,14 @@ func (e *mcpAppsEnv) request(ctx context.Context, method, path, tenant string, b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if method != http.MethodGet && method != http.MethodHead && e.csrf != "" {
+		req.Header.Set("X-Keel-CSRF", e.csrf)
+		req.AddCookie(&http.Cookie{Name: "keel_csrf", Value: e.csrfCookie})
+	}
 	if tenant != "" {
 		req.Header.Set("X-Tenant-ID", tenant)
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := e.client.Do(req)
 	if err != nil {
 		return 0, nil, nil, err
 	}

@@ -19,7 +19,8 @@
 //   E2E_RUN             run label (run-1, run-2)
 //   E2E_MCP_LOG         MCP fixture JSONL log
 //   E2E_WIRE_LOG        stub provider JSONL log
-//   KEEL_SERVE_PASSWORD passphrase for the login gate
+//   E2E_USERNAME        account username for the login gate
+//   E2E_PASSWORD        account password (or KEEL_ACCOUNT_USERNAME/PASSWORD)
 //   PLAYWRIGHT_CORE     optional playwright-core entry
 //   E2E_CHROME          optional Chrome executable
 
@@ -31,13 +32,14 @@ const EVIDENCE = process.env.E2E_EVIDENCE || '/tmp/mcp-apps-e2e';
 const RUN = process.env.E2E_RUN || 'run-1';
 const MCP_LOG = process.env.E2E_MCP_LOG || '';
 const WIRE_LOG = process.env.E2E_WIRE_LOG || '';
-const PASSWORD = process.env.KEEL_SERVE_PASSWORD || '';
+const USERNAME = process.env.E2E_USERNAME || process.env.KEEL_ACCOUNT_USERNAME || '';
+const PASSWORD = process.env.E2E_PASSWORD || process.env.KEEL_ACCOUNT_PASSWORD || '';
 const CHROME = process.env.E2E_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PLAYWRIGHT =
   process.env.PLAYWRIGHT_CORE || '/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs';
 
-if (!PASSWORD) {
-  console.error('KEEL_SERVE_PASSWORD is not set');
+if (!USERNAME || !PASSWORD) {
+  console.error('E2E_USERNAME/E2E_PASSWORD (or KEEL_ACCOUNT_USERNAME/PASSWORD) are not set');
   process.exit(2);
 }
 
@@ -192,15 +194,17 @@ const expandToolRow = async (waitMs) => {
 try {
   // ---- 0. login gate -----------------------------------------------------
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('input[aria-label="服务口令"], input[type="password"], input', {
+  await page.waitForSelector('input[aria-label="用户名"], input[type="password"]', {
     timeout: 30000,
     state: 'visible',
   });
   await step('login-gate', { url: page.url() });
 
-  const passwordInput = await page.$('input[aria-label="服务口令"]');
-  const input = passwordInput ?? (await page.$('input[type="password"]')) ?? (await page.$('input'));
-  await input.fill(PASSWORD);
+  const usernameInput = await page.$('input[aria-label="用户名"]');
+  const passwordInput = await page.$('input[aria-label="密码"], input[type="password"]');
+  if (!usernameInput || !passwordInput) throw new Error('login username/password fields not found');
+  await usernameInput.fill(USERNAME);
+  await passwordInput.fill(PASSWORD);
   const submit =
     (await page.$('[aria-label="进入 Keel"]')) ??
     (await page.$('[aria-label="进入"]')) ??

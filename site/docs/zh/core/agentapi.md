@@ -14,9 +14,11 @@
 
 认证按部署不同，且属于网络中间件、永不属于内核：
 
-- **`keel serve`**：浏览器用 HMAC 签名的 HttpOnly cookie，CLI/TUI 用
-  `Authorization: Bearer <passphrase>`。服务端注入租户并剥离客户端传来的 `X-Tenant-ID`
-  （`docs/WEBUI.md`、`cmd/keel/auth.go`）。`--password ""` 关闭认证（仅回环开发），此时只回答回环 Host。
+- **`keel serve`**：人类用账号 + 密码在 `POST /v1/auth/login` 换 HMAC 签名的 HttpOnly cookie，
+  写请求带 `X-Keel-CSRF`；机器客户端用绑定到 Bot 的 `keel_bot_...` key（Bearer）。服务端注入租户
+  并剥离客户端传来的 `X-Tenant-ID`（`docs/HARNESS.md`、`cmd/keel/auth.go`）。空库没有超管：
+  `keel admin bootstrap` 生成一次性 setup token；`--auth local-only` 把回环请求映射为内置
+  local-admin，`off` 还需显式 `--insecure`。
 - **`cmd/runtime`**：每个请求用 `X-Tenant-ID` 指定租户；管理员端点额外要求
   `Authorization: Bearer <KEEL_ADMIN_KEY>`。`X-Tenant-ID` 是行 id，从不是身份凭证；未配置 admin key
   时管理员 API 整体关闭（503）。
@@ -76,6 +78,20 @@
 | `GET` | `/v1/triggers` · `POST` `/v1/triggers/{id}/fire` | 触发器审计与手动触发（带幂等键） |
 | `GET` | `/v1/subagents` · `GET` `/v1/subagents/{id}` | 子代理列表 / 详情 |
 | `POST` | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不取消子代理） |
+
+身份、权限与 Bot（change `keel-bot-identity-access`；完整表见 `docs/HARNESS.md` §2）：
+
+| 方法 | 路径 | 语义 |
+|---|---|---|
+| POST/GET | `/v1/auth/login`、`/v1/auth/logout`、`/v1/auth/session`、`/v1/auth/password`、`/v1/auth/bootstrap` | 账号登录/登出、CSRF 与引导状态、强制改密、一次性 setup token |
+| GET/POST | `/v1/accounts`、`POST …/disable`、`POST …/password-reset`、`GET/POST/DELETE …/groups` | Account（登录/权限主体）、禁用/重置密码/权限组写入 |
+| GET/POST/PATCH/DELETE | `/v1/roles`、`/v1/profiles` | Role（只给身份，不授权）、Profile（Account + Role） |
+| GET/POST/PATCH/DELETE | `/v1/permission-groups`、`/v1/permissions` | permission-key registry、scope、权限组与有效授权 |
+| GET/POST/PATCH | `/v1/bots`、`/v1/bots/{id}`、`/v1/bots/{id}/archive`、`/v1/bots/{id}/invoke` | Bot CRUD/归档/调用；Session 属于 Bot → Account |
+| GET/POST/DELETE | `/v1/bots/{id}/keys` | 签发/列出/吊销绑定 Bot 的 key（明文只显示一次） |
+| GET/POST/PATCH | `/v1/team-bots`、`/v1/team-bots/{id}`、`/v1/team-bots/{id}/roster`、`/v1/team-bots/{id}/start` | TeamBot = Mission + Roster；不是权限主体 |
+
+旧 `/v1/agents`、`/v1/teams` 返回 404，无别名。
 
 实测的列表与插件响应（有省略）：
 

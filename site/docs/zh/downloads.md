@@ -49,24 +49,29 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 # 1. 账本需要一个数据库
 createdb keel
 
-# 2. 起服务（/v1、网页界面与 SSE 都在一个端口上）
+# 2. 部署密钥与服务（/v1、网页界面与 SSE 都在一个端口上）
 export KEEL_DSN='postgres://postgres@127.0.0.1:5432/keel?sslmode=disable'
 export KEEL_SERVE_TENANT="$(uuidgen | tr 'A-Z' 'a-z')"
-export KEEL_SERVE_PASSWORD='自己定一个口令'
-export KEEL_SERVE_WEB_DIR="$PWD/keel-web"   # 解压后的网页客户端
+export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # 签 session/CSRF cookie
+export KEEL_SERVE_WEB_DIR="$PWD/keel-web"          # 解压后的网页客户端
 export KEEL_MODEL='deepseek-v4.1-flash'
 export KEEL_PROVIDER='openai'
 export KEEL_BASE_URL='https://api.example.com/v1'
 export KEEL_API_KEY='…'
+
+# 3. 空库：为第一个超管生成一次性 setup token
+keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
 keel serve -addr 127.0.0.1:13750
 ```
 
-打开 `http://127.0.0.1:13750`，输入口令，发一条消息。起不来时先跑 `keel doctor` —— 它会打印进程实际解析到的配置、构建信息与产物路径。
+打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，首次登录会强制改密。
+机器客户端用绑定到 Bot 的 key（`keel_bot_...`），不走浏览器登录。起不来时先跑
+`keel doctor` —— 它会打印进程实际解析到的配置、构建信息与产物路径。
 
 终端客户端连的是同一个服务：
 
 ```bash
-keel tui --url http://127.0.0.1:13750
+keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"
 ```
 
 ## 说明与如实边界
@@ -74,5 +79,8 @@ keel tui --url http://127.0.0.1:13750
 - **没有代码签名。** macOS 上先清一次隔离标记：`xattr -dr com.apple.quarantine ./keel`。
 - **不带数据库。** 自备 PostgreSQL；`keel` 首次启动时跑自己的迁移。
 - **1.0 之前。** Harness API 有版本号（`apiVersion: v1`），但产品面仍在动；稳定的是插件契约。
+- **Alpha 零兼容。** `KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys` 与旧
+  `agents`/`agent_teams` schema 全部删除；旧库启动即拒绝并打印重建指令。升级请重新初始化
+  账号与 Bot，不做运行时迁移。
 - **镜像。** GitHub 慢时把域名换成 `https://gh.fde2e.tweb.xin/`（自建镜像，国内首选）或
   `https://ghfast.top/https://github.com/…` —— 路径与校验和完全一致。

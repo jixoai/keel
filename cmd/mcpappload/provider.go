@@ -5,7 +5,7 @@
 // long enough to observe the run-concurrency gauge. The model name selects the
 // dwell time: a name containing "slow" sleeps for -slow-ms, everything else
 // answers after -fast-ms. The response is a valid streaming completion in the
-// same wire shape scripts/agent-runtime-e2e.sh uses.
+// same wire shape scripts/mcp-apps-e2e/stub-provider.py records.
 
 package main
 

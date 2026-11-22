@@ -69,19 +69,18 @@ fi
 [[ -f "$ENV_FILE" ]] || die "no env file found (.env.local or the main repo's .env.personal)"
 
 DSN=""
-SERVE_PASS=""
 while IFS= read -r line; do
   key="${line%%=*}"; value="${line#*=}"
   value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
   case "$key" in
     KEEL_TEST_DSN) DSN="$value" ;;
     KEEL_DSN) [[ -z "$DSN" ]] && DSN="$value" ;;
-    KEEL_SERVE_PASSWORD) SERVE_PASS="$value" ;;
+    KEEL_SERVE_PASSWORD) : ;; # retired; the lane provisions an account below
   esac
 done < <(grep -E '^(KEEL_TEST_DSN|KEEL_DSN|KEEL_SERVE_PASSWORD)=' "$ENV_FILE")
 [[ -n "$DSN" ]] || die "KEEL_TEST_DSN is not set in $ENV_FILE"
-[[ -n "$SERVE_PASS" ]] || die "KEEL_SERVE_PASSWORD is not set in $ENV_FILE"
-export KEEL_SERVE_PASSWORD="$SERVE_PASS"
+
+source "$ROOT/scripts/lib/keel-auth.sh"
 
 # The PostgreSQL container is the one publishing the DSN's port.
 DSN_PORT="$(KEEL_DSN_VALUE="$DSN" python3 - <<'PY'
@@ -177,7 +176,8 @@ cleanup_current() {
   pkill -f "$ROOT/scripts/mcp-apps-e2e/mcp-server.mjs" 2>/dev/null || true
   # The session cookie is credential-shaped: never kept.
   if [[ -n "$RUN_DIR" ]]; then
-    rm -f "$RUN_DIR/cookies.txt" "$RUN_DIR/login-body.json"
+    rm -f "$RUN_DIR/cookies.txt" "$RUN_DIR/csrf.txt" "$RUN_DIR/auth.json" \
+      "$RUN_DIR/setup.token" "$RUN_DIR/login-body.json"
   fi
   sleep 0.4
   if [[ -n "$RUN_DIR" ]]; then
@@ -209,15 +209,17 @@ trap 'rc=$?; cleanup_current; trap - EXIT; exit $rc' EXIT
 trap 'exit 130' INT TERM
 
 api() { # METHOD PATH [BODY] [JAR] → status on stdout, body in last-body.json
-  local method="$1" path="$2" body="${3:-}" jar="${4:-}"
+  local method="$1" path="$2" body="${3:-}" jar="${4:-$RUN_DIR/cookies.txt}"
   local base="http://127.0.0.1:$SERVE_PORT"
-  local -a args=(-sS)
-  [[ -n "$jar" ]] && args+=(-b "$jar")
+  local -a args=(-sS -b "$jar" -c "$jar" -X "$method")
+  if [[ -s "$RUN_DIR/csrf.txt" ]]; then
+    args+=(-H "X-Keel-CSRF: $(cat "$RUN_DIR/csrf.txt")")
+  fi
   if [[ -n "$body" ]]; then
-    curl "${args[@]}" -X "$method" "$base$path" -H 'Content-Type: application/json' \
+    curl "${args[@]}" "$base$path" -H 'Content-Type: application/json' \
       --data-binary "$body" -o "$RUN_DIR/last-body.json" -w '%{http_code}'
   else
-    curl "${args[@]}" -X "$method" "$base$path" -o "$RUN_DIR/last-body.json" -w '%{http_code}'
+    curl "${args[@]}" "$base$path" -o "$RUN_DIR/last-body.json" -w '%{http_code}'
   fi
 }
 
@@ -296,7 +298,9 @@ JSON
   session="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 
   KITE_E2E_KEY="kite-e2e-not-a-credential" \
-  KEEL_DSN="$TEST_DSN" KEEL_TEST_DSN="$TEST_DSN" KEEL_MODELS_CONFIG="$RUN_DIR/models-config.json" \
+  KEEL_DSN="$TEST_DSN" KEEL_TEST_DSN="$TEST_DSN" \
+  KEEL_SECRET_KEY="$(openssl rand -hex 32)" \
+  KEEL_MODELS_CONFIG="$RUN_DIR/models-config.json" \
     "$KEEL_BIN" serve --addr "127.0.0.1:$SERVE_PORT" --tenant "$tenant" \
       --web-dir "$WEB_DIR" --mcp "$RUN_DIR/mcp.json" > "$RUN_DIR/serve.log" 2>&1 &
   SERVE_PID=$!
@@ -307,16 +311,9 @@ JSON
   done
   curl -sf -m 2 "http://127.0.0.1:$SERVE_PORT/v1/health" >/dev/null || die "keel serve did not become healthy"
 
-  local jar="$RUN_DIR/cookies.txt"
-  python3 - "$RUN_DIR/login-body.json" <<'PY'
-import json, os, sys
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump({"password": os.environ["KEEL_SERVE_PASSWORD"]}, handle)
-PY
-  curl -sS -c "$jar" -X POST "http://127.0.0.1:$SERVE_PORT/v1/auth/login" \
-    -H 'Content-Type: application/json' --data-binary "@$RUN_DIR/login-body.json" > "$RUN_DIR/login.json"
-  rm -f "$RUN_DIR/login-body.json"
-  grep -q '"authenticated":true' "$RUN_DIR/login.json" || die "login failed (see login.json)"
+  # Each scenario has its own database, so it also bootstraps its own account.
+  keel_auth_provision "http://127.0.0.1:$SERVE_PORT" "$KEEL_BIN" "$TEST_DSN" "$tenant" "$RUN_DIR"
+  local jar="$KEEL_E2E_JAR"
 
   local code
   code="$(api GET /v1/capabilities "" "$jar")"
@@ -415,7 +412,8 @@ PY
   E2E_LEAK_LOG="$RUN_DIR/leak-trap.jsonl" \
   E2E_LEAK_PORT="$LEAK_PORT" \
   E2E_LEAK_HOST="$LEAK_HOST" \
-  KEEL_SERVE_PASSWORD="$SERVE_PASS" \
+  E2E_USERNAME="$KEEL_E2E_USERNAME" \
+  E2E_PASSWORD="$KEEL_E2E_PASSWORD" \
     timeout 240 node "$ROOT/scripts/mcp-apps-e2e/browser-degrade.mjs" > "$RUN_DIR/browser.log" 2>&1
   browser_rc=$?
   set -e
@@ -426,16 +424,17 @@ PY
     exit "$browser_rc"
   fi
 
-  # Hygiene: the evidence must not contain a DSN, the passphrase or an
-  # Authorization value. (The cookie jar and login body are already removed.)
+  # Hygiene: the evidence must not contain a DSN, the account password or an
+  # Authorization value. (The cookie jar, CSRF file and auth summary are
+  # already removed by cleanup_current.)
   if grep -rqF "postgres://" "$RUN_DIR" 2>/dev/null; then
     die "evidence contains a DSN (scenario $name)"
   fi
   if grep -rqF "postgresql://" "$RUN_DIR" 2>/dev/null; then
     die "evidence contains a DSN (scenario $name)"
   fi
-  if grep -rqF "$SERVE_PASS" "$RUN_DIR" 2>/dev/null; then
-    die "evidence contains the serve passphrase (scenario $name)"
+  if grep -rqF -- "$KEEL_E2E_PASSWORD" "$RUN_DIR" 2>/dev/null; then
+    die "evidence contains the test account password (scenario $name)"
   fi
 
   cleanup_current

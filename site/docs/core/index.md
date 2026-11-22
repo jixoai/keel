@@ -78,21 +78,25 @@ go build -o keel ./cmd/keel
 export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
 ./keel serve --addr 127.0.0.1:13750 \
   --tenant 11111111-2222-3333-4444-555555555555 \
-  --password devpass
+  --auth local-only
 ```
+
+`local-only` answers loopback and maps requests to the built-in local admin, so this quickstart
+needs no account fixture. A real deployment uses `--auth required` + `keel admin bootstrap` +
+username/password (see [Operations](/harness/operations)).
 
 ```bash
 # 3. create a session, submit input, read the committed event log
 T=http://127.0.0.1:13750
-TENANT=11111111-2222-3333-4444-555555555555
-SID=$(curl -s -X POST -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  -H 'Content-Type: application/json' -d '{}' $T/v1/sessions | cut -d'"' -f4)
+JAR=$(mktemp)
+CSRF=$(curl -sS -c "$JAR" "$T/v1/auth/session" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrfToken"])')
+SID=$(curl -sS -b "$JAR" -H "X-Keel-CSRF: $CSRF" -H 'Content-Type: application/json' \
+  -d '{}' "$T/v1/sessions" | cut -d'"' -f4)
 
-curl -s -X POST -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  -H 'Content-Type: application/json' -d '{"text":"hello keel"}' \
-  $T/v1/sessions/$SID/input
-curl -s -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  "$T/v1/sessions/$SID/events"
+curl -sS -b "$JAR" -H "X-Keel-CSRF: $CSRF" -H 'Content-Type: application/json' \
+  -d '{"text":"hello keel"}' "$T/v1/sessions/$SID/input"
+curl -sS -b "$JAR" "$T/v1/sessions/$SID/events"
 ```
 
 Three responses you will actually get (verified against this revision):

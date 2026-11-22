@@ -13,6 +13,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"sort"
 	"strconv"
@@ -34,8 +35,10 @@ func newHTTPClient() *http.Client {
 }
 
 func newAPIClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
 	return &http.Client{
 		Timeout: 30 * time.Second,
+		Jar:     jar,
 		Transport: &http.Transport{
 			MaxIdleConns:        256,
 			MaxIdleConnsPerHost: 256,
@@ -296,6 +299,50 @@ func (d *driver) getJSON(ctx context.Context, path string, out any) (int, []byte
 	return response.StatusCode, raw, nil
 }
 
+// refreshCSRF reads the session/CSRF pair. local-only maps the request to the
+// built-in local admin, but writes still enforce the double-submit token.
+func (d *driver) refreshCSRF(ctx context.Context) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, d.config.base+"/v1/auth/session", nil)
+	if err != nil {
+		return err
+	}
+	response, err := d.api.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	raw, err := readAllLimited(response.Body, 1<<20)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET /v1/auth/session: HTTP %d", response.StatusCode)
+	}
+	var body struct {
+		CSRF string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return fmt.Errorf("decode /v1/auth/session: %w", err)
+	}
+	if body.CSRF == "" {
+		return fmt.Errorf("GET /v1/auth/session returned no csrfToken")
+	}
+	d.csrf = body.CSRF
+	// Secure cookies are not sent by Go's jar over plain-HTTP loopback, so the
+	// value travels explicitly alongside the header.
+	d.csrfCookie = ""
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == "keel_csrf" {
+			d.csrfCookie = cookie.Value
+			break
+		}
+	}
+	if d.csrfCookie == "" {
+		return fmt.Errorf("GET /v1/auth/session set no keel_csrf cookie")
+	}
+	return nil
+}
+
 func (d *driver) postJSON(ctx context.Context, path string, body any, out any) (int, []byte, error) {
 	var reader io.Reader
 	if body != nil {
@@ -310,6 +357,10 @@ func (d *driver) postJSON(ctx context.Context, path string, body any, out any) (
 		return 0, nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if d.csrf != "" {
+		request.Header.Set("X-Keel-CSRF", d.csrf)
+		request.AddCookie(&http.Cookie{Name: "keel_csrf", Value: d.csrfCookie})
+	}
 	response, err := d.api.Do(request)
 	if err != nil {
 		return 0, nil, err

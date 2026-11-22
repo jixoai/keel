@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
-# naming-scan.sh — Harness 命名纪律扫描（keel-harness-naming N1/N5）
+# naming-scan.sh — 产品命名纪律扫描（keel-harness-naming N1/N5 +
+# keel-bot-identity-access A5）
 #
-# 对外文件不得再用「Agent」指代产品层；产品层统一 **Harness**（原 Agent）。
-# 白名单只有四类，且每类都在输出里如实标注：
+# 对外文件不得再用「Agent」指代产品层；产品实体统一 **Bot / TeamBot / Account /
+# Role / Profile**，产品层外壳是 **Harness**。白名单每类都在输出里如实标注：
 #   1. protocol       —— 协议名 AgentAPI / AgentBackend。它们是契约（不改名，改名破坏
 #                        客户端与适配器），保留；文档在首次引入它们的页面（README、
-#                        docs/HARNESS.md、术语表）标注「Harness（原 Agent）」别名。
+#                        docs/HARNESS.md、术语表）标注技术名词例外。
 #   2. code-ident      —— 仓库 Go/TS 源码中真实存在的 Agent* 标识符，以及以 `.` 引用的
 #                        结构字段路径（如 `TenantConfig.Agent`）。文档引用代码符号是在
 #                        引用代码事实，保留。裸词「Agent」「Agents」不在此列。
-#   3. alias          —— 专门说明改名的句子（「原 Agent」「旧称」「更名」「取代」
-#                        「别名」「formerly」「earlier」「rename」）；这类行会逐条打印，便于人工复核。
-#   4. upstream       —— 上游命名：pi/pigo 的「Agent Skills 规范」、agentskills.io、
+#   3. alias           —— 专门说明改名的句子（「原 Agent」「旧称」「更名」「删除」
+#                        「formerly」「old」「deleted」）；这类行逐条打印，便于人工复核。
+#   4. upstream        —— 上游命名：pi/pigo 的「Agent Skills 规范」、agentskills.io、
 #                        「pi Agent」（描述 pigo 时的上游事实说法）。
+#   5. ui-debt         —— 旧 UI demo fixture 里尚未替换的产品词（A4.4 所属）；逐条打印，
+#                        不静默丢弃。
+#   6. historical      —— 历史规划/残留计划文档；文件级白名单。
+#
+# A5 追加 legacy 扫描：docs 中不得再出现仍在使用的旧产品入口（`/v1/agents`、
+# `/v1/teams`、`keel agent`、`keel team`、`TeamAgent`、`agent_teams`、
+# `KEEL_SERVE_PASSWORD`）。说明「已删除/retired/旧」的句子允许并计数。
 #
 # 代码文件（cmd/keel/serve.go、web/src/data/fixture.ts）只扫描字符串字面量：内部字段名/注释
 # 不是对外文案，只改字面量。
 #
-# 其余任何 capital-A `Agent` 命中即违规。脚本以非零码退出并打印 file:line: token。
+# 其余任何 capital-A `Agent` 或仍在使用旧入口的文档行命中即违规。脚本以非零码退出并打印
+# file:line: token。
 #
 # Usage:
 #   scripts/naming-scan.sh                # 扫描，零违规退出 0，有违规退出 1
@@ -70,14 +79,33 @@ for path in root.rglob("*"):
 # --- whitelist: upstream naming ---------------------------------------------
 UPSTREAM = re.compile(r"pi Agent|PI Agent|pigo|Agent Skills|agentskills\.io")
 # --- whitelist: sentences that document the rename itself -------------------
-ALIAS = re.compile(r"原 Agent|旧称|原名|别名|取代|更名|rename|formerly|earlier|alias")
+ALIAS = re.compile(
+    r"原 Agent|旧称|原名|别名|取代|更名|删除|\bold\b|\bdeleted\b|rename|formerly|earlier|alias"
+)
+# --- known debt (printed, not silently dropped) ----------------------------
+# The old UI demo fixture still speaks the retired Agent vocabulary. A4.4 owns
+# that screen and replaces it; A5 (docs/scripts) must not edit web/. Every
+# entry is printed on every run so the debt stays visible.
+KNOWN_UI_DEBT = {
+    ("web/src/data/fixture.ts", 979): "A4.4 UI fixture string",
+    ("web/src/data/fixture.ts", 996): "A4.4 UI fixture string",
+    ("web/src/data/fixture.ts", 1018): "A4.4 UI fixture string",
+    ("web/src/data/fixture.ts", 1020): "A4.4 UI fixture string",
+    ("web/src/data/fixture.ts", 1033): "A4.4 UI fixture string",
+    ("web/src/data/fixture.ts", 1080): "A4.4 UI fixture string",
+}
+# Historical planning notes describe the old model; they are not product copy.
+HISTORICAL_DOCS = {
+    "docs/RESIDUAL-PLAN.md": "historical residual plan (pre-A5 vocabulary)",
+}
 # --- code files are scanned inside string literals only ---------------------
 QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'(?:[^'\\]|\\.)*'" + r"|`[^`]*`")
 CODE_FILES = {".go", ".ts", ".tsx"}
 
 TOKEN = re.compile(r"(?<![A-Za-z0-9_])Agent[A-Za-z0-9_]*")
-counts = {"protocol": 0, "code-ident": 0, "alias": 0, "upstream": 0}
+counts = {"protocol": 0, "code-ident": 0, "alias": 0, "upstream": 0, "ui-debt": 0, "historical": 0}
 alias_lines = []
+debt_lines = []
 violations = []
 
 for f in files:
@@ -102,6 +130,11 @@ for f in files:
             if token in code_ids or before == ".":
                 counts["code-ident"] += 1
                 continue
+            key = (str(f), lineno)
+            if key in KNOWN_UI_DEBT:
+                counts["ui-debt"] += 1
+                debt_lines.append(f"  {f}:{lineno} [{KNOWN_UI_DEBT[key]}]: {line.strip()}")
+                continue
             if token == "Agent" and ALIAS.search(context):
                 counts["alias"] += 1
                 alias_lines.append(f"  {f}:{lineno}: {line.strip()}")
@@ -109,7 +142,52 @@ for f in files:
             if token == "Agent" and UPSTREAM.search(context):
                 counts["upstream"] += 1
                 continue
+            if str(f) in HISTORICAL_DOCS:
+                counts["historical"] += 1
+                continue
             violations.append((str(f), lineno, token, line.strip()))
+
+# --- legacy product surface (keel-bot-identity-access A5) -------------------
+# The retired words are allowed only in sentences that document their removal
+# ("retired", "旧…", "删除", "zero compatibility", …) or in historical plans.
+# This scan covers docs, not scripts: shell/go fixtures are checked by the
+# explicit grep in the A5 report because they intentionally mention the retired
+# env var to refuse it.
+LEGACY_PATTERNS = [
+    re.compile(r"/v1/agents\b"),
+    re.compile(r"/v1/teams\b"),
+    re.compile(r"keel team\b(?!-bot)"),
+    re.compile(r"keel agent\b"),
+    re.compile(r"\bTeamAgent\b"),
+    re.compile(r"\bagent_teams\b"),
+    re.compile(r"KEEL_SERVE_PASSWORD"),
+]
+LEGACY_RETIRED = re.compile(
+    r"retir|旧|\bold\b|删除|不再|zero[- ]compat|refus|ignor|legacy|archive|formerly|renam|migrat|deprecat",
+    re.IGNORECASE,
+)
+legacy_docs = [root / "README.md"] + sorted((root / "docs").rglob("*.md")) + sorted((root / "site/docs").rglob("*.md"))
+legacy_allowed = []
+legacy_violations = []
+for f in legacy_docs:
+    if not f.is_file():
+        continue
+    try:
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        continue
+    for lineno, line in enumerate(lines, 1):
+        # A wrap can put the retirement word on the previous line; read both.
+        context = " ".join(lines[max(0, lineno - 2):lineno])
+        for pattern in LEGACY_PATTERNS:
+            match = pattern.search(line)
+            if not match:
+                continue
+            if str(f) in HISTORICAL_DOCS or LEGACY_RETIRED.search(context):
+                legacy_allowed.append(f"  {f}:{lineno}: {match.group(0)}: {line.strip()}")
+            else:
+                legacy_violations.append((str(f), lineno, match.group(0), line.strip()))
+            break
 
 if not quiet:
     print("naming-scan: scope = outward docs + user-visible strings")
@@ -118,10 +196,24 @@ if not quiet:
     print(f"  code-ident (Agent* symbols / .Agent fields) hits: {counts['code-ident']}")
     print(f"  alias      (rename notes, audited below)    hits: {counts['alias']}")
     print(f"  upstream   (pi/pigo naming)                 hits: {counts['upstream']}")
+    print(f"  ui-debt    (A4.4 fixture, printed below)    hits: {counts['ui-debt']}")
+    print(f"  historical (historical plans)               hits: {counts['historical']}")
     if alias_lines:
         print("naming-scan: alias lines (explicit rename notes, for review):")
         for line in alias_lines:
             print(line)
+    if debt_lines:
+        print("naming-scan: known UI debt (A4.4 owns these; not silently ignored):")
+        for line in debt_lines:
+            print(line)
+
+if legacy_violations:
+    print(f"naming-scan: FAIL — {len(legacy_violations)} legacy product-surface use(s):")
+    for path, lineno, token, line in legacy_violations:
+        print(f"  {path}:{lineno}: {token}: {line}")
+    if legacy_allowed:
+        print(f"naming-scan: ({len(legacy_allowed)} retirement note(s) allowed)")
+    sys.exit(1)
 
 if violations:
     print(f"naming-scan: FAIL — {len(violations)} residual product-name use(s):")
@@ -129,5 +221,8 @@ if violations:
         print(f"  {path}:{lineno}: {token}: {line}")
     sys.exit(1)
 
-print("naming-scan: PASS — no product-name 'Agent' outside the whitelist")
+if not quiet and legacy_allowed:
+    print(f"naming-scan: legacy words only in {len(legacy_allowed)} retirement note(s) (allowed)")
+
+print("naming-scan: PASS — no product-name 'Agent' outside the whitelist; no live legacy product surface")
 PY

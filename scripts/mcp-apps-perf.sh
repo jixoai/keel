@@ -203,8 +203,8 @@ log "== build binaries =="
   CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go build -o "$RUN_DIR/mcpappload" ./cmd/mcpappload
   go build -o "$RUN_DIR/keel-host" ./cmd/keel
 )
-log "creating tenant $TENANT (no key: auth is disabled on the loopback-only container netns)"
-KEEL_DSN="$HOST_DSN" "$RUN_DIR/keel-host" admin tenant create --name p6d-perf --tenant "$TENANT" --no-key >/dev/null \
+log "creating tenant $TENANT (loopback-only local-admin auth: no account login in this lane)"
+KEEL_DSN="$HOST_DSN" "$RUN_DIR/keel-host" admin tenant create --name p6d-perf --tenant "$TENANT" >/dev/null \
   || die "could not create the test tenant"
 # The default tenant stream quota is 20; the G5 profile holds 256 control
 # streams (the server's scheduler cap) across 1000 sessions.
@@ -285,7 +285,7 @@ docker run -d --name "$SERVE_CTR" --network "container:$NET_CTR" \
   -e "HOME=/tmp" \
   -e "KEEL_PLUGINS_ROOT=/tmp/plugins" \
   alpine:3.20 /run/keel serve \
-  --addr "127.0.0.1:$SERVE_PORT" --tenant "$TENANT" --runs "$RUN_SLOTS" \
+  --addr "127.0.0.1:$SERVE_PORT" --auth local-only --tenant "$TENANT" --runs "$RUN_SLOTS" \
   --web-dir /tmp/web --cas /tmp/cas \
   --mcp /run/mcp.json --models-config /run/models.json >/dev/null
 

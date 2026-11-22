@@ -51,26 +51,31 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 # 1. the ledger needs a database
 createdb keel
 
-# 2. run the server (it hosts /v1, the web UI and SSE on one port)
+# 2. deployment secrets and the server (it hosts /v1, the web UI and SSE on one port)
 export KEEL_DSN='postgres://postgres@127.0.0.1:5432/keel?sslmode=disable'
 export KEEL_SERVE_TENANT="$(uuidgen | tr 'A-Z' 'a-z')"
-export KEEL_SERVE_PASSWORD='choose-a-passphrase'
-export KEEL_SERVE_WEB_DIR="$PWD/keel-web"   # the unzipped web client
+export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookies
+export KEEL_SERVE_WEB_DIR="$PWD/keel-web"          # the unzipped web client
 export KEEL_MODEL='deepseek-v4.1-flash'
 export KEEL_PROVIDER='openai'
 export KEEL_BASE_URL='https://api.example.com/v1'
 export KEEL_API_KEY='…'
+
+# 3. empty database: mint the one-time setup token for the first super admin
+keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
 keel serve -addr 127.0.0.1:13750
 ```
 
-Open `http://127.0.0.1:13750`, enter the passphrase, and send a message.
+Open `http://127.0.0.1:13750`, enter the setup token plus the username and
+password for the first super admin, then change the password on first login.
+Machines use a Bot-bound key (`keel_bot_...`), not a browser login.
 `keel doctor` prints what the process resolved (config, build, artifacts) when
 something does not start.
 
 The terminal client talks to the same server:
 
 ```bash
-keel tui --url http://127.0.0.1:13750
+keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"
 ```
 
 ## Notes and honest limits
@@ -81,6 +86,10 @@ keel tui --url http://127.0.0.1:13750
   migrations on first start.
 - **Pre-1.0.** The Harness API is versioned (`apiVersion: v1`) but the product
   surface still moves. The plugin contract is the stable part.
+- **Alpha zero compatibility.** `KEEL_SERVE_PASSWORD`, old cookies, old
+  `api_keys` and the old `agents`/`agent_teams` schema are gone. An old
+  database refuses to start and prints the rebuild instruction; re-initialize
+  accounts and Bots instead of migrating.
 - **Mirrors.** If GitHub is slow, swap the host for `https://gh.fde2e.tweb.xin/`
   (self-built mirror, domestic) or `https://ghfast.top/https://github.com/…` —
   paths and checksums are identical.

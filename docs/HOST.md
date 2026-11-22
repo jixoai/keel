@@ -213,8 +213,9 @@ mcphost.MRTR   ──▶ input_required / legacy 服务端请求执行器
 
 ### 5.3 HTTP 面
 
-所有 `/v1` 路由都在鉴权中间件之后：浏览器会话由中间件注入 `X-Tenant-ID`；直接 API 调用
-必须自带 `X-Tenant-ID`（缺失/非 UUID 为 401）。租户判定先于任何目录/文档字节读取。
+所有 `/v1` 路由都在鉴权中间件之后：人类账号 cookie 与机器 Bot key 都由中间件解析出身份并
+注入 `X-Tenant-ID`；客户端自带的 `X-Tenant-ID` 会被删除，不手工发送（`cmd/runtime` 是例外，
+它仍以该头作为运行时租户接口）。租户判定先于任何目录/文档字节读取。
 未接线 registry 的路由明确回 501，不用 404 假装「没有这个能力」。
 
 | 方法与路径 | 语义 | 主要失败码 |
@@ -394,14 +395,14 @@ decision/audit 未接线。
 ### 5.8 运维
 
 ```bash
-# 1) 能力位与目录
-curl -sS -H "X-Tenant-ID: $TENANT" https://<host>/v1/capabilities | jq '.features | with_entries(select(.key|startswith("mcp.")))'
-curl -sS -H "X-Tenant-ID: $TENANT" https://<host>/v1/mcp/servers | jq .
-curl -sS -H "X-Tenant-ID: $TENANT" https://<host>/v1/mcp/apps | jq '.apps[] | {appId,server,tools,hash,documentUrl}'
+# 1) 能力位与目录（Bot-bound key；浏览器换成账号会话 cookie）
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" https://<host>/v1/capabilities | jq '.features | with_entries(select(.key|startswith("mcp.")))'
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" https://<host>/v1/mcp/servers | jq .
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" https://<host>/v1/mcp/apps | jq '.apps[] | {appId,server,tools,hash,documentUrl}'
 
 # 2) 文档头与审计
 curl -sSI "https://<host>/v1/mcp/apps/<appId>/view?v=<hash>" | grep -Ei 'content-security|nosniff|referrer|x-mcp-app|vary|cache-control'
-curl -sS -H "X-Tenant-ID: $TENANT" 'https://<host>/v1/mcp/apps/audit?limit=50' | jq .
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" 'https://<host>/v1/mcp/apps/audit?limit=50' | jq .
 ```
 
 指标（固定基数，`/metrics`）：`mcp_servers{state}`、`mcp_surface_generation`、

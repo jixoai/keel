@@ -102,7 +102,8 @@ After connecting, the host fetches and validates every declared document and pub
 catalogue:
 
 ```bash
-curl -sS -H "X-Tenant-ID: $TENANT" https://<host>/v1/mcp/apps
+# a Bot-bound key; a browser uses its account session cookie instead
+curl -sS -H "Authorization: Bearer $KEEL_AGENT_TOKEN" https://<host>/v1/mcp/apps
 ```
 
 Each app row carries `appId`, `server`, `title`, `resourceUri`, `tools`, `visibility`, `csp`,
@@ -242,8 +243,9 @@ run one process per tenant for multi-tenant deployments.
 | `POST /v1/mcp/apps/{appId}/context` | Record app context |
 | `GET /v1/mcp/apps/audit` | Read the audit trail |
 
-Every `/v1` route needs a tenant identity; the browser session gets `X-Tenant-ID` injected by
-`keel serve`, while direct API clients supply it themselves.
+Every `/v1` route is behind the auth middleware: the account cookie or Bot key determines the
+tenant, and `keel serve` injects `X-Tenant-ID` itself. Clients do not supply that header; a
+client-supplied one is stripped.
 
 ### 6.4 Limits
 

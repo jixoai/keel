@@ -6,11 +6,14 @@ sidebar: false
 
 # Glossary
 
-> Naming rule of this project: the product layer is called **Harness** (formerly
-> "Agent"). The protocol names **AgentAPI** and **AgentBackend** are contracts
-> and are kept as-is — renaming them would break clients and adapters. Every
-> page on this site follows this rule, and a scan script
-> (`scripts/naming-scan.sh`) checks it.
+> Naming rule of this project: the product layer is called **Harness**; its
+> product entities are **Bot**, **TeamBot**, **Account**, **Role** and
+> **Profile**. The old product word "Agent" and `TeamAgent` are deleted (alpha
+> zero compatibility), not aliases. The protocol names **AgentAPI** and
+> **AgentBackend** are contracts and are kept as-is — renaming them would break
+> clients and adapters. PI's technical packages (`agentcore`, `agentloop`,
+> `agenttool`, `internal/agent`) keep their names too. Every page on this site
+> follows this rule, and a scan script (`scripts/naming-scan.sh`) checks it.
 
 ## Product vocabulary
 
@@ -18,8 +21,13 @@ sidebar: false
 | --- | --- | --- |
 | **Keel** | The project: a stateless, multi-tenant agent runtime base. | `README.md` |
 | **Core** | The contract kernel + event ledger + service graph + loadout + storage + handoff. The part that cannot be swapped. | `docs/SERVICE-GRAPH.md`, `docs/KERNEL.md` |
-| **Harness** (formerly "Agent") | The product layer over the Core: sessions, turns, tools, approvals, plugins, triggers, sub-agents, and the client surfaces. The process is `keel serve`. | `internal/harnessext/doc.go`, `docs/HARNESS.md` |
-| **AgentAPI** | The `/v1` product API contract (alias: Harness API). Name kept; it is a wire contract consumed by the web UI and TUI. | `internal/harnessapi/api.go:49` |
+| **Harness** | The product layer over the Core: sessions, turns, tools, approvals, plugins, triggers, sub-agents, and the client surfaces. The process is `keel serve`. | `internal/harnessext/doc.go`, `docs/HARNESS.md` |
+| **Account** | The login and permission subject; human, bot and service accounts share one model. | `accounts` table, `/v1/accounts`, `internal/botteam` |
+| **Role** | Identity and soul: name, instruction, voice, default behavior. It grants **no** permission. | `roles` table, `/v1/roles` |
+| **Profile** | The `Account + Role` binding a Bot runs under. | `profiles` table, `/v1/profiles` |
+| **Bot** | A runnable AI employee: `Profile + ModelKind + Harness`; a Bot is a permission subject and owns Sessions. | `bots` table, `/v1/bots`, `keel bot` |
+| **TeamBot** | Mission + roster of Bots. It is a resource, not a permission subject; it owns no Session/Account/Profile. | `team_bots` table, `/v1/team-bots`, `keel team-bot` |
+| **AgentAPI** | The `/v1` product API contract (alias: Harness API). Name kept; it is a wire contract consumed by the web UI and TUI. | `internal/harnessapi/api.go` |
 | **AgentBackend** | The protocol a foreign agent runtime (for example DSH) implements to be driven as an external backend. Name kept. | `internal/gateway/protocol.go`, `docs/DSH-REFERENCE.md` |
 | **DSH** | DeepSeek Harness — an external reference for the plugin model and an external-agent target. A reference, not this project's source of truth. | `docs/DSH-REFERENCE.md` |
 

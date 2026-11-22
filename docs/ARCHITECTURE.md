@@ -160,6 +160,21 @@ CREATE TABLE blob_chunks (
 > `agenttool` / `internal/agent` 是 PI 的 loop、工具执行与 runner 技术包，作为唯一例外
 > 保留原名。
 
+### 身份与归属（keel-bot-identity-access）
+
+产品层的登录主体与权限主体是 **Account**；`Bot = Profile + ModelKind + Harness`，
+`Profile = Account + Role`，`TeamBot = Mission + Roster`。Session 属于 Bot、Bot 属于 Account；
+TeamBot 不拥有 Session，也不是权限主体。数据表为 `accounts` / `roles` / `profiles` / `bots` /
+`team_bots` / `permission_*` / `resource_relations` / `auth_sessions` / `auth_events` /
+`bot_api_keys`；`sessions.bot_id` 必填，`account_id` 由 Bot 派生，`created_by_account_id`
+记录发起人。
+
+认证：人类账号 + 密码（Argon2id）换签名 cookie，写请求带 `X-Keel-CSRF`；机器客户端用绑定
+`(account_id, bot_id)` 的 Bot key。旧 `KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys`、
+旧 `agents`/`agent_teams` 表删除；旧 schema 启动即拒绝，不写迁移（alpha 零兼容）。
+权限：permission-key + scope + ReBAC-lite 关系元组，`Account 权限 ∩ Harness permissions`
+是 Bot 的有效权限，Role 不授权。术语对表见 `docs/PRODUCT-TERMS.md`。
+
 ## 8. 实测结果（2026-11-05）
 
 | 指标 | 结果 |

@@ -23,6 +23,28 @@ GOMEMLIMIT=1610612736 /tmp/keel-runtime \
 - `-bandwidth` 是全局出站字节/秒（0=不限）；生产按链路 85–90% 设。
 - `-cas` 必须与上传目录一致，否则 >1MiB 的图读不出来。
 
+## Harness 产品进程（`keel serve`）
+
+`cmd/runtime` 是多租户运行时（每请求 `X-Tenant-ID` + `KEEL_ADMIN_KEY`）；`keel serve` 是产品壳，
+认证模型不同：**账号 + 密码**登录，机器客户端用绑定到具体 Bot 的 key。
+
+```bash
+export KEEL_DSN='postgres://…'
+export KEEL_SERVE_TENANT='<tenant-uuid>'
+export KEEL_SECRET_KEY='<32-byte base64/hex>'       # cookie/CSRF 签名
+keel admin bootstrap --tenant "$KEEL_SERVE_TENANT"  # 空库首次；一次性 setup token
+keel serve --addr 127.0.0.1:13750
+```
+
+- 浏览器用 setup token 完成首个超管设置，首次登录强制改密；之后用户名/密码登录。
+- CLI/TUI：`KEEL_ACCOUNT_USERNAME` + `KEEL_ACCOUNT_PASSWORD`（或 `--password-file`）；
+  写请求由客户端带 `X-Keel-CSRF`。
+- 机器客户端：`KEEL_AGENT_TOKEN=keel_bot_...`（绑定 `account_id + bot_id`，不能登录浏览器）。
+- `--auth required|local-only|off`：`required` 默认；`local-only` 仅回环并映射内置 local-admin；
+  `off` 必须显式 `--insecure`，公网拒绝启动。
+- **零兼容**：`KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys`、旧 `agents`/`agent_teams` schema
+  全部失效；启动会拒绝旧 schema 并给出重建指令，不提供迁移。升级即重新初始化账号与 Bot。
+
 ## 租户 provisioning
 
 `POST /v1/tenants` 是管理员操作，必须带 `Authorization: Bearer <KEEL_ADMIN_KEY>`。

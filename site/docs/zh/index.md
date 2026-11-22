@@ -61,32 +61,20 @@ docker run -d --name keel-pg \
   -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
   -p 13741:5432 postgres:18
 
-# 2. 构建并启动 Harness（产品壳 + API + worker）
+# 2. 构建、引导首个超管并启动 Harness（产品壳 + API + worker）
 git clone https://github.com/jixoai/keel.git && cd keel
 go build -o keel ./cmd/keel
 export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
-./keel serve --addr 127.0.0.1:13750 \
-  --tenant 11111111-2222-3333-4444-555555555555 \
-  --password devpass
+export KEEL_SERVE_TENANT=11111111-2222-3333-4444-555555555555
+export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # 签 session/CSRF cookie
+./keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
+./keel serve --addr 127.0.0.1:13750
 ```
 
-```bash
-# 3. 和它说话（另开终端；口令即 Bearer token）
-T=http://127.0.0.1:13750
-TENANT=11111111-2222-3333-4444-555555555555
-SID=$(curl -s -X POST -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  -H 'Content-Type: application/json' -d '{}' $T/v1/sessions | cut -d'"' -f4)
-
-curl -s -X POST -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  -H 'Content-Type: application/json' -d '{"text":"hello keel"}' \
-  $T/v1/sessions/$SID/input
-# {"created":true,"requestId":"…","seq":1,"status":"committed","submissionId":"…"}
-
-curl -s -H "Authorization: Bearer devpass" -H "X-Tenant-ID: $TENANT" \
-  "$T/v1/sessions/$SID/events" | head -c 400
-# {"events":[{"seq":1,"kind":"user.message",…},{"seq":2,"kind":"assistant.message",…},
-#            {"seq":3,"kind":"run.finished","payload":{"status":"done",…}}]}
-```
+打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，浏览器会强制改密后再进入。
+没有口令，也没有“第一个访问者自动成为超管”的路径。机器客户端用绑定到 Bot 的 key
+（`keel_bot_...`），不走浏览器登录。登录/CSRF 请求与每个端点的形状见
+[AgentAPI 参考](/zh/core/agentapi)。
 
 没有配置模型时，运行时会使用确定性的 **fake provider**，所以回答是预置文本，但整条路径——edge 提交、
 claim、loop、提交、投影——都真实跑过。要真实回答，把 `KEEL_MODEL`（配合 `KEEL_BASE_URL`/`KEEL_API_KEY`）
