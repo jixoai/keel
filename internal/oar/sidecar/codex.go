@@ -114,9 +114,11 @@ func (s *Server) runCodexTurn(ctx context.Context, session *sessionState, turn *
 		readErr       error
 		terminalFail  string
 		errorRecorded bool
+		completed     bool
 	)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64<<10), 8<<20)
+readLoop:
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(strings.TrimSpace(string(line))) == 0 {
@@ -144,11 +146,32 @@ func (s *Server) runCodexTurn(ctx context.Context, session *sessionState, turn *
 			}
 			session.emit(record)
 		}
+		switch eventType {
+		case "turn.completed":
+			// The turn is logically done. A Codex CLI can linger in its
+			// transport teardown after this event (observed with a 403 network
+			// error); stop the process group instead of waiting for its timeout.
+			completed = true
+			break readLoop
+		case "turn.failed":
+			break readLoop
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		readErr = err
 	}
-	waitErr := command.Wait()
+	if completed || terminalFail != "" {
+		_ = terminateProcess(command.Process)
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- command.Wait() }()
+	var waitErr error
+	select {
+	case waitErr = <-waitCh:
+	case <-time.After(2 * time.Second):
+		_ = killProcessTree(command.Process)
+		waitErr = <-waitCh
+	}
 	close(watcherDone)
 	// The leader may have exited while its shell children keep the group alive.
 	_ = killProcessTree(command.Process)
@@ -159,10 +182,12 @@ func (s *Server) runCodexTurn(ctx context.Context, session *sessionState, turn *
 	}
 
 	switch {
-	case ctx.Err() != nil:
-		return turnResult{err: ctx.Err(), errorRecorded: errorRecorded}
 	case terminalFail != "":
 		return turnResult{err: fmt.Errorf("codex turn failed: %s", terminalFail), errorRecorded: errorRecorded}
+	case completed:
+		return turnResult{}
+	case ctx.Err() != nil:
+		return turnResult{err: ctx.Err(), errorRecorded: errorRecorded}
 	case readErr != nil:
 		return turnResult{err: fmt.Errorf("read codex event stream: %w", readErr), errorRecorded: errorRecorded}
 	case waitErr != nil:

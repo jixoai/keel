@@ -466,7 +466,7 @@ func TestServiceCodexCancelReapsProcessGroup(t *testing.T) {
 func writeFakeCodex(t *testing.T, hang bool) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "codex")
-	script := `#!/bin/sh
+	header := `#!/bin/sh
 case "$1" in
   --version)
     echo "codex-cli 9.9.9"
@@ -477,20 +477,25 @@ case "$1" in
       echo "  --json  Print events to stdout as JSONL"
       exit 0
     fi
-    printf '%s\n' '{"type":"thread.started","thread_id":"thread-test"}'
+`
+	body := `    printf '%s\n' '{"type":"thread.started","thread_id":"thread-test"}'
     printf '%s\n' '{"type":"turn.started"}'
     printf '%s\n' '{"type":"item.started","item":{"id":"item-1","type":"command_execution","command":"echo hi"}}'
     printf '%s\n' '{"type":"item.completed","item":{"id":"item-1","type":"command_execution","aggregated_output":"hi\n","exit_code":0,"status":"completed"}}'
     printf '%s\n' '{"type":"item.completed","item":{"id":"item-2","type":"agent_message","text":"codex answer"}}'
-    printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}'
-    `
+`
 	if hang {
-		script += `    sleep 300 &
+		// No turn.completed before the wait: the test is about cancellation and
+		// process-group reaping, not a completed turn.
+		body += `    sleep 300 &
     echo $! > "$CODEX_CHILD_PID_FILE"
     wait
     `
+	} else {
+		body += `    printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}'
+    `
 	}
-	script += `    exit 0
+	script := header + body + `    exit 0
     ;;
 esac
 exit 1

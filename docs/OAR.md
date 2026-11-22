@@ -202,6 +202,8 @@ Go 类型：`*oar.Error{Code, Runtime, Detail, Required, Declared, Err}`；`oar.
   `item.completed` → result（失败带 error）；`agent_message`/`reasoning` → message；
   `turn.completed.usage` → usage；`turn.failed` → error；`error`（含 Reconnecting）→
   degraded status；未知事件 → `codex.<type>` status + 原始输出（有界），不丢行。
+- `turn.completed` 是 turn 终态：sidecar 映射 usage 后主动回收 Codex 进程组，不等 CLI
+  的 transport teardown（网络异常时 CLI 可能在 turn 完成后仍滞留重连）。
 - 单条输出超过 `-max-output-bytes`（默认 64 KiB）时写成
   `{"truncated":true,"bytes":N,"preview":"…"}`，记录不超 1 MiB。
 - **一个 sidecar 同时只跑一个 Codex turn**：`-codex-pid-file` 是单值，并发会话的 turn
