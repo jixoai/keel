@@ -699,7 +699,12 @@ function AccountHead(props: { accountId: string; name: string; disabled: boolean
       ]}
       actions={
         <>
-          <If when={canGrantMembership()}>
+          <If when={props.superAdmin}>
+            <Text testID="account-superadmin-identity-note" style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+              身份由部署决定
+            </Text>
+          </If>
+          <If when={!props.superAdmin && canGrantMembership()}>
             <Button
               testID="account-add-group-head"
               size={isMobile() ? "default" : "sm"}
@@ -927,8 +932,8 @@ function AccountCapabilities(props: { accountId: string }) {
           icon="shield"
           title="这个账号还没有能力"
           description="加入一个权限组，能力会按组出现在这里。"
-          primaryLabel={canGrantMembership() ? "加入权限组" : undefined}
-          onPrimary={canGrantMembership() ? () => addGroupDialog.set(true) : undefined}
+          primaryLabel={detail()?.account.isSuperAdmin !== true && canGrantMembership() ? "加入权限组" : undefined}
+          onPrimary={detail()?.account.isSuperAdmin !== true && canGrantMembership() ? () => addGroupDialog.set(true) : undefined}
         />
       </If>
     </View>
@@ -1018,13 +1023,21 @@ function CapabilityDomains(props: {
 function AccountGroups(props: { accountId: string }) {
   const detail = () => identityAccess.accountDetail();
   const groups = () => detail()?.groups ?? [];
+  const superAdmin = () => detail()?.account.isSuperAdmin === true;
   return (
     <View testID="account-groups" style={{ flexDirection: "column", gap: space.lg }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
         <Text style={{ fontSize: typeScale.base, fontWeight: weight.medium, color: color.foreground }}>
           所属权限组 {groups().length} 个
         </Text>
-        <If when={canGrantMembership()} else={<Text style={{ marginLeft: "auto", fontSize: typeScale.sm, color: color.mutedForeground }}>只读：缺「授予账号权限」能力。</Text>}>
+        <If
+          when={!superAdmin() && canGrantMembership()}
+          else={
+            <Text style={{ marginLeft: "auto", fontSize: typeScale.sm, color: color.mutedForeground }}>
+              {superAdmin() ? "身份由部署决定；超级管理员固定拥有全部能力。" : "只读：缺「授予账号权限」能力。"}
+            </Text>
+          }
+        >
           <Button
             testID="account-add-group"
             size="sm"
@@ -1042,8 +1055,8 @@ function AccountGroups(props: { accountId: string }) {
           icon="shield"
           title="还没有加入任何权限组"
           description="加入一个组，组里的能力会出现在这个账号的能力页。"
-          primaryLabel={canGrantMembership() ? "加入权限组" : undefined}
-          onPrimary={canGrantMembership() ? () => addGroupDialog.set(true) : undefined}
+          primaryLabel={!superAdmin() && canGrantMembership() ? "加入权限组" : undefined}
+          onPrimary={!superAdmin() && canGrantMembership() ? () => addGroupDialog.set(true) : undefined}
         />
       </If>
       <Each of={groups()} key={(group) => group.groupId}>
@@ -1090,7 +1103,7 @@ function AccountGroups(props: { accountId: string }) {
           );
         }}
       </Each>
-      <If when={!canGrantMembership()}>
+      <If when={!canGrantMembership() && !superAdmin()}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           你可以查看，但不能修改成员：需要「授予账号权限」能力。
         </Text>
@@ -1509,7 +1522,7 @@ export function AccountConfirmations() {
         testID="account-disable-dialog"
         open={disable() !== null}
         title="禁用账号？"
-        description={`禁用 ${disable()?.name ?? ""} 会吊销它的全部会话；Bot 密钥随之不可用。可以随时重新启用。`}
+        description={`禁用 ${disable()?.name ?? ""} 会吊销该账号的全部会话；Bot 密钥随之不可用。可以随时重新启用。`}
         confirmLabel="禁用"
         cancelLabel="取消"
         destructive

@@ -1,6 +1,6 @@
 // The books chapters — change keel-bot-identity-access, A4.4a/A4.4b.
 //
-// 02 员工 and 03 团队 are their own chapters (A4.4b); 04 身份 and 05 记录 are
+// 02 员工 and 03 团队 are their own chapters (A4.4b); 04 身份 and 记录 05 are
 // A4.4a's. The router only picks the chapter; each chapter gates on its own
 // capability, so a deep link to a page the account may not read renders the
 // four-part permission page instead of a blank shell.

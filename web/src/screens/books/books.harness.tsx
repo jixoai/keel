@@ -15,7 +15,7 @@
 //
 // The success faces are driven by the app's own fixture transport
 // (`?fixture=1` / `host.params.fixture`), not here.
-import { host, mount, View } from "nsh";
+import { effect, host, mount, signal, View } from "nsh";
 import { setEffectivePermissions } from "../../data/permissions";
 import { KeelApiError } from "../../data/http";
 import type { IdentityApi } from "../../data/identity-api";
@@ -27,12 +27,38 @@ import { color } from "../../ui/kit";
 import { IdentityChapter } from "./identity";
 import { RecordsChapter } from "./records";
 
-const scenario = (): string => String(host.params.scenario ?? "empty");
-const chapter = (): string => String(host.params.chapter ?? "identity");
-const identitySection = (): "accounts" | "groups" => (host.params.section === "groups" ? "groups" : "accounts");
-const identityObject = (): string | null =>
-  typeof host.params.object === "string" && host.params.object !== "" ? host.params.object : null;
-const recordsChapter = (): boolean => chapter() === "records";
+interface HarnessParams {
+  scenario?: string;
+  chapter?: string;
+  section?: string;
+  object?: string;
+}
+
+/** The TUI test host passes its parameters directly; the web dev host has no
+ * `location` in the app sandbox, so a browser launch reads the same names from
+ * `keel.route`'s query string. */
+const directParams = (host.params ?? {}) as HarnessParams;
+const params = signal<HarnessParams | null>(directParams.scenario !== undefined ? directParams : null);
+
+/** A web evidence entry sets the same parameters the TUI host passes. The app
+ * sandbox has no `location`, so the wrapper reads its own scenario and calls
+ * this before the first read. */
+export function setHarnessParams(next: HarnessParams): void {
+  params.set(next);
+}
+
+const scenarioOf = (p: HarnessParams | null): string => String(p?.scenario ?? "empty");
+const chapterOf = (p: HarnessParams | null): string => String(p?.chapter ?? "identity");
+const identitySectionOf = (p: HarnessParams | null): "accounts" | "groups" =>
+  p?.section === "groups" ? "groups" : "accounts";
+const identityObjectOf = (p: HarnessParams | null): string | null =>
+  typeof p?.object === "string" && p.object !== "" ? p.object : null;
+const recordsChapterOf = (p: HarnessParams | null): boolean => chapterOf(p) === "records";
+
+const scenario = (): string => scenarioOf(params());
+const identitySection = (): "accounts" | "groups" => identitySectionOf(params());
+const identityObject = (): string | null => identityObjectOf(params());
+const recordsChapter = (): boolean => recordsChapterOf(params());
 
 const pageOf = <T,>(items: T[]) => ({ items, limit: 100, hasMore: false });
 
@@ -88,6 +114,7 @@ const apiFor = (name: string): IdentityApi => ({
     ? {}
     : {
         async listAuditEvents() {
+          if (name === "records-loading") return new Promise(() => {});
           if (name === "records-error") throw new KeelApiError(500, "服务暂时没有响应");
           return pageOf(name === "empty" ? [] : [event]);
         },
@@ -111,36 +138,53 @@ const readonlyKeys = (): Record<string, PermissionScope> => {
   return keys;
 };
 
-identityAccess.resetForTest();
-// The harness owns its transport and keys: cancel the store's boot probe so a
-// late answer cannot reset the scenario (the probe checks its token after every
-// await).
-store.skipBootForTest();
-store.setIdentityTransport(apiFor(scenario()));
-if (recordsChapter()) {
-  store.openChapter("records");
-} else {
-  store.openIdentitySection(identitySection());
-  if (identityObject() !== null) store.openIdentityObject(identitySection(), identityObject()!);
+let configured = false;
+
+/** Install the harness's transport, route and keys once the parameters are
+ * known (immediately in the TUI, after `keel.route` in a browser). */
+function configure(p: HarnessParams): void {
+  if (configured) return;
+  configured = true;
+  identityAccess.resetForTest();
+  // The harness owns its transport and keys: cancel the store's boot probe so a
+  // late answer cannot reset the scenario (the probe checks its token after
+  // every await).
+  store.skipBootForTest();
+  store.setIdentityTransport(apiFor(scenarioOf(p)));
+  if (recordsChapterOf(p)) {
+    store.openChapter("records");
+  } else {
+    store.openIdentitySection(identitySectionOf(p));
+    const object = identityObjectOf(p);
+    if (object !== null) store.openIdentityObject(identitySectionOf(p), object);
+  }
+  setEffectivePermissions(
+    scenarioOf(p) === "permission"
+      ? { "session.read": "team" as PermissionScope }
+      : scenarioOf(p) === "group-readonly"
+        ? readonlyKeys()
+        : ALL_KEYS,
+    false,
+  );
 }
-setEffectivePermissions(
-  scenario() === "permission"
-    ? { "session.read": "team" as PermissionScope }
-    : scenario() === "group-readonly"
-      ? readonlyKeys()
-      : ALL_KEYS,
-  false,
-);
+
+if (directParams.scenario !== undefined) configure(directParams);
 
 function Harness() {
+  effect(() => {
+    const p = params();
+    if (p !== null) configure(p);
+  });
   return (
-    <View style={{ flex: 1, minHeight: 0, backgroundColor: color.background }}>
-      <BooksChrome>
-        <If when={recordsChapter()} else={<IdentityChapter />}>
-          <RecordsChapter />
-        </If>
-      </BooksChrome>
-    </View>
+    <If when={params() !== null} else={<View style={{ flex: 1, backgroundColor: color.background }} />}>
+      <View style={{ flex: 1, minHeight: 0, backgroundColor: color.background }}>
+        <BooksChrome>
+          <If when={recordsChapter()} else={<IdentityChapter />}>
+            <RecordsChapter />
+          </If>
+        </BooksChrome>
+      </View>
+    </If>
   );
 }
 

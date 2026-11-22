@@ -47,6 +47,9 @@ export const BOOK_MATRIX_MAX_WIDTH_PX = 820;
 export const BOOK_MOBILE_MAX_PX = 767;
 export const BOOK_WIDE_MIN_PX = 1440;
 export const BOOK_TOUCH_PX = 44;
+/** ≥1280: the records table keeps its 330px detail column; below it the same
+ * detail is a right drawer so the table keeps its columns at 1024. */
+export const BOOK_RECORDS_INLINE_MIN_PX = 1280;
 
 /** ≤767: the single column with the bottom tab bar. */
 export const isMobile = (): boolean => windowSize().width <= BOOK_MOBILE_MAX_PX;
@@ -54,6 +57,8 @@ export const isMobile = (): boolean => windowSize().width <= BOOK_MOBILE_MAX_PX;
 export const isWide = (): boolean => windowSize().width >= BOOK_WIDE_MIN_PX;
 /** <1024: the compact layouts (cards, a detail sheet) instead of wide tables. */
 export const isNarrow = (): boolean => windowSize().width < 1024;
+/** The records detail is inline (a third column) only on a wide desktop. */
+export const recordsInline = (): boolean => windowSize().width >= BOOK_RECORDS_INLINE_MIN_PX;
 
 /** A control that meets the 44px touch floor on a phone and keeps the kit's
  * own height elsewhere. */

@@ -25,6 +25,7 @@
 // NSH components run once: every reactive read lives in the vnode getters (JSX
 // or an `<If>`), never in a body-level `if` or a local.
 import { effect, mount, platform, signal, Storage, Text, View, windowSize } from "nsh";
+import { Scrollbar } from "nsh/base";
 
 import type { SessionSummary } from "./src/data/contract";
 import { setClientCapabilities } from "./src/data/capabilities";
@@ -53,7 +54,9 @@ import {
   AlertDialog,
   Badge,
   Button,
+  alpha,
   color,
+  radius,
   IconButton,
   space,
   ToastViewport,
@@ -505,6 +508,25 @@ function App() {
     resetBotsUi();
     resetTeamsUi();
     resetRunUi();
+  });
+  // One scrollbar language for the whole app: a quiet, token-coloured thumb
+  // instead of the platform's light indicator on the dark surface.
+  let scrollbarThemed = false;
+  effect(() => {
+    if (scrollbarThemed) return;
+    scrollbarThemed = true;
+    Scrollbar.setTheme({
+      mode: "hover",
+      minThumbLength: 40,
+      vertical: {
+        style: { width: 10, backgroundColor: "transparent" },
+        thumbStyle: { borderRadius: radius.pill, backgroundColor: alpha(color.foreground, 0.22) },
+      },
+      horizontal: {
+        style: { height: 10, backgroundColor: "transparent" },
+        thumbStyle: { borderRadius: radius.pill, backgroundColor: alpha(color.foreground, 0.22) },
+      },
+    });
   });
   // Boot: the appearance the last session chose (the settings page's 外观
   // section writes it through the same source) …

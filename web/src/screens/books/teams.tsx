@@ -501,8 +501,8 @@ export function TeamPage(props: { teamId: string }) {
                 variant="outline"
                 size="sm"
                 icon={dirty() ? "check" : "play"}
-                label={dirty() ? "去签记" : "去启动前检查"}
-                accessibilityLabel={dirty() ? "去签记" : "去启动前检查"}
+                label={dirty() ? "去登记" : "去启动前检查"}
+                accessibilityLabel={dirty() ? "去登记" : "去启动前检查"}
                 onPress={() => {
                   if (dirty()) {
                     teamConfirmHigh.set({});
@@ -537,7 +537,7 @@ export function TeamPage(props: { teamId: string }) {
                 />
               </DropdownMenu>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, lineHeight: Math.round(typeScale.sm * lineHeight.normal) }}>
-                {dirty() ? "有未保存的变更；保存后影响下一次启动。" : "保存会写入 05 记录。"}
+                {dirty() ? "有未保存的变更；保存后影响下一次启动。" : "保存会写入记录 05。"}
               </Text>
             </>
           }
@@ -1013,7 +1013,7 @@ function TeamStartPanel() {
   const reason = () => {
     if (team()?.archived) return "这个团队已归档，不能启动。";
     if (!canManage()) return "启动需要「管理团队」能力。";
-    if (botAccess.teamChanges().length > 0) return "有未保存的名单或使命；先保存并签记，再启动。";
+    if (botAccess.teamChanges().length > 0) return "有未保存的名单或使命；先保存并登记，再启动。";
     if (!pass()) return botAccess.blockingReason();
     return "";
   };
@@ -1062,7 +1062,7 @@ function TeamSignoff() {
         <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
           本次登记人：{me()?.displayName || me()?.username || "当前账号"}
         </Text>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入 05 记录 · 影响下一次启动</Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入记录 05 · 影响下一次启动</Text>
       </View>
       <If when={dirty()}>
         <Badge variant="warning" label={`${changes().length} 项未保存`} />
@@ -1085,8 +1085,8 @@ function TeamSignoff() {
           testID="team-save"
           size="sm"
           icon="check"
-          label="检查并签记"
-          accessibilityLabel="检查并签记"
+          label="检查并登记"
+          accessibilityLabel="检查并登记"
           disabled={!dirty() || !can("team_bot.manage", { archived: false })}
           onPress={() => {
             teamConfirmHigh.set({});
@@ -1160,7 +1160,7 @@ function TeamRecordsSection() {
     <View testID="team-records" style={{ flexDirection: "column", gap: space.md, maxWidth: 720 }}>
       <PageUnavailable
         icon="activity"
-        title="这个团队的操作记录在 05 记录里"
+        title="这个团队的操作记录在记录 05 里"
         description="启动、停止、名单变更都会写入同一本账。这里不复制一份，避免出现第二个真源。"
       >
         <Button
@@ -1263,7 +1263,7 @@ function TeamLedgerSheet() {
               </View>
             )}
           </Each>
-          <StateNote tone="info" icon="info" text="影响下一次启动 · 正在运行的会话不受影响 · 写入 05 记录。" />
+          <StateNote tone="info" icon="info" text="影响下一次启动 · 正在运行的会话不受影响 · 写入记录 05。" />
           <Each of={high()} key={(change) => `${change.kind}-${change.memberId ?? ""}`}>
             {(change) => (
               <Checkbox

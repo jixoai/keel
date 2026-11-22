@@ -39,6 +39,10 @@ const ALERT_DIALOG_FOOTER_STACK_BELOW_PX = 640;
 
 const footerStacked = () => windowSize().width < ALERT_DIALOG_FOOTER_STACK_BELOW_PX;
 
+/** A phone's actions are full-width rows, so they meet the 44px touch floor
+ * (the desktop pair keeps the control size's own height). */
+const actionStyle = () => (footerStacked() ? { height: 44, minHeight: 44 } : undefined);
+
 export function AlertDialog(props: {
   open?: boolean;
   title?: string;
@@ -143,6 +147,7 @@ export function AlertDialog(props: {
               props.onCancel?.();
             }}
             testID={props.testID !== undefined ? `${props.testID}-cancel` : undefined}
+            style={actionStyle()}
           />
         ) : null}
         <Button
@@ -150,6 +155,7 @@ export function AlertDialog(props: {
           label={props.confirmLabel ?? "确认"}
           onPress={props.onConfirm}
           testID={props.testID !== undefined ? `${props.testID}-confirm` : undefined}
+          style={actionStyle()}
         />
       </View>
       </View>

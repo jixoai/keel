@@ -1250,7 +1250,7 @@ function BotChanges() {
           )}
         </Each>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          影响下一次会话；正在运行的会话不会被改写。保存后会写入 05 记录。
+          影响下一次会话；正在运行的会话不会被改写。保存后会写入记录 05。
         </Text>
       </View>
     </If>
@@ -1279,7 +1279,7 @@ function BotSignoff() {
         <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
           本次登记人：{me()?.displayName || me()?.username || "当前账号"}
         </Text>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入 05 记录 · 影响下一次会话</Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入记录 05 · 影响下一次会话</Text>
       </View>
       <If when={dirty()}>
         <Badge variant="warning" label={`${changes().length} 项未保存`} />
@@ -1302,8 +1302,8 @@ function BotSignoff() {
           testID="bot-save"
           size="sm"
           icon="check"
-          label="检查并签记"
-          accessibilityLabel="检查并签记"
+          label="检查并登记"
+          accessibilityLabel="检查并登记"
           disabled={!dirty() || !can("bot.manage", { archived: false })}
           onPress={() => {
             botConfirmHigh.set({});
@@ -1661,7 +1661,7 @@ function BotLedgerSheet() {
               </View>
             )}
           </Each>
-          <StateNote tone="info" icon="info" text="影响下一次会话 · 写入 05 记录。" />
+          <StateNote tone="info" icon="info" text="影响下一次会话 · 写入记录 05。" />
           <If when={unknown().length > 0}>
             <StateNote
               tone="danger"

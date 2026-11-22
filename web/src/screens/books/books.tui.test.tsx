@@ -29,6 +29,8 @@ test("TUI: 账簿壳——1440 身份默认选中当前账号，详情有角色�
   expect(view.texts().join("\n")).toContain("3 个权限组");
   expect(view.texts().join("\n")).toContain("租户管理员");
   expect(view.texts().join("\n")).toContain("最近活动 今天");
+  expect(view.shows("id:books-live")).toBe(true);
+  expect(view.texts()).toContain("实时");
   // 账号页：唯一 H1 与章节索引。
   await view.press("id:account-section-capabilities");
   await view.waitFor("id:account-capabilities");
@@ -48,9 +50,11 @@ test("TUI: 超管——统一叫超级管理员，概览显示全部能力", asy
   expect(screen).toContain("超级管理员");
   expect(screen).not.toContain("部署管理员");
   expect(screen).toContain("全部能力（53 项）");
+  expect(screen).toContain("身份由部署决定");
+  expect(view.shows("id:account-add-group-head")).toBe(false);
 });
 
-test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet 锁定与账本签记", async () => {
+test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet 锁定与账本登记", async () => {
   const view = await app(1440);
   await view.press("id:books-chapter-identity");
   await view.waitFor("id:identity-index");
@@ -69,6 +73,7 @@ test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet
   // 未改时没有「放弃」；组头也没有未保存徽标。
   expect(view.shows("id:group-discard")).toBe(false);
   expect(view.shows("id:group-unsaved-head")).toBe(false);
+  expect(view.texts().join("\n")).toContain("无变更");
 
   // 范围是印章：打开 Sheet，超过自己上限的选项带锁与原因。
   await view.press("id:capability-scope-session.delete");
@@ -116,6 +121,7 @@ test("TUI: 记录——默认打开首条，详情写缺什么/归属/可授予�
   expect(first).toContain("可授予组/人");
   expect(first).toContain("客服组");
   expect(view.shows("id:record-open-object")).toBe(true);
+  expect(view.shows("id:record-open-owner")).toBe(true);
 
   // 授权的对象是权限组：详情给「打开权限组」。
   await view.press("id:record-row-ev-4 >> text:保存权限组");
@@ -128,7 +134,7 @@ test("TUI: 记录——默认打开首条，详情写缺什么/归属/可授予�
   // 超管操作有「超管」徽标。
   await view.press("id:record-row-ev-10 >> text:禁用账号");
   await view.waitFor("id:record-detail");
-  expect(view.texts()).toContain("超管");
+  expect(view.texts()).toContain("超级管理员");
 
   await view.press("id:records-export");
   await view.waitFor("text:/已复制 12 行 CSV|复制失败/");
@@ -219,9 +225,22 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部五 ta
   await mid.press("id:identity-segment-groups");
   await mid.waitFor("id:groups-head");
   expect(mid.shows("id:groups-table")).toBe(true);
+  const groupsHeader = mid.texts().join("\n");
+  expect(groupsHeader).toContain("权限组");
+  expect(groupsHeader).toContain("类型");
+  expect(groupsHeader).toContain("成员");
+  expect(groupsHeader).toContain("最近修改");
   await mid.press("label:打开权限组 客服组");
   await mid.waitFor("id:group-matrix");
   expect(mid.texts().join("\n")).toContain("最高：本团队");
+  // 1024 记录：表格保留，详情是抽屉而不是第三列。
+  await mid.press("id:books-chapter-records");
+  await mid.waitFor("id:records-head");
+  expect(mid.shows("id:records-table")).toBe(true);
+  expect(mid.texts().join("\n")).not.toContain("缺少能力");
+  await mid.press("id:record-row-ev-1 >> text:调用 Bot 被拒：缺「调用 Bot」（bot.invoke）");
+  await mid.waitFor("text:记录详情");
+  expect(mid.texts().join("\n")).toContain("缺少能力");
 
   const pad = await app(768);
   await pad.press("id:books-chapter-identity");
@@ -271,4 +290,19 @@ test("TUI: 账号最近活动——审计不可读时只说明一次，不逐行
   expect(screen).toContain("活动追踪待接入");
   expect(screen).not.toContain("最近活动未记录");
   expect(screen.split("活动追踪待接入").length - 1).toBe(1);
+});
+
+test("TUI: 内置权限组——底部只说只读与另存为副本，没有登记人/保存", async () => {
+  const view = await app(1440);
+  await view.press("id:books-chapter-identity");
+  await view.waitFor("id:identity-index");
+  await view.press("id:identity-segment-groups");
+  await view.waitFor("text:超级管理员");
+  await view.press("label:打开权限组 超级管理员");
+  await view.waitFor("id:group-matrix");
+  expect(view.shows("id:group-readonly-signoff")).toBe(true);
+  const screen = view.texts().join("\n");
+  expect(screen).toContain("只读 · 另存为副本后可修改");
+  expect(screen).not.toContain("本次登记人");
+  expect(view.shows("id:group-save")).toBe(false);
 });

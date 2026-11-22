@@ -1,7 +1,7 @@
 // The 账簿 shell — change keel-bot-identity-access, A4.4a.
 //
 // A 56px chapter band over the paper: 01 工作区 / 02 员工 / 03 团队 / 04 身份 /
-// 05 记录, with the reader's own account, the live-channel state, search and the
+// 记录 05, with the reader's own account, the live-channel state, search and the
 // deployment's settings entry on the right. A chapter the reader may not read is
 // not rendered at all (design §6.1: hide, never grey a destination without a
 // path). On a phone the band becomes a compact title row and the same five
@@ -67,20 +67,18 @@ const chapterOf = (): ChapterEntry =>
 const canRead = (chapter: ChapterEntry): boolean => chapterVisible(chapter);
 
 /** The live channel's own word. The books pages are static projections, so a
- * channel that was never opened is not a failure: it renders nothing. A
- * channel that is connecting or reconnecting says so; an open one is green
- * 实时. There is deliberately no gray 「未连接」 badge on a page that never
- * promised a stream. */
+ * channel that was never opened is not a failure: it stays green 实时. A
+ * channel that is connecting/reconnecting degrades to 重连中, and a deployment
+ * whose transport is really offline says so. There is deliberately no gray
+ * 「未连接」 badge on a page that never promised a stream. */
 function LiveBadge() {
   const status = () => store.connection().status;
-  const visible = () => status() === "open" || status() === "connecting" || status() === "reconnecting";
-  const label = () => (status() === "open" ? "实时" : "重连中");
-  const variant = () => (status() === "open" ? "success" : "warning");
-  return (
-    <If when={visible()}>
-      <Badge testID="books-live" variant={variant()} label={label()} icon={status() === "open" ? "wifi" : "refresh"} />
-    </If>
-  );
+  const offline = () => store.mode() === "offline";
+  const degraded = () => !offline() && (status() === "connecting" || status() === "reconnecting");
+  const label = () => (offline() ? "离线" : degraded() ? "重连中" : "实时");
+  const variant = () => (offline() ? "destructive" : degraded() ? "warning" : "success");
+  const icon = () => (offline() ? "wifi-off" : degraded() ? "refresh" : "wifi");
+  return <Badge testID="books-live" variant={variant()} label={label()} icon={icon()} />;
 }
 
 // ---- the band --------------------------------------------------------------
@@ -318,6 +316,8 @@ function BottomBar() {
         borderTopWidth: 1,
         borderTopColor: color.border,
         minHeight: BOOK_BAND_HEIGHT_PX,
+        paddingTop: space.xxs,
+        paddingBottom: space.sm,
       }}
     >
       <Each of={CHAPTERS.filter((chapter) => chapterVisible(chapter))} key={(chapter) => chapter.id}>
@@ -385,6 +385,7 @@ function PhoneTopBar(props: { onTodo: () => void }) {
       <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>{chapter().num}</Text>
       <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>{pageLabel()}</Text>
       <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: space.xs }}>
+        <LiveBadge />
         <IconButton testID="books-phone-todo" icon="alert" label="待我处理" onPress={props.onTodo} style={{ width: 44, height: 44 }} />
         <IconButton testID="books-phone-search" icon="search" label="搜索" onPress={openPalette} style={{ width: 44, height: 44 }} />
         <IconButton testID="books-phone-settings" icon="settings" label="打开部署设置" onPress={() => store.openSettings()} style={{ width: 44, height: 44 }} />

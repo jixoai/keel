@@ -5,7 +5,7 @@
 // the caller's own is disabled with its reason in words (not a tooltip), a
 // built-in group is read-only with 另存为副本 as the way forward, and the save
 // is a ledger: the diff, the signatory, the number of members affected, one
-// explicit confirmation for every widened high-risk key, then 保存并签记 — and
+// explicit confirmation for every widened high-risk key, then 保存并登记 — and
 // the server writes the record. Nothing here is a second truth: the draft is a
 // comparison against the last server answer, and a save re-reads the group.
 import { effect, signal, Text, View } from "nsh";
@@ -296,11 +296,21 @@ function GroupsTable() {
   return (
     <Table testID="groups-table" bare accessibilityLabel="权限组列表">
       <TableHeaderRow>
-        <Th>权限组</Th>
-        <Th width={90}>类型</Th>
-        <Th width={90}>成员</Th>
-        <Th width={90}>能力</Th>
-        <Th width={130}>最近修改</Th>
+        <Th>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>权限组</Text>
+        </Th>
+        <Th width={90}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>类型</Text>
+        </Th>
+        <Th width={90}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>成员</Text>
+        </Th>
+        <Th width={90}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>能力</Text>
+        </Th>
+        <Th width={130}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>最近修改</Text>
+        </Th>
       </TableHeaderRow>
       <Each of={visibleGroups()} key={(group) => group.groupId}>
         {(group) => {
@@ -318,7 +328,11 @@ function GroupsTable() {
                 </PressRow>
               </Td>
               <Td>
-                <Badge variant={group().builtin ? "outline" : "secondary"} label={group().builtin ? "内置组" : "自定义"} />
+                <Badge
+                  variant={group().builtin ? "outline" : "secondary"}
+                  label={group().builtin ? "内置组" : "自定义"}
+                  style={{ alignSelf: "flex-start" }}
+                />
               </Td>
               <Td>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
@@ -500,7 +514,7 @@ function GroupHead(props: { groupId: string; editable: boolean; builtin: boolean
           </If>
         </>
       }
-      description="权限只做加法：账号的最终能力是所有组与直接授权的并集。保存会写入 05 记录。"
+      description="权限只做加法：账号的最终能力是所有组与直接授权的并集。保存会写入记录 05。"
       facts={[{ label: "最近修改", value: formatWhen(detail()?.group.updatedAt) }]}
       actions={
         <>
@@ -898,7 +912,10 @@ function ScopeChoice(props: { label: string; selected: boolean; reason?: string;
       onPress={disabled() ? undefined : props.onPress}
       disabled={disabled()}
       selected={props.selected}
-      style={{ borderBottomWidth: 1, minHeight: 48, alignItems: "flex-start", paddingVertical: space.sm }}
+      style={[
+        { borderBottomWidth: 1, minHeight: 48, alignItems: "flex-start", paddingVertical: space.sm },
+        disabled() ? { opacity: 0.85 } : null,
+      ]}
     >
       <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: space.xxs }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
@@ -965,65 +982,107 @@ function GroupChanges(props: { editable: boolean }) {
 }
 
 /** The sign-off bar: who, how many, and the one save. It sits at the end of the
- * paper (the paper scrolls as one column; the bar is its last band). */
+ * paper (the paper scrolls as one column; the bar is its last band). A built-in
+ * or permission-limited group has no signatory at all: a read-only bar says why
+ * and offers the one path forward (另存为副本). */
 function GroupSignoff() {
   const changes = () => identityAccess.groupChanges();
   const dirty = () => changes().length > 0;
-  const editable = () => canManageGroups() && identityAccess.groupDetail()?.group.builtin !== true;
+  const detail = () => identityAccess.groupDetail();
+  const builtin = () => detail()?.group.builtin === true;
+  const editable = () => canManageGroups() && !builtin();
   const me = () => store.identity();
   return (
-    <View
-      testID="group-signoff"
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.md,
-        paddingTop: space.md,
-        borderTopWidth: 1,
-        borderTopColor: color.border,
-        flexWrap: "wrap",
-      }}
+    <If
+      when={!editable()}
+      else={
+        <View
+          testID="group-signoff"
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.md,
+            paddingTop: space.md,
+            borderTopWidth: 1,
+            borderTopColor: color.border,
+            flexWrap: "wrap",
+          }}
+        >
+          <View style={{ flexDirection: "column", minWidth: 0 }}>
+            <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
+              本次登记人：{me()?.displayName || me()?.username || "当前账号"} · {identityAccess.currentRoleLabel()}
+            </Text>
+            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>登记后写入记录 05 · 立即生效</Text>
+          </View>
+          <If when={dirty()}>
+            <Badge variant="warning" label={`${changes().length} 项未保存`} />
+          </If>
+          <If when={dirty() && changes().some((change) => change.highRisk)}>
+            <Badge variant="destructive" label={`${changes().filter((change) => change.highRisk).length} 项高危 · 需确认`} />
+          </If>
+          <If when={!dirty()}>
+            <Badge testID="group-no-changes" variant="outline" label="无变更" />
+          </If>
+          <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <If when={dirty()}>
+              <Button
+                testID="group-discard"
+                variant="ghost"
+                size="sm"
+                label="放弃"
+                accessibilityLabel="放弃修改"
+                onPress={() => identityAccess.discardDraft()}
+                style={touchStyle()}
+              />
+            </If>
+            <Button
+              testID="group-save"
+              variant={dirty() ? "default" : "outline"}
+              size={isMobile() ? "default" : "sm"}
+              icon="check"
+              label={identityAccess.groupSaving() ? "保存中…" : "检查并登记"}
+              accessibilityLabel="检查并登记"
+              disabled={!dirty() || identityAccess.groupSaving()}
+              loading={identityAccess.groupSaving()}
+              onPress={() => {
+                confirmHighRisk.set({});
+                ledgerOpen.set(true);
+              }}
+              style={touchStyle()}
+            />
+          </View>
+        </View>
+      }
     >
-      <View style={{ flexDirection: "column", minWidth: 0 }}>
-        <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
-          本次登记人：{me()?.displayName || me()?.username || "当前账号"} · {identityAccess.currentRoleLabel()}
+      <View
+        testID="group-readonly-signoff"
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.md,
+          paddingTop: space.md,
+          borderTopWidth: 1,
+          borderTopColor: color.border,
+          flexWrap: "wrap",
+        }}
+      >
+        <Icon name="lock" size={14} tint={color.mutedForeground} />
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          {builtin() ? "只读 · 另存为副本后可修改" : "只读 · 缺「管理权限组」能力"}
         </Text>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>保存后写入 05 记录 · 立即生效</Text>
-      </View>
-      <If when={dirty()}>
-        <Badge variant="warning" label={`${changes().length} 项未保存`} />
-      </If>
-      <If when={dirty() && changes().some((change) => change.highRisk)}>
-        <Badge variant="destructive" label={`${changes().filter((change) => change.highRisk).length} 项高危 · 需确认`} />
-      </If>
-      <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: space.sm }}>
-        <If when={dirty()}>
+        <If when={builtin() && canManageGroups()}>
           <Button
-            testID="group-discard"
-            variant="ghost"
+            testID="group-readonly-copy"
+            variant="outline"
             size="sm"
-            label="放弃"
-            accessibilityLabel="放弃修改"
-            onPress={() => identityAccess.discardDraft()}
-            style={touchStyle()}
+            label="另存为副本"
+            accessibilityLabel="另存为副本"
+            onPress={() => groupCopyDialog.set(true)}
+            style={[touchStyle(), { marginLeft: "auto" }]}
           />
         </If>
-        <Button
-          testID="group-save"
-          size={isMobile() ? "default" : "sm"}
-          icon="check"
-          label="检查并签记"
-          accessibilityLabel="检查并签记"
-          disabled={!dirty() || !editable() || identityAccess.groupSaving()}
-          loading={identityAccess.groupSaving()}
-          onPress={() => {
-            confirmHighRisk.set({});
-            ledgerOpen.set(true);
-          }}
-          style={touchStyle()}
-        />
       </View>
-    </View>
+    </If>
   );
 }
 
@@ -1041,7 +1100,7 @@ function LedgerSheet() {
     const result = await identityAccess.saveGroupDraft();
     if (result.ok) {
       ledgerOpen.set(false);
-      savedNotice.set(`已保存并登记 ${result.applied} 项变更 · 已写入 05 记录。`);
+      savedNotice.set(`已保存并登记 ${result.applied} 项变更 · 已写入记录 05。`);
       confirmHighRisk.set({});
     }
   };
@@ -1100,7 +1159,7 @@ function LedgerSheet() {
           )}
         </Each>
       </ScrollArea>
-      <StateNote tone="info" icon="info" text={`影响 ${members()} 位成员的下一次操作 · 写入 05 记录。`} />
+      <StateNote tone="info" icon="info" text={`影响 ${members()} 位成员的下一次操作 · 写入记录 05。`} />
       <Each of={high()} key={(change) => change.key}>
         {(change) => {
           const target = () =>

@@ -1,4 +1,4 @@
-// 05 记录 — change keel-bot-identity-access, A4.4a.
+// 记录 05 — change keel-bot-identity-access, A4.4a.
 //
 // The audit ledger's projection: one row per event, a filter bar (range, kind,
 // result, free text over the actor/object), a detail panel and an export of
@@ -52,6 +52,7 @@ import {
   formatWhen,
   isMobile,
   isNarrow,
+  recordsInline,
   touchStyle,
 } from "./common";
 
@@ -59,7 +60,7 @@ const KIND_LABEL: Record<AuditKind, string> = {
   login: "登录",
   grant: "授权",
   deny: "拒绝",
-  "super-admin": "超管",
+  "super-admin": "超级管理员",
   relation: "关系",
   invoke: "调用",
   account: "账号",
@@ -85,7 +86,7 @@ const resultBadge = (event: AuditEventView) =>
 /** A super-admin action carries its own badge: the ledger's reader must see
  * that a deployment-level role acted, not just "an admin". */
 const superBadge = (event: AuditEventView) =>
-  event.kind === "super-admin" ? <Badge variant="info" label="超管" accessibilityLabel="超级管理员操作" /> : null;
+  event.kind === "super-admin" ? <Badge variant="info" label="超级管理员" accessibilityLabel="超级管理员操作" /> : null;
 
 /** The missing key: the record's structured field first, then a `domain.key`
  * token in the sentence the server sent. */
@@ -110,7 +111,7 @@ const kindFilterItems = () => [
   { value: "login", title: "登录" },
   { value: "grant", title: "授权" },
   { value: "deny", title: "拒绝" },
-  { value: "super-admin", title: "超管" },
+  { value: "super-admin", title: "超级管理员" },
   { value: "relation", title: "关系" },
   { value: "invoke", title: "调用" },
   { value: "account", title: "账号" },
@@ -252,10 +253,10 @@ export function RecordsChapter() {
                   <Badge variant="destructive" label={`${deniedCount()} 条拒绝`} />
                 </If>
               }
-              description="登录、授权、拒绝、超管、关系与调用在同一张账上；记录只有一个真源。"
+              description="登录、授权、拒绝、超级管理员、关系与调用在同一张账上；记录只有一个真源。"
               facts={[
                 { label: "当前", value: `${records().length} 条事件` },
-                { label: "", value: `${deniedCount()} 条拒绝 · ${superAdminCount()} 条超管` },
+                { label: "", value: `${deniedCount()} 条拒绝 · ${superAdminCount()} 条超级管理员` },
               ]}
               actions={
                 <Button
@@ -336,14 +337,21 @@ export function RecordsChapter() {
               />
             </If>
             <If when={!identityAccess.recordsUnavailable() && !identityAccess.recordsLoading() && identityAccess.recordsError() === null && records().length > 0}>
-              <If when={isNarrow()} else={<RecordsGrid selectedId={() => store.routeObjectId()} />}>
+              <If
+                when={isNarrow()}
+                else={
+                  <If when={recordsInline()} else={<RecordsGrid selectedId={() => store.routeObjectId()} inline={false} />}>
+                    <RecordsGrid selectedId={() => store.routeObjectId()} inline />
+                  </If>
+                }
+              >
                 <RecordsCards />
               </If>
             </If>
           </View>
         </ScrollArea>
         </Paper>
-        <If when={isNarrow()}>
+        <If when={!recordsInline()}>
           <RecordSheet event={() => selected()} />
         </If>
         <If when={isMobile()}>
@@ -457,7 +465,7 @@ function RecordsFilters() {
   );
 }
 
-function RecordsGrid(props: { selectedId: () => string | null }) {
+function RecordsGrid(props: { selectedId: () => string | null; inline: boolean }) {
   const events = () => identityAccess.visibleRecords();
   // With a ledger on screen, the detail pane opens on the first (newest) row
   // instead of leaving 310px of empty paper; only a truly empty ledger has no
@@ -480,7 +488,7 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
             <Th width={150}>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>对象</Text>
             </Th>
-            <Th width={90}>
+            <Th width={130}>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>结果</Text>
             </Th>
           </TableHeaderRow>
@@ -488,7 +496,7 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
             {(event) => (
               <TableBodyRow testID={`record-row-${event().eventId}`}>
                 <Td>
-                  <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
+                  <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
                     {formatWhen(event().occurredAt)}
                   </Text>
                 </Td>
@@ -511,7 +519,6 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
                     >
                       {eventText(event())}
                     </Text>
-                    {superBadge(event())}
                   </PressRow>
                 </Td>
                 <Td>
@@ -524,7 +531,12 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
                     {eventObject(event())}
                   </Text>
                 </Td>
-                <Td>{resultBadge(event())}</Td>
+                <Td>
+                  <View style={{ flexDirection: "column", alignItems: "flex-start", gap: space.xxs }}>
+                    {resultBadge(event())}
+                    {superBadge(event())}
+                  </View>
+                </Td>
               </TableBodyRow>
             )}
           </Each>
@@ -538,19 +550,21 @@ function RecordsGrid(props: { selectedId: () => string | null }) {
           </If>
         </View>
       </View>
-      <View style={{ width: 330, flexShrink: 0, borderLeftWidth: 1, borderLeftColor: color.border, paddingLeft: space.lg }}>
-        <If
-          when={selected() !== null}
-          else={
-            <View style={{ flexDirection: "column", gap: space.sm, paddingVertical: space.lg }}>
-              <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>没有匹配的记录</Text>
-              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>清空搜索，或换一个时间范围与结果筛选。</Text>
-            </View>
-          }
-        >
-          <RecordDetail event={() => selected()!} />
-        </If>
-      </View>
+      <If when={props.inline}>
+        <View style={{ width: 330, flexShrink: 0, borderLeftWidth: 1, borderLeftColor: color.border, paddingLeft: space.lg }}>
+          <If
+            when={selected() !== null}
+            else={
+              <View style={{ flexDirection: "column", gap: space.sm, paddingVertical: space.lg }}>
+                <Text style={{ fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>没有匹配的记录</Text>
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>清空搜索，或换一个时间范围与结果筛选。</Text>
+              </View>
+            }
+          >
+            <RecordDetail event={() => selected()!} />
+          </If>
+        </View>
+      </If>
     </View>
   );
 }
@@ -559,31 +573,59 @@ function RecordDetail(props: { event: () => AuditEventView; showActions?: boolea
   const event = () => props.event();
   const missingKey = () => missingKeyOf(event());
   const capability = () => (missingKey() ? capabilityOf(missingKey()!).displayName : undefined);
-  const objectLink = () => {
+  interface RecordLink {
+    label: string;
+    testID: string;
+    icon: "external" | "play" | "user-plus";
+    run: () => void;
+  }
+  const objectLinks = (): RecordLink[] => {
     const objectId = event().objectId;
-    if (!objectId) return null;
-    switch (event().objectType) {
-      case "权限组":
-        return { label: "打开权限组", run: () => store.openIdentityObject("groups", objectId) };
-      case "Bot":
-        return { label: "打开 Bot", run: () => store.openBot(objectId) };
-      case "账号":
-        return { label: "打开账号", run: () => store.openIdentityObject("accounts", objectId) };
-      case "团队":
-        return event().runId
-          ? { label: "打开运行", run: () => store.openTeamRun(objectId, event().runId!) }
-          : { label: "打开团队", run: () => store.openTeam(objectId) };
-      case "会话":
-        return {
-          label: "打开会话",
-          run: () => {
-            store.openChapter("workspace");
-            void store.openSession(objectId);
-          },
-        };
-      default:
-        return null;
+    const links: RecordLink[] = [];
+    if (objectId) {
+      switch (event().objectType) {
+        case "权限组":
+          links.push({ label: "打开权限组", testID: "record-open-object", icon: "external", run: () => store.openIdentityObject("groups", objectId) });
+          break;
+        case "Bot":
+          links.push({ label: "打开 Bot", testID: "record-open-object", icon: "external", run: () => store.openBot(objectId) });
+          break;
+        case "账号":
+          links.push({ label: "打开账号", testID: "record-open-object", icon: "external", run: () => store.openIdentityObject("accounts", objectId) });
+          break;
+        case "团队":
+          links.push({ label: "打开团队", testID: "record-open-object", icon: "external", run: () => store.openTeam(objectId) });
+          break;
+        case "会话":
+          links.push({
+            label: "打开会话",
+            testID: "record-open-object",
+            icon: "external",
+            run: () => {
+              store.openChapter("workspace");
+              void store.openSession(objectId);
+            },
+          });
+          break;
+        default:
+          break;
+      }
     }
+    if (event().teamId && event().runId) {
+      const teamId = event().teamId!;
+      const runId = event().runId!;
+      links.push({ label: "打开运行", testID: "record-open-run", icon: "play", run: () => store.openTeamRun(teamId, runId) });
+    }
+    if (event().objectOwnerId && event().objectType !== "账号") {
+      const ownerId = event().objectOwnerId!;
+      links.push({
+        label: "打开归属账号",
+        testID: "record-open-owner",
+        icon: "user-plus",
+        run: () => store.openIdentityObject("accounts", ownerId),
+      });
+    }
+    return links;
   };
   // The record may name the object without naming its owner. Resolve a Bot or
   // account already in the reader's index so the detail still answers 「找谁」.
@@ -649,18 +691,20 @@ function RecordDetail(props: { event: () => AuditEventView; showActions?: boolea
       </If>
       <If when={props.showActions !== false}>
       <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
-        <If when={objectLink() !== null}>
-          <Button
-            testID="record-open-object"
-            variant="outline"
-            size="sm"
-            icon="external"
-            label={objectLink()?.label ?? "打开对象"}
-            accessibilityLabel={objectLink()?.label ?? "打开对象"}
-            onPress={() => objectLink()?.run()}
-            style={touchStyle()}
-          />
-        </If>
+        <Each of={objectLinks()} key={(link) => link.testID}>
+          {(link) => (
+            <Button
+              testID={link().testID}
+              variant="outline"
+              size="sm"
+              icon={link().icon}
+              label={link().label}
+              accessibilityLabel={link().label}
+              onPress={() => link().run()}
+              style={touchStyle()}
+            />
+          )}
+        </Each>
         <If when={!!event().requestId}>
           <Button
             variant="outline"
@@ -741,29 +785,19 @@ function RecordSheet(props: { event: () => AuditEventView | null }) {
     <Sheet
       testID="record-sheet"
       open={props.event() !== null}
-      side="bottom"
-      style={isNarrow() ? { height: 460, maxHeight: "80%" } : undefined}
+      side={isMobile() || isNarrow() ? "bottom" : "right"}
+      style={isMobile() || isNarrow() ? { height: 460, maxHeight: "80%" } : undefined}
       title="记录详情"
       onOpenChange={(event) => {
         if (!event.open) store.openRecord(null);
       }}
       footer={
-        <>
-          <Button variant="outline" label="关闭" accessibilityLabel="关闭记录详情" onPress={() => store.openRecord(null)} style={touchStyle()} />
-          <If when={!!props.event()?.requestId}>
-            <Button
-              label="复制编号"
-              accessibilityLabel="复制请求编号"
-              onPress={() => void copyText(props.event()?.requestId ?? "")}
-              style={touchStyle()}
-            />
-          </If>
-        </>
+        <Button variant="outline" label="关闭" accessibilityLabel="关闭记录详情" onPress={() => store.openRecord(null)} style={touchStyle()} />
       }
     >
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <If when={props.event() !== null}>
-          <RecordDetail event={() => props.event() as AuditEventView} showActions={false} />
+          <RecordDetail event={() => props.event() as AuditEventView} />
         </If>
       </ScrollArea>
     </Sheet>
