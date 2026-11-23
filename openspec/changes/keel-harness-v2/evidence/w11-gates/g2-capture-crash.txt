@@ -1,0 +1,4 @@
+=== RUN   TestCaptureCrashBeforeCommitRecoversExactlyOnce
+--- PASS: TestCaptureCrashBeforeCommitRecoversExactlyOnce (0.03s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	0.285s

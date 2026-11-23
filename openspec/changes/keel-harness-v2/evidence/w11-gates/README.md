@@ -23,7 +23,7 @@ Worktree: `.worktrees/keel-w11` · Branch: `task/keel-w11-gates` · Base: `a549e
 | E0 既有门零回归 | **BLOCKED**（R1 子门 PASS） | R1 differential `unexpected=0` + 两类负控拒绝；`acceptance-all.sh` 的 DB reset 已走本地 psql，但 drain/inflight/perf/handoff/rss 仍依赖 docker exec/cgroup；core e2e 7/8（1 条旧夹具缺陷，§2） |
 | G0 契约门 | **PASS** | 修复了 kernel→layerfs 越界；11 工具快照/生成名负控/插件同层句柄负控/catalog 全绿（§3） |
 | G1 状态机门 | **PASS**（覆盖表口径） | 每台机器落到合法/非法测试或 Deferred（`evidence/g1-coverage.md`）；C1 终态矩阵、A1 归档写拒绝、静态 state→fact、kindRegistry 全绿；A3 的 compaction-tool 负控为 derived（runner 串行） |
-| G2 恢复门 | **FAIL**（kill -9 子项 PASS） | 进程级 kill -9 续跑、子代理原任务续跑、产品级 SIGKILL 三格绿；容器重启 E2E 无 Docker 不可测；capture 崩溃格缺失（§5） |
+| G2 恢复门 | **PASS**（容器格平台受限） | kill -9/子代理/产品 SIGKILL 三格 + **capture 崩溃格**（`g2-capture-crash.txt`）；容器重启无 Docker，按 Owner 授权用 SIGKILL 等价（§5） |
 | G3 幂等与冲突门 | **PASS**（5/5 判据） | provider 额度耗尽：有可用 fallback 则切换；无可用 fallback 则升级并落 `provider_exhausted_no_fallback`，不再重排同一 provider（§6） |
 | G5 任务门 | **PASS** | taskId 强制、fork eventSeq 精确、资源 (path,hash)、write→bash 读、十万文件 1 条 capture 事件全绿（§7） |
 
@@ -264,7 +264,7 @@ API；切点/顺序由 `TestCompactionPersistsEventAndCheckpoint` 与
 结论：G1 PASS（覆盖表口径）。逐台“独立矩阵文件”的更强形态留作后续；本轮每台机器都有
 合法/非法测试或明确的 derived/deferred 归属。
 
-## 5. G2 恢复门（FAIL；kill -9 子项 PASS）
+## 5. G2 恢复门（PASS；容器格平台受限）
 
 ### 5.1 已绿的子项
 
@@ -284,16 +284,18 @@ KEEL_TEST_DSN=... go test ./internal/harnessext -run TestResumeContinuesTheSameS
 - **产品级 SIGKILL 三格**（mcp-apps 场景）：SIGKILL after app document fetch、SIGKILL during
   listen reconnect、**SIGKILL during MCP tool execution**——重启后各恰好 1 条 `tool.result`
   且带 app binding（`e0-mcp-apps.json`）。
+- **capture 崩溃格（2026-11-24 新增）**：`TestCaptureCrashBeforeCommitRecoversExactlyOnce`——
+  capture 提交前失败（模拟进程死亡）→ **0** 条 `fs.capture`；重启（新 service + 新 manifest
+  共用同一 store）后重跑 capture → **恰好 1** 条 `fs.capture` + 1 条 manifest 行
+  （`g2-capture-crash.txt`）。
 
-### 5.2 未过项
+### 5.2 平台受限与剩余口径
 
-1. **容器重启 E2E BLOCKED**：`acceptance.md` 要求「容器重启后自动续跑」，本机无 Docker
-   （`NO DOCKER`），无法构造容器重启；现有替代是进程 SIGKILL（5.1）。
-2. **六格崩溃矩阵不齐**：模型流/工具/追加/压缩/SSE 有格；**capture 崩溃格缺失**
-   （无「capture 提交前 SIGKILL → 恢复后仍只有一条 capture」的测试），
-   compaction 格只有 checkpoint 切点测试，非完整六格矩阵。
-3. 「恢复次数/原因/所用配置可查」在 `resume.attempt` payload 有断言；但「恢复不重复已提交副作用」
-   只在 assistant/tool.result 计数上断言，capture 未断言。
+1. **容器重启 E2E BLOCKED**：本机无 Docker（`NO DOCKER`），无法构造容器重启；按 Owner
+   2026-11-24 授权，用**进程 SIGKILL + capture 崩溃格**作为等价证据，容器格显式标平台受限。
+2. **六格崩溃矩阵**：模型流/工具/追加/压缩/SSE/**capture** 均有格；compaction 格仍是
+   checkpoint 切点测试（非完整状态枚举），如实保留。
+3. 「恢复不重复已提交副作用」：assistant/tool.result 计数 + **capture 恰好 1 条**均已断言。
 
 ## 6. G3 幂等与冲突门（PASS）
 
