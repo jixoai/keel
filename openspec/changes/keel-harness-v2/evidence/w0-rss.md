@@ -93,22 +93,22 @@ and no ps → UNMEASURABLE); CLI argument/identity contract.
 ```text
 $ scripts/acceptance-rss.sh --port 13771 --duration 5 --interval 1 --out attach-pass.json
 attach: port 13771 is listening; resolving its owner via /v1/health + lsof
-RSS sampler: mode=attach platform=darwin source=ps-rss pid=88032 port=13771 identity=health+lsof comm=python3
-RSS sampler: 6 sample(s) at 1s interval over 5.038s (duration), tree=2 process(es)
-RSS sampler: peak=25.69MB ceiling=500MB target=300MB steady=20.25MB p50=20.25MB withinTarget=True
-RSS sampler: NOTE: peak 25.69 MB is within the 300 MB target
+RSS sampler: mode=attach platform=darwin source=ps-rss pid=14140 port=13771 identity=health+lsof comm=python3
+RSS sampler: 6 sample(s) at 1s interval (observed 1.0s) over 5.097s (duration), tree=2 process(es)
+RSS sampler: peak=21.23MB ceiling=500MB target=300MB steady=19.93MB p50=20.35MB withinTarget=True
+RSS sampler: NOTE: peak 21.23 MB is within the 300 MB target
 RSS VERDICT: PASS (exit 0)
 ```
 
 ```json
 {
-  "target": {"pid": 88032, "port": 13771, "identity": "health+lsof", "comm": "python3"},
-  "sampling": {"intervalSec": 1, "actualDurationSec": 5.038, "samples": 6, "stopReason": "duration"},
+  "target": {"pid": 14140, "port": 13771, "identity": "health+lsof", "comm": "python3"},
+  "sampling": {"intervalSec": 1, "observedIntervalSec": 1.0, "actualDurationSec": 5.097, "samples": 6, "stopReason": "duration"},
   "processes": [
-    {"pid": 88032, "ppid": 88027, "comm": "python3", "rssKB": 19584},
-    {"pid": 88036, "ppid": 88032, "comm": "sleep",   "rssKB": 192}
+    {"pid": 14140, "ppid": 14137, "comm": "python3", "rssKB": 18464},
+    {"pid": 14142, "ppid": 14140, "comm": "sleep",  "rssKB": 192}
   ],
-  "totals": {"peakMB": 25.69, "minMB": 20.25, "p50MB": 20.25, "steadyMB": 20.25},
+  "totals": {"peakMB": 21.23, "minMB": 19.1, "p50MB": 20.35, "steadyMB": 19.93},
   "thresholds": {"ceilingMB": 500, "targetMB": 300, "withinTarget": true},
   "verdict": "PASS", "exitCode": 0, "source": "ps-rss"
 }
@@ -138,7 +138,7 @@ RSS VERDICT: PASS (exit 0)
 | Above-target band | `--port 13771 --target-mb 1` (ceiling 500) | `PASS`, exit 0, `withinTarget:false`, NOTE «above the 1 MB target» |
 | Unknown pid | `--pid 999999999` | `UNMEASURABLE`, exit 2: `pid 999999999 does not exist` + `no RSS sample was taken` |
 | Dead port | `--port 13779` (nothing listening) | `UNMEASURABLE`, exit 2: `cannot read http://127.0.0.1:13779/v1/health` |
-| Proxied port | test-only proxy on 13772 forwarding `/v1/health` to the fixture | `UNMEASURABLE`, exit 2: `/v1/health says pid 79784, lsof listener(s) [80411]; refusing to sample a proxied/foreign process` |
+| Proxied port | test-only proxy on 13772 forwarding `/v1/health` to the fixture | `UNMEASURABLE`, exit 2: `/v1/health says pid 14140, lsof listener(s) [14337]; refusing to sample a proxied/foreign process` |
 | Both `--pid` and `--port` | — | exit 2 (`give either --pid or --port, not both`) |
 | Unknown flag / non-integer window | — | exit 2 (`unknown argument`, e.g. `--duration 10s` is accepted, `--duration x` is not) |
 | Target dies mid-window | `--pid <shell>` that is SIGKILLed after 1.5s of a 5s window | exit 2: `root pid … is not in the process table (already gone?)` + `only 1 sample(s); the protocol needs >= 3` — partial peak is not certified |
