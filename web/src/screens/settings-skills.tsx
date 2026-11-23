@@ -54,6 +54,7 @@ import {
   weight,
   type SelectItem,
 } from "../ui/kit";
+import { fieldHeightProp, isMobile, touchStyle } from "./books/common";
 
 // ---- form state (module-level, like the other settings sections) ----------
 
@@ -150,7 +151,7 @@ function ErrorBlock(props: { text: string; code?: string | null; onRetry: () => 
         <Badge variant="secondary" label={`code: ${props.code ?? ""}`} />
       </If>
       <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Button size="sm" variant="outline" icon="refresh" label="重试" onPress={props.onRetry} />
+        <Button size="sm" variant="outline" icon="refresh" label="重试" onPress={props.onRetry} style={touchStyle()} />
       </View>
     </View>
   );
@@ -173,9 +174,23 @@ function SkillRow(props: { skill: SkillRecordView }) {
         backgroundColor: color.card,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space.md }}>
-        <View style={{ flex: 1, gap: space.xs }}>
-          <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.foreground }}>
+      <View
+        style={{
+          flexDirection: isMobile() ? "column" : "row",
+          alignItems: isMobile() ? "stretch" : "flex-start",
+          gap: space.md,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0, gap: space.xs }}>
+          <Text
+            style={{
+              fontSize: typeScale.base,
+              fontWeight: weight.semibold,
+              color: color.foreground,
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
+            }}
+          >
             {skill().name}
           </Text>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 2 }}>
@@ -215,6 +230,7 @@ function SkillRow(props: { skill: SkillRecordView }) {
           label="查看"
           accessibilityLabel={`查看技能 ${skill().name}`}
           onPress={() => void store.openSkillDetail(skill().name)}
+          style={touchStyle()}
         />
         <Button
           testID={`skill-update-${skill().name}`}
@@ -226,6 +242,7 @@ function SkillRow(props: { skill: SkillRecordView }) {
           loading={store.skillsBusy()}
           disabled={!skill().updateAvailable || store.skillsBusy()}
           onPress={() => void store.updateSkill(skill().name)}
+          style={touchStyle()}
         />
         <If
           when={pinned()}
@@ -239,6 +256,7 @@ function SkillRow(props: { skill: SkillRecordView }) {
               accessibilityLabel={`固定技能 ${skill().name} 的当前版本`}
               disabled={store.skillsBusy()}
               onPress={() => void store.pinSkill(skill().name)}
+              style={touchStyle()}
             />
           }
         >
@@ -251,6 +269,7 @@ function SkillRow(props: { skill: SkillRecordView }) {
             accessibilityLabel={`解除技能 ${skill().name} 的固定`}
             disabled={store.skillsBusy()}
             onPress={() => void store.unpinSkill(skill().name)}
+            style={touchStyle()}
           />
         </If>
         <Button
@@ -262,6 +281,7 @@ function SkillRow(props: { skill: SkillRecordView }) {
           accessibilityLabel={`移除技能 ${skill().name}`}
           disabled={store.skillsBusy()}
           onPress={() => confirmRemoveSkill.set(skill().name)}
+          style={touchStyle()}
         />
       </View>
       <If when={(skill().diagnostics ?? []).length > 0}>
@@ -299,6 +319,7 @@ function SourceRow(props: { source: SkillSourceView }) {
         label="取消订阅"
         disabled={store.skillsBusy()}
         onPress={() => confirmRemoveSource.set(source().id)}
+        style={touchStyle()}
       />
     </View>
   );
@@ -320,7 +341,7 @@ function DetailDialog() {
       }}
       footer={
         <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-          <Button variant="ghost" label="关闭" onPress={() => store.closeSkillDetail()} />
+          <Button variant="ghost" label="关闭" onPress={() => store.closeSkillDetail()} style={touchStyle()} />
         </View>
       }
     >
@@ -535,6 +556,8 @@ export function SkillsSection() {
                 <Select
                   testID="skills-install-source"
                   accessibilityLabel="选择订阅源"
+                  size="field"
+                  height={fieldHeightProp()}
                   items={sourceItems()}
                   value={installSourceId()}
                   placeholder={sources().length === 0 ? "先添加订阅源" : "选择订阅源"}
@@ -551,6 +574,8 @@ export function SkillsSection() {
                   placeholder="team-review"
                   maxLength={64}
                   disabled={store.skillsBusy()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
               <Field label="未信任源">
@@ -560,6 +585,7 @@ export function SkillsSection() {
                   onChange={(checked) => installAllowUntrusted.set(checked)}
                   label={`允许未信任源 ${installAllowUntrusted() ? "是" : "否"}`}
                   accessibilityLabel="允许从未信任源安装"
+                  style={isMobile() ? { minHeight: 44 } : undefined}
                 />
               </Field>
             </FieldGroup>
@@ -571,6 +597,7 @@ export function SkillsSection() {
                 loading={store.skillsBusy()}
                 disabled={store.skillsBusy() || !installSourceId() || !installSkillName().trim()}
                 onPress={installFromSource}
+                style={touchStyle()}
               />
             </View>
           </View>
@@ -592,6 +619,8 @@ export function SkillsSection() {
                   placeholder="deploy-flow"
                   maxLength={64}
                   disabled={store.skillsBusy()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
               <Field label="描述" hint="一行说明什么时候用这个技能。">
@@ -603,6 +632,8 @@ export function SkillsSection() {
                   placeholder="发布前检查与回滚步骤"
                   maxLength={1024}
                   disabled={store.skillsBusy()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
               <Field label="正文" hint="SKILL.md 的 Markdown 正文（可稍后补全）。">
@@ -625,6 +656,7 @@ export function SkillsSection() {
                 loading={store.skillsBusy()}
                 disabled={store.skillsBusy() || !newSkillName().trim() || !newSkillDescription().trim()}
                 onPress={saveSkill}
+                style={touchStyle()}
               />
             </View>
           </View>
@@ -659,6 +691,8 @@ export function SkillsSection() {
                   placeholder="team"
                   maxLength={64}
                   disabled={store.skillsBusy()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
               <Field label="目录" hint="受管源根内的相对目录（如 team）；绝对路径也必须在该根内。目录本身是技能或包含 <name>/SKILL.md。">
@@ -670,12 +704,16 @@ export function SkillsSection() {
                   placeholder="team"
                   maxLength={512}
                   disabled={store.skillsBusy()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
               <Field label="信任">
                 <Select
                   testID="skill-source-trust"
                   accessibilityLabel="订阅源信任等级"
+                  size="field"
+                  height={fieldHeightProp()}
                   items={trustItems()}
                   value={newSourceTrust()}
                   disabled={store.skillsBusy()}
@@ -691,6 +729,7 @@ export function SkillsSection() {
                 loading={store.skillsBusy()}
                 disabled={store.skillsBusy() || !newSourceId().trim() || !newSourceURL().trim()}
                 onPress={subscribe}
+                style={touchStyle()}
               />
             </View>
           </View>

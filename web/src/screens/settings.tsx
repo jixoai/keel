@@ -148,7 +148,7 @@ import {
 } from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
 import { SkillsSection } from "./settings-skills";
-import { LiveBadge, PressRow } from "./books/common";
+import { LiveBadge, PressRow, fieldHeightProp, isMobile, touchStyle } from "./books/common";
 import { managementDoors } from "./books/management";
 import { pluginSlots, runDataAction, type PluginActionHandlers } from "../plugins";
 import { PluginActionButtons, PluginSettingsSections } from "../plugins/slots";
@@ -595,6 +595,7 @@ function GeneralSection() {
               label={`逐字预览 ${store.showPartials() ? "开" : "关"}`}
               accessibilityLabel="切换逐字预览"
               testID="settings-partials"
+              style={isMobile() ? { minHeight: 44 } : undefined}
             />
           </Field>
         </CardContent>
@@ -628,6 +629,7 @@ function WorkspaceChaptersCard() {
               label="身份与权限"
               accessibilityLabel="打开身份章节"
               onPress={() => store.openChapter("identity")}
+              style={touchStyle()}
             />
           </If>
           <If when={doors().records}>
@@ -637,6 +639,7 @@ function WorkspaceChaptersCard() {
               label="记录"
               accessibilityLabel="打开记录章节"
               onPress={() => store.openChapter("records")}
+              style={touchStyle()}
             />
           </If>
           <If when={doors().bots}>
@@ -646,6 +649,7 @@ function WorkspaceChaptersCard() {
               label="员工"
               accessibilityLabel="打开员工章节"
               onPress={() => store.openChapter("bots")}
+              style={touchStyle()}
             />
           </If>
           <If when={doors().teams}>
@@ -655,6 +659,7 @@ function WorkspaceChaptersCard() {
               label="团队"
               accessibilityLabel="打开团队章节"
               onPress={() => store.openChapter("teams")}
+              style={touchStyle()}
             />
           </If>
         </View>
@@ -726,6 +731,7 @@ function TodoCard() {
               label="去记录"
               accessibilityLabel="去记录"
               onPress={() => store.openChapter("records")}
+              style={touchStyle()}
             />
           </View>
         </If>
@@ -786,6 +792,7 @@ function AccountSessionCard() {
               label="退出登录"
               accessibilityLabel="退出登录"
               onPress={() => void store.logout()}
+              style={touchStyle()}
             />
           </View>
         </View>
@@ -824,6 +831,7 @@ function AppearanceSection() {
             onChange={(value) => applyAppearance(value as Appearance)}
             accessibilityLabel="颜色偏好"
             testID="settings-appearance-preference"
+            optionStyle={isMobile() ? { minHeight: 44 } : undefined}
           />
         </Field>
       </CardContent>
@@ -883,6 +891,7 @@ function CurrentModelCard() {
               label="更换"
               accessibilityLabel="更换默认模型"
               onPress={openReplaceDialog}
+              style={touchStyle()}
             />
             <Button
               testID="settings-refresh-models"
@@ -892,6 +901,7 @@ function CurrentModelCard() {
               label="刷新"
               accessibilityLabel="刷新模型配置"
               onPress={() => void store.loadModelsPanel()}
+              style={touchStyle()}
             />
           </View>
         }
@@ -1650,6 +1660,7 @@ function ProviderCard(props: { provider: () => DraftProvider }) {
           label="配置"
           accessibilityLabel={`配置 ${providerNameOf(props.provider())}`}
           onPress={() => openProviderEditor(props.provider().id)}
+          style={touchStyle()}
         />
       </CardFooter>
     </Card>
@@ -1686,6 +1697,7 @@ function ProvidersSection() {
           label="添加 Provider"
           accessibilityLabel="添加 Provider"
           onPress={openNewProvider}
+          style={touchStyle()}
         />
       </View>
       <If when={loading()}>
@@ -1890,29 +1902,34 @@ function ProviderConfigDialog() {
             <If when={!isNew()}>
               <Button
                 variant="destructive"
-                size="sm"
+                size="field"
                 icon="trash"
                 label="删除该 Provider"
                 accessibilityLabel="删除该 Provider"
                 disabled={store.settingsSaving()}
                 onPress={() => confirmDeleteProvider.set(true)}
+                style={touchStyle()}
               />
             </If>
             <View style={{ flex: 1 }} />
             <Button
               variant="outline"
+              size="field"
               label="取消"
               accessibilityLabel="取消"
               disabled={store.settingsSaving()}
               onPress={closeProviderEditor}
+              style={touchStyle()}
             />
             <Button
+              size="field"
               icon="check"
               label="保存并生效"
               accessibilityLabel="保存并生效"
               loading={store.settingsSaving()}
               disabled={store.settingsSaving()}
               onPress={() => void saveProvider()}
+              style={touchStyle()}
             />
           </>
         }
@@ -1943,6 +1960,8 @@ function ProviderConfigDialog() {
               accessibilityLabel="Provider ID"
               value={editorId()}
               placeholder="s2api"
+              size="field"
+              height={fieldHeightProp()}
               onChange={(value) => {
                 editorId.set(value);
                 editorIdError.set(null);
@@ -1955,6 +1974,8 @@ function ProviderConfigDialog() {
               accessibilityLabel="显示名称"
               value={editorName()}
               placeholder="例如 S2API"
+              size="field"
+              height={fieldHeightProp()}
               onChange={(value) => editorName.set(value)}
             />
           </Field>
@@ -1962,6 +1983,8 @@ function ProviderConfigDialog() {
             <Select
               testID="provider-config-protocol"
               accessibilityLabel="接口协议"
+              size="field"
+              height={fieldHeightProp()}
               items={API_PROTOCOLS}
               value={editorApiType()}
               placeholder="选择协议"
@@ -1981,6 +2004,8 @@ function ProviderConfigDialog() {
               accessibilityLabel="服务地址"
               value={editorBaseUrl()}
               placeholder="https://…"
+              size="field"
+              height={fieldHeightProp()}
               onChange={(value) => {
                 editorBaseUrl.set(value);
                 editorBaseUrlError.set(null);
@@ -1997,6 +2022,8 @@ function ProviderConfigDialog() {
               accessibilityLabel="凭据引用"
               value={editorCredential()}
               placeholder="env:S2API_KEY 或 secret:name"
+              size="field"
+              height={fieldHeightProp()}
               onChange={(value) => {
                 editorCredential.set(value);
                 editorCredentialError.set(null);
@@ -2048,17 +2075,20 @@ function ProviderConfigDialog() {
                   value={editorModelInput()}
                   placeholder="模型 ID，例如 deepseek-v4.1-flash"
                   submitBehavior="submit"
+                  size="field"
+                  height={fieldHeightProp()}
                   onChange={(value) => editorModelInput.set(value)}
                   onSubmit={() => addEditorModel()}
                 />
               </View>
               <Button
                 variant="outline"
-                size="sm"
+                size="field"
                 icon="plus"
                 label="添加模型"
                 accessibilityLabel="添加模型"
                 onPress={addEditorModel}
+                style={touchStyle()}
               />
             </View>
             <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
@@ -2488,18 +2518,22 @@ function ChangeDefaultDialog() {
         <>
           <Button
             variant="outline"
+            size="field"
             label="取消"
             accessibilityLabel="取消更换默认模型"
             disabled={store.settingsSaving()}
             onPress={() => replaceOpen.set(false)}
+            style={touchStyle()}
           />
           <Button
+            size="field"
             icon="check"
             label="保存并生效"
             accessibilityLabel="保存默认模型"
             loading={store.settingsSaving()}
             disabled={store.settingsSaving() || providers().length === 0}
             onPress={() => void saveReplacement()}
+            style={touchStyle()}
           />
         </>
       }
@@ -2522,6 +2556,8 @@ function ChangeDefaultDialog() {
           <Select
             testID="default-provider"
             accessibilityLabel="默认服务商"
+            size="field"
+            height={fieldHeightProp()}
             items={providers().map((provider) => ({
               value: provider.id,
               title: providerNameOf(provider),
@@ -2544,6 +2580,8 @@ function ChangeDefaultDialog() {
           <Select
             testID="default-model"
             accessibilityLabel="默认模型"
+            size="field"
+            height={fieldHeightProp()}
             items={modelItems()}
             value={replaceModelId()}
             disabled={modelItems().length === 0}
@@ -2557,6 +2595,8 @@ function ChangeDefaultDialog() {
           <Select
             testID="default-reasoning"
             accessibilityLabel="默认思考档"
+            size="field"
+            height={fieldHeightProp()}
             items={reasoningItems()}
             value={replaceReasoning()}
             disabled={reasoningItems().length <= 1}
@@ -2910,6 +2950,8 @@ export function SecretsSection() {
                   placeholder="名字，例如 s2api"
                   maxLength={128}
                   disabled={!available()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
               <Field label="值" hint="保存后输入框清空；之后的界面只显示名字与时间。">
@@ -2922,17 +2964,21 @@ export function SecretsSection() {
                   masked
                   maxLength={4096}
                   disabled={!available()}
+                  size="field"
+                  height={fieldHeightProp()}
                 />
               </Field>
             </FieldGroup>
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
               <Button
+                testID="settings-secret-save"
                 icon="check"
                 label={isOverwrite() ? "覆盖保存" : "保存密钥"}
                 accessibilityLabel="保存密钥"
                 loading={store.secretsBusy()}
                 disabled={!available() || store.secretsBusy() || !secretName().trim() || !secretValue()}
                 onPress={submit}
+                style={touchStyle()}
               />
               <If when={!!store.secretsActionError()}>
                 <Text style={{ fontSize: typeScale.sm, color: color.danger }}>
