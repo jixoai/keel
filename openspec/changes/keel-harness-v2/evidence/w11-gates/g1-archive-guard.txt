@@ -1,0 +1,4 @@
+=== RUN   TestCommitClientInputRefusesArchivedSession
+--- PASS: TestCommitClientInputRefusesArchivedSession (0.06s)
+PASS
+ok  	github.com/jixoai/keel/internal/httpapi	0.255s

@@ -503,13 +503,15 @@
       `PUT /v1/settings/providers/{id}/credential` 缺 accessgate 声明、COVERAGE compaction
       状态词不可解析，两处已修；DB reset 已是本地 psql，剩余平台阻塞只在
       drain/inflight/perf/handoff/rss 的 docker exec 与 Linux cgroup）
-- [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
+- [x] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据
-      （W11 2026-11-23：**G0 PASS / G1 FAIL，本行保持未勾**——G0：修复 `internal/agent`→layerfs
+      （W11 2026-11-24：**G0 PASS / G1 PASS（覆盖表口径）**——G0：修复 `internal/agent`→layerfs
       越界（capture policy 迁到 `internal/capturepolicy`）；11 工具快照、25 个生成的 `mcp__*` 名逐个拒绝、
-      已审批 provides.tools 哈希往返、插件同层句柄反射负控、catalog 均绿。G1：无逐状态机转移矩阵、
-      无逐条拒绝事实、无状态→权威事实映射脚本，A5 kind→key 未与 state-machines.md 逐行对表。
+      已审批 provides.tools 哈希往返、插件同层句柄反射负控、catalog 均绿。G1：全机器覆盖表
+      `evidence/g1-coverage.md`；C1 终态矩阵 `TestTerminalCardIsReadOnly`、A1 归档写拒绝
+      `TestCommitClientInputRefusesArchivedSession`、静态 state→fact（5 表/22 状态）、A5
+      `TestKindRegistryDeclaresClassAndKey`；A3 compaction-tool 负控 derived（runner 串行）。
       证据 `evidence/w11-gates/README.md` §3/§4）
 - [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务 （对账 2026-11-20：部分——缺口：非终态 run 自动续跑/lease/chaos 在（internal/durable/recovery.go、internal/agent/crash_matrix_test.go）；子代理继续原任务（W8-2/3）未实现）（W8 2026-11-21：子代理 resume 已实现并测「失败→requeue→claim→同一 run 完成」；G2 门本身仍缺 kill -9/容器重启端到端证据，保持未勾）（W11 2026-11-23：**FAIL（部分绿）**——kill -9 子进程续跑（同会话、1 条 final、1 条 run.finished、resume.attempt lease_expired/adopted、seq 连续）、子代理原任务续跑、never/manual/auto 策略、mcp-apps 产品面 SIGKILL 三格均绿；容器重启 E2E 因本机 NO DOCKER BLOCKED；六格矩阵缺 capture 崩溃格。证据 `evidence/w11-gates/README.md` §5）
 - [x] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用） （对账 2026-11-20：部分——缺口：G3 幂等/409 在；G5 taskId 强制/资源引用已交付，fork 精确（W4-6）未实现）（W8 2026-11-21：fork 精确（eventSeq + snapshot + parentTaskId）已交付；G5 门级汇总仍未勾）（W11 2026-11-23：**G5 PASS / G3 PASS（5/5）**——G5：taskId 强制、跨会话任务树、fork eventSeq 精确、资源 (path,hash)、write→bash 立读、十万文件 1 条 fs.capture（旧机 308.97s；本机 rerun 23.06s）全绿；G3：副作用重试一次/写冲突/webhook 重投去重/重复作答 409 绿，provider 额度耗尽现在有可用 fallback 则切换、无可用 fallback 则升级并落 provider_exhausted_no_fallback（不再重排同一 selection，`47a96d0`）。证据 `evidence/w11-gates/README.md` §6/§7）

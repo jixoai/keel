@@ -579,6 +579,9 @@ func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
 		return
 	}
+	if !s.requireWritableSession(w, r, tenantID, sessionID) {
+		return
+	}
 	// This endpoint starts a run without a user.message, so it is outside the
 	// gated committer: admit through the same placement gate the input paths
 	// use, then enqueue. A refusal writes no run row and surfaces the typed
@@ -708,6 +711,9 @@ func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		writeErr(w, 400, fmt.Errorf("bad session id: %w", err))
+		return
+	}
+	if !s.requireWritableSession(w, r, tenantID, sessionID) {
 		return
 	}
 	var body struct {

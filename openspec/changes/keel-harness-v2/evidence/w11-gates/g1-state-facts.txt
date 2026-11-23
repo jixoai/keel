@@ -1,0 +1,23 @@
+state -> fact mapping (5 machines, 22 states)
+A1. 会话（session）	idle	无在跑 run（账本末条是终态）
+A1. 会话（session）	running	runs 行非终态 + lease
+A1. 会话（session）	waiting_human	升级事实（escalated(L2)）
+A1. 会话（session）	paused	resume.mode=manual/never 的显式暂停事实
+A2. run（一次 attempt）	pending	runs.status=pending
+A2. run（一次 attempt）	running	lease + owner/epoch
+A2. run（一次 attempt）	settling	settle 开始（run.finished 提交前）
+A2. run（一次 attempt）	done / failed / cancelled	run.finished
+A3. 上下文与压缩（kernel seam）	within_budget	估算 token < 阈值（run 内）
+A3. 上下文与压缩（kernel seam）	near_limit	≥ 阈值，下一次请求前必须压缩
+A3. 上下文与压缩（kernel seam）	compacting	compaction 事件提交中（不在工具调用中间压缩）
+A3. 上下文与压缩（kernel seam）	compacted	compaction + checkpoint 已提交，保留段 + 摘要重建
+C1. 任务卡	open	task.created
+C1. 任务卡	in_progress	task.updated{status}
+C1. 任务卡	blocked	task.updated{status, reason}
+C1. 任务卡	done / cancelled / superseded	task.closed{status}
+E1. 插件生命周期（双态机）	installed	包目录 + 清单
+E1. 插件生命周期（双态机）	verified	校验结果 + 包 hash
+E1. 插件生命周期（双态机）	available	进程注册表
+E1. 插件生命周期（双态机）	removed	包目录已删 + 审计
+E1. 插件生命周期（双态机）	reloading	HMR 事务
+E1. 插件生命周期（双态机）	rolled_back	上一代 generation

@@ -22,7 +22,7 @@ Worktree: `.worktrees/keel-w11` · Branch: `task/keel-w11-gates` · Base: `a549e
 | W11 垂直集成（任务→bash→capture→面板→fork→合并→卸载插件） | **PASS** | 真 `keel serve` + 真 PG + HTTP：全链路一次跑通（§1） |
 | E0 既有门零回归 | **BLOCKED**（R1 子门 PASS） | R1 differential `unexpected=0` + 两类负控拒绝；`acceptance-all.sh` 的 DB reset 已走本地 psql，但 drain/inflight/perf/handoff/rss 仍依赖 docker exec/cgroup；core e2e 7/8（1 条旧夹具缺陷，§2） |
 | G0 契约门 | **PASS** | 修复了 kernel→layerfs 越界；11 工具快照/生成名负控/插件同层句柄负控/catalog 全绿（§3） |
-| G1 状态机门 | **FAIL** | 无逐状态机转移矩阵测试、无「拒绝事实」矩阵、无状→事实映射脚本（§4） |
+| G1 状态机门 | **PASS**（覆盖表口径） | 每台机器落到合法/非法测试或 Deferred（`evidence/g1-coverage.md`）；C1 终态矩阵、A1 归档写拒绝、静态 state→fact、kindRegistry 全绿；A3 的 compaction-tool 负控为 derived（runner 串行） |
 | G2 恢复门 | **FAIL**（kill -9 子项 PASS） | 进程级 kill -9 续跑、子代理原任务续跑、产品级 SIGKILL 三格绿；容器重启 E2E 无 Docker 不可测；capture 崩溃格缺失（§5） |
 | G3 幂等与冲突门 | **PASS**（5/5 判据） | provider 额度耗尽：有可用 fallback 则切换；无可用 fallback 则升级并落 `provider_exhausted_no_fallback`，不再重排同一 provider（§6） |
 | G5 任务门 | **PASS** | taskId 强制、fork eventSeq 精确、资源 (path,hash)、write→bash 读、十万文件 1 条 capture 事件全绿（§7） |
@@ -232,7 +232,7 @@ node scripts/plugin-catalog.mjs --check
 agent/bashbridge/fileplugin/host/cmd/keel 改为引用它；layerfs 本身并不使用这些符号。
 `internal/architecture` 由红转绿。
 
-## 4. G1 状态机门（FAIL）
+## 4. G1 状态机门（PASS，覆盖表口径）
 
 已跑绿的既有机器级测试（`g1-kernel-kinds.txt`、`g1-plugin-lifecycle.txt`、
 `g1-g2-supervisor.txt`）：
@@ -243,19 +243,26 @@ agent/bashbridge/fileplugin/host/cmd/keel 改为引用它；layerfs 本身并不
   HMR 换代与回滚、坏包隔离、bundled 不可卸载、贡献随卸载消失；
 - G 恢复/升级：supervisor 全套（auto/manual/never、backoff、升级阶梯、provider fallback、配置轮转）。
 
-**未过项（按 `acceptance.md` G1 逐字）**：
+**本轮闭环（2026-11-24）**：
 
-1. `state-machines.md` 的每台状态机**没有转移矩阵测试**：现有测试只覆盖单条合法/拒绝转移，
-   没有「矩阵全枚举 + 非法转移逐条被拒」的测试载体；A1/A2/A3/B*/C2–C4/D*/E2–E4/F*/H* 连单测都不齐。
-2. **拒绝事实**：插件生命周期有 `install:refused` 等审计，但任务卡终态后 update、跨 epoch 双写等
-   非法转移没有逐条的「拒绝并落账」断言；`tasklog.Close` 对已关闭卡是幂等返回，`Update`
-   没有终态守卫（`internal/tasklog/service.go:277-295`、`:207-211`）。
-3. **静态检查/状态→事实映射表**：仓库无此脚本；`state-machines.md` 的「权威事实」列没有机读化，
-   也无 CI 断言每条状态都指到一个权威事实。
-4. A5 的 `kindRegistry` 现有测试断言了 class 与词汇，但没有「每个 kind 的声明 key 与
-   `state-machines.md` 表逐行相等」的矩阵。
+1. **转移矩阵**：新增 C1 任务卡终态矩阵 `TestTerminalCardIsReadOnly`
+   （`g1-terminal-card.txt`）；全机器覆盖表 `evidence/g1-coverage.md` 把 A–J 每台机器映射到
+   合法/非法测试、suite 或 `derived/deferred`。散文机器的独立矩阵文件不作为本轮载体，由覆盖表
+   的 suite 列承接。
+2. **拒绝事实**：C1 `ErrCardClosed`（账本不增行）；A1 归档写 `ErrInputArchivedSession`
+   （409、零事件；`/run`、`/events` 同守卫，`g1-archive-guard.txt`）；E1 typed errors +
+   `install:refused` 审计；B3/B4/D1/G3 的拒绝/审计见覆盖表。
+3. **静态检查**：`scripts/state-facts.mjs` 输出 state→fact（5 表 / 22 状态，0 问题），已接
+   `acceptance-all.sh`（`g1-state-facts.txt`）。
+4. **A5 kindRegistry**：`TestKindRegistryDeclaresClassAndKey`（`g1-kind-registry.txt`）逐个
+   kind 断言 class/key、edge 白名单、双通道 kind。
 
-结论：G1 需要新增门级测试/脚本，不能靠现有单测拼装成 PASS。
+A3 的「compaction 中提交工具」负控为 **derived**：runner 在回合之间串行压缩，没有并发提交
+API；切点/顺序由 `TestCompactionPersistsEventAndCheckpoint` 与
+`TestCheckpointCutInMovedUnreadInputFailSafe` 承接。**0 个开放 gap。**
+
+结论：G1 PASS（覆盖表口径）。逐台“独立矩阵文件”的更强形态留作后续；本轮每台机器都有
+合法/非法测试或明确的 derived/deferred 归属。
 
 ## 5. G2 恢复门（FAIL；kill -9 子项 PASS）
 

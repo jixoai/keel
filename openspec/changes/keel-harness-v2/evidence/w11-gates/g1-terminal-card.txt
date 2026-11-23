@@ -1,0 +1,4 @@
+=== RUN   TestTerminalCardIsReadOnly
+--- PASS: TestTerminalCardIsReadOnly (0.08s)
+PASS
+ok  	github.com/jixoai/keel/internal/tasklog	0.472s

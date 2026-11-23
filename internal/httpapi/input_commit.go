@@ -24,6 +24,12 @@ import (
 // path (CommitClientInput) and must map the refusal onto its own wire.
 var ErrInputExternalSession = errors.New("session is owned by an external backend; native input is not supported")
 
+// ErrInputArchivedSession refuses native input to a soft-deleted (archived)
+// session. The archive is a read-only state: the ledger stays, but continuing
+// the work needs a new session. The check runs before any write, so a refused
+// input leaves no event.
+var ErrInputArchivedSession = errors.New("session is archived; it is read-only")
+
 // ClientInput is one client input, validated by its caller and ready for the
 // shared commit path. POST /v1/sessions/{id}/input fills it from the request
 // body; POST /v1/sessions/{id}/retry fills it from a committed user.message;
@@ -113,6 +119,13 @@ func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committ
 	if !exists {
 		return ClientInputCommit{}, store.ErrNoSession
 	}
+	if active, err := st.SessionActive(ctx, in.TenantID, in.SessionID); err != nil {
+		return ClientInputCommit{}, err
+	} else if !active {
+		// The session row exists but is archived: a write is a state-machine
+		// violation (A1: archived -> running is illegal), not a missing row.
+		return ClientInputCommit{}, ErrInputArchivedSession
+	}
 	if owner == store.StateOwnerExternal {
 		return ClientInputCommit{}, ErrInputExternalSession
 	}
@@ -177,11 +190,38 @@ func presentRawJSON(raw json.RawMessage) bool {
 // the edge/enqueue mappings (unwired kernel 503, kernel rejections, 500).
 func writeInputError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrInputExternalSession):
+	case errors.Is(err, ErrInputExternalSession), errors.Is(err, ErrInputArchivedSession):
 		writeErr(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrNoSession), errors.Is(err, store.ErrExternalSession):
 		writeEnqueueError(w, err)
 	default:
 		writeEdgeError(w, err)
 	}
+}
+
+// requireWritableSession refuses a native write to a missing (404) or archived
+// (409) session. The input commit path has its own pre-check; the run and
+// event edges use this one so an archived session cannot be resumed through a
+// side door.
+func (s *Server) requireWritableSession(w http.ResponseWriter, r *http.Request, tenantID, sessionID uuid.UUID) bool {
+	if s.cfg.Store == nil {
+		return true
+	}
+	if _, exists, err := s.cfg.Store.SessionOwner(r.Context(), tenantID, sessionID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return false
+	} else if !exists {
+		writeErr(w, http.StatusNotFound, store.ErrNoSession)
+		return false
+	}
+	active, err := s.cfg.Store.SessionActive(r.Context(), tenantID, sessionID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if !active {
+		writeErr(w, http.StatusConflict, ErrInputArchivedSession)
+		return false
+	}
+	return true
 }

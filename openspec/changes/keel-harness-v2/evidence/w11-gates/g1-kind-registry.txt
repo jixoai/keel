@@ -1,0 +1,4 @@
+=== RUN   TestKindRegistryDeclaresClassAndKey
+--- PASS: TestKindRegistryDeclaresClassAndKey (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/kernel	0.395s
