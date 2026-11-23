@@ -2,18 +2,20 @@
 # date: 2026-11-23; nsh 0.6.0 (f577c51 nightly); macOS arm64; headless Chrome
 # (the pinned nsh 0.4.0 bba76ef nightly is not available on this machine; the
 #  test steps are target-agnostic, only the host differs)
+# Rerun after the review fixes (comment/501 wording, format=400 test,
+# capability Access bit, placeholder gating): all three still pass.
 #
 # $ cd web && nsh test --target web App.tui.test.tsx --filter '历史消息搜索'
-✓ App.tui.test.tsx › TUI: 历史消息搜索——命中跨会话正文，点结果打开会话 (3.1s)
-✓ 1 test: 1 passed, 0 failed (6.2s)
+✓ App.tui.test.tsx › TUI: 历史消息搜索——命中跨会话正文，点结果打开会话 (3.7s)
+✓ 1 test: 1 passed, 0 failed (6.9s)
 #
 # $ cd web && nsh test --target web App.tui.test.tsx --filter '交付物'
-✓ App.tui.test.tsx › TUI: 交付物——清单里的路径/大小/哈希与一份预览 (2.6s)
-✓ 1 test: 1 passed, 0 failed (5.7s)
+✓ App.tui.test.tsx › TUI: 交付物——清单里的路径/大小/哈希与一份预览 (2.4s)
+✓ 1 test: 1 passed, 0 failed (5.5s)
 #
 # $ cd web && nsh test --target web App.tui.test.tsx --filter '导出会话'
-✓ App.tui.test.tsx › TUI: 导出会话——一页有界消息复制到剪贴板 (2.2s)
-✓ 1 test: 1 passed, 0 failed (5.4s)
+✓ App.tui.test.tsx › TUI: 导出会话——一页有界消息复制到剪贴板 (2.5s)
+✓ 1 test: 1 passed, 0 failed (5.6s)
 #
 # Note: the first browser attempt (before the capability gate fix) failed at
 # `id:session-message-hits showing never happened`: the fixture answered the

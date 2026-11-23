@@ -1,10 +1,6 @@
-# nsh 0.6.0 (f577c51 nightly); rerun after the capability-gate fix
-### filter: 历史消息搜索
+# nsh 0.6.0 (f577c51 nightly); final base a2640b8 + W12, after the review fixes
 ✓ App.tui.test.tsx › TUI: 历史消息搜索——命中跨会话正文，点结果打开会话 (1.7s)
-✓ 1 test: 1 passed, 0 failed (1.7s)
-### filter: 交付物
 ✓ App.tui.test.tsx › TUI: 交付物——清单里的路径/大小/哈希与一份预览 (1.9s)
-✓ 1 test: 1 passed, 0 failed (1.9s)
-### filter: 导出会话
 ✓ App.tui.test.tsx › TUI: 导出会话——一页有界消息复制到剪贴板 (1.8s)
-✓ 1 test: 1 passed, 0 failed (1.8s)
+
+# Pinned nsh 0.4.0 run (old machine, pre-rebase) recorded 3/3; see the historical note in README.

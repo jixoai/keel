@@ -1,9 +1,1 @@
---- FAIL: TestMCPAppRejectionAuditSampling (4.87s)
-    mcp_app_actions_test.go:1067: rate audit rows after two windows = 4, want 2
-2026/11/23 17:46:44 WARN mcp app audit is not durable: no audit store is wired action=ui/update-model-context result=ok server=weather app=mcpapp_0123456789abcdef
-2026/11/23 17:46:44 WARN mcp app audit is not durable: no audit store is wired action=ui/update-model-context result=refused server=weather app=mcpapp_0123456789abcdef
-2026/11/23 17:46:44 WARN mcp app audit is not durable: no audit store is wired action=ui/update-model-context result=error server=weather app=mcpapp_0123456789abcdef
-FAIL
-FAIL	github.com/jixoai/keel/internal/harnessapi	95.699s
-ok  	github.com/jixoai/keel/internal/fileplugin	338.379s
-FAIL
+ok  	github.com/jixoai/keel/internal/harnessapi	7.788s

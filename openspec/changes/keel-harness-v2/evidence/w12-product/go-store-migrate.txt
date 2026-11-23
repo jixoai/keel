@@ -1,1 +1,1 @@
-ok  	github.com/jixoai/keel/internal/store	3.818s
+ok  	github.com/jixoai/keel/internal/store	0.736s

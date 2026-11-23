@@ -18,7 +18,7 @@
 
 | 文件 | 命令 | 结果 |
 |---|---|---|
-| `go-build.txt` | `go build ./cmd/keel && go vet ./internal/harnessapi ./internal/sessiontitle ./internal/accessgate` | 无输出（成功） |
+| `go-build.txt` | `go build -o /tmp/keel-w12-build ./cmd/keel && go vet ./internal/harnessapi ./internal/sessiontitle ./internal/accessgate` | 无输出（成功）。**必须带 `-o`**：仓根的 `keel` 是入库二进制，裸 `go build ./cmd/keel` 会覆盖它（复核时踩到并已恢复） |
 | `go-targeted.txt` | `KEEL_TEST_DSN=postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable go test ./internal/sessiontitle ./internal/accessgate ./internal/harnessapi -run 'TestDerive|TestSession|TestDeliverables|TestBoundedExport|TestPGSession|TestMatrix|TestCheckRoutes|TestTaskPanelRoutesAreDeclared' -count=1 -p 1` | 3 包全 ok |
 | `go-targeted-final.txt` | 同 DSN，最终一轮 W12 用例 + 既有列表/标题用例 | 3 包全 ok |
 | `go-pg-query-after-index.txt` | 同上 DSN，`go test ./internal/harnessapi -run TestPGSessionQuery -count=1 -p 1` | ok（含迁移后的 `events_transcript_created` 索引） |
@@ -27,7 +27,7 @@
 | `nsh-check-0.6.0.txt` | 同命令（本机 nsh 0.6.0 f577c51） | 2 errors，全在既有 speech 文件（`PickedFile.file` 空值），无 W12 文件 |
 | `tui-new-tests.txt` | `cd web && nsh test --target tui --filter <三个新用例>` | 3/3 通过（capability 修复后重跑） |
 | `browser-new-tests.txt` | `cd web && nsh test --target web App.tui.test.tsx --filter <三个新用例>` | 3/3 通过（headless Chrome；capability 修复后） |
-| `tui-full.txt` | `cd web && nsh test --target tui` | 372/373 通过；唯一失败见下「环境性失败」 |
+| `tui-full.txt` | `cd web && nsh test --target tui`（final base，nsh 0.6.0） | 371/396 通过；25 失败=24 个 nsh 0.6.0 资源路径规则（realtime/speech）+ 1 个既有 settings raw-JSON（见下「环境性失败」） |
 | `openspec-strict.txt` | `openspec validate keel-harness-v2 --strict` | `Change 'keel-harness-v2' is valid` |
 
 ## 能力门（复核 P1 修复，2026-11-23）
@@ -49,6 +49,24 @@ W12 的可用性判断原本是传输层探测（`typeof identityApi().sessionSe
 浏览器首跑失败（`id:session-message-hits showing never happened`）就是这个缺口的实证：
 fixture 能应答但没广告；补齐后 TUI 与浏览器两套宿主都 3/3 通过。
 
+## 复核修复（独立复核 8/10，2026-11-23）
+
+独立复核（PASS 8/10）留下的 1 个 P1 与 5 个 P2 已逐条处理：
+
+- **P1 残留库**：`keel_w12_test` / `keel_w12_gate` 已 `DROP ... WITH (FORCE)`；最终检查无
+  `keel_%` 库（本轮证据用的 `keel_w12_fix` 也在收尾时删除）。
+- **注释失真**：`SessionSearcher`/`SessionExporter`/Config 注释原写「Nil answers 503」，
+  实际 seam nil 走 501（无 Access 才是 503）；已改为「Nil answers 501（缺 Access 是单独的
+  503 路径）」。
+- **format=400 分支无测试**：`TestSessionExportRefusalsAndBounds` 拆成
+  `SessionExists=true`（format/xml、limit 0/501、afterSeq -1 逐个断言 400）与
+  `SessionExists=false`（404）两段，再加 unwired 501。
+- **能力位与 handler 不对称**：`session.search/export/deliverables` 能力位现在同时要求
+  seam 与 `Access != nil`（与 `sessions.list` 同口径）；生产接线仍同源。
+- **搜索框文案**：部署没有 search 能力时 placeholder 只承诺「搜索会话」，不再写「或消息」。
+- **`tui-full.txt` 时效**：旧文件是 rebase 前 `9480bf8` 的记录；已用 final base 全量重跑替换
+  （见下表与「环境性失败」）。
+
 ## 负控（测试里构造的失败面）
 
 - **跨租户检索**：`TestPGSessionQuerySearchScopeAndPagination` 在另一租户写入相同文本，检索只返回本租户会话；归档会话也被排除。
@@ -61,16 +79,23 @@ fixture 能应答但没广告；补齐后 TUI 与浏览器两套宿主都 3/3 �
 
 ## 环境性失败（与切片无关，已记录）
 
-1. `internal/harnessapi` 整包（`go-full-packages.txt`）在本机出现
-   `TestMCPAppRejectionAuditSampling` 失败（4 个采样窗口而非 1 个）。该用例在本机单独重跑
-   仍失败（`go-mcp-audit-rerun.txt`），原因是 1000 次 HTTP 拒绝请求在本机耗时超过 1 秒，
-   一个固定时钟窗口内出现多个真实窗口；本切片没有改动 `mcp_app_actions*`。W12 相关包与
-   用例全绿。
-2. `nsh test --target tui` 的 373 个用例中 1 个失败：
-   `TUI: 设置页——模型分区两层结构…`。它在单独重跑时同样失败，失败点是原始 JSON 编辑器
-   逐段输入后文档在 position 177 变成非法 JSON（保存按钮因此 disabled）。该用例路径不经过
-   任何 W12 文件；本切片没有改 `settings.tsx`/模型 fixture 的既有形状。新加的 3 个 TUI 用例
-   与所有其他设置/模型用例通过。
+1. `TestMCPAppRejectionAuditSampling` 是**负载敏感的既有用例**：旧基线在并发负载下出现过
+   「4 个采样窗口而非 1 个」（`go-mcp-audit-rerun.txt` 是那次记录；1000 次 HTTP 拒绝请求在
+   慢机上超过 1 秒，真实定时器多切了窗口）。在 final base 的串行全量里
+   `go test ./internal/harnessapi` 通过（`go-full-packages.txt`，7.788s），全仓
+   `go test -p 1 ./...` 也通过；本切片没有改 `mcp_app_actions*`。
+2. `nsh test --target tui` 的 396 个用例中 1 个失败：
+   `TUI: 设置页——模型分区两层结构…`。它是**既有**失败（0.4.0 时代在旧基线 position 177
+   失败；本机 0.6.0 在 position 52 失败），失败点是原始 JSON 编辑器逐段输入后文档变成非法
+   JSON（保存按钮因此 disabled）。该用例路径不经过任何 W12 文件；本切片没有改
+   `settings.tsx`/模型 fixture 的既有形状。新加的 3 个 TUI 用例与所有其他设置/模型用例通过。
+   已在合入前单独定位：用 `app.paste` 替换逐段 `type` 可以让「坏文档 → 400」这一段通过，
+   但第二次保存仍不落版本；属于既有测试/输入路径问题，另行修。
+3. `nsh test --target tui` 另有 **24 个** realtime/speech 失败，全部同一条启动错误：
+   `open("./harness.tsx"): '../../../assets/demo-shot.png' is outside the app's
+   directory ...: the files an app imports ship with it, so move it inside`。
+   这是 **nsh 0.6.0 新增的资源路径规则**：旧机 pinned 0.4.0（bba76ef）下这 24 个用例通过
+   （旧证据 372/373）。与本切片无关；pinned 0.4.0 到位后应为 383/384（仅 settings 那条）。
 
 ## 已知限制
 
@@ -86,3 +111,7 @@ fixture 能应答但没广告；补齐后 TUI 与浏览器两套宿主都 3/3 �
 - 本机 nsh 是 0.6.0 nightly（pinned 0.4.0 bba76ef 不可得）；`nsh check` 的两条错误是 0.6.0
   的 `PickedFile.file` 空值语义（既有 speech surface），不是本切片引入；pinned 0.4.0 的
   `nsh-check.txt` 仍是 exit=0。
+- deliverables 的分页在 handler 里是「manifest seam 全量列表 + 内存按 path 排序截断」，
+  对外游标仍是 path keyset（客户端语义正确），但服务端成本是 O(session manifest)。复用既有
+  `SessionFiles` seam（不另造文件真值）是有意取舍；manifest 行数失控时再把
+  `ORDER BY path` + `WHERE path > $after` 下推到 `PostgresManifest.List`。
