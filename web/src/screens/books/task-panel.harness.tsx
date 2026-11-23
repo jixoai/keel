@@ -190,7 +190,7 @@ const API = (name: string): IdentityApi => {
         return {
           files: [{ path: "reports/page-2.csv", hash: HASH_B, size: 24, updatedSeq: 23, lastTaskId: "task-summary" }],
           count: 1,
-          limit: query.limit ?? 200,
+          limit: query?.limit ?? 200,
           truncated: false,
           hasMore: false,
         };
@@ -198,7 +198,7 @@ const API = (name: string): IdentityApi => {
       return {
         files: [{ path: "reports/page-1.csv", hash: HASH_A, size: 12, updatedSeq: 22, lastTaskId: "task-summary" }],
         count: 1,
-        limit: query.limit ?? 200,
+        limit: query?.limit ?? 200,
         truncated: true,
         hasMore: true,
         nextCursor: "reports/page-1.csv",
