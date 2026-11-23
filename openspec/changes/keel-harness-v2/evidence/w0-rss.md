@@ -197,6 +197,8 @@ measure fails the battery instead of skipping.
   a battery failure, not a skip.
 - Any other value (including the default `0`) prints an explicit SKIP line: the local
   battery stays light, and the gate is never silently dropped from a documented run.
+- The segment removes `perf/rss-gate.json` before running, so a failed opted-in gate cannot
+  leave the previous run's measurement in the evidence directory.
 
 ## 6. Reported gap (why there is no 1000-session RSS number in this file)
 
