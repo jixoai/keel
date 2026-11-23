@@ -806,6 +806,9 @@ func TestVerticalW11(t *testing.T) {
 	if !contains(toolsAfterEnable, publishedProbe) {
 		t.Fatalf("the enabled plugin's tool is not on the surface: %v", toolsAfterEnable)
 	}
+	// Positive half of the residue check: the sidecar must be a live process
+	// before the uninstall, otherwise "no process afterwards" proves nothing.
+	waitForProcess(t, sidecarScriptName, 10*time.Second)
 	// The run surface is the Bot's whitelist ∩ the deployment registry, so the
 	// probe tool must be granted to this Bot before its presence can show up in
 	// the run snapshot. The extra entry is kept after the uninstall on purpose:
@@ -856,8 +859,11 @@ func TestVerticalW11(t *testing.T) {
 			t.Fatalf("managed directory %s survived the uninstall (err=%v)", dir, err)
 		}
 	}
-	// No sidecar process from the package survives the uninstall.
-	waitNoProcess(t, sidecarDir, 5*time.Second)
+	// No sidecar process from the package survives the uninstall. The needle is
+	// the script name the process command line carries (the sidecar runs with
+	// its package directory as cwd, so the directory itself is not on the
+	// command line).
+	waitNoProcess(t, sidecarScriptName, 5*time.Second)
 	restoredHash := client.toolManifestHash(botID)
 	if restoredHash != baselineHash {
 		t.Fatalf("the tool manifest hash did not restore after uninstall: %s vs %s", restoredHash, baselineHash)
@@ -871,6 +877,27 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// sidecarScriptName is unique to this fixture so pgrep -f can tell the sidecar
+// apart from every other node process (the entry command is `node <name>`, a
+// relative path resolved against the installed package directory).
+const sidecarScriptName = "w11-probe-sidecar.mjs"
+
+// waitForProcess fails when no process whose command line contains needle
+// appears before the deadline. It proves the sidecar was really running, so
+// the post-uninstall waitNoProcess is not vacuous.
+func waitForProcess(t *testing.T, needle string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("pgrep", "-f", needle).Output()
+		if err == nil && len(bytes.TrimSpace(out)) > 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("no process matching %q appeared; the sidecar never started", needle)
 }
 
 // waitNoProcess fails when a process whose command line contains needle is
@@ -939,9 +966,9 @@ permissions:
   tools:
     - w11_probe
 entry:
-  command: [node, sidecar.mjs]
+  command: [node, w11-probe-sidecar.mjs]
 `,
-		"sidecar.mjs": sidecarScript,
+		sidecarScriptName: sidecarScript,
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
