@@ -1,5 +1,7 @@
 # W12 记忆卫生证据（2026-11-23）
 
+实现提交：`ba8bb53 feat(memory): spill-backed pruning, image offload, and a stable prompt prefix`
+
 范围：`openspec/changes/keel-harness-v2/tasks.md` 的 W12「记忆卫生（W1–W2）」：
 `keel.spill`、`keel.compaction` 扩展（tool-result-pruner + image-offload）、
 `keel.prompt-cache`。`keel.checkpoint` 未在本切片内（仍为未完成）。
@@ -10,8 +12,8 @@
 
 | 能力 | 实现 | 位置 |
 |---|---|---|
-| tool-result-pruner | 保留窗口之外、文本型且 ≥ 阈值的工具结果序列化为 `ToolResultMessage` JSON，写入 `spill.Store`，上下文替换为有界引用（ref、sha256、bytes、预览） | `internal/compaction/hygiene.go` `PruneToolResults`/`ApplyHygiene` |
-| image-offload | 图片窗口之外的 `ImageRefContent` 替换为命名 `blobId`/MIME/size 的文本引用；provider 不再上传/内联旧图 | `internal/compaction/hygiene.go` `OffloadImages`/`RenderImageReference` |
+| tool-result-pruner | 保留窗口之外、文本型且 ≥ 阈值的工具结果序列化为 `ToolResultMessage` JSON，写入 `spill.Store`，上下文替换为有界引用（ref、sha256、bytes、预览） | `internal/compaction/hygiene.go` `pruneToolResults`/`ApplyHygiene` |
+| image-offload | 图片窗口之外的 `ImageRefContent` 替换为命名 `blobId`/MIME/size 的文本引用；provider 不再上传/内联旧图 | `internal/compaction/hygiene.go` `offloadImages`/`RenderImageReference` |
 | 两个接入点 | runner 在 **image resolve 之前** 对 rebuild transcript 执行一次（防 resume 重传旧图）；loop 在每个 turn 边界、auto-compaction 之前执行一次（拦截 run 内新增的大结果） | `internal/agent/hygiene.go`、`internal/loop/loop.go` `maybeHygiene` |
 | 失败语义 | 存储错误/不完整引用/无 blobId 的图片 → 原文保留 + `HygieneReport.Failures`（runner/loop 以 warn 记录），run 不失败、不静默丢 | 同上 |
 | 账本不变 | 只改 in-memory 请求视图；已提交消息与 run result 保持原文；测试断言 caller transcript 未被修改 | `internal/loop/hygiene_test.go`、`internal/agent/hygiene_test.go` |
