@@ -298,3 +298,41 @@ func TestFinishPersistsWatermarkOnFailure(t *testing.T) {
 		})
 	}
 }
+
+// TestEdgeCommitKeepsAPlacementQueuedRunQueued pins the W2 review rule on
+// both implementations: a user.message wake must not turn a durable placement
+// queue entry into a claimable pending run. The wake leaves it queued, so the
+// placement promotion (quota-guarded) remains the only door to a slot.
+func TestEdgeCommitKeepsAPlacementQueuedRunQueued(t *testing.T) {
+	for _, im := range implementations(t) {
+		t.Run(im.name, func(t *testing.T) {
+			h := im.build(t)
+			ctx := context.Background()
+			scope := h.bareSession()
+			if h.mem != nil {
+				h.mem.mu.Lock()
+				h.mem.sessions[scope].run = &memRun{status: RunStatusQueued}
+				h.mem.mu.Unlock()
+			} else {
+				if _, err := h.st.Pool().Exec(ctx,
+					`INSERT INTO runs (tenant_id, session_id, status, queue_seq)
+					 VALUES ($1, $2, 'queued', nextval('runs_queue_seq'))`,
+					scope.TenantID, scope.SessionID); err != nil {
+					t.Fatalf("seed queued run: %v", err)
+				}
+			}
+			h.mustCommit(CommitRequest{Scope: scope, Kind: KindUserMessage,
+				RequestID: "queued-wake-1", Payload: userPayload("wake a waiting run")})
+			pin, err := h.k.RunPin(ctx, scope)
+			if err != nil {
+				t.Fatalf("run pin after the wake: %v", err)
+			}
+			if pin.Status != RunStatusQueued {
+				t.Fatalf("queued run after the wake = %s, want queued (never pending)", pin.Status)
+			}
+			if _, err := h.k.ClaimScope(ctx, scope, "runtime-a", h.ttl()); !iso(err, ErrNoRunnable) {
+				t.Fatalf("claim of a woken queued run = %v, want ErrNoRunnable", err)
+			}
+		})
+	}
+}

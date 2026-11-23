@@ -666,8 +666,9 @@ func (t *memTxn) Commit(ctx context.Context) error {
 }
 
 // wakeRunLocked mirrors PG's in-transaction run wake: a run already executing
-// keeps running, anything else becomes pending, and an external session gets no
-// run row at all.
+// keeps running, a placement-queued run keeps waiting (promotion, not this
+// wake, makes it claimable), anything else becomes pending, and an external
+// session gets no run row at all.
 func (m *MemStore) wakeRunLocked(s *memSession, unreadInput bool) {
 	if s.isExternal() {
 		return
@@ -675,7 +676,7 @@ func (m *MemStore) wakeRunLocked(s *memSession, unreadInput bool) {
 	if s.run == nil {
 		s.run = &memRun{status: RunStatusPending}
 	}
-	if s.run.status != RunStatusRunning {
+	if s.run.status != RunStatusRunning && s.run.status != RunStatusQueued {
 		s.run.status = RunStatusPending
 	}
 	if unreadInput {

@@ -123,8 +123,11 @@ const (
 	KindNotificationPushSent EventKind = "notification.push_sent"
 )
 
-// Run status values for the runs row (mirrored from internal/store).
+// Run status values for the runs row (mirrored from internal/store). Queued is
+// a placement-queue entry: durable, not claimable, and only promotion turns it
+// into pending.
 const (
+	RunStatusQueued  = "queued"
 	RunStatusPending = "pending"
 	RunStatusRunning = "running"
 	RunStatusDone    = "done"
