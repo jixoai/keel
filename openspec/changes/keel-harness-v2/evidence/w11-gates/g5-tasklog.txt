@@ -22,40 +22,63 @@
 --- PASS: TestPanelMemberPageIgnoresOwnChildren (0.00s)
 === RUN   TestPanelMemberPageExactReadBoundFloorsTheCount
 --- PASS: TestPanelMemberPageExactReadBoundFloorsTheCount (0.00s)
+=== RUN   TestPanelCardPageIsBounded
+--- PASS: TestPanelCardPageIsBounded (0.00s)
+=== RUN   TestPanelAttachmentPageIsBounded
+--- PASS: TestPanelAttachmentPageIsBounded (0.01s)
+=== RUN   TestPanelOldCorruptEventOutsideThePageDoesNotFail
+--- PASS: TestPanelOldCorruptEventOutsideThePageDoesNotFail (0.00s)
 === RUN   TestPanelUsesTheDecoderAndRefusesCorruption
 --- PASS: TestPanelUsesTheDecoderAndRefusesCorruption (0.00s)
 === RUN   TestPanelTreeOrderAndMembers
---- PASS: TestPanelTreeOrderAndMembers (0.23s)
+    panel_test.go:27: KEEL_TEST_DSN not set
+--- SKIP: TestPanelTreeOrderAndMembers (0.00s)
 === RUN   TestPanelForkOriginAndEventStream
---- PASS: TestPanelForkOriginAndEventStream (0.10s)
+    panel_test.go:94: KEEL_TEST_DSN not set
+--- SKIP: TestPanelForkOriginAndEventStream (0.00s)
 === RUN   TestPanelAttachmentFoldAndEventOrder
---- PASS: TestPanelAttachmentFoldAndEventOrder (0.21s)
+    panel_test.go:158: KEEL_TEST_DSN not set
+--- SKIP: TestPanelAttachmentFoldAndEventOrder (0.00s)
 === RUN   TestPanelBoundsArePages
---- PASS: TestPanelBoundsArePages (0.33s)
+    panel_test.go:218: KEEL_TEST_DSN not set
+--- SKIP: TestPanelBoundsArePages (0.00s)
+=== RUN   TestPanelOldCorruptProjectionRowOutsideThePage
+    panel_test.go:274: KEEL_TEST_DSN not set
+--- SKIP: TestPanelOldCorruptProjectionRowOutsideThePage (0.00s)
 === RUN   TestPanelTenantBoundary
---- PASS: TestPanelTenantBoundary (0.18s)
+    panel_test.go:325: KEEL_TEST_DSN not set
+--- SKIP: TestPanelTenantBoundary (0.00s)
 === RUN   TestDescribeEventRejectsACorruptRow
 --- PASS: TestDescribeEventRejectsACorruptRow (0.00s)
 === RUN   TestInitialCardIsIdempotentAndAutoAttributed
---- PASS: TestInitialCardIsIdempotentAndAutoAttributed (0.07s)
+    tasklog_test.go:71: KEEL_TEST_DSN not set
+--- SKIP: TestInitialCardIsIdempotentAndAutoAttributed (0.00s)
 === RUN   TestProjectionRebuildIsIdempotentAndRepairsStrayRows
---- PASS: TestProjectionRebuildIsIdempotentAndRepairsStrayRows (0.29s)
+    tasklog_test.go:108: KEEL_TEST_DSN not set
+--- SKIP: TestProjectionRebuildIsIdempotentAndRepairsStrayRows (0.00s)
 === RUN   TestAttachDetachNoteAndCloseAreEvents
---- PASS: TestAttachDetachNoteAndCloseAreEvents (0.10s)
+    tasklog_test.go:222: KEEL_TEST_DSN not set
+--- SKIP: TestAttachDetachNoteAndCloseAreEvents (0.00s)
 === RUN   TestForkCreatesANewCardPointingAtTheOrigin
---- PASS: TestForkCreatesANewCardPointingAtTheOrigin (0.13s)
+    tasklog_test.go:279: KEEL_TEST_DSN not set
+--- SKIP: TestForkCreatesANewCardPointingAtTheOrigin (0.00s)
 === RUN   TestSubagentCardLinksToParentActiveCard
---- PASS: TestSubagentCardLinksToParentActiveCard (0.08s)
+    tasklog_test.go:330: KEEL_TEST_DSN not set
+--- SKIP: TestSubagentCardLinksToParentActiveCard (0.00s)
 === RUN   TestCrossTenantTaskAccessIsRefused
---- PASS: TestCrossTenantTaskAccessIsRefused (0.11s)
+    tasklog_test.go:369: KEEL_TEST_DSN not set
+--- SKIP: TestCrossTenantTaskAccessIsRefused (0.00s)
 === RUN   TestParentCycleIsRefused
---- PASS: TestParentCycleIsRefused (0.11s)
+    tasklog_test.go:408: KEEL_TEST_DSN not set
+--- SKIP: TestParentCycleIsRefused (0.00s)
 === RUN   TestOriginCardResolvesTheLedgerPosition
---- PASS: TestOriginCardResolvesTheLedgerPosition (0.07s)
+    tasklog_test.go:465: KEEL_TEST_DSN not set
+--- SKIP: TestOriginCardResolvesTheLedgerPosition (0.00s)
 === RUN   TestNoteSubagentFinishedLandsOnTheParentCard
---- PASS: TestNoteSubagentFinishedLandsOnTheParentCard (0.25s)
+    tasklog_test.go:491: KEEL_TEST_DSN not set
+--- SKIP: TestNoteSubagentFinishedLandsOnTheParentCard (0.00s)
 === RUN   TestForkCardIsIdempotentAndReopens
---- PASS: TestForkCardIsIdempotentAndReopens (0.29s)
+    tasklog_test.go:538: KEEL_TEST_DSN not set
+--- SKIP: TestForkCardIsIdempotentAndReopens (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/tasklog	3.018s
-exit=0
+ok  	github.com/jixoai/keel/internal/tasklog	1.053s

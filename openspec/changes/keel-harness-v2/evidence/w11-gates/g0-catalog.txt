@@ -1,2 +1,1 @@
 plugin-catalog: OK (103 entries, §A/§B/§C mapped, §H current)
-catalog exit=0

@@ -11,5 +11,4 @@
 === RUN   TestTaskGateDisabledPluginIsTyped
 --- PASS: TestTaskGateDisabledPluginIsTyped (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/toolsurface	0.232s
-exit=0
+ok  	github.com/jixoai/keel/internal/toolsurface	0.354s

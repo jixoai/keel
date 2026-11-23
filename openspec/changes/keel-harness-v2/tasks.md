@@ -444,6 +444,9 @@
       面板卡与事件可见、fork `originSeq` 精确+`parentTaskId` 指向活动卡、父卡 `task.note` 合并结果、
       sidecar+UI 插件 disable→uninstall 后 inventory/贡献/受管目录/进程/toolManifestHash 全部复原。
       证据 `evidence/w11-gates/README.md` §1、`vertical-integration.txt`）
+      （rerun 2026-11-23 on `a549e87`：sidecar 残留检查改为唯一脚本名 `w11-probe-sidecar.mjs`
+      + 卸载前先断言进程存在（正控），`TestVerticalW11` 3.52s PASS；rebase 后
+      `PUT /v1/settings/providers/{id}/credential` 漏 accessgate 声明导致 serve 启动即拒，已补）
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
       （W9 2026-11-22：**Codex 真链路在 OAR record 层面已绿**——真实
       `codex exec --json` 被 spawn，模型回答 `OAR-OK`，usage total=17538，
@@ -468,6 +471,11 @@
       catalog 缺 keel.oar 条目；core e2e 7/8（tool-replay 在裸 cmd/runtime 上无 Bot 归属→fail-closed，
       同崩溃点由 mcp-apps G2c 产品面覆盖并绿）。本机可跑 battery 的非 perf 部分；drain/inflight/perf/handoff
       子脚本与 Linux cgroup 2GB cell 仍受平台限制。证据 `evidence/w11-gates/README.md` §2）
+      （rerun 2026-11-23 on `a549e87`：R1 152 paths/103 allowed/0 unexpected + 两类负控
+      （同 dump→stale rules；注入未登记差异→unexpected path）；rebase 后
+      `PUT /v1/settings/providers/{id}/credential` 缺 accessgate 声明、COVERAGE compaction
+      状态词不可解析，两处已修；DB reset 已是本地 psql，剩余平台阻塞只在
+      drain/inflight/perf/handoff/rss 的 docker exec 与 Linux cgroup）
 - [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据

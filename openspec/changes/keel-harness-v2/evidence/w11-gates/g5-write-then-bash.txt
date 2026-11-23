@@ -1,7 +1,6 @@
-=== RUN   TestCaptureCommitsExactlyOneBatchEvent
---- PASS: TestCaptureCommitsExactlyOneBatchEvent (0.06s)
+=== RUN   TestFSWriteFollowsToolResultWithoutKeyCollision
+--- PASS: TestFSWriteFollowsToolResultWithoutKeyCollision (0.02s)
 === RUN   TestWriteThroughReachesBash
---- PASS: TestWriteThroughReachesBash (0.12s)
+--- PASS: TestWriteThroughReachesBash (0.02s)
 PASS
-ok  	github.com/jixoai/keel/internal/fileplugin	0.524s
-exit=0
+ok  	github.com/jixoai/keel/internal/fileplugin	0.550s

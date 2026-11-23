@@ -1,17 +1,26 @@
 # W11 收口门证据（2026-11-23）
 
 Change: `keel-harness-v2` · 门判据: `acceptance.md` · 任务: `tasks.md` W11
-Worktree: `.worktrees/keel-w11-gates` · Branch: `task/keel-w11-gates` · Base: `8d6252b`
-环境: macOS arm64 / Go 1.27.3 / PostgreSQL 18.7（本机单实例，**无 Docker**）
+Worktree: `.worktrees/keel-w11` · Branch: `task/keel-w11-gates` · Base: `a549e87`
+环境: macOS arm64 / Go 1.27.4 / PostgreSQL 18.7（本机单实例，**无 Docker**）
 测试库: `KEEL_TEST_DSN=postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable`
-（每个用例自建独立 DB，跑完删除；见 §7 清理证据）
+（每个用例自建独立 DB，跑完删除；见 §10 清理证据）
+
+> **Rerun 2026-11-23 on the rebased base `a549e87`（新机，PG 已起）。**
+> 本目录下 `vertical-integration.txt`、`e0-r1-live.txt`、`e0-r1-negative-control.txt`、
+> `e0-r1-report.json`、`g0-*.txt`、`g5-*.txt` 均为本次 rerun 的实测输出；旧机
+> `8d6252b` 的旧输出已替换（叶子路径 141→152、工具面/路由已经变化，旧输出不再代表本分支）。
+> 本轮 rerun 暴露并修复了两个 rebase 后回归：① `PUT /v1/settings/providers/{id}/credential`
+> 缺 accessgate 权限声明 → `keel serve` 启动即拒（§9）；② `plugins/COVERAGE.md` 的 compaction
+> 行状态词不可解析 → catalog 门红（§2.2）。另把 sidecar 残留检查的 needle 从源目录改为脚本名，
+> 并增加「卸载前必须先看到进程」的正控（§1.7）。
 
 ## 0. 结论表
 
 | 门 | 判定 | 一句话 |
 |---|---|---|
 | W11 垂直集成（任务→bash→capture→面板→fork→合并→卸载插件） | **PASS** | 真 `keel serve` + 真 PG + HTTP：全链路一次跑通（§1） |
-| E0 既有门零回归 | **BLOCKED**（R1 子门 PASS） | R1 differential `unexpected=0` + 负控拒绝；`acceptance-all.sh` 的 docker/cgroup 步骤在本机不可执行；core e2e 7/8（1 条旧夹具缺陷，§2） |
+| E0 既有门零回归 | **BLOCKED**（R1 子门 PASS） | R1 differential `unexpected=0` + 两类负控拒绝；`acceptance-all.sh` 的 DB reset 已走本地 psql，但 drain/inflight/perf/handoff/rss 仍依赖 docker exec/cgroup；core e2e 7/8（1 条旧夹具缺陷，§2） |
 | G0 契约门 | **PASS** | 修复了 kernel→layerfs 越界；11 工具快照/生成名负控/插件同层句柄负控/catalog 全绿（§3） |
 | G1 状态机门 | **FAIL** | 无逐状态机转移矩阵测试、无「拒绝事实」矩阵、无状→事实映射脚本（§4） |
 | G2 恢复门 | **FAIL**（kill -9 子项 PASS） | 进程级 kill -9 续跑、子代理原任务续跑、产品级 SIGKILL 三格绿；容器重启 E2E 无 Docker 不可测；capture 崩溃格缺失（§5） |
@@ -35,10 +44,17 @@ KEEL_TEST_DSN='postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable' \
 输出（`vertical-integration.txt`）：
 
 ```
---- PASS: TestVerticalW11 (10.15s)
+--- PASS: TestVerticalW11 (3.52s)
 PASS
-ok  	github.com/jixoai/keel/internal/producte2e	10.611s
+ok  	github.com/jixoai/keel/internal/producte2e	4.284s
 ```
+
+> **本轮 rerun 修的真实回归（rebase 后）**：`keel serve` 在 `a549e87` 上**启动即拒**：
+> `route permission matrix: accessgate: 1 /v1 route(s) have no permission declaration:
+> PUT /v1/settings/providers/{id}/credential`。该路由由 `4376a45` 引入但漏了 accessgate
+> 声明，所以任何 `keel serve`（包括本测试）都起不来。已在 `internal/accessgate/matrix.go`
+> 补 `ModeKey` + `secret.write`（它写的是秘密存储，models 文档另由 PUT /v1/settings/models 落）。
+> 修复前本测试的失败形态是「health 40s 超时 + supervisor 刷 closed pool」，不是断言失败。
 
 断言链（每条都在测试里，失败即红）：
 
@@ -59,9 +75,13 @@ ok  	github.com/jixoai/keel/internal/producte2e	10.611s
    - sidecar 夹具 `w11.probe`（`provides.tools: [w11_probe]`）安装→启用后，发布名
      `w11_probe_w11_probe` 出现在工具面且 `run.finished.toolManifestHash` 改变；
    - UI 夹具 `keel.w12.fixture`（6 条 contributes）安装→启用；
-   - disable→uninstall 后：inventory 无两条目、贡献消失、受管目录删除、无 sidecar 进程存活
-     （`pgrep -f <pkg>`）、generation 前进；**卸载后新 run 的 toolManifestHash 精确回到安装前基线**
+   - disable→uninstall 后：inventory 无两条目、贡献消失、受管目录删除、无 sidecar 进程存活、
+     generation 前进；**卸载后新 run 的 toolManifestHash 精确回到安装前基线**
      （Bot 白名单里故意保留那个悬空工具名，证明 registry 交集不再授予任何东西）。
+   - sidecar 进程检查是**正控 + 负控**：夹具脚本名是唯一的 `w11-probe-sidecar.mjs`
+     （entry command 是 `node <relative>`，cwd 才是包目录，所以「包目录」不在命令行上——
+     旧 needle 指向源目录，`pgrep` 永远匹配不到，检查是空的）。启用后先 `waitForProcess`
+     断言进程存在，卸载后再 `waitNoProcess` 断言消失；两步都失败即红。
 
 为驱动模型工具调用，`internal/agent/fake.go` 增加行锚定的脚本指令
 （`tasks-create:<title>` / `bash:<command>`，每个回合一条，工具结果后推进），
@@ -77,11 +97,11 @@ go build -o /tmp/keel-w11-candidate ./cmd/runtime
 go run ./cmd/r1diff -old-bin /tmp/keel-r1-base -new-bin /tmp/keel-w11-candidate \
   -dsn 'postgres://kzf@127.0.0.1:5432/keel_w11_r1diff?sslmode=disable' -out /tmp/r1 \
   -pin cmd/r1diff/baseline.json -allow cmd/r1diff/allow-v2.json \
-  -port-old 13770 -port-new 13771
+  -port-old 13770 -port-new 13773
 ```
 
-> 端口用 13770/13771：`acceptance-all.sh` 默认的 13778/13779 在本机已被无关进程占用
-> （`lsof` 显示两个 python 监听），不改他人进程。
+> 端口用 13770/13773：本机 13771/13772 已被无关的 python 静态服务占用（`lsof` 可见），
+> 不改他人进程。`r1diff` 默认的 13746/13747 也可用，跑前先 `lsof` 确认。
 
 `e0-r1-live.txt`：
 
@@ -90,11 +110,14 @@ R1 differential: 152 leaf paths compared, 103 difference(s), 103 allowed, 0 unex
 verdict: PASS (no difference outside the allowlist; every allow rule fired)
 ```
 
-负控（同一份 dump 两边，必须 FAIL；`e0-r1-negative-control.txt`）：
+负控有两类（`e0-r1-negative-control.txt`），都必须 FAIL：
 
-```
-verdict: FAIL (stale allow rules: registered differences did not happen)
-```
+1. **同一份 dump 两边**（每条 allow 规则都会 stale）：
+   `verdict: FAIL (stale allow rules: registered differences did not happen)`；
+2. **注入一个不在 allowlist 的真实差异**（把 `runStatus.body.status` 从 `done` 改成
+   `failed` 再 diff）：`152 paths, 1 difference, 1 unexpected` +
+   `UNEXPECTED /runStatus/body/status`，`verdict: FAIL (unexpected differences and stale allow rules)`。
+   第 2 类证明门能抓到真实漂移，而不只是「规则没命中」。
 
 **修复的真实缺陷**：R1 在 `8d6252b` 本身即红（我用 `git archive HEAD` 构建未改动的
 candidate 复现，见 §9）。根因：`8a5794e` 给 bash 增加了显式 `checkpoint` action，工具 schema
@@ -117,15 +140,33 @@ node scripts/plugin-catalog.mjs --check
 `status=partial`、`keelPluginId=keel.oar`、note 指向 `evidence/w09-oar.md`（record 层已绿，
 专用渲染器与任务图闭环待 W12），并 `--write` 重生成 COVERAGE §H。
 
+**本轮 rerun 修的真实回归（rebase 后）**：`plugins/COVERAGE.md` §A 的 `compaction` 行状态格是
+中文叙述（「压缩核心已交付；…」），不含闭集状态词，`plugin-catalog.mjs --check` 直接报
+`COVERAGE §A row "compaction": status cell must name one of delivered|partial|planned|registered|merged|absent`。
+已把该格改为 `delivered（压缩核心 + W12 pruner/offload 已交付；capability，无独立插件实体）`
+并 `--write` 重生成 §H；现在输出是 `plugin-catalog: OK (103 entries, §A/§B/§C mapped, §H current)`。
+注意口径：§A 的 `delivered` 指**能力面**；§H 的 `dsh.compaction`/`dsh.spill` 由 catalog 的
+`coverage.status` 生成，仍是 `planned`（`covered:false`，无独立插件实体）——这是两套轴，
+不是自相矛盾；旧 §H 手写的 `delivered` 才是越权声明，已被 `--write` 纠正。
+
 ### 2.3 全量 battery（BLOCKED）
 
-`scripts/acceptance-all.sh` 无法在本环境完整运行，阻塞点写在脚本自身：
+`scripts/acceptance-all.sh` 无法在本环境完整运行，但**阻塞点已不是 DB reset**：
 
-- `db_reset()` 走 `docker exec "$PG_CTR" psql …`（脚本 :83-90），本机 **NO DOCKER**；
-- `acceptance-perf.sh`/`acceptance-handoff-rss.sh` 要求 2GB cgroup + `docker`（Linux cgroup v2），macOS 无；
-- `scripts/acceptance-all.sh` 的 race-full/chaos/perf 也远超单机串行预算。
+- `db_reset()` 已改为本地 `psql`（`scripts/acceptance-all.sh:97-102`，change `0c0138a`），
+  不再依赖 `docker exec`；
+- 仍依赖 Docker/cgroup 的脚本（按 `rg -c docker|cgroup` 实测）：
+  `acceptance-drain.sh`（docker 6）、`acceptance-inflight.sh`（docker 5）、
+  `acceptance-perf.sh`（docker 13 / cgroup 9）、`acceptance-handoff-rss.sh`（docker 17 / cgroup 9）、
+  `acceptance-rss.sh`（docker 15 / cgroup 15）、`acceptance-g5-perf.sh`（docker 14 / cgroup 18）
+  ——它们要 Dockerized PostgreSQL（`KEEL_PG_CTR`）与 Linux cgroup v2 / 2GB 内存上限，macOS 无；
+- `acceptance-all.sh` 的 race-full/chaos/perf 也远超单机串行预算。
 
 可独立复跑的分项（本机）：
+
+> 本轮 `a549e87` rerun 实跑了：`go build/vet`、R1 + 两类负控、catalog、垂直集成、G0、
+> G5（含 100k capture）。表中 conformance / core e2e / mcp-apps 三行沿用旧机 `8d6252b`
+> 的记录，本轮未重跑（它们不在 W11 的 rerun 清单里）。
 
 | 分项 | 结果 | 证据 |
 |---|---|---|
@@ -271,11 +312,19 @@ KEEL_TEST_DSN=... go test ./internal/harnessext -run TestResumeContinuesTheSameS
 | fork 原点 `eventSeq` 精确 | `TestForkCreatesAPrefixSessionCardAndInheritedBinding`（`OriginSeq == tip`、fork fact、前缀不复制）、`TestForkCapacityRetryConvergesToOneCard` | `g5-fork-resources.txt` |
 | 资源只记 `(path, hash)` | tasklog attach/detach 事件（`TestAttachDetachNoteAndCloseAreEvents`、panel 资源折叠）、`TestSubagentReturnCarriesArtifactRefsAndParentNote`（file/tree/blob/tool 引用） | `g5-tasklog.txt`, `g5-fork-resources.txt` |
 | `write` 后 `bash` 立即可读 | `TestWriteThroughReachesBash`、`TestFSWriteFollowsToolResultWithoutKeyCollision` | `g5-write-then-bash.txt` |
-| 十万文件 capture 只一条批事件 | `TestCaptureOneHundredThousandFilesIsOneEvent`（100,000 文件、`count=100000`、`NewObjects=1`、`fs.capture` 事件 **1**、manifest 100,000 行、refcount 1） | `g5-100k-capture.txt`（308.97s，PASS） |
+| 十万文件 capture 只一条批事件 | `TestCaptureOneHundredThousandFilesIsOneEvent`（100,000 文件、`count=100000`、`NewObjects=1`、`fs.capture` 事件 **1**、manifest 100,000 行、refcount 1） | `g5-100k-capture.txt`（本机 23.06s PASS；旧机 308.97s） |
+
+> **G5 证据口径（不要过度解读）**：本节是 Go 包级/API 级断言（`tasklog`/`toolsurface`/
+> `fileplugin`/`harnessext`），不是每条判据都经 `keel serve` HTTP 面复跑。产品 HTTP 面
+> 的 task→bash→capture→panel→fork→merge 由 §1 的垂直集成覆盖；G5 的 PASS 口径是
+> 「门判据在 API/存储契约层全部成立」，不是「全链路 HTTP 全覆盖」。
 
 ## 8. 负控与「不声称」
 
-- R1 负控：同一 dump 两侧 → **FAIL**（§2.1）。
+- R1 负控（两类）：同一 dump 两侧 → **FAIL（stale rules）**；注入一个未列入 allowlist 的
+  差异 → **FAIL（unexpected difference + stale rules）**（§2.1）。
+- Sidecar 残留检查（正控 + 负控）：启用后必须 `pgrep -f w11-probe-sidecar.mjs` 有进程，
+  卸载后必须无进程；两步都在测试里，任一不成立即红（§1.7）。
 - G0 负控：25 个生成的 `mcp__server__tool` 名逐个 unknown tool；往 `PluginEnv` 加 Manager 句柄
   → `TestPluginTypesExposeNoSiblingStateHandle` 红。
 - G3 负控：同 webhook 两次 `deduped`；同审批答案两次 `duplicate`、不同答案 409。
@@ -295,22 +344,30 @@ KEEL_TEST_DSN=... go test ./internal/harnessext -run TestResumeContinuesTheSameS
 | mcp-apps 场景 Bot 归属 + `mcp.use/mcp.read` 授权（A4.2b 后夹具过期） | `cmd/e2e/mcp_apps.go` |
 | 垂直集成测试 + fake provider 脚本指令 | `internal/producte2e/vertical_w11_test.go`、`internal/agent/fake.go`/`fake_test.go` |
 | G0 生成名负控 / 插件同层句柄负控 | `internal/toolsurface/toolsurface_test.go`、`internal/harnessext/plugin_boundary_test.go` |
+| rebase 后回归：`PUT /v1/settings/providers/{id}/credential` 缺权限声明 → serve 启动即拒 | `internal/accessgate/matrix.go`（`ModeKey` + `secret.write`） |
+| rebase 后回归：COVERAGE §A compaction 状态格不含闭集状态词 → catalog 门红 | `plugins/COVERAGE.md`（§A 状态格；`--write` 重生成 §H） |
+| sidecar 残留检查 needle 指向源目录（命令行里没有）→ 改为脚本名并加正控 | `internal/producte2e/vertical_w11_test.go`（`w11-probe-sidecar.mjs`、`waitForProcess`） |
+| 本轮 rerun 证据替换为 `a549e87` 实测（垂直/R1/G0/G5） | `evidence/w11-gates/{vertical-integration,e0-r1-*,g0-*,g5-*}` |
 
 ## 10. 清理证据
 
-跑完后（本文件写入时）：
+跑完后（2026-11-23 rerun 收尾实测）：
 
 ```text
-$ psql ... -Atc "select datname from pg_database where datname like 'keel_w11%' or datname like 'keel_agent_test_%'"
-(空)
+$ psql "postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable" -Atc \
+    "select datname from pg_database where datname like 'keel_w11%' or datname like 'keel_agent_test_%'" 
+(空；rerun 用的 keel_w11_manual / keel_w11_r1diff / keel_test 已 DROP ... WITH (FORCE))
 $ pgrep -fl "keel-w11|keel-runtime|keel serve|w11-probe|keel-producte2e"
 (空)
-$ lsof -nP -iTCP:13711/13745/13686/13770/13771 -sTCP:LISTEN
-全部 free
+$ lsof -nP -iTCP:13770/13773 -sTCP:LISTEN
+13770 free, 13773 free
+$ ls -d /tmp/keel-w11-* /tmp/keel-r1-base
+(无)
 ```
 
-`/tmp/keel-w11-*`、`/tmp/keel-r1-base`、测试 DSN 指向的临时库全部删除；mcp-apps 场景自己的
-`cleanup.json` 同时记录 `portFree=true/processAlive=false/workDirRemoved=true`（`e0-mcp-apps-cleanup.json`）。
+注意：13771/13772 是**本机既有的无关 python 静态服务**（2026-11-04 起就在），不是本轮的残留；
+本轮 R1 因此改用 13770/13773。mcp-apps 场景自己的 `cleanup.json` 记录
+`portFree=true/processAlive=false/workDirRemoved=true`（`e0-mcp-apps-cleanup.json`）。
 
 ## 11. 复跑入口（按门）
 
@@ -336,5 +393,7 @@ go run ./cmd/e2e -scenario core -bin <runtime> -dsn <dedicated> -port 13745 -res
 go run ./cmd/e2e -scenario mcp-apps -keel-bin <keel> -out <dir> -dsn <dedicated> -mcp-apps-port 13686
 ```
 
-`scripts/acceptance-all.sh` 的完整 battery 仍需要：Dockerized PostgreSQL（`KEEL_PG_CTR`）+
-Linux cgroup v2 + ≥2GB 容器预算；在 macOS/无 Docker 环境只能跑上表分项。
+`scripts/acceptance-all.sh` 的 DB reset 已改为本地 psql（`0c0138a`），但完整 battery 仍会因为
+`acceptance-drain/inflight/perf/handoff-rss/rss/g5-perf` 需要 Dockerized PostgreSQL
+（`KEEL_PG_CTR`）+ Linux cgroup v2 + ≥2GB 容器预算而无法在 macOS/无 Docker 环境跑完；
+只能跑上表分项（本轮已跑 build/vet、R1、catalog、垂直、G0、G5）。

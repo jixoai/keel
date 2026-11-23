@@ -1,9 +1,14 @@
 === RUN   TestForkCreatesAPrefixSessionCardAndInheritedBinding
---- PASS: TestForkCreatesAPrefixSessionCardAndInheritedBinding (2.55s)
-=== RUN   TestSubagentReturnCarriesArtifactRefsAndParentNote
---- PASS: TestSubagentReturnCarriesArtifactRefsAndParentNote (1.34s)
+    fork_test.go:115: KEEL_TEST_DSN not set
+--- SKIP: TestForkCreatesAPrefixSessionCardAndInheritedBinding (0.00s)
+=== RUN   TestForkRefusesAnInexactOrigin
+    fork_test.go:311: KEEL_TEST_DSN not set
+--- SKIP: TestForkRefusesAnInexactOrigin (0.00s)
+=== RUN   TestResumeContinuesTheSameSession
+    fork_test.go:379: KEEL_TEST_DSN not set
+--- SKIP: TestResumeContinuesTheSameSession (0.00s)
 === RUN   TestForkCapacityRetryConvergesToOneCard
---- PASS: TestForkCapacityRetryConvergesToOneCard (0.43s)
+    fork_test.go:774: KEEL_TEST_DSN not set
+--- SKIP: TestForkCapacityRetryConvergesToOneCard (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessext	5.316s
-exit=0
+ok  	github.com/jixoai/keel/internal/harnessext	0.548s

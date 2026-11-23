@@ -105,4 +105,4 @@ R1 differential: 152 leaf paths compared, 103 difference(s), 103 allowed, 0 unex
   allowed /sse/2/data/inputSeqs/0 (ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate.)
   allowed /sse/2/data/inputSeqs/1 (ADDED field (kernel-loop): the assistant message records payload.inputSeqs — the committed user inputs the request presented to the model. This is the consumption fact owedTurn uses instead of the read watermark. Values are pinned to the scenario's seqs so a wrong set fails the gate.)
 verdict: PASS (no difference outside the allowlist; every allow rule fired)
-report: /tmp/keel-w11-r1/report.json
+report: /tmp/keel-takeover/w11-rerun/r1/report.json
