@@ -2,7 +2,9 @@
 
 Date: 2026-11-23. Change: `keel-harness-v2`，W4 面板的复核 P2。
 Worktree: `.worktrees/keel-w4-followups`，branch `task/keel-w4-followups`，
-base `main 8d6252b`。提交：`dfae305`（后端）、`9864279`（web）。
+base `main 9480bf8`。提交：`11a96f6`（后端分页/有界读）、`6de2ba2`（web 翻页/hash/
+文案）、`cfff353`（证据）、`1c09863`（harness 类型守卫）、`0baea81`（attach fold
+坏行失败闭合）。
 
 本切片只收口 W4 面板的 5 个 P2；不新增面板真值、不写任务状态、不改账本。
 测试用本机单实例 PostgreSQL 18（`KEEL_TEST_DSN=postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable`），

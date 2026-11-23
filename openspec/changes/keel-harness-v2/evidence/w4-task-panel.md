@@ -8,6 +8,11 @@ Worktree: `.worktrees/keel-w4-taskpanel`, branch `task/keel-w4-taskpanel`.
 上界时是 floor=1 而不是伪造精确值；资源视图增加会话清单的按卡归属组
 （`lastTaskId`）及失败/空/未接三态。见 §1.1、§1.2、§2、§3。
 
+第三轮（W4 follow-up，同日）：清单改为 `limit/cursor` 分页并带 manifest hash；
+own cards / 事件流 / attach 历史均有界读取；fixture 对齐投影；0 字节、短 hash、
+floor-1 文案修正。本文旧描述已按当前代码更正，完整证据见
+`evidence/w4-followups/w4-followups.md`。
+
 本证据只覆盖**面板这一项**。W11 的 alpha 切片
 「任务创建 → bash 执行 → capture → 面板可见 → fork → 合并 → 卸载插件零残留」里，
 面板可见这一段由本切片交付；其余段（bash/capture/fork/合并/卸载）各自的状态见
@@ -34,9 +39,9 @@ Worktree: `.worktrees/keel-w4-taskpanel`, branch `task/keel-w4-taskpanel`.
 
 | 件 | 文件 | 行为 |
 | --- | --- | --- |
-| 折叠与状态 | `web/src/data/tasks.ts`（新） | `taskTree`（own 卡按创建序、成员按读数序、外层父卡置顶、`externalParent` 标"另一会话"）、`forkBranches`、`eventLines`/`eventDetail`（每种 kind 只说自己带的字段）、`panelGaps`（每个上限一句、外来 kind 只报一次；成员截断不冒充精确总数：count>1 说"至少还有 N 张"，count=1 只说"达到上限"）、`panelPhase`（五态）、`resourceChanged`/`previewSummary`、`shouldShowTaskPanel`；`fileReferences`（会话清单按 `lastTaskId` 归属到本会话 own 卡；别的会话的卡不冒充；已挂载的 (taskId, path) 交给资源组，不重复打印；组序按树序）；`taskPanelAccess` 单例（同一 `store.identityApi()` seam，读一次/会话，`ensure` 对重入与失败重读有守卫）。 |
+| 折叠与状态 | `web/src/data/tasks.ts`（新） | `taskTree`（own 卡按创建序、成员按读数序、外层父卡置顶、`externalParent` 标"另一会话"）、`forkBranches`、`eventLines`/`eventDetail`（每种 kind 只说自己带的字段）、`panelGaps`（每个上限一句、外来 kind 只报一次；成员截断不冒充精确总数：count>1 说"至少还有 N 张"，count=1 只说"至少 1 张"，不说"达到/上限"）、`panelPhase`（五态）、`resourceChanged`/`previewSummary`、`shouldShowTaskPanel`；`fileReferences`（会话清单按 `lastTaskId` 归属到本会话 own 卡；别的会话的卡不冒充；已挂载的 path 交给资源组，不重复打印；组序按树序）；`taskPanelAccess` 单例（同一 `store.identityApi()` seam，读一次/会话，`ensure` 对重入与失败重读有守卫）。 |
 | 清单读数 | `web/src/data/{store,identity-api}.ts` | 面板与任务投影**并行**读会话清单 `GET /v1/sessions/{id}/files`，走同一个 `identityApi()` seam（fixture / harness / live 一致）；`files` / `filesAvailable` / `filesTruncated` / `filesError` 分开记录：失败不伪装成空清单，late answer 不落到已切换的会话，未接清单的部署整组不出现。 |
-| 面板 | `web/src/screens/books/task-panel.tsx`（新） | `TaskPanelBody`（五态 + 图 / 事件流 / 资源三视图）；资源视图的 `task-panel-files` 组：按卡归属的清单文件、空态 `task-panel-files-empty`、失败态 `task-panel-files-error`、清单截断提示 `task-panel-files-truncated`；打开清单文件按 path 预览，无引用 hash 时徽标是「清单当前版本」而不是「未核对」/「与引用一致」。`TaskPanelEntry`（运行页一行入口）；`TaskPanelSheet`（390 的底部 Sheet）。全部 kit 组件 + solid-glass 令牌，无硬编码色值，无新顶部栏元素（A4.4f 未动）。 |
+| 面板 | `web/src/screens/books/task-panel.tsx`（新） | `TaskPanelBody`（五态 + 图 / 事件流 / 资源三视图）；资源视图的 `task-panel-files` 组：按卡归属的清单文件、空态 `task-panel-files-empty`、失败态 `task-panel-files-error`、清单截断提示 `task-panel-files-truncated`；打开清单文件按 path 预览；清单行带 hash 时做真实比对（一致/文件已变化），只有行本身无 hash 才显示「清单当前版本」。`TaskPanelEntry`（运行页一行入口）；`TaskPanelSheet`（390 的底部 Sheet）。全部 kit 组件 + solid-glass 令牌，无硬编码色值，无新顶部栏元素（A4.4f 未动）。 |
 | 入口 | `web/src/screens/books/run.tsx` | 运行页纸面上的一个低噪声 band：`run-task-panel-entry`；1440 展开在 run paper 内（`run-task-panel-band`），≤767 走 `TaskPanelSheet`。不新增章节，不改 `shell.tsx`/`App.tsx`/`settings.tsx`（W12 与身份 lane 的文件未碰）。 |
 | 数据 seam | `web/src/data/{contract,http,identity-api,store,fixture,fixture-identity}.ts` | `TaskPanelView`/`FilePreviewView` wire 类型；`taskPanel`/`filePreview` 解析（缺字段保持缺）；`IdentityApi`/`Client` 可选方法（部署未接则入口消失）；fixture 真状态：captain 两张 own 卡、sub-agent 成员、fork 成员（`originSeq 12`）、两份 attach 资源与预览内容，外加一份**只有清单归属**的 `reports/refund-by-channel.csv`（summary 卡写入，没有 attach 事件）；fixture `capabilities` 报 `task.panel: true`。**fixture 的 fork 父卡是 captain 卡**，与投影的 join 语义一致（fork 挂在成员卡下时，读不到；见 §5 注）。 |
 
@@ -118,8 +123,8 @@ nsh test --target tui src/screens/books/task-panel.tui.test.tsx   # 8/8
 4. 五态：loading / empty / error（请求编号 `k-panel-1`）/ permission（`查看会话`）；
 5. 资源预览的「文件已变化」态：说明"下面是当前内容，不是卡记录的那一份"，
    且不出现"与引用一致"；
-6. 清单归属文件可直接预览：徽标 `清单当前版本`（没有可核对的引用 hash），
-   内容是该 CSV 的当前页；
+6. 清单归属文件可直接预览：带 manifest hash 时徽标 `与引用一致`（hash 不匹配
+   则 `文件已变化`）；只有清单行本身无 hash 才显示 `清单当前版本`；内容是该 CSV 的当前页；
 7. 清单三态：失败显示 `task-panel-files-error` 且不出现文件组；空清单显示
    `task-panel-files-empty`；transport 未接则整组不出现；
 8. 390：入口在、展开进 Sheet、单列、`run-task-panel-band` 不出现；切到资源
@@ -140,7 +145,7 @@ nsh test --target tui src/screens/books/task-panel.tui.test.tsx   # 8/8
 | 资源预览 | `task-panel-resources`、打开 `reports/refund-analysis.md`、`与引用一致` | pass |
 | 文件归属组 | `task-panel-files`、`task-panel-file-reports/refund-by-channel.csv` | pass |
 | 挂载资源不重复 | `task-panel-file-reports/refund-analysis.md` count = 0（它只在资源组） | pass |
-| 清单文件预览 | 打开 `refund-by-channel.csv`：`清单当前版本` + `渠道,退款单,占比` | pass |
+| 清单文件预览 | 打开 `refund-by-channel.csv`：manifest hash 与清单行一致时 `与引用一致` + `渠道,退款单,占比` | pass |
 | 横向溢出 | 1440/1440/…/390/390（doc/body scrollWidth ≤ innerWidth） | pass |
 | 控制台 | console errors = 0，page errors = 0，failed requests = 0 | pass |
 
@@ -155,7 +160,7 @@ nsh test --target tui src/screens/books/task-panel.tui.test.tsx   # 8/8
   `0ad61e2`），仅作历史状态参考；它不是同视图的 before 对照，本次未采集同视图
   before（原文件名为 `task-panel-resources-before-1440.png`，已按事实改名）。
 - `w4-task-panel/task-panel-resources-after-1440.png` — **改后**：新增
-  `文件清单 · 按卡归属（lastTaskId）` 组、CSV 行与「清单当前版本」预览。
+  `文件清单 · 按卡归属（lastTaskId）` 组、CSV 行与带 hash 的清单预览。
 - `w4-task-panel/report.json` — 断言、溢出数字、console/page error。
 
 ## 3. 负控（都能判失败）
