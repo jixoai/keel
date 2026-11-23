@@ -78,9 +78,18 @@
 - [x] 冻结 `catalog.json` 的 id/status/wave；`plugin-inventory.md` 仅作设计期附录，不作为波次真值 （对账 2026-11-20：部分——缺口：catalog.json 无 wave/dshGroups；inventory 已降为附录，但 catalog 未冻结）
 - [x] 五种 **layer**（kernel/harness/provider/ui/service）的装载边界与架构测试；
       承载 `kind` 仍是三种（in-process/sidecar/webview），两者正交
-- [ ] 四层装配（base/mode/preset/config.toml）与 row id overlay 语义
-- [ ] 能力 seam 清单（fs/shell/subprocess/exec-surface/terminal）与 capability matrix
-- [ ] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
+- [x] 四层装配（base/mode/preset/config.toml）与 row id overlay 语义
+      （W0.5-assembly：纯模型 `internal/assembly`（build/config/seam）+ 生产适配
+      `internal/loadout/assembly.go`；契约 `docs/ASSEMBLY.md`、ADR
+      `adr/0003-four-layer-row-overlay.md`；测试 `internal/assembly/*_test.go`、
+      `internal/loadout/assembly_test.go`；证据 `evidence/w05-assembly/`。文件级
+      config.toml 读取/原子 rename、headless/tui/sdk bundle 仍留 W8/W9）
+- [x] 能力 seam 清单（fs/shell/subprocess/exec-surface/terminal）与 capability matrix
+      （W0.5-assembly：`seam.go` 闭集 capability + `Registry.Matrix()` +
+      `Prepare` 启动前 typed rejection `unsupported_capability` / `invalid_capability`；
+      真实 local/remote/SSH provider 注册留 W8/W9）
+- [x] 不照搬清单写入 ADR：Cordis/typert、一能力一工具、70 个 UI 包、sandbox 族、DSH ssh
+      （W0.5-assembly：`adr/0003-four-layer-row-overlay.md` §不照搬清单）
 - [x] 冻结扩展面声明格式：`layer` / `provides.slots` / `contributes` / `extensibility.json` +
       `EXTENSIBILITY.md`（创造模式的聚合输入）
 - [x] **catalog 对账**：以 `catalog.json` 为唯一机读真源，`COVERAGE.md` §A/§B/§C 逐行映射到 （对账 2026-11-20：部分——缺口：COVERAGE.md §A/B/C 有映射，但 goal/todo/plan/team/workspace/guard 仍独立；无 absent+理由逐行处置）

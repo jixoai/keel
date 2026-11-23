@@ -169,8 +169,12 @@ func FromTenantConfig(cfg host.TenantConfig, opts Options, provide func(service 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("loadout: %w", err)
 	}
+	services, err := AssembledServices(cfg, opts)
+	if err != nil {
+		return nil, err
+	}
 	enabled := map[string]bool{}
-	for _, name := range EnabledServices(cfg, opts) {
+	for _, name := range services {
 		enabled[name] = true
 	}
 	filtered := func(name string) servicegraph.Factory {
