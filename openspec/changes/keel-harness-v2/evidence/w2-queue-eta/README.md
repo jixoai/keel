@@ -136,6 +136,12 @@ throwaway PostgreSQL on `127.0.0.1:13742`). Coverage:
   lowered tenant/memory ceilings, ETA samples + pruning, tenant hard refusal,
   pack memory across groups, unsupported estimate, user.message and `EnqueueRun`
   preserving queued, placement move re-homing a queued row to the new group tail.
+- Review P1 regression (2026-11-23): a queued row re-homed from an unbounded
+  group into a memory-bounded one now refreshes `runs.memory_bytes` from the
+  target group's estimate, so promotion cannot stall forever at the head.
+  `TestQueuedRunMoveToMemoryBoundedGroupRefreshesEstimate` (MemStore) and
+  `TestPGQueuedRunMoveToMemoryBoundedGroupRefreshesEstimate` (real PG) pin it.
+  The previously existing move tests only targeted unbounded groups.
 - HTTP e2e (real PG + production wiring): 202 + position + known ETA +
   Retry-After, concurrent inputs (3 slots / 12 inputs → 3 pending + 9 queued,
   all 12 inputs durable), crash-pending convergence with promotion, `/run`

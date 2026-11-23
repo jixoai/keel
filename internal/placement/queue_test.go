@@ -432,6 +432,51 @@ func TestQueuedRunFollowsAPlacementMove(t *testing.T) {
 	}
 }
 
+func TestQueuedRunMoveToMemoryBoundedGroupRefreshesEstimate(t *testing.T) {
+	ctx := context.Background()
+	estimates := map[uuid.UUID]int64{}
+	svc, _ := memService(t, Options{MemoryEstimator: estimator(estimates)})
+	tenant := uuid.New()
+	groupA := mustGroup(t, svc, tenant, "move-unbounded", 1)
+	groupB := memoryGroup(t, svc, tenant, "move-bounded", 1, 100)
+	holder, moving := uuid.New(), uuid.New()
+	estimates[holder], estimates[moving] = 10, 20
+	mustJoin(t, svc, tenant, holder, groupA.GroupID, "w1", time.Minute)
+	mustJoin(t, svc, tenant, moving, groupA.GroupID, "w1", time.Minute)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: moving})
+	if err != nil || !queued.Queued {
+		t.Fatalf("queue moving = %+v err=%v", queued, err)
+	}
+	if queued.MemoryBytes != 0 {
+		t.Fatalf("unbounded source memory = %d, want the zero estimate", queued.MemoryBytes)
+	}
+
+	current, err := svc.Store().GetPlacement(ctx, tenant, moving)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Leave(ctx, LeaveRequest{
+		TenantID: tenant, SessionID: moving, WorkerID: current.WorkerID, ExpectedEpoch: current.Epoch,
+	}); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+	mustJoin(t, svc, tenant, moving, groupB.GroupID, "w2", time.Minute)
+	admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: moving})
+	if err != nil {
+		t.Fatalf("re-admit after the move: %v", err)
+	}
+	if admission.GroupID != groupB.GroupID || admission.Queued {
+		t.Fatalf("admission after the move = %+v, want it admitted in %s", admission, groupB.GroupID)
+	}
+	if admission.MemoryBytes != estimates[moving] {
+		t.Fatalf("re-homed memory = %d, want the target group's estimate %d",
+			admission.MemoryBytes, estimates[moving])
+	}
+}
+
 // TestRunSettledPromotesAndFeedsETA pins the settlement hook: a settled attempt
 // promotes the FIFO head and its observed duration becomes the next ETA.
 func TestRunSettledPromotesAndFeedsETA(t *testing.T) {

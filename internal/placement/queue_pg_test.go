@@ -316,6 +316,48 @@ func TestPGQueuedRunFollowsAPlacementMove(t *testing.T) {
 	}
 }
 
+func TestPGQueuedRunMoveToMemoryBoundedGroupRefreshesEstimate(t *testing.T) {
+	st := pgPlacementStore(t)
+	estimates := map[uuid.UUID]int64{}
+	svc := pgMemoryService(t, st, estimator(estimates))
+	ctx := context.Background()
+	tenant := pgTenant(t, st)
+	groupA := mustGroup(t, svc, tenant, "pg-move-unbounded", 1)
+	groupB := memoryGroup(t, svc, tenant, "pg-move-bounded", 1, 100)
+	holder, moving := pgSession(t, st, tenant), pgSession(t, st, tenant)
+	estimates[holder], estimates[moving] = 10, 20
+	mustJoin(t, svc, tenant, holder, groupA.GroupID, "w1", time.Minute)
+	mustJoin(t, svc, tenant, moving, groupA.GroupID, "w1", time.Minute)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: moving})
+	if err != nil || !queued.Queued {
+		t.Fatalf("queue moving = %+v err=%v", queued, err)
+	}
+	current, err := svc.Store().GetPlacement(ctx, tenant, moving)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Leave(ctx, LeaveRequest{
+		TenantID: tenant, SessionID: moving, WorkerID: current.WorkerID, ExpectedEpoch: current.Epoch,
+	}); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+	mustJoin(t, svc, tenant, moving, groupB.GroupID, "w2", time.Minute)
+	admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: moving})
+	if err != nil {
+		t.Fatalf("re-admit after the move: %v", err)
+	}
+	if admission.GroupID != groupB.GroupID || admission.Queued {
+		t.Fatalf("admission after the move = %+v, want it admitted in %s", admission, groupB.GroupID)
+	}
+	if admission.MemoryBytes != estimates[moving] {
+		t.Fatalf("re-homed memory = %d, want the target group's estimate %d",
+			admission.MemoryBytes, estimates[moving])
+	}
+}
+
 // TestPGQueueETAKnownFromObservedDurations pins the ETA on the database: the
 // group window comes from recorded attempts, and no history stays unknown.
 func TestPGQueueETAKnownFromObservedDurations(t *testing.T) {

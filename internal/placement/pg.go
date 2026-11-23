@@ -658,11 +658,15 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			// re-claimed elsewhere). The queued row follows the placement and joins
 			// the target group's queue at its tail: queue positions are meaningful
 			// only inside one group.
+			// The estimate is resolved for the *target* group: a row queued in
+			// an unbounded group carries 0, and promotion in a memory-bounded
+			// target would otherwise refuse it forever at the head of the queue.
 			if _, err := tx.Exec(ctx,
 				`UPDATE runs
-				    SET group_id = $3, queue_seq = nextval('runs_queue_seq'), updated_at = now()
+				    SET group_id = $3, queue_seq = nextval('runs_queue_seq'),
+				        memory_bytes = $4, updated_at = now()
 				  WHERE tenant_id = $1 AND session_id = $2 AND status = 'queued'`,
-				req.tenantID, req.sessionID, group.GroupID); err != nil {
+				req.tenantID, req.sessionID, group.GroupID, req.memoryEstimate); err != nil {
 				return fmt.Errorf("placement: re-home queued run: %w", err)
 			}
 			selfGroup = group.GroupID

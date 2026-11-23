@@ -436,6 +436,9 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 		m.nextQueueSeq++
 		selfRun.groupID = placement.GroupID
 		selfRun.queueSeq = m.nextQueueSeq
+		// The queued row now belongs to the target group; carry the estimate
+		// resolved for that group instead of the source group's 0.
+		selfRun.memoryBytes = req.memoryEstimate
 		m.runs[key] = selfRun
 	}
 	if selfAdmitted {
