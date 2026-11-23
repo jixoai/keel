@@ -314,10 +314,13 @@ FOR EACH ROW EXECUTE FUNCTION notify_event();
 
 -- One run row per session. Workers claim it with FOR UPDATE SKIP LOCKED; a
 -- crashed process leaves the lease behind and any worker may reclaim it.
+-- 'queued' is the placement queue's waiting state: durable, but neither
+-- claimable (the kernel's predicate matches only pending/running) nor counted
+-- against a group/tenant slot until promotion turns it into 'pending'.
 CREATE TABLE IF NOT EXISTS runs (
     tenant_id   uuid NOT NULL,
     session_id  uuid NOT NULL,
-    status      text NOT NULL DEFAULT 'pending', -- pending|running|done|failed
+    status      text NOT NULL DEFAULT 'pending', -- queued|pending|running|done|failed
     lease_until timestamptz,
     attempts    int NOT NULL DEFAULT 0,
     cursor_seq  bigint NOT NULL DEFAULT 0,
@@ -968,6 +971,58 @@ CREATE INDEX IF NOT EXISTS runs_active_group
 CREATE INDEX IF NOT EXISTS runs_active_tenant
     ON runs (tenant_id)
     WHERE status IN ('pending', 'running');
+
+-- --- run queue and ETA history (change keel-harness-v2, W2 queue+ETA) -------
+--
+-- A full group no longer refuses a run: the run row becomes 'queued', a durable
+-- FIFO entry that holds no slot and that the kernel's claim predicate never
+-- matches. queue_seq is the arrival order (a global sequence is enough because
+-- positions are compared inside one group). memory_bytes is the admission
+-- memory estimate: the pack strategy's headroom and the group memory ceiling
+-- are sums over active rows, so the number travels with the run it describes.
+--
+-- Promotion is the single guarded transition queued -> pending. It runs in the
+-- same transaction as the release that freed a slot (and on an attempt
+-- settlement through the runtime's settlement hook), under the per-tenant
+-- admission advisory lock, so a row is promoted exactly once and FIFO.
+CREATE SEQUENCE IF NOT EXISTS runs_queue_seq;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema()
+                     AND table_name = 'runs' AND column_name = 'queue_seq') THEN
+        ALTER TABLE runs ADD COLUMN queue_seq bigint;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema()
+                     AND table_name = 'runs' AND column_name = 'memory_bytes') THEN
+        ALTER TABLE runs ADD COLUMN memory_bytes bigint NOT NULL DEFAULT 0;
+    END IF;
+END
+$$;
+
+CREATE INDEX IF NOT EXISTS runs_queued_fifo
+    ON runs (tenant_id, group_id, queue_seq)
+    WHERE status = 'queued';
+
+-- Observed attempt durations: the ONLY source of the queue ETA average. A
+-- sample is written when an attempt settles (the worker's settlement hook); the
+-- placement store retains the newest samples per group and averages a window of
+-- them. No history means "ETA unknown" (never a fabricated zero).
+CREATE TABLE IF NOT EXISTS run_duration_samples (
+    tenant_id   uuid NOT NULL,
+    group_id    uuid NOT NULL,
+    duration_ms bigint NOT NULL,
+    observed_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT run_duration_samples_duration_check CHECK (duration_ms > 0),
+    CONSTRAINT run_duration_samples_group_fk
+        FOREIGN KEY (tenant_id, group_id)
+        REFERENCES groups (tenant_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS run_duration_samples_group
+    ON run_duration_samples (tenant_id, group_id, observed_at DESC);
 
 -- Scheduled-trigger catch-up cursor (change keel-harness-v2, W10). One row per
 -- (tenant, trigger): the newest scheduled window the engine processed. It is

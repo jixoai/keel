@@ -464,53 +464,293 @@ func TestDrainingGroupRenewsButTakesNoNewWork(t *testing.T) {
 	}
 }
 
-// TestGroupSlotsRefuseWithRetryAfter pins the 429 shape: a full group refuses
-// with a typed capacity error and a non-zero Retry-After; releasing a slot
-// admits the next run.
-func TestGroupSlotsRefuseWithRetryAfter(t *testing.T) {
+// TestFullGroupQueuesFIFOWithPosition pins the queue contract: a full group
+// admits the run into a durable FIFO entry (no slot) with a 1-based position
+// and an unknown ETA until durations are observed; releasing the holder
+// promotes the head, in arrival order, exactly once.
+func TestFullGroupQueuesFIFOWithPosition(t *testing.T) {
 	ctx := context.Background()
 	svc, store := memService(t, Options{})
 	tenant := uuid.New()
 	group := mustGroup(t, svc, tenant, "slots", 1)
-	s1, s2 := uuid.New(), uuid.New()
-	for _, session := range []uuid.UUID{s1, s2} {
+	holder, second, third := uuid.New(), uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{holder, second, third} {
 		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
 	}
 	_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: uuid.New()})
 	if conflict := asConflict(t, err); conflict.Reason != ReasonPlacementNotFound {
 		t.Fatalf("admit for an unplaced session = %+v, want placement_not_found", conflict)
 	}
-	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: s1}); err != nil {
+	first, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder})
+	if err != nil {
 		t.Fatalf("first admit: %v", err)
 	}
-	if err := store.SetRunStatus(tenant, s1, RunStatusRunning, 2*time.Second); err != nil {
+	if first.Queued {
+		t.Fatalf("first admission = %+v, want a slot", first)
+	}
+	if err := store.SetRunStatus(tenant, holder, RunStatusRunning, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: s2})
+
+	queuedSecond, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: second})
+	if err != nil {
+		t.Fatalf("queue second: %v", err)
+	}
+	if !queuedSecond.Queued || queuedSecond.QueuePosition != 1 || queuedSecond.ActiveGroup != 1 {
+		t.Fatalf("second admission = %+v, want queued at position 1 with one active", queuedSecond)
+	}
+	if queuedSecond.ETA.Known || queuedSecond.ETA.Wait != 0 {
+		t.Fatalf("ETA = %+v, want unknown with no observed durations (never a zero estimate)", queuedSecond.ETA)
+	}
+	queuedThird, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: third})
+	if err != nil {
+		t.Fatalf("queue third: %v", err)
+	}
+	if !queuedThird.Queued || queuedThird.QueuePosition != 2 {
+		t.Fatalf("third admission = %+v, want queued at position 2", queuedThird)
+	}
+
+	// A repeated input on a queued session keeps its place (idempotent queueing).
+	again, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: second})
+	if err != nil {
+		t.Fatalf("re-admit queued: %v", err)
+	}
+	if !again.Queued || again.QueuePosition != 1 || again.Created {
+		t.Fatalf("re-admission = %+v, want queued at position 1 and not created", again)
+	}
+
+	// The kernel settles the holder (a terminal settlement, observed through the
+	// promotion path): the head is promoted, in FIFO order, and counts again.
+	if err := store.SetRunStatus(tenant, holder, RunStatusDone, 0); err != nil {
+		t.Fatal(err)
+	}
+	promoted, err := svc.PromoteQueued(ctx, tenant)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || promoted[0].SessionID != second {
+		t.Fatalf("promoted = %+v, want exactly the FIFO head (%s)", promoted, second)
+	}
+	state, err := svc.QueueState(ctx, tenant, second)
+	if err != nil || state.Queued {
+		t.Fatalf("second queue state = %+v err=%v, want promoted", state, err)
+	}
+	state, err = svc.QueueState(ctx, tenant, third)
+	if err != nil || !state.Queued || state.Position != 1 {
+		t.Fatalf("third queue state = %+v err=%v, want queued at position 1", state, err)
+	}
+	// Promotion is idempotent: a second sweep has nothing to promote.
+	promoted, err = svc.PromoteQueued(ctx, tenant)
+	if err != nil || len(promoted) != 0 {
+		t.Fatalf("second promotion = %+v err=%v, want none (the slot is taken)", promoted, err)
+	}
+}
+
+// TestQueueETAKnownFromObservedDurations pins the ETA source: the wait comes
+// only from observed attempt durations (group window, then tenant fallback) and
+// stays unknown with no history.
+func TestQueueETAKnownFromObservedDurations(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := memService(t, Options{})
+	tenant := uuid.New()
+	group := mustGroup(t, svc, tenant, "eta", 1)
+	holder, waiting := uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{holder, waiting} {
+		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+		t.Fatalf("admit holder: %v", err)
+	}
+	before, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: waiting})
+	if err != nil {
+		t.Fatalf("queue waiting: %v", err)
+	}
+	if before.ETA.Known {
+		t.Fatalf("ETA before any observation = %+v, want unknown", before.ETA)
+	}
+
+	// Four observed 10s attempts give the group a 10s average; position 1 in a
+	// one-slot group is one wave, so the ETA is 10s.
+	for i := 0; i < 4; i++ {
+		if err := svc.ObserveRunDuration(ctx, tenant, holder, 10*time.Second); err != nil {
+			t.Fatalf("observe duration: %v", err)
+		}
+	}
+	state, err := svc.QueueState(ctx, tenant, waiting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.ETA.Known || state.ETA.Wait != 10*time.Second || state.ETA.Basis != "group" || state.ETA.Samples != 4 {
+		t.Fatalf("ETA = %+v, want known 10s from 4 group samples", state.ETA)
+	}
+
+	// A second group with no samples falls back to the tenant window.
+	other := mustGroup(t, svc, tenant, "eta-other", 1)
+	otherHolder, otherWaiting := uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{otherHolder, otherWaiting} {
+		mustJoin(t, svc, tenant, session, other.GroupID, "w1", time.Minute)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: otherHolder}); err != nil {
+		t.Fatalf("admit other holder: %v", err)
+	}
+	fallback, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: otherWaiting})
+	if err != nil {
+		t.Fatalf("queue other waiting: %v", err)
+	}
+	if !fallback.ETA.Known || fallback.ETA.Basis != "tenant" || fallback.ETA.Wait != 10*time.Second {
+		t.Fatalf("tenant fallback ETA = %+v, want known 10s from tenant samples", fallback.ETA)
+	}
+}
+
+// TestQueuePromotionIsExactlyOnce races many promotion passes over one queue:
+// only the free slots are filled, each row once, in FIFO order.
+func TestQueuePromotionIsExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := memService(t, Options{})
+	tenant := uuid.New()
+	group := mustGroup(t, svc, tenant, "promote-race", 2)
+	holderA, holderB := uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{holderA, holderB} {
+		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	}
+	waiting := make([]uuid.UUID, 5)
+	for i := range waiting {
+		waiting[i] = uuid.New()
+		mustJoin(t, svc, tenant, waiting[i], group.GroupID, "w1", time.Minute)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holderA}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holderB}); err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range waiting {
+		admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session})
+		if err != nil || !admission.Queued {
+			t.Fatalf("queue %s = %+v err=%v", session, admission, err)
+		}
+	}
+
+	// Both holders settle; exactly two promotion passes may win two rows.
+	store := svc.Store().(*MemStore)
+	for _, session := range []uuid.UUID{holderA, holderB} {
+		if err := store.SetRunStatus(tenant, session, RunStatusDone, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var promoted atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := svc.PromoteQueued(ctx, tenant)
+			if err != nil {
+				t.Errorf("promote: %v", err)
+				return
+			}
+			promoted.Add(int32(len(got)))
+		}()
+	}
+	wg.Wait()
+	if promoted.Load() != 2 {
+		t.Fatalf("promoted = %d, want exactly 2 (one per freed slot)", promoted.Load())
+	}
+	// FIFO: the two oldest waiting sessions are the ones that run.
+	for i, session := range waiting {
+		state, err := svc.QueueState(ctx, tenant, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantQueued := i >= 2
+		if state.Queued != wantQueued {
+			t.Fatalf("waiting[%d] queued=%v, want %v", i, state.Queued, wantQueued)
+		}
+		if wantQueued && state.Position != i-1 {
+			t.Fatalf("waiting[%d] position = %d, want %d", i, state.Position, i-1)
+		}
+	}
+}
+
+// TestQueueTenantQuotaIsHardRefusal keeps the tenant quota out of the queue: a
+// spent quota is a 429 even when the group also has room, and a queued run
+// blocked at promotion by a lowered quota waits instead of overselling it.
+func TestQueueTenantQuotaIsHardRefusal(t *testing.T) {
+	ctx := context.Background()
+	limit := 1
+	svc, _ := memService(t, Options{
+		TenantRunLimit: func(context.Context, uuid.UUID) (int, error) { return limit, nil },
+	})
+	tenant := uuid.New()
+	group := mustGroup(t, svc, tenant, "quota-queue", 1)
+	first, second := uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{first, second} {
+		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: first}); err != nil {
+		t.Fatalf("first admit: %v", err)
+	}
+	_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: second})
 	var capacity *CapacityError
-	if !errors.As(err, &capacity) {
-		t.Fatalf("full group err = %v, want *CapacityError", err)
-	}
-	if capacity.Reason != CapacityGroup || capacity.Limit != 1 || capacity.Active != 1 {
-		t.Fatalf("capacity = %+v, want group 1/1", capacity)
-	}
-	if capacity.RetryAfter < DefaultRetryAfter || capacity.RetryAfter > 3*time.Second {
-		t.Fatalf("retry_after = %s, want [1s, 3s]", capacity.RetryAfter)
+	if !errors.As(err, &capacity) || capacity.Reason != CapacityTenant {
+		t.Fatalf("admit under a spent quota = %v, want the tenant refusal (the queue is not a bypass)", err)
 	}
 	if !IsCapacity(err) {
 		t.Fatal("IsCapacity did not recognise the refusal")
 	}
+	if capacity.RetryAfter < DefaultRetryAfter {
+		t.Fatalf("retry_after = %s, want >= %s", capacity.RetryAfter, DefaultRetryAfter)
+	}
+}
 
-	if err := svc.ReleaseRun(ctx, tenant, s1); err != nil {
+// TestQueuePromotionStopsAtALoweredTenantQuota covers the promotion side: a
+// queued run admitted while the quota had room waits when an administrator
+// lowers the quota under it, and is promoted once room returns.
+func TestQueuePromotionStopsAtALoweredTenantQuota(t *testing.T) {
+	ctx := context.Background()
+	limit := 2
+	svc, _ := memService(t, Options{
+		TenantRunLimit: func(context.Context, uuid.UUID) (int, error) { return limit, nil },
+	})
+	tenant := uuid.New()
+	groupA := mustGroup(t, svc, tenant, "lowered-a", 1)
+	groupB := mustGroup(t, svc, tenant, "lowered-b", 0)
+	holder, waiting, other := uuid.New(), uuid.New(), uuid.New()
+	mustJoin(t, svc, tenant, holder, groupA.GroupID, "w1", time.Minute)
+	mustJoin(t, svc, tenant, waiting, groupA.GroupID, "w1", time.Minute)
+	mustJoin(t, svc, tenant, other, groupB.GroupID, "w1", time.Minute)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
 		t.Fatal(err)
 	}
-	// ReleaseRun only frees an unstarted run; a running run is finished by the
-	// kernel. Simulate that finish, then the next admission fits.
-	if err := store.SetRunStatus(tenant, s1, RunStatusDone, 0); err != nil {
-		t.Fatal(err)
+	queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: waiting})
+	if err != nil || !queued.Queued {
+		t.Fatalf("queue waiting = %+v err=%v", queued, err)
 	}
-	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: s2}); err != nil {
-		t.Fatalf("admit after release: %v", err)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: other}); err != nil {
+		t.Fatalf("admit other: %v", err)
+	}
+
+	// The quota is lowered under the queue, then the holder frees its slot.
+	limit = 1
+	store := svc.Store().(*MemStore)
+	store.SetRunStatus(tenant, holder, RunStatusDone, 0)
+	promoted, err := svc.PromoteQueued(ctx, tenant)
+	if err != nil {
+		t.Fatalf("promote under a lowered quota: %v", err)
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("promoted = %+v, want none (the tenant quota has no room)", promoted)
+	}
+	state, err := svc.QueueState(ctx, tenant, waiting)
+	if err != nil || !state.Queued || state.Position != 1 {
+		t.Fatalf("waiting state = %+v err=%v, want still queued", state, err)
+	}
+
+	// The other group's run settles: room returns and the head is promoted.
+	store.SetRunStatus(tenant, other, RunStatusDone, 0)
+	promoted, err = svc.PromoteQueued(ctx, tenant)
+	if err != nil || len(promoted) != 1 || promoted[0].SessionID != waiting {
+		t.Fatalf("promotion after room returned = %+v err=%v", promoted, err)
 	}
 }
 
@@ -560,13 +800,14 @@ func TestTenantQuotaAggregatesAcrossGroups(t *testing.T) {
 }
 
 // TestConcurrentAdmissionsDoNotOversell runs the two races concurrently: one
-// group limit and one cross-group tenant limit. Exactly the limit is admitted
-// and every other request gets a typed capacity error.
+// group limit and one cross-group tenant limit. Exactly the tenant limit is
+// admitted (the group limit only queues), and every refusal is a typed
+// capacity error, never a silent oversell.
 func TestConcurrentAdmissionsDoNotOversell(t *testing.T) {
 	ctx := context.Background()
 	const attempts = 40
 	tenant := uuid.New()
-	svc, _ := memService(t, Options{
+	svc, store := memService(t, Options{
 		TenantRunLimit: func(context.Context, uuid.UUID) (int, error) { return 5, nil },
 	})
 	groupA := mustGroup(t, svc, tenant, "race-slot-a", 3)
@@ -581,7 +822,7 @@ func TestConcurrentAdmissionsDoNotOversell(t *testing.T) {
 		mustJoin(t, svc, tenant, sessions[i], group, "w1", time.Minute)
 	}
 
-	var admitted, refused, untyped atomic.Int32
+	var admitted, queued, refused, untyped atomic.Int32
 	var wg sync.WaitGroup
 	errs := make(chan error, attempts)
 	for _, session := range sessions {
@@ -589,8 +830,10 @@ func TestConcurrentAdmissionsDoNotOversell(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session})
+			admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session})
 			switch {
+			case err == nil && admission.Queued:
+				queued.Add(1)
 			case err == nil:
 				admitted.Add(1)
 			case IsCapacity(err):
@@ -606,22 +849,18 @@ func TestConcurrentAdmissionsDoNotOversell(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("untyped admission error: %v", err)
 	}
-	if admitted.Load() != 5 || refused.Load() != attempts-5 || untyped.Load() != 0 {
-		t.Fatalf("admissions admitted=%d refused=%d untyped=%d, want 5/%d/0",
-			admitted.Load(), refused.Load(), untyped.Load(), attempts-5)
+	if admitted.Load() != 5 || untyped.Load() != 0 {
+		t.Fatalf("admissions admitted=%d queued=%d refused=%d untyped=%d, want 5 admitted",
+			admitted.Load(), queued.Load(), refused.Load(), untyped.Load())
 	}
-
-	// Nothing beyond the limits is active: each admitted session reports the
-	// same tenant count, so a fresh admissive probe on an already counted
-	// session sees exactly 5.
-	var report Admission
-	for _, session := range sessions {
-		report, _ = svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session})
-		if report.AlreadyActive {
-			break
-		}
+	if got := admitted.Load() + queued.Load() + refused.Load(); got != attempts {
+		t.Fatalf("accounted admissions = %d, want %d", got, attempts)
 	}
-	if !report.AlreadyActive || report.ActiveTenant != 5 {
-		t.Fatalf("active tenant after race = %+v, want 5", report)
+	// Nothing beyond the limits is active: queued rows hold no slot.
+	if active := store.activeTenantLocked(tenant); active != 5 {
+		t.Fatalf("active tenant rows = %d, want exactly the quota 5", active)
+	}
+	if active := store.activeGroupLocked(tenant, groupA.GroupID); active > 3 {
+		t.Fatalf("active group A rows = %d, want <= 3", active)
 	}
 }

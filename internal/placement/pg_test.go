@@ -213,6 +213,9 @@ func TestPGConcurrentClaimsSingleWinner(t *testing.T) {
 
 // TestPGRunSlotGroupLimit pins the group slot refusal and its Retry-After. The
 // slot is freed by finishing the run in the runs table (the kernel's path).
+// TestPGRunSlotGroupLimit pins the database queue: a full group stores the run
+// as a queued FIFO row (no slot, no claimable status), and promotion after the
+// holder settles turns exactly the head into a pending run.
 func TestPGRunSlotGroupLimit(t *testing.T) {
 	st := pgPlacementStore(t)
 	svc := pgService(t, st, 0)
@@ -231,19 +234,24 @@ func TestPGRunSlotGroupLimit(t *testing.T) {
 		  WHERE tenant_id = $1 AND session_id = $2`, tenant, s1); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: s2})
-	var capacity *CapacityError
-	if !errors.As(err, &capacity) {
-		t.Fatalf("full group err = %v, want *CapacityError", err)
+	queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: s2})
+	if err != nil {
+		t.Fatalf("full group admit: %v", err)
 	}
-	if capacity.Reason != CapacityGroup || capacity.Limit != 1 || capacity.Active != 1 {
-		t.Fatalf("capacity = %+v, want group 1/1", capacity)
+	if !queued.Queued || queued.QueuePosition != 1 || queued.ActiveGroup != 1 {
+		t.Fatalf("full group admission = %+v, want queued at position 1", queued)
 	}
-	if capacity.RetryAfter < DefaultRetryAfter {
-		t.Fatalf("retry_after = %s, want >= %s", capacity.RetryAfter, DefaultRetryAfter)
+	if queued.ETA.Known {
+		t.Fatalf("ETA = %+v, want unknown with no observed durations", queued.ETA)
 	}
-	if !IsCapacity(err) {
-		t.Fatal("IsCapacity did not recognise the refusal")
+	if status := pgRunStatus(t, st, tenant, s2); status != "queued" {
+		t.Fatalf("queued run status = %q, want queued", status)
+	}
+	// The queued row holds no slot and is not claimable by the kernel: the
+	// claim predicate matches pending/running only.
+	if n := pgCount(t, st, `SELECT count(*) FROM runs
+	                        WHERE tenant_id = $1 AND status IN ('pending','running')`, tenant); n != 1 {
+		t.Fatalf("active runs = %d, want 1 (the queued row holds no slot)", n)
 	}
 
 	if _, err := st.Pool().Exec(ctx,
@@ -251,8 +259,15 @@ func TestPGRunSlotGroupLimit(t *testing.T) {
 		  WHERE tenant_id = $1 AND session_id = $2`, tenant, s1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: s2}); err != nil {
-		t.Fatalf("admit after finish: %v", err)
+	promoted, err := svc.PromoteQueued(ctx, tenant)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || promoted[0].SessionID != s2 {
+		t.Fatalf("promoted = %+v, want the FIFO head %s", promoted, s2)
+	}
+	if status := pgRunStatus(t, st, tenant, s2); status != "pending" {
+		t.Fatalf("promoted run status = %q, want pending", status)
 	}
 }
 
@@ -314,7 +329,7 @@ func TestPGConcurrentAdmissionsNoOversell(t *testing.T) {
 		mustJoin(t, svc, tenant, sessions[i], group, "w1", time.Minute)
 	}
 
-	var admitted, refused, untyped atomic.Int32
+	var admitted, queued, refused, untyped atomic.Int32
 	var wg sync.WaitGroup
 	errs := make(chan error, len(sessions))
 	for _, session := range sessions {
@@ -322,8 +337,10 @@ func TestPGConcurrentAdmissionsNoOversell(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session})
+			admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session})
 			switch {
+			case err == nil && admission.Queued:
+				queued.Add(1)
 			case err == nil:
 				admitted.Add(1)
 			case IsCapacity(err):
@@ -340,8 +357,11 @@ func TestPGConcurrentAdmissionsNoOversell(t *testing.T) {
 		t.Fatalf("untyped admission error: %v", err)
 	}
 	if admitted.Load() != 5 || untyped.Load() != 0 {
-		t.Fatalf("tenant race admitted=%d refused=%d untyped=%d, want 5/%d/0",
-			admitted.Load(), refused.Load(), untyped.Load(), len(sessions)-5)
+		t.Fatalf("tenant race admitted=%d queued=%d refused=%d untyped=%d, want 5 admitted",
+			admitted.Load(), queued.Load(), refused.Load(), untyped.Load())
+	}
+	if got := admitted.Load() + queued.Load() + refused.Load(); got != int32(len(sessions)) {
+		t.Fatalf("accounted tenant race admissions = %d, want %d", got, len(sessions))
 	}
 	if n := pgCount(t, st, `SELECT count(*) FROM runs
 	                        WHERE tenant_id = $1 AND status IN ('pending','running')`, tenant); n != 5 {
@@ -358,6 +378,7 @@ func TestPGConcurrentAdmissionsNoOversell(t *testing.T) {
 		mustJoin(t, groupSvc, groupTenant, groupSessions[i], limited.GroupID, "w1", time.Minute)
 	}
 	admitted.Store(0)
+	queued.Store(0)
 	refused.Store(0)
 	wg = sync.WaitGroup{}
 	for _, session := range groupSessions {
@@ -365,21 +386,23 @@ func TestPGConcurrentAdmissionsNoOversell(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := groupSvc.AdmitRun(ctx, AdmitRequest{TenantID: groupTenant, SessionID: session})
+			admission, err := groupSvc.AdmitRun(ctx, AdmitRequest{TenantID: groupTenant, SessionID: session})
 			switch {
+			case err == nil && admission.Queued:
+				queued.Add(1)
 			case err == nil:
 				admitted.Add(1)
 			case IsCapacity(err):
 				refused.Add(1)
 			default:
-				errs2 := err
-				t.Errorf("untyped group admission error: %v", errs2)
+				t.Errorf("untyped group admission error: %v", err)
 			}
 		}()
 	}
 	wg.Wait()
-	if admitted.Load() != 3 || refused.Load() != 17 {
-		t.Fatalf("group race admitted=%d refused=%d, want 3/17", admitted.Load(), refused.Load())
+	if admitted.Load() != 3 || queued.Load() != 17 || refused.Load() != 0 {
+		t.Fatalf("group race admitted=%d queued=%d refused=%d, want 3/17/0",
+			admitted.Load(), queued.Load(), refused.Load())
 	}
 	if n := pgCount(t, st, `SELECT count(*) FROM runs
 	                        WHERE tenant_id = $1 AND group_id = $2

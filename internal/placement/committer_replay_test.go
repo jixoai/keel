@@ -2,7 +2,6 @@ package placement
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -100,11 +99,13 @@ func TestGatedCommitterReplaySkipsAFullGroup(t *testing.T) {
 	}
 
 	// The slot the filler owns is untouched: a fresh admission for the replayed
-	// session still sees the full group instead of inheriting a phantom slot.
-	_, err = gate.Admit(ctx, tenant, replaying)
-	var capacity *CapacityError
-	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroup {
-		t.Fatalf("admission after replay = %v, want the group to stay full", err)
+	// session waits at position 1 instead of inheriting a phantom slot.
+	admission, err := gate.Admit(ctx, tenant, replaying)
+	if err != nil {
+		t.Fatalf("admission after replay: %v", err)
+	}
+	if !admission.Queued || admission.QueuePosition != 1 {
+		t.Fatalf("admission after replay = %+v, want queued at position 1", admission)
 	}
 	if got := store.runs[memSessionKey{tenant, filler}].status; got != RunStatusPending {
 		t.Fatalf("filler run = %q, want pending (the only slot)", got)

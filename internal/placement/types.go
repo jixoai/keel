@@ -9,9 +9,14 @@
 //     per user), pin (an explicit group);
 //   - group slots and the tenant run quota are counted in the database, so two
 //     groups cannot sell the same tenant slot and two workers cannot oversell a
-//     group. A full group refuses with 429 + Retry-After rather than queueing:
-//     the admission reserves a slot by writing the pending run row, so nothing
-//     is silently dropped and the client has an explainable retry.
+//     group. A full group queues the run as a durable FIFO entry (status
+//     `queued`, one per session, ordered by a database sequence) and answers
+//     an explainable position + ETA; the tenant quota stays a hard refusal
+//     (429 + Retry-After), so the queue can never become an oversell channel.
+//     A queued row is never claimable by the kernel: promotion is the single
+//     guarded transition queued -> pending, and it runs FIFO on ReleaseRun,
+//     on a terminal attempt settlement, and from a recovery sweep (so a crash
+//     converges the queue).
 //
 // The package owns no kernel state: it reads and writes the `groups` /
 // `session_placement` rows and the existing `runs` table (which is the only
@@ -151,20 +156,31 @@ func IsConflict(err error) bool {
 type CapacityReason string
 
 const (
-	// CapacityGroup: the target group has no free run slot.
+	// CapacityGroup: the target group has no free run slot. A new run is queued
+	// (not refused) when this is the only limit involved; the reason explains a
+	// queued admission and a promotion that is still waiting for a slot.
 	CapacityGroup CapacityReason = "group_slots_full"
+	// CapacityGroupMemory: the target group's memory budget has no headroom for
+	// the run's estimate. Memory is a hard ceiling at admission (a run that does
+	// not fit is refused, not queued behind an estimate nothing can honour);
+	// promotion re-checks it, so a queued run whose group lost headroom waits.
+	CapacityGroupMemory CapacityReason = "group_memory_full"
 	// CapacityTenant: the tenant's run quota is spent across every group. The
 	// number is aggregated from the runs table, so grouping cannot sell the
-	// same tenant slot twice.
+	// same tenant slot twice. This stays a hard refusal: the queue never
+	// bypasses the tenant quota, and a queued run waits at promotion time until
+	// the quota has room again.
 	CapacityTenant CapacityReason = "tenant_quota_exceeded"
 )
 
 // CapacityError is the typed "not now" refusal of a run admission. It is not a
 // conflict (nothing is inconsistent); the client gets 429 + Retry-After, and
-// the run must not be silently dropped.
+// the run must not be silently dropped. A full group is not reported this way
+// anymore: it is a queued admission (Admission.Queued).
 type CapacityError struct {
 	Reason CapacityReason `json:"reason"`
-	// Resource is "group" or "tenant" (diagnostics; it mirrors Reason).
+	// Resource is "group", "group_memory" or "tenant" (diagnostics; it mirrors
+	// Reason).
 	Resource   string        `json:"resource"`
 	TenantID   uuid.UUID     `json:"tenantId"`
 	SessionID  uuid.UUID     `json:"sessionId"`
@@ -172,6 +188,10 @@ type CapacityError struct {
 	Limit      int           `json:"limit"`
 	Active     int           `json:"active"`
 	RetryAfter time.Duration `json:"-"`
+	// LimitBytes/UsedBytes explain a memory-budget refusal (CapacityGroupMemory);
+	// they are zero for slot/quota refusals.
+	LimitBytes int64 `json:"limitBytes,omitempty"`
+	UsedBytes  int64 `json:"usedBytes,omitempty"`
 }
 
 func (e *CapacityError) Error() string {
@@ -288,20 +308,109 @@ type AdmitRequest struct {
 	GroupID   *uuid.UUID
 }
 
-// Admission is a granted run slot. ActiveGroup/ActiveTenant include this
-// session's own row; Limit 0 means unlimited. The slot is reserved by the
-// pending run row and released when the kernel finishes the run (or by
-// ReleaseRun when an admitted run is abandoned before it starts).
+// Admission is the outcome of a run admission: either a granted slot or a
+// durable position in the group's FIFO queue. ActiveGroup/ActiveTenant count
+// active (pending+running) rows and include this session's own row; Limit 0
+// means unlimited. A queued admission holds no slot: the queued row is the
+// durable queue entry, it is excluded from every active count, and promotion
+// (FIFO, exactly once) turns it into a pending run when a slot frees.
 type Admission struct {
-	TenantID      uuid.UUID     `json:"tenantId"`
-	SessionID     uuid.UUID     `json:"sessionId"`
-	GroupID       uuid.UUID     `json:"groupId"`
-	ActiveGroup   int           `json:"activeGroup"`
-	LimitGroup    int           `json:"limitGroup"`
-	ActiveTenant  int           `json:"activeTenant"`
-	LimitTenant   int           `json:"limitTenant"`
-	AlreadyActive bool          `json:"alreadyActive"`
-	RetryAfter    time.Duration `json:"-"`
+	TenantID     uuid.UUID `json:"tenantId"`
+	SessionID    uuid.UUID `json:"sessionId"`
+	GroupID      uuid.UUID `json:"groupId"`
+	ActiveGroup  int       `json:"activeGroup"`
+	LimitGroup   int       `json:"limitGroup"`
+	ActiveTenant int       `json:"activeTenant"`
+	LimitTenant  int       `json:"limitTenant"`
+	// AlreadyActive means the session already had an active (pending/running)
+	// row in this group before this call; the call reserved no extra slot.
+	AlreadyActive bool `json:"alreadyActive"`
+	// Created means this call wrote the run reservation/queue entry. It is what
+	// a failed commit releases; a re-admission of an existing row is not.
+	Created bool `json:"created"`
+	// Queued means the run waits in the group's FIFO queue. The input commit
+	// still proceeds (the message is durable); the run starts on promotion.
+	Queued        bool     `json:"queued"`
+	QueuePosition int      `json:"queuePosition,omitempty"`
+	ETA           QueueETA `json:"eta"`
+	// MemoryBytes is the estimate recorded on the run row (0 when the group has
+	// no memory budget or the estimate is unknown).
+	MemoryBytes int64 `json:"memoryBytes,omitempty"`
+	// RetryAfter is the explainable wait a hard capacity refusal advertises.
+	RetryAfter time.Duration `json:"-"`
+}
+
+// QueueETA is the explainable wait of a queued run. Known=false is the
+// documented fallback when the group (and its tenant) have no observed run
+// durations yet: the wait is unknown, never a fabricated zero. Wait is derived
+// only from observed attempts: avgDuration * ceil(position/limit).
+type QueueETA struct {
+	Known   bool          `json:"known"`
+	Wait    time.Duration `json:"-"`
+	Samples int           `json:"samples"`
+	// Basis is "group" or "tenant": which rolling window produced the average.
+	Basis string `json:"basis,omitempty"`
+}
+
+// QueueState is the durable queue fact for one session, read after a commit by
+// the HTTP edge so a queued admission can answer 202 with its position and ETA.
+type QueueState struct {
+	TenantID  uuid.UUID `json:"tenantId"`
+	SessionID uuid.UUID `json:"sessionId"`
+	GroupID   uuid.UUID `json:"groupId"`
+	Queued    bool      `json:"queued"`
+	Position  int       `json:"position"`
+	Limit     int       `json:"limit"`
+	Active    int       `json:"active"`
+	ETA       QueueETA  `json:"eta"`
+}
+
+// Promotion is one queued run that became pending.
+type Promotion struct {
+	TenantID  uuid.UUID `json:"tenantId"`
+	GroupID   uuid.UUID `json:"groupId"`
+	SessionID uuid.UUID `json:"sessionId"`
+}
+
+// UnsupportedReason classifies a request the current configuration cannot
+// answer honestly.
+type UnsupportedReason string
+
+const (
+	// ReasonMemoryEstimateUnavailable: the group has a memory budget but no
+	// memory estimate is available for the session. Packing must not invent a
+	// number (an invented estimate would make a hard ceiling look exact), so
+	// the request is refused with this typed reason instead.
+	ReasonMemoryEstimateUnavailable UnsupportedReason = "memory_estimate_unavailable"
+)
+
+// UnsupportedError is the typed "the current configuration cannot decide this"
+// failure (HTTP 501 at the edge). It is distinct from a capacity refusal: no
+// retry will help until configuration supplies the missing input.
+type UnsupportedError struct {
+	Reason    UnsupportedReason `json:"reason"`
+	TenantID  uuid.UUID         `json:"tenantId"`
+	SessionID uuid.UUID         `json:"sessionId"`
+	GroupID   uuid.UUID         `json:"groupId,omitempty"`
+	Detail    string            `json:"detail,omitempty"`
+}
+
+func (e *UnsupportedError) Error() string {
+	base := fmt.Sprintf("placement: unsupported %s (tenant %s session %s)", e.Reason, e.TenantID, e.SessionID)
+	if e.GroupID != uuid.Nil {
+		base += fmt.Sprintf(" group %s", e.GroupID)
+	}
+	if e.Detail != "" {
+		base += ": " + e.Detail
+	}
+	return base
+}
+
+// IsUnsupported reports whether err is a typed unsupported/configuration
+// failure.
+func IsUnsupported(err error) bool {
+	var unsupported *UnsupportedError
+	return errors.As(err, &unsupported)
 }
 
 // GroupSpec is one group creation request. Name is a per-tenant handle; the
@@ -329,9 +438,13 @@ type Options struct {
 	// the strategies create on demand. Zero means unlimited.
 	DefaultMaxConcurrentRuns int
 	DefaultMemoryLimitBytes  int64
-	// SessionMemoryBytes is the pack strategy's per-session memory estimate
-	// (default 8 MiB). It sizes the packing decision, not cgroup enforcement.
-	SessionMemoryBytes int64
+	// MemoryEstimator resolves the memory budget a session's next run is
+	// expected to consume. It is the only source of that number: there is no
+	// built-in default, because an invented estimate would make a hard memory
+	// ceiling look exact. A nil estimator (or a non-positive answer) means
+	// "unknown": using a memory-bounded group then fails with
+	// *UnsupportedError{Reason: ReasonMemoryEstimateUnavailable}.
+	MemoryEstimator MemoryEstimator
 	// TenantRunLimit resolves the tenant's concurrent-run quota from the same
 	// configuration vocabulary the kernel admission uses (quota.Limits.Quota).
 	// Nil means no tenant-level limit; an error is fail-closed.
@@ -340,8 +453,16 @@ type Options struct {
 	NewID func() uuid.UUID
 }
 
-// DefaultSessionMemoryBytes is the pack estimate when Options leaves it zero.
-const DefaultSessionMemoryBytes = 8 << 20
+// MemoryEstimator answers the memory estimate for one session's next run. A
+// non-positive value means "no estimate"; an error is propagated (fail closed).
+type MemoryEstimator func(ctx context.Context, tenantID, sessionID uuid.UUID) (int64, error)
+
+// ETA observation bounds: how many recent attempts an ETA average uses per
+// group, and how many samples are retained per group.
+const (
+	ETASampleWindow    = 20
+	ETASampleRetention = 50
+)
 
 // DefaultLeaseTTL bounds a placement lease when a request carries no TTL.
 const DefaultLeaseTTL = 30 * time.Second

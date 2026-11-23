@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,7 +25,7 @@ type Service struct {
 	pinGroup       *uuid.UUID
 	defaultMaxRuns int
 	defaultMemory  int64
-	sessionMemory  int64
+	memoryEstimate MemoryEstimator
 	tenantRunLimit func(ctx context.Context, tenantID uuid.UUID) (int, error)
 	newID          func() uuid.UUID
 	leaseTTL       time.Duration
@@ -46,10 +48,6 @@ func New(opts Options) (*Service, error) {
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrInvalidStrategy, strategy)
 	}
-	sessionMemory := opts.SessionMemoryBytes
-	if sessionMemory <= 0 {
-		sessionMemory = DefaultSessionMemoryBytes
-	}
 	newID := opts.NewID
 	if newID == nil {
 		newID = uuid.New
@@ -60,7 +58,7 @@ func New(opts Options) (*Service, error) {
 		pinGroup:       opts.PinGroupID,
 		defaultMaxRuns: opts.DefaultMaxConcurrentRuns,
 		defaultMemory:  opts.DefaultMemoryLimitBytes,
-		sessionMemory:  sessionMemory,
+		memoryEstimate: opts.MemoryEstimator,
 		tenantRunLimit: opts.TenantRunLimit,
 		newID:          newID,
 		leaseTTL:       DefaultLeaseTTL,
@@ -180,7 +178,7 @@ func (s *Service) Join(ctx context.Context, req JoinRequest) (Placement, error) 
 		}
 	case errors.Is(err, ErrPlacementNotFound):
 		if groupID == nil {
-			id, err := s.resolveStrategyGroup(ctx, req.TenantID, strategy)
+			id, err := s.resolveStrategyGroup(ctx, req.TenantID, req.SessionID, strategy)
 			if err != nil {
 				return Placement{}, err
 			}
@@ -276,48 +274,192 @@ func (s *Service) Seek(ctx context.Context, req SeekRequest) (MigrationPlan, err
 	}, nil
 }
 
-// AdmitRun reserves one run slot for a placed session. Group slots and the
-// tenant quota are counted from the runs table inside one DB transaction, so
-// concurrent workers (even in different groups) cannot oversell either limit.
-// A full group or spent tenant quota is a typed CapacityError (HTTP 429 with
-// Retry-After), never a silently dropped run.
+// AdmitRun reserves one run slot for a placed session, or queues it when the
+// group's slots are full. Group slots, the memory budget and the tenant quota
+// are counted from the runs table inside one DB transaction, so concurrent
+// workers (even in different groups) cannot oversell any limit.
 //
-// The pending run row this writes is the durable queue entry. A process that
-// crashes between admission and the input commit leaves a claimable row; the
-// next worker claims it, finds no owed input and settles it as done, so no
-// separate sweeper is needed (there is no second ledger to reconcile). When the
-// commit itself fails in-process, GatedCommitter releases the reservation
-// immediately; ReleaseRun is the guarded form of that (pending, no unread
-// input).
+//   - a full group is a queued admission (durable FIFO entry + position/ETA);
+//   - the tenant quota stays a hard CapacityError (429 + Retry-After): the
+//     queue is never an oversell channel;
+//   - a memory-bounded group without an estimate is a typed UnsupportedError,
+//     never an invented number.
+//
+// A process that crashes between admission and the input commit leaves a
+// claimable pending row (or a queued row) behind; the next worker claims it,
+// finds no owed input and settles it as done, and the queue sweeper promotes
+// the next entry, so no separate ledger exists to reconcile. When the commit
+// itself fails in-process, GatedCommitter releases the reservation immediately;
+// ReleaseRun is the guarded form of that (pending/queued, no unread input).
 func (s *Service) AdmitRun(ctx context.Context, req AdmitRequest) (Admission, error) {
 	if err := validatePlacementIDs(req.TenantID, req.SessionID); err != nil {
 		return Admission{}, err
 	}
-	tenantLimit := 0
-	if s.tenantRunLimit != nil {
-		limit, err := s.tenantRunLimit(ctx, req.TenantID)
-		if err != nil {
-			// Fail closed: a quota that cannot be resolved must not admit.
-			return Admission{}, fmt.Errorf("placement: resolve tenant run limit: %w", err)
+	tenantLimit, err := s.resolveTenantLimit(ctx, req.TenantID)
+	if err != nil {
+		// Fail closed: a quota that cannot be resolved must not admit.
+		return Admission{}, err
+	}
+	// The estimate is only meaningful for a memory-bounded group; resolve it
+	// after reading the group so an unbounded deployment pays nothing. An unknown
+	// estimate is passed through as unknown: the store turns it into the typed
+	// UnsupportedError only when it actually needs a new reservation (a queued
+	// run's repeated input keeps its existing estimate and is never refused for
+	// the estimator's absence).
+	placement, err := s.store.GetPlacement(ctx, req.TenantID, req.SessionID)
+	if err != nil {
+		if errors.Is(err, ErrPlacementNotFound) {
+			return Admission{}, &Conflict{
+				Reason: ReasonPlacementNotFound, TenantID: req.TenantID, SessionID: req.SessionID,
+			}
 		}
-		tenantLimit = limit
+		return Admission{}, err
+	}
+	group, err := s.store.GetGroup(ctx, req.TenantID, placement.GroupID)
+	if err != nil {
+		if errors.Is(err, ErrGroupNotFound) {
+			return Admission{}, &Conflict{
+				Reason: ReasonGroupUnavailable, TenantID: req.TenantID,
+				SessionID: req.SessionID, GroupID: placement.GroupID,
+			}
+		}
+		return Admission{}, err
+	}
+	var (
+		estimate int64
+		known    bool
+	)
+	if group.MemoryLimitBytes > 0 {
+		estimate, known, err = s.estimateMemory(ctx, req.TenantID, req.SessionID)
+		if err != nil {
+			return Admission{}, err
+		}
 	}
 	return s.store.AdmitRun(ctx, admitWrite{
-		tenantID:    req.TenantID,
-		sessionID:   req.SessionID,
-		groupID:     req.GroupID,
-		tenantLimit: tenantLimit,
+		tenantID:       req.TenantID,
+		sessionID:      req.SessionID,
+		groupID:        req.GroupID,
+		tenantLimit:    tenantLimit,
+		memoryEstimate: estimate,
+		memoryKnown:    known,
 	})
 }
 
 // ReleaseRun frees a slot whose run was admitted but abandoned before the
-// kernel started it. A running run is released by the kernel's finish path,
-// never here.
+// kernel started it (pending or queued, no unread input), then promotes the
+// tenant's FIFO queue heads while capacity permits. A running run is released
+// by the kernel's finish path, never here.
 func (s *Service) ReleaseRun(ctx context.Context, tenantID, sessionID uuid.UUID) error {
 	if err := validatePlacementIDs(tenantID, sessionID); err != nil {
 		return err
 	}
-	return s.store.ReleaseRun(ctx, tenantID, sessionID)
+	tenantLimit, err := s.resolveTenantLimit(ctx, tenantID)
+	if err != nil {
+		// The release itself must not be lost because the quota document is
+		// unreadable; skip promotion (negative limit) and let the recovery sweep
+		// retry. Returning the quota error would strand the reservation.
+		tenantLimit = -1
+	}
+	return s.store.ReleaseRun(ctx, tenantID, sessionID, tenantLimit)
+}
+
+// QueueState reports the durable queue entry for one session (Queued=false when
+// its run is not waiting). The HTTP edge reads it after a commit so a queued
+// admission answers 202 with its position and ETA.
+func (s *Service) QueueState(ctx context.Context, tenantID, sessionID uuid.UUID) (QueueState, error) {
+	if err := validatePlacementIDs(tenantID, sessionID); err != nil {
+		return QueueState{}, err
+	}
+	return s.store.QueueState(ctx, tenantID, sessionID)
+}
+
+// PromoteQueued promotes the tenant's FIFO queue heads while slots, the memory
+// budget and the tenant quota all permit. It is the settlement/release path;
+// errors are surfaced so the caller can log them (the recovery sweep converges).
+func (s *Service) PromoteQueued(ctx context.Context, tenantID uuid.UUID) ([]Promotion, error) {
+	if tenantID == uuid.Nil {
+		return nil, errors.New("placement: tenant id is required")
+	}
+	tenantLimit, err := s.resolveTenantLimit(ctx, tenantID)
+	if err != nil {
+		// Fail closed: promoting without a readable quota could oversell it.
+		return nil, err
+	}
+	return s.store.PromoteQueued(ctx, tenantID, tenantLimit)
+}
+
+// PromoteAllQueued is the crash-recovery sweep: every tenant with a queued run
+// gets one FIFO promotion pass. Per-tenant failures do not stop the sweep; they
+// are returned so the caller can log them.
+func (s *Service) PromoteAllQueued(ctx context.Context) ([]Promotion, error) {
+	tenants, err := s.store.QueuedTenants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		promoted []Promotion
+		failures []error
+	)
+	for _, tenantID := range tenants {
+		tenantPromoted, err := s.PromoteQueued(ctx, tenantID)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("tenant %s: %w", tenantID, err))
+			continue
+		}
+		promoted = append(promoted, tenantPromoted...)
+	}
+	return promoted, errors.Join(failures...)
+}
+
+// ObserveRunDuration records one observed attempt duration for the queue ETA
+// average. A session without a placement has no group to attribute it to, so it
+// is ignored (the run was not admitted through this gate).
+func (s *Service) ObserveRunDuration(ctx context.Context, tenantID, sessionID uuid.UUID, duration time.Duration) error {
+	if err := validatePlacementIDs(tenantID, sessionID); err != nil {
+		return err
+	}
+	if duration <= 0 {
+		return nil
+	}
+	placement, err := s.store.GetPlacement(ctx, tenantID, sessionID)
+	if err != nil {
+		if errors.Is(err, ErrPlacementNotFound) {
+			return nil
+		}
+		return err
+	}
+	return s.store.ObserveRunDuration(ctx, tenantID, placement.GroupID, duration)
+}
+
+// resolveTenantLimit resolves the tenant run quota (0 = unlimited). An error is
+// fail-closed; the message names the resolution step so a misconfigured quota
+// document is diagnosable.
+func (s *Service) resolveTenantLimit(ctx context.Context, tenantID uuid.UUID) (int, error) {
+	if s.tenantRunLimit == nil {
+		return 0, nil
+	}
+	limit, err := s.tenantRunLimit(ctx, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("placement: resolve tenant run limit: %w", err)
+	}
+	return limit, nil
+}
+
+// estimateMemory resolves the session's memory estimate. known=false means the
+// estimator is absent or answered a non-positive value: callers turn that into
+// a typed unsupported error rather than a fabricated number.
+func (s *Service) estimateMemory(ctx context.Context, tenantID, sessionID uuid.UUID) (int64, bool, error) {
+	if s.memoryEstimate == nil {
+		return 0, false, nil
+	}
+	estimate, err := s.memoryEstimate(ctx, tenantID, sessionID)
+	if err != nil {
+		return 0, false, fmt.Errorf("placement: resolve memory estimate: %w", err)
+	}
+	if estimate <= 0 {
+		return 0, false, nil
+	}
+	return estimate, true, nil
 }
 
 func (s *Service) strategyFor(strategy Strategy) Strategy {
@@ -347,7 +489,7 @@ func (s *Service) targetGroup(ctx context.Context, tenantID, sessionID uuid.UUID
 		id := current.GroupID
 		return &id, nil
 	case errors.Is(err, ErrPlacementNotFound):
-		id, err := s.resolveStrategyGroup(ctx, tenantID, strategy)
+		id, err := s.resolveStrategyGroup(ctx, tenantID, sessionID, strategy)
 		if err != nil {
 			return nil, err
 		}
@@ -361,23 +503,15 @@ func (s *Service) targetGroup(ctx context.Context, tenantID, sessionID uuid.UUID
 //
 //   - pin needs the caller's group; the strategy never guesses one.
 //   - user ensures one "user" group per tenant (enterprise isolation SKU).
-//   - pack ensures the single "pack-default" group. Multi-group packing by
-//     memory headroom is a later optimisation; the spec allows the default
-//     pack to be one group, and the memory limit is recorded for that step.
-func (s *Service) resolveStrategyGroup(ctx context.Context, tenantID uuid.UUID, strategy Strategy) (uuid.UUID, error) {
+//   - pack chooses among the tenant's active pack groups by memory headroom
+//     (best fit: the smallest leftover after placing the session), creating
+//     "pack-default" when none exists. A memory-bounded pack group needs an
+//     observed estimate; without one the call fails with *UnsupportedError
+//     instead of inventing a number.
+func (s *Service) resolveStrategyGroup(ctx context.Context, tenantID, sessionID uuid.UUID, strategy Strategy) (uuid.UUID, error) {
 	switch strategy {
 	case Pack:
-		group, err := s.store.EnsureGroup(ctx, GroupSpec{
-			TenantID:          tenantID,
-			GroupID:           s.newID(),
-			Name:              PackDefaultGroupName,
-			MaxConcurrentRuns: s.defaultMaxRuns,
-			MemoryLimitBytes:  s.defaultMemory,
-		})
-		if err != nil {
-			return uuid.Nil, err
-		}
-		return group.GroupID, nil
+		return s.packGroup(ctx, tenantID, sessionID)
 	case User:
 		group, err := s.store.EnsureGroup(ctx, GroupSpec{
 			TenantID:          tenantID,
@@ -401,6 +535,131 @@ func (s *Service) resolveStrategyGroup(ctx context.Context, tenantID uuid.UUID, 
 	default:
 		return uuid.Nil, fmt.Errorf("%w: %q", ErrInvalidStrategy, strategy)
 	}
+}
+
+// packGroup packs one unplaced session into a pack group by memory headroom.
+// Only the tenant's active pack groups are candidates (pack-default plus any
+// "pack-*" group an operator created); the strategy never creates a second
+// group on its own, because one group is hosted by one worker process in this
+// change, so a group nobody hosts would strand the session.
+func (s *Service) packGroup(ctx context.Context, tenantID, sessionID uuid.UUID) (uuid.UUID, error) {
+	groups, err := s.store.ListGroups(ctx, tenantID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	candidates := make([]Group, 0, len(groups))
+	for _, group := range groups {
+		if group.Status == StatusActive && isPackGroupName(group.Name) {
+			candidates = append(candidates, group)
+		}
+	}
+	if len(candidates) == 0 {
+		// The default pack group's limits are deployment configuration. A
+		// memory-bounded default with no estimate is refused before the group is
+		// created, so the failure does not leave an unusable group behind.
+		if s.defaultMemory > 0 {
+			if _, known, err := s.estimateMemory(ctx, tenantID, sessionID); err != nil {
+				return uuid.Nil, err
+			} else if !known {
+				return uuid.Nil, &UnsupportedError{
+					Reason: ReasonMemoryEstimateUnavailable, TenantID: tenantID,
+					SessionID: sessionID,
+					Detail:    "the default pack group defines a memory budget but no memory estimate is configured",
+				}
+			}
+		}
+		group, err := s.store.EnsureGroup(ctx, GroupSpec{
+			TenantID:          tenantID,
+			GroupID:           s.newID(),
+			Name:              PackDefaultGroupName,
+			MaxConcurrentRuns: s.defaultMaxRuns,
+			MemoryLimitBytes:  s.defaultMemory,
+		})
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return group.GroupID, nil
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })
+	bounded := 0
+	for _, group := range candidates {
+		if group.MemoryLimitBytes > 0 {
+			bounded++
+		}
+	}
+	if bounded == 0 {
+		// Every pack group is unbounded: no estimate is involved.
+		return candidates[0].GroupID, nil
+	}
+	estimate, known, err := s.estimateMemory(ctx, tenantID, sessionID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !known {
+		// Without an estimate only an unbounded group can be chosen honestly.
+		for _, group := range candidates {
+			if group.MemoryLimitBytes == 0 {
+				return group.GroupID, nil
+			}
+		}
+		return uuid.Nil, &UnsupportedError{
+			Reason: ReasonMemoryEstimateUnavailable, TenantID: tenantID, SessionID: sessionID,
+			Detail: "the pack groups define memory budgets but no memory estimate is configured",
+		}
+	}
+	usage, err := s.store.GroupMemoryUsage(ctx, tenantID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var (
+		best      *Group
+		bestLeft  int64
+		unbounded bool
+		largest   int64
+	)
+	for i := range candidates {
+		group := &candidates[i]
+		if group.MemoryLimitBytes == 0 {
+			// An unbounded group is the fallback: a bounded group that fits is the
+			// denser (and therefore preferred) packing choice.
+			if best == nil {
+				best, unbounded = group, true
+			}
+			continue
+		}
+		if group.MemoryLimitBytes > largest {
+			largest = group.MemoryLimitBytes
+		}
+		used := usage[group.GroupID]
+		if used+estimate > group.MemoryLimitBytes {
+			continue
+		}
+		left := group.MemoryLimitBytes - used - estimate
+		if unbounded || best == nil || left < bestLeft || (left == bestLeft && group.Name < best.Name) {
+			best, bestLeft, unbounded = group, left, false
+		}
+	}
+	if best == nil {
+		// No pack group has headroom. Memory is a hard ceiling like a full group
+		// slot; unlike slots there is no queue, because a queued run behind an
+		// over-budget group could never be promoted without eviction.
+		return uuid.Nil, &CapacityError{
+			Reason:     CapacityGroupMemory,
+			Resource:   capacityResource(CapacityGroupMemory),
+			TenantID:   tenantID,
+			SessionID:  sessionID,
+			LimitBytes: largest,
+			Active:     len(candidates),
+			RetryAfter: DefaultRetryAfter,
+		}
+	}
+	return best.GroupID, nil
+}
+
+// isPackGroupName reports whether a group belongs to the pack pool. The
+// strategies are the only creators of these names (see resolveStrategyGroup).
+func isPackGroupName(name string) bool {
+	return name == PackDefaultGroupName || strings.HasPrefix(name, "pack-")
 }
 
 func validatePlacementIDs(tenantID, sessionID uuid.UUID) error {

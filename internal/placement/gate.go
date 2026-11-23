@@ -14,9 +14,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/jixoai/keel/internal/kernel"
 )
 
 // SessionStateFunc answers whether the tenant owns the session and whether an
@@ -51,6 +54,9 @@ type GateOptions struct {
 	// fails closed: without it an unplaced session could get a run row that no
 	// native worker may ever claim.
 	SessionState SessionStateFunc
+	// Logger reports settlement-hook failures (duration observation, queue
+	// promotion). Nil uses slog.Default.
+	Logger *slog.Logger
 }
 
 // EnsureRequest creates a placement when the session has none. It never steals
@@ -91,7 +97,7 @@ func (s *Service) EnsurePlacement(ctx context.Context, req EnsureRequest) (Place
 	}
 	groupID := req.GroupID
 	if groupID == nil {
-		id, err := s.resolveStrategyGroup(ctx, req.TenantID, s.strategyFor(req.Strategy))
+		id, err := s.resolveStrategyGroup(ctx, req.TenantID, req.SessionID, s.strategyFor(req.Strategy))
 		if err != nil {
 			return Placement{}, err
 		}
@@ -128,6 +134,7 @@ type Gate struct {
 	strategy     Strategy
 	ttl          time.Duration
 	sessionState SessionStateFunc
+	logger       *slog.Logger
 }
 
 // NewGate validates the options and builds the gate.
@@ -150,12 +157,17 @@ func NewGate(opts GateOptions) (*Gate, error) {
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrInvalidStrategy, strategy)
 	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Gate{
 		service:      opts.Service,
 		workerID:     opts.WorkerID,
 		strategy:     strategy,
 		ttl:          opts.TTL,
 		sessionState: opts.SessionState,
+		logger:       logger,
 	}, nil
 }
 
@@ -165,10 +177,54 @@ func (g *Gate) Service() *Service { return g.service }
 // Strategy is the policy used for an unplaced session.
 func (g *Gate) Strategy() Strategy { return g.strategy }
 
-// Admit places an unplaced session (strategy pack by default) and reserves one
-// run slot. A full group or spent tenant quota is a typed *CapacityError; a
-// draining/retired group, a foreign session or a live lease move is a typed
-// *Conflict. Nothing is silently dropped: a refused admission writes no run row.
+// QueueState reads the session's durable queue entry (Queued=false when the run
+// is not waiting). The HTTP edge reads it after a commit so a queued admission
+// answers 202 with its position and ETA.
+func (g *Gate) QueueState(ctx context.Context, tenantID, sessionID uuid.UUID) (QueueState, error) {
+	return g.service.QueueState(ctx, tenantID, sessionID)
+}
+
+// RunSettled is the worker's settlement observer (agent.SettlementObserver).
+// A settled attempt frees a group slot, so the queue head is promoted now
+// instead of waiting for the recovery sweep; the observed duration is the ETA
+// history. Failures never affect the settled run: they are logged and the
+// sweep converges.
+func (g *Gate) RunSettled(ctx context.Context, scope kernel.Scope, status string, duration time.Duration) {
+	if scope.IsZero() {
+		return
+	}
+	if err := g.service.ObserveRunDuration(ctx, scope.TenantID, scope.SessionID, duration); err != nil {
+		g.logger.Warn("observe run duration for the placement ETA",
+			"tenant_id", scope.TenantID, "session_id", scope.SessionID,
+			"status", status, "duration_ms", duration.Milliseconds(), "err", err)
+	}
+	promoted, err := g.service.PromoteQueued(ctx, scope.TenantID)
+	if err != nil {
+		g.logger.Warn("promote the placement queue after a settled run",
+			"tenant_id", scope.TenantID, "session_id", scope.SessionID, "status", status, "err", err)
+		return
+	}
+	if len(promoted) > 0 {
+		g.logger.Info("promoted queued runs after a settled run",
+			"tenant_id", scope.TenantID, "session_id", scope.SessionID,
+			"status", status, "promoted", len(promoted))
+	}
+}
+
+// SweepQueues is the crash-recovery pass: queued rows written by a previous
+// process are promoted (FIFO, capacity-guarded) even though no settlement in
+// this process triggered it. It returns what it promoted.
+func (g *Gate) SweepQueues(ctx context.Context) ([]Promotion, error) {
+	return g.service.PromoteAllQueued(ctx)
+}
+
+// Admit places an unplaced session (strategy pack by default) and admits its
+// run: a slot when the group has room, otherwise a durable FIFO queue entry
+// with position and ETA. The tenant quota is a typed *CapacityError (hard
+// refusal); a draining/retired group, a foreign session or a live lease move is
+// a typed *Conflict; a memory-bounded group without an estimate is a typed
+// *UnsupportedError. Nothing is silently dropped: a refused admission writes no
+// run row, and a queued one is never claimable before promotion.
 func (g *Gate) Admit(ctx context.Context, tenantID, sessionID uuid.UUID) (Admission, error) {
 	if err := validatePlacementIDs(tenantID, sessionID); err != nil {
 		return Admission{}, err
@@ -218,9 +274,10 @@ func (g *Gate) Admit(ctx context.Context, tenantID, sessionID uuid.UUID) (Admiss
 	return Admission{}, err
 }
 
-// Release frees an admitted-but-abandoned slot (the input never committed, so
-// the pending run row would otherwise execute an empty attempt). Only a pending
-// run with no unread input is released; a running run is settled by the kernel.
+// Release frees an admitted-but-abandoned reservation (the input never
+// committed, so the pending/queued row would otherwise execute an empty
+// attempt) and promotes the next FIFO queue head. Only an unstarted row with no
+// unread input is released; a running run is settled by the kernel.
 func (g *Gate) Release(ctx context.Context, tenantID, sessionID uuid.UUID) error {
 	return g.service.ReleaseRun(ctx, tenantID, sessionID)
 }

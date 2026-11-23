@@ -234,6 +234,11 @@ type Config struct {
 	// DrainGate, when set, closes the worker's claim path during a drain and
 	// reports the in-flight run count (internal/handoff's Coordinator).
 	DrainGate agent.DrainGate
+	// Settlements, when set, observes the end of every attempt: the placement
+	// gate uses it to record the observed duration (queue ETA) and to promote
+	// the group's FIFO queue. Nil leaves the crash-recovery sweep as the only
+	// promotion path.
+	Settlements agent.SettlementObserver
 	// ToolAccess authorizes every model tool call (A4.2b1). Production wires the
 	// access-backed implementation; nil leaves the runner fail-closed (every
 	// tool call is refused), never open.

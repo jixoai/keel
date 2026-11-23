@@ -1,0 +1,66 @@
+# W2 queue + ETA + memory packing — targeted test run (final)
+# host DB: throwaway postgres:18 container keel-w2q-pg on 127.0.0.1:13742 (db runtime_w2q)
+# date: 2026-11-23T07:02:05Z
+# go: go version go1.27.3 darwin/arm64
+# packages are run SEQUENTIALLY (one go test per package; ./... not used).
+# Several packages in ONE go test invocation race the store package's
+# legacy-schema fixtures against every other package's migration guard on
+# the shared DB; that is pre-existing test isolation, not this lane.
+
+$ go build ./...
+ok (build)
+
+$ go test ./internal/placement/ -count=1   # unit-only, no DSN
+ok  	github.com/jixoai/keel/internal/placement	8.341s
+
+$ KEEL_TEST_DSN=... go test ./internal/placement/... -count=1
+ok  	github.com/jixoai/keel/internal/placement	6.718s
+ok  	github.com/jixoai/keel/internal/placement/wiring	0.394s
+
+$ KEEL_TEST_DSN=... go test ./internal/httpapi/... -count=1
+ok  	github.com/jixoai/keel/internal/httpapi	19.766s
+
+$ KEEL_TEST_DSN=... go test ./internal/agent/... -count=1
+ok  	github.com/jixoai/keel/internal/agent	40.693s
+
+$ KEEL_TEST_DSN=... go test ./internal/store/... -count=1
+ok  	github.com/jixoai/keel/internal/store	21.393s
+
+$ KEEL_TEST_DSN=... go test ./internal/kernel/... -count=1
+ok  	github.com/jixoai/keel/internal/kernel	32.323s
+
+$ KEEL_TEST_DSN=... go test ./internal/servicehost/... -count=1
+ok  	github.com/jixoai/keel/internal/servicehost	6.050s
+
+$ KEEL_TEST_DSN=... go test ./internal/harnessext/... -count=1
+ok  	github.com/jixoai/keel/internal/harnessext	25.833s
+
+$ KEEL_TEST_DSN=... go test ./internal/supervisor/... -count=1
+ok  	github.com/jixoai/keel/internal/supervisor	2.695s
+
+# new/changed placement test names:
+TestPGQueueFIFOAndPromotionOnRelease
+TestPGQueuedRunIsNeverClaimable
+TestPGQueuedReAdmissionCannotJumpTheQueue
+TestPGUserMessageCommitKeepsAQueuedRunQueued
+TestPGQueuedInputSurvivesALoweredQuota
+TestPGQueuedRunFollowsAPlacementMove
+TestPGQueueETAKnownFromObservedDurations
+TestPGQueueNeverBypassesTheTenantQuota
+TestPGPackMemoryBudgetAcrossGroups
+TestPGMemoryEstimateUnavailableOnAdmission
+TestPackMemoryBudgetChoosesHeadroom
+TestPackChoosesGroupByHeadroomAtClaim
+TestPackWithoutEstimateIsUnsupported
+TestAdmissionMemoryCeilingIsHardRefusal
+TestQueueMemoryBlocksPromotionWithoutJumpingFIFO
+TestQueuedReAdmissionCannotJumpTheQueue
+TestPackUnboundedFallback
+TestQueuedInputSurvivesALoweredQuota
+TestQueuedRunFollowsAPlacementMove
+TestRunSettledPromotesAndFeedsETA
+TestSweepQueuesConvergesACrashLeftQueue
+TestQueueETAKnownFromObservedDurations
+TestQueuePromotionIsExactlyOnce
+TestQueueTenantQuotaIsHardRefusal
+TestQueuePromotionStopsAtALoweredTenantQuota

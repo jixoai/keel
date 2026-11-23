@@ -61,6 +61,11 @@ func (s *Store) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UUID) (
 		// A running row whose lease expired is a crashed attempt: requeue it.
 	case RunPending:
 		return RequeueOutcome{Status: "pending", Attempts: attempts}, nil
+	case RunQueued:
+		// A placement-queued run is already waiting for a slot; a resume must
+		// not bypass the queue by making it pending. "pending" is the resume
+		// vocabulary's "already enqueued, nothing to do".
+		return RequeueOutcome{Status: "pending", Attempts: attempts}, nil
 	case RunDone:
 		return RequeueOutcome{Status: "done", Attempts: attempts}, nil
 	case RunFailed:

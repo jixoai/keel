@@ -45,20 +45,37 @@ type Config struct {
 	// automatic strategies create on demand. Zero means unlimited.
 	DefaultMaxConcurrentRuns int
 	DefaultMemoryLimitBytes  int64
+	// MemoryEstimator is the ONLY source of a session's memory estimate. A
+	// memory-bounded pack group without one fails with a typed
+	// *placement.UnsupportedError (FromEnv additionally refuses to boot when the
+	// default group is memory-bounded and no estimator is wired).
+	MemoryEstimator placement.MemoryEstimator
 	// LeaseTTL bounds the placement lease; zero uses the placement default.
 	LeaseTTL time.Duration
-	Logger   *slog.Logger
+	// QueueInterval is the crash-recovery sweep interval. Zero uses
+	// DefaultQueueInterval.
+	QueueInterval time.Duration
+	Logger        *slog.Logger
 }
+
+// DefaultQueueInterval is how often the recovery sweep promotes queued runs
+// that no in-process settlement will wake (a crash between a run's settle and
+// its promotion, or a queue inherited from a previous process).
+const DefaultQueueInterval = 5 * time.Second
 
 // Runtime is the wired admission surface.
 type Runtime struct {
-	// Gate admits a run (placement + slot) and releases abandoned reservations.
+	// Gate admits a run (placement + slot/queue), releases abandoned
+	// reservations and is the worker's settlement observer (a settled attempt
+	// promotes the queue).
 	Gate *placement.Gate
 	// Service exposes the placement policy for diagnostics and tests.
 	Service *placement.Service
 	// Edge is the gated kernel committer the HTTP edge and the product turn
 	// starters must use for native input.
 	Edge *placement.GatedCommitter
+	// QueueInterval is the recovery sweep interval.
+	QueueInterval time.Duration
 }
 
 // New validates the config and builds the gate.
@@ -98,6 +115,7 @@ func New(cfg Config) (*Runtime, error) {
 		PinGroupID:               cfg.PinGroupID,
 		DefaultMaxConcurrentRuns: cfg.DefaultMaxConcurrentRuns,
 		DefaultMemoryLimitBytes:  cfg.DefaultMemoryLimitBytes,
+		MemoryEstimator:          cfg.MemoryEstimator,
 		TenantRunLimit:           tenantLimit,
 	})
 	if err != nil {
@@ -109,6 +127,7 @@ func New(cfg Config) (*Runtime, error) {
 		Strategy:     cfg.Strategy,
 		TTL:          cfg.LeaseTTL,
 		SessionState: sessionState(cfg.Store),
+		Logger:       cfg.Logger,
 	})
 	if err != nil {
 		return nil, err
@@ -117,7 +136,11 @@ func New(cfg Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{Gate: gate, Service: service, Edge: edge}, nil
+	queueInterval := cfg.QueueInterval
+	if queueInterval <= 0 {
+		queueInterval = DefaultQueueInterval
+	}
+	return &Runtime{Gate: gate, Service: service, Edge: edge, QueueInterval: queueInterval}, nil
 }
 
 // sessionState is the gate's session check over the store's tenant boundary.

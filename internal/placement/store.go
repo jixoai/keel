@@ -37,7 +37,27 @@ type Store interface {
 	ReleasePlacement(ctx context.Context, tenantID, sessionID uuid.UUID, workerID string, expectedEpoch int64) error
 
 	AdmitRun(ctx context.Context, req admitWrite) (Admission, error)
-	ReleaseRun(ctx context.Context, tenantID, sessionID uuid.UUID) error
+	// ReleaseRun drops an unstarted reservation (pending or queued, no unread
+	// input), then promotes the tenant's FIFO queue heads while capacity
+	// permits. tenantLimit is the resolved tenant quota (0 = unlimited, a
+	// negative value means "could not resolve": release still happens, but no
+	// promotion is attempted from this call).
+	ReleaseRun(ctx context.Context, tenantID, sessionID uuid.UUID, tenantLimit int) error
+	// QueueState reads one session's durable queue entry (Queued=false when the
+	// run is not waiting).
+	QueueState(ctx context.Context, tenantID, sessionID uuid.UUID) (QueueState, error)
+	// PromoteQueued promotes FIFO queue heads for one tenant, one per free slot,
+	// while slots, the memory budget and the tenant quota all permit.
+	PromoteQueued(ctx context.Context, tenantID uuid.UUID, tenantLimit int) ([]Promotion, error)
+	// ObserveRunDuration records one observed attempt duration: the only source
+	// of the queue ETA average (there is no built-in duration).
+	ObserveRunDuration(ctx context.Context, tenantID, groupID uuid.UUID, duration time.Duration) error
+	// GroupMemoryUsage reports the active-run memory estimate per group (the
+	// pack strategy's headroom input).
+	GroupMemoryUsage(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]int64, error)
+	// QueuedTenants lists the tenants that currently have queued runs (the
+	// crash-recovery sweep's work list).
+	QueuedTenants(ctx context.Context) ([]uuid.UUID, error)
 }
 
 // claimWrite is a compare-and-set placement claim after the service resolved
@@ -68,21 +88,52 @@ type adoptWrite struct {
 
 // admitWrite is one run-slot admission. tenantLimit is already resolved by the
 // service (0 = unlimited, an error there is fail-closed before this call).
+// memoryEstimate/memoryKnown carry the resolved memory estimate; a memory-
+// bounded group refuses an unknown estimate with *UnsupportedError instead of
+// inventing one.
 type admitWrite struct {
-	tenantID    uuid.UUID
-	sessionID   uuid.UUID
-	groupID     *uuid.UUID
-	tenantLimit int
+	tenantID       uuid.UUID
+	sessionID      uuid.UUID
+	groupID        *uuid.UUID
+	tenantLimit    int
+	memoryEstimate int64
+	memoryKnown    bool
 }
 
 // Run status values placed on the runs row. They mirror store.Run* on purpose:
 // the runs table is the one active-run account, so the placement package reads
-// and writes the same strings, never a second ledger.
+// and writes the same strings, never a second ledger. "queued" is a waiting
+// run: it is durable, it holds no slot, and the kernel's claim predicate never
+// matches it, so only promotion (queued -> pending) can make it runnable.
 const (
+	RunStatusQueued  = "queued"
 	RunStatusPending = "pending"
 	RunStatusRunning = "running"
 	RunStatusDone    = "done"
+	RunStatusFailed  = "failed"
 )
+
+// runActive reports whether a run status occupies a slot (group or tenant).
+// Queued rows deliberately do not: the queue is waiting, not running.
+func runActive(status string) bool {
+	return status == RunStatusPending || status == RunStatusRunning
+}
+
+// etcWait derives the explainable ETA of one queue position. It is only called
+// with an observed average (samples > 0); the wait is the number of full
+// slot-waves a run must wait, times the average attempt duration. limit 0 means
+// the group has no slot limit (the row is queued only until the next sweep) and
+// yields the one-wave wait.
+func etcWait(position, limit int, avg time.Duration) time.Duration {
+	if position <= 0 || avg <= 0 {
+		return 0
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	waves := (position + limit - 1) / limit
+	return avg * time.Duration(waves)
+}
 
 var (
 	// ErrGroupExists reports a duplicate (tenant, name) group creation.

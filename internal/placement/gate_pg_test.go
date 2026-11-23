@@ -2,7 +2,6 @@ package placement
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -117,7 +116,7 @@ func TestPGGateConcurrentAdmissionsNoOversell(t *testing.T) {
 		sessions[i] = pgSession(t, st, tenant)
 		mustJoin(t, svc, tenant, sessions[i], group.GroupID, "runtime-gate", time.Minute)
 	}
-	var admitted, refused, untyped atomic.Int32
+	var admitted, queued, untyped atomic.Int32
 	errs := make(chan error, attempts)
 	var wg sync.WaitGroup
 	for _, session := range sessions {
@@ -125,15 +124,15 @@ func TestPGGateConcurrentAdmissionsNoOversell(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := gate.Admit(ctx, tenant, session)
+			admission, err := gate.Admit(ctx, tenant, session)
 			switch {
-			case err == nil:
-				admitted.Add(1)
-			case IsCapacity(err):
-				refused.Add(1)
-			default:
+			case err != nil:
 				untyped.Add(1)
 				errs <- err
+			case admission.Queued:
+				queued.Add(1)
+			default:
+				admitted.Add(1)
 			}
 		}()
 	}
@@ -142,14 +141,19 @@ func TestPGGateConcurrentAdmissionsNoOversell(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("untyped gate admission error: %v", err)
 	}
-	if admitted.Load() != 3 || refused.Load() != attempts-3 || untyped.Load() != 0 {
-		t.Fatalf("admitted=%d refused=%d untyped=%d, want 3/%d/0",
-			admitted.Load(), refused.Load(), untyped.Load(), attempts-3)
+	if admitted.Load() != 3 || queued.Load() != attempts-3 || untyped.Load() != 0 {
+		t.Fatalf("admitted=%d queued=%d untyped=%d, want 3/%d/0",
+			admitted.Load(), queued.Load(), untyped.Load(), attempts-3)
 	}
 	if n := pgCount(t, st, `SELECT count(*) FROM runs
 	                        WHERE tenant_id = $1 AND group_id = $2
 	                          AND status IN ('pending','running')`, tenant, group.GroupID); n != 3 {
 		t.Fatalf("active group runs = %d, want 3", n)
+	}
+	if n := pgCount(t, st, `SELECT count(*) FROM runs
+	                        WHERE tenant_id = $1 AND group_id = $2 AND status = 'queued'`,
+		tenant, group.GroupID); n != attempts-3 {
+		t.Fatalf("queued group runs = %d, want %d", n, attempts-3)
 	}
 }
 
@@ -220,14 +224,16 @@ func TestPGAdmitAdoptsAnUnstampedPendingRow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: legacy})
-	var capacity *CapacityError
-	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroup {
-		t.Fatalf("unstamped pending admission = %v, want a full-group refusal", err)
+	queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: legacy})
+	if err != nil {
+		t.Fatalf("unstamped pending admission: %v", err)
+	}
+	if !queued.Queued || queued.QueuePosition != 1 {
+		t.Fatalf("unstamped pending admission = %+v, want queued at position 1", queued)
 	}
 
-	// Free the group: the pending run is adopted (already active, tenant slot
-	// unchanged) and stamped with the group.
+	// Free the group: the queued row is promoted (FIFO) and stamped with the
+	// group; the tenant slot accounting is unchanged.
 	if _, err := st.Pool().Exec(ctx,
 		`UPDATE runs SET status = 'done' WHERE tenant_id = $1 AND session_id = $2`,
 		tenant, filler); err != nil {
@@ -237,8 +243,8 @@ func TestPGAdmitAdoptsAnUnstampedPendingRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("adopt unstamped pending run: %v", err)
 	}
-	if !admission.AlreadyActive || admission.GroupID != group.GroupID {
-		t.Fatalf("adoption = %+v, want already active in %s", admission, group.GroupID)
+	if admission.Queued || admission.GroupID != group.GroupID {
+		t.Fatalf("adoption = %+v, want an admitted run in %s", admission, group.GroupID)
 	}
 	if n := pgCount(t, st, `SELECT count(*) FROM runs
 	                        WHERE tenant_id = $1 AND session_id = $2 AND group_id = $3`,

@@ -338,8 +338,9 @@ func (t *pgTxn) Append(ctx context.Context, kind EventKind, payload json.RawMess
 		// queued for it, so a crash between the commit and the HTTP layer's
 		// bookkeeping cannot strand the input. A running run keeps running —
 		// its finish probe (read-through watermark) decides whether this input
-		// needs another turn — and an external session is never enqueued (it
-		// has no native run/lease flow).
+		// needs another turn — a placement-queued run keeps waiting (promotion,
+		// not this wake, makes it claimable), and an external session is never
+		// enqueued (it has no native run/lease flow).
 		if _, err := t.tx.Exec(ctx,
 			`INSERT INTO runs (tenant_id, session_id, status, pending_input)
 			 SELECT $1, $2, 'pending', true
@@ -347,7 +348,9 @@ func (t *pgTxn) Append(ctx context.Context, kind EventKind, payload json.RawMess
 			     SELECT 1 FROM sessions
 			     WHERE tenant_id = $1 AND session_id = $2 AND state_owner = 'external')
 			 ON CONFLICT (tenant_id, session_id) DO UPDATE
-			 SET status = CASE WHEN runs.status = 'running' THEN 'running' ELSE 'pending' END,
+			 SET status = CASE WHEN runs.status = 'running' THEN 'running'
+			                   WHEN runs.status = 'queued' THEN 'queued'
+			                   ELSE 'pending' END,
 			     pending_input = true,
 			     updated_at = now()
 			 WHERE NOT EXISTS (

@@ -154,23 +154,28 @@ func TestGateParentAndChildShareGroupSlots(t *testing.T) {
 	if _, err := gate.Admit(ctx, tenant, parent); err != nil {
 		t.Fatalf("parent admit: %v", err)
 	}
-	_, err := gate.Admit(ctx, tenant, child)
-	var capacity *CapacityError
-	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroup {
-		t.Fatalf("child admit = %v, want a group slot refusal", err)
+	childAdmission, err := gate.Admit(ctx, tenant, child)
+	if err != nil {
+		t.Fatalf("child admit: %v", err)
+	}
+	// The group has one slot and the parent holds it: the child waits in the
+	// durable FIFO queue, holding no slot.
+	if !childAdmission.Queued || childAdmission.QueuePosition != 1 || childAdmission.ActiveGroup != 1 {
+		t.Fatalf("child admission = %+v, want queued at position 1 with one active run", childAdmission)
 	}
 }
 
 // TestGateReleaseFreesOnlyAnUncommittedReservation pins the release guard: an
-// admitted run whose input never committed is dropped, while a queued run whose
-// input already landed must keep its slot.
+// admitted run whose input never committed is dropped (and the next FIFO entry
+// is promoted), while a run whose input already landed must keep its slot even
+// when a release asks for it.
 func TestGateReleaseFreesOnlyAnUncommittedReservation(t *testing.T) {
 	ctx := context.Background()
 	svc, store := memService(t, Options{})
 	tenant := uuid.New()
 	group := mustGroup(t, svc, tenant, "release", 1)
-	abandoned, queued, next := uuid.New(), uuid.New(), uuid.New()
-	for _, session := range []uuid.UUID{abandoned, queued, next} {
+	abandoned, committed, next := uuid.New(), uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{abandoned, committed, next} {
 		mustJoin(t, svc, tenant, session, group.GroupID, "runtime-1", time.Minute)
 	}
 	gate := memGate(t, svc, "runtime-1", newTestSessions(true).state)
@@ -181,30 +186,37 @@ func TestGateReleaseFreesOnlyAnUncommittedReservation(t *testing.T) {
 	if err := gate.Release(ctx, tenant, abandoned); err != nil {
 		t.Fatalf("release abandoned: %v", err)
 	}
-	if _, err := gate.Admit(ctx, tenant, queued); err != nil {
+	admitted, err := gate.Admit(ctx, tenant, committed)
+	if err != nil {
 		t.Fatalf("admit after release: %v", err)
 	}
+	if admitted.Queued {
+		t.Fatalf("admit after release = %+v, want the freed slot", admitted)
+	}
 
-	// The queued run's input commits: the run row now carries the unread-input
-	// fact, so a later release must not drop it.
+	// The committed run's input lands: the row now carries the unread-input
+	// fact, so a later release must not drop it (nor free its slot).
 	store.mu.Lock()
-	run := store.runs[memSessionKey{tenant, queued}]
+	run := store.runs[memSessionKey{tenant, committed}]
 	run.pendingInput = true
-	store.runs[memSessionKey{tenant, queued}] = run
+	store.runs[memSessionKey{tenant, committed}] = run
 	store.mu.Unlock()
-	if err := gate.Release(ctx, tenant, queued); err != nil {
+	if err := gate.Release(ctx, tenant, committed); err != nil {
 		t.Fatalf("release committed: %v", err)
 	}
-	_, err := gate.Admit(ctx, tenant, next)
-	var capacity *CapacityError
-	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroup {
-		t.Fatalf("admit after committed release = %v, want the slot still held", err)
+	queued, err := gate.Admit(ctx, tenant, next)
+	if err != nil {
+		t.Fatalf("admit after committed release: %v", err)
+	}
+	if !queued.Queued || queued.QueuePosition != 1 {
+		t.Fatalf("admit after committed release = %+v, want a queued admission", queued)
 	}
 }
 
 // TestAdmitDoesNotTreatAnUnstampedPendingRowAsAdmitted is the regression guard
 // for the old selfActive shortcut: a pending row written before admission (the
-// kernel's edge wake) has no group yet and must not bypass the group limit.
+// kernel's edge wake) has no group yet and must not bypass the group limit; it
+// is queued and promoted like any other waited run.
 func TestAdmitDoesNotTreatAnUnstampedPendingRowAsAdmitted(t *testing.T) {
 	ctx := context.Background()
 	svc, store := memService(t, Options{})
@@ -223,31 +235,31 @@ func TestAdmitDoesNotTreatAnUnstampedPendingRowAsAdmitted(t *testing.T) {
 	store.runs[memSessionKey{tenant, legacy}] = memRun{status: RunStatusPending}
 	store.mu.Unlock()
 
-	_, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: legacy})
-	var capacity *CapacityError
-	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroup {
-		t.Fatalf("unstamped pending admission = %v, want the full group refusal", err)
+	queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: legacy})
+	if err != nil {
+		t.Fatalf("unstamped pending admission: %v", err)
+	}
+	if !queued.Queued || queued.QueuePosition != 1 {
+		t.Fatalf("unstamped pending admission = %+v, want queued position 1", queued)
 	}
 
 	// With room, the same row is adopted into the group instead of being
-	// ignored (the run is already active; it needs an accountable slot).
+	// ignored (the run needs an accountable slot).
 	if err := svc.ReleaseRun(ctx, tenant, filler); err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	store.runs[memSessionKey{tenant, filler}] = memRun{status: RunStatusDone}
-	store.mu.Unlock()
 	admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: legacy})
 	if err != nil {
 		t.Fatalf("adopt unstamped pending run: %v", err)
 	}
-	if !admission.AlreadyActive || admission.GroupID != group.GroupID {
-		t.Fatalf("adoption = %+v, want active in %s", admission, group.GroupID)
+	if admission.Queued || admission.GroupID != group.GroupID {
+		t.Fatalf("adoption = %+v, want an admitted run in %s", admission, group.GroupID)
 	}
 }
 
 // TestGateConcurrentAdmissionsDoNotOversell runs the admission path (placement
-// ensure included) concurrently against one group: exactly the limit wins.
+// ensure included) concurrently against one group: exactly the limit is
+// admitted, and every other run waits in the durable queue (never a slot).
 func TestGateConcurrentAdmissionsDoNotOversell(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := memService(t, Options{})
@@ -260,7 +272,7 @@ func TestGateConcurrentAdmissionsDoNotOversell(t *testing.T) {
 		sessions[i] = uuid.New()
 		mustJoin(t, svc, tenant, sessions[i], group.GroupID, "runtime-1", time.Minute)
 	}
-	var admitted, refused, untyped atomic.Int32
+	var admitted, queued, untyped atomic.Int32
 	errs := make(chan error, attempts)
 	var wg sync.WaitGroup
 	for _, session := range sessions {
@@ -268,15 +280,15 @@ func TestGateConcurrentAdmissionsDoNotOversell(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := gate.Admit(ctx, tenant, session)
+			admission, err := gate.Admit(ctx, tenant, session)
 			switch {
-			case err == nil:
-				admitted.Add(1)
-			case IsCapacity(err):
-				refused.Add(1)
-			default:
+			case err != nil:
 				untyped.Add(1)
 				errs <- err
+			case admission.Queued:
+				queued.Add(1)
+			default:
+				admitted.Add(1)
 			}
 		}()
 	}
@@ -285,9 +297,25 @@ func TestGateConcurrentAdmissionsDoNotOversell(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("untyped admission error: %v", err)
 	}
-	if admitted.Load() != 3 || refused.Load() != attempts-3 || untyped.Load() != 0 {
-		t.Fatalf("admitted=%d refused=%d untyped=%d, want 3/%d/0",
-			admitted.Load(), refused.Load(), untyped.Load(), attempts-3)
+	if admitted.Load() != 3 || queued.Load() != attempts-3 || untyped.Load() != 0 {
+		t.Fatalf("admitted=%d queued=%d untyped=%d, want 3/%d/0",
+			admitted.Load(), queued.Load(), untyped.Load(), attempts-3)
+	}
+	// Nothing beyond the limit is active: only the three admitted runs count.
+	var active, waiting int
+	for _, session := range sessions {
+		state, err := svc.Store().QueueState(ctx, tenant, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Queued {
+			waiting++
+		} else {
+			active++
+		}
+	}
+	if active != 3 || waiting != attempts-3 {
+		t.Fatalf("active=%d waiting=%d, want 3/%d", active, waiting, attempts-3)
 	}
 }
 

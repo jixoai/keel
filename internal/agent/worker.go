@@ -78,6 +78,15 @@ type RunBinding interface {
 	Acquire(ctx context.Context) (BoundRun, error)
 }
 
+// SettlementObserver is told when an attempt settled or was abandoned. It is
+// the placement layer's seam: a settled attempt frees a group slot, so the FIFO
+// queue head is promoted now, and the observed duration is the queue's ETA
+// history. The observer runs after the settle and owns its errors: a failure
+// there must never change the run's outcome (the recovery sweep converges).
+type SettlementObserver interface {
+	RunSettled(ctx context.Context, scope kernel.Scope, status string, duration time.Duration)
+}
+
 // DrainGate is the worker's drain seam (internal/handoff's Coordinator
 // satisfies it). Claiming() is checked before every claim, so a draining
 // runtime stops picking up work without killing the runs already executing;
@@ -137,6 +146,10 @@ type Worker struct {
 	// Committer, when set, records the attempt summary as run.finished under the
 	// run's lease right before the settle. Nil keeps the worker summary-free.
 	Committer kernel.Committer
+	// Settlements, when set, observes the end of an attempt (the placement
+	// queue's promotion trigger and ETA history). Nil disables the hook; the
+	// runtime's recovery sweep still converges a queue left behind.
+	Settlements SettlementObserver
 }
 
 // NewWorker builds a worker with defaults sized for a 2GB host. leases is the
@@ -255,7 +268,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 			if ctx.Err() != nil {
 				w.Logger.Info("run abandoned for shutdown", "run_id", runID,
 					"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID, "attempt", attempts)
-				w.releaseAbandoned(lease)
+				w.releaseAbandoned(lease, time.Since(started))
 				return
 			}
 			settled = true
@@ -267,6 +280,8 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 				MaxAttempts: w.MaxAttempts,
 			}); finishErr != nil {
 				w.Logger.Warn("finish unpinned run", "run_id", runID, "err", finishErr)
+			} else {
+				w.notifySettled(ctx, lease.Scope, kernel.RunSummaryFailed, time.Since(started))
 			}
 			if w.Metrics != nil {
 				w.Metrics.RunAttempt("finish_error", time.Since(started))
@@ -289,7 +304,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 				if isFenceError(err) {
 					w.Logger.Info("run abandoned, claim lost while pinning loadout", "run_id", runID,
 						"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID, "err", err)
-					w.releaseAbandoned(lease)
+					w.releaseAbandoned(lease, time.Since(started))
 					return
 				}
 				settled = true
@@ -436,7 +451,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 		// slot is returned; leaving the lease to expire would leak it).
 		w.Logger.Info("run abandoned for shutdown", "run_id", runID,
 			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID, "attempt", attempts)
-		w.releaseAbandoned(lease)
+		w.releaseAbandoned(lease, time.Since(started))
 		return
 	}
 	elapsed := time.Since(started)
@@ -512,6 +527,11 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 	default:
 		outcome = kernel.RunSummaryDone
 	}
+	// The settle freed a group slot: tell the placement layer now (FIFO
+	// promotion) and hand it the observed duration for the ETA. The committed
+	// row status is read for metrics after the hook, because the hook may
+	// promote this very session's next input.
+	w.notifySettled(ctx, lease.Scope, outcome, elapsed)
 	// The kernel settled the run; the run-row mirror carries the committed
 	// status (done / pending / failed) for the terminal metrics and the log.
 	// A row a newer claim already took over reads as running: that status
@@ -551,7 +571,9 @@ func modelTurnFailure(message string) error {
 // abandoned without a settle (shutdown, or a claim lost while pinning). Release
 // is fenced: a stale token fails, but the kernel returns the admission slot
 // either way, so repeated abandons cannot starve the tenant's run budget.
-func (w *Worker) releaseAbandoned(lease kernel.Lease) {
+// duration is the attempted work (0 when unknown); the settlement observer uses
+// it only as an ETA sample and promotes the queue because the slot is free.
+func (w *Worker) releaseAbandoned(lease kernel.Lease, duration time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := w.Leases.Release(ctx, lease); err != nil && !isFenceError(err) {
@@ -559,6 +581,17 @@ func (w *Worker) releaseAbandoned(lease kernel.Lease) {
 			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
 			"token", lease.Token.String(), "err", err)
 	}
+	w.notifySettled(ctx, lease.Scope, "abandoned", duration)
+}
+
+// notifySettled reports the end of an attempt to the settlement observer. A
+// live context is used (the caller may already be shutting down): promotion is
+// a short, independent write and the observer owns its errors.
+func (w *Worker) notifySettled(ctx context.Context, scope kernel.Scope, status string, duration time.Duration) {
+	if w.Settlements == nil {
+		return
+	}
+	w.Settlements.RunSettled(ctx, scope, status, duration)
 }
 
 // attemptOf reads the run-row mirror for logging. Best effort: a mirror read

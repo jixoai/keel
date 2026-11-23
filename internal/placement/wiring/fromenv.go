@@ -31,6 +31,9 @@ const (
 	// EnvLeaseMS bounds the placement lease the gate creates. Zero uses the
 	// placement default.
 	EnvLeaseMS = "KEEL_PLACEMENT_LEASE_MS"
+	// EnvQueueIntervalMS is the crash-recovery queue sweep interval. Zero uses
+	// DefaultQueueInterval.
+	EnvQueueIntervalMS = "KEEL_PLACEMENT_QUEUE_INTERVAL_MS"
 )
 
 // FromEnv completes cfg from the deployment environment and builds the gate.
@@ -58,11 +61,28 @@ func FromEnv(getenv func(string) string, cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 	cfg.DefaultMemoryLimitBytes = defaultMemory
+	if defaultMemory > 0 && cfg.MemoryEstimator == nil {
+		// A memory-bounded group needs an observed estimate for both packing and
+		// the admission ceiling. Booting without one would turn every admission
+		// into a typed unsupported failure at request time; failing here names the
+		// misconfiguration once, at the only moment an operator can fix it.
+		return nil, fmt.Errorf(
+			"%s=%d configures a memory-bounded group but no memory estimator is wired; "+
+				"remove the limit or wire placement.Config.MemoryEstimator",
+			EnvGroupMemoryBytes, defaultMemory)
+	}
 	leaseMS, err := envInt(getenv, EnvLeaseMS, 0)
 	if err != nil {
 		return nil, err
 	}
 	cfg.LeaseTTL = time.Duration(leaseMS) * time.Millisecond
+	queueMS, err := envInt(getenv, EnvQueueIntervalMS, 0)
+	if err != nil {
+		return nil, err
+	}
+	if queueMS > 0 {
+		cfg.QueueInterval = time.Duration(queueMS) * time.Millisecond
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -77,6 +97,7 @@ func FromEnv(getenv func(string) string, cfg Config) (*Runtime, error) {
 	cfg.Logger.Info("placement admission gate", "strategy", string(effective),
 		"group_max_concurrent_runs", cfg.DefaultMaxConcurrentRuns,
 		"group_memory_limit_bytes", cfg.DefaultMemoryLimitBytes,
+		"queue_sweep_interval", rt.QueueInterval.String(),
 		"tenant_run_quota", "tenant-document")
 	return rt, nil
 }

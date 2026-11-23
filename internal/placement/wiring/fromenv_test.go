@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
@@ -53,18 +56,41 @@ func TestFromEnvKeepsDefaultsForEmptyValues(t *testing.T) {
 	}
 }
 
-// TestFromEnvParsesValidValues is the positive path for all three integers.
+// TestFromEnvParsesValidValues is the positive path for the integers. A
+// memory-bounded deployment must also wire an estimator: the boot then accepts
+// the limit instead of failing the memory guard.
 func TestFromEnvParsesValidValues(t *testing.T) {
+	cfg := envConfig()
+	cfg.MemoryEstimator = func(context.Context, uuid.UUID, uuid.UUID) (int64, error) {
+		return 1 << 20, nil
+	}
 	rt, err := FromEnv(lookup(map[string]string{
 		EnvGroupMaxRuns:     "7",
 		EnvGroupMemoryBytes: "1073741824",
 		EnvLeaseMS:          "2500",
-	}), envConfig())
+		EnvQueueIntervalMS:  "1500",
+	}), cfg)
 	if err != nil {
 		t.Fatalf("FromEnv with valid values: %v", err)
 	}
 	if rt == nil {
 		t.Fatal("FromEnv returned a nil runtime")
+	}
+	if rt.QueueInterval != 1500*time.Millisecond {
+		t.Fatalf("queue interval = %s, want 1.5s", rt.QueueInterval)
+	}
+}
+
+// TestFromEnvRejectsMemoryBudgetWithoutEstimator is the misconfiguration guard:
+// a memory-bounded group with no estimate source fails the boot by name instead
+// of failing every admission at request time.
+func TestFromEnvRejectsMemoryBudgetWithoutEstimator(t *testing.T) {
+	_, err := FromEnv(lookup(map[string]string{EnvGroupMemoryBytes: "1048576"}), envConfig())
+	if err == nil {
+		t.Fatal("FromEnv accepted a memory-bounded group without an estimator")
+	}
+	if !strings.Contains(err.Error(), EnvGroupMemoryBytes) || !strings.Contains(err.Error(), "MemoryEstimator") {
+		t.Fatalf("error = %q, want the variable and the missing estimator", err)
 	}
 }
 

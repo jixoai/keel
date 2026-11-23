@@ -370,10 +370,12 @@ func (r *SubagentRunner) ForkAsync(ctx context.Context, req ForkRequest) (Subage
 				return SubagentRecord{}, err
 			}
 		}
-		// The admission gate refused the first input (group full / tenant quota)
-		// or the commit failed before appending. Compensate every side effect
-		// this fork created: the slot reservation, the fork fact, the card and
-		// the child session.
+		// The admission gate refused the first input (tenant quota, group memory
+		// budget, draining/unsupported configuration) or the commit failed before
+		// appending. A full group is not a failure: it queues the child run, so
+		// this branch is not taken. Compensate every side effect this fork
+		// created: the slot reservation, the fork fact, the card and the child
+		// session.
 		r.rollbackFork(ctx, req.TenantID, childID, true)
 		return SubagentRecord{}, err
 	}

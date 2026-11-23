@@ -496,13 +496,43 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	if commit.Created {
 		status = 201
 	}
-	writeJSON(w, status, map[string]any{
+	response := map[string]any{
 		"submissionId": commit.Submission.ID,
 		"requestId":    requestID,
 		"status":       commit.Submission.Status,
 		"seq":          commit.Submission.Seq,
 		"created":      commit.Created,
-	})
+	}
+	// The input is durable; if its run is waiting for a group slot, say so (202
+	// + FIFO position + ETA). The state is read back after the commit because a
+	// settlement may have promoted the run in between: reporting the live row is
+	// honest, and a read failure must not fail a committed input.
+	if s.annotateQueued(r.Context(), w, tenantID, sessionID, response) {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, response)
+}
+
+// annotateQueued adds the queued-admission block to a successful input response
+// and reports whether the run is waiting (the caller answers 202). The read is
+// best effort: a committed input must never fail because the queue-state read
+// did.
+func (s *Server) annotateQueued(ctx context.Context, w http.ResponseWriter, tenantID, sessionID uuid.UUID, response map[string]any) bool {
+	if s.cfg.Placement == nil {
+		return false
+	}
+	state, err := s.cfg.Placement.QueueState(ctx, tenantID, sessionID)
+	if err != nil {
+		s.cfg.Logger.Warn("read placement queue state after commit",
+			"tenant_id", tenantID, "session_id", sessionID, "err", err)
+		return false
+	}
+	if !state.Queued {
+		return false
+	}
+	response["queued"] = queuedAdmissionBody(state)
+	setQueuedRetryAfter(w, state.ETA)
+	return true
 }
 
 // vetEventPayload applies the input gate to an edge event payload. Only
@@ -552,15 +582,18 @@ func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 	// This endpoint starts a run without a user.message, so it is outside the
 	// gated committer: admit through the same placement gate the input paths
 	// use, then enqueue. A refusal writes no run row and surfaces the typed
-	// 409/429 instead of a silent 500.
+	// 409/429/501 instead of a silent 500; a full group answers 202 with the
+	// FIFO position and ETA (the run will start on promotion).
+	var admission placement.Admission
 	admitted := false
 	if s.cfg.Placement != nil {
-		admission, err := s.cfg.Placement.Admit(r.Context(), tenantID, sessionID)
+		var err error
+		admission, err = s.cfg.Placement.Admit(r.Context(), tenantID, sessionID)
 		if err != nil {
 			writeEnqueueError(w, err)
 			return
 		}
-		admitted = !admission.AlreadyActive
+		admitted = admission.Created
 	}
 	if err := s.cfg.Store.EnqueueRun(r.Context(), tenantID, sessionID); err != nil {
 		if admitted {
@@ -572,7 +605,34 @@ func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 		writeEnqueueError(w, err)
 		return
 	}
-	writeJSON(w, 202, map[string]any{"enqueued": true})
+	response := map[string]any{"enqueued": true}
+	if admission.Queued {
+		setQueuedRetryAfter(w, admission.ETA)
+		response["queued"] = map[string]any{
+			"position":   admission.QueuePosition,
+			"active":     admission.ActiveGroup,
+			"limit":      admission.LimitGroup,
+			"etaKnown":   admission.ETA.Known,
+			"etaSeconds": queueETASeconds(admission.ETA),
+		}
+		if admission.GroupID != uuid.Nil {
+			response["queued"].(map[string]any)["groupId"] = admission.GroupID.String()
+		}
+	}
+	writeJSON(w, 202, response)
+}
+
+// queueETASeconds renders a known ETA as whole seconds (nil when unknown, never
+// a fabricated zero).
+func queueETASeconds(eta placement.QueueETA) any {
+	if !eta.Known {
+		return nil
+	}
+	seconds := int(math.Ceil(eta.Wait.Seconds()))
+	if seconds < 1 {
+		seconds = 1
+	}
+	return seconds
 }
 
 // runStatus reports the session's durable run state.
@@ -790,8 +850,12 @@ func writeEdgeError(w http.ResponseWriter, err error) {
 
 // writePlacementError maps the harness admission decisions onto the wire:
 //
-//   - a full group / spent tenant quota is 429 with a Retry-After header (the
-//     typed CapacityError carries the explainable wait), never a silent drop;
+//   - a spent tenant quota or a memory-budget refusal is 429 with a Retry-After
+//     header (the typed CapacityError carries the explainable wait), never a
+//     silent drop. A full group is no longer a 429: it is a queued admission
+//     (202, see queuedAdmissionBody);
+//   - a memory-bounded group with no estimate is 501: retrying cannot help until
+//     configuration supplies the estimate;
 //   - a placement conflict (draining/retired group, epoch/live-lease race,
 //     already placed elsewhere) is 409 with the reason;
 //   - a missing session is 404 without leaking existence, and an external
@@ -815,10 +879,26 @@ func writePlacementError(w http.ResponseWriter, err error) bool {
 			"active":            capacity.Active,
 			"retryAfterSeconds": seconds,
 		}
+		if capacity.LimitBytes > 0 {
+			body["limitBytes"] = capacity.LimitBytes
+			body["usedBytes"] = capacity.UsedBytes
+		}
 		if capacity.GroupID != uuid.Nil {
 			body["groupId"] = capacity.GroupID.String()
 		}
 		writeJSON(w, http.StatusTooManyRequests, body)
+		return true
+	}
+	var unsupported *placement.UnsupportedError
+	if errors.As(err, &unsupported) {
+		body := map[string]any{
+			"error":  logsafe.Redact(err.Error()),
+			"reason": string(unsupported.Reason),
+		}
+		if unsupported.GroupID != uuid.Nil {
+			body["groupId"] = unsupported.GroupID.String()
+		}
+		writeJSON(w, http.StatusNotImplemented, body)
 		return true
 	}
 	var conflict *placement.Conflict
@@ -842,6 +922,45 @@ func writePlacementError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 	return false
+}
+
+// queuedAdmissionBody renders the queued admission contract: a 1-based FIFO
+// position and an ETA derived from observed attempts (etaSeconds is null when
+// there is no history, never a fabricated zero).
+func queuedAdmissionBody(state placement.QueueState) map[string]any {
+	body := map[string]any{
+		"position":   state.Position,
+		"active":     state.Active,
+		"limit":      state.Limit,
+		"etaKnown":   state.ETA.Known,
+		"etaSeconds": nil,
+	}
+	if state.GroupID != uuid.Nil {
+		body["groupId"] = state.GroupID.String()
+	}
+	if state.ETA.Known {
+		seconds := int(math.Ceil(state.ETA.Wait.Seconds()))
+		if seconds < 1 {
+			seconds = 1
+		}
+		body["etaSeconds"] = seconds
+		body["etaSamples"] = state.ETA.Samples
+		body["etaBasis"] = state.ETA.Basis
+	}
+	return body
+}
+
+// setQueuedRetryAfter advertises when a queued client should poll again: the
+// ETA when it is known, otherwise no header (an unknown wait is not a guess).
+func setQueuedRetryAfter(w http.ResponseWriter, eta placement.QueueETA) {
+	if !eta.Known {
+		return
+	}
+	seconds := int(math.Ceil(eta.Wait.Seconds()))
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 }
 
 // writeEnqueueError maps the native queue seam's refusals: a missing (or

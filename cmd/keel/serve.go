@@ -43,6 +43,7 @@ import (
 	"github.com/jixoai/keel/internal/modelcfg"
 	"github.com/jixoai/keel/internal/notify"
 	"github.com/jixoai/keel/internal/placement"
+	placementwiring "github.com/jixoai/keel/internal/placement/wiring"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/pluginpkg/builtin"
 	"github.com/jixoai/keel/internal/provider"
@@ -405,6 +406,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if err != nil {
 		return fmt.Errorf("placement admission gate: %w", err)
 	}
+	// Crash recovery for the placement queue: a queued run whose promotion was
+	// lost with a previous process is promoted by this sweep (the settlement and
+	// release paths handle the in-process cases).
+	go placementwiring.RunQueueSweeper(ctx, placementRT, log)
 
 	// The task log is a harness service, not a plugin: its attribution gate must
 	// keep working when keel.tasks is disabled. The plugin only supplies the
@@ -644,6 +649,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// document over the boot document. The worker pins the mode on the
 		// attempt's tool context and runs the checkpoint hook at run close.
 		CapturePolicy: newRunCaptureResolver(st, tenantCfg, opts.Workspace),
+		// A settled attempt frees a placement slot: the gate promotes the FIFO
+		// queue head and records the observed duration for the ETA.
+		Settlements: placementRT.Gate,
 		Seams: servicehost.Seams{
 			// The run loop keeps the raw kernel: its read-marker/checkpoint
 			// capabilities are derived from the concrete committer, and the

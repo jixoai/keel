@@ -31,17 +31,25 @@ type memRun struct {
 	// pendingInput mirrors the runs.pending_input column: a successful commit
 	// sets it, and a release must not drop a run whose input already landed.
 	pendingInput bool
+	// queueSeq is the FIFO position key (mirrors runs.queue_seq); 0 when the
+	// row is not queued.
+	queueSeq int64
+	// memoryBytes is the admission memory estimate (mirrors runs.memory_bytes).
+	memoryBytes int64
 }
 
 // MemStore is a mutex-guarded Store. One instance must not be shared across
 // processes; its atomicity is a Go mutex, not a database transaction.
 type MemStore struct {
-	mu          sync.Mutex
-	now         func() time.Time
-	groups      map[memGroupKey]Group
-	placements  map[memSessionKey]Placement
-	runs        map[memSessionKey]memRun
-	nextGroupID func() uuid.UUID
+	mu            sync.Mutex
+	now           func() time.Time
+	groups        map[memGroupKey]Group
+	placements    map[memSessionKey]Placement
+	runs          map[memSessionKey]memRun
+	nextGroupID   func() uuid.UUID
+	nextQueueSeq  int64
+	groupSamples  map[memGroupKey][]time.Duration
+	tenantSamples map[uuid.UUID][]time.Duration
 }
 
 // NewMemStore builds an empty store. The clock is injectable for lease/retry
@@ -51,10 +59,12 @@ func NewMemStore(now func() time.Time) *MemStore {
 		now = time.Now
 	}
 	return &MemStore{
-		now:        now,
-		groups:     map[memGroupKey]Group{},
-		placements: map[memSessionKey]Placement{},
-		runs:       map[memSessionKey]memRun{},
+		now:           now,
+		groups:        map[memGroupKey]Group{},
+		placements:    map[memSessionKey]Placement{},
+		runs:          map[memSessionKey]memRun{},
+		groupSamples:  map[memGroupKey][]time.Duration{},
+		tenantSamples: map[uuid.UUID][]time.Duration{},
 	}
 }
 
@@ -352,21 +362,9 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 	}
 	group := m.groups[memGroupKey{req.tenantID, placement.GroupID}]
 
-	activeGroup, activeTenant := 0, 0
-	for runKey, run := range m.runs {
-		if run.status != RunStatusPending && run.status != RunStatusRunning {
-			continue
-		}
-		if runKey.tenantID != req.tenantID {
-			continue
-		}
-		activeTenant++
-		if run.groupID == placement.GroupID {
-			activeGroup++
-		}
-	}
 	selfRun, hasRun := m.runs[key]
-	selfActive := hasRun && (selfRun.status == RunStatusPending || selfRun.status == RunStatusRunning)
+	selfActive := hasRun && runActive(selfRun.status)
+	selfQueued := hasRun && selfRun.status == RunStatusQueued
 	selfAdmitted := selfActive && selfRun.groupID == placement.GroupID
 	if selfActive && !selfAdmitted && selfRun.status == RunStatusRunning {
 		return Admission{}, &Conflict{
@@ -374,34 +372,111 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 			GroupID: selfRun.groupID, Detail: "the session is already running in another group",
 		}
 	}
+	activeGroup, activeTenant := m.activeCountsLocked(req.tenantID, placement.GroupID)
+	usedMemory := m.groupMemoryLocked(req.tenantID, placement.GroupID)
 
-	if !selfAdmitted {
-		if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
-			return Admission{}, m.capacityError(req, placement, CapacityGroup,
-				group.MaxConcurrentRuns, activeGroup, now)
-		}
+	if !selfAdmitted && !selfQueued {
+		// The tenant quota is a hard capacity refusal: the queue never bypasses
+		// it, and a queued run does not consume a tenant slot while it waits. A
+		// queued row's new input is not a new admission, so it is not re-charged.
 		if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
 			return Admission{}, m.capacityError(req, placement, CapacityTenant,
 				req.tenantLimit, activeTenant, now)
 		}
+		// Memory is a hard ceiling at admission too. No estimate is not a zero
+		// estimate: refusing with a typed unsupported error is honest, while a
+		// fabricated number would make the ceiling look enforced.
+		if group.MemoryLimitBytes > 0 {
+			if !req.memoryKnown || req.memoryEstimate <= 0 {
+				return Admission{}, &UnsupportedError{
+					Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
+					SessionID: req.sessionID, GroupID: group.GroupID,
+					Detail: "the group defines a memory budget but no memory estimate is configured",
+				}
+			}
+			if usedMemory+req.memoryEstimate > group.MemoryLimitBytes {
+				return Admission{}, m.memoryCapacityError(req, placement, group, usedMemory, now)
+			}
+		}
+		if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
+			// A full group queues: the queued run row is the durable FIFO entry,
+			// it holds no slot, and the kernel cannot claim it.
+			seq := selfRun.queueSeq
+			if !selfQueued || seq == 0 {
+				m.nextQueueSeq++
+				seq = m.nextQueueSeq
+			}
+			m.runs[key] = memRun{
+				status: RunStatusQueued, groupID: placement.GroupID,
+				pendingInput: selfRun.pendingInput, queueSeq: seq,
+				memoryBytes: req.memoryEstimate,
+			}
+			position := m.queuePositionLocked(req.tenantID, placement.GroupID, seq)
+			return Admission{
+				TenantID:      req.tenantID,
+				SessionID:     req.sessionID,
+				GroupID:       placement.GroupID,
+				ActiveGroup:   activeGroup,
+				LimitGroup:    group.MaxConcurrentRuns,
+				ActiveTenant:  activeTenant,
+				LimitTenant:   req.tenantLimit,
+				Created:       !selfActive && !selfQueued,
+				Queued:        true,
+				QueuePosition: position,
+				ETA:           m.etaLocked(req.tenantID, placement.GroupID, position, group.MaxConcurrentRuns),
+				MemoryBytes:   req.memoryEstimate,
+			}, nil
+		}
 	}
 
+	if selfQueued && selfRun.groupID != placement.GroupID {
+		// The placement moved while the run waited (an expired lease was
+		// re-claimed elsewhere): the queued row follows its placement and joins
+		// the target group's queue at the tail.
+		m.nextQueueSeq++
+		selfRun.groupID = placement.GroupID
+		selfRun.queueSeq = m.nextQueueSeq
+		m.runs[key] = selfRun
+	}
 	if selfAdmitted {
 		// Keep the live attempt's status/lease: an admission for a guide input
 		// must not demote a running run back to pending.
 		selfRun.groupID = placement.GroupID
 		m.runs[key] = selfRun
+	} else if selfQueued {
+		// A queued row is only ever moved by promotion, so a repeated input cannot
+		// jump ahead of an earlier queued run. The sweep below may promote it when
+		// it reaches the head.
+		selfRun.groupID = placement.GroupID
+		m.runs[key] = selfRun
 	} else {
 		m.runs[key] = memRun{status: RunStatusPending, groupID: placement.GroupID,
-			pendingInput: selfRun.pendingInput}
+			pendingInput: selfRun.pendingInput, memoryBytes: req.memoryEstimate}
 	}
-	switch {
-	case !selfActive:
-		activeGroup++
-		activeTenant++
-	case selfRun.groupID != placement.GroupID:
-		activeGroup++
+	// Capacity is available: promote FIFO heads while slots (and memory, and
+	// the tenant quota) permit. This is the same guarded transition ReleaseRun
+	// and the settlement hook use; a row is promoted once because the write is
+	// conditioned on status=queued.
+	m.promoteLocked(req.tenantID, req.tenantLimit)
+	if final, ok := m.runs[key]; ok && final.status == RunStatusQueued {
+		position := m.queuePositionLocked(req.tenantID, placement.GroupID, final.queueSeq)
+		activeGroup, activeTenant = m.activeCountsLocked(req.tenantID, placement.GroupID)
+		return Admission{
+			TenantID:      req.tenantID,
+			SessionID:     req.sessionID,
+			GroupID:       placement.GroupID,
+			ActiveGroup:   activeGroup,
+			LimitGroup:    group.MaxConcurrentRuns,
+			ActiveTenant:  activeTenant,
+			LimitTenant:   req.tenantLimit,
+			Created:       !selfActive && !selfQueued,
+			Queued:        true,
+			QueuePosition: position,
+			ETA:           m.etaLocked(req.tenantID, placement.GroupID, position, group.MaxConcurrentRuns),
+			MemoryBytes:   req.memoryEstimate,
+		}, nil
 	}
+	activeGroup, activeTenant = m.activeCountsLocked(req.tenantID, placement.GroupID)
 	return Admission{
 		TenantID:      req.tenantID,
 		SessionID:     req.sessionID,
@@ -411,23 +486,104 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 		ActiveTenant:  activeTenant,
 		LimitTenant:   req.tenantLimit,
 		AlreadyActive: selfActive,
+		Created:       !selfActive && !selfQueued,
+		MemoryBytes:   req.memoryEstimate,
 	}, nil
 }
 
-func (m *MemStore) ReleaseRun(_ context.Context, tenantID, sessionID uuid.UUID) error {
+func (m *MemStore) ReleaseRun(_ context.Context, tenantID, sessionID uuid.UUID, tenantLimit int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := memSessionKey{tenantID, sessionID}
 	run, ok := m.runs[key]
-	if !ok || run.status != RunStatusPending || run.pendingInput {
+	if ok && !run.pendingInput && (run.status == RunStatusPending || run.status == RunStatusQueued) {
 		// A running run is released by the kernel's finish path, never here; a
-		// pending run whose input already committed is real queued work.
+		// pending/queued run whose input already committed is real work.
+		run.status = RunStatusDone
+		run.leaseUntil = time.Time{}
+		run.queueSeq = 0
+		m.runs[key] = run
+	}
+	// A slot may have freed: promote the head immediately, in the same critical
+	// section that wrote the release.
+	m.promoteLocked(tenantID, tenantLimit)
+	return nil
+}
+
+// QueueState reads the durable queue entry for one session.
+func (m *MemStore) QueueState(_ context.Context, tenantID, sessionID uuid.UUID) (QueueState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := QueueState{TenantID: tenantID, SessionID: sessionID}
+	run, ok := m.runs[memSessionKey{tenantID, sessionID}]
+	if !ok || run.status != RunStatusQueued {
+		return state, nil
+	}
+	group, ok := m.groups[memGroupKey{tenantID, run.groupID}]
+	if !ok {
+		return state, nil
+	}
+	position := m.queuePositionLocked(tenantID, run.groupID, run.queueSeq)
+	active, _ := m.activeCountsLocked(tenantID, run.groupID)
+	return QueueState{
+		TenantID: tenantID, SessionID: sessionID, GroupID: run.groupID,
+		Queued: true, Position: position, Limit: group.MaxConcurrentRuns, Active: active,
+		ETA: m.etaLocked(tenantID, run.groupID, position, group.MaxConcurrentRuns),
+	}, nil
+}
+
+// PromoteQueued promotes the tenant's FIFO queue heads while capacity permits.
+func (m *MemStore) PromoteQueued(_ context.Context, tenantID uuid.UUID, tenantLimit int) ([]Promotion, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.promoteLocked(tenantID, tenantLimit), nil
+}
+
+// ObserveRunDuration records one observed attempt duration for the ETA
+// average. Non-positive durations are ignored (an unknown duration is not a
+// zero-length run).
+func (m *MemStore) ObserveRunDuration(_ context.Context, tenantID, groupID uuid.UUID, duration time.Duration) error {
+	if duration <= 0 {
 		return nil
 	}
-	run.status = RunStatusDone
-	run.leaseUntil = time.Time{}
-	m.runs[key] = run
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := memGroupKey{tenantID, groupID}
+	m.groupSamples[key] = trimSamples(append(m.groupSamples[key], duration))
+	m.tenantSamples[tenantID] = trimSamples(append(m.tenantSamples[tenantID], duration))
 	return nil
+}
+
+// GroupMemoryUsage reports the active-run memory estimate per group.
+func (m *MemStore) GroupMemoryUsage(_ context.Context, tenantID uuid.UUID) (map[uuid.UUID]int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	usage := map[uuid.UUID]int64{}
+	for key, run := range m.runs {
+		if key.tenantID != tenantID || !runActive(run.status) || run.groupID == uuid.Nil {
+			continue
+		}
+		usage[run.groupID] += run.memoryBytes
+	}
+	return usage, nil
+}
+
+// QueuedTenants lists tenants with at least one queued run.
+func (m *MemStore) QueuedTenants(_ context.Context) ([]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seen := map[uuid.UUID]bool{}
+	for key, run := range m.runs {
+		if run.status == RunStatusQueued {
+			seen[key.tenantID] = true
+		}
+	}
+	tenants := make([]uuid.UUID, 0, len(seen))
+	for tenantID := range seen {
+		tenants = append(tenants, tenantID)
+	}
+	sort.Slice(tenants, func(i, j int) bool { return tenants[i].String() < tenants[j].String() })
+	return tenants, nil
 }
 
 // SetRunStatus is a test/embedding aid: it moves an admitted run to running
@@ -442,11 +598,188 @@ func (m *MemStore) SetRunStatus(tenantID, sessionID uuid.UUID, status string, le
 		return ErrNoRun
 	}
 	run.status = status
+	if status != RunStatusQueued {
+		run.queueSeq = 0
+	}
 	if status == RunStatusRunning && lease > 0 {
 		run.leaseUntil = m.now().Add(lease)
 	}
 	m.runs[key] = run
 	return nil
+}
+
+// promoteLocked is the one promotion transition: a queued row becomes pending
+// (claimable) exactly once, in FIFO order, only while the group has a free
+// slot, the memory budget has headroom and the tenant quota has room. The
+// status check makes it idempotent under concurrent callers.
+func (m *MemStore) promoteLocked(tenantID uuid.UUID, tenantLimit int) []Promotion {
+	if tenantLimit < 0 {
+		// The quota could not be resolved: promoting without it could oversell, so
+		// the release still happens but promotion waits for the recovery sweep.
+		return nil
+	}
+	keys := make([]memGroupKey, 0, len(m.groups))
+	for key, group := range m.groups {
+		if key.tenantID == tenantID && group.Status == StatusActive {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return m.groups[keys[i]].Name < m.groups[keys[j]].Name
+	})
+	activeTenant := m.activeTenantLocked(tenantID)
+	promoted := make([]Promotion, 0)
+	for _, key := range keys {
+		group := m.groups[key]
+		activeGroup := m.activeGroupLocked(tenantID, key.groupID)
+		usedMemory := m.groupMemoryLocked(tenantID, key.groupID)
+		for {
+			if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
+				break
+			}
+			if tenantLimit > 0 && activeTenant >= tenantLimit {
+				break
+			}
+			headKey, headRun, ok := m.queueHeadLocked(tenantID, key.groupID)
+			if !ok {
+				break
+			}
+			if group.MemoryLimitBytes > 0 {
+				// Head-of-line: an unknown estimate or an over-budget head stops
+				// this group rather than letting a later entry jump the queue.
+				if headRun.memoryBytes <= 0 || usedMemory+headRun.memoryBytes > group.MemoryLimitBytes {
+					break
+				}
+			}
+			headRun.status = RunStatusPending
+			headRun.queueSeq = 0
+			m.runs[headKey] = headRun
+			activeGroup++
+			activeTenant++
+			usedMemory += headRun.memoryBytes
+			promoted = append(promoted, Promotion{
+				TenantID: tenantID, GroupID: key.groupID, SessionID: headKey.sessionID,
+			})
+		}
+	}
+	return promoted
+}
+
+func (m *MemStore) queueHeadLocked(tenantID, groupID uuid.UUID) (memSessionKey, memRun, bool) {
+	var (
+		bestKey memSessionKey
+		bestRun memRun
+		found   bool
+	)
+	for key, run := range m.runs {
+		if key.tenantID != tenantID || run.groupID != groupID || run.status != RunStatusQueued {
+			continue
+		}
+		if !found || run.queueSeq < bestRun.queueSeq {
+			bestKey, bestRun, found = key, run, true
+		}
+	}
+	return bestKey, bestRun, found
+}
+
+// queuePositionLocked is the 1-based FIFO position of seq inside the group.
+func (m *MemStore) queuePositionLocked(tenantID, groupID uuid.UUID, seq int64) int {
+	if seq <= 0 {
+		return 0
+	}
+	position := 0
+	for key, run := range m.runs {
+		if key.tenantID != tenantID || run.groupID != groupID || run.status != RunStatusQueued {
+			continue
+		}
+		if run.queueSeq <= seq {
+			position++
+		}
+	}
+	return position
+}
+
+func (m *MemStore) activeTenantLocked(tenantID uuid.UUID) int {
+	active := 0
+	for key, run := range m.runs {
+		if key.tenantID == tenantID && runActive(run.status) {
+			active++
+		}
+	}
+	return active
+}
+
+func (m *MemStore) activeGroupLocked(tenantID, groupID uuid.UUID) int {
+	active := 0
+	for key, run := range m.runs {
+		if key.tenantID == tenantID && run.groupID == groupID && runActive(run.status) {
+			active++
+		}
+	}
+	return active
+}
+
+// activeCountsLocked reports (group, tenant) active counts.
+func (m *MemStore) activeCountsLocked(tenantID, groupID uuid.UUID) (int, int) {
+	group, tenant := 0, 0
+	for key, run := range m.runs {
+		if key.tenantID != tenantID || !runActive(run.status) {
+			continue
+		}
+		tenant++
+		if run.groupID == groupID {
+			group++
+		}
+	}
+	return group, tenant
+}
+
+func (m *MemStore) groupMemoryLocked(tenantID, groupID uuid.UUID) int64 {
+	var used int64
+	for key, run := range m.runs {
+		if key.tenantID == tenantID && run.groupID == groupID && runActive(run.status) {
+			used += run.memoryBytes
+		}
+	}
+	return used
+}
+
+// etaLocked builds the explainable wait from observed durations. With no
+// history the ETA is unknown (Wait stays 0 and Known is false), never a
+// fabricated zero.
+func (m *MemStore) etaLocked(tenantID, groupID uuid.UUID, position, limit int) QueueETA {
+	avg, samples, basis := m.averageLocked(tenantID, groupID)
+	if samples == 0 || avg <= 0 {
+		return QueueETA{}
+	}
+	return QueueETA{
+		Known: true, Wait: etcWait(position, limit, avg), Samples: samples, Basis: basis,
+	}
+}
+
+func (m *MemStore) averageLocked(tenantID, groupID uuid.UUID) (time.Duration, int, string) {
+	if samples := m.groupSamples[memGroupKey{tenantID, groupID}]; len(samples) > 0 {
+		return meanDuration(samples), len(samples), "group"
+	}
+	if samples := m.tenantSamples[tenantID]; len(samples) > 0 {
+		return meanDuration(samples), len(samples), "tenant"
+	}
+	return 0, 0, ""
+}
+
+func meanDuration(samples []time.Duration) time.Duration {
+	var total time.Duration
+	for _, sample := range samples {
+		total += sample
+	}
+	return total / time.Duration(len(samples))
+}
+
+func trimSamples(samples []time.Duration) []time.Duration {
+	if len(samples) > ETASampleRetention {
+		return append([]time.Duration(nil), samples[len(samples)-ETASampleRetention:]...)
+	}
+	return samples
 }
 
 func (m *MemStore) checkGroupUsable(tenantID, groupID uuid.UUID, allowDraining bool) error {
@@ -497,9 +830,44 @@ func (m *MemStore) capacityError(req admitWrite, placement Placement, reason Cap
 	}
 }
 
-func capacityResource(reason CapacityReason) string {
-	if reason == CapacityTenant {
-		return "tenant"
+// memoryCapacityError is the typed refusal of a group whose memory budget has
+// no headroom. The wait is the nearest running attempt's lease in the group:
+// the completion that frees memory is the one that makes the retry work.
+func (m *MemStore) memoryCapacityError(req admitWrite, placement Placement, group Group, used int64, now time.Time) error {
+	retry := time.Duration(0)
+	for key, run := range m.runs {
+		if key.tenantID != req.tenantID || run.groupID != group.GroupID ||
+			run.status != RunStatusRunning || !run.leaseUntil.After(now) {
+			continue
+		}
+		wait := run.leaseUntil.Sub(now)
+		if retry == 0 || wait < retry {
+			retry = wait
+		}
 	}
-	return "group"
+	if retry < DefaultRetryAfter {
+		retry = DefaultRetryAfter
+	}
+	return &CapacityError{
+		Reason:     CapacityGroupMemory,
+		Resource:   capacityResource(CapacityGroupMemory),
+		TenantID:   req.tenantID,
+		SessionID:  req.sessionID,
+		GroupID:    group.GroupID,
+		Active:     m.activeGroupLocked(req.tenantID, group.GroupID),
+		LimitBytes: group.MemoryLimitBytes,
+		UsedBytes:  used,
+		RetryAfter: retry,
+	}
+}
+
+func capacityResource(reason CapacityReason) string {
+	switch reason {
+	case CapacityTenant:
+		return "tenant"
+	case CapacityGroupMemory:
+		return "group_memory"
+	default:
+		return "group"
+	}
 }

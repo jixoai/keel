@@ -83,6 +83,7 @@ var rlsTenantTables = []string{
 	"mcp_app_contexts",
 	"groups",
 	"session_placement",
+	"run_duration_samples",
 	"trigger_state",
 	// bot-identity-access (A1). Every new identity table is tenant-scoped.
 	// bot_api_keys and auth_sessions also carry a global lookup index (key_hash /

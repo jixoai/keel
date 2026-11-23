@@ -55,9 +55,11 @@ func NewGatedCommitter(edge kernel.Committer, gate *Gate, logger *slog.Logger) (
 }
 
 // Commit admits the run a native user.message will wake, then commits the
-// event. The admission writes the pending run row (the slot reservation) before
-// the input exists; if the commit fails, the reservation is released so the
-// queue does not hold an empty attempt.
+// event. The admission writes the pending run row or the durable queue entry
+// (the slot reservation) before the input exists; if the commit fails, a
+// reservation this call created is released so the queue does not hold an empty
+// attempt. A queued admission still commits: the input is durable, and the run
+// starts when promotion (FIFO) gives it a slot.
 func (c *GatedCommitter) Commit(ctx context.Context, req kernel.CommitRequest) (kernel.Receipt, error) {
 	if req.Kind != kernel.KindUserMessage || !req.NativeEdge || req.Scope.IsZero() {
 		return c.edge.Commit(ctx, req)
@@ -82,8 +84,9 @@ func (c *GatedCommitter) Commit(ctx context.Context, req kernel.CommitRequest) (
 	receipt, err := c.edge.Commit(ctx, req)
 	if err != nil {
 		// Only the reservation this call created is ours to release. An
-		// already-active run belongs to an earlier input and must keep its slot.
-		if !admission.AlreadyActive {
+		// already-active or already-queued run belongs to an earlier input and
+		// must keep its slot/place.
+		if admission.Created {
 			c.release(ctx, req.Scope.TenantID, req.Scope.SessionID)
 		}
 		return receipt, err

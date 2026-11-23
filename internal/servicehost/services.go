@@ -769,6 +769,9 @@ func newWorkerFactory(cfg Config, engine *servicegraph.Engine) servicegraph.Fact
 		worker.Metrics = cfg.Metrics
 		worker.DrainGate = cfg.DrainGate
 		worker.Control = cfg.Product.RunControl
+		// A settled attempt frees a placement slot: the hook promotes the FIFO
+		// queue head and records the observed duration for the ETA.
+		worker.Settlements = cfg.Settlements
 		// The attempt summary is a durable fact (run.finished) written under the
 		// run's lease; without the commit seam the worker settles without it.
 		worker.Committer = cfg.Seams.Committer

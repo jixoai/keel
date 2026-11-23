@@ -34,6 +34,7 @@ import (
 	"github.com/jixoai/keel/internal/mcp/oauth"
 	"github.com/jixoai/keel/internal/mcphost"
 	keelmetrics "github.com/jixoai/keel/internal/metrics"
+	placementwiring "github.com/jixoai/keel/internal/placement/wiring"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
 	"github.com/jixoai/keel/internal/store"
@@ -167,6 +168,10 @@ func main() {
 		log.Error("placement admission gate", "err", err)
 		os.Exit(1)
 	}
+	// Crash recovery for the placement queue: a queued run whose promotion was
+	// lost with a previous process is promoted by this sweep (the settlement and
+	// release paths handle the in-process cases).
+	go placementwiring.RunQueueSweeper(ctx, placementRT, log)
 	handoffRegistry, err := handoff.NewPGRegistry(ctx, st.Pool())
 	if err != nil {
 		log.Error("open handoff registry", "err", err)
@@ -473,6 +478,9 @@ func main() {
 		// reference, never a copy).
 		ForkPrefixes: st,
 		DrainGate:    coord,
+		// A settled attempt frees a placement slot: the gate promotes the FIFO
+		// queue head and records the observed duration for the ETA.
+		Settlements: placementRT.Gate,
 	})
 	if err != nil {
 		log.Error("assemble service loadout", "err", err)

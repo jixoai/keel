@@ -10,8 +10,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// RunStatus values.
+// RunStatus values. RunQueued is the placement queue's waiting state: the row
+// is durable, it holds no group/tenant slot, and the kernel's claim predicate
+// never matches it. Only placement promotion turns it into pending.
 const (
+	RunQueued  = "queued"
 	RunPending = "pending"
 	RunRunning = "running"
 	RunDone    = "done"
@@ -34,7 +37,9 @@ type Run struct {
 }
 
 // EnqueueRun marks a session as having work. A run already executing is left
-// alone; its finish path re-enqueues if newer user events arrived meanwhile.
+// alone; its finish path re-enqueues if newer user events arrived meanwhile. A
+// queued run stays queued: the placement queue owns its promotion, so a repair
+// enqueue after a committed input must not turn it into a claimable pending row.
 //
 // The session row is locked first (lock order sessions -> runs), so this
 // statement serializes with CreateExternalSession/UpsertExternalSession, whose
@@ -66,7 +71,9 @@ func (s *Store) EnqueueRun(ctx context.Context, tenantID, sessionID uuid.UUID) e
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO runs (tenant_id, session_id, status) VALUES ($1, $2, 'pending')
 			 ON CONFLICT (tenant_id, session_id) DO UPDATE
-			 SET status = CASE WHEN runs.status = 'running' THEN 'running' ELSE 'pending' END,
+			 SET status = CASE WHEN runs.status = 'running' THEN 'running'
+			                   WHEN runs.status = 'queued' THEN 'queued'
+			                   ELSE 'pending' END,
 			     updated_at = now()`,
 			tenantID, sessionID); err != nil {
 			return err

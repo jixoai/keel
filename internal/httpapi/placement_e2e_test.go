@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -246,10 +245,11 @@ func TestPlacementHTTPAdmitOK(t *testing.T) {
 	}
 }
 
-// TestPlacementHTTPGroupFull429 is the spec's explainable refusal: a full group
-// answers 429 with Retry-After, commits no input, writes no run row, and admits
-// the same session after the running slot is freed.
-func TestPlacementHTTPGroupFull429(t *testing.T) {
+// TestPlacementHTTPGroupFullQueues202 is the spec's explainable admission: a
+// full group answers 202 with the durable FIFO position and an ETA derived from
+// observed attempts, commits the input (the message is durable), writes a
+// queued run row, and starts the run on promotion when a slot frees.
+func TestPlacementHTTPGroupFullQueues202(t *testing.T) {
 	f := newPlacementFixture(t, placementFixtureOptions{})
 	group := f.group(t, "limited", 1)
 	running, waiting := f.session(t), f.session(t)
@@ -259,46 +259,58 @@ func TestPlacementHTTPGroupFull429(t *testing.T) {
 	if res := f.input(t, running, "slot-1", "first"); res.code != http.StatusCreated {
 		t.Fatalf("first input = %d %v", res.code, res.body)
 	}
-	// The worker claimed the run: a live lease gives the refusal an ETA.
+	// The worker claimed the run; one observed attempt gives the queue its ETA.
 	if _, err := f.st.Pool().Exec(context.Background(),
 		`UPDATE runs SET status = 'running', lease_until = now() + interval '2 seconds'
 		  WHERE tenant_id = $1 AND session_id = $2`, f.tenant, running); err != nil {
 		t.Fatal(err)
 	}
+	if err := f.runtime.Service.ObserveRunDuration(context.Background(), f.tenant, running, 2*time.Second); err != nil {
+		t.Fatalf("observe duration: %v", err)
+	}
 
 	res := f.input(t, waiting, "slot-2", "second")
-	if res.code != http.StatusTooManyRequests {
-		t.Fatalf("full-group input = %d %v, want 429", res.code, res.body)
+	if res.code != http.StatusAccepted {
+		t.Fatalf("full-group input = %d %v, want 202", res.code, res.body)
 	}
-	retryAfter := res.header.Get("Retry-After")
-	seconds, err := strconv.Atoi(retryAfter)
-	if err != nil || seconds < 1 {
-		t.Fatalf("Retry-After = %q, want a positive number of seconds", retryAfter)
+	queued, ok := res.body["queued"].(map[string]any)
+	if !ok {
+		t.Fatalf("response has no queued block: %v", res.body)
 	}
-	if reason, _ := res.body["reason"].(string); reason != string(placement.CapacityGroup) {
-		t.Fatalf("reason = %v, want %s", res.body["reason"], placement.CapacityGroup)
+	if position, _ := queued["position"].(float64); position != 1 {
+		t.Fatalf("queue position = %v, want 1", queued["position"])
 	}
-	if limit, _ := res.body["limit"].(float64); limit != 1 {
-		t.Fatalf("limit = %v, want 1", res.body["limit"])
+	if eta, _ := queued["etaSeconds"].(float64); eta != 2 {
+		t.Fatalf("etaSeconds = %v, want the observed 2s", queued["etaSeconds"])
 	}
-	var refusedSeq int64
-	if err := f.st.Pool().QueryRow(context.Background(),
-		`SELECT COALESCE(max(seq), 0) FROM events WHERE tenant_id = $1 AND session_id = $2 AND kind = 'user.message'`,
-		f.tenant, waiting).Scan(&refusedSeq); err != nil {
-		t.Fatal(err)
+	if res.header.Get("Retry-After") != "2" {
+		t.Fatalf("Retry-After = %q, want 2", res.header.Get("Retry-After"))
 	}
-	if refusedSeq != 0 || f.runRows(t, waiting) != 0 {
-		t.Fatalf("refused input wrote a run row / user.message seq %d; nothing may be enqueued", refusedSeq)
+	status, groupID, seq := f.runRow(t, waiting)
+	if status != "queued" || groupID == nil || *groupID != group.GroupID {
+		t.Fatalf("queued run row = %q group %v, want queued in %s", status, groupID, group.GroupID)
+	}
+	if seq != 1 {
+		t.Fatalf("queued input seq = %d, want the message committed (1)", seq)
+	}
+	if got := f.activeGroupRuns(t, group.GroupID); got != 1 {
+		t.Fatalf("active group runs = %d, want 1 (the queued row holds no slot)", got)
 	}
 
-	// Freeing the slot admits the retry.
+	// The running attempt settles: the settlement hook promotes the FIFO head.
 	if _, err := f.st.Pool().Exec(context.Background(),
 		`UPDATE runs SET status = 'done', lease_until = NULL WHERE tenant_id = $1 AND session_id = $2`,
 		f.tenant, running); err != nil {
 		t.Fatal(err)
 	}
-	if res := f.input(t, waiting, "slot-3", "second"); res.code != http.StatusCreated {
-		t.Fatalf("retry after the slot freed = %d %v, want 201", res.code, res.body)
+	f.runtime.Gate.RunSettled(context.Background(),
+		kernel.Scope{TenantID: f.tenant, SessionID: running}, "done", 2*time.Second)
+	status, _, _ = f.runRow(t, waiting)
+	if status != "pending" {
+		t.Fatalf("run after promotion = %q, want pending", status)
+	}
+	if got := f.activeGroupRuns(t, group.GroupID); got != 1 {
+		t.Fatalf("active group runs after promotion = %d, want 1", got)
 	}
 }
 
@@ -338,7 +350,8 @@ func TestPlacementHTTPTenantQuotaAcrossGroups429(t *testing.T) {
 }
 
 // TestPlacementHTTPConcurrentAdmissionsNoOversell fires concurrent HTTP inputs:
-// exactly the group limit commits input and holds a slot.
+// exactly the group limit holds slots, the rest queue (202), and every input is
+// durable (a queued run is stored work, not a dropped message).
 func TestPlacementHTTPConcurrentAdmissionsNoOversell(t *testing.T) {
 	f := newPlacementFixture(t, placementFixtureOptions{})
 	const limit = 3
@@ -349,7 +362,7 @@ func TestPlacementHTTPConcurrentAdmissionsNoOversell(t *testing.T) {
 		sessions[i] = f.session(t)
 		f.join(t, sessions[i], group.GroupID)
 	}
-	var admitted, refused int
+	var admitted, queued, other int
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for i, session := range sessions {
@@ -363,28 +376,44 @@ func TestPlacementHTTPConcurrentAdmissionsNoOversell(t *testing.T) {
 			switch res.code {
 			case http.StatusCreated:
 				admitted++
-			case http.StatusTooManyRequests:
-				refused++
+			case http.StatusAccepted:
+				queued++
 			default:
+				other++
 				t.Errorf("race input %d = %d %v", i, res.code, res.body)
 			}
 		}()
 	}
 	wg.Wait()
-	if admitted != limit || refused != attempts-limit {
-		t.Fatalf("admitted=%d refused=%d, want %d/%d", admitted, refused, limit, attempts-limit)
+	if admitted != limit || queued != attempts-limit || other != 0 {
+		t.Fatalf("admitted=%d queued=%d other=%d, want %d/%d/0",
+			admitted, queued, other, limit, attempts-limit)
 	}
 	if got := f.activeGroupRuns(t, group.GroupID); got != limit {
 		t.Fatalf("active runs in group = %d, want %d", got, limit)
 	}
-	var committed int
+	var committed, stored, waiting int
 	if err := f.st.Pool().QueryRow(context.Background(),
 		`SELECT count(*) FROM events WHERE tenant_id = $1 AND kind = 'user.message'`,
 		f.tenant).Scan(&committed); err != nil {
 		t.Fatal(err)
 	}
-	if committed != limit {
-		t.Fatalf("committed user messages = %d, want %d (a refused run must not store input)", committed, limit)
+	if err := f.st.Pool().QueryRow(context.Background(),
+		`SELECT count(*) FROM runs WHERE tenant_id = $1 AND group_id = $2 AND status = 'queued'`,
+		f.tenant, group.GroupID).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.Pool().QueryRow(context.Background(),
+		`SELECT count(*) FROM runs WHERE tenant_id = $1 AND group_id = $2`,
+		f.tenant, group.GroupID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if committed != attempts || stored != attempts {
+		t.Fatalf("committed messages=%d run rows=%d, want %d/%d (no input lost, no slot oversold)",
+			committed, stored, attempts, attempts)
+	}
+	if waiting != attempts-limit {
+		t.Fatalf("queued rows = %d, want %d", waiting, attempts-limit)
 	}
 }
 
@@ -423,7 +452,9 @@ func TestPlacementHTTPCancelReleasesSlot(t *testing.T) {
 
 // TestPlacementHTTPCrashPendingConverges simulates a crash between admission
 // and the input commit (the pending row the gate writes), then restarts: the
-// pending row is claimable, an empty attempt settles it, and the slot is free.
+// pending row is claimable, an empty attempt settles it, and the queued next
+// input is promoted. The input that arrived while the stale row held the slot
+// is durable in the queue, not refused.
 func TestPlacementHTTPCrashPendingConverges(t *testing.T) {
 	f := newPlacementFixture(t, placementFixtureOptions{})
 	group := f.group(t, "crash", 1)
@@ -441,12 +472,17 @@ func TestPlacementHTTPCrashPendingConverges(t *testing.T) {
 	if status != "pending" || groupID == nil || *groupID != admission.GroupID || seq != 0 {
 		t.Fatalf("pre-crash run = %q group %v seq %d", status, groupID, seq)
 	}
-	if res := f.input(t, next, "crash-next", "blocked while the stale run holds the slot"); res.code != http.StatusTooManyRequests {
-		t.Fatalf("input while stale pending run holds the slot = %d %v, want 429", res.code, res.body)
+	res := f.input(t, next, "crash-next", "blocked while the stale run holds the slot")
+	if res.code != http.StatusAccepted {
+		t.Fatalf("input while stale pending run holds the slot = %d %v, want 202 queued", res.code, res.body)
+	}
+	if status, _, seq := f.runRow(t, next); status != "queued" || seq != 1 {
+		t.Fatalf("next run = %q seq %d, want queued with the input committed", status, seq)
 	}
 
 	// Restart: a worker reclaims the pending row, sees no owed input, and
-	// settles it. The empty attempt is not a leaked slot.
+	// settles it. The empty attempt is not a leaked slot, and the settlement
+	// hook promotes the queued input.
 	ctx := context.Background()
 	lease, err := f.kern.ClaimScope(ctx, kernel.Scope{TenantID: f.tenant, SessionID: stale}, "worker-restarted", 30*time.Second)
 	if err != nil {
@@ -455,15 +491,19 @@ func TestPlacementHTTPCrashPendingConverges(t *testing.T) {
 	if err := f.kern.Finish(ctx, kernel.FinishRequest{Lease: lease, MaxAttempts: 3}); err != nil {
 		t.Fatalf("restart settle: %v", err)
 	}
+	f.runtime.Gate.RunSettled(ctx, kernel.Scope{TenantID: f.tenant, SessionID: stale}, "done", 0)
 	status, _, _ = f.runRow(t, stale)
 	if status != "done" {
 		t.Fatalf("stale run after restart = %q, want done", status)
 	}
-	if got := f.activeGroupRuns(t, group.GroupID); got != 0 {
-		t.Fatalf("active runs after convergence = %d, want 0", got)
+	if status, _, _ := f.runRow(t, next); status != "pending" {
+		t.Fatalf("queued run after restart = %q, want pending (promoted)", status)
+	}
+	if got := f.activeGroupRuns(t, group.GroupID); got != 1 {
+		t.Fatalf("active runs after convergence = %d, want the promoted run (1)", got)
 	}
 	if res := f.input(t, next, "crash-next-2", "after restart"); res.code != http.StatusCreated {
-		t.Fatalf("input after restart = %d %v, want 201", res.code, res.body)
+		t.Fatalf("input after restart = %d %v, want 201 (the session is already admitted)", res.code, res.body)
 	}
 }
 
@@ -507,7 +547,8 @@ func TestPlacementHTTPDrainingGroup409(t *testing.T) {
 }
 
 // TestPlacementHTTPTriggerRunGated covers the second enqueue door: POST /run
-// has no user.message, so it admits through the same gate explicitly.
+// has no user.message, so it admits through the same gate explicitly. A full
+// group answers 202 with the queue position (the run starts on promotion).
 func TestPlacementHTTPTriggerRunGated(t *testing.T) {
 	f := newPlacementFixture(t, placementFixtureOptions{})
 	group := f.group(t, "trigger", 1)
@@ -519,10 +560,43 @@ func TestPlacementHTTPTriggerRunGated(t *testing.T) {
 		t.Fatalf("trigger first = %d %v, want 202", res.code, res.body)
 	}
 	res := f.post(t, "/v1/sessions/"+second.String()+"/run", map[string]any{})
-	if res.code != http.StatusTooManyRequests {
-		t.Fatalf("trigger second = %d %v, want 429", res.code, res.body)
+	if res.code != http.StatusAccepted {
+		t.Fatalf("trigger second = %d %v, want 202 queued", res.code, res.body)
 	}
-	if reason, _ := res.body["reason"].(string); reason != string(placement.CapacityGroup) {
-		t.Fatalf("trigger refusal reason = %v, want %s", res.body["reason"], placement.CapacityGroup)
+	queued, ok := res.body["queued"].(map[string]any)
+	if !ok {
+		t.Fatalf("trigger response has no queued block: %v", res.body)
+	}
+	if position, _ := queued["position"].(float64); position != 1 {
+		t.Fatalf("trigger queue position = %v, want 1", queued["position"])
+	}
+	if status, _, _ := f.runRow(t, second); status != "queued" {
+		t.Fatalf("triggered run status = %q, want queued", status)
+	}
+}
+
+// TestPlacementHTTPMemoryEstimateUnavailable501 is the honest configuration
+// failure: a memory-bounded group with no estimator answers 501 with the typed
+// reason instead of packing with an invented number.
+func TestPlacementHTTPMemoryEstimateUnavailable501(t *testing.T) {
+	f := newPlacementFixture(t, placementFixtureOptions{})
+	group, err := f.runtime.Service.CreateGroup(context.Background(), placement.GroupSpec{
+		TenantID: f.tenant, Name: "memory-bounded", MaxConcurrentRuns: 2, MemoryLimitBytes: 64 << 20,
+	})
+	if err != nil {
+		t.Fatalf("create memory group: %v", err)
+	}
+	session := f.session(t)
+	f.join(t, session, group.GroupID)
+
+	res := f.input(t, session, "memory-1", "hello")
+	if res.code != http.StatusNotImplemented {
+		t.Fatalf("memory-bounded input = %d %v, want 501", res.code, res.body)
+	}
+	if reason, _ := res.body["reason"].(string); reason != string(placement.ReasonMemoryEstimateUnavailable) {
+		t.Fatalf("reason = %v, want %s", res.body["reason"], placement.ReasonMemoryEstimateUnavailable)
+	}
+	if f.runRows(t, session) != 0 {
+		t.Fatal("a 501 admission wrote a run row")
 	}
 }

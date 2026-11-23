@@ -125,11 +125,18 @@ func (s *Server) retryTurn(w http.ResponseWriter, r *http.Request) {
 		writeInputError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	status := http.StatusCreated
+	response := map[string]any{
 		"created":   commit.Created,
 		"seq":       commit.Submission.Seq,
 		"requestId": requestID,
-	})
+	}
+	// The retried message is durable; if its run waits for a group slot the
+	// answer is 202 with the FIFO position and ETA, exactly like the input path.
+	if s.annotateQueued(r.Context(), w, tenantID, sessionID, response) {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, response)
 }
 
 // resolveRetryInput maps the client's turn identifier onto the committed
