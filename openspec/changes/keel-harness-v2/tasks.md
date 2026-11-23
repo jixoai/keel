@@ -524,7 +524,7 @@
 - [x] G6 插件门 · G7 UI 门 · G9 有界门 （对账 2026-11-20：部分——缺口：G6 生命周期/依赖/回滚测试在；G7 槽位机制未实现（W12-16/17）；G9 bash 输出有界/作业上限在）（W11 2026-11-24：**G6 PASS / G9 PASS / G7 PASS（web/TUI）**——G6：生命周期/依赖/HMR/目录唯一真源/卸载零残留；G9：工具输出有界、排队 ETA、作业上限、十万文件 1 条 capture；G7：slots/chunk 贡献、TUI 降级、主题令牌/桥能力；macOS 原生 target 按程序板 Defer。证据 `evidence/w11-gates/g6-g9-g10.md`）
 - [ ] G8 创造模式门：AI 现场写 Native 插件端到端（装→渲染→卸载无残留） （对账 2026-11-20：部分——缺口：创造模式已有 webview E2E（creation_test.go）；缺 Native chunk 形态/macos target/卸载 diff）（W11 2026-11-24：**Deferred**——Alpha 切片只要求一个 Native chunk 形态，web/TUI chunk 已有测试；macOS target 与完整创建流程按程序板 Defer，保持未勾）
 - [x] G10 资源回收门：零孤儿进程/端口/VM + 回收证据 （对账 2026-11-20：部分——缺口：sidecar/gateway 进程组回收、drain、chaos 孤儿断言在；无 layerfs VM/sweep 与端口台账核对）（W11 2026-11-24：**PASS**——零孤儿进程/端口（vertical sidecar 正控+负控、mcp-apps cleanup.json、final gate pgrep/lsof）；SIGKILL sweep/恢复测试；PORT.md 核对；VM 形态按 Defer 不适用。证据 `evidence/w11-gates/g6-g9-g10.md`）
-- [ ] G11 交付面门：HTML 图文 E2E 报告 + 改动文件 before/after 审计（UNCOVERED=0）+ 子代理交叉复核 （W11 2026-11-24：**PENDING**——需要先起 review 实例/截图，按项目规范生成 HTML 报告与审计表；保持未勾）
+- [x] G11 交付面门：HTML 图文 E2E 报告 + 改动文件 before/after 审计（UNCOVERED=0）+ 子代理交叉复核 （W11 2026-11-24：**PASS**——活实例报告 `.agents/reports/keel/g11-review-2026-11-24/report.html`（10 步/10 断言/8 图，公网 `https://local-kzf-keel.fde2e.com/report.html`）；审计覆盖交付窗口 a549e87..e76a6f5 全部 212 文件（A 表 W11 87 + B 表其它车道 104 + 本轮修复 21），UNCOVERED=0；两轮子代理复核 reviewer 6.5→8.5、vision 三处视觉复验 PASS；复核修复 4 个真实缺陷（导出漏 assistant bfac99a、工作区 botless 会话 957a6ce、窄列输入区/插件折叠 3b983df、/plugins 路由 4a8fb36）；ADR 0001 反向记录；报告目录按 2026-11-04 口径不入库，`.agents/docs/E2E-REPORTS.md` 已登记）
 
 ## W12 插件补全（DSH 对表 + Owner 裁决，可与 W3–W9 并行）
 
@@ -658,8 +658,8 @@
 - [ ] RF-4 缩略图异步生成（可选）（W11 G4）
 - [ ] RF-5 RLS 可选启用 + 非 owner 角色（W11 G4）
 - [ ] RF-6 每租户配额（并发/带宽/存储）（W11 G4）
-- [ ] RF-7 HTML 报告 + 公网链接（W11 G11）
-- [ ] RF-8 子代理交叉复核（本项目不使用 Codex）（W11 G11）
+- [x] RF-7 HTML 报告 + 公网链接（W11 G11；2026-11-24：`.agents/reports/keel/g11-review-2026-11-24/report.html` 10 步/10 断言/8 图，公网 https://local-kzf-keel.fde2e.com/report.html ，审计同目录）
+- [x] RF-8 子代理交叉复核（本项目不使用 Codex）（W11 G11；2026-11-24：reviewer 两轮 6.5→8.5、vision 两轮（首轮 3 缺陷→修复后全 PASS）；复核发现 4 缺陷全部修复并复验）
 
 ## W13 模型目录（keel-model-catalog 车道）
 

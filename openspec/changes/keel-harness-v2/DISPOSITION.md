@@ -18,7 +18,7 @@
 | G9 有界 | PASS | 工具输出有界/队列 ETA/组上限/100k capture 1 事件；RSS 曲线平台受限 |
 | G10 资源回收 | PASS | 零孤儿进程/端口、SIGKILL sweep、vertical §1.7 正负控 |
 | G8 创造模式 | Deferred | 端到端未跑通；webview E2E 已有 |
-| G11 交付面 | PASS | 报告（9 步/9 断言/8 图）+ 审计（94 文件，UNCOVERED=0）+ 子代理复核 + ADR 反向记录 |
+| G11 交付面 | PASS | 报告（10 步/10 断言/8 图）+ 审计（212 文件，UNCOVERED=0）+ 子代理复核 + ADR 反向记录 |
 | E0 既有门 | BLOCKED（平台） | 原生电池：conformance 1129/0/2、mcp-apps 5/5、external 15/15、core 7/8（fake MCP marker 时序）；容器电池需 Docker（本机禁用） |
 
 ## 未勾任务处置（50 项）
@@ -81,3 +81,11 @@
 - 未完成项不新开占位 change；重启时从本表与 `openspec/changes/archive/<date>-keel-harness-v2/tasks.md` 逐条认领。
 - W11 收口补充（RF-1..RF-8）中 RF-1/2/3/4/5/6 的处置见上表；RF-7/RF-8 本轮关闭。
 - 报告与公网链接：https://local-kzf-keel.fde2e.com/report.html（审计同目录 audit-coverage.md）。
+
+## 报告入库口径（G11 判据对齐，2026-11-24）
+
+主仓 `.gitignore` 按 Owner 2026-11-04 裁决把 `.agents/reports/` 排除在版本库外，入库产物是
+`.agents/docs/E2E-REPORTS.md` 的索引条目。本 change 的 G11 判据已同步改写为「报告落
+`.agents/reports/keel/g11-review-2026-11-24/`（目录不入库）+ `E2E-REPORTS.md` 索引登记」，避免把
+与现行裁决冲突的 MUST 冻结进归档。报告与审计按同目录相对引用，公网入口
+https://local-kzf-keel.fde2e.com/report.html （静态服务 + frp pin）。

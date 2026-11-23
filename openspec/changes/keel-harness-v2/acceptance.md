@@ -125,8 +125,9 @@
 ## G11 交付面门
 
 - **判据**：E2E 报告为 **HTML 图文文档**（每步截图 + 做了什么/预期/实际断言/关键日志），落
-  `.agents/reports/<group>/<fileName>/` 并随主仓入库；**每个改动过的文件**在审计清单里有对应
-  页面/状态（视觉文件 before/after 成对），`UNCOVERED=0`；子代理交叉复核；layerfs 的 ADR
+  `.agents/reports/<group>/<fileName>/`（目录本身按主仓 2026-11-04 裁决不入库），并在
+  `.agents/docs/E2E-REPORTS.md` 索引登记（入库产物是索引文字）；**每个改动过的文件**在审计清单里
+  有对应页面/状态（视觉文件 before/after 成对），`UNCOVERED=0`；子代理交叉复核；layerfs 的 ADR
   证据门（1000 并发流 RSS/p99/GC 停顿、tree 去重收益、fork O(1)）齐备或已回退。
 - **证据**：`report.html` + 覆盖表 + 复核结论 + ADR 证据。
 - **负控**：抽查未截图改动文件 → UNCOVERED。
