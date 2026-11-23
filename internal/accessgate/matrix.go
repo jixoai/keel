@@ -293,6 +293,11 @@ var rules = []Rule{
 	route(http.MethodGet, "/v1/settings/secrets", ModeKey, access.KeySecretReadMetadata),
 	route(http.MethodPut, "/v1/settings/secrets/{name}", ModeKey, access.KeySecretWrite),
 	route(http.MethodDelete, "/v1/settings/secrets/{name}", ModeKey, access.KeySecretWrite),
+	// The provider editor's direct-entry path stores the value in the same tenant
+	// secret store as PUT /v1/settings/secrets/{name} (the models document is
+	// saved separately), so it carries the secret-write authority rather than the
+	// model-configure one.
+	route(http.MethodPut, "/v1/settings/providers/{id}/credential", ModeKey, access.KeySecretWrite),
 
 	// --- settings: skills ----------------------------------------------------
 	route(http.MethodGet, "/v1/settings/skills", ModeKey, access.KeySkillRead),
