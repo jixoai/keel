@@ -40,7 +40,7 @@ func newProvider(tenant host.TenantConfig, cfg Config, engine *servicegraph.Engi
 		loadout.ServiceLLM:               newLLMFactory(tenant, cfg),
 		loadout.ServicePrompt:            newPromptFactory(tenant, cfg),
 		loadout.ServiceTools:             newToolsFactory(cfg),
-		loadout.ServicePiLoop:            newPiLoopFactory(cfg),
+		loadout.ServicePiLoop:            newPiLoopFactory(tenant, cfg),
 		loadout.ServiceSessionProjection: newProjectionFactory(cfg),
 		loadout.ServiceTelemetry:         newTelemetryFactory(cfg),
 		loadout.ServiceCompaction:        newCompactionFactory(cfg),
@@ -541,7 +541,7 @@ func (l *loopService) Runner() *agent.Runner                                  { 
 func (l *loopService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (l *loopService) Stop(context.Context) error                             { return nil }
 
-func newPiLoopFactory(cfg Config) servicegraph.Factory {
+func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory {
 	return func(_ context.Context, resolved servicegraph.Resolved) (servicegraph.Instance, error) {
 		llm, err := servicegraph.BindAs[LLMService](resolved, loadout.CapLLM)
 		if err != nil {
@@ -583,7 +583,7 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		if cfg.CapturePolicy != nil {
 			runner.CapturePolicy = cfg.CapturePolicy
 		} else {
-			mode := cfg.Tenant.Filesystem.Capture.EffectiveMode()
+			mode := tenant.Filesystem.Capture.EffectiveMode()
 			runner.CapturePolicy = func(context.Context, kernel.Scope) (agent.RunCapture, error) {
 				return agent.RunCapture{Mode: mode}, nil
 			}
