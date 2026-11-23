@@ -285,7 +285,8 @@ print(urllib.parse.urlunparse(u._replace(path="/" + sys.argv[2])))
 sql_exec() { # sql_exec <database> <sql...>; prints psql output
   local database="$1"; shift
   if command -v psql >/dev/null 2>&1; then
-    PGCONNECT_TIMEOUT=10 psql "$(dsn_with_db "$database")" -v ON_ERROR_STOP=1 -q "$@"
+    PGCONNECT_TIMEOUT=10 run_bounded 30 psql "$(dsn_with_db "$database")" \
+      -v ON_ERROR_STOP=1 -q "$@"
   elif docker_ready; then
     run_bounded 30 docker exec "$PG_CTR" psql -U postgres -v ON_ERROR_STOP=1 -q -d "$database" "$@"
   else
@@ -371,7 +372,11 @@ profile_mode() {
   create_database >>"$PROFILE_LOG" 2>&1 || fatal "could not create database $DB"
   DB_CREATED=1
   local tables
-  tables=$(sql_exec "$DB" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>>"$PROFILE_LOG" | tr -d '[:space:]')
+  tables=$(sql_exec "$DB" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>>"$PROFILE_LOG" | tr -d '[:space:]') \
+    || fatal "could not read the table count of $DB (see $PROFILE_LOG)"
+  case "$tables" in
+    ''|*[!0-9]*) fatal "table count of $DB is unreadable (\"$tables\"); refusing a stale/unknown database" ;;
+  esac
   [ "$tables" = "0" ] || fatal "database $DB is not fresh ($tables public tables)"
 
   port_is_free "$PROFILE_PORT" || fatal "port $PROFILE_PORT is already in use"
