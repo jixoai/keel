@@ -39,7 +39,7 @@ const launch = async (
     ...(options.preflight === undefined ? {} : { "keel.realtime.preflight": options.preflight }),
   };
   try {
-    const app = await open("./harness.tsx", {
+    const app = await open("./realtime-harness.tsx", {
       clock: {},
       ...(options.width ? { width: options.width } : {}),
       host: { params: options.params ?? {}, handlers },
@@ -48,7 +48,7 @@ const launch = async (
   } catch (error) {
     const code = String((error as { code?: unknown } | null)?.code ?? "");
     if (code !== "ERR_NSH_TEST_UNSUPPORTED") throw error;
-    const app = await open("./harness.tsx", {
+    const app = await open("./realtime-harness.tsx", {
       clock: {},
       ...(options.width ? { width: options.width } : {}),
     });

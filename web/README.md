@@ -8,11 +8,12 @@
 
 | 项 | 值 |
 |---|---|
-| CLI | **nsh 0.4.0 (bba76ef nightly)**，2026-11-08 安装 |
+| CLI | **nsh 0.6.0 (f577c51 nightly)**，2026-11-23 由 0.4.0 (bba76ef) 升级 |
 | 安装 | `curl -fsSL https://nsh.dev/install.sh \| sh -s -- --nightly`（校验 `sha256` 通过） |
 | 组件 | `web`、`tui`（由 `nsh package/run/test` 自动安装） |
 | 关键特性 | `List alignment="bottom"`（聊天列表底部对齐）、`--target tui` 开发宿主、`TextView` markdown/streaming、`Picker`、`host` 通道、`nsh test --target tui`（in-memory terminal） |
 | 本地参考检出 | `~/Development/GitHub/longbridge/nsh` |
+| 0.6.0 升级适配 | ① 测试 app 的静态资源必须在该 app 目录内：realtime/speech 的 gate 从 `src/surfaces/*` 挪到 `web/` 根（`assets/` 在 app 根内），harness 改为 `*-harness.tsx`；② `PickedFile.file` 可为 `null`（`status: "tooLarge"`）：speech 的上传路径现在给出「文件过大」提示，不再把空字节送进转写 |
 
 **为什么必须 nightly**：发布版 0.3.0（4e95ae5）既没有 `List alignment=bottom`，也没有
 `--target tui`；两者都在官方 main 上，nightly 已包含。本仓按 Owner 指令 pin main/nightly，
@@ -170,7 +171,7 @@ web/
 4. **Web Push / service worker**：`nsh package --target web` 没有公开自定义 service worker/public 文件的
    入口，本仓只做 host 通知；真正的 Web Push 需官方支持。
 5. **`nsh test --target tui` 的终端尺寸不可配**（观测 49×53 cells）；窄终端适配已做，但不能模拟宽终端。
-6. **`List alignment="bottom"` 只在 nightly**：发布版 0.3.0 缺失（本仓已用 0.4.0 nightly）。
+6. **`List alignment="bottom"` 只在 nightly**：发布版 0.3.0 缺失（本仓已用 0.6.0 nightly）。
 7. **自定义组件的 `testID` 透传**：经 `Press` 包装后 `id:` 选择器找不到（`Input` 直接使用正常），
    本仓测试改用 `label:`；若为官方 bug 建议修复，否则请在文档说明限制。
 

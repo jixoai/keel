@@ -11,8 +11,8 @@
 // `/v1/realtime?session_id=…` from it and the server resolves the session by
 // it, so a fixture with a made-up id would test a call that cannot exist.
 import { host, mount, View, windowSize } from "nsh";
-import { store } from "../../data/store";
-import { RealtimeSurface } from "./index";
+import { store } from "./src/data/store";
+import { RealtimeSurface } from "./src/surfaces/realtime/index";
 
 const params = host.params as Record<string, unknown>;
 const text = (key: string, fallback: string): string =>

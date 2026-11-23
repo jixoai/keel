@@ -15,7 +15,7 @@
 import { expect, open, test } from "nsh/test";
 
 const openSurface = (width?: number) =>
-  open("./harness.tsx", { clock: {}, ...(width ? { width } : {}) });
+  open("./speech-harness.tsx", { clock: {}, ...(width ? { width } : {}) });
 
 const ready = () => "text:/待命/";
 
@@ -212,7 +212,7 @@ test("语音合成：未配置 Provider——文本、音色与禁用的合成�
 });
 
 test("语音合成：Provider 已配置——合成走服务端语音端点并给出结果", async () => {
-  const app = await open("./harness.tsx", {
+  const app = await open("./speech-harness.tsx", {
     clock: {},
     network: {
       "POST http://keel.test/v1/media/audio/speech": () => ({
@@ -246,7 +246,7 @@ test("语音合成：Provider 已配置——合成走服务端语音端点并�
 });
 
 test("语音合成：请求带上会话选中的 TTS 模型（否则走部署默认，可能是付费厂商）", async () => {
-  const app = await open("./harness.tsx", {
+  const app = await open("./speech-harness.tsx", {
     clock: {},
     network: {
       "POST http://keel.test/v1/media/audio/speech": () => ({
@@ -275,7 +275,7 @@ test("语音合成：请求带上会话选中的 TTS 模型（否则走部署默
 });
 
 test("语音合成：头部状态与卡片状态必须一致（不得一处写「未配置」一处写「已配置」）", async () => {
-  const app = await open("./harness.tsx", {
+  const app = await open("./speech-harness.tsx", {
     clock: {},
     network: {
       "GET http://keel.test/v1/media/capabilities": () => ({
@@ -299,12 +299,12 @@ test("语音工作台：mode 变化必须切换工作台（STT 模型不得停�
   // not remount — a one-shot body statement would leave the previous workbench
   // on screen. The harness reads `host.params.mode`, so two opens prove the
   // initial mode; the live check is that the TTS-only controls are absent.
-  const stt = await open("./harness.tsx", { clock: {}, host: { params: { mode: "stt" } } });
+  const stt = await open("./speech-harness.tsx", { clock: {}, host: { params: { mode: "stt" } } });
   await stt.waitFor(ready());
   expect(stt.shows("id:speech-tts")).toBe(false);
   expect(stt.shows("id:speech-record")).toBe(true);
 
-  const tts = await open("./harness.tsx", { clock: {}, host: { params: { mode: "tts" } } });
+  const tts = await open("./speech-harness.tsx", { clock: {}, host: { params: { mode: "tts" } } });
   await tts.waitFor("id:speech-tts");
   expect(tts.shows("id:speech-record")).toBe(false);
 });
@@ -312,7 +312,7 @@ test("语音工作台：mode 变化必须切换工作台（STT 模型不得停�
 test("语音转写：文件输入走服务端转写端点（无需麦克风权限）", async () => {
   // The microphone is a browser permission, so the file path is the one that
   // works everywhere — and it is what makes a TTS → STT round trip verifiable.
-  const app = await open("./harness.tsx", {
+  const app = await open("./speech-harness.tsx", {
     clock: {},
     network: {
       "POST http://keel.test/v1/media/audio/transcriptions": () => ({

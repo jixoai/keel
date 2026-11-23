@@ -9,8 +9,8 @@
 // pattern as the image harness). Tests that never stub the network get the
 // configuration state.
 import { host, mount, View, windowSize } from "nsh";
-import { setMediaBase } from "../../data/media";
-import { SpeechSurface } from "./index";
+import { setMediaBase } from "./src/data/media";
+import { SpeechSurface } from "./src/surfaces/speech/index";
 
 setMediaBase("http://keel.test");
 
