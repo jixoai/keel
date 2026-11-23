@@ -1,0 +1,926 @@
+{
+  "lane": "system-bar",
+  "startedAt": "2026-11-23T06:07:05.908Z",
+  "base": "http://127.0.0.1:13763",
+  "viewports": [
+    "390x844",
+    "768x1024",
+    "1024x800",
+    "1440x900"
+  ],
+  "steps": [
+    {
+      "label": "390: system bar is mounted",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: plugin/drag slot is inside the bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: five system controls present",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "390: no fake window controls in a browser",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: phone has three daily tabs",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-tab-workspace",
+        "books-tab-bots",
+        "books-tab-teams"
+      ]
+    },
+    {
+      "label": "390: phone keeps the settings entry",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "workspace-390",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "workspace-390: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "workspace 390",
+      "kind": "screenshot",
+      "file": "workspace-390.png"
+    },
+    {
+      "label": "768: system bar is mounted",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "768: plugin/drag slot is inside the bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "768: five system controls present",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "768: no fake window controls in a browser",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "768: desktop rail has the three daily chapters",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "768: identity/records are not rail entries",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "workspace-768",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 768,
+        "docScrollWidth": 768,
+        "docClientWidth": 768,
+        "bodyScrollWidth": 768
+      }
+    },
+    {
+      "label": "workspace-768: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 768,
+        "docScrollWidth": 768,
+        "docClientWidth": 768,
+        "bodyScrollWidth": 768
+      }
+    },
+    {
+      "label": "workspace 768",
+      "kind": "screenshot",
+      "file": "workspace-768.png"
+    },
+    {
+      "label": "1024: system bar is mounted",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1024: plugin/drag slot is inside the bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1024: five system controls present",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "1024: no fake window controls in a browser",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1024: desktop rail has the three daily chapters",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "1024: identity/records are not rail entries",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "workspace-1024",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1024,
+        "docScrollWidth": 1024,
+        "docClientWidth": 1024,
+        "bodyScrollWidth": 1024
+      }
+    },
+    {
+      "label": "workspace-1024: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1024,
+        "docScrollWidth": 1024,
+        "docClientWidth": 1024,
+        "bodyScrollWidth": 1024
+      }
+    },
+    {
+      "label": "workspace 1024",
+      "kind": "screenshot",
+      "file": "workspace-1024.png"
+    },
+    {
+      "label": "1440: system bar is mounted",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: plugin/drag slot is inside the bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: five system controls present",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "1440: no fake window controls in a browser",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: desktop rail has the three daily chapters",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "1440: identity/records are not rail entries",
+      "kind": "assert",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "workspace-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "workspace-1440: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "workspace 1440",
+      "kind": "screenshot",
+      "file": "workspace-1440.png"
+    },
+    {
+      "label": "390: settings exposes identity/records doors",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "390: settings keeps account/logout/todo/live",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "settings-390",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "settings-390: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "settings general 390",
+      "kind": "screenshot",
+      "file": "settings-general-390.png"
+    },
+    {
+      "label": "390: the settings door opens the identity chapter",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: settings exposes identity/records doors",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "1440: settings keeps account/logout/todo/live",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "settings-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "settings-1440: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "settings general 1440",
+      "kind": "screenshot",
+      "file": "settings-general-1440.png"
+    },
+    {
+      "label": "notification panel lists the waiting approvals",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "approvals": 2,
+        "live": true,
+        "text": "通知\n需要你决定的审批，和这台客户端最近的提示。\n待审批 · 2\n实时\n发布审批\n是否在 22:00–23:00 窗口发布 Keel 0.1.0？\n部署卡在确认\n预发包已就绪：继续推生产，还是先回滚？\n最近提示\n还没有新的提示。保存失败、连接状态和审批到达都会留在这里。\n实时通道与审批通知已打开。"
+      }
+    },
+    {
+      "label": "notification panel names the live channel",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "notifications 1440",
+      "kind": "screenshot",
+      "file": "notifications-1440.png"
+    },
+    {
+      "label": "sound toggle flips its action label",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "soundBefore": "关闭提示音",
+        "soundAfter": "打开提示音"
+      }
+    },
+    {
+      "label": "sound settings dialog exposes switch, volumes and preview",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "enabled": true,
+        "volumes": true,
+        "preview": true
+      }
+    },
+    {
+      "label": "sound settings 1440",
+      "kind": "screenshot",
+      "file": "sound-settings-1440.png"
+    },
+    {
+      "label": "theme switch flips light/dark",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "themeBefore": "切换到浅色主题",
+        "themeAfter": "切换到深色主题"
+      }
+    },
+    {
+      "label": "light theme 1440",
+      "kind": "screenshot",
+      "file": "light-theme-1440.png"
+    },
+    {
+      "label": "command palette opens from the system bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: plugin top panel renders inside the system bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "plugin-390",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "plugin-390: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "plugin top bar 390",
+      "kind": "screenshot",
+      "file": "plugin-topbar-390.png"
+    },
+    {
+      "label": "1440: plugin top panel renders inside the system bar",
+      "kind": "assert",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "plugin-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "plugin-1440: no horizontal overflow",
+      "kind": "assert",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "plugin top bar 1440",
+      "kind": "screenshot",
+      "file": "plugin-topbar-1440.png"
+    }
+  ],
+  "console": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "pass": true,
+  "checks": [
+    {
+      "label": "390: system bar is mounted",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: plugin/drag slot is inside the bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: five system controls present",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "390: no fake window controls in a browser",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: phone has three daily tabs",
+      "ok": true,
+      "detail": [
+        "books-tab-workspace",
+        "books-tab-bots",
+        "books-tab-teams"
+      ]
+    },
+    {
+      "label": "390: phone keeps the settings entry",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "workspace-390: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "768: system bar is mounted",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "768: plugin/drag slot is inside the bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "768: five system controls present",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "768: no fake window controls in a browser",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "768: desktop rail has the three daily chapters",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "768: identity/records are not rail entries",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "workspace-768: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 768,
+        "docScrollWidth": 768,
+        "docClientWidth": 768,
+        "bodyScrollWidth": 768
+      }
+    },
+    {
+      "label": "1024: system bar is mounted",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1024: plugin/drag slot is inside the bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1024: five system controls present",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "1024: no fake window controls in a browser",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1024: desktop rail has the three daily chapters",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "1024: identity/records are not rail entries",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "workspace-1024: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1024,
+        "docScrollWidth": 1024,
+        "docClientWidth": 1024,
+        "bodyScrollWidth": 1024
+      }
+    },
+    {
+      "label": "1440: system bar is mounted",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: plugin/drag slot is inside the bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: five system controls present",
+      "ok": true,
+      "detail": [
+        "system-bar-sound",
+        "system-bar-sound-settings",
+        "system-bar-notifications",
+        "system-bar-theme",
+        "system-bar-command"
+      ]
+    },
+    {
+      "label": "1440: no fake window controls in a browser",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: desktop rail has the three daily chapters",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "1440: identity/records are not rail entries",
+      "ok": true,
+      "detail": [
+        "books-chapter-workspace",
+        "books-chapter-bots",
+        "books-chapter-teams"
+      ]
+    },
+    {
+      "label": "workspace-1440: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "390: settings exposes identity/records doors",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "390: settings keeps account/logout/todo/live",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "settings-390: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "390: the settings door opens the identity chapter",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "1440: settings exposes identity/records doors",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "1440: settings keeps account/logout/todo/live",
+      "ok": true,
+      "detail": {
+        "identity": true,
+        "records": true,
+        "account": true,
+        "logout": true,
+        "todo": true,
+        "live": true
+      }
+    },
+    {
+      "label": "settings-1440: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "notification panel lists the waiting approvals",
+      "ok": true,
+      "detail": {
+        "approvals": 2,
+        "live": true,
+        "text": "通知\n需要你决定的审批，和这台客户端最近的提示。\n待审批 · 2\n实时\n发布审批\n是否在 22:00–23:00 窗口发布 Keel 0.1.0？\n部署卡在确认\n预发包已就绪：继续推生产，还是先回滚？\n最近提示\n还没有新的提示。保存失败、连接状态和审批到达都会留在这里。\n实时通道与审批通知已打开。"
+      }
+    },
+    {
+      "label": "notification panel names the live channel",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "sound toggle flips its action label",
+      "ok": true,
+      "detail": {
+        "soundBefore": "关闭提示音",
+        "soundAfter": "打开提示音"
+      }
+    },
+    {
+      "label": "sound settings dialog exposes switch, volumes and preview",
+      "ok": true,
+      "detail": {
+        "enabled": true,
+        "volumes": true,
+        "preview": true
+      }
+    },
+    {
+      "label": "theme switch flips light/dark",
+      "ok": true,
+      "detail": {
+        "themeBefore": "切换到浅色主题",
+        "themeAfter": "切换到深色主题"
+      }
+    },
+    {
+      "label": "command palette opens from the system bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "390: plugin top panel renders inside the system bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "plugin-390: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "1440: plugin top panel renders inside the system bar",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "label": "plugin-1440: no horizontal overflow",
+      "ok": true,
+      "detail": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    }
+  ],
+  "finishedAt": "2026-11-23T06:07:39.822Z"
+}
