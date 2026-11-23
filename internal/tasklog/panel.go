@@ -54,11 +54,15 @@ type Panel struct {
 	Ancestors []Card `json:"ancestors"`
 	// Attachments folds each own card's live task.attached/task.detached events.
 	Attachments []PanelAttachment `json:"attachments"`
-	Events      []DescribedEvent  `json:"events"`
+	// Events is the newest page of the session's stream, in ledger order.
+	Events []DescribedEvent `json:"events"`
 	// Bounds and truncation, so a surface says "more exist" instead of
 	// dropping rows silently.
-	MemberLimit          int  `json:"memberLimit"`
-	Truncated            bool `json:"truncated"`
+	MemberLimit int  `json:"memberLimit"`
+	Truncated   bool `json:"truncated"`
+	// TruncatedMemberCount is how many linked cards the page left out: exact
+	// when the over-fetch read every linked row, a floor of at least 1 when the
+	// read itself stopped at its bound (it cannot count rows it never read).
 	TruncatedMemberCount int  `json:"truncatedMemberCount,omitempty"`
 	EventLimit           int  `json:"eventLimit"`
 	EventsTruncated      bool `json:"eventsTruncated"`
@@ -126,8 +130,10 @@ func (s *Service) Panel(ctx context.Context, scope kernel.Scope, memberLimit, ev
 	}
 	sortEventsBySeq(described)
 	if len(described) > panel.EventLimit {
+		// Keep the newest page: a panel reader wants the latest fact, and the
+		// gap sentence says the older ones were not read.
 		panel.EventsTruncated = true
-		described = described[:panel.EventLimit]
+		described = described[len(described)-panel.EventLimit:]
 	}
 	panel.Events = described
 
@@ -191,14 +197,12 @@ func (s *Service) Panel(ctx context.Context, scope kernel.Scope, memberLimit, ev
 		}
 		panel.Members = append(panel.Members, card)
 	}
-	if overflow > 0 {
+	// A read that stopped exactly at its bound cannot say how many rows follow;
+	// one is the floor the page certifies. A row past the budget proves at least
+	// that many.
+	if len(childPage) == read || overflow > 0 {
 		panel.Truncated = true
-		panel.TruncatedMemberCount = overflow
-		// A read that stopped exactly at its bound cannot say how many rows
-		// follow; one is the floor the page certifies.
-		if len(childPage) == read {
-			panel.TruncatedMemberCount = max(overflow, 1)
-		}
+		panel.TruncatedMemberCount = max(overflow, 1)
 	}
 
 	// Parents that live outside this session: resolve their card rows so the

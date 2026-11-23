@@ -8,6 +8,7 @@ package tasklog_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -272,6 +273,217 @@ func TestPanelFoldWithoutADatabase(t *testing.T) {
 	}
 	if !page.EventsTruncated || len(page.Events) != 2 {
 		t.Fatalf("event page = %+v", page.Events)
+	}
+	// The page keeps the newest events (the gap sentence names the older ones).
+	if page.Events[0].Seq != 5 || page.Events[1].Seq != 6 {
+		t.Fatalf("event page order = %d %d, want the newest 5, 6", page.Events[0].Seq, page.Events[1].Seq)
+	}
+}
+
+// TestPanelEventPageKeepsTheNewest pins the event page's direction: a stream
+// over its bound keeps the newest events in ledger order and says the older
+// ones were not read; a stream at or under the bound is the whole history and
+// reports no truncation.
+func TestPanelEventPageKeepsTheNewest(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	now := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	rootID := "30000000-0000-4000-8000-000000000001"
+	root := memCard(tenant, session, rootID, "根卡", 1, nil, tasklog.OriginSession, 0, now)
+	events := make([]memEvent, 0, 6)
+	for seq := 1; seq <= 6; seq++ {
+		events = append(events, memEvent{
+			SessionID: session,
+			Event: tasklog.Event{
+				TaskID: root.TaskID, Kind: string(kernel.KindTaskNote), Seq: int64(seq),
+				Payload: seqPayload(rootID, fmt.Sprintf(`,"text":"事件 %d"`, seq)), CreatedAt: now,
+			},
+		})
+	}
+	service := memService(t, &memProjection{cards: []tasklog.Card{root}, events: events})
+
+	for _, testCase := range []struct {
+		name      string
+		limit     int
+		wantSeqs  []int64
+		truncated bool
+	}{
+		{name: "newest page", limit: 2, wantSeqs: []int64{5, 6}, truncated: true},
+		{name: "exact bound", limit: 6, wantSeqs: []int64{1, 2, 3, 4, 5, 6}},
+		{name: "under the bound", limit: 10, wantSeqs: []int64{1, 2, 3, 4, 5, 6}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 0, testCase.limit)
+			if err != nil {
+				t.Fatalf("panel: %v", err)
+			}
+			got := make([]int64, 0, len(panel.Events))
+			for _, event := range panel.Events {
+				got = append(got, event.Seq)
+			}
+			if len(got) != len(testCase.wantSeqs) {
+				t.Fatalf("event seqs = %v, want %v", got, testCase.wantSeqs)
+			}
+			for index := range got {
+				if got[index] != testCase.wantSeqs[index] {
+					t.Fatalf("event seqs = %v, want %v (ledger order, newest page)", got, testCase.wantSeqs)
+				}
+			}
+			if panel.EventsTruncated != testCase.truncated {
+				t.Fatalf("eventsTruncated = %v, want %v", panel.EventsTruncated, testCase.truncated)
+			}
+			if panel.EventLimit != testCase.limit {
+				t.Fatalf("eventLimit = %d, want %d", panel.EventLimit, testCase.limit)
+			}
+		})
+	}
+}
+
+// TestPanelMemberPageBounds pins the member page's truncation arithmetic: a
+// page that fits every member reports nothing; a page with rows left over
+// reports them; a read that stopped at its own bound certifies a floor of 1
+// instead of pretending it counted rows it never read. Own child cards are
+// filtered before the page fills, so they neither consume a slot nor inflate
+// the count.
+func TestPanelMemberPageBounds(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	childSession := uuid.New()
+	now := time.Date(2026, 11, 23, 10, 30, 0, 0, time.UTC)
+	rootID := "30000000-0000-4000-8000-000000000010"
+	root := memCard(tenant, session, rootID, "根卡", 1, nil, tasklog.OriginSession, 0, now)
+
+	// Four member cards, newest activity last: the projection sorts members
+	// newest first, so the all-fit page names member 4 first.
+	members := make([]tasklog.Card, 0, 4)
+	for index := 0; index < 4; index++ {
+		id := fmt.Sprintf("40000000-0000-4000-8000-%012d", index+1)
+		members = append(members, memCard(tenant, childSession, id, fmt.Sprintf("成员 %d", index+1), int64(index+1), &root.TaskID, tasklog.OriginSubagent, 0, now.Add(time.Duration(index+1)*time.Minute)))
+	}
+	service := memService(t, &memProjection{cards: append([]tasklog.Card{root}, members...)})
+
+	for _, testCase := range []struct {
+		name        string
+		limit       int
+		wantMembers int
+		truncated   bool
+		wantCount   int
+	}{
+		{name: "all fit", limit: 4, wantMembers: 4},
+		// Four members and a limit of 3: the read returned all four, so the
+		// one omitted member is counted exactly.
+		{name: "overflow, fully read", limit: 3, wantMembers: 3, truncated: true, wantCount: 1},
+		// A limit of 2 makes the read's own bound four (limit + own + 1): the
+		// page stops at four rows, so the two reported are the rows it saw.
+		{name: "overflow at the read bound", limit: 2, wantMembers: 2, truncated: true, wantCount: 2},
+		// The read stops sooner than the actual overflow (three members are
+		// left out, two were read): the count never overstates the read.
+		{name: "overflow past the read bound", limit: 1, wantMembers: 1, truncated: true, wantCount: 2},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, testCase.limit, 0)
+			if err != nil {
+				t.Fatalf("panel: %v", err)
+			}
+			if len(panel.Members) != testCase.wantMembers {
+				t.Fatalf("members = %d, want %d", len(panel.Members), testCase.wantMembers)
+			}
+			if panel.Truncated != testCase.truncated {
+				t.Fatalf("truncated = %v, want %v", panel.Truncated, testCase.truncated)
+			}
+			if panel.TruncatedMemberCount != testCase.wantCount {
+				t.Fatalf("truncatedMemberCount = %d, want %d", panel.TruncatedMemberCount, testCase.wantCount)
+			}
+			if panel.MemberLimit != testCase.limit {
+				t.Fatalf("memberLimit = %d, want %d", panel.MemberLimit, testCase.limit)
+			}
+		})
+	}
+
+	// The all-fit page's order is the projection's: newest activity first.
+	all, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 4, 0)
+	if err != nil {
+		t.Fatalf("all-fit panel: %v", err)
+	}
+	if all.Members[0].TaskID != members[3].TaskID || all.Members[3].TaskID != members[0].TaskID {
+		t.Fatalf("member order = %s … %s, want newest first", all.Members[0].TaskID, all.Members[3].TaskID)
+	}
+}
+
+// TestPanelMemberPageIgnoresOwnChildren proves the over-fetch filter: this
+// session's own child cards are not members, so they neither take a member slot
+// nor make the page claim truncation.
+func TestPanelMemberPageIgnoresOwnChildren(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	childSession := uuid.New()
+	now := time.Date(2026, 11, 23, 11, 0, 0, 0, time.UTC)
+	rootID := "30000000-0000-4000-8000-000000000020"
+	root := memCard(tenant, session, rootID, "根卡", 1, nil, tasklog.OriginSession, 0, now)
+	ownChild := memCard(tenant, session, "30000000-0000-4000-8000-000000000021", "自己的子卡", 2, &root.TaskID, tasklog.OriginTool, 0, now.Add(time.Minute))
+	members := []tasklog.Card{
+		memCard(tenant, childSession, "40000000-0000-4000-8000-000000000021", "成员一", 1, &root.TaskID, tasklog.OriginSubagent, 0, now.Add(2*time.Minute)),
+		memCard(tenant, childSession, "40000000-0000-4000-8000-000000000022", "成员二", 2, &root.TaskID, tasklog.OriginSubagent, 0, now.Add(3*time.Minute)),
+	}
+	service := memService(t, &memProjection{cards: []tasklog.Card{root, ownChild, members[0], members[1]}})
+
+	panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 2, 0)
+	if err != nil {
+		t.Fatalf("panel: %v", err)
+	}
+	// Both members fit: the own child was filtered out of the over-fetched page
+	// rather than occupying a slot, and the page did not stop at its bound.
+	if len(panel.Members) != 2 {
+		t.Fatalf("members = %+v, want the two linked members", panel.Members)
+	}
+	if panel.Truncated || panel.TruncatedMemberCount != 0 {
+		t.Fatalf("truncation = %v/%d, want none", panel.Truncated, panel.TruncatedMemberCount)
+	}
+	for _, card := range panel.Members {
+		if card.SessionID != childSession {
+			t.Fatalf("member %s lives in %s, want the child session", card.TaskID, card.SessionID)
+		}
+	}
+}
+
+// TestPanelMemberPageExactReadBoundFloorsTheCount proves the one case the
+// over-fetch cannot resolve: the read stopped exactly at its own bound with
+// every returned row placed, so the page certifies at least one more row
+// instead of claiming the linked set ended.
+func TestPanelMemberPageExactReadBoundFloorsTheCount(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	childSession := uuid.New()
+	now := time.Date(2026, 11, 23, 11, 30, 0, 0, time.UTC)
+	rootID := "30000000-0000-4000-8000-000000000030"
+	root := memCard(tenant, session, rootID, "根卡", 1, nil, tasklog.OriginSession, 0, now)
+	// The page's read bound is MemberLimit + own cards + 1, clamped to the
+	// maximum. A maximum-sized member limit with one own card clamps to 500, so
+	// exactly 500 returned members fill the page without an overflow row.
+	cards := make([]tasklog.Card, 0, tasklog.MaxPanelMemberLimit+1)
+	cards = append(cards, root)
+	for index := 0; index < tasklog.MaxPanelMemberLimit; index++ {
+		id := fmt.Sprintf("40000000-0000-4000-8000-%012d", index+1)
+		cards = append(cards, memCard(tenant, childSession, id, fmt.Sprintf("成员 %d", index+1), int64(index+1), &root.TaskID, tasklog.OriginSubagent, 0, now.Add(time.Duration(index+1)*time.Second)))
+	}
+	service := memService(t, &memProjection{cards: cards})
+
+	panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, tasklog.MaxPanelMemberLimit, 0)
+	if err != nil {
+		t.Fatalf("panel: %v", err)
+	}
+	if len(panel.Members) != tasklog.MaxPanelMemberLimit {
+		t.Fatalf("members = %d, want the full page %d", len(panel.Members), tasklog.MaxPanelMemberLimit)
+	}
+	if !panel.Truncated {
+		t.Fatalf("the read stopped at its bound but the panel claims the member set ended")
+	}
+	if panel.TruncatedMemberCount != 1 {
+		t.Fatalf("truncatedMemberCount = %d, want the floor 1", panel.TruncatedMemberCount)
 	}
 }
 

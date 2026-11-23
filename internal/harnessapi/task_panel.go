@@ -84,8 +84,10 @@ type TaskPanelView struct {
 }
 
 type TaskPanelLimits struct {
-	MemberLimit          int  `json:"memberLimit"`
-	Truncated            bool `json:"truncated"`
+	MemberLimit int  `json:"memberLimit"`
+	Truncated   bool `json:"truncated"`
+	// TruncatedMemberCount is exact when the read saw every linked row and a
+	// floor (at least 1) when the read itself stopped at its bound.
 	TruncatedMemberCount int  `json:"truncatedMemberCount,omitempty"`
 	EventLimit           int  `json:"eventLimit"`
 	EventsTruncated      bool `json:"eventsTruncated"`
