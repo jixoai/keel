@@ -202,18 +202,21 @@ const dialogMetrics = async (page, id, inputIds, expected, tallIds = []) => {
   check(`${id}: fields are ${expected}px`, present.length > 0 && wrong.length === 0, { wrong });
   const tallPresent = Object.entries(tall).filter(([, input]) => input !== null);
   const tallWrong = tallPresent.filter(([, input]) => input.h < expected).map(([inputId, input]) => `${inputId}=${input.h}`);
-  check(
-    `${id}: multiline fields are at least ${expected}px`,
-    tallPresent.length === tallIds.length && tallWrong.length === 0,
-    { tall, tallWrong },
-  );
+  if (tallIds.length > 0) {
+    check(
+      `${id}: multiline fields are at least ${expected}px`,
+      tallPresent.length === tallIds.length && tallWrong.length === 0,
+      { tall, tallWrong },
+    );
+  }
 
   if (buttons) {
     const heights = [...new Set(buttons.map((button) => button.h))];
+    const floor = expected >= 44 ? 44 : 28;
     check(`${id}: footer actions share one height`, heights.length === 1, { buttons });
     check(
-      `${id}: footer actions are ${expected >= 44 ? 44 : 28}px`,
-      heights.length === 1 && heights[0] >= (expected >= 44 ? 44 : 28),
+      `${id}: footer actions are at least ${floor}px`,
+      heights.length === 1 && heights[0] >= floor,
       { heights },
     );
   }

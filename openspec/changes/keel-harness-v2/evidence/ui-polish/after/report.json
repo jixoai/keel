@@ -1,6 +1,6 @@
 {
   "lane": "ui-polish",
-  "startedAt": "2026-11-23T07:22:37.652Z",
+  "startedAt": "2026-11-23T07:26:26.980Z",
   "base": "http://127.0.0.1:13773",
   "viewports": [
     "390x844",
@@ -648,15 +648,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 44px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: footer actions share one height",
       "kind": "assert",
       "ok": true,
@@ -676,7 +667,7 @@
       }
     },
     {
-      "label": "account-create-dialog: footer actions are 44px",
+      "label": "account-create-dialog: footer actions are at least 44px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -745,15 +736,6 @@
       }
     },
     {
-      "label": "bot-create-dialog: multiline fields are at least 44px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "bot-create-dialog: footer actions share one height",
       "kind": "assert",
       "ok": true,
@@ -773,7 +755,7 @@
       }
     },
     {
-      "label": "bot-create-dialog: footer actions are 44px",
+      "label": "bot-create-dialog: footer actions are at least 44px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -879,7 +861,7 @@
       }
     },
     {
-      "label": "team-create-dialog: footer actions are 44px",
+      "label": "team-create-dialog: footer actions are at least 44px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -948,15 +930,6 @@
       }
     },
     {
-      "label": "provider-config-dialog: multiline fields are at least 44px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "provider-config-dialog: footer actions share one height",
       "kind": "assert",
       "ok": true,
@@ -981,7 +954,7 @@
       }
     },
     {
-      "label": "provider-config-dialog: footer actions are 44px",
+      "label": "provider-config-dialog: footer actions are at least 44px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -1770,15 +1743,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 34px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: footer actions share one height",
       "kind": "assert",
       "ok": true,
@@ -1798,7 +1762,7 @@
       }
     },
     {
-      "label": "account-create-dialog: footer actions are 28px",
+      "label": "account-create-dialog: footer actions are at least 28px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -1867,15 +1831,6 @@
       }
     },
     {
-      "label": "bot-create-dialog: multiline fields are at least 34px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "bot-create-dialog: footer actions share one height",
       "kind": "assert",
       "ok": true,
@@ -1895,7 +1850,7 @@
       }
     },
     {
-      "label": "bot-create-dialog: footer actions are 28px",
+      "label": "bot-create-dialog: footer actions are at least 28px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -2001,7 +1956,7 @@
       }
     },
     {
-      "label": "team-create-dialog: footer actions are 28px",
+      "label": "team-create-dialog: footer actions are at least 28px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -2070,15 +2025,6 @@
       }
     },
     {
-      "label": "provider-config-dialog: multiline fields are at least 34px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "provider-config-dialog: footer actions share one height",
       "kind": "assert",
       "ok": true,
@@ -2103,7 +2049,7 @@
       }
     },
     {
-      "label": "provider-config-dialog: footer actions are 28px",
+      "label": "provider-config-dialog: footer actions are at least 28px",
       "kind": "assert",
       "ok": true,
       "detail": {
@@ -2738,14 +2684,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 44px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: footer actions share one height",
       "ok": true,
       "detail": {
@@ -2764,7 +2702,7 @@
       }
     },
     {
-      "label": "account-create-dialog: footer actions are 44px",
+      "label": "account-create-dialog: footer actions are at least 44px",
       "ok": true,
       "detail": {
         "heights": [
@@ -2814,14 +2752,6 @@
       }
     },
     {
-      "label": "bot-create-dialog: multiline fields are at least 44px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "bot-create-dialog: footer actions share one height",
       "ok": true,
       "detail": {
@@ -2840,7 +2770,7 @@
       }
     },
     {
-      "label": "bot-create-dialog: footer actions are 44px",
+      "label": "bot-create-dialog: footer actions are at least 44px",
       "ok": true,
       "detail": {
         "heights": [
@@ -2925,7 +2855,7 @@
       }
     },
     {
-      "label": "team-create-dialog: footer actions are 44px",
+      "label": "team-create-dialog: footer actions are at least 44px",
       "ok": true,
       "detail": {
         "heights": [
@@ -2975,14 +2905,6 @@
       }
     },
     {
-      "label": "provider-config-dialog: multiline fields are at least 44px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "provider-config-dialog: footer actions share one height",
       "ok": true,
       "detail": {
@@ -3006,7 +2928,7 @@
       }
     },
     {
-      "label": "provider-config-dialog: footer actions are 44px",
+      "label": "provider-config-dialog: footer actions are at least 44px",
       "ok": true,
       "detail": {
         "heights": [
@@ -3580,14 +3502,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 34px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: footer actions share one height",
       "ok": true,
       "detail": {
@@ -3606,7 +3520,7 @@
       }
     },
     {
-      "label": "account-create-dialog: footer actions are 28px",
+      "label": "account-create-dialog: footer actions are at least 28px",
       "ok": true,
       "detail": {
         "heights": [
@@ -3656,14 +3570,6 @@
       }
     },
     {
-      "label": "bot-create-dialog: multiline fields are at least 34px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "bot-create-dialog: footer actions share one height",
       "ok": true,
       "detail": {
@@ -3682,7 +3588,7 @@
       }
     },
     {
-      "label": "bot-create-dialog: footer actions are 28px",
+      "label": "bot-create-dialog: footer actions are at least 28px",
       "ok": true,
       "detail": {
         "heights": [
@@ -3767,7 +3673,7 @@
       }
     },
     {
-      "label": "team-create-dialog: footer actions are 28px",
+      "label": "team-create-dialog: footer actions are at least 28px",
       "ok": true,
       "detail": {
         "heights": [
@@ -3817,14 +3723,6 @@
       }
     },
     {
-      "label": "provider-config-dialog: multiline fields are at least 34px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "provider-config-dialog: footer actions share one height",
       "ok": true,
       "detail": {
@@ -3848,7 +3746,7 @@
       }
     },
     {
-      "label": "provider-config-dialog: footer actions are 28px",
+      "label": "provider-config-dialog: footer actions are at least 28px",
       "ok": true,
       "detail": {
         "heights": [
@@ -5027,5 +4925,5 @@
     }
   },
   "pass": true,
-  "finishedAt": "2026-11-23T07:23:27.285Z"
+  "finishedAt": "2026-11-23T07:27:16.669Z"
 }

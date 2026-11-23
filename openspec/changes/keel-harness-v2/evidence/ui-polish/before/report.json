@@ -1,6 +1,6 @@
 {
   "lane": "ui-polish",
-  "startedAt": "2026-11-23T07:23:36.621Z",
+  "startedAt": "2026-11-23T07:27:26.747Z",
   "base": "http://127.0.0.1:13773",
   "viewports": [
     "390x844",
@@ -659,15 +659,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 44px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: card is inside the window",
       "kind": "assert",
       "ok": true,
@@ -726,15 +717,6 @@
         "wrong": [
           "bot-create-name=28"
         ]
-      }
-    },
-    {
-      "label": "bot-create-dialog: multiline fields are at least 44px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -880,15 +862,6 @@
           "provider-config-credential=28",
           "provider-config-model-input=28"
         ]
-      }
-    },
-    {
-      "label": "provider-config-dialog: multiline fields are at least 44px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -1683,15 +1656,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 34px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: card is inside the window",
       "kind": "assert",
       "ok": true,
@@ -1753,15 +1717,6 @@
           "bot-create-kind=28",
           "bot-create-model=28"
         ]
-      }
-    },
-    {
-      "label": "bot-create-dialog: multiline fields are at least 34px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -1908,15 +1863,6 @@
           "provider-config-credential=28",
           "provider-config-model-input=28"
         ]
-      }
-    },
-    {
-      "label": "provider-config-dialog: multiline fields are at least 34px",
-      "kind": "assert",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -2556,14 +2502,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 44px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: card is inside the window",
       "ok": true,
       "detail": {
@@ -2604,14 +2542,6 @@
         "wrong": [
           "bot-create-name=28"
         ]
-      }
-    },
-    {
-      "label": "bot-create-dialog: multiline fields are at least 44px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -2720,14 +2650,6 @@
           "provider-config-credential=28",
           "provider-config-model-input=28"
         ]
-      }
-    },
-    {
-      "label": "provider-config-dialog: multiline fields are at least 44px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -3308,14 +3230,6 @@
       }
     },
     {
-      "label": "account-create-dialog: multiline fields are at least 34px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
-      }
-    },
-    {
       "label": "account-create-dialog: card is inside the window",
       "ok": true,
       "detail": {
@@ -3359,14 +3273,6 @@
           "bot-create-kind=28",
           "bot-create-model=28"
         ]
-      }
-    },
-    {
-      "label": "bot-create-dialog: multiline fields are at least 34px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -3476,14 +3382,6 @@
           "provider-config-credential=28",
           "provider-config-model-input=28"
         ]
-      }
-    },
-    {
-      "label": "provider-config-dialog: multiline fields are at least 34px",
-      "ok": true,
-      "detail": {
-        "tall": {},
-        "tallWrong": []
       }
     },
     {
@@ -4489,5 +4387,5 @@
     }
   },
   "pass": false,
-  "finishedAt": "2026-11-23T07:24:25.648Z"
+  "finishedAt": "2026-11-23T07:28:24.209Z"
 }

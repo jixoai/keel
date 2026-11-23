@@ -32,11 +32,11 @@ parameter; no credential is involved.
 
 ## Result
 
-- Before: **89 / 114 checks** (25 failures: four are test ids the baseline
+- Before: **83 / 108 checks** (25 failures: four are test ids the baseline
   predates, the rest are field heights, footer reachability and numeric
   alignment; the checks whose elements do not exist in the baseline are simply
   not counted).
-- After: **130 / 130 checks**, no console errors, page errors or failed
+- After: **124 / 124 checks**, no console errors, page errors or failed
   requests, and no horizontal overflow at 390 or 1440.
 
 What the checks pin:
