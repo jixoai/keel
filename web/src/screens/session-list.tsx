@@ -545,7 +545,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
         <Input
           value={query()}
           onChange={(value) => query.set(value)}
-          placeholder="搜索会话或消息"
+          placeholder={searchAvailable() ? "搜索会话或消息" : "搜索会话"}
           accessibilityLabel="搜索会话"
           testID="session-search"
         />
