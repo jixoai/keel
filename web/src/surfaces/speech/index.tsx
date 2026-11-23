@@ -416,7 +416,17 @@ const transcribeFile = async () => {
       filters: [{ name: "音频", extensions: ["wav", "mp3", "m4a", "webm", "ogg", "flac"] }],
     });
     if (!picked.length) return;
-    const file = picked[0]!.file;
+    const pickedFile = picked[0]!;
+    const file = pickedFile.file;
+    if (!file) {
+      // A file over the read limit arrives with its name and size only
+      // (`status: "tooLarge"`), so there are no bytes to transcribe. Say that
+      // instead of sending an empty body.
+      fileNote.set(
+        `${pickedFile.name} 有 ${Math.max(1, Math.round(pickedFile.size / 1024))} KB，超过单次读取上限，没有读取内容；请换一个更小的文件。`,
+      );
+      return;
+    }
     const model = selectedSpeechModel("stt");
     const result = await transcribeAudio({
       audio: file,
