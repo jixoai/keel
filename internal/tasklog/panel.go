@@ -178,7 +178,14 @@ func (s *Service) Panel(ctx context.Context, scope kernel.Scope, memberLimit, ev
 		eventsByTask[event.TaskID] = append(eventsByTask[event.TaskID], event)
 	}
 	for _, card := range panel.Cards {
-		for _, attachment := range attachmentsFromEvents(eventsByTask[card.TaskID]) {
+		attachments, foldErr := attachmentsFromEvents(eventsByTask[card.TaskID])
+		if foldErr != nil {
+			// A row inside the attachment page that violates its kind's contract
+			// is corruption, exactly like a corrupt event in the stream page:
+			// fail the read instead of presenting a silently short live set.
+			return Panel{}, foldErr
+		}
+		for _, attachment := range attachments {
 			panel.Attachments = append(panel.Attachments, PanelAttachment{
 				TaskID: card.TaskID,
 				Path:   attachment.Path,

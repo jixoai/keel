@@ -357,7 +357,11 @@ func (s *Service) Show(ctx context.Context, scope kernel.Scope, taskID uuid.UUID
 	if err != nil {
 		return View{}, err
 	}
-	return View{Card: card, Events: events, Children: children, Attachments: attachmentsFromEvents(events)}, nil
+	attachments, foldErr := attachmentsFromEvents(events)
+	if foldErr != nil {
+		return View{}, foldErr
+	}
+	return View{Card: card, Events: events, Children: children, Attachments: attachments}, nil
 }
 
 // ForkCard creates (or converges on) the card of a forked child session. The
@@ -868,12 +872,18 @@ func applyCardChange(card *Card, event Event, payload taskEventPayload, now time
 
 // attachmentsFromEvents folds attach/detach events into the live reference set.
 // A detached event with a hash unbinds that exact reference; without one it
-// unbinds the path.
-func attachmentsFromEvents(events []Event) []Attachment {
+// unbinds the path. A row that cannot be decoded is not silently skipped: the
+// caller gets the valid part plus a typed error, because a panel that claimed a
+// complete live set while dropping a visible attach/detach would lie.
+func attachmentsFromEvents(events []Event) ([]Attachment, error) {
 	live := map[string]string{}
+	var firstErr error
 	for _, event := range events {
 		payload, err := decodeTaskPayload(event.Kind, event.Payload)
 		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%w: attachment fold: %v", ErrInvalidEvent, err)
+			}
 			continue
 		}
 		switch event.Kind {
@@ -890,5 +900,5 @@ func attachmentsFromEvents(events []Event) []Attachment {
 		out = append(out, Attachment{Path: path, Hash: hash})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out
+	return out, firstErr
 }
