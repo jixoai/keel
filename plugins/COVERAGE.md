@@ -12,7 +12,7 @@
 > `dsh-plugin in:name` **5,854** 仓；按 star 排序各取前 30 逐条核对，C/F 节只收录
 > 描述明确是 DSH 插件/市场/技能/桌面端的项目，star 数为抓取时刻值。
 >
-> 机器可读版本＝`plugins/keel.plugin-market/catalog.json`（**102 条**：53 官方组 + 33 社区 +
+> 机器可读版本＝`plugins/keel.plugin-market/catalog.json`（**103 条**：53 官方组 + 33 社区 +
 > 3 已交付 + 13 规划中的第一方插件），含每条的 `keelPluginId` / `status` / `wave` / `dshGroups`、
 > 真实 DSH 包名与来源链接。**catalog 是唯一机读真源**：本文件 §A/§B/§C 的每行都经
 > `scripts/plugin-catalog.mjs --check` 映射到 catalog；§H 由 `--write` 生成，禁止手工编辑。
@@ -206,7 +206,7 @@
 
 - 工具：`keel_plugin-market_search` / `keel_plugin-market_info`（侧车本地名
   `search` / `info`）
-- 依赖：`node`（≥20）；包内静态索引 `catalog.json`（102 条）
+- 依赖：`node`（≥20）；包内静态索引 `catalog.json`（103 条）
 - 权限：`permissions.fs: ["read:plugin-package"]`；无 net / secrets
 - 安装：`POST /v1/plugins/install {"path":"<repo>/plugins/keel.plugin-market"}`（同上审批路径）
 - 验证：README 的 `search "memory"`（4 条）、`info "dsh.web"`（partial → `keel.web-search`）、

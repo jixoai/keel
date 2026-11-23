@@ -102,6 +102,8 @@ go run ./cmd/r1diff -old-bin /tmp/keel-r1-base -new-bin /tmp/keel-w11-candidate 
 
 > 端口用 13770/13773：本机 13771/13772 已被无关的 python 静态服务占用（`lsof` 可见），
 > 不改他人进程。`r1diff` 默认的 13746/13747 也可用，跑前先 `lsof` 确认。
+> 本次实际 `-out` 是 `/tmp/keel-takeover/w11-rerun/r1`（会话临时根），`e0-r1-live.txt`
+> 末尾的 `report:` 行记录的就是它；复跑可换成任意空目录。
 
 `e0-r1-live.txt`：
 
@@ -318,6 +320,9 @@ KEEL_TEST_DSN=... go test ./internal/harnessext -run TestResumeContinuesTheSameS
 > `fileplugin`/`harnessext`），不是每条判据都经 `keel serve` HTTP 面复跑。产品 HTTP 面
 > 的 task→bash→capture→panel→fork→merge 由 §1 的垂直集成覆盖；G5 的 PASS 口径是
 > 「门判据在 API/存储契约层全部成立」，不是「全链路 HTTP 全覆盖」。
+> `acceptance.md` G5 证据列提到的「任务面板截图」在本门以 HTTP 面断言等价替代：
+> §1 第 4 步直接断言 `GET /v1/sessions/{id}/task-panel` 返回卡与 `task.created` 事件流，
+> 不另存截图。
 
 ## 8. 负控与「不声称」
 
@@ -368,6 +373,9 @@ $ ls -d /tmp/keel-w11-* /tmp/keel-r1-base
 注意：13771/13772 是**本机既有的无关 python 静态服务**（2026-11-04 起就在），不是本轮的残留；
 本轮 R1 因此改用 13770/13773。mcp-apps 场景自己的 `cleanup.json` 记录
 `portFree=true/processAlive=false/workDirRemoved=true`（`e0-mcp-apps-cleanup.json`）。
+
+会话临时根 `/tmp/keel-takeover/w11-rerun/`（本轮跑测的原始日志与 R1 dump）不属于上述
+清理 globs；它是本次会话的 scratch，证据已拷入本目录，scratch 在会话结束时随 `/tmp` 回收。
 
 ## 11. 复跑入口（按门）
 
