@@ -1,0 +1,61 @@
+=== RUN   TestPanelFoldWithoutADatabase
+--- PASS: TestPanelFoldWithoutADatabase (0.00s)
+=== RUN   TestPanelEventPageKeepsTheNewest
+=== RUN   TestPanelEventPageKeepsTheNewest/newest_page
+=== RUN   TestPanelEventPageKeepsTheNewest/exact_bound
+=== RUN   TestPanelEventPageKeepsTheNewest/under_the_bound
+--- PASS: TestPanelEventPageKeepsTheNewest (0.00s)
+    --- PASS: TestPanelEventPageKeepsTheNewest/newest_page (0.00s)
+    --- PASS: TestPanelEventPageKeepsTheNewest/exact_bound (0.00s)
+    --- PASS: TestPanelEventPageKeepsTheNewest/under_the_bound (0.00s)
+=== RUN   TestPanelMemberPageBounds
+=== RUN   TestPanelMemberPageBounds/all_fit
+=== RUN   TestPanelMemberPageBounds/overflow,_fully_read
+=== RUN   TestPanelMemberPageBounds/overflow_at_the_read_bound
+=== RUN   TestPanelMemberPageBounds/overflow_past_the_read_bound
+--- PASS: TestPanelMemberPageBounds (0.00s)
+    --- PASS: TestPanelMemberPageBounds/all_fit (0.00s)
+    --- PASS: TestPanelMemberPageBounds/overflow,_fully_read (0.00s)
+    --- PASS: TestPanelMemberPageBounds/overflow_at_the_read_bound (0.00s)
+    --- PASS: TestPanelMemberPageBounds/overflow_past_the_read_bound (0.00s)
+=== RUN   TestPanelMemberPageIgnoresOwnChildren
+--- PASS: TestPanelMemberPageIgnoresOwnChildren (0.00s)
+=== RUN   TestPanelMemberPageExactReadBoundFloorsTheCount
+--- PASS: TestPanelMemberPageExactReadBoundFloorsTheCount (0.00s)
+=== RUN   TestPanelUsesTheDecoderAndRefusesCorruption
+--- PASS: TestPanelUsesTheDecoderAndRefusesCorruption (0.00s)
+=== RUN   TestPanelTreeOrderAndMembers
+--- PASS: TestPanelTreeOrderAndMembers (0.23s)
+=== RUN   TestPanelForkOriginAndEventStream
+--- PASS: TestPanelForkOriginAndEventStream (0.10s)
+=== RUN   TestPanelAttachmentFoldAndEventOrder
+--- PASS: TestPanelAttachmentFoldAndEventOrder (0.21s)
+=== RUN   TestPanelBoundsArePages
+--- PASS: TestPanelBoundsArePages (0.33s)
+=== RUN   TestPanelTenantBoundary
+--- PASS: TestPanelTenantBoundary (0.18s)
+=== RUN   TestDescribeEventRejectsACorruptRow
+--- PASS: TestDescribeEventRejectsACorruptRow (0.00s)
+=== RUN   TestInitialCardIsIdempotentAndAutoAttributed
+--- PASS: TestInitialCardIsIdempotentAndAutoAttributed (0.07s)
+=== RUN   TestProjectionRebuildIsIdempotentAndRepairsStrayRows
+--- PASS: TestProjectionRebuildIsIdempotentAndRepairsStrayRows (0.29s)
+=== RUN   TestAttachDetachNoteAndCloseAreEvents
+--- PASS: TestAttachDetachNoteAndCloseAreEvents (0.10s)
+=== RUN   TestForkCreatesANewCardPointingAtTheOrigin
+--- PASS: TestForkCreatesANewCardPointingAtTheOrigin (0.13s)
+=== RUN   TestSubagentCardLinksToParentActiveCard
+--- PASS: TestSubagentCardLinksToParentActiveCard (0.08s)
+=== RUN   TestCrossTenantTaskAccessIsRefused
+--- PASS: TestCrossTenantTaskAccessIsRefused (0.11s)
+=== RUN   TestParentCycleIsRefused
+--- PASS: TestParentCycleIsRefused (0.11s)
+=== RUN   TestOriginCardResolvesTheLedgerPosition
+--- PASS: TestOriginCardResolvesTheLedgerPosition (0.07s)
+=== RUN   TestNoteSubagentFinishedLandsOnTheParentCard
+--- PASS: TestNoteSubagentFinishedLandsOnTheParentCard (0.25s)
+=== RUN   TestForkCardIsIdempotentAndReopens
+--- PASS: TestForkCardIsIdempotentAndReopens (0.29s)
+PASS
+ok  	github.com/jixoai/keel/internal/tasklog	3.018s
+exit=0

@@ -1,0 +1,5 @@
+=== RUN   TestVerticalW11
+--- PASS: TestVerticalW11 (10.15s)
+PASS
+ok  	github.com/jixoai/keel/internal/producte2e	10.611s
+exit=0

@@ -1,0 +1,16 @@
+=== RUN   TestInputRepairsBookkeepingAfterCrash
+--- PASS: TestInputRepairsBookkeepingAfterCrash (1.28s)
+PASS
+ok  	github.com/jixoai/keel/internal/httpapi	2.488s
+httpapi exit=0
+=== RUN   TestCheckpointCutInMovedUnreadInputFailSafe
+--- PASS: TestCheckpointCutInMovedUnreadInputFailSafe (3.29s)
+=== RUN   TestRunnerResumesUnresolvedToolCall
+--- PASS: TestRunnerResumesUnresolvedToolCall (1.74s)
+=== RUN   TestWorkerRetryThenSuccessCountsOnlyTerminalFinished
+--- PASS: TestWorkerRetryThenSuccessCountsOnlyTerminalFinished (0.63s)
+=== RUN   TestWorkerLeaseExpiredMetric
+--- PASS: TestWorkerLeaseExpiredMetric (0.17s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	6.178s
+agent exit=0

@@ -1,0 +1,12 @@
+# conformance: go test -json ... (parallel packages) — extracted failures
+
+failed test actions: 5
+  FAIL github.com/jixoai/keel/internal/httpapi TestInputRepairsBookkeepingAfterCrash
+  FAIL github.com/jixoai/keel/internal/agent TestCheckpointCutInMovedUnreadInputFailSafe
+  FAIL github.com/jixoai/keel/internal/agent TestRunnerResumesUnresolvedToolCall
+  FAIL github.com/jixoai/keel/internal/agent TestWorkerRetryThenSuccessCountsOnlyTerminalFinished
+  FAIL github.com/jixoai/keel/internal/agent TestWorkerLeaseExpiredMetric
+failing packages: 2
+  github.com/jixoai/keel/internal/agent
+  github.com/jixoai/keel/internal/httpapi
+passing test actions: 1108 across 13 packages

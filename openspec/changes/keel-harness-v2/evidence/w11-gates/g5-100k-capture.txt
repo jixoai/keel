@@ -1,0 +1,5 @@
+=== RUN   TestCaptureOneHundredThousandFilesIsOneEvent
+--- PASS: TestCaptureOneHundredThousandFilesIsOneEvent (308.97s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	309.663s
+exit=0

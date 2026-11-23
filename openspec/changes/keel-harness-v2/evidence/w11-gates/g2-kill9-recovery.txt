@@ -1,0 +1,13 @@
+=== RUN   TestCrashBeforeAssistantCommitReanswers
+--- PASS: TestCrashBeforeAssistantCommitReanswers (0.11s)
+=== RUN   TestCrashAfterAssistantCommitDoesNotReanswer
+--- PASS: TestCrashAfterAssistantCommitDoesNotReanswer (0.10s)
+=== RUN   TestCrashDuringToolTurnFillsResults
+--- PASS: TestCrashDuringToolTurnFillsResults (0.10s)
+=== RUN   TestKillBetweenLoadAndFinishNeitherDuplicatesNorMisses
+--- PASS: TestKillBetweenLoadAndFinishNeitherDuplicatesNorMisses (5.40s)
+=== RUN   TestCrashThenRestartResumesWithoutADuplicateFinal
+--- PASS: TestCrashThenRestartResumesWithoutADuplicateFinal (5.82s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	12.078s
+recovery exit=0

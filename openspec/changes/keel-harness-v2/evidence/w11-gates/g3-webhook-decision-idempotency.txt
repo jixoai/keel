@@ -1,0 +1,9 @@
+=== RUN   TestDecisionOpenAnswerIdempotent
+--- PASS: TestDecisionOpenAnswerIdempotent (0.01s)
+=== RUN   TestTriggerWebhookHMACAndInitialCardE2E
+--- PASS: TestTriggerWebhookHMACAndInitialCardE2E (3.52s)
+=== RUN   TestTriggerFireCreatesBotOwnedSession
+--- PASS: TestTriggerFireCreatesBotOwnedSession (1.90s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	5.988s
+exit=0

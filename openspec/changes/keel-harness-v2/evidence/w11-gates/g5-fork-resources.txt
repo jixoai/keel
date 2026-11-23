@@ -1,0 +1,9 @@
+=== RUN   TestForkCreatesAPrefixSessionCardAndInheritedBinding
+--- PASS: TestForkCreatesAPrefixSessionCardAndInheritedBinding (2.55s)
+=== RUN   TestSubagentReturnCarriesArtifactRefsAndParentNote
+--- PASS: TestSubagentReturnCarriesArtifactRefsAndParentNote (1.34s)
+=== RUN   TestForkCapacityRetryConvergesToOneCard
+--- PASS: TestForkCapacityRetryConvergesToOneCard (0.43s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	5.316s
+exit=0

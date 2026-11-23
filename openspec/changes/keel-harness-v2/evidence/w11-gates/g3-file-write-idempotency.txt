@@ -1,0 +1,9 @@
+=== RUN   TestFSWriteFollowsToolResultWithoutKeyCollision
+--- PASS: TestFSWriteFollowsToolResultWithoutKeyCollision (0.03s)
+=== RUN   TestWriteReadPagingAndPreconditions
+--- PASS: TestWriteReadPagingAndPreconditions (0.11s)
+=== RUN   TestWriteIsIdempotentForTheSameToolCall
+--- PASS: TestWriteIsIdempotentForTheSameToolCall (0.09s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	1.154s
+exit=0

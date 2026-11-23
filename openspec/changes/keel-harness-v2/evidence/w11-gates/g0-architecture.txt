@@ -1,0 +1,35 @@
+=== RUN   TestBotteamStaysPure
+--- PASS: TestBotteamStaysPure (1.89s)
+=== RUN   TestStoreDoesNotImportBotteam
+--- PASS: TestStoreDoesNotImportBotteam (1.38s)
+=== RUN   TestBotteamGuardedPackagesResolve
+--- PASS: TestBotteamGuardedPackagesResolve (0.29s)
+=== RUN   TestKernelDoesNotImportProductLayers
+--- PASS: TestKernelDoesNotImportProductLayers (0.92s)
+=== RUN   TestModelConfigStaysIndependent
+--- PASS: TestModelConfigStaysIndependent (0.78s)
+=== RUN   TestProductLayersCompileOnTopOfTheKernel
+--- PASS: TestProductLayersCompileOnTopOfTheKernel (2.75s)
+=== RUN   TestSkillPackagesDoNotExecuteScripts
+--- PASS: TestSkillPackagesDoNotExecuteScripts (0.39s)
+=== RUN   TestMCPHostDoesNotImportProductSSE
+--- PASS: TestMCPHostDoesNotImportProductSSE (1.90s)
+=== RUN   TestMCPClientDoesNotImportHostDispatcher
+--- PASS: TestMCPClientDoesNotImportHostDispatcher (0.75s)
+=== RUN   TestKernelDoesNotImportV2Layers
+--- PASS: TestKernelDoesNotImportV2Layers (3.84s)
+=== RUN   TestServiceLayerDoesNotImportHarness
+--- PASS: TestServiceLayerDoesNotImportHarness (1.41s)
+=== RUN   TestHarnessDoesNotImportCommands
+--- PASS: TestHarnessDoesNotImportCommands (9.50s)
+=== RUN   TestProviderLayerDoesNotImportHarness
+--- PASS: TestProviderLayerDoesNotImportHarness (0.58s)
+=== RUN   TestAssemblyPlaneStaysIndependent
+--- PASS: TestAssemblyPlaneStaysIndependent (0.43s)
+=== RUN   TestNoGoPackageImportsTheUIClient
+--- PASS: TestNoGoPackageImportsTheUIClient (0.04s)
+=== RUN   TestV2LayerPackagesResolve
+--- PASS: TestV2LayerPackagesResolve (0.69s)
+PASS
+ok  	github.com/jixoai/keel/internal/architecture	27.947s
+architecture exit=0

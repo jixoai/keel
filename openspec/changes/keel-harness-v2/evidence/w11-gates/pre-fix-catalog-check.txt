@@ -1,0 +1,2 @@
+plugin-catalog: 1 problem(s)
+  - installed official plugin keel.oar has no catalog entry

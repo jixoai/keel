@@ -1,0 +1,5 @@
+=== RUN   TestResumeContinuesTheSameSession
+--- PASS: TestResumeContinuesTheSameSession (1.29s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	1.749s
+subagent resume exit=0

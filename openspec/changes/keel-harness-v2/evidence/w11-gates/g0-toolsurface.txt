@@ -1,0 +1,13 @@
+=== RUN   TestBuiltinSurfaceIsExactlyEleven
+--- PASS: TestBuiltinSurfaceIsExactlyEleven (0.04s)
+=== RUN   TestManifestHashStableAcrossMCPServers
+--- PASS: TestManifestHashStableAcrossMCPServers (0.04s)
+=== RUN   TestApprovedPluginToolsChangeAndRestoreTheManifestHash
+2026/11/23 17:23:18 INFO plugin assembly generation=1 plugins=1 active=1 pending=0
+2026/11/23 17:23:18 INFO plugin assembly generation=2 plugins=0 active=0 pending=0
+--- PASS: TestApprovedPluginToolsChangeAndRestoreTheManifestHash (0.11s)
+=== RUN   TestEveryGeneratedPerServerMCPNameIsRefused
+--- PASS: TestEveryGeneratedPerServerMCPNameIsRefused (0.03s)
+PASS
+ok  	github.com/jixoai/keel/internal/toolsurface	0.872s
+toolsurface exit=0

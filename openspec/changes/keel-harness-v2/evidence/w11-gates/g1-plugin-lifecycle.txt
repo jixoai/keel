@@ -1,0 +1,15 @@
+=== RUN   TestManagerInstallCarriesContributionAndUninstallLeavesNone
+--- PASS: TestManagerInstallCarriesContributionAndUninstallLeavesNone (0.02s)
+=== RUN   TestPluginManagerInstallEnableDisableUninstall
+--- PASS: TestPluginManagerInstallEnableDisableUninstall (0.01s)
+=== RUN   TestPluginManagerDependenciesAndKindLoader
+--- PASS: TestPluginManagerDependenciesAndKindLoader (0.00s)
+=== RUN   TestPluginManagerUpdateSwapsAndRollsBack
+--- PASS: TestPluginManagerUpdateSwapsAndRollsBack (0.03s)
+=== RUN   TestPluginManagerIsolatesInvalidPackages
+--- PASS: TestPluginManagerIsolatesInvalidPackages (0.00s)
+=== RUN   TestPluginManagerBundledPluginsAreNotUninstallable
+--- PASS: TestPluginManagerBundledPluginsAreNotUninstallable (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	0.515s
+plugin lifecycle exit=0

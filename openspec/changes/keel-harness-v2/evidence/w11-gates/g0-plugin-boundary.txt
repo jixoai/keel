@@ -1,0 +1,5 @@
+=== RUN   TestPluginTypesExposeNoSiblingStateHandle
+--- PASS: TestPluginTypesExposeNoSiblingStateHandle (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	0.708s
+plugin-boundary exit=0

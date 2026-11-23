@@ -1,0 +1,11 @@
+=== RUN   TestEventKindsMatchStore
+--- PASS: TestEventKindsMatchStore (0.00s)
+=== RUN   TestDedupeKeyNamespace
+--- PASS: TestDedupeKeyNamespace (0.00s)
+=== RUN   TestCommitClassesAndEdgeWhitelist
+--- PASS: TestCommitClassesAndEdgeWhitelist (0.00s)
+=== RUN   TestFinishStatusPolicy
+--- PASS: TestFinishStatusPolicy (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/kernel	0.251s
+kernel exit=0

@@ -1,0 +1,2 @@
+ok  	github.com/jixoai/keel/internal/supervisor	1.857s
+supervisor exit=0

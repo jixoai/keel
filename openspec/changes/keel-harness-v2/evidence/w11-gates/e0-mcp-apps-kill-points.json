@@ -1,0 +1,63 @@
+[
+  {
+    "at": "2026-11-23T09:22:07.56894Z",
+    "killError": null,
+    "logTail": "{\"time\":\"2026-11-23T17:22:06.546623+08:00\",\"level\":\"INFO\",\"msg\":\"keel serve listening\",\"addr\":\"127.0.0.1:13686\",\"tenant\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\",\"auth\":\"local-only\",\"web\":\"missing: /var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1020214982/web-missing\",\"web_ready\":false,\"worker\":true,\"provider\":\"fake\",\"model\":\"fake\",\"plugins\":11,\"plugins_enabled\":10,\"plugins_root\":\"/var/folders/xq/7g230ng91vlbs_yfjgpy96vc0000gp/T/keel-mcp-apps-e2e-1020214982/plugins\",\"triggers\":0}\n{\"time\":\"2026-11-23T17:22:06.571387+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"c67b24ae-3fa4-42c8-b8dd-e4320a944b5c\",\"method\":\"POST\",\"route\":\"POST /v1/roles\",\"status\":201,\"bytes\":169,\"duration_ms\":1,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.578743+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"65a35a82-9986-4e1d-b25c-496557e1151a\",\"method\":\"POST\",\"route\":\"POST /v1/profiles\",\"status\":201,\"bytes\":247,\"duration_ms\":6,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.591664+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"267bf085-10f5-4f66-b15d-9c9955da1f0b\",\"method\":\"POST\",\"route\":\"POST /v1/bots\",\"status\":201,\"bytes\":479,\"duration_ms\":12,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.594592+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"0abcb40e-75e8-48d9-af25-08bc4e9ec592\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups\",\"status\":201,\"bytes\":185,\"duration_ms\":2,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.60018+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"17f88763-be6a-424a-aaaf-8c09b57658c4\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups/{id}/grants\",\"status\":200,\"bytes\":96,\"duration_ms\":5,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.603045+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"cd6748d0-161e-4d01-91bf-47c1bb57ff4e\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups/{id}/grants\",\"status\":200,\"bytes\":97,\"duration_ms\":2,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.605849+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"2afe6edb-dae4-4a40-b20a-f52487e7a76e\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups/{id}/members\",\"status\":200,\"bytes\":114,\"duration_ms\":2,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.607239+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"b96fc367-ba83-4471-866e-1db50d47f72b\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.616456+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"48959278-f062-4842-9dd1-3161caece77b\",\"method\":\"POST\",\"route\":\"POST /v1/sessions\",\"status\":201,\"bytes\":75,\"duration_ms\":8,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\"}\n{\"time\":\"2026-11-23T17:22:06.664044+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"5386c064-1ce6-453c-9cd4-dfc0f365c02d\",\"method\":\"POST\",\"route\":\"POST /v1/sessions/{id}/input\",\"status\":201,\"bytes\":120,\"duration_ms\":47,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\",\"session_id\":\"535bae08-7f37-48af-ae1e-7f1064607be4\"}\n{\"time\":\"2026-11-23T17:22:07.56849+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"c5faf06a-a6ea-4c2f-89a5-0760089b80d4\",\"method\":\"GET\",\"route\":\"GET /v1/sessions/{id}/events\",\"status\":200,\"bytes\":118,\"duration_ms\":0,\"tenant_id\":\"f5a0527f-75ca-401d-b0e4-9ac405ce58a1\",\"session_id\":\"535bae08-7f37-48af-ae1e-7f1064607be4\"}",
+    "pid": 98714,
+    "point": "G2a",
+    "processGroup": true,
+    "proof": {
+      "appDocumentFetched": true,
+      "fakeServerPID": 98724,
+      "ledgerSeqs": [
+        1
+      ],
+      "toolExecutionStarted": false,
+      "toolResults": 0,
+      "userMessages": 1
+    },
+    "signal": "SIGKILL"
+  },
+  {
+    "at": "2026-11-23T09:22:14.503311Z",
+    "killError": null,
+    "logTail": "{\"time\":\"2026-11-23T17:22:09.074219+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"b14fda49-6f7e-45b3-9edc-cf6d0e7c2248\",\"method\":\"GET\",\"route\":\"GET /v1/sessions/{id}/events\",\"status\":200,\"bytes\":106,\"duration_ms\":0,\"tenant_id\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\",\"session_id\":\"651a8444-6df2-4429-97e3-91aab80095e5\"}\n{\"time\":\"2026-11-23T17:22:09.115268+08:00\",\"level\":\"INFO\",\"msg\":\"run attempt settled\",\"run_id\":\"c77b6826-ebca-4d46-ad0a-f8c5b750d03c\",\"tenant_id\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\",\"session_id\":\"651a8444-6df2-4429-97e3-91aab80095e5\",\"cursor\":3,\"attempt\":1,\"duration_ms\":17,\"run_status\":\"done\",\"token\":\"[REDACTED]\",\"err\":null}\n{\"time\":\"2026-11-23T17:22:09.177697+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"2c0fb4e9-8bdd-4358-b07b-87854b6e9570\",\"method\":\"GET\",\"route\":\"GET /v1/sessions/{id}/events\",\"status\":200,\"bytes\":1005,\"duration_ms\":0,\"tenant_id\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\",\"session_id\":\"651a8444-6df2-4429-97e3-91aab80095e5\"}\n{\"time\":\"2026-11-23T17:22:12.920404+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue audit\",\"server\":\"fixture\",\"action\":\"subscription.listen\",\"result\":\"ok\",\"detail\":\"subscription=n:4\"}\n{\"time\":\"2026-11-23T17:22:12.994461+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"137390ce-71a4-4829-a985-2ec4497e48fe\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\"}\n{\"time\":\"2026-11-23T17:22:13.016398+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue refreshed\",\"server\":\"fixture\",\"tools\":3,\"added\":0,\"removed\":0}\n{\"time\":\"2026-11-23T17:22:13.023541+08:00\",\"level\":\"INFO\",\"msg\":\"mcp app audit\",\"tenant\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\",\"server\":\"fixture\",\"app\":\"mcpapp_9695970d06976122\",\"resource\":\"ui://scenario/dashboard\",\"action\":\"document.fetch\",\"result\":\"ok\",\"detail\":\"hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf bytes=264\"}\n{\"time\":\"2026-11-23T17:22:13.025559+08:00\",\"level\":\"INFO\",\"msg\":\"mcp app audit\",\"tenant\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\",\"server\":\"\",\"app\":\"\",\"resource\":\"\",\"action\":\"catalogue.publish\",\"result\":\"ok\",\"detail\":\"generation=2 apps=1 declared=1\"}\n{\"time\":\"2026-11-23T17:22:13.074148+08:00\",\"level\":\"INFO\",\"msg\":\"mcp catalogue audit\",\"server\":\"\",\"action\":\"catalogue.refresh\",\"result\":\"ok\",\"detail\":\"generation=2 servers=[fixture] kinds=[tools prompts resources] added=0 removed=0 err=\u003cnil\u003e\"}\n{\"time\":\"2026-11-23T17:22:13.107638+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"9949fd43-663c-43e3-8b8f-c074fe2206a0\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"ef14beb0-f80d-4147-8957-7ad0d0e28e8e\"}\n{\"time\":\"2026-11-23T17:22:13.368917+08:00\",\"level\":\"WARN\",\"msg\":\"mcp listen\",\"detail\":\"mcp listen: subscription closed\"}\n{\"time\":\"2026-11-23T17:22:13.368999+08:00\",\"level\":\"WARN\",\"msg\":\"mcp catalogue audit\",\"server\":\"fixture\",\"action\":\"subscription.listen\",\"result\":\"closed\",\"detail\":\"\u003cnil\u003e\"}",
+    "pid": 98744,
+    "point": "G2b",
+    "processGroup": true,
+    "proof": {
+      "fakeServerPID": 98774,
+      "generationAfterAck": 2,
+      "ledgerSeqs": [
+        1,
+        2,
+        3
+      ],
+      "listenReconnects": 1,
+      "listenStream": "n=2 sent, ack not received",
+      "stream1Closed": true
+    },
+    "signal": "SIGKILL"
+  },
+  {
+    "at": "2026-11-23T09:22:21.203517Z",
+    "killError": null,
+    "logTail": "{\"time\":\"2026-11-23T17:22:15.920228+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"31ac16ba-98bc-4fee-be2c-08f1e17f644d\",\"method\":\"POST\",\"route\":\"POST /v1/roles\",\"status\":201,\"bytes\":169,\"duration_ms\":6,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.923357+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"2c2ab71c-1cd9-4d30-82b9-e5878e950ff7\",\"method\":\"POST\",\"route\":\"POST /v1/profiles\",\"status\":201,\"bytes\":247,\"duration_ms\":2,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.929148+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"c502933f-8da0-4ee7-a142-94a0f339112b\",\"method\":\"POST\",\"route\":\"POST /v1/bots\",\"status\":201,\"bytes\":479,\"duration_ms\":5,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.934164+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"ee7e3440-3b32-478a-a7da-ecfe804d4e14\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups\",\"status\":201,\"bytes\":185,\"duration_ms\":4,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.937866+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"4a426076-d724-4e06-8241-bf1971917690\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups/{id}/grants\",\"status\":200,\"bytes\":96,\"duration_ms\":2,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.939742+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"53469b4a-f684-483f-b9d2-2f562e5ab4cd\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups/{id}/grants\",\"status\":200,\"bytes\":97,\"duration_ms\":1,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.945177+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"60421233-cc78-44d1-8efc-0936aeb06045\",\"method\":\"POST\",\"route\":\"POST /v1/permission-groups/{id}/members\",\"status\":200,\"bytes\":114,\"duration_ms\":4,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.947666+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"352f8e6d-b1da-465e-88dc-dabedd7af25b\",\"method\":\"GET\",\"route\":\"GET /v1/mcp/apps\",\"status\":200,\"bytes\":1049,\"duration_ms\":0,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:15.953747+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"bc77b75c-d360-4177-b016-019690919915\",\"method\":\"POST\",\"route\":\"POST /v1/sessions\",\"status\":201,\"bytes\":75,\"duration_ms\":4,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:20.967572+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"17a28d90-bd26-4ee3-aca4-21fafe33fa7b\",\"method\":\"POST\",\"route\":\"POST /v1/mcp/apps/{appId}/tools/call\",\"status\":200,\"bytes\":106,\"duration_ms\":5013,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\"}\n{\"time\":\"2026-11-23T17:22:20.992915+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"64c32e50-8f07-4141-b79f-fe34553e8141\",\"method\":\"POST\",\"route\":\"POST /v1/sessions/{id}/input\",\"status\":201,\"bytes\":120,\"duration_ms\":24,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\",\"session_id\":\"4834962f-c543-4aa5-9722-bc1d0a856201\"}\n{\"time\":\"2026-11-23T17:22:21.202791+08:00\",\"level\":\"INFO\",\"msg\":\"http request\",\"request_id\":\"90128b5d-0b64-4efe-ad18-a4c077d23be9\",\"method\":\"GET\",\"route\":\"GET /v1/sessions/{id}/events\",\"status\":200,\"bytes\":571,\"duration_ms\":0,\"tenant_id\":\"1f1c0829-e8b4-4443-949d-4f349fe065b1\",\"session_id\":\"4834962f-c543-4aa5-9722-bc1d0a856201\"}",
+    "pid": 98847,
+    "point": "G2c",
+    "processGroup": true,
+    "proof": {
+      "assistantToolCalls": 1,
+      "fakeServerPID": 98858,
+      "ledgerSeqs": [
+        1,
+        2,
+        3
+      ],
+      "mcpResultReceived": false,
+      "toolCallDispatched": true,
+      "toolResults": 0
+    },
+    "signal": "SIGKILL"
+  }
+]

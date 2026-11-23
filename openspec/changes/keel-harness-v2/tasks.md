@@ -437,7 +437,12 @@
       ~1h45m CPU、写满 8.7GB/8.4GB 日志；`Hub.Run` 现在有退避 + 每次尝试一条
       warning，测试 `TestNextNotifyBackoffDoublesAndCaps`；
       证据 `evidence/notify-reconnect-backoff.md`）
-- [ ] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
+- [x] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
+      （W11 2026-11-23：PASS——`internal/producte2e/vertical_w11_test.go` 对真 `keel serve` + 真 PG
+      走 HTTP：tasks-create→task.created、bash 退出 0、`fs.capture` 恰 1 条（taskId/treeHash）、
+      面板卡与事件可见、fork `originSeq` 精确+`parentTaskId` 指向活动卡、父卡 `task.note` 合并结果、
+      sidecar+UI 插件 disable→uninstall 后 inventory/贡献/受管目录/进程/toolManifestHash 全部复原。
+      证据 `evidence/w11-gates/README.md` §1、`vertical-integration.txt`）
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
       （W9 2026-11-22：**Codex 真链路在 OAR record 层面已绿**——真实
       `codex exec --json` 被 spawn，模型回答 `OAR-OK`，usage total=17538，
@@ -457,11 +462,21 @@
       + `psql`，从 `KEEL_TEST_DSN` 派生专用库，不再依赖 Docker 容器；证据
       `evidence/acceptance-local-pg.md`。E0 本身仍不勾——Linux cgroup/2GB 的
       perf cell 是平台限制，需在 Linux 上跑。）
+      （W11 2026-11-23：**BLOCKED（R1 子门 PASS）**——R1 152 paths/103 allowed/0 unexpected + 负控拒绝；
+      修复 R1 allowlist 对 8a5794e bash checkpoint schema 的陈旧 toolManifestHash（原本在 8d6252b 即红）、
+      catalog 缺 keel.oar 条目；core e2e 7/8（tool-replay 在裸 cmd/runtime 上无 Bot 归属→fail-closed，
+      同崩溃点由 mcp-apps G2c 产品面覆盖并绿）。本机可跑 battery 的非 perf 部分；drain/inflight/perf/handoff
+      子脚本与 Linux cgroup 2GB cell 仍受平台限制。证据 `evidence/w11-gates/README.md` §2）
 - [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据
-- [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务 （对账 2026-11-20：部分——缺口：非终态 run 自动续跑/lease/chaos 在（internal/durable/recovery.go、internal/agent/crash_matrix_test.go）；子代理继续原任务（W8-2/3）未实现）（W8 2026-11-21：子代理 resume 已实现并测「失败→requeue→claim→同一 run 完成」；G2 门本身仍缺 kill -9/容器重启端到端证据，保持未勾）
-- [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用） （对账 2026-11-20：部分——缺口：G3 幂等/409 在；G5 taskId 强制/资源引用已交付，fork 精确（W4-6）未实现）（W8 2026-11-21：fork 精确（eventSeq + snapshot + parentTaskId）已交付；G5 门级汇总仍未勾）
+      （W11 2026-11-23：**G0 PASS / G1 FAIL，本行保持未勾**——G0：修复 `internal/agent`→layerfs
+      越界（capture policy 迁到 `internal/capturepolicy`）；11 工具快照、25 个生成的 `mcp__*` 名逐个拒绝、
+      已审批 provides.tools 哈希往返、插件同层句柄反射负控、catalog 均绿。G1：无逐状态机转移矩阵、
+      无逐条拒绝事实、无状态→权威事实映射脚本，A5 kind→key 未与 state-machines.md 逐行对表。
+      证据 `evidence/w11-gates/README.md` §3/§4）
+- [ ] G2 恢复门：`kill -9` 与容器重启后全部非终态 run 自动续跑（零人工）；子代理继续原任务 （对账 2026-11-20：部分——缺口：非终态 run 自动续跑/lease/chaos 在（internal/durable/recovery.go、internal/agent/crash_matrix_test.go）；子代理继续原任务（W8-2/3）未实现）（W8 2026-11-21：子代理 resume 已实现并测「失败→requeue→claim→同一 run 完成」；G2 门本身仍缺 kill -9/容器重启端到端证据，保持未勾）（W11 2026-11-23：**FAIL（部分绿）**——kill -9 子进程续跑（同会话、1 条 final、1 条 run.finished、resume.attempt lease_expired/adopted、seq 连续）、子代理原任务续跑、never/manual/auto 策略、mcp-apps 产品面 SIGKILL 三格均绿；容器重启 E2E 因本机 NO DOCKER BLOCKED；六格矩阵缺 capture 崩溃格。证据 `evidence/w11-gates/README.md` §5）
+- [ ] G3 幂等门 · G5 任务门（taskId 强制 / fork 精确 / 资源只记引用） （对账 2026-11-20：部分——缺口：G3 幂等/409 在；G5 taskId 强制/资源引用已交付，fork 精确（W4-6）未实现）（W8 2026-11-21：fork 精确（eventSeq + snapshot + parentTaskId）已交付；G5 门级汇总仍未勾）（W11 2026-11-23：**G5 PASS / G3 FAIL（4/5），本行保持未勾**——G5：taskId 强制、跨会话任务树、fork eventSeq 精确、资源 (path,hash)、write→bash 立读、十万文件 1 条 fs.capture（308.97s 实测）全绿；G3：副作用重试一次/写冲突/webhook 重投去重/重复作答 409 绿，但「provider 额度耗尽立即停止重试该 provider」未实现——未配 fallback 时仍重排同一 selection，违反 supervision spec :78-79（既有测试把该行为钉成期望）。证据 `evidence/w11-gates/README.md` §6/§7）
 - [ ] G4 内存门：后端 RSS ≤500MB（目标 ≤300MB），组 OOM 不扩散，前端 VM 配额独立断言 （对账 2026-11-20：部分——缺口：cgroup peak 门在（scripts/acceptance-perf.sh），无 VmRSS 采样门（W0-12）、组 OOM 隔离、前端 surface VM 配额断言）
 - [ ] G6 插件门 · G7 UI 门 · G9 有界门 （对账 2026-11-20：部分——缺口：G6 生命周期/依赖/回滚测试在；G7 槽位机制未实现（W12-16/17）；G9 bash 输出有界/作业上限在）
 - [ ] G8 创造模式门：AI 现场写 Native 插件端到端（装→渲染→卸载无残留） （对账 2026-11-20：部分——缺口：创造模式已有 webview E2E（creation_test.go）；缺 Native chunk 形态/macos target/卸载 diff）

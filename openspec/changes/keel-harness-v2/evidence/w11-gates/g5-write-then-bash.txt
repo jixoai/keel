@@ -1,0 +1,7 @@
+=== RUN   TestCaptureCommitsExactlyOneBatchEvent
+--- PASS: TestCaptureCommitsExactlyOneBatchEvent (0.06s)
+=== RUN   TestWriteThroughReachesBash
+--- PASS: TestWriteThroughReachesBash (0.12s)
+PASS
+ok  	github.com/jixoai/keel/internal/fileplugin	0.524s
+exit=0
