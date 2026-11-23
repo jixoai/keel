@@ -607,32 +607,23 @@ func (s *Server) triggerRun(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{"enqueued": true}
 	if admission.Queued {
+		// Same wire shape as input/retry: one helper renders the queue block
+		// (position, active/limit, group, etaSeconds + etaSamples/etaBasis when
+		// known), so /run cannot drift from the other admission doors.
+		state := placement.QueueState{
+			TenantID:  tenantID,
+			SessionID: sessionID,
+			GroupID:   admission.GroupID,
+			Queued:    true,
+			Position:  admission.QueuePosition,
+			Limit:     admission.LimitGroup,
+			Active:    admission.ActiveGroup,
+			ETA:       admission.ETA,
+		}
+		response["queued"] = queuedAdmissionBody(state)
 		setQueuedRetryAfter(w, admission.ETA)
-		response["queued"] = map[string]any{
-			"position":   admission.QueuePosition,
-			"active":     admission.ActiveGroup,
-			"limit":      admission.LimitGroup,
-			"etaKnown":   admission.ETA.Known,
-			"etaSeconds": queueETASeconds(admission.ETA),
-		}
-		if admission.GroupID != uuid.Nil {
-			response["queued"].(map[string]any)["groupId"] = admission.GroupID.String()
-		}
 	}
 	writeJSON(w, 202, response)
-}
-
-// queueETASeconds renders a known ETA as whole seconds (nil when unknown, never
-// a fabricated zero).
-func queueETASeconds(eta placement.QueueETA) any {
-	if !eta.Known {
-		return nil
-	}
-	seconds := int(math.Ceil(eta.Wait.Seconds()))
-	if seconds < 1 {
-		seconds = 1
-	}
-	return seconds
 }
 
 // runStatus reports the session's durable run state.

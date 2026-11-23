@@ -559,6 +559,13 @@ func TestPlacementHTTPTriggerRunGated(t *testing.T) {
 	if res := f.post(t, "/v1/sessions/"+first.String()+"/run", map[string]any{}); res.code != http.StatusAccepted {
 		t.Fatalf("trigger first = %d %v, want 202", res.code, res.body)
 	}
+	// One observed attempt: the queued /run answer must carry the same ETA
+	// fields (etaSamples/etaBasis) as input/retry, not a reduced body.
+	if _, err := f.st.Pool().Exec(context.Background(),
+		`INSERT INTO run_duration_samples (tenant_id, group_id, duration_ms)
+		 VALUES ($1, $2, 4000)`, f.tenant, group.GroupID); err != nil {
+		t.Fatalf("insert duration sample: %v", err)
+	}
 	res := f.post(t, "/v1/sessions/"+second.String()+"/run", map[string]any{})
 	if res.code != http.StatusAccepted {
 		t.Fatalf("trigger second = %d %v, want 202 queued", res.code, res.body)
@@ -567,11 +574,76 @@ func TestPlacementHTTPTriggerRunGated(t *testing.T) {
 	if !ok {
 		t.Fatalf("trigger response has no queued block: %v", res.body)
 	}
+	// The exact contract input/retry render through queuedAdmissionBody.
 	if position, _ := queued["position"].(float64); position != 1 {
 		t.Fatalf("trigger queue position = %v, want 1", queued["position"])
 	}
+	if active, _ := queued["active"].(float64); active != 1 {
+		t.Fatalf("trigger queue active = %v, want 1", queued["active"])
+	}
+	if limit, _ := queued["limit"].(float64); limit != 1 {
+		t.Fatalf("trigger queue limit = %v, want 1", queued["limit"])
+	}
+	if known, _ := queued["etaKnown"].(bool); !known {
+		t.Fatalf("trigger etaKnown = %v, want true from the observed sample", queued["etaKnown"])
+	}
+	if seconds, _ := queued["etaSeconds"].(float64); seconds != 4 {
+		t.Fatalf("trigger etaSeconds = %v, want 4", queued["etaSeconds"])
+	}
+	if samples, _ := queued["etaSamples"].(float64); samples != 1 {
+		t.Fatalf("trigger etaSamples = %v, want 1 (same helper as input/retry)", queued["etaSamples"])
+	}
+	if basis, _ := queued["etaBasis"].(string); basis != "group" {
+		t.Fatalf("trigger etaBasis = %v, want group", queued["etaBasis"])
+	}
+	if got, _ := queued["groupId"].(string); got != group.GroupID.String() {
+		t.Fatalf("trigger groupId = %q, want %s", got, group.GroupID)
+	}
+	if got := res.header.Get("Retry-After"); got != "4" {
+		t.Fatalf("trigger Retry-After = %q, want 4", got)
+	}
 	if status, _, _ := f.runRow(t, second); status != "queued" {
 		t.Fatalf("triggered run status = %q, want queued", status)
+	}
+}
+
+// TestPlacementHTTPMemoryRefusalDiagnostics pins the wire shape of a memory
+// refusal: Active is the active-RUN count (never the number of groups) and
+// usedBytes is filled whenever the admission knows the usage.
+func TestPlacementHTTPMemoryRefusalDiagnostics(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := &placement.CapacityError{
+		Reason:     placement.CapacityGroupMemory,
+		Resource:   "group_memory",
+		Active:     3,
+		LimitBytes: 100,
+		UsedBytes:  60,
+		RetryAfter: 2 * time.Second,
+	}
+	if !writePlacementError(rec, err) {
+		t.Fatal("writePlacementError did not handle the capacity refusal")
+	}
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After = %q, want 2", got)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if reason, _ := body["reason"].(string); reason != string(placement.CapacityGroupMemory) {
+		t.Fatalf("reason = %v, want %s", body["reason"], placement.CapacityGroupMemory)
+	}
+	if active, _ := body["active"].(float64); active != 3 {
+		t.Fatalf("active = %v, want the 3 active runs", body["active"])
+	}
+	if used, _ := body["usedBytes"].(float64); used != 60 {
+		t.Fatalf("usedBytes = %v, want 60", body["usedBytes"])
+	}
+	if limit, _ := body["limitBytes"].(float64); limit != 100 {
+		t.Fatalf("limitBytes = %v, want 100", body["limitBytes"])
 	}
 }
 
