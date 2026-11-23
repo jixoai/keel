@@ -211,8 +211,11 @@ config.toml        （用户配置；可轮转）
   中途轮转只影响下一次 run。
 - 子代理 fork 继承父 run 的配置版本，随后可写自己的 `config.toml`。
 
-当前 `internal/loadout` + `internal/servicegraph` 表达「服务图」这一层；base/mode/preset 的
-row id 覆盖是**本契约**的要求，具体装配器在 W8/W9 落地（不在 W0.5 伪造）。
+当前 `internal/assembly` + `internal/loadout` + `internal/servicegraph` 表达「服务图」这一层；
+base/mode/preset 的 row id 覆盖由 `internal/assembly` 实现，`config.toml` 的严格解析与
+`config.toml.new → fsync → rename()` 原子轮转由 `internal/assembly` +
+`internal/configfile` 实现（W3.config）。生产 base 目前只携带 service rows，非 service row
+的覆盖进入服务图仍留 W8/W9。
 
 ## 7. layer 边界与架构测试
 

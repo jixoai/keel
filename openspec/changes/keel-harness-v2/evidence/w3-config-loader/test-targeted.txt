@@ -1,0 +1,1683 @@
+=== RUN   TestActivationIsAvailabilityDrivenNotDeclarationOrder
+--- PASS: TestActivationIsAvailabilityDrivenNotDeclarationOrder (0.00s)
+=== RUN   TestModeOverridesOnlyTheMatchingRow
+--- PASS: TestModeOverridesOnlyTheMatchingRow (0.00s)
+=== RUN   TestPresetChangesBehaviorWithoutRewritingBase
+--- PASS: TestPresetChangesBehaviorWithoutRewritingBase (0.00s)
+=== RUN   TestAbsentRowRendersAsAbsent
+--- PASS: TestAbsentRowRendersAsAbsent (0.00s)
+=== RUN   TestRowIdentityCollisionsAreRejected
+--- PASS: TestRowIdentityCollisionsAreRejected (0.00s)
+=== RUN   TestUnknownRowIsRejected
+--- PASS: TestUnknownRowIsRejected (0.00s)
+=== RUN   TestReorderingIsRejected
+--- PASS: TestReorderingIsRejected (0.00s)
+=== RUN   TestStackShapeIsValidated
+--- PASS: TestStackShapeIsValidated (0.00s)
+=== RUN   TestAnonymousBaseRowsNeverParticipateInOverlay
+--- PASS: TestAnonymousBaseRowsNeverParticipateInOverlay (0.00s)
+=== RUN   TestOverlayCannotChangeStructure
+--- PASS: TestOverlayCannotChangeStructure (0.00s)
+=== RUN   TestOverlayKeepsTheBaseDependencyShape
+--- PASS: TestOverlayKeepsTheBaseDependencyShape (0.00s)
+=== RUN   TestRequirementErrorsAndBlockedRows
+--- PASS: TestRequirementErrorsAndBlockedRows (0.00s)
+=== RUN   TestEffectiveRowsAreCopies
+--- PASS: TestEffectiveRowsAreCopies (0.00s)
+=== RUN   TestParseConfigReadsTheCaptureSetting
+--- PASS: TestParseConfigReadsTheCaptureSetting (0.00s)
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/unknown_parent_table
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/unknown_setting_key
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/duplicate_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/duplicate_table
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/mode_is_not_a_string
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/empty_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/unknown_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/padded_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/arrays_are_outside_the_subset
+--- PASS: TestParseConfigRejectsMalformedCaptureSettings (0.00s)
+=== RUN   TestValidateRejectsHandBuiltSettings
+--- PASS: TestValidateRejectsHandBuiltSettings (0.00s)
+=== RUN   TestParseConfigRoundTripsTheDocumentedSubset
+--- PASS: TestParseConfigRoundTripsTheDocumentedSubset (0.00s)
+=== RUN   TestParseConfigRejectsFieldLevelMistakes
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/missing_version
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/wrong_version
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/non-integer_version
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/unknown_table
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/unknown_top-level_key
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/unknown_row_key
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/id_is_not_a_string
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/param_is_not_a_string
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/duplicate_key
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/duplicate_row
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/absent_with_impl
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/absent_with_params
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/empty_row_table
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/row_without_id
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/row_with_invalid_id
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/present_row_without_impl
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/invalid_param_key
+--- PASS: TestParseConfigRejectsFieldLevelMistakes (0.00s)
+=== RUN   TestConfigHashIsCanonical
+--- PASS: TestConfigHashIsCanonical (0.00s)
+=== RUN   TestRotationKeepsInFlightRunsOnTheirVersion
+--- PASS: TestRotationKeepsInFlightRunsOnTheirVersion (0.00s)
+=== RUN   TestRotationRejectsInvalidAnchorsAndDocuments
+--- PASS: TestRotationRejectsInvalidAnchorsAndDocuments (0.00s)
+=== RUN   TestConfigDocumentOverlaysTheBase
+--- PASS: TestConfigDocumentOverlaysTheBase (0.00s)
+=== RUN   TestSeamVocabularyIsClosed
+--- PASS: TestSeamVocabularyIsClosed (0.00s)
+=== RUN   TestCapabilityMatrixListsEveryCapability
+--- PASS: TestCapabilityMatrixListsEveryCapability (0.00s)
+=== RUN   TestEverySeamCapabilityGapFailsBeforeStartup
+=== RUN   TestEverySeamCapabilityGapFailsBeforeStartup/fs
+=== RUN   TestEverySeamCapabilityGapFailsBeforeStartup/shell
+=== RUN   TestEverySeamCapabilityGapFailsBeforeStartup/subprocess
+=== RUN   TestEverySeamCapabilityGapFailsBeforeStartup/exec-surface
+=== RUN   TestEverySeamCapabilityGapFailsBeforeStartup/terminal
+--- PASS: TestEverySeamCapabilityGapFailsBeforeStartup (0.00s)
+=== RUN   TestUnknownProviderIsUnsupportedCapability
+--- PASS: TestUnknownProviderIsUnsupportedCapability (0.00s)
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/unknown_capability_in_a_requirement
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/unknown_seam_in_a_requirement
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/invalid_provider_id_in_a_requirement
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/unknown_capability_declaration
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/unknown_seam_declaration
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/duplicate_provider
+=== RUN   TestMalformedCapabilityVocabularyIsInvalidCapability/duplicate_capability_declaration
+--- PASS: TestMalformedCapabilityVocabularyIsInvalidCapability (0.00s)
+=== RUN   TestCheckMergesRepeatedGapsAndAcceptsSatisfiedRequirements
+--- PASS: TestCheckMergesRepeatedGapsAndAcceptsSatisfiedRequirements (0.00s)
+=== RUN   TestPrepareWithoutRequirementsDoesNotNeedARegistry
+--- PASS: TestPrepareWithoutRequirementsDoesNotNeedARegistry (0.00s)
+=== RUN   TestOpenMissingFileIsAnEmptyOptionalConfig
+--- PASS: TestOpenMissingFileIsAnEmptyOptionalConfig (0.00s)
+=== RUN   TestOpenRequiresAPath
+--- PASS: TestOpenRequiresAPath (0.00s)
+=== RUN   TestOpenRejectsInvalidFile
+--- PASS: TestOpenRejectsInvalidFile (0.00s)
+=== RUN   TestRotateReplacesTheFileAtomically
+--- PASS: TestRotateReplacesTheFileAtomically (0.01s)
+=== RUN   TestRotationKeepsInFlightAttemptOnItsPinnedVersion
+--- PASS: TestRotationKeepsInFlightAttemptOnItsPinnedVersion (0.01s)
+=== RUN   TestRotateRejectsInvalidDocumentsWithoutTouchingTheActiveFile
+--- PASS: TestRotateRejectsInvalidDocumentsWithoutTouchingTheActiveFile (0.00s)
+=== RUN   TestRotateRejectsAnAnchorThatDoesNotAdvance
+--- PASS: TestRotateRejectsAnAnchorThatDoesNotAdvance (0.01s)
+=== RUN   TestRotationWriteFailureLeavesNoPartialFile
+--- PASS: TestRotationWriteFailureLeavesNoPartialFile (0.00s)
+=== RUN   TestRotateOverwritesAStaleStagingFile
+--- PASS: TestRotateOverwritesAStaleStagingFile (0.01s)
+=== RUN   TestConfigFileCaptureModeOverlaysTheTenantDocument
+--- PASS: TestConfigFileCaptureModeOverlaysTheTenantDocument (0.00s)
+=== RUN   TestRestartPicksTheRotatedVersion
+--- PASS: TestRestartPicksTheRotatedVersion (0.01s)
+=== RUN   TestReloadAdoptsAnExternallyRotatedFile
+--- PASS: TestReloadAdoptsAnExternallyRotatedFile (0.00s)
+=== RUN   TestConcurrentPinAndRotate
+--- PASS: TestConcurrentPinAndRotate (0.20s)
+=== RUN   TestParseAndClosedVocabulary
+--- PASS: TestParseAndClosedVocabulary (0.00s)
+=== RUN   TestTriggerErrorIsTyped
+--- PASS: TestTriggerErrorIsTyped (0.00s)
+=== RUN   TestContextPinRoundTrip
+--- PASS: TestContextPinRoundTrip (0.00s)
+=== RUN   TestMergeOverlaysTenantOnDefaults
+--- PASS: TestMergeOverlaysTenantOnDefaults (0.00s)
+=== RUN   TestMergeEmptyTenantInheritsEverything
+--- PASS: TestMergeEmptyTenantInheritsEverything (0.00s)
+=== RUN   TestMergeExplicitEmptySlicesClearDefaults
+--- PASS: TestMergeExplicitEmptySlicesClearDefaults (0.00s)
+=== RUN   TestValidateAcceptsDocumentedConfig
+--- PASS: TestValidateAcceptsDocumentedConfig (0.00s)
+=== RUN   TestValidateRejectsBadFields
+=== RUN   TestValidateRejectsBadFields/negative_max_turns
+=== RUN   TestValidateRejectsBadFields/negative_context_window
+=== RUN   TestValidateRejectsBadFields/unknown_protocol
+=== RUN   TestValidateRejectsBadFields/bad_base_url
+=== RUN   TestValidateRejectsBadFields/unknown_thinking
+=== RUN   TestValidateRejectsBadFields/literal_api_key_ref
+=== RUN   TestValidateRejectsBadFields/bad_section_name
+=== RUN   TestValidateRejectsBadFields/section_name_whitespace
+=== RUN   TestValidateRejectsBadFields/empty_section_name
+=== RUN   TestValidateRejectsBadFields/duplicate_section
+=== RUN   TestValidateRejectsBadFields/unknown_file_read_tool
+=== RUN   TestValidateRejectsBadFields/empty_skill_root
+=== RUN   TestValidateRejectsBadFields/mcp_no_transport
+=== RUN   TestValidateRejectsBadFields/mcp_both_transports
+=== RUN   TestValidateRejectsBadFields/mcp_bad_url
+=== RUN   TestValidateRejectsBadFields/mcp_negative_timeout
+=== RUN   TestValidateRejectsBadFields/mcp_bad_server_name
+=== RUN   TestValidateRejectsBadFields/mcp_literal_header
+=== RUN   TestValidateRejectsBadFields/mcp_literal_env
+=== RUN   TestValidateRejectsBadFields/mcp_url_userinfo
+=== RUN   TestValidateRejectsBadFields/hook_without_event
+=== RUN   TestValidateRejectsBadFields/hook_without_command
+=== RUN   TestValidateRejectsBadFields/hook_negative_timeout
+=== RUN   TestValidateRejectsBadFields/threshold_above_one
+=== RUN   TestValidateRejectsBadFields/threshold_below_zero
+=== RUN   TestValidateRejectsBadFields/negative_keep_recent
+=== RUN   TestValidateRejectsBadFields/unknown_telemetry
+=== RUN   TestValidateRejectsBadFields/bad_tool_allow
+--- PASS: TestValidateRejectsBadFields (0.00s)
+=== RUN   TestValidateEmptyConfigIsValid
+--- PASS: TestValidateEmptyConfigIsValid (0.00s)
+=== RUN   TestMarshalPreservesNilVersusEmptyCollections
+--- PASS: TestMarshalPreservesNilVersusEmptyCollections (0.00s)
+=== RUN   TestParseTenantConfigRejectsNonObjectAndUnknownFields
+--- PASS: TestParseTenantConfigRejectsNonObjectAndUnknownFields (0.00s)
+=== RUN   TestParseTenantConfigRoundTripsCanonicalJSON
+--- PASS: TestParseTenantConfigRoundTripsCanonicalJSON (0.00s)
+=== RUN   TestExternalConfigValidation
+=== RUN   TestExternalConfigValidation/literal_env_secret
+=== RUN   TestExternalConfigValidation/missing_unmetered_policy
+=== RUN   TestExternalConfigValidation/unknown_unmetered_policy
+=== RUN   TestExternalConfigValidation/command_and_url
+=== RUN   TestExternalConfigValidation/stdio_with_url
+=== RUN   TestExternalConfigValidation/http_url_with_credentials
+=== RUN   TestExternalConfigValidation/illegal_provider_name
+=== RUN   TestExternalConfigValidation/negative_max_sessions
+--- PASS: TestExternalConfigValidation (0.00s)
+=== RUN   TestExternalConfigMerge
+--- PASS: TestExternalConfigMerge (0.00s)
+=== RUN   TestModelsDocumentMerge
+--- PASS: TestModelsDocumentMerge (0.00s)
+=== RUN   TestLoadModelsDocument
+--- PASS: TestLoadModelsDocument (0.00s)
+=== RUN   TestCaptureModeMergeAndDefault
+--- PASS: TestCaptureModeMergeAndDefault (0.00s)
+=== RUN   TestValidateCaptureModeMatrix
+--- PASS: TestValidateCaptureModeMatrix (0.00s)
+=== RUN   TestCaptureModeRoundTripsCanonicalJSON
+--- PASS: TestCaptureModeRoundTripsCanonicalJSON (0.00s)
+=== RUN   TestHostAssemblesPromptAndTools
+--- PASS: TestHostAssemblesPromptAndTools (0.00s)
+=== RUN   TestHostHidesDisabledSkillFromPrompt
+--- PASS: TestHostHidesDisabledSkillFromPrompt (0.00s)
+=== RUN   TestRefreshMCPReplacesToolsAndPromptSection
+--- PASS: TestRefreshMCPReplacesToolsAndPromptSection (0.00s)
+=== RUN   TestToolsAllowFiltersBuiltinsAndPluginTools
+--- PASS: TestToolsAllowFiltersBuiltinsAndPluginTools (0.00s)
+=== RUN   TestToolsAllowExplicitEmptyKeepsNoTools
+--- PASS: TestToolsAllowExplicitEmptyKeepsNoTools (0.00s)
+=== RUN   TestToolAllowListMatching
+=== RUN   TestToolAllowListMatching/nil_keeps_everything
+=== RUN   TestToolAllowListMatching/empty_keeps_nothing
+=== RUN   TestToolAllowListMatching/exact_match
+=== RUN   TestToolAllowListMatching/exact_miss
+=== RUN   TestToolAllowListMatching/prefix_wildcard_match
+=== RUN   TestToolAllowListMatching/prefix_wildcard_does_not_overreach
+--- PASS: TestToolAllowListMatching (0.00s)
+=== RUN   TestRefreshMCPConcurrentReads
+--- PASS: TestRefreshMCPConcurrentReads (0.01s)
+=== RUN   TestRefreshSectionsKeepsBothMCPSectionsWithoutDuplicates
+--- PASS: TestRefreshSectionsKeepsBothMCPSectionsWithoutDuplicates (0.00s)
+=== RUN   TestBuildSystemPrompt
+--- PASS: TestBuildSystemPrompt (0.00s)
+=== RUN   TestBuildSystemPromptNoSkills
+--- PASS: TestBuildSystemPromptNoSkills (0.00s)
+=== RUN   TestRenderSystemPromptSwapsThePreamble
+--- PASS: TestRenderSystemPromptSwapsThePreamble (0.00s)
+=== RUN   TestAdminBootstrapAndResetCLI
+--- PASS: TestAdminBootstrapAndResetCLI (0.53s)
+=== RUN   TestEnsureServeTenantProvisionsEmptyDatabase
+--- PASS: TestEnsureServeTenantProvisionsEmptyDatabase (0.03s)
+=== RUN   TestAuthRequiredLifecycleE2E
+--- PASS: TestAuthRequiredLifecycleE2E (1.32s)
+=== RUN   TestLoopbackRequestRequiresBothHostAndPeer
+--- PASS: TestLoopbackRequestRequiresBothHostAndPeer (0.00s)
+=== RUN   TestAuthRateLimitE2E
+--- PASS: TestAuthRateLimitE2E (0.63s)
+=== RUN   TestBotKeyLifecycleE2E
+--- PASS: TestBotKeyLifecycleE2E (0.22s)
+=== RUN   TestAuthLocalOnlyE2E
+--- PASS: TestAuthLocalOnlyE2E (0.04s)
+=== RUN   TestAuthRejectsCrossTenantSessionAndKeyE2E
+--- PASS: TestAuthRejectsCrossTenantSessionAndKeyE2E (0.22s)
+=== RUN   TestNotificationTokenRouteClassification
+--- PASS: TestNotificationTokenRouteClassification (0.00s)
+=== RUN   TestAdminPasswordResetE2E
+--- PASS: TestAdminPasswordResetE2E (0.70s)
+=== RUN   TestNotificationTokenRoutesE2E
+--- PASS: TestNotificationTokenRoutesE2E (0.20s)
+=== RUN   TestBashJobCommandsAdapterMapsJobManagerFacts
+--- PASS: TestBashJobCommandsAdapterMapsJobManagerFacts (0.00s)
+=== RUN   TestBashJobCommandsAdapterStartJobIsBackground
+--- PASS: TestBashJobCommandsAdapterStartJobIsBackground (0.00s)
+=== RUN   TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts
+--- PASS: TestBashJobCommandsAdapterMatchesTheToolSurfaceJobFacts (0.04s)
+=== RUN   TestBashSessionBackendStampsRunIdentity
+--- PASS: TestBashSessionBackendStampsRunIdentity (0.00s)
+=== RUN   TestBashSessionBackendPassesThroughOutsideARun
+--- PASS: TestBashSessionBackendPassesThroughOutsideARun (0.00s)
+=== RUN   TestBotCLIListsAndShowsOverBotEndpoints
+--- PASS: TestBotCLIListsAndShowsOverBotEndpoints (0.00s)
+=== RUN   TestBotCLICreateCarriesHarnessAndDefaultModel
+--- PASS: TestBotCLICreateCarriesHarnessAndDefaultModel (0.00s)
+=== RUN   TestBotCLIStartInvokesTheBot
+--- PASS: TestBotCLIStartInvokesTheBot (0.00s)
+=== RUN   TestBotCLIBotKeyNeedsNoLogin
+--- PASS: TestBotCLIBotKeyNeedsNoLogin (0.00s)
+=== RUN   TestBotKeyCreatePrintsThePlaintextOnce
+--- PASS: TestBotKeyCreatePrintsThePlaintextOnce (0.00s)
+=== RUN   TestTeamBotCLICreateRosterStart
+--- PASS: TestTeamBotCLICreateRosterStart (0.00s)
+=== RUN   TestRetiredAgentAndTeamCommandsAreUnknown
+--- PASS: TestRetiredAgentAndTeamCommandsAreUnknown (0.00s)
+=== RUN   TestBotCLIUpdatePreservesUnchangedHarnessAndModel
+--- PASS: TestBotCLIUpdatePreservesUnchangedHarnessAndModel (0.00s)
+=== RUN   TestBotSessionStarterWritesOwnershipAndSelection
+--- PASS: TestBotSessionStarterWritesOwnershipAndSelection (0.03s)
+=== RUN   TestTeamBotSessionStarterWritesMissionSnapshotAndTeamSelection
+--- PASS: TestTeamBotSessionStarterWritesMissionSnapshotAndTeamSelection (0.03s)
+=== RUN   TestBotSessionStarterRefusesArchivedBot
+--- PASS: TestBotSessionStarterRefusesArchivedBot (0.03s)
+=== RUN   TestEffectiveCaptureModeUsesStoredDocumentOverBoot
+--- PASS: TestEffectiveCaptureModeUsesStoredDocumentOverBoot (0.00s)
+=== RUN   TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead
+=== RUN   TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead/parse
+=== RUN   TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead/read
+--- PASS: TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead (0.00s)
+=== RUN   TestEffectiveCaptureModeAppliesConfigFileLast
+--- PASS: TestEffectiveCaptureModeAppliesConfigFileLast (0.02s)
+=== RUN   TestEffectiveCaptureModeFallsBackWhenFileSettingIsRemoved
+--- PASS: TestEffectiveCaptureModeFallsBackWhenFileSettingIsRemoved (0.01s)
+=== RUN   TestCheckpointDocumentRequiresAnAmbientRun
+--- PASS: TestCheckpointDocumentRequiresAnAmbientRun (0.00s)
+=== RUN   TestVersionCommand
+--- PASS: TestVersionCommand (0.00s)
+=== RUN   TestStaticHandlerSPAFallbackAndCaching
+--- PASS: TestStaticHandlerSPAFallbackAndCaching (0.00s)
+=== RUN   TestDoctorWithoutDSNFails
+--- PASS: TestDoctorWithoutDSNFails (0.00s)
+=== RUN   TestTUIResolutionAndMissingArtifact
+--- PASS: TestTUIResolutionAndMissingArtifact (0.22s)
+=== RUN   TestServeConfigValidation
+--- PASS: TestServeConfigValidation (0.00s)
+=== RUN   TestHasherAndCursorHelpers
+--- PASS: TestHasherAndCursorHelpers (0.00s)
+=== RUN   TestMCPAppRuntimeAdapterOverLiveManager
+--- PASS: TestMCPAppRuntimeAdapterOverLiveManager (0.05s)
+=== RUN   TestMCPAppInputCommitWritesUserMessage
+--- PASS: TestMCPAppInputCommitWritesUserMessage (0.05s)
+=== RUN   TestMCPHalfSurvivesPluginRefresh
+--- PASS: TestMCPHalfSurvivesPluginRefresh (0.04s)
+=== RUN   TestPluginHalfSurvivesMCPRepublish
+--- PASS: TestPluginHalfSurvivesMCPRepublish (0.04s)
+=== RUN   TestMCPAppsHTTPEndToEnd
+--- PASS: TestMCPAppsHTTPEndToEnd (0.03s)
+=== RUN   TestModelProvidersTable
+--- PASS: TestModelProvidersTable (0.00s)
+=== RUN   TestModelProvidersJSON
+--- PASS: TestModelProvidersJSON (0.00s)
+=== RUN   TestModelListTable
+--- PASS: TestModelListTable (0.00s)
+=== RUN   TestModelShowQualified
+--- PASS: TestModelShowQualified (0.00s)
+=== RUN   TestModelShowBareIDAmbiguousNamesCandidates
+--- PASS: TestModelShowBareIDAmbiguousNamesCandidates (0.00s)
+=== RUN   TestModelShowNotFound
+--- PASS: TestModelShowNotFound (0.00s)
+=== RUN   TestModelUsageAndUnknownCommand
+--- PASS: TestModelUsageAndUnknownCommand (0.00s)
+=== RUN   TestModelProviderAddWritesDocument
+--- PASS: TestModelProviderAddWritesDocument (0.00s)
+=== RUN   TestModelProviderUpdateAppliesOnlyPassedFlags
+--- PASS: TestModelProviderUpdateAppliesOnlyPassedFlags (0.00s)
+=== RUN   TestModelProviderRemoveDropsEntryAndReportsCatalogRegistry
+--- PASS: TestModelProviderRemoveDropsEntryAndReportsCatalogRegistry (0.00s)
+=== RUN   TestModelProviderRemovePrintsReferenceRefusal
+--- PASS: TestModelProviderRemovePrintsReferenceRefusal (0.00s)
+=== RUN   TestModelProviderTestProbe
+--- PASS: TestModelProviderTestProbe (0.00s)
+=== RUN   TestModelProviderListAlias
+--- PASS: TestModelProviderListAlias (0.00s)
+=== RUN   TestModelProviderShow
+--- PASS: TestModelProviderShow (0.00s)
+=== RUN   TestModelCatalogResolvedAndRefresh
+--- PASS: TestModelCatalogResolvedAndRefresh (0.00s)
+=== RUN   TestModelProviderAddRendersValidationIssues
+--- PASS: TestModelProviderAddRendersValidationIssues (0.00s)
+=== RUN   TestModelProviderUsage
+--- PASS: TestModelProviderUsage (0.00s)
+=== RUN   TestPluginPromptReachesSystemPrompt
+--- PASS: TestPluginPromptReachesSystemPrompt (0.03s)
+=== RUN   TestPluginPromptMCPHelper
+--- SKIP: TestPluginPromptMCPHelper (0.00s)
+=== RUN   TestPluginUIHostsEnabledPluginOnly
+--- PASS: TestPluginUIHostsEnabledPluginOnly (0.00s)
+=== RUN   TestPluginUIRefusesTraversalAndSymlinkEscape
+--- PASS: TestPluginUIRefusesTraversalAndSymlinkEscape (0.00s)
+=== RUN   TestPluginUIServeFileContainment
+--- PASS: TestPluginUIServeFileContainment (0.00s)
+=== RUN   TestPluginUIContentTypeMap
+--- PASS: TestPluginUIContentTypeMap (0.00s)
+=== RUN   TestPluginUIUnwired
+--- PASS: TestPluginUIUnwired (0.00s)
+=== RUN   TestLoadHostTheme
+--- PASS: TestLoadHostTheme (0.00s)
+=== RUN   TestSessionOwnerCallback
+--- PASS: TestSessionOwnerCallback (0.05s)
+=== RUN   TestSettingsEndToEndOverHTTP
+--- PASS: TestSettingsEndToEndOverHTTP (0.05s)
+=== RUN   TestSkillsCLIListShowAndSources
+--- PASS: TestSkillsCLIListShowAndSources (0.00s)
+=== RUN   TestSkillsCLIInstallReadsADirectory
+--- PASS: TestSkillsCLIInstallReadsADirectory (0.00s)
+=== RUN   TestSkillsCLIInstallFromSourceNeedsNoDescription
+--- PASS: TestSkillsCLIInstallFromSourceNeedsNoDescription (0.00s)
+=== RUN   TestSkillsCLIUpdatePinUnpinRemove
+--- PASS: TestSkillsCLIUpdatePinUnpinRemove (0.00s)
+=== RUN   TestSkillsCLIRefusalCarriesTheServerCode
+--- PASS: TestSkillsCLIRefusalCarriesTheServerCode (0.00s)
+=== RUN   TestStaticServesBrotliSidecar
+--- PASS: TestStaticServesBrotliSidecar (0.00s)
+=== RUN   TestStaticFallsBackToGzipThenPlain
+--- PASS: TestStaticFallsBackToGzipThenPlain (0.00s)
+=== RUN   TestStaticKeepsIndexAndRangeUncompressed
+--- PASS: TestStaticKeepsIndexAndRangeUncompressed (0.00s)
+=== RUN   TestAdminUsageAndQuotaCommands
+--- PASS: TestAdminUsageAndQuotaCommands (0.10s)
+=== RUN   TestEdgeQuotaMiddlewareRejectsSaturatedTenant
+--- PASS: TestEdgeQuotaMiddlewareRejectsSaturatedTenant (0.00s)
+=== RUN   TestEdgeQuotaMiddlewareRejectsOversizedUpload
+--- PASS: TestEdgeQuotaMiddlewareRejectsOversizedUpload (0.00s)
+=== RUN   TestCapabilities
+--- PASS: TestCapabilities (0.00s)
+=== RUN   TestCapabilitiesOmitsNilConfigFileBlock
+--- PASS: TestCapabilitiesOmitsNilConfigFileBlock (0.00s)
+=== RUN   TestSessionListPaginationAndIsolation
+--- PASS: TestSessionListPaginationAndIsolation (0.00s)
+=== RUN   TestCancelIdempotencyAndErrorMapping
+--- PASS: TestCancelIdempotencyAndErrorMapping (0.00s)
+=== RUN   TestCancelUnwiredAnswers501
+--- PASS: TestCancelUnwiredAnswers501 (0.00s)
+=== RUN   TestDecisionHTTPIdempotency
+--- PASS: TestDecisionHTTPIdempotency (0.00s)
+=== RUN   TestExtensionRoutes
+--- PASS: TestExtensionRoutes (0.00s)
+=== RUN   TestSubagentRoutes
+--- PASS: TestSubagentRoutes (0.00s)
+=== RUN   TestCursorRoundTrip
+--- PASS: TestCursorRoundTrip (0.00s)
+=== RUN   TestSubagentCapacityIs429
+--- PASS: TestSubagentCapacityIs429 (0.00s)
+=== RUN   TestResumeRouteAnswersTerminalExplicitly
+--- PASS: TestResumeRouteAnswersTerminalExplicitly (0.00s)
+=== RUN   TestApprovalAnswerRecordsValidatedProvenance
+--- PASS: TestApprovalAnswerRecordsValidatedProvenance (0.00s)
+=== RUN   TestApprovalOtherEscapeIsNotValidated
+--- PASS: TestApprovalOtherEscapeIsNotValidated (0.00s)
+=== RUN   TestNonApprovalDecisionHasNoProvenance
+--- PASS: TestNonApprovalDecisionHasNoProvenance (0.00s)
+=== RUN   TestApprovalRoutesAreTenantScoped
+--- PASS: TestApprovalRoutesAreTenantScoped (0.00s)
+=== RUN   TestNotificationRoutesAckListAndURL
+--- PASS: TestNotificationRoutesAckListAndURL (0.00s)
+=== RUN   TestNotificationPixelAndExpiry
+--- PASS: TestNotificationPixelAndExpiry (0.00s)
+=== RUN   TestNotificationRoutesAreTenantScoped
+--- PASS: TestNotificationRoutesAreTenantScoped (0.00s)
+=== RUN   TestNotificationTokenRoutesDoNotLeakExistence
+--- PASS: TestNotificationTokenRoutesDoNotLeakExistence (0.00s)
+=== RUN   TestNotificationRoutesWithoutServiceAre503
+--- PASS: TestNotificationRoutesWithoutServiceAre503 (0.00s)
+=== RUN   TestAuditReadContractAndFilters
+--- PASS: TestAuditReadContractAndFilters (0.12s)
+=== RUN   TestAuditReadPaginationIsStable
+--- PASS: TestAuditReadPaginationIsStable (0.06s)
+=== RUN   TestAuditReadAuthAndTenantBoundary
+--- PASS: TestAuditReadAuthAndTenantBoundary (0.05s)
+=== RUN   TestAuditReadRedactsSensitiveDetail
+--- PASS: TestAuditReadRedactsSensitiveDetail (0.05s)
+=== RUN   TestAuditReadEmptyPageShape
+--- PASS: TestAuditReadEmptyPageShape (0.04s)
+=== RUN   TestSessionFilesRoutePagesByPathAndCarriesTheManifestHash
+--- PASS: TestSessionFilesRoutePagesByPathAndCarriesTheManifestHash (0.00s)
+=== RUN   TestDemoProviderProjectsSixModels
+--- PASS: TestDemoProviderProjectsSixModels (0.00s)
+=== RUN   TestDemoProviderProjectsAsOneProviderGroup
+--- PASS: TestDemoProviderProjectsAsOneProviderGroup (0.00s)
+=== RUN   TestDemoProviderAbsentFromBothProjections
+--- PASS: TestDemoProviderAbsentFromBothProjections (0.00s)
+=== RUN   TestWriteErrRedactsCredentials
+=== RUN   TestWriteErrRedactsCredentials/bearer
+=== RUN   TestWriteErrRedactsCredentials/api_key
+=== RUN   TestWriteErrRedactsCredentials/query_token
+--- PASS: TestWriteErrRedactsCredentials (0.00s)
+=== RUN   TestAccountsHTTPSurface
+--- PASS: TestAccountsHTTPSurface (0.43s)
+=== RUN   TestPermissionGroupsHTTPSurface
+--- PASS: TestPermissionGroupsHTTPSurface (0.08s)
+=== RUN   TestIdentityEndpointsFailClosedWithoutAccess
+--- PASS: TestIdentityEndpointsFailClosedWithoutAccess (0.00s)
+=== RUN   TestIdentityEndpointCoverageGate
+--- PASS: TestIdentityEndpointCoverageGate (0.00s)
+=== RUN   TestIdentityWritesAreAudited
+--- PASS: TestIdentityWritesAreAudited (0.12s)
+=== RUN   TestBotsHTTPSurface
+--- PASS: TestBotsHTTPSurface (0.06s)
+=== RUN   TestTeamBotsHTTPSurface
+--- PASS: TestTeamBotsHTTPSurface (0.05s)
+=== RUN   TestBotKeysHTTPSurface
+--- PASS: TestBotKeysHTTPSurface (0.05s)
+=== RUN   TestWhoAmIRealBridge
+--- PASS: TestWhoAmIRealBridge (0.04s)
+=== RUN   TestSessionListUsesVisibleResources
+--- PASS: TestSessionListUsesVisibleResources (0.05s)
+=== RUN   TestIdentityEventsHubIsTenantScopedAndBounded
+--- PASS: TestIdentityEventsHubIsTenantScopedAndBounded (0.17s)
+=== RUN   TestIdentityEventStreamIsTenantScopedAtTheRoute
+--- PASS: TestIdentityEventStreamIsTenantScopedAtTheRoute (0.28s)
+=== RUN   TestIdentityEventStreamDeliversMutationWithinTwoSeconds
+--- PASS: TestIdentityEventStreamDeliversMutationWithinTwoSeconds (0.15s)
+=== RUN   TestIdentityEventStreamPublishesOnlySucceededWrites
+--- PASS: TestIdentityEventStreamPublishesOnlySucceededWrites (0.73s)
+=== RUN   TestIdentityEventStreamHeartbeatCleanupAndReconnect
+--- PASS: TestIdentityEventStreamHeartbeatCleanupAndReconnect (0.36s)
+=== RUN   TestIdentityEventStreamPublishesEveryProjection
+--- PASS: TestIdentityEventStreamPublishesEveryProjection (0.14s)
+=== RUN   TestIdentityEventStreamRequiresAuthenticationAndAppRead
+--- PASS: TestIdentityEventStreamRequiresAuthenticationAndAppRead (0.06s)
+=== RUN   TestRequireKeyRejectsResourceScopedKey
+--- PASS: TestRequireKeyRejectsResourceScopedKey (0.00s)
+=== RUN   TestRequireKeyRejectsUnknownKey
+--- PASS: TestRequireKeyRejectsUnknownKey (0.00s)
+=== RUN   TestRolesHTTPSurface
+--- PASS: TestRolesHTTPSurface (0.05s)
+=== RUN   TestProfilesHTTPSurface
+--- PASS: TestProfilesHTTPSurface (0.05s)
+=== RUN   TestMCPAppToolCallOwnership
+--- PASS: TestMCPAppToolCallOwnership (0.00s)
+=== RUN   TestMCPAppDestructiveConfirmation
+--- PASS: TestMCPAppDestructiveConfirmation (0.04s)
+=== RUN   TestMCPAppMessageBranches
+--- PASS: TestMCPAppMessageBranches (0.02s)
+=== RUN   TestMCPAppOpenLink
+--- PASS: TestMCPAppOpenLink (0.01s)
+=== RUN   TestMCPAppResourceSchemeWhitelist
+--- PASS: TestMCPAppResourceSchemeWhitelist (0.00s)
+=== RUN   TestMCPAppRateLimit
+--- PASS: TestMCPAppRateLimit (0.05s)
+=== RUN   TestMCPAppConcurrencyLimit
+--- PASS: TestMCPAppConcurrencyLimit (0.00s)
+=== RUN   TestMCPAppBodyLimit
+--- PASS: TestMCPAppBodyLimit (0.50s)
+=== RUN   TestMCPAppAuditRoutes
+--- PASS: TestMCPAppAuditRoutes (0.01s)
+=== RUN   TestMCPAppAuditNoBodyAgainstStore
+--- PASS: TestMCPAppAuditNoBodyAgainstStore (0.09s)
+=== RUN   TestMCPAppNameDestructive
+--- PASS: TestMCPAppNameDestructive (0.00s)
+=== RUN   TestMCPAppRateLimiterBucket
+--- PASS: TestMCPAppRateLimiterBucket (0.00s)
+=== RUN   TestMCPAppRejectionAuditSampling
+--- PASS: TestMCPAppRejectionAuditSampling (0.18s)
+=== RUN   TestMCPAppConfirmationOverflow
+--- PASS: TestMCPAppConfirmationOverflow (0.01s)
+=== RUN   TestMCPAppMessageAttachments
+--- PASS: TestMCPAppMessageAttachments (0.01s)
+=== RUN   TestMCPAppMessageProtocolAudits
+--- PASS: TestMCPAppMessageProtocolAudits (0.00s)
+=== RUN   TestMCPAppMessageSingleContentObject
+--- PASS: TestMCPAppMessageSingleContentObject (0.01s)
+=== RUN   TestMCPAppOpenLinkRejectsUserinfoAndNonASCII
+--- PASS: TestMCPAppOpenLinkRejectsUserinfoAndNonASCII (0.00s)
+=== RUN   TestMCPAppOpenLinkSchemeAuditCarriesSession
+--- PASS: TestMCPAppOpenLinkSchemeAuditCarriesSession (0.00s)
+=== RUN   TestMCPAppAuditSampleWindowRollover
+--- PASS: TestMCPAppAuditSampleWindowRollover (0.00s)
+=== RUN   TestMCPAppContextRouteUnwiredAnswersMethodNotFound
+--- PASS: TestMCPAppContextRouteUnwiredAnswersMethodNotFound (0.00s)
+=== RUN   TestMCPAppContextRouteUsesTheBridgeGate
+--- PASS: TestMCPAppContextRouteUsesTheBridgeGate (0.00s)
+=== RUN   TestMCPAppContextRoutePersistsOverwrite
+--- PASS: TestMCPAppContextRoutePersistsOverwrite (0.00s)
+=== RUN   TestMCPAppContextRouteValidatesInput
+--- PASS: TestMCPAppContextRouteValidatesInput (0.00s)
+=== RUN   TestMCPAppContextRouteForeignTenantIsNotFound
+--- PASS: TestMCPAppContextRouteForeignTenantIsNotFound (0.00s)
+=== RUN   TestMCPAppContextRouteStoreFailureIsNotSuccess
+--- PASS: TestMCPAppContextRouteStoreFailureIsNotSuccess (0.00s)
+=== RUN   TestMCPAppCallContextStampsSessionScope
+--- PASS: TestMCPAppCallContextStampsSessionScope (0.00s)
+=== RUN   TestMCPAppsRoutesRequireTenant
+--- PASS: TestMCPAppsRoutesRequireTenant (0.00s)
+=== RUN   TestMCPAppsCatalogIsTenantScoped
+--- PASS: TestMCPAppsCatalogIsTenantScoped (0.00s)
+=== RUN   TestMCPAppViewSecurityHeaders
+--- PASS: TestMCPAppViewSecurityHeaders (0.00s)
+=== RUN   TestMCPAppViewUnknownIdentity
+--- PASS: TestMCPAppViewUnknownIdentity (0.00s)
+=== RUN   TestMCPAppsUnwired
+--- PASS: TestMCPAppsUnwired (0.00s)
+=== RUN   TestCapabilitiesMCPBits
+--- PASS: TestCapabilitiesMCPBits (0.00s)
+=== RUN   TestCapabilitiesMCPBridgeBits
+--- PASS: TestCapabilitiesMCPBridgeBits (0.00s)
+=== RUN   TestMCPAppViewRefusesIncompleteDocument
+--- PASS: TestMCPAppViewRefusesIncompleteDocument (0.00s)
+=== RUN   TestMCPAppGateCountsBridgeFrames
+--- PASS: TestMCPAppGateCountsBridgeFrames (0.00s)
+=== RUN   TestListMCPServersReportsEraVersionCapabilities
+--- PASS: TestListMCPServersReportsEraVersionCapabilities (0.00s)
+=== RUN   TestSettingsModelsRefusesADecisionBindingThatFailsPreflight
+--- PASS: TestSettingsModelsRefusesADecisionBindingThatFailsPreflight (0.00s)
+=== RUN   TestModelListPublishesPricing
+--- PASS: TestModelListPublishesPricing (0.00s)
+=== RUN   TestProviderSettingsAndModelList
+--- PASS: TestProviderSettingsAndModelList (0.00s)
+=== RUN   TestModelCatalogUnwiredAnswers501
+--- PASS: TestModelCatalogUnwiredAnswers501 (0.00s)
+=== RUN   TestModelCatalogEmptyDiagnostics
+--- PASS: TestModelCatalogEmptyDiagnostics (0.00s)
+=== RUN   TestProviderRoutesRequireTenantHeader
+--- PASS: TestProviderRoutesRequireTenantHeader (0.00s)
+=== RUN   TestModelCatalogAllHiddenDiagnostic
+--- PASS: TestModelCatalogAllHiddenDiagnostic (0.00s)
+=== RUN   TestModelsResponsePublishesTheEnforcementLedger
+--- PASS: TestModelsResponsePublishesTheEnforcementLedger (0.00s)
+=== RUN   TestModelsListCarriesProviderTypeAndSurfaceKind
+--- PASS: TestModelsListCarriesProviderTypeAndSurfaceKind (0.00s)
+=== RUN   TestProviderProbeRoute
+--- PASS: TestProviderProbeRoute (0.00s)
+=== RUN   TestPartialsSSEBypass
+--- PASS: TestPartialsSSEBypass (0.36s)
+=== RUN   TestPluginApprovalAskingDoesNotAct
+--- PASS: TestPluginApprovalAskingDoesNotAct (0.00s)
+=== RUN   TestPluginApprovalQuestionIsIdempotent
+--- PASS: TestPluginApprovalQuestionIsIdempotent (0.00s)
+=== RUN   TestPluginApprovalDeniedIsRefusedAndAudited
+--- PASS: TestPluginApprovalDeniedIsRefusedAndAudited (0.00s)
+=== RUN   TestPluginApprovalGrantedActsOnce
+--- PASS: TestPluginApprovalGrantedActsOnce (0.00s)
+=== RUN   TestPluginApprovalPendingRetryIsRefusedNotExecuted
+--- PASS: TestPluginApprovalPendingRetryIsRefusedNotExecuted (0.00s)
+=== RUN   TestPluginApprovalDecisionIsBoundToItsRequest
+--- PASS: TestPluginApprovalDecisionIsBoundToItsRequest (0.00s)
+=== RUN   TestPluginApprovalFailsClosedWithoutDecisions
+--- PASS: TestPluginApprovalFailsClosedWithoutDecisions (0.00s)
+=== RUN   TestPluginApprovalBounds
+--- PASS: TestPluginApprovalBounds (0.00s)
+=== RUN   TestPluginApprovalQuestionSurvivesRestart
+--- PASS: TestPluginApprovalQuestionSurvivesRestart (0.00s)
+=== RUN   TestPluginBridgeStateCarriesTheDeclaration
+--- PASS: TestPluginBridgeStateCarriesTheDeclaration (0.00s)
+=== RUN   TestPluginBridgeGatesUndeclaredVerbs
+=== RUN   TestPluginBridgeGatesUndeclaredVerbs/call
+=== RUN   TestPluginBridgeGatesUndeclaredVerbs/approve
+=== RUN   TestPluginBridgeGatesUndeclaredVerbs/subscribe
+--- PASS: TestPluginBridgeGatesUndeclaredVerbs (0.00s)
+=== RUN   TestPluginBridgeDeclaredCallStillOwnsItsTool
+--- PASS: TestPluginBridgeDeclaredCallStillOwnsItsTool (0.00s)
+=== RUN   TestPluginBridgeLegacyViewKeepsTheFullBridge
+--- PASS: TestPluginBridgeLegacyViewKeepsTheFullBridge (0.00s)
+=== RUN   TestPluginBridgeUndeclaredToolKeepsItsCode
+--- PASS: TestPluginBridgeUndeclaredToolKeepsItsCode (0.00s)
+=== RUN   TestPluginBridgeStateJSONHasNoPackagePath
+--- PASS: TestPluginBridgeStateJSONHasNoPackagePath (0.00s)
+=== RUN   TestPluginBridgeStateIsAnAllowlist
+--- PASS: TestPluginBridgeStateIsAnAllowlist (0.00s)
+=== RUN   TestPluginBridgeStateGate
+=== RUN   TestPluginBridgeStateGate/disabled
+=== RUN   TestPluginBridgeStateGate/not_installed
+=== RUN   TestPluginBridgeStateGate/malformed_id
+--- PASS: TestPluginBridgeStateGate (0.00s)
+=== RUN   TestPluginBridgeCallOwnTools
+--- PASS: TestPluginBridgeCallOwnTools (0.00s)
+=== RUN   TestPluginBridgeApproveRoundTrip
+--- PASS: TestPluginBridgeApproveRoundTrip (0.00s)
+=== RUN   TestPluginBridgeSubscribeAttribute
+--- PASS: TestPluginBridgeSubscribeAttribute (0.36s)
+=== RUN   TestPluginBridgeCapabilitiesDiscoverable
+--- PASS: TestPluginBridgeCapabilitiesDiscoverable (0.00s)
+=== RUN   TestPluginAPILifecycleRoutesAndAuditAttribution
+--- PASS: TestPluginAPILifecycleRoutesAndAuditAttribution (0.00s)
+=== RUN   TestPluginAPIErrorMapping
+=== RUN   TestPluginAPIErrorMapping/not_found
+=== RUN   TestPluginAPIErrorMapping/already_enabled
+=== RUN   TestPluginAPIErrorMapping/missing_dependency
+=== RUN   TestPluginAPIErrorMapping/dependents
+=== RUN   TestPluginAPIErrorMapping/version_gate
+=== RUN   TestPluginAPIErrorMapping/invalid_package_on_install
+=== RUN   TestPluginAPIErrorMapping/invalid_package_on_enable
+=== RUN   TestPluginAPIErrorMapping/kind_without_loader
+=== RUN   TestPluginAPIErrorMapping/bundled
+=== RUN   TestPluginAPIErrorMapping/path_outside
+=== RUN   TestPluginAPIErrorMapping/malformed_id
+--- PASS: TestPluginAPIErrorMapping (0.01s)
+=== RUN   TestPluginAPIRequiresTenantAndManager
+--- PASS: TestPluginAPIRequiresTenantAndManager (0.00s)
+=== RUN   TestPluginAPIAuditPaginationAndCapabilities
+--- PASS: TestPluginAPIAuditPaginationAndCapabilities (0.00s)
+=== RUN   TestPluginAPIInstallRejectsUnknownFields
+--- PASS: TestPluginAPIInstallRejectsUnknownFields (0.00s)
+=== RUN   TestPluginAPIPluginErrorsAreNotWrapped
+--- PASS: TestPluginAPIPluginErrorsAreNotWrapped (0.00s)
+=== RUN   TestPluginsInventoryCarriesEffectivePrompt
+--- PASS: TestPluginsInventoryCarriesEffectivePrompt (0.00s)
+=== RUN   TestProviderCredentialDirectEntry
+--- PASS: TestProviderCredentialDirectEntry (0.00s)
+=== RUN   TestProviderCredentialShortValueMask
+--- PASS: TestProviderCredentialShortValueMask (0.00s)
+=== RUN   TestProviderCredentialRefusals
+--- PASS: TestProviderCredentialRefusals (0.00s)
+=== RUN   TestProviderCredentialNameIsStableAndGrammatical
+--- PASS: TestProviderCredentialNameIsStableAndGrammatical (0.00s)
+=== RUN   TestProviderCredentialNamesDoNotCollideAfterSanitization
+--- PASS: TestProviderCredentialNamesDoNotCollideAfterSanitization (0.00s)
+=== RUN   TestProviderCredentialNeverReachesTheDocumentOrLogs
+--- PASS: TestProviderCredentialNeverReachesTheDocumentOrLogs (0.00s)
+=== RUN   TestPGSessionListerKeysetPagination
+--- PASS: TestPGSessionListerKeysetPagination (0.25s)
+=== RUN   TestPGSessionListerTitlesFromFirstUserMessage
+--- PASS: TestPGSessionListerTitlesFromFirstUserMessage (0.26s)
+=== RUN   TestSessionListerRunsUnderRLS
+--- PASS: TestSessionListerRunsUnderRLS (0.18s)
+=== RUN   TestDeriveSessionTitle
+=== RUN   TestDeriveSessionTitle/empty
+=== RUN   TestDeriveSessionTitle/whitespace_only
+=== RUN   TestDeriveSessionTitle/plain
+=== RUN   TestDeriveSessionTitle/trimmed
+=== RUN   TestDeriveSessionTitle/newlines_collapse
+=== RUN   TestDeriveSessionTitle/runs_collapse
+=== RUN   TestDeriveSessionTitle/exact_limit_is_untouched
+=== RUN   TestDeriveSessionTitle/one_over_the_limit_is_cut
+=== RUN   TestDeriveSessionTitle/long_text_is_cut
+--- PASS: TestDeriveSessionTitle (0.00s)
+=== RUN   TestSessionListRowCarriesTitleAndCreatedAt
+--- PASS: TestSessionListRowCarriesTitleAndCreatedAt (0.00s)
+=== RUN   TestArchiveSessionRoute
+--- PASS: TestArchiveSessionRoute (0.00s)
+=== RUN   TestArchiveSessionNotWired
+--- PASS: TestArchiveSessionNotWired (0.00s)
+=== RUN   TestModelSettingsRoutes
+--- PASS: TestModelSettingsRoutes (0.00s)
+=== RUN   TestModelSettingsValidationAndConflicts
+--- PASS: TestModelSettingsValidationAndConflicts (0.00s)
+=== RUN   TestModelSettingsReloadFailureIsCompensated
+--- PASS: TestModelSettingsReloadFailureIsCompensated (0.00s)
+=== RUN   TestModelSettingsTenantScoping
+--- PASS: TestModelSettingsTenantScoping (0.00s)
+=== RUN   TestModelSettingsUnwired
+--- PASS: TestModelSettingsUnwired (0.00s)
+=== RUN   TestModelCatalogLiveSeam
+--- PASS: TestModelCatalogLiveSeam (0.00s)
+=== RUN   TestSettingsSecretsRoutes
+--- PASS: TestSettingsSecretsRoutes (0.00s)
+=== RUN   TestSettingsSecretsUnavailable
+--- PASS: TestSettingsSecretsUnavailable (0.00s)
+=== RUN   TestSettingsPluginsInventory
+--- PASS: TestSettingsPluginsInventory (0.00s)
+=== RUN   TestSettingsPluginsStatesApprovalsUnwired
+--- PASS: TestSettingsPluginsStatesApprovalsUnwired (0.00s)
+=== RUN   TestSettingsPluginsUnwired
+--- PASS: TestSettingsPluginsUnwired (0.00s)
+=== RUN   TestSettingsCapabilitiesDiscoverable
+--- PASS: TestSettingsCapabilitiesDiscoverable (0.00s)
+=== RUN   TestSecretNameGrammarMatchesReferences
+--- PASS: TestSecretNameGrammarMatchesReferences (0.00s)
+=== RUN   TestModelSettingsReadNamesARejectedOverride
+--- PASS: TestModelSettingsReadNamesARejectedOverride (0.00s)
+=== RUN   TestSecretDeleteRefusesWhileReferenced
+--- PASS: TestSecretDeleteRefusesWhileReferenced (0.00s)
+=== RUN   TestModelSettingsWriteRefusesRemovingReferencedProvider
+--- PASS: TestModelSettingsWriteRefusesRemovingReferencedProvider (0.00s)
+=== RUN   TestSessionShareSurface
+--- PASS: TestSessionShareSurface (0.07s)
+=== RUN   TestBotShareSurface
+--- PASS: TestBotShareSurface (0.06s)
+=== RUN   TestTeamBotShareSurface
+--- PASS: TestTeamBotShareSurface (0.05s)
+=== RUN   TestShareSubjectValidation
+--- PASS: TestShareSubjectValidation (0.06s)
+=== RUN   TestShareTenantBoundary
+--- PASS: TestShareTenantBoundary (0.04s)
+=== RUN   TestSkillSettingsInstallShowPinAndRemove
+--- PASS: TestSkillSettingsInstallShowPinAndRemove (0.01s)
+=== RUN   TestSkillSettingsTrustPinAndUpdateConflicts
+--- PASS: TestSkillSettingsTrustPinAndUpdateConflicts (0.01s)
+=== RUN   TestSkillSettingsValidationAndTenantScope
+--- PASS: TestSkillSettingsValidationAndTenantScope (0.00s)
+=== RUN   TestSkillSettingsNotWired
+--- PASS: TestSkillSettingsNotWired (0.00s)
+=== RUN   TestCompletionRoutes
+--- PASS: TestCompletionRoutes (0.00s)
+=== RUN   TestSpawnBotIDRequiresBotInvoke
+=== RUN   TestSpawnBotIDRequiresBotInvoke/botId
+=== RUN   TestSpawnBotIDRequiresBotInvoke/selection_botId
+--- PASS: TestSpawnBotIDRequiresBotInvoke (0.00s)
+=== RUN   TestSpawnAuthorizesEveryNamedTarget
+=== RUN   TestSpawnAuthorizesEveryNamedTarget/spawn
+=== RUN   TestSpawnAuthorizesEveryNamedTarget/fork
+--- PASS: TestSpawnAuthorizesEveryNamedTarget (0.00s)
+=== RUN   TestForkBotIDRequiresBotInvoke
+--- PASS: TestForkBotIDRequiresBotInvoke (0.00s)
+=== RUN   TestTaskPanelRouteWireShape
+--- PASS: TestTaskPanelRouteWireShape (0.00s)
+=== RUN   TestTaskPanelRouteRefusals
+--- PASS: TestTaskPanelRouteRefusals (0.00s)
+=== RUN   TestFilePreviewRouteReadsTheManifest
+--- PASS: TestFilePreviewRouteReadsTheManifest (0.00s)
+=== RUN   TestTeamTasksProjectionAndBoundaries
+--- PASS: TestTeamTasksProjectionAndBoundaries (0.22s)
+=== RUN   TestWhoAmIReportsIdentityAndPermissions
+--- PASS: TestWhoAmIReportsIdentityAndPermissions (0.00s)
+=== RUN   TestWhoAmIReportsBotIdentity
+--- PASS: TestWhoAmIReportsBotIdentity (0.00s)
+=== RUN   TestWhoAmIFailsClosedWithoutAccess
+--- PASS: TestWhoAmIFailsClosedWithoutAccess (0.00s)
+=== RUN   TestProvisionTenantCreatesWithoutKey
+--- PASS: TestProvisionTenantCreatesWithoutKey (0.00s)
+=== RUN   TestProvisioningRequiresAdminCredential
+--- PASS: TestProvisioningRequiresAdminCredential (0.00s)
+=== RUN   TestQuotaProjectionHasNoMoney
+--- PASS: TestQuotaProjectionHasNoMoney (0.00s)
+=== RUN   TestCrossTenantSessionIs404
+--- PASS: TestCrossTenantSessionIs404 (0.00s)
+=== RUN   TestBotteamStaysPure
+--- PASS: TestBotteamStaysPure (0.11s)
+=== RUN   TestStoreDoesNotImportBotteam
+--- PASS: TestStoreDoesNotImportBotteam (0.08s)
+=== RUN   TestBotteamGuardedPackagesResolve
+--- PASS: TestBotteamGuardedPackagesResolve (0.03s)
+=== RUN   TestKernelDoesNotImportProductLayers
+--- PASS: TestKernelDoesNotImportProductLayers (0.05s)
+=== RUN   TestModelConfigStaysIndependent
+--- PASS: TestModelConfigStaysIndependent (0.02s)
+=== RUN   TestProductLayersCompileOnTopOfTheKernel
+--- PASS: TestProductLayersCompileOnTopOfTheKernel (0.17s)
+=== RUN   TestSkillPackagesDoNotExecuteScripts
+--- PASS: TestSkillPackagesDoNotExecuteScripts (0.03s)
+=== RUN   TestMCPHostDoesNotImportProductSSE
+--- PASS: TestMCPHostDoesNotImportProductSSE (0.12s)
+=== RUN   TestMCPClientDoesNotImportHostDispatcher
+--- PASS: TestMCPClientDoesNotImportHostDispatcher (0.09s)
+=== RUN   TestKernelDoesNotImportV2Layers
+--- PASS: TestKernelDoesNotImportV2Layers (0.56s)
+=== RUN   TestServiceLayerDoesNotImportHarness
+--- PASS: TestServiceLayerDoesNotImportHarness (0.19s)
+=== RUN   TestHarnessDoesNotImportCommands
+--- PASS: TestHarnessDoesNotImportCommands (1.49s)
+=== RUN   TestProviderLayerDoesNotImportHarness
+--- PASS: TestProviderLayerDoesNotImportHarness (0.08s)
+=== RUN   TestAssemblyPlaneStaysIndependent
+--- PASS: TestAssemblyPlaneStaysIndependent (0.07s)
+=== RUN   TestNoGoPackageImportsTheUIClient
+--- PASS: TestNoGoPackageImportsTheUIClient (0.01s)
+=== RUN   TestV2LayerPackagesResolve
+--- PASS: TestV2LayerPackagesResolve (0.05s)
+=== RUN   TestAttachmentPDFNativePath
+--- PASS: TestAttachmentPDFNativePath (0.00s)
+=== RUN   TestAttachmentPDFModelDeniesInput
+--- PASS: TestAttachmentPDFModelDeniesInput (0.00s)
+=== RUN   TestAttachmentPDFWireCannotCarry
+--- PASS: TestAttachmentPDFWireCannotCarry (0.00s)
+=== RUN   TestAttachmentAudioNativeOnChatWire
+--- PASS: TestAttachmentAudioNativeOnChatWire (0.00s)
+=== RUN   TestAttachmentAudioFallbackWhereUnsupported
+--- PASS: TestAttachmentAudioFallbackWhereUnsupported (0.00s)
+=== RUN   TestAttachmentVideoAlwaysFallsBack
+--- PASS: TestAttachmentVideoAlwaysFallsBack (0.00s)
+=== RUN   TestAttachmentResolverFailureLeavesText
+--- PASS: TestAttachmentResolverFailureLeavesText (0.00s)
+=== RUN   TestAttachmentProbeFailureKeepsReferenceFacts
+--- PASS: TestAttachmentProbeFailureKeepsReferenceFacts (0.00s)
+=== RUN   TestAttachmentWithoutBlobIdIsNotDropped
+--- PASS: TestAttachmentWithoutBlobIdIsNotDropped (0.00s)
+=== RUN   TestAttachmentNoResolverStillNamesTheBlob
+--- PASS: TestAttachmentNoResolverStillNamesTheBlob (0.00s)
+=== RUN   TestAttachmentTextOnlyModelReceivesOnlyMetadata
+--- PASS: TestAttachmentTextOnlyModelReceivesOnlyMetadata (0.00s)
+=== RUN   TestMediaCapsForGatesEveryModality
+--- PASS: TestMediaCapsForGatesEveryModality (0.00s)
+=== RUN   TestMediaCapsForKeepsTheLegacyImageField
+--- PASS: TestMediaCapsForKeepsTheLegacyImageField (0.00s)
+=== RUN   TestImageReferenceOnATextOnlyModelDegrades
+--- PASS: TestImageReferenceOnATextOnlyModelDegrades (0.00s)
+=== RUN   TestAttachmentNoResolverBlamesThePipelineNotTheWire
+--- PASS: TestAttachmentNoResolverBlamesThePipelineNotTheWire (0.00s)
+=== RUN   TestAttachmentAudioResolverFailureFallsBack
+--- PASS: TestAttachmentAudioResolverFailureFallsBack (0.00s)
+=== RUN   TestAttachmentWithoutBlobIdFallsBackHonestly
+--- PASS: TestAttachmentWithoutBlobIdFallsBackHonestly (0.00s)
+=== RUN   TestAttachmentMixedNativeAndFallbackPreservesOrder
+--- PASS: TestAttachmentMixedNativeAndFallbackPreservesOrder (0.00s)
+=== RUN   TestAttachmentVideoModelDeniesInput
+--- PASS: TestAttachmentVideoModelDeniesInput (0.00s)
+=== RUN   TestAttachmentWithoutMimeButImageExtensionIsAnImage
+--- PASS: TestAttachmentWithoutMimeButImageExtensionIsAnImage (0.00s)
+=== RUN   TestAttachmentNativeFormWithANoteIsReportedDegraded
+--- PASS: TestAttachmentNativeFormWithANoteIsReportedDegraded (0.00s)
+=== RUN   TestAttachmentFallbackStatesUnknowns
+=== RUN   TestAttachmentFallbackStatesUnknowns/pdf_pages
+=== RUN   TestAttachmentFallbackStatesUnknowns/video_duration
+=== RUN   TestAttachmentFallbackStatesUnknowns/image_dimensions
+=== RUN   TestAttachmentFallbackStatesUnknowns/known_pdf_pages
+=== RUN   TestAttachmentFallbackStatesUnknowns/known_wav_duration
+--- PASS: TestAttachmentFallbackStatesUnknowns (0.00s)
+=== RUN   TestTrimReasonCutsOnARuneBoundary
+--- PASS: TestTrimReasonCutsOnARuneBoundary (0.00s)
+=== RUN   TestBindingWithoutResolverKeepsDeploymentPromptAndTools
+--- PASS: TestBindingWithoutResolverKeepsDeploymentPromptAndTools (0.08s)
+=== RUN   TestBindingPromptReachesProviderAndKeepsSections
+--- PASS: TestBindingPromptReachesProviderAndKeepsSections (0.04s)
+=== RUN   TestBindingToolGrantsFilterTheSurface
+--- PASS: TestBindingToolGrantsFilterTheSurface (0.03s)
+=== RUN   TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled
+=== RUN   TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled/grants_without_the_primitive
+=== RUN   TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled/grants_with_it_enabled
+=== RUN   TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled/grants_with_it_disabled
+--- PASS: TestTeamModeKeepsAgentToolUnlessExplicitlyDisabled (0.10s)
+=== RUN   TestTeamModeWarnsWhenTheDelegationPrimitiveIsMissing
+--- PASS: TestTeamModeWarnsWhenTheDelegationPrimitiveIsMissing (0.00s)
+=== RUN   TestBindingDefaultModelAppliesOnlyWithoutAChoice
+=== RUN   TestBindingDefaultModelAppliesOnlyWithoutAChoice/fact_names_a_model
+=== RUN   TestBindingDefaultModelAppliesOnlyWithoutAChoice/fact_names_only_the_binding
+--- PASS: TestBindingDefaultModelAppliesOnlyWithoutAChoice (0.07s)
+=== RUN   TestBindingResolverFailureFailsBeforeAnyCommit
+--- PASS: TestBindingResolverFailureFailsBeforeAnyCommit (0.03s)
+=== RUN   TestMergeSelectionDefaultModel
+=== RUN   TestMergeSelectionDefaultModel/empty_fact_gains_the_default
+=== RUN   TestMergeSelectionDefaultModel/binding-only_fact_gains_the_default
+=== RUN   TestMergeSelectionDefaultModel/chosen_model_wins
+=== RUN   TestMergeSelectionDefaultModel/half_binding_is_left_to_the_resolver
+=== RUN   TestMergeSelectionDefaultModel/reasoning_level_survives_the_merge
+--- PASS: TestMergeSelectionDefaultModel (0.00s)
+=== RUN   TestBindingEmptyToolSurfaceUnblocksNoToolModels
+--- PASS: TestBindingEmptyToolSurfaceUnblocksNoToolModels (0.06s)
+=== RUN   TestRecoveryDoesNotExecuteToolsOutsideTheGrant
+--- PASS: TestRecoveryDoesNotExecuteToolsOutsideTheGrant (0.04s)
+=== RUN   TestCaptainSeesTheTeamRoster
+--- PASS: TestCaptainSeesTheTeamRoster (0.03s)
+=== RUN   TestCheckpointPolicyPinsAndFiresOnce
+--- PASS: TestCheckpointPolicyPinsAndFiresOnce (0.00s)
+=== RUN   TestPerToolCallPolicyDoesNotCheckpointAtRunClose
+--- PASS: TestPerToolCallPolicyDoesNotCheckpointAtRunClose (0.00s)
+=== RUN   TestManualPolicyDoesNotCheckpointAtRunClose
+--- PASS: TestManualPolicyDoesNotCheckpointAtRunClose (0.00s)
+=== RUN   TestCapturePolicyWithoutTriggerFailsClosed
+--- PASS: TestCapturePolicyWithoutTriggerFailsClosed (0.00s)
+=== RUN   TestCompactionPersistsEventAndCheckpoint
+--- PASS: TestCompactionPersistsEventAndCheckpoint (0.04s)
+=== RUN   TestCompactionCheckpointFailureKeepsEvent
+--- PASS: TestCompactionCheckpointFailureKeepsEvent (0.05s)
+=== RUN   TestCheckpointCutInMovedUnreadInputFailSafe
+--- PASS: TestCheckpointCutInMovedUnreadInputFailSafe (0.07s)
+=== RUN   TestSecondCompactionAnchorsFromCheckpoint
+--- PASS: TestSecondCompactionAnchorsFromCheckpoint (0.07s)
+=== RUN   TestNewRunReplaysFromCheckpoint
+--- PASS: TestNewRunReplaysFromCheckpoint (0.06s)
+=== RUN   TestReplayFallsBackWithoutCheckpoint
+--- PASS: TestReplayFallsBackWithoutCheckpoint (0.06s)
+=== RUN   TestReplayFallsBackWithoutAnchor
+--- PASS: TestReplayFallsBackWithoutAnchor (0.11s)
+=== RUN   TestCrashBeforeAssistantCommitReanswers
+--- PASS: TestCrashBeforeAssistantCommitReanswers (0.09s)
+=== RUN   TestCrashAfterAssistantCommitDoesNotReanswer
+--- PASS: TestCrashAfterAssistantCommitDoesNotReanswer (0.04s)
+=== RUN   TestLegacyPrefixIsNotReansweredAfterUpgrade
+--- PASS: TestLegacyPrefixIsNotReansweredAfterUpgrade (0.05s)
+=== RUN   TestCrashDuringToolTurnFillsResults
+--- PASS: TestCrashDuringToolTurnFillsResults (0.04s)
+=== RUN   TestProviderFailureAfterToolTurnIsRetried
+--- PASS: TestProviderFailureAfterToolTurnIsRetried (0.04s)
+=== RUN   TestTerminalBoundaryDoesNotReanswerTheLegacyPrefix
+--- PASS: TestTerminalBoundaryDoesNotReanswerTheLegacyPrefix (0.04s)
+=== RUN   TestFakeToolCallIDIsDeterministic
+--- PASS: TestFakeToolCallIDIsDeterministic (0.00s)
+=== RUN   TestFakeToolCallIDVariesWithCommittedInput
+--- PASS: TestFakeToolCallIDVariesWithCommittedInput (0.00s)
+=== RUN   TestFakeToolCallIDDoubleClickDoesNotCollide
+--- PASS: TestFakeToolCallIDDoubleClickDoesNotCollide (0.00s)
+=== RUN   TestFakeStreamUsesCommittedInputForToolCallID
+--- PASS: TestFakeStreamUsesCommittedInputForToolCallID (0.00s)
+=== RUN   TestFakeMCPDirectives
+--- PASS: TestFakeMCPDirectives (0.00s)
+=== RUN   TestFakeScriptedDirectives
+--- PASS: TestFakeScriptedDirectives (0.00s)
+=== RUN   TestForkPrefixIsAReadTimeUnion
+--- PASS: TestForkPrefixIsAReadTimeUnion (0.00s)
+=== RUN   TestGuardrailMemoryPressureIsAuditedInTheLedger
+--- PASS: TestGuardrailMemoryPressureIsAuditedInTheLedger (0.03s)
+=== RUN   TestReclaimedLeaseRecordsTheRecoveryFact
+--- PASS: TestReclaimedLeaseRecordsTheRecoveryFact (0.12s)
+=== RUN   TestGuardrailDuplicateCallBlocksAndAudits
+--- PASS: TestGuardrailDuplicateCallBlocksAndAudits (0.00s)
+=== RUN   TestGuardrailDuplicateResetsOnDifferentCall
+--- PASS: TestGuardrailDuplicateResetsOnDifferentCall (0.00s)
+=== RUN   TestGuardrailDuplicateWhitespaceIsTheSameCall
+--- PASS: TestGuardrailDuplicateWhitespaceIsTheSameCall (0.00s)
+=== RUN   TestGuardrailAccessRefusalIsNotCountedAsDuplicate
+--- PASS: TestGuardrailAccessRefusalIsNotCountedAsDuplicate (0.00s)
+=== RUN   TestGuardrailCallTimeoutAbortsTheCallAndAudits
+--- PASS: TestGuardrailCallTimeoutAbortsTheCallAndAudits (0.01s)
+=== RUN   TestGuardrailTimeoutExemptionKeepsRegistry
+--- PASS: TestGuardrailTimeoutExemptionKeepsRegistry (0.00s)
+=== RUN   TestGuardrailConsecutiveFailuresAbortsRun
+--- PASS: TestGuardrailConsecutiveFailuresAbortsRun (0.00s)
+=== RUN   TestGuardrailSuccessResetsFailureStreak
+--- PASS: TestGuardrailSuccessResetsFailureStreak (0.00s)
+=== RUN   TestGuardrailTokenAndCostBudgets
+=== RUN   TestGuardrailTokenAndCostBudgets/tokens
+=== RUN   TestGuardrailTokenAndCostBudgets/cost
+--- PASS: TestGuardrailTokenAndCostBudgets (0.00s)
+=== RUN   TestGuardrailMemoryPressureAbortsOnlyItsRun
+--- PASS: TestGuardrailMemoryPressureAbortsOnlyItsRun (0.00s)
+=== RUN   TestGuardrailDisabledPolicyKeepsRunPathUnchanged
+--- PASS: TestGuardrailDisabledPolicyKeepsRunPathUnchanged (0.00s)
+=== RUN   TestGuardrailCommitFailureDoesNotPanic
+--- PASS: TestGuardrailCommitFailureDoesNotPanic (0.00s)
+=== RUN   TestCanonicalArguments
+--- PASS: TestCanonicalArguments (0.00s)
+=== RUN   TestRunnerHygienePrePassOffloadsBeforeImageResolution
+--- PASS: TestRunnerHygienePrePassOffloadsBeforeImageResolution (0.00s)
+=== RUN   TestRunnerHygienePrePassDisabledWithoutCompaction
+--- PASS: TestRunnerHygienePrePassDisabledWithoutCompaction (0.00s)
+=== RUN   TestUserMessageAttachmentsDecodeAsDurableReferences
+--- PASS: TestUserMessageAttachmentsDecodeAsDurableReferences (0.00s)
+=== RUN   TestNonImageAttachmentsBecomeDurableReferences
+--- PASS: TestNonImageAttachmentsBecomeDurableReferences (0.00s)
+=== RUN   TestResolveImagesReplacesReferencesWithTheChosenForm
+--- PASS: TestResolveImagesReplacesReferencesWithTheChosenForm (0.00s)
+=== RUN   TestResolveImagesWithNoResolverDegradesToANotice
+--- PASS: TestResolveImagesWithNoResolverDegradesToANotice (0.00s)
+=== RUN   TestResolveImagesRecordsAResolverFailure
+--- PASS: TestResolveImagesRecordsAResolverFailure (0.00s)
+=== RUN   TestResolveImagesLeavesTextOnlyTranscriptsAlone
+--- PASS: TestResolveImagesLeavesTextOnlyTranscriptsAlone (0.00s)
+=== RUN   TestImageCapsForHonoursTheModelDeclaration
+--- PASS: TestImageCapsForHonoursTheModelDeclaration (0.00s)
+=== RUN   TestImageFallbackWithoutBlobIDDoesNotClaimStoredBytes
+--- PASS: TestImageFallbackWithoutBlobIDDoesNotClaimStoredBytes (0.00s)
+=== RUN   TestImageWorkspaceDefaultsToTheTenant
+--- PASS: TestImageWorkspaceDefaultsToTheTenant (0.00s)
+=== RUN   TestInputDuringRunIsNotStranded
+--- PASS: TestInputDuringRunIsNotStranded (0.05s)
+=== RUN   TestFinishUsesWatermarkAndFlag
+--- PASS: TestFinishUsesWatermarkAndFlag (0.04s)
+=== RUN   TestAbandonedAttemptStillOwesAModelCall
+--- PASS: TestAbandonedAttemptStillOwesAModelCall (0.04s)
+=== RUN   TestInFlightInputIsAnsweredWithItsToolCall
+--- PASS: TestInFlightInputIsAnsweredWithItsToolCall (0.04s)
+=== RUN   TestRunnerStampsAttemptScopeAndCallID
+--- PASS: TestRunnerStampsAttemptScopeAndCallID (0.05s)
+=== RUN   TestMCPToolDetailsSurviveTheLedgerAndStayOutOfTheModelContext
+--- PASS: TestMCPToolDetailsSurviveTheLedgerAndStayOutOfTheModelContext (0.04s)
+=== RUN   TestRunnerStampsTheAttemptSelectionOnToolContext
+--- PASS: TestRunnerStampsTheAttemptSelectionOnToolContext (0.04s)
+=== RUN   TestResolvedModelDrivesTheAttempt
+--- PASS: TestResolvedModelDrivesTheAttempt (0.04s)
+=== RUN   TestSelectionIsTheNewestInputs
+--- PASS: TestSelectionIsTheNewestInputs (0.04s)
+=== RUN   TestUnresolvedSelectionFailsBeforeAnyCommit
+--- PASS: TestUnresolvedSelectionFailsBeforeAnyCommit (0.03s)
+=== RUN   TestStaticIdentityWithoutResolver
+--- PASS: TestStaticIdentityWithoutResolver (0.03s)
+=== RUN   TestRunSelectionReadsOnlyTheSelectionField
+--- PASS: TestRunSelectionReadsOnlyTheSelectionField (0.00s)
+=== RUN   TestResumeSelectionOverridesTheChildBinding
+--- PASS: TestResumeSelectionOverridesTheChildBinding (0.00s)
+=== RUN   TestObservedStreamRecordsRequestSpanAndMetrics
+--- PASS: TestObservedStreamRecordsRequestSpanAndMetrics (0.00s)
+=== RUN   TestObservedStreamErrorStopMarksSpanError
+--- PASS: TestObservedStreamErrorStopMarksSpanError (0.00s)
+=== RUN   TestObservedStreamAbortedStopKeepsSpanOK
+--- PASS: TestObservedStreamAbortedStopKeepsSpanOK (0.00s)
+=== RUN   TestObservedStreamCloseWithoutTerminalMarksError
+--- PASS: TestObservedStreamCloseWithoutTerminalMarksError (0.00s)
+=== RUN   TestObservedStreamNilTelemetryIsIdentity
+--- PASS: TestObservedStreamNilTelemetryIsIdentity (0.00s)
+=== RUN   TestObservedStreamBuildFailureRecordsErrorSpan
+--- PASS: TestObservedStreamBuildFailureRecordsErrorSpan (0.00s)
+=== RUN   TestObservedStreamCanceledBuildIsAborted
+--- PASS: TestObservedStreamCanceledBuildIsAborted (0.00s)
+=== RUN   TestObservedStreamStartSpanRejectionClosesStream
+--- PASS: TestObservedStreamStartSpanRejectionClosesStream (0.00s)
+=== RUN   TestProxyToolCallMetadataFromEnd
+--- PASS: TestProxyToolCallMetadataFromEnd (0.00s)
+=== RUN   TestProxyTerminalEventWithoutNewline
+--- PASS: TestProxyTerminalEventWithoutNewline (0.00s)
+=== RUN   TestProxyStreamEndsWithoutTerminal
+--- PASS: TestProxyStreamEndsWithoutTerminal (0.00s)
+=== RUN   TestProxyGrowingToolArguments
+--- PASS: TestProxyGrowingToolArguments (0.00s)
+=== RUN   TestFailedAttemptKeepsWatermarkAndInputIsAnswered
+--- PASS: TestFailedAttemptKeepsWatermarkAndInputIsAnswered (0.04s)
+=== RUN   TestCrashBeforeFinishDoesNotDuplicateTheFinalAnswer
+--- PASS: TestCrashBeforeFinishDoesNotDuplicateTheFinalAnswer (5.05s)
+=== RUN   TestKillBetweenLoadAndFinishNeitherDuplicatesNorMisses
+--- PASS: TestKillBetweenLoadAndFinishNeitherDuplicatesNorMisses (5.13s)
+=== RUN   TestRecoveryCrashHelper
+--- SKIP: TestRecoveryCrashHelper (0.00s)
+=== RUN   TestCrashThenRestartResumesWithoutADuplicateFinal
+--- PASS: TestCrashThenRestartResumesWithoutADuplicateFinal (5.15s)
+=== RUN   TestOwedTurnIgnoresBookkeepingTails
+--- PASS: TestOwedTurnIgnoresBookkeepingTails (0.00s)
+=== RUN   TestResolveFailureOnFirstInputIsRetriedNotStranded
+--- PASS: TestResolveFailureOnFirstInputIsRetriedNotStranded (0.08s)
+=== RUN   TestCancelAfterCommittedAnswerIsNotAborted
+--- PASS: TestCancelAfterCommittedAnswerIsNotAborted (0.04s)
+=== RUN   TestResolverWithoutTransportIsRefused
+--- PASS: TestResolverWithoutTransportIsRefused (0.03s)
+=== RUN   TestModelWithoutToolSupportRefusesTools
+--- PASS: TestModelWithoutToolSupportRefusesTools (0.04s)
+=== RUN   TestSelectionGuideStopsTheScan
+--- PASS: TestSelectionGuideStopsTheScan (0.04s)
+=== RUN   TestProviderFailureIsPostedAsAnErrorMetric
+--- PASS: TestProviderFailureIsPostedAsAnErrorMetric (0.03s)
+=== RUN   TestRunSnapshotPinsTheInjectedSurface
+--- PASS: TestRunSnapshotPinsTheInjectedSurface (0.04s)
+=== RUN   TestRunSnapshotIgnoresAMidRunToolSurfaceChange
+--- PASS: TestRunSnapshotIgnoresAMidRunToolSurfaceChange (0.04s)
+=== RUN   TestRunSnapshotAnchorFollowsConfigRotation
+--- PASS: TestRunSnapshotAnchorFollowsConfigRotation (0.05s)
+=== RUN   TestWorkerRunFinishedCarriesThePinnedSnapshot
+--- PASS: TestWorkerRunFinishedCarriesThePinnedSnapshot (0.00s)
+=== RUN   TestConfigHashForLoadoutIsRevisionScoped
+--- PASS: TestConfigHashForLoadoutIsRevisionScoped (0.00s)
+=== RUN   TestRunnerTextReply
+--- PASS: TestRunnerTextReply (0.04s)
+=== RUN   TestRunnerToolRoundTrip
+--- PASS: TestRunnerToolRoundTrip (0.04s)
+=== RUN   TestRunnerCommitsThroughKernel
+--- PASS: TestRunnerCommitsThroughKernel (0.04s)
+=== RUN   TestRunnerRejectsStaleClaim
+--- PASS: TestRunnerRejectsStaleClaim (0.04s)
+=== RUN   TestRunnerResumesUnresolvedToolCall
+--- PASS: TestRunnerResumesUnresolvedToolCall (0.04s)
+=== RUN   TestToolResultDedupeKey
+--- PASS: TestToolResultDedupeKey (0.02s)
+=== RUN   TestRunnerSkipsDuplicateFinal
+--- PASS: TestRunnerSkipsDuplicateFinal (0.04s)
+=== RUN   TestRunnerUsesHostAssembly
+--- PASS: TestRunnerUsesHostAssembly (0.04s)
+=== RUN   TestRunnerRecordsTelemetry
+--- PASS: TestRunnerRecordsTelemetry (0.04s)
+=== RUN   TestSessionContextReachesPromptWithoutLedgerGain
+--- PASS: TestSessionContextReachesPromptWithoutLedgerGain (0.04s)
+=== RUN   TestPrependSessionContextCopiesTheMessage
+--- PASS: TestPrependSessionContextCopiesTheMessage (0.00s)
+=== RUN   TestGuideInputIsInjectedAfterToolResults
+--- PASS: TestGuideInputIsInjectedAfterToolResults (0.04s)
+=== RUN   TestGuideInputWithAttachmentsWaitsForTheNextRun
+--- PASS: TestGuideInputWithAttachmentsWaitsForTheNextRun (0.05s)
+=== RUN   TestSelectionGuideInputWaitsForTheNextRun
+--- PASS: TestSelectionGuideInputWaitsForTheNextRun (0.04s)
+=== RUN   TestQueueAndGuideMixAreEachAnsweredOnce
+--- PASS: TestQueueAndGuideMixAreEachAnsweredOnce (0.05s)
+=== RUN   TestTwoGuidesAreInjectedOneAtATime
+--- PASS: TestTwoGuidesAreInjectedOneAtATime (0.04s)
+=== RUN   TestGuideCommittedBeforeTheRunIsQueueInput
+--- PASS: TestGuideCommittedBeforeTheRunIsQueueInput (0.12s)
+=== RUN   TestRunFinishedIsBookkeepingForTheTranscript
+--- PASS: TestRunFinishedIsBookkeepingForTheTranscript (0.00s)
+=== RUN   TestFeedSnapshotsAlignWithRequests
+--- PASS: TestFeedSnapshotsAlignWithRequests (0.03s)
+=== RUN   TestRunAttemptSummary
+--- PASS: TestRunAttemptSummary (0.03s)
+=== RUN   TestRunAttemptSummaryOnFailure
+--- PASS: TestRunAttemptSummaryOnFailure (0.03s)
+=== RUN   TestWorkerSettlesModelFailure
+--- PASS: TestWorkerSettlesModelFailure (0.05s)
+=== RUN   TestWorkerCommitsRunFinishedSummary
+--- PASS: TestWorkerCommitsRunFinishedSummary (0.04s)
+=== RUN   TestWorkerCancelledAttemptIsTerminal
+--- PASS: TestWorkerCancelledAttemptIsTerminal (0.03s)
+=== RUN   TestWorkerSummaryFailureDoesNotChangeTheRun
+--- PASS: TestWorkerSummaryFailureDoesNotChangeTheRun (0.04s)
+=== RUN   TestToolAccessNilSeamFailsClosed
+--- PASS: TestToolAccessNilSeamFailsClosed (0.00s)
+=== RUN   TestToolAccessAllowAllFakeIsExplicit
+--- PASS: TestToolAccessAllowAllFakeIsExplicit (0.00s)
+=== RUN   TestToolAccessDeniedIsStructuredAndDoesNotLeakResource
+--- PASS: TestToolAccessDeniedIsStructuredAndDoesNotLeakResource (0.00s)
+=== RUN   TestToolAccessNoPrincipalMessage
+--- PASS: TestToolAccessNoPrincipalMessage (0.00s)
+=== RUN   TestToolAccessBlockRunsBeforeExecute
+--- PASS: TestToolAccessBlockRunsBeforeExecute (0.00s)
+=== RUN   TestWorkerAbandonReleasesClaimOnShutdown
+--- PASS: TestWorkerAbandonReleasesClaimOnShutdown (0.00s)
+=== RUN   TestWorkerAbandonReleasesClaimOnFenceLoss
+--- PASS: TestWorkerAbandonReleasesClaimOnFenceLoss (0.00s)
+=== RUN   TestWorkerPinsLoadoutPerRun
+--- PASS: TestWorkerPinsLoadoutPerRun (0.00s)
+=== RUN   TestWorkerBindingFailureSettlesAttempt
+--- PASS: TestWorkerBindingFailureSettlesAttempt (0.00s)
+=== RUN   TestWorkerStopsClaimingWhenGateClosed
+--- PASS: TestWorkerStopsClaimingWhenGateClosed (0.11s)
+=== RUN   TestWorkerRetryThenSuccessCountsOnlyTerminalFinished
+--- PASS: TestWorkerRetryThenSuccessCountsOnlyTerminalFinished (0.07s)
+=== RUN   TestWorkerFinishErrorDoesNotRecordTerminal
+--- PASS: TestWorkerFinishErrorDoesNotRecordTerminal (0.06s)
+=== RUN   TestWorkerAbandonedDoesNotRecordTerminal
+--- PASS: TestWorkerAbandonedDoesNotRecordTerminal (0.03s)
+=== RUN   TestWorkerStaleLeaseAbandoned
+--- PASS: TestWorkerStaleLeaseAbandoned (0.03s)
+=== RUN   TestWorkerClaimsThroughKernel
+--- PASS: TestWorkerClaimsThroughKernel (0.31s)
+=== RUN   TestWorkerLeaseExpiredMetric
+--- PASS: TestWorkerLeaseExpiredMetric (0.13s)
+=== RUN   TestPutDedupesIdenticalBytes
+--- PASS: TestPutDedupesIdenticalBytes (0.01s)
+=== RUN   TestRefCountIsEventIdempotent
+--- PASS: TestRefCountIsEventIdempotent (0.02s)
+=== RUN   TestRefJournalSurvivesReopen
+--- PASS: TestRefJournalSurvivesReopen (0.01s)
+=== RUN   TestQuotaRejectsAtCommitPoint
+--- PASS: TestQuotaRejectsAtCommitPoint (0.01s)
+=== RUN   TestLargePutAndReadAreChunked
+--- PASS: TestLargePutAndReadAreChunked (0.04s)
+=== RUN   TestCollectIsConcurrencySafe
+--- PASS: TestCollectIsConcurrencySafe (2.55s)
+=== RUN   TestPutResultReportsCreated
+--- PASS: TestPutResultReportsCreated (0.01s)
+=== RUN   TestTreeHashIsStableAcrossWalks
+--- PASS: TestTreeHashIsStableAcrossWalks (0.03s)
+=== RUN   TestTreeDedupesIdenticalSubtrees
+--- PASS: TestTreeDedupesIdenticalSubtrees (0.02s)
+=== RUN   TestCaptureIgnoresGitObjectsByDefault
+--- PASS: TestCaptureIgnoresGitObjectsByDefault (0.03s)
+=== RUN   TestCaptureCacheSkipsUnchangedFiles
+--- PASS: TestCaptureCacheSkipsUnchangedFiles (0.03s)
+=== RUN   TestMaterializeRoundTrip
+--- PASS: TestMaterializeRoundTrip (0.03s)
+=== RUN   TestMaterializeRejectsTraversalNames
+--- PASS: TestMaterializeRejectsTraversalNames (0.01s)
+=== RUN   TestReadRangeOnMissingObject
+--- PASS: TestReadRangeOnMissingObject (0.00s)
+=== RUN   TestObjectStatAndHas
+--- PASS: TestObjectStatAndHas (0.01s)
+=== RUN   TestPutFileStreams
+--- PASS: TestPutFileStreams (0.01s)
+=== RUN   TestLookupPathWalksTheTreeWithoutMaterializing
+--- PASS: TestLookupPathWalksTheTreeWithoutMaterializing (0.02s)
+=== RUN   TestSandboxHasNoHostBinariesAndNoNetwork
+--- PASS: TestSandboxHasNoHostBinariesAndNoNetwork (0.00s)
+=== RUN   TestHostPathsAreUnreachable
+--- PASS: TestHostPathsAreUnreachable (0.00s)
+=== RUN   TestWorkspaceAndCommandInjection
+--- PASS: TestWorkspaceAndCommandInjection (0.00s)
+=== RUN   TestDefaultWorkspaceIsScratchAndMountIsNotRoot
+--- PASS: TestDefaultWorkspaceIsScratchAndMountIsNotRoot (0.00s)
+=== RUN   TestBoundedOutputIsFixedWindow
+--- PASS: TestBoundedOutputIsFixedWindow (0.02s)
+=== RUN   TestCancellationYields130
+--- PASS: TestCancellationYields130 (0.20s)
+=== RUN   TestSessionsAreIndependent
+--- PASS: TestSessionsAreIndependent (0.40s)
+=== RUN   TestSandboxJobCommandsRenderKeelJobs
+--- PASS: TestSandboxJobCommandsRenderKeelJobs (0.00s)
+=== RUN   TestSandboxNohupStartsBackgroundJob
+--- PASS: TestSandboxNohupStartsBackgroundJob (0.00s)
+=== RUN   TestSandboxJobCommandsReportBackendFailure
+--- PASS: TestSandboxJobCommandsReportBackendFailure (0.00s)
+=== RUN   TestProductionWiringWriteThenBashRead
+--- PASS: TestProductionWiringWriteThenBashRead (0.03s)
+=== RUN   TestBashWriteCapturedIntoManifestAndTree
+--- PASS: TestBashWriteCapturedIntoManifestAndTree (0.02s)
+=== RUN   TestManifestSeedsSandboxView
+--- PASS: TestManifestSeedsSandboxView (0.01s)
+=== RUN   TestSessionsGetIndependentWorkspaces
+--- PASS: TestSessionsGetIndependentWorkspaces (0.01s)
+=== RUN   TestCaptureFailureIsOneSystemEvent
+--- PASS: TestCaptureFailureIsOneSystemEvent (0.01s)
+=== RUN   TestBackgroundJobCaptureSettlesWithoutRunLease
+--- PASS: TestBackgroundJobCaptureSettlesWithoutRunLease (0.02s)
+=== RUN   TestWorkspaceFallbackWarnsOnce
+--- PASS: TestWorkspaceFallbackWarnsOnce (0.00s)
+=== RUN   TestBackgroundJobCaptureFailureCarriesJobID
+--- PASS: TestBackgroundJobCaptureFailureCarriesJobID (0.01s)
+=== RUN   TestRunCaptureStillRequiresTheLease
+--- PASS: TestRunCaptureStillRequiresTheLease (0.01s)
+=== RUN   TestBashRmIsReconciledByCapture
+--- PASS: TestBashRmIsReconciledByCapture (0.03s)
+=== RUN   TestParentCloseAndJobCloseOrderingKeepsJobWrites
+--- PASS: TestParentCloseAndJobCloseOrderingKeepsJobWrites (0.24s)
+=== RUN   TestJobSettlesBeforeParentKeepsJobWrites
+--- PASS: TestJobSettlesBeforeParentKeepsJobWrites (0.02s)
+=== RUN   TestPerToolCallCapturesEveryBashExecution
+--- PASS: TestPerToolCallCapturesEveryBashExecution (0.06s)
+=== RUN   TestCheckpointCapturesOnceAfterMultipleCommands
+--- PASS: TestCheckpointCapturesOnceAfterMultipleCommands (0.04s)
+=== RUN   TestManualCapturesOnlyOnExplicitCheckpoint
+--- PASS: TestManualCapturesOnlyOnExplicitCheckpoint (0.04s)
+=== RUN   TestUnknownCaptureModeFailsClosed
+--- PASS: TestUnknownCaptureModeFailsClosed (0.00s)
+=== RUN   TestBackgroundJobSettlesDespiteCheckpointMode
+--- PASS: TestBackgroundJobSettlesDespiteCheckpointMode (0.01s)
+=== RUN   TestPermissionCatalogIsComplete
+--- PASS: TestPermissionCatalogIsComplete (0.00s)
+=== RUN   TestRequiredKeyMapping
+--- PASS: TestRequiredKeyMapping (0.00s)
+=== RUN   TestActionOfOnlyParsesAggregateTools
+--- PASS: TestActionOfOnlyParsesAggregateTools (0.00s)
+=== RUN   TestPermissionEndpointsPassTheCoverageGate
+--- PASS: TestPermissionEndpointsPassTheCoverageGate (0.00s)
+=== RUN   TestBotOperatorHoldsTheWholeToolSurface
+--- PASS: TestBotOperatorHoldsTheWholeToolSurface (0.00s)
+=== RUN   TestValidatePermissionCatalogRejects
+=== RUN   TestValidatePermissionCatalogRejects/unknown_action
+=== RUN   TestValidatePermissionCatalogRejects/unknown_key
+=== RUN   TestValidatePermissionCatalogRejects/missing_action
+=== RUN   TestValidatePermissionCatalogRejects/duplicate
+=== RUN   TestValidatePermissionCatalogRejects/empty
+=== RUN   TestValidatePermissionCatalogRejects/unknown_tool
+--- PASS: TestValidatePermissionCatalogRejects (0.00s)
+=== RUN   TestToolPermissionManifestReturnsACopy
+--- PASS: TestToolPermissionManifestReturnsACopy (0.00s)
+=== RUN   TestApproveToolRoutesToItsBackend
+--- PASS: TestApproveToolRoutesToItsBackend (0.00s)
+=== RUN   TestNotifyToolRoutesToItsBackend
+--- PASS: TestNotifyToolRoutesToItsBackend (0.00s)
+=== RUN   TestApproveAndNotifyDisabledPluginsAreTyped
+--- PASS: TestApproveAndNotifyDisabledPluginsAreTyped (0.00s)
+=== RUN   TestApproveAndNotifyWithoutBackendsAreNotWired
+--- PASS: TestApproveAndNotifyWithoutBackendsAreNotWired (0.00s)
+=== RUN   TestMCPToolInjectsProgressTokenAndAttempt
+--- PASS: TestMCPToolInjectsProgressTokenAndAttempt (0.00s)
+=== RUN   TestMCPToolFreezesCataloguePerAttempt
+--- PASS: TestMCPToolFreezesCataloguePerAttempt (0.00s)
+=== RUN   TestTaskGateStampsTheAmbientCard
+--- PASS: TestTaskGateStampsTheAmbientCard (0.00s)
+=== RUN   TestTaskGateRejectsMissingOrForeignCards
+--- PASS: TestTaskGateRejectsMissingOrForeignCards (0.00s)
+=== RUN   TestTaskGatePassesAValidTaskIDThrough
+--- PASS: TestTaskGatePassesAValidTaskIDThrough (0.00s)
+=== RUN   TestTaskGateLeavesNonRunCallsAlone
+--- PASS: TestTaskGateLeavesNonRunCallsAlone (0.00s)
+=== RUN   TestTasksToolActionsRouteThroughTheBackendAndStayUntargeted
+--- PASS: TestTasksToolActionsRouteThroughTheBackendAndStayUntargeted (0.00s)
+=== RUN   TestTaskGateIsInvisibleToTheManifestHash
+--- PASS: TestTaskGateIsInvisibleToTheManifestHash (0.00s)
+=== RUN   TestTaskGateDisabledPluginIsTyped
+--- PASS: TestTaskGateDisabledPluginIsTyped (0.00s)
+=== RUN   TestBuiltinSurfaceIsExactlyEleven
+--- PASS: TestBuiltinSurfaceIsExactlyEleven (0.00s)
+=== RUN   TestUnknownActionIsTypedAndSideEffectFree
+--- PASS: TestUnknownActionIsTypedAndSideEffectFree (0.00s)
+=== RUN   TestBashSchemaAndClosedActionSet
+--- PASS: TestBashSchemaAndClosedActionSet (0.00s)
+=== RUN   TestBashActionsNeedBackend
+--- PASS: TestBashActionsNeedBackend (0.00s)
+=== RUN   TestBashDelegatesToBackend
+--- PASS: TestBashDelegatesToBackend (0.00s)
+=== RUN   TestBashCheckpointDelegatesToBackend
+--- PASS: TestBashCheckpointDelegatesToBackend (0.00s)
+=== RUN   TestBashMapsPluginStateAndBackendErrors
+--- PASS: TestBashMapsPluginStateAndBackendErrors (0.00s)
+=== RUN   TestFileToolsWithoutABackendAreTyped
+--- PASS: TestFileToolsWithoutABackendAreTyped (0.00s)
+=== RUN   TestMCPActions
+--- PASS: TestMCPActions (0.00s)
+=== RUN   TestMCPCallArgumentsMustBeAnObject
+--- PASS: TestMCPCallArgumentsMustBeAnObject (0.00s)
+=== RUN   TestMCPNotFoundIsTyped
+--- PASS: TestMCPNotFoundIsTyped (0.00s)
+=== RUN   TestMCPDisconnectedServerSharesOneCode
+--- PASS: TestMCPDisconnectedServerSharesOneCode (0.00s)
+=== RUN   TestSkillsActions
+--- PASS: TestSkillsActions (0.00s)
+=== RUN   TestSkillsSchemaDoesNotExposeTrustArguments
+--- PASS: TestSkillsSchemaDoesNotExposeTrustArguments (0.00s)
+=== RUN   TestSkillsManageAndSourcesRouteToTheLibrary
+--- PASS: TestSkillsManageAndSourcesRouteToTheLibrary (0.00s)
+=== RUN   TestSkillsBackendErrorCarriesTheLibraryCode
+--- PASS: TestSkillsBackendErrorCarriesTheLibraryCode (0.00s)
+=== RUN   TestAgentSpawnCarriesTheBinding
+--- PASS: TestAgentSpawnCarriesTheBinding (0.00s)
+=== RUN   TestAgentListAndStatusStayInTheParent
+--- PASS: TestAgentListAndStatusStayInTheParent (0.00s)
+=== RUN   TestAgentUnresolvedBackendIsNotWired
+--- PASS: TestAgentUnresolvedBackendIsNotWired (0.00s)
+=== RUN   TestCreationWiringAndDisabledStayDistinct
+--- PASS: TestCreationWiringAndDisabledStayDistinct (0.00s)
+=== RUN   TestCreationRoutesAndMapsDisabledPlugin
+--- PASS: TestCreationRoutesAndMapsDisabledPlugin (0.00s)
+=== RUN   TestManifestHashStableAcrossMCPServers
+--- PASS: TestManifestHashStableAcrossMCPServers (0.00s)
+=== RUN   TestApprovedPluginToolsChangeAndRestoreTheManifestHash
+--- PASS: TestApprovedPluginToolsChangeAndRestoreTheManifestHash (0.01s)
+=== RUN   TestCreationBackendNilIsTyped
+--- PASS: TestCreationBackendNilIsTyped (0.00s)
+=== RUN   TestTasksBackendNilIsTyped
+--- PASS: TestTasksBackendNilIsTyped (0.00s)
+=== RUN   TestMCPVisibilityKeepsAppOnlyToolsOffTheModelSurface
+--- PASS: TestMCPVisibilityKeepsAppOnlyToolsOffTheModelSurface (0.00s)
+=== RUN   TestMCPCallDetailsCarryAppAndStructuredContent
+--- PASS: TestMCPCallDetailsCarryAppAndStructuredContent (0.00s)
+=== RUN   TestMCPCallDetailsBoundStructuredContent
+--- PASS: TestMCPCallDetailsBoundStructuredContent (0.00s)
+=== RUN   TestAgentCapacityRefusalIsTyped
+--- PASS: TestAgentCapacityRefusalIsTyped (0.00s)
+=== RUN   TestEveryGeneratedPerServerMCPNameIsRefused
+--- PASS: TestEveryGeneratedPerServerMCPNameIsRefused (0.00s)
+=== RUN   TestApplyModelsKeepsTheWorkerClaiming
+--- PASS: TestApplyModelsKeepsTheWorkerClaiming (6.31s)
+=== RUN   TestBindingPGResolvesBotAndTeamBot
+--- PASS: TestBindingPGResolvesBotAndTeamBot (0.16s)
+=== RUN   TestBindingPGRefusesArchivedBotAtRunTime
+--- PASS: TestBindingPGRefusesArchivedBotAtRunTime (0.03s)
+=== RUN   TestLoadBotBindingPromptToolsAndModel
+--- PASS: TestLoadBotBindingPromptToolsAndModel (0.00s)
+=== RUN   TestLoadBotBindingPromptDeduplicatesAndEmptyToolsGrantNothing
+--- PASS: TestLoadBotBindingPromptDeduplicatesAndEmptyToolsGrantNothing (0.00s)
+=== RUN   TestLoadBindingRefusesMissingArchivedAndBrokenBots
+=== RUN   TestLoadBindingRefusesMissingArchivedAndBrokenBots/missing
+=== RUN   TestLoadBindingRefusesMissingArchivedAndBrokenBots/archived
+--- PASS: TestLoadBindingRefusesMissingArchivedAndBrokenBots (0.00s)
+=== RUN   TestLoadTeamBotBindingCaptainAndMembers
+--- PASS: TestLoadTeamBotBindingCaptainAndMembers (0.00s)
+=== RUN   TestLoadTeamBotRefusesBrokenRosters
+--- PASS: TestLoadTeamBotRefusesBrokenRosters (0.00s)
+=== RUN   TestLoadSessionBindingUsesOwnershipAndFallsBack
+--- PASS: TestLoadSessionBindingUsesOwnershipAndFallsBack (0.00s)
+=== RUN   TestLoadSessionBindingRefusesUnownedAndMissingSessions
+--- PASS: TestLoadSessionBindingRefusesUnownedAndMissingSessions (0.00s)
+=== RUN   TestBindingResolverBuildsTheRunSurface
+--- PASS: TestBindingResolverBuildsTheRunSurface (0.00s)
+=== RUN   TestBindingResolverRefusesAnUnownedSession
+--- PASS: TestBindingResolverRefusesAnUnownedSession (0.00s)
+=== RUN   TestBindingRereadsTheCurrentDocuments
+--- PASS: TestBindingRereadsTheCurrentDocuments (0.00s)
+=== RUN   TestDemoSelectionRoutesToTheInProcessDriver
+--- PASS: TestDemoSelectionRoutesToTheInProcessDriver (0.00s)
+=== RUN   TestDemoSelectionIsListedInThePickerProjection
+--- PASS: TestDemoSelectionIsListedInThePickerProjection (0.00s)
+=== RUN   TestDemoAbsentFromTheProjectionWithoutTheSwitch
+--- PASS: TestDemoAbsentFromTheProjectionWithoutTheSwitch (0.00s)
+=== RUN   TestDemoDecisionModelIsListedButNotSelectable
+--- PASS: TestDemoDecisionModelIsListedButNotSelectable (0.00s)
+=== RUN   TestDemoProviderBehaviouralNameIsOrdinary
+--- PASS: TestDemoProviderBehaviouralNameIsOrdinary (0.00s)
+=== RUN   TestDefaultAssemblyMatchesDirectHostAssembly
+--- PASS: TestDefaultAssemblyMatchesDirectHostAssembly (0.01s)
+=== RUN   TestTenantToolsAllowFiltersTheAssembly
+--- PASS: TestTenantToolsAllowFiltersTheAssembly (0.00s)
+=== RUN   TestBootDefaultLoadoutServices
+--- PASS: TestBootDefaultLoadoutServices (0.00s)
+=== RUN   TestBootWorkerStartsOnlyWhenEnabled
+--- PASS: TestBootWorkerStartsOnlyWhenEnabled (0.01s)
+=== RUN   TestReloadSharesUnchangedServicesAndPinsRevision
+--- PASS: TestReloadSharesUnchangedServicesAndPinsRevision (0.01s)
+=== RUN   TestReloadRejectsInvalidDocumentAndKeepsGeneration
+--- PASS: TestReloadRejectsInvalidDocumentAndKeepsGeneration (0.00s)
+=== RUN   TestHostCollectorFinishesRetiringGenerationsWhileIdle
+--- PASS: TestHostCollectorFinishesRetiringGenerationsWhileIdle (0.01s)
+=== RUN   TestAuditSinkRateLimitsAndHidesToken
+--- PASS: TestAuditSinkRateLimitsAndHidesToken (0.00s)
+=== RUN   TestAuditSinkSeparatesReasons
+--- PASS: TestAuditSinkSeparatesReasons (0.00s)
+=== RUN   TestKernelStaleCommitIsAudited
+--- PASS: TestKernelStaleCommitIsAudited (0.00s)
+=== RUN   TestExternalServicesAssembleFromDocument
+--- PASS: TestExternalServicesAssembleFromDocument (0.01s)
+=== RUN   TestBootWiresTheImageResolver
+--- PASS: TestBootWiresTheImageResolver (0.00s)
+=== RUN   TestBootWithoutABlobSourceLeavesTheResolverNil
+--- PASS: TestBootWithoutABlobSourceLeavesTheResolverNil (0.00s)
+=== RUN   TestModelsDocumentResolvesItsImageCaps
+--- PASS: TestModelsDocumentResolvesItsImageCaps (0.00s)
+=== RUN   TestAssembledRunnerResolvesAnImageOntoTheWire
+--- PASS: TestAssembledRunnerResolvesAnImageOntoTheWire (0.01s)
+=== RUN   TestLLMServiceSendsTheModelIDNotTheProviderName
+--- PASS: TestLLMServiceSendsTheModelIDNotTheProviderName (0.00s)
+=== RUN   TestMCPClientCapabilitiesDeclareAppsOnlyWhenRegistryWired
+--- PASS: TestMCPClientCapabilitiesDeclareAppsOnlyWhenRegistryWired (0.00s)
+=== RUN   TestWorkerRunCallsSpeechTTSAndCommitsAnAudioReference
+--- PASS: TestWorkerRunCallsSpeechTTSAndCommitsAnAudioReference (0.25s)
+=== RUN   TestWorkerRunCallsSpeechSTTWithALayerFSInput
+--- PASS: TestWorkerRunCallsSpeechSTTWithALayerFSInput (0.23s)
+=== RUN   TestWorkerRunCallsDecisionAskAndCommitsTypedAnswers
+--- PASS: TestWorkerRunCallsDecisionAskAndCommitsTypedAnswers (0.23s)
+=== RUN   TestWorkerRunDecisionEnforceFailureIsFailClosed
+--- PASS: TestWorkerRunDecisionEnforceFailureIsFailClosed (0.23s)
+=== RUN   TestWorkerRunDecisionShadowFailureIsObservableAndNonBlocking
+--- PASS: TestWorkerRunDecisionShadowFailureIsObservableAndNonBlocking (0.23s)
+=== RUN   TestWorkerRunCallsImageGenerateAndCommitsReferences
+--- PASS: TestWorkerRunCallsImageGenerateAndCommitsReferences (0.25s)
+=== RUN   TestWorkerRunFailsClosedWithoutAMediaCredential
+--- PASS: TestWorkerRunFailsClosedWithoutAMediaCredential (0.23s)
+=== RUN   TestWorkerRunCallsVideoGenerateAndCommitsReferences
+--- PASS: TestWorkerRunCallsVideoGenerateAndCommitsReferences (0.23s)
+=== RUN   TestProductMediaToolServesARealHostCall
+--- PASS: TestProductMediaToolServesARealHostCall (0.02s)
+=== RUN   TestMediaToolsFollowTheGenerationOnSettingsWrite
+--- PASS: TestMediaToolsFollowTheGenerationOnSettingsWrite (0.02s)
+=== RUN   TestSettingsWriteRunsDecisionPreflight
+--- PASS: TestSettingsWriteRunsDecisionPreflight (0.01s)
+=== RUN   TestAssembledRuntimeCarriesANativePDF
+--- PASS: TestAssembledRuntimeCarriesANativePDF (0.01s)
+=== RUN   TestAssembledRuntimeDegradesPDFOnATextOnlyModel
+--- PASS: TestAssembledRuntimeDegradesPDFOnATextOnlyModel (0.01s)
+=== RUN   TestAssembledRuntimeModelPropertiesCarryEveryModality
+--- PASS: TestAssembledRuntimeModelPropertiesCarryEveryModality (0.00s)
+=== RUN   TestAssembledRuntimeCarriesNativeAudio
+--- PASS: TestAssembledRuntimeCarriesNativeAudio (0.01s)
+=== RUN   TestAssembledRuntimeUndeclaredModalityDegrades
+--- PASS: TestAssembledRuntimeUndeclaredModalityDegrades (0.01s)
+=== RUN   TestMediaCapsForAPIUnknownDeclaresNothing
+--- PASS: TestMediaCapsForAPIUnknownDeclaresNothing (0.00s)
+=== RUN   TestModelServiceResolvesTheDocumentSelection
+--- PASS: TestModelServiceResolvesTheDocumentSelection (0.00s)
+=== RUN   TestModelServicePerInputSelectionWins
+--- PASS: TestModelServicePerInputSelectionWins (0.00s)
+=== RUN   TestModelServiceFailsClosedOnUnknownModel
+--- PASS: TestModelServiceFailsClosedOnUnknownModel (0.00s)
+=== RUN   TestModelServiceRequiresACredential
+--- PASS: TestModelServiceRequiresACredential (0.00s)
+=== RUN   TestModelServiceSetButEmptyEnvFailsClosed
+--- PASS: TestModelServiceSetButEmptyEnvFailsClosed (0.00s)
+=== RUN   TestModelServiceViewsHideHiddenProviders
+--- PASS: TestModelServiceViewsHideHiddenProviders (0.00s)
+=== RUN   TestModelServiceLegacyOnlyTenantKeepsTheWireModel
+--- PASS: TestModelServiceLegacyOnlyTenantKeepsTheWireModel (0.00s)
+=== RUN   TestBootWiresModelsOnlyWhenConfigured
+=== RUN   TestBootWiresModelsOnlyWhenConfigured/models_document
+=== RUN   TestBootWiresModelsOnlyWhenConfigured/legacy_model_only
+=== RUN   TestBootWiresModelsOnlyWhenConfigured/nothing_configured
+=== RUN   TestBootWiresModelsOnlyWhenConfigured/malformed_document_fails_boot
+--- PASS: TestBootWiresModelsOnlyWhenConfigured (0.01s)
+=== RUN   TestReloadRebuildsTheModelServiceOnDocumentChange
+--- PASS: TestReloadRebuildsTheModelServiceOnDocumentChange (0.01s)
+=== RUN   TestModelsConfiguredIsSemantic
+=== RUN   TestModelsConfiguredIsSemantic/empty_bytes
+=== RUN   TestModelsConfiguredIsSemantic/empty_object
+=== RUN   TestModelsConfiguredIsSemantic/spaced_object
+=== RUN   TestModelsConfiguredIsSemantic/newline_object
+=== RUN   TestModelsConfiguredIsSemantic/null
+=== RUN   TestModelsConfiguredIsSemantic/schema_version_only
+=== RUN   TestModelsConfiguredIsSemantic/null_selection
+=== RUN   TestModelsConfiguredIsSemantic/empty_providers
+=== RUN   TestModelsConfiguredIsSemantic/selection
+=== RUN   TestModelsConfiguredIsSemantic/rules
+=== RUN   TestModelsConfiguredIsSemantic/providers
+--- PASS: TestModelsConfiguredIsSemantic (0.00s)
+=== RUN   TestSpacedEmptyDocumentKeepsTheStaticPath
+--- PASS: TestSpacedEmptyDocumentKeepsTheStaticPath (0.00s)
+=== RUN   TestModelServiceHiddenProviderIsRefused
+--- PASS: TestModelServiceHiddenProviderIsRefused (0.00s)
+=== RUN   TestModelServiceRefCredentials
+=== RUN   TestModelServiceRefCredentials/env:REF_KEY
+=== RUN   TestModelServiceRefCredentials/${REF_KEY}
+=== RUN   TestModelServiceRefCredentials/secret_ref_reads_the_tenant_secret_store
+=== RUN   TestModelServiceRefCredentials/secret_ref_without_a_secret_store_fails_closed_naming_the_secret
+=== RUN   TestModelServiceRefCredentials/unstored_secret_ref_names_the_secret
+=== RUN   TestModelServiceRefCredentials/unresolvable_ref_never_falls_back
+=== RUN   TestModelServiceRefCredentials/literal_ref_fails_construction
+--- PASS: TestModelServiceRefCredentials (0.00s)
+=== RUN   TestModelServiceProviderWithoutModelIsRefused
+--- PASS: TestModelServiceProviderWithoutModelIsRefused (0.00s)
+=== RUN   TestModelServicePartialSelectionMergesTheLevel
+--- PASS: TestModelServicePartialSelectionMergesTheLevel (0.00s)
+=== RUN   TestModelServiceValidateSelectionMatchesExecution
+--- PASS: TestModelServiceValidateSelectionMatchesExecution (0.00s)
+=== RUN   TestModelServiceValidatesTheDefaultSelectionAtBoot
+=== RUN   TestModelServiceValidatesTheDefaultSelectionAtBoot/typo'd_model
+=== RUN   TestModelServiceValidatesTheDefaultSelectionAtBoot/disabled_model
+=== RUN   TestModelServiceValidatesTheDefaultSelectionAtBoot/provider_without_model
+=== RUN   TestModelServiceValidatesTheDefaultSelectionAtBoot/unknown_provider
+=== RUN   TestModelServiceValidatesTheDefaultSelectionAtBoot/legal_default
+--- PASS: TestModelServiceValidatesTheDefaultSelectionAtBoot (0.00s)
+=== RUN   TestModelServiceBaselineWindowIsWithheld
+--- PASS: TestModelServiceBaselineWindowIsWithheld (0.00s)
+=== RUN   TestModelServicePickerRequiresAResolvableCredential
+=== RUN   TestModelServicePickerRequiresAResolvableCredential/unresolvable
+=== RUN   TestModelServicePickerRequiresAResolvableCredential/env_resolvable
+=== RUN   TestModelServicePickerRequiresAResolvableCredential/flat_key_fallback
+--- PASS: TestModelServicePickerRequiresAResolvableCredential (0.00s)
+=== RUN   TestModelServiceAllHiddenProvidersGetTheirOwnDiagnostic
+--- PASS: TestModelServiceAllHiddenProvidersGetTheirOwnDiagnostic (0.00s)
+=== RUN   TestModelServiceUnknownSelectionKeysRefused
+--- PASS: TestModelServiceUnknownSelectionKeysRefused (0.00s)
+=== RUN   TestModelServiceAdvertisesTheDocumentIdentity
+--- PASS: TestModelServiceAdvertisesTheDocumentIdentity (0.00s)
+=== RUN   TestModelServiceUsesOnlyTheInjectedLookup
+--- PASS: TestModelServiceUsesOnlyTheInjectedLookup (0.00s)
+=== RUN   TestModelServiceToolGateReachesTheRuntime
+--- PASS: TestModelServiceToolGateReachesTheRuntime (0.00s)
+=== RUN   TestCredentialFallsBackToTheSameNameSecret
+--- PASS: TestCredentialFallsBackToTheSameNameSecret (0.00s)
+=== RUN   TestCredentialEnvironmentBeatsTheSameNameSecret
+--- PASS: TestCredentialEnvironmentBeatsTheSameNameSecret (0.00s)
+=== RUN   TestCredentialLegacyKeyStillAppliesWithoutASecret
+--- PASS: TestCredentialLegacyKeyStillAppliesWithoutASecret (0.00s)
+=== RUN   TestCredentialSetButEmptyEnvIgnoresTheSameNameSecret
+--- PASS: TestCredentialSetButEmptyEnvIgnoresTheSameNameSecret (0.00s)
+=== RUN   TestCredentialWithoutStorageFailsClosedWithAReadableIssue
+--- PASS: TestCredentialWithoutStorageFailsClosedWithAReadableIssue (0.00s)
+=== RUN   TestCredentialEnvMissWithoutSecretNamesBothSources
+--- PASS: TestCredentialEnvMissWithoutSecretNamesBothSources (0.00s)
+=== RUN   TestCredentialSecretReferenceStillWinsOverEnv
+--- PASS: TestCredentialSecretReferenceStillWinsOverEnv (0.00s)
+=== RUN   TestModelsDocumentWritePathServesNewRuns
+--- PASS: TestModelsDocumentWritePathServesNewRuns (0.01s)
+=== RUN   TestModelsDocumentValidationRejections
+=== RUN   TestModelsDocumentValidationRejections/unknown_model
+=== RUN   TestModelsDocumentValidationRejections/unknown_provider
+=== RUN   TestModelsDocumentValidationRejections/no_default_selection
+=== RUN   TestModelsDocumentValidationRejections/incomplete_provider
+=== RUN   TestModelsDocumentValidationRejections/unsupported_api_type_in_the_patch
+=== RUN   TestModelsDocumentValidationRejections/unknown_reasoning_level
+=== RUN   TestModelsDocumentValidationRejections/document_shape
+--- PASS: TestModelsDocumentValidationRejections (0.01s)
+=== RUN   TestModelsDocumentValidationReportsCredentialFieldPaths
+--- PASS: TestModelsDocumentValidationReportsCredentialFieldPaths (0.00s)
+=== RUN   TestRejectedReloadKeepsTheServingGeneration
+--- PASS: TestRejectedReloadKeepsTheServingGeneration (0.01s)
+=== RUN   TestStoredSecretResolvesAnAttempt
+--- PASS: TestStoredSecretResolvesAnAttempt (0.05s)
+=== RUN   TestBootFallsBackToTheDeploymentDocumentWhenTheOverrideCannotBeServed
+--- PASS: TestBootFallsBackToTheDeploymentDocumentWhenTheOverrideCannotBeServed (0.00s)
+=== RUN   TestBootKeepsFailingWhenTheDeploymentDocumentItselfIsBroken
+--- PASS: TestBootKeepsFailingWhenTheDeploymentDocumentItselfIsBroken (0.00s)
+=== RUN   TestRuntimeSamplerForwardsMaxTokensToTheProvider
+--- PASS: TestRuntimeSamplerForwardsMaxTokensToTheProvider (0.00s)
+=== RUN   TestRuntimeSamplerResolvesTheAttemptModelSelection
+--- PASS: TestRuntimeSamplerResolvesTheAttemptModelSelection (0.00s)
+=== RUN   TestRuntimeSamplerUsesTheRuntimeStream
+--- PASS: TestRuntimeSamplerUsesTheRuntimeStream (0.00s)
+=== RUN   TestSamplingStopReasonMapping
+--- PASS: TestSamplingStopReasonMapping (0.00s)
+=== RUN   TestRuntimeSamplerWithoutAModelFailsClosed
+--- PASS: TestRuntimeSamplerWithoutAModelFailsClosed (0.00s)
+=== RUN   TestProviderProbeReachesUpstream
+--- PASS: TestProviderProbeReachesUpstream (0.00s)
+=== RUN   TestProviderProbeNeedsAuthWithoutRequest
+--- PASS: TestProviderProbeNeedsAuthWithoutRequest (0.00s)
+=== RUN   TestProviderProbeUnreachableReportsTheFailure
+--- PASS: TestProviderProbeUnreachableReportsTheFailure (0.00s)
+=== RUN   TestProviderProbeRejectedCredentialIsNeedsAuth
+--- PASS: TestProviderProbeRejectedCredentialIsNeedsAuth (0.00s)
+=== RUN   TestProviderProbeIncompleteConfigurationSendsNothing
+--- PASS: TestProviderProbeIncompleteConfigurationSendsNothing (0.00s)
+=== RUN   TestProviderProbeUnknownAndHiddenAreMisses
+--- PASS: TestProviderProbeUnknownAndHiddenAreMisses (0.00s)
+=== RUN   TestProductTelemetryWrapInstalled
+--- PASS: TestProductTelemetryWrapInstalled (0.00s)
+=== RUN   TestProductStreamWrapInstalled
+--- PASS: TestProductStreamWrapInstalled (0.00s)
+=== RUN   TestProductExtraToolsJoinTheRegistry
+--- PASS: TestProductExtraToolsJoinTheRegistry (0.00s)
+=== RUN   TestRefreshProductToolsPublishesDynamicTools
+--- PASS: TestRefreshProductToolsPublishesDynamicTools (0.01s)
+=== RUN   TestRefreshProductPromptPublishesPluginSections
+--- PASS: TestRefreshProductPromptPublishesPluginSections (0.01s)
+=== RUN   TestRefreshProductPromptConcurrent
+--- PASS: TestRefreshProductPromptConcurrent (0.92s)
+=== RUN   TestRefreshProductPromptIsIdempotent
+--- PASS: TestRefreshProductPromptIsIdempotent (0.01s)
+=== RUN   TestReloadKeepsPluginPromptSurface
+--- PASS: TestReloadKeepsPluginPromptSurface (0.01s)
+=== RUN   TestAgentBindingPreambleKeepsThePluginSurface
+--- PASS: TestAgentBindingPreambleKeepsThePluginSurface (0.00s)
+=== RUN   TestAssemblyBaseMatchesTheBlueprint
+--- PASS: TestAssemblyBaseMatchesTheBlueprint (0.00s)
+=== RUN   TestAssemblyBaseRejectsDuplicateCapabilityProviders
+--- PASS: TestAssemblyBaseRejectsDuplicateCapabilityProviders (0.00s)
+=== RUN   TestAssemblyModeOnlyServeIsWired
+--- PASS: TestAssemblyModeOnlyServeIsWired (0.00s)
+=== RUN   TestAssembledServicesMatchesEnabledServices
+=== RUN   TestAssembledServicesMatchesEnabledServices/empty
+=== RUN   TestAssembledServicesMatchesEnabledServices/worker
+=== RUN   TestAssembledServicesMatchesEnabledServices/mcp
+=== RUN   TestAssembledServicesMatchesEnabledServices/compaction
+=== RUN   TestAssembledServicesMatchesEnabledServices/compaction_explicitly_off
+=== RUN   TestAssembledServicesMatchesEnabledServices/telemetry
+=== RUN   TestAssembledServicesMatchesEnabledServices/external_backends_and_tools
+=== RUN   TestAssembledServicesMatchesEnabledServices/models_document
+--- PASS: TestAssembledServicesMatchesEnabledServices (0.00s)
+=== RUN   TestAssemblyConfigIsAnOrderedOverlay
+--- PASS: TestAssemblyConfigIsAnOrderedOverlay (0.00s)
+=== RUN   TestAssemblyConfigCarriesDocumentDerivedImplementationVersions
+--- PASS: TestAssemblyConfigCarriesDocumentDerivedImplementationVersions (0.00s)
+=== RUN   TestPinnedPiLoopManifestMatchesSuite
+--- PASS: TestPinnedPiLoopManifestMatchesSuite (0.00s)
+=== RUN   TestDefaultAcceptsPinnedLoopConformance
+--- PASS: TestDefaultAcceptsPinnedLoopConformance (0.00s)
+=== RUN   TestDefaultRejectsTamperedLoopManifest
+--- PASS: TestDefaultRejectsTamperedLoopManifest (0.00s)
+=== RUN   TestDefaultRejectsWrongLoopPin
+--- PASS: TestDefaultRejectsWrongLoopPin (0.00s)
+=== RUN   TestDefaultRejectsDuplicateLoopDeclarations
+--- PASS: TestDefaultRejectsDuplicateLoopDeclarations (0.00s)
+=== RUN   TestValidateLoopConformanceRejectsMissingManifest
+--- PASS: TestValidateLoopConformanceRejectsMissingManifest (0.00s)
+=== RUN   TestValidateLoopConformanceRejectsMissingPin
+--- PASS: TestValidateLoopConformanceRejectsMissingPin (0.00s)
+=== RUN   TestValidateLoopConformanceAcceptsDeclaredLoop
+--- PASS: TestValidateLoopConformanceAcceptsDeclaredLoop (0.00s)
+=== RUN   TestValidateLoopConformanceRejectsWrongPin
+--- PASS: TestValidateLoopConformanceRejectsWrongPin (0.00s)
+=== RUN   TestValidateLoopConformanceIgnoresNonLoopServices
+--- PASS: TestValidateLoopConformanceIgnoresNonLoopServices (0.00s)
+=== RUN   TestDefaultServicesBlueprintCoherent
+--- PASS: TestDefaultServicesBlueprintCoherent (0.00s)
+=== RUN   TestDefaultAllServicesAssemble
+--- PASS: TestDefaultAllServicesAssemble (0.00s)
+=== RUN   TestDefaultMinimalAssemblyDegraded
+--- PASS: TestDefaultMinimalAssemblyDegraded (0.00s)
+=== RUN   TestDefaultMissingStoreKeepsDependentsPending
+--- PASS: TestDefaultMissingStoreKeepsDependentsPending (0.00s)
+=== RUN   TestDefaultMissingPromptKeepsToolsPending
+--- PASS: TestDefaultMissingPromptKeepsToolsPending (0.00s)
+=== RUN   TestDefaultHeaderDefaults
+--- PASS: TestDefaultHeaderDefaults (0.00s)
+=== RUN   TestTenantConfigSummary
+--- PASS: TestTenantConfigSummary (0.00s)
+=== RUN   TestFromTenantConfigSelection
+--- PASS: TestFromTenantConfigSelection (0.00s)
+=== RUN   TestFromTenantConfigMinimal
+--- PASS: TestFromTenantConfigMinimal (0.00s)
+=== RUN   TestFromTenantConfigRejectsInvalidDocument
+--- PASS: TestFromTenantConfigRejectsInvalidDocument (0.00s)
+=== RUN   TestModelConfigurationVersionsTheLLMService
+--- PASS: TestModelConfigurationVersionsTheLLMService (0.00s)
+=== RUN   TestExternalServicesSelectedByDocument
+--- PASS: TestExternalServicesSelectedByDocument (0.00s)
+=== RUN   TestSummaryNamesTheModelsDocumentIdentity
+--- PASS: TestSummaryNamesTheModelsDocumentIdentity (0.00s)

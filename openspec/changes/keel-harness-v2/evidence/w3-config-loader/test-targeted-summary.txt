@@ -1,0 +1,13 @@
+ok  	github.com/jixoai/keel/internal/assembly	3.471s
+ok  	github.com/jixoai/keel/internal/configfile	0.374s
+ok  	github.com/jixoai/keel/internal/capturepolicy	0.052s
+ok  	github.com/jixoai/keel/internal/host	0.136s
+ok  	github.com/jixoai/keel/cmd/keel	5.078s
+ok  	github.com/jixoai/keel/internal/harnessapi	6.632s
+ok  	github.com/jixoai/keel/internal/architecture	3.453s
+ok  	github.com/jixoai/keel/internal/agent	19.690s
+ok  	github.com/jixoai/keel/internal/layerfs	3.134s
+ok  	github.com/jixoai/keel/internal/bashbridge	1.972s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.336s
+ok  	github.com/jixoai/keel/internal/servicehost	10.001s
+ok  	github.com/jixoai/keel/internal/loadout	0.341s

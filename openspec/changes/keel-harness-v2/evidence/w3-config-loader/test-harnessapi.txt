@@ -1,0 +1,10 @@
+=== RUN   TestCapabilities
+--- PASS: TestCapabilities (0.00s)
+=== RUN   TestCapabilitiesOmitsNilConfigFileBlock
+--- PASS: TestCapabilitiesOmitsNilConfigFileBlock (0.00s)
+=== RUN   TestCapabilitiesMCPBits
+--- PASS: TestCapabilitiesMCPBits (0.00s)
+=== RUN   TestCapabilitiesMCPBridgeBits
+--- PASS: TestCapabilitiesMCPBridgeBits (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessapi	0.434s

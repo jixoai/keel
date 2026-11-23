@@ -27,6 +27,7 @@ import (
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/capturepolicy"
+	"github.com/jixoai/keel/internal/configfile"
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/harnessext"
@@ -101,6 +102,13 @@ type serveOptions struct {
 	// ModelsConfig is the path of the tenant models document
 	// (providers/rules/selection); empty leaves provider configuration off.
 	ModelsConfig string
+	// ConfigFile is the config.toml path loaded at startup and rotated
+	// atomically by the host. Missing is an empty optional document; invalid
+	// fails startup.
+	ConfigFile string
+	// ConfigLoader is the loaded config.toml version (set by runServe before
+	// the product layer), so every consumer pins the same version.
+	ConfigLoader *configfile.Loader
 	// PluginsRoot is the managed plugin directory tree
 	// ($KEEL_HOME/plugins/<id>/plugin.yaml). An empty root disables install and
 	// discovery; bundled plugins still load.
@@ -554,6 +562,46 @@ func runServe(parent context.Context, opts serveOptions) error {
 			overrideRevision = revision
 		}
 	}
+	// The config.toml file is loaded once at startup and fails closed: an
+	// unreadable or invalid document stops the process instead of leaving a
+	// half-applied policy. A missing file is an empty optional document. The
+	// active file version/hash and rotation facts are logged and exposed on the
+	// capability document; the per-attempt capture resolver pins the file pin it
+	// starts under. The run's loadout configHash is a separate identity.
+	// captureDefaults is the boot tenant document BEFORE the config.toml overlay.
+	// The per-attempt resolver applies the file pin itself, so a rotation that
+	// removes filesystem.capture.mode must fall back through the stored document
+	// to this document. Passing the already-overlaid tenantCfg here would leak
+	// the removed file value into every later attempt as "boot-default".
+	captureDefaults := tenantCfg
+	var configFile *configfile.Loader
+	if path := strings.TrimSpace(opts.ConfigFile); path != "" {
+		configFile, err = configfile.Open(configfile.Options{Path: path})
+		if err != nil {
+			return fmt.Errorf("load %s: %w", path, err)
+		}
+		opts.ConfigLoader = configFile
+		configStatus := configFile.Status()
+		log.Info("config.toml loaded",
+			"exists", configStatus.Exists, "revision", configStatus.Revision,
+			"hash", configStatus.Hash, "anchorEventSeq", configStatus.AnchorEventSeq,
+			"captureMode", configStatus.CaptureMode)
+		if configStatus.LastRotation != nil {
+			log.Info("config.toml rotation fact",
+				"revision", configStatus.LastRotation.Revision,
+				"hash", configStatus.LastRotation.Hash,
+				"anchorEventSeq", configStatus.LastRotation.AnchorEventSeq,
+				"previousRevision", configStatus.LastRotation.PreviousRevision,
+				"previousHash", configStatus.LastRotation.PreviousHash)
+		}
+		if overlaid, applied, err := configfile.OverlayTenant(configFile.Pin(), tenantCfg); err != nil {
+			return fmt.Errorf("apply %s: %w", path, err)
+		} else if applied {
+			tenantCfg = overlaid
+		}
+	} else {
+		log.Info("config.toml disabled: no path resolved")
+	}
 	limits.Update(tenantCfg.Quota)
 
 	// Tenant secret resolution is one closure shared by the chat provider path
@@ -659,9 +707,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 		ToolAccess:      toolAccess,
 		GuardrailPolicy: policyReader.guardrails,
 		// The capture policy is resolved once per attempt from the stored tenant
-		// document over the boot document. The worker pins the mode on the
-		// attempt's tool context and runs the checkpoint hook at run close.
-		CapturePolicy: newRunCaptureResolver(st, tenantCfg, opts.Workspace),
+		// document over the PRE-overlay boot document, and the config.toml pin
+		// is applied last by the resolver. The generation tenant keeps the boot
+		// overlay, but it must not become the resolver's default: a rotation that
+		// removes the file setting falls back to the stored/boot document.
+		CapturePolicy: newRunCaptureResolver(st, captureDefaults, opts.Workspace, configFile),
 		// A settled attempt frees a placement slot: the gate promotes the FIFO
 		// queue head and records the observed duration for the ETA.
 		Settlements: placementRT.Gate,
@@ -1444,6 +1494,34 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		ProviderReferences: st,
 		SecretStore:        secretStore,
 		SecretStoreReason:  secretReason,
+		// The active config.toml file version/hash and rotation facts are a
+		// capability fact. They describe the file and the capture policy source,
+		// not the run's loadout-derived configHash.
+		ConfigFileStatus: func() *harnessapi.ConfigFileCapabilities {
+			if opts.ConfigLoader == nil {
+				return nil
+			}
+			status := opts.ConfigLoader.Status()
+			block := harnessapi.ConfigFileCapabilities{
+				Exists:         status.Exists,
+				Revision:       status.Revision,
+				Hash:           status.Hash,
+				AnchorEventSeq: status.AnchorEventSeq,
+				CaptureMode:    status.CaptureMode,
+				Rotations:      status.Rotations,
+			}
+			if fact := status.LastRotation; fact != nil {
+				block.LastRotation = &harnessapi.ConfigFileRotation{
+					Revision:         fact.Revision,
+					Hash:             fact.Hash,
+					AnchorEventSeq:   fact.AnchorEventSeq,
+					PreviousRevision: fact.PreviousRevision,
+					PreviousHash:     fact.PreviousHash,
+					RotatedAt:        fact.RotatedAt.Format(time.RFC3339Nano),
+				}
+			}
+			return &block
+		},
 		// The skill settings surface and the session-local completion sources:
 		// both read services the tools already use, never a second copy.
 		Skills:       opts.Skills,

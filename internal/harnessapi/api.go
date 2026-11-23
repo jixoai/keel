@@ -166,6 +166,12 @@ type Config struct {
 	// SecretStoreReason explains a missing secret store to an operator. It is
 	// rendered verbatim and must never contain a value.
 	SecretStoreReason string
+	// ConfigFileStatus, when set, reports the active config.toml file version,
+	// hash and rotation facts on GET /v1/capabilities. It describes the file
+	// (and its capture setting), not the run's loadout-derived configHash:
+	// AnchorEventSeq is 0 until a rotation event anchors the file. Nil function
+	// or nil result omits the block (a deployment without the file loader).
+	ConfigFileStatus func() *ConfigFileCapabilities
 	// Skills is the tenant-scoped skill library behind /v1/settings/skills and
 	// the `skills` aggregate tool's manage/sources actions. Nil answers 501 on
 	// the settings routes (the tool keeps its constant name).
@@ -480,6 +486,36 @@ type Capabilities struct {
 	// only when the app surface is wired; the feature flags below are the
 	// stable booleans clients gate on.
 	MCPApps *MCPAppsCapabilities `json:"mcpApps,omitempty"`
+	// ConfigFile is the active config.toml file version and its rotation facts.
+	// It is present only when the deployment loaded a file loader. It is the
+	// capture-policy/file source a new attempt resolves, NOT the run's
+	// loadout-derived configHash; AnchorEventSeq is 0 at boot and only becomes
+	// a ledger sequence when a rotation event anchors the file.
+	ConfigFile *ConfigFileCapabilities `json:"configFile,omitempty"`
+}
+
+// ConfigFileCapabilities is the config.toml discovery block. It deliberately
+// omits the filesystem path (a local path is not a client fact).
+type ConfigFileCapabilities struct {
+	Exists         bool                `json:"exists"`
+	Revision       int64               `json:"revision"`
+	Hash           string              `json:"hash"`
+	AnchorEventSeq int64               `json:"anchorEventSeq"`
+	CaptureMode    string              `json:"captureMode,omitempty"`
+	Rotations      int64               `json:"rotations"`
+	LastRotation   *ConfigFileRotation `json:"lastRotation,omitempty"`
+}
+
+// ConfigFileRotation is one successful atomic rotation. AnchorEventSeq is the
+// ledger sequence the caller committed for the version; PreviousRevision/Hash
+// make the transition auditable.
+type ConfigFileRotation struct {
+	Revision         int64  `json:"revision"`
+	Hash             string `json:"hash"`
+	AnchorEventSeq   int64  `json:"anchorEventSeq"`
+	PreviousRevision int64  `json:"previousRevision"`
+	PreviousHash     string `json:"previousHash"`
+	RotatedAt        string `json:"rotatedAt"`
 }
 
 // MCPAppsCapabilities is the MCP Apps discovery block.
@@ -582,6 +618,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 			block.Apps = len(surface.Apps)
 		}
 		capabilities.MCPApps = block
+	}
+	if s.cfg.ConfigFileStatus != nil {
+		if block := s.cfg.ConfigFileStatus(); block != nil {
+			capabilities.ConfigFile = block
+		}
 	}
 	writeJSON(w, http.StatusOK, capabilities)
 }

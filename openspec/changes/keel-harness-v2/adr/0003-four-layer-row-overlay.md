@@ -54,7 +54,8 @@ W0.5-3 的任务是把这套语义落成可实现、可测试的契约，而不�
 - `ConfigVersion` = `{Revision, Hash, AnchorEventSeq}`；每次轮转 revision 前进，锚点必须
   严格大于当前锚点。`Pinned` 是深拷贝，一次 run 固定一个版本；轮转只影响下一次 `Pin()`。
 - 文件级 `config.toml.new → fsync → rename()` 是宿主职责，留给 W8/W9；本 ADR 只冻结版本/
-  锚点语义，不把文件 IO 塞进纯模型。
+  锚点语义，不把文件 IO 塞进纯模型。（W3.config 2026-11-23 已由
+  `internal/configfile` 补齐文件适配，纯模型边界不变。）
 
 ### 5. seam 能力矩阵 + 启动前类型化拒绝
 
@@ -94,8 +95,9 @@ W0.5-3 的任务是把这套语义落成可实现、可测试的契约，而不�
 - 生产服务选择已改由 `loadout.AssembledServices`（base → serve → config）决定；
   `FromTenantConfig` 不再直接读 `EnabledServices` 的布尔集合。现有服务图与工厂机制不变。
 - `docs/ASSEMBLY.md` 成为字段/错误码/capability 名的单源；文档与代码不一致按契约缺陷处理。
-- W8/W9 仍需完成：生产 `config.toml` 文件读取与原子 rename、headless/tui/sdk bundle、
-  local/remote/SSH seam provider 的实际注册与启动检查。这些在文档与证据中明确标注，
+- W3.config 已交付生产 `config.toml` 文件读取与原子 rename（`internal/configfile`）；
+  W8/W9 仍需完成：headless/tui/sdk bundle、local/remote/SSH seam provider 的实际注册与
+  启动检查，以及非 service row 覆盖进入生产服务图。这些在文档与证据中明确标注，
   本 ADR 不把它们算作已交付。
 - 新增装配行必须先在 base 声明并分配稳定 row id；新增 mode/preset/config 只能覆盖它。
 

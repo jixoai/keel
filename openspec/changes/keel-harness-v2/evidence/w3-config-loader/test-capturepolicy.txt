@@ -1,0 +1,8 @@
+=== RUN   TestParseAndClosedVocabulary
+--- PASS: TestParseAndClosedVocabulary (0.00s)
+=== RUN   TestTriggerErrorIsTyped
+--- PASS: TestTriggerErrorIsTyped (0.00s)
+=== RUN   TestContextPinRoundTrip
+--- PASS: TestContextPinRoundTrip (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/capturepolicy	0.277s

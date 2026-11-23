@@ -83,7 +83,8 @@
       `internal/loadout/assembly.go`；契约 `docs/ASSEMBLY.md`、ADR
       `adr/0003-four-layer-row-overlay.md`；测试 `internal/assembly/*_test.go`、
       `internal/loadout/assembly_test.go`；证据 `evidence/w05-assembly/`。文件级
-      config.toml 读取/原子 rename、headless/tui/sdk bundle 仍留 W8/W9）
+      config.toml 读取/原子 rename 已由 W3.config 的 `internal/configfile` 补齐，
+      headless/tui/sdk bundle 仍留 W8/W9）
 - [x] 能力 seam 清单（fs/shell/subprocess/exec-surface/terminal）与 capability matrix
       （W0.5-assembly：`seam.go` 闭集 capability + `Registry.Matrix()` +
       `Prepare` 启动前 typed rejection `unsupported_capability` / `invalid_capability`；
@@ -193,8 +194,9 @@
       `TestCaptureDeletedPayloadIsBounded`（fileplugin）、`TestBashRmIsReconciledByCapture`（bash seam）；
       证据 `evidence/w3-capture-tail-2026-11-21/`）
 - [x] capture 策略覆写：tenant document `filesystem.capture.mode=per-tool-call|checkpoint|manual`
-      （W3.capture 2026-11-23：仓库没有 `config.toml` 加载器，策略落在唯一租户文档词汇
-      `filesystem.capture.mode`；`internal/host/config.go` 新增 `Filesystem/Capture` 段，
+      （W3.capture 2026-11-23：仓库当时没有 `config.toml` 加载器，策略落在唯一租户文档词汇
+      `filesystem.capture.mode`；W3.config 已补加载器，见下一条；`internal/host/config.go`
+      新增 `Filesystem/Capture` 段，
       Merge/Validate 严格闭集（省略 = per-tool-call，未知/带空白值拒绝），canonical JSON 可往返。
       模式与上下文钉扎在 `internal/capturepolicy/capturemode.go`（W11 2026-11-23：从
       `internal/layerfs/capturemode.go` 迁到 kernel 叶子包，值 + context pin，layerfs 不留 alias）；worker 每 attempt 解析一次
@@ -221,6 +223,31 @@
       延迟结算的崩溃数据窗口已在 docs/HOST.md 与 layerfs spec 写明。
       本次测试不依赖 PG（KEEL_TEST_DSN 未设置，既有 PG gated 套件保持不变）。
       证据 `evidence/w3-capture-mode/`）
+- [x] config.toml 磁盘加载器：严格解析、原子轮转、启动加载、settings → 租户文档
+      （W3.config 2026-11-23：`internal/assembly` 的 parser 新增唯一 settings 表
+      `[filesystem.capture] mode`（闭集来自 kernel 叶子包 `internal/capturepolicy`；rebase 到
+      `a549e87` 时删除了重复的 `internal/capturemode`，layerfs 不再留 alias，assembly/agent/
+      configfile 统一引用 capturepolicy，装配面不再 import service 层）；`internal/configfile.Loader` 负责
+      `Open`（缺失 = 空配置，非法 = 启动失败）、`Rotate`（parse → `config.toml.new` →
+      fsync → rename → dir fsync → revision+1）与 `Reload`（采纳外部原子替换），
+      版本/哈希语义复用 `assembly.Rotation`，anchor 由宿主提交 `config.rotated` 后提供。
+      `keel serve --config-file`/`KEEL_CONFIG_FILE`（默认 `$KEEL_HOME/config.toml`）
+      启动加载并记录 active version/hash；`GET /v1/capabilities` 的 `configFile` 块暴露
+      revision/hash/anchor/rotation 事实。`configfile.OverlayTenant` 把文件 setting 叠加到
+      租户文档，每-attempt capture resolver 以文件最后覆盖，管理端 JSON 对未声明键继续生效。
+      测试 `TestParseConfigReadsTheCaptureSetting`/`TestParseConfigRejectsMalformedCaptureSettings`
+      （assembly）、`TestRotateReplacesTheFileAtomically`/
+      `TestRotationKeepsInFlightAttemptOnItsPinnedVersion`/
+      `TestRotateRejectsInvalidDocumentsWithoutTouchingTheActiveFile`/
+      `TestRotationWriteFailureLeavesNoPartialFile`/`TestRotateOverwritesAStaleStagingFile`/
+      `TestConfigFileCaptureModeOverlaysTheTenantDocument`/`TestRestartPicksTheRotatedVersion`/
+      `TestReloadAdoptsAnExternallyRotatedFile`/`TestConcurrentPinAndRotate`（configfile）、
+      `TestEffectiveCaptureModeAppliesConfigFileLast`/
+      `TestEffectiveCaptureModeFallsBackWhenFileSettingIsRemoved`（cmd/keel）。
+      文件 rows 已解析并随版本 pin；生产 base 仍只有 service rows，非 service row 覆盖
+      留 W8/W9。`Rotate`/`Reload` 是库 API：本切片没有生产轮转调用者/HTTP 入口，
+      调用者提交 `config.rotated` 并传锚点的接线留 W8/W9；`Open`/`OverlayTenant` 与
+      启动 status 已真实接线。证据 `evidence/w3-config-loader/`）
 - [x] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交， （对账 2026-11-20：部分——缺口：Upsert 有 updated_seq guard（manifest.go:180-196），snapshot 按 seq 精确存；但无跨 lane 定序/版本化，且 fork 未接线（W4））
       `session_snapshot` 的最新 seq 树可能落后于 `file_manifest` 行；fork 接线前必须定序/版本化
       （W3.H3B 2026-11-21：每个 (tenant,session) 的显式写与 capture 共用 settlement 临界区

@@ -1,0 +1,14 @@
+=== RUN   TestEffectiveCaptureModeUsesStoredDocumentOverBoot
+--- PASS: TestEffectiveCaptureModeUsesStoredDocumentOverBoot (0.00s)
+=== RUN   TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead
+=== RUN   TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead/parse
+=== RUN   TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead/read
+--- PASS: TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead (0.00s)
+    --- PASS: TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead/parse (0.00s)
+    --- PASS: TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead/read (0.00s)
+=== RUN   TestEffectiveCaptureModeAppliesConfigFileLast
+--- PASS: TestEffectiveCaptureModeAppliesConfigFileLast (0.01s)
+=== RUN   TestEffectiveCaptureModeFallsBackWhenFileSettingIsRemoved
+--- PASS: TestEffectiveCaptureModeFallsBackWhenFileSettingIsRemoved (0.01s)
+PASS
+ok  	github.com/jixoai/keel/cmd/keel	0.539s

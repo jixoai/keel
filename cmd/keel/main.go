@@ -100,6 +100,7 @@ Environment (serve):
   KEEL_MODEL / KEEL_PROVIDER / KEEL_BASE_URL / KEEL_PROTOCOL / KEEL_API_KEY
                            model selection (fake provider when unset)
   KEEL_MODELS_CONFIG       tenant models document (providers/rules/selection)
+  KEEL_CONFIG_FILE         config.toml path (default $KEEL_HOME/config.toml)
   KEEL_SKILLS_ROOTS        OS path list of skill roots (PI-compatible)
   KEEL_SKILLS_ROOT         managed skill library root (default $KEEL_HOME/skills)
   KEEL_SKILLS_SOURCE_ROOT  managed subscription root (default $KEEL_SKILLS_ROOT/sources)
@@ -163,6 +164,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		mcpProject       = fs.String("mcp-project", os.Getenv("KEEL_MCP_PROJECT"), "project mcp.json path")
 		// modelsConfig carries the tenant models document (providers/rules/selection).
 		modelsConfig = fs.String("models-config", os.Getenv("KEEL_MODELS_CONFIG"), "tenant models document (providers/rules/selection; empty disables provider configuration)")
+		configFile   = fs.String("config-file", defaultConfigFile(), "config.toml path (default $KEEL_HOME/config.toml; missing = empty)")
 		exampleBot   = fs.String("example-bot-id", os.Getenv("KEEL_EXAMPLE_BOT_ID"), "Bot handle the example plugin's triggers fire as (empty: the example plugin declares no trigger)")
 		exampleInt   = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
 		pluginsRoot  = fs.String("plugins-root", defaultPluginsRoot(), "managed plugins directory ($KEEL_HOME/plugins)")
@@ -205,6 +207,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		MCPConfig:        *mcpConfig,
 		MCPProject:       *mcpProject,
 		ModelsConfig:     *modelsConfig,
+		ConfigFile:       *configFile,
 		PluginsRoot:      *pluginsRoot,
 		ExampleBotID:     strings.TrimSpace(*exampleBot),
 		ExampleInterval:  *exampleInt,
@@ -215,6 +218,25 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// defaultConfigFile resolves the config.toml path: KEEL_CONFIG_FILE wins, then
+// $KEEL_HOME/config.toml, then ~/.keel/config.toml. The file is optional: a
+// missing path is an empty configuration, while an invalid file fails startup.
+func defaultConfigFile() string {
+	if path := strings.TrimSpace(os.Getenv("KEEL_CONFIG_FILE")); path != "" {
+		return path
+	}
+	home := os.Getenv("KEEL_HOME")
+	if home == "" {
+		if dir, err := os.UserHomeDir(); err == nil {
+			home = filepath.Join(dir, ".keel")
+		}
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, "config.toml")
 }
 
 // defaultPluginsRoot resolves the managed plugins root: KEEL_PLUGINS_ROOT wins,

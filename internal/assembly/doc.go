@@ -4,11 +4,11 @@
 //
 // The package owns no runtime state: Build validates row documents, resolves
 // the effective row set, derives activation order from declared availability
-// and exposes the result as immutable values. The only repository import is
-// internal/pluginpkg, the frozen owner of the plugin layer vocabulary
-// (docs/PLUGIN-EXTENSIBILITY.md §1–§2); no harness, product, servicehost or
-// servicegraph package is imported, so the assembler cannot become a second
-// dependency-injection runtime.
+// and exposes the result as immutable values. It imports internal/pluginpkg
+// (the frozen owner of the plugin layer vocabulary) and internal/capturepolicy
+// (the closed capture-policy vocabulary used by the config.toml setting); no
+// harness, product, servicehost, servicegraph or layerfs package is imported,
+// so the assembler cannot become a second dependency-injection runtime.
 //
 // Contract documents:
 //   - docs/ASSEMBLY.md (machine/person contract: row schema, overlay rules,
@@ -18,6 +18,7 @@
 //
 // The hosting process maps its production configuration onto this model; the
 // bounded production adapter is internal/loadout (service rows), not a second
-// runtime. File-level config.toml loading and seam enforcement at process
-// startup remain W8/W9 work and are named as such in docs/ASSEMBLY.md.
+// runtime. File-level config.toml parsing/rotation semantics live here and the
+// disk adapter is internal/configfile (W3); seam enforcement at process startup
+// remains W8/W9 work and is named as such in docs/ASSEMBLY.md.
 package assembly

@@ -60,6 +60,11 @@ filesystem:
     mode: "per-tool-call" # per-tool-call | checkpoint | manual（省略 = per-tool-call）
 ```
 
+同一份文档也是 `config.toml` 的词汇来源：文件里的
+`[filesystem.capture] mode = "..."` 会覆盖租户文档的 `filesystem.capture.mode`
+（文件是最外层用户层，见 §2 后半与 `docs/ASSEMBLY.md` §5.5）。文件不改写 JSON
+文档，也不新增第二套字段名。
+
 `filesystem.capture.mode` 决定会话执行空间何时以一条 `fs.capture` 结算：
 
 - `per-tool-call`（默认）：每次 bash 执行结束结算一次；
@@ -75,10 +80,28 @@ filesystem:
 `capture_trigger_missing` 失败，不会静默吞掉 capture。
 
 捕获策略的来源与模型/提示词的 generation 不是同一个读取路径：模型来自本次 attempt
-钉住的 loadout generation，capture 模式来自当时的存储租户文档（或启动文档）。summary
-因此记录 `captureMode` 与 `captureSource`（`stored-document@<revision>` /
-`boot-default` / `generation-tenant`），审计能看出这次 attempt 实际由哪份文档治理；
-在管理员写入触发运行时 reassembly 之前，两者可能相差一个配置版本。
+钉住的 loadout generation，capture 模式来自当时的存储租户文档（或启动文档），随后由
+`config.toml` 的 `[filesystem.capture] mode` 最后覆盖。summary 因此记录 `captureMode`
+与 `captureSource`（`stored-document@<revision>` / `boot-default` /
+`generation-tenant` / `config.toml@revision=<n>`），审计能看出这次 attempt 实际由哪份
+文档治理；在管理员写入触发运行时 reassembly 之前，两者可能相差一个配置版本。
+
+**config.toml 文件源**（`keel serve --config-file` / `KEEL_CONFIG_FILE`，默认
+`$KEEL_HOME/config.toml`）：
+
+- 启动时严格解析；文件缺失是空配置（可选文件），文件非法则启动失败（fail closed），
+  不进入半应用状态。
+- 轮转在库里已实现为 `config.toml.new` → fsync → `rename()` → 目录 fsync 的原子替换，
+  并推进 `ConfigVersion{Revision, Hash, AnchorEventSeq}`；一次 attempt 固定一个版本，
+  进行中的 attempt 不受轮转影响。**当前没有生产代码调用 `Rotate`/`Reload`，也没有
+  HTTP/自动轮转入口**；调用者提交 `config.rotated` 并传锚点的接线留 W8/W9，启动时无
+  事件则锚点为 0。
+- 优先级固定为 `boot 默认 < 存储的管理端 JSON 文档 < config.toml settings`：文件只覆盖
+  自己声明的键（当前只有 `filesystem.capture.mode`），管理端 JSON 路径继续对其它键生效。
+- active revision/hash、锚点、rotation 次数与最近轮转事实通过启动日志和
+  `GET /v1/capabilities` 的 `configFile` 块暴露（不含本机路径）；不新增第二条配置 API。
+- 文件里的 `[[rows]]` 被严格解析并随版本 pin；生产服务图目前仍由租户文档映射的 service
+  rows 决定，非 service row 的覆盖在 W8/W9 接入前不改变运行时。
 
 **延迟结算的数据窗口**：`checkpoint`/`manual` 有意把 bash 写留在执行空间（CAS），
 直到 run close 或显式 checkpoint 才进入 manifest。若进程在结算前崩溃/停机，这些写会
@@ -86,10 +109,10 @@ filesystem:
 延迟结算模式的固有代价；默认 `per-tool-call` 不暴露该窗口。
 
 配置来源：运行时可继续从环境变量读取（见 §4）；租户配置文档持久化在
-`tenants.config jsonb`，由管理员 API（见 §4.2）写入，下一轮 run 生效。
-密钥只存引用：`agent.apiKeyRef` 与 MCP server 的 `env` / `headers` 值只接受
-`${NAME}` / `env:NAME` / `secret:NAME` 三种形态；明文（包括 `Bearer <token>`）一律拒绝，
-不落 schema。
+`tenants.config jsonb`，由管理员 API（见 §4.2）写入，下一轮 run 生效；`config.toml`
+是部署侧的最外层文件覆盖（见上）。密钥只存引用：`agent.apiKeyRef` 与 MCP server 的
+`env` / `headers` 值只接受 `${NAME}` / `env:NAME` / `secret:NAME` 三种形态；明文
+（包括 `Bearer <token>`）一律拒绝，不落 schema。
 
 ## 3. 装配顺序（与 PI 对齐）
 
@@ -140,6 +163,7 @@ filesystem:
 | `KEEL_TELEMETRY` | `memory` 时启用内存 telemetry recorder |
 | `KEEL_ADMIN_KEY` | 管理员 Bearer key（租户 provisioning、租户配置/用量 API、MCP OAuth sign-in）；空 = 管理员 API 关闭（503） |
 | `KEEL_MODEL` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_PROVIDER` / `KEEL_API_KEY` | provider 选择（空 = fake provider） |
+| `KEEL_CONFIG_FILE` | **仅 `keel serve`**：`config.toml` 路径（默认 `$KEEL_HOME/config.toml`）。缺失 = 空配置；非法文件启动失败；原子轮转/active version 见 §2 |
 | `KEEL_LOADOUT_ID` / `KEEL_LOADOUT_REVISION` | 默认 loadout 快照 id 与 revision（handoff identity 与 run 元数据共用；默认 `default` / 1） |
 | `KEEL_QUOTA_RUNS` / `KEEL_QUOTA_EVENTS_PER_MINUTE` | 默认租户文档的 per-tenant 配额（并发 run / 每分钟事件）；0 = 不限，租户存储文档可覆盖 |
 

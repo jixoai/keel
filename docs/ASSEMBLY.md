@@ -1,7 +1,8 @@
 # Assembly — 四层装配、row id overlay 与能力 seam
 
-> 状态：W0.5 交付（2026-11-23）。实现：`internal/assembly`（纯模型）+
-> `internal/loadout`（生产适配）。契约来源：
+> 状态：W0.5 交付 + W3 文件加载器（2026-11-23）。实现：`internal/assembly`（纯模型）+
+> `internal/configfile`（磁盘适配：原子轮转/启动加载）+
+> `internal/loadout`（生产服务适配）。契约来源：
 > `docs/PLUGIN-EXTENSIBILITY.md` §6、`openspec/changes/keel-harness-v2/specs/plugin-architecture/spec.md`
 > （Requirement: 装配模型 / 能力 seam 可替换）、`design.md` §10、ADR
 > `openspec/changes/keel-harness-v2/adr/0003-four-layer-row-overlay.md`。
@@ -13,7 +14,8 @@
 
 `internal/assembly` 是**纯模型**：没有 goroutine、锁、时钟、全局状态，也不 import
 `servicehost` / `servicegraph` / `agent` / 产品层。唯一的仓内依赖是
-`internal/pluginpkg`（`Layer` 词汇的冻结属主）。它负责：
+`internal/pluginpkg`（`Layer` 词汇的冻结属主）与 `internal/capturepolicy`（捕获策略闭集，
+见 §5.4）。它负责：
 
 - 校验并叠加 base → mode（serve/headless/tui/sdk）→ preset → config.toml；
 - 按 row id 解析 effective rows（缺席语义、禁止重排）；
@@ -22,12 +24,17 @@
 - 校验五个能力 seam 的 provider 能力矩阵，启动前以类型化
   `unsupported_capability` 拒绝不支持的组合。
 
+`internal/configfile` 是**磁盘适配器，不是第二套配置系统**：解析/哈希/版本语义全部复用
+`internal/assembly`，它只加文件事实（是否存在、哪些字节是 active、何时被替换）与
+settings → 租户文档的覆盖。
+
 **不在本切片、不得伪装的**（W8/W9）：
 
 | 项 | 现状 | 归属 |
 |---|---|---|
-| 从磁盘读取生产 `config.toml` | 生产配置源仍是 `host.TenantConfig`（部署文档/管理端写入） | W8/W9 |
-| `config.toml.new` → `fsync` → `rename()` 文件适配 | 轮转的**版本/锚点语义**已实现；原子文件写不在纯模型内 | W8/W9 |
+| `headless` / `tui` / `sdk` mode bundle | 仅 `serve` 显式接线；其余请求直接报错 | W8/W9 |
+| 真实 local/remote/SSH seam provider 注册与启动检查 | capability 词汇、矩阵、typed rejection 已实现；生产进程尚未注册 provider 集合 | W8/W9 |
+| `config.toml` row 覆盖进入生产服务图 | 文件行被严格解析并随版本 pin；生产服务选择仍由租户文档映射（base 尚未携带 shell/file 等非 service row） | W8/W9 |
 | `headless` / `tui` / `sdk` mode bundle | 仅 `serve` 显式接线；其余请求直接报错 | W8/W9 |
 | 真实 local/remote/SSH seam provider 注册与启动检查 | capability 词汇、矩阵、typed rejection 已实现；生产进程尚未注册 provider 集合 | W8/W9 |
 
@@ -144,6 +151,9 @@ type Row struct {
 ```toml
 version = 1
 
+[filesystem.capture]
+mode = "checkpoint"        # per-tool-call | checkpoint | manual
+
 [[rows]]
 id = "keel.shell#bash-local"
 impl = "ssh"
@@ -155,7 +165,8 @@ id = "keel.ui#shell"
 absent = true
 ```
 
-- 顶层只允许 `version = 1`；只允许 `[[rows]]` 表。
+- 顶层只允许 `version = 1`；只允许 `[[rows]]` 和 `[filesystem.capture]` 两个表。
+- `[filesystem.capture]` 只允许 `mode`，值必须是闭集之一、不带前后空白、不能为空。
 - 行级只允许 `id`、`impl`、`absent`、`params.<key>`。
 - `params` 值是字符串（basic `"..."` 或 literal `'...'`）；数组、内联表、多行字符串
   不在子集内，遇到即 `config-value`，不半应用。
@@ -164,11 +175,11 @@ absent = true
 
 ### 5.2 版本哈希
 
-`Config.Hash()` 是规范化内容摘要：跳过空白/注释，params 与 rows 排序后哈希，
-输出 `sha256:<64 hex>`。因此：
+`Config.Hash()` 是规范化内容摘要：跳过空白/注释，settings 按 key、params 与 rows 排序后
+哈希，输出 `sha256:<64 hex>`。因此：
 
-- 同内容不同写法（键序、行序、注释）哈希相同；
-- `impl`/`params`/`absent` 任一变化哈希不同；
+- 同内容不同写法（键序、行序、注释、settings/rows 表先后）哈希相同；
+- `impl`/`params`/`absent`/`filesystem.capture.mode` 任一变化哈希不同；
 - 行序本身不改变 effective 配置，所以不制造新 hash；是否合法由 `Build` 的
   `row-order` 判断。
 
@@ -186,13 +197,64 @@ next, _ := rotation.Rotate(config2, nextAnchorEventSeq)    // revision+1
   `Revision` 每次 `Rotate` 前进（即使内容相同——轮转事件本身是版本事实）。
 - `AnchorEventSeq` 必须严格大于当前锚点且非负；否则 `config-anchor`。
 - `Pinned` 是深拷贝：轮转不会改变进行中 run 的版本。
-- 文件级原子替换（写 `config.toml.new` → fsync → `rename()`）由宿主在 W8/W9 实现；
-  `Rotation` 只定义版本与锚点语义，不读写文件。
-- capture 策略同样按 run 固定：租户文档 `filesystem.capture.mode` 在每次 attempt
-  开始时解析一次（存储文档覆盖启动文档），worker 把模式固定在本次 attempt 的工具
-  上下文，配置轮转只影响下一次 run。`checkpoint`/`manual` 必须有对应触发器
-  （run 完成钩子 / 显式 checkpoint），否则 attempt 以 `capture_trigger_missing`
-  类型化错误失败；不存在“没有触发器的模式静默吞掉 capture”的降级。
+
+### 5.4 磁盘加载器（`internal/configfile`）
+
+`internal/configfile.Loader` 是 config.toml 的唯一磁盘适配器。`keel serve`
+（`--config-file` / `KEEL_CONFIG_FILE`，默认 `$KEEL_HOME/config.toml`）只在启动时调用
+`Open`；`Rotate`/`Reload` 是库 API（有测试），本切片没有生产轮转调用者或 HTTP 入口：
+
+```go
+loader, err := configfile.Open(configfile.Options{Path: path, AnchorEventSeq: 0})
+pinned := loader.Pin()                       // attempt 固定
+fact, err := loader.Rotate(data, anchorSeq)  // 库 API：原子轮转 + revision+1
+```
+
+- **启动加载**：`Open` 读 active 文件并严格解析。文件缺失 = 空配置（可选文件）；
+  文件不可读/非法 = 启动失败（fail closed），不进入“半应用”状态。
+- **原子轮转**：先完整解析校验 → 写 `config.toml.new` → `fsync(file)` →
+  `rename()` → `fsync(dir)` → 推进不可变版本。解析/写/rename 失败时 active 文件与
+  当前版本都不变，staging 文件被清理；不存在半写的 `config.toml`。
+- **账本锚点**：`Rotate(data, anchorEventSeq)` 的 `anchorEventSeq` 由宿主提交
+  `config.rotated`（payload 带 `configHash`/`revision`）后提供；必须严格大于当前锚点。
+  启动时没有轮转事件则为 0。loader 不自行发事件，避免第二套身份/注入。
+- **外部轮转**：`Reload(anchorEventSeq)` 采纳已原子替换的 active 文件（同样要求锚点
+  前进），供“另一个进程写了新文件”的场景。
+- **状态暴露**：`Status()` 返回 `Path/Exists/Revision/Hash/AnchorEventSeq/CaptureMode/
+  Rotations/LastRotation`；`keel serve` 启动日志输出 active version/hash，并在
+  `GET /v1/capabilities` 的 `configFile` 块暴露同一事实（不含本机路径）。
+- **重启**：重启后 `Open` 读取 active 文件，hash/内容与轮转后的版本一致
+  （`revision` 是进程内轮转计数；跨重启的权威锚点由账本事件提供）。
+- **未接线范围**：没有生产代码调用 `Rotate`/`Reload`，也没有 HTTP/自动轮转入口；
+  调用者提交 `config.rotated` 并传入锚点的接线属于 W8/W9。`Status` 只暴露启动版本与
+  测试/库调用产生的轮转事实。
+
+### 5.5 settings 与优先级
+
+`config.toml` 的 settings 是**租户文档的覆盖层**，不是第二套 schema：
+
+```text
+boot 默认（环境变量/部署文档） < 存储的管理端 JSON 文档 < config.toml settings
+```
+
+- 当前文件只携带 `filesystem.capture.mode`（唯一由 run path 每次 attempt 解析的租户
+  setting）；管理端 JSON 仍可写同一键，且对文件未声明的键继续生效。
+- `configfile.OverlayTenant(pinned, tenant)` 把文件 setting 叠加到租户文档；输入不被
+  修改。`keel serve` 启动时先叠加一次 generation 租户文档，`cmd/keel` 的每-attempt
+  capture resolver 以**叠加前的 boot 文档**为默认、再以文件 pin 最后覆盖；因此移除文件
+  setting 会回退到存储文档/启动默认，而不是把旧文件值粘在默认里。轮转只影响下一次
+  attempt。
+- 未知 setting key / 非法值在解析阶段拒绝（`config-key` / `config-value`），不做部分
+  应用；新增文件键必须先在这里登记词汇。
+
+### 5.6 capture 策略与 run 固定
+
+租户文档 `filesystem.capture.mode`（或 config.toml 的同名 setting）在每次 attempt
+开始时解析一次（存储文档覆盖启动文档，文件 setting 最后覆盖），worker 把模式固定在
+本次 attempt 的工具上下文，配置轮转只影响下一次 run。`checkpoint`/`manual` 必须有
+对应触发器（run 完成钩子 / 显式 checkpoint），否则 attempt 以
+`capture_trigger_missing` 类型化错误失败；不存在“没有触发器的模式静默吞掉 capture”
+的降级。
 
 ## 6. 能力 seam 与 capability matrix
 
@@ -228,9 +290,10 @@ _, err := assembly.Prepare(docs, registry, []assembly.Requirement{
     非法 provider id、重复 provider/capability——词汇错误，任何 provider 都满足不了。
 - 不静默降级：没有 fallback 链，也没有“先启动再在第一次工具调用失败”。
 
-## 7. 生产接线（W0.5 实际生效的部分）
+## 7. 生产接线（W0.5 已生效 + W3 启动加载）
 
-`internal/loadout` 是唯一适配层，不新增 DI/运行时：
+`internal/loadout` 是唯一服务适配层，不新增 DI/运行时；`internal/configfile` 是唯一
+config.toml 磁盘适配器：
 
 | 函数 | 作用 |
 |---|---|
@@ -240,16 +303,27 @@ _, err := assembly.Prepare(docs, registry, []assembly.Requirement{
 | `AssemblyConfig(tenant, opts)` | 把 `host.TenantConfig` 映射为 config stage：未启用的服务 → absent row；models 文档派生的 llm 版本 → impl 覆盖 |
 | `AssembledServices(tenant, opts)` | `base → serve → config` 叠加后从 active rows 取服务清单；`Blocked` 视为 loadout 失败 |
 | `FromTenantConfig` | 用 `AssembledServices` 决定服务集合，再交给 `servicegraph` 装配 |
+| `configfile.Open` | `keel serve` 启动加载 config.toml；缺失 = 空，非法 = 启动失败 |
+| `configfile.OverlayTenant` | 启动时把文件 setting 叠到 generation 租户文档；per-attempt capture resolver 再以文件 pin 最后覆盖 |
+
+`Loader.Rotate/Reload/Status`（§5.4）是**库 API**：原子轮转、外部采纳与版本事实有针对性
+测试，但本切片没有生产轮转调用者/HTTP 触发入口，`Rotate/Reload` 的账本事件与锚点由宿主
+（尚未接线）提交；`Status` 的启动值已通过日志与 `GET /v1/capabilities` 暴露。生产轮转
+入口和 config.toml row 覆盖进入服务图仍是 W8/W9。
 
 因此生产路径上的“哪些服务存在”已由四层 overlay 决定，而不是第二套 if/else；
-`servicegraph` 仍是唯一的加载/激活器。`config.toml` 文件源、其余 mode bundle 和真实
-seam provider 注册仍是 W8/W9，本切片不伪造。
+`servicegraph` 仍是唯一的加载/激活器。config.toml 的 rows 已严格解析并随版本 pin，
+但生产 base 目前只携带 service rows，非 service row 的覆盖进入服务图仍属 W8/W9，
+本切片不伪造；文件 settings 当前只携带 `filesystem.capture.mode`，已真实进入 run
+路径。其余 mode bundle 与真实 seam provider 注册仍是 W8/W9。
 
 ## 8. 校验命令
 
 ```bash
 go test ./internal/assembly
+go test ./internal/configfile
 go test ./internal/loadout
 go test ./internal/servicehost
 go test ./internal/architecture
+go test ./cmd/keel
 ```

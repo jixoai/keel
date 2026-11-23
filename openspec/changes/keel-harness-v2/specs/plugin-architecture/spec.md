@@ -27,8 +27,9 @@ Harness MUST 按 layer 选择装载、隔离与回收策略。
 
 装配 MUST 由 **base bundle + mode bundle + preset + 用户配置** 四层叠加；覆盖 MUST 按
 row id 进行、last write wins；激活 MUST 由服务可用性驱动，MUST NOT 依赖手写的启动顺序。
-用户配置（`config.toml`）MUST 可轮转，轮转 MUST 生成新版本并以账本事件序号为锚点生效；
-一次 run MUST 固定使用一个版本。
+`config.toml` MUST 从磁盘严格解析、启动加载并可轮转：非法文件 MUST 使启动失败，轮转
+MUST 以 `config.toml.new` → fsync → rename 原子替换并以账本事件序号为锚点；一次 run MUST
+固定一个版本。文件 setting MUST 映射到租户文档，且 MUST NOT 破坏管理端 JSON 路径。
 
 #### Scenario: mode bundle 覆盖 base
 - **WHEN** `headless` 装配面不启用 UI 插件而启用同一套工具
@@ -41,6 +42,25 @@ row id 进行、last write wins；激活 MUST 由服务可用性驱动，MUST NO
 #### Scenario: 配置轮转后新 run 生效
 - **WHEN** 用户改写 `config.toml` 并触发轮转
 - **THEN** 正在进行中的 run 保持旧版本；下一次 run 使用新版本，并记录锚点事件序号
+
+#### Scenario: 非法配置文件 fail closed
+- **WHEN** 启动时 `config.toml` 含未知表、非法 capture 模式或错误值类型
+- **THEN** 进程拒绝启动并给出字段级错误，不进入半应用配置
+- **AND** 一次轮转中的非法文档不改变 active 文件与当前版本，也不留下 staging 文件
+
+#### Scenario: 原子轮转无半文件
+- **WHEN** 轮转写入过程中解析、fsync 或 rename 失败
+- **THEN** 读取方只能看到旧的完整文件或新的完整文件，`config.toml.new` 被清理
+
+#### Scenario: 文件 setting 覆盖租户文档
+- **WHEN** 租户 JSON 文档设 `checkpoint`，`config.toml` 设 `manual`
+- **THEN** 下一次 attempt 使用 `manual`，summary 记录 `config.toml@revision=<n>`；
+  删除文件 setting 后管理端 JSON 的 `checkpoint` 重新生效
+
+#### Scenario: active version 可观测
+- **WHEN** 启动加载或一次成功轮转完成
+- **THEN** 宿主日志与 `GET /v1/capabilities` 的 `configFile` 块给出 revision、hash、
+  账本锚点、rotation 次数与最近一次轮转的前后 revision/hash
 
 ### Requirement: 能力 seam 可替换
 

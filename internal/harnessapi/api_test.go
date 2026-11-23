@@ -111,6 +111,16 @@ func TestCapabilities(t *testing.T) {
 		Triggers:  harnessext.NewTriggerEngine(harnessext.TriggerEngineOptions{Logger: testLogger()}),
 		Subagents: nil,
 		Logger:    testLogger(),
+		ConfigFileStatus: func() *ConfigFileCapabilities {
+			return &ConfigFileCapabilities{
+				Exists: true, Revision: 3, Hash: "sha256:abc", AnchorEventSeq: 42,
+				CaptureMode: "checkpoint", Rotations: 2,
+				LastRotation: &ConfigFileRotation{
+					Revision: 3, Hash: "sha256:abc", AnchorEventSeq: 42,
+					PreviousRevision: 2, PreviousHash: "sha256:def", RotatedAt: "2026-11-23T00:00:00Z",
+				},
+			}
+		},
 	}))
 	defer server.Close()
 	var body Capabilities
@@ -130,6 +140,32 @@ func TestCapabilities(t *testing.T) {
 	}
 	if len(body.Hooks) != len(harnessext.HookEvents()) {
 		t.Fatalf("hooks = %v", body.Hooks)
+	}
+	if body.ConfigFile == nil || body.ConfigFile.Revision != 3 ||
+		body.ConfigFile.AnchorEventSeq != 42 || body.ConfigFile.CaptureMode != "checkpoint" {
+		t.Fatalf("configFile = %+v", body.ConfigFile)
+	}
+	if body.ConfigFile.LastRotation == nil ||
+		body.ConfigFile.LastRotation.PreviousHash != "sha256:def" ||
+		body.ConfigFile.LastRotation.RotatedAt != "2026-11-23T00:00:00Z" {
+		t.Fatalf("configFile rotation = %+v", body.ConfigFile.LastRotation)
+	}
+}
+
+func TestCapabilitiesOmitsNilConfigFileBlock(t *testing.T) {
+	server := httptest.NewServer(New(Config{
+		Logger: testLogger(),
+		ConfigFileStatus: func() *ConfigFileCapabilities {
+			return nil
+		},
+	}))
+	defer server.Close()
+	var body Capabilities
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/capabilities", uuid.Nil, nil, &body); code != 200 {
+		t.Fatalf("capabilities: %d", code)
+	}
+	if body.ConfigFile != nil {
+		t.Fatalf("configFile = %+v, want the block omitted for a nil status", body.ConfigFile)
 	}
 }
 

@@ -1,0 +1,28 @@
+=== RUN   TestOpenMissingFileIsAnEmptyOptionalConfig
+--- PASS: TestOpenMissingFileIsAnEmptyOptionalConfig (0.00s)
+=== RUN   TestOpenRequiresAPath
+--- PASS: TestOpenRequiresAPath (0.00s)
+=== RUN   TestOpenRejectsInvalidFile
+--- PASS: TestOpenRejectsInvalidFile (0.00s)
+=== RUN   TestRotateReplacesTheFileAtomically
+--- PASS: TestRotateReplacesTheFileAtomically (0.01s)
+=== RUN   TestRotationKeepsInFlightAttemptOnItsPinnedVersion
+--- PASS: TestRotationKeepsInFlightAttemptOnItsPinnedVersion (0.01s)
+=== RUN   TestRotateRejectsInvalidDocumentsWithoutTouchingTheActiveFile
+--- PASS: TestRotateRejectsInvalidDocumentsWithoutTouchingTheActiveFile (0.00s)
+=== RUN   TestRotateRejectsAnAnchorThatDoesNotAdvance
+--- PASS: TestRotateRejectsAnAnchorThatDoesNotAdvance (0.01s)
+=== RUN   TestRotationWriteFailureLeavesNoPartialFile
+--- PASS: TestRotationWriteFailureLeavesNoPartialFile (0.00s)
+=== RUN   TestRotateOverwritesAStaleStagingFile
+--- PASS: TestRotateOverwritesAStaleStagingFile (0.01s)
+=== RUN   TestConfigFileCaptureModeOverlaysTheTenantDocument
+--- PASS: TestConfigFileCaptureModeOverlaysTheTenantDocument (0.00s)
+=== RUN   TestRestartPicksTheRotatedVersion
+--- PASS: TestRestartPicksTheRotatedVersion (0.01s)
+=== RUN   TestReloadAdoptsAnExternallyRotatedFile
+--- PASS: TestReloadAdoptsAnExternallyRotatedFile (0.00s)
+=== RUN   TestConcurrentPinAndRotate
+--- PASS: TestConcurrentPinAndRotate (0.19s)
+PASS
+ok  	github.com/jixoai/keel/internal/configfile	0.606s

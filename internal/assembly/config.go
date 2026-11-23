@@ -7,12 +7,39 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/jixoai/keel/internal/capturepolicy"
 )
 
 // ConfigFormatVersion is the config.toml schema version this package parses.
 const ConfigFormatVersion = 1
 
 const configHashDomain = "keel-assembly-config-v1"
+
+// SettingFilesystemCaptureMode is the one setting the config.toml file carries
+// today. It maps onto the tenant document's filesystem.capture.mode and is the
+// only setting the run path resolves per attempt; other tenant settings remain
+// on the admin JSON document until their file representation is defined.
+const SettingFilesystemCaptureMode = "filesystem.capture.mode"
+
+// ConfigSettings is the typed settings table of a config.toml document. Keys
+// use the tenant document's dotted names so the file and the admin JSON
+// document share one vocabulary.
+type ConfigSettings struct {
+	Values map[string]string
+}
+
+// Get returns one setting value.
+func (s ConfigSettings) Get(key string) (string, bool) {
+	if s.Values == nil {
+		return "", false
+	}
+	value, ok := s.Values[key]
+	return value, ok
+}
+
+// Empty reports whether the document declares no settings.
+func (s ConfigSettings) Empty() bool { return len(s.Values) == 0 }
 
 // Config is one parsed config.toml document: the fourth assembly stage.
 //
@@ -23,6 +50,10 @@ type Config struct {
 	Version int
 	// Rows are the row overrides in declaration order.
 	Rows []Row
+	// Settings are the scalar settings the file carries (today only
+	// filesystem.capture.mode). They are not assembly rows: they overlay the
+	// tenant document, not the service graph.
+	Settings ConfigSettings
 	// Source is a human label for issue paths (defaults to "config.toml" when
 	// parsed).
 	Source string
@@ -58,6 +89,17 @@ func (c Config) Hash() string {
 	hash.Write([]byte{0})
 	fmt.Fprintf(hash, "version=%d", c.Version)
 	hash.Write([]byte{0})
+	keys := make([]string, 0, len(c.Settings.Values))
+	for key := range c.Settings.Values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		hash.Write([]byte(key))
+		hash.Write([]byte{0})
+		hash.Write([]byte(c.Settings.Values[key]))
+		hash.Write([]byte{0})
+	}
 	for _, row := range rows {
 		hash.Write([]byte(canonicalConfigRow(row)))
 		hash.Write([]byte{0})
@@ -314,11 +356,63 @@ func validateConfigShape(config Config) []Issue {
 		}
 		issues = append(issues, validateParams(row.Params, where)...)
 	}
+	issues = append(issues, validateConfigSettings(config.Settings)...)
+	return issues
+}
+
+func validateConfigSettings(settings ConfigSettings) []Issue {
+	if settings.Empty() {
+		return nil
+	}
+	keys := make([]string, 0, len(settings.Values))
+	for key := range settings.Values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var issues []Issue
+	for _, key := range keys {
+		where := "config.toml." + key
+		value := settings.Values[key]
+		switch key {
+		case SettingFilesystemCaptureMode:
+			if value == "" || strings.TrimSpace(value) != value {
+				issues = append(issues, Issue{
+					Code:    IssueConfigValue,
+					Stage:   StageConfig,
+					Field:   where,
+					Message: fmt.Sprintf("%s must be one of per-tool-call|checkpoint|manual", key),
+				})
+				continue
+			}
+			if _, err := capturepolicy.ParseCaptureMode(value); err != nil {
+				issues = append(issues, Issue{
+					Code:    IssueConfigValue,
+					Stage:   StageConfig,
+					Field:   where,
+					Message: fmt.Sprintf("%s %q (want per-tool-call|checkpoint|manual)", key, value),
+				})
+			}
+		default:
+			issues = append(issues, Issue{
+				Code:    IssueConfigKey,
+				Stage:   StageConfig,
+				Field:   where,
+				Message: fmt.Sprintf("unknown config setting %q", key),
+			})
+		}
+	}
 	return issues
 }
 
 func cloneConfig(config Config) Config {
 	config.Rows = cloneRows(config.Rows)
+	if config.Settings.Values != nil {
+		values := make(map[string]string, len(config.Settings.Values))
+		for key, value := range config.Settings.Values {
+			values[key] = value
+		}
+		config.Settings.Values = values
+	}
 	return config
 }
 
@@ -340,6 +434,9 @@ type configRowState struct {
 //
 //	version = 1
 //
+//	[filesystem.capture]
+//	mode = "checkpoint"
+//
 //	[[rows]]
 //	id = "keel.shell#bash-local"
 //	impl = "ssh"
@@ -357,6 +454,8 @@ func ParseConfig(data []byte) (Config, error) {
 	seenVersion := false
 	versionRejected := false
 	seenIDs := map[RowID]bool{}
+	seenSettings := map[string]bool{}
+	seenCaptureTable := false
 
 	issue := func(code string, line int, format string, args ...any) {
 		issues = append(issues, Issue{
@@ -439,7 +538,17 @@ func ParseConfig(data []byte) (Config, error) {
 		}
 		if strings.HasPrefix(line, "[") {
 			finishRow()
-			issue(IssueConfigTable, lineNo, "unsupported table header %q (only [[rows]] is defined)", line)
+			if line == "[filesystem.capture]" {
+				if seenCaptureTable {
+					issue(IssueConfigDuplicate, lineNo, "[filesystem.capture] appears twice")
+					section = "table"
+					continue
+				}
+				seenCaptureTable = true
+				section = "capture"
+				continue
+			}
+			issue(IssueConfigTable, lineNo, "unsupported table header %q (only [[rows]] and [filesystem.capture] are defined)", line)
 			section = "table"
 			continue
 		}
@@ -469,6 +578,33 @@ func ParseConfig(data []byte) (Config, error) {
 		case "table":
 			// The table header was already rejected; do not pile up a second
 			// issue for every key under it.
+		case "capture":
+			if key != "mode" {
+				issue(IssueConfigKey, lineNo, "unknown [filesystem.capture] key %q", key)
+				continue
+			}
+			if seenSettings[SettingFilesystemCaptureMode] {
+				issue(IssueConfigDuplicate, lineNo, "filesystem.capture.mode is declared twice")
+				continue
+			}
+			value, ok := parseTOMLString(rawValue)
+			if !ok {
+				issue(IssueConfigValue, lineNo, "filesystem.capture.mode must be a string")
+				continue
+			}
+			if value == "" || strings.TrimSpace(value) != value {
+				issue(IssueConfigValue, lineNo, "filesystem.capture.mode must be per-tool-call|checkpoint|manual without surrounding whitespace")
+				continue
+			}
+			if _, err := capturepolicy.ParseCaptureMode(value); err != nil {
+				issue(IssueConfigValue, lineNo, "filesystem.capture.mode %q (want per-tool-call|checkpoint|manual)", value)
+				continue
+			}
+			seenSettings[SettingFilesystemCaptureMode] = true
+			if config.Settings.Values == nil {
+				config.Settings.Values = map[string]string{}
+			}
+			config.Settings.Values[SettingFilesystemCaptureMode] = value
 		case "rows":
 			if current == nil {
 				issue(IssueConfigKey, lineNo, "key %q appears outside a [[rows]] table", key)

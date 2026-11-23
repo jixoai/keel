@@ -1,6 +1,14 @@
 W3 capture policy override — evidence (2026-11-23)
 =================================================
 
+> REBASE NOTE (2026-11-23, rebased onto a549e87): this evidence was recorded
+> before W11's `internal/capturepolicy` landed. At the rebase the duplicate
+> `internal/capturemode` package and the layerfs alias were deleted; the
+> package names below (`internal/layerfs/capturemode.go`, `Mode`, ...) now
+> read `internal/capturepolicy` (`CaptureMode`, `ParseCaptureMode`, ...).
+> Behavior and test intent are unchanged; the current run is in
+> `evidence/w3-config-loader/` and `evidence/w11-gates/`.
+
 Scope
 -----
 The missing W3 item from openspec/changes/keel-harness-v2/tasks.md:

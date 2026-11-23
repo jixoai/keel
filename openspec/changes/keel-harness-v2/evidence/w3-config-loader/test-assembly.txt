@@ -1,0 +1,62 @@
+=== RUN   TestParseConfigReadsTheCaptureSetting
+--- PASS: TestParseConfigReadsTheCaptureSetting (0.00s)
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/unknown_parent_table
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/unknown_setting_key
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/duplicate_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/duplicate_table
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/mode_is_not_a_string
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/empty_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/unknown_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/padded_mode
+=== RUN   TestParseConfigRejectsMalformedCaptureSettings/arrays_are_outside_the_subset
+--- PASS: TestParseConfigRejectsMalformedCaptureSettings (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/unknown_parent_table (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/unknown_setting_key (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/duplicate_mode (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/duplicate_table (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/mode_is_not_a_string (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/empty_mode (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/unknown_mode (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/padded_mode (0.00s)
+    --- PASS: TestParseConfigRejectsMalformedCaptureSettings/arrays_are_outside_the_subset (0.00s)
+=== RUN   TestParseConfigRoundTripsTheDocumentedSubset
+--- PASS: TestParseConfigRoundTripsTheDocumentedSubset (0.00s)
+=== RUN   TestParseConfigRejectsFieldLevelMistakes
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/missing_version
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/wrong_version
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/non-integer_version
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/unknown_table
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/unknown_top-level_key
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/unknown_row_key
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/id_is_not_a_string
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/param_is_not_a_string
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/duplicate_key
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/duplicate_row
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/absent_with_impl
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/absent_with_params
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/empty_row_table
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/row_without_id
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/row_with_invalid_id
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/present_row_without_impl
+=== RUN   TestParseConfigRejectsFieldLevelMistakes/invalid_param_key
+--- PASS: TestParseConfigRejectsFieldLevelMistakes (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/missing_version (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/wrong_version (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/non-integer_version (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/unknown_table (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/unknown_top-level_key (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/unknown_row_key (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/id_is_not_a_string (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/param_is_not_a_string (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/duplicate_key (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/duplicate_row (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/absent_with_impl (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/absent_with_params (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/empty_row_table (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/row_without_id (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/row_with_invalid_id (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/present_row_without_impl (0.00s)
+    --- PASS: TestParseConfigRejectsFieldLevelMistakes/invalid_param_key (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/assembly	0.320s

@@ -9,8 +9,10 @@
 // run can never switch policy mid-flight.
 //
 // The boot-time tenant document is the fallback (it carries deployment
-// defaults). A stored document overlays it, so quota-style tenant writes and the
-// capture policy share the same precedence and the same validation.
+// defaults). A stored document overlays it, and the config.toml file's
+// filesystem.capture.mode overlays both: the explicit rotation layer is the
+// outermost user layer for the keys it declares. The admin JSON path keeps
+// governing every key the file does not name.
 
 package main
 
@@ -22,8 +24,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/agent"
+	"github.com/jixoai/keel/internal/assembly"
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/capturepolicy"
+	"github.com/jixoai/keel/internal/configfile"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
@@ -35,15 +39,24 @@ type tenantConfigReader interface {
 	GetTenantConfig(ctx context.Context, tenantID uuid.UUID) (store.TenantConfigRecord, error)
 }
 
+// pinnedConfigSource is the config.toml seam: one immutable version per
+// attempt. *configfile.Loader satisfies it.
+type pinnedConfigSource interface {
+	Pin() assembly.Pinned
+}
+
 // newRunCaptureResolver builds the runner's per-attempt capture policy source.
 // documents may be nil (no stored-document seam): the boot tenant document is
 // then the only source. workspace is the execution space whose explicit
 // checkpoint is the manual/checkpoint trigger; nil keeps the modes fail-closed
-// at policy validation instead of pretending a trigger exists.
+// at policy validation instead of pretending a trigger exists. configFile may
+// be nil (no file loaded): the file setting is then absent and the stored/boot
+// precedence is unchanged.
 func newRunCaptureResolver(documents tenantConfigReader, defaults host.TenantConfig,
-	workspace *bashbridge.LayerWorkspaces) func(context.Context, kernel.Scope) (agent.RunCapture, error) {
+	workspace *bashbridge.LayerWorkspaces,
+	configFile pinnedConfigSource) func(context.Context, kernel.Scope) (agent.RunCapture, error) {
 	return func(ctx context.Context, scope kernel.Scope) (agent.RunCapture, error) {
-		mode, source, err := effectiveCaptureMode(ctx, documents, defaults, scope)
+		mode, source, err := effectiveCaptureMode(ctx, documents, defaults, configFile, scope)
 		if err != nil {
 			return agent.RunCapture{}, err
 		}
@@ -62,32 +75,47 @@ func newRunCaptureResolver(documents tenantConfigReader, defaults host.TenantCon
 	}
 }
 
-// effectiveCaptureMode merges the stored tenant document over the boot
-// document and returns the capture mode. A read or parse failure is returned to
-// the runner, which fails the attempt before any tool executes: running under
-// an unknown policy is worse than not running.
+// effectiveCaptureMode applies the documented precedence:
+//
+//	boot defaults < stored admin tenant document < config.toml setting
+//
+// It returns the mode and an audit source. A read or parse failure is returned
+// to the runner, which fails the attempt before any tool executes: running
+// under an unknown policy is worse than not running.
 func effectiveCaptureMode(ctx context.Context, documents tenantConfigReader,
-	defaults host.TenantConfig, scope kernel.Scope) (capturepolicy.CaptureMode, string, error) {
+	defaults host.TenantConfig, configFile pinnedConfigSource,
+	scope kernel.Scope) (capturepolicy.CaptureMode, string, error) {
 	mode := defaults.Filesystem.Capture.EffectiveMode()
-	if documents == nil {
-		return mode, "boot-default", nil
-	}
-	record, err := documents.GetTenantConfig(ctx, scope.TenantID)
-	switch {
-	case err == nil:
-		document, parseErr := host.ParseTenantConfig(record.Config)
-		if parseErr != nil {
-			return "", "", fmt.Errorf("stored tenant config: %w", parseErr)
+	source := "boot-default"
+	if documents != nil {
+		record, err := documents.GetTenantConfig(ctx, scope.TenantID)
+		switch {
+		case err == nil:
+			document, parseErr := host.ParseTenantConfig(record.Config)
+			if parseErr != nil {
+				return "", "", fmt.Errorf("stored tenant config: %w", parseErr)
+			}
+			merged := host.Merge(defaults, document)
+			mode = merged.Filesystem.Capture.EffectiveMode()
+			source = fmt.Sprintf("stored-document@%d", record.Revision)
+		case errors.Is(err, store.ErrNoTenant):
+			// A tenant without a stored document runs on the boot defaults.
+		default:
+			return "", "", fmt.Errorf("read stored tenant config: %w", err)
 		}
-		merged := host.Merge(defaults, document)
-		return merged.Filesystem.Capture.EffectiveMode(),
-			fmt.Sprintf("stored-document@%d", record.Revision), nil
-	case errors.Is(err, store.ErrNoTenant):
-		// A tenant without a stored document runs on the boot defaults.
-		return mode, "boot-default", nil
-	default:
-		return "", "", fmt.Errorf("read stored tenant config: %w", err)
 	}
+	if configFile != nil {
+		pinned := configFile.Pin()
+		fileMode, ok, err := configfile.CaptureModeOf(pinned.Config)
+		if err != nil {
+			return "", "", fmt.Errorf("config.toml: %w", err)
+		}
+		if ok {
+			mode = fileMode
+			source = fmt.Sprintf("config.toml@revision=%d", pinned.Version.Revision)
+		}
+	}
+	return mode, source, nil
 }
 
 // checkpointDocument is the model-visible bash {action:"checkpoint"} surface.
