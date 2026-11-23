@@ -53,6 +53,7 @@ import (
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicegraph"
 	"github.com/jixoai/keel/internal/skills"
+	"github.com/jixoai/keel/internal/spill"
 	"github.com/jixoai/keel/internal/supervisor"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/toolsurface"
@@ -84,6 +85,15 @@ type Seams struct {
 	// tenant document (nil disables the update).
 	Limits *quota.Limits
 	Logger *slog.Logger
+}
+
+// MemoryOptions carries the durable byte seam of the keel.spill capability: the
+// runner writes pruned tool results here and reads them back by reference. The
+// hosting process supplies the tenant blob store; a nil Spill keeps the pruner
+// off (the image offload still runs, because image references are already
+// durable).
+type MemoryOptions struct {
+	Spill spill.Store
 }
 
 // PromptOptions carries the hosting process's host-assembly inputs that are not
@@ -258,6 +268,9 @@ type Config struct {
 	Prompt PromptOptions
 	MCP    MCPOptions
 	LLM    LLMOptions
+	// Memory is the keel.spill durable seam used by the compaction memory
+	// hygiene. A zero value keeps the pruner off.
+	Memory MemoryOptions
 	// Bindings carries the execution-binding read seam (the tenant's Agent and
 	// AgentTeam documents) and the root prompt-file references resolve against.
 	// A zero value disables the binding surface.

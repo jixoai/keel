@@ -337,6 +337,9 @@ const (
 	BotPluginID = "keel.bot"
 	// TeamBotPluginID is the TeamBot plugin (mission, roster, captain).
 	TeamBotPluginID = "keel.team-bot"
+	// SpillPluginID is the keel.spill capability plugin: long content leaves the
+	// request view and a durable reference stays (backend: internal/spill).
+	SpillPluginID = "keel.spill"
 	// CapabilityPluginVersion is the version all three capability plugins ship.
 	CapabilityPluginVersion = "1.0.0"
 )
@@ -354,4 +357,14 @@ func NewBotPlugin() *Plugin {
 // NewTeamBotPlugin builds the TeamBot plugin.
 func NewTeamBotPlugin() *Plugin {
 	return &Plugin{ID: TeamBotPluginID, Version: CapabilityPluginVersion, Provides: []string{"cap:team-bot-registry"}}
+}
+
+// NewSpillPlugin builds the keel.spill capability plugin. Its behavior lives in
+// internal/spill + internal/compaction (the pruner), wired by the runner; the
+// plugin entity carries the registry marker and the capability names so the
+// plugin list, the audit surface and the builtin manifest describe the same
+// thing. It contributes nothing to the model's tool face, which stays the fixed
+// eleven aggregated tools.
+func NewSpillPlugin() *Plugin {
+	return &Plugin{ID: SpillPluginID, Version: CapabilityPluginVersion, Provides: []string{"cap:ctx-spill"}}
 }

@@ -45,6 +45,7 @@ import (
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/compaction"
 	"github.com/jixoai/keel/internal/loop"
+	"github.com/jixoai/keel/internal/spill"
 )
 
 // DefaultMaxTurns is the turn cap the default loop (PiLoop) applies when
@@ -172,14 +173,22 @@ type Limits struct {
 	EventBuffer int
 }
 
-// CompactionConfig configures automatic context compaction. Compaction is
-// disabled while ContextWindow <= 0 or Settings.Enabled is false.
+// CompactionConfig configures automatic context compaction and its memory
+// hygiene extensions. Compaction is disabled while ContextWindow <= 0 or
+// Settings.Enabled is false; hygiene additionally requires Hygiene.Enabled.
 type CompactionConfig struct {
 	// ContextWindow is the model's total token budget. The loop compacts when
 	// the estimated usage crosses Settings' threshold.
 	ContextWindow int
 	// Settings holds the thresholds/retention knobs.
 	Settings compaction.CompactionSettings
+	// Hygiene configures the tool-result pruner and image offload.
+	Hygiene compaction.HygieneSettings
+	// Spill is the durable store pruned tool results are written to. Nil keeps
+	// the pruner off; the image offload still runs.
+	Spill spill.Store
+	// SpillScope is the tenant/session a spilled payload belongs to.
+	SpillScope spill.Scope
 }
 
 // Hooks are the optional per-run seams a run coordinator wires into a loop.

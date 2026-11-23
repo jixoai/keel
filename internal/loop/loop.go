@@ -604,6 +604,11 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 			}
 			explicitContinuation = decision != nil && decision.Action == TurnActionContinue
 
+			// Keel extension: memory hygiene runs before compaction at the turn
+			// boundary. Pruning/offloading the request view is cheaper than a
+			// summary call and preserves every byte by reference; the transcript
+			// on the ledger is untouched.
+			maybeHygiene(ctx, agentCtx, &cfg, tel)
 			// Keel extension: auto-compaction at the turn boundary (pi's host does
 			// it between runs). Record utilization after any compaction so the
 			// telemetry summary reports the current used/window figure.
@@ -704,6 +709,36 @@ func applyPrepareRequest(ctx context.Context, agentCtx *agentcore.AgentContext, 
 	}
 	if upd.ThinkingLevel != nil {
 		cfg.ThinkingLevel = *upd.ThinkingLevel
+	}
+}
+
+// maybeHygiene applies the keel.compaction memory-hygiene extensions to the
+// in-memory context: large tool results outside the recent window are spilled
+// to the durable store and replaced by a bounded reference; image references
+// outside the image window become text references naming their blob. Nothing is
+// committed or rewritten in the ledger — the original messages were already
+// emitted, and the run result keeps them.
+//
+// The pass is a no-op unless both compaction and hygiene are enabled. A failure
+// (store down, a reference without a blob id) leaves the original message in
+// place and is reported; it never fails the run and never drops content.
+func maybeHygiene(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, tel *telemetry) {
+	if cfg == nil || !cfg.Compaction.Enabled || !cfg.Hygiene.Enabled {
+		return
+	}
+	before := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
+	out, report := compaction.ApplyHygiene(ctx, agentCtx.Messages, cfg.Hygiene, cfg.Spill, cfg.SpillScope)
+	if report.Changed() || len(report.Failures) > 0 {
+		agentCtx.Messages = out
+		if cfg.OnHygiene != nil {
+			cfg.OnHygiene(ctx, report)
+		}
+	}
+	if tel != nil && cfg.ContextWindow > 0 {
+		tel.recordContext(before, cfg.ContextWindow)
+		if report.Changed() {
+			tel.recordContext(report.TokensAfter, cfg.ContextWindow)
+		}
 	}
 }
 

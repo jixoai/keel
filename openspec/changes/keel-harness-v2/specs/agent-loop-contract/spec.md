@@ -50,6 +50,32 @@ run 时更新。每次 run MUST 记录 `(configHash, anchorEventSeq, toolManifes
 - **WHEN** 回看一条 assistant 事件
 - **THEN** 其 `inputSeqs` 精确指出本次请求呈现了哪些输入，不因后续追加而改变
 
+### Requirement: 记忆卫生只派生请求视图，不重写账本
+
+`keel.compaction` 的 tool-result-pruner 与 image-offload、`keel.spill` 的长文本溢出
+MUST 只作用于**下一次请求的派生视图**（loop 的 in-memory context 与 runner 的 transcript
+rebuild），MUST NOT 改写已提交的消息事件。被修剪/外置的内容 MUST 以**可恢复引用**留在
+上下文中（存储 id、内容哈希、字节数、有界预览），MUST NOT 静默丢弃；存储失败时 MUST 保留
+原文并留下可观测失败事实。`keel.prompt-cache` 的缓存边界 MUST 位于 system/tool 前缀之后、
+transcript 之前，使消息修剪/外置/压缩不会使缓存前缀失效；系统提示与工具声明 MUST 在
+turn 之间保持字节稳定（工具顺序与 schema 对象键顺序 MUST 规范化）。
+
+#### Scenario: 大工具结果被修剪后可恢复
+- **WHEN** 一个超出保留窗口的大工具结果被修剪
+- **THEN** 上下文只留下有界引用（存储 id、sha256、字节数、预览），按该引用读取存储得到逐字节原文；已提交的 tool result 事件不变
+
+#### Scenario: 旧图片外置保留 blob 引用
+- **WHEN** 一个图片引用落到图片窗口之外
+- **THEN** 请求视图把它替换为命名 blobId 的文本引用，provider 不再上传/内联旧图；blob 仍可按引用恢复
+
+#### Scenario: 溢出失败不丢内容
+- **WHEN** spill 存储不可用或引用缺少 blob id
+- **THEN** 原始消息保持在请求视图中，并产生可观测失败事实；run 不因记忆卫生失败而失败
+
+#### Scenario: 稳定前缀不被消息修剪击穿
+- **WHEN** 同一会话的相邻两次请求之间只有 transcript 被修剪/压缩
+- **THEN** system/tool 前缀字节不变，缓存断点仍命中；规范化的工具清单顺序与 schema 键序不因注册顺序抖动
+
 ### Requirement: 外部内核的能力矩阵与类型化拒绝
 
 外部内核适配器 MUST 声明自己的能力集（是否支持流式、工具、审批、fork、resume、压缩），

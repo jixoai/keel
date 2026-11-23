@@ -14,7 +14,9 @@ import (
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/compaction"
+	"github.com/jixoai/keel/internal/promptcache"
 	"github.com/jixoai/keel/internal/provider"
+	"github.com/jixoai/keel/internal/spill"
 )
 
 // LoopConfig holds the pluggable behavior of the agent loop. Every hook is
@@ -61,6 +63,31 @@ type LoopConfig struct {
 
 	// Extra is forwarded to StreamConfig.Extra.
 	Extra map[string]any
+
+	// PromptCache enables the stable-prefix policy (keel.prompt-cache): the
+	// request's tool list is canonicalized (sorted by name, schemas re-encoded
+	// with sorted keys) and the provider is asked to place its cache breakpoint
+	// at the end of the system/tool prefix. The prefix is deliberately before
+	// the transcript, so pruning/compaction cannot invalidate it.
+	PromptCache bool
+	// OnPromptPrefix, when set, receives the canonical prefix plan of every
+	// request. A tracker in the caller (promptcache.Tracker) turns consecutive
+	// plans into an invalidation report; the loop itself holds no history.
+	OnPromptPrefix func(model string, plan promptcache.Plan)
+
+	// Hygiene configures the keel.compaction memory-hygiene extensions
+	// (tool-result pruner and image offload) at every turn boundary. It is
+	// gated by Compaction.Enabled: hygiene is an extension of compaction, not a
+	// second memory subsystem.
+	Hygiene compaction.HygieneSettings
+	// Spill is the durable store that receives pruned tool results. Nil
+	// disables the pruner (the image offload needs no write and still runs).
+	Spill spill.Store
+	// SpillScope names the tenant/session a spilled payload belongs to.
+	SpillScope spill.Scope
+	// OnHygiene, when set, is called after a pass that rewrote messages or
+	// failed to. The original messages are always kept on failure.
+	OnHygiene func(ctx context.Context, report compaction.HygieneReport)
 }
 
 // streamAssistantResponse runs one assistant turn: it builds the request from
@@ -79,11 +106,21 @@ func streamAssistantResponse(ctx context.Context, agentCtx *agentcore.AgentConte
 	if cfg.ConvertToLlm != nil {
 		msgs = cfg.ConvertToLlm(msgs)
 	}
-	// 3. shape the LLM context.
+	// 3. shape the LLM context. With the prompt-cache policy on, the tool list
+	// is canonicalized so the prefix is byte-stable regardless of registration
+	// order; the plan is reported for invalidation diagnostics. The system
+	// prompt itself is never rewritten (its bytes are the prompt).
+	tools := agentCtx.Tools
+	if cfg.PromptCache {
+		tools = promptcache.CanonicalTools(agentCtx.Tools)
+		if cfg.OnPromptPrefix != nil {
+			cfg.OnPromptPrefix(cfg.Model, promptcache.Build(agentCtx.SystemPrompt, agentCtx.Tools))
+		}
+	}
 	llm := provider.LlmContext{
 		SystemPrompt: agentCtx.SystemPrompt,
 		Messages:     msgs,
-		Tools:        agentCtx.Tools,
+		Tools:        tools,
 	}
 	// 4. resolve API key dynamically, fall back to static.
 	key := cfg.APIKey
@@ -97,6 +134,7 @@ func streamAssistantResponse(ctx context.Context, agentCtx *agentcore.AgentConte
 		APIKey:        key,
 		ThinkingLevel: cfg.ThinkingLevel,
 		Extra:         cfg.Extra,
+		PromptCache:   cfg.PromptCache,
 	})
 	if err != nil {
 		// Early "cannot build stream" failure: synthesize a terminal message so

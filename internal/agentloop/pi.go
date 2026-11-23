@@ -99,7 +99,15 @@ func (p *PiLoop) Run(ctx context.Context, in Input) (*RunStream, error) {
 			ConvertToLlm:     in.Context.ConvertToLlm,
 			ContextWindow:    in.Compaction.ContextWindow,
 			Compaction:       in.Compaction.Settings,
+			Hygiene:          in.Compaction.Hygiene,
+			Spill:            in.Compaction.Spill,
+			SpillScope:       in.Compaction.SpillScope,
 			Extra:            in.Model.Extra,
+			// The stable-prefix policy is unconditional for this loop: it only
+			// canonicalizes the tool list (a semantic no-op) and lets a wire with
+			// an explicit cache breakpoint use it. A driver without one ignores
+			// the request bit.
+			PromptCache: true,
 		},
 		Batch:                   batch,
 		GetFollowUpMessages:     in.Hooks.GetFollowUpMessages,

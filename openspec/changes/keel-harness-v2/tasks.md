@@ -472,10 +472,13 @@
 
 **记忆卫生（W1–W2）**
 
-- [ ] `keel.spill`：长文本溢出到存储，上下文只留引用
-- [ ] `keel.compaction` 扩展：tool-result-pruner + image-offload （对账 2026-11-20：部分——缺口：压缩核心/自动压缩在（internal/compaction、internal/agent/runner.go）；无 tool-result-pruner/image-offload）
+- [x] `keel.spill`：长文本溢出到存储，上下文只留引用
+      （W12 2026-11-23：`internal/spill` 契约 + `internal/spillblob` 生产实现（租户 blob 表 + 共享 CAS，同一 uploader/reader，无第二存储）；内建插件实体 `keel.spill`（`internal/harnessext` + `internal/pluginpkg/builtin/keel.spill.yaml`，capability ids `keel.spill.text`/`keel.spill.load`，模型工具面仍为固定 11）；引用文本含 ref/sha256/bytes/预览，`spill.Store.Load` 按引用逐字节恢复；测试 `internal/spill`、`internal/spillblob`（真 PG）；证据 `evidence/w12-memory/`）
+- [x] `keel.compaction` 扩展：tool-result-pruner + image-offload （对账 2026-11-20：部分——缺口：压缩核心/自动压缩在（internal/compaction、internal/agent/runner.go）；无 tool-result-pruner/image-offload）
+      （W12 2026-11-23：`internal/compaction/hygiene.go` 落地两遍：窗口外大工具结果→`spill` 存储+bounded reference（含 toolCallId/name、ref、sha256、bytes、preview），窗口外 `ImageRefContent`→文本 blob 引用；在 runner（镜像解析前，防旧图重传）与 loop 每 turn 边界（compaction 前）各跑一次；失败保留原文并报告，绝不静默丢；账本/已提交消息不变（只改请求视图）；token 估算沿用 `EstimateContextTokens`；测试 `compaction/hygiene_test.go`、`loop/hygiene_test.go`、`agent/hygiene_test.go`；证据 `evidence/w12-memory/`）
 - [ ] `keel.checkpoint`：checkpoint 策略（何时落、保留多少） （对账 2026-11-20：部分——缺口：checkpoint 语义在压缩内；无独立何时落/保留量策略插件）
-- [ ] `keel.prompt-cache`：稳定前缀与缓存边界
+- [x] `keel.prompt-cache`：稳定前缀与缓存边界
+      （W12 2026-11-23：`internal/promptcache` 规范化工具清单（按 name 排序、schema 对象键排序）+ 前缀 digest + `Tracker` 失效原因（system / tool set / tool declaration / model）；loop 在 `PromptCache` 开启时用规范化清单，Anthropic 编码器在 `StreamConfig.PromptCache` 时把 `cache_control: ephemeral` 断点放最后一个 tool（无 tools 时放 system content block）；断点刻意位于 transcript 之前，因此修剪/外置/压缩不会使缓存前缀失效；测试 `internal/promptcache`、`internal/provider/prompt_cache_test.go`；失效清单写入包文档与 spec delta）
 
 **护栏与自动恢复（W1，延伸 `supervision` spec）**
 

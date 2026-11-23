@@ -51,6 +51,7 @@ import (
 	"github.com/jixoai/keel/internal/servicehost"
 	"github.com/jixoai/keel/internal/sessionbinding"
 	"github.com/jixoai/keel/internal/skilllib"
+	"github.com/jixoai/keel/internal/spillblob"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 	"github.com/jixoai/keel/internal/tasklog"
@@ -639,8 +640,16 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if err := parkDisabledBeforeBoot(ctx, st, kern, policyReader, log); err != nil {
 		return fmt.Errorf("supervisor pre-boot park: %w", err)
 	}
+	// keel.spill's durable seam: pruned tool results are tenant blobs, stored and
+	// read through the same uploader/reader as attachments. It is built before
+	// Boot because the runner pins the seam with the loadout generation.
+	spillStore := spillblob.New(
+		&blob.Uploader{Store: st, CASDir: opts.CASDir, TempDir: os.TempDir()},
+		&blob.ImageSource{Store: st, Reader: blob.NewReader(st, 256, 1)},
+	)
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
+		Memory:  servicehost.MemoryOptions{Spill: spillStore},
 		// Every model tool call is authorized against the session's principal
 		// (Bot Account ∩ Harness) before it executes (A4.2b1).
 		ToolAccess:      toolAccess,
@@ -1590,6 +1599,7 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		harnessext.ModelPluginID:   func() *harnessext.Plugin { return harnessext.NewModelPlugin() },
 		harnessext.BotPluginID:     func() *harnessext.Plugin { return harnessext.NewBotPlugin() },
 		harnessext.TeamBotPluginID: func() *harnessext.Plugin { return harnessext.NewTeamBotPlugin() },
+		harnessext.SpillPluginID:   func() *harnessext.Plugin { return harnessext.NewSpillPlugin() },
 		harnessext.CreationPluginID: func() *harnessext.Plugin {
 			return harnessext.NewCreationPlugin(harnessext.CreationOptions{
 				Manager:  func() *harnessext.Manager { return pluginManager },

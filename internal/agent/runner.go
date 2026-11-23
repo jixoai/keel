@@ -19,7 +19,9 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/loop"
+	"github.com/jixoai/keel/internal/promptcache"
 	"github.com/jixoai/keel/internal/provider"
+	"github.com/jixoai/keel/internal/spill"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/supervisor"
 	"github.com/jixoai/keel/internal/telemetry"
@@ -31,6 +33,15 @@ import (
 type CompactionOptions struct {
 	ContextWindow int
 	Settings      compaction.CompactionSettings
+	// Hygiene configures the keel.compaction memory-hygiene extensions
+	// (tool-result pruner and image offload). Its Enabled flag is checked
+	// alongside Settings.Enabled by the loop; the production wiring enables both
+	// together.
+	Hygiene compaction.HygieneSettings
+	// Spill is the durable store pruned tool results are written to. Nil keeps
+	// the pruner off (the original content stays in context) while the image
+	// offload, which needs no write, still runs.
+	Spill spill.Store
 }
 
 // Assembly is the host seam: the system prompt and tool registry for a run.
@@ -804,6 +815,14 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		}
 	}
 
+	// Memory hygiene on the rebuilt transcript, before images are resolved into
+	// wire bytes: a large old tool result is spilled and replaced by its
+	// reference, and an image reference outside the recent window becomes text
+	// naming its blob id. Doing it here keeps the first request of a resumed
+	// session small and guarantees an offloaded image is never re-uploaded. The
+	// committed transcript is untouched; this is the request view only.
+	msgs = r.applyHygienePrePass(ctx, msgs, lease)
+
 	// Outbound image resolution: the transcript stores references (blobId), the
 	// provider wire wants bytes, a URL or a file handle. This is the boundary
 	// crossing, and it happens per attempt because the right form depends on the
@@ -913,6 +932,21 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			// Compaction is off unless the loadout's compaction service
 			// supplies settings; the loop reports a successful compaction on
 			// CompactionEvent, which the consumer persists below.
+			//
+			// The system/tool prefix is the provider's cache boundary. The loop
+			// canonicalizes the tool list and the wire driver places its
+			// breakpoint at the end of that prefix; the digest is logged for
+			// invalidation diagnosis. Message hygiene happens after the
+			// boundary, so it cannot invalidate the cached prefix.
+			PromptCache: true,
+			OnPromptPrefix: func(model string, plan promptcache.Plan) {
+				r.Logger.Debug("prompt prefix",
+					"session_id", lease.Scope.SessionID,
+					"model", model,
+					"digest", plan.PrefixDigest,
+					"tools", len(plan.ToolNames),
+					"boundary", plan.Boundary)
+			},
 		},
 		Batch: agenttool.BatchConfig{
 			ToolExecutorConfig: agenttool.ToolExecutorConfig{
@@ -959,9 +993,22 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		if window <= 0 {
 			window = r.Compaction.ContextWindow
 		}
+		// Compaction settings (and the hygiene extension) are configured even
+		// when the window is unknown: hygiene's own bounds are token-based and
+		// do not need the model's window. Auto-compaction itself still refuses
+		// to run without a window.
+		cfg.Compaction = r.Compaction.Settings
+		cfg.Hygiene = r.Compaction.Hygiene
+		cfg.Spill = r.Compaction.Spill
+		cfg.SpillScope = spill.Scope{
+			TenantID:  lease.Scope.TenantID.String(),
+			SessionID: lease.Scope.SessionID.String(),
+		}
+		cfg.OnHygiene = func(_ context.Context, report compaction.HygieneReport) {
+			logHygiene(r.Logger, lease, report)
+		}
 		if window > 0 {
 			cfg.ContextWindow = window
-			cfg.Compaction = r.Compaction.Settings
 		}
 	}
 	// The request overlay of the resolved model travels to the provider as

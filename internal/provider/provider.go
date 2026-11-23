@@ -115,6 +115,14 @@ type StreamConfig struct {
 	ThinkingLevel agentcore.ThinkingLevel
 	// Extra holds provider-specific options; opaque to the loop.
 	Extra map[string]any
+	// PromptCache asks the wire driver to place its prefix-cache breakpoint at
+	// the end of the system/tool prefix (the stable boundary owned by
+	// internal/promptcache). Only drivers whose wire has an explicit breakpoint
+	// act on it; a driver without one ignores the field, because the request is
+	// already byte-stable thanks to promptcache.CanonicalTools. It never changes
+	// the message history: the breakpoint is deliberately before it, so memory
+	// hygiene and compaction cannot invalidate the cached prefix.
+	PromptCache bool
 	// Telemetry is the optional request-scoped telemetry context. It is a
 	// contract seam only: providers may ignore it, and the runtime's
 	// request-level span is installed by wrapping the StreamFn

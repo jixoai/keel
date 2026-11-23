@@ -1,0 +1,13 @@
+id: keel.spill
+version: 1.0.0
+kind: in-process
+description: "Long-text spill: oversized tool results outside the recent context window are written to the tenant blob store and replaced by a bounded reference (blob id, sha256, byte size, preview). The full payload stays durable and recoverable by reference; the committed transcript is never rewritten. The pruner lives in internal/compaction and is wired by the run loop; this plugin is the capability registration."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides: {}
+permissions:
+  tools:
+    - keel.spill.text
+    - keel.spill.load
+source:
+  type: builtin

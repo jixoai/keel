@@ -37,6 +37,7 @@ import (
 	placementwiring "github.com/jixoai/keel/internal/placement/wiring"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
+	"github.com/jixoai/keel/internal/spillblob"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 	"github.com/jixoai/keel/internal/toolauth"
@@ -434,8 +435,16 @@ func main() {
 		log.Error("tool access", "err", err)
 		os.Exit(1)
 	}
+	// keel.spill's durable seam: pruned tool results are tenant blobs, written
+	// and read through the same uploader/reader the attachment pipeline uses. It
+	// is built before Boot because the runner pins the seam with the generation.
+	spillStore := spillblob.New(
+		&blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()},
+		&blob.ImageSource{Store: st, Reader: blob.NewReader(st, *streamCap, *batch)},
+	)
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		ToolAccess: toolAccess,
+		Memory:     servicehost.MemoryOptions{Spill: spillStore},
 		Seams: servicehost.Seams{
 			// The run loop keeps the raw kernel: its read-marker/checkpoint
 			// capabilities are derived from the concrete committer, and the

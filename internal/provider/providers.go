@@ -461,6 +461,17 @@ func encodeAnthropicRequest(req CompletionRequest, models []Model) ([]byte, erro
 	if tools := encodeAnthropicTools(req.Context.Tools); len(tools) > 0 {
 		body["tools"] = tools
 	}
+	// The prompt-cache breakpoint belongs at the end of the system/tool prefix,
+	// before any transcript message (the stable boundary documented in
+	// internal/promptcache). Anthropic accepts cache_control on the last tool
+	// definition, so the system prompt can stay a plain string; a request with
+	// no tools falls back to a system content block. This is opt-in through
+	// StreamConfig.PromptCache: a gateway that does not implement the field
+	// never sees it, and the request remains byte-stable either way because the
+	// loop canonicalizes the tool list first.
+	if req.Config.PromptCache {
+		applyAnthropicPromptCacheBoundary(body, req.Context.SystemPrompt)
+	}
 	// The caller's overlay joins the finished envelope: the resolved model's
 	// request patch owns max_tokens and thinking, the driver owns the envelope.
 	applyRequestExtra(body, req.Config.Extra, anthropicManagedKeys...)
@@ -816,6 +827,26 @@ func checkImageSupport(providerName, model string, models []Model, msgs []agentc
 		}
 	}
 	return nil
+}
+
+// applyAnthropicPromptCacheBoundary places the client's cache breakpoint at the
+// end of the stable prefix. The last tool definition is the preferred anchor
+// (the system prompt stays a string, matching the rest of the driver); with no
+// tools the system prompt becomes the one cacheable content block.
+func applyAnthropicPromptCacheBoundary(body map[string]any, systemPrompt string) {
+	breakpoint := map[string]any{"type": "ephemeral"}
+	if tools, ok := body["tools"].([]map[string]any); ok && len(tools) > 0 {
+		tools[len(tools)-1]["cache_control"] = breakpoint
+		return
+	}
+	if strings.TrimSpace(systemPrompt) == "" {
+		return
+	}
+	body["system"] = []any{map[string]any{
+		"type":          "text",
+		"text":          systemPrompt,
+		"cache_control": breakpoint,
+	}}
 }
 
 // encodeAnthropicTools maps AgentTools onto the Anthropic tool schema.

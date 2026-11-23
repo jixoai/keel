@@ -478,7 +478,17 @@ func compactionOptions(tenant host.TenantConfig) agent.CompactionOptions {
 			settings.ReserveTokens = reserve
 		}
 	}
-	return agent.CompactionOptions{ContextWindow: window, Settings: settings}
+	hygiene := compaction.DefaultHygieneSettings()
+	// The pruner protects the same recent tail compaction keeps verbatim; that
+	// is the one window the tenant already tunes, so a second knob would let
+	// the two disagree.
+	hygiene.KeepRecentTokens = settings.KeepRecentTokens
+	hygiene.ImageRecentTokens = settings.KeepRecentTokens
+	return agent.CompactionOptions{
+		ContextWindow: window,
+		Settings:      settings,
+		Hygiene:       hygiene,
+	}
 }
 
 // --- session projection --------------------------------------------------
@@ -613,6 +623,10 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 				return nil, fmt.Errorf("ctx.compaction is bound to %T, want *compactionService", bound)
 			}
 			opts := policy.Options()
+			// The spill store is the hosting process's blob seam. It is attached
+			// here (not inside the compaction service) because the service is a
+			// pure policy provider with no IO; the runner owns the write path.
+			opts.Spill = cfg.Memory.Spill
 			runner.Compaction = &opts
 		}
 		// The outbound media pipeline (keel-ga §3 provider-files, extended by the
