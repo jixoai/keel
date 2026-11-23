@@ -16,6 +16,7 @@
 #   perf/chaos-handoff.json  strict chaos, handoff mode (epoch evidence)
 #   perf/final-1000.json     2GB cgroup / 1000 sessions (peak merged in)
 #   perf/handoff-dual.json   dual-process handoff RSS (peak merged in)
+#   perf/rss-gate.json       VmRSS process-tree gate, only when opted in (see §8b)
 #   acceptance-all.log       the run log with one verdict line per gate
 #
 # Usage:
@@ -180,6 +181,36 @@ run "2GB / 1000 sessions" "$EVID/perf/final-1000.log" \
 run "handoff dual-process RSS" "$EVID/perf/handoff-dual.log" \
   env KEEL_HANDOFF_RSS_DB=keel_perf_handoff_final KEEL_HANDOFF_OUT="$EVID/perf/handoff-dual.json" \
   scripts/acceptance-handoff-rss.sh
+
+# --- 8b. VmRSS process-tree gate (opt-in) -----------------------------------
+# The 2GB cgroup peak above answers "did it survive the hard limit"; this gate
+# answers the harness-v2 memory protocol (sum of VmRSS over the backend tree,
+# <=500MB hard, <=300MB target, acceptance.md §0). It is off by default because
+# it starts its own native runtime plus a 1000-session load (~2 minutes and a
+# dedicated database), which would make every local run heavier.
+#   KEEL_ACCEPTANCE_RSS=1        run the profile gate (needs KEEL_TEST_DSN)
+#   KEEL_ACCEPTANCE_RSS=attach   sample an already-running backend instead;
+#                                requires KEEL_RSS_PORT or KEEL_RSS_PID
+# On a platform with neither procfs nor ps the sampler exits UNMEASURABLE (2)
+# and this gate fails; it never passes without a real measurement.
+case "${KEEL_ACCEPTANCE_RSS:-0}" in
+  1|profile)
+    run "VmRSS process-tree gate (profile)" "$EVID/perf/rss-gate.log" \
+      env KEEL_RSS_OUT="$EVID/perf/rss-gate.json" KEEL_RSS_DB=keel_perf_rss KEEL_RSS_DIR=/tmp/keel-rss-acceptance \
+      scripts/acceptance-rss.sh --profile
+    ;;
+  attach)
+    if [ -z "${KEEL_RSS_PORT:-}" ] && [ -z "${KEEL_RSS_PID:-}" ]; then
+      fail "KEEL_ACCEPTANCE_RSS=attach needs KEEL_RSS_PORT or KEEL_RSS_PID"
+    fi
+    run "VmRSS process-tree gate (attach)" "$EVID/perf/rss-gate.log" \
+      env KEEL_RSS_OUT="$EVID/perf/rss-gate.json" KEEL_RSS_DIR=/tmp/keel-rss-acceptance \
+      scripts/acceptance-rss.sh
+    ;;
+  *)
+    say "SKIP: VmRSS process-tree gate (set KEEL_ACCEPTANCE_RSS=1 for the 1000-session profile, or =attach with KEEL_RSS_PORT/KEEL_RSS_PID)"
+    ;;
+esac
 
 # --- 9. real model E2E (needs credentials + network; opt-in) ----------------
 # The provider-configuration phase is the only gate that proves the tenant's

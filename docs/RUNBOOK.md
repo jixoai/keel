@@ -163,6 +163,52 @@ go build -o /tmp/keel-loadtest ./cmd/loadtest
   单进程峰值各轮 485–640MB（随负载完成度浮动，均 ≤2GiB 的 32%），上限门 1.5GB。
 - 结果 JSON 含 p50/p95/p99、吞吐、429 计数、RSS 采样。
 
+## VmRSS 进程树内存门（`scripts/acceptance-rss.sh`）
+
+口径（`openspec/changes/keel-harness-v2/acceptance.md` §0）：**后端进程树的
+`VmRSS` 求和**，采样间隔 ≤10s，不含 page cache。判据：**>500MB 失败；300–500MB
+通过但记「未达目标」（`withinTarget:false`）；≤300MB 达标**。cgroup
+`memory.peak`（含 page cache）单列，只用于与 v1 基线对比，**不与 RSS 直接比较**。
+
+```bash
+# attach：给已在跑的后端采样（端口经 /v1/health 取 pid，并用 lsof 校验监听者）
+scripts/acceptance-rss.sh --port 13740
+scripts/acceptance-rss.sh --pid 12345 --duration 10s --out /tmp/keel-rss/attach.json
+
+# profile：起一个原生 runtime 并跑 1000 会话 / 64 并发 run / 1MiB 图片通道，
+# 采样窗口覆盖负载；RSS 与 workload 都真实才 PASS（约 2 分钟 + 独立库）
+KEEL_TEST_DSN='postgres://…' scripts/acceptance-rss.sh --profile
+```
+
+- 退出码：`0` PASS（含 300–500MB 的 above-target 档）、`1` 越限或负载无效、
+  `2` 不可测（无 procfs 且无 ps、目标消失、身份不匹配）。**没有「静默通过」路径**：
+  取不到样本就是 2，不是 0。
+- 平台：Linux 读 `/proc/<pid>/status:VmRSS`（进程表用 `ps` 建树，`ps` 缺失时仅在
+  所有 `/proc` 行可读时降级为 proc-only，否则 fail-closed）；**macOS 无 procfs/
+  `VmRSS`，用 `ps` 常驻集（KiB）作为平台等价读数**，summary 的 `source` 字段写明
+  （`ps-rss` vs `proc-status`），不会把 ps 读数冒充 Linux VmRSS。
+- 目标识别：`--port` 走后端自己的 `/v1/health` 取 pid，再用 `lsof` 交叉校验端口
+  监听者；容器端口代理/外来进程不一致时直接 exit 2（容器内请用 `--pid`）。只对
+  该 pid 及其后代求和，绝不把无关进程算进总量。
+- `profile` 模式遇到不可用的 PostgreSQL（psql 缺失且 docker daemon 无响应）或端口
+  占用会立即失败（docker/psql 探针带超时，不会挂住）；退出时回收 runtime、采样器
+  与数据库，并核对端口已释放。`--cgroup <container>` 可把 `memory.peak` 作为**独立
+  指标**附到 summary。
+  采样器自身子树（`processTree.excludedOverhead`，如 `python3` 采样器与 `ps`）不计入
+  总量；采样节奏用绝对截止时间，慢 `ps` 不会累积漂移，实际间距报在
+  `sampling.observedIntervalSec`。
+- 机读 summary（`--out`，默认 `/tmp/keel-rss/summary.json`）：`verdict`、
+  `exitCode`、`source`、`sampling`（间隔/实际间距/样本数/窗口/`stopReason`）、
+  `processes`（每个成员的 pid/comm/RSS）、`processTree`（zombie/中途退出/被排除的
+  采样器自身进程）、`totals`（peak/steady/p50）、`thresholds`
+  （`ceilingMB`/`targetMB`/`withinTarget`）、`workloadCheck`（profile 模式）。
+  W11 G4 报告直接引用其中的 `totals.peakMB`、`source` 与 `sampling`。
+- 自测（无进程、无网络，喂合成 `/proc` 与 `ps` 表）：`scripts/acceptance-rss.sh --self-test`；
+  CI 直接跑这条命令。
+- `scripts/acceptance-all.sh` 里是**opt-in** 门：`KEEL_ACCEPTANCE_RSS=1` 跑 profile，
+  `KEEL_ACCEPTANCE_RSS=attach`（配 `KEEL_RSS_PORT`/`KEEL_RSS_PID`）只采样已有进程；
+  默认 SKIP，避免每次本地全量验收都多背一个 1000 会话负载。
+
 ## 验收脚本（一条命令复跑）
 
 **推荐入口**：`scripts/acceptance-all.sh` —— 串行跑完全部验收门（build/vet、全仓
@@ -173,6 +219,10 @@ chaos kill/handoff、2GB/1000 与双进程内存门），每个门的工件先�
 ```bash
 KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence \
   scripts/acceptance-all.sh
+
+# 加上 VmRSS 进程树门（默认 SKIP；=1 跑 1000 会话 profile，=attach 只采已有进程）
+KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence \
+  KEEL_ACCEPTANCE_RSS=1 scripts/acceptance-all.sh
 ```
 
 改内核/装配/handoff 之后，也可以按下面顺序手工复跑；这些脚本都自己建/删**隔离库**
@@ -374,7 +424,8 @@ docker stop keel-keel-1   # SIGTERM -> drain -> 关闭
 `.github/workflows/ci.yml`：
 
 - `gofmt -l .` 零输出、`go vet ./...`、`go test -race ./...`（GitHub Actions
-  `postgres:18` service，注入 `KEEL_TEST_DSN`）、`go build ./...`；
+  `postgres:18` service，注入 `KEEL_TEST_DSN`）、`go build ./...`、
+  `scripts/acceptance-rss.sh --self-test`（VmRSS 解析/求和/阈值夹具，不启动进程）；
 - `image` job：`docker build -t keel:ci .`；
 - `chaos-nightly`：schedule 触发，当前为 TODO 占位（随机 kill 10 分钟场景待接）。
 
