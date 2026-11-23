@@ -561,3 +561,25 @@
 - [ ] RF-6 每租户配额（并发/带宽/存储）（W11 G4）
 - [ ] RF-7 HTML 报告 + 公网链接（W11 G11）
 - [ ] RF-8 子代理交叉复核（本项目不使用 Codex）（W11 G11）
+
+## W13 模型目录（keel-model-catalog 车道）
+
+> 规格见 `specs/model-catalog/spec.md`；产品说明见 `docs/MODEL-CATALOG.md`。
+> 2026-11-23 并入 `keel-harness-v2`（此前车道只有代码与文档，没有 spec delta）。
+
+- [x] 逐模型事实与价格词汇：`providerModelRules` 精确规则 + RFC 7386 合并语义；四档价格 +
+      免费标记；`pricing.notes` ≤200 字符改为**服务端**强制（`internal/modelcfg/catalog.go`、
+      `pricing_test.go`）；未知键与非法值仍按字段路径拒绝
+- [x] 设置视图与执行注册表分离：`/v1/providers` 保留全部成员模型（含缺凭据/停用）及 issues，
+      `/v1/models` 只列可执行且启用的模型；参数编辑器与 Provider 卡片从解析视图取事实，
+      保存只写读者改动的字段，空白保存为 no-op（`web/src/data/model-catalog.ts`、
+      `web/src/screens/settings.tsx`；TUI `settings-models.test.tsx` 覆盖缺凭据态，
+      停用模型的查找与 no-op 由 `model-catalog.test.ts` 覆盖）
+- [x] 能力事实强制执行：`GET /v1/models` 发布 `enforcement.{toolCall,media}`；媒体门与
+      modality-input 车道的附件分发对齐（`internal/harnessapi/models.go`、
+      `internal/servicehost/modality_test.go`）
+- [x] 直写凭据名字抗碰撞：provider id 经清洗后追加短摘要后缀，`a.b`/`a-b` 不再共用一行；
+      路由 id 语法与 models 文档 identifier 语法分开表述（`internal/harnessapi/settings.go`、
+      `provider_credential_test.go`；客户端镜像 `providerCredentialSecretName`）
+- [x] 证据去重：删除与 pricing 图完全相同的 reasoning 别名，以及 `settings-models-1440-full`
+      副本；文档只声明实际存在的两态（顶部 / 下半部思考档与价格）

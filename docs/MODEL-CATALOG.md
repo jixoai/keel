@@ -59,9 +59,10 @@ Alpha 零兼容，旧方言不保留垫片。
   `价格未声明`（带 `notes` 时是 `价格未声明（notes）`）。`contextWindow=0`
   与 `maxOutputTokens.max=0` 是 resolver 的"不完整"默认值，界面同样按未声明
   显示，绝不把 0 当成事实。
-- 编辑器的空白字段 = 清除：表单打开时已回填解析值，所以清空后保存写入
-  `null`（上下文、输出上限、思考档），或对价格字段逐项写 `null`。表单没
-  声明过、也没被清空的字段不写，避免一次保存凭空产生 clear。
+- 编辑器的空白字段 = 清除：表单打开时按 `/v1/providers` 的解析事实回填，
+  所以清空后保存写入 `null`（上下文、输出上限、思考档），或对价格字段逐项写
+  `null`。未改动的字段不写；**未改动任何字段的保存是 no-op**（不写文档），
+  避免空白对话框把能力写成全 `false` 或把思考档写成 `null`。
 - `modelprovider.ModelDescriptor` 的 128k/16k 是 **discovery 契约**的默认
   （Pi 同样如此），不属于本文的文档词汇；`modelcfg` 的可执行性仍要求
   `contextWindow > 0` 与 `maxOutputTokens.max > 0`。
@@ -87,12 +88,16 @@ Alpha 零兼容，旧方言不保留垫片。
 
 `PUT /v1/settings/providers/{id}/credential`：
 
-1. 校验 provider id（models 文档 id 语法）与 body（`{"value": string}`，严格
-   解码）；
+1. 校验 provider id 与 body（`{"value": string}`，严格解码）。这里的 id 语法是
+   **该路由自己的**窄语法（1–128 个字母/数字/`.`/`_`/`-`，以字母或数字开头），
+   比 models 文档的 identifier 语法（`modelcfg.validateIdentifier`：任意非空白
+   token）更窄——路由要从 id 派生一个可被文档引用的密钥名；
 2. **空值拒绝**：`value is required: a blank field never erases a stored
    credential`——忘掉一个凭据只有显式删除 secret 一种路径；
-3. 派生**稳定**名字 `provider_<id>`（`[A-Za-z0-9_]` 以外的字符换成 `_`，
-   可重复写入同一行，不累积）；
+3. 派生**稳定**名字 `provider_<id>`（`[A-Za-z0-9_]` 以外的字符换成 `_`）。
+   清洗不是单射（`a.b` 与 `a-b` 都会变成 `a_b`），所以**发生过清洗或超长截断**
+   的 id 追加一个 8 位摘要后缀（`provider_<sanitized>_<digest>`），两个 provider
+   永远不共用一行；未改写的 id 仍保持 `provider_<id>`，重复写入同一行、不累积；
 4. 交给现有加密租户密钥库（AES-256-GCM `SecretBox`，AAD 绑定 tenant+name）；
 5. 只回答 `{providerId, secretName, secretRef: "secret:<name>", preview,
    updatedAt}`。
@@ -143,14 +148,20 @@ hash 或任何其它可猜事实。旧行（`preview IS NULL`）的列表投影�
 
 ## 5. 逐模型编辑与投影
 
-- `/v1/providers`：设置视图，含不完整/停用条目及其 issues；
-- `/v1/models`：扁平注册表；`pricing` 随 `ModelView` 一起投影
-  （`omitempty`），只用于展示与估算，**不参与执行**；
-- 界面「参数」对话框写**一条** `providerModelRules` 精确规则，使用与解析器
-  相同的 RFC 7386 合并语义：对话框编辑可见的思考档 `values`（运行时词汇、
-  升序），也编辑模型家族（`providerType`；「继承」写 `null`），但不编辑各档
-  的请求补丁 `map`；已有补丁原样保留，新增档位补一个空补丁；清除价格以
-  `pricing: null` 表达，单项清空写该项 `null`；
+- `/v1/providers`：设置视图，含**全部**成员模型——不完整/停用/凭据不可解析
+  的条目也在，并带 issues。它是编辑器与 provider 卡片事实的单源；
+- `/v1/models`：可执行注册表，只含凭据可解析、完整且启用的模型（选择器再按
+  `selectable` 收窄）；`pricing` 随 `ModelView` 一起投影（`omitempty`），
+  只用于展示与估算，**不参与执行**；
+- 「参数」对话框打开时按 `/v1/providers` 的解析事实回填（模型不在该视图时
+  显示「尚不可用/缺少凭据」并说明未修改的字段不会被写回）；保存只写**读者
+  实际改动**的段与键：未动的模态/能力/思考档/价格不写，展示过又被清空的字段
+  写 `null`，从未展示的字段不凭空写 clear。未改动的保存是 no-op（不写文档、
+  不新增规则），因此一次空白保存不会把能力写成全 `false` 或把思考档写成
+  `null`。对话框写**一条** `providerModelRules` 精确规则，使用与解析器相同的
+  RFC 7386 合并语义：编辑可见的思考档 `values`（运行时词汇、升序）与模型家族
+  （`providerType`；「继承」写 `null`），但不编辑各档的请求补丁 `map`；已有
+  补丁原样保留，新增档位补一个空补丁；
 - 对话框保存到文档的规则本身是"补丁的补丁"：组合时 `null` 必须保留（不能
   当作删除键），否则被清空的字段会在解析时重新继承下层规则；
 - 默认模型选择器与 provider 卡片显示 `上下文 · 输出 · 价格` 摘要与 **免费**
@@ -187,25 +198,27 @@ hash 或任何其它可猜事实。旧行（`preview IS NULL`）的列表投影�
 ## 8. 测试与证据
 
 - `internal/modelcfg/pricing_test.go`：词汇往返、逐字段合并、`null` 清除、
-  未知键拒绝、免费-only、深拷贝、租户规则链路，以及"价格不进请求补丁、无价
-  仍可执行"。
+  未知键拒绝、`notes` 200 字符上限（按码点，200 合法/201 拒绝）、免费-only、
+  深拷贝、租户规则链路，以及"价格不进请求补丁、无价仍可执行"。
 - `internal/store/secrets_preview_test.go`：18/19 边界、CJK/emoji 按码点、
   固定掩码不随值变化、预览不含全值；`secrets_test.go` 钉住写入时计算、覆盖
   轮换、旧行 NULL、跨租户。
 - `internal/harnessapi/provider_credential_test.go`：直写路由的成功/短值/
-  空值不擦除/租户门/严格 body/503/稳定名字。
+  空值不擦除/租户门/严格 body/503/稳定名字、清洗后名字抗碰撞
+  （`a.b` vs `a-b`）与 128 字符 id 的截断+摘要，以及"值不进模型文档、不进
+  日志、不进错误"。
 - `internal/harnessapi/models_test.go`：`/v1/models` 与 `/v1/providers` 的
-  `pricing` 投影（有/无两态）。
-- `web/src/data/model-catalog.test.ts`：摘要、格式化、合并补丁、逐模型保存、
-  思考档升序与请求补丁保留、清除字段写 `null`（且不把下层值放回来）、
-  实时清单合并、掩码镜像。
+  `pricing` 投影（有/无两态）与 `enforcement` 发布。
+- `web/src/data/model-catalog.test.ts`：摘要、格式化、合并补丁、只写改动字段、
+  空白保存 no-op、思考档升序与请求补丁保留、清除字段写 `null`（且不把下层值
+  放回来）、价格逐档写入、设置视图查找、直写名字摘要、实时清单合并、掩码镜像。
 - `web/src/screens/settings-models.test.tsx`、`settings-secrets.test.tsx`：
-  TUI 的直写/拉取成功与凭据失败/参数编辑（含思考档与清空）/掩码预览，
-  390 与 1440 两种宽度；保存后的文档形状经「高级」原始文档读取验证。
-- `internal/harnessapi/provider_credential_test.go`：直写路由的成功/短值/
-  空值不擦除/租户门/严格 body/503/稳定名字，以及"值不进模型文档、不进日志、
-  不进错误"。
+  TUI 的直写/拉取成功与凭据失败/参数编辑（含思考档与清空）/掩码预览；
+  缺凭据模型的回填与"原样保存不写空能力"；390 与 1440 两种宽度；
+  保存后的文档形状经「高级」原始文档读取验证。停用模型（仍在设置视图、不在
+  可执行注册表）的查找与空白保存 no-op 在 `model-catalog.test.ts` 单元层覆盖。
 - 浏览器位图（390/1440 两档）见
   `openspec/changes/keel-harness-v2/evidence/model-catalog/`：设置页、
-  provider 编辑器与直写凭据、服务端拉取、模型参数（顶部/思考档/价格）与
-  会话模型选择器；provider 编辑器与模型参数各有 390 与 1440 两种宽度。
+  provider 编辑器与直写凭据、服务端拉取、模型参数（顶部；下半部的思考档与
+  价格是同一次滚动后的画面）与会话模型选择器；provider 编辑器与模型参数各有
+  390 与 1440 两种宽度。
