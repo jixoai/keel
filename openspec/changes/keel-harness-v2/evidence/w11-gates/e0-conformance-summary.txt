@@ -1,3 +1,9 @@
+# NOTE (2026-11-24): this file is the PARALLEL-package run's failure extract.
+# The 5 tests below are load-flakes: each passes in the serial rerun
+# (e0-conformance-serial-rerun.txt, exit=0) and the final go-test-json
+# (e0-conformance-final.json) is 1129 pass / 0 fail / 2 skip.
+# The verdict of record is the final serial run, not this diagnostic extract.
+
 # conformance: go test -json ... (parallel packages) — extracted failures
 
 failed test actions: 5

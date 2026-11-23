@@ -1,0 +1,23 @@
+TUI full suite — final main (2026-11-24, 957a6ce)
+
+Command:
+  cd web && nsh test --target tui
+
+Result:
+  error 398 tests: 397 passed, 1 failed (7m 15s)
+
+The only failure is the pre-existing settings raw-JSON input case (same case as
+the 2026-11-23 run's single failure; 396 tests then, +2 = the new
+session-create.test.ts):
+
+  ✗ App.tui.test.tsx › TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片）与读写重置 (9.9s)
+
+Focused confirmation (same run mode):
+  nsh test --target tui App.tui.test.tsx
+  → error 15 tests: 14 passed, 1 failed (53.8s)
+  → the same ✗ line
+
+Headless note: `nsh test` (no --target) shows 4 unrelated TUI-layout failures
+(container scroll extent, books system-bar sound controls, capabilities media
+text, MCP app iframe) because headless hosts a different terminal size; the
+product's TUI gate uses --target tui, as in the prior evidence files.
