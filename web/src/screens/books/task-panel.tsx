@@ -40,6 +40,7 @@ import {
   panelPhase,
   previewSummary,
   resourceChanged,
+  resourceCount,
   shortHash,
   taskPanelAccess,
   taskTree,
@@ -76,6 +77,12 @@ function PanelSegmented() {
     const panel = taskPanelAccess.panel();
     return panel ? panelCounts(panel) : { cards: 0, members: 0, attachments: 0, events: 0 };
   };
+  // The resources section counts what it prints: live attachments plus the
+  // manifest's own attributed rows (a manifest-only file is a resource too).
+  const resources = () => {
+    const panel = taskPanelAccess.panel();
+    return panel ? resourceCount(panel, taskPanelAccess.files()) : 0;
+  };
   return (
     <View
       testID="task-panel-section"
@@ -97,7 +104,7 @@ function PanelSegmented() {
             item().id === "events"
               ? counts().events
               : item().id === "resources"
-                ? counts().attachments
+                ? resources()
                 : counts().cards + counts().members;
           return (
             <View
@@ -531,10 +538,10 @@ function SessionFileAttribution(props: { panel: NonNullable<ReturnType<typeof ta
                 void taskPanelAccess.openResource(props.sessionId, {
                   taskId: file().taskId,
                   path: file().path,
-                  // The manifest's own row does not carry a content hash on the
-                  // wire; the preview answers with the current one and reports
-                  // no reference comparison for this group.
-                  hash: "",
+                  // The manifest's own row carries the content hash; the
+                  // preview compares it instead of assuming a match. A row
+                  // without one stays without a comparison.
+                  hash: file().hash ?? "",
                 })
               }
               accessibilityLabel={`打开文件 ${file().path}`}
@@ -563,9 +570,26 @@ function SessionFileAttribution(props: { panel: NonNullable<ReturnType<typeof ta
           )}
         </Each>
       </If>
+      <If when={taskPanelAccess.filesHasMore() && taskPanelAccess.filesNextCursor() !== null}>
+        <View style={{ paddingTop: space.xs }}>
+          <Button
+            testID="task-panel-files-more"
+            variant="outline"
+            size="sm"
+            label={taskPanelAccess.filesLoadingMore() ? "正在读取下一页…" : "加载更多文件"}
+            accessibilityLabel="读取文件清单的下一页"
+            disabled={taskPanelAccess.filesLoadingMore()}
+            onPress={() => void taskPanelAccess.loadMoreFiles(props.sessionId)}
+            style={touchStyle()}
+          />
+        </View>
+      </If>
+      <If when={taskPanelAccess.filesMoreError() !== null}>
+        <StateNote tone="danger" icon="alert" text={`读取下一页失败：${taskPanelAccess.filesMoreError()?.message ?? ""}`} testID="task-panel-files-more-error" />
+      </If>
       <If when={taskPanelAccess.filesTruncated()}>
         <Text testID="task-panel-files-truncated" style={{ paddingVertical: space.xxs, fontSize: typeScale.sm, color: color.mutedForeground }}>
-          文件清单只读到读取上限，更早的归属可能没有列进来。
+          文件清单只读到读取上限，后面还有归属没有列出来（这次读数没有给下一页的游标）。
         </Text>
       </If>
     </View>

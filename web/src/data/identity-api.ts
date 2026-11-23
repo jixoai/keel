@@ -10,7 +10,7 @@
 // The record chapter's read and the run projection's reads are optional on
 // purpose. A transport without them answers nothing, and the page renders its
 // 待接入 state instead of an error about a surface the deployment never had.
-import type { FilePreviewView, SessionFilesView, SessionSummary, TaskPanelView } from "./contract";
+import type { FilePreviewView, SessionFilesQuery, SessionFilesView, SessionSummary, TaskPanelView } from "./contract";
 import type {
   AccountView,
   AuditEventView,
@@ -118,9 +118,11 @@ export interface IdentityApi {
    * (`GET /v1/sessions/{id}/file-preview`). Optional, same rule. */
   filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;
   /** The session's file manifest (`GET /v1/sessions/{id}/files`): the panel
-   * reads each row's `lastTaskId` as a card's own file attribution. Optional:
+   * reads each row's `lastTaskId` as a card's own file attribution and its
+   * `hash` as the manifest's current content version. A path-cursor page, so a
+   * long manifest can be paged instead of reported as truncated. Optional:
    * without it the panel simply omits the attribution group. */
-  sessionFiles?(sessionId: string): Promise<SessionFilesView>;
+  sessionFiles?(sessionId: string, query?: SessionFilesQuery): Promise<SessionFilesView>;
   sessionEvents?(sessionId: string, limit?: number): Promise<SessionEventView[]>;
   listSubagents?(parentSessionId?: string, limit?: number): Promise<SubagentView[]>;
   cancelSession?(sessionId: string): Promise<SessionCancelView>;

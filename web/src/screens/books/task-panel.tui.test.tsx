@@ -48,6 +48,11 @@ test("TUI: 运行页的任务面板入口——真实读数，图里有根卡、
   expect(view.shows("id:task-panel-fork-task-refund-fork")).toBe(true);
   expect(screen).toContain("seq 12");
   expect(screen).toContain("分叉");
+  // Fidelity: only cards whose parent is an own card are members here. The
+  // knowledge/aftersales cards' parents are elsewhere or absent, so they are
+  // not drawn as this session's members.
+  expect(view.shows("id:task-panel-card-task-knowledge")).toBe(false);
+  expect(view.shows("id:task-panel-card-task-aftersales")).toBe(false);
 }, 120_000);
 
 test("TUI: 任务面板三视图——图 / 事件流 / 资源预览（事件带 kind 与卡名）", async () => {
@@ -102,8 +107,10 @@ test("TUI: 资源预览——按会话清单打开，与引用一致", async () 
   const preview = view.texts().join("\n");
   expect(preview).toContain("与引用一致");
   expect(preview).toContain("退款原因分析");
-  // The preview's size line is the file's own: a KB word, never a guessed size.
-  expect(preview).toMatch(/\d+ KB · \d+\/\d+ 行/);
+  // The preview's size line is the file's own: this fixture file is under a
+  // kilobyte, so it prints bytes — never a rounded-up 1 KB.
+  expect(preview).toMatch(/\d+ B · \d+\/\d+ 行/);
+  expect(preview).not.toContain("1 KB");
   expect(view.shows("id:task-panel-preview-content")).toBe(true);
 }, 120_000);
 
@@ -151,14 +158,41 @@ test("TUI: 文件归属——按卡归属的清单文件可打开，且不与挂
   // The two reports are live attachments: the file group leaves them to the
   // attachment rows above instead of naming the same (path, hash) again.
   expect(view.shows("id:task-panel-file-reports/refund-analysis.md")).toBe(false);
-  // The manifest row has no reference hash, so the preview says what it is
-  // instead of claiming a comparison that never happened.
+  // The manifest row carries its own content hash, so the preview compares it
+  // with the bytes it read and says they match.
   await view.press("id:task-panel-file-reports/refund-by-channel.csv");
   await view.waitFor("id:task-panel-preview");
   const preview = view.texts().join("\n");
-  expect(preview).toContain("清单当前版本");
+  expect(preview).toContain("与引用一致");
   expect(preview).toContain("渠道,退款单,占比");
+  expect(preview).not.toContain("清单当前版本");
   expect(preview).not.toContain("未核对");
+
+  // A manifest row without a hash (the defensive branch) has nothing to
+  // compare: the badge names the answer instead of claiming a check.
+  await view.press("id:task-panel-file-reports/unhashed.csv");
+  await view.waitFor("id:task-panel-preview");
+  const unhashed = view.texts().join("\n");
+  expect(unhashed).toContain("清单当前版本");
+  expect(unhashed).not.toContain("未核对");
+}, 120_000);
+
+test("TUI: 文件清单翻页——第一页可加载下一页，行不会互相覆盖", async () => {
+  const view = await harness(1440, "panel-files-paged");
+  await view.waitFor("id:task-panel");
+  await view.press("id:task-panel-section-resources");
+  await view.waitFor("id:task-panel-files");
+  expect(view.shows("id:task-panel-file-reports/page-1.csv")).toBe(true);
+  expect(view.shows("id:task-panel-file-reports/page-2.csv")).toBe(false);
+  // The first answer said a later page exists: the group offers the read
+  // instead of calling the list complete.
+  expect(view.shows("id:task-panel-files-more")).toBe(true);
+  await view.press("id:task-panel-files-more");
+  await view.waitFor("id:task-panel-file-reports/page-2.csv");
+  expect(view.shows("id:task-panel-file-reports/page-1.csv")).toBe(true);
+  // The last page has no cursor: the control is gone, not left claiming more.
+  expect(view.shows("id:task-panel-files-more")).toBe(false);
+  expect(view.shows("id:task-panel-files-truncated")).toBe(false);
 }, 120_000);
 
 test("TUI: 文件清单三态——失败如实报、空如实说、未接就不出现", async () => {

@@ -439,18 +439,33 @@ export interface SkillUpdateRequest {
   allowUntrusted?: boolean;
 }
 
-/** One file row of `GET /v1/sessions/{id}/files` (the `$` file group). */
+/** One file row of `GET /v1/sessions/{id}/files` (the `$` file group). `hash`
+ * is the manifest's own content hash (`sha256:<hex>`), so a reader can compare
+ * it with a card's recorded reference; a row without one stays without one. */
 export interface SessionFileView {
   path: string;
+  hash?: string;
   size: number;
   updatedSeq: number;
   lastTaskId?: string;
 }
 
+/** The manifest page's request: a path-cursor page, not an unbounded list. */
+export interface SessionFilesQuery {
+  limit?: number;
+  /** Exclusive: the page starts after this path (the previous page's last). */
+  cursor?: string;
+}
+
 export interface SessionFilesView {
   files?: SessionFileView[];
   count?: number;
+  limit?: number;
+  /** A later page exists (the original meaning of the route's cap). */
   truncated?: boolean;
+  hasMore?: boolean;
+  /** The path to pass back as `cursor`; absent on the last page. */
+  nextCursor?: string;
 }
 
 /** One task-card row of `GET /v1/sessions/{id}/tasks` (the `$` task group). */
@@ -514,11 +529,16 @@ export interface TaskPanelAttachmentView {
 }
 
 export interface TaskPanelLimitsView {
+  cardLimit?: number;
+  cardsTruncated?: boolean;
   memberLimit: number;
   truncated?: boolean;
   truncatedMemberCount?: number;
   eventLimit: number;
   eventsTruncated?: boolean;
+  /** The attach/detach page the live resource set was folded from. */
+  attachmentLimit?: number;
+  attachmentsTruncated?: boolean;
   ancestorsTruncated?: boolean;
 }
 

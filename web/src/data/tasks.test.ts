@@ -17,9 +17,11 @@ import {
   forkBranches,
   panelCounts,
   panelGaps,
+  mergeFilePage,
   panelPhase,
   previewSummary,
   resourceChanged,
+  resourceCount,
   shortHash,
   shouldShowTaskPanel,
   taskTree,
@@ -162,6 +164,36 @@ test("panelGaps: 每个上限一句话，外来的 kind 只报一次", () => {
   expect(panelGaps(panel())).toHaveLength(0);
 });
 
+test("panelGaps: count=1 是下界，不断言达到了上限", () => {
+  const view = panel({
+    limits: { memberLimit: 200, truncated: true, truncatedMemberCount: 1, eventLimit: 500 },
+  });
+  const [gap] = panelGaps(view);
+  // The floor of 1 can come from a read that stopped at its own bound with
+  // fewer rows than the page limit, so the sentence says "at least 1" and
+  // never claims the member page reached 200.
+  expect(gap).toContain("至少 1 张");
+  expect(gap).not.toContain("达到");
+  expect(gap).not.toContain("上限");
+});
+
+test("panelGaps: 自己的卡页与资源折叠页各有自己的句子", () => {
+  const view = panel({
+    limits: {
+      cardLimit: 1000,
+      cardsTruncated: true,
+      memberLimit: 200,
+      eventLimit: 500,
+      attachmentLimit: 1000,
+      attachmentsTruncated: true,
+    },
+  });
+  const gaps = panelGaps(view);
+  expect(gaps[0]).toContain("1000 张上限");
+  expect(gaps[1]).toContain("挂载/解绑");
+  expect(gaps[1]).toContain("1000 条");
+});
+
 test("panelPhase: loading / empty / error / permission / success 各有来源", () => {
   expect(panelPhase({ loading: true, error: null, panel: null })).toBe("loading");
   expect(panelPhase({ loading: false, error: { status: 403 }, panel: null })).toBe("permission");
@@ -178,6 +210,11 @@ test("resourceChanged / previewSummary: 一致、已变化、未核对三态", (
   expect(resourceChanged(attachment, { path: "a.md", hash: "sha256:" + "b".repeat(64), size: 10, offset: 0, limit: 1, totalLines: 1, returnedLines: 1, nextOffset: 1, content: "", matchesReference: false })).toBe(true);
   expect(resourceChanged(attachment, { path: "a.md", hash: HASH_A, size: 10, offset: 0, limit: 1, totalLines: 1, returnedLines: 1, nextOffset: 1, content: "" })).toBe(null);
   expect(previewSummary({ path: "a", hash: "", size: 2048, offset: 0, limit: 1, totalLines: 30, returnedLines: 20, nextOffset: 20, content: "" })).toBe("2 KB · 20/30 行");
+  // A sub-kilobyte page is printed in bytes: an empty file is 0 B, not a
+  // rounded-up 1 KB, and a 300-byte file does not claim a kilobyte.
+  expect(previewSummary({ path: "empty", hash: "", size: 0, offset: 0, limit: 1, totalLines: 0, returnedLines: 0, nextOffset: 0, content: "" })).toBe("0 B");
+  expect(previewSummary({ path: "small", hash: "", size: 300, offset: 0, limit: 1, totalLines: 2, returnedLines: 2, nextOffset: 2, content: "" })).toBe("300 B · 2/2 行");
+  expect(previewSummary({ path: "big", hash: "", size: 1024 * 1024 * 2, offset: 0, limit: 1, totalLines: 0, returnedLines: 0, nextOffset: 0, content: "" })).toBe("2.0 MB");
 });
 
 test("fileReferences: 只列本会话卡归属的路径，别的会话的卡不冒充，挂载过的不重复", () => {
@@ -189,7 +226,7 @@ test("fileReferences: 只列本会话卡归属的路径，别的会话的卡不�
     attachments: [{ taskId: "root", path: "reports/a.md", hash: HASH_A }],
   });
   const refs = fileReferences(view, [
-    { path: "reports/b.md", size: 10, updatedSeq: 22, lastTaskId: "summary" },
+    { path: "reports/b.md", hash: HASH_A, size: 10, updatedSeq: 22, lastTaskId: "summary" },
     { path: "reports/a.md", size: 4, updatedSeq: 19, lastTaskId: "root" },
     { path: "reports/c.md", size: 6, updatedSeq: 20, lastTaskId: "root" },
     { path: "notes.txt", size: 2, updatedSeq: 8, lastTaskId: "elsewhere" },
@@ -200,6 +237,10 @@ test("fileReferences: 只列本会话卡归属的路径，别的会话的卡不�
   expect(refs.map((ref) => ref.path)).toEqual(["reports/c.md", "reports/b.md"]);
   expect(refs[0].cardTitle).toBe("本周退款原因分析");
   expect(refs[1].cardTitle).toBe("汇总渠道异常");
+  // The manifest's own hash travels with the row, so a preview can compare it;
+  // a row without one leaves it absent instead of inventing a digest.
+  expect(refs[0].hash).toBe(undefined);
+  expect(refs[1].hash).toBe(HASH_A);
   // The attached (root, reports/a.md) pair is left to the attachment group,
   // which carries its hash; the panel does not print it twice.
   expect(refs.some((ref) => ref.path === "reports/a.md")).toBe(false);
@@ -222,15 +263,45 @@ test("fileReferences: 同一路径已被别的卡挂载，也不再按写入卡�
   expect(refs).toEqual([]);
 });
 
-test("shortHash / labels: 截断的只是显示，原值留在事件字段里", () => {
+test("shortHash / labels: 只截断真正的 sha256，原值留在事件字段里", () => {
   expect(shortHash(HASH_A)).toBe("sha256:aaaaaaaaaa…");
   expect(shortHash("abc")).toBe("abc");
   expect(shortHash(undefined)).toBe("");
+  // A non-sha256 token is printed as it came: it is neither shortened to a
+  // different digest nor relabelled with a sha256: prefix it did not have.
+  expect(shortHash("md5:" + "a".repeat(32))).toBe("md5:" + "a".repeat(32));
+  expect(shortHash("a".repeat(64))).toBe("a".repeat(64));
+  expect(shortHash("sha256:not-hex")).toBe("sha256:not-hex");
   expect(cardStatusLabel("blocked")).toBe("受阻");
   expect(cardStatusLabel("future_status")).toBe("future_status");
   expect(cardOriginLabel("fork")).toBe("分叉");
   expect(eventKindLabel("task.attached")).toBe("挂载资源");
   expect(eventKindLabel("task.future")).toBe("task.future");
+});
+
+test("resourceCount / mergeFilePage: 资源计数含清单组，翻页按 path 合并", () => {
+  const view = panel({
+    attachments: [{ taskId: "root", path: "reports/a.md", hash: HASH_A }],
+  });
+  const files = [
+    { path: "reports/a.md", size: 4, updatedSeq: 19, lastTaskId: "root" },
+    { path: "reports/b.md", hash: HASH_A, size: 10, updatedSeq: 22, lastTaskId: "root" },
+  ];
+  // a.md is already a live attachment; b.md is the manifest-only row. The
+  // resources count is what the section prints: 1 + 1, not the attachment count
+  // alone.
+  expect(resourceCount(view, files)).toBe(2);
+
+  const first = [{ path: "a.md", size: 1, updatedSeq: 1 }];
+  const second = [
+    { path: "a.md", size: 2, updatedSeq: 2 },
+    { path: "b.md", size: 3, updatedSeq: 3 },
+  ];
+  const merged = mergeFilePage(first, second);
+  // A page boundary shifted under the read: the repeated path wins with its
+  // newest row, and it is not duplicated.
+  expect(merged.map((file) => file.path)).toEqual(["a.md", "b.md"]);
+  expect(merged[0].size).toBe(2);
 });
 
 test("panelCounts / shouldShowTaskPanel: 计数来自读数，入口由能力位决定", () => {

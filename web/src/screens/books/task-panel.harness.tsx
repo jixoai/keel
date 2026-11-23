@@ -13,6 +13,7 @@
 //   panel-changed     the same tree, and a reference whose file has changed
 //   panel-files-error the manifest read fails beside a readable panel
 //   panel-files-empty the manifest answers, but no row is attributed to a card
+//   panel-files-paged the manifest answers one page and a cursor to the next
 //   panel-no-manifest the transport has no manifest read at all
 //
 // The success faces of the *run surface entry* are driven by the app's own
@@ -127,7 +128,7 @@ const PANEL: TaskPanelView = {
     { taskId: "task-summary", kind: "task.created", seq: 6, at: "2026-11-23T09:06:00Z", title: "汇总渠道异常" },
     { taskId: "task-summary", kind: "task.closed", seq: 18, at: "2026-11-23T09:10:00Z", reason: "汇总完成" },
   ],
-  limits: { memberLimit: 200, eventLimit: 500 },
+  limits: { cardLimit: 1000, memberLimit: 200, eventLimit: 500, attachmentLimit: 1000 },
 };
 
 const API = (name: string): IdentityApi => {
@@ -177,21 +178,46 @@ const API = (name: string): IdentityApi => {
     },
   };
   if (name === "panel-no-manifest") return api;
-  api.sessionFiles = async (_sessionId: string) => {
+  api.sessionFiles = async (_sessionId: string, query?: { limit?: number; cursor?: string }) => {
     if (name === "panel-files-error") {
       throw new KeelApiError(500, "文件清单暂时不可用", [], undefined, undefined, {}, "k-files-1");
     }
-    const files: Array<{ path: string; size: number; updatedSeq: number; lastTaskId?: string }> = [
+    if (name === "panel-files-paged") {
+      // A two-page manifest: the first answer carries one attributed row and a
+      // cursor, the second the row after it. The panel must append, not replace,
+      // and must not call the first page complete.
+      if (query?.cursor === "reports/page-1.csv") {
+        return {
+          files: [{ path: "reports/page-2.csv", hash: HASH_B, size: 24, updatedSeq: 23, lastTaskId: "task-summary" }],
+          count: 1,
+          limit: query.limit ?? 200,
+          truncated: false,
+          hasMore: false,
+        };
+      }
+      return {
+        files: [{ path: "reports/page-1.csv", hash: HASH_A, size: 12, updatedSeq: 22, lastTaskId: "task-summary" }],
+        count: 1,
+        limit: query.limit ?? 200,
+        truncated: true,
+        hasMore: true,
+        nextCursor: "reports/page-1.csv",
+      };
+    }
+    const files: Array<{ path: string; hash?: string; size: number; updatedSeq: number; lastTaskId?: string }> = [
       { path: "src/composer.tsx", size: 1200, updatedSeq: 8 },
       // Listed above as a live attachment: the file group must not repeat it.
-      { path: "reports/refund-analysis.md", size: 2048, updatedSeq: 19, lastTaskId: "task-captain" },
-      { path: "reports/refund-report.json", size: 180, updatedSeq: 21, lastTaskId: "task-captain" },
+      { path: "reports/refund-analysis.md", hash: HASH_A, size: 2048, updatedSeq: 19, lastTaskId: "task-captain" },
+      { path: "reports/refund-report.json", hash: HASH_B, size: 180, updatedSeq: 21, lastTaskId: "task-captain" },
     ];
     if (name !== "panel-files-empty") {
       // A manifest-only write by the summary card; no attach event names it.
-      files.push({ path: "reports/refund-by-channel.csv", size: 48, updatedSeq: 22, lastTaskId: "task-summary" });
+      files.push({ path: "reports/refund-by-channel.csv", hash: HASH_A, size: 48, updatedSeq: 22, lastTaskId: "task-summary" });
+      // A manifest row the fixture cannot hash (the defensive branch): the
+      // preview must say 清单当前版本, never 未核对 or 与引用一致.
+      files.push({ path: "reports/unhashed.csv", size: 6, updatedSeq: 23, lastTaskId: "task-summary" });
     }
-    return { files, count: files.length, truncated: false };
+    return { files, count: files.length, limit: query?.limit ?? 200, truncated: false, hasMore: false };
   };
   return api;
 };

@@ -301,6 +301,12 @@ const FIXTURE_FILES: Record<string, { hash: string; seq: number; content: string
   },
 };
 
+/** The manifest hash of a fixture path, or undefined when the fixture holds no
+ * bytes for it. The development transport stamps this same value on the file
+ * row, so a card's reference and the manifest agree exactly like a live
+ * deployment's. */
+export const fixtureFileHash = (path: string): string | undefined => FIXTURE_FILES[path]?.hash;
+
 /** One member card in the panel's wire shape. The title/status/origin come from
  * the task row; the seq values are the card's own ledger positions. */
 const taskPanelCard = (card: TeamTaskView, extra: { originSeq?: number; origin?: string; member?: boolean } = {}): TaskPanelCardView => ({
@@ -1345,39 +1351,65 @@ export class FixtureIdentity implements IdentityApi {
    * cards whose parentTaskId points at a captain card); a card whose parent
    * lives outside the asked session is reported as an ancestor. No panel field
    * exists that this data does not hold. */
-  async taskPanel(sessionId: string): Promise<TaskPanelView> {
-    const cards = sessionId === RUN_ID ? CAPTAIN_TASKS : [];
-    const members: TaskPanelCardView[] = [];
-    const ancestors: TaskPanelCardView[] = [];
-    const cardIds = new Set(cards.map((card) => card.taskId));
-    if (sessionId === RUN_ID) {
-      for (const task of this.tasks) {
-        const card = taskPanelCard(task, {
+  async taskPanel(sessionId: string, memberLimit = 200, eventLimit = 500): Promise<TaskPanelView> {
+    const ownCard = (task: TeamTaskView): TaskPanelCardView =>
+      taskPanelCard(task, {
+        origin: task.taskId === FORK_CARD_ID ? "fork" : task.origin,
+        originSeq: task.taskId === FORK_CARD_ID ? FORK_ORIGIN_SEQ : undefined,
+      });
+    // The session's own cards are the rows its ledger holds: the captain run's
+    // are CAPTAIN_TASKS, every other sample session's are the task rows whose
+    // sessionId is that session (the row never travels into another session).
+    const cards =
+      sessionId === RUN_ID
+        ? CAPTAIN_TASKS.map((card) => ({ ...card }))
+        : this.tasks.filter((task) => task.sessionId === sessionId).map(ownCard);
+    const ownIds = new Set(cards.map((card) => card.taskId));
+
+    // A member is a card whose parent is one of *this* session's cards; its own
+    // row lives in its own session. This is the projection's join: a card whose
+    // parent points elsewhere is not a member here, and its row is not copied.
+    const members = this.tasks
+      .filter((task) => task.sessionId !== sessionId && task.parentTaskId !== undefined && ownIds.has(task.parentTaskId))
+      .map((task) =>
+        taskPanelCard(task, {
           origin: task.taskId === FORK_CARD_ID ? "fork" : task.origin,
           originSeq: task.taskId === FORK_CARD_ID ? FORK_ORIGIN_SEQ : undefined,
           member: true,
-        });
-        members.push(card);
-      }
-    } else if (sessionId === REFUND_SESSION) {
-      // The refund/fork session's own card is the fork card; its parent is the
-      // captain's order card, which lives in another session and is therefore
-      // named as an ancestor rather than copied.
-      const own = this.tasks.find((task) => task.taskId === FORK_CARD_ID);
-      if (own) {
-        cards.push(
-          taskPanelCard(own, { origin: "fork", originSeq: FORK_ORIGIN_SEQ }),
-        );
-      }
-      const parent = this.tasks.find((task) => task.taskId === "task-order");
-      if (parent) ancestors.push(taskPanelCard(parent, { member: true }));
+        }),
+      )
+      // The projection's member order: newest activity first, then task id.
+      .sort((left, right) => {
+        const leftAt = Date.parse(left.updatedAt ?? "");
+        const rightAt = Date.parse(right.updatedAt ?? "");
+        if (leftAt !== rightAt) return rightAt - leftAt;
+        return left.taskId < right.taskId ? 1 : left.taskId > right.taskId ? -1 : 0;
+      });
+
+    // An ancestor is a parent card the read did not carry: its row lives in
+    // another session, so it is named (with its own title) rather than copied
+    // into the tree as an own card. The chain is not walked past the first
+    // parent, exactly like the projection.
+    const cardById = new Map<string, TaskPanelCardView>();
+    for (const card of CAPTAIN_TASKS) cardById.set(card.taskId, { ...card });
+    for (const task of this.tasks) {
+      if (!cardById.has(task.taskId)) cardById.set(task.taskId, ownCard(task));
     }
+    const ancestors: TaskPanelCardView[] = [];
+    for (const card of [...cards, ...members]) {
+      const parentId = card.parentTaskId;
+      if (!parentId || ownIds.has(parentId) || ancestors.some((ancestor) => ancestor.taskId === parentId)) continue;
+      const parent = cardById.get(parentId);
+      if (parent) ancestors.push({ ...parent, member: true });
+    }
+
+    // The stream is the asked session's own ledger: a member card's events live
+    // in its own session and are not copied into this one.
     const events: TaskPanelEventView[] = [];
     const attachments: TaskPanelAttachmentView[] = [];
     let seq = 20;
     const next = () => (seq += 1);
     for (const card of cards) {
-      cardIds.add(card.taskId);
       const parentCardId = card.parentTaskId ?? CAPTAIN_CARD_ID;
       events.push(...taskPanelEventsFor(card, parentCardId, next));
       if (card.taskId === CAPTAIN_CARD_ID) {
@@ -1387,26 +1419,32 @@ export class FixtureIdentity implements IdentityApi {
         );
       }
     }
-    for (const card of members) {
-      events.push(...taskPanelEventsFor(card, card.parentTaskId ?? CAPTAIN_CARD_ID, next));
-    }
     // The stream is ledger-ordered: the fixture's seq values encode the order,
-    // so sorting makes it explicit rather than relying on array order.
+    // so sorting makes it explicit rather than relying on array order. The page
+    // is the newest N, like the route's own event page.
     events.sort((left, right) => left.seq - right.seq);
-    const memberLimit = 200;
-    const eventLimit = 500;
+    const boundedMemberLimit = Math.max(1, memberLimit);
+    const boundedEventLimit = Math.max(1, eventLimit);
+    const memberPage = members.slice(0, boundedMemberLimit);
+    const eventPage = events.slice(-boundedEventLimit);
+    const truncatedMembers = members.length - memberPage.length;
     return {
       sessionId,
       cards,
-      members,
+      members: memberPage,
       ancestors,
       attachments,
-      events: events.slice(-eventLimit),
+      events: eventPage,
       limits: {
-        memberLimit,
-        truncated: false,
-        eventLimit,
-        eventsTruncated: events.length > eventLimit,
+        cardLimit: 1000,
+        cardsTruncated: false,
+        memberLimit: boundedMemberLimit,
+        truncated: truncatedMembers > 0,
+        truncatedMemberCount: truncatedMembers > 0 ? truncatedMembers : undefined,
+        eventLimit: boundedEventLimit,
+        eventsTruncated: events.length > eventPage.length,
+        attachmentLimit: 1000,
+        attachmentsTruncated: false,
         ancestorsTruncated: false,
       },
     };

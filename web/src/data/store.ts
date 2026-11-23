@@ -37,6 +37,7 @@ import type {
   ScrollState,
   SendOptions,
   SessionSummary,
+  SessionFilesQuery,
   SessionFilesView,
   SessionTasksView,
   SessionFileView,
@@ -120,7 +121,7 @@ type Client = SettingsApi &
   listSessions(limit?: number): Promise<SessionSummary[]>;
   /** The composer `$` completion sources. Optional: a transport without the
    * projections leaves the file/task groups out instead of inventing rows. */
-  sessionFiles?(sessionId: string): Promise<SessionFilesView>;
+  sessionFiles?(sessionId: string, query?: SessionFilesQuery): Promise<SessionFilesView>;
   sessionTasks?(sessionId: string): Promise<SessionTasksView>;
   taskPanel?(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView>;
   filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;
@@ -1570,14 +1571,15 @@ class KeelStore {
 
   /** The session manifest (`GET /v1/sessions/{id}/files`) or `null` when this
    * transport has none. The run surface's task panel reads it beside the task
-   * projection, so a file's `lastTaskId` attribution comes from the manifest
-   * the file plugin wrote — never from a guessed link. It reads through the
-   * same identity seam as the panel, so a harness/fixture transport answers it
-   * exactly like the live one. */
-  async sessionFileManifest(sessionId: string): Promise<SessionFilesView | null> {
+   * projection, so a file's `lastTaskId` attribution and `hash` come from the
+   * manifest the file plugin wrote — never from a guessed link or digest. The
+   * query is the route's path-cursor page. It reads through the same identity
+   * seam as the panel, so a harness/fixture transport answers it exactly like
+   * the live one. */
+  async sessionFileManifest(sessionId: string, query?: SessionFilesQuery): Promise<SessionFilesView | null> {
     const client = this.identityApi();
     if (!client?.sessionFiles) return null;
-    return await client.sessionFiles(sessionId);
+    return await client.sessionFiles(sessionId, query);
   }
 
   /** identity-stream.ts installs its stop function here; `null` clears it. */

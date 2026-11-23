@@ -266,12 +266,19 @@ export function eventDetail(event: TaskPanelEventView): string {
   }
 }
 
+/** A real content hash: `sha256:` followed by exactly 64 lowercase hex digits.
+ * Only that shape is shortened and re-prefixed; any other token (a bare path,
+ * a foreign digest) is printed as it came, never relabelled as sha256. */
+const SHA256_PREFIXED = /^sha256:[0-9a-f]{64}$/;
+
 /** `sha256:3a3a…` → `sha256:3a3a…` shortened for a row. The full hash stays in
- * the event's own field and in the resource row. */
+ * the event's own field and in the resource row. A value that is not a sha256
+ * digest is not shortened to a 10-character prefix (which would be a different
+ * hash), and it is never given a `sha256:` prefix it did not have. */
 export const shortHash = (hash: string | undefined): string => {
   if (!hash) return "";
-  const bare = hash.startsWith("sha256:") ? hash.slice("sha256:".length) : hash;
-  return bare.length <= 12 ? hash : `sha256:${bare.slice(0, 10)}…`;
+  if (!SHA256_PREFIXED.test(hash)) return hash;
+  return `sha256:${hash.slice("sha256:".length, "sha256:".length + 10)}…`;
 };
 
 // ---- resources ------------------------------------------------------------
@@ -283,6 +290,9 @@ export const shortHash = (hash: string | undefined): string => {
  * it. Both are read; neither is composed. */
 export interface FileReference {
   path: string;
+  /** The manifest's own content hash, when the row carries one. A preview
+   * compares this with the bytes it reads instead of claiming a match. */
+  hash?: string;
   size: number;
   updatedSeq: number;
   taskId: string;
@@ -313,6 +323,7 @@ export function fileReferences(panel: TaskPanelView, files: SessionFileView[]): 
     if (attached.has(file.path)) continue;
     out.push({
       path: file.path,
+      hash: file.hash,
       size: file.size,
       updatedSeq: file.updatedSeq,
       taskId,
@@ -327,6 +338,24 @@ export function fileReferences(panel: TaskPanelView, files: SessionFileView[]): 
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
     return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
   });
+}
+
+/** The resources section's count: the live attachment references plus the
+ * manifest's own attributed rows, which the section prints together. A
+ * manifest-only file is a resource of the panel even though no attach event
+ * names it. */
+export function resourceCount(panel: TaskPanelView, files: SessionFileView[]): number {
+  return (panel.attachments ?? []).length + fileReferences(panel, files).length;
+}
+
+/** Append one manifest page to the rows already read. Paths are the identity:
+ * a page boundary the manifest shifted under (a row added or removed between
+ * reads) must not duplicate a row, and the newest row for a path wins. */
+export function mergeFilePage(existing: SessionFileView[], incoming: SessionFileView[]): SessionFileView[] {
+  const byPath = new Map<string, SessionFileView>();
+  for (const file of existing) byPath.set(file.path, file);
+  for (const file of incoming) byPath.set(file.path, file);
+  return [...byPath.values()];
 }
 
 /** The preview a reader asked for. The resolved file is the manifest's current
@@ -348,9 +377,16 @@ export function resourceChanged(attachment: TaskPanelAttachmentView, preview: Fi
   return true;
 }
 
-/** One line naming the preview's size and pages. */
+/** One line naming the preview's size and pages. A file smaller than a
+ * kilobyte is printed in bytes: an empty file is `0 B`, never a rounded-up
+ * `1 KB`, and a 300-byte file does not claim a kilobyte it does not hold. */
 export function previewSummary(preview: FilePreviewView): string {
-  const size = preview.size >= 1024 * 1024 ? `${(preview.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(preview.size / 1024))} KB`;
+  const size =
+    preview.size < 1024
+      ? `${preview.size} B`
+      : preview.size >= 1024 * 1024
+        ? `${(preview.size / 1024 / 1024).toFixed(1)} MB`
+        : `${Math.round(preview.size / 1024)} KB`;
   if (preview.totalLines <= 0) return size;
   return `${size} · ${preview.returnedLines}/${preview.totalLines} 行`;
 }
@@ -364,16 +400,22 @@ export function panelGaps(panel: TaskPanelView): string[] {
     const count = limits.truncatedMemberCount ?? 0;
     // The count is exact when the read saw every linked row, and a floor of 1
     // when the read stopped at its own bound. A count of 1 cannot say whether
-    // one row was left or the bound itself hid the rest, so the sentence names
-    // the bound without a number; a larger floor is still a true minimum.
+    // one row was left or the bound itself hid the rest, so the sentence never
+    // claims "the limit was reached"; a larger floor is a true minimum.
     gaps.push(
       count > 1
         ? `成员卡超过 ${limits.memberLimit} 张的上限，这里只画了前 ${limits.memberLimit} 张（至少还有 ${count} 张没画）。`
-        : `成员卡达到 ${limits.memberLimit} 张上限，更早的成员没有画出来。`,
+        : "成员卡还有没画出来的（至少 1 张）；这次读取停在了自己的上界，数不到更多。",
     );
   }
   if (limits?.eventsTruncated) {
     gaps.push(`事件达到 ${limits.eventLimit} 条上限，更早的事件没有读入。`);
+  }
+  if (limits?.cardsTruncated) {
+    gaps.push(`本会话的任务卡超过 ${limits.cardLimit ?? 1000} 张上限，更晚创建的卡没有读入。`);
+  }
+  if (limits?.attachmentsTruncated) {
+    gaps.push(`资源引用只折叠了最近 ${limits.attachmentLimit ?? 1000} 条挂载/解绑事件，更早的引用可能没有列出。`);
   }
   if (limits?.ancestorsTruncated) {
     gaps.push("这条链的上层卡超过读取上限，更早的父卡没有解析。");
@@ -448,6 +490,10 @@ const failureOf = (error: unknown): TaskPanelFailure => {
 const failureKey = (sessionId: string, taskId?: string): string =>
   taskId ? `${sessionId}:${taskId}` : sessionId;
 
+/** The manifest page the panel asks for in one read (the route's own bound is
+ * 1000; a smaller page keeps one read cheap and pages the rest). */
+export const FILES_PAGE_LIMIT = 500;
+
 class TaskPanelStore {
   readonly panel = signal<TaskPanelView | null>(null);
   readonly loading = signal(false);
@@ -464,9 +510,17 @@ class TaskPanelStore {
    * the resource view can tell "no attributed file" apart from "this
    * deployment never wired the read". */
   readonly filesAvailable = signal(false);
-  /** The manifest read stopped at its own row cap: attributed files may be
-   * missing, and the surface says so instead of implying the list is whole. */
+  /** The manifest read stopped at its own row cap and answered no cursor: the
+   * surface says the list is not whole instead of implying it is. */
   readonly filesTruncated = signal(false);
+  /** The manifest answered a later page exists, and the cursor to read it. The
+   * resource view offers 加载更多 instead of calling the list complete. */
+  readonly filesHasMore = signal(false);
+  readonly filesNextCursor = signal<string | null>(null);
+  readonly filesLoadingMore = signal(false);
+  /** A failed page read, reported under the rows already shown (a failure to
+   * read *more* never hides the rows already read). */
+  readonly filesMoreError = signal<TaskPanelFailure | null>(null);
   readonly filesError = signal<TaskPanelFailure | null>(null);
   /** The open resource: the attachment the reader asked to preview. */
   readonly preview = signal<{ attachment: TaskPanelAttachmentView; view: FilePreviewView } | null>(null);
@@ -520,6 +574,10 @@ class TaskPanelStore {
       this.files.set([]);
       this.filesAvailable.set(false);
       this.filesTruncated.set(false);
+      this.filesHasMore.set(false);
+      this.filesNextCursor.set(null);
+      this.filesLoadingMore.set(false);
+      this.filesMoreError.set(null);
       this.preview.set(null);
       this.previewLoading.set(null);
       this.previewError.set(null);
@@ -528,8 +586,12 @@ class TaskPanelStore {
     this.loading.set(true);
     this.error.set(null);
     this.filesError.set(null);
+    this.filesMoreError.set(null);
     this.filesAvailable.set(false);
     this.filesTruncated.set(false);
+    this.filesHasMore.set(false);
+    this.filesNextCursor.set(null);
+    this.filesLoadingMore.set(false);
     this.sessionId.set(sessionId);
     if (!api?.taskPanel) {
       // A deployment without the projection is not an empty tree: it says so.
@@ -551,7 +613,7 @@ class TaskPanelStore {
       this.panel.set(view);
       this.files.set(manifest?.files ?? []);
       this.filesAvailable.set(manifest !== null);
-      this.filesTruncated.set(manifest?.truncated === true);
+      this.applyFilesBounds(manifest);
       this.selectedTaskId.set(null);
       this.preview.set(null);
     } catch (error) {
@@ -560,6 +622,9 @@ class TaskPanelStore {
       this.files.set([]);
       this.filesAvailable.set(false);
       this.filesTruncated.set(false);
+      this.filesHasMore.set(false);
+      this.filesNextCursor.set(null);
+      this.filesMoreError.set(null);
       this.error.set(failureOf(error));
     } finally {
       if (token === this.readToken) this.loading.set(false);
@@ -572,12 +637,45 @@ class TaskPanelStore {
    * for a session the reader already left never lands. */
   private async filesApi(sessionId: string, token: number): Promise<SessionFilesView | null> {
     try {
-      const manifest = await store.sessionFileManifest(sessionId);
+      const manifest = await store.sessionFileManifest(sessionId, { limit: FILES_PAGE_LIMIT });
       if (token !== this.readToken) return null;
       return manifest;
     } catch (error) {
       if (token === this.readToken) this.filesError.set(failureOf(error));
       return null;
+    }
+  }
+
+  /** Record a manifest page's bounds. A cursor means the rest is pageable; a
+   * truncated answer without one is the old un-pageable cap, which the surface
+   * must state as a gap. */
+  private applyFilesBounds(page: SessionFilesView | null): void {
+    const next = page?.nextCursor ?? null;
+    const more = next !== null || page?.hasMore === true || page?.truncated === true;
+    this.filesHasMore.set(more);
+    this.filesNextCursor.set(next);
+    this.filesTruncated.set(next === null && page?.truncated === true);
+  }
+
+  /** Read the manifest's next page and append it. The rows already shown stay
+   * put when this fails; the failure is reported under them. */
+  async loadMoreFiles(sessionId: string): Promise<void> {
+    const cursor = this.filesNextCursor();
+    if (!sessionId || !cursor || this.filesLoadingMore()) return;
+    const api = this.api();
+    if (!api?.sessionFiles) return;
+    const token = this.readToken;
+    this.filesLoadingMore.set(true);
+    this.filesMoreError.set(null);
+    try {
+      const page = await api.sessionFiles(sessionId, { limit: FILES_PAGE_LIMIT, cursor });
+      if (token !== this.readToken) return;
+      this.files.set(mergeFilePage(this.files(), page.files ?? []));
+      this.applyFilesBounds(page);
+    } catch (error) {
+      if (token === this.readToken) this.filesMoreError.set(failureOf(error));
+    } finally {
+      if (token === this.readToken) this.filesLoadingMore.set(false);
     }
   }
 
@@ -643,6 +741,10 @@ class TaskPanelStore {
     this.files.set([]);
     this.filesAvailable.set(false);
     this.filesTruncated.set(false);
+    this.filesHasMore.set(false);
+    this.filesNextCursor.set(null);
+    this.filesLoadingMore.set(false);
+    this.filesMoreError.set(null);
     this.filesError.set(null);
     this.loading.set(false);
     this.error.set(null);

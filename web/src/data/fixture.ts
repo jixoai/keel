@@ -36,7 +36,9 @@ import type {
   SecretSaved,
   SecretsView,
   SendOptions,
+  SessionFilesQuery,
   SessionFilesView,
+  SessionFileView,
   SessionSummary,
   SessionTasksView,
   SettingsApi,
@@ -56,7 +58,14 @@ import type {
 } from "./contract";
 import { KeelApiError } from "./http";
 import { providerCredentialSecretName } from "./model-catalog";
-import { FixtureIdentity, fixtureAccountId, fixtureCurrentAccountId, fixtureForkSessionId, fixtureRunSessionId } from "./fixture-identity";
+import {
+  FixtureIdentity,
+  fixtureAccountId,
+  fixtureCurrentAccountId,
+  fixtureFileHash,
+  fixtureForkSessionId,
+  fixtureRunSessionId,
+} from "./fixture-identity";
 import type {
   AccountView,
   AuditEventView,
@@ -875,21 +884,55 @@ export class FixtureClient implements SettingsApi {
    * own sample paths stay for the `$` menu. The CSV is a manifest-only write by
    * the summary card: no attach event names it, so the panel's file group is
    * the one place it appears. */
-  async sessionFiles(sessionId?: string): Promise<SessionFilesView> {
-    const files: Array<{ path: string; size: number; updatedSeq: number; lastTaskId?: string }> = [
+  async sessionFiles(sessionId?: string, query: SessionFilesQuery = {}): Promise<SessionFilesView> {
+    const files: SessionFileView[] = [
       { path: "src/composer.tsx", size: 1200, updatedSeq: 8 },
       { path: "docs/release.md", size: 640, updatedSeq: 5 },
     ];
     if (sessionId === fixtureRunSessionId || sessionId === fixtureForkSessionId) {
       files.push(
-        { path: "reports/refund-analysis.md", size: 2048, updatedSeq: 19, lastTaskId: "task-captain" },
-        { path: "reports/refund-report.json", size: 180, updatedSeq: 21, lastTaskId: "task-captain" },
+        {
+          path: "reports/refund-analysis.md",
+          hash: fixtureFileHash("reports/refund-analysis.md"),
+          size: 2048,
+          updatedSeq: 19,
+          lastTaskId: "task-captain",
+        },
+        {
+          path: "reports/refund-report.json",
+          hash: fixtureFileHash("reports/refund-report.json"),
+          size: 180,
+          updatedSeq: 21,
+          lastTaskId: "task-captain",
+        },
       );
     }
     if (sessionId === fixtureRunSessionId) {
-      files.push({ path: "reports/refund-by-channel.csv", size: 48, updatedSeq: 22, lastTaskId: "task-captain-summary" });
+      files.push({
+        path: "reports/refund-by-channel.csv",
+        hash: fixtureFileHash("reports/refund-by-channel.csv"),
+        size: 48,
+        updatedSeq: 22,
+        lastTaskId: "task-captain-summary",
+      });
     }
-    return { files, count: files.length, truncated: false };
+    // The route's own page contract: path-sorted, an exclusive path cursor and
+    // a bounded limit, so the fixture transport is paged exactly like the live
+    // one instead of growing a one-shot answer the panel cannot page.
+    const sorted = [...files].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+    const cursor = query.cursor ?? "";
+    const limit = Math.max(1, query.limit ?? 200);
+    const remaining = sorted.filter((file) => file.path > cursor);
+    const page = remaining.slice(0, limit);
+    const hasMore = remaining.length > page.length;
+    return {
+      files: page,
+      count: page.length,
+      limit,
+      truncated: hasMore,
+      hasMore,
+      nextCursor: hasMore ? page[page.length - 1]?.path : undefined,
+    };
   }
 
   /** The `$` task group's demo source (the session's cards). */
@@ -1291,8 +1334,8 @@ export class FixtureClient implements SettingsApi {
     return this.identity.teamTasks(sessionId);
   }
 
-  taskPanel(sessionId: string): Promise<TaskPanelView> {
-    return this.identity.taskPanel(sessionId);
+  taskPanel(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView> {
+    return this.identity.taskPanel(sessionId, memberLimit, eventLimit);
   }
 
   filePreview(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView> {

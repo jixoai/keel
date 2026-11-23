@@ -30,6 +30,7 @@ import type {
   SecretSaved,
   SecretsView,
   SendOptions,
+  SessionFilesQuery,
   SessionFilesView,
   SessionSummary,
   SessionTasksView,
@@ -1318,23 +1319,35 @@ export class KeelHttp implements SettingsApi {
     await this.request(`/v1/settings/skills/sources/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
-  /** `GET /v1/sessions/{id}/files` — the `$` file group's source. Optional in
-   * the Client seam; the live transport always serves it. */
-  async sessionFiles(sessionId: string): Promise<SessionFilesView> {
-    const response = await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/files`);
+  /** `GET /v1/sessions/{id}/files` — the `$` file group's source and the task
+   * panel's manifest read. A path-cursor page: `cursor` is the previous page's
+   * `nextCursor`. Optional in the Client seam; the live transport always serves
+   * it. */
+  async sessionFiles(sessionId: string, query: SessionFilesQuery = {}): Promise<SessionFilesView> {
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    if (query.cursor) params.set("cursor", query.cursor);
+    const suffix = params.toString();
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/files${suffix ? `?${suffix}` : ""}`,
+    );
     const body = asRecord(await response.json());
     return {
       files: listOf(body.files).map((item) => {
         const file = asRecord(item);
         return {
           path: asText(file.path),
+          hash: asText(file.hash) || undefined,
           size: numberOr(file.size, 0),
           updatedSeq: numberOr(file.updatedSeq, 0),
           lastTaskId: asText(file.lastTaskId) || undefined,
         };
       }),
       count: numberOr(body.count, 0),
+      limit: numberOr(body.limit, 0) || undefined,
       truncated: body.truncated === true,
+      hasMore: body.hasMore === true,
+      nextCursor: asText(body.nextCursor) || undefined,
     };
   }
 
@@ -1423,11 +1436,15 @@ export class KeelHttp implements SettingsApi {
       }),
       events: listOf(body.events).map(event),
       limits: {
+        cardLimit: numberOr(limits.cardLimit, 0) || undefined,
+        cardsTruncated: limits.cardsTruncated === true,
         memberLimit: numberOr(limits.memberLimit, 0),
         truncated: limits.truncated === true,
         truncatedMemberCount: numberOr(limits.truncatedMemberCount, 0) || undefined,
         eventLimit: numberOr(limits.eventLimit, 0),
         eventsTruncated: limits.eventsTruncated === true,
+        attachmentLimit: numberOr(limits.attachmentLimit, 0) || undefined,
+        attachmentsTruncated: limits.attachmentsTruncated === true,
         ancestorsTruncated: limits.ancestorsTruncated === true,
       },
     };
