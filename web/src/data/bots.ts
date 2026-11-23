@@ -405,6 +405,10 @@ class BotAccessStore {
   readonly botsStatus = signal<"all" | "active" | "archived">("all");
   private botsAttempted = false;
   private botsToken = 0;
+  /** The in-flight index read. Callers that must decide from the list (the
+   * workspace "+") await this instead of sampling `botsLoading`, which would
+   * read an empty list as "the tenant has no Bots". */
+  private botsLoad: Promise<void> | null = null;
 
   // ---- one Bot -------------------------------------------------------------
   readonly botDetail = signal<BotView | null>(null);
@@ -498,6 +502,17 @@ class BotAccessStore {
   // ---- the Bot index -------------------------------------------------------
 
   async loadBots(): Promise<void> {
+    // Concurrent callers share one read: a second list request while the first
+    // is in flight would race the token guard and leave one caller with an
+    // empty list.
+    if (this.botsLoad) return this.botsLoad;
+    this.botsLoad = this.doLoadBots().finally(() => {
+      this.botsLoad = null;
+    });
+    return this.botsLoad;
+  }
+
+  private async doLoadBots(): Promise<void> {
     const api = this.api();
     const token = ++this.botsToken;
     if (!api?.listBots) {
@@ -534,10 +549,10 @@ class BotAccessStore {
     await this.loadBots();
   }
 
-  ensureBots(): void {
-    if (this.botsAttempted) return;
+  ensureBots(): Promise<void> {
+    if (this.botsAttempted) return this.botsLoad ?? Promise.resolve();
     this.botsAttempted = true;
-    void this.loadBots();
+    return this.loadBots();
   }
 
   visibleBots(): BotView[] {

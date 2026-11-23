@@ -15,11 +15,11 @@
 // | prop | type | default | notes |
 // |---|---|---|---|
 // | label | string? | – | the row's text |
-// | expanded | boolean? | false | rotates the chevron and is said to AT |
+// | expanded | boolean? | false | switches the chevron and is said to AT |
 // | disabled | boolean? | false | no presses, dimmed |
 // | onPress | () => void? | – | toggles the collapsible's `open` |
 //
-// States: closed (trigger shows `chevron-down`) · open (chevron rotated,
+// States: closed (trigger shows `chevron-down`) · open (chevron points up,
 // content visible) · disabled (dimmed, rejects presses). TUI: the panel's text
 // appears right under the trigger row.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
@@ -106,15 +106,11 @@ export function CollapsibleTrigger(props: {
           ) : null}
           {props.children}
         </View>
-        <View
-          style={{
-            transform: props.expanded ? "rotate(180deg)" : "rotate(0deg)",
-            transitionProperty: "transform",
-            transitionDuration: 160,
-          }}
-        >
-          <Icon name="chevron-down" size={14} tint={color.mutedForeground} />
-        </View>
+        <Icon
+          name={props.expanded ? "chevron-up" : "chevron-down"}
+          size={14}
+          tint={color.mutedForeground}
+        />
       </NativeButton>
     </View>
   );

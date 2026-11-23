@@ -10,6 +10,7 @@ export type IconName =
   | "trash"
   | "chevron-left"
   | "chevron-down"
+  | "chevron-up"
   | "chevron-right"
   | "arrow-up"
   | "arrow-down"
@@ -61,6 +62,7 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   trash: ["M3 6h18", "M8 6V4h8v2", "M19 6l-1 14H6L5 6", "M10 11v6", "M14 11v6"],
   "chevron-left": ["M15 18l-6-6 6-6"],
   "chevron-down": ["M6 9l6 6 6-6"],
+  "chevron-up": ["M18 15l-6-6-6 6"],
   "chevron-right": ["M9 18l6-6-6-6"],
   "arrow-up": ["M12 19V5", "M5 12l7-7 7 7"],
   "arrow-down": ["M12 5v14", "M19 12l-7 7-7-7"],

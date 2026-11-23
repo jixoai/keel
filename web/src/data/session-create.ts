@@ -17,24 +17,37 @@ export function resolveWorkspaceBot(bots: BotView[]): BotView | null {
   return active.length === 1 ? active[0]! : null;
 }
 
+/** One create per press burst: a double press must not append two empty
+ * sessions (the live transport no longer reuses an untouched one). */
+let creating = false;
+
 export async function createSessionFromWorkspace(): Promise<string | null> {
   // The demo transport keeps its scripted sessions and has no real Bot to
   // own one; its own create path stays untouched.
   if (store.mode() !== "http") return store.createSession();
+  if (creating) return null;
+  creating = true;
+  try {
+    // Await the index read (shared with any in-flight load): an empty list
+    // while the read is still running is not "this tenant has no Bots".
+    await botAccess.ensureBots();
+    const failure = botAccess.botsError();
+    if (failure) {
+      store.notice.set({ tone: "danger", text: `读取员工列表失败：${failure.message}` });
+      return null;
+    }
+    const bot = resolveWorkspaceBot(botAccess.bots());
+    if (bot) return await store.createSession(bot.botId);
 
-  botAccess.ensureBots();
-  if (botAccess.bots().length === 0 && !botAccess.botsLoading()) {
-    await botAccess.loadBots();
+    const active = botAccess.bots().filter((entry) => !entry.archived);
+    store.notice.set(
+      active.length
+        ? { tone: "info", text: "这个租户有多位员工：到「员工」页选一位开始会话。" }
+        : { tone: "danger", text: "还没有员工（Bot）：先在「员工」页创建一位，再开始会话。" },
+    );
+    store.openChapter("bots");
+    return null;
+  } finally {
+    creating = false;
   }
-  const bot = resolveWorkspaceBot(botAccess.bots());
-  if (bot) return store.createSession(bot.botId);
-
-  const active = botAccess.bots().filter((entry) => !entry.archived);
-  store.notice.set(
-    active.length
-      ? { tone: "info", text: "这个租户有多位员工：到「员工」页选一位开始会话。" }
-      : { tone: "danger", text: "还没有员工（Bot）：先在「员工」页创建一位，再开始会话。" },
-  );
-  store.openChapter("bots");
-  return null;
 }

@@ -1023,7 +1023,7 @@ function BotCapabilitiesSection() {
     <View testID="bot-capabilities" style={{ flexDirection: "column", gap: space.md }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          已授 {allowed()} 项 · 被 Bot 授权收窄 {narrowed()} 项 · 账号没有 {missing()} 项
+          已授 {allowed()} 项 · 被 Bot 授权收窄 {narrowed()} 项 · 账号未授予 {missing()} 项
         </Text>
         <View style={{ marginLeft: "auto", width: isMobile() ? "100%" : 240 }}>
           <Input

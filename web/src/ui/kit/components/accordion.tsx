@@ -23,7 +23,7 @@
 // | reveal | boolean? | true | native clipped-height spring on open/close |
 // | children | JSX.Element? | – | the panel's content |
 //
-// States: closed (`▸`, panel hidden) · open (`▾`, chevron rotated, panel
+// States: closed (`▸`, panel hidden) · open (`▴`, chevron up, panel
 // visible) · disabled (dimmed). TUI: the native trigger starts with its own
 // `▸` / `▾` disclosure and the panel's text follows it.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
@@ -112,15 +112,11 @@ export function AccordionItem(props: {
           <Text style={{ flex: 1, fontSize: typeScale.base, fontWeight: weight.medium, color: color.foreground }}>
             {props.title ?? ""}
           </Text>
-          <View
-            style={{
-              transform: expanded() ? "rotate(180deg)" : "rotate(0deg)",
-              transitionProperty: "transform",
-              transitionDuration: 160,
-            }}
-          >
-            <Icon name="chevron-down" size={14} tint={color.mutedForeground} />
-          </View>
+          <Icon
+            name={expanded() ? "chevron-up" : "chevron-down"}
+            size={14}
+            tint={color.mutedForeground}
+          />
         </AccordionTrigger>
       </AccordionHeader>
       <AccordionPanel reveal={props.reveal ?? true} accessibilityLabel={props.title}>

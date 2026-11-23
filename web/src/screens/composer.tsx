@@ -56,6 +56,11 @@ const sending = signal(false);
 /** Bumped when text is placed into the draft from outside (the empty-state
  * suggestion chips): the input takes the caret, nothing is sent (C8). */
 const prefillTick = signal(0);
+/** The composer's own measured width. The toolbar's hint is a convenience; on
+ * a narrow column (the side pane open at 1440 leaves the column ~290px) it
+ * pushed the send button outside the composer shell. Measured on the root so
+ * the hint drops before the primary control does. */
+const composerWidth = signal(0);
 
 export const composerDraft = draft;
 
@@ -153,8 +158,10 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
   const submitOnEnter = () => platform.idiom !== "phone";
   // The shell reports its single-column layout (≤767px) as `compact`: with a
   // toolbar this dense, the state hint is the first thing it drops. The
-  // shortcut hint stays reachable through the send button's tooltip.
-  const showHint = () => !props.compact;
+  // shortcut hint stays reachable through the send button's tooltip. The
+  // column can also be narrow while the window is not (the right status pane
+  // is open), so the measured width drops the hint too.
+  const showHint = () => !props.compact && (composerWidth() === 0 || composerWidth() >= 460);
   const fieldHeight = () => Math.min(Math.max(inputHeight(), oneLine()), fieldCeiling());
 
   // `$` opens the grouped menu once per session: the first activation loads
@@ -263,7 +270,14 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
         : "空闲发送直接开始";
 
   return (
-    <View style={{ gap: space.sm }}>
+    <View
+      style={{ gap: space.sm }}
+      onLayout={(event) => {
+        const next = event.bounds.size.width;
+        if (Math.abs(next - composerWidth()) < 0.5) return;
+        composerWidth.set(next);
+      }}
+    >
       <QueueCard queue={view()?.queue ?? []} />
       <If when={attachments().length > 0}>
         <View

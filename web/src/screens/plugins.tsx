@@ -551,15 +551,8 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
         <Collapsible
           open={detail()}
           accessibilityLabel={`${pluginName(props.plugin().id)} 详情`}
-        >
-          <CollapsibleTrigger
-            testID={`plugin-detail-${props.plugin().id}`}
-            label="详情"
-            icon="file"
-            expanded={detail()}
-            onPress={() => toggleDetail(props.plugin().id)}
-          />
-          <View style={{ gap: space.md, paddingTop: space.sm }}>
+          content={
+            <View style={{ gap: space.md, paddingTop: space.sm }}>
             <View style={{ flexDirection: "row", gap: space["2xl"], flexWrap: "wrap" }}>
               <Fact label="插件 id" value={props.plugin().id} />
               <If when={!!props.plugin().version}>
@@ -611,7 +604,16 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
                 </Each>
               </View>
             </If>
-          </View>
+            </View>
+          }
+        >
+          <CollapsibleTrigger
+            testID={`plugin-detail-${props.plugin().id}`}
+            label="详情"
+            icon="file"
+            expanded={detail()}
+            onPress={() => toggleDetail(props.plugin().id)}
+          />
         </Collapsible>
       </CardContent>
     </Card>
