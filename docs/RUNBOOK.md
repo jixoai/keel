@@ -194,7 +194,7 @@ KEEL_TEST_DSN='postgres://…' scripts/acceptance-rss.sh --profile
   占用会立即失败（docker/psql 探针带超时，不会挂住）；退出时回收 runtime、采样器
   与数据库，并核对端口已释放。`--cgroup <container>` 可把 `memory.peak` 作为**独立
   指标**附到 summary。
-  采样器自身子树（`processTree.excludedOverhead`，如 `python3` 采样器与 `ps`）不计入
+- 采样器自身子树（`processTree.excludedOverhead`，如 `python3` 采样器与 `ps`）不计入
   总量；采样节奏用绝对截止时间，慢 `ps` 不会累积漂移，实际间距报在
   `sampling.observedIntervalSec`。
 - 机读 summary（`--out`，默认 `/tmp/keel-rss/summary.json`）：`verdict`、
