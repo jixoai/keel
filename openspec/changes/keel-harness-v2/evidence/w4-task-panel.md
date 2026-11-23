@@ -87,9 +87,11 @@ go test ./internal/fileplugin -count=1            # ok (54.7s)
 - `internal/tasklog/panel_test.go`：PostgreSQL 集成（`KEEL_TEST_DSN`）——
   own 卡序、成员卡行在子会话、fork 的 `origin=fork`/`originSeq`/`parentTaskId` 与
   子会话把原点卡报成 ancestor、attach/detach 的 live 集与历史、
-  事件流账本序与外来 kind、界与租户边界、坏行拒绝。**本机 Docker/PostgreSQL
-  在本次会话不可用（`127.0.0.1:13741` 关闭），该文件在本机 skip；需在有
-  `KEEL_TEST_DSN` 的环境复跑。**
+  事件流账本序与外来 kind、界与租户边界、坏行拒绝。复核时用一次性
+  `postgres:18`（127.0.0.1:13742，`keel-w4-pg`）实跑：最初两处失败均为测试
+  自身——`LinkSubagent` 取的是父会话最新的 active 卡（不是第一张），以及 fork
+  测试没有先建子会话；两处已修。最终
+  `KEEL_TEST_DSN=… go test ./internal/tasklog -count=1` → ok，容器已删除。
 - `internal/harnessapi/task_panel_test.go`：路由 wire 形状（own/member/ancestor
   标记、fork 字段、附件、事件、limits）、未接 501 + capability false、
   外部会话 404、越界 limit 400；file-preview 的 200/404/文件已变化
@@ -149,8 +151,9 @@ nsh test --target tui src/screens/books/task-panel.tui.test.tsx   # 8/8
 - `w4-task-panel/task-panel-events-1440.png` — 事件流（挂载资源带 path 与短 hash）。
 - `w4-task-panel/task-panel-preview-1440.png` — 资源预览（与引用一致、1 KB · 7/7 行）。
 - `w4-task-panel/task-panel-390.png` — 390 单列（入口在，无溢出）。
-- `w4-task-panel/task-panel-resources-before-1440.png` — **改前**：资源视图只有两条挂载
-  资源（来自 `0ad61e2` 的截图，未含清单归属组）。
+- `w4-task-panel/task-panel-preview-at-0ad61e2-1440.png` — 旧版本预览截图（来自
+  `0ad61e2`），仅作历史状态参考；它不是同视图的 before 对照，本次未采集同视图
+  before（原文件名为 `task-panel-resources-before-1440.png`，已按事实改名）。
 - `w4-task-panel/task-panel-resources-after-1440.png` — **改后**：新增
   `文件清单 · 按卡归属（lastTaskId）` 组、CSV 行与「清单当前版本」预览。
 - `w4-task-panel/report.json` — 断言、溢出数字、console/page error。
@@ -184,9 +187,10 @@ nsh test --target tui src/screens/books/task-panel.tui.test.tsx   # 8/8
   `nsh package` 到 `/tmp/w4-task-panel-web`、起一次性静态服务跑浏览器脚本（最终
   截图来自第二次重跑，去掉脚本里的 debug 截图步骤后），收尾 `kill` 并删除
   `/tmp/w4-task-panel-web`；`lsof -iTCP:13752` 现无监听。
-- 无其它常驻进程；Docker/`keel-pg` 在本会话不可用，未启动。浏览器是脚本内
-  一次性 headless Chrome，脚本结束 `browser.close()`。
-- 测试库：PG 套件在本机未跑（DSN 缺省 skip）；fixture/TUI 全内存，
+- 无其它常驻进程；复核时发现证据脚本遗留的一只 headless Chrome（pid 42823,
+  `--remote-debugging-port=9231`）已回收。一次性测试 Postgres 容器
+  `keel-w4-pg` 已 `docker rm -f`，13742 无监听。
+- 测试库：复核用一次性 Postgres 18 跑通 `panel_test.go`；fixture/TUI 全内存，
   无残留库。有 DSN 的环境跑 `panel_test.go`/`team_tasks_pg_test.go` 时
   `openTestStore` 自建库并在 cleanup `DROP DATABASE ... WITH FORCE`。
 

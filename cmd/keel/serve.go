@@ -1141,6 +1141,16 @@ func (f filePreviewReader) ReadEntry(ctx context.Context, scope fileplugin.Scope
 	return f.service.ReadEntry(ctx, scope, path, offset, limit)
 }
 
+// filePreviewFor keeps the "not wired" state honest: a typed nil service must
+// not become a non-nil interface value, or the capability probe would advertise
+// session.filePreview and the route would answer 500 instead of 404.
+func filePreviewFor(service *fileplugin.Service) harnessapi.SessionFileReader {
+	if service == nil {
+		return nil
+	}
+	return filePreviewReader{service: service}
+}
+
 // forkAdmission compensates a failed fork's placement reservation. Release
 // drops the pending run slot; Leave removes the placement EnsurePlacement may
 // have created before admission failed.
@@ -1411,7 +1421,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// the file manifest's bounded read behind the resource preview. Both
 		// are the services the tools already use; neither writes task state.
 		TaskPanel:   taskLog,
-		FilePreview: filePreviewReader{service: opts.FileService},
+		FilePreview: filePreviewFor(opts.FileService),
 		// Tenancy surface (change keel-ga §2): the operator provisioning path and
 		// the tenant's own quota projection. Both read the same store the request
 		// path uses; neither is reachable with a tenant credential alone.

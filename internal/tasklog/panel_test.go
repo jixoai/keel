@@ -78,8 +78,10 @@ func TestPanelTreeOrderAndMembers(t *testing.T) {
 	if len(childPanel.Cards) != 1 || childPanel.Cards[0].TaskID != child.TaskID {
 		t.Fatalf("child own cards = %+v", childPanel.Cards)
 	}
-	if len(childPanel.Ancestors) != 1 || childPanel.Ancestors[0].TaskID != initial.TaskID {
-		t.Fatalf("child ancestors = %+v", childPanel.Ancestors)
+	// LinkSubagent attaches the child to the parent session's *newest* active
+	// card; `second` was created after `initial`, so it is the ancestor here.
+	if len(childPanel.Ancestors) != 1 || childPanel.Ancestors[0].TaskID != second.TaskID {
+		t.Fatalf("child ancestors = %+v, want the newest active parent card %s", childPanel.Ancestors, second.TaskID)
 	}
 }
 
@@ -89,13 +91,16 @@ func TestPanelTreeOrderAndMembers(t *testing.T) {
 // surface can print the fork point. It also proves the stream is the ledger's
 // own order and that a payload field the kind did not carry stays empty.
 func TestPanelForkOriginAndEventStream(t *testing.T) {
-	_, kern, service, scope := taskLogHarness(t)
+	st, kern, service, scope := taskLogHarness(t)
 	ctx := context.Background()
 	tenant := scope.TenantID
 
 	origin := mustCard(t)(service.EnsureCard(ctx, scope))
 	originSeq := ledgerSeqAfter(t, kern, scope, kernel.KindTaskCreated)
 	childSession := uuid.New()
+	if err := st.CreateSession(ctx, tenant, childSession); err != nil {
+		t.Fatalf("create child session: %v", err)
+	}
 	childScope := kernel.Scope{TenantID: tenant, SessionID: childSession}
 	forked := mustCard(t)(service.ForkCard(ctx, scope, origin.TaskID, originSeq, childScope, "退款分支", "call-fork"))
 

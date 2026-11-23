@@ -41,7 +41,6 @@ import {
   previewSummary,
   resourceChanged,
   shortHash,
-  shouldShowTaskPanel,
   taskPanelAccess,
   taskTree,
   type TaskEventLine,
@@ -473,6 +472,9 @@ function TaskResources(props: { panel: NonNullable<ReturnType<typeof taskPanelAc
             )}
           </Each>
         </View>
+      </If>
+      <If when={taskPanelAccess.previewLoading() !== null}>
+        <StateNote tone="info" icon="clock" text="正在读取文件预览…" testID="task-panel-preview-loading" />
       </If>
       <If when={taskPanelAccess.previewError() !== null}>
         <StateNote tone="danger" icon="alert" text={taskPanelAccess.previewError()?.message ?? ""} testID="task-panel-preview-error">

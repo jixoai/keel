@@ -303,12 +303,14 @@ export function fileReferences(panel: TaskPanelView, files: SessionFileView[]): 
     order.set(card.taskId, index);
     titles.set(card.taskId, card.title);
   });
-  const attached = new Set((panel.attachments ?? []).map((attachment) => `${attachment.taskId}:${attachment.path}`));
+  // The manifest path is session-wide, so a live attachment of the same path
+  // is the same file even when its card differs from the write's lastTaskId.
+  const attached = new Set((panel.attachments ?? []).map((attachment) => attachment.path));
   const out: FileReference[] = [];
   for (const file of files) {
     const taskId = file.lastTaskId;
     if (!taskId || !titles.has(taskId)) continue;
-    if (attached.has(`${taskId}:${file.path}`)) continue;
+    if (attached.has(file.path)) continue;
     out.push({
       path: file.path,
       size: file.size,
@@ -492,9 +494,11 @@ class TaskPanelStore {
     // landed: loading is in flight, a success is done, and an error stays an
     // error until 重试/刷新 clears it (otherwise a failed read would re-run the
     // failed request on every render).
-    if (this.loading()) return;
+    if (this.loading() && this.sessionId() === sessionId) return;
     if (this.sessionId() === sessionId && this.panel() !== null && this.error() === null) return;
-    if (this.attempted.has(sessionId) && this.error() !== null) return;
+    // An error belongs to the session that produced it: switching to another
+    // session must start its own read instead of inheriting this failure.
+    if (this.sessionId() === sessionId && this.attempted.has(sessionId) && this.error() !== null) return;
     this.attempted.add(sessionId);
     void this.load(sessionId);
   }
@@ -508,6 +512,19 @@ class TaskPanelStore {
     if (!sessionId) return;
     const api = this.api();
     const token = ++this.readToken;
+    // A read for a new session must not render the previous session's tree
+    // while it lands: clear the whole panel state first, then let the new
+    // answer fill it. A same-session refresh keeps the current view.
+    if (this.sessionId() !== sessionId) {
+      this.panel.set(null);
+      this.files.set([]);
+      this.filesAvailable.set(false);
+      this.filesTruncated.set(false);
+      this.preview.set(null);
+      this.previewLoading.set(null);
+      this.previewError.set(null);
+      this.selectedTaskId.set(null);
+    }
     this.loading.set(true);
     this.error.set(null);
     this.filesError.set(null);

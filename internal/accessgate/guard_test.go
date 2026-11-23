@@ -249,6 +249,18 @@ func TestCheckRoutesRefusesUndeclaredRoute(t *testing.T) {
 	}
 }
 
+// TestTaskPanelRoutesAreDeclared keeps the W4 panel's two session reads in the
+// matrix: an undeclared route is a serve boot failure, and the panel's
+// evidence never boots the full server.
+func TestTaskPanelRoutesAreDeclared(t *testing.T) {
+	if err := accessgate.CheckRoutes([]string{
+		"GET /v1/sessions/{id}/task-panel",
+		"GET /v1/sessions/{id}/file-preview",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestBotOperatorPresetSatisfiesTriggerRoute joins the preset and the route:
 // bot-operator's trigger grants must reach tenant scope, because GET
 // /v1/triggers is a tenant-global route (no relation tuples to authorize).

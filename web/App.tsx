@@ -38,6 +38,7 @@ import { botAccess } from "./src/data/bots";
 import { resetBotsUi } from "./src/screens/books/bots";
 import { resetTeamsUi } from "./src/screens/books/teams";
 import { resetRunUi } from "./src/screens/books/run";
+import { taskPanelAccess } from "./src/data/tasks";
 import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
@@ -93,6 +94,10 @@ setClientCapabilities({
   "mcp.apps.message": appSurface,
   "mcp.apps.links": appSurface,
   "mcp.apps.context": appSurface,
+  // This client renders the run surface's task panel; the deployment half is
+  // still a separate fact (`can("task.panel")`), so a server that never wired
+  // the projection stays off.
+  "task.panel": true,
 });
 
 // The plugin UI runtime's base slots (keel.ui's declarations). Installed once,
@@ -525,6 +530,9 @@ function App() {
     resetBotsUi();
     resetTeamsUi();
     resetRunUi();
+    // The panel is session-scoped and can hold another account's tree; drop it
+    // with the other identity reads.
+    taskPanelAccess.reset();
   });
   // One scrollbar language for the whole app: a quiet, token-coloured thumb
   // instead of the platform's light indicator on the dark surface.

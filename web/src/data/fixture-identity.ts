@@ -1401,7 +1401,7 @@ export class FixtureIdentity implements IdentityApi {
       members,
       ancestors,
       attachments,
-      events: events.slice(0, eventLimit),
+      events: events.slice(-eventLimit),
       limits: {
         memberLimit,
         truncated: false,

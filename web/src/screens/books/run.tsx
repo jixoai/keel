@@ -33,8 +33,8 @@ import { store } from "../../data/store";
 import { identityAccess } from "../../data/identity-access";
 import { botAccess, formatRunDuration, runStatusLabel, type RunNode, type RunNodeStatus, type RunProjection } from "../../data/bots";
 import { capabilityOf } from "../../data/permission-catalog";
-import { deploymentCapabilities } from "../../data/capabilities";
-import { isTaskPanelReadable, shouldShowTaskPanel, taskPanelAccess } from "../../data/tasks";
+import { can, capabilityIsKnown } from "../../data/capabilities";
+import { isTaskPanelReadable, taskPanelAccess } from "../../data/tasks";
 import { formatWhen } from "./common";
 import {
   BookAvatar,
@@ -97,7 +97,7 @@ const MIN_BAR_PX = 24;
  * `task.panel` capability bit is the gate, and a deployment that did not
  * answer capabilities falls back to the transport's own read. */
 const showTaskPanel = (): boolean =>
-  shouldShowTaskPanel(deploymentCapabilities().features, isTaskPanelReadable());
+  can("task.panel") || (!capabilityIsKnown("task.panel") && isTaskPanelReadable());
 
 /** The bar's own duration word: 38s / 1m06s, not a sentence. */
 const barDuration = (ms: number | undefined): string => {

@@ -208,6 +208,20 @@ test("fileReferences: 只列本会话卡归属的路径，别的会话的卡不�
   expect(refs.some((ref) => ref.path === "unowned.txt")).toBe(false);
 });
 
+test("fileReferences: 同一路径已被别的卡挂载，也不再按写入卡重复", () => {
+  const view = panel({
+    cards: [
+      { taskId: "root", sessionId: "s-1", title: "根卡", status: "open", origin: "session", createdSeq: 2 },
+      { taskId: "summary", sessionId: "s-1", title: "汇总", status: "done", origin: "tool", createdSeq: 3 },
+    ],
+    attachments: [{ taskId: "summary", path: "reports/a.md", hash: HASH_A }],
+  });
+  const refs = fileReferences(view, [
+    { path: "reports/a.md", size: 4, updatedSeq: 19, lastTaskId: "root" },
+  ]);
+  expect(refs).toEqual([]);
+});
+
 test("shortHash / labels: 截断的只是显示，原值留在事件字段里", () => {
   expect(shortHash(HASH_A)).toBe("sha256:aaaaaaaaaa…");
   expect(shortHash("abc")).toBe("abc");

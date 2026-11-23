@@ -157,6 +157,13 @@ export function deploymentCan(feature: string): boolean {
   return deploymentFeature(feature);
 }
 
+/** Whether the deployment answered this feature at all. A feature the gate
+ * must keep off can still be "unknown" on an older deployment; a caller that
+ * has a transport-level fallback asks this instead of reading the raw map. */
+export function capabilityIsKnown(feature: string): boolean {
+  return deployment().features[feature] !== undefined;
+}
+
 /** The MCP Apps deployment block (`sandboxOrigin` included). */
 export function mcpAppsCapability(): McpAppsCapability {
   return deployment().mcpApps;
