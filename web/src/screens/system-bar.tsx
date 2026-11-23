@@ -67,6 +67,16 @@ export const soundSettingsOpen = signal(false);
 
 // ---- the bar --------------------------------------------------------------
 
+/** The left inset: the host may reserve the hidden title bar's left area for
+ * native controls (macOS traffic lights). The app draws no duplicate controls
+ * there, but the brand must not sit underneath them either. */
+function barPaddingLeft(): number {
+  const base = isMobile() ? space.sm : space.lg;
+  if (!desktopIsAvailable) return base;
+  const native = titleBar().left;
+  return native > 0 ? native + space.sm : base;
+}
+
 export function SystemBar() {
   return (
     <View
@@ -78,7 +88,8 @@ export function SystemBar() {
         flexDirection: "row",
         alignItems: "center",
         gap: isMobile() ? space.sm : space.md,
-        paddingHorizontal: isMobile() ? space.sm : space.lg,
+        paddingLeft: barPaddingLeft(),
+        paddingRight: isMobile() ? space.sm : space.lg,
         backgroundColor: color.panel,
         backdropFilter: GLASS_BLUR,
         borderBottomWidth: 1,
@@ -199,6 +210,7 @@ function BarAction(props: {
           />
           <If when={(props.count ?? 0) > 0}>
             <View
+              accessibilityElementsHidden
               style={{
                 position: "absolute",
                 top: 3,

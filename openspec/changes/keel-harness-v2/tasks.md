@@ -502,6 +502,12 @@
 
 **UI 贡献（W1–W2）**
 
+- [x] 全局系统栏 + 三章节日常导航（2026-11-23）：系统栏承载品牌/拖动、插件 top-band、
+      声音/通知/主题/命令面板与宿主门控的窗口控制；桌面 rail 与手机 tab 只留
+      工作区/员工/团队，身份/记录进设置“管理入口”（保留路由、权限门与 testID）；
+      390/768/1024/1440 无横向溢出；浏览器证据 45/45。实现与证据见
+      `web/src/screens/system-bar.tsx`、`evidence/system-bar/`；身份 E2E 的手机 tab
+      断言已同步为三个日常 tab + 设置管理入口。
 - [ ] `ui-task-board`、`ui-notifications`、`ui-jobs`、`ui-tool-renderer`、`ui-skills`
 - [ ] `ui-subagent`、`ui-deliverables`、`ui-secret-mask`、`ui-creation`
 - [ ] 登记：`ui-trajectory`

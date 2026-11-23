@@ -1576,10 +1576,12 @@ async function step9(step, ctx) {
   check(step, 'permission page explains the missing capability', permissionText.includes('权限'), 'explains permission', permissionText.slice(0, 160));
   await shot(alicePage, step, 'state-permission');
 
-  // Shell contract (A4.4f): the top band is a brand/drag strip only; desktop
-  // navigation is the rail; the phone tab bar is five chapter tabs plus a
-  // separate 44px settings target. The old avatar trigger is gone, so its P2
-  // is closed as "control removed; new targets 44+".
+  // Shell contract (A4.4f + system bar): the top band is global system chrome,
+  // not per-page navigation; desktop navigation is the rail; the phone tab bar
+  // is the three daily chapters plus a separate 44px settings target. Identity
+  // and records are management doors in settings, not primary tabs. The old
+  // avatar trigger is gone, so its P2 is closed as "control removed; new
+  // targets 44+".
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoRoute(page, `/identity/accounts/${ctx.aliceAccountId}`, 'account-head');
   await waitTestId(page, 'books-top', 30000);
@@ -1622,10 +1624,10 @@ async function step9(step, ctx) {
       legacyTrigger: Boolean(document.querySelector('[data-testid="books-account-trigger"]')),
     };
   });
-  const expectedTabs = ['books-tab-workspace', 'books-tab-bots', 'books-tab-teams', 'books-tab-identity', 'books-tab-records'];
+  const expectedTabs = ['books-tab-workspace', 'books-tab-bots', 'books-tab-teams'];
   check(step, 'phone shell has books-top', phoneShell.top, true, phoneShell.top);
   check(step, 'phone shell has the bottom chapter bar', phoneShell.tabbar, true, phoneShell.tabbar);
-  check(step, 'phone tab bar has exactly the five chapter tabs', expectedTabs.every((id) => phoneShell.tabs.includes(id)) && phoneShell.tabs.length === expectedTabs.length, expectedTabs.join(','), phoneShell.tabs.join(','));
+  check(step, 'phone tab bar has exactly the three daily chapter tabs', expectedTabs.every((id) => phoneShell.tabs.includes(id)) && phoneShell.tabs.length === expectedTabs.length, expectedTabs.join(','), phoneShell.tabs.join(','));
   const mobileSettings = (await page.$(sel('books-mobile-settings'))) !== null;
   check(step, 'phone tab bar has a separate settings target', mobileSettings, 'books-mobile-settings', mobileSettings ? 'present' : 'missing');
   check(step, 'phone top band has no chapter/search/todo/settings/avatar controls', phoneShell.forbidden.length === 0, '0 controls', phoneShell.forbidden.join(',') || '0');
@@ -1635,8 +1637,6 @@ async function step9(step, ctx) {
     'books-tab-workspace',
     'books-tab-bots',
     'books-tab-teams',
-    'books-tab-identity',
-    'books-tab-records',
     'books-mobile-settings',
     'accounts-create-page',
     'accounts-search-page',
@@ -1654,6 +1654,20 @@ async function step9(step, ctx) {
     check(step, `44px target ${row.id}`, ok, '>=44x44', row.missing ? 'missing' : `${row.width}x${row.height}`);
   }
   await shot(page, step, 'shell-contract-390');
+
+  // Identity and records are still reachable at 390, but through the settings
+  // management doors instead of primary tabs.
+  await gotoRoute(page, '/settings', 'settings-chapters');
+  const managementDoors = await page.evaluate(() => {
+    return ['books-chapter-identity', 'books-chapter-records'].map((id) => ({
+      id,
+      present: Boolean(document.querySelector(`[data-testid="${id}"]`)),
+    }));
+  });
+  for (const door of managementDoors) {
+    check(step, `settings management door ${door.id}`, door.present, 'present', door.present ? 'present' : 'missing');
+  }
+  await shot(page, step, 'settings-management-390');
 
   // A team/run page on the phone too, so the DAG is reachable at 390.
   if (ctx.teamSessionId) {
