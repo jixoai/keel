@@ -183,6 +183,16 @@ mkdir -p "$WORK_DIR" "$(dirname "$OUT_JSON")"
 
 SAMPLER_ARGS="--interval $INTERVAL --ceiling-mb $CEILING_MB --target-mb $TARGET_MB --min-samples $MIN_SAMPLES"
 
+# print_summary — emit the final summary (after any cgroup merge) as one
+# compact JSON line on stdout; the --out file is the same document.
+print_summary() {
+  python3 -I -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    print(json.dumps(json.load(fh), ensure_ascii=False))
+' "$1"
+}
+
 port_is_free() {
   if command -v lsof >/dev/null 2>&1; then
     ! lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
@@ -218,9 +228,14 @@ attach_mode() {
   # shellcheck disable=SC2086
   python3 -I "$SELF" sample "${target_args[@]}" --duration "$DURATION" $SAMPLER_ARGS \
     --mode attach --out "$out" >"$WORK_DIR/attach.stdout" 2>"$log" || rc=$?
-  cat "$WORK_DIR/attach.stdout"
   say "$(cat "$log")"
-  if [ "$rc" -eq 0 ]; then attach_cgroup; else say "RSS GATE: cgroup peak not attached (sampler exit $rc)"; fi
+  if [ "$rc" -eq 0 ]; then
+    attach_cgroup
+  else
+    say "RSS GATE: cgroup peak not attached (sampler exit $rc)"
+  fi
+  # A failed attach may not have written --out (arg error); only print when it exists.
+  [ -s "$out" ] && print_summary "$out"
   exit "$rc"
 }
 
@@ -431,7 +446,7 @@ profile_mode() {
   python3 -I "$SELF" merge "${merge_args[@]}" >"$WORK_DIR/merge.stdout" 2>>"$PROFILE_LOG" || merge_rc=$?
   [ "$sampler_rc" -eq 0 ] || say "RSS GATE: NOTE: sampler exit $sampler_rc (see $WORK_DIR/sampler.log)"
   attach_cgroup
-  cat "$WORK_DIR/merge.stdout"
+  print_summary "$OUT_JSON"
   # Runtime logs are long; the gate log keeps the tail (which carries the
   # merge's human lines) and the full file stays in the work dir.
   say "== profile log tail ($PROFILE_LOG) =="
