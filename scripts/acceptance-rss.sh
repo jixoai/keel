@@ -432,7 +432,10 @@ profile_mode() {
   [ "$sampler_rc" -eq 0 ] || say "RSS GATE: NOTE: sampler exit $sampler_rc (see $WORK_DIR/sampler.log)"
   attach_cgroup
   cat "$WORK_DIR/merge.stdout"
-  say "$(cat "$PROFILE_LOG")"
+  # Runtime logs are long; the gate log keeps the tail (which carries the
+  # merge's human lines) and the full file stays in the work dir.
+  say "== profile log tail ($PROFILE_LOG) =="
+  tail -60 "$PROFILE_LOG" >&2 || true
   exit "$merge_rc"
 }
 
