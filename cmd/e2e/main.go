@@ -56,6 +56,7 @@ func main() {
 		keelBin      = flag.String("keel-bin", "", "keel serve binary for the mcp-apps scenario (built on demand when empty)")
 		outDir       = flag.String("out", "", "evidence directory for the mcp-apps scenario")
 		mcpAppsPort  = flag.Int("mcp-apps-port", 13686, "listen port for the mcp-apps scenario")
+		casesRaw     = flag.String("cases", "", "comma-separated core case slugs (empty runs all): idempotent,sse,blob,reply,retry,resume-kill,tool-replay,concurrent-kill")
 	)
 	flag.Parse()
 	if *dsn == "" {
@@ -76,15 +77,29 @@ func main() {
 
 	switch *scenario {
 	case "core":
+		selected := selectedCases(*casesRaw)
 		results := []result{}
-		results = append(results, e.caseIdempotentAcrossRestart())
-		results = append(results, e.caseSSECursorAcrossRestart())
-		results = append(results, e.caseBlobResumeAcrossRestart())
-		results = append(results, e.caseAgentReply())
-		results = append(results, e.caseRetryAppends())
-		results = append(results, e.caseRunResumeAfterKill())
-		results = append(results, e.caseToolReplayAfterKill())
-		results = append(results, e.caseConcurrentKillNoLoss())
+		for _, candidate := range []struct {
+			slug string
+			run  func() result
+		}{
+			{"idempotent", e.caseIdempotentAcrossRestart},
+			{"sse", e.caseSSECursorAcrossRestart},
+			{"blob", e.caseBlobResumeAcrossRestart},
+			{"reply", e.caseAgentReply},
+			{"retry", e.caseRetryAppends},
+			{"resume-kill", e.caseRunResumeAfterKill},
+			{"tool-replay", e.caseToolReplayAfterKill},
+			{"concurrent-kill", e.caseConcurrentKillNoLoss},
+		} {
+			if selected != nil && !selected[candidate.slug] {
+				continue
+			}
+			results = append(results, candidate.run())
+		}
+		if len(results) == 0 {
+			log.Fatalf("-cases %q selected no core case", *casesRaw)
+		}
 
 		e.stop()
 		raw, _ := json.MarshalIndent(results, "", "  ")
@@ -898,17 +913,27 @@ func (e *env) caseRunResumeAfterKill() result {
 	if countKind(evs, "assistant.message") != 1 {
 		return fail("assistant messages = %d, want 1", countKind(evs, "assistant.message"))
 	}
+	// The recovered attempt commits its answer before the run row settles, so a
+	// single read races the finish transaction. Poll the row: the assertion is
+	// "converged to done", not "was already done at the first millisecond".
+	deadline := time.Now().Add(15 * time.Second)
 	var run struct {
-		Status string `json:"status"`
+		Status string
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", e.base+"/v1/sessions/"+session+"/run", nil)
-	req.Header.Set("X-Tenant-ID", tenant)
-	if res, err := http.DefaultClient.Do(req); err == nil {
-		_ = json.NewDecoder(res.Body).Decode(&run)
-		res.Body.Close()
-	}
-	if run.Status != "done" {
-		return fail("run status = %q, want done", run.Status)
+	for {
+		req, _ := http.NewRequestWithContext(ctx, "GET", e.base+"/v1/sessions/"+session+"/run", nil)
+		req.Header.Set("X-Tenant-ID", tenant)
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_ = json.NewDecoder(res.Body).Decode(&run)
+			res.Body.Close()
+			if run.Status == "done" {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			return fail("run status = %q, want done", run.Status)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	r.Checks = []string{"input committed", "SIGKILL during the model call", "lease expired and the run was reclaimed", "exactly one user event", "exactly one final reply", "run status done"}
 	r.Pass = true
@@ -964,7 +989,7 @@ func (e *env) caseToolReplayAfterKill() result {
 	if err := waitFakeMarkerFile(eventsBefore, func(marker fakeMarker) bool {
 		return marker.Event == "tools_call_begin" && marker.Name == "plain"
 	}, 8*time.Second); err != nil {
-		return fail("wait MCP tools/call: %v", err)
+		return fail("wait MCP tools/call: %v; markers: %s", err, describeFakeMarkers(eventsBefore))
 	}
 	e.kill9() // the MCP tool is sleeping; its result was never committed
 	// The retry must not inherit the 5s delay; a fresh marker file proves the
@@ -1008,4 +1033,37 @@ func (e *env) caseToolReplayAfterKill() result {
 	r.Pass = true
 	r.Detail = "the unresolved aggregate mcp call was re-executed and committed exactly once"
 	return r
+}
+
+// selectedCases parses the -cases slug list. An empty list means "all cases".
+func selectedCases(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	out := make(map[string]bool)
+	for _, slug := range strings.Split(raw, ",") {
+		if slug = strings.TrimSpace(slug); slug != "" {
+			out[slug] = true
+		}
+	}
+	return out
+}
+
+// describeFakeMarkers renders the observed fake-server events for a failed
+// crash-window assertion: without the markers, a timeout says nothing about
+// whether the server never started, refused the call, or answered another tool.
+func describeFakeMarkers(path string) string {
+	markers, err := readFakeMarkers(path)
+	if err != nil {
+		return "(unreadable: " + err.Error() + ")"
+	}
+	if len(markers) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(markers))
+	for _, marker := range markers {
+		parts = append(parts, marker.Event+"/"+marker.Name)
+	}
+	return strings.Join(parts, ",")
 }

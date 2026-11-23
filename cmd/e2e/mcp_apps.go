@@ -47,10 +47,15 @@ type mcpAppsEnv struct {
 	port     int
 	adminKey string
 	tenant   string
-	work     string
-	out      string
-	phase    string
-	dbName   string
+	// botID is the Bot the scenario's sessions are owned by. Since A4.2b a
+	// session without a Bot has no principal: its runs refuse to start
+	// ("session is not owned by a bot and cannot run") and tool calls fail
+	// closed. The scenario provisions one once per env (it survives restarts).
+	botID  string
+	work   string
+	out    string
+	phase  string
+	dbName string
 	// client carries the CSRF cookie pair; local-only auth still enforces the
 	// double-submit token on writes. csrf is refreshed after every boot because
 	// the process's ephemeral signing key changes across SIGKILL restarts.
@@ -221,6 +226,9 @@ func envWithoutKeelConfig() []string {
 // audit rows are tenant-scoped.
 func (e *mcpAppsEnv) beginCase() {
 	e.tenant = uuid.NewString()
+	// The Bot belongs to the previous case's tenant; the next start
+	// provisions one for the new tenant.
+	e.botID = ""
 }
 
 // start launches one keel serve process with a fresh mcp.json and a fresh fake
@@ -314,6 +322,10 @@ func (e *mcpAppsEnv) start(phase, scenario string, toolDelayMS int, extra ...str
 				if err := e.refreshCSRF(context.Background()); err != nil {
 					e.kill9()
 					return fmt.Errorf("refresh csrf: %w", err)
+				}
+				if err := e.ensureBot(context.Background()); err != nil {
+					e.kill9()
+					return fmt.Errorf("provision bot: %w", err)
 				}
 				e.writeText(fmt.Sprintf("start-%s-%d.txt", phase, e.startCount),
 					fmt.Sprintf("pid=%d\ntenant=%s\nphase=%s\nscenario=%s\ntoolDelayMs=%d\nfakeEvents=%s\nlog=%s\n",
@@ -698,11 +710,85 @@ func (e *mcpAppsEnv) newSession(ctx context.Context) (string, string, error) {
 	var out struct {
 		SessionID string `json:"sessionId"`
 	}
-	if code, err := e.postJSON(ctx, "/v1/sessions", e.tenant, map[string]string{}, &out); err != nil || code != 201 {
+	if code, err := e.postJSON(ctx, "/v1/sessions", e.tenant, map[string]string{"botId": e.botID}, &out); err != nil || code != 201 {
 		return "", "", fmt.Errorf("create session: %d %v", code, err)
 	}
 	return e.tenant, out.SessionID, nil
 }
+
+// ensureBot provisions the identity ladder a Bot-owned session needs:
+// account→role→profile→bot (change keel-bot-identity-access, A4.2b). The Bot
+// is owned by the built-in local admin, so the run's tool authorizer resolves
+// the super-admin grant set narrowed by the Bot's Harness permissions. Idempotent
+// within one env: the object survives process restarts in the same database.
+func (e *mcpAppsEnv) ensureBot(ctx context.Context) error {
+	if e.botID != "" {
+		return nil
+	}
+	const botID = "mcp-apps-bot"
+	var role struct {
+		Role struct {
+			ID string `json:"roleId"`
+		} `json:"role"`
+	}
+	if code, err := e.postJSON(ctx, "/v1/roles", e.tenant, map[string]string{"name": "mcp-apps-operator"}, &role); err != nil || code != 201 {
+		return fmt.Errorf("create role: %d %v", code, err)
+	}
+	var profile struct {
+		Profile struct {
+			ID string `json:"profileId"`
+		} `json:"profile"`
+	}
+	if code, err := e.postJSON(ctx, "/v1/profiles", e.tenant, map[string]string{
+		"accountId": localAdminAccountID, "roleId": role.Role.ID,
+	}, &profile); err != nil || code != 201 {
+		return fmt.Errorf("create profile: %d %v", code, err)
+	}
+	var bot struct {
+		Bot struct {
+			ID string `json:"botId"`
+		} `json:"bot"`
+	}
+	if code, err := e.postJSON(ctx, "/v1/bots", e.tenant, map[string]any{
+		"botId": botID, "name": "MCP Apps Bot", "profileId": profile.Profile.ID,
+		"modelKind":    "text",
+		"defaultModel": map[string]string{"providerId": "fake", "modelId": "fake"},
+		"harness": map[string]any{
+			"tools":   []string{"mcp"},
+			"context": map[string]any{"permissions": []string{"mcp.use", "mcp.read"}},
+		},
+	}, &bot); err != nil || code != 201 {
+		return fmt.Errorf("create bot: %d %v", code, err)
+	}
+	e.botID = bot.Bot.ID
+	// A Bot-owned session's principal carries the Bot's Harness narrowing but
+	// NOT the account's super-admin shortcut (accesswire.SessionPrincipal sets
+	// IsSuperAdmin only for the legacy account-owned branch), so the grant keys
+	// the model needs must exist as real grants on the Bot's owner account.
+	var group struct {
+		Group struct {
+			ID string `json:"groupId"`
+		} `json:"group"`
+	}
+	if code, err := e.postJSON(ctx, "/v1/permission-groups", e.tenant, map[string]string{"name": "mcp-apps-grants"}, &group); err != nil || code != 201 {
+		return fmt.Errorf("create permission group: %d %v", code, err)
+	}
+	for _, grant := range [][2]string{{"mcp.use", "tenant"}, {"mcp.read", "tenant"}} {
+		if code, err := e.postJSON(ctx, "/v1/permission-groups/"+group.Group.ID+"/grants", e.tenant,
+			map[string]string{"key": grant[0], "scope": grant[1]}, nil); err != nil || code != 200 {
+			return fmt.Errorf("add grant %s: %d %v", grant[0], code, err)
+		}
+	}
+	if code, err := e.postJSON(ctx, "/v1/permission-groups/"+group.Group.ID+"/members", e.tenant,
+		map[string]string{"accountId": localAdminAccountID}, nil); err != nil || code != 200 {
+		return fmt.Errorf("add grant member: %d %v", code, err)
+	}
+	return nil
+}
+
+// localAdminAccountID is cmd/keel's built-in local-only administrator
+// (cmd/keel/auth.go localAdminIDString).
+const localAdminAccountID = "00000000-0000-0000-0000-00000000a002"
 
 // --- shared response types ------------------------------------------------
 
