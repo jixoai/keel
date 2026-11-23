@@ -11,7 +11,7 @@
 // scrim, no z-index and no breakpoint in this file.
 import { signal, Text, View } from "nsh";
 import type { ModelSelection, ModelView } from "../data/contract";
-import { isFree, priceSummary, windowSummary } from "../data/model-catalog";
+import { isFree, outputPriceSummary, priceSummary } from "../data/model-catalog";
 import { store } from "../data/store";
 import {
   checkSurfaceSwitch,
@@ -239,7 +239,7 @@ function PickerModelRow(props: { model: () => ModelView }) {
           testID={`picker-model-facts-${props.model().providerId}-${props.model().modelId}`}
           style={{ fontSize: typeScale.xs, color: color.mutedForeground }}
         >
-          {`${windowSummary(props.model())} · ${priceSummary(props.model().pricing)}`}
+          {outputPriceSummary(props.model())}
         </Text>
         <If when={isFree(props.model().pricing)}>
           <Badge variant="success" label="免费" />

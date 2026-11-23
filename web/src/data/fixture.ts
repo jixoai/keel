@@ -619,7 +619,7 @@ export class FixtureClient implements SettingsApi {
     return {
       models: resolution.models,
       issues: [],
-      enforcement: { toolCall: true, media: false },
+      enforcement: { toolCall: true, media: true },
     };
   }
 
@@ -1373,17 +1373,26 @@ export class FixtureClient implements SettingsApi {
         const ruleProperties = asRecord(ruleConfig.properties);
         const ruleOptions = asRecord(ruleConfig.options);
         const ruleMaxOutput = asRecord(ruleOptions.maxOutputTokens);
+        const ruleReasoning = asRecord(ruleOptions.reasoningLevel);
+        const hasRuleReasoning = Object.prototype.hasOwnProperty.call(ruleOptions, "reasoningLevel");
+        const declaredReasoning = Array.isArray(ruleReasoning.values)
+          ? ruleReasoning.values.filter((value): value is string => typeof value === "string")
+          : [];
         const rulePricing = asRecord(ruleConfig.pricing);
         const caps = demoModelCapabilities(modelId);
         const declaredInput = asRecord(ruleProperties.inputFormat);
         const declaredOutput = asRecord(ruleProperties.outputFormat);
+        const baseOptions = demoOptions(modelId);
         const model: ModelView = {
           providerId,
           modelId,
           providerType: typeof ruleConfig.providerType === "string" ? ruleConfig.providerType : undefined,
           api: asRecord(provider.api) as ModelView["api"],
           properties: {
-            contextWindow: demoNumber(ruleProperties.contextWindow) ?? caps.contextWindow,
+            contextWindow:
+              ruleProperties.contextWindow === null
+                ? 0
+                : demoNumber(ruleProperties.contextWindow) ?? caps.contextWindow,
             inputFormat:
               Object.keys(declaredInput).length > 0
                 ? demoMediaIn(declaredInput)
@@ -1396,12 +1405,22 @@ export class FixtureClient implements SettingsApi {
                 : ruleProperties.supportsJsonSchemaOutput === true,
             supportsNativeWebSearch: ruleProperties.supportsNativeWebSearch === true,
           },
-          options: Object.keys(ruleMaxOutput).length > 0
-            ? {
-                ...demoOptions(modelId),
-                maxOutputTokens: { max: demoNumber(ruleMaxOutput.max) ?? 8192, map: {} },
-              }
-            : demoOptions(modelId),
+          options: {
+            ...baseOptions,
+            reasoningLevel: hasRuleReasoning
+              ? {
+                  values: declaredReasoning,
+                  map: asRecord(ruleReasoning.map) as Record<string, Record<string, unknown>>,
+                }
+              : baseOptions.reasoningLevel,
+            maxOutputTokens:
+              Object.keys(ruleMaxOutput).length > 0
+                ? {
+                    max: ruleMaxOutput.max === null ? 0 : demoNumber(ruleMaxOutput.max) ?? 8192,
+                    map: {},
+                  }
+                : baseOptions.maxOutputTokens,
+          },
           pricing: Object.keys(rulePricing).length > 0 ? demoPricingOf(rulePricing) : demoPricing(modelId),
           enabled: true,
           executable: resolvable,

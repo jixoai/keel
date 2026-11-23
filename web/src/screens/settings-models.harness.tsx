@@ -11,12 +11,16 @@ import { ModelsSection } from "./settings";
 
 function Harness() {
   // The transport is chosen by the store's boot probe; wait for it to settle,
-  // then load the three resources the section shows (document, providers,
-  // models). The load leaves the effect's own turn so a mount-time signal
+  // then load the four resources the section shows (document, providers,
+  // models, secrets — the editor's direct-credential preview reads the
+  // secret list). The load leaves the effect's own turn so a mount-time signal
   // write never lands inside the tree's first render.
   effect(() => {
     if (store.mode() === "checking") return;
-    const timer = setTimeout(() => void store.loadModelsPanel(), 0);
+    const timer = setTimeout(() => {
+      void store.loadModelsPanel();
+      void store.loadSecrets();
+    }, 0);
     cleanup(() => clearTimeout(timer));
   });
   return (

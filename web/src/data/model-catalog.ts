@@ -27,7 +27,24 @@ export interface ModelMetadata {
   supportsToolCall?: boolean;
   supportsJsonSchemaOutput?: boolean;
   supportsNativeWebSearch?: boolean;
+  /** The thinking levels this model accepts, ascending. An empty/absent list
+   * is 未声明; the editor offers the runtime's closed vocabulary. */
+  reasoningLevels?: string[];
+  /** The request patch per level. The editor edits the visible levels, not
+   * the wire patches, so a save must carry the maps through untouched. */
+  reasoningLevelMap?: Record<string, Record<string, unknown>>;
   pricing?: ModelPricingView;
+}
+
+/** The runtime's unified thinking vocabulary, ascending (modelcfg's set). */
+export const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+const reasoningLevelSet = new Set<string>(REASONING_LEVELS);
+
+/** Keep only runtime levels, deduplicated and in ascending order. */
+export function normalizeReasoningLevels(values: readonly string[] | undefined): string[] {
+  const wanted = new Set((values ?? []).filter((value) => reasoningLevelSet.has(value)));
+  return REASONING_LEVELS.filter((level) => wanted.has(level));
 }
 
 /** The model families the editor offers. `decision` is a capability endpoint,
@@ -83,6 +100,13 @@ const textOf = (value: unknown): string | undefined => {
 const boolOf = (value: unknown): boolean | undefined =>
   value === null || value === undefined ? undefined : value === true;
 
+/** A token limit is declared only when it is a positive count: 0 is the
+ * resolver's "incomplete" value, never a fact the UI should print as "0". */
+const tokenCountOf = (value: unknown): number | undefined => {
+  const parsed = numberOf(value);
+  return parsed !== undefined && parsed > 0 ? parsed : undefined;
+};
+
 /** A resolved model's declared metadata; the document's rule patch is merged
  * on top so an unsaved edit is visible while the dialog is open. */
 export function metadataOf(model: ModelView | undefined): ModelMetadata {
@@ -91,10 +115,20 @@ export function metadataOf(model: ModelView | undefined): ModelMetadata {
   const output = asRecord(properties.outputFormat);
   const options = asRecord(model?.options);
   const maxOutput = asRecord(options.maxOutputTokens);
+  const reasoning = asRecord(options.reasoningLevel);
+  const rawLevels = Array.isArray(reasoning.values)
+    ? reasoning.values.filter((value): value is string => typeof value === "string")
+    : [];
+  const reasoningLevels = normalizeReasoningLevels(rawLevels);
+  const patches = asRecord(reasoning.map);
+  const reasoningLevelMap: Record<string, Record<string, unknown>> = {};
+  for (const level of reasoningLevels) {
+    reasoningLevelMap[level] = asRecord(patches[level]);
+  }
   return {
     providerType: textOf(model?.providerType),
-    contextWindow: numberOf(properties.contextWindow),
-    maxOutputTokens: numberOf(maxOutput.max),
+    contextWindow: tokenCountOf(properties.contextWindow),
+    maxOutputTokens: tokenCountOf(maxOutput.max),
     inputFormat: {
       text: boolOf(input.text),
       image: boolOf(input.image),
@@ -111,6 +145,8 @@ export function metadataOf(model: ModelView | undefined): ModelMetadata {
     supportsToolCall: boolOf(properties.supportsToolCall),
     supportsJsonSchemaOutput: boolOf(properties.supportsJsonSchemaOutput),
     supportsNativeWebSearch: boolOf(properties.supportsNativeWebSearch),
+    reasoningLevels,
+    reasoningLevelMap,
     pricing: model?.pricing ? { ...model.pricing } : undefined,
   };
 }
@@ -138,6 +174,26 @@ export function mergeJsonObjects(target: Record<string, unknown>, patch: Record<
   return out;
 }
 
+/** Compose two merge patches stored at the same layer. The second patch must
+ * keep its `null`s: a stored rule's null is the instruction that clears a lower
+ * layer's value, so applying RFC 7386 to the rule itself (which would delete
+ * the key) would silently re-inherit the value the reader cleared. */
+function composeModelPatch(target: unknown, patch: unknown): unknown {
+  if (patch === null || patch === undefined) return patch ?? null;
+  const patchRecord =
+    typeof patch === "object" && !Array.isArray(patch) ? (patch as Record<string, unknown>) : null;
+  if (!patchRecord) return patch;
+  const base =
+    target && typeof target === "object" && !Array.isArray(target)
+      ? { ...(target as Record<string, unknown>) }
+      : {};
+  for (const [key, value] of Object.entries(patchRecord)) {
+    if (value === undefined) continue;
+    base[key] = composeModelPatch(base[key], value);
+  }
+  return base;
+}
+
 /** The provider-model rule a document declares for (providerId, modelId), or
  * null. The rule is the model's exact (non-baseline) declaration. */
 export function findProviderModelRule(
@@ -154,14 +210,28 @@ export function findProviderModelRule(
   return null;
 }
 
+/** Which facts the form cleared. A blank field whose resolved value existed
+ * must be written as `null` to override the lower layers; a field that was
+ * never declared stays absent, so saving the dialog cannot invent a clear. */
+export interface MetadataCleared {
+  providerType?: boolean;
+  contextWindow?: boolean;
+  maxOutputTokens?: boolean;
+  reasoningLevels?: boolean;
+  pricing?: boolean;
+}
+
 /** The sparse config a model editor save produces. Every section the form
  * edited is present; a cleared section is `null` (which clears under merge
  * patch); a section the form left untouched is absent. */
-export function metadataPatch(metadata: ModelMetadata, cleared: { pricing?: boolean } = {}): Record<string, unknown> {
+export function metadataPatch(metadata: ModelMetadata, cleared: MetadataCleared = {}): Record<string, unknown> {
   const config: Record<string, unknown> = {};
   if (metadata.providerType) config.providerType = metadata.providerType;
+  else if (cleared.providerType) config.providerType = null;
+
   const properties: Record<string, unknown> = {};
   if (metadata.contextWindow !== undefined) properties.contextWindow = metadata.contextWindow;
+  else if (cleared.contextWindow) properties.contextWindow = null;
   properties.inputFormat = { ...metadata.inputFormat };
   properties.outputFormat = { ...metadata.outputFormat };
   if (metadata.supportsToolCall !== undefined) properties.supportsToolCall = metadata.supportsToolCall;
@@ -172,29 +242,51 @@ export function metadataPatch(metadata: ModelMetadata, cleared: { pricing?: bool
     properties.supportsNativeWebSearch = metadata.supportsNativeWebSearch;
   }
   config.properties = properties;
-  if (metadata.maxOutputTokens !== undefined) {
-    config.options = { maxOutputTokens: { max: metadata.maxOutputTokens } };
+
+  const options: Record<string, unknown> = {};
+  if (metadata.maxOutputTokens !== undefined) options.maxOutputTokens = { max: metadata.maxOutputTokens };
+  else if (cleared.maxOutputTokens) options.maxOutputTokens = { max: null };
+  if (metadata.reasoningLevels !== undefined) {
+    const levels = normalizeReasoningLevels(metadata.reasoningLevels);
+    if (levels.length === 0) {
+      options.reasoningLevel = null;
+    } else {
+      const map: Record<string, Record<string, unknown>> = {};
+      for (const [level, patch] of Object.entries(metadata.reasoningLevelMap ?? {})) {
+        map[level] = { ...asRecord(patch) };
+      }
+      for (const level of levels) {
+        if (!(level in map)) map[level] = {};
+      }
+      options.reasoningLevel = { values: levels, map };
+    }
+  } else if (cleared.reasoningLevels) {
+    options.reasoningLevel = null;
   }
+  if (Object.keys(options).length > 0) config.options = options;
+
   if (cleared.pricing) config.pricing = null;
   else if (metadata.pricing) config.pricing = pricingPatch(metadata.pricing);
   return config;
 }
 
-/** The pricing part of a patch: only declared fields, `undefined` omitted.
- * A block with nothing declared is `null` (clears the block). */
-function pricingPatch(pricing: ModelPricingView): Record<string, unknown> | null {
-  const block: Record<string, unknown> = {};
-  if (pricing.currency) block.currency = pricing.currency;
-  if (pricing.input !== undefined) block.input = pricing.input;
-  if (pricing.output !== undefined) block.output = pricing.output;
-  if (pricing.cacheRead !== undefined) block.cacheRead = pricing.cacheRead;
-  if (pricing.cacheWrite !== undefined) block.cacheWrite = pricing.cacheWrite;
-  if (pricing.free) block.free = true;
-  if (pricing.notes && pricing.notes.trim()) block.notes = pricing.notes.trim();
-  return Object.keys(block).length > 0 ? block : null;
+/** The pricing part of a patch. A blank field is `null`: the form showed the
+ * resolved value, so blank means the reader cleared it, not "leave the lower
+ * layer alone". `free: false` is written as a value (not omitted) so turning
+ * the marker off on a priced model actually clears it under merge patch. */
+function pricingPatch(pricing: ModelPricingView): Record<string, unknown> {
+  return {
+    currency: pricing.currency?.trim() || null,
+    input: pricing.input ?? null,
+    output: pricing.output ?? null,
+    cacheRead: pricing.cacheRead ?? null,
+    cacheWrite: pricing.cacheWrite ?? null,
+    free: pricing.free === true,
+    notes: pricing.notes?.trim() || null,
+  };
 }
 
-/** Apply an editor save to the document: merge the patch into the existing
+/** Apply an editor save to the document: compose the patch into the existing
  * provider-model rule's config (or append a new rule). Returns the document
  * (same object identity is not promised; the caller replaces it). */
 export function applyModelMetadata(
@@ -210,7 +302,7 @@ export function applyModelMetadata(
   });
   if (index >= 0) {
     const rule = { ...asRecord(rules[index]) };
-    rule.config = mergeJsonObjects(asRecord(rule.config), patch);
+    rule.config = composeModelPatch(asRecord(rule.config), patch) as Record<string, unknown>;
     rules[index] = rule;
   } else {
     rules.push({ providerId, modelId, config: patch });
@@ -234,6 +326,16 @@ const decimalsOf = (value: number): number => {
   // At least two decimals; a value like 0.00125 keeps all five it declares.
   return Math.max(2, Math.min(6, text.length - dot - 1));
 };
+
+/** The picker row's second line: the max-output fact `modelFacts` does not
+ * carry, plus the price summary. The context window is already on the row's
+ * first line, so it is deliberately not repeated here. */
+export function outputPriceSummary(model: ModelView | undefined): string {
+  const metadata = metadataOf(model);
+  const output =
+    metadata.maxOutputTokens === undefined ? "输出未声明" : `输出上限 ${formatTokens(metadata.maxOutputTokens)}`;
+  return `${output} · ${priceSummary(model?.pricing)}`;
+}
 
 /** The one-line price summary the picker row and the default-model dialog
  * show: 免费 / 价格未声明 / "输入 $0.27 · 输出 $1.10 （每 1M tokens）". */

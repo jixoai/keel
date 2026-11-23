@@ -66,6 +66,7 @@ import {
   OUTPUT_MODALITIES,
   MODEL_FAMILIES,
   PRICING_CURRENCIES,
+  REASONING_LEVELS,
   applyModelMetadata,
   formatPrice,
   formatTokens,
@@ -73,6 +74,7 @@ import {
   mergeLiveModels,
   metadataOf,
   metadataPatch,
+  normalizeReasoningLevels,
   priceSummary,
   secretPreviewLabel,
   windowSummary,
@@ -257,6 +259,8 @@ const modelEditorContextWindow = signal("");
 const modelEditorMaxOutput = signal("");
 const modelEditorInputs = signal<Record<string, boolean>>({});
 const modelEditorOutputs = signal<Record<string, boolean>>({});
+const modelEditorReasoningLevels = signal<string[]>([]);
+const modelEditorReasoningMap = signal<Record<string, Record<string, unknown>>>({});
 const modelEditorToolCall = signal(false);
 const modelEditorJsonSchema = signal(false);
 const modelEditorWebSearch = signal(false);
@@ -1180,6 +1184,8 @@ const openModelEditor = (providerId: string, modelId: string) => {
     video: metadata.outputFormat.video === true,
     audio: metadata.outputFormat.audio === true,
   });
+  modelEditorReasoningLevels.set(metadata.reasoningLevels ?? []);
+  modelEditorReasoningMap.set(metadata.reasoningLevelMap ?? {});
   modelEditorToolCall.set(metadata.supportsToolCall === true);
   modelEditorJsonSchema.set(metadata.supportsJsonSchemaOutput === true);
   modelEditorWebSearch.set(metadata.supportsNativeWebSearch === true);
@@ -1225,13 +1231,13 @@ const saveModelMetadata = async () => {
   const context = modelEditorContextWindow().trim()
     ? Number(modelEditorContextWindow().trim())
     : undefined;
-  if (context !== undefined && (!Number.isFinite(context) || context < 0)) {
-    modelEditorError.set("上下文窗口必须是非负整数（tokens）");
+  if (context !== undefined && (!Number.isFinite(context) || context <= 0)) {
+    modelEditorError.set("上下文窗口必须是大于 0 的整数（tokens）");
     return;
   }
   const maxOutput = modelEditorMaxOutput().trim() ? Number(modelEditorMaxOutput().trim()) : undefined;
-  if (maxOutput !== undefined && (!Number.isFinite(maxOutput) || maxOutput < 0)) {
-    modelEditorError.set("最大输出必须是非负整数（tokens）");
+  if (maxOutput !== undefined && (!Number.isFinite(maxOutput) || maxOutput <= 0)) {
+    modelEditorError.set("最大输出必须是大于 0 的整数（tokens）");
     return;
   }
   const prices = {
@@ -1259,6 +1265,7 @@ const saveModelMetadata = async () => {
     modelEditorFree() ||
     modelEditorNotes().trim() !== "" ||
     currency !== "";
+  const reasoningLevels = normalizeReasoningLevels(modelEditorReasoningLevels());
   const metadata: ModelMetadata = {
     providerType: modelEditorFamily() === "inherit" ? undefined : modelEditorFamily(),
     contextWindow: context,
@@ -1268,6 +1275,8 @@ const saveModelMetadata = async () => {
     supportsToolCall: modelEditorToolCall(),
     supportsJsonSchemaOutput: modelEditorJsonSchema(),
     supportsNativeWebSearch: modelEditorWebSearch(),
+    reasoningLevels,
+    reasoningLevelMap: modelEditorReasoningMap(),
     pricing: hasAnyPrice
       ? {
           currency: currency || undefined,
@@ -1285,7 +1294,23 @@ const saveModelMetadata = async () => {
     modelEditorError.set(candidate.error ?? "配置不是合法的 JSON，先到「高级」修复原始文档。");
     return;
   }
-  const patch = metadataPatch(metadata, { pricing: modelEditorClearPricing() || !hasAnyPrice });
+  // A blank field whose resolved value existed clears it (null under merge
+  // patch); a field that was never declared stays absent. This is what makes
+  // "留空为未声明" true without letting an unedited save invent a clear.
+  const resolved = store
+    .models()
+    .find((row) => row.providerId === providerId && row.modelId === modelId);
+  const original = metadataOf(resolved);
+  const patch = metadataPatch(metadata, {
+    providerType: original.providerType !== undefined && metadata.providerType === undefined,
+    contextWindow: original.contextWindow !== undefined && context === undefined,
+    maxOutputTokens: original.maxOutputTokens !== undefined && maxOutput === undefined,
+    reasoningLevels:
+      original.reasoningLevels !== undefined &&
+      original.reasoningLevels.length > 0 &&
+      reasoningLevels.length === 0,
+    pricing: modelEditorClearPricing() || (original.pricing !== undefined && !hasAnyPrice),
+  });
   const document = applyModelMetadata(candidate.document, providerId, modelId, patch);
   const ok = await saveCandidate(document);
   if (ok) closeModelEditor();
@@ -1730,7 +1755,7 @@ function DirectCredentialField() {
         </View>
         <If when={!!preview()}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
-            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>已保存的凭据</Text>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>当前凭据</Text>
             <Text
               testID="provider-config-credential-preview"
               style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}
@@ -1789,6 +1814,15 @@ function ProbeStatusLine() {
   );
 }
 
+/** A price input's value for the live preview: a parsable non-negative number,
+ * else undefined (an unparsable draft must not print "NaN"). */
+const previewPrice = (raw: string): number | undefined => {
+  const text = raw.trim();
+  if (!text) return undefined;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+};
+
 /** Write the pasted credential now (independent of the document save), so the
  * preview and the row appear before the reader saves the document. */
 const saveDirectCredential = async () => {
@@ -1807,6 +1841,10 @@ const saveDirectCredential = async () => {
   }
   editorCredentialPreview.set(saved.preview);
   editorDirectCredential.set("");
+  // Saving a pasted key is the reader saying "use this now": the reference
+  // field flips to the minted `secret:provider_<id>` (the document then stores
+  // only that reference when it is next saved).
+  editorCredential.set(saved.secretRef);
 };
 
 function ProviderConfigDialog() {
@@ -2086,13 +2124,14 @@ function ModelMetadataDialog() {
       style={{ margin: "auto" }}
       maxHeight={760}
       title={title()}
-      description="只改这一个模型的事实：家族、上下文与输出上限、输入/输出模态、能力与价格。保存写入该模型的精确规则并立即生效。"
+      description="改这一个模型的事实并立即生效。"
       onOpenChange={(event) => {
         if (!event.open) closeModelEditor();
       }}
       footer={
         <>
           <Button
+            testID="model-metadata-cancel"
             variant="outline"
             label="取消"
             accessibilityLabel="取消模型参数编辑"
@@ -2100,6 +2139,7 @@ function ModelMetadataDialog() {
             onPress={closeModelEditor}
           />
           <Button
+            testID="model-metadata-save"
             icon="check"
             label="保存并生效"
             accessibilityLabel="保存模型参数"
@@ -2124,7 +2164,7 @@ function ModelMetadataDialog() {
         </Text>
       </If>
       <FieldGroup>
-        <Field label="模型家族" hint="一个 Provider 下的这一条模型属于哪个家族；继承时用 Provider 的家族。">
+        <Field label="模型家族">
           <Select
             testID="model-family"
             accessibilityLabel="模型家族"
@@ -2137,32 +2177,29 @@ function ModelMetadataDialog() {
         </Field>
         <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
           <View style={{ flex: 1, minWidth: 160 }}>
-            <Field
-              label="上下文窗口（tokens）"
-              hint="最大可输入；留空为未声明。"
-            >
+            <Field label="上下文窗口（tokens）">
               <Input
                 testID="model-context-window"
                 accessibilityLabel="上下文窗口 tokens"
                 value={modelEditorContextWindow()}
-                placeholder="例如 128000"
+                placeholder="例如 128000（留空为未声明）"
                 onChange={(value) => modelEditorContextWindow.set(value)}
               />
             </Field>
           </View>
           <View style={{ flex: 1, minWidth: 160 }}>
-            <Field label="最大输出（tokens）" hint="单次回复的输出上限；留空为未声明。">
+            <Field label="最大输出（tokens）">
               <Input
                 testID="model-max-output"
                 accessibilityLabel="最大输出 tokens"
                 value={modelEditorMaxOutput()}
-                placeholder="例如 8192"
+                placeholder="例如 8192（留空为未声明）"
                 onChange={(value) => modelEditorMaxOutput.set(value)}
               />
             </Field>
           </View>
         </View>
-        <Field label="可接受的输入" hint="声明这个模型真正能接收的输入类型；界面据此提示附件。">
+        <Field label="可接受的输入" hint="按此声明分发附件；未声明的模型按纯文本处理。">
           <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
             <Each of={INPUT_MODALITIES} key={(row) => row.key}>
               {(row) => (
@@ -2190,7 +2227,32 @@ function ModelMetadataDialog() {
             </Each>
           </View>
         </Field>
-        <Field label="能力" hint="运行时按这些声明执行能力门（工具门已强制；媒体门记录但未强制）。">
+        <Field label="思考档" hint="该模型接受的思考档位（升序）；全不选 = 未声明。请求补丁由文档保留。">
+          <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
+            <Each of={REASONING_LEVELS} key={(level) => level}>
+              {(level) => {
+                const checked = () => modelEditorReasoningLevels().includes(level());
+                return (
+                  <Badge
+                    testID={`model-reasoning-${level()}`}
+                    variant={checked() ? "default" : "outline"}
+                    label={reasoningLabel(level())}
+                    accessibilityLabel={`思考档 ${reasoningLabel(level())}`}
+                    onPress={() => {
+                      const current = modelEditorReasoningLevels();
+                      modelEditorReasoningLevels.set(
+                        checked()
+                          ? current.filter((value) => value !== level())
+                          : normalizeReasoningLevels([...current, level()]),
+                      );
+                    }}
+                  />
+                );
+              }}
+            </Each>
+          </View>
+        </Field>
+        <Field label="能力" hint="运行时按这些声明执行能力门。">
           <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
             <FlagRow
               testID="model-capability-tool"
@@ -2313,11 +2375,14 @@ function ModelMetadataDialog() {
             </Field>
           </View>
         </View>
-        <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+        <Text
+          testID="model-pricing-preview"
+          style={{ fontSize: typeScale.xs, color: color.mutedForeground }}
+        >
           {`预览：${priceSummary({
             currency: modelEditorCurrency().trim() || undefined,
-            input: modelEditorInputPrice().trim() ? Number(modelEditorInputPrice()) : undefined,
-            output: modelEditorOutputPrice().trim() ? Number(modelEditorOutputPrice()) : undefined,
+            input: previewPrice(modelEditorInputPrice()),
+            output: previewPrice(modelEditorOutputPrice()),
             free: modelEditorFree(),
             notes: modelEditorNotes().trim() || undefined,
           })}`}
@@ -2719,7 +2784,9 @@ function SecretRow(props: { secret: () => SecretMeta }) {
   );
 }
 
-function SecretsSection() {
+/** The 密钥 section (exported for its harness: the section owns the write form
+ * and the row previews, and the harness mounts it alone). */
+export function SecretsSection() {
   const available = () => store.secretsAvailable();
   /** Why the box is off, in the reader's words: the server names its own
    * configuration key, and that name is not the reader's business. */

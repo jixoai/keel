@@ -120,6 +120,7 @@ export function Dialog(props: {
         }}
       >
       <Scroll
+        testID={props.testID !== undefined ? `${props.testID}-scroll` : undefined}
         centerContent
         style={{ flex: 1, width: "100%", pointerEvents: "box-none" }}
         contentStyle={{
