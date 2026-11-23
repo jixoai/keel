@@ -366,66 +366,13 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 	selfActive := hasRun && runActive(selfRun.status)
 	selfQueued := hasRun && selfRun.status == RunStatusQueued
 	selfAdmitted := selfActive && selfRun.groupID == placement.GroupID
+	// What existed before this call: promotion below may promote this session's
+	// own queued row, but Created/AlreadyActive describe this call's reservation.
+	wasActive, wasQueued := selfActive, selfQueued
 	if selfActive && !selfAdmitted && selfRun.status == RunStatusRunning {
 		return Admission{}, &Conflict{
 			Reason: ReasonAlreadyPlaced, TenantID: req.tenantID, SessionID: req.sessionID,
 			GroupID: selfRun.groupID, Detail: "the session is already running in another group",
-		}
-	}
-	activeGroup, activeTenant := m.activeCountsLocked(req.tenantID, placement.GroupID)
-	usedMemory := m.groupMemoryLocked(req.tenantID, placement.GroupID)
-
-	if !selfAdmitted && !selfQueued {
-		// The tenant quota is a hard capacity refusal: the queue never bypasses
-		// it, and a queued run does not consume a tenant slot while it waits. A
-		// queued row's new input is not a new admission, so it is not re-charged.
-		if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
-			return Admission{}, m.capacityError(req, placement, CapacityTenant,
-				req.tenantLimit, activeTenant, now)
-		}
-		// Memory is a hard ceiling at admission too. No estimate is not a zero
-		// estimate: refusing with a typed unsupported error is honest, while a
-		// fabricated number would make the ceiling look enforced.
-		if group.MemoryLimitBytes > 0 {
-			if !req.memoryKnown || req.memoryEstimate <= 0 {
-				return Admission{}, &UnsupportedError{
-					Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
-					SessionID: req.sessionID, GroupID: group.GroupID,
-					Detail: "the group defines a memory budget but no memory estimate is configured",
-				}
-			}
-			if usedMemory+req.memoryEstimate > group.MemoryLimitBytes {
-				return Admission{}, m.memoryCapacityError(req, placement, group, usedMemory, now)
-			}
-		}
-		if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
-			// A full group queues: the queued run row is the durable FIFO entry,
-			// it holds no slot, and the kernel cannot claim it.
-			seq := selfRun.queueSeq
-			if !selfQueued || seq == 0 {
-				m.nextQueueSeq++
-				seq = m.nextQueueSeq
-			}
-			m.runs[key] = memRun{
-				status: RunStatusQueued, groupID: placement.GroupID,
-				pendingInput: selfRun.pendingInput, queueSeq: seq,
-				memoryBytes: req.memoryEstimate,
-			}
-			position := m.queuePositionLocked(req.tenantID, placement.GroupID, seq)
-			return Admission{
-				TenantID:      req.tenantID,
-				SessionID:     req.sessionID,
-				GroupID:       placement.GroupID,
-				ActiveGroup:   activeGroup,
-				LimitGroup:    group.MaxConcurrentRuns,
-				ActiveTenant:  activeTenant,
-				LimitTenant:   req.tenantLimit,
-				Created:       !selfActive && !selfQueued,
-				Queued:        true,
-				QueuePosition: position,
-				ETA:           m.etaLocked(req.tenantID, placement.GroupID, position, group.MaxConcurrentRuns),
-				MemoryBytes:   req.memoryEstimate,
-			}, nil
 		}
 	}
 
@@ -450,6 +397,87 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 		selfRun.memoryBytes = req.memoryEstimate
 		m.runs[key] = selfRun
 	}
+
+	activeGroup, activeTenant := m.activeCountsLocked(req.tenantID, placement.GroupID)
+	usedMemory := m.groupMemoryLocked(req.tenantID, placement.GroupID)
+	// FIFO fairness: when the group has a free slot, promote queued heads before
+	// this admission may take it. A crash/reconfigure window can leave queued
+	// rows and free slots at the same time; filling the slot first would let the
+	// newcomer jump the queue. A full group queues this admission anyway, so the
+	// promotion pass is skipped there (the triggers/sweeper handle other groups).
+	if group.MaxConcurrentRuns == 0 || activeGroup < group.MaxConcurrentRuns {
+		m.promoteLocked(req.tenantID, req.tenantLimit)
+		if final, ok := m.runs[key]; ok {
+			selfRun, selfActive = final, runActive(final.status)
+			selfQueued = final.status == RunStatusQueued
+			selfAdmitted = selfActive && final.groupID == placement.GroupID
+		}
+		activeGroup, activeTenant = m.activeCountsLocked(req.tenantID, placement.GroupID)
+		usedMemory = m.groupMemoryLocked(req.tenantID, placement.GroupID)
+	}
+	// newAdmission is the only case that consumes a fresh slot: an already
+	// active row or a waiting queue entry is not a second admission.
+	newAdmission := !selfActive && !selfQueued && !selfAdmitted
+
+	if !selfAdmitted && !selfQueued {
+		// The tenant quota is a hard capacity refusal: the queue never bypasses
+		// it, and a queued run does not consume a tenant slot while it waits. A
+		// queued row's new input is not a new admission, so it is not re-charged.
+		if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
+			return Admission{}, m.capacityError(req, placement, CapacityTenant,
+				req.tenantLimit, activeTenant, now)
+		}
+		// Memory is a hard ceiling at admission too. No estimate is not a zero
+		// estimate: refusing with a typed unsupported error is honest, while a
+		// fabricated number would make the ceiling look enforced.
+		if group.MemoryLimitBytes > 0 {
+			if !req.memoryKnown || req.memoryEstimate <= 0 {
+				return Admission{}, &UnsupportedError{
+					Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
+					SessionID: req.sessionID, GroupID: group.GroupID,
+					Detail: "the group defines a memory budget but no memory estimate is configured",
+				}
+			}
+			if usedMemory+req.memoryEstimate > group.MemoryLimitBytes {
+				return Admission{}, m.memoryCapacityError(req, placement, group, usedMemory, now)
+			}
+		}
+		// A new run queues when the group is full, and also when a queued head
+		// remains after promotion: a head blocked by the memory budget keeps its
+		// place, so a smaller newcomer must not slip past it.
+		_, _, headWaiting := m.queueHeadLocked(req.tenantID, placement.GroupID)
+		if (group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns) ||
+			(newAdmission && headWaiting) {
+			// A full group (or a waiting head) queues: the queued run row is the
+			// durable FIFO entry, it holds no slot, and the kernel cannot claim it.
+			seq := selfRun.queueSeq
+			if !selfQueued || seq == 0 {
+				m.nextQueueSeq++
+				seq = m.nextQueueSeq
+			}
+			m.runs[key] = memRun{
+				status: RunStatusQueued, groupID: placement.GroupID,
+				pendingInput: selfRun.pendingInput, queueSeq: seq,
+				memoryBytes: req.memoryEstimate,
+			}
+			position := m.queuePositionLocked(req.tenantID, placement.GroupID, seq)
+			return Admission{
+				TenantID:      req.tenantID,
+				SessionID:     req.sessionID,
+				GroupID:       placement.GroupID,
+				ActiveGroup:   activeGroup,
+				LimitGroup:    group.MaxConcurrentRuns,
+				ActiveTenant:  activeTenant,
+				LimitTenant:   req.tenantLimit,
+				Created:       !wasActive && !wasQueued,
+				Queued:        true,
+				QueuePosition: position,
+				ETA:           m.etaLocked(req.tenantID, placement.GroupID, position, group.MaxConcurrentRuns),
+				MemoryBytes:   req.memoryEstimate,
+			}, nil
+		}
+	}
+
 	if selfAdmitted {
 		// Keep the live attempt's status/lease: an admission for a guide input
 		// must not demote a running run back to pending.
@@ -465,11 +493,6 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 		m.runs[key] = memRun{status: RunStatusPending, groupID: placement.GroupID,
 			pendingInput: selfRun.pendingInput, memoryBytes: req.memoryEstimate}
 	}
-	// Capacity is available: promote FIFO heads while slots (and memory, and
-	// the tenant quota) permit. This is the same guarded transition ReleaseRun
-	// and the settlement hook use; a row is promoted once because the write is
-	// conditioned on status=queued.
-	m.promoteLocked(req.tenantID, req.tenantLimit)
 	if final, ok := m.runs[key]; ok && final.status == RunStatusQueued {
 		position := m.queuePositionLocked(req.tenantID, placement.GroupID, final.queueSeq)
 		activeGroup, activeTenant = m.activeCountsLocked(req.tenantID, placement.GroupID)
@@ -481,7 +504,7 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 			LimitGroup:    group.MaxConcurrentRuns,
 			ActiveTenant:  activeTenant,
 			LimitTenant:   req.tenantLimit,
-			Created:       !selfActive && !selfQueued,
+			Created:       !wasActive && !wasQueued,
 			Queued:        true,
 			QueuePosition: position,
 			ETA:           m.etaLocked(req.tenantID, placement.GroupID, position, group.MaxConcurrentRuns),
@@ -497,8 +520,8 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 		LimitGroup:    group.MaxConcurrentRuns,
 		ActiveTenant:  activeTenant,
 		LimitTenant:   req.tenantLimit,
-		AlreadyActive: selfActive,
-		Created:       !selfActive && !selfQueued,
+		AlreadyActive: wasActive,
+		Created:       !wasActive && !wasQueued,
 		MemoryBytes:   req.memoryEstimate,
 	}, nil
 }
@@ -566,16 +589,19 @@ func (m *MemStore) ObserveRunDuration(_ context.Context, tenantID, groupID uuid.
 	return nil
 }
 
-// GroupMemoryUsage reports the active-run memory estimate per group.
-func (m *MemStore) GroupMemoryUsage(_ context.Context, tenantID uuid.UUID) (map[uuid.UUID]int64, error) {
+// GroupUsage reports each group's active-run count and memory estimate.
+func (m *MemStore) GroupUsage(_ context.Context, tenantID uuid.UUID) (map[uuid.UUID]GroupUsage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	usage := map[uuid.UUID]int64{}
+	usage := map[uuid.UUID]GroupUsage{}
 	for key, run := range m.runs {
 		if key.tenantID != tenantID || !runActive(run.status) || run.groupID == uuid.Nil {
 			continue
 		}
-		usage[run.groupID] += run.memoryBytes
+		entry := usage[run.groupID]
+		entry.Runs++
+		entry.MemoryBytes += run.memoryBytes
+		usage[run.groupID] = entry
 	}
 	return usage, nil
 }

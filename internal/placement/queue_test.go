@@ -84,8 +84,10 @@ func TestPackMemoryBudgetChoosesHeadroom(t *testing.T) {
 	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroupMemory {
 		t.Fatalf("claim with no headroom = %v, want %s", err, CapacityGroupMemory)
 	}
-	if capacity.Active != 2 || capacity.LimitBytes != 100 {
-		t.Fatalf("capacity = %+v, want two at-capacity pack groups", capacity)
+	// The diagnostics describe the refused pack pool: 4 active runs (not two
+	// groups), 170/200 bytes of estimates across the two 100-byte groups.
+	if capacity.Active != 4 || capacity.UsedBytes != 170 || capacity.LimitBytes != 200 {
+		t.Fatalf("capacity = %+v, want 4 active runs, 170/200 used bytes", capacity)
 	}
 	if _, err := svc.Store().GetPlacement(ctx, tenant, e); !errors.Is(err, ErrPlacementNotFound) {
 		t.Fatalf("refused claim wrote a placement: %v", err)
@@ -111,8 +113,9 @@ func TestPackChoosesGroupByHeadroomAtClaim(t *testing.T) {
 		TenantID: tenant, SessionID: newcomer, WorkerID: "w1", Strategy: Pack,
 	})
 	var capacity *CapacityError
-	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroupMemory || capacity.LimitBytes != 100 {
-		t.Fatalf("claim = %v, want %s with the 100-byte limit", err, CapacityGroupMemory)
+	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroupMemory ||
+		capacity.LimitBytes != 100 || capacity.UsedBytes != 90 || capacity.Active != 1 {
+		t.Fatalf("claim = %v, want %s with 90/100 used bytes and one active run", err, CapacityGroupMemory)
 	}
 	if _, err := store.GetPlacement(context.Background(), tenant, newcomer); !errors.Is(err, ErrPlacementNotFound) {
 		t.Fatalf("refused claim wrote a placement: %v", err)
@@ -194,8 +197,8 @@ func TestAdmissionMemoryCeilingIsHardRefusal(t *testing.T) {
 	if !errors.As(err, &capacity) || capacity.Reason != CapacityGroupMemory {
 		t.Fatalf("over-budget admit = %v, want %s", err, CapacityGroupMemory)
 	}
-	if capacity.LimitBytes != 100 || capacity.UsedBytes != 60 {
-		t.Fatalf("memory capacity = %+v, want 60/100 bytes", capacity)
+	if capacity.LimitBytes != 100 || capacity.UsedBytes != 60 || capacity.Active != 1 {
+		t.Fatalf("memory capacity = %+v, want 1 active run and 60/100 bytes", capacity)
 	}
 	// A smaller estimate fits.
 	estimates[second] = 40
@@ -580,5 +583,78 @@ func TestSweepQueuesConvergesACrashLeftQueue(t *testing.T) {
 	// A second sweep is a no-op (nothing is promoted twice).
 	if promoted, err := gate.SweepQueues(ctx); err != nil || len(promoted) != 0 {
 		t.Fatalf("second sweep = %+v err=%v, want none", promoted, err)
+	}
+}
+
+// TestQueuedHeadGetsAFreeSlotBeforeANewAdmission is the crash/reconfigure
+// fairness guard: a queued head must be promoted into the free slot before a
+// new admission can take it. The holder's row is terminal without the
+// settlement hook (the crash window), so the slot is free while the queue is
+// not empty; admitting the newcomer first would silently jump the queue.
+func TestQueuedHeadGetsAFreeSlotBeforeANewAdmission(t *testing.T) {
+	ctx := context.Background()
+	svc, store := memService(t, Options{})
+	tenant := uuid.New()
+	group := mustGroup(t, svc, tenant, "fifo-window", 1)
+	holder, head, newcomer := uuid.New(), uuid.New(), uuid.New()
+	for _, session := range []uuid.UUID{holder, head, newcomer} {
+		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+		t.Fatalf("admit holder: %v", err)
+	}
+	if admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: head}); err != nil || !admission.Queued {
+		t.Fatalf("queue head = %+v err=%v", admission, err)
+	}
+	// The crash/reconfigure window: the holder is terminal, but nobody promoted
+	// the queue yet, so a slot is free while `head` still waits.
+	if err := store.SetRunStatus(tenant, holder, RunStatusDone, 0); err != nil {
+		t.Fatal(err)
+	}
+	admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: newcomer})
+	if err != nil {
+		t.Fatalf("admit newcomer: %v", err)
+	}
+	if !admission.Queued || admission.QueuePosition != 1 {
+		t.Fatalf("newcomer = %+v, want queued behind the head", admission)
+	}
+	headRun := store.runs[memSessionKey{tenant, head}]
+	if headRun.status != RunStatusPending {
+		t.Fatalf("queued head = %q, want promoted to pending before the newcomer", headRun.status)
+	}
+	newcomerRun := store.runs[memSessionKey{tenant, newcomer}]
+	if newcomerRun.status != RunStatusQueued {
+		t.Fatalf("newcomer = %q, want queued (it must not take the head's slot)", newcomerRun.status)
+	}
+}
+
+// TestRunSettledOnlySamplesCompletedAttempts defines the ETA sample rule: only
+// a completed ("done") attempt feeds the average. Abandoned, failed,
+// cancelled, finish_error and superseded attempts free the slot (promotion
+// still runs) but do not distort the advertised wait.
+func TestRunSettledOnlySamplesCompletedAttempts(t *testing.T) {
+	ctx := context.Background()
+	svc, store := memService(t, Options{})
+	tenant := uuid.New()
+	group := mustGroup(t, svc, tenant, "eta-rule", 1)
+	session := uuid.New()
+	mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session}); err != nil {
+		t.Fatal(err)
+	}
+	gate := memGate(t, svc, "runtime-1", newTestSessions(true).state)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+	key := memGroupKey{tenant, group.GroupID}
+
+	for _, status := range []string{"abandoned", "finish_error", "failed", "cancelled", "superseded"} {
+		gate.RunSettled(ctx, scope, status, 3*time.Second)
+		if samples := store.groupSamples[key]; len(samples) != 0 {
+			t.Fatalf("%s attempt added an ETA sample: %v", status, samples)
+		}
+	}
+	gate.RunSettled(ctx, scope, kernel.RunSummaryDone, 9*time.Second)
+	samples := store.groupSamples[key]
+	if len(samples) != 1 || samples[0] != 9*time.Second {
+		t.Fatalf("completed attempt samples = %v, want exactly the 9s observation", samples)
 	}
 }

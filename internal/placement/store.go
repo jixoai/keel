@@ -52,12 +52,22 @@ type Store interface {
 	// ObserveRunDuration records one observed attempt duration: the only source
 	// of the queue ETA average (there is no built-in duration).
 	ObserveRunDuration(ctx context.Context, tenantID, groupID uuid.UUID, duration time.Duration) error
-	// GroupMemoryUsage reports the active-run memory estimate per group (the
-	// pack strategy's headroom input).
-	GroupMemoryUsage(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]int64, error)
+	// GroupUsage reports each group's active-run account: the number of runs
+	// holding a slot and the sum of their memory estimates (the pack strategy's
+	// headroom input and the memory-refusal diagnostics).
+	GroupUsage(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]GroupUsage, error)
 	// QueuedTenants lists the tenants that currently have queued runs (the
 	// crash-recovery sweep's work list).
 	QueuedTenants(ctx context.Context) ([]uuid.UUID, error)
+}
+
+// GroupUsage is one group's active-run account. Runs is the number of
+// pending+running rows in the group; MemoryBytes is the sum of their
+// estimates. Queued rows hold no slot and are excluded from both, exactly like
+// the admission count.
+type GroupUsage struct {
+	Runs        int
+	MemoryBytes int64
 }
 
 // claimWrite is a compare-and-set placement claim after the service resolved

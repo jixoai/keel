@@ -570,6 +570,10 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 		selfActive := selfHasRun && runActive(selfStatus)
 		selfQueued := selfHasRun && selfStatus == RunStatusQueued
 		selfAdmitted := selfActive && selfGroup == group.GroupID
+		// The call's "what existed before" facts. Promotion below may turn this
+		// session's own queued row pending; Created/AlreadyActive describe the
+		// reservation this call made, not the state promotion left behind.
+		wasActive, wasQueued := selfActive, selfQueued
 		if selfActive && !selfAdmitted && selfStatus == RunStatusRunning {
 			// A running attempt cannot be re-homed: the placement move requires
 			// the old work to drain first. Refusing is safer than moving a live
@@ -577,79 +581,6 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			return &Conflict{
 				Reason: ReasonAlreadyPlaced, TenantID: req.tenantID, SessionID: req.sessionID,
 				GroupID: selfGroup, Detail: "the session is already running in another group",
-			}
-		}
-
-		activeGroup, activeTenant, usedMemory, err := activeCountsTx(ctx, tx, req.tenantID, group.GroupID)
-		if err != nil {
-			return err
-		}
-
-		if !selfAdmitted && !selfQueued {
-			// The tenant quota is a hard refusal, never a queue bypass. A queued
-			// row's new input is not a new admission: it already has its place, so
-			// it is not re-charged (or refused) here.
-			if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
-				return s.capacityErrorTx(ctx, tx, req, group.GroupID, CapacityTenant,
-					req.tenantLimit, activeTenant, false)
-			}
-			// Memory is a hard ceiling too. An unknown estimate is a typed
-			// unsupported failure, not a zero: a fabricated number would make the
-			// ceiling look enforced.
-			if group.MemoryLimitBytes > 0 {
-				if !req.memoryKnown || req.memoryEstimate <= 0 {
-					return &UnsupportedError{
-						Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
-						SessionID: req.sessionID, GroupID: group.GroupID,
-						Detail: "the group defines a memory budget but no memory estimate is configured",
-					}
-				}
-				if usedMemory+req.memoryEstimate > group.MemoryLimitBytes {
-					return s.memoryErrorTx(ctx, tx, req, group.GroupID, usedMemory, activeGroup)
-				}
-			}
-			if group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns {
-				// Full group: the queued row is the durable FIFO entry. It holds no
-				// slot, the kernel's claim predicate never matches it, and only a
-				// promotion (guarded queued -> pending) can start it. An existing
-				// queued row keeps its queue_seq (COALESCE), so a repeated input
-				// does not jump the line.
-				if _, err := tx.Exec(ctx,
-					`INSERT INTO runs (tenant_id, session_id, status, group_id, queue_seq, memory_bytes)
-					 VALUES ($1, $2, 'queued', $3, nextval('runs_queue_seq'), $4)
-					 ON CONFLICT (tenant_id, session_id) DO UPDATE
-					 SET status = 'queued',
-					     group_id = EXCLUDED.group_id,
-					     queue_seq = COALESCE(runs.queue_seq, EXCLUDED.queue_seq),
-					     memory_bytes = EXCLUDED.memory_bytes,
-					     updated_at = now()`,
-					req.tenantID, req.sessionID, group.GroupID, req.memoryEstimate); err != nil {
-					return fmt.Errorf("placement: enqueue run: %w", err)
-				}
-				var position int
-				if err := tx.QueryRow(ctx, queuePositionQuery, req.tenantID, group.GroupID, req.sessionID).
-					Scan(&position); err != nil {
-					return fmt.Errorf("placement: read queue position: %w", err)
-				}
-				eta, err := queueETATx(ctx, tx, req.tenantID, group.GroupID, position, group.MaxConcurrentRuns)
-				if err != nil {
-					return err
-				}
-				out = Admission{
-					TenantID:      req.tenantID,
-					SessionID:     req.sessionID,
-					GroupID:       group.GroupID,
-					ActiveGroup:   activeGroup,
-					LimitGroup:    group.MaxConcurrentRuns,
-					ActiveTenant:  activeTenant,
-					LimitTenant:   req.tenantLimit,
-					Created:       !selfActive,
-					Queued:        true,
-					QueuePosition: position,
-					ETA:           eta,
-					MemoryBytes:   req.memoryEstimate,
-				}
-				return nil
 			}
 		}
 
@@ -680,6 +611,129 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			}
 			selfGroup = group.GroupID
 		}
+
+		// Count first: only a group with a free slot can receive a promoted head.
+		// When the target group is already full, this admission is going straight
+		// to the queue, and a promotion pass would only lengthen the tenant lock
+		// (the settlement/release/sweeper triggers still promote other groups).
+		activeGroup, activeTenant, usedMemory, err := activeCountsTx(ctx, tx, req.tenantID, group.GroupID)
+		if err != nil {
+			return err
+		}
+		if group.MaxConcurrentRuns == 0 || activeGroup < group.MaxConcurrentRuns {
+			// FIFO fairness: a queued head must be offered the free slot before a
+			// new admission can take it. This matters in the crash/reconfigure
+			// windows where queued rows exist but active rows do not (a worker
+			// died, or an operator raised max_concurrent_runs): counting only
+			// active rows and inserting this run first would let the newcomer jump
+			// the queue. Promotion is the same guarded transition ReleaseRun uses,
+			// under this same tenant advisory lock, so it is safe (and idempotent)
+			// here.
+			if _, err := s.promoteQueuedTx(ctx, tx, req.tenantID, req.tenantLimit); err != nil {
+				return err
+			}
+			// Promotion may have promoted this session's own queued row. Re-read
+			// the row so the admission decision is made against the live status.
+			reloadErr := tx.QueryRow(ctx,
+				`SELECT status, COALESCE(group_id, '00000000-0000-0000-0000-000000000000'::uuid)
+				   FROM runs
+				  WHERE tenant_id = $1 AND session_id = $2 FOR UPDATE`,
+				req.tenantID, req.sessionID).
+				Scan(&selfStatus, &selfGroup)
+			if reloadErr != nil && !errors.Is(reloadErr, pgx.ErrNoRows) {
+				return fmt.Errorf("placement: re-read self run: %w", reloadErr)
+			}
+			selfHasRun = reloadErr == nil
+			selfActive = selfHasRun && runActive(selfStatus)
+			selfQueued = selfHasRun && selfStatus == RunStatusQueued
+			selfAdmitted = selfActive && selfGroup == group.GroupID
+			activeGroup, activeTenant, usedMemory, err = activeCountsTx(ctx, tx, req.tenantID, group.GroupID)
+			if err != nil {
+				return err
+			}
+		}
+		// newAdmission is the only case that consumes a fresh slot: an already
+		// active row (even an ungrouped legacy wake row) or a waiting queue entry
+		// is not a second admission.
+		newAdmission := !selfActive && !selfQueued && !selfAdmitted
+		if !selfAdmitted && !selfQueued {
+			// The tenant quota is a hard refusal, never a queue bypass. A queued
+			// row's new input is not a new admission: it already has its place, so
+			// it is not re-charged (or refused) here.
+			if !selfActive && req.tenantLimit > 0 && activeTenant >= req.tenantLimit {
+				return s.capacityErrorTx(ctx, tx, req, group.GroupID, CapacityTenant,
+					req.tenantLimit, activeTenant, false)
+			}
+			// Memory is a hard ceiling too. An unknown estimate is a typed
+			// unsupported failure, not a zero: a fabricated number would make the
+			// ceiling look enforced.
+			if group.MemoryLimitBytes > 0 {
+				if !req.memoryKnown || req.memoryEstimate <= 0 {
+					return &UnsupportedError{
+						Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
+						SessionID: req.sessionID, GroupID: group.GroupID,
+						Detail: "the group defines a memory budget but no memory estimate is configured",
+					}
+				}
+				if usedMemory+req.memoryEstimate > group.MemoryLimitBytes {
+					return s.memoryErrorTx(ctx, tx, req, group.GroupID, usedMemory, activeGroup)
+				}
+			}
+			// A new run queues when the group is full, and also when a queued
+			// head remains after the promotion pass: a head blocked by the memory
+			// budget (or by a concurrent writer) keeps its place, so a smaller
+			// newcomer must not slip past it.
+			headWaiting := false
+			if newAdmission {
+				if headWaiting, err = groupHasQueuedTx(ctx, tx, req.tenantID, group.GroupID); err != nil {
+					return err
+				}
+			}
+			if (group.MaxConcurrentRuns > 0 && activeGroup >= group.MaxConcurrentRuns) || headWaiting {
+				// Full group (or a waiting head): the queued row is the durable
+				// FIFO entry. It holds no slot, the kernel's claim predicate never
+				// matches it, and only a promotion (guarded queued -> pending) can
+				// start it. An existing queued row keeps its queue_seq (COALESCE),
+				// so a repeated input does not jump the line.
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO runs (tenant_id, session_id, status, group_id, queue_seq, memory_bytes)
+					 VALUES ($1, $2, 'queued', $3, nextval('runs_queue_seq'), $4)
+					 ON CONFLICT (tenant_id, session_id) DO UPDATE
+					 SET status = 'queued',
+					     group_id = EXCLUDED.group_id,
+					     queue_seq = COALESCE(runs.queue_seq, EXCLUDED.queue_seq),
+					     memory_bytes = EXCLUDED.memory_bytes,
+					     updated_at = now()`,
+					req.tenantID, req.sessionID, group.GroupID, req.memoryEstimate); err != nil {
+					return fmt.Errorf("placement: enqueue run: %w", err)
+				}
+				var position int
+				if err := tx.QueryRow(ctx, queuePositionQuery, req.tenantID, group.GroupID, req.sessionID).
+					Scan(&position); err != nil {
+					return fmt.Errorf("placement: read queue position: %w", err)
+				}
+				eta, err := queueETATx(ctx, tx, req.tenantID, group.GroupID, position, group.MaxConcurrentRuns)
+				if err != nil {
+					return err
+				}
+				out = Admission{
+					TenantID:      req.tenantID,
+					SessionID:     req.sessionID,
+					GroupID:       group.GroupID,
+					ActiveGroup:   activeGroup,
+					LimitGroup:    group.MaxConcurrentRuns,
+					ActiveTenant:  activeTenant,
+					LimitTenant:   req.tenantLimit,
+					Created:       !wasActive && !wasQueued,
+					Queued:        true,
+					QueuePosition: position,
+					ETA:           eta,
+					MemoryBytes:   req.memoryEstimate,
+				}
+				return nil
+			}
+		}
+
 		if !selfQueued {
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO runs (tenant_id, session_id, status, group_id, queue_seq, memory_bytes)
@@ -693,14 +747,6 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 				req.tenantID, req.sessionID, group.GroupID, req.memoryEstimate); err != nil {
 				return fmt.Errorf("placement: reserve run slot: %w", err)
 			}
-		}
-		// Capacity is available: promote FIFO heads while slots, memory and the
-		// tenant quota permit. A queued row is never promoted here directly, so a
-		// repeated input cannot jump ahead of an earlier queued run; the sweep may
-		// promote this session's own row when it reaches the head, which is why the
-		// final state is re-read.
-		if _, err := s.promoteQueuedTx(ctx, tx, req.tenantID, req.tenantLimit); err != nil {
-			return err
 		}
 		var finalStatus string
 		if err := tx.QueryRow(ctx,
@@ -731,7 +777,7 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 				LimitGroup:    group.MaxConcurrentRuns,
 				ActiveTenant:  activeTenant,
 				LimitTenant:   req.tenantLimit,
-				Created:       !selfActive && !selfQueued,
+				Created:       !wasActive && !wasQueued,
 				Queued:        true,
 				QueuePosition: position,
 				ETA:           eta,
@@ -747,8 +793,8 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			LimitGroup:    group.MaxConcurrentRuns,
 			ActiveTenant:  activeTenant,
 			LimitTenant:   req.tenantLimit,
-			AlreadyActive: selfActive,
-			Created:       !selfActive && !selfQueued,
+			AlreadyActive: wasActive,
+			Created:       !wasActive && !wasQueued,
 			MemoryBytes:   req.memoryEstimate,
 		}
 		return nil
@@ -776,6 +822,22 @@ func activeCountsTx(ctx context.Context, tx pgx.Tx, tenantID, groupID uuid.UUID)
 		return 0, 0, 0, fmt.Errorf("placement: count active runs: %w", err)
 	}
 	return activeGroup, activeTenant, usedMemory, nil
+}
+
+// groupHasQueuedTx reports whether the group still has a queued run after the
+// promotion pass. A new admission must join the tail behind it even when a
+// slot is free: the head may be blocked by the memory budget (head-of-line) or
+// may have been left behind by a crash/reconfigure window, and either way a
+// newcomer taking that slot would break FIFO.
+func groupHasQueuedTx(ctx context.Context, tx pgx.Tx, tenantID, groupID uuid.UUID) (bool, error) {
+	var queued bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM runs
+		                 WHERE tenant_id = $1 AND group_id = $2 AND status = 'queued')`,
+		tenantID, groupID).Scan(&queued); err != nil {
+		return false, fmt.Errorf("placement: probe queued head: %w", err)
+	}
+	return queued, nil
 }
 
 // queuePositionQuery is the 1-based FIFO position of one session inside its
@@ -955,14 +1017,20 @@ func (s *PGStore) promoteQueuedTx(ctx context.Context, tx pgx.Tx, tenantID uuid.
 		return nil, nil
 	}
 
-	// One snapshot of the active counts: promotions in this transaction are the
-	// only writers that change them (the advisory lock is held).
+	// One snapshot of the active counts. Placement writers are serialised by the
+	// advisory lock, but a kernel user.message wake can still commit an active
+	// row during this pass: the loop re-counts below instead of trusting this
+	// snapshot for the quota decision.
 	var activeTenant int
 	if err := tx.QueryRow(ctx,
 		`SELECT count(*) FROM runs WHERE tenant_id = $1 AND status IN ('pending', 'running')`,
 		tenantID).Scan(&activeTenant); err != nil {
 		return nil, fmt.Errorf("placement: count tenant runs: %w", err)
 	}
+	// startingActive distinguishes an over-quota tenant that was lowered before
+	// this pass (no promotion is attempted, no error) from an oversell that a
+	// concurrent wake introduced while this pass ran (roll back and retry).
+	startingActive := activeTenant
 	type groupUsage struct{ active, used int64 }
 	usage := make(map[uuid.UUID]groupUsage, len(groups))
 	usageRows, err := tx.Query(ctx,
@@ -996,8 +1064,21 @@ func (s *PGStore) promoteQueuedTx(ctx context.Context, tx pgx.Tx, tenantID uuid.
 			if group.maxRuns > 0 && entry.active >= int64(group.maxRuns) {
 				break
 			}
-			if tenantLimit > 0 && activeTenant >= tenantLimit {
-				break
+			if tenantLimit > 0 {
+				// Re-read the tenant aggregate on every iteration instead of
+				// trusting the snapshot taken above. A kernel user.message wake
+				// can commit another active row while this transaction runs; the
+				// fresh statement sees it (READ COMMITTED) and stops this pass
+				// before the queue oversells the quota by one.
+				if err := tx.QueryRow(ctx,
+					`SELECT count(*) FROM runs
+					  WHERE tenant_id = $1 AND status IN ('pending', 'running')`,
+					tenantID).Scan(&activeTenant); err != nil {
+					return nil, fmt.Errorf("placement: re-count tenant runs: %w", err)
+				}
+				if activeTenant >= tenantLimit {
+					break
+				}
 			}
 			var (
 				sessionID uuid.UUID
@@ -1020,16 +1101,35 @@ func (s *PGStore) promoteQueuedTx(ctx context.Context, tx pgx.Tx, tenantID uuid.
 					break
 				}
 			}
+			// The write itself re-checks the quota in the same statement: the
+			// guarded UPDATE and the count cannot be separated by a concurrent
+			// writer that lands between the read above and this write.
 			tag, err := tx.Exec(ctx,
 				`UPDATE runs SET status = 'pending', queue_seq = NULL, updated_at = now()
-				  WHERE tenant_id = $1 AND session_id = $2 AND status = 'queued'`,
-				tenantID, sessionID)
+				  WHERE tenant_id = $1 AND session_id = $2 AND status = 'queued'
+				    AND ($3 = 0 OR (SELECT count(*) FROM runs
+				                     WHERE tenant_id = $1 AND status IN ('pending', 'running')) < $3)`,
+				tenantID, sessionID, tenantLimit)
 			if err != nil {
 				return nil, fmt.Errorf("placement: promote queued run: %w", err)
 			}
 			if tag.RowsAffected() == 0 {
-				// The row stopped being queued (a concurrent release settled it);
-				// re-read the head rather than promoting blindly.
+				// The row stopped being queued (a concurrent release settled it)
+				// or the quota filled. A still-queued head means this group is
+				// blocked; anything else means re-read the next head.
+				var status string
+				err := tx.QueryRow(ctx,
+					`SELECT status FROM runs WHERE tenant_id = $1 AND session_id = $2`,
+					tenantID, sessionID).Scan(&status)
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue
+				}
+				if err != nil {
+					return nil, fmt.Errorf("placement: re-read queue head: %w", err)
+				}
+				if status == RunStatusQueued {
+					break
+				}
 				continue
 			}
 			entry.active++
@@ -1038,6 +1138,22 @@ func (s *PGStore) promoteQueuedTx(ctx context.Context, tx pgx.Tx, tenantID uuid.
 			promoted = append(promoted, Promotion{
 				TenantID: tenantID, GroupID: group.groupID, SessionID: sessionID,
 			})
+		}
+	}
+	if tenantLimit > 0 {
+		// Final fail-closed check: a wake that committed while this pass ran is
+		// visible now. If the tenant is over quota despite the guarded writes,
+		// roll this promotion transaction back (the caller retries and sees the
+		// wake's row) rather than committing an oversell.
+		var active int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM runs
+			  WHERE tenant_id = $1 AND status IN ('pending', 'running')`,
+			tenantID).Scan(&active); err != nil {
+			return nil, fmt.Errorf("placement: verify tenant runs: %w", err)
+		}
+		if active > tenantLimit && active > startingActive {
+			return nil, errPromotionContention
 		}
 	}
 	return promoted, nil
@@ -1225,27 +1341,27 @@ func (s *PGStore) ObserveRunDuration(ctx context.Context, tenantID, groupID uuid
 	})
 }
 
-// GroupMemoryUsage reports the active-run memory estimate per group.
-func (s *PGStore) GroupMemoryUsage(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]int64, error) {
+// GroupUsage reports each group's active-run count and memory estimate.
+func (s *PGStore) GroupUsage(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]GroupUsage, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT group_id, COALESCE(sum(memory_bytes), 0)
+		`SELECT group_id, count(*), COALESCE(sum(memory_bytes), 0)
 		   FROM runs
 		  WHERE tenant_id = $1 AND status IN ('pending', 'running') AND group_id IS NOT NULL
 		  GROUP BY group_id`, tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("placement: group memory usage: %w", err)
+		return nil, fmt.Errorf("placement: group usage: %w", err)
 	}
 	defer rows.Close()
-	usage := map[uuid.UUID]int64{}
+	usage := map[uuid.UUID]GroupUsage{}
 	for rows.Next() {
 		var (
 			groupID uuid.UUID
-			used    int64
+			entry   GroupUsage
 		)
-		if err := rows.Scan(&groupID, &used); err != nil {
-			return nil, fmt.Errorf("placement: scan group memory usage: %w", err)
+		if err := rows.Scan(&groupID, &entry.Runs, &entry.MemoryBytes); err != nil {
+			return nil, fmt.Errorf("placement: scan group usage: %w", err)
 		}
-		usage[groupID] = used
+		usage[groupID] = entry
 	}
 	return usage, rows.Err()
 }
@@ -1327,7 +1443,17 @@ func (s *PGStore) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return lastErr
 }
 
+// errPromotionContention reports that a promotion pass found the tenant over
+// quota after its guarded writes: a concurrent kernel wake committed an active
+// row during the pass. The transaction is rolled back and inTx retries, so the
+// retry sees the wake's row and stops at the quota instead of committing an
+// oversell.
+var errPromotionContention = errors.New("placement: promotion lost the tenant quota race")
+
 func isTransientTx(err error) bool {
+	if errors.Is(err, errPromotionContention) {
+		return true
+	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {

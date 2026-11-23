@@ -186,17 +186,24 @@ func (g *Gate) QueueState(ctx context.Context, tenantID, sessionID uuid.UUID) (Q
 
 // RunSettled is the worker's settlement observer (agent.SettlementObserver).
 // A settled attempt frees a group slot, so the queue head is promoted now
-// instead of waiting for the recovery sweep; the observed duration is the ETA
-// history. Failures never affect the settled run: they are logged and the
-// sweep converges.
+// instead of waiting for the recovery sweep. Failures never affect the settled
+// run: they are logged and the sweep converges.
+//
+// ETA observations are restricted to completed attempts (status "done"). An
+// abandoned attempt (shutdown, lost claim), a finish error, a cancelled attempt
+// or a failed model turn did not run the full work the queue is waiting for;
+// feeding their partial/arbitrary durations into the average would make the
+// advertised wait drift away from what a queued run will actually experience.
 func (g *Gate) RunSettled(ctx context.Context, scope kernel.Scope, status string, duration time.Duration) {
 	if scope.IsZero() {
 		return
 	}
-	if err := g.service.ObserveRunDuration(ctx, scope.TenantID, scope.SessionID, duration); err != nil {
-		g.logger.Warn("observe run duration for the placement ETA",
-			"tenant_id", scope.TenantID, "session_id", scope.SessionID,
-			"status", status, "duration_ms", duration.Milliseconds(), "err", err)
+	if status == kernel.RunSummaryDone {
+		if err := g.service.ObserveRunDuration(ctx, scope.TenantID, scope.SessionID, duration); err != nil {
+			g.logger.Warn("observe run duration for the placement ETA",
+				"tenant_id", scope.TenantID, "session_id", scope.SessionID,
+				"status", status, "duration_ms", duration.Milliseconds(), "err", err)
+		}
 	}
 	promoted, err := g.service.PromoteQueued(ctx, scope.TenantID)
 	if err != nil {

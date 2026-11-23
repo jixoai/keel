@@ -607,7 +607,7 @@ func (s *Service) packGroup(ctx context.Context, tenantID, sessionID uuid.UUID) 
 			Detail: "the pack groups define memory budgets but no memory estimate is configured",
 		}
 	}
-	usage, err := s.store.GroupMemoryUsage(ctx, tenantID)
+	usage, err := s.store.GroupUsage(ctx, tenantID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -615,10 +615,19 @@ func (s *Service) packGroup(ctx context.Context, tenantID, sessionID uuid.UUID) 
 		best      *Group
 		bestLeft  int64
 		unbounded bool
-		largest   int64
+		// Diagnostics of the refused pack pool: every candidate group's active
+		// runs and estimates, summed. Active is a run count, never a group count,
+		// and UsedBytes is filled whenever the store knows the estimates.
+		activeRuns int
+		usedBytes  int64
+		limitBytes int64
 	)
 	for i := range candidates {
 		group := &candidates[i]
+		entry := usage[group.GroupID]
+		activeRuns += entry.Runs
+		usedBytes += entry.MemoryBytes
+		limitBytes += group.MemoryLimitBytes
 		if group.MemoryLimitBytes == 0 {
 			// An unbounded group is the fallback: a bounded group that fits is the
 			// denser (and therefore preferred) packing choice.
@@ -627,10 +636,7 @@ func (s *Service) packGroup(ctx context.Context, tenantID, sessionID uuid.UUID) 
 			}
 			continue
 		}
-		if group.MemoryLimitBytes > largest {
-			largest = group.MemoryLimitBytes
-		}
-		used := usage[group.GroupID]
+		used := entry.MemoryBytes
 		if used+estimate > group.MemoryLimitBytes {
 			continue
 		}
@@ -642,14 +648,17 @@ func (s *Service) packGroup(ctx context.Context, tenantID, sessionID uuid.UUID) 
 	if best == nil {
 		// No pack group has headroom. Memory is a hard ceiling like a full group
 		// slot; unlike slots there is no queue, because a queued run behind an
-		// over-budget group could never be promoted without eviction.
+		// over-budget group could never be promoted without eviction. The
+		// diagnostics aggregate the whole pack pool the caller may spill into:
+		// runs (a count, not len(groups)), used bytes and the pool's capacity.
 		return uuid.Nil, &CapacityError{
 			Reason:     CapacityGroupMemory,
 			Resource:   capacityResource(CapacityGroupMemory),
 			TenantID:   tenantID,
 			SessionID:  sessionID,
-			LimitBytes: largest,
-			Active:     len(candidates),
+			LimitBytes: limitBytes,
+			UsedBytes:  usedBytes,
+			Active:     activeRuns,
 			RetryAfter: DefaultRetryAfter,
 		}
 	}

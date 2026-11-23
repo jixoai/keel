@@ -3,6 +3,8 @@ package placement
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -510,4 +512,264 @@ func mustListGroups(t *testing.T, svc *Service, tenant uuid.UUID) []Group {
 		t.Fatalf("list groups: %v", err)
 	}
 	return groups
+}
+
+// TestPGQueuedHeadGetsAFreeSlotBeforeANewAdmission is the database half of the
+// crash/reconfigure fairness guard: a queued head is promoted before a new
+// admission may take the free slot the crashed holder left behind.
+func TestPGQueuedHeadGetsAFreeSlotBeforeANewAdmission(t *testing.T) {
+	st := pgPlacementStore(t)
+	svc := pgService(t, st, 0)
+	ctx := context.Background()
+	tenant := pgTenant(t, st)
+	group := mustGroup(t, svc, tenant, "pg-fifo-window", 1)
+	holder, head, newcomer := pgSession(t, st, tenant), pgSession(t, st, tenant), pgSession(t, st, tenant)
+	for _, session := range []uuid.UUID{holder, head, newcomer} {
+		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	}
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+		t.Fatalf("admit holder: %v", err)
+	}
+	if admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: head}); err != nil || !admission.Queued {
+		t.Fatalf("queue head = %+v err=%v", admission, err)
+	}
+	// The crash/reconfigure window: the holder's row is terminal, but no
+	// settlement/release promoted the queue yet.
+	if _, err := st.Pool().Exec(ctx,
+		`UPDATE runs SET status = 'done' WHERE tenant_id = $1 AND session_id = $2`,
+		tenant, holder); err != nil {
+		t.Fatalf("settle holder directly: %v", err)
+	}
+	admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: newcomer})
+	if err != nil {
+		t.Fatalf("admit newcomer: %v", err)
+	}
+	if !admission.Queued || admission.QueuePosition != 1 {
+		t.Fatalf("newcomer = %+v, want queued behind the head", admission)
+	}
+	if status := pgRunStatus(t, st, tenant, head); status != RunStatusPending {
+		t.Fatalf("queued head = %q, want promoted before the newcomer", status)
+	}
+	if status := pgRunStatus(t, st, tenant, newcomer); status != RunStatusQueued {
+		t.Fatalf("newcomer = %q, want queued (never the head's slot)", status)
+	}
+}
+
+// TestPGRunSettledOnlySamplesCompletedAttempts pins the ETA sample rule on the
+// real table: abandoned, finish_error, failed, cancelled and superseded
+// attempts free the slot but write no run_duration_samples row; only a
+// completed ("done") attempt feeds the average.
+func TestPGRunSettledOnlySamplesCompletedAttempts(t *testing.T) {
+	st := pgPlacementStore(t)
+	svc := pgService(t, st, 0)
+	ctx := context.Background()
+	tenant := pgTenant(t, st)
+	group := mustGroup(t, svc, tenant, "pg-eta-rule", 1)
+	session := pgSession(t, st, tenant)
+	mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session}); err != nil {
+		t.Fatal(err)
+	}
+	gate := memGate(t, svc, "runtime-1", newTestSessions(true).state)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+	sampleCount := func() int {
+		return pgCount(t, st, `SELECT count(*) FROM run_duration_samples
+		                        WHERE tenant_id = $1 AND group_id = $2`, tenant, group.GroupID)
+	}
+	for _, status := range []string{"abandoned", "finish_error", "failed", "cancelled", "superseded"} {
+		gate.RunSettled(ctx, scope, status, 3*time.Second)
+		if n := sampleCount(); n != 0 {
+			t.Fatalf("%s attempt wrote %d ETA samples, want 0", status, n)
+		}
+	}
+	gate.RunSettled(ctx, scope, kernel.RunSummaryDone, 9*time.Second)
+	if n := sampleCount(); n != 1 {
+		t.Fatalf("completed attempt wrote %d ETA samples, want 1", n)
+	}
+}
+
+// TestPGUserMessageWakeOfATerminalRunJoinsTheQueue pins the quota-safety rule
+// for the kernel wake: a user.message for a session whose placement-governed
+// run is terminal queues the run instead of resurrecting it as pending. The
+// wake therefore cannot create an active row outside the placement gate, and
+// promotion (quota-guarded, under the admission lock) remains the only door to
+// a slot.
+func TestPGUserMessageWakeOfATerminalRunJoinsTheQueue(t *testing.T) {
+	st := pgPlacementStore(t)
+	ctx := context.Background()
+	var limit atomic.Int64
+	limit.Store(3)
+	svc, err := New(Options{
+		Store: NewPGStore(st.Pool()),
+		TenantRunLimit: func(context.Context, uuid.UUID) (int, error) {
+			return int(limit.Load()), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	tenant := pgTenant(t, st)
+	// Three slots so the queue entry can be created while the tenant quota has
+	// room; the quota is lowered to the two busy holders before the assertions.
+	group := mustGroup(t, svc, tenant, "pg-wake-terminal", 2)
+	first, second, waking := pgSession(t, st, tenant), pgSession(t, st, tenant), pgSession(t, st, tenant)
+	for _, session := range []uuid.UUID{first, second, waking} {
+		mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+	}
+	for _, session := range []uuid.UUID{first, second} {
+		if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: session}); err != nil {
+			t.Fatalf("admit holder: %v", err)
+		}
+	}
+	if admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: waking}); err != nil || !admission.Queued {
+		t.Fatalf("queue waking = %+v err=%v", admission, err)
+	}
+	// Make the waking row terminal inside its group: this is the state a wake
+	// must not turn back into an active run on its own.
+	if _, err := st.Pool().Exec(ctx,
+		`UPDATE runs SET status = 'done', queue_seq = NULL
+		  WHERE tenant_id = $1 AND session_id = $2`, tenant, waking); err != nil {
+		t.Fatalf("settle waking directly: %v", err)
+	}
+	kernLog, err := kernel.NewPG(ctx, st.Pool())
+	if err != nil {
+		t.Fatalf("kernel migrate: %v", err)
+	}
+	kern := kernel.New(kernLog, kernel.Options{})
+	limit.Store(2)
+	if _, err := kern.Commit(ctx, kernel.CommitRequest{
+		Scope:     kernel.Scope{TenantID: tenant, SessionID: waking},
+		Kind:      kernel.KindUserMessage,
+		RequestID: "wake-terminal-1",
+		Payload:   []byte(`{"text":"wake"}`),
+	}); err != nil {
+		t.Fatalf("wake terminal run: %v", err)
+	}
+	if status := pgRunStatus(t, st, tenant, waking); status != RunStatusQueued {
+		t.Fatalf("woken terminal run = %q, want queued (not pending)", status)
+	}
+	if n := pgCount(t, st, `SELECT count(*) FROM runs
+	                        WHERE tenant_id = $1 AND status IN ('pending','running')`, tenant); n != 2 {
+		t.Fatalf("active runs after the wake = %d, want 2 (the quota it must not exceed)", n)
+	}
+	// Give the group a third slot while the tenant quota (2) is spent by the two
+	// holders: promotion must re-check the quota and keep the woken row queued
+	// even though the group now has room.
+	if _, err := st.Pool().Exec(ctx,
+		`UPDATE groups SET max_concurrent_runs = 3 WHERE tenant_id = $1 AND group_id = $2`,
+		tenant, group.GroupID); err != nil {
+		t.Fatalf("reconfigure group: %v", err)
+	}
+	if promoted, err := svc.PromoteQueued(ctx, tenant); err != nil || len(promoted) != 0 {
+		t.Fatalf("promotion under a spent quota = %+v err=%v, want none", promoted, err)
+	}
+	if status := pgRunStatus(t, st, tenant, waking); status != RunStatusQueued {
+		t.Fatalf("woken run after a blocked promotion = %q, want queued", status)
+	}
+	// When the quota frees too, the queued wake is promoted normally.
+	if _, err := st.Pool().Exec(ctx,
+		`UPDATE runs SET status = 'done' WHERE tenant_id = $1 AND session_id = $2`,
+		tenant, first); err != nil {
+		t.Fatalf("settle first holder directly: %v", err)
+	}
+	if promoted, err := svc.PromoteQueued(ctx, tenant); err != nil || len(promoted) != 1 || promoted[0].SessionID != waking {
+		t.Fatalf("promotion after the release = %+v err=%v, want the woken run", promoted, err)
+	}
+	if status := pgRunStatus(t, st, tenant, waking); status != RunStatusPending {
+		t.Fatalf("woken run after promotion = %q, want pending", status)
+	}
+}
+
+// TestPGPromotionRacingAUserMessageWakeDoesNotOversell runs the promotion and
+// the kernel wake concurrently after the tenant quota is lowered to the one
+// slot the earlier queue entry gets. Whichever transaction wins, at most one
+// run holds an active slot: the wake joins the FIFO queue and promotion
+// re-reads the DB aggregate under the admission lock.
+func TestPGPromotionRacingAUserMessageWakeDoesNotOversell(t *testing.T) {
+	st := pgPlacementStore(t)
+	ctx := context.Background()
+	kernLog, err := kernel.NewPG(ctx, st.Pool())
+	if err != nil {
+		t.Fatalf("kernel migrate: %v", err)
+	}
+	kern := kernel.New(kernLog, kernel.Options{})
+	for iteration := 0; iteration < 8; iteration++ {
+		tenant := pgTenant(t, st)
+		var limit atomic.Int64
+		limit.Store(2)
+		svc, err := New(Options{
+			Store: NewPGStore(st.Pool()),
+			TenantRunLimit: func(context.Context, uuid.UUID) (int, error) {
+				return int(limit.Load()), nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("iteration %d new service: %v", iteration, err)
+		}
+		group := mustGroup(t, svc, tenant, "pg-race-wake", 1)
+		holder, waiting, waking := pgSession(t, st, tenant), pgSession(t, st, tenant), pgSession(t, st, tenant)
+		for _, session := range []uuid.UUID{holder, waiting, waking} {
+			mustJoin(t, svc, tenant, session, group.GroupID, "w1", time.Minute)
+		}
+		if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+			t.Fatalf("iteration %d admit holder: %v", iteration, err)
+		}
+		if admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: waiting}); err != nil || !admission.Queued {
+			t.Fatalf("iteration %d queue waiting = %+v err=%v", iteration, admission, err)
+		}
+		if admission, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: waking}); err != nil || !admission.Queued {
+			t.Fatalf("iteration %d queue waking = %+v err=%v", iteration, admission, err)
+		}
+		if _, err := st.Pool().Exec(ctx,
+			`UPDATE runs SET status = 'done', queue_seq = NULL
+			  WHERE tenant_id = $1 AND session_id = $2`, tenant, waking); err != nil {
+			t.Fatalf("iteration %d settle waking: %v", iteration, err)
+		}
+		// The crash window: the holder is terminal, the queue is not promoted,
+		// and the quota is lowered to the single slot the earlier entry gets.
+		if _, err := st.Pool().Exec(ctx,
+			`UPDATE runs SET status = 'done' WHERE tenant_id = $1 AND session_id = $2`,
+			tenant, holder); err != nil {
+			t.Fatalf("iteration %d settle holder: %v", iteration, err)
+		}
+		limit.Store(1)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var promoteErr, wakeErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, promoteErr = svc.PromoteQueued(ctx, tenant)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, wakeErr = kern.Commit(ctx, kernel.CommitRequest{
+				Scope:     kernel.Scope{TenantID: tenant, SessionID: waking},
+				Kind:      kernel.KindUserMessage,
+				RequestID: "race-" + uuid.NewString(),
+				Payload:   []byte(`{"text":"wake"}`),
+			})
+		}()
+		close(start)
+		wg.Wait()
+		if promoteErr != nil {
+			t.Fatalf("iteration %d promotion: %v", iteration, promoteErr)
+		}
+		if wakeErr != nil {
+			t.Fatalf("iteration %d wake: %v", iteration, wakeErr)
+		}
+		if n := pgCount(t, st, `SELECT count(*) FROM runs
+		                        WHERE tenant_id = $1 AND status IN ('pending','running')`, tenant); n > 1 {
+			t.Fatalf("iteration %d active runs = %d, want at most 1 (oversell)", iteration, n)
+		}
+		waitingStatus := pgRunStatus(t, st, tenant, waiting)
+		wakingStatus := pgRunStatus(t, st, tenant, waking)
+		if waitingStatus != RunStatusPending || wakingStatus != RunStatusQueued {
+			t.Fatalf("iteration %d waiting=%q waking=%q, want the earlier queue entry pending and the wake queued",
+				iteration, waitingStatus, wakingStatus)
+		}
+	}
 }
