@@ -1,7 +1,8 @@
 === RUN   TestScanProviderFallbackSelection
 --- PASS: TestScanProviderFallbackSelection (0.00s)
-=== RUN   TestScanProviderFallbackInvalidStillResumes
---- PASS: TestScanProviderFallbackInvalidStillResumes (0.00s)
+=== RUN   TestScanProviderFallbackInvalidEscalatesWithoutResuming
+--- PASS: TestScanProviderFallbackInvalidEscalatesWithoutResuming (0.00s)
+=== RUN   TestScanProviderExhaustedWithoutFallbackEscalates
+--- PASS: TestScanProviderExhaustedWithoutFallbackEscalates (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/supervisor	0.388s
-exit=0
+ok  	github.com/jixoai/keel/internal/supervisor	0.707s

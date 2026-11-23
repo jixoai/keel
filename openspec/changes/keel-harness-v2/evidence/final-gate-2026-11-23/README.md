@@ -36,10 +36,10 @@ nsh 0.6.0 (f577c51 nightly)。
 - `internal/servicehost` 的 `TestApplyModelsKeepsTheWorkerClaiming` 有 10s 级等待，在
   多任务并发（R1 + 全量 + TUI 同时跑）时曾超时；单跑与本次 idle 全量均 PASS。全量门
   应在机器空闲时跑。
-- **W11 的三个收口门仍未绿**（见 `evidence/w11-gates/README.md`）：
-  G1 缺逐状态机转移矩阵/拒绝事实；G2 的容器重启 E2E 无 Docker 不可测、capture 崩溃格
-  缺失；G3 的 provider 额度耗尽仍重排同一 selection（与 supervision spec :78-79 相反）。
-  `keel-harness-v2` 的归档要等这三个门补齐或 Owner 明确接受缺口，本次未归档。
+- **W11 收口门：G3 已修（`47a96d0`），G1/G2 仍未绿**（见 `evidence/w11-gates/README.md`）：
+  G1 缺逐状态机转移矩阵/拒绝事实（静态 state→fact 与 kindRegistry 已补，转移矩阵仍开）；
+  G2 的容器重启 E2E 无 Docker 不可测、capture 崩溃格缺失。
+  `keel-harness-v2` 的归档要等 G1/G2 补齐或 Owner 明确接受缺口，本次未归档。
 
 ## 清理
 

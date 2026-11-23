@@ -24,7 +24,7 @@ Worktree: `.worktrees/keel-w11` · Branch: `task/keel-w11-gates` · Base: `a549e
 | G0 契约门 | **PASS** | 修复了 kernel→layerfs 越界；11 工具快照/生成名负控/插件同层句柄负控/catalog 全绿（§3） |
 | G1 状态机门 | **FAIL** | 无逐状态机转移矩阵测试、无「拒绝事实」矩阵、无状→事实映射脚本（§4） |
 | G2 恢复门 | **FAIL**（kill -9 子项 PASS） | 进程级 kill -9 续跑、子代理原任务续跑、产品级 SIGKILL 三格绿；容器重启 E2E 无 Docker 不可测；capture 崩溃格缺失（§5） |
-| G3 幂等与冲突门 | **FAIL**（4/5 判据 PASS） | provider 额度耗尽且未配 fallback 时仍重试同一 provider，违反 supervision spec「立即停止重试该 provider，按 fallback 切换或升级」（§6） |
+| G3 幂等与冲突门 | **PASS**（5/5 判据） | provider 额度耗尽：有可用 fallback 则切换；无可用 fallback 则升级并落 `provider_exhausted_no_fallback`，不再重排同一 provider（§6） |
 | G5 任务门 | **PASS** | taskId 强制、fork eventSeq 精确、资源 (path,hash)、write→bash 读、十万文件 1 条 capture 事件全绿（§7） |
 
 > `acceptance.md` 的依赖顺序要求 E0→G0→G1 先绿，后续门才作为验收依据。本文件仍按主线要求
@@ -288,7 +288,7 @@ KEEL_TEST_DSN=... go test ./internal/harnessext -run TestResumeContinuesTheSameS
 3. 「恢复次数/原因/所用配置可查」在 `resume.attempt` payload 有断言；但「恢复不重复已提交副作用」
    只在 assistant/tool.result 计数上断言，capture 未断言。
 
-## 6. G3 幂等与冲突门（FAIL；4/5 判据 PASS）
+## 6. G3 幂等与冲突门（PASS）
 
 | 判据 | 测试 | 结果/证据 |
 |---|---|---|
@@ -296,14 +296,14 @@ KEEL_TEST_DSN=... go test ./internal/harnessext -run TestResumeContinuesTheSameS
 | 文件写前置条件不命中 `conflict` | `TestWriteReadPagingAndPreconditions` | PASS（`g3-file-write-idempotency.txt`） |
 | webhook 重投不产生第二次会话 | `TestTriggerWebhookHMACAndInitialCardE2E`（重复投递 `deduped=true`、同 sessionId）、`TestTriggerFireCreatesBotOwnedSession` | PASS（`g3-webhook-decision-idempotency.txt`） |
 | approve 重复作答 409 | `TestDecisionHTTPIdempotency`（同答案 `duplicate=true`；不同答案 **409**） | PASS（`g3-decision-409.txt`） |
-| **provider 额度耗尽后停止对该 provider 重试** | `TestScanProviderFallbackSelection` 只覆盖「配置了 fallback → 切换」 | **FAIL** |
+| **provider 额度耗尽后停止对该 provider 重试** | `TestScanProviderFallbackSelection`（有可用 fallback → 切换）、`TestScanProviderExhaustedWithoutFallbackEscalates` / `TestScanProviderFallbackInvalidEscalatesWithoutResuming`（无可用 fallback → 升级，不重排） | **PASS**（`g3-provider-exhaustion.txt`） |
 
-**失败依据**：`openspec/changes/keel-harness-v2/specs/supervision/spec.md:78-79`
-要求「provider 报额度耗尽 → **立即停止重试该 provider**，按 `providerFallback` 切换或升级」。
-现状（`internal/supervisor/supervisor.go:430-475`）在**未配置 fallback** 时仍
-`RequeueRun` 同一 selection（继续重试同一 provider）；配置了 fallback 但校验失败时也照样重排
-（`TestScanProviderFallbackInvalidStillResumes` 把这一行为钉成期望，`g3-provider-exhaustion.txt`）。
-即 4/5 绿，第 5 条与 spec 相反；G3 不能判 PASS。
+**修复（2026-11-23，`47a96d0`）**：`recoverFailed` 在 provider 耗尽且 `selection == nil`
+（无 fallback 或 fallback 校验失败）时不再 `RequeueRun`，改为
+`exhaustWithReason(..., "provider_exhausted_no_fallback")`：按阶梯升级（父 / owner /
+super-agent；`onExhausted=stop` 落 stop 事实），账本 fact 带 exhaustion 原因；有可用
+fallback 时仍按 fallback 重排。旧的 `TestScanProviderFallbackInvalidStillResumes`（把错误
+行为钉成期望）已改名为 `...InvalidEscalatesWithoutResuming` 并断言不重排。5/5 判据 PASS。
 
 ## 7. G5 任务门（PASS）
 
