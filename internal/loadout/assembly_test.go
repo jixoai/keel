@@ -8,6 +8,7 @@ import (
 
 	"github.com/jixoai/keel/internal/assembly"
 	"github.com/jixoai/keel/internal/host"
+	"github.com/jixoai/keel/internal/servicegraph"
 )
 
 // TestAssemblyBaseMatchesTheBlueprint pins the production adapter: every
@@ -66,6 +67,16 @@ func TestAssemblyBaseMatchesTheBlueprint(t *testing.T) {
 		if positions[prerequisite] >= positions[ServiceRowID(ServiceWorker)] {
 			t.Fatalf("%s activates after worker: %v", prerequisite, positions)
 		}
+	}
+}
+
+func TestAssemblyBaseRejectsDuplicateCapabilityProviders(t *testing.T) {
+	_, err := assemblyBase([]servicegraph.ServiceDescriptor{
+		{Name: "one", Version: Version, Provides: []string{"ctx.shared"}},
+		{Name: "two", Version: Version, Provides: []string{"ctx.shared"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "both provide capability") {
+		t.Fatalf("duplicate capability error = %v, want a fail-closed blueprint", err)
 	}
 }
 

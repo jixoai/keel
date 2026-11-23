@@ -347,6 +347,39 @@ func TestOverlayCannotChangeStructure(t *testing.T) {
 	}
 }
 
+func TestOverlayKeepsTheBaseDependencyShape(t *testing.T) {
+	dependency := row("keel.dep#row", "v1", assembly.LayerHarness)
+	target := row("keel.a#row", "v1", assembly.LayerHarness)
+	target.Requires = []assembly.RowID{"keel.dep#row"}
+
+	built := mustBuild(t,
+		base(dependency, target),
+		overlay(assembly.StagePreset, "p", assembly.Row{ID: "keel.a#row", Impl: "v2"}),
+	)
+	effective, ok := built.Row("keel.a#row")
+	if !ok {
+		t.Fatal("overridden row is missing from the effective set")
+	}
+	if effective.Impl != "v2" {
+		t.Fatalf("impl = %q, want v2", effective.Impl)
+	}
+	if got, want := effective.Requires, []assembly.RowID{"keel.dep#row"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("overridden row requires = %v, want the base dependency %v", got, want)
+	}
+
+	// A dependency that did not survive the overlay must block the overridden
+	// row instead of letting it activate with a silently dropped edge.
+	absentDependency := assembly.Row{ID: "keel.dep#row", Absent: true}
+	blocked := mustBuild(t,
+		base(dependency, target),
+		overlay(assembly.StagePreset, "p", absentDependency, assembly.Row{ID: "keel.a#row", Impl: "v2"}),
+	)
+	blockedRows := blocked.Blocked()
+	if len(blockedRows) != 1 || blockedRows[0].ID != "keel.a#row" {
+		t.Fatalf("blocked = %+v, want keel.a#row blocked by its missing dependency", blockedRows)
+	}
+}
+
 func TestRequirementErrorsAndBlockedRows(t *testing.T) {
 	a := row("keel.a#row", "v1", assembly.LayerHarness)
 	b := row("keel.b#row", "v1", assembly.LayerHarness)

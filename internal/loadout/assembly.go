@@ -7,6 +7,7 @@ import (
 
 	"github.com/jixoai/keel/internal/assembly"
 	"github.com/jixoai/keel/internal/host"
+	"github.com/jixoai/keel/internal/servicegraph"
 )
 
 // This file is the bounded production adapter from the default service
@@ -47,13 +48,22 @@ func ServiceRowID(service string) assembly.RowID {
 // base declares every default service and its availability edges, and the
 // later stages may only remove or re-implement rows.
 func AssemblyBase() (assembly.Document, error) {
-	services := DefaultServices()
+	return assemblyBase(DefaultServices())
+}
+
+// assemblyBase is the testable form: the production blueprint and a synthetic
+// one take the identical path, so capability-shape failures are pinned without
+// mutating the package-level blueprint.
+func assemblyBase(services []servicegraph.ServiceDescriptor) (assembly.Document, error) {
 	providerByCapability := map[string]string{}
 	for _, service := range services {
 		for _, capability := range service.Provides {
-			if _, exists := providerByCapability[capability]; !exists {
-				providerByCapability[capability] = service.Name
+			if existing, exists := providerByCapability[capability]; exists && existing != service.Name {
+				return assembly.Document{}, fmt.Errorf(
+					"loadout: services %q and %q both provide capability %q; a single-capability row must have one provider",
+					existing, service.Name, capability)
 			}
+			providerByCapability[capability] = service.Name
 		}
 	}
 	rows := make([]assembly.Row, 0, len(services))

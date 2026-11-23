@@ -112,6 +112,27 @@ func TestProviderLayerDoesNotImportHarness(t *testing.T) {
 	}
 }
 
+// v2AssemblyPackage is the pure assembly plane (W0.5). It may depend on the
+// frozen plugin vocabulary, never on the runtime that consumes its plan: the
+// four-layer overlay must stay a model, not a second loader/DI.
+const v2AssemblyPackage = "github.com/jixoai/keel/internal/assembly"
+
+// TestAssemblyPlaneStaysIndependent pins the "no second DI/runtime" rule for
+// the four-layer assembler: importing loadout/servicegraph or any product layer
+// would make the assembly model able to load services itself.
+func TestAssemblyPlaneStaysIndependent(t *testing.T) {
+	forbidden := append(append(append([]string{}, v2HarnessPackages...), v2ProviderPackages...), v2ServicePackages...)
+	forbidden = append(forbidden,
+		"github.com/jixoai/keel/internal/loadout",
+		"github.com/jixoai/keel/internal/servicegraph",
+		"github.com/jixoai/keel/internal/kernel",
+	)
+	graph := packageGraph(t, v2AssemblyPackage)
+	for _, dependency := range forbidden {
+		requireNoImport(t, graph, v2AssemblyPackage, dependency)
+	}
+}
+
 // TestNoGoPackageImportsTheUIClient is the UI boundary: the client is a
 // separate NSH application under web/, reachable only over HTTP/SSE and the
 // host bridge. No Go package may import it (a Go import would be a second
@@ -135,6 +156,7 @@ func TestNoGoPackageImportsTheUIClient(t *testing.T) {
 // accident (go list fails, or the graph has no node to inspect).
 func TestV2LayerPackagesResolve(t *testing.T) {
 	all := append(append(append([]string{}, v2HarnessPackages...), v2ProviderPackages...), v2ServicePackages...)
+	all = append(all, v2AssemblyPackage)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "go", append([]string{"list"}, all...)...).Output()

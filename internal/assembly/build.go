@@ -462,10 +462,14 @@ func applyOverlay(doc Document, effective []EffectiveRow, byID map[RowID]int) []
 		}
 		effective[position] = EffectiveRow{
 			Row: Row{
-				ID:     row.ID,
-				Layer:  inherited.Layer,
-				Impl:   row.Impl,
-				Params: cloneParams(row.Params),
+				ID:    row.ID,
+				Layer: inherited.Layer,
+				Impl:  row.Impl,
+				// An override replaces implementation and params, never the
+				// dependency shape: the base declares requires, and an active
+				// override must still wait for (and report) the same dependencies.
+				Requires: append([]RowID(nil), inherited.Requires...),
+				Params:   cloneParams(row.Params),
 			},
 			Origin:     inherited.Origin,
 			Source:     doc.Stage,
