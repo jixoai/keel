@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/bashbridge"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
-	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -38,7 +38,7 @@ func TestEffectiveCaptureModeUsesStoredDocumentOverBoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveCaptureMode: %v", err)
 	}
-	if mode != layerfs.CaptureModeCheckpoint {
+	if mode != capturepolicy.CaptureModeCheckpoint {
 		t.Fatalf("mode = %q, want checkpoint", mode)
 	}
 	if source != "stored-document@7" {
@@ -51,7 +51,7 @@ func TestEffectiveCaptureModeUsesStoredDocumentOverBoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveCaptureMode(no tenant): %v", err)
 	}
-	if mode != layerfs.CaptureModePerToolCall || source != "boot-default" {
+	if mode != capturepolicy.CaptureModePerToolCall || source != "boot-default" {
 		t.Fatalf("mode/source = %q/%q, want per-tool-call from boot-default", mode, source)
 	}
 
@@ -60,7 +60,7 @@ func TestEffectiveCaptureModeUsesStoredDocumentOverBoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveCaptureMode(nil reader): %v", err)
 	}
-	if mode != layerfs.CaptureModePerToolCall || source != "boot-default" {
+	if mode != capturepolicy.CaptureModePerToolCall || source != "boot-default" {
 		t.Fatalf("mode/source = %q/%q, want per-tool-call from boot-default", mode, source)
 	}
 }

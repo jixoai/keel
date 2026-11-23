@@ -1,12 +1,14 @@
-package layerfs
+package capturepolicy
 
 // Capture modes select when the execution space's changes settle into layerfs
 // as an fs.capture event (change keel-harness-v2, W3 capture policy override).
 //
-// The vocabulary lives here, next to the capture object model, because it is
-// the layerfs spec's policy dimension: the host configuration document, the
-// bash bridge and the run runner all name the same three values. Nothing in
-// this file touches a store or a workspace; it is a pure data contract.
+// The vocabulary lives in this leaf package, not in layerfs: the capture policy
+// is an execution policy the kernel runner pins per attempt, and the kernel
+// must not depend on a storage service (internal/architecture
+// TestKernelDoesNotImportV2Layers). The host configuration document, the bash
+// bridge and the run runner all name the same three values. Nothing in this
+// file touches a store or a workspace; it is a pure data contract.
 
 import (
 	"context"
@@ -41,7 +43,7 @@ type CaptureModeError struct {
 }
 
 func (e *CaptureModeError) Error() string {
-	return fmt.Sprintf("layerfs: unknown capture mode %q (want per-tool-call|checkpoint|manual)", string(e.Mode))
+	return fmt.Sprintf("capturepolicy: unknown capture mode %q (want per-tool-call|checkpoint|manual)", string(e.Mode))
 }
 
 // Code is the typed wire code for a policy vocabulary error.
@@ -63,7 +65,7 @@ func (e *CaptureTriggerError) Error() string {
 	if missing == "" {
 		missing = "capture trigger"
 	}
-	return fmt.Sprintf("layerfs: capture mode %q has no %s; refusing to swallow capture", string(e.Mode), missing)
+	return fmt.Sprintf("capturepolicy: capture mode %q has no %s; refusing to swallow capture", string(e.Mode), missing)
 }
 
 // Code is the typed wire code for a mode with no trigger.

@@ -16,15 +16,15 @@ import (
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agenttool"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/kernel"
-	"github.com/jixoai/keel/internal/layerfs"
 )
 
 // captureProbeTool is the attempt's tool call: it records the capture mode the
 // runner pinned on the tool-execution context. The fake provider calls "echo"
 // for a prompt containing "echo".
 type captureProbeTool struct {
-	modes []layerfs.CaptureMode
+	modes []capturepolicy.CaptureMode
 }
 
 func (t *captureProbeTool) Name() string            { return "echo" }
@@ -35,7 +35,7 @@ func (t *captureProbeTool) ExecutionMode() agentcore.ToolExecutionMode {
 }
 
 func (t *captureProbeTool) Execute(ctx context.Context, _ string, _ json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
-	mode, _ := layerfs.CaptureModeFromContext(ctx)
+	mode, _ := capturepolicy.CaptureModeFromContext(ctx)
 	t.modes = append(t.modes, mode)
 	return agentcore.AgentToolResult{
 		Content: agentcore.ContentList{agentcore.NewTextContent("probed")},
@@ -92,15 +92,15 @@ func (h *captureHarness) runAttempt(t *testing.T) {
 // mid-attempt, and the run-completion hook fires exactly once.
 func TestCheckpointPolicyPinsAndFiresOnce(t *testing.T) {
 	h := newCaptureHarness(t)
-	current := layerfs.CaptureModeCheckpoint
+	current := capturepolicy.CaptureModeCheckpoint
 	var hookCalls int
-	var hookModes []layerfs.CaptureMode
+	var hookModes []capturepolicy.CaptureMode
 	h.runner.CapturePolicy = func(context.Context, kernel.Scope) (RunCapture, error) {
 		mode := current
-		if mode == layerfs.CaptureModeCheckpoint {
+		if mode == capturepolicy.CaptureModeCheckpoint {
 			// Rotation lands after this attempt pinned its policy. The in-flight
 			// attempt must keep checkpoint; the next attempt reads manual.
-			current = layerfs.CaptureModeManual
+			current = capturepolicy.CaptureModeManual
 			return RunCapture{
 				Mode: mode,
 				Checkpoint: func(ctx context.Context, _ kernel.Scope, callID string) error {
@@ -108,7 +108,7 @@ func TestCheckpointPolicyPinsAndFiresOnce(t *testing.T) {
 						t.Error("checkpoint hook called without an idempotency key")
 					}
 					hookCalls++
-					pinned, _ := layerfs.CaptureModeFromContext(ctx)
+					pinned, _ := capturepolicy.CaptureModeFromContext(ctx)
 					hookModes = append(hookModes, pinned)
 					return nil
 				},
@@ -126,10 +126,10 @@ func TestCheckpointPolicyPinsAndFiresOnce(t *testing.T) {
 	if hookCalls != 1 {
 		t.Fatalf("checkpoint hook calls = %d, want exactly 1", hookCalls)
 	}
-	if len(hookModes) != 1 || hookModes[0] != layerfs.CaptureModeCheckpoint {
+	if len(hookModes) != 1 || hookModes[0] != capturepolicy.CaptureModeCheckpoint {
 		t.Fatalf("checkpoint hook modes = %v, want the pinned checkpoint", hookModes)
 	}
-	if len(h.probe.modes) != 1 || h.probe.modes[0] != layerfs.CaptureModeCheckpoint {
+	if len(h.probe.modes) != 1 || h.probe.modes[0] != capturepolicy.CaptureModeCheckpoint {
 		t.Fatalf("tool modes = %v, want the pinned checkpoint (the rotation must not reach this run)", h.probe.modes)
 	}
 
@@ -138,7 +138,7 @@ func TestCheckpointPolicyPinsAndFiresOnce(t *testing.T) {
 	if hookCalls != 1 {
 		t.Fatalf("checkpoint hook calls after rotation = %d, want 1", hookCalls)
 	}
-	if len(h.probe.modes) != 2 || h.probe.modes[1] != layerfs.CaptureModeManual {
+	if len(h.probe.modes) != 2 || h.probe.modes[1] != capturepolicy.CaptureModeManual {
 		t.Fatalf("second attempt modes = %v, want the rotated manual policy", h.probe.modes)
 	}
 }
@@ -150,7 +150,7 @@ func TestPerToolCallPolicyDoesNotCheckpointAtRunClose(t *testing.T) {
 	hookCalls := 0
 	h.runner.CapturePolicy = func(context.Context, kernel.Scope) (RunCapture, error) {
 		return RunCapture{
-			Mode: layerfs.CaptureModePerToolCall,
+			Mode: capturepolicy.CaptureModePerToolCall,
 			Checkpoint: func(context.Context, kernel.Scope, string) error {
 				hookCalls++
 				return nil
@@ -161,7 +161,7 @@ func TestPerToolCallPolicyDoesNotCheckpointAtRunClose(t *testing.T) {
 	if hookCalls != 0 {
 		t.Fatalf("checkpoint hook calls = %d, want 0 for per-tool-call", hookCalls)
 	}
-	if len(h.probe.modes) != 1 || h.probe.modes[0] != layerfs.CaptureModePerToolCall {
+	if len(h.probe.modes) != 1 || h.probe.modes[0] != capturepolicy.CaptureModePerToolCall {
 		t.Fatalf("tool modes = %v, want per-tool-call", h.probe.modes)
 	}
 }
@@ -173,7 +173,7 @@ func TestManualPolicyDoesNotCheckpointAtRunClose(t *testing.T) {
 	hookCalls := 0
 	h.runner.CapturePolicy = func(context.Context, kernel.Scope) (RunCapture, error) {
 		return RunCapture{
-			Mode: layerfs.CaptureModeManual,
+			Mode: capturepolicy.CaptureModeManual,
 			Checkpoint: func(context.Context, kernel.Scope, string) error {
 				hookCalls++
 				return nil
@@ -184,7 +184,7 @@ func TestManualPolicyDoesNotCheckpointAtRunClose(t *testing.T) {
 	if hookCalls != 0 {
 		t.Fatalf("checkpoint hook calls = %d, want 0 for manual", hookCalls)
 	}
-	if len(h.probe.modes) != 1 || h.probe.modes[0] != layerfs.CaptureModeManual {
+	if len(h.probe.modes) != 1 || h.probe.modes[0] != capturepolicy.CaptureModeManual {
 		t.Fatalf("tool modes = %v, want manual", h.probe.modes)
 	}
 }
@@ -196,14 +196,14 @@ func TestCapturePolicyWithoutTriggerFailsClosed(t *testing.T) {
 	h := newCaptureHarness(t)
 	ctx := context.Background()
 
-	for _, mode := range []layerfs.CaptureMode{layerfs.CaptureModeCheckpoint, layerfs.CaptureModeManual} {
+	for _, mode := range []capturepolicy.CaptureMode{capturepolicy.CaptureModeCheckpoint, capturepolicy.CaptureModeManual} {
 		h.runner.CapturePolicy = func(context.Context, kernel.Scope) (RunCapture, error) {
 			return RunCapture{Mode: mode}, nil
 		}
 		_, err := h.runner.ResolveCapturePolicy(ctx, h.scope)
-		var triggerErr *layerfs.CaptureTriggerError
+		var triggerErr *capturepolicy.CaptureTriggerError
 		if !errors.As(err, &triggerErr) {
-			t.Fatalf("mode %s without a trigger: err = %v, want *layerfs.CaptureTriggerError", mode, err)
+			t.Fatalf("mode %s without a trigger: err = %v, want *capturepolicy.CaptureTriggerError", mode, err)
 		}
 		if triggerErr.Mode != mode || triggerErr.Code() != "capture_trigger_missing" {
 			t.Fatalf("mode %s trigger error = %+v", mode, triggerErr)
@@ -211,12 +211,12 @@ func TestCapturePolicyWithoutTriggerFailsClosed(t *testing.T) {
 	}
 
 	h.runner.CapturePolicy = func(context.Context, kernel.Scope) (RunCapture, error) {
-		return RunCapture{Mode: layerfs.CaptureMode("sometimes")}, nil
+		return RunCapture{Mode: capturepolicy.CaptureMode("sometimes")}, nil
 	}
 	_, err := h.runner.ResolveCapturePolicy(ctx, h.scope)
-	var modeErr *layerfs.CaptureModeError
+	var modeErr *capturepolicy.CaptureModeError
 	if !errors.As(err, &modeErr) {
-		t.Fatalf("unknown mode: err = %v, want *layerfs.CaptureModeError", err)
+		t.Fatalf("unknown mode: err = %v, want *capturepolicy.CaptureModeError", err)
 	}
 
 	// A runner without the seam is the documented default, not a refusal.
@@ -225,7 +225,7 @@ func TestCapturePolicyWithoutTriggerFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil policy: %v", err)
 	}
-	if capture.Mode != layerfs.CaptureModePerToolCall {
+	if capture.Mode != capturepolicy.CaptureModePerToolCall {
 		t.Fatalf("nil policy mode = %q, want per-tool-call", capture.Mode)
 	}
 }

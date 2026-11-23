@@ -1023,3 +1023,34 @@ func TestAgentCapacityRefusalIsTyped(t *testing.T) {
 		t.Fatalf("retryAfterMs = %v, want 3000", problem["retryAfterMs"])
 	}
 }
+
+// TestEveryGeneratedPerServerMCPNameIsRefused is G0's generated negative
+// control: the surface must refuse the whole `mcp__<server>__<tool>` family, not
+// just the one name a reviewer happened to type. Each concrete name is built
+// from a real server/tool pair and validated individually (no substring grep),
+// so a future alias or a per-server registration path would fail here.
+func TestEveryGeneratedPerServerMCPNameIsRefused(t *testing.T) {
+	h, _, err := host.New(host.Config{IncludeBuiltins: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := []string{"fs", "git", "browser", "db", "search"}
+	tools := []string{"read", "write", "call", "query", "open"}
+	checked := 0
+	for _, server := range servers {
+		for _, tool := range tools {
+			name := "mcp__" + server + "__" + tool
+			checked++
+			if _, ok := h.Tools().Get(name); ok {
+				t.Fatalf("per-server MCP tool %q is registered", name)
+			}
+			errs := h.Tools().Validate(name, json.RawMessage(`{}`))
+			if len(errs) == 0 || !strings.Contains(errs[0].Message, "unknown tool") {
+				t.Fatalf("%q validation = %#v, want unknown tool", name, errs)
+			}
+		}
+	}
+	if checked != len(servers)*len(tools) {
+		t.Fatalf("checked %d generated names, want %d", checked, len(servers)*len(tools))
+	}
+}

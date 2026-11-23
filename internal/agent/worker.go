@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/kernel"
-	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -372,7 +372,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 	// The pinned mode travels with the run context into every tool call. The
 	// bash backend copies it into the session identity; the workspace provider
 	// resolves it at mount time and never re-reads configuration at close time.
-	runCtx = layerfs.WithCaptureMode(runCtx, capture.Mode)
+	runCtx = capturepolicy.WithCaptureMode(runCtx, capture.Mode)
 	// Keep the lease alive while the model/tools run. A crash stops the renewal,
 	// so the lease expires and another worker takes over. A rejection means the
 	// claim is gone (taken over or expired): stop the run so it cannot write
@@ -409,7 +409,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 	// its own deadline. A capture failure is logged, not promoted to a run
 	// failure: the file service has already committed its fs.capture_failed fact
 	// and the model's work is not invalid because persistence failed.
-	if capture.Mode == layerfs.CaptureModeCheckpoint && ctx.Err() == nil {
+	if capture.Mode == capturepolicy.CaptureModeCheckpoint && ctx.Err() == nil {
 		if err := capture.Checkpoint(context.WithoutCancel(runCtx), lease.Scope, "run:"+runID); err != nil {
 			w.Logger.Warn("run completion checkpoint failed", "run_id", runID,
 				"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID, "err", err)

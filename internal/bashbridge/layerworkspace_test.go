@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/bashbridge"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/layerfs"
@@ -114,7 +115,7 @@ func (h *seamHarness) bashCtx(callID string) context.Context {
 // bashModeCtx is a run's capture-pinned execution identity: the mode the
 // runner pinned on the attempt context, copied into the identity the bash
 // backend stamps.
-func (h *seamHarness) bashModeCtx(callID string, mode layerfs.CaptureMode) context.Context {
+func (h *seamHarness) bashModeCtx(callID string, mode capturepolicy.CaptureMode) context.Context {
 	return bashbridge.WithSessionIdentity(h.ctx, bashbridge.SessionIdentity{
 		TenantID:    h.scope.TenantID,
 		SessionID:   h.scope.SessionID,
@@ -913,7 +914,7 @@ func TestPerToolCallCapturesEveryBashExecution(t *testing.T) {
 		`mkdir -p /workspace/a && printf 'one\n' > /workspace/a/one.txt`,
 		`printf 'two\n' > /workspace/a/two.txt`,
 	} {
-		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-per-%d", i), layerfs.CaptureModePerToolCall), command)
+		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-per-%d", i), capturepolicy.CaptureModePerToolCall), command)
 	}
 	if got := len(h.captures(t, kernel.KindFSCapture)); got != 2 {
 		t.Fatalf("fs.capture events = %d, want one per execution (2)", got)
@@ -930,7 +931,7 @@ func TestCheckpointCapturesOnceAfterMultipleCommands(t *testing.T) {
 		`printf 'two\n' > /workspace/out/two.txt`,
 		`printf 'three\n' > /workspace/out/three.txt`,
 	} {
-		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-cp-%d", i), layerfs.CaptureModeCheckpoint), command)
+		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-cp-%d", i), capturepolicy.CaptureModeCheckpoint), command)
 	}
 	if got := len(h.captures(t, kernel.KindFSCapture)); got != 0 {
 		t.Fatalf("automatic fs.capture events = %d, want 0 before checkpoint", got)
@@ -979,7 +980,7 @@ func TestManualCapturesOnlyOnExplicitCheckpoint(t *testing.T) {
 		`mkdir -p /workspace/manual && printf 'one\n' > /workspace/manual/one.txt`,
 		`printf 'two\n' > /workspace/manual/two.txt`,
 	} {
-		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-manual-%d", i), layerfs.CaptureModeManual), command)
+		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-manual-%d", i), capturepolicy.CaptureModeManual), command)
 	}
 	if got := len(h.captures(t, kernel.KindFSCapture)); got != 0 {
 		t.Fatalf("automatic fs.capture events = %d, want 0 in manual mode", got)
@@ -1001,7 +1002,7 @@ func TestManualCapturesOnlyOnExplicitCheckpoint(t *testing.T) {
 	}
 	// Idempotent replay: a later suppressed execution re-uses the same caller id
 	// (a retried tool call) and must not append a second event for the same key.
-	h.runBashCommand(t, h.bashModeCtx("call-manual-after", layerfs.CaptureModeManual),
+	h.runBashCommand(t, h.bashModeCtx("call-manual-after", capturepolicy.CaptureModeManual),
 		`printf 'late\n' > /workspace/manual/late.txt`)
 	replay, captured, err := h.provider.Checkpoint(h.ctx, bashbridge.SessionIdentity{
 		TenantID:  h.scope.TenantID,
@@ -1034,13 +1035,13 @@ func TestManualCapturesOnlyOnExplicitCheckpoint(t *testing.T) {
 // refuses the mount with a typed error instead of falling back to the default.
 func TestUnknownCaptureModeFailsClosed(t *testing.T) {
 	h := newSeamHarness(t)
-	_, err := h.bridge.NewSession(h.bashModeCtx("call-bad-mode", layerfs.CaptureMode("sometimes")))
+	_, err := h.bridge.NewSession(h.bashModeCtx("call-bad-mode", capturepolicy.CaptureMode("sometimes")))
 	if err == nil {
 		t.Fatal("unknown capture mode mounted a session")
 	}
-	var modeErr *layerfs.CaptureModeError
+	var modeErr *capturepolicy.CaptureModeError
 	if !errors.As(err, &modeErr) {
-		t.Fatalf("err = %v, want *layerfs.CaptureModeError", err)
+		t.Fatalf("err = %v, want *capturepolicy.CaptureModeError", err)
 	}
 	if modeErr.Code() != "invalid_capture_mode" {
 		t.Fatalf("mode error code = %q", modeErr.Code())
@@ -1059,7 +1060,7 @@ func TestBackgroundJobSettlesDespiteCheckpointMode(t *testing.T) {
 		TaskID:      "task-seam",
 		CallID:      "call-job-cp",
 		JobID:       "job-cp-1",
-		CaptureMode: layerfs.CaptureModeCheckpoint,
+		CaptureMode: capturepolicy.CaptureModeCheckpoint,
 	})
 	h.runBashCommand(t, ctx, `mkdir -p /workspace/job && printf 'job\n' > /workspace/job/out.txt`)
 	captures := h.captures(t, kernel.KindFSCapture)

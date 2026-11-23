@@ -23,9 +23,9 @@ import (
 
 	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/bashbridge"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
-	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -48,7 +48,7 @@ func newRunCaptureResolver(documents tenantConfigReader, defaults host.TenantCon
 			return agent.RunCapture{}, err
 		}
 		capture := agent.RunCapture{Mode: mode, Source: source}
-		if mode == layerfs.CaptureModeCheckpoint || mode == layerfs.CaptureModeManual {
+		if mode == capturepolicy.CaptureModeCheckpoint || mode == capturepolicy.CaptureModeManual {
 			if workspace != nil {
 				capture.Checkpoint = func(ctx context.Context, scope kernel.Scope, callID string) error {
 					_, _, err := workspace.Checkpoint(ctx, bashbridge.SessionIdentity{
@@ -67,7 +67,7 @@ func newRunCaptureResolver(documents tenantConfigReader, defaults host.TenantCon
 // the runner, which fails the attempt before any tool executes: running under
 // an unknown policy is worse than not running.
 func effectiveCaptureMode(ctx context.Context, documents tenantConfigReader,
-	defaults host.TenantConfig, scope kernel.Scope) (layerfs.CaptureMode, string, error) {
+	defaults host.TenantConfig, scope kernel.Scope) (capturepolicy.CaptureMode, string, error) {
 	mode := defaults.Filesystem.Capture.EffectiveMode()
 	if documents == nil {
 		return mode, "boot-default", nil

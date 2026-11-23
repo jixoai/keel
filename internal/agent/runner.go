@@ -16,9 +16,9 @@ import (
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/agenttool"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/compaction"
 	"github.com/jixoai/keel/internal/kernel"
-	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/loop"
 	"github.com/jixoai/keel/internal/promptcache"
 	"github.com/jixoai/keel/internal/provider"
@@ -173,7 +173,7 @@ type Runner struct {
 	SessionContexts func(ctx context.Context, scope kernel.Scope) []agentcore.Content
 	// CapturePolicy resolves the attempt's capture policy exactly once, at
 	// attempt start. The resolved mode is pinned on the tool-execution context
-	// (layerfs.WithCaptureMode), so a configuration rotation affects only later
+	// (capturepolicy.WithCaptureMode), so a configuration rotation affects only later
 	// attempts. Nil keeps the layerfs default (per-tool-call). A checkpoint mode
 	// without a Checkpoint hook is refused with a typed error: selecting a mode
 	// whose trigger does not exist must never silently swallow capture.
@@ -197,7 +197,7 @@ func (r *Runner) promptTracker() *promptcache.Tracker {
 // RunCapture is one attempt's resolved capture policy.
 type RunCapture struct {
 	// Mode is the pinned policy (empty resolves to per-tool-call).
-	Mode layerfs.CaptureMode
+	Mode capturepolicy.CaptureMode
 	// Source names where this mode was read (a stored tenant document revision,
 	// the pinned generation's tenant document, or boot defaults). The worker
 	// records it in the run summary: the model/prompt generation and the capture
@@ -213,22 +213,22 @@ type RunCapture struct {
 // validate refuses a policy the runtime cannot honor. It is also the fail-closed
 // gate for a mode whose trigger was not wired.
 func (c RunCapture) validate() (RunCapture, error) {
-	mode, err := layerfs.ParseCaptureMode(string(c.Mode))
+	mode, err := capturepolicy.ParseCaptureMode(string(c.Mode))
 	if err != nil {
 		return RunCapture{}, err
 	}
 	c.Mode = mode
 	switch mode {
-	case layerfs.CaptureModeCheckpoint:
+	case capturepolicy.CaptureModeCheckpoint:
 		if c.Checkpoint == nil {
-			return RunCapture{}, &layerfs.CaptureTriggerError{
+			return RunCapture{}, &capturepolicy.CaptureTriggerError{
 				Mode:    mode,
 				Missing: "run-completion checkpoint hook",
 			}
 		}
-	case layerfs.CaptureModeManual:
+	case capturepolicy.CaptureModeManual:
 		if c.Checkpoint == nil {
-			return RunCapture{}, &layerfs.CaptureTriggerError{
+			return RunCapture{}, &capturepolicy.CaptureTriggerError{
 				Mode:    mode,
 				Missing: "explicit checkpoint surface",
 			}
@@ -597,7 +597,7 @@ func (r *Runner) RunAttempt(ctx context.Context, lease kernel.Lease) (RunResult,
 // default; a policy whose mode has no trigger fails with the typed error.
 func (r *Runner) ResolveCapturePolicy(ctx context.Context, scope kernel.Scope) (RunCapture, error) {
 	if r.CapturePolicy == nil {
-		return RunCapture{Mode: layerfs.DefaultCaptureMode}, nil
+		return RunCapture{Mode: capturepolicy.DefaultCaptureMode}, nil
 	}
 	capture, err := r.CapturePolicy(ctx, scope)
 	if err != nil {

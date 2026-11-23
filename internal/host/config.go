@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/jixoai/keel/internal/agentcore"
-	"github.com/jixoai/keel/internal/layerfs"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/provider"
 )
 
@@ -183,7 +183,7 @@ type FilesystemConfig struct {
 	Capture CaptureConfig `json:"capture"`
 }
 
-// CaptureConfig selects the capture policy. Mode is a layerfs.CaptureMode
+// CaptureConfig selects the capture policy. Mode is a capturepolicy.CaptureMode
 // value: per-tool-call (default), checkpoint or manual. Empty inherits the
 // default; an unknown value is rejected by Validate, never coerced.
 type CaptureConfig struct {
@@ -192,12 +192,12 @@ type CaptureConfig struct {
 
 // EffectiveMode resolves the capture policy, applying the default for an empty
 // document value.
-func (c CaptureConfig) EffectiveMode() layerfs.CaptureMode {
-	mode, err := layerfs.ParseCaptureMode(c.Mode)
+func (c CaptureConfig) EffectiveMode() capturepolicy.CaptureMode {
+	mode, err := capturepolicy.ParseCaptureMode(c.Mode)
 	if err != nil {
 		// Validate rejects this before a run; returning the raw value keeps the
 		// fail-closed path visible if a caller skipped validation.
-		return layerfs.CaptureMode(c.Mode)
+		return capturepolicy.CaptureMode(c.Mode)
 	}
 	return mode
 }
@@ -678,7 +678,7 @@ func (c TenantConfig) Validate() error {
 			return problem("filesystem.capture.mode %q (want per-tool-call|checkpoint|manual)", raw)
 		}
 	}
-	if _, err := layerfs.ParseCaptureMode(c.Filesystem.Capture.Mode); err != nil {
+	if _, err := capturepolicy.ParseCaptureMode(c.Filesystem.Capture.Mode); err != nil {
 		return problem("filesystem.capture.mode %q (want per-tool-call|checkpoint|manual)", c.Filesystem.Capture.Mode)
 	}
 	if err := c.External.validate(); err != nil {

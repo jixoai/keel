@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jixoai/keel/internal/layerfs"
+	"github.com/jixoai/keel/internal/capturepolicy"
 )
 
 func boolPtr(value bool) *bool { return &value }
@@ -628,11 +628,11 @@ func TestLoadModelsDocument(t *testing.T) {
 
 func TestCaptureModeMergeAndDefault(t *testing.T) {
 	// An empty document selects the documented default, not an empty policy.
-	if got := (TenantConfig{}).Filesystem.Capture.EffectiveMode(); got != layerfs.CaptureModePerToolCall {
-		t.Fatalf("empty config mode = %q, want %q", got, layerfs.CaptureModePerToolCall)
+	if got := (TenantConfig{}).Filesystem.Capture.EffectiveMode(); got != capturepolicy.CaptureModePerToolCall {
+		t.Fatalf("empty config mode = %q, want %q", got, capturepolicy.CaptureModePerToolCall)
 	}
-	for _, mode := range []layerfs.CaptureMode{
-		layerfs.CaptureModePerToolCall, layerfs.CaptureModeCheckpoint, layerfs.CaptureModeManual,
+	for _, mode := range []capturepolicy.CaptureMode{
+		capturepolicy.CaptureModePerToolCall, capturepolicy.CaptureModeCheckpoint, capturepolicy.CaptureModeManual,
 	} {
 		raw := []byte(`{"filesystem":{"capture":{"mode":"` + string(mode) + `"}}}`)
 		cfg, err := ParseTenantConfig(raw)
@@ -647,13 +647,13 @@ func TestCaptureModeMergeAndDefault(t *testing.T) {
 		}
 	}
 
-	defaults := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: string(layerfs.CaptureModeCheckpoint)}}}
-	tenant := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: string(layerfs.CaptureModeManual)}}}
-	if got := Merge(defaults, tenant).Filesystem.Capture.EffectiveMode(); got != layerfs.CaptureModeManual {
+	defaults := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: string(capturepolicy.CaptureModeCheckpoint)}}}
+	tenant := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: string(capturepolicy.CaptureModeManual)}}}
+	if got := Merge(defaults, tenant).Filesystem.Capture.EffectiveMode(); got != capturepolicy.CaptureModeManual {
 		t.Fatalf("merged mode = %q, want the tenant override manual", got)
 	}
 	// An omitted tenant mode inherits the default document.
-	if got := Merge(defaults, TenantConfig{}).Filesystem.Capture.EffectiveMode(); got != layerfs.CaptureModeCheckpoint {
+	if got := Merge(defaults, TenantConfig{}).Filesystem.Capture.EffectiveMode(); got != capturepolicy.CaptureModeCheckpoint {
 		t.Fatalf("inherited mode = %q, want checkpoint", got)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/harnessext"
@@ -147,7 +148,7 @@ func (b bashSessionBackend) Invoke(ctx context.Context, action string, args json
 			TaskID string `json:"taskId"`
 		}
 		_ = json.Unmarshal(args, &fields)
-		mode, _ := layerfs.CaptureModeFromContext(ctx)
+		mode, _ := capturepolicy.CaptureModeFromContext(ctx)
 		ctx = bashbridge.WithSessionIdentity(ctx, bashbridge.SessionIdentity{
 			TenantID:    scope.TenantID,
 			SessionID:   scope.SessionID,

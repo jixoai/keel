@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/layerfs/gbashfs"
@@ -43,11 +44,11 @@ type SessionIdentity struct {
 	// owner token.
 	JobID string
 	// CaptureMode is the run's pinned capture policy. Empty consults the
-	// attempt context (layerfs.CaptureModeFromContext) and then the default
+	// attempt context (capturepolicy.CaptureModeFromContext) and then the default
 	// (per-tool-call). The bash tool's context wrapper copies the pinned value
 	// here; the workspace provider never re-reads configuration at close time,
 	// so a rotation cannot change a run already in flight.
-	CaptureMode layerfs.CaptureMode
+	CaptureMode capturepolicy.CaptureMode
 }
 
 // Valid reports whether the identity names a session.
@@ -59,14 +60,14 @@ func (i SessionIdentity) Valid() bool {
 // value wins; a context pinned by the runner is the fallback; an unset policy
 // is the layerfs default. An unknown value is a typed error, never a silent
 // per-tool-call fallback.
-func (i SessionIdentity) captureMode(ctx context.Context) (layerfs.CaptureMode, error) {
+func (i SessionIdentity) captureMode(ctx context.Context) (capturepolicy.CaptureMode, error) {
 	mode := i.CaptureMode
 	if mode == "" {
-		if pinned, ok := layerfs.CaptureModeFromContext(ctx); ok {
+		if pinned, ok := capturepolicy.CaptureModeFromContext(ctx); ok {
 			mode = pinned
 		}
 	}
-	parsed, err := layerfs.ParseCaptureMode(string(mode))
+	parsed, err := capturepolicy.ParseCaptureMode(string(mode))
 	if err != nil {
 		return "", err
 	}
@@ -218,7 +219,7 @@ func (l *LayerWorkspaces) Mount(ctx context.Context) (Mount, error) {
 				return l.capture(ctx, identity)
 			}
 			switch mode {
-			case layerfs.CaptureModeCheckpoint, layerfs.CaptureModeManual:
+			case capturepolicy.CaptureModeCheckpoint, capturepolicy.CaptureModeManual:
 				l.markPending(identity)
 				return nil
 			default:
