@@ -575,6 +575,19 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 		if cfg.GuardrailPolicy != nil {
 			runner.Guardrails = cfg.GuardrailPolicy
 		}
+		// The capture policy is resolved once per attempt and pinned on that
+		// attempt's tool context. The hosting process supplies the resolver when
+		// it owns the execution space; otherwise the generation's tenant document
+		// is the policy, and a mode without a wired trigger fails the attempt
+		// with a typed error rather than swallowing capture.
+		if cfg.CapturePolicy != nil {
+			runner.CapturePolicy = cfg.CapturePolicy
+		} else {
+			mode := cfg.Tenant.Filesystem.Capture.EffectiveMode()
+			runner.CapturePolicy = func(context.Context, kernel.Scope) (agent.RunCapture, error) {
+				return agent.RunCapture{Mode: mode}, nil
+			}
+		}
 		// The execution binding (the Bot/TeamBot the session belongs to or the
 		// input selected) resolves per attempt through this seam: the runner reads
 		// the binding and freezes its identity into the run summary. A zero

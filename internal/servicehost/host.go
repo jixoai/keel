@@ -242,6 +242,13 @@ type Config struct {
 	// runner consults it once per attempt, so a policy rotation affects only
 	// later attempts. Nil keeps the runner's environment-driven defaults.
 	GuardrailPolicy func() supervisor.GuardrailPolicy
+	// CapturePolicy resolves the run's workspace capture policy once per
+	// attempt. The hosting process supplies it when it owns the execution space
+	// (the bash bridge's per-session workspace); a deployment without the seam
+	// falls back to the generation's tenant document, and a checkpoint/manual
+	// document without a trigger fails the attempt with a typed error instead
+	// of silently swallowing capture.
+	CapturePolicy func(ctx context.Context, scope kernel.Scope) (agent.RunCapture, error)
 
 	Prompt PromptOptions
 	MCP    MCPOptions

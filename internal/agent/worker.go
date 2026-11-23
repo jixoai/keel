@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -309,6 +310,35 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 		}
 	}
 
+	// The capture policy is resolved once, at attempt start, and pinned on the
+	// tool-execution context below. A configuration rotation therefore affects
+	// only later attempts; an in-flight run keeps the policy it began with.
+	// Resolving before any tool can execute also makes a mode whose trigger is
+	// not wired a typed attempt failure instead of a silently swallowed capture.
+	if ctx.Err() != nil {
+		// Process shutdown: give the claim back instead of starting work under a
+		// policy read that is already racing the shutdown.
+		w.releaseAbandoned(lease)
+		return
+	}
+	capture, captureErr := runner.ResolveCapturePolicy(ctx, lease.Scope)
+	if captureErr != nil {
+		settled = true
+		w.Logger.Error("resolve capture policy", "run_id", runID,
+			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID, "err", captureErr)
+		if finishErr := w.Leases.Finish(ctx, kernel.FinishRequest{
+			Lease:       lease,
+			Err:         fmt.Errorf("resolve capture policy: %w", captureErr),
+			MaxAttempts: w.MaxAttempts,
+		}); finishErr != nil {
+			w.Logger.Warn("finish run with capture policy failure", "run_id", runID, "err", finishErr)
+		}
+		if w.Metrics != nil {
+			w.Metrics.RunAttempt("finish_error", time.Since(started))
+		}
+		return
+	}
+
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// Register the attempt with the product's cancel seam (optional). The
@@ -324,6 +354,10 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 			defer func() { finishControl(outcome) }()
 		}
 	}
+	// The pinned mode travels with the run context into every tool call. The
+	// bash backend copies it into the session identity; the workspace provider
+	// resolves it at mount time and never re-reads configuration at close time.
+	runCtx = layerfs.WithCaptureMode(runCtx, capture.Mode)
 	// Keep the lease alive while the model/tools run. A crash stops the renewal,
 	// so the lease expires and another worker takes over. A rejection means the
 	// claim is gone (taken over or expired): stop the run so it cannot write
@@ -352,6 +386,20 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 	}()
 
 	result, runErr := runner.RunAttempt(runCtx, lease)
+	// Run-completion capture: the checkpoint mode's one trigger. It runs after
+	// the loop has stopped and before run.finished/settle, so the settlement is
+	// still fenced by this attempt's live lease. The attempt context may be
+	// canceled by the product's cancel seam while the process keeps running; the
+	// writes are still facts, so the hook gets a non-canceled context and owns
+	// its own deadline. A capture failure is logged, not promoted to a run
+	// failure: the file service has already committed its fs.capture_failed fact
+	// and the model's work is not invalid because persistence failed.
+	if capture.Mode == layerfs.CaptureModeCheckpoint && ctx.Err() == nil {
+		if err := capture.Checkpoint(context.WithoutCancel(runCtx), lease.Scope, "run:"+runID); err != nil {
+			w.Logger.Warn("run completion checkpoint failed", "run_id", runID,
+				"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID, "err", err)
+		}
+	}
 	cursor, readThrough := result.Cursor, result.ReadThrough
 	// The run snapshot's configHash comes from the loadout this attempt pinned,
 	// not from process memory: the configuration revision is immutable for the
