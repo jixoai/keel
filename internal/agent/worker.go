@@ -80,9 +80,11 @@ type RunBinding interface {
 
 // SettlementObserver is told when an attempt settled or was abandoned. It is
 // the placement layer's seam: a settled attempt frees a group slot, so the FIFO
-// queue head is promoted now, and the observed duration is the queue's ETA
-// history. The observer runs after the settle and owns its errors: a failure
-// there must never change the run's outcome (the recovery sweep converges).
+// queue head is promoted now. The duration is the attempt's elapsed time; the
+// observer records it as ETA history only for a completed (done) attempt, never
+// for an abandoned, failed, cancelled or finish-error path. The observer runs
+// after the settle and owns its errors: a failure there must never change the
+// run's outcome (the recovery sweep converges).
 type SettlementObserver interface {
 	RunSettled(ctx context.Context, scope kernel.Scope, status string, duration time.Duration)
 }
@@ -571,8 +573,9 @@ func modelTurnFailure(message string) error {
 // abandoned without a settle (shutdown, or a claim lost while pinning). Release
 // is fenced: a stale token fails, but the kernel returns the admission slot
 // either way, so repeated abandons cannot starve the tenant's run budget.
-// duration is the attempted work (0 when unknown); the settlement observer uses
-// it only as an ETA sample and promotes the queue because the slot is free.
+// duration is the attempted work (0 when unknown); the observer promotes the
+// queue because the slot is free, but does not feed this abandoned duration into
+// the ETA average.
 func (w *Worker) releaseAbandoned(lease kernel.Lease, duration time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

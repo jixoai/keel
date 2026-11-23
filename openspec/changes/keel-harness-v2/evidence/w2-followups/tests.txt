@@ -1,0 +1,80 @@
+# W2 follow-ups (P2 closure) — targeted test run (final)
+# date: 2026-11-23T09:29Z (local run; host macOS arm64)
+# go: go version go1.27.3 darwin/arm64
+# db: PostgreSQL 18.7 (Homebrew), local single instance
+# DSN: postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable&pool_max_conns=10
+# (the pool bound keeps this lane from exhausting the shared instance while
+#  other worktrees are also testing; no credential is recorded)
+#
+# Packages are run one at a time. The test database is shared with other lanes,
+# so the full suite was run when they were idle. Two transient failures were
+# observed only while another lane ran its Go suites concurrently and are
+# recorded below for honesty; both passed on the clean rerun.
+
+$ go build ./...
+ok (build)
+
+$ KEEL_TEST_DSN=... go test ./internal/placement/... -count=1
+ok  	github.com/jixoai/keel/internal/placement	17.228s
+ok  	github.com/jixoai/keel/internal/placement/wiring	0.507s
+
+$ go test ./internal/placement/ -count=1   # unit-only, no DSN
+ok  	github.com/jixoai/keel/internal/placement	0.418s
+
+$ KEEL_TEST_DSN=... go test ./internal/httpapi/... -count=1
+ok  	github.com/jixoai/keel/internal/httpapi	11.900s
+
+$ KEEL_TEST_DSN=... go test ./internal/agent/... -count=1
+ok  	github.com/jixoai/keel/internal/agent	34.558s
+
+$ KEEL_TEST_DSN=... go test ./internal/kernel/... -count=1
+ok  	github.com/jixoai/keel/internal/kernel	47.162s
+
+# Transient failures under another lane's concurrent Go suite (both reruns green):
+#   placement (pool_max_conns=3): TestPGGateConcurrentAdmissionsNoOversell /
+#     TestPGConcurrentAdmissionsNoOversell -> 55P03 admission lock timeout
+#   kernel: TestCheckpointProjection/pg -> deadlock detected (untouched code)
+# The final runs above are the clean reruns.
+
+$ cd web && nsh check
+ok (nsh check)
+
+$ nsh test src/data/queue.test.ts
+ok  4 tests: 4 passed, 0 failed
+
+$ nsh test src/ui/run-state.test.ts
+ok  4 tests: 4 passed, 0 failed
+
+$ nsh test --target tui App.tui.test.tsx --filter '会话列表 → 打开会话'
+ok  1 test: 1 passed, 0 failed (3.8s)
+
+$ nsh test --target tui App.tui.test.tsx --filter '390px 单列'
+ok  1 test: 1 passed, 0 failed (1.6s)
+
+$ nsh test --target tui --junit /tmp/keel-w2-tui.xml   # full suite under load
+330/334 passed, 4 failed (11m 55s)
+  App.tui.test.tsx :: 设置页——模型分区两层结构（默认卡 + provider 卡片）与读写重置
+    the test did not end in 30 s
+  src/screens/books/books.tui.test.tsx :: 系统栏是全局壳，章节只留三个日常章；身份/记录在设置页入口
+    the test did not end in 30 s
+  src/screens/books/books.tui.test.tsx :: 记录——默认打开首条，详情写缺什么/归属/可授予与对象链路
+    expected ... to contain "打开运行" (selection did not advance under load)
+  src/screens/books/books.tui.test.tsx :: 四档——1440 有身份索引；1024/768 全宽；390 底部三 tab 与卡片
+    the test did not end in 30 s
+  (None of these files are touched by this lane; the books record test passes
+   alone: `nsh test --target tui src/screens/books/books.tui.test.tsx --filter
+   '记录——默认打开首条'` -> 1 passed, 8.0s. The 30s timeouts are the suite's
+   per-test ceiling under concurrent CPU load.)
+
+# New/changed test names (this lane):
+TestQueuedHeadGetsAFreeSlotBeforeANewAdmission              (mem)
+TestRunSettledOnlySamplesCompletedAttempts                 (mem)
+TestPGQueuedHeadGetsAFreeSlotBeforeANewAdmission
+TestPGRunSettledOnlySamplesCompletedAttempts
+TestPGUserMessageWakeOfATerminalRunJoinsTheQueue
+TestPGPromotionRacingAUserMessageWakeDoesNotOversell
+TestEdgeCommitKeepsAPlacementQueuedRunQueued               (mem + pg)
+TestPlacementHTTPTriggerRunGated                           (extended: etaSamples/etaBasis)
+TestPlacementHTTPMemoryRefusalDiagnostics                  (new)
+web/src/data/queue.test.ts                                 (4)
+web/src/ui/run-state.test.ts                               (4)
