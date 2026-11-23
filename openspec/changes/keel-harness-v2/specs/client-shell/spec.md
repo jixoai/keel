@@ -132,3 +132,26 @@ MUST 无横向溢出。插件 top-band 贡献 MUST 继续渲染在系统栏内�
 #### Scenario: 手机导航
 - **WHEN** 视口宽 390
 - **THEN** 底部只有三个日常 tab 与设置入口；身份/记录仍可从设置进入
+
+### Requirement: 字段高度与控制对齐
+
+Web 客户端的工具条/筛选行/表单 MUST 使用同一套 kit 控制高度：桌面 34、手机 44。
+文本输入、选择器、范围分段、检索框与同一行的按钮 MUST 同高、基线对齐，MUST NOT
+让原生输入面（例如 19px）落在更高的外壳里。kit 的样式合并 MUST 保留组件默认值，
+显式 `undefined` 不得擦除高度。Field 的 label/control/hint MUST 有固定间距，不得重叠。
+
+表格 header MUST 为 34 + 细分隔线，正文行 MUST 为 44；数字列 MUST 右对齐。移动端
+交互目标 MUST ≥44×44，390/768/1024/1440 MUST 无横向溢出。对话框 footer MUST 在同一
+对话框内统一高度，并允许长表单滚动到底部。
+
+#### Scenario: 记录筛选行
+- **WHEN** 打开记录页的筛选行
+- **THEN** 范围、Select、检索框与外层控件同为 34（手机 44），原生输入面与外壳同高
+
+#### Scenario: 长表单对话框
+- **WHEN** 在 390 宽度打开长表单对话框
+- **THEN** 表单可滚动到 footer，footer 按钮同高且可点，无横向溢出
+
+#### Scenario: 表格数字列
+- **WHEN** 团队/群组表渲染成员与能力计数
+- **THEN** header 与数字列右对齐，正文行 44，至少 34px header 高度

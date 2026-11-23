@@ -12,6 +12,7 @@
 // | onChange | (value: string \| null) => void? | – | a choice (null: cleared) |
 // | placeholder | string? | "请选择" | shown while nothing is chosen |
 // | size | "sm" \| "default" \| "lg" \| "field" | "default" | trigger height |
+// | height | number? | – | explicit trigger height; wins over size (phone 44) |
 // | searchable | boolean? | false | a filter field above the rows |
 // | disabled | boolean? | false | does not open; dimmed |
 // | invalid | boolean? | false | destructive trigger border + ring |

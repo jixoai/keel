@@ -7,8 +7,10 @@ shared kit pieces they use. The system bar and shell navigation are owned by
 
 ## Layout
 
-- `before/` — the rebased lane tip before this pass (`0766a7b`, the records
-  filter one-off on the system-bar tip `733be2b`), driven by the same script.
+- `before/` — the baseline captured during lane development (`0766a7b`). After
+  the final rebase the same script was re-run against the actual parent
+  (`8d6252b`): identical 83/108 failures and byte-identical measurement keys,
+  so the committed before report is representative of the real parent.
 - `after/` — the final build of this lane.
 - Each directory has `report.json` and one PNG per page/viewport. There is no
   hand-written HTML report; `report.json` is the machine-readable one.

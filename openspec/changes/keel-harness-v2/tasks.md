@@ -583,3 +583,22 @@
       `provider_credential_test.go`；客户端镜像 `providerCredentialSecretName`）
 - [x] 证据去重：删除与 pricing 图完全相同的 reasoning 别名，以及 `settings-models-1440-full`
       副本；文档只声明实际存在的两态（顶部 / 下半部思考档与价格）
+
+## W14 Web 字段高度与控制对齐（keel-ui-polish 车道）
+
+> 规格见 `specs/client-shell/spec.md` 的「字段高度与控制对齐」；证据
+> `evidence/ui-polish/`。
+
+- [x] kit 增加 `field` 控制尺寸（桌面 34；手机由调用点覆盖 44），`Input`/`Select`/
+      `Button` 走同一 `withoutUndefined` 样式合并，显式 `undefined` 不再擦除默认高度
+      （`web/src/ui/kit/components/{styles,input,select,button}.tsx`、
+      `styles.test.ts`、`form.test.tsx`）
+- [x] 书籍页筛选/表单/表格统一：accounts/groups/bots/teams/records 的搜索、Select、
+      范围分段、创建按钮全部 34/44；表格 header 34+hairline、正文 44，团队/群组数字列右对齐
+      （`web/src/screens/books/*`、`common.tsx`；TUI `books.tui.test.tsx`、
+      `bots-teams.tui.test.tsx`）
+- [x] 设置页表单、Provider/密钥/技能/默认模型字段统一 34/44；对话框 footer 同高、
+      长表单可滚到底部；移动端 390 无溢出（`web/src/screens/settings*.tsx`、
+      `web/src/ui/kit/layout`；TUI `settings-models.test.tsx`、`settings-skills.test.tsx`）
+- [x] 证据：before 83/108、after 124/124，34 张 390/1440 截图、零 console/page/request
+      错误；复跑脚本 `scripts/ui-polish-evidence.sh` + `ui-polish-e2e.mjs`
