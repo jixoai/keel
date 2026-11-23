@@ -11,11 +11,17 @@ TUI target 里运行（`keel tui`）。它只消费两样东西：`@keel/chat-su
 cd web
 nsh check                                   # 类型检查
 nsh test --target tui                       # 同一份代码在终端宿主上的 5 条行为测试
-nsh package --target web -o dist/web/keel   # 静态站点 → dist/web/keel/Keel/
+cd ..
+scripts/package-web.sh                      # 静态站点 → web/dist/web/keel/Keel/（含 theme.json）
 ```
 
+`scripts/package-web.sh [out-dir]` 包一层 `nsh package --target web`：nsh 只产出静态站点，
+而 `keel serve` 需要 `theme.json` 与 `index.html` 同目录（`loadHostTheme` 把它交给插件 UI，
+插件才能继承宿主令牌），所以脚本把 `web/theme.json` 一并放进去。发布流水线
+（`.github/workflows/release.yml`）走同一个脚本。
+
 `keel serve` 同源托管该产物（`web/dist` 下的嵌套根会被自动识别）；未构建时 `/` 返回 JSON 404
-并给出上面的命令。TUI 由 `keel tui` 启动（`KEEL_TUI_BIN` 或 `nsh package --target tui` 的产物）。
+并给出构建指引。TUI 由 `keel tui` 启动（`KEEL_TUI_BIN` 或 `nsh package --target tui` 的产物）。
 
 ## 2. 两种数据模式
 

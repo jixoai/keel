@@ -90,7 +90,9 @@ jobs:
           curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
           export PATH="$HOME/.nsh/bin:$PATH"
           nsh --version
-          (cd web && nsh package --target web -o "$RUNNER_TEMP/webdist")
+          # The script also copies web/theme.json next to index.html: the
+          # plugin bridge (loadHostTheme) publishes it to plugin UIs.
+          ./scripts/package-web.sh "$RUNNER_TEMP/webdist"
           VERSION="${{ steps.ver.outputs.version }}"
           (cd "$RUNNER_TEMP/webdist" && zip -q -r "$GITHUB_WORKSPACE/dist/keel-web-$VERSION.zip" .)
           ls -la dist
