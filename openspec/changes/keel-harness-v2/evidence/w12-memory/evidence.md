@@ -1,8 +1,8 @@
 # W12 记忆卫生证据（2026-11-23，review 修复后 2026-11-23）
 
-实现提交：
-- `d9a2ac5 feat(memory): spill-backed pruning, image offload, and a stable prompt prefix`
-- `b24bd4e fix(memory): CAS-aware spill reads, incomplete-dedupe refusal, honest tokens`（独立 review P1/P2 修复）
+实现提交（rebase 后当前分支）：
+- `a92b2ce feat(memory): spill-backed pruning, image offload, and a stable prompt prefix`
+- `7fe2e21 fix(memory): CAS-aware spill reads, incomplete-dedupe refusal, honest tokens`（独立 review P1/P2 修复）
 
 范围：`openspec/changes/keel-harness-v2/tasks.md` 的 W12「记忆卫生（W1–W2）」：
 `keel.spill`、`keel.compaction` 扩展（tool-result-pruner + image-offload）、

@@ -69,8 +69,9 @@ func (b *Blobs) Spill(ctx context.Context, scope spill.Scope, mime string, data 
 	// crash between CreateBlob and CompleteBlob). Such a row is unreadable: its
 	// chunks are missing or partial, so Load would fail with ErrIncompleteBlob.
 	// Returning a reference to it would be a broken reference; refuse instead, so
-	// the caller keeps the original content. The next process's upload repair or
-	// the row's TTL is the recovery path; this call must never claim success.
+	// the caller keeps the original content. There is no in-process repair or TTL
+	// for incomplete rows today: an operator must repair/re-upload the row before
+	// this payload can be deduped successfully. This call never claims success.
 	if !meta.Complete {
 		state := "deduped"
 		if created {
