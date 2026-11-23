@@ -501,6 +501,118 @@ export interface SessionTasksView {
   truncated?: boolean;
 }
 
+/** One message hit of `GET /v1/sessions/search?scope=messages`. The title is
+ * the session's derived title (the same projection the list renders), and the
+ * snippet is the server's bounded window around the match. */
+export interface SessionMessageHitView {
+  sessionId: string;
+  sessionTitle: string;
+  seq: number;
+  kind: string;
+  role: string;
+  at?: string;
+  snippet: string;
+}
+
+export interface SessionMessageSearchView {
+  scope: "messages";
+  query?: string;
+  messages?: SessionMessageHitView[];
+  count?: number;
+  limit?: number;
+  nextCursor?: string;
+  hasMore?: boolean;
+}
+
+/** One session hit of `GET /v1/sessions/search?scope=sessions`: the derived
+ * title and the text that matched, never a second summary shape. */
+export interface SessionHitView {
+  sessionId: string;
+  title: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastMessageAt?: string;
+  snippet: string;
+}
+
+export interface SessionSearchSessionsView {
+  scope: "sessions";
+  query?: string;
+  sessions?: SessionHitView[];
+  count?: number;
+  limit?: number;
+  nextCursor?: string;
+  hasMore?: boolean;
+}
+
+export type SessionSearchView = SessionMessageSearchView | SessionSearchSessionsView;
+
+export interface SessionSearchOptions {
+  scope?: "messages" | "sessions";
+  sessionId?: string;
+  kind?: "user" | "assistant";
+  limit?: number;
+  after?: string;
+}
+
+export interface SessionExportOptions {
+  afterSeq?: number;
+  limit?: number;
+}
+
+export interface DeliverablesOptions {
+  limit?: number;
+  after?: string;
+}
+
+/** One transcript message of `GET /v1/sessions/{id}/export`. Only text is
+ * exported; `textTruncated` marks a message the server cut at its bound. */
+export interface SessionExportMessageView {
+  seq: number;
+  kind: string;
+  role: string;
+  at?: string;
+  text: string;
+  textTruncated?: boolean;
+}
+
+export interface SessionExportView {
+  sessionId: string;
+  title?: string;
+  format?: string;
+  messages?: SessionExportMessageView[];
+  count?: number;
+  limit?: number;
+  afterSeq?: number;
+  nextAfterSeq?: number;
+  hasMore?: boolean;
+  truncated?: boolean;
+  limits?: Record<string, number>;
+}
+
+/** One workspace change / deliverable of `GET /v1/sessions/{id}/deliverables`:
+ * a file_manifest row (path, hash, size) plus the preview link the client
+ * opens it through. The manifest is the only file truth; this is a projection. */
+export interface DeliverableView {
+  path: string;
+  hash: string;
+  size: number;
+  mode?: number;
+  updatedSeq?: number;
+  lastTaskId?: string;
+  previewUrl: string;
+}
+
+export interface DeliverablesView {
+  sessionId?: string;
+  deliverables?: DeliverableView[];
+  count?: number;
+  limit?: number;
+  nextCursor?: string;
+  hasMore?: boolean;
+  limits?: Record<string, number>;
+}
+
 /** One card of `GET /v1/sessions/{id}/task-panel`. `member` is true for a
  * card whose row lives in another session (a sub-agent or a fork). */
 export interface TaskPanelCardView {

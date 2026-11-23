@@ -30,8 +30,14 @@ import type {
   SecretSaved,
   SecretsView,
   SendOptions,
+  DeliverablesOptions,
+  DeliverablesView,
+  SessionExportOptions,
+  SessionExportView,
   SessionFilesQuery,
   SessionFilesView,
+  SessionSearchOptions,
+  SessionSearchView,
   SessionSummary,
   SessionTasksView,
   SettingsApi,
@@ -1351,6 +1357,130 @@ export class KeelHttp implements SettingsApi {
       truncated: body.truncated === true,
       hasMore: body.hasMore === true,
       nextCursor: asText(body.nextCursor) || undefined,
+    };
+  }
+
+  /** `GET /v1/sessions/search` — bounded transcript/session search. The
+   * response keeps the server's scope: a caller that asked for messages never
+   * receives a fabricated sessions list. */
+  async sessionSearch(query: string, opts: SessionSearchOptions = {}): Promise<SessionSearchView> {
+    const params = new URLSearchParams({ q: query });
+    params.set("scope", opts.scope ?? "messages");
+    if (opts.sessionId) params.set("sessionId", opts.sessionId);
+    if (opts.kind) params.set("kind", opts.kind);
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts.after) params.set("after", opts.after);
+    const response = await this.request(`/v1/sessions/search?${params.toString()}`);
+    const body = asRecord(await response.json());
+    const scope = body.scope === "sessions" ? "sessions" : "messages";
+    if (scope === "sessions") {
+      return {
+        scope,
+        query: asText(body.query) || undefined,
+        sessions: listOf(body.sessions).map((item) => {
+          const row = asRecord(item);
+          return {
+            sessionId: asText(row.sessionId),
+            title: asText(row.title),
+            createdAt: asText(row.createdAt) || undefined,
+            updatedAt: asText(row.updatedAt) || undefined,
+            lastMessageAt: asText(row.lastMessageAt) || undefined,
+            snippet: asText(row.snippet),
+          };
+        }),
+        count: numberOr(body.count, 0),
+        limit: numberOr(body.limit, 0),
+        nextCursor: asText(body.nextCursor) || undefined,
+        hasMore: body.hasMore === true,
+      };
+    }
+    return {
+      scope,
+      query: asText(body.query) || undefined,
+      messages: listOf(body.messages).map((item) => {
+        const row = asRecord(item);
+        return {
+          sessionId: asText(row.sessionId),
+          sessionTitle: asText(row.sessionTitle),
+          seq: numberOr(row.seq, 0),
+          kind: asText(row.kind),
+          role: asText(row.role),
+          at: asText(row.at) || undefined,
+          snippet: asText(row.snippet),
+        };
+      }),
+      count: numberOr(body.count, 0),
+      limit: numberOr(body.limit, 0),
+      nextCursor: asText(body.nextCursor) || undefined,
+      hasMore: body.hasMore === true,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/export` — one bounded transcript page. */
+  async sessionExport(sessionId: string, opts: SessionExportOptions = {}): Promise<SessionExportView> {
+    const params = new URLSearchParams();
+    if (opts.afterSeq !== undefined) params.set("afterSeq", String(opts.afterSeq));
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    const suffix = params.toString();
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/export${suffix ? `?${suffix}` : ""}`,
+    );
+    const body = asRecord(await response.json());
+    return {
+      sessionId: asText(body.sessionId),
+      title: asText(body.title) || undefined,
+      format: asText(body.format) || undefined,
+      messages: listOf(body.messages).map((item) => {
+        const row = asRecord(item);
+        return {
+          seq: numberOr(row.seq, 0),
+          kind: asText(row.kind),
+          role: asText(row.role),
+          at: asText(row.at) || undefined,
+          text: asText(row.text),
+          textTruncated: row.textTruncated === true,
+        };
+      }),
+      count: numberOr(body.count, 0),
+      limit: numberOr(body.limit, 0),
+      afterSeq: numberOr(body.afterSeq, 0),
+      nextAfterSeq: numberOr(body.nextAfterSeq, 0),
+      hasMore: body.hasMore === true,
+      truncated: body.truncated === true,
+      limits: typeof body.limits === "object" && body.limits !== null ? (body.limits as Record<string, number>) : undefined,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/deliverables` — the manifest-backed workspace
+   * changes, one bounded page. */
+  async sessionDeliverables(sessionId: string, opts: DeliverablesOptions = {}): Promise<DeliverablesView> {
+    const params = new URLSearchParams();
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts.after) params.set("after", opts.after);
+    const suffix = params.toString();
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/deliverables${suffix ? `?${suffix}` : ""}`,
+    );
+    const body = asRecord(await response.json());
+    return {
+      sessionId: asText(body.sessionId) || undefined,
+      deliverables: listOf(body.deliverables).map((item) => {
+        const row = asRecord(item);
+        return {
+          path: asText(row.path),
+          hash: asText(row.hash),
+          size: numberOr(row.size, 0),
+          mode: typeof row.mode === "number" ? row.mode : undefined,
+          updatedSeq: numberOr(row.updatedSeq, 0),
+          lastTaskId: asText(row.lastTaskId) || undefined,
+          previewUrl: asText(row.previewUrl),
+        };
+      }),
+      count: numberOr(body.count, 0),
+      limit: numberOr(body.limit, 0),
+      nextCursor: asText(body.nextCursor) || undefined,
+      hasMore: body.hasMore === true,
+      limits: typeof body.limits === "object" && body.limits !== null ? (body.limits as Record<string, number>) : undefined,
     };
   }
 

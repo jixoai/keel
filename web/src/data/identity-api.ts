@@ -10,7 +10,19 @@
 // The record chapter's read and the run projection's reads are optional on
 // purpose. A transport without them answers nothing, and the page renders its
 // 待接入 state instead of an error about a surface the deployment never had.
-import type { FilePreviewView, SessionFilesQuery, SessionFilesView, SessionSummary, TaskPanelView } from "./contract";
+import type {
+  DeliverablesOptions,
+  DeliverablesView,
+  FilePreviewView,
+  SessionExportOptions,
+  SessionExportView,
+  SessionFilesQuery,
+  SessionFilesView,
+  SessionSearchOptions,
+  SessionSearchView,
+  SessionSummary,
+  TaskPanelView,
+} from "./contract";
 import type {
   AccountView,
   AuditEventView,
@@ -123,6 +135,14 @@ export interface IdentityApi {
    * long manifest can be paged instead of reported as truncated. Optional:
    * without it the panel simply omits the attribution group. */
   sessionFiles?(sessionId: string, query?: SessionFilesQuery): Promise<SessionFilesView>;
+  /** `GET /v1/sessions/search`: bounded transcript or session search. Optional:
+   * a deployment without the read leaves the search entry out. */
+  sessionSearch?(query: string, opts?: SessionSearchOptions): Promise<SessionSearchView>;
+  /** `GET /v1/sessions/{id}/export`: one bounded transcript page. Optional. */
+  sessionExport?(sessionId: string, opts?: SessionExportOptions): Promise<SessionExportView>;
+  /** `GET /v1/sessions/{id}/deliverables`: the manifest-backed workspace
+   * changes. Optional: without it the status pane omits the 交付物 section. */
+  sessionDeliverables?(sessionId: string, opts?: DeliverablesOptions): Promise<DeliverablesView>;
   sessionEvents?(sessionId: string, limit?: number): Promise<SessionEventView[]>;
   listSubagents?(parentSessionId?: string, limit?: number): Promise<SubagentView[]>;
   cancelSession?(sessionId: string): Promise<SessionCancelView>;

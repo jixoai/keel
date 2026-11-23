@@ -98,6 +98,14 @@ setClientCapabilities({
   // still a separate fact (`can("task.panel")`), so a server that never wired
   // the projection stays off.
   "task.panel": true,
+  // The W12 session reads: the list can render server-backed search/export and
+  // the status pane can render deliverables on every host. The deployment half
+  // is still a separate fact (`GET /v1/capabilities`), so an older server that
+  // does not wire the reads keeps them off even though this client can draw
+  // them.
+  "session.search": true,
+  "session.export": true,
+  "session.deliverables": true,
 });
 
 // The plugin UI runtime's base slots (keel.ui's declarations). Installed once,

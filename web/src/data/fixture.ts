@@ -36,9 +36,15 @@ import type {
   SecretSaved,
   SecretsView,
   SendOptions,
+  DeliverablesOptions,
+  DeliverablesView,
+  SessionExportOptions,
+  SessionExportView,
   SessionFilesQuery,
   SessionFilesView,
   SessionFileView,
+  SessionSearchOptions,
+  SessionSearchView,
   SessionSummary,
   SessionTasksView,
   SettingsApi,
@@ -284,6 +290,42 @@ const demoHash = (seed: string): string => {
 const cloneSkill = (record: SkillRecordView): SkillRecordView =>
   JSON.parse(JSON.stringify(record)) as SkillRecordView;
 
+/** The full text a fixture message carries (search/export need the whole
+ * sentence; `textPreview` is the list's 90-character line). */
+const payloadText = (payload: unknown): string => {
+  if (!payload || typeof payload !== "object") return "";
+  const row = payload as { text?: unknown; content?: unknown };
+  if (typeof row.text === "string") return row.text;
+  if (Array.isArray(row.content)) {
+    return row.content
+      .map((part) =>
+        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+          ? (part as { text: string }).text
+          : "",
+      )
+      .join("");
+  }
+  return "";
+};
+
+/** A bounded one-line window around a fixture search match. */
+const matchSnippet = (text: string, needle: string): string => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const at = flat.toLowerCase().indexOf(needle.toLowerCase());
+  if (at < 0) return flat.slice(0, 160);
+  const start = Math.max(0, at - 40);
+  const end = Math.min(flat.length, start + 160);
+  return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
+};
+
+/** The two generic demo paths the fixture manifest always holds. Their preview
+ * content is fixed demo text; the hash is the same deterministic stand-in the
+ * deliverable row carries. */
+const fixtureFileContent: Record<string, string> = {
+  "src/composer.tsx": "// 发布准备周报的输入组件（演示）\nexport const Composer = () => null;\n",
+  "docs/release.md": "# 发布说明（演示）\n\n- 检查清单已更新\n- 回滚步骤已演练\n",
+};
+
 function textPreview(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const row = payload as { text?: string; summary?: string; question?: string };
@@ -469,6 +511,12 @@ export class FixtureClient implements SettingsApi {
         // exactly as a deployment with the projection wired.
         "task.panel": true,
         "session.filePreview": true,
+        // The W12 reads are answered by this transport (bounded search,
+        // export, and the manifest-backed deliverables page), so the fixture
+        // advertises the same deployment half a live keel serve does.
+        "session.search": true,
+        "session.export": true,
+        "session.deliverables": true,
         // The demo answers the same settings surface a live server does, so
         // the editor's discovery and direct-entry actions are exercised.
         "settings.models": true,
@@ -935,6 +983,123 @@ export class FixtureClient implements SettingsApi {
     };
   }
 
+  /** `GET /v1/sessions/search` in memory: bounded message hits across the
+   * fixture's sessions, or session rows matched on title/preview. */
+  async sessionSearch(query: string, opts: SessionSearchOptions = {}): Promise<SessionSearchView> {
+    const needle = query.trim();
+    if (opts.scope === "sessions") {
+      const rows = [...this.sessions.values()]
+        .filter((peer) => {
+          const haystack = `${peer.meta.title ?? ""} ${peer.meta.lastMessage ?? ""}`.toLowerCase();
+          return haystack.includes(needle.toLowerCase());
+        })
+        .sort((left, right) => (right.meta.updatedAt ?? "").localeCompare(left.meta.updatedAt ?? ""))
+        .slice(0, opts.limit ?? 20)
+        .map((peer) => ({
+          sessionId: peer.id,
+          title: peer.meta.title ?? "",
+          createdAt: peer.meta.createdAt,
+          updatedAt: peer.meta.updatedAt,
+          lastMessageAt: peer.meta.lastMessageAt,
+          snippet: matchSnippet(peer.meta.lastMessage ?? peer.meta.title ?? "", needle),
+        }));
+      return { scope: "sessions", query: needle, sessions: rows, count: rows.length, limit: opts.limit ?? 20, hasMore: false };
+    }
+    const hits: Array<{ sessionId: string; sessionTitle: string; seq: number; kind: string; role: string; at?: string; snippet: string }> = [];
+    for (const peer of this.sessions.values()) {
+      if (opts.sessionId && peer.id !== opts.sessionId) continue;
+      for (const event of peer.events) {
+        if (event.kind !== "user.message" && event.kind !== "assistant.message") continue;
+        if (opts.kind && event.kind !== `${opts.kind}.message`) continue;
+        const text = payloadText(event.payload);
+        if (!text.toLowerCase().includes(needle.toLowerCase())) continue;
+        const timestamp = (event.payload as { timestamp?: number } | undefined)?.timestamp;
+        hits.push({
+          sessionId: peer.id,
+          sessionTitle: peer.meta.title ?? "",
+          seq: event.seq,
+          kind: event.kind,
+          role: event.kind === "user.message" ? "user" : "assistant",
+          at: typeof timestamp === "number" ? new Date(timestamp).toISOString() : peer.meta.updatedAt,
+          snippet: matchSnippet(text, needle),
+        });
+      }
+    }
+    hits.sort((left, right) => (right.at ?? "").localeCompare(left.at ?? ""));
+    const limit = opts.limit ?? 20;
+    const page = hits.slice(0, limit);
+    return {
+      scope: "messages",
+      query: needle,
+      messages: page,
+      count: page.length,
+      limit,
+      hasMore: hits.length > limit,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/export` in memory: the transcript's text messages,
+   * bounded by `limit`, keyset by seq. */
+  async sessionExport(sessionId: string, opts: SessionExportOptions = {}): Promise<SessionExportView> {
+    const peer = this.need(sessionId);
+    const limit = Math.max(1, Math.min(500, opts.limit ?? 200));
+    const after = opts.afterSeq ?? 0;
+    const all = peer.events
+      .filter((event) => event.seq > after && (event.kind === "user.message" || event.kind === "assistant.message"))
+      .map((event) => ({
+        seq: event.seq,
+        kind: event.kind,
+        role: event.kind === "user.message" ? "user" : "assistant",
+        at: peer.meta.updatedAt,
+        text: payloadText(event.payload),
+      }))
+      .filter((message) => message.text !== "");
+    const page = all.slice(0, limit);
+    return {
+      sessionId,
+      title: peer.meta.title ?? "",
+      format: "json",
+      messages: page,
+      count: page.length,
+      limit,
+      afterSeq: after,
+      nextAfterSeq: page.length > 0 ? page[page.length - 1].seq : 0,
+      hasMore: all.length > limit,
+      truncated: false,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/deliverables` in memory: the same manifest rows the
+   * `$` group reads, each with the deterministic hash and the preview link. */
+  async sessionDeliverables(sessionId: string, opts: DeliverablesOptions = {}): Promise<DeliverablesView> {
+    const source = await this.sessionFiles(sessionId);
+    const files = [...(source.files ?? [])].sort((left, right) => left.path.localeCompare(right.path));
+    const start = opts.after ? files.findIndex((file) => file.path > opts.after!) : 0;
+    const from = start < 0 ? files.length : start;
+    const limit = opts.limit ?? 100;
+    const page = files.slice(from, from + limit);
+    const rows = page.map((file) => {
+      const hash = `sha256:${demoHash(file.path)}`;
+      return {
+        path: file.path,
+        hash,
+        size: file.size,
+        mode: 0o644,
+        updatedSeq: file.updatedSeq,
+        lastTaskId: file.lastTaskId,
+        previewUrl: `/v1/sessions/${sessionId}/file-preview?path=${encodeURIComponent(file.path)}&hash=${encodeURIComponent(hash)}`,
+      };
+    });
+    return {
+      sessionId,
+      deliverables: rows,
+      count: rows.length,
+      limit,
+      hasMore: from + limit < files.length,
+      nextCursor: from + limit < files.length ? files[from + limit - 1].path : undefined,
+    };
+  }
+
   /** The `$` task group's demo source (the session's cards). */
   async sessionTasks(_sessionId: string): Promise<SessionTasksView> {
     return {
@@ -1338,8 +1503,32 @@ export class FixtureClient implements SettingsApi {
     return this.identity.taskPanel(sessionId, memberLimit, eventLimit);
   }
 
-  filePreview(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView> {
-    return this.identity.filePreview(sessionId, path, referenceHash, offset);
+  async filePreview(sessionId: string, path: string, referenceHash?: string, offset = 0): Promise<FilePreviewView> {
+    try {
+      return await this.identity.filePreview(sessionId, path, referenceHash, offset);
+    } catch (error) {
+      // The generic demo paths are not in the run session's file map; the
+      // manifest above still holds them, so the preview reads their fixed demo
+      // text instead of claiming the file is missing.
+      const content = fixtureFileContent[path];
+      if (content === undefined) throw error;
+      const hash = `sha256:${demoHash(path)}`;
+      const lines = content.split("\n").length;
+      return {
+        path,
+        hash,
+        size: content.length,
+        offset,
+        limit: 200,
+        totalLines: lines,
+        returnedLines: lines,
+        nextOffset: lines,
+        truncated: false,
+        content,
+        referenceHash,
+        matchesReference: referenceHash === undefined ? undefined : referenceHash === hash,
+      };
+    }
   }
 
   listSubagents(parentSessionId?: string): Promise<SubagentView[]> {

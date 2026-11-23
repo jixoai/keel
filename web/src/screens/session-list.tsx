@@ -48,7 +48,7 @@
 //     competing cards that starved the titles.
 //   · the panel header names the list only (会话 / AI 员工会话): the product
 //     brand lives in the global system bar, not twice on one screen.
-import { signal, Text, type TextStyle, View } from "nsh";
+import { Clipboard, cleanup, effect, signal, Text, type TextStyle, View } from "nsh";
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
 import { formatTime } from "../data/wire";
@@ -87,6 +87,7 @@ import {
   type RunState,
 } from "../ui/run-state";
 import { oneLine, sessionTitle } from "../ui/session-title";
+import { exportSummary, searchAvailable, sessionQueryAccess } from "../data/session-query";
 import { PluginSidebarSlot } from "../plugins/slots";
 import { requestDelete } from "./delete-dialog";
 
@@ -192,6 +193,19 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
   const waiting = () => store.waiting(row().sessionId);
   const badge = () => rowBadgeOf(rowStateOf(row(), props.active), waiting(), props.active, row().queue);
   const openDelete = () => requestDelete(row().sessionId, title());
+  /** Export the session's transcript (one bounded page) to the clipboard. The
+   * read is the server's export; this only delivers the exact lines it
+   * returned, so no second export shape exists in the client. */
+  const openExport = async () => {
+    try {
+      const { view, jsonl } = await sessionQueryAccess.exportSession(row().sessionId);
+      if (jsonl) await Clipboard.writeText(jsonl);
+      store.flash({ tone: view.messages?.length ? "success" : "info", text: exportSummary(view) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      store.flash({ tone: "danger", text: `导出失败：${message}` });
+    }
+  };
   /** The pointer is on the row: the wide layout's overflow action only shows
    * then (or while the row is the open one — a terminal has no hover). */
   const hovered = signal(false);
@@ -307,6 +321,7 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
               />
             }
           >
+            <DropdownMenuItem label="导出会话" icon="download" onSelect={() => void openExport()} />
             <DropdownMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />
           </DropdownMenu>
         </If>
@@ -318,7 +333,12 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
     <ContextMenu
       accessibilityLabel={`会话操作 ${title()}`}
       trigger={trigger}
-      menu={<ContextMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />}
+      menu={
+        <View style={{ flexDirection: "column" }}>
+          <ContextMenuItem label="导出会话" icon="download" onSelect={() => void openExport()} />
+          <ContextMenuItem label="删除会话" icon="trash" danger onSelect={openDelete} />
+        </View>
+      }
     />
   );
 }
@@ -383,11 +403,91 @@ function SessionListEmpty(props: { searching: boolean }) {
   );
 }
 
+/** The server-backed message hits for the search box. It sits above the
+ * session rows because it can reach sessions the first list page does not
+ * hold; a deployment without the read renders nothing here and the local
+ * filter still works. */
+function MessageHits(props: { onSelect: (id: string) => void }) {
+  const hits = () => sessionQueryAccess.hits();
+  const searching = () => sessionQueryAccess.searched() && !sessionQueryAccess.loading();
+  return (
+    <View testID="session-message-hits" style={{ flexDirection: "column", gap: space.xs, paddingHorizontal: space.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Text style={{ flex: 1, fontSize: typeScale.sm, color: color.mutedForeground }}>
+          消息结果{hits().length > 0 ? ` · ${hits().length} 条` : ""}
+        </Text>
+        <If when={sessionQueryAccess.loading()}>
+          <Text testID="session-message-search-loading" style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            搜索中…
+          </Text>
+        </If>
+      </View>
+      <If when={sessionQueryAccess.error() !== null}>
+        <Text testID="session-message-search-error" style={{ fontSize: typeScale.sm, color: color.danger }}>
+          {sessionQueryAccess.error() ?? ""}
+        </Text>
+      </If>
+      <If when={searching() && hits().length === 0 && sessionQueryAccess.error() === null}>
+        <Text testID="session-message-search-empty" style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          没有匹配的历史消息。
+        </Text>
+      </If>
+      <Each of={hits()} key={(hit) => `${hit.sessionId}:${hit.seq}`}>
+        {(hit) => (
+          <View
+            testID={`session-message-hit-${hit().sessionId}-${hit().seq}`}
+            role="button"
+            focusable
+            onPress={() => props.onSelect(hit().sessionId)}
+            accessibilityLabel={`打开消息 ${hit().sessionTitle}`}
+            hoverStyle={{ backgroundColor: color.hover }}
+            style={{
+              flexDirection: "column",
+              gap: space.xxs,
+              paddingVertical: space.xs,
+              borderBottomWidth: 1,
+              borderBottomColor: color.border,
+            }}
+          >
+            <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+              {hit().sessionTitle || "未命名会话"}
+            </Text>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, numberOfLines: 2 }}>
+              {hit().snippet}
+            </Text>
+          </View>
+        )}
+      </Each>
+      <If when={sessionQueryAccess.hasMore()}>
+        <Button
+          testID="session-message-search-more"
+          variant="ghost"
+          size="sm"
+          label="继续搜索"
+          onPress={() => void sessionQueryAccess.more()}
+        />
+      </If>
+    </View>
+  );
+}
+
 export function SessionList(props: { onSelect: (id: string) => void; activeId: string | null; wide: boolean }) {
   // The store's order, filtered only by the search box (never re-sorted, never
   // re-created): a refresh that changes state must not move a row (C5). The
   // search reads what the rows show — title and preview, never the id — so a
   // match is always visible in the row it keeps.
+  // The local filter is instant; the server read is debounced so typing does
+  // not scan the transcript for every keystroke. It is the one entry into
+  // bounded message search.
+  effect(() => {
+    const text = query().trim();
+    if (!searchAvailable() || text.length < 2) {
+      sessionQueryAccess.clear();
+      return;
+    }
+    const timer = setTimeout(() => void sessionQueryAccess.search(text), 250);
+    cleanup(() => clearTimeout(timer));
+  });
   const rows = () => {
     const needle = query().trim().toLowerCase();
     const filter = source();
@@ -445,7 +545,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
         <Input
           value={query()}
           onChange={(value) => query.set(value)}
-          placeholder="搜索会话"
+          placeholder="搜索会话或消息"
           accessibilityLabel="搜索会话"
           testID="session-search"
         />
@@ -494,6 +594,9 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             every row's native view. A press that landed in that window found a
             row's label with no native view. Each `If` mounts once for its
             boolean, and the rows below it stay the same nodes. */}
+        <If when={searchAvailable() && query().trim().length >= 2}>
+          <MessageHits onSelect={props.onSelect} />
+        </If>
         <If when={store.sessionsLoading()}>
           <SessionListSkeleton />
         </If>

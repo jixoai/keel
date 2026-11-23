@@ -21,13 +21,18 @@
 //
 // NSH components run once: every reactive read sits in a getter the JSX calls
 // (or in an `<If>`), never in a body-level local.
-import { cleanup, effect, Text, View } from "nsh";
+import { Clipboard, cleanup, effect, Text, View } from "nsh";
 import { store } from "../data/store";
 import { formatTokens, reasoningLabel, selectionDisplay } from "../data/wire";
 import {
+  Alert,
   Badge,
+  Button,
+  IconButton,
   ScrollArea,
+  Skeleton,
   color,
+  font,
   lineHeight,
   space,
   typeScale,
@@ -42,6 +47,14 @@ import {
   type RunState,
   type RunTone,
 } from "../ui/run-state";
+import { exportAvailable, exportSummary, sessionQueryAccess } from "../data/session-query";
+import {
+  deliverablesAccess,
+  deliverableSize,
+  shortDeliverableHash,
+  type DeliverablePreview,
+} from "../data/deliverables";
+import type { DeliverableView } from "../data/contract";
 
 const stateBadge: Record<RunTone, BadgeVariant> = {
   neutral: "secondary",
@@ -125,6 +138,223 @@ const toolCallCount = () => {
   return count;
 };
 
+/** One manifest row: the path, the size/hash the manifest records, and a press
+ * that opens the row's bounded preview. The preview link is the server's own
+ * `/file-preview` URL (the row carries it), never a client-composed path. */
+function DeliverableRow(props: { row: DeliverableView; onOpen: () => void }) {
+  const row = () => props.row;
+  return (
+    <View
+      testID={`deliverable-row-${row().path}`}
+      role="button"
+      focusable
+      onPress={props.onOpen}
+      accessibilityLabel={`预览交付物 ${row().path}`}
+      hoverStyle={{ backgroundColor: color.hover }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        minHeight: 36,
+        paddingVertical: space.xxs,
+        borderBottomWidth: 1,
+        borderBottomColor: color.border,
+      }}
+    >
+      <Text
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontFamily: font.mono,
+          fontSize: typeScale.key,
+          color: color.foreground,
+          numberOfLines: 1,
+          textOverflow: "ellipsis",
+        }}
+      >
+        {row().path}
+      </Text>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{deliverableSize(row().size)}</Text>
+      <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
+        {shortDeliverableHash(row().hash)}
+      </Text>
+    </View>
+  );
+}
+
+/** The open preview: the manifest's current bytes, whether they still match the
+ * row's hash, and the server's preview link (copyable). */
+function DeliverablePreviewCard(props: { preview: DeliverablePreview; onClose: () => void }) {
+  const preview = () => props.preview;
+  const matchLabel = () =>
+    preview().matches === null ? "未能核对引用" : preview().matches ? "与引用一致" : "文件已变更，显示当前内容";
+  return (
+    <View
+      testID="deliverable-preview"
+      style={{
+        flexDirection: "column",
+        gap: space.xs,
+        padding: space.md,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: color.border,
+        backgroundColor: color.card,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Text style={{ flex: 1, minWidth: 0, fontFamily: font.mono, fontSize: typeScale.key, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+          {preview().row.path}
+        </Text>
+        <Button variant="ghost" size="sm" label="关闭" accessibilityLabel="关闭交付物预览" onPress={props.onClose} />
+      </View>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+        {deliverableSize(preview().view.size)} · {shortDeliverableHash(preview().view.hash)} · {matchLabel()}
+      </Text>
+      <Text
+        testID="deliverable-preview-content"
+        style={{
+          fontFamily: font.mono,
+          fontSize: typeScale.key,
+          lineHeight: Math.round(typeScale.key * lineHeight.normal),
+          color: color.foreground,
+          userSelect: "text",
+          numberOfLines: 40,
+          textOverflow: "ellipsis",
+        }}
+      >
+        {preview().view.content}
+      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Button
+          testID="deliverable-copy-link"
+          variant="outline"
+          size="sm"
+          icon="copy"
+          label="复制链接"
+          onPress={() => {
+            void Clipboard.writeText(preview().row.previewUrl).then(
+              () => store.flash({ tone: "success", text: "已复制交付物链接。" }),
+              () => store.flash({ tone: "danger", text: "这个平台不能写入剪贴板。" }),
+            );
+          }}
+        />
+        <Text style={{ flex: 1, minWidth: 0, fontFamily: font.mono, fontSize: typeScale["2xs"], color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+          {preview().row.previewUrl}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** The workspace-changes / deliverables section: the session manifest's rows,
+ * five states, and one bounded preview at a time. */
+function DeliverablesSection() {
+  const rows = () => deliverablesAccess.rows();
+  const phase = () => deliverablesAccess.phase();
+  return (
+    <View testID="deliverables-section" style={{ flexDirection: "column", gap: space.sm }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+        <Text style={{ flex: 1, fontSize: typeScale.sm, fontWeight: weight.semibold, color: color.foreground }}>
+          交付物 · 工作区变更
+        </Text>
+        <If when={rows().length > 0}>
+          <Text testID="deliverables-count" style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            {rows().length} 个文件
+          </Text>
+        </If>
+        <Button
+          testID="deliverables-refresh"
+          variant="ghost"
+          size="sm"
+          icon="refresh"
+          label="刷新交付物"
+          accessibilityLabel="刷新交付物"
+          onPress={() => {
+            const sessionId = store.activeId();
+            if (sessionId) void deliverablesAccess.refresh(sessionId);
+          }}
+        />
+      </View>
+      <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+        这些是会话文件清单里的写入；路径、大小与哈希都来自清单本身。
+      </Text>
+      <If when={phase() === "loading"}>
+        <Skeleton testID="deliverables-loading" lines={3} accessibilityLabel="正在加载交付物" />
+      </If>
+      <If when={phase() === "permission"}>
+        <Alert
+          testID="deliverables-permission"
+          variant="destructive"
+          icon="lock"
+          title="权限不足"
+          description={deliverablesAccess.error()?.message ?? ""}
+        />
+      </If>
+      <If when={phase() === "error"}>
+        <Alert
+          testID="deliverables-error"
+          variant="destructive"
+          icon="alert"
+          title="交付物读取失败"
+          description={deliverablesAccess.error()?.message ?? ""}
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              label="重试"
+              onPress={() => {
+                const sessionId = store.activeId();
+                if (sessionId) void deliverablesAccess.refresh(sessionId);
+              }}
+            />
+          }
+        />
+      </If>
+      <If when={phase() === "empty"}>
+        <Text testID="deliverables-empty" style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          这个会话还没有交付物。
+        </Text>
+      </If>
+      <If when={phase() === "success"}>
+        <View testID="deliverables-list" style={{ flexDirection: "column" }}>
+          <Each of={rows()} key={(row) => row.path}>
+            {(row) => <DeliverableRow row={row()} onOpen={() => void deliverablesAccess.openPreview(row())} />}
+          </Each>
+        </View>
+      </If>
+      <If when={deliverablesAccess.hasMore()}>
+        <Button
+          testID="deliverables-more"
+          variant="outline"
+          size="sm"
+          label="继续加载"
+          onPress={() => void deliverablesAccess.more()}
+        />
+      </If>
+      <If when={deliverablesAccess.previewLoading() !== null}>
+        <Text testID="deliverable-preview-loading" style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+          正在读取文件预览…
+        </Text>
+      </If>
+      <If when={deliverablesAccess.previewError() !== null}>
+        <Alert
+          testID="deliverable-preview-error"
+          variant="destructive"
+          icon="alert"
+          title="预览失败"
+          description={deliverablesAccess.previewError()?.message ?? ""}
+        />
+      </If>
+      <If when={deliverablesAccess.preview() !== null}>
+        <DeliverablePreviewCard
+          preview={deliverablesAccess.preview()!}
+          onClose={() => deliverablesAccess.closePreview()}
+        />
+      </If>
+    </View>
+  );
+}
+
 export function SessionStatusPane() {
   // The plugin surface is part of this pane's facts; ask for it when the pane
   // opens (the store's own guard keeps this to one request while it is in
@@ -132,6 +362,15 @@ export function SessionStatusPane() {
   effect(() => {
     if (store.mode() !== "http") return;
     const timer = setTimeout(() => void store.loadPlugins(), 0);
+    cleanup(() => clearTimeout(timer));
+  });
+  // The workspace-changes projection follows the open session. The read is a
+  // bounded first page; the section's 继续加载 asks for the next one.
+  effect(() => {
+    const sessionId = store.activeId();
+    const mode = store.mode();
+    if (mode !== "http" || !sessionId || !deliverablesAccess.available()) return;
+    const timer = setTimeout(() => deliverablesAccess.ensure(sessionId), 0);
     cleanup(() => clearTimeout(timer));
   });
 
@@ -161,6 +400,25 @@ export function SessionStatusPane() {
           >
             会话状态
           </Text>
+          <If when={!!store.activeId() && exportAvailable()}>
+            <IconButton
+              testID="session-export"
+              icon="download"
+              label="导出会话"
+              onPress={async () => {
+                const sessionId = store.activeId();
+                if (!sessionId) return;
+                try {
+                  const { view, jsonl } = await sessionQueryAccess.exportSession(sessionId);
+                  if (jsonl) await Clipboard.writeText(jsonl);
+                  store.flash({ tone: view.messages?.length ? "success" : "info", text: exportSummary(view) });
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  store.flash({ tone: "danger", text: `导出失败：${message}` });
+                }
+              }}
+            />
+          </If>
           <If when={!!store.activeId()}>
             <Badge
               testID="session-status-state"
@@ -230,6 +488,9 @@ export function SessionStatusPane() {
               } 个工具`}
             />
           </If>
+        </If>
+        <If when={!!store.activeId() && deliverablesAccess.available()}>
+          <DeliverablesSection />
         </If>
       </ScrollArea>
     </View>

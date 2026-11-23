@@ -20,6 +20,10 @@ const TITLE = (name: string) => `label:打开会话 ${name}`;
 /** The app on the terminal host, with the development transport enabled. */
 const openApp = () => open("./App.tsx", { host: { params: { fixture: true } } });
 
+/** The wide workspace (sidebar + conversation + right pane): the status pane's
+ * deliverables/export entry only fits at ≥1024. */
+const openWideApp = () => open("./App.tsx", { width: 1440, host: { params: { fixture: true } } });
+
 test("TUI: 会话列表 → 打开会话 → 输入 → 显示回复", async () => {
   const app = await openApp();
   expect(app.texts()).toContain("发布准备周报");
@@ -379,4 +383,51 @@ test("TUI: MCP app 结果——不挂 iframe，文本兜底与能力提示", asy
   expect(app.texts()).toContain("上海 24°C 多云，湿度 62%");
   expect(app.shows("id:mcp-app-frame-call-mcp-app")).toBe(false);
   expect(app.shows("id:mcp-app-fallback-call-mcp-app")).toBe(false);
+});
+
+test("TUI: 历史消息搜索——命中跨会话正文，点结果打开会话", async () => {
+  const app = await openApp();
+  await app.type("id:session-search", "发布准备");
+  // The server read is debounced; the section appears when it lands.
+  await app.waitFor("id:session-message-hits", { timeout: 15_000 });
+  await app.waitFor("id:session-message-hit-demo-chat-1", { timeout: 15_000 });
+  const hits = app.texts().join("\n");
+  expect(hits).toContain("消息结果");
+  expect(hits).toContain("发布准备周报");
+  expect(hits).toContain("本周发布准备");
+
+  await app.press("id:session-message-hit-demo-chat-1");
+  await app.waitFor("text:/本周发布准备已基本就绪/", { timeout: 10_000 });
+});
+
+test("TUI: 交付物——清单里的路径/大小/哈希与一份预览", async () => {
+  const app = await openWideApp();
+  await app.press("label:打开会话 发布准备周报");
+  await app.waitFor("text:/本周发布准备已基本就绪/", { timeout: 10_000 });
+  await app.press("label:展开右侧状态栏");
+  await app.waitFor("id:deliverables-section", { timeout: 15_000 });
+  await app.waitFor("id:deliverable-row-src/composer.tsx", { timeout: 15_000 });
+  const list = app.texts().join("\n");
+  expect(list).toContain("交付物 · 工作区变更");
+  expect(list).toContain("src/composer.tsx");
+  expect(list).toContain("docs/release.md");
+  expect(list).toContain("这些是会话文件清单里的写入");
+
+  await app.press("id:deliverable-row-src/composer.tsx");
+  await app.waitFor("id:deliverable-preview", { timeout: 15_000 });
+  const preview = app.texts().join("\n");
+  expect(preview).toContain("发布准备周报的输入组件");
+  expect(preview).toContain("与引用一致");
+});
+
+test("TUI: 导出会话——一页有界消息复制到剪贴板", async () => {
+  const app = await openWideApp();
+  await app.press("label:打开会话 发布准备周报");
+  await app.waitFor("text:/本周发布准备已基本就绪/", { timeout: 10_000 });
+  await app.press("label:展开右侧状态栏");
+  await app.waitFor("id:session-export", { timeout: 15_000 });
+  await app.press("id:session-export");
+  await app.waitFor("text:/已复制 \\d+ 条消息|这个部署没有提供会话导出|不能写入剪贴板/", {
+    timeout: 15_000,
+  });
 });
