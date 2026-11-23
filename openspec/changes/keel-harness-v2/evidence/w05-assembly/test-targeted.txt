@@ -1,0 +1,8 @@
+$ go test -count=1 ./internal/architecture
+ok  	github.com/jixoai/keel/internal/architecture	6.742s
+
+$ go test -count=1 ./internal/servicehost
+ok  	github.com/jixoai/keel/internal/servicehost	5.729s
+
+$ go vet ./internal/assembly ./internal/loadout
+vet: OK

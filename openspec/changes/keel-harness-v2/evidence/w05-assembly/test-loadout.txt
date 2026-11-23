@@ -1,0 +1,75 @@
+$ go test -count=1 -v ./internal/loadout
+=== RUN   TestAssemblyBaseMatchesTheBlueprint
+--- PASS: TestAssemblyBaseMatchesTheBlueprint (0.00s)
+=== RUN   TestAssemblyModeOnlyServeIsWired
+--- PASS: TestAssemblyModeOnlyServeIsWired (0.00s)
+=== RUN   TestAssembledServicesMatchesEnabledServices
+=== RUN   TestAssembledServicesMatchesEnabledServices/empty
+=== RUN   TestAssembledServicesMatchesEnabledServices/worker
+=== RUN   TestAssembledServicesMatchesEnabledServices/mcp
+=== RUN   TestAssembledServicesMatchesEnabledServices/compaction
+=== RUN   TestAssembledServicesMatchesEnabledServices/compaction_explicitly_off
+=== RUN   TestAssembledServicesMatchesEnabledServices/telemetry
+=== RUN   TestAssembledServicesMatchesEnabledServices/external_backends_and_tools
+=== RUN   TestAssembledServicesMatchesEnabledServices/models_document
+--- PASS: TestAssembledServicesMatchesEnabledServices (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/empty (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/worker (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/mcp (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/compaction (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/compaction_explicitly_off (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/telemetry (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/external_backends_and_tools (0.00s)
+    --- PASS: TestAssembledServicesMatchesEnabledServices/models_document (0.00s)
+=== RUN   TestAssemblyConfigIsAnOrderedOverlay
+--- PASS: TestAssemblyConfigIsAnOrderedOverlay (0.00s)
+=== RUN   TestAssemblyConfigCarriesDocumentDerivedImplementationVersions
+--- PASS: TestAssemblyConfigCarriesDocumentDerivedImplementationVersions (0.00s)
+=== RUN   TestPinnedPiLoopManifestMatchesSuite
+--- PASS: TestPinnedPiLoopManifestMatchesSuite (0.00s)
+=== RUN   TestDefaultAcceptsPinnedLoopConformance
+--- PASS: TestDefaultAcceptsPinnedLoopConformance (0.00s)
+=== RUN   TestDefaultRejectsTamperedLoopManifest
+--- PASS: TestDefaultRejectsTamperedLoopManifest (0.00s)
+=== RUN   TestDefaultRejectsWrongLoopPin
+--- PASS: TestDefaultRejectsWrongLoopPin (0.00s)
+=== RUN   TestDefaultRejectsDuplicateLoopDeclarations
+--- PASS: TestDefaultRejectsDuplicateLoopDeclarations (0.00s)
+=== RUN   TestValidateLoopConformanceRejectsMissingManifest
+--- PASS: TestValidateLoopConformanceRejectsMissingManifest (0.00s)
+=== RUN   TestValidateLoopConformanceRejectsMissingPin
+--- PASS: TestValidateLoopConformanceRejectsMissingPin (0.00s)
+=== RUN   TestValidateLoopConformanceAcceptsDeclaredLoop
+--- PASS: TestValidateLoopConformanceAcceptsDeclaredLoop (0.00s)
+=== RUN   TestValidateLoopConformanceRejectsWrongPin
+--- PASS: TestValidateLoopConformanceRejectsWrongPin (0.00s)
+=== RUN   TestValidateLoopConformanceIgnoresNonLoopServices
+--- PASS: TestValidateLoopConformanceIgnoresNonLoopServices (0.00s)
+=== RUN   TestDefaultServicesBlueprintCoherent
+--- PASS: TestDefaultServicesBlueprintCoherent (0.00s)
+=== RUN   TestDefaultAllServicesAssemble
+--- PASS: TestDefaultAllServicesAssemble (0.00s)
+=== RUN   TestDefaultMinimalAssemblyDegraded
+--- PASS: TestDefaultMinimalAssemblyDegraded (0.00s)
+=== RUN   TestDefaultMissingStoreKeepsDependentsPending
+--- PASS: TestDefaultMissingStoreKeepsDependentsPending (0.00s)
+=== RUN   TestDefaultMissingPromptKeepsToolsPending
+--- PASS: TestDefaultMissingPromptKeepsToolsPending (0.00s)
+=== RUN   TestDefaultHeaderDefaults
+--- PASS: TestDefaultHeaderDefaults (0.00s)
+=== RUN   TestTenantConfigSummary
+--- PASS: TestTenantConfigSummary (0.00s)
+=== RUN   TestFromTenantConfigSelection
+--- PASS: TestFromTenantConfigSelection (0.00s)
+=== RUN   TestFromTenantConfigMinimal
+--- PASS: TestFromTenantConfigMinimal (0.00s)
+=== RUN   TestFromTenantConfigRejectsInvalidDocument
+--- PASS: TestFromTenantConfigRejectsInvalidDocument (0.00s)
+=== RUN   TestModelConfigurationVersionsTheLLMService
+--- PASS: TestModelConfigurationVersionsTheLLMService (0.00s)
+=== RUN   TestExternalServicesSelectedByDocument
+--- PASS: TestExternalServicesSelectedByDocument (0.00s)
+=== RUN   TestSummaryNamesTheModelsDocumentIdentity
+--- PASS: TestSummaryNamesTheModelsDocumentIdentity (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/loadout	0.187s
