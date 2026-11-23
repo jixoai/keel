@@ -1,0 +1,8 @@
+=== RUN   TestCaptureModeMergeAndDefault
+--- PASS: TestCaptureModeMergeAndDefault (0.00s)
+=== RUN   TestValidateCaptureModeMatrix
+--- PASS: TestValidateCaptureModeMatrix (0.00s)
+=== RUN   TestCaptureModeRoundTripsCanonicalJSON
+--- PASS: TestCaptureModeRoundTripsCanonicalJSON (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/host	0.271s

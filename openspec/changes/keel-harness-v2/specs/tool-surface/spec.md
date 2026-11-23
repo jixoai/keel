@@ -25,7 +25,7 @@
 
 | 工具 | actions |
 |---|---|
-| `bash` | `run`（命令、cwd、timeout、env 白名单）、`jobs`（list/status/adopt/kill） |
+| `bash` | `run`（命令、cwd、timeout、env 白名单）、`jobs`（list/status/adopt/kill）、`checkpoint`（显式结算执行空间；manual/checkpoint 策略用） |
 | `read` / `write` / `edit` | 单一动作（参数见 file-plugin 契约） |
 | `mcp` | `list`、`describe`、`call` |
 | `skills` | `ls`、`view`、`manage`（create/patch/put/delete/write_file/remove_file）、`sources`（list/subscribe/unsubscribe/pin） |
@@ -109,6 +109,12 @@ Agent MUST 能通过 `bash` 完成系统操作；bash MUST 由 gbash 提供（�
 - **WHEN** 30 秒后仍未结束
 - **THEN** 命令转入后台作业（独立 Session+goroutine，非同一 session 的 `&`）继续执行，
   返回超时说明与可查询的作业 id，不丢已产生的输出
+
+#### Scenario: manual/checkpoint 策略的显式结算
+- **GIVEN** 租户文档设置 `filesystem.capture.mode=manual`
+- **WHEN** 模型调用 `bash {action:"checkpoint"}`（不执行任何命令）
+- **THEN** 执行空间中待结算的变更作为一条 `fs.capture` 结算；没有待结算变更时返回
+  `captured:false`，不追加第二条事件
 
 #### Scenario: 契约 pin 后才可开工
 - **WHEN** `docs/GBASH-CONTRACT.md` 未冻结

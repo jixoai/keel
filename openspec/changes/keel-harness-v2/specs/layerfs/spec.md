@@ -77,7 +77,7 @@ MUST NOT 回收仍被任一 manifest、snapshot 或账本前缀引用的对象�
 每次工具调用结束后结算变更集，MUST 使用 stat 缓存或文件监视只对变化文件计算哈希，MUST NOT 全树
 重扫。**一次结算 MUST 只产生一条批事件**（`baseSeq` / `count` / `treeHash`），manifest MUST
 批量 upsert 并以该事件 seq 作为 `updated_seq`，MUST NOT 为每个文件单独追加事件。忽略清单默认
-MUST 只包含 `.git/objects`。策略 MUST 可由 `config.toml` 覆写为 `checkpoint` 或 `manual`。
+MUST 只包含 `.git/objects`。
 run 内结算 MUST 携带 run fence。后台作业（无 run lease）产生的变更 MUST 由 Harness 以**系统事实**
 结算 `fs.capture`：payload 携带 `jobId` 归因，MUST NOT 伪造 owner token。
 
@@ -86,16 +86,38 @@ run 内结算 MUST 携带 run fence。后台作业（无 run lease）产生的�
 - **WHEN** 工具调用结束触发 capture
 - **THEN** 账本新增**一条** `fs.capture`，manifest 批量更新；事件数不随文件数增长
 
-#### Scenario: 配置关闭实时 capture
-- **GIVEN** 子代理的 `config.toml` 设置 `fs.capture.mode=checkpoint`
-- **WHEN** 它连续执行多条命令
-- **THEN** 只有任务完成/子代理返回/显式 checkpoint 时才结算变更
-
 #### Scenario: 后台作业逃出 run 后仍结算
 - **GIVEN** 一次 bash 调用超时转入后台作业，原 run 已结束并释放租约
 - **WHEN** 作业写完文件后退出
 - **THEN** 账本新增一条 `fs.capture{sessionId, taskId, jobId, baseSeq, count, treeHash}`，
   manifest 含该文件，不产生 `fs.capture_failed`，也不出现伪造的 owner token
+
+### Requirement: capture 策略按 run 固定
+
+策略 MUST 由租户文档 `filesystem.capture.mode` 提供（`per-tool-call` / `checkpoint` /
+`manual`），MUST 在 attempt 开始时固定，进行中的 run MUST NOT 中途切换。`checkpoint` /
+`manual` 没有对应触发器时 MUST 以类型化错误失败，MUST NOT 静默吞掉 capture。后台作业的
+结算 MUST NOT 受 run 的 capture 模式影响。
+
+#### Scenario: 配置关闭实时 capture
+- **GIVEN** 子代理的租户文档设置 `filesystem.capture.mode=checkpoint`
+- **WHEN** 它连续执行多条命令
+- **THEN** 只有任务完成/子代理返回/显式 checkpoint 时才结算变更
+
+#### Scenario: manual 只由显式 checkpoint 结算
+- **GIVEN** 租户文档设置 `filesystem.capture.mode=manual`
+- **WHEN** run 连续执行多条命令且没有调用显式 checkpoint
+- **THEN** 不产生任何自动 `fs.capture`；`bash {action:"checkpoint"}` 结算一次，重复调用不追加第二条
+
+#### Scenario: 配置轮转只影响下一次 run
+- **GIVEN** 一次 run 已固定 `checkpoint`
+- **WHEN** 租户文档在 run 进行中改为 `manual`
+- **THEN** 该 run 仍按 checkpoint 结算，只有下一次 run 使用 manual
+
+#### Scenario: 模式没有触发器
+- **GIVEN** 租户文档选择 `checkpoint` 但运行时没有 run 完成钩子
+- **WHEN** 下一次 attempt 开始
+- **THEN** attempt 以 `capture_trigger_missing` 失败，不产生被静默吞掉的 capture
 
 ### Requirement: 执行空间是物化视图，显式写必须写穿
 

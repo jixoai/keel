@@ -1,0 +1,10 @@
+=== RUN   TestCheckpointPolicyPinsAndFiresOnce
+--- PASS: TestCheckpointPolicyPinsAndFiresOnce (0.00s)
+=== RUN   TestPerToolCallPolicyDoesNotCheckpointAtRunClose
+--- PASS: TestPerToolCallPolicyDoesNotCheckpointAtRunClose (0.00s)
+=== RUN   TestManualPolicyDoesNotCheckpointAtRunClose
+--- PASS: TestManualPolicyDoesNotCheckpointAtRunClose (0.00s)
+=== RUN   TestCapturePolicyWithoutTriggerFailsClosed
+--- PASS: TestCapturePolicyWithoutTriggerFailsClosed (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/agent	0.272s

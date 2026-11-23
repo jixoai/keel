@@ -188,6 +188,11 @@ next, _ := rotation.Rotate(config2, nextAnchorEventSeq)    // revision+1
 - `Pinned` 是深拷贝：轮转不会改变进行中 run 的版本。
 - 文件级原子替换（写 `config.toml.new` → fsync → `rename()`）由宿主在 W8/W9 实现；
   `Rotation` 只定义版本与锚点语义，不读写文件。
+- capture 策略同样按 run 固定：租户文档 `filesystem.capture.mode` 在每次 attempt
+  开始时解析一次（存储文档覆盖启动文档），worker 把模式固定在本次 attempt 的工具
+  上下文，配置轮转只影响下一次 run。`checkpoint`/`manual` 必须有对应触发器
+  （run 完成钩子 / 显式 checkpoint），否则 attempt 以 `capture_trigger_missing`
+  类型化错误失败；不存在“没有触发器的模式静默吞掉 capture”的降级。
 
 ## 6. 能力 seam 与 capability matrix
 

@@ -192,18 +192,29 @@
       测试 `TestCaptureReconcilesDeletions`/`TestCaptureDeletesWrittenThenRemoved`/
       `TestCaptureDeletedPayloadIsBounded`（fileplugin）、`TestBashRmIsReconciledByCapture`（bash seam）；
       证据 `evidence/w3-capture-tail-2026-11-21/`）
-- [ ] capture 策略覆写：`config.toml` 的 `fs.capture.mode=checkpoint|manual` （对账 2026-11-20：未开始——无 config.toml，CaptureMode/checkpoint/manual 覆写通道未接）
-      （layerfs spec 的 MUST；当前只实现 per-tool-call，覆写通道未接——依赖配置面切片，接线前不算满足）
-      （W3.H3B 2026-11-21 阻塞：仓库仍无 `config.toml` 加载器；`tenants.config` 只在 admin PUT
-      (`internal/httpapi/admin.go:98,122`) 与 `internal/quota/limits.go:250` 的 quota 片段被读，
-      `cmd/keel/serve.go:422` 的 host 配置只来自 env，stored document 不进入 runtime。
-      所需字段：tenant document `fs.capture.mode=per-tool-call|checkpoint|manual`（`internal/host/config.go:37`
-      TenantConfig 需新增段并过 Merge/Validate）。所需接入点：capture 决策在
-      `internal/bashbridge/layerworkspace.go:272`（`Mount.Finish` :175）；显式 checkpoint 无调用者
-      （`Service.CaptureWorkspace` 已是原语，但只有 `LayerWorkspaces.capture` 调用它）；任务完成
-      `internal/tasklog/service.go:268` 无回调、子代理返回 `internal/agentext/subagent.go:418-455`
-      只有命令 hook、`manual` 所需显式 attach/checkpoint 面不存在。缺触发器时落地 mode 只会吞掉 capture，
-      故未接线，保留未勾）
+- [x] capture 策略覆写：tenant document `filesystem.capture.mode=per-tool-call|checkpoint|manual`
+      （W3.capture 2026-11-23：仓库没有 `config.toml` 加载器，策略落在唯一租户文档词汇
+      `filesystem.capture.mode`；`internal/host/config.go` 新增 `Filesystem/Capture` 段，
+      Merge/Validate 严格闭集（省略 = per-tool-call，未知/带空白值拒绝），canonical JSON 可往返。
+      模式与上下文钉扎在 `internal/layerfs/capturemode.go`；worker 每 attempt 解析一次
+      （存储租户文档覆盖启动文档，`cmd/keel/capture_policy.go`）并把模式固定在本次工具上下文，
+      bash backend 复制进 `SessionIdentity`。`Mount.Finish` 在 checkpoint/manual 下只记 pending，
+      `LayerWorkspaces.Checkpoint` 一次消费并结算（同 id 重放去重；失败/重放恢复 pending）。
+      checkpoint 的触发器是 worker 在 `run.finished` 前、lease 仍活时的 run-completion hook；
+      manual 的显式面是闭集新增 `bash {action:"checkpoint"}`（权限键 `file.write`，
+      keel.shell 内部工具 `keel.shell.checkpoint`）。后台作业不受 run 模式影响，仍在其 Close
+      以系统事实结算；任何选择 checkpoint/manual 却没有触发器的 attempt 以
+      `capture_trigger_missing` 类型化错误失败，不静默吞掉 capture。
+      测试 `TestCaptureModeMergeAndDefault`/`TestValidateCaptureModeMatrix`/
+      `TestCaptureModeRoundTripsCanonicalJSON`（host）、
+      `TestPerToolCallCapturesEveryBashExecution`/`TestCheckpointCapturesOnceAfterMultipleCommands`/
+      `TestManualCapturesOnlyOnExplicitCheckpoint`/`TestUnknownCaptureModeFailsClosed`/
+      `TestBackgroundJobSettlesDespiteCheckpointMode`（bashbridge）、
+      `TestCheckpointPolicyPinsAndFiresOnce`/`TestPerToolCallPolicyDoesNotCheckpointAtRunClose`/
+      `TestManualPolicyDoesNotCheckpointAtRunClose`/`TestCapturePolicyWithoutTriggerFailsClosed`（agent）、
+      `TestBashCheckpointDelegatesToBackend`/`TestShellCheckpointRoutesToTheExplicitSurface`；
+      本次测试不依赖 PG（KEEL_TEST_DSN 未设置，既有 PG gated 套件保持不变）。
+      证据 `evidence/w3-capture-mode/`）
 - [x] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交， （对账 2026-11-20：部分——缺口：Upsert 有 updated_seq guard（manifest.go:180-196），snapshot 按 seq 精确存；但无跨 lane 定序/版本化，且 fork 未接线（W4））
       `session_snapshot` 的最新 seq 树可能落后于 `file_manifest` 行；fork 接线前必须定序/版本化
       （W3.H3B 2026-11-21：每个 (tenant,session) 的显式写与 capture 共用 settlement 临界区

@@ -1,0 +1,23 @@
+=== RUN   TestShellPluginEndToEnd
+    shell_integration_test.go:30: KEEL_TEST_DSN not set
+--- SKIP: TestShellPluginEndToEnd (0.00s)
+=== RUN   TestShellPluginContributesOnlyInternalTools
+--- PASS: TestShellPluginContributesOnlyInternalTools (0.00s)
+=== RUN   TestShellBackendWithoutManagerIsPluginState
+--- PASS: TestShellBackendWithoutManagerIsPluginState (0.00s)
+=== RUN   TestShellCheckpointRoutesToTheExplicitSurface
+--- PASS: TestShellCheckpointRoutesToTheExplicitSurface (0.00s)
+=== RUN   TestShellCheckpointWithoutSurfaceIsTyped
+--- PASS: TestShellCheckpointWithoutSurfaceIsTyped (0.00s)
+=== RUN   TestShellInvokeWithoutServiceIsPluginState
+--- PASS: TestShellInvokeWithoutServiceIsPluginState (0.00s)
+=== RUN   TestShellEnvAllowlist
+--- PASS: TestShellEnvAllowlist (0.00s)
+=== RUN   TestShellRunTextIsBounded
+--- PASS: TestShellRunTextIsBounded (0.00s)
+=== RUN   TestShellJobsListTextIsBoundedAndInformative
+--- PASS: TestShellJobsListTextIsBoundedAndInformative (0.00s)
+=== RUN   TestShellErrorShape
+--- PASS: TestShellErrorShape (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	0.369s

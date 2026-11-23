@@ -1,0 +1,8 @@
+ok  	github.com/jixoai/keel/internal/host	0.316s
+ok  	github.com/jixoai/keel/internal/bashbridge	2.925s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.853s
+ok  	github.com/jixoai/keel/internal/harnessext	6.330s
+ok  	github.com/jixoai/keel/internal/agent	0.433s
+ok  	github.com/jixoai/keel/internal/servicehost	8.233s
+ok  	github.com/jixoai/keel/internal/fileplugin	76.715s
+ok  	github.com/jixoai/keel/cmd/keel	1.787s

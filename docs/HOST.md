@@ -55,7 +55,24 @@ tools:
 quota:
   runConcurrency: 8       # per-tenant concurrent runs in this runtime (0 = unlimited)
   eventsPerMinute: 600    # per-tenant admitted-event rate (0 = unlimited)
+filesystem:
+  capture:
+    mode: "per-tool-call" # per-tool-call | checkpoint | manual（省略 = per-tool-call）
 ```
+
+`filesystem.capture.mode` 决定会话执行空间何时以一条 `fs.capture` 结算：
+
+- `per-tool-call`（默认）：每次 bash 执行结束结算一次；
+- `checkpoint`：每次执行不结算，run（attempt）完成时由 worker 在写 `run.finished`
+  之前结算一次；后台作业（可能逃出 run）仍在其自身 Close 时以系统事实结算；
+- `manual`：自动结算全部关闭，只有模型显式调用 `bash {action:"checkpoint"}`
+  才结算（该 action 的权限键是 `file.write`）。
+
+模式在每次 attempt 开始时从**存储的租户文档覆盖启动文档**解析一次，并由 worker
+固定在本次 attempt 的工具上下文上：配置轮转只影响下一次 run，进行中的 run 不会
+中途换策略。未知值在配置校验时拒绝；`checkpoint`/`manual` 若没有可用触发器
+（run 完成钩子 / 显式 checkpoint 面），attempt 以类型化错误
+`capture_trigger_missing` 失败，不会静默吞掉 capture。
 
 配置来源：运行时可继续从环境变量读取（见 §4）；租户配置文档持久化在
 `tenants.config jsonb`，由管理员 API（见 §4.2）写入，下一轮 run 生效。

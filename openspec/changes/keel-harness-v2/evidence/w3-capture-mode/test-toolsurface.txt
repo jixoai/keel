@@ -1,0 +1,12 @@
+=== RUN   TestBashSchemaAndClosedActionSet
+--- PASS: TestBashSchemaAndClosedActionSet (0.00s)
+=== RUN   TestBashActionsNeedBackend
+--- PASS: TestBashActionsNeedBackend (0.00s)
+=== RUN   TestBashDelegatesToBackend
+--- PASS: TestBashDelegatesToBackend (0.00s)
+=== RUN   TestBashCheckpointDelegatesToBackend
+--- PASS: TestBashCheckpointDelegatesToBackend (0.00s)
+=== RUN   TestBashMapsPluginStateAndBackendErrors
+--- PASS: TestBashMapsPluginStateAndBackendErrors (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/toolsurface	0.159s
