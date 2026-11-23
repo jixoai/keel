@@ -917,11 +917,14 @@ export class KeelHttp implements SettingsApi {
     };
   }
 
-  async createSession(): Promise<string> {
+  async createSession(botId?: string): Promise<string> {
+    // Every Session belongs to exactly one Bot (identity-access spec). A
+    // botless create is the legacy shape and cannot run, so the caller passes
+    // the Bot it resolved; the body stays `{}` only for the demo transport.
     const response = await this.request("/v1/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: botId ? JSON.stringify({ botId }) : "{}",
     });
     const body = (await response.json()) as { sessionId?: string; id?: string };
     const id = body.sessionId ?? body.id;

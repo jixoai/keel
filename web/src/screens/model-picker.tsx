@@ -13,6 +13,7 @@ import { signal, Text, View } from "nsh";
 import type { ModelSelection, ModelView } from "../data/contract";
 import { isFree, outputPriceSummary, priceSummary } from "../data/model-catalog";
 import { store } from "../data/store";
+import { createSessionFromWorkspace } from "../data/session-create";
 import {
   checkSurfaceSwitch,
   resolveSelectionSurface,
@@ -116,7 +117,7 @@ const confirmSurfaceSwitch = async () => {
   const pending = pendingSwitch();
   if (!pending) return;
   pendingSwitch.set(null);
-  const id = await store.createSession();
+  const id = await createSessionFromWorkspace();
   if (!id) return;
   const next: ModelSelection = { providerId: pending.model.providerId, modelId: pending.model.modelId };
   if (pending.level) next.reasoningLevel = pending.level;

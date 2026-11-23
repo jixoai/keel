@@ -126,7 +126,7 @@ type Client = SettingsApi &
   sessionTasks?(sessionId: string): Promise<SessionTasksView>;
   taskPanel?(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView>;
   filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;
-  createSession(): Promise<string>;
+  createSession(botId?: string): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
   source(sessionId: string): EventSource;
   commands(sessionId: string): UiCommands;
@@ -2191,19 +2191,35 @@ class KeelStore {
     this.scrollStates.set(sessionId, state);
   }
 
-  async createSession(): Promise<string | null> {
+  async createSession(botId?: string): Promise<string | null> {
     try {
-      // One empty "new session" is enough: creating again while an untouched
-      // one exists reopens it instead of appending a twin row.
-      const empty = this.sessions().find(
-        (row) => !row.lastMessage && (row.title ?? "").trim() === "新会话",
-      );
-      if (empty) {
-        await this.refreshSessions();
-        if (this.activeId() !== empty.sessionId) await this.openSession(empty.sessionId);
-        return empty.sessionId;
+      // A Session belongs to exactly one Bot. In the live transport an
+      // unowned session is a dead end (the worker refuses to run it), so the
+      // caller resolves a Bot before asking; the demo transport keeps its
+      // scripted sessions.
+      if (this.mode() === "http" && !botId) {
+        this.notice.set({
+          tone: "danger",
+          text: "这个租户还没有可用的员工（Bot）：先到「员工」页创建或选择一位。",
+        });
+        return null;
       }
-      const id = await this.client.createSession();
+      // One empty "new session" is enough in the demo: creating again while an
+      // untouched one exists reopens it instead of appending a twin row. The
+      // live transport cannot tell whose Bot an empty row belongs to (the list
+      // does not project ownership), so it always creates instead of reusing
+      // a session that might be unowned.
+      if (this.mode() !== "http") {
+        const empty = this.sessions().find(
+          (row) => !row.lastMessage && (row.title ?? "").trim() === "新会话",
+        );
+        if (empty) {
+          await this.refreshSessions();
+          if (this.activeId() !== empty.sessionId) await this.openSession(empty.sessionId);
+          return empty.sessionId;
+        }
+      }
+      const id = await this.client.createSession(botId);
       await this.refreshSessions();
       await this.openSession(id);
       return id;

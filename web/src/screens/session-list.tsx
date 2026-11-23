@@ -51,6 +51,7 @@
 import { Clipboard, cleanup, effect, signal, Text, type TextStyle, View } from "nsh";
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
+import { createSessionFromWorkspace } from "../data/session-create";
 import { formatTime } from "../data/wire";
 import {
   Badge,
@@ -394,7 +395,7 @@ function SessionListEmpty(props: { searching: boolean }) {
       <EmptyContent>
         <If
           when={props.searching}
-          else={<Button icon="plus" label="新建会话" onPress={() => void store.createSession()} />}
+          else={<Button icon="plus" label="新建会话" onPress={() => void createSessionFromWorkspace()} />}
         >
           <Button variant="outline" icon="x" label="清除搜索" onPress={() => query.set("")} />
         </If>
@@ -531,7 +532,7 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
             as two targets, so 「新建会话」 and 「刷新会话」 are not one press
             away from each other by accident. */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
-          <IconButton icon="plus" label="新建会话" onPress={() => void store.createSession()} />
+          <IconButton icon="plus" label="新建会话" onPress={() => void createSessionFromWorkspace()} />
           <IconButton
             icon="refresh"
             label="刷新会话"

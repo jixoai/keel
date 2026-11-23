@@ -46,3 +46,19 @@
 - 十万文件目录的 tree 去重收益（manifest 行数、字节数）；
 - fork 100 次的继承成本（应为 O(1) 引用）。
 - 以上证据进 G4 与 G10 报告；缺一项不得宣布"已达标"。
+
+## 反向记录（2026-11-24，W11 收口）
+
+- **状态**：Rust + gRPC 独立服务部分 **Superseded / Deferred**；实际交付 =
+  **Phase A 进程内 Go CAS**（`internal/layerfs` + `internal/blob`，W2.3）。
+- **不是按"证据不达标"回退**：Rust 侧从未实现（无 proto/gRPC、无 sidecar、无 CI 工具链），
+  因此 1000 并发流/p99/GC 停顿这组对照**不可执行**，不是跑输给 Go CAS。W1 gRPC 车道
+  延后，连同 Docker/健康检查/端口/SIGKILL sweep 一并延后（tasks.md 第 41 行处置）。
+- **Go CAS 已承接的三项语义**：tree object 内容寻址与子树共享哈希（`TestTreeObject*`）、
+  事件派生 refcount + GC（`internal/layerfs` GC 套件）、fork 继承=引用（`g5-fork-resources.txt`
+  与 `TestForkCreatesAPrefixSessionCard...` 的引用成本）。十万文件 capture 的证据是
+  `TestCaptureOneHundredThousandFilesIsOneEvent`（1 条批事件，本机 23.06s），RSS 曲线见
+  `evidence/w11-gates/g4-rss-profile.txt`（峰值 468MB，500MB 上限内；300MB 目标未达）。
+- **约束**：不得两套并存——仓库里没有 Rust layerfs 产物；若未来重启 Rust 车道，必须
+  重开 ADR 并补齐本节的证据门。
+
