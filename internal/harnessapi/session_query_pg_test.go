@@ -190,8 +190,24 @@ func TestPGSessionQueryExportIsBoundedAndTenantScoped(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The runner persists an assistant message as {role, content:[{type,text}],
+	// ...} — no top-level text. This is the shape the export must read.
 	if _, err := st.AppendEvent(ctx, tenantID, sessionID, store.EventAssistantMessage, map[string]any{
-		"role": "assistant", "text": "第二行",
+		"role":    "assistant",
+		"content": []map[string]any{{"type": "text", "text": "第二行"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A tool-only assistant message carries no transcript text.
+	if _, err := st.AppendEvent(ctx, tenantID, sessionID, store.EventAssistantMessage, map[string]any{
+		"role":    "assistant",
+		"content": []map[string]any{{"type": "toolCall", "name": "tasks", "arguments": map[string]any{"action": "create"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A legacy event with the old top-level text still exports.
+	if _, err := st.AppendEvent(ctx, tenantID, sessionID, store.EventAssistantMessage, map[string]any{
+		"role": "assistant", "text": "第三行",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -215,11 +231,18 @@ func TestPGSessionQueryExportIsBoundedAndTenantScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(second.Messages) != 1 || second.HasMore || second.NextAfterSeq <= first.NextAfterSeq {
+	if len(second.Messages) != 1 || !second.HasMore || second.NextAfterSeq <= first.NextAfterSeq {
 		t.Fatalf("second page = %+v", second)
 	}
 	if second.Messages[0].Text != "第二行" || second.Messages[0].Kind != store.EventAssistantMessage {
 		t.Fatalf("second message = %+v", second.Messages[0])
+	}
+	third, err := query.ExportMessages(ctx, tenantID, sessionID, ExportFilter{AfterSeq: second.NextAfterSeq, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(third.Messages) != 1 || third.HasMore || third.Messages[0].Text != "第三行" {
+		t.Fatalf("third page = %+v", third)
 	}
 
 	foreign, err := query.ExportMessages(ctx, otherTenant, sessionID, ExportFilter{Limit: 10})

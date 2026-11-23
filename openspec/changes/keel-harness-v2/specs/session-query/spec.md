@@ -68,6 +68,13 @@ fail closed（503），MUST NOT 返回租户全部会话。
 - **WHEN** 会话里有 `tool.result` 的文本
 - **THEN** 导出页不包含该条；只有 user/assistant 消息出现
 
+#### Scenario: 助手回复按 content 块导出
+- **WHEN** 会话里有一条 `assistant.message`，payload 为运行时的真实形态
+  `{role, content:[{type:"text", text:"答复"}], inputSeqs, stopReason}`（没有顶层 `text` 字段）
+- **THEN** 导出页包含该条，`text` = 各 `type:"text"` 块的文本（多块以换行连接）；
+  只有 `toolCall` 块、没有文本块的助手消息 MUST NOT 出现；旧形态（顶层 `text`）仍 MUST 导出
+
+
 ### Requirement: 客户端检索与导出入口
 
 客户端 MUST 在会话列表的搜索框提供服务器检索入口：输入不少于 2 个字符后 MUST 读取一页

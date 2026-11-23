@@ -285,12 +285,28 @@ func (q *PGSessionQuery) ExportMessages(ctx context.Context, tenantID, sessionID
 		}
 		rows, err := db.Query(ctx, `
 			SELECT seq, kind, created_at,
-			       left(payload ->> 'text', $4) AS text,
-			       length(payload ->> 'text') AS total_chars
-			  FROM events
-			 WHERE tenant_id = $1 AND session_id = $2 AND seq > $3
-			   AND kind IN ('user.message', 'assistant.message')
-			   AND payload ? 'text'
+			       left(text_of, $4) AS text,
+			       length(text_of) AS total_chars
+			  FROM (
+			        SELECT seq, kind, created_at,
+			               CASE kind
+			                 WHEN 'assistant.message' THEN COALESCE(
+			                       NULLIF((
+			                         SELECT string_agg(elem ->> 'text', E'\n')
+			                           FROM jsonb_array_elements(
+			                                  CASE WHEN jsonb_typeof(payload -> 'content') = 'array'
+			                                       THEN payload -> 'content'
+			                                       ELSE '[]'::jsonb END) elem
+			                          WHERE elem ->> 'type' = 'text'
+			                       ), ''),
+			                       payload ->> 'text')
+			                 ELSE payload ->> 'text'
+			               END AS text_of
+			          FROM events
+			         WHERE tenant_id = $1 AND session_id = $2 AND seq > $3
+			           AND kind IN ('user.message', 'assistant.message')
+			       ) transcript
+			 WHERE text_of IS NOT NULL AND text_of <> ''
 			 ORDER BY seq
 			 LIMIT $5`,
 			tenantID, sessionID, filter.AfterSeq, exportMessageChars, filter.Limit+1)
