@@ -195,6 +195,7 @@ run "handoff dual-process RSS" "$EVID/perf/handoff-dual.log" \
 # and this gate fails; it never passes without a real measurement.
 case "${KEEL_ACCEPTANCE_RSS:-0}" in
   1|profile)
+    rm -f "$EVID/perf/rss-gate.json"  # a stale JSON must not survive a failed run
     run "VmRSS process-tree gate (profile)" "$EVID/perf/rss-gate.log" \
       env KEEL_RSS_OUT="$EVID/perf/rss-gate.json" KEEL_RSS_DB=keel_perf_rss KEEL_RSS_DIR=/tmp/keel-rss-acceptance \
       scripts/acceptance-rss.sh --profile
@@ -203,6 +204,7 @@ case "${KEEL_ACCEPTANCE_RSS:-0}" in
     if [ -z "${KEEL_RSS_PORT:-}" ] && [ -z "${KEEL_RSS_PID:-}" ]; then
       fail "KEEL_ACCEPTANCE_RSS=attach needs KEEL_RSS_PORT or KEEL_RSS_PID"
     fi
+    rm -f "$EVID/perf/rss-gate.json"
     run "VmRSS process-tree gate (attach)" "$EVID/perf/rss-gate.log" \
       env KEEL_RSS_OUT="$EVID/perf/rss-gate.json" KEEL_RSS_DIR=/tmp/keel-rss-acceptance \
       scripts/acceptance-rss.sh
