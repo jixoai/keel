@@ -58,7 +58,8 @@ rebuild），MUST NOT 改写已提交的消息事件。被修剪/外置的内容
 上下文中（存储 id、内容哈希、字节数、有界预览），MUST NOT 静默丢弃；存储失败时 MUST 保留
 原文并留下可观测失败事实。`keel.prompt-cache` 的缓存边界 MUST 位于 system/tool 前缀之后、
 transcript 之前，使消息修剪/外置/压缩不会使缓存前缀失效；系统提示与工具声明 MUST 在
-turn 之间保持字节稳定（工具顺序与 schema 对象键顺序 MUST 规范化）。
+turn 之间保持字节稳定（工具顺序与 schema 对象键顺序 MUST 规范化），且缓存策略 MUST 是
+显式 opt-in（默认关闭时请求字节与未启用时一致）。
 
 #### Scenario: 大工具结果被修剪后可恢复
 - **WHEN** 一个超出保留窗口的大工具结果被修剪
@@ -75,6 +76,10 @@ turn 之间保持字节稳定（工具顺序与 schema 对象键顺序 MUST 规�
 #### Scenario: 稳定前缀不被消息修剪击穿
 - **WHEN** 同一会话的相邻两次请求之间只有 transcript 被修剪/压缩
 - **THEN** system/tool 前缀字节不变，缓存断点仍命中；规范化的工具清单顺序与 schema 键序不因注册顺序抖动
+
+#### Scenario: 缓存默认关闭时请求不变
+- **WHEN** 租户未显式开启 `agent.promptCache`
+- **THEN** 请求体与未引入该能力时一致（不排序、不加 `cache_control`）；开启后才应用规范化与断点
 
 ### Requirement: 外部内核的能力矩阵与类型化拒绝
 
