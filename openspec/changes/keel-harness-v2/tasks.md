@@ -399,6 +399,11 @@
 
 **集成用例（各门的载体，必须先跑通）**
 
+- [x] 运行时空闲稳定性：数据库不可达时 notify listener 指数退避（1s→30s），
+      不得忙循环重连/刷日志（2026-11-23：两个 review 实例在 PG 删除后各烧掉
+      ~1h45m CPU、写满 8.7GB/8.4GB 日志；`Hub.Run` 现在有退避 + 每次尝试一条
+      warning，测试 `TestNextNotifyBackoffDoublesAndCaps`；
+      证据 `evidence/notify-reconnect-backoff.md`）
 - [ ] 端到端：任务创建 → bash 执行 → capture → 面板可见 → fork 子代理 → 合并结果 → 卸载插件零残留
 - [ ] 外部工具：OAR 接 Codex 或 Claude 至少一条真链路；专用渲染器可见；任务图不被污染
       （W9 2026-11-22：**Codex 真链路在 OAR record 层面已绿**——真实

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -73,13 +74,54 @@ func (h *Hub) wake(k string) {
 	h.mu.Unlock()
 }
 
+// Notify listener backoff bounds. A database that is down must not turn the
+// reconnect loop into a busy loop: each failed attempt logs once and waits
+// (exponentially, with a cap) instead of hammering connect+log thousands of
+// times per second.
+const (
+	notifyInitialBackoff = time.Second
+	notifyMaxBackoff     = 30 * time.Second
+)
+
+// nextNotifyBackoff doubles a failed reconnect delay up to the cap.
+func nextNotifyBackoff(current time.Duration) time.Duration {
+	if current <= 0 {
+		current = notifyInitialBackoff
+	}
+	next := current * 2
+	if next > notifyMaxBackoff {
+		return notifyMaxBackoff
+	}
+	return next
+}
+
 // Run listens for notifications until ctx is cancelled. It reconnects on error
-// with a bounded backoff; callers should run it in its own goroutine.
+// with a bounded, exponential backoff; callers should run it in its own
+// goroutine. A listener that stayed up for a while starts over at the initial
+// delay, so one early blip does not slow every later reconnect.
 func (h *Hub) Run(ctx context.Context) {
+	backoff := notifyInitialBackoff
 	for ctx.Err() == nil {
-		if err := h.listen(ctx); err != nil && ctx.Err() == nil {
-			h.log.Warn("notify listener stopped, retrying", "err", err)
+		started := time.Now()
+		err := h.listen(ctx)
+		if ctx.Err() != nil {
+			return
 		}
+		if err == nil {
+			continue
+		}
+		if time.Since(started) >= notifyMaxBackoff {
+			backoff = notifyInitialBackoff
+		}
+		h.log.Warn("notify listener stopped, retrying", "err", err, "retryIn", backoff)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		backoff = nextNotifyBackoff(backoff)
 	}
 }
 
