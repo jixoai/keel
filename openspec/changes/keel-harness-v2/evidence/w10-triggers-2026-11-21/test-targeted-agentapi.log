@@ -1,4 +1,0 @@
-=== RUN   TestExtensionRoutes
---- PASS: TestExtensionRoutes (0.01s)
-PASS
-ok  	github.com/jixoai/keel/internal/agentapi	0.465s

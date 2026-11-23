@@ -1,0 +1,208 @@
+# harness-core Specification
+
+## Purpose
+TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+
+## Requirements
+
+### Requirement: 内核与 Harness 的边界
+
+内核 MUST 只做「把一个会话的一次 run 跑成可重放账本」；**AgentLoop 包** MUST NOT 感知插件
+运行时、用户、租户、Group、文件系统。`kernel` layer 插件由内核宿主在装配期装载，loop 只看到
+注入能力。Harness MUST 通过注入（工具清单、system sections、message-parts、invoke 回调）
+向内核提供一切能力。内核包 MUST NOT import 任何产品层包，该约束 MUST 由
+架构测试钉住（沿用 `internal/architecture` 的 `go list -deps` 断言模式）。
+
+#### Scenario: 内核包 import 产品层即失败
+- **WHEN** `internal/loop` 或 `internal/kernel` 直接 import placement/task/fs 包
+- **THEN** `go test ./internal/architecture/...` 失败并指出违规 import
+
+#### Scenario: 内核不知道用户
+- **WHEN** Harness 为两个不同用户的会话各起一个 run
+- **THEN** 内核侧看到的只有会话 id 与注入物，任何事件、日志、span 标签中都不出现用户或租户标识
+
+### Requirement: Group 是放置与协作单元
+
+Group MUST 同时是**项目组**与**资源/放置容器**：每个 Group MUST 由一个 Harness worker
+进程承载（本 change 内一组一 worker；一组多 worker 留到后续 change）。一个 Group MAY
+承载多个用户的会话；同一个用户的不同会话 MAY 加入不同的 Group。Group MUST 拥有独立的
+并发槽位（`max_concurrent_runs`）、内存上限、插件装配集与健康状态。
+
+#### Scenario: 一个用户跨组工作
+- **GIVEN** 用户 A 的会话 S1 加入项目组 P，会话 S2 留在组 Q
+- **WHEN** S1 在 P 中消耗并发槽位执行任务
+- **THEN** S2 在 Q 中的并发额度不受影响；A 的用户级配额在 DB 侧跨组聚合
+
+#### Scenario: 组是进程边界
+- **WHEN** 承载组 G 的 worker 进程因内存超限被杀
+- **THEN** 组 G 内的会话被标记为可接管，其它组的进程与连接不受影响
+
+### Requirement: 会话归属是 lease，不是静态绑定
+
+`session → group` MUST 记录为带 `epoch` 与 `lease_until` 的 placement 事实。任何 Harness
+进程 MUST 能接管任何会话（内核的无状态契约不变）。迁移 MUST 走「旧组排水 → 新组从账本
+重建」，不得复制进程内状态。
+
+#### Scenario: 排水迁移后 seq 连续
+- **WHEN** 组 G1 排水，会话被 G2 接管
+- **THEN** 客户端按 `Last-Event-ID` 续传，事件 seq 连续，不丢事件、不重复最终回答
+
+#### Scenario: 双组争抢同一会话
+- **WHEN** G1 与 G2 同时尝试持有同一会话的 lease
+- **THEN** 只有 epoch 更高者写入成功，落败方按 409 放弃，不产生第二次并发 run
+
+### Requirement: 组并发槽位与用户配额
+
+每个 Group MUST 用 `max_concurrent_runs` 限制同时在跑的 run。槽位满时 MUST 明确排队或
+拒绝（429 + `retry_after`），不得静默丢弃。用户配额（并发 run、tokens、存储字节）MUST 在
+DB 侧聚合，跨组一致；分组不得成为超卖配额的通道。
+
+#### Scenario: 组满时的可解释失败
+- **WHEN** 组内已有 `max_concurrent_runs` 个 run 在跑，第 N+1 个请求到达
+- **THEN** 请求返回 429 并带 `retry_after`，或进入队列并返回排位；客户端 UI 可展示原因
+
+#### Scenario: 跨组配额不超卖
+- **GIVEN** 用户 A 的并发配额为 15，A 的会话分布在组 P 与 Q
+- **WHEN** A 在两个组中合计已启动 15 个 run
+- **THEN** 第 16 个 run 被拒绝或排队，不因分组而越过配额
+
+### Requirement: 责任分层
+
+插件 MUST 只向上声明「我做什么」（工具、hook、触发器、能力），MUST NOT 依赖或查询同层
+插件的运行时保证（例如 skills 的 patch 不得询问文件系统是否有写保护，bash 不得询问
+layerfs 是否强一致）。需要组合语义时 MUST 由 Harness 在装配期决定并注入。
+
+#### Scenario: 插件不检查同层
+- **WHEN** 装配 skills 与 file 两个插件
+- **THEN** skills 只调用 file-plugin 的公开工具契约，不读取 file-plugin 的内部状态或保证声明
+
+#### Scenario: 装配期决定组合
+- **WHEN** Harness 需要「写入前校验任务归属」
+- **THEN** 该校验由 Harness 的装配层完成，而不是让 file-plugin 去认识 task-plugin
+
+### Requirement: 通知与审批是持久事实
+
+通知的「已消费」MUST 是持久事件（ack）；审批的 open/answer/timeout MUST 是 durable 状态，
+不得用进程内定时器推断。推送 MUST 按三态真值表：①在线且声明 ack 能力者在窗口内 ack → 不推，
+ack 落账；②在线且声明 ack 能力者窗口内未 ack → 窗口后推一次，之后仍可 ack；③没有任何具备
+ack 能力的在线消费者 → 窗口后推一次。**原生 target MUST 使用系统通知；web target 在无
+service worker 能力时 MUST 显式降级为页内通知并登记缺口**，不得假装已推送。
+URL 形态的消费 MUST 单次有效且不可猜。
+
+#### Scenario: 在线客户端即时消费
+- **GIVEN** 一个持有 live 连接且声明 ack 能力的客户端已收到通知
+- **WHEN** 客户端在窗口内 ack
+- **THEN** 不触发系统原生推送；ack 落为持久事件
+
+#### Scenario: 在线但未 ack
+- **GIVEN** 一个持有 live 连接且声明 ack 能力的客户端已收到通知
+- **WHEN** 窗口内未 ack
+- **THEN** 窗口后推送一次；之后仍可 ack，不重复推送
+
+#### Scenario: 离线时推送一次
+- **GIVEN** 没有任何具备 ack 能力的在线消费者
+- **WHEN** 通知超过窗口未被 ack
+- **THEN** 触发一次原生推送；进程重启后不重复推送
+
+#### Scenario: 审批超时可回放
+- **WHEN** 审批在超时后被重新读取
+- **THEN** 返回持久化的超时状态（而非重新计时），答案与超时顺序可从账本复现
+
+### Requirement: 单进程多租户模式保留
+
+`pack` 策略下单进程承载多租户 MUST 继续成立；进程切分 MUST 是 Harness 的放置策略，不是内核
+契约，也不是密度目标的必要条件。
+
+#### Scenario: 单进程密度不回归
+- **WHEN** 以 `pack` 策略在单进程内跑 1000 个会话
+- **THEN** 行为与 v1 一致，且 RSS 满足下一条「内存预算」的要求
+
+### Requirement: 多用户进程与装配隔离
+
+本 change MUST 把 `keel serve` 升级为**多用户进程**：MUST 按凭据解析用户/租户；MUST 在
+`/v1/plugins`、triggers、工具面与设置读接口上按租户过滤；插件启用/配置/可见性 MUST 走租户级
+`plugin_state`（见 `plugin-system`）；MUST 保证一个租户的装配（插件/技能/MCP/工具）不影响另一个租户。`AGENTS.md` 的「不做每用户进程」MUST 修订为「默认单进程多租户；
+`user` 放置是显式 SKU，其资源代价由 cgroup 证据承担」。
+
+#### Scenario: 租户互不可见
+- **WHEN** 租户 A 安装了插件并注册了工具
+- **THEN** 租户 B 的 `/v1/plugins`、工具清单与设置面都看不到它；B 的调用不能命中 A 的实例
+
+#### Scenario: user 放置是显式 SKU
+- **WHEN** 某租户选择 `user` 策略（一人一组）
+- **THEN** 其进程边界、内存上限与成本可见，且默认策略仍是 `pack`
+
+### Requirement: 内存预算
+
+后端整体（各 group worker + layerfs + 控制面）MUST 满足 **硬上限 ≤500MB、目标 ≤300MB**。
+判据：>500 失败；300–500 通过但记「未达目标」；≤300 达标。
+前端（NSH 客户端）可分离部署，其 surface VM MUST 有配额（默认单 surface 32–64MB）且关闭即卸；
+MUST NOT 以"前端可分离"为由取消前端配额。测量协议见下一条。
+
+#### Scenario: 内存不回归
+- **WHEN** 以 `pack` 跑 1000 会话 + M 并发 run，并打开与关闭重型插件面板
+- **THEN** RSS 峰值 ≤500MB、稳态落在 ≤300MB 目标区间且可解释；面板关闭后内存回落可测
+
+#### Scenario: 单组越界不扩散
+- **WHEN** 一个 Group 的资源触顶
+- **THEN** 只有该组的会话受影响，其它组的 RSS 与连接不受影响
+
+### Requirement: 内存测量协议
+
+- **RSS**：对所有后端进程（各 group worker、layerfs、控制面）读 `/proc/<pid>/status` 的
+  `VmRSS` 定时采样（≤10s）并求和；`VmRSS` 不含 page cache。
+- **cgroup peak**：同时单列 `memory.peak`（含 page cache），仅用于与 v1 基线对比。
+- **作用域**：预算指**全机后端总和**；MUST 另报每 group 的分解。
+
+v1 基线为 cgroup `memory.peak` **523.8–639.1MB**；RSS 基线 MUST 在本 change 中实测补登，
+MUST NOT 用 cgroup peak 与 RSS 直接比较。
+
+#### Scenario: 两种读数都在
+- **WHEN** 提交 G4 内存报告
+- **THEN** 同时给出 RSS 与 cgroup peak、全机与每 group 分解，并注明采样间隔与进程清单
+
+### Requirement: Webhook 投递真实性
+
+webhook 触发 MUST 用每触发器的 HMAC-SHA256 secret 校验
+`v1\n<tenantId>\n<triggerId>\n<timestamp>\n<idempotencyKey>\n<rawBody>`，时间戳 MUST 落在
+配置的重放窗口内，签名比较 MUST 为常量时间。未配置 secret 的 webhook 触发 MUST fail-closed；
+缺失、错误或过期签名 MUST 被拒绝。任何拒绝 MUST 审计。secret MUST NOT 出现在 API、事件、
+日志或插件快照中。
+
+#### Scenario: 错误签名被拒并审计
+- **WHEN** 一个 webhook 投递的签名错误或时间戳超出窗口
+- **THEN** 请求被拒绝、没有 `user.message`，`GET /v1/triggers` 的审计出现一条 rejected
+
+#### Scenario: 未配置 secret 的 webhook 失败关闭
+- **WHEN** 触发器声明为 webhook 但未配置 HMAC secret，且收到带签名的投递
+- **THEN** 投递被拒绝并审计，绝不“无签名放行”
+
+### Requirement: 触发器去重与漏跑补偿
+
+同一幂等键 MUST 只提交一条 `user.message`；进程内重复投递返回 `deduped`，跨重启由 kernel
+requestId 去重。interval/cron MUST 持久化最后处理的计划窗口；重启后 MUST 按该 last-run 追赶
+错过的窗口，且 MUST 同时有数量上限与回看窗口上限；超出部分 MUST 合并跳过并审计，
+MUST NOT 形成重启风暴。
+
+#### Scenario: 重启后按 last-run 追赶但有界
+- **WHEN** 进程停机跨越 K 个 interval/cron 窗口后重启
+- **THEN** 至多补跑配置上限内的最近窗口，其余以 skipped 审计合并；同窗口不会产生第二条
+  `user.message`
+
+#### Scenario: 重复投递不产生第二回合
+- **WHEN** 同一个已成功的 webhook 幂等键在进程内被再次投递
+- **THEN** 返回 `deduped:true`，账本仍只有一条 `user.message`
+
+### Requirement: 触发器并发与归属
+
+每触发器 MUST 有在飞 fire 上限；超限 MUST 显式拒绝（429）或排队，MUST NOT 无界排队或静默
+丢弃；拒绝 MUST 审计。一次成功 fire MUST 使目标会话立即可归属：初始任务卡随 fire 创建，
+失败可见但不回滚已提交回合。
+
+#### Scenario: 并发超限可解释
+- **WHEN** 同一触发器已有 `maxConcurrent` 个 fire 在飞，第 N+1 个到达
+- **THEN** 返回 429 + `Retry-After`（或明确的排队语义），并记录 throttled 审计
+
+#### Scenario: 触发会话起步即有卡
+- **WHEN** 一次 trigger fire 为没有任务的会话提交了第一条输入
+- **THEN** 该会话的初始任务卡已存在，响应携带 `taskCardId`

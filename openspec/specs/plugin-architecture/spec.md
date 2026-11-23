@@ -1,0 +1,146 @@
+# plugin-architecture Specification
+
+## Purpose
+TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+
+## Requirements
+
+### Requirement: 插件 layer 与装载边界
+
+插件 MAY 声明 `layer`；缺省按 `kind` 推导。取值只能是 `kernel` / `harness` / `provider` / `ui` /
+`service`（`kind` 仍是 `in-process` / `sidecar` / `webview` 的承载形态，见 `plugin-system`；
+两者正交）。kernel 只实现 loop seam、MUST NOT 直连 DB/网络/文件（IO 经注入接口，如 llm 的
+HTTP client、context 的 fs 读取）；provider 在独立进程、崩溃 MUST NOT 拖垮 Harness；ui 只消费
+投影、MUST NOT 直写领域真值（MAY 经宿主桥发起审批/工具调用，有审计）；service 只经 gRPC。
+Harness MUST 按 layer 选择装载、隔离与回收策略。
+
+#### Scenario: provider 崩溃隔离
+- **WHEN** 一个 provider 插件进程崩溃
+- **THEN** Harness 仍可用，相关工具返回 `unavailable`，会话可继续或按其策略失败，不产生孤儿进程
+
+#### Scenario: kernel 插件越界即失败
+- **WHEN** 一个 kernel 插件尝试 import 产品层包或直接打开数据库连接
+- **THEN** 架构测试失败，插件不得装载
+
+### Requirement: 装配模型
+
+装配 MUST 由 **base bundle + mode bundle + preset + 用户配置** 四层叠加；覆盖 MUST 按
+row id 进行、last write wins；激活 MUST 由服务可用性驱动，MUST NOT 依赖手写的启动顺序。
+`config.toml` MUST 从磁盘严格解析、启动加载并可轮转：非法文件 MUST 使启动失败，轮转
+MUST 以 `config.toml.new` → fsync → rename 原子替换并以账本事件序号为锚点；一次 run MUST
+固定一个版本。文件 setting MUST 映射到租户文档，且 MUST NOT 破坏管理端 JSON 路径。
+
+#### Scenario: mode bundle 覆盖 base
+- **WHEN** `headless` 装配面不启用 UI 插件而启用同一套工具
+- **THEN** 只覆盖对应 row，base 的其余插件不变，启动顺序不需要人工维护
+
+#### Scenario: preset 只改行为
+- **WHEN** 一个 preset 关闭 `bash` 并保留 `read`/`write`/`edit`
+- **THEN** 该会话的工具清单按 preset 生效，base 与 bundle 定义不被改写
+
+#### Scenario: 配置轮转后新 run 生效
+- **WHEN** 用户改写 `config.toml` 并触发轮转
+- **THEN** 正在进行中的 run 保持旧版本；下一次 run 使用新版本，并记录锚点事件序号
+
+#### Scenario: 非法配置文件 fail closed
+- **WHEN** 启动时 `config.toml` 含未知表、非法 capture 模式或错误值类型
+- **THEN** 进程拒绝启动并给出字段级错误，不进入半应用配置
+- **AND** 一次轮转中的非法文档不改变 active 文件与当前版本，也不留下 staging 文件
+
+#### Scenario: 原子轮转无半文件
+- **WHEN** 轮转写入过程中解析、fsync 或 rename 失败
+- **THEN** 读取方只能看到旧的完整文件或新的完整文件，`config.toml.new` 被清理
+
+#### Scenario: 文件 setting 覆盖租户文档
+- **WHEN** 租户 JSON 文档设 `checkpoint`，`config.toml` 设 `manual`
+- **THEN** 下一次 attempt 使用 `manual`，summary 记录 `config.toml@revision=<n>`；
+  删除文件 setting 后管理端 JSON 的 `checkpoint` 重新生效
+
+#### Scenario: active version 可观测
+- **WHEN** 启动加载或一次成功轮转完成
+- **THEN** 宿主日志与 `GET /v1/capabilities` 的 `configFile` 块给出 revision、hash、
+  账本锚点、rotation 次数与最近一次轮转的前后 revision/hash
+
+### Requirement: 能力 seam 可替换
+
+`fs`、`shell`、`subprocess`、`exec-surface`、`terminal` MUST 以 provider seam 暴露，
+MUST 能在不改上层工具的前提下替换实现（本地 / 远端 / SSH）。每个 seam MUST 声明能力矩阵；
+不支持的组合 MUST 在启动前以类型化错误拒绝，MUST NOT 静默降级。
+
+#### Scenario: 换远端执行面
+- **WHEN** 把本地 exec-surface 换成远端适配器
+- **THEN** `bash`、`read`、`write`、`edit` 的模型可见契约不变，只有延迟与错误语义变化
+
+#### Scenario: seam 能力不足
+- **WHEN** 远端执行面不支持某个文件操作语义
+- **THEN** 启动前返回 `unsupported_capability`，不进入运行期才失败
+
+### Requirement: 插件粒度不等于工具粒度
+
+插件 MUST 只实现聚合工具的**既有 action 后端**（`provides.backends`），MUST NOT 新增 action 名；
+新增模型可见能力 MUST 经 `provides.tools`（安装期显式）或由聚合工具拥有者新增 action
+（见 `tool-surface`）。
+
+#### Scenario: web 搜索不新增核心工具
+- **WHEN** 安装一个搜索 provider
+- **THEN** 它可以发布一个显式工具（安装期 schema 变更），也可以只作为 `mcp`/`bash` 的后端，不改变内建工具清单
+
+#### Scenario: 一个能力组拆多个插件
+- **WHEN** 一个 DSH 能力组（如 shell）在 Keel 拆成 `keel.shell` + `keel.jobs` + `keel.terminal`
+- **THEN** 模型看到的仍是 `bash` 与作业动作，插件边界对模型不可见
+
+#### Scenario: 新增 action 被拒
+- **WHEN** 一个插件声明 `provides.backends` 指向不存在的 action，或试图新增 action 名
+- **THEN** 装配期拒绝并列出该聚合工具的闭集 action
+
+### Requirement: 插件的扩展面声明
+
+插件清单 MUST 能声明四件事：**架构层**（`layer`）、**提供的槽位**（`provides.slots`）、
+**投出的贡献**（`contributes`：目标槽位 + 形态 + 入口）、**可扩展面文档**
+（`extensibility.json` 机读 + `EXTENSIBILITY.md` 人读，声明配置项、可挂 hook、可替换 provider、
+示例与限制）。贡献 MUST 只针对已声明的槽位与槽位允许的形态；装配期 MUST 校验并 fail-closed。
+**Harness MUST NOT 内置任何具体槽位**：槽位由插件声明，机制与形态见 `plugin-ui-extension`。
+
+#### Scenario: 贡献到不存在的槽位
+- **WHEN** 一个插件的 `contributes` 指向未声明的槽位或槽位不允许的形态
+- **THEN** 装配前拒绝安装并给出字段级原因，界面不出现半成品入口
+
+#### Scenario: 缺可扩展面文档
+- **WHEN** 安装一个没有 `extensibility.json` 的插件
+- **THEN** 它可用但被标记「不可被创造模式利用」；官方插件发布门禁直接拒绝该包
+
+### Requirement: 可逆副作用与热重载
+
+插件装载 MUST 注册可逆副作用（工具、hook、触发器、UI、服务）；卸载 MUST 反序撤销且无残留。
+HMR MUST 只重载插件代码，MUST NOT 重启会话或丢弃进行中的 run；重载失败 MUST 回滚到上一个
+generation，并把失败暴露为可查询状态。
+
+#### Scenario: 卸载无残留
+- **WHEN** 停用一个提供工具与 hook 的插件
+- **THEN** 其工具、hook、触发器、UI 注册全部撤销，模型面与面板不再出现它
+
+#### Scenario: 热重载不打断 run
+- **WHEN** 在会话运行中热重载一个非内核插件
+- **THEN** 当前 run 继续完成；下一次工具调用使用新版本；失败则回滚并记录
+
+### Requirement: 单一插件运行时
+
+本项目 MUST NOT 引入 Cordis、typert 或第二套 DI/插件运行时；等价语义 MUST 由
+`agentext` + `servicegraph` 承担。插件契约 MUST 只有一个真源（本仓的插件清单与生命周期）。
+
+#### Scenario: 新运行时提案被拒
+- **WHEN** 一个 change 提议引入外部插件框架来表达依赖注入/可逆副作用
+- **THEN** 拒绝，并要求用现有 `agentext`/`servicegraph` 表达
+
+### Requirement: 插件清单与可见性
+
+Harness MUST 提供已安装插件、包清单、generation、依赖状态、健康状态的查询；UI MUST 能
+看到每个插件提供的工具/服务/依赖。安装、启用、升级 MUST 走 durable 审批（沿用 v1）。
+
+#### Scenario: 依赖缺失可见
+- **WHEN** 一个插件依赖另一个未启用的插件
+- **THEN** 它处于 `PENDING` 且原因可见，不静默降级
+
+#### Scenario: 安装即出现
+- **WHEN** 安装并通过审批
+- **THEN** 清单、工具面（若声明）、面板入口在同一 generation 内可见
