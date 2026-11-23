@@ -9,7 +9,8 @@
 //
 // Responsive contract (design §8): ≥1440 keeps the identity index column; 1024–
 // 1439 is a full-width paper; 768–1023 folds the object summary into the paper;
-// ≤767 is a single column with a 5-tab bottom bar and 44px controls.
+// ≤767 is a single column with a 3-tab daily bottom bar (身份 / 记录 enter from
+// the settings page) and 44px controls.
 import type { JSX, StyleProp, ViewStyle } from "nsh";
 import { Clipboard, Text, View, windowSize } from "nsh";
 import {

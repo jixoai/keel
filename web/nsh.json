@@ -25,6 +25,7 @@
     "host": [
       "keel.*"
     ],
+    "audio": true,
     "clipboard": true,
     "picker": true,
     "speech": true,

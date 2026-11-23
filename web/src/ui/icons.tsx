@@ -29,6 +29,12 @@ export type IconName =
   | "wifi-off"
   | "sun"
   | "moon"
+  | "volume"
+  | "volume-off"
+  | "bell"
+  | "command"
+  | "minus"
+  | "square"
   | "message"
   | "panel"
   | "spark"
@@ -77,6 +83,15 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   "wifi-off": ["M2.5 9a15 15 0 0 1 6.5-3.2", "M15.5 6.2A15 15 0 0 1 21.5 9", "M6 12.5a10 10 0 0 1 3-1.6", "M16 11.5a10 10 0 0 1 2 1", "M9.5 16a5 5 0 0 1 5 0", "M2 2l20 20"],
   sun: ["M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M12 2v2", "M12 20v2", "M4.9 4.9l1.4 1.4", "M17.7 17.7l1.4 1.4", "M2 12h2", "M20 12h2", "M4.9 19.1l1.4-1.4", "M17.7 6.3l1.4-1.4"],
   moon: ["M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"],
+  // lucide's `volume-2`, `volume-x`, `bell`, `command`, `minus` and
+  // `square`: the system bar's sound / notifications / palette and the window
+  // controls a host that reserves no native buttons lets the app draw.
+  volume: ["M11 5L6 9H2v6h4l5 4V5z", "M15.54 8.46a5 5 0 0 1 0 7.07", "M19.07 4.93a10 10 0 0 1 0 14.14"],
+  "volume-off": ["M11 5L6 9H2v6h4l5 4V5z", "M22 9l-6 6", "M16 9l6 6"],
+  bell: ["M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9", "M13.73 21a2 2 0 0 1-3.46 0"],
+  command: ["M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 0 0 0-6z"],
+  minus: ["M5 12h14"],
+  square: ["M5 5h14v14H5z"],
   message: ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"],
   panel: ["M3 3h18v18H3V3z", "M9 3v18"],
   spark: ["M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z", "M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16z"],

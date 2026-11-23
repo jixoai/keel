@@ -8,6 +8,7 @@ import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
 import { KeelApiError, KeelHttp, errorMessageOf, type FetchLike } from "./http";
 import { setEffectivePermissions, resetPermissions } from "./permissions";
+import { playApprovalCue } from "./sound";
 import type { AuthSessionView, WhoAmI } from "./identity";
 import type { IdentityApi } from "./identity-api";
 import { selectionForSend } from "./selection";
@@ -1725,6 +1726,9 @@ class KeelStore {
         if (!this.notifiedDecisions.has(key)) {
           this.notifiedDecisions.add(key);
           void notify("Keel · 需要你的审批", question);
+          // The system bar's sound preference gates this cue; a silent host
+          // (terminal, refused autoplay) simply answers false.
+          void playApprovalCue();
         }
       } else {
         this.patchSession(sessionId, { pendingDecision: false });

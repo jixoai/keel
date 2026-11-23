@@ -46,9 +46,8 @@
 //     card face made the selected row the darkest one on the column (round-2
 //     review), and an outline around every row turned the column into eleven
 //     competing cards that starved the titles.
-//   · the header's logo is a token tile with `radius.lg` (12px) — the shape the
-//     reference's titlebar logo has (`DesktopTopOverlay.tsx:144`,
-//     `rounded-lg`). The kit `Avatar`'s pill is outside the 6/12/16 ladder.
+//   · the panel header names the list only (会话 / AI 员工会话): the product
+//     brand lives in the global system bar, not twice on one screen.
 import { signal, Text, type TextStyle, View } from "nsh";
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
@@ -72,16 +71,13 @@ import {
   Tooltip,
   WORKSPACE_SHELL_HEADER_HEIGHT_PX,
   color,
-  controlHeight,
   focusRing,
-  iconSize,
   radius,
   space,
   typeScale,
   weight,
   type BadgeVariant,
 } from "../ui/kit";
-import { Icon } from "../ui/icons";
 import { conversationState, runStateLabel, sessionState, type RunState } from "../ui/run-state";
 import { oneLine, sessionTitle } from "../ui/session-title";
 import { PluginSidebarSlot } from "../plugins/slots";
@@ -406,27 +402,11 @@ export function SessionList(props: { onSelect: (id: string) => void; activeId: s
           borderColor: color.sidebarBorder,
         }}
       >
-        <View
-          accessibilityLabel="Keel"
-          style={{
-            // The reference's titlebar logo is a 12px-rounded tile
-            // (`DesktopTopOverlay.tsx:144`, `rounded-lg`); the kit's Avatar
-            // face is a pill, so the mark is drawn in the tokens instead.
-            width: controlHeight("lg"),
-            height: controlHeight("lg"),
-            borderRadius: radius.lg,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: color.muted,
-            borderWidth: 1,
-            borderColor: color.border,
-          }}
-        >
-          <Icon name="spark" size={iconSize.md} tint={color.brand} />
-        </View>
+        {/* The global system bar carries the product's brand and the window's
+            drag area; this panel's header names the panel only. */}
         <View style={{ flexDirection: "column", flex: 1, minWidth: 0 }}>
           <Text style={{ fontSize: typeScale.base, fontWeight: weight.semibold, color: color.sidebarForeground }}>
-            Keel
+            会话
           </Text>
           {/* 12px is the UI floor; 9px CJK ink read as a solid block. */}
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>AI 员工会话</Text>

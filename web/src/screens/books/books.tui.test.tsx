@@ -1,5 +1,5 @@
-// TUI verification for the 账簿 shell and the identity/records chapters —
-// change keel-bot-identity-access, A4.4a/A4.4c.
+// TUI verification for the 账簿 shell and the identity/records management
+// faces — change keel-bot-identity-access, A4.4a/A4.4c; shell IA change.
 //
 // The fixture transport carries the design board's sample deployment (eleven
 // accounts, five permission groups, a week of audit rows), so the success cases
@@ -7,33 +7,57 @@
 // non-success states are a separate harness inside the app's module graph
 // (`books.harness.tsx`), because a test's module graph is not the app's.
 //
-// Covered: the chapter band at 1440/1024/768/390, the default account/group/
-// record selection, the account activity derived from the ledger, the role
-// words, the permission matrix's ceiling micro-label and scope sheet, the
-// ledger sheet (diff + signatory + high-risk tick + save), the records detail's
-// missing key/owner/grantable/links, and the five states.
+// Layout under test: the daily rail and phone tabs carry only 工作区 / 员工 /
+// 团队; 身份 and 记录 are entered from the settings page's 管理入口, which
+// keeps their old `books-chapter-*` test ids and their permission gates.
 import { expect, open, test } from "nsh/test";
 
 const app = (width = 1440) => open("../../../App.tsx", { width, host: { params: { fixture: true } } });
 const harness = (width: number, params: Record<string, string>) =>
   open("./books.harness.tsx", { width, host: { params } });
 
-test("TUI: A4.4f 顶部只剩品牌/插件槽，章节在左栏，设置页收下待办与实时", async () => {
+/** 身份 / 记录 are no longer rail entries: the settings page is their door.
+ * Both the desktop rail's settings entry and the phone's own entry land on the
+ * same page; the General section holds the management card. */
+const openManagement = async (
+  view: Awaited<ReturnType<typeof app>>,
+  chapter: "identity" | "records",
+  mobile = false,
+) => {
+  await view.press(mobile ? "id:books-mobile-settings" : "id:books-settings");
+  await view.waitFor("id:settings-page");
+  await view.press("id:settings-section-general");
+  await view.waitFor("id:settings-chapters");
+  await view.press(`id:books-chapter-${chapter}`);
+};
+
+test("TUI: 系统栏是全局壳，章节只留三个日常章；身份/记录在设置页入口", async () => {
   const wide = await app(1440);
-  expect(wide.shows("id:books-top")).toBe(true);
+  expect(wide.shows("id:keel-system-bar")).toBe(true);
   expect(wide.shows("id:books-rail")).toBe(true);
-  // The old top-band entries are gone, not merely hidden.
+  // The daily rail: exactly the three daily chapters.
+  expect(wide.shows("id:books-chapter-workspace")).toBe(true);
+  expect(wide.shows("id:books-chapter-bots")).toBe(true);
+  expect(wide.shows("id:books-chapter-teams")).toBe(true);
+  expect(wide.shows("id:books-chapter-identity")).toBe(false);
+  expect(wide.shows("id:books-chapter-records")).toBe(false);
+  // The old top-band entries stay gone, and the system bar carries the plugin
+  // slot even when it is empty.
   expect(wide.shows("id:books-search")).toBe(false);
   expect(wide.shows("id:books-todo")).toBe(false);
   expect(wide.shows("id:books-account-menu")).toBe(false);
-  // The plugin slot is empty until a plugin contributes a panel.
+  expect(wide.shows("id:books-top")).toBe(true);
   expect(wide.shows("id:plugin-top-panels")).toBe(false);
   expect(wide.shows("id:books-settings")).toBe(true);
 
   const phone = await app(390);
   await phone.waitFor("id:books-tabbar");
   expect(phone.shows("id:books-rail")).toBe(false);
-  expect(phone.shows("id:books-tab-identity")).toBe(true);
+  expect(phone.shows("id:books-tab-workspace")).toBe(true);
+  expect(phone.shows("id:books-tab-bots")).toBe(true);
+  expect(phone.shows("id:books-tab-teams")).toBe(true);
+  expect(phone.shows("id:books-tab-identity")).toBe(false);
+  expect(phone.shows("id:books-tab-records")).toBe(false);
   expect(phone.shows("id:books-mobile-settings")).toBe(true);
   await phone.press("id:books-mobile-settings");
   await phone.waitFor("id:settings-page");
@@ -41,11 +65,59 @@ test("TUI: A4.4f 顶部只剩品牌/插件槽，章节在左栏，设置页收�
   await phone.waitFor("id:settings-live");
   expect(phone.shows("id:settings-todo")).toBe(true);
   expect(phone.shows("id:settings-logout")).toBe(true);
+  expect(phone.shows("id:books-chapter-identity")).toBe(true);
+  expect(phone.shows("id:books-chapter-records")).toBe(true);
+  await phone.press("id:books-chapter-identity");
+  await phone.waitFor("id:identity-segment");
+});
+
+test("TUI: 系统栏——声音开关/声音设置、通知面板、主题与命令面板", async () => {
+  const view = await app(1440);
+  expect(view.shows("id:system-bar-sound")).toBe(true);
+  expect(view.shows("id:system-bar-sound-settings")).toBe(true);
+  expect(view.shows("id:system-bar-notifications")).toBe(true);
+  expect(view.shows("id:system-bar-theme")).toBe(true);
+  expect(view.shows("id:system-bar-command")).toBe(true);
+  // The terminal/browser host reserves no app-drawn window buttons.
+  expect(view.shows("id:system-bar-window-controls")).toBe(false);
+
+  // Sound: the quick toggle flips its terminal label, and the dialog writes
+  // the same preference.
+  expect(view.texts()).toContain("声");
+  await view.press("id:system-bar-sound");
+  await view.waitFor("text:静");
+  await view.press("id:system-bar-sound-settings");
+  await view.waitFor("id:sound-settings");
+  expect(view.texts().join("\n")).toContain("提示音");
+  expect(view.shows("id:sound-settings-enabled")).toBe(true);
+  expect(view.shows("id:sound-settings-volume-low")).toBe(true);
+  expect(view.shows("id:sound-settings-preview")).toBe(true);
+  await view.press("id:sound-settings-volume-high");
+  expect(view.texts().join("\n")).toContain("高");
+  await view.keyboard.press("escape");
+
+  // Notification panel: the fixture has sessions waiting on a decision.
+  await view.press("id:system-bar-notifications");
+  await view.waitFor("id:notifications-panel");
+  expect(view.texts().join("\n")).toContain("待审批");
+  expect(view.texts().join("\n")).toContain("发布审批");
+  expect(view.shows("id:notifications-live")).toBe(true);
+  await view.keyboard.press("escape");
+
+  // Theme: the label is the action, not the current state (the terminal shows
+  // the short action word; the full sentence stays its accessibility label).
+  expect(view.texts()).toContain("浅色");
+  await view.press("id:system-bar-theme");
+  await view.waitFor("text:深色");
+
+  // The palette entry is the same Mod+K overlay.
+  await view.press("id:system-bar-command");
+  await view.waitFor("id:command-palette");
 });
 
 test("TUI: 账簿壳——1440 身份默认选中当前账号，详情有角色与账本摘要", async () => {
   const view = await app(1440);
-  await view.press("id:books-chapter-identity");
+  await openManagement(view, "identity");
   await view.waitFor("id:identity-index");
   // 首屏不是空白：默认选中当前账号（李娜），而不是「选择一个账号」。
   await view.waitFor("id:account-head");
@@ -69,7 +141,7 @@ test("TUI: 账簿壳——1440 身份默认选中当前账号，详情有角色�
 
 test("TUI: 超管——统一叫超级管理员，概览显示全部能力", async () => {
   const view = await app(1440);
-  await view.press("id:books-chapter-identity");
+  await openManagement(view, "identity");
   await view.waitFor("id:identity-index");
   await view.press("label:打开账号 王强");
   await view.waitFor("id:account-head");
@@ -83,7 +155,7 @@ test("TUI: 超管——统一叫超级管理员，概览显示全部能力", asy
 
 test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet 锁定与账本登记", async () => {
   const view = await app(1440);
-  await view.press("id:books-chapter-identity");
+  await openManagement(view, "identity");
   await view.waitFor("id:identity-index");
   await view.press("id:identity-segment-groups");
   await view.waitFor("text:客服组");
@@ -136,7 +208,7 @@ test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet
 
 test("TUI: 记录——默认打开首条，详情写缺什么/归属/可授予与对象链路", async () => {
   const view = await app(1440);
-  await view.press("id:books-chapter-records");
+  await openManagement(view, "records");
   await view.waitFor("id:records-head");
   await view.waitFor("id:record-detail");
   expect(view.texts().join("\n")).toContain("调用 Bot 被拒");
@@ -247,15 +319,15 @@ test("TUI: 记录——路由未接入时是待接入面，不是示例账本", 
   expect(view.texts().join("\n")).not.toContain("调用 Bot 被拒");
 });
 
-test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部五 tab 与卡片", async () => {
+test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部三 tab 与卡片", async () => {
   const wide = await app(1440);
-  await wide.press("id:books-chapter-identity");
+  await openManagement(wide, "identity");
   await wide.waitFor("id:identity-index");
   expect(wide.shows("id:accounts-table")).toBe(false);
   expect(wide.shows("id:account-head")).toBe(true);
 
   const mid = await app(1024);
-  await mid.press("id:books-chapter-identity");
+  await openManagement(mid, "identity");
   await mid.waitFor("id:accounts-head");
   expect(mid.shows("id:identity-index")).toBe(false);
   expect(mid.shows("id:accounts-table")).toBe(true);
@@ -272,7 +344,7 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部五 ta
   await mid.waitFor("id:group-matrix");
   expect(mid.texts().join("\n")).toContain("最高：本团队");
   // 1024 记录：表格保留，详情是抽屉而不是第三列。
-  await mid.press("id:books-chapter-records");
+  await openManagement(mid, "records");
   await mid.waitFor("id:records-head");
   expect(mid.shows("id:records-table")).toBe(true);
   expect(mid.texts().join("\n")).not.toContain("缺少能力");
@@ -281,12 +353,12 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部五 ta
   expect(mid.texts().join("\n")).toContain("缺少能力");
 
   const pad = await app(768);
-  await pad.press("id:books-chapter-identity");
+  await openManagement(pad, "identity");
   await pad.waitFor("id:accounts-head");
   expect(pad.shows("id:identity-index")).toBe(false);
   expect(pad.shows("id:accounts-table")).toBe(true);
   // 768 的记录页用卡片 + 详情 Sheet，不把 5 列表与 330 检查器硬塞进 720。
-  await pad.press("id:books-chapter-records");
+  await openManagement(pad, "records");
   await pad.waitFor("id:records-head");
   expect(pad.shows("id:records-table")).toBe(false);
   expect(pad.texts().join("\n")).toContain("调用 Bot 被拒");
@@ -296,7 +368,7 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部五 ta
 
   const phone = await app(390);
   await phone.waitFor("id:books-tabbar");
-  await phone.press("id:books-tab-identity");
+  await openManagement(phone, "identity", true);
   await phone.waitFor("id:identity-segment");
   expect(phone.shows("id:books-tabbar")).toBe(true);
   expect(phone.texts()).toContain("李娜");
@@ -307,7 +379,7 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部五 ta
 
 test("TUI: 390 账号——危险操作走溢出菜单，二次确认后才禁用", async () => {
   const phone = await app(390);
-  await phone.press("id:books-tab-identity");
+  await openManagement(phone, "identity", true);
   await phone.waitFor("id:identity-segment");
   await phone.press("label:打开账号 李娜");
   await phone.waitFor("id:account-head");
@@ -332,7 +404,7 @@ test("TUI: 账号最近活动——审计不可读时只说明一次，不逐行
 
 test("TUI: 内置权限组——底部只说只读与另存为副本，没有登记人/保存", async () => {
   const view = await app(1440);
-  await view.press("id:books-chapter-identity");
+  await openManagement(view, "identity");
   await view.waitFor("id:identity-index");
   await view.press("id:identity-segment-groups");
   await view.waitFor("text:超级管理员");

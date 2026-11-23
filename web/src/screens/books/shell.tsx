@@ -1,15 +1,22 @@
-// The 账簿 shell — change keel-bot-identity-access, A4.4a; top refactor A4.4f.
+// The 账簿 shell — change keel-bot-identity-access, A4.4a; top refactor A4.4f;
+// shell IA change: three daily chapters.
 //
-// The top band no longer carries navigation. The chapters live in a left rail
-// on desktop (labels from 1280px, an icon rail from 768–1279) and in the five
-// bottom tabs on a phone; the top band is a slim brand / window-drag strip that
-// becomes the plugin panel slot when a plugin contributes one. Account,
-// sign-out, todo and the live-channel state moved to the settings page (its
-// General / account cards), and search lives in each list that has something
+// The global system bar (App.tsx's `SystemBar`) is the app's top-level chrome:
+// brand, plugin top-band slot, sound, notifications, theme, command palette and
+// host-gated window controls. This shell owns only what is below it: the left
+// rail on desktop (labels from 1280px, an icon rail from 768–1279) carrying the
+// three daily chapters — 工作区 / 员工 / 团队 — and the three bottom tabs on a
+// phone plus the settings entry.
+//
+// 身份 and 记录 are management faces, not daily destinations: the settings
+// page's 通用 section carries their entries (with the old `books-chapter-*`
+// test ids and the same permission gates), so the rail is not a dumping
+// ground. Account, sign-out, todo and the live-channel state stay on the
+// settings page's General cards; search lives in each list that has something
 // to filter.
 //
 // A chapter the reader may not read is not rendered at all (design §6.1: hide,
-// never grey a destination without a path). The rail keeps the five
+// never grey a destination without a path). The rail keeps the three daily
 // destinations' test ids (`books-chapter-*`); the phone's bottom tabs keep
 // theirs (`books-tab-*`).
 import type { JSX } from "nsh";
@@ -39,7 +46,7 @@ import {
   isMobile,
   touchStyle,
 } from "./common";
-import { BrandMark, PluginTopPanels, topBandHasContent } from "./plugin-top-panels";
+import { MANAGEMENT_KEYS } from "./management";
 
 export type ChapterId = "workspace" | "bots" | "teams" | "identity" | "records";
 
@@ -54,10 +61,8 @@ interface ChapterEntry {
 
 const CHAPTERS: ChapterEntry[] = [
   { id: "workspace", num: "01", label: "工作区", icon: "message" },
-  { id: "bots", num: "02", label: "员工", icon: "bot", keys: ["bot.read", "bot.manage"] },
-  { id: "teams", num: "03", label: "团队", icon: "users", keys: ["team_bot.read", "team_bot.manage"] },
-  { id: "identity", num: "04", label: "身份", icon: "shield", keys: ["account.read", "permission.read"] },
-  { id: "records", num: "05", label: "记录", icon: "activity", keys: ["audit.read"] },
+  { id: "bots", num: "02", label: "员工", icon: "bot", keys: MANAGEMENT_KEYS.bots },
+  { id: "teams", num: "03", label: "团队", icon: "users", keys: MANAGEMENT_KEYS.teams },
 ];
 
 const chapterVisible = (chapter: ChapterEntry): boolean => !chapter.keys || canAny(chapter.keys);
@@ -68,10 +73,6 @@ const chapterVisible = (chapter: ChapterEntry): boolean => !chapter.keys || canA
 export const BOOK_RAIL_WIDTH_PX = 208;
 export const BOOK_RAIL_COMPACT_WIDTH_PX = 60;
 export const BOOK_RAIL_WIDE_MIN_PX = 1280;
-/** The slim brand / drag strip when no plugin contributes a panel. */
-export const BOOK_TOP_BAND_HEIGHT_PX = 34;
-/** The band's height while a plugin panel is in it. */
-export const BOOK_TOP_BAND_PLUGIN_HEIGHT_PX = 48;
 
 const railWide = (): boolean => windowSize().width >= BOOK_RAIL_WIDE_MIN_PX;
 
@@ -216,39 +217,6 @@ function ChapterRail() {
   );
 }
 
-// ---- the top band ----------------------------------------------------------
-
-/** The top band: brand / drag strip at rest, plugin panel row when a plugin
- * contributes one. No chapter navigation, search, todo, live badge, settings
- * gear or avatar lives here (A4.4f). */
-function TopBand() {
-  const hasPlugins = () => topBandHasContent();
-  return (
-    <View
-      testID="books-top"
-      style={{
-        height: hasPlugins() ? BOOK_TOP_BAND_PLUGIN_HEIGHT_PX : BOOK_TOP_BAND_HEIGHT_PX,
-        flexShrink: 0,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.md,
-        paddingHorizontal: space.lg,
-        backgroundColor: hasPlugins() ? color.panel : "transparent",
-        backdropFilter: hasPlugins() ? GLASS_BLUR : undefined,
-        borderBottomWidth: hasPlugins() ? 1 : 0,
-        borderBottomColor: color.border,
-      }}
-    >
-      <BrandMark />
-      <PluginTopPanels />
-      <If when={!hasPlugins()}>
-        {/* The empty half is the window's drag region; it draws nothing. */}
-        <View style={{ flex: 1, minWidth: 0 }} />
-      </If>
-    </View>
-  );
-}
-
 // ---- the phone's bottom bar ------------------------------------------------
 
 function BottomBar() {
@@ -305,7 +273,8 @@ function BottomBar() {
         }}
       </Each>
       {/* Settings is not a chapter tab: it keeps its own 44px target after the
-          five destinations, so the bottom bar stays the five-tab navigation. */}
+          three daily destinations, so the bottom bar stays the daily-chapter
+          navigation. 身份 and 记录 are entered from settings. */}
       <View
         style={{
           width: BOOK_TOUCH_PX + 4,
@@ -327,8 +296,8 @@ function BottomBar() {
   );
 }
 
-/** The shell: the top band, the desktop rail or the phone's bottom tabs, and
- * the chapter's paper. */
+/** The shell below the global system bar: the desktop rail or the phone's
+ * bottom tabs, and the chapter's paper. */
 export function BooksChrome(props: { children?: JSX.Element }) {
   // The team/bot chapters read one shared store; the shell warms it once (the
   // top band no longer owns a todo count, but the lists still need the data).
@@ -344,7 +313,6 @@ export function BooksChrome(props: { children?: JSX.Element }) {
   });
   return (
     <View testID="books-shell" style={{ flex: 1, minHeight: 0, backgroundColor: color.background }}>
-      <TopBand />
       <View style={{ flex: 1, minHeight: 0, flexDirection: "row" }}>
         <If when={!isMobile()}>
           <ChapterRail />

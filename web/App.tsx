@@ -48,6 +48,8 @@ import { SessionList } from "./src/screens/session-list";
 import { SessionStatusPane } from "./src/screens/session-status-pane";
 import { SettingsScreen } from "./src/screens/settings";
 import { ShareDialog } from "./src/screens/share-dialog";
+import { SystemBar, SystemBarOverlays } from "./src/screens/system-bar";
+import { restoreSoundPreferences } from "./src/data/sound";
 import { canShareResource, openSessionShare } from "./src/data/shares";
 import { applyPluginInventory, installPluginRuntime } from "./src/plugins";
 import { restoreAppearance } from "./src/ui/appearance";
@@ -189,6 +191,8 @@ let sidePaneTouched = false;
 let sidePaneRestored = false;
 /** The stored appearance was applied. */
 let appearanceApplied = false;
+/** The stored sound preference and the host's sound answer were read. */
+let soundRestored = false;
 
 /** The header's toggle: the user's choice, kept for the next launch. */
 const chooseSidePane = (open: boolean) => {
@@ -548,6 +552,13 @@ function App() {
     appearanceApplied = true;
     void restoreAppearance();
   });
+  // … the system bar's sound preference (the same one the sound dialog writes)
+  // and whether this host plays a sound at all.
+  effect(() => {
+    if (soundRestored) return;
+    soundRestored = true;
+    void restoreSoundPreferences();
+  });
   // … and the right pane: only the stored choice reopens it — no width-driven
   // default (the reference keeps the shared right panel closed until the reader
   // opens it; the kit's own policy then closes it again if the conversation
@@ -583,17 +594,32 @@ function App() {
   });
   return (
     <View style={{ flex: 1, backgroundColor: color.background }}>
-      {/* The auth gate is the app's outer wall: only an authenticated session
-          renders the product. `required` (login), `bootstrap` (the deployment
-          has no super admin), `must-change` (the forced password change) and
-          `unknown` (the boot probe, or a dead service) all render the gate. */}
-      <If when={store.auth() !== "ok"} else={<Routed />}>
-        <LoginScreen />
-      </If>
+      {/* The global system bar: brand / drag area, the plugin top-band slot and
+          the system controls. It is the app's top-level chrome on every route;
+          the screens below keep their own toolbars. */}
+      <SystemBar />
+      <View style={{ flex: 1, minHeight: 0 }}>
+        {/* The auth gate is the app's outer wall: only an authenticated session
+            renders the product. `required` (login), `bootstrap` (the deployment
+            has no super admin), `must-change` (the forced password change) and
+            `unknown` (the boot probe, or a dead service) all render the gate. */}
+        <If when={store.auth() !== "ok"} else={<Routed />}>
+          <LoginScreen />
+        </If>
+      </View>
       <NoticeToasts />
       <DeleteConfirm />
       <ShareDialog />
       <SessionModelPicker />
+      {/* The system bar's two overlays: the notification panel (待审批 + recent
+          in-app notices) and the sound settings dialog. Mounted at the root so
+          they are not clipped by the bar's row. */}
+      <SystemBarOverlays
+        onOpenSession={(sessionId) => {
+          store.closeSettings();
+          selectSession(sessionId);
+        }}
+      />
       {/* The global palette: mounted at the root so Mod+K opens it over every
           route, and a choice can leave the settings/plugin page for the
           workspace. It opens a session through the same `selectSession` the

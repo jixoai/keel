@@ -116,9 +116,8 @@ export function SettingsShell(props: SettingsShellProps) {
           boxShadow: `inset -1px 0 0 ${color.glassEdge}, inset 0 1px 0 ${color.glassInner}`,
         }}
       >
-        {/* The window-drag/title band: h-12, empty on the web and in a
-            terminal. */}
-        <View style={{ height: SETTINGS_BREADCRUMB_HEIGHT_PX, flexShrink: 0 }} />
+        {/* The global system bar is the window-drag/title band; this rail
+            starts at the page's top edge instead of reserving a second one. */}
         <Scroll style={{ flex: 1, minHeight: 0 }}>
           <View style={{ paddingHorizontal: 8, paddingBottom: 12, gap: 4 }}>
             <If when={props.onBack}>

@@ -1,7 +1,9 @@
-// The books chapters — change keel-bot-identity-access, A4.4a/A4.4b.
+// The books chapters — change keel-bot-identity-access, A4.4a/A4.4b; shell IA
+// change: the daily rail carries 工作区 / 员工 / 团队.
 //
-// 02 员工 and 03 团队 are their own chapters (A4.4b); 04 身份 and 记录 05 are
-// A4.4a's. The router only picks the chapter; each chapter gates on its own
+// 02 员工 and 03 团队 are daily chapters; 04 身份 and 05 记录 are management
+// faces entered from the settings page, and their routes still render here.
+// The router only picks the chapter; each chapter gates on its own
 // capability, so a deep link to a page the account may not read renders the
 // four-part permission page instead of a blank shell.
 import { Text, View } from "nsh";
@@ -74,7 +76,7 @@ function Fallback() {
         <PageUnavailable
           icon="layers"
           title="这个页面不在当前章节里"
-          description="回到工作区，或从章节导航进入员工、团队、身份与记录。"
+          description="员工与团队在章节导航里；身份与记录是设置页的「管理入口」。"
         >
           <EmptyContent>
             <Button label="返回工作区" accessibilityLabel="返回工作区" onPress={() => store.openChapter("workspace")} style={touchStyle()} />

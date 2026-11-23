@@ -8,14 +8,17 @@ import { expect, open, test } from "nsh/test";
 
 const openApp = () => open("../../App.tsx", { host: { params: { fixture: true, plugins: true } } });
 
-test("TUI: 顶栏与侧栏渲染插件的 chunk 贡献", async () => {
+test("TUI: 系统栏的插件槽渲染 chunk 贡献，侧栏与设置同时保留", async () => {
   const app = await openApp();
   await app.waitFor("text:W12 插件条");
   await app.waitFor("text:W12 插件侧栏");
+  expect(app.shows("id:keel-system-bar")).toBe(true);
   expect(app.shows("id:plugin-top-panels")).toBe(true);
   expect(app.shows("id:plugin-sidebar-slot")).toBe(true);
-  // The band kept its own contract: no chapter navigation moved into it.
+  // The plugin slot kept its own contract inside the new system bar: no
+  // chapter navigation moved into it.
   expect(app.shows("id:books-top")).toBe(true);
+  expect(app.shows("id:books-chapter-identity")).toBe(false);
 });
 
 test("TUI: 设置页渲染 action 与 settings-section 贡献", async () => {

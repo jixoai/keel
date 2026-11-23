@@ -1,14 +1,16 @@
-// The top band's plugin slot — change A4.4f.
+// The global system bar's plugin slot — change A4.4f, folded into the system
+// bar by the shell IA change.
 //
-// The product's top band is not navigation any more: the chapters live in the
-// left rail (desktop) or the bottom bar (phone), and account / todo / live
-// state / settings live on the settings page. What the band is for is plugins:
-// a panel a plugin contributes to the top of the shell (a mini player, a
-// recording strip, a task light — whatever the plugin can prove it needs).
+// The product's top chrome is not navigation: the chapters live in the left
+// rail (desktop) or the bottom bar (phone), and account / todo / live state /
+// settings live on the settings page. What the left half of the system bar is
+// for is the brand and plugins: a panel a plugin contributes there (a mini
+// player, a recording strip, a task light — whatever the plugin can prove it
+// needs).
 //
-// There is no plugin UI runtime yet, so the registry starts empty and the band
-// renders no fake panel: with no contribution it is only the slim brand /
-// window-drag strip. When the plugin contract lands, a plugin registers
+// There is no plugin UI runtime yet, so the registry starts empty and the bar
+// renders no fake panel: with no contribution the slot is only the brand /
+// window-drag region. When the plugin contract lands, a plugin registers
 // through `registerPluginTopPanel` (returning its own disposer) and the same
 // slot renders its node; the kit's layout guarantees it cannot push the page
 // sideways at 390/768/1024/1440.
@@ -118,7 +120,7 @@ export function PluginTopPanels(props: { testID?: string }) {
   );
 }
 
-/** The brand half of the band: a K tile and the wordmark. It doubles as the
+/** The system bar's brand: a K tile and the wordmark. It sits inside the
  * window's drag region; it never grows a control of its own. */
 export function BrandMark() {
   const compact = () => isMobile();

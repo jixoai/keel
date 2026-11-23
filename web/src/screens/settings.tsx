@@ -126,6 +126,7 @@ import {
 import { defaultReasoningFor } from "./model-picker";
 import { SkillsSection } from "./settings-skills";
 import { LiveBadge, PressRow } from "./books/common";
+import { managementDoors } from "./books/management";
 import { pluginSlots, runDataAction, type PluginActionHandlers } from "../plugins";
 import { PluginActionButtons, PluginSettingsSections } from "../plugins/slots";
 
@@ -547,40 +548,63 @@ function GeneralSection() {
   );
 }
 
-/** The product objects are not deployment settings: account, Bot and team
- * management live in the books chapters. This card is a pointer, never a
- * second copy of those pages. */
+/** The management entries the daily rail no longer carries. 身份 and 记录 are
+ * low-frequency, high-consequence faces: the settings page is their one door,
+ * the rail stays three daily chapters. The entries keep the old
+ * `books-chapter-*` test ids and the chapters' own permission gates, so a
+ * reader without a key never sees a destination with no path. */
 function WorkspaceChaptersCard() {
+  const doors = () => managementDoors();
   return (
     <Card testID="settings-chapters">
       <CardHeader
-        title="账号、Bot 与团队"
-        description="这些是产品对象，在「账簿」章节里管理；设置页只保留部署级配置。"
+        title="管理入口"
+        description="身份与记录是低频管理面，放在设置里；员工与团队在章节导航里，设置页只留入口。"
       />
       <CardContent>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
-          <Button
-            testID="settings-open-identity"
-            variant="outline"
-            label="账号与权限"
-            accessibilityLabel="打开账号与权限章节"
-            onPress={() => store.openChapter("identity")}
-          />
-          <Button
-            testID="settings-open-bots"
-            variant="outline"
-            label="Bot"
-            accessibilityLabel="打开 Bot 章节"
-            onPress={() => store.openChapter("bots")}
-          />
-          <Button
-            testID="settings-open-teams"
-            variant="outline"
-            label="团队"
-            accessibilityLabel="打开团队章节"
-            onPress={() => store.openChapter("teams")}
-          />
+          <If when={doors().identity}>
+            <Button
+              testID="books-chapter-identity"
+              variant="outline"
+              label="身份与权限"
+              accessibilityLabel="打开身份章节"
+              onPress={() => store.openChapter("identity")}
+            />
+          </If>
+          <If when={doors().records}>
+            <Button
+              testID="books-chapter-records"
+              variant="outline"
+              label="记录"
+              accessibilityLabel="打开记录章节"
+              onPress={() => store.openChapter("records")}
+            />
+          </If>
+          <If when={doors().bots}>
+            <Button
+              testID="settings-open-bots"
+              variant="outline"
+              label="员工"
+              accessibilityLabel="打开员工章节"
+              onPress={() => store.openChapter("bots")}
+            />
+          </If>
+          <If when={doors().teams}>
+            <Button
+              testID="settings-open-teams"
+              variant="outline"
+              label="团队"
+              accessibilityLabel="打开团队章节"
+              onPress={() => store.openChapter("teams")}
+            />
+          </If>
         </View>
+        <If when={!doors().identity && !doors().records}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            你的账号没有身份或记录的管理能力；需要时请管理员授予 account.read / audit.read。
+          </Text>
+        </If>
       </CardContent>
     </Card>
   );
@@ -636,15 +660,17 @@ function TodoCard() {
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           打开团队后，「启动前检查」会指出缺什么、找谁处理。
         </Text>
-        <View style={{ flexDirection: "row" }}>
-          <Button
-            testID="settings-todo-records"
-            variant="outline"
-            label="去记录"
-            accessibilityLabel="去记录"
-            onPress={() => store.openChapter("records")}
-          />
-        </View>
+        <If when={canAny(["audit.read"])}>
+          <View style={{ flexDirection: "row" }}>
+            <Button
+              testID="settings-todo-records"
+              variant="outline"
+              label="去记录"
+              accessibilityLabel="去记录"
+              onPress={() => store.openChapter("records")}
+            />
+          </View>
+        </If>
       </CardContent>
     </Card>
   );
