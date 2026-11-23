@@ -301,7 +301,9 @@ def measure_tree(entries: dict[int, dict], root: int, vmrss=None, overhead_root:
     processes.sort(key=lambda p: (-p["rssBytes"], p["pid"]))
     return {
         "totalBytes": total,
-        "memberCount": len(members) - len(skipped),
+        # memberCount counts what was actually summed; zombies and the sampler's
+        # own subtree are reported separately instead of inflating the tree.
+        "memberCount": len(processes),
         "zombiePids": zombies,
         "exitedDuringSample": exited,
         "excludedOverhead": skipped,
