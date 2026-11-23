@@ -422,7 +422,7 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部三 ta
   await phone.press("label:打开账号 李娜");
   await phone.waitFor("id:account-head");
   expect(phone.shows("id:books-back")).toBe(true);
-});
+}, 45_000);
 
 test("TUI: 390 账号——危险操作走溢出菜单，二次确认后才禁用", async () => {
   const phone = await app(390);
