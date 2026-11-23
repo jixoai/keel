@@ -45,3 +45,7 @@ nsh 0.6.0 (f577c51 nightly)。
 
 `keel_final_gate` / `keel_final_r1diff` / `keel_w12_fix` 等临时库已删除；R1 的
 `/tmp/keel-r1-base`、`/tmp/keel-final-r1` 与 dump 已删除；无 keel serve / nsh 残留进程。
+
+> Post-gate: G3 closed (`47a96d0`) and the servicehost claim test stabilized
+> (`cb3e325`); `go test -p 1 ./...` at `cb3e325` is again 76 packages ok / 0 FAIL
+> (`go-full-after-g3.txt`).
