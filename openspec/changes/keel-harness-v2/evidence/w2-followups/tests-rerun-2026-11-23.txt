@@ -20,3 +20,8 @@ ok  	github.com/jixoai/keel/internal/kernel	18.834s
 #   src/data/store.queue.test.ts  5 passed
 #   src/data/queue.test.ts        4 passed
 #   src/ui/run-state.test.ts      4 passed
+#
+# Cleanup: the lane database was dropped after the evidence run
+# (`DROP DATABASE keel_w2_test WITH (FORCE)`). A final check lists no
+# keel_w2% database. The independent review recreated/reused a temporary
+# database for its rerun and dropped it too.

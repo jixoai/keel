@@ -162,6 +162,23 @@ web queue suites green): `web/src/data/store.queue.test.ts` (5),
 `web/src/data/queue.test.ts` (4), `web/src/ui/run-state.test.ts` (4). See
 `web-queue-p1.txt` and `tests-rerun-2026-11-23.txt`.
 
+## Known follow-ups (P3, not blocking)
+
+The independent review (2026-11-23) left three observations, recorded here
+rather than silently dropped:
+
+1. The admission's three-false combination (promotion promoted the caller's own
+   queued row, so `Created`/`AlreadyActive`/`Queued` are all false) has no
+   direct unit test; its consumers are exercised through the gate/HTTP paths.
+2. `errPromotionContention` can consume the transaction's retry budget after
+   four consecutive races and surface as a generic 500; mapping it to
+   503 + `Retry-After` is a follow-up (probability is low).
+3. The send path's 202 → queued patch has no store-level integration test (the
+   retry path does); the unit and gate paths are covered.
+
+None of these is a correctness gap in the covered paths; they are backlog for
+the next W2 touch.
+
 ## Limitations (explicit)
 
 - A kernel `user.message` commit for a session with **no run row** still inserts

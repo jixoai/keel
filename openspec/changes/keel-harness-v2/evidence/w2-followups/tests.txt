@@ -1,6 +1,10 @@
 # W2 follow-ups (P2 closure) — targeted test run (final)
 # date: 2026-11-23T09:29Z (local run; host macOS arm64)
 # go: go version go1.27.3 darwin/arm64
+# nsh: the `nsh check` lines below ran with the pinned nsh 0.4.0 (bba76ef
+# nightly), exit 0. This machine's 0.6.0 nightly reports two pre-existing
+# speech errors (`PickedFile.file` nullability) unrelated to this lane; see
+# web-queue-p1.txt.
 # db: PostgreSQL 18.7 (Homebrew), local single instance
 # DSN: postgres://kzf@127.0.0.1:5432/postgres?sslmode=disable&pool_max_conns=10
 # (the pool bound keeps this lane from exhausting the shared instance while
