@@ -38,6 +38,7 @@ import { capabilityOf } from "../../data/permission-catalog";
 import { Paper } from "./shell";
 import { groupDisplayName, type AuditEventView, type AuditKind } from "../../data/identity";
 import {
+  BOOK_TOUCH_PX,
   FactLine,
   Hairline,
   PageEmpty,
@@ -46,9 +47,11 @@ import {
   PagePermission,
   PageUnavailable,
   PressRow,
+  Segmented,
   SheetHead,
   StateNote,
   copyText,
+  fieldHeightProp,
   formatWhen,
   isMobile,
   isNarrow,
@@ -160,7 +163,7 @@ function FilterStamp(props: { label: string; testID: string; onPress: () => void
       style={{
         flex: 1,
         minWidth: 120,
-        height: 44,
+        height: BOOK_TOUCH_PX,
         paddingHorizontal: space.md,
         flexDirection: "row",
         alignItems: "center",
@@ -168,7 +171,7 @@ function FilterStamp(props: { label: string; testID: string; onPress: () => void
         gap: space.xs,
         borderRadius: radius.sm,
         borderWidth: 1,
-        borderColor: color.input,
+        borderColor: color.fieldEdge,
         backgroundColor: color.field,
       }}
     >
@@ -273,7 +276,7 @@ export function RecordsChapter() {
                 <Button
                   testID="records-export"
                   variant="outline"
-                  size={isMobile() ? "default" : "sm"}
+                  size="field"
                   icon="download"
                   label="导出 CSV"
                   accessibilityLabel="导出 CSV"
@@ -382,51 +385,21 @@ function RecordsFilters() {
   return (
     <View style={{ flexDirection: "column", gap: space.sm }}>
       <View style={{ flexDirection: "row", gap: space.sm, alignItems: "center", flexWrap: "wrap" }}>
-        <View
+        <Segmented
           testID="records-range"
-          style={{
-            flexDirection: "row",
-            gap: 2,
-            padding: 2,
-            borderRadius: radius.sm,
-            backgroundColor: color.muted,
-            borderWidth: 1,
-            borderColor: color.border,
-          }}
-        >
-          <Each of={rangeItems} key={(item) => item.value}>
-            {(item) => {
-              const active = () => identityAccess.recordsRange() === item().value;
-              return (
-                <View
-                  testID={`records-range-${item().value}`}
-                  role="button"
-                  focusable
-                  onPress={() => identityAccess.setRecordsRange(item().value as "today" | "7d" | "30d")}
-                  accessibilityLabel={`时间范围 ${item().title}`}
-                  accessibilityState={{ selected: active() }}
-                  style={{
-                    minHeight: isMobile() ? 44 : 28,
-                    paddingHorizontal: space.md,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: radius.xs,
-                    backgroundColor: active() ? color.selected : "transparent",
-                  }}
-                >
-                  <Text style={{ fontSize: typeScale.sm, color: active() ? color.foreground : color.mutedForeground }}>{item().title}</Text>
-                </View>
-              );
-            }}
-          </Each>
-        </View>
+          accessibilityLabel="时间范围"
+          itemAccessibilityPrefix="时间范围"
+          items={rangeItems.map((item) => ({ id: item.value, label: item.title }))}
+          value={identityAccess.recordsRange()}
+          onSelect={(id) => identityAccess.setRecordsRange(id as "today" | "7d" | "30d")}
+        />
         <If
           when={isMobile()}
           else={
             <>
               <Select
                 testID="records-kind"
-                size="sm"
+                size="field"
                 items={kindFilterItems()}
                 value={identityAccess.recordsKind()}
                 onChange={(value) => identityAccess.setRecordsKind(value ?? "all")}
@@ -435,7 +408,7 @@ function RecordsFilters() {
               />
               <Select
                 testID="records-result"
-                size="sm"
+                size="field"
                 items={[
                   { value: "all", title: "全部结果" },
                   { value: "ok", title: "成功" },
@@ -461,34 +434,16 @@ function RecordsFilters() {
             onPress={() => mobileFilter.set("result")}
           />
         </If>
-        {/* The kit's Input paints its field on the native input (19px tall)
-            while the row's Selects are 34px. The wrapper owns the visual
-            field height and centers the native field inside it, so the filter
-            row has one height language on both pointer and touch layouts. */}
-        <View
-          style={{
-            flex: 1,
-            minWidth: 160,
-            height: isMobile() ? 44 : 34,
-            flexDirection: "row",
-            alignItems: "center",
-            paddingHorizontal: space.md,
-            borderRadius: radius.sm,
-            borderWidth: 1,
-            borderColor: color.input,
-            backgroundColor: color.field,
-          }}
-        >
-          <Input
-            testID="records-search"
-            value={identityAccess.recordsQuery()}
-            onChange={(value) => identityAccess.recordsQuery.set(value)}
-            placeholder="搜索操作者或对象"
-            accessibilityLabel="搜索操作者或对象"
-            size="sm"
-            style={{ flex: 1, backgroundColor: "transparent", borderWidth: 0, paddingHorizontal: 0 }}
-          />
-        </View>
+        <Input
+          testID="records-search"
+          value={identityAccess.recordsQuery()}
+          onChange={(value) => identityAccess.recordsQuery.set(value)}
+          placeholder="搜索操作者或对象"
+          accessibilityLabel="搜索操作者或对象"
+          size="field"
+          height={fieldHeightProp()}
+          style={{ flex: 1, minWidth: 160 }}
+        />
       </View>
       <Hairline />
     </View>
@@ -505,7 +460,7 @@ function RecordsGrid(props: { selectedId: () => string | null; inline: boolean }
     <View style={{ flexDirection: "row", gap: space.lg, minHeight: 0 }}>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Table testID="records-table" bare accessibilityLabel="记录列表">
-          <TableHeaderRow>
+          <TableHeaderRow testID="records-table-head">
             <Th width={110}>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>时间</Text>
             </Th>

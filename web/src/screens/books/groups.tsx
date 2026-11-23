@@ -62,6 +62,7 @@ import {
   type PermissionGroupSummary,
 } from "../../data/identity";
 import {
+  BOOK_FIELD_HEIGHT_PX,
   BandHead,
   Hairline,
   PageEmpty,
@@ -73,6 +74,7 @@ import {
   SheetHead,
   StateNote,
   ScopeStamp,
+  fieldHeightProp,
   formatWhen,
   isMobile,
   touchStyle,
@@ -153,6 +155,7 @@ export function GroupsIndex() {
           onChange={(value) => identityAccess.groupsQuery.set(value)}
           placeholder="搜索权限组"
           accessibilityLabel="搜索权限组"
+          size="field"
         />
       </View>
       <ScrollArea testID="groups-index-scroll" accessibilityLabel="权限组列表" style={{ flex: 1, minHeight: 0 }}>
@@ -212,12 +215,12 @@ export function GroupsIndex() {
           <Button
             testID="groups-create"
             variant="outline"
-            size="sm"
+            size="field"
             icon="plus"
             label="新建权限组"
             accessibilityLabel="新建权限组"
             onPress={() => createGroupDialog.set(true)}
-            style={{ alignSelf: "stretch" }}
+            style={[{ alignSelf: "stretch" }, touchStyle()]}
           />
         </If>
       </View>
@@ -253,7 +256,7 @@ export function GroupsPage() {
             canManageGroups() && all().length > 0 && !busy() ? (
               <Button
                 testID="groups-create-page"
-                size={isMobile() ? "default" : "sm"}
+                size="field"
                 icon="plus"
                 label="新建权限组"
                 accessibilityLabel="新建权限组"
@@ -270,7 +273,8 @@ export function GroupsPage() {
             onChange={(value) => identityAccess.groupsQuery.set(value)}
             placeholder="搜索权限组"
             accessibilityLabel="搜索权限组"
-            style={{ height: isMobile() ? 44 : undefined }}
+            size="field"
+            height={fieldHeightProp()}
           />
         </SheetHead>
         <If when={identityAccess.groupsLoading() && all().length === 0}>
@@ -321,17 +325,17 @@ const GROUP_MODIFIED_WIDTH = 130;
 function GroupsTable() {
   return (
     <Table testID="groups-table" bare accessibilityLabel="权限组列表">
-      <TableHeaderRow>
+      <TableHeaderRow testID="groups-table-head">
         <Th>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>权限组</Text>
         </Th>
         <Th width={GROUP_TYPE_WIDTH}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>类型</Text>
         </Th>
-        <Th width={GROUP_MEMBERS_WIDTH}>
+        <Th width={GROUP_MEMBERS_WIDTH} align="end">
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>成员</Text>
         </Th>
-        <Th width={GROUP_CAPABILITIES_WIDTH}>
+        <Th width={GROUP_CAPABILITIES_WIDTH} align="end">
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>能力</Text>
         </Th>
         <Th width={GROUP_MODIFIED_WIDTH}>
@@ -360,12 +364,12 @@ function GroupsTable() {
                   style={{ alignSelf: "flex-start" }}
                 />
               </Td>
-              <Td width={GROUP_MEMBERS_WIDTH}>
+              <Td width={GROUP_MEMBERS_WIDTH} align="end">
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                   {row()?.memberCount !== undefined ? `${row()?.memberCount} 人` : "—"}
                 </Text>
               </Td>
-              <Td width={GROUP_CAPABILITIES_WIDTH}>
+              <Td width={GROUP_CAPABILITIES_WIDTH} align="end">
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                   {row()?.grantCount !== undefined ? `${row()?.grantCount} 项` : "—"}
                 </Text>
@@ -636,8 +640,9 @@ function GroupMatrix(props: { editable: boolean; builtin: boolean }) {
             onChange={(value) => identityAccess.groupSearch.set(value)}
             placeholder="搜索能力或 key"
             accessibilityLabel="搜索能力"
-            size="sm"
-            style={{ width: isMobile() ? 150 : 220, height: isMobile() ? 44 : undefined }}
+            size="field"
+            height={fieldHeightProp()}
+            style={{ width: isMobile() ? 150 : 220 }}
           />
         }
       />
@@ -692,7 +697,7 @@ function GroupMatrix(props: { editable: boolean; builtin: boolean }) {
           style={{
             flexDirection: "row",
             gap: space.md,
-            height: 28,
+            height: BOOK_FIELD_HEIGHT_PX,
             alignItems: "center",
             borderBottomWidth: 1,
             borderBottomColor: color.border,
@@ -1064,7 +1069,7 @@ function GroupSignoff() {
             <Button
               testID="group-save"
               variant={dirty() ? "default" : "outline"}
-              size={isMobile() ? "default" : "sm"}
+              size="field"
               icon="check"
               label={identityAccess.groupSaving() ? "登记中…" : "检查并登记"}
               accessibilityLabel="检查并登记"
@@ -1336,8 +1341,9 @@ function AddMemberDialog(props: { groupId: string }) {
         onChange={(value) => query.set(value)}
         placeholder="搜索名字或用户名"
         accessibilityLabel="搜索成员"
-                style={{ height: isMobile() ? 44 : undefined }}
-        />
+        size="field"
+        height={fieldHeightProp()}
+      />
       <If when={rows().length === 0}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有可添加的人。换个名字，或先建账号。</Text>
       </If>
@@ -1424,7 +1430,8 @@ function CreateGroupDialog() {
           onChange={(value) => name.set(value)}
           placeholder="例如 客服组"
           accessibilityLabel="权限组名称"
-          style={{ height: isMobile() ? 44 : undefined }}
+          size="field"
+          height={fieldHeightProp()}
         />
       </Field>
       <If when={error() !== null}>
@@ -1491,7 +1498,8 @@ function CopyGroupDialog(props: { groupId: string }) {
           value={name()}
           onChange={(value) => name.set(value)}
           accessibilityLabel="副本名称"
-          style={{ height: isMobile() ? 44 : undefined }}
+          size="field"
+          height={fieldHeightProp()}
         />
       </Field>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>

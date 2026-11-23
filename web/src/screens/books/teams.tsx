@@ -19,6 +19,7 @@ import {
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  Field,
   Input,
   ScrollArea,
   Select,
@@ -62,6 +63,7 @@ import {
   SheetHead,
   StateNote,
   copyText,
+  fieldHeightProp,
   formatWhen,
   isMobile,
   isNarrow,
@@ -189,7 +191,7 @@ export function TeamsIndex() {
             <If when={can("team_bot.manage")}>
               <Button
                 testID="teams-create"
-                size="sm"
+                size="field"
                 icon="plus"
                 label="新建团队"
                 accessibilityLabel="新建团队"
@@ -211,12 +213,13 @@ export function TeamsIndex() {
             onChange={(value) => botAccess.teamsQuery.set(value)}
             placeholder="搜索团队或使命"
             accessibilityLabel="搜索团队"
-            size="sm"
-            style={{ width: isMobile() ? "100%" : 280, height: isMobile() ? 44 : undefined }}
+            size="field"
+            height={fieldHeightProp()}
+            style={{ width: isMobile() ? "100%" : 280 }}
           />
           <Select
             testID="teams-status-filter"
-            size={isMobile() ? "lg" : "sm"}
+            size="field"
             items={[
               { value: "all", title: "全部状态" },
               { value: "active", title: "未归档" },
@@ -225,7 +228,7 @@ export function TeamsIndex() {
             value={botAccess.teamsStatus()}
             onChange={(value) => botAccess.teamsStatus.set((value ?? "all") as "all" | "active" | "archived")}
             accessibilityLabel="按状态筛选"
-            height={isMobile() ? 44 : undefined}
+            height={fieldHeightProp()}
             style={{ width: isMobile() ? "100%" : 150 }}
           />
         </View>
@@ -333,7 +336,7 @@ function latestRun(teamId: string): StartedRun | undefined {
 function TeamsTable(props: { rows: TeamBotView[] }) {
   return (
     <Table testID="teams-table" bare accessibilityLabel="团队列表">
-      <TableHeaderRow>
+      <TableHeaderRow testID="teams-table-head">
         <Th>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>团队</Text>
         </Th>
@@ -343,7 +346,7 @@ function TeamsTable(props: { rows: TeamBotView[] }) {
         <Th width={220}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>使命</Text>
         </Th>
-        <Th width={86}>
+        <Th width={86} align="end">
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>成员</Text>
         </Th>
         <Th width={110}>
@@ -383,7 +386,7 @@ function TeamsTable(props: { rows: TeamBotView[] }) {
                 {team().mission}
               </Text>
             </Td>
-            <Td>
+            <Td align="end">
               <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{team().roster.length}</Text>
             </Td>
             <Td>{teamStatusBadge(team())}</Td>
@@ -1091,7 +1094,7 @@ function TeamSignoff() {
         />
         <Button
           testID="team-save"
-          size="sm"
+          size="field"
           icon="check"
           label="检查并登记"
           accessibilityLabel="检查并登记"
@@ -1368,8 +1371,8 @@ function TeamAddMemberDialog() {
           onChange={teamMemberQuery.set}
           placeholder="搜索 Bot 或账号"
           accessibilityLabel="搜索可加入的 Bot"
-          size="sm"
-          style={{ height: isMobile() ? 44 : undefined }}
+          size="field"
+          height={fieldHeightProp()}
         />
         <If when={!can("bot.invoke")}>
           <StateNote
@@ -1463,6 +1466,7 @@ function TeamCaptainDialog() {
       <View style={{ flexDirection: "column", gap: space.md }}>
         <Select
           testID="team-captain-select"
+          size="field"
           items={others().map((seat) => ({
             value: seat.botId,
             title: botAccess.botNameOf(seat.botId),
@@ -1470,7 +1474,7 @@ function TeamCaptainDialog() {
           value={teamCaptainChoice()}
           onChange={(value) => teamCaptainChoice.set(value ?? "")}
           accessibilityLabel="新队长"
-          height={isMobile() ? 44 : undefined}
+          height={fieldHeightProp()}
         />
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           更换队长会改变下一次启动时谁负责拆分任务；原来的队长留在名单里，变成普通成员。
@@ -1522,12 +1526,18 @@ function TeamCreateDialog() {
     >
       <ScrollArea maxHeight={isMobile() ? 420 : 520} style={{ flexDirection: "column" }}>
         <View style={{ flexDirection: "column", gap: space.md }}>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>团队名</Text>
-            <Input testID="team-create-name" value={teamCreateName()} onChange={teamCreateName.set} placeholder="客服团队" accessibilityLabel="团队名" />
-          </View>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>使命</Text>
+          <Field label="团队名">
+            <Input
+              testID="team-create-name"
+              value={teamCreateName()}
+              onChange={teamCreateName.set}
+              placeholder="客服团队"
+              accessibilityLabel="团队名"
+              size="field"
+              height={fieldHeightProp()}
+            />
+          </Field>
+          <Field label="使命">
             <Textarea
               testID="team-create-mission"
               value={teamCreateMission()}
@@ -1536,22 +1546,22 @@ function TeamCreateDialog() {
               placeholder="在 24 小时内解决客户问题；无法解决时升级给人工。"
               accessibilityLabel="团队使命"
             />
-          </View>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>队长</Text>
+          </Field>
+          <Field label="队长">
             <Select
               testID="team-create-captain"
+              size="field"
               items={captainOptions()}
               value={teamCreateCaptain()}
               searchable
               onChange={(value) => teamCreateCaptain.set(value ?? "")}
               accessibilityLabel="团队队长"
-              height={isMobile() ? 44 : undefined}
+              height={fieldHeightProp()}
             />
-            <If when={!can("bot.invoke")}>
-              <StateNote tone="warning" icon="lock" text="创建团队需要你能调用队长：先获得「调用 Bot」能力。" />
-            </If>
-          </View>
+          </Field>
+          <If when={!can("bot.invoke")}>
+            <StateNote tone="warning" icon="lock" text="创建团队需要你能调用队长：先获得「调用 Bot」能力。" />
+          </If>
           <If when={botAccess.teamActionError() !== null}>
             <StateNote tone="danger" icon="alert" text={botAccess.teamActionError() ?? ""} />
           </If>

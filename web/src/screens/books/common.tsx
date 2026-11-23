@@ -26,6 +26,7 @@ import {
   ScrollArea,
   alpha,
   color,
+  controlHeight,
   font,
   lineHeight,
   radius,
@@ -48,6 +49,11 @@ export const BOOK_MATRIX_MAX_WIDTH_PX = 820;
 export const BOOK_MOBILE_MAX_PX = 767;
 export const BOOK_WIDE_MIN_PX = 1440;
 export const BOOK_TOUCH_PX = 44;
+/** The one field height the shell's toolbars, filters and forms share: 34px on
+ * a pointer layout, the 44px touch floor on a phone. A Select, an Input, a
+ * range segment, a scope stamp and a form button all read this, so a row has
+ * one height language instead of a ladder of 19/24/28/32/34 faces. */
+export const BOOK_FIELD_HEIGHT_PX = controlHeight("field");
 /** ≥1280: the records table keeps its 330px detail column; below it the same
  * detail is a right drawer so the table keeps its columns at 1024. */
 export const BOOK_RECORDS_INLINE_MIN_PX = 1280;
@@ -65,6 +71,15 @@ export const recordsInline = (): boolean => windowSize().width >= BOOK_RECORDS_I
  * own height elsewhere. */
 export const touchStyle = (): StyleProp<ViewStyle> =>
   isMobile() ? { height: BOOK_TOUCH_PX, minHeight: BOOK_TOUCH_PX } : null;
+
+/** The height of a field-row control on this layout. */
+export const fieldHeight = (): number => (isMobile() ? BOOK_TOUCH_PX : BOOK_FIELD_HEIGHT_PX);
+
+/** The `height` prop for an Input/Select: `undefined` on a pointer layout (its
+ * `size="field"` decides), the 44px floor on a phone. Never pass
+ * `height: undefined` through `style`: NSH's later-wins merge would erase the
+ * component's own height and collapse the field to its text line. */
+export const fieldHeightProp = (): number | undefined => (isMobile() ? BOOK_TOUCH_PX : undefined);
 
 /** The focus ring at the kit's measured contrast (the kit's own helper is not
  * part of its public surface, so the same two values are repeated here: an
@@ -317,53 +332,17 @@ export function SectionLabel(props: { text: string; note?: string; onNotePress?:
 /** 账号 / 权限组 — the identity chapter's one segmented control (the index
  * column on a wide screen, the page's top row below it). */
 export function IdentitySegmented(props: { section: "accounts" | "groups"; groupCount?: number }) {
-  const items: Array<{ id: "accounts" | "groups"; label: string }> = [
-    { id: "accounts", label: "账号" },
-    { id: "groups", label: "权限组" },
-  ];
   return (
-    <View
+    <Segmented
       testID="identity-segment"
       accessibilityLabel="身份子页"
-      style={{
-        flexDirection: "row",
-        gap: 2,
-        padding: 2,
-        borderRadius: radius.sm,
-        backgroundColor: color.muted,
-        borderWidth: 1,
-        borderColor: color.border,
-      }}
-    >
-      <Each of={items} key={(item) => item.id}>
-        {(item) => {
-          const active = () => props.section === item().id;
-          return (
-            <View
-              testID={`identity-segment-${item().id}`}
-              role="button"
-              focusable
-              onPress={() => store.openIdentitySection(item().id)}
-              accessibilityLabel={item().label}
-              accessibilityState={{ selected: active() }}
-              style={{
-                flex: 1,
-                minHeight: isMobile() ? BOOK_TOUCH_PX : 28,
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: radius.xs,
-                backgroundColor: active() ? color.selected : "transparent",
-              }}
-            >
-              <Text style={{ fontSize: typeScale.sm, color: active() ? color.foreground : color.mutedForeground }}>
-                {item().label}
-                {item().id === "groups" && props.groupCount !== undefined ? ` ${props.groupCount}` : ""}
-              </Text>
-            </View>
-          );
-        }}
-      </Each>
-    </View>
+      items={[
+        { id: "accounts", label: "账号" },
+        { id: "groups", label: "权限组", count: props.groupCount !== undefined ? String(props.groupCount) : undefined },
+      ]}
+      value={props.section}
+      onSelect={(id) => store.openIdentitySection(id as "accounts" | "groups")}
+    />
   );
 }
 
@@ -409,11 +388,15 @@ export function PressRow(props: {
 }
 
 /** A pressable segmented control for a small closed set (chapters, sections,
- * modes). It is the identity segment's grammar, generalised: 44px on a phone,
- * 28px elsewhere. */
+ * modes). The tray is exactly one field tall (34 desktop / 44 touch) and the
+ * options fill it, so a segment sits on the same baseline as the search box
+ * beside it. The 1px tray edge is an inset shadow, not layout: it takes no
+ * height away from the options' touch target. */
 export function Segmented(props: {
   testID?: string;
   accessibilityLabel?: string;
+  /** Prefixes each option's accessibility label (`时间范围 今天`). */
+  itemAccessibilityPrefix?: string;
   items: Array<{ id: string; label: string; count?: string }>;
   value: string;
   disabled?: boolean;
@@ -428,11 +411,10 @@ export function Segmented(props: {
         {
           flexDirection: "row",
           gap: 2,
-          padding: 2,
+          height: fieldHeight(),
           borderRadius: radius.sm,
           backgroundColor: color.muted,
-          borderWidth: 1,
-          borderColor: color.border,
+          boxShadow: `inset 0 0 0 1px ${color.border}`,
         },
         props.style ?? null,
       ]}
@@ -448,13 +430,25 @@ export function Segmented(props: {
               onPress={() => {
                 if (props.disabled !== true) props.onSelect(item().id);
               }}
-              accessibilityLabel={item().label}
+              accessibilityLabel={
+                props.itemAccessibilityPrefix
+                  ? `${props.itemAccessibilityPrefix} ${item().label}`
+                  : item().label
+              }
               accessibilityState={{ selected: active(), disabled: props.disabled === true }}
               hoverStyle={active() || props.disabled ? undefined : { backgroundColor: color.hover }}
               focusStyle={booksFocusStyle()}
               style={{
-                flex: 1,
-                minHeight: isMobile() ? BOOK_TOUCH_PX : 28,
+                flexGrow: 1,
+                flexShrink: 1,
+                // `flex: 1` would make the tray's max-content the sum of the
+                // items' zero bases, so a content-sized row clipped the last
+                // label. A content basis keeps every label whole; the options
+                // still grow to fill a fixed-width column (the identity index).
+                flexBasis: "auto",
+                minWidth: 0,
+                minHeight: 0,
+                alignSelf: "stretch",
                 alignItems: "center",
                 justifyContent: "center",
                 paddingHorizontal: space.sm,
@@ -467,6 +461,7 @@ export function Segmented(props: {
                   fontSize: typeScale.sm,
                   color: active() ? color.foreground : color.mutedForeground,
                   numberOfLines: 1,
+                  textOverflow: "ellipsis",
                 }}
               >
                 {item().label}
@@ -688,7 +683,7 @@ export function ScopeStamp(props: { label: string; unset?: boolean; disabled?: b
       hoverStyle={props.onPress && !props.disabled ? { borderColor: color.ring } : undefined}
       focusStyle={booksFocusStyle()}
       style={{
-        height: isMobile() ? BOOK_TOUCH_PX : 32,
+        height: fieldHeight(),
         minWidth: 120,
         paddingHorizontal: space.sm,
         flexDirection: "row",

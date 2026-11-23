@@ -69,6 +69,7 @@ import {
   SheetHead,
   StateNote,
   accountKindLabel,
+  fieldHeightProp,
   formatDay,
   formatWhen,
   isMobile,
@@ -192,6 +193,7 @@ export function AccountsIndex() {
           onChange={(value) => identityAccess.accountsQuery.set(value)}
           placeholder="搜索名字、用户名或权限组"
           accessibilityLabel="搜索账号"
+          size="field"
         />
       </View>
       <ScrollArea testID="accounts-index-scroll" accessibilityLabel="账号列表" style={{ flex: 1, minHeight: 0 }}>
@@ -266,12 +268,12 @@ export function AccountsIndex() {
           <Button
             testID="accounts-create"
             variant="outline"
-            size="sm"
+            size="field"
             icon="plus"
             label="新建账号"
             accessibilityLabel="新建账号"
             onPress={() => createAccountDialog.set(true)}
-            style={{ alignSelf: "stretch" }}
+            style={[{ alignSelf: "stretch" }, touchStyle()]}
           />
         </If>
       </View>
@@ -306,7 +308,7 @@ export function AccountsPage() {
             canManageAccounts() && all().length > 0 && !busy() ? (
               <Button
                 testID="accounts-create-page"
-                size={isMobile() ? "default" : "sm"}
+                size="field"
                 icon="plus"
                 label="新建账号"
                 accessibilityLabel="新建账号"
@@ -324,14 +326,16 @@ export function AccountsPage() {
               onChange={(value) => identityAccess.accountsQuery.set(value)}
               placeholder="搜索名字、用户名或权限组"
               accessibilityLabel="搜索账号"
-              style={{ flex: 1, minWidth: 180, height: isMobile() ? 44 : undefined }}
+              size="field"
+              height={fieldHeightProp()}
+              style={{ flex: 1, minWidth: 180 }}
             />
             <If
               when={isMobile()}
               else={
                 <Select
                   testID="accounts-status-filter"
-                  size="sm"
+                  size="field"
                   items={[
                     { value: "all", title: "全部状态" },
                     { value: "active", title: "启用" },
@@ -466,7 +470,7 @@ export function AccountsPage() {
 function AccountsTable() {
   return (
     <Table testID="accounts-table" bare accessibilityLabel="账号列表">
-      <TableHeaderRow>
+      <TableHeaderRow testID="accounts-table-head">
         <Th>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>账号</Text>
         </Th>
@@ -723,7 +727,7 @@ function AccountHead(props: { accountId: string; name: string; disabled: boolean
           <If when={!props.superAdmin && canGrantMembership()}>
             <Button
               testID="account-add-group-head"
-              size={isMobile() ? "default" : "sm"}
+              size="field"
               icon="user-plus"
               label="加入权限组"
               accessibilityLabel="加入权限组"
@@ -1396,7 +1400,8 @@ function CreateAccountForm(props: {
           onChange={(value) => props.username.set(value)}
           placeholder="例如 zhangsan"
           accessibilityLabel="用户名"
-          style={{ height: isMobile() ? 44 : undefined }}
+          size="field"
+          height={fieldHeightProp()}
         />
       </Field>
       <Field label="显示名" hint="列表与记录里显示的名字。">
@@ -1406,12 +1411,14 @@ function CreateAccountForm(props: {
           onChange={(value) => props.displayName.set(value)}
           placeholder="例如 张三"
           accessibilityLabel="显示名"
-          style={{ height: isMobile() ? 44 : undefined }}
+          size="field"
+          height={fieldHeightProp()}
         />
       </Field>
       <Field label="类型" hint="人账号用密码登录；Bot/服务账号用密钥登录。">
         <Select
           testID="account-create-kind"
+          size="field"
           items={[
             { value: "human", title: "人" },
             { value: "bot", title: "Bot" },
@@ -1420,6 +1427,7 @@ function CreateAccountForm(props: {
           value={props.kind()}
           onChange={(value) => props.kind.set((value as "human" | "bot" | "service") ?? "human")}
           accessibilityLabel="账号类型"
+          height={fieldHeightProp()}
         />
       </Field>
       <If when={props.kind() === "human"}>
@@ -1430,11 +1438,13 @@ function CreateAccountForm(props: {
               value={props.password()}
               onChange={(value) => props.password.set(value)}
               accessibilityLabel="临时密码"
+              size="field"
+              height={fieldHeightProp()}
               style={{ flex: 1 }}
             />
             <Button
               variant="outline"
-              size="sm"
+              size="field"
               label="换一个"
               accessibilityLabel="换一个临时密码"
               onPress={() => props.password.set(temporaryPassword())}
@@ -1488,8 +1498,9 @@ export function AddGroupDialog(props: { accountId: string }) {
         onChange={(value) => query.set(value)}
         placeholder="搜索权限组"
         accessibilityLabel="搜索权限组"
-                style={{ height: isMobile() ? 44 : undefined }}
-        />
+        size="field"
+        height={fieldHeightProp()}
+      />
       <If when={rows().length === 0}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           没有可加入的组。这个账号已经在所有组里，或还没有更多组。
@@ -1640,11 +1651,13 @@ function ResetPasswordDialog() {
                 value={password()}
                 onChange={(value) => password.set(value)}
                 accessibilityLabel="临时密码"
+                size="field"
+                height={fieldHeightProp()}
                 style={{ flex: 1 }}
               />
               <Button
                 variant="outline"
-                size="sm"
+                size="field"
                 label="换一个"
                 accessibilityLabel="换一个临时密码"
                 onPress={() => password.set(temporaryPassword())}

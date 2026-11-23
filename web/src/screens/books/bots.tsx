@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  Field,
   Input,
   ScrollArea,
   Select,
@@ -51,6 +52,7 @@ import { capabilityOf, scopeLabel, type CapabilityRisk } from "../../data/permis
 import type { BotKeyView, BotView, ModelRef, PermissionScope } from "../../data/identity";
 import { displayNameOf, selectionDisplay } from "../../data/wire";
 import {
+  BOOK_FIELD_HEIGHT_PX,
   BandHead,
   BookAvatar,
   FactLine,
@@ -69,6 +71,7 @@ import {
   SheetHead,
   StateNote,
   copyText,
+  fieldHeightProp,
   formatWhen,
   isMobile,
   isNarrow,
@@ -240,7 +243,7 @@ export function BotsIndex() {
             <If when={can("bot.create")}>
               <Button
                 testID="bots-create"
-                size="sm"
+                size="field"
                 icon="plus"
                 label="新建 Bot"
                 accessibilityLabel="新建 Bot"
@@ -257,24 +260,25 @@ export function BotsIndex() {
             onChange={(value) => botAccess.botsQuery.set(value)}
             placeholder="搜索名字、账号或模型"
             accessibilityLabel="搜索 Bot"
-            size="sm"
-            style={{ width: isMobile() ? "100%" : 260, height: isMobile() ? 44 : undefined }}
+            size="field"
+            height={fieldHeightProp()}
+            style={{ width: isMobile() ? "100%" : 260 }}
           />
           <View style={{ width: isMobile() ? "48%" : 140 }}>
             <Select
               testID="bots-kind-filter"
-              size={isMobile() ? "lg" : "sm"}
+              size="field"
               items={[{ value: "all", title: "全部模型类型" }, ...MODEL_KIND_ITEMS]}
               value={botAccess.botsModelKind()}
               onChange={(value) => botAccess.botsModelKind.set(value ?? "all")}
               accessibilityLabel="按模型类型筛选"
-              height={isMobile() ? 44 : undefined}
+              height={fieldHeightProp()}
             />
           </View>
           <View style={{ width: isMobile() ? "48%" : 130 }}>
             <Select
               testID="bots-status-filter"
-              size={isMobile() ? "lg" : "sm"}
+              size="field"
               items={[
                 { value: "all", title: "全部状态" },
                 { value: "active", title: "可用" },
@@ -283,7 +287,7 @@ export function BotsIndex() {
               value={botAccess.botsStatus()}
               onChange={(value) => botAccess.botsStatus.set((value ?? "all") as "all" | "active" | "archived")}
               accessibilityLabel="按状态筛选"
-              height={isMobile() ? 44 : undefined}
+              height={fieldHeightProp()}
             />
           </View>
         </View>
@@ -369,7 +373,7 @@ export function BotsIndex() {
 function BotsTable(props: { rows: BotView[] }) {
   return (
     <Table testID="bots-table" bare accessibilityLabel="Bot 列表">
-      <TableHeaderRow>
+      <TableHeaderRow testID="bots-table-head">
         <Th>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>Bot</Text>
         </Th>
@@ -930,6 +934,7 @@ function BotWorkSection() {
         <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>模型类型</Text>
         <Select
           testID="bot-model-kind"
+          size="field"
           items={MODEL_KIND_ITEMS}
           value={draft()?.modelKind ?? bot()?.modelKind ?? "text"}
           disabled={!canManage()}
@@ -937,7 +942,7 @@ function BotWorkSection() {
             if (value) botAccess.setBotField("modelKind", value);
           }}
           accessibilityLabel="模型类型"
-          height={isMobile() ? 44 : undefined}
+          height={fieldHeightProp()}
         />
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           模型类型决定它能处理文字、图像、实时语音或做判断；改变后请确认默认模型仍然可用。
@@ -947,6 +952,7 @@ function BotWorkSection() {
         <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>默认模型</Text>
         <Select
           testID="bot-default-model"
+          size="field"
           items={modelItems()}
           value={modelKeyOf(draft()?.defaultModel)}
           disabled={!canManage() || modelItems().length === 0}
@@ -957,7 +963,7 @@ function BotWorkSection() {
             if (model) botAccess.setBotDefaultModel(model);
           }}
           accessibilityLabel="默认模型"
-          height={isMobile() ? 44 : undefined}
+          height={fieldHeightProp()}
         />
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           运行时可以由调用参数覆盖；每次会话会记录实际使用的模型。{" "}
@@ -1026,8 +1032,9 @@ function BotCapabilitiesSection() {
             onChange={(value) => botCapQuery.set(value)}
             placeholder="为什么它不能…？输入能力名"
             accessibilityLabel="搜索能力"
-            size="sm"
-            style={{ width: "100%", height: isMobile() ? 44 : undefined }}
+            size="field"
+            height={fieldHeightProp()}
+            style={{ width: "100%" }}
           />
         </View>
       </View>
@@ -1065,7 +1072,7 @@ function BotCapabilitiesSection() {
                 flexDirection: "row",
                 alignItems: "center",
                 gap: space.md,
-                height: 28,
+                height: BOOK_FIELD_HEIGHT_PX,
                 borderBottomWidth: 1,
                 borderBottomColor: color.border,
               }}
@@ -1225,7 +1232,7 @@ function BotCapabilityRowsPhone(props: { rows: BotOption[]; canManage: boolean }
                 <If when={props.canManage} else={<Badge variant="outline" label={row().allowed ? "允许" : "收窄"} />}>
                   <Select
                     testID={`bot-harness-${row().key}`}
-                    size="lg"
+                    size="field"
                     items={[
                       { value: "allow", title: "允许" },
                       { value: "narrow", title: "收窄" },
@@ -1233,7 +1240,7 @@ function BotCapabilityRowsPhone(props: { rows: BotOption[]; canManage: boolean }
                     value={row().allowed ? "allow" : "narrow"}
                     onChange={(value) => botAccess.setHarnessAllowed(row().key, value === "allow")}
                     accessibilityLabel={`${row().label} 的 Bot 授权`}
-                    height={isMobile() ? 44 : undefined}
+                    height={fieldHeightProp()}
                   />
                 </If>
               </View>
@@ -1320,7 +1327,7 @@ function BotSignoff() {
         />
         <Button
           testID="bot-save"
-          size="sm"
+          size="field"
           icon="check"
           label="检查并登记"
           accessibilityLabel="检查并登记"
@@ -1748,6 +1755,8 @@ function BotIssueDialog() {
           onChange={botIssueLabel.set}
           placeholder="生产 Webhook"
           accessibilityLabel="密钥标签"
+          size="field"
+          height={fieldHeightProp()}
         />
         <If when={botAccess.botActionError() !== null}>
           <StateNote tone="danger" icon="alert" text={botAccess.botActionError() ?? ""} />
@@ -1914,6 +1923,7 @@ function BotRebindDialog() {
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>归属账号</Text>
         <Select
           testID="bot-rebind-account"
+          size="field"
           items={accounts().map((entry) => ({
             value: entry.accountId,
             title: `${entry.displayName || entry.username} · ${entry.kind === "bot" ? "Bot" : "人"}`,
@@ -1925,17 +1935,18 @@ function BotRebindDialog() {
             botRebindProfile.set("");
           }}
           accessibilityLabel="归属账号"
-          height={isMobile() ? 44 : undefined}
+          height={fieldHeightProp()}
         />
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>身份档案（账号 + 人设）</Text>
         <Select
           testID="bot-rebind-profile"
+          size="field"
           items={accountProfiles().map((profile) => ({ value: profile.profileId, title: labelOf(profile.profileId) }))}
           value={botRebindProfile()}
           disabled={accountProfiles().length === 0}
           onChange={(value) => botRebindProfile.set(value ?? "")}
           accessibilityLabel="身份档案"
-          height={isMobile() ? 44 : undefined}
+          height={fieldHeightProp()}
         />
         <If when={accountProfiles().length === 0}>
           <StateNote
@@ -2023,62 +2034,59 @@ function BotCreateDialog() {
     >
       <ScrollArea maxHeight={isMobile() ? 420 : 520} style={{ flexDirection: "column" }}>
         <View style={{ flexDirection: "column", gap: space.md }}>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>名字</Text>
+          <Field label="名字">
             <Input
               testID="bot-create-name"
               value={botCreateName()}
               onChange={botCreateName.set}
               placeholder="客服一号"
               accessibilityLabel="Bot 名字"
+              size="field"
+              height={fieldHeightProp()}
             />
-          </View>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>身份档案（账号 + 人设）</Text>
+          </Field>
+          <Field
+            label="身份档案（账号 + 人设）"
+            hint={profiles().length === 0 ? "还没有可用的身份档案。先让管理员为账号建立身份档案，再回来创建 Bot。" : undefined}
+          >
             <Select
               testID="bot-create-profile"
+              size="field"
               items={profiles().map((profile) => ({ value: profile.profileId, title: profileLabel(profile.profileId) }))}
               value={botCreateProfile()}
               searchable
               onChange={(value) => botCreateProfile.set(value ?? "")}
               accessibilityLabel="身份档案"
-              height={isMobile() ? 44 : undefined}
+              height={fieldHeightProp()}
             />
-            <If when={profiles().length === 0}>
-              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                还没有可用的身份档案。先让管理员为账号建立身份档案，再回来创建 Bot。
-              </Text>
-            </If>
-          </View>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>模型类型</Text>
+          </Field>
+          <Field label="模型类型">
             <Select
               testID="bot-create-kind"
+              size="field"
               items={MODEL_KIND_ITEMS}
               value={botCreateKind()}
               onChange={(value) => botCreateKind.set(value ?? "text")}
               accessibilityLabel="模型类型"
-              height={isMobile() ? 44 : undefined}
+              height={fieldHeightProp()}
             />
-          </View>
-          <View style={{ flexDirection: "column", gap: space.xs }}>
-            <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>默认模型</Text>
+          </Field>
+          <Field
+            label="默认模型"
+            hint={modelItems().length === 0 ? "模型目录还没有读到；先去「设置 → 模型接入」检查。" : undefined}
+          >
             <Select
               testID="bot-create-model"
+              size="field"
               items={modelItems()}
               value={botCreateModel()}
               searchable
               disabled={modelItems().length === 0}
               onChange={(value) => botCreateModel.set(value ?? "")}
               accessibilityLabel="默认模型"
-              height={isMobile() ? 44 : undefined}
+              height={fieldHeightProp()}
             />
-            <If when={modelItems().length === 0}>
-              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                模型目录还没有读到；先去「设置 → 模型接入」检查。
-              </Text>
-            </If>
-          </View>
+          </Field>
           <StateNote
             tone="info"
             icon="info"
