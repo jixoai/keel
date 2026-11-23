@@ -461,15 +461,34 @@ function RecordsFilters() {
             onPress={() => mobileFilter.set("result")}
           />
         </If>
-        <Input
-          testID="records-search"
-          value={identityAccess.recordsQuery()}
-          onChange={(value) => identityAccess.recordsQuery.set(value)}
-          placeholder="搜索操作者或对象"
-          accessibilityLabel="搜索操作者或对象"
-          size="sm"
-          style={{ flex: 1, minWidth: 160, height: isMobile() ? 44 : undefined }}
-        />
+        {/* The kit's Input paints its field on the native input (19px tall)
+            while the row's Selects are 34px. The wrapper owns the visual
+            field height and centers the native field inside it, so the filter
+            row has one height language on both pointer and touch layouts. */}
+        <View
+          style={{
+            flex: 1,
+            minWidth: 160,
+            height: isMobile() ? 44 : 34,
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: space.md,
+            borderRadius: radius.sm,
+            borderWidth: 1,
+            borderColor: color.input,
+            backgroundColor: color.field,
+          }}
+        >
+          <Input
+            testID="records-search"
+            value={identityAccess.recordsQuery()}
+            onChange={(value) => identityAccess.recordsQuery.set(value)}
+            placeholder="搜索操作者或对象"
+            accessibilityLabel="搜索操作者或对象"
+            size="sm"
+            style={{ flex: 1, backgroundColor: "transparent", borderWidth: 0, paddingHorizontal: 0 }}
+          />
+        </View>
       </View>
       <Hairline />
     </View>
