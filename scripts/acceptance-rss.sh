@@ -223,6 +223,7 @@ attach_mode() {
     say "attach: port $PORT is listening; resolving its owner via /v1/health + lsof"
   fi
   mkdir -p "$(dirname "$log")"
+  rm -f "$out"  # a stale summary from an earlier run must not be printed
   local target_args
   if [ -n "$PID" ]; then target_args=(--pid "$PID"); else target_args=(--port "$PORT"); fi
   # shellcheck disable=SC2086
