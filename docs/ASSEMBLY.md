@@ -230,7 +230,7 @@ _, err := assembly.Prepare(docs, registry, []assembly.Requirement{
 | 函数 | 作用 |
 |---|---|
 | `ServiceRowID(service)` | `keel.<service>#service` 稳定 row id |
-| `AssemblyBase()` | 把 `DefaultServices()` 的 12 个默认服务映射为 base rows；`Requires` 由服务图的 capability 依赖推导 |
+| `AssemblyBase()` | 把 `DefaultServices()` 的全部默认服务映射为 base rows；`Requires` 由服务图的 capability 依赖推导 |
 | `AssemblyMode(mode)` | 只接线 `serve`（空覆盖）；headless/tui/sdk 明确报错 W8/W9 |
 | `AssemblyConfig(tenant, opts)` | 把 `host.TenantConfig` 映射为 config stage：未启用的服务 → absent row；models 文档派生的 llm 版本 → impl 覆盖 |
 | `AssembledServices(tenant, opts)` | `base → serve → config` 叠加后从 active rows 取服务清单；`Blocked` 视为 loadout 失败 |
