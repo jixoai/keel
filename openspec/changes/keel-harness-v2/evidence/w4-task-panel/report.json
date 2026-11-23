@@ -1,7 +1,7 @@
 {
   "lane": "W4-task-panel",
   "base": "http://127.0.0.1:13752",
-  "startedAt": "2026-11-23T04:24:33.363Z",
+  "startedAt": "2026-11-23T05:41:43.880Z",
   "steps": [
     {
       "label": "workspace shell",
@@ -35,14 +35,6 @@
       "value": {
         "card": 1,
         "confirm": 1
-      }
-    },
-    {
-      "label": "dialog",
-      "kind": "screenshot",
-      "ok": true,
-      "value": {
-        "file": "debug-dialog.png"
       }
     },
     {
@@ -201,6 +193,65 @@
       }
     },
     {
+      "label": "file group",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-panel-files"
+      }
+    },
+    {
+      "label": "attributed file",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "reports/refund-by-channel.csv"
+      }
+    },
+    {
+      "label": "attached file not repeated",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "count": 0
+      }
+    },
+    {
+      "label": "manifest preview",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "清单当前版本"
+      }
+    },
+    {
+      "label": "manifest preview content",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "渠道,退款单,占比"
+      }
+    },
+    {
+      "label": "task panel attributed file 1440",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "task-panel-resources-after-1440.png"
+      }
+    },
+    {
+      "label": "task-panel-resources-after-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
       "label": "380 phone screenshot",
       "kind": "screenshot",
       "ok": true,
@@ -232,5 +283,5 @@
   "pageErrors": [],
   "failedRequests": [],
   "pass": true,
-  "finishedAt": "2026-11-23T04:25:01.764Z"
+  "finishedAt": "2026-11-23T05:42:00.235Z"
 }

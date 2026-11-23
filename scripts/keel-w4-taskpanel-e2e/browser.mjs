@@ -111,7 +111,6 @@ report.steps.push({ label: 'team-start count', kind: 'value', ok: true, value: {
 await page.locator(id('team-start')).first().click();
 await page.waitForTimeout(700);
 report.steps.push({ label: 'dialog visible', kind: 'value', ok: true, value: { card: await page.locator(id('team-start-dialog-card')).count(), confirm: await page.locator(id('team-start-dialog-confirm')).count() } });
-await shot(page, 'dialog', 'debug-dialog.png');
 await page.locator(id('team-start-dialog-confirm')).first().click({ timeout: 8000 });
 await page.waitForTimeout(2000);
 report.steps.push({ label: 'start receipt notice', kind: 'assert', ok: await page.locator('text=团队已启动').first().isVisible(), value: {} });
@@ -157,6 +156,22 @@ note('resource preview', 'assert', await page.locator(id('task-panel-preview')).
 note('resource match', 'assert', await page.locator('text=与引用一致').first().isVisible(), { text: '与引用一致' });
 await shot(page, 'task panel preview 1440', 'task-panel-preview-1440.png');
 await overflow(page, 'task-panel-preview-1440');
+
+// The manifest's own attribution (lastTaskId): the summary card's CSV has no
+// attach event, so the file group is the only place it is named. A file the
+// attachment group already lists must not be printed twice.
+note('file group', 'assert', await page.locator(id('task-panel-files')).first().isVisible(), { text: 'task-panel-files' });
+note('attributed file', 'assert', await page.locator(id('task-panel-file-reports/refund-by-channel.csv')).first().isVisible(), { text: 'reports/refund-by-channel.csv' });
+const repeated = await page.locator(id('task-panel-file-reports/refund-analysis.md')).count();
+note('attached file not repeated', 'assert', repeated === 0, { count: repeated });
+await page.locator(id('task-panel-file-reports/refund-by-channel.csv')).first().click();
+await page.waitForTimeout(900);
+// The manifest row carries no reference hash: the preview answers the current
+// bytes and badges them as such instead of claiming a comparison.
+note('manifest preview', 'assert', await page.locator('text=清单当前版本').first().isVisible(), { text: '清单当前版本' });
+note('manifest preview content', 'assert', await page.locator('text=渠道,退款单,占比').first().isVisible(), { text: '渠道,退款单,占比' });
+await shot(page, 'task panel attributed file 1440', 'task-panel-resources-after-1440.png');
+await overflow(page, 'task-panel-resources-after-1440');
 
 // ---- 3. the phone frame ---------------------------------------------------
 
