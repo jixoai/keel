@@ -119,6 +119,9 @@ run "build candidate runtime" "$EVID/runtime-build.log" go build -o "$BIN" ./cmd
 # The catalog is the only machine-readable coverage truth; COVERAGE.md §A/§B/§C
 # are mapped onto it and §H is generated (docs/PLUGIN-CATALOG.md).
 run "plugin catalog" "$EVID/plugin-catalog.txt" node scripts/plugin-catalog.mjs --check
+# G1's static half: every tabulated state names an authority fact (no memory-only
+# state); the output is the state -> fact mapping the acceptance gate asks for.
+run "state -> fact mapping" "$EVID/state-facts.txt" node scripts/state-facts.mjs
 
 # --- 1. the full race suite -------------------------------------------------
 {
