@@ -30,8 +30,9 @@ const (
 	ShellPluginID      = "keel.shell"
 	ShellPluginVersion = "1.0.0"
 
-	shellRunTool  = "keel.shell.run"
-	shellJobsTool = "keel.shell.jobs"
+	shellRunTool        = "keel.shell.run"
+	shellJobsTool       = "keel.shell.jobs"
+	shellCheckpointTool = "keel.shell.checkpoint"
 )
 
 // Wire error codes. These mirror toolsurface's typed codes; harnessext cannot
@@ -53,6 +54,12 @@ type ShellOptions struct {
 	// TenantID is the fallback tenant when no run scope is installed (tests,
 	// CLI-driven calls). uuid.Nil is the no-auth dev tenant.
 	TenantID uuid.UUID
+	// Checkpoint is the explicit capture surface behind bash
+	// {action:"checkpoint"}. It runs under the caller's session identity (the
+	// bash backend wrapper stamps it) and returns the settlement document.
+	// Nil keeps the action on the surface and answers a typed backend error:
+	// a manual-mode deployment must fail visibly, not silently drop capture.
+	Checkpoint func(ctx context.Context) (map[string]any, error)
 }
 
 // NewShellPlugin builds keel.shell. It contributes no model-facing tools: its
@@ -83,6 +90,14 @@ func NewShellPlugin(opts ShellOptions) *Plugin {
 					return shellInvoke(ctx, opts, "jobs", args)
 				},
 			},
+			{
+				Name:     shellCheckpointTool,
+				Schema:   shellCheckpointSchema(),
+				Internal: true,
+				Execute: func(ctx context.Context, _ string, args json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+					return shellInvoke(ctx, opts, "checkpoint", args)
+				},
+			},
 		},
 	}
 }
@@ -109,6 +124,8 @@ func (b ShellBackend) Invoke(ctx context.Context, action string, args json.RawMe
 	case "run":
 	case "jobs":
 		tool = shellJobsTool
+	case "checkpoint":
+		tool = shellCheckpointTool
 	default:
 		return agentcore.AgentToolResult{}, fmt.Errorf("harnessext: unknown bash action %q", action)
 	}
@@ -116,6 +133,11 @@ func (b ShellBackend) Invoke(ctx context.Context, action string, args json.RawMe
 }
 
 func shellInvoke(ctx context.Context, opts ShellOptions, action string, raw json.RawMessage) (agentcore.AgentToolResult, error) {
+	// Checkpoint settles the file workspace; it needs no job manager, so it is
+	// dispatched before the shell service check.
+	if action == "checkpoint" {
+		return shellCheckpoint(ctx, opts, raw)
+	}
 	var manager *jobqueue.Manager
 	if opts.Service != nil {
 		manager = opts.Service()
@@ -131,7 +153,7 @@ func shellInvoke(ctx context.Context, opts ShellOptions, action string, raw json
 		return shellJobs(ctx, manager, tenant, raw)
 	default:
 		return shellError(shellCodeUnknownAction, "unknown bash action "+action, map[string]any{
-			"availableActions": []string{"run", "jobs"},
+			"availableActions": []string{"run", "jobs", "checkpoint"},
 		}), nil
 	}
 }
@@ -240,6 +262,39 @@ func shellEnvNames() []string {
 	// Stable order for the error message.
 	sortStrings(names)
 	return names
+}
+
+// shellCheckpoint is the explicit capture trigger of the manual/checkpoint
+// policies. The action carries no command: the workspace provider has already
+// recorded that one or more executions were suppressed, and this call settles
+// them as exactly one fs.capture. A second call is an honest no-op.
+func shellCheckpoint(ctx context.Context, opts ShellOptions, raw json.RawMessage) (agentcore.AgentToolResult, error) {
+	if opts.Checkpoint == nil {
+		return shellError(shellCodeBackendFailed,
+			"checkpoint is not wired in this deployment; manual capture would have no trigger",
+			map[string]any{"reason": "checkpoint_unavailable"}), nil
+	}
+	if len(raw) > 0 {
+		var input struct {
+			TaskID string `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return shellError(shellCodeInvalidArguments,
+				"bash checkpoint arguments are not valid JSON: "+err.Error(), nil), nil
+		}
+	}
+	document, err := opts.Checkpoint(ctx)
+	if err != nil {
+		return shellError(shellCodeBackendFailed, err.Error(), nil), nil
+	}
+	if document == nil {
+		document = map[string]any{}
+	}
+	text := "workspace changes checkpointed"
+	if captured, ok := document["captured"].(bool); ok && !captured {
+		text = "nothing to checkpoint: the workspace has no suppressed changes"
+	}
+	return shellJSONResult(document, text), nil
 }
 
 func shellRunResult(result jobqueue.RunResult) agentcore.AgentToolResult {
@@ -514,4 +569,8 @@ func shellRunSchema() json.RawMessage {
 
 func shellJobsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"action":{"type":"string"},"operation":{"type":"string"},"jobId":{"type":"string"}},"required":["operation"],"additionalProperties":true}`)
+}
+
+func shellCheckpointSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"action":{"type":"string"},"taskId":{"type":"string"}},"additionalProperties":true}`)
 }

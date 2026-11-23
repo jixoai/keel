@@ -162,7 +162,7 @@ func TestUnknownActionIsTypedAndSideEffectFree(t *testing.T) {
 	}
 }
 
-func TestBashSchemaAndActionSetAreUnchanged(t *testing.T) {
+func TestBashSchemaAndClosedActionSet(t *testing.T) {
 	registry := builtinRegistry(t, toolsurface.Backends{})
 	tool := registry[toolsurface.Bash]
 	var document struct {
@@ -179,15 +179,15 @@ func TestBashSchemaAndActionSetAreUnchanged(t *testing.T) {
 	sort.Strings(names)
 	want := []string{"action", "command", "cwd", "env", "jobId", "operation", "timeoutMs"}
 	if !reflect.DeepEqual(names, want) {
-		t.Fatalf("bash schema properties = %v, want the W2.1 closed set %v", names, want)
+		t.Fatalf("bash schema properties = %v, want the closed set %v", names, want)
 	}
 	if !reflect.DeepEqual(document.Required, []string{"action"}) {
 		t.Fatalf("bash schema required = %v, want [action]", document.Required)
 	}
 	problem := errorDocument(t, runAction(t, tool, `{"action":"unknown"}`))
 	available, ok := problem["availableActions"].([]string)
-	if !ok || !reflect.DeepEqual(available, []string{"run", "jobs"}) {
-		t.Fatalf("bash actions = %#v, want [run jobs]", problem["availableActions"])
+	if !ok || !reflect.DeepEqual(available, []string{"run", "jobs", "checkpoint"}) {
+		t.Fatalf("bash actions = %#v, want [run jobs checkpoint]", problem["availableActions"])
 	}
 }
 
@@ -196,6 +196,7 @@ func TestBashActionsNeedBackend(t *testing.T) {
 	for _, args := range []string{
 		`{"action":"run","command":"ls"}`,
 		`{"action":"jobs","operation":"list"}`,
+		`{"action":"checkpoint"}`,
 	} {
 		problem := errorDocument(t, runAction(t, registry[toolsurface.Bash], args))
 		if problem["code"] != toolsurface.CodeNotWired {
@@ -207,8 +208,8 @@ func TestBashActionsNeedBackend(t *testing.T) {
 		t.Fatalf("unknown bash action code = %v, want unknown_action", problem["code"])
 	}
 	available, ok := problem["availableActions"].([]string)
-	if !ok || !reflect.DeepEqual(available, []string{"run", "jobs"}) {
-		t.Fatalf("bash available actions = %#v, want the closed run/jobs set", problem["availableActions"])
+	if !ok || !reflect.DeepEqual(available, []string{"run", "jobs", "checkpoint"}) {
+		t.Fatalf("bash available actions = %#v, want the closed run/jobs/checkpoint set", problem["availableActions"])
 	}
 }
 
@@ -235,6 +236,21 @@ func TestBashDelegatesToBackend(t *testing.T) {
 	}
 	if !reflect.DeepEqual(backend.calls, []string{"run"}) {
 		t.Fatalf("backend calls = %v", backend.calls)
+	}
+}
+
+func TestBashCheckpointDelegatesToBackend(t *testing.T) {
+	backend := &fakeBash{result: agentcore.AgentToolResult{
+		Content:           agentcore.ContentList{agentcore.NewTextContent("checkpointed")},
+		StructuredContent: map[string]any{"captured": true, "seq": 3},
+	}}
+	registry := builtinRegistry(t, toolsurface.Backends{Bash: backend})
+	result := runAction(t, registry[toolsurface.Bash], `{"action":"checkpoint"}`)
+	if got := agentcore.ContentToText(result.Content); got != "checkpointed" {
+		t.Fatalf("bash checkpoint result = %q", got)
+	}
+	if !reflect.DeepEqual(backend.calls, []string{toolsurface.ActionCheckpoint}) {
+		t.Fatalf("backend calls = %v, want [checkpoint]", backend.calls)
 	}
 }
 

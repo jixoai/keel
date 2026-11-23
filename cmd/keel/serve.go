@@ -116,6 +116,10 @@ type serveOptions struct {
 	// service graph so the constant read/write/edit tools have a backend at
 	// assembly time; nil keeps them present and answering not_wired.
 	FileService *fileplugin.Service
+	// Workspace is the per-session execution space the bash bridge mounts. It
+	// is also the explicit checkpoint surface behind bash
+	// {action:"checkpoint"} and the run-completion capture hook.
+	Workspace *bashbridge.LayerWorkspaces
 }
 
 const (
@@ -141,11 +145,13 @@ func (b bashSessionBackend) Invoke(ctx context.Context, action string, args json
 			TaskID string `json:"taskId"`
 		}
 		_ = json.Unmarshal(args, &fields)
+		mode, _ := layerfs.CaptureModeFromContext(ctx)
 		ctx = bashbridge.WithSessionIdentity(ctx, bashbridge.SessionIdentity{
-			TenantID:  scope.TenantID,
-			SessionID: scope.SessionID,
-			TaskID:    strings.TrimSpace(fields.TaskID),
-			CallID:    strings.TrimSpace(tasklog.CallIDFromContext(ctx)),
+			TenantID:    scope.TenantID,
+			SessionID:   scope.SessionID,
+			TaskID:      strings.TrimSpace(fields.TaskID),
+			CallID:      strings.TrimSpace(tasklog.CallIDFromContext(ctx)),
+			CaptureMode: mode,
 		})
 	}
 	return b.inner.Invoke(ctx, action, args)
@@ -339,6 +345,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if err != nil {
 		return fmt.Errorf("bash workspace provider: %w", err)
 	}
+	opts.Workspace = sandbox
 
 	// Bash background jobs: the manager is a process-level singleton. Recovery
 	// runs before the service graph, so no run can observe a stale "running"
@@ -633,6 +640,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// (Bot Account ∩ Harness) before it executes (A4.2b1).
 		ToolAccess:      toolAccess,
 		GuardrailPolicy: policyReader.guardrails,
+		// The capture policy is resolved once per attempt from the stored tenant
+		// document over the boot document. The worker pins the mode on the
+		// attempt's tool context and runs the checkpoint hook at run close.
+		CapturePolicy: newRunCaptureResolver(st, tenantCfg, opts.Workspace),
 		Seams: servicehost.Seams{
 			// The run loop keeps the raw kernel: its read-marker/checkpoint
 			// capabilities are derived from the concrete committer, and the
@@ -1584,6 +1595,9 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 			return harnessext.NewShellPlugin(harnessext.ShellOptions{
 				Service:  func() *jobqueue.Manager { return opts.Bash },
 				TenantID: opts.TenantID,
+				Checkpoint: func(ctx context.Context) (map[string]any, error) {
+					return checkpointDocument(ctx, opts.Workspace)
+				},
 			})
 		},
 		harnessext.ApprovalPluginID: func() *harnessext.Plugin {

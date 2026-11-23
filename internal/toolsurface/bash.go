@@ -24,11 +24,13 @@ type BashBackend interface {
 var bashTool = &actionTool{
 	name: Bash,
 	description: "Run commands and manage background jobs. Actions: run {command, cwd, timeoutMs, env}; " +
-		"jobs {operation: list|status|adopt|kill, jobId}. A run whose timeoutMs expires keeps running " +
-		"as a background job; `adopt` restores a job's facts and settles its terminal state after a restart. " +
+		"jobs {operation: list|status|adopt|kill, jobId}; checkpoint {} (persist the session workspace's " +
+		"changes now; required when the tenant's capture mode is manual, and accepted in checkpoint mode). " +
+		"A run whose timeoutMs expires keeps running as a background job; `adopt` restores a job's facts " +
+		"and settles its terminal state after a restart. " +
 		"env accepts only session variables (PATH, HOME, locale, TZ, TERM); use script-local assignments for other values.",
 	schema:     schema(`, "command":{"type":"string"}, "cwd":{"type":"string"}, "timeoutMs":{"type":"integer","minimum":0}, "env":{"type":"object"}, "operation":{"type":"string"}, "jobId":{"type":"string"}`),
-	actions:    []string{ActionRun, ActionJobs},
+	actions:    []string{ActionRun, ActionJobs, ActionCheckpoint},
 	sequential: true,
 }
 

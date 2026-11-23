@@ -72,6 +72,9 @@ type ToolPermission struct {
 var toolPermissionCatalog = []ToolPermission{
 	{Tool: Bash, Action: ActionRun, Key: access.KeyShellExec},
 	{Tool: Bash, Action: ActionJobs, Key: access.KeyShellExec},
+	// An explicit checkpoint persists the session workspace into layerfs: a file
+	// write, not another command execution.
+	{Tool: Bash, Action: ActionCheckpoint, Key: access.KeyFileWrite},
 
 	{Tool: Read, Key: access.KeyFileRead},
 	{Tool: Write, Key: access.KeyFileWrite},

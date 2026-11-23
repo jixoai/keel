@@ -17,8 +17,8 @@ func TestShellPluginContributesOnlyInternalTools(t *testing.T) {
 	if plugin.ID != ShellPluginID {
 		t.Fatalf("id = %q", plugin.ID)
 	}
-	if len(plugin.Tools) != 2 {
-		t.Fatalf("tools = %d, want 2", len(plugin.Tools))
+	if len(plugin.Tools) != 3 {
+		t.Fatalf("tools = %d, want 3 (run, jobs, checkpoint)", len(plugin.Tools))
 	}
 	for _, tool := range plugin.Tools {
 		if !tool.Internal {
@@ -34,6 +34,63 @@ func TestShellBackendWithoutManagerIsPluginState(t *testing.T) {
 	_, err := (ShellBackend{}).Invoke(context.Background(), "run", nil)
 	if !errors.Is(err, ErrPluginState) {
 		t.Fatalf("err = %v, want ErrPluginState", err)
+	}
+}
+
+func TestShellCheckpointRoutesToTheExplicitSurface(t *testing.T) {
+	calls := 0
+	plugin := NewShellPlugin(ShellOptions{
+		Checkpoint: func(context.Context) (map[string]any, error) {
+			calls++
+			return map[string]any{"captured": true, "seq": 7, "count": 2}, nil
+		},
+	})
+	var tool *ToolSpec
+	for i := range plugin.Tools {
+		if plugin.Tools[i].Name == shellCheckpointTool {
+			tool = &plugin.Tools[i]
+		}
+	}
+	if tool == nil {
+		t.Fatalf("keel.shell does not expose %s", shellCheckpointTool)
+	}
+	result, err := tool.Execute(context.Background(), "call-checkpoint", []byte(`{"action":"checkpoint"}`), nil)
+	if err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("checkpoint surface calls = %d, want 1", calls)
+	}
+	document, ok := result.StructuredContent.(map[string]any)
+	if !ok || document["captured"] != true || document["seq"] != 7 {
+		t.Fatalf("checkpoint document = %#v", result.StructuredContent)
+	}
+	if text := agentcore.ContentToText(result.Content); !strings.Contains(text, "checkpointed") {
+		t.Fatalf("checkpoint text = %q", text)
+	}
+}
+
+func TestShellCheckpointWithoutSurfaceIsTyped(t *testing.T) {
+	plugin := NewShellPlugin(ShellOptions{})
+	var tool *ToolSpec
+	for i := range plugin.Tools {
+		if plugin.Tools[i].Name == shellCheckpointTool {
+			tool = &plugin.Tools[i]
+		}
+	}
+	if tool == nil {
+		t.Fatalf("keel.shell does not expose %s", shellCheckpointTool)
+	}
+	result, err := tool.Execute(context.Background(), "call-checkpoint", nil, nil)
+	if err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if result.IsError == nil || !*result.IsError {
+		t.Fatalf("unwired checkpoint result = %#v, want an error", result)
+	}
+	document := result.StructuredContent.(map[string]any)["error"].(map[string]any)
+	if document["code"] != shellCodeBackendFailed || document["reason"] != "checkpoint_unavailable" {
+		t.Fatalf("unwired checkpoint document = %#v", document)
 	}
 }
 
