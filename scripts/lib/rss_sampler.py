@@ -510,13 +510,23 @@ def build_summary(
     measurement_failures = [f"measurement aborted: {e}" for e in errors]
     threshold_failures: list[str] = []
     notes: list[str] = []
+    observed_interval = collected.get("observedIntervalSec")
     if not totals:
         measurement_failures.append("no RSS sample was taken; refusing to certify an unknown value")
-    elif collected.get("stopReason") == "duration" and len(totals) < min_samples:
-        # A window that produced fewer samples than the protocol demands cannot
-        # certify a peak: the interval/stop logic missed its own schedule.
+    elif isinstance(observed_interval, (int, float)) and observed_interval > MAX_INTERVAL_SEC:
+        # The protocol requires sampling at least every 10s; a host too loaded
+        # to keep that cadence has not followed the protocol, so its peak is
+        # not certifiable as a protocol-compliant measurement.
         measurement_failures.append(
-            f"only {len(totals)} sample(s); the protocol needs >= {min_samples} for a window"
+            f"observed sampling spacing {observed_interval}s exceeds the {MAX_INTERVAL_SEC}s "
+            "protocol maximum (host too loaded or target unavailable between samples)"
+        )
+    elif collected.get("stopReason") == "duration" and len(totals) < min_samples:
+        # A window that produced fewer samples than the gate demands cannot
+        # certify a peak: the window/interval configuration missed its schedule.
+        measurement_failures.append(
+            f"only {len(totals)} sample(s); the protocol needs >= {min_samples} for a window "
+            f"(observed spacing {observed_interval}s)"
         )
 
     summary = {

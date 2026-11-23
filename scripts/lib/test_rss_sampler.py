@@ -341,6 +341,20 @@ class ThresholdTests(unittest.TestCase):
         self.assertEqual(summary["exitCode"], RSS.EXIT_UNMEASURABLE)
         self.assertIsNone(summary["totals"])
 
+    def test_cadence_slower_than_protocol_max_is_unmeasurable(self):
+        # 12s spacing > the 10s protocol maximum, even with 3 samples.
+        again = RSS.build_summary(
+            mode="test", platform="darwin", source="ps-rss",
+            target={"pid": 100, "port": None, "identity": "pid", "comm": None},
+            collected={
+                "samples": [RSS.measure_tree(_table([_entry(100, 1, 250_000)]), 100)] * 3,
+                "errors": [], "intervalSec": 1, "requestedDurationSec": 30,
+                "durationSec": 30, "stopReason": "duration", "observedIntervalSec": 12.0,
+            },
+        )
+        self.assertEqual(again["verdict"], "UNMEASURABLE")
+        self.assertTrue(any("exceeds the 10s protocol maximum" in f for f in again["failures"]))
+
     def test_incomplete_measurement_wins_over_breach(self):
         # One real sample already breaches; the tree then vanished. The value
         # cannot be certified, so the verdict is UNMEASURABLE (exit 2), not FAIL.
