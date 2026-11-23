@@ -1,0 +1,16 @@
+== VmRSS profile: 1000 sessions / 64 runs / 60s / db=keel_rss_perf port=13770 ==
+-- build runtime + loadtest (native, so the measured tree is real)
+-- fresh database keel_rss_perf
+-- start runtime (pid is verified through /v1/health)
+-- start VmRSS sampler for pid 7350 (interval 1s, window up to 210s)
+-- loadtest: 1000 SSE sessions, 64 run-driving sessions, 1048576B images
+-- merge RSS + workload and enforce thresholds
+RSS sampler: mode=profile platform=darwin source=ps-rss pid=7350 identity=pid comm=/tmp/keel-rss-runtime
+RSS sampler: 66 sample(s) at 1s interval (observed 1.001s) over 65.072s (stop-file), tree=1 process(es)
+RSS sampler: peak=468.01MB ceiling=500MB target=300MB steady=468.0MB p50=467.71MB withinTarget=False
+RSS sampler: workload sessions=1000 sseSessions=1000 runsActiveMax=56 durationSec=60.021001333 texts=64 imagesOK=999 hardErrors=0
+RSS sampler: runsActiveMax = 56, want >= 64 (run concurrency was never reached)
+RSS sampler: NOTE: peak 468.01 MB is inside the 500 MB ceiling but above the 300 MB target; recorded as above-target pass
+RSS VERDICT: FAIL (exit 1)
+
+{"schema": "keel.rss-sampler.v1", "mode": "profile", "platform": "darwin", "source": "ps-rss", "sourceNote": "ps resident set (KiB); macOS has no /proc/VmRSS, so ps RSS is the platform equivalent (page cache is not included)", "target": {"pid": 7350, "port": null, "identity": "pid", "comm": "/tmp/keel-rss-runtime"}, "workload": {"sessions": 1000, "loadDurationSec": 60}, "sampling": {"intervalSec": 1, "observedIntervalSec": 1.001, "requestedDurationSec": 210.0, "actualDurationSec": 65.072, "samples": 66, "sampleErrors": [], "stopReason": "stop-file", "sampledAt": "2026-11-24T03:09:16+0800"}, "processes": [{"pid": 7350, "ppid": 7178, "comm": "/tmp/keel-rss-runtime", "rssKB": 457040, "rssBytes": 468008960}], "processTree": {"memberCount": 1, "zombiePids": [], "exitedDuringSample": [], "excludedOverhead": []}, "totals": {"peakMB": 468.01, "peakBytes": 468008960, "minMB": 28.44, "p50MB": 467.71, "steadyMB": 468.0, "lastMB": 468.01}, "thresholds": {"ceilingMB": 500, "targetMB": 300, "withinTarget": false}, "verdict": "FAIL", "exitCode": 1, "failures": ["runsActiveMax = 56, want >= 64 (run concurrency was never reached)"], "notes": ["peak 468.01 MB is inside the 500 MB ceiling but above the 300 MB target; recorded as above-target pass"], "workloadObserved": {"sessions": 1000, "sseSessions": 1000, "durationSec": 60.021001333, "texts": 64, "imagesOK": 999, "imagesErr": 121, "runsActiveMax": 56, "runsPendingMax": 63, "streamsActiveMax": 1880, "sseErrors": 0, "statusCounts429": 0, "hardErrors": 0, "drainWaitSec": 4.337459958, "throughputMBs": 23.270286482742844}, "workloadCheck": {"pass": false, "expected": {"sessions": 1000, "concurrentRuns": 64, "durationSec": 60.0, "imagesRequired": true}, "failures": ["runsActiveMax = 56, want >= 64 (run concurrency was never reached)"]}}

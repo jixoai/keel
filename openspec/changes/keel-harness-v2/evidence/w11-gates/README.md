@@ -26,9 +26,17 @@ Worktree: `.worktrees/keel-w11` · Branch: `task/keel-w11-gates` · Base: `a549e
 | G2 恢复门 | **PASS**（容器格平台受限） | kill -9/子代理/产品 SIGKILL 三格 + **capture 崩溃格**（`g2-capture-crash.txt`）；容器重启无 Docker，按 Owner 授权用 SIGKILL 等价（§5） |
 | G3 幂等与冲突门 | **PASS**（5/5 判据） | provider 额度耗尽：有可用 fallback 则切换；无可用 fallback 则升级并落 `provider_exhausted_no_fallback`，不再重排同一 provider（§6） |
 | G5 任务门 | **PASS** | taskId 强制、fork eventSeq 精确、资源 (path,hash)、write→bash 读、十万文件 1 条 capture 事件全绿（§7） |
+| G4 内存门 | **PARTIAL**（RSS above-target pass） | 1000 SSE / 56 并发 run 峰值 **468MB**（≤500 pass，>300 未达目标，`g4-rss-profile.txt`）；64-run 并发未达（harness 短差）；组 OOM 隔离 / 前端 VM 配额 / cgroup 2GB 平台受限或 Defer |
+| G6 插件门 | **PASS** | 生命周期/依赖/HMR/目录唯一真源；卸载零残留（`g6-g9-g10.md`） |
+| G7 UI 与槽位门 | **PASS（web/TUI）** | slots/chunk 贡献、TUI 显式降级、主题令牌/桥能力；macOS 原生 target 按程序板 Defer |
+| G8 创造模式门 | **Deferred** | Native chunk 的 macOS target/创建全流程按程序板 Defer；web/TUI chunk 形态已有测试 |
+| G9 有界门 | **PASS**（RSS 曲线平台受限） | 工具输出有界/排队 ETA/作业上限/十万文件 1 条 capture；RSS 不线性需 cgroup（平台受限） |
+| G10 资源回收门 | **PASS** | 零孤儿/端口/清理证据；SIGKILL sweep；PORT.md 核对（`g6-g9-g10.md`） |
+| G11 交付面门 | **PENDING** | HTML 图文报告 + before/after 审计（UNCOVERED=0）+ 交叉复核待做 |
 
-> `acceptance.md` 的依赖顺序要求 E0→G0→G1 先绿，后续门才作为验收依据。本文件仍按主线要求
-> 逐门给出可复跑证据与失败点，**G1/G2/G3 的未过项不作为后续门的依据**。
+> `acceptance.md` 的依赖顺序要求 E0→G0→G1 先绿，后续门才作为验收依据。本文件按主线要求逐门
+> 给出可复跑证据；E0 的完整 battery 仍被 Docker/cgroup 平台阻塞，G4 的组 OOM/前端 VM 配额、
+> G7 的 macOS target、G8 的全流程按程序板 Defer，G11 待报告落地。
 
 ## 1. W11 垂直集成（PASS）
 
