@@ -1,8 +1,8 @@
-ok  	github.com/jixoai/keel/internal/host	0.316s
-ok  	github.com/jixoai/keel/internal/bashbridge	2.925s
-ok  	github.com/jixoai/keel/internal/toolsurface	0.853s
-ok  	github.com/jixoai/keel/internal/harnessext	6.330s
-ok  	github.com/jixoai/keel/internal/agent	0.433s
-ok  	github.com/jixoai/keel/internal/servicehost	8.233s
-ok  	github.com/jixoai/keel/internal/fileplugin	76.715s
-ok  	github.com/jixoai/keel/cmd/keel	1.787s
+ok  	github.com/jixoai/keel/internal/host	0.515s
+ok  	github.com/jixoai/keel/internal/bashbridge	3.135s
+ok  	github.com/jixoai/keel/internal/toolsurface	0.969s
+ok  	github.com/jixoai/keel/internal/harnessext	6.350s
+ok  	github.com/jixoai/keel/internal/agent	0.667s
+ok  	github.com/jixoai/keel/internal/servicehost	7.286s
+ok  	github.com/jixoai/keel/internal/fileplugin	58.463s
+ok  	github.com/jixoai/keel/cmd/keel	1.300s
