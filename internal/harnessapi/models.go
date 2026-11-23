@@ -69,10 +69,10 @@ type modelsResponse struct {
 	// Enforcement says which published capability facts the server actually
 	// enforces. A client MUST NOT promise behaviour from a declared fact alone:
 	// v1 enforces the tool gate (a model declaring supportsToolCall=false never
-	// receives tools) while the media gate is a recorded deferral, so an
-	// attachment policy may not be derived from properties.inputFormat yet.
-	// Keeping the answer in the response means a client reads it instead of
-	// assuming it.
+	// receives tools) and the media gate (attachment dispatch reads the model's
+	// declared inputFormat; a model that declares no modality is treated as
+	// text-only). Keeping the answer in the response means a client reads it
+	// instead of assuming it.
 	Enforcement capabilityEnforcement `json:"enforcement"`
 }
 
@@ -197,9 +197,10 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, modelsResponse{
 		Models: models,
 		Issues: resolutionIssues(catalog, providers),
-		// v1: the tool gate is enforced in the runtime, the media gate is not
-		// (see the spec's capability scenario and the change's deferred list).
-		Enforcement: capabilityEnforcement{ToolCall: true, Media: false},
+		// v1: both gates are enforced — tools by the runtime, media by the
+		// attachment dispatch (inputFormat decides whether a reference becomes a
+		// native part or text; an undeclared model is text-only).
+		Enforcement: capabilityEnforcement{ToolCall: true, Media: true},
 	})
 }
 

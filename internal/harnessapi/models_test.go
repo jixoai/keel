@@ -98,6 +98,104 @@ func testViews() ([]modelcfg.ProviderView, []modelcfg.ModelView, modelcfg.ModelV
 	return providers, []modelcfg.ModelView{complete, hiddenModel}, complete
 }
 
+// TestModelListPublishesPricing pins the C projection: a model's declared price
+// block reaches /v1/models and /v1/providers as display metadata, and a model
+// without one stays absent (omitempty) — the client must be able to tell 未声明
+// from a free/zero model.
+func TestModelListPublishesPricing(t *testing.T) {
+	priced := modelcfg.ModelView{
+		ProviderID:   "gw",
+		ModelID:      "gw-priced",
+		ProviderType: modelcfg.ProviderTypeLLM,
+		SurfaceKind:  modelcfg.SurfaceKindLLM,
+		Properties:   modelcfg.Properties{ContextWindow: 128000, OutputFormat: modelcfg.MediaOut{Text: true}},
+		Options: modelcfg.OptionSpecs{
+			ReasoningLevel:  modelcfg.EnumSpec{Values: []string{"low"}, Map: map[string]map[string]any{"low": {}}},
+			MaxOutputTokens: modelcfg.LimitSpec{Max: 8192, Map: map[string]map[string]any{"": {}}},
+		},
+		Pricing: &modelcfg.Pricing{
+			Currency: "USD",
+			Input:    ptrPrice(0.27),
+			Output:   ptrPrice(1.10),
+			Free:     true,
+			Notes:    "free tier",
+		},
+		Enabled:    true,
+		Executable: true,
+		Selectable: true,
+	}
+	unpriced := priced
+	unpriced.ModelID = "gw-unpriced"
+	unpriced.Pricing = nil
+	provider := modelcfg.ProviderView{
+		ProviderID:   "gw",
+		Name:         "GW",
+		ProviderType: modelcfg.ProviderTypeLLM,
+		SurfaceKind:  modelcfg.SurfaceKindLLM,
+		Visibility:   modelcfg.VisibilityVisible,
+		Access:       modelcfg.Access{Type: modelcfg.AccessTypeAPIKey, Env: "GW_KEY"},
+		Models:       []modelcfg.ModelView{priced, unpriced},
+		Executable:   true,
+		Selectable:   true,
+	}
+	server := httptest.NewServer(New(Config{
+		Models: stubCatalog{
+			providers: []modelcfg.ProviderView{provider},
+			models:    []modelcfg.ModelView{priced, unpriced},
+		},
+		Logger: testLogger(),
+	}))
+	defer server.Close()
+	tenant := uuid.New()
+
+	var raw json.RawMessage
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/models", tenant, nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/models = %d %s", code, raw)
+	}
+	for _, want := range []string{
+		`"pricing":{"currency":"USD","input":0.27,"output":1.1,"free":true,"notes":"free tier"}`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("the model list lost %s: %s", want, raw)
+		}
+	}
+	var list modelsResponse
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]modelcfg.ModelView{}
+	for _, model := range list.Models {
+		byID[model.ModelID] = model
+	}
+	gotten, ok := byID["gw-priced"]
+	if !ok || gotten.Pricing == nil {
+		t.Fatalf("priced model = %+v", gotten)
+	}
+	if gotten.Pricing.Input == nil || *gotten.Pricing.Input != 0.27 || !gotten.Pricing.Free {
+		t.Fatalf("price round-tripped wrong: %+v", gotten.Pricing)
+	}
+	if unpricedModel, ok := byID["gw-unpriced"]; !ok || unpricedModel.Pricing != nil {
+		t.Fatalf("unpriced model = %+v, want no pricing block", unpricedModel)
+	}
+	// The settings view carries the same fact.
+	raw = nil
+	if code := doJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/providers", tenant, nil, &raw); code != 200 {
+		t.Fatalf("GET /v1/providers = %d %s", code, raw)
+	}
+	var settings providersResponse
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Providers) != 1 || len(settings.Providers[0].Models) != 2 {
+		t.Fatalf("settings view = %+v", settings.Providers)
+	}
+	if settings.Providers[0].Models[0].Pricing == nil || !settings.Providers[0].Models[0].Pricing.Free {
+		t.Fatalf("the settings view lost the price block: %+v", settings.Providers[0].Models[0])
+	}
+}
+
+func ptrPrice(value float64) *float64 { return &value }
+
 // TestProviderSettingsAndModelList pins the two projections: /v1/providers is
 // the settings view (incomplete entries and their issues included, hidden
 // providers omitted), /v1/models is the flat picker list, and neither is a
@@ -291,9 +389,10 @@ func TestModelCatalogAllHiddenDiagnostic(t *testing.T) {
 	}
 }
 
-// TestModelsResponsePublishesTheEnforcementLedger pins the round-2 blocker: a
-// declared capability the server does not enforce must not read like a promise,
-// so the response carries the enforcement answer explicitly.
+// TestModelsResponsePublishesTheEnforcementLedger pins the enforcement answer a
+// client reads instead of assuming a promise from a declared fact: both gates
+// are enforced now — tools by the runtime, media by attachment dispatch (which
+// reads inputFormat and treats an undeclared model as text-only).
 func TestModelsResponsePublishesTheEnforcementLedger(t *testing.T) {
 	server := httptest.NewServer(New(Config{Models: stubCatalog{}, Logger: testLogger()}))
 	defer server.Close()
@@ -308,8 +407,8 @@ func TestModelsResponsePublishesTheEnforcementLedger(t *testing.T) {
 	if !body.Enforcement.ToolCall {
 		t.Fatal("the tool gate is enforced and the ledger must say so")
 	}
-	if body.Enforcement.Media {
-		t.Fatal("the media gate is a recorded deferral; claiming enforcement would be a lie")
+	if !body.Enforcement.Media {
+		t.Fatal("attachment dispatch enforces the declared input modalities and the ledger must say so")
 	}
 }
 

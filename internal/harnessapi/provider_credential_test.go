@@ -7,7 +7,10 @@ package harnessapi
 // route, so a literal credential can never enter model configuration.
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -193,5 +196,58 @@ func TestProviderCredentialNameIsStableAndGrammatical(t *testing.T) {
 	// enforces exactly the grammar a document can reference).
 	if !secretNamePattern.MatchString(first.SecretName) {
 		t.Fatalf("derived name %q is not referencable", first.SecretName)
+	}
+}
+
+// TestProviderCredentialNeverReachesTheDocumentOrLogs pins the two remaining
+// leak surfaces of the direct-entry path: the stored models document is not
+// written by the route, and neither a success nor a strict-body refusal puts the
+// value in the server's log.
+func TestProviderCredentialNeverReachesTheDocumentOrLogs(t *testing.T) {
+	const value = "sk-live-0123456789-should-never-be-logged"
+	var logs bytes.Buffer
+	secrets := newFakeSecretStore()
+	models := newFakeModelSettingsStore()
+	tenant := uuid.New()
+	document := json.RawMessage(`{"schemaVersion":1,"providers":[` +
+		`{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://api.example/v1"},` +
+		`"access":{"type":"api-key","ref":"secret:provider_s2api"},"modelIds":["deepseek-v4.1-flash"]}]}`)
+	if _, err := models.SetModelSettings(context.Background(), tenant, 0, document); err != nil {
+		t.Fatalf("seed document: %v", err)
+	}
+	server := settingsServer(t, func(cfg *Config) {
+		cfg.SecretStore = secrets
+		cfg.ModelSettingsStore = models
+		cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	})
+	client := server.Client()
+	// The happy path.
+	if code := doSettingsJSON(t, client, http.MethodPut,
+		server.URL+"/v1/settings/providers/s2api/credential", tenant,
+		map[string]string{"value": value}, nil); code != http.StatusOK {
+		t.Fatalf("put = %d, want 200", code)
+	}
+	// A refused body still carries the value into decodeBody; its error must not
+	// echo it, and nothing may be logged.
+	var refusal map[string]any
+	if code := doSettingsJSON(t, client, http.MethodPut,
+		server.URL+"/v1/settings/providers/s2api/credential", tenant,
+		map[string]string{"value": value, "apiKey": "extra"}, &refusal); code != http.StatusBadRequest {
+		t.Fatalf("strict-body refusal = %d, want 400", code)
+	}
+	if message, _ := refusal["error"].(string); strings.Contains(message, value) {
+		t.Fatalf("the refusal echoed the value: %q", message)
+	}
+	if strings.Contains(logs.String(), value) {
+		t.Fatalf("the value reached the server log: %s", logs.String())
+	}
+	// The models document is untouched (the client puts the reference in it
+	// through PUT /v1/settings/models, never this route).
+	stored, _, _, found, err := models.GetModelSettings(context.Background(), tenant)
+	if err != nil || !found {
+		t.Fatalf("read document: found=%v err=%v", found, err)
+	}
+	if string(stored) != string(document) {
+		t.Fatalf("the credential route changed the models document:\ngot  %s\nwant %s", stored, document)
 	}
 }

@@ -199,6 +199,52 @@ func TestPricingNullClearsBlocks(t *testing.T) {
 	}
 }
 
+// TestPricingFieldNullClearsOnlyThatField: the per-model editor clears one
+// blank field with null; the sibling rates (and the free marker when it is
+// explicitly written as false) survive. This is the merge contract the settings
+// dialog's patch relies on.
+func TestPricingFieldNullClearsOnlyThatField(t *testing.T) {
+	doc := map[string]any{
+		"schemaVersion": 1,
+		"providers":     baseProviders(),
+		"modelRules": []any{
+			baselineModelRule(),
+			pricingRule("*", map[string]any{
+				"currency": "USD",
+				"input":    1.0,
+				"output":   2.0,
+				"free":     true,
+			}),
+		},
+		"modelApiRules": protocolModelAPIRules(),
+		"siteRules":     []any{},
+		"providerModelRules": []any{
+			providerPricingRule("chat", "deepseek-v4.1-flash", map[string]any{
+				"input": nil,
+				"free":  false,
+			}),
+		},
+	}
+	cat := loadTestCatalog(t, doc)
+	model := mustFindModel(t, resolveFrom(t, cat, Overlay{}), "chat", "deepseek-v4.1-flash")
+	pricing := model.Pricing
+	if pricing == nil {
+		t.Fatal("clearing one field must not clear the block")
+	}
+	if pricing.Input != nil {
+		t.Fatalf("pricing.input = %v, want nil after an explicit null", *pricing.Input)
+	}
+	if pricing.Output == nil || *pricing.Output != 2.0 {
+		t.Fatalf("pricing.output = %v, want the untouched 2.0", pricing.Output)
+	}
+	if pricing.Free {
+		t.Fatal("free: false must clear an inherited free marker")
+	}
+	if pricing.Currency != "USD" {
+		t.Fatalf("pricing.currency = %q, want the inherited USD", pricing.Currency)
+	}
+}
+
 // TestPricingValidationRefusesUnknownAndBadValues: the vocabulary is closed and
 // the value domains are checked with field paths.
 func TestPricingValidationRefusesUnknownAndBadValues(t *testing.T) {
