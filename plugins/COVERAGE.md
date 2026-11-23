@@ -55,7 +55,7 @@
 | goal | 每会话持久目标 + 自动续跑 | `keel.tasks` | in-process | W1 | merged（目标并入 `keel.tasks`；自动续跑归 `keel.supervisor`） |
 | todo | `todo_write` 工具 | `keel.tasks` | in-process | W1 | merged（待办是 `keel.tasks` 的动作） |
 | plan | 计划模式 | `keel.tasks` | in-process | W1 | merged（计划模式是任务卡视图） |
-| compaction | 自动压缩 / `/compact` / 结果修剪 | `keel.compaction` | in-process | W1 | 压缩核心已交付；W12 tool-result-pruner + image-offload 已交付（capability，无独立插件实体） |
+| compaction | 自动压缩 / `/compact` / 结果修剪 | `keel.compaction` | in-process | W1 | delivered（压缩核心 + W12 tool-result-pruner/image-offload 已交付；capability，无独立插件实体） |
 | context | 指令/时间/文件引用/harness 上下文 | `keel.context` + **`keel.context-memory`** | in-process / sidecar | W1 | `keel.context-memory` **delivered**；`keel.context` planned |
 | deliverables | 交付物登记（文件/工作区变更） | `keel.deliverables` | in-process | W2 | planned |
 | feedback | 会话/消息反馈采集 | `keel.feedback` | in-process | W2 | planned |
@@ -323,7 +323,7 @@
 | `dsh.browser-use` | `keel.browser-use` | planned | W2 | `dsh.browser-use` |
 | `dsh.bundle` | `keel.bundles` | planned | W2 | `dsh.bundle` |
 | `dsh.client` | `keel.client-ui` | planned | W1 | `dsh.client` |
-| `dsh.compaction` | `keel.compaction` | delivered（含 pruner/offload） | W1 | `dsh.compaction` |
+| `dsh.compaction` | `keel.compaction` | planned | W1 | `dsh.compaction` |
 | `dsh.computer-use` | `keel.computer-use` | planned | W2 | `dsh.computer-use` |
 | `dsh.context` | `keel.context-memory` | partial | W1 | `dsh.context` |
 | `dsh.core` | `keel.core` | planned | W1 | `dsh.core` |
@@ -354,7 +354,7 @@
 | `dsh.settings` | `keel.settings` | planned | W1 | `dsh.settings` |
 | `dsh.shell` | `keel.shell` | planned | W1 | `dsh.shell` |
 | `dsh.skill` | `keel.skills` | planned | W1 | `dsh.skill` |
-| `dsh.spill` | `keel.spill` | delivered | W1 | `dsh.spill` |
+| `dsh.spill` | `keel.spill` | planned | W1 | `dsh.spill` |
 | `dsh.ssh` | `keel.ssh` | planned | W3 | `dsh.ssh` |
 | `dsh.storage` | `keel.storage` | planned | W1 | `dsh.storage` |
 | `dsh.subagent` | `keel.subagent` | planned | W1 | `dsh.subagent` |
