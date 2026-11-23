@@ -563,6 +563,11 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 		}
 		runner := agent.NewRunner(cfg.Seams.Committer, cfg.Seams.Reader,
 			llm.StreamFn(), llm.ProviderName(), llm.Model(), llm.APIKey(), cfg.Seams.Logger)
+		// keel.prompt-cache is an explicit tenant opt-in. Off (the default)
+		// keeps the pre-feature request bytes; on canonicalizes the system/tool
+		// prefix and allows a wire cache breakpoint. The runner pins the setting
+		// with the generation, so a document rotation applies to later runs.
+		runner.PromptCache = tenant.Agent.PromptCache != nil && *tenant.Agent.PromptCache
 		// The runner belongs to one loadout generation, so its configuration
 		// identity is stable for every attempt it serves. Recovery and guardrail
 		// facts record it; a rotation creates a new runner and affects only later

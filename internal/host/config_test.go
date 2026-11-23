@@ -21,6 +21,7 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 			Sections:      []PromptSection{{Name: "tenant", Content: "default section"}},
 			MaxTurns:      10,
 			ContextWindow: 128000,
+			PromptCache:   boolPtr(true),
 		},
 		Skills: SkillsConfig{Enabled: boolPtr(true), Roots: []string{"/global/skills"}, FileReadTool: "read"},
 		MCP: MCPConfig{Servers: map[string]MCPServerConfig{
@@ -39,6 +40,8 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 			Model:    "gpt-5-mini",
 			Sections: []PromptSection{{Name: "tenant", Content: "tenant section"}},
 			Thinking: "high",
+			// Explicit false must override a default-on prompt cache.
+			PromptCache: boolPtr(false),
 		},
 		Skills: SkillsConfig{Roots: []string{"/tenant/skills"}},
 		MCP: MCPConfig{Servers: map[string]MCPServerConfig{
@@ -61,6 +64,9 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 	}
 	if merged.Agent.MaxTurns != 10 || merged.Agent.ContextWindow != 128000 {
 		t.Fatalf("agent limits = %d/%d", merged.Agent.MaxTurns, merged.Agent.ContextWindow)
+	}
+	if merged.Agent.PromptCache == nil || *merged.Agent.PromptCache {
+		t.Fatalf("agent promptCache = %v, want explicit false", merged.Agent.PromptCache)
 	}
 	if len(merged.Agent.Sections) != 1 || merged.Agent.Sections[0].Content != "tenant section" {
 		t.Fatalf("sections = %+v", merged.Agent.Sections)

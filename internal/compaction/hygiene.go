@@ -124,7 +124,11 @@ type HygieneFailure struct {
 	Reason       string
 }
 
-// HygieneReport is the outcome of one hygiene pass.
+// HygieneReport is the outcome of one hygiene pass. Both token figures are
+// full conservative estimates over the message list, deliberately ignoring the
+// newest assistant Usage block: a rewrite invalidates that block as a
+// description of this request, and reusing it would report the pre-prune figure
+// unchanged (the reviewer's 50122→50122).
 type HygieneReport struct {
 	TokensBefore int
 	TokensAfter  int
@@ -143,7 +147,10 @@ func (r HygieneReport) Changed() bool {
 // store disables the pruner but not the image offload: image references are
 // already durable and need no write.
 func ApplyHygiene(ctx context.Context, msgs agentcore.MessageList, settings HygieneSettings, store spill.Store, scope spill.Scope) (agentcore.MessageList, HygieneReport) {
-	report := HygieneReport{TokensBefore: EstimateContextTokens(msgs).Tokens}
+	// Token accounting uses the full estimate, never the newest Usage block: the
+	// pass rewrites messages that usage was measured over, so trusting it would
+	// hide every reduction (and report the pre-prune number as post-prune).
+	report := HygieneReport{TokensBefore: EstimateContextTokensConservative(msgs)}
 	if !settings.Enabled {
 		report.TokensAfter = report.TokensBefore
 		return msgs, report
@@ -159,7 +166,7 @@ func ApplyHygiene(ctx context.Context, msgs agentcore.MessageList, settings Hygi
 		report.Offloaded = offloaded
 		report.Failures = append(report.Failures, failures...)
 	}
-	report.TokensAfter = EstimateContextTokens(out).Tokens
+	report.TokensAfter = EstimateContextTokensConservative(out)
 	return out, report
 }
 
@@ -205,10 +212,10 @@ func pruneToolResults(ctx context.Context, msgs agentcore.MessageList, settings 
 			continue
 		}
 		label := fmt.Sprintf("tool result %q (call %s)", tr.ToolName, tr.ToolCallID)
-		ref, reference, err := spill.SpillBytes(ctx, store, scope, ToolResultPayloadMIME, label, payload, spill.Policy{
-			MinBytes:     settings.MinToolResultBytes,
-			PreviewBytes: previewBytes,
-		})
+		// Store the full message as JSON for exact recovery, but render the
+		// preview from the tool's own text: a model-facing preview should read
+		// like the result, not like its JSON envelope.
+		ref, err := store.Spill(ctx, scope, ToolResultPayloadMIME, payload)
 		if err != nil {
 			failures = append(failures, HygieneFailure{
 				MessageIndex: i,
@@ -228,6 +235,7 @@ func pruneToolResults(ctx context.Context, msgs agentcore.MessageList, settings 
 			})
 			continue
 		}
+		reference := spill.RenderReference(ref, label, text, previewBytes)
 		replacement := tr
 		replacement.Content = agentcore.ContentList{agentcore.NewTextContent(reference)}
 		originalTokens := EstimateTokens(tr)

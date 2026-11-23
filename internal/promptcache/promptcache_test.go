@@ -3,6 +3,7 @@ package promptcache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -99,6 +100,41 @@ func TestTrackerNamesInvalidationReasons(t *testing.T) {
 	if change := tracker.Observe("model-b", Build("you are keel!", changedDesc)); !change.Invalidated ||
 		!strings.Contains(strings.Join(change.Reasons, ";"), "model changed") {
 		t.Fatalf("model change = %+v", change)
+	}
+}
+
+// TestTrackerKeepsSessionsSeparate: one runner serves many sessions; a plan
+// difference between sessions is a cache miss for the changed session, never a
+// false invalidation of another.
+func TestTrackerKeepsSessionsSeparate(t *testing.T) {
+	tracker := NewTracker()
+	a := Build("system a", tools())
+	b := Build("system b", tools())
+	if change := tracker.ObserveStream("session-a", "m", a); change.Invalidated {
+		t.Fatalf("first plan for session-a invalidated: %+v", change)
+	}
+	if change := tracker.ObserveStream("session-b", "m", b); change.Invalidated {
+		t.Fatalf("first plan for session-b invalidated by another session: %+v", change)
+	}
+	if change := tracker.ObserveStream("session-a", "m", a); change.Invalidated {
+		t.Fatalf("stable session-a plan invalidated: %+v", change)
+	}
+	if change := tracker.ObserveStream("session-b", "m", b); change.Invalidated {
+		t.Fatalf("stable session-b plan invalidated: %+v", change)
+	}
+}
+
+// TestTrackerBoundsState: a long-lived runner must not grow one entry per
+// session forever. Eviction is a cache miss, never a false invalidation.
+func TestTrackerBoundsState(t *testing.T) {
+	tracker := NewTracker()
+	tracker.max = 4
+	plan := Build("s", tools())
+	for i := 0; i < 50; i++ {
+		tracker.ObserveStream(fmt.Sprintf("session-%d", i), "m", plan)
+	}
+	if len(tracker.states) > 4 {
+		t.Fatalf("tracker kept %d streams, want <= 4", len(tracker.states))
 	}
 }
 

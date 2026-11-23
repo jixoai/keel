@@ -156,6 +156,9 @@ type ModelConfig struct {
 	GetAPIKey func(ctx context.Context, provider string) string
 	// ThinkingLevel is the requested reasoning effort.
 	ThinkingLevel agentcore.ThinkingLevel
+	// PromptCache opts into the stable system/tool prefix (keel.prompt-cache).
+	// Default false keeps the pre-feature request bytes.
+	PromptCache bool
 	// Extra is forwarded to the provider request (provider-specific options).
 	Extra map[string]any
 }

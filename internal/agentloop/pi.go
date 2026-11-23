@@ -103,11 +103,10 @@ func (p *PiLoop) Run(ctx context.Context, in Input) (*RunStream, error) {
 			Spill:            in.Compaction.Spill,
 			SpillScope:       in.Compaction.SpillScope,
 			Extra:            in.Model.Extra,
-			// The stable-prefix policy is unconditional for this loop: it only
-			// canonicalizes the tool list (a semantic no-op) and lets a wire with
-			// an explicit cache breakpoint use it. A driver without one ignores
-			// the request bit.
-			PromptCache: true,
+			// keel.prompt-cache is an explicit input opt-in: it only
+			// canonicalizes the tool list and lets a wire with an explicit cache
+			// breakpoint use it, so off stays byte-identical to the old request.
+			PromptCache: in.Model.PromptCache,
 		},
 		Batch:                   batch,
 		GetFollowUpMessages:     in.Hooks.GetFollowUpMessages,

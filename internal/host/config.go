@@ -76,6 +76,12 @@ type AgentConfig struct {
 	Thinking      string          `json:"thinking,omitempty"`
 	MaxTurns      int             `json:"maxTurns,omitempty"`
 	ContextWindow int             `json:"contextWindow,omitempty"`
+	// PromptCache opts into keel.prompt-cache: the loop canonicalizes the tool
+	// list (stable order and schema keys) and the wire driver places its prefix
+	// cache breakpoint at the end of the system/tool prefix. Nil/false keeps the
+	// pre-feature request bytes; the breakpoint is before the transcript, so
+	// memory hygiene cannot invalidate it.
+	PromptCache *bool `json:"promptCache,omitempty"`
 }
 
 // PromptSection is one named system-prompt section, rendered as
@@ -467,6 +473,7 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 			Thinking:      pickString(defaults.Agent.Thinking, tenant.Agent.Thinking),
 			MaxTurns:      pickInt(defaults.Agent.MaxTurns, tenant.Agent.MaxTurns),
 			ContextWindow: pickInt(defaults.Agent.ContextWindow, tenant.Agent.ContextWindow),
+			PromptCache:   pickBool(defaults.Agent.PromptCache, tenant.Agent.PromptCache),
 		},
 		Models: cloneRawMessage(defaults.Models),
 		Skills: SkillsConfig{
@@ -784,6 +791,15 @@ func cloneBool(value *bool) *bool {
 	}
 	copied := *value
 	return &copied
+}
+
+// pickBool takes the override when explicitly set (non-nil), otherwise the
+// default. The result is always a copy, so a merge never aliases an input.
+func pickBool(defaults, override *bool) *bool {
+	if override != nil {
+		return cloneBool(override)
+	}
+	return cloneBool(defaults)
 }
 
 // cloneStrings and cloneSections use slices.Clone so a non-nil empty slice

@@ -307,6 +307,24 @@ func EstimateContextTokens(msgs []agentcore.Message) ContextUsageEstimate {
 	}
 }
 
+// EstimateContextTokensConservative estimates the context from every message
+// instead of trusting the newest assistant Usage block. Callers use it after
+// they rewrite the request view (memory hygiene, context injection): that Usage
+// was measured over the *old* prefix, so it cannot describe the rewritten
+// request and trusting it would report the pre-prune figure forever. The
+// estimate is deliberately upward-biased (the character heuristic on every
+// message) rather than pretending stale data is exact.
+func EstimateContextTokensConservative(msgs []agentcore.Message) int {
+	total := 0
+	for _, m := range msgs {
+		if excludedFromContext(m) {
+			continue
+		}
+		total += EstimateTokens(m)
+	}
+	return total
+}
+
 // CompactionTrigger classifies where contextTokens sits relative to the
 // compaction thresholds, mirroring pi's thresholdCompaction
 // (harness/generation.ts:455-468): blocking above `contextWindow -

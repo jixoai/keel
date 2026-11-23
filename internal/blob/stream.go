@@ -47,6 +47,17 @@ func NewReader(s *store.Store, concurrency, batch int) *Reader {
 	}
 }
 
+// NewReaderWithCAS builds a reader that can stream both PG-chunked rows and
+// objects in the local CAS. Any caller that may read a blob larger than the
+// uploader's PG threshold MUST use this constructor: a CAS-backed row read by a
+// reader without CASDir fails with "blob: CAS dir not configured". The uploader
+// and the reader must therefore share the same directory.
+func NewReaderWithCAS(s *store.Store, concurrency, batch int, casDir string) *Reader {
+	reader := NewReader(s, concurrency, batch)
+	reader.CASDir = casDir
+	return reader
+}
+
 // WireLen returns the base64 length of a blob of size bytes.
 func WireLen(size int64) int64 { return 4 * ((size + 2) / 3) }
 

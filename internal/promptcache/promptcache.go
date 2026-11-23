@@ -161,55 +161,91 @@ func (t canonicalTool) Execute(ctx context.Context, id string, args json.RawMess
 	return t.inner.Execute(ctx, id, args, onUpdate)
 }
 
-// Tracker remembers the previous plan so a run can report invalidation. It is
-// safe for concurrent use; each tracker should represent one session/model
-// stream (the runner keeps one per runner).
-type Tracker struct {
-	mu    sync.Mutex
-	last  *Plan
+// DefaultTrackerStreams bounds the per-tracker state. The runner keeps one
+// tracker for every session it serves; a long-lived process must not grow an
+// unbounded map, and an evicted session simply reports "no previous plan" (a
+// cache miss, never a false invalidation).
+const DefaultTrackerStreams = 128
+
+// trackerState is one stream's previous plan.
+type trackerState struct {
+	plan  Plan
 	model string
 }
 
-// NewTracker returns an empty tracker. Empty means "no previous plan": the
-// first observation reports Invalidated=false (there was no cache to reuse).
-func NewTracker() *Tracker { return &Tracker{} }
+// Tracker remembers the previous plan per stream so a run can report
+// invalidation. It is safe for concurrent use. A stream is a session id (or any
+// caller-chosen key): different sessions served by one runner must not be
+// compared with each other.
+type Tracker struct {
+	mu     sync.Mutex
+	states map[string]trackerState
+	max    int
+}
 
-// Observe compares plan with the previous observation for model and records it.
+// NewTracker returns an empty tracker. Empty means "no previous plan": the
+// first observation of a stream reports Invalidated=false (there was no cache
+// to reuse).
+func NewTracker() *Tracker {
+	return &Tracker{states: make(map[string]trackerState), max: DefaultTrackerStreams}
+}
+
+// Observe compares plan with the previous observation of one single stream. It
+// keeps the pre-multi-stream behavior for callers that track one session: a
+// model change is reported as an invalidation.
 func (t *Tracker) Observe(model string, next Plan) Change {
+	return t.observe("", model, next)
+}
+
+// ObserveStream compares plan with the previous observation of stream and
+// records it. The runner keys stream by session id and passes the model
+// separately, so a model switch is reported as a model change rather than a
+// different-stream miss.
+func (t *Tracker) ObserveStream(stream, model string, next Plan) Change {
+	return t.observe(stream, model, next)
+}
+
+func (t *Tracker) observe(stream, model string, next Plan) Change {
 	if t == nil {
 		return Change{Digest: next.PrefixDigest}
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	change := Change{Digest: next.PrefixDigest}
-	if t.last == nil {
-		t.last = &next
-		t.model = model
+	prev, ok := t.states[stream]
+	if !ok {
+		if t.max > 0 && len(t.states) >= t.max {
+			// Bounded eviction: drop one arbitrary stream. Its next request is a
+			// cache miss, which is safe; keeping an unbounded map is not.
+			for key := range t.states {
+				delete(t.states, key)
+				break
+			}
+		}
+		t.states[stream] = trackerState{plan: next, model: model}
 		return change
 	}
-	prev := *t.last
 	change.Invalidated = true
-	if t.model != model {
-		change.Reasons = append(change.Reasons, fmt.Sprintf("model changed (%s → %s)", t.model, model))
+	if prev.model != model {
+		change.Reasons = append(change.Reasons, fmt.Sprintf("model changed (%s → %s)", prev.model, model))
 	}
-	if prev.SystemDigest != next.SystemDigest {
+	if prev.plan.SystemDigest != next.SystemDigest {
 		change.Reasons = append(change.Reasons, "system prompt changed")
 	}
-	if prev.ToolsDigest != next.ToolsDigest {
-		change.Reasons = append(change.Reasons, describeToolChanges(prev, next))
+	if prev.plan.ToolsDigest != next.ToolsDigest {
+		change.Reasons = append(change.Reasons, describeToolChanges(prev.plan, next))
 	}
 	if len(change.Reasons) == 0 {
 		// A digest mismatch without a named cause means the canonical inputs
 		// changed in a way this version does not classify; report the fact
 		// rather than claim stability.
-		if prev.PrefixDigest != next.PrefixDigest {
+		if prev.plan.PrefixDigest != next.PrefixDigest {
 			change.Reasons = append(change.Reasons, "prefix digest changed")
 		} else {
 			change.Invalidated = false
 		}
 	}
-	t.last = &next
-	t.model = model
+	t.states[stream] = trackerState{plan: next, model: model}
 	return change
 }
 

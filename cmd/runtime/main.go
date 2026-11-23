@@ -440,7 +440,10 @@ func main() {
 	// is built before Boot because the runner pins the seam with the generation.
 	spillStore := spillblob.New(
 		&blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()},
-		&blob.ImageSource{Store: st, Reader: blob.NewReader(st, *streamCap, *batch)},
+		// The reader must see the same CAS directory as the uploader: payloads
+		// above the uploader's PG threshold are stored as CAS files, and a
+		// reader without CASDir cannot recover them.
+		&blob.ImageSource{Store: st, Reader: blob.NewReaderWithCAS(st, *streamCap, *batch, *casDir)},
 	)
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		ToolAccess: toolAccess,
@@ -475,7 +478,7 @@ func main() {
 			// Outbound image resolution (keel-ga §3 provider-files): a transcript
 			// image is a blob reference resolved into a wire form here. Without it
 			// the reference degrades to a named text notice (never a silent drop).
-			Images:        &blob.ImageSource{Store: st, Reader: blob.NewReader(st, *streamCap, *batch)},
+			Images:        &blob.ImageSource{Store: st, Reader: blob.NewReaderWithCAS(st, *streamCap, *batch, *casDir)},
 			PublicBaseURL: os.Getenv("KEEL_PUBLIC_BASE_URL"),
 		},
 		External: servicehost.ExternalOptions{
@@ -585,9 +588,9 @@ func main() {
 	// Blob lifecycle (keel-ga §5): async thumbnails for uploads and the TTL
 	// sweeper. Both loops stop with the runtime context; the generator's uploader
 	// is bare so thumbnails never queue themselves.
-	blobReader := blob.NewReader(st, *streamCap, *batch)
+	blobReader := blob.NewReaderWithCAS(st, *streamCap, *batch, *casDir)
 	blobUploader := &blob.Uploader{Store: st, CASDir: *casDir, TempDir: os.TempDir()}
-	thumbnails := blob.NewThumbnailer(st, blob.NewReader(st, 4, 1), blobUploader, log)
+	thumbnails := blob.NewThumbnailer(st, blob.NewReaderWithCAS(st, 4, 1, *casDir), blobUploader, log)
 	thumbnails.Interval = envDuration("KEEL_BLOB_THUMB_INTERVAL", blob.ThumbDefaultInterval)
 	blobUploader.Thumbnails = thumbnails
 	go thumbnails.Run(ctx)

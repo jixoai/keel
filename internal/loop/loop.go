@@ -412,6 +412,11 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 	// no natural (tool-result, steering, follow-up) request satisfied yet; the
 	// outer loop then runs exactly one context-only turn (pi's explicitContinuation).
 	explicitContinuation := false
+	// usageStale records that the request view was rewritten after the newest
+	// assistant Usage block was measured. Context-token estimates must then use
+	// the conservative full estimate; the next assistant response resets it,
+	// because that usage describes the rewritten request.
+	usageStale := false
 
 	// settleOrContinue emits agent_end and, when EmitSettleEvents is enabled, the
 	// host-level settle boundary. An aborted run skips agent_before_settle and
@@ -512,6 +517,13 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 				return
 			}
 			produced = append(produced, assistant)
+			// A response that carries Usage measured it over the request just
+			// sent, which is the current request view: it is fresh again. A
+			// response without Usage cannot clear an earlier rewrite's staleness,
+			// because the older Usage still describes the pre-rewrite prefix.
+			if assistant.Usage != nil {
+				usageStale = false
+			}
 
 			var toolResults []agentcore.ToolResultMessage
 			switch assistant.StopReason {
@@ -607,14 +619,20 @@ func runLoop(ctx context.Context, agentCtx *agentcore.AgentContext, cfg RunConfi
 			// Keel extension: memory hygiene runs before compaction at the turn
 			// boundary. Pruning/offloading the request view is cheaper than a
 			// summary call and preserves every byte by reference; the transcript
-			// on the ledger is untouched.
-			maybeHygiene(ctx, agentCtx, &cfg, tel)
+			// on the ledger is untouched. A rewrite makes the newest Usage block
+			// stale, so later estimates use the conservative full estimate.
+			tokens := estimateContextTokens(agentCtx.Messages, usageStale)
+			if changed, hygieneTokens := maybeHygiene(ctx, agentCtx, &cfg, usageStale); changed {
+				usageStale = true
+				tokens = hygieneTokens
+			}
 			// Keel extension: auto-compaction at the turn boundary (pi's host does
 			// it between runs). Record utilization after any compaction so the
 			// telemetry summary reports the current used/window figure.
-			maybeAutoCompact(ctx, agentCtx, &cfg, emit, tel)
+			if maybeAutoCompact(ctx, agentCtx, &cfg, emit, tel, tokens) {
+				tokens = compaction.EstimateContextTokensConservative(agentCtx.Messages)
+			}
 			if tel != nil && cfg.ContextWindow > 0 {
-				tokens := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
 				tel.recordContext(tokens, cfg.ContextWindow)
 			}
 			// Stop hook, consulted before queue draining: a stop skips the post-turn
@@ -719,27 +737,45 @@ func applyPrepareRequest(ctx context.Context, agentCtx *agentcore.AgentContext, 
 // committed or rewritten in the ledger — the original messages were already
 // emitted, and the run result keeps them.
 //
+// Pre-existing transcript images are resolved by the runner before the loop
+// starts; this pass therefore sees refs that entered the context in-run (tool
+// results) and cannot offload an already-resolved ImageContent. The runner's
+// pre-pass owns the resumed-transcript case (see internal/agent/hygiene.go).
+//
 // The pass is a no-op unless both compaction and hygiene are enabled. A failure
 // (store down, a reference without a blob id) leaves the original message in
 // place and is reported; it never fails the run and never drops content.
-func maybeHygiene(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, tel *telemetry) {
+// It returns whether the request view changed and the honest post-pass token
+// estimate (conservative, because the rewrite invalidated the Usage block).
+func maybeHygiene(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, usageStale bool) (bool, int) {
 	if cfg == nil || !cfg.Compaction.Enabled || !cfg.Hygiene.Enabled {
-		return
+		return false, 0
 	}
-	before := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
+	before := estimateContextTokens(agentCtx.Messages, usageStale)
 	out, report := compaction.ApplyHygiene(ctx, agentCtx.Messages, cfg.Hygiene, cfg.Spill, cfg.SpillScope)
+	if usageStale {
+		// The pre-pass estimate is already conservative; keep the two figures on
+		// one basis.
+		report.TokensBefore = before
+	}
 	if report.Changed() || len(report.Failures) > 0 {
 		agentCtx.Messages = out
 		if cfg.OnHygiene != nil {
 			cfg.OnHygiene(ctx, report)
 		}
 	}
-	if tel != nil && cfg.ContextWindow > 0 {
-		tel.recordContext(before, cfg.ContextWindow)
-		if report.Changed() {
-			tel.recordContext(report.TokensAfter, cfg.ContextWindow)
-		}
+	return report.Changed(), report.TokensAfter
+}
+
+// estimateContextTokens picks the honest estimator for the current request view.
+// A stale flag means a previous rewrite invalidated the newest Usage block, so
+// the conservative full estimate is used until a new assistant response resets
+// it.
+func estimateContextTokens(msgs agentcore.MessageList, stale bool) int {
+	if stale {
+		return compaction.EstimateContextTokensConservative(msgs)
 	}
+	return compaction.EstimateContextTokens(msgs).Tokens
 }
 
 // maybeAutoCompact checks whether the context has outgrown its usable window and,
@@ -748,11 +784,14 @@ func maybeHygiene(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *Ru
 // under threshold. A compaction failure is non-fatal: the original context is
 // preserved and a CompactionEvent carrying ErrorMessage is emitted so the failure
 // is observable without aborting the run (US-004).
-func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, emit func(agentcore.AgentEvent) error, tel *telemetry) {
+//
+// before is the caller's honest estimate of the current request view (it may be
+// conservative when a previous hygiene pass invalidated the Usage block). It
+// returns true when the context was actually compacted.
+func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg *RunConfig, emit func(agentcore.AgentEvent) error, tel *telemetry, before int) bool {
 	if !cfg.Compaction.Enabled || cfg.ContextWindow <= 0 {
-		return
+		return false
 	}
-	before := compaction.EstimateContextTokens(agentCtx.Messages).Tokens
 	// Record pre-compaction utilization so the ratio reflects the peak that
 	// triggered (or nearly triggered) compaction even when the summary is read
 	// mid-run. The turn boundary overwrites it with the post-settle figure.
@@ -760,7 +799,7 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 		tel.recordContext(before, cfg.ContextWindow)
 	}
 	if !compaction.ShouldCompact(before, cfg.ContextWindow, cfg.Compaction) {
-		return
+		return false
 	}
 	// Signal the start so a front-end can show an in-progress indicator while the
 	// summarization request (an LLM call that blocks the loop) is in flight.
@@ -775,11 +814,11 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 			KeptCount:    kept,
 			ErrorMessage: err.Error(),
 		})
-		return
+		return false
 	}
 	if res == nil {
 		// Nothing to summarize (cut point left no prefix); leave context as-is.
-		return
+		return false
 	}
 	now := nowMillis()
 	rebuilt := res.RebuildContext(agentCtx.Messages, now)
@@ -803,7 +842,9 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 		cfg.OnCompaction(ctx, res.Summary, res.FirstKeptIndex, summarized)
 	}
 	agentCtx.Messages = rebuilt
-	after := compaction.EstimateContextTokens(rebuilt).Tokens
+	// The checkpoint makes older Usage blocks unusable; the conservative full
+	// estimate is the honest post-compaction figure.
+	after := compaction.EstimateContextTokensConservative(rebuilt)
 	_ = emit(agentcore.CompactionEvent{
 		Reason:                   "threshold",
 		TokensBefore:             before,
@@ -814,6 +855,7 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 		FirstKeptTranscriptIndex: firstKeptTranscript,
 		Summary:                  res.Summary,
 	})
+	return true
 }
 
 // runCompaction invokes compaction.Compact with the loop's summarization config,

@@ -217,6 +217,84 @@ func TestLoopHygieneRequiresCompaction(t *testing.T) {
 	}
 }
 
+// TestLoopHygieneReportsHonestContextAfterPruning pins the token-accounting fix
+// end to end: after a prune, the telemetry context figure must not repeat the
+// pre-prune provider Usage (the reviewer's 50122→50122).
+func TestLoopHygieneReportsHonestContextAfterPruning(t *testing.T) {
+	store := newLoopSpill()
+	large := strings.Repeat("tool output line\n", 300)
+	responses := []agentcore.AssistantMessage{
+		assistantText("first answer", agentcore.StopReasonEndTurn),
+		assistantText("second answer", agentcore.StopReasonEndTurn),
+	}
+	responses[0].Usage = &agentcore.Usage{InputTokens: 50000, OutputTokens: 100}
+	next := 0
+	stream := func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		msg := responses[next]
+		next++
+		s := provider.NewAssistantMessageEventStream(4)
+		go func() {
+			defer s.Close()
+			_ = s.Emit(ctx, provider.StreamStartEvent{Partial: agentcore.AssistantMessage{RoleField: agentcore.RoleAssistant}})
+			_ = s.Emit(ctx, provider.StreamTextEvent{Partial: msg})
+			_ = s.Emit(ctx, provider.StreamDoneEvent{Message: msg})
+		}()
+		return s, nil
+	}
+	followUps := 0
+	var reports []compaction.HygieneReport
+	cfg := RunConfig{
+		LoopConfig: LoopConfig{
+			Model: "fake", Provider: "fake", Stream: stream,
+			ContextWindow: 1_000_000,
+			Compaction:    compaction.CompactionSettings{Enabled: true, KeepRecentTokens: 20},
+			Hygiene: compaction.HygieneSettings{
+				Enabled: true, KeepRecentTokens: 20, MinToolResultBytes: 256,
+				PreviewBytes: 32, OffloadImages: false,
+			},
+			Spill:      store,
+			SpillScope: spill.Scope{TenantID: "tenant", SessionID: "session"},
+			OnHygiene: func(_ context.Context, report compaction.HygieneReport) {
+				reports = append(reports, report)
+			},
+		},
+		EventBuffer: 8,
+		GetFollowUpMessages: func(context.Context, *agentcore.AgentContext) []agentcore.AgentMessage {
+			followUps++
+			if followUps > 1 {
+				return nil
+			}
+			return []agentcore.AgentMessage{
+				agentcore.UserMessage{RoleField: agentcore.RoleUser, Content: agentcore.ContentList{agentcore.NewTextContent("continue")}},
+			}
+		},
+	}
+	events, _ := runLoopOnce(t, cfg,
+		agentcore.UserMessage{RoleField: agentcore.RoleUser, Content: agentcore.ContentList{agentcore.NewTextContent("run it")}},
+		agentcore.ToolResultMessage{RoleField: agentcore.RoleToolResult, ToolCallID: "call-1", ToolName: "bash", Content: agentcore.ContentList{agentcore.NewTextContent(large)}},
+		agentcore.UserMessage{RoleField: agentcore.RoleUser, Content: agentcore.ContentList{agentcore.NewTextContent("what happened?")}},
+	)
+	if len(reports) != 1 {
+		t.Fatalf("hygiene reports = %d, want 1", len(reports))
+	}
+	report := reports[0]
+	if report.TokensAfter >= report.TokensBefore {
+		t.Fatalf("report = %d→%d, want a visible reduction", report.TokensBefore, report.TokensAfter)
+	}
+	var telemetryEvent agentcore.TelemetryEvent
+	for _, event := range events {
+		if tel, ok := event.(agentcore.TelemetryEvent); ok {
+			telemetryEvent = tel
+		}
+	}
+	if telemetryEvent.ContextTokens == 0 {
+		t.Fatal("no telemetry context figure was emitted")
+	}
+	if telemetryEvent.ContextTokens >= 50000 {
+		t.Fatalf("telemetry ContextTokens = %d, want the honest post-prune estimate, not the stale usage", telemetryEvent.ContextTokens)
+	}
+}
+
 // providerMessagesText flattens every text block in a provider request.
 func providerMessagesText(msgs agentcore.MessageList) string {
 	var b strings.Builder

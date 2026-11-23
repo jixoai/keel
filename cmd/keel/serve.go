@@ -645,7 +645,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// Boot because the runner pins the seam with the loadout generation.
 	spillStore := spillblob.New(
 		&blob.Uploader{Store: st, CASDir: opts.CASDir, TempDir: os.TempDir()},
-		&blob.ImageSource{Store: st, Reader: blob.NewReader(st, 256, 1)},
+		// The reader must see the same CAS directory as the uploader: payloads
+		// above the uploader's PG threshold are stored as CAS files, and a
+		// reader without CASDir cannot recover them.
+		&blob.ImageSource{Store: st, Reader: blob.NewReaderWithCAS(st, 256, 1, opts.CASDir)},
 	)
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
@@ -759,7 +762,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 			// only a blobId, and the worker streams the bytes here before the
 			// request leaves. Without it an image reference degrades to a named
 			// text notice instead of a silent drop.
-			Images: &blob.ImageSource{Store: st, Reader: blob.NewReader(st, 256, 1)},
+			Images: &blob.ImageSource{Store: st, Reader: blob.NewReaderWithCAS(st, 256, 1, opts.CASDir)},
 			// Prefix under which a provider may fetch images itself; empty means
 			// the url form degrades to file_id/base64 rather than emitting a URL
 			// the provider cannot reach.
@@ -919,9 +922,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// never queues itself. The sweeper reaps TTL-expired, unreferenced blobs
 	// (metadata -> chunks -> CAS) and retries a crashed unlink through its
 	// orphan scan. Both loops stop with the serve context.
-	blobReader := blob.NewReader(st, 256, 1)
+	blobReader := blob.NewReaderWithCAS(st, 256, 1, opts.CASDir)
 	blobUploader := &blob.Uploader{Store: st, CASDir: opts.CASDir, TempDir: os.TempDir()}
-	thumbnails := blob.NewThumbnailer(st, blob.NewReader(st, 4, 1), blobUploader, log)
+	thumbnails := blob.NewThumbnailer(st, blob.NewReaderWithCAS(st, 4, 1, opts.CASDir), blobUploader, log)
 	thumbnails.Interval = envDuration("KEEL_BLOB_THUMB_INTERVAL", blob.ThumbDefaultInterval)
 	blobUploader.Thumbnails = thumbnails
 	go thumbnails.Run(ctx)

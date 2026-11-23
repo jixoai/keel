@@ -3,6 +3,7 @@ package spillblob
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"os"
 	"strings"
 	"testing"
@@ -72,6 +73,76 @@ func TestSpillAndLoadRoundTripsThroughTheTenantBlobStore(t *testing.T) {
 	}
 	if !bytes.Equal(recovered, payload) {
 		t.Fatalf("recovered %d bytes, want %d", len(recovered), len(payload))
+	}
+}
+
+// TestSpillRejectsIncompleteDedupeRow pins the failure mode: blob.PutDetailed
+// dedupes by (tenant, sha256) and returns an existing row even when that row's
+// upload never completed. Returning a reference to it would break Load forever,
+// so Spill must refuse and the caller keeps the original message.
+func TestSpillRejectsIncompleteDedupeRow(t *testing.T) {
+	st := testStore(t)
+	blobs := testBlobs(t, st)
+	tenant := newTenant(t, st)
+	ctx := context.Background()
+	payload := []byte("an incomplete row from a crashed upload")
+	sum := sha256.Sum256(payload)
+
+	// Reserve the row (the dedupe identity) without completing the upload.
+	blobID := uuid.New()
+	if _, _, err := st.CreateBlob(ctx, tenant, blobID, sum[:], int64(len(payload)), "text/plain", store.StoragePGChunked); err != nil {
+		t.Fatalf("reserve incomplete blob: %v", err)
+	}
+	if meta, err := st.BlobMetaOf(ctx, tenant, blobID); err != nil || meta.Complete {
+		t.Fatalf("test premise: blob meta = %+v, err = %v", meta, err)
+	}
+
+	scope := spill.Scope{TenantID: tenant.String(), SessionID: uuid.NewString()}
+	if _, err := blobs.Spill(ctx, scope, "text/plain", payload); err == nil {
+		t.Fatal("Spill returned a reference to an incomplete blob")
+	} else if !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("Spill error = %v, want the incomplete-blob refusal", err)
+	}
+}
+
+// TestSpillRoundTripsCASPayloadsAboveThePGThreshold is the production bug this
+// test exists for: a payload larger than the uploader's PG threshold goes to the
+// local CAS, so the reader must be built with the same CAS directory. A reader
+// without it fails exactly as the reviewer's probe did.
+func TestSpillRoundTripsCASPayloadsAboveThePGThreshold(t *testing.T) {
+	st := testStore(t)
+	tenant := newTenant(t, st)
+	ctx := context.Background()
+	casDir := t.TempDir()
+	uploader := &blob.Uploader{Store: st, CASDir: casDir, TempDir: t.TempDir(), PGThreshold: 1}
+	payload := bytes.Repeat([]byte("a payload that belongs in the CAS\n"), 1<<16) // ~2MiB
+	if int64(len(payload)) <= 1<<20 {
+		t.Fatalf("test premise: payload is only %d bytes", len(payload))
+	}
+	scope := spill.Scope{TenantID: tenant.String(), SessionID: uuid.NewString()}
+
+	withCAS := New(uploader, &blob.ImageSource{
+		Store:  st,
+		Reader: blob.NewReaderWithCAS(st, 4, 1, casDir),
+	})
+	ref, err := withCAS.Spill(ctx, scope, "text/plain", payload)
+	if err != nil {
+		t.Fatalf("Spill: %v", err)
+	}
+	recovered, err := withCAS.Load(ctx, scope, ref)
+	if err != nil {
+		t.Fatalf("Load CAS payload: %v", err)
+	}
+	if !bytes.Equal(recovered, payload) {
+		t.Fatalf("recovered %d bytes, want %d", len(recovered), len(payload))
+	}
+
+	// Control: the same reference through a reader without CASDir reproduces the
+	// original failure ("blob: CAS dir not configured"), proving the wiring is
+	// load-bearing rather than incidental.
+	withoutCAS := New(uploader, &blob.ImageSource{Store: st, Reader: blob.NewReader(st, 4, 1)})
+	if _, err := withoutCAS.Load(ctx, scope, ref); err == nil || !strings.Contains(err.Error(), "CAS dir") {
+		t.Fatalf("reader without CASDir error = %v, want the CAS-dir failure", err)
 	}
 }
 

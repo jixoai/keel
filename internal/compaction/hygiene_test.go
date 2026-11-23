@@ -103,7 +103,7 @@ func TestPruneToolResultsReplacesOldLargeResultWithDurableReference(t *testing.T
 		userText("what happened?"),
 	}
 	settings := hygieneSettings()
-	before := EstimateContextTokens(msgs).Tokens
+	before := EstimateContextTokensConservative(msgs)
 
 	out, report := ApplyHygiene(context.Background(), msgs, settings, store, spill.Scope{TenantID: "t", SessionID: "s"})
 
@@ -134,6 +134,10 @@ func TestPruneToolResultsReplacesOldLargeResultWithDurableReference(t *testing.T
 	if len(reference) > 800 {
 		t.Fatalf("replacement = %d bytes, want a bounded reference", len(reference))
 	}
+	// The preview is the tool's text, not the JSON recovery envelope.
+	if !strings.Contains(reference, "line of tool output") || strings.Contains(reference, `"role":"toolResult"`) {
+		t.Fatalf("preview should render the tool text, not the payload JSON: %q", reference)
+	}
 	// The original message identity survives: call id/name stay addressable.
 	if prunedMsg.ToolCallID != "call-old" || prunedMsg.ToolName != "bash" {
 		t.Fatalf("replacement lost the tool identity: %+v", prunedMsg)
@@ -154,7 +158,7 @@ func TestPruneToolResultsReplacesOldLargeResultWithDurableReference(t *testing.T
 		t.Fatalf("recovered identity = %+v", recovered)
 	}
 	// Token accounting reflects the smaller request view.
-	after := EstimateContextTokens(out).Tokens
+	after := EstimateContextTokensConservative(out)
 	if !(after < before) {
 		t.Fatalf("tokens before=%d after=%d, want a reduction", before, after)
 	}
@@ -209,7 +213,7 @@ func TestPruneFailureKeepsOriginal(t *testing.T) {
 		assistantReply("ok"),
 		userText("and?"),
 	}
-	before := EstimateContextTokens(msgs).Tokens
+	before := EstimateContextTokensConservative(msgs)
 	out, report := ApplyHygiene(context.Background(), msgs, hygieneSettings(), store, spill.Scope{})
 	if report.Changed() {
 		t.Fatal("a failed spill must not rewrite the message")
@@ -349,6 +353,43 @@ func (incompleteSpill) Load(context.Context, spill.Scope, spill.Ref) ([]byte, er
 	return nil, errors.New("not found")
 }
 
+// TestHygieneReportDoesNotTrustStaleUsage pins the reviewer's 50122→50122 bug:
+// a large tool result is pruned, but EstimateContextTokens still trusts the
+// newest assistant Usage measured over the pre-prune prefix. The hygiene report
+// must use full estimates on both sides so the reduction is visible.
+func TestHygieneReportDoesNotTrustStaleUsage(t *testing.T) {
+	store := newMemSpill()
+	large := strings.Repeat("x", 8000)
+	withUsage := assistantReply("done")
+	withUsage.Usage = &agentcore.Usage{InputTokens: 50000, OutputTokens: 100}
+	msgs := agentcore.MessageList{
+		userText("run"),
+		toolResultTextMessage("call-1", "bash", large),
+		withUsage,
+		userText("and?"),
+	}
+	settings := hygieneSettings()
+	settings.KeepRecentTokens = 20
+
+	out, report := ApplyHygiene(context.Background(), msgs, settings, store, spill.Scope{})
+	if !report.Changed() {
+		t.Fatal("the large result should have been pruned")
+	}
+	// The bug premise: the ordinary estimator still reports the pre-prune Usage.
+	if got := EstimateContextTokens(out).Tokens; got < 50000 {
+		t.Fatalf("test premise: EstimateContextTokens = %d, want the stale usage figure", got)
+	}
+	if report.TokensBefore < 2000 {
+		t.Fatalf("report.TokensBefore = %d, want a full estimate of the large result", report.TokensBefore)
+	}
+	if report.TokensAfter >= report.TokensBefore {
+		t.Fatalf("report = %d→%d, want a visible post-prune reduction", report.TokensBefore, report.TokensAfter)
+	}
+	if report.TokensAfter != EstimateContextTokensConservative(out) {
+		t.Fatalf("report.TokensAfter = %d, conservative estimate = %d", report.TokensAfter, EstimateContextTokensConservative(out))
+	}
+}
+
 // TestApplyHygieneDisabled does nothing when the master switch is off.
 func TestApplyHygieneDisabled(t *testing.T) {
 	store := newMemSpill()
@@ -357,12 +398,15 @@ func TestApplyHygieneDisabled(t *testing.T) {
 		toolResultTextMessage("call-1", "bash", strings.Repeat("q", 4000)),
 		userText("next"),
 	}
-	before := EstimateContextTokens(msgs).Tokens
+	before := EstimateContextTokensConservative(msgs)
 	out, report := ApplyHygiene(context.Background(), msgs, HygieneSettings{Enabled: false}, store, spill.Scope{})
 	if report.Changed() || store.spills != 0 {
 		t.Fatalf("disabled hygiene wrote or rewrote: %+v", report)
 	}
-	if EstimateContextTokens(out).Tokens != before {
+	if report.TokensBefore != before || report.TokensAfter != before {
+		t.Fatalf("disabled hygiene report = %d→%d, want %d", report.TokensBefore, report.TokensAfter, before)
+	}
+	if EstimateContextTokensConservative(out) != before {
 		t.Fatal("disabled hygiene changed the token estimate")
 	}
 }

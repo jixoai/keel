@@ -57,6 +57,7 @@ host.TenantConfig ──resolve──▶ Loadout(revision, summary) ──Apply�
 | `agent.provider/model/baseUrl/protocol/apiKeyRef` | `llm` 的 provider 选择（`apiKeyRef` 只存引用） |
 | `agent.systemPrompt/sections` | preamble 与额外 prompt section |
 | `agent.maxTurns/contextWindow` | run 回合上限 / compaction 窗口 |
+| `agent.promptCache` | 显式开启稳定 system/tool 前缀缓存（默认 false；开启后规范化工具顺序/schema 键序，Anthropic 在最后一个 tool 放 `cache_control` 断点） |
 | `skills.enabled/roots/fileReadTool` | 技能发现与索引措辞 |
 | `mcp.servers` | 非空即启用 `mcp` 服务 |
 | `compaction.enabled/threshold/keepRecentTokens` | `enabled=true` 才启用 `compaction` |

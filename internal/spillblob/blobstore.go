@@ -61,9 +61,25 @@ func (b *Blobs) Spill(ctx context.Context, scope spill.Scope, mime string, data 
 	if strings.TrimSpace(mime) == "" {
 		mime = "application/octet-stream"
 	}
-	meta, err := b.Uploader.Put(ctx, tenant, mime, bytes.NewReader(data))
+	meta, created, err := b.Uploader.PutDetailed(ctx, tenant, mime, bytes.NewReader(data))
 	if err != nil {
 		return spill.Ref{}, fmt.Errorf("spillblob: store payload: %w", err)
+	}
+	// Content dedupe can return an existing row whose upload never completed (a
+	// crash between CreateBlob and CompleteBlob). Such a row is unreadable: its
+	// chunks are missing or partial, so Load would fail with ErrIncompleteBlob.
+	// Returning a reference to it would be a broken reference; refuse instead, so
+	// the caller keeps the original content. The next process's upload repair or
+	// the row's TTL is the recovery path; this call must never claim success.
+	if !meta.Complete {
+		state := "deduped"
+		if created {
+			state = "new"
+		}
+		return spill.Ref{}, fmt.Errorf("spillblob: %s blob %s is incomplete; refusing a reference that cannot be read", state, meta.BlobID)
+	}
+	if meta.Size != int64(len(data)) {
+		return spill.Ref{}, fmt.Errorf("spillblob: stored blob %s is %d bytes, want %d", meta.BlobID, meta.Size, len(data))
 	}
 	ref := spill.Ref{
 		ID:     meta.BlobID.String(),

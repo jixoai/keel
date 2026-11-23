@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -139,8 +140,13 @@ type Runner struct {
 	// Compaction, when set, enables automatic context compaction for every run
 	// of this runner (the compaction service adapter). Nil keeps it off.
 	Compaction *CompactionOptions
-	MaxTurns   int
-	Logger     *slog.Logger
+	// PromptCache opts into keel.prompt-cache for this runner's attempts. It is
+	// an explicit runtime/tenant setting (AgentConfig.PromptCache), default off:
+	// off keeps the pre-feature request bytes, on canonicalizes the system/tool
+	// prefix and lets a wire with a cache breakpoint use it.
+	PromptCache bool
+	MaxTurns    int
+	Logger      *slog.Logger
 	// Images resolves the durable image references in the transcript into the
 	// wire form the attempt's provider accepts, immediately before each request
 	// (see internal/agent/images.go). Nil means the deployment has no image
@@ -172,6 +178,20 @@ type Runner struct {
 	// without a Checkpoint hook is refused with a typed error: selecting a mode
 	// whose trigger does not exist must never silently swallow capture.
 	CapturePolicy func(ctx context.Context, scope kernel.Scope) (RunCapture, error)
+
+	// promptCacheOnce/promptCacheTracker back the keel.prompt-cache invalidation
+	// log. The tracker is keyed by session, so concurrent sessions served by this
+	// runner never compare plans with each other.
+	promptCacheOnce    sync.Once
+	promptCacheTracker *promptcache.Tracker
+}
+
+// promptTracker returns the runner's lazily built prompt-cache tracker.
+func (r *Runner) promptTracker() *promptcache.Tracker {
+	r.promptCacheOnce.Do(func() {
+		r.promptCacheTracker = promptcache.NewTracker()
+	})
+	return r.promptCacheTracker
 }
 
 // RunCapture is one attempt's resolved capture policy.
@@ -933,20 +953,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			// supplies settings; the loop reports a successful compaction on
 			// CompactionEvent, which the consumer persists below.
 			//
-			// The system/tool prefix is the provider's cache boundary. The loop
-			// canonicalizes the tool list and the wire driver places its
-			// breakpoint at the end of that prefix; the digest is logged for
-			// invalidation diagnosis. Message hygiene happens after the
-			// boundary, so it cannot invalidate the cached prefix.
-			PromptCache: true,
-			OnPromptPrefix: func(model string, plan promptcache.Plan) {
-				r.Logger.Debug("prompt prefix",
-					"session_id", lease.Scope.SessionID,
-					"model", model,
-					"digest", plan.PrefixDigest,
-					"tools", len(plan.ToolNames),
-					"boundary", plan.Boundary)
-			},
+			// The system/tool prefix is the provider's cache boundary. With the
+			// tenant's explicit opt-in the loop canonicalizes the tool list and
+			// the wire driver places its breakpoint at the end of that prefix;
+			// the digest is logged and the tracker reports invalidations.
+			// Message hygiene happens after the boundary, so it cannot
+			// invalidate the cached prefix.
+			PromptCache: r.PromptCache,
 		},
 		Batch: agenttool.BatchConfig{
 			ToolExecutorConfig: agenttool.ToolExecutorConfig{
@@ -984,6 +997,30 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			}
 			return false
 		},
+	}
+	if r.PromptCache {
+		// The tracker is the production caller of promptcache.Tracker: it turns
+		// consecutive plans of this session into an invalidation fact, logged at
+		// info when the cached prefix cannot be reused and at debug when it can.
+		tracker := r.promptTracker()
+		stream := lease.Scope.SessionID.String()
+		cfg.OnPromptPrefix = func(model string, plan promptcache.Plan) {
+			change := tracker.ObserveStream(stream, model, plan)
+			if change.Invalidated {
+				r.Logger.Info("prompt prefix invalidated",
+					"session_id", lease.Scope.SessionID,
+					"model", model,
+					"digest", change.Digest,
+					"reasons", change.Reasons)
+				return
+			}
+			r.Logger.Debug("prompt prefix stable",
+				"session_id", lease.Scope.SessionID,
+				"model", model,
+				"digest", change.Digest,
+				"tools", len(plan.ToolNames),
+				"boundary", plan.Boundary)
+		}
 	}
 	if r.Compaction != nil && r.Compaction.Settings.Enabled {
 		// The model's own budget is the primary source (a 1M-context model must
