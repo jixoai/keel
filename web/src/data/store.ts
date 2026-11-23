@@ -39,6 +39,8 @@ import type {
   SessionTasksView,
   SessionFileView,
   SessionTaskView,
+  FilePreviewView,
+  TaskPanelView,
   SettingsApi,
   SettingsIssue,
   SkillDetailView,
@@ -117,6 +119,8 @@ type Client = SettingsApi &
    * projections leaves the file/task groups out instead of inventing rows. */
   sessionFiles?(sessionId: string): Promise<SessionFilesView>;
   sessionTasks?(sessionId: string): Promise<SessionTasksView>;
+  taskPanel?(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView>;
+  filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;
   createSession(): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
   source(sessionId: string): EventSource;

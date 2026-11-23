@@ -32,6 +32,11 @@ import type {
   SessionSummary,
   SessionTasksView,
   SettingsApi,
+  FilePreviewView,
+  TaskPanelAttachmentView,
+  TaskPanelCardView,
+  TaskPanelEventView,
+  TaskPanelView,
   SettingsIssue,
   SkillDetailView,
   SkillInstallRequest,
@@ -1293,6 +1298,110 @@ export class KeelHttp implements SettingsApi {
       }),
       count: numberOr(body.count, 0),
       truncated: body.truncated === true,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/task-panel` — the run surface's task tree, event
+   * stream and resource references. A field the projection did not send stays
+   * absent; the panel never fills one in. */
+  async taskPanel(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView> {
+    const query = new URLSearchParams();
+    if (memberLimit !== undefined) query.set("memberLimit", String(memberLimit));
+    if (eventLimit !== undefined) query.set("eventLimit", String(eventLimit));
+    const suffix = query.toString();
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/task-panel${suffix ? `?${suffix}` : ""}`,
+    );
+    const body = asRecord(await response.json());
+    const card = (value: unknown): TaskPanelCardView => {
+      const row = asRecord(value);
+      const parsed: TaskPanelCardView = {
+        taskId: asText(row.taskId),
+        sessionId: asText(row.sessionId),
+        title: asText(row.title),
+        status: asText(row.status),
+        parentTaskId: asText(row.parentTaskId) || undefined,
+        origin: asText(row.origin) || undefined,
+        originSeq: numberOr(row.originSeq, 0) || undefined,
+        createdSeq: numberOr(row.createdSeq, 0) || undefined,
+        updatedSeq: numberOr(row.updatedSeq, 0) || undefined,
+        closedSeq: numberOr(row.closedSeq, 0) || undefined,
+        createdAt: asText(row.createdAt) || undefined,
+        updatedAt: asText(row.updatedAt) || undefined,
+      };
+      if (row.member === true) parsed.member = true;
+      return parsed;
+    };
+    const event = (value: unknown): TaskPanelEventView => {
+      const row = asRecord(value);
+      const parsed: TaskPanelEventView = {
+        taskId: asText(row.taskId),
+        kind: asText(row.kind),
+        seq: numberOr(row.seq, 0),
+        at: asText(row.at) || undefined,
+        title: asText(row.title) || undefined,
+        status: asText(row.status) || undefined,
+        parentTaskId: asText(row.parentTaskId) || undefined,
+        origin: asText(row.origin) || undefined,
+        originSeq: numberOr(row.originSeq, 0) || undefined,
+        path: asText(row.path) || undefined,
+        hash: asText(row.hash) || undefined,
+        text: asText(row.text) || undefined,
+        reason: asText(row.reason) || undefined,
+      };
+      if (row.unparsed === true) parsed.unparsed = true;
+      return parsed;
+    };
+    const limits = asRecord(body.limits);
+    return {
+      sessionId: asText(body.sessionId),
+      cards: listOf(body.cards).map(card),
+      members: listOf(body.members).map(card),
+      ancestors: listOf(body.ancestors).map(card),
+      attachments: listOf(body.attachments).flatMap((value): TaskPanelAttachmentView[] => {
+        const row = asRecord(value);
+        const path = asText(row.path);
+        if (!path) return [];
+        return [{ taskId: asText(row.taskId), path, hash: asText(row.hash) }];
+      }),
+      events: listOf(body.events).map(event),
+      limits: {
+        memberLimit: numberOr(limits.memberLimit, 0),
+        truncated: limits.truncated === true,
+        truncatedMemberCount: numberOr(limits.truncatedMemberCount, 0) || undefined,
+        eventLimit: numberOr(limits.eventLimit, 0),
+        eventsTruncated: limits.eventsTruncated === true,
+        ancestorsTruncated: limits.ancestorsTruncated === true,
+      },
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/file-preview` — one bounded page of a path the
+   * session's manifest holds. The path is passed exactly as the event recorded
+   * it; no path is invented. */
+  async filePreview(sessionId: string, path: string, referenceHash?: string, offset = 0): Promise<FilePreviewView> {
+    const query = new URLSearchParams({ path });
+    if (referenceHash) query.set("hash", referenceHash);
+    if (offset > 0) query.set("offset", String(offset));
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/file-preview?${query.toString()}`,
+    );
+    const body = asRecord(await response.json());
+    return {
+      path: asText(body.path),
+      hash: asText(body.hash),
+      size: numberOr(body.size, 0),
+      seq: numberOr(body.seq, 0) || undefined,
+      offset: numberOr(body.offset, 0),
+      limit: numberOr(body.limit, 0),
+      totalLines: numberOr(body.totalLines, 0),
+      returnedLines: numberOr(body.returnedLines, 0),
+      nextOffset: numberOr(body.nextOffset, 0),
+      truncated: body.truncated === true,
+      content: asText(body.content),
+      referenceHash: asText(body.referenceHash) || undefined,
+      matchesReference:
+        typeof body.matchesReference === "boolean" ? body.matchesReference : undefined,
     };
   }
 

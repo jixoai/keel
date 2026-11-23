@@ -10,7 +10,7 @@
 // The record chapter's read and the run projection's reads are optional on
 // purpose. A transport without them answers nothing, and the page renders its
 // 待接入 state instead of an error about a surface the deployment never had.
-import type { SessionSummary } from "./contract";
+import type { FilePreviewView, SessionSummary, TaskPanelView } from "./contract";
 import type {
   AccountView,
   AuditEventView,
@@ -109,6 +109,14 @@ export interface IdentityApi {
    * summary without importing the whole workspace store. */
   listSessions?(limit?: number, after?: string): Promise<SessionSummary[]>;
   teamTasks?(sessionId: string, limit?: number, after?: string): Promise<TeamTasksView>;
+  /** The run surface's task panel (`GET /v1/sessions/{id}/task-panel`): the
+   * task tree, the event stream and the live resource references. Optional:
+   * a deployment without the projection answers nothing, and the panel says
+   * so instead of drawing an empty tree. */
+  taskPanel?(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView>;
+  /** One bounded page of a session file the panel previews
+   * (`GET /v1/sessions/{id}/file-preview`). Optional, same rule. */
+  filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;
   sessionEvents?(sessionId: string, limit?: number): Promise<SessionEventView[]>;
   listSubagents?(parentSessionId?: string, limit?: number): Promise<SubagentView[]>;
   cancelSession?(sessionId: string): Promise<SessionCancelView>;

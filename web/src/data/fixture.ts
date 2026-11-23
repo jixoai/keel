@@ -36,6 +36,8 @@ import type {
   SessionSummary,
   SessionTasksView,
   SettingsApi,
+  FilePreviewView,
+  TaskPanelView,
   SettingsIssue,
   SkillDetailView,
   SkillInstallRequest,
@@ -367,6 +369,11 @@ export class FixtureClient implements SettingsApi {
         "mcp.apps": true,
         "mcp.apps.sandboxOrigin": false,
         "mcp.events": false,
+        // The development transport answers the task panel (the fixture's run
+        // has a real in-memory task tree), so the run surface's entry renders
+        // exactly as a deployment with the projection wired.
+        "task.panel": true,
+        "session.filePreview": true,
       },
       limits: {},
       hooks: [],
@@ -1105,6 +1112,14 @@ export class FixtureClient implements SettingsApi {
 
   teamTasks(sessionId: string): Promise<TeamTasksView> {
     return this.identity.teamTasks(sessionId);
+  }
+
+  taskPanel(sessionId: string): Promise<TaskPanelView> {
+    return this.identity.taskPanel(sessionId);
+  }
+
+  filePreview(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView> {
+    return this.identity.filePreview(sessionId, path, referenceHash, offset);
   }
 
   listSubagents(parentSessionId?: string): Promise<SubagentView[]> {

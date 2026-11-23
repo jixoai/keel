@@ -11,7 +11,14 @@
 import { KeelApiError } from "./http";
 import { CAPABILITIES } from "./permission-catalog";
 import type { IdentityApi } from "./identity-api";
-import type { TeamTaskView } from "./contract";
+import type {
+  FilePreviewView,
+  TaskPanelAttachmentView,
+  TaskPanelCardView,
+  TaskPanelEventView,
+  TaskPanelView,
+  TeamTaskView,
+} from "./contract";
 import type {
   ProfileView,
   RoleView,
@@ -223,6 +230,148 @@ const MEMBER_EVENTS: Record<string, SessionEventView[]> = {
   [ORDER_SESSION]: memberEvents("订单查询", 8400, 1500, 66_000, "search_orders", agoMs(4, 0)),
   [REFUND_SESSION]: memberEvents("退款专员", 2600, 600, 38_000, "refund_policy", agoMs(3, 0)),
   [KNOWLEDGE_SESSION]: memberEvents("知识库", 7200, 1900, 138_000, "search_docs", agoMs(3, 50)),
+};
+
+/** The fixture run's task panel data. The captain's own card is the session's
+ * initial card (origin "session"); the member cards are the sub-agent cards the
+ * registry already names; one fork card carries origin=fork and the originSeq of
+ * the position it branched from. The seq values are the fixture's ledger order,
+ * so the panel's stream and the tree's creation order are both stable. */
+const CAPTAIN_CARD_ID = "task-captain";
+const CAPTAIN_TASKS: TaskPanelCardView[] = [
+  {
+    taskId: CAPTAIN_CARD_ID,
+    sessionId: RUN_ID,
+    title: "本周退款原因分析",
+    status: "in_progress",
+    origin: "session",
+    createdSeq: 2,
+    updatedSeq: 9,
+    createdAt: agoIso(4, 12),
+    updatedAt: agoIso(0, 54),
+  },
+  {
+    taskId: "task-captain-summary",
+    parentTaskId: CAPTAIN_CARD_ID,
+    sessionId: RUN_ID,
+    title: "汇总渠道异常",
+    status: "done",
+    origin: "tool",
+    createdSeq: 6,
+    updatedSeq: 18,
+    closedSeq: 18,
+    createdAt: agoIso(3, 40),
+    updatedAt: agoIso(1, 20),
+  },
+];
+
+const FORK_CARD_ID = "task-refund-fork";
+const FORK_ORIGIN_SEQ = 12;
+
+const REFUND_REPORT_HASH = "sha256:" + "3a".repeat(32);
+const REFUND_JSON_HASH = "sha256:" + "7c".repeat(32);
+
+/** The panel's live resource references point at files the fixture manifest
+ * holds, so the preview route resolves them (and a reference whose bytes no
+ * longer match says so instead of pretending). */
+const FIXTURE_FILES: Record<string, { hash: string; seq: number; content: string }> = {
+  "reports/refund-analysis.md": {
+    hash: REFUND_REPORT_HASH,
+    seq: 19,
+    content:
+      "# 退款原因分析\n\n本周退款 3 单，2 单来自同一渠道（渠道 B）。\n\n1. 渠道 B 的退款率 4.8%，是上周的两倍。\n2. 售后升级被拒：缺 bot.invoke，需人工确认。\n",
+  },
+  "reports/refund-report.json": {
+    hash: REFUND_JSON_HASH,
+    seq: 21,
+    content: JSON.stringify(
+      { range: "7d", refunded: 3, channels: [{ id: "B", refunds: 2 }, { id: "A", refunds: 1 }] },
+      null,
+      2,
+    ),
+  },
+};
+
+/** One member card in the panel's wire shape. The title/status/origin come from
+ * the task row; the seq values are the card's own ledger positions. */
+const taskPanelCard = (card: TeamTaskView, extra: { originSeq?: number; origin?: string; member?: boolean } = {}): TaskPanelCardView => ({
+  taskId: card.taskId,
+  parentTaskId: card.parentTaskId,
+  sessionId: card.sessionId,
+  title: card.title,
+  status: card.status,
+  origin: extra.origin ?? card.origin,
+  originSeq: extra.originSeq,
+  createdSeq: undefined,
+  updatedSeq: undefined,
+  createdAt: card.createdAt,
+  updatedAt: card.updatedAt,
+  member: extra.member === true ? true : undefined,
+});
+
+/** The event stream of one fixture card. The kinds and fields are the six the
+ * task log defines; the fork card's stream starts with the task.created that
+ * carries origin=fork and the originSeq.
+ *
+ * `seq` is assigned from the caller's cursor (`next`), so the fixture's stream
+ * is one monotonically ordered ledger exactly like the materialized
+ * `task_events` rows the live route reads: seq values never repeat and never
+ * go backwards. */
+const taskPanelEventsFor = (
+  card: TaskPanelCardView,
+  parentCardId: string,
+  next: () => number,
+): TaskPanelEventView[] => {
+  const base = card.createdAt ? Date.parse(card.createdAt) : Date.now();
+  const iso = (offsetMs: number) => new Date(base + offsetMs).toISOString();
+  const created: TaskPanelEventView = {
+    taskId: card.taskId,
+    kind: "task.created",
+    seq: next(),
+    at: iso(0),
+    title: card.title,
+    status: "open",
+    origin: card.origin,
+    parentTaskId: card.parentTaskId ?? (card.taskId === CAPTAIN_CARD_ID ? undefined : parentCardId),
+  };
+  if (card.origin === "fork") created.originSeq = card.originSeq ?? FORK_ORIGIN_SEQ;
+  const updated: TaskPanelEventView = {
+    taskId: card.taskId,
+    kind: "task.updated",
+    seq: next(),
+    at: iso(60_000),
+    status: card.status,
+  };
+  const events: TaskPanelEventView[] = [created, updated];
+  if (card.taskId === CAPTAIN_CARD_ID) {
+    events.push(
+      {
+        taskId: card.taskId,
+        kind: "task.attached",
+        seq: next(),
+        at: iso(90_000),
+        path: "reports/refund-analysis.md",
+        hash: REFUND_REPORT_HASH,
+      },
+      {
+        taskId: card.taskId,
+        kind: "task.note",
+        seq: next(),
+        at: iso(120_000),
+        text: "渠道 B 的退款率翻倍，先看它的退款条款。",
+      },
+    );
+  }
+  if (card.taskId === "task-refund") {
+    events.push({
+      taskId: card.taskId,
+      kind: "task.note",
+      seq: next(),
+      at: iso(90_000),
+      text: "退款材料已备齐，等待人工确认。",
+    });
+  }
+  return events;
 };
 
 /** The current user: 李娜, a team administrator — enough to see every chapter,
@@ -548,6 +697,20 @@ export class FixtureIdentity implements IdentityApi {
       origin: "subagent",
       createdAt: agoIso(3, 0),
       updatedAt: agoIso(2, 30),
+    },
+    {
+      // A fork whose origin card is the captain's card: the projection links
+      // it to the captain session as a member (its row lives in the refund
+      // session's ledger), and the fork's own session names the captain card
+      // as an ancestor.
+      taskId: FORK_CARD_ID,
+      parentTaskId: CAPTAIN_CARD_ID,
+      sessionId: REFUND_SESSION,
+      title: "退款条款对照",
+      status: "open",
+      origin: "fork",
+      createdAt: agoIso(2, 40),
+      updatedAt: agoIso(1, 10),
     },
     {
       taskId: "task-knowledge",
@@ -1157,7 +1320,107 @@ export class FixtureIdentity implements IdentityApi {
 
   async teamTasks(sessionId: string): Promise<{ tasks: TeamTaskView[]; hasMore: boolean }> {
     if (sessionId !== RUN_ID) return { tasks: [], hasMore: false };
+    // The endpoint answers the *member* cards (the captain's own card is the
+    // session's initial card, not a member): the run page's topology depends
+    // on that split, and the panel reads the own cards separately.
     return { tasks: this.tasks.map((task) => ({ ...task })), hasMore: false };
+  }
+
+  /** The run surface's task panel, computed from the same in-memory task state
+   * the team page and the member cards read. The captain session's own cards
+   * are CAPTAIN_TASKS; the member cards are this.tasks (the sub-agent and fork
+   * cards whose parentTaskId points at a captain card); a card whose parent
+   * lives outside the asked session is reported as an ancestor. No panel field
+   * exists that this data does not hold. */
+  async taskPanel(sessionId: string): Promise<TaskPanelView> {
+    const cards = sessionId === RUN_ID ? CAPTAIN_TASKS : [];
+    const members: TaskPanelCardView[] = [];
+    const ancestors: TaskPanelCardView[] = [];
+    const cardIds = new Set(cards.map((card) => card.taskId));
+    if (sessionId === RUN_ID) {
+      for (const task of this.tasks) {
+        const card = taskPanelCard(task, {
+          origin: task.taskId === FORK_CARD_ID ? "fork" : task.origin,
+          originSeq: task.taskId === FORK_CARD_ID ? FORK_ORIGIN_SEQ : undefined,
+          member: true,
+        });
+        members.push(card);
+      }
+    } else if (sessionId === REFUND_SESSION) {
+      // The refund/fork session's own card is the fork card; its parent is the
+      // captain's order card, which lives in another session and is therefore
+      // named as an ancestor rather than copied.
+      const own = this.tasks.find((task) => task.taskId === FORK_CARD_ID);
+      if (own) {
+        cards.push(
+          taskPanelCard(own, { origin: "fork", originSeq: FORK_ORIGIN_SEQ }),
+        );
+      }
+      const parent = this.tasks.find((task) => task.taskId === "task-order");
+      if (parent) ancestors.push(taskPanelCard(parent, { member: true }));
+    }
+    const events: TaskPanelEventView[] = [];
+    const attachments: TaskPanelAttachmentView[] = [];
+    let seq = 20;
+    const next = () => (seq += 1);
+    for (const card of cards) {
+      cardIds.add(card.taskId);
+      const parentCardId = card.parentTaskId ?? CAPTAIN_CARD_ID;
+      events.push(...taskPanelEventsFor(card, parentCardId, next));
+      if (card.taskId === CAPTAIN_CARD_ID) {
+        attachments.push(
+          { taskId: card.taskId, path: "reports/refund-analysis.md", hash: REFUND_REPORT_HASH },
+          { taskId: card.taskId, path: "reports/refund-report.json", hash: REFUND_JSON_HASH },
+        );
+      }
+    }
+    for (const card of members) {
+      events.push(...taskPanelEventsFor(card, card.parentTaskId ?? CAPTAIN_CARD_ID, next));
+    }
+    // The stream is ledger-ordered: the fixture's seq values encode the order,
+    // so sorting makes it explicit rather than relying on array order.
+    events.sort((left, right) => left.seq - right.seq);
+    const memberLimit = 200;
+    const eventLimit = 500;
+    return {
+      sessionId,
+      cards,
+      members,
+      ancestors,
+      attachments,
+      events: events.slice(0, eventLimit),
+      limits: {
+        memberLimit,
+        truncated: false,
+        eventLimit,
+        eventsTruncated: events.length > eventLimit,
+        ancestorsTruncated: false,
+      },
+    };
+  }
+
+  async filePreview(sessionId: string, path: string, referenceHash?: string, offset = 0): Promise<FilePreviewView> {
+    if (sessionId !== RUN_ID && sessionId !== REFUND_SESSION) {
+      throw new KeelApiError(404, "没有找到这个会话。");
+    }
+    const file = FIXTURE_FILES[path];
+    if (!file) throw new KeelApiError(404, `会话里没有 ${path} 这个文件。`);
+    const matchesReference = referenceHash === undefined ? undefined : referenceHash === file.hash;
+    return {
+      path,
+      hash: file.hash,
+      size: file.content.length,
+      seq: file.seq,
+      offset,
+      limit: 200,
+      totalLines: file.content.split("\n").length,
+      returnedLines: file.content.split("\n").length,
+      nextOffset: file.content.split("\n").length,
+      truncated: false,
+      content: file.content,
+      referenceHash,
+      matchesReference,
+    };
   }
 
   async listSubagents(parentSessionId?: string): Promise<SubagentView[]> {

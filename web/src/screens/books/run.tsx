@@ -33,6 +33,8 @@ import { store } from "../../data/store";
 import { identityAccess } from "../../data/identity-access";
 import { botAccess, formatRunDuration, runStatusLabel, type RunNode, type RunNodeStatus, type RunProjection } from "../../data/bots";
 import { capabilityOf } from "../../data/permission-catalog";
+import { deploymentCapabilities } from "../../data/capabilities";
+import { isTaskPanelReadable, shouldShowTaskPanel, taskPanelAccess } from "../../data/tasks";
 import { formatWhen } from "./common";
 import {
   BookAvatar,
@@ -52,12 +54,18 @@ import {
   ObjectSpine,
 } from "./common";
 import { showTeamSection } from "./teams";
+import { TaskPanelBody, TaskPanelEntry, TaskPanelSheet } from "./task-panel";
 
 const stopOpen = signal(false);
 const rerunOpen = signal(false);
 const inspectorOpen = signal(false);
 const graphSheetOpen = signal(false);
 const inspectorTab = signal<"summary" | "tools" | "permissions">("summary");
+/** The task panel's own open state on the run paper (desktop: a band under the
+ * run facts; phone: the bottom Sheet). It starts closed: the panel is an
+ * entry, not a sixth chapter. */
+const taskPanelOpen = signal(false);
+const taskPanelSheetOpen = signal(false);
 
 const STATUS_VARIANT: Record<RunNodeStatus, "info" | "success" | "destructive" | "secondary" | "outline"> = {
   running: "info",
@@ -84,6 +92,12 @@ const edgeLabel = (node: RunNode): string =>
     : EDGE_LABEL[node.edge ?? "unknown"] ?? "关联";
 
 const MIN_BAR_PX = 24;
+
+/** Whether this deployment serves the run surface's task panel: the
+ * `task.panel` capability bit is the gate, and a deployment that did not
+ * answer capabilities falls back to the transport's own read. */
+const showTaskPanel = (): boolean =>
+  shouldShowTaskPanel(deploymentCapabilities().features, isTaskPanelReadable());
 
 /** The bar's own duration word: 38s / 1m06s, not a sentence. */
 const barDuration = (ms: number | undefined): string => {
@@ -146,6 +160,8 @@ export function resetRunUi(): void {
   inspectorOpen.set(false);
   graphSheetOpen.set(false);
   inspectorTab.set("summary");
+  taskPanelOpen.set(false);
+  taskPanelSheetOpen.set(false);
 }
 
 // ---- the page -------------------------------------------------------------
@@ -163,6 +179,13 @@ export function TeamRunPage(props: { teamId: string; runId: string }) {
   effect(() => {
     const node = selected();
     if (node?.sessionId) void botAccess.ensureNodeEvents(node);
+  });
+  // The panel's read is one per session, and only when the deployment serves
+  // it: the entry renders from the same capability answer.
+  effect(() => {
+    if (!showTaskPanel()) return;
+    const runId = run()?.runId;
+    if (runId) taskPanelAccess.ensure(runId);
   });
   const teamName = () => run()?.teamName ?? team()?.name ?? "团队";
   const status = () => run()?.status ?? "unknown";
@@ -294,6 +317,13 @@ export function TeamRunPage(props: { teamId: string; runId: string }) {
       <RerunDialog teamId={props.teamId} />
       <RunInspectorSheet onStop={() => stopOpen.set(true)} />
       <GraphSheet />
+      <If when={isMobile() && run() !== null}>
+        <TaskPanelSheet
+          open={taskPanelSheetOpen()}
+          sessionId={props.runId}
+          onClose={() => taskPanelSheetOpen.set(false)}
+        />
+      </If>
     </View>
   );
 }
@@ -419,6 +449,31 @@ export function RunBody(props: { run: RunProjection; isRunning: boolean }) {
           botAccess.runSelected.set(failure()!.id);
           if (isMobile()) inspectorOpen.set(true);
         }} />
+      </If>
+      <If when={showTaskPanel()}>
+        <TaskPanelEntry
+          sessionId={run().runId}
+          open={isMobile() ? taskPanelSheetOpen() : taskPanelOpen()}
+          onOpen={() => {
+            if (isMobile()) taskPanelSheetOpen.set(true);
+            else taskPanelOpen.update((open) => !open);
+          }}
+        />
+        <If when={!isMobile() && taskPanelOpen()}>
+          <View
+            testID="run-task-panel-band"
+            style={{
+              flexDirection: "column",
+              padding: space.md,
+              borderRadius: radius.md,
+              borderWidth: 1,
+              borderColor: color.border,
+              backgroundColor: color.hoverFaint,
+            }}
+          >
+            <TaskPanelBody sessionId={run().runId} />
+          </View>
+        </If>
       </If>
       <If when={empty()}>
         <PageEmpty

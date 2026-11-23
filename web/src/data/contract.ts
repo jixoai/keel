@@ -420,6 +420,89 @@ export interface SessionTasksView {
   truncated?: boolean;
 }
 
+/** One card of `GET /v1/sessions/{id}/task-panel`. `member` is true for a
+ * card whose row lives in another session (a sub-agent or a fork). */
+export interface TaskPanelCardView {
+  taskId: string;
+  parentTaskId?: string;
+  sessionId: string;
+  title: string;
+  status: string;
+  origin?: string;
+  originSeq?: number;
+  createdSeq?: number;
+  updatedSeq?: number;
+  closedSeq?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  member?: boolean;
+}
+
+/** One task event of the panel's stream. A field the event's kind did not
+ * carry is absent; `unparsed` marks a kind this build does not decode. */
+export interface TaskPanelEventView {
+  taskId: string;
+  kind: string;
+  seq: number;
+  at?: string;
+  title?: string;
+  status?: string;
+  parentTaskId?: string;
+  origin?: string;
+  originSeq?: number;
+  path?: string;
+  hash?: string;
+  text?: string;
+  reason?: string;
+  unparsed?: boolean;
+}
+
+/** One live (path, hash) reference a card carries. The bytes stay in the file
+ * layer; a preview resolves it by path through the session's manifest. */
+export interface TaskPanelAttachmentView {
+  taskId: string;
+  path: string;
+  hash: string;
+}
+
+export interface TaskPanelLimitsView {
+  memberLimit: number;
+  truncated?: boolean;
+  truncatedMemberCount?: number;
+  eventLimit: number;
+  eventsTruncated?: boolean;
+  ancestorsTruncated?: boolean;
+}
+
+export interface TaskPanelView {
+  sessionId: string;
+  cards?: TaskPanelCardView[];
+  members?: TaskPanelCardView[];
+  ancestors?: TaskPanelCardView[];
+  attachments?: TaskPanelAttachmentView[];
+  events?: TaskPanelEventView[];
+  limits?: TaskPanelLimitsView;
+}
+
+/** One bounded page of `GET /v1/sessions/{id}/file-preview`. `hash` is the
+ * manifest's current hash; `matchesReference` is false when the file changed
+ * since the reference was recorded. */
+export interface FilePreviewView {
+  path: string;
+  hash: string;
+  size: number;
+  seq?: number;
+  offset: number;
+  limit: number;
+  totalLines: number;
+  returnedLines: number;
+  nextOffset: number;
+  truncated?: boolean;
+  content: string;
+  referenceHash?: string;
+  matchesReference?: boolean;
+}
+
 /** A trigger as the plugin manifest declares it. */
 export interface TriggerSpecView {
   id: string;
