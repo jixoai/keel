@@ -135,6 +135,14 @@ type Runner struct {
 	// pipeline: a referenced image degrades to a text notice naming why, and the
 	// run continues.
 	Images ImageResolver
+	// Media resolves the durable non-image attachment references (documents,
+	// audio, video, generic files) into a native wire block or the metadata
+	// fallback text, immediately before each request (see
+	// internal/agent/attachments.go). Nil means no attachment pipeline: every
+	// reference degrades to the same metadata text, so the model still learns the
+	// attachment exists and can look for it with file tools. It defaults to
+	// Images when that value implements MediaResolver.
+	Media MediaResolver
 	// ImageWorkspace is the blob scope images resolve against (the tenant id).
 	// Empty with a non-nil Images is refused per image, not per run: the
 	// transcript still reaches the model.
@@ -738,10 +746,36 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			BaseURL:  model.Endpoint,
 			APIKey:   model.APIKey,
 		},
-		caps: imageCapsFor(model),
+		caps:  imageCapsFor(model),
+		model: model.Properties,
 	})
 	if !imageReport.empty() {
 		logImageResolution(r.Logger, lease, model, imageReport)
+	}
+	// Outbound attachment dispatch: the same boundary for non-image references.
+	// The model's declared input modalities and the wire's media declaration
+	// decide native vs metadata text; an attachment the model cannot receive
+	// natively still reaches it as a text block naming the blob, so it is never
+	// dropped silently.
+	media := r.Media
+	if media == nil {
+		if legacy, ok := r.Images.(MediaResolver); ok {
+			media = legacy
+		}
+	}
+	msgs, attachmentReport := r.resolveAttachments(ctx, msgs, attachmentResolution{
+		resolver:  media,
+		workspace: r.imageWorkspace(lease),
+		target: provider.ImageTarget{
+			Provider: model.ProviderID,
+			BaseURL:  model.Endpoint,
+			APIKey:   model.APIKey,
+		},
+		model: model.Properties,
+		caps:  mediaCapsFor(model),
+	})
+	if !attachmentReport.empty() {
+		logAttachmentResolution(r.Logger, lease, model, attachmentReport)
 	}
 
 	// Generation identity: the kernel dedupes assistant messages by

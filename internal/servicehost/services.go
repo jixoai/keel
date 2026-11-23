@@ -602,15 +602,19 @@ func newPiLoopFactory(cfg Config) servicegraph.Factory {
 			opts := policy.Options()
 			runner.Compaction = &opts
 		}
-		// The outbound image pipeline (keel-ga §3 provider-files): the runner
-		// resolves a transcript image reference (blobId) into the wire form the
-		// attempt's provider accepts, right before each request. A deployment
-		// without a blob source keeps the nil resolver, and a referenced image
-		// degrades to a text notice naming why (never a silent drop).
-		if resolver := newImageResolver(cfg); resolver != nil {
+		// The outbound media pipeline (keel-ga §3 provider-files, extended by the
+		// modality-input lane): the runner resolves a transcript reference (blobId)
+		// into the wire form the attempt's provider accepts — native where the
+		// model and the wire both declare the modality, metadata text otherwise —
+		// right before each request. A deployment without a blob source keeps the
+		// nil resolver, and a reference degrades to a text notice naming why
+		// (never a silent drop).
+		if resolver := newMediaResolver(cfg); resolver != nil {
 			// Assigned only when non-nil: a typed nil in the interface would look
-			// wired to every nil check downstream.
+			// wired to every nil check downstream. One value serves both runners:
+			// images keep their dedicated path, attachments get the dispatcher.
 			runner.Images = resolver
+			runner.Media = resolver
 		}
 		return &loopService{runner: runner}, nil
 	}
@@ -638,6 +642,18 @@ func newImageResolver(cfg Config) *provider.ImageResolver {
 		resolver.URLs = &provider.PathURLSigner{Base: base}
 	}
 	return resolver
+}
+
+// newMediaResolver wraps the image resolver into the attachment resolver. One
+// handle cache serves images and documents: the same account uploaded either, and
+// the key is the content digest. A deployment with no blob source returns nil
+// (the runner's degradation path is the honest answer there).
+func newMediaResolver(cfg Config) *provider.MediaResolver {
+	image := newImageResolver(cfg)
+	if image == nil {
+		return nil
+	}
+	return &provider.MediaResolver{ImageResolver: *image}
 }
 
 // --- worker --------------------------------------------------------------

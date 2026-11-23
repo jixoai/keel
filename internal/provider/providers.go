@@ -222,23 +222,18 @@ func encodeOpenAIMessage(m agentcore.Message) []map[string]any {
 }
 
 // openAIUserContent shapes a user content list for the OpenAI wire. When there
-// are no images it collapses to a plain string (the common case, and what most
-// OpenAI-compatible gateways expect). When images are present it emits the
-// multimodal array form: text parts plus one image_url part per image.
+// are no images or media blocks it collapses to a plain string (the common case,
+// and what most OpenAI-compatible gateways expect). When a media block is
+// present it emits the multimodal array form: text parts, one image_url part per
+// image, one file part per document and one input_audio part per audio block.
 //
 // The url field takes either an absolute provider-fetchable URL or a base64 data
 // URI, so the resolver's url and base64 forms both map here verbatim; a file_id
-// block is refused, because the Chat Completions wire has no file_id field (the
-// Responses driver carries those).
+// image block is refused, because the Chat Completions wire has no image file_id
+// field (the Responses driver carries those). A document file_id travels in the
+// file part's file_id field, which the chat wire does support (PDF only).
 func openAIUserContent(content agentcore.ContentList) any {
-	hasImage := false
-	for _, c := range content {
-		if _, ok := c.(agentcore.ImageContent); ok {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
+	if !contentHasModalPart(content) {
 		return agentcore.ContentToText(content)
 	}
 	parts := make([]map[string]any, 0, len(content))
@@ -253,9 +248,81 @@ func openAIUserContent(content agentcore.ContentList) any {
 			if part, ok := openAIImagePart(b); ok {
 				parts = append(parts, part)
 			}
+		case agentcore.FileContent:
+			parts = append(parts, openAIFilePart(b))
+		case agentcore.AudioContent:
+			parts = append(parts, openAIAudioPart(b))
 		}
 	}
 	return parts
+}
+
+// contentHasModalPart reports whether a content list carries any block that
+// needs the multimodal array form (image, document or audio).
+func contentHasModalPart(content agentcore.ContentList) bool {
+	for _, c := range content {
+		switch c.(type) {
+		case agentcore.ImageContent, agentcore.FileContent, agentcore.AudioContent:
+			return true
+		}
+	}
+	return false
+}
+
+// openAIFilePart renders one document block as a chat `file` part. The chat wire
+// accepts only PDFs here and takes exactly one of file_id or file_data (a data
+// URL) plus the filename; a block whose form or MIME the wire cannot carry
+// becomes a text notice, never a silently dropped attachment.
+func openAIFilePart(file agentcore.FileContent) map[string]any {
+	wire, err := splitFile(file)
+	if err == nil {
+		switch wire.form() {
+		case FileFormFileID:
+			// supported by the chat wire for PDFs
+		case FileFormInline:
+			// supported
+		default:
+			err = fmt.Errorf("openai-chat: document form %q is not supported by this wire (file_data or file_id only); the resolver should have chosen one of those", wire.form())
+		}
+	}
+	if err == nil {
+		if mime := normalizeMime(wire.Mime); mime != "application/pdf" {
+			err = fmt.Errorf("openai-chat: document type %q is not supported (PDF only); the resolver should have refused it", mime)
+		}
+	}
+	if err != nil {
+		return map[string]any{"type": "text", "text": "[document omitted: " + err.Error() + "]"}
+	}
+	body := map[string]any{}
+	if wire.form() == FileFormFileID {
+		body["file_id"] = wire.FileID
+	} else {
+		// The chat wire requires a filename alongside file_data and rejects a
+		// bare base64 string: file_data is a data URL.
+		body["file_data"] = wire.dataURI()
+		body["filename"] = wire.filename()
+	}
+	return map[string]any{"type": "file", "file": body}
+}
+
+// openAIAudioPart renders one audio block as a chat input_audio part. Audio is
+// inline-only on this wire, and the format must be wav or mp3; anything else
+// becomes a text notice.
+func openAIAudioPart(audio agentcore.AudioContent) map[string]any {
+	format := strings.ToLower(strings.TrimSpace(audio.Format))
+	if audio.Data == "" {
+		return map[string]any{"type": "text", "text": "[audio omitted: audio block carries no inline data]"}
+	}
+	if format != "wav" && format != "mp3" {
+		return map[string]any{"type": "text", "text": "[audio omitted: openai-chat accepts wav and mp3 only (got " + format + ")]"}
+	}
+	return map[string]any{
+		"type": "input_audio",
+		"input_audio": map[string]any{
+			"data":   audio.Data,
+			"format": format,
+		},
+	}
 }
 
 // openAIImagePart renders one image block as an image_url part. A block whose
@@ -576,22 +643,22 @@ func encodeAnthropicMessage(m agentcore.Message) map[string]any {
 }
 
 // anthropicUserContent shapes a user content list for the Anthropic Messages
-// wire. When there are no images it collapses to a plain string. When images are
-// present it emits the content-block array form: text blocks plus one image block
-// per image, with the source type the resolver chose:
+// wire. When no media block is present it collapses to a plain string. Otherwise
+// it emits the content-block array form: text blocks, one image block per image,
+// one document block per PDF and a text notice for audio (the Messages API has
+// no audio input block), with the source type the resolver chose:
 //
 //	base64 → {"type":"image","source":{"type":"base64","media_type":…,"data":…}}
 //	url    → {"type":"image","source":{"type":"url","url":…}}
 //	file   → {"type":"image","source":{"type":"file","file_id":…}}
+//
+// A document uses the same source shapes under {"type":"document"}:
+//
+//	base64 → {"type":"document","source":{"type":"base64","media_type":"application/pdf","data":…}}
+//	url    → {"type":"document","source":{"type":"url","url":…}}
+//	file   → {"type":"document","source":{"type":"file","file_id":…}}
 func anthropicUserContent(content agentcore.ContentList) any {
-	hasImage := false
-	for _, c := range content {
-		if _, ok := c.(agentcore.ImageContent); ok {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
+	if !contentHasAnthropicModalPart(content) {
 		return agentcore.ContentToText(content)
 	}
 	blocks := make([]map[string]any, 0, len(content))
@@ -604,9 +671,73 @@ func anthropicUserContent(content agentcore.ContentList) any {
 			blocks = append(blocks, map[string]any{"type": "text", "text": b.Text})
 		case agentcore.ImageContent:
 			blocks = append(blocks, anthropicImageBlock(b))
+		case agentcore.FileContent:
+			blocks = append(blocks, anthropicDocumentBlock(b))
+		case agentcore.AudioContent:
+			// No audio content block exists on the Messages API. The notice keeps
+			// the attachment visible to the model/operator; the caller usually
+			// already produced the metadata fallback, so this is a second net.
+			blocks = append(blocks, map[string]any{"type": "text", "text": "[audio omitted: the anthropic-messages wire has no audio input block" +
+				audioNameSuffix(b) + "]"})
 		}
 	}
 	return blocks
+}
+
+// contentHasAnthropicModalPart reports whether a content list needs the block
+// array form on the Anthropic wire.
+func contentHasAnthropicModalPart(content agentcore.ContentList) bool {
+	for _, c := range content {
+		switch c.(type) {
+		case agentcore.ImageContent, agentcore.FileContent, agentcore.AudioContent:
+			return true
+		}
+	}
+	return false
+}
+
+// audioNameSuffix names the attachment in an omission notice when the block
+// carries a display name.
+func audioNameSuffix(audio agentcore.AudioContent) string {
+	if name := strings.TrimSpace(audio.Name); name != "" {
+		return ": " + name
+	}
+	return ""
+}
+
+// anthropicDocumentBlock renders one document block as an Anthropic document
+// content block. The driver encodes only the forms this package declares and the
+// Messages API documents: an inline PDF (base64) or a PDF URL. A file_id source
+// needs the Files API beta header on the message request, which this driver does
+// not send, and a non-PDF MIME has no verified native shape here; both become a
+// text block naming the reason, so the turn still reaches the model with the
+// surrounding prompt and the attachment is never dropped silently.
+func anthropicDocumentBlock(file agentcore.FileContent) map[string]any {
+	wire, err := splitFile(file)
+	if err != nil {
+		return map[string]any{"type": "text", "text": "[document omitted: " + err.Error() + "]"}
+	}
+	if mime := normalizeMime(wire.Mime); mime != "application/pdf" {
+		return map[string]any{"type": "text", "text": "[document omitted: anthropic-messages carries PDF documents natively (got " + mime + ")]"}
+	}
+	switch wire.form() {
+	case FileFormFileID:
+		return map[string]any{"type": "text", "text": "[document omitted: anthropic-messages needs the Files API beta header for a document file_id; this driver sends none]"}
+	case FileFormURL:
+		return map[string]any{
+			"type":   "document",
+			"source": map[string]any{"type": "url", "url": wire.URL},
+		}
+	default:
+		return map[string]any{
+			"type": "document",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": "application/pdf",
+				"data":       wire.Data,
+			},
+		}
+	}
 }
 
 // anthropicImageBlock renders one image block as an Anthropic image content

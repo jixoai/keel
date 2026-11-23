@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Content is a sealed interface implemented by every content block kind.
@@ -43,7 +44,81 @@ const (
 	ContentTypeToolCall = "toolCall"
 	ContentTypeImage    = "image"
 	ContentTypeImageRef = "imageRef"
+	// ContentTypeMediaRef is the durable form of any non-image attachment: a
+	// reference to a stored blob plus the metadata a client needs to render and a
+	// provider needs to size-check it (change keel-harness-v2 modality-input).
+	// Like ImageRefContent it never carries bytes; the event log stores the
+	// reference and the provider boundary resolves it per attempt.
+	ContentTypeMediaRef = "mediaRef"
+	// ContentTypeFile is the *transport* form of a document (PDF today). Exactly
+	// one source is populated: a provider-side file handle, an absolute URL, or
+	// the base64 bytes. It is produced by the resolver at the request boundary and
+	// never committed.
+	ContentTypeFile = "file"
+	// ContentTypeAudio is the *transport* form of audio input. The source is
+	// always inline base64 (the Chat Completions input_audio shape); Format is the
+	// wire format ("wav"/"mp3"), not the MIME type.
+	ContentTypeAudio = "audio"
 )
+
+// MediaReference kinds classify a durable attachment by the input modality it
+// maps to. The vocabulary mirrors modelcfg's InputFormat (image is handled by
+// ImageRefContent, so InputKindForMime does not return it) plus a generic "file"
+// bucket for attachments that have no native modality.
+const (
+	MediaKindImage = "image"
+	MediaKindPDF   = "pdf"
+	MediaKindAudio = "audio"
+	MediaKindVideo = "video"
+	MediaKindFile  = "file"
+)
+
+// InputKindForMime classifies an attachment by MIME type, falling back to the
+// filename extension. It returns one of the MediaKind* constants. It is pure and
+// dependency-free because both the transcript rebuild and the provider resolver
+// classify with it, and they must agree.
+func InputKindForMime(mime, name string) string {
+	normalized := lowerMime(mime)
+	switch {
+	case normalized == "application/pdf":
+		return MediaKindPDF
+	case len(normalized) > 6 && normalized[:6] == "audio/":
+		return MediaKindAudio
+	case len(normalized) > 6 && normalized[:6] == "video/":
+		return MediaKindVideo
+	case len(normalized) > 6 && normalized[:6] == "image/":
+		// Images have their own durable reference; a caller that reaches here
+		// with an image MIME treats it as a generic file rather than guesses.
+		return MediaKindFile
+	}
+	switch lowerExtension(name) {
+	case ".pdf":
+		return MediaKindPDF
+	case ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac":
+		return MediaKindAudio
+	case ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v":
+		return MediaKindVideo
+	}
+	return MediaKindFile
+}
+
+// lowerMime lowercases and strips parameters from a MIME type.
+func lowerMime(mime string) string {
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	if i := strings.IndexByte(mime, ';'); i >= 0 {
+		mime = strings.TrimSpace(mime[:i])
+	}
+	return mime
+}
+
+// lowerExtension returns the lowercase extension of a display name.
+func lowerExtension(name string) string {
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		return strings.ToLower(name[i:])
+	}
+	return ""
+}
 
 // TextContent is a plain text block.
 type TextContent struct {
@@ -123,11 +198,57 @@ type ImageRefContent struct {
 	Name string `json:"name,omitempty"`
 }
 
+// MediaRefContent is a durable reference to one stored non-image attachment:
+// blob id plus the cheap facts a fallback text block can name (name, mime,
+// size, and width/height when the client or the platform probed them). It is
+// the general counterpart of ImageRefContent and is never what the provider
+// wire carries.
+//
+// Kind classifies the reference for modality dispatch (pdf/audio/video/file);
+// an empty kind means the producer did not classify it and the resolver falls
+// back to the MIME type and name extension.
+type MediaRefContent struct {
+	Type     string `json:"type"`
+	Kind     string `json:"kind,omitempty"`
+	BlobID   string `json:"blobId"`
+	Name     string `json:"name,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
+}
+
+// FileContent is a document in transport form. Exactly one of FileID, URL or
+// Data is populated (the resolver picks the form the target declares). Name is
+// the filename the wire needs for the inline form (both OpenAI wires require a
+// filename alongside file_data).
+type FileContent struct {
+	Type     string `json:"type"`
+	Data     string `json:"data,omitempty"`
+	FileID   string `json:"fileId,omitempty"`
+	URL      string `json:"url,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
+// AudioContent is audio input in transport form: inline base64 plus the wire
+// format the provider accepts ("wav"/"mp3"). It is never committed.
+type AudioContent struct {
+	Type     string `json:"type"`
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Format   string `json:"format,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
 func (TextContent) isContent()     {}
 func (ThinkingContent) isContent() {}
 func (ToolCallContent) isContent() {}
 func (ImageContent) isContent()    {}
 func (ImageRefContent) isContent() {}
+func (MediaRefContent) isContent() {}
+func (FileContent) isContent()     {}
+func (AudioContent) isContent()    {}
 
 // MarshalJSON encodes a ToolCallContent, tolerating malformed Arguments. A
 // model can stream syntactically invalid tool-call JSON (a truncated or
@@ -196,6 +317,20 @@ func NewImageRefContent(blobID, mimeType string) ImageRefContent {
 	return ImageRefContent{Type: ContentTypeImageRef, BlobID: blobID, MimeType: mimeType}
 }
 
+// NewMediaRefContent returns a MediaRefContent with the type discriminant set.
+// As with image references, the blob id is the reference: callers validate it
+// where the error can name the offending attachment.
+func NewMediaRefContent(kind, blobID, name, mimeType string, size int64) MediaRefContent {
+	return MediaRefContent{
+		Type:     ContentTypeMediaRef,
+		Kind:     kind,
+		BlobID:   blobID,
+		Name:     name,
+		MimeType: mimeType,
+		Size:     size,
+	}
+}
+
 // decodeContent peeks at the "type" field of a JSON object and decodes it into
 // the matching concrete Content struct. This is the single dispatch point used
 // by every container that holds Content (messages, tool results, session
@@ -234,6 +369,24 @@ func decodeContent(raw json.RawMessage) (Content, error) {
 		return c, nil
 	case ContentTypeImageRef:
 		var c ImageRefContent
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+		return c, nil
+	case ContentTypeMediaRef:
+		var c MediaRefContent
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+		return c, nil
+	case ContentTypeFile:
+		var c FileContent
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+		return c, nil
+	case ContentTypeAudio:
+		var c AudioContent
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, err
 		}

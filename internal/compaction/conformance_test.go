@@ -782,6 +782,49 @@ func TestConformanceTokenEstimation(t *testing.T) {
 		}
 	})
 
+	// A durable non-image attachment becomes either a native part or the bounded
+	// metadata text; either way it is priced as a small text ceiling so a
+	// transcript full of references cannot read as free. Wire-only forms are
+	// priced defensively for a hand-built message.
+	t.Run("counts a durable attachment reference as a bounded text block", func(t *testing.T) {
+		msg := agentcore.UserMessage{
+			RoleField: agentcore.RoleUser,
+			Content: agentcore.ContentList{
+				agentcore.NewMediaRefContent(agentcore.MediaKindPDF, "blob-1", "a.pdf", "application/pdf", 2048),
+			},
+		}
+		want := (mediaRefChars*charsPerTokenDen + charsPerTokenNum - 1) / charsPerTokenNum
+		if got := EstimateTokens(msg); got != want {
+			t.Fatalf("EstimateTokens(mediaRef) = %d, want %d (ceil(%d/3.5))", got, want, mediaRefChars)
+		}
+	})
+	t.Run("counts wire-only document and audio blocks defensively", func(t *testing.T) {
+		for _, block := range []agentcore.Content{
+			agentcore.FileContent{Type: agentcore.ContentTypeFile, Data: "QUJD", MimeType: "application/pdf"},
+			agentcore.AudioContent{Type: agentcore.ContentTypeAudio, Data: "UklGRg==", Format: "wav"},
+		} {
+			msg := agentcore.UserMessage{RoleField: agentcore.RoleUser, Content: agentcore.ContentList{block}}
+			want := (mediaRefChars*charsPerTokenDen + charsPerTokenNum - 1) / charsPerTokenNum
+			if got := EstimateTokens(msg); got != want {
+				t.Fatalf("EstimateTokens(%T) = %d, want %d", block, got, want)
+			}
+		}
+	})
+	t.Run("counts a media reference alongside text", func(t *testing.T) {
+		msg := agentcore.UserMessage{
+			RoleField: agentcore.RoleUser,
+			Content: agentcore.ContentList{
+				agentcore.NewTextContent("look at this"),
+				agentcore.NewMediaRefContent(agentcore.MediaKindAudio, "blob-2", "memo.wav", "audio/wav", 4096),
+			},
+		}
+		chars := len("look at this") + mediaRefChars
+		want := (chars*charsPerTokenDen + charsPerTokenNum - 1) / charsPerTokenNum
+		if got := EstimateTokens(msg); got != want {
+			t.Fatalf("EstimateTokens(text+mediaRef) = %d, want %d", got, want)
+		}
+	})
+
 	t.Run("counts a tool call by name plus serialized arguments", func(t *testing.T) {
 		// pi counts name.length + JSON.stringify(arguments).length
 		// (estimate.ts:59-67).

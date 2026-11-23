@@ -126,9 +126,9 @@ func uploadFilename(name, mime string, blob BlobInfo) string {
 		}
 	}
 	if blob.BlobID != "" {
-		return "image-" + blob.BlobID + extensionForMime(mime)
+		return "attachment-" + blob.BlobID + extensionForMime(mime)
 	}
-	return "image" + extensionForMime(mime)
+	return "attachment" + extensionForMime(mime)
 }
 
 func extensionForMime(mime string) string {
@@ -145,6 +145,18 @@ func extensionForMime(mime string) string {
 		return ".heic"
 	case "application/pdf":
 		return ".pdf"
+	case "audio/wav", "audio/x-wav", "audio/wave":
+		return ".wav"
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "audio/mp4", "audio/m4a":
+		return ".m4a"
+	case "video/mp4":
+		return ".mp4"
+	case "video/quicktime":
+		return ".mov"
+	case "video/webm":
+		return ".webm"
 	default:
 		return ".bin"
 	}

@@ -22,10 +22,11 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-// TestUserMessageAttachmentsDecodeAsImageReferences pins the durable shape: an
-// attachment array with a fileId becomes an ImageRefContent and nothing else
-// enters the content list.
-func TestUserMessageAttachmentsDecodeAsImageReferences(t *testing.T) {
+// TestUserMessageAttachmentsDecodeAsDurableReferences pins the durable shape:
+// every attachment becomes a reference block (imageRef for images, mediaRef for
+// everything else) and nothing else enters the content list; an attachment with
+// no blob id becomes an explicit notice.
+func TestUserMessageAttachmentsDecodeAsDurableReferences(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{
 		"text": "what is in this shot?",
 		"attachments": []map[string]any{
@@ -47,8 +48,8 @@ func TestUserMessageAttachmentsDecodeAsImageReferences(t *testing.T) {
 	if !ok {
 		t.Fatalf("message = %T, want UserMessage", msgs[0])
 	}
-	if len(user.Content) != 2 {
-		t.Fatalf("content = %#v, want a text block plus one image reference", user.Content)
+	if len(user.Content) != 4 {
+		t.Fatalf("content = %#v, want text, imageRef, mediaRef and the no-blob notice", user.Content)
 	}
 	if _, ok := user.Content[0].(agentcore.TextContent); !ok {
 		t.Fatalf("first block = %T, want the text block first", user.Content[0])
@@ -60,26 +61,46 @@ func TestUserMessageAttachmentsDecodeAsImageReferences(t *testing.T) {
 	if ref.BlobID != "blob-image-1" || ref.MimeType != "image/png" || ref.Width != 800 || ref.Height != 600 || ref.Size != 1234 {
 		t.Fatalf("reference = %+v, want the attachment's blob metadata", ref)
 	}
-	// The base64 form must never appear: that is the whole point of the change.
+	doc, ok := user.Content[2].(agentcore.MediaRefContent)
+	if !ok {
+		t.Fatalf("third block = %T, want MediaRefContent for the non-image attachment", user.Content[2])
+	}
+	if doc.BlobID != "blob-doc-1" || doc.Name != "notes.txt" || doc.MimeType != "text/plain" || doc.Size != 10 {
+		t.Fatalf("media reference = %+v, want the attachment's blob metadata", doc)
+	}
+	notice, ok := user.Content[3].(agentcore.TextContent)
+	if !ok || !strings.Contains(notice.Text, "no fileId") {
+		t.Fatalf("fourth block = %#v, want an explicit no-blob notice", user.Content[3])
+	}
+	// The byte-carrying forms must never appear: that is the whole point.
 	for _, block := range user.Content {
-		if img, ok := block.(agentcore.ImageContent); ok {
-			t.Fatalf("the durable transcript must not carry bytes: %+v", img)
+		switch block.(type) {
+		case agentcore.ImageContent, agentcore.FileContent, agentcore.AudioContent:
+			t.Fatalf("the durable transcript must not carry bytes: %+v", block)
 		}
 	}
 }
 
-// TestNonImageAttachmentsStayOutOfTheModelContext pins the boundary: a text
-// attachment is a UI fact, and the model never received its contents before this
-// change either — inventing a placeholder here would be a silent behavior change.
-func TestNonImageAttachmentsStayOutOfTheModelContext(t *testing.T) {
+// TestNonImageAttachmentsBecomeDurableReferences pins the Owner rule (2026-11-23):
+// a non-image attachment is never silently dropped. It enters the transcript as a
+// durable mediaRef (no bytes), which the request boundary turns into a native part
+// or a metadata text block.
+func TestNonImageAttachmentsBecomeDurableReferences(t *testing.T) {
 	payload, _ := json.Marshal(map[string]any{
 		"text":        "read the log",
 		"attachments": []map[string]any{{"fileId": "blob-doc", "name": "a.log", "mime": "text/plain"}},
 	})
 	msgs := MessagesFromEvents([]store.Event{{Seq: 1, Kind: store.EventUserMessage, Payload: payload}}, nil)
 	user := msgs[0].(agentcore.UserMessage)
-	if len(user.Content) != 1 {
-		t.Fatalf("content = %#v, want only the text block", user.Content)
+	if len(user.Content) != 2 {
+		t.Fatalf("content = %#v, want the text block plus one media reference", user.Content)
+	}
+	ref, ok := user.Content[1].(agentcore.MediaRefContent)
+	if !ok {
+		t.Fatalf("second block = %T, want MediaRefContent", user.Content[1])
+	}
+	if ref.BlobID != "blob-doc" || ref.Kind != agentcore.MediaKindFile {
+		t.Fatalf("reference = %+v, want a generic file reference", ref)
 	}
 }
 

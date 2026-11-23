@@ -47,6 +47,11 @@ type imageResolution struct {
 	workspace string
 	target    provider.ImageTarget
 	caps      provider.ImageCaps
+	// model is the resolved model's capability fact sheet. A model that declares
+	// no image input never causes bytes to be uploaded or inlined: the reference
+	// becomes the same metadata text an unsupported attachment gets, so the model
+	// is told about the image without a native part its declaration denies.
+	model *ModelProperties
 }
 
 // resolveImages rewrites every ImageRefContent in the transcript into a wire
@@ -82,6 +87,15 @@ func (r *Runner) resolveImages(ctx context.Context, msgs agentcore.MessageList, 
 			ref, ok := block.(agentcore.ImageRefContent)
 			if !ok {
 				resolved = append(resolved, block)
+				continue
+			}
+			if res.model != nil && !res.model.ImageInput {
+				// The model explicitly denies image input: no upload, no inline
+				// bytes, an explicit metadata fallback with the tools hint.
+				report.fallbacks = append(report.fallbacks, ref.BlobID)
+				ensureCopy()
+				resolved = append(resolved, agentcore.NewTextContent(
+					imageFallbackText(ref, "the selected model does not declare image input")))
 				continue
 			}
 			wire, err := r.resolveOneImage(ctx, res, ref)
@@ -133,11 +147,13 @@ func imageOmittedNotice(ref agentcore.ImageRefContent, err error) string {
 }
 
 // imageResolutionReport summarises one attempt's outbound resolution for the
-// log line: how many references took each form, which degraded, which failed.
+// log line: how many references took each form, which fell back to metadata
+// text, which degraded, which failed.
 type imageResolutionReport struct {
-	forms    map[string]int
-	degraded []string
-	failures []imageFailure
+	forms     map[string]int
+	degraded  []string
+	failures  []imageFailure
+	fallbacks []string
 }
 
 type imageFailure struct {
@@ -147,7 +163,29 @@ type imageFailure struct {
 
 // empty reports that no image reference was present (no log line needed).
 func (rep imageResolutionReport) empty() bool {
-	return len(rep.forms) == 0 && len(rep.degraded) == 0 && len(rep.failures) == 0
+	return len(rep.forms) == 0 && len(rep.degraded) == 0 && len(rep.failures) == 0 && len(rep.fallbacks) == 0
+}
+
+// imageFallbackText renders the metadata block an image reference becomes when
+// the model denies image input. It names the blob and tells the model to inspect
+// it with file tools; it carries no bytes.
+func imageFallbackText(ref agentcore.ImageRefContent, reason string) string {
+	name := strings.TrimSpace(ref.Name)
+	if name == "" {
+		name = ref.BlobID
+	}
+	facts := name
+	if mime := strings.TrimSpace(ref.MimeType); mime != "" {
+		facts += ", " + mime
+	}
+	if ref.Size > 0 {
+		facts += fmt.Sprintf(", %d bytes", ref.Size)
+	}
+	if ref.Width > 0 && ref.Height > 0 {
+		facts += fmt.Sprintf(", %dx%d", ref.Width, ref.Height)
+	}
+	return fmt.Sprintf("[image attachment %s was not sent with this request: %s. Stored bytes: blobId=%s. "+
+		"Use file tools to inspect the attachment if you need its contents.]", facts, reason, ref.BlobID)
 }
 
 // contentHasImageRef reports whether a content list carries a durable reference.
@@ -195,21 +233,11 @@ func replaceMessageContent(msg agentcore.Message, content agentcore.ContentList)
 	}
 }
 
-// imageCapsFor returns the attempt's image transport declaration. The resolved
-// identity carries it (the product layer asks the wire driver); a model that
-// declares no image input yields the zero declaration, so a resolver never
-// uploads bytes for a request the driver's capability gate would refuse anyway.
-func imageCapsFor(model ActiveModel) provider.ImageCaps {
-	if model.Properties != nil && !model.Properties.ImageInput {
-		return provider.ImageCaps{}
-	}
-	return model.ImageCaps
-}
-
 // imageWorkspace is the blob scope of the attempt: the explicit field when set,
 // otherwise the lease's tenant. The tenant is the right default — blobs are
 // tenant-scoped rows — and the explicit field exists so a host can override it
-// (a future per-user workspace) without a new seam.
+// (a future per-user workspace) without a new seam. Attachments share this scope
+// (see attachments.go).
 func (r *Runner) imageWorkspace(lease kernel.Lease) string {
 	if workspace := strings.TrimSpace(r.ImageWorkspace); workspace != "" {
 		return workspace
@@ -232,6 +260,10 @@ func logImageResolution(logger *slog.Logger, lease kernel.Lease, model ActiveMod
 	}
 	for _, failure := range report.failures {
 		logger.Warn("outbound image omitted", append(attrs, "blob_id", failure.blobID, "err", failure.err)...)
+	}
+	for _, blobID := range report.fallbacks {
+		logger.Info("outbound image sent as metadata text", append(attrs, "blob_id", blobID,
+			"reason", "the selected model does not declare image input")...)
 	}
 	for _, note := range report.degraded {
 		logger.Warn("outbound image degraded", append(attrs, "reason", note)...)

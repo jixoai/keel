@@ -43,17 +43,59 @@ type ActiveModel struct {
 	// image pipeline uploads provider files against it, so a handle lands in the
 	// same account the request uses.
 	Endpoint string
+	// MediaCaps is the wire driver's media transport declaration for the API type
+	// the provider resolved (image forms, document forms, audio inline). The
+	// attachment dispatcher reads it to decide native vs fallback, per modality.
+	MediaCaps provider.MediaCaps
+	// APIType is the resolved protocol token ("openai-chat-completions", …). It
+	// is carried for diagnostics and for the dispatch matrix's own tests; the
+	// dispatcher reads MediaCaps, not the token, so a custom gateway inherits its
+	// wire's shapes.
+	APIType string
 }
 
 // ModelProperties is the capability fact sheet of an attempt's model, as plain
 // data: the runtime must not depend on configuration types, and the caller (the
-// product layer) owns what the fields mean. The attachment/media gate is not
-// wired to this yet (see the change's tasks); the tool gate is.
+// product layer) owns what the fields mean. The input modalities and the tool
+// gate are enforced; every other field is informational.
 type ModelProperties struct {
 	SupportsToolCall         bool
 	SupportsJSONSchemaOutput bool
 	SupportsNativeWebSearch  bool
-	ImageInput               bool
+	// Input modalities. These mirror modelcfg.Properties.InputFormat exactly:
+	// the product layer copies the declaration, the runtime only reads it. A nil
+	// Properties means "unknown" (the static/fake path) and the attachment
+	// dispatcher then treats every modality as accepted (the historic behavior);
+	// a non-nil Properties declares exactly what the model accepts.
+	TextInput  bool
+	ImageInput bool
+	VideoInput bool
+	AudioInput bool
+	PDFInput   bool
+}
+
+// AcceptsModality reports whether the model declares the given input modality
+// (agentcore.MediaKind*; text is always accepted by a text model and is not
+// dispatched). Unknown properties accept everything, matching the runtime's
+// "only refuse what the configuration explicitly denies".
+func (p *ModelProperties) AcceptsModality(kind string) bool {
+	if p == nil {
+		return true
+	}
+	switch kind {
+	case agentcore.MediaKindPDF:
+		return p.PDFInput
+	case agentcore.MediaKindAudio:
+		return p.AudioInput
+	case agentcore.MediaKindVideo:
+		return p.VideoInput
+	case agentcore.MediaKindImage:
+		return p.ImageInput
+	default:
+		// A generic file has no modality declaration to check; it degrades to the
+		// metadata text, which every model can read.
+		return false
+	}
 }
 
 // ModelResolver is the product seam between a run and its execution identity.

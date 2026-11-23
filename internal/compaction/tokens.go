@@ -63,6 +63,12 @@ const (
 // block, matching pi's ESTIMATED_IMAGE_CHARS (ai/src/utils/estimate.ts:16).
 const estimatedImageChars = 4800
 
+// mediaRefChars is the character budget attributed to a durable non-image
+// attachment reference. The fallback renderer bounds the metadata text at a few
+// hundred bytes; 1024 is the conservative ceiling (far below an image block,
+// because no bytes travel for a document fallback).
+const mediaRefChars = 1024
+
 // charsPerToken is pi's CHARS_PER_TOKEN (ai/src/utils/estimate.ts:15): 3.5
 // characters per token. pi divides by 3.5 and rounds up; 3.5 = charsPerTokenNum
 // / charsPerTokenDen, so ceil(chars/3.5) is computed exactly in integers as
@@ -110,6 +116,17 @@ func contentListChars(content agentcore.ContentList) int {
 			// resolver turns it into bytes (or a provider file handle) before the
 			// request, so the budget must not price the reference as free.
 			chars += estimatedImageChars
+		case agentcore.MediaRefContent:
+			// A durable non-image reference becomes either a native part or the
+			// metadata text block. Its worst case is the bounded fallback text
+			// (name, MIME, size, dimensions and the tool instruction), so it is
+			// priced as a small text ceiling rather than as image-sized cost.
+			chars += mediaRefChars
+		case agentcore.FileContent, agentcore.AudioContent:
+			// Wire-only forms: the request boundary produces them from a reference
+			// and they never enter a committed transcript. Pricing them defensively
+			// keeps a hand-built message from reading as free.
+			chars += mediaRefChars
 		}
 	}
 	return chars

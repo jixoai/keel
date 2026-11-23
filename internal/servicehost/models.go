@@ -440,6 +440,9 @@ func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveM
 			Message: err.Error(),
 		}}, err
 	}
+	// One read of the protocol's media declaration: the legacy image field and
+	// the general one must not be able to disagree.
+	mediaCaps := provider.MediaCapsForAPI(active.API.Type)
 	return agent.ActiveModel{
 		ProviderID:    active.ProviderID,
 		Model:         active.ModelID,
@@ -449,21 +452,28 @@ func (m *modelsService) attemptModel(active modelcfg.ActiveModel) (agent.ActiveM
 		ContextWindow: m.contextWindow(active),
 		RequestPatch:  active.RequestPatch,
 		// The capability facts travel with the identity: the runtime enforces what
-		// the configuration declares (the tool gate today; the media gate is a
-		// recorded deferral), and it must not have to re-derive them.
+		// the configuration declares (the tool gate and the input-modality gate),
+		// and it must not have to re-derive them.
 		Properties: &agent.ModelProperties{
 			SupportsToolCall:         active.Properties.SupportsToolCall,
 			SupportsJSONSchemaOutput: active.Properties.SupportsJSONSchemaOutput,
 			SupportsNativeWebSearch:  active.Properties.SupportsNativeWebSearch,
+			TextInput:                active.Properties.InputFormat.Text,
 			ImageInput:               active.Properties.InputFormat.Image,
+			VideoInput:               active.Properties.InputFormat.Video,
+			AudioInput:               active.Properties.InputFormat.Audio,
+			PDFInput:                 active.Properties.InputFormat.PDF,
 		},
-		// The outbound image pipeline needs the endpoint and the wire's image
+		// The outbound media pipeline needs the endpoint and the wire's media
 		// declaration: the endpoint so a provider file upload lands in the account
-		// the request uses, the declaration so the resolver picks a form the wire
-		// actually accepts (file_id > url > base64). The declaration is read from
-		// the protocol, which is the fact this function already switches on.
+		// the request uses, the declaration so the dispatcher picks a native form
+		// only where the wire can carry it and a metadata fallback everywhere else.
+		// The declaration is read from the protocol, which is the fact this
+		// function already switches on.
 		Endpoint:  active.API.BaseURL,
-		ImageCaps: provider.ImageCapsForAPI(active.API.Type),
+		ImageCaps: mediaCaps.Image,
+		MediaCaps: mediaCaps,
+		APIType:   active.API.Type,
 	}, nil, nil
 }
 

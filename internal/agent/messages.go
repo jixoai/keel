@@ -6,6 +6,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/jixoai/keel/internal/agentcore"
@@ -52,7 +53,7 @@ func DecodeMessages(events []store.Event, diagnose func(seq int64, kind string, 
 				continue
 			}
 			content := agentcore.ContentList{agentcore.NewTextContent(p.Text)}
-			content = append(content, attachmentImages(p.Attachments)...)
+			content = append(content, attachmentBlocks(p.Attachments)...)
 			appendMsg(ev.Seq, agentcore.UserMessage{
 				RoleField: agentcore.RoleUser,
 				Content:   content,
@@ -135,30 +136,78 @@ type attachmentReference struct {
 	Height int    `json:"height"`
 }
 
-// imageContent maps the attachments a turn carries onto image references. Only
-// entries with an image mime type AND a fileId participate: an attachment
-// without a blob id is not resolvable (there are no bytes to send), and a
-// non-image attachment stays a UI-only fact — the model never received file
-// contents through this channel, and inventing a text placeholder for it would
-// be a silent behavior change.
-func attachmentImages(refs []attachmentReference) agentcore.ContentList {
-	var out agentcore.ContentList
+// attachmentBlocks maps the attachments a turn carries onto durable references:
+// every attachment becomes one reference block (imageRef for images, mediaRef
+// for everything else), in the order the client sent them. An attachment without
+// a blob id cannot be resolved, so it becomes an explicit text notice naming it —
+// never nothing: a client that attached a file and got no reaction from the model
+// is exactly the silent drop this change removes.
+func attachmentBlocks(refs []attachmentReference) agentcore.ContentList {
+	out := make(agentcore.ContentList, 0, len(refs))
 	for _, ref := range refs {
-		if strings.TrimSpace(ref.FileID) == "" {
+		name := strings.TrimSpace(ref.Name)
+		blobID := strings.TrimSpace(ref.FileID)
+		if blobID == "" {
+			out = append(out, agentcore.NewTextContent(attachmentMissingBlobNotice(name, ref.Mime)))
 			continue
 		}
-		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ref.Mime)), "image/") {
+		if isImageAttachment(ref.Mime, name) {
+			out = append(out, agentcore.ImageRefContent{
+				Type:     agentcore.ContentTypeImageRef,
+				BlobID:   blobID,
+				MimeType: strings.TrimSpace(ref.Mime),
+				Size:     ref.Size,
+				Width:    ref.Width,
+				Height:   ref.Height,
+				Name:     name,
+			})
 			continue
 		}
-		out = append(out, agentcore.ImageRefContent{
-			Type:     agentcore.ContentTypeImageRef,
-			BlobID:   strings.TrimSpace(ref.FileID),
+		kind := agentcore.InputKindForMime(ref.Mime, name)
+		out = append(out, agentcore.MediaRefContent{
+			Type:     agentcore.ContentTypeMediaRef,
+			Kind:     kind,
+			BlobID:   blobID,
+			Name:     name,
 			MimeType: strings.TrimSpace(ref.Mime),
 			Size:     ref.Size,
 			Width:    ref.Width,
 			Height:   ref.Height,
-			Name:     ref.Name,
 		})
 	}
 	return out
+}
+
+// isImageAttachment reports whether an attachment is image input. A missing MIME
+// with an image-looking extension is still an image: the upload endpoint records
+// the real MIME (the blob store is the authority the image resolver reads), but a
+// client that omitted it must not turn an image into a generic document.
+func isImageAttachment(mime, name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(mime))
+	if i := strings.IndexByte(normalized, ';'); i >= 0 {
+		normalized = strings.TrimSpace(normalized[:i])
+	}
+	if strings.HasPrefix(normalized, "image/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(strings.TrimSpace(name))) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff":
+		return true
+	}
+	return false
+}
+
+// attachmentMissingBlobNotice is the explicit record of an attachment that cannot
+// be resolved at all: the client sent a name and MIME but no blob id, so there
+// are no bytes for any provider. The model is told, and the operator can tell an
+// unusable client upload from a model that ignored a working one.
+func attachmentMissingBlobNotice(name, mime string) string {
+	label := strings.TrimSpace(name)
+	if label == "" {
+		label = "unnamed attachment"
+	}
+	if mime = strings.TrimSpace(mime); mime != "" {
+		label += " (" + mime + ")"
+	}
+	return "[attachment " + label + " omitted: the client sent no fileId, so no stored bytes are referenced]"
 }

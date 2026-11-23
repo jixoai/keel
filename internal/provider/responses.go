@@ -426,10 +426,10 @@ func appendInputItems(items responses.ResponseInputParam, m agentcore.Message) r
 				string(call.Arguments), call.ID, call.Name))
 		}
 	default:
-		// A user (or other non-assistant) message with images is replayed as a
-		// content-part list (input_text + input_image data URIs); a text-only
-		// message stays a plain string.
-		if parts, ok := imageInputParts(m); ok {
+		// A user (or other non-assistant) message with media is replayed as a
+		// content-part list (input_text + input_image/input_file/input_audio); a
+		// text-only message stays a plain string.
+		if parts, ok := mediaInputParts(m); ok {
 			items = append(items, responses.ResponseInputItemParamOfMessage(parts, responsesRole(m.Role())))
 		} else if text := messageText(m); text != "" {
 			items = append(items, responses.ResponseInputItemParamOfMessage(
@@ -439,13 +439,68 @@ func appendInputItems(items responses.ResponseInputParam, m agentcore.Message) r
 	return items
 }
 
-// imageInputParts builds a Responses content-part list for a message that
-// carries at least one image: leading input_text (the concatenated text, if
-// any) followed by one input_image per image. Each image uses the form the
-// resolver chose — file_id when a provider handle exists (the cheapest form, as
-// the bytes cross the wire once), otherwise an image_url holding either the
-// absolute URL or the base64 data URI. It returns ok=false when the message has
-// no images, so the caller keeps the plain-text path.
+// mediaInputParts builds a Responses content-part list for a message that
+// carries at least one media block: leading input_text (the concatenated text,
+// if any) followed by one part per media block. Each image uses the form the
+// resolver chose — file_id when a provider handle exists, otherwise an image_url
+// holding either the absolute URL or the base64 data URI. A document becomes an
+// input_file part (file_id, file_url or a data-URL file_data plus filename). An
+// audio block becomes an input_text notice: the Responses wire rejects
+// input_audio at the upstream today, so claiming the part would fail the whole
+// request. It returns ok=false when the message has no media, so the caller
+// keeps the plain-text path.
+func mediaInputParts(m agentcore.Message) (responses.ResponseInputMessageContentListParam, bool) {
+	content := messageContent(m)
+	if !contentHasModalPart(content) {
+		return nil, false
+	}
+	parts := make(responses.ResponseInputMessageContentListParam, 0, len(content)+1)
+	if text := contentText(content); text != "" {
+		parts = append(parts, responses.ResponseInputContentParamOfInputText(text))
+	}
+	for _, c := range content {
+		switch b := c.(type) {
+		case agentcore.ImageContent:
+			parts = append(parts, responsesImagePart(b))
+		case agentcore.FileContent:
+			parts = append(parts, responsesFilePart(b))
+		case agentcore.AudioContent:
+			parts = append(parts, responses.ResponseInputContentParamOfInputText(
+				"[audio omitted: the openai-responses wire does not accept input_audio"+audioNameSuffix(b)+"]"))
+		}
+	}
+	return parts, true
+}
+
+// responsesFilePart renders one document block as an input_file content part.
+// The Responses wire takes file_id, file_url or a data-URL file_data (with a
+// filename); a block with no usable source, or a form the wire does not carry,
+// becomes an input_text notice so the request still succeeds.
+func responsesFilePart(file agentcore.FileContent) responses.ResponseInputContentUnionParam {
+	wire, err := splitFile(file)
+	if err != nil {
+		return responses.ResponseInputContentParamOfInputText("[document omitted: " + err.Error() + "]")
+	}
+	part := responses.ResponseInputContentUnionParam{OfInputFile: &responses.ResponseInputFileParam{
+		// The SDK's input_file variant is built field by field below.
+	}}
+	part.OfInputFile.Filename = openai.String(wire.filename())
+	switch wire.form() {
+	case FileFormFileID:
+		part.OfInputFile.FileID = openai.String(wire.FileID)
+	case FileFormURL:
+		part.OfInputFile.FileURL = openai.String(wire.URL)
+	default:
+		// The upstream requires a data URL with a valid file MIME type, not a
+		// bare base64 string.
+		part.OfInputFile.FileData = openai.String(wire.dataURI())
+	}
+	return part
+}
+
+// imageInputParts is the image-only form of mediaInputParts, kept as the
+// documented seam the image tests assert against: it answers ok=false for a
+// message whose only media is a document or audio block.
 func imageInputParts(m agentcore.Message) (responses.ResponseInputMessageContentListParam, bool) {
 	content := messageContent(m)
 	var hasImage bool
@@ -458,18 +513,7 @@ func imageInputParts(m agentcore.Message) (responses.ResponseInputMessageContent
 	if !hasImage {
 		return nil, false
 	}
-	parts := make(responses.ResponseInputMessageContentListParam, 0, len(content)+1)
-	if text := contentText(content); text != "" {
-		parts = append(parts, responses.ResponseInputContentParamOfInputText(text))
-	}
-	for _, c := range content {
-		img, ok := c.(agentcore.ImageContent)
-		if !ok {
-			continue
-		}
-		parts = append(parts, responsesImagePart(img))
-	}
-	return parts, true
+	return mediaInputParts(m)
 }
 
 // responsesImagePart renders one image block as an input_image content part. A
