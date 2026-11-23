@@ -21,7 +21,8 @@ import (
 )
 
 // waitForRunSettled waits until the session's run row leaves pending/running,
-// reporting whether it was ever claimed.
+// reporting whether it was ever claimed. The media tests use it: they need the
+// attempt to settle before they read its outcome.
 func waitForRunSettled(t *testing.T, mem *kernel.MemStore, tenant, session uuid.UUID, within time.Duration) kernel.RunPin {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -32,6 +33,25 @@ func waitForRunSettled(t *testing.T, mem *kernel.MemStore, tenant, session uuid.
 			case kernel.RunStatusDone, kernel.RunStatusFailed, "cancelled":
 				return pin
 			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	pin, _, _ := mem.ReadRunPin(context.Background(), kernel.Scope{TenantID: tenant, SessionID: session})
+	return pin
+}
+
+// waitForRunClaimed waits until the session's run row carries an owner (the
+// worker claimed it). The regression this file pins is a worker that stops
+// claiming after a settings write; whether the attempt then settles depends on
+// the fake provider endpoint, which under load can take longer than any fixed
+// settle deadline. The owner is the liveness fact.
+func waitForRunClaimed(t *testing.T, mem *kernel.MemStore, tenant, session uuid.UUID, within time.Duration) kernel.RunPin {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		pin, ok, err := mem.ReadRunPin(context.Background(), kernel.Scope{TenantID: tenant, SessionID: session})
+		if err == nil && ok && pin.Owner != "" {
+			return pin
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -76,8 +96,8 @@ func TestApplyModelsKeepsTheWorkerClaiming(t *testing.T) {
 
 	// The deployment document works before the write.
 	submit("before")
-	first := waitForRunSettled(t, mem, tenant, session, 10*time.Second)
-	if first.Status == kernel.RunStatusPending || first.Status == kernel.RunStatusRunning {
+	first := waitForRunClaimed(t, mem, tenant, session, 10*time.Second)
+	if first.Owner == "" {
 		t.Fatalf("the run before the settings write was never claimed: %+v", first)
 	}
 
@@ -90,8 +110,8 @@ func TestApplyModelsKeepsTheWorkerClaiming(t *testing.T) {
 	cancel()
 
 	submit("after")
-	second := waitForRunSettled(t, mem, tenant, session, 15*time.Second)
-	if second.Status == kernel.RunStatusPending || second.Status == kernel.RunStatusRunning {
+	second := waitForRunClaimed(t, mem, tenant, session, 10*time.Second)
+	if second.Owner == "" {
 		t.Fatalf("the worker stopped claiming after the settings write: %+v", second)
 	}
 }
