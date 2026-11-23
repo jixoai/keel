@@ -126,8 +126,9 @@ type SessionSearchPage struct {
 	HasMore    bool
 }
 
-// SessionSearcher is the transcript/session search seam. Nil answers 503 on
-// GET /v1/sessions/search and reports the capability false.
+// SessionSearcher is the transcript/session search seam. Nil answers 501 on
+// GET /v1/sessions/search and reports the capability false (a missing access
+// surface is the separate 503 path).
 type SessionSearcher interface {
 	SearchMessages(ctx context.Context, tenantID uuid.UUID, filter MessageSearchFilter) (MessageHitPage, error)
 	SearchSessions(ctx context.Context, tenantID uuid.UUID, filter SessionSearchFilter) (SessionSearchPage, error)
@@ -163,8 +164,9 @@ type ExportPage struct {
 	HasMore      bool
 }
 
-// SessionExporter is the export seam. Nil answers 503 on
-// GET /v1/sessions/{id}/export and reports the capability false.
+// SessionExporter is the export seam. Nil answers 501 on
+// GET /v1/sessions/{id}/export and reports the capability false (a missing
+// access surface is the separate 503 path).
 type SessionExporter interface {
 	ExportMessages(ctx context.Context, tenantID, sessionID uuid.UUID, filter ExportFilter) (ExportPage, error)
 }

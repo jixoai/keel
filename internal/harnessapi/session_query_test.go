@@ -263,23 +263,33 @@ func TestSessionExportRouteJSONAndNDJSON(t *testing.T) {
 func TestSessionExportRefusalsAndBounds(t *testing.T) {
 	tenant, session := uuid.New(), uuid.New()
 	query := &fakeSessionQuery{}
+	base := "/v1/sessions/" + session.String() + "/export"
+
+	// A session that exists makes each malformed query a 400 (the existence
+	// check owns the 404, so without this fixture every probe would be 404 and
+	// the grammar branches would never run).
 	server := searchServer(t, func(cfg *Config) {
+		cfg.SessionExport = query
+		cfg.SessionExists = func(context.Context, uuid.UUID, uuid.UUID) (bool, error) { return true, nil }
+	})
+	client := server.Client()
+	for _, probe := range []string{"?format=xml", "?limit=0", "?limit=501", "?afterSeq=-1"} {
+		if code := doJSON(t, client, http.MethodGet, server.URL+base+probe, tenant, nil, nil); code != 400 {
+			t.Fatalf("%s = %d, want 400", probe, code)
+		}
+	}
+
+	// A missing/foreign session is 404.
+	missing := searchServer(t, func(cfg *Config) {
 		cfg.SessionExport = query
 		cfg.SessionExists = func(context.Context, uuid.UUID, uuid.UUID) (bool, error) { return false, nil }
 	})
-	client := server.Client()
-	base := server.URL + "/v1/sessions/" + session.String() + "/export"
-
-	for _, probe := range []string{base + "?format=xml", base + "?limit=0", base + "?limit=501", base + "?afterSeq=-1"} {
-		if code := doJSON(t, client, http.MethodGet, probe, tenant, nil, nil); code != 400 && code != http.StatusNotFound {
-			t.Fatalf("%s = %d, want 400/404", probe, code)
-		}
-	}
-	if code := doJSON(t, client, http.MethodGet, base, tenant, nil, nil); code != http.StatusNotFound {
+	if code := doJSON(t, missing.Client(), http.MethodGet, missing.URL+base, tenant, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("foreign export = %d, want 404", code)
 	}
+
 	unwired := searchServer(t, nil)
-	if code := doJSON(t, unwired.Client(), http.MethodGet, unwired.URL+"/v1/sessions/"+session.String()+"/export", tenant, nil, nil); code != http.StatusNotImplemented {
+	if code := doJSON(t, unwired.Client(), http.MethodGet, unwired.URL+base, tenant, nil, nil); code != http.StatusNotImplemented {
 		t.Fatalf("unwired export = %d, want 501", code)
 	}
 }

@@ -185,12 +185,13 @@ type Config struct {
 	// group. Nil omits the group from the capability answer.
 	SessionTasks SessionTaskLister
 	// SessionSearch is the bounded transcript/session search behind
-	// GET /v1/sessions/search. Nil answers 503 and reports the capability false.
+	// GET /v1/sessions/search. Nil answers 501 and reports the capability false
+	// (a missing access surface is the separate 503 path).
 	SessionSearch SessionSearcher
 	// SessionExport is the bounded transcript export behind
-	// GET /v1/sessions/{id}/export. Nil answers 503 and reports the capability
-	// false. It never dumps a whole session: every page carries a row and byte
-	// bound.
+	// GET /v1/sessions/{id}/export. Nil answers 501 and reports the capability
+	// false (a missing access surface is the separate 503 path). It never dumps
+	// a whole session: every page carries a row and byte bound.
 	SessionExport SessionExporter
 	// TaskPanel is the panel's read of one session's task memory (tree, member
 	// cards, attachment references, event stream). It is a projection over
@@ -577,9 +578,9 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// The W12 product reads: bounded transcript search/export and the
 		// manifest-backed delivery projection. Each flag follows the seam it
 		// needs; a deployment without one leaves the client's entry out.
-		"session.search":       s.cfg.SessionSearch != nil,
-		"session.export":       s.cfg.SessionExport != nil,
-		"session.deliverables": s.cfg.SessionFiles != nil,
+		"session.search":       s.cfg.SessionSearch != nil && s.cfg.Access != nil,
+		"session.export":       s.cfg.SessionExport != nil && s.cfg.Access != nil,
+		"session.deliverables": s.cfg.SessionFiles != nil && s.cfg.Access != nil,
 		// MCP Apps (change feat-mcp-apps-events): the app catalogue and the
 		// document host exist only when the host registry is wired. The sandbox
 		// origin is a separate capability because it is a deployment choice:
