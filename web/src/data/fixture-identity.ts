@@ -270,6 +270,7 @@ const FORK_ORIGIN_SEQ = 12;
 
 const REFUND_REPORT_HASH = "sha256:" + "3a".repeat(32);
 const REFUND_JSON_HASH = "sha256:" + "7c".repeat(32);
+const REFUND_CHANNEL_HASH = "sha256:" + "5e".repeat(32);
 
 /** The panel's live resource references point at files the fixture manifest
  * holds, so the preview route resolves them (and a reference whose bytes no
@@ -289,6 +290,14 @@ const FIXTURE_FILES: Record<string, { hash: string; seq: number; content: string
       null,
       2,
     ),
+  },
+  // A manifest-only write: the summary card produced it through the file
+  // tools, so the task log carries no attach event for it. The panel's file
+  // attribution group is the only place it is named.
+  "reports/refund-by-channel.csv": {
+    hash: REFUND_CHANNEL_HASH,
+    seq: 22,
+    content: "渠道,退款单,占比\nB,2,66.7%\nA,1,33.3%\n",
   },
 };
 
@@ -383,6 +392,10 @@ const CURRENT_ACCOUNT: AccountView = account("lina", "lina", "李娜", "human", 
  * sample sessions to the same accounts the share dialogs list. */
 export const fixtureAccountId = (key: string): string => id(key);
 export const fixtureCurrentAccountId: string = CURRENT_ACCOUNT.accountId;
+/** The fixture run's stable session ids, exported so the development transport
+ * can key its run-scoped reads (the file manifest's attribution) to them. */
+export const fixtureRunSessionId: string = RUN_ID;
+export const fixtureForkSessionId: string = REFUND_SESSION;
 
 const CURRENT_PERMISSIONS: Record<string, PermissionScope> = {
   "session.read": "team",

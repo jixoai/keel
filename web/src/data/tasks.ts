@@ -18,6 +18,8 @@
 import { signal } from "nsh";
 import type {
   FilePreviewView,
+  SessionFileView,
+  SessionFilesView,
   TaskPanelAttachmentView,
   TaskPanelCardView,
   TaskPanelEventView,
@@ -274,6 +276,57 @@ export const shortHash = (hash: string | undefined): string => {
 
 // ---- resources ------------------------------------------------------------
 
+/** One file the session's manifest attributes to a task card: the manifest's
+ * own `lastTaskId`, which the file plugin stamps on every write. It is the
+ * "tool/fs reference" half of the panel that the task events do not carry: an
+ * attach event records (path, hash), while a write records the card that wrote
+ * it. Both are read; neither is composed. */
+export interface FileReference {
+  path: string;
+  size: number;
+  updatedSeq: number;
+  taskId: string;
+  cardTitle: string;
+}
+
+/** The files a card owns, limited to the own cards the panel drew. A file
+ * whose `lastTaskId` names a card outside this session's tree (a member card's
+ * row lives in another session) is not listed: the panel never claims another
+ * session's card. A reference the panel already lists as a live attachment is
+ * left to that group, which carries its (path, hash); this group adds the
+ * writes the task events do not carry, so one reference is not printed twice. */
+export function fileReferences(panel: TaskPanelView, files: SessionFileView[]): FileReference[] {
+  const order = new Map<string, number>();
+  const titles = new Map<string, string>();
+  (panel.cards ?? []).forEach((card, index) => {
+    if (titles.has(card.taskId)) return;
+    order.set(card.taskId, index);
+    titles.set(card.taskId, card.title);
+  });
+  const attached = new Set((panel.attachments ?? []).map((attachment) => `${attachment.taskId}:${attachment.path}`));
+  const out: FileReference[] = [];
+  for (const file of files) {
+    const taskId = file.lastTaskId;
+    if (!taskId || !titles.has(taskId)) continue;
+    if (attached.has(`${taskId}:${file.path}`)) continue;
+    out.push({
+      path: file.path,
+      size: file.size,
+      updatedSeq: file.updatedSeq,
+      taskId,
+      cardTitle: titles.get(taskId) ?? taskId,
+    });
+  }
+  // The panel's own tree order decides the groups (own cards by creation
+  // sequence), then the path: two reads of the same session render alike.
+  return out.sort((left, right) => {
+    const leftOrder = order.get(left.taskId) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = order.get(right.taskId) ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+  });
+}
+
 /** The preview a reader asked for. The resolved file is the manifest's current
  * one; `matchesReference` says whether it is still the bytes the card
  * recorded. */
@@ -307,9 +360,13 @@ export function panelGaps(panel: TaskPanelView): string[] {
   const limits = panel.limits;
   if (limits?.truncated) {
     const count = limits.truncatedMemberCount ?? 0;
+    // The count is exact when the read saw every linked row, and a floor of 1
+    // when the read stopped at its own bound. A count of 1 cannot say whether
+    // one row was left or the bound itself hid the rest, so the sentence names
+    // the bound without a number; a larger floor is still a true minimum.
     gaps.push(
-      count > 0
-        ? `成员卡共 ${limits.memberLimit + count} 张，这里只画了前 ${limits.memberLimit} 张。`
+      count > 1
+        ? `成员卡超过 ${limits.memberLimit} 张的上限，这里只画了前 ${limits.memberLimit} 张（至少还有 ${count} 张没画）。`
         : `成员卡达到 ${limits.memberLimit} 张上限，更早的成员没有画出来。`,
     );
   }
@@ -396,6 +453,19 @@ class TaskPanelStore {
   /** The session the current answer belongs to: a answer for a session the
    * reader already left never lands (the panel is session-scoped). */
   readonly sessionId = signal<string | null>(null);
+  /** The session manifest's rows, read with the panel: each row's own
+   * `lastTaskId` attributes it to a card (the tool/fs reference an attach
+   * event does not carry). A failed read is recorded, never substituted with
+   * an empty list that reads as "no file". */
+  readonly files = signal<SessionFileView[]>([]);
+  /** True once a transport answered the manifest read (even with no rows), so
+   * the resource view can tell "no attributed file" apart from "this
+   * deployment never wired the read". */
+  readonly filesAvailable = signal(false);
+  /** The manifest read stopped at its own row cap: attributed files may be
+   * missing, and the surface says so instead of implying the list is whole. */
+  readonly filesTruncated = signal(false);
+  readonly filesError = signal<TaskPanelFailure | null>(null);
   /** The open resource: the attachment the reader asked to preview. */
   readonly preview = signal<{ attachment: TaskPanelAttachmentView; view: FilePreviewView } | null>(null);
   readonly previewLoading = signal<string | null>(null);
@@ -440,26 +510,57 @@ class TaskPanelStore {
     const token = ++this.readToken;
     this.loading.set(true);
     this.error.set(null);
+    this.filesError.set(null);
+    this.filesAvailable.set(false);
+    this.filesTruncated.set(false);
     this.sessionId.set(sessionId);
     if (!api?.taskPanel) {
       // A deployment without the projection is not an empty tree: it says so.
       this.panel.set(null);
+      this.files.set([]);
       this.error.set({ status: null, message: "这个部署没有接通任务面板读数。" });
       this.loading.set(false);
       return;
     }
     try {
-      const view = await api.taskPanel(sessionId);
+      // The panel projection and the session manifest are one view of the same
+      // session: both are read, and a manifest failure is reported next to the
+      // resources rather than failing the whole panel.
+      const [view, manifest] = await Promise.all([
+        api.taskPanel(sessionId),
+        this.filesApi(sessionId, token),
+      ]);
       if (token !== this.readToken) return;
       this.panel.set(view);
+      this.files.set(manifest?.files ?? []);
+      this.filesAvailable.set(manifest !== null);
+      this.filesTruncated.set(manifest?.truncated === true);
       this.selectedTaskId.set(null);
       this.preview.set(null);
     } catch (error) {
       if (token !== this.readToken) return;
       this.panel.set(null);
+      this.files.set([]);
+      this.filesAvailable.set(false);
+      this.filesTruncated.set(false);
       this.error.set(failureOf(error));
     } finally {
       if (token === this.readToken) this.loading.set(false);
+    }
+  }
+
+  /** The session manifest (`GET /v1/sessions/{id}/files`), or null when this
+   * transport has none. The panel calls it with the projection so one refresh
+   * reads both; a failure is reported beside the resources, and a late answer
+   * for a session the reader already left never lands. */
+  private async filesApi(sessionId: string, token: number): Promise<SessionFilesView | null> {
+    try {
+      const manifest = await store.sessionFileManifest(sessionId);
+      if (token !== this.readToken) return null;
+      return manifest;
+    } catch (error) {
+      if (token === this.readToken) this.filesError.set(failureOf(error));
+      return null;
     }
   }
 
@@ -496,7 +597,11 @@ class TaskPanelStore {
       return;
     }
     try {
-      const view = await api.filePreview(sessionId, attachment.path, attachment.hash);
+      // A manifest-attributed file has no recorded reference hash: asking for
+      // a comparison against "" would make the transport (or a harness) answer
+      // one, so the empty string is sent as "no reference".
+      const reference = attachment.hash === "" ? undefined : attachment.hash;
+      const view = await api.filePreview(sessionId, attachment.path, reference);
       if (token !== this.previewToken) return;
       this.preview.set({ attachment, view });
     } catch (error) {
@@ -518,6 +623,10 @@ class TaskPanelStore {
     this.readToken += 1;
     this.previewToken += 1;
     this.panel.set(null);
+    this.files.set([]);
+    this.filesAvailable.set(false);
+    this.filesTruncated.set(false);
+    this.filesError.set(null);
     this.loading.set(false);
     this.error.set(null);
     this.sessionId.set(null);

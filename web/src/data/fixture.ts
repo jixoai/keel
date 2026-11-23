@@ -51,7 +51,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { KeelApiError } from "./http";
-import { FixtureIdentity, fixtureAccountId, fixtureCurrentAccountId } from "./fixture-identity";
+import { FixtureIdentity, fixtureAccountId, fixtureCurrentAccountId, fixtureForkSessionId, fixtureRunSessionId } from "./fixture-identity";
 import type {
   AccountView,
   AuditEventView,
@@ -703,16 +703,27 @@ export class FixtureClient implements SettingsApi {
     this.skillSourceState = this.skillSourceState.filter((item) => item.id !== id);
   }
 
-  /** The `$` file group's demo source (a session's manifest paths). */
-  async sessionFiles(_sessionId: string): Promise<SessionFilesView> {
-    return {
-      files: [
-        { path: "src/composer.tsx", size: 1200, updatedSeq: 8 },
-        { path: "docs/release.md", size: 640, updatedSeq: 5 },
-      ],
-      count: 2,
-      truncated: false,
-    };
+  /** The `$` file group's demo source (a session's manifest paths). The two
+   * run-surface reports also carry their writing card (`lastTaskId`), which is
+   * the attribution the task panel's resource view reads; the composer group's
+   * own sample paths stay for the `$` menu. The CSV is a manifest-only write by
+   * the summary card: no attach event names it, so the panel's file group is
+   * the one place it appears. */
+  async sessionFiles(sessionId?: string): Promise<SessionFilesView> {
+    const files: Array<{ path: string; size: number; updatedSeq: number; lastTaskId?: string }> = [
+      { path: "src/composer.tsx", size: 1200, updatedSeq: 8 },
+      { path: "docs/release.md", size: 640, updatedSeq: 5 },
+    ];
+    if (sessionId === fixtureRunSessionId || sessionId === fixtureForkSessionId) {
+      files.push(
+        { path: "reports/refund-analysis.md", size: 2048, updatedSeq: 19, lastTaskId: "task-captain" },
+        { path: "reports/refund-report.json", size: 180, updatedSeq: 21, lastTaskId: "task-captain" },
+      );
+    }
+    if (sessionId === fixtureRunSessionId) {
+      files.push({ path: "reports/refund-by-channel.csv", size: 48, updatedSeq: 22, lastTaskId: "task-captain-summary" });
+    }
+    return { files, count: files.length, truncated: false };
   }
 
   /** The `$` task group's demo source (the session's cards). */

@@ -83,6 +83,12 @@ test("TUI: 任务面板三视图——图 / 事件流 / 资源预览（事件带
   expect(resources).toContain("reports/refund-analysis.md");
   expect(resources).toContain("reports/refund-report.json");
   expect(resources).toContain("资源只记录 (path, hash)");
+  // The manifest attributes the CSV to the summary card (lastTaskId); it has no
+  // attach event, so this group is the only place it is named.
+  expect(resources).toContain("文件清单 · 按卡归属（lastTaskId）");
+  expect(view.shows("id:task-panel-file-reports/refund-by-channel.csv")).toBe(true);
+  // A file already shown as a live attachment is not printed twice.
+  expect(view.shows("id:task-panel-file-reports/refund-report.json")).toBe(false);
 }, 120_000);
 
 test("TUI: 资源预览——按会话清单打开，与引用一致", async () => {
@@ -135,6 +141,48 @@ test("TUI: 资源预览——文件已变化时如实说明，不冒充旧引用
   expect(screen).not.toContain("与引用一致");
 }, 120_000);
 
+test("TUI: 文件归属——按卡归属的清单文件可打开，且不与挂载资源重复", async () => {
+  const view = await harness(1440, "panel-success");
+  await view.waitFor("id:task-panel");
+  await view.press("id:task-panel-section-resources");
+  await view.waitFor("id:task-panel-files");
+  expect(view.texts().join("\n")).toContain("汇总渠道异常");
+  expect(view.shows("id:task-panel-file-reports/refund-by-channel.csv")).toBe(true);
+  // The two reports are live attachments: the file group leaves them to the
+  // attachment rows above instead of naming the same (path, hash) again.
+  expect(view.shows("id:task-panel-file-reports/refund-analysis.md")).toBe(false);
+  // The manifest row has no reference hash, so the preview says what it is
+  // instead of claiming a comparison that never happened.
+  await view.press("id:task-panel-file-reports/refund-by-channel.csv");
+  await view.waitFor("id:task-panel-preview");
+  const preview = view.texts().join("\n");
+  expect(preview).toContain("清单当前版本");
+  expect(preview).toContain("渠道,退款单,占比");
+  expect(preview).not.toContain("未核对");
+}, 120_000);
+
+test("TUI: 文件清单三态——失败如实报、空如实说、未接就不出现", async () => {
+  const failed = await harness(1440, "panel-files-error");
+  await failed.waitFor("id:task-panel");
+  await failed.press("id:task-panel-section-resources");
+  await failed.waitFor("id:task-panel-files-error");
+  expect(failed.texts().join("\n")).toContain("没能读到会话的文件清单");
+  expect(failed.shows("id:task-panel-files")).toBe(false);
+
+  const empty = await harness(1440, "panel-files-empty");
+  await empty.waitFor("id:task-panel");
+  await empty.press("id:task-panel-section-resources");
+  await empty.waitFor("id:task-panel-files-empty");
+  expect(empty.texts()).toContain("文件清单里没有额外归属到本会话卡的路径。");
+
+  const unwired = await harness(1440, "panel-no-manifest");
+  await unwired.waitFor("id:task-panel");
+  await unwired.press("id:task-panel-section-resources");
+  await unwired.waitFor("id:task-panel-resources");
+  expect(unwired.shows("id:task-panel-files")).toBe(false);
+  expect(unwired.shows("id:task-panel-files-error")).toBe(false);
+}, 120_000);
+
 test("TUI: 390 任务面板——单列，入口与页面都在，无横向溢出", async () => {
   const view = await openFixtureRun(390);
   await view.waitFor("id:run-task-panel-entry");
@@ -149,4 +197,9 @@ test("TUI: 390 任务面板——单列，入口与页面都在，无横向溢�
   // entry flips to 收起 once the sheet is open.
   expect(screen).toContain("收起");
   expect(view.shows("id:run-task-panel-band")).toBe(false);
+  // The resource face carries the manifest-attributed file at phone width too:
+  // the row is one line in the sheet, not a squeezed third column.
+  await view.press("id:task-panel-section-resources");
+  await view.waitFor("id:task-panel-files");
+  expect(view.shows("id:task-panel-file-reports/refund-by-channel.csv")).toBe(true);
 }, 120_000);

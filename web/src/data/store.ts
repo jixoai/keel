@@ -1497,6 +1497,18 @@ class KeelStore {
     return candidate as { url(path: string): string; transport(): FetchLike };
   }
 
+  /** The session manifest (`GET /v1/sessions/{id}/files`) or `null` when this
+   * transport has none. The run surface's task panel reads it beside the task
+   * projection, so a file's `lastTaskId` attribution comes from the manifest
+   * the file plugin wrote — never from a guessed link. It reads through the
+   * same identity seam as the panel, so a harness/fixture transport answers it
+   * exactly like the live one. */
+  async sessionFileManifest(sessionId: string): Promise<SessionFilesView | null> {
+    const client = this.identityApi();
+    if (!client?.sessionFiles) return null;
+    return await client.sessionFiles(sessionId);
+  }
+
   /** identity-stream.ts installs its stop function here; `null` clears it. */
   setIdentityStreamCloser(closer: (() => void) | null): void {
     this.identityStreamCloser = closer;

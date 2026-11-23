@@ -33,6 +33,7 @@ import {
   cardTone,
   eventKindLabel,
   eventLines,
+  fileReferences,
   forkBranches,
   panelCounts,
   panelGaps,
@@ -485,8 +486,85 @@ function TaskResources(props: { panel: NonNullable<ReturnType<typeof taskPanelAc
           />
         </StateNote>
       </If>
+      <If when={taskPanelAccess.filesError() !== null}>
+        <StateNote tone="danger" icon="alert" text={`没能读到会话的文件清单：${taskPanelAccess.filesError()?.message ?? ""}`} testID="task-panel-files-error" />
+      </If>
+      <If when={taskPanelAccess.filesError() === null && taskPanelAccess.filesAvailable()}>
+        <SessionFileAttribution panel={props.panel} sessionId={props.sessionId} />
+      </If>
       <If when={taskPanelAccess.preview() !== null}>
         <ResourcePreviewCard />
+      </If>
+    </View>
+  );
+}
+
+/** The files the manifest attributes to a card of this session (`lastTaskId`)
+ * that the attachment group above does not already carry. It is the tool/fs
+ * reference half of the panel: a write records its card on the manifest row,
+ * so this group names what each card wrote without reading the file's bytes. A
+ * file attributed to a card outside this session's tree is not listed. */
+function SessionFileAttribution(props: { panel: NonNullable<ReturnType<typeof taskPanelAccess.panel>>; sessionId: string }) {
+  const files = () => fileReferences(props.panel, taskPanelAccess.files());
+  return (
+    <View testID="task-panel-files" style={{ flexDirection: "column", gap: 0 }}>
+      <Text style={{ paddingTop: space.sm, fontSize: typeScale.sm, color: color.mutedForeground }}>
+        文件清单 · 按卡归属（lastTaskId）
+      </Text>
+      <If
+        when={files().length > 0}
+        else={
+          <Text testID="task-panel-files-empty" style={{ paddingVertical: space.xs, fontSize: typeScale.sm, color: color.mutedForeground }}>
+            文件清单里没有额外归属到本会话卡的路径。
+          </Text>
+        }
+      >
+        <Each of={files()} key={(file) => `${file.taskId}:${file.path}`}>
+          {(file) => (
+            <View
+              testID={`task-panel-file-${file().path}`}
+              role="button"
+              focusable
+              onPress={() =>
+                void taskPanelAccess.openResource(props.sessionId, {
+                  taskId: file().taskId,
+                  path: file().path,
+                  // The manifest's own row does not carry a content hash on the
+                  // wire; the preview answers with the current one and reports
+                  // no reference comparison for this group.
+                  hash: "",
+                })
+              }
+              accessibilityLabel={`打开文件 ${file().path}`}
+              hoverStyle={{ backgroundColor: color.hover }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: space.sm,
+                minHeight: isMobile() ? 44 : 40,
+                paddingHorizontal: space.xs,
+                borderBottomWidth: 1,
+                borderBottomColor: color.border,
+              }}
+            >
+              <Icon name="file" size={12} tint={color.mutedForeground} />
+              <Text style={{ flex: 1, minWidth: 0, fontFamily: font.mono, fontSize: typeScale.key, color: color.foreground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                {file().path}
+              </Text>
+              <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1 }}>
+                {file().cardTitle}
+              </Text>
+              <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}>
+                seq {file().updatedSeq}
+              </Text>
+            </View>
+          )}
+        </Each>
+      </If>
+      <If when={taskPanelAccess.filesTruncated()}>
+        <Text testID="task-panel-files-truncated" style={{ paddingVertical: space.xxs, fontSize: typeScale.sm, color: color.mutedForeground }}>
+          文件清单只读到读取上限，更早的归属可能没有列进来。
+        </Text>
       </If>
     </View>
   );
@@ -503,6 +581,9 @@ function ResourcePreviewCard() {
     const current = preview();
     return current ? resourceChanged(current.attachment, current.view) : null;
   };
+  // A manifest-attributed file has no recorded reference hash: there is nothing
+  // to compare, so the badge names the answer instead of asking for a check.
+  const manifestOnly = () => (attachment()?.hash ?? "") === "";
   return (
     <View
       testID="task-panel-preview"
@@ -527,7 +608,7 @@ function ResourcePreviewCard() {
           <Badge variant="success" label="与引用一致" />
         </If>
         <If when={changed() === null}>
-          <Badge variant="outline" label="未核对" />
+          <Badge variant="outline" label={manifestOnly() ? "清单当前版本" : "未核对"} />
         </If>
         <IconButton icon="x" label="关闭预览" onPress={() => taskPanelAccess.closePreview()} />
       </View>

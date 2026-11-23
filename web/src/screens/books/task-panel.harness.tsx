@@ -11,6 +11,9 @@
 //   panel-permission  the panel read is refused (403 + required key)
 //   panel-success     a real tree: root + own child + sub-agent + fork member
 //   panel-changed     the same tree, and a reference whose file has changed
+//   panel-files-error the manifest read fails beside a readable panel
+//   panel-files-empty the manifest answers, but no row is attributed to a card
+//   panel-no-manifest the transport has no manifest read at all
 //
 // The success faces of the *run surface entry* are driven by the app's own
 // fixture transport (`?fixture=1` / `host.params.fixture`), not here.
@@ -127,47 +130,71 @@ const PANEL: TaskPanelView = {
   limits: { memberLimit: 200, eventLimit: 500 },
 };
 
-const API = (name: string): IdentityApi => ({
-  async listAccounts() {
-    return { items: [ACCOUNT], limit: 100, hasMore: false };
-  },
-  async taskPanel(sessionId: string) {
-    if (name === "panel-loading") return new Promise(() => {});
-    if (name === "panel-error") throw failure();
-    if (name === "panel-permission") throw forbidden();
-    if (name === "panel-empty") {
+const API = (name: string): IdentityApi => {
+  const api: IdentityApi = {
+    async listAccounts() {
+      return { items: [ACCOUNT], limit: 100, hasMore: false };
+    },
+    async taskPanel(sessionId: string) {
+      if (name === "panel-loading") return new Promise(() => {});
+      if (name === "panel-error") throw failure();
+      if (name === "panel-permission") throw forbidden();
+      if (name === "panel-empty") {
+        return {
+          sessionId,
+          cards: [],
+          members: [],
+          ancestors: [],
+          attachments: [],
+          events: [],
+          limits: { memberLimit: 200, eventLimit: 500 },
+        };
+      }
+      return { ...PANEL, sessionId };
+    },
+    async filePreview(_sessionId: string, path: string, referenceHash?: string): Promise<FilePreviewView> {
+      const hash = name === "panel-changed" && path === "reports/refund-analysis.md" ? HASH_B : referenceHash ?? HASH_A;
+      const changed = referenceHash !== undefined && hash !== referenceHash;
+      const content =
+        path === "reports/refund-by-channel.csv"
+          ? "渠道,退款单,占比\nB,2,66.7%\nA,1,33.3%\n"
+          : "# 退款原因分析\n\n本周退款 3 单，2 单来自同一渠道（渠道 B）。\n";
       return {
-        sessionId,
-        cards: [],
-        members: [],
-        ancestors: [],
-        attachments: [],
-        events: [],
-        limits: { memberLimit: 200, eventLimit: 500 },
+        path,
+        hash,
+        size: 2048,
+        seq: 19,
+        offset: 0,
+        limit: 200,
+        totalLines: 4,
+        returnedLines: 4,
+        nextOffset: 4,
+        truncated: false,
+        content,
+        referenceHash,
+        matchesReference: referenceHash === undefined ? undefined : !changed,
       };
+    },
+  };
+  if (name === "panel-no-manifest") return api;
+  api.sessionFiles = async (_sessionId: string) => {
+    if (name === "panel-files-error") {
+      throw new KeelApiError(500, "文件清单暂时不可用", [], undefined, undefined, {}, "k-files-1");
     }
-    return { ...PANEL, sessionId };
-  },
-  async filePreview(_sessionId: string, path: string, referenceHash?: string): Promise<FilePreviewView> {
-    const hash = name === "panel-changed" && path === "reports/refund-analysis.md" ? HASH_B : referenceHash ?? HASH_A;
-    const changed = referenceHash !== undefined && hash !== referenceHash;
-    return {
-      path,
-      hash,
-      size: 2048,
-      seq: 19,
-      offset: 0,
-      limit: 200,
-      totalLines: 4,
-      returnedLines: 4,
-      nextOffset: 4,
-      truncated: false,
-      content: "# 退款原因分析\n\n本周退款 3 单，2 单来自同一渠道（渠道 B）。\n",
-      referenceHash,
-      matchesReference: referenceHash === undefined ? undefined : !changed,
-    };
-  },
-});
+    const files: Array<{ path: string; size: number; updatedSeq: number; lastTaskId?: string }> = [
+      { path: "src/composer.tsx", size: 1200, updatedSeq: 8 },
+      // Listed above as a live attachment: the file group must not repeat it.
+      { path: "reports/refund-analysis.md", size: 2048, updatedSeq: 19, lastTaskId: "task-captain" },
+      { path: "reports/refund-report.json", size: 180, updatedSeq: 21, lastTaskId: "task-captain" },
+    ];
+    if (name !== "panel-files-empty") {
+      // A manifest-only write by the summary card; no attach event names it.
+      files.push({ path: "reports/refund-by-channel.csv", size: 48, updatedSeq: 22, lastTaskId: "task-summary" });
+    }
+    return { files, count: files.length, truncated: false };
+  };
+  return api;
+};
 
 const ALL_KEYS: Record<string, PermissionScope> = {
   "session.read": "tenant",

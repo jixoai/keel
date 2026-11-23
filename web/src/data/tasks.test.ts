@@ -13,6 +13,7 @@ import {
   eventDetail,
   eventKindLabel,
   eventLines,
+  fileReferences,
   forkBranches,
   panelCounts,
   panelGaps,
@@ -152,7 +153,8 @@ test("panelGaps: 每个上限一句话，外来的 kind 只报一次", () => {
   });
   const gaps = panelGaps(view);
   expect(gaps).toHaveLength(4);
-  expect(gaps[0]).toContain("5 张");
+  // The omitted count may be a floor, so the sentence says "at least".
+  expect(gaps[0]).toContain("至少还有 3 张");
   expect(gaps[1]).toContain("10 条");
   expect(gaps[2]).toContain("父卡");
   expect(gaps[3]).toContain("kind");
@@ -176,6 +178,34 @@ test("resourceChanged / previewSummary: 一致、已变化、未核对三态", (
   expect(resourceChanged(attachment, { path: "a.md", hash: "sha256:" + "b".repeat(64), size: 10, offset: 0, limit: 1, totalLines: 1, returnedLines: 1, nextOffset: 1, content: "", matchesReference: false })).toBe(true);
   expect(resourceChanged(attachment, { path: "a.md", hash: HASH_A, size: 10, offset: 0, limit: 1, totalLines: 1, returnedLines: 1, nextOffset: 1, content: "" })).toBe(null);
   expect(previewSummary({ path: "a", hash: "", size: 2048, offset: 0, limit: 1, totalLines: 30, returnedLines: 20, nextOffset: 20, content: "" })).toBe("2 KB · 20/30 行");
+});
+
+test("fileReferences: 只列本会话卡归属的路径，别的会话的卡不冒充，挂载过的不重复", () => {
+  const view = panel({
+    cards: [
+      { taskId: "root", sessionId: "s-1", title: "本周退款原因分析", status: "open", origin: "session", createdSeq: 2 },
+      { taskId: "summary", sessionId: "s-1", title: "汇总渠道异常", status: "done", origin: "tool", createdSeq: 6 },
+    ],
+    attachments: [{ taskId: "root", path: "reports/a.md", hash: HASH_A }],
+  });
+  const refs = fileReferences(view, [
+    { path: "reports/b.md", size: 10, updatedSeq: 22, lastTaskId: "summary" },
+    { path: "reports/a.md", size: 4, updatedSeq: 19, lastTaskId: "root" },
+    { path: "reports/c.md", size: 6, updatedSeq: 20, lastTaskId: "root" },
+    { path: "notes.txt", size: 2, updatedSeq: 8, lastTaskId: "elsewhere" },
+    { path: "unowned.txt", size: 1, updatedSeq: 1 },
+  ]);
+  // The panel's tree order decides the groups (root before summary), then the
+  // path: one read of the same session renders the same order.
+  expect(refs.map((ref) => ref.path)).toEqual(["reports/c.md", "reports/b.md"]);
+  expect(refs[0].cardTitle).toBe("本周退款原因分析");
+  expect(refs[1].cardTitle).toBe("汇总渠道异常");
+  // The attached (root, reports/a.md) pair is left to the attachment group,
+  // which carries its hash; the panel does not print it twice.
+  expect(refs.some((ref) => ref.path === "reports/a.md")).toBe(false);
+  // The unattributed rows and the other session's card are left out.
+  expect(refs.some((ref) => ref.path === "notes.txt")).toBe(false);
+  expect(refs.some((ref) => ref.path === "unowned.txt")).toBe(false);
 });
 
 test("shortHash / labels: 截断的只是显示，原值留在事件字段里", () => {
