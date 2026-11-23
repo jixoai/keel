@@ -128,6 +128,19 @@ func (p *PgProjection) ListEvents(ctx context.Context, tenantID, sessionID, task
 	return out, nil
 }
 
+// ListSessionEvents reads the session's whole projected task event stream.
+func (p *PgProjection) ListSessionEvents(ctx context.Context, tenantID, sessionID uuid.UUID) ([]Event, error) {
+	rows, err := p.store.ListSessionTaskEventRows(ctx, tenantID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Event, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, eventFromRow(row))
+	}
+	return out, nil
+}
+
 // CountEvents reports the projection size (consistency assertions).
 func (p *PgProjection) CountEvents(ctx context.Context, tenantID, sessionID uuid.UUID) (int, error) {
 	return p.store.CountTaskEvents(ctx, tenantID, sessionID)

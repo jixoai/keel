@@ -472,6 +472,32 @@ func (s *Store) ListChildTaskCardRows(ctx context.Context, tenantID, parentSessi
 	return out, nil
 }
 
+// ListSessionTaskEventRows returns every projected task.* event of one session
+// in ledger order. It is the panel's stream read: one session's task memory,
+// nothing copied from another session's ledger.
+func (s *Store) ListSessionTaskEventRows(ctx context.Context, tenantID, sessionID uuid.UUID) ([]TaskEventRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT tenant_id, session_id, seq, task_id, kind, payload, created_at
+		   FROM task_events WHERE tenant_id=$1 AND session_id=$2
+		  ORDER BY seq`, tenantID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list session task events: %w", err)
+	}
+	defer rows.Close()
+	var out []TaskEventRow
+	for rows.Next() {
+		var row TaskEventRow
+		var payload []byte
+		if err := rows.Scan(&row.TenantID, &row.SessionID, &row.Seq, &row.TaskID, &row.Kind,
+			&payload, &row.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan session task event: %w", err)
+		}
+		row.Payload = payload
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // ListTaskEventRows returns the events of one card in ledger order.
 func (s *Store) ListTaskEventRows(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) ([]TaskEventRow, error) {
 	rows, err := s.pool.Query(ctx,

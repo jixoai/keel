@@ -25,6 +25,9 @@ type Projection interface {
 	// member card is found even though its row lives in the child session.
 	ListChildCards(ctx context.Context, tenantID, parentSessionID uuid.UUID, limit int, afterUpdatedAt *time.Time, afterTaskID *uuid.UUID) ([]Card, error)
 	ListEvents(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) ([]Event, error)
+	// ListSessionEvents reads the session's whole task event stream (the
+	// panel's stream), in ledger order.
+	ListSessionEvents(ctx context.Context, tenantID, sessionID uuid.UUID) ([]Event, error)
 	CountEvents(ctx context.Context, tenantID, sessionID uuid.UUID) (int, error)
 	UpsertCard(ctx context.Context, card Card) error
 	InsertEvent(ctx context.Context, tenantID, sessionID uuid.UUID, event Event) error
