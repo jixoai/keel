@@ -1129,6 +1129,18 @@ func (f forkCards) CloseForkCard(ctx context.Context, scope kernel.Scope, childS
 	return err
 }
 
+// filePreviewReader adapts the file service to the panel's preview seam. The
+// preview is a read, so it never touches the ledger or the manifest; a nil
+// service answers the route as not wired.
+type filePreviewReader struct{ service *fileplugin.Service }
+
+func (f filePreviewReader) ReadEntry(ctx context.Context, scope fileplugin.Scope, path string, offset, limit int) (fileplugin.ReadResult, error) {
+	if f.service == nil {
+		return fileplugin.ReadResult{}, fileplugin.Errorf(fileplugin.CodeUnavailable, "the file service is not wired")
+	}
+	return f.service.ReadEntry(ctx, scope, path, offset, limit)
+}
+
 // forkAdmission compensates a failed fork's placement reservation. Release
 // drops the pending run slot; Leave removes the placement EnsurePlacement may
 // have created before admission failed.
@@ -1395,6 +1407,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Skills:       opts.Skills,
 		SessionFiles: opts.FileService,
 		SessionTasks: taskLog,
+		// The run surface's task panel (W4): the task-log projection read and
+		// the file manifest's bounded read behind the resource preview. Both
+		// are the services the tools already use; neither writes task state.
+		TaskPanel:   taskLog,
+		FilePreview: filePreviewReader{service: opts.FileService},
 		// Tenancy surface (change keel-ga §2): the operator provisioning path and
 		// the tenant's own quota projection. Both read the same store the request
 		// path uses; neither is reachable with a tenant credential alone.

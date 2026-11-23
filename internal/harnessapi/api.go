@@ -176,6 +176,14 @@ type Config struct {
 	// SessionTasks lists the session's task cards for the composer's `$` task
 	// group. Nil omits the group from the capability answer.
 	SessionTasks SessionTaskLister
+	// TaskPanel is the panel's read of one session's task memory (tree, member
+	// cards, attachment references, event stream). It is a projection over
+	// task_cards/task_events; nil answers 503 on GET
+	// /v1/sessions/{id}/task-panel and reports the capability false.
+	TaskPanel TaskPanelLister
+	// FilePreview is the panel's resource preview: the session file manifest's
+	// bounded read. Nil omits GET /v1/sessions/{id}/file-preview.
+	FilePreview SessionFileReader
 	// SessionExists validates that a session belongs to the tenant before a
 	// product endpoint writes to it (a decision opened on a missing session
 	// would be an orphan row). Nil skips the check (tests without a store).
@@ -356,6 +364,7 @@ func (s *Server) routes() {
 	s.settingsRoutes()
 	s.skillsRoutes()
 	s.completionRoutes()
+	s.taskPanelRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/team-tasks", s.listTeamTasks)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
@@ -511,6 +520,12 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// data a `$` group needs (the shell decides which groups to draw).
 		"settings.skills":   s.cfg.Skills != nil,
 		"skills.completion": s.cfg.SessionFiles != nil || s.cfg.SessionTasks != nil,
+		// task.panel: the run surface's task tree / event stream / resource
+		// preview. A deployment without the task-log projection leaves the
+		// panel's read out, and the surface says so instead of drawing an
+		// empty tree.
+		"task.panel":          s.cfg.TaskPanel != nil,
+		"session.filePreview": s.cfg.FilePreview != nil,
 		// MCP Apps (change feat-mcp-apps-events): the app catalogue and the
 		// document host exist only when the host registry is wired. The sandbox
 		// origin is a separate capability because it is a deployment choice:

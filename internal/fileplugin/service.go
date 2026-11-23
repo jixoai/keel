@@ -240,6 +240,77 @@ func (s *Service) Read(ctx context.Context, args json.RawMessage) (ReadResult, e
 	}, nil
 }
 
+// ReadEntry is the scope-explicit form of Read for a caller that already
+// resolved the session (the panel's file preview). It is the same bounded page
+// the model's read tool gets and reads only the session's own view — an
+// inherited fork path resolves through the overlay exactly as a tool read does.
+func (s *Service) ReadEntry(ctx context.Context, scope Scope, rawPath string, offset, limit int) (ReadResult, error) {
+	if !scope.Valid() {
+		return ReadResult{}, Errorf(CodeRunScopeMissing, "read needs a session scope")
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	path, err := NormalizePath(rawPath)
+	if err != nil {
+		return ReadResult{}, err
+	}
+	entry, ok, err := s.effectiveGet(ctx, scope.TenantID, scope.SessionID, path)
+	if err != nil {
+		return ReadResult{}, mapStoreError(err)
+	}
+	if !ok {
+		return ReadResult{}, Errorf(CodeNotFound, "file %q does not exist in this session", path)
+	}
+	object, err := s.store.Open(entry.Hash)
+	if err != nil {
+		return ReadResult{}, mapLayerfsError(err)
+	}
+	defer object.Close()
+	endsWithNewline := true
+	if object.Size > 0 {
+		if _, err := object.Seek(object.Size-1, io.SeekStart); err == nil {
+			var last [1]byte
+			if _, err := io.ReadFull(object, last[:]); err == nil {
+				endsWithNewline = last[0] == '\n'
+			}
+		}
+		if _, err := object.Seek(0, io.SeekStart); err != nil {
+			return ReadResult{}, mapLayerfsError(err)
+		}
+	}
+	if limit <= 0 {
+		limit = s.maxLines
+	}
+	if limit <= 0 {
+		limit = DefaultReadLines
+	}
+	if limit > MaxReadLines {
+		limit = MaxReadLines
+	}
+	page, err := readLinePage(object, offset, limit, s.maxBytes)
+	if err != nil {
+		return ReadResult{}, mapLayerfsError(err)
+	}
+	if !endsWithNewline && page.ReturnedLines > 0 && page.NextOffset == page.TotalLines {
+		page.Content = strings.TrimSuffix(page.Content, "\n")
+	}
+	return ReadResult{
+		Path:          path,
+		Hash:          entry.Hash.Prefixed(),
+		Size:          entry.Size,
+		Mode:          entry.Mode,
+		Seq:           entry.UpdatedSeq,
+		Offset:        offset,
+		Limit:         limit,
+		TotalLines:    page.TotalLines,
+		ReturnedLines: page.ReturnedLines,
+		NextOffset:    page.NextOffset,
+		Truncated:     page.Truncated,
+		Content:       page.Content,
+	}, nil
+}
+
 // WriteOptions carries the write preconditions.
 type WriteOptions struct {
 	// ExpectedHash is the content hash the model read. Required for an existing
