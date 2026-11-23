@@ -177,11 +177,21 @@ type Config struct {
 	// the settings routes (the tool keeps its constant name).
 	Skills SkillLibrary
 	// SessionFiles lists the open session's file manifest for the composer's
-	// `$` file group. Nil omits the group from the capability answer.
+	// `$` file group. It is also the one projection behind
+	// GET /v1/sessions/{id}/deliverables: a deliverable is a manifest row, not
+	// a second file truth. Nil omits the group and the delivery read.
 	SessionFiles SessionFileLister
 	// SessionTasks lists the session's task cards for the composer's `$` task
 	// group. Nil omits the group from the capability answer.
 	SessionTasks SessionTaskLister
+	// SessionSearch is the bounded transcript/session search behind
+	// GET /v1/sessions/search. Nil answers 503 and reports the capability false.
+	SessionSearch SessionSearcher
+	// SessionExport is the bounded transcript export behind
+	// GET /v1/sessions/{id}/export. Nil answers 503 and reports the capability
+	// false. It never dumps a whole session: every page carries a row and byte
+	// bound.
+	SessionExport SessionExporter
 	// TaskPanel is the panel's read of one session's task memory (tree, member
 	// cards, attachment references, event stream). It is a projection over
 	// task_cards/task_events; nil answers 503 on GET
@@ -371,6 +381,8 @@ func (s *Server) routes() {
 	s.skillsRoutes()
 	s.completionRoutes()
 	s.taskPanelRoutes()
+	s.sessionQueryRoutes()
+	s.deliverableRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/team-tasks", s.listTeamTasks)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
@@ -562,6 +574,12 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// empty tree.
 		"task.panel":          s.cfg.TaskPanel != nil,
 		"session.filePreview": s.cfg.FilePreview != nil,
+		// The W12 product reads: bounded transcript search/export and the
+		// manifest-backed delivery projection. Each flag follows the seam it
+		// needs; a deployment without one leaves the client's entry out.
+		"session.search":       s.cfg.SessionSearch != nil,
+		"session.export":       s.cfg.SessionExport != nil,
+		"session.deliverables": s.cfg.SessionFiles != nil,
 		// MCP Apps (change feat-mcp-apps-events): the app catalogue and the
 		// document host exist only when the host registry is wired. The sandbox
 		// origin is a separate capability because it is a deployment choice:
@@ -600,6 +618,13 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 			"subagentsPageMax":     200,
 			"teamTasksPageDefault": tasklog.DefaultTeamTaskLimit,
 			"teamTasksPageMax":     tasklog.MaxTeamTaskLimit,
+			"searchPageDefault":    defaultSearchLimit,
+			"searchPageMax":        maxSearchLimit,
+			"exportPageDefault":    defaultExportLimit,
+			"exportPageMax":        maxExportLimit,
+			"exportPageBytes":      exportPageBytes,
+			"deliverablesDefault":  defaultDeliverablesLimit,
+			"deliverablesMax":      maxDeliverablesLimit,
 		},
 		Hooks: hooks,
 	}

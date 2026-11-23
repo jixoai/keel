@@ -101,6 +101,14 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (tenant_id, session_id, seq)
 );
 
+-- The W12 transcript reads (`keel.session-query`): message search pages order by
+-- (created_at, session_id, seq) over user/assistant messages only. A partial
+-- index keeps that scan on transcript rows and off tool payloads; the text
+-- predicate itself is a parameterized strpos (no extension required).
+CREATE INDEX IF NOT EXISTS events_transcript_created
+    ON events (tenant_id, created_at DESC, session_id DESC, seq DESC)
+    WHERE kind IN ('user.message', 'assistant.message');
+
 -- Tool results (and other replayable effects) are at-least-once at the execution
 -- layer but exactly-once in the log: the same dedupe key can only be inserted
 -- once per session.

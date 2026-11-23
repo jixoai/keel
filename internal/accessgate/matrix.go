@@ -175,6 +175,12 @@ var rules = []Rule{
 	resource(http.MethodGet, "/v1/sessions/{id}/team-tasks", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/files", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/file-preview", access.KeySessionRead, "session", "path:id"),
+	// The W12 product reads. Tenant-wide search is a collection read (the
+	// handler filters candidates through Visible); export and deliverables are
+	// one session's resource reads.
+	route(http.MethodGet, "/v1/sessions/search", ModeHeldKey, access.KeySessionRead),
+	resource(http.MethodGet, "/v1/sessions/{id}/export", access.KeySessionRead, "session", "path:id"),
+	resource(http.MethodGet, "/v1/sessions/{id}/deliverables", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/tasks", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/task-panel", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/subagents", access.KeySessionWrite, "session", "path:id"),

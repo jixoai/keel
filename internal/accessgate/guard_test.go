@@ -256,6 +256,9 @@ func TestTaskPanelRoutesAreDeclared(t *testing.T) {
 	if err := accessgate.CheckRoutes([]string{
 		"GET /v1/sessions/{id}/task-panel",
 		"GET /v1/sessions/{id}/file-preview",
+		"GET /v1/sessions/search",
+		"GET /v1/sessions/{id}/export",
+		"GET /v1/sessions/{id}/deliverables",
 	}); err != nil {
 		t.Fatal(err)
 	}

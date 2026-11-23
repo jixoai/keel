@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/sessiontitle"
 )
 
 // Session listing and cancellation.
@@ -17,8 +17,10 @@ const (
 	defaultSessionsLimit = 50
 	maxSessionsLimit     = 200
 	// sessionTitleLimit bounds the derived list title, in runes, including the
-	// trailing ellipsis of a cut title.
-	sessionTitleLimit = 60
+	// trailing ellipsis of a cut title. The rule itself lives in
+	// internal/sessiontitle: the list, the search hits and the export page all
+	// read one derivation.
+	sessionTitleLimit = sessiontitle.Limit
 )
 
 // ErrBadCursor is a malformed pagination cursor (400).
@@ -59,19 +61,13 @@ type SessionSummary struct {
 	SharedWithMe bool `json:"sharedWithMe"`
 }
 
-// deriveSessionTitle renders a session's list title from the text of its first
-// user.message. It is a display projection of user text only (never of the
-// selection/attachments facts): whitespace runs collapse to single spaces, so
-// a multi-line prompt stays one line, and a text longer than sessionTitleLimit
-// runes is cut to that many runes with a trailing ellipsis. An empty or
-// whitespace-only text has no title.
+// deriveSessionTitle is the harnessapi face of internal/sessiontitle: the
+// title is a projection of the FIRST user.message text only, never of
+// selection/attachments, and appending later messages never moves it. The
+// package owns the rule; this wrapper keeps the list call site and its tests
+// local.
 func deriveSessionTitle(text string) string {
-	flat := strings.Join(strings.Fields(text), " ")
-	runes := []rune(flat)
-	if len(runes) <= sessionTitleLimit {
-		return flat
-	}
-	return string(runes[:sessionTitleLimit-1]) + "…"
+	return sessiontitle.Derive(text)
 }
 
 // SessionPage is one keyset page. NextCursor is empty on the last page.

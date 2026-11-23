@@ -1413,6 +1413,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if secretBox != nil {
 		secretStore = tenantSecretSeam{store: st, box: secretBox}
 	}
+	// The bounded transcript reads (W12 session-query) run over the same store
+	// and tenant scope as the session list; they never become a second ledger.
+	sessionQuery := harnessapi.NewPGSessionQuery(st)
 	api := harnessapi.New(harnessapi.Config{
 		Sessions: harnessapi.NewPGSessionLister(st),
 		// Identity/access surface (change keel-bot-identity-access, A4.1): the
@@ -1527,6 +1530,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Skills:       opts.Skills,
 		SessionFiles: opts.FileService,
 		SessionTasks: taskLog,
+		// Bounded transcript search/export (W12 `keel.session-query`). The
+		// handler filters every candidate through the same access relation the
+		// session list uses.
+		SessionSearch: sessionQuery,
+		SessionExport: sessionQuery,
 		// The run surface's task panel (W4): the task-log projection read and
 		// the file manifest's bounded read behind the resource preview. Both
 		// are the services the tools already use; neither writes task state.
