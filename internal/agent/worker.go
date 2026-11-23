@@ -409,6 +409,10 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 		result.Summary.ConfigHashBefore = pinned.ConfigHash
 		result.Summary.ConfigHashAfter = pinned.ConfigHash
 	}
+	// The capture policy was resolved before any tool ran; record the mode and
+	// its source so an audit can tell which document governed this attempt.
+	result.Summary.CaptureMode = string(capture.Mode)
+	result.Summary.CaptureSource = capture.Source
 	// A cancel from the product seam reaches the attempt as a cancelled runCtx
 	// (the parent ctx is untouched). It is a deliberate stop, not a failure: the
 	// attempt settles through the same policy (unread input re-queues) and the

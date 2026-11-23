@@ -43,11 +43,11 @@ type tenantConfigReader interface {
 func newRunCaptureResolver(documents tenantConfigReader, defaults host.TenantConfig,
 	workspace *bashbridge.LayerWorkspaces) func(context.Context, kernel.Scope) (agent.RunCapture, error) {
 	return func(ctx context.Context, scope kernel.Scope) (agent.RunCapture, error) {
-		mode, err := effectiveCaptureMode(ctx, documents, defaults, scope)
+		mode, source, err := effectiveCaptureMode(ctx, documents, defaults, scope)
 		if err != nil {
 			return agent.RunCapture{}, err
 		}
-		capture := agent.RunCapture{Mode: mode}
+		capture := agent.RunCapture{Mode: mode, Source: source}
 		if mode == layerfs.CaptureModeCheckpoint || mode == layerfs.CaptureModeManual {
 			if workspace != nil {
 				capture.Checkpoint = func(ctx context.Context, scope kernel.Scope, callID string) error {
@@ -67,25 +67,26 @@ func newRunCaptureResolver(documents tenantConfigReader, defaults host.TenantCon
 // the runner, which fails the attempt before any tool executes: running under
 // an unknown policy is worse than not running.
 func effectiveCaptureMode(ctx context.Context, documents tenantConfigReader,
-	defaults host.TenantConfig, scope kernel.Scope) (layerfs.CaptureMode, error) {
+	defaults host.TenantConfig, scope kernel.Scope) (layerfs.CaptureMode, string, error) {
 	mode := defaults.Filesystem.Capture.EffectiveMode()
 	if documents == nil {
-		return mode, nil
+		return mode, "boot-default", nil
 	}
 	record, err := documents.GetTenantConfig(ctx, scope.TenantID)
 	switch {
 	case err == nil:
 		document, parseErr := host.ParseTenantConfig(record.Config)
 		if parseErr != nil {
-			return "", fmt.Errorf("stored tenant config: %w", parseErr)
+			return "", "", fmt.Errorf("stored tenant config: %w", parseErr)
 		}
 		merged := host.Merge(defaults, document)
-		return merged.Filesystem.Capture.EffectiveMode(), nil
+		return merged.Filesystem.Capture.EffectiveMode(),
+			fmt.Sprintf("stored-document@%d", record.Revision), nil
 	case errors.Is(err, store.ErrNoTenant):
 		// A tenant without a stored document runs on the boot defaults.
-		return mode, nil
+		return mode, "boot-default", nil
 	default:
-		return "", fmt.Errorf("read stored tenant config: %w", err)
+		return "", "", fmt.Errorf("read stored tenant config: %w", err)
 	}
 }
 

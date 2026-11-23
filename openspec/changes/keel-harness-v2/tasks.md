@@ -213,6 +213,11 @@
       `TestCheckpointPolicyPinsAndFiresOnce`/`TestPerToolCallPolicyDoesNotCheckpointAtRunClose`/
       `TestManualPolicyDoesNotCheckpointAtRunClose`/`TestCapturePolicyWithoutTriggerFailsClosed`（agent）、
       `TestBashCheckpointDelegatesToBackend`/`TestShellCheckpointRoutesToTheExplicitSurface`；
+      生产 resolver 另有 `TestEffectiveCaptureModeUsesStoredDocumentOverBoot`/
+      `TestEffectiveCaptureModeFailsClosedOnBadDocumentOrRead`/
+      `TestCheckpointDocumentRequiresAnAmbientRun`（cmd/keel）。run summary 记录
+      `captureMode`/`captureSource`，因为捕获策略与模型 generation 来自不同读取路径；
+      延迟结算的崩溃数据窗口已在 docs/HOST.md 与 layerfs spec 写明。
       本次测试不依赖 PG（KEEL_TEST_DSN 未设置，既有 PG gated 套件保持不变）。
       证据 `evidence/w3-capture-mode/`）
 - [x] 并发 capture 定序：父 run Close 与 nohup 子作业 Close 都做全量快照，若子先提交、父后提交， （对账 2026-11-20：部分——缺口：Upsert 有 updated_seq guard（manifest.go:180-196），snapshot 按 seq 精确存；但无跨 lane 定序/版本化，且 fork 未接线（W4））

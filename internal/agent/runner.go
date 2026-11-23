@@ -167,6 +167,12 @@ type Runner struct {
 type RunCapture struct {
 	// Mode is the pinned policy (empty resolves to per-tool-call).
 	Mode layerfs.CaptureMode
+	// Source names where this mode was read (a stored tenant document revision,
+	// the pinned generation's tenant document, or boot defaults). The worker
+	// records it in the run summary: the model/prompt generation and the capture
+	// document can come from different layers until the admin write path grows a
+	// reload, and an audit fact must say which one actually governed the run.
+	Source string
 	// Checkpoint settles the session workspace at attempt completion. It is
 	// required when Mode is checkpoint and ignored otherwise. It runs under the
 	// live run lease, before the worker commits run.finished.
@@ -422,6 +428,12 @@ type RunSummary struct {
 	TeamRevision uint64 `json:"teamRevision,omitempty"`
 	TeamHash     string `json:"teamHash,omitempty"`
 	PromptHash   string `json:"promptHash,omitempty"`
+	// CaptureMode and CaptureSource record the capture policy this attempt
+	// pinned and where it was read (see RunCapture.Source). They make a policy
+	// whose source differs from the pinned model generation auditable instead
+	// of invisible; empty is allowed for logs predating the fields.
+	CaptureMode   string `json:"captureMode,omitempty"`
+	CaptureSource string `json:"captureSource,omitempty"`
 }
 
 // TokenTotals is the objective token accounting of an attempt (no prices: the

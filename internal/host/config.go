@@ -664,8 +664,9 @@ func (c TenantConfig) Validate() error {
 		return problem("quota.eventsPerMinute must be >= 0")
 	}
 	if raw := c.Filesystem.Capture.Mode; raw != "" {
-		// Whitespace is a typo, not a mode: the canonical document value is
-		// exact, and the runtime never trims a policy into a different one.
+		// Whitespace is a typo, not a mode: the write boundary rejects it, so a
+		// stored document can never rely on the runtime parser's defensive
+		// TrimSpace to normalize a different value into a valid mode.
 		if strings.TrimSpace(raw) != raw {
 			return problem("filesystem.capture.mode %q (want per-tool-call|checkpoint|manual)", raw)
 		}

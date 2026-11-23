@@ -585,7 +585,7 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 		} else {
 			mode := tenant.Filesystem.Capture.EffectiveMode()
 			runner.CapturePolicy = func(context.Context, kernel.Scope) (agent.RunCapture, error) {
-				return agent.RunCapture{Mode: mode}, nil
+				return agent.RunCapture{Mode: mode, Source: "generation-tenant"}, nil
 			}
 		}
 		// The execution binding (the Bot/TeamBot the session belongs to or the

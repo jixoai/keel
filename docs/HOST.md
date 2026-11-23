@@ -69,10 +69,21 @@ filesystem:
   才结算（该 action 的权限键是 `file.write`）。
 
 模式在每次 attempt 开始时从**存储的租户文档覆盖启动文档**解析一次，并由 worker
-固定在本次 attempt 的工具上下文上：配置轮转只影响下一次 run，进行中的 run 不会
+固定在本次 attempt 的工具上下文上：配置轮转只影响下一次 attempt，进行中的 attempt 不会
 中途换策略。未知值在配置校验时拒绝；`checkpoint`/`manual` 若没有可用触发器
 （run 完成钩子 / 显式 checkpoint 面），attempt 以类型化错误
 `capture_trigger_missing` 失败，不会静默吞掉 capture。
+
+捕获策略的来源与模型/提示词的 generation 不是同一个读取路径：模型来自本次 attempt
+钉住的 loadout generation，capture 模式来自当时的存储租户文档（或启动文档）。summary
+因此记录 `captureMode` 与 `captureSource`（`stored-document@<revision>` /
+`boot-default` / `generation-tenant`），审计能看出这次 attempt 实际由哪份文档治理；
+在管理员写入触发运行时 reassembly 之前，两者可能相差一个配置版本。
+
+**延迟结算的数据窗口**：`checkpoint`/`manual` 有意把 bash 写留在执行空间（CAS），
+直到 run close 或显式 checkpoint 才进入 manifest。若进程在结算前崩溃/停机，这些写会
+从会话视图消失（transcript 里的 stdout 仍在，但 manifest 不会出现它们）。这是选择
+延迟结算模式的固有代价；默认 `per-tool-call` 不暴露该窗口。
 
 配置来源：运行时可继续从环境变量读取（见 §4）；租户配置文档持久化在
 `tenants.config jsonb`，由管理员 API（见 §4.2）写入，下一轮 run 生效。

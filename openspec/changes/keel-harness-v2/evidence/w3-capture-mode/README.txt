@@ -111,3 +111,18 @@ Limitations
   together.
 - fileplugin's full suite is slow (~140s) but passed; the new code does not
   change fileplugin.
+- Capture mode and the model/prompt generation are read through different paths:
+  the mode comes from the stored tenant document (or boot defaults) at attempt
+  start, while models/prompts come from the pinned loadout generation. The run
+  summary records captureMode + captureSource (stored-document@<revision>,
+  boot-default, generation-tenant) so the difference is auditable; the admin
+  write path does not yet reassemble the runtime, which is why the source can
+  differ by one revision.
+- checkpoint/manual deliberately delay settlement: writes stay in the execution
+  CAS until run close or an explicit checkpoint. If the process dies before
+  settlement, those writes never enter the manifest (the transcript stdout
+  remains). This is the inherent cost of the selected mode; per-tool-call does
+  not expose the window. docs/HOST.md and the layerfs spec state it.
+- cmd/keel/capture_policy_test.go covers the production resolver (stored over
+  boot, ErrNoTenant fallback, bad document/read fail-closed, checkpoint outside
+  a run). It is a main-package test and runs with `go test ./cmd/keel`.

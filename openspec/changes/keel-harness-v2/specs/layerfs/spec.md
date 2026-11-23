@@ -95,24 +95,27 @@ run 内结算 MUST 携带 run fence。后台作业（无 run lease）产生的�
 ### Requirement: capture 策略按 run 固定
 
 策略 MUST 由租户文档 `filesystem.capture.mode` 提供（`per-tool-call` / `checkpoint` /
-`manual`），MUST 在 attempt 开始时固定，进行中的 run MUST NOT 中途切换。`checkpoint` /
+`manual`），MUST 在 attempt 开始时固定，进行中的 attempt MUST NOT 中途切换。`checkpoint` /
 `manual` 没有对应触发器时 MUST 以类型化错误失败，MUST NOT 静默吞掉 capture。后台作业的
-结算 MUST NOT 受 run 的 capture 模式影响。
+结算 MUST NOT 受 run 的 capture 模式影响。run summary MUST 记录本次 attempt 的 capture
+模式与来源（存储文档 revision / 启动默认 / generation 文档），因为捕获策略与模型
+generation 可能来自不同读取路径。`checkpoint`/`manual` 的延迟结算窗口（进程在结算前
+崩溃时未捕获的写不会进入 manifest）MUST 在运维文档写明；默认 `per-tool-call` 不受影响。
 
 #### Scenario: 配置关闭实时 capture
 - **GIVEN** 子代理的租户文档设置 `filesystem.capture.mode=checkpoint`
 - **WHEN** 它连续执行多条命令
-- **THEN** 只有任务完成/子代理返回/显式 checkpoint 时才结算变更
+- **THEN** 只有该 attempt 完成（run close）或显式 checkpoint 时才结算变更
 
 #### Scenario: manual 只由显式 checkpoint 结算
 - **GIVEN** 租户文档设置 `filesystem.capture.mode=manual`
 - **WHEN** run 连续执行多条命令且没有调用显式 checkpoint
 - **THEN** 不产生任何自动 `fs.capture`；`bash {action:"checkpoint"}` 结算一次，重复调用不追加第二条
 
-#### Scenario: 配置轮转只影响下一次 run
-- **GIVEN** 一次 run 已固定 `checkpoint`
-- **WHEN** 租户文档在 run 进行中改为 `manual`
-- **THEN** 该 run 仍按 checkpoint 结算，只有下一次 run 使用 manual
+#### Scenario: 配置轮转只影响下一次 attempt
+- **GIVEN** 一次 attempt 已固定 `checkpoint`
+- **WHEN** 租户文档在该 attempt 进行中改为 `manual`
+- **THEN** 该 attempt 仍按 checkpoint 结算，只有下一次 attempt 使用 manual
 
 #### Scenario: 模式没有触发器
 - **GIVEN** 租户文档选择 `checkpoint` 但运行时没有 run 完成钩子
