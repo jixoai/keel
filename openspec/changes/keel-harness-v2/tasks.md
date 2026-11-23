@@ -565,8 +565,25 @@
 
 **产品完整度（W2）**
 
-- [ ] `keel.session-title`、`keel.session-query`（检索/导出） （对账 2026-11-20：部分——缺口：标题派生在（internal/agentapi/sessions.go:52、web/src/ui/session-title.ts）；无 session-query 检索/导出，也无插件实体）
-- [ ] `keel.deliverables`（交付物 + workspace changes）
+- [x] `keel.session-title`、`keel.session-query`（检索/导出）
+      （W12 2026-11-23：标题规则单源 `internal/sessiontitle`（首条 user.message、空白折叠、
+      60 码点截断、无标题列/事件；列表 `title`、检索 `sessionTitle`、导出 `title` 同一派生），
+      客户端兜底 `web/src/ui/session-title.ts`；检索 `GET /v1/sessions/search`（messages/sessions
+      两作用域、keyset、租户+Visible 过滤、默认 20/上限 100）；导出
+      `GET /v1/sessions/{id}/export`（仅 user/assistant 文本、默认 200/上限 500、单条 32KiB、
+      单页 512KiB、json/ndjson 两形态）；UI 搜索框消息结果 + 导出动作。规格
+      `specs/session-title/`、`specs/session-query/`；证据 `evidence/w12-product/`。
+      未建同名插件清单：能力在 core，不伪造 manifest。2026-11-23 复核 P1 修复：可用性判断从
+      传输层探测改为 `can("session.search")`/`can("session.export")` 能力门；客户端半边在
+      `web/App.tsx` 注册、fixture 的 `/v1/capabilities` 同步广告；回归测试
+      `web/src/data/session-capabilities.test.ts`；TUI 与浏览器（`--target web`）各 3/3。）
+- [x] `keel.deliverables`（交付物 + workspace changes）
+      （W12 2026-11-23：`GET /v1/sessions/{id}/deliverables` 只投影 `file_manifest`
+      （path/hash/size/mode/updatedSeq/lastTaskId + 服务端 `previewUrl`），path keyset 分页；
+      右侧状态栏「交付物 · 工作区变更」列表 + 有界预览 + 五态。规格
+      `specs/deliverables/`；证据 `evidence/w12-product/`。2026-11-23 复核 P1 修复：
+      `available()` 改为 `can("session.deliverables")` 能力门（客户端 + fixture 部署半边），
+      回归测试同 `session-capabilities.test.ts`。）
 - [ ] `keel.attachment` （对账 2026-11-20：部分——缺口：上传/输入 attachments 在（internal/httpapi、internal/agent/images.go）；无 keel.attachment 插件实体）
 - [ ] `keel.commands`、`keel.permission`、`keel.feedback` （对账 2026-11-20：部分——缺口：permission 派发/hooks 决策在（internal/agentext/plugin_permissions.go、internal/hooks/decision.go）；commands/feedback 无插件实体）
 - [ ] `keel.subprocess`、`keel.terminal`（provider）
