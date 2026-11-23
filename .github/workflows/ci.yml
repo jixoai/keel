@@ -28,7 +28,11 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     steps:
+      # Full history: the binary size gate builds the base commit's tree, and a
+      # depth-1 checkout does not contain that commit (scripts/binary-size.sh).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.3"
@@ -54,6 +58,20 @@ jobs:
       # processes, no network). A broken gate must not reach a delivery.
       - name: VmRSS sampler fixtures
         run: bash scripts/acceptance-rss.sh --self-test
+      # Owner constraint (2026-11-23): the Go binary must not balloon. The gate
+      # builds both shipping commands (cmd/keel, cmd/runtime) at the base revision
+      # and the change (stripped, CGO off) and fails when a target grows past the
+      # budget; a PDF/image/video parser or any other new dependency must be
+      # measured here before it can land.
+      - name: binary size gate
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$BASE"
+          case "$base" in
+            ""|0000000000000000000000000000000000000000) base="HEAD~1" ;;
+          esac
+          ./scripts/binary-size.sh --base "$base"
       # The catalog is the only machine-readable coverage truth; COVERAGE.md
       # §A/§B/§C are mapped onto it and §H is generated. A stale catalog or an
       # ungenerated §H fails here (docs/PLUGIN-CATALOG.md).
