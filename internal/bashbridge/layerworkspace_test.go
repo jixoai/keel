@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -107,6 +108,19 @@ func (h *seamHarness) bashCtx(callID string) context.Context {
 		SessionID: h.scope.SessionID,
 		TaskID:    "task-seam",
 		CallID:    callID,
+	})
+}
+
+// bashModeCtx is a run's capture-pinned execution identity: the mode the
+// runner pinned on the attempt context, copied into the identity the bash
+// backend stamps.
+func (h *seamHarness) bashModeCtx(callID string, mode layerfs.CaptureMode) context.Context {
+	return bashbridge.WithSessionIdentity(h.ctx, bashbridge.SessionIdentity{
+		TenantID:    h.scope.TenantID,
+		SessionID:   h.scope.SessionID,
+		TaskID:      "task-seam",
+		CallID:      callID,
+		CaptureMode: mode,
 	})
 }
 
@@ -866,5 +880,200 @@ func TestJobSettlesBeforeParentKeepsJobWrites(t *testing.T) {
 	captures := h.captures(t, kernel.KindFSCapture)
 	if len(captures) != 2 || captures[0].Seq >= captures[1].Seq {
 		t.Fatalf("capture seqs = %+v, want the job first", captures)
+	}
+}
+
+// runBashCommand executes one command in a fresh sandbox session under ctx and
+// closes it, exactly like the bash tool's execution lifecycle.
+func (h *seamHarness) runBashCommand(t *testing.T, ctx context.Context, command string) {
+	t.Helper()
+	session, err := h.bridge.NewSession(ctx)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	result, err := session.Run(ctx, bashbridge.RunSpec{Command: command})
+	if err != nil {
+		session.Close()
+		t.Fatalf("run %q: %v", command, err)
+	}
+	if result.ExitCode != 0 {
+		session.Close()
+		t.Fatalf("run %q exit = %d", command, result.ExitCode)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close %q: %v", command, err)
+	}
+}
+
+// TestPerToolCallCapturesEveryBashExecution pins the default policy: each bash
+// execution settles its own fs.capture, independent of the number of commands.
+func TestPerToolCallCapturesEveryBashExecution(t *testing.T) {
+	h := newSeamHarness(t)
+	for i, command := range []string{
+		`mkdir -p /workspace/a && printf 'one\n' > /workspace/a/one.txt`,
+		`printf 'two\n' > /workspace/a/two.txt`,
+	} {
+		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-per-%d", i), layerfs.CaptureModePerToolCall), command)
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 2 {
+		t.Fatalf("fs.capture events = %d, want one per execution (2)", got)
+	}
+}
+
+// TestCheckpointCapturesOnceAfterMultipleCommands pins the checkpoint policy:
+// suppressed per-execution settles accumulate, and the run-completion trigger
+// captures the whole workspace exactly once.
+func TestCheckpointCapturesOnceAfterMultipleCommands(t *testing.T) {
+	h := newSeamHarness(t)
+	for i, command := range []string{
+		`mkdir -p /workspace/out && printf 'one\n' > /workspace/out/one.txt`,
+		`printf 'two\n' > /workspace/out/two.txt`,
+		`printf 'three\n' > /workspace/out/three.txt`,
+	} {
+		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-cp-%d", i), layerfs.CaptureModeCheckpoint), command)
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 0 {
+		t.Fatalf("automatic fs.capture events = %d, want 0 before checkpoint", got)
+	}
+	result, captured, err := h.provider.Checkpoint(h.ctx, bashbridge.SessionIdentity{
+		TenantID:  h.scope.TenantID,
+		SessionID: h.scope.SessionID,
+		TaskID:    "task-seam",
+		CallID:    "run-checkpoint-1",
+	})
+	if err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if !captured {
+		t.Fatal("checkpoint reported no captured changes")
+	}
+	if result.Count != 3 || result.Replayed {
+		t.Fatalf("checkpoint result = %+v, want 3 files and a fresh settlement", result)
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 1 {
+		t.Fatalf("fs.capture events = %d, want exactly 1", got)
+	}
+	entries, err := h.service.List(h.ctx, h.scope)
+	if err != nil || len(entries) != 3 {
+		t.Fatalf("manifest after checkpoint = %+v/%v, want the 3 commands' files", entries, err)
+	}
+	// A second checkpoint with no suppressed execution is a no-op, not a
+	// duplicate event.
+	if _, captured, err := h.provider.Checkpoint(h.ctx, bashbridge.SessionIdentity{
+		TenantID: h.scope.TenantID, SessionID: h.scope.SessionID, CallID: "run-checkpoint-2",
+	}); err != nil {
+		t.Fatalf("second checkpoint: %v", err)
+	} else if captured {
+		t.Fatal("second checkpoint captured with nothing pending")
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 1 {
+		t.Fatalf("fs.capture events after a no-op checkpoint = %d, want 1", got)
+	}
+}
+
+// TestManualCapturesOnlyOnExplicitCheckpoint pins the manual policy: nothing is
+// settled automatically, and the explicit surface captures exactly once.
+func TestManualCapturesOnlyOnExplicitCheckpoint(t *testing.T) {
+	h := newSeamHarness(t)
+	for i, command := range []string{
+		`mkdir -p /workspace/manual && printf 'one\n' > /workspace/manual/one.txt`,
+		`printf 'two\n' > /workspace/manual/two.txt`,
+	} {
+		h.runBashCommand(t, h.bashModeCtx(fmt.Sprintf("call-manual-%d", i), layerfs.CaptureModeManual), command)
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 0 {
+		t.Fatalf("automatic fs.capture events = %d, want 0 in manual mode", got)
+	}
+	result, captured, err := h.provider.Checkpoint(h.ctx, bashbridge.SessionIdentity{
+		TenantID:  h.scope.TenantID,
+		SessionID: h.scope.SessionID,
+		TaskID:    "task-seam",
+		CallID:    "call-explicit-checkpoint",
+	})
+	if err != nil {
+		t.Fatalf("explicit checkpoint: %v", err)
+	}
+	if !captured || result.Count != 2 {
+		t.Fatalf("explicit checkpoint = %+v captured=%t, want 2 files", result, captured)
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 1 {
+		t.Fatalf("fs.capture events = %d, want exactly 1", got)
+	}
+	// Idempotent replay: a later suppressed execution re-uses the same caller id
+	// (a retried tool call) and must not append a second event for the same key.
+	h.runBashCommand(t, h.bashModeCtx("call-manual-after", layerfs.CaptureModeManual),
+		`printf 'late\n' > /workspace/manual/late.txt`)
+	replay, captured, err := h.provider.Checkpoint(h.ctx, bashbridge.SessionIdentity{
+		TenantID:  h.scope.TenantID,
+		SessionID: h.scope.SessionID,
+		CallID:    "call-explicit-checkpoint",
+	})
+	if err != nil {
+		t.Fatalf("replayed checkpoint: %v", err)
+	}
+	if !captured || !replay.Replayed {
+		t.Fatalf("replayed checkpoint = %+v captured=%t, want a replayed settlement", replay, captured)
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 1 {
+		t.Fatalf("fs.capture events after replay = %d, want 1 (the idempotency key deduped)", got)
+	}
+	// A fresh key settles the change that arrived after the first key.
+	if _, captured, err := h.provider.Checkpoint(h.ctx, bashbridge.SessionIdentity{
+		TenantID: h.scope.TenantID, SessionID: h.scope.SessionID, CallID: "call-explicit-checkpoint-2",
+	}); err != nil {
+		t.Fatalf("fresh checkpoint: %v", err)
+	} else if !captured {
+		t.Fatal("fresh checkpoint did not capture the late change")
+	}
+	if got := len(h.captures(t, kernel.KindFSCapture)); got != 2 {
+		t.Fatalf("fs.capture events = %d, want 2 after a fresh key", got)
+	}
+}
+
+// TestUnknownCaptureModeFailsClosed pins the strict vocabulary: an unknown mode
+// refuses the mount with a typed error instead of falling back to the default.
+func TestUnknownCaptureModeFailsClosed(t *testing.T) {
+	h := newSeamHarness(t)
+	_, err := h.bridge.NewSession(h.bashModeCtx("call-bad-mode", layerfs.CaptureMode("sometimes")))
+	if err == nil {
+		t.Fatal("unknown capture mode mounted a session")
+	}
+	var modeErr *layerfs.CaptureModeError
+	if !errors.As(err, &modeErr) {
+		t.Fatalf("err = %v, want *layerfs.CaptureModeError", err)
+	}
+	if modeErr.Code() != "invalid_capture_mode" {
+		t.Fatalf("mode error code = %q", modeErr.Code())
+	}
+}
+
+// TestBackgroundJobSettlesDespiteCheckpointMode pins the job exception: a job
+// may outlive the run, so its own close always settles as a system fact even
+// when the run's policy is checkpoint. Suppressing it would leave its writes
+// with no later trigger.
+func TestBackgroundJobSettlesDespiteCheckpointMode(t *testing.T) {
+	h := newSeamHarness(t)
+	ctx := bashbridge.WithSessionIdentity(h.ctx, bashbridge.SessionIdentity{
+		TenantID:    h.scope.TenantID,
+		SessionID:   h.scope.SessionID,
+		TaskID:      "task-seam",
+		CallID:      "call-job-cp",
+		JobID:       "job-cp-1",
+		CaptureMode: layerfs.CaptureModeCheckpoint,
+	})
+	h.runBashCommand(t, ctx, `mkdir -p /workspace/job && printf 'job\n' > /workspace/job/out.txt`)
+	captures := h.captures(t, kernel.KindFSCapture)
+	if len(captures) != 1 {
+		t.Fatalf("job fs.capture events = %d, want exactly 1", len(captures))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(captures[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["jobId"] != "job-cp-1" {
+		t.Fatalf("job capture payload = %v, want jobId attribution", payload)
+	}
+	if got := len(h.captures(t, kernel.KindFSCaptureFailed)); got != 0 {
+		t.Fatalf("fs.capture_failed events = %d, want 0", got)
 	}
 }

@@ -42,11 +42,35 @@ type SessionIdentity struct {
 	// run, so its close settles on the system lane with jobId attribution and no
 	// owner token.
 	JobID string
+	// CaptureMode is the run's pinned capture policy. Empty consults the
+	// attempt context (layerfs.CaptureModeFromContext) and then the default
+	// (per-tool-call). The bash tool's context wrapper copies the pinned value
+	// here; the workspace provider never re-reads configuration at close time,
+	// so a rotation cannot change a run already in flight.
+	CaptureMode layerfs.CaptureMode
 }
 
 // Valid reports whether the identity names a session.
 func (i SessionIdentity) Valid() bool {
 	return i.TenantID != uuid.Nil && i.SessionID != uuid.Nil
+}
+
+// captureMode resolves the identity's pinned policy. The explicit identity
+// value wins; a context pinned by the runner is the fallback; an unset policy
+// is the layerfs default. An unknown value is a typed error, never a silent
+// per-tool-call fallback.
+func (i SessionIdentity) captureMode(ctx context.Context) (layerfs.CaptureMode, error) {
+	mode := i.CaptureMode
+	if mode == "" {
+		if pinned, ok := layerfs.CaptureModeFromContext(ctx); ok {
+			mode = pinned
+		}
+	}
+	parsed, err := layerfs.ParseCaptureMode(string(mode))
+	if err != nil {
+		return "", err
+	}
+	return parsed, nil
 }
 
 type sessionIdentityKey struct{}
@@ -107,6 +131,10 @@ type LayerWorkspaces struct {
 
 	mu       sync.Mutex
 	sessions map[sessionKey]*gbashfs.Workspace
+	// pending records sessions whose automatic settle was suppressed by the
+	// run's capture mode. A checkpoint consumes the marker and captures once;
+	// an explicit checkpoint after an automatic settle is a no-op.
+	pending map[sessionKey]struct{}
 }
 
 var (
@@ -145,6 +173,7 @@ func NewLayerWorkspaces(opts LayerWorkspaceOptions) (*LayerWorkspaces, error) {
 		logger:         logger,
 		fallback:       TempDirWorkspace{},
 		sessions:       make(map[sessionKey]*gbashfs.Workspace),
+		pending:        make(map[sessionKey]struct{}),
 	}, nil
 }
 
@@ -164,6 +193,14 @@ func (l *LayerWorkspaces) Mount(ctx context.Context) (Mount, error) {
 		})
 		return l.fallback.Mount(ctx)
 	}
+	// The policy is resolved at mount time from the run's pinned identity, not
+	// at close time from configuration: a rotation affects only later runs. It
+	// is resolved before the workspace exists so an unknown policy refuses the
+	// mount without creating/seeding anything.
+	mode, err := identity.captureMode(ctx)
+	if err != nil {
+		return Mount{}, err
+	}
 	workspace, err := l.workspace(ctx, identity.TenantID, identity.SessionID)
 	if err != nil {
 		return Mount{}, err
@@ -173,7 +210,20 @@ func (l *LayerWorkspaces) Mount(ctx context.Context) (Mount, error) {
 		Point: point,
 		FS:    workspace,
 		Finish: func() error {
-			return l.capture(ctx, identity)
+			// A background job always settles at its own close, whatever the
+			// run's policy: the job may outlive the run, so suppressing its
+			// settle would leave its writes without any later trigger (the
+			// layerfs spec treats a job's close as a system fact).
+			if strings.TrimSpace(identity.JobID) != "" {
+				return l.capture(ctx, identity)
+			}
+			switch mode {
+			case layerfs.CaptureModeCheckpoint, layerfs.CaptureModeManual:
+				l.markPending(identity)
+				return nil
+			default:
+				return l.capture(ctx, identity)
+			}
 		},
 	}, nil
 }
@@ -270,15 +320,86 @@ func (l *LayerWorkspaces) manifestEntries(ctx context.Context, tenantID, session
 // and settles as a system fact with jobId attribution (the lease may already be
 // gone, so requiring it would lose the job's writes forever).
 func (l *LayerWorkspaces) capture(ctx context.Context, identity SessionIdentity) error {
-	service := l.serviceValue()
-	if service == nil {
-		return errors.New("bashbridge: the file service is not wired; the run's workspace changes were not captured")
-	}
 	callID := strings.TrimSpace(identity.CallID)
 	if callID == "" {
 		// No model tool-call id (a direct bridge call): one id per session close
 		// keeps the event unique without inventing a replay identity.
 		callID = "bash:" + uuid.NewString()
+	}
+	result, err := l.settle(ctx, identity, callID)
+	if err != nil {
+		l.logger.Warn("bash workspace capture failed",
+			"tenant_id", identity.TenantID, "session_id", identity.SessionID,
+			"call_id", callID, "job_id", identity.JobID, "err", err)
+		return err
+	}
+	l.logger.Debug("bash workspace captured",
+		"tenant_id", identity.TenantID, "session_id", identity.SessionID,
+		"call_id", callID, "job_id", identity.JobID, "tree", result.Tree, "count", result.Count, "seq", result.Seq)
+	return nil
+}
+
+// Checkpoint settles the session's suppressed workspace changes as exactly one
+// fs.capture. It is the explicit trigger of the checkpoint/manual policies: the
+// first caller after one or more bash executions consumes the pending marker
+// and captures; a second call, or a call after per-tool-call already settled,
+// returns captured=false without appending an event. The call id is the
+// idempotency key (a stable caller id makes a retry replay instead of
+// duplicating).
+//
+// The owner lane is used, so the caller must execute while the run's lease is
+// live. The run-completion hook and the model-visible bash checkpoint action
+// both satisfy that; a checkpoint outside a run fails with the service's typed
+// lease error instead of committing an unfenced fact.
+func (l *LayerWorkspaces) Checkpoint(ctx context.Context, identity SessionIdentity) (fileplugin.CaptureResult, bool, error) {
+	if !identity.Valid() {
+		return fileplugin.CaptureResult{}, false, fileplugin.Errorf(fileplugin.CodeRunScopeMissing,
+			"checkpoint needs the ambient session identity")
+	}
+	if strings.TrimSpace(identity.JobID) != "" {
+		return fileplugin.CaptureResult{}, false, fileplugin.Errorf(fileplugin.CodeInvalid,
+			"a background job does not checkpoint: its own close settles the job's changes")
+	}
+	if !l.consumePending(identity) {
+		return fileplugin.CaptureResult{}, false, nil
+	}
+	callID := strings.TrimSpace(identity.CallID)
+	if callID == "" {
+		callID = "checkpoint:" + uuid.NewString()
+	} else {
+		// The prefix keeps an explicit checkpoint out of the key namespace of a
+		// per-tool-call settlement that happens to share the model call id.
+		callID = "checkpoint:" + callID
+	}
+	result, err := l.settle(ctx, identity, callID)
+	if err != nil {
+		// The capture did not settle (and the service committed its
+		// capture_failed fact): restore the marker so a later checkpoint can
+		// retry, instead of leaving changes that no trigger will ever see.
+		l.markPending(identity)
+		l.logger.Warn("bash workspace checkpoint failed",
+			"tenant_id", identity.TenantID, "session_id", identity.SessionID,
+			"call_id", callID, "err", err)
+		return fileplugin.CaptureResult{}, false, err
+	}
+	if result.Replayed {
+		// The key already settled a snapshot. Changes that arrived after that
+		// settlement are still pending; keep the marker so a fresh checkpoint
+		// (a new key) can capture them. Returning the replay is still the honest
+		// answer to "settle this key".
+		l.markPending(identity)
+	}
+	l.logger.Debug("bash workspace checkpointed",
+		"tenant_id", identity.TenantID, "session_id", identity.SessionID,
+		"call_id", callID, "tree", result.Tree, "count", result.Count, "seq", result.Seq)
+	return result, true, nil
+}
+
+// settle performs one capture settlement on the identity's lane.
+func (l *LayerWorkspaces) settle(ctx context.Context, identity SessionIdentity, callID string) (fileplugin.CaptureResult, error) {
+	service := l.serviceValue()
+	if service == nil {
+		return fileplugin.CaptureResult{}, errors.New("bashbridge: the file service is not wired; the run's workspace changes were not captured")
 	}
 	jobID := strings.TrimSpace(identity.JobID)
 	captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), l.captureTimeout)
@@ -288,25 +409,28 @@ func (l *LayerWorkspaces) capture(ctx context.Context, identity SessionIdentity)
 		SessionID: identity.SessionID,
 		TaskID:    strings.TrimSpace(identity.TaskID),
 	}
-	var (
-		result fileplugin.CaptureResult
-		err    error
-	)
 	if jobID != "" {
-		result, err = service.CaptureWorkspaceSystem(captureCtx, scope, callID, 0, scope.TaskID, jobID)
-	} else {
-		result, err = service.CaptureWorkspace(captureCtx, scope, callID, 0, scope.TaskID)
+		return service.CaptureWorkspaceSystem(captureCtx, scope, callID, 0, scope.TaskID, jobID)
 	}
-	if err != nil {
-		l.logger.Warn("bash workspace capture failed",
-			"tenant_id", identity.TenantID, "session_id", identity.SessionID,
-			"call_id", callID, "job_id", jobID, "err", err)
-		return err
+	return service.CaptureWorkspace(captureCtx, scope, callID, 0, scope.TaskID)
+}
+
+func (l *LayerWorkspaces) markPending(identity SessionIdentity) {
+	key := sessionKey{tenantID: identity.TenantID, sessionID: identity.SessionID}
+	l.mu.Lock()
+	l.pending[key] = struct{}{}
+	l.mu.Unlock()
+}
+
+func (l *LayerWorkspaces) consumePending(identity SessionIdentity) bool {
+	key := sessionKey{tenantID: identity.TenantID, sessionID: identity.SessionID}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, ok := l.pending[key]; !ok {
+		return false
 	}
-	l.logger.Debug("bash workspace captured",
-		"tenant_id", identity.TenantID, "session_id", identity.SessionID,
-		"call_id", callID, "job_id", jobID, "tree", result.Tree, "count", result.Count, "seq", result.Seq)
-	return nil
+	delete(l.pending, key)
+	return true
 }
 
 func (l *LayerWorkspaces) serviceValue() *fileplugin.Service {
