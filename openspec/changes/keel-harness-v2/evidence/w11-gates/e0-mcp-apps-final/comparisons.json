@@ -1,0 +1,149 @@
+[
+  {
+    "catalogAfter": {
+      "apps": [
+        {
+          "appId": "mcpapp_9695970d06976122",
+          "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+          "resourceUri": "ui://scenario/dashboard",
+          "tools": 2
+        }
+      ],
+      "generation": 2
+    },
+    "catalogBefore": {
+      "apps": [
+        {
+          "appId": "mcpapp_9695970d06976122",
+          "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+          "resourceUri": "ui://scenario/dashboard",
+          "tools": 2
+        }
+      ],
+      "generation": 2
+    },
+    "kindsAfter": [
+      "1:user.message",
+      "2:resume.attempt",
+      "3:assistant.message",
+      "4:task.created",
+      "5:tool.result",
+      "6:assistant.message",
+      "7:run.finished"
+    ],
+    "kindsBefore": [
+      "1:user.message"
+    ],
+    "point": "G2a",
+    "seqAfter": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "seqBefore": [
+      1
+    ]
+  },
+  {
+    "catalogAfter": {
+      "apps": [
+        {
+          "appId": "mcpapp_9695970d06976122",
+          "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+          "resourceUri": "ui://scenario/dashboard",
+          "tools": 2
+        }
+      ],
+      "generation": 2
+    },
+    "catalogBefore": {
+      "apps": [
+        {
+          "appId": "mcpapp_9695970d06976122",
+          "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+          "resourceUri": "ui://scenario/dashboard",
+          "tools": 2
+        }
+      ],
+      "generation": 1
+    },
+    "kindsAfter": [
+      "1:user.message",
+      "2:assistant.message",
+      "3:run.finished"
+    ],
+    "kindsBefore": [
+      "1:user.message",
+      "2:assistant.message",
+      "3:run.finished"
+    ],
+    "point": "G2b",
+    "seqAfter": [
+      1,
+      2,
+      3
+    ],
+    "seqBefore": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "catalogAfter": {
+      "apps": [
+        {
+          "appId": "mcpapp_9695970d06976122",
+          "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+          "resourceUri": "ui://scenario/dashboard",
+          "tools": 2
+        }
+      ],
+      "generation": 2
+    },
+    "catalogBefore": {
+      "apps": [
+        {
+          "appId": "mcpapp_9695970d06976122",
+          "hash": "0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+          "resourceUri": "ui://scenario/dashboard",
+          "tools": 2
+        }
+      ],
+      "generation": 2
+    },
+    "kindsAfter": [
+      "1:user.message",
+      "2:assistant.message",
+      "3:task.created",
+      "4:resume.attempt",
+      "5:tool.result",
+      "6:assistant.message",
+      "7:run.finished"
+    ],
+    "kindsBefore": [
+      "1:user.message",
+      "2:assistant.message",
+      "3:task.created"
+    ],
+    "point": "G2c",
+    "seqAfter": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "seqBefore": [
+      1,
+      2,
+      3
+    ]
+  }
+]

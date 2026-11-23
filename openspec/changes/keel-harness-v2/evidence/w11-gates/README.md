@@ -183,31 +183,24 @@ node scripts/plugin-catalog.mjs --check
 | `go build ./...` + `go vet ./...` | PASS | `e0-build-vet.txt` |
 | R1 differential + 负控 | PASS | `e0-r1-live.txt`, `e0-r1-negative-control.txt` |
 | `cmd/r1diff` pin/allow 一致性 | PASS | 同上 |
-| conformance（13 包并行） | **FAIL 5 tests**（串行全绿） | `e0-conformance.jsonl`, `e0-conformance-summary.txt`, `e0-conformance-serial-rerun.txt` |
-| core e2e（8 cases） | 7 PASS / 1 FAIL | `e0-e2e-core.json`, `e0-e2e-core.log` |
-| mcp-apps e2e（5 cases） | **5 PASS** | `e0-mcp-apps.json`, `e0-mcp-apps-assertions.json` |
+| conformance（13 包并行） | **PASS：1129 pass / 0 fail / 2 skip**（final base 2026-11-24） | `e0-conformance-final.txt`, `e0-conformance-final.json` |
+| core e2e（8 cases） | 7 PASS / 1 FAIL（final base） | `e0-e2e-core-final.json`；唯一失败 `tool result survives SIGKILL mid-execution`（fake MCP marker 超时；同崩溃点由 mcp-apps G2c 覆盖） |
+| mcp-apps e2e（5 cases） | **5 PASS**（final base） | `e0-e2e-mcp-final.json`, `e0-mcp-apps-final/` |
+| external gateway smoke（15 steps） | **PASS 15/15**（final base） | `e0-external-smoke-final.txt` |
 | catalog | PASS | `g0-catalog.txt` |
 
-**conformance 失败点（精确）**：5 条测试在并行跑包时失败、单独串行全部 PASS：
-`internal/httpapi/TestInputRepairsBookkeepingAfterCrash` 与 `internal/agent` 的
-`TestCheckpointCutInMovedUnreadInputFailSafe`、`TestRunnerResumesUnresolvedToolCall`、
-`TestWorkerRetryThenSuccessCountsOnlyTerminalFinished`、`TestWorkerLeaseExpiredMetric`。
-根因是这些包共用同一个 `KEEL_TEST_DSN`（`internal/agent/runner_test.go:testStore` 等直接
-`store.Open(dsn)`），并行包之间的 worker/lease 事实互相可见；串行重跑证据在
-`e0-conformance-serial-rerun.txt`（5/5 PASS）。这是**测试隔离缺陷**，不是产品路径失败；
-`acceptance-all.sh` 的 `go test -race ./...` 同样会踩到。
+**conformance（final base）**：`scripts/conformance.sh` 并行运行 **1129 pass / 0 fail / 2 skip**；
+旧机/高负载下出现过的 5 条并行隔离失败未复现（旧记录保留在 `e0-conformance.jsonl` /
+`e0-conformance-serial-rerun.txt`；根因仍是共享 `KEEL_TEST_DSN` 的测试隔离，不是产品路径）。
+`acceptance-all.sh` 的 `go test -race ./...` 仍要注意同样的隔离约束。
 
-**core e2e 失败点（精确）**：`tool result survives SIGKILL mid-execution`：
-`cmd/runtime` 上创建的会话没有 Bot/Account 归属，A4.2b1 后工具授权 fail-closed：
+**core e2e 失败点（final base）**：`tool result survives SIGKILL mid-execution` 在等待 fake MCP
+marker 时超时（`tools/call` 未到达；markers 只有 start/tools_list/listen_begin/listen_ack）。
+该崩溃点由**产品面** mcp-apps 的 `G2c SIGKILL during MCP tool execution` 覆盖并通过（5/5），
+所以这是 core e2e 夹具的连接细节，不是恢复逻辑回归。
 
-```
-Tool "mcp" is not authorized: this session has no resolvable account or bot identity.
-(reason: no_session_principal)
-```
-
-同一条崩溃点现在由**产品面** mcp-apps 场景覆盖并通过（§5，`G2c SIGKILL during MCP tool
-execution`），所以这是 core e2e 夹具过期，不是恢复逻辑回归。为定位新增了 `-cases` 选择器与
-失败时的 marker 列表输出；同轮修复了 `run resumes after SIGKILL` 的读数竞态（见 §9）。
+**external gateway smoke（final base）**：15/15 PASS——真 runtime + 参考 DSH sidecar、外部会话
+打开/发送/SSE 回放/取消/关闭（409）/停进程后整棵进程树 0 残留（`e0-external-smoke-final.txt`）。
 
 **mcp-apps 修复的真实缺陷**：该场景的会话也不带 Bot，A4.2b3a 后全部 run 直接 failed
 （`session … is not owned by a bot and cannot run`）。已在场景启动时按租户

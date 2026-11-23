@@ -1,0 +1,63 @@
+[
+  {
+    "name": "G1 single-machine end to end",
+    "pass": true,
+    "detail": "catalogue + view + proxy call + list_changed generation over real keel serve and a real stdio MCP server",
+    "checks": [
+      "app catalogue published once from a real resources/read",
+      "appId=mcpapp_9695970d06976122 hash=0d39935081916fb0013733aed1c64c933c1661ad0dc65b84f72ec58cc8626dbf",
+      "server connected over modern era (2026-07-28), tools=3 apps=1",
+      "aggregate mcp list shows show_dashboard/plain and hides app-only refresh",
+      "view serves the fetched HTML with CSP/nosniff/hash and immutable cache",
+      "app bridge tools/call reached the real MCP server (refresh-ok)",
+      "the next attempt's model tool list contains the v2-only show_audit tool",
+      "tools/list_changed advanced generation 2→3 and replaced the app without a stale snapshot"
+    ]
+  },
+  {
+    "name": "G3 observability: fixed series and identifier-only audit",
+    "pass": true,
+    "detail": "Prometheus families stay fixed and the audit trail is identifier-only",
+    "checks": [
+      "six MCP families present with closed label vocabularies",
+      "series key set unchanged after 20 more sessions",
+      "audit rows=13 contain no message body, token, URL query or half line"
+    ]
+  },
+  {
+    "name": "G2a SIGKILL after app document fetch, before tool.result",
+    "pass": true,
+    "detail": "SIGKILL after the app document fetch; recovery committed one tool.result with the app binding",
+    "checks": [
+      "app document fetched (fake server resource_read marker)",
+      "kill landed after the document fetch and before any tool execution",
+      "restart ran in a new process (fake server pid 22760→22772)",
+      "exactly one tool.result with details.app after restart",
+      "app remains mountable from tool.result details"
+    ]
+  },
+  {
+    "name": "G2b SIGKILL during subscriptions/listen reconnect",
+    "pass": true,
+    "detail": "SIGKILL while listen #2 awaited its ack; restart reconciled the catalogue and left the ledger intact",
+    "checks": [
+      "listen ack triggered a catalogue recompute (1→2)",
+      "the host is provably inside a reconnect (listen #2 sent, unacknowledged, metric \u003e= 1)",
+      "restart re-established listen in a new process (pid 23029→23349)",
+      "catalogue recomputed to the same app identity/hash",
+      "ledger unchanged (one user message, one assistant message, contiguous seq)"
+    ]
+  },
+  {
+    "name": "G2c SIGKILL during MCP tool execution, before tool.result commit",
+    "pass": true,
+    "detail": "SIGKILL mid tool execution; the at-least-once retry committed one result with the app binding",
+    "checks": [
+      "kill landed after tools/call dispatch and before the MCP result (begin marker, no end marker)",
+      "global audit table has no half line and no orphan app",
+      "restart ran in a new process (fake server pid 23360→23599)",
+      "exactly one tool.result with details.app; the tool was at-least-once, the ledger exactly-once",
+      "audit rows are complete and reference only the published app"
+    ]
+  }
+]

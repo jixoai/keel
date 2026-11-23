@@ -1,0 +1,33 @@
+[1] build runtime and reference sidecar
+PASS [1] binaries built in /tmp/keel-gw-smoke.OOFu94/bin
+[2] prepare a dedicated database (keel_gw_smoke)
+PASS [2] database ready
+[3] write the external provider declarations (one host.TenantConfig vocabulary)
+PASS [3] config written to /tmp/keel-gw-smoke.OOFu94/external.json
+[4] start the runtime on 127.0.0.1:13796
+PASS [4] runtime ready (pid 24871)
+[5] wait for the external agent backend to connect
+PASS [5] backend ready
+PASS [5] sidecar grandchild alive (pid 24902)
+[6] create the tenant
+PASS [6] tenant 11111111-1111-4111-8111-111111111111
+[7] open an external session
+PASS [7] session 5c7d9ecb-2c49-43e6-ae8f-1c9e4f481d80 (ref dsh-ref-session-1, metering external)
+[8] the native input endpoint refuses the external session (409, no event)
+PASS [8] native /input -> 409
+[9] send a message to the backend
+PASS [9] message accepted (turn dsh-ref-turn-1)
+[10] replay the projected events through the ordinary event endpoint
+PASS [10] events projected (assistant=1, send=1, usage=1)
+[11] query the session (compatibility markers and usage)
+PASS [11] query active, usage.totalTokens=9
+[12] SSE replay: the ordinary stream only carries Keel-recorded external.event frames
+PASS [12] SSE replayed 7 external.event frame(s) with markers
+[13] cancel the turn (idempotent control path)
+PASS [13] cancel answered
+[14] close the session and refuse further sends
+PASS [14] closed and further sends -> 409
+[15] stop the runtime and reap the whole process tree
+PASS [15] runtime exited; grandchild and sidecar gone (0 residue)
+SMOKE PASS (15 steps)
+EXIT=0

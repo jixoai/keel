@@ -1,0 +1,8 @@
+{
+  "database": "keel_e2e_mcp",
+  "port": 13686,
+  "portFree": true,
+  "processAlive": false,
+  "resetGuard": true,
+  "workDirRemoved": true
+}

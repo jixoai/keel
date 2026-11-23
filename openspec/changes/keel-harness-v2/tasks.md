@@ -503,6 +503,11 @@
       `PUT /v1/settings/providers/{id}/credential` 缺 accessgate 声明、COVERAGE compaction
       状态词不可解析，两处已修；DB reset 已是本地 psql，剩余平台阻塞只在
       drain/inflight/perf/handoff/rss 的 docker exec 与 Linux cgroup）
+      （final base 2026-11-24：E0 原生分项在 `7e01c9d` 重跑——conformance **1129 pass / 0 fail /
+      2 skip**（并行）、core e2e 7/8（唯一失败为 fake MCP marker 超时，G2c 产品面覆盖）、
+      mcp-apps 5/5、external gateway smoke 15/15（0 残留）；R1 仍 PASS。E0 本身保持未勾：
+      `acceptance-all.sh` 的 drain/inflight/perf/handoff/rss 与 2GB cgroup 仍需 Docker/Linux。
+      证据 `evidence/w11-gates/e0-*-final.*`）
 - [x] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据
