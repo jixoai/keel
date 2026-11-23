@@ -14,7 +14,7 @@
 | Gate wrapper: attach (port/pid) and profile modes, machine-readable summary | `scripts/acceptance-rss.sh` | live attach run (§4) |
 | Opt-in wiring in the full battery (default SKIP) | `scripts/acceptance-all.sh` §8b | segment runs (§5) |
 | CI-able parser/sum/threshold check (no process, no network) | `.github/workflows/ci.yml` | CI step `VmRSS sampler fixtures` |
-| Fixture tests (46 cases incl. the Linux proc path and overhead exclusion) | `scripts/lib/test_rss_sampler.py` | `python3 -I scripts/lib/test_rss_sampler.py` |
+| Fixture tests (47 cases incl. the Linux proc path, overhead exclusion and cadence) | `scripts/lib/test_rss_sampler.py` | `python3 -I scripts/lib/test_rss_sampler.py` |
 | Runbook (protocol, platform behavior, flags, exit codes) | `docs/RUNBOOK.md` §「VmRSS 进程树内存门」 | doc review |
 | `.gitignore` `__pycache__/` | `.gitignore` | — |
 
@@ -46,7 +46,8 @@ From `openspec/changes/keel-harness-v2/acceptance.md` §0 and `specs/harness-cor
   window → UNMEASURABLE (exit 2). An incomplete measurement never degrades into PASS or into
   FAIL-of-a-number-it-did-not-see.
 - Cadence uses absolute deadlines (tick n due at n·interval), so a slow `ps` cannot accumulate
-  drift; the achieved spacing is reported as `sampling.observedIntervalSec`.
+  drift; the achieved spacing is reported as `sampling.observedIntervalSec`, and spacing beyond
+  the protocol's 10s maximum is UNMEASURABLE (the host did not follow the protocol).
 
 ## 3. Platform behavior (explicit, no silent pass)
 
@@ -72,7 +73,7 @@ Ran 37 tests in 0.018s
 OK
 ```
 
-46 cases: `/proc` status parsing (VmRSS kB, PPid, State, zombie w/o VmRSS, bad unit);
+47 cases: `/proc` status parsing (VmRSS kB, PPid, State, zombie w/o VmRSS, bad unit);
 `ps` table parsing (macOS paths with spaces, truncated rows); tree walk (root+descendants,
 depth 4, unrelated sibling excluded, zombie not counted, sampler-overhead subtree excluded
 only when it lies inside the target tree); `read_vmrss` (member value,
@@ -80,7 +81,8 @@ exited member → 0, unreadable member → Unmeasurable); `snapshot_from_proc` o
 procfs dir; Linux `sample_once`: ps-tree + per-member VmRSS (15MB tree next to a 90MB
 sibling → 15MB), proc-only fallback when ps is absent, proc-only refused when a row is
 unreadable; threshold bands (300 / 450 / 500 / 501 MB, above-target band,
-incomplete-beats-breach, declining steady/p50); merge workload gate (valid, quiet, short,
+incomplete-beats-breach, cadence beyond the 10s protocol maximum, declining
+steady/p50); merge workload gate (valid, quiet, short,
 unreadable bench, hard SSE errors, sampling window too short); sampling cadence (absolute
 deadlines, stop-file early exit, observed spacing); platform fallback (no procfs
 and no ps → UNMEASURABLE); CLI argument/identity contract.
