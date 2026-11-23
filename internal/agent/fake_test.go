@@ -206,3 +206,55 @@ func TestFakeMCPDirectives(t *testing.T) {
 		t.Fatalf("echo directive = %+v", calls)
 	}
 }
+
+// TestFakeScriptedDirectives pins the vertical-E2E scripting surface: a user
+// turn may name an ordered list of tool calls ("tasks-create:" then "bash:"),
+// the fake provider emits exactly one per round, and the script advances only
+// when the previous call's result is in the transcript. A directive is
+// line-anchored, so the same words inside prose never call a tool.
+func TestFakeScriptedDirectives(t *testing.T) {
+	text := "prepare the workspace\n" +
+		"tasks-create: write a report\n" +
+		"bash:printf 'hello-from-bash\\n' > out.txt"
+	msgs := agentcore.MessageList{fakeUserMsg(text)}
+
+	first := fakeReply("fake", msgs)
+	calls := first.ToolCalls()
+	if len(calls) != 1 || calls[0].Name != "tasks" {
+		t.Fatalf("first round = %+v, want the tasks call", calls)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(calls[0].Arguments, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["action"] != "create" || args["title"] != "write a report" {
+		t.Fatalf("tasks arguments = %v", args)
+	}
+	// The call is part of the transcript now; the next round must be the bash
+	// directive, with a different deterministic id.
+	msgs = append(msgs, first, fakeToolResultMsg("card created"))
+	second := fakeReply("fake", msgs)
+	calls = second.ToolCalls()
+	if len(calls) != 1 || calls[0].Name != "bash" {
+		t.Fatalf("second round = %+v, want the bash call", calls)
+	}
+	if err := json.Unmarshal(calls[0].Arguments, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["action"] != "run" || args["command"] != "printf 'hello-from-bash\\n' > out.txt" {
+		t.Fatalf("bash arguments = %v", args)
+	}
+	if calls[0].ID == first.ToolCalls()[0].ID {
+		t.Fatalf("the two calls share id %q", calls[0].ID)
+	}
+	// The script is exhausted: the turn ends with text, not a third call.
+	msgs = append(msgs, second, fakeToolResultMsg("exited 0"))
+	if calls := fakeReply("fake", msgs).ToolCalls(); len(calls) != 0 {
+		t.Fatalf("exhausted script produced %+v", calls)
+	}
+	// Prose that merely mentions the words is not a directive.
+	prose := fakeReply("fake", agentcore.MessageList{fakeUserMsg("I will run bash: later and tasks-create: someday")})
+	if calls := prose.ToolCalls(); len(calls) != 0 {
+		t.Fatalf("prose produced %+v", calls)
+	}
+}

@@ -21,6 +21,9 @@ import (
 //
 // Contract:
 //   - last message is a tool result → a final text answer quoting the result
+//   - a user line "<tool-directive>" (see fakeTurnDirectives: "bash:<command>",
+//     "tasks-create:<title>") → the next directive of that turn, one tool call
+//     per round, so an E2E can script "create a card, then run a command"
 //   - last user text contains "echo" → a call to a tool named "echo" (the
 //     caller supplies it; tests use keel.testkit's EchoTool)
 //   - otherwise → a short acknowledgement
@@ -49,6 +52,19 @@ func FakeStream() provider.StreamFn {
 func fakeReply(model string, msgs agentcore.MessageList) agentcore.AssistantMessage {
 	if len(msgs) == 0 {
 		return fakeText("fake provider: no input")
+	}
+	// Explicit scripted directives win over the keyword shortcuts and keep
+	// advancing across tool results: a vertical E2E needs a real card before a
+	// real command, and each round emits exactly the next directive of the
+	// current user turn.
+	if text, ok := fakeLastUserText(msgs); ok {
+		if call, ok := fakeNextDirective(model, msgs, text); ok {
+			return agentcore.AssistantMessage{
+				RoleField:  agentcore.RoleAssistant,
+				Content:    agentcore.ContentList{call},
+				StopReason: agentcore.StopReasonToolUse,
+			}
+		}
 	}
 	last := msgs[len(msgs)-1]
 	switch m := last.(type) {
@@ -102,8 +118,99 @@ func fakeReply(model string, msgs agentcore.MessageList) agentcore.AssistantMess
 	}
 }
 
-// fakeToolCallID derives a deterministic tool-call id from the committed input
-// the fake provider is answering. The derivation rule is:
+// fakeCommandDirectivePrefix and fakeTaskDirectivePrefix are the scripted
+// directives of the vertical E2E harness. They are line-anchored so ordinary
+// prose (including the word "bash") cannot trigger them by accident.
+const (
+	fakeBashDirectivePrefix = "bash:"
+	fakeTaskDirectivePrefix = "tasks-create:"
+)
+
+// fakeDirective is one scripted tool call of a user turn.
+type fakeDirective struct {
+	tool string
+	args json.RawMessage
+}
+
+// fakeTurnDirectives parses the directive lines of one user message. Unknown or
+// empty directives are ignored: a typo degrades to the ordinary reply, never to
+// a half-built tool call.
+func fakeTurnDirectives(text string) []fakeDirective {
+	var out []fakeDirective
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case strings.HasPrefix(line, fakeTaskDirectivePrefix):
+			title := strings.TrimSpace(strings.TrimPrefix(line, fakeTaskDirectivePrefix))
+			if title == "" {
+				continue
+			}
+			args, _ := json.Marshal(map[string]any{"action": "create", "title": title})
+			out = append(out, fakeDirective{tool: "tasks", args: args})
+		case strings.HasPrefix(line, fakeBashDirectivePrefix):
+			command := strings.TrimSpace(strings.TrimPrefix(line, fakeBashDirectivePrefix))
+			if command == "" {
+				continue
+			}
+			args, _ := json.Marshal(map[string]any{"action": "run", "command": command})
+			out = append(out, fakeDirective{tool: "bash", args: args})
+		}
+	}
+	return out
+}
+
+// fakeLastUserText returns the newest user message's text. The scripted
+// directives live there, so a tool result round can still find them.
+func fakeLastUserText(msgs agentcore.MessageList) (string, bool) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if user, ok := msgs[i].(agentcore.UserMessage); ok {
+			return ContentText(user.Content), true
+		}
+	}
+	return "", false
+}
+
+// fakeNextDirective returns the next scripted call of the current user turn.
+// Progress is read from the transcript: the number of assistant messages with
+// tool calls after the newest user message is the number of directives already
+// executed. A tool result therefore advances the script by exactly one step,
+// and a retried attempt (same transcript) replays the same step.
+func fakeNextDirective(model string, msgs agentcore.MessageList, text string) (agentcore.ToolCallContent, bool) {
+	directives := fakeTurnDirectives(text)
+	if len(directives) == 0 {
+		return agentcore.ToolCallContent{}, false
+	}
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role() == agentcore.RoleUser {
+			start = i + 1
+			break
+		}
+	}
+	done := 0
+	for _, msg := range msgs[start:] {
+		if assistant, ok := msg.(agentcore.AssistantMessage); ok && assistantHasToolCall(assistant) {
+			done++
+		}
+	}
+	if done >= len(directives) {
+		return agentcore.ToolCallContent{}, false
+	}
+	next := directives[done]
+	return agentcore.NewToolCallContent(fakeToolCallID(model, msgs, done), next.tool, next.args), true
+}
+
+// assistantHasToolCall reports whether the assistant message carries one.
+func assistantHasToolCall(msg agentcore.AssistantMessage) bool {
+	for _, block := range msg.Content {
+		if _, ok := block.(agentcore.ToolCallContent); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// fakeToolCallID derives a deterministic tool-call id from the committed input// the fake provider is answering. The derivation rule is:
 //
 //	sha256("model=<model>\0seq=<len(messages)>\0index=<call index>\0"
 //	       "role=<last message role>\0text=<last message text>")[:8]  (hex)
