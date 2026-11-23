@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // The built-in catalog is compiled into the binary. It is the static baseline
@@ -1078,6 +1079,11 @@ func validatePricingMap(pricing map[string]any) error {
 		}
 		if strings.ContainsAny(text, "\r\n") {
 			return errors.New("notes must not contain line breaks")
+		}
+		// The client's input caps at 200; the server enforces the same bound so
+		// an API write cannot store a note the settings surface cannot show.
+		if utf8.RuneCountInString(text) > 200 {
+			return errors.New("notes must be at most 200 characters")
 		}
 	}
 	return nil

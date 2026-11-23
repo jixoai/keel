@@ -138,7 +138,8 @@ func TestProviderCredentialRefusals(t *testing.T) {
 		map[string]string{"value": "v", "apiKey": "x"}, &body); code != http.StatusBadRequest {
 		t.Fatalf("unknown key = %d, want 400", code)
 	}
-	// A provider id outside the models-document grammar is refused.
+	// A provider id outside the direct-credential route's own grammar is
+	// refused before a secret name is derived.
 	if code := doSettingsJSON(t, client, http.MethodPut,
 		server.URL+"/v1/settings/providers/"+url.PathEscape("bad id")+"/credential", tenant,
 		map[string]string{"value": "v"}, &body); code != http.StatusBadRequest {
@@ -162,21 +163,23 @@ func TestProviderCredentialRefusals(t *testing.T) {
 }
 
 // TestProviderCredentialNameIsStableAndGrammatical: a provider id with
-// characters the secret-name grammar refuses is sanitized, a re-paste overwrites
-// the same row, and the derived name is one a models document can reference.
+// characters the secret-name grammar refuses is sanitized with a digest suffix,
+// a re-paste overwrites the same row, and the derived name is one a models
+// document can reference.
 func TestProviderCredentialNameIsStableAndGrammatical(t *testing.T) {
 	secrets := newFakeSecretStore()
 	server := settingsServer(t, func(cfg *Config) { cfg.SecretStore = secrets })
 	client := server.Client()
 	tenant := uuid.New()
 
+	const wantName = "provider_local_gw_b75ac66d"
 	var first providerCredentialResponse
 	if code := doSettingsJSON(t, client, http.MethodPut, server.URL+"/v1/settings/providers/local-gw/credential", tenant,
 		map[string]string{"value": "first-credential-value-0123"}, &first); code != http.StatusOK {
 		t.Fatalf("put = %d", code)
 	}
-	if first.SecretName != "provider_local_gw" {
-		t.Fatalf("derived name = %q, want provider_local_gw", first.SecretName)
+	if first.SecretName != wantName {
+		t.Fatalf("derived name = %q, want %s", first.SecretName, wantName)
 	}
 	var second providerCredentialResponse
 	if code := doSettingsJSON(t, client, http.MethodPut, server.URL+"/v1/settings/providers/local-gw/credential", tenant,
@@ -189,13 +192,75 @@ func TestProviderCredentialNameIsStableAndGrammatical(t *testing.T) {
 	if rows := len(secrets.values[tenant]); rows != 1 {
 		t.Fatalf("a re-paste accumulated %d rows, want the one stable row", rows)
 	}
-	if got := secrets.values[tenant]["provider_local_gw"]; string(got) != "second-credential-value-4567" {
+	if got := secrets.values[tenant][wantName]; string(got) != "second-credential-value-4567" {
 		t.Fatal("the re-paste did not overwrite the value")
 	}
 	// The derived name is legal for the reference grammar (the write route
 	// enforces exactly the grammar a document can reference).
 	if !secretNamePattern.MatchString(first.SecretName) {
 		t.Fatalf("derived name %q is not referencable", first.SecretName)
+	}
+}
+
+// TestProviderCredentialNamesDoNotCollideAfterSanitization: `a.b` and `a-b`
+// sanitize to the same fragment, so each gets its own digest suffix; a re-paste
+// of one rotates only that row. An id the grammar already accepts keeps the
+// bare name.
+func TestProviderCredentialNamesDoNotCollideAfterSanitization(t *testing.T) {
+	secrets := newFakeSecretStore()
+	server := settingsServer(t, func(cfg *Config) { cfg.SecretStore = secrets })
+	client := server.Client()
+	tenant := uuid.New()
+
+	put := func(id, value string) providerCredentialResponse {
+		t.Helper()
+		var response providerCredentialResponse
+		if code := doSettingsJSON(t, client, http.MethodPut,
+			server.URL+"/v1/settings/providers/"+id+"/credential", tenant,
+			map[string]string{"value": value}, &response); code != http.StatusOK {
+			t.Fatalf("put %q = %d", id, code)
+		}
+		return response
+	}
+	dotted := put("a.b", "credential-for-dotted-0123")
+	dashed := put("a-b", "credential-for-dashed-4567")
+	if dotted.SecretName != "provider_a_b_108bf50c" {
+		t.Fatalf("a.b name = %q", dotted.SecretName)
+	}
+	if dashed.SecretName != "provider_a_b_2a89df63" {
+		t.Fatalf("a-b name = %q", dashed.SecretName)
+	}
+	if dotted.SecretName == dashed.SecretName {
+		t.Fatalf("sanitization collided two providers onto %q", dotted.SecretName)
+	}
+	if rows := len(secrets.values[tenant]); rows != 2 {
+		t.Fatalf("stored %d rows, want one per provider", rows)
+	}
+	// Rotating one credential leaves the other provider's value alone.
+	rotated := put("a.b", "credential-for-dotted-rotated")
+	if rotated.SecretName != dotted.SecretName {
+		t.Fatalf("a re-paste changed the name: %q -> %q", dotted.SecretName, rotated.SecretName)
+	}
+	if got := secrets.values[tenant][dashed.SecretName]; string(got) != "credential-for-dashed-4567" {
+		t.Fatal("rotating a.b changed a-b's credential")
+	}
+
+	plain := put("s2api", "credential-for-plain-7890")
+	if plain.SecretName != "provider_s2api" {
+		t.Fatalf("an unsanitized id changed its name: %q", plain.SecretName)
+	}
+	// Every derived name stays inside the reference grammar's bound, including
+	// an id at the route grammar's 128-character maximum (truncated + digested).
+	longID := "p." + strings.Repeat("x", 126)
+	long := put(longID, "credential-for-long-id-0123")
+	if len(long.SecretName) > maxSecretNameLength {
+		t.Fatalf("long id name %q is %d chars, want <= %d", long.SecretName, len(long.SecretName), maxSecretNameLength)
+	}
+	if !secretNamePattern.MatchString(long.SecretName) {
+		t.Fatalf("long id name %q is not referencable", long.SecretName)
+	}
+	if long.SecretName != providerCredentialSecretName(longID) {
+		t.Fatalf("long id name = %q, derivation = %q", long.SecretName, providerCredentialSecretName(longID))
 	}
 }
 

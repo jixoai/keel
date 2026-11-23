@@ -46,10 +46,13 @@ const (
 // reference — a footgun the API refuses instead of documenting.
 var secretNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 
-// providerIDPattern is the models-document provider id grammar (modelcfg's
-// validateIdentifier shape: a token with no whitespace). The direct-credential
-// route derives a secret name from this id, so it refuses an id no provider
-// entry could carry before deriving anything.
+// providerIDPattern is the direct-credential route's own provider-id grammar:
+// one to 128 characters of letters, digits, '.', '_' or '-', starting with an
+// alphanumeric. It is deliberately narrower than the models document's
+// identifier grammar (modelcfg.validateIdentifier: any non-whitespace token),
+// because the route derives a tenant-secret name from the id and a secret name
+// is a closed, referencable grammar. A document id outside this shape is a
+// valid provider identity but cannot use the paste-a-key convenience.
 var providerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // ModelSettingsStore is the persistence seam of the tenant models override. It
@@ -860,15 +863,43 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, secretDeleteResponse{Name: name, Deleted: deleted})
 }
 
+// maxSecretNameLength is the secret-name grammar's bound (secretNamePattern).
+const maxSecretNameLength = 64
+
+// providerIDDigest is a stable short digest of the original provider id, used
+// to keep two ids that sanitize to the same fragment (`a.b` and `a-b` both
+// become `a_b`) on distinct secret rows. It is a 32-bit FNV-1a digest — enough
+// for accidental collisions between configured ids, not a security boundary.
+// The client mirrors it (web/src/data/model-catalog.ts) so the editor's
+// fallback reference names the same row.
+func providerIDDigest(providerID string) string {
+	const (
+		offset32 = 2166136261
+		prime32  = 16777619
+	)
+	hash := uint32(offset32)
+	for i := 0; i < len(providerID); i++ {
+		hash ^= uint32(providerID[i])
+		hash *= prime32
+	}
+	return fmt.Sprintf("%08x", hash)
+}
+
 // providerCredentialSecretName derives the stable tenant-secret name a
 // provider's directly entered credential is stored under: `provider_<id>`, with
 // every character the secret-name grammar refuses replaced by `_`. The name is
 // stable (the same provider always overwrites the same row), so a re-paste
 // rotates the value instead of accumulating rows.
+//
+// Sanitization is not injective, so an id that had to be changed (or truncated
+// to the grammar's bound) gets a short digest suffix: `provider_<sanitized>_
+// <digest>`. Otherwise `a.b` and `a-b` would share one row and a re-paste for
+// one provider would silently rotate the other's credential. An id the grammar
+// already accepts keeps the bare `provider_<id>` name.
 func providerCredentialSecretName(providerID string) string {
+	const prefix = "provider_"
 	var builder strings.Builder
-	builder.Grow(len("provider_") + len(providerID))
-	builder.WriteString("provider_")
+	builder.Grow(len(prefix) + len(providerID))
 	for _, r := range providerID {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
 			builder.WriteRune(r)
@@ -876,7 +907,16 @@ func providerCredentialSecretName(providerID string) string {
 		}
 		builder.WriteRune('_')
 	}
-	return builder.String()
+	sanitized := builder.String()
+	if sanitized == providerID && len(prefix)+len(sanitized) <= maxSecretNameLength {
+		return prefix + sanitized
+	}
+	suffix := "_" + providerIDDigest(providerID)
+	room := maxSecretNameLength - len(prefix) - len(suffix)
+	if len(sanitized) > room {
+		sanitized = sanitized[:room]
+	}
+	return prefix + sanitized + suffix
 }
 
 // putProviderCredential implements PUT /v1/settings/providers/{id}/credential:
@@ -900,7 +940,7 @@ func (s *Server) putProviderCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	if !providerIDPattern.MatchString(providerID) {
 		writeErr(w, http.StatusBadRequest,
-			errors.New("provider id must be a token of letters, digits, '.', '_' or '-' (the models-document id grammar)"))
+			errors.New("provider id must be 1-128 characters of letters, digits, '.', '_' or '-', starting with a letter or digit (the direct-credential route's grammar)"))
 		return
 	}
 	if s.cfg.SecretStore == nil {

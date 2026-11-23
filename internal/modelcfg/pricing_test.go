@@ -289,6 +289,22 @@ func TestPricingValidationRefusesUnknownAndBadValues(t *testing.T) {
 			wantErr: "notes must not contain line breaks",
 		},
 		{
+			name: "notes over 200 characters",
+			config: map[string]any{"pricing": map[string]any{
+				"notes": strings.Repeat("x", 201),
+			}},
+			wantErr: "notes must be at most 200 characters",
+		},
+		{
+			// The bound counts runes, not bytes: 201 CJK characters are over
+			// the limit even though the byte count is different from ASCII.
+			name: "notes bound counts runes",
+			config: map[string]any{"pricing": map[string]any{
+				"notes": strings.Repeat("价", 201),
+			}},
+			wantErr: "notes must be at most 200 characters",
+		},
+		{
 			name:    "pricing not an object",
 			config:  map[string]any{"pricing": []any{1.0}},
 			wantErr: "pricing must be an object",
@@ -324,6 +340,16 @@ func TestPricingFreeMarkerOnly(t *testing.T) {
 	}
 	if decoded.Pricing.Input != nil || decoded.Pricing.Output != nil {
 		t.Fatal("a free-only block must not invent a rate")
+	}
+}
+
+// TestPricingNotesBoundIsInclusive: exactly 200 runes is legal, in ASCII and in
+// multi-byte characters (the bound is characters, not bytes).
+func TestPricingNotesBoundIsInclusive(t *testing.T) {
+	for _, note := range []string{strings.Repeat("x", 200), strings.Repeat("价", 200)} {
+		if err := validateModelConfigMap(priceConfig(map[string]any{"notes": note})); err != nil {
+			t.Fatalf("a 200-rune note was refused: %v", err)
+		}
 	}
 }
 

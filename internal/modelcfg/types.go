@@ -214,7 +214,8 @@ type Pricing struct {
 	// understate. It never changes execution.
 	Free bool `json:"free,omitempty"`
 	// Notes is a short human note (a discount window, "off-peak", a source
-	// URL). It is display-only and never used for metering.
+	// URL): at most 200 runes, no line breaks. It is display-only and never
+	// used for metering.
 	Notes string `json:"notes,omitempty"`
 }
 
