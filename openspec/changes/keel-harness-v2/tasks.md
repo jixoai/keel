@@ -256,7 +256,24 @@
       `TestForkPrefixIsAReadTimeUnion`、`TestForkFileViewIsAnOverlay`、
       `TestForkCaptureDoesNotCopyInheritedManifestRows`、
       `TestForkCreatesAPrefixSessionCardAndInheritedBinding`）
-- [ ] 面板：任务图、事件流、资源预览；纯投影，不写额外真值
+- [x] 面板：任务图、事件流、资源预览；纯投影，不写额外真值
+      （W4 2026-11-23：`internal/tasklog/panel.go` + `internal/harnessapi/task_panel.go`
+      + `web/src/data/tasks.ts` / `web/src/screens/books/task-panel.tsx`；证据
+      `evidence/w4-task-panel.md`。复核 P2 见下节）
+
+**W4 复核 P2 收口（2026-11-23，w4-followups）**
+
+- [x] 会话清单有界翻页：`GET /v1/sessions/{id}/files?limit&cursor` 路径游标页
+      （`nextCursor`/`hasMore`），客户端翻页并合并；面板资源组可「加载更多」
+- [x] 清单行带内容 hash：`SessionFileView.hash` 来自 manifest，面板预览据此
+      显示「与引用一致/文件已变化」；无 hash 的行不编造，仍显示「清单当前版本」
+- [x] 面板读数有界：own 卡按创建序 SQL 分页（`cardLimit`/`cardsTruncated`）、事件流只读
+      最新一页（旧坏行不参与解码）、attach/detach 折叠独立有界（`attachmentLimit`/
+      `attachmentsTruncated`）
+- [x] fixture 保真：成员只取本会话卡的子卡、祖先与 `parentTaskId` 按投影解析、事件页保留
+      最新 N、资源区分段计数含清单组
+- [x] 客户端读数不撒谎：0 字节预览显示 `0 B` 不是 `1 KB`；`shortHash` 只截断真正的
+      sha256；成员截断 count=1 只说「至少 1 张」不说「达到上限」
 
 ## W5 approve 与 notification
 

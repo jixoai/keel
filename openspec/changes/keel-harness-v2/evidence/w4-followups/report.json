@@ -1,0 +1,287 @@
+{
+  "lane": "W4-task-panel",
+  "base": "http://127.0.0.1:13753",
+  "startedAt": "2026-11-23T09:04:03.373Z",
+  "steps": [
+    {
+      "label": "workspace shell",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "工作区"
+      }
+    },
+    {
+      "label": "team page",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "team-roster"
+      }
+    },
+    {
+      "label": "team-start count",
+      "kind": "value",
+      "ok": true,
+      "value": {
+        "count": 1,
+        "disabled": false
+      }
+    },
+    {
+      "label": "dialog visible",
+      "kind": "value",
+      "ok": true,
+      "value": {
+        "card": 1,
+        "confirm": 1
+      }
+    },
+    {
+      "label": "start receipt notice",
+      "kind": "assert",
+      "ok": true,
+      "value": {}
+    },
+    {
+      "label": "run rows",
+      "kind": "value",
+      "ok": true,
+      "value": {
+        "rows": 1,
+        "url": "http://127.0.0.1:13753/teams/bfb7f85f-1111-4111-8111-bfb7f85fbfb7"
+      }
+    },
+    {
+      "label": "run page",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "任务面板"
+      }
+    },
+    {
+      "label": "run page with panel entry",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "run-entry-1440.png"
+      }
+    },
+    {
+      "label": "run-entry-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "panel tree",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-panel"
+      }
+    },
+    {
+      "label": "panel card",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-captain"
+      }
+    },
+    {
+      "label": "panel fork",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-refund-fork"
+      }
+    },
+    {
+      "label": "task panel graph 1440",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "task-panel-graph-1440.png"
+      }
+    },
+    {
+      "label": "task-panel-graph-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "panel events",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-panel-events"
+      }
+    },
+    {
+      "label": "task panel events 1440",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "task-panel-events-1440.png"
+      }
+    },
+    {
+      "label": "task-panel-events-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "panel resources",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-panel-resources"
+      }
+    },
+    {
+      "label": "resource preview",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-panel-preview"
+      }
+    },
+    {
+      "label": "resource match",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "与引用一致"
+      }
+    },
+    {
+      "label": "task panel preview 1440",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "task-panel-preview-1440.png"
+      }
+    },
+    {
+      "label": "task-panel-preview-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "file group",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "task-panel-files"
+      }
+    },
+    {
+      "label": "attributed file",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "reports/refund-by-channel.csv"
+      }
+    },
+    {
+      "label": "attached file not repeated",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "count": 0
+      }
+    },
+    {
+      "label": "manifest preview",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "与引用一致"
+      }
+    },
+    {
+      "label": "manifest preview content",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "渠道,退款单,占比"
+      }
+    },
+    {
+      "label": "task panel attributed file 1440",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "task-panel-resources-after-1440.png"
+      }
+    },
+    {
+      "label": "task-panel-resources-after-1440",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "docClientWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
+    },
+    {
+      "label": "380 phone screenshot",
+      "kind": "screenshot",
+      "ok": true,
+      "value": {
+        "file": "task-panel-390.png"
+      }
+    },
+    {
+      "label": "task-panel-390",
+      "kind": "overflow",
+      "ok": true,
+      "value": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "docClientWidth": 390,
+        "bodyScrollWidth": 390
+      }
+    },
+    {
+      "label": "phone panel entry",
+      "kind": "assert",
+      "ok": true,
+      "value": {
+        "text": "run-task-panel-entry"
+      }
+    }
+  ],
+  "console": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "pass": true,
+  "finishedAt": "2026-11-23T09:04:25.222Z"
+}
