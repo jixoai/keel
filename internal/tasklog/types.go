@@ -150,6 +150,9 @@ var (
 	ErrInvalidCursor = errors.New("tasklog: malformed task card cursor")
 	// ErrNoBackend: the service was built without a ledger or projection.
 	ErrNoBackend = errors.New("tasklog: ledger or projection backend is not wired")
+	// ErrCardClosed: a terminal card is read-only; a new card (or an explicit
+	// reopen event) is required to continue the work.
+	ErrCardClosed = errors.New("tasklog: task card is closed")
 )
 
 // taskEventPayload is the durable payload shape of every task.* kind. One

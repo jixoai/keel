@@ -203,6 +203,9 @@ func (s *Service) Update(ctx context.Context, scope kernel.Scope, taskID uuid.UU
 	if err != nil {
 		return Card{}, err
 	}
+	if err := requireOpen(card); err != nil {
+		return Card{}, err
+	}
 	payload := taskEventPayload{}
 	if in.Title != nil {
 		title := strings.TrimSpace(*in.Title)
@@ -245,7 +248,11 @@ func (s *Service) Attach(ctx context.Context, scope kernel.Scope, taskID uuid.UU
 	if path == "" || hash == "" {
 		return Event{}, fmt.Errorf("%w: attach needs path and hash", ErrInvalidEvent)
 	}
-	if _, err := s.requireCard(ctx, scope, taskID); err != nil {
+	card, err := s.requireCard(ctx, scope, taskID)
+	if err != nil {
+		return Event{}, err
+	}
+	if err := requireOpen(card); err != nil {
 		return Event{}, err
 	}
 	payload := taskEventPayload{Path: path, Hash: hash}
@@ -267,7 +274,11 @@ func (s *Service) Detach(ctx context.Context, scope kernel.Scope, taskID uuid.UU
 	if path == "" {
 		return Event{}, fmt.Errorf("%w: detach needs a path", ErrInvalidEvent)
 	}
-	if _, err := s.requireCard(ctx, scope, taskID); err != nil {
+	card, err := s.requireCard(ctx, scope, taskID)
+	if err != nil {
+		return Event{}, err
+	}
+	if err := requireOpen(card); err != nil {
 		return Event{}, err
 	}
 	payload := taskEventPayload{Path: path, Hash: strings.TrimSpace(hash)}
@@ -311,7 +322,11 @@ func (s *Service) Note(ctx context.Context, scope kernel.Scope, taskID uuid.UUID
 	if text == "" {
 		return Event{}, fmt.Errorf("%w: note needs text", ErrInvalidEvent)
 	}
-	if _, err := s.requireCard(ctx, scope, taskID); err != nil {
+	card, err := s.requireCard(ctx, scope, taskID)
+	if err != nil {
+		return Event{}, err
+	}
+	if err := requireOpen(card); err != nil {
 		return Event{}, err
 	}
 	payload := taskEventPayload{Text: text}
@@ -690,6 +705,17 @@ func (s *Service) requireCard(ctx context.Context, scope kernel.Scope, taskID uu
 		}
 	}
 	return Card{}, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+}
+
+// requireOpen rejects a mutation of a terminal card. The state-machine
+// contract (C1) makes done/closed read-only: continuing the work needs a new
+// card or an explicit reopen event, not an update that rewrites history.
+// Close stays idempotent (the history already carries the fact).
+func requireOpen(card Card) error {
+	if card.Status == StatusClosed {
+		return fmt.Errorf("%w: %s", ErrCardClosed, card.Status)
+	}
+	return nil
 }
 
 // validateParent refuses a missing parent and any link that would close a
