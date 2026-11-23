@@ -1,6 +1,6 @@
 {
   "schema": "keel.plugin-market.catalog/1",
-  "generatedAt": "2026-11-22",
+  "generatedAt": "2026-11-23",
   "sources": [
     {
       "kind": "dsh-official",
@@ -93,6 +93,33 @@
       "dshGroups": [
         "dsh.context"
       ]
+    },
+    {
+      "id": "keel.oar",
+      "name": "外部运行时（keel.oar）",
+      "summary": "OAR 外部运行时适配器（sidecar，目标清单）：把 Codex/Claude 作为带外 record 流接入，不进任务图；专用渲染器与宿主任务图闭环仍待 W12。",
+      "capabilities": [
+        "external-runtime",
+        "oar",
+        "codex",
+        "claude",
+        "process-group"
+      ],
+      "source": {
+        "kind": "keel-official",
+        "url": "https://github.com/jixoai/keel/tree/main/plugins/keel.oar",
+        "path": "plugins/keel.oar"
+      },
+      "dshPackages": [],
+      "coverage": {
+        "covered": true,
+        "status": "partial",
+        "keelPluginId": "keel.oar",
+        "tools": [],
+        "note": "Codex 真链路在 OAR record 层面已绿（evidence/w09-oar.md）；sidecar loader 目前只接受 tool_provider，专用渲染器（W12 UI 槽位）与宿主任务图闭环未交付，故为 partial。"
+      },
+      "wave": "W3",
+      "dshGroups": []
     },
     {
       "id": "keel.plugin-market",

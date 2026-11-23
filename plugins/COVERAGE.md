@@ -373,6 +373,7 @@
 | `keel.cli` | `keel.cli` | planned | W1 | — |
 | `keel.context` | `keel.context` | planned | W1 | `dsh.context` |
 | `keel.context-memory` | `keel.context-memory` | delivered | W1 | `dsh.context` |
+| `keel.oar` | `keel.oar` | partial | W3 | — |
 | `keel.plugin-manager` | `keel.plugin-manager` | planned | W1 | `dsh.boot` |
 | `keel.plugin-market` | `keel.plugin-market` | delivered | W1 | `dsh.boot`, `dsh.util` |
 | `keel.presets` | `keel.presets` | planned | W2 | `dsh.preset` |

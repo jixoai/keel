@@ -200,8 +200,8 @@
   {
     "path": "/bookkeeping/0/toolManifestHash",
     "old": "$absent",
-    "new": "\"sha256:e8d55a6a495f6784117f5af1a6075c54e1e243b957efa1ca66f95e407c851c0b\"",
-    "reason": "ADDED v2 run snapshot (agent-loop-contract): hash of the tool manifest this attempt saw. Pinned so a wrong or drifting tool surface fails."
+    "new": "\"sha256:5afcad2e464bd723ad450c476865ab1e9e1bdc1ec191d29283acf44a3fc57665\"",
+    "reason": "RE-PINNED tool manifest hash: 8a5794e added the explicit bash checkpoint action and its tenant capture resolver, so the model-visible bash schema (and therefore the manifest hash) changed intentionally after d105fb5 pinned the old value. The rule still pins one exact hash for every attempt, so a drifting surface fails this gate."
   },
   {
     "path": "/bookkeeping/1/configHashBefore",
@@ -224,8 +224,8 @@
   {
     "path": "/bookkeeping/1/toolManifestHash",
     "old": "$absent",
-    "new": "\"sha256:e8d55a6a495f6784117f5af1a6075c54e1e243b957efa1ca66f95e407c851c0b\"",
-    "reason": "ADDED v2 run snapshot (agent-loop-contract): hash of the tool manifest this attempt saw. Pinned so a wrong or drifting tool surface fails."
+    "new": "\"sha256:5afcad2e464bd723ad450c476865ab1e9e1bdc1ec191d29283acf44a3fc57665\"",
+    "reason": "RE-PINNED tool manifest hash: 8a5794e added the explicit bash checkpoint action and its tenant capture resolver, so the model-visible bash schema (and therefore the manifest hash) changed intentionally after d105fb5 pinned the old value. The rule still pins one exact hash for every attempt, so a drifting surface fails this gate."
   },
   {
     "path": "/events/4/payload/content/0/text",
