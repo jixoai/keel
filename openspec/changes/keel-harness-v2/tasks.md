@@ -196,7 +196,8 @@
       （W3.capture 2026-11-23：仓库没有 `config.toml` 加载器，策略落在唯一租户文档词汇
       `filesystem.capture.mode`；`internal/host/config.go` 新增 `Filesystem/Capture` 段，
       Merge/Validate 严格闭集（省略 = per-tool-call，未知/带空白值拒绝），canonical JSON 可往返。
-      模式与上下文钉扎在 `internal/layerfs/capturemode.go`；worker 每 attempt 解析一次
+      模式与上下文钉扎在 `internal/capturepolicy/capturemode.go`（W11 2026-11-23：从
+      `internal/layerfs/capturemode.go` 迁到 kernel 叶子包，值 + context pin，layerfs 不留 alias）；worker 每 attempt 解析一次
       （存储租户文档覆盖启动文档，`cmd/keel/capture_policy.go`）并把模式固定在本次工具上下文，
       bash backend 复制进 `SessionIdentity`。`Mount.Finish` 在 checkpoint/manual 下只记 pending，
       `LayerWorkspaces.Checkpoint` 一次消费并结算（同 id 重放去重；失败/重放恢复 pending）。
