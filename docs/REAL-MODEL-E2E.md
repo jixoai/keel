@@ -322,10 +322,12 @@ harness，不掩盖缺陷：不打开它时，真实回合在修复前必然失�
 - **启动门**：文档驱动部署的**默认 selection** 在装配期就校验（模型/档位/驱动/凭据），
   不合格即启动（或 reload）失败并点名变量/字段；因此「secret 变量为空」是启动失败而不是
   运行期失败。
-- **媒体附件的 v1 边界（诚实声明）**：媒体能力门未实装——图片等附件既不会进请求，也不会
-  报错（解码层只带文本），模型声明 `inputFormat.image=false` 同样如此。使用方**不得**据
-  `inputFormat` 假定附件被消费；`enforcement.media=false` 就是这句话的机器可读形式。
-  工具门已实装（声明 `supportsToolCall=false` 的模型拿不到工具，请求前 fail-closed）。
+- **媒体附件（modality-input 切片，2026-11-23）**：媒体能力门已实装——附件在每次尝试的
+  请求边界按「模型声明的模态 × 协议原生形状」派发：声明支持且协议可载 → 原生部件
+  （image/document/audio）；否则转成 blobId + 元数据的文本块并提示模型用文件工具，绝不
+  静默丢弃。契约见 `docs/MODEL-INPUT-MODALITIES.md`。`GET /v1/models` 的
+  `enforcement.media` 仍保守返回 false，待 models API lane 与上述行为对齐后再翻转。
+  工具门同样已实装（声明 `supportsToolCall=false` 的模型拿不到工具，请求前 fail-closed）。
 - **run.finished 记录身份**：摘要里带 `provider`/`model`，审计可回答「这一轮是谁答的」。
 
 **边界与恢复（selection 是账本事实的代价）**：尝试取「最新一条带 selection 的输入」，
