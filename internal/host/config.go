@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/layerfs"
 	"github.com/jixoai/keel/internal/provider"
 )
 
@@ -48,6 +49,9 @@ type TenantConfig struct {
 	Telemetry  TelemetryConfig  `json:"telemetry"`
 	Tools      ToolsConfig      `json:"tools"`
 	Quota      QuotaConfig      `json:"quota"`
+	// Filesystem configures the session execution space (the layerfs view the
+	// read/write/edit and bash tools share).
+	Filesystem FilesystemConfig `json:"filesystem"`
 	// External declares the process-external providers of the tenant's
 	// loadout (agent backends and tool providers). It is the single
 	// configuration vocabulary for the external gateway: the loadout decides
@@ -164,6 +168,32 @@ type QuotaConfig struct {
 	// EventsPerMinute caps admitted events per tenant per minute. The limit is
 	// a token bucket shared by every session of the tenant; 0 = unlimited.
 	EventsPerMinute int `json:"eventsPerMinute,omitempty"`
+}
+
+// FilesystemConfig configures the session execution space. It is deliberately a
+// section of the one tenant document: the same vocabulary the admin API stores
+// is what the run path reads, with no second config file.
+type FilesystemConfig struct {
+	Capture CaptureConfig `json:"capture"`
+}
+
+// CaptureConfig selects the capture policy. Mode is a layerfs.CaptureMode
+// value: per-tool-call (default), checkpoint or manual. Empty inherits the
+// default; an unknown value is rejected by Validate, never coerced.
+type CaptureConfig struct {
+	Mode string `json:"mode,omitempty"`
+}
+
+// EffectiveMode resolves the capture policy, applying the default for an empty
+// document value.
+func (c CaptureConfig) EffectiveMode() layerfs.CaptureMode {
+	mode, err := layerfs.ParseCaptureMode(c.Mode)
+	if err != nil {
+		// Validate rejects this before a run; returning the raw value keeps the
+		// fail-closed path visible if a caller skipped validation.
+		return layerfs.CaptureMode(c.Mode)
+	}
+	return mode
 }
 
 // External provider transports.
@@ -463,6 +493,11 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 			RunConcurrency:  pickInt(defaults.Quota.RunConcurrency, tenant.Quota.RunConcurrency),
 			EventsPerMinute: pickInt(defaults.Quota.EventsPerMinute, tenant.Quota.EventsPerMinute),
 		},
+		Filesystem: FilesystemConfig{
+			Capture: CaptureConfig{
+				Mode: pickString(defaults.Filesystem.Capture.Mode, tenant.Filesystem.Capture.Mode),
+			},
+		},
 		External: ExternalConfig{
 			Backends: cloneExternalProviders(defaults.External.Backends),
 			Tools:    cloneExternalProviders(defaults.External.Tools),
@@ -627,6 +662,16 @@ func (c TenantConfig) Validate() error {
 	}
 	if c.Quota.EventsPerMinute < 0 {
 		return problem("quota.eventsPerMinute must be >= 0")
+	}
+	if raw := c.Filesystem.Capture.Mode; raw != "" {
+		// Whitespace is a typo, not a mode: the canonical document value is
+		// exact, and the runtime never trims a policy into a different one.
+		if strings.TrimSpace(raw) != raw {
+			return problem("filesystem.capture.mode %q (want per-tool-call|checkpoint|manual)", raw)
+		}
+	}
+	if _, err := layerfs.ParseCaptureMode(c.Filesystem.Capture.Mode); err != nil {
+		return problem("filesystem.capture.mode %q (want per-tool-call|checkpoint|manual)", c.Filesystem.Capture.Mode)
 	}
 	if err := c.External.validate(); err != nil {
 		return problem("%v", err)

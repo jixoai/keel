@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jixoai/keel/internal/layerfs"
 )
 
 func boolPtr(value bool) *bool { return &value }
@@ -615,5 +617,86 @@ func TestLoadModelsDocument(t *testing.T) {
 	}
 	if _, err := LoadModelsDocument(filepath.Join(dir, "missing.json")); err == nil {
 		t.Fatal("an unreadable file must be an error")
+	}
+}
+
+func TestCaptureModeMergeAndDefault(t *testing.T) {
+	// An empty document selects the documented default, not an empty policy.
+	if got := (TenantConfig{}).Filesystem.Capture.EffectiveMode(); got != layerfs.CaptureModePerToolCall {
+		t.Fatalf("empty config mode = %q, want %q", got, layerfs.CaptureModePerToolCall)
+	}
+	for _, mode := range []layerfs.CaptureMode{
+		layerfs.CaptureModePerToolCall, layerfs.CaptureModeCheckpoint, layerfs.CaptureModeManual,
+	} {
+		raw := []byte(`{"filesystem":{"capture":{"mode":"` + string(mode) + `"}}}`)
+		cfg, err := ParseTenantConfig(raw)
+		if err != nil {
+			t.Fatalf("parse %s: %v", mode, err)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("validate %s: %v", mode, err)
+		}
+		if got := cfg.Filesystem.Capture.EffectiveMode(); got != mode {
+			t.Fatalf("parsed mode = %q, want %q", got, mode)
+		}
+	}
+
+	defaults := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: string(layerfs.CaptureModeCheckpoint)}}}
+	tenant := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: string(layerfs.CaptureModeManual)}}}
+	if got := Merge(defaults, tenant).Filesystem.Capture.EffectiveMode(); got != layerfs.CaptureModeManual {
+		t.Fatalf("merged mode = %q, want the tenant override manual", got)
+	}
+	// An omitted tenant mode inherits the default document.
+	if got := Merge(defaults, TenantConfig{}).Filesystem.Capture.EffectiveMode(); got != layerfs.CaptureModeCheckpoint {
+		t.Fatalf("inherited mode = %q, want checkpoint", got)
+	}
+}
+
+func TestValidateCaptureModeMatrix(t *testing.T) {
+	valid := []string{"", "per-tool-call", "checkpoint", "manual"}
+	for _, mode := range valid {
+		cfg := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: mode}}}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("mode %q rejected: %v", mode, err)
+		}
+	}
+	invalid := []string{"PER-TOOL-CALL", "per_tool_call", "sometimes", "checkpoint ", " checkpoint"}
+	for _, mode := range invalid {
+		cfg := TenantConfig{Filesystem: FilesystemConfig{Capture: CaptureConfig{Mode: mode}}}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatalf("mode %q accepted", mode)
+		}
+		if !strings.Contains(err.Error(), "filesystem.capture.mode") ||
+			!strings.Contains(err.Error(), "per-tool-call|checkpoint|manual") {
+			t.Fatalf("mode %q error = %v, want the field path and the closed vocabulary", mode, err)
+		}
+	}
+}
+
+func TestCaptureModeRoundTripsCanonicalJSON(t *testing.T) {
+	for _, mode := range []string{"", "per-tool-call", "checkpoint", "manual"} {
+		raw := []byte(`{"filesystem":{"capture":{"mode":"` + mode + `"}}}`)
+		cfg, err := ParseTenantConfig(raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", mode, err)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("validate %q: %v", mode, err)
+		}
+		encoded, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("marshal %q: %v", mode, err)
+		}
+		reparsed, err := ParseTenantConfig(encoded)
+		if err != nil {
+			t.Fatalf("canonical JSON for %q does not parse: %v (%s)", mode, err, encoded)
+		}
+		if err := reparsed.Validate(); err != nil {
+			t.Fatalf("canonical JSON for %q does not validate: %v", mode, err)
+		}
+		if got, want := reparsed.Filesystem.Capture.Mode, mode; got != want {
+			t.Fatalf("canonical JSON mode = %q, want %q (%s)", got, want, encoded)
+		}
 	}
 }
