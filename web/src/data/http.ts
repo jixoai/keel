@@ -1060,10 +1060,12 @@ export class KeelHttp implements SettingsApi {
       body: JSON.stringify({ turnId }),
     });
     const body = asRecord(await response.json());
+    const queue = parseQueueFacts(body);
     return {
       created: body.created === true,
       seq: numberOr(body.seq, 0),
       requestId: typeof body.requestId === "string" ? body.requestId : "",
+      ...(queue ? { queue } : {}),
     };
   }
 

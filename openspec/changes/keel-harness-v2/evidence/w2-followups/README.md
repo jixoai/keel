@@ -1,9 +1,10 @@
-# W2 review follow-ups — P2 closure (2026-11-23)
+# W2 review follow-ups — P2 closure + web P1 (2026-11-23)
 
-Lane: `task/keel-w2-followups` (worktree `.worktrees/keel-w2-followups`), based on
-`8d6252b` (W2 queue/ETA/memory-packing slice). Scope: the six follow-ups from the
-W2 review that are implementable in this lane. Group OOM / process isolation and
-draining-group eviction remain out of scope (unchanged).
+Lane: `task/keel-w2-followups` (worktree `.worktrees/keel-w2`), based on the W2
+queue/ETA/memory-packing slice; final rebase on `a549e87` + W11 + W3. Scope: the
+six follow-ups from the W2 review that are implementable in this lane, plus the
+web queued-state P1 (§7). Group OOM / process isolation and draining-group
+eviction remain out of scope (unchanged).
 
 ## 1. FIFO fairness in a crash/reconfigure window
 
@@ -137,6 +138,29 @@ timeouts plus a records-page interaction), none of which touch the changed
 files. `nsh test --target tui src/screens/books/books.tui.test.tsx --filter
 '记录——默认打开首条'` passes alone (8.0s), and `App.tui.test.tsx` passes
 11/12 (the remaining one is the same settings timeout). See `tests.txt`.
+
+## 7. Web P1: the queue fact cannot outlive the server fact
+
+Review found a drift: the client queue fact (from a 202) could survive after the
+server row left `queued` (promotion/finish/cancel), and a historical `attach()`
+replay or a live input racing its 202 could overwrite a queued row.
+
+After (`web/src/data/store.ts`, `web/src/data/http.ts`,
+`web/src/screens/session-list.tsx`, `web/src/screens/session-status-pane.tsx`):
+
+- `mergeSessions` drops the client queue fact whenever the incoming server
+  `runStatus` is not `queued`; a still-queued row keeps the admission fact;
+- `rowStateOf` and the status header only render 排队中 while the row's
+  `runStatus` is still queued (a stale fact cannot speak for the server);
+- `onLiveEvent` ignores `attach()`'s historical user/assistant/run.finished
+  replay and a racing input for a queued row;
+- `retry` parses a queued 202 through `parseQueueFacts` and patches
+  `queued` + the queue fact instead of optimistically saying running.
+
+Tests on the final rebase (Go `internal/placement`/`httpapi`/`kernel` green;
+web queue suites green): `web/src/data/store.queue.test.ts` (5),
+`web/src/data/queue.test.ts` (4), `web/src/ui/run-state.test.ts` (4). See
+`web-queue-p1.txt` and `tests-rerun-2026-11-23.txt`.
 
 ## Limitations (explicit)
 

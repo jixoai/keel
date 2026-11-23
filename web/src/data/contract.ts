@@ -90,6 +90,9 @@ export interface RetryResult {
   created: boolean;
   seq: number;
   requestId: string;
+  /** The retried input may itself be queued behind a full group; the server
+   * then answers 202 with the same queue block as input/run. */
+  queue?: QueueFacts;
 }
 
 /** An attachment shown in the conversation (uploaded by the composer). */

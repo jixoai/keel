@@ -274,6 +274,12 @@ const runningLike = (runStatus: string | undefined): boolean => {
   }
 };
 
+/** A server row that says the run is waiting in the placement queue. The
+ * position/ETA is a client-side admission fact (the session listing never
+ * carries it), so it is only valid while the server still says queued. */
+const queuedRunStatus = (runStatus: string | undefined): boolean =>
+  (runStatus ?? "").toLowerCase() === "queued";
+
 /** The tail's newest decision, read for the list badge (C2): an open decision
  * parks the session on an answer; a settled one, or a tail that ends without
  * any decision, is not waiting. `undefined` = the tail says nothing either
@@ -1547,6 +1553,26 @@ class KeelStore {
     this.sessionsLoading.set(false);
   }
 
+  /** Test only: fold a listing through the real merge path (promotion, finish
+   * and stale-position cases). */
+  mergeSessionsForTest(rows: SessionSummary[]): void {
+    this.mergeSessions(rows);
+  }
+
+  /** Test only: deliver one event through the opened session's stream path,
+   * exactly as attach() hydration and the live SSE tap do. */
+  applyLiveEventForTest(event: WireEvent): void {
+    this.onLiveEvent(event);
+  }
+
+  /** Test only: cancel a scheduled list refresh so a case owns the merge. */
+  clearRefreshTimerForTest(): void {
+    if (this.refreshTimer !== undefined) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+  }
+
   /** Test/host seam: answer the identity/access surface without a network.
    * `null` restores the app's own transport. */
   setIdentityTransport(client: IdentityApi | null): void {
@@ -1678,18 +1704,24 @@ class KeelStore {
    * at the top, newest first (C5). */
   private mergeSessions(incoming: SessionSummary[]) {
     const current = this.sessions();
+    // A queue fact is only valid while the server says the run is queued. The
+    // listing never carries the position/ETA, so an incoming non-queued row
+    // (promotion, finish, cancellation) must drop the stale client fact instead
+    // of leaving 排队中 on screen forever.
+    const clean = (row: SessionSummary): SessionSummary =>
+      queuedRunStatus(row.runStatus) ? row : { ...row, queue: undefined };
     if (current.length === 0) {
-      this.sessions.set(sortNewestFirst(incoming));
+      this.sessions.set(sortNewestFirst(incoming.map(clean)));
       return;
     }
     const fresh = new Map(incoming.map((row) => [row.sessionId, row]));
     const next: SessionSummary[] = [];
     for (const row of current) {
       const update = fresh.get(row.sessionId);
-      if (update) next.push({ ...row, ...update });
+      if (update) next.push({ ...row, ...clean(update) });
     }
     const known = new Set(current.map((row) => row.sessionId));
-    const added = sortNewestFirst(incoming.filter((row) => !known.has(row.sessionId)));
+    const added = sortNewestFirst(incoming.filter((row) => !known.has(row.sessionId)).map(clean));
     this.sessions.set([...added, ...next]);
   }
 
@@ -1739,11 +1771,15 @@ class KeelStore {
   }
 
   /** The open session's last queue fact (a 202 admission's position/ETA). The
-   * header uses it to say 排队中 instead of projecting an idle conversation. */
+   * header uses it to say 排队中 instead of projecting an idle conversation.
+   * It is only reported while the row still says queued: a promoted run may
+   * keep the old fact for a refresh tick, and the header must not prefer it
+   * over the server's newer status. */
   activeQueue(): QueueFacts | undefined {
     const id = this.activeId();
     if (!id) return undefined;
-    return this.sessions().find((row) => row.sessionId === id)?.queue;
+    const row = this.sessions().find((candidate) => candidate.sessionId === id);
+    return queuedRunStatus(row?.runStatus) ? row?.queue : undefined;
   }
 
   async openSession(sessionId: string) {
@@ -1832,16 +1868,32 @@ class KeelStore {
         this.patchSession(sessionId, { pendingDecision: false });
       }
     }
+    const row = this.sessions().find((candidate) => candidate.sessionId === sessionId);
+    const stillQueued = queuedRunStatus(row?.runStatus);
     if (event.kind === "run.finished") {
-      this.patchSession(sessionId, {
-        runStatus: String(payloadOf(event).stopReason ?? "done"),
-        queue: undefined,
-        lastSeq: event.seq,
-        lastMessageAt: new Date().toISOString(),
-        pendingDecision: false,
-      });
+      if (stillQueued) {
+        // A queued run cannot have finished: this is history replayed by
+        // attach() (or an out-of-order event) and must not clear the queue
+        // fact. The refresh scheduled below reconciles a real promotion.
+        this.patchSession(sessionId, { lastSeq: Math.max(row?.lastSeq ?? 0, event.seq) });
+      } else {
+        this.patchSession(sessionId, {
+          runStatus: String(payloadOf(event).stopReason ?? "done"),
+          queue: undefined,
+          lastSeq: event.seq,
+          lastMessageAt: new Date().toISOString(),
+          pendingDecision: false,
+        });
+      }
     } else if (event.kind === "user.message" || event.kind === "assistant.message") {
-      this.patchSession(sessionId, { runStatus: "running", queue: undefined, lastSeq: event.seq });
+      if (stillQueued) {
+        // attach() hydrates history through this same callback, and the
+        // queueing input's live event can race its 202. Neither may pretend
+        // the run started or wipe the position/ETA learned from the 202.
+        this.patchSession(sessionId, { lastSeq: Math.max(row?.lastSeq ?? 0, event.seq) });
+      } else {
+        this.patchSession(sessionId, { runStatus: "running", queue: undefined, lastSeq: event.seq });
+      }
     }
     if (event.kind !== "partial") {
       this.scheduleRefresh();
@@ -2109,10 +2161,16 @@ class KeelStore {
     if (!sessionId || this.retryingTurn()) return false;
     this.retryingTurn.set(turnId);
     try {
-      await this.client.retryTurn(sessionId, turnId);
+      const result = await this.client.retryTurn(sessionId, turnId);
       if (this.dismissedTurnError === turnId) this.dismissedTurnError = null;
       if (this.turnError()?.turnId === turnId) this.turnError.set(null);
-      this.patchSession(sessionId, { runStatus: "running", pendingDecision: false });
+      // A retried input can land in the placement queue (202): report that
+      // honestly instead of optimistically saying the run is already running.
+      if (result.queue) {
+        this.patchSession(sessionId, { runStatus: "queued", queue: result.queue, pendingDecision: false });
+      } else {
+        this.patchSession(sessionId, { runStatus: "running", queue: undefined, pendingDecision: false });
+      }
       this.scheduleRefresh();
       return true;
     } catch (error) {

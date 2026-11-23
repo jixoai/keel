@@ -113,14 +113,16 @@ const summaryOf = (row: SessionSummary): string => {
   return preview;
 };
 
-/** The one-word state of a row: a placement queue entry always wins (the
+/** The one-word state of a row: the server's queued status wins (the
  * conversation view has no queue fact), then the active row projects the open
  * conversation (which knows about stopping), every other row projects
- * runStatus. */
+ * runStatus. A client-side queue fact never speaks for the server: only a row
+ * whose runStatus is still queued may render 排队中. */
 const rowStateOf = (row: SessionSummary, active: boolean): RunState => {
-  if (row.queue || (row.runStatus ?? "").toLowerCase() === "queued") return "queued";
+  const state = sessionState(row.runStatus);
+  if (state === "queued") return "queued";
   if (active && store.conversation()) return conversationState(store.conversation());
-  return sessionState(row.runStatus);
+  return state;
 };
 
 /** The single status word a row shows, or none at all.

@@ -1,0 +1,22 @@
+# W2 follow-ups — targeted rerun on the final rebase
+# date: 2026-11-23 (a549e87 + W11 + W3 + W2)
+# host: macOS arm64 / Go 1.27.4 / PostgreSQL 18.7 (local, no Docker)
+# DSN: postgres://kzf@127.0.0.1:5432/keel_w2_test?sslmode=disable
+# (fresh database for this run; dropped after the run)
+#
+# $ go build ./...
+# (exit 0)
+# $ go vet ./...
+# (exit 0)
+#
+# $ KEEL_TEST_DSN=... go test -p 1 -count=1 \
+#     ./internal/placement ./internal/httpapi ./internal/kernel
+ok  	github.com/jixoai/keel/internal/placement	2.514s
+ok  	github.com/jixoai/keel/internal/httpapi	4.940s
+ok  	github.com/jixoai/keel/internal/kernel	18.834s
+#
+# Web suites (nsh 0.6.0 f577c51 nightly; the pinned 0.4.0 bba76ef nightly is
+# not installed on this machine) — see web-queue-p1.txt for the full lines:
+#   src/data/store.queue.test.ts  5 passed
+#   src/data/queue.test.ts        4 passed
+#   src/ui/run-state.test.ts      4 passed

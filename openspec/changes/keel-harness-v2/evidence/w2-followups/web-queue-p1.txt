@@ -1,0 +1,30 @@
+# W2 web P1 — the queue fact cannot outlive the server fact
+# date: 2026-11-23 (final rebase: a549e87 + W11 + W3 + W2)
+# host: macOS arm64; nsh 0.6.0 (f577c51 nightly, 2026-11-22)
+#
+# Note: the pinned nsh 0.4.0 (bba76ef nightly) is not installed on this
+# machine; these queue suites are host-version independent. `nsh check` has
+# two pre-existing speech errors from 0.6.0's nullable PickedFile.file, not
+# from this lane.
+#
+# $ nsh test --target tui src/data/store.queue.test.ts
+✓ src/data/store.queue.test.ts › mergeSessions: a non-queued server row drops the client queue fact (0ms)
+✓ src/data/store.queue.test.ts › mergeSessions: a still-queued row keeps the admission fact (0ms)
+✓ src/data/store.queue.test.ts › historical replay through attach() does not clear a queued row (0ms)
+✓ src/data/store.queue.test.ts › retry: a queued 202 renders 排队中 with its position/ETA (0ms)
+✓ src/data/store.queue.test.ts › retry: an admitted retry is running and clears any stale queue fact (0ms)
+✓ 5 tests: 5 passed, 0 failed (37ms)
+#
+# $ nsh test --target tui src/data/queue.test.ts
+✓ src/data/queue.test.ts › parseQueueFacts: 读取 202 队列块的位置与已知 ETA (0ms)
+✓ src/data/queue.test.ts › parseQueueFacts: ETA 未知时 etaSeconds 为 null，不伪造 0 (0ms)
+✓ src/data/queue.test.ts › parseQueueFacts: 没有队列块或位置非法＝没有队列事实 (0ms)
+✓ src/data/queue.test.ts › parseQueueFacts: etaKnown 为真但 etaSeconds 缺失/非数仍是未知 (0ms)
+✓ 4 tests: 4 passed, 0 failed (6ms)
+#
+# $ nsh test --target tui src/ui/run-state.test.ts
+✓ src/ui/run-state.test.ts › sessionState: queued 映射为排队中，不再落到 ready (0ms)
+✓ src/ui/run-state.test.ts › queueDetail: 有队列事实时展示位置与 ETA (0ms)
+✓ src/ui/run-state.test.ts › queueDetail: 未知 ETA 只说位置，不伪造 0 (0ms)
+✓ src/ui/run-state.test.ts › conversationState: 队列事实不改变对话投影（由调用方优先用 queue） (0ms)
+✓ 4 tests: 4 passed, 0 failed (6ms)
