@@ -46,6 +46,12 @@ const (
 // reference — a footgun the API refuses instead of documenting.
 var secretNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 
+// providerIDPattern is the models-document provider id grammar (modelcfg's
+// validateIdentifier shape: a token with no whitespace). The direct-credential
+// route derives a secret name from this id, so it refuses an id no provider
+// entry could carry before deriving anything.
+var providerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
 // ModelSettingsStore is the persistence seam of the tenant models override. It
 // is the store package's model-settings API verbatim, so *store.Store satisfies
 // it without an adapter; the typed errors
@@ -133,9 +139,14 @@ type SecretStore interface {
 	Delete(ctx context.Context, tenantID uuid.UUID, name string) (bool, error)
 }
 
-// SecretMeta is what a secret list may show: the name and the timestamps.
+// SecretMeta is what a secret list may show: the name, the masked preview
+// computed at write time, and the timestamps. Preview is never the value: it is
+// first6 + "…" + last6 for a credential longer than 18 runes, a fixed mask
+// otherwise (store.SecretPreview). An empty preview means the stored row
+// predates the preview column; a reader shows "已保存" rather than inventing one.
 type SecretMeta struct {
 	Name      string    `json:"name"`
+	Preview   string    `json:"preview,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -149,6 +160,7 @@ func (s *Server) settingsRoutes() {
 	s.mux.HandleFunc("GET /v1/settings/secrets", s.listSecrets)
 	s.mux.HandleFunc("PUT /v1/settings/secrets/{name}", s.putSecret)
 	s.mux.HandleFunc("DELETE /v1/settings/secrets/{name}", s.deleteSecret)
+	s.mux.HandleFunc("PUT /v1/settings/providers/{id}/credential", s.putProviderCredential)
 	s.mux.HandleFunc("GET /v1/settings/plugins", s.settingsPlugins)
 }
 
@@ -694,9 +706,12 @@ type secretsResponse struct {
 	Reason    string       `json:"reason,omitempty"`
 }
 
-// secretWriteResponse is the PUT /v1/settings/secrets/{name} body.
+// secretWriteResponse is the PUT /v1/settings/secrets/{name} body. Preview is
+// the masked form of the just-written value (store.SecretPreview) — the same
+// rule the list publishes — and never the value itself.
 type secretWriteResponse struct {
 	Name      string    `json:"name"`
+	Preview   string    `json:"preview,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -704,6 +719,30 @@ type secretWriteResponse struct {
 type secretDeleteResponse struct {
 	Name    string `json:"name"`
 	Deleted bool   `json:"deleted"`
+}
+
+// providerCredentialRequest is the PUT
+// /v1/settings/providers/{id}/credential body: the credential value, sent once.
+// It is the direct-entry convenience the Provider editor offers; the value goes
+// straight to the encrypted tenant secret store and is never echoed, logged or
+// written into the models document.
+type providerCredentialRequest struct {
+	Value string `json:"value"`
+}
+
+// providerCredentialResponse is the answer of a direct credential write. The
+// value is gone: the caller receives the reference to put in the document,
+// the stored name and its masked preview.
+type providerCredentialResponse struct {
+	ProviderID string `json:"providerId"`
+	// SecretName is the stable name the value was stored under
+	// (provider_<providerId>, sanitized to the secret-name grammar).
+	SecretName string `json:"secretName"`
+	// SecretRef is the reference to declare in the models document
+	// (`secret:<SecretName>`). The document never carries the value.
+	SecretRef string    `json:"secretRef"`
+	Preview   string    `json:"preview"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // secretsUnavailableReason is the operator-facing explanation rendered whenever
@@ -774,7 +813,11 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, secretWriteResponse{Name: name, UpdatedAt: updatedAt})
+	writeJSON(w, http.StatusOK, secretWriteResponse{
+		Name:      name,
+		Preview:   store.SecretPreview([]byte(body.Value)),
+		UpdatedAt: updatedAt,
+	})
 }
 
 // deleteSecret implements DELETE /v1/settings/secrets/{name}. It is idempotent:
@@ -815,6 +858,87 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, secretDeleteResponse{Name: name, Deleted: deleted})
+}
+
+// providerCredentialSecretName derives the stable tenant-secret name a
+// provider's directly entered credential is stored under: `provider_<id>`, with
+// every character the secret-name grammar refuses replaced by `_`. The name is
+// stable (the same provider always overwrites the same row), so a re-paste
+// rotates the value instead of accumulating rows.
+func providerCredentialSecretName(providerID string) string {
+	var builder strings.Builder
+	builder.Grow(len("provider_") + len(providerID))
+	builder.WriteString("provider_")
+	for _, r := range providerID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteRune('_')
+	}
+	return builder.String()
+}
+
+// putProviderCredential implements PUT /v1/settings/providers/{id}/credential:
+// the Provider editor's direct-entry path. It writes the value to the encrypted
+// tenant secret store under the provider's stable name, and answers the
+// reference (`secret:<name>`) plus its masked preview. The models document is
+// NOT touched here: the client puts the returned reference into the document's
+// access.ref and saves the document through PUT /v1/settings/models, so a
+// credential can never end up embedded in configuration. A blank value is
+// refused (a blank field must never erase a stored credential; forgetting one
+// is the explicit DELETE /v1/settings/secrets/{name}).
+func (s *Server) putProviderCredential(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFrom(w, r)
+	if !ok {
+		return
+	}
+	providerID := strings.TrimSpace(r.PathValue("id"))
+	if providerID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("provider id is required"))
+		return
+	}
+	if !providerIDPattern.MatchString(providerID) {
+		writeErr(w, http.StatusBadRequest,
+			errors.New("provider id must be a token of letters, digits, '.', '_' or '-' (the models-document id grammar)"))
+		return
+	}
+	if s.cfg.SecretStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New(s.secretsUnavailableReason()))
+		return
+	}
+	var body providerCredentialRequest
+	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	value := strings.TrimSpace(body.Value)
+	if value == "" {
+		writeErr(w, http.StatusBadRequest,
+			errors.New("value is required: a blank field never erases a stored credential (delete the secret to forget it)"))
+		return
+	}
+	name := providerCredentialSecretName(providerID)
+	if !secretNamePattern.MatchString(name) {
+		// Unreachable for a valid provider id (sanitization is idempotent), but
+		// the store's grammar is the authority; fail rather than store a name
+		// nothing can reference.
+		writeErr(w, http.StatusBadRequest,
+			errors.New("the provider id produces a secret name the reference grammar refuses"))
+		return
+	}
+	updatedAt, err := s.cfg.SecretStore.Put(r.Context(), tenantID, name, []byte(value))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, providerCredentialResponse{
+		ProviderID: providerID,
+		SecretName: name,
+		SecretRef:  "secret:" + name,
+		Preview:    store.SecretPreview([]byte(value)),
+		UpdatedAt:  updatedAt,
+	})
 }
 
 // documentReferencesSecret reports whether a models document names the tenant

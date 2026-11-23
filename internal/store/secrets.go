@@ -4,7 +4,7 @@ package store
 // with `secret:NAME`. The value is only ever handled as ciphertext at rest and
 // as an in-memory plaintext for the resolving path; no method here returns a
 // value to a caller that renders it, and the list projection deliberately
-// carries nothing but the name and the timestamps.
+// carries nothing but the name, the masked preview and the timestamps.
 
 import (
 	"context"
@@ -19,11 +19,39 @@ import (
 // ErrNoTenantSecret means no secret row exists for the tenant/name pair.
 var ErrNoTenantSecret = errors.New("store: tenant secret not found")
 
+// MaskedSecretPreview is the fixed stand-in for a credential too short to mask
+// with a prefix and a suffix. It deliberately carries no character of the value
+// and no length fact.
+const MaskedSecretPreview = "••••••••"
+
+// previewVisibleRunes is the rune count above which a preview keeps the first
+// six and the last six characters. At exactly 18 runes, six + six would be the
+// whole value, so the fixed mask applies instead.
+const previewVisibleRunes = 18
+
+// SecretPreview computes the masked preview of one credential value. The rule
+// is exact: a value longer than 18 runes previews as first6 + "…" + last6; any
+// shorter value (including 18) previews as the fixed mask alone, so a short
+// credential cannot be reconstructed and its length cannot be probed from the
+// preview. A rune-counted boundary matters: an emoji or CJK secret counts by
+// code point, not UTF-16 units or bytes.
+func SecretPreview(value []byte) string {
+	runes := []rune(string(value))
+	if len(runes) <= previewVisibleRunes {
+		return MaskedSecretPreview
+	}
+	return string(runes[:6]) + "…" + string(runes[len(runes)-6:])
+}
+
 // TenantSecretMeta is the non-sensitive projection of one stored secret: what
-// a list may show. It deliberately has no length, prefix, hash or any other
-// datum that could help guess the value.
+// a list may show. The preview is the masked form computed at write time (see
+// SecretPreview); it deliberately has no length, full prefix, hash or any other
+// datum that could help guess the value. An empty preview means the row
+// predates the column and no masked form was recorded — a reader shows
+// "已保存" instead of inventing one.
 type TenantSecretMeta struct {
 	Name      string
+	Preview   string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -39,11 +67,12 @@ func TenantSecretAAD(tenantID uuid.UUID, name string) []byte {
 	return aad
 }
 
-// ListTenantSecrets returns the names and timestamps of a tenant's secrets in
-// name order. A tenant with none is an empty slice, not an error.
+// ListTenantSecrets returns the names, masked previews and timestamps of a
+// tenant's secrets in name order. A tenant with none is an empty slice, not an
+// error.
 func (s *Store) ListTenantSecrets(ctx context.Context, tenantID uuid.UUID) ([]TenantSecretMeta, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT name, created_at, updated_at FROM tenant_secrets
+		`SELECT name, preview, created_at, updated_at FROM tenant_secrets
 		 WHERE tenant_id = $1 ORDER BY name`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tenant secrets: %w", err)
@@ -52,8 +81,12 @@ func (s *Store) ListTenantSecrets(ctx context.Context, tenantID uuid.UUID) ([]Te
 	out := make([]TenantSecretMeta, 0, 8)
 	for rows.Next() {
 		var meta TenantSecretMeta
-		if err := rows.Scan(&meta.Name, &meta.CreatedAt, &meta.UpdatedAt); err != nil {
+		var preview *string
+		if err := rows.Scan(&meta.Name, &preview, &meta.CreatedAt, &meta.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan tenant secret: %w", err)
+		}
+		if preview != nil {
+			meta.Preview = *preview
 		}
 		out = append(out, meta)
 	}
@@ -87,8 +120,10 @@ func (s *Store) GetTenantSecret(ctx context.Context, tenantID uuid.UUID, name st
 }
 
 // PutTenantSecret encrypts and upserts one secret, returning the row's
-// updated_at. created_at is preserved across an overwrite, so the list still
-// distinguishes "first written" from "last changed".
+// updated_at. The masked preview is computed from the plaintext here — at write
+// time, by the same process that held the value — so no later read ever needs
+// the plaintext to render it. created_at is preserved across an overwrite, so
+// the list still distinguishes "first written" from "last changed".
 func (s *Store) PutTenantSecret(ctx context.Context, tenantID uuid.UUID, name string, plaintext []byte, box *SecretBox) (time.Time, error) {
 	if box == nil {
 		return time.Time{}, ErrSecretKeyMissing
@@ -99,12 +134,12 @@ func (s *Store) PutTenantSecret(ctx context.Context, tenantID uuid.UUID, name st
 	}
 	var updatedAt time.Time
 	err = s.pool.QueryRow(ctx,
-		`INSERT INTO tenant_secrets (tenant_id, name, ciphertext)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO tenant_secrets (tenant_id, name, ciphertext, preview)
+		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT (tenant_id, name) DO UPDATE
-		 SET ciphertext = EXCLUDED.ciphertext, updated_at = now()
+		 SET ciphertext = EXCLUDED.ciphertext, preview = EXCLUDED.preview, updated_at = now()
 		 RETURNING updated_at`,
-		tenantID, name, sealed).Scan(&updatedAt)
+		tenantID, name, sealed, SecretPreview(plaintext)).Scan(&updatedAt)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("store: put tenant secret: %w", err)
 	}

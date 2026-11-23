@@ -1885,7 +1885,12 @@ func (s tenantSecretSeam) List(ctx context.Context, tenantID uuid.UUID) ([]harne
 	}
 	out := make([]harnessapi.SecretMeta, 0, len(metas))
 	for _, meta := range metas {
-		out = append(out, harnessapi.SecretMeta{Name: meta.Name, CreatedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt})
+		out = append(out, harnessapi.SecretMeta{
+			Name:      meta.Name,
+			Preview:   meta.Preview,
+			CreatedAt: meta.CreatedAt,
+			UpdatedAt: meta.UpdatedAt,
+		})
 	}
 	return out, nil
 }

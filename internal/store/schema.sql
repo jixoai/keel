@@ -538,6 +538,15 @@ CREATE TABLE IF NOT EXISTS tenant_secrets (
     PRIMARY KEY (tenant_id, name)
 );
 
+-- Additive (change keel-model-catalog A): the masked preview a settings list
+-- renders next to a credential name. It is computed at write time by
+-- store.SecretPreview (first6 + "…" + last6 for values longer than 18 runes,
+-- a fixed mask otherwise) and carries no length, full value or hash. NULL means
+-- the row predates this column; a reader shows "已保存" instead of inventing a
+-- preview. ADD COLUMN IF NOT EXISTS keeps the migration idempotent on both a
+-- fresh database and an existing one.
+ALTER TABLE tenant_secrets ADD COLUMN IF NOT EXISTS preview text;
+
 -- Encrypted OAuth state: client registration, tokens, PKCE verifier, discovery.
 -- payload is AES-256-GCM ciphertext (nonce prepended); the key comes from
 -- KEEL_SECRET_KEY and is never stored next to the row. scopes and expires_at

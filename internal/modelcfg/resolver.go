@@ -236,6 +236,7 @@ func resolveModel(provider ProviderConfig, modelID string, doc document) ModelVi
 	if decoded.Options != nil {
 		options = *decoded.Options
 	}
+	pricing := clonePricing(decoded.Pricing)
 	issues, complete := modelIssues(decoded, providerType, enabled, exact)
 	// A capability-endpoint family is executable but not a session model; the
 	// issue explains the missing Selectable flag next to the model in Settings.
@@ -254,6 +255,7 @@ func resolveModel(provider ProviderConfig, modelID string, doc document) ModelVi
 		API:          cloneAPI(provider.API),
 		Properties:   properties,
 		Options:      cloneOptions(options),
+		Pricing:      pricing,
 		Enabled:      enabled,
 		Executable:   complete,
 		Baseline:     !exact,
@@ -580,8 +582,30 @@ func cloneModelView(view ModelView) ModelView {
 	out := view
 	out.API = cloneAPI(view.API)
 	out.Options = cloneOptions(view.Options)
+	out.Pricing = clonePricing(view.Pricing)
 	out.Issues = cloneIssues(view.Issues)
 	return out
+}
+
+// clonePricing deep-copies a price block. Every price is a *float64, so a
+// settings read cannot mutate the value a generation displays or meters against.
+func clonePricing(pricing *Pricing) *Pricing {
+	if pricing == nil {
+		return nil
+	}
+	out := *pricing
+	copyPrice := func(price *float64) *float64 {
+		if price == nil {
+			return nil
+		}
+		value := *price
+		return &value
+	}
+	out.Input = copyPrice(pricing.Input)
+	out.Output = copyPrice(pricing.Output)
+	out.CacheRead = copyPrice(pricing.CacheRead)
+	out.CacheWrite = copyPrice(pricing.CacheWrite)
+	return &out
 }
 
 func cloneAPI(api API) API {

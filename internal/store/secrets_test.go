@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,8 +82,17 @@ func TestTenantSecretEncryptedAtRest(t *testing.T) {
 	if list[0].CreatedAt.IsZero() || list[0].UpdatedAt.IsZero() {
 		t.Fatalf("list entry must carry timestamps: %+v", list[0])
 	}
+	// The preview was computed at write time from the plaintext: a >18-rune
+	// value previews first6…last6, and the row itself carries no plaintext.
+	if list[0].Preview != "sk-liv…ot-log" {
+		t.Fatalf("preview = %q, want the masked form of the stored value", list[0].Preview)
+	}
+	if strings.Contains(list[0].Preview, string(plaintext)) {
+		t.Fatalf("the preview carries the whole value: %q", list[0].Preview)
+	}
 
-	// An overwrite keeps created_at, moves updated_at, and stays ciphertext.
+	// An overwrite keeps created_at, moves updated_at, stays ciphertext, and
+	// advances the preview to the new value's masked form.
 	created := list[0].CreatedAt
 	time.Sleep(2 * time.Millisecond)
 	if _, err := st.PutTenantSecret(ctx, tenant, "s2api", []byte("sk-live-rotated"), box); err != nil {
@@ -100,6 +110,24 @@ func TestTenantSecretEncryptedAtRest(t *testing.T) {
 	}
 	if !overwritten[0].UpdatedAt.After(created) {
 		t.Fatalf("updated_at did not move on overwrite: %v", overwritten[0].UpdatedAt)
+	}
+	if overwritten[0].Preview != MaskedSecretPreview {
+		t.Fatalf("a short overwrite must show the fixed mask, got %q", overwritten[0].Preview)
+	}
+
+	// A row that predates the preview column lists with an empty preview (the
+	// client renders "已保存"), never a NULL scan error.
+	if _, err := st.Pool().Exec(ctx,
+		`UPDATE tenant_secrets SET preview = NULL WHERE tenant_id = $1 AND name = $2`,
+		tenant, "s2api"); err != nil {
+		t.Fatalf("clear preview: %v", err)
+	}
+	legacy, err := st.ListTenantSecrets(ctx, tenant)
+	if err != nil {
+		t.Fatalf("list legacy row: %v", err)
+	}
+	if len(legacy) != 1 || legacy[0].Preview != "" {
+		t.Fatalf("a row without a preview = %+v, want an empty preview", legacy)
 	}
 
 	// Delete reports whether anything was there and is idempotent.

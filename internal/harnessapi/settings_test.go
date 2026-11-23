@@ -145,7 +145,12 @@ func (f *fakeSecretStore) List(_ context.Context, tenantID uuid.UUID) ([]SecretM
 	out := make([]SecretMeta, 0, len(f.values[tenantID]))
 	for name := range f.values[tenantID] {
 		key := tenantID.String() + "/" + name
-		out = append(out, SecretMeta{Name: name, CreatedAt: f.created[key], UpdatedAt: time.Now().UTC()})
+		out = append(out, SecretMeta{
+			Name:      name,
+			Preview:   store.SecretPreview(f.values[tenantID][name]),
+			CreatedAt: f.created[key],
+			UpdatedAt: time.Now().UTC(),
+		})
 	}
 	return out, nil
 }
@@ -557,8 +562,8 @@ func TestModelCatalogLiveSeam(t *testing.T) {
 // TestSettingsSecretsRoutes pins the secret surface: names and timestamps only,
 // one-way values, idempotent deletes, and tenant scoping.
 func TestSettingsSecretsRoutes(t *testing.T) {
-	store := newFakeSecretStore()
-	server := settingsServer(t, func(cfg *Config) { cfg.SecretStore = store })
+	secrets := newFakeSecretStore()
+	server := settingsServer(t, func(cfg *Config) { cfg.SecretStore = secrets })
 	client := server.Client()
 	tenant := uuid.New()
 
@@ -583,14 +588,25 @@ func TestSettingsSecretsRoutes(t *testing.T) {
 	if code := doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/secrets", tenant, nil, &raw); code != 200 {
 		t.Fatalf("list after put = %d", code)
 	}
-	if strings.Contains(string(raw), secretValue) || strings.Contains(string(raw), "sk-") {
-		t.Fatalf("the list leaked the value or a value-shaped field: %s", raw)
+	if strings.Contains(string(raw), secretValue) {
+		t.Fatalf("the list leaked the value: %s", raw)
+	}
+	// The masked preview is allowed to show the first/last six characters (the
+	// Owner's masking rule), but never the whole value or a guessable shape:
+	// no length, hash or full prefix is in the body.
+	for _, field := range []string{`"length"`, `"hash"`, `"value"`, `"prefix"`} {
+		if strings.Contains(string(raw), field) {
+			t.Fatalf("the list carries %s: %s", field, raw)
+		}
 	}
 	if !strings.Contains(string(raw), `"s2api"`) {
 		t.Fatalf("the list must name the secret: %s", raw)
 	}
 	if err := json.Unmarshal(raw, &list); err != nil {
 		t.Fatal(err)
+	}
+	if list.Secrets[0].Preview != store.SecretPreview([]byte(secretValue)) {
+		t.Fatalf("the list preview = %q, want the masked form", list.Secrets[0].Preview)
 	}
 	if list.Secrets[0].CreatedAt.IsZero() || list.Secrets[0].UpdatedAt.IsZero() {
 		t.Fatalf("the list must carry the timestamps: %+v", list.Secrets[0])
@@ -615,7 +631,7 @@ func TestSettingsSecretsRoutes(t *testing.T) {
 		map[string]string{"value": "v"}, nil); code != 200 {
 		t.Fatalf("put other = %d", code)
 	}
-	if value, found := store.values[uuid.New()]["other"]; found && value != nil {
+	if value, found := secrets.values[uuid.New()]["other"]; found && value != nil {
 		t.Fatal("a secret landed under a foreign tenant")
 	}
 	for _, name := range []string{"has space", "bad!name", strings.Repeat("x", 65)} {

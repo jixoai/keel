@@ -97,6 +97,29 @@ func floatToInt(f float64) (int, bool) {
 	return int(f), true
 }
 
+// asFloat converts a decoded JSON number into a float64. Non-numeric values
+// return ok=false.
+func asFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	default:
+		return 0, false
+	}
+}
+
 // intValue extracts an integral number from a request-patch value.
 func intValue(value any) (int, bool) {
 	return asInt(value)

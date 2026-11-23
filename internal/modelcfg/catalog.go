@@ -820,7 +820,7 @@ func validateModelConfigMap(config map[string]any) error {
 	if config == nil {
 		return errors.New("config must be an object")
 	}
-	if err := rejectUnknownKeys(config, "enabled", "providerType", "properties", "options"); err != nil {
+	if err := rejectUnknownKeys(config, "enabled", "providerType", "properties", "options", "pricing"); err != nil {
 		return err
 	}
 	if value, ok := config["providerType"]; ok && value != nil {
@@ -853,6 +853,15 @@ func validateModelConfigMap(config map[string]any) error {
 		}
 		if err := validateOptionsMap(options); err != nil {
 			return fmt.Errorf("options: %w", err)
+		}
+	}
+	if value, ok := config["pricing"]; ok && value != nil {
+		pricing, ok := value.(map[string]any)
+		if !ok {
+			return errors.New("pricing must be an object or null")
+		}
+		if err := validatePricingMap(pricing); err != nil {
+			return fmt.Errorf("pricing: %w", err)
 		}
 	}
 	return nil
@@ -1018,6 +1027,57 @@ func validatePatchMap(patches map[string]any, allowEmptyKey bool) error {
 		}
 		if _, ok := value.(map[string]any); !ok {
 			return fmt.Errorf("%q must be a patch object or null", key)
+		}
+	}
+	return nil
+}
+
+// pricingKeys is the closed vocabulary of a model's pricing block. Prices are
+// per one million tokens (the unit every vendor sheet publishes), in the block's
+// currency. Nothing here is an execution fact: an unknown key is refused so a
+// typo (inputPrice, cost) can never silently record a price nobody reads.
+var pricingKeys = []string{"currency", "input", "output", "cacheRead", "cacheWrite", "free", "notes"}
+
+// currencyPattern is the ISO-4217 shape: three upper-case letters. Membership is
+// not checked (a currency this build has no symbol for still formats as its
+// code).
+var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
+
+// validatePricingMap checks types and domains of a pricing block. Every field is
+// optional: a block that declares only `free: true` is legal, and a price is
+// never required for execution.
+func validatePricingMap(pricing map[string]any) error {
+	if err := rejectUnknownKeys(pricing, pricingKeys...); err != nil {
+		return err
+	}
+	if value, ok := pricing["currency"]; ok && value != nil {
+		code, ok := value.(string)
+		if !ok || !currencyPattern.MatchString(code) {
+			return errors.New("currency must be a three-letter upper-case ISO-4217 code (for example USD)")
+		}
+	}
+	for _, key := range []string{"input", "output", "cacheRead", "cacheWrite"} {
+		value, ok := pricing[key]
+		if !ok || value == nil {
+			continue
+		}
+		amount, ok := asFloat(value)
+		if !ok || amount < 0 {
+			return fmt.Errorf("%s must be a non-negative number (per 1M tokens)", key)
+		}
+	}
+	if value, ok := pricing["free"]; ok && value != nil {
+		if _, ok := value.(bool); !ok {
+			return errors.New("free must be a boolean or null")
+		}
+	}
+	if value, ok := pricing["notes"]; ok && value != nil {
+		text, ok := value.(string)
+		if !ok {
+			return errors.New("notes must be a string or null")
+		}
+		if strings.ContainsAny(text, "\r\n") {
+			return errors.New("notes must not contain line breaks")
 		}
 	}
 	return nil

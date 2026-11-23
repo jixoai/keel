@@ -192,6 +192,32 @@ type OptionSpecs struct {
 	MaxOutputTokens LimitSpec `json:"maxOutputTokens"`
 }
 
+// Pricing is the model's list price, per one million tokens, as a product fact
+// for display and estimates only. It is deliberately NOT part of
+// modelprovider.ModelDescriptor (that contract states that pricing belongs to
+// the contract side), and the runtime never sends it upstream: a request patch
+// carrying a price would be a bug.
+//
+// Money values are pointers so "no price declared" stays distinguishable from
+// "$0": a provider that publishes a free tier declares Free or the zeros, while
+// a model nobody priced has no pricing block at all. Currency is an ISO-4217
+// code; an absent currency renders as a bare number (the client never invents a
+// symbol) and the document never gains one.
+type Pricing struct {
+	Currency   string   `json:"currency,omitempty"`
+	Input      *float64 `json:"input,omitempty"`
+	Output     *float64 `json:"output,omitempty"`
+	CacheRead  *float64 `json:"cacheRead,omitempty"`
+	CacheWrite *float64 `json:"cacheWrite,omitempty"`
+	// Free is the explicit free/zero marker: the provider publishes the model
+	// at no charge (a local model, a free tier), which a bare $0/1M line would
+	// understate. It never changes execution.
+	Free bool `json:"free,omitempty"`
+	// Notes is a short human note (a discount window, "off-peak", a source
+	// URL). It is display-only and never used for metering.
+	Notes string `json:"notes,omitempty"`
+}
+
 // EnumSpec maps each allowed value to a JSON Merge Patch template. Every value
 // in Values must have an entry in Map for a model to be executable.
 type EnumSpec struct {
@@ -268,6 +294,9 @@ type ModelConfig struct {
 	ProviderType string       `json:"providerType,omitempty"`
 	Properties   *Properties  `json:"properties,omitempty"`
 	Options      *OptionSpecs `json:"options,omitempty"`
+	// Pricing is display/metering metadata, never an execution fact: a model
+	// without it is executable, and the value never reaches a request patch.
+	Pricing *Pricing `json:"pricing,omitempty"`
 }
 
 // Selection names a model identity. It deliberately carries no endpoint,
@@ -321,11 +350,14 @@ type ModelView struct {
 	API          API         `json:"api"`
 	Properties   Properties  `json:"properties"`
 	Options      OptionSpecs `json:"options"`
-	Enabled      bool        `json:"enabled"`
-	Executable   bool        `json:"executable"`
-	Selectable   bool        `json:"selectable"`
-	Baseline     bool        `json:"baseline"`
-	Issues       []Issue     `json:"issues,omitempty"`
+	// Pricing is the model's declared price list (per 1M tokens) for display
+	// and estimates. Absent means "未声明"; it never affects executability.
+	Pricing    *Pricing `json:"pricing,omitempty"`
+	Enabled    bool     `json:"enabled"`
+	Executable bool     `json:"executable"`
+	Selectable bool     `json:"selectable"`
+	Baseline   bool     `json:"baseline"`
+	Issues     []Issue  `json:"issues,omitempty"`
 }
 
 // ProviderView is the resolved view of one provider. Models contains every
