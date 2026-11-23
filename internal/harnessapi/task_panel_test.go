@@ -79,7 +79,7 @@ func panelFixture(tenant, session uuid.UUID) tasklog.Panel {
 			{TaskID: fork.TaskID, Kind: string(kernel.KindTaskAttached), Seq: 4, At: at, Path: "dist/app.tar.gz", Hash: "sha256:" + "a"},
 			{TaskID: fork.TaskID, Kind: "task.future_kind", Seq: 5, At: at, Unparsed: true},
 		},
-		MemberLimit: 200, EventLimit: 500,
+		CardLimit: 1000, MemberLimit: 200, EventLimit: 500, AttachmentLimit: 1000,
 	}
 }
 
@@ -139,6 +139,12 @@ func TestTaskPanelRouteWireShape(t *testing.T) {
 	}
 	if body.Limits.MemberLimit != 200 || body.Limits.EventLimit != 500 {
 		t.Fatalf("limits = %+v", body.Limits)
+	}
+	if body.Limits.CardLimit != 1000 || body.Limits.AttachmentLimit != 1000 {
+		t.Fatalf("read bounds = %+v", body.Limits)
+	}
+	if body.Limits.CardsTruncated || body.Limits.AttachmentsTruncated {
+		t.Fatalf("a complete read reported truncation: %+v", body.Limits)
 	}
 }
 

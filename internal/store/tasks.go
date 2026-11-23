@@ -407,6 +407,35 @@ func (s *Store) ListTaskCardRows(ctx context.Context, tenantID uuid.UUID, sessio
 	return out, rows.Err()
 }
 
+// ListTaskCardRowsInCreationOrder lists at most limit cards of one session in
+// ledger creation order (the tree's top-down order). A limit <= 0 reads every
+// card. The panel's own-card read is a page: the bound is applied in SQL so a
+// session with a pathological card count never materializes all of them.
+func (s *Store) ListTaskCardRowsInCreationOrder(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]TaskCardRow, error) {
+	q := `SELECT ` + taskCardColumns + ` FROM task_cards
+	       WHERE tenant_id=$1 AND session_id=$2
+	       ORDER BY created_seq, created_at, task_id`
+	args := []any{tenantID, sessionID}
+	if limit > 0 {
+		args = append(args, limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list task cards in creation order: %w", err)
+	}
+	defer rows.Close()
+	var out []TaskCardRow
+	for rows.Next() {
+		row, err := scanTaskCardRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan task card: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 const childTaskCardColumns = `c.tenant_id, c.session_id, c.task_id, c.parent_task_id, c.title, c.status,
 	c.origin, c.origin_seq, c.created_seq, c.updated_seq, c.closed_seq, c.created_at, c.updated_at`
 
@@ -472,14 +501,41 @@ func (s *Store) ListChildTaskCardRows(ctx context.Context, tenantID, parentSessi
 	return out, nil
 }
 
-// ListSessionTaskEventRows returns every projected task.* event of one session
-// in ledger order. It is the panel's stream read: one session's task memory,
-// nothing copied from another session's ledger.
-func (s *Store) ListSessionTaskEventRows(ctx context.Context, tenantID, sessionID uuid.UUID) ([]TaskEventRow, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT tenant_id, session_id, seq, task_id, kind, payload, created_at
-		   FROM task_events WHERE tenant_id=$1 AND session_id=$2
-		  ORDER BY seq`, tenantID, sessionID)
+// ListSessionTaskEventRows returns the newest limit projected task.* events of
+// one session, in ledger order (limit <= 0 reads every event). It is the
+// panel's stream read: one session's task memory, nothing copied from another
+// session's ledger. The newest page is selected in SQL, so an older row the
+// panel never renders is not even loaded — and a corrupt old payload outside
+// that page cannot fail the read.
+func (s *Store) ListSessionTaskEventRows(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]TaskEventRow, error) {
+	return s.listSessionTaskEventRows(ctx, tenantID, sessionID, "", limit)
+}
+
+// ListSessionTaskAttachmentEventRows returns the newest limit attach/detach
+// events of one session in ledger order (limit <= 0 reads every one). The
+// panel folds its live resource set from this page, so the fold is bounded
+// independently of the displayed event stream.
+func (s *Store) ListSessionTaskAttachmentEventRows(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]TaskEventRow, error) {
+	return s.listSessionTaskEventRows(ctx, tenantID, sessionID,
+		` AND kind IN ('task.attached', 'task.detached')`, limit)
+}
+
+func (s *Store) listSessionTaskEventRows(ctx context.Context, tenantID, sessionID uuid.UUID, kindFilter string, limit int) ([]TaskEventRow, error) {
+	columns := `tenant_id, session_id, seq, task_id, kind, payload, created_at`
+	q := `SELECT ` + columns + ` FROM task_events
+	       WHERE tenant_id=$1 AND session_id=$2` + kindFilter
+	args := []any{tenantID, sessionID}
+	if limit > 0 {
+		args = append(args, limit)
+		// The inner order picks the newest rows; the outer one restores ledger
+		// order so a caller can fold them chronologically.
+		q = `SELECT ` + columns + ` FROM (
+		          SELECT ` + columns + ` FROM task_events
+		           WHERE tenant_id=$1 AND session_id=$2` + kindFilter + `
+		           ORDER BY seq DESC LIMIT $3
+		     ) newest ORDER BY seq`
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list session task events: %w", err)
 	}

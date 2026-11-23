@@ -76,6 +76,29 @@ func (m *memProjection) ListCards(_ context.Context, tenantID uuid.UUID, session
 	return out, nil
 }
 
+func (m *memProjection) ListPanelCards(_ context.Context, tenantID, sessionID uuid.UUID, limit int) ([]tasklog.Card, error) {
+	var out []tasklog.Card
+	for _, card := range m.cards {
+		if card.TenantID == tenantID && card.SessionID == sessionID {
+			out = append(out, card)
+		}
+	}
+	// The store's order: ledger creation sequence, then task id.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedSeq != out[j].CreatedSeq {
+			return out[i].CreatedSeq < out[j].CreatedSeq
+		}
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].TaskID.String() < out[j].TaskID.String()
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (m *memProjection) ListChildCards(_ context.Context, tenantID, parentSessionID uuid.UUID, limit int, _ *time.Time, _ *uuid.UUID) ([]tasklog.Card, error) {
 	parents := map[uuid.UUID]bool{}
 	for _, card := range m.cards {
@@ -116,14 +139,30 @@ func (m *memProjection) ListEvents(_ context.Context, tenantID, sessionID, taskI
 	return out, nil
 }
 
-func (m *memProjection) ListSessionEvents(_ context.Context, tenantID, sessionID uuid.UUID) ([]tasklog.Event, error) {
+func (m *memProjection) ListSessionEvents(_ context.Context, tenantID, sessionID uuid.UUID, limit int) ([]tasklog.Event, error) {
+	return m.sessionEvents(sessionID, limit, "")
+}
+
+func (m *memProjection) ListSessionAttachmentEvents(_ context.Context, tenantID, sessionID uuid.UUID, limit int) ([]tasklog.Event, error) {
+	return m.sessionEvents(sessionID, limit, "attachment")
+}
+
+// sessionEvents returns the newest limit events of the session in ledger order.
+func (m *memProjection) sessionEvents(sessionID uuid.UUID, limit int, only string) ([]tasklog.Event, error) {
 	var out []tasklog.Event
 	for _, row := range m.events {
-		if row.SessionID == sessionID {
-			out = append(out, row.Event)
+		if row.SessionID != sessionID {
+			continue
 		}
+		if only == "attachment" && row.Event.Kind != string(kernel.KindTaskAttached) && row.Event.Kind != string(kernel.KindTaskDetached) {
+			continue
+		}
+		out = append(out, row.Event)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
 	return out, nil
 }
 
@@ -484,6 +523,126 @@ func TestPanelMemberPageExactReadBoundFloorsTheCount(t *testing.T) {
 	}
 	if panel.TruncatedMemberCount != 1 {
 		t.Fatalf("truncatedMemberCount = %d, want the floor 1", panel.TruncatedMemberCount)
+	}
+}
+
+// TestPanelCardPageIsBounded pins the own-card cap: the projection reads one
+// row past the bound, the panel keeps the earliest cards (the root must never
+// be the row a bound drops), and it says the page was cut.
+func TestPanelCardPageIsBounded(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	cards := make([]tasklog.Card, 0, tasklog.DefaultPanelCardLimit+1)
+	for index := 0; index < tasklog.DefaultPanelCardLimit+1; index++ {
+		id := fmt.Sprintf("50000000-0000-4000-8000-%012d", index+1)
+		cards = append(cards, memCard(tenant, session, id, fmt.Sprintf("卡 %d", index+1), int64(index+1), nil, tasklog.OriginTool, 0, now.Add(time.Duration(index)*time.Second)))
+	}
+	service := memService(t, &memProjection{cards: cards})
+
+	panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 0, 0)
+	if err != nil {
+		t.Fatalf("panel: %v", err)
+	}
+	if panel.CardLimit != tasklog.DefaultPanelCardLimit {
+		t.Fatalf("cardLimit = %d, want %d", panel.CardLimit, tasklog.DefaultPanelCardLimit)
+	}
+	if !panel.CardsTruncated {
+		t.Fatalf("the read stopped one row past the bound but the panel claims the card set ended")
+	}
+	if len(panel.Cards) != tasklog.DefaultPanelCardLimit {
+		t.Fatalf("cards = %d, want the page %d", len(panel.Cards), tasklog.DefaultPanelCardLimit)
+	}
+	// The page is the earliest cards in creation order: the root is kept.
+	if panel.Cards[0].CreatedSeq != 1 {
+		t.Fatalf("first card createdSeq = %d, want the root at 1", panel.Cards[0].CreatedSeq)
+	}
+	if panel.Cards[len(panel.Cards)-1].CreatedSeq != int64(tasklog.DefaultPanelCardLimit) {
+		t.Fatalf("last card createdSeq = %d, want %d", panel.Cards[len(panel.Cards)-1].CreatedSeq, tasklog.DefaultPanelCardLimit)
+	}
+}
+
+// TestPanelAttachmentPageIsBounded pins the resource fold's own bound: the
+// newest attach/detach page is folded, the oldest reference falls outside it,
+// and the panel reports that the live set may be missing older references
+// instead of pretending the set is complete.
+func TestPanelAttachmentPageIsBounded(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	now := time.Date(2026, 11, 23, 12, 30, 0, 0, time.UTC)
+	rootID := "30000000-0000-4000-8000-000000000040"
+	root := memCard(tenant, session, rootID, "根卡", 1, nil, tasklog.OriginSession, 0, now)
+	events := make([]memEvent, 0, tasklog.DefaultPanelAttachmentLimit+1)
+	for index := 0; index < tasklog.DefaultPanelAttachmentLimit+1; index++ {
+		events = append(events, memEvent{
+			SessionID: session,
+			Event: tasklog.Event{
+				TaskID: root.TaskID, Kind: string(kernel.KindTaskAttached), Seq: int64(index + 1),
+				Payload:   seqPayload(rootID, fmt.Sprintf(`,"path":"reports/f%d.md","hash":"sha256:%s"`, index, repeat("a", 64))),
+				CreatedAt: now.Add(time.Duration(index) * time.Second),
+			},
+		})
+	}
+	service := memService(t, &memProjection{cards: []tasklog.Card{root}, events: events})
+
+	panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 0, 2)
+	if err != nil {
+		t.Fatalf("panel: %v", err)
+	}
+	if panel.AttachmentLimit != tasklog.DefaultPanelAttachmentLimit {
+		t.Fatalf("attachmentLimit = %d, want %d", panel.AttachmentLimit, tasklog.DefaultPanelAttachmentLimit)
+	}
+	if !panel.AttachmentsTruncated {
+		t.Fatalf("the attachment read stopped past its bound but the panel claims the set ended")
+	}
+	if len(panel.Attachments) != tasklog.DefaultPanelAttachmentLimit {
+		t.Fatalf("attachments = %d, want the page %d", len(panel.Attachments), tasklog.DefaultPanelAttachmentLimit)
+	}
+	for _, attachment := range panel.Attachments {
+		if attachment.Path == "reports/f0.md" {
+			t.Fatalf("the oldest attachment fell outside the page but was folded in: %+v", attachment)
+		}
+	}
+}
+
+// TestPanelOldCorruptEventOutsideThePageDoesNotFail proves the decode is scoped
+// to the newest page: a corrupt event older than the page is never described,
+// so the panel answers; the same row inside the page is still a failure.
+func TestPanelOldCorruptEventOutsideThePageDoesNotFail(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.New()
+	session := uuid.New()
+	now := time.Date(2026, 11, 23, 13, 0, 0, 0, time.UTC)
+	rootID := "30000000-0000-4000-8000-000000000050"
+	root := memCard(tenant, session, rootID, "根卡", 1, nil, tasklog.OriginSession, 0, now)
+	projection := &memProjection{
+		cards: []tasklog.Card{root},
+		events: []memEvent{
+			// The oldest row violates its kind's contract (taskId is not a uuid).
+			{SessionID: session, Event: tasklog.Event{TaskID: root.TaskID, Kind: string(kernel.KindTaskNote), Seq: 1,
+				Payload: []byte(`{"taskId":"not-a-uuid","text":"坏行"}`), CreatedAt: now}},
+			{SessionID: session, Event: tasklog.Event{TaskID: root.TaskID, Kind: string(kernel.KindTaskNote), Seq: 2,
+				Payload: seqPayload(rootID, `,"text":"第二条"`), CreatedAt: now.Add(time.Second)}},
+			{SessionID: session, Event: tasklog.Event{TaskID: root.TaskID, Kind: string(kernel.KindTaskNote), Seq: 3,
+				Payload: seqPayload(rootID, `,"text":"第三条"`), CreatedAt: now.Add(2 * time.Second)}},
+		},
+	}
+	service := memService(t, projection)
+
+	panel, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 0, 2)
+	if err != nil {
+		t.Fatalf("a corrupt row outside the newest page failed the panel: %v", err)
+	}
+	if !panel.EventsTruncated || len(panel.Events) != 2 || panel.Events[0].Seq != 2 || panel.Events[1].Seq != 3 {
+		t.Fatalf("event page = %+v (truncated %v), want the newest 2, 3", panel.Events, panel.EventsTruncated)
+	}
+
+	// The corrupt row is inside the page when the page is large enough: the
+	// read fails rather than silently dropping a fact the surface asked for.
+	if _, err := service.Panel(ctx, kernel.Scope{TenantID: tenant, SessionID: session}, 0, 3); err == nil {
+		t.Fatalf("a corrupt row inside the page decoded without an error")
 	}
 }
 

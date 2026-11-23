@@ -248,8 +248,9 @@ func TestPanelBoundsArePages(t *testing.T) {
 	if !panel.EventsTruncated || len(panel.Events) != 3 || panel.EventLimit != 3 {
 		t.Fatalf("event page = %d events, truncated=%v", len(panel.Events), panel.EventsTruncated)
 	}
-	// The attachment fold reads the whole stream even when the panel shows a
-	// page of it: the live set is the card's current memory, not the page.
+	// The attachment fold reads its own (bounded) attach/detach page even when
+	// the displayed stream is a smaller page: the live set is the card's
+	// current memory, not the rendered events.
 	if len(panel.Attachments) != 0 {
 		t.Fatalf("attachments = %+v", panel.Attachments)
 	}
@@ -261,6 +262,59 @@ func TestPanelBoundsArePages(t *testing.T) {
 	}
 	if clamped.MemberLimit != tasklog.MaxPanelMemberLimit || clamped.EventLimit != tasklog.MaxPanelEventLimit {
 		t.Fatalf("clamped limits = %d/%d", clamped.MemberLimit, clamped.EventLimit)
+	}
+}
+
+// TestPanelOldCorruptProjectionRowOutsideThePage proves the SQL read is the
+// page, not the history: an older projection row with an undecodable payload
+// (inserted directly, the way a repair or a bug could leave one) is outside the
+// newest page, so it is never loaded or described and the panel answers. The
+// same row inside the requested page still fails the read.
+func TestPanelOldCorruptProjectionRowOutsideThePage(t *testing.T) {
+	st, _, service, scope := taskLogHarness(t)
+	ctx := context.Background()
+	tenant := scope.TenantID
+
+	root := mustCard(t)(service.EnsureCard(ctx, scope))
+	for index := 0; index < 3; index++ {
+		if _, err := service.Note(ctx, scope, root.TaskID, "记录", uuid.NewString()); err != nil {
+			t.Fatalf("note: %v", err)
+		}
+	}
+	// A negative sequence sorts before every ledger row: it is an old row a
+	// read of the newest page must never materialize.
+	projection := tasklog.NewPGProjection(st)
+	if err := projection.InsertEvent(ctx, tenant, scope.SessionID, tasklog.Event{
+		TaskID: root.TaskID, Kind: string(kernel.KindTaskNote), Seq: -1,
+		Payload: []byte(`{"taskId":"not-a-uuid","text":"坏行"}`),
+	}); err != nil {
+		t.Fatalf("insert corrupt row: %v", err)
+	}
+
+	panel, err := service.Panel(ctx, scope, 0, 2)
+	if err != nil {
+		t.Fatalf("a corrupt row outside the newest page failed the panel: %v", err)
+	}
+	if !panel.EventsTruncated || len(panel.Events) != 2 {
+		t.Fatalf("event page = %+v (truncated %v)", panel.Events, panel.EventsTruncated)
+	}
+	if !eventsAreOrdered(panel.Events) {
+		t.Fatalf("event page is not in ledger order: %+v", panel.Events)
+	}
+
+	// With a page large enough to hold the corrupt row the read fails: a row
+	// the surface asked for is never silently dropped.
+	if _, err := service.Panel(ctx, scope, 0, 5); err == nil {
+		t.Fatalf("a corrupt row inside the page decoded without an error")
+	}
+
+	// The own-card read is a SQL page too, not a list the panel trims.
+	page, err := st.ListTaskCardRowsInCreationOrder(ctx, tenant, scope.SessionID, 1)
+	if err != nil {
+		t.Fatalf("card page: %v", err)
+	}
+	if len(page) != 1 || page[0].TaskID != root.TaskID {
+		t.Fatalf("card page = %+v, want the root only", page)
 	}
 }
 

@@ -102,6 +102,19 @@ func (p *PgProjection) ListCards(ctx context.Context, tenantID uuid.UUID, sessio
 	return out, nil
 }
 
+// ListPanelCards reads a bounded page of the session's cards in creation order.
+func (p *PgProjection) ListPanelCards(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]Card, error) {
+	rows, err := p.store.ListTaskCardRowsInCreationOrder(ctx, tenantID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Card, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, cardFromRow(row))
+	}
+	return out, nil
+}
+
 // ListChildCards reads the cards linked to any card of the named session.
 func (p *PgProjection) ListChildCards(ctx context.Context, tenantID, parentSessionID uuid.UUID, limit int, afterUpdatedAt *time.Time, afterTaskID *uuid.UUID) ([]Card, error) {
 	rows, err := p.store.ListChildTaskCardRows(ctx, tenantID, parentSessionID, limit, afterUpdatedAt, afterTaskID)
@@ -128,9 +141,24 @@ func (p *PgProjection) ListEvents(ctx context.Context, tenantID, sessionID, task
 	return out, nil
 }
 
-// ListSessionEvents reads the session's whole projected task event stream.
-func (p *PgProjection) ListSessionEvents(ctx context.Context, tenantID, sessionID uuid.UUID) ([]Event, error) {
-	rows, err := p.store.ListSessionTaskEventRows(ctx, tenantID, sessionID)
+// ListSessionEvents reads the newest limit projected task events, in ledger
+// order (limit <= 0 reads the whole stream).
+func (p *PgProjection) ListSessionEvents(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]Event, error) {
+	rows, err := p.store.ListSessionTaskEventRows(ctx, tenantID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Event, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, eventFromRow(row))
+	}
+	return out, nil
+}
+
+// ListSessionAttachmentEvents reads the newest limit attach/detach events, in
+// ledger order (limit <= 0 reads every one).
+func (p *PgProjection) ListSessionAttachmentEvents(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]Event, error) {
+	rows, err := p.store.ListSessionTaskAttachmentEventRows(ctx, tenantID, sessionID, limit)
 	if err != nil {
 		return nil, err
 	}

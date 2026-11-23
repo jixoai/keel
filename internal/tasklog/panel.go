@@ -26,14 +26,20 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 )
 
-// Panel bounds. A panel read is a page, not an export.
+// Panel bounds. A panel read is a page, not an export: every list it carries
+// has a bound and a truncation fact, and the projector never decodes a row the
+// page did not include.
 const (
-	DefaultPanelMemberLimit   = 200
-	MaxPanelMemberLimit       = 500
-	DefaultPanelEventLimit    = 500
-	MaxPanelEventLimit        = 2000
-	DefaultPanelAncestorLimit = 50
-	MaxPanelAncestorLimit     = 200
+	DefaultPanelCardLimit       = 1000
+	MaxPanelCardLimit           = 5000
+	DefaultPanelMemberLimit     = 200
+	MaxPanelMemberLimit         = 500
+	DefaultPanelEventLimit      = 500
+	MaxPanelEventLimit          = 2000
+	DefaultPanelAttachmentLimit = 1000
+	MaxPanelAttachmentLimit     = 5000
+	DefaultPanelAncestorLimit   = 50
+	MaxPanelAncestorLimit       = 200
 )
 
 // PanelAttachment is one live (path, hash) reference a card carries.
@@ -58,14 +64,20 @@ type Panel struct {
 	Events []DescribedEvent `json:"events"`
 	// Bounds and truncation, so a surface says "more exist" instead of
 	// dropping rows silently.
-	MemberLimit int  `json:"memberLimit"`
-	Truncated   bool `json:"truncated"`
+	CardLimit      int  `json:"cardLimit"`
+	CardsTruncated bool `json:"cardsTruncated"`
+	MemberLimit    int  `json:"memberLimit"`
+	Truncated      bool `json:"truncated"`
 	// TruncatedMemberCount is how many linked cards the page left out: exact
 	// when the over-fetch read every linked row, a floor of at least 1 when the
 	// read itself stopped at its bound (it cannot count rows it never read).
 	TruncatedMemberCount int  `json:"truncatedMemberCount,omitempty"`
 	EventLimit           int  `json:"eventLimit"`
 	EventsTruncated      bool `json:"eventsTruncated"`
+	// AttachmentLimit bounds the attach/detach history the live set is folded
+	// from; AttachmentsTruncated says an older reference may not be listed.
+	AttachmentLimit      int  `json:"attachmentLimit"`
+	AttachmentsTruncated bool `json:"attachmentsTruncated"`
 	AncestorsTruncated   bool `json:"ancestorsTruncated"`
 }
 
@@ -91,6 +103,7 @@ func (s *Service) Panel(ctx context.Context, scope kernel.Scope, memberLimit, ev
 		Attachments: []PanelAttachment{},
 		Events:      []DescribedEvent{},
 	}
+	panel.CardLimit = DefaultPanelCardLimit
 	panel.MemberLimit = memberLimit
 	if panel.MemberLimit <= 0 {
 		panel.MemberLimit = DefaultPanelMemberLimit
@@ -105,20 +118,36 @@ func (s *Service) Panel(ctx context.Context, scope kernel.Scope, memberLimit, ev
 	if panel.EventLimit > MaxPanelEventLimit {
 		panel.EventLimit = MaxPanelEventLimit
 	}
+	panel.AttachmentLimit = DefaultPanelAttachmentLimit
 
-	cards, err := s.projection.ListCards(ctx, scope.TenantID, &scope.SessionID, nil, "")
+	// The session's own cards, bounded in creation order: the root card is the
+	// session's first, so a pathological card count truncates the newest tail
+	// (and says so) instead of dropping the tree's top.
+	cards, err := s.projection.ListPanelCards(ctx, scope.TenantID, scope.SessionID, panel.CardLimit+1)
 	if err != nil {
 		return Panel{}, err
+	}
+	if len(cards) > panel.CardLimit {
+		panel.CardsTruncated = true
+		cards = cards[:panel.CardLimit]
 	}
 	sortCardsForTree(cards)
 	panel.Cards = cards
 
-	// The session's whole task event stream. Reading it once answers both the
-	// panel's stream and the attachment fold below; the projection's row order
-	// is already ledger order.
-	events, err := s.projection.ListSessionEvents(ctx, scope.TenantID, scope.SessionID)
+	// The newest page of the session's task event stream. The read stops at
+	// eventLimit+1 (one sentinel row proving more history exists); only the
+	// page itself is decoded, so a corrupt older row outside the page cannot
+	// fail the panel.
+	events, err := s.projection.ListSessionEvents(ctx, scope.TenantID, scope.SessionID, panel.EventLimit+1)
 	if err != nil {
 		return Panel{}, err
+	}
+	sortRawEventsBySeq(events)
+	if len(events) > panel.EventLimit {
+		// Keep the newest page: a panel reader wants the latest fact, and the
+		// gap sentence says the older ones were not read.
+		panel.EventsTruncated = true
+		events = events[len(events)-panel.EventLimit:]
 	}
 	described := make([]DescribedEvent, 0, len(events))
 	for _, event := range events {
@@ -128,19 +157,24 @@ func (s *Service) Panel(ctx context.Context, scope kernel.Scope, memberLimit, ev
 		}
 		described = append(described, view)
 	}
-	sortEventsBySeq(described)
-	if len(described) > panel.EventLimit {
-		// Keep the newest page: a panel reader wants the latest fact, and the
-		// gap sentence says the older ones were not read.
-		panel.EventsTruncated = true
-		described = described[len(described)-panel.EventLimit:]
-	}
 	panel.Events = described
 
-	// Live attachment set per own card. A detached path leaves the set; its
-	// history stays readable in the event stream above.
+	// Live attachment set per own card, folded from a separate bounded page of
+	// attach/detach events. A detached path leaves the set; its history stays
+	// readable in the event stream above. The page is the newest history, so a
+	// reference whose newest event fell outside it is omitted (never invented),
+	// and AttachmentsTruncated says so.
+	attachmentEvents, err := s.projection.ListSessionAttachmentEvents(ctx, scope.TenantID, scope.SessionID, panel.AttachmentLimit+1)
+	if err != nil {
+		return Panel{}, err
+	}
+	sortRawEventsBySeq(attachmentEvents)
+	if len(attachmentEvents) > panel.AttachmentLimit {
+		panel.AttachmentsTruncated = true
+		attachmentEvents = attachmentEvents[len(attachmentEvents)-panel.AttachmentLimit:]
+	}
 	eventsByTask := map[uuid.UUID][]Event{}
-	for _, event := range events {
+	for _, event := range attachmentEvents {
 		eventsByTask[event.TaskID] = append(eventsByTask[event.TaskID], event)
 	}
 	for _, card := range panel.Cards {
@@ -255,6 +289,15 @@ func sortMembersForTree(cards []Card) {
 			return left.UpdatedAt.After(right.UpdatedAt)
 		}
 		return left.TaskID.String() > right.TaskID.String()
+	})
+}
+
+func sortRawEventsBySeq(events []Event) {
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].Seq != events[j].Seq {
+			return events[i].Seq < events[j].Seq
+		}
+		return events[i].TaskID.String() < events[j].TaskID.String()
 	})
 }
 

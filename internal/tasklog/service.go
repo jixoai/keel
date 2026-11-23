@@ -20,14 +20,22 @@ type Projection interface {
 	GetCard(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) (Card, error)
 	GetCardByID(ctx context.Context, tenantID, taskID uuid.UUID) (Card, error)
 	ListCards(ctx context.Context, tenantID uuid.UUID, sessionID, parentTaskID *uuid.UUID, status string) ([]Card, error)
+	// ListPanelCards reads at most limit cards of the session in ledger
+	// creation order (the order the panel draws top-down). limit <= 0 reads
+	// every card. The panel's own-card read is a page, not an export.
+	ListPanelCards(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]Card, error)
 	// ListChildCards reads the cards whose parent card belongs to the named
 	// session, newest activity first. The relation lives in task_cards, so a
 	// member card is found even though its row lives in the child session.
 	ListChildCards(ctx context.Context, tenantID, parentSessionID uuid.UUID, limit int, afterUpdatedAt *time.Time, afterTaskID *uuid.UUID) ([]Card, error)
 	ListEvents(ctx context.Context, tenantID, sessionID, taskID uuid.UUID) ([]Event, error)
-	// ListSessionEvents reads the session's whole task event stream (the
-	// panel's stream), in ledger order.
-	ListSessionEvents(ctx context.Context, tenantID, sessionID uuid.UUID) ([]Event, error)
+	// ListSessionEvents reads the newest limit task events of the session's
+	// stream, in ledger order. limit <= 0 reads the whole stream.
+	ListSessionEvents(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]Event, error)
+	// ListSessionAttachmentEvents reads the newest limit attach/detach events
+	// of the session, in ledger order. The panel folds its live resource set
+	// from this page independently of the displayed event stream.
+	ListSessionAttachmentEvents(ctx context.Context, tenantID, sessionID uuid.UUID, limit int) ([]Event, error)
 	CountEvents(ctx context.Context, tenantID, sessionID uuid.UUID) (int, error)
 	UpsertCard(ctx context.Context, card Card) error
 	InsertEvent(ctx context.Context, tenantID, sessionID uuid.UUID, event Event) error

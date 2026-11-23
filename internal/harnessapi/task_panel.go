@@ -84,13 +84,20 @@ type TaskPanelView struct {
 }
 
 type TaskPanelLimits struct {
-	MemberLimit int  `json:"memberLimit"`
-	Truncated   bool `json:"truncated"`
+	CardLimit      int  `json:"cardLimit"`
+	CardsTruncated bool `json:"cardsTruncated"`
+	MemberLimit    int  `json:"memberLimit"`
+	Truncated      bool `json:"truncated"`
 	// TruncatedMemberCount is exact when the read saw every linked row and a
 	// floor (at least 1) when the read itself stopped at its bound.
 	TruncatedMemberCount int  `json:"truncatedMemberCount,omitempty"`
 	EventLimit           int  `json:"eventLimit"`
 	EventsTruncated      bool `json:"eventsTruncated"`
+	// AttachmentLimit bounds the attach/detach history the live resource set
+	// was folded from; AttachmentsTruncated says an older reference may be
+	// missing from that set.
+	AttachmentLimit      int  `json:"attachmentLimit"`
+	AttachmentsTruncated bool `json:"attachmentsTruncated"`
 	AncestorsTruncated   bool `json:"ancestorsTruncated"`
 }
 
@@ -278,11 +285,15 @@ func panelView(panel tasklog.Panel) TaskPanelView {
 		Attachments: make([]TaskPanelAttachment, 0, len(panel.Attachments)),
 		Events:      make([]TaskPanelEvent, 0, len(panel.Events)),
 		Limits: TaskPanelLimits{
+			CardLimit:            panel.CardLimit,
+			CardsTruncated:       panel.CardsTruncated,
 			MemberLimit:          panel.MemberLimit,
 			Truncated:            panel.Truncated,
 			TruncatedMemberCount: panel.TruncatedMemberCount,
 			EventLimit:           panel.EventLimit,
 			EventsTruncated:      panel.EventsTruncated,
+			AttachmentLimit:      panel.AttachmentLimit,
+			AttachmentsTruncated: panel.AttachmentsTruncated,
 			AncestorsTruncated:   panel.AncestorsTruncated,
 		},
 	}
