@@ -443,6 +443,14 @@ func (s *Supervisor) recoverFailed(ctx context.Context, report *Report, policy P
 	}
 
 	selection, fallback, fallbackErr := s.fallbackSelection(ctx, policy, attempts, run)
+	// Spec (supervision, "额度护栏"): a provider that reports exhausted quota
+	// must not be retried. Without a usable providerFallback the ladder escalates
+	// (one fact per failure epoch) instead of requeuing the same selection, which
+	// would burn the retry budget against a provider that keeps refusing.
+	if durable.IsProviderExhausted(run.LastError) && selection == nil {
+		s.exhaustWithReason(ctx, report, policy, version, run, attempts, now, "provider_exhausted_no_fallback")
+		return
+	}
 	outcome, err := s.store.RequeueRun(ctx, run.TenantID, run.SessionID)
 	if err != nil {
 		s.fail(report, run, "requeue", err)
@@ -523,6 +531,14 @@ func (s *Supervisor) fallbackSelection(ctx context.Context, policy Policy, attem
 // exhaust applies onExhausted: escalate up the ladder once per failure epoch,
 // or stop with an auditable fact.
 func (s *Supervisor) exhaust(ctx context.Context, report *Report, policy Policy, version ConfigVersion, run RunRecord, attempts int, now time.Time) {
+	s.exhaustWithReason(ctx, report, policy, version, run, attempts, now, "attempts_exhausted")
+}
+
+// exhaustWithReason is exhaust with the ledger reason the escalation carries.
+// The retry-budget path says attempts_exhausted; a provider that ran out of
+// quota with no usable fallback says provider_exhausted_no_fallback (the spec
+// requires that reason in the ledger).
+func (s *Supervisor) exhaustWithReason(ctx context.Context, report *Report, policy Policy, version ConfigVersion, run RunRecord, attempts int, now time.Time, reason string) {
 	escalations, err := s.store.EscalationsSince(ctx, run.TenantID, run.SessionID, run.UpdatedAt)
 	if err != nil {
 		s.fail(report, run, "read escalations", err)
@@ -534,7 +550,7 @@ func (s *Supervisor) exhaust(ctx context.Context, report *Report, policy Policy,
 	if policy.Resume.OnExhausted == ExhaustedStop {
 		s.recordEscalation(ctx, report, run, version, escalationFact{
 			Level:        "stop",
-			Reason:       "attempts_exhausted",
+			Reason:       reason,
 			Attempts:     attempts,
 			MaxAttempts:  policy.Resume.MaxAttempts,
 			Result:       "stopped",
@@ -546,11 +562,21 @@ func (s *Supervisor) exhaust(ctx context.Context, report *Report, policy Policy,
 
 	fact := escalationFact{
 		Level:        "owner",
-		Reason:       "attempts_exhausted",
+		Reason:       reason,
 		Attempts:     attempts,
 		MaxAttempts:  policy.Resume.MaxAttempts,
 		StatusBefore: run.Status,
 		At:           now,
+	}
+	summary := fmt.Sprintf("sub-agent attempts exhausted after %d automatic resumes; resume it in place after fixing its configuration (%s)",
+		attempts, trimError(run.LastError))
+	notificationText := fmt.Sprintf("Session %s exhausted its automatic recovery budget (%d). Last error: %s. Resume it after fixing the configuration, for example the provider that ran out of quota.",
+		run.SessionID, attempts, trimError(run.LastError))
+	if reason == "provider_exhausted_no_fallback" {
+		summary = fmt.Sprintf("sub-agent stopped: its provider is out of quota and no usable providerFallback is configured; fix the provider or add a fallback, then resume it (%s)",
+			trimError(run.LastError))
+		notificationText = fmt.Sprintf("Session %s stopped: its provider is out of quota and no usable providerFallback is configured. Fix the provider or add providerFallback, then resume it. Last error: %s.",
+			run.SessionID, trimError(run.LastError))
 	}
 	parentDone := false
 	if s.parentOf != nil {
@@ -565,8 +591,7 @@ func (s *Supervisor) exhaust(ctx context.Context, report *Report, policy Policy,
 			} else if result, err := s.parentEscalator.Escalate(ctx,
 				kernel.Scope{TenantID: run.TenantID, SessionID: parentID},
 				kernel.Scope{TenantID: run.TenantID, SessionID: run.SessionID},
-				fmt.Sprintf("sub-agent attempts exhausted after %d automatic resumes; resume it in place after fixing its configuration (%s)",
-					attempts, trimError(run.LastError))); err != nil {
+				summary); err != nil {
 				fact.ParentError = err.Error()
 			} else {
 				fact.Result = "parent_notified"
@@ -585,8 +610,7 @@ func (s *Supervisor) exhaust(ctx context.Context, report *Report, policy Policy,
 				SessionID: run.SessionID,
 				RequestID: fmt.Sprintf("supervision:%s:%d", run.SessionID, run.UpdatedAt.UnixNano()),
 				Title:     "Agent run needs attention",
-				Text: fmt.Sprintf("Session %s exhausted its automatic recovery budget (%d). Last error: %s. Resume it after fixing the configuration, for example the provider that ran out of quota.",
-					run.SessionID, attempts, trimError(run.LastError)),
+				Text:      notificationText,
 			})
 			if err != nil {
 				fact.Result = "notify_failed"
@@ -604,7 +628,7 @@ func (s *Supervisor) exhaust(ctx context.Context, report *Report, policy Policy,
 	if s.superAgent != nil && !parentDone {
 		result, err := s.superAgent.Recover(ctx, SuperAgentRequest{
 			TenantID: run.TenantID, SessionID: run.SessionID,
-			Reason: "attempts_exhausted", Attempts: attempts, Config: version,
+			Reason: reason, Attempts: attempts, Config: version,
 		})
 		fact.SuperAgentResult = result
 		if err != nil {

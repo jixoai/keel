@@ -592,7 +592,7 @@ func TestScanProviderFallbackSelection(t *testing.T) {
 	}
 }
 
-func TestScanProviderFallbackInvalidStillResumes(t *testing.T) {
+func TestScanProviderFallbackInvalidEscalatesWithoutResuming(t *testing.T) {
 	tenant, session := uuid.New(), uuid.New()
 	store := newFakeStore(failedRun(tenant, session, "quota exceeded"))
 	store.selection = json.RawMessage(`{"providerId":"p1","modelId":"m1"}`)
@@ -606,15 +606,46 @@ func TestScanProviderFallbackInvalidStillResumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	if report.Recovered != 1 {
-		t.Fatalf("report = %+v", report)
+	if report.Recovered != 0 || len(store.requeued) != 0 {
+		t.Fatalf("an exhausted provider with an unusable fallback was retried: report=%+v requeued=%v", report, store.requeued)
 	}
-	payload := decodePayload(t, ledger.ofKind(kernel.KindResumeAttempt)[0])
-	if payload["fallbackError"] != "model is not configured" {
-		t.Fatalf("fallbackError = %+v", payload["fallbackError"])
+	facts := ledger.ofKind(kernel.KindSupervisionEscalated)
+	if len(facts) != 1 {
+		t.Fatalf("escalation facts = %d, want 1", len(facts))
 	}
-	if _, present := payload["selection"]; present {
-		t.Fatalf("an invalid selection was recorded: %+v", payload["selection"])
+	payload := decodePayload(t, facts[0])
+	if payload["reason"] != "provider_exhausted_no_fallback" {
+		t.Fatalf("reason = %+v, want provider_exhausted_no_fallback", payload["reason"])
+	}
+	if payload["lastError"] != "quota exceeded" {
+		t.Fatalf("lastError = %+v", payload["lastError"])
+	}
+}
+
+func TestScanProviderExhaustedWithoutFallbackEscalates(t *testing.T) {
+	tenant, session := uuid.New(), uuid.New()
+	store := newFakeStore(failedRun(tenant, session, "insufficient_quota: the account is out of credit"))
+	store.selection = json.RawMessage(`{"providerId":"p1","modelId":"m1"}`)
+	ledger := &fakeLedger{}
+	sup := newTestSupervisor(t, store, ledger, DefaultPolicy(), ConfigVersion{})
+
+	report, err := sup.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if report.Recovered != 0 || len(store.requeued) != 0 {
+		t.Fatalf("an exhausted provider without fallback was retried: report=%+v requeued=%v", report, store.requeued)
+	}
+	facts := ledger.ofKind(kernel.KindSupervisionEscalated)
+	if len(facts) != 1 {
+		t.Fatalf("escalation facts = %d, want 1", len(facts))
+	}
+	payload := decodePayload(t, facts[0])
+	if payload["reason"] != "provider_exhausted_no_fallback" {
+		t.Fatalf("reason = %+v, want provider_exhausted_no_fallback", payload["reason"])
+	}
+	if payload["result"] != "notifier_not_wired" {
+		t.Fatalf("result = %+v, want the owner rung recorded even without a notifier", payload["result"])
 	}
 }
 
