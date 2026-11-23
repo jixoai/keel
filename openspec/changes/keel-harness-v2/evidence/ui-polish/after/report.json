@@ -1,6 +1,6 @@
 {
   "lane": "ui-polish",
-  "startedAt": "2026-11-23T07:15:27.743Z",
+  "startedAt": "2026-11-23T07:22:37.652Z",
   "base": "http://127.0.0.1:13773",
   "viewports": [
     "390x844",
@@ -4195,277 +4195,277 @@
         "bottom": 727
       }
     },
-    "account-create-dialog": {
+    "account-create-dialog-390": {
       "card": {
-        "x": 500,
-        "y": 211,
-        "w": 440,
-        "h": 479,
-        "right": 940,
+        "x": 12,
+        "y": 155,
+        "w": 366,
+        "h": 535,
+        "right": 378,
         "bottom": 690
       },
       "footer": {
-        "x": 517,
-        "y": 645,
-        "w": 406,
-        "h": 28,
-        "right": 923,
+        "x": 29,
+        "y": 629,
+        "w": 332,
+        "h": 44,
+        "right": 361,
         "bottom": 673
       },
       "inputs": {
         "account-create-username": {
-          "x": 517,
-          "y": 304,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 338
+          "x": 29,
+          "y": 248,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 292
         },
         "account-create-name": {
-          "x": 517,
-          "y": 393,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 427
+          "x": 29,
+          "y": 347,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 391
         },
         "account-create-kind": {
-          "x": 517,
-          "y": 482,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 516
+          "x": 29,
+          "y": 446,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 490
         },
         "account-create-password": {
-          "x": 517,
-          "y": 571,
-          "w": 340,
-          "h": 34,
-          "right": 857,
-          "bottom": 605
+          "x": 29,
+          "y": 545,
+          "w": 266,
+          "h": 44,
+          "right": 295,
+          "bottom": 589
         }
       },
       "tall": {},
       "buttons": [
         {
-          "h": 28,
-          "y": 645,
+          "h": 44,
+          "y": 629,
           "bottom": 673
         },
         {
-          "h": 28,
-          "y": 645,
+          "h": 44,
+          "y": 629,
           "bottom": 673
         }
       ]
     },
-    "bot-create-dialog": {
+    "bot-create-dialog-390": {
       "card": {
-        "x": 440,
-        "y": 228,
-        "w": 560,
-        "h": 445,
-        "right": 1000,
-        "bottom": 673
+        "x": 12,
+        "y": 164,
+        "w": 366,
+        "h": 516,
+        "right": 378,
+        "bottom": 680
       },
       "footer": {
-        "x": 457,
-        "y": 628,
-        "w": 526,
-        "h": 28,
-        "right": 983,
-        "bottom": 656
+        "x": 29,
+        "y": 619,
+        "w": 332,
+        "h": 44,
+        "right": 361,
+        "bottom": 663
       },
       "inputs": {
         "bot-create-name": {
-          "x": 457,
-          "y": 321,
-          "w": 526,
-          "h": 34,
-          "right": 983,
-          "bottom": 355
+          "x": 29,
+          "y": 272,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 316
         },
         "bot-create-profile": {
-          "x": 457,
-          "y": 386,
-          "w": 526,
-          "h": 34,
-          "right": 983,
-          "bottom": 420
+          "x": 29,
+          "y": 347,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 391
         },
         "bot-create-kind": {
-          "x": 457,
-          "y": 451,
-          "w": 526,
-          "h": 34,
-          "right": 983,
-          "bottom": 485
+          "x": 29,
+          "y": 422,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 466
         },
         "bot-create-model": {
-          "x": 457,
-          "y": 516,
-          "w": 526,
-          "h": 34,
-          "right": 983,
-          "bottom": 550
+          "x": 29,
+          "y": 497,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 541
         }
       },
       "tall": {},
       "buttons": [
         {
-          "h": 28,
-          "y": 628,
-          "bottom": 656
+          "h": 44,
+          "y": 619,
+          "bottom": 663
         },
         {
-          "h": 28,
-          "y": 628,
-          "bottom": 656
+          "h": 44,
+          "y": 619,
+          "bottom": 663
         }
       ]
     },
-    "team-create-dialog": {
+    "team-create-dialog-390": {
       "card": {
-        "x": 440,
-        "y": 245,
-        "w": 560,
-        "h": 411,
-        "right": 1000,
-        "bottom": 656
+        "x": 12,
+        "y": 199,
+        "w": 366,
+        "h": 447,
+        "right": 378,
+        "bottom": 646
       },
       "footer": {
-        "x": 457,
-        "y": 611,
-        "w": 526,
-        "h": 28,
-        "right": 983,
-        "bottom": 639
+        "x": 29,
+        "y": 585,
+        "w": 332,
+        "h": 44,
+        "right": 361,
+        "bottom": 629
       },
       "inputs": {
         "team-create-name": {
-          "x": 457,
-          "y": 338,
-          "w": 526,
-          "h": 34,
-          "right": 983,
-          "bottom": 372
+          "x": 29,
+          "y": 292,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 336
         },
         "team-create-captain": {
-          "x": 457,
-          "y": 561,
-          "w": 526,
-          "h": 34,
-          "right": 983,
-          "bottom": 595
+          "x": 29,
+          "y": 525,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 569
         }
       },
       "tall": {
         "team-create-mission": {
-          "x": 457,
-          "y": 403,
-          "w": 526,
+          "x": 29,
+          "y": 367,
+          "w": 332,
           "h": 127,
-          "right": 983,
-          "bottom": 530
+          "right": 361,
+          "bottom": 494
         }
       },
       "buttons": [
         {
-          "h": 28,
-          "y": 611,
-          "bottom": 639
+          "h": 44,
+          "y": 585,
+          "bottom": 629
         },
         {
-          "h": 28,
-          "y": 611,
-          "bottom": 639
+          "h": 44,
+          "y": 585,
+          "bottom": 629
         }
       ]
     },
-    "provider-config-dialog": {
+    "provider-config-dialog-390": {
       "card": {
-        "x": 500,
-        "y": 90,
-        "w": 440,
-        "h": 757,
-        "right": 940,
-        "bottom": 847
+        "x": 12,
+        "y": 62,
+        "w": 366,
+        "h": 878,
+        "right": 378,
+        "bottom": 940
       },
       "footer": {
-        "x": 517,
-        "y": 796,
-        "w": 406,
-        "h": 34,
-        "right": 923,
-        "bottom": 830
+        "x": 29,
+        "y": 879,
+        "w": 332,
+        "h": 44,
+        "right": 361,
+        "bottom": 923
       },
       "inputs": {
         "provider-config-id": {
-          "x": 517,
-          "y": 183,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 217
+          "x": 29,
+          "y": 170,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 214
         },
         "provider-config-name": {
-          "x": 517,
-          "y": 276,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 310
+          "x": 29,
+          "y": 291,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 335
         },
         "provider-config-protocol": {
-          "x": 517,
-          "y": 369,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 403
+          "x": 29,
+          "y": 394,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 438
         },
         "provider-config-endpoint": {
-          "x": 517,
-          "y": 462,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 496
+          "x": 29,
+          "y": 497,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 541
         },
         "provider-config-credential": {
-          "x": 517,
-          "y": 555,
-          "w": 406,
-          "h": 34,
-          "right": 923,
-          "bottom": 589
+          "x": 29,
+          "y": 600,
+          "w": 332,
+          "h": 44,
+          "right": 361,
+          "bottom": 644
         },
         "provider-config-model-input": {
-          "x": 517,
-          "y": 728,
-          "w": 308,
-          "h": 34,
-          "right": 825,
-          "bottom": 762
+          "x": 29,
+          "y": 801,
+          "w": 234,
+          "h": 44,
+          "right": 263,
+          "bottom": 845
         }
       },
       "tall": {},
       "buttons": [
         {
-          "h": 34,
-          "y": 796,
-          "bottom": 830
+          "h": 44,
+          "y": 879,
+          "bottom": 923
         },
         {
-          "h": 34,
-          "y": 796,
-          "bottom": 830
+          "h": 44,
+          "y": 879,
+          "bottom": 923
         },
         {
-          "h": 34,
-          "y": 796,
-          "bottom": 830
+          "h": 44,
+          "y": 879,
+          "bottom": 923
         }
       ]
     },
@@ -4717,6 +4717,280 @@
         "bottom": 507
       }
     },
+    "account-create-dialog-1440": {
+      "card": {
+        "x": 500,
+        "y": 211,
+        "w": 440,
+        "h": 479,
+        "right": 940,
+        "bottom": 690
+      },
+      "footer": {
+        "x": 517,
+        "y": 645,
+        "w": 406,
+        "h": 28,
+        "right": 923,
+        "bottom": 673
+      },
+      "inputs": {
+        "account-create-username": {
+          "x": 517,
+          "y": 304,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 338
+        },
+        "account-create-name": {
+          "x": 517,
+          "y": 393,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 427
+        },
+        "account-create-kind": {
+          "x": 517,
+          "y": 482,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 516
+        },
+        "account-create-password": {
+          "x": 517,
+          "y": 571,
+          "w": 340,
+          "h": 34,
+          "right": 857,
+          "bottom": 605
+        }
+      },
+      "tall": {},
+      "buttons": [
+        {
+          "h": 28,
+          "y": 645,
+          "bottom": 673
+        },
+        {
+          "h": 28,
+          "y": 645,
+          "bottom": 673
+        }
+      ]
+    },
+    "bot-create-dialog-1440": {
+      "card": {
+        "x": 440,
+        "y": 228,
+        "w": 560,
+        "h": 445,
+        "right": 1000,
+        "bottom": 673
+      },
+      "footer": {
+        "x": 457,
+        "y": 628,
+        "w": 526,
+        "h": 28,
+        "right": 983,
+        "bottom": 656
+      },
+      "inputs": {
+        "bot-create-name": {
+          "x": 457,
+          "y": 321,
+          "w": 526,
+          "h": 34,
+          "right": 983,
+          "bottom": 355
+        },
+        "bot-create-profile": {
+          "x": 457,
+          "y": 386,
+          "w": 526,
+          "h": 34,
+          "right": 983,
+          "bottom": 420
+        },
+        "bot-create-kind": {
+          "x": 457,
+          "y": 451,
+          "w": 526,
+          "h": 34,
+          "right": 983,
+          "bottom": 485
+        },
+        "bot-create-model": {
+          "x": 457,
+          "y": 516,
+          "w": 526,
+          "h": 34,
+          "right": 983,
+          "bottom": 550
+        }
+      },
+      "tall": {},
+      "buttons": [
+        {
+          "h": 28,
+          "y": 628,
+          "bottom": 656
+        },
+        {
+          "h": 28,
+          "y": 628,
+          "bottom": 656
+        }
+      ]
+    },
+    "team-create-dialog-1440": {
+      "card": {
+        "x": 440,
+        "y": 245,
+        "w": 560,
+        "h": 411,
+        "right": 1000,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 457,
+        "y": 611,
+        "w": 526,
+        "h": 28,
+        "right": 983,
+        "bottom": 639
+      },
+      "inputs": {
+        "team-create-name": {
+          "x": 457,
+          "y": 338,
+          "w": 526,
+          "h": 34,
+          "right": 983,
+          "bottom": 372
+        },
+        "team-create-captain": {
+          "x": 457,
+          "y": 561,
+          "w": 526,
+          "h": 34,
+          "right": 983,
+          "bottom": 595
+        }
+      },
+      "tall": {
+        "team-create-mission": {
+          "x": 457,
+          "y": 403,
+          "w": 526,
+          "h": 127,
+          "right": 983,
+          "bottom": 530
+        }
+      },
+      "buttons": [
+        {
+          "h": 28,
+          "y": 611,
+          "bottom": 639
+        },
+        {
+          "h": 28,
+          "y": 611,
+          "bottom": 639
+        }
+      ]
+    },
+    "provider-config-dialog-1440": {
+      "card": {
+        "x": 500,
+        "y": 90,
+        "w": 440,
+        "h": 757,
+        "right": 940,
+        "bottom": 847
+      },
+      "footer": {
+        "x": 517,
+        "y": 796,
+        "w": 406,
+        "h": 34,
+        "right": 923,
+        "bottom": 830
+      },
+      "inputs": {
+        "provider-config-id": {
+          "x": 517,
+          "y": 183,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 217
+        },
+        "provider-config-name": {
+          "x": 517,
+          "y": 276,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 310
+        },
+        "provider-config-protocol": {
+          "x": 517,
+          "y": 369,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 403
+        },
+        "provider-config-endpoint": {
+          "x": 517,
+          "y": 462,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 496
+        },
+        "provider-config-credential": {
+          "x": 517,
+          "y": 555,
+          "w": 406,
+          "h": 34,
+          "right": 923,
+          "bottom": 589
+        },
+        "provider-config-model-input": {
+          "x": 517,
+          "y": 728,
+          "w": 308,
+          "h": 34,
+          "right": 825,
+          "bottom": 762
+        }
+      },
+      "tall": {},
+      "buttons": [
+        {
+          "h": 34,
+          "y": 796,
+          "bottom": 830
+        },
+        {
+          "h": 34,
+          "y": 796,
+          "bottom": 830
+        },
+        {
+          "h": 34,
+          "y": 796,
+          "bottom": 830
+        }
+      ]
+    },
     "accounts-table-1024": {
       "accounts-table": {
         "header": 35,
@@ -4753,5 +5027,5 @@
     }
   },
   "pass": true,
-  "finishedAt": "2026-11-23T07:16:21.324Z"
+  "finishedAt": "2026-11-23T07:23:27.285Z"
 }

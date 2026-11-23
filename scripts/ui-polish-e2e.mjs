@@ -192,7 +192,7 @@ const dialogMetrics = async (page, id, inputIds, expected, tallIds = []) => {
     });
   }, id);
   const value = { card: card[`${id}-card`], footer: footer[`${id}-footer`], inputs, tall, buttons };
-  report.measurements[id] = value;
+  report.measurements[`${id}-${page.viewportSize()?.width ?? 0}`] = value;
 
   const present = Object.entries(inputs).filter(([, input]) => input !== null);
   check(`${id}: fields present`, present.length === inputIds.length, {
