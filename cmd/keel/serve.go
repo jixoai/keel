@@ -1059,7 +1059,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 		switch {
 		case r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/metrics":
 			apiMux.ServeHTTP(w, r)
-		case r.URL.Path == "/plugins" || strings.HasPrefix(r.URL.Path, "/plugins/"):
+		case strings.HasPrefix(r.URL.Path, "/plugins/"):
+			// Only the namespace with an id is a plugin UI. The bare /plugins is
+			// the web client's own route: a reload there must serve the SPA, not
+			// the plugin handler's "a plugin id is required" JSON.
 			pluginUI.ServeHTTP(w, r)
 		default:
 			static.ServeHTTP(w, r)
