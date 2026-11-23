@@ -90,8 +90,11 @@ func ImageCapsForAPI(apiType string) ImageCaps {
 		// leads the degradation order with the handle form.
 		return ImageCaps{SupportsFileID: true, SupportsImageURL: true, MaxImageBytes: 20 << 20}
 	case "anthropic-messages":
-		// image source takes base64, url, or a file_id (Files API).
-		return ImageCaps{SupportsFileID: true, SupportsImageURL: true, MaxImageBytes: 20 << 20}
+		// image source takes base64 or url. The file_id source needs the Files
+		// API beta header on the *message* request, which this driver does not
+		// send; claiming it would make every image attempt a hard upstream 400
+		// instead of a url/base64 degradation.
+		return ImageCaps{SupportsImageURL: true, MaxImageBytes: 20 << 20}
 	default:
 		return ImageCaps{}
 	}

@@ -87,10 +87,12 @@ func wavDurationMs(header []byte) int64 {
 			}
 		case "data":
 			// The declared data size may exceed the header; that is fine — the
-			// duration comes from the declared size, not the bytes read.
+			// duration comes from the declared size, not the bytes read. A
+			// streaming WAV writes 0xFFFFFFFF as a placeholder, though: using it
+			// would fabricate an enormous duration, so report unknown instead.
 			if byteRate > 0 {
 				dataBytes = size
-				if dataBytes == 0 {
+				if dataBytes == 0 || dataBytes == 0xFFFFFFFF {
 					return 0
 				}
 				return int64(dataBytes) * 1000 / int64(byteRate)

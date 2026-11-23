@@ -464,6 +464,9 @@ func TestMediaCapsMatrix(t *testing.T) {
 	if !anthropic.File.SupportsFileURL || !anthropic.File.SupportsInline {
 		t.Fatalf("anthropic file caps = %+v, want url and inline", anthropic.File)
 	}
+	if anthropic.Image.SupportsFileID {
+		t.Fatalf("anthropic image caps = %+v, want no file_id (the driver sends no Files beta header)", anthropic.Image)
+	}
 	if anthropic.Audio.SupportsInline || anthropic.Video {
 		t.Fatalf("anthropic media caps = %+v, want no audio and no video", anthropic)
 	}
@@ -644,6 +647,19 @@ func TestProbeReadsOnlyBoundedMetadata(t *testing.T) {
 	}
 	if facts.DurationMs != 1000 {
 		t.Fatalf("duration = %d ms, want 1000", facts.DurationMs)
+	}
+
+	// A streaming WAV writes 0xFFFFFFFF as a size placeholder; that is not a
+	// duration, so the probe must say unknown rather than fabricate one.
+	streaming := wavHeader(8000, 16, 1, 0xFFFFFFFF)
+	blobs.put("blob-wav-stream", "audio/wav", streaming)
+	facts, err = resolver.Probe(context.Background(), "ws",
+		agentcore.MediaRefContent{Type: agentcore.ContentTypeMediaRef, BlobID: "blob-wav-stream", Name: "live.wav"})
+	if err != nil {
+		t.Fatalf("Probe streaming wav: %v", err)
+	}
+	if facts.DurationMs != 0 {
+		t.Fatalf("duration = %d ms, want unknown for a placeholder data size", facts.DurationMs)
 	}
 }
 

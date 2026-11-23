@@ -271,8 +271,9 @@ func (r *ImageResolver) Resolve(ctx context.Context, workspace string, target Im
 
 	// 3. base64 — always available, bounded by the declared inline cap.
 	limit := caps.inlineLimit()
-	if limit > 0 && info.Size > limit {
-		reason := fmt.Sprintf("image %s is %d bytes, inline limit for provider %s is %d", blobID, info.Size, target.Provider, limit)
+	if limit > 0 && base64WireLen(info.Size) > limit {
+		reason := fmt.Sprintf("image %s is %d bytes (%d base64), inline limit for provider %s is %d",
+			blobID, info.Size, base64WireLen(info.Size), target.Provider, limit)
 		if note != "" {
 			reason = note + "; " + reason
 		}

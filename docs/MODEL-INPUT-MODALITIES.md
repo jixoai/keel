@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | `openai-chat-completions` | `image_url`（URL 或 data URI） | `file` 部件：`file_data`（data URL）+ `filename`，或 `file_id`；**仅 PDF** | `input_audio`（base64 + `format` wav/mp3） | — |
 | `openai-responses` | `input_image`（`image_url` 或 `file_id`） | `input_file`：`file_id` / `file_url` / `file_data`（data URL + `filename`） | —（见 §4） | — |
-| `anthropic-messages` | `image`（`source` base64/url/file） | `document`（`source` base64/url；`file_id` 形状被编码器显式拒绝成文本 notice） | — | — |
+| `anthropic-messages` | `image`（`source` base64/url；**无** `file`，消息请求不带 Files API beta 头） | `document`（`source` base64/url；`file_id` 形状被编码器显式拒绝成文本 notice） | — | — |
 | 未知协议 / `demo` | 仅 base64 | — | — | — |
 
 线形状判定代码：`internal/provider/providers.go`（chat / anthropic）、

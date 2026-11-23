@@ -184,8 +184,12 @@ func imageFallbackText(ref agentcore.ImageRefContent, reason string) string {
 	if ref.Width > 0 && ref.Height > 0 {
 		facts += fmt.Sprintf(", %dx%d", ref.Width, ref.Height)
 	}
-	return fmt.Sprintf("[image attachment %s was not sent with this request: %s. Stored bytes: blobId=%s. "+
-		"Use file tools to inspect the attachment if you need its contents.]", facts, reason, ref.BlobID)
+	stored := ""
+	if blobID := strings.TrimSpace(ref.BlobID); blobID != "" {
+		stored = fmt.Sprintf(" Stored bytes: blobId=%s.", blobID)
+	}
+	return fmt.Sprintf("[image attachment %s was not sent with this request: %s.%s "+
+		"Use file tools to inspect the attachment if you need its contents.]", facts, reason, stored)
 }
 
 // contentHasImageRef reports whether a content list carries a durable reference.

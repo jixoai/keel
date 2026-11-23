@@ -294,6 +294,24 @@ func TestImageCapsForHonoursTheModelDeclaration(t *testing.T) {
 	}
 }
 
+// TestImageFallbackWithoutBlobIDDoesNotClaimStoredBytes pins the honest
+// reference rule for the image path too: a reference with no blob id cannot
+// claim the platform stores bytes for it.
+func TestImageFallbackWithoutBlobIDDoesNotClaimStoredBytes(t *testing.T) {
+	text := imageFallbackText(agentcore.ImageRefContent{
+		Type: agentcore.ContentTypeImageRef, Name: "shot.png", MimeType: "image/png",
+	}, "the selected model does not declare image input")
+	if strings.Contains(text, "Stored bytes") {
+		t.Fatalf("fallback = %q, want no stored-bytes claim without a blobId", text)
+	}
+	withID := imageFallbackText(agentcore.ImageRefContent{
+		Type: agentcore.ContentTypeImageRef, BlobID: "blob-1", Name: "shot.png",
+	}, "reason")
+	if !strings.Contains(withID, "blobId=blob-1") {
+		t.Fatalf("fallback = %q, want the blob reference when one exists", withID)
+	}
+}
+
 // TestImageWorkspaceDefaultsToTheTenant pins the blob scope: the tenant is the
 // default, and an explicit override wins.
 func TestImageWorkspaceDefaultsToTheTenant(t *testing.T) {

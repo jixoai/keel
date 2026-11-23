@@ -165,7 +165,10 @@ func MediaCapsForAPI(apiType string) MediaCaps {
 		}
 	case "anthropic-messages":
 		return MediaCaps{
-			Image: ImageCaps{SupportsFileID: true, SupportsImageURL: true, MaxImageBytes: 20 << 20},
+			// Image: url/base64 only, for the same reason the document file_id
+			// form is not claimed below: the message request carries no Files
+			// API beta header.
+			Image: ImageCaps{SupportsImageURL: true, MaxImageBytes: 20 << 20},
 			File: FileCaps{
 				// The Messages API document source accepts base64 and url today.
 				// A file_id source additionally requires the Files API beta header on
@@ -535,8 +538,9 @@ func (r *MediaResolver) ResolveFile(ctx context.Context, workspace string, targe
 	if limit <= 0 {
 		limit = caps.MaxFileBytes
 	}
-	if limit > 0 && info.Size > limit {
-		reason := fmt.Sprintf("document %s is %d bytes, inline limit for provider %s is %d", blobID, info.Size, target.Provider, limit)
+	if limit > 0 && base64WireLen(info.Size) > limit {
+		reason := fmt.Sprintf("document %s is %d bytes (%d base64), inline limit for provider %s is %d",
+			blobID, info.Size, base64WireLen(info.Size), target.Provider, limit)
 		if note != "" {
 			reason = note + "; " + reason
 		}

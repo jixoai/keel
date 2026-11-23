@@ -588,14 +588,14 @@ func TestUploaderHTTPFailureDegradesToBase64(t *testing.T) {
 }
 
 // TestImageCapsForAPIDeclaresTheThreeWires pins the declaration table the product
-// layer reads: Responses and Anthropic lead with file_id, Chat leads with url, an
+// layer reads: Responses leads with file_id, Chat/Anthropic lead with url, an
 // unknown protocol declares nothing (base64 only).
 func TestImageCapsForAPIDeclaresTheThreeWires(t *testing.T) {
 	if caps := ImageCapsForAPI("openai-responses"); !caps.SupportsFileID || !caps.SupportsImageURL {
 		t.Fatalf("responses caps = %+v, want file_id and url", caps)
 	}
-	if caps := ImageCapsForAPI("anthropic-messages"); !caps.SupportsFileID || !caps.SupportsImageURL {
-		t.Fatalf("anthropic caps = %+v, want file_id and url", caps)
+	if caps := ImageCapsForAPI("anthropic-messages"); caps.SupportsFileID || !caps.SupportsImageURL {
+		t.Fatalf("anthropic caps = %+v, want url only (the driver sends no Files beta header)", caps)
 	}
 	chat := ImageCapsForAPI("openai-chat-completions")
 	if chat.SupportsFileID {
