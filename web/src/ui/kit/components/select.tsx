@@ -11,7 +11,7 @@
 // | defaultValue | string? | – | first value when uncontrolled |
 // | onChange | (value: string \| null) => void? | – | a choice (null: cleared) |
 // | placeholder | string? | "请选择" | shown while nothing is chosen |
-// | size | "sm" \| "default" \| "lg" | "default" | trigger height |
+// | size | "sm" \| "default" \| "lg" \| "field" | "default" | trigger height |
 // | searchable | boolean? | false | a filter field above the rows |
 // | disabled | boolean? | false | does not open; dimmed |
 // | invalid | boolean? | false | destructive trigger border + ring |
@@ -26,7 +26,7 @@ import { Text, View } from "nsh";
 import { Select as NativeSelect, type SelectEntry, type SelectItem } from "nsh/base";
 import { Icon } from "../../icons";
 import { color, radius, space, typeScale } from "../tokens";
-import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, menuRow, popupSurface, type ControlSize } from "./styles";
+import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, menuRow, popupSurface, withoutUndefined, type ControlSize } from "./styles";
 
 export type { SelectItem };
 
@@ -119,7 +119,11 @@ export function Select(props: {
         >
           <Text
             style={{
+              flexShrink: 1,
+              minWidth: 0,
               fontSize: typeScale.base,
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
               color: props.disabled
                 ? color.mutedForeground
                 : title() === undefined
@@ -135,7 +139,7 @@ export function Select(props: {
       hoverStyle={{ borderColor: color.ring }}
       focusStyle={props.invalid ? invalidRing() : focusRing()}
       disabledStyle={{ opacity: 0.5 }}
-      style={[{ alignSelf: "stretch", borderRadius: controlRadius(size()) }, props.style ?? null]}
+      style={[{ alignSelf: "stretch", borderRadius: controlRadius(size()) }, withoutUndefined(props.style)]}
     />
   );
 }

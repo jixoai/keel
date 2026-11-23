@@ -6,7 +6,7 @@
 // | prop | type | default | notes |
 // |---|---|---|---|
 // | variant | "default" \| "secondary" \| "ghost" \| "outline" \| "destructive" \| "link" | "default" | shadcn's set; `link` is text-only |
-// | size | "sm" \| "default" \| "lg" \| "icon" | "default" | 24 / 28 / 32 px; `icon` is square at 28 |
+// | size | "sm" \| "default" \| "lg" \| "field" \| "icon" | "default" | 24 / 28 / 32 / 34 px; `icon` is square at 28. `field` matches the 34px field shell; a phone passes `height: 44` through `style`. |
 // | label | string? | – | text content; omit when `children` carries it |
 // | icon | IconName? | – | leading lucide glyph, tinted with the variant's ink |
 // | iconTrailing | IconName? | – | trailing glyph (menus, disclosure) |
@@ -38,6 +38,7 @@ import {
   glassControl,
   glassPrimary,
   invalidRing,
+  withoutUndefined,
   type ControlSize,
 } from "./styles";
 import { Spinner } from "./spinner";
@@ -142,7 +143,7 @@ export function Button(props: {
         variant() === "link" ? { backgroundColor: "transparent" } : null,
         face().base,
         props.invalid ? invalidRing() : null,
-        props.style ?? null,
+        withoutUndefined(props.style),
       ]}
       disabledStyle={{ opacity: disabledOpacity }}
     >

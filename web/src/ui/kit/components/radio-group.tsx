@@ -10,6 +10,7 @@
 // | onChange | (value: string) => void? | – | a press or an arrow asks for this value |
 // | disabled | boolean? | false | the whole group is disabled |
 // | orientation | "vertical" \| "horizontal" | "vertical" | layout of the options |
+// | optionStyle | StyleProp<ViewStyle>? | – | each option's row (a phone's 44px touch floor) |
 // | accessibilityLabel | string? | – | what screen readers call the set (on the wrapper) |
 // | testID | string? | – | `id:` selector for tests |
 //
@@ -28,6 +29,7 @@ export function RadioGroup(props: {
   onChange?: (value: string) => void;
   disabled?: boolean;
   orientation?: "vertical" | "horizontal";
+  optionStyle?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -41,10 +43,13 @@ export function RadioGroup(props: {
       style={{ flexDirection: "column" }}
     >
       <NativeRadioGroup
-        style={{
-          flexDirection: horizontal() ? "row" : "column",
-          gap: horizontal() ? space.xl : space.sm,
-        }}
+        style={[
+          {
+            flexDirection: horizontal() ? "row" : "column",
+            gap: horizontal() ? space.xl : space.sm,
+          },
+          props.style ?? null,
+        ]}
       >
         {(props.options ?? []).map((option) => {
           const checked = () => props.value === option.value;
@@ -57,7 +62,7 @@ export function RadioGroup(props: {
               onChange={() => props.onChange?.(option.value)}
               hoverStyle={{ opacity: 0.92 }}
               disabledStyle={{ opacity: 0.5 }}
-              style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}
+              style={[{ flexDirection: "row", alignItems: "center", gap: space.sm }, props.optionStyle ?? null]}
             >
               <View
                 style={{

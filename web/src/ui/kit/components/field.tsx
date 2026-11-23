@@ -44,7 +44,11 @@ export function Field(props: {
         {
           flexDirection: horizontal() ? "row" : "column",
           alignItems: horizontal() ? "center" : "stretch",
-          gap: horizontal() ? space.lg : space.xs,
+          // The label, the control and its hint/error are one stack: 6px above
+          // the control and 6px below it (2px stack gap + 4px hint padding).
+          // A control with a real height (the 34px field, 44 on touch) then
+          // cannot collide with its hint the way the old minHeight patch did.
+          gap: horizontal() ? space.lg : space.sm,
         },
         props.style ?? null,
       ]}
@@ -58,7 +62,7 @@ export function Field(props: {
           <View
             role="alert"
             accessibilityLabel={props.error}
-            style={{ flexDirection: "row", alignItems: "center", gap: space.xs, paddingTop: space.xxs }}
+            style={{ flexDirection: "row", alignItems: "center", gap: space.xs, paddingTop: space.xs }}
           >
             <Icon name="alert" size={12} tint={color.destructive} />
             <Text
@@ -81,7 +85,7 @@ export function Field(props: {
               fontSize: typeScale.sm,
               lineHeight: Math.round(typeScale.sm * lineHeight.normal),
               color: color.mutedForeground,
-              paddingTop: space.xxs,
+              paddingTop: space.xs,
             }}
           >
             {props.hint}

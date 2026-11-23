@@ -191,7 +191,22 @@ export function Dialog(props: {
           {/* The card's Scroll viewport owns the scroll for a long dialog. */}
           <View style={[{ flexDirection: "column", gap: space.md }, fill]}>{props.children}</View>
           {props.footer !== undefined ? (
-            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>{props.footer}</View>
+            <View
+              testID={props.testID !== undefined ? `${props.testID}-footer` : undefined}
+              style={{
+                flexDirection: "row",
+                // The footer is one action row: every action sits on one
+                // baseline, and a narrow phone wraps a long destructive label
+                // onto its own line instead of forcing it off the card.
+                alignItems: "center",
+                justifyContent: "flex-end",
+                flexWrap: "wrap",
+                columnGap: space.md,
+                rowGap: space.sm,
+              }}
+            >
+              {props.footer}
+            </View>
           ) : null}
         </View>
       </View>

@@ -7,11 +7,18 @@
 import type { StyleProp, ViewStyle } from "nsh";
 import { alpha, color, radius, space } from "../tokens";
 
-/** The dense control ladder the kit uses for sm/default/lg sizes. */
-export type ControlSize = "sm" | "default" | "lg";
+/** The dense control ladder the kit uses for sm/default/lg sizes, plus the
+ * shell's one *field* size. `field` is the height every toolbar, filter row and
+ * form control shares (34px), so a search box, a Select trigger and a range
+ * segment sit on one baseline; `sm`/`default`/`lg` stay for dense chrome
+ * (menus, icon buttons, inline actions). Touch layouts override the height to
+ * the 44px floor at the call site. */
+export type ControlSize = "sm" | "default" | "lg" | "field";
 
-/** Height of a control at each size (shadcn radix-mira: 24 / 28 / 32). */
-export const controlHeight = (size: ControlSize): number => (size === "sm" ? 24 : size === "lg" ? 32 : 28);
+/** Height of a control at each size (shadcn radix-mira: 24 / 28 / 32; the
+ * product's field shell: 34). */
+export const controlHeight = (size: ControlSize): number =>
+  size === "sm" ? 24 : size === "lg" ? 32 : size === "field" ? 34 : 28;
 
 /** Icon box of a control at each size. */
 export const controlIconSize = (size: ControlSize): number => (size === "sm" ? 12 : size === "lg" ? 16 : 14);
@@ -22,6 +29,22 @@ export const controlRadius = (size: ControlSize): number =>
 
 /** Horizontal padding of a control at each size. */
 export const controlPadding = (size: ControlSize): number => (size === "sm" ? space.md : size === "lg" ? space.lg : space.md);
+
+/** A style object with its `undefined` entries removed. NSH merges a style
+ * array by later-wins, and an explicit `height: undefined` overwrites the
+ * default the component set first (the input then collapsed to its 19px text
+ * line). Call sites keep passing conditional values; this makes an absent one
+ * absent, not a reset. */
+export const withoutUndefined = <T extends object>(style: StyleProp<T>): StyleProp<T> => {
+  if (!style) return style;
+  if (Array.isArray(style)) return style.map((entry) => withoutUndefined(entry)) as StyleProp<T>;
+  if (typeof style !== "object") return style;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(style as Record<string, unknown>)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+};
 
 /** The keyboard focus ring (shadcn's `ring-2 ring-ring/35`, at a contrast the
  * WCAG non-text floor actually sees).

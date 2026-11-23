@@ -5,7 +5,8 @@
 // Props
 // | prop | type | default | notes |
 // |---|---|---|---|
-// | size | "sm" \| "default" \| "lg" | "default" | 24 / 28 / 32 px |
+// | size | "sm" \| "default" \| "lg" \| "field" | "default" | 24 / 28 / 32 / 34 px |
+// | height | number? | – | overrides the size's height (the 44px touch floor) |
 // | value | string? | – | controlled text |
 // | defaultValue | string? | – | first text when uncontrolled |
 // | placeholder | string? | – | shown while empty |
@@ -25,10 +26,13 @@ import type { StyleProp } from "nsh";
 import type { InputStyle } from "nsh";
 import { Input as NativeInput } from "nsh/base";
 import { alpha, color, typeScale } from "../tokens";
-import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, type ControlSize } from "./styles";
+import { controlHeight, controlPadding, controlRadius, focusRing, glassField, invalidRing, withoutUndefined, type ControlSize } from "./styles";
 
 export function Input(props: {
   size?: ControlSize;
+  /** The visual field height. A phone toolbar passes 44 (the touch floor);
+   * otherwise `size` decides. */
+  height?: number;
   value?: string;
   defaultValue?: string;
   placeholder?: string;
@@ -69,7 +73,8 @@ export function Input(props: {
       style={[
         {
           ...glassField(),
-          height: controlHeight(size()),
+          height: props.height ?? controlHeight(size()),
+          minWidth: 0,
           borderRadius: controlRadius(size()),
           paddingHorizontal: controlPadding(size()),
           fontSize: typeScale.base,
@@ -79,7 +84,7 @@ export function Input(props: {
           selectionColor: alpha(color.primary, 0.25),
         },
         props.invalid ? invalidRing() : null,
-        props.style ?? null,
+        withoutUndefined(props.style),
       ]}
     />
   );

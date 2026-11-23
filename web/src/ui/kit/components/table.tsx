@@ -10,7 +10,9 @@
 // | bare | boolean? | false | no card shell (a table inside a card) |
 // | testID | string? | – | `id:` selector for tests |
 //
-// Props — rows and cells: `children` (+ `style`); `TableHead` takes `width`.
+// Props — rows and cells: `children` (+ `style`); `TableHead` takes `width`
+// and `align` (`start` / `center` / `end`), and so does a body cell, so a
+// numeric column's header and its numbers share one edge.
 // `TableRow` hovers and stripes via `striped`.
 //
 // States: header/body/footer groups · hovered row · empty body (pass an
@@ -61,11 +63,17 @@ export function Table(props: {
   );
 }
 
+/** Which edge a header or cell's content sits on. */
+export type CellAlign = "start" | "center" | "end";
+
+const cellAlign = (align: CellAlign | undefined): "stretch" | "center" | "flex-end" =>
+  align === "center" ? "center" : align === "end" ? "flex-end" : "stretch";
+
 /** A styled header cell: quiet, small, medium weight. */
-export function Th(props: { children?: JSX.Element; width?: number | `${number}%`; style?: StyleProp<ViewStyle> }) {
+export function Th(props: { children?: JSX.Element; width?: number | `${number}%`; align?: CellAlign; style?: StyleProp<ViewStyle> }) {
   return (
     <TableHead style={[{ flex: props.width === undefined ? 1 : undefined, width: props.width }, props.style ?? null]}>
-      <View style={{ height: 34, justifyContent: "center", paddingHorizontal: space.lg }}>
+      <View style={{ height: 34, justifyContent: "center", alignItems: cellAlign(props.align), paddingHorizontal: space.lg }}>
         {props.children}
       </View>
     </TableHead>
@@ -73,10 +81,12 @@ export function Th(props: { children?: JSX.Element; width?: number | `${number}%
 }
 
 /** A styled body cell. */
-export function Td(props: { children?: JSX.Element; width?: number | `${number}%`; style?: StyleProp<ViewStyle> }) {
+export function Td(props: { children?: JSX.Element; width?: number | `${number}%`; align?: CellAlign; style?: StyleProp<ViewStyle> }) {
   return (
     <TableCell style={[{ flex: props.width === undefined ? 1 : undefined, width: props.width }, props.style ?? null]}>
-      <View style={{ minHeight: 36, justifyContent: "center", paddingHorizontal: space.lg }}>{props.children}</View>
+      <View style={{ minHeight: 36, justifyContent: "center", alignItems: cellAlign(props.align), paddingHorizontal: space.lg }}>
+        {props.children}
+      </View>
     </TableCell>
   );
 }
