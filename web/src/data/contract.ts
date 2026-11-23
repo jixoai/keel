@@ -26,6 +26,15 @@ export type {
 
 import type { Delivery, SurfaceCommands, WireEvent } from "../../../packages/chat-surface/src/types";
 
+/** The queue block a 202 admission carries (POST input/retry/run). position is
+ * 1-based; etaSeconds is null when there is no observed history. */
+export interface QueueFacts {
+  position: number;
+  etaKnown: boolean;
+  etaSeconds: number | null;
+  groupId?: string;
+}
+
 /** A row of `GET /v1/sessions`. */
 export interface SessionSummary {
   sessionId: string;
@@ -34,6 +43,9 @@ export interface SessionSummary {
   lastSeq?: number;
   runStatus?: string;
   lastMessageAt?: string;
+  /** The last admission's queue fact, kept until the run starts; `runStatus`
+   * alone says "queued" but not the position or ETA. */
+  queue?: QueueFacts;
   /** Optional enrichments (the API may add them; the client falls back to
    * loading the last events of a session). */
   title?: string;
@@ -121,6 +133,9 @@ export interface SendOptions {
   attachments?: AttachmentRef[];
   /** The session's model selection for this input; absent = tenant default. */
   selection?: ModelSelection;
+  /** Called when the server answers 202 with a queue block, so the session row
+   * can show 排队中 + position/ETA instead of pretending the run is ready. */
+  onQueued?: (queue: QueueFacts) => void;
 }
 
 export interface UiCommands extends SurfaceCommands {

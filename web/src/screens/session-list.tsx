@@ -78,7 +78,14 @@ import {
   weight,
   type BadgeVariant,
 } from "../ui/kit";
-import { conversationState, runStateLabel, sessionState, type RunState } from "../ui/run-state";
+import {
+  conversationState,
+  queueDetail,
+  runStateLabel,
+  sessionState,
+  type QueueFacts,
+  type RunState,
+} from "../ui/run-state";
 import { oneLine, sessionTitle } from "../ui/session-title";
 import { PluginSidebarSlot } from "../plugins/slots";
 import { requestDelete } from "./delete-dialog";
@@ -106,9 +113,12 @@ const summaryOf = (row: SessionSummary): string => {
   return preview;
 };
 
-/** The one-word state of a row: the active row projects the open conversation
- * (which knows about stopping), every other row projects runStatus. */
+/** The one-word state of a row: a placement queue entry always wins (the
+ * conversation view has no queue fact), then the active row projects the open
+ * conversation (which knows about stopping), every other row projects
+ * runStatus. */
 const rowStateOf = (row: SessionSummary, active: boolean): RunState => {
+  if (row.queue || (row.runStatus ?? "").toLowerCase() === "queued") return "queued";
   if (active && store.conversation()) return conversationState(store.conversation());
   return sessionState(row.runStatus);
 };
@@ -116,15 +126,18 @@ const rowStateOf = (row: SessionSummary, active: boolean): RunState => {
 /** The single status word a row shows, or none at all.
  *
  * A parked question is not a run: `waiting` gets the badge and never motion
- * (the polish change's C2). The active row stays quiet about its own run — the
- * conversation's header already says what it is doing — but it still reports a
- * wait, and a failure is never hidden. */
+ * (the polish change's C2). A queued admission always gets its badge — even on
+ * the active row — with the FIFO position/ETA the server reported; otherwise
+ * the active row stays quiet about its own run because the conversation's
+ * header already says what it is doing. A failure is never hidden. */
 const rowBadgeOf = (
   state: RunState,
   waiting: boolean,
   active: boolean,
+  queue?: QueueFacts,
 ): { variant: BadgeVariant; label: string; icon?: "clock" | "alert" } | null => {
   if (waiting) return { variant: "warning", label: runStateLabel.waiting, icon: "clock" };
+  if (state === "queued") return { variant: "info", label: queueDetail(queue), icon: "clock" };
   if (active) return null;
   if (state === "failed") return { variant: "destructive", label: runStateLabel.failed, icon: "alert" };
   if (state === "running") return { variant: "info", label: runStateLabel.running };
@@ -175,7 +188,7 @@ function SessionRow(props: { row: () => SessionSummary; active: boolean; wide: b
   const preview = () => summaryOf(row());
   const time = () => formatTime(row().lastMessageAt);
   const waiting = () => store.waiting(row().sessionId);
-  const badge = () => rowBadgeOf(rowStateOf(row(), props.active), waiting(), props.active);
+  const badge = () => rowBadgeOf(rowStateOf(row(), props.active), waiting(), props.active, row().queue);
   const openDelete = () => requestDelete(row().sessionId, title());
   /** The pointer is on the row: the wide layout's overflow action only shows
    * then (or while the row is the open one — a terminal has no hover). */

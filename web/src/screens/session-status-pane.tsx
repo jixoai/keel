@@ -34,13 +34,29 @@ import {
   weight,
   type BadgeVariant,
 } from "../ui/kit";
-import { conversationState, runStateLabel, runStateTone, type RunTone } from "../ui/run-state";
+import {
+  conversationState,
+  queueDetail,
+  runStateLabel,
+  runStateTone,
+  type RunState,
+  type RunTone,
+} from "../ui/run-state";
 
 const stateBadge: Record<RunTone, BadgeVariant> = {
   neutral: "secondary",
   brand: "info",
   warning: "warning",
   danger: "destructive",
+};
+
+/** The header's state: a 202 queue admission wins over the conversation
+ * projection, which has no queue fact and would otherwise say 就绪 while the
+ * run waits in line. */
+const headerState = (): RunState => (store.activeQueue() ? "queued" : conversationState(store.conversation()));
+const headerStateLabel = (): string => {
+  const queue = store.activeQueue();
+  return queue ? queueDetail(queue) : runStateLabel[headerState()];
 };
 
 /** The connection in the reader's words. */
@@ -148,8 +164,8 @@ export function SessionStatusPane() {
           <If when={!!store.activeId()}>
             <Badge
               testID="session-status-state"
-              variant={stateBadge[runStateTone[conversationState(store.conversation())]]}
-              label={runStateLabel[conversationState(store.conversation())]}
+              variant={stateBadge[runStateTone[headerState()]]}
+              label={headerStateLabel()}
             />
           </If>
         </View>

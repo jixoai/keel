@@ -55,6 +55,7 @@ import type {
   UiCommands,
   WireEvent,
 } from "./contract";
+import { parseQueueFacts } from "./queue";
 import {
   APP_ID_PATTERN,
   McpAppRequestError,
@@ -2204,7 +2205,7 @@ export class HttpCommands implements UiCommands {
   }
 
   async sendWithAttachments(text: string, opts: SendOptions): Promise<void> {
-    await this.http.request(`/v1/sessions/${encodeURIComponent(this.sessionId)}/input`, {
+    const response = await this.http.request(`/v1/sessions/${encodeURIComponent(this.sessionId)}/input`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2217,6 +2218,17 @@ export class HttpCommands implements UiCommands {
         ...(opts.selection ? { selection: opts.selection } : {}),
       }),
     });
+    if (!opts.onQueued) return;
+    // A queued admission is a 202 with a `queued` block; report it so the
+    // session row says 排队中 (with position/ETA) instead of "ready". A body
+    // without the block (200/201) simply carries no queue fact.
+    try {
+      const queued = parseQueueFacts(await response.json());
+      if (!queued) return;
+      opts.onQueued(queued);
+    } catch {
+      /* an empty or non-JSON body carries no queue fact */
+    }
   }
 
   async stop(): Promise<void> {

@@ -33,6 +33,7 @@ import type {
   ProviderCredentialSaved,
   ProviderProbeView,
   ProviderView,
+  QueueFacts,
   SecretMeta,
   ScrollState,
   SendOptions,
@@ -1737,6 +1738,14 @@ class KeelStore {
     );
   }
 
+  /** The open session's last queue fact (a 202 admission's position/ETA). The
+   * header uses it to say 排队中 instead of projecting an idle conversation. */
+  activeQueue(): QueueFacts | undefined {
+    const id = this.activeId();
+    if (!id) return undefined;
+    return this.sessions().find((row) => row.sessionId === id)?.queue;
+  }
+
   async openSession(sessionId: string) {
     if (this.activeId() === sessionId) return;
     const token = ++this.openToken;
@@ -1826,12 +1835,13 @@ class KeelStore {
     if (event.kind === "run.finished") {
       this.patchSession(sessionId, {
         runStatus: String(payloadOf(event).stopReason ?? "done"),
+        queue: undefined,
         lastSeq: event.seq,
         lastMessageAt: new Date().toISOString(),
         pendingDecision: false,
       });
     } else if (event.kind === "user.message" || event.kind === "assistant.message") {
-      this.patchSession(sessionId, { runStatus: "running", lastSeq: event.seq });
+      this.patchSession(sessionId, { runStatus: "running", queue: undefined, lastSeq: event.seq });
     }
     if (event.kind !== "partial") {
       this.scheduleRefresh();
@@ -1997,6 +2007,12 @@ class KeelStore {
       const body = trimmed || (attachments.length ? "（附件）" : "");
       const sendOpts: SendOptions = { requestId, delivery, attachments };
       if (selection) sendOpts.selection = selection;
+      // A 202 admission carries the FIFO position/ETA: patch the row now so the
+      // list says 排队中 instead of "ready" (the run row is queued; nothing is
+      // executing yet).
+      sendOpts.onQueued = (queue) => {
+        this.patchSession(sessionId, { runStatus: "queued", queue });
+      };
       if (commands.sendWithAttachments) {
         await commands.sendWithAttachments(body, sendOpts);
       } else {
