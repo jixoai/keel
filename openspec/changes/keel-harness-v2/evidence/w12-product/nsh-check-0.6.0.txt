@@ -1,13 +1,4 @@
-# nsh check on this machine — nsh 0.6.0 (f577c51 nightly, 2026-11-22)
-# The pinned nsh 0.4.0 (bba76ef nightly) is not installed here; the old
-# nsh-check.txt records the pinned run (exit=0).
-#
-# $ cd web && nsh check
-src/surfaces/speech/index.tsx(422,7): error TS2322: Type 'File | null' is not assignable to type 'Blob'.
-  Type 'null' is not assignable to type 'Blob'.
-src/surfaces/speech/index.tsx(423,17): error TS18047: 'file' is possibly 'null'.
-error type check failed (exit status: 1)
-#
-# 2 errors, both in the existing speech surface: 0.6.0's PickedFile.file is
-# `File | null` (the pinned 0.4.0 typed it as `File`). No W12 file appears in
-# the output; the W12 data modules, screens, App.tsx and fixture type-check.
+# nsh 0.6.0 (f577c51) after the upgrade and the surface-gate move:
+# 396 tests, 395 passed, 1 failed (the pre-existing settings raw-JSON case).
+$ nsh check
+(exit 0, no output)

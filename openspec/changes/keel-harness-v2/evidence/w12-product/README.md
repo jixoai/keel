@@ -24,10 +24,10 @@
 | `go-pg-query-after-index.txt` | 同上 DSN，`go test ./internal/harnessapi -run TestPGSessionQuery -count=1 -p 1` | ok（含迁移后的 `events_transcript_created` 索引） |
 | `go-store-migrate.txt` | 同上 DSN，`go test ./internal/store -run 'TestMigrate|TestSchema|TestRLS|TestTenant'` | ok |
 | `nsh-check.txt` | `cd web && nsh check`（pinned nsh 0.4.0 bba76ef） | exit=0 |
-| `nsh-check-0.6.0.txt` | 同命令（本机 nsh 0.6.0 f577c51） | 2 errors，全在既有 speech 文件（`PickedFile.file` 空值），无 W12 文件 |
+| `nsh-check-0.6.0.txt` | 同命令（本机 nsh 0.6.0 f577c51，升级后） | **exit 0 / 0 errors**（speech 的 tooLarge 空值已处理；surface gate 已移到 app 根） |
 | `tui-new-tests.txt` | `cd web && nsh test --target tui --filter <三个新用例>` | 3/3 通过（capability 修复后重跑） |
 | `browser-new-tests.txt` | `cd web && nsh test --target web App.tui.test.tsx --filter <三个新用例>` | 3/3 通过（headless Chrome；capability 修复后） |
-| `tui-full.txt` | `cd web && nsh test --target tui`（final base，nsh 0.6.0） | 371/396 通过；25 失败=24 个 nsh 0.6.0 资源路径规则（realtime/speech）+ 1 个既有 settings raw-JSON（见下「环境性失败」） |
+| `tui-full.txt` | `cd web && nsh test --target tui`（final base + nsh 0.6.0 升级后） | **395/396 通过**；唯一失败=既有 settings raw-JSON（见下「环境性失败」第 2 条） |
 | `openspec-strict.txt` | `openspec validate keel-harness-v2 --strict` | `Change 'keel-harness-v2' is valid` |
 
 ## 能力门（复核 P1 修复，2026-11-23）
@@ -91,11 +91,13 @@ fixture 能应答但没广告；补齐后 TUI 与浏览器两套宿主都 3/3 �
    `settings.tsx`/模型 fixture 的既有形状。新加的 3 个 TUI 用例与所有其他设置/模型用例通过。
    已在合入前单独定位：用 `app.paste` 替换逐段 `type` 可以让「坏文档 → 400」这一段通过，
    但第二次保存仍不落版本；属于既有测试/输入路径问题，另行修。
-3. `nsh test --target tui` 另有 **24 个** realtime/speech 失败，全部同一条启动错误：
-   `open("./harness.tsx"): '../../../assets/demo-shot.png' is outside the app's
-   directory ...: the files an app imports ship with it, so move it inside`。
-   这是 **nsh 0.6.0 新增的资源路径规则**：旧机 pinned 0.4.0（bba76ef）下这 24 个用例通过
-   （旧证据 372/373）。与本切片无关；pinned 0.4.0 到位后应为 383/384（仅 settings 那条）。
+3. **24 个 realtime/speech 失败已随 nsh 0.6.0 升级修掉**：0.6.0 要求 app 导入的资源
+   在 app 目录内，而这两个 gate 在 `src/surfaces/*` 下经 fixture 拉 `web/assets/demo-shot.png`。
+   已把两个测试文件与 harness 移到 `web/`（产品 app 根，`assets/` 在根内），并删除只为旧
+   app 根存在的 surface `App.tsx`/`nsh.json`；`nsh check` 也从 2 个 speech 空值错误降到 **0**
+   （speech 上传路径补了 `PickedFile.file == null`（tooLarge）的提示）。
+   final base 的全量 TUI：**396 tests, 395 passed, 1 failed**（只剩下面第 2 条的 settings
+   raw-JSON 既有失败）。
 
 ## 已知限制
 
