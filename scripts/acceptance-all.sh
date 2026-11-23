@@ -22,10 +22,13 @@
 # Usage:
 #   KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=<dir> scripts/acceptance-all.sh
 #
-# Environment: KEEL_PG_CTR (dockerized Postgres, default keel-pg),
+# Environment: KEEL_TEST_DSN is the maintenance connection; its host/user/
+# query carry over to every dedicated database this script creates.
+# KEEL_PSQL (default psql) names the PostgreSQL client binary;
+# KEEL_ACCEPTANCE_MAINTENANCE_DSN overrides the connection used for DROP/CREATE.
 # KEEL_PERF_DIR / KEEL_PERF_DB / KEEL_HANDOFF_* passthrough (see the scripts).
 # The load generators own their dedicated databases (this script drops and
-# recreates them first, WITH (FORCE)).
+# recreates them first, WITH (FORCE)). No Docker is required.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -33,7 +36,8 @@ cd "$(dirname "$0")/.."
 : "${KEEL_EVIDENCE_DIR:?set KEEL_EVIDENCE_DIR (where the raw evidence lands)}"
 
 EVID="$KEEL_EVIDENCE_DIR"
-PG_CTR="${KEEL_PG_CTR:-keel-pg}"
+PSQL="${KEEL_PSQL:-psql}"
+MAINTENANCE_DSN="${KEEL_ACCEPTANCE_MAINTENANCE_DSN:-$KEEL_TEST_DSN}"
 ADMIN_KEY="${KEEL_ADMIN_KEY:-keel-acceptance-admin}"
 BIN=/tmp/keel-runtime-acceptance
 BASE=/tmp/keel-r1-base
@@ -79,14 +83,23 @@ run_split() {
   fi
 }
 
-# dsn <db> — a dedicated DSN on the dockerized Postgres.
-dsn() { printf 'postgres://postgres:runtime@127.0.0.1:13741/%s?sslmode=disable' "$1"; }
+# dsn <db> — a dedicated database on the same server and credentials as
+# KEEL_TEST_DSN. Only the database path changes; host/user/query are preserved.
+dsn() {
+  local base="${KEEL_TEST_DSN%%\?*}"
+  local query=""
+  if [[ "$KEEL_TEST_DSN" == *\?* ]]; then
+    query="?${KEEL_TEST_DSN#*\?}"
+  fi
+  printf '%s/%s%s' "${base%/*}" "$1" "$query"
+}
 
-# db_reset <db> — drop (forced) and recreate a dedicated database.
+# db_reset <db> — drop (forced) and recreate a dedicated database through the
+# local PostgreSQL client. A missing psql/server is a hard failure.
 db_reset() {
-  docker exec "$PG_CTR" psql -U postgres -q \
+  "$PSQL" "$MAINTENANCE_DSN" -v ON_ERROR_STOP=1 -q \
     -c "DROP DATABASE IF EXISTS $1 WITH (FORCE)" -c "CREATE DATABASE $1" >/dev/null \
-    || fail "could not reset database $1 (is the $PG_CTR container running?)"
+    || fail "could not reset database $1 (psql=$PSQL maintenance=$MAINTENANCE_DSN)"
 }
 
 # port_free <port> — refuse to run when a stale server holds the port.

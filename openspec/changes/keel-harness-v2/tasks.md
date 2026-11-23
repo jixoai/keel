@@ -453,6 +453,10 @@
 
 - [ ] **E0 既有门零回归**：`scripts/acceptance-all.sh` 全绿、R1 `unexpected=0`、allowlist 每条 （对账 2026-11-20：部分——缺口：scripts/acceptance-all.sh 有 R1 + 负控，但仍用冻结基线 e7361f8 的旧场景；v2 kind 未进 r1diff/allowlist/重 pin）
       有理由、事件基线已重新 pin
+      （2026-11-23 acceptance-local-pg：battery 的 `dsn`/`db_reset` 已改为本机 PostgreSQL
+      + `psql`，从 `KEEL_TEST_DSN` 派生专用库，不再依赖 Docker 容器；证据
+      `evidence/acceptance-local-pg.md`。E0 本身仍不勾——Linux cgroup/2GB 的
+      perf cell 是平台限制，需在 Linux 上跑。）
 - [ ] G0 契约门（终局工具集快照 + 迁移表逐名断言）· G1 状态机门（两台插件状态机 + 转移矩阵 + （对账 2026-11-20：部分——缺口：G0 的 11 工具快照/旧名负控有测试（TestBuiltinSurfaceIsExactlyEleven）；G1 有插件生命周期/任务卡状态测试；缺门级汇总证据与完整转移矩阵/拒绝事实表）
       拒绝事实）先行；
       未绿则后续门不作为依据
