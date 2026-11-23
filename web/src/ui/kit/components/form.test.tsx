@@ -11,6 +11,8 @@ test("TUI: C2 输入件——Field 三态与键入回读", async () => {
   expect(app.texts()).toContain("备注过长");
   expect(app.texts()).toContain("描述");
   expect(app.texts()).toContain("只读字段");
+  expect(app.texts()).toContain("字段尺寸");
+  expect(app.texts().join("\n")).toContain("工具栏/表单共用的 34px 字段");
 
   await app.type("id:input-title", "发布周报");
   await app.waitFor("text:/标题=发布周报/");

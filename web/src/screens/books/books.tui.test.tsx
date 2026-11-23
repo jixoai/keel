@@ -239,6 +239,53 @@ test("TUI: 记录——默认打开首条，详情写缺什么/归属/可授予�
   await view.waitFor("text:/已复制 12 行 CSV|复制失败/");
 });
 
+test("TUI: 记录筛选行——范围、类型、结果与搜索同排可用（390 走筛选纸）", async () => {
+  const wide = await app(1440);
+  await openManagement(wide, "records");
+  await wide.waitFor("id:records-head");
+  expect(wide.shows("id:records-range")).toBe(true);
+  expect(wide.shows("id:records-range-30d")).toBe(true);
+  expect(wide.shows("id:records-kind")).toBe(true);
+  expect(wide.shows("id:records-result")).toBe(true);
+  await wide.press("id:records-range-30d");
+  await wide.press("label:按事件类型筛选");
+  await wide.press("text:登录");
+  await wide.type("id:records-search", "李娜");
+  expect(wide.texts().join("\n")).toContain("登录成功");
+
+  const phone = await app(390);
+  await openManagement(phone, "records", true);
+  await phone.waitFor("id:records-head");
+  expect(phone.shows("id:records-range")).toBe(true);
+  expect(phone.shows("id:records-kind-stamp")).toBe(true);
+  expect(phone.shows("id:records-result-stamp")).toBe(true);
+  await phone.press("id:records-range-today");
+  await phone.press("id:records-kind-stamp");
+  await phone.waitFor("text:按事件类型筛选");
+  expect(phone.shows("id:records-filter-all")).toBe(true);
+  await phone.press("id:records-filter-all");
+  await phone.waitFor("text:按事件类型筛选", { state: "gone" });
+  expect(phone.shows("id:records-kind-stamp")).toBe(true);
+});
+
+test("TUI: 新建账号表单——Field 标签与提示成对出现，用户名为空时提交禁用", async () => {
+  const view = await app(1440);
+  await openManagement(view, "identity");
+  await view.waitFor("id:identity-index");
+  await view.press("id:accounts-create");
+  await view.waitFor("id:account-create-dialog");
+  const form = view.texts().join("\n");
+  expect(form).toContain("用户名");
+  expect(form).toContain("登录名；创建后不改。");
+  expect(form).toContain("显示名");
+  expect(form).toContain("列表与记录里显示的名字。");
+  expect(form).toContain("类型");
+  expect(form).toContain("临时密码");
+  expect(view.enabled("id:account-create-submit")).toBe(false);
+  await view.type("id:account-create-username", "验收账号");
+  expect(view.enabled("id:account-create-submit")).toBe(true);
+});
+
 test("TUI: 五态·加载——账号读未返回时是骨架，不是空态", async () => {
   const loading = await harness(1440, { scenario: "loading", chapter: "identity" });
   await loading.waitFor("id:accounts-index-loading");

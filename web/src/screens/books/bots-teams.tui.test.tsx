@@ -13,6 +13,32 @@ const harness = (width: number, params: Record<string, string>) =>
 const waitRun = (view: { waitFor: (selector: string, options?: { timeout?: number }) => Promise<void> }) =>
   view.waitFor("id:run-lanes", { timeout: 20000 });
 
+test("TUI: 新建 Bot 表单——名字/身份档案/模型类型/默认模型四个 Field，缺项不可提交", async () => {
+  const view = await app(1440);
+  await view.press("id:books-chapter-bots");
+  await view.waitFor("id:bots-head");
+  await view.press("id:bots-create");
+  await view.waitFor("id:bot-create-dialog");
+  const form = view.texts().join("\n");
+  expect(form).toContain("身份档案（账号 + 人设）");
+  expect(form).toContain("模型类型");
+  expect(form).toContain("默认模型");
+  expect(view.enabled("id:bot-create-confirm")).toBe(false);
+});
+
+test("TUI: 新建团队表单——团队名/使命/队长三个 Field，缺项不可提交", async () => {
+  const view = await app(1440);
+  await view.press("id:books-chapter-teams");
+  await view.waitFor("id:teams-head");
+  await view.press("id:teams-create");
+  await view.waitFor("id:team-create-dialog");
+  const form = view.texts().join("\n");
+  expect(form).toContain("团队名");
+  expect(form).toContain("使命");
+  expect(form).toContain("队长");
+  expect(view.enabled("id:team-create-confirm")).toBe(false);
+});
+
 test("TUI: 员工索引——真实 Bot、账号、模型、状态与筛选", async () => {
   const view = await app(1440);
   await view.press("id:books-chapter-bots");

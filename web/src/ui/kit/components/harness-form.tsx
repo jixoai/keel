@@ -19,6 +19,15 @@ function Harness() {
             onChange={(value) => title.set(value)}
           />
         </Field>
+        <Field label="字段尺寸" hint="工具栏/表单共用的 34px 字段；手机上由调用方抬到 44">
+          <Input
+            testID="input-field-size"
+            size="field"
+            placeholder="field"
+            value={title()}
+            onChange={(value) => title.set(value)}
+          />
+        </Field>
         <Field label="备注" error="备注过长">
           <Input testID="input-note-err" placeholder="备注" invalid />
         </Field>
