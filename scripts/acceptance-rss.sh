@@ -219,7 +219,12 @@ attach_mode() {
   if [ -z "$PID" ] && [ -z "$PORT" ]; then
     fatal "attach mode needs --port or --pid (or use --profile)"
   fi
-  if [ -z "$PID" ] && ! port_is_free "$PORT"; then
+  if [ -z "$PID" ] && port_is_free "$PORT"; then
+    # Sampling a dead port is still attempted: the sampler's own identity probe
+    # fails closed with the exact reason (exit 2), which is more useful than a
+    # generic pre-flight rejection here.
+    say "attach: port $PORT is not listening; the identity probe will report it"
+  else
     say "attach: port $PORT is listening; resolving its owner via /v1/health + lsof"
   fi
   mkdir -p "$(dirname "$log")"
