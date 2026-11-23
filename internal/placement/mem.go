@@ -432,7 +432,16 @@ func (m *MemStore) AdmitRun(_ context.Context, req admitWrite) (Admission, error
 	if selfQueued && selfRun.groupID != placement.GroupID {
 		// The placement moved while the run waited (an expired lease was
 		// re-claimed elsewhere): the queued row follows its placement and joins
-		// the target group's queue at the tail.
+		// the target group's queue at the tail. A bounded target without an
+		// estimate is the same typed refusal as a new admission, not a zero
+		// that would stall promotion at the queue head.
+		if group.MemoryLimitBytes > 0 && (!req.memoryKnown || req.memoryEstimate <= 0) {
+			return Admission{}, &UnsupportedError{
+				Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
+				SessionID: req.sessionID, GroupID: placement.GroupID,
+				Detail: "the target group defines a memory budget but no memory estimate is configured",
+			}
+		}
 		m.nextQueueSeq++
 		selfRun.groupID = placement.GroupID
 		selfRun.queueSeq = m.nextQueueSeq

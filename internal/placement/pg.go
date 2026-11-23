@@ -661,6 +661,15 @@ func (s *PGStore) AdmitRun(ctx context.Context, req admitWrite) (Admission, erro
 			// The estimate is resolved for the *target* group: a row queued in
 			// an unbounded group carries 0, and promotion in a memory-bounded
 			// target would otherwise refuse it forever at the head of the queue.
+			// A bounded target without an estimate is the same typed refusal as
+			// a new admission, never a silent zero.
+			if group.MemoryLimitBytes > 0 && (!req.memoryKnown || req.memoryEstimate <= 0) {
+				return &UnsupportedError{
+					Reason: ReasonMemoryEstimateUnavailable, TenantID: req.tenantID,
+					SessionID: req.sessionID, GroupID: group.GroupID,
+					Detail: "the target group defines a memory budget but no memory estimate is configured",
+				}
+			}
 			if _, err := tx.Exec(ctx,
 				`UPDATE runs
 				    SET group_id = $3, queue_seq = nextval('runs_queue_seq'),

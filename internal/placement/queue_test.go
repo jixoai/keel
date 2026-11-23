@@ -477,6 +477,40 @@ func TestQueuedRunMoveToMemoryBoundedGroupRefreshesEstimate(t *testing.T) {
 	}
 }
 
+func TestQueuedRunMoveToBoundedGroupWithoutEstimatorIsTyped(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := memService(t, Options{}) // deliberately no estimator
+	tenant := uuid.New()
+	groupA := mustGroup(t, svc, tenant, "move-no-estimator-a", 1)
+	groupB := memoryGroup(t, svc, tenant, "move-no-estimator-b", 1, 100)
+	holder, moving := uuid.New(), uuid.New()
+	mustJoin(t, svc, tenant, holder, groupA.GroupID, "w1", time.Minute)
+	mustJoin(t, svc, tenant, moving, groupA.GroupID, "w1", time.Minute)
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: holder}); err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: moving}); err != nil || !queued.Queued {
+		t.Fatalf("queue moving = %+v err=%v", queued, err)
+	}
+	current, err := svc.Store().GetPlacement(ctx, tenant, moving)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Leave(ctx, LeaveRequest{
+		TenantID: tenant, SessionID: moving, WorkerID: current.WorkerID, ExpectedEpoch: current.Epoch,
+	}); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+	mustJoin(t, svc, tenant, moving, groupB.GroupID, "w2", time.Minute)
+	var unsupported *UnsupportedError
+	if _, err := svc.AdmitRun(ctx, AdmitRequest{TenantID: tenant, SessionID: moving}); !errors.As(err, &unsupported) {
+		t.Fatalf("re-admit without an estimator = %v, want a typed unsupported refusal", err)
+	}
+	if unsupported.Reason != ReasonMemoryEstimateUnavailable {
+		t.Fatalf("unsupported reason = %q, want %q", unsupported.Reason, ReasonMemoryEstimateUnavailable)
+	}
+}
+
 // TestRunSettledPromotesAndFeedsETA pins the settlement hook: a settled attempt
 // promotes the FIFO head and its observed duration becomes the next ETA.
 func TestRunSettledPromotesAndFeedsETA(t *testing.T) {
