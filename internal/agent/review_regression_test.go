@@ -128,17 +128,41 @@ func TestCancelAfterCommittedAnswerIsNotAborted(t *testing.T) {
 	// "stop pressed as the answer lands" race, and the only ordering in which the
 	// guard's exception matters.
 	var stopOnce sync.Once
+	// The poller must not outlive the test: a t.Fatal from a goroutine after the
+	// test completed panics ("Fail in goroutine after ... has completed"), and
+	// the store's cleanup closes the pool. Stop it and join it in cleanup (LIFO:
+	// this runs before the store's own cleanup registers/tears down).
+	stopPolling := make(chan struct{})
+	var pollers sync.WaitGroup
+	t.Cleanup(func() {
+		close(stopPolling)
+		pollers.Wait()
+	})
 	stream := func(ctx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		pollers.Add(1)
 		go func() {
+			defer pollers.Done()
 			deadline := time.Now().Add(3 * time.Second)
 			for time.Now().Before(deadline) {
-				for _, ev := range eventsOf(t, st, tenant, session) {
-					if ev.Kind == store.EventAssistantMessage {
-						stopOnce.Do(control.stop)
-						return
+				select {
+				case <-stopPolling:
+					return
+				default:
+				}
+				events, err := st.LoadEvents(context.Background(), tenant, session, 0, 500)
+				if err == nil {
+					for _, ev := range events {
+						if ev.Kind == store.EventAssistantMessage {
+							stopOnce.Do(control.stop)
+							return
+						}
 					}
 				}
-				time.Sleep(5 * time.Millisecond)
+				select {
+				case <-stopPolling:
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
 			}
 		}()
 		return fake(ctx, model, llm, cfg)
