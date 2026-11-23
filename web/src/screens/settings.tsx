@@ -53,6 +53,7 @@ import type {
   MediaCapabilitiesView,
   MediaCapabilityStatus,
   MediaCapabilityView,
+  ModelView,
   PluginStatusView,
   RealtimeStatusView,
   SecretMeta,
@@ -60,6 +61,23 @@ import type {
   TriggerStatusView,
 } from "../data/contract";
 import { KeelApiError, KeelHttp, type FetchLike } from "../data/http";
+import {
+  INPUT_MODALITIES,
+  OUTPUT_MODALITIES,
+  MODEL_FAMILIES,
+  PRICING_CURRENCIES,
+  applyModelMetadata,
+  formatPrice,
+  formatTokens,
+  isFree,
+  mergeLiveModels,
+  metadataOf,
+  metadataPatch,
+  priceSummary,
+  secretPreviewLabel,
+  windowSummary,
+  type ModelMetadata,
+} from "../data/model-catalog";
 import { store } from "../data/store";
 import { botAccess } from "../data/bots";
 import { canAny } from "../data/permissions";
@@ -223,6 +241,34 @@ const editorBaseUrlError = signal<string | null>(null);
 const editorCredentialError = signal<string | null>(null);
 const editorDocumentError = signal<string | null>(null);
 const confirmDeleteProvider = signal(false);
+/** The direct-entry field's one-shot draft: cleared the moment the server
+ * accepts it, never rendered again and never written into the document. */
+const editorDirectCredential = signal("");
+/** The preview the server answered for the last direct write (or the stored
+ * row's masked form), so the editor can show "已保存：sk-liv…ot-log". */
+const editorCredentialPreview = signal<string | null>(null);
+
+/** The per-model metadata editor (change keel-model-catalog C). */
+const modelEditorOpen = signal(false);
+const modelEditorProviderId = signal("");
+const modelEditorModelId = signal("");
+const modelEditorFamily = signal("inherit");
+const modelEditorContextWindow = signal("");
+const modelEditorMaxOutput = signal("");
+const modelEditorInputs = signal<Record<string, boolean>>({});
+const modelEditorOutputs = signal<Record<string, boolean>>({});
+const modelEditorToolCall = signal(false);
+const modelEditorJsonSchema = signal(false);
+const modelEditorWebSearch = signal(false);
+const modelEditorCurrency = signal("");
+const modelEditorInputPrice = signal("");
+const modelEditorOutputPrice = signal("");
+const modelEditorCacheRead = signal("");
+const modelEditorCacheWrite = signal("");
+const modelEditorFree = signal(false);
+const modelEditorNotes = signal("");
+const modelEditorError = signal<string | null>(null);
+const modelEditorClearPricing = signal(false);
 
 /** The「更换」dialog: provider + model + reasoning for the default selection. */
 const replaceOpen = signal(false);
@@ -794,6 +840,14 @@ function AppearanceSection() {
 /** The page's first level: what is in force right now. */
 function CurrentModelCard() {
   const selection = () => store.tenantSelection();
+  const defaultModel = () =>
+    store
+      .models()
+      .find(
+        (model) =>
+          model.modelId === selection()?.modelId &&
+          (!selection()?.providerId || model.providerId === selection()?.providerId),
+      );
   const providerName = () => {
     const current = selection();
     if (!current) return "";
@@ -878,6 +932,19 @@ function CurrentModelCard() {
               >
                 {selectionLabel(selection())}
               </Text>
+              <If when={!!defaultModel()}>
+                <View
+                  testID="settings-default-facts"
+                  style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}
+                >
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                    {`${windowSummary(defaultModel())} · ${priceSummary(defaultModel()?.pricing)}`}
+                  </Text>
+                  <If when={isFree(defaultModel()?.pricing)}>
+                    <Badge variant="success" label="免费" />
+                  </If>
+                </View>
+              </If>
             </View>
           </If>
           <Separator />
@@ -963,6 +1030,8 @@ const closeProviderEditor = () => {
   editorBaseUrlError.set(null);
   editorCredentialError.set(null);
   confirmDeleteProvider.set(false);
+  editorDirectCredential.set("");
+  editorCredentialPreview.set(null);
   saveFailure.set(null);
   saveAttempted.set(false);
 };
@@ -981,6 +1050,8 @@ const seedEditor = (provider: DraftProvider) => {
   editorBaseUrlError.set(null);
   editorCredentialError.set(null);
   editorDocumentError.set(null);
+  editorDirectCredential.set("");
+  editorCredentialPreview.set(store.providerCredentialPreview(provider.id) ?? null);
   saveFailure.set(null);
   saveAttempted.set(false);
 };
@@ -1004,6 +1075,8 @@ const openNewProvider = () => {
   editorBaseUrlError.set(null);
   editorCredentialError.set(null);
   editorDocumentError.set(null);
+  editorDirectCredential.set("");
+  editorCredentialPreview.set(null);
   saveFailure.set(null);
   saveAttempted.set(false);
 };
@@ -1019,6 +1092,205 @@ const removeEditorModel = (modelId: string) => {
   editorModelIds.set(editorModelIds().filter((row) => row !== modelId));
 };
 
+/**「从服务端拉取模型」: runs the existing provider probe
+ * (POST /v1/providers/{id}/test, through the server's own credential
+ * resolution) and merges its live line-up into the editor's list — deduped,
+ * appended after the configured ids, nothing removed. A provider that is not
+ * saved yet has no id the server knows, so the editor asks the reader to save
+ * first instead of inventing a draft endpoint. */
+const discoverEditorModels = async () => {
+  const id = editorId().trim();
+  if (!id) {
+    editorModelInput.set("");
+    editorIdError.set("先填写 Provider ID 并保存一次，服务端才能按它探测模型清单。");
+    return;
+  }
+  const configured = new Set(draftProviders().map((row) => row.id));
+  if (!configured.has(id)) {
+    editorIdError.set("先保存这个 Provider（可带一个占位模型），再从服务端拉取模型清单。");
+    return;
+  }
+  const probe = await store.probeProvider(id);
+  if (!probe) {
+    editorIdError.set(
+      `探测没有完成：${store.probeError()?.message ?? "服务端没有返回结果"}`,
+    );
+    return;
+  }
+  if (!probe.ok) {
+    editorIdError.set(
+      probe.error?.trim()
+        ? `探测未通过（${probeStatusLabel(probe.status)}）：${probe.error}`
+        : `探测未通过（${probeStatusLabel(probe.status)}）。`,
+    );
+    return;
+  }
+  const merged = mergeLiveModels(editorModelIds(), probe.models ?? []);
+  editorModelIds.set(merged.models);
+  if (merged.added.length === 0) {
+    editorIdError.set("服务端清单与已配置的模型一致，没有新增。");
+  } else {
+    editorIdError.set(null);
+    store.flash({
+      tone: "success",
+      text: `已从服务端并入 ${merged.added.length} 个模型（${probe.latencyMs ?? 0} ms）`,
+    });
+  }
+};
+
+/** The probe's status in the reader's words (never a raw token as the whole
+ * sentence). */
+const probeStatusLabel = (status: string): string => {
+  switch (status) {
+    case "ready":
+      return "可用";
+    case "needs_auth":
+      return "凭据不可用";
+    case "unreachable":
+      return "服务端不可达";
+    case "invalid_config":
+      return "配置不完整";
+    default:
+      return status || "未知状态";
+  }
+};
+
+// ---- the per-model metadata editor's actions -----------------------------
+
+const openModelEditor = (providerId: string, modelId: string) => {
+  const model = store
+    .models()
+    .find((row) => row.providerId === providerId && row.modelId === modelId);
+  const metadata = metadataOf(model);
+  modelEditorProviderId.set(providerId);
+  modelEditorModelId.set(modelId);
+  modelEditorFamily.set(metadata.providerType ?? "inherit");
+  modelEditorContextWindow.set(metadata.contextWindow !== undefined ? String(metadata.contextWindow) : "");
+  modelEditorMaxOutput.set(metadata.maxOutputTokens !== undefined ? String(metadata.maxOutputTokens) : "");
+  modelEditorInputs.set({
+    text: metadata.inputFormat.text === true,
+    image: metadata.inputFormat.image === true,
+    video: metadata.inputFormat.video === true,
+    audio: metadata.inputFormat.audio === true,
+    pdf: metadata.inputFormat.pdf === true,
+  });
+  modelEditorOutputs.set({
+    text: metadata.outputFormat.text === true,
+    image: metadata.outputFormat.image === true,
+    video: metadata.outputFormat.video === true,
+    audio: metadata.outputFormat.audio === true,
+  });
+  modelEditorToolCall.set(metadata.supportsToolCall === true);
+  modelEditorJsonSchema.set(metadata.supportsJsonSchemaOutput === true);
+  modelEditorWebSearch.set(metadata.supportsNativeWebSearch === true);
+  const pricing = metadata.pricing;
+  modelEditorCurrency.set(pricing?.currency ?? "");
+  modelEditorInputPrice.set(pricing?.input !== undefined ? String(pricing.input) : "");
+  modelEditorOutputPrice.set(pricing?.output !== undefined ? String(pricing.output) : "");
+  modelEditorCacheRead.set(pricing?.cacheRead !== undefined ? String(pricing.cacheRead) : "");
+  modelEditorCacheWrite.set(pricing?.cacheWrite !== undefined ? String(pricing.cacheWrite) : "");
+  modelEditorFree.set(pricing?.free === true);
+  modelEditorNotes.set(pricing?.notes ?? "");
+  modelEditorClearPricing.set(false);
+  modelEditorError.set(null);
+  modelEditorOpen.set(true);
+};
+
+const closeModelEditor = () => {
+  modelEditorOpen.set(false);
+  modelEditorError.set(null);
+};
+
+/** A price input: blank → undefined (未声明); a non-number or negative → an
+ * error sentence (the server would refuse it too, but the dialog must say why
+ * before a round trip). */
+const priceField = (raw: string, label: string): { value?: number; error?: string } => {
+  const text = raw.trim();
+  if (!text) return {};
+  const value = Number(text);
+  if (!Number.isFinite(value) || value < 0) {
+    return { error: `${label}必须是非负数字（每 1M tokens）` };
+  }
+  return { value };
+};
+
+const saveModelMetadata = async () => {
+  modelEditorError.set(null);
+  const providerId = modelEditorProviderId();
+  const modelId = modelEditorModelId();
+  if (!providerId || !modelId) {
+    modelEditorError.set("没有选定的模型");
+    return;
+  }
+  const context = modelEditorContextWindow().trim()
+    ? Number(modelEditorContextWindow().trim())
+    : undefined;
+  if (context !== undefined && (!Number.isFinite(context) || context < 0)) {
+    modelEditorError.set("上下文窗口必须是非负整数（tokens）");
+    return;
+  }
+  const maxOutput = modelEditorMaxOutput().trim() ? Number(modelEditorMaxOutput().trim()) : undefined;
+  if (maxOutput !== undefined && (!Number.isFinite(maxOutput) || maxOutput < 0)) {
+    modelEditorError.set("最大输出必须是非负整数（tokens）");
+    return;
+  }
+  const prices = {
+    input: priceField(modelEditorInputPrice(), "输入价格"),
+    output: priceField(modelEditorOutputPrice(), "输出价格"),
+    cacheRead: priceField(modelEditorCacheRead(), "缓存读取价格"),
+    cacheWrite: priceField(modelEditorCacheWrite(), "缓存写入价格"),
+  };
+  for (const field of Object.values(prices)) {
+    if (field.error) {
+      modelEditorError.set(field.error);
+      return;
+    }
+  }
+  const currency = modelEditorCurrency().trim();
+  if (currency && !/^[A-Z]{3}$/.test(currency)) {
+    modelEditorError.set("币种必须是三位大写字母代码（例如 USD）");
+    return;
+  }
+  const hasAnyPrice =
+    prices.input.value !== undefined ||
+    prices.output.value !== undefined ||
+    prices.cacheRead.value !== undefined ||
+    prices.cacheWrite.value !== undefined ||
+    modelEditorFree() ||
+    modelEditorNotes().trim() !== "" ||
+    currency !== "";
+  const metadata: ModelMetadata = {
+    providerType: modelEditorFamily() === "inherit" ? undefined : modelEditorFamily(),
+    contextWindow: context,
+    maxOutputTokens: maxOutput,
+    inputFormat: modelEditorInputs(),
+    outputFormat: modelEditorOutputs(),
+    supportsToolCall: modelEditorToolCall(),
+    supportsJsonSchemaOutput: modelEditorJsonSchema(),
+    supportsNativeWebSearch: modelEditorWebSearch(),
+    pricing: hasAnyPrice
+      ? {
+          currency: currency || undefined,
+          input: prices.input.value,
+          output: prices.output.value,
+          cacheRead: prices.cacheRead.value,
+          cacheWrite: prices.cacheWrite.value,
+          free: modelEditorFree() ? true : undefined,
+          notes: modelEditorNotes().trim() || undefined,
+        }
+      : undefined,
+  };
+  const candidate = currentDocument();
+  if (!candidate.document) {
+    modelEditorError.set(candidate.error ?? "配置不是合法的 JSON，先到「高级」修复原始文档。");
+    return;
+  }
+  const patch = metadataPatch(metadata, { pricing: modelEditorClearPricing() || !hasAnyPrice });
+  const document = applyModelMetadata(candidate.document, providerId, modelId, patch);
+  const ok = await saveCandidate(document);
+  if (ok) closeModelEditor();
+};
+
 const saveProvider = async () => {
   editorIdError.set(null);
   editorBaseUrlError.set(null);
@@ -1030,6 +1302,7 @@ const saveProvider = async () => {
   const id = editorId().trim();
   const baseUrl = editorBaseUrl().trim();
   const credential = editorCredential().trim();
+  const directCredential = editorDirectCredential();
   let invalid = false;
   if (!id) {
     editorIdError.set("给这个 Provider 一个 id，例如 s2api。");
@@ -1045,11 +1318,32 @@ const saveProvider = async () => {
     editorBaseUrlError.set("服务地址不能为空，例如 https://api.example.com/v1。");
     invalid = true;
   }
-  if (!credential) {
-    editorCredentialError.set("凭据引用不能为空：env:NAME 或 secret:NAME。");
+  // A credential is required unless one is (or is about to be) stored directly:
+  // the direct field is a convenience that produces `secret:provider_<id>`.
+  const credentialSource = credential || directCredential.trim() || editorCredentialPreview();
+  if (!credentialSource) {
+    editorCredentialError.set("凭据引用不能为空：env:NAME 或 secret:NAME，或在下面直接粘贴一个密钥。");
     invalid = true;
   }
   if (invalid) return;
+
+  // The direct-entry value is written to the encrypted tenant secret store
+  // first, under the provider's stable name; the document then carries only the
+  // reference the server answered. A blank field leaves the stored credential
+  // alone (the input is one-shot and cleared after a successful write).
+  let directRef: string | null = null;
+  if (directCredential.trim()) {
+    const saved = await store.saveProviderCredential(id, directCredential.trim());
+    if (!saved) {
+      editorCredentialError.set(
+        `直接粘贴的凭据没有保存：${store.credentialError()?.message ?? "未知原因"}`,
+      );
+      return;
+    }
+    directRef = saved.secretRef;
+    editorCredentialPreview.set(saved.preview);
+    editorDirectCredential.set("");
+  }
 
   const candidate = currentDocument();
   if (!candidate.document) {
@@ -1066,7 +1360,21 @@ const saveProvider = async () => {
   provider.api = { ...asRecord(provider.api), type: editorApiType(), baseUrl };
   const access = { ...asRecord(provider.access) };
   access.type = typeof access.type === "string" && access.type ? access.type : "api-key";
-  applyCredential(access, credential);
+  if (directRef) {
+    // The just-written reference wins: a direct paste is the reader saying
+    // "use this key now". The literal is not in `directRef` — it is a
+    // `secret:NAME` reference the server minted.
+    access.ref = directRef;
+    delete access.env;
+  } else if (credential) {
+    applyCredential(access, credential);
+  } else if (editorCredentialPreview()) {
+    // A blank credential field with a stored direct credential keeps the
+    // reference already in the document (or the derived one for a new
+    // provider): a blank field must never erase it.
+    if (typeof access.ref !== "string" || !access.ref) access.ref = `secret:provider_${id.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    delete access.env;
+  }
   provider.access = access;
   provider.modelIds = editorModelIds().map((modelId) => modelId.trim()).filter(Boolean);
   if (index >= 0) rows[index] = provider;
@@ -1203,6 +1511,8 @@ function ProviderCard(props: { provider: () => DraftProvider }) {
       ? `${protocol} · ${provider.baseUrl}`
       : `${protocol} · 服务地址未设置`;
   };
+  const resolvedModel = (modelId: string) =>
+    store.models().find((model) => model.providerId === props.provider().id && model.modelId === modelId);
   return (
     <Card
       testID={`provider-card-${props.provider().id}`}
@@ -1220,17 +1530,55 @@ function ProviderCard(props: { provider: () => DraftProvider }) {
         }
       />
       <CardContent>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <View style={{ gap: space.xs }}>
           <If when={props.provider().modelIds.length === 0}>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>还没有模型</Text>
           </If>
           <Each of={props.provider().modelIds} key={(modelId) => modelId}>
             {(modelId) => (
-              <Badge
-                testID={`provider-model-${props.provider().id}-${modelId()}`}
-                variant="secondary"
-                label={displayNameOf(modelId())}
-              />
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: space.md,
+                  flexWrap: "wrap",
+                  paddingVertical: space.xs,
+                }}
+              >
+                <Text
+                  testID={`provider-model-${props.provider().id}-${modelId()}`}
+                  style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}
+                >
+                  {displayNameOf(modelId())}
+                </Text>
+                <If when={isFree(resolvedModel(modelId())?.pricing)}>
+                  <Badge
+                    testID={`provider-model-free-${props.provider().id}-${modelId()}`}
+                    variant="success"
+                    label="免费"
+                  />
+                </If>
+                <Text
+                  testID={`provider-model-facts-${props.provider().id}-${modelId()}`}
+                  style={{
+                    flex: 1,
+                    minWidth: 120,
+                    fontSize: typeScale.xs,
+                    color: color.mutedForeground,
+                  }}
+                >
+                  {`${windowSummary(resolvedModel(modelId()))} · ${priceSummary(resolvedModel(modelId())?.pricing)}`}
+                </Text>
+                <Button
+                  testID={`provider-model-edit-${props.provider().id}-${modelId()}`}
+                  variant="ghost"
+                  size="sm"
+                  icon="tool"
+                  label="参数"
+                  accessibilityLabel={`编辑模型 ${displayNameOf(modelId())} 的参数`}
+                  onPress={() => openModelEditor(props.provider().id, modelId())}
+                />
+              </View>
             )}
           </Each>
         </View>
@@ -1246,6 +1594,18 @@ function ProviderCard(props: { provider: () => DraftProvider }) {
         >
           {props.provider().credential || "凭据未设置"}
         </Text>
+        <If when={!!store.providerCredentialPreview(props.provider().id)}>
+          <Text
+            testID={`provider-credential-preview-${props.provider().id}`}
+            style={{
+              fontFamily: font.mono,
+              fontSize: typeScale["2xs"],
+              color: color.mutedForeground,
+            }}
+          >
+            {`· ${store.providerCredentialPreview(props.provider().id) ?? ""}`}
+          </Text>
+        </If>
         <View style={{ flex: 1 }} />
         <Button
           testID={`provider-configure-${props.provider().id}`}
@@ -1320,6 +1680,134 @@ function ProvidersSection() {
 }
 
 // ---- the second level: one provider ---------------------------------------
+
+/** The direct-entry credential field (change keel-model-catalog A): the reader
+ * pastes an API key once. Saving writes it to the encrypted tenant secret store
+ * under `provider_<id>` and puts only `secret:provider_<id>` in the document;
+ * the field clears and the masked preview stays. A blank field never erases a
+ * stored credential. */
+function DirectCredentialField() {
+  const saving = () => store.credentialSaving() === editorId().trim();
+  const failure = () => {
+    const error = store.credentialError();
+    return error && error.providerId === editorId().trim() ? error.message : null;
+  };
+  const preview = () => editorCredentialPreview();
+  return (
+    <Field
+      label="直接粘贴密钥（可选）"
+      hint="不想先建环境变量或「密钥」条目时，直接把密钥粘贴到这里：保存时写入服务端加密的租户密钥库（名字 provider_<id>），配置里只留 secret:provider_<id> 引用。输入框在保存成功后清空，之后只显示掩码预览；留空不会删除已保存的凭据。"
+      error={failure() ?? undefined}
+    >
+      <View style={{ flexDirection: "column", gap: space.sm }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+          <View style={{ flex: 1, minWidth: 180 }}>
+            <Input
+              testID="provider-config-direct-credential"
+              accessibilityLabel="直接粘贴密钥"
+              value={editorDirectCredential()}
+              placeholder="sk-…（只保存一次，不回显）"
+              masked
+              maxLength={4096}
+              disabled={saving()}
+              onChange={(value) => {
+                editorDirectCredential.set(value);
+                editorCredentialError.set(null);
+              }}
+            />
+          </View>
+          <Button
+            testID="provider-config-credential-save"
+            variant="outline"
+            size="sm"
+            icon="key"
+            label={saving() ? "保存中…" : "保存密钥"}
+            accessibilityLabel="保存直接粘贴的密钥"
+            loading={saving()}
+            disabled={saving() || store.settingsSaving() || !editorDirectCredential().trim() || !editorId().trim()}
+            onPress={() => void saveDirectCredential()}
+          />
+        </View>
+        <If when={!!preview()}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+            <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>已保存的凭据</Text>
+            <Text
+              testID="provider-config-credential-preview"
+              style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}
+            >
+              {secretPreviewLabel(preview() ?? "")}
+            </Text>
+            <Badge variant="success" label="已保存" />
+          </View>
+        </If>
+      </View>
+    </Field>
+  );
+}
+
+/** The probe's measured line in the editor: status, latency, the live count and
+ * the failure reason. Never a credential; the server composes the reason from
+ * field paths. */
+function ProbeStatusLine() {
+  const probe = () => store.providerProbes()[editorId().trim()];
+  const running = () => store.probingProvider() === editorId().trim();
+  const failed = () => {
+    const error = store.probeError();
+    return error && error.providerId === editorId().trim() ? error.message : null;
+  };
+  return (
+    <>
+      <If when={running()}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+          <Spinner size={iconSize.sm} tint={color.brand} />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>正在探测服务端模型清单…</Text>
+        </View>
+      </If>
+      <If when={!!failed()}>
+        <Notice tone="danger" accessibilityLabel="探测失败" testID="provider-probe-error">
+          <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{failed() ?? ""}</Text>
+        </Notice>
+      </If>
+      <If when={!!probe()}>
+        <View
+          testID="provider-probe-status"
+          style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}
+        >
+          <Badge
+            variant={probe()?.ok ? "success" : "warning"}
+            label={probeStatusLabel(probe()?.status ?? "")}
+          />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            {`${probe()?.latencyMs ?? 0} ms · 服务端 ${probe()?.modelCount ?? 0} 个模型`}
+          </Text>
+          <If when={!probe()?.ok && !!probe()?.error}>
+            <Text style={{ fontSize: typeScale.xs, color: color.danger }}>{probe()?.error ?? ""}</Text>
+          </If>
+        </View>
+      </If>
+    </>
+  );
+}
+
+/** Write the pasted credential now (independent of the document save), so the
+ * preview and the row appear before the reader saves the document. */
+const saveDirectCredential = async () => {
+  const id = editorId().trim();
+  const value = editorDirectCredential();
+  if (!id) {
+    editorIdError.set("先填写 Provider ID。");
+    return;
+  }
+  if (!value.trim()) return;
+  editorCredentialError.set(null);
+  const saved = await store.saveProviderCredential(id, value);
+  if (!saved) {
+    editorCredentialError.set(`直接粘贴的凭据没有保存：${store.credentialError()?.message ?? "未知原因"}`);
+    return;
+  }
+  editorCredentialPreview.set(saved.preview);
+  editorDirectCredential.set("");
+};
 
 function ProviderConfigDialog() {
   const mode = () => providerEditorMode();
@@ -1452,7 +1940,6 @@ function ProviderConfigDialog() {
           </Field>
           <Field
             label="凭据引用"
-            required
             hint="三种写法：${NAME} 或 env:NAME 指环境变量，secret:NAME 指「密钥」分区里保存的密钥；这里永远不存凭据的值。内置 Provider 的 env:NAME 在环境变量未设置时，会自动改用「密钥」里同名的密钥（环境变量优先），所以自托管只需在「密钥」存一个同名条目即可。"
             error={editorCredentialError() ?? undefined}
           >
@@ -1467,12 +1954,28 @@ function ProviderConfigDialog() {
               }}
             />
           </Field>
+          <DirectCredentialField />
           <View style={{ gap: space.sm }}>
-            <Label label="模型列表" />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+              <Label label="模型列表" />
+              <View style={{ flex: 1 }} />
+              <Button
+                testID="provider-config-discover"
+                variant="outline"
+                size="sm"
+                icon="refresh"
+                label={store.probingProvider() === editorId().trim() ? "拉取中…" : "从服务端拉取模型"}
+                accessibilityLabel="从服务端拉取模型"
+                loading={store.probingProvider() === editorId().trim()}
+                disabled={store.probingProvider() !== null || store.settingsSaving()}
+                onPress={() => void discoverEditorModels()}
+              />
+            </View>
+            <ProbeStatusLine />
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
               <If when={editorModelIds().length === 0}>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                  还没有模型；在下面添加模型 ID。
+                  还没有模型；在下面添加模型 ID，或从服务端拉取。
                 </Text>
               </If>
               <Each of={editorModelIds()} key={(modelId) => modelId}>
@@ -1510,7 +2013,7 @@ function ProviderConfigDialog() {
               />
             </View>
             <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-              模型 ID 必须与服务商的清单一致；保存后按凭据解析可执行性。
+              模型 ID 必须与服务商的清单一致；保存后按凭据解析可执行性。拉取只并入新 ID，不会删除已配置的模型。
             </Text>
           </View>
         </FieldGroup>
@@ -1530,6 +2033,300 @@ function ProviderConfigDialog() {
   );
 }
 
+// ---- the second level: one model's metadata -------------------------------
+
+/** A checkbox row that writes a modality/capability flag. */
+function FlagRow(props: { testID: string; label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <View style={{ minWidth: 96, flexGrow: 1, flexBasis: "auto" }}>
+      <Switch
+        testID={props.testID}
+        checked={props.checked}
+        onChange={props.onChange}
+        label={props.label}
+        size="sm"
+        accessibilityLabel={props.label}
+      />
+    </View>
+  );
+}
+
+/** The per-model metadata editor (change keel-model-catalog C): family, context
+ * window / max output, input/output modalities, the three capability flags and
+ * the price list. It writes ONE `providerModelRules` entry (the node whose match
+ * is the exact (providerId, modelId)), so a save cannot alter another model.
+ * Never a raw JSON editor. */
+function ModelMetadataDialog() {
+  const open = () => modelEditorOpen();
+  const model = () =>
+    store
+      .models()
+      .find(
+        (row) =>
+          row.providerId === modelEditorProviderId() && row.modelId === modelEditorModelId(),
+      );
+  const title = () => `模型参数 · ${displayNameOf(modelEditorModelId())}`;
+  const familyItems = (): SelectItem[] => [
+    { value: "inherit", title: "继承 Provider 的家族" },
+    ...MODEL_FAMILIES.map((family) => ({ value: family.value, title: family.title })),
+  ];
+  const currencyItems = (): SelectItem[] => {
+    const declared = modelEditorCurrency().trim();
+    const items: SelectItem[] = [{ value: "", title: "未声明" }];
+    for (const code of PRICING_CURRENCIES) items.push({ value: code, title: code });
+    if (declared && !PRICING_CURRENCIES.includes(declared)) {
+      items.push({ value: declared, title: declared });
+    }
+    return items;
+  };
+  return (
+    <Dialog
+      testID="model-metadata-dialog"
+      open={open()}
+      style={{ margin: "auto" }}
+      maxHeight={760}
+      title={title()}
+      description="只改这一个模型的事实：家族、上下文与输出上限、输入/输出模态、能力与价格。保存写入该模型的精确规则并立即生效。"
+      onOpenChange={(event) => {
+        if (!event.open) closeModelEditor();
+      }}
+      footer={
+        <>
+          <Button
+            variant="outline"
+            label="取消"
+            accessibilityLabel="取消模型参数编辑"
+            disabled={store.settingsSaving()}
+            onPress={closeModelEditor}
+          />
+          <Button
+            icon="check"
+            label="保存并生效"
+            accessibilityLabel="保存模型参数"
+            loading={store.settingsSaving()}
+            disabled={store.settingsSaving()}
+            onPress={() => void saveModelMetadata()}
+          />
+        </>
+      }
+    >
+      <SaveFeedback />
+      <If when={!!modelEditorError()}>
+        <Notice tone="danger" accessibilityLabel="模型参数不可保存">
+          <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{modelEditorError() ?? ""}</Text>
+        </Notice>
+      </If>
+      <If when={!!model()}>
+        <Text
+          style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}
+        >
+          {`${modelEditorProviderId()}/${modelEditorModelId()}`}
+        </Text>
+      </If>
+      <FieldGroup>
+        <Field label="模型家族" hint="一个 Provider 下的这一条模型属于哪个家族；继承时用 Provider 的家族。">
+          <Select
+            testID="model-family"
+            accessibilityLabel="模型家族"
+            items={familyItems()}
+            value={modelEditorFamily()}
+            onChange={(value) => {
+              if (value !== null) modelEditorFamily.set(value);
+            }}
+          />
+        </Field>
+        <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
+          <View style={{ flex: 1, minWidth: 160 }}>
+            <Field
+              label="上下文窗口（tokens）"
+              hint="最大可输入；留空为未声明。"
+            >
+              <Input
+                testID="model-context-window"
+                accessibilityLabel="上下文窗口 tokens"
+                value={modelEditorContextWindow()}
+                placeholder="例如 128000"
+                onChange={(value) => modelEditorContextWindow.set(value)}
+              />
+            </Field>
+          </View>
+          <View style={{ flex: 1, minWidth: 160 }}>
+            <Field label="最大输出（tokens）" hint="单次回复的输出上限；留空为未声明。">
+              <Input
+                testID="model-max-output"
+                accessibilityLabel="最大输出 tokens"
+                value={modelEditorMaxOutput()}
+                placeholder="例如 8192"
+                onChange={(value) => modelEditorMaxOutput.set(value)}
+              />
+            </Field>
+          </View>
+        </View>
+        <Field label="可接受的输入" hint="声明这个模型真正能接收的输入类型；界面据此提示附件。">
+          <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
+            <Each of={INPUT_MODALITIES} key={(row) => row.key}>
+              {(row) => (
+                <FlagRow
+                  testID={`model-input-${row().key}`}
+                  label={row().label}
+                  checked={modelEditorInputs()[row().key] === true}
+                  onChange={(checked) => modelEditorInputs.set({ ...modelEditorInputs(), [row().key]: checked })}
+                />
+              )}
+            </Each>
+          </View>
+        </Field>
+        <Field label="输出模态" hint="模型产出的类型；文本模型只声明文本。">
+          <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
+            <Each of={OUTPUT_MODALITIES} key={(row) => row.key}>
+              {(row) => (
+                <FlagRow
+                  testID={`model-output-${row().key}`}
+                  label={row().label}
+                  checked={modelEditorOutputs()[row().key] === true}
+                  onChange={(checked) => modelEditorOutputs.set({ ...modelEditorOutputs(), [row().key]: checked })}
+                />
+              )}
+            </Each>
+          </View>
+        </Field>
+        <Field label="能力" hint="运行时按这些声明执行能力门（工具门已强制；媒体门记录但未强制）。">
+          <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
+            <FlagRow
+              testID="model-capability-tool"
+              label="工具调用"
+              checked={modelEditorToolCall()}
+              onChange={(checked) => modelEditorToolCall.set(checked)}
+            />
+            <FlagRow
+              testID="model-capability-json"
+              label="JSON Schema 输出"
+              checked={modelEditorJsonSchema()}
+              onChange={(checked) => modelEditorJsonSchema.set(checked)}
+            />
+            <FlagRow
+              testID="model-capability-websearch"
+              label="原生联网搜索"
+              checked={modelEditorWebSearch()}
+              onChange={(checked) => modelEditorWebSearch.set(checked)}
+            />
+          </View>
+        </Field>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+          <Label label="价格（每 1M tokens）" />
+          <View style={{ flex: 1 }} />
+          <Switch
+            testID="model-pricing-free"
+            checked={modelEditorFree()}
+            onChange={(checked) => modelEditorFree.set(checked)}
+            label="免费 / 零价"
+            size="sm"
+            accessibilityLabel="标记为免费或零价"
+          />
+          <Button
+            testID="model-pricing-clear"
+            variant="ghost"
+            size="sm"
+            icon="x"
+            label="清除价格"
+            accessibilityLabel="清除价格声明"
+            onPress={() => {
+              modelEditorCurrency.set("");
+              modelEditorInputPrice.set("");
+              modelEditorOutputPrice.set("");
+              modelEditorCacheRead.set("");
+              modelEditorCacheWrite.set("");
+              modelEditorFree.set(false);
+              modelEditorNotes.set("");
+              modelEditorClearPricing.set(true);
+            }}
+          />
+        </View>
+        <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
+          <View style={{ flex: 1, minWidth: 200 }}>
+            <Field label="币种" hint="ISO-4217 三位代码；留空只显示数字。">
+              <Select
+                testID="model-pricing-currency"
+                accessibilityLabel="价格币种"
+                items={currencyItems()}
+                value={modelEditorCurrency()}
+                onChange={(value) => modelEditorCurrency.set(value ?? "")}
+              />
+            </Field>
+          </View>
+          <View style={{ flex: 1, minWidth: 140 }}>
+            <Field label="输入">
+              <Input
+                testID="model-pricing-input"
+                accessibilityLabel="输入价格每 1M tokens"
+                value={modelEditorInputPrice()}
+                placeholder="例如 0.27"
+                onChange={(value) => modelEditorInputPrice.set(value)}
+              />
+            </Field>
+          </View>
+          <View style={{ flex: 1, minWidth: 140 }}>
+            <Field label="输出">
+              <Input
+                testID="model-pricing-output"
+                accessibilityLabel="输出价格每 1M tokens"
+                value={modelEditorOutputPrice()}
+                placeholder="例如 1.10"
+                onChange={(value) => modelEditorOutputPrice.set(value)}
+              />
+            </Field>
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", gap: space.md, flexWrap: "wrap" }}>
+          <View style={{ flex: 1, minWidth: 140 }}>
+            <Field label="缓存读取">
+              <Input
+                testID="model-pricing-cache-read"
+                accessibilityLabel="缓存读取价格每 1M tokens"
+                value={modelEditorCacheRead()}
+                placeholder="例如 0.07"
+                onChange={(value) => modelEditorCacheRead.set(value)}
+              />
+            </Field>
+          </View>
+          <View style={{ flex: 1, minWidth: 140 }}>
+            <Field label="缓存写入">
+              <Input
+                testID="model-pricing-cache-write"
+                accessibilityLabel="缓存写入价格每 1M tokens"
+                value={modelEditorCacheWrite()}
+                placeholder="例如 0.27"
+                onChange={(value) => modelEditorCacheWrite.set(value)}
+              />
+            </Field>
+          </View>
+          <View style={{ flex: 2, minWidth: 200 }}>
+            <Field label="备注" hint="例如 off-peak 折扣、价格来源；只用于展示。">
+              <Input
+                testID="model-pricing-notes"
+                accessibilityLabel="价格备注"
+                value={modelEditorNotes()}
+                placeholder="例如 list price"
+                maxLength={200}
+                onChange={(value) => modelEditorNotes.set(value)}
+              />
+            </Field>
+          </View>
+        </View>
+        <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+          {`预览：${priceSummary({
+            currency: modelEditorCurrency().trim() || undefined,
+            input: modelEditorInputPrice().trim() ? Number(modelEditorInputPrice()) : undefined,
+            output: modelEditorOutputPrice().trim() ? Number(modelEditorOutputPrice()) : undefined,
+            free: modelEditorFree(),
+            notes: modelEditorNotes().trim() || undefined,
+          })}`}
+        </Text>
+      </FieldGroup>
+    </Dialog>
+  );
+}
+
 // ---- the second level: the default selection ------------------------------
 
 function ChangeDefaultDialog() {
@@ -1541,9 +2338,15 @@ function ChangeDefaultDialog() {
         .models()
         .find((model) => model.providerId === provider?.id && model.modelId === modelId);
       const unavailable = resolved?.selectable === false;
+      // The row's label carries the facts a reader compares by: context/max
+      // output and the price summary. The id is never the primary label.
+      const facts = resolved
+        ? ` · ${windowSummary(resolved)} · ${priceSummary(resolved.pricing)}`
+        : "";
+      const free = isFree(resolved?.pricing) ? "（免费）" : "";
       return {
         value: modelId,
-        title: `${displayNameOf(modelId)}${unavailable ? "（不可执行）" : ""}`,
+        title: `${displayNameOf(modelId)}${free}${facts}${unavailable ? "（不可执行）" : ""}`,
         disabled: unavailable,
       };
     });
@@ -1845,6 +2648,8 @@ export function ModelsSection() {
       providerEditorMode.set("closed");
       replaceOpen.set(false);
       confirmDeleteProvider.set(false);
+      modelEditorOpen.set(false);
+      editorDirectCredential.set("");
     });
   });
   return (
@@ -1853,6 +2658,7 @@ export function ModelsSection() {
       <ProvidersSection />
       <AdvancedCard />
       <ProviderConfigDialog />
+      <ModelMetadataDialog />
       <ChangeDefaultDialog />
     </View>
   );
@@ -1888,6 +2694,14 @@ function SecretRow(props: { secret: () => SecretMeta }) {
           secret:{props.secret().name}
         </Text>
       </View>
+      {/* The masked preview: first6…last6 for a long credential, the fixed
+          mask otherwise, 「已保存」 for a row that predates the column. Never
+          a value and never a length. */}
+      <Badge
+        testID={`secret-preview-${props.secret().name}`}
+        variant="secondary"
+        label={secretPreviewLabel(props.secret().preview)}
+      />
       <View style={{ flex: 1 }} />
       <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
         创建 {formatTime(props.secret().createdAt)} · 更新 {formatTime(props.secret().updatedAt)}

@@ -30,6 +30,8 @@ import type {
   ModelSelection,
   ModelView,
   PluginsView,
+  ProviderCredentialSaved,
+  ProviderProbeView,
   ProviderView,
   SecretMeta,
   ScrollState,
@@ -375,6 +377,20 @@ class KeelStore {
   readonly secretsBusy = signal(false);
   /** A write/delete failure, shown next to the form (never swallowed). */
   readonly secretsActionError = signal<string | null>(null);
+
+  /** The provider probe's last measured answer, per provider id
+   * (`POST /v1/providers/{id}/test`): the live line-up and the health state.
+   * Absent = never probed this session. */
+  readonly providerProbes = signal<Record<string, ProviderProbeView>>({});
+  /** The provider whose probe is in flight, and the last probe that failed to
+   * run at all (a 404/501/transport failure, distinct from a measured
+   * `ok:false`). */
+  readonly probingProvider = signal<string | null>(null);
+  readonly probeError = signal<{ providerId: string; message: string } | null>(null);
+  /** The provider whose direct credential write is in flight, and its last
+   * failure. */
+  readonly credentialSaving = signal<string | null>(null);
+  readonly credentialError = signal<{ providerId: string; message: string } | null>(null);
 
   // ---- skill library (change keel-harness-v2, W7 skills) ------------------
 
@@ -1167,6 +1183,59 @@ class KeelStore {
     } finally {
       this.secretsBusy.set(false);
     }
+  }
+
+  // ---- provider probe + direct credential ---------------------------------
+
+  /** `POST /v1/providers/{id}/test`: one measured probe. A provider that ran
+   * and failed is a RESULT (`ok:false` with the measured status and issues),
+   * not an error; a probe that could not run (404/501/transport) is recorded
+   * in `probeError` so the dialog can say which. The credential never reaches
+   * the client — the server resolves it. */
+  async probeProvider(providerId: string): Promise<ProviderProbeView | null> {
+    if (this.probingProvider()) return null;
+    this.probingProvider.set(providerId);
+    this.probeError.set(null);
+    try {
+      const probe = await this.client.testProvider(providerId);
+      this.providerProbes.set({ ...this.providerProbes(), [providerId]: probe });
+      return probe;
+    } catch (error) {
+      this.probeError.set({ providerId, message: messageOf(error) });
+      return null;
+    } finally {
+      this.probingProvider.set(null);
+    }
+  }
+
+  /** `PUT /v1/settings/providers/{id}/credential`: store a directly pasted
+   * credential and get the reference back. The value is sent once and is never
+   * kept in a signal, echoed or rendered; the returned reference is what the
+   * editor puts into the document. */
+  async saveProviderCredential(providerId: string, value: string): Promise<ProviderCredentialSaved | null> {
+    if (this.credentialSaving()) return null;
+    this.credentialSaving.set(providerId);
+    this.credentialError.set(null);
+    try {
+      const saved = await this.client.saveProviderCredential(providerId, value);
+      // The secrets list may now carry a new row (provider_<id>): refresh it
+      // so the 密钥 section and the editor's preview agree.
+      void this.loadSecrets();
+      this.flash({ tone: "success", text: `凭据已保存：${saved.secretRef}（值不回显）` });
+      return saved;
+    } catch (error) {
+      this.credentialError.set({ providerId, message: messageOf(error) });
+      return null;
+    } finally {
+      this.credentialSaving.set(null);
+    }
+  }
+
+  /** The stored preview of a provider's direct credential (the row named
+   * `provider_<id>`), or undefined when nothing is stored under that name. */
+  providerCredentialPreview(providerId: string): string | undefined {
+    const expected = `provider_${providerId.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    return this.secrets().find((item) => item.name === expected)?.preview;
   }
 
   // ---- skill library ------------------------------------------------------

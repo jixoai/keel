@@ -11,6 +11,7 @@
 // scrim, no z-index and no breakpoint in this file.
 import { signal, Text, View } from "nsh";
 import type { ModelSelection, ModelView } from "../data/contract";
+import { isFree, priceSummary, windowSummary } from "../data/model-catalog";
 import { store } from "../data/store";
 import {
   checkSurfaceSwitch,
@@ -230,6 +231,20 @@ function PickerModelRow(props: { model: () => ModelView }) {
       <Text style={{ fontSize: typeScale.xs, lineHeight: lineHeight.normal, color: color.mutedForeground }}>
         {`${modelFacts(props.model())} · ${surfaceFact(props.model(), providerOf(props.model()))}`}
       </Text>
+      {/* The comparables: context / max output and the price summary, with
+          the free marker as a badge (the fact a cheaper row is free, not
+          merely zero). */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <Text
+          testID={`picker-model-facts-${props.model().providerId}-${props.model().modelId}`}
+          style={{ fontSize: typeScale.xs, color: color.mutedForeground }}
+        >
+          {`${windowSummary(props.model())} · ${priceSummary(props.model().pricing)}`}
+        </Text>
+        <If when={isFree(props.model().pricing)}>
+          <Badge variant="success" label="免费" />
+        </If>
+      </View>
       <If when={levels().length > 0}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
           <Text style={{ fontSize: typeScale.xs, fontWeight: weight.medium, color: color.mutedForeground }}>

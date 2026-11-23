@@ -22,6 +22,8 @@ import type {
   ModelsSettingsSaved,
   ModelsSettingsView,
   PluginsView,
+  ProviderCredentialSaved,
+  ProviderProbeView,
   ProvidersResponse,
   RealtimeStatusView,
   RetryResult,
@@ -537,6 +539,27 @@ const realtimeStatusOf = (body: Record<string, unknown>): RealtimeStatusView => 
     : [],
   inputSampleRate: typeof body.inputSampleRate === "number" ? body.inputSampleRate : undefined,
   outputSampleRate: typeof body.outputSampleRate === "number" ? body.outputSampleRate : undefined,
+});
+
+/** `POST /v1/providers/{id}/test` → the view. The error text is the server's
+ * measured reason and never carries a credential (the server composes it from
+ * field paths); the model ids are plain strings. */
+const providerProbeOf = (body: Record<string, unknown>): ProviderProbeView => ({
+  providerId: String(body.providerId ?? ""),
+  providerType: textOr(body.providerType),
+  apiType: textOr(body.apiType),
+  endpoint: textOr(body.endpoint),
+  ok: body.ok === true,
+  status: String(body.status ?? "unreachable"),
+  latencyMs: typeof body.latencyMs === "number" ? body.latencyMs : undefined,
+  modelCount: typeof body.modelCount === "number" ? body.modelCount : undefined,
+  models: Array.isArray(body.models)
+    ? body.models
+        .map((model) => (typeof model === "string" ? model.trim() : ""))
+        .filter((model) => model !== "")
+    : [],
+  error: textOr(body.error),
+  issues: issueList(body.issues),
 });
 
 // ---- agent & team registry normalization ---------------------------------
@@ -1099,7 +1122,19 @@ export class KeelHttp implements SettingsApi {
     return realtimeStatusOf(asRecord(await response.json()));
   }
 
-  /** `GET /v1/settings/secrets` — names and times only, never values. */
+  /** `POST /v1/providers/{id}/test` — the measured probe. A provider that ran
+   * and failed answers 200 with `ok: false`, so this resolves either way; a
+   * 404/501 rejects. The body never carries a credential: only the measured
+   * state and the live model ids. */
+  async testProvider(providerId: string): Promise<ProviderProbeView> {
+    const response = await this.request(`/v1/providers/${encodeURIComponent(providerId)}/test`, {
+      method: "POST",
+    });
+    return providerProbeOf(asRecord(await response.json()));
+  }
+
+  /** `GET /v1/settings/secrets` — names, masked previews and times, never
+   * values. A row without a preview (one that predates the column) keeps `""`. */
   async secrets(): Promise<SecretsView> {
     const response = await this.request("/v1/settings/secrets");
     const body = asRecord(await response.json());
@@ -1109,12 +1144,34 @@ export class KeelHttp implements SettingsApi {
         const item = asRecord(row);
         return {
           name: String(item.name ?? ""),
+          preview: typeof item.preview === "string" && item.preview ? item.preview : undefined,
           createdAt: item.createdAt ? String(item.createdAt) : undefined,
           updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
         };
       }),
       available: body.available !== false,
       reason: typeof body.reason === "string" && body.reason ? body.reason : undefined,
+    };
+  }
+
+  /** `PUT /v1/settings/providers/{id}/credential` — the direct-entry path:
+   * write the value once, keep the reference. The value is never read back. */
+  async saveProviderCredential(providerId: string, value: string): Promise<ProviderCredentialSaved> {
+    const response = await this.request(
+      `/v1/settings/providers/${encodeURIComponent(providerId)}/credential`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      },
+    );
+    const body = asRecord(await response.json());
+    return {
+      providerId: String(body.providerId ?? providerId),
+      secretName: String(body.secretName ?? ""),
+      secretRef: String(body.secretRef ?? ""),
+      preview: String(body.preview ?? ""),
+      updatedAt: body.updatedAt ? String(body.updatedAt) : undefined,
     };
   }
 

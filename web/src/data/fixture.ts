@@ -18,6 +18,8 @@ import type {
   FireResultView,
   McpAppCatalogueView,
   ModelOptionSpecsView,
+  ModelPricingView,
+  ModelPropertiesView,
   ModelsResponse,
   ModelsSettingsReset,
   ModelsSettingsSaved,
@@ -25,6 +27,8 @@ import type {
   ModelSelection,
   ModelView,
   PluginsView,
+  ProviderCredentialSaved,
+  ProviderProbeView,
   ProviderView,
   ProvidersResponse,
   RetryResult,
@@ -118,6 +122,19 @@ const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "m
 /** Credentials this demo process can resolve (the analogue of env vars). */
 const DEMO_CREDENTIALS = ["S2API_KEY", "A6API_KEY"];
 
+/** The demo provider's live line-up (what a discovery probe would answer).
+ * Two ids are deliberately not declared in the demo document, so the merge
+ * action has something to add. */
+const DEMO_LIVE_MODELS = ["claude-sonnet-5", "deepseek-v4.1-flash", "deepseek-v4.1-pro", "gemini-flash-3"];
+
+/** The masked preview rule (server: store.SecretPreview): >18 runes keeps the
+ * first and last six code points, anything shorter is the fixed mask. */
+const demoSecretPreview = (value: string): string => {
+  const runes = [...value];
+  if (runes.length <= 18) return "••••••••";
+  return `${runes.slice(0, 6).join("")}…${runes.slice(-6).join("")}`;
+};
+
 const DEMO_PROTOCOLS = ["openai-chat-completions", "openai-responses", "anthropic-messages"];
 
 /** The deployment-default models document (what a startup file would hold). */
@@ -180,6 +197,57 @@ const demoOptions = (modelId: string): ModelOptionSpecsView => ({
     map: Object.fromEntries(demoModelCapabilities(modelId).levels.map((level) => [level, {}])),
   },
   maxOutputTokens: { max: 8192, map: {} },
+});
+
+/** The demo price list per model (rates, currency and the free marker). */
+const demoPricing = (modelId: string): ModelPricingView | undefined => {
+  if (modelId === "deepseek-v4.1-flash") {
+    return { currency: "USD", input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 };
+  }
+  if (modelId === "claude-sonnet-5") {
+    return { currency: "USD", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, notes: "list price" };
+  }
+  if (modelId === "deepseek-v4.1-pro") {
+    return { currency: "USD", input: 0, output: 0, free: true, notes: "free tier" };
+  }
+  return undefined;
+};
+
+/** A document's pricing block → the view (numbers coerced, unknown keys
+ * dropped). */
+const demoPricingOf = (raw: Record<string, unknown>): ModelPricingView => ({
+  currency: typeof raw.currency === "string" ? raw.currency : undefined,
+  input: demoNumber(raw.input),
+  output: demoNumber(raw.output),
+  cacheRead: demoNumber(raw.cacheRead),
+  cacheWrite: demoNumber(raw.cacheWrite),
+  free: raw.free === true ? true : undefined,
+  notes: typeof raw.notes === "string" ? raw.notes : undefined,
+});
+
+/** A decoded JSON number, or undefined for a missing/invalid one. */
+const demoNumber = (value: unknown): number | undefined => {
+  if (value === null || value === undefined) return undefined;
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed < 0) return undefined;
+  return parsed;
+};
+
+/** A declared input-format object → the view (only real booleans survive). */
+const demoMediaIn = (raw: Record<string, unknown>): ModelPropertiesView["inputFormat"] => ({
+  text: raw.text === true ? true : undefined,
+  image: raw.image === true ? true : undefined,
+  video: raw.video === true ? true : undefined,
+  audio: raw.audio === true ? true : undefined,
+  pdf: raw.pdf === true ? true : undefined,
+});
+
+/** A declared output-format object → the view (no pdf in the vocabulary). */
+const demoMediaOut = (raw: Record<string, unknown>): ModelPropertiesView["outputFormat"] => ({
+  text: raw.text === true ? true : undefined,
+  image: raw.image === true ? true : undefined,
+  video: raw.video === true ? true : undefined,
+  audio: raw.audio === true ? true : undefined,
 });
 
 interface DemoModelResolution {
@@ -302,10 +370,27 @@ export class FixtureClient implements SettingsApi {
     source: "stored" | "deployment";
     document: Record<string, unknown>;
   } = { revision: 3, source: "deployment", document: demoDeploymentDocument() };
-  /** Secret names and times only — the demo never keeps a value either. */
+  /** Secret names, masked previews and times only — the demo never keeps a
+   * value either. The third row predates the preview column (empty preview),
+   * which is the legacy state the settings list renders as 「已保存」. */
   private secretState: SecretMeta[] = [
-    { name: "s2api", createdAt: new Date(Date.now() - 86_400_000).toISOString(), updatedAt: new Date(Date.now() - 3_600_000).toISOString() },
-    { name: "webhook-token", createdAt: new Date(Date.now() - 172_800_000).toISOString(), updatedAt: new Date(Date.now() - 172_800_000).toISOString() },
+    {
+      name: "s2api",
+      preview: "sk-liv…-a1b2-c",
+      createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    },
+    {
+      name: "webhook-token",
+      preview: "••••••••",
+      createdAt: new Date(Date.now() - 172_800_000).toISOString(),
+      updatedAt: new Date(Date.now() - 172_800_000).toISOString(),
+    },
+    {
+      name: "legacy-env-key",
+      createdAt: new Date(Date.now() - 172_800_000).toISOString(),
+      updatedAt: new Date(Date.now() - 172_800_000).toISOString(),
+    },
   ];
   /** The demo skill library (settings「技能」): one locally authored skill and
    * one trusted subscription source. It is editable so the demo's install,
@@ -374,6 +459,10 @@ export class FixtureClient implements SettingsApi {
         // exactly as a deployment with the projection wired.
         "task.panel": true,
         "session.filePreview": true,
+        // The demo answers the same settings surface a live server does, so
+        // the editor's discovery and direct-entry actions are exercised.
+        "settings.models": true,
+        "settings.secrets": true,
       },
       limits: {},
       hooks: [],
@@ -543,11 +632,44 @@ export class FixtureClient implements SettingsApi {
     if (!trimmed) throw new KeelApiError(400, "secret name is required");
     if (!value) throw new KeelApiError(400, "secret value is required");
     const at = nowISO();
+    const preview = demoSecretPreview(value);
     const existing = this.secretState.find((item) => item.name === trimmed);
-    if (existing) existing.updatedAt = at;
-    else this.secretState.push({ name: trimmed, createdAt: at, updatedAt: at });
+    if (existing) {
+      existing.updatedAt = at;
+      existing.preview = preview;
+    } else {
+      this.secretState.push({ name: trimmed, preview, createdAt: at, updatedAt: at });
+    }
     this.secretState.sort((a, b) => a.name.localeCompare(b.name));
     return { name: trimmed, updatedAt: at };
+  }
+
+  /** The direct-entry path (server: PUT /v1/settings/providers/{id}/credential):
+   * the demo stores the value as a secret named `provider_<id>` — the same
+   * stable name the server derives — and answers the reference plus the masked
+   * preview. It never returns the value. */
+  async saveProviderCredential(providerId: string, value: string): Promise<ProviderCredentialSaved> {
+    const id = providerId.trim();
+    if (!id) throw new KeelApiError(400, "provider id is required");
+    if (!value.trim()) throw new KeelApiError(400, "value is required: a blank field never erases a stored credential");
+    const secretName = `provider_${id.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    const at = nowISO();
+    const preview = demoSecretPreview(value);
+    const existing = this.secretState.find((item) => item.name === secretName);
+    if (existing) {
+      existing.updatedAt = at;
+      existing.preview = preview;
+    } else {
+      this.secretState.push({ name: secretName, preview, createdAt: at, updatedAt: at });
+    }
+    this.secretState.sort((a, b) => a.name.localeCompare(b.name));
+    return {
+      providerId: id,
+      secretName,
+      secretRef: `secret:${secretName}`,
+      preview,
+      updatedAt: at,
+    };
   }
 
   async deleteSecret(name: string): Promise<void> {
@@ -555,6 +677,42 @@ export class FixtureClient implements SettingsApi {
       throw new KeelApiError(404, `secret ${name} was not found`);
     }
     this.secretState = this.secretState.filter((item) => item.name !== name);
+  }
+
+  /** The provider probe (server: POST /v1/providers/{id}/test). The demo
+   * answers a measured result for a known provider: `ready` with the live
+   * line-up when its credential resolves, `needs_auth` when it does not.
+   * Unknown ids are a 404, exactly like the server. */
+  async testProvider(providerId: string): Promise<ProviderProbeView> {
+    const provider = this.resolveSelection(this.settingsState.document).providers.find(
+      (row) => row.providerId === providerId,
+    );
+    if (!provider) throw new KeelApiError(404, `provider ${providerId} is not served by this deployment`);
+    const started = Date.now();
+    if (provider.executable !== true) {
+      return {
+        providerId,
+        providerType: provider.providerType,
+        apiType: provider.api?.type,
+        endpoint: provider.api?.baseUrl,
+        ok: false,
+        status: "needs_auth",
+        latencyMs: 0,
+        models: [],
+        error: "no credential could be resolved; no request was sent",
+      };
+    }
+    return {
+      providerId,
+      providerType: provider.providerType,
+      apiType: provider.api?.type,
+      endpoint: provider.api?.baseUrl,
+      ok: true,
+      status: "ready",
+      latencyMs: 12 + (Date.now() - started),
+      modelCount: DEMO_LIVE_MODELS.length,
+      models: [...DEMO_LIVE_MODELS],
+    };
   }
 
   // ---- skill library ------------------------------------------------------
@@ -1202,20 +1360,49 @@ export class FixtureClient implements SettingsApi {
         });
       }
       const providerModels: ModelView[] = modelIds.map((modelId) => {
+        // The demo's exact per-model rule (what the model editor saves) wins
+        // over the capability seed, exactly as the server's providerModelRules
+        // layer does.
+        const rule = asRecord(
+          (Array.isArray(document.providerModelRules) ? document.providerModelRules : []).find((entry) => {
+            const candidate = asRecord(entry);
+            return candidate.providerId === providerId && candidate.modelId === modelId;
+          }),
+        );
+        const ruleConfig = asRecord(rule.config);
+        const ruleProperties = asRecord(ruleConfig.properties);
+        const ruleOptions = asRecord(ruleConfig.options);
+        const ruleMaxOutput = asRecord(ruleOptions.maxOutputTokens);
+        const rulePricing = asRecord(ruleConfig.pricing);
         const caps = demoModelCapabilities(modelId);
+        const declaredInput = asRecord(ruleProperties.inputFormat);
+        const declaredOutput = asRecord(ruleProperties.outputFormat);
         const model: ModelView = {
           providerId,
           modelId,
+          providerType: typeof ruleConfig.providerType === "string" ? ruleConfig.providerType : undefined,
           api: asRecord(provider.api) as ModelView["api"],
           properties: {
-            contextWindow: caps.contextWindow,
-            inputFormat: { text: true, image: caps.image, video: false, audio: false, pdf: false },
-            outputFormat: { text: true },
-            supportsToolCall: true,
-            supportsJsonSchemaOutput: true,
-            supportsNativeWebSearch: false,
+            contextWindow: demoNumber(ruleProperties.contextWindow) ?? caps.contextWindow,
+            inputFormat:
+              Object.keys(declaredInput).length > 0
+                ? demoMediaIn(declaredInput)
+                : { text: true, image: caps.image, video: false, audio: false, pdf: false },
+            outputFormat: Object.keys(declaredOutput).length > 0 ? demoMediaOut(declaredOutput) : { text: true },
+            supportsToolCall: ruleProperties.supportsToolCall === undefined ? true : ruleProperties.supportsToolCall === true,
+            supportsJsonSchemaOutput:
+              ruleProperties.supportsJsonSchemaOutput === undefined
+                ? true
+                : ruleProperties.supportsJsonSchemaOutput === true,
+            supportsNativeWebSearch: ruleProperties.supportsNativeWebSearch === true,
           },
-          options: demoOptions(modelId),
+          options: Object.keys(ruleMaxOutput).length > 0
+            ? {
+                ...demoOptions(modelId),
+                maxOutputTokens: { max: demoNumber(ruleMaxOutput.max) ?? 8192, map: {} },
+              }
+            : demoOptions(modelId),
+          pricing: Object.keys(rulePricing).length > 0 ? demoPricingOf(rulePricing) : demoPricing(modelId),
           enabled: true,
           executable: resolvable,
           selectable: resolvable,

@@ -185,6 +185,9 @@ export interface ModelView {
   api?: ProviderApiView;
   properties?: ModelPropertiesView;
   options?: ModelOptionSpecsView;
+  /** The declared price list (per 1M tokens) for display and estimates; absent
+   * means 未声明 and is never "free". */
+  pricing?: ModelPricingView;
   enabled?: boolean;
   executable?: boolean;
   selectable?: boolean;
@@ -246,11 +249,56 @@ export interface ModelsSettingsReset {
   source: "deployment";
 }
 
-/** `GET /v1/settings/secrets` — names and times only, never values. */
+/** `POST /v1/providers/{id}/test` — one measured upstream probe through the
+ * server's own credential resolution. The body is the measurement; the
+ * credential never leaves the server, and `models` is the live line-up. */
+export interface ProviderProbeView {
+  providerId: string;
+  providerType?: string;
+  apiType?: string;
+  endpoint?: string;
+  ok: boolean;
+  /** `ready` | `needs_auth` | `unreachable` | `invalid_config`. */
+  status: string;
+  latencyMs?: number;
+  modelCount?: number;
+  /** The live model ids the upstream catalog answered, sorted. */
+  models?: string[];
+  error?: string;
+  issues?: SettingsIssue[];
+}
+
+/** `GET /v1/settings/secrets` — names, masked previews and times, never
+ * values. `preview` is empty on a row that predates the preview column. */
 export interface SecretMeta {
   name: string;
+  preview?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/** `PUT /v1/settings/providers/{id}/credential` — the direct-entry path's
+ * answer: the stored name, the reference to put in the document and the
+ * masked preview. The value itself never comes back. */
+export interface ProviderCredentialSaved {
+  providerId: string;
+  secretName: string;
+  secretRef: string;
+  preview: string;
+  updatedAt?: string;
+}
+
+/** The pricing block of one model (`properties` is capabilities; this is the
+ * display/estimate price list, per 1M tokens). `free` is the explicit
+ * free/zero marker the client badges. */
+export interface ModelPricingView {
+  currency?: string;
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  free?: boolean;
+  notes?: string;
 }
 
 export interface SecretsView {
@@ -833,9 +881,16 @@ export interface SettingsApi {
   resetModelsSettings(expectedRevision?: number): Promise<ModelsSettingsReset>;
   providers(): Promise<ProvidersResponse>;
   models(): Promise<ModelsResponse>;
+  /** `POST /v1/providers/{id}/test`: the measured probe (status, latency and
+   * the live model ids). A provider that ran and failed is still a resolved
+   * call with `ok: false`; only a probe that could not run rejects. */
+  testProvider(providerId: string): Promise<ProviderProbeView>;
   secrets(): Promise<SecretsView>;
   putSecret(name: string, value: string): Promise<SecretSaved>;
   deleteSecret(name: string): Promise<void>;
+  /** `PUT /v1/settings/providers/{id}/credential`: store a directly pasted
+   * credential and answer the reference + masked preview (never the value). */
+  saveProviderCredential(providerId: string, value: string): Promise<ProviderCredentialSaved>;
   skillsSettings(check?: boolean): Promise<SkillsSettingsView>;
   showSkill(name: string): Promise<SkillDetailView>;
   installSkill(request: SkillInstallRequest): Promise<SkillRecordView>;
