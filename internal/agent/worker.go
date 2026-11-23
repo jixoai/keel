@@ -333,7 +333,7 @@ func (w *Worker) execute(ctx context.Context, sem chan struct{}, lease kernel.Le
 	if ctx.Err() != nil {
 		// Process shutdown: give the claim back instead of starting work under a
 		// policy read that is already racing the shutdown.
-		w.releaseAbandoned(lease)
+		w.releaseAbandoned(lease, time.Since(started))
 		return
 	}
 	capture, captureErr := runner.ResolveCapturePolicy(ctx, lease.Scope)
