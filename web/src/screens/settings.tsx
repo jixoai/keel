@@ -68,14 +68,17 @@ import {
   PRICING_CURRENCIES,
   REASONING_LEVELS,
   applyModelMetadata,
+  editorSeed,
   formatPrice,
   formatTokens,
   isFree,
   mergeLiveModels,
+  metadataEditPatch,
   metadataOf,
-  metadataPatch,
   normalizeReasoningLevels,
   priceSummary,
+  providerCredentialSecretName,
+  resolvedModelOf,
   secretPreviewLabel,
   windowSummary,
   type ModelMetadata,
@@ -272,7 +275,12 @@ const modelEditorCacheWrite = signal("");
 const modelEditorFree = signal(false);
 const modelEditorNotes = signal("");
 const modelEditorError = signal<string | null>(null);
-const modelEditorClearPricing = signal(false);
+/** The facts the form showed when it opened. The save diffs against this seed,
+ * so an untouched dialog writes nothing and an edit writes only its section. */
+const modelEditorBaseline = signal<ModelMetadata>({
+  inputFormat: {},
+  outputFormat: {},
+});
 
 /** The「更换」dialog: provider + model + reasoning for the default selection. */
 const replaceOpen = signal(false);
@@ -1162,10 +1170,13 @@ const probeStatusLabel = (status: string): string => {
 // ---- the per-model metadata editor's actions -----------------------------
 
 const openModelEditor = (providerId: string, modelId: string) => {
-  const model = store
-    .models()
-    .find((row) => row.providerId === providerId && row.modelId === modelId);
-  const metadata = metadataOf(model);
+  // Seed from the resolved settings view (ProviderViews): it carries every
+  // member model, including the ones /v1/models omits for an unresolved
+  // credential or a disabled model. The executable registry is only a fallback
+  // for a panel whose settings view failed to load.
+  const model = resolvedModelOf(store.providers(), providerId, modelId) ??
+    store.models().find((row) => row.providerId === providerId && row.modelId === modelId);
+  const metadata = editorSeed(metadataOf(model));
   modelEditorProviderId.set(providerId);
   modelEditorModelId.set(modelId);
   modelEditorFamily.set(metadata.providerType ?? "inherit");
@@ -1197,7 +1208,7 @@ const openModelEditor = (providerId: string, modelId: string) => {
   modelEditorCacheWrite.set(pricing?.cacheWrite !== undefined ? String(pricing.cacheWrite) : "");
   modelEditorFree.set(pricing?.free === true);
   modelEditorNotes.set(pricing?.notes ?? "");
-  modelEditorClearPricing.set(false);
+  modelEditorBaseline.set(metadata);
   modelEditorError.set(null);
   modelEditorOpen.set(true);
 };
@@ -1289,28 +1300,21 @@ const saveModelMetadata = async () => {
         }
       : undefined,
   };
+  // Only what the reader changed relative to the facts the form showed is
+  // written. A blank field whose resolved value existed is a clear (null under
+  // merge patch); a field the resolved view never showed stays absent. An
+  // untouched save is therefore a no-op, which is what keeps the dialog from
+  // overwriting capabilities it could not display.
+  const patch = metadataEditPatch(modelEditorBaseline(), metadata);
+  if (Object.keys(patch).length === 0) {
+    closeModelEditor();
+    return;
+  }
   const candidate = currentDocument();
   if (!candidate.document) {
     modelEditorError.set(candidate.error ?? "配置不是合法的 JSON，先到「高级」修复原始文档。");
     return;
   }
-  // A blank field whose resolved value existed clears it (null under merge
-  // patch); a field that was never declared stays absent. This is what makes
-  // "留空为未声明" true without letting an unedited save invent a clear.
-  const resolved = store
-    .models()
-    .find((row) => row.providerId === providerId && row.modelId === modelId);
-  const original = metadataOf(resolved);
-  const patch = metadataPatch(metadata, {
-    providerType: original.providerType !== undefined && metadata.providerType === undefined,
-    contextWindow: original.contextWindow !== undefined && context === undefined,
-    maxOutputTokens: original.maxOutputTokens !== undefined && maxOutput === undefined,
-    reasoningLevels:
-      original.reasoningLevels !== undefined &&
-      original.reasoningLevels.length > 0 &&
-      reasoningLevels.length === 0,
-    pricing: modelEditorClearPricing() || (original.pricing !== undefined && !hasAnyPrice),
-  });
   const document = applyModelMetadata(candidate.document, providerId, modelId, patch);
   const ok = await saveCandidate(document);
   if (ok) closeModelEditor();
@@ -1397,7 +1401,9 @@ const saveProvider = async () => {
     // A blank credential field with a stored direct credential keeps the
     // reference already in the document (or the derived one for a new
     // provider): a blank field must never erase it.
-    if (typeof access.ref !== "string" || !access.ref) access.ref = `secret:provider_${id.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    if (typeof access.ref !== "string" || !access.ref) {
+      access.ref = `secret:${providerCredentialSecretName(id)}`;
+    }
     delete access.env;
   }
   provider.access = access;
@@ -1536,7 +1542,12 @@ function ProviderCard(props: { provider: () => DraftProvider }) {
       ? `${protocol} · ${provider.baseUrl}`
       : `${protocol} · 服务地址未设置`;
   };
+  // The card's facts come from the resolved settings view, which keeps every
+  // member model. /v1/models omits a model whose credential does not resolve or
+  // which is disabled; reading only it would print 未声明 for facts the server
+  // did resolve and then seed the editor blank.
   const resolvedModel = (modelId: string) =>
+    resolvedModelOf(store.providers(), props.provider().id, modelId) ??
     store.models().find((model) => model.providerId === props.provider().id && model.modelId === modelId);
   return (
     <Card
@@ -2096,13 +2107,38 @@ function FlagRow(props: { testID: string; label: string; checked: boolean; onCha
  * Never a raw JSON editor. */
 function ModelMetadataDialog() {
   const open = () => modelEditorOpen();
+  // The resolved settings view, not the executable registry: it is the only
+  // projection that carries the models this editor exists to fix.
   const model = () =>
-    store
-      .models()
-      .find(
-        (row) =>
-          row.providerId === modelEditorProviderId() && row.modelId === modelEditorModelId(),
-      );
+    resolvedModelOf(store.providers(), modelEditorProviderId(), modelEditorModelId());
+  const provider = () =>
+    store.providers().find((row) => row.providerId === modelEditorProviderId());
+  /** Why this model is not (fully) available, or null when it is. A model the
+   * settings view does not carry has no facts to seed: the dialog says so
+   * instead of showing a blank form whose save would overwrite capabilities. */
+  const availability = (): string | null => {
+    if (!store.registryLoaded()) return "正在读取服务端解析结果…";
+    const row = model();
+    const resolved = provider();
+    const credentialIssue = resolved?.issues?.find((issue) => /credential/i.test(issue.message));
+    if (credentialIssue) {
+      return `尚不可用（缺少凭据）：${credentialIssue.message}。未修改的字段不会被写回。`;
+    }
+    if (!row) {
+      const issue = resolved?.issues?.[0]?.message;
+      return issue
+        ? `尚不可用：${issue}。未修改的字段不会被写回。`
+        : "尚不可用：服务端没有返回这个模型的解析结果（Provider 可能被隐藏或配置未生效）。未修改的字段不会被写回。";
+    }
+    if (row.enabled === false) {
+      return "已停用：这个模型当前不会被执行，事实仍可编辑；未修改的字段不会被写回。";
+    }
+    if (row.executable === false) {
+      const issue = row.issues?.[0]?.message ?? resolved?.issues?.[0]?.message;
+      return `当前不可执行${issue ? `：${issue}` : "（能力声明不完整）"}；未修改的字段不会被写回。`;
+    }
+    return null;
+  };
   const title = () => `模型参数 · ${displayNameOf(modelEditorModelId())}`;
   const familyItems = (): SelectItem[] => [
     { value: "inherit", title: "继承 Provider 的家族" },
@@ -2156,12 +2192,21 @@ function ModelMetadataDialog() {
           <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{modelEditorError() ?? ""}</Text>
         </Notice>
       </If>
-      <If when={!!model()}>
-        <Text
-          style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}
+      <Text
+        style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}
+      >
+        {`${modelEditorProviderId()}/${modelEditorModelId()}`}
+      </Text>
+      <If when={availability() !== null}>
+        <Notice
+          tone="warning"
+          accessibilityLabel="模型尚不可用"
+          testID="model-unavailable-note"
         >
-          {`${modelEditorProviderId()}/${modelEditorModelId()}`}
-        </Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>
+            {availability() ?? ""}
+          </Text>
+        </Notice>
       </If>
       <FieldGroup>
         <Field label="模型家族">
@@ -2300,7 +2345,6 @@ function ModelMetadataDialog() {
               modelEditorCacheWrite.set("");
               modelEditorFree.set(false);
               modelEditorNotes.set("");
-              modelEditorClearPricing.set(true);
             }}
           />
         </View>

@@ -55,6 +55,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
+import { providerCredentialSecretName } from "./model-catalog";
 import { refreshDeploymentCapabilities, setDeploymentCapabilities } from "./capabilities";
 import {
   mcpAppContextBody,
@@ -1231,10 +1232,11 @@ class KeelStore {
     }
   }
 
-  /** The stored preview of a provider's direct credential (the row named
-   * `provider_<id>`), or undefined when nothing is stored under that name. */
+  /** The stored preview of a provider's direct credential (the row the server
+   * derives for the id: `provider_<id>`, with a digest suffix when the id had
+   * to be sanitized), or undefined when nothing is stored under that name. */
   providerCredentialPreview(providerId: string): string | undefined {
-    const expected = `provider_${providerId.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    const expected = providerCredentialSecretName(providerId);
     return this.secrets().find((item) => item.name === expected)?.preview;
   }
 

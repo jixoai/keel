@@ -106,12 +106,18 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   await app.waitFor("id:provider-config-dialog", { state: "gone" });
 
   // 坏文档：400 的字段级 issues 原样呈现。原始文档在「高级」折叠里（spec：
-  // 原始 JSON 只放折叠内），先展开再编辑。
+  // 原始 JSON 只放折叠内），先展开再编辑。The field takes a long document in
+  // chunks: one `type` call drops a burst this size (the TUI input path), while
+  // a reader's keystrokes arrive over time.
   await app.press("id:settings-advanced");
   await app.waitFor("id:settings-raw-document");
-  await app.clear("id:settings-raw-document");
-  await app.type(
-    "id:settings-raw-document",
+  const typeRaw = async (text: string) => {
+    await app.clear("id:settings-raw-document");
+    for (let index = 0; index < text.length; index += 80) {
+      await app.type("id:settings-raw-document", text.slice(index, index + 80));
+    }
+  };
+  await typeRaw(
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"nope"}}',
   );
   await app.press("label:保存配置");
@@ -122,9 +128,7 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   expect(app.texts().join("\n")).toContain("第 3 版");
 
   // 好文档：保存即生效，版本号 +1，来源变「已保存覆盖」。
-  await app.clear("id:settings-raw-document");
-  await app.type(
-    "id:settings-raw-document",
+  await typeRaw(
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"deepseek-v4.1-flash","reasoningLevel":"low"}}',
   );
   await app.press("label:保存配置");

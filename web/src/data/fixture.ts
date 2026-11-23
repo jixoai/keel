@@ -55,6 +55,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { KeelApiError } from "./http";
+import { providerCredentialSecretName } from "./model-catalog";
 import { FixtureIdentity, fixtureAccountId, fixtureCurrentAccountId, fixtureForkSessionId, fixtureRunSessionId } from "./fixture-identity";
 import type {
   AccountView,
@@ -617,7 +618,13 @@ export class FixtureClient implements SettingsApi {
   async models(): Promise<ModelsResponse> {
     const resolution = this.resolveSelection(this.settingsState.document);
     return {
-      models: resolution.models,
+      // The executable registry: only complete, enabled models of a provider
+      // whose credential resolves here. `/v1/providers` keeps the rest — the
+      // settings view is where their issues are read (server: ModelViews vs
+      // ProviderViews).
+      models: resolution.models.filter(
+        (model) => model.enabled === true && model.executable === true,
+      ),
       issues: [],
       enforcement: { toolCall: true, media: true },
     };
@@ -645,14 +652,15 @@ export class FixtureClient implements SettingsApi {
   }
 
   /** The direct-entry path (server: PUT /v1/settings/providers/{id}/credential):
-   * the demo stores the value as a secret named `provider_<id>` — the same
-   * stable name the server derives — and answers the reference plus the masked
-   * preview. It never returns the value. */
+   * the demo stores the value under the name the server derives
+   * (`provider_<id>`, collision-resistant suffix after sanitization) and
+   * answers the reference plus the masked preview. It never returns the
+   * value. */
   async saveProviderCredential(providerId: string, value: string): Promise<ProviderCredentialSaved> {
     const id = providerId.trim();
     if (!id) throw new KeelApiError(400, "provider id is required");
     if (!value.trim()) throw new KeelApiError(400, "value is required: a blank field never erases a stored credential");
-    const secretName = `provider_${id.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    const secretName = providerCredentialSecretName(id);
     const at = nowISO();
     const preview = demoSecretPreview(value);
     const existing = this.secretState.find((item) => item.name === secretName);
@@ -1383,6 +1391,36 @@ export class FixtureClient implements SettingsApi {
         const declaredInput = asRecord(ruleProperties.inputFormat);
         const declaredOutput = asRecord(ruleProperties.outputFormat);
         const baseOptions = demoOptions(modelId);
+        // Merge patch semantics (server: mergeJSONObjects): a rule's modality
+        // object patches the capability seed key by key; a null key clears the
+        // inherited fact, the other keys stay.
+        const mergedInput: Record<string, unknown> = {
+          text: true,
+          image: caps.image,
+          video: false,
+          audio: false,
+          pdf: false,
+          ...declaredInput,
+        };
+        for (const [key, value] of Object.entries(declaredInput)) {
+          if (value === null) delete mergedInput[key];
+        }
+        const mergedOutput: Record<string, unknown> = { text: true, ...declaredOutput };
+        for (const [key, value] of Object.entries(declaredOutput)) {
+          if (value === null) delete mergedOutput[key];
+        }
+        // The price list merges the same way: a cleared field (null) is gone
+        // from this model's list, the fields the dialog did not edit stay; a
+        // rule's `pricing: null` removes the whole block.
+        const pricingCleared =
+          Object.prototype.hasOwnProperty.call(ruleConfig, "pricing") && ruleConfig.pricing === null;
+        const mergedPricing: Record<string, unknown> = pricingCleared
+          ? {}
+          : { ...asRecord(demoPricing(modelId)), ...rulePricing };
+        for (const [key, value] of Object.entries(rulePricing)) {
+          if (value === null) delete mergedPricing[key];
+        }
+        const modelEnabled = ruleConfig.enabled === false ? false : true;
         const model: ModelView = {
           providerId,
           modelId,
@@ -1393,11 +1431,8 @@ export class FixtureClient implements SettingsApi {
               ruleProperties.contextWindow === null
                 ? 0
                 : demoNumber(ruleProperties.contextWindow) ?? caps.contextWindow,
-            inputFormat:
-              Object.keys(declaredInput).length > 0
-                ? demoMediaIn(declaredInput)
-                : { text: true, image: caps.image, video: false, audio: false, pdf: false },
-            outputFormat: Object.keys(declaredOutput).length > 0 ? demoMediaOut(declaredOutput) : { text: true },
+            inputFormat: demoMediaIn(mergedInput),
+            outputFormat: demoMediaOut(mergedOutput),
             supportsToolCall: ruleProperties.supportsToolCall === undefined ? true : ruleProperties.supportsToolCall === true,
             supportsJsonSchemaOutput:
               ruleProperties.supportsJsonSchemaOutput === undefined
@@ -1421,10 +1456,11 @@ export class FixtureClient implements SettingsApi {
                   }
                 : baseOptions.maxOutputTokens,
           },
-          pricing: Object.keys(rulePricing).length > 0 ? demoPricingOf(rulePricing) : demoPricing(modelId),
-          enabled: true,
+          pricing:
+            Object.keys(mergedPricing).length > 0 ? demoPricingOf(mergedPricing) : undefined,
+          enabled: modelEnabled,
           executable: resolvable,
-          selectable: resolvable,
+          selectable: resolvable && modelEnabled,
         };
         models.push(model);
         return model;
@@ -1438,7 +1474,7 @@ export class FixtureClient implements SettingsApi {
         models: providerModels,
         issues: providerIssues.length ? providerIssues : undefined,
         executable: resolvable,
-        selectable: resolvable && providerModels.length > 0,
+        selectable: resolvable && providerModels.some((model) => model.selectable === true),
       };
       providers.push(providerView);
     }

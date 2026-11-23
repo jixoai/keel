@@ -13,7 +13,7 @@
 //  3. merge a live provider line-up into a configured model list without
 //     deleting anything and preserving display order.
 
-import type { ModelPricingView, ModelView } from "./contract";
+import type { ModelPricingView, ModelView, ProviderView } from "./contract";
 
 /** One model's editable metadata, as the model editor reads it. Every field is
  * optional: `undefined` is 未声明, which the editor shows as such and a save
@@ -210,80 +210,182 @@ export function findProviderModelRule(
   return null;
 }
 
-/** Which facts the form cleared. A blank field whose resolved value existed
- * must be written as `null` to override the lower layers; a field that was
- * never declared stays absent, so saving the dialog cannot invent a clear. */
-export interface MetadataCleared {
-  providerType?: boolean;
-  contextWindow?: boolean;
-  maxOutputTokens?: boolean;
-  reasoningLevels?: boolean;
-  pricing?: boolean;
+/** The resolved settings view's model (`GET /v1/providers`). ProviderViews
+ * keeps every member model — including one `/v1/models` omits because the
+ * provider's credential does not resolve here or the model is disabled — so
+ * the editor seeds from the facts the server actually resolved, not from the
+ * executable registry. An absent model is a real state (hidden provider, a
+ * document the runtime did not resolve); the caller must show it as such. */
+export function resolvedModelOf(
+  providers: readonly ProviderView[] | undefined,
+  providerId: string,
+  modelId: string,
+): ModelView | undefined {
+  const provider = (providers ?? []).find((row) => row.providerId === providerId);
+  return provider?.models?.find((row) => row.modelId === modelId);
 }
 
-/** The sparse config a model editor save produces. Every section the form
- * edited is present; a cleared section is `null` (which clears under merge
- * patch); a section the form left untouched is absent. */
-export function metadataPatch(metadata: ModelMetadata, cleared: MetadataCleared = {}): Record<string, unknown> {
+/** The editor's canonical seed: booleans become real booleans and an empty
+ * reasoning list stays empty, so the form's own values diff against the seed
+ * without treating 未声明 as a change. A pricing block that declares no fact
+ * (`{}`, `free: false`) is not a fact either. */
+export function editorSeed(metadata: ModelMetadata): ModelMetadata {
+  const reasoningLevels = normalizeReasoningLevels(metadata.reasoningLevels);
+  const reasoningLevelMap: Record<string, Record<string, unknown>> = {};
+  for (const level of reasoningLevels) {
+    reasoningLevelMap[level] = { ...asRecord(metadata.reasoningLevelMap?.[level]) };
+  }
+  return {
+    providerType: metadata.providerType,
+    contextWindow: metadata.contextWindow,
+    maxOutputTokens: metadata.maxOutputTokens,
+    inputFormat: {
+      text: metadata.inputFormat.text === true,
+      image: metadata.inputFormat.image === true,
+      video: metadata.inputFormat.video === true,
+      audio: metadata.inputFormat.audio === true,
+      pdf: metadata.inputFormat.pdf === true,
+    },
+    outputFormat: {
+      text: metadata.outputFormat.text === true,
+      image: metadata.outputFormat.image === true,
+      video: metadata.outputFormat.video === true,
+      audio: metadata.outputFormat.audio === true,
+    },
+    supportsToolCall: metadata.supportsToolCall === true,
+    supportsJsonSchemaOutput: metadata.supportsJsonSchemaOutput === true,
+    supportsNativeWebSearch: metadata.supportsNativeWebSearch === true,
+    reasoningLevels,
+    reasoningLevelMap,
+    pricing: pricingFactsOf(metadata.pricing),
+  };
+}
+
+/** The declared pricing facts of a block, or undefined when it declares none. */
+function pricingFactsOf(pricing: ModelPricingView | undefined): ModelPricingView | undefined {
+  if (!pricing) return undefined;
+  const facts: ModelPricingView = {
+    currency: pricing.currency?.trim() || undefined,
+    input: pricing.input,
+    output: pricing.output,
+    cacheRead: pricing.cacheRead,
+    cacheWrite: pricing.cacheWrite,
+    free: pricing.free === true ? true : undefined,
+    notes: pricing.notes?.trim() || undefined,
+  };
+  return Object.values(facts).some((value) => value !== undefined) ? facts : undefined;
+}
+
+const INPUT_MODALITY_KEYS = ["text", "image", "video", "audio", "pdf"] as const;
+const OUTPUT_MODALITY_KEYS = ["text", "image", "video", "audio"] as const;
+
+/** The modality keys the reader toggled, as a per-key merge patch: an
+ * untouched key is absent (the resolved fact stays), a cleared one is `false`
+ * and a newly accepted one is `true`. */
+function mediaEditPatch(
+  before: Record<string, boolean | undefined>,
+  after: Record<string, boolean | undefined>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const key of keys) {
+    const was = before[key] === true;
+    const is = after[key] === true;
+    if (was !== is) patch[key] = is;
+  }
+  return patch;
+}
+
+/** Pricing fields the reader changed. A block that had no declared fact stays
+ * untouched; a field the form showed and the reader blanked is `null`; a field
+ * the form never showed is never invented as a clear. */
+function pricingEditPatch(
+  before: ModelPricingView | undefined,
+  after: ModelPricingView | undefined,
+): Record<string, unknown> | null | undefined {
+  if (!before) {
+    if (!after) return undefined;
+    const declared: Record<string, unknown> = {};
+    if (after.currency?.trim()) declared.currency = after.currency.trim();
+    if (after.input !== undefined) declared.input = after.input;
+    if (after.output !== undefined) declared.output = after.output;
+    if (after.cacheRead !== undefined) declared.cacheRead = after.cacheRead;
+    if (after.cacheWrite !== undefined) declared.cacheWrite = after.cacheWrite;
+    if (after.free === true) declared.free = true;
+    if (after.notes?.trim()) declared.notes = after.notes.trim();
+    return Object.keys(declared).length > 0 ? declared : undefined;
+  }
+  if (!after) return null;
+  const patch: Record<string, unknown> = {};
+  if ((before.currency ?? "").trim() !== (after.currency ?? "").trim()) {
+    patch.currency = after.currency?.trim() || null;
+  }
+  if (before.input !== after.input) patch.input = after.input ?? null;
+  if (before.output !== after.output) patch.output = after.output ?? null;
+  if (before.cacheRead !== after.cacheRead) patch.cacheRead = after.cacheRead ?? null;
+  if (before.cacheWrite !== after.cacheWrite) patch.cacheWrite = after.cacheWrite ?? null;
+  if ((before.free === true) !== (after.free === true)) patch.free = after.free === true;
+  if ((before.notes ?? "").trim() !== (after.notes ?? "").trim()) {
+    patch.notes = after.notes?.trim() || null;
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined;
+}
+
+/** The sparse config one model editor save produces: only the sections (and,
+ * inside a section, only the keys) whose value differs from the seed the form
+ * showed. An untouched save is `{}` — the caller must then write nothing at
+ * all. This is what keeps a blank dialog from overwriting capabilities the
+ * resolved view never displayed (an unauthenticated provider's model would
+ * otherwise lose every modality and its reasoning levels, and become
+ * unusable). */
+export function metadataEditPatch(before: ModelMetadata, after: ModelMetadata): Record<string, unknown> {
   const config: Record<string, unknown> = {};
-  if (metadata.providerType) config.providerType = metadata.providerType;
-  else if (cleared.providerType) config.providerType = null;
+  if (after.providerType !== before.providerType) config.providerType = after.providerType ?? null;
 
   const properties: Record<string, unknown> = {};
-  if (metadata.contextWindow !== undefined) properties.contextWindow = metadata.contextWindow;
-  else if (cleared.contextWindow) properties.contextWindow = null;
-  properties.inputFormat = { ...metadata.inputFormat };
-  properties.outputFormat = { ...metadata.outputFormat };
-  if (metadata.supportsToolCall !== undefined) properties.supportsToolCall = metadata.supportsToolCall;
-  if (metadata.supportsJsonSchemaOutput !== undefined) {
-    properties.supportsJsonSchemaOutput = metadata.supportsJsonSchemaOutput;
+  if (after.contextWindow !== before.contextWindow) properties.contextWindow = after.contextWindow ?? null;
+  const input = mediaEditPatch(before.inputFormat, after.inputFormat, INPUT_MODALITY_KEYS);
+  if (Object.keys(input).length > 0) properties.inputFormat = input;
+  const output = mediaEditPatch(before.outputFormat, after.outputFormat, OUTPUT_MODALITY_KEYS);
+  if (Object.keys(output).length > 0) properties.outputFormat = output;
+  if (after.supportsToolCall !== before.supportsToolCall) {
+    properties.supportsToolCall = after.supportsToolCall === true;
   }
-  if (metadata.supportsNativeWebSearch !== undefined) {
-    properties.supportsNativeWebSearch = metadata.supportsNativeWebSearch;
+  if (after.supportsJsonSchemaOutput !== before.supportsJsonSchemaOutput) {
+    properties.supportsJsonSchemaOutput = after.supportsJsonSchemaOutput === true;
   }
-  config.properties = properties;
+  if (after.supportsNativeWebSearch !== before.supportsNativeWebSearch) {
+    properties.supportsNativeWebSearch = after.supportsNativeWebSearch === true;
+  }
+  if (Object.keys(properties).length > 0) config.properties = properties;
 
   const options: Record<string, unknown> = {};
-  if (metadata.maxOutputTokens !== undefined) options.maxOutputTokens = { max: metadata.maxOutputTokens };
-  else if (cleared.maxOutputTokens) options.maxOutputTokens = { max: null };
-  if (metadata.reasoningLevels !== undefined) {
-    const levels = normalizeReasoningLevels(metadata.reasoningLevels);
-    if (levels.length === 0) {
+  if (after.maxOutputTokens !== before.maxOutputTokens) {
+    options.maxOutputTokens = { max: after.maxOutputTokens ?? null };
+  }
+  const beforeLevels = normalizeReasoningLevels(before.reasoningLevels);
+  const afterLevels = normalizeReasoningLevels(after.reasoningLevels);
+  if (beforeLevels.join(",") !== afterLevels.join(",")) {
+    if (afterLevels.length === 0) {
       options.reasoningLevel = null;
     } else {
+      // Reuse the patches the form carried (it edits levels, not wire
+      // patches); a newly added level gets the empty patch the resolver
+      // requires, and an untouched level keeps its patch.
       const map: Record<string, Record<string, unknown>> = {};
-      for (const [level, patch] of Object.entries(metadata.reasoningLevelMap ?? {})) {
-        map[level] = { ...asRecord(patch) };
+      for (const level of afterLevels) {
+        map[level] = {
+          ...asRecord(after.reasoningLevelMap?.[level] ?? before.reasoningLevelMap?.[level]),
+        };
       }
-      for (const level of levels) {
-        if (!(level in map)) map[level] = {};
-      }
-      options.reasoningLevel = { values: levels, map };
+      options.reasoningLevel = { values: afterLevels, map };
     }
-  } else if (cleared.reasoningLevels) {
-    options.reasoningLevel = null;
   }
   if (Object.keys(options).length > 0) config.options = options;
 
-  if (cleared.pricing) config.pricing = null;
-  else if (metadata.pricing) config.pricing = pricingPatch(metadata.pricing);
+  const pricing = pricingEditPatch(before.pricing, after.pricing);
+  if (pricing !== undefined) config.pricing = pricing;
   return config;
-}
-
-/** The pricing part of a patch. A blank field is `null`: the form showed the
- * resolved value, so blank means the reader cleared it, not "leave the lower
- * layer alone". `free: false` is written as a value (not omitted) so turning
- * the marker off on a priced model actually clears it under merge patch. */
-function pricingPatch(pricing: ModelPricingView): Record<string, unknown> {
-  return {
-    currency: pricing.currency?.trim() || null,
-    input: pricing.input ?? null,
-    output: pricing.output ?? null,
-    cacheRead: pricing.cacheRead ?? null,
-    cacheWrite: pricing.cacheWrite ?? null,
-    free: pricing.free === true,
-    notes: pricing.notes?.trim() || null,
-  };
 }
 
 /** Apply an editor save to the document: compose the patch into the existing
@@ -398,6 +500,40 @@ export function mergeLiveModels(
     added.push(id);
   }
   return { models: [...configured, ...added], added };
+}
+
+/** The secret-name grammar's maximum length (the server's `secretNamePattern`). */
+const SECRET_NAME_MAX = 64;
+
+/** A stable short digest of the original provider id. The direct-credential
+ * route and this mirror both derive names from it; ASCII ids (the route's
+ * grammar) hash identically on both sides. It exists so two ids that sanitize
+ * to the same fragment (`a.b` and `a-b` → `a_b`) can never share one secret
+ * row; it is not a security boundary. */
+const providerIDDigest = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+};
+
+/** The tenant-secret name the direct-credential route derives for a provider
+ * (`provider_<id>`), mirrored client-side for the one fallback reference the
+ * editor mints when it keeps a stored credential. An id the secret grammar
+ * refuses is sanitized and gets a short digest suffix, so sanitization cannot
+ * collide two providers onto one row; an over-long id is truncated to the
+ * grammar's bound with the same suffix. The server's answer is the authority. */
+export function providerCredentialSecretName(providerId: string): string {
+  const prefix = "provider_";
+  const sanitized = providerId.replace(/[^A-Za-z0-9_]/g, "_");
+  if (sanitized === providerId && prefix.length + sanitized.length <= SECRET_NAME_MAX) {
+    return `${prefix}${sanitized}`;
+  }
+  const suffix = `_${providerIDDigest(providerId)}`;
+  const room = SECRET_NAME_MAX - prefix.length - suffix.length;
+  return `${prefix}${sanitized.slice(0, Math.max(0, room))}${suffix}`;
 }
 
 /** The masked preview rule, mirrored client-side for the editor's optimistic

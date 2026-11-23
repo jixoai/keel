@@ -51,6 +51,7 @@ test("TUI: 模型分区——一个 provider 一张卡片，带已配置/不可�
   expect(texts).toContain("Claude Sonnet 5");
 
   // The advanced raw document is closed at the bottom until asked for.
+  await app.scroll("id:settings-models-scroll", 4000);
   expect(app.shows("id:settings-raw-document")).toBe(false);
   expect(app.shows("id:settings-advanced")).toBe(true);
 });
@@ -140,9 +141,11 @@ test("TUI: 模型分区——添加 Provider 的三步路径（点添加→填�
   await app.press("label:添加模型");
   await app.waitFor("id:provider-config-model-deepseek-v4.1-flash");
 
-  // Step 3: save and see the new card, already resolvable.
+  // Step 3: save and see the new card, already resolvable. The card is
+  // appended after the existing providers, below the test viewport.
   await app.press("label:保存并生效");
   await app.waitFor("id:provider-config-dialog", { state: "gone" });
+  await app.scroll("id:settings-models-scroll", 4000);
   await app.waitFor("id:provider-card-local");
   expect(app.texts()).toContain("Local Gateway");
   expect(app.texts().filter((text) => text === "已配置").length).toBe(3);
@@ -271,6 +274,7 @@ test("TUI: 模型参数——编辑上下文/输出/模态/能力与价格，保
   // The saved document carries ONE exact rule for this model. The advanced
   // editor shows the app's live document (the test's module store is a
   // different instance, so the UI is the honest read).
+  await app.scroll("id:settings-models-scroll", 4000);
   await app.press("id:settings-advanced");
   const raw = app.value("id:settings-raw-document") ?? "";
   expect(raw.length).toBeGreaterThan(0);
@@ -328,6 +332,7 @@ test("TUI: 模型参数——清空上下文与输出上限写成 null，卡片�
   // Missing is 未声明, never the resolver's zero default.
   await app.waitFor("text:/上下文未声明 · 输出未声明/");
 
+  await app.scroll("id:settings-models-scroll", 4000);
   await app.press("id:settings-advanced");
   const raw = app.value("id:settings-raw-document") ?? "";
   expect(raw.length).toBeGreaterThan(0);
@@ -341,18 +346,91 @@ test("TUI: 模型参数——清空上下文与输出上限写成 null，卡片�
   expect((options.maxOutputTokens as Record<string, unknown>).max).toBe(null);
 });
 
-test("TUI: 模型参数——不编辑的字段不被保存覆盖（移除模型仍被拒绝）", async () => {
+test("TUI: 模型参数——原样保存是 no-op，不新增规则也不写 false 模态", async () => {
   const app = await openModels();
   await app.waitFor("id:provider-model-edit-s2api-deepseek-v4.1-flash");
   await app.press("id:provider-model-edit-s2api-deepseek-v4.1-flash");
   await app.waitFor("id:model-metadata-dialog");
 
-  // A dialog opened and saved with no edits writes the same facts back: the
-  // document stays valid and the default selection still resolves.
   await app.press("id:model-metadata-save");
   await app.waitFor("id:model-metadata-dialog", { state: "gone" });
-  // The dialog closed (the server accepted) and the card's facts are intact.
+
+  await app.scroll("id:settings-models-scroll", 4000);
+  await app.press("id:settings-advanced");
+  const document = JSON.parse(app.value("id:settings-raw-document") ?? "") as Record<string, unknown>;
+  const rules = (document.providerModelRules as Array<Record<string, unknown>>) ?? [];
+  // The untouched dialog writes nothing at all: no exact rule is invented, so
+  // no capability can be silently rewritten.
+  expect(rules.some((row) => row.providerId === "s2api" && row.modelId === "deepseek-v4.1-flash")).toBe(false);
+  // The card's facts are intact.
   expect(app.texts().join("\n")).toContain("128K 上下文");
+});
+
+test("TUI: 模型参数——凭据不可解析的模型按解析视图回填，原样保存不写空能力", async () => {
+  const app = await openModels();
+  // The executable registry omits this model (its credential does not resolve),
+  // but the settings view resolves its facts: the card shows them instead of
+  // 未声明.
+  await app.waitFor("id:provider-card-anthropic");
+  await app.waitFor("text:/200K 上下文/");
+  await app.press("id:provider-model-edit-anthropic-claude-sonnet-5");
+  await app.waitFor("id:model-metadata-dialog");
+
+  // The seed is the resolved fact sheet, not a blank form.
+  expect(app.value("id:model-context-window")).toBe("200000");
+  expect(app.value("id:model-max-output")).toBe("8192");
+  expect(app.value("id:model-pricing-input")).toBe("3");
+  // The dialog says why the model is not usable, and that untouched facts are
+  // not written back.
+  expect(app.shows("id:model-unavailable-note")).toBe(true);
+  expect(app.texts().join("\n")).toContain("缺少凭据");
+  expect(app.texts().join("\n")).toContain("未修改的字段不会被写回");
+
+  // Save without edits.
+  await app.press("id:model-metadata-save");
+  await app.waitFor("id:model-metadata-dialog", { state: "gone" });
+
+  await app.scroll("id:settings-models-scroll", 4000);
+  await app.press("id:settings-advanced");
+  const document = JSON.parse(app.value("id:settings-raw-document") ?? "") as Record<string, unknown>;
+  const rules = (document.providerModelRules as Array<Record<string, unknown>>) ?? [];
+  // No rule, therefore no `text:false` flags and no `reasoningLevel:null`: the
+  // model keeps every capability it had.
+  expect(rules.some((row) => row.providerId === "anthropic" && row.modelId === "claude-sonnet-5")).toBe(false);
+  expect(app.texts().join("\n")).toContain("200K 上下文");
+});
+
+test("TUI: 模型参数——只改一个字段时其它已解析事实原样保留", async () => {
+  const app = await openModels();
+  await app.waitFor("id:provider-model-edit-anthropic-claude-sonnet-5");
+  await app.press("id:provider-model-edit-anthropic-claude-sonnet-5");
+  await app.waitFor("id:model-metadata-dialog");
+
+  await app.clear("id:model-context-window");
+  await app.type("id:model-context-window", "210000");
+  await app.press("id:model-metadata-save");
+  await app.waitFor("id:model-metadata-dialog", { state: "gone" });
+
+  await app.scroll("id:settings-models-scroll", 4000);
+  await app.press("id:settings-advanced");
+  const document = JSON.parse(app.value("id:settings-raw-document") ?? "") as Record<string, unknown>;
+  const rules = (document.providerModelRules as Array<Record<string, unknown>>) ?? [];
+  const rule = rules.find(
+    (row) => row.providerId === "anthropic" && row.modelId === "claude-sonnet-5",
+  ) as Record<string, unknown>;
+  const config = rule.config as Record<string, unknown>;
+  // Exactly one section holds exactly the edited value. The modalities, the
+  // capability flags, the reasoning levels and the price list are absent, so
+  // they keep their resolved values.
+  expect(config.properties).toEqual({ contextWindow: 210000 });
+  expect(config.options).toBe(undefined);
+  expect(config.pricing).toBe(undefined);
+
+  // The card keeps the untouched facts.
+  const text = app.texts().join("\n");
+  expect(text).toContain("210K 上下文");
+  expect(text).toContain("8,192 输出");
+  expect(text).toContain("输入 USD 3.00 · 输出 USD 15.00");
 });
 
 // ---- 390 / 1440: the two columns -------------------------------------------

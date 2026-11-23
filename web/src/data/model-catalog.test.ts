@@ -4,24 +4,28 @@
 // removed, order preserved), and the masked preview mirror. Plain unit tests:
 // no rendering, no store.
 import { expect, test } from "nsh/test";
-import type { ModelView } from "./contract";
+import type { ModelView, ProviderView } from "./contract";
 import {
   FIXED_SECRET_MASK,
   REASONING_LEVELS,
   applyModelMetadata,
+  editorSeed,
   formatPrice,
   formatTokens,
   isFree,
   maskedPreview,
   mergeJsonObjects,
   mergeLiveModels,
+  metadataEditPatch,
   metadataOf,
-  metadataPatch,
   normalizeReasoningLevels,
   outputPriceSummary,
   priceSummary,
+  providerCredentialSecretName,
+  resolvedModelOf,
   secretPreviewLabel,
   windowSummary,
+  type ModelMetadata,
 } from "./model-catalog";
 
 const model = (overrides: Partial<ModelView> = {}): ModelView => ({
@@ -121,7 +125,19 @@ test("模型元数据读回：属性、选项上限与价格块", () => {
   );
 });
 
-test("保存只写这一个模型：精确 providerModelRules 的一条，不碰其它模型", () => {
+/** The form's own canonical values: every switch is a real boolean, no level is
+ * selected, no price is declared. */
+const blankForm: ModelMetadata = {
+  inputFormat: { text: false, image: false, video: false, audio: false, pdf: false },
+  outputFormat: { text: false, image: false, video: false, audio: false },
+  supportsToolCall: false,
+  supportsJsonSchemaOutput: false,
+  supportsNativeWebSearch: false,
+  reasoningLevels: [],
+  reasoningLevelMap: {},
+};
+
+test("保存只写读者改动的字段：未动的模态/能力/思考档不进规则", () => {
   const document: Record<string, unknown> = {
     schemaVersion: 1,
     providers: [{ id: "gw", modelIds: ["a", "b"] }],
@@ -136,61 +152,71 @@ test("保存只写这一个模型：精确 providerModelRules 的一条，不碰
       },
     ],
   };
-  const patch = metadataPatch({
+  const before = editorSeed({
+    contextWindow: 128000,
+    inputFormat: { text: true, image: false },
+    outputFormat: { text: true },
+    supportsToolCall: true,
+    reasoningLevels: ["high"],
+    reasoningLevelMap: { high: { reasoning_effort: "high" } },
+  });
+  const after: ModelMetadata = {
+    ...before,
     contextWindow: 200000,
-    inputFormat: { text: true },
-    outputFormat: { text: true, image: true },
+    inputFormat: { text: true, image: true },
     maxOutputTokens: 4096,
+    pricing: { currency: "USD", input: 1, output: 2 },
+  };
+  const patch = metadataEditPatch(before, after);
+  // One exact rule: only the changed sections are present — the toggle writes
+  // its own key, never the whole input format.
+  expect(patch).toEqual({
+    properties: { contextWindow: 200000, inputFormat: { image: true } },
+    options: { maxOutputTokens: { max: 4096 } },
     pricing: { currency: "USD", input: 1, output: 2 },
   });
   const next = applyModelMetadata(document, "gw", "a", patch);
   const rules = next.providerModelRules as Array<Record<string, unknown>>;
-  const edited = rules.find((rule) => rule.modelId === "a") as Record<string, unknown>;
-  const config = edited.config as Record<string, unknown>;
+  const config = (rules.find((rule) => rule.modelId === "a") as Record<string, unknown>)
+    .config as Record<string, unknown>;
   const properties = config.properties as Record<string, unknown>;
   expect(properties.contextWindow).toBe(200000);
+  expect(properties.inputFormat).toEqual({ image: true });
+  // The capability flag the form did not change is not written; the resolved
+  // value survives the merge.
+  expect(properties.supportsToolCall).toBe(undefined);
   const options = config.options as Record<string, unknown>;
-  const maxOutput = options.maxOutputTokens as Record<string, unknown>;
-  expect(maxOutput.max).toBe(4096);
-  // The reasoning map (a field the dialog did not edit) survives the merge.
-  const reasoning = options.reasoningLevel as Record<string, unknown>;
-  expect(Array.isArray(reasoning.values)).toBe(true);
+  expect(options.reasoningLevel).toEqual({
+    values: ["high"],
+    map: { high: { reasoning_effort: "high" } },
+  });
   // One model's edit does not add a rule for the sibling model.
   expect(rules.filter((rule) => rule.modelId === "b").length).toBe(0);
   expect(next.providers).toEqual(document.providers);
 });
 
-test("思考档：按运行时词汇升序保存，请求补丁保留并补齐", () => {
-  const document: Record<string, unknown> = {
-    schemaVersion: 1,
-    providerModelRules: [
-      {
-        providerId: "gw",
-        modelId: "a",
-        config: {
-          options: { reasoningLevel: { values: ["high"], map: { high: { reasoning_effort: "high" } } } },
-        },
-      },
-    ],
-  };
-  const patch = metadataPatch({
+test("思考档：只写改动后的档位，按运行时词汇升序，请求补丁保留并补齐", () => {
+  const before = editorSeed({
     inputFormat: {},
     outputFormat: {},
-    // Deliberately unsorted; normalizeReasoningLevels is the authority.
-    reasoningLevels: ["high", "minimal"],
+    reasoningLevels: ["high"],
     reasoningLevelMap: { high: { reasoning_effort: "high" } },
   });
-  const next = applyModelMetadata(document, "gw", "a", patch);
-  const config = (next.providerModelRules as Array<Record<string, unknown>>)[0].config as Record<string, unknown>;
-  const options = config.options as Record<string, unknown>;
-  const reasoning = options.reasoningLevel as Record<string, unknown>;
-  expect(reasoning.values).toEqual(["minimal", "high"]);
-  expect(reasoning.map).toEqual({ minimal: {}, high: { reasoning_effort: "high" } });
+  // Deliberately unsorted; normalizeReasoningLevels is the authority.
+  const patch = metadataEditPatch(before, { ...before, reasoningLevels: ["high", "minimal"] });
+  expect(patch).toEqual({
+    options: {
+      reasoningLevel: {
+        values: ["minimal", "high"],
+        map: { minimal: {}, high: { reasoning_effort: "high" } },
+      },
+    },
+  });
   expect(normalizeReasoningLevels(["max", "high", "bogus", "high"])).toEqual(["high", "max"]);
   expect(REASONING_LEVELS.join(",")).toBe("off,minimal,low,medium,high,xhigh,max");
 });
 
-test("清除：空字段写成 null；未编辑的请求补丁与其它价格字段仍在", () => {
+test("清除：表单展示过的字段写 null，未展示的请求补丁与组成的字段不受影响", () => {
   const document: Record<string, unknown> = {
     schemaVersion: 1,
     providerModelRules: [
@@ -209,66 +235,111 @@ test("清除：空字段写成 null；未编辑的请求补丁与其它价格字
       },
     ],
   };
-  const patch = metadataPatch(
-    {
-      inputFormat: { text: true },
-      outputFormat: { text: true },
-      reasoningLevels: [],
-      pricing: { input: undefined, output: 2 },
-    },
-    { providerType: true, contextWindow: true, maxOutputTokens: true, reasoningLevels: true },
-  );
+  const before = editorSeed({
+    providerType: "llm",
+    contextWindow: 128000,
+    maxOutputTokens: 4096,
+    inputFormat: { text: true },
+    outputFormat: { text: true },
+    reasoningLevels: ["high"],
+    reasoningLevelMap: { high: { reasoning_effort: "high" } },
+    pricing: { currency: "USD", input: 1, output: 2, cacheRead: 0.1, free: true, notes: "list" },
+  });
+  const after: ModelMetadata = {
+    ...before,
+    providerType: undefined,
+    contextWindow: undefined,
+    maxOutputTokens: undefined,
+    reasoningLevels: [],
+    reasoningLevelMap: {},
+    pricing: undefined,
+  };
+  const patch = metadataEditPatch(before, after);
+  expect(patch.providerType).toBe(null);
+  expect((patch.properties as Record<string, unknown>).contextWindow).toBe(null);
+  const patchOptions = patch.options as Record<string, unknown>;
+  expect(patchOptions.maxOutputTokens).toEqual({ max: null });
+  expect(patchOptions.reasoningLevel).toBe(null);
+  expect(patch.pricing).toBe(null);
   const next = applyModelMetadata(document, "gw", "a", patch);
   const config = (next.providerModelRules as Array<Record<string, unknown>>)[0].config as Record<string, unknown>;
   expect(config.providerType).toBe(null);
   expect((config.properties as Record<string, unknown>).contextWindow).toBe(null);
-  const options = config.options as Record<string, unknown>;
-  const maxOutput = options.maxOutputTokens as Record<string, unknown>;
-  expect(maxOutput.max).toBe(null);
   // The default request patch is not collateral damage of clearing `max`.
+  const maxOutput = (config.options as Record<string, unknown>).maxOutputTokens as Record<string, unknown>;
+  expect(maxOutput.max).toBe(null);
   expect((maxOutput.map as Record<string, Record<string, unknown>>)[""].max_tokens).toBe(4096);
-  expect(options.reasoningLevel).toBe(null);
-  expect(config.pricing).toEqual({
-    currency: null,
-    input: null,
-    output: 2,
-    cacheRead: null,
-    cacheWrite: null,
-    free: false,
-    notes: null,
+});
+
+test("价格：只写改动的档位；整块清空写 null；未展示的字段不凭空写 null", () => {
+  const priced = { currency: "USD", input: 1, output: 2, cacheRead: 0.1, free: true, notes: "list" };
+  const before = editorSeed({ inputFormat: {}, outputFormat: {}, pricing: priced });
+  // Clearing one field (the form blanked a value it showed) writes that null
+  // only; the other rates stay inherited.
+  expect(metadataEditPatch(before, { ...before, pricing: { ...priced, cacheRead: undefined } })).toEqual({
+    pricing: { cacheRead: null },
   });
+  // Clearing the whole block is one null, not a set of nulls.
+  expect(metadataEditPatch(before, { ...before, pricing: undefined })).toEqual({ pricing: null });
+  // A block the resolved view never showed cannot invent clears for its fields.
+  expect(metadataEditPatch(editorSeed({ inputFormat: {}, outputFormat: {} }), {
+    ...blankForm,
+    pricing: { free: true },
+  })).toEqual({ pricing: { free: true } });
 });
 
-test("清除价格：已有规则里存 null，不把下层的价格放回来", () => {
-  const document: Record<string, unknown> = {
-    schemaVersion: 1,
-    providerModelRules: [
-      { providerId: "gw", modelId: "a", config: { pricing: { currency: "USD", input: 1 } } },
-    ],
-  };
-  const next = applyModelMetadata(
-    document,
-    "gw",
-    "a",
-    metadataPatch({ inputFormat: {}, outputFormat: {} }, { pricing: true }),
-  );
-  const config = (next.providerModelRules as Array<Record<string, unknown>>)[0].config as Record<string, unknown>;
-  expect(config.pricing).toBe(null);
-});
-
-test("保存追加未知模型的一条规则；清除价格用 null 表达", () => {
-  const document: Record<string, unknown> = { schemaVersion: 1, providers: [] };
-  const next = applyModelMetadata(
-    document,
-    "gw",
-    "new-model",
-    metadataPatch({ contextWindow: 64000, inputFormat: { text: true }, outputFormat: { text: true } }, { pricing: true }),
-  );
+test("空白保存是 no-op：无解析事实的模型不会被写空能力", () => {
+  const seed = editorSeed(metadataOf(undefined));
+  // The form always reports its booleans; they are the seed's own values, so
+  // the save has nothing to write.
+  expect(metadataEditPatch(seed, blankForm)).toEqual({});
+  // Editing one field writes only that field (and appends one exact rule).
+  const patch = metadataEditPatch(seed, { ...blankForm, contextWindow: 64000 });
+  expect(patch).toEqual({ properties: { contextWindow: 64000 } });
+  const next = applyModelMetadata({ schemaVersion: 1, providers: [] }, "gw", "new-model", patch);
   const rules = next.providerModelRules as Array<Record<string, unknown>>;
   expect(rules.length).toBe(1);
   const config = rules[0].config as Record<string, unknown>;
-  expect(config.pricing).toBe(null);
   expect((config.properties as Record<string, unknown>).contextWindow).toBe(64000);
+  expect(config.pricing).toBe(undefined);
+});
+
+test("设置视图查找：ProviderViews 的模型（含不可执行/停用项）是编辑器的种子", () => {
+  const disabled = model({
+    providerId: "gw",
+    modelId: "legacy",
+    enabled: false,
+    executable: true,
+    selectable: false,
+  });
+  const providers: ProviderView[] = [
+    { providerId: "gw", models: [model({ providerId: "gw", modelId: "gw-large" }), disabled] },
+  ];
+  expect(resolvedModelOf(providers, "gw", "gw-large")?.modelId).toBe("gw-large");
+  // A disabled model is still carried by the settings view; the executable
+  // registry is what drops it. Its resolved facts seed the editor, and an
+  // untouched save stays a no-op.
+  expect(resolvedModelOf(providers, "gw", "legacy")?.enabled).toBe(false);
+  const seed = editorSeed(metadataOf(disabled));
+  expect(seed.contextWindow).toBe(1000000);
+  expect(metadataEditPatch(seed, seed)).toEqual({});
+  expect(resolvedModelOf(providers, "gw", "missing")).toBe(undefined);
+  expect(resolvedModelOf(providers, "other", "gw-large")).toBe(undefined);
+  expect(resolvedModelOf(undefined, "gw", "gw-large")).toBe(undefined);
+});
+
+test("直写凭据名字：未改写的 id 稳定，改写过的 id 带摘要后缀且互不碰撞", () => {
+  expect(providerCredentialSecretName("s2api")).toBe("provider_s2api");
+  const dotted = providerCredentialSecretName("a.b");
+  const dashed = providerCredentialSecretName("a-b");
+  expect(dotted).toBe("provider_a_b_108bf50c");
+  expect(dashed).toBe("provider_a_b_2a89df63");
+  expect(dotted).not.toBe(dashed);
+  expect(providerCredentialSecretName("a.b")).toBe(dotted);
+  // An id longer than the secret-name grammar is truncated and digested.
+  const long = providerCredentialSecretName("x".repeat(120));
+  expect(long).toBe(`provider_${"x".repeat(46)}_c14b2ba5`);
+  expect(long.length).toBeLessThanOrEqual(64);
 });
 
 test("合并补丁：对象递归、null 清除、数组替换", () => {

@@ -5,7 +5,7 @@
 // store swaps in the development transport (the same switch App.tsx's tests
 // use), so the assertions exercise the real store, the real `ModelsSection`
 // and the fixture's model document — not a second fake client.
-import { cleanup, effect, mount, View } from "nsh";
+import { Scroll, cleanup, effect, mount, View } from "nsh";
 import { store } from "../data/store";
 import { ModelsSection } from "./settings";
 
@@ -23,10 +23,15 @@ function Harness() {
     }, 0);
     cleanup(() => clearTimeout(timer));
   });
+  // The section is taller than the test viewport (each provider card carries
+  // its resolved facts); the real page scrolls, so the harness does too — a
+  // bottom action is reached the way a reader reaches it.
   return (
-    <View style={{ flex: 1, flexDirection: "column", padding: 8 }}>
-      <ModelsSection />
-    </View>
+    <Scroll testID="settings-models-scroll" style={{ flex: 1 }}>
+      <View style={{ flexDirection: "column", padding: 8 }}>
+        <ModelsSection />
+      </View>
+    </Scroll>
   );
 }
 
