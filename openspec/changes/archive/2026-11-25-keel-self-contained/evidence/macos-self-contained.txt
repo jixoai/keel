@@ -1,0 +1,47 @@
+# macOS 自包含垂直切片（2026-11-25，keel 0.3.0）
+
+$ scripts/package-self-contained.sh
+→ fetching PostgreSQL 18.7.0 (darwin-arm64v8)
+→ extracting the relocatable PG tree
+→ packaging the web client
+→ building the single binary
+✓ dist/keel (121M)  [PG 18.7.0, darwin-arm64v8]
+
+$ ./dist/keel version
+keel 0.3.0
+
+# 干净环境：PATH 无 PostgreSQL、无 KEEL_DSN、空 HOME
+$ env -i HOME=/tmp/keel-selfhome3 PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    KEEL_HOME=/tmp/keel-selfhome3/.keel ./dist/keel start --no-open --addr 127.0.0.1:13691
+keel: runtime extracted to /tmp/keel-selfhome3/.keel/runtime/0.3.0
+initializing a PostgreSQL cluster in /tmp/keel-selfhome3/.keel/dev-pg
+keel serve listening web=/tmp/keel-selfhome3/.keel/runtime/0.3.0/web web_ready=true
+$ curl /v1/health → 200
+# PostgreSQL 进程来自 runtime：
+# /tmp/keel-selfhome3/.keel/runtime/0.3.0/pg/bin/postgres -D .../dev-pg
+
+$ ./dist/keel install --dir /tmp/KeelApps3 --no-open
+installed: /tmp/KeelApps3/Keel.app
+$ plutil -p .../Info.plist
+CFBundleShortVersionString => "0.3.0"
+CFBundleURLSchemes => ["keel"]
+CFBundleExecutable => "Keel"
+# Contents/MacOS/{Keel launcher, keel-bin}, Contents/Resources/{pg,web}
+# ad-hoc 签名：codesign -dv → Signature=adhoc
+# open Keel.app → curl /v1/health = 200
+$ du -sh /tmp/KeelApps3/Keel.app → 468M
+
+$ .../keel-bin uninstall --dir /tmp/KeelApps3
+removed: /tmp/KeelApps3/Keel.app
+local data kept; pass --purge to remove it
+
+# 门禁
+go vet ./cmd/keel → ok
+go test ./cmd/keel → ok（含 extractTar 路径逃逸拒绝、Info.plist scheme、tenant 持久化）
+pnpm --dir site build → 37 对 / 3312 链接 / 1466 引用（版本 0.3.0 下载页与首页）
+
+# 边界
+- Linux/Windows 的 `keel start` 机制同一套（内嵌对应 PG），但本机只实测 macOS；
+  `keel install` 桌面注册本版仅 macOS。
+- 下载的二进制未代码签名；生成的 .app 为 ad-hoc 签名（不公证）。
+- 未来二进制工具走 assets/tools 同一机制，尚未实现。

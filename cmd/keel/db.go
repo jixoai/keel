@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -553,15 +556,20 @@ func startDevDBCluster(d devDB, pgCtl string) error {
 }
 
 func waitDevDBReady(d devDB) error {
-	pgIsReady, err := pgTool("pg_isready")
+	postgresDSN, err := d.dsnFor("postgres")
 	if err != nil {
 		return err
 	}
 	deadline := time.Now().Add(devDBReadyTimeout)
 	for {
-		if exec.Command(pgIsReady, "-h", "127.0.0.1", "-p", strconv.Itoa(d.port)).Run() == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		conn, err := pgx.Connect(ctx, postgresDSN)
+		if err == nil {
+			_ = conn.Close(ctx)
+			cancel()
 			return nil
 		}
+		cancel()
 		if time.Now().After(deadline) {
 			return fmt.Errorf("cluster did not become ready; see %s", d.logFile())
 		}
@@ -569,39 +577,40 @@ func waitDevDBReady(d devDB) error {
 	}
 }
 
+// ensureDevDBDatabase talks to the server over TCP instead of shelling out to
+// psql/createdb: a bundled PostgreSQL runtime carries only initdb/pg_ctl/
+// postgres, and the client tools are not part of the minimal distribution.
 func ensureDevDBDatabase(d devDB) error {
-	pass, err := os.ReadFile(d.passFile())
-	if err != nil {
-		return fmt.Errorf("read password file: %w", err)
-	}
-	env := append(os.Environ(), "PGPASSWORD="+strings.TrimSpace(string(pass)))
-	psql, err := pgTool("psql")
+	postgresDSN, err := d.dsnFor("postgres")
 	if err != nil {
 		return err
 	}
-	query := "SELECT 1 FROM pg_database WHERE datname = '" + strings.ReplaceAll(d.database, "'", "''") + "'"
-	cmd := exec.Command(psql, "-h", "127.0.0.1", "-p", strconv.Itoa(d.port), "-U", d.user, "-d", "postgres", "-tAc", query)
-	cmd.Env = env
-	out, err := cmd.Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, postgresDSN)
 	if err != nil {
-		return fmt.Errorf("query database existence: %v", err)
+		return fmt.Errorf("connect to postgres database: %w", err)
 	}
-	if strings.TrimSpace(string(out)) == "1" {
+	defer conn.Close(ctx)
+	var exists bool
+	if err := conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)", d.database).Scan(&exists); err != nil {
+		return fmt.Errorf("query database existence: %w", err)
+	}
+	if exists {
 		return nil
 	}
-	createdb, err := pgTool("createdb")
-	if err != nil {
-		return err
-	}
-	cmd = exec.Command(createdb, "-h", "127.0.0.1", "-p", strconv.Itoa(d.port), "-U", d.user, d.database)
-	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("createdb failed: %v\n%s", err, strings.TrimSpace(string(out)))
+	identifier := pgx.Identifier{d.database}.Sanitize()
+	if _, err := conn.Exec(ctx, "CREATE DATABASE "+identifier); err != nil {
+		return fmt.Errorf("create database %q: %w", d.database, err)
 	}
 	return nil
 }
 
 func (d devDB) dsn() (string, error) {
+	return d.dsnFor(d.database)
+}
+
+func (d devDB) dsnFor(database string) (string, error) {
 	b, err := os.ReadFile(d.passFile())
 	if err != nil {
 		return "", fmt.Errorf("no password file at %s (run start first)", d.passFile())
@@ -614,13 +623,19 @@ func (d devDB) dsn() (string, error) {
 		Scheme:   "postgres",
 		User:     url.UserPassword(d.user, pass),
 		Host:     net.JoinHostPort("127.0.0.1", strconv.Itoa(d.port)),
-		Path:     "/" + d.database,
+		Path:     "/" + database,
 		RawQuery: "sslmode=disable",
 	}
 	return u.String(), nil
 }
 
 func pgTool(name string) (string, error) {
+	for _, dir := range pgSearchDirs() {
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
 	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
 	}

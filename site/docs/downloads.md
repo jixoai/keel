@@ -4,101 +4,76 @@ title: Download
 
 # Download keel
 
-keel ships as a single Go binary plus a static web client. Both come from the
-same tagged commit, cross-compiled in CI — nothing is built on a laptop, so the
-checksums below mean something.
+keel ships as **one self-contained binary per platform**: PostgreSQL 18, the web
+client and the README are embedded. Download it, run one command, and the product
+starts on loopback with its own database. No Docker, no `KEEL_DSN`, no manual
+`initdb`.
 
-**Current release: `v0.2.0`** (pre-1.0; expect breaking changes between minor versions.)
+**Current release: `v0.3.0`** (pre-1.0; expect breaking changes between minor versions.)
 
-## What you get
-
-- `keel` — the product shell (serve / tui / doctor / version).
-- `keel-web-0.2.0.zip` — the packaged web client.
-
-The shell's commands:
-
-- `keel serve` — Harness API, web UI and SSE on one origin.
-- `keel tui` — launches a TUI client you provide (`KEEL_TUI_BIN`, see below).
-- `keel doctor` / `keel version` — environment check and the version line.
-
-Unzip the web client and point `keel serve -web-dir <dir>` at it.
-
-## Requirements
-
-- **PostgreSQL 18** — the event ledger lives there (`internal/store/schema.sql:1`); `keel serve`
-  needs a DSN.
-- **A model endpoint** — any OpenAI-compatible API (or Anthropic), plus a key.
-- **The web client** — provided separately (the binary does not embed it).
-
-## Platform builds
+## Download
 
 | Platform | Download |
 |---|---|
-| macOS · Apple silicon | [keel-0.2.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-darwin-arm64.tar.gz) |
-| macOS · Intel | [keel-0.2.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-darwin-amd64.tar.gz) |
-| Linux · x86-64 | [keel-0.2.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-linux-amd64.tar.gz) |
-| Linux · arm64 | [keel-0.2.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-linux-arm64.tar.gz) |
-| Windows · x86-64 | [keel-0.2.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-windows-amd64.zip) |
-| Web client | [keel-web-0.2.0.zip](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-web-0.2.0.zip) |
+| macOS · Apple silicon | [keel-0.3.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-darwin-arm64.tar.gz) |
+| macOS · Intel | [keel-0.3.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-darwin-amd64.tar.gz) |
+| Linux · x86-64 | [keel-0.3.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-linux-amd64.tar.gz) |
+| Linux · arm64 | [keel-0.3.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-linux-arm64.tar.gz) |
+| Windows · x86-64 | [keel-0.3.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-windows-amd64.zip) |
 
-All assets: [the v0.2.0 release](https://github.com/jixoai/keel/releases/tag/v0.2.0) ·
-newer releases: [releases](https://github.com/jixoai/keel/releases) ·
-[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.2.0/SHA256SUMS.txt)
+All assets: [the v0.3.0 release](https://github.com/jixoai/keel/releases/tag/v0.3.0) ·
+[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.3.0/SHA256SUMS.txt)
+
+## Start
+
+```bash
+# macOS: generate ~/Applications/Keel.app (ad-hoc signed locally, no notarization)
+chmod +x keel
+./keel install
+
+# Linux / Windows: run the product in place
+chmod +x keel
+./keel start
+```
+
+`keel start` extracts the embedded runtime to `$KEEL_HOME/runtime/<version>`,
+initializes a local PostgreSQL cluster, starts the Harness on
+`http://127.0.0.1:13750` in local-only mode, and opens the browser. Data lives in
+`$KEEL_HOME` (`~/.keel` by default); `keel db status|stop|reset --yes` manages
+the cluster.
+
+`keel install` is macOS-only in this release; Linux and Windows run
+`keel start` directly (desktop registration follows). `keel uninstall` removes
+the app and keeps the data; `--purge` removes it too.
+
+## Docker variant
+
+The image and compose file use PostgreSQL as a service instead of embedding it:
+
+```bash
+docker compose up -d --build
+```
+
+The native binary and the Docker variant share the same server and web client.
 
 ## Verify what you downloaded
 
 ```bash
-curl -LO https://github.com/jixoai/keel/releases/download/v0.2.0/SHA256SUMS.txt
+curl -LO https://github.com/jixoai/keel/releases/download/v0.3.0/SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
-```
-
-## First run
-
-```bash
-# 1. the ledger needs a database
-createdb keel
-
-# 2. deployment secrets and the server (it hosts /v1, the web UI and SSE on one port)
-export KEEL_DSN='postgres://postgres@127.0.0.1:5432/keel?sslmode=disable'
-export KEEL_SERVE_TENANT="$(uuidgen | tr 'A-Z' 'a-z')"
-export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookies
-export KEEL_SERVE_WEB_DIR="$PWD/keel-web"          # the unzipped web client
-export KEEL_MODEL='deepseek-v4.1-flash'
-export KEEL_PROVIDER='openai'
-export KEEL_BASE_URL='https://api.example.com/v1'
-export KEEL_API_KEY='…'
-
-# 3. empty database: mint the one-time setup token for the first super admin
-keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
-keel serve -addr 127.0.0.1:13750
-```
-
-Open `http://127.0.0.1:13750`, enter the setup token plus the username and
-password for the first super admin: that password is final and setup completes
-straight into the app. Only a temporary password minted by a CLI/admin reset
-forces a change at first login (`cmd/keel/auth.go:568`, `internal/store/auth_events.go:173`).
-Machines use a Bot-bound key (`keel_bot_...`), not a browser login.
-`keel doctor` prints what the process resolved (config, build, artifacts) when
-something does not start.
-
-`keel tui` launches the TUI binary named by `KEEL_TUI_BIN` (a user-supplied or embedded client) against the same server:
-
-```bash
-keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"
 ```
 
 ## Notes and honest limits
 
-- **Nothing is code-signed.** On macOS, clear the quarantine flag once:
-  `xattr -dr com.apple.quarantine ./keel`.
-- **No bundled database.** Bring your own PostgreSQL; `keel` runs its own
-  migrations on first start.
+- **The downloaded binary is not code-signed.** macOS may quarantine it; run
+  `xattr -dr com.apple.quarantine ./keel` once. The `.app` generated by
+  `keel install` is ad-hoc signed on this machine and is not notarized.
+- **One binary, no external runtime.** PostgreSQL 18 is embedded; the app uses
+  a loopback-only cluster under `$KEEL_HOME`. A deployment can still point
+  `KEEL_DSN` at its own PostgreSQL and ignore the bundled runtime.
 - **Pre-1.0.** The Harness API is versioned (`apiVersion: v1`) but the product
-  surface still moves. The plugin contract is the stable part.
-- **Alpha zero compatibility.** `KEEL_SERVE_PASSWORD`, old cookies, old
-  `api_keys` and the old `agents`/`agent_teams` schema are gone. An old
-  database refuses to start and prints the rebuild instruction; re-initialize
-  accounts and Bots instead of migrating.
+  surface still moves; the plugin contract is the stable part.
+- **Alpha zero compatibility.** Old environment names and old account schemas
+  are gone; an old database refuses to start and prints the rebuild instruction.
 - **Mirrors.** If GitHub is slow, swap the host for `https://gh.fde2e.tweb.xin/`
-  (self-built mirror, domestic) or `https://ghfast.top/https://github.com/…` —
-  paths and checksums are identical.
+  or `https://ghfast.top/https://github.com/…` — paths and checksums are identical.

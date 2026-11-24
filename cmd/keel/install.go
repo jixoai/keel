@@ -1,0 +1,225 @@
+// `keel install`: register the single binary as a desktop app. macOS generates
+// a real .app from the running binary and its embedded assets, ad-hoc signs it,
+// and clears the download quarantine — no notarization, no external installer.
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+func runInstallCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("keel install", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var (
+		dir       = fs.String("dir", "", "parent directory for Keel.app (default ~/Applications)")
+		noOpen    = fs.Bool("no-open", false, "do not open the app after installing")
+		force     = fs.Bool("force", false, "replace an existing Keel.app")
+		uninstall = fs.Bool("uninstall", false, "remove the installed app")
+		purge     = fs.Bool("purge", false, "with --uninstall, also delete the local data")
+	)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *uninstall {
+		return uninstallApp(*dir, *purge, stdout, stderr)
+	}
+	if runtime.GOOS != "darwin" {
+		fmt.Fprintf(stderr, "keel install: app registration is implemented for macOS in this build; run `keel start` on %s\n", runtime.GOOS)
+		return 1
+	}
+	return installMacApp(*dir, *noOpen, *force, stdout, stderr)
+}
+
+func defaultApplicationsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Applications"), nil
+}
+
+func installMacApp(dir string, noOpen, force bool, stdout, stderr io.Writer) int {
+	if dir == "" {
+		var err error
+		dir, err = defaultApplicationsDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "keel install: %v\n", err)
+			return 1
+		}
+	}
+	app := filepath.Join(dir, "Keel.app")
+	if _, err := os.Stat(app); err == nil && !force {
+		fmt.Fprintf(stderr, "keel install: %s exists; pass --force to replace it\n", app)
+		return 1
+	}
+	if !hasEmbeddedPG() {
+		fmt.Fprintln(stderr, "keel install: this build has no bundled assets; download the self-contained release")
+		return 1
+	}
+	runtimeDir, err := ensureRuntime(stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	if force {
+		if err := os.RemoveAll(app); err != nil {
+			fmt.Fprintf(stderr, "keel install: %v\n", err)
+			return 1
+		}
+	}
+	macOS := filepath.Join(app, "Contents", "MacOS")
+	resources := filepath.Join(app, "Contents", "Resources")
+	for _, path := range []string{macOS, resources} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			fmt.Fprintf(stderr, "keel install: %v\n", err)
+			return 1
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	if err := copyExecutable(exe, filepath.Join(macOS, "keel-bin")); err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	// CFBundleExecutable runs `keel start`: a bare `keel` is the CLI, and the
+	// app's double-click has no arguments to tell it otherwise.
+	launcher := "#!/bin/sh\nexec \"$(dirname \"$0\")/keel-bin\" start \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(macOS, "Keel"), []byte(launcher), 0o755); err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	if err := copyTree(filepath.Join(runtimeDir, "pg"), filepath.Join(resources, "pg")); err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	if err := copyTree(filepath.Join(runtimeDir, "web"), filepath.Join(resources, "web")); err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	_ = copyFileIfExists(filepath.Join(runtimeDir, "icon.png"), filepath.Join(resources, "icon.png"))
+	_ = copyFileIfExists(filepath.Join(runtimeDir, "README.md"), filepath.Join(resources, "README.md"))
+	if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(infoPlist()), 0o644); err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	signApp(app, stderr)
+	// The source binary may carry the browser's download quarantine; the app is
+	// generated locally, so clear it before the first open.
+	_ = exec.Command("xattr", "-dr", "com.apple.quarantine", app).Run()
+	fmt.Fprintf(stdout, "installed: %s\n", app)
+	if !noOpen {
+		if err := exec.Command("open", app).Run(); err != nil {
+			fmt.Fprintf(stderr, "keel install: open %s: %v\n", app, err)
+		}
+	}
+	return 0
+}
+
+func uninstallApp(dir string, purge bool, stdout, stderr io.Writer) int {
+	if dir == "" {
+		var err error
+		dir, err = defaultApplicationsDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "keel uninstall: %v\n", err)
+			return 1
+		}
+	}
+	app := filepath.Join(dir, "Keel.app")
+	if err := os.RemoveAll(app); err != nil {
+		fmt.Fprintf(stderr, "keel uninstall: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "removed: %s\n", app)
+	if purge {
+		if home := keelHome(); home != "" {
+			if err := os.RemoveAll(home); err != nil {
+				fmt.Fprintf(stderr, "keel uninstall: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "removed data: %s\n", home)
+		}
+	} else {
+		fmt.Fprintln(stdout, "local data kept; pass --purge to remove it")
+	}
+	return 0
+}
+
+func copyExecutable(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o755); err != nil {
+		return err
+	}
+	return os.Chmod(dst, 0o755)
+}
+
+func copyFileIfExists(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
+}
+
+func signApp(app string, stderr io.Writer) {
+	if _, err := exec.LookPath("codesign"); err != nil {
+		fmt.Fprintln(stderr, "keel install: codesign not found; the app is unsigned")
+		return
+	}
+	out, err := exec.Command("codesign", "--force", "--deep", "--sign", "-", app).CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel install: ad-hoc codesign failed: %v\n%s\n", err, strings.TrimSpace(string(out)))
+	}
+}
+
+func infoPlist() string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleDisplayName</key><string>Keel</string>
+  <key>CFBundleExecutable</key><string>Keel</string>
+  <key>CFBundleIdentifier</key><string>com.fde2e.keel</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Keel</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>%s</string>
+  <key>CFBundleVersion</key><string>%s</string>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>com.fde2e.keel</string>
+    <key>CFBundleURLSchemes</key><array><string>keel</string></array>
+  </dict></array>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+`, version, version)
+}

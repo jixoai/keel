@@ -12,3 +12,11 @@ __pycache__/
 /keel
 /keel.exe
 
+# self-contained release assets (scripts/package-self-contained.sh)
+/cmd/keel/assets/pg.txz
+/cmd/keel/assets/web/
+/cmd/keel/assets/icon.png
+/cmd/keel/assets/README.md
+
+# release staging
+/dist/

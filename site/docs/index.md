@@ -7,7 +7,7 @@ hero:
   tagline: Open-source agent runtime in Go. Stateless, multi-tenant, 1000 concurrent sessions inside a 2GB budget — kill the process and sessions continue.
   actions:
     - theme: brand
-      text: Download v0.2.0
+      text: Download v0.3.0
       link: /downloads
     - theme: alt
       text: Core — how it works
@@ -61,37 +61,26 @@ The commands below were run against the repository at the revision this site doc
 response shapes shown are the actual ones.
 
 ```bash
-# 1. clone
-git clone \
-  https://github.com/jixoai/keel.git
-cd keel
+# 1. download the single binary for your platform from /downloads, then:
+chmod +x keel
 
-# 2. build the CLI
-go build -o keel ./cmd/keel
+# 2. macOS: generate ~/Applications/Keel.app (ad-hoc signed locally)
+./keel install
 
-# 3. start (auto local PostgreSQL)
-TENANT=11111111-2222-3333-4444-\
-555555555555
-export KEEL_SERVE_TENANT="$TENANT"
-# signs the session and CSRF cookies
-SECRET="$(openssl rand -hex 32)"
-export KEEL_SECRET_KEY="$SECRET"
-./keel admin bootstrap \
-  --tenant "$TENANT" \
-  --token-file ./setup.token
-./keel serve --addr 127.0.0.1:13750
+# or run it in place on any platform (opens the browser when ready)
+./keel start
 ```
 
-No Docker or manual database setup is required: on first run, `keel admin`/`keel serve`
-initialize a local PostgreSQL 18 cluster under `$KEEL_HOME/dev-pg` (or `~/.keel/dev-pg`;
-loopback only; random password in a 0600 file). Set `KEEL_DSN` to use any other database;
-set `KEEL_NO_AUTO_DB=1` to disable auto-init. `keel db status|stop|reset` manages the local
-cluster. If you prefer a container,
-`docker run --name keel-pg ... postgres:18` is an equivalent alternative on the same port — do not
-run both. A few acceptance scripts default to a container named `keel-pg`, but all of them accept
-`KEEL_DSN`/`KEEL_TEST_DSN` for a local server. Only the 2GB cgroup battery
-(`scripts/acceptance-perf.sh`) needs Docker/Linux, which is why the E0 container battery is marked
-platform-limited.
+One binary carries PostgreSQL 18, the web client and the README. There is no
+Docker requirement, no `KEEL_DSN`, no `createdb`, no setup token: `keel start`
+extracts the runtime under `$KEEL_HOME/runtime`, initializes a loopback-only
+cluster, serves the Harness with `auth=local-only`, and opens
+`http://127.0.0.1:13750`. `keel db status|stop|reset` manages the local cluster;
+`keel uninstall` removes the app but keeps data (`--purge` deletes it).
+
+Source builds (`git clone`, `go build`) still work and use the same `keel start`;
+see the repository README. A Docker compose variant keeps PostgreSQL as a
+service instead of embedding it.
 
 Open `http://127.0.0.1:13750`, enter the setup token plus the username and password for the first
 super admin: that password is the final credential, so the browser enters the app directly. Only a

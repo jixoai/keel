@@ -4,8 +4,8 @@ title: Release and upgrade
 
 # Release and upgrade
 
-A keel release is a tagged commit, six artifacts built from it in CI, one checksum file, and a
-documented handoff for the running process. Nothing is built on a laptop, so a published SHA means
+A keel release is a tagged commit, five self-contained platform binaries built from it in CI, one
+checksum file, and a documented handoff for the running process. Nothing is built on a laptop, so a published SHA means
 something.
 
 ## 1. One version constant, two version numbers
@@ -28,7 +28,7 @@ is built, it compares the tag to the binary's own report:
 
 ```bash
 # what the gate does, locally
-go run ./cmd/keel version          # prints: keel 0.2.0
+go run ./cmd/keel version          # prints: keel 0.3.0
 # tag must be v + that number, or the run fails before publishing
 ```
 
@@ -38,20 +38,21 @@ and the reported version aborts the run with "bump the version constant before t
 
 ## 3. What a tag publishes
 
-| Artifact | Platform / content | Built at |
-|---|---|---|
-| `keel-<ver>-darwin-arm64.tar.gz` | macOS Apple silicon | `.github/workflows/release.yml:65` |
-| `keel-<ver>-darwin-amd64.tar.gz` | macOS Intel | `.github/workflows/release.yml:65` |
-| `keel-<ver>-linux-amd64.tar.gz` | Linux x86-64 | `.github/workflows/release.yml:65` |
-| `keel-<ver>-linux-arm64.tar.gz` | Linux arm64 | `.github/workflows/release.yml:65` |
-| `keel-<ver>-windows-amd64.zip` | Windows x86-64 (`keel.exe`) | `.github/workflows/release.yml:65` |
-| `keel-web-<ver>.zip` | the packaged web client | `.github/workflows/release.yml:101` |
-| `SHA256SUMS.txt` | sorted, one line per artifact | `.github/workflows/release.yml:104` |
+| Artifact | Platform / content |
+|---|---|
+| `keel-<ver>-darwin-arm64.tar.gz` | macOS Apple silicon, self-contained |
+| `keel-<ver>-darwin-amd64.tar.gz` | macOS Intel, self-contained |
+| `keel-<ver>-linux-amd64.tar.gz` | Linux x86-64, self-contained |
+| `keel-<ver>-linux-arm64.tar.gz` | Linux arm64, self-contained |
+| `keel-<ver>-windows-amd64.zip` | Windows x86-64 (`keel.exe`), self-contained |
+| `keel-web-<ver>.zip` | the packaged web client (optional, for `serve -web-dir`) |
+| `SHA256SUMS.txt` | sorted, one line per artifact |
 
-Each archive contains the binary plus `README.md` when present; the web zip is the packaged client
-including the host theme document (`scripts/package-web.sh:21`). The `serve`/`tui`/`doctor`/`version`
-subcommands are in every binary. **Nothing is code-signed**; on macOS, clear the quarantine flag once:
-`xattr -dr com.apple.quarantine ./keel` (`.github/workflows/release.yml:123`).
+Each platform binary embeds a relocatable PostgreSQL 18 runtime, the packaged web client and the
+README; the archive adds `README.md` (`scripts/package-self-contained.sh`). `keel start` needs no
+`KEEL_DSN`, no external PostgreSQL and no Docker; macOS `keel install` generates an ad-hoc signed
+`.app` from the same binary. **The downloaded binary is not code-signed**; on macOS clear the
+quarantine flag once: `xattr -dr com.apple.quarantine ./keel`.
 
 The TUI is not a packaged artifact: `nsh package` has no `tui` target, so `keel tui` runs from a
 development host (`nsh run --target tui`) or an embedded `nsh-platform-tui`
@@ -59,18 +60,18 @@ development host (`nsh run --target tui`) or an embedded `nsh-platform-tui`
 
 ## 4. The pipeline, in order
 
-1. **Version gate** — tag ↔ binary (`.github/workflows/release.yml:43`).
-2. **Cross-compile** — five `GOOS/GOARCH` targets with `CGO_ENABLED=0`, `-trimpath`, `-s -w`
-   (`.github/workflows/release.yml:70`). `-ldflags -X main.version=$VERSION` stamps the tag into the binary.
-3. **Web client** — install the pinned NSH release and package the site (`.github/workflows/release.yml:83`). The NSH
-   version is pinned to a release, not the rolling nightly (`.github/workflows/release.yml:94`), because a nightly
-   drift already broke this build once.
-4. **Checksums** — `sha256sum` over every artifact in sorted order (`.github/workflows/release.yml:104`).
-5. **Publish** — create the release on this repository, or upload to it on a retry
-   (`.github/workflows/release.yml:115`).
+1. **Version gate** — tag ↔ binary (`go run ./cmd/keel version`).
+2. **Web client** — install the pinned NSH release and package the site (`scripts/package-web.sh`).
+   The NSH version is pinned to a release, not the rolling nightly, because a nightly drift already
+   broke this build once.
+3. **Self-contained binaries** — for each `GOOS/GOARCH`, download the matching relocatable
+   PostgreSQL 18 runtime (zonky/theseus Maven artifact), extract it into `cmd/keel/assets`,
+   embed the web client, and cross-compile with `CGO_ENABLED=0`, `-trimpath`, `-s -w`.
+4. **Checksums** — `sha256sum` over every artifact in sorted order (`SHA256SUMS.txt`).
+5. **Publish** — create the release on this repository, or upload to it on a retry.
 6. **Mirror** — when `FDE2E_RELEASES_TOKEN` is configured, the same bytes go to
-   `jixoai/fde2e-releases` under the `keel-v<ver>` tag (`.github/workflows/release.yml:129`); without the token the
-   step skips and the run stays green.
+   `jixoai/fde2e-releases` under the `keel-v<ver>` tag; without the token the step skips and the run
+   stays green.
 
 The web build is deliberately fail-closed: v0.2.0 shipped without its zip because the step was
 `continue-on-error`, and a partial release is worse than a red run that can be fixed and re-tagged
@@ -118,7 +119,7 @@ Rules for the edit:
 GitHub is the origin; the same path suffix is served by mirrors for slow networks:
 
 ```bash
-VER=0.2.0
+VER=0.3.0
 BASE=https://github.com/jixoai/keel/releases/download/v$VER
 MIRROR=https://gh.fde2e.tweb.xin/jixoai/keel/releases/download/v$VER
 
@@ -188,7 +189,7 @@ already verified. Ship the fix as a new patch version.
 ## 9. Verifying a download
 
 ```bash
-VER=0.2.0
+VER=0.3.0
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/SHA256SUMS.txt"
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/keel-$VER-linux-amd64.tar.gz"
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing

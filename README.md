@@ -11,6 +11,26 @@
 Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都可能带图片、工具调用、长上下文），
 又不想让进程内存随会话数增长，也不想在重启时丢会话，底层的执行、存储、流式与反压应该长什么样。
 
+## 下载与一键开始（推荐）
+
+每个平台一个**单体二进制**：内嵌 PostgreSQL 18、网页客户端与图标，不需要 Docker、
+不需要 `KEEL_DSN`、不需要手动建库。
+
+```bash
+# 从 Releases 下载对应平台的 keel（macOS/Linux/Windows）
+chmod +x keel
+
+# macOS：生成 ~/Applications/Keel.app（本机 ad-hoc 签名，不公证），双击即用
+./keel install
+
+# 或者不安装，直接启动（所有平台）
+./keel start
+```
+
+`keel start` 首次会把内嵌运行时解到 `$KEEL_HOME/runtime/<version>`，自动初始化本地库、
+以 local-only 模式起服务并打开浏览器。`keel uninstall` 移除应用（默认保留数据，
+`--purge` 才删）。Docker 用户仍可用 compose（PG 容器在 compose 里，二进制不内嵌）。
+
 ## 设计目标
 
 - **2GB 内存**装下 **100–200 个逻辑隔离租户**、每租户 5–10 并发、**1000 个持续会话**；
@@ -72,7 +92,7 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
 | 图片 | PG 64KiB 分块 `bytea`（≤1MiB）＋ 本地内容寻址存储（>1MiB） |
 | 反压 | 全局带宽桶 + 三类分池 + 有界 worker + 慢客户端取消 + Range/offset 续传 |
 
-## 快速开始
+## 从源码运行
 
 ```bash
 git clone https://github.com/jixoai/keel.git && cd keel

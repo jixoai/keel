@@ -13,7 +13,7 @@ title: 发布与升级
 
 | 版本号 | 位置 | 含义 |
 |---|---|---|
-| 产品版本 | `cmd/keel/main.go:23` | 发版号（`0.2.0`）；`keel version` 输出的就是它 |
+| 产品版本 | `cmd/keel/main.go:23` | 发版号（`0.3.0`）；`keel version` 输出的就是它 |
 | HarnessAPI 版本 | `harnessapi.APIVersion` | `/v1` 契约；客户端只锁 major 并查 `/v1/capabilities` |
 
 常量上方的注释写明了这个区分（`cmd/keel/main.go:20`），`printVersion` 渲染 `keel <version>`
@@ -26,7 +26,7 @@ title: 发布与升级
 
 ```bash
 # 门禁在本地做的事
-go run ./cmd/keel version          # 输出：keel 0.2.0
+go run ./cmd/keel version          # 输出：keel 0.3.0
 # tag 必须是 v + 这个数字，否则在发布前失败
 ```
 
@@ -36,35 +36,37 @@ go run ./cmd/keel version          # 输出：keel 0.2.0
 
 ## 3. 一个 tag 发布什么
 
-| 产物 | 平台 / 内容 | 构建处 |
-|---|---|---|
-| `keel-<ver>-darwin-arm64.tar.gz` | macOS Apple 芯片 | `.github/workflows/release.yml:65` |
-| `keel-<ver>-darwin-amd64.tar.gz` | macOS Intel | `.github/workflows/release.yml:65` |
-| `keel-<ver>-linux-amd64.tar.gz` | Linux x86-64 | `.github/workflows/release.yml:65` |
-| `keel-<ver>-linux-arm64.tar.gz` | Linux arm64 | `.github/workflows/release.yml:65` |
-| `keel-<ver>-windows-amd64.zip` | Windows x86-64（`keel.exe`） | `.github/workflows/release.yml:65` |
-| `keel-web-<ver>.zip` | 打包好的网页客户端 | `.github/workflows/release.yml:101` |
-| `SHA256SUMS.txt` | 排序后每个产物一行 | `.github/workflows/release.yml:104` |
+| 产物 | 平台 / 内容 |
+|---|---|
+| `keel-<ver>-darwin-arm64.tar.gz` | macOS Apple 芯片，自包含 |
+| `keel-<ver>-darwin-amd64.tar.gz` | macOS Intel，自包含 |
+| `keel-<ver>-linux-amd64.tar.gz` | Linux x86-64，自包含 |
+| `keel-<ver>-linux-arm64.tar.gz` | Linux arm64，自包含 |
+| `keel-<ver>-windows-amd64.zip` | Windows x86-64（`keel.exe`），自包含 |
+| `keel-web-<ver>.zip` | 打包的网页客户端（可选，供 `serve -web-dir`） |
+| `SHA256SUMS.txt` | 排序后每个产物一行 |
 
-每个归档含二进制，以及存在时的 `README.md`；web zip 是打包好的客户端，含宿主主题文档
-（`scripts/package-web.sh:21`）。`serve`/`tui`/`doctor`/`version` 子命令在每个二进制里。**没有任何
-代码签名**；macOS 首次运行需清一次隔离标记：`xattr -dr com.apple.quarantine ./keel`
-（`.github/workflows/release.yml:123`）。
+每个平台二进制内嵌可重定位的 PostgreSQL 18 运行时、网页客户端与 README；归档里另附
+`README.md`（`scripts/package-self-contained.sh`）。`keel start` 不需要 `KEEL_DSN`、不需要
+外部 PostgreSQL、不需要 Docker；macOS 的 `keel install` 用同一个二进制生成 ad-hoc 签名的
+`.app`。**下载的二进制没有代码签名**；macOS 先清一次隔离标记：
+`xattr -dr com.apple.quarantine ./keel`。
 
 TUI 不是打包产物：`nsh package` 没有 `tui` target，所以 `keel tui` 只能跑在开发宿主
-（`nsh run --target tui`）或嵌入的 `nsh-platform-tui` 上（`web/README.md:167`）。
+（`nsh run --target tui`）或嵌入的 `nsh-platform-tui` 上。
 
 ## 4. 流水线顺序
 
-1. **版本门**——tag ↔ 二进制（`.github/workflows/release.yml:43`）。
-2. **交叉编译**——五个 `GOOS/GOARCH` 目标，`CGO_ENABLED=0`、`-trimpath`、`-s -w`
-   （`.github/workflows/release.yml:70`）。`-ldflags -X main.version=$VERSION` 把 tag 写进二进制。
-3. **网页客户端**——安装固定版本的 NSH 并打包站点（`.github/workflows/release.yml:83`）。NSH 固定到 release，不用
-   滚动 nightly（`.github/workflows/release.yml:94`）——nightly 漂移已经弄坏过这个构建一次。
-4. **校验和**——对 `dist` 内全部产物 `sha256sum`，按排序输出（`.github/workflows/release.yml:104`）。
-5. **发布**——在本仓创建 release；重试时上传到同一条（`.github/workflows/release.yml:115`）。
+1. **版本门**——tag ↔ 二进制（`go run ./cmd/keel version`）。
+2. **网页客户端**——安装固定版本的 NSH 并打包站点（`scripts/package-web.sh`）；NSH 固定到
+   release，不用滚动 nightly——nightly 漂移已经弄坏过这个构建一次。
+3. **自包含二进制**——对每个 `GOOS/GOARCH` 下载匹配的可重定位 PostgreSQL 18 运行时
+   （zonky/theseus Maven 产物），解到 `cmd/keel/assets`，嵌入网页客户端，再用
+   `CGO_ENABLED=0`、`-trimpath`、`-s -w` 交叉编译。
+4. **校验和**——对 `dist` 内全部产物 `sha256sum`，按排序输出（`SHA256SUMS.txt`）。
+5. **发布**——在本仓创建 release；重试时上传到同一条。
 6. **镜像**——配置了 `FDE2E_RELEASES_TOKEN` 时，同样的字节进 `jixoai/fde2e-releases`，tag 为
-   `keel-v<ver>`（`.github/workflows/release.yml:129`）；没有 token 则跳过且保持绿灯。
+   `keel-v<ver>`；没有 token 则跳过且保持绿灯。
 
 网页构建刻意 fail-closed：v0.2.0 曾因该步骤是 `continue-on-error` 而漏发 zip，而「半个发布」比一次
 可修复的红色构建更糟（`.github/workflows/release.yml:85`）。
@@ -108,7 +110,7 @@ cd site && pnpm build
 GitHub 是源站；慢网络下同一路径后缀由镜像提供：
 
 ```bash
-VER=0.2.0
+VER=0.3.0
 BASE=https://github.com/jixoai/keel/releases/download/v$VER
 MIRROR=https://gh.fde2e.tweb.xin/jixoai/keel/releases/download/v$VER
 
@@ -169,7 +171,7 @@ SIGTERM 是 **shutdown** 排水，不是 handoff：它拒绝新写、放弃在�
 ## 9. 校验一次下载
 
 ```bash
-VER=0.2.0
+VER=0.3.0
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/SHA256SUMS.txt"
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/keel-$VER-linux-amd64.tar.gz"
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing

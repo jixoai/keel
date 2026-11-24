@@ -1,17 +1,16 @@
 name: Release
 
-# Publishes the keel product artifacts for a `v*` tag: the `keel` server/client
-# binary for five platforms, the packaged web client, and SHA256SUMS.txt.
+# Publishes one self-contained `keel` binary per platform for a `v*` tag. Each
+# binary embeds its platform's PostgreSQL 18 runtime, the packaged web client
+# and the README; `keel start` needs no external database and no environment.
 #
-# The binaries are cross-compiled from the same commit the tag points at, with
-# `-trimpath` so the same source produces the same bytes on a rerun. Nothing is
-# built on a laptop: a tag (or a manual dispatch) is the only trigger, which is
-# what keeps a published SHA meaningful.
+# The PostgreSQL runtime comes from the relocatable zonky/theseus Maven
+# artifacts (PostgreSQL licence), extracted at build time and embedded xz-tar.
+# Nothing is built on a laptop: a tag (or manual dispatch) is the only trigger.
 #
 # Assets land on this repository's Release page. `jixoai/fde2e-releases` (the
-# aggregate download outlet the other products use) needs FDE2E_RELEASES_TOKEN;
-# when that secret is present the job mirrors the same bytes there under the
-# `keel-v<ver>` tag, and the site links both.
+# aggregate outlet) needs FDE2E_RELEASES_TOKEN; when present the same bytes are
+# mirrored under `keel-v<ver>`.
 
 on:
   push:
@@ -19,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (e.g. v0.1.0)"
+        description: "Tag to publish (e.g. v0.3.0)"
         required: true
 
 permissions:
@@ -47,9 +46,6 @@ jobs:
           VERSION="${REF#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          # `keel version` must agree with the tag before anything is published:
-          # a mismatched tag makes the SHA and the version line lie about each
-          # other.
           BUILT="$(go run ./cmd/keel version | sed -n 's/^keel //p' | head -1)"
           if [ "$BUILT" != "$VERSION" ]; then
             echo "::error::tag v$VERSION ≠ reported version '$BUILT' — bump the version constant before tagging"
@@ -57,56 +53,68 @@ jobs:
           fi
           echo "✓ tag v$VERSION matches the binary's reported version"
 
-      - name: build binaries (five platforms)
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          VERSION="${{ steps.ver.outputs.version }}"
-          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
-            GOOS="${target%/*}"; GOARCH="${target#*/}"
-            OUT="keel"
-            [ "$GOOS" = "windows" ] && OUT="keel.exe"
-            echo "→ $GOOS/$GOARCH"
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" \
-              -o "build/$GOOS-$GOARCH/$OUT" ./cmd/keel
-            cp README.md "build/$GOOS-$GOARCH/README.md" 2>/dev/null || true
-            if [ "$GOOS" = "windows" ]; then
-              (cd "build/$GOOS-$GOARCH" && zip -q -r "../../dist/keel-$VERSION-$GOOS-$GOARCH.zip" .)
-            else
-              tar -C "build/$GOOS-$GOARCH" -czf "dist/keel-$VERSION-$GOOS-$GOARCH.tar.gz" .
-            fi
-          done
-          ls -la dist
-
       - name: build the web client
         id: web
-        # A failed web build fails the release: v0.2.0 shipped without its
-        # zip because this step was continue-on-error. A partial release is
-        # worse than a red run that can be fixed and re-tagged.
+        # A failed web build fails the release: v0.2.0 shipped without its zip
+        # because this step was continue-on-error.
         run: |
           set -euo pipefail
-          # The client is an NSH app; pin the release the repo uses (see
-          # web/README.md). The rolling nightly drifted within a day (0.6.0
-          # 589a60f dropped the `Speech` export) and broke this build at
-          # v0.2.0, so the workflow takes the stable release, not `--nightly`.
           curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.6.1 sh -s --
           export PATH="$HOME/.nsh/bin:$PATH"
           nsh --version
-          # The script also copies web/theme.json next to index.html: the
-          # plugin bridge (loadHostTheme) publishes it to plugin UIs.
           ./scripts/package-web.sh "$RUNNER_TEMP/webdist"
           VERSION="${{ steps.ver.outputs.version }}"
           (cd "$RUNNER_TEMP/webdist" && zip -q -r "$GITHUB_WORKSPACE/dist/keel-web-$VERSION.zip" .)
+          ls -la dist
+
+      - name: build self-contained binaries
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          WEB="$RUNNER_TEMP/webdist"
+          PG_VERSION="18.7.0"
+          mkdir -p dist build
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            case "$GOOS/$GOARCH" in
+              darwin/arm64) pgart="darwin-arm64v8" ;;
+              darwin/amd64) pgart="darwin-amd64" ;;
+              linux/amd64) pgart="linux-amd64" ;;
+              linux/arm64) pgart="linux-arm64v8" ;;
+              windows/amd64) pgart="windows-amd64" ;;
+            esac
+            OUT="keel"; [ "$GOOS" = "windows" ] && OUT="keel.exe"
+            DIR="build/$GOOS-$GOARCH"
+            mkdir -p "$DIR"
+
+            echo "→ $GOOS/$GOARCH (PostgreSQL $pgart $PG_VERSION)"
+            JAR_URL="https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-${pgart}/${PG_VERSION}/embedded-postgres-binaries-${pgart}-${PG_VERSION}.jar"
+            curl -fsSL --retry 3 -o /tmp/pg.jar "$JAR_URL"
+            unzip -p /tmp/pg.jar '*.txz' > cmd/keel/assets/pg.txz
+            rm -rf cmd/keel/assets/web
+            cp -R "$WEB" cmd/keel/assets/web
+            cp web/icon.png cmd/keel/assets/icon.png
+            cp README.md cmd/keel/assets/README.md
+
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+              -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+              -o "$DIR/$OUT" ./cmd/keel
+            cp README.md "$DIR/README.md"
+            if [ "$GOOS" = "windows" ]; then
+              (cd "$DIR" && zip -q -r "../../dist/keel-$VERSION-$GOOS-$GOARCH.zip" .)
+            else
+              tar -C "$DIR" -czf "dist/keel-$VERSION-$GOOS-$GOARCH.tar.gz" .
+            fi
+            ls -lh "$DIR/$OUT"
+          done
+          # The next checkout/build starts from the placeholder again.
+          rm -rf cmd/keel/assets/pg.txz cmd/keel/assets/web cmd/keel/assets/icon.png cmd/keel/assets/README.md
           ls -la dist
 
       - name: checksums
         run: |
           cd dist
           rm -f SHA256SUMS.txt
-          # Sorted, one line per artifact: the page and the docs quote these
-          # exact strings, so a stable order keeps the three faces comparable.
           for f in $(ls | grep -v '^SHA256SUMS.txt$' | sort); do
             sha256sum "$f" >> SHA256SUMS.txt
           done
@@ -118,14 +126,16 @@ jobs:
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
           NOTES="keel ${{ steps.ver.outputs.version }} — ${{ github.event.repository.name }} build ${GITHUB_SHA::7}
-          
-          Binary: serve / tui / doctor / version. The web client is the separate \`keel-web-*.zip\`;
-          serve it with \`keel serve -web-dir <unzipped dir>\`. Nothing is code-signed: macOS needs
-          \`xattr -dr com.apple.quarantine ./keel\` before the first run."
+
+          One binary per platform: PostgreSQL 18 and the web client are embedded.
+          macOS:  chmod +x keel && ./keel install   (generates ~/Applications/Keel.app, ad-hoc signed, no notarization)
+          Others: chmod +x keel && ./keel start     (no database, no KEEL_DSN, no Docker)
+
+          Nothing is code-signed as a binary; macOS may quarantine the download. The
+          installed .app is ad-hoc signed locally. SHA256SUMS.txt has every asset."
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "keel ${{ steps.ver.outputs.version }}" --notes "$NOTES" --verify-tag || \
             gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
 
-      # `secrets` is not available in a step's `if`, so the branch lives here.
       - name: mirror to the aggregate outlet (when the token is configured)
         env:
           AGG_TOKEN: ${{ secrets.FDE2E_RELEASES_TOKEN }}

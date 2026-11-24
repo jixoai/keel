@@ -20,7 +20,7 @@ import (
 // version is the keel product version. It is deliberately separate from the
 // HarnessAPI contract version (harnessapi.APIVersion): a UI pins /v1 and asks
 // /v1/capabilities, never a binary version.
-var version = "0.2.0"
+var version = "0.3.0"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -47,6 +47,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "serve":
 		return runServeCmd(args[1:], stdout, stderr)
+	case "start":
+		return runStartCmd(args[1:], stdout, stderr)
+	case "install":
+		return runInstallCmd(args[1:], stdout, stderr)
+	case "uninstall":
+		return runInstallCmd(append([]string{"--uninstall"}, args[1:]...), stdout, stderr)
 	case "tui":
 		return runTUICmd(args[1:], stdout, stderr)
 	case "bot":
@@ -80,6 +86,9 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `keel — the Bot product shell over the Keel runtime
 
 Usage:
+  keel start [flags]     One-command local product: bundled PostgreSQL + web, opens the browser
+  keel install [flags]   Register this binary as the platform app (macOS .app; no notarization)
+  keel uninstall         Remove the installed app (keeps data unless --purge)
   keel serve [flags]     Host the Harness API (/v1), the web UI and SSE on one origin
   keel tui [flags]       Run the NSH TUI client against a running keel serve
   keel bot <cmd>         Manage Bots (list|show|create|update|archive|start|keys|key-create|key-revoke)
@@ -149,7 +158,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 	var (
 		addr             = fs.String("addr", envOr("KEEL_SERVE_ADDR", defaultServeAddr), "listen address")
 		dsn              = fs.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
-		webDir           = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "static web build directory")
+		webDir           = fs.String("web-dir", defaultWebDir(), "static web build directory")
 		casDir           = fs.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
 		oarJournalDir    = fs.String("oar-journal-dir", os.Getenv("KEEL_OAR_JOURNAL_DIR"), "OAR record journal directory (session-<ref>.ndjson); empty answers 501 on the external projection route")
 		tenantRaw        = fs.String("tenant", os.Getenv("KEEL_SERVE_TENANT"), "tenant UUID the server acts as")

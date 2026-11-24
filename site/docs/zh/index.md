@@ -7,7 +7,7 @@ hero:
   tagline: 开源的 Go 智能体运行时。无状态、多租户，2GB 预算内跑 1000 个持续会话——杀掉进程，会话继续。
   actions:
     - theme: brand
-      text: 下载 v0.2.0
+      text: 下载 v0.3.0
       link: /zh/downloads
     - theme: alt
       text: Core —— 原理
@@ -56,36 +56,24 @@ loop 本体由 [pigo](https://github.com/smallnest/pigo)（MIT）搬运最小必
 以下命令在本站所述修订上实际跑过；回复形状也是实际返回。
 
 ```bash
-# 1. 克隆
-git clone \
-  https://github.com/jixoai/keel.git
-cd keel
+# 1. 从 /downloads 下载对应平台的单文件，然后：
+chmod +x keel
 
-# 2. 构建 CLI
-go build -o keel ./cmd/keel
+# 2. macOS：生成 ~/Applications/Keel.app（本机 ad-hoc 签名）
+./keel install
 
-# 3. 启动（首次自动初始化本机 PostgreSQL）
-TENANT=11111111-2222-3333-4444-\
-555555555555
-export KEEL_SERVE_TENANT="$TENANT"
-# 签 session/CSRF cookie
-SECRET="$(openssl rand -hex 32)"
-export KEEL_SECRET_KEY="$SECRET"
-./keel admin bootstrap \
-  --tenant "$TENANT" \
-  --token-file ./setup.token
-./keel serve --addr 127.0.0.1:13750
+# 或者任意平台原地启动（就绪后自动打开浏览器）
+./keel start
 ```
 
-不需要 Docker，也不需要先手动建库：`keel admin`/`keel serve` 首次运行会自动初始化
-`$KEEL_HOME/dev-pg`（未设置时 `~/.keel/dev-pg`）下的本机 PostgreSQL 18 集群（仅回环；
-随机密码存 0600 文件）。要用已有数据库，设 `KEEL_DSN`；要关闭自动初始化，设
-`KEEL_NO_AUTO_DB=1`；`keel db status|stop|reset` 管理本地集群。任何其它本机 PostgreSQL 18 也可以（`createdb keel`，再用
-`KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`）。偏好容器时
-`docker run --name keel-pg ... postgres:18` 是等价备选（同一端口，二者不要同时开）。
-少数验收脚本默认找名为 `keel-pg` 的容器，但都可用 `KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；
-只有 2GB cgroup 电池（`scripts/acceptance-perf.sh`）确实需要 Docker/Linux——E0 容器电池
-因此标「平台受限」。
+一个二进制里带着 PostgreSQL 18、网页客户端与 README。不需要 Docker、不需要
+`KEEL_DSN`、不需要 `createdb`、不需要 setup token：`keel start` 会把运行时解到
+`$KEEL_HOME/runtime`，初始化仅回环的本地库，以 `auth=local-only` 起 Harness，并打开
+`http://127.0.0.1:13750`。`keel db status|stop|reset` 管理本地集群；`keel uninstall`
+移除应用但保留数据（`--purge` 才删）。
+
+源码构建（`git clone`、`go build`）同样可用，并且也走 `keel start`；见仓库 README。
+Docker compose 变体则把 PostgreSQL 作为 service，而不是内嵌。
 
 打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入应用。
 没有口令，也没有“第一个访问者自动成为超管”的路径。机器客户端用绑定到 Bot 的 key
