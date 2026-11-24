@@ -12,5 +12,3 @@ __pycache__/
 /keel
 /keel.exe
 
-# local dev cluster (scripts/dev-pg.sh)
-/.dev/

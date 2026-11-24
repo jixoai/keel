@@ -61,12 +61,14 @@ git clone \
   https://github.com/jixoai/keel.git
 cd keel
 
-# 2. 本机 PostgreSQL 18（无 Docker）
-scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"
-
-# 3. 构建并启动 Harness（产品壳 + API + worker）
+# 2. 构建 CLI
 go build -o keel ./cmd/keel
+
+# 3. 本机 PostgreSQL 18（无 Docker）
+./keel db start
+eval "$(./keel db env)"
+
+# 4. 引导首个超管并启动 Harness（产品壳 + API + worker）
 TENANT=11111111-2222-3333-4444-\
 555555555555
 export KEEL_SERVE_TENANT="$TENANT"
@@ -79,9 +81,9 @@ export KEEL_SECRET_KEY="$SECRET"
 ./keel serve --addr 127.0.0.1:13750
 ```
 
-不需要 Docker：`scripts/dev-pg.sh` 在仓库内跑一个一次性 PostgreSQL 18 集群
-（`.dev/pg`，gitignored；仅回环；随机密码存 `.dev/pg.pass`，0600），`env` 子命令导出
-`KEEL_DSN`。任何其它本机 PostgreSQL 18 也可以（`createdb keel`，再用
+不需要 Docker：`keel db` 在 `$KEEL_HOME/dev-pg`（未设置时 `~/.keel/dev-pg`）跑一个一次性
+PostgreSQL 18 集群（仅回环；随机密码存 0600 文件），`keel db env` 导出 `KEEL_DSN`。
+任何其它本机 PostgreSQL 18 也可以（`createdb keel`，再用
 `KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`）。偏好容器时
 `docker run --name keel-pg ... postgres:18` 是等价备选（同一端口，二者不要同时开）。
 少数验收脚本默认找名为 `keel-pg` 的容器，但都可用 `KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；

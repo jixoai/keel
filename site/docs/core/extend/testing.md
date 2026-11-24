@@ -14,7 +14,7 @@ go build ./...
 
 These are exactly what CI runs (`.github/workflows/ci.yml`: gofmt zero-output, vet, race tests with a
 `postgres:18` service, build; plus `docker build -t keel:ci .` and a scheduled chaos job). Local
-equivalents are in `docs/RUNBOOK.md:447`. Integration tests (blob/HTTP) skip themselves when
+equivalents are in `docs/RUNBOOK.md:448`. Integration tests (blob/HTTP) skip themselves when
 `KEEL_TEST_DSN` is unset — but note the corollary: a green run *without* the DSN proves much less.
 
 Docker is **not** required for this suite: point `KEEL_TEST_DSN` at any local PostgreSQL 18. The
@@ -25,8 +25,9 @@ container battery is recorded as platform-limited.
 A zero-configuration local cluster comes from the repository itself:
 
 ```bash
-scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"
+go build -o keel ./cmd/keel
+./keel db start
+eval "$(./keel db env)"
 KEEL_TEST_DSN="$KEEL_DSN" go test ./...
 ```
 

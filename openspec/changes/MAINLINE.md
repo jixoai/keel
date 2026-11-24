@@ -37,9 +37,10 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
 2. **官网 v2 刷新（已交付并归档 2026-11-24）**：`keel-site-architecture-refresh` 把 37 对中英文页面按
    harness v2 重写（插件标准 implemented/partly/deferred、事件 25 kind、API 路由补齐、
    新增 assembly/placement/tenancy/files/session-query/release/slots），四道门与部署全绿。
-3. **本机 PG 零配置（已交付并归档 2026-11-24）**：`keel-dev-pg` 提供 `scripts/dev-pg.sh`
-   （仓库内一次性 PG18 集群，无 Docker；start/status/env/stop/reset），README、RUNBOOK 与官网
-   首页/测试页改为脚本优先，`keel serve`/`keel admin` 的 DSN 缺失报错指向该脚本。
+3. **本机 PG 零配置（已交付并归档 2026-11-24）**：`keel-dev-pg` 先以脚本补洞，随后由
+   `keel-db-cli` 收进产品 CLI：`keel db start|stop|status|dsn|env|reset`（默认
+   `$KEEL_HOME/dev-pg`，仅回环、随机 0600 密码、PG18 门、reset 防护）；README/RUNBOOK/官网
+   已改为 `keel db` 优先，`scripts/dev-pg.sh` 删除。
 4. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
    自更新、RichEditor/流式 Markdown、1000 条消息长会话性能。
 5. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、

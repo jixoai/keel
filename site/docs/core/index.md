@@ -68,21 +68,23 @@ Prerequisites: PostgreSQL 18 (`initdb`/`pg_ctl` on `PATH`, or any DSN) and Go 1.
 (`go.mod:3`). No Docker is needed.
 
 ```bash
-# 1. clone and start a local PostgreSQL 18 cluster (no Docker)
+# 1. clone and build the CLI
 git clone https://github.com/jixoai/keel.git
 cd keel
-scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"
-
-# 2. build the Harness and start it (fake provider when no model is configured)
 go build -o keel ./cmd/keel
+
+# 2. start a local PostgreSQL 18 cluster (no Docker)
+./keel db start
+eval "$(./keel db env)"
+
+# 3. start the Harness (fake provider when no model is configured)
 ./keel serve --addr 127.0.0.1:13750 \
   --tenant 11111111-2222-3333-4444-555555555555 \
   --auth local-only
 ```
 
 Any PostgreSQL 18 DSN works as well (an existing server, or a `postgres:18` container on port
-13741); `scripts/dev-pg.sh` is just the zero-configuration path.
+13741); `keel db` is just the zero-configuration path.
 
 `local-only` answers loopback and maps requests to the built-in local admin, so this quickstart
 needs no account fixture. A real deployment uses `--auth required` + `keel admin bootstrap` +

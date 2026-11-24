@@ -14,7 +14,7 @@ go build ./...
 
 这正是 CI 所跑（`.github/workflows/ci.yml`：gofmt 零输出、vet、带 `postgres:18` service 的 race 测试、
 build；另有 `docker build -t keel:ci .` 与定时触发的 chaos 任务）。本地等价命令见
-`docs/RUNBOOK.md:447`。集成测试（blob/HTTP）在 `KEEL_TEST_DSN` 未设置时自动 skip——由此得出一条推论：
+`docs/RUNBOOK.md:448`。集成测试（blob/HTTP）在 `KEEL_TEST_DSN` 未设置时自动 skip——由此得出一条推论：
 **没有 DSN 的绿灯证明的少得多**。
 
 这套测试**不需要 Docker**：把 `KEEL_TEST_DSN` 指向任意本机 PostgreSQL 18 即可。上面的
@@ -24,8 +24,9 @@ build；另有 `docker build -t keel:ci .` 与定时触发的 chaos 任务）。
 仓库自带一个零配置的本地集群：
 
 ```bash
-scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"
+go build -o keel ./cmd/keel
+./keel db start
+eval "$(./keel db env)"
 KEEL_TEST_DSN="$KEEL_DSN" go test ./...
 ```
 

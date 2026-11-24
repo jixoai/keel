@@ -59,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSkillsCmd(args[1:], stdout, stderr)
 	case "admin":
 		return runAdminCmd(args[1:], stdout, stderr)
+	case "db":
+		return runDBCmd(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctorCmd(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
@@ -85,6 +87,8 @@ Usage:
   keel model <cmd>       Read/manage the model registry (providers|list|show|catalog|provider ...)
   keel skills <cmd>      Manage the tenant skill library (list|show|install|update|pin|unpin|remove|sources)
   keel admin <cmd>       Provision tenants, API keys and quotas (operator)
+  keel db <cmd>          Manage the local development PostgreSQL 18 cluster
+                         (start|stop|status|dsn|env|reset)
   keel doctor [flags]    Diagnose configuration and build artifacts
   keel version           Print version and build information
 

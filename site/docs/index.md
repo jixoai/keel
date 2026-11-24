@@ -66,12 +66,14 @@ git clone \
   https://github.com/jixoai/keel.git
 cd keel
 
-# 2. local PostgreSQL 18 (no Docker)
-scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"
-
-# 3. build and start the Harness
+# 2. build the CLI
 go build -o keel ./cmd/keel
+
+# 3. local PostgreSQL 18 (no Docker)
+./keel db start
+eval "$(./keel db env)"
+
+# 4. bootstrap and start the Harness
 TENANT=11111111-2222-3333-4444-\
 555555555555
 export KEEL_SERVE_TENANT="$TENANT"
@@ -84,9 +86,9 @@ export KEEL_SECRET_KEY="$SECRET"
 ./keel serve --addr 127.0.0.1:13750
 ```
 
-No Docker is required: `scripts/dev-pg.sh` runs a throwaway PostgreSQL 18 cluster inside the
-checkout (`.dev/pg`, gitignored; loopback only; random password in `.dev/pg.pass`, 0600), and its
-`env` subcommand exports `KEEL_DSN`. Any other PostgreSQL 18 works too (`createdb keel`, then
+No Docker is required: `keel db` runs a throwaway PostgreSQL 18 cluster in
+`$KEEL_HOME/dev-pg` (or `~/.keel/dev-pg`; loopback only; random password in a 0600 file), and
+`keel db env` exports `KEEL_DSN`. Any other PostgreSQL 18 works too (`createdb keel`, then
 `KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`). If you prefer a container,
 `docker run --name keel-pg ... postgres:18` is an equivalent alternative on the same port — do not
 run both. A few acceptance scripts default to a container named `keel-pg`, but all of them accept
