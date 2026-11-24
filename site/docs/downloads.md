@@ -8,14 +8,14 @@ keel ships as a single Go binary plus a static web client. Both come from the
 same tagged commit, cross-compiled in CI — nothing is built on a laptop, so the
 checksums below mean something.
 
-**Current release: `v0.1.0`** (pre-1.0; expect breaking changes between minor versions.)
+**Current release: `v0.2.0`** (pre-1.0; expect breaking changes between minor versions.)
 
 ## What you get
 
 | Artifact | What it is |
 |---|---|
 | `keel` | The product shell: `keel serve` (Harness API + web UI + SSE on one origin), `keel tui` (terminal client), `keel doctor`, `keel version` |
-| `keel-web-0.1.0.zip` | The packaged web client. Unzip it and point `keel serve -web-dir <dir>` at it |
+| `keel-web-0.2.0.zip` | The packaged web client. Unzip it and point `keel serve -web-dir <dir>` at it |
 
 ## Requirements
 
@@ -27,21 +27,21 @@ checksums below mean something.
 
 | Platform | Download |
 |---|---|
-| macOS · Apple silicon | [keel-0.1.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-darwin-arm64.tar.gz) |
-| macOS · Intel | [keel-0.1.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-darwin-amd64.tar.gz) |
-| Linux · x86-64 | [keel-0.1.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-linux-amd64.tar.gz) |
-| Linux · arm64 | [keel-0.1.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-linux-arm64.tar.gz) |
-| Windows · x86-64 | [keel-0.1.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-windows-amd64.zip) |
-| Web client | [keel-web-0.1.0.zip](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-web-0.1.0.zip) |
+| macOS · Apple silicon | [keel-0.2.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-darwin-arm64.tar.gz) |
+| macOS · Intel | [keel-0.2.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-darwin-amd64.tar.gz) |
+| Linux · x86-64 | [keel-0.2.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-linux-amd64.tar.gz) |
+| Linux · arm64 | [keel-0.2.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-linux-arm64.tar.gz) |
+| Windows · x86-64 | [keel-0.2.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-windows-amd64.zip) |
+| Web client | [keel-web-0.2.0.zip](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-web-0.2.0.zip) |
 
-All assets: [the v0.1.0 release](https://github.com/jixoai/keel/releases/tag/v0.1.0) ·
+All assets: [the v0.2.0 release](https://github.com/jixoai/keel/releases/tag/v0.2.0) ·
 newer releases: [releases](https://github.com/jixoai/keel/releases) ·
-[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.1.0/SHA256SUMS.txt)
+[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.2.0/SHA256SUMS.txt)
 
 ## Verify what you downloaded
 
 ```bash
-curl -LO https://github.com/jixoai/keel/releases/download/v0.1.0/SHA256SUMS.txt
+curl -LO https://github.com/jixoai/keel/releases/download/v0.2.0/SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 ```
 

@@ -6,14 +6,14 @@ title: 下载
 
 keel 交付为一个 Go 二进制加一份静态网页客户端。两者来自同一个 tag、在 CI 里交叉编译 —— 不在任何人的笔记本上构建，所以下面的校验和是有意义的。
 
-**当前版本：`v0.1.0`**（1.0 之前；小版本之间可能有不兼容变更。）
+**当前版本：`v0.2.0`**（1.0 之前；小版本之间可能有不兼容变更。）
 
 ## 你会拿到什么
 
 | 产物 | 说明 |
 |---|---|
 | `keel` | 产品外壳：`keel serve`（Harness API + 网页界面 + SSE 同一个源）、`keel tui`（终端客户端）、`keel doctor`、`keel version` |
-| `keel-web-0.1.0.zip` | 打包好的网页客户端。解压后用 `keel serve -web-dir <目录>` 指过去 |
+| `keel-web-0.2.0.zip` | 打包好的网页客户端。解压后用 `keel serve -web-dir <目录>` 指过去 |
 
 ## 运行前提
 
@@ -25,21 +25,21 @@ keel 交付为一个 Go 二进制加一份静态网页客户端。两者来自�
 
 | 平台 | 下载 |
 |---|---|
-| macOS · Apple 芯片 | [keel-0.1.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-darwin-arm64.tar.gz) |
-| macOS · Intel | [keel-0.1.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-darwin-amd64.tar.gz) |
-| Linux · x86-64 | [keel-0.1.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-linux-amd64.tar.gz) |
-| Linux · arm64 | [keel-0.1.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-linux-arm64.tar.gz) |
-| Windows · x86-64 | [keel-0.1.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-0.1.0-windows-amd64.zip) |
-| 网页客户端 | [keel-web-0.1.0.zip](https://github.com/jixoai/keel/releases/download/v0.1.0/keel-web-0.1.0.zip) |
+| macOS · Apple 芯片 | [keel-0.2.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-darwin-arm64.tar.gz) |
+| macOS · Intel | [keel-0.2.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-darwin-amd64.tar.gz) |
+| Linux · x86-64 | [keel-0.2.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-linux-amd64.tar.gz) |
+| Linux · arm64 | [keel-0.2.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-linux-arm64.tar.gz) |
+| Windows · x86-64 | [keel-0.2.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-0.2.0-windows-amd64.zip) |
+| 网页客户端 | [keel-web-0.2.0.zip](https://github.com/jixoai/keel/releases/download/v0.2.0/keel-web-0.2.0.zip) |
 
-全部产物：[v0.1.0 发布页](https://github.com/jixoai/keel/releases/tag/v0.1.0) ·
+全部产物：[v0.2.0 发布页](https://github.com/jixoai/keel/releases/tag/v0.2.0) ·
 更新的版本：[releases](https://github.com/jixoai/keel/releases) ·
-[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.1.0/SHA256SUMS.txt)
+[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.2.0/SHA256SUMS.txt)
 
 ## 校验你下到的东西
 
 ```bash
-curl -LO https://github.com/jixoai/keel/releases/download/v0.1.0/SHA256SUMS.txt
+curl -LO https://github.com/jixoai/keel/releases/download/v0.2.0/SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 ```
 
