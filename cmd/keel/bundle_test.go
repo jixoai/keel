@@ -60,3 +60,15 @@ func TestLocalTenantPersists(t *testing.T) {
 		t.Fatalf("tenant file is accessible to group/other: %v", info.Mode())
 	}
 }
+
+func TestFindPGToolResolvesExe(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "initdb.exe")
+	if err := os.WriteFile(path, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := findPGTool(dir, "initdb")
+	if got != path {
+		t.Fatalf("findPGTool = %q; want %q", got, path)
+	}
+}

@@ -21,6 +21,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// runDefaultCmd is what a double-click (or a bare `keel`) does: on Windows it
+// first registers the app for the current user if needed, then starts the
+// product. No arguments, no environment, no terminal input.
+func runDefaultCmd(stdout, stderr io.Writer) int {
+	if runtime.GOOS == "windows" {
+		if dir, err := windowsInstallDir(); err == nil {
+			target := filepath.Join(dir, "keel.exe")
+			exe, _ := os.Executable()
+			if !strings.EqualFold(filepath.Clean(exe), filepath.Clean(target)) {
+				if _, err := os.Stat(target); err != nil {
+					if code := installWindows(true, false, stdout, stderr); code != 0 {
+						return code
+					}
+				}
+			}
+		}
+	}
+	return runStartCmd(nil, stdout, stderr)
+}
+
 func runStartCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("keel start", flag.ContinueOnError)
 	fs.SetOutput(stderr)

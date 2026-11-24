@@ -13,7 +13,7 @@ title: 发布与升级
 
 | 版本号 | 位置 | 含义 |
 |---|---|---|
-| 产品版本 | `cmd/keel/main.go:23` | 发版号（`0.3.0`）；`keel version` 输出的就是它 |
+| 产品版本 | `cmd/keel/main.go:23` | 发版号（`0.3.1`）；`keel version` 输出的就是它 |
 | HarnessAPI 版本 | `harnessapi.APIVersion` | `/v1` 契约；客户端只锁 major 并查 `/v1/capabilities` |
 
 常量上方的注释写明了这个区分（`cmd/keel/main.go:20`），`printVersion` 渲染 `keel <version>`
@@ -26,7 +26,7 @@ title: 发布与升级
 
 ```bash
 # 门禁在本地做的事
-go run ./cmd/keel version          # 输出：keel 0.3.0
+go run ./cmd/keel version          # 输出：keel 0.3.1
 # tag 必须是 v + 这个数字，否则在发布前失败
 ```
 
@@ -110,7 +110,7 @@ cd site && pnpm build
 GitHub 是源站；慢网络下同一路径后缀由镜像提供：
 
 ```bash
-VER=0.3.0
+VER=0.3.1
 BASE=https://github.com/jixoai/keel/releases/download/v$VER
 MIRROR=https://gh.fde2e.tweb.xin/jixoai/keel/releases/download/v$VER
 
@@ -171,7 +171,7 @@ SIGTERM 是 **shutdown** 排水，不是 handoff：它拒绝新写、放弃在�
 ## 9. 校验一次下载
 
 ```bash
-VER=0.3.0
+VER=0.3.1
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/SHA256SUMS.txt"
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/keel-$VER-linux-amd64.tar.gz"
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing

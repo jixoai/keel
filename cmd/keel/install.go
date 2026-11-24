@@ -31,11 +31,15 @@ func runInstallCmd(args []string, stdout, stderr io.Writer) int {
 	if *uninstall {
 		return uninstallApp(*dir, *purge, stdout, stderr)
 	}
-	if runtime.GOOS != "darwin" {
-		fmt.Fprintf(stderr, "keel install: app registration is implemented for macOS in this build; run `keel start` on %s\n", runtime.GOOS)
+	switch runtime.GOOS {
+	case "darwin":
+		return installMacApp(*dir, *noOpen, *force, stdout, stderr)
+	case "windows":
+		return installWindows(*noOpen, *force, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "keel install: app registration is implemented for macOS/Windows in this build; run `keel start` on %s\n", runtime.GOOS)
 		return 1
 	}
-	return installMacApp(*dir, *noOpen, *force, stdout, stderr)
 }
 
 func defaultApplicationsDir() (string, error) {
@@ -131,6 +135,9 @@ func installMacApp(dir string, noOpen, force bool, stdout, stderr io.Writer) int
 }
 
 func uninstallApp(dir string, purge bool, stdout, stderr io.Writer) int {
+	if runtime.GOOS == "windows" {
+		return uninstallWindows(purge, stdout, stderr)
+	}
 	if dir == "" {
 		var err error
 		dir, err = defaultApplicationsDir()
@@ -155,6 +162,124 @@ func uninstallApp(dir string, purge bool, stdout, stderr io.Writer) int {
 		}
 	} else {
 		fmt.Fprintln(stdout, "local data kept; pass --purge to remove it")
+	}
+	return 0
+}
+
+func windowsInstallDir() (string, error) {
+	local := os.Getenv("LOCALAPPDATA")
+	if local == "" {
+		return "", errors.New("LOCALAPPDATA is not set")
+	}
+	return filepath.Join(local, "Keel"), nil
+}
+
+func windowsShortcutPath() string {
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		return ""
+	}
+	return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Keel.lnk")
+}
+
+// installWindows registers the app for the current user: no administrator
+// prompt, no machine-wide writes. The registry key is HKCU\Software\Classes.
+func installWindows(noOpen, force bool, stdout, stderr io.Writer) int {
+	dir, err := windowsInstallDir()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	target := filepath.Join(dir, "keel.exe")
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel install: %v\n", err)
+		return 1
+	}
+	same := strings.EqualFold(filepath.Clean(exe), filepath.Clean(target))
+	if _, err := os.Stat(target); err == nil && !force && !same {
+		fmt.Fprintf(stderr, "keel install: %s exists; pass --force to replace it\n", target)
+		return 1
+	}
+	if !same {
+		if !hasEmbeddedPG() {
+			fmt.Fprintln(stderr, "keel install: this build has no bundled assets; download the self-contained release")
+			return 1
+		}
+		runtimeDir, err := ensureRuntime(stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "keel install: %v\n", err)
+			return 1
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "keel install: %v\n", err)
+			return 1
+		}
+		if err := copyExecutable(exe, target); err != nil {
+			fmt.Fprintf(stderr, "keel install: %v\n", err)
+			return 1
+		}
+		// The binary already embeds the runtime; the first `start` extracts it
+		// under %USERPROFILE%\.keel. Copying the PG tree here would duplicate
+		// 300 MB and hit Windows symlink privileges.
+		_ = copyFileIfExists(filepath.Join(runtimeDir, "README.md"), filepath.Join(dir, "README.md"))
+	}
+	if err := registerWindowsScheme(target); err != nil {
+		fmt.Fprintf(stderr, "keel install: registry: %v\n", err)
+		return 1
+	}
+	createWindowsShortcut(target, stderr)
+	fmt.Fprintf(stdout, "installed: %s\n", dir)
+	if !noOpen {
+		_ = exec.Command("cmd", "/c", "start", "", target).Run()
+	}
+	return 0
+}
+
+func registerWindowsScheme(target string) error {
+	command := fmt.Sprintf("\"%s\" start \"%%1\"", target)
+	steps := [][]string{
+		{"reg", "add", `HKCU\Software\Classes\keel`, "/ve", "/d", "URL:Keel", "/f"},
+		{"reg", "add", `HKCU\Software\Classes\keel`, "/v", "URL Protocol", "/d", "", "/f"},
+		{"reg", "add", `HKCU\Software\Classes\keel\shell\open\command`, "/ve", "/d", command, "/f"},
+	}
+	for _, step := range steps {
+		if out, err := exec.Command(step[0], step[1:]...).CombinedOutput(); err != nil {
+			return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+func createWindowsShortcut(target string, stderr io.Writer) {
+	shortcut := windowsShortcutPath()
+	if shortcut == "" {
+		return
+	}
+	script := fmt.Sprintf(`$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%s'); $s.TargetPath='%s'; $s.Arguments='start'; $s.Save()`, strings.ReplaceAll(shortcut, "'", "''"), strings.ReplaceAll(target, "'", "''"))
+	_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Run()
+}
+
+func uninstallWindows(purge bool, stdout, stderr io.Writer) int {
+	dir, err := windowsInstallDir()
+	if err != nil {
+		fmt.Fprintf(stderr, "keel uninstall: %v\n", err)
+		return 1
+	}
+	_ = exec.Command("reg", "delete", `HKCU\Software\Classes\keel`, "/f").Run()
+	if shortcut := windowsShortcutPath(); shortcut != "" {
+		_ = os.Remove(shortcut)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintf(stderr, "keel uninstall: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "removed: %s\n", dir)
+	if purge {
+		if home := keelHome(); home != "" {
+			_ = os.RemoveAll(home)
+			fmt.Fprintf(stdout, "removed data: %s\n", home)
+		}
 	}
 	return 0
 }

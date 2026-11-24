@@ -9,20 +9,20 @@ client and the README are embedded. Download it, run one command, and the produc
 starts on loopback with its own database. No Docker, no `KEEL_DSN`, no manual
 `initdb`.
 
-**Current release: `v0.3.0`** (pre-1.0; expect breaking changes between minor versions.)
+**Current release: `v0.3.1`** (pre-1.0; expect breaking changes between minor versions.)
 
 ## Download
 
 | Platform | Download |
 |---|---|
-| macOS · Apple silicon | [keel-0.3.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-darwin-arm64.tar.gz) |
-| macOS · Intel | [keel-0.3.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-darwin-amd64.tar.gz) |
-| Linux · x86-64 | [keel-0.3.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-linux-amd64.tar.gz) |
-| Linux · arm64 | [keel-0.3.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-linux-arm64.tar.gz) |
-| Windows · x86-64 | [keel-0.3.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.3.0/keel-0.3.0-windows-amd64.zip) |
+| macOS · Apple silicon | [keel-0.3.1-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-darwin-arm64.tar.gz) |
+| macOS · Intel | [keel-0.3.1-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-darwin-amd64.tar.gz) |
+| Linux · x86-64 | [keel-0.3.1-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-linux-amd64.tar.gz) |
+| Linux · arm64 | [keel-0.3.1-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-linux-arm64.tar.gz) |
+| Windows · x86-64 | [keel-0.3.1-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-windows-amd64.zip) |
 
-All assets: [the v0.3.0 release](https://github.com/jixoai/keel/releases/tag/v0.3.0) ·
-[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.3.0/SHA256SUMS.txt)
+All assets: [the v0.3.1 release](https://github.com/jixoai/keel/releases/tag/v0.3.1) ·
+[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.3.1/SHA256SUMS.txt)
 
 ## Start
 
@@ -59,7 +59,7 @@ The native binary and the Docker variant share the same server and web client.
 ## Verify what you downloaded
 
 ```bash
-curl -LO https://github.com/jixoai/keel/releases/download/v0.3.0/SHA256SUMS.txt
+curl -LO https://github.com/jixoai/keel/releases/download/v0.3.1/SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 ```
 

@@ -1,0 +1,31 @@
+# Windows 启动修复（0.3.1）
+
+## Owner 实测 v0.3.0
+
+C:\Users\gaube> D:\Downloads\keel-0.3.0-windows-amd64\keel.exe start
+keel: runtime extracted to C:\Users\gaube\.keel\runtime\0.3.0
+keel serve: missing PostgreSQL tool "initdb"; install PostgreSQL 18 (...)
+
+根因：runtime 的 Windows 工具是 initdb.exe/pg_ctl.exe，pgTool 只按无后缀名字查目录。
+
+## 0.3.1 修复
+
+- findPGTool 先试 `name`，再试 `name.exe`（任意平台，带后缀的运行时也能命中）。
+- 单测：TestFindPGToolResolvesExe（临时目录里的 initdb.exe）。
+- Windows `keel install`：复制 exe 到 %LOCALAPPDATA%\Keel、HKCU\Software\Classes\keel
+  （URL Protocol）、开始菜单 Keel.lnk；不要求管理员权限；uninstall 反向清理。
+- 裸 `keel`（双击）：Windows 首次先 install，再 start；macOS/Linux 直接 start。
+
+## 本机验证（macOS）
+
+$ ./dist/keel            # 无参数
+keel: runtime extracted to /tmp/keel-noargs/.keel/runtime/0.3.1
+keel serve listening auth=local-only web_ready=true
+$ curl /v1/health -> 200
+$ ./dist/keel install --dir /tmp/KeelApps4 --no-open
+installed: /tmp/KeelApps4/Keel.app (CFBundleShortVersionString 0.3.1)
+
+## 边界
+
+本机没有 Windows 运行环境；Windows 的 install/无参 start 未实机跑，需 Owner 在 0.3.1 复验。
+macOS 无参 start 与 .app 安装已实测；Go 单测与站点构建通过。

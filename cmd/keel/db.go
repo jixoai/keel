@@ -631,9 +631,8 @@ func (d devDB) dsnFor(database string) (string, error) {
 
 func pgTool(name string) (string, error) {
 	for _, dir := range pgSearchDirs() {
-		candidate := filepath.Join(dir, name)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, nil
+		if path := findPGTool(dir, name); path != "" {
+			return path, nil
 		}
 	}
 	if path, err := exec.LookPath(name); err == nil {
@@ -641,13 +640,27 @@ func pgTool(name string) (string, error) {
 	}
 	if pgConfig, err := exec.LookPath("pg_config"); err == nil {
 		if out, err := exec.Command(pgConfig, "--bindir").Output(); err == nil {
-			candidate := filepath.Join(strings.TrimSpace(string(out)), name)
-			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				return candidate, nil
+			if path := findPGTool(strings.TrimSpace(string(out)), name); path != "" {
+				return path, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("missing PostgreSQL tool %q; install PostgreSQL 18 (e.g. brew install postgresql@18)", name)
+	return "", fmt.Errorf("missing PostgreSQL tool %q (bundled runtime or PATH); install PostgreSQL 18 or use the self-contained release", name)
+}
+
+// findPGTool resolves the Windows `.exe` suffix as well as the POSIX name.
+func findPGTool(dir, name string) string {
+	candidates := []string{name}
+	if !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		candidates = append(candidates, name+".exe")
+	}
+	for _, candidate := range candidates {
+		path := filepath.Join(dir, candidate)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }
 
 func initdbMajor(initdb string) (int, error) {

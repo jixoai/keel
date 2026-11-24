@@ -20,7 +20,7 @@ import (
 // version is the keel product version. It is deliberately separate from the
 // HarnessAPI contract version (harnessapi.APIVersion): a UI pins /v1 and asks
 // /v1/capabilities, never a binary version.
-var version = "0.3.0"
+var version = "0.3.1"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -28,8 +28,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		usage(stderr)
-		return 2
+		return runDefaultCmd(stdout, stderr)
 	}
 	// The client commands accept --username/--password-file before any
 	// subcommand flag parsing; the values live for this invocation only (a
