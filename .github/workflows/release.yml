@@ -93,7 +93,8 @@ jobs:
             curl -fsSL --retry 3 -o /tmp/pg.jar "$JAR_URL"
             unzip -p /tmp/pg.jar '*.txz' > cmd/keel/assets/pg.txz
             rm -rf cmd/keel/assets/web
-            cp -R "$WEB" cmd/keel/assets/web
+            mkdir -p cmd/keel/assets/web
+            cp -R "$WEB/Keel/." cmd/keel/assets/web/
             cp web/icon.png cmd/keel/assets/icon.png
             cp README.md cmd/keel/assets/README.md
 
