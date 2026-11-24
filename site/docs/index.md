@@ -76,6 +76,13 @@ export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookie
 ./keel serve --addr 127.0.0.1:13750
 ```
 
+No Docker is required: `keel` only needs a PostgreSQL 18 DSN. Any local server works
+(`createdb keel`, then `KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`); the
+`keel-pg` container above is just a disposable local database. A few acceptance scripts default to
+a container named `keel-pg`, but all of them accept `KEEL_DSN`/`KEEL_TEST_DSN` for a local server.
+Only the 2GB cgroup battery (`scripts/acceptance-perf.sh`) needs Docker/Linux, which is why the E0
+container battery is marked platform-limited.
+
 Open `http://127.0.0.1:13750`, enter the setup token plus the username and password for the first
 super admin: that password is the final credential, so the browser enters the app directly. Only a
 temporary password minted by a CLI/admin reset forces a change at first login

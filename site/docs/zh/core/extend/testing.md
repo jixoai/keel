@@ -17,6 +17,10 @@ build；另有 `docker build -t keel:ci .` 与定时触发的 chaos 任务）。
 `docs/RUNBOOK.md:359`。集成测试（blob/HTTP）在 `KEEL_TEST_DSN` 未设置时自动 skip——由此得出一条推论：
 **没有 DSN 的绿灯证明的少得多**。
 
+这套测试**不需要 Docker**：把 `KEEL_TEST_DSN` 指向任意本机 PostgreSQL 18 即可。上面的
+`postgres:18` service 与 `docker build` 是 CI 自己的管线；本地唯一确实需要 Docker/Linux 的是
+2GB cgroup 电池（`scripts/acceptance-perf.sh`），这也是 E0 容器电池标「平台受限」的原因。
+
 ## 2. 一条命令跑完整套
 
 ```bash

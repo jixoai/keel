@@ -17,6 +17,11 @@ These are exactly what CI runs (`.github/workflows/ci.yml`: gofmt zero-output, v
 equivalents are in `docs/RUNBOOK.md:359`. Integration tests (blob/HTTP) skip themselves when
 `KEEL_TEST_DSN` is unset — but note the corollary: a green run *without* the DSN proves much less.
 
+Docker is **not** required for this suite: point `KEEL_TEST_DSN` at any local PostgreSQL 18. The
+`postgres:18` service and `docker build` above are CI's own plumbing; the only local path that
+requires Docker/Linux is the 2GB cgroup battery (`scripts/acceptance-perf.sh`), which is why the E0
+container battery is recorded as platform-limited.
+
 ## 2. One command for the whole battery
 
 ```bash

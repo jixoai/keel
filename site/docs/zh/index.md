@@ -71,6 +71,12 @@ export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # 签 session/CSRF cookie
 ./keel serve --addr 127.0.0.1:13750
 ```
 
+不需要 Docker：`keel` 只依赖一个 PostgreSQL 18 的 DSN。任何本机实例都可以（`createdb keel`，
+再用 `KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`）；上面的 `keel-pg` 容器
+只是一次性本地库的便利。少数验收脚本默认找名为 `keel-pg` 的容器，但都可用
+`KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；只有 2GB cgroup 电池
+（`scripts/acceptance-perf.sh`）确实需要 Docker/Linux——E0 容器电池因此标「平台受限」。
+
 打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入应用。
 没有口令，也没有“第一个访问者自动成为超管”的路径。机器客户端用绑定到 Bot 的 key
 （`keel_bot_...`），不走浏览器登录。登录/CSRF 请求与每个端点的形状见

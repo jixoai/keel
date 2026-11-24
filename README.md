@@ -82,6 +82,13 @@ export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=dis
 go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 ```
 
+**不需要 Docker**：`keel` 只依赖一个 PostgreSQL 18；任何本机实例都可以，例如
+`createdb keel && export KEEL_DSN='postgres://<user>@127.0.0.1:5432/keel?sslmode=disable'`。
+上面的 `keel-pg` 容器只是给一次性本地库的便利（本项目的测试/评审实例都用本机 PG，零 Docker）。
+少数验收脚本默认找名为 `keel-pg` 的容器，但都可用 `KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；
+只有 `scripts/acceptance-perf.sh` 的 2GB cgroup 电池确实需要 Docker/Linux——这是 E0 容器电池
+标「平台受限」的原因，原生电池（conformance/mcp-apps/external/core）不依赖它。
+
 完整命令（测试、E2E、压测、2GB cgroup 复跑）见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
 
 ### 本地评审服务器（账号登录 / Bot key）
