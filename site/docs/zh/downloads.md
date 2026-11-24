@@ -10,10 +10,8 @@ keel 交付为一个 Go 二进制加一份静态网页客户端。两者来自�
 
 ## 你会拿到什么
 
-| 产物 | 说明 |
-|---|---|
-| `keel` | 产品外壳（serve / tui / doctor / version） |
-| `keel-web-0.2.0.zip` | 打包好的网页客户端 |
+- `keel` —— 产品外壳（serve / tui / doctor / version）。
+- `keel-web-0.2.0.zip` —— 打包好的网页客户端。
 
 外壳的子命令：
 

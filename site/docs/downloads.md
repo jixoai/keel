@@ -12,10 +12,8 @@ checksums below mean something.
 
 ## What you get
 
-| Artifact | What it is |
-|---|---|
-| `keel` | The product shell (serve / tui / doctor / version) |
-| `keel-web-0.2.0.zip` | The packaged web client |
+- `keel` — the product shell (serve / tui / doctor / version).
+- `keel-web-0.2.0.zip` — the packaged web client.
 
 The shell's commands:
 
