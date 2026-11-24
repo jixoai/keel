@@ -28,18 +28,22 @@
 
 v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
 
-1. **Alpha 残余**：只剩 OAR 专用渲染器 + 宿主任务图闭环（Codex record 链路已绿，缺
-   `keel.ui.tool-renderer` 与任务图证明）——已在 `keel-oar-renderer` change 立项。
+1. **Alpha 残余（已关闭）**：OAR 专用渲染器 + 宿主任务图闭环由 `keel-oar-renderer` 交付
+   （投影读取 API `GET /v1/sessions/{id}/external/projection`、外部运行卡经
+   `keel.ui.tool-renderer`、任务图前后计数不变；reviewer 9/10）。
    R1 v2 已绿（pin e7361f8 / scenario r1-basic-v2 / 77 allow rules；152 leaf paths、
    103 allowed、0 unexpected；负控证明 allowlist 不能吞掉全部差异），仅 E0 的容器电池
    平台受限；G4 300MB 目标/组 OOM 同属平台受限（468MB ≤500MB 已记 PARTIAL）。
-2. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
+2. **官网 v2 刷新（已交付）**：`keel-site-architecture-refresh` 把 37 对中英文页面按
+   harness v2 重写（插件标准 implemented/partly/deferred、事件 25 kind、API 路由补齐、
+   新增 assembly/placement/tenancy/files/session-query/release/slots），四道门与部署全绿。
+3. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
    自更新、RichEditor/流式 Markdown、1000 条消息长会话性能。
-3. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
+4. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
    attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
    gbash mcp CLI、fileplugin 锁回收）；多租户插件面；macOS 原生 target；Rust+gRPC layerfs。
-4. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
+5. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
    待同步（browser 有他人 WIP）；TUI 设置页 raw JSON 1 例失败；headless 模式 4 个布局差异。
 
 **下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻
