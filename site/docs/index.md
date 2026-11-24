@@ -72,7 +72,8 @@ eval "$(scripts/dev-pg.sh env)"
 
 # 3. build and start the Harness
 go build -o keel ./cmd/keel
-TENANT=11111111-2222-3333-4444-555555555555
+TENANT=11111111-2222-3333-4444-\
+555555555555
 export KEEL_SERVE_TENANT="$TENANT"
 # signs the session and CSRF cookies
 SECRET="$(openssl rand -hex 32)"

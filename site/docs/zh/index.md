@@ -67,7 +67,8 @@ eval "$(scripts/dev-pg.sh env)"
 
 # 3. 构建并启动 Harness（产品壳 + API + worker）
 go build -o keel ./cmd/keel
-TENANT=11111111-2222-3333-4444-555555555555
+TENANT=11111111-2222-3333-4444-\
+555555555555
 export KEEL_SERVE_TENANT="$TENANT"
 # 签 session/CSRF cookie
 SECRET="$(openssl rand -hex 32)"
