@@ -121,12 +121,51 @@ Rules the tests pin:
   configuration changed but the service did not, the **instance is shared across generations**
   instead of being rebuilt.
 
-## 4. Loadout: an immutable snapshot, pinned per run
+## 4. Loadout and assembly
 
 A loadout is `{id, revision, version, summary, service descriptors}` — an immutable snapshot
-resolved from the tenant configuration document (`internal/host.TenantConfig`). There is no second
-configuration vocabulary: `internal/loadout/tenant.go` only maps the document, it does not define
-its own (`docs/LOADOUT.md:51`).
+pinned per run. What changed is where its rows come from: the service set is the product of the
+**four-layer assembly**, not of a single document.
+
+```text
+base bundle      defaults: kernel seams, memory hygiene, product services
+   ↓ row id      (the only layer allowed to add rows)
+mode bundle      serve / headless / tui / sdk
+   ↓
+preset           behaviour overlays for tools, prompts and skills
+   ↓
+config.toml      user file: immutable versions + a ledger anchor
+```
+
+Every row has a stable identity, `<plugin-id>#<row>` (for example `keel.shell#bash-local`), and it
+is an identity rather than a position: overlays match by that id only, last write wins, and a hit
+replaces the whole row — `impl` plus `params`, with params never merged key by key
+(`docs/ASSEMBLY.md:61`, `docs/ASSEMBLY.md:68`). Only `base` may introduce rows; an overlay that
+names a row base never declared is `row-unknown`, and `absent = true` keeps the row in the
+effective set while removing it from activation, so its dependents become `Blocked` instead of
+half-wired (`docs/ASSEMBLY.md:73`). Activation order is derived from `requires` by a topological
+sort; a blocked row fails loadout construction rather than degrading silently
+(`docs/ASSEMBLY.md:80`).
+
+`internal/assembly` is the pure model — no goroutines, clocks or global state. `internal/loadout`
+is the only service adapter: it maps the default blueprint to base rows
+(`keel.<service>#service`, `internal/loadout/assembly.go:38`), maps the tenant document onto the
+`config` stage, and assembles `base → serve → config` into the service set
+(`docs/ASSEMBLY.md:302`). The tenant document is one input to that stack — the row vocabulary
+itself belongs to the assembly (`docs/LOADOUT.md:51`).
+
+`internal/configfile` is the only disk adapter for `config.toml` (`keel serve --config-file` /
+`KEEL_CONFIG_FILE`, default `$KEEL_HOME/config.toml`) (`docs/ASSEMBLY.md:203`). A missing file is
+an empty configuration, an invalid file fails startup, and a rotation is atomic and produces an
+immutable version that a run pins, anchored to a ledger sequence. The active version is advertised
+in `GET /v1/capabilities` under `configFile` — hash, revision, anchor and capture mode, never the
+local path (`internal/harnessapi/api.go:525`).
+
+The unwired parts are declared rather than implied: only the `serve` mode bundle is connected
+(headless/tui/sdk answer an error), and `config.toml` rows are parsed and pinned but non-service
+rows do not reach the production service graph yet (`docs/ASSEMBLY.md:35`,
+`docs/ASSEMBLY.md:302`). The full rule set, error codes, capability matrix and verification
+commands are on [Assembly](/core/assembly).
 
 The default blueprint is `loadout.DefaultServices()` (`internal/loadout/loadout.go:83`):
 
@@ -174,6 +213,12 @@ manifest whose canonical hash equals the service's pin; an undeclared, unpinned 
 rejected before the loadout exists (`internal/loadout/conformance.go:55`). The default `pi-loop`
 pins `PinnedPiLoopManifestHash`; changing the suite requires deliberately re-pinning and bumping
 the loop service version.
+
+**Placement is the other half of the same story.** The assembly decides what a process is made of;
+placement decides where a session's runs execute. A full group queues the run as a durable FIFO
+entry (`202` + position + ETA) while a spent tenant quota is a hard refusal (`429` + `Retry-After`);
+both are described on [Placement and groups](/core/placement), and the isolation/limits layer on
+[Tenancy](/core/tenancy).
 
 ## 5. Handoff: how the workbench is swapped
 

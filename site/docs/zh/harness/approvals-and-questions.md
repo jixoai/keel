@@ -4,7 +4,7 @@
 事情：工具审批、澄清问句、选项抉择。
 
 设计规则与其他部分一致：原语住在产品层，账本的词汇表不增长。Decision **不是**内核事件
-kind（`internal/kernel/validate.go:36`）；它是投影到既有 tasks 记账表上的 durable 行，
+kind（`internal/kernel/validate.go:46`）；它是投影到既有 tasks 记账表上的 durable 行，
 带答案日志（`internal/harnessext/doc.go`）。
 
 ## 1. 原语
@@ -96,9 +96,28 @@ Decision 以两种等价方式暴露给客户端：
   而不是机制本身。
 - **不是 UI 状态。** UI 可以乐观渲染，但 durable 行才是答案的权威；刷新会从 API 重新读取。
 
-## 6. 规划中：面向插件的审批
+## 6. 面向插件的审批（已实现）
 
-规划中的插件标准新增一个消费者：插件 UI 可以通过宿主桥（`keel.plugin.*`）**请求审批**；且
-插件安装/启用本身必须经过 durable 审批才会生效
-（`openspec/changes/keel-plugin-core/specs/plugin-system/spec.md`「权限与沙箱」）。两者均标注
-为**规划中**——当前检出既无插件桥，也无插件安装路径。
+插件标准新增两个消费者，二者都建在同一原语之上并已交付：
+
+1. **生命周期写。** `install`、`enable` 与 `update` 是 durable 审批，不是默认值——安装插件
+   意味着采用运维没写的代码（`internal/harnessapi/plugin_approval.go:412`）：
+
+   ```
+   POST /v1/plugins/install {"path": "..."}                       → 202 {"approvalRequired": true, "decision": …}
+   POST /v1/plugin-approvals/{decisionId} {"optionId": "allow"}    （人作答）
+   POST /v1/plugins/install {"path": "...", "decisionId": "..."}   → 201（或被拒 409）
+   ```
+
+   decision id 由 `(tenant, action, requestId-or-target)` 派生，因此为某个动作或某个包打开的
+   问题无法授权另一个。拒绝与超时永不抵达管理器，并以 `refused` 结果记入审计。插件写来自设置
+   页而不是聊天回合，因此其 decision 行住在租户作用域的 session 命名空间，而不是某个 run 的
+   session。
+
+2. **插件 UI 请求。** 插件页可以通过桥打开自己的问题——`POST /v1/plugins/{id}/bridge/approve`，
+   再用 `/v1/plugins/{id}/bridge/approvals/{decisionId}` 这一对读取或作答
+   （`internal/harnessapi/plugin_bridge.go:75`）。问题带 `plugin-bridge:` 前缀，以便与其他
+   问题区分；整个桥要求插件处于 enabled。
+
+两条路径都没有引入第二套问句机制：它们都是上文所述的 `Decision` 行、答案日志与有界超时
+（[权限](/zh/harness/plugins/permissions)、[生命周期](/zh/harness/plugins/lifecycle)）。

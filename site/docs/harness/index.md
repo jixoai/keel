@@ -24,7 +24,7 @@ partials (`internal/harnessext/doc.go:1`).
 
 | Question | Answered by | Citation |
 | --- | --- | --- |
-| May this event be appended? | Core (contract kernel) | `internal/kernel/validate.go:36` |
+| May this event be appended? | Core (contract kernel) | `internal/kernel/validate.go:46` |
 | Who owns the session right now? | Core (leases + fencing epoch) | `internal/kernel/lease.go:16` |
 | What does the model see? | Harness host assembly + the loop | `internal/agent/runner.go:280` |
 | Which tools exist for this run? | Harness (host registry + plugin tools) | `internal/agenttool/registry.go` |
@@ -74,11 +74,14 @@ keel serve (one process)
 │   ├─ discovery        GET /v1/capabilities                        internal/harnessapi/api.go:257
 │   ├─ sessions         GET /v1/sessions, POST …/{id}/cancel        internal/harnessapi/api.go:171
 │   ├─ decisions        GET/POST /v1/sessions/{id}/decisions[/…]    internal/harnessapi/api.go:173
-│   ├─ plugins          GET /v1/plugins                             internal/harnessapi/ext.go:18
+│   ├─ plugins          GET /v1/plugins, POST …/install|{id}/enable|disable|uninstall|update,
+│   │                   GET …/audit, POST /v1/plugin-approvals/{id} internal/harnessapi/plugins.go:56
+│   ├─ plugin UI        GET /plugins/{id}/*, /v1/plugins/{id}/bridge/* cmd/keel/plugins_ui.go:17
 │   ├─ triggers         GET /v1/triggers, POST …/{id}/fire          internal/harnessapi/ext.go:39
 │   └─ sub-agents       GET /v1/subagents, POST …/{id}/subagents    internal/harnessapi/ext.go:128
 ├─ Extension surface (harnessext)
 │   ├─ plugin runtime   declarative plugins, generation, reverse unload   internal/harnessext/plugin.go:163
+│   ├─ plugin manager   manifest packages, lifecycle, permissions, audit  internal/harnessext/plugin_manager_ops.go:504
 │   ├─ hook bus         closed event set, async, bounded queue            internal/harnessext/hooks.go:298
 │   ├─ decisions        approval/clarify primitive with durable rows      internal/harnessext/decisions.go:233
 │   ├─ triggers         interval/cron/webhook + idempotency + audit       internal/harnessext/triggers.go:305
@@ -88,7 +91,7 @@ keel serve (one process)
 ├─ Host assembly        system prompt, skills, tool registry, MCP         internal/host/host.go
 ├─ Service graph        store/llm/prompt/mcp/tools/pi-loop/…              internal/loadout/loadout.go:63
 ├─ Worker               claim → execute → settle                          internal/agent/worker.go:170
-└─ Static UI host       web/dist (NSH web build), /plugins/<id>/ (planned) cmd/keel/static.go
+└─ Static UI host       web/dist (NSH web build), /plugins/<id>/          cmd/keel/static.go:16
 ```
 
 ## 4. Lifecycle of one session
@@ -104,7 +107,8 @@ client                     Harness host (keel serve)                 Core (kerne
   │                              │                                        │
   │ POST /v1/sessions/{id}/input │                                        │
   ├─────────────────────────────▶│ commitUserInput (edge class)        ───▶│ validate → seq → queue run (one tx)
-  │   202 {seq, requestId}       │◀───────────────────────────────────────│
+  │   201 {seq, requestId}       │◀───────────────────────────────────────│  (200 = duplicate requestId;
+  │   202 = committed but queued │                                        │   202 + queued{position,etaSeconds})
   │                              │                                        │
   │                              │ worker poll loop                       │
   │                              ├─ claim() ─────────────────────────────▶│ lease + fencing epoch
@@ -138,31 +142,35 @@ Two properties are load-bearing and should be read in order:
    missing (tools are at-least-once). See
    [Recovery and compaction](/harness/recovery-and-compaction).
 
-## 5. Implemented today vs planned
+## 5. Implemented, partly implemented, deferred
 
-This site distinguishes **implemented** (with a `path:line` citation) from
-**planned** (pointing at the in-development `keel-plugin-core` change). The
-distinction is deliberate: the plugin standard below is a specification, not a
-description of shipped code.
+This site uses three tiers, and every row below names the tier it is in:
+
+- **Implemented** — ships in this repository; the claim carries a `path:line`
+  citation.
+- **Partly implemented** — the mechanism ships, but a named part is missing or
+  narrower than the contract (the gap is stated).
+- **Deferred** — specified and registered, not in this build; tracked in
+  `plugins/COVERAGE.md` and, where a gate was deferred, in the change's
+  `DISPOSITION.md`.
 
 | Area | Status | Where |
 | --- | --- | --- |
 | Ledger, kernel verbs, recovery, handoff | Implemented | [Anatomy of a turn](/harness/anatomy-of-a-turn), [Recovery and compaction](/harness/recovery-and-compaction) |
-| Streaming, partials, drain frame | Implemented | [Streaming and partials](/harness/streaming-and-partial) |
+| Streaming, partials, drain frame; queued admission (`202` + `queued{position,etaSeconds}`, `429` only for tenant quota / memory cap) | Implemented | [Streaming and partials](/harness/streaming-and-partial) |
 | Decisions (approvals/questions) | Implemented | [Approvals and questions](/harness/approvals-and-questions) |
 | In-process declarative plugins (`harnessext.Plugin`) | Implemented | [Plugin host](/harness/plugins/) |
 | MCP Apps host (catalogue, sandbox, bridge, events/era) | Implemented (P1–P5; P6 acceptance in progress) | [MCP Apps](/harness/mcp-apps) |
-| `plugin.yaml` packages, install, sidecar/webview kinds | Planned (`keel-plugin-core` W1) | [Manifest](/harness/plugins/manifest), [Kinds](/harness/plugins/kinds) |
-| Plugin permissions, sandbox boundary, audit endpoint | Planned (`keel-plugin-core` W1) | [Permissions](/harness/plugins/permissions) |
-| Plugin UI bridge (`keel.plugin.*`), plugin hosting | Planned (`keel-plugin-core` W1) | [Plugin UI](/harness/plugins/ui) |
-| Creation mode (`keel.creation`) | Planned (`keel-plugin-core` W1) | [Creation mode](/harness/creation-mode) |
-| Official plugin suite coverage matrix | Planned (W1/W2/W3 waves) | [Plugins overview](/harness/plugins/) |
+| `plugin.yaml` packages, install/lifecycle API, sidecar and webview kinds | Implemented; `agent_backend` sidecars Deferred | [Manifest](/harness/plugins/manifest), [Kinds](/harness/plugins/kinds), [Lifecycle](/harness/plugins/lifecycle) |
+| Plugin permissions and audit endpoint | Partly implemented: tools + sidecar env enforced; `net`/`secrets` gates not routed; `fs` declaration-only | [Permissions](/harness/plugins/permissions) |
+| Plugin UI bridge (`keel.plugin.*`), `/plugins/<id>/` hosting | Implemented (backend + client open path); client install/update cards not wired | [Plugin UI](/harness/plugins/ui) |
+| Creation mode (`keel.creation`) | Implemented actions/template; end-to-end gate G8 Deferred | [Creation mode](/harness/creation-mode) |
+| Official plugin suite coverage matrix | Implemented (catalog + CI gate); per-plugin status is the matrix's own vocabulary | [Plugins overview](/harness/plugins/) |
 
-> **Planned** in this site means: specified in
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` and tracked in
-> `plugins/COVERAGE.md`. Neither file is present in the current checkout — both
-> arrive with the `keel-plugin-core` change. Anything not marked planned is
-> implemented in this repository today.
+`internal/httpapi/server.go:497` is the status-code truth for input: `201` when
+the submission is created, `200` when the same `requestId` is replayed, `202`
+when the input is durable but its run waits for a group slot, and `429` only for
+tenant quota or the in-memory cap (`internal/httpapi/server.go:924`).
 
 ## 6. Where to go next
 
@@ -176,10 +184,10 @@ description of shipped code.
   primitive.
 - [Recovery and compaction](/harness/recovery-and-compaction) — crashes,
   leases, handoff, context compaction.
-- [Plugins](/harness/plugins/) — the plugin host, the standard, and the
-  DSH comparison.
+- [Plugins](/harness/plugins/) — the plugin host, the package standard, and
+  the DSH comparison.
 - [MCP Apps](/harness/mcp-apps) — interactive tool results: app declaration,
   sandboxing, bridge actions and degradation.
 - [Creation mode](/harness/creation-mode) — natural language to a running
-  plugin (planned).
+  plugin (actions shipped; the end-to-end gate is Deferred).
 - [Operations](/harness/operations) — serve, TUI, diagnostics, upgrades.

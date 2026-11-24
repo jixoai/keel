@@ -148,7 +148,7 @@ The recovery guarantees are tested, not promised:
 
 | Guarantee | Evidence |
 | --- | --- |
-| requestId idempotency, SSE cursor, blob resume, 2000-event sequence with no gap | `cmd/e2e` (7/7 in `README.md`) |
+| requestId idempotency, SSE cursor, blob resume, 2000-event sequence with no gap | `cmd/e2e` (8/8 — the case table in `cmd/e2e/main.go:86`, counted in `README.md`) |
 | `SIGKILL` during a model call and during tool execution, then continue | `internal/agent/crash_matrix_test.go`, `internal/durable/*_test.go` |
 | abandoned attempts, lease takeover, drain gate | `internal/agent/worker_abandon_test.go`, `worker_drain_gate_test.go` |
 | handoff safety points (5 classes) and dual-process SSE continuation | `internal/handoff/*_test.go`, `docs/HANDOFF.md` |

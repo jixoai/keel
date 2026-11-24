@@ -17,8 +17,8 @@ section for those.
 ┌───────────────────────────────▼──────────────────────────────────────────────┐
 │ HTTP edge + Harness API (internal/httpapi, internal/harnessapi)              │
 │  edge: tenants/sessions/input/retry/events/stream/files/runtime drain        │
-│  product: capabilities, session list, cancel, decisions, plugins/triggers/   │
-│           sub-agents, settings surface                                       │
+│  product: capabilities, sessions, cancel, decisions, plugins (lifecycle,     │
+│           audit, bridge), triggers, sub-agents, settings surface             │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │ seams: kernel.Committer/Reader/LeaseManager,
                                 │ harnessext primitives, service bindings
@@ -110,11 +110,21 @@ generations (`docs/LOADOUT.md` §4).
 
 ## 3. The plugin host
 
-The plugin host is the `Harness`'s extension runtime. Today it is
-`harnessext.Runtime`: an **in-process, declarative** contract.
+The plugin host is the Harness's extension runtime. It has two layers:
+
+- **`harnessext.Runtime`** — the in-process, declarative assembly;
+- **`harnessext.Manager`** — the package lifecycle authority in front of it:
+  manifest packages under a managed root, six lifecycle states, durable
+  approval for install/enable/update, permission enforcement at host seams and
+  an audit trail (`internal/harnessext/plugin_manager_ops.go:504`).
 
 ```
-harnessext.Runtime
+harnessext.Manager (intent: what the database says)
+├─ Boot(): bundled defaults + discovered packages + persisted state
+├─ Install/Enable/Disable/Uninstall/Update → validate → stage → runtime
+└─ Audit(): plugin_audit rows
+
+harnessext.Runtime (assembly: what is loaded right now)
 ├─ assemble(): unload previous assembly → generation+1 → activate in dependency order
 │    ├─ duplicate tool names across plugins → fail-closed diagnostic
 │    ├─ requires not satisfied → PENDING with "waiting for: …"
@@ -127,19 +137,33 @@ harnessext.Runtime
 
 Citations: plugin contract `internal/harnessext/plugin.go:67`; assembly
 `internal/harnessext/plugin.go:209`; activation `:317`; reverse cleanup `:387`;
-unload `:417`; snapshot `:505`. The current plugin set in `keel serve` is the
-built-in manifests under `internal/pluginpkg/builtin/` (`keel.example`,
-`keel.creation`, `keel.testkit`, the model/agent/team registry plugins); the
-sub-agent primitive is the harness-owned `agent` tool, not a plugin tool.
+unload `:417`; snapshot `:505`. The manager's loaders map is what decides which
+kinds can actually be materialized: `keel serve` registers the sidecar loader
+only (`cmd/keel/serve.go:1769`), and a UI-only `webview` package is enabled
+without an assembly entry (`internal/harnessext/plugin_manager_ops.go:447`).
 
-What this host gives you today: dependency-ordered activation, reverse-order
-reversal of every declared side effect (hooks subscriptions, trigger
-registrations, effects), generation counting, observable states and
-diagnostics, and a fail-closed rule for duplicate tool names. What it does
-*not* have: manifests, installation, sandboxing, permissions or UI hosting —
-those are the planned `plugin.yaml` layer described in
-[Plugins](/harness/plugins/). Until then, "a plugin" means a Go value compiled
-into the binary.
+The built-in manifests under `internal/pluginpkg/builtin/` are all twelve:
+`keel.file`, `keel.model`, `keel.bot`, `keel.team-bot`, `keel.spill`,
+`keel.tasks`, `keel.shell`, `keel.approval`, `keel.notify`, `keel.creation`,
+`keel.example` and `keel.testkit` (all default-enabled except `keel.testkit`,
+`cmd/keel/serve.go:1752`). Official installable packages under `plugins/` add
+`keel.plugin-market`, `keel.web-search` and `keel.context-memory`. The sub-agent
+primitive is the harness-owned `agent` tool, not a plugin tool.
+
+What this host gives you: dependency-ordered activation, reverse-order reversal
+of every declared side effect, generation counting, observable states and
+diagnostics, a fail-closed rule for duplicate tool names, a manifest/package
+layer with lifecycle and audit, permission checks at the seams the host owns,
+and UI hosting at `/plugins/<id>/` with the `keel.plugin.*` bridge. What it does
+not have: a sandbox (neither kind is sandboxed), `permissions.fs` mediation, a
+per-plugin CPU/memory budget, or `agent_backend` sidecars — those are named as
+deferred in [Plugins](/harness/plugins/) §2.3 and
+[Permissions](/harness/plugins/permissions) §5.
+
+Two adjacent layers have their own pages: how the host assembles services,
+config layers and row overlays is [Assembly](/core/assembly); how runs are
+admitted to a group slot, the tenant quota and the queue is
+[Placement](/core/placement).
 
 ## 4. Tools and approvals
 
@@ -176,7 +200,7 @@ that needs a human answer opens a decision, waits with a bounded timeout
 (default 5 minutes, `internal/harnessext/decisions.go:162`), and continues or
 fails on the answer. Decisions are durable rows in the tasks bookkeeping table,
 **never a new event kind** — the kernel's vocabulary is unchanged
-(`internal/kernel/validate.go:36`, `internal/harnessext/doc.go`). See
+(`internal/kernel/validate.go:46`, `internal/harnessext/doc.go`). See
 [Approvals and questions](/harness/approvals-and-questions).
 
 ## 5. Projection

@@ -25,7 +25,8 @@
   - API：`GET /v1/plugins`、`POST /v1/plugins/install`、`GET /v1/plugins/audit`、
     `POST /v1/plugins/{id}/enable|disable|uninstall|update`（`internal/harnessapi/plugins.go:56-62`）；
   - 安装/启用/升级走 durable approval：202 decision → 回答 → 带 decisionId 重试 201（`plugin_approval.go:15-17`、`:111-190`）；
-  - 权限：tools/net/secrets 在 host-mediated 边界强制、sidecar env 白名单、审计写 `plugin_audit`；
+  - 权限：`permissions.tools` 经 `Manager.InvokePluginTool` 强制、sidecar env 白名单强制、审计写 `plugin_audit`；
+    **net/secrets 的 gate 已就绪但生产未接线（`NewPermissionedBroker` 仅测试调用）**——2026-11-24 Lane B 实证修正；
     **`permissions.fs` 仍只声明、不中介**（`internal/harnessext/plugin_permissions.go:19-56`）；
   - sidecar 当前只支持 **tool_provider** 连接；`health` 不在 tool surface；OAR（agent_backend）sidecar 仍 Deferred
     （`plugin_sidecar.go:22-53`、`plugins/keel.oar/plugin.yaml:1-10`）；

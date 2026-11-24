@@ -17,7 +17,7 @@ Core 各包（`internal/kernel`、`internal/loop`、`internal/agentcore`、`inte
 
 | 问题 | 由谁回答 | 出处 |
 | --- | --- | --- |
-| 这条事件可以落账吗？ | Core（契约内核） | `internal/kernel/validate.go:36` |
+| 这条事件可以落账吗？ | Core（契约内核） | `internal/kernel/validate.go:46` |
 | 此刻谁拥有这个会话？ | Core（租约 + fencing epoch） | `internal/kernel/lease.go:16` |
 | 模型看到什么？ | Harness 宿主装配 + loop | `internal/agent/runner.go:280` |
 | 这次 run 有哪些工具？ | Harness（宿主 registry + 插件工具） | `internal/agenttool/registry.go` |
@@ -60,11 +60,14 @@ keel serve（单进程）
 │   ├─ 能力发现         GET /v1/capabilities                        internal/harnessapi/api.go:257
 │   ├─ 会话             GET /v1/sessions, POST …/{id}/cancel        internal/harnessapi/api.go:171
 │   ├─ 审批             GET/POST /v1/sessions/{id}/decisions[/…]    internal/harnessapi/api.go:173
-│   ├─ 插件             GET /v1/plugins                             internal/harnessapi/ext.go:18
+│   ├─ 插件             GET /v1/plugins, POST …/install|{id}/enable|disable|uninstall|update,
+│   │                   GET …/audit, POST /v1/plugin-approvals/{id} internal/harnessapi/plugins.go:56
+│   ├─ 插件 UI          GET /plugins/{id}/*, /v1/plugins/{id}/bridge/* cmd/keel/plugins_ui.go:17
 │   ├─ 触发器           GET /v1/triggers, POST …/{id}/fire          internal/harnessapi/ext.go:39
 │   └─ 子代理           GET /v1/subagents, POST …/{id}/subagents    internal/harnessapi/ext.go:128
 ├─ 扩展面（harnessext）
 │   ├─ 插件运行时       声明式插件、generation、反序卸载            internal/harnessext/plugin.go:163
+│   ├─ 插件管理器       清单包、生命周期、权限、审计                internal/harnessext/plugin_manager_ops.go:504
 │   ├─ hook 总线        闭集事件、异步、有界队列                    internal/harnessext/hooks.go:298
 │   ├─ 审批             开/答/等/超时/取消 + durable 行             internal/harnessext/decisions.go:233
 │   ├─ 触发器           interval/cron/webhook + 幂等 + 审计         internal/harnessext/triggers.go:305
@@ -74,7 +77,7 @@ keel serve（单进程）
 ├─ 宿主装配             system prompt、技能、工具 registry、MCP     internal/host/host.go
 ├─ 服务图               store/llm/prompt/mcp/tools/pi-loop/…        internal/loadout/loadout.go:63
 ├─ Worker               claim → execute → settle                    internal/agent/worker.go:170
-└─ 静态 UI 宿主         web/dist（NSH web 构建）· /plugins/<id>/（规划中） cmd/keel/static.go
+└─ 静态 UI 宿主         web/dist（NSH web 构建）· /plugins/<id>/      cmd/keel/static.go:16
 ```
 
 ## 4. 一次会话的生命周期
@@ -89,7 +92,8 @@ keel serve（单进程）
   │                              │                                        │
   │ POST /v1/sessions/{id}/input │                                        │
   ├─────────────────────────────▶│ commitUserInput（edge 类）          ───▶│ 校验 → 分配 seq → 同事务入队 run
-  │   202 {seq, requestId}       │◀───────────────────────────────────────│
+  │   201 {seq, requestId}       │◀───────────────────────────────────────│  （200 = requestId 重放；
+  │   202 = 已落账但排队中        │                                        │    202 + queued{position,etaSeconds}）
   │                              │                                        │
   │                              │ worker 轮询                            │
   │                              ├─ claim() ─────────────────────────────▶│ 租约 + fencing epoch
@@ -119,28 +123,31 @@ keel serve（单进程）
 2. **恢复不等于续命。** 被杀死的进程由新的 claim 取代：从账本重建转录，只重做缺的那部分
    （工具是 at-least-once）。见[恢复与压缩](/zh/harness/recovery-and-compaction)。
 
-## 5. 已实现 vs 规划中
+## 5. 已实现 / 部分实现 / Deferred
 
-本站严格区分**已实现**（附 `path:line` 可查证）与**规划中**（指向开发中的 `keel-plugin-core`
-change）。这个区分是刻意的：下面的插件标准是规格，不是已交付代码的描述。
+本站使用三档，下表每一行都标明它属于哪一档：
+
+- **已实现**——本仓库已交付；断言附 `path:line` 出处。
+- **部分实现**——机制已交付，但某一部分缺失或比契约更窄（缺口写明）。
+- **Deferred（推迟）**——已定规格并登记、不在本构建中；由 `plugins/COVERAGE.md` 跟踪，某个门被
+  推迟时由其 change 的 `DISPOSITION.md` 记录。
 
 | 领域 | 状态 | 位置 |
 | --- | --- | --- |
 | 账本、内核动词、恢复、handoff | 已实现 | [一次输入的解剖](/zh/harness/anatomy-of-a-turn)、[恢复与压缩](/zh/harness/recovery-and-compaction) |
-| 流式、partials、drain 帧 | 已实现 | [流式与 partial](/zh/harness/streaming-and-partial) |
+| 流式、partials、drain 帧；排队准入（`202` + `queued{position,etaSeconds}`，`429` 只给租户配额/内存上限） | 已实现 | [流式与 partial](/zh/harness/streaming-and-partial) |
 | 审批/问句（decision 原语） | 已实现 | [审批与问句](/zh/harness/approvals-and-questions) |
 | 进程内声明式插件（`harnessext.Plugin`） | 已实现 | [插件宿主](/zh/harness/plugins/) |
 | MCP Apps 宿主（目录/沙箱/桥/events/era） | 已实现（P1–P5；P6 验收进行中） | [MCP Apps](/zh/harness/mcp-apps) |
-| `plugin.yaml` 包、安装、sidecar/webview kind | 规划（`keel-plugin-core` W1） | [清单](/zh/harness/plugins/manifest)、[三种 kind](/zh/harness/plugins/kinds) |
-| 插件权限、沙箱边界、审计端点 | 规划（`keel-plugin-core` W1） | [权限](/zh/harness/plugins/permissions) |
-| 插件 UI 桥（`keel.plugin.*`）、插件托管 | 规划（`keel-plugin-core` W1） | [插件 UI](/zh/harness/plugins/ui) |
-| 创造模式（`keel.creation`） | 规划（`keel-plugin-core` W1） | [创造模式](/zh/harness/creation-mode) |
-| 官方插件套件覆盖矩阵 | 规划（W1/W2/W3 波次） | [插件总览](/zh/harness/plugins/) |
+| `plugin.yaml` 包、安装/生命周期 API、sidecar 与 webview kind | 已实现；`agent_backend` sidecar 为 Deferred | [清单](/zh/harness/plugins/manifest)、[三种 kind](/zh/harness/plugins/kinds)、[生命周期](/zh/harness/plugins/lifecycle) |
+| 插件权限与审计端点 | 部分实现：工具与 sidecar 环境已强制；`net`/`secrets` gate 未路由；`fs` 仅声明 | [权限](/zh/harness/plugins/permissions) |
+| 插件 UI 桥（`keel.plugin.*`）、`/plugins/<id>/` 托管 | 已实现（后端 + 客户端打开路径）；客户端安装/更新卡未接线 | [插件 UI](/zh/harness/plugins/ui) |
+| 创造模式（`keel.creation`） | 动作/模板已实现；端到端门 G8 为 Deferred | [创造模式](/zh/harness/creation-mode) |
+| 官方插件套件覆盖矩阵 | 已实现（catalog + CI 门）；逐插件状态以矩阵自己的词表为准 | [插件总览](/zh/harness/plugins/) |
 
-> 本站中的**规划中**指：已在
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` 定规格，并在
-> `plugins/COVERAGE.md` 跟踪进展。这两个文件在当前检出中都不存在——它们随
-> `keel-plugin-core` change 一同到达。凡未标注规划中的内容，均为本仓库当下已实现。
+输入的状态码真值在 `internal/httpapi/server.go:497`：新建为 `201`、同一 `requestId` 重放为
+`200`、输入已落账但 run 在等组槽位为 `202`，`429` 只用于租户配额或内存上限
+（`internal/httpapi/server.go:924`）。
 
 ## 6. 接下来读什么
 
@@ -149,7 +156,7 @@ change）。这个区分是刻意的：下面的插件标准是规格，不是�
 - [流式与 partial](/zh/harness/streaming-and-partial)——SSE、续传游标、反压与 token 级旁路。
 - [审批与问句](/zh/harness/approvals-and-questions)——decision 原语。
 - [恢复与压缩](/zh/harness/recovery-and-compaction)——崩溃、租约、handoff、上下文压缩。
-- [插件](/zh/harness/plugins/)——插件宿主、标准，以及与 DSH 的对照。
+- [插件](/zh/harness/plugins/)——插件宿主、包标准，以及与 DSH 的对照。
 - [MCP Apps（交互界面）](/zh/harness/mcp-apps)——交互式工具结果：声明、沙箱、桥动作与降级。
-- [创造模式](/zh/harness/creation-mode)——从自然语言到运行中的插件（规划）。
+- [创造模式](/zh/harness/creation-mode)——从自然语言到运行中的插件（动作已交付；端到端门为 Deferred）。
 - [运维](/zh/harness/operations)——serve、TUI、诊断、升级。

@@ -125,7 +125,7 @@ at-least-once 契约与推导式 generation id，存在的意义就是让「缺�
 
 | 保证 | 证据 |
 | --- | --- |
-| requestId 幂等、SSE 游标、blob 续传、2000 事件序列无缺口 | `cmd/e2e`（`README.md` 记 7/7） |
+| requestId 幂等、SSE 游标、blob 续传、2000 事件序列无缺口 | `cmd/e2e`（8/8——用例表见 `cmd/e2e/main.go:86`，`README.md` 记同一数字） |
 | 模型调用中与工具执行中 `SIGKILL` 后继续 | `internal/agent/crash_matrix_test.go`、`internal/durable/*_test.go` |
 | 放弃的 attempt、租约接管、排水门 | `internal/agent/worker_abandon_test.go`、`worker_drain_gate_test.go` |
 | handoff 五类安全点与双进程 SSE 续传 | `internal/handoff/*_test.go`、`docs/HANDOFF.md` |

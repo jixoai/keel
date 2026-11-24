@@ -55,6 +55,11 @@ partial 旁路——以及围绕它们的交付保证：续传游标、唤醒、
 
 过载永远以诚实的 429/503 + `Retry-After` 呈现，绝不静默丢弃已提交事实。
 
+有一类情况刻意**不算**过载拒绝：输入已落账，但它所在的 run 正在等一个已满的组槽位时，返回 **202** 与
+`queued` 块（`position`/`active`/`limit`/`etaKnown`/`etaSeconds`，ETA 已知时另带 `Retry-After`），
+而不是 429——durable 输入不会被拒，它按 FIFO 排队；429 只留给租户配额与内存上限，因此队列永远不会
+变成超卖通道（`internal/httpapi/server.go:497`、`internal/httpapi/server.go:848`、`internal/httpapi/server.go:924`）。
+
 ## 4. Partials：token 级旁路
 
 这条旁路的存在，是为了让 UI 在文本生成过程中即可显示，同时不削弱日志。它刻意很窄：

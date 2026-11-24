@@ -132,7 +132,7 @@ KEEL_DSN="$KEEL_DSN" ./keel-runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 
 ## Reading map
 
-The Core main line is five pages of theory plus six pages of practice:
+The Core main line starts with the theory pages and the extension paths:
 
 | Page | Question it answers |
 |---|---|
@@ -140,6 +140,11 @@ The Core main line is five pages of theory plus six pages of practice:
 | [Events and protocol](/core/events) | What are the event kinds, how is a commit classified, how is idempotency enforced, what does SSE guarantee? |
 | [Harness API reference](/core/agentapi) | Which HTTP endpoints exist on each face, with what request/response shapes and error codes? |
 | [Storage and runtime](/core/storage) | How is data stored (PostgreSQL, chunks, CAS), how are requests pooled, and what is the memory budget? |
+| [Loadout and assembly](/core/assembly) | How do base, mode, preset and `config.toml` combine, and what does a row id override? |
+| [Placement and queues](/core/placement) | How are groups, leases and the queued 202 admission counted, and when is it a 429? |
+| [Tenancy and quotas](/core/tenancy) | How do tenants, RLS and the two quota vocabularies work in `keel serve` vs `cmd/runtime`? |
+| [Files and blobs](/core/files) | How do the file manifest, tree objects, CAS, GC and thumbnails fit together? |
+| [Session query](/core/session-query) | How do search, export, deliverables, task panel and file preview read a session? |
 | [Extension map](/core/extend/) | I want to change X — which seam do I use? |
 | [Embed the runtime](/core/extend/embed-runtime) · [Write a service descriptor](/core/extend/service-descriptor) · [Connect an external backend](/core/extend/external-backend) · [Write a provider adapter](/core/extend/provider-adapter) · [Test and accept](/core/extend/testing) | The four extension paths, each with code, commands and acceptance criteria. |
 
@@ -149,8 +154,13 @@ graph and the handoff work this way).
 
 ## Status and honesty note
 
-Keel is a working runtime under active hardening, not a finished GA product. `docs/MATURITY.md`
-grades every capability G0–G5 with the evidence each gate requires, and states plainly what is
-still missing (for example: per-tenant loadout hot-switching, service-ised sandbox/hooks, and CPU /
-memory budgets for external sidecars). Where this site describes something as done, it was
-verified against the code at the documented revision; where something is a plan, the page says so.
+Keel is a working runtime under active hardening, not a finished GA product. Maturity is now
+established per change: each change under `openspec/changes/` carries its own evidence directory
+(contract snapshots, before/after graphs, test logs — for example
+`openspec/changes/keel-oar-renderer/evidence/api-contract.txt:1`), and that evidence is what a
+capability claim is checked against. `docs/MATURITY.md` keeps the G0–G5 ladder and the historical
+v1 matrix, but the matrix is a snapshot from an earlier revision and is no longer the only source
+of truth (`docs/MATURITY.md:34`). Still-open gaps are named where they apply — for example
+per-tenant loadout hot-switching, service-ised sandbox/hooks, and CPU / memory budgets for external
+sidecars. Where this site describes something as done, it was verified against the code at the
+documented revision; where something is a plan or is deferred, the page says so.

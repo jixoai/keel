@@ -77,8 +77,10 @@ export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookie
 ```
 
 Open `http://127.0.0.1:13750`, enter the setup token plus the username and password for the first
-super admin, and the browser forces a password change before entering. There is no passphrase and
-no first-visitor-becomes-admin path. Machines use a Bot-bound key (`keel_bot_...`), never a browser
+super admin: that password is the final credential, so the browser enters the app directly. Only a
+temporary password minted by a CLI/admin reset forces a change at first login
+(`cmd/keel/auth.go:568`; the flag is set only by a password reset — `internal/store/auth_events.go:173`). There is no passphrase and no
+first-visitor-becomes-admin path. Machines use a Bot-bound key (`keel_bot_...`), never a browser
 login. The exact login/CSRF requests and every endpoint shape are in the
 [AgentAPI reference](/core/agentapi).
 

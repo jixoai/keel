@@ -12,12 +12,12 @@ keel 交付为一个 Go 二进制加一份静态网页客户端。两者来自�
 
 | 产物 | 说明 |
 |---|---|
-| `keel` | 产品外壳：`keel serve`（Harness API + 网页界面 + SSE 同一个源）、`keel tui`（终端客户端）、`keel doctor`、`keel version` |
+| `keel` | 产品外壳：`keel serve`（Harness API + 网页界面 + SSE 同一个源）、`keel tui`（启动你自备的 TUI 客户端，见下）、`keel doctor`、`keel version` |
 | `keel-web-0.2.0.zip` | 打包好的网页客户端。解压后用 `keel serve -web-dir <目录>` 指过去 |
 
 ## 运行前提
 
-- **PostgreSQL 14+** —— 事件账本存在那里，`keel serve` 需要一个 DSN。
+- **PostgreSQL 18** —— 事件账本存在那里（`internal/store/schema.sql:1`），`keel serve` 需要一个 DSN。
 - **一个模型端点** —— 任意 OpenAI 兼容接口（或 Anthropic），外加一把 key。
 - **网页客户端** —— 单独提供（二进制里没有内嵌）。
 
@@ -64,11 +64,11 @@ keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
 keel serve -addr 127.0.0.1:13750
 ```
 
-打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入；只有 CLI/管理员重置出的临时密码才会要求先改密。
+打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入；只有 CLI/管理员重置出的临时密码才会要求先改密（`internal/store/auth_events.go:173`）。
 机器客户端用绑定到 Bot 的 key（`keel_bot_...`），不走浏览器登录。起不来时先跑
 `keel doctor` —— 它会打印进程实际解析到的配置、构建信息与产物路径。
 
-终端客户端连的是同一个服务：
+`keel tui` 启动 `KEEL_TUI_BIN` 指定的 TUI 可执行文件（用户自备或嵌入），连的是同一个服务：
 
 ```bash
 keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"

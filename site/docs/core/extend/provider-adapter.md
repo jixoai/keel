@@ -2,8 +2,8 @@
 
 A **provider adapter** is the code that turns Keel's shaped request into one vendor's wire format
 and streams the answer back as a single event type. This page documents the seam, how resolution
-works today, what adding a provider actually involves, and which parts of the file/image protocol
-are *not* implemented.
+works today, what adding a provider actually involves, and how attachments (images and documents)
+are carried outbound.
 
 ## 1. The seam
 
@@ -147,23 +147,44 @@ patch: the `llm` service provides `ctx.llm`, so you supply your own factory thro
 described in [Write a service descriptor](/core/extend/service-descriptor); the loop sees only a
 `StreamFn`.
 
-## 6. What is *not* implemented: the file/image protocol
+## 6. Attachments: `file_id` > `url` > `base64`
 
-Providers currently receive images the way PI/pigo do: **base64 inline**. The content type has
-`data` and `mimeType` only — there is no blob reference
-(`internal/agentcore/content.go:65`). The repository's own research and plan are explicit about the
-gap (`docs/FILE-PROTOCOL.md:46`):
+The file/image protocol is implemented, and the order is fixed. Two shapes matter:
 
-- The platform blob layer exists (`POST /v1/files` → `fileId` + `url`, streamed chunk reads,
-  SHA-256 dedupe — see [Storage and runtime](/core/storage)).
-- What does **not** exist yet: per-provider capability bits (`SupportsImageURL`, `SupportsFileID`)
-  and `ResolveImage(blobID)` selection (`file_id` > `url` > `base64`). A grep for those identifiers
-  in `internal/` finds no implementation.
-- The planned order is Gemini Files API → OpenAI Responses `file_id` → Anthropic URL → Anthropic
-  Files `file_id` → DashScope/OpenRouter URL (`docs/FILE-PROTOCOL.md:62`).
+- **What the ledger stores** is a reference only: `ImageRefContent{blobId, mimeType, size…}` (and
+  `MediaRefContent` for non-images). Base64 never enters the events table, so the same image
+  referenced by many turns is one blob row and one copy of the bytes
+  (`internal/agentcore/content.go:190`, `openspec/specs/provider-files/spec.md:5`).
+- **What the provider wire carries** is a transport form: `ImageContent` with exactly one of
+  `fileId` / `url` / `data` populated (`internal/agentcore/content.go:156`).
 
-So: an adapter that wants to avoid re-uploading image bytes has to do that work first; do not
-document it as available.
+Resolution happens in the worker, before the outbound request, against the target's declared
+capabilities:
+
+1. **`file_id`** — a provider-side handle from the upload path. Cheapest form: the bytes cross the
+   wire once and again only when the handle expires. Handles are cached by
+   `(sha256, provider, workspace)` with a TTL and lazy refresh
+   (`internal/provider/imagefiles.go:324`).
+2. **`url`** — a minted URL (default TTL 10 minutes) so the bytes stay out of the request body
+   (`internal/provider/imagefiles.go:163`).
+3. **`base64`** — universal, and the bound: the inline path allocates exactly one encoded buffer,
+   capped by the provider's `MaxInlineBytes` before a byte is read
+   (`internal/provider/imagefiles.go:299`).
+
+The capability declaration is per **wire protocol**, not per model name: `ImageCapsForAPI`
+(`internal/provider/imagecaps.go:82`) and `FileCaps` for documents
+(`internal/provider/media.go:51`), each with `BestForm()` following the same order
+(`internal/provider/imagecaps.go:63`, `internal/provider/media.go:80`). A driver that declares no
+capabilities is treated as base64-only, which every vendor accepts.
+
+Degradation is honest, never silent: a failed upload/URL falls through with a recorded `Note`, and
+an image over the declared ceiling that no cheaper form can carry fails closed as
+`ErrImageTooLarge` naming the size and the limit — the run continues without the image instead of
+an OOM or a rejected request (`internal/provider/imagefiles.go:42`).
+
+So the work an adapter author has is narrow: declare the caps for the protocol and encode the three
+forms. Everything above the encoder — capability selection, the handle cache, the bounded inline
+buffer — is already in `internal/provider`.
 
 ## 7. Testing a provider adapter
 

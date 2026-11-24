@@ -1,10 +1,14 @@
 # Creation mode
 
-> **Planned.** Creation mode is specified in
-> `openspec/changes/keel-plugin-core/specs/plugin-system/spec.md` ("creation mode (shipped as
-> the built-in plugin `keel.creation`)") and tracked in `plugins/COVERAGE.md`. Nothing on
-> this page exists in the current checkout; every mechanism it builds on is
-> implemented and cited.
+> **Implemented**: `keel.creation` is a bundled plugin with six actions, enabled
+> by default like every builtin except `keel.testkit`
+> (`internal/harnessext/creation.go:91`, `cmd/keel/serve.go:1752`), and it
+> scaffolds the webview + react + solid-glass template
+> (`plugins/templates/webview-react-solidglass/`).
+> **Deferred**: the end-to-end gate G8 — "one sentence → a running plugin" — has
+> not passed (`openspec/changes/archive/2026-11-24-keel-harness-v2/DISPOSITION.md:20`).
+> This page describes what ships and states the gap; it does not claim a fully
+> accepted feature.
 
 Creation mode is the answer to a simple question: *if everything is a plugin,
 who writes the plugins?* The answer is the agent itself — under the same
@@ -14,18 +18,20 @@ approval and audit rules as everything else.
 
 A **built-in plugin** named `keel.creation`. It is not a privileged core
 feature: it can be disabled like any other plugin, and it is subject to its own
-permission set (`spec: creation mode`). What it does:
+permission set. The manifest is
+`internal/pluginpkg/builtin/keel.creation.yaml`; the implementation lives in
+`internal/harnessext/creation.go`. What it does:
 
 ```
 user describes a capability in natural language
         │
         ▼
-keel.creation: generate a plugin package
+keel.creation: scaffold a plugin package
         │   webview + react + solid-glass template
         │   plugin.yaml (id/version/kind/provides/permissions)
         │   ui/index.html + assets
         ▼
-validate (manifest · version gate · content hash · template lint)
+validate (manifest · version gate · content tree · template lint)
         │
         ▼
 install → enable  (durable approval required)
@@ -34,11 +40,22 @@ install → enable  (durable approval required)
 return a UI deep link:  /plugins/<id>/
 ```
 
-The spec's acceptance scenario is the shortest possible statement of the
-feature: *say "make a small panel showing this session's token usage", and a
-webview plugin package is generated, installed and enabled; the plugin appears
-in the inventory; opening its UI shows the data; the audit has `install` and
-`enable` records* (`spec: one sentence generates a plugin`).
+The six actions are the plugin's whole surface (`internal/harnessext/creation.go:91`):
+
+| Action | What it does |
+| --- | --- |
+| `catalog` | read-only aggregate of installed plugins and their surface |
+| `scaffold` | render the template into `<plugins-root>/.creation/<id>`, then validate the **output** with the real package validator |
+| `validate` | field-level problems of a staged package, plus structural/host-prerequisite warnings |
+| `install` | durable approval → manager `Install` → manager `Enable` → deep link |
+| `list` | what this session generated and where it stands |
+| `remove` | durable approval → disable → uninstall → delete the staged artifact |
+
+The model reaches them through the harness-owned `creation` aggregate tool; the
+`keel.creation.*` names are internal handlers and are never published to the
+model (`internal/harnessext/creation.go:88`). Creation mode does **not** call a
+model from inside a plugin: the main session's agent writes the package, and
+these tools are its hands on the filesystem and on the plugin manager.
 
 ## 2. Why it is a plugin, not a core mode
 
@@ -52,21 +69,21 @@ the point:
    enforcement, audit ([Permissions](/harness/plugins/permissions),
    [Lifecycle](/harness/plugins/lifecycle)). There is no "generated" shortcut
    around the rules.
-3. **Uniform artifacts.** A generated plugin is a normal package in the
-   managed directory: listable, disable-able, deletable, auditable
-   (`spec: artifacts MUST be listable, disableable and deletable`).
+3. **Uniform artifacts.** A generated plugin is a normal package in the managed
+   directory: listable, disable-able, deletable, auditable.
 
 ## 3. Failure is a first-class outcome
 
 Generation is a model-driven activity; it will fail sometimes, and the failure
-path is specified as strictly as the success path (`spec: a failed generation rolls back`):
+path is implemented as strictly as the success path:
 
-- a failed generation or validation produces **no half-installed state** — the
-  install step is atomic at the package level;
+- a scaffold renders into a temporary directory and only moves into the staging
+  path after the **real** validator accepts it, so a failed generation leaves
+  nothing behind (`internal/harnessext/creation.go:28`);
+- a failed install removes the staged package;
 - the error is returned to the user verbatim (not re-wrapped into a generic
   "something went wrong");
-- temporary artifacts produced during generation are cleaned up;
-- generation and installation both write audit rows, including the failure.
+- every step writes audit rows, including the failure.
 
 The rollback rule is the same discipline the service graph applies to
 activation: *a failed activation rolls back its own effects; it never leaves a
@@ -83,7 +100,10 @@ Creation mode is an ordinary participant in the Harness loop:
   in a workspace, the plugin's tools scaffold and validate them;
 - the install/enable step **opens a decision** and waits — the approval is a
   durable row, not a modal dialog ([Approvals and
-  questions](/harness/approvals-and-questions));
+  questions](/harness/approvals-and-questions)). It is two-phase because a
+  human answer does not fit in one tool call: call `install` to get
+  `approval_required` + `decisionId` + `answerUrl`, have it answered, then call
+  `install` again with that `decisionId`. A refusal changes nothing.
 - every step lands in the ledger as normal events, so the whole act of
   creation is replayable and auditable like any other run.
 
@@ -108,3 +128,18 @@ same thesis: the official suite (`plugins/COVERAGE.md`, waves W1–W3) brings
 keel's existing capability surface *in* as plugins; creation mode lets a user
 grow *new* ones without waiting for a release. Both end up as rows in the same
 inventory, under the same permissions and the same audit.
+
+## 7. Acceptance status — what has not passed
+
+Two parts of the standard around creation mode are **not** accepted, and the
+documentation says so instead of implying completion:
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| G8 end-to-end: AI writes a native plugin in a live session, start to deep link | **Deferred** — the end-to-end run has not gone through; the webview E2E path exists | `openspec/changes/archive/2026-11-24-keel-harness-v2/DISPOSITION.md:20` |
+| v2 extensibility aggregation and the native chunk main path | **partial** — the declaration format is frozen and validated, but aggregating every installed plugin's `extensibility.json` into the creation surface is unfinished | `plugins/COVERAGE.md` (`keel.creation` → `partial`) |
+
+So the honest summary is: the six actions, the template, the approval path and
+the rollback discipline ship; the "say one sentence, get a running plugin"
+acceptance gate is open. Until it closes, treat creation mode as implemented but
+**not** as a fully accepted feature.

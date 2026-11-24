@@ -14,12 +14,13 @@ checksums below mean something.
 
 | Artifact | What it is |
 |---|---|
-| `keel` | The product shell: `keel serve` (Harness API + web UI + SSE on one origin), `keel tui` (terminal client), `keel doctor`, `keel version` |
+| `keel` | The product shell: `keel serve` (Harness API + web UI + SSE on one origin), `keel tui` (launches a TUI client you provide, see below), `keel doctor`, `keel version` |
 | `keel-web-0.2.0.zip` | The packaged web client. Unzip it and point `keel serve -web-dir <dir>` at it |
 
 ## Requirements
 
-- **PostgreSQL 14+** — the event ledger lives there. `keel serve` needs a DSN.
+- **PostgreSQL 18** — the event ledger lives there (`internal/store/schema.sql:1`); `keel serve`
+  needs a DSN.
 - **A model endpoint** — any OpenAI-compatible API (or Anthropic), plus a key.
 - **The web client** — provided separately (the binary does not embed it).
 
@@ -67,12 +68,14 @@ keel serve -addr 127.0.0.1:13750
 ```
 
 Open `http://127.0.0.1:13750`, enter the setup token plus the username and
-password for the first super admin, then change the password on first login.
+password for the first super admin: that password is final and setup completes
+straight into the app. Only a temporary password minted by a CLI/admin reset
+forces a change at first login (`cmd/keel/auth.go:568`, `internal/store/auth_events.go:173`).
 Machines use a Bot-bound key (`keel_bot_...`), not a browser login.
 `keel doctor` prints what the process resolved (config, build, artifacts) when
 something does not start.
 
-The terminal client talks to the same server:
+`keel tui` launches the TUI binary named by `KEEL_TUI_BIN` (a user-supplied or embedded client) against the same server:
 
 ```bash
 keel tui --url http://127.0.0.1:13750 --token "$KEEL_AGENT_TOKEN"

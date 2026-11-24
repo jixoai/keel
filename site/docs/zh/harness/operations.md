@@ -1,7 +1,8 @@
 # 运维
 
 本页是 Harness 部署的运行手册：如何启动、如何观察、产物在哪里、如何在不丢会话的前提下升级。
-覆盖已实现的面（附出处）与规划中的插件目录（已标注）。
+本页点名的每个面都已在本仓库交付；凡比契约更窄的部分（TUI 没有可分发产物、`permissions.fs`
+尚未中介），页面会写明。
 
 ## 1. `keel serve`——Harness 宿主
 
@@ -24,10 +25,14 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 | `KEEL_SERVE_WEB_DIR` / `--web-dir` | 静态 web 构建目录 | `web/dist` |
 | `KEEL_MODEL` / `KEEL_PROVIDER` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_API_KEY` | 模型选择（未设 = fake provider） | — |
 | `KEEL_MODELS_CONFIG` / `--models-config` | 租户模型文档（providers/rules/selection） | — |
+| `--config-file` / `KEEL_CONFIG_FILE` | `config.toml` 路径；文件缺失 = 空配置 | `$KEEL_HOME/config.toml` |
+| `--plugins-root` / `KEEL_PLUGINS_ROOT` | 受管插件包根目录（每个插件 id 一个目录；首次安装时创建） | `$KEEL_HOME/plugins` |
+| `KEEL_HOME` | 上述默认值的家目录 | `~/.keel` |
 | `KEEL_SKILLS_ROOTS` | 技能根目录的 OS 路径列表（PI 兼容） | — |
 | `KEEL_RUNTIME_ID` | 写入 claim/审计的运行时身份（handoff） | hostname-pid |
 
-（出处：`cmd/keel/main.go`、`cmd/keel/auth.go`、`docs/HANDOFF.md`。）
+（出处：`cmd/keel/main.go:170` 为 config/plugins flag 及其默认值，`cmd/keel/main.go:246` 为
+plugins-root 的解析顺序；另见 `cmd/keel/auth.go`、`docs/HANDOFF.md`。）
 
 暴露端口前值得知道的运维事实：
 
@@ -62,22 +67,29 @@ keel tui --print
 ```
 
 TUI 是同一个客户端（同一份 TSX、同一个 Harness API）在终端宿主中的渲染；它不是第二套实现
-（`docs/WEBUI.md`）。`KEEL_TUI_BIN` 指向打包的 TUI 二进制
-（`nsh package --target tui`），`KEEL_AGENT_URL` 指向运行中的宿主（`cmd/keel/tui.go:22`）。
-它刻意不渲染插件 UI——插件行改为打开 web URL
+（`docs/WEBUI.md`）。本次构建**没有可分发的 TUI 产物**：`nsh package` 没有 `tui` target
+（`web/README.md:167`），因此 TUI 只能走开发宿主（`nsh run --target tui`）或嵌入
+`nsh-platform-tui`。`KEEL_TUI_BIN` 指向用户自备的 TUI 二进制，`KEEL_AGENT_URL` 指向运行中
+的宿主（`cmd/keel/tui.go:22`）。它刻意不渲染插件 UI——插件行改为打开 web URL
 （[插件 UI](/zh/harness/plugins/ui)）。
 
-## 3. 插件目录
+## 3. 插件目录与生命周期 API
 
-| 方面 | 今天 | 规划 |
-| --- | --- | --- |
-| 插件从哪来 | 编译进二进制（`keel.example`、`keel.creation`、`keel.testkit`、registry 插件——`internal/pluginpkg/builtin/`） | 启动时发现 `<plugins-root>/<id>/` 包 |
-| 启用/停用 | 进程装配（`harnessext.Runtime.Apply`） | 生命周期 API + 审批（[生命周期](/zh/harness/plugins/lifecycle)） |
-| 状态 | 逐插件 `active`/`pending`/`failed`/`stopped`、generation 计数、诊断 | 加上 `installed`/`disabled`，以及安装/卸载/更新审计 |
-| 在哪可见 | `GET /v1/plugins` + web 设置 › 插件（`internal/harnessapi/ext.go:18`、`web/src/screens/settings.tsx:1148`） | 同一端点扩展，而非替换 |
-
-规划中的插件根目录是**受管目录**：包被拷入其中、安装时做内容 hash、绝不就地引用
+插件根是**受管目录** `<plugins-root>/<id>/`：安装时把包拷入、做内容哈希、绝不就地引用
 （[清单](/zh/harness/plugins/manifest)）。像备份其他状态目录一样备份它；账本里没有插件二进制。
+
+| 方面 | 交付了什么 |
+| --- | --- |
+| 插件从哪来 | 二进制内嵌的内置清单（`internal/pluginpkg/builtin/`，共十二个）**加上**启动时在插件根下发现的包 |
+| 安装 / 升级 | `POST /v1/plugins/install` `{path}`；`POST /v1/plugins/{id}/update` `{path?}`——两阶段：`202` 打开 durable 审批（由 `POST /v1/plugin-approvals/{decisionId}` 作答），带 `decisionId` 重试回答 `201`；拒绝为 `409` |
+| 启用 / 停用 / 卸载 | `POST /v1/plugins/{id}/enable`（同理 `disable`、`uninstall`）；卸载要求先 `disabled` 且无启用依赖方；内置插件只能停用，不能卸载 |
+| 状态 | 持久化在 `plugins` 表（`internal/store/schema.sql:582`）：`installed`/`enabled`/`disabled`/`failed`/`invalid`；包消失时行保留状态，让原因可见 |
+| 审计 | `GET /v1/plugins/audit`（`internal/store/schema.sql:603`）：每次生命周期动作、每次被拒审批或权限拒绝，按 `after` 做 keyset 分页 |
+| 在哪可见 | `GET /v1/plugins`（`internal/harnessapi/plugins.go:56`）+ web 插件页；已启用插件的 UI 在 `/plugins/<id>/` |
+| 持久化规则 | 持久化的停用状态跨重启保留；只有首次启动才应用内置插件的默认启用值 |
+
+根目录为空会禁用安装（无处可拷），但内置插件照常工作——该部署仍能以装配结果回答
+`GET /v1/plugins`。
 
 ## 4. 诊断
 
@@ -88,7 +100,9 @@ TUI 是同一个客户端（同一份 TSX、同一个 Harness API）在终端宿
 | `GET /v1/health` | 进程存活 |
 | `GET /v1/ready` | store 就绪（迁移已应用） |
 | `GET /v1/metrics`（JSON）与 `GET /metrics`（Prometheus） | 流/调度/准入计数、run 指标 |
-| `GET /v1/plugins` | 装配结果：generation、插件状态、工具、hooks 摘要、诊断 |
+| `GET /v1/plugins` | 清单：root、revision、generation、逐插件 state/source/path/content hash、工具、prompt 分节、hooks 摘要、诊断 |
+| `GET /v1/plugins/audit` | 生命周期轨迹，外加被拒审批与权限拒绝 |
+| `GET /plugins/<id>/…` | 已启用插件的托管 UI（未安装 404，未启用 403） |
 | `GET /v1/triggers` | 触发器清单 + 审计窗口（`internal/harnessapi/ext.go:39`） |
 | `GET /v1/sessions/{id}/run` 与 `/run/loadout` | run 行（status/attempts/cursor/lastError）与钉住的 loadout（`docs/LOADOUT.md` §5） |
 | `POST /v1/runtime/drain`、`GET /v1/runtime/status` | 排水控制与可观测性（`docs/HANDOFF.md`） |

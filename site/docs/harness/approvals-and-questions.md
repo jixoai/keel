@@ -6,7 +6,7 @@ answer: tool approvals, clarifying questions, choices between options.
 
 The design rule is the same as everywhere else: the primitive lives in the
 product layer, and the ledger's vocabulary does not grow. A decision is **not**
-a kernel event kind (`internal/kernel/validate.go:36`); it is a durable row
+a kernel event kind (`internal/kernel/validate.go:46`); it is a durable row
 projected onto the existing tasks bookkeeping table with an answer journal
 (`internal/harnessext/doc.go`).
 
@@ -114,12 +114,35 @@ section instead of guessing (`internal/harnessapi/api.go:261`).
 - **Not a UI state.** The UI may render optimistically, but the durable row is
   the answer of record; a refresh re-reads it from the API.
 
-## 6. Planned: plugin-facing approvals
+## 6. Plugin-facing approvals (implemented)
 
-The planned plugin standard adds one more consumer: a plugin UI can **request
-an approval** through the host bridge (`keel.plugin.*`), and plugin
-installation/enablement itself must go through a durable approval before it
-takes effect
-(`openspec/changes/keel-plugin-core/specs/plugin-system/spec.md`, "permissions and sandbox").
-Both are marked **planned** — the current checkout has no plugin bridge and no
-plugin install path.
+The plugin standard adds two more consumers, and both are shipped on top of the
+same primitive:
+
+1. **Lifecycle writes.** `install`, `enable` and `update` are durable approvals,
+   not defaults — installing a plugin means adopting code the operator did not
+   write (`internal/harnessapi/plugin_approval.go:412`):
+
+   ```
+   POST /v1/plugins/install {"path": "..."}                       → 202 {"approvalRequired": true, "decision": …}
+   POST /v1/plugin-approvals/{decisionId} {"optionId": "allow"}    (the human answers)
+   POST /v1/plugins/install {"path": "...", "decisionId": "..."}   → 201 (or 409 refused)
+   ```
+
+   The decision id is derived from `(tenant, action, requestId-or-target)`, so
+   a question opened for one action or one package cannot authorize another.
+   Deny and timeout never reach the manager and are audited with result
+   `refused`. Because plugin writes arrive from a settings page rather than
+   from inside a chat turn, their decision rows live in a tenant-scoped session
+   namespace instead of a run's session.
+
+2. **Plugin UI requests.** A plugin page can open its own question through the
+   bridge — `POST /v1/plugins/{id}/bridge/approve`, then the
+   `/v1/plugins/{id}/bridge/approvals/{decisionId}` pair to read or answer
+   (`internal/harnessapi/plugin_bridge.go:75`). The question is marked with a
+   `plugin-bridge:` prefix so it is distinguishable from other questions, and
+   the whole bridge requires the plugin to be enabled.
+
+Neither path introduces a second question mechanism: both are the `Decision`
+row, the answer journal and the bounded timeout described above
+([Permissions](/harness/plugins/permissions), [Lifecycle](/harness/plugins/lifecycle)).

@@ -21,7 +21,9 @@ Keel 只有两种扩展哲学，适用哪一种取决于**你要改的是什么�
 | 暴露外部工具服务 | `ToolProvider`（`external.tools`） | [接外部 backend](/zh/core/extend/external-backend) |
 | 加模型 provider 或换协议 | `provider.StreamFn` + `provider.ResolveProvider` | [写 provider 适配器](/zh/core/extend/provider-adapter) |
 | 给模型加一个工具 | `agenttool.ToolRegistry`（内核侧）或宿主 registry（受 `tools.allow` 过滤） | [嵌入 runtime](/zh/core/extend/embed-runtime) |
-| 加产品能力（插件、hook、触发器、子代理、审批） | Harness 扩展面（当前实现 `internal/harnessext`；插件标准在 Harness 主线） | [Harness 插件](/zh/harness/plugins/) |
+| 加产品能力（插件、hook、触发器、子代理、审批） | Harness 扩展面：插件标准（`internal/pluginpkg`、`internal/harnessext`）或仓内 harness 服务 | [Harness 插件](/zh/harness/plugins/) |
+| 交付一个插件包（工具、hook、触发器、UI 或槽位贡献） | 带 `provides`/`contributes`/`slots` 的 `plugin.yaml` 包（`internal/pluginpkg/manifest.go:142`），经 `/v1/plugins` 安装 | [Harness 插件](/zh/harness/plugins/) · 冻结契约见 `docs/PLUGIN-EXTENSIBILITY.md:1` |
+| 为某个部署/模式/预设覆盖一个服务行 | 装配行覆盖：base → mode → preset → `config.toml`，按 row id 命中（`internal/assembly`、`docs/ASSEMBLY.md:41`） | [写一个服务描述符](/zh/core/extend/service-descriptor) |
 | 加新事件 kind | 仓内变更：`kindRegistry` + `internal/store` 常量 + 转录/SSE/R1 规则同步移动 | [事件与协议](/zh/core/events) |
 | 改存储或加表 | 仓内变更：`internal/store/schema.sql` 或带编号的内核迁移 | [存储与运行](/zh/core/storage) |
 | 做 UI | Harness API + SSE（版本化 `/v1`，能力探测） | [Harness API 参考](/zh/core/agentapi) |
@@ -45,6 +47,8 @@ Keel 只有两种扩展哲学，适用哪一种取决于**你要改的是什么�
 | 新 loop | `internal/agentloop` 实现 + 声明 | PI conformance 套件 + R1 差分 + loop conformance 门 |
 | 外部 backend | 租户文档（`external.backends`）+ 一个 provider 进程 | `go test -race ./internal/gateway ./internal/externalgw` + `scripts/external-gateway-smoke.sh` |
 | provider 适配器 | `internal/provider` + 注册表条目 | provider 流测试；有凭据则跑真模型 E2E |
+| 插件包 | `plugin.yaml`（官方插件另加 `extensibility.json`）、你的入口/UI 资产 | `go test -race ./internal/pluginpkg ./internal/harnessext`；再到运行实例上 `POST /v1/plugins/install` 安装 |
+| 装配行覆盖 | base/mode/preset 文档或 `config.toml` | `go test -race ./internal/assembly ./internal/configfile`；校验命令清单见 `docs/ASSEMBLY.md:320` |
 | 新事件 kind | `kindRegistry`、store 常量、转录/SSE/R1 规则 | R1 差分（白名单之外零差异）+ 完整 `acceptance-all.sh` |
 
 这些门本身见[测试与验收](/zh/core/extend/testing)。

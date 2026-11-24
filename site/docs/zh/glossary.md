@@ -32,7 +32,7 @@ sidebar: false
 | 术语 | 定义 | 出处 |
 | --- | --- | --- |
 | **账本（Ledger）** | 只追加的事件日志；唯一真值。投影与 checkpoint 皆由它派生。 | `docs/KERNEL.md` |
-| **事件 kind** | durable 事实的闭集词汇：`user.message`、`assistant.message`、`tool.result`、`compaction`、`run.started`/`run.failed`（保留）、`run.finished`、`external.event`。 | `internal/kernel/validate.go:36` |
+| **事件 kind** | durable 事实的闭集词汇——**共 25 个已注册 kind**：`user.message`、`assistant.message`、`tool.result`、`compaction`、`run.started`/`run.failed`（保留）、`run.finished`（携带 `run` 键）、`external.event`、六个 `task.*`、`fs.write`/`fs.capture`/`fs.capture_failed`，以及 system 类 `config.rotated`、`placement.joined`/`placement.left`、`supervision.escalated`、`guardrail.tripped`、`resume.attempt`、`notification.ack`/`notification.push_sent`。 | `internal/kernel/validate.go:46` |
 | **seq** | 会话内事件序号；客户端续传的游标（`id: <seq>`）。 | `internal/httpapi/server.go:628` |
 | **会话（Session）** | 一段对话：一份事件日志，任一时刻至多一个写者。 | `docs/KERNEL.md` |
 | **run / attempt** | 会话待办工作的一次执行。一个 run 可被多次 attempt（重试）；每次 attempt 被 claim、围栏与结算。 | `internal/kernel/lease.go`、`internal/agent/worker.go:223` |
@@ -56,11 +56,12 @@ sidebar: false
 | **Loadout** | 服务集合的不可变快照 `{id, revision, version, summary, services}`，按 run 钉住。 | `docs/LOADOUT.md` §1 |
 | **Generation** | 每次重装配 +1 的计数器；旧代实例继续服务在途 run，之后退休。 | `internal/servicegraph/engine.go:270`、`docs/LOADOUT.md` §4 |
 | **Selection** | 随 run 记录的模型/provider 选择；按当前代的 provider 配置校验。 | `internal/modelcfg`、`internal/agent/runner.go:321` |
-| **插件（Plugin）** | Harness 的扩展。今天：进程内 Go 值（`harnessext.Plugin`）。规划：三种 kind 之一的 `plugin.yaml` 包。 | `internal/harnessext/plugin.go:67` |
-| **`plugin.yaml`** | 规划中的插件清单（id/version/kind/engines/provides/requires/permissions/entry/source）。 | 规划：`keel-plugin-core` spec |
-| **in-process / sidecar / webview** | 三种规划中的插件 kind：编译进宿主 / 经 stdio JSON-RPC 的外部进程 / 宿主托管的 UI 包。 | 规划：`keel-plugin-core` spec |
-| **`keel.plugin.*`** | 规划中的桥：webview 插件借它读自身状态、调自身工具、请求审批、订阅事件——仅此而已。 | 规划：`keel-plugin-core` spec |
-| **创造模式（Creation mode）** | 规划中的内置插件 `keel.creation`：自然语言 → 生成 webview 插件 → 安装 → 启用 → 深链，带审批与回滚。 | 规划：`keel-plugin-core` spec |
+| **装配行（Assembly / row）** | 服务图之上的配置栈：base → mode → preset → `config.toml`，按 row id（`<plugin-id>#<row>`）覆盖，last write wins；只有 base 可以新增 row。 | `docs/ASSEMBLY.md:41`、`docs/ASSEMBLY.md:53` |
+| **插件（Plugin）** | Harness 的扩展：三种 kind（`in-process`/`sidecar`/`webview`）之一的 `plugin.yaml` 包，安装进受管根目录并由插件管理器启用；生命周期状态 `installed/enabled/disabled/failed/invalid`（`uninstalled` 只留在审计轨迹）。 | `internal/pluginpkg/manifest.go:142`、`internal/harnessext/plugin_manager.go:31` |
+| **`plugin.yaml`** | 插件包清单：id/version/kind/layer/description/engines/provides/contributes/extensibility/requires/permissions/entry/source，加载时严格校验（未知字段是错误，不是 no-op）。 | `internal/pluginpkg/manifest.go:142` |
+| **in-process / sidecar / webview** | 三种插件 kind，均已可加载：编译进宿主 / 以网关 stdio 行级 JSON-RPC 说话的 `tool_provider` 外部进程 / 在产品同源 `/plugins/<id>/` 下、仅对 enabled 插件提供的 UI 包。 | `internal/harnessext/plugin_sidecar.go:22`、`cmd/keel/plugins_ui.go:17` |
+| **`keel.plugin.*`** | webview 插件借用它的桥：读自身状态、调自身工具、请求审批、订阅事件——仅此而已（`state`/`call`/`approve`/`subscribe`，另加主题令牌）。 | `internal/harnessapi/plugin_bridge.go:75` |
+| **创造模式（Creation mode）** | 内置插件 `keel.creation`，默认启用：自然语言 → 生成 webview 插件 → 安装 → 启用 → 深链，带审批与回滚。六个动作——`catalog`/`scaffold`/`validate`/`install`/`list`/`remove`；G8 端到端验收仍 Deferred，不得写成已完成。 | `internal/harnessext/creation.go:91`、`internal/pluginpkg/builtin/keel.creation.yaml:1` |
 
 ## DSH 词汇对照（仅作参照）
 
@@ -69,6 +70,6 @@ sidebar: false
 | `apply(ctx)` | 插件入口，接收注入的服务 | `Plugin.Start(ctx, *PluginEnv)` |
 | inject / DI | 由运行时解析并注入的服务 | 服务图绑定 + `PluginEnv` |
 | effect | 插件拥有的可逆副作用 | `Plugin.Effects`，按反序释放 |
-| bundle | 一层补丁（配置 + 插件） | 规划中的启用清单；今天对应默认 loadout |
+| bundle | 一层补丁（配置 + 插件） | 装配行：`<plugin-id>#<row>` 的 impl+params 覆盖，last write wins（`internal/assembly`、`docs/ASSEMBLY.md:53`） |
 | profile | 有序的 bundle 栈 | loadout（不可变快照，按 run 钉住） |
 | Cordis | TS 插件运行时 | **不移植**——`harnessext` + `servicegraph` 以 Go 表达同一语义 |

@@ -4,6 +4,12 @@ This page is the working recipe from the spec: write a service descriptor and at
 runtime so the service reaches `ACTIVE`. Everything here is verified against the repository's own
 blueprint and tests.
 
+Above the descriptor sits one more layer: the **assembly** (`internal/assembly`) is the
+configuration stack — base → mode → preset → `config.toml` — that decides which rows exist and
+which `impl`/`params` each row resolves to, addressed by row id (`<plugin-id>#<row>`, last write
+wins, and only base may add a row). A descriptor is the *code* seam; an assembly row is how a
+deployment selects or overrides it (`docs/ASSEMBLY.md:41`, `docs/ASSEMBLY.md:53`).
+
 ## 1. The contract
 
 A service is described by a `ServiceDescriptor` (`internal/servicegraph/descriptor.go:26`) and

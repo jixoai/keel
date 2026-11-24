@@ -36,7 +36,7 @@ sidebar: false
 | Term | Definition | Source |
 | --- | --- | --- |
 | **Ledger** | The append-only event log; the only truth. Projections and checkpoints are derived from it. | `docs/KERNEL.md` |
-| **Event kind** | The closed vocabulary of durable facts: `user.message`, `assistant.message`, `tool.result`, `compaction`, `run.started`/`run.failed` (reserved), `run.finished`, `external.event`. | `internal/kernel/validate.go:36` |
+| **Event kind** | The closed vocabulary of durable facts — **25 registered kinds**: `user.message`, `assistant.message`, `tool.result`, `compaction`, `run.started`/`run.failed` (reserved), `run.finished` (carries a `run` key), `external.event`, the six `task.*` kinds, `fs.write`/`fs.capture`/`fs.capture_failed`, and the system kinds `config.rotated`, `placement.joined`/`placement.left`, `supervision.escalated`, `guardrail.tripped`, `resume.attempt`, `notification.ack`/`notification.push_sent`. | `internal/kernel/validate.go:46` |
 | **seq** | The per-session event sequence number; the cursor clients resume from (`id: <seq>`). | `internal/httpapi/server.go:628` |
 | **Session** | A conversation: one event log, at most one writer at a time. | `docs/KERNEL.md` |
 | **Run / attempt** | One execution of a session's pending work. A run can be attempted several times (retry); each attempt is claimed, fenced and settled. | `internal/kernel/lease.go`, `internal/agent/worker.go:223` |
@@ -60,11 +60,12 @@ sidebar: false
 | **Loadout** | An immutable snapshot of the assembled service set `{id, revision, version, summary, services}`, pinned per run. | `docs/LOADOUT.md` §1 |
 | **Generation** | A counter incremented once per reassembly; instances from an old generation serve in-flight runs and are retired afterwards. | `internal/servicegraph/engine.go:270`, `docs/LOADOUT.md` §4 |
 | **Selection** | The model/provider choice recorded with a run; validated against the current generation's provider configuration. | `internal/modelcfg`, `internal/agent/runner.go:321` |
-| **Plugin** | An extension of the Harness. Today: an in-process Go value (`harnessext.Plugin`). Planned: a `plugin.yaml` package of one of three kinds. | `internal/harnessext/plugin.go:67` |
-| **`plugin.yaml`** | The planned plugin manifest (id/version/kind/engines/provides/requires/permissions/entry/source). | planned: `keel-plugin-core` spec |
-| **in-process / sidecar / webview** | The three planned plugin kinds: compiled-in / external process over stdio JSON-RPC / hosted UI package. | planned: `keel-plugin-core` spec |
-| **`keel.plugin.*`** | The planned bridge a webview plugin uses to read its own state, call its own tools, request an approval and subscribe to events — and nothing else. | planned: `keel-plugin-core` spec |
-| **Creation mode** | The planned built-in plugin `keel.creation`: natural language → generated webview plugin → install → enable → deep link, with approval and rollback. | planned: `keel-plugin-core` spec |
+| **Assembly / row** | The configuration stack above the service graph: base → mode → preset → `config.toml`, overlaid by row id (`<plugin-id>#<row>`), last write wins; only base may add rows. | `docs/ASSEMBLY.md:41`, `docs/ASSEMBLY.md:53` |
+| **Plugin** | A Harness extension packaged as a `plugin.yaml` of one of three kinds (`in-process`/`sidecar`/`webview`), installed into a managed root and enabled through the plugin manager; lifecycle states `installed/enabled/disabled/failed/invalid` (`uninstalled` survives only in the audit trail). | `internal/pluginpkg/manifest.go:142`, `internal/harnessext/plugin_manager.go:31` |
+| **`plugin.yaml`** | The plugin package manifest: id/version/kind/layer/description/engines/provides/contributes/extensibility/requires/permissions/entry/source, validated strictly on load (an unknown field is an error, not a no-op). | `internal/pluginpkg/manifest.go:142` |
+| **in-process / sidecar / webview** | The three plugin kinds, all loadable: compiled into the host / an external process speaking the gateway's stdio line-JSON-RPC as a `tool_provider` / a UI package served on the product origin at `/plugins/<id>/` for enabled plugins only. | `internal/harnessext/plugin_sidecar.go:22`, `cmd/keel/plugins_ui.go:17` |
+| **`keel.plugin.*`** | The bridge a webview plugin uses to read its own state, call its own tools, request an approval and subscribe to events — and nothing else (`state`/`call`/`approve`/`subscribe`, plus theme tokens). | `internal/harnessapi/plugin_bridge.go:75` |
+| **Creation mode** | The built-in plugin `keel.creation`, enabled by default: natural language → generated webview plugin → install → enable → deep link, with approval and rollback. Six actions — `catalog`/`scaffold`/`validate`/`install`/`list`/`remove`; the G8 end-to-end acceptance is still deferred and is not claimed as done. | `internal/harnessext/creation.go:91`, `internal/pluginpkg/builtin/keel.creation.yaml:1` |
 
 ## DSH vocabulary mapped (reference only)
 
@@ -73,6 +74,6 @@ sidebar: false
 | `apply(ctx)` | a plugin's entry point receiving injected services | `Plugin.Start(ctx, *PluginEnv)` |
 | inject / DI | services resolved and injected by the runtime | service graph bindings + `PluginEnv` |
 | effect | a reversible side effect owned by a plugin | `Plugin.Effects` released in reverse order |
-| bundle | a patch layer (config + plugins) | planned enablement list; today the default loadout |
+| bundle | a patch layer (config + plugins) | an assembly row: a `<plugin-id>#<row>` impl+params override, last write wins (`internal/assembly`, `docs/ASSEMBLY.md:53`) |
 | profile | an ordered stack of bundles | loadout (immutable snapshot, pinned per run) |
 | Cordis | the TS plugin runtime | **not ported** — `harnessext` + `servicegraph` express the same semantics in Go |

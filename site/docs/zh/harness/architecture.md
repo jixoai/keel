@@ -96,10 +96,20 @@ broken，持有者必须以 `drain-expired` 诊断让 run 失败（`internal/age
 
 ## 3. 插件宿主
 
-插件宿主是 Harness 的扩展运行时。今天它是 `harnessext.Runtime`：一个**进程内、声明式**契约。
+插件宿主是 Harness 的扩展运行时。它有两层：
+
+- **`harnessext.Runtime`**——进程内、声明式装配；
+- **`harnessext.Manager`**——它前面的包生命周期权威：受管根下的清单包、六个生命周期状态、
+  安装/启用/升级的 durable 审批、宿主接缝处的权限强制与审计轨迹
+  （`internal/harnessext/plugin_manager_ops.go:504`）。
 
 ```
-harnessext.Runtime
+harnessext.Manager（意图：数据库怎么说）
+├─ Boot()：内置默认 + 发现的包 + 持久化状态对账
+├─ Install/Enable/Disable/Uninstall/Update → 校验 → 暂存 → 运行时
+└─ Audit()：plugin_audit 行
+
+harnessext.Runtime（装配：此刻装载了什么）
 ├─ assemble()：先卸载上一代装配 → generation+1 → 按依赖顺序激活
 │    ├─ 跨插件工具重名 → fail-closed 诊断
 │    ├─ requires 未满足 → PENDING，附 "waiting for: …"
@@ -111,14 +121,27 @@ harnessext.Runtime
 ```
 
 出处：插件契约 `internal/harnessext/plugin.go:67`；装配 `:209`；激活 `:317`；反序清理 `:387`；
-卸载 `:417`；快照 `:505`。`keel serve` 当前装配两个内置插件：`keel.example`
-（`internal/harnessext/builtin.go:38`）与 `keel.creation` / `keel.testkit` 等内置插件
-（`internal/pluginpkg/builtin/`）；子代理原语是 harness 内建的 `agent` 工具，不是插件工具。
+卸载 `:417`；快照 `:505`。管理器的 loaders 映射决定哪些 kind 真能被 materialize：`keel serve`
+只注册 sidecar loader（`cmd/keel/serve.go:1769`），纯 UI 的 `webview` 包会被启用但没有装配
+条目（`internal/harnessext/plugin_manager_ops.go:447`）。
 
-今天这个宿主给你的能力：按依赖顺序激活、对每个声明的副作用（hook 订阅、触发器注册、
-effects）做精确反序撤销、generation 计数、可观测状态与诊断，以及工具重名的 fail-closed
-规则。它**没有**的：清单、安装、沙箱、权限与 UI 托管——那些是[插件](/zh/harness/plugins/)
-部分描述的规划 `plugin.yaml` 层。在此之前，「插件」指的是编译进二进制的 Go 值。
+`internal/pluginpkg/builtin/` 下的内置清单共十二个：`keel.file`、`keel.model`、`keel.bot`、
+`keel.team-bot`、`keel.spill`、`keel.tasks`、`keel.shell`、`keel.approval`、`keel.notify`、
+`keel.creation`、`keel.example` 与 `keel.testkit`（除 `keel.testkit` 外全部默认启用，
+`cmd/keel/serve.go:1752`）。`plugins/` 下的官方可安装包另有 `keel.plugin-market`、
+`keel.web-search` 与 `keel.context-memory`。子代理原语是 harness 内建的 `agent` 工具，不是
+插件工具。
+
+这个宿主给你的能力：按依赖顺序激活、对每个声明的副作用做精确反序撤销、generation 计数、
+可观测状态与诊断、工具重名的 fail-closed 规则、带生命周期与审计的清单/包层、宿主自控接缝处
+的权限校验，以及 `/plugins/<id>/` 的 UI 托管与 `keel.plugin.*` 桥。它**没有**的：沙箱（两种
+kind 都不沙箱）、`permissions.fs` 中介、per-plugin CPU/内存预算、`agent_backend` sidecar——
+这些在[插件](/zh/harness/plugins/) §2.3 与[权限](/zh/harness/plugins/permissions) §5 中列为
+Deferred。
+
+相邻的两层各有自己的页面：宿主如何装配服务、配置层与 row 覆盖见
+[装配（assembly）](/zh/core/assembly)；run 如何被准入到组槽位、租户配额与队列见
+[放置（placement）](/zh/core/placement)。
 
 ## 4. 工具与审批
 
@@ -148,7 +171,7 @@ tool.result 提交          内核与调用配对；重复结果按 toolCallId �
 （`internal/harnessext/decisions.go:233`）。需要人工回答的 run 打开一个 decision，以有界超时
 等待（默认 5 分钟，`internal/harnessext/decisions.go:162`），按答案继续或失败。Decision 是
 tasks 记账表中的 durable 行，**绝不是新的内核事件 kind**——内核词汇表不变
-（`internal/kernel/validate.go:36`、`internal/harnessext/doc.go`）。见
+（`internal/kernel/validate.go:46`、`internal/harnessext/doc.go`）。见
 [审批与问句](/zh/harness/approvals-and-questions)。
 
 ## 5. 投影

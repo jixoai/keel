@@ -2,8 +2,9 @@
 
 This page is the runbook for a Harness deployment: how to start it, how to look
 at it, where its artifacts live, and how to upgrade it without losing a
-session. It covers both the implemented surfaces (cited) and the planned plugin
-root (marked).
+session. Every surface named here ships in this repository; where a part is
+narrower than the contract (the TUI has no packaged artifact, `permissions.fs` is
+not mediated), the page says so.
 
 ## 1. `keel serve` — the Harness host
 
@@ -26,10 +27,15 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 | `KEEL_SERVE_WEB_DIR` / `--web-dir` | static web build directory | `web/dist` |
 | `KEEL_MODEL` / `KEEL_PROVIDER` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_API_KEY` | model selection (fake provider when unset) | — |
 | `KEEL_MODELS_CONFIG` / `--models-config` | tenant models document (providers/rules/selection) | — |
+| `--config-file` / `KEEL_CONFIG_FILE` | `config.toml` path; missing file = empty config | `$KEEL_HOME/config.toml` |
+| `--plugins-root` / `KEEL_PLUGINS_ROOT` | managed plugin package root (one directory per plugin id; created on first install) | `$KEEL_HOME/plugins` |
+| `KEEL_HOME` | home for the defaults above | `~/.keel` |
 | `KEEL_SKILLS_ROOTS` | OS path list of skill roots (PI-compatible) | — |
 | `KEEL_RUNTIME_ID` | runtime identity written into claims/audit (handoff) | hostname-pid |
 
-(Source: `cmd/keel/main.go`, `cmd/keel/auth.go`, `docs/HANDOFF.md`.)
+(Sources: `cmd/keel/main.go:170` for the config/plugins flags and their defaults,
+`cmd/keel/main.go:246` for the plugins-root resolution order, `cmd/keel/auth.go`,
+`docs/HANDOFF.md`.)
 
 Operational facts worth knowing before you expose the port:
 
@@ -73,25 +79,34 @@ keel tui --print
 ```
 
 The TUI is the same client (same TSX, same Harness API) rendered in a terminal
-host; it is not a second implementation (`docs/WEBUI.md`). `KEEL_TUI_BIN`
-points at the packaged TUI binary (`nsh package --target tui`), `KEEL_AGENT_URL`
-at the running host (`cmd/keel/tui.go:22`). It deliberately does not render
-plugin UIs — plugin rows open a web URL instead
-([Plugin UI](/harness/plugins/ui)).
+host; it is not a second implementation (`docs/WEBUI.md`). There is **no
+packaged TUI artifact** in this build: `nsh package` has no `tui` target
+(`web/README.md:167`), so the TUI runs from a development host
+(`nsh run --target tui`) or an embedded `nsh-platform-tui`. `KEEL_TUI_BIN`
+points at a user-supplied TUI binary and `KEEL_AGENT_URL` at the running host
+(`cmd/keel/tui.go:22`). It deliberately does not render plugin UIs — plugin
+rows open a web URL instead ([Plugin UI](/harness/plugins/ui)).
 
-## 3. Plugin directory
+## 3. Plugin directory and lifecycle API
 
-| Aspect | Today | Planned |
-| --- | --- | --- |
-| Where plugins come from | compiled into the binary (`keel.example`, `keel.creation`, `keel.testkit`, the registry plugins — `internal/pluginpkg/builtin/`) | `<plugins-root>/<id>/` packages discovered at boot |
-| Enable/disable | process assembly (`harnessext.Runtime.Apply`) | lifecycle API + approval ([Lifecycle](/harness/plugins/lifecycle)) |
-| State | `active`/`pending`/`failed`/`stopped` per plugin, generation counter, diagnostics | plus `installed`/`disabled`, install/uninstall/update audit |
-| Visible at | `GET /v1/plugins` + web settings › Plugins (`internal/harnessapi/ext.go:18`, `web/src/screens/settings.tsx:1148`) | same endpoints extended, not replaced |
-
-The planned plugins root is a **managed directory**: packages are copied into
-it, content-hashed at install, and never referenced in place
+The plugins root is the **managed directory** `<plugins-root>/<id>/`: packages
+are copied into it at install, content-hashed, and never referenced in place
 ([Manifest](/harness/plugins/manifest)). Back it up like any other state
 directory; the ledger does not contain plugin binaries.
+
+| Aspect | What ships |
+| --- | --- |
+| Where plugins come from | bundled manifests embedded in the binary (`internal/pluginpkg/builtin/`, twelve of them) **plus** packages discovered under the plugins root at boot |
+| Install / update | `POST /v1/plugins/install` `{path}`; `POST /v1/plugins/{id}/update` `{path?}` — two-phase: `202` opens a durable approval (`POST /v1/plugin-approvals/{decisionId}` answers it), then the retry with `decisionId` answers `201`; a refusal is `409` |
+| Enable / disable / uninstall | `POST /v1/plugins/{id}/enable` (likewise `disable`, `uninstall`); uninstall requires `disabled` and no enabled dependents; bundled plugins are disabled, never uninstalled |
+| State | persisted in the `plugins` table (`internal/store/schema.sql:582`): `installed`/`enabled`/`disabled`/`failed`/`invalid`; the row keeps its state when the package goes missing so the reason stays visible |
+| Audit | `GET /v1/plugins/audit` (`internal/store/schema.sql:603`): every lifecycle action and every refused approval or permission denial, keyset-paginated by `after` |
+| Visible at | `GET /v1/plugins` (`internal/harnessapi/plugins.go:56`) + the web plugin page; the plugin's UI at `/plugins/<id>/` for enabled plugins |
+| Persistence rule | a persisted disable survives restarts; only a first boot applies a bundled plugin's default enablement |
+
+A root that is empty disables installs (there is nowhere to copy) while bundled
+plugins keep working — the deployment still answers `GET /v1/plugins` with the
+assembled surface.
 
 ## 4. Diagnostics
 
@@ -102,7 +117,9 @@ directory; the ledger does not contain plugin binaries.
 | `GET /v1/health` | process liveness |
 | `GET /v1/ready` | store readiness (migrations applied) |
 | `GET /v1/metrics` (JSON) and `GET /metrics` (Prometheus) | stream/scheduler/admission counters, run metrics |
-| `GET /v1/plugins` | assembled surface: generation, plugin states, tools, hooks summary, diagnostics |
+| `GET /v1/plugins` | inventory: root, revision, generation, per-plugin state/source/path/content hash, tools, prompt sections, hooks summary, diagnostics |
+| `GET /v1/plugins/audit` | lifecycle trail plus refused approvals and permission denials |
+| `GET /plugins/<id>/…` | the enabled plugin's hosted UI (404 when not installed, 403 when not enabled) |
 | `GET /v1/triggers` | trigger inventory + audit windows (`internal/harnessapi/ext.go:39`) |
 | `GET /v1/sessions/{id}/run` and `/run/loadout` | run row (status/attempts/cursor/lastError) and the pinned loadout (`docs/LOADOUT.md` §5) |
 | `POST /v1/runtime/drain`, `GET /v1/runtime/status` | drain control and observability (`docs/HANDOFF.md`) |

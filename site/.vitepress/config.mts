@@ -30,8 +30,13 @@ const coreSidebarEn = [
     items: [
       { text: 'What Keel is', link: '/core/' },
       { text: 'Architecture', link: '/core/architecture' },
+      { text: 'Assembly (loadout layers)', link: '/core/assembly' },
+      { text: 'Placement and groups', link: '/core/placement' },
+      { text: 'Tenancy, RLS and quotas', link: '/core/tenancy' },
       { text: 'Events and protocol', link: '/core/events' },
       { text: 'Harness API reference', link: '/core/agentapi' },
+      { text: 'Session query', link: '/core/session-query' },
+      { text: 'Files', link: '/core/files' },
       { text: 'Storage and runtime', link: '/core/storage' }
     ]
   },
@@ -69,6 +74,7 @@ const harnessSidebarEn = [
       { text: 'Lifecycle and effects', link: '/harness/plugins/lifecycle' },
       { text: 'Permissions and audit', link: '/harness/plugins/permissions' },
       { text: 'UI surfaces', link: '/harness/plugins/ui' },
+      { text: 'Slots and contributions', link: '/harness/plugins/slots' },
       { text: 'Testing and conformance', link: '/harness/plugins/testing' }
     ]
   },
@@ -82,7 +88,8 @@ const harnessSidebarEn = [
     text: 'Harness · Operating',
     items: [
       { text: 'Creation mode', link: '/harness/creation-mode' },
-      { text: 'Operations', link: '/harness/operations' }
+      { text: 'Operations', link: '/harness/operations' },
+      { text: 'Release', link: '/harness/release' }
     ]
   }
 ]
@@ -93,8 +100,13 @@ const coreSidebarZh = [
     items: [
       { text: 'Keel 是什么', link: '/zh/core/' },
       { text: '架构', link: '/zh/core/architecture' },
+      { text: '装配（loadout 分层）', link: '/zh/core/assembly' },
+      { text: '放置与组', link: '/zh/core/placement' },
+      { text: '多租户、RLS 与配额', link: '/zh/core/tenancy' },
       { text: '事件与协议', link: '/zh/core/events' },
       { text: 'Harness API 参考', link: '/zh/core/agentapi' },
+      { text: '会话查询', link: '/zh/core/session-query' },
+      { text: '文件', link: '/zh/core/files' },
       { text: '存储与运行', link: '/zh/core/storage' }
     ]
   },
@@ -132,6 +144,7 @@ const harnessSidebarZh = [
       { text: '生命周期与副作用', link: '/zh/harness/plugins/lifecycle' },
       { text: '权限与审计', link: '/zh/harness/plugins/permissions' },
       { text: 'UI 界面', link: '/zh/harness/plugins/ui' },
+      { text: '槽位与贡献', link: '/zh/harness/plugins/slots' },
       { text: '测试与一致性', link: '/zh/harness/plugins/testing' }
     ]
   },
@@ -145,7 +158,8 @@ const harnessSidebarZh = [
     text: 'Harness · 运维',
     items: [
       { text: '创造模式', link: '/zh/harness/creation-mode' },
-      { text: '运维', link: '/zh/harness/operations' }
+      { text: '运维', link: '/zh/harness/operations' },
+      { text: '发布', link: '/zh/harness/release' }
     ]
   }
 ]

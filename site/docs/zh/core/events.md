@@ -5,8 +5,9 @@ Core 的 durable 契约是**事件账本**。其余一切——转录、checkpoi
 
 ## 1. 事件种类（全部词汇）
 
-注册表在 `internal/kernel/validate.go:36`。未注册的 kind 不能进入账本；字符串值与 `internal/store`
-逐字对齐并由测试钉住。
+注册表在 `internal/kernel/validate.go:46`：**25 个已注册 kind**（下表中同族且共享形状的 kind 合并成
+一行）。未注册的 kind 不能进入账本；字符串值与 `internal/store` 逐字对齐并由测试钉住；edge 白名单恰好是
+edge-scoped 条目。
 
 | kind | 类别 | 幂等键 | 当前是否发射 | 语义 |
 |---|---|---|---|---|
@@ -14,32 +15,52 @@ Core 的 durable 契约是**事件账本**。其余一切——转录、checkpoi
 | `assistant.message` | owner-scoped | `generationId` | 是（loop） | 模型回答；`payload.inputSeqs` 记录本次请求呈现给模型的输入 |
 | `tool.result` | owner-scoped | `toolCallId` | 是（loop） | 工具结果，按 `toolCallId` 与调用配对 |
 | `compaction` | owner-scoped | —（无） | 是（compaction 服务） | 上下文压缩事实 |
-| `run.finished` | owner-scoped | —（无） | 是（worker，每个 settle 的 attempt 一条） | attempt 摘要：status/turns/tokens/toolTimings/context/stopReason/error/durationMs |
-| `run.started` | owner-scoped | —（无） | **否——保留词汇** | vocabulary 与 fence 已实现，但当前无运行时发射（run 行本身已记录开始/尝试次数） |
+| `run.started` | owner-scoped | —（无） | **否——保留词汇** | fence 已实现，但当前无运行时发射（run 行本身已记录开始/尝试次数） |
 | `run.failed` | owner-scoped | —（无） | **否——保留词汇** | 同上 |
+| `run.finished` | owner-scoped | `run`（`KeyRun`） | 是（worker，每个 settle 的 attempt 一条） | attempt 摘要：status/turns/tokens/toolTimings/context/stopReason/error/durationMs |
 | `external.event` | external-scoped | `requestId` | 是（外部网关） | Keel 对外部 backend 事实的兼容日志；只在 `state_owner=external` 的会话里合法 |
+| `task.created` · `task.updated` · `task.attached` · `task.detached` · `task.closed` · `task.note` | owner-scoped（双车道） | `task` | 是（task-log 服务） | 任务卡的只追加历史；卡片与事件视图都是这些行的投影 |
+| `fs.write` | owner-scoped | `fs` | 是（文件插件） | 一次成功的工作区文件写入 |
+| `fs.capture` | owner-scoped（双车道） | `capture` | 是（文件插件 / harness 后台任务） | 一次捕获结算；后台任务活过 run，改走 system 车道并携带 `payload.jobId` |
+| `fs.capture_failed` | system-scoped | `capture-failed` | 是（文件插件） | 捕获失败作为独立事实 |
+| `config.rotated` | system-scoped | `config` | **否——仅有词汇** | `config.toml` 版本的账本锚点；轮转目前是库 API（`docs/ASSEMBLY.md:205`） |
+| `placement.joined` | system-scoped | `placement` | **否——仅有词汇** | 会话的组归属事实；placement 包把归属放在行里而非事件里 |
+| `placement.left` | system-scoped | `placement` | **否——仅有词汇** | 离开组 |
+| `supervision.escalated` | system-scoped | `supervision` | 是（supervisor） | supervisor 对停滞/被弃 run 的升级 |
+| `guardrail.tripped` | system-scoped | `guardrail` | 是（agent guardrails） | 护栏拒绝或中止了一次 attempt |
+| `resume.attempt` | system-scoped | `resume` | 是（supervisor） | 对被恢复 attempt 的续跑 |
+| `notification.ack` | system-scoped | `notif-ack` | 是（notify） | 某个消费者消费了通知 |
+| `notification.push_sent` | system-scoped | `notif-push` | 是（notify） | 通知的唯一原生/页内推送兜底 |
 
-两点源码明确强调（`internal/kernel/validate.go:26`）：
+三点源码明确强调（`internal/kernel/validate.go:34`）：
 
 - `run.started` / `run.failed` 是**保留**的：词汇与 fence 都在，但没有运行时发射它们。不要把它们的
   存在读成「loop 会发生命周期事件」。
 - `run.finished` 不同：worker 每个 settle 的 attempt 发一次，因为客户端需要 turns/tokens/stopReason，
   而不该从转录里反推。它是记账，不是消息——转录解码会跳过它（`internal/kernel/kernel.go:87`）。
+- **owner-scoped 不等于「一定携带租约写入」**。注册表里标了 `system: true` 的 kind（全部 `task.*` 与
+  `fs.capture`）在 run 拥有该事实时是 owner-scoped，也可以在无 run 拥有时走 system 车道——初始任务卡
+  先于任何 run 存在，而捕获任务会活过启动它的 attempt（`internal/kernel/validate.go:56`）。
 
 ## 2. 提交分类：谁携带 fence
 
-`internal/kernel/kernel.go:238` 定义三个类别；提交的类别由 kind 决定，不由调用方决定。
+`internal/kernel/kernel.go:292` 定义四个类别；提交的类别由 kind 决定，不由调用方决定。
 
 | 类别 | kind | fence（lease token） | 校验对象 |
 |---|---|---|---|
-| `owner-scoped` | `assistant.message`、`tool.result`、`compaction`、`run.*` | **必须携带** | 会话当前 owner + epoch |
+| `owner-scoped` | `assistant.message`、`tool.result`、`compaction`、`run.*`、`fs.write`，以及 run 拥有事实时的双车道 kind | **必须携带** | 会话当前 owner + epoch |
 | `edge-scoped` | `user.message` | **必须不带** | 租户/会话存在性、edge 白名单、幂等 |
 | `external-scoped` | `external.event` | 必须不带 | 会话必须标记 `state_owner=external` 且未关闭 |
+| `system-scoped` | `fs.capture_failed`、`config.rotated`、`placement.*`、`supervision.escalated`、`guardrail.tripped`、`resume.attempt`、`notification.*`，以及无 run 拥有事实时的双车道 kind | 必须不带——提交必须置 `CommitRequest.System` | kind 必须是 `ClassSystem` 或声明了 `system: true`；客户端永不可写 |
 
-edge 白名单恰好是 `ClassEdge` 条目（`internal/kernel/validate.go:65` 的 `EdgeKinds()`），因此
+最后这一类的作用，是让「harness 事实」不会变成「伪造租约」：system-scoped 提交只接受显式的 system
+车道，因此 harness 驱动的事实（失败的捕获、placement 变更、通知 ack）从不需要伪造 owner token
+（`internal/kernel/kernel.go:306`）。客户端根本触达不到该车道：edge 端点恰好只收 `ClassEdge` 条目。
+
+edge 白名单恰好是 `ClassEdge` 条目（`internal/kernel/validate.go:102` 的 `EdgeKinds()`），因此
 `POST /v1/sessions/{id}/events` 只收 `user.message`，其他一律 400；跨租户或不存在的会话 404。
 handoff drain 期间 edge 输入照常落账（这就是「换进程时用户还能打字」的机制）——由下一个持有租约的
-进程消费（`docs/SERVICE-GRAPH.md:202`）。
+进程消费（`docs/SERVICE-GRAPH.md:204`）。
 
 外部会话是对称的另一面：对它的原生 edge 写入被 409 拒绝（`ErrExternalSession`），
 `/v1/sessions/{id}/run` 也拒绝为它入队——内核的入队谓词按 `state_owner <> 'external'` fail-closed
@@ -47,15 +68,20 @@ handoff drain 期间 edge 输入照常落账（这就是「换进程时用户还
 
 ## 3. 幂等：一个键，一个作用域
 
-一次提交最多携带一个幂等键，由 kind 决定是哪一个（`internal/kernel/validate.go:90` 的 `keyFor`）：
+一次提交恰好携带一个幂等键，由 kind 决定它属于哪个空间（`internal/kernel/validate.go:188` 的 `keyFor`）：
 
 - `requestId` — `user.message`、`external.event`
 - `generationId` — `assistant.message`
 - `toolCallId` — `tool.result`
-- 声明为 `""` 的 kind（compaction、run 摘要）**必须不带**任何键；传了就是错误，而不是被静默忽略。
+- `run` — `run.finished`：用 attempt id，因此被重试的 attempt 是新事实，而同一次 attempt 的提交重试
+  仍去重（`internal/kernel/validate.go:53`）
+- `task` — 六个 `task.*`；`fs` — `fs.write`；`capture` / `capture-failed` — `fs.capture` /
+  `fs.capture_failed`；`config` / `placement` / `supervision` / `guardrail` / `resume` / `notif-ack` /
+  `notif-push` — 对应的 system-scoped kind（`internal/kernel/kernel.go:234`）
+- `compaction`、`run.started`、`run.failed` 不声明键，**必须不带**；传了就是错误，而不是被静默忽略。
 
 唯一性作用域是 `(tenant_id, session_id, dedupe_key)`——一个部分唯一索引
-（`internal/store/schema.sql:67`）。推论：
+（`internal/store/schema.sql:117`）。推论：
 
 - **重试同一输入是安全的**。带同一 `requestId` 重投 `POST /v1/sessions/{id}/input` 返回同一
   submission（实测响应：`{"created":true,"requestId":"…","seq":1,…}`）；作用域是会话，因此两个会话里
@@ -64,12 +90,12 @@ handoff drain 期间 edge 输入照常落账（这就是「换进程时用户还
   但同一 dedupe key 每个会话只能插入一次，所以最终日志里每个 `toolCallId` 恰好一条结果。
   replay-safe ≠ exactly-once，框架不假装保证前者等于后者（`docs/ARCHITECTURE.md:46`）。
 - 载荷比较忽略格式：键顺序不同、空白不同仍是同一个请求（`samePayload`/`canonicalJSON`，
-  `internal/kernel/validate.go:480`）。
+  `internal/kernel/validate.go:637`）。
 
 ## 4. 投递模式：`queue` 与 `guide`
 
 `user.message.payload.delivery` 是 edge（写意图）与 loop（消费意图）之间的 durable 契约
-（`internal/kernel/validate.go:247`）：
+（`internal/kernel/validate.go:378`）：
 
 - **`queue`**（缺省；字段缺失即 `queue`，因此旧客户端与旧 dump 继续可用）：run 结束后、下一次
   claim 时才进入模型上下文。
@@ -100,7 +126,7 @@ handoff drain 期间 edge 输入照常落账（这就是「换进程时用户还
 ## 6. 结算：状态策略
 
 worker 在 settle 之前用同一 lease 提交 `run.finished`；摘要写入失败不改变 run 终态。状态策略是
-`finishStatus`（`internal/kernel/validate.go:222`）：
+`finishStatus`（`internal/kernel/validate.go:314`）：
 
 | 情形 | 结果 run 状态 |
 |---|---|
@@ -118,7 +144,7 @@ provider 失败按 PI 语义是 `stopReason: error` 的终止消息；runner 把
 **快照与续传**。`GET /v1/sessions/{id}/events?after=<seq>&limit=<n>` 返回已提交事件与游标。
 `GET /v1/sessions/{id}/events/stream?after=<seq>` 是 SSE 流：帧的 `id:` 字段就是事件 `seq`，因此
 SSE 客户端用 `Last-Event-ID`（或 `after`）续传，绝不丢已提交事件。订阅者由 `LISTEN/NOTIFY` 唤醒而非
-轮询（`internal/store/schema.sql:207`），心跳是兜底。
+轮询（`internal/store/schema.sql:313`），心跳是兜底。
 
 **partial 是旁路，不属于账本**。开启 `partials=1` 时，token 级帧以 `event: partial` 推送且**不带**
 `id:`；它们从不写入事件表、从不移动 `Last-Event-ID`、断线后不重放。partial 期间断线的客户端重连后
@@ -149,32 +175,48 @@ data: {"retry_after_ms":3000}
 ## 8. 校验：内核拒绝什么
 
 内核在提交时校验「重放所依赖」的载荷形状，因为坏载荷一旦进日志就是永久的
-（`internal/kernel/validate.go:265`）：
+（`internal/kernel/validate.go:260`）：
 
 - `user.message`：`text`/`requestId` 若存在必须是字符串；`delivery` 必须是 `queue`/`guide`；
   `selection` 必须是 JSON 对象；`retryOf` 必须是非负整数。未知字段允许存在，以便 edge 携带元数据而
   无需改内核。
 - `assistant.message`：每个 `toolCall` 块必须有 `id` 与 `name`，且同一消息内 `id` 不得重复——否则
-  结果无法附着到唯一的调用（`internal/kernel/validate.go:165`）。
+  结果无法附着到唯一的调用（`internal/kernel/validate.go:260`）。
 - `tool.result`：`payload.toolCallId` 必须与请求的 `toolCallId` 相等，且必须指向已提交的对应
-  assistant 调用（`internal/kernel/validate.go:192`）。
+  assistant 调用（`internal/kernel/validate.go:284`）。
 - `run.finished`：`status` 必须是 `done`/`failed`/`cancelled` 之一；计数器若存在必须是非负整数；
-  `toolTimings` 必须是对象数组（不得为 null）（`internal/kernel/validate.go:320`）。
+  `toolTimings` 必须是对象数组（不得为 null）（`internal/kernel/validate.go:417`）。
 - `external.event`：载荷必须带 `backend` 与 `externalRef`；`stateOwner` 若存在必须为 `external`
-  （`internal/kernel/validate.go:437`）。
+  （`internal/kernel/validate.go:569`）。
 
 ## 9. 问服务端，不要猜
 
-客户端的线契约是版本化的：Harness API 以 `/v1` 前缀且只增不改（`internal/harnessapi/api.go:268`）。
-客户端不得从二进制版本推断特性；它问 `GET /v1/capabilities` 并对 `false` 降级。实测响应：
+客户端的线契约是版本化的：Harness API 以 `/v1` 前缀且只增不改（`internal/harnessapi/api.go:53`）。
+客户端不得从二进制版本推断特性；它问 `GET /v1/capabilities` 并对 `false` 降级。该文档由
+`internal/harnessapi/api.go:556` 的 feature 映射构建；下面是有省略的形态——依赖部署接线的块
+（`plugins`、`pluginRevision`、`mcpApps`、`configFile`）只在其 seam 接线时出现，且每个 feature flag
+都跟随它真正需要的 seam：
 
 ```json
 {"apiVersion":"v1","serviceVersion":"keel-agent/0.1.0",
  "features":{"decisions":true,"hooks":true,"partials":true,"plugins":true,
-             "sessions.cancel":true,"sessions.list":true,"settings.models":true,
-             "settings.secrets":false,"subagents":true,"triggers":true},
- "limits":{"sessionsPageDefault":50,"sessionsPageMax":200,"subagentsPageMax":200},
- "hooks":["subagent.started","subagent.finished","trigger.before","trigger.after","turn.started","turn.finished","decision.opened","decision.answered"]}
+             "plugins.manage":true,"plugins.audit":true,"plugins.approvals":true,"plugins.bridge":true,
+             "sessions.cancel":true,"sessions.list":true,
+             "session.search":true,"session.export":true,"session.deliverables":true,
+             "session.filePreview":true,"task.panel":true,"team.tasks":true,
+             "settings.models":true,"settings.secrets":false,"settings.skills":true,
+             "skills.completion":true,"subagents":true,"triggers":true,
+             "mcp.apps":true,"mcp.apps.sandboxOrigin":false,"mcp.apps.context":true,
+             "mcp.apps.tools":true,"mcp.apps.resources":true,"mcp.apps.message":true,
+             "mcp.apps.links":true,"mcp.events":false},
+ "limits":{"sessionsPageDefault":50,"sessionsPageMax":200,"subagentsPageMax":200,
+           "teamTasksPageDefault":50,"teamTasksPageMax":200,
+           "searchPageDefault":20,"searchPageMax":100,
+           "exportPageDefault":200,"exportPageMax":500,"exportPageBytes":524288,
+           "deliverablesDefault":100,"deliverablesMax":500},
+ "hooks":["subagent.started","subagent.finished","trigger.before","trigger.after",
+          "turn.started","turn.finished","decision.opened","decision.answered","mcp.surface.changed"],
+ "plugins":["keel.example"]}
 ```
 
 端点参考在下一页：[Harness API 参考](/zh/core/agentapi)。

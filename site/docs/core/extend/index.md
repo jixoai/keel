@@ -25,7 +25,9 @@ working in a checkout of this repository (or a fork) — see
 | Expose an external tool server | `ToolProvider` (`external.tools`) | [Connect an external backend](/core/extend/external-backend) |
 | Add a model provider or change protocols | `provider.StreamFn` + `provider.ResolveProvider` | [Write a provider adapter](/core/extend/provider-adapter) |
 | Add a tool to the model's toolbox | `agenttool.ToolRegistry` (kernel side) or the host registry (`tools.allow` filters it) | [Embed the runtime](/core/extend/embed-runtime) |
-| Add a product capability (plugin, hook, trigger, sub-agent, approval) | the Harness extension surface (`internal/harnessext` today; plugin standard documented in the Harness line) | [Harness plugins](/harness/plugins/) |
+| Add a product capability (plugin, hook, trigger, sub-agent, approval) | the Harness extension surface: the plugin standard (`internal/pluginpkg`, `internal/harnessext`) or the in-tree harness services | [Harness plugins](/harness/plugins/) |
+| Ship a plugin package (tools, hooks, triggers, UI or slot contributions) | a `plugin.yaml` package with `provides`/`contributes`/`slots` (`internal/pluginpkg/manifest.go:142`), installed through `/v1/plugins` | [Harness plugins](/harness/plugins/) · frozen contract in `docs/PLUGIN-EXTENSIBILITY.md:1` |
+| Override a service row for one deployment, mode or preset | assembly row overlay: base → mode → preset → `config.toml`, by row id (`internal/assembly`, `docs/ASSEMBLY.md:41`) | [Write a service descriptor](/core/extend/service-descriptor) |
 | Add a new event kind | in-repo change: `kindRegistry` + `internal/store` constants + transcript/SSE/R1 rules move together | [Events and protocol](/core/events) |
 | Change storage or add a table | in-repo change: `internal/store/schema.sql` or a numbered kernel migration | [Storage and runtime](/core/storage) |
 | Build a UI | the Harness API + SSE (versioned `/v1`, capability discovery) | [Harness API reference](/core/agentapi) |
@@ -52,6 +54,8 @@ a pass. If you replace the loop, run the suite and declare it deliberately
 | New loop | `internal/agentloop` implementation + declaration | PI conformance suite + R1 diff + the loop conformance gate |
 | External backend | tenant document (`external.backends`) + a provider process | `go test -race ./internal/gateway ./internal/externalgw` + `scripts/external-gateway-smoke.sh` |
 | Provider adapter | `internal/provider` + registry entry | provider stream tests; real-model E2E if credentials allow |
+| Plugin package | `plugin.yaml` (+ `extensibility.json` for an official plugin), your entrypoint/UI assets | `go test -race ./internal/pluginpkg ./internal/harnessext`; then install it on a running instance via `POST /v1/plugins/install` |
+| Assembly row override | a base/mode/preset document or `config.toml` | `go test -race ./internal/assembly ./internal/configfile`; `docs/ASSEMBLY.md:320` lists the validation commands |
 | New event kind | `kindRegistry`, store constants, transcript/SSE/R1 rules | R1 diff (whitelist outside zero difference) + full `acceptance-all.sh` |
 
 The gates themselves are documented in [Test and accept](/core/extend/testing).

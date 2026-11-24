@@ -8,8 +8,18 @@ that back them.
 ## 1. PostgreSQL: one database, logical isolation
 
 Keel uses **one PostgreSQL 18 database** with `tenant_id` on every row and composite keys, not one
-database or process per tenant (`README.md:19`). Row-level security is optional; the primary
-isolation mechanism is the composite key plus the kernel's tenant checks.
+database or process per tenant (`README.md:70`). Row-level security is **on by default**: every
+tenant table gets `ENABLE` + `FORCE ROW LEVEL SECURITY` and a `tenant_isolation` policy that
+compares `tenant_id` with `current_setting('app.tenant_id', true)`, and the application assumes a
+dedicated non-owner role instead of connecting as the table owner (`internal/store/rls.go:259`,
+`internal/store/rls.go:57`). An unset setting yields NULL, so a query that forgot its tenant
+predicate returns zero rows rather than another tenant's data; operator paths (provisioning,
+pre-tenant auth lookups) opt out explicitly with `app.bypass_rls = 'on'`
+(`internal/store/rls.go:292`).
+
+`KEEL_RLS=off` is the explicit escape hatch for a managed cluster that forbids `CREATE ROLE`
+(`cmd/keel/serve.go:313`); it is never auto-disabled. The isolation and quota layers around this
+schema are on [Tenancy](/core/tenancy).
 
 Why not a process or a SQLite file per tenant: 2GB ÷ 200 tenants = 10MB per tenant, and the Go
 runtime alone needs 10–20MB — the arithmetic rules it out. 200 SQLite files would each carry a page
@@ -37,6 +47,11 @@ The schema lives in two places:
 | `usage_ledger` | one row per provider request, keyed by the runner-generated `request_id` | **no price columns** by design; `unaccounted` rows are upgraded in place when usage is recovered |
 | `mcp_oauth_pending` / `mcp_oauth_credentials` | MCP OAuth state machine and encrypted credentials | AES-256-GCM with AAD = tenant+server |
 | `model_settings` / `model_settings_history` / `tenant_secrets` | tenant model document + secret storage | secrets are encrypted; only references appear in configuration |
+| `groups` / `session_placement` | placement containers and each session's lease (`epoch` + `lease_until`) | run slots are counted from `runs` per group and the tenant quota across groups, so two workers cannot oversell a group (`internal/store/schema.sql:894`, `internal/store/schema.sql:935`) |
+| `file_manifest` / `session_snapshot` | the file plugin's path → hash projection and the tree hash recorded per event seq | both are projections: `fs.write` commits before the manifest changes, and a fork/snapshot materializes the prefix from the tree (`internal/store/schema.sql:855`, `internal/store/schema.sql:871`) |
+| `task_cards` / `task_events` | the task panel's card rows and their event stream | a card is UI memory; a durable `tasks` row is scheduling bookkeeping (`internal/store/schema.sql:749`, `internal/store/schema.sql:773`) |
+| `plugins` / `plugin_audit` | installed plugin inventory and its append-only audit | process-level on purpose: plugin enablement is not a tenant fact, so the tenant role gets no grant (`internal/store/schema.sql:582`, `internal/store/schema.sql:603`) |
+| `notifications` | per-tenant notification rows | `push_attempted_at` is the compare-and-set that makes "push once" survive restarts (`internal/store/schema.sql:824`) |
 
 Two database-side behaviours matter for the runtime:
 
@@ -80,6 +95,33 @@ writes with `io.Copy`. A whole image never enters memory; the read batch size is
 (`srcOff = off/4*3`), answers `206 + Content-Range`, and `totalWire = 4*⌈n/3⌉` comes from metadata.
 The base64 output carries no line breaks, or the 4:3 relationship would break
 (`docs/BACKPRESSURE.md:102`).
+
+### Lifecycle: TTL reaping, orphan scan, thumbnails
+
+Reclamation is a database-first pipeline (`docs/BLOB-LIFECYCLE.md:73`):
+
+- **Candidates** are rows with `ref_count = 0`, `complete = true`, an `expires_at` in the past and
+  no parent blob naming them as `thumb_blob_id`; the select uses `FOR UPDATE SKIP LOCKED`, so
+  several workers can sweep at once (`docs/BLOB-LIFECYCLE.md:86`).
+- **Delete order is strict**: `blob_refs` → `blobs` → `blob_chunks` in one transaction, commit,
+  then unlink the CAS file outside it after a cross-tenant `CASBlobExists` recheck — the same
+  sha256 may be shared by another tenant (`docs/BLOB-LIFECYCLE.md:94`). Repeating a sweep is
+  idempotent (`internal/blob/gc.go:86`).
+- **Orphans are retried, not guessed**: `SweepOrphanCAS(grace)` walks only the two-level hex layout,
+  ignores fresh files, and deletes a file only when no `blobs` row (`storage_kind = 2`) names its
+  sha256; the `layerfs/` subtree is out of scope by construction (`docs/BLOB-LIFECYCLE.md:111`,
+  `internal/blob/gc.go:142`). Defaults: TTL sweep every `1m`, orphan scan every `30m` with a fixed
+  1h grace (`docs/BLOB-LIFECYCLE.md:125`, `docs/BLOB-LIFECYCLE.md:126`).
+- **Thumbnails are their own blobs**: a re-encoded `image/png` row (`complete`, `ref_count = 0`,
+  longest edge 320px) tracked by `thumb_status` (`pending` → `ready`/`failed`); the parent row is
+  never rewritten (`docs/BLOB-LIFECYCLE.md:141`). `GET /v1/files/{id}/thumbnail` answers `200`,
+  `202` (pending), `404` (none) or `409` (failed) (`docs/BLOB-LIFECYCLE.md:161`).
+
+The file tree is a projection too: `file_manifest` maps path → hash, `session_snapshot` records the
+layerfs tree hash at an event seq, and `MaterializeSnapshot` rebuilds a directory from that tree
+(`internal/fileplugin/service.go:849`). A write commits the `fs.write` event before the manifest
+moves, so the ledger stays the truth (`internal/fileplugin/service.go:353`). The HTTP surface for
+upload, download, ranges and thumbnails is on [Files](/core/files).
 
 **No dedicated storage engine.** The research conclusion is explicit: Haystack/SeaweedFS/LMDB/bbolt/
 Badger all have RSS ≈ data size or a 4MB buffer per read, with no benefit at 1GbE; local CAS + page
@@ -170,9 +212,10 @@ The 2GB / 1000-session baseline, as reported in `README.md:26` and `docs/RUNBOOK
 tool retries per `Retry-After`. `docs/MATURITY.md:23` defines the GA-scale condition (2GB cgroup,
 1000 SSE, 64 concurrent runs, periodic 1MiB images, RSS peak < 1.8GB, 0 OOM).
 
-The stateless E2E suite is 7/7: `requestId` idempotency, SSE cursor, blob wire-offset resume, agent
-reply, `SIGKILL` during a model call, `SIGKILL` during tool execution, and 100 sessions × 2000
-events with no gap (`docs/RUNBOOK.md:112`).
+The stateless E2E suite is **8/8**: `requestId` idempotency across restart, SSE cursor across
+restart, blob wire-offset resume across restart, agent reply, retry append, `SIGKILL` during a model
+call, `SIGKILL` during tool execution, and 100 concurrent sessions × 2000 events with no gap
+(`cmd/e2e/main.go:86`, `docs/LOADOUT.md:168`).
 
 ## 6. Operating the runtime
 

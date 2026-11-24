@@ -71,6 +71,14 @@ thousand concurrent sessions inside 2GB (`docs/ARCHITECTURE.md` §1):
 Overload is always an honest 429/503 with `Retry-After`, never a silent drop of
 committed facts.
 
+One case is deliberately *not* an overload refusal: an input that is already
+committed while its run waits behind a full group slot answers **202** with a
+`queued` block (`position`/`active`/`limit`/`etaKnown`/`etaSeconds`, plus
+`Retry-After` when the ETA is known) instead of 429 — the durable input is not
+rejected, it is queued FIFO, and 429 stays reserved for the tenant quota and the
+memory ceiling so the queue cannot become an oversell channel
+(`internal/httpapi/server.go:497`, `internal/httpapi/server.go:848`, `internal/httpapi/server.go:924`).
+
 ## 4. Partials: the token-level bypass
 
 The bypass exists so a UI can show text as it is produced without weakening the

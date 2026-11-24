@@ -1,7 +1,7 @@
 # 写 provider 适配器
 
 **provider 适配器**把 Keel 整形后的请求翻译成某个厂商的线格式，并把回答以单一事件类型流式返回。本页
-说明这条接缝、当前的解析流程、新增 provider 实际要做什么，以及文件/图片协议里**没有实现**的部分。
+说明这条接缝、当前的解析流程、新增 provider 实际要做什么，以及附件（图片与文档）如何出站承载。
 
 ## 1. 接缝
 
@@ -133,21 +133,37 @@ func (p *myProvider) StreamCompletion(ctx context.Context, req CompletionRequest
 `Version`。这就是[写一个服务描述符](/zh/core/extend/service-descriptor)描述的装配接缝；loop 只看见一个
 `StreamFn`。
 
-## 6. **没有**实现的部分：文件/图片协议
+## 6. 附件：`file_id` > `url` > `base64`
 
-provider 目前仍按 PI/pigo 的方式接收图片：**内联 base64**。内容类型只有 `data` 与 `mimeType`，没有
-blob 引用（`internal/agentcore/content.go:65`）。仓库自己的调研与计划对这个缺口写得很明确
-（`docs/FILE-PROTOCOL.md:46`）：
+文件/图片协议已经实现，且顺序是固定的。两个形状要分清：
 
-- 平台 blob 层已经存在（`POST /v1/files` → `fileId` + `url`、流式分块读取、SHA-256 去重——见
-  [存储与运行](/zh/core/storage)）。
-- **尚不存在**的是：按 provider 的能力位（`SupportsImageURL`、`SupportsFileID`）与
-  `ResolveImage(blobID)` 的形态选择（`file_id` > `url` > `base64`）。在 `internal/` 里 grep 这两个标识符
-  没有任何实现。
-- 计划顺序是 Gemini Files API → OpenAI Responses `file_id` → Anthropic URL → Anthropic Files `file_id`
-  → DashScope/OpenRouter URL（`docs/FILE-PROTOCOL.md:62`）。
+- **账本只存引用**：`ImageRefContent{blobId, mimeType, size…}`（非图片是 `MediaRefContent`）。
+  base64 永不进事件表，因此被多轮引用的同一张图只有一条 blob 行、一份字节
+  （`internal/agentcore/content.go:190`、`openspec/specs/provider-files/spec.md:5`）。
+- **provider 线上携带的是传输形态**：`ImageContent`，`fileId`/`url`/`data` 恰好只填一个
+  （`internal/agentcore/content.go:156`）。
 
-也就是说：想让适配器避免重复上传图片字节，得先把这部分做出来；不要把它写成可用能力。
+解析发生在 worker 里、出站请求之前，按目标声明的能力选择：
+
+1. **`file_id`** —— 上传路径给出的 provider 侧句柄，最便宜：字节只过一次线，句柄过期才再过一次。
+   句柄按 `(sha256, provider, workspace)` 缓存，带 TTL 与懒刷新
+   （`internal/provider/imagefiles.go:324`）。
+2. **`url`** —— 签发的 URL（默认 TTL 10 分钟），让字节完全不进请求体
+   （`internal/provider/imagefiles.go:163`）。
+3. **`base64`** —— 通用形态，也是兜底：内联路径只分配一份编码后的缓冲，读取任何字节之前先按
+   provider 的 `MaxInlineBytes` 设界（`internal/provider/imagefiles.go:299`）。
+
+能力声明挂在**线协议**上，而不是模型名上：图片用 `ImageCapsForAPI`
+（`internal/provider/imagecaps.go:82`），文档用 `FileCaps`（`internal/provider/media.go:51`），
+两者的 `BestForm()` 都遵循同一顺序（`internal/provider/imagecaps.go:63`、
+`internal/provider/media.go:80`）。没有声明能力的驱动按 base64-only 处理，而这是所有厂商都接受的形态。
+
+降级是诚实的、绝不静默：上传/URL 失败会带一条 `Note` 继续降级；超过声明上限且没有更便宜形态可用的
+图片以 `ErrImageTooLarge` fail-closed 并指名大小与上限——run 继续但缺这张图，而不是 OOM 或让整条请求
+被上游拒绝（`internal/provider/imagefiles.go:42`）。
+
+所以适配器作者要做的事很窄：为协议声明能力、编码三种形态。编码器之上的一切——能力选择、句柄缓存、
+有界内联缓冲——都已经在 `internal/provider` 里。
 
 ## 7. 测试 provider 适配器
 

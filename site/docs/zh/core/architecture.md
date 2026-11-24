@@ -108,11 +108,43 @@ PENDING ──依赖齐──▶ LOADING ──成功──▶ ACTIVE
 - 重装配身份是 `(Name, Version, Provides, Requires, Optional, Role)`。若配置变了但服务没变，
   实例**跨代共享**，不重建。
 
-## 4. Loadout：不可变快照，按 run pin
+## 4. Loadout 与装配
 
-loadout 是 `{id, revision, version, summary, 服务描述符集合}` 的不可变快照，由租户配置文档
-（`internal/host.TenantConfig`）解析而来。没有第二套配置词汇：`internal/loadout/tenant.go` 只做映射，
-不定义自己的文档（`docs/LOADOUT.md:51`）。
+loadout 是 `{id, revision, version, summary, 服务描述符集合}` 的不可变快照，按 run pin。变的是它的行从
+哪来：服务集合现在是**四层装配**的产物，而不是单一文档。
+
+```text
+base bundle      默认：内核 seam、记忆卫生、产品服务
+   ↓ row id      （唯一允许新增 row 的层）
+mode bundle      serve / headless / tui / sdk
+   ↓
+preset           工具/提示/技能的行为覆盖
+   ↓
+config.toml      用户文件：不可变版本 + 账本锚点
+```
+
+每一行有稳定身份 `<plugin-id>#<row>`（例如 `keel.shell#bash-local`），它是身份而不是位置：覆盖只按该
+id 命中、last write wins，命中即**整行**替换（`impl` + `params`，params 绝不按键合并）
+（`docs/ASSEMBLY.md:61`、`docs/ASSEMBLY.md:68`）。只有 `base` 可以新增 row；覆盖 base 未声明的 row 是
+`row-unknown`；`absent = true` 把该行保留在 effective 集合里但移出激活，依赖方进入 `Blocked` 而不是
+半接线（`docs/ASSEMBLY.md:73`）。激活顺序由 `requires` 拓扑排序推导；被阻塞的行让 loadout 构造失败，
+不会静默降级（`docs/ASSEMBLY.md:80`）。
+
+`internal/assembly` 是纯模型——没有 goroutine、时钟或全局状态。`internal/loadout` 是唯一的服务适配层：
+它把默认蓝图映射为 base rows（`keel.<service>#service`，`internal/loadout/assembly.go:38`），把租户文档
+映射到 `config` stage，并把 `base → serve → config` 叠加成服务集合（`docs/ASSEMBLY.md:302`）。租户文档
+只是这个栈的**一个输入**，row 词汇本身属于装配（`docs/LOADOUT.md:51`）。
+
+`internal/configfile` 是 `config.toml` 的唯一磁盘适配器（`keel serve --config-file` /
+`KEEL_CONFIG_FILE`，默认 `$KEEL_HOME/config.toml`）（`docs/ASSEMBLY.md:203`）。文件缺失 = 空配置；非法
+文件 = 启动失败；轮转是原子的，产出不可变版本并由 run pin 住，锚点落在账本序列上。当前生效版本在
+`GET /v1/capabilities` 的 `configFile` 块暴露——hash、revision、anchor 与 capture mode，从不含本机路径
+（`internal/harnessapi/api.go:525`）。
+
+两处边界是刻意保留、并在源文档里写明的：只有 `serve` mode bundle 接线（headless/tui/sdk 直接报错），
+`config.toml` 的 row 已被严格解析并随版本 pin，但非 service row 尚未进入生产服务图
+（`docs/ASSEMBLY.md:35`、`docs/ASSEMBLY.md:302`）。完整规则、错误码、能力矩阵与校验命令见
+[装配](/zh/core/assembly)。
 
 默认蓝图是 `loadout.DefaultServices()`（`internal/loadout/loadout.go:83`）：
 
@@ -155,6 +187,10 @@ loadout 是 `{id, revision, version, summary, 服务描述符集合}` 的不可�
 其规范哈希与该服务的 pin 相等；未声明、未 pin 或哈希不符的 loop 在 loadout 存在之前就被拒绝
 （`internal/loadout/conformance.go:55`）。默认 `pi-loop` pin 住 `PinnedPiLoopManifestHash`；
 改测试套件必须显式重新 pin 并升 loop 服务版本。
+
+**放置是同一件事的另一半。** 装配决定一个进程由什么构成，放置决定会话的 run 在哪里执行。组满时 run
+进入持久 FIFO 排队（`202` + 位置 + ETA），租户配额耗尽则是硬拒绝（`429` + `Retry-After`）；两者见
+[放置与组](/zh/core/placement)，隔离与限额层见[多租户](/zh/core/tenancy)。
 
 ## 5. Handoff：工位怎么换
 

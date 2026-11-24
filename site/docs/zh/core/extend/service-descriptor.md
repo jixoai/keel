@@ -3,6 +3,11 @@
 本页就是规格里那条「照做即可」的路径：写一个服务描述符并接入 runtime，让服务达到 `ACTIVE`。以下内容
 与仓库自身的蓝图和测试逐条对表。
 
+描述符之上还有一层：**装配（assembly，`internal/assembly`）**是配置栈——base → mode → preset →
+`config.toml`——决定存在哪些 row、每行解析成哪个 `impl`/`params`，按 row id（`<plugin-id>#<row>`，
+last write wins，且只有 base 可以新增 row）寻址。描述符是**代码**接缝；装配行是部署选择或覆盖它的
+方式（`docs/ASSEMBLY.md:41`、`docs/ASSEMBLY.md:53`）。
+
 ## 1. 契约
 
 一个服务由 `ServiceDescriptor` 描述（`internal/servicegraph/descriptor.go:26`），由工厂构造

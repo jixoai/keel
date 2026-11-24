@@ -6,7 +6,15 @@ blob 层（库内分块 + 内容寻址溢出）、准入分池、资源预算，
 ## 1. PostgreSQL：单库 + 逻辑隔离
 
 Keel 使用**单个 PostgreSQL 18 库**，每行带 `tenant_id` 与复合键，而不是每租户一个库或进程
-（`README.md:19`）。行级安全（RLS）可选；主要隔离手段是复合键加内核的租户校验。
+（`README.md:70`）。行级安全（RLS）**默认开启**：每张租户表都 `ENABLE` + `FORCE ROW LEVEL SECURITY`，
+`tenant_isolation` 策略把 `tenant_id` 与 `current_setting('app.tenant_id', true)` 比较，应用以专用
+非属主角色（`keel_app`，`NOLOGIN NOSUPERUSER NOBYPASSRLS`）而不是表属主身份连接
+（`internal/store/rls.go:259`、`internal/store/rls.go:57`）。未设置该变量时取值为 NULL，因此一条忘了
+租户谓词的查询返回零行，而不是别的租户的数据；运维路径（provisioning、租户确定前的鉴权查询）显式用
+`app.bypass_rls = 'on'` 放行（`internal/store/rls.go:292`）。
+
+`KEEL_RLS=off` 是托管集群禁止 `CREATE ROLE` 时的显式逃生门（`cmd/keel/serve.go:313`），永远不会被
+自动关闭。围绕这份 schema 的隔离与配额层见[多租户](/zh/core/tenancy)。
 
 为什么不是每租户一个进程或 SQLite 文件：2GB ÷ 200 租户 = 每租户 10MB，而 Go runtime 自身就要
 10–20MB——算术上直接否决。200 个 SQLite 各带 page cache（默认 2MB → 400MB），且无法共享统一的事务/
@@ -32,6 +40,11 @@ schema 分两处：
 | `usage_ledger` | 每次 provider 请求一行，以 runner 生成的 `request_id` 为键 | 刻意**没有价格列**；usage 恢复后把 `unaccounted` 行原地升级 |
 | `mcp_oauth_pending` / `mcp_oauth_credentials` | MCP OAuth 状态机与加密凭据 | AES-256-GCM，AAD = tenant+server |
 | `model_settings` / `model_settings_history` / `tenant_secrets` | 租户模型文档 + 密钥存储 | 密钥加密存储；配置里只出现引用 |
+| `groups` / `session_placement` | 放置容器与每个会话的租约（`epoch` + `lease_until`） | run 槽位按组从 `runs` 计数、租户配额跨组计数，两个 worker 无法超卖同一组（`internal/store/schema.sql:894`、`internal/store/schema.sql:935`） |
+| `file_manifest` / `session_snapshot` | 文件插件的 path → hash 投影，以及按事件 seq 记录 tree hash | 两者都是投影：`fs.write` 先落账再改 manifest，fork/快照按 tree 物化前缀（`internal/store/schema.sql:855`、`internal/store/schema.sql:871`） |
+| `task_cards` / `task_events` | 任务面板的卡片行与其事件流 | 卡片是 UI 记忆；durable 的 `tasks` 行才是调度记账（`internal/store/schema.sql:749`、`internal/store/schema.sql:773`） |
+| `plugins` / `plugin_audit` | 已安装插件清单与 append-only 审计 | 刻意是进程级：插件启用不是租户事实，租户角色在它上面没有任何授权（`internal/store/schema.sql:582`、`internal/store/schema.sql:603`） |
+| `notifications` | 按租户的通知行 | `push_attempted_at` 是让「只推一次」跨重启成立的 compare-and-set（`internal/store/schema.sql:824`） |
 
 两处数据库侧行为对运行时很重要：
 
@@ -67,6 +80,30 @@ base64 编码（4 个 base64 字符 ≡ 3 个源字节，这正是任意 wire of
 **Range 续传由客户端驱动**：客户端上报已收到的 wire offset（`Range: bytes=<off>-`，必须是 4 的倍数），
 服务端映射回源偏移（`srcOff = off/4*3`），返回 `206 + Content-Range`，`totalWire = 4·⌈n/3⌉` 取自
 元数据。base64 输出**不加换行**，否则 4:3 关系被破坏（`docs/BACKPRESSURE.md:102`）。
+
+### 生命周期：TTL 回收、orphan 扫描、缩略图
+
+回收是「先库后文件」的流水线（`docs/BLOB-LIFECYCLE.md:73`）：
+
+- **候选**是 `ref_count = 0`、`complete = true`、`expires_at` 已过期、且没有父 blob 通过
+  `thumb_blob_id` 指向它的行；查询用 `FOR UPDATE SKIP LOCKED`，多个 worker 可同时 sweep
+  （`docs/BLOB-LIFECYCLE.md:86`）。
+- **删除顺序是严格的**：同一事务内 `blob_refs` → `blobs` → `blob_chunks`，提交后再到事务外做跨租户
+  的 `CASBlobExists` 复核并 unlink CAS 文件——同一个 sha256 可能被别的租户共享
+  （`docs/BLOB-LIFECYCLE.md:94`）。重复 sweep 幂等（`internal/blob/gc.go:86`）。
+- **孤儿靠重试而不是猜**：`SweepOrphanCAS(grace)` 只走两级十六进制目录、跳过新鲜文件，且只有
+  `blobs`（`storage_kind = 2`）中没有任何行引用该 sha256 时才删除；`layerfs/` 子树在结构上不在
+  扫描范围（`docs/BLOB-LIFECYCLE.md:111`、`internal/blob/gc.go:142`）。默认：TTL sweep 每 `1m`，
+  orphan 扫描每 `30m`、grace 固定 1h（`docs/BLOB-LIFECYCLE.md:125`、`docs/BLOB-LIFECYCLE.md:126`）。
+- **缩略图是独立 blob**：重新编码的 `image/png` 行（`complete`、`ref_count = 0`，最长边 320px），
+  `thumb_status` 走 `pending` → `ready`/`failed`；父行永不被改写（`docs/BLOB-LIFECYCLE.md:141`）。
+  `GET /v1/files/{id}/thumbnail` 返回 `200`、`202`（pending）、`404`（none）或 `409`（failed）
+  （`docs/BLOB-LIFECYCLE.md:161`）。
+
+文件树同样是投影：`file_manifest` 记录 path → hash，`session_snapshot` 按事件 seq 记录 layerfs 的 tree
+hash，`MaterializeSnapshot` 从该 tree 重建目录（`internal/fileplugin/service.go:849`）。写入先提交
+`fs.write` 事件、再移动 manifest，账本因此始终是真值（`internal/fileplugin/service.go:353`）。上传、下载、
+Range 与缩略图的 HTTP 面见[文件](/zh/core/files)。
 
 **不引入专用存储引擎**。调研结论很明确：Haystack/SeaweedFS/LMDB/bbolt/Badger 的 RSS ≈ 数据量，或
 每读一次占 4MB 缓冲，在 1GbE 下没有收益；本地 CAS + 页缓存 + PG 元数据就是上限
@@ -148,8 +185,9 @@ GOMEMLIMIT=1610612736 ./keel-runtime \
 `429` 是尺寸分池的预期反压而非流错误；压测工具按 `Retry-After` 重试。`docs/MATURITY.md:23` 定义
 GA 规模条件（2GB cgroup、1000 SSE、64 并发 run、周期 1MiB 图片、RSS 峰值 < 1.8GB、0 OOM）。
 
-无状态 E2E 为 7/7：`requestId` 幂等、SSE 游标、blob wire-offset 续传、agent 回复、模型调用中
-`SIGKILL`、工具执行中 `SIGKILL`、100 会话 × 2000 事件无缺口（`docs/RUNBOOK.md:112`）。
+无状态 E2E 为 **8/8**：跨重启的 `requestId` 幂等、跨重启的 SSE 游标、跨重启的 blob wire-offset 续传、
+agent 回复、retry 追加、模型调用中 `SIGKILL`、工具执行中 `SIGKILL`、100 并发会话 × 2000 事件无缺口
+（`cmd/e2e/main.go:86`、`docs/LOADOUT.md:168`）。
 
 ## 6. 运行运行时
 

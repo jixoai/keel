@@ -118,7 +118,7 @@ KEEL_DSN="$KEEL_DSN" ./keel-runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 
 ## 阅读地图
 
-Core 主线是五页原理 + 六页实践：
+Core 主线由原理页与扩展路径组成：
 
 | 页面 | 它回答什么 |
 |---|---|
@@ -126,6 +126,11 @@ Core 主线是五页原理 + 六页实践：
 | [事件与协议](/zh/core/events) | 事件种类有哪些？提交如何分类、如何幂等？SSE 保证什么？ |
 | [Harness API 参考](/zh/core/agentapi) | 每个 HTTP 面有哪些端点？请求/响应形状与错误码是什么？ |
 | [存储与运行](/zh/core/storage) | 数据怎么存（PG、分块、CAS）？请求怎么分池？内存预算多少？ |
+| [Loadout 与装配](/zh/core/assembly) | base、mode、preset 与 `config.toml` 如何叠加？row id 覆盖的是什么？ |
+| [放置与队列](/zh/core/placement) | 组、租约与 queued 202 准入怎么计数？什么时候才是 429？ |
+| [租户与配额](/zh/core/tenancy) | `keel serve` 与 `cmd/runtime` 下的租户、RLS 与两套配额词汇怎么工作？ |
+| [文件与 Blob](/zh/core/files) | file manifest、tree object、CAS、GC 与缩略图之间是什么关系？ |
+| [会话查询](/zh/core/session-query) | search、export、deliverables、task panel 与 file preview 怎么读一个会话？ |
 | [扩展地图](/zh/core/extend/) | 我想改 X——该用哪个接缝？ |
 | [嵌入 runtime](/zh/core/extend/embed-runtime) · [写一个服务描述符](/zh/core/extend/service-descriptor) · [接外部 backend](/zh/core/extend/external-backend) · [写 provider 适配器](/zh/core/extend/provider-adapter) · [测试与验收](/zh/core/extend/testing) | 四条扩展路径，各带代码、命令与验收口径。 |
 
@@ -134,6 +139,10 @@ Core 主线是五页原理 + 六页实践：
 
 ## 状态与诚实说明
 
-Keel 是一个持续加固中的可用运行时，不是已完成的 GA 产品。`docs/MATURITY.md` 为每个能力按 G0–G5
-分级并写明每级要求的证据，也直白记录了仍缺什么（例如按租户热切换 loadout、sandbox/hooks 服务化、
-外部 sidecar 的 CPU/内存预算）。本站凡称「已完成」之处，均在所述修订上对过代码；凡属计划，页面会明说。
+Keel 是一个持续加固中的可用运行时，不是已完成的 GA 产品。成熟度现在**按 change 取证**：
+`openspec/changes/` 下每个 change 都带自己的 evidence 目录（契约快照、前后对照图、测试日志——例如
+`openspec/changes/keel-oar-renderer/evidence/api-contract.txt:1`），能力声明以这些证据为准。
+`docs/MATURITY.md` 保留 G0–G5 闸门与历史 v1 矩阵，但该矩阵是更早修订的快照，已不再是唯一事实源
+（`docs/MATURITY.md:34`）。仍缺的能力在对应页点名——例如按租户热切换 loadout、sandbox/hooks 服务化、
+外部 sidecar 的 CPU/内存预算。本站凡称「已完成」之处，均在所述修订上对过代码；凡属计划或 Deferred，
+页面会明说。
