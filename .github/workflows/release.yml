@@ -63,6 +63,7 @@ jobs:
           export PATH="$HOME/.nsh/bin:$PATH"
           nsh --version
           ./scripts/package-web.sh "$RUNNER_TEMP/webdist"
+          mkdir -p dist
           VERSION="${{ steps.ver.outputs.version }}"
           (cd "$RUNNER_TEMP/webdist" && zip -q -r "$GITHUB_WORKSPACE/dist/keel-web-$VERSION.zip" .)
           ls -la dist
