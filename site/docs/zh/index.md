@@ -57,17 +57,24 @@ loop 本体由 [pigo](https://github.com/smallnest/pigo)（MIT）搬运最小必
 
 ```bash
 # 1. 克隆
-git clone https://github.com/jixoai/keel.git && cd keel
+git clone \
+  https://github.com/jixoai/keel.git
+cd keel
 
-# 2. 本机 PostgreSQL 18 集群（无 Docker）：数据在 .dev/pg，仅回环
+# 2. 本机 PostgreSQL 18（无 Docker）
 scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"   # 导出 KEEL_DSN
+eval "$(scripts/dev-pg.sh env)"
 
-# 3. 构建、引导首个超管并启动 Harness（产品壳 + API + worker）
+# 3. 构建并启动 Harness（产品壳 + API + worker）
 go build -o keel ./cmd/keel
-export KEEL_SERVE_TENANT=11111111-2222-3333-4444-555555555555
-export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # 签 session/CSRF cookie
-./keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
+TENANT=11111111-2222-3333-4444-555555555555
+export KEEL_SERVE_TENANT="$TENANT"
+# 签 session/CSRF cookie
+SECRET="$(openssl rand -hex 32)"
+export KEEL_SECRET_KEY="$SECRET"
+./keel admin bootstrap \
+  --tenant "$TENANT" \
+  --token-file ./setup.token
 ./keel serve --addr 127.0.0.1:13750
 ```
 

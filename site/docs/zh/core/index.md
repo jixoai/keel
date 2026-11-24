@@ -57,7 +57,8 @@ Core 之上的产品层叫 **Harness**，它有独立的主线，从 [Harness �
 
 ```bash
 # 1. 克隆并启动本机 PostgreSQL 18 集群（无 Docker）
-git clone https://github.com/jixoai/keel.git && cd keel
+git clone https://github.com/jixoai/keel.git
+cd keel
 scripts/dev-pg.sh start
 eval "$(scripts/dev-pg.sh env)"
 

@@ -62,17 +62,24 @@ response shapes shown are the actual ones.
 
 ```bash
 # 1. clone
-git clone https://github.com/jixoai/keel.git && cd keel
+git clone \
+  https://github.com/jixoai/keel.git
+cd keel
 
-# 2. a local PostgreSQL 18 cluster (no Docker): data in .dev/pg, loopback only
+# 2. local PostgreSQL 18 (no Docker)
 scripts/dev-pg.sh start
-eval "$(scripts/dev-pg.sh env)"   # exports KEEL_DSN
+eval "$(scripts/dev-pg.sh env)"
 
-# 3. build, bootstrap the first super admin, and start the Harness
+# 3. build and start the Harness
 go build -o keel ./cmd/keel
-export KEEL_SERVE_TENANT=11111111-2222-3333-4444-555555555555
-export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookies
-./keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
+TENANT=11111111-2222-3333-4444-555555555555
+export KEEL_SERVE_TENANT="$TENANT"
+# signs the session and CSRF cookies
+SECRET="$(openssl rand -hex 32)"
+export KEEL_SECRET_KEY="$SECRET"
+./keel admin bootstrap \
+  --tenant "$TENANT" \
+  --token-file ./setup.token
 ./keel serve --addr 127.0.0.1:13750
 ```
 

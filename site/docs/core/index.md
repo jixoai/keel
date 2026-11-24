@@ -69,7 +69,8 @@ Prerequisites: PostgreSQL 18 (`initdb`/`pg_ctl` on `PATH`, or any DSN) and Go 1.
 
 ```bash
 # 1. clone and start a local PostgreSQL 18 cluster (no Docker)
-git clone https://github.com/jixoai/keel.git && cd keel
+git clone https://github.com/jixoai/keel.git
+cd keel
 scripts/dev-pg.sh start
 eval "$(scripts/dev-pg.sh env)"
 
