@@ -85,9 +85,11 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          # The client is an NSH app; package it with the same nightly the repo
-          # pins (see web/README.md) so the bundle matches what the product runs.
-          curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
+          # The client is an NSH app; pin the release the repo uses (see
+          # web/README.md). The rolling nightly drifted within a day (0.6.0
+          # 589a60f dropped the `Speech` export) and broke this build at
+          # v0.2.0, so the workflow takes the stable release, not `--nightly`.
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.6.1 sh -s --
           export PATH="$HOME/.nsh/bin:$PATH"
           nsh --version
           # The script also copies web/theme.json next to index.html: the

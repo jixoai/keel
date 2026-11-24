@@ -8,16 +8,18 @@
 
 | 项 | 值 |
 |---|---|
-| CLI | **nsh 0.6.0 (f577c51 nightly)**，2026-11-23 由 0.4.0 (bba76ef) 升级 |
-| 安装 | `curl -fsSL https://nsh.dev/install.sh \| sh -s -- --nightly`（校验 `sha256` 通过） |
+| CLI | **nsh 0.6.1 (2f51d86)**，2026-11-24 由 0.6.0 nightly (f577c51) 升级 |
+| 安装 | `curl -fsSL https://nsh.dev/install.sh \| NSH_VERSION=v0.6.1 sh -s --`（校验 `sha256` 通过） |
 | 组件 | `web`、`tui`（由 `nsh package/run/test` 自动安装） |
 | 关键特性 | `List alignment="bottom"`（聊天列表底部对齐）、`--target tui` 开发宿主、`TextView` markdown/streaming、`Picker`、`host` 通道、`nsh test --target tui`（in-memory terminal） |
 | 本地参考检出 | `~/Development/GitHub/longbridge/nsh` |
 | 0.6.0 升级适配 | ① 测试 app 的静态资源必须在该 app 目录内：realtime/speech 的 gate 从 `src/surfaces/*` 挪到 `web/` 根（`assets/` 在 app 根内），harness 改为 `*-harness.tsx`；② `PickedFile.file` 可为 `null`（`status: "tooLarge"`）：speech 的上传路径现在给出「文件过大」提示，不再把空字节送进转写 |
 
-**为什么必须 nightly**：发布版 0.3.0（4e95ae5）既没有 `List alignment=bottom`，也没有
-`--target tui`；两者都在官方 main 上，nightly 已包含。本仓按 Owner 指令 pin main/nightly，
-不锁 release。
+**为什么锁 v0.6.1**：发布版 0.3.0（4e95ae5）缺 `List alignment=bottom` 与 `--target tui`；
+0.6.1 已同时具备（`nsh check` 0、`nsh test --target tui` 14/15，唯一失败是既有的设置页
+raw JSON 用例），且是稳定 release。**不再跟随 nightly**：2026-11-24 的 nightly（0.6.0
+589a60f）移除了 `Speech` 导出，导致 v0.2.0 的 CI web 构建失败；nightly 是滚动目标，不能作为
+可复现的发布输入。
 
 ## 构建与运行
 
