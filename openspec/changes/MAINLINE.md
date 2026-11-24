@@ -41,8 +41,10 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
    待同步（browser 有他人 WIP）；TUI 设置页 raw JSON 1 例失败；headless 模式 4 个布局差异。
 
 **下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻
-`keel-ecosystem`），不得直接在归档板上继续勾选。候选计划见
-`.agents/reports/keel/remaining-plan-2026-11-24/PLAN-AFTER-V0.2.0.md`。
+`keel-ecosystem`），不得直接在归档板上继续勾选。候选排程（P1 Alpha 残余 →
+P2 客户端产品化 → P3 解冻审计 → P4 运维债）在本地报告
+`.agents/reports/keel/remaining-plan-2026-11-24/PLAN-AFTER-V0.2.0.md`（报告目录不入库，
+上方的四组口子即入库摘要）。
 
 ## Owner 裁决（2026-11-22，记录，不再讨论）
 
