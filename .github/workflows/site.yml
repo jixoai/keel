@@ -4,8 +4,10 @@ name: Site
 # (the custom domain is carried by site/docs/public/CNAME).
 #
 # A failed build never deploys: the deploy job depends on the build job, so a
-# dead link (VitePress fails the build on those), a bilingual parity break or a
-# stale `path:line` citation leaves the previous revision online.
+# dead link (VitePress fails the build on those), a bilingual parity break, a
+# stale `path:line` citation or Chinese text leaking into an English page
+# (scripts/check-en-cjk.mjs, wired into scripts/build.mjs) leaves the previous
+# revision online.
 
 on:
   push:

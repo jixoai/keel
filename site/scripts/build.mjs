@@ -16,6 +16,17 @@ import { checkCitations } from './check-citations.mjs'
 import { checkLinks } from './check-links.mjs'
 
 const siteRoot = fileURLToPath(new URL('..', import.meta.url))
+
+/** Run the English-page CJK gate after the build produced dist/. */
+function runEnCjk() {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [join(siteRoot, 'scripts', 'check-en-cjk.mjs')], {
+      cwd: siteRoot,
+      stdio: 'inherit'
+    })
+    child.on('close', (code) => resolve(code ?? 1))
+  })
+}
 const vitepressBin = join(siteRoot, 'node_modules', 'vitepress', 'bin', 'vitepress.js')
 
 function runVitepress() {
@@ -71,6 +82,13 @@ console.log('\n== citation gate ==')
 const citations = checkCitations({ log: (line) => console.log(line) })
 if (!citations.ok) {
   console.error('citation check failed: stale path:line anchors in site pages')
+  process.exit(1)
+}
+
+console.log('\n== EN page purity (no CJK in the English tree) ==')
+const enCjkCode = await runEnCjk()
+if (enCjkCode !== 0) {
+  console.error('EN page purity failed: a Chinese character leaked into an English page')
   process.exit(1)
 }
 

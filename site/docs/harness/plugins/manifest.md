@@ -2,9 +2,9 @@
 
 > **Implemented.** The package format, the validator and the store below ship in
 > this repository; every rule carries the code that enforces it. The contract's
-> prose lives in `openspec/specs/plugin-system/spec.md` ("插件包与清单",
-> "发现、安装与包存储"), promoted there when the `keel-plugin-core` change was
-> archived. One field is declaration-only: `permissions.fs` (see
+> prose lives in `openspec/specs/plugin-system/spec.md` (the plugin-package,
+> discovery/install and package-storage sections), promoted there when the
+> `keel-plugin-core` change was archived. One field is declaration-only: `permissions.fs` (see
 > [Permissions](/harness/plugins/permissions)).
 
 ## 1. The package
