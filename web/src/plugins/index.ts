@@ -6,18 +6,25 @@
 // singleton registry directly.
 import type { PluginsView } from "../data/contract";
 import { currentPluginTarget } from "./forms";
+import { registerOarToolRenderer } from "./oar";
 import { SlotRegistry, slots } from "./registry";
 import { syncPluginInventory } from "./sync";
 import type { MountedContribution, SlotTarget } from "./types";
 
 let baseInstalled = false;
 
-/** Declare keel.ui's base slots once. Idempotent; a re-register replaces the
- * declarations with the same table. */
+/** Declare keel.ui's base slots once, then the first-party renderers that ship
+ * with this build. Idempotent; a re-register replaces the declarations with the
+ * same table. */
 export function installPluginRuntime(): void {
   if (baseInstalled) return;
   baseInstalled = true;
   slots.registerBaseSlots();
+  // The OAR external-run card (change keel-oar-renderer) is builtin: the
+  // conversation host asks the slot for `oar`, and a deployment whose inventory
+  // never named `keel.oar` still renders it (or falls back to its text row when
+  // the projection route says 501).
+  registerOarToolRenderer(slots);
 }
 
 /** Apply one `GET /v1/plugins` answer. The base slots are always present; an

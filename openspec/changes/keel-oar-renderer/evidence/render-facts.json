@@ -1,0 +1,31 @@
+{
+  "collapsed": {
+    "card": true,
+    "simulated": true,
+    "runtime": "fake",
+    "task": "task-oar-codex",
+    "rows": 6,
+    "cardOverflow": false,
+    "docOverflow": false
+  },
+  "expanded": {
+    "card": true,
+    "simulated": true,
+    "runtime": "fake",
+    "task": "task-oar-codex",
+    "rows": 6,
+    "cardOverflow": false,
+    "docOverflow": false
+  },
+  "narrow": {
+    "card": true,
+    "simulated": true,
+    "runtime": "fake",
+    "task": "task-oar-codex",
+    "rows": 6,
+    "cardOverflow": false,
+    "docOverflow": false
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}

@@ -476,6 +476,38 @@ export function PluginToolRendererSlot(props: { call: { toolCallId: string; name
   );
 }
 
+/** A tool renderer resolved by name, for a host that supplies its own props
+ * and its own degradation (the conversation's external-run card). Unlike
+ * `PluginToolRendererSlot` this never draws a plugin failure into the
+ * conversation: no contribution, a failed chunk or a missing module is the
+ * host's own face, so a plugin can never park a turn. */
+export function PluginToolRendererEntry(props: {
+  toolName: string;
+  /** What the ready contribution draws (the host's own data). */
+  props?: unknown;
+  /** The host's face when the slot cannot run here (text, in the conversation). */
+  fallback: JSX.Element;
+  registry?: SlotRegistry;
+}): JSX.Element {
+  const registry = registryOf(props.registry);
+  const target = currentPluginTarget();
+  const candidate = () => registry.toolRenderer(props.toolName, target);
+  return (
+    <If when={candidate()} else={props.fallback}>
+      {(entry) =>
+        safeRender(
+          entry(),
+          entry().declaration.slot,
+          registry.slot("keel.ui.tool-renderer"),
+          registry,
+          target,
+          props.props,
+        )
+      }
+    </If>
+  );
+}
+
 /** The message-part slot: a contribution may draw a part kind (a task card, a
  * deliverable) in the host tree. Renders nothing when no plugin claims it. */
 export function PluginMessagePartSlot(props: { partKind: string; props?: unknown }) {

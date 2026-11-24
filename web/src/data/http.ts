@@ -62,6 +62,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { parseQueueFacts } from "./queue";
+import { parseExternalProjection, type ExternalProjectionView } from "./oar-projection";
 import {
   APP_ID_PATTERN,
   McpAppRequestError,
@@ -1505,6 +1506,29 @@ export class KeelHttp implements SettingsApi {
       count: numberOr(body.count, 0),
       truncated: body.truncated === true,
     };
+  }
+
+  /** `GET /v1/sessions/{id}/external/projection` — the OAR render projection
+   * (`keel.oar.render-projection/1`). Read-only and server-folded: the client
+   * never folds a second record model (docs/OAR.md §6). The typed refusals are
+   * the server's own: 404 `not_external_session`, 501 `oar_not_wired`, 5xx
+   * `projection_corrupt`. A body that is not this schema is refused here so a
+   * future document is never drawn as this one. */
+  async externalProjection(sessionId: string): Promise<ExternalProjectionView> {
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/external/projection`,
+    );
+    const projection = parseExternalProjection(await response.json());
+    if (!projection) {
+      throw new KeelApiError(
+        502,
+        "外部运行投影的返回无法识别（不是 keel.oar.render-projection/1）",
+        [],
+        undefined,
+        "projection_invalid",
+      );
+    }
+    return projection;
   }
 
   /** `GET /v1/sessions/{id}/task-panel` — the run surface's task tree, event

@@ -11,4 +11,8 @@ type ChunkFactory = () => Promise<PluginChunkModule>;
 export const BUNDLED_CHUNKS: Record<string, ChunkFactory> = {
   "fixture:w12-hello": () =>
     import("./fixtures/hello-chunk").then((module) => module as unknown as PluginChunkModule),
+  // The OAR external-run card (change keel-oar-renderer): a first-party builtin
+  // contribution, not inventory. Its key is the contribution's `entry`.
+  "keel.oar:tool-renderer": () =>
+    import("./chunks/oar-run").then((module) => module as unknown as PluginChunkModule),
 };

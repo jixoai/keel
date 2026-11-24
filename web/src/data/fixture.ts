@@ -72,6 +72,7 @@ import {
   fixtureForkSessionId,
   fixtureRunSessionId,
 } from "./fixture-identity";
+import { demoOarEvents, demoOarProjection, FIXTURE_OAR_SESSION_ID } from "./fixture-oar";
 import type {
   AccountView,
   AuditEventView,
@@ -103,6 +104,7 @@ import type {
   SubagentView,
   TeamTasksView,
 } from "./bots-wire";
+import type { ExternalProjectionView } from "./oar-projection";
 import demoShot from "../../assets/demo-shot.png";
 
 type Subscriber = {
@@ -487,6 +489,9 @@ export class FixtureClient implements SettingsApi {
      * with `?fixture=1&plugins=1`, or `host.params.plugins === true`). The
      * default fixture stays the product-shaped sample. */
     private readonly pluginFixtures = false,
+    /** Include the OAR external-run sample (`?oar=1` / `host.params.oar`):
+     * one external session, its three records and its projection. */
+    private readonly oarFixtures = false,
   ) {
     this.seed();
   }
@@ -1503,6 +1508,27 @@ export class FixtureClient implements SettingsApi {
     return this.identity.taskPanel(sessionId, memberLimit, eventLimit);
   }
 
+  /** `GET /v1/sessions/{id}/external/projection` (change keel-oar-renderer):
+   * the demo's one external session, folded server-side exactly like the live
+   * route. The typed refusals mirror it too — a launch without the OAR sample
+   * is a deployment without the journal (501), and every other session is not
+   * external (404). */
+  async externalProjection(sessionId: string): Promise<ExternalProjectionView> {
+    if (!this.oarFixtures) {
+      throw new KeelApiError(
+        501,
+        "this deployment has not wired the OAR journal",
+        [],
+        undefined,
+        "oar_not_wired",
+      );
+    }
+    if (sessionId !== FIXTURE_OAR_SESSION_ID) {
+      throw new KeelApiError(404, "not an external session", [], undefined, "not_external_session");
+    }
+    return demoOarProjection(sessionId);
+  }
+
   async filePreview(sessionId: string, path: string, referenceHash?: string, offset = 0): Promise<FilePreviewView> {
     try {
       return await this.identity.filePreview(sessionId, path, referenceHash, offset);
@@ -2093,6 +2119,53 @@ export class FixtureClient implements SettingsApi {
     ]);
 
     this.add("demo-empty", "新会话", []);
+
+    // The OAR sample (change keel-oar-renderer): one external session whose
+    // turn carries three `oar.record` events and whose projection is a fake
+    // runtime. Asked for with `?oar=1` / `host.params.oar`, so the default
+    // sample (and every existing test's expectations) stays unchanged.
+    if (this.oarFixtures) {
+      this.add(FIXTURE_OAR_SESSION_ID, "Codex 外部运行", [
+        {
+          kind: "user.message",
+          payload: {
+            text: "让 Codex 看一眼构建发布脚本，确认包内容没有漏项。",
+            requestId: "seed-oar-1",
+            delivery: "queue",
+            timestamp: base - 300_000,
+          },
+        },
+        {
+          kind: "assistant.message",
+          payload: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "外部工具的记录不建任务卡；归属挂在发起它的卡上。" },
+              {
+                type: "text",
+                text: "已把这次检查交给 Codex（外部运行时）。它的记录经 OAR 汇成下方这张运行卡，任务归属仍是发起它的那张卡。",
+              },
+            ],
+            inputSeqs: [1],
+            stopReason: "end_turn",
+            timestamp: base - 296_000,
+          },
+        },
+        ...demoOarEvents(),
+        {
+          kind: "run.finished",
+          payload: {
+            turns: 1,
+            tokensIn: 0,
+            tokensOut: 0,
+            stopReason: "done",
+            durationMs: 4200,
+            metering: "external",
+            timestamp: base - 290_000,
+          },
+        },
+      ]);
+    }
 
     // One session shared with 李娜 by 陈墨, so 「共享给我」 and 「由 陈墨 共享」
     // are a real row rather than a fabricated filter.

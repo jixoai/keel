@@ -106,6 +106,7 @@ function RowCell(props: { row: () => Row }) {
       <If when={props.row().kind === "turn"}>
         <TurnRow
           turn={() => props.row().turn!}
+          sessionId={() => store.conversation()?.sessionId ?? store.activeId() ?? ""}
           attachmentsFor={(requestId) => store.attachmentsFor(requestId)}
           partialText={() => store.partial()}
           isLastRunning={isLastRunning}

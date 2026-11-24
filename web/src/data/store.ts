@@ -56,6 +56,7 @@ import type {
   UiCommands,
   WireEvent,
 } from "./contract";
+import type { ExternalProjectionView } from "./oar-projection";
 import { asString, payloadOf, textOf, contentOf } from "./wire";
 import { providerCredentialSecretName } from "./model-catalog";
 import { refreshDeploymentCapabilities, setDeploymentCapabilities } from "./capabilities";
@@ -503,6 +504,10 @@ class KeelStore {
    * `host.params.plugins`): only the slot tests and the browser evidence ask
    * for it; the default fixture stays the product-shaped sample. */
   private pluginFixtures = false;
+  /** The OAR external-run sample is requested (`?oar=1` / `host.params.oar`):
+   * one external session, its records and its projection. Same rule — the
+   * default sample stays unchanged. */
+  private oarFixtures = false;
   /** The web page's query as read for the dev launch (`?fixture=1`). */
   private devSearch = "";
   private devRequest: Promise<boolean> | null = null;
@@ -552,6 +557,7 @@ class KeelStore {
     if (host.params?.fixture === true) {
       this.dev = true;
       this.pluginFixtures = host.params?.plugins === true;
+      this.oarFixtures = host.params?.oar === true;
       return true;
     }
     const page = await this.pageRoute();
@@ -559,6 +565,7 @@ class KeelStore {
     const params = new URLSearchParams(this.devSearch);
     this.dev = params.get("fixture") === "1";
     this.pluginFixtures = params.get("plugins") === "1";
+    this.oarFixtures = params.get("oar") === "1";
     return this.dev;
   }
 
@@ -573,7 +580,7 @@ class KeelStore {
     // The product never reaches this branch — it is asked for at launch.
     if (await this.devLaunch()) {
       if (token !== this.detectToken) return;
-      if (!this.fixture) this.fixture = new FixtureClient(undefined, this.pluginFixtures);
+      if (!this.fixture) this.fixture = new FixtureClient(undefined, this.pluginFixtures, this.oarFixtures);
       this.http = null;
       this.client = this.fixture;
       resetPermissions();
@@ -1607,6 +1614,18 @@ class KeelStore {
     const client = this.identityApi();
     if (!client?.sessionFiles) return null;
     return await client.sessionFiles(sessionId, query);
+  }
+
+  /** The external run projection (`GET
+   * /v1/sessions/{id}/external/projection`) or `null` when this transport has
+   * none. The once-per-record cache is `data/oar.ts`; the store only names the
+   * seam, so a harness answers it exactly like the live one. A transport
+   * without the surface is not an error path of its own: the conversation keeps
+   * its text row. */
+  async externalProjection(sessionId: string): Promise<ExternalProjectionView | null> {
+    const client = this.identityApi();
+    if (!client?.externalProjection) return null;
+    return await client.externalProjection(sessionId);
   }
 
   /** identity-stream.ts installs its stop function here; `null` clears it. */

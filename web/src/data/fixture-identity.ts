@@ -10,6 +10,7 @@
 // and a real `keel serve` is always `KeelHttp`.
 import { KeelApiError } from "./http";
 import { CAPABILITIES } from "./permission-catalog";
+import { FIXTURE_OAR_SESSION_ID, FIXTURE_OAR_TASK_ID } from "./fixture-oar";
 import type { IdentityApi } from "./identity-api";
 import type {
   FilePreviewView,
@@ -698,6 +699,18 @@ export class FixtureIdentity implements IdentityApi {
   ];
 
   private readonly tasks: TeamTaskView[] = [
+    {
+      // Change keel-oar-renderer: the card the demo external run is attributed
+      // to. It has no parent, so it is this session's own card and never a
+      // member of the captain run.
+      taskId: FIXTURE_OAR_TASK_ID,
+      sessionId: FIXTURE_OAR_SESSION_ID,
+      title: "Codex 构建检查",
+      status: "in_progress",
+      origin: "tool",
+      createdAt: agoIso(0, 20),
+      updatedAt: agoIso(0, 5),
+    },
     {
       taskId: "task-order",
       sessionId: ORDER_SESSION,

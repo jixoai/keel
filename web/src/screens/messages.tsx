@@ -14,7 +14,7 @@
 // Tool families are *derived* from the tool's own name (`./tool-families`):
 // `ToolCallView` is a frozen contract with no family field, so the words and
 // the counts the summary line says them with live in that pure module.
-import { Clipboard, Image, type JSX, keymap, platform, signal, Text, View, windowSize } from "nsh";
+import { Clipboard, effect, Image, type JSX, keymap, platform, signal, Text, View, windowSize } from "nsh";
 import { Radio, RadioGroup as NativeRadioGroup, TextView } from "nsh/base";
 import type {
   AttachmentRef,
@@ -62,7 +62,10 @@ import {
   type BadgeVariant,
 } from "../ui/kit";
 import { McpAppSlot } from "../surfaces/mcp-app";
-import { PluginMessagePartSlot, PluginToolRendererSlot } from "../plugins/slots";
+import { currentPluginTarget } from "../plugins/forms";
+import { PluginMessagePartSlot, PluginToolRendererEntry, PluginToolRendererSlot } from "../plugins/slots";
+import { oarAccess } from "../data/oar";
+import { taskPanelAccess } from "../data/tasks";
 import {
   FAMILY_ICON,
   FAMILY_LABEL,
@@ -1059,8 +1062,94 @@ function ActionLine(props: { turnId: string; time?: number; children: JSX.Elemen
   );
 }
 
+// ---- external runs (change keel-oar-renderer) ------------------------------
+
+/** The note `payloadNote` writes for an OAR record: the external payload's
+ * `type` is `oar.record` (`internal/externalgw/agent.go`). */
+const OAR_RECORD_NOTE = "oar.record";
+
+/** The existing text row: the one face an external record has when no card may
+ * draw it (no contribution, a 404/501/5xx projection, the terminal). */
+function ExternalEventRow(props: { note: string }) {
+  return (
+    <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+      外部事件 · {props.note}
+    </Text>
+  );
+}
+
+/** The row that owns the session's single external-run card: the newest
+ * `oar.record` in the open conversation. The projection is the session's, so
+ * every other record of the same run draws nothing (one run, one card). */
+const oarCardSeat = (): { turnId: string; seq: number } | null => {
+  const turns = store.conversation()?.turns ?? [];
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]!;
+    for (let at = turn.postTurnEvents.length - 1; at >= 0; at -= 1) {
+      const event = turn.postTurnEvents[at]!;
+      if (event.kind === "external.event" && event.note === OAR_RECORD_NOTE) {
+        return { turnId: turn.turnId, seq: event.seq };
+      }
+    }
+  }
+  return null;
+};
+
+/** Open the existing card an external run is attributed to: the task panel's
+ * own read and selection. The attribution never creates a card — a task id
+ * outside this session's tree is reported, not drawn. */
+const openOarTask = (sessionId: string, taskId: string): void => {
+  void taskPanelAccess.focus(sessionId, taskId).then((found) => {
+    store.flash({
+      tone: found ? "info" : "warn",
+      text: found
+        ? `已定位任务卡 ${taskId}`
+        : `任务图里没有 ${taskId}：外部运行只归属已有任务卡，不新建卡。`,
+    });
+  });
+};
+
+/** The external run card's host: one projection read per record burst (cached
+ * in `oarAccess`), drawn through the builtin `keel.ui.tool-renderer`
+ * contribution (`toolName: "oar"`). The terminal, a missing contribution, a
+ * failed chunk and a 4xx/5xx projection all degrade to the existing text row: a
+ * plugin can never park a turn (spec: 外部运行记录经 tool-renderer 呈现).
+ * Exported for the harness; the conversation is its only product caller. */
+export function ExternalRunRow(props: { sessionId: string; seq: number }) {
+  effect(() => {
+    // The terminal has no card to fill: the record is its text row, so the
+    // projection read is not asked for there.
+    if (props.sessionId && currentPluginTarget() !== "tui") {
+      oarAccess.ensure(props.sessionId, props.seq);
+    }
+  });
+  const projection = () => {
+    const state = oarAccess.state(props.sessionId);
+    return state.status === "ready" ? state.projection : null;
+  };
+  // The card is a graphical face: the terminal keeps the text row.
+  const cardReady = () => currentPluginTarget() !== "tui" && projection() !== null;
+  const fallback = () => <ExternalEventRow note={OAR_RECORD_NOTE} />;
+  return (
+    <If when={cardReady()} else={fallback()}>
+      <PluginToolRendererEntry
+        toolName="oar"
+        props={{
+          sessionId: props.sessionId,
+          projection: projection(),
+          onOpenTask: (taskId: string) => openOarTask(props.sessionId, taskId),
+        }}
+        fallback={fallback()}
+      />
+    </If>
+  );
+}
+
 export function TurnRow(props: {
   turn: () => TurnView;
+  /** The open session's id: the external run card's projection is the
+   * session's, and its task attribution opens that session's own card. */
+  sessionId: () => string;
   attachmentsFor: (requestId: string) => AttachmentRef[] | undefined;
   partialText: () => string | undefined;
   isLastRunning: () => boolean;
@@ -1276,11 +1365,15 @@ export function TurnRow(props: {
                 return <InlineError text={event.note ?? "模型返回错误"} />;
               }
               if (event.kind === "external.event") {
-                return (
-                  <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                    外部事件 · {event.note ?? event.kind}
-                  </Text>
-                );
+                if (event.note === OAR_RECORD_NOTE) {
+                  // One card per session: the newest record seats it, and the
+                  // other records of the same run draw nothing (they are the
+                  // same projection; the text row is not repeated per record).
+                  const seat = oarCardSeat();
+                  const here = seat?.turnId === props.turn().turnId && seat.seq === event.seq;
+                  return here ? <ExternalRunRow sessionId={props.sessionId()} seq={event.seq} /> : null;
+                }
+                return <ExternalEventRow note={event.note ?? event.kind} />;
               }
               return null;
             })}

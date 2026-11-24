@@ -53,6 +53,7 @@ import type {
   SubagentView,
   TeamTasksView,
 } from "./bots-wire";
+import type { ExternalProjectionView } from "./oar-projection";
 
 export interface IssuedBotKeyView {
   key: BotKeyView;
@@ -126,6 +127,11 @@ export interface IdentityApi {
    * a deployment without the projection answers nothing, and the panel says
    * so instead of drawing an empty tree. */
   taskPanel?(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView>;
+  /** The external run projection (`GET /v1/sessions/{id}/external/projection`):
+   * the server-folded OAR record stream (`keel.oar.render-projection/1`) the
+   * conversation's external run card renders. Optional: a deployment that never
+   * wired OAR answers nothing, and the conversation keeps its text row. */
+  externalProjection?(sessionId: string): Promise<ExternalProjectionView>;
   /** One bounded page of a session file the panel previews
    * (`GET /v1/sessions/{id}/file-preview`). Optional, same rule. */
   filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;

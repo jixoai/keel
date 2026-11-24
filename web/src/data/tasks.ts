@@ -690,6 +690,27 @@ class TaskPanelStore {
     this.selectedTaskId.set(taskId);
   }
 
+  /** Open one card in the panel: read the session's projection when it is not
+   * in hand, then select the card (the panel's own selection — the way a click
+   * on the tree selects it). Answers whether the card is in this session's
+   * tree: an attribution that points outside it is reported, never invented as
+   * a second card. */
+  async focus(sessionId: string, taskId: string): Promise<boolean> {
+    if (!sessionId || !taskId) return false;
+    const known = (): boolean => {
+      const panel = this.panel();
+      if (!panel) return false;
+      return [...(panel.cards ?? []), ...(panel.members ?? []), ...(panel.ancestors ?? [])].some(
+        (card) => card.taskId === taskId,
+      );
+    };
+    if (!known()) await this.load(sessionId);
+    if (!known()) return false;
+    this.section.set("graph");
+    this.select(taskId);
+    return true;
+  }
+
   setSection(section: "graph" | "events" | "resources"): void {
     this.section.set(section);
     if (section !== "resources") {
