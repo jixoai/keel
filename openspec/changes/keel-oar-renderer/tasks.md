@@ -8,6 +8,7 @@
 - [x] 1.3 `cmd/keel/serve.go` 装配 journal dir（`-oar-journal-dir` > `KEEL_OAR_JOURNAL_DIR`），
       注册路由，accessgate 矩阵补声明。
 - [x] 1.4 测试：真 PG + 临时 journal 的契约测试（有记录/空/损坏/跨租户/非外部会话/未配置）。
+      复跑须带 `KEEL_TEST_DSN=...`；用 `DSN=` 会七个测试全 SKIP 但仍打印 `ok`（假绿陷阱）。
 
 ## 2. 客户端渲染（前端）
 

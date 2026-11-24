@@ -6,7 +6,8 @@
 ## 1. 审计与基线
 
 - [x] 1.1 逐页审计 → `evidence/fact-sheet.md`（页面/优先级/问题/当前事实/建议；含 lane 划分）。
-- [ ] 1.2 基线：四道门与构建结果记录到 `evidence/baseline.txt`；关键页 before 截图。
+- [x] 1.2 基线：before = `git diff 5465b17..9ab8bf8 -- site`（纯文档内容变更，无组件/样式改动，
+      故不产 before 截图）；构建数字与 after 截图在 `evidence/`。
 
 ## 2. Lane A · Onboarding + Core 契约
 
@@ -48,9 +49,11 @@
 
 ## 7. 收口与验收
 
-- [x] 7.1 四道门全绿：`check-links`、`parity`、`check-citations`、`check-en-cjk`；
-      `pnpm --dir site build` 成功。
-- [ ] 7.2 部署：site.yml 成功；关键页公网 200 且为新内容；after 截图到 `evidence/after/`。
+- [x] 7.1 四道门全绿：`check-links`、`parity`、`check-citations`、`check-en-cjk`
+      （后者已接入 `site/scripts/build.mjs` 与 CI）；`pnpm --dir site build` 成功
+      （37 对 / 3314 链接 / 1471 引用 / 0 CJK）。
+- [x] 7.2 部署：site.yml 成功（run 45326674777；下载页表格修复后的 run 见 git 记录）；
+      关键页公网 200 且为新内容；after 截图已入库。
 - [ ] 7.3 vision 子代理复核关键页（架构总览/harness 总览/插件标准/下载页，四档/双端）；P0/P1 清零。
 - [ ] 7.4 归档本 change（docs-only；按 site 规格合入或 `--skip-specs`）。
 
