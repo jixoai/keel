@@ -2,28 +2,47 @@
 
 > Owner 2026-11-22 裁决。本文件是唯一程序板（canonical board）；任务真值仍是各 change 的
 > `tasks.md` + 证据。勾选数只表示板面状态，不表示本文件重新验收过实现。
-> 更新：2026-11-22 · 分支：`main` · 基线：`5d422bd`
+> 更新：2026-11-24（v0.2.0 发布）· 分支：`main` · 基线：`864ed8b`
 
 ## 当前状态（板面快照）
 
 | Change | 勾选 | 状态 | 处置 |
 |---|---:|---|---|
-| `keel-harness-v2` | 90/157 | **唯一活跃主线** | 只推进这一条 |
-| `runtime-foundation` | 39/47 | 已折叠 | 8 项残余并入 W11；不单开线 |
-| `keel-ecosystem` | 4/72 | 冻结参考/backlog | 只有 W11 实际需要才取用 |
+| `keel-harness-v2` | 133/174 | **已归档 2026-11-24（v0.2.0 已发布）** | 收口门与 G11 证据在 `archive/2026-11-24-keel-harness-v2/`；不再推进 |
+| `runtime-foundation` | 39/47 | 已折叠（8 残余由 W11 关闭） | 见 `FOLDED.md` 2026-11-24 收口记录；不单开线 |
+| `keel-ecosystem` | 4/72 | 冻结参考/backlog | Owner 2026-11-22；解冻前先做 PI parity 审计（多数能力已由 v2 以不同形态交付） |
 | `keel-agent-team-v1` | 61/62 | 已被取代 | 归档；最后 1 条设计任务不做 |
 
 已交付/已归档的锚点（只作事实引用，不重复验收）：
 
 - 身份/Bot/TeamBot/共享/审计：`keel-bot-identity-access` 2026-11-22 归档，A6 10/10 步、
   304/304 断言、P0/P1/P2=0；见 `.agents/docs/E2E-REPORTS.md` 2026-11-22 条目。
-- 任务→bash→capture→任务面板：W3/W4 主体已勾（W4 面板项仍开）。
-- Web + TUI：W7/TUI 证据在；W10 触发器已勾。
-- 恢复：W8 子代理 resume 已交付；W11 G2 的 kill -9/容器重启端到端证据已由 W2/W12 recovery 切片的真实 SIGKILL 测试补强，门级汇总仍待 W11。
-- 2026-11-22 已交付切片：W0.5 契约冻结；W9 OAR/Codex；W2/W12 恢复与护栏；W12 UI 槽位/chunk；身份 2s SSE invalidation。
+- `keel-harness-v2` 2026-11-24 归档：W11 收口门 E0/G0–G11 的证据、G11 活实例报告
+  （10 步/10 断言/212 文件审计，复核 8.5/10）与 41 项未勾任务的逐条处置见
+  `archive/2026-11-24-keel-harness-v2/DISPOSITION.md`；v0.2.0 于同日发布
+  （tag `38a0713`，六资产 + SHA256SUMS 全量校验，keel.jixoai.com 已切版）。
+- 任务→bash→capture→任务面板：W3/W4 主体已勾（面板已交付）。
+- Web + TUI：W7/TUI 证据在；W10 触发器已勾；W12 UI 槽位已交付（`evidence/w12-ui-slots.md`）。
+- 恢复：W8 子代理 resume 已交付；W11 G2 的 kill -9/容器重启端到端证据由 W2/W12 recovery
+  切片的真实 SIGKILL 测试补强；G1 覆盖表 30 台机器 0 gap。
 
-板面仍开的主要口子（按 W）：W0 多用户/清单/RSS/原生 target；W0.5 剩余四层装配/能力矩阵；W1 Rust+gRPC；
-W2 组排队/ETA/OOM；W3 capture 策略覆写；W4 面板；W9 OAR；W11 收口门；W12 槽位/恢复/产品件。
+v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
+
+1. **Alpha 残余**：OAR 专用渲染器 + 宿主任务图闭环（Codex record 链路已绿，缺
+   `keel.ui.tool-renderer` 与任务图证明）；E0/R1 v2 重 pin 与零回归（旧基线 e7361f8）；
+   G4 300MB 目标/组 OOM（平台受限，468MB ≤500MB 已记 PARTIAL）。
+2. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
+   自更新、RichEditor/流式 Markdown、1000 条消息长会话性能。
+3. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
+   attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
+   telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
+   gbash mcp CLI、fileplugin 锁回收）；多租户插件面；macOS 原生 target；Rust+gRPC layerfs。
+4. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
+   待同步（browser 有他人 WIP）；TUI 设置页 raw JSON 1 例失败；headless 模式 4 个布局差异。
+
+**下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻
+`keel-ecosystem`），不得直接在归档板上继续勾选。候选计划见
+`.agents/reports/keel/remaining-plan-2026-11-24/PLAN-AFTER-V0.2.0.md`。
 
 ## Owner 裁决（2026-11-22，记录，不再讨论）
 
@@ -84,7 +103,10 @@ W0.5 插件全景/扩展面冻结
 
 ## 链接
 
-- `openspec/changes/keel-harness-v2/tasks.md`
+- `openspec/changes/archive/2026-11-24-keel-harness-v2/tasks.md`
+- `openspec/changes/archive/2026-11-24-keel-harness-v2/DISPOSITION.md`
+- `openspec/changes/archive/2026-11-24-keel-harness-v2/acceptance.md`（验收判据）
 - `openspec/changes/runtime-foundation/FOLDED.md`
 - `openspec/changes/keel-ecosystem/FROZEN.md`
 - `openspec/changes/archive/2026-11-22-keel-agent-team-v1/SUPERSEDED.md`
+- G11 报告：https://local-kzf-keel.fde2e.com/report.html
