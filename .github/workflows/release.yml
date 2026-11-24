@@ -82,7 +82,9 @@ jobs:
 
       - name: build the web client
         id: web
-        continue-on-error: true
+        # A failed web build fails the release: v0.2.0 shipped without its
+        # zip because this step was continue-on-error. A partial release is
+        # worse than a red run that can be fixed and re-tagged.
         run: |
           set -euo pipefail
           # The client is an NSH app; pin the release the repo uses (see
