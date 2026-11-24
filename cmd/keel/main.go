@@ -97,6 +97,8 @@ Environment (serve):
   KEEL_SECRET_KEY          32-byte base64/hex key for cookie/CSRF signing (required)
   KEEL_BOOTSTRAP_TOKEN     one-time setup token for a container (auth=required, no super admin)
   KEEL_SERVE_WEB_DIR       static build directory (default web/dist)
+  KEEL_OAR_JOURNAL_DIR     OAR record journal directory (session-<ref>.ndjson);
+                           empty answers 501 on the external projection route
   KEEL_MODEL / KEEL_PROVIDER / KEEL_BASE_URL / KEEL_PROTOCOL / KEEL_API_KEY
                            model selection (fake provider when unset)
   KEEL_MODELS_CONFIG       tenant models document (providers/rules/selection)
@@ -144,6 +146,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		dsn              = fs.String("dsn", os.Getenv("KEEL_DSN"), "PostgreSQL DSN")
 		webDir           = fs.String("web-dir", envOr("KEEL_SERVE_WEB_DIR", defaultServeWebDir), "static web build directory")
 		casDir           = fs.String("cas", os.Getenv("KEEL_CAS_DIR"), "content-addressed store directory (large originals)")
+		oarJournalDir    = fs.String("oar-journal-dir", os.Getenv("KEEL_OAR_JOURNAL_DIR"), "OAR record journal directory (session-<ref>.ndjson); empty answers 501 on the external projection route")
 		tenantRaw        = fs.String("tenant", os.Getenv("KEEL_SERVE_TENANT"), "tenant UUID the server acts as")
 		authRaw          = fs.String("auth", envOr("KEEL_AUTH", string(authModeRequired)), "authentication mode: required|local-only|off")
 		insecure         = fs.Bool("insecure", envBool("KEEL_INSECURE"), "allow auth=off (loopback only)")
@@ -188,6 +191,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		DSN:              *dsn,
 		WebDir:           *webDir,
 		CASDir:           *casDir,
+		OARJournalDir:    *oarJournalDir,
 		TenantID:         tenantID,
 		AuthMode:         mode,
 		Insecure:         *insecure,

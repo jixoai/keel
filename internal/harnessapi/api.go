@@ -188,6 +188,16 @@ type Config struct {
 	// GET /v1/sessions/search. Nil answers 501 and reports the capability false
 	// (a missing access surface is the separate 503 path).
 	SessionSearch SessionSearcher
+	// ExternalSessions reads the session's external marks (state_owner,
+	// external_ref) for GET /v1/sessions/{id}/external/projection (change
+	// keel-oar-renderer). Nil answers 501 oar_not_wired: without the marks there
+	// is no journal handle to read.
+	ExternalSessions SessionExternalReader
+	// OARJournalDir is the directory of the OAR record journals
+	// (session-<ref>.ndjson). Empty answers 501 oar_not_wired on the projection
+	// route: a deployment without OAR must not serve an empty projection as if
+	// the capability were present.
+	OARJournalDir string
 	// SessionExport is the bounded transcript export behind
 	// GET /v1/sessions/{id}/export. Nil answers 501 and reports the capability
 	// false (a missing access surface is the separate 503 path). It never dumps
@@ -386,6 +396,9 @@ func (s *Server) routes() {
 	s.deliverableRoutes()
 	s.mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/team-tasks", s.listTeamTasks)
+	// The external run projection (change keel-oar-renderer): read-only, always
+	// registered so an unwired deployment can answer 501 instead of 404.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/external/projection", s.externalProjection)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)

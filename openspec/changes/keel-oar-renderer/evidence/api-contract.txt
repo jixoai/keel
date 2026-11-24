@@ -1,0 +1,301 @@
+=== task-graph (200)
+GET /v1/sessions/083dc918-9ca6-4aee-a029-9a7fdc369264/external/projection
+X-Tenant-ID: 1b0e1bbb-e79a-4415-96b5-c17177ab650e
+
+HTTP 200
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{
+  "schema": "keel.oar.render-projection/1",
+  "backendSessionId": "oar-1",
+  "hostSessionId": "083dc918-9ca6-4aee-a029-9a7fdc369264",
+  "taskId": "5e8d3366-cdd7-5ac5-b68e-a31835cb3f69",
+  "runtime": "fake",
+  "simulated": true,
+  "agents": [
+    {
+      "agentPath": "/main",
+      "runtime": "fake",
+      "status": "completed",
+      "calls": 1,
+      "failures": 0
+    },
+    {
+      "agentPath": "/main/worker-1",
+      "runtime": "fake",
+      "status": "completed",
+      "calls": 1,
+      "failures": 0
+    }
+  ],
+  "items": [
+    {
+      "seq": 1,
+      "agentPath": "/main",
+      "kind": "status",
+      "name": "turn.started",
+      "state": "started",
+      "text": "turn started"
+    },
+    {
+      "seq": 2,
+      "resultSeq": 3,
+      "agentPath": "/main",
+      "kind": "call",
+      "callId": "call-1",
+      "name": "shell",
+      "state": "completed",
+      "input": {
+        "command": "printf OAR-OK"
+      },
+      "output": {
+        "exitCode": 0,
+        "stdout": "OAR-OK"
+      }
+    },
+    {
+      "seq": 4,
+      "resultSeq": 5,
+      "agentPath": "/main/worker-1",
+      "kind": "call",
+      "callId": "call-2",
+      "name": "read_file",
+      "state": "completed",
+      "input": {
+        "path": "README.md"
+      },
+      "output": {
+        "bytes": 42
+      }
+    },
+    {
+      "seq": 6,
+      "agentPath": "/main",
+      "kind": "message",
+      "name": "agent_message",
+      "text": "fake answer to: 外部工具检查任务图"
+    },
+    {
+      "seq": 7,
+      "agentPath": "/main",
+      "kind": "status",
+      "name": "turn.finished",
+      "state": "completed",
+      "text": "turn completed"
+    }
+  ]
+}
+
+=== with-records (200)
+GET /v1/sessions/8bcf46d2-de46-46ef-9ddb-d206d07a7121/external/projection
+X-Tenant-ID: 003a2b4a-e05f-436e-9fd1-fb88891a328e
+
+HTTP 200
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{
+  "schema": "keel.oar.render-projection/1",
+  "backendSessionId": "oar-ext-1",
+  "hostSessionId": "8bcf46d2-de46-46ef-9ddb-d206d07a7121",
+  "taskId": "task-card-oar-1",
+  "runtime": "fake",
+  "simulated": true,
+  "agents": [
+    {
+      "agentPath": "/main",
+      "runtime": "fake",
+      "status": "completed",
+      "calls": 1,
+      "failures": 0
+    },
+    {
+      "agentPath": "/main/worker-1",
+      "runtime": "fake",
+      "status": "completed",
+      "calls": 1,
+      "failures": 0
+    }
+  ],
+  "items": [
+    {
+      "seq": 1,
+      "agentPath": "/main",
+      "kind": "status",
+      "name": "turn.started",
+      "state": "started",
+      "text": "turn started"
+    },
+    {
+      "seq": 2,
+      "resultSeq": 3,
+      "agentPath": "/main",
+      "kind": "call",
+      "callId": "call-1",
+      "name": "shell",
+      "state": "completed",
+      "input": {
+        "command": "printf OAR-OK"
+      },
+      "output": {
+        "stdout": "OAR-OK",
+        "exitCode": 0
+      }
+    },
+    {
+      "seq": 4,
+      "resultSeq": 5,
+      "agentPath": "/main/worker-1",
+      "kind": "call",
+      "callId": "call-2",
+      "name": "read_file",
+      "state": "completed",
+      "input": {
+        "path": "README.md"
+      },
+      "output": {
+        "bytes": 42
+      }
+    },
+    {
+      "seq": 6,
+      "agentPath": "/main",
+      "kind": "message",
+      "name": "agent_message",
+      "text": "fake answer to: inspect the repo"
+    },
+    {
+      "seq": 7,
+      "agentPath": "/main",
+      "kind": "usage",
+      "name": "turn.usage",
+      "usage": {
+        "metering": "external",
+        "model": "fake-model",
+        "inputTokens": 12,
+        "outputTokens": 5,
+        "totalTokens": 17
+      }
+    },
+    {
+      "seq": 8,
+      "agentPath": "/main",
+      "kind": "status",
+      "name": "turn.finished",
+      "state": "completed",
+      "text": "turn completed"
+    }
+  ]
+}
+
+=== empty-journal-missing-file (200)
+GET /v1/sessions/7344effe-5ca7-4ffd-8f29-2642b5a07e2b/external/projection
+X-Tenant-ID: 68a31e68-4b6a-4f16-9955-1d0dbf2486d4
+
+HTTP 200
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{
+  "schema": "keel.oar.render-projection/1",
+  "backendSessionId": "",
+  "agents": [],
+  "items": []
+}
+
+=== empty-journal-empty-file (200)
+GET /v1/sessions/7344effe-5ca7-4ffd-8f29-2642b5a07e2b/external/projection
+X-Tenant-ID: 68a31e68-4b6a-4f16-9955-1d0dbf2486d4
+
+HTTP 200
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{
+  "schema": "keel.oar.render-projection/1",
+  "backendSessionId": "",
+  "agents": [],
+  "items": []
+}
+
+=== corrupt-journal (500)
+GET /v1/sessions/53639cd2-e43d-4e3d-99ce-38c116e0c577/external/projection
+X-Tenant-ID: ea214568-7f88-4ada-96a3-2d3a4caa8bbe
+
+HTTP 500
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"code":"projection_corrupt","error":"the OAR journal could not be read"}
+
+=== native-session (404)
+GET /v1/sessions/ca6e8ea3-9912-41bc-9e5e-abb61fdc5761/external/projection
+X-Tenant-ID: ad9df34b-1b25-4145-9ce5-40510fd24a53
+
+HTTP 404
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"code":"not_external_session","error":"session is not an external session"}
+
+=== external-without-ref (404)
+GET /v1/sessions/a233068d-8fd9-45c3-b658-e3d65724300a/external/projection
+X-Tenant-ID: ad9df34b-1b25-4145-9ce5-40510fd24a53
+
+HTTP 404
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"code":"not_external_session","error":"session is not an external session"}
+
+=== missing-session (404)
+GET /v1/sessions/d9698a28-dcb0-4043-b417-97e5bbbc244a/external/projection
+X-Tenant-ID: ad9df34b-1b25-4145-9ce5-40510fd24a53
+
+HTTP 404
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"error":"harnessapi: session not found"}
+
+=== unwired-journal-dir (501)
+GET /v1/sessions/69c2d79e-8415-4094-b889-c4ccc9c4b456/external/projection
+X-Tenant-ID: 3d81bad1-34dc-4249-997f-32b462cc09f3
+
+HTTP 501
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"code":"oar_not_wired","error":"the OAR journal directory is not configured in this deployment"}
+
+=== unwired-session-seam (501)
+GET /v1/sessions/69c2d79e-8415-4094-b889-c4ccc9c4b456/external/projection
+X-Tenant-ID: 3d81bad1-34dc-4249-997f-32b462cc09f3
+
+HTTP 501
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"code":"oar_not_wired","error":"the external session surface is not wired in this deployment"}
+
+=== cross-tenant (404)
+GET /v1/sessions/fbf4aa6b-40f9-4d8b-bedb-c006ebc10ac6/external/projection
+X-Tenant-ID: 61b7d40d-25c1-4916-8e47-3638ba2b99a0
+
+HTTP 404
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"error":"harnessapi: session not found"}
+
+=== foreign-missing (404)
+GET /v1/sessions/295f932b-2831-4f6e-b8a2-3fd577f8ca66/external/projection
+X-Tenant-ID: 61b7d40d-25c1-4916-8e47-3638ba2b99a0
+
+HTTP 404
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-store
+
+{"error":"harnessapi: session not found"}
+

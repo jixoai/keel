@@ -65,13 +65,18 @@ import (
 
 // serveOptions is the resolved `keel serve` configuration (flags + environment).
 type serveOptions struct {
-	Addr     string
-	DSN      string
-	WebDir   string
-	CASDir   string
-	TenantID uuid.UUID
-	AuthMode authMode
-	Insecure bool
+	Addr   string
+	DSN    string
+	WebDir string
+	CASDir string
+	// OARJournalDir is the directory of the OAR record journals
+	// (session-<ref>.ndjson). The external-run projection route reads it; empty
+	// leaves that route answering 501 oar_not_wired (a deployment without OAR
+	// must not serve an empty projection as if the capability were present).
+	OARJournalDir string
+	TenantID      uuid.UUID
+	AuthMode      authMode
+	Insecure      bool
 	// SecretKey is the 32-byte KEEL_SECRET_KEY (or an ephemeral key in
 	// local-only/off when it is unset). It signs the session cookie and CSRF.
 	SecretKey []byte
@@ -1543,6 +1548,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// are the services the tools already use; neither writes task state.
 		TaskPanel:   taskLog,
 		FilePreview: filePreviewFor(opts.FileService),
+		// The external-run projection (change keel-oar-renderer): the session's
+		// external marks come from the same store the rest of the request path
+		// reads, and the journal directory is the deployment's OAR journal
+		// (-oar-journal-dir > KEEL_OAR_JOURNAL_DIR, resolved in main.go). Empty
+		// keeps the route registered and answering 501 oar_not_wired.
+		ExternalSessions: st,
+		OARJournalDir:    opts.OARJournalDir,
 		// Tenancy surface (change keel-ga §2): the operator provisioning path and
 		// the tenant's own quota projection. Both read the same store the request
 		// path uses; neither is reachable with a tenant credential alone.

@@ -108,6 +108,14 @@ func TestJournalFileNameIsSafe(t *testing.T) {
 	if !strings.HasSuffix(unsafe, ".ndjson") {
 		t.Fatalf("unsafe path = %q", unsafe)
 	}
+	// The read-side helper (the product projection route) locates exactly the
+	// file the host journal writes, including the sanitization above.
+	if JournalPath(journal.Dir(), "oar-1") != journal.Path("oar-1") {
+		t.Fatalf("JournalPath = %q, want %q", JournalPath(journal.Dir(), "oar-1"), journal.Path("oar-1"))
+	}
+	if JournalPath(journal.Dir(), "../../etc/passwd") != journal.Path("../../etc/passwd") {
+		t.Fatalf("JournalPath sanitization drifted for an unsafe reference")
+	}
 }
 
 func TestParseJournalRejectsCorruption(t *testing.T) {

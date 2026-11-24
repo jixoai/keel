@@ -183,6 +183,16 @@ var rules = []Rule{
 	resource(http.MethodGet, "/v1/sessions/{id}/deliverables", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/tasks", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/task-panel", access.KeySessionRead, "session", "path:id"),
+	// The external-run projection (change keel-oar-renderer) is one session's
+	// read of its external backend's records: it carries exactly the transcript's
+	// visibility, so it takes the same session.read relation as the neighboring
+	// session reads (task-panel/export/file-preview) and there is no new key.
+	{
+		Method: http.MethodGet, Pattern: "/v1/sessions/{id}/external/projection",
+		Mode: ModeResourceKey, Key: access.KeySessionRead,
+		ResourceType: "session", ResourceParam: "path:id",
+		Note: "read-only OAR renderer projection; same session.read relation as task-panel",
+	},
 	resource(http.MethodPost, "/v1/sessions/{id}/subagents", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/fork", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/resume", access.KeySessionWrite, "session", "path:id"),

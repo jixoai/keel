@@ -166,8 +166,13 @@ host (gateway.SpawnStdio)
 - 开发视图：`go run ./internal/oar/cmd/oar-view -journal <file|dir>`；`-format json`、
   `-agent`、`-kind`、`-after`、`-session` 过滤。
 - 渲染 seam：`oar.Projection`（`keel.oar.render-projection/1`）把 call/result 折叠成
-  一行一项，保留 status/message/usage/error 顺序；**W12 UI owns the slot**，本包不建
-  web renderer。固定 fixture：`internal/oar/testdata/tool-renderer.fixture.json`
+  一行一项，保留 status/message/usage/error 顺序。**投影读取 API 已交付**（本 change
+  `keel-oar-renderer`）：`GET /v1/sessions/{id}/external/projection` 只读返回同一
+  projection 文档（`sessions.external_ref` → `session-<ref>.ndjson` →
+  `oar.ProjectionFromJournal`/`ProjectionJSON`）；非外部会话 404 `not_external_session`、
+  未配置 journal 目录 501 `oar_not_wired`、损坏 500 `projection_corrupt`、空 journal 为空
+  投影。**UI 槽位消费见 `plugin-ui-extension`**（`keel.ui.tool-renderer`，客户端不自行
+  fold）。固定 fixture：`internal/oar/testdata/tool-renderer.fixture.json`
   （`plugins/keel.oar/fixtures/tool-renderer.fixture.json` 同文件副本）。
 - 重生成 fixture：`UPDATE_OAR_FIXTURE=1 go test ./internal/oar -run TestProjectionFixture`。
 

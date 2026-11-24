@@ -76,6 +76,15 @@ func (j *Journal) Path(sessionID string) string {
 	return filepath.Join(j.dir, journalFileName(sessionID))
 }
 
+// JournalPath is the journal file of one backend session inside dir. It is the
+// read-side companion of Journal.Path for a caller that only locates a journal
+// (the product projection route) and must not open or create one: the same file
+// name sanitization applies, so a backend reference can never address a path
+// outside dir.
+func JournalPath(dir, sessionID string) string {
+	return filepath.Join(dir, journalFileName(sessionID))
+}
+
 func journalFileName(sessionID string) string {
 	var b strings.Builder
 	safe := true
