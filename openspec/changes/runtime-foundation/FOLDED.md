@@ -31,3 +31,22 @@
   段跟踪；`runtime-foundation` 板不再勾选。
 - 任何一项若被判定不属于 Alpha 垂直切片，留在本文件作为 backlog，不阻塞 W11 其他门。
 - 不得把本文件当作“已折叠 = 已完成”；折叠只表示归属改变。
+
+## 2026-11-24 收口记录（8 项残余全部关闭）
+
+W11 收口门已归档（`openspec/changes/archive/2026-11-24-keel-harness-v2/`），其 tasks.md
+「W11 收口补充」段的 RF-1..RF-8 已全部勾选，证据逐条如下：
+
+| ID | 结果 | 证据 |
+|---|---|---|
+| RF-1 | 关闭 | 主仓 keel gitlink=3b9b1a1（父仓 cc04bf38 已推送）、PROJECT-MAP.md:36 登记、端口/临时库/二进制回收 |
+| RF-2 | 关闭 | `internal/loop/loop_test.go`（文本/工具/构建错误）、`internal/agent/fake_test.go`（确定性）、`internal/agent/compaction_checkpoint_test.go`（压缩切点）、取消三态测试（summary/provider_telemetry/review_regression） |
+| RF-3 | 关闭 | `TestRunnerResumesUnresolvedToolCall`、`TestCheckpointCutInMovedUnreadInputFailSafe`、`TestNewRunReplaysFromCheckpoint` |
+| RF-4 | 关闭 | `internal/blob/thumb.go` 异步生成（上传 handler 不等待）、`thumbnail_test.go` + `lifecycle_test.go` |
+| RF-5 | 关闭 | `internal/store/rls.go`（幂等迁移、keel_app 非 owner、FORCE RLS、bypass 管理路径）、`tenancy_quota_test.go` 非 owner 池边界 |
+| RF-6 | 关闭 | `TenantQuota{Streams,BytesPerSec,StorageBytes}` + admin set/read + edge 执行；placement 租户并发配额测试 |
+| RF-7 | 关闭 | G11 报告（10 步/10 断言/8 图）与公网链接，见归档 W11 tasks.md:661 |
+| RF-8 | 关闭 | 两轮子代理复核（reviewer 6.5→8.5、vision 三处复验 PASS），见归档 W11 tasks.md:662 |
+
+本 change 不另归档：它是折叠记录与历史提案，6 份 spec delta 已由 `keel-harness-v2` 的归档规格
+覆盖；再归档会重复应用旧 delta。无新增 backlog。

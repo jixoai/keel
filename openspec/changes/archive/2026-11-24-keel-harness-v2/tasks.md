@@ -652,12 +652,12 @@
 > Owner 2026-11-22：`runtime-foundation` 不再单独推进；以下 8 项残余并入 W11，保持未勾。
 > 映射与门级口径见 `openspec/changes/runtime-foundation/FOLDED.md`；本附加段不改上方任务状态。
 
-- [ ] RF-1 主仓挂 submodule + PROJECT-MAP 登记（W11 G10；核对 keel 指针与主仓登记）
-- [ ] RF-2 为 loop 补单测（fake stream：文本/工具/压缩/取消）（W11 G2，兼 G3）
-- [ ] RF-3 loop 的持久任务接线（工具执行/压缩 `resume()`）（W11 G2）
-- [ ] RF-4 缩略图异步生成（可选）（W11 G4）
-- [ ] RF-5 RLS 可选启用 + 非 owner 角色（W11 G4）
-- [ ] RF-6 每租户配额（并发/带宽/存储）（W11 G4）
+- [x] RF-1 主仓挂 submodule + PROJECT-MAP 登记（W11 G10；2026-11-24 关闭：主仓 keel gitlink=3b9b1a1、父仓 cc04bf38 已推送；`.agents/docs/PROJECT-MAP.md:36` 有 keel 登记；13610 端口释放、临时库/二进制已回收）
+- [x] RF-2 为 loop 补单测（fake stream：文本/工具/压缩/取消）（W11 G2，兼 G3；2026-11-24 关闭：`internal/loop/loop_test.go` TestLoopTextOnly/TestLoopToolRoundTrip/TestLoopProviderBuildErrorBecomesTerminalMessage、`internal/agent/fake_test.go` 确定性、`internal/agent/compaction_checkpoint_test.go` 压缩切点、`internal/agent/{summary,provider_telemetry,review_regression}_test.go` 取消三态）
+- [x] RF-3 loop 的持久任务接线（工具执行/压缩 `resume()`）（W11 G2；2026-11-24 关闭：`TestRunnerResumesUnresolvedToolCall`（工具续跑）与 `TestCheckpointCutInMovedUnreadInputFailSafe`/`TestNewRunReplaysFromCheckpoint`（压缩切点重放）；G2 kill -9 恢复 E2E 另在 evidence/w11-gates/）
+- [x] RF-4 缩略图异步生成（可选）（W11 G4；2026-11-24 关闭：`internal/blob/thumb.go` 上传 handler 不等待缩略图 goroutine，坏图不影响入库；`internal/httpapi/thumbnail_test.go` + `internal/blob/lifecycle_test.go` 取消即回收）
+- [x] RF-5 RLS 可选启用 + 非 owner 角色（W11 G4；2026-11-24 关闭：`internal/store/rls.go` 幂等迁移、keel_app 非 owner 角色 + SET ROLE、FORCE RLS + app.bypass_rls 管理路径；`internal/store/tenancy_quota_test.go` 在非 owner 池上验证租户边界）
+- [x] RF-6 每租户配额（并发/带宽/存储）（W11 G4；2026-11-24 关闭：`TenantQuota{Streams,BytesPerSec,StorageBytes}` + admin set/read（cmd/keel/admin.go）+ edge 执行；placement 的 per-tenant 并发配额另有 TestPGTenantQuotaAcrossGroupsNoOversell；组 OOM 隔离仍按平台受限登记）
 - [x] RF-7 HTML 报告 + 公网链接（W11 G11；2026-11-24：`.agents/reports/keel/g11-review-2026-11-24/report.html` 10 步/10 断言/8 图，公网 https://local-kzf-keel.fde2e.com/report.html ，审计同目录）
 - [x] RF-8 子代理交叉复核（本项目不使用 Codex）（W11 G11；2026-11-24：reviewer 两轮 6.5→8.5、vision 两轮（首轮 3 缺陷→修复后全 PASS）；复核发现 4 缺陷全部修复并复验）
 
