@@ -97,6 +97,10 @@ The data directory defaults to $KEEL_HOME/dev-pg, then ~/.keel/dev-pg. The
 cluster listens on 127.0.0.1 only, uses a random password stored in a 0600
 file, and requires PostgreSQL 18 or newer (initdb/pg_ctl on PATH or via
 pg_config --bindir). `+"`reset`"+` refuses directories it did not create.
+
+keel serve and keel admin use this cluster automatically when KEEL_DSN is
+unset; run these commands only for explicit control (status/stop/reset/custom
+port or directory) or set KEEL_NO_AUTO_DB=1 to disable auto-init.
 `)
 }
 
@@ -212,7 +216,6 @@ func runDBStart(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "keel db: cluster was initialized with user %q, not %q\n", meta.User, d.user)
 				return 1
 			}
-			d.port, d.database, d.user = meta.Port, meta.Database, meta.User
 		} else if errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(stderr, "keel db: %s is initialized but has no metadata file %s; run reset --yes and start again\n", d.dir, d.metaFile())
 			return 1
@@ -222,47 +225,69 @@ func runDBStart(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	if !d.initialized() {
-		if err := initDevDBCluster(d, stderr); err != nil {
-			fmt.Fprintf(stderr, "keel db: %v\n", err)
-			return 1
-		}
-		if err := d.saveMeta(devDBMeta{Port: d.port, Database: d.database, User: d.user}); err != nil {
-			fmt.Fprintf(stderr, "keel db: %v\n", err)
-			return 1
-		}
-	}
-
-	pgCtl, err := pgTool("pg_ctl")
-	if err != nil {
-		fmt.Fprintf(stderr, "keel db: %v\n", err)
-		return 1
-	}
-	if !devDBRunning(pgCtl, d.dir) {
-		if err := portFree(d.port); err != nil {
-			fmt.Fprintf(stderr, "keel db: %v\n", err)
-			return 1
-		}
-		if err := startDevDBCluster(d, pgCtl); err != nil {
-			fmt.Fprintf(stderr, "keel db: %v\n", err)
-			return 1
-		}
-	}
-	if err := waitDevDBReady(d); err != nil {
-		fmt.Fprintf(stderr, "keel db: %v\n", err)
-		return 1
-	}
-	if err := ensureDevDBDatabase(d); err != nil {
-		fmt.Fprintf(stderr, "keel db: %v\n", err)
-		return 1
-	}
-	dsn, err := d.dsn()
+	dsn, err := d.ensure(stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel db: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "ready: %s\n", dsn)
 	return 0
+}
+
+// ensure makes the cluster usable and returns its DSN. It is shared by
+// `keel db start` and by the implicit auto-start in `keel serve`/`keel admin`:
+// a stopped cluster is started, a missing cluster is initialized, and the
+// database is created if needed.
+func (d devDB) ensure(stderr io.Writer) (string, error) {
+	if d.initialized() {
+		meta, err := d.loadMeta()
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("%s is initialized but has no metadata file %s; run reset --yes and start again", d.dir, d.metaFile())
+		}
+		if err != nil {
+			return "", err
+		}
+		d.port, d.database, d.user = meta.Port, meta.Database, meta.User
+	} else {
+		if err := initDevDBCluster(d, stderr); err != nil {
+			return "", err
+		}
+		if err := d.saveMeta(devDBMeta{Port: d.port, Database: d.database, User: d.user}); err != nil {
+			return "", err
+		}
+	}
+	pgCtl, err := pgTool("pg_ctl")
+	if err != nil {
+		return "", err
+	}
+	if !devDBRunning(pgCtl, d.dir) {
+		if err := portFree(d.port); err != nil {
+			return "", err
+		}
+		if err := startDevDBCluster(d, pgCtl); err != nil {
+			return "", err
+		}
+	}
+	if err := waitDevDBReady(d); err != nil {
+		return "", err
+	}
+	if err := ensureDevDBDatabase(d); err != nil {
+		return "", err
+	}
+	return d.dsn()
+}
+
+// ensureAutoDevDB is the no-configuration path used when KEEL_DSN is unset.
+// It returns the DSN and the data directory so callers can say where the data
+// lives (never the password).
+func ensureAutoDevDB(stderr io.Writer) (dsn, dir string, err error) {
+	dir = defaultDevDBDir()
+	if dir == "" {
+		return "", "", errors.New("cannot resolve a data directory; set KEEL_HOME or KEEL_DSN")
+	}
+	d := devDB{dir: dir, port: defaultDevDBPort, database: defaultDevDBDatabase, user: defaultDevDBUser}
+	dsn, err = d.ensure(stderr)
+	return dsn, dir, err
 }
 
 func runDBStop(args []string, stdout, stderr io.Writer) int {

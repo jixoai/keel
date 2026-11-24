@@ -1,0 +1,56 @@
+$ ./keel admin bootstrap --tenant 11111111-2222-3333-4444-555555555555 --token-file /tmp/keel-auto-setup.token   # no KEEL_DSN
+initializing a PostgreSQL cluster in /Users/kzf/.keel/dev-pg (superuser keel, loopback only)
+keel admin: no KEEL_DSN, using the local development database at /Users/kzf/.keel/dev-pg
+tenant:  11111111-2222-3333-4444-555555555555
+created: tenant "keel"
+expires: 2026-11-24T07:45:14Z
+
+SETUP TOKEN (shown once, expires 2026-11-24T07:45:14Z):
+keel_setup_<redacted>
+
+Open the login page and submit this token with the username and password for the first super admin.
+token file: /tmp/keel-auto-setup.token (mode 0600)
+exit=0
+
+keel serve: no KEEL_DSN, using the local development database at /Users/kzf/.keel/dev-pg
+{"time":"2026-11-24T15:15:14.825614+08:00","level":"WARN","msg":"KEEL_SECRET_KEY is unset: using an ephemeral key (sessions and CSRF tokens expire on restart)"}
+{"time":"2026-11-24T15:15:14.848375+08:00","level":"INFO","msg":"local authentication mode","mode":"local-only/off","account":"00000000-0000-0000-0000-00000000a002","tenant":"11111111-2222-3333-4444-555555555555"}
+{"time":"2026-11-24T15:15:14.863282+08:00","level":"WARN","msg":"KEEL_CAS_DIR is not set; layerfs uses an ephemeral temp root","root":"/var/folders/tn/y_b12zxs2dldn8thmfnpy9c80000gp/T/keel-layerfs"}
+{"time":"2026-11-24T15:15:14.86867+08:00","level":"INFO","msg":"placement admission gate","strategy":"pack","group_max_concurrent_runs":0,"group_memory_limit_bytes":0,"queue_sweep_interval":"5s","tenant_run_quota":"tenant-document"}
+{"time":"2026-11-24T15:15:14.868978+08:00","level":"INFO","msg":"tenant secret storage disabled","reason":"KEEL_SECRET_KEY is not set"}
+{"time":"2026-11-24T15:15:14.870104+08:00","level":"INFO","msg":"config.toml loaded","exists":false,"revision":1,"hash":"sha256:503724232f8c1db521d35653bbd0763d1765510cfcdecefa52bbe87892cd9fce","anchorEventSeq":0,"captureMode":""}
+{"time":"2026-11-24T15:15:14.872988+08:00","level":"INFO","msg":"host assembled","skills":0,"visible":0,"tools":11,"extra_tools":0}
+{"time":"2026-11-24T15:15:14.873101+08:00","level":"INFO","msg":"loadout applied","loadout":"default","revision":1,"generation":1,"services":7,"active":7,"failed":0,"retiring_generations":0}
+{"time":"2026-11-24T15:15:14.874985+08:00","level":"INFO","msg":"service loadout active","loadout":"default","revision":1,"generation":1,"summary":"agent=fake;skills=1;mcp=0;hooks=0;compaction=false;telemetry=none;tools=0;sandbox=false;external-backends=0;external-tools=0;external-unmetered=none;quota-runs=0;quota-events=0;worker=true;runs=64","services":7,"retiring":0}
+2026/11/24 15:15:14 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/24 15:15:14 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/24 15:15:14 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
+{"time":"2026-11-24T15:15:14.886912+08:00","level":"INFO","msg":"plugin manager boot","root":"/Users/kzf/.keel/plugins","plugins":12,"enabled":11,"revision":1}
+{"time":"2026-11-24T15:15:14.888091+08:00","level":"INFO","msg":"supervisor startup scan","scanned":0,"queued":0,"recovered":0,"parked":0,"escalated":0,"backoff":0,"live":0,"errors":0}
+{"time":"2026-11-24T15:15:14.888375+08:00","level":"INFO","msg":"route permission matrix verified","rules":184,"routes":184}
+{"time":"2026-11-24T15:15:14.888691+08:00","level":"INFO","msg":"keel serve listening","addr":"127.0.0.1:13622","tenant":"11111111-2222-3333-4444-555555555555","auth":"local-only","web":"/Users/kzf/Dev/GitHub/jixoai/fde2e/keel/web/dist/web/keel/Keel (from /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/web/dist)","web_ready":true,"worker":true,"provider":"fake","model":"fake","plugins":12,"plugins_enabled":11,"plugins_root":"/Users/kzf/.keel/plugins","triggers":0}
+$ ./keel serve --addr 127.0.0.1:13622 --auth local-only   # no KEEL_DSN
+health=200
+
+{"time":"2026-11-24T15:15:15.070454+08:00","level":"INFO","msg":"keel serve stopped"}
+$ ./keel db status
+running on 127.0.0.1:13741 (data: /Users/kzf/.keel/dev-pg)
+dsn: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ ./keel serve --no-auto-db --addr 127.0.0.1:13622   # no KEEL_DSN
+keel serve: KEEL_DSN (or --dsn) is required; --no-auto-db/KEEL_NO_AUTO_DB disables the local development cluster
+exit=2
+
+$ KEEL_NO_AUTO_DB=1 ./keel serve --addr 127.0.0.1:13622   # no KEEL_DSN
+keel serve: KEEL_DSN (or --dsn) is required; --no-auto-db/KEEL_NO_AUTO_DB disables the local development cluster
+exit=2
+
+$ ./keel db reset --yes
+cluster removed
+exit=0
+
+$ KEEL_DSN=postgres://keel:secret@127.0.0.1:1/keel?sslmode=disable ./keel serve --addr 127.0.0.1:13623 --auth local-only   # explicit DSN
+{"time":"2026-11-24T15:15:57.503719+08:00","level":"WARN","msg":"KEEL_SECRET_KEY is unset: using an ephemeral key (sessions and CSRF tokens expire on restart)"}
+{"time":"2026-11-24T15:15:57.505022+08:00","level":"ERROR","msg":"keel serve failed","err":"open store: store: migrate begin: failed to connect to `user=keel database=keel`: 127.0.0.1:1 (127.0.0.1): dial error: dial tcp 127.0.0.1:1: connect: connection refused"}
+exit=1

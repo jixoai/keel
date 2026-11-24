@@ -61,18 +61,15 @@ git clone https://github.com/jixoai/keel.git
 cd keel
 go build -o keel ./cmd/keel
 
-# 2. 启动本机 PostgreSQL 18 集群（无 Docker）
-./keel db start
-eval "$(./keel db env)"
-
-# 3. 启动 Harness（未配置模型时使用 fake provider）
+# 2. 启动 Harness
 ./keel serve --addr 127.0.0.1:13750 \
   --tenant 11111111-2222-3333-4444-555555555555 \
   --auth local-only
 ```
 
-任意 PostgreSQL 18 的 DSN 同样可用（已有实例，或 13741 端口上的 `postgres:18` 容器）；
-`keel db` 只是零配置路径。
+首次运行会自动初始化本机 PostgreSQL 18（`$KEEL_HOME/dev-pg` 或 `~/.keel/dev-pg`，仅回环）。
+任意 PostgreSQL 18 的 DSN 同样可用（已有实例，或 13741 端口上的 `postgres:18` 容器）：
+设 `KEEL_DSN` 即使用它，设 `KEEL_NO_AUTO_DB=1` 关闭自动初始化。
 
 `local-only` 只应答回环并映射内置 local-admin，所以本快速开始不需要账号 fixture。真实部署用
 `--auth required` + `keel admin bootstrap` + 用户名/密码（见[运维](/zh/harness/operations)）。

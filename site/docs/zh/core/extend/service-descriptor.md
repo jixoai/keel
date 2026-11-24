@@ -173,7 +173,7 @@ lo, err := loadout.Default(loadout.Config{
 | 门 | 命令 |
 |---|---|
 | 单测 / race | `go test -race ./internal/servicegraph ./internal/loadout ./internal/servicehost` |
-| 装配平价 | R1 差分：同输入、同库，白名单之外零差异（`cmd/r1diff`、`docs/RUNBOOK.md:177`） |
+| 装配平价 | R1 差分：同输入、同库，白名单之外零差异（`cmd/r1diff`、`docs/RUNBOOK.md:180`） |
 | 全量验收 | `KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence scripts/acceptance-all.sh` |
 | 默认装配变更时 | R1 门是强制的——它是「默认 loadout 复现旧行为」的唯一证明 |
 

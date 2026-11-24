@@ -84,7 +84,8 @@ The plaintext tenant API key is printed exactly once, by "tenant create" /
 it again.
 
 Environment:
-  KEEL_DSN                 PostgreSQL DSN (required)
+  KEEL_DSN                 PostgreSQL DSN (default: the local development cluster)
+  KEEL_NO_AUTO_DB          disable auto-init of the local cluster when KEEL_DSN is unset
   KEEL_SERVE_TENANT        default tenant UUID for bootstrap/reset
 `)
 }
@@ -92,10 +93,19 @@ Environment:
 // adminStore opens the store for one command. It is closed before the process
 // exits; schema migration runs (idempotent) so the first command on a fresh
 // database works.
-func adminStore(ctx context.Context) (*store.Store, error) {
+func adminStore(ctx context.Context, stderr io.Writer) (*store.Store, error) {
 	dsn := strings.TrimSpace(os.Getenv("KEEL_DSN"))
 	if dsn == "" {
-		return nil, errors.New("KEEL_DSN (or --dsn) is required; for a local cluster without Docker run keel db start")
+		if envBool("KEEL_NO_AUTO_DB") {
+			return nil, errors.New("KEEL_DSN is required; KEEL_NO_AUTO_DB disables the local development cluster")
+		}
+		var dir string
+		var err error
+		dsn, dir, err = ensureAutoDevDB(stderr)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(stderr, "keel admin: no KEEL_DSN, using the local development database at %s\n", dir)
 	}
 	return store.Open(ctx, store.Config{
 		DSN:        dsn,
@@ -128,7 +138,7 @@ func runAdminBootstrap(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -214,7 +224,7 @@ func runAdminReset(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -294,7 +304,7 @@ func runAdminTenantCreate(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -328,7 +338,7 @@ func runAdminTenantList(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -366,7 +376,7 @@ func runAdminTenantShow(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -449,7 +459,7 @@ func runAdminQuotaSet(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -503,7 +513,7 @@ func runAdminQuotaShow(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1
@@ -561,7 +571,7 @@ func runAdminUsageShow(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	st, err := adminStore(ctx)
+	st, err := adminStore(ctx, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel admin: %v\n", err)
 		return 1

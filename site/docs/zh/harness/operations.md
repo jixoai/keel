@@ -31,7 +31,7 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 | `KEEL_SKILLS_ROOTS` | 技能根目录的 OS 路径列表（PI 兼容） | — |
 | `KEEL_RUNTIME_ID` | 写入 claim/审计的运行时身份（handoff） | hostname-pid |
 
-（出处：`cmd/keel/main.go:170` 为 config/plugins flag 及其默认值，`cmd/keel/main.go:246` 为
+（出处：`cmd/keel/main.go:172` 为 config/plugins flag 及其默认值，`cmd/keel/main.go:262` 为
 plugins-root 的解析顺序；另见 `cmd/keel/auth.go`、`docs/HANDOFF.md`。）
 
 暴露端口前值得知道的运维事实：

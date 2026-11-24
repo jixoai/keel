@@ -23,7 +23,7 @@
 包在安装时被拷入**受管目录**（`<plugins-root>/<id>/`）；已存的插件绝不指向来源目录，安装会
 记录包内容树的 hash（`internal/pluginpkg/package.go:74`、
 `internal/harnessext/plugin_manager_ops.go:504`）。根目录由 `--plugins-root` /
-`KEEL_PLUGINS_ROOT` / `$KEEL_HOME/plugins` 决定（`cmd/keel/main.go:246`），首次安装时创建。
+`KEEL_PLUGINS_ROOT` / `$KEEL_HOME/plugins` 决定（`cmd/keel/main.go:262`），首次安装时创建。
 
 ## 2. 清单——全字段
 

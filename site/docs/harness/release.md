@@ -18,7 +18,7 @@ something.
 | HarnessAPI version | `harnessapi.APIVersion` | the `/v1` contract; a client pins the major and asks `/v1/capabilities` |
 
 The comment above the constant states the separation (`cmd/keel/main.go:20`), and `printVersion`
-renders `keel <version>` plus build facts (`cmd/keel/main.go:127`). Bumping the product version is
+renders `keel <version>` plus build facts (`cmd/keel/main.go:128`). Bumping the product version is
 a source change: it is committed, reviewed and tagged like any other.
 
 ## 2. The tag is the trigger, and the gate runs first

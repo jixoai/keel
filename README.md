@@ -80,18 +80,16 @@ git clone https://github.com/jixoai/keel.git && cd keel
 # 1. 构建 CLI
 go build -o keel ./cmd/keel
 
-# 2. 本机 PostgreSQL 18 集群（无 Docker）：默认 ~/.keel/dev-pg，仅回环
-./keel db start
-eval "$(./keel db env)"       # 导出 KEEL_DSN
-
-# 3. 启动运行时
-go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
+# 2. 启动产品壳（首次自动初始化本机 PostgreSQL 18，无 Docker）
+./keel serve --addr 127.0.0.1:13750 --auth local-only \
+  --tenant 11111111-2222-3333-4444-555555555555
 ```
 
-`keel db start|stop|status|dsn|env|reset --yes` 管理的是本机**一次性**集群：默认目录
-`$KEEL_HOME/dev-pg`（未设置时 `~/.keel/dev-pg`，`--dir` 可改）、端口 13741、仅监听
-`127.0.0.1`、随机密码存 0600 文件；它不碰你已有的 PostgreSQL 实例，要求本机有
-PostgreSQL 18 的 `initdb`/`pg_ctl`。本项目的测试与评审实例都用本机 PG，零 Docker。
+首次启动会自动初始化本机 PostgreSQL 18 集群（默认 `$KEEL_HOME/dev-pg`，未设置时
+`~/.keel/dev-pg`；仅回环、随机 0600 密码），不需要 Docker，也不需要先执行建库命令。
+要用已有数据库，设 `KEEL_DSN`；要关闭自动初始化，设 `KEEL_NO_AUTO_DB=1`。
+`keel db status|stop|reset --yes` 用于管理本地集群，`keel db start` 仍可显式启动。
+多租户 API 进程 `cmd/runtime` 仍要求显式 DSN。
 
 **已有 PG 或偏好容器**：`keel` 只认一个 PostgreSQL 18 DSN，任选其一——
 

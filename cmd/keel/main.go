@@ -100,6 +100,7 @@ Environment (serve):
   KEEL_INSECURE            allow auth=off (loopback only; never expose it)
   KEEL_SECRET_KEY          32-byte base64/hex key for cookie/CSRF signing (required)
   KEEL_BOOTSTRAP_TOKEN     one-time setup token for a container (auth=required, no super admin)
+  KEEL_NO_AUTO_DB          disable auto-init of a local PostgreSQL cluster when KEEL_DSN is unset
   KEEL_SERVE_WEB_DIR       static build directory (default web/dist)
   KEEL_OAR_JOURNAL_DIR     OAR record journal directory (session-<ref>.ndjson);
                            empty answers 501 on the external projection route
@@ -156,6 +157,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		insecure         = fs.Bool("insecure", envBool("KEEL_INSECURE"), "allow auth=off (loopback only)")
 		runs             = fs.Int("runs", envInt("KEEL_RUNS", 64), "max concurrent agent runs")
 		noWorker         = fs.Bool("no-worker", false, "do not start the agent worker (API-only process)")
+		noAutoDB         = fs.Bool("no-auto-db", envBool("KEEL_NO_AUTO_DB"), "do not auto-initialize a local PostgreSQL cluster when KEEL_DSN is unset")
 		model            = fs.String("model", os.Getenv("KEEL_MODEL"), "model id")
 		provider         = fs.String("provider", os.Getenv("KEEL_PROVIDER"), "provider name")
 		baseURL          = fs.String("base-url", os.Getenv("KEEL_BASE_URL"), "provider base URL")
@@ -189,10 +191,24 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "keel serve: %v\n", err)
 		return 2
 	}
+	dsnValue := strings.TrimSpace(*dsn)
+	if dsnValue == "" {
+		if *noAutoDB {
+			fmt.Fprintln(stderr, "keel serve: KEEL_DSN (or --dsn) is required; --no-auto-db/KEEL_NO_AUTO_DB disables the local development cluster")
+			return 2
+		}
+		autoDSN, dir, err := ensureAutoDevDB(stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "keel serve: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "keel serve: no KEEL_DSN, using the local development database at %s\n", dir)
+		dsnValue = autoDSN
+	}
 	log := slog.New(logsafe.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	opts := serveOptions{
 		Addr:             *addr,
-		DSN:              *dsn,
+		DSN:              dsnValue,
 		WebDir:           *webDir,
 		CASDir:           *casDir,
 		OARJournalDir:    *oarJournalDir,

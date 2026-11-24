@@ -80,7 +80,7 @@ type Plugin struct {
   （`internal/pluginpkg/package.go:74`）。
 - **受管根目录**——包位于 `<plugins-root>/<id>/`，安装时拷入并做内容哈希；启动时发现。根目录
   默认 `$KEEL_HOME/plugins`，可用 `--plugins-root` / `KEEL_PLUGINS_ROOT` 覆盖
-  （`cmd/keel/main.go:173`、`:246`）。
+  （`cmd/keel/main.go:175`、`:246`）。
 - **生命周期**——六个状态（`installed`、`enabled`、`disabled`、`failed`、`invalid`、
   `uninstalled`；`internal/harnessext/plugin_manager.go:29`）上的 `install`、`enable`、
   `disable`、`uninstall`、`update`。API 为 `GET /v1/plugins`、

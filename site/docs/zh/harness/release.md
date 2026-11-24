@@ -17,7 +17,7 @@ title: 发布与升级
 | HarnessAPI 版本 | `harnessapi.APIVersion` | `/v1` 契约；客户端只锁 major 并查 `/v1/capabilities` |
 
 常量上方的注释写明了这个区分（`cmd/keel/main.go:20`），`printVersion` 渲染 `keel <version>`
-以及构建信息（`cmd/keel/main.go:127`）。改产品版本是一次源码变更：像其他改动一样提交、评审、打 tag。
+以及构建信息（`cmd/keel/main.go:128`）。改产品版本是一次源码变更：像其他改动一样提交、评审、打 tag。
 
 ## 2. tag 是触发器，门禁先跑
 

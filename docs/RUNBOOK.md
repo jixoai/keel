@@ -4,7 +4,10 @@
 
 无 Docker（推荐）：`keel db` 管理一个本机一次性 PostgreSQL 18 集群——默认目录
 `$KEEL_HOME/dev-pg`（未设置时 `~/.keel/dev-pg`，`--dir` 可改）、仅监听
-`127.0.0.1:13741`、随机密码存 0600 文件、不触碰已有实例。
+`127.0.0.1:13741`、随机密码存 0600 文件、不触碰已有实例。`keel serve`/`keel admin`
+在 `KEEL_DSN` 未设置时会自动复用/初始化该集群，通常不需要先跑下面的命令；
+`KEEL_NO_AUTO_DB=1`（或 `keel serve --no-auto-db`）关闭自动并报错，生产部署请显式设置
+`KEEL_DSN`。
 
 ```bash
 go build -o keel ./cmd/keel

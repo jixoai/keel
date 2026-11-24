@@ -69,11 +69,7 @@ cd keel
 # 2. build the CLI
 go build -o keel ./cmd/keel
 
-# 3. local PostgreSQL 18 (no Docker)
-./keel db start
-eval "$(./keel db env)"
-
-# 4. bootstrap and start the Harness
+# 3. start (auto local PostgreSQL)
 TENANT=11111111-2222-3333-4444-\
 555555555555
 export KEEL_SERVE_TENANT="$TENANT"
@@ -86,10 +82,11 @@ export KEEL_SECRET_KEY="$SECRET"
 ./keel serve --addr 127.0.0.1:13750
 ```
 
-No Docker is required: `keel db` runs a throwaway PostgreSQL 18 cluster in
-`$KEEL_HOME/dev-pg` (or `~/.keel/dev-pg`; loopback only; random password in a 0600 file), and
-`keel db env` exports `KEEL_DSN`. Any other PostgreSQL 18 works too (`createdb keel`, then
-`KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`). If you prefer a container,
+No Docker or manual database setup is required: on first run, `keel admin`/`keel serve`
+initialize a local PostgreSQL 18 cluster under `$KEEL_HOME/dev-pg` (or `~/.keel/dev-pg`;
+loopback only; random password in a 0600 file). Set `KEEL_DSN` to use any other database;
+set `KEEL_NO_AUTO_DB=1` to disable auto-init. `keel db status|stop|reset` manages the local
+cluster. If you prefer a container,
 `docker run --name keel-pg ... postgres:18` is an equivalent alternative on the same port — do not
 run both. A few acceptance scripts default to a container named `keel-pg`, but all of them accept
 `KEEL_DSN`/`KEEL_TEST_DSN` for a local server. Only the 2GB cgroup battery

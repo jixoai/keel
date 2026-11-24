@@ -25,7 +25,7 @@ schema 分两处：
 - `internal/store/schema.sql` —— 基础表；
 - `internal/kernel/schema/0001…0005*.sql` —— 内核迁移：fencing、工具调用索引、外部/交接、待读输入、
   loadout revision。迁移在启动时于事务内执行（`SET LOCAL statement_timeout=0`），锁等待由
-  `lock_timeout=30s` 兜底并在 `55P03` 上自动重试（`docs/RUNBOOK.md:203`）。
+  `lock_timeout=30s` 兜底并在 `55P03` 上自动重试（`docs/RUNBOOK.md:206`）。
 
 | 表 | 用途 | 关键细节 |
 |---|---|---|
@@ -52,7 +52,7 @@ schema 分两处：
   （`internal/store/schema.sql:207`）；订阅者按自己的游标重读日志，因此丢一次通知只损失一个心跳周期。
 - **就绪检查深入到 schema**。`GET /v1/ready` 不只 Ping PG，还检查运行 schema（内核迁移
   0001/0003/0004/0005 的列、外部会话标记、handoff 表）。缺任一列的旧库返回 503，而不是假装就绪
-  （`docs/RUNBOOK.md:290`）。
+  （`docs/RUNBOOK.md:293`）。
 
 ## 2. Blob：库内 64KiB 分块 + CAS 溢出
 
@@ -170,7 +170,7 @@ GOMEMLIMIT=1610612736 ./keel-runtime \
 
 ## 5. 实测结果
 
-2GB / 1000 会话基线，取材自 `README.md:26` 与 `docs/RUNBOOK.md:152`（2026-11-06 与 2026-11-08
+2GB / 1000 会话基线，取材自 `README.md:26` 与 `docs/RUNBOOK.md:155`（2026-11-06 与 2026-11-08
 终轮；两轮负载构成不同，故都列出）：
 
 | 指标 | 2026-11-06 基线 | 2026-11-08 终轮 |
@@ -199,7 +199,7 @@ agent 回复、retry 追加、模型调用中 `SIGKILL`、工具执行中 `SIGKI
 | 排水/接管 | `POST /v1/runtime/drain`、`GET /v1/runtime/status` |
 | 优雅停止 | SIGTERM：停 claim、新 API 请求 503、先补发 SSE、发 `event: drain`、按速率关闭；SIGINT 立即取消 |
 
-指标族刻意保持固定基数——**禁止** tenant/session/run 标签（`docs/RUNBOOK.md:248`）：
+指标族刻意保持固定基数——**禁止** tenant/session/run 标签（`docs/RUNBOOK.md:251`）：
 `keel_runs_started_total`、`keel_runs_finished_total{status}`、`keel_run_attempts_total{outcome}`、
 `keel_run_attempt_duration_seconds`、`keel_runs_pending`、`keel_streams_active`、`keel_draining`、
 `keel_leases_expired_total`、`keel_compactions_total`，外加 Go runtime 与 `pgxpool` gauge。僵尸

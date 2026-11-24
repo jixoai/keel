@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -128,5 +130,26 @@ func TestDBHelpAndUnknownCommand(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"db", "nope"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("unknown db command exit = %d; want 2", code)
+	}
+}
+
+func TestAdminStoreHonoursNoAutoDB(t *testing.T) {
+	t.Setenv("KEEL_DSN", "")
+	t.Setenv("KEEL_NO_AUTO_DB", "1")
+	if _, err := adminStore(context.Background(), io.Discard); err == nil || !strings.Contains(err.Error(), "KEEL_NO_AUTO_DB") {
+		t.Fatalf("adminStore error = %v; want a KEEL_NO_AUTO_DB hint", err)
+	}
+}
+
+func TestServeNoAutoDBWithoutDSN(t *testing.T) {
+	t.Setenv("KEEL_DSN", "")
+	t.Setenv("KEEL_NO_AUTO_DB", "")
+	var stdout, stderr bytes.Buffer
+	code := runServeCmd([]string{"--no-auto-db", "--tenant", "11111111-2222-3333-4444-555555555555"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("serve --no-auto-db exit = %d; want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "--no-auto-db") {
+		t.Fatalf("stderr = %q; want the opt-out hint", stderr.String())
 	}
 }

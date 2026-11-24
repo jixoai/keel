@@ -99,7 +99,7 @@ The package contract is implemented end to end:
 - **Managed root** — packages live in `<plugins-root>/<id>/`, are copied in and
   content-hashed at install; discovery runs at boot. The root defaults to
   `$KEEL_HOME/plugins` and is overridden by `--plugins-root` /
-  `KEEL_PLUGINS_ROOT` (`cmd/keel/main.go:173`, `:246`).
+  `KEEL_PLUGINS_ROOT` (`cmd/keel/main.go:175`, `:246`).
 - **Lifecycle** — `install`, `enable`, `disable`, `uninstall`, `update` over
   six states (`installed`, `enabled`, `disabled`, `failed`, `invalid`,
   `uninstalled`; `internal/harnessext/plugin_manager.go:29`). The API is

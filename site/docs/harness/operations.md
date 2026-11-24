@@ -33,8 +33,8 @@ keel serve --dsn "$KEEL_DSN" --addr 127.0.0.1:13750
 | `KEEL_SKILLS_ROOTS` | OS path list of skill roots (PI-compatible) | — |
 | `KEEL_RUNTIME_ID` | runtime identity written into claims/audit (handoff) | hostname-pid |
 
-(Sources: `cmd/keel/main.go:170` for the config/plugins flags and their defaults,
-`cmd/keel/main.go:246` for the plugins-root resolution order, `cmd/keel/auth.go`,
+(Sources: `cmd/keel/main.go:172` for the config/plugins flags and their defaults,
+`cmd/keel/main.go:262` for the plugins-root resolution order, `cmd/keel/auth.go`,
 `docs/HANDOFF.md`.)
 
 Operational facts worth knowing before you expose the port:

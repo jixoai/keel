@@ -73,18 +73,16 @@ git clone https://github.com/jixoai/keel.git
 cd keel
 go build -o keel ./cmd/keel
 
-# 2. start a local PostgreSQL 18 cluster (no Docker)
-./keel db start
-eval "$(./keel db env)"
-
-# 3. start the Harness (fake provider when no model is configured)
+# 2. start the Harness
 ./keel serve --addr 127.0.0.1:13750 \
   --tenant 11111111-2222-3333-4444-555555555555 \
   --auth local-only
 ```
 
-Any PostgreSQL 18 DSN works as well (an existing server, or a `postgres:18` container on port
-13741); `keel db` is just the zero-configuration path.
+On first run this initializes a local PostgreSQL 18 cluster (`$KEEL_HOME/dev-pg` or
+`~/.keel/dev-pg`; loopback only). Any PostgreSQL 18 DSN works as well (an existing server, or a
+`postgres:18` container on port 13741); set `KEEL_DSN` to use it, or `KEEL_NO_AUTO_DB=1` to
+disable auto-init.
 
 `local-only` answers loopback and maps requests to the built-in local admin, so this quickstart
 needs no account fixture. A real deployment uses `--auth required` + `keel admin bootstrap` +

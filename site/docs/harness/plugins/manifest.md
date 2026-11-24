@@ -28,7 +28,7 @@ install time; the stored plugin never points at the source directory, and
 installation records the tree hash (`internal/pluginpkg/package.go:74`,
 `internal/harnessext/plugin_manager_ops.go:504`). The root itself is
 `--plugins-root` / `KEEL_PLUGINS_ROOT` / `$KEEL_HOME/plugins`
-(`cmd/keel/main.go:246`), and it is created on first install.
+(`cmd/keel/main.go:262`), and it is created on first install.
 
 ## 2. The manifest — full field list
 
