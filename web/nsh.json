@@ -35,5 +35,9 @@
     "base": "/",
     "host": "./host.js"
   },
-  "icon": "icon.png"
+  "icon": "icon.png",
+  "singleInstance": true,
+  "schemes": [
+    "keel"
+  ]
 }

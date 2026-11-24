@@ -1,0 +1,35 @@
+# macOS 桌面壳冒烟（2026-11-24）
+
+$ nsh package --target macos -o dist/macos
+warn the app's own runner did not build, so it has the prebuilt one, with every native feature:
+building the release runner for macOS failed
+✓ packaged dist/macos/Keel.app
+
+$ plutil -p dist/macos/Keel.app/Contents/Info.plist | grep -A6 CFBundleURLTypes
+"CFBundleURLTypes" => [
+  0 => {
+    "CFBundleURLName" => "com.fde2e.keel"
+    "CFBundleURLSchemes" => [ 0 => "keel" ]
+  }
+]
+
+# 单实例：正常 open 再次启动，进程数保持 1
+$ open dist/macos/Keel.app
+$ pgrep -f '/dist/macos/Keel.app/Contents/MacOS/Keel' | wc -l
+1
+# 注：`open -n` 是 macOS 的强制新实例，不作为 singleInstance 判据。
+
+# 深链分发（临时 console.log 取证；日志已移除）
+$ open 'keel://settings'
+INFO js: keel-link settings
+$ open 'keel://session/11111111-2222-3333-4444-555555555555'
+INFO js: keel-link session
+$ open 'keel://session/not-a-uuid'
+INFO js: keel-link invalid
+
+# 托盘设置路径执行（临时日志；最终代码已移除）
+INFO js: keel-tray-set
+# 全局快捷键 mod+shift+k 的 register 未在观察窗口内 settle；未做可视/按键验证。
+
+# 边界：屏幕截图在本机返回全黑（screencapture 权限/显示限制），未对托盘图标与
+# 深链后的页面做视觉验收；深链只验证了分发与合法/非法分流。

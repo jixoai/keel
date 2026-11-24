@@ -59,6 +59,14 @@ web/
 │   └── ui/                    theme tokens、lucide 风格单色 Canvas 图标、primitives
 ```
 
+## 桌面壳
+
+- `nsh.json`：`singleInstance: true`、`schemes: ["keel"]`。
+- 深链：`keel://session/<uuid>`、`keel://session/<uuid>/decision/<id>`、`keel://settings`；
+  非法链接只提示，不导航（`src/desktop/links.ts` 纯函数，单测覆盖）。
+- 托盘：显示/设置/退出；全局快捷键 `mod+shift+k` 唤回；关闭最后窗口不退出（tray 退出）。
+- 仅桌面 host 生效（`nsh/desktop` 的 `isAvailable`）；web/TUI 是 no-op。
+
 ## 与 headless 核心的接法
 
 - **契约单源**：`src/data/contract.ts` 只做 `export type ... from "../../../packages/chat-surface/src/types"`，

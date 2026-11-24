@@ -37,21 +37,24 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
 2. **官网 v2 刷新（已交付并归档 2026-11-24）**：`keel-site-architecture-refresh` 把 37 对中英文页面按
    harness v2 重写（插件标准 implemented/partly/deferred、事件 25 kind、API 路由补齐、
    新增 assembly/placement/tenancy/files/session-query/release/slots），四道门与部署全绿。
-3. **客户端编辑器（P2，已交付并归档 2026-11-24）**：`keel-client-editor` 把 web Composer 换成
+3. **客户端壳（P2，已交付并归档 2026-11-24）**：`keel-client-shell` 声明 `singleInstance` +
+   `keel://` scheme；session/decision/settings 深链、托盘、`mod+shift+k` 唤回；桌面 host 生效，
+   web/TUI no-op。macOS 包/单实例/深链分发已实测，托盘/快捷键视觉未验（截图受限）。
+4. **客户端编辑器（P2，已交付并归档 2026-11-24）**：`keel-client-editor` 把 web Composer 换成
    `RichEditor`（Markdown 快捷输入、HTML 粘贴、Enter 发送/Shift+Enter 换行、5 行封顶），
    用户气泡按 Markdown 渲染、会话预览剥标记；TUI/原生保留纯文本。
-4. **本机 PG 零配置（已交付并归档 2026-11-24）**：`keel-dev-pg` 先以脚本补洞，随后由
+5. **本机 PG 零配置（已交付并归档 2026-11-24）**：`keel-dev-pg` 先以脚本补洞，随后由
    `keel-db-cli` 收进产品 CLI：`keel db start|stop|status|dsn|env|reset`（默认
    `$KEEL_HOME/dev-pg`，仅回环、随机 0600 密码、PG18 门、reset 防护）；`keel serve`/`keel admin`
    在无 `KEEL_DSN` 时自动初始化/启动本地库（`--no-auto-db`/`KEEL_NO_AUTO_DB=1` 可关闭）；
    README/RUNBOOK/官网已改为自动初始化优先，`scripts/dev-pg.sh` 删除。
-5. **客户端产品化（进行中：编辑器已交付，shell/updater/perf 未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
-   自更新、RichEditor/流式 Markdown、1000 条消息长会话性能。
-6. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
+6. **客户端产品化（进行中：壳/编辑器/通知已交付，updater/perf 未开始）**：`nsh/updater`
+   自更新、签名 OTA、1000 条消息长会话性能与离屏增量创建。
+7. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
    attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
    gbash mcp CLI、fileplugin 锁回收）；多租户插件面；macOS 原生 target；Rust+gRPC layerfs。
-7. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
+8. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
    待同步（browser 有他人 WIP）；TUI 设置页 raw JSON 1 例失败；headless 模式 4 个布局差异。
 
 **下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻

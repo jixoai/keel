@@ -30,6 +30,7 @@ import { Scrollbar } from "nsh/base";
 import type { SessionSummary } from "./src/data/contract";
 import { setClientCapabilities } from "./src/data/capabilities";
 import { store, type Notice, type Route } from "./src/data/store";
+import { installDesktopShell } from "./src/desktop/shell";
 import { KitGallery } from "./kit/KitGallery";
 import { BooksChapterRoute } from "./src/screens/books/chapters";
 import { BooksChrome } from "./src/screens/books/shell";
@@ -112,6 +113,25 @@ setClientCapabilities({
 // before the first render, so a plugin contribution scanned at boot always
 // finds the slot it targets.
 installPluginRuntime();
+
+// Desktop-only wake-up and keel:// links; a no-op on the web and in a terminal.
+installDesktopShell({
+  openLink: (link) => {
+    if (link.kind === "settings") {
+      store.openSettings();
+      return;
+    }
+    void store.openSession(link.sessionId).then(
+      () => {
+        if (link.kind === "decision") {
+          store.flash({ tone: "info", text: "已打开会话；审批卡在对话中。" });
+        }
+      },
+      () => store.flash({ tone: "warn", text: "链接里的会话无法打开。" }),
+    );
+  },
+  invalidLink: (raw) => store.flash({ tone: "warn", text: `无法打开链接：${raw.slice(0, 120)}` }),
+});
 
 /** The plugin inventory is one read per boot: the top band, the sidebar and
  * the settings sections come from it, so waiting for the plugin page would
