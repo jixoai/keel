@@ -48,7 +48,7 @@ Go 的 `internal/` 规则意味着这些包只能被模块 `github.com/jixoai/ke
 
 | 字段 | 含义 |
 |---|---|
-| `Seams` | `kernel.Committer`、`kernel.Reader`、`kernel.LeaseManager`、`kernel.ExternalSessions`、`agent.RunMirror`、`*quota.Limits`、logger（`internal/servicehost/host.go:69`） |
+| `Seams` | `kernel.Committer`、`kernel.Reader`、`kernel.LeaseManager`、`kernel.ExternalSessions`、`agent.RunMirror`、`*quota.Limits`、logger（`internal/servicehost/host.go:74`） |
 | `Tenant` | 解析 loadout 所用的租户配置文档（`internal/host.TenantConfig`） |
 | `Options` | loadout 快照头（`loadout.Options`：id、revision、version、summary、worker 开关、run 并发） |
 | `RuntimeID` | 每次 claim 写入的 worker owner 身份（handoff 身份） |

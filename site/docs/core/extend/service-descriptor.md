@@ -138,7 +138,7 @@ cannot be silently ignored in production assembly.
 **Step 5 — retire paths.** When a reload changes your service, the old generation goes `RETIRING`
 (no new runs), and is unloaded in reverse dependency order once its references drain or the retire
 timeout expires. `Engine.CollectExpired` must be called periodically — the host ticker does this
-(`engine.go:303`, `docs/LOADOUT.md:114`). If your effects can outlive a generation, they will show
+(`engine.go:303`, `docs/LOADOUT.md:115`). If your effects can outlive a generation, they will show
 up as leaked registrations in diagnostics after the retire deadline.
 
 ## 4. Descriptors that are deliberately incomplete

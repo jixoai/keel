@@ -49,7 +49,7 @@ Two disciplines make the evidence trustworthy:
 - **Every gate owns a dedicated database.** Tools that TRUNCATE/DROP refuse to run against a shared
   library: `cmd/e2e -reset` requires a dedicated database, `r1diff` requires the name to contain
   `r1diff`, and the load generators require `e2e/test/smoke/perf/accept` in the name
-  (`docs/RUNBOOK.md:182`). One old-schema migration against a shared database is enough to delete
+  (`docs/RUNBOOK.md:229`). One old-schema migration against a shared database is enough to delete
   rows another thread is using — that accident is recorded in the runbook.
 
 ## 3. Running the individual gates

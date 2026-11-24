@@ -128,7 +128,7 @@ inst, ok := eng.Lookup("audit-log")   // 查看当前活着的是什么（engine
 
 **第 5 步——退役路径。** reload 改动你的服务时，旧代进入 `RETIRING`（不接新 run），引用归零或
 retire 超时后按反序卸载。`Engine.CollectExpired` 必须被周期调用——宿主 ticker 负责
-（`engine.go:303`、`docs/LOADOUT.md:114`）。如果你的 effect 会活过代际，退役截止后它会以「泄漏的注册项」
+（`engine.go:303`、`docs/LOADOUT.md:115`）。如果你的 effect 会活过代际，退役截止后它会以「泄漏的注册项」
 出现在诊断里。
 
 ## 4. 刻意不完整的描述符

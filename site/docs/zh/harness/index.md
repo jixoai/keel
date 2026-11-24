@@ -40,11 +40,11 @@ Core 各包（`internal/kernel`、`internal/loop`、`internal/agentcore`、`inte
 - **服务图负责装配，账本负责裁决。** 服务声明 `provides`/`requires` 与清理副作用；它们从不
   直接写事件表（`docs/SERVICE-GRAPH.md` §2）。
 - **run 钉住一个 loadout。** 每个 run 记录 `loadout_id`/`revision`/`generation`，配置变更
-  绝不打扰在途 run（`internal/agent/worker.go:242`、`docs/LOADOUT.md` §4）。
+  绝不打扰在途 run（`internal/agent/worker.go:70`、`docs/LOADOUT.md` §4）。
 
 Harness 通过窄接缝消费 Core——`kernel.Committer`、`kernel.Reader`、`kernel.LeaseManager`、
 `kernel.ExternalSessions`（`internal/kernel/seams.go`），以及服务图提供的 per-run 绑定
-（`internal/agent/worker.go:72`）。任何 Harness 组件都不持有事件表的原始写句柄
+（`internal/agent/worker.go:73`）。任何 Harness 组件都不持有事件表的原始写句柄
 （`docs/LOADOUT.md` §7）。
 
 ## 3. 进程视图
@@ -69,7 +69,7 @@ keel serve（单进程）
 │   ├─ 审批             开/答/等/超时/取消 + durable 行             internal/harnessext/decisions.go:233
 │   ├─ 触发器           interval/cron/webhook + 幂等 + 审计         internal/harnessext/triggers.go:305
 │   ├─ 子代理           带预算与结构化结果的子会话                  internal/harnessext/subagent.go:175
-│   ├─ run 控制         为正在执行的 attempt 注册取消               internal/harnessext/turns.go:222
+│   ├─ run 控制         为正在执行的 attempt 注册取消               internal/harnessext/turns.go:223
 │   └─ partials         进程本地 token 增量（永不进日志）           internal/harnessext/turns.go:360
 ├─ 宿主装配             system prompt、技能、工具 registry、MCP     internal/host/host.go
 ├─ 服务图               store/llm/prompt/mcp/tools/pi-loop/…        internal/loadout/loadout.go:63

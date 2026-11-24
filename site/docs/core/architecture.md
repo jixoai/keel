@@ -82,7 +82,7 @@ Services get **narrow seams**, not store handles: `kernel.Committer`, `kernel.Re
 `kernel.LeaseManager`, `kernel.ExternalSessions` (`internal/kernel/seams.go`), plus per-service
 interfaces such as `agent.Assembly`, `agent.RunMirror` and `agent.RunBinding`. No service ever
 receives an event-table write handle, a `seq` allocator, or a bypass around tenant/lease checks
-(`docs/LOADOUT.md:147`).
+(`docs/LOADOUT.md:148`).
 
 ## 3. The service graph: capabilities, descriptors, lifecycle
 
@@ -158,7 +158,7 @@ Two deliberate structures (`docs/LOADOUT.md:42`):
 **Pinning.** Every claimed run calls `Engine.Acquire()` and gets a lease carrying
 generation/revision; `pi-loop` is resolved from that lease (not from a global lookup), and
 `FinishRequest.Loadout` records `loadout_id`/`revision`/`generation`/`owner_epoch` in the run row
-(`internal/kernel/schema/0005-loadout-revision.sql`, `docs/LOADOUT.md:99`). The read-only query
+(`internal/kernel/schema/0005-loadout-revision.sql`, `docs/LOADOUT.md:119`). The read-only query
 `GET /v1/sessions/{id}/run/loadout` returns the pin.
 
 **Reload.** `Runtime.Reload` applies a new document: new runs use the new generation; in-flight
@@ -167,7 +167,7 @@ unloaded in reverse order once references drop or the retire deadline passes. Pa
 `CollectExpired` force-unloads and marks still-held leases as broken — the holder must fail its run
 with a `drain-expired` diagnostic (`internal/servicehost/host.go:691`, `docs/LOADOUT.md:109`).
 A host ticker calls `CollectExpired` periodically so an idle process does not keep a dead
-generation's effects around (`docs/LOADOUT.md:114`).
+generation's effects around (`docs/LOADOUT.md:115`).
 
 **Conformance gate (fail-closed).** Any service providing `ctx.loop` must present a PI conformance
 manifest whose canonical hash equals the service's pin; an undeclared, unpinned or drifted loop is

@@ -51,12 +51,12 @@ facts are:
   (`docs/SERVICE-GRAPH.md` §2).
 - **Runs pin a loadout.** Each run records `loadout_id`/`revision`/`generation`,
   so a configuration change never disturbs an in-flight run
-  (`internal/agent/worker.go:242`, `docs/LOADOUT.md` §4).
+  (`internal/agent/worker.go:70`, `docs/LOADOUT.md` §4).
 
 The Harness consumes the Core through narrow seams — `kernel.Committer`,
 `kernel.Reader`, `kernel.LeaseManager`, `kernel.ExternalSessions`
 (`internal/kernel/seams.go`), plus the per-run binding supplied by the service
-graph (`internal/agent/worker.go:72`). No Harness component holds a raw write
+graph (`internal/agent/worker.go:73`). No Harness component holds a raw write
 handle to the events table (`docs/LOADOUT.md` §7).
 
 ## 3. A process view
@@ -83,7 +83,7 @@ keel serve (one process)
 │   ├─ decisions        approval/clarify primitive with durable rows      internal/harnessext/decisions.go:233
 │   ├─ triggers         interval/cron/webhook + idempotency + audit       internal/harnessext/triggers.go:305
 │   ├─ sub-agents       child sessions with budgets and structured result internal/harnessext/subagent.go:175
-│   ├─ run control      cancel registration for the executing attempt     internal/harnessext/turns.go:222
+│   ├─ run control      cancel registration for the executing attempt     internal/harnessext/turns.go:223
 │   └─ partials         process-local token deltas (never in the log)     internal/harnessext/turns.go:360
 ├─ Host assembly        system prompt, skills, tool registry, MCP         internal/host/host.go
 ├─ Service graph        store/llm/prompt/mcp/tools/pi-loop/…              internal/loadout/loadout.go:63

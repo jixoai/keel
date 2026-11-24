@@ -50,7 +50,7 @@ sidebar: false
 | **Handoff** | Cross-process succession: new runtime, drain the old one, new epoch, continue from the ledger. | `docs/HANDOFF.md` |
 | **Decision** | The approval/question primitive: durable row, idempotent answer, bounded timeout. Not a kernel event kind. | `internal/harnessext/decisions.go:233` |
 | **Trigger** | A scheduled or webhook-started turn (`interval`/`cron`/`webhook`) with idempotency keys and an audit trail. | `internal/harnessext/triggers.go:30` |
-| **Sub-agent** | A child session spawned by a tool or API call, with a budget and a structured result. | `internal/harnessext/subagent.go:44` |
+| **Sub-agent** | A child session spawned by a tool or API call, with a budget and a structured result. | `internal/harnessext/subagent.go:21` |
 
 ## Assembly vocabulary
 

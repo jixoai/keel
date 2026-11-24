@@ -103,7 +103,7 @@ the loop instance it started with even if the host reassembles services
 later. A retiring generation accepts no new runs and is unloaded in reverse
 dependency order once its references drain, or forcibly after the retire
 deadline — its leases are then marked broken and the holder must fail the run
-with a `drain-expired` diagnostic (`internal/agent/worker.go:242`,
+with a `drain-expired` diagnostic (`internal/agent/worker.go:237`,
 `internal/servicegraph/engine.go:303`, `:650`). A host ticker calls
 `CollectExpired` periodically so an idle process never accumulates old
 generations (`docs/LOADOUT.md` §4).

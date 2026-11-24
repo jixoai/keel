@@ -20,7 +20,7 @@
 ## 2. ① 提交：先提交，再谈其他
 
 客户端发送 `{text, requestId?, delivery?, selection?, attachments?}`
-（`internal/httpapi/input_commit.go:26`）。输入端点与重试端点汇入同一条提交路径
+（`internal/httpapi/input_commit.go:34`）。输入端点与重试端点汇入同一条提交路径
 `commitUserInput`（`internal/httpapi/input_commit.go:58`），因此载荷形状、外部会话预检与
 内核提交不会在两者之间漂移。
 
@@ -66,7 +66,7 @@ claim 是「恰好一个写者」成立的根源：attempt 的每次提交都携
    内核保证每个 `toolCallId` 恰好一条结果（`internal/agent/runner.go:829`）；
 7. **把未读输入挪到最后**：上一 attempt 运行期间到达的输入在日志里位于该 attempt 的答案
    *之前*；runner 把未读输入移到转录末尾，让模型把它当作自己的 prompt 而不是「已答过的
-   内容」（`internal/agent/runner.go:360`、`:888`）。
+   内容」（`internal/agent/runner.go:1548`、`:888`）。
 
 ## 5. ⑤ loop 运行
 

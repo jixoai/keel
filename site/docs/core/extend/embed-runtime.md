@@ -55,7 +55,7 @@ Both entry points build the same pieces in the same order; `cmd/runtime` is the 
 
 | Field | Meaning |
 |---|---|
-| `Seams` | `kernel.Committer`, `kernel.Reader`, `kernel.LeaseManager`, `kernel.ExternalSessions`, `agent.RunMirror`, `*quota.Limits`, logger (`internal/servicehost/host.go:69`) |
+| `Seams` | `kernel.Committer`, `kernel.Reader`, `kernel.LeaseManager`, `kernel.ExternalSessions`, `agent.RunMirror`, `*quota.Limits`, logger (`internal/servicehost/host.go:74`) |
 | `Tenant` | the tenant configuration document (`internal/host.TenantConfig`) the loadout is resolved from |
 | `Options` | loadout snapshot header (`loadout.Options`: id, revision, version, summary, worker switch, run concurrency) |
 | `RuntimeID` | the worker owner identity written into every claim (handoff identity) |

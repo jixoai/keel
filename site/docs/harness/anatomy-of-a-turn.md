@@ -22,7 +22,7 @@ process dies mid-turn.
 ## 2. ① Submit: commit before anything else
 
 The client sends `{text, requestId?, delivery?, selection?, attachments?}`
-(`internal/httpapi/input_commit.go:26`). Both the input endpoint and the retry
+(`internal/httpapi/input_commit.go:34`). Both the input endpoint and the retry
 endpoint funnel into the same commit path, `commitUserInput`
 (`internal/httpapi/input_commit.go:58`), so the payload shape, the
 external-session pre-check and the kernel commit cannot drift apart between
@@ -83,7 +83,7 @@ claim is gone, so a superseded run cannot keep writing
 7. **present unread input last**: input that arrived while the previous attempt
    was running sits *before* that attempt's answer in the log; the runner moves
    the unread inputs to the end of the transcript so the model treats them as
-   its prompt instead of "already answered" (`internal/agent/runner.go:360`,
+   its prompt instead of "already answered" (`internal/agent/runner.go:1548`,
    `:888`).
 
 ## 5. ⑤ The loop runs

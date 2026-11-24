@@ -72,7 +72,7 @@
 服务拿到的是**窄接缝**，不是 store 句柄：`kernel.Committer`、`kernel.Reader`、
 `kernel.LeaseManager`、`kernel.ExternalSessions`（`internal/kernel/seams.go`），以及
 `agent.Assembly`、`agent.RunMirror`、`agent.RunBinding` 这类按服务定义的接口。任何服务都拿不到
-事件表写句柄、`seq` 分配或绕过租户/租约校验的旁路（`docs/LOADOUT.md:147`）。
+事件表写句柄、`seq` 分配或绕过租户/租约校验的旁路（`docs/LOADOUT.md:148`）。
 
 ## 3. 服务图：能力、描述符、生命周期
 
@@ -142,14 +142,14 @@ loadout 是 `{id, revision, version, summary, 服务描述符集合}` 的不可�
 **运行期 pin**。每个被 claim 的 run 调 `Engine.Acquire()`，得到带 generation/revision 的 lease；
 `pi-loop` 从该 lease 解析（不是全局 Lookup），`FinishRequest.Loadout` 把
 `loadout_id`/`revision`/`generation`/`owner_epoch` 写进 run 行
-（`internal/kernel/schema/0005-loadout-revision.sql`、`docs/LOADOUT.md:99`）。只读查询
+（`internal/kernel/schema/0005-loadout-revision.sql`、`docs/LOADOUT.md:119`）。只读查询
 `GET /v1/sessions/{id}/run/loadout` 返回该 pin。
 
 **Reload**。`Runtime.Reload` 应用新文档：新 run 用新 generation；在途 run 继续用旧实例；旧代进入
 `RETIRING`（不接新 run），引用归零或 drain 截止后按反序卸载。截止后 `CollectExpired` 强制卸载，并把
 仍持有旧代的 lease 标为 broken——持有者必须让 run 以 `drain-expired` 诊断失败
 （`internal/servicehost/host.go:691`、`docs/LOADOUT.md:109`）。宿主 ticker 周期调用
-`CollectExpired`，空闲进程也不会永远留着一代旧 effects（`docs/LOADOUT.md:114`）。
+`CollectExpired`，空闲进程也不会永远留着一代旧 effects（`docs/LOADOUT.md:115`）。
 
 **Conformance 门（fail-closed）**。任何提供 `ctx.loop` 的服务都必须给出 PI conformance manifest，
 其规范哈希与该服务的 pin 相等；未声明、未 pin 或哈希不符的 loop 在 loadout 存在之前就被拒绝

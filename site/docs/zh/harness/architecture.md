@@ -90,7 +90,7 @@ MCP/工具刷新分叉）；`sandbox` 不造空工厂——未实现的服务就
 每个被 claim 的 run 会向引擎*获取*一份租约（`internal/servicegraph/engine.go:270`）并钉住
 generation：即使宿主之后重装配服务，该 run 仍使用它开始时的 loop 实例。进入退休的
 generation 不接新 run，待引用归零后按反序卸载；超过退休截止则强制卸载——其租约被标记为
-broken，持有者必须以 `drain-expired` 诊断让 run 失败（`internal/agent/worker.go:242`、
+broken，持有者必须以 `drain-expired` 诊断让 run 失败（`internal/agent/worker.go:237`、
 `internal/servicegraph/engine.go:303`、`:650`）。宿主 ticker 周期调用 `CollectExpired`，
 空闲进程也不会累积旧代（`docs/LOADOUT.md` §4）。
 
