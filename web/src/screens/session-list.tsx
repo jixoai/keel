@@ -52,7 +52,7 @@ import { Clipboard, cleanup, effect, signal, Text, type TextStyle, View } from "
 import type { SessionSummary } from "../data/contract";
 import { store } from "../data/store";
 import { createSessionFromWorkspace } from "../data/session-create";
-import { formatTime } from "../data/wire";
+import { formatTime, plainPreview } from "../data/wire";
 import {
   Badge,
   Button,
@@ -87,7 +87,7 @@ import {
   type QueueFacts,
   type RunState,
 } from "../ui/run-state";
-import { oneLine, sessionTitle } from "../ui/session-title";
+import { sessionTitle } from "../ui/session-title";
 import { exportSummary, searchAvailable, sessionQueryAccess } from "../data/session-query";
 import { PluginSidebarSlot } from "../plugins/slots";
 import { requestDelete } from "./delete-dialog";
@@ -110,7 +110,7 @@ const isMine = (row: SessionSummary): boolean => {
  * `../ui/session-title` is its single source (the list rows, the workspace
  * header and the conversation read one name). */
 const summaryOf = (row: SessionSummary): string => {
-  const preview = oneLine(row.lastMessage) || "还没有消息";
+  const preview = plainPreview(row.lastMessage) || "还没有消息";
   if (row.sharedWithMe && row.ownerDisplayName) return `由 ${row.ownerDisplayName} 共享 · ${preview}`;
   return preview;
 };

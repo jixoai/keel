@@ -198,16 +198,37 @@ function UserInputRow(props: { turnId: string; input: InputView; attachments?: A
           gap: space.none,
         }}
       >
-        <Text
-          style={{
-            userSelect: "text",
-            fontSize: typeScale.base,
-            lineHeight: Math.round(typeScale.base * lineHeight.normal),
-            color: color.foreground,
-          }}
+        <If
+          when={platform.idiom === "terminal"}
+          else={
+            <TextView
+              markdown={props.input.text}
+              selectable
+              styles={{
+                root: {
+                  fontSize: typeScale.base,
+                  lineHeight: Math.round(typeScale.base * lineHeight.normal),
+                  color: color.foreground,
+                },
+                paragraph: {
+                  fontSize: typeScale.base,
+                  lineHeight: Math.round(typeScale.base * lineHeight.normal),
+                },
+              }}
+            />
+          }
         >
-          {props.input.text}
-        </Text>
+          <Text
+            style={{
+              userSelect: "text",
+              fontSize: typeScale.base,
+              lineHeight: Math.round(typeScale.base * lineHeight.normal),
+              color: color.foreground,
+            }}
+          >
+            {props.input.text}
+          </Text>
+        </If>
       </Card>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         <If when={props.input.delivery === "guide"}>

@@ -102,7 +102,10 @@ web/
   图片与附件、压缩分隔、run 状态、`run.finished` 摘要、消息级流式与 partial 开关。
 - **聊天列表**：`<List alignment="bottom">`，新内容从底部出现；列表贴底才跟随流式，
   上滚后显示「回到底部」而不强制拉回。
-- **Composer**：queue/guide 切换（缺省 queue；空闲时一律按 queue 发送）、运行中发送 + 独立停止按钮
+- **Composer**：web 用 `nsh/base` RichEditor（Markdown 快捷输入、粘贴 HTML 导入、
+  发送为 Markdown），Enter 发送 / Shift+Enter 换行；TUI 与原生/手机暂保持纯文本 Input；
+  高度 5 行封顶；
+  queue/guide 切换（缺省 queue；空闲时一律按 queue 发送）、运行中发送 + 独立停止按钮
   （stop barrier 状态）、附件（Picker + `/v1/files`）、「等待引导当前任务…」、服务端降级回队列并保序。
 - **审批**：decision 卡（问题/选项/推荐/剩余时间/超时/取消），一键作答后卡片变为 `answered`，
   同一卡片提交中禁用、重复提交幂等。

@@ -16,7 +16,8 @@
 //
 // Events: `keel.network` { online: boolean } whenever the browser's network
 // state changes; `keel.route` { path, search } on browser back/forward, so the
-// back button follows the app's routes.
+// back button follows the app's routes; `keel.send` {} when Enter is pressed
+// in the composer (Shift+Enter stays the editor's newline).
 //
 // Realtime duplex audio (`keel.realtime.*`) is the browser half of a realtime
 // voice session. The app never touches the microphone or an AudioContext:
@@ -181,6 +182,29 @@ export async function createHost(player) {
     }
   };
   onGlobal("popstate", sendRoute);
+
+  // Enter in the rich composer is send; Shift+Enter stays the editor's
+  // newline. The editor consumes Enter natively before the app's keymap can
+  // see it, so the page host catches it at the DOM (capture) and forwards one
+  // host event; the app's Composer subscribes to `keel.send`. A composing IME
+  // keeps Enter for itself.
+  const onComposerKeyDown = (event) => {
+    if (!event || event.isComposing || event.key !== "Enter") return;
+    if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== "function") return;
+    if (!target.closest('[aria-label="输入消息"]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      player.hostEvent("keel.send", {});
+    } catch {
+      /* an event that is not JSON must not break the page */
+    }
+  };
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("keydown", onComposerKeyDown, true);
+  }
 
   // A call must not keep listening with the page hidden or gone: the browser
   // may throttle a background tab but the microphone keeps capturing, so the

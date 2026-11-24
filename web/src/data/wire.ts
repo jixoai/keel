@@ -192,6 +192,23 @@ export function toolResultText(payload: Record<string, unknown>): string {
 }
 
 /** A short one-line preview of a value (arguments, results). */
+/** A one-line text preview without the Markdown syntax a rich composer sends
+ * (`**bold**`, `# heading`, `- item`, `` `code` ``, `[text](url)`). The message
+ * itself keeps its formatting; list previews are labels, not documents. */
+export function plainPreview(text: string | undefined): string {
+  const stripped = (text ?? "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped;
+}
+
 export function preview(value: unknown, max = 120): string {
   if (value === undefined || value === null) return "";
   let text: string;

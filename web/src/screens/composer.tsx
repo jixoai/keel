@@ -9,12 +9,12 @@
 // toolbar's faces are kit Buttons / Tabs / Badges and every value below is a
 // token read (`web/theme.json` through kit/tokens.ts).
 //
-// The editing field is the native `nsh/base` Input: the kit's `Input` /
-// `Textarea` carry their own field chrome and expose no content-size callback,
-// while this field must be chrome-less (the shell's p-3 is the box) and
-// auto-grow. Everything it draws with is still a token.
-import { cleanup, effect, Picker, platform, signal, Text, type InputRef, untracked, View } from "nsh";
-import { Input } from "nsh/base";
+// The web target edits with `nsh/base` RichEditor (Markdown shortcuts, HTML
+// paste, formatted text); the terminal and native/phone hosts keep the plain
+// Input. Both paths are chrome-less (the shell's p-3 is the box) and auto-grow,
+// and everything either draws with is a token.
+import { cleanup, effect, host, Picker, platform, signal, Text, type InputRef, untracked, View } from "nsh";
+import { createRichEditor, Input, markdown, RichEditor, type RichEditorSession, starterKit } from "nsh/base";
 import type { ConversationView, Delivery, QueueItemView } from "../data/contract";
 import type { PendingAttachment } from "../data/store";
 import { store } from "../data/store";
@@ -27,6 +27,7 @@ import {
   CardHeader,
   color,
   ComposerSurface,
+  font,
   IconButton,
   Kbd,
   lineHeight,
@@ -35,6 +36,7 @@ import {
   Tabs,
   Tooltip,
   typeScale,
+  weight,
 } from "../ui/kit";
 
 import {
@@ -61,6 +63,25 @@ const prefillTick = signal(0);
  * pushed the send button outside the composer shell. Measured on the root so
  * the hint drops before the primary control does. */
 const composerWidth = signal(0);
+/** The editor revision at which a picked completion should stay closed. The
+ * editor's Markdown normalisation drops the trailing space the plain input
+ * used to end a token, so the revision (not the text) is the close signal. */
+const completionDismissedAt = signal(0);
+/** True while a draft change is being written into the editor: the editor's
+ * change callback must not echo it back. */
+let applyingRichDraft = false;
+
+/** The rich editor is made once, lazily, and only for drawn hosts. */
+let richSession: RichEditorSession | null = null;
+/** A fresh empty document (setContent("") can leave a zero-width block). */
+const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
+function richEditor(): RichEditorSession | null {
+  // This slice ships the web target; the terminal and native/phone hosts keep
+  // the plain Input (its Enter/submit behavior is already correct there).
+  if (platform.os !== "web" || platform.idiom === "terminal") return null;
+  if (!richSession) richSession = createRichEditor({ plugins: [starterKit(), markdown()] });
+  return richSession;
+}
 
 export const composerDraft = draft;
 
@@ -144,9 +165,43 @@ const sendHint = () => (
 
 export function Composer(props: { view: ConversationView | null; compact?: boolean }) {
   let input: InputRef | undefined;
+  const rich = richEditor();
+  // The session listener and the view's onChange both land here. The web host
+  // turns Enter into `keel.send` (host.js owns that keydown: the native rich
+  // editor consumes Enter itself); the draft is the Markdown text.
+  const syncRichDraft = () => {
+    if (!rich || applyingRichDraft) return;
+    draft.set(rich.getMarkdown().replace(/\u200b/g, "").replace(/\n$/, ""));
+  };
   effect(() => {
     if (prefillTick() === 0) return;
-    untracked(() => input?.focus());
+    untracked(() => {
+      if (rich) rich.focus();
+      else input?.focus();
+    });
+  });
+  // The session's own listener is the source of truth for editor-origin
+  // changes; the view's onChange is not the only path a programmatic change
+  // can take (and a test host may deliver it a turn later).
+  effect(() => {
+    if (!rich) return;
+    const off = rich.on("update", syncRichDraft);
+    cleanup(off);
+  });
+  // External draft writes (empty-state prefills, a completion, a failed send's
+  // restore, the clear after a send) reach the rich editor here; editor-origin
+  // changes already match and do nothing.
+  effect(() => {
+    const text = draft();
+    if (!rich) return;
+    untracked(() => {
+      if (applyingRichDraft) return;
+      const current = rich.getMarkdown().replace(/\n+$/, "");
+      if (current === text.replace(/\n+$/, "")) return;
+      applyingRichDraft = true;
+      rich.setContent(text, "markdown");
+      applyingRichDraft = false;
+    });
   });
   const view = () => props.view;
   const busy = () => !!view()?.busy;
@@ -180,8 +235,19 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
   const pickCompletion = (insert: string) => {
     const active = completionTrigger(draft());
     if (!active) return;
-    draft.set(insertCompletion(draft(), active.start, insert));
-    untracked(() => input?.focus());
+    const next = insertCompletion(draft(), active.start, insert);
+    draft.set(next);
+    untracked(() => {
+      if (rich) {
+        applyingRichDraft = true;
+        rich.setContent(next, "markdown");
+        applyingRichDraft = false;
+        completionDismissedAt.set(rich.revision + 1);
+        rich.focus();
+      } else {
+        input?.focus();
+      }
+    });
   };
 
   const addPicked = async () => {
@@ -231,6 +297,12 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
     const text = learn ? buildLearnInstruction(learn.prompt) : raw;
     const pending = attachments();
     draft.set("");
+    if (rich) {
+      applyingRichDraft = true;
+      rich.setContent(EMPTY_DOC, "json");
+      applyingRichDraft = false;
+      rich.focus();
+    }
     attachments.set([]);
     inputHeight.set(0);
     sending.set(true);
@@ -243,6 +315,11 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
       // Nothing was committed: give the writer their words back (attachment
       // previews included). The reason is in the turn-error banner.
       draft.set(raw);
+      if (rich) {
+        applyingRichDraft = true;
+        rich.setContent(raw, "markdown");
+        applyingRichDraft = false;
+      }
       attachments.set(pending);
     }
   };
@@ -251,6 +328,17 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
     if (stopping()) return;
     void store.stop();
   };
+
+  // The web host turns Enter in this composer into `keel.send` (host.js): the
+  // rich editor consumes Enter internally, so a DOM keydown is the reliable
+  // interception point. Other hosts use the send button.
+  effect(() => {
+    if (!rich || !host.available()) return;
+    const off = host.on("keel.send", () => {
+      if (!stopping()) void send();
+    });
+    cleanup(off);
+  });
 
   const placeholder = () =>
     stopping()
@@ -301,7 +389,12 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
           ))}
         </View>
       </If>
-      <If when={!!completionTrigger(draft())}>
+      <If
+        when={
+          !!completionTrigger(draft()) &&
+          (!rich || rich.revision > completionDismissedAt())
+        }
+      >
         <CompletionMenu
           query={completionTrigger(draft())?.query ?? ""}
           sessionId={store.activeId()}
@@ -309,37 +402,137 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
         />
       </If>
       <ComposerSurface testID="composer-surface">
-        <Input
-          ref={(node) => {
-            input = node;
-          }}
-          testID="composer-input"
-          accessibilityLabel="输入消息"
-          value={draft()}
-          onChange={({ value }) => draft.set(value)}
-          multiline
-          submitBehavior={submitOnEnter() ? "submit" : "newline"}
-          onSubmit={() => {
-            if (!stopping()) void send();
-          }}
-          placeholder={placeholder()}
-          onContentSizeChange={({ size }) => inputHeight.set(size.height)}
-          style={{
-            // The shell owns the box: no border, no fill, no padding of its own
-            // (the shell's p-3 is the only padding around the text).
-            height: fieldHeight(),
-            borderWidth: 0,
-            backgroundColor: "transparent",
-            paddingHorizontal: space.none,
-            paddingVertical: space.none,
-            fontSize: typeScale.base,
-            lineHeight: Math.round(typeScale.base * lineHeight.relaxed),
-            color: color.foreground,
-            placeholderColor: color.mutedForeground,
-            caretColor: color.brand,
-            selectionColor: alpha(color.brand, 0.3),
-          }}
-        />
+        <If
+          when={!!rich}
+          else={
+            <Input
+              ref={(node) => {
+                input = node;
+              }}
+              testID="composer-input"
+              accessibilityLabel="输入消息"
+              value={draft()}
+              onChange={({ value }) => draft.set(value)}
+              multiline
+              submitBehavior={submitOnEnter() ? "submit" : "newline"}
+              onSubmit={() => {
+                if (!stopping()) void send();
+              }}
+              placeholder={placeholder()}
+              onContentSizeChange={({ size }) => inputHeight.set(size.height)}
+              style={{
+                // The shell owns the box: no border, no fill, no padding of its
+                // own (the shell's p-3 is the only padding around the text).
+                height: fieldHeight(),
+                borderWidth: 0,
+                backgroundColor: "transparent",
+                paddingHorizontal: space.none,
+                paddingVertical: space.none,
+                fontSize: typeScale.base,
+                lineHeight: Math.round(typeScale.base * lineHeight.relaxed),
+                color: color.foreground,
+                placeholderColor: color.mutedForeground,
+                caretColor: color.brand,
+                selectionColor: alpha(color.brand, 0.3),
+              }}
+            />
+          }
+        >
+          <View style={{ position: "relative" }}>
+            <RichEditor
+              editor={rich!}
+              testID="composer-input"
+              accessibilityLabel="输入消息"
+              placeholder={null}
+            onChange={syncRichDraft}
+            onContentSizeChange={({ contentSize }) => inputHeight.set(contentSize.height)}
+            styles={{
+              root: {
+                height: fieldHeight(),
+                backgroundColor: "transparent",
+              },
+              content: {
+                paddingHorizontal: space.none,
+                paddingVertical: space.none,
+                fontSize: typeScale.base,
+                lineHeight: Math.round(typeScale.base * lineHeight.relaxed),
+                color: color.foreground,
+              },
+              placeholder: { color: color.mutedForeground },
+              caret: { backgroundColor: color.brand },
+              selection: { backgroundColor: alpha(color.brand, 0.3) },
+              nodes: {
+                paragraph: {
+                  fontSize: typeScale.base,
+                  lineHeight: Math.round(typeScale.base * lineHeight.relaxed),
+                },
+                heading: { fontWeight: weight.semibold },
+                "heading[level=1]": {
+                  fontSize: typeScale["2xl"],
+                  lineHeight: Math.round(typeScale["2xl"] * lineHeight.tight),
+                  fontWeight: weight.semibold,
+                },
+                "heading[level=2]": {
+                  fontSize: typeScale.section,
+                  lineHeight: Math.round(typeScale.section * lineHeight.tight),
+                  fontWeight: weight.semibold,
+                },
+                "heading[level=3]": {
+                  fontSize: typeScale.xl,
+                  lineHeight: Math.round(typeScale.xl * lineHeight.snug),
+                  fontWeight: weight.semibold,
+                },
+                bulletList: { paddingLeft: space.lg },
+                orderedList: { paddingLeft: space.lg },
+                listItem: { paddingLeft: space.none },
+                blockquote: {
+                  borderLeftWidth: 2,
+                  borderLeftColor: color.border,
+                  paddingLeft: space.sm,
+                  color: color.mutedForeground,
+                },
+                codeBlock: {
+                  fontFamily: font.mono,
+                  fontSize: typeScale.caption,
+                  lineHeight: Math.round(typeScale.caption * lineHeight.relaxed),
+                  backgroundColor: alpha(color.muted, 0.35),
+                },
+              },
+              listMarker: { color: color.foreground, fontSize: typeScale.base },
+              marks: {
+                bold: { fontWeight: weight.bold },
+                italic: { fontStyle: "italic" },
+                strike: { textDecorationLine: "line-through" },
+                code: {
+                  fontFamily: font.mono,
+                  fontSize: typeScale.caption,
+                  backgroundColor: alpha(color.muted, 0.35),
+                },
+                link: { color: color.brand, textDecorationLine: "underline" },
+              },
+            }}
+          />
+            {/* The editor's own placeholder disappears after a programmatic
+                clear in some hosts; this overlay follows the same empty state. */}
+            <If when={!draft().trim()}>
+              <Text
+                testID="composer-placeholder"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  right: 0,
+                  fontSize: typeScale.base,
+                  lineHeight: Math.round(typeScale.base * lineHeight.relaxed),
+                  color: color.mutedForeground,
+                  pointerEvents: "none",
+                }}
+              >
+                {placeholder()}
+              </Text>
+            </If>
+          </View>
+        </If>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           <IconButton
             testID="composer-attach"

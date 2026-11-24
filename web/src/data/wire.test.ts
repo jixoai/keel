@@ -1,7 +1,7 @@
 // Time stamps (P6V): the event log's missing/epoch times are data, not a
 // date. A 0 or a pre-2000 timestamp must read as empty, never as 1970.
 import { expect, test } from "nsh/test";
-import { formatTime } from "./wire";
+import { formatTime, plainPreview } from "./wire";
 
 const NOW = new Date(2026, 10, 20, 12, 0, 0).getTime();
 
@@ -28,4 +28,12 @@ test("时间：跨年时带年份", () => {
   const newYear = new Date(2026, 0, 2, 0, 0, 0).getTime();
   const lastYear = new Date(2025, 11, 31, 23, 30, 0).getTime();
   expect(formatTime(lastYear, newYear)).toBe("2025年12月31日 23:30");
+});
+
+test("预览：富文本消息的 Markdown 标记不进入列表标签", () => {
+  expect(plainPreview("**bold** and plain")).toBe("bold and plain");
+  expect(plainPreview("# Heading\n- item one\n`code`\n[link](https://x.test)")).toBe(
+    "Heading item one code link",
+  );
+  expect(plainPreview(undefined)).toBe("");
 });
