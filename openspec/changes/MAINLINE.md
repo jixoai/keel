@@ -28,9 +28,11 @@
 
 v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
 
-1. **Alpha 残余**：OAR 专用渲染器 + 宿主任务图闭环（Codex record 链路已绿，缺
-   `keel.ui.tool-renderer` 与任务图证明）；E0/R1 v2 重 pin 与零回归（旧基线 e7361f8）；
-   G4 300MB 目标/组 OOM（平台受限，468MB ≤500MB 已记 PARTIAL）。
+1. **Alpha 残余**：只剩 OAR 专用渲染器 + 宿主任务图闭环（Codex record 链路已绿，缺
+   `keel.ui.tool-renderer` 与任务图证明）——已在 `keel-oar-renderer` change 立项。
+   R1 v2 已绿（pin e7361f8 / scenario r1-basic-v2 / 77 allow rules；152 leaf paths、
+   103 allowed、0 unexpected；负控证明 allowlist 不能吞掉全部差异），仅 E0 的容器电池
+   平台受限；G4 300MB 目标/组 OOM 同属平台受限（468MB ≤500MB 已记 PARTIAL）。
 2. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
    自更新、RichEditor/流式 Markdown、1000 条消息长会话性能。
 3. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、

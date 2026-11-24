@@ -1,0 +1,37 @@
+# Tasks: keel-oar-renderer
+
+## 1. 投影读取 API（后端）
+
+- [ ] 1.1 `internal/harnessapi` 增加只读投影处理器：会话可见性校验 → `external_ref` →
+      journal 路径 → `oar.ProjectionFromJournal` → `oar.ProjectionJSON`。
+- [ ] 1.2 typed 错误：非外部会话 404、journal 未配置 501、损坏 500；空 journal 返回空投影。
+- [ ] 1.3 `cmd/keel/serve.go` 装配 journal dir（`-oar-journal-dir` > `KEEL_OAR_JOURNAL_DIR`），
+      注册路由，accessgate 矩阵补声明。
+- [ ] 1.4 测试：真 PG + 临时 journal 的契约测试（有记录/空/损坏/跨租户/非外部会话/未配置）。
+
+## 2. 客户端渲染（前端）
+
+- [ ] 2.1 `web/src/data/http.ts`：`externalProjection(sessionId)`；失败类型化。
+- [ ] 2.2 `web/src/plugins/chunks/oar-run.tsx`：`OarRunCard`（runtime/simulated/行/usage/错误/
+      关联任务），全部 kit 组件与令牌；`BUNDLED_CHUNKS` 注册。
+- [ ] 2.3 `keel.ui.tool-renderer` 宿主接入：外部事件（`oar.record`）按会话取投影，
+      经槽位渲染；失败/未配置回退现有文本行；TUI 降级为文本。
+- [ ] 2.4 测试：fixture 投影渲染、simulated 徽标、行折叠、失败回退、TUI 文本降级。
+
+## 3. 任务图不污染证明
+
+- [ ] 3.1 宿主测试：已有任务卡的会话跑 fake OAR 一轮，`tasklog` 行数/`task.created` 不变；
+      投影 `taskId` 指向原卡。
+- [ ] 3.2 UI 断言：关联任务打开原卡，不产生第二张卡。
+
+## 4. E2E 与证据
+
+- [ ] 4.1 fake runtime 确定性 E2E：外部会话 → 记录 → 投影 API → 外部运行卡截图。
+- [ ] 4.2 若本机有 codex：live 分支一条（复用 W9 证据，不重复烧 token）。
+- [ ] 4.3 `evidence/`：API 契约输出、投影 JSON、截图、任务图前后对比。
+
+## 5. 收口
+
+- [ ] 5.1 `docs/OAR.md` 的渲染小节从「W12 UI owns」改为已交付；`MAINLINE.md` 更新。
+- [ ] 5.2 子代理交叉复核（reviewer 逻辑 + vision 卡片视觉）；P0/P1 清零。
+- [ ] 5.3 归档本 change；如产品面变化则发 v0.3.0。
