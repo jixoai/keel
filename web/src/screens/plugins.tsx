@@ -5,10 +5,11 @@
 // `src/data/http.ts:362-364`). Every fact on a card is a field of
 // `PluginStatusView` (`src/data/contract.ts:245-258`): id, version, state,
 // provides, requires, tools, hooks, triggers, effects, diagnostics, startedAt,
-// stoppedAt. The contract declares no "installable" and no "update" field —
-// the 可装/更新 card is therefore an Empty that names `keel-plugin-core` (the
-// entry that owns the install surface and the plugin UI route); no row is
-// invented for it.
+// stoppedAt. The backend install surface is implemented (`POST
+// /v1/plugins/install`, `internal/harnessapi/plugins.go:56-62`; the client
+// cards are still unwired): the contract declares no "installable" and no
+// "update" field — the 可装/更新 card remains an Empty awaiting the client
+// wiring; no row is invented for it.
 //
 // P2 · opening. On the web a plugin's UI is its own page at `/plugins/<id>` and
 // is carried by the platform's web view element (`<WebView src>`; NSH's web

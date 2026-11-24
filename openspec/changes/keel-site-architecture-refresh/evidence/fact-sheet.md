@@ -33,7 +33,7 @@
     `keel.plugin.*` 四动词 state/call/approve/subscribe + theme tokens（`internal/harnessapi/plugin_bridge.go:1-13`、`:75-81`）；
   - 槽位/贡献/extensibility：`docs/PLUGIN-EXTENSIBILITY.md:1-10`、`:24-60`；
     `internal/harnessext/plugin_extension.go:64-113`；`internal/pluginpkg/manifest.go:210-231`；
-  - 创造模式：`keel.creation` 内置默认启用（`internal/pluginpkg/builtin/keel.creation.yaml:1-30`），
+  - 创造模式：`keel.creation` 内置默认启用（`internal/pluginpkg/builtin/keel.creation.yaml:1-17`），
     6 个动作 catalog/scaffold/validate/install/list/remove（`internal/harnessext/creation.go:91-96`、`:119`），
     webview+react+solid-glass 模板存在（`plugins/templates/webview-react-solidglass/`）；
     **G8 端到端仍 Deferred**（归档 DISPOSITION:20），不得写成完全验收；

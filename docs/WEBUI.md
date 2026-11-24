@@ -21,7 +21,8 @@ scripts/package-web.sh                      # 静态站点 → web/dist/web/keel
 （`.github/workflows/release.yml`）走同一个脚本。
 
 `keel serve` 同源托管该产物（`web/dist` 下的嵌套根会被自动识别）；未构建时 `/` 返回 JSON 404
-并给出构建指引。TUI 由 `keel tui` 启动（`KEEL_TUI_BIN` 或 `nsh package --target tui` 的产物）。
+并给出构建指引。TUI 由 `keel tui` 启动（`KEEL_TUI_BIN` 或 `nsh run --target tui` 开发宿主；
+`nsh package` 没有 tui target，见 `web/README.md:167`）。
 
 ## 2. 两种数据模式
 
@@ -44,8 +45,9 @@ scripts/package-web.sh                      # 静态站点 → web/dist/web/keel
 
 ## 4. NSH 版本策略
 
-**pin main（nightly）**，不锁 release（Owner 指令）。当前 `nsh 0.4.0 (bba76ef nightly)`：
-`List alignment=bottom` 与 `--target tui` 都在 main 上。需要新特性直接向作者提。
+**pin release `v0.6.1`**（`nsh 0.6.1 (2f51d86)`，2026-11-24 由 0.6.0 nightly `f577c51` 升级；
+不再跟随 nightly，理由见 `web/README.md:19-23`）：`List alignment=bottom` 与 `--target tui`
+开发宿主均已具备；需要新特性直接向作者提。
 
 ## 5. 视觉证据
 

@@ -27,19 +27,19 @@
 5. **安全**：日志无密钥/消息正文；MCP 凭据脱敏；skill 不能未经许可执行任意代码；tool 拒绝钩子真实生效。
 6. **文档**：每个能力有 spec + 示例 + runbook；公开 API 标记 v1 并承诺兼容策略。
 
-## 能力矩阵（当前 → 目标）
+## 能力矩阵（v1 快照 → 目标；当前事实见 `openspec/changes/MAINLINE.md` 与归档 evidence）
 
 | 能力 | 当前 | 目标 | 主要缺口 |
 |---|---|---|---|
 | 智能体执行 | G1（fake 可跑） | G5 | G2 混沌、G3 遥测、G4 生态、G5 规模 |
 | 可恢复性 | G1（模型/工具 kill 各一例） | G5 | generation 幂等、task 状态机、checkpoint 回放、10min 混沌 |
-| 上下文压缩 | G0（代码在，未接线） | G5 | 压缩事件/checkpoint 投影、手动压缩、token 账 |
-| 可观测 | G0 | G5 | run.finished、指标、日志字段、trace 可选 |
+| 上下文压缩 | v2 已接线（`internal/servicehost/services.go:46`、`:468`；`internal/compaction`） | G5 | 剩余见归档 evidence |
+| 可观测 | v2：`run.finished` 已注册并带 `KeyRun`（`internal/kernel/validate.go:53`） | G5 | 剩余见归档 evidence（trace 可选） |
 | Skills | G0 | G5 | SKILL.md 加载、渐进披露、租户隔离、权限 |
 | MCP | G0 | G5 | 客户端/传输/命名空间/重连/鉴权 |
 | Hooks | G0 | G5 | 事件模型、命令钩子、决策语义、审计 |
 | 租户/配额 | G1（tenant_id） | G5 | API key、RLS、配额、用量 |
-| Provider 文件 | G0 | G5 | blobId、能力位、adapter、缓存 |
+| Provider 文件 | v2：`file_id > url > base64` 已实现（`internal/provider/media.go:52-79`、`internal/provider/imagefiles.go:7-30`） | G5 | 剩余见归档 evidence |
 | 运维 | G1（health） | G5 | ready、metrics、CI、镜像、排水 |
 
 ## 每个闸门的执行方式

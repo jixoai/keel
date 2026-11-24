@@ -165,7 +165,7 @@ lookup、基础 environ），其 import 边界由 `internal/externalgw/boundary_
 
 - **R1 差分**：默认 loadout 与 W0 基线二进制同输入、同库，规范化后白名单外 0 差异
   （`cmd/r1diff`，白名单 `openspec/.../r1-allow.json`）。
-- **e2e 7/7**：`cmd/e2e`（重启/kill -9/SSE 游标/blob 续传）。
+- **e2e 8/8**：`cmd/e2e`（重启/kill -9/SSE 游标/blob 续传/重试追加；`cmd/e2e/main.go:86-95`）。
 - **单测**：loadout 映射与摘要；服务图生命周期/回滚/反序/代际；servicehost
   装配与旧装配对表、Reload 共享与 revision pin、空闲 collector、审计限频；
   quota 的限流/释放/多租户/竞态；运行元数据（mem + PG）。

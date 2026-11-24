@@ -2,6 +2,8 @@
 
 > 来源：2026-11-05 pi 生态 / 各厂商 Files API 调查。结论：**pi / pi-durable / pigo 全是
 > base64-only，没有 file 协议**；「上传一次、多轮引用」必须由本仓自建 blob 层 + provider adapter。
+> **实现状态（2026-11-24）**：出站 `file_id > url > base64` 已实现（`internal/provider/media.go:52-79`、
+> `internal/provider/imagefiles.go:7-30`、`internal/agentcore/content.go:148-228`）；§1–§4 保留 2026-11-05 调查原貌。
 
 ## 1. 现状事实（带源码锚点）
 
