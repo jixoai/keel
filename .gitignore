@@ -7,3 +7,7 @@ vendor/
 .env.local
 .env.*.local
 __pycache__/
+
+# built binaries (releases are published from tags, not the worktree)
+/keel
+/keel.exe
