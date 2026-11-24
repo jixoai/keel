@@ -12,8 +12,16 @@ keel 交付为一个 Go 二进制加一份静态网页客户端。两者来自�
 
 | 产物 | 说明 |
 |---|---|
-| `keel` | 产品外壳：`keel serve`（Harness API + 网页界面 + SSE 同一个源）、`keel tui`（启动你自备的 TUI 客户端，见下）、`keel doctor`、`keel version` |
-| `keel-web-0.2.0.zip` | 打包好的网页客户端。解压后用 `keel serve -web-dir <目录>` 指过去 |
+| `keel` | 产品外壳（serve / tui / doctor / version） |
+| `keel-web-0.2.0.zip` | 打包好的网页客户端 |
+
+外壳的子命令：
+
+- `keel serve` —— Harness API、网页界面与 SSE 同一个源。
+- `keel tui` —— 启动你自备的 TUI 客户端（`KEEL_TUI_BIN`，见下）。
+- `keel doctor` / `keel version` —— 环境自检与版本行。
+
+解压网页客户端后，用 `keel serve -web-dir <目录>` 指过去。
 
 ## 运行前提
 

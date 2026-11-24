@@ -14,8 +14,16 @@ checksums below mean something.
 
 | Artifact | What it is |
 |---|---|
-| `keel` | The product shell: `keel serve` (Harness API + web UI + SSE on one origin), `keel tui` (launches a TUI client you provide, see below), `keel doctor`, `keel version` |
-| `keel-web-0.2.0.zip` | The packaged web client. Unzip it and point `keel serve -web-dir <dir>` at it |
+| `keel` | The product shell (serve / tui / doctor / version) |
+| `keel-web-0.2.0.zip` | The packaged web client |
+
+The shell's commands:
+
+- `keel serve` — Harness API, web UI and SSE on one origin.
+- `keel tui` — launches a TUI client you provide (`KEEL_TUI_BIN`, see below).
+- `keel doctor` / `keel version` — environment check and the version line.
+
+Unzip the web client and point `keel serve -web-dir <dir>` at it.
 
 ## Requirements
 
