@@ -34,7 +34,7 @@
 ## 5. 收口
 
 - [x] 5.1 `docs/OAR.md` 的渲染小节从「W12 UI owns」改为已交付；`MAINLINE.md` 更新。
-- [ ] 5.2 子代理交叉复核（reviewer 逻辑 + vision 卡片视觉）；P0/P1 清零。
+- [x] 5.2 子代理交叉复核（reviewer 逻辑 + vision 卡片视觉）；P0/P1 清零（reviewer 二轮 9/10；vision 4 张全 PASS）。
 - [ ] 5.3 归档本 change；如产品面变化则发 v0.3.0。
 
 ## 6. 已知边界（如实登记）

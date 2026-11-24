@@ -28,13 +28,13 @@
 
 v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
 
-1. **Alpha 残余（已关闭）**：OAR 专用渲染器 + 宿主任务图闭环由 `keel-oar-renderer` 交付
+1. **Alpha 残余（已关闭并归档 2026-11-24）**：OAR 专用渲染器 + 宿主任务图闭环由 `keel-oar-renderer` 交付
    （投影读取 API `GET /v1/sessions/{id}/external/projection`、外部运行卡经
    `keel.ui.tool-renderer`、任务图前后计数不变；reviewer 9/10）。
    R1 v2 已绿（pin e7361f8 / scenario r1-basic-v2 / 77 allow rules；152 leaf paths、
    103 allowed、0 unexpected；负控证明 allowlist 不能吞掉全部差异），仅 E0 的容器电池
    平台受限；G4 300MB 目标/组 OOM 同属平台受限（468MB ≤500MB 已记 PARTIAL）。
-2. **官网 v2 刷新（已交付）**：`keel-site-architecture-refresh` 把 37 对中英文页面按
+2. **官网 v2 刷新（已交付并归档 2026-11-24）**：`keel-site-architecture-refresh` 把 37 对中英文页面按
    harness v2 重写（插件标准 implemented/partly/deferred、事件 25 kind、API 路由补齐、
    新增 assembly/placement/tenancy/files/session-query/release/slots），四道门与部署全绿。
 3. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
@@ -118,3 +118,6 @@ W0.5 插件全景/扩展面冻结
 - `openspec/changes/keel-ecosystem/FROZEN.md`
 - `openspec/changes/archive/2026-11-22-keel-agent-team-v1/SUPERSEDED.md`
 - G11 报告：https://local-kzf-keel.fde2e.com/report.html
+- OAR + 官网验收包：https://local-kzf-keel-oar.fde2e.com/report.html
+- `openspec/changes/archive/2026-11-24-keel-oar-renderer/`（投影 API + 外部运行卡 + 任务图证明）
+- `openspec/changes/archive/2026-11-24-keel-site-architecture-refresh/`（官网 v2 刷新，37 对页面）
