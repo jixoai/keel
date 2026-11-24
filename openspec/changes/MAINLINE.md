@@ -2,7 +2,7 @@
 
 > Owner 2026-11-22 裁决。本文件是唯一程序板（canonical board）；任务真值仍是各 change 的
 > `tasks.md` + 证据。勾选数只表示板面状态，不表示本文件重新验收过实现。
-> 更新：2026-11-25（v0.3.0 自包含发布）· 分支：`main` · 基线：`44e774b`
+> 更新：2026-11-25（v0.3.1 Windows 启动修复）· 分支：`main` · 基线：`44e774b`
 
 ## 当前状态（板面快照）
 
@@ -17,7 +17,7 @@
 
 - **v0.3.0 自包含发布（2026-11-25）**：tag `v0.3.0`；五平台单体二进制内嵌 PostgreSQL 18 +
   web 客户端；macOS `keel install` 生成 ad-hoc 签名 `.app`（不公证），`keel start` 零配置；
-  发布资产与 SHA256SUMS 已出，下载页/首页/README 已切一键路径。
+  发布资产与 SHA256SUMS 已出，下载页/首页/README 已切一键路径。v0.3.1 修复 Windows 内嵌 PG 的 `.exe` 查找与双击无参注册/启动（Windows 实机待 Owner 复验）。
 
 - 身份/Bot/TeamBot/共享/审计：`keel-bot-identity-access` 2026-11-22 归档，A6 10/10 步、
   304/304 断言、P0/P1/P2=0；见 `.agents/docs/E2E-REPORTS.md` 2026-11-22 条目。
