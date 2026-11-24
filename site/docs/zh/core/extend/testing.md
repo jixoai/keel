@@ -14,12 +14,20 @@ go build ./...
 
 这正是 CI 所跑（`.github/workflows/ci.yml`：gofmt 零输出、vet、带 `postgres:18` service 的 race 测试、
 build；另有 `docker build -t keel:ci .` 与定时触发的 chaos 任务）。本地等价命令见
-`docs/RUNBOOK.md:359`。集成测试（blob/HTTP）在 `KEEL_TEST_DSN` 未设置时自动 skip——由此得出一条推论：
+`docs/RUNBOOK.md:447`。集成测试（blob/HTTP）在 `KEEL_TEST_DSN` 未设置时自动 skip——由此得出一条推论：
 **没有 DSN 的绿灯证明的少得多**。
 
 这套测试**不需要 Docker**：把 `KEEL_TEST_DSN` 指向任意本机 PostgreSQL 18 即可。上面的
 `postgres:18` service 与 `docker build` 是 CI 自己的管线；本地唯一确实需要 Docker/Linux 的是
 2GB cgroup 电池（`scripts/acceptance-perf.sh`），这也是 E0 容器电池标「平台受限」的原因。
+
+仓库自带一个零配置的本地集群：
+
+```bash
+scripts/dev-pg.sh start
+eval "$(scripts/dev-pg.sh env)"
+KEEL_TEST_DSN="$KEEL_DSN" go test ./...
+```
 
 ## 2. 一条命令跑完整套
 
@@ -51,7 +59,7 @@ KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence \
 - **每次运行前先截断工件**。在同一目录重跑绝不留下两次运行的拼接输出——陈旧工件就是会撒谎的工件
   （`scripts/acceptance-all.sh:52`）。
 - **每个门独占数据库**。会 TRUNCATE/DROP 的工具拒绝跑共享库：`cmd/e2e -reset` 要求专用库，`r1diff`
-  要求库名含 `r1diff`，压测工具要求库名含 `e2e/test/smoke/perf/accept`（`docs/RUNBOOK.md:229`）。
+  要求库名含 `r1diff`，压测工具要求库名含 `e2e/test/smoke/perf/accept`（`docs/RUNBOOK.md:244`）。
   一次打到共享库上的旧 schema 迁移，就足以删掉别的线程正在使用的行——runbook 里登记了这次事故。
 
 ## 3. 单独跑各个门

@@ -189,7 +189,7 @@ repository (`internal/loadout/conformance.go:18`) and a test fails when the mani
 | Gate | Command |
 |---|---|
 | Unit / race | `go test -race ./internal/servicegraph ./internal/loadout ./internal/servicehost` |
-| Assembly parity | R1 differential: same input, same database, zero difference outside the whitelist (`cmd/r1diff`, `docs/RUNBOOK.md:162`) |
+| Assembly parity | R1 differential: same input, same database, zero difference outside the whitelist (`cmd/r1diff`, `docs/RUNBOOK.md:177`) |
 | Full acceptance | `KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence scripts/acceptance-all.sh` |
 | If the default assembly changed | the R1 gate is mandatory — it is what proves "the default loadout reproduces the previous behaviour" |
 

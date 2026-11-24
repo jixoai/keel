@@ -95,7 +95,7 @@ Environment:
 func adminStore(ctx context.Context) (*store.Store, error) {
 	dsn := strings.TrimSpace(os.Getenv("KEEL_DSN"))
 	if dsn == "" {
-		return nil, errors.New("KEEL_DSN (or --dsn) is required")
+		return nil, errors.New("KEEL_DSN (or --dsn) is required; for a local cluster without Docker run scripts/dev-pg.sh start")
 	}
 	return store.Open(ctx, store.Config{
 		DSN:        dsn,

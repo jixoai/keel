@@ -56,26 +56,29 @@ loop 本体由 [pigo](https://github.com/smallnest/pigo)（MIT）搬运最小必
 以下命令在本站所述修订上实际跑过；回复形状也是实际返回。
 
 ```bash
-# 1. 账本的数据库
-docker run -d --name keel-pg \
-  -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
-  -p 13741:5432 postgres:18
-
-# 2. 构建、引导首个超管并启动 Harness（产品壳 + API + worker）
+# 1. 克隆
 git clone https://github.com/jixoai/keel.git && cd keel
+
+# 2. 本机 PostgreSQL 18 集群（无 Docker）：数据在 .dev/pg，仅回环
+scripts/dev-pg.sh start
+eval "$(scripts/dev-pg.sh env)"   # 导出 KEEL_DSN
+
+# 3. 构建、引导首个超管并启动 Harness（产品壳 + API + worker）
 go build -o keel ./cmd/keel
-export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
 export KEEL_SERVE_TENANT=11111111-2222-3333-4444-555555555555
 export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # 签 session/CSRF cookie
 ./keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
 ./keel serve --addr 127.0.0.1:13750
 ```
 
-不需要 Docker：`keel` 只依赖一个 PostgreSQL 18 的 DSN。任何本机实例都可以（`createdb keel`，
-再用 `KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`）；上面的 `keel-pg` 容器
-只是一次性本地库的便利。少数验收脚本默认找名为 `keel-pg` 的容器，但都可用
-`KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；只有 2GB cgroup 电池
-（`scripts/acceptance-perf.sh`）确实需要 Docker/Linux——E0 容器电池因此标「平台受限」。
+不需要 Docker：`scripts/dev-pg.sh` 在仓库内跑一个一次性 PostgreSQL 18 集群
+（`.dev/pg`，gitignored；仅回环；随机密码存 `.dev/pg.pass`，0600），`env` 子命令导出
+`KEEL_DSN`。任何其它本机 PostgreSQL 18 也可以（`createdb keel`，再用
+`KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`）。偏好容器时
+`docker run --name keel-pg ... postgres:18` 是等价备选（同一端口，二者不要同时开）。
+少数验收脚本默认找名为 `keel-pg` 的容器，但都可用 `KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；
+只有 2GB cgroup 电池（`scripts/acceptance-perf.sh`）确实需要 Docker/Linux——E0 容器电池
+因此标「平台受限」。
 
 打开 `http://127.0.0.1:13750`，输入 setup token 与首个超管的用户名/密码，设置即完成并直接进入应用。
 没有口令，也没有“第一个访问者自动成为超管”的路径。机器客户端用绑定到 Bot 的 key

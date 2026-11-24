@@ -61,27 +61,30 @@ The commands below were run against the repository at the revision this site doc
 response shapes shown are the actual ones.
 
 ```bash
-# 1. a PostgreSQL 18 instance for the ledger
-docker run -d --name keel-pg \
-  -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
-  -p 13741:5432 postgres:18
-
-# 2. build, bootstrap the first super admin, and start the Harness
+# 1. clone
 git clone https://github.com/jixoai/keel.git && cd keel
+
+# 2. a local PostgreSQL 18 cluster (no Docker): data in .dev/pg, loopback only
+scripts/dev-pg.sh start
+eval "$(scripts/dev-pg.sh env)"   # exports KEEL_DSN
+
+# 3. build, bootstrap the first super admin, and start the Harness
 go build -o keel ./cmd/keel
-export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
 export KEEL_SERVE_TENANT=11111111-2222-3333-4444-555555555555
 export KEEL_SECRET_KEY="$(openssl rand -hex 32)"   # signs session + CSRF cookies
 ./keel admin bootstrap --tenant "$KEEL_SERVE_TENANT" --token-file ./setup.token
 ./keel serve --addr 127.0.0.1:13750
 ```
 
-No Docker is required: `keel` only needs a PostgreSQL 18 DSN. Any local server works
-(`createdb keel`, then `KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`); the
-`keel-pg` container above is just a disposable local database. A few acceptance scripts default to
-a container named `keel-pg`, but all of them accept `KEEL_DSN`/`KEEL_TEST_DSN` for a local server.
-Only the 2GB cgroup battery (`scripts/acceptance-perf.sh`) needs Docker/Linux, which is why the E0
-container battery is marked platform-limited.
+No Docker is required: `scripts/dev-pg.sh` runs a throwaway PostgreSQL 18 cluster inside the
+checkout (`.dev/pg`, gitignored; loopback only; random password in `.dev/pg.pass`, 0600), and its
+`env` subcommand exports `KEEL_DSN`. Any other PostgreSQL 18 works too (`createdb keel`, then
+`KEEL_DSN=postgres://<user>@127.0.0.1:5432/keel?sslmode=disable`). If you prefer a container,
+`docker run --name keel-pg ... postgres:18` is an equivalent alternative on the same port — do not
+run both. A few acceptance scripts default to a container named `keel-pg`, but all of them accept
+`KEEL_DSN`/`KEEL_TEST_DSN` for a local server. Only the 2GB cgroup battery
+(`scripts/acceptance-perf.sh`) needs Docker/Linux, which is why the E0 container battery is marked
+platform-limited.
 
 Open `http://127.0.0.1:13750`, enter the setup token plus the username and password for the first
 super admin: that password is the final credential, so the browser enters the app directly. Only a

@@ -32,7 +32,7 @@ The schema lives in two places:
 - `internal/kernel/schema/0001…0005*.sql` — kernel migrations: fencing, tool-call index,
   external/handoff, pending input, loadout revision. Migrations run at startup, inside a
   transaction with `SET LOCAL statement_timeout=0`; lock waits are bounded by `lock_timeout=30s`
-  with automatic retry on `55P03` (`docs/RUNBOOK.md:188`).
+  with automatic retry on `55P03` (`docs/RUNBOOK.md:203`).
 
 | Table | Purpose | Notable detail |
 |---|---|---|
@@ -60,7 +60,7 @@ Two database-side behaviours matter for the runtime:
   notification costs one heartbeat interval, never data.
 - **Readiness is schema-deep.** `GET /v1/ready` pings PG *and* checks the running schema (kernel
   migrations 0001/0003/0004/0005 columns, external session marks, handoff tables). An old database
-  missing any of them answers 503 instead of pretending to be ready (`docs/RUNBOOK.md:275`).
+  missing any of them answers 503 instead of pretending to be ready (`docs/RUNBOOK.md:290`).
 
 ## 2. Blobs: 64KiB chunks in PostgreSQL, overflow in a CAS
 
@@ -196,7 +196,7 @@ on connect (`docs/BACKPRESSURE.md:154`). Acquiring a connection has a 300ms cont
 
 ## 5. Measured results
 
-The 2GB / 1000-session baseline, as reported in `README.md:26` and `docs/RUNBOOK.md:137`
+The 2GB / 1000-session baseline, as reported in `README.md:26` and `docs/RUNBOOK.md:152`
 (2026-11-06 and the 2026-11-08 final round; different load mixes, so both are listed):
 
 | Metric | 2026-11-06 baseline | 2026-11-08 final round |
@@ -228,7 +228,7 @@ call, `SIGKILL` during tool execution, and 100 concurrent sessions × 2000 event
 | graceful stop | SIGTERM: stop claiming, 503 new API requests, flush SSE, send `event: drain`, close at a bounded rate; SIGINT cancels immediately |
 
 Metric families are fixed-cardinality on purpose — **never** label by tenant/session/run
-(`docs/RUNBOOK.md:233`): `keel_runs_started_total`, `keel_runs_finished_total{status}`,
+(`docs/RUNBOOK.md:248`): `keel_runs_started_total`, `keel_runs_finished_total{status}`,
 `keel_run_attempts_total{outcome}`, `keel_run_attempt_duration_seconds`,
 `keel_runs_pending`, `keel_streams_active`, `keel_draining`, `keel_leases_expired_total`,
 `keel_compactions_total`, plus Go runtime and `pgxpool` gauges. A zombie attempt (lease taken over

@@ -267,7 +267,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		log = slog.Default()
 	}
 	if opts.DSN == "" {
-		return errors.New("KEEL_DSN (or --dsn) is required")
+		return errors.New("KEEL_DSN (or --dsn) is required; for a local cluster without Docker run scripts/dev-pg.sh start")
 	}
 	if opts.Addr == "" {
 		opts.Addr = defaultServeAddr

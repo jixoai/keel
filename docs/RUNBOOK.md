@@ -2,16 +2,31 @@
 
 ## 本地起 PostgreSQL
 
+无 Docker（推荐）：`scripts/dev-pg.sh` 在仓库内管理一个一次性 PostgreSQL 18 集群——
+数据目录 `.dev/pg`（gitignored）、仅监听 `127.0.0.1:13741`、随机密码存 `.dev/pg.pass`
+（0600）、不触碰已有实例。
+
+```bash
+scripts/dev-pg.sh start         # 首次 initdb + 启动 + 建库 keel；打印 DSN
+scripts/dev-pg.sh status        # 运行状态 + DSN
+scripts/dev-pg.sh stop          # 停止，数据保留
+scripts/dev-pg.sh reset --yes   # 停止并删除集群（数据丢失）
+eval "$(scripts/dev-pg.sh env)" # 在当前 shell 导出 KEEL_DSN
+```
+
+Docker 备选（端口同为 13741，二者不要同时开）：
+
 ```bash
 docker run -d --name keel-runtime-pg \
   -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
   -p 13741:5432 --memory=2g --cpus=2 postgres:18
+export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
 ```
 
 ## 起服务
 
 ```bash
-export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
+export KEEL_DSN='postgres://…'   # 或：eval "$(scripts/dev-pg.sh env)"
 go build -o /tmp/keel-runtime ./cmd/runtime
 GOMEMLIMIT=1610612736 /tmp/keel-runtime \
   -addr 127.0.0.1:13740 -cas /tmp/keel-cas \

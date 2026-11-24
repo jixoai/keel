@@ -14,13 +14,21 @@ go build ./...
 
 These are exactly what CI runs (`.github/workflows/ci.yml`: gofmt zero-output, vet, race tests with a
 `postgres:18` service, build; plus `docker build -t keel:ci .` and a scheduled chaos job). Local
-equivalents are in `docs/RUNBOOK.md:359`. Integration tests (blob/HTTP) skip themselves when
+equivalents are in `docs/RUNBOOK.md:447`. Integration tests (blob/HTTP) skip themselves when
 `KEEL_TEST_DSN` is unset — but note the corollary: a green run *without* the DSN proves much less.
 
 Docker is **not** required for this suite: point `KEEL_TEST_DSN` at any local PostgreSQL 18. The
 `postgres:18` service and `docker build` above are CI's own plumbing; the only local path that
 requires Docker/Linux is the 2GB cgroup battery (`scripts/acceptance-perf.sh`), which is why the E0
 container battery is recorded as platform-limited.
+
+A zero-configuration local cluster comes from the repository itself:
+
+```bash
+scripts/dev-pg.sh start
+eval "$(scripts/dev-pg.sh env)"
+KEEL_TEST_DSN="$KEEL_DSN" go test ./...
+```
 
 ## 2. One command for the whole battery
 
@@ -54,7 +62,7 @@ Two disciplines make the evidence trustworthy:
 - **Every gate owns a dedicated database.** Tools that TRUNCATE/DROP refuse to run against a shared
   library: `cmd/e2e -reset` requires a dedicated database, `r1diff` requires the name to contain
   `r1diff`, and the load generators require `e2e/test/smoke/perf/accept` in the name
-  (`docs/RUNBOOK.md:229`). One old-schema migration against a shared database is enough to delete
+  (`docs/RUNBOOK.md:244`). One old-schema migration against a shared database is enough to delete
   rows another thread is using — that accident is recorded in the runbook.
 
 ## 3. Running the individual gates

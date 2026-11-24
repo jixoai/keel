@@ -75,16 +75,33 @@ Keel 解决一个具体问题：当你要同时跑很多持续会话（每个都
 ## 快速开始
 
 ```bash
-docker run -d --name keel-pg -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
-  -p 13741:5432 --memory=2g postgres:18
+git clone https://github.com/jixoai/keel.git && cd keel
 
-export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
+# 1. 一个本机 PostgreSQL 18 集群（无 Docker）：数据在 .dev/pg，仅回环
+scripts/dev-pg.sh start
+eval "$(scripts/dev-pg.sh env)"        # 导出 KEEL_DSN
+
+# 2. 构建并启动运行时
 go run ./cmd/runtime -addr 127.0.0.1:13740 -cas /tmp/keel-cas
 ```
 
-**不需要 Docker**：`keel` 只依赖一个 PostgreSQL 18；任何本机实例都可以，例如
-`createdb keel && export KEEL_DSN='postgres://<user>@127.0.0.1:5432/keel?sslmode=disable'`。
-上面的 `keel-pg` 容器只是给一次性本地库的便利（本项目的测试/评审实例都用本机 PG，零 Docker）。
+`scripts/dev-pg.sh start|stop|status|dsn|env|reset --yes` 管理的是仓库内的**一次性**集群：
+数据目录 `.dev/pg`（gitignored）、端口 13741、仅监听 `127.0.0.1`、随机密码存 `.dev/pg.pass`
+（0600）；它不碰你已有的 PostgreSQL 实例，要求本机有 PostgreSQL 18 的 `initdb`/`pg_ctl`。
+本项目的测试与评审实例都用本机 PG，零 Docker。
+
+**已有 PG 或偏好容器**：`keel` 只认一个 PostgreSQL 18 DSN，任选其一——
+
+```bash
+# 已有本机实例
+createdb keel && export KEEL_DSN='postgres://<user>@127.0.0.1:5432/keel?sslmode=disable'
+
+# 或一次性容器（与 dev-pg 同为 13741，不要同时开）
+docker run -d --name keel-pg -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
+  -p 13741:5432 --memory=2g postgres:18
+export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
+```
+
 少数验收脚本默认找名为 `keel-pg` 的容器，但都可用 `KEEL_DSN`/`KEEL_TEST_DSN` 指向本机库；
 只有 `scripts/acceptance-perf.sh` 的 2GB cgroup 电池确实需要 Docker/Linux——这是 E0 容器电池
 标「平台受限」的原因，原生电池（conformance/mcp-apps/external/core）不依赖它。

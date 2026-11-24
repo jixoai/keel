@@ -1,0 +1,85 @@
+$ scripts/dev-pg.sh reset --yes
+cluster removed
+exit=0
+
+$ scripts/dev-pg.sh start
+initializing a PostgreSQL cluster in /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/.dev/pg (superuser keel, loopback only)
+ready: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ scripts/dev-pg.sh start
+ready: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ scripts/dev-pg.sh status
+running on 127.0.0.1:13741 (data: /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/.dev/pg)
+dsn: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ go build -o /tmp/keel-devpg ./cmd/keel
+exit=0
+
+$ /tmp/keel-devpg admin bootstrap --tenant $KEEL_SERVE_TENANT --token-file /tmp/keel-devpg-setup.token
+tenant:  11111111-2222-3333-4444-555555555555
+created: tenant "keel"
+expires: 2026-11-24T06:59:36Z
+
+SETUP TOKEN (shown once, expires 2026-11-24T06:59:36Z):
+keel_setup_<redacted>
+
+Open the login page and submit this token with the username and password for the first super admin.
+token file: /tmp/keel-devpg-setup.token (mode 0600)
+exit=0
+
+{"time":"2026-11-24T14:29:36.23556+08:00","level":"WARN","msg":"no super admin exists: run `keel admin bootstrap` (or set KEEL_BOOTSTRAP_TOKEN) before signing in"}
+{"time":"2026-11-24T14:29:36.248881+08:00","level":"WARN","msg":"KEEL_CAS_DIR is not set; layerfs uses an ephemeral temp root","root":"/var/folders/tn/y_b12zxs2dldn8thmfnpy9c80000gp/T/keel-layerfs"}
+{"time":"2026-11-24T14:29:36.254258+08:00","level":"INFO","msg":"placement admission gate","strategy":"pack","group_max_concurrent_runs":0,"group_memory_limit_bytes":0,"queue_sweep_interval":"5s","tenant_run_quota":"tenant-document"}
+{"time":"2026-11-24T14:29:36.255698+08:00","level":"INFO","msg":"config.toml loaded","exists":false,"revision":1,"hash":"sha256:503724232f8c1db521d35653bbd0763d1765510cfcdecefa52bbe87892cd9fce","anchorEventSeq":0,"captureMode":""}
+{"time":"2026-11-24T14:29:36.258419+08:00","level":"INFO","msg":"host assembled","skills":0,"visible":0,"tools":11,"extra_tools":0}
+{"time":"2026-11-24T14:29:36.258506+08:00","level":"INFO","msg":"loadout applied","loadout":"default","revision":1,"generation":1,"services":7,"active":7,"failed":0,"retiring_generations":0}
+{"time":"2026-11-24T14:29:36.260293+08:00","level":"INFO","msg":"service loadout active","loadout":"default","revision":1,"generation":1,"summary":"agent=fake;skills=1;mcp=0;hooks=0;compaction=false;telemetry=none;tools=0;sandbox=false;external-backends=0;external-tools=0;external-unmetered=none;quota-runs=0;quota-events=0;worker=true;runs=64","services":7,"retiring":0}
+2026/11/24 14:29:36 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/24 14:29:36 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/24 14:29:36 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
+{"time":"2026-11-24T14:29:36.270949+08:00","level":"INFO","msg":"plugin manager boot","root":"/Users/kzf/.keel/plugins","plugins":12,"enabled":11,"revision":1}
+{"time":"2026-11-24T14:29:36.272257+08:00","level":"INFO","msg":"supervisor startup scan","scanned":0,"queued":0,"recovered":0,"parked":0,"escalated":0,"backoff":0,"live":0,"errors":0}
+{"time":"2026-11-24T14:29:36.272501+08:00","level":"INFO","msg":"route permission matrix verified","rules":184,"routes":184}
+{"time":"2026-11-24T14:29:36.272821+08:00","level":"INFO","msg":"keel serve listening","addr":"127.0.0.1:13615","tenant":"11111111-2222-3333-4444-555555555555","auth":"required","web":"/Users/kzf/Dev/GitHub/jixoai/fde2e/keel/web/dist/web/keel/Keel (from /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/web/dist)","web_ready":true,"worker":true,"provider":"fake","model":"fake","plugins":12,"plugins_enabled":11,"plugins_root":"/Users/kzf/.keel/plugins","triggers":0}
+$ curl -s -o /dev/null -w %{http_code} http://127.0.0.1:13615/v1/health
+200
+
+{"time":"2026-11-24T14:29:36.385155+08:00","level":"INFO","msg":"keel serve stopped"}
+$ scripts/dev-pg.sh stop
+stopped (data kept in /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/.dev/pg)
+exit=0
+
+$ scripts/dev-pg.sh start
+ready: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ scripts/dev-pg.sh stop
+stopped (data kept in /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/.dev/pg)
+exit=0
+
+$ scripts/dev-pg.sh start   # port 13741 occupied by an unrelated process
+dev-pg: port 13741 is already in use by another process: python3.1 51356  kzf    3u  IPv4 0x63475ecbd9944f39      0t0  TCP 127.0.0.1:13741 (LISTEN)
+exit=1
+
+$ scripts/dev-pg.sh reset --yes
+cluster removed
+exit=0
+
+$ scripts/dev-pg.sh start
+initializing a PostgreSQL cluster in /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/.dev/pg (superuser keel, loopback only)
+ready: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ scripts/dev-pg.sh status
+running on 127.0.0.1:13741 (data: /Users/kzf/Dev/GitHub/jixoai/fde2e/keel/.dev/pg)
+dsn: postgres://keel:<redacted>@127.0.0.1:13741/keel?sslmode=disable
+exit=0
+
+$ scripts/dev-pg.sh reset --yes
+cluster removed
+exit=0
+

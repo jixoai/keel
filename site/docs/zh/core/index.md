@@ -52,22 +52,24 @@ Core 之上的产品层叫 **Harness**，它有独立的主线，从 [Harness �
 
 ## 快速开始
 
-前置条件：Docker（跑 PostgreSQL 18）与 Go 1.27.3（`go.mod:3`）。
+前置条件：PostgreSQL 18（`initdb`/`pg_ctl` 在 `PATH` 上，或任意 DSN）与 Go 1.27.3
+（`go.mod:3`）。不需要 Docker。
 
 ```bash
-# 1. 账本的数据库
-docker run -d --name keel-pg \
-  -e POSTGRES_PASSWORD=runtime -e POSTGRES_DB=runtime \
-  -p 13741:5432 postgres:18
+# 1. 克隆并启动本机 PostgreSQL 18 集群（无 Docker）
+git clone https://github.com/jixoai/keel.git && cd keel
+scripts/dev-pg.sh start
+eval "$(scripts/dev-pg.sh env)"
 
 # 2. 构建并启动 Harness（未配置模型时使用 fake provider）
-git clone https://github.com/jixoai/keel.git && cd keel
 go build -o keel ./cmd/keel
-export KEEL_DSN='postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable'
 ./keel serve --addr 127.0.0.1:13750 \
   --tenant 11111111-2222-3333-4444-555555555555 \
   --auth local-only
 ```
+
+任意 PostgreSQL 18 的 DSN 同样可用（已有实例，或 13741 端口上的 `postgres:18` 容器）；
+`scripts/dev-pg.sh` 只是零配置路径。
 
 `local-only` 只应答回环并映射内置 local-admin，所以本快速开始不需要账号 fixture。真实部署用
 `--auth required` + `keel admin bootstrap` + 用户名/密码（见[运维](/zh/harness/operations)）。

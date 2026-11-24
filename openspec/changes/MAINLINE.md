@@ -37,13 +37,16 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
 2. **官网 v2 刷新（已交付并归档 2026-11-24）**：`keel-site-architecture-refresh` 把 37 对中英文页面按
    harness v2 重写（插件标准 implemented/partly/deferred、事件 25 kind、API 路由补齐、
    新增 assembly/placement/tenancy/files/session-query/release/slots），四道门与部署全绿。
-3. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
+3. **本机 PG 零配置（已交付并归档 2026-11-24）**：`keel-dev-pg` 提供 `scripts/dev-pg.sh`
+   （仓库内一次性 PG18 集群，无 Docker；start/status/env/stop/reset），README、RUNBOOK 与官网
+   首页/测试页改为脚本优先，`keel serve`/`keel admin` 的 DSN 缺失报错指向该脚本。
+4. **客户端产品化（未开始）**：单实例/托盘/快捷键/深链、系统通知 + badge、`nsh/updater`
    自更新、RichEditor/流式 Markdown、1000 条消息长会话性能。
-4. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
+5. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
    attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
    gbash mcp CLI、fileplugin 锁回收）；多租户插件面；macOS 原生 target；Rust+gRPC layerfs。
-5. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
+6. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
    待同步（browser 有他人 WIP）；TUI 设置页 raw JSON 1 例失败；headless 模式 4 个布局差异。
 
 **下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻
