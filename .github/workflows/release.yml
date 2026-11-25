@@ -132,6 +132,7 @@ jobs:
           One binary per platform: PostgreSQL 18 and the web client are embedded.
           macOS:  chmod +x keel && ./keel install   (generates ~/Applications/Keel.app, ad-hoc signed, no notarization)
           Others: chmod +x keel && ./keel start     (no database, no KEEL_DSN, no Docker)
+          Update: chmod +x keel && ./keel update     (SHA-256 verified; no signing required)
 
           Nothing is code-signed as a binary; macOS may quarantine the download. The
           installed .app is ad-hoc signed locally. SHA256SUMS.txt has every asset."

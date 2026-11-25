@@ -20,7 +20,7 @@ import (
 // version is the keel product version. It is deliberately separate from the
 // HarnessAPI contract version (harnessapi.APIVersion): a UI pins /v1 and asks
 // /v1/capabilities, never a binary version.
-var version = "0.3.1"
+var version = "0.4.0"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -66,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runAdminCmd(args[1:], stdout, stderr)
 	case "db":
 		return runDBCmd(args[1:], stdout, stderr)
+	case "update":
+		return runUpdateCmd(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctorCmd(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
@@ -97,6 +99,7 @@ Usage:
   keel admin <cmd>       Provision tenants, API keys and quotas (operator)
   keel db <cmd>          Manage the local development PostgreSQL 18 cluster
                          (start|stop|status|dsn|env|reset)
+  keel update [flags]    Self-update from GitHub releases (--check|--force|--manifest)
   keel doctor [flags]    Diagnose configuration and build artifacts
   keel version           Print version and build information
 

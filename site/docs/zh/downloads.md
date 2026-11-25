@@ -7,20 +7,20 @@ title: 下载
 keel 每个平台只交付**一个自包含二进制**：PostgreSQL 18、网页客户端与 README 都在里面。
 下载后一条命令就能在本机启动产品：不需要 Docker、不需要 `KEEL_DSN`、不需要手动 `initdb`。
 
-**当前版本：`v0.3.1`**（1.0 之前；小版本之间可能有不兼容变更。）
+**当前版本：`v0.4.0`**（1.0 之前；小版本之间可能有不兼容变更。）
 
 ## 下载
 
 | 平台 | 下载 |
 |---|---|
-| macOS · Apple 芯片 | [keel-0.3.1-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-darwin-arm64.tar.gz) |
-| macOS · Intel | [keel-0.3.1-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-darwin-amd64.tar.gz) |
-| Linux · x86-64 | [keel-0.3.1-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-linux-amd64.tar.gz) |
-| Linux · arm64 | [keel-0.3.1-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-linux-arm64.tar.gz) |
-| Windows · x86-64 | [keel-0.3.1-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.3.1/keel-0.3.1-windows-amd64.zip) |
+| macOS · Apple 芯片 | [keel-0.4.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.4.0/keel-0.4.0-darwin-arm64.tar.gz) |
+| macOS · Intel | [keel-0.4.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.4.0/keel-0.4.0-darwin-amd64.tar.gz) |
+| Linux · x86-64 | [keel-0.4.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.4.0/keel-0.4.0-linux-amd64.tar.gz) |
+| Linux · arm64 | [keel-0.4.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.4.0/keel-0.4.0-linux-arm64.tar.gz) |
+| Windows · x86-64 | [keel-0.4.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.4.0/keel-0.4.0-windows-amd64.zip) |
 
-全部产物：[v0.3.1 发布页](https://github.com/jixoai/keel/releases/tag/v0.3.1) ·
-[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.3.1/SHA256SUMS.txt)
+全部产物：[v0.4.0 发布页](https://github.com/jixoai/keel/releases/tag/v0.4.0) ·
+[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.4.0/SHA256SUMS.txt)
 
 ## 启动
 
@@ -38,8 +38,24 @@ chmod +x keel
 以 local-only 模式在 `http://127.0.0.1:13750` 起 Harness 并打开浏览器。数据在
 `$KEEL_HOME`（默认 `~/.keel`）；`keel db status|stop|reset --yes` 管理本地集群。
 
+`keel install` 还会写一个 `~/.local/bin/keel` 启动器（只覆盖自己生成的文件），
+所以装了 `.app` 也能直接 `keel update` / `keel db`；该目录不在 PATH 时会打印提示。
+
 本版 `keel install` 仅 macOS；Linux/Windows 直接 `keel start`（桌面注册后续补齐）。
 `keel uninstall` 移除应用但保留数据，`--purge` 才删数据。
+
+## 升级
+
+```bash
+./keel update --check   # 只检查有没有新版本
+./keel update           # 下载 → SHA-256 校验 → 替换当前二进制
+```
+
+更新读取公开 Release 页面而不是 GitHub API（后者未认证时每 IP 每小时只有
+60 次），按 `keel-<version>-<os>-<arch>` 选资产，并用同版本 `SHA256SUMS.txt`
+校验。不需要代码签名或公证：生成的 `.app` 内替换后重新 ad-hoc 签名；
+Windows 在进程退出后由小助手替换运行中的 `.exe` 并重启。
+`--force` 重装同版本；`--manifest URL` 指向自建发布。Windows 安装版在 `%LOCALAPPDATA%\Keel\keel.exe`。0.4.0 之前的二进制需要先手动升级一次。
 
 ## Docker 变体
 
@@ -54,7 +70,7 @@ docker compose up -d --build
 ## 校验你下到的东西
 
 ```bash
-curl -LO https://github.com/jixoai/keel/releases/download/v0.3.1/SHA256SUMS.txt
+curl -LO https://github.com/jixoai/keel/releases/download/v0.4.0/SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 ```
 

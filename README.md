@@ -27,9 +27,27 @@ chmod +x keel
 ./keel start
 ```
 
+`keel install` 还会写一个 `~/.local/bin/keel` 启动器（只覆盖自己生成的文件），
+装了 `.app` 也能直接 `keel update` / `keel db`；该目录不在 PATH 时会打印提示。
 `keel start` 首次会把内嵌运行时解到 `$KEEL_HOME/runtime/<version>`，自动初始化本地库、
 以 local-only 模式起服务并打开浏览器。`keel uninstall` 移除应用（默认保留数据，
 `--purge` 才删）。Docker 用户仍可用 compose（PG 容器在 compose 里，二进制不内嵌）。
+
+## 升级（无需签名）
+
+```bash
+./keel update --check   # 只检查是否有新版本
+./keel update           # 下载 → SHA-256 校验 → 原子替换
+```
+
+更新读取 GitHub Release 发布页（不走有 60 次/时限制的 API），按
+`keel-<version>-<os>-<arch>` 选资产，用同版本 `SHA256SUMS.txt` 校验后替换。
+不需要 Apple 公证或 Windows 代码签名：macOS `.app` 内替换后重新 ad-hoc 签名，
+Windows 由退出后的小助手换掉运行中的 exe 再启动。`--force` 重装同版本，
+`--manifest URL` 指向自建发布；`KEEL_UPDATE_MANIFEST` 可设默认值。
+Windows 安装版未进 PATH 时用 `%LOCALAPPDATA%\Keel\keel.exe update`。
+
+> v0.3.1 及更早的二进制没有 `update` 子命令，第一次升级需要手动下载；从 0.4.0 起可用。
 
 ## 设计目标
 
@@ -181,7 +199,7 @@ pigo 是 MIT 许可的 Go 版 pi Agent。Keel **不 fork**，只搬运并改造�
 - `compaction`（上下文压缩）
 - `agentcore` 的内容类型（text/thinking/toolCall/toolResult/image）
 
-不搬：CLI/TUI/REPL、session JSONL、trust、plugin/pkgmgr、selfupdate、内置 coding 工具。
+不搬：CLI/TUI/REPL、session JSONL、trust、plugin/pkgmgr、pigo 的 selfupdate（Keel 的更新器另行实现）、内置 coding 工具。
 pigo 的 `Session` 是有状态、非并发安全的，且 SDK 没有历史注入/图片输入——这些由 Keel 重做。
 来源与 pin commit 见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 

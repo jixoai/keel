@@ -1,0 +1,113 @@
+keel-client-updater — 2026-11-25
+=================================
+
+目标：无签名依赖的自更新（HTTPS + SHA-256 + 同盘原子替换）
+环境：macOS 27.2 arm64；Go 1.27.3；线上最新发布 v0.3.1；本次版本 0.4.0
+
+1. 单元测试
+------------
+$ go test ./cmd/keel -run 'Test(CompareVersions|ChecksumFor|UpdateAssetName|ExtractUpdateBinary|RunUpdate|AppBundleFor|ReleaseFromURL|VerifyStagedBinary|IsLoopbackHost|WindowsUpdateScript)' -v
+=== RUN   TestCompareVersions ... PASS
+=== RUN   TestChecksumFor ... PASS
+=== RUN   TestUpdateAssetName ... PASS
+=== RUN   TestExtractUpdateBinaryTar ... PASS
+=== RUN   TestExtractUpdateBinaryZip ... PASS
+=== RUN   TestRunUpdateCheckNewer ... PASS
+=== RUN   TestRunUpdateUpToDate ... PASS
+=== RUN   TestAppBundleFor ... PASS
+=== RUN   TestReleaseFromURL ... PASS
+=== RUN   TestRunUpdateCheckFromReleasePage ... PASS
+=== RUN   TestVerifyStagedBinary ... PASS
+=== RUN   TestIsLoopbackHost ... PASS
+=== RUN   TestWindowsUpdateScript ... PASS
+ok  github.com/jixoai/keel/cmd/keel
+
+2. 发布页/版本方向
+-------------------
+$ /tmp/keel-current update --check      # 0.4.0 vs 线上 0.3.1
+keel 0.4.0 is newer than the latest release 0.3.1; nothing to do
+
+$ /tmp/keel-update-old update --check   # 0.3.0 vs 线上 0.3.1
+keel 0.3.0 → 0.3.1 available (keel-0.3.1-darwin-arm64.tar.gz)
+
+3. 真实升级（0.3.0 → v0.3.1）
+-----------------------------
+$ time /tmp/keel-update-old update
+downloading keel-0.3.1-darwin-arm64.tar.gz (0.3.1)
+updated to 0.3.1; restart keel to use it
+real 0m23.327s
+$ /tmp/keel-update-old version
+keel 0.3.1
+  commit:   cc419f9149a6d6bd102e34187025a9986d6504f9
+  go:       go1.27.3 darwin/arm64
+
+下载 121MB；SHA-256 通过；解出的新二进制先执行 `version` 确认 0.3.1；
+暂存为 <exe>.new（与目标同盘）后 rename；未使用 GitHub API。
+
+4. macOS .app 重签名
+---------------------
+临时布局 /tmp/KeelFinal.app/Contents/MacOS/keel-bin（预 ad-hoc 签名）：
+$ HOME=/tmp/keel-updater-home /tmp/KeelFinal.app/Contents/MacOS/keel-bin update
+downloading keel-0.3.1-darwin-arm64.tar.gz (0.3.1)
+updated to 0.3.1; restart keel to use it
+exit=0
+$ codesign --verify --deep --strict /tmp/KeelFinal.app
+CODESIGN-VERIFY-OK
+
+5. Windows 路径（交叉编译 + 脚本断言；未在真实 Windows 运行）
+-----------------------------------------------------------
+$ GOOS=windows GOARCH=amd64 go build ./cmd/keel
+WINDOWS-BUILD-OK
+$ go test ./cmd/keel -run TestWindowsUpdateScript -v
+--- PASS: TestWindowsUpdateScript
+
+helper 脚本语义：
+- 等待 updater PID 退出；
+- 等待所有同名 keel.exe 退出（有界 60 次，每次约 2s）；
+- move /Y 重试 12 次（杀毒/文件锁抖动）；
+- 失败写 <exe>.update.log；成功后 start 新 exe 并自删。
+边界：本机无 Windows，未做运行期实测。
+
+6. 全仓回归与站点
+------------------
+$ KEEL_TEST_DSN="$(keel db dsn)" go test -p 1 ./...
+EXIT=0（0 FAIL）
+$ cd site && npm run build
+SITE BUILD OK — 37 page pairs, 3314 links, 1465 citations verified
+
+7. 视觉
+-------
+四张下载页 Update/升级段截图（EN/ZH × 1440/390）：
+.agents/reports/keel/updater-2026-11-25/shots/
+由 vision 子代理独立判读；报告：.agents/reports/keel/updater-2026-11-25/report.html
+
+已知边界：
+- Windows 更新器只有交叉编译与脚本单测，没有真实 Windows 运行证据。
+- GitHub Release 页面解析依赖 github.com 的 302 跳转；自建 manifest 可绕过。
+- 校验和与归档来自同一发布账号，只防传输损坏，不防账号失陷；后续可加签名 manifest。
+- 0.3.1 及更早二进制没有 update 子命令，第一次升级需手动下载。
+
+8. --force 同版本重装（最终代码）
+---------------------------------
+$ go build -ldflags '-X main.version=0.3.1' -o /tmp/keel-force-same ./cmd/keel
+$ /tmp/keel-force-same update --force
+downloading keel-0.3.1-darwin-arm64.tar.gz (0.3.1)
+updated to 0.3.1; restart keel to use it
+exit=0
+$ /tmp/keel-force-same version
+keel 0.3.1
+  commit:   cc419f9149a6d6bd102e34187025a9986d6504f9
+
+9. 安装后的 CLI 可达性（macOS）
+--------------------------------
+$ HOME=/tmp/keel-shim-home /tmp/keel-full-040 install --no-open
+keel: runtime extracted to /tmp/keel-shim-home/.keel/runtime/0.4.0
+cli: /tmp/keel-shim-home/.local/bin/keel (add /tmp/keel-shim-home/.local/bin to PATH)
+installed: /tmp/keel-shim-home/Applications/Keel.app
+$ HOME=... /tmp/keel-shim-home/.local/bin/keel update --check
+keel 0.4.0 is newer than the latest release 0.3.1; nothing to do
+$ HOME=... /tmp/keel-full-040 uninstall
+removed cli: /tmp/keel-shim-home/.local/bin/keel
+removed: /tmp/keel-shim-home/Applications/Keel.app
+
+说明：shim 只覆盖含 “# keel app shim” 标记的文件，不会覆盖用户自己的 ~/.local/bin/keel。
